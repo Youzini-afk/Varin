@@ -7,5 +7,5 @@ export const VARIN_WORKBENCH_LAYOUT_SERVICE_ID = "varin.workbench.layout";
 export const VARIN_EDITOR_MONACO_SERVICE_ID = "varin.editor.monaco";
 export const VARIN_WORKSPACE_RECOVERY_SERVICE_ID = "varin.workspace-recovery";
 export const VARIN_EDITOR_MONACO_SERVICE_VERSION = 1 as const;
-export const VARIN_WORKSPACE_RECOVERY_SERVICE_VERSION = 6 as const;
+export const VARIN_WORKSPACE_RECOVERY_SERVICE_VERSION = 7 as const;
 export const VARIN_CORE_SERVICE_VERSION = 1 as const;

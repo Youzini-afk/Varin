@@ -2577,8 +2577,9 @@ it.each(['thread', 'host'] as const)('thread recovery cannot submit a late prepa
   expect(container.querySelector<HTMLTextAreaElement>('[aria-label="Message thread"]')!.value).not.toBe('Old conversation');
 });
 
-it('thread recovery uses the actual materialized source owner for automatic combined restore and operation-based undo', async () => {
+it.each(['local', 'managed_host'] as const)('thread recovery uses the actual %s materialized source owner for combined restore and operation-based undo', async kind => {
   const f = navigationFixture(); const recovery = combinedFixture(f); useUIStore.setState({ recoveryPreference: 'both' });
+  if (kind === 'managed_host') f.recoverySource.mockResolvedValue({ resourceOwner: { kind, hostId: 'resource-host', connectionId: 'paired-resource', endpointIdentity: 'https://resource-host.test' }, workspaceId: 'actual-source-owner', mode: 'materialized', runId: 'finished-run' });
   await act(async () => root.render(<ThreadConversation api={f.api} identity={identity} initialWorkspacePath="/unrelated-sidebar" />));
   await act(async () => button('Restore before this message').click());
   expect(recovery.prepareCombinedRecovery).toHaveBeenCalledWith({ workspaceId: 'actual-source-owner', conversation: { kind: 'thread', threadId: identity.threadId, branchId: identity.branchId }, entryId: f.user.id });
@@ -2823,16 +2824,17 @@ it('thread recovery offers an explicit conversation-only choice when file prepar
 });
 
 
-it('keeps managed file recovery off the coordinator and preserves explicit conversation-only navigation', async () => {
+it('keeps an unavailable managed file owner explicit and preserves conversation-only navigation', async () => {
   const f = navigationFixture(); const recovery = combinedFixture(f); useUIStore.setState({ recoveryPreference: 'both' });
   f.recoverySource.mockResolvedValue({ resourceOwner: { kind: 'managed_host', hostId: 'host-b', connectionId: 'b', endpointIdentity: 'sha256-b' },
     workspaceId: 'same-path-on-b', mode: 'materialized', runId: 'finished-run' });
+  recovery.prepareCombinedRecovery.mockRejectedValueOnce(new Error('Original file Host is offline'));
   await act(async () => root.render(<ThreadConversation api={f.api} identity={identity} />));
   await act(async () => button('Restore before this message').click());
-  expect(recovery.prepareCombinedRecovery).not.toHaveBeenCalled(); expect(f.navigate).not.toHaveBeenCalled();
-  expect(container.textContent).toContain('File recovery for this managed Host is not available yet');
+  expect(recovery.prepareCombinedRecovery).toHaveBeenCalledWith({ workspaceId: 'same-path-on-b', conversation: { kind: 'thread', threadId: identity.threadId, branchId: identity.branchId }, entryId: f.user.id }); expect(f.navigate).not.toHaveBeenCalled();
+  expect(container.textContent).toContain('Original file Host is offline');
   const conversation = [...container.querySelectorAll<HTMLButtonElement>('button')].find(item => item.textContent?.includes('Restore conversation only'));
   expect(conversation).toBeDefined();
   await act(async () => conversation!.click());
-  expect(f.navigate).toHaveBeenCalledOnce(); expect(recovery.prepareCombinedRecovery).not.toHaveBeenCalled();
+  expect(f.navigate).toHaveBeenCalledOnce(); expect(recovery.prepareCombinedRecovery).toHaveBeenCalledOnce(); expect(recovery.applyCombinedRecovery).not.toHaveBeenCalled();
 });

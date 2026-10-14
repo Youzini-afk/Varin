@@ -679,6 +679,8 @@ pub(crate) enum SourceDispatch {
         action: SourceFileObservationAction,
     },
     ReadObserve(crate::storage::source_read_receipts::ReadReceipt),
+    ScheduleReceiptStage(crate::storage::source_schedule_receipts::ScheduleReceiptPreparation),
+    ScheduleReceiptObserve(crate::storage::source_schedule_receipts::ScheduleReceiptBody),
     McpCreationReceiptStage(crate::storage::source_mcp_receipts::McpReceiptPreparation),
     McpCreationReceiptObserve(crate::storage::source_mcp_receipts::McpReceiptBody),
     McpDerivationStage(crate::storage::source_mcp_derivation::McpDerivationPreparation),
@@ -718,6 +720,8 @@ impl SourceDispatch {
                 "file-observation:{}:{}",
                 address.authority_id, request_id
             )),
+            Self::ScheduleReceiptStage(_) | Self::ScheduleReceiptObserve(_) =>
+                Some(format!("schedule-receipt:{}", uuid::Uuid::new_v4())),
             Self::ReadObserve(_) => Some(format!("source-read-observe:{}", uuid::Uuid::new_v4())),
             Self::McpDerivationStage(_) | Self::McpDerivationObserve(_) =>
                 Some(format!("mcp-child-derivation:{}", uuid::Uuid::new_v4())),
@@ -747,15 +751,19 @@ impl SourceDispatch {
         resources: crate::tools::KernelResourceClient,
         cancel: varin_runtime::execution::CancellationToken,
     ) -> Result<SourceWorkResult, KernelError> {
+        if let Self::ScheduleReceiptStage(preparation) = self {
+            let (value, staged) = preparation.stage()?;
+            return Ok(SourceWorkResult { value, schedule_receipt: Some(staged), read: None, mcp_receipt: None, mcp_child: None, mcp_derivation: None });
+        }
         if let Self::McpCreationReceiptStage(preparation) = self {
             let (value, staged) = preparation.stage()?;
-            return Ok(SourceWorkResult { value, read: None, mcp_receipt: Some(staged), mcp_child: None, mcp_derivation: None });
+            return Ok(SourceWorkResult { value, schedule_receipt: None, read: None, mcp_receipt: Some(staged), mcp_child: None, mcp_derivation: None });
         }
         if let Self::McpChildSelectionStage(preparation) = self {
-            return Ok(SourceWorkResult { value: Value::Null, read: None, mcp_receipt: None, mcp_child: Some(preparation.stage()?), mcp_derivation: None });
+            return Ok(SourceWorkResult { value: Value::Null, schedule_receipt: None, read: None, mcp_receipt: None, mcp_child: Some(preparation.stage()?), mcp_derivation: None });
         }
         if let Self::McpDerivationStage(preparation) = self {
-            return Ok(SourceWorkResult { value: Value::Null, read: None, mcp_receipt: None,
+            return Ok(SourceWorkResult { value: Value::Null, schedule_receipt: None, read: None, mcp_receipt: None,
                 mcp_child: None, mcp_derivation: Some(preparation.stage()?) });
         }
         let read = if let Self::Tool { read, .. } = &mut self {
@@ -776,6 +784,8 @@ impl SourceDispatch {
                 .ok_or_else(|| denied("Original file observation owner unavailable"))?
                 .execute_managed(address, action, &cancel),
             Self::ReadObserve(read) => read.load(),
+            Self::ScheduleReceiptObserve(body) => body.load(),
+            Self::ScheduleReceiptStage(_) => unreachable!("schedule receipt staged above"),
             Self::McpDerivationObserve(body) => body.load(),
             Self::McpDerivationStage(_) => unreachable!("derivation staged above"),
             Self::McpChildSelectionObserve(body) => body.load(),
@@ -831,17 +841,19 @@ impl SourceDispatch {
             let (value, staged) = read.stage(value)?;
             Ok(SourceWorkResult {
                 value,
+                schedule_receipt: None,
                 read: Some(staged),
                 mcp_receipt: None,
                 mcp_child: None, mcp_derivation: None,
             })
         } else {
-            value.map(|value| SourceWorkResult { value, read: None, mcp_receipt: None, mcp_child: None, mcp_derivation: None })
+            value.map(|value| SourceWorkResult { value, schedule_receipt: None, read: None, mcp_receipt: None, mcp_child: None, mcp_derivation: None })
         }
     }
 }
 pub(crate) struct SourceWorkResult {
     value: Value,
+    schedule_receipt: Option<crate::storage::source_schedule_receipts::StagedScheduleReceipt>,
     read: Option<crate::storage::source_read_receipts::StagedRead>,
     mcp_receipt: Option<crate::storage::source_mcp_receipts::StagedMcpReceipt>,
     mcp_child: Option<crate::storage::source_mcp_children::StagedMcpChild>,
@@ -852,6 +864,10 @@ impl SourceWorkResult {
         self,
         storage: &mut crate::storage::Storage,
     ) -> Result<Value, KernelError> {
+        if let Some(receipt) = self.schedule_receipt {
+            storage.publish_source_schedule(receipt)?;
+            return Ok(self.value);
+        }
         if let Some(read) = self.read {
             storage.publish_source_read(read)?;
         }
@@ -987,6 +1003,9 @@ pub(crate) fn prepare_request(
         "source.mcp.child" => {
             return storage.source_mcp_child(serde_json::from_value(params)?, epoch);
         }
+        "source.schedule.receipt" => {
+            return storage.source_schedule_receipt(serde_json::from_value(params)?, epoch);
+        }
         "source.mcp.creation_receipt" => {
             return storage.source_mcp_creation_receipt(serde_json::from_value(params)?, epoch);
         }
@@ -1017,16 +1036,14 @@ pub(crate) fn prepare_request(
         }
         "source.resource.release" => {
             let p: SourceResourceControlParams = serde_json::from_value(params)?;
-            storage.release_source_read(
-                &SourceAuthorityAddress {
-                    principal_id: p.principal_id,
-                    coordinator_host_id: p.coordinator_host_id,
-                    authority_id: p.authority_id,
-                    resource_epoch: p.resource_epoch,
-                },
-                &p.operation_id,
-                epoch,
-            )?
+            let address = SourceAuthorityAddress {
+                principal_id: p.principal_id, coordinator_host_id: p.coordinator_host_id,
+                authority_id: p.authority_id, resource_epoch: p.resource_epoch,
+            };
+            match storage.release_source_schedule(&address, &p.operation_id, epoch)? {
+                Some(value) => value,
+                None => storage.release_source_read(&address, &p.operation_id, epoch)?,
+            }
         }
         "source.resource.observe" | "source.resource.cancel" => {
             let p: SourceResourceControlParams = serde_json::from_value(params)?;
@@ -1037,6 +1054,9 @@ pub(crate) fn prepare_request(
                 resource_epoch: p.resource_epoch,
             };
             let record = storage.source_authority(&address, false, epoch)?;
+            if let Some(receipt) = storage.recall_source_schedule(&record, &p.operation_id, method == "source.resource.cancel")? {
+                return Ok(receipt);
+            }
             if let Some(read) = storage.recall_source_read(&record, &p.operation_id)? {
                 return Ok(SourceDispatch::ReadObserve(read));
             }

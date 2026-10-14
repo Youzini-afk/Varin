@@ -226,7 +226,7 @@ impl Storage {
         {
             blobs.insert(row?);
         }
-        for row in self.conn.prepare("SELECT json_extract(result_json,'$.objectHash') FROM operations WHERE kind='source.read' AND state='committed' AND json_extract(result_json,'$.released') IS NOT 1")?.query_map([], |row| row.get::<_,String>(0))? {
+        for row in self.conn.prepare("SELECT json_extract(result_json,'$.objectHash') FROM operations WHERE kind IN ('source.read','source.schedule') AND state='committed' AND json_extract(result_json,'$.released') IS NOT 1")?.query_map([], |row| row.get::<_,String>(0))? {
             blobs.insert(row?);
         }
         // Original MCP holders own creation bodies until their exact release,

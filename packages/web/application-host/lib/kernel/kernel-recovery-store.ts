@@ -189,6 +189,10 @@ export class KernelRecoveryContentStore implements RecoveryFileStore {
     }
   }
 
+  async assertApplyState(identity: RecoveryIdentity, relativePath: string, state: RecoveryState): Promise<void> {
+    await (await this.resources(identity)).assertApplyState(identity, relativePath, state);
+  }
+
   async storeContent(identity: RecoveryIdentity, bytes: Buffer): Promise<{ state: RegularFileState; release(): Promise<void> }> {
     if (this.scopedActor && identity.workspaceId !== this.scopedActor.identity.workspaceId) {
       throw new Error('Recovery content does not match its admitted actor');
@@ -650,12 +654,23 @@ export class KernelRecoveryStore {
       retryable: false,
       ...(unrecorded.length > 0 ? { details: { paths: unrecorded } } : {}),
     });
+    const status = exact ? "ready" : "incomplete";
+    // Reopened preparation may revisit an already settled input checkpoint.
+    // Recall identical facts without creating a second transition; changed
+    // coverage still enters the original revision CAS under a distinct identity.
+    if (row.settledAt && row.status === status
+      && (row.assistantEntryId ?? null) === (input.assistantEntryId ?? null)
+      && row.provenance === input.provenance
+      && isDeepStrictEqual(row.observedResourceIds, observed)
+      && isDeepStrictEqual(row.unrecordedResourceIds, unrecorded)
+      && isDeepStrictEqual(row.activeWriterScopes, input.activeWriterScopes)
+      && isDeepStrictEqual(row.failure ?? null, failure ?? null)) return this.turn(row);
     const settled = await context.client.recoveryTurnSettle({
-      operationId: `recovery-settle:${input.executionId}`,
+      operationId: `recovery-settle:${input.workspaceId}:${input.executionId}:${Number(row.revision)}`,
       workspaceId: input.workspaceId,
       executionId: input.executionId,
       expectedRevision: Number(row.revision),
-      status: exact ? "ready" : "incomplete",
+      status,
       observedResourceIds: observed,
       unrecordedResourceIds: unrecorded,
       observationComplete: input.observationComplete,

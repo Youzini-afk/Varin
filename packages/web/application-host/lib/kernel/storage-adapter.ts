@@ -1732,6 +1732,8 @@ export interface KernelStorageAdapterOptions {
   resolveWorkspaceRoot: (workspaceId: string) => Promise<string>;
   fileStore?: RecoveryFileStore;
   storageRoot: string;
+  /** Host-owned journal coordination metadata; it is never a Documents/file workspace. */
+  recoveryCoordinatorWorkspace?: string;
   resolveActor?: (workspaceId: string, purpose: string, hint?: KernelActorIdentity) => KernelActorIdentity | Promise<KernelActorIdentity>;
   durableRecoveryStore?: RecoveryDurableOperationPort;
 }
@@ -1906,6 +1908,21 @@ export class KernelStorageAdapter {
   }
 
   async context(workspaceId: string, purpose: string, actorOverride?: KernelActorIdentity): Promise<KernelStorageContext & { client: KernelScopedClient }> {
+    if (workspaceId === this.options.recoveryCoordinatorWorkspace) {
+      if (purpose !== 'recovery-maintenance' || actorOverride?.sessionId) {
+        throw new Error('Recovery coordination storage does not admit a file/session actor');
+      }
+      const key = JSON.stringify({ workspaceId, purpose: 'recovery-coordinator' });
+      let grant = this.grants.get(key);
+      if (!grant) {
+        grant = this.client.issueGrant({ grantId: `product:${this.options.hostId}:${randomUUID()}`,
+          owningWorkspace: workspaceId, executionWorkspace: workspaceId, pathScopes: [],
+          capabilities: ['storage.read', 'storage.write', 'recovery', 'recovery.maintenance'] });
+        this.grants.set(key, grant);
+      }
+      return this.contextUsingGrant(await grant, { authorityId: this.options.hostId, workspaceId,
+        canonicalRoot: '', filesystemProfile: 'metadata' }, undefined, true);
+    }
     const identity: RecoveryIdentity = { authorityId: this.options.hostId, canonicalRoot: await this.options.resolveWorkspaceRoot(workspaceId), filesystemProfile: process.platform === "win32" ? "windows-local" : `${process.platform}-local`, workspaceId };
     const grant = await this.grantFor(workspaceId, purpose, actorOverride);
     return this.contextUsingGrant(grant, identity);

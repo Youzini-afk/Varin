@@ -37,6 +37,13 @@ pub(crate) fn reconcile(
                     }
                 }
                 for operation in &operations {
+                    if operation.executor.as_deref() == Some("scheduled_task") && !binding.resource_owner.is_local()
+                        && crate::schedule_reconciliation::reconcile(&runtime, &resources, Some(&binding),
+                            &operation.id, operation.execution_owner.as_ref())? {
+                        reconciled.push(operation.id.clone());
+                    }
+                }
+                for operation in &operations {
                     if matches!(
                         operation.executor.as_deref(),
                         Some("process_write" | "process_resize")

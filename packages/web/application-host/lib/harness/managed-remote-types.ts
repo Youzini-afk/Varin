@@ -88,6 +88,7 @@ export interface ManagedSourceInspection { scope: SourceAuthorityScope; phase: '
 /** Closed, non-model source services. A command cannot name an arbitrary kernel method,
  * mint a grant, change a source, or select a different physical root. */
 export type SourceServiceOperation =
+  | { kind: 'schedule'; invocation: import('../kernel/tool-invocation.js').ToolInvocationAuthority }
   | { kind: 'mcp'; action: import('./managed-mcp-contract.js').ManagedMcpAction }
   | {kind:'native_resource';context:{run_id:string;origin:import('../kernel/protocol.generated.js').ToolOrigin;operation_id:string};action:import('../kernel/protocol.generated.js').SourceResourceAction;authorizeOnly:boolean}
   | { kind: 'language'; query: Omit<import('../kernel/protocol.generated.js').LanguageQuery, 'runId' | 'threadId' | 'grantId' | 'source' | 'physicalRoot'> }
@@ -149,6 +150,7 @@ export type ManagedSourceServiceHandler = (scope: ManagedSourceLocalScope, opera
 /** The target Host composes its existing Documents, WorkingState and native resource owners.
  * Network routes only supply authenticated principal and the closed request. */
 export interface ManagedSourceService {
+  recovery(principal: ManagedSourcePrincipal, input: import('./managed-recovery-contract.js').ManagedRecoveryRequest, signal?: AbortSignal): Promise<import('./managed-recovery-contract.js').ManagedRecoveryReply>;
   scriptControl(principal: ManagedSourcePrincipal, input: ManagedScriptControlRequest, signal?: AbortSignal): Promise<ManagedScriptControlReceipt>;
   scriptBinding(principal: ManagedSourcePrincipal, input: ManagedScriptBindingRequest, signal?: AbortSignal): Promise<import('../kernel/protocol.generated.js').NodeBinding>;
   scriptSpawn(principal: ManagedSourcePrincipal, input: ManagedScriptSpawnRequest, signal?: AbortSignal): Promise<import('../kernel/protocol.generated.js').KernelProcessSnapshot>;
@@ -180,6 +182,7 @@ export interface ManagedSourceService {
 }
 
 export interface SourceServiceResults {
+  schedule: import('../kernel/tool-bridge.js').ToolExecutionReceipt;
   mcp: import('./managed-mcp-contract.js').ManagedMcpReply;
   native_resource: unknown;
   validate: { pathScopes: string[] };

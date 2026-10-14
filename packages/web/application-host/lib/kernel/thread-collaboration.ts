@@ -66,6 +66,12 @@ export class ThreadCollaboration {
     if (!this.suspended || this.stopped) return;
     this.epoch = new AbortController(); this.suspended = false;
   }
+  /** A real Source connection recovery makes original domain receipts readable again.
+   * Preserve a wake arriving during discovery; the existing owner coalesces its next pass. */
+  sourceReached(): void {
+    this.domainRecoveryNeeded = true;
+    void this.recover();
+  }
   stop(): void {
     this.stopped = true; this.epoch.abort();
     for (const task of this.tasks.values()) task.controller.abort();

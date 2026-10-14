@@ -18,6 +18,9 @@ import {
   type RecoverySessionNavigation,
   type WorkspaceRecoveryEngine,
 } from './journal-engine.js';
+import { RecoveryPrimitiveError } from './errors.js';
+import { createManagedRecoveryCoordinator } from './managed-recovery-coordinator.js';
+import { createManagedRecoveryService } from '../kernel/managed-recovery-service.js';
 import type { RecoveryFileStore } from './journal-files.js';
 import { createRecoveryFileStore } from './file-store.test-helper.js';
 import {
@@ -1140,6 +1143,262 @@ describe('affected-file workspace recovery journal', () => {
     });
     // The file must not have been changed.
     expect(await fs.promises.readFile(notePath, 'utf8')).toBe('after');
+  });
+
+});
+
+describe('managed file participants in the original recovery journal', () => {
+  const createPair = async (mixed = false) => {
+    const bFiles = createRecoveryFileStore();
+    const b = await createHarness({ fileStore: bFiles });
+    const conversation = { kind: 'thread' as const, threadId: 'thread-A', branchId: 'branch-A' };
+    const fileTarget = { kind: 'physical' as const, workspaceId: b.harness.identity.workspaceId, threadId: conversation.threadId,
+      runId: 'run-A', rootId: 'root-B', canonicalRoot: b.harness.workspaceRoot,
+      executionWorkspaceId: b.harness.identity.workspaceId, sourceMode: 'live_root' as const };
+    const executionId = 'run-A:user-1';
+    const notePath = path.join(b.harness.workspaceRoot, 'note.txt');
+    await fs.promises.writeFile(notePath, 'before-B');
+    ready(await b.engine.recordTurnStart({ activeWriterScopes: [], executionId, provenance: 'caused-by',
+      runtimeGeneration: 1, conversation, userEntryId: 'user-1', workerId: 'kernel',
+      workspaceId: b.harness.identity.workspaceId, fileTarget }));
+    const mutation = { executionId, mutationId: 'mutation-B', path: notePath, toolCallId: 'tool-B', toolName: 'write' as const, workspaceId: b.harness.identity.workspaceId };
+    ready(await b.engine.recordMutationBefore(mutation));
+    await fs.promises.writeFile(notePath, 'after-B');
+    ready(await b.engine.recordMutationAfter({ ...mutation, succeeded: true }));
+    await settleTurn(b.engine, b.harness, { executionId });
+    const owner = { kind: 'managed_host' as const, hostId: 'host-B', connectionId: 'connection-B', endpointIdentity: 'endpoint-B' };
+    const physicalRoot = { hostId: owner.hostId, rootId: fileTarget.rootId, canonicalRoot: fileTarget.canonicalRoot };
+    const source: import('../kernel/protocol.generated.js').LaunchSource = { resource_owner: owner,
+      workspace_id: b.harness.identity.workspaceId, execution_workspace_id: b.harness.identity.workspaceId,
+      live_root: physicalRoot, mode: 'live_root', branch_id: null, revision: null };
+    const turns: import('./managed-recovery-coordinator.js').ManagedRecoveryTurn[] = [{ restore: true, turn: {
+      anchor: { executionId, threadId: 'thread-A', branchId: 'branch-A', runId: 'run-A', entryId: 'user-1', epoch: 1 },
+      source, entryIds: ['user-1', 'assistant-1'], uncovered: false, settled: true,
+    } }];
+    const binding = { principalId: 'principal-A', coordinatorHostId: 'host-A', workspaceId: source.workspace_id, conversation, turns };
+    const service = createManagedRecoveryService({ hostId: 'host-B',
+      kernel: { start: async () => ({}), sourceRequest: async () => [{ source, physicalRoot,
+        scope: { kind: 'run', threadId: 'thread-A', runId: 'run-A', epoch: 1 }, phase: 'retired' }] } as unknown as import('../kernel/kernel-client.js').KernelClient,
+      storage: { fileAuthorityContext: async () => ({ rootId: 'root-B', canonicalRoot: b.harness.workspaceRoot, client: {} }) } as unknown as import('../kernel/storage-adapter.js').KernelStorageAdapter,
+      documents: b.harness.authority, store: b.durable, recovery: b.engine, validateLiveSource: async () => {},
+    });
+    const originalCapture = bFiles.captureState;
+    const originalApply = bFiles.applyState;
+    bFiles.captureState = async (...args) => { if (args[0].fileTarget) expect(await service.resolveFileResources(args[0])).not.toBeNull(); return originalCapture(...args); };
+    bFiles.applyState = async (...args) => { expect(await service.resolveFileResources(args[0])).not.toBeNull(); return originalApply(...args); };
+    const client = { recovery: (input: import('../harness/managed-recovery-contract.js').ManagedRecoveryRequest) =>
+      service.handle({ principalId: 'principal-A', capabilities: ['filesystem:read', 'filesystem:write'] }, input) };
+    const remote = createManagedRecoveryCoordinator({ coordinatorHostId: 'host-A',
+      registry: { source: async () => client as import('../harness/managed-remote-client.js').ManagedSourceClient } });
+    vi.spyOn(remote, 'apply'); vi.spyOn(remote, 'read'); vi.spyOn(remote, 'complete'); vi.spyOn(remote, 'cancel');
+    const navigation = createTestNavigation();
+    navigation.prepare = vi.fn(async () => ({ expectedLeafId: 'leaf-current', targetLeafId: 'leaf-before',
+      removedEntryIds: ['user-1', 'assistant-1'], journalTurns: [], managedTurns: turns }));
+    const aFiles = createRecoveryFileStore();
+    const capture = vi.spyOn(aFiles, 'captureState');
+    const metadata = { coordinatorWorkspaceId: 'recovery-coordinator:host-A',
+      resolveCoordinatorIdentity: async (workspaceId: string) => workspaceId === 'recovery-coordinator:host-A'
+        ? { authorityId: 'host-A', workspaceId, canonicalRoot: '', filesystemProfile: 'metadata' } : null,
+      listCoordinatorWorkspaces: async () => [{ workspaceId: 'recovery-coordinator:host-A' }],
+    };
+    const a = await createHarness({ ...metadata, fileStore: aFiles, managedRecovery: remote, sessionNavigation: navigation });
+    await fs.promises.writeFile(path.join(a.harness.workspaceRoot, 'note.txt'), mixed ? 'before-A' : 'independent-A');
+    if (mixed) {
+      const localTarget = { ...fileTarget, workspaceId: a.harness.identity.workspaceId, executionWorkspaceId: a.harness.identity.workspaceId,
+        canonicalRoot: a.harness.workspaceRoot, rootId: 'root-A', runId: 'run-local' };
+      ready(await a.engine.recordTurnStart({ activeWriterScopes: [], executionId: 'execution-1', provenance: 'caused-by',
+        runtimeGeneration: 1, conversation, userEntryId: 'user-local', workerId: 'worker-A', workspaceId: a.harness.identity.workspaceId, fileTarget: localTarget }));
+      await recordWrite(a.engine, a.harness, 'after-A');
+      await settleTurn(a.engine, a.harness);
+      navigation.prepare = vi.fn(async () => ({ expectedLeafId: 'leaf-current', targetLeafId: 'leaf-before',
+        removedEntryIds: ['user-local', 'user-1', 'assistant-1'], journalTurns: [{ workspaceId: a.harness.identity.workspaceId, executionId: 'execution-1', restore: true }], managedTurns: turns }));
+    }
+    const prepared = ready(await a.engine.prepareCombinedRecovery({ conversation, workspaceId: b.harness.identity.workspaceId, entryId: 'user-1' }));
+    const apply = { operationId: prepared.plan.id, expectedRevision: prepared.plan.revision, conflictPolicy: 'abort' as const, confirmedConflicts: [] };
+    const reopen = () => createWorkspaceRecoveryEngine({ ...metadata, authorityId: 'host-A', dataDir: a.harness.dataDir,
+      documents: a.harness.authority, durableRecoveryStore: a.durable, fileStore: aFiles,
+      managedRecovery: remote, sessionNavigation: navigation });
+    return { a, b, remote, navigation, prepared, apply, capture, binding, reopen };
+  };
+
+  it('restores on B, navigates only A, and undoes from B-owned safety without A file access', async () => {
+    const { a, b, remote, navigation, prepared, apply, capture } = await createPair();
+    expect(prepared.plan.workspaceId).toBe('recovery-coordinator:host-A');
+    const result = ready(await a.engine.applyCombinedRecovery(apply));
+    expect(result.operation.state).toBe('complete');
+    expect(await fs.promises.readFile(path.join(b.harness.workspaceRoot, 'note.txt'), 'utf8')).toBe('before-B');
+    expect(await fs.promises.readFile(path.join(a.harness.workspaceRoot, 'note.txt'), 'utf8')).toBe('independent-A');
+    expect(capture).not.toHaveBeenCalled();
+    expect(b.navigation.commit).not.toHaveBeenCalled();
+    expect(navigation.commit).toHaveBeenCalledOnce();
+    expect(remote.complete).toHaveBeenCalledOnce();
+    const aRecord = a.durable.snapshot(prepared.plan.workspaceId, prepared.plan.id)!;
+    expect(aRecord.files).toEqual([]);
+    const undo = ready(await a.engine.prepareCombinedUndo(prepared.plan.id));
+    expect(ready(await a.engine.applyCombinedRecovery({ operationId: undo.plan.id, expectedRevision: undo.plan.revision, conflictPolicy: 'abort', confirmedConflicts: [] })).operation.state).toBe('complete');
+    expect(await fs.promises.readFile(path.join(b.harness.workspaceRoot, 'note.txt'), 'utf8')).toBe('after-B');
+    expect(capture).not.toHaveBeenCalled();
+  });
+
+  it('keeps a lost B response pending and resumes the same journal after reopening without replay', async () => {
+    const { a, b, remote, navigation, prepared, apply, reopen } = await createPair();
+    const originalApply = remote.apply;
+    remote.apply = vi.fn(async (...args: Parameters<typeof originalApply>) => { await originalApply(...args); throw new Error('lost apply reply'); });
+    const read = remote.read;
+    remote.read = vi.fn(async () => { throw new Error('target temporarily disconnected'); });
+    expect(await a.engine.applyCombinedRecovery(apply)).toMatchObject({ status: 'failed', failure: { retryable: true } });
+    expect(ready(await a.engine.getCombinedOperation(prepared.plan.id)).operation.state).toBe('applying-files');
+    expect(navigation.commit).not.toHaveBeenCalled();
+    expect(remote.cancel).not.toHaveBeenCalled();
+    expect(await fs.promises.readFile(path.join(b.harness.workspaceRoot, 'note.txt'), 'utf8')).toBe('before-B');
+    await a.engine.dispose();
+    remote.read = read;
+    const restarted = reopen();
+    expect((await restarted.resumeCombinedOperations())[0]?.state).toBe('complete');
+    expect(remote.apply).toHaveBeenCalledOnce();
+    expect(navigation.commit).toHaveBeenCalledOnce();
+    await restarted.dispose();
+  });
+
+  it('compensates B after a definite A head rejection, preserving unrelated A files', async () => {
+    const { a, b, navigation, prepared, apply } = await createPair();
+    navigation.commit = vi.fn(async () => { throw new RecoveryPrimitiveError('navigation-conflict', 'head changed', { origin: 'navigation' }); });
+    expect((await a.engine.applyCombinedRecovery(apply)).status).toBe('failed');
+    expect(ready(await a.engine.getCombinedOperation(prepared.plan.id)).operation.state).toBe('compensated');
+    expect(await fs.promises.readFile(path.join(b.harness.workspaceRoot, 'note.txt'), 'utf8')).toBe('after-B');
+    expect(await fs.promises.readFile(path.join(a.harness.workspaceRoot, 'note.txt'), 'utf8')).toBe('independent-A');
+  });
+
+  it('holds a restored B participant on autonomous restart and refuses a different authenticated binding', async () => {
+    const { a, b, remote, prepared, apply, binding } = await createPair();
+    const record = a.durable.snapshot(prepared.plan.workspaceId, prepared.plan.id)!;
+    const participant = ((record.result ?? record.data).managedParticipants as import('./managed-recovery-coordinator.js').ManagedRecoveryParticipant[])[0]!;
+    expect(ready(await remote.apply(participant, { ...apply, operationId: participant.id, expectedRevision: participant.plan.revision })).operation.state).toBe('files-restored');
+    expect(await b.engine.resumeCombinedOperations()).toEqual([]);
+    expect(await b.engine.readFileRecovery({ operationId: participant.id, binding: { ...binding, principalId: 'other' } }))
+      .toMatchObject({ status: 'failed', failure: { code: 'workspace-untrusted' } });
+    expect(b.navigation.commit).not.toHaveBeenCalled();
+    expect(ready(await remote.cancel(participant)).operation.state).toBe('compensated');
+    expect(await fs.promises.readFile(path.join(b.harness.workspaceRoot, 'note.txt'), 'utf8')).toBe('after-B');
+  });
+
+  it('durably records preparation before B can acknowledge and retries only that original plan', async () => {
+    const { a, b, remote, prepared } = await createPair();
+    ready(await a.engine.cancelCombinedOperation(prepared.plan.id));
+    const prepare = remote.prepare;
+    remote.prepare = vi.fn(async (...args: Parameters<typeof prepare>) => { await prepare(...args); throw new Error('lost preparation acknowledgement'); });
+    const input = { workspaceId: prepared.plan.workspaceId, conversation: prepared.plan.conversation, entryId: prepared.plan.entryId };
+    const lost = await a.engine.prepareCombinedRecovery(input);
+    expect(lost).toMatchObject({ status: 'failed', failure: { code: 'recovery-in-progress', retryable: true } });
+    if (lost.status !== 'failed' || !lost.failure.operationId) throw new Error('Expected the original durable operation identity');
+    const operationId = lost.failure.operationId;
+    const pending = a.durable.snapshot(prepared.plan.workspaceId, operationId)!;
+    expect((pending.result ?? pending.data).managedPreparation).toBeTruthy();
+    const count = (await b.durable.listOperations(b.harness.identity.workspaceId, 'combined')).length;
+    remote.prepare = prepare;
+    const retried = ready(await a.engine.prepareCombinedRecovery(input));
+    expect(retried.plan.id).toBe(operationId);
+    expect((await b.durable.listOperations(b.harness.identity.workspaceId, 'combined')).length).toBe(count);
+    expect(ready(await a.engine.cancelCombinedOperation(operationId)).operation.state).toBe('compensated');
+    expect(await fs.promises.readFile(path.join(b.harness.workspaceRoot, 'note.txt'), 'utf8')).toBe('after-B');
+  });
+
+  it('recovers mixed A and B files without compensating an uncertain A navigation or replaying files', async () => {
+    const { a, b, remote, navigation, prepared, apply, reopen } = await createPair(true);
+    navigation.commit = vi.fn(async () => { throw new RecoveryPrimitiveError('navigation-conflict', 'original Catalog response is pending', { origin: 'navigation', retryable: true }); });
+    expect((await a.engine.applyCombinedRecovery(apply)).status).toBe('failed');
+    expect(ready(await a.engine.getCombinedOperation(prepared.plan.id)).operation.state).toBe('navigating-conversation');
+    expect(await fs.promises.readFile(path.join(a.harness.workspaceRoot, 'note.txt'), 'utf8')).toBe('before-A');
+    expect(await fs.promises.readFile(path.join(b.harness.workspaceRoot, 'note.txt'), 'utf8')).toBe('before-B');
+    expect(remote.cancel).not.toHaveBeenCalled();
+    navigation.commit = vi.fn(async () => ({ markerId: prepared.plan.id }));
+    const complete = remote.complete;
+    remote.complete = vi.fn(async (...args: Parameters<typeof complete>) => { await complete(...args); throw new Error('lost completion receipt'); });
+    await a.engine.dispose();
+    const restarted = reopen();
+    expect((await restarted.resumeCombinedOperations())[0]?.state).toBe('complete');
+    expect(remote.apply).toHaveBeenCalledOnce();
+    expect(navigation.commit).toHaveBeenCalledWith(expect.objectContaining({ operationId: prepared.plan.id }));
+    expect(ready(await restarted.getCombinedOperation(prepared.plan.id)).operation.appliedPathCount).toBe(2);
+    await restarted.dispose();
+  });
+
+
+  it('keeps B editor conflicts namespaced and compensates local files when the confirmed B surface is unavailable', async () => {
+    const { a, b, navigation, prepared } = await createPair(true);
+    ready(await a.engine.cancelCombinedOperation(prepared.plan.id));
+    await b.harness.authority.publishDirtyBuffers({ generation: 1, ownerId: 'surface-B',
+      resources: [{ baseRevision: null, localEditRevision: 1, resource: { resourceId: 'note.txt', workspaceId: b.harness.identity.workspaceId } }],
+      workspaceId: b.harness.identity.workspaceId });
+    const plan = ready(await a.engine.prepareCombinedRecovery({ workspaceId: prepared.plan.workspaceId, conversation: prepared.plan.conversation, entryId: prepared.plan.entryId })).plan;
+    expect(plan.conflicts).toEqual([expect.objectContaining({ kind: 'dirty-buffer', path: expect.stringMatching(/^managed\//) })]);
+    const result = await a.engine.applyCombinedRecovery({ operationId: plan.id, expectedRevision: plan.revision, conflictPolicy: 'overwrite-confirmed',
+      confirmedConflicts: plan.conflicts.map(({ path, fingerprint }) => ({ path, fingerprint })) });
+    expect(result).toMatchObject({ status: 'failed', failure: { code: 'dirty-state-unavailable' } });
+    expect(navigation.commit).not.toHaveBeenCalled();
+    expect(await fs.promises.readFile(path.join(a.harness.workspaceRoot, 'note.txt'), 'utf8')).toBe('after-A');
+    expect(await fs.promises.readFile(path.join(b.harness.workspaceRoot, 'note.txt'), 'utf8')).toBe('after-B');
+  });
+
+
+  it('re-enters the same planned B operation when the durable apply dispatch never reached its owner', async () => {
+    const { a, b, remote, navigation, prepared, apply, reopen } = await createPair();
+    const dispatch = remote.apply;
+    remote.apply = vi.fn(async () => { throw new Error('connection failed before B received apply'); });
+    expect(await a.engine.applyCombinedRecovery(apply)).toMatchObject({ status: 'failed', failure: { retryable: true } });
+    expect(navigation.commit).not.toHaveBeenCalled();
+    expect(await fs.promises.readFile(path.join(b.harness.workspaceRoot, 'note.txt'), 'utf8')).toBe('after-B');
+    await a.engine.dispose();
+    remote.apply = dispatch;
+    const restarted = reopen();
+    expect((await restarted.resumeCombinedOperations())[0]?.state).toBe('complete');
+    expect(dispatch).toHaveBeenCalledOnce();
+    expect((await b.durable.listOperations(b.harness.identity.workspaceId, 'combined'))).toHaveLength(1);
+    expect(ready(await restarted.getCombinedOperation(prepared.plan.id)).operation.state).toBe('complete');
+    expect(await fs.promises.readFile(path.join(b.harness.workspaceRoot, 'note.txt'), 'utf8')).toBe('before-B');
+    await restarted.dispose();
+  });
+
+
+  it('compensates confirmed local output when reopened B reconciles its interrupted file stage to compensated', async () => {
+    const { a, b, remote, navigation, prepared, apply, reopen } = await createPair(true);
+    const dispatch = remote.apply;
+    remote.apply = vi.fn(async (...args: Parameters<typeof dispatch>) => {
+      await dispatch(...args);
+      b.durable.debugSetOperationState(args[0].workspaceId, args[0].id, 'applying-files');
+      throw new Error('B restarted before its final file-stage acknowledgement');
+    });
+    const read = remote.read;
+    remote.read = vi.fn(async () => { throw new Error('B restart still in progress'); });
+    expect(await a.engine.applyCombinedRecovery(apply)).toMatchObject({ status: 'failed', failure: { retryable: true } });
+    expect(await fs.promises.readFile(path.join(a.harness.workspaceRoot, 'note.txt'), 'utf8')).toBe('before-A');
+    await a.engine.dispose();
+    remote.read = read;
+    const restarted = reopen();
+    expect((await restarted.resumeCombinedOperations())[0]?.state).toBe('compensated');
+    expect(ready(await restarted.getCombinedOperation(prepared.plan.id)).operation.conversationState).toBe('unchanged');
+    expect(navigation.commit).not.toHaveBeenCalled();
+    expect(await fs.promises.readFile(path.join(a.harness.workspaceRoot, 'note.txt'), 'utf8')).toBe('after-A');
+    expect(await fs.promises.readFile(path.join(b.harness.workspaceRoot, 'note.txt'), 'utf8')).toBe('after-B');
+    await restarted.dispose();
+  });
+
+
+  it('compensates local output when the same planned B apply is rejected after a user edit during disconnection', async () => {
+    const { a, b, remote, navigation, prepared, apply, reopen } = await createPair(true);
+    const dispatch = remote.apply;
+    remote.apply = vi.fn(async () => { throw new Error('apply never reached B'); });
+    expect(await a.engine.applyCombinedRecovery(apply)).toMatchObject({ status: 'failed', failure: { retryable: true } });
+    await fs.promises.writeFile(path.join(b.harness.workspaceRoot, 'note.txt'), 'later-user-B');
+    await a.engine.dispose();
+    remote.apply = dispatch;
+    const restarted = reopen();
+    expect((await restarted.resumeCombinedOperations())[0]).toMatchObject({ state: 'compensated', failure: { code: 'path-conflict' } });
+    expect(ready(await restarted.getCombinedOperation(prepared.plan.id)).operation.conversationState).toBe('unchanged');
+    expect(navigation.commit).not.toHaveBeenCalled();
+    expect(await fs.promises.readFile(path.join(a.harness.workspaceRoot, 'note.txt'), 'utf8')).toBe('after-A');
+    expect(await fs.promises.readFile(path.join(b.harness.workspaceRoot, 'note.txt'), 'utf8')).toBe('later-user-B');
+    await restarted.dispose();
   });
 
 });

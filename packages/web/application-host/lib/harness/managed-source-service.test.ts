@@ -64,13 +64,15 @@ function fixture() {
   const releaseSource = vi.fn<(scope: ManagedSourceCleanupScope) => Promise<void | { mcpExecutorStopped: boolean }>>(async () => { events.push('drain-views'); });
   const mcpInteractionContinuation = vi.fn(async () => ({ ok: true as const, value: null, executorStopped: true as const }));
   const releaseMcpView = vi.fn(async () => ({ ok: true as const, value: null, executorStopped: true as const }));
+  const recovery = vi.fn(async () => ({ status: 'failed' as const,
+    failure: { code: 'operation-not-found' as const, message: 'Original journal is unavailable', retryable: false } }));
   const service = createManagedSourceService({ kernel, hostId: 'target', releaseMcpView, mcpInteractionContinuation, documents: {
     admitWorkspaceRegistration: async () => {
       events.push('registration'); if (!state.trusted) throw new Error('Trust withdrawn');
       return { workspaceId: 'workspace', canonicalPath: '/target/project', hostId: 'target' };
     },
-  } as never, validateLiveSource: async () => {}, prepareSource, serviceOperation, releaseSource });
-  return { service, kernel, state, events, sourceRequest, issueGrant, claimManagedChildSource, readBranch, fileMaterialize, fileRootRegister, prepareSource, serviceOperation, releaseSource, releaseMcpView, mcpInteractionContinuation };
+  } as never, validateLiveSource: async () => {}, prepareSource, serviceOperation, releaseSource, recovery });
+  return { service, kernel, state, events, sourceRequest, issueGrant, claimManagedChildSource, readBranch, fileMaterialize, fileRootRegister, prepareSource, serviceOperation, releaseSource, releaseMcpView, mcpInteractionContinuation, recovery };
 }
 
 async function bindMcp(f: ReturnType<typeof fixture>) {
@@ -82,6 +84,20 @@ async function bindMcp(f: ReturnType<typeof fixture>) {
 }
 
 describe('managed Source target admission orchestration', () => {
+  it('routes a newly authorized Recovery to its original owner without reopening an execution Source', async () => {
+    const f = fixture();
+    const input = { coordinatorHostId: 'coordinator', binding: { operationId: 'original-recovery', workspaceId: 'workspace',
+      conversation: { kind: 'thread' as const, threadId: 'thread', branchId: 'history' }, turns: [] }, action: { kind: 'read' as const } };
+    await expect(f.service.recovery(principal, input)).rejects.toThrow();
+    expect(f.recovery).not.toHaveBeenCalled();
+    const writer = { ...principal, capabilities: ['filesystem:read', 'filesystem:write'] };
+    expect(await f.service.recovery(writer, input)).toMatchObject({ status: 'failed', failure: { code: 'operation-not-found' } });
+    expect(f.recovery).toHaveBeenCalledWith(writer, input, undefined);
+    expect(f.sourceRequest).not.toHaveBeenCalled();
+    expect(f.issueGrant).not.toHaveBeenCalled();
+    expect(f.serviceOperation).not.toHaveBeenCalled();
+  });
+
   it('namespaces preparation by the verified principal and coordinator while using the original local preparer', async () => {
     const f = fixture();
     const input: ThreadPrepareSource = { runtime: 'agent', threadId: 'thread', branchId: 'history', key: 'same-key',
@@ -150,7 +166,7 @@ describe('managed Source target admission orchestration', () => {
     const receipt = await f.service.release(principal, { coordinatorHostId: 'coordinator', authorityId: binding.authorityId,
       resourceEpoch: binding.resourceEpoch, mode: 'retire' });
     expect(f.events.slice(before)).toEqual(['source.authority.inspect', 'drain-views', 'source.authority.release']);
-    expect(f.releaseSource).toHaveBeenCalledWith(expect.objectContaining({ authorityId: binding.authorityId, scope: expect.objectContaining({ threadId: 'thread' }) }));
+    expect(f.releaseSource).toHaveBeenCalledWith(expect.objectContaining({ authorityId: binding.authorityId, scope: expect.objectContaining({ threadId: 'thread' }) }), { retainMcpHolders: false });
     expect(receipt).toEqual({ authorityId: binding.authorityId, phase: 'retired' });
   });
 
@@ -176,6 +192,20 @@ describe('managed Source target admission orchestration', () => {
     leave();
     expect(await cancellation).toMatchObject({ status: 'drained' });
     expect(await work).toBeInstanceOf(ManagedSourceDrainedError);
+  });
+
+  it.each([
+    [{ executor_stopped: true }, 'drained'],
+    [{ executor_stopped: false }, 'unknown'],
+    [{ executorStopped: true }, 'unknown'],
+    [null, 'unknown'],
+  ] as const)('keeps the original schedule receipt stop evidence when observing service drainage (%j)', async (receipt, status) => {
+    const f = fixture(); const binding = await f.service.bind(principal, request);
+    f.serviceOperation.mockResolvedValue(receipt);
+    const address = { coordinatorHostId: 'coordinator', authorityId: binding.authorityId,
+      resourceEpoch: binding.resourceEpoch, requestId: 'schedule-control' };
+    await f.service.service(principal, { ...address, operation: { kind: 'schedule', invocation: {} as never } });
+    expect(await f.service.cancelService(principal, address)).toMatchObject({ status });
   });
 
   it('retains caller-owned Host references during Run retirement and drains them on explicit revocation', async () => {

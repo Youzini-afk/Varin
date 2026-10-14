@@ -60,12 +60,7 @@ export function createThreadRecoveryNavigation(owners: Owners): RecoverySessionN
             const selected = identity(input.conversation);
             const navigation = await threads.prepareNavigation({ ...selected, entryId: input.entryId });
             const range = await runtime.recoveryRange({ threadId: selected.threadId, branchId: selected.branchId, entryId: input.entryId });
-            if (range.some(turn => turn.source?.resource_owner.kind === 'managed_host'
-                && turn.entryIds.some(id => navigation.removedEntryIds.includes(id)))) {
-                throw new RecoveryPrimitiveError('unsupported-metadata',
-                    'Combined file recovery across managed Hosts is not available yet. History-only navigation remains available; target files have not been changed.',
-                    { origin: 'storage' });
-            }
+            const managedTurns: import('./managed-recovery-coordinator.js').ManagedRecoveryTurn[] = [];
             const journalTurns: Array<{
                 workspaceId: string;
                 executionId: string;
@@ -74,6 +69,10 @@ export function createThreadRecoveryNavigation(owners: Owners): RecoverySessionN
             for (const turn of range) {
                 if (!turn.source || !turn.entryIds.some(id => navigation.removedEntryIds.includes(id)))
                     continue;
+                if (turn.source.resource_owner.kind === 'managed_host') {
+                    managedTurns.push({ turn, restore: navigation.removedEntryIds.includes(turn.anchor.entryId) });
+                    continue;
+                }
                 const workspaceId = turn.source.workspace_id;
                 journalTurns.push({ workspaceId, executionId: turn.anchor.executionId, restore: navigation.removedEntryIds.includes(turn.anchor.entryId) });
                 await store.recordTurnStart({ workspaceId, conversation: { kind: "thread", threadId: turn.anchor.threadId, branchId: turn.anchor.branchId }, executionId: turn.anchor.executionId,
@@ -84,7 +83,7 @@ export function createThreadRecoveryNavigation(owners: Owners): RecoverySessionN
                     ...(!turn.settled || turn.uncovered ? { failure: { code: 'checkpoint-incomplete' as const, message: !turn.settled ? 'Original input work is not settled' : 'Shell or external tool effects do not have complete before-images', retryable: false } } : {}),
                 });
             }
-            return { journalTurns, expectedLeafId: navigation.expectedHeadId, targetLeafId: navigation.targetHeadId, removedEntryIds: navigation.removedEntryIds,
+            return { journalTurns, managedTurns, expectedLeafId: navigation.expectedHeadId, targetLeafId: navigation.targetHeadId, removedEntryIds: navigation.removedEntryIds,
                 ...(navigation.editorText !== undefined ? { editorText: navigation.editorText } : {}), ...('editorImages' in navigation ? { editorImages: navigation.editorImages } : {}) };
         },
         async prepareLeaf(input) {

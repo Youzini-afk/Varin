@@ -34,9 +34,10 @@ turn checkpoints bound to those entries and folds their path operations into:
 - the state to restore before the selected message.
 
 Preparation hashes only those paths. Matching paths restore immediately. A later user edit or dirty
-buffer becomes a path conflict. Current combined restore requires an affected dirty buffer to be saved
-or discarded first; a failed dirty-state synchronization returns retryable `dirty-state-unavailable`.
-The proposed confirmable dirty-buffer/per-surface fallback is not implemented. Before any
+buffer becomes a path conflict. A confirmed dirty buffer retains its actual text and disk base in the
+original operation's safety objects; the registered surface applies and compensates under its exact
+owner, instance and revision. Unknown or disconnected editor state remains retryable
+`dirty-state-unavailable`; confirmation does not bypass the missing observation. Before any
 write, Varin stores the current version of the affected paths as the redo/compensation state. It does
 not create a whole-workspace safety checkpoint or enter global maintenance mode.
 
@@ -48,6 +49,24 @@ planned operations remain inert, while interrupted operations continue or compen
 stored phases. Reopened UI reads the original operation and revision. It never creates a new attempt
 merely because an earlier response was lost. The former local SQLite recovery engine is test-fixture
 code only and is not a production fallback.
+
+For a Thread range spanning managed Hosts, the conversation Host retains one coordinator operation in
+its original recovery catalog. Its metadata-only workspace has no default file authority. Before
+contacting file owners, it stores the frozen preparation and deterministic participant identities;
+an interrupted preparation resumes the same plans and cannot be applied until complete. Local physical
+targets keep their original file owners. Managed targets carry their Host identity for display and are
+never resolved against an equal path on the coordinator.
+
+Each managed Host verifies the authenticated coordinator's original Source records and reacquires
+current maintenance permission. Its existing journal retains its file plans, objects, safety, dirty
+surface phases and compensation. The coordinator retains references and receipts only, not remote
+content-object ownership. All participants must confirm the file stage before the original HistoryBranch
+head command commits. An unknown response remains pending until the original operation or Catalog
+receipt answers; transport closure does not prove stopped work or authorize compensation. A definite
+navigation rejection compensates each original owner's unchanged outputs. Cancellation and undo use
+those same records. Participant startup waits for authenticated source re-admission and never navigates
+a second Thread. This is recoverable coordination across individual file transactions, not cross-Host
+atomicity.
 
 Thread result integration uses the same selected storage, content objects, exact path-state capture,
 conditional apply/compensation phases, and workspace lease through a trusted Host-only adapter. Its
@@ -100,7 +119,7 @@ retention controls. A zero-reclaim result is distinct from cleanup failure. GC r
 deleted object-file lengths from both prior/orphan cleanup and the committed release pass; the
 Host propagates physical deletion failures instead of reporting successful zero-byte cleanup.
 
-The public recovery v6 contract still permits replacement providers to implement application-data,
+The public recovery v7 contract still permits replacement providers to implement application-data,
 workspace-local, workspace-adjacent, or custom locations. For those providers, transfer and cleanup semantics
 remain provider-owned. They do not grant direct access to the built-in kernel catalog.
 

@@ -108,7 +108,7 @@ export function registerManagedRemoteRoutes(
     response.json(await service.identity());
   }));
 
-  const sourceMethods = ['scriptBinding', 'scriptSpawn', 'scriptControl', 'processAccess', 'processControl', 'processWrite', 'processResize', 'capabilities', 'handoff', 'integrationReceipt', 'resolve', 'prepare', 'bind', 'authorize', 'execute', 'service', 'cancelService', 'observe', 'releaseReceipt', 'cancel', 'release', 'inspectScope', 'releaseScope','inspectReadScope','closeReadScope','fileObservation'] as const;
+  const sourceMethods = ['recovery', 'scriptBinding', 'scriptSpawn', 'scriptControl', 'processAccess', 'processControl', 'processWrite', 'processResize', 'capabilities', 'handoff', 'integrationReceipt', 'resolve', 'prepare', 'bind', 'authorize', 'execute', 'service', 'cancelService', 'observe', 'releaseReceipt', 'cancel', 'release', 'inspectScope', 'releaseScope','inspectReadScope','closeReadScope','fileObservation'] as const;
   const receiptMethods: ReadonlySet<string> = new Set(['scriptControl', 'processControl', 'handoff', 'integrationReceipt', 'cancelService', 'observe', 'releaseReceipt', 'cancel', 'release', 'inspectScope', 'releaseScope','inspectReadScope','closeReadScope','fileObservation']);
   for (const method of sourceMethods) {
     const methodAuth: RequestHandler = (request, response, next) => {
@@ -130,7 +130,7 @@ export function registerManagedRemoteRoutes(
       // Cancellation and retirement have their own original-owner receipts.
       const sourceOperation = value(body.operation);
       const mcpObserver = method === 'service' && sourceOperation.kind === 'mcp' && ['changed', 'resource_watch', 'interaction_watch'].includes(String(value(sourceOperation.action).kind));
-      const result = !mcpObserver && (method === 'scriptSpawn' || method === 'scriptControl' || method === 'processWrite' || method === 'processResize' || method === 'processControl' || method === 'execute' || method === 'service' || method === 'cancelService' || method === 'cancel' || method === 'releaseReceipt' || method === 'release' || method === 'releaseScope')
+      const result = !mcpObserver && (method === 'recovery' || method === 'scriptSpawn' || method === 'scriptControl' || method === 'processWrite' || method === 'processResize' || method === 'processControl' || method === 'execute' || method === 'service' || method === 'cancelService' || method === 'cancel' || method === 'releaseReceipt' || method === 'release' || method === 'releaseScope')
         ? await invoke() : await whileResponseOpen(response, invoke);
       if (!response.destroyed) {
         response.setHeader('Cache-Control', 'no-store');
