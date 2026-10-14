@@ -41,3 +41,18 @@ export function mcpArgumentHeaders(declarations: readonly Declaration[], args: u
   }
   return headers;
 }
+
+/** The model view omits only the validated HTTP routing annotation. Execution keeps the
+ * original schema, including every constraint and any identically named user-data field. */
+export function mcpModelInputSchema(schema: Record<string, unknown>): Record<string, unknown> {
+  const projected = structuredClone(schema);
+  const visit = (node: unknown) => {
+    if (!object(node)) return;
+    delete node['x-mcp-header'];
+    for (const child of Object.values(object(node.properties) ? node.properties : {})) visit(child);
+    for (const key of branches) for (const child of Array.isArray(node[key]) ? node[key] : [node[key]]) visit(child);
+    for (const key of maps) for (const child of Object.values(object(node[key]) ? node[key] : {})) visit(child);
+  };
+  visit(projected);
+  return projected;
+}

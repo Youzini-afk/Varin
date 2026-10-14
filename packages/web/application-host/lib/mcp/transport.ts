@@ -55,11 +55,11 @@ export class StreamableHttpTransport implements McpTransport {
     if (token) headers.set('authorization', `Bearer ${token}`);
     signal.throwIfAborted();
     const response = await (this.options.fetch ?? globalThis.fetch)(this.url, { ...init, method, headers, signal, redirect: 'manual' });
+    if (response.status === 404 && this.#session) { await response.body?.cancel(); throw new McpSessionExpiredError(); }
     if (!response.ok && response.status !== 401 && response.status !== 403 && response.headers.get('content-type')?.split(';')[0]?.trim().toLowerCase() === 'application/json') {
       // A protocol rejection is a received response, including discovery/version rejections.
       try { const reply = parseJSONRPCMessage(await response.clone().json()); if ('error' in reply) return response; } catch { /* Non-RPC HTTP failure below. */ }
     }
-    if (response.status === 404 && this.#session) { await response.body?.cancel(); throw new McpSessionExpiredError(); }
     if (!response.ok) {
       await response.body?.cancel();
       throw Object.assign(new Error(response.status === 401 || response.status === 403 ? 'MCP sign-in required' : `MCP HTTP ${response.status}`), { status: response.status, wwwAuthenticate: response.headers.get('www-authenticate') });
@@ -156,6 +156,7 @@ export class StreamableHttpTransport implements McpTransport {
     const token = await waitWithSignal(this.options.authProvider?.token() ?? Promise.resolve(undefined), this.#shutdown.signal); if (token) headers.set('authorization', `Bearer ${token}`);
     this.#shutdown.signal.throwIfAborted();
     const response = await (this.options.fetch ?? globalThis.fetch)(this.url, { method: 'GET', headers, signal: this.#shutdown.signal, redirect: 'manual' });
+    if (response.status === 404 && this.#session) { await response.body?.cancel(); throw new McpSessionExpiredError(); }
     if (response.status === 405 || response.status === 404) { await response.body?.cancel(); return; }
     if (!response.ok) { await response.body?.cancel(); throw new Error(`MCP notification stream failed (${response.status})`); }
     await this.#consume(response, undefined, this.#shutdown.signal);

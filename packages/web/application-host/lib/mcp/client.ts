@@ -2,7 +2,7 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { Client, ProtocolError, isInputRequiredResult, type SubscriptionFilter, type ClientCapabilities, type CallToolResult, type Resource, type ResourceTemplateType as ResourceTemplate, type Tool, type Transport } from '@modelcontextprotocol/client';
 import { isModernMcpVersion, mcpHeaderDeclarations, mcpArgumentHeaders } from './headers.js';
-import type { McpTransport } from './transport.js';
+import { McpSessionExpiredError, type McpTransport } from './transport.js';
 export { ProtocolError as McpError } from '@modelcontextprotocol/client';
 export type { Tool, CallToolResult, Resource, ResourceTemplateType as ResourceTemplate } from '@modelcontextprotocol/client';
 export interface McpRequestOptions {
@@ -17,7 +17,7 @@ export interface McpRequestHandlerContext {
   beforeResponse(callback: () => void | Promise<void>): void;
   onResponseSettled(callback: (state: 'sent' | 'unknown' | 'not_sent') => void): void;
 }
-interface RequestContext { options: McpRequestOptions; id?: string | number; legs: Map<string | number, boolean>; controller: AbortController; continuation?: Incoming }
+interface RequestContext { options: McpRequestOptions; id?: string | number; legs: Map<string | number, boolean>; controller: AbortController; transportError?: McpSessionExpiredError; continuation?: Incoming }
 interface Incoming { relatedRequestId?: string | number; guards: (() => void | Promise<void>)[]; observers: ((state: 'sent' | 'unknown' | 'not_sent') => void)[] }
 type RequestHandler = (params: unknown, context: McpRequestHandlerContext) => unknown | Promise<unknown>;
 const passthrough = { '~standard': { version: 1 as const, vendor: 'varin', validate: (value: unknown) => ({ value }) } };
@@ -35,16 +35,26 @@ export class McpClient {
   readonly #closes = new Set<() => void>();
   #state: 'idle' | 'connecting' | 'connected' | 'closed' = 'idle';
   #http = false;
+  #closing: Promise<void> | undefined;
+  #capabilities: ReturnType<Client['getServerCapabilities']>;
+  #version: ReturnType<Client['getNegotiatedProtocolVersion']>;
+  #instructions: string | undefined;
   constructor(readonly options: { name: string; version: string; capabilities?: ClientCapabilities; requestTimeoutMs?: number }) {
     this.sdk = new Client({ name: options.name, version: options.version }, { capabilities: options.capabilities ?? {},
       versionNegotiation: { mode: 'auto' }, inputRequired: { autoFulfill: false } });
-    this.sdk.onerror = error => { for (const listener of this.#errors) listener(error); };
+    this.sdk.onerror = error => this.#transportError(error);
     this.sdk.onclose = () => { this.#state = 'closed'; for (const listener of this.#closes) listener(); };
   }
+  #transportError(error: Error) {
+    // Expiration invalidates this client; it never retries the original request.
+    if (error instanceof McpSessionExpiredError) this.#state = 'closed';
+    for (const listener of this.#errors) listener(error);
+    if (error instanceof McpSessionExpiredError) void this.close().catch(() => undefined);
+  }
   get connectionState() { return this.#state; }
-  get serverCapabilities() { return this.sdk.getServerCapabilities(); }
-  get protocolVersion() { return this.sdk.getNegotiatedProtocolVersion(); }
-  get instructions() { return this.sdk.getInstructions(); }
+  get serverCapabilities() { return this.#capabilities ?? this.sdk.getServerCapabilities(); }
+  get protocolVersion() { return this.#version ?? this.sdk.getNegotiatedProtocolVersion(); }
+  get instructions() { return this.#instructions ?? this.sdk.getInstructions(); }
   async connect(transport: McpTransport, signal?: AbortSignal) {
     this.#state = 'connecting';
     this.#http = transport.hasPerRequestStream === true;
@@ -84,6 +94,12 @@ export class McpClient {
             current?.controller.abort(new Error('MCP response stream ended before its result'));
           } });
           sent = true;
+        } catch (error) {
+          if (error instanceof McpSessionExpiredError) {
+            if (current) current.transportError = error;
+            this.#transportError(error);
+          }
+          throw error;
         } finally {
           if (response) {
             if ('id' in message && message.id !== undefined) this.#incoming.delete(message.id);
@@ -98,6 +114,9 @@ export class McpClient {
     };
     try {
       await sdk.connect(bridge, { ...(signal ? { signal } : {}), ...(this.options.requestTimeoutMs === undefined ? {} : { timeout: this.options.requestTimeoutMs }) });
+      this.#capabilities = structuredClone(sdk.getServerCapabilities());
+      this.#version = sdk.getNegotiatedProtocolVersion();
+      this.#instructions = sdk.getInstructions();
       this.#state = 'connected';
     } catch (error) { this.#state = 'closed'; await transport.close(); throw error; }
   }
@@ -118,7 +137,7 @@ export class McpClient {
             void subscription.closed.then(cause => {
               if (this.#resourceSubscriptions.get(uri) !== subscription) return;
               this.#resourceSubscriptions.delete(uri);
-              if (cause === 'remote') for (const notify of this.#gaps) notify();
+              if (cause !== 'local') for (const notify of this.#gaps) notify();
             });
           }
           return {} as T;
@@ -144,6 +163,10 @@ export class McpClient {
           }));
           next = { ...params, ...(result.requestState === undefined ? {} : { requestState: result.requestState }), inputResponses: Object.fromEntries(responses) };
         }
+      } catch (error) {
+        // Closing an expired session also rejects pending SDK requests. Preserve the
+        // original request's explicit rejection instead of relabeling its settlement.
+        throw context.transportError ?? error;
       } finally {
         for (const observer of context.continuation?.observers.splice(0) ?? []) observer('not_sent');
         for (const [id, received] of context.legs) { this.#pending.delete(id); options.onRequestSettled?.(id, received); }
@@ -181,11 +204,12 @@ export class McpClient {
   onNotificationGap(listener: () => void) { this.#gaps.add(listener); return () => { this.#gaps.delete(listener); }; }
   async listTools(options?: McpRequestOptions) {
     const directory = await this.#list<Tool>('tools/list', 'tools', options);
-    const tools = directory.filter(tool => {
-      if (!this.#http || !isModernMcpVersion(this.protocolVersion)) return true;
-      try { mcpHeaderDeclarations(tool.inputSchema); return true; }
-      catch { for (const listener of this.#errors) listener(new Error(`MCP tool has invalid HTTP header declarations: ${tool.name}`)); return false; }
-    });
+    const tools = directory;
+    for (const tool of tools) {
+      if (!this.#http || !isModernMcpVersion(this.protocolVersion)) continue;
+      try { mcpHeaderDeclarations(tool.inputSchema); }
+      catch { for (const listener of this.#errors) listener(new Error(`MCP tool has invalid HTTP header declarations: ${tool.name}`)); }
+    }
     this.#tools.clear(); for (const tool of tools) this.#tools.set(tool.name, tool);
     return tools;
   }
@@ -209,5 +233,8 @@ export class McpClient {
     } while (cursor);
     return rows;
   }
-  async close() { await this.sdk.close(); this.#state = 'closed'; }
+  close(): Promise<void> {
+    this.#state = 'closed';
+    return this.#closing ??= this.sdk.close();
+  }
 }

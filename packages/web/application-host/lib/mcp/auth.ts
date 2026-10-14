@@ -6,6 +6,7 @@ import { createSettingsFileStore } from '@varin/settings-store';
 import { auth, extractWWWAuthenticateParams, type OAuthClientProvider, type OAuthClientMetadata, type StoredOAuthClientInformation, type StoredOAuthTokens, type OAuthDiscoveryState } from '@modelcontextprotocol/client';
 import { fileSecretStore } from '../models/credentials.js';
 import { object } from '../models/configuration.js';
+import { waitWithSignal } from '../cancellation.js';
 export interface McpOAuthSettings { clientId?: string; clientSecret?: string; callbackPort?: number; callbackUrl?: string; scope?: string; clientName?: string }
 export interface McpOAuthState {
   tokens?: StoredOAuthTokens; client?: StoredOAuthClientInformation; verifier?: string; discovery?: OAuthDiscoveryState;
@@ -55,7 +56,8 @@ export class McpOAuthCredentialStore {
     if (!object(value) || value.version !== 1 || typeof value.account !== 'string' || !object(value.state)) throw new Error('MCP credential is invalid');
     return value as unknown as { account: string; state: McpOAuthState };
   }
-  binding(name: string, url: string) { const record = this.#record(name, url); return record ? { reference: record.account, generation: 1 } : undefined; }
+  binding(name: string, url: string) { const record = this.#record(name, url); return record ? { reference: record.account, generation: 1,
+    ...(record.state.tokens?.scope === undefined ? {} : { scope: [...new Set(record.state.tokens.scope.split(/\s+/).filter(Boolean))].sort().join(' ') }) } : undefined; }
   tokens(name: string, url: string) { return this.#record(name, url)?.state.tokens; }
   async remove(name: string, url: string) {
     let existed = false;
@@ -105,7 +107,7 @@ export function oauthProvider(options: { store: Pick<McpOAuthServerStore, 'load'
     tokens: () => options.store.load()?.tokens,
     saveTokens: tokens => {
       const { expiresAt: _expiry, ...current } = options.store.load() ?? {};
-      return options.store.save({ ...current, tokens,
+      return options.store.save({ ...current, tokens: { ...tokens, ...(tokens.scope === undefined && current.tokens?.scope !== undefined ? { scope: current.tokens.scope } : {}) },
         ...(tokens.expires_in === undefined ? {} : { expiresAt: Date.now() + tokens.expires_in * 1000 }),
         ...(options.replace ? { bindingAccount: randomUUID() } : {}) });
     },
@@ -141,11 +143,12 @@ export function mcpAuthProvider(name: string, url: string, credentials: McpOAuth
 export async function signInMcpServer(options: { serverUrl: string; store: Pick<McpOAuthServerStore, 'load' | 'save'>; settings: McpOAuthSettings; challenge?: unknown; prompt: McpSignInPrompt; fetch?: typeof globalThis.fetch }) {
   options.prompt.signal?.throwIfAborted();
   const controller = new AbortController();
+  const signal = options.prompt.signal ? AbortSignal.any([controller.signal, options.prompt.signal]) : controller.signal;
   const state = randomUUID();
   let callback!: (value: URL) => void;
   const arrived = new Promise<URL>(resolve => { callback = resolve; });
   const server = createServer((request, response) => {
-    const url = new URL(request.url ?? '/', `http://${request.headers.host}`);
+    const url = new URL(request.url ?? '/', 'http://127.0.0.1');
     if (url.searchParams.get('state') !== state || !url.searchParams.get('code')) { response.writeHead(400).end('Invalid sign-in callback'); return; }
     response.writeHead(200, { 'content-type': 'text/plain; charset=utf-8' }).end('Signed in. You can return to Varin.'); callback(url);
   });
@@ -165,8 +168,8 @@ export async function signInMcpServer(options: { serverUrl: string; store: Pick<
     const provider = oauthProvider({ store: options.store, settings: options.settings, redirectUrl, redirect: url => options.prompt.showAuthorizationUrl(url), replace: true });
     const result = await auth(provider, { ...authOptions, forceReauthorization: true });
     if (result === 'AUTHORIZED') return;
-    const manual = options.prompt.promptForRedirectUrl(controller.signal).then(value => value ? new URL(value) : Promise.reject(new Error('MCP sign-in cancelled')));
-    const url = await Promise.race([arrived, manual]);
+    const manual = options.prompt.promptForRedirectUrl(signal).then(value => value ? new URL(value) : Promise.reject(new Error('MCP sign-in cancelled')));
+    const url = await waitWithSignal(Promise.race([arrived, manual]), signal);
     controller.abort();
     if (url.searchParams.get('state') !== state || !url.searchParams.get('code')) throw new Error('Invalid sign-in callback');
     const authorizationCode = url.searchParams.get('code')!;

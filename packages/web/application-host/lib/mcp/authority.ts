@@ -1,3 +1,4 @@
+import { mcpHeaderDeclarations, mcpModelInputSchema } from './headers.js';
 import { McpAuthorityError, McpTaskRequestError, McpSamplingRejectedError } from './errors.js';
 /** Shared Application Host MCP authority for Agent consumers and independent settings. */
 import { createHash, randomUUID } from 'node:crypto';
@@ -6,9 +7,9 @@ import { join, resolve } from 'node:path';
 import type { ValidateFunction } from 'ajv';
 import { compileToolJsonSchema } from '../models/schema.js';
 import { applyEdits, modify } from 'jsonc-parser';
-import { createMcpToolName, getMcpToolExposure, McpConfigurations, validateMcpServerConfig, type LoadedMcpConfig, type McpServerEntry } from './configuration.js';
+import { createMcpToolName, getMcpToolExposure, McpConfigurations, validateMcpServerConfig, mcpEnvironmentBindings, mcpEnvironmentCurrent, type LoadedMcpConfig, type McpServerEntry } from './configuration.js';
 import { McpOAuthCredentialStore, mcpCredentialPath, type McpSignInPrompt } from './auth.js';
-import type { McpServerConnection, McpTransportFactory } from './connection.js';
+import type { McpServerConnection, McpTransportFactory, McpDirectoryKind, McpDirectoryState } from './connection.js';
 import * as runtime from './connection.js';
 import type { McpOwnerConfig, McpOwnerConnectionSnapshot, McpOwnerEntry, McpServerOwner, McpProvenance, SourceResourceOwner } from '@varin/protocol';
 import { ConfigTextFileEditor } from './config-text-file-editor.js';
@@ -102,7 +103,11 @@ export interface McpAuthorityTool {
   configurationScope: 'global' | 'project' | 'extension';
   executionScope: 'global' | 'workspace';
   inputSchema: Record<string, unknown>;
+  /** Protocol presentation only; inputSchema remains the execution contract. */
+  modelInputSchema?: Record<string, unknown>;
   outputSchema?: Record<string, unknown>;
+  /** Unsupported execution contracts remain discoverable, never directly exposed or dispatched. */
+  problem?: 'mcp-schema-unsupported';
   description: string;
   exposure: 'direct' | 'codemode' | 'deferred';
   /** Remote annotations are descriptive only; authorization always classifies MCP as unknown. */
@@ -120,6 +125,7 @@ export interface McpAuthorityServerReadiness {
   cachedToolCount: number;
   connectedToolCount: number;
   selected: boolean;
+  directories?: Readonly<Record<McpDirectoryKind, McpDirectoryState>>;
 }
 export interface McpAuthorityInspection {
   configErrorCount: number;
@@ -230,6 +236,7 @@ interface ScopeRecord {
   shutdown: AbortController;
 }
 interface RetainedDefinition {
+  environment: Readonly<Record<string, string | undefined>>;
   scope: McpAuthorityScope;
   entry: McpServerEntry;
   originalConnection: ConnectionRecord | undefined;
@@ -269,6 +276,10 @@ interface ConnectionRecord {
   shutdown: AbortController;
   ready?: Promise<void>;
   closing?: Promise<void>;
+  idleTimer?: ReturnType<typeof setTimeout>;
+  idleDeadline?: number;
+  lifecycleWatch?: Promise<void>;
+  unwatchLifecycle?: () => void;
   credentialRevision: number;
   oauthGrant: string;
   provider: string | undefined;
@@ -297,7 +308,8 @@ function publicEntry(entry: McpServerEntry): McpOwnerEntry {
   // Transport configuration/credentials stay with their owner. Pi only needs presentation/exposure.
   const config = entry.config;
   const common = { enabled: config.enabled, exposure: config.exposure, toolExposure: config.toolExposure,
-    description: config.description, timeout: config.timeout };
+    description: config.description, timeout: config.timeout,
+    ...(config.isolation === undefined ? {} : { isolation: config.isolation }), ...(config.lifecycle === undefined ? {} : { lifecycle: config.lifecycle }) };
   let transport: Record<string, unknown>;
   if ('url' in config) {
     const url = new URL(config.url); url.username = ''; url.password = ''; url.search = ''; url.hash = '';
@@ -323,7 +335,10 @@ function serverOwner(scope: McpAuthorityScope): McpServerOwner {
   return { resource_owner: scope.resourceOwner, source_authority: scope.sourceAuthority ?? null, configuration: configuration(scope), execution_scope: scope.executionScope };
 }
 function compile(tool: McpTool): ValidateFunction {
-  try { return compileToolJsonSchema(tool.inputSchema); }
+  try {
+    mcpHeaderDeclarations(tool.inputSchema);
+    return compileToolJsonSchema(tool.inputSchema, ['x-mcp-header']);
+  }
   catch { return fail('mcp-schema-unsupported'); }
 }
 
@@ -407,6 +422,7 @@ export class McpAuthority {
       if (record.scopeKey !== scopeKey(scope)) continue;
       const entry = current.servers.find(entry => entry.name === record.entry.name);
       if (record.entry.scope !== 'extension' && (!entry || entry.config.enabled === false)) this.#revoke(record);
+      if (entry && record.entry.scope !== 'extension' && !isDeepStrictEqual(entry, record.entry)) { record.retired = true; this.#collect(record); }
       if (record.oauthGrant !== this.#oauthGrant(record.scope, record.connection)) this.#revoke(record, 'mcp-credential-revoked');
     }
     this.#observeDefinitionWithdrawal(scope, current.servers);
@@ -503,20 +519,20 @@ export class McpAuthority {
     return directory;
   }
   #cacheConnection(record: ConnectionRecord) {
-    if (record.revoked || !record.connection.directoriesReady.has('tools')) return;
+    if (record.revoked || !record.connection.directoriesReady.size || record.connection.environmentIdentity) return;
     const account = record.providerGrant ? JSON.parse(record.providerGrant) as unknown
       : record.connection.oauthUrl ? this.#store(record.scope.agentDir).binding(record.entry.name, record.connection.oauthUrl) : undefined;
     const key = createHash('sha256').update(stable([record.scopeKey, record.configIdentity, account ?? null])).digest('hex');
     const directory = this.#directory(record.scope), connection = record.connection;
-    this.#cachedCounts.set(record.key, connection.tools.length);
+    if (connection.directoriesReady.has('tools')) this.#cachedCounts.set(record.key, connection.tools.length);
     // Persist outside the request/notification path. A failed auxiliary directory keeps its old data.
-    const work = directory.get(key).then(previous => {
-      directory.put(key, {
-        tools: structuredClone(connection.tools),
-        resources: structuredClone(connection.directoriesReady.has('resources') ? connection.resources : previous?.resources ?? []),
-        resourceTemplates: structuredClone(connection.directoriesReady.has('resourceTemplates') ? connection.resourceTemplates : previous?.resourceTemplates ?? []),
-        prompts: structuredClone(connection.directoriesReady.has('prompts') ? connection.prompts : previous?.prompts ?? []), updatedAt: new Date().toISOString(),
-      });
+    // Capture the successful cut now, before close/reconnect clears readiness. Each
+    // field merges independently; a slower unrelated cache read cannot erase it.
+    const work = directory.update(key, {
+      ...(connection.directoriesReady.has('tools') ? { tools: structuredClone(connection.tools) } : {}),
+      ...(connection.directoriesReady.has('resources') ? { resources: structuredClone(connection.resources) } : {}),
+      ...(connection.directoriesReady.has('resourceTemplates') ? { resourceTemplates: structuredClone(connection.resourceTemplates) } : {}),
+      ...(connection.directoriesReady.has('prompts') ? { prompts: structuredClone(connection.prompts) } : {}),
     });
     this.#cacheWrites.add(work);
     void work.finally(() => this.#cacheWrites.delete(work));
@@ -531,6 +547,9 @@ export class McpAuthority {
   async #cachedTools(scope: ScopeRecord, signal: AbortSignal): Promise<readonly McpCachedTool[]> {
     const groups = await Promise.allSettled([...scope.entries.values()].filter(entry => entry.config.enabled !== false && entry.config.exposure !== 'hidden').map(async entry => {
       signal.throwIfAborted();
+      // A variable source has no durable account/service identity. Ordinary literal
+      // configuration still caches normally; no environment value or hash is persisted.
+      if (Object.keys(mcpEnvironmentBindings(entry)).length) return [];
       const key = await this.#directoryKey(scope, entry);
       const snapshot = await this.#directory(scope.scope).get(key);
       signal.throwIfAborted();
@@ -614,7 +633,8 @@ export class McpAuthority {
       const handles = [...record.connections.values()];
       if (handles.some(connection => connection.connection.state === 'needs-auth')) fail('mcp-server-needs-auth');
       if (handles.some(connection => connection.connection.state !== 'connected')) fail('mcp-connection-unavailable');
-      const pinned = new Map<string, { connection: ConnectionRecord; tool: McpTool; descriptor: McpAuthorityTool; validate: ValidateFunction }>();
+      await Promise.all(handles.map(connection => waitWithSignal(connection.connection.getToolsClient(), record.shutdown.signal)));
+      const pinned = new Map<string, { connection: ConnectionRecord; tool: McpTool; descriptor: McpAuthorityTool; validate: ValidateFunction | undefined }>();
       const project = (connection: ConnectionRecord): McpAuthorityTool[] => {
         connection.declarations = stable(connection.connection.tools);
         const declarations = [...connection.connection.tools].sort((a, b) => a.name.localeCompare(b.name));
@@ -625,11 +645,16 @@ export class McpAuthority {
           const name = createMcpToolName(connection.entry.name, tool.name);
           const schemaVersion = this.#toolVersion(connection, tool);
           let validate = connection.validators.get(schemaVersion);
-          if (!validate) { validate = compile(tool); connection.validators.set(schemaVersion, validate); }
+          if (!validate) {
+            try { validate = compile(tool); connection.validators.set(schemaVersion, validate); }
+            catch { /* One unsupported declaration must not poison its server's other tools. */ }
+          }
           const descriptor: McpAuthorityTool = freeze({ name, server: connection.entry.name, tool: tool.name, schemaVersion,
             resourceKey: this.#resourceKey(record, connection.entry), configurationScope: connection.entry.scope ?? 'global',
-            executionScope: connection.scope.executionScope, inputSchema: structuredClone(tool.inputSchema), taskSupport: taskSupport(tool), taskCapable: taskCapabilities(connection.client).call,
-            description: tool.description ?? '', exposure,
+            executionScope: connection.scope.executionScope, inputSchema: structuredClone(tool.inputSchema),
+            ...(validate ? { modelInputSchema: mcpModelInputSchema(tool.inputSchema) } : {}), taskSupport: taskSupport(tool), taskCapable: taskCapabilities(connection.client).call,
+            description: tool.description ?? '', exposure: validate ? exposure : 'deferred',
+            ...(!validate ? { problem: 'mcp-schema-unsupported' as const } : {}),
             ...(tool.outputSchema ? { outputSchema: structuredClone(tool.outputSchema) } : {}),
             ...(tool.annotations ? { annotations: { ...tool.annotations } } : {}) });
           pinned.set(name, { connection, tool: structuredClone(tool), descriptor, validate });
@@ -644,7 +669,8 @@ export class McpAuthority {
         const target = pinned.get(name);
         if (!target || target.descriptor.schemaVersion !== schemaVersion) fail('mcp-schema-generation-mismatch');
         this.#assertConnection(record, target.connection, target.tool.name, schemaVersion);
-        return target;
+        if (!target.validate) fail('mcp-schema-unsupported');
+        return { ...target, validate: target.validate };
       };
       const validateArguments = (name: string, schemaVersion: string, args: unknown) => {
         const target = assert(name, schemaVersion);
@@ -669,7 +695,12 @@ export class McpAuthority {
         this.#assertConnection(record, connection, undefined, undefined, true);
         return connection;
       };
-      const discover = async (server: string, signal: AbortSignal) => freeze(project(await prepareServer(server, signal)));
+      const discover = async (server: string, signal: AbortSignal) => {
+        const connection = await prepareServer(server, signal);
+        await waitWithSignal(connection.connection.getToolsClient(), signal);
+        this.#assertConnection(record, connection);
+        return freeze(project(connection));
+      };
       const discoverServices = async (server: string, signal: AbortSignal) => {
         const connection = await prepareServer(server, signal);
         const client = await this.#client(connection);
@@ -825,10 +856,13 @@ export class McpAuthority {
     if (existing?.key === key && !existing.revoked) {
       await waitWithSignal(existing.ready!, scope.shutdown.signal);
       this.#scope(scopeHandle);
-      if (existing.connection.state !== 'connected') await existing.connection.getClient().catch(() => undefined);
+      if (existing.connection.state !== 'connected') await waitWithSignal(existing.connection.getClient().catch(() => undefined), scope.shutdown.signal);
       return this.snapshot(scopeHandle, existing.handle);
     }
     let record = this.#pool.get(key);
+    if (record && !record.revoked) await this.#assertCredential(record).catch(() => undefined);
+    this.#scope(scopeHandle);
+    record = this.#pool.get(key);
     if (!record || record.revoked) {
       const provider = 'url' in entry.config ? entry.config.auth?.provider : undefined;
       if (provider && !this.#options.credentialScope) fail('mcp-provider-credential-authority-required');
@@ -871,10 +905,18 @@ export class McpAuthority {
           credentialRevision: 0, oauthGrant: this.#oauthGrant(scope.scope, connection), provider, providerGrant, validators: new Map(), prompts: new Map(), promptRevision: 0, taskListeners: new Set(), resourceGroups:new Map(), clientDisposers:[] };
         this.#pool.set(key, record);
         const selected = record;
+        if (entry.config.lifecycle?.keepAlive || entry.config.lifecycle?.idleTimeoutSeconds) {
+          // A pool-owned lifetime also owns configuration observation after the last view
+          // leaves, so external disable/removal still revokes this live connection.
+          selected.lifecycleWatch = this.subscribe(selected.scope, () => {}).then(unwatch => {
+            if (selected.closing || selected.revoked || this.#closed) unwatch();
+            else selected.unwatchLifecycle = unwatch;
+          }, () => undefined);
+        }
         record.ready = connection.getClient().then(client => {
           this.#observeClient(selected, client);
           if (selected.revoked || selected.closing) return;
-          const selectionKey = stable([selected.scopeKey, selected.entry.name]);
+          const selectionKey = stable([selected.scopeKey, selected.entry.name, selected.entry.config.isolation === 'session' ? selected.scope.sessionId : null]);
           const previous = this.#selected.get(selectionKey);
           this.#selected.set(selectionKey, selected);
           if (previous && previous !== selected) { previous.retired = true; this.#collect(previous); }
@@ -885,6 +927,7 @@ export class McpAuthority {
       }
     }
     if (existing && existing !== record) this.#releaseConnection(scope, existing);
+    if (record.idleTimer) { clearTimeout(record.idleTimer); delete record.idleTimer; delete record.idleDeadline; }
     if (scope.connections.get(entry.name) !== record) { record.references++; scope.connections.set(entry.name, record); }
     await waitWithSignal(record.ready!, scope.shutdown.signal);
     if (definitionSource) await this.#assertRetainedDefinition(definitionSource);
@@ -918,7 +961,7 @@ export class McpAuthority {
     try {
     await this.#assertCredential(record);
     // getClient may reconnect. Revalidate the exact declaration after it settles, before dispatch.
-    try { await this.#client(record); } catch { fail('mcp-connection-unavailable'); }
+    try { await waitWithSignal(record.connection.getToolsClient(), signal); } catch { fail(signal.aborted ? 'mcp-call-cancelled' : 'mcp-connection-unavailable'); }
     this.#assertConnection(scope, record, tool, schemaVersion);
     if (signal.aborted) fail('mcp-call-cancelled');
     let dispatched = false, receivedResponse = false, protocolError: Record<string, unknown> | undefined, interactionProblem: string | undefined;
@@ -1159,7 +1202,7 @@ export class McpAuthority {
     this.#assertConnection(scope, record);
     return {server:record.entry.name,resourceKey:this.#resourceKey(scope,record.entry),
       configurationVersion:record.configIdentity,
-      credentialVersion:createHash('sha256').update(stable([record.oauthGrant,record.providerGrant ?? null])).digest('hex')};
+      credentialVersion:createHash('sha256').update(stable([record.oauthGrant,record.providerGrant ?? null, ...(record.connection.environmentIdentity ? [record.connection.environmentIdentity] : [])])).digest('hex')};
   }
   #taskLease(scope: ScopeRecord, record: ConnectionRecord, endpoint: McpEndpoint): McpTaskLease {
     scope.retainedHolders++;
@@ -1180,6 +1223,7 @@ export class McpAuthority {
       scope.inflight++;
       try {
         await assert();
+        if (method === 'tools/call') await waitWithSignal(record.connection.getToolsClient(), signal);
         return await record.connection.requestOnce(async client => {
           this.#observeClient(record,client);
           await assert();
@@ -1297,7 +1341,7 @@ export class McpAuthority {
           await options.beforeDispatch?.();
           await this.#assertCredential(record);
           if(this.#service(scope,record,'resources').schemaVersion!==service.schemaVersion)fail('mcp-service-generation-mismatch');
-          if(client.serverCapabilities?.resources?.subscribe!==true)fail('mcp-resource-subscribe-unsupported');
+          if(!isModernMcpVersion(client.protocolVersion)&&client.serverCapabilities?.resources?.subscribe!==true)fail('mcp-resource-subscribe-unsupported');
         }
         options.signal.throwIfAborted();this.#assertConnection(scope,record);
         if(record.retired||record.client!==client)fail('mcp-resource-client-retired');
@@ -1329,9 +1373,9 @@ export class McpAuthority {
   #service(scope: ScopeRecord, record: ConnectionRecord, kind: McpServiceKind): McpAuthorityService {
     const client = record.client;
     if (!client?.serverCapabilities?.[kind]) return fail('mcp-service-unsupported');
-    return { ...(kind==='resources'?{subscribe:client.serverCapabilities.resources?.subscribe===true}:{}), server: record.entry.name, kind, resourceKey: this.#resourceKey(scope, record.entry),
+    return { ...(kind==='resources'?{subscribe:isModernMcpVersion(client.protocolVersion)||client.serverCapabilities.resources?.subscribe===true}:{}), server: record.entry.name, kind, resourceKey: this.#resourceKey(scope, record.entry),
       schemaVersion: createHash('sha256').update(stable([kind, client.protocolVersion, client.serverCapabilities[kind],
-        record.configIdentity, record.oauthGrant, record.providerGrant ?? null])).digest('hex') };
+        record.configIdentity, record.oauthGrant, record.providerGrant ?? null, ...(record.connection.environmentIdentity ? [record.connection.environmentIdentity] : [])])).digest('hex') };
   }
   #promptVersion(service: McpAuthorityService, prompt: McpPromptDeclaration): string {
     return createHash('sha256').update(stable([service.schemaVersion, prompt])).digest('hex');
@@ -1399,6 +1443,7 @@ export class McpAuthority {
 
   async reconnect(scopeHandle: string, handle: string): Promise<McpOwnerConnectionSnapshot> {
     const scope = this.#scope(scopeHandle); const record = this.#connection(scope, handle); this.#assertConnection(scope, record, undefined, undefined, true);
+    await this.#assertCredential(record);
     await record.connection.reconnect().catch(() => undefined);
     this.#changed(scope.key, { kind: 'tools', server: record.entry.name });
     return this.snapshot(scopeHandle, handle);
@@ -1488,7 +1533,10 @@ export class McpAuthority {
     scope.released = true; scope.shutdown.abort();
     this.#drainScope(scope);
   }
-  disposeSession(sessionId: string): void { for (const scope of this.#scopes.values()) if (scope.scope.sessionId === sessionId) this.closeScope(scope.handle); }
+  disposeSession(sessionId: string): void {
+    for (const scope of this.#scopes.values()) if (scope.scope.sessionId === sessionId) this.closeScope(scope.handle);
+    for (const record of this.#pool.values()) if (record.scope.sessionId === sessionId && record.entry.config.isolation === 'session') { record.retired = true; this.#collect(record); }
+  }
   async close(): Promise<void> {
     this.#closed = true; this.#configWatches.close(); this.#fileWatches.clear(); this.#subscribers.clear();
     const scopes = [...this.#scopes.values()];
@@ -1527,7 +1575,7 @@ export class McpAuthority {
           const providerGrant = connection ? Promise.resolve(connection.providerGrant)
             : provider ? this.#options.credentialScope!(scope.scope, provider).then(value => stable(value)) : Promise.resolve(undefined);
           void providerGrant.catch(() => undefined);
-          definition = { scope: scope.scope, entry: freeze(structuredClone(entry)), originalConnection: connection,
+          definition = { environment: mcpEnvironmentBindings(entry), scope: scope.scope, entry: freeze(structuredClone(entry)), originalConnection: connection,
             oauthUrl, oauthGrant: connection?.oauthGrant ?? (oauthUrl ? stable(this.#store(scope.scope.agentDir).binding(name, oauthUrl) ?? null) : 'none'),
             provider, providerGrant, references: 0, revoked: undefined };
         }
@@ -1584,6 +1632,7 @@ export class McpAuthority {
   #assertRetainedDefinitionCurrent(definition: RetainedDefinition): void {
     if (this.#closed) fail('mcp-owner-closed');
     if (definition.originalConnection?.revoked) this.#revokeDefinition(definition, definition.originalConnection.revocationReason ?? 'mcp-owner-revoked');
+    if (!mcpEnvironmentCurrent(definition.environment)) this.#revokeDefinition(definition, 'mcp-credential-revoked');
     if (definition.revoked) fail(definition.revoked);
     const { scope, entry, oauthUrl } = definition;
     if (oauthUrl && definition.oauthGrant !== stable(this.#store(scope.agentDir).binding(entry.name, oauthUrl) ?? null)) {
@@ -1623,16 +1672,16 @@ export class McpAuthority {
       transport, sensitive ? entry.sourceVersion ?? null : null])).digest('hex');
   }
   #resourceKey(scope: ScopeRecord, entry: McpServerEntry): string {
-    return `mcp:${createHash('sha256').update(stable([scope.scope.resourceOwner, scope.scope.agentDir, scope.scope.configCwd, scope.scope.executionCwd, scope.scope.environmentId, entry.name])).digest('hex')}`;
+    return `mcp:${createHash('sha256').update(stable([scope.scope.resourceOwner, scope.scope.agentDir, scope.scope.configCwd, scope.scope.executionCwd, scope.scope.environmentId, entry.name, ...(entry.config.isolation === 'session' ? [scope.scope.sessionId] : [])])).digest('hex')}`;
   }
   #connectionKey(scope: ScopeRecord, entry: McpServerEntry): string {
-    return stable([scope.key, entry.name, entry.config, entry.scope === 'extension' ? [scope.scope.sessionId, entry.source] : entry.source]);
+    return stable([scope.key, entry.name, entry.config, entry.scope === 'extension' || entry.config.isolation === 'session' ? [scope.scope.sessionId, entry.source] : entry.source]);
   }
   #inspectScope(scope: ScopeRecord, selected: ReadonlySet<string>): McpAuthorityInspection {
     const servers = [...scope.entries.values()].map((entry): McpAuthorityServerReadiness => {
       const current = this.#pool.get(this.#connectionKey(scope, entry));
       const observation = this.#observations.get(this.#connectionKey(scope, entry));
-      const previous = this.#selected.get(stable([scope.key, entry.name]));
+      const previous = this.#selected.get(stable([scope.key, entry.name, entry.config.isolation === 'session' ? scope.scope.sessionId : null]));
       const connection = current ?? previous;
       const status = entry.config.enabled === false ? 'disabled' : current?.revoked ? 'closed'
         : current ? current.connection.state : previous ? 'stale' : observation?.status ?? 'unprepared';
@@ -1640,7 +1689,8 @@ export class McpAuthority {
         hasDirectTools: entry.config.exposure === 'direct' || Object.values(entry.config.toolExposure ?? {}).includes('direct'), exposure: entry.config.exposure ?? 'codemode',
         configurationScope: entry.scope ?? 'global', executionScope: scope.scope.executionScope, status,
         cachedToolCount: connection?.connection.tools.length ?? this.#cachedCounts.get(this.#connectionKey(scope, entry)) ?? observation?.toolCount ?? 0,
-        connectedToolCount: status === 'connected' ? current?.connection.tools.length ?? 0 : 0, selected: selected.has(entry.name) };
+        connectedToolCount: status === 'connected' && current?.connection.directoriesReady.has('tools') ? current.connection.tools.length : 0,
+        ...(current ? { directories: { ...current.connection.directoryStates } } : {}), selected: selected.has(entry.name) };
     });
     return freeze({ configErrorCount: scope.config.errors.length, configuredServerCount: servers.length,
       connectedServerCount: servers.filter(server => server.status === 'connected').length,
@@ -1669,9 +1719,10 @@ export class McpAuthority {
   }
   #toolVersion(record: ConnectionRecord, tool: McpTool): string {
     // Persisted target versions bind the declaration AND opaque credential grant, never a token.
-    return createHash('sha256').update(stable([tool, taskCapabilities(record.client), record.client?.protocolVersion ?? null, record.configIdentity, record.oauthGrant, record.providerGrant ?? null])).digest('hex');
+    return createHash('sha256').update(stable([tool, taskCapabilities(record.client), record.client?.protocolVersion ?? null, record.configIdentity, record.oauthGrant, record.providerGrant ?? null, ...(record.connection.environmentIdentity ? [record.connection.environmentIdentity] : [])])).digest('hex');
   }
   async #assertCredential(record: ConnectionRecord): Promise<void> {
+    if (!record.connection.environmentCurrent) { this.#revoke(record, 'mcp-credential-revoked'); fail('mcp-credential-revoked'); }
     if (record.oauthGrant !== this.#oauthGrant(record.scope, record.connection)) { this.#revoke(record, 'mcp-credential-revoked'); fail('mcp-credential-revoked'); }
     if (record.provider && (!this.#options.credentialScope || stable(await this.#options.credentialScope(record.scope, record.provider)) !== record.providerGrant)) {
       this.#revoke(record, 'mcp-credential-revoked'); fail('mcp-credential-revoked');
@@ -1727,17 +1778,38 @@ export class McpAuthority {
   }
   #collect(record: ConnectionRecord): void {
     if (record.references > 0) return;
-    // The pool is a shared owner, not a permanent daemon: the last lease reclaims the transport.
-    this.#observations.set(record.key, { status: record.revoked ? 'closed' : record.connection.state === 'connected' ? 'unprepared' : record.connection.state, toolCount: record.connection.tools.length });
+    if (!this.#closed && !record.revoked && !record.retired) {
+      const lifecycle = record.entry.config.lifecycle;
+      if (lifecycle?.keepAlive) return;
+      if (lifecycle?.idleTimeoutSeconds) {
+        record.idleDeadline ??= Date.now() + lifecycle.idleTimeoutSeconds * 1000;
+        const remaining = record.idleDeadline - Date.now();
+        if (remaining > 0) {
+          // Node timers have a signed 32-bit delay. Long configured lifetimes are observed
+          // in bounded timer segments, without shortening the user's requested policy.
+          record.idleTimer ??= setTimeout(() => { delete record.idleTimer; this.#collect(record); }, Math.min(remaining, 2_147_483_647));
+          record.idleTimer.unref();
+          return;
+        }
+      }
+    }
+    if (record.idleTimer) { clearTimeout(record.idleTimer); delete record.idleTimer; }
+    delete record.idleDeadline;
+    // Only configured idle/persistent instances stay owned by the pool after their last lease.
+    this.#observations.set(record.key, { status: record.revoked ? 'closed' : record.connection.state === 'connected' ? 'unprepared' : record.connection.state, toolCount: record.connection.environmentIdentity ? 0 : record.connection.tools.length });
     if (this.#pool.get(record.key) === record) this.#pool.delete(record.key);
-    const key = stable([record.scopeKey, record.entry.name]); if (this.#selected.get(key) === record) this.#selected.delete(key);
+    const key = stable([record.scopeKey, record.entry.name, record.entry.config.isolation === 'session' ? record.scope.sessionId : null]); if (this.#selected.get(key) === record) this.#selected.delete(key);
     this.#closeConnection(record);
   }
   #closeConnection(record: ConnectionRecord): void {
     if (record.closing) return;
     // SDK close waits for its opening connection, but internally suppresses some transport
     // failures. Its settlement is never promoted to native whole-process-tree evidence.
-    const closing = Promise.resolve().then(() => record.connection.close()).catch(cause => {
+    const closing = Promise.resolve().then(async () => {
+      await record.lifecycleWatch;
+      record.unwatchLifecycle?.(); delete record.unwatchLifecycle;
+      await record.connection.close();
+    }).catch(cause => {
       throw Object.assign(new McpAuthorityError('mcp-close-failed'), { cause });
     });
     record.closing = closing;

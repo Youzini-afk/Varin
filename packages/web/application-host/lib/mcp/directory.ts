@@ -29,6 +29,12 @@ export class McpDirectory {
     await this.#loading;
     const entry = this.#entries.get(key); return entry ? structuredClone(entry) : undefined;
   }
+  async update(key: string, value: Partial<Omit<McpDirectorySnapshot, 'updatedAt'>>) {
+    await this.get(key);
+    // Merge after loading, against the latest in-memory commit. Independent directories
+    // finishing in the same turn must not overwrite one another with an earlier snapshot.
+    this.put(key, { tools: [], resources: [], resourceTemplates: [], prompts: [], ...this.#entries.get(key), ...value, updatedAt: new Date().toISOString() });
+  }
   put(key: string, value: McpDirectorySnapshot) {
     const snapshot = structuredClone(value); this.#entries.set(key, snapshot); this.#pending.set(key, snapshot);
     this.#writing ??= Promise.resolve().then(async () => {

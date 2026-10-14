@@ -112,7 +112,7 @@ export function createMcpLease(options: McpOwnerOptions): McpToolLease {
         description: tool.description,
         output_schema: null,
         metadata: null,
-        schema: structuredClone(tool.inputSchema),
+        schema: structuredClone(tool.modelInputSchema ?? tool.inputSchema),
       })),
   };
   const configured = servers.size > 0 || lease.binding.readiness.configErrorCount > 0 || Boolean(options.unavailableWorkspaceScope);
@@ -362,6 +362,7 @@ export function createMcpLease(options: McpOwnerOptions): McpToolLease {
                     description: tool.description,
                     inputSchema: tool.inputSchema,
                     schemaVersion: tool.schemaVersion,
+                    ...(tool.problem ? { problem: tool.problem } : {}),
                     taskSupport: tool.taskSupport, taskCapable: tool.taskCapable,
                   })), ...cached.filter(tool => !liveNames.has(`${tool.server}\u0000${tool.tool}`)
                     && `${tool.name} ${tool.description}`.toLocaleLowerCase().includes(query))],

@@ -5,7 +5,7 @@ import { join, resolve } from 'node:path';
 import { parse, type ParseError } from 'jsonc-parser';
 import { object } from '../models/configuration.js';
 export type McpExposure = 'direct' | 'codemode' | 'deferred' | 'hidden';
-interface McpConfigBase { enabled?: boolean; exposure?: McpExposure; toolExposure?: Record<string, McpExposure>; description?: string; timeout?: number }
+interface McpConfigBase { enabled?: boolean; exposure?: McpExposure; toolExposure?: Record<string, McpExposure>; description?: string; timeout?: number; isolation?: 'shared' | 'session'; lifecycle?: { keepAlive?: boolean; idleTimeoutSeconds?: number } }
 export interface McpStdioServerConfig extends McpConfigBase { command: string; args?: string[]; env?: Record<string, string>; cwd?: string; type?: 'stdio' }
 export interface McpHttpServerConfig extends McpConfigBase { url: string; type?: 'http'; headers?: Record<string, string>; auth?: { provider: string }; oauth?: { clientId?: string; clientSecret?: string; callbackPort?: number; callbackUrl?: string; scope?: string } }
 export type McpServerConfig = McpStdioServerConfig | McpHttpServerConfig;
@@ -28,19 +28,51 @@ export function validateMcpDocument(input: unknown): string | undefined {
 }
 export function validateMcpServerConfig(name: string, input: unknown): McpServerConfig | string {
   if (!name || !object(input)) return 'Server configuration must be an object';
+  if (input.description !== undefined && typeof input.description !== 'string'
+    || input.isolation !== undefined && !['shared', 'session'].includes(String(input.isolation))
+    || input.lifecycle !== undefined && (!object(input.lifecycle)
+      || Object.keys(input.lifecycle).some(key => !['keepAlive', 'idleTimeoutSeconds'].includes(key))
+      || input.lifecycle.keepAlive !== undefined && typeof input.lifecycle.keepAlive !== 'boolean'
+      || input.lifecycle.idleTimeoutSeconds !== undefined && (typeof input.lifecycle.idleTimeoutSeconds !== 'number' || !Number.isFinite(input.lifecycle.idleTimeoutSeconds * 1000) || input.lifecycle.idleTimeoutSeconds < 0)
+      || input.lifecycle.keepAlive === true && input.lifecycle.idleTimeoutSeconds !== undefined)) return 'Server lifecycle is invalid';
   if (input.enabled !== undefined && typeof input.enabled !== 'boolean' || input.exposure !== undefined && !['direct', 'codemode', 'deferred', 'hidden'].includes(String(input.exposure))
     || input.timeout !== undefined && (typeof input.timeout !== 'number' || !Number.isFinite(input.timeout) || input.timeout <= 0)
     || input.toolExposure !== undefined && (!object(input.toolExposure) || Object.values(input.toolExposure).some(value => !['direct', 'codemode', 'deferred', 'hidden'].includes(String(value))))) return 'Server policy is invalid';
   if (typeof input.command === 'string' && input.command.trim() && input.url === undefined) {
+    if (input.type !== undefined && input.type !== 'stdio' || ['headers', 'auth', 'oauth'].some(key => input[key] !== undefined)) return 'Server transport options are invalid';
     if (input.args !== undefined && (!Array.isArray(input.args) || input.args.some(arg => typeof arg !== 'string')) || input.env !== undefined && !strings(input.env) || input.cwd !== undefined && typeof input.cwd !== 'string') return 'Server command arguments, environment or cwd are invalid';
     return structuredClone(input) as unknown as McpStdioServerConfig;
   }
   if (typeof input.url === 'string' && input.command === undefined) {
+    if (input.type !== undefined && input.type !== 'http' || ['args', 'env', 'cwd'].some(key => input[key] !== undefined)) return 'Server transport options are invalid';
     try { const url = new URL(input.url); if (!['http:', 'https:'].includes(url.protocol)) return 'Server URL must use HTTP'; } catch { return 'Server URL is invalid'; }
-    if (input.headers !== undefined && !strings(input.headers) || input.auth !== undefined && (!object(input.auth) || typeof input.auth.provider !== 'string') || input.oauth !== undefined && !object(input.oauth)) return 'Server authentication is invalid';
+    if (input.headers !== undefined && !strings(input.headers) || input.auth !== undefined && (!object(input.auth) || typeof input.auth.provider !== 'string' || !input.auth.provider.trim() || Object.keys(input.auth).some(key => key !== 'provider')) || input.oauth !== undefined && !object(input.oauth)) return 'Server authentication is invalid';
+    if (object(input.oauth)) {
+      const oauth = input.oauth;
+      if (Object.keys(oauth).some(key => !['clientId', 'clientSecret', 'callbackPort', 'callbackUrl', 'scope'].includes(key))
+        || ['clientId', 'clientSecret', 'callbackUrl', 'scope'].some(key => oauth[key] !== undefined && typeof oauth[key] !== 'string')
+        || oauth.callbackPort !== undefined && (!Number.isInteger(oauth.callbackPort) || Number(oauth.callbackPort) < 0 || Number(oauth.callbackPort) > 65535)) return 'Server OAuth settings are invalid';
+      if (typeof oauth.callbackUrl === 'string') {
+        try { const callback = new URL(oauth.callbackUrl); if (callback.protocol !== 'http:' || !['localhost', '127.0.0.1', '[::1]'].includes(callback.hostname) || callback.username || callback.password || callback.hash) return 'OAuth callback must use a local HTTP address'; }
+        catch { return 'OAuth callback URL is invalid'; }
+      }
+    }
+    try { new Headers(input.headers as Record<string, string> | undefined); } catch { return 'Server HTTP headers are invalid'; }
     return structuredClone(input) as unknown as McpHttpServerConfig;
   }
   return 'Define one command or URL for this server';
+}
+/** Capture only explicitly referenced process values. These stay in memory, never in a
+ * configuration revision, persisted cache key, public snapshot or diagnostic. */
+export function mcpEnvironmentBindings(entry: McpServerEntry): Readonly<Record<string, string | undefined>> {
+  const config = entry.config;
+  const values = 'command' in config ? [config.command, ...(config.args ?? []), config.cwd, ...Object.values(config.env ?? {})]
+    : [...Object.values(config.headers ?? {}), config.oauth?.clientSecret];
+  const names = new Set(values.flatMap(value => typeof value === 'string' ? [...value.matchAll(/\$\{([A-Za-z_][A-Za-z0-9_]*)\}/g)].map(match => match[1]!) : []));
+  return Object.freeze(Object.fromEntries([...names].map(name => [name, process.env[name]])));
+}
+export function mcpEnvironmentCurrent(bindings: Readonly<Record<string, string | undefined>>): boolean {
+  return Object.entries(bindings).every(([name, value]) => process.env[name] === value);
 }
 async function readSource(accepted: Map<string, Source>, path: string, scope: 'global' | 'project', errors: string[]): Promise<Source | undefined> {
   const key = JSON.stringify([scope, path]);
