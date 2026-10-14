@@ -37,8 +37,8 @@ it('passes the original observation and stop requests unchanged and preserves pe
   await expect(controlManagedScript(client, observation)).resolves.toBe(pending);
   await expect(controlManagedScript(client, stop)).resolves.toBe(stopped);
   expect(scriptControl.mock.calls).toEqual([[before[0]], [before[1]]]);
-  expect(scriptControl.mock.calls[0][0]).toBe(observation);
-  expect(scriptControl.mock.calls[1][0]).toBe(stop);
+  expect(scriptControl.mock.calls[0]?.[0]).toBe(observation);
+  expect(scriptControl.mock.calls[1]?.[0]).toBe(stop);
 });
 
 it('stops once and keeps observing the original process until its late tree receipt confirms termination', async () => {

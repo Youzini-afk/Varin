@@ -5,7 +5,7 @@ import type { KernelClient, KernelGrantHandle } from './kernel-client.js';
 it('keeps remote-only recovery metadata on the existing Host store without admitting any physical root', async () => {
   const workspaceId = 'recovery-coordinator:coordinator-host';
   const scoped = {};
-  const issueGrant = vi.fn(async (input: unknown) => ({ ...input as object, hostId: 'coordinator-host', kernelEpoch: 'epoch' } as KernelGrantHandle));
+  const issueGrant = vi.fn(async (input: unknown) => ({ ...input as object, hostId: 'coordinator-host', kernelEpoch: 'epoch' } as unknown as KernelGrantHandle));
   const resolveWorkspaceRoot = vi.fn(async () => { throw new Error('No local workspace is registered'); });
   const resolveActor = vi.fn(async () => { throw new Error('No session actor exists'); });
   const adapter = new KernelStorageAdapter({ client: { issueGrant, scoped: () => scoped } as unknown as KernelClient,

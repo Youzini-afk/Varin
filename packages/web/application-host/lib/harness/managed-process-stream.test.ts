@@ -51,7 +51,7 @@ it('carries independent native data/control credit and closes only the original 
 });
 
 it('rejects a changed stream identity without replaying an interaction', async () => {
-  const transport = stream(), control = vi.fn(async () => ({})), observer = vi.fn();
+  const transport = stream(), control = vi.fn(async (_request: Parameters<Parameters<typeof consumeManagedProcessStream>[3]>[0]) => ({})), observer = vi.fn();
   const opening = consumeManagedProcessStream(transport.response, input, observer, control);
   transport.send({ kind: 'ready', subscriptionId: input.subscriptionId, resourceEpoch: input.resourceEpoch });
   const client = await opening;

@@ -185,12 +185,12 @@
         "varin-host": "./dist/host-bootstrap.js",
       },
       "dependencies": {
-        "@varin/script-runtime": "0.1.0",
         "@earendil-works/pi-agent-core": "1.0.4",
         "@earendil-works/pi-ai": "1.0.4",
         "@earendil-works/pi-coding-agent": "1.0.4",
         "@earendil-works/pi-mcp": "1.0.4",
         "@varin/protocol": "0.1.0",
+        "@varin/script-runtime": "0.1.0",
         "ajv": "^8.20.0",
         "ajv-formats": "^3.0.1",
         "jsonc-parser": "^3.3.1",
@@ -224,7 +224,9 @@
     "packages/script-runtime": {
       "name": "@varin/script-runtime",
       "version": "0.1.0",
-      "dependencies": { "@varin/protocol": "workspace:*" },
+      "dependencies": {
+        "@varin/protocol": "workspace:*",
+      },
     },
     "packages/settings-store": {
       "name": "@varin/settings-store",
@@ -339,7 +341,6 @@
         "varin": "./bin/cli.js",
       },
       "dependencies": {
-        "@varin/script-runtime": "workspace:*",
         "@clack/prompts": "^1.8.1",
         "@konbakuyomu/smart-search": "^0.1.25",
         "@mozilla/readability": "0.6.0",
@@ -353,6 +354,7 @@
         "@varin/pi-host": "workspace:*",
         "@varin/protocol": "workspace:*",
         "@varin/runtime-broker": "workspace:*",
+        "@varin/script-runtime": "workspace:*",
         "@varin/settings-store": "workspace:*",
         "adm-zip": "^0.6.1",
         "compression": "^1.8.2",
@@ -401,6 +403,7 @@
         "@types/web-push": "^3.6.4",
         "@types/ws": "^8.18.2",
         "@types/yazl": "^3.3.1",
+        "@varin/extension-sdk": "workspace:*",
         "@varin/runtime-client": "workspace:*",
         "@varin/ui": "workspace:*",
         "@vitejs/plugin-react": "^6.1.2",
