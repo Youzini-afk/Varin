@@ -208,5 +208,5 @@ Bundled Pi version 只有 `packages/pi-host/package.json` 一处来源。维护�
 不覆盖付费 provider、模型推理、恢复或完整 UI 旅程。
 
 生命周期测试随 Host、loader 和 Surface owner 维护，native consumer test 验证其实际绑定边界。
-局部 helper 测试不能代替平台/打包验收；本文没有新增扩展/provider/UI 端到端验证结论。
+局部 helper 测试不能代替扩展/provider/UI 的实际集成或平台/打包验收。
 公共包发布与默认产品运行时切换仍是单独的发行决定。

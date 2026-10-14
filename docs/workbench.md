@@ -211,4 +211,4 @@ Web/Electron 共享桌面文件能力；hosted/Capacitor mobile 使用兼容 con
 
 Profile transition、Registry、Monaco、client settings 和 Thread consumer 的局部测试描述中断与 stale-owner
 行为；它们不证明完整 provider 集成、真机触屏/无障碍、打包 worker 加载或 UI 端到端验收。
-平台验证应针对实际变更的 Surface，本文不记录新的运行时或平台验证结果。
+平台验证应针对实际变更的 Surface。
