@@ -57,16 +57,8 @@ fn chat_parts(parts: Vec<ProviderPart<'_>>) -> Result<Vec<Value>, ExecutionError
     }
     Ok(blocks)
 }
-impl ModelProvider for ChatProvider {
-    fn request_budget_protocol(&self) -> Option<crate::context_capacity::RequestBudgetProtocol> {
-        Some(crate::context_capacity::RequestBudgetProtocol {
-            transcript: &["messages"],
-            coalesced_content: None,
-            complete_input_tokens: inclusive_input_tokens,
-        })
-    }
-
-    fn serialize(&self, view: &RequestView) -> Result<Value, ExecutionError> {
+impl ChatProvider {
+    pub(super) fn compile_body(&self, view: &RequestView) -> Result<Value, ExecutionError> {
         validate_view(view, self.family)?;
         validate_images(view, &self.connection)?;
         let mut messages = Vec::<Value>::new();
@@ -212,6 +204,19 @@ impl ModelProvider for ChatProvider {
         }
         Ok(body)
     }
+}
+impl ModelProvider for ChatProvider {
+    fn request_budget_protocol(&self) -> Option<crate::context_capacity::RequestBudgetProtocol> {
+        Some(crate::context_capacity::RequestBudgetProtocol {
+            transcript: &["messages"],
+            coalesced_content: None,
+            complete_input_tokens: inclusive_input_tokens,
+        })
+    }
+
+    fn serialize(&self, view: &RequestView, _reuse: Option<&mut RequestCompileReuse>) -> Result<RequestBody, ExecutionError> {
+        self.compile_body(view).map(Into::into)
+    }
     fn generate(
         &self,
         request: &RequestSnapshot,
@@ -225,8 +230,9 @@ impl ModelProvider for ChatProvider {
             mistral: self.mistral,
             ..StreamState::default()
         };
+        let affinity = request.serialized.get("prompt_cache_key");
         let headers = if self.mistral {
-            request.serialized["prompt_cache_key"]
+            affinity.as_ref().unwrap_or(&Value::Null)
                 .as_str()
                 .map(|key| vec![("x-affinity", key)])
                 .unwrap_or_default()

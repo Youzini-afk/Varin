@@ -459,7 +459,7 @@ fn request_snapshot(receipt: &Receipt) -> crate::execution::RequestSnapshot {
             },
             history: vec![],
         },
-        serialized: json!({"model":"mock"}),
+        serialized: json!({"model":"mock"}).into(),
     }
 }
 #[test]
@@ -1571,7 +1571,7 @@ fn prepared_snapshot_preserves_typed_media_and_opaque_provider_body_through_gc_a
     }.into());
     // Image-shaped provider JSON is opaque material, independent of the typed
     // media dependency retained in the same immutable RequestSnapshot.
-    snapshot.serialized = json!({"provider":"mock","unknown":[null,true,17],"image":{"media_type":"image/png","data":encoded}});
+    snapshot.serialized = json!({"provider":"mock","unknown":[null,true,17],"image":{"media_type":"image/png","data":encoded}}).into();
     let expected = serde_json::to_value(&snapshot).unwrap();
     let request_id = snapshot.view.request_id.clone();
     db.commit_execution(&receipt.run_id, db.epoch(), &ExecutionRecord::RequestPrepared { snapshot: snapshot.into() }).unwrap();

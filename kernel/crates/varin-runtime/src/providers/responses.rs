@@ -49,69 +49,99 @@ fn response_parts(parts: Vec<ProviderPart<'_>>) -> Result<Vec<Value>, ExecutionE
     }
     Ok(blocks)
 }
+fn serialize_item(projected: ProjectedHistoryItem<'_>) -> Result<Value, ExecutionError> {
+    let item = projected.item;
+    if let Some(original) = projected.opaque {
+        if original.adapter_version != "1" {
+            return Err(ExecutionError::new(
+                "opaque_version",
+                "unsupported Responses continuation version",
+            ));
+        }
+        return Ok(original.value.clone());
+    }
+    let role = match &item.provenance {
+        p if p.is_system() => "system",
+        p if p.is_assistant() => "assistant",
+        _ => "user",
+    };
+    Ok(match &item.content {
+        Content::Text { text } | Content::ReasoningSummary { text } => {
+            json!({"role":role,"content":text})
+        }
+        Content::ToolCall { call } => {
+            json!({"type":"function_call","call_id":call.call_id,"name":call.name,"arguments":call.arguments.to_string()})
+        }
+        Content::ToolResult { result } => {
+            json!({"type":"function_call_output","call_id":result.call_id,"output":response_parts(completion_parts(&result.completion))?})
+        }
+        Content::Media { media } => {
+            json!({"role":"user","content":response_parts(vec![ProviderPart::Media{media}])?})
+        }
+        Content::Output { output } => {
+            json!({"role":evidence_role(&item.provenance,role),"content":response_parts(evidence_parts(output,&item.provenance))?})
+        }
+        Content::ProviderOnly => {
+            return Err(ExecutionError::new(
+                "missing_opaque",
+                "provider-only content requires continuation data",
+            ))
+        }
+    })
+}
 impl ResponsesProvider {
     pub(super) fn serialize_history<'a>(
         &self,
         view: &RequestView,
         history: impl IntoIterator<Item = ProjectedHistoryItem<'a>>,
-    ) -> Result<Value, ExecutionError> {
+        mut reuse: Option<&mut RequestCompileReuse>,
+    ) -> Result<RequestBody, ExecutionError> {
+        // Validation and the owning wrapper's lease check run even for a fully reusable prefix.
         validate_view(view, self.family)?;
         validate_images(view, &self.connection)?;
+        let previous = reuse
+            .as_mut()
+            .map(|reuse| std::mem::take(&mut reuse.responses))
+            .unwrap_or_default();
         let mut input = Vec::new();
         for projected in history {
-            let item = projected.item;
-            if let Some(original) = projected.opaque {
-                if original.adapter_version != "1" {
-                    return Err(ExecutionError::new(
-                        "opaque_version",
-                        "unsupported Responses continuation version",
-                    ));
-                }
-                input.push(original.value.clone());
-                continue;
-            }
-            let role = match item.provenance {
-                ref p if p.is_system() => "system",
-                ref p if p.is_assistant() => "assistant",
-                _ => "user",
+            let source = projected.item;
+            let key = Arc::as_ptr(source) as usize;
+            let fragment = match previous.get(&key) {
+                Some((original, fragment)) if Arc::ptr_eq(original, source) => fragment.clone(),
+                _ => crate::request_body::FrozenJson::new(serialize_item(projected)?),
             };
-            match &item.content {
-                Content::Text{text} | Content::ReasoningSummary{text} => input.push(json!({"role":role,"content":text})),
-                Content::ToolCall{call}=>input.push(json!({"type":"function_call","call_id":call.call_id,"name":call.name,"arguments":call.arguments.to_string()})),
-                Content::ToolResult { result } => {
-                    let mut value = json!({"type":"function_call_output","call_id":result.call_id});
-                    value["output"] = Value::Array(response_parts(completion_parts(&result.completion))?);
-                    input.push(value);
-                }
-                Content::Media { media } => {
-                    let mut value = json!({"role":"user"});
-                    value["content"] = Value::Array(response_parts(vec![ProviderPart::Media { media }])?);
-                    input.push(value);
-                }
-                Content::Output { output } => {
-                    let mut value = json!({"role":evidence_role(&item.provenance,role)});
-                    value["content"] = Value::Array(response_parts(evidence_parts(output,&item.provenance))?);
-                    input.push(value);
-                }
-                Content::ProviderOnly=>return Err(ExecutionError::new("missing_opaque", "provider-only content requires continuation data")),
+            if let Some(reuse) = reuse.as_mut() {
+                reuse
+                    .responses
+                    .insert(key, (source.clone(), fragment.clone()));
             }
+            input.push(fragment);
         }
-        let tools: Vec<_> = view
-            .binding
-            .tools
-            .iter()
-            .map(|t| json!({"type":"function","name":t.name,"description":t.description,"parameters":t.schema}))
-            .collect();
-        let mut value = json!({"model":view.binding.model,"stream":true,"store":false,"include":["reasoning.encrypted_content"]});
-        value["input"] = Value::Array(input);
-        value["tools"] = Value::Array(tools);
+        let tools = if let Some(tools) = reuse
+            .as_ref()
+            .and_then(|reuse| reuse.responses_tools.as_ref())
+        {
+            tools.clone()
+        } else {
+            let tools: Vec<_>=view.binding.tools.iter().map(|t|crate::request_body::FrozenJson::new(json!({"type":"function","name":t.name,"description":t.description,"parameters":t.schema}))).collect();
+            if let Some(reuse) = reuse.as_mut() {
+                reuse.responses_tools = Some(tools.clone());
+            }
+            tools
+        };
+        let mut body = RequestBody::from(
+            json!({"model":view.binding.model,"stream":true,"store":false,"include":["reasoning.encrypted_content"]}),
+        );
+        body.insert_fragments("input", input);
+        body.insert_fragments("tools", tools);
         if let Some(max) = self.max_output_tokens {
-            value["max_output_tokens"] = json!(max);
+            body.insert("max_output_tokens", json!(max));
         }
         if let Some(reasoning) = &self.reasoning {
-            value["reasoning"] = reasoning.clone();
+            body.insert("reasoning", reasoning.clone());
         }
-        Ok(value)
+        Ok(body)
     }
 }
 impl ModelProvider for ResponsesProvider {
@@ -123,7 +153,11 @@ impl ModelProvider for ResponsesProvider {
         })
     }
 
-    fn serialize(&self, view: &RequestView) -> Result<Value, ExecutionError> {
+    fn serialize(
+        &self,
+        view: &RequestView,
+        reuse: Option<&mut RequestCompileReuse>,
+    ) -> Result<RequestBody, ExecutionError> {
         self.serialize_history(
             view,
             project_history(
@@ -131,6 +165,7 @@ impl ModelProvider for ResponsesProvider {
                 self.family,
                 &view.binding.connection_identity,
             ),
+            reuse,
         )
     }
     fn generate(
@@ -317,8 +352,9 @@ impl StreamState {
                                 cached_input_tokens: usage["input_tokens_details"]["cached_tokens"]
                                     .as_u64(),
                                 cache_write_tokens: None,
-                                reasoning_tokens:
-                                    usage["output_tokens_details"]["reasoning_tokens"].as_u64(),
+                                reasoning_tokens: usage["output_tokens_details"]
+                                    ["reasoning_tokens"]
+                                    .as_u64(),
                                 raw: Some(usage.clone()),
                                 pricing_version: None,
                             },

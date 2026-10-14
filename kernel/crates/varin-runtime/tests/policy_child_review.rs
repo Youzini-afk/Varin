@@ -60,7 +60,7 @@ fn no_model_exchange(f: &Fixture) {
 #[derive(Default)]
 struct NoExecution;
 impl ModelProvider for NoExecution {
-    fn serialize(&self, _: &RequestView) -> Result<Value, ExecutionError> {
+    fn serialize(&self, _: &RequestView, _reuse: Option<&mut varin_runtime::execution::RequestCompileReuse>) -> Result<varin_runtime::execution::RequestBody, ExecutionError> {
         panic!("child recovery must not request a model")
     }
     fn generate(

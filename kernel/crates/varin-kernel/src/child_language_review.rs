@@ -12,8 +12,8 @@ struct DispatchModel {
     preset: &'static str,
 }
 impl ModelProvider for DispatchModel {
-    fn serialize(&self, view: &RequestView) -> Result<Value, ExecutionError> {
-        Script.serialize(view)
+    fn serialize(&self, view: &RequestView, reuse: Option<&mut varin_runtime::execution::RequestCompileReuse>) -> Result<varin_runtime::execution::RequestBody, ExecutionError> {
+        Script.serialize(view, reuse)
     }
     fn generate(
         &self,
@@ -53,8 +53,8 @@ impl ModelProvider for DispatchModel {
 }
 struct ChildModel;
 impl ModelProvider for ChildModel {
-    fn serialize(&self, view: &RequestView) -> Result<Value, ExecutionError> {
-        Script.serialize(view)
+    fn serialize(&self, view: &RequestView, reuse: Option<&mut varin_runtime::execution::RequestCompileReuse>) -> Result<varin_runtime::execution::RequestBody, ExecutionError> {
+        Script.serialize(view, reuse)
     }
     fn generate(
         &self,

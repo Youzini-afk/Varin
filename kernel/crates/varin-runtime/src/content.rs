@@ -299,9 +299,9 @@ impl ContentStore {
     pub(crate) fn save(&self, value: &Value) -> Result<Value> {
         self.save_with_dependencies(value, Vec::new())
     }
-    pub(crate) fn save_with_dependencies(
+    pub(crate) fn save_with_dependencies<T: Serialize + ?Sized>(
         &self,
-        value: &Value,
+        value: &T,
         dependencies: Vec<String>,
     ) -> Result<Value> {
         self.save_payload(&serde_json::to_vec(value)?, dependencies)

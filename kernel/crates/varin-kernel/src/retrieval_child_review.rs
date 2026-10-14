@@ -15,8 +15,8 @@ struct DispatchModel {
     preset: &'static str,
 }
 impl ModelProvider for DispatchModel {
-    fn serialize(&self, _: &RequestView) -> Result<Value, ExecutionError> {
-        Ok(json!({}))
+    fn serialize(&self, _: &RequestView, _reuse: Option<&mut varin_runtime::execution::RequestCompileReuse>) -> Result<varin_runtime::execution::RequestBody, ExecutionError> {
+        Ok(json!({}).into())
     }
     fn generate(
         &self,

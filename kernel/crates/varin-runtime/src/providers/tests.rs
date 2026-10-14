@@ -98,7 +98,7 @@ fn pi_messages_fragmented_signed_thinking_and_tool_exchange_roundtrip() {
         },
         opaque: None,
     }.into());
-    let wire = provider.serialize(&replay).unwrap();
+    let wire = provider.serialize(&replay, None).unwrap().to_value();
     assert_eq!(
         wire["context"]["messages"][0]["toolsAdded"][0]["name"],
         "read"
@@ -162,7 +162,7 @@ fn generate(
 ) -> (Result<FinishReason, ModelFailure>, Vec<ProviderEvent>) {
     let view = view(family);
     let snapshot = RequestSnapshot {
-        serialized: provider.serialize(&view).unwrap(),
+        serialized: provider.serialize(&view, None).unwrap(),
         view,
     };
     let mut events = vec![];
@@ -209,7 +209,7 @@ fn responses_fragmented_utf8_opaque_tool_and_usage_roundtrip() {
             opaque: i.opaque,
         }.into())
         .collect();
-    let serialized = p.serialize(&v).unwrap();
+    let serialized = p.serialize(&v, None).unwrap().to_value();
     assert_eq!(serialized["input"][0], reasoning);
     assert_eq!(serialized["input"][1], tool);
 }
@@ -299,7 +299,7 @@ fn anthropic_signature_and_server_tool_remain_opaque() {
             opaque: i.opaque,
         }.into())
         .collect();
-    let out = p.serialize(&v).unwrap();
+    let out = p.serialize(&v, None).unwrap().to_value();
     assert_eq!(out["messages"][0]["content"][0]["signature"], "signed");
     assert_eq!(out["messages"][0]["content"][1]["type"], "server_tool_use");
 }
@@ -316,7 +316,7 @@ fn cancelled_before_send_never_resolves_credentials() {
     ));
     let view = view(responses::FAMILY);
     let snapshot = RequestSnapshot {
-        serialized: p.serialize(&view).unwrap(),
+        serialized: p.serialize(&view, None).unwrap(),
         view,
     };
     let cancel = CancellationToken::default();
@@ -357,7 +357,7 @@ fn http_status_preserves_retry_and_request_id_without_echoing_body() {
             HttpRequest {
                 endpoint: &endpoint,
                 headers: reqwest::header::HeaderMap::new(),
-                body: &json!({"input":"fixture"}),
+                body: &json!({"input":"fixture"}).into(),
             },
             &CancellationToken::default(),
             &mut |_| Ok(false),
@@ -396,7 +396,7 @@ fn http_cancellation_interrupts_stalled_headers_and_body() {
                 HttpRequest {
                     endpoint: &endpoint,
                     headers: reqwest::header::HeaderMap::new(),
-                    body: &json!({}),
+                    body: &json!({}).into(),
                 },
                 &worker_cancel,
                 &mut |_| Ok(false),
@@ -468,7 +468,7 @@ fn transport_reuses_builder_and_keeps_headers_request_local() {
                 HttpRequest {
                     endpoint: &endpoint,
                     headers,
-                    body: &json!({}),
+                    body: &json!({}).into(),
                 },
                 &CancellationToken::default(),
                 &mut |_| Ok(true),
@@ -508,7 +508,7 @@ fn shared_reqwest_transport_has_independent_progress_and_cancellation() {
             HttpRequest {
                 endpoint: &slow_endpoint,
                 headers: reqwest::header::HeaderMap::new(),
-                body: &json!({}),
+                body: &json!({}).into(),
             },
             &slow_cancel,
             &mut |_| Ok(true),
@@ -538,7 +538,7 @@ fn shared_reqwest_transport_has_independent_progress_and_cancellation() {
             HttpRequest {
                 endpoint: &fast_endpoint,
                 headers: reqwest::header::HeaderMap::new(),
-                body: &json!({}),
+                body: &json!({}).into(),
             },
             &CancellationToken::default(),
             &mut |_| Ok(true),
@@ -619,7 +619,7 @@ fn chat_complete_tool_fragments_replay_once_and_keep_usage_after_finish() {
             opaque: i.opaque,
         }.into())
         .collect();
-    let replay = p.serialize(&v).unwrap();
+    let replay = p.serialize(&v, None).unwrap().to_value();
     assert_eq!(replay["messages"].as_array().unwrap().len(), 1);
     assert_eq!(
         replay["messages"][0]["tool_calls"]
@@ -675,7 +675,7 @@ fn azure_keeps_query_deployment_header_and_distinct_opaque_family() {
             let query: std::collections::BTreeMap<_, _> = url.query_pairs().collect();
             assert_eq!(query.get("tenant").unwrap(), "fixture");
             assert_eq!(query.get("api-version").unwrap(), "2025-04-01-preview");
-            assert_eq!(request.body["model"], "my-deployment");
+            assert_eq!(request.body.to_value()["model"], "my-deployment");
             assert_eq!(request.headers["api-key"], "fixture-only");
             assert!(!request.headers.contains_key("authorization"));
             let event = json!({"type":"response.completed","response":{"output":[{"id":"reasoning","type":"reasoning","encrypted_content":"azure-original"}]}});
@@ -762,7 +762,7 @@ fn google_signed_parts_replay_in_place_and_optional_call_ids_pair_by_name() {
         },
         opaque: None,
     }.into());
-    let replay = p.serialize(&v).unwrap();
+    let replay = p.serialize(&v, None).unwrap().to_value();
     assert_eq!(replay["contents"][0]["parts"][0], text);
     assert_eq!(replay["contents"][0]["parts"][1], call);
     let response = &replay["contents"][1]["parts"][0]["functionResponse"];
@@ -770,7 +770,7 @@ fn google_signed_parts_replay_in_place_and_optional_call_ids_pair_by_name() {
     assert!(response.get("id").is_none());
     v.binding.model = "another-model".into();
     assert!(
-        !p.serialize(&v)
+        !p.serialize(&v, None)
             .unwrap()
             .to_string()
             .contains("thoughtSignature")
@@ -779,7 +779,7 @@ fn google_signed_parts_replay_in_place_and_optional_call_ids_pair_by_name() {
     v.binding.provider_family = google::VERTEX_FAMILY.into();
     assert!(
         !vertex
-            .serialize(&v)
+            .serialize(&v, None)
             .unwrap()
             .to_string()
             .contains("thoughtSignature")
@@ -876,20 +876,20 @@ fn same_protocol_other_connection_never_receives_opaque_history() {
                 == v.binding.connection_identity)
     );
     assert!(
-        p.serialize(&v)
+        p.serialize(&v, None)
             .unwrap()
             .to_string()
             .contains("connection-owned")
     );
     v.binding.connection_identity = "different-tenant".into();
-    let changed = p.serialize(&v).unwrap().to_string();
+    let changed = p.serialize(&v, None).unwrap().to_string();
     assert!(!changed.contains("connection-owned"));
     assert!(changed.contains("portable answer"));
     v.binding.connection_identity.clear();
     for item in &mut v.history {
         Arc::make_mut(item).opaque.as_mut().unwrap().connection_identity.clear();
     }
-    let unidentified = p.serialize(&v).unwrap().to_string();
+    let unidentified = p.serialize(&v, None).unwrap().to_string();
     assert!(!unidentified.contains("connection-owned"));
     assert!(unidentified.contains("portable answer"));
 }
@@ -937,7 +937,7 @@ fn mistral_wire_id_collision_keeps_both_tool_result_pairs() {
             opaque: None,
         }.into());
     }
-    let body = p.serialize(&v).unwrap();
+    let body = p.serialize(&v, None).unwrap().to_value();
     let calls = body["messages"][0]["tool_calls"].as_array().unwrap();
     let a = calls[0]["id"].as_str().unwrap();
     let b = calls[1]["id"].as_str().unwrap();
@@ -1052,7 +1052,8 @@ fn codex_fixture_separates_instructions_and_pins_session_headers() {
             assert_eq!(request.headers["originator"], "varin");
             assert_eq!(request.headers["openai-beta"], "responses=experimental");
             assert_eq!(request.headers["chatgpt-account-id"], "fixture-account");
-            let key = request.body["prompt_cache_key"].as_str().unwrap();
+            let body = request.body.to_value();
+            let key = body["prompt_cache_key"].as_str().unwrap();
             assert_eq!(key.len(), 64);
             assert_eq!(request.headers["session-id"], key);
             assert_eq!(request.headers["x-client-request-id"], "request");
@@ -1092,7 +1093,7 @@ fn codex_fixture_separates_instructions_and_pins_session_headers() {
             opaque: None,
         },
     ].into_iter().map(Into::into).collect();
-    let body = provider.serialize(&v).unwrap();
+    let body = provider.serialize(&v, None).unwrap().to_value();
     assert_eq!(body["instructions"], "Follow the fixture task");
     assert_eq!(body["input"].as_array().unwrap().len(), 1);
     assert_eq!(body["store"], false);
@@ -1105,7 +1106,7 @@ fn codex_fixture_separates_instructions_and_pins_session_headers() {
             .generate(
                 &RequestSnapshot {
                     view: v,
-                    serialized: body
+                    serialized: body.into()
                 },
                 &CancellationToken::default(),
                 &mut |e| {
@@ -1187,13 +1188,13 @@ fn explicit_model_image_capability_rejects_attachment_before_request_serializati
         opaque: None,
     }.into());
     assert_eq!(
-        provider.serialize(&request).unwrap_err().code,
+        provider.serialize(&request, None).unwrap_err().code,
         "unsupported_model_image"
     );
     Arc::make_mut(&mut request.history[0]).content = Content::Text {
         text: "ordinary text".into(),
     };
-    assert!(provider.serialize(&request).is_ok());
+    assert!(provider.serialize(&request, None).is_ok());
 }
 
 // AWS eventstream fixture uses Python zlib CRC32, independently of the decoder.
@@ -1285,7 +1286,7 @@ fn bedrock_fragmented_binary_preserves_reasoning_tool_and_trailing_usage() {
             opaque: item.opaque,
         }.into())
         .collect();
-    let replay = provider.serialize(&request).unwrap();
+    let replay = provider.serialize(&request, None).unwrap().to_value();
     assert_eq!(
         replay["messages"][0]["content"][0]["reasoningContent"]["reasoningText"]["signature"],
         "opaque-signature"
@@ -1310,7 +1311,7 @@ fn bedrock_truncated_or_corrupt_frame_fails_and_pre_cancel_never_sends() {
     let (provider, transport) = bedrock_fixture(bytes.to_vec());
     let view = view(bedrock::FAMILY);
     let snapshot = RequestSnapshot {
-        serialized: provider.serialize(&view).unwrap(),
+        serialized: provider.serialize(&view, None).unwrap(),
         view,
     };
     let cancel = CancellationToken::default();
@@ -1366,7 +1367,7 @@ fn planning_call_original_is_retained_without_weakening_main_schema_authority() 
                 boundary_id: "boundary".into(),
             };
         }
-        let serialized = provider.serialize(&view).unwrap();
+        let serialized = provider.serialize(&view, None).unwrap();
         let snapshot = RequestSnapshot { view, serialized };
         let mut events = Vec::new();
         let result = provider.generate(&snapshot, &CancellationToken::default(), &mut |event| {
@@ -1472,8 +1473,8 @@ fn policy_output_is_assistant_history_in_every_provider_family() {
             opaque: None,
         }.into());
         let wire = provider
-            .serialize(&request)
-            .unwrap_or_else(|error| panic!("{family}: {error}"));
+            .serialize(&request, None)
+            .unwrap_or_else(|error| panic!("{family}: {error}")).to_value();
         let mut messages = &wire;
         for key in path {
             messages = &messages[*key];
@@ -1613,8 +1614,8 @@ fn paired_media_view(family: &str, mime: &str) -> RequestView {
 fn typed_parallel_tool_output_reaches_each_actual_provider_without_pair_or_json_inference() {
     for family in MEDIA_FAMILIES {
         let wire = media_provider(family, true)
-            .serialize(&paired_media_view(family, "image/png"))
-            .unwrap();
+            .serialize(&paired_media_view(family, "image/png"), None)
+            .unwrap().to_value();
         let encoded = wire.to_string();
         assert_eq!(
             encoded.matches(MEDIA_PNG).count(),
@@ -1700,7 +1701,7 @@ fn typed_parallel_tool_output_reaches_each_actual_provider_without_pair_or_json_
         for mime in ["image/svg+xml", "audio/wav"] {
             assert_eq!(
                 media_provider(family, true)
-                    .serialize(&paired_media_view(family, mime))
+                    .serialize(&paired_media_view(family, mime), None)
                     .unwrap_err()
                     .code,
                 "unsupported_media",
@@ -1709,7 +1710,7 @@ fn typed_parallel_tool_output_reaches_each_actual_provider_without_pair_or_json_
         }
         assert_eq!(
             media_provider(family, false)
-                .serialize(&paired_media_view(family, "image/png"))
+                .serialize(&paired_media_view(family, "image/png"), None)
                 .unwrap_err()
                 .code,
             "unsupported_model_image",
@@ -1770,7 +1771,7 @@ fn external_and_sampling_media_outputs_keep_their_original_roles_in_each_protoco
                 },
                 opaque: None,
             }].into_iter().map(Into::into).collect();
-            let wire = media_provider(family, true).serialize(&request).unwrap();
+            let wire = media_provider(family, true).serialize(&request, None).unwrap().to_value();
             let encoded = wire.to_string();
             assert_eq!(encoded.matches(MEDIA_PNG).count(), 1, "{family}");
             assert_eq!(
@@ -1842,7 +1843,7 @@ fn accepted_job_and_not_dispatched_receipts_keep_their_data_and_media_in_each_pr
             };
             let rejected = json!({"kind":"not_dispatched","reason":"用户取消 🧭\noriginal request was never sent"});
             crate::execution::validate_history_pairs(&request.history).unwrap();
-            let wire = media_provider(family, true).serialize(&request).unwrap();
+            let wire = media_provider(family, true).serialize(&request, None).unwrap().to_value();
             let mut receipts = Vec::new();
             let text = |value: &Value| value.as_str().unwrap().to_string();
             match family {
@@ -1974,7 +1975,7 @@ fn opaque_continuations_keep_original_connection_version_and_model_boundaries_in
             },
         ].into_iter().map(Into::into).collect();
         let provider = media_provider(family, true);
-        let original = provider.serialize(&request).unwrap().to_string();
+        let original = provider.serialize(&request, None).unwrap().to_string();
         assert!(
             original.contains("original-private-continuation")
                 && original.contains("original-private-only"),
@@ -1984,13 +1985,13 @@ fn opaque_continuations_keep_original_connection_version_and_model_boundaries_in
             Arc::make_mut(item).opaque.as_mut().unwrap().adapter_version = "unknown-version".into();
         }
         assert_eq!(
-            provider.serialize(&request).unwrap_err().code,
+            provider.serialize(&request, None).unwrap_err().code,
             "opaque_version",
             "{family}"
         );
         for connection in ["other-tenant", ""] {
             request.binding.connection_identity = connection.into();
-            let portable = provider.serialize(&request).unwrap().to_string();
+            let portable = provider.serialize(&request, None).unwrap().to_string();
             assert!(
                 portable.contains("portable semantic answer")
                     && !portable.contains("original-private"),
@@ -2001,7 +2002,7 @@ fn opaque_continuations_keep_original_connection_version_and_model_boundaries_in
         for item in &mut request.history {
             Arc::make_mut(item).opaque.as_mut().unwrap().family = "another-protocol".into();
         }
-        let portable = provider.serialize(&request).unwrap().to_string();
+        let portable = provider.serialize(&request, None).unwrap().to_string();
         assert!(
             portable.contains("portable semantic answer") && !portable.contains("original-private"),
             "{family}"
@@ -2016,7 +2017,7 @@ fn opaque_continuations_keep_original_connection_version_and_model_boundaries_in
                 opaque.adapter_version = "1".into();
             }
             request.binding.model = "another-model".into();
-            let portable = provider.serialize(&request).unwrap().to_string();
+            let portable = provider.serialize(&request, None).unwrap().to_string();
             assert!(
                 portable.contains("portable semantic answer")
                     && !portable.contains("original-private"),
@@ -2024,4 +2025,375 @@ fn opaque_continuations_keep_original_connection_version_and_model_boundaries_in
             );
         }
     }
+}
+
+#[test]
+fn responses_fragment_reuse_respects_adapter_lease_and_latest_source_identity() {
+    for family in [responses::FAMILY, azure::FAMILY, codex::FAMILY] {
+        let config: crate::ModelSessionConfiguration=serde_json::from_value(json!({
+            "providerFamily":family,"model":"model","endpoint":"https://fixture.invalid",
+            "credentialEnvironment":null,"allowAnonymous":true,"configurationGeneration":1,"maxOutputTokens":null,
+            "azureDeployment":"deployment","azureApiVersion":"2025-04-01-preview"
+        })).unwrap();
+        let mut registry = registry::ModelAdapterRegistry::default();
+        registry.publish(0, super::builtins::adapters()).unwrap();
+        let selected = registry.select(&config).unwrap();
+        let lease = selected.binding_id();
+        let provider = selected.bind(&config, connection(vec![], 1)).unwrap();
+        let mut request = view(family);
+        request.history.push(Arc::new(ConversationItem {
+            id: "stable".into(),
+            resource_activation: None,
+            provenance: Provenance::UserInstruction {
+                input_id: "input".into(),
+            },
+            content: Content::Text {
+                text: "large prefix 汉字 🧭".repeat(8192),
+            },
+            opaque: None,
+        }));
+        let mut reuse = RequestCompileReuse::new();
+        let prepare = |reuse: &mut RequestCompileReuse, request: &RequestView, checkpoint: &str| {
+            reuse.prepare(
+                request,
+                1,
+                Some(checkpoint.into()),
+                Arc::as_ptr(&provider) as *const () as usize,
+                Some(provider.clone()),
+            );
+        };
+        prepare(&mut reuse, &request, "checkpoint");
+        let first = provider.serialize(&request, Some(&mut reuse)).unwrap();
+        prepare(&mut reuse, &request, "checkpoint");
+        let next = provider.serialize(&request, Some(&mut reuse)).unwrap();
+        assert_eq!(first.shared_fragments(&next, "input"), 1, "{family}");
+        // A preview has no authority to replace the original worker's current fragments.
+        let mut preview = request.clone();
+        preview.history.clear();
+        provider.serialize(&preview, None).unwrap();
+        let after_preview = provider.serialize(&request, Some(&mut reuse)).unwrap();
+        assert_eq!(first.shared_fragments(&after_preview, "input"), 1);
+        if family == codex::FAMILY {
+            assert!(
+                first.shares_field(&after_preview, "instructions"),
+                "the default instructions reuse one encoding"
+            );
+            let mut with_system = request.clone();
+            with_system.history.insert(
+                0,
+                Arc::new(ConversationItem {
+                    id: "system".into(),
+                    resource_activation: None,
+                    provenance: Provenance::SystemInstruction {
+                        source: "fixture".into(),
+                    },
+                    content: Content::Text {
+                        text: "stable system context 汉字".repeat(8192),
+                    },
+                    opaque: None,
+                }),
+            );
+            with_system.history.insert(
+                1,
+                Arc::new(ConversationItem {
+                    id: "second-system".into(),
+                    resource_activation: None,
+                    provenance: Provenance::SystemInstruction {
+                        source: "second".into(),
+                    },
+                    content: Content::Text {
+                        text: "second system".into(),
+                    },
+                    opaque: None,
+                }),
+            );
+            let first_system = provider.serialize(&with_system, Some(&mut reuse)).unwrap();
+            let next_system = provider.serialize(&with_system, Some(&mut reuse)).unwrap();
+            assert!(first_system.shares_field(&next_system, "instructions"));
+            Arc::make_mut(&mut with_system.history[0]).content = Content::Text {
+                text: "changed system".into(),
+            };
+            let changed_system = provider.serialize(&with_system, Some(&mut reuse)).unwrap();
+            assert!(!first_system.shares_field(&changed_system, "instructions"));
+            assert_eq!(
+                changed_system.get("instructions"),
+                Some(json!("changed system\n\nsecond system"))
+            );
+            with_system.history.swap(0, 1);
+            let reordered_system = provider.serialize(&with_system, Some(&mut reuse)).unwrap();
+            assert!(!changed_system.shares_field(&reordered_system, "instructions"));
+            assert_eq!(
+                reordered_system.get("instructions"),
+                Some(json!("second system\n\nchanged system"))
+            );
+            let default_again = provider.serialize(&request, Some(&mut reuse)).unwrap();
+            assert!(
+                !first.shares_field(&default_again, "instructions"),
+                "latest holder released the earlier default encoding"
+            );
+        }
+        let source = Arc::downgrade(&request.history[0]);
+        request.history[0] = Arc::new((*request.history[0]).clone());
+        let replacement = provider.serialize(&request, Some(&mut reuse)).unwrap();
+        assert_eq!(
+            first.shared_fragments(&replacement, "input"),
+            0,
+            "equal content with a new immutable source must miss"
+        );
+        assert!(
+            source.upgrade().is_none(),
+            "latest-only mapping releases old source allocations"
+        );
+        prepare(&mut reuse, &request, "replacement-checkpoint");
+        let changed = provider.serialize(&request, Some(&mut reuse)).unwrap();
+        assert_eq!(replacement.shared_fragments(&changed, "input"), 0);
+        request.history.push(Arc::new(ConversationItem {
+            id: "media".into(),
+            resource_activation: None,
+            provenance: Provenance::UserInstruction {
+                input_id: "media-input".into(),
+            },
+            content: Content::Media {
+                media: ResolvedMedia {
+                    media_type: "image/png".into(),
+                    data_base64: "YQ==".into(),
+                    source: OutputSource::Conversation {
+                        provenance: Provenance::UserInstruction {
+                            input_id: "media-input".into(),
+                        },
+                    },
+                },
+            },
+            opaque: None,
+        }));
+        request.history.push(Arc::new(ConversationItem {
+            id: "opaque".into(),
+            resource_activation: None,
+            provenance: Provenance::Assistant,
+            content: Content::ProviderOnly,
+            opaque: Some(OpaqueProviderItem {
+                family: family.into(),
+                connection_identity: request.binding.connection_identity.clone(),
+                adapter_version: "1".into(),
+                value: json!({"type":"reasoning","encrypted_content":"old-private","summary":[]}),
+            }),
+        }));
+        let original_payloads = provider.serialize(&request, Some(&mut reuse)).unwrap();
+        let old_bytes = original_payloads.wire_bytes();
+        if let Content::Media { media } = &mut Arc::make_mut(&mut request.history[1]).content {
+            media.data_base64 = "Yg==".into();
+        }
+        Arc::make_mut(&mut request.history[2])
+            .opaque
+            .as_mut()
+            .unwrap()
+            .value["encrypted_content"] = json!("new-private");
+        let updated_payloads = provider.serialize(&request, Some(&mut reuse)).unwrap();
+        assert_eq!(
+            original_payloads.shared_fragments(&updated_payloads, "input"),
+            1,
+            "only untouched text shares a fragment after media/opaque COW"
+        );
+        assert!(updated_payloads.to_string().contains("new-private"));
+        assert!(updated_payloads
+            .to_string()
+            .contains("data:image/png;base64,Yg=="));
+        assert_eq!(
+            original_payloads.wire_bytes(),
+            old_bytes,
+            "old prepared bytes remain immutable"
+        );
+        for change in 0..5 {
+            let previous = provider.serialize(&request, Some(&mut reuse)).unwrap();
+            match change {
+                0 => request.binding.configuration_generation += 1,
+                1 => request.binding.tool_schema_generation += 1,
+                2 => request.binding.model.push_str("-changed"),
+                3 => request.binding.connection_identity.push_str("-changed"),
+                _ => {
+                    request.binding.tools[0].schema =
+                        json!({"type":"object","properties":{"changed":{"type":"string"}}})
+                }
+            }
+            prepare(&mut reuse, &request, "replacement-checkpoint");
+            let next = provider.serialize(&request, Some(&mut reuse)).unwrap();
+            assert_eq!(
+                previous.shared_fragments(&next, "input"),
+                0,
+                "identity change {change}, {family}"
+            );
+        }
+        let previous = provider.serialize(&request, Some(&mut reuse)).unwrap();
+        reuse.prepare(
+            &request,
+            2,
+            Some("replacement-checkpoint".into()),
+            Arc::as_ptr(&provider) as *const () as usize,
+            Some(provider.clone()),
+        );
+        let epoch_changed = provider.serialize(&request, Some(&mut reuse)).unwrap();
+        assert_eq!(previous.shared_fragments(&epoch_changed, "input"), 0);
+        let other = registry
+            .select(&config)
+            .unwrap()
+            .bind(&config, connection(vec![], 1))
+            .unwrap();
+        reuse.prepare(
+            &request,
+            2,
+            Some("replacement-checkpoint".into()),
+            Arc::as_ptr(&other) as *const () as usize,
+            Some(other.clone()),
+        );
+        let adapter_changed = other.serialize(&request, Some(&mut reuse)).unwrap();
+        assert_eq!(
+            epoch_changed.shared_fragments(&adapter_changed, "input"),
+            0,
+            "a different live adapter allocation/lease cannot inherit fragments"
+        );
+        prepare(&mut reuse, &request, "replacement-checkpoint");
+        provider.serialize(&request, Some(&mut reuse)).unwrap();
+        // A populated cache never bypasses the actual pinned adapter's admission check.
+        assert!(registry.revoke_binding(lease));
+        assert_eq!(
+            provider
+                .serialize(&request, Some(&mut reuse))
+                .unwrap_err()
+                .code,
+            "model_adapter_binding"
+        );
+        let source = Arc::downgrade(&request.history[0]);
+        drop(request);
+        drop(reuse);
+        assert!(
+            source.upgrade().is_none(),
+            "Run-local cache lifetime ends with its holder"
+        );
+    }
+}
+
+#[test]
+fn frozen_bedrock_body_is_identical_for_durable_recovery_signing_and_real_http() {
+    use sha2::{Digest, Sha256};
+    use std::io::{Read, Write};
+    use std::sync::Mutex;
+    struct Signing(Mutex<Vec<String>>);
+    impl CredentialResolver for Signing {
+        fn headers(
+            &self,
+            _: Option<&str>,
+            _: &CancellationToken,
+        ) -> Result<reqwest::header::HeaderMap, ModelFailure> {
+            panic!("Bedrock must request body-bound credentials")
+        }
+        fn request_headers(
+            &self,
+            _: Option<&str>,
+            dispatch: &CredentialDispatch,
+            _: &CancellationToken,
+        ) -> Result<reqwest::header::HeaderMap, ModelFailure> {
+            self.0.lock().unwrap().push(dispatch.payload_sha256.clone());
+            let mut headers = reqwest::header::HeaderMap::new();
+            headers.insert("authorization", "Bearer local-fixture".parse().unwrap());
+            Ok(headers)
+        }
+    }
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let endpoint = format!(
+        "http://{}/model/model/converse-stream",
+        listener.local_addr().unwrap()
+    );
+    let server = std::thread::spawn(move || {
+        let (mut socket, _) = listener.accept().unwrap();
+        socket
+            .set_read_timeout(Some(std::time::Duration::from_secs(10)))
+            .unwrap();
+        let mut received = Vec::new();
+        let (body_start, length) = loop {
+            let mut buffer = [0u8; 4096];
+            let read = socket.read(&mut buffer).unwrap();
+            assert_ne!(read, 0);
+            received.extend_from_slice(&buffer[..read]);
+            if let Some(at) = received.windows(4).position(|bytes| bytes == b"\r\n\r\n") {
+                let headers = std::str::from_utf8(&received[..at])
+                    .unwrap()
+                    .to_ascii_lowercase();
+                let length = headers
+                    .lines()
+                    .find_map(|line| line.strip_prefix("content-length:"))
+                    .unwrap()
+                    .trim()
+                    .parse::<usize>()
+                    .unwrap();
+                break (at + 4, length);
+            }
+        };
+        while received.len() < body_start + length {
+            let mut buffer = [0u8; 4096];
+            let read = socket.read(&mut buffer).unwrap();
+            assert_ne!(read, 0);
+            received.extend_from_slice(&buffer[..read]);
+        }
+        let response = include_bytes!("../../tests/fixtures/bedrock-converse.bin");
+        write!(socket,"HTTP/1.1 200 OK\r\nContent-Type: application/vnd.amazon.eventstream\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",response.len()).unwrap();
+        socket.write_all(response).unwrap();
+        received[body_start..body_start + length].to_vec()
+    });
+    let credentials = Arc::new(Signing(Mutex::new(Vec::new())));
+    let provider = bedrock::BedrockProvider::new(Connection::new(
+        endpoint,
+        credentials.clone(),
+        Arc::new(ReqwestTransport::new(|| {
+            reqwest::Client::builder().no_proxy()
+        })),
+    ));
+    let mut view = view(bedrock::FAMILY);
+    view.history.push(Arc::new(ConversationItem {
+        id: "large".into(),
+        resource_activation: None,
+        provenance: Provenance::UserInstruction {
+            input_id: "input".into(),
+        },
+        content: Content::Text {
+            text: "汉字 🧭 \"quoted\"\n".repeat(8192),
+        },
+        opaque: None,
+    }));
+    let body = provider.serialize(&view, None).unwrap();
+    // Deliberately noncanonical valid JSON proves no downstream Value re-encoding can hide.
+    let serialized: RequestBody =
+        serde_json::from_str(&serde_json::to_string_pretty(&body.to_value()).unwrap()).unwrap();
+    let snapshot = RequestSnapshot { view, serialized };
+    let expected = snapshot.serialized.wire_bytes();
+    assert_eq!(
+        expected.as_ptr(),
+        snapshot.clone().serialized.wire_bytes().as_ptr()
+    );
+    let directory = std::env::temp_dir().join(format!("varin-wire-body-{}", uuid::Uuid::new_v4()));
+    let store = crate::content::ContentStore::open(directory.clone()).unwrap();
+    let reference = store.save_snapshot(&snapshot).unwrap();
+    drop(store);
+    let recovered = crate::content::ContentStore::open(directory.clone())
+        .unwrap()
+        .load_snapshot(&reference)
+        .unwrap();
+    assert_eq!(recovered.serialized.wire_bytes(), expected);
+    assert_eq!(
+        provider
+            .generate(&recovered, &CancellationToken::default(), &mut |_| Ok(()))
+            .unwrap(),
+        FinishReason::ToolCalls
+    );
+    let sent = server.join().unwrap();
+    assert_eq!(
+        sent.as_slice(),
+        expected.as_ref(),
+        "real reqwest sends the durably frozen bytes verbatim"
+    );
+    assert_eq!(
+        *credentials.0.lock().unwrap(),
+        vec![hex::encode(Sha256::digest(&sent))],
+        "signing hashes precisely those HTTP bytes"
+    );
+    std::fs::remove_dir_all(directory).unwrap();
 }

@@ -178,7 +178,7 @@ impl Harness {
                         binding,
                         history: vec![],
                     },
-                    serialized: json!({}),
+                    serialized: json!({}).into(),
                 }.into(),
             },
         );

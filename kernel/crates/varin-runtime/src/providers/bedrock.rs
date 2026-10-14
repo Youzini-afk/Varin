@@ -81,7 +81,7 @@ impl ModelProvider for BedrockProvider {
         })
     }
 
-    fn serialize(&self, view: &RequestView) -> Result<Value, ExecutionError> {
+    fn serialize(&self, view: &RequestView, _reuse: Option<&mut RequestCompileReuse>) -> Result<RequestBody, ExecutionError> {
         validate_view(view, FAMILY)?;
         validate_images(view, &self.connection)?;
         let mut messages = Vec::new();
@@ -166,7 +166,7 @@ impl ModelProvider for BedrockProvider {
         if !view.binding.tools.is_empty() {
             body["toolConfig"] = json!({"tools":view.binding.tools.iter().map(|t|json!({"toolSpec":{"name":t.name,"description":t.description,"inputSchema":{"json":t.schema}}})).collect::<Vec<_>>()});
         }
-        Ok(body)
+        Ok(body.into())
     }
     fn generate(
         &self,
@@ -180,7 +180,7 @@ impl ModelProvider for BedrockProvider {
         let dispatch = CredentialDispatch {
             method: "POST".into(),
             endpoint: self.connection.endpoint.clone(),
-            payload_sha256: hex::encode(Sha256::digest(request_body(&request.serialized)?)),
+            payload_sha256: hex::encode(Sha256::digest(request.serialized.wire_bytes())),
         };
         let headers = self.connection.credentials.request_headers(
             request.view.binding.credential_ref.as_deref(),

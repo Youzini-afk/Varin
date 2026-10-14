@@ -69,8 +69,12 @@ impl ModelProvider for MistralProvider {
         self.inner.request_budget_protocol()
     }
 
-    fn serialize(&self, view: &RequestView) -> Result<Value, ExecutionError> {
-        let mut body = self.inner.serialize(view)?;
+    fn serialize(
+        &self,
+        view: &RequestView,
+        _reuse: Option<&mut RequestCompileReuse>,
+    ) -> Result<RequestBody, ExecutionError> {
+        let mut body = self.inner.compile_body(view)?;
         body.as_object_mut().expect("compiled object").remove("n");
         if let Some(mode) = &self.prompt_mode {
             body["prompt_mode"] = json!(mode);
@@ -127,7 +131,7 @@ impl ModelProvider for MistralProvider {
                 }
             }
         }
-        Ok(body)
+        Ok(body.into())
     }
     fn generate(
         &self,

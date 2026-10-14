@@ -486,7 +486,7 @@ impl Fixture {
                 },
                 history: vec![],
             },
-            serialized: json!({}),
+            serialized: json!({}).into(),
         };
         let epoch = db.epoch();
         let run = receipt.run_id.clone();
@@ -681,7 +681,7 @@ impl Fixture {
                 },
                 history: vec![],
             },
-            serialized: json!({}),
+            serialized: json!({}).into(),
         };
         self.db
             .commit_execution(

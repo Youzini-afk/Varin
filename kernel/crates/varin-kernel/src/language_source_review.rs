@@ -38,7 +38,7 @@ const SCRIPT_CALLS: usize = 10;
 
 struct Script;
 impl ModelProvider for Script {
-    fn serialize(&self, view: &RequestView) -> Result<Value, ExecutionError> {
+    fn serialize(&self, view: &RequestView, reuse: Option<&mut varin_runtime::execution::RequestCompileReuse>) -> Result<varin_runtime::execution::RequestBody, ExecutionError> {
         // Use the ordinary provider serialization too, without an external HTTP request.
         use varin_runtime::providers::{
             Connection, EnvironmentCredentialResolver, ReqwestTransport,
@@ -48,7 +48,7 @@ impl ModelProvider for Script {
             Arc::new(EnvironmentCredentialResolver::default()),
             Arc::new(ReqwestTransport::default()),
         ))
-        .serialize(view)
+        .serialize(view, reuse)
     }
     fn generate(
         &self,

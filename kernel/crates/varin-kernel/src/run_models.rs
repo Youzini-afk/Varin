@@ -304,8 +304,8 @@ impl ModelProvider for SelectedProvider {
         self.primary.request_budget_protocol()
     }
 
-    fn serialize(&self, view: &RequestView) -> Result<serde_json::Value, ExecutionError> {
-        self.primary.serialize(view)
+    fn serialize(&self, view: &RequestView, reuse: Option<&mut varin_runtime::execution::RequestCompileReuse>) -> Result<varin_runtime::execution::RequestBody, ExecutionError> {
+        self.primary.serialize(view, reuse)
     }
     fn generate(
         &self,

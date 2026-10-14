@@ -18,8 +18,8 @@ fn bot_scope_waits_for_real_provider_and_operation_workers_then_preserves_unknow
         release: Mutex<mpsc::Receiver<()>>,
     }
     impl ModelProvider for HeldProvider {
-        fn serialize(&self, view: &RequestView) -> Result<Value, ExecutionError> {
-            Ok(serde_json::to_value(view).unwrap())
+        fn serialize(&self, view: &RequestView, _reuse: Option<&mut crate::execution::RequestCompileReuse>) -> Result<crate::execution::RequestBody, ExecutionError> {
+            Ok(serde_json::to_value(view).unwrap().into())
         }
         fn generate(
             &self,
@@ -108,7 +108,7 @@ fn bot_scope_waits_for_real_provider_and_operation_workers_then_preserves_unknow
                 binding,
                 history: vec![],
             },
-            serialized: json!({"original":"aux-candidate"}),
+            serialized: json!({"original":"aux-candidate"}).into(),
         };
         owner
             .commit_execution(

@@ -1032,7 +1032,7 @@ fn begin_package_call(db: &mut Catalog, params: Value) -> Result<Value, KernelEr
                     binding,
                     history: vec![],
                 },
-                serialized: json!({"fixture":true}),
+                serialized: json!({"fixture":true}).into(),
             }
             .into(),
         },
@@ -1186,7 +1186,7 @@ fn coordinator_read(
                         binding: request.clone(),
                         history: vec![],
                     },
-                    serialized: json!({"fixture":true}),
+                    serialized: json!({"fixture":true}).into(),
                 }.into(),
             },
         )?;
@@ -1634,7 +1634,7 @@ fn managed_read_receipt_survives_lost_reply_revoke_gc_and_reopen_until_original_
 
 struct NoModel;
 impl ModelProvider for NoModel {
-    fn serialize(&self, _: &RequestView) -> Result<Value, ExecutionError> {
+    fn serialize(&self, _: &RequestView, _reuse: Option<&mut varin_runtime::execution::RequestCompileReuse>) -> Result<varin_runtime::execution::RequestBody, ExecutionError> {
         panic!("policy-only fixture cannot compile a model request")
     }
     fn generate(
@@ -2080,7 +2080,7 @@ fn environment_forward_canonical_acceptance_survives_unknown_and_terminal_host_r
                     binding,
                     history: vec![],
                 },
-                serialized: json!({"fixture":true}),
+                serialized: json!({"fixture":true}).into(),
             }.into(),
         },
     )
@@ -2319,7 +2319,7 @@ fn native_file_followup(
                     binding: request,
                     history: vec![],
                 },
-                serialized: json!({"fixture":true}),
+                serialized: json!({"fixture":true}).into(),
             }.into(),
         },
     )?;

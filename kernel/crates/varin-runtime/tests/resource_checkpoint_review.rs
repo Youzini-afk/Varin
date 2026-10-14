@@ -175,7 +175,7 @@ fn model_call(db: &mut Catalog, receipt: &Receipt, checkpoint: &str) -> ToolOrig
             binding,
             history: vec![],
         },
-        serialized: json!({"fixture":true}),
+        serialized: json!({"fixture":true}).into(),
     };
     let epoch = db.epoch();
     db.commit_execution(
@@ -709,7 +709,7 @@ fn compaction_copies_original_resource_bytes_even_before_previous_summary_bounda
             binding,
             history: vec![],
         },
-        serialized: json!({}),
+        serialized: json!({}).into(),
     };
     let epoch = db.epoch();
     for record in [
@@ -860,8 +860,8 @@ fn projection(db: &Catalog, receipt: &Receipt) -> ContextProjection {
 
 struct ResourceModel(std::sync::Mutex<Vec<RequestSnapshot>>);
 impl ModelProvider for ResourceModel {
-    fn serialize(&self, view: &RequestView) -> Result<Value, ExecutionError> {
-        Ok(serde_json::to_value(view).unwrap())
+    fn serialize(&self, view: &RequestView, _reuse: Option<&mut varin_runtime::execution::RequestCompileReuse>) -> Result<varin_runtime::execution::RequestBody, ExecutionError> {
+        Ok(serde_json::to_value(view).unwrap().into())
     }
     fn generate(
         &self,

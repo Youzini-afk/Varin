@@ -51,7 +51,7 @@ fn request_snapshot(receipt: &Receipt) -> varin_runtime::execution::RequestSnaps
             },
             history: vec![],
         },
-        serialized: json!({"model":"mock"}),
+        serialized: json!({"model":"mock"}).into(),
     }
 }
 
@@ -310,8 +310,8 @@ mod actual_engines {
 
     struct Provider(AtomicUsize);
     impl ModelProvider for Provider {
-        fn serialize(&self, v: &RequestView) -> Result<Value, ExecutionError> {
-            Ok(serde_json::to_value(v).unwrap())
+        fn serialize(&self, v: &RequestView, _reuse: Option<&mut varin_runtime::execution::RequestCompileReuse>) -> Result<varin_runtime::execution::RequestBody, ExecutionError> {
+            Ok(serde_json::to_value(v).unwrap().into())
         }
         fn generate(
             &self,

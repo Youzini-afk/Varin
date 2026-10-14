@@ -13,9 +13,9 @@ struct Model {
     views: Arc<Mutex<Vec<RequestView>>>,
 }
 impl ModelProvider for Model {
-    fn serialize(&self, view: &RequestView) -> Result<Value, ExecutionError> {
+    fn serialize(&self, view: &RequestView, _reuse: Option<&mut varin_runtime::execution::RequestCompileReuse>) -> Result<varin_runtime::execution::RequestBody, ExecutionError> {
         self.views.lock().unwrap().push(view.clone());
-        Ok(json!({"request":view.request_id}))
+        Ok(json!({"request":view.request_id}).into())
     }
     fn generate(
         &self,
@@ -698,9 +698,9 @@ struct NestedModel {
     views: Arc<Mutex<Vec<RequestView>>>,
 }
 impl ModelProvider for NestedModel {
-    fn serialize(&self, view: &RequestView) -> Result<Value, ExecutionError> {
+    fn serialize(&self, view: &RequestView, _reuse: Option<&mut varin_runtime::execution::RequestCompileReuse>) -> Result<varin_runtime::execution::RequestBody, ExecutionError> {
         self.views.lock().unwrap().push(view.clone());
-        Ok(Value::Null)
+        Ok(Value::Null.into())
     }
     fn generate(
         &self,

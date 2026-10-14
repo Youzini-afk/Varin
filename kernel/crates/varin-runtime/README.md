@@ -84,10 +84,25 @@ writing Pi session files or the Host harness's existing execution records.
   opaque payloads. A worker-local latest projection retains a sanitized item only while its actual
   source `Arc` and provider family/connection match; foreign provider-only items remain omitted.
   Changed checkpoints and connection identities replace those derived entries without mutating original
-  history. Current memory, Goal and policy evidence are still freshly projected. Vector assembly and
-  validation scan items; media storage projection can still clone semantic bodies, while durable JSON
-  encoding and provider serialization still visit the complete request. Provider wire fragments and
-  HTTP encoding are not reused, and this is not evidence of remote cache discounts.
+  history. Current memory, Goal and policy evidence are still freshly projected. `RequestBody` is the
+  single provider-body contract: Responses, Azure Responses and Codex retain encoded independent-item
+  fragments and tool schemas in the original Run worker's latest-only holder. Codex also retains its
+  latest ordered system-item sequence and joined instructions encoding. Reuse requires the actual
+  adapter/lease, Run/epoch/checkpoint, branch ancestry, configuration, schema, model, connection and
+  immutable source identity. Preview requests use no holder. Serializer lease validation and dispatch
+  credential resolution still run on every step. Other protocols retain their complete stateful/grouped
+  compilers; this does not infer independent-item semantics for Chat, Google or Anthropic.
+  Outer configuration finishes before the final body freezes. HTTP and Bedrock request signing share
+  one byte allocation, and the existing ContentStore embeds and reopens those exact raw JSON bytes.
+  Snapshot storage borrows semantic text, tool data, opaque values and binding metadata while building
+  only stored-media references; it does not clone the entire semantic view or rebuild a provider Value.
+  Capacity sums the original UTF-8 estimate contributions, excluding media/signatures as before;
+  calibration compares exact canonical fragments and each protocol's actual final-block grouping.
+  Vector assembly and validation still scan items. Freezing still copies all fragments into one complete
+  HTTP buffer; snapshot encoding, content chunking/hashing and media base64 validation/decoding and
+  existing-object verification remain real costs. Cached raw fragments coexist with each complete wire
+  buffer, so this is not a general peak-memory reduction or remote incremental-send/cache-discount claim.
+  Request-budget reads still hydrate their latest durable observation; they have no additional cache.
 - User answers prepare content outside Catalog and commit its identity with the original question,
   branch, wait and owner guards. Equal retries deliver once; conflicting answers and late cancelled
   work fail. Waiting/cancellation lookup selects the actual Run's questions instead of decoding all

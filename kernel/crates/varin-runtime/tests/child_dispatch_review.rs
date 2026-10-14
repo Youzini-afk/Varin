@@ -1426,7 +1426,7 @@ fn admit_native_child_writer(
                     binding,
                     history: vec![],
                 },
-                serialized: json!({"fixture":"native child writer"}),
+                serialized: json!({"fixture":"native child writer"}).into(),
             }.into(),
         },
     )

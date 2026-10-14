@@ -65,8 +65,8 @@ impl ModelProvider for WithPolicyModels {
         self.primary.request_budget_protocol()
     }
 
-    fn serialize(&self, view: &RequestView) -> Result<Value, ExecutionError> {
-        self.primary.serialize(view)
+    fn serialize(&self, view: &RequestView, reuse: Option<&mut RequestCompileReuse>) -> Result<RequestBody, ExecutionError> {
+        self.primary.serialize(view, reuse)
     }
     fn generate(
         &self,
@@ -306,7 +306,7 @@ impl<
             history: request_history.into_iter().map(Into::into).collect(),
         };
         let serialized = guarded("provider_serialize_panicked", || {
-            bound.provider.serialize(&view)
+            bound.provider.serialize(&view, None)
         })?;
         let snapshot = RequestSnapshot { view, serialized };
         let intent = PolicyModelIntent::PolicyModelJobV1 {

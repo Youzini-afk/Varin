@@ -15,7 +15,7 @@ struct ControlledModel {
     wires: Arc<Mutex<Vec<Value>>>,
 }
 impl ModelProvider for ControlledModel {
-    fn serialize(&self, view: &RequestView) -> Result<Value, ExecutionError> {
+    fn serialize(&self, view: &RequestView, reuse: Option<&mut varin_runtime::execution::RequestCompileReuse>) -> Result<varin_runtime::execution::RequestBody, ExecutionError> {
         use varin_runtime::providers::{
             Connection, EnvironmentCredentialResolver, ReqwestTransport,
         };
@@ -25,7 +25,7 @@ impl ModelProvider for ControlledModel {
                 Arc::new(EnvironmentCredentialResolver::default()),
                 Arc::new(ReqwestTransport::default()),
             ));
-        let wire = provider.serialize(view)?;
+        let wire = provider.serialize(view, reuse)?;
         self.wires
             .lock()
             .unwrap()

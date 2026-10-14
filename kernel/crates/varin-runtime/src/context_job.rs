@@ -415,7 +415,7 @@ impl ContextPreparation for SummaryCapacity {
         &self,
         _: u64,
         view: &RequestView,
-        serialized: &Value,
+        serialized: &RequestBody,
         _: Option<crate::context_capacity::RequestBudgetProtocol>,
         _: &dyn Fn(
             ContextProjection,
@@ -441,14 +441,14 @@ impl ModelProvider for SummaryProvider {
         self.0.request_budget_protocol()
     }
 
-    fn serialize(&self, view: &RequestView) -> Result<Value, ExecutionError> {
+    fn serialize(&self, view: &RequestView, reuse: Option<&mut RequestCompileReuse>) -> Result<RequestBody, ExecutionError> {
         if !view.binding.tools.is_empty() {
             return Err(ExecutionError::new(
                 "compaction_tools",
                 "summary requests cannot carry tools",
             ));
         }
-        self.0.serialize(view)
+        self.0.serialize(view, reuse)
     }
     fn generate(
         &self,
@@ -543,7 +543,7 @@ impl AgentPolicy for SummaryPolicy {
 /// Text candidates never bind a model adapter, resolve credentials, serialize, or dispatch.
 pub struct NoModelProvider;
 impl ModelProvider for NoModelProvider {
-    fn serialize(&self, _: &RequestView) -> Result<Value, ExecutionError> {
+    fn serialize(&self, _: &RequestView, _: Option<&mut RequestCompileReuse>) -> Result<RequestBody, ExecutionError> {
         Err(ExecutionError::new(
             "compaction_no_model",
             "text compaction has no model provider",

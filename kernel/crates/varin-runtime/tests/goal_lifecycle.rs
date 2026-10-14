@@ -108,7 +108,7 @@ impl Fixture {
                     },
                     history: vec![],
                 },
-                serialized: json!({}),
+                serialized: json!({}).into(),
             }.into(),
         });
     }
@@ -362,8 +362,8 @@ struct UserAfterGoal {
     input: std::sync::Mutex<Option<varin_runtime::catalog::inputs::InputReceipt>>,
 }
 impl ModelProvider for UserAfterGoal {
-    fn serialize(&self, v: &RequestView) -> Result<serde_json::Value, ExecutionError> {
-        Ok(serde_json::to_value(v).unwrap())
+    fn serialize(&self, v: &RequestView, _reuse: Option<&mut varin_runtime::execution::RequestCompileReuse>) -> Result<varin_runtime::execution::RequestBody, ExecutionError> {
+        Ok(serde_json::to_value(v).unwrap().into())
     }
     fn generate(
         &self,
@@ -600,7 +600,7 @@ fn goal_edit_after_serialization_recompiles_before_the_only_paid_dispatch() {
         seen: Mutex<Vec<RequestSnapshot>>,
     }
     impl ModelProvider for Edit {
-        fn serialize(&self, v: &RequestView) -> Result<serde_json::Value, ExecutionError> {
+        fn serialize(&self, v: &RequestView, _reuse: Option<&mut varin_runtime::execution::RequestCompileReuse>) -> Result<varin_runtime::execution::RequestBody, ExecutionError> {
             if !self.edited.swap(true, Ordering::SeqCst) {
                 let preparation = self
                     .db
@@ -615,7 +615,7 @@ fn goal_edit_after_serialization_recompiles_before_the_only_paid_dispatch() {
                     .admit_goal_mutation(prepared)
                     .unwrap();
             }
-            Ok(serde_json::to_value(v).unwrap())
+            Ok(serde_json::to_value(v).unwrap().into())
         }
         fn generate(
             &self,

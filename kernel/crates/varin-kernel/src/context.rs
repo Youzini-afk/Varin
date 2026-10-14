@@ -74,7 +74,7 @@ impl ContextPreparation for CapacityPreparation {
         &self,
         epoch: u64,
         view: &RequestView,
-        serialized: &Value,
+        serialized: &varin_runtime::execution::RequestBody,
         budget_protocol: Option<varin_runtime::context_capacity::RequestBudgetProtocol>,
         preview: &dyn Fn(
             ContextProjection,
@@ -502,7 +502,7 @@ mod tests {
             let result = preparation.prepare_request(
                 epoch,
                 &view,
-                &json!({"input":"Original source"}),
+                &json!({"input":"Original source"}).into(),
                 None,
                 &|_| panic!("No candidate may be previewed"),
                 &CancellationToken::default(),

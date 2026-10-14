@@ -125,7 +125,7 @@ impl Fixture {
                     binding,
                     history: vec![],
                 },
-                serialized: json!({}),
+                serialized: json!({}).into(),
             }.into(),
         });
         fixture.record(ExecutionRecord::ModelDispatched {
@@ -1092,7 +1092,7 @@ fn report_dependency(f: &mut Fixture, request: &str, wait: Option<String>) {
                 binding,
                 history: vec![],
             },
-            serialized: json!({}),
+            serialized: json!({}).into(),
         }.into(),
     });
     f.record(ExecutionRecord::ModelDispatched {

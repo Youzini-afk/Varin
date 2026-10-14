@@ -18,7 +18,7 @@ use input_admission::InputAdmission;
 
 struct NoModel;
 impl ModelProvider for NoModel {
-    fn serialize(&self, _: &RequestView) -> Result<Value, ExecutionError> {
+    fn serialize(&self, _: &RequestView, _reuse: Option<&mut varin_runtime::execution::RequestCompileReuse>) -> Result<varin_runtime::execution::RequestBody, ExecutionError> {
         panic!("policy domains cannot fabricate a model request")
     }
     fn generate(
@@ -33,8 +33,8 @@ impl ModelProvider for NoModel {
 /// Simulated provider output travels through one actual ModelStep and legal tool pairing.
 struct QuestionModel;
 impl ModelProvider for QuestionModel {
-    fn serialize(&self, view: &RequestView) -> Result<Value, ExecutionError> {
-        Ok(serde_json::to_value(view).unwrap())
+    fn serialize(&self, view: &RequestView, _reuse: Option<&mut varin_runtime::execution::RequestCompileReuse>) -> Result<varin_runtime::execution::RequestBody, ExecutionError> {
+        Ok(serde_json::to_value(view).unwrap().into())
     }
     fn generate(
         &self,

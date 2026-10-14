@@ -82,9 +82,9 @@ struct Model {
     snapshots: Arc<Mutex<Vec<RequestView>>>,
 }
 impl ModelProvider for Model {
-    fn serialize(&self, view: &RequestView) -> Result<Value, ExecutionError> {
+    fn serialize(&self, view: &RequestView, _reuse: Option<&mut varin_runtime::execution::RequestCompileReuse>) -> Result<varin_runtime::execution::RequestBody, ExecutionError> {
         self.snapshots.lock().unwrap().push(view.clone());
-        Ok(serde_json::to_value(view).unwrap())
+        Ok(serde_json::to_value(view).unwrap().into())
     }
     fn generate(
         &self,

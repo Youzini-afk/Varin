@@ -700,8 +700,8 @@ impl ModelProvider for SelectedPolicyModels {
         self.primary.request_budget_protocol()
     }
 
-    fn serialize(&self, view: &RequestView) -> Result<Value, ExecutionError> {
-        self.primary.serialize(view)
+    fn serialize(&self, view: &RequestView, reuse: Option<&mut varin_runtime::execution::RequestCompileReuse>) -> Result<varin_runtime::execution::RequestBody, ExecutionError> {
+        self.primary.serialize(view, reuse)
     }
     fn generate(
         &self,

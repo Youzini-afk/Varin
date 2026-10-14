@@ -25,8 +25,8 @@ impl ModelProvider for ControlledModel {
     ) -> Option<varin_runtime::context_capacity::RequestBudgetProtocol> {
         self.serializer.request_budget_protocol()
     }
-    fn serialize(&self, view: &RequestView) -> Result<Value, ExecutionError> {
-        self.serializer.serialize(view)
+    fn serialize(&self, view: &RequestView, reuse: Option<&mut varin_runtime::execution::RequestCompileReuse>) -> Result<varin_runtime::execution::RequestBody, ExecutionError> {
+        self.serializer.serialize(view, reuse)
     }
     fn generate(
         &self,
@@ -108,7 +108,7 @@ impl ContextPreparation for ObservedContext {
         &self,
         epoch: u64,
         view: &RequestView,
-        serialized: &Value,
+        serialized: &varin_runtime::execution::RequestBody,
         protocol: Option<varin_runtime::context_capacity::RequestBudgetProtocol>,
         preview: &dyn Fn(ContextProjection) -> Result<varin_runtime::context_capacity::InputEstimate, ExecutionError>,
         cancel: &CancellationToken,
@@ -658,7 +658,7 @@ fn calibrated_scenario(with_goal: bool) {
     .unwrap();
     let mut google_view = initial.request.view.clone();
     google_view.binding.provider_family = varin_runtime::providers::google::FAMILY.into();
-    let google_request = google.serialize(&google_view).unwrap();
+    let google_request = google.serialize(&google_view, None).unwrap().to_value();
     assert!(
         google_request["systemInstruction"]["parts"]
             .as_array()
@@ -684,7 +684,7 @@ fn calibrated_scenario(with_goal: bool) {
             .unwrap();
         assert!(goal < user);
         assert!(!initial.request.view.history[goal].provenance.is_system());
-        assert_eq!(initial.request.serialized["input"][goal]["role"], "user");
+        assert_eq!(initial.request.serialized.to_value()["input"][goal]["role"], "user");
     }
     let old_estimate =
         estimate_request(&initial.request.view, &initial.request.serialized).estimated_tokens;
