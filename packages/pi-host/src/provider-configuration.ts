@@ -909,7 +909,7 @@ export class ProviderConfigurationManager {
    * Endpoint/model selection is deliberately excluded: changing routing retires a binding,
    * whereas changing a credential source revokes it. No source is hashed or persisted.
    */
-  async inferenceCredentialSources(cwd: string, providerId: string, classifierId?: string): Promise<{
+  async inferenceCredentialSources(cwd: string, providerId: string, classifierId?: string, modelType: 'classifier' | 'image' = 'classifier'): Promise<{
     configured: boolean;
     sources: unknown[];
     revision: string;
@@ -923,7 +923,7 @@ export class ProviderConfigurationManager {
       if (!value) continue;
       // Classifier headers must never inherit a same-id chat definition or modelOverrides.
       const definition = classifierId && Array.isArray(value.models) ? value.models.find(entry => isObject(entry)
-        && entry.id === classifierId && entry.type === 'classifier') : undefined;
+        && entry.id === classifierId && entry.type === modelType) : undefined;
       sources.push({ scope, apiKey: value.apiKey, headers: value.headers, authHeader: value.authHeader,
         ...(classifierId === undefined ? {} : { modelHeaders: [isObject(definition) ? definition.headers : undefined] }) });
       const info = await stat(document!.path, { bigint: true });

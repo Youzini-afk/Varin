@@ -1270,6 +1270,8 @@ export const registerCommonRequestMiddleware = (
       req.path.startsWith('/api/config/settings') ||
       req.path.startsWith('/api/agent-personalization') ||
       req.path.startsWith('/api/agent-profiles') ||
+      req.path.startsWith('/api/models') ||
+      req.path.startsWith('/api/mcp') ||
       req.path.startsWith('/api/bot-memory') ||
       req.path.startsWith('/api/computers') ||
       (req.method === 'POST' && req.path.startsWith('/api/harness/managed-execution/')) ||

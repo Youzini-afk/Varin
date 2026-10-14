@@ -11,6 +11,8 @@ export interface SelectedModel {
   samplingParams?: Record<string, unknown>;
   samplingParamsByThinkingLevel?: Partial<Record<ThreadThinkingLevel, Record<string, unknown>>>;
   compat?: Record<string, unknown>;
+  requestModelId?: string;
+  allowAnonymous?: boolean;
 }
 interface ModelAuthority extends ExistingModelAuthRuntime {
   selectedModel(providerId: string, modelId: string): Promise<SelectedModel>;
@@ -45,6 +47,7 @@ export function createModelAuthority(authority: ModelAuthority) {
   async function configurationFor(model: SelectedModel, thinkingLevel?: ThreadThinkingLevel, temperature?: number): Promise<ModelSessionConfiguration> {
     if (!families.has(model.api)) return failed('model-protocol-unavailable');
     const env = await authority.routingEnvironment(model.providerId);
+    const requestModelId = model.requestModelId ?? model.modelId;
     const anthropicOauth = model.api === 'anthropic-messages' && await authority.anthropicAuthentication?.(model.providerId, model.modelId) === 'oauth';
     const vertexAdc = model.api === 'google-vertex' && await authority.vertexAuthentication?.(model.providerId, model.modelId) === 'adc';
     const vertexDefault = model.api === 'google-vertex' && (!model.baseUrl.trim() || model.baseUrl.includes('{location}'));
@@ -79,24 +82,24 @@ export function createModelAuthority(authority: ModelAuthority) {
         case 'bedrock-converse-stream': {
           // Preserve explicit VPC/proxy endpoints. Standard catalog endpoints use the selected
           // model ARN's region, then the owner's explicit region, matching the existing SDK.
-          const region = /^arn:aws(?:-[a-z0-9-]+)?:bedrock:([a-z0-9-]+):/.exec(model.modelId)?.[1]
+          const region = /^arn:aws(?:-[a-z0-9-]+)?:bedrock:([a-z0-9-]+):/.exec(requestModelId)?.[1]
             || env.AWS_REGION || env.AWS_DEFAULT_REGION;
           if (region && /^bedrock-runtime\.[a-z0-9-]+\.amazonaws\.com(?:\.cn)?$/.test(url.hostname)) {
             if (!/^[a-z0-9-]+$/.test(region)) return failed('bedrock-region-invalid');
             url.hostname = `bedrock-runtime.${region}.amazonaws.com${region.startsWith('cn-') ? '.cn' : ''}`;
           }
-          endpoint = append(url, `model/${encodeURIComponent(model.modelId)}/converse-stream`); break;
+          endpoint = append(url, `model/${encodeURIComponent(requestModelId)}/converse-stream`); break;
         }
         case 'google-generative-ai':
-          endpoint = append(url, `models/${encodeURIComponent(model.modelId.replace(/^models\//, ''))}:streamGenerateContent`); break;
+          endpoint = append(url, `models/${encodeURIComponent(requestModelId.replace(/^models\//, ''))}:streamGenerateContent`); break;
         case 'google-vertex': {
           // Cloud API keys use express mode; ADC uses the selected project/location. A custom collection
           // base URL retains its path, matching the SDK's ResourceScope.COLLECTION contract.
           if (url.pathname.endsWith(':streamGenerateContent')) { endpoint = url.toString(); break; }
           if (!url.pathname.split('/').some(part => /^v\d+(?:beta\d*)?$/.test(part))) append(url, 'v1');
-          let modelPath = /^(publishers|projects|models)\//.test(model.modelId) ? model.modelId
-            : model.modelId.includes('/') ? `publishers/${model.modelId.split('/')[0]}/models/${model.modelId.split('/')[1]}`
-              : `publishers/google/models/${model.modelId}`;
+          let modelPath = /^(publishers|projects|models)\//.test(requestModelId) ? requestModelId
+            : requestModelId.includes('/') ? `publishers/${requestModelId.split('/')[0]}/models/${requestModelId.split('/')[1]}`
+              : `publishers/google/models/${requestModelId}`;
           if (vertexAdc && vertexDefault && !modelPath.startsWith('projects/')) {
             modelPath = `projects/${vertexProject}/locations/${vertexLocation}/${modelPath}`;
           }
@@ -113,12 +116,13 @@ export function createModelAuthority(authority: ModelAuthority) {
     const streamUsage = model.compat?.supportsUsageInStreaming !== false;
     if (model.contextWindow !== undefined && (!Number.isSafeInteger(model.contextWindow) || model.contextWindow <= 0)) return failed('model-context-capacity-invalid');
     const resolved = modelOptions(model, thinkingLevel, max, temperature);
-    const generation = Number.parseInt(createHash('sha256').update(JSON.stringify({ providerId: model.providerId,
+    const generation = Number.parseInt(createHash('sha256').update(JSON.stringify({ providerId: model.providerId, requestModelId: model.requestModelId, allowAnonymous: model.allowAnonymous,
       family: model.api, model: model.modelId, endpoint, max, deployment, apiVersion, legacy, streamUsage, acceptsImages,
       contextWindow: model.contextWindow, ...resolved, ...(model.api === 'anthropic-messages' ? { anthropicOauth } : {}) })).digest('hex').slice(0, 12), 16);
-    return { providerId: model.providerId, providerFamily: model.api, model: model.modelId, endpoint,
-      credentialEnvironment: null, allowAnonymous: false, acceptsImages, configurationGeneration: generation, maxOutputTokens: max,
+    return { providerId: model.providerId, providerFamily: model.api, model: model.requestModelId ?? model.modelId, endpoint,
+      credentialEnvironment: null, allowAnonymous: model.allowAnonymous ?? false, acceptsImages, configurationGeneration: generation, maxOutputTokens: max,
       adapterId: model.api, adapterVersion: '1', ...resolved,
+      ...(model.requestModelId ? { modelOptions: { ...(resolved.modelOptions as Record<string, unknown>), catalogModelId: model.modelId } } : {}),
       ...(model.contextWindow === undefined ? {} : { contextWindowTokens: model.contextWindow }),
       ...(model.api === 'anthropic-messages' ? { anthropicOauth } : {}),
       ...(deployment ? { azureDeployment: deployment } : {}), ...(apiVersion ? { azureApiVersion: apiVersion } : {}),
@@ -140,6 +144,7 @@ export function createModelAuthority(authority: ModelAuthority) {
     };
     return new ExistingHostCredentialOwner({ runtime: { getAuth, resolveRequest: getAuth }, providerId,
       providerFamily: configuration.providerFamily, endpoint: configuration.endpoint,
+      allowAnonymous: configuration.allowAnonymous ?? false,
       currentScope: () => authority.currentScope(providerId, configuration.model),
       currentProviderAccount: () => authority.currentProviderAccount(providerId) });
   }
@@ -171,7 +176,8 @@ export function createModelAuthority(authority: ModelAuthority) {
       if (!expectedScope) return failed('credential-selection-missing');
       const providerId = configuration.providerId || failed('provider-identity-required');
       const configuredLevel = configuration.thinkingLevel as ThreadThinkingLevel | undefined;
-      const current = await configurationFor(await authority.selectedModel(providerId, configuration.model), configuredLevel,
+      const catalogModelId = (configuration.modelOptions as { catalogModelId?: string } | undefined)?.catalogModelId ?? configuration.model;
+      const current = await configurationFor(await authority.selectedModel(providerId, catalogModelId), configuredLevel,
         (configuration.modelOptions as { temperature?: number } | undefined)?.temperature);
       if (current.configurationGeneration !== configuration.configurationGeneration || current.endpoint !== configuration.endpoint
         || current.providerFamily !== configuration.providerFamily) return failed('model-configuration-changed');

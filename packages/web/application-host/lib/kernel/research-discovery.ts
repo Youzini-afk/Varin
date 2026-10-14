@@ -2,7 +2,7 @@
 import { RESEARCH_DISCOVERY_CAPABILITY, RESEARCH_DISCOVERY_TOOL_DECLARATIONS } from '@varin/extension-builtins';
 import { parseVarinToolJson } from '@varin/extension-contract';
 import type { HostCapabilityHandler } from '@varin/extension-host';
-import { compileToolJsonSchema } from '@varin/pi-host/tool-schema';
+import { compileToolJsonSchema } from '../models/schema.js';
 import type { PiSettingsSnapshot, ScholarlySearchParams } from '@varin/protocol';
 import type { ScholarlySearchService } from '../harness/research-search.js';
 import { HarnessServiceError } from '../harness/service-error.js';

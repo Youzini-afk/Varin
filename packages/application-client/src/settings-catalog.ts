@@ -230,6 +230,12 @@ export const SETTINGS_CATALOG: readonly SettingsCatalogEntry[] = [
       keywords: ['allow', 'deny', 'ask', 'regex', 'rules'] },
   },
   {
+    id: 'harness.images', category: 'harness', owner: 'pi-settings',
+    field: { path: 'harness.images', kind: 'json', scope: 'user', note: '{generation?: {providerId, modelId} | null, editing?: {providerId, modelId} | null}; unconfigured tools are omitted' },
+    apply: 'next-run',
+    ui: { page: 'harness-tools', titleKey: 'settings.harness.images.title', keywords: ['image', 'generate', 'edit', 'model', '图片', '生图'] },
+  },
+  {
     id: 'harness.models.explore', category: 'retrieval', owner: 'pi-settings',
     fields: [
       { path: 'harness.models.explore', kind: 'json', scope: 'user', note: '{enabled?: boolean, providerId?: string, modelId?: string}; false disables the role while retaining its model' },

@@ -713,6 +713,7 @@ export const createRetrievalArtifactAccess = (
           || record.recordType.startsWith("retrieval.evidence.")
           || record.recordType === "retrieval.artifact"
           || record.recordType === "retrieval.receipt"
+          || record.recordType === 'media.resource'
         )) continue;
         if (isCollection && (persistedCollection(record) || sharedCollections.has(collectionIdOf(record) ?? ""))) continue;
         if (record.threadId === threadId) {
@@ -793,6 +794,10 @@ export const createRetrievalArtifactAccess = (
       const plainOrphans: RecordLike[] = [];
       const snapshotOrphans: RecordLike[] = [];
       for (const record of records) {
+        if (record.recordType === 'media.resource') {
+          if (record.threadId && !knownThreads.has(record.threadId)) plainOrphans.push(record);
+          continue;
+        }
         if (record.recordType === "retrieval.evidence.pending" || record.recordType === "retrieval.evidence.sealed") {
           const thread = record.threadId ? knownThreads.get(record.threadId) : undefined;
           if (!thread || !evidenceIdsForThread(thread).has(record.recordId)) {

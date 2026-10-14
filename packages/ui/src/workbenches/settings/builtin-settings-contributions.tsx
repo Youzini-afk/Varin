@@ -11,6 +11,8 @@ import { PluginsPage } from '@/components/sections/plugins';
 import { ProjectsPage } from '@/components/sections/projects/ProjectsPage';
 import { ProjectsSidebar } from '@/components/sections/projects/ProjectsSidebar';
 import { ProvidersPage } from '@/components/sections/providers/ProvidersPage';
+import { ModelConnectionsPage } from '@/components/sections/providers/ModelConnectionsPage';
+import { McpConnectionsPage } from '@/components/sections/mcp/McpConnectionsPage';
 import { ProvidersSidebar } from '@/components/sections/providers/ProvidersSidebar';
 import { RemoteInstancesPage } from '@/components/sections/remote-instances/RemoteInstancesPage';
 import { PiRuntimeSettingsPage } from '@/components/sections/runtime/PiRuntimeSettingsPage';
@@ -46,6 +48,8 @@ const implementationFor = (spec: BuiltinSettingsPageSpec): SettingsPageImplement
       case 'plugins': implementation = { renderContent: () => <PluginsPage /> }; break;
       case 'projects': implementation = { renderContent: () => <ProjectsPage />, renderSidebar: (options) => <ProjectsSidebar onItemSelect={options.onItemSelect} /> }; break;
       case 'providers': implementation = { renderContent: () => <ProvidersPage />, renderSidebar: (options) => <ProvidersSidebar onItemSelect={options.onItemSelect} /> }; break;
+      case 'model-connections': implementation = { renderContent: () => <ModelConnectionsPage /> }; break;
+      case 'mcp-connections': implementation = { renderContent: () => <McpConnectionsPage /> }; break;
       case 'remote-instances': implementation = { renderContent: () => <RemoteInstancesPage /> }; break;
       case 'runtime': implementation = { renderContent: () => <PiRuntimeSettingsPage /> }; break;
       case 'skills': implementation = { renderContent: () => <SkillsPage />, renderSidebar: (options) => <SkillsSidebar onItemSelect={options.onItemSelect} /> }; break;

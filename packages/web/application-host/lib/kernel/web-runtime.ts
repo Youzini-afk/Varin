@@ -4,7 +4,7 @@ import type { ThreadIdentity, ThreadMaterialsAPI, ThreadMaterialArtifactReadRequ
 import { WEB_CAPABILITY, WEB_TOOL_DECLARATIONS } from '@varin/extension-builtins';
 import { parseVarinToolJson } from '@varin/extension-contract';
 import type { HostCapabilityHandler } from '@varin/extension-host';
-import { compileToolJsonSchema } from '@varin/pi-host/tool-schema';
+import { compileToolJsonSchema } from '../models/schema.js';
 import {
   resolveHarnessDocumentReadingSettings,
   type DocumentReadRequest, type FetchResult, type HarnessDocumentReadingSettings, type HarnessWebDomainPolicy,

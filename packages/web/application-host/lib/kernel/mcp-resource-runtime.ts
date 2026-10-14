@@ -1,7 +1,7 @@
 /** Live handles only. Original Operations, passive inputs and ContentStore own durable facts. */
 import { randomUUID } from 'node:crypto';
-import { McpAuthorityError } from '@varin/pi-host/mcp-errors';
-import type { McpAuthorityLease, McpAuthorityService, McpResourceObserver, McpResourceChange, McpResourceRelease } from '@varin/pi-host/mcp-authority';
+import { McpAuthorityError } from '../mcp/errors.js';
+import type { McpAuthorityLease, McpAuthorityService, McpResourceObserver, McpResourceChange, McpResourceRelease } from '../mcp/authority.js';
 import type { KernelClient } from './kernel-client.js';
 import type { AgentRuntimeClient } from './agent-runtime-client.js';
 import type { HostToolCall, ToolExecutionReceipt } from './tool-bridge.js';

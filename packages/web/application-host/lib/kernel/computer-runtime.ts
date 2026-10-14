@@ -7,7 +7,7 @@ import { parseVarinToolJson } from '@varin/extension-contract';
 import type { HostCapabilityHandler } from '@varin/extension-host';
 import type { ThreadComputerAPI, ThreadIdentity } from '@varin/application-client';
 import { computerWorkKey, sameComputerExecution, parseComputerWorkRef, type ComputerActParams, type ComputerObserveParams, type ComputerWorkRef, type ComputerActor, type ComputerAccessRequest, type ComputerExecutionRef, type ComputerWorkScope } from '@varin/protocol';
-import { compileToolJsonSchema } from '@varin/pi-host/tool-schema';
+import { compileToolJsonSchema } from '../models/schema.js';
 import { ComputerEffectError, type ComputerService, type ComputerExecutionEvidence } from '../computer/computer-service.js';
 import { HarnessServiceError } from '../harness/service-error.js';
 import type { PendingComputerControlEvent, PendingComputerControlCancellation } from '../computer/computer-records.js';

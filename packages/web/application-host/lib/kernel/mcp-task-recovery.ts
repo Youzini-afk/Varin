@@ -1,8 +1,8 @@
 /** Reopen only the original Catalog Task holder. No Run restart, task listing or dispatch. */
 import { isDeepStrictEqual } from 'node:util';
 import type { ManagedMcpTaskCreationReceipt } from '../harness/managed-mcp-contract.js';
-import { McpTaskRequestError } from '@varin/pi-host/mcp-errors';
-import type { McpAuthority, McpTaskLease } from '@varin/pi-host/mcp-authority';
+import { McpTaskRequestError } from '../mcp/errors.js';
+import type { McpAuthority, McpTaskLease } from '../mcp/authority.js';
 import { createMcpOriginalOwnerRecovery } from './mcp-original-owner.js';
 import { createManagedMcpTaskLease, requestManagedMcpTask } from './managed-mcp-task-lease.js';
 import type { KernelClient } from './kernel-client.js';

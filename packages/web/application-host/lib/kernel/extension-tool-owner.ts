@@ -19,7 +19,7 @@ import {
   validatePermissionRule,
   type PermissionPolicy,
 } from '@varin/protocol';
-import { compileToolJsonSchema } from '@varin/pi-host/tool-schema';
+import { compileToolJsonSchema } from '../models/schema.js';
 import type { ThreadToolPreparation } from '@varin/application-client';
 import type { KernelClient } from './kernel-client.js';
 import type {
@@ -84,7 +84,12 @@ export interface ExtensionToolLease {
   lease: HostToolLease;
   revocationSignal: AbortSignal;
 }
-export type ExtensionToolConfiguration = (descriptor: VarinExtensionServiceProvision, original?: string | null) => string | null;
+export interface ExtensionToolConfiguration {
+  (descriptor: VarinExtensionServiceProvision, original?: string | null): string | null;
+  enabled?(descriptor: VarinExtensionServiceProvision): boolean;
+  declaration?(descriptor: VarinExtensionServiceProvision, identity: string | null): VarinExtensionServiceProvision;
+  retain?(descriptor: VarinExtensionServiceProvision, identity: string | null): () => void;
+}
 class ExtensionToolConfigurationError extends Error {
   constructor(serviceId: string, cause: unknown) {
     super(`extension_tool_configuration_unavailable:${serviceId}`, { cause });
@@ -117,6 +122,7 @@ export interface ExtensionToolOwnerOptions {
   /** Domain configuration is captured once by the ordinary Run preparation owner. */
   prepareConfiguration?(run: ExtensionToolRun, required: readonly ExtensionToolBinding[]): Promise<ExtensionToolConfiguration>;
   configurationIdentity?: ExtensionToolConfiguration;
+  subscribeConfiguration?(listener: () => void): () => void;
 }
 export async function retainExtensionTool(
   options: ExtensionToolOwnerOptions,
@@ -125,9 +131,9 @@ export async function retainExtensionTool(
 ): Promise<ExtensionToolLease> {
   const { runtime, kernel } = options,
     pin = (() => { try { return selected.pin(); } catch (error) { selected.release(); throw error; } })();
+  let releaseConfiguration: (() => void) | undefined;
   try {
-    const descriptor = parseVarinExtensionServiceProvision(selected.descriptor),
-      schema = extensionToolSchema(descriptor);
+    const originalDescriptor = parseVarinExtensionServiceProvision(selected.descriptor);
     const provider = runtime.services
       .getSnapshot()
       .providers.find((p) => p.providerId === selected.providerId);
@@ -137,8 +143,11 @@ export async function retainExtensionTool(
       throw new Error('extension_tool_artifact_unavailable');
     let configurationIdentity: string | null;
     try {
-      configurationIdentity = options.configurationIdentity?.(descriptor, required ? required.configurationIdentity : undefined) ?? null;
-    } catch (error) { throw new ExtensionToolConfigurationError(descriptor.id, error); }
+      configurationIdentity = options.configurationIdentity?.(originalDescriptor, required ? required.configurationIdentity : undefined) ?? null;
+    } catch (error) { throw new ExtensionToolConfigurationError(originalDescriptor.id, error); }
+    const descriptor = parseVarinExtensionServiceProvision(options.configurationIdentity?.declaration?.(originalDescriptor, configurationIdentity) ?? originalDescriptor);
+    const schema = extensionToolSchema(descriptor);
+    releaseConfiguration = options.configurationIdentity?.retain?.(descriptor, configurationIdentity);
     // Null states that this service has no separate configuration authority.
     const binding: ExtensionToolBinding = {
       providerKey: selected.providerKey,
@@ -382,6 +391,7 @@ export async function retainExtensionTool(
       release() {
         if (!released) {
           released = true;
+          releaseConfiguration?.();
           approved.clear();
           pin.release();
           selected.release();
@@ -396,6 +406,7 @@ export async function retainExtensionTool(
       revocationSignal: pin.revocationSignal,
     };
   } catch (error) {
+    releaseConfiguration?.();
     pin.release();
     selected.release();
     throw error;
@@ -425,7 +436,7 @@ export function createExtensionTools(
   options: ExtensionToolOwnerOptions,
 ): ExtensionToolPreparer {
   return async (run, required, signal) => {
-    const preparedOptions = options.prepareConfiguration ? { ...options, configurationIdentity: await options.prepareConfiguration(run, required) } : options;
+    let preparedOptions = options.prepareConfiguration ? { ...options, configurationIdentity: await options.prepareConfiguration(run, required) } : options;
     const runtime = options.runtime,
       initial: ExtensionToolLease[] = [],
       states = new Map<string, ThreadToolPreparation>(),
@@ -439,6 +450,7 @@ export function createExtensionTools(
           ) => Promise<void>)
         | undefined;
     const watches = new Map<string, () => void>();
+    const delivered = new Map<string, ExtensionToolLease>();
     const routingScope = {
       sessionId: run.threadId,
       ...(run.projectId ? { projectId: run.projectId } : {}),
@@ -492,6 +504,7 @@ export function createExtensionTools(
       version: number,
       routingRevision: number,
     ) => {
+      const candidateOptions = preparedOptions;
       const selected = await runtime.prepareService(
         {
           serviceId: id,
@@ -504,7 +517,7 @@ export function createExtensionTools(
       );
       try {
         signal.throwIfAborted(); requireToolSource(id, selected.descriptor.tool?.requirements, run.source);
-        return await retainExtensionTool(preparedOptions, selected);
+        return await retainExtensionTool(candidateOptions, selected);
       } catch (error) { selected.release(); throw error; }
     };
     const snapshot = await runtime.state();
@@ -548,6 +561,7 @@ export function createExtensionTools(
       }
       if (!required.length && !run.fixed) for (const entry of services(snapshot).values()) {
         try {
+          if (entry.declarations.every(descriptor => preparedOptions.configurationIdentity?.enabled?.(descriptor) === false)) continue;
           const resolved = await runtime.resolveServiceCompositions({ serviceId: entry.id, version: entry.version,
             method: 'execute', args: [], routing: routingScope }, { signal, expectedRoutingRevision: snapshot.routing.document.revision });
           const root = resolved.services[0];
@@ -568,8 +582,10 @@ export function createExtensionTools(
     }
     const tokenFor = async (state: VarinExtensionHostStateSnapshot, id: string, version: number): Promise<string> => {
       try {
-        const resolved = await runtime.resolveServiceCompositions({ serviceId: id, version, method: 'execute', args: [], routing: routingScope }, { signal });
-        return canonical(resolved.services.map(service => ({ provider: service.providerKey, graph: service.composition.root, descriptor: service.descriptor })));
+        const resolved = await runtime.resolveServiceCompositions({ serviceId: id, version, method: 'execute', args: [], routing: routingScope },
+          { signal, expectedRoutingRevision: state.routing.document.revision });
+        return canonical(resolved.services.map(service => ({ provider: service.providerKey, graph: service.composition.root, descriptor: service.descriptor,
+          configuration: preparedOptions.configurationIdentity?.(service.descriptor) ?? null })));
       } catch (error) {
         signal.throwIfAborted();
         if (error instanceof HostCompositionPreparationRequiredError) return canonical({ needsPreparation: error.extensionId,
@@ -595,10 +611,12 @@ export function createExtensionTools(
         status: 'ready',
         prepared: retained.binding,
       });
+      delivered.set(slot, retained);
     }
     let seenRevision = snapshot.revision;
-    const refresh = async () => {
+    const refreshOnce = async () => {
       if (run.fixed) return;
+      if (options.prepareConfiguration) preparedOptions = { ...options, configurationIdentity: await options.prepareConfiguration(run, []) };
       const current = await runtime.state();
       if (
         closed ||
@@ -610,6 +628,12 @@ export function createExtensionTools(
         return;
       seenRevision = current.revision;
       for (const [slot, entry] of services(current)) {
+        if (entry.declarations.every(descriptor => preparedOptions.configurationIdentity?.enabled?.(descriptor) === false)) {
+          tokens.delete(slot); states.delete(slot);
+          const previous = delivered.get(slot);
+          if (previous && publish) { await publish(slot, undefined, previous); delivered.delete(slot); watches.get(slot)?.(); watches.delete(slot); }
+          continue;
+        }
         const token = await tokenFor(current, entry.id, entry.version);
         if (tokens.get(slot) === token) continue;
         tokens.set(slot, token);
@@ -638,6 +662,7 @@ export function createExtensionTools(
               // The publication, rather than a newer preparation token, owns this handoff.
               // Successful callbacks follow the same short publication chain in admission order.
               if (!closed) watch(slot, retained);
+              delivered.set(slot, retained);
             } else retained.lease.release();
           })
           .catch((error: unknown) => {
@@ -652,6 +677,14 @@ export function createExtensionTools(
           });
       }
     };
+    let refreshing: Promise<void> | undefined;
+    let refreshPending = false;
+    const refresh = (): Promise<void> => {
+      refreshPending = true;
+      return refreshing ??= (async () => {
+        while (refreshPending && !closed) { refreshPending = false; await refreshOnce(); }
+      })().finally(() => { refreshing = undefined; });
+    };
     let unsubscribe: () => void;
     try {
       unsubscribe = run.fixed
@@ -663,10 +696,14 @@ export function createExtensionTools(
       for (const retained of initial) retained.lease.release();
       throw error;
     }
+    const unsubscribeConfiguration = run.fixed ? () => {} : options.subscribeConfiguration?.(() => {
+      if (publish) void refresh().catch(() => undefined);
+    }) ?? (() => {});
     const close = () => {
       if (closed) return;
       closed = true;
       unsubscribe();
+      unsubscribeConfiguration();
       for (const unwatch of watches.values()) unwatch();
       watches.clear();
       signal.removeEventListener('abort', close);

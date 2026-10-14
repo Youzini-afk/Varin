@@ -1,12 +1,11 @@
 import React from 'react';
-import type { ProviderModelConfigInput } from '@varin/protocol';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useI18n } from '@/lib/i18n';
 import { AutoSaveInput } from './AutoSaveInput';
 
 /** Declared inference models are suggestions. An undiscovered model can still be entered explicitly. */
 export function InferenceModelField({ models, value, onCommit, label, placeholder }: {
-  models: readonly ProviderModelConfigInput[];
+  models: readonly { id: string; name?: string }[];
   value: string;
   onCommit: (id: string) => void;
   label: string;

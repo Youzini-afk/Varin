@@ -14,6 +14,8 @@ export type BuiltinSettingsRenderer =
   | 'plugins'
   | 'projects'
   | 'providers'
+  | 'model-connections'
+  | 'mcp-connections'
   | 'remote-instances'
   | 'runtime'
   | 'skills'
@@ -39,6 +41,8 @@ const spec = (
 ): BuiltinSettingsPageSpec => ({ meta, renderer, ...(availability ? { availability } : {}) });
 
 export const BUILTIN_SETTINGS_PAGE_SPECS: readonly BuiltinSettingsPageSpec[] = [
+  spec({ slug: 'model-connections', title: 'Model channels', titleKey: 'settings.models.title', group: 'harness', kind: 'single', icon: 'cloud', order: 1, keywords: ['models', 'channels', 'credentials', 'api', '模型', '渠道'] }, 'model-connections'),
+  spec({ slug: 'mcp-connections', title: 'MCP', titleKey: 'settings.mcp.title', group: 'harness', kind: 'single', icon: 'plug-2', order: 2, keywords: ['mcp', 'servers', 'tools', 'oauth'] }, 'mcp-connections'),
   spec({ slug: 'agent-memory', title: 'Memory', titleKey: 'assistant.memory.title', group: 'harness', kind: 'single', icon: 'database-2', order: 5, keywords: ['memory', 'global', 'project', 'session'] }, 'agent-memory'),
   spec({ slug: 'agent-prompt', title: 'System prompt', titleKey: 'assistant.prompt.title', group: 'harness', kind: 'single', icon: 'file-text', order: 3, keywords: ['prompt', 'instructions', 'style', 'autonomy'] }, 'agent-prompt'),
   spec({ slug: 'home', title: 'Settings', titleKey: 'settings.view.home.title', group: 'general', kind: 'single', icon: null, order: -1, keywords: ['search', 'settings'] }, 'empty'),

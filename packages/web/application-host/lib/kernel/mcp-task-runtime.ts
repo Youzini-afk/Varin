@@ -1,7 +1,7 @@
 /** Reconcile the original Catalog HostJob with its original MCP Task creation and holder.
  * Catalog owns task state; source cleanup acknowledges the exact durable holder before local detach. */
-import { McpAuthorityError, McpTaskRequestError } from '@varin/pi-host/mcp-errors';
-import type { McpTaskLease, McpAuthorityTool, McpTaskResponse } from '@varin/pi-host/mcp-authority';
+import { McpAuthorityError, McpTaskRequestError } from '../mcp/errors.js';
+import type { McpTaskLease, McpAuthorityTool, McpTaskResponse } from '../mcp/authority.js';
 import type { KernelClient } from './kernel-client.js';
 import type { AgentRuntimeClient } from './agent-runtime-client.js';
 import type { HostToolCall, ToolExecutionReceipt } from './tool-bridge.js';

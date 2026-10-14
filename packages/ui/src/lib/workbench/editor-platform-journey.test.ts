@@ -293,7 +293,8 @@ describe('unified editor cross-surface journey', () => {
     const prepared = await documents.prepareWorkspaceEdit({
       workspaceId,
       origin: 'language:rename',
-      textEdits: [{
+      changes: [{
+        kind: 'text',
         identity,
         version: currentVersion ?? null,
         edits: [{

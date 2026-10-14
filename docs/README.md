@@ -20,7 +20,10 @@ package.json 为准；文档解释职责、机制、约束和不显然的取舍�
 ## 进行中的设计
 
 [能力补齐设计](capability-design.md)：Documents 批量修改、分别配置模型的图像生成与编辑工具、
-同进程扩展更新交接，以及 macOS / Wayland Computer Use。这些方案尚待实现，与上面的当前系统说明分开阅读。
+同进程扩展更新交接，以及 macOS / Wayland Computer Use。
+
+[模型渠道、认证与 MCP 服务设计](model-mcp-design.md)：渠道接入与模型管理、独立认证与配置服务、
+MCP 实现接入，以及这些能力对 Pi SDK 依赖的替换。这些方案尚待实施完成，与上面的当前系统说明分开阅读。
 
 ## 源码旁的说明
 

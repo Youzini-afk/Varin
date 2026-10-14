@@ -1,8 +1,8 @@
 /** A projection of the original target Task, independent of its creating Run view. */
 import { randomUUID } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
-import { McpTaskRequestError } from '@varin/pi-host/mcp-errors';
-import type { McpTaskLease, McpTaskResponse } from '@varin/pi-host/mcp-authority';
+import { McpTaskRequestError } from '../mcp/errors.js';
+import type { McpTaskLease, McpTaskResponse } from '../mcp/authority.js';
 import type { ManagedSourceClient } from '../harness/managed-remote-client.js';
 import type { ManagedSourceAddress } from '../harness/managed-remote-types.js';
 import type { ManagedMcpTaskAction } from '../harness/managed-mcp-contract.js';

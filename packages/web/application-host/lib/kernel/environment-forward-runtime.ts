@@ -5,7 +5,7 @@ import { ENVIRONMENT_FORWARD_CAPABILITY, ENVIRONMENT_FORWARD_TOOL_DECLARATIONS }
 import { parseVarinToolJson } from '@varin/extension-contract';
 import type { HostCapabilityHandler } from '@varin/extension-host';
 import type { EnvironmentServiceAccess } from '@varin/protocol';
-import { compileToolJsonSchema } from '@varin/pi-host/tool-schema';
+import { compileToolJsonSchema } from '../models/schema.js';
 import { managedEndpointIdentity, type ManagedRemoteTargetRegistry, type ManagedTarget } from '../harness/managed-remote-client.js';
 import type { EnvironmentForwardOwner, EnvironmentForwardRuntime } from '../harness/environment-forwards.js';
 import type { KernelClient } from './kernel-client.js';

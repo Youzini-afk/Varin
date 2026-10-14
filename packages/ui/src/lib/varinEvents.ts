@@ -40,7 +40,7 @@ export type HarnessExperimentChangedEvent = {
 /** Agent-origin settings write landed on a shared authority (D-306 / D-309). */
 export type SettingsChangedEvent = {
   type: 'settings-changed';
-  owner: 'app' | 'pi-settings' | 'client';
+  owner: 'app' | 'pi-settings' | 'agent-settings' | 'client';
   ids: string[];
   scope: 'host' | 'global' | 'project' | 'client';
   revision: string;
@@ -319,7 +319,7 @@ const dispatchFromEnvelope = (envelope: { type: string; properties: unknown }) =
     const ids = Array.isArray(properties?.ids)
       ? properties.ids.filter((id): id is string => typeof id === 'string')
       : [];
-    if ((owner === 'app' || owner === 'pi-settings' || owner === 'client')
+    if ((owner === 'app' || owner === 'pi-settings' || owner === 'agent-settings' || owner === 'client')
       && (scope === 'host' || scope === 'global' || scope === 'project' || scope === 'client')
       && revision) {
       for (const listener of listeners) listener({

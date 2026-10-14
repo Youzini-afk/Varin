@@ -12,6 +12,8 @@ import { IndexSettings } from './IndexSettings';
 import { WebSettings } from './WebSettings';
 import { ComputerSettings } from '../computers/ComputerSettings';
 import { BotSettings } from '../bots/BotSettings';
+import { ConfigurationRuntime } from './ConfigurationModels';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 
 export type HarnessSettingsSection = 'tools' | 'permissions' | 'context' | 'retrieval' | 'index' | 'web' | 'computers' | 'bots';
 const pages: Record<HarnessSettingsSection, React.ComponentType<HarnessSettingsPageProps>> = {
@@ -23,7 +25,8 @@ const pages: Record<HarnessSettingsSection, React.ComponentType<HarnessSettingsP
 
 export function HarnessSettingsPage({ section }: { section: HarnessSettingsSection }) {
   const { t } = useI18n();
-  const { harness, status, error, update, retry, targetKey } = useHarnessSettings();
+  const [runtime, setRuntime] = React.useState<'agent' | 'pi'>('agent');
+  const { harness, status, error, update, retry, targetKey } = useHarnessSettings(runtime);
   const Page = pages[section];
   const selfFetching = section === 'computers' || section === 'bots';
   const showPiSaveStatus = section !== 'index' && !selfFetching;
@@ -43,8 +46,8 @@ export function HarnessSettingsPage({ section }: { section: HarnessSettingsSecti
   </>;
   return <SettingsPageLayout title={t(`settings.page.harness.page.${section}.title`)}
     description={t(`settings.page.harness.page.${section}.description`)} showSaveStatus={showPiSaveStatus}
-    headerEnd={showPiSaveStatus ? <span className="typography-meta text-muted-foreground">{t('settings.harness.userDefaults')}</span> : undefined}
+    headerEnd={showPiSaveStatus ? <Select value={runtime} onValueChange={value => setRuntime(value as 'agent' | 'pi')}><SelectTrigger size="settings" className="w-36" aria-label="Runtime"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="agent">Agent</SelectItem><SelectItem value="pi">Pi</SelectItem></SelectContent></Select> : undefined}
     className="[&>section]:py-5 [&>section]:space-y-4">
-    {content}
+    <ConfigurationRuntime.Provider value={runtime}>{content}</ConfigurationRuntime.Provider>
   </SettingsPageLayout>;
 }

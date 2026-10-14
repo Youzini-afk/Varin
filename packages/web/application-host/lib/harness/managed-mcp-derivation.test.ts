@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { McpAuthority, McpAuthorityAcquireOptions, McpAuthorityOwnedLease, McpAuthorityScope,
-  McpAuthorityTool, McpCompositionSnapshot, McpDefinitionLease } from '@varin/pi-host/mcp-authority';
+  McpAuthorityTool, McpCompositionSnapshot, McpDefinitionLease } from '../mcp/authority.js';
 import type { KernelClient } from '../kernel/kernel-client.js';
 import type { McpBinding, McpChildDerivationProof, SourceMcpChildBinding, SourceMcpChildResult,
   SourceMcpDerivationParams, SourceMcpDerivationResult } from '../kernel/protocol.generated.js';
@@ -130,6 +130,7 @@ function fixture() {
           serverSelections: names.map(name => ({ name, configurationVersion: original.servers[name]!.definition_version, hiddenTools: [] })) },
         implementationIdentity: `${authorityId}-sdk`, inspect: () => readiness,
         async discover(name) { check(); calls.push({ authorityId, kind: 'discover', name }); return [tool(name)]; },
+        async cachedTools() { check(); return []; },
         async prepareTool(name) { check(); return tool(name); },
         async discoverServices(name) { check(); return [{ server: name, resourceKey: provenance.servers[name]!.resource_key, kind: 'resources', schemaVersion: 'service-v1' }]; },
         prepareService: async () => { throw new Error('unused'); }, preparePrompt: async () => { throw new Error('unused'); },

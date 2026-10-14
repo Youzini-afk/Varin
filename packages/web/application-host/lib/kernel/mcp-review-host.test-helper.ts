@@ -5,7 +5,8 @@ import assert from 'node:assert/strict';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { createInterface } from 'node:readline';
-import { McpAuthority, McpCompositions, type McpCompositionScope } from '@varin/pi-host/mcp-authority';
+import { McpAuthority, McpCompositions, type McpCompositionScope } from '../mcp/authority.js';
+import { fixtureMcpStdio } from './mcp-stdio.test-helper.js';
 import { createMcpLease } from './mcp-owner.js';
 import { permissionService } from './permission-service.js';
 import { ToolBridge } from './tool-bridge.js';
@@ -21,7 +22,7 @@ const eventListeners = new Set<(event: unknown) => void>();
 const readyListeners = new Set<() => void>();
 let sequence = 0, epoch = '', root = '';
 let scope: McpCompositionScope | undefined;
-const authority = new McpAuthority();
+const authority = new McpAuthority({ adaptTransport: fixtureMcpStdio });
 const compositions = new McpCompositions(authority, code => write({ kind: 'fixture-failed', code }));
 const credentials = new CredentialBridge(() => epoch || null, async frame => { write(frame); },
   () => write({ kind: 'fixture-failed', code: 'original-credential-bridge-send-failed' }));

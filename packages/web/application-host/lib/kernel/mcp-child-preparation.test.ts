@@ -2,7 +2,8 @@ import { expect, it } from 'vitest';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { McpAuthority } from '@varin/pi-host/mcp-authority';
+import { McpAuthority } from '../mcp/authority.js';
+import { fixtureMcpStdio } from './mcp-stdio.test-helper.js';
 import { createMcpLease } from './mcp-owner.js';
 import { createChildMcpPreparer } from './mcp-child-preparation.js';
 import type { KernelClient } from './kernel-client.js';
@@ -30,7 +31,7 @@ else if(request.method==='resources/templates/list')result={resourceTemplates:[]
 else if(request.method==='resources/read')result={contents:[{uri:request.params.uri,text:JSON.stringify({cwd:process.cwd(),marker:fs.readFileSync('marker','utf8')})},{uri:request.params.uri,blob:Buffer.from('resource-bytes').toString('base64'),mimeType:'application/octet-stream'}]};
 else if(request.method==='tools/list')result={tools:[{name:'read',description:'Read the actual working view',inputSchema:{type:'object',additionalProperties:false},execution:{taskSupport:'required'}}]};
 else if(request.method==='tools/call'){const value={cwd:process.cwd(),marker:fs.readFileSync('marker','utf8')};fs.appendFileSync(${JSON.stringify(calls)},JSON.stringify(value)+'\\n');result={content:[{type:'text',text:JSON.stringify(value)}]};}
-else return;process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:request.id,result})+'\\n');});`,
+else {process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:request.id,error:{code:-32601,message:'Unsupported fixture method'}})+'\\n');return;}process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:request.id,result})+'\\n');});`,
   );
   const config = {
     mcpServers: {
@@ -42,7 +43,7 @@ else return;process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:request.id,res
     },
   };
   await fs.writeFile(path.join(root, 'mcp.json'), JSON.stringify(config));
-  const authority = new McpAuthority();
+  const authority = new McpAuthority({ adaptTransport: fixtureMcpStdio });
   const leases: McpToolLease[] = [];
   const kernel = {} as KernelClient; // Permission fixture explicitly allows this tool; no kernel RPC occurs.
   let allowedTool = '';

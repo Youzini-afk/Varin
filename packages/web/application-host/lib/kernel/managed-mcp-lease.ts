@@ -2,8 +2,8 @@
 import { randomUUID } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
 import { McpAuthorityError, type McpAuthorityLease, type McpAuthorityTool, type McpAuthorityService,
-  type McpAuthorityPrompt, type McpServiceRequest } from '@varin/pi-host/mcp-authority';
-import { compileToolJsonSchema } from '@varin/pi-host/tool-schema';
+  type McpAuthorityPrompt, type McpServiceRequest } from '../mcp/authority.js';
+import { compileToolJsonSchema } from '../models/schema.js';
 import type { ManagedSourceAccess } from './managed-source-consumers.js';
 import { createManagedMcpTaskLease } from './managed-mcp-task-lease.js';
 import { createManagedMcpResourceObserver, requestManagedMcpResource } from './managed-mcp-resource-observer.js';
@@ -154,7 +154,7 @@ export async function createManagedMcpLease(input: {
     assertService(service);
     if (!request.operation.startsWith(`${service.kind}/`)) fail('mcp_service_operation_invalid');
   };
-  const ensureInteractions = async (server: string, origin: import('@varin/pi-host/mcp-authority').McpInteractionOrigin | undefined, endpoint?: McpEndpoint) => {
+  const ensureInteractions = async (server: string, origin: import('../mcp/authority.js').McpInteractionOrigin | undefined, endpoint?: McpEndpoint) => {
     if (!origin) return;
     if (!input.interactions) return fail('mcp_interaction_owner_unavailable');
     const selected = snapshot.binding.provenance.servers[server];
@@ -196,6 +196,7 @@ export async function createManagedMcpLease(input: {
     binding: snapshot.binding, implementationIdentity: `${snapshot.incarnation}:${snapshot.implementationIdentity}`,
     inspect: () => { assertLive(); return snapshot.binding.readiness; },
     discover: async (server, signal) => admitTools(await call({ kind: 'discover', handleId, server }, signal)),
+    cachedTools: async signal => { assertLive(); return call({ kind: 'cached_tools', handleId }, signal); },
     prepareTool: async (server, tool, schemaVersion, signal) => {
       const selected = await call<McpAuthorityTool>({ kind: 'prepare_tool', handleId, server, tool, schemaVersion }, signal);
       admitTools([selected]); return selected;

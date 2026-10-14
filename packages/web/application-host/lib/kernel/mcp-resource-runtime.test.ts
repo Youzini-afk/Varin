@@ -254,7 +254,7 @@ const quietRuntime = { onReady: () => () => {}, onEvent: () => () => {} };
 it('recovers an original managed subscribe receipt and retries its lost Catalog ACK without replaying creation', async () => {
   const port = resourcePort(managedResource());
   const acknowledgement = { _meta: { original: 'response' } };
-  const { McpAuthorityError } = await import('@varin/pi-host/mcp-errors');
+  const { McpAuthorityError } = await import('../mcp/errors.js');
   const recoverCreation = vi.fn()
     .mockRejectedValueOnce(new McpAuthorityError('mcp_resource_creation_receipt_pending'))
     .mockResolvedValue({ kind: 'subscribed', listenerId: 'original-listener', acknowledgement });
@@ -370,7 +370,7 @@ it('retries managed cleanup and a lost holder ACK without duplicate target relea
 
 it('disconnects managed projections on gaps and disposal but uses one original cleanup hook for explicit unsubscribe', async () => {
   const port = resourcePort(managedResource(true));
-  const callbacks: Array<(change: import('@varin/pi-host/mcp-authority').McpResourceChange) => void> = [];
+  const callbacks: Array<(change: import('../mcp/authority.js').McpResourceChange) => void> = [];
   const disconnects = [vi.fn(), vi.fn(), vi.fn()];
   const detach = vi.fn(async () => ({ status: 'shared' as const }));
   const recover = vi.fn<McpResourceRuntimeOptions['recover']>(async (_op, _signal, change) => {
@@ -472,7 +472,7 @@ it('closes the current managed listener when source retirement races its in-flig
 it('reattaches in the same Host after the original subscribe response is lost and its creation ACK is recovered', async () => {
   const port = resourcePort(managedResource());
   const { binding } = port.current().subscription;
-  const { McpAuthorityError } = await import('@varin/pi-host/mcp-errors');
+  const { McpAuthorityError } = await import('../mcp/errors.js');
   const observeResource = vi.fn(async () => { throw new McpAuthorityError('mcp_resource_original_response_lost', true); });
   const recoverCreation = vi.fn(async () => ({ kind: 'subscribed' as const, listenerId: 'original-listener', acknowledgement: {} }));
   const disconnect = vi.fn(), detach = vi.fn(async () => ({ status: 'shared' as const }));

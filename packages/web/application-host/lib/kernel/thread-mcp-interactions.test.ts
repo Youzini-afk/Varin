@@ -3,7 +3,7 @@ import type { Express, Request, RequestHandler, Response as ExpressResponse } fr
 import { afterEach, expect, it, vi } from 'vitest';
 import { createThreadsHttpAPI, type ThreadIdentity } from '@varin/application-client';
 import type { McpElicitationResponse, McpInteractionItem, McpInteractionView, McpInteractionRecord, ModelSessionConfiguration, McpSamplingResult } from '@varin/protocol';
-import type { McpInteractionRequest } from '@varin/pi-host/mcp-authority';
+import type { McpInteractionRequest } from '../mcp/authority.js';
 import { createMcpInteractionRuntime } from './mcp-interaction-runtime.js';
 import { AgentRuntimeClient } from './agent-runtime-client.js';
 import { KernelClientError, type KernelClient } from './kernel-client.js';

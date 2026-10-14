@@ -3,7 +3,7 @@ import { isDeepStrictEqual } from 'node:util';
 import { RESEARCH_DECISION_CAPABILITY, RESEARCH_DECISION_TOOL_DECLARATIONS } from '@varin/extension-builtins';
 import { parseVarinToolJson } from '@varin/extension-contract';
 import type { HostCapabilityHandler } from '@varin/extension-host';
-import { compileToolJsonSchema } from '@varin/pi-host/tool-schema';
+import { compileToolJsonSchema } from '../models/schema.js';
 import type { PiSettingsSnapshot, ResearchDecideParams } from '@varin/protocol';
 import { executeResearchDecide } from '../harness/research-decide.js';
 import { HarnessServiceError } from '../harness/service-error.js';

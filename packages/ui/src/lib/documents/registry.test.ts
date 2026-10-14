@@ -1394,14 +1394,16 @@ describe('DocumentRegistry', () => {
     const preview = await registry.prepareWorkspaceEdit({
       workspaceId: first.workspaceId,
       origin: 'language:rename',
-      textEdits: [
+      changes: [
         {
-          identity: first,
+        kind: 'text',
+        identity: first,
           version: opened.localEditRevision,
           edits: [{ range: { start: { line: 0, character: 6 }, end: { line: 0, character: 11 } }, newText: 'renamed' }],
         },
         {
-          identity: second,
+        kind: 'text',
+        identity: second,
           version: null,
           edits: [{ range: { start: { line: 0, character: 15 }, end: { line: 0, character: 20 } }, newText: 'renamed' }],
         },
@@ -1440,9 +1442,13 @@ describe('DocumentRegistry', () => {
     const preview = await registry.prepareWorkspaceEdit({
       workspaceId: first.workspaceId,
       origin: 'language:rename',
-      textEdits: [
-        { identity: first, version: firstRecord.localEditRevision, edits: [{ range: { start: { line: 0, character: 0 }, end: { line: 0, character: 5 } }, newText: 'changed' }] },
-        { identity: second, version: 0, edits: [{ range: { start: { line: 0, character: 0 }, end: { line: 0, character: 6 } }, newText: 'changed' }] },
+      changes: [
+        {
+        kind: 'text',
+        identity: first, version: firstRecord.localEditRevision, edits: [{ range: { start: { line: 0, character: 0 }, end: { line: 0, character: 5 } }, newText: 'changed' }] },
+        {
+        kind: 'text',
+        identity: second, version: 0, edits: [{ range: { start: { line: 0, character: 0 }, end: { line: 0, character: 6 } }, newText: 'changed' }] },
       ],
     });
     if (preview.status !== 'ready') throw new Error('expected workspace edit preview');
@@ -1468,8 +1474,9 @@ describe('DocumentRegistry', () => {
       workspaceId: identity.workspaceId,
       origin: 'thread-integration',
       groupId: 'reopened-operation',
-      textEdits: [{
+      changes: [{
         identity,
+        kind: 'text',
         version: original.localEditRevision,
         edits: [{ range: { start: { line: 0, character: 0 }, end: { line: 0, character: 4 } }, newText: 'next' }],
       }],
@@ -1496,14 +1503,13 @@ describe('DocumentRegistry', () => {
     const result = await registry.prepareWorkspaceEdit({
       workspaceId: resource().workspaceId,
       origin: 'language:code-action',
-      textEdits: [],
-      resourceOperations: [{ kind: 'create', identity: resource('created.ts') }],
+      changes: [{ kind: 'create', identity: resource('created.ts') }],
     });
     expect(result).toEqual({
       status: 'rejected',
       failures: [{
         reason: 'resource-operation-unsupported',
-        message: 'Workspace resource create, rename, and delete operations require a Host batch mutation contract',
+        message: 'Workspace resource changes require the Host batch mutation contract',
       }],
     });
     registry.dispose();
@@ -1527,8 +1533,9 @@ describe('DocumentRegistry', () => {
       workspaceId: identity.workspaceId,
       origin: 'thread-integration',
       groupId: 'integration-op-named',
-      textEdits: [{
+      changes: [{
         identity,
+        kind: 'text',
         version: opened.localEditRevision,
         edits: [{ range: { start: { line: 0, character: 0 }, end: { line: 0, character: 6 } }, newText: 'after' }],
       }],

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { McpTaskRequestError } from '@varin/pi-host/mcp-errors';
-import type { McpTaskLease, McpAuthorityTool } from '@varin/pi-host/mcp-authority';
+import { McpTaskRequestError } from '../mcp/errors.js';
+import type { McpTaskLease, McpAuthorityTool } from '../mcp/authority.js';
 import { createMcpTaskRuntime } from './mcp-task-runtime.js';
 import type { KernelClient } from './kernel-client.js';
 import type { HostJobPending, HostJobTaskUpdateParams, HostToolCall, McpTaskState, SourceMcpCreationOutcome } from './protocol.generated.js';

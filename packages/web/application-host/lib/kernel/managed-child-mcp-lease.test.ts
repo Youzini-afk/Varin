@@ -1,8 +1,8 @@
 import { expect, it, vi } from 'vitest';
 // These tests exercise the real coordinator request/lease lifecycle. Tool schema
 // compilation and the SDK transport are separate owners, unused by this empty cut.
-vi.mock('@varin/pi-host/mcp-authority', async () => ({ McpAuthorityError: (await import('@varin/pi-host/mcp-errors')).McpAuthorityError }));
-vi.mock('@varin/pi-host/tool-schema', () => ({ compileToolJsonSchema: vi.fn() }));
+vi.mock('../mcp/authority.js', async () => ({ McpAuthorityError: (await import('../mcp/errors.js')).McpAuthorityError }));
+vi.mock('../models/schema.js', () => ({ compileToolJsonSchema: vi.fn() }));
 import { createManagedMcpLease } from './managed-mcp-lease.js';
 import type { McpChildDerivationReceipt } from './protocol.generated.js';
 

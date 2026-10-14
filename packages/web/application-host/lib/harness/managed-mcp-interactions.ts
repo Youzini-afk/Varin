@@ -1,8 +1,8 @@
 /** Original SDK reverse-request responders. Review, Catalog and model execution stay on A. */
 import { createHash, randomUUID } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
-import { McpSamplingRejectedError } from '@varin/pi-host/mcp-errors';
-import type { McpErrorInteraction, McpErrorInteractionItem, McpInteractionOrigin, McpInteractionRequest } from '@varin/pi-host/mcp-authority';
+import { McpSamplingRejectedError } from '../mcp/errors.js';
+import type { McpErrorInteraction, McpErrorInteractionItem, McpInteractionOrigin, McpInteractionRequest } from '../mcp/authority.js';
 import type { McpElicitationResponse, McpSamplingResult } from '@varin/protocol';
 import type { KernelClient } from '../kernel/kernel-client.js';
 import type { McpInteractionBinding, SourceAuthorityAddress, SourceMcpDeliveryParams, SourceMcpDeliveryReceipt,

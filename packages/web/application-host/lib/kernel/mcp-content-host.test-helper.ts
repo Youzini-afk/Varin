@@ -4,8 +4,9 @@ import assert from 'node:assert/strict';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { createInterface } from 'node:readline';
-import { McpAuthority, McpCompositions, type McpCompositionScope } from '@varin/pi-host/mcp-authority';
-import { resolvePiSdkSpecifier } from '@varin/pi-host/sdk';
+import { McpAuthority, McpCompositions, type McpCompositionScope } from '../mcp/authority.js';
+import { createDefaultTransport } from '../mcp/connection.js';
+import { fixtureMcpStdio } from './mcp-stdio.test-helper.js';
 import { createMcpLease } from './mcp-owner.js';
 import { permissionService } from './permission-service.js';
 import { ToolBridge } from './tool-bridge.js';
@@ -27,6 +28,7 @@ const fixtureFetch: typeof fetch = async (_input, init) => {
   assert.equal(typeof init?.body, 'string');
   const request = JSON.parse(init!.body as string) as Record<string, unknown>;
   httpRequests.push({ ...request, session });
+  if (request.method === 'server/discover') return Response.json({ jsonrpc: '2.0', id: request.id, error: { code: -32601, message: 'Unsupported fixture method' } }, { status: 404 });
   if (request.method === 'initialize') {
     const params = request.params as Record<string, unknown>;
     return new Response(JSON.stringify({ jsonrpc: '2.0', id: request.id, result: {
@@ -43,14 +45,9 @@ const fixtureFetch: typeof fetch = async (_input, init) => {
   return new Response(JSON.stringify({ jsonrpc: '2.0', id: request.id, result }),
     { status: 200, headers: { 'content-type': 'application/json' } });
 };
-const sdk = await import(resolvePiSdkSpecifier(join(process.cwd(), 'packages/pi-host'), '@earendil-works/pi-coding-agent'));
-const transportRuntime = await sdk.loadMcpRuntime();
 const authority = new McpAuthority({ createTransport: (...args) => {
-  const original = transportRuntime.createDefaultTransport(...args);
-  if (args[0].name !== 'expiry') return original;
-  const Transport = original.constructor as new (options: Record<string, unknown>) => typeof original;
-  return new Transport({ ...original.options, fetch: fixtureFetch });
-} });
+  return createDefaultTransport(...args, args[0].name === 'expiry' ? fixtureFetch as typeof globalThis.fetch : undefined);
+}, adaptTransport: fixtureMcpStdio });
 const compositions = new McpCompositions(authority, code => write({ kind: 'fixture-failed', code }));
 const kernel = {
   subscribeExit() { return () => {}; },

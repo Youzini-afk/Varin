@@ -2,8 +2,8 @@
 import { randomUUID } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
 import { parseHarnessRerankSettings, type HarnessRerankResult, type HarnessResolvedRerankBinding, type HarnessRerankSettings } from '@varin/protocol';
-import { requestHttpRerank, parseHttpRerankScores, RerankResponseError, type HttpRerankScore } from '@varin/pi-host/rerank';
-import type { HostInferenceProviderBinding } from '@varin/pi-host/credentials';
+import { requestHttpRerank, parseHttpRerankScores, RerankResponseError, type HttpRerankScore } from '../../models/rerank.js';
+import type { InferenceProviderBinding as HostInferenceProviderBinding } from '../../models/service.js';
 import type { InferenceCall, InferenceInvocationAuthority, InferenceRequests, InferenceRequestsOptions } from './inference-requests.js';
 export interface RerankInferenceAuthority {
   resolveRerankBinding(providerId: string, modelId: string, endpoint?: string): Promise<HostInferenceProviderBinding>;
@@ -72,7 +72,7 @@ export function createRerankInference(authority: RerankInferenceAuthority, setti
             const scores = requireCandidateScores(await requestHttpRerank({ baseUrl: provider.baseUrl, ...(provider.endpoint ? { endpoint: provider.endpoint } : {}),
               ...(auth?.auth.apiKey ? { apiKey: auth.auth.apiKey } : {}),
               ...(auth?.auth.headers ? { headers: Object.fromEntries(Object.entries(auth.auth.headers).filter((entry): entry is [string, string] => typeof entry[1] === 'string')) } : {}),
-              model: binding.modelId, query: input.query, documents: input.documents, signal: call.signal,
+              model: provider.requestModelId ?? binding.modelId, query: input.query, documents: input.documents, signal: call.signal,
               fetchImpl: async (url, init) => {
                 const destination = new URL(String(url)).toString();
                 if (destination !== provider.requestUrl || init?.method !== 'POST' || typeof init.body !== 'string') throw new Error('Rerank request binding changed');

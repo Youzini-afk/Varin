@@ -2,7 +2,7 @@
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import type { McpAuthority, McpCompositions, McpCompositionScope } from '@varin/pi-host/mcp-authority';
+import type { McpAuthority, McpCompositions, McpCompositionScope } from '../mcp/authority.js';
 import type { AgentRuntimeClient } from './agent-runtime-client.js';
 import type { KernelClient } from './kernel-client.js';
 import type { ToolBridge } from './tool-bridge.js';

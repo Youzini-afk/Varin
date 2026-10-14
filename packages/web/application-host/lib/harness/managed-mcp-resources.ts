@@ -1,7 +1,7 @@
 /** Original target resource observers. Notifications are lossy, in-memory invalidations. */
 import { createHash } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
-import type { McpAuthorityLease, McpResourceChange, McpResourceObserver, McpResourceRelease } from '@varin/pi-host/mcp-authority';
+import type { McpAuthorityLease, McpResourceChange, McpResourceObserver, McpResourceRelease } from '../mcp/authority.js';
 import type { KernelClient } from '../kernel/kernel-client.js';
 import type { McpResourceBinding, SourceAuthorityAddress, SourceMcpCreationError, SourceMcpCreationOutcome,
   SourceMcpCreationReceiptResult, SourceMcpHolder, SourceMcpHolderBinding, SourceMcpHolderResult } from '../kernel/protocol.generated.js';
@@ -55,7 +55,7 @@ export function createManagedMcpResources(options: {
   interface Entry { binding: McpResourceBinding; requestHash: string; observer?: McpResourceObserver;
     work: Promise<Subscription>; outcome?: SourceMcpCreationOutcome; settled: boolean; released: boolean; unavailable: boolean;
     admission: AbortController; revision: number; changes: Map<McpResourceChange['kind'], { revision: number; change: McpResourceChange }>;
-    watchers: Set<() => void>; cleanup?: Promise<McpResourceRelease>; cleanupOptions?: { interaction: import('@varin/pi-host/mcp-authority').McpInteractionOrigin; signal: AbortSignal }; }
+    watchers: Set<() => void>; cleanup?: Promise<McpResourceRelease>; cleanupOptions?: { interaction: import('../mcp/authority.js').McpInteractionOrigin; signal: AbortSignal }; }
   const entries = new Map<string, Entry>();
   const address = (scope: Scope): SourceAuthorityAddress => ({ principalId: scope.principal.principalId,
     coordinatorHostId: scope.coordinatorHostId, authorityId: scope.authorityId, resourceEpoch: scope.resourceEpoch });
@@ -198,7 +198,7 @@ export function createManagedMcpResources(options: {
       if (current.grantState !== 'active' || current.holder.released) return failure('mcp_resource_original_owner_revoked');
       return snapshot();
     },
-    async release(scope: Scope, binding: McpResourceBinding, cleanupOptions?: { interaction: import('@varin/pi-host/mcp-authority').McpInteractionOrigin; signal: AbortSignal }): Promise<{ retire: boolean; controlsDrained: true; release: McpResourceRelease }> {
+    async release(scope: Scope, binding: McpResourceBinding, cleanupOptions?: { interaction: import('../mcp/authority.js').McpInteractionOrigin; signal: AbortSignal }): Promise<{ retire: boolean; controlsDrained: true; release: McpResourceRelease }> {
       const selected = entry(scope, binding);
       // Fence an absent first dispatch, then check the full immutable request
       // identity before releasing a started holder. A has recovered its ACK before

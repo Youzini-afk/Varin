@@ -3,11 +3,11 @@ import type { ManagedSourceLocalScope } from '../harness/managed-remote-types.js
 import type { KernelClient } from './kernel-client.js';
 import { KernelClientError, KernelRequestError } from './kernel-error.js';
 import { createManagedMcpProcesses } from './managed-mcp-processes.js';
-import { StdioTransport } from '@varin/pi-host/mcp-authority';
+import { StdioTransport } from '../mcp/authority.js';
 
 // Controlled transport construction and Kernel ports. Framing and real native receipts
 // have separate owners; this fixture checks the Host's original request/receipt join.
-vi.mock('@varin/pi-host/mcp-authority', () => ({
+vi.mock('../mcp/authority.js', () => ({
   StdioTransport: class { constructor(readonly options: object) {} },
   StreamableHttpTransport: class {},
 }));

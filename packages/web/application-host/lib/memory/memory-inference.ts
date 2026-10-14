@@ -2,9 +2,9 @@ import { sourceIdentity } from './memory-sources.js';
 /** Bot MemoryWork admission and original native inference receipts. Knowledge is not written here. */
 import { randomUUID } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
-import { restoreClassifierResult } from '@varin/pi-host/classifier';
+import { restoreClassifierResult } from '../models/classifier.js';
 import type { ModelSelection, HarnessFastDecisionParams, HarnessFastDecisionPurposeStatus, MemorySourceSpan } from '@varin/protocol';
-import type { HostCredentialAuthority } from '@varin/pi-host/credentials';
+import type { SelectedModel } from '../kernel/model-authority.js';
 import type { KernelClient } from '../kernel/kernel-client.js';
 import type { AgentRuntimeClient } from '../kernel/agent-runtime-client.js';
 import type { createModelAuthority } from '../kernel/model-authority.js';
@@ -57,7 +57,7 @@ export function createMemoryInference(options: {
   kernel: KernelClient;
   runtime: AgentRuntimeClient;
   models: ReturnType<typeof createModelAuthority>;
-  authority: HostCredentialAuthority;
+  authority: { readGlobalInferenceSettings(): Promise<unknown>; selectedModel(providerId: string, modelId: string): Promise<SelectedModel> };
   decision: Pick<SemanticInference, 'captureDecision'>;
   /** Registry lookup, not a scope-string test. Sleep/enable authority stays with BotService. */
   validateScope(scopeId: string): Promise<void>;

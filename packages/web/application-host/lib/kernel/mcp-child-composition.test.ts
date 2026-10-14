@@ -1,11 +1,6 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
+import { resolve } from 'node:path';
 
-const modules = await vi.hoisted(async () => {
-  const { createRequire } = await import('node:module');
-  const require = createRequire(new URL('../../../../pi-host/src/mcp-authority.ts', import.meta.url));
-  const resolve = (name: string) => { try { return require.resolve(name); } catch { return name; } };
-  return { coding: resolve('@earendil-works/pi-coding-agent'), mcp: resolve('@earendil-works/pi-mcp'), jsonc: resolve('jsonc-parser') };
-});
 const sdk = vi.hoisted(() => {
   type Entry = { name: string; source: string; scope: string; config: { command: string; exposure: string } };
   const configurations = new Map<string, Entry[]>();
@@ -18,14 +13,14 @@ const sdk = vi.hoisted(() => {
     get name() { return this.options.entry.name; }
     readonly client = {
       protocolVersion: '2025-11-25', serverCapabilities: { tools: {}, resources: {} },
-      onNotification: () => () => {}, onClose: () => () => {}, setRequestHandler: () => {}, connectionState: 'connected',
+      onNotification: () => () => {}, onClose: () => () => {}, onNotificationGap: () => () => {}, setRequestHandler: () => {}, connectionState: 'connected',
       request: async (operation: string, params: { uri: string }) => {
         if (operation !== 'resources/read') throw new Error('Unexpected service request');
-        return { contents: [{ uri: params.uri, text: JSON.stringify({ server: this.name, cwd: this.options.cwd }) }] };
+        return { contents: [{ uri: params.uri, text: JSON.stringify({ server: this.name, cwd: this.options.cwd.replace(/^[a-z]:/i, '').replaceAll('\\', '/') }) }] };
       },
       callTool: async (_tool: string, _args: unknown, options: { beforeDispatch?: () => Promise<void> }) => {
         await options.beforeDispatch?.();
-        const value = { server: this.name, cwd: this.options.cwd }; calls.push(value);
+        const value = { server: this.name, cwd: this.options.cwd.replace(/^[a-z]:/i, '').replaceAll('\\', '/') }; calls.push(value);
         return { content: [{ type: 'text', text: JSON.stringify(value) }] };
       },
     };
@@ -35,28 +30,22 @@ const sdk = vi.hoisted(() => {
   }
   return { configurations, calls, Connection };
 });
-vi.mock(modules.coding, () => ({
-  FileAuthStorageBackend: class {}, McpOAuthCredentialStore: class {},
+vi.mock('../mcp/configuration.js', async importOriginal => ({
+  ...await importOriginal<typeof import('../mcp/configuration.js')>(),
   createMcpToolName: (server: string, tool: string) => `${server}_${tool}`,
   getMcpToolExposure: (config: { exposure: string }) => config.exposure,
-  loadMcpConfig: ({ cwd }: { cwd: string }) => ({ servers: structuredClone(sdk.configurations.get(cwd) ?? []), errors: [] }),
-  loadMcpRuntime: async () => ({ McpServerConnection: sdk.Connection, McpServerLog: class {}, createDefaultTransport: () => {} }),
+  McpConfigurations: class {
+    current({ cwd }: { cwd: string }) { return { servers: structuredClone(sdk.configurations.get(cwd.replace(/^[a-z]:/i, '').replaceAll('\\', '/')) ?? []), errors: [], sources: [] }; }
+    async prepare(scope: { cwd: string }) { return this.current(scope); }
+  },
   validateMcpServerConfig: (_name: string, config: unknown) => config,
 }));
-vi.mock(modules.mcp, () => ({ McpError: class extends Error {}, McpSessionExpiredError: class extends Error {},
-  StdioTransport: class {}, StreamableHttpTransport: class {}, McpConnectionClosedError: class extends Error {},
-  McpMessageTooLargeError: class extends Error {}, parseJsonRpcMessage: (value: unknown) => value }));
-vi.mock(modules.jsonc, () => ({ applyEdits: () => {}, modify: () => {} }));
-vi.mock('../../../../pi-host/src/tool-schema.js', () => ({ compileToolJsonSchema: () => () => true }));
-vi.mock('../../../../pi-host/src/config-text-file-editor.js', () => ({ ConfigTextFileEditor: class {}, resolveConfigDocumentPath: () => {} }));
-vi.mock('../../../../pi-host/src/config-watch-manager.js', () => ({ ConfigWatchManager: class {
+vi.mock('../mcp/connection.js', () => ({ McpServerConnection: sdk.Connection }));
+vi.mock('../configuration-watch.js', () => ({ ConfigWatchManager: class {
   async watch() { return { watchId: 'test-watch' }; } unwatch() {} close() {}
 } }));
-vi.mock('../../../../pi-host/src/mcp-host-configuration.js', () => ({ mcpHostAgentDir: () => {}, mcpHostProjectTrusted: () => {}, readMcpHostPermissionPolicy: () => {} }));
-vi.mock('@varin/pi-host/mcp-authority', async () => await import('../../../../pi-host/src/mcp-authority.js'));
-vi.mock('@varin/pi-host/tool-schema', async () => await import('../../../../pi-host/src/tool-schema.js'));
 
-import { McpAuthority, composeMcpAuthorityLeases, type McpAuthorityOwnedLease, type McpAuthorityScope } from '@varin/pi-host/mcp-authority';
+import { McpAuthority, composeMcpAuthorityLeases, type McpAuthorityOwnedLease, type McpAuthorityScope } from '../mcp/authority.js';
 import { createChildMcpPreparer } from './mcp-child-preparation.js';
 import { createMcpLease } from './mcp-owner.js';
 import type { McpPreparation } from './agent-runtime-client.js';
@@ -65,8 +54,8 @@ import { MCP_CAPABILITIES, type HostToolCall, type McpBinding } from './protocol
 import type { McpToolLease } from './tool-bridge.js';
 
 // Real child preparer, McpAuthority, lease composition and Host binding/permission adapter.
-// SDK configuration, naming, schema compiler and connection ports are controlled; this suite
-// does not prove SDK transport, JSON-schema validation, native process stops or remote Hosts.
+// Configuration, naming and connection ports are controlled; this suite does not prove
+// protocol transport, process stops or remote Hosts.
 const authorities: McpAuthority[] = [];
 const leases: McpToolLease[] = [];
 const signal = new AbortController().signal;
@@ -128,8 +117,8 @@ it('groups complete frozen local owners and executes global/project contribution
   const acquire = vi.spyOn(f.authority, 'acquire');
   const child = await f.prepare({ ...input, delegatedBinding: f.parent.binding }, signal); leases.push(child);
   expect(acquire).toHaveBeenCalledTimes(3);
-  expect(acquire.mock.calls.map(([owner, options]) => ({ cwd: owner.executionCwd, environment: owner.environmentId,
-    config: owner.configCwd, scope: owner.executionScope, direct: options.servers, selected: Object.keys(options.provenance!.servers) }))).toEqual([
+  expect(acquire.mock.calls.map(([owner, options]) => ({ cwd: owner.executionCwd.replace(/^[a-z]:/i, '').replaceAll('\\', '/'), environment: owner.environmentId,
+    config: owner.configCwd.replace(/^[a-z]:/i, '').replaceAll('\\', '/'), scope: owner.executionScope, direct: options.servers, selected: Object.keys(options.provenance!.servers) }))).toEqual([
     { cwd: '/agent', environment: 'host:global', config: '/agent', scope: 'global', direct: ['global'], selected: ['global'] },
     { cwd: '/child-cwd', environment: 'host:child-workspace', config: '/project', scope: 'workspace', direct: ['shadowed'], selected: ['project_service', 'shadowed'] },
     { cwd: '/child-cwd', environment: 'host:child-workspace', config: '/agent', scope: 'workspace', direct: ['workspace_global'], selected: ['workspace_global'] },
@@ -147,7 +136,7 @@ it('groups complete frozen local owners and executes global/project contribution
     expect(result.completion).toMatchObject({ kind: 'result', outcome: 'succeeded', effect: 'confirmed' });
   }
   expect(sdk.calls).toEqual([{ server: 'global', cwd: '/agent' }, { server: 'shadowed', cwd: '/child-cwd' }, { server: 'workspace_global', cwd: '/child-cwd' }]);
-  expect(f.options.currentPolicy).toHaveBeenLastCalledWith('/project', true);
+  expect(f.options.currentPolicy).toHaveBeenLastCalledWith(resolve('/project'), true);
   const saved = structuredClone(child.binding); child.release();
   const restored = await f.prepare({ ...input, requiredBinding: saved }, signal); leases.push(restored);
   expect(restored.binding).toEqual(saved);
@@ -179,9 +168,9 @@ it('rechecks every group trust and preserves neutral global-only preparation for
   const acquire = vi.spyOn(f.authority, 'acquire');
   const neutral = await f.prepare({ ...input, source: null, delegatedBinding: global.binding }, signal); leases.push(neutral);
   expect(acquire).toHaveBeenCalledTimes(1);
-  expect(acquire.mock.calls[0]![0]).toMatchObject({ executionCwd: '/agent', executionScope: 'global', configCwd: '/agent' });
+  expect(acquire.mock.calls[0]![0]).toMatchObject({ executionCwd: resolve('/agent'), executionScope: 'global', configCwd: resolve('/agent') });
   await neutral.authorize(call(neutral.binding, 'global'), signal);
-  expect(f.options.currentPolicy).toHaveBeenLastCalledWith('/agent', false);
+  expect(f.options.currentPolicy).toHaveBeenLastCalledWith(resolve('/agent'), false);
 });
 
 it('rejects managed owners and unrelated project configurations before acquiring a sibling', async () => {
@@ -230,9 +219,12 @@ it('drains successful siblings on an unavailable original definition or a compos
   const f = await fixture();
   const originalAcquire = f.authority.acquire.bind(f.authority);
   const drains: ReturnType<typeof vi.fn>[] = [];
+  const siblingsReady = deferred<void>();
   vi.spyOn(f.authority, 'acquire').mockImplementation(async (owner, options) => {
+    if (options.provenance?.servers.shadowed?.definition_version === 'unavailable-original') await siblingsReady.promise;
     const lease = await originalAcquire(owner, options);
     drains.push(vi.spyOn(lease, 'releaseAndDrain'));
+    if (drains.length === 2) siblingsReady.resolve();
     return lease;
   });
   const missing = structuredClone(f.parent.binding);

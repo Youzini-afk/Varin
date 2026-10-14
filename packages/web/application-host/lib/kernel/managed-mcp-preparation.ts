@@ -1,7 +1,7 @@
 /** Independent target readiness. Pending B contributions do not block A's ready global tools. */
 import { randomUUID } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
-import type { McpAuthorityLease } from '@varin/pi-host/mcp-authority';
+import type { McpAuthorityLease } from '../mcp/authority.js';
 import type { AgentRuntimeClient, McpPreparation } from './agent-runtime-client.js';
 import type { ManagedSourceAccess } from './managed-source-consumers.js';
 import type { McpBinding, SourceResourceOwner } from './protocol.generated.js';

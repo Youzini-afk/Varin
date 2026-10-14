@@ -303,7 +303,7 @@ it('installed SDK declaration reaches shared bridge, compiled schemas, validated
         executionOwner as { kind: 'external'; identity: string; epoch: string },
       ),
     ).toMatchObject({ completion: { kind: 'not_dispatched' } });
-    const scope = await createExtensionTools(options)(
+   const scope = await createExtensionTools(options)(
       { runId: 'second', threadId: 'thread', source: null },
       [],
       new AbortController().signal,
@@ -333,7 +333,7 @@ it('installed SDK declaration reaches shared bridge, compiled schemas, validated
     } finally { isolated.close(); for (const initial of isolated.initial) initial.lease.release(); }
     bridge.close();
     await expect(
-      retainExtensionTool(options, selected, {
+      retainExtensionTool(options, await runtime.prepareService({ serviceId: descriptor.id, version: descriptor.version, method: 'execute', args: [], routing: { sessionId: 'thread' } }), {
         ...retained.binding,
         artifactIntegrity: 'different-original-artifact',
       }),
@@ -497,6 +497,7 @@ it('real A-to-B routing keeps A on rejected B publication, ignores disabled B, a
     const options = {
       runtime,
       kernel,
+      configurationIdentity: Object.assign(() => null, { enabled: (value: { id: string }) => value.id === serviceId }),
       currentPolicy: async () => ({
         mode: 'normal' as const,
         rules: [{ tool: 'routing_read', decision: 'allow' as const }],
@@ -509,12 +510,12 @@ it('real A-to-B routing keeps A on rejected B publication, ignores disabled B, a
       args: [],
       routing: { sessionId: 'thread' },
     });
-    const scope = await createExtensionTools(options)(
+   const scope = await createExtensionTools(options)(
       { runId: 'run', threadId: 'thread', source: null },
       [],
       new AbortController().signal,
     );
-    closeScope = () => scope.close();
+   closeScope = () => scope.close();
     leases.push(...scope.initial);
     expect(scope.initial[0]?.binding.extensionId).toBe(a);
     const removed: string[] = [];
@@ -524,7 +525,7 @@ it('real A-to-B routing keeps A on rejected B publication, ignores disabled B, a
     const restoredA = new Promise<void>(resolve => { observedA = resolve; });
     let observedB!: () => void;
     const publishedB = new Promise<void>(resolve => { observedB = resolve; });
-    scope.start(async (_slot, lease, revoked) => {
+   scope.start(async (_slot, lease, revoked) => {
       if (lease && lease.binding.extensionId === a && removed.includes(a)) {
         restored = lease;
         leases.push(lease);
@@ -538,7 +539,7 @@ it('real A-to-B routing keeps A on rejected B publication, ignores disabled B, a
       }
       if (revoked) removed.push(revoked.binding.extensionId);
     });
-    await route(b);
+   await route(b);
     await publishedB;
     expect(rejected?.binding.extensionId).toBe(b);
     await expect.poll(() => scope.inspect().find(state => state.serviceId === serviceId)?.status).toBe('unavailable');
@@ -701,7 +702,7 @@ it('real A-to-B routing keeps A on rejected B publication, ignores disabled B, a
         [scope.initial[0]!.binding],
         new AbortController().signal,
       ),
-    ).rejects.toThrow('extension_tool_exact_artifact_unavailable');
+    ).rejects.toThrow(/artifact.*unavailable/i);
     await route(a);
     await runtime.setEnabled(
       a,

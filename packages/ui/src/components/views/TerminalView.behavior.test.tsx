@@ -59,7 +59,7 @@ vi.mock('@/components/terminal/TerminalViewport', () => ({ TerminalViewport: () 
 let root: Root;
 let container: HTMLElement;
 let handlers: Parameters<TerminalAPI['connect']>[1];
-let detach: ReturnType<typeof vi.fn>;
+let detach: ReturnType<typeof vi.fn<() => void>>;
 const managedOwner = { kind: 'managed_host' as const, hostId: 'host-b', connectionId: 'connection-b', endpointIdentity: 'sha256-b' };
 const originalIdentity: ThreadIdentity = { runtime: 'agent', threadId: 'original-thread', branchId: 'original-branch' };
 const originalTerminal: ThreadProcessTerminal = { cwd: '/only-on-host-b', sessionId: 'original-managed-session', resourceOwner: managedOwner, operationId: 'original-operation', processId: 'original-process' };
@@ -76,7 +76,7 @@ beforeEach(() => {
   useWorkspaceStore.getState().resetForTests();
   useTerminalStore.setState({ hasHydrated: true });
   useUIStore.setState({ showTerminalQuickKeysOnDesktop: false });
-  detach = vi.fn();
+  detach = vi.fn<() => void>();
   mocks.terminal.connect.mockImplementation((_id, callback) => { handlers = callback; return { close: detach }; });
   mocks.terminal.close.mockResolvedValue(undefined);
   mocks.terminal.resize.mockResolvedValue(undefined);

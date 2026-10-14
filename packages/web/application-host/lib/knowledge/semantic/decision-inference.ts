@@ -4,8 +4,8 @@ import { isDeepStrictEqual } from 'node:util';
 import { parseHarnessFastDecisionSettings, resolveFastDecisionPurpose,
   type HarnessFastDecisionPurpose, type HarnessFastDecisionPurposeStatus, type HarnessFastDecisionResult,
   type HarnessFastDecisionParams, type HarnessResolvedFastDecisionBinding } from '@varin/protocol';
-import { requestClassifier, classifierWireUsage, classifierRawUsage, classifierWireResponseValid, ClassifierResponseError } from '@varin/pi-host/classifier';
-import type { HostInferenceProviderBinding } from '@varin/pi-host/credentials';
+import { requestClassifier, classifierWireUsage, classifierRawUsage, classifierWireResponseValid, ClassifierResponseError } from '../../models/classifier.js';
+import type { InferenceProviderBinding as HostInferenceProviderBinding } from '../../models/service.js';
 import type { InferenceCall, InferenceInvocationAuthority, InferenceRequests, InferenceRequestsOptions } from './inference-requests.js';
 import { ResearchDecisionFailure } from '../../harness/research-decide.js';
 import type { InferenceBinding, InferenceReceipt } from '../../kernel/protocol.generated.js';
@@ -121,13 +121,13 @@ export function createDecisionInference(authority: DecisionInferenceAuthority, s
                 } });
             };
             const result = await requestClassifier({ baseUrl: provider.baseUrl, ...(provider.endpoint ? { endpoint: provider.endpoint } : {}),
-              nativeModel: { ...(provider.nativeModel ?? { type: 'classifier' as const, api: provider.api as 'typesafe-system-one' | 'cloudflare-workers-ai-system-one' | 'llama-cpp-classify',
-                provider: binding.providerId, id: binding.modelId, name: binding.modelId, input: ['text'] as const, contextWindow: 0,
+              nativeModel: { ...({ type: 'classifier' as const, api: provider.api as 'typesafe-system-one' | 'cloudflare-workers-ai-system-one' | 'llama-cpp-classify',
+                provider: binding.providerId, id: provider.requestModelId ?? binding.modelId, name: binding.modelId, input: ['text'] as const, contextWindow: 0,
                 cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 } }), baseUrl: provider.baseUrl,
                 api: provider.api as 'typesafe-system-one' | 'cloudflare-workers-ai-system-one' | 'llama-cpp-classify' },
               ...(auth?.auth.apiKey === undefined ? {} : { apiKey: auth.auth.apiKey }),
               ...(auth?.auth.headers ? { headers: Object.fromEntries(Object.entries(auth.auth.headers).filter((entry): entry is [string, string] => typeof entry[1] === 'string')) } : {}),
-              model: binding.modelId, state: { goal: input.goal, materials: input.materials }, questions: input.questions, signal: combined, fetchImpl });
+              model: provider.requestModelId ?? binding.modelId, state: { goal: input.goal, materials: input.materials }, questions: input.questions, signal: combined, fetchImpl });
             if (combined.aborted) throw new ResearchDecisionFailure('Decision interrupted after retaining its original provider receipt.', observed(), call.cancelled);
             const { usage: _usage, ...answers } = result;
             const projected = { ...observed(), ...answers };
