@@ -18,10 +18,7 @@ import { parseRecoveryState, sameState, stateIdentity } from "../recovery/journa
 import type {
   DraftBaseline,
   DraftBaselinePathProvenance,
-  ParentVerificationBundle,
   RecoveryState,
-  ResultReviewRecord,
-  ResultVerificationBundle,
   WorkingBranchRoot,
   WorkingBranchCreateOptions,
   WorkingSourcePreparation,
@@ -131,12 +128,6 @@ export interface KernelStorageContext {
     draftGet(recordId: string): Promise<Record<string, unknown> | null>;
     draftList(): Promise<Record<string, unknown>[]>;
     draftRelease(operationId: string, recordId: string): Promise<Record<string, unknown>>;
-    verificationPut(input: Omit<Parameters<KernelScopedClient["workingVerificationPut"]>[0], "workspaceId"> & { workspaceId?: string }): Promise<Record<string, unknown>>;
-    verificationList(threadId: string, kind: "child" | "parent"): Promise<Record<string, unknown>[]>;
-    verificationRelease(operationId: string, recordId: string): Promise<Record<string, unknown>>;
-    reviewPut(input: Omit<Parameters<KernelScopedClient["workingReviewPut"]>[0], "workspaceId"> & { workspaceId?: string }): Promise<Record<string, unknown>>;
-    reviewList(threadId: string): Promise<Record<string, unknown>[]>;
-    reviewRelease(operationId: string, recordId: string): Promise<Record<string, unknown>>;
   };
 }
 
@@ -525,49 +516,6 @@ export class KernelWorkingStateRootStore implements WorkingStateRootStore {
   async resultTreeIdentity(branchId: string, revision: number): Promise<string | null> {
     const result = await this.getResult(branchId, revision);
     return result?.root ?? null;
-  }
-
-  async listChildVerifications(threadId: string): Promise<ResultVerificationBundle[]> {
-    return (await this.context.working.verificationList(threadId, "child")).map((entry) => asRecord(entry.record) as unknown as ResultVerificationBundle);
-  }
-
-  async listParentVerifications(threadId: string): Promise<ParentVerificationBundle[]> {
-    return (await this.context.working.verificationList(threadId, "parent")).map((entry) => asRecord(entry.record) as unknown as ParentVerificationBundle);
-  }
-
-  async listReviewRecords(threadId: string): Promise<ResultReviewRecord[]> {
-    return (await this.context.working.reviewList(threadId)).map((entry) => asRecord(entry.record) as unknown as ResultReviewRecord);
-  }
-
-  async getChildVerification(threadId: string, revision: number): Promise<ResultVerificationBundle | null> {
-    return (await this.listChildVerifications(threadId)).find((entry) => entry.resultRevision === revision) ?? null;
-  }
-
-  async getParentVerification(threadId: string, revision?: number): Promise<ParentVerificationBundle | null> {
-    const list = await this.listParentVerifications(threadId);
-    return (revision === undefined ? list.at(-1) : list.find((entry) => entry.mergedResultRevision === revision)) ?? null;
-  }
-
-  async getReviewRecord(threadId: string, revision: number): Promise<ResultReviewRecord | null> {
-    return (await this.listReviewRecords(threadId)).find((entry) => entry.resultRevision === revision) ?? null;
-  }
-
-  async putChildVerification(threadId: string, bundle: ResultVerificationBundle): Promise<void> {
-    const result = await this.getResult(bundle.branchId, bundle.resultRevision);
-    if (!result?.root) throw new Error(`Working result ${bundle.branchId}@${bundle.resultRevision} is unavailable`);
-    await this.context.working.verificationPut({ operationId: `working-verification-child:${threadId}:${bundle.resultRevision}:${randomUUID()}`, recordId: `working-verification:child:${threadId}:${bundle.resultRevision}`, threadId, kind: "child", branchId: bundle.branchId, resultRevision: bundle.resultRevision, root: result.root, document: bundle, ownerIds: [], references: [] });
-  }
-
-  async putParentVerification(threadId: string, branchId: string, bundle: ParentVerificationBundle): Promise<void> {
-    const result = await this.getResult(branchId, bundle.mergedResultRevision);
-    if (!result?.root) throw new Error(`Working result ${branchId}@${bundle.mergedResultRevision} is unavailable`);
-    await this.context.working.verificationPut({ operationId: `working-verification-parent:${threadId}:${bundle.mergedResultRevision}:${randomUUID()}`, recordId: `working-verification:parent:${threadId}:${bundle.mergedResultRevision}`, threadId, kind: "parent", branchId, resultRevision: bundle.mergedResultRevision, root: result.root, document: bundle, ownerIds: [], references: [] });
-  }
-
-  async putReviewRecord(threadId: string, branchId: string, record: ResultReviewRecord): Promise<void> {
-    const result = await this.getResult(branchId, record.resultRevision);
-    if (!result?.root) throw new Error(`Working result ${branchId}@${record.resultRevision} is unavailable`);
-    await this.context.working.reviewPut({ operationId: `working-review:${threadId}:${record.resultRevision}:${randomUUID()}`, recordId: `working-review:${threadId}:${record.resultRevision}`, threadId, branchId, resultRevision: record.resultRevision, root: result.root, document: record, ownerIds: [], references: [] });
   }
 
   private async selected(branchId: string, paths: readonly string[], revision: number | undefined, signal?: AbortSignal): Promise<KernelBranchReadResult | null> {
@@ -1881,7 +1829,7 @@ export class KernelStorageAdapter {
     const key = JSON.stringify({ workspaceId, actorJson, capabilities });
     const existing = this.grants.get(key); if (existing) return existing;
     const grant = (async () => {
-      // The cache reuses a live grant. A later adapter/session lifetime needs a new
+      // The cache reuses a live grant. A later adapter lifetime needs a new
       // identity: the previous grant may have been explicitly revoked on disposal.
       return this.client.issueGrant({ grantId: `product:${this.options.hostId}:${randomUUID()}`, ...actor, capabilities, pathScopes: actor.pathScopes ?? [""] });
     })();
@@ -2047,18 +1995,6 @@ export class KernelStorageAdapter {
         return Array.isArray(result.records) ? result.records as Record<string, unknown>[] : [];
       },
       draftRelease: (operationId: string, recordId: string) => scoped.workingDraftRelease({ operationId, workspaceId, recordId }),
-      verificationPut: (input: Omit<Parameters<KernelScopedClient["workingVerificationPut"]>[0], "workspaceId"> & { workspaceId?: string }) => scoped.workingVerificationPut({ ...input, workspaceId }),
-      verificationList: async (threadId: string, kind: "child" | "parent") => {
-        const result = await scoped.workingVerificationList({ workspaceId, threadId, kind });
-        return Array.isArray(result.records) ? result.records as Record<string, unknown>[] : [];
-      },
-      verificationRelease: (operationId: string, recordId: string) => scoped.workingVerificationRelease({ operationId, workspaceId, recordId }),
-      reviewPut: (input: Omit<Parameters<KernelScopedClient["workingReviewPut"]>[0], "workspaceId"> & { workspaceId?: string }) => scoped.workingReviewPut({ ...input, workspaceId }),
-      reviewList: async (threadId: string) => {
-        const result = await scoped.workingReviewList({ workspaceId, threadId });
-        return Array.isArray(result.records) ? result.records as Record<string, unknown>[] : [];
-      },
-      reviewRelease: (operationId: string, recordId: string) => scoped.workingReviewRelease({ operationId, workspaceId, recordId }),
     };
     const resolveMaterializationRoot = async (directory: string) => {
       if (admitted || branchOnly) throw new Error("Managed materialization requires its separately admitted destination authority");
@@ -2131,10 +2067,6 @@ export class KernelStorageAdapter {
       resolveFileRoot,
       resolveMaterializationRoot,
       actor: {
-        ...(grant.sessionId ? { sessionId: grant.sessionId } : {}),
-        ...(grant.authorityInstanceId ? { authorityInstanceId: grant.authorityInstanceId } : {}),
-        ...(grant.workerId ? { workerId: grant.workerId } : {}),
-        ...(grant.workerGeneration === null ? {} : { workerGeneration: grant.workerGeneration }),
         ...(grant.threadId ? { threadId: grant.threadId } : {}),
         ...(grant.runId ? { runId: grant.runId } : {}),
         owningWorkspace: grant.owningWorkspace ?? workspaceId,
@@ -2171,16 +2103,6 @@ export class KernelStorageAdapter {
     this.grants.clear();
     const failures = grants.filter((result): result is PromiseRejectedResult => result.status === "rejected");
     if (failures.length > 0) throw new Error(`One or more kernel storage grants failed to revoke: ${failures.map((failure) => String(failure.reason)).join("; ")}`);
-  }
-
-  async revokeSession(sessionId: string): Promise<void> {
-    const candidates = [...this.grants.entries()];
-    for (const [key, promise] of candidates) {
-      const grant = await promise.catch(() => null);
-      if (!grant || grant.sessionId !== sessionId) continue;
-      await this.client.revokeGrant(grant.grantId).catch(() => undefined);
-      this.grants.delete(key);
-    }
   }
 }
 

@@ -105,6 +105,7 @@ pub(crate) struct Grant {
     pub(crate) grant_id: String,
     pub(crate) host_id: String,
     pub(crate) host_generation: String,
+    // Historical format-22 fields. New grants store null; non-null is never authority.
     pub(crate) authority_instance_id: Option<String>,
     pub(crate) worker_id: Option<String>,
     pub(crate) worker_generation: Option<u64>,

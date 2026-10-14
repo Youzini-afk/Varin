@@ -23,8 +23,6 @@ pub(crate) fn required_capability(method: &str) -> &'static str {
         | "working.result.list"
         | "working.draft.get"
         | "working.draft.list"
-        | "working.verification.list"
-        | "working.review.list"
         | "file.scan"
         | "file.read"
         | "file.read.check"
@@ -67,11 +65,7 @@ pub(crate) fn required_capability(method: &str) -> &'static str {
         | "working.result.put"
         | "working.result.release"
         | "working.draft.put"
-        | "working.draft.release"
-        | "working.verification.put"
-        | "working.verification.release"
-        | "working.review.put"
-        | "working.review.release" => "storage.write",
+        | "working.draft.release" => "storage.write",
         "storage.record.workspaces" | "branch.objects"
         | "file.materializedView.prepare" | "file.materializedView.release" => "storage.maintenance",
         "storage.gc" => "storage.gc",

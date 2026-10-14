@@ -51,6 +51,17 @@ impl Storage {
         Ok(())
     }
 
+    pub(super) fn require_native_record_owner(&self, workspace: &str, record: &str) -> Result<(), KernelError> {
+        let legacy: bool = self.conn.query_row(
+            "SELECT EXISTS(SELECT 1 FROM domain_records WHERE workspace_id=?1 AND record_id=?2 AND session_id IS NOT NULL)",
+            params![workspace, record], |row| row.get(0),
+        )?;
+        if legacy {
+            return Err(KernelError::Authorization("legacy session record owner is not supported; stored assets were not changed".into()));
+        }
+        Ok(())
+    }
+
     pub(super) fn validate_domain_record_identity(
         &self,
         params_value: &Value,
@@ -69,10 +80,12 @@ impl Storage {
                 "record workspace does not match actor grant".to_string(),
             ));
         }
-        for key in ["sessionId", "threadId", "runId"] {
+        if params_value.get("sessionId").is_some_and(|value| !value.is_null()) {
+            return Err(KernelError::Authorization("legacy session record owner is not supported".into()));
+        }
+        for key in ["threadId", "runId"] {
             if let Some(value) = params_value.get(key).and_then(Value::as_str) {
                 let expected = match key {
-                    "sessionId" => grant.session_id.as_deref(),
                     "threadId" => grant.thread_id.as_deref(),
                     _ => grant.run_id.as_deref(),
                 };
@@ -656,6 +669,9 @@ impl Storage {
         value: &Value,
         grant_id: &str,
     ) -> Result<bool, KernelError> {
+        if value.get("sessionId").is_some_and(|value| !value.is_null()) {
+            return Err(KernelError::Authorization("legacy session record owner is not supported".into()));
+        }
         let grant = self.load_grant(grant_id)?;
         if grant.capabilities.contains("recovery.maintenance")
             || grant.capabilities.contains("storage.maintenance")
@@ -663,10 +679,9 @@ impl Storage {
         {
             return Ok(true);
         }
-        for key in ["sessionId", "threadId", "runId"] {
+        for key in ["threadId", "runId"] {
             let record_value = value.get(key).and_then(Value::as_str);
             let grant_value = match key {
-                "sessionId" => grant.session_id.as_deref(),
                 "threadId" => grant.thread_id.as_deref(),
                 _ => grant.run_id.as_deref(),
             };
@@ -747,6 +762,9 @@ impl Storage {
         else {
             return Ok(None);
         };
+        if session_id.is_some() {
+            return Err(KernelError::Authorization("legacy session record owner is not supported; stored assets were not changed".into()));
+        }
         let references = self
             .conn
             .prepare("SELECT slot, object_hash FROM domain_record_refs WHERE record_id = ?1 AND workspace_id = ?2 ORDER BY slot")?
@@ -1062,7 +1080,7 @@ impl Storage {
         let now = now_ms();
         self.conn.execute(
             "INSERT INTO domain_records(record_id, workspace_id, record_type, state, session_id, thread_id, run_id, branch_id, revision, result_revision, record_revision, payload_json, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, COALESCE((SELECT created_at FROM domain_records WHERE record_id = ?1 AND workspace_id = ?2), ?13), ?13) ON CONFLICT(workspace_id, record_id) DO UPDATE SET state = excluded.state, record_revision = excluded.record_revision, payload_json = excluded.payload_json, updated_at = excluded.updated_at",
-            params![record_id, workspace_id, record_type, state, params_value.get("sessionId").and_then(Value::as_str), params_value.get("threadId").and_then(Value::as_str), params_value.get("runId").and_then(Value::as_str), params_value.get("branchId").and_then(Value::as_str), params_value.get("revision").and_then(Value::as_i64), params_value.get("resultRevision").and_then(Value::as_i64), record_revision, serde_json::to_string(&payload)?, now],
+            params![record_id, workspace_id, record_type, state, Option::<String>::None, params_value.get("threadId").and_then(Value::as_str), params_value.get("runId").and_then(Value::as_str), params_value.get("branchId").and_then(Value::as_str), params_value.get("revision").and_then(Value::as_i64), params_value.get("resultRevision").and_then(Value::as_i64), record_revision, serde_json::to_string(&payload)?, now],
         )?;
         self.conn.execute(
             "DELETE FROM domain_record_refs WHERE workspace_id = ?1 AND record_id = ?2",
@@ -1502,6 +1520,13 @@ impl Storage {
                 return Err(KernelError::Operation(
                     "the branch head result cannot be released".to_string(),
                 ));
+            }
+            let legacy_dependent: bool = self.conn.query_row(
+                "SELECT EXISTS(SELECT 1 FROM domain_records WHERE workspace_id = ?1 AND branch_id = ?2 AND result_revision = ?3 AND session_id IS NOT NULL AND record_type IN ('working.verification.child', 'working.verification.parent', 'working.review'))",
+                params![workspace_id, branch_id, revision], |row| row.get(0),
+            )?;
+            if legacy_dependent {
+                return Err(KernelError::Authorization("legacy session result dependent is not supported; stored assets were not changed".into()));
             }
             let released_dependents = self.conn.execute(
                 "DELETE FROM domain_records WHERE workspace_id = ?1 AND branch_id = ?2 AND result_revision = ?3 AND record_type IN ('working.verification.child', 'working.verification.parent', 'working.review')",
@@ -2185,7 +2210,9 @@ mod artifact_page_tests {
             storage.dispatch(method, &input, Some(actor), &grant)
         };
         assert!(matches!(dispatch(&mut storage, "storage.record.put", &input, "other"), Err(KernelError::Authorization(_))));
-        let mut mismatch = input.clone(); mismatch["branchId"] = json!("another");
+        let mut mismatch = input.clone();
+        mismatch["operationId"] = json!("put-mismatched-branch");
+        mismatch["branchId"] = json!("another");
         assert!(dispatch(&mut storage, "storage.record.put", &mismatch, "original").is_err());
         let result = dispatch(&mut storage, "storage.record.put", &input, "original").unwrap();
         assert_eq!(result["threadId"], "thread"); assert_eq!(result["branchId"], "branch");

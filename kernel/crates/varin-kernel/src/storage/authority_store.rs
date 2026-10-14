@@ -17,8 +17,23 @@ impl Storage {
                 }
                 other => other.into(),
             })?;
-        serde_json::from_str(&json)
-            .map_err(|error| KernelError::Storage(format!("grant is corrupt: {error}")))
+        let grant: Grant = serde_json::from_str(&json)
+            .map_err(|error| KernelError::Storage(format!("grant is corrupt: {error}")))?;
+        Self::require_native_grant(&grant)?;
+        Ok(grant)
+    }
+
+    fn require_native_grant(grant: &Grant) -> Result<(), KernelError> {
+        if grant.authority_instance_id.is_some()
+            || grant.worker_id.is_some()
+            || grant.worker_generation.is_some()
+            || grant.session_id.is_some()
+        {
+            return Err(KernelError::Authorization(
+                "legacy session or worker grant cannot authorize native resources; stored assets were not changed".into(),
+            ));
+        }
+        Ok(())
     }
 
     pub(crate) fn issue_grant(
@@ -98,20 +113,21 @@ impl Storage {
             .collect::<Result<Vec<_>, KernelError>>()?;
         let owning_workspace = parse_optional("owningWorkspace")?;
         let execution_workspace = parse_optional("executionWorkspace")?;
-        let worker_generation = match params.get("workerGeneration") {
-            None | Some(Value::Null) => None,
-            Some(value) => Some(value.as_u64().ok_or_else(|| {
-                KernelError::Authorization("grant workerGeneration is malformed".to_string())
-            })?),
-        };
+        for key in ["authorityInstanceId", "workerId", "workerGeneration", "sessionId"] {
+            if params.get(key).is_some_and(|value| !value.is_null()) {
+                return Err(KernelError::Authorization(format!(
+                    "grant {key} is a retired authority field"
+                )));
+            }
+        }
         let grant = Grant {
             grant_id: grant_id.to_string(),
             host_id: host_id.to_string(),
             host_generation: supplied_host_generation.to_string(),
-            authority_instance_id: parse_optional("authorityInstanceId")?,
-            worker_id: parse_optional("workerId")?,
-            worker_generation,
-            session_id: parse_optional("sessionId")?,
+            authority_instance_id: None,
+            worker_id: None,
+            worker_generation: None,
+            session_id: None,
             thread_id: parse_optional("threadId")?,
             run_id: parse_optional("runId")?,
             operation_id: parse_optional("operationId")?,
@@ -145,6 +161,7 @@ impl Storage {
                 ));
             }
             let mut stored_grant: Grant = serde_json::from_str(&stored_json)?;
+            Self::require_native_grant(&stored_grant)?;
             if stored_grant.state != GrantState::Active {
                 return Err(KernelError::Authorization(
                     "grant is retired or revoked; issue a new grant identity".into(),

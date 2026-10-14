@@ -25,7 +25,20 @@ impl Storage {
                     return Ok(None);
                 }
                 match result {
-                    Some(text) => Ok(Some(serde_json::from_str(&text)?)),
+                    Some(text) => {
+                        let result: Value = serde_json::from_str(&text)?;
+                        // Receipt replay is authority-bearing, unlike operation.get's history view.
+                        // Do not let a completed old write bypass native ownership admission.
+                        if kind.starts_with("storage.record.") || kind.starts_with("working.") || kind.starts_with("recovery.") {
+                            if ["sessionId", "ownerSessionId"].iter().any(|key| result.get(*key).is_some_and(|value| !value.is_null())) {
+                                return Err(KernelError::Authorization("legacy session receipt cannot be replayed; stored assets were not changed".into()));
+                            }
+                            if kind.starts_with("recovery.") && result.get("conversation").is_some_and(|value| !value.is_null()) {
+                                Self::recovery_conversation(&result)?;
+                            }
+                        }
+                        Ok(Some(result))
+                    },
                     None => Err(KernelError::Operation(format!(
                         "operationId {id} is still in progress"
                     ))),

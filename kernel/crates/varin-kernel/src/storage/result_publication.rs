@@ -77,6 +77,7 @@ impl Storage {
             "changes":builder.changes});
         let prior = self.operation_get(&json!({"operationId":operation}))?;
         if prior["kind"] == "working.result.prepare" && prior["state"] == "committed" {
+            Self::require_native_candidate(&prior["result"])?;
             self.validate_source_grant_owner(
                 grant_id,
                 required(&prior["result"], "ownerGrantId")?,
@@ -124,9 +125,15 @@ impl Storage {
                 json!({"publicationId":publication,"candidateOperationId":operation,
                 "workspaceId":branch.workspace_id,"branchId":branch_id,"root":branch.head_root,
                 "baseRoot":branch.base_root,"writeRevision":branch.write_revision,"pinId":pin_id,"basePinId":base_pin_id,
-                "parentRef":branch.parent_ref,"ownerGrantId":grant.grant_id,"ownerThreadId":grant.thread_id,"ownerSessionId":grant.session_id}),
+                "parentRef":branch.parent_ref,"ownerGrantId":grant.grant_id,"ownerThreadId":grant.thread_id,"ownerSessionId":Value::Null}),
             )
         })
+    }
+    fn require_native_candidate(candidate: &Value) -> Result<(), KernelError> {
+        if candidate.get("ownerSessionId").is_some_and(|value| !value.is_null()) {
+            return Err(KernelError::Authorization("legacy session result candidate is not supported; stored assets were not changed".into()));
+        }
+        Ok(())
     }
     fn result_candidate(&self, params: &Value, grant_id: &str) -> Result<Value, KernelError> {
         let workspace = required(params, "workspaceId")?;
@@ -134,6 +141,7 @@ impl Storage {
         let candidate_id = required(params, "candidateOperationId")?;
         let operation = self.operation_get(&json!({"operationId":candidate_id}))?;
         let candidate = operation["result"].clone();
+        Self::require_native_candidate(&candidate)?;
         if operation["kind"] != "working.result.prepare"
             || operation["state"] != "committed"
             || candidate["workspaceId"] != workspace
@@ -147,7 +155,6 @@ impl Storage {
         self.validate_source_grant_owner(grant_id, required(&candidate, "ownerGrantId")?)?;
         for (key, actual) in [
             ("ownerThreadId", grant.thread_id.as_deref()),
-            ("ownerSessionId", grant.session_id.as_deref()),
         ] {
             if candidate[key]
                 .as_str()
@@ -541,6 +548,52 @@ mod tests {
         invoke(storage,"branch.write.begin",json!({"operationId":op,"builderId":op,"branchId":"branch","expectedWriteRevision":branch.write_revision})).unwrap();
         invoke(storage,"branch.write.append",json!({"builderId":op,"sequence":0,"changes":[{"path":"dir","state":{"kind":"directory","mode":493}}]})).unwrap();
         invoke(storage,"working.result.prepare",json!({"operationId":op,"publicationId":publication,"builderId":op,"expectedRoot":branch.head_root})).unwrap()
+    }
+    #[test]
+    fn legacy_candidate_owner_blocks_prepare_replay_publish_and_release_without_changes() {
+        let (mut storage, root) = fixture();
+        let before = storage.branch("branch").unwrap();
+        candidate(&mut storage, "legacy");
+        let operation = "result-prepare:legacy";
+        let receipt = storage.operation_get(&json!({"operationId":operation})).unwrap();
+        assert!(receipt["result"]["ownerSessionId"].is_null());
+        let mut legacy = receipt["result"].clone(); legacy["ownerSessionId"] = json!("old-session");
+        let exact = serde_json::to_string_pretty(&legacy).unwrap();
+        storage.conn.execute("UPDATE operations SET result_json=?1 WHERE operation_id=?2", params![exact, operation]).unwrap();
+        invoke(&mut storage,"branch.write.begin",json!({"operationId":operation,"builderId":operation,"branchId":"branch","expectedWriteRevision":before.write_revision})).unwrap();
+        invoke(&mut storage,"branch.write.append",json!({"builderId":operation,"sequence":0,"changes":[{"path":"dir","state":{"kind":"directory","mode":493}}]})).unwrap();
+        assert!(matches!(invoke(&mut storage,"working.result.prepare",json!({"operationId":operation,"publicationId":"legacy","builderId":operation,"expectedRoot":before.head_root})), Err(KernelError::Authorization(_))));
+        assert!(matches!(invoke(&mut storage,"working.result.publish",json!({"operationId":"legacy","workspaceId":"workspace","branchId":"branch","candidateOperationId":operation})), Err(KernelError::Authorization(_))));
+        assert!(matches!(invoke(&mut storage,"working.result.candidate.release",json!({"operationId":"result-candidate-release:legacy","workspaceId":"workspace","branchId":"branch","candidateOperationId":operation})), Err(KernelError::Authorization(_))));
+        let retained: String = storage.conn.query_row("SELECT result_json FROM operations WHERE operation_id=?1", [operation], |row| row.get(0)).unwrap();
+        assert_eq!(retained, exact);
+        let pins: i64 = storage.conn.query_row("SELECT COUNT(*) FROM pins WHERE pin_id IN ('result-candidate:legacy','result-base:legacy')", [], |row| row.get(0)).unwrap();
+        assert_eq!(pins, 2);
+        assert_eq!(storage.branch("branch").unwrap().head_revision, 0);
+        drop(storage); fs::remove_dir_all(root).unwrap();
+    }
+    #[test]
+    fn legacy_candidate_owner_blocks_cached_publication_and_release_receipts() {
+        for released in [false, true] {
+            let (mut storage, root) = fixture();
+            candidate(&mut storage, "cached");
+            let publish = json!({"operationId":"cached","workspaceId":"workspace","branchId":"branch","candidateOperationId":"result-prepare:cached"});
+            let release = json!({"operationId":"result-candidate-release:cached","workspaceId":"workspace","branchId":"branch","candidateOperationId":"result-prepare:cached"});
+            invoke(&mut storage, "working.result.publish", publish.clone()).unwrap();
+            if released { invoke(&mut storage, "working.result.candidate.release", release.clone()).unwrap(); }
+            let original = storage.operation_get(&json!({"operationId":"result-prepare:cached"})).unwrap();
+            let mut legacy = original["result"].clone(); legacy["ownerSessionId"] = json!("old-session");
+            let exact = legacy.to_string();
+            storage.conn.execute("UPDATE operations SET result_json=?1 WHERE operation_id='result-prepare:cached'", [&exact]).unwrap();
+            assert!(matches!(invoke(&mut storage, "working.result.publish", publish), Err(KernelError::Authorization(_))));
+            assert!(matches!(invoke(&mut storage, "working.result.candidate.release", release), Err(KernelError::Authorization(_))));
+            let retained: String = storage.conn.query_row("SELECT result_json FROM operations WHERE operation_id='result-prepare:cached'", [], |row| row.get(0)).unwrap();
+            assert_eq!(retained, exact);
+            assert_eq!(storage.branch("branch").unwrap().head_revision, 1);
+            let pins: i64 = storage.conn.query_row("SELECT COUNT(*) FROM pins WHERE pin_id IN ('result-candidate:cached','result-base:cached')", [], |row| row.get(0)).unwrap();
+            assert_eq!(pins, if released { 0 } else { 2 });
+            drop(storage); fs::remove_dir_all(root).unwrap();
+        }
     }
     #[test]
     fn result_transaction_survives_rebase_and_replays_original_identity() {

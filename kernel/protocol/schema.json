@@ -1,5 +1,5 @@
 {
-  "privateDtos": ["ContextObservationSource","ContextObservationSources","ContextObservationFact","ContextObservationAdmit","ContextObservationReceipt","HostToolErrorMarker","SourceAuthorityScopeParams","SourceResourceAction","SourceHandoffInspectParams","SourceHandoffClaimParams","SourceIntegrationReceiptParams"],
+  "privateDtos": ["KernelWorkingVerificationDocument","KernelWorkingReviewDocument","ContextObservationSource","ContextObservationSources","ContextObservationFact","ContextObservationAdmit","ContextObservationReceipt","HostToolErrorMarker","SourceAuthorityScopeParams","SourceResourceAction","SourceHandoffInspectParams","SourceHandoffClaimParams","SourceIntegrationReceiptParams"],
   "mcpCapabilities": [
   {"name": "mcp_subscribe_resource", "operation": "subscribe_resource", "version": "1", "description": "Observe resource change notifications from the selected MCP server. Use its resources schemaVersion. Notifications are passive facts; this does not read the resource or authorize new model work. Nonexact resource notifications may be unassociated.", "schema": {"type": "object", "properties": {"server": {"type": "string", "minLength": 1}, "schemaVersion": {"type": "string", "minLength": 1}, "uri": {"type": "string", "minLength": 1}}, "required": ["server", "schemaVersion", "uri"], "additionalProperties": false}, "output_schema": null, "metadata": null, "route": {"kind": "resource_subscribe", "argument": "server"}},
   {"name": "mcp_unsubscribe_resource", "operation": "unsubscribe_resource", "version": "1", "description": "Stop the resource observer created by an original subscription Operation. Local listener release and the server unsubscribe acknowledgement are reported separately.", "schema": {"type": "object", "properties": {"operationId": {"type": "string", "minLength": 1}}, "required": ["operationId"], "additionalProperties": false}, "output_schema": null, "metadata": null, "route": {"kind": "resource_unsubscribe", "argument": "operationId"}},
@@ -835,7 +835,7 @@
   "MediaReadChunk",
   "ChildSourceAuthority"
 ],
-  "protocolVersion": 45,
+  "protocolVersion": 46,
   "runtimeStructs": {"ContentCollectionReport":{"fields":{"status":{"type":"ContentCollectionStatus"},"phase":{"type":"ContentCollectionPhase"},"removedObjects":{"type":"number"},"removedBytes":{"type":"number"},"removedStagingFiles":{"type":"number"},"reason":{"type":"string | null"}}},"ModelSessionConfiguration":{"fields":{"providerId":{"type":"string","optional":true},"providerFamily":{"type":"string"},"model":{"type":"string"},"endpoint":{"type":"string"},"credentialEnvironment":{"type":"string | null"},"allowAnonymous":{"type":"boolean"},"acceptsImages":{"type":"boolean","optional":true},"configurationGeneration":{"type":"number"},"maxOutputTokens":{"type":"number | null"},"azureDeployment":{"type":"string | null","optional":true},"azureApiVersion":{"type":"string | null","optional":true},"legacyMaxTokens":{"type":"boolean","optional":true},"includeStreamUsage":{"type":"boolean","optional":true},"reasoningEffort":{"type":"string | null","optional":true},"anthropicOauth":{"type":"boolean","optional":true},"adapterId":{"type":"string","optional":true},"adapterVersion":{"type":"string","optional":true},"awsRegion":{"type":"string","optional":true},"adapterIdentity":{"type":"string","optional":true},"adapterBindingId":{"type":"string","optional":true},"connection":{"type":"ModelHttpConfiguration","optional":true},"contextWindowTokens":{"type":"number","optional":true},"thinkingLevel":{"type":"string","optional":true},"modelOptions":{"type":"unknown","optional":true}}},"KernelWorkingResultCandidate":{"fields":{"publicationId":{"type":"string"},"candidateOperationId":{"type":"string"},"workspaceId":{"type":"string"},"branchId":{"type":"string"},"root":{"type":"string"},"baseRoot":{"type":"string"},"writeRevision":{"type":"number"},"pinId":{"type":"string"},"basePinId":{"type":"string"}}}},
   "runtimeEnums": {
     "McpInteractionMode": ["Form", "Url", "Sampling"],
@@ -1399,12 +1399,6 @@
     "working.draft.get": "KernelWorkingDraftGetParams",
     "working.draft.list": "KernelWorkingDraftListParams",
     "working.draft.release": "KernelWorkingDraftReleaseParams",
-    "working.verification.put": "KernelWorkingVerificationPutParams",
-    "working.verification.list": "KernelWorkingVerificationListParams",
-    "working.verification.release": "KernelWorkingVerificationReleaseParams",
-    "working.review.put": "KernelWorkingReviewPutParams",
-    "working.review.list": "KernelWorkingReviewListParams",
-    "working.review.release": "KernelWorkingReviewReleaseParams",
     "branch.create.begin": "KernelCreateBranchBeginParams",
     "branch.create.append": "KernelCreateBranchAppendParams",
     "branch.create.finish": "KernelCreateBranchFinishParams",
@@ -2371,20 +2365,6 @@
     "KernelWorkingDraftGetParams": {"fields": {"workspaceId": {"type": "string"}, "recordId": {"type": "string"}}},
     "KernelWorkingDraftListParams": {"fields": {"workspaceId": {"type": "string"}, "cursor": {"type": "number", "optional": true}, "pageSize": {"type": "number", "optional": true}}},
     "KernelWorkingDraftReleaseParams": {"fields": {"operationId": {"type": "string"}, "workspaceId": {"type": "string"}, "recordId": {"type": "string"}}},
-    "KernelWorkingVerificationPutParams": {"fields": {
-      "operationId": {"type": "string"}, "recordId": {"type": "string"}, "workspaceId": {"type": "string"}, "kind": {"type": "string"},
-      "threadId": {"type": "string"}, "runId": {"type": "string", "optional": true}, "branchId": {"type": "string"}, "resultRevision": {"type": "number"}, "root": {"type": "string"},
-      "document": {"type": "KernelWorkingVerificationDocument"}, "expectedRecordRevision": {"type": "number", "optional": true}, "ownerIds": {"type": "string[]"}, "references": {"type": "KernelRecordReference[]"}
-    }},
-    "KernelWorkingVerificationListParams": {"fields": {"workspaceId": {"type": "string"}, "threadId": {"type": "string"}, "kind": {"type": "string"}}},
-    "KernelWorkingVerificationReleaseParams": {"fields": {"operationId": {"type": "string"}, "workspaceId": {"type": "string"}, "recordId": {"type": "string"}}},
-    "KernelWorkingReviewPutParams": {"fields": {
-      "operationId": {"type": "string"}, "recordId": {"type": "string"}, "workspaceId": {"type": "string"}, "threadId": {"type": "string"},
-      "runId": {"type": "string", "optional": true}, "branchId": {"type": "string"}, "resultRevision": {"type": "number"}, "root": {"type": "string"},
-      "document": {"type": "KernelWorkingReviewDocument"}, "expectedRecordRevision": {"type": "number", "optional": true}, "ownerIds": {"type": "string[]"}, "references": {"type": "KernelRecordReference[]"}
-    }},
-    "KernelWorkingReviewListParams": {"fields": {"workspaceId": {"type": "string"}, "threadId": {"type": "string"}}},
-    "KernelWorkingReviewReleaseParams": {"fields": {"operationId": {"type": "string"}, "workspaceId": {"type": "string"}, "recordId": {"type": "string"}}},
     "KernelSourceProvenanceReference": {"fields":{"objectHash":{"type":"string"},"ownerId":{"type":"string"}}},
     "KernelCreateBranchBeginParams": {"fields":{"operationId":{"type":"string"},"builderId":{"type":"string"},"branchId":{"type":"string"},"workspaceId":{"type":"string"},"baseRef":{"type":"string","optional":true},"parentRef":{"type":"string","optional":true},"draftBasePaths":{"type":"string[]"},"captureScopes":{"type":"string[]"},"sourceProvenance":{"type":"KernelSourceProvenanceReference","optional":true}}},
     "KernelCreateBranchAppendParams": {"fields": {
@@ -3161,12 +3141,6 @@
     "working.draft.get": "read a root-bound draft baseline",
     "working.draft.list": "list root-bound draft baselines",
     "working.draft.release": "release a draft baseline and its references",
-    "working.verification.put": "publish a result-bound verification",
-    "working.verification.list": "list result-bound verifications",
-    "working.verification.release": "release a verification record",
-    "working.review.put": "publish a result-bound review",
-    "working.review.list": "list result-bound reviews",
-    "working.review.release": "release a review record",
     "branch.create.begin": "open a backpressured branch builder",
     "branch.create.append": "append a bounded entry batch to a branch builder",
     "branch.create.finish": "atomically publish a completed branch builder",

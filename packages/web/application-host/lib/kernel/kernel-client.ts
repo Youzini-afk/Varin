@@ -459,12 +459,6 @@ export class KernelScopedClient {
   workingDraftGet(params: KernelMethodParams["working.draft.get"], signal?: AbortSignal): Promise<Record<string, unknown> | null> { return this.owner.workingDraftGet(params, this.grant, signal); }
   workingDraftList(params: KernelMethodParams["working.draft.list"], signal?: AbortSignal): Promise<Record<string, unknown>> { return this.owner.workingDraftList(params, this.grant, signal); }
   workingDraftRelease(params: KernelMethodParams["working.draft.release"], signal?: AbortSignal): Promise<Record<string, unknown>> { return this.owner.workingDraftRelease(params, this.grant, signal); }
-  workingVerificationPut(params: KernelMethodParams["working.verification.put"], signal?: AbortSignal): Promise<Record<string, unknown>> { return this.owner.workingVerificationPut(params, this.grant, signal); }
-  workingVerificationList(params: KernelMethodParams["working.verification.list"], signal?: AbortSignal): Promise<Record<string, unknown>> { return this.owner.workingVerificationList(params, this.grant, signal); }
-  workingVerificationRelease(params: KernelMethodParams["working.verification.release"], signal?: AbortSignal): Promise<Record<string, unknown>> { return this.owner.workingVerificationRelease(params, this.grant, signal); }
-  workingReviewPut(params: KernelMethodParams["working.review.put"], signal?: AbortSignal): Promise<Record<string, unknown>> { return this.owner.workingReviewPut(params, this.grant, signal); }
-  workingReviewList(params: KernelMethodParams["working.review.list"], signal?: AbortSignal): Promise<Record<string, unknown>> { return this.owner.workingReviewList(params, this.grant, signal); }
-  workingReviewRelease(params: KernelMethodParams["working.review.release"], signal?: AbortSignal): Promise<Record<string, unknown>> { return this.owner.workingReviewRelease(params, this.grant, signal); }
 
   getRecord(workspaceId: string, recordId: string, signal?: AbortSignal): Promise<KernelRecordResult | null> {
     return this.owner.getRecord({ workspaceId, recordId }, this.grant, signal);
@@ -808,15 +802,18 @@ export class KernelClient {
     const grantId = typeof value.grant_id === "string" ? value.grant_id : "";
     const epoch = typeof value.kernel_epoch === "string" ? value.kernel_epoch : "";
     if (!grantId || !epoch) throw new KernelClientError({ code: "kernel-grant-invalid", message: "Rust kernel returned an incomplete grant handle", retryable: false });
+    if (["authority_instance_id", "worker_id", "worker_generation", "session_id"].some(key => value[key] !== null && value[key] !== undefined)) {
+      throw new KernelClientError({ code: "kernel-grant-invalid", message: "Rust kernel returned a retired session or worker grant", retryable: false });
+    }
     return Object.freeze({
       clientToken: this.clientToken,
       grantId,
       kernelEpoch: epoch,
       hostGeneration: String(value.host_generation ?? ""),
-      authorityInstanceId: typeof value.authority_instance_id === "string" ? value.authority_instance_id : null,
-      workerId: typeof value.worker_id === "string" ? value.worker_id : null,
-      workerGeneration: typeof value.worker_generation === "number" ? value.worker_generation : null,
-      sessionId: typeof value.session_id === "string" ? value.session_id : null,
+      authorityInstanceId: null,
+      workerId: null,
+      workerGeneration: null,
+      sessionId: null,
       threadId: typeof value.thread_id === "string" ? value.thread_id : null,
       runId: typeof value.run_id === "string" ? value.run_id : null,
       operationId: typeof value.operation_id === "string" ? value.operation_id : null,
@@ -1641,12 +1638,18 @@ export class KernelClient {
   }
 
   async issueGrant(params: KernelGrantIssueInput, signal?: AbortSignal): Promise<KernelGrantHandle> {
+    if ([params.authorityInstanceId, params.workerId, params.workerGeneration, params.sessionId].some(value => value !== undefined && value !== null)) {
+      throw new KernelClientError({ code: "kernel-grant-invalid", message: "Session and worker grant authority is retired", retryable: false });
+    }
     if (!this.handshakeResult) await this.start();
     const grant = await this.requestRaw<Record<string, unknown>>("authority.grant.issue", {
       grantId: params.grantId,
       capabilities: params.capabilities,
       pathScopes: params.pathScopes,
-      sessionId: params.sessionId ?? null,
+      authorityInstanceId: null,
+      workerId: null,
+      workerGeneration: null,
+      sessionId: null,
       threadId: params.threadId ?? null,
       runId: params.runId ?? null,
       operationId: params.operationId ?? null,
@@ -1654,9 +1657,6 @@ export class KernelClient {
       executionWorkspace: params.executionWorkspace ?? null,
       storageIdentity: params.storageIdentity ?? this.handshakeResult!.storageRoot,
       hostGeneration: params.hostGeneration ?? this.options.hostGeneration ?? `${this.options.hostId}:${process.pid}`,
-      ...(params.authorityInstanceId === undefined ? {} : { authorityInstanceId: params.authorityInstanceId }),
-      ...(params.workerId === undefined ? {} : { workerId: params.workerId }),
-      ...(params.workerGeneration === undefined ? {} : { workerGeneration: params.workerGeneration }),
     }, { signal });
     this.inactiveGrants.delete(String(grant.grant_id));
     const handle = this.grantFromResponse(grant);
@@ -1733,12 +1733,6 @@ export class KernelClient {
   async workingDraftGet(params: KernelMethodParams["working.draft.get"], grant: KernelGrantHandle, signal?: AbortSignal): Promise<Record<string, unknown> | null> { return this.requestRaw("working.draft.get", params, { signal, grant }); }
   async workingDraftList(params: KernelMethodParams["working.draft.list"], grant: KernelGrantHandle, signal?: AbortSignal): Promise<Record<string, unknown>> { return this.requestRaw("working.draft.list", params, { signal, grant }); }
   async workingDraftRelease(params: KernelMethodParams["working.draft.release"], grant: KernelGrantHandle, signal?: AbortSignal): Promise<Record<string, unknown>> { return this.requestRaw("working.draft.release", params, { signal, grant }); }
-  async workingVerificationPut(params: KernelMethodParams["working.verification.put"], grant: KernelGrantHandle, signal?: AbortSignal): Promise<Record<string, unknown>> { return this.requestRaw("working.verification.put", params, { signal, grant }); }
-  async workingVerificationList(params: KernelMethodParams["working.verification.list"], grant: KernelGrantHandle, signal?: AbortSignal): Promise<Record<string, unknown>> { return this.requestRaw("working.verification.list", params, { signal, grant }); }
-  async workingVerificationRelease(params: KernelMethodParams["working.verification.release"], grant: KernelGrantHandle, signal?: AbortSignal): Promise<Record<string, unknown>> { return this.requestRaw("working.verification.release", params, { signal, grant }); }
-  async workingReviewPut(params: KernelMethodParams["working.review.put"], grant: KernelGrantHandle, signal?: AbortSignal): Promise<Record<string, unknown>> { return this.requestRaw("working.review.put", params, { signal, grant }); }
-  async workingReviewList(params: KernelMethodParams["working.review.list"], grant: KernelGrantHandle, signal?: AbortSignal): Promise<Record<string, unknown>> { return this.requestRaw("working.review.list", params, { signal, grant }); }
-  async workingReviewRelease(params: KernelMethodParams["working.review.release"], grant: KernelGrantHandle, signal?: AbortSignal): Promise<Record<string, unknown>> { return this.requestRaw("working.review.release", params, { signal, grant }); }
 
   async getRecord(params: KernelMethodParams["storage.record.get"], grant: KernelGrantHandle, signal?: AbortSignal): Promise<KernelRecordResult | null> {
     return this.requestRaw<KernelRecordResult | null>("storage.record.get", params, { signal, grant });

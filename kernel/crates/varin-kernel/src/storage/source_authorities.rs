@@ -10,16 +10,20 @@ impl Storage {
         kind: &str,
         id: &str,
     ) -> Result<Option<T>, KernelError> {
-        let body: Option<String> = self
+        let body: Option<(String, Option<String>)> = self
             .conn
             .query_row(
-                "SELECT payload_json FROM domain_records WHERE record_type=?1 AND record_id=?2",
+                "SELECT payload_json, session_id FROM domain_records WHERE record_type=?1 AND record_id=?2",
                 params![kind, id],
-                |r| r.get(0),
+                |r| Ok((r.get(0)?, r.get(1)?)),
             )
             .optional()?;
-        body.map(|v| serde_json::from_str(&v).map_err(Into::into))
-            .transpose()
+        body.map(|(value, session)| {
+            if session.is_some() {
+                return Err(denied("Legacy session record cannot authorize a native source"));
+            }
+            serde_json::from_str(&value).map_err(Into::into)
+        }).transpose()
     }
     pub(super) fn save_source_record<T: Serialize>(
         &mut self,
@@ -29,7 +33,13 @@ impl Storage {
         state: &str,
         value: &T,
     ) -> Result<(), KernelError> {
+        self.require_native_record_owner(workspace, id)?;
         self.conn.execute("INSERT INTO domain_records(record_id,workspace_id,record_type,state,record_revision,payload_json,created_at,updated_at) VALUES(?1,?2,?3,?4,1,?5,?6,?6) ON CONFLICT(workspace_id,record_id) DO UPDATE SET state=excluded.state,payload_json=excluded.payload_json,record_revision=record_revision+1,updated_at=excluded.updated_at",params![id,workspace,kind,state,serde_json::to_string(value)?,now_ms()])?;
+        Ok(())
+    }
+    fn require_native_source_owner(&self, record: &AuthorityRecord) -> Result<(), KernelError> {
+        self.require_native_record_owner(&record.result.source.workspace_id, &record.result.authority_id)?;
+        self.load_grant(&record.result.grant_id)?;
         Ok(())
     }
     pub(crate) fn source_authority(
@@ -41,6 +51,7 @@ impl Storage {
         let record: AuthorityRecord = self
             .source_record("source.authority", &address.authority_id)?
             .ok_or_else(|| denied("Original source authority is unavailable"))?;
+        self.require_native_source_owner(&record)?;
         if record.principal_id != address.principal_id
             || record.coordinator_host_id != address.coordinator_host_id
             || record.result.resource_epoch != address.resource_epoch
@@ -308,6 +319,7 @@ impl Storage {
             if record.scope_id != id {
                 continue;
             }
+            self.require_native_source_owner(&record)?;
             if record.principal_id != p.principal_id
                 || record.coordinator_host_id != p.coordinator_host_id
                 || record.result.scope != p.scope
@@ -774,6 +786,7 @@ impl Storage {
                 && record.result.scope.thread_id() == p.thread_id
                 && record.result.scope.run_id() == Some(p.run_id.as_str())
             {
+                self.require_native_source_owner(&record)?;
                 found.push(record.result);
             }
         }
@@ -815,6 +828,7 @@ impl Storage {
             {
                 continue;
             }
+            self.require_native_source_owner(&record)?;
             if p.mode == "retire" && record.operation_id.is_some() {
                 continue;
             }
@@ -850,10 +864,14 @@ impl Storage {
         grant_id: &str,
     ) -> Result<Option<AuthorityRecord>, KernelError> {
         let mut query = self.conn.prepare(
-            "SELECT payload_json FROM domain_records WHERE record_type='source.authority'",
+            "SELECT payload_json, session_id FROM domain_records WHERE record_type='source.authority'",
         )?;
-        for row in query.query_map([], |row| row.get::<_, String>(0))? {
-            let record: AuthorityRecord = serde_json::from_str(&row?)?;
+        for row in query.query_map([], |row| Ok((row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?)))? {
+            let (body, session) = row?;
+            let record: AuthorityRecord = serde_json::from_str(&body)?;
+            if record.result.grant_id == grant_id && session.is_some() {
+                return Err(denied("Legacy session record cannot authorize a native source"));
+            }
             if record.result.grant_id == grant_id {
                 return Ok(Some(record));
             }
@@ -865,6 +883,8 @@ impl Storage {
         current_grant: &str,
         creation_grant: &str,
     ) -> Result<(), KernelError> {
+        self.load_grant(current_grant)?;
+        self.load_grant(creation_grant)?;
         match (
             self.source_authority_for_grant(current_grant)?,
             self.source_authority_for_grant(creation_grant)?,
@@ -931,6 +951,7 @@ impl Storage {
         for row in rows {
             let value: AuthorityRecord = serde_json::from_str(&row?)?;
             if value.result.grant_id == actor {
+                self.require_native_source_owner(&value)?;
                 creation = Some(value);
                 break;
             }
@@ -1491,6 +1512,7 @@ impl Storage {
                 && authority.result.scope.thread_id() == p.thread_id
                 && authority.result.source == p.source
             {
+                self.require_native_source_owner(&authority)?;
                 found = true;
                 break;
             }

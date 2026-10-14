@@ -30,17 +30,27 @@ const issueActor = async (client: KernelClient, grantId: string, workspaceId: st
   pathScopes,
 });
 
-const issueSessionActor = async (client: KernelClient, grantId: string, workspaceId: string, sessionId: string): Promise<KernelGrantHandle> => client.issueGrant({
+const issueThreadActor = async (client: KernelClient, grantId: string, workspaceId: string, threadId: string): Promise<KernelGrantHandle> => client.issueGrant({
   grantId,
   hostGeneration: client.handshake?.hostGeneration,
-  sessionId,
-  threadId: null,
+  threadId,
   runId: null,
   owningWorkspace: workspaceId,
   executionWorkspace: workspaceId,
   storageIdentity: client.handshake?.storageRoot,
   capabilities: ["storage.read", "storage.write", "recovery", "storage.gc"],
   pathScopes: [""],
+});
+
+test("Kernel client rejects retired grant authority before starting native resources", async () => {
+  const client = createKernelClient({ hostId: "native-only", storageRoot: path.join(os.tmpdir(), "unopened-native-only"),
+    buildVersion, kernelPath: path.join(os.tmpdir(), "not-a-kernel-executable"), allowCargoDevRunner: false });
+  for (const legacy of [{ sessionId: "old-session" }, { authorityInstanceId: "old-authority" }, { workerId: "old-worker" }, { workerGeneration: 0 }]) {
+    await assert.rejects(client.issueGrant({ grantId: "rejected", capabilities: ["storage.read"], pathScopes: [""], ...legacy }),
+      /Session and worker grant authority is retired/);
+  }
+  assert.equal(client.handshake, null);
+  await client.close();
 });
 
 afterEach(async () => {
@@ -302,13 +312,13 @@ test("operation finish failure rolls back the durable mutation and permits retry
   });
   clients.push(faultedHost);
   await faultedHost.start();
-  const faulted = faultedHost.scoped(await issueSessionActor(faultedHost, "operation-fault-actor", "recovery-workspace", "recovery-session"));
+  const faulted = faultedHost.scoped(await issueThreadActor(faultedHost, "operation-fault-actor", "recovery-workspace", "recovery-session"));
   await assert.rejects(faulted.putBlob(Buffer.from("retry-me"), "retry-operation"), /injected operation finish failure|storage error/i);
   await faulted.close();
   const retriedHost = createKernelClient({ hostId: "operation-fault-host", storageRoot: root, buildVersion, kernelPath, allowCargoDevRunner: false });
   clients.push(retriedHost);
   await retriedHost.start();
-  const retried = retriedHost.scoped(await issueSessionActor(retriedHost, "operation-fault-actor", "recovery-workspace", "recovery-session"));
+  const retried = retriedHost.scoped(await issueThreadActor(retriedHost, "operation-fault-actor", "recovery-workspace", "recovery-session"));
   const result = await retried.putBlob(Buffer.from("retry-me"), "retry-operation");
   assert.equal(result.byteLength, 8);
   assert.equal((await retried.getOperation("retry-operation"))?.state, "committed");
@@ -317,7 +327,7 @@ test("operation finish failure rolls back the durable mutation and permits retry
     workspaceId: "recovery-workspace",
     kind: "combined",
     state: "planned",
-    sessionId: "recovery-session",
+    threadId: "recovery-session",
     dataJson: JSON.stringify({ before: "before-state" }),
     files: [],
   });
@@ -724,59 +734,6 @@ test("typed working result boundary stores root identity with frozen state maps"
   // Frozen per-path states travel with the record so a later branch baseline
   // rebase cannot rewrite an older revision's provenance (3.18D).
   assert.equal(JSON.stringify(value.record).includes("pathStates"), true);
-  const verificationClient = host.scoped(await host.issueGrant({
-    grantId: "working-record-verification-actor",
-    hostGeneration: host.handshake?.hostGeneration,
-    sessionId: "working-record-session",
-    threadId: "thread-1",
-    runId: null,
-    owningWorkspace: "working-record-workspace",
-    executionWorkspace: "working-record-workspace",
-    storageIdentity: host.handshake?.storageRoot,
-    capabilities: ["storage.read", "storage.write"],
-    pathScopes: [""],
-  }));
-  await assert.rejects(
-    verificationClient.workingVerificationPut({
-      operationId: "working-verification-malformed",
-      recordId: "working-verification:child:thread-1:1",
-      workspaceId: "working-record-workspace",
-      kind: "child",
-      threadId: "thread-1",
-      branchId: "branch-1",
-      resultRevision: 1,
-      root: publishedRoot,
-      document: { recordedAt: Date.now(), binding: "bound", checks: [] },
-      ownerIds: [],
-      references: [],
-    }),
-    /child verification|result identity/i,
-  );
-  await verificationClient.workingVerificationPut({
-    operationId: "working-verification-valid",
-    recordId: "working-verification:child:thread-1:1",
-    workspaceId: "working-record-workspace",
-    kind: "child",
-    threadId: "thread-1",
-    branchId: "branch-1",
-    resultRevision: 1,
-    root: publishedRoot,
-    document: { resultRevision: 1, branchId: "branch-1", resultTreeHash: publishedRoot, recordedAt: Date.now(), binding: "bound", checks: [] },
-    ownerIds: [],
-    references: [],
-  });
-  await verificationClient.workingReviewPut({
-    operationId: "working-review-valid",
-    recordId: "working-review:thread-1:1",
-    workspaceId: "working-record-workspace",
-    threadId: "thread-1",
-    branchId: "branch-1",
-    resultRevision: 1,
-    root: publishedRoot,
-    document: { resultRevision: 1, status: "completed", recordedAt: Date.now() },
-    ownerIds: [],
-    references: [],
-  });
   const listed = await client.workingResultList({ workspaceId: "working-record-workspace", branchId: "branch-1" });
   assert.equal((listed.records as unknown[]).length, 1);
   await assert.rejects(
@@ -791,8 +748,6 @@ test("typed working result boundary stores root identity with frozen state maps"
   const released = await client.workingResultRelease({ operationId: "working-result-release", workspaceId: "working-record-workspace", recordId: "working-result:branch-1@1" });
   assert.equal(released.released, true);
   assert.equal(await client.workingResultGet({ workspaceId: "working-record-workspace", recordId: "working-result:branch-1@1" }), null);
-  assert.equal(((await verificationClient.workingVerificationList({ workspaceId: "working-record-workspace", threadId: "thread-1", kind: "child" })).records as unknown[]).length, 0);
-  assert.equal(((await verificationClient.workingReviewList({ workspaceId: "working-record-workspace", threadId: "thread-1" })).records as unknown[]).length, 0);
   const gc = await client.gc("working-result-gc");
   assert.ok(Number(gc.deletedBlobs ?? 0) >= 0);
 });
@@ -1119,10 +1074,10 @@ test("domain record identity is workspace- and actor-scoped", { timeout: 30_000 
   clients.push(host);
   await host.start();
   const storageIdentity = host.handshake?.storageRoot;
-  const actor = async (grantId: string, workspaceId: string, sessionId: string) => host.scoped(await host.issueGrant({ grantId, hostGeneration: "record-scope-generation", authorityInstanceId: "authority", workerId: `${sessionId}-worker`, workerGeneration: 3, sessionId, threadId: `${sessionId}-thread`, runId: `${sessionId}-run`, owningWorkspace: workspaceId, executionWorkspace: workspaceId, storageIdentity, capabilities: ["storage.read", "storage.write", "recovery"], pathScopes: [""] }));
+  const actor = async (grantId: string, workspaceId: string, sessionId: string) => host.scoped(await host.issueGrant({ grantId, hostGeneration: "record-scope-generation", threadId: `${sessionId}-thread`, runId: `${sessionId}-run`, owningWorkspace: workspaceId, executionWorkspace: workspaceId, storageIdentity, capabilities: ["storage.read", "storage.write", "recovery"], pathScopes: [""] }));
   const first = await actor("record-scope-a", "workspace-a", "session-a");
   const second = await actor("record-scope-b", "workspace-b", "session-b");
-  const put = (client: ReturnType<typeof host.scoped>, operationId: string, workspaceId: string, sessionId: string) => client.putRecord({ operationId, recordId: "same-record", workspaceId, recordType: "recovery.checkpoint", state: "ready", sessionId, threadId: `${sessionId}-thread`, runId: `${sessionId}-run`, payloadJson: JSON.stringify({ id: "same-record", workspaceId, sessionId }), ownerIds: [], references: [] });
+  const put = (client: ReturnType<typeof host.scoped>, operationId: string, workspaceId: string, sessionId: string) => client.putRecord({ operationId, recordId: "same-record", workspaceId, recordType: "recovery.checkpoint", state: "ready", threadId: `${sessionId}-thread`, runId: `${sessionId}-run`, payloadJson: JSON.stringify({ id: "same-record", workspaceId, conversation: { kind: "thread", threadId: `${sessionId}-thread`, branchId: "main" } }), ownerIds: [], references: [] });
   await put(first, "scope-put-a", "workspace-a", "session-a");
   await put(second, "scope-put-b", "workspace-b", "session-b");
   assert.equal((await first.getRecord("workspace-a", "same-record"))?.workspaceId, "workspace-a");
@@ -1132,7 +1087,7 @@ test("domain record identity is workspace- and actor-scoped", { timeout: 30_000 
   const unbound = host.scoped(await issueActor(host, "record-scope-unbound", "workspace-a"));
   await assert.rejects(
     unbound.putRecord({ operationId: "scope-put-impersonated", recordId: "impersonated", workspaceId: "workspace-a", recordType: "working.result", state: "published", sessionId: "session-a", payloadJson: JSON.stringify({}), ownerIds: [], references: [] }),
-    /actor-bound|actor|authorization/i,
+    /actor-bound|actor|authorization|legacy session/i,
   );
 });
 
@@ -1338,14 +1293,14 @@ test("typed recovery operation publishes files atomically and rejects stale phas
   const host = createKernelClient({ hostId: "typed-recovery-host", storageRoot: root, buildVersion, kernelPath, allowCargoDevRunner: false });
   clients.push(host);
   await host.start();
-  const client = host.scoped(await issueSessionActor(host, "typed-recovery-actor", "typed-recovery-workspace", "typed-recovery-session"));
+  const client = host.scoped(await issueThreadActor(host, "typed-recovery-actor", "typed-recovery-workspace", "typed-recovery-session"));
   const body = await client.putBlob(Buffer.from("typed recovery"), "typed-recovery-body");
   const created = await client.recoveryOperationCreate({
     operationId: "typed-recovery-operation",
     workspaceId: "typed-recovery-workspace",
     kind: "combined",
     state: "planned",
-    sessionId: "typed-recovery-session",
+    threadId: "typed-recovery-session",
     dataJson: JSON.stringify({ workspaceId: "typed-recovery-workspace", affectedPaths: ["file.txt"] }),
     files: [{
       path: "file.txt",
@@ -1380,14 +1335,14 @@ test("typed recovery create fault injection rolls back operation intent and perm
   const faultedHost = createKernelClient({ hostId: "typed-recovery-fault-host", storageRoot: root, buildVersion, kernelPath, allowCargoDevRunner: false, env: { VARIN_KERNEL_FAIL_RECOVERY_PHASE: "operation-before-files" } });
   clients.push(faultedHost);
   await faultedHost.start();
-  const faulted = faultedHost.scoped(await issueSessionActor(faultedHost, "typed-recovery-fault-actor", "typed-recovery-fault-workspace", "typed-recovery-fault-session"));
-  await assert.rejects(faulted.recoveryOperationCreate({ operationId: "typed-recovery-fault-operation", workspaceId: "typed-recovery-fault-workspace", sessionId: "typed-recovery-fault-session", kind: "combined", state: "planned", dataJson: JSON.stringify({}), files: [] }), /injected recovery failure/i);
+  const faulted = faultedHost.scoped(await issueThreadActor(faultedHost, "typed-recovery-fault-actor", "typed-recovery-fault-workspace", "typed-recovery-fault-session"));
+  await assert.rejects(faulted.recoveryOperationCreate({ operationId: "typed-recovery-fault-operation", workspaceId: "typed-recovery-fault-workspace", threadId: "typed-recovery-fault-session", kind: "combined", state: "planned", dataJson: JSON.stringify({}), files: [] }), /injected recovery failure/i);
   await faultedHost.close();
   const retryHost = createKernelClient({ hostId: "typed-recovery-fault-host", storageRoot: root, buildVersion, kernelPath, allowCargoDevRunner: false });
   clients.push(retryHost);
   await retryHost.start();
-  const retry = retryHost.scoped(await issueSessionActor(retryHost, "typed-recovery-fault-retry", "typed-recovery-fault-workspace", "typed-recovery-fault-session"));
-  const result = await retry.recoveryOperationCreate({ operationId: "typed-recovery-fault-operation", workspaceId: "typed-recovery-fault-workspace", sessionId: "typed-recovery-fault-session", kind: "combined", state: "planned", dataJson: JSON.stringify({}), files: [] });
+  const retry = retryHost.scoped(await issueThreadActor(retryHost, "typed-recovery-fault-retry", "typed-recovery-fault-workspace", "typed-recovery-fault-session"));
+  const result = await retry.recoveryOperationCreate({ operationId: "typed-recovery-fault-operation", workspaceId: "typed-recovery-fault-workspace", threadId: "typed-recovery-fault-session", kind: "combined", state: "planned", dataJson: JSON.stringify({}), files: [] });
   assert.equal(result.operationId, "typed-recovery-fault-operation");
 });
 

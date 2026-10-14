@@ -56,11 +56,13 @@ impl Storage {
         workspace: &str,
         view: &str,
     ) -> Result<Option<Value>, KernelError> {
+        self.require_native_record_owner(workspace, &record_id(view))?;
         self.conn.query_row("SELECT payload_json FROM domain_records WHERE workspace_id=?1 AND record_id=?2 AND record_type=?3",
             params![workspace,record_id(view),RECORD_TYPE], |row| row.get::<_,String>(0)).optional()?
             .map(|raw| serde_json::from_str(&raw).map_err(Into::into)).transpose()
     }
     fn save_materialized_view_record(&self, record: &Value) -> Result<(), KernelError> {
+        self.require_native_record_owner(field(record, "workspaceId")?, &record_id(field(record, "viewId")?))?;
         self.conn.execute("INSERT INTO domain_records(record_id,workspace_id,record_type,state,record_revision,payload_json,created_at,updated_at) VALUES(?1,?2,?3,?4,1,?5,?6,?6) ON CONFLICT(workspace_id,record_id) DO UPDATE SET state=excluded.state,record_revision=domain_records.record_revision+1,payload_json=excluded.payload_json,updated_at=excluded.updated_at",
             params![record_id(field(record,"viewId")?),field(record,"workspaceId")?,RECORD_TYPE,field(record,"state")?,serde_json::to_string(record)?,now_ms()])?;
         Ok(())
