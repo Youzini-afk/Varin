@@ -72,7 +72,15 @@ writing Pi session files or the Host harness's existing execution records.
   Execution and `RequestPrepared` share one immutable request snapshot. Media persistence projects its
   view while borrowing the serialized provider body, avoiding a second copy of that body.
   Stored JSON, media references and provider originals keep the same shape. This removes duplicate
-  copies within a ModelStep; context compilation and provider serialization still visit the full input.
+  copies within a ModelStep. A Run worker also retains only its latest immutable compiled context
+  prefix, keyed by the original Catalog epoch, Run, branch, checkpoint content reference and verified
+  history head. Appended steps read and hydrate only the new ancestral suffix; checkpoint changes,
+  navigation and recovery compile afresh. Current memory/receipts, Goal and policy context still
+  project at each boundary, and all admission and dispatch authorization stays live. The worker drops
+  the cache on exit, including waiting and cancellation; no global cache or second history ledger owns
+  it. This removes repeated retained-body I/O, parsing, media hydration and fixed-context assembly.
+  Semantic request vectors still clone their owned values, and providers still compile and encode a
+  complete request. It is not provider wire-fragment reuse or evidence of remote cache discounts.
 - User answers prepare content outside Catalog and commit its identity with the original question,
   branch, wait and owner guards. Equal retries deliver once; conflicting answers and late cancelled
   work fail. Waiting/cancellation lookup selects the actual Run's questions instead of decoding all

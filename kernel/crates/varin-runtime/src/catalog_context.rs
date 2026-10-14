@@ -431,6 +431,14 @@ impl Catalog {
         let reference = checkpoint.save(&self.content)?;
         Ok((checkpoint, reference))
     }
+    #[cfg(test)]
+    pub(crate) fn set_context_history_read_hook(
+        &self,
+        hook: Option<std::sync::Arc<dyn Fn(&str) + Send + Sync>>,
+    ) {
+        self.content.set_history_read_hook(hook);
+    }
+
     pub fn prepare_context_read(
         &self,
         run_id: &str,
@@ -447,6 +455,7 @@ impl Catalog {
         let capture = |kind| -> Result<ContextRead> {
             Ok(ContextRead {
                 kind,
+                reuse_allowed: true,
                 database: self
                     .db
                     .path()
@@ -467,6 +476,8 @@ impl Catalog {
             return Ok(None);
         };
         Ok(Some(capture(ContextReadKind::Checkpoint {
+            run_id: run_id.into(),
+            owner_generation: epoch,
             compositions: self.context_compositions.clone(),
             branch_id: run.branch_id.clone(),
             memory: self.capture_memory_state(&run.branch_id)?,
@@ -579,14 +590,44 @@ impl CheckpointRead {
     }
 }
 
+/// One worker owns only its latest compiled checkpoint/head. Dropping it releases all cached
+/// bodies; no Catalog or global cache retains them, and recovery starts cold.
+#[derive(Default)]
+pub struct ContextCompileReuse {
+    prefix: Option<CompiledContextPrefix>,
+}
+
+#[derive(PartialEq)]
+struct ContextPrefixIdentity {
+    database: std::path::PathBuf,
+    run_id: String,
+    owner_generation: u64,
+    branch_id: String,
+    checkpoint_id: String,
+    reference: Value,
+    through_id: Option<String>,
+}
+
+struct CompiledContextPrefix {
+    identity: ContextPrefixIdentity,
+    head: Option<String>,
+    checkpoint: ContextCheckpoint,
+    history: Vec<ConversationItem>,
+    fixed_items: usize,
+    instruction_sources: Vec<String>,
+}
+
 pub struct ContextRead {
     kind: ContextReadKind,
+    reuse_allowed: bool,
     database: std::path::PathBuf,
     _publication: crate::content::ContentPublication,
 }
 
 enum ContextReadKind {
     Checkpoint {
+        run_id: String,
+        owner_generation: u64,
         memory: Option<super::memory_state::MemoryStateRead>,
         thread_id: String,
         compositions: std::sync::Arc<crate::composition::context::ContextCompositions>,
@@ -605,159 +646,223 @@ enum ContextReadKind {
 impl ContextRead {
     /// Reuse the ordinary compiler with an immutable, unpublished candidate. All captured
     /// source/head/memory ownership stays unchanged; this is not active-context publication.
-    pub fn with_checkpoint(mut self, checkpoint: &ContextCheckpoint, candidate_reference: Value) -> Result<Self> {
+    pub fn with_checkpoint(
+        mut self,
+        checkpoint: &ContextCheckpoint,
+        candidate_reference: Value,
+    ) -> Result<Self> {
+        self.reuse_allowed = false;
         match &mut self.kind {
-            ContextReadKind::Checkpoint { branch_id, checkpoint_id, reference, through_id, .. }
-                if *branch_id == checkpoint.proposal.branch_id => {
+            ContextReadKind::Checkpoint {
+                branch_id,
+                checkpoint_id,
+                reference,
+                through_id,
+                ..
+            } if *branch_id == checkpoint.proposal.branch_id => {
                 *checkpoint_id = checkpoint.id.clone();
                 *reference = candidate_reference;
                 *through_id = checkpoint.proposal.through_id.clone();
                 Ok(self)
             }
-            _ => Err(RuntimeError::Conflict("context preview belongs to another source".into())),
+            _ => Err(RuntimeError::Conflict(
+                "context preview belongs to another source".into(),
+            )),
         }
     }
     pub fn load(self) -> Result<ContextProjection> {
+        self.load_reusing(None)
+    }
+
+    pub fn load_reusing(
+        self,
+        reuse: Option<&mut ContextCompileReuse>,
+    ) -> Result<ContextProjection> {
         let Self {
             kind,
             database,
             _publication,
+            reuse_allowed,
         } = self;
-        let (
-            content,
-            checkpoint_id,
-            reference,
-            suffix,
+        let mut reuse = reuse.filter(|_| reuse_allowed);
+        let ContextReadKind::Checkpoint {
+            run_id,
+            owner_generation,
             compositions,
             branch_id,
             memory,
-            trusted_receipts,
-        ) = match kind {
-            ContextReadKind::Checkpoint {
-                compositions,
-                branch_id,
-                memory,
-                thread_id,
-                content,
-                checkpoint_id,
-                reference,
-                head,
-                through_id,
-            } => {
-                let database = Connection::open_with_flags(
-                    database,
-                    rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY
-                        | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX,
-                )?;
-                let trusted_receipts =
-                    super::memory::trusted_memory_receipts(&database, &content, &thread_id)?;
-                let memory = memory
-                    .map(super::memory_state::MemoryStateRead::load)
-                    .transpose()?;
-                let suffix = super::context_jobs::source_metadata_until(
-                    &database,
-                    head.as_deref(),
-                    through_id.as_deref(),
-                )?;
-                (
-                    content,
-                    checkpoint_id,
-                    reference,
-                    suffix,
-                    compositions,
-                    branch_id,
-                    memory,
-                    trusted_receipts,
-                )
+            thread_id,
+            content,
+            checkpoint_id,
+            reference,
+            head,
+            through_id,
+        } = kind
+        else {
+            if let Some(reuse) = reuse {
+                reuse.prefix = None;
             }
-            ContextReadKind::Summary { job, outputs } => return job.compile(outputs),
+            let ContextReadKind::Summary { job, outputs } = kind else {
+                unreachable!()
+            };
+            return job.compile(outputs);
         };
-        let checkpoint: ContextCheckpoint = serde_json::from_value(content.load(&reference)?)?;
-        let mut history = Vec::new();
-        // Body hydration, composition assembly and the pure typed transform execute outside
-        // the Catalog mutex. The cache reuses unchanged selected handles across model requests.
-        let composition = checkpoint
-            .personalization
-            .as_ref()
-            .and_then(|basis| basis.context_composition.as_ref());
-        let fragments = compositions
-            .bind(&branch_id, composition)
-            .map_err(RuntimeError::Invalid)?;
-        let mut instruction_sources = checkpoint.proposal.instruction_sources.clone();
-        if let Some(composition) = composition {
-            for transform in &composition.transforms {
-                instruction_sources.push(
-                    serde_json::json!([
-                        crate::composition::context::CAPABILITY,
-                        transform.provider_id,
-                        transform.content_version
-                    ])
-                    .to_string(),
-                );
+        let identity = ContextPrefixIdentity {
+            database: database.clone(),
+            run_id,
+            owner_generation,
+            branch_id: branch_id.clone(),
+            checkpoint_id: checkpoint_id.clone(),
+            reference: reference.clone(),
+            through_id: through_id.clone(),
+        };
+        // Ownership/head capture already ran under Catalog. Cache identity never grants access.
+        // Take the body out of the worker holder: no cache lock spans I/O or history traversal.
+        let previous = reuse
+            .as_mut()
+            .and_then(|reuse| reuse.prefix.take())
+            .filter(|prefix| prefix.identity == identity);
+        let database = Connection::open_with_flags(
+            database,
+            rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX,
+        )?;
+        let trusted_receipts =
+            super::memory::trusted_memory_receipts(&database, &content, &thread_id)?;
+        let memory = memory
+            .map(super::memory_state::MemoryStateRead::load)
+            .transpose()?;
+        let suffix = super::context_jobs::source_metadata_since(
+            &database,
+            head.as_deref(),
+            through_id.as_deref(),
+            previous.as_ref().and_then(|prefix| prefix.head.as_deref()),
+        )?;
+        let mut prefix = match previous {
+            Some(mut prefix) => {
+                if !suffix.reused_prefix {
+                    prefix.history.truncate(prefix.fixed_items);
+                }
+                prefix
             }
-        }
-        if !checkpoint.proposal.effective_system_prompt.is_empty() {
-            history.push(ConversationItem {
-                resource_activation: None,
-                id: format!("context:{}:system", checkpoint.id),
-                provenance: Provenance::SystemInstruction {
-                    source: checkpoint.id.clone(),
-                },
-                content: Content::Text {
-                    text: checkpoint.proposal.effective_system_prompt.clone(),
-                },
-                opaque: None,
-            });
-        }
-        if let Some(fragments) = fragments {
-            history.extend(
-                fragments
-                    .apply(&checkpoint.id)
-                    .map_err(RuntimeError::Invalid)?,
-            );
-        }
-        if checkpoint.proposal.through_id.is_some() {
-            history.push(ConversationItem {
-                resource_activation: None,
-                id: format!("context:{}:summary", checkpoint.id),
-                provenance: Provenance::ExternalData {
-                    source: format!("conversation-summary:{}", checkpoint.id),
-                },
-                content: Content::Text {
-                    text: checkpoint.proposal.summary.clone(),
-                },
-                opaque: None,
-            });
-        }
-        history.extend(
-            checkpoint
-                .resource_activations
-                .iter()
-                .map(resources::ResourceActivation::summary_reference),
-        );
-        for metadata in suffix {
+            None => {
+                let checkpoint: ContextCheckpoint =
+                    serde_json::from_value(content.load(&reference)?)?;
+                let mut history = Vec::new();
+                let composition = checkpoint
+                    .personalization
+                    .as_ref()
+                    .and_then(|basis| basis.context_composition.as_ref());
+                let fragments = compositions
+                    .bind(&branch_id, composition)
+                    .map_err(RuntimeError::Invalid)?;
+                let mut instruction_sources = checkpoint.proposal.instruction_sources.clone();
+                if let Some(composition) = composition {
+                    for transform in &composition.transforms {
+                        instruction_sources.push(
+                            serde_json::json!([
+                                crate::composition::context::CAPABILITY,
+                                transform.provider_id,
+                                transform.content_version
+                            ])
+                            .to_string(),
+                        );
+                    }
+                }
+                if !checkpoint.proposal.effective_system_prompt.is_empty() {
+                    history.push(ConversationItem {
+                        resource_activation: None,
+                        id: format!("context:{}:system", checkpoint.id),
+                        provenance: Provenance::SystemInstruction {
+                            source: checkpoint.id.clone(),
+                        },
+                        content: Content::Text {
+                            text: checkpoint.proposal.effective_system_prompt.clone(),
+                        },
+                        opaque: None,
+                    });
+                }
+                if let Some(fragments) = fragments {
+                    history.extend(
+                        fragments
+                            .apply(&checkpoint.id)
+                            .map_err(RuntimeError::Invalid)?,
+                    );
+                }
+                if checkpoint.proposal.through_id.is_some() {
+                    history.push(ConversationItem {
+                        resource_activation: None,
+                        id: format!("context:{}:summary", checkpoint.id),
+                        provenance: Provenance::ExternalData {
+                            source: format!("conversation-summary:{}", checkpoint.id),
+                        },
+                        content: Content::Text {
+                            text: checkpoint.proposal.summary.clone(),
+                        },
+                        opaque: None,
+                    });
+                }
+                history.extend(
+                    checkpoint
+                        .resource_activations
+                        .iter()
+                        .map(resources::ResourceActivation::summary_reference),
+                );
+                CompiledContextPrefix {
+                    identity,
+                    head: None,
+                    checkpoint,
+                    fixed_items: history.len(),
+                    history,
+                    instruction_sources,
+                }
+            }
+        };
+        for metadata in suffix.history {
             let item = content.hydrate_history(metadata)?;
-            history.extend(super::execution_persistence::history_input_items(
-                &item.id,
-                item.source,
-                &item.content,
-            )?);
+            prefix
+                .history
+                .extend(super::execution_persistence::history_input_items(
+                    &item.id,
+                    item.source,
+                    &item.content,
+                )?);
         }
-        let baseline = checkpoint.bot_memory_snapshot.as_ref().map(|snapshot| snapshot.load(&content)).transpose()?;
-        history.extend(super::memory::project(
+        prefix.head = head;
+        // Only immutable checkpoint and conversation material is reusable. Current memory and
+        // delivery receipts are projected afresh, before Engine adds Goal/binding/policy context.
+        let baseline = prefix
+            .checkpoint
+            .bot_memory_snapshot
+            .as_ref()
+            .map(|snapshot| snapshot.load(&content))
+            .transpose()?;
+        let dynamic = super::memory::project(
             memory.as_ref(),
-            checkpoint.personalization.as_ref(),
-            &history,
+            prefix.checkpoint.personalization.as_ref(),
+            &prefix.history,
             &trusted_receipts,
             baseline.as_ref(),
-        )?);
-        Ok(ContextProjection {
+        )?;
+        let mut projection = ContextProjection {
             compaction: None,
-            resource_checkpoint_id: checkpoint.resources.as_ref().map(|_| checkpoint_id.clone()),
+            resource_checkpoint_id: prefix
+                .checkpoint
+                .resources
+                .as_ref()
+                .map(|_| checkpoint_id.clone()),
             checkpoint_id,
-            history,
-            instruction_sources,
-            memory_checkpoint: checkpoint.proposal.memory_checkpoint,
-        })
+            history: Vec::new(),
+            instruction_sources: prefix.instruction_sources.clone(),
+            memory_checkpoint: prefix.checkpoint.proposal.memory_checkpoint.clone(),
+        };
+        projection.history = if let Some(reuse) = reuse {
+            let history = prefix.history.clone();
+            reuse.prefix = Some(prefix);
+            history
+        } else {
+            prefix.history
+        };
+        projection.history.extend(dynamic);
+        Ok(projection)
     }
 }

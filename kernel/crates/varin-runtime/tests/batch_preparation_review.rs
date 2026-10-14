@@ -54,6 +54,7 @@ impl Persistence for Store {
         _: &str,
         _: u64,
         _: Option<&str>,
+        _reuse: Option<&mut varin_runtime::catalog::context::ContextCompileReuse>,
     ) -> Result<Option<ContextProjection>, ExecutionError> {
         Ok(None)
     }
@@ -573,8 +574,9 @@ fn cancellation_after_durable_dispatch_marker_settles_no_send_and_releases_occup
             run: &str,
             epoch: u64,
             head: Option<&str>,
+            reuse: Option<&mut varin_runtime::catalog::context::ContextCompileReuse>,
         ) -> Result<Option<ContextProjection>, ExecutionError> {
-            self.db.compile_context(run, epoch, head)
+            self.db.compile_context(run, epoch, head, reuse)
         }
         fn consume_inputs(
             &self,

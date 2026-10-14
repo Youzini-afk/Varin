@@ -440,46 +440,56 @@ mod tests {
             },
             opaque: None,
         };
-        let parts = partition(
-            "job",
-            &json!({"contextWindowTokens":600,"maxOutputTokens":64}),
-            &ContextSummaryRecipe::manual(),
-            None,
-            vec![source.clone(), image.clone()],
-        )
-        .unwrap();
-        assert!(parts.len() > 1);
-        let body = serde_json::to_string(&source.content).unwrap();
+        let preview = ContextCompactionPreview {
+            source_cut_hash: "unicode-cut".into(),
+            sources: quote_sources("job", vec![source.clone(), image.clone()]).unwrap(),
+            model_budget: model_budget(
+                &json!({"contextWindowTokens":600,"maxOutputTokens":64}),
+                &ContextSummaryRecipe::manual(),
+            )
+            .unwrap(),
+        };
+        let plan = builtin_plan(&preview).unwrap();
+        assert!(plan.nodes().len() > 1);
+        let body = serde_json::to_string(&source).unwrap();
         let mut reconstructed = String::new();
         let mut offset = 0;
-        for item in parts.iter().flatten() {
-            match &item.content {
-                Content::Text { text } => {
-                    let fragment: Value = serde_json::from_str(text).unwrap();
-                    assert_eq!(fragment["id"], source.id);
-                    assert_eq!(
-                        fragment["provenance"],
-                        serde_json::to_value(&source.provenance).unwrap()
-                    );
-                    assert_eq!(fragment["utf8_range"]["start"], offset);
-                    assert_eq!(fragment["utf8_range"]["total"], body.len());
-                    let excerpt = fragment["content_fragment"].as_str().unwrap();
-                    reconstructed.push_str(excerpt);
-                    offset += excerpt.len();
-                    assert_eq!(fragment["utf8_range"]["end"], offset);
-                }
-                Content::Media { .. } => assert_eq!(item.content, image.content),
-                _ => panic!("summary source acquired executable content"),
+        let mut retained_media = 0;
+        for input in plan.nodes().iter().flat_map(|node| &node.inputs) {
+            let ContextCompactionInput::Source { source_id, range } = input else {
+                continue;
+            };
+            let source = preview
+                .sources
+                .iter()
+                .find(|source| &source.source_id == source_id)
+                .unwrap();
+            let item = source_item(source, range.as_ref()).unwrap();
+            if source_id == &preview.sources[0].source_id {
+                let Content::Text { text } = &item.content else {
+                    panic!("text source changed kind")
+                };
+                let fragment: Value = serde_json::from_str(text).unwrap();
+                assert_eq!(fragment["sourceId"], *source_id);
+                assert_eq!(fragment["utf8Range"]["start"], offset);
+                assert_eq!(fragment["utf8Range"]["total"], body.len());
+                let excerpt = fragment["quotedSourceFragment"].as_str().unwrap();
+                reconstructed.push_str(excerpt);
+                offset += excerpt.len();
+                assert_eq!(fragment["utf8Range"]["end"], offset);
+            } else if matches!(item.content, Content::Media { .. }) {
+                assert_eq!(item.content, image.content);
+                retained_media += 1;
+            } else {
+                assert_eq!(
+                    item, source.item,
+                    "the media source label stays attached to its original identity"
+                );
             }
             assert!(matches!(item.provenance, Provenance::ExternalData { .. }));
         }
         assert_eq!(reconstructed, body);
-        assert!(
-            parts
-                .iter()
-                .flatten()
-                .any(|item| item.content == image.content)
-        );
+        assert_eq!(retained_media, 1);
     }
 
     #[test]
@@ -576,47 +586,65 @@ mod tests {
             media.push(image);
             originals.push(item);
         }
-        let parts = partition(
-            "original-summary",
-            &json!({}),
-            &ContextSummaryRecipe::manual(),
-            None,
-            originals,
-        )
-        .unwrap();
-        let items: Vec<_> = parts.iter().flatten().collect();
-        assert_eq!(items.len(), 12);
-        for (index, group) in items.chunks_exact(4).enumerate() {
+        let preview = ContextCompactionPreview {
+            source_cut_hash: "mixed-cut".into(),
+            sources: quote_sources("original-summary", originals).unwrap(),
+            model_budget: model_budget(&json!({}), &ContextSummaryRecipe::manual()).unwrap(),
+        };
+        let plan = builtin_plan(&preview).unwrap();
+        let items: Vec<_> = plan
+            .nodes()
+            .iter()
+            .flat_map(|node| &node.inputs)
+            .map(|input| {
+                let ContextCompactionInput::Source { source_id, range } = input else {
+                    panic!("unbounded fixture needs one node")
+                };
+                source_item(
+                    preview
+                        .sources
+                        .iter()
+                        .find(|source| &source.source_id == source_id)
+                        .unwrap(),
+                    range.as_ref(),
+                )
+                .unwrap()
+            })
+            .collect();
+        assert_eq!(items.len(), 15);
+        for (index, group) in items.chunks_exact(5).enumerate() {
             let decode = |item: &ConversationItem| {
                 let Content::Text { text } = &item.content else {
                     panic!("expected summary evidence text")
                 };
                 serde_json::from_str::<ConversationItem>(text).unwrap()
             };
-            assert_eq!(decode(group[0]), metadata[index]);
+            assert_eq!(decode(&group[0]), metadata[index]);
             let kind = ["output", "result", "job"][index];
             for (part, text) in [
                 (0, format!("before-{kind} 中文")),
                 (2, format!("after-{kind} 🎉")),
             ] {
-                let item = decode(group[if part == 0 { 1 } else { 3 }]);
+                let item = decode(&group[if part == 0 { 1 } else { 4 }]);
                 assert_eq!(item.content, Content::Text { text });
-                assert_eq!(
-                    item.provenance,
-                    Provenance::ExternalData {
-                        source: format!("history:original-{kind}")
-                    }
-                );
+                assert_eq!(item.provenance, metadata[index].provenance);
                 assert_eq!(item.id, format!("original-{kind}:part:{part}"));
             }
+            let Content::Text { text } = &group[2].content else {
+                panic!("media must retain its original source label")
+            };
+            let label: Value = serde_json::from_str(text).unwrap();
+            assert_eq!(label["id"], format!("original-{kind}:part:1"));
+            assert_eq!(label["content"]["kind"], "media");
+            assert_eq!(label["content"]["sourceId"], group[3].id);
             assert_eq!(
-                group[2].content,
+                group[3].content,
                 Content::Media {
                     media: media[index].clone()
                 }
             );
             assert_eq!(
-                group[2].provenance,
+                group[3].provenance,
                 Provenance::ExternalData {
                     source: format!("history:original-{kind}:part:1")
                 }
