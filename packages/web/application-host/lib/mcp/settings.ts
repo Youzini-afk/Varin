@@ -34,7 +34,9 @@ export function createMcpSettings(options: {
         return { name: entry.name, source: entry.source, ...(entry.override ? { override: entry.override } : {}), enabled: entry.config.enabled !== false,
           exposure: entry.config.exposure ?? 'codemode', status: state.status, cachedToolCount: state.cachedToolCount, connectedToolCount: state.connectedToolCount,
           canSignIn: mcpOAuthUrl(entry) !== undefined,
-          ...(current?.error ? { error: current.error } : {}) };
+          ...(current?.error ? { error: current.error } : Object.values(state.directories ?? {}).includes('needs-auth')
+            ? { error: `MCP sign-in required for: ${Object.entries(state.directories ?? {}).filter(([, status]) => status === 'needs-auth').map(([kind]) => kind).join(', ')}` } : Object.values(state.directories ?? {}).includes('failed')
+            ? { error: `MCP directory unavailable: ${Object.entries(state.directories ?? {}).filter(([, status]) => status === 'failed').map(([kind]) => kind).join(', ')}` } : {}) };
       }) };
   };
   const editor = (view: View, path: unknown) => {
