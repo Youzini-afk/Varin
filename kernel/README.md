@@ -79,13 +79,17 @@ prove that source readers drained. Ordinary metadata reads acquire no new lease.
 revocation and retirement defer that retained lease's physical removal until the worker stops.
 See [inventory acceptance](../docs/reviews/runtime-file-inventory-2026-10-11.md).
 
-Single `file.capture` and `file.captureBatch` share one body reader with file observations. Reading,
-staging, hashing both source passes and verifying an existing object run on original file workers.
+Single `file.capture` and `file.captureBatch` share source readers with file observations. Stored capture
+hashes the admitted sources, returns one batched continuation to Storage for transient exact-hash
+retention, then verifies existing objects and hashes every source again on the original file workers.
+Only missing objects stage their second source pass; existing objects retain their verified bytes.
+The continuation keeps the same request, cancellation, credit and physical lease, with no Host round trip.
+Both source hashes, object integrity verification and response construction stay outside the actor.
 Single capture retains its original `{path,stateJson,ownerId}` response and non-indexed operation owner;
 batch retains indexed owners. A supplied lease stays caller-owned. An unbound single capture temporarily
 retains an exact resource in the same physical lease map, preserving managed-writer exclusion until its
 reader stops. Admission checks and insertion use one canonical resource identity. Worker completion
-rechecks original authority, installs verified staging bytes and commits object ownership in Storage;
+rechecks original authority, installs verified misses and commits fresh object ownership in Storage;
 finite rename/directory durability operations remain with that owner to preserve its existing GC order.
 Original mutation/reconciliation observations reuse the body algorithm synchronously and remain an
 explicit separate control boundary. See [capture acceptance](../docs/reviews/runtime-file-capture-2026-10-11.md).

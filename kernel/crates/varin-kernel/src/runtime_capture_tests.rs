@@ -14,22 +14,68 @@ impl Fixture {
         params["operationId"] = json!(operation);
         params
     }
-    fn receive_capture(&self) -> (Value, CaptureTask, Result<CapturedBatch, KernelError>) {
+    fn continue_capture(&mut self) -> Result<(), KernelError> {
         match self
             .rx
             .recv_timeout(WAIT)
-            .expect("capture worker did not drain")
+            .expect("capture first pass did not drain")
         {
-            WorkerRequest::CaptureDone {
+            WorkerRequest::CaptureHashed {
                 request,
                 task,
                 result,
-            } => (request, task, result),
-            _ => panic!("unexpected worker completion"),
+            } => self
+                .kernel
+                .continue_file_capture(request, task, result, &self.revoked, &self.tx),
+            _ => panic!("unexpected capture continuation"),
+        }
+    }
+    fn receive_capture(
+        &mut self,
+    ) -> Result<(Value, CaptureTask, Result<CapturedBatch, KernelError>), KernelError> {
+        loop {
+            match self
+                .rx
+                .recv_timeout(WAIT)
+                .expect("capture worker did not drain")
+            {
+                WorkerRequest::CaptureDone {
+                    request,
+                    task,
+                    result,
+                } => {
+                    // Completion is queued before the native thread's retention tail exits.
+                    // Drain only this request's workers before asserting reclamation.
+                    let cancellation = task.cancellation();
+                    let mut index = 0;
+                    while index < self.kernel.file_workers.len() {
+                        if Arc::ptr_eq(&self.kernel.file_workers[index].0, &cancellation) {
+                            self.kernel.file_workers.remove(index).1.join().unwrap();
+                        } else {
+                            index += 1;
+                        }
+                    }
+                    return Ok((request, task, result));
+                }
+                WorkerRequest::CaptureHashed {
+                    request,
+                    task,
+                    result,
+                } => {
+                    self.kernel.continue_file_capture(
+                        request,
+                        task,
+                        result,
+                        &self.revoked,
+                        &self.tx,
+                    )?;
+                }
+                _ => panic!("unexpected worker completion"),
+            }
         }
     }
     fn finish_capture(&mut self) -> Result<Value, KernelError> {
-        let (request, task, result) = self.receive_capture();
+        let (request, task, result) = self.receive_capture()?;
         self.kernel
             .complete_file_capture(&request, &task, result, &self.revoked)
     }
@@ -111,6 +157,9 @@ fn single_capture_real_body_retains_original_or_implicit_exclusion_while_control
                 CapturePhase::Read
             });
             let (request, token) = f.begin("file.capture", params.clone(), "writer");
+            if store {
+                f.continue_capture().unwrap();
+            }
             hold.entered();
             assert_eq!(
                 f.short("storage.health", json!({}), Some("writer"))["integrity"],
@@ -248,6 +297,162 @@ fn single_capture_preserves_exact_result_owner_bytes_gc_and_batch_indexed_identi
 }
 
 #[test]
+fn stored_capture_reuses_verified_bytes_with_two_complete_source_passes_and_no_staging() {
+    let mut f = Fixture::new();
+    let body = vec![19; 3 * 128 * 1024 + 17];
+    fs::write(f.work().join("body"), &body).unwrap();
+    let mut owners = Vec::new();
+    for (operation, stages) in [("install", 1), ("reuse", 0)] {
+        f.begin(
+            "file.capture",
+            f.capture_params("body", true, operation),
+            "writer",
+        );
+        let (request, task, result) = f.receive_capture().unwrap();
+        assert_eq!(
+            task.counts(),
+            [1, body.len() as u64, 1, body.len() as u64, stages]
+        );
+        let captured = f
+            .kernel
+            .complete_file_capture(&request, &task, result, &f.revoked)
+            .unwrap();
+        owners.push(captured["ownerId"].clone());
+        assert_eq!(fs::read(object_path(&f, &body)).unwrap(), body);
+        assert_eq!(
+            fs::read_dir(f.directory.0.join("store/staging"))
+                .unwrap()
+                .count(),
+            0
+        );
+    }
+    assert_ne!(owners[0], owners[1]);
+    f.release_owner(&owners[0]);
+    f.gc();
+    assert!(object_path(&f, &body).exists());
+    f.release_owner(&owners[1]);
+    f.gc();
+    assert!(!object_path(&f, &body).exists());
+}
+
+#[test]
+fn capture_continuation_keeps_original_lease_and_rechecks_cancel_and_missing_objects() {
+    for cancel in [false, true] {
+        let mut f = Fixture::new();
+        let body = b"exact first-pass identity";
+        fs::write(f.work().join("body"), body).unwrap();
+        let seed = f.capture("body", true, "seed");
+        let (request, token) = f.begin(
+            "file.capture",
+            f.capture_params("body", true, "continued"),
+            "writer",
+        );
+        let WorkerRequest::CaptureHashed {
+            request: completed,
+            task,
+            result,
+        } = f.rx.recv_timeout(WAIT).unwrap()
+        else {
+            panic!("expected first pass");
+        };
+        assert_eq!(completed["id"], request["id"]);
+        assert!(result.is_ok());
+        assert_eq!(task.counts(), [1, body.len() as u64, 0, 0, 0]);
+        assert_eq!(
+            f.short(
+                "file.lease.acquire",
+                f.lease("body", "contender"),
+                Some("writer")
+            )["status"],
+            "busy"
+        );
+        f.release_owner(&seed["ownerId"]);
+        f.gc();
+        assert!(!object_path(&f, body).exists());
+        if cancel {
+            token.store(true, Ordering::Release);
+        }
+        let continued = f
+            .kernel
+            .continue_file_capture(completed, task, result, &f.revoked, &f.tx);
+        if cancel {
+            assert!(matches!(continued, Err(KernelError::Cancelled)));
+            assert!(matches!(f.rx.try_recv(), Err(mpsc::TryRecvError::Empty)));
+        } else {
+            continued.unwrap();
+            let (completed, task, result) = f.receive_capture().unwrap();
+            assert_eq!(completed["id"], request["id"]);
+            assert_eq!(
+                task.counts(),
+                [1, body.len() as u64, 1, body.len() as u64, 1]
+            );
+            f.kernel
+                .complete_file_capture(&completed, &task, result, &f.revoked)
+                .unwrap();
+            assert_eq!(fs::read(object_path(&f, body)).unwrap(), body);
+        }
+        assert_eq!(
+            f.short(
+                "file.lease.acquire",
+                f.lease("body", "contender"),
+                Some("writer")
+            )["status"],
+            "acquired"
+        );
+    }
+}
+
+#[test]
+fn retained_object_hit_still_rejects_a_changed_second_source_pass() {
+    let mut f = Fixture::new();
+    let body = b"original capture body";
+    fs::write(f.work().join("body"), body).unwrap();
+    let seed = f.capture("body", true, "seed");
+    let mut hold = f.capture_hold(CapturePhase::VerifySource);
+    f.begin(
+        "file.capture",
+        f.capture_params("body", true, "must-not-own"),
+        "writer",
+    );
+    f.continue_capture().unwrap();
+    // The retained object is fully verified; the source must still be reread.
+    hold.entered();
+    f.release_owner(&seed["ownerId"]);
+    f.gc();
+    assert!(object_path(&f, body).exists());
+    assert_eq!(
+        fs::read_dir(f.directory.0.join("store/staging"))
+            .unwrap()
+            .count(),
+        0
+    );
+    fs::write(f.work().join("body"), b"modified capture body").unwrap();
+    hold.release();
+    let (request, task, result) = f.receive_capture().unwrap();
+    assert_eq!(
+        task.counts(),
+        [1, body.len() as u64, 1, body.len() as u64, 0]
+    );
+    assert!(
+        matches!(f.kernel.complete_file_capture(&request, &task, result, &f.revoked),
+        Err(KernelError::Operation(message)) if message.contains("changed"))
+    );
+    drop(task);
+    assert_eq!(
+        f.short("storage.health", json!({}), Some("writer"))["temporaryObjectOwners"],
+        0
+    );
+    assert_eq!(
+        f.short(
+            "file.lease.acquire",
+            f.lease("body", "contender"),
+            Some("writer")
+        )["status"],
+        "acquired"
+    );
+}
+
+#[test]
 fn existing_object_verification_is_off_actor_and_gc_cannot_delete_later_publication() {
     for cancel in [false, true] {
         let mut f = Fixture::new();
@@ -259,10 +464,11 @@ fn existing_object_verification_is_off_actor_and_gc_cannot_delete_later_publicat
             f.capture_params("body", true, "second"),
             "writer",
         );
+        f.continue_capture().unwrap();
         hold.entered();
         f.release_owner(&seed["ownerId"]);
         f.gc();
-        assert!(!object_path(&f, b"object verification body").exists());
+        assert!(object_path(&f, b"object verification body").exists());
         assert_eq!(
             f.short("storage.health", json!({}), Some("writer"))["integrity"],
             "ok"
@@ -273,9 +479,18 @@ fn existing_object_verification_is_off_actor_and_gc_cannot_delete_later_publicat
         hold.release();
         if cancel {
             assert!(matches!(f.finish_capture(), Err(KernelError::Cancelled)));
+            f.gc();
             assert!(!object_path(&f, b"object verification body").exists());
         } else {
-            let captured = f.finish_capture().unwrap();
+            let (request, task, result) = f.receive_capture().unwrap();
+            f.gc();
+            assert!(object_path(&f, b"object verification body").exists());
+            assert_eq!(task.counts()[4], 0);
+            let captured = f
+                .kernel
+                .complete_file_capture(&request, &task, result, &f.revoked)
+                .unwrap();
+            drop(task);
             f.gc();
             assert_eq!(f.read_capture(&captured), b"object verification body");
         }
@@ -296,7 +511,7 @@ fn completed_reader_requires_current_grant_and_uncancelled_publication_and_relea
         let mut params = f.capture_params("body", true, "unpublished");
         params["leaseId"] = json!("source-lease");
         let (_, token) = f.begin("file.capture", params, "source");
-        let (request, task, result) = f.receive_capture();
+        let (request, task, result) = f.receive_capture().unwrap();
         assert!(result.is_ok());
         assert_eq!(
             f.short(
@@ -409,7 +624,7 @@ fn capture_preserves_scoped_symlinks_and_rejects_root_or_parent_retarget() {
         f.capture_params("allowed/body", true, "changed-root"),
         "writer",
     );
-    let (request, task, result) = f.receive_capture();
+    let (request, task, result) = f.receive_capture().unwrap();
     fs::rename(f.work(), f.directory.0.join("old-work")).unwrap();
     fs::create_dir(f.directory.0.join("replacement")).unwrap();
     symlink(f.directory.0.join("replacement"), f.work()).unwrap();
@@ -468,20 +683,27 @@ fn staged_capture_cancellation_changed_source_and_panic_publish_no_owner_and_rel
             ));
             None
         } else {
-            Some(f.capture_hold(CapturePhase::Staged))
+            Some(f.capture_hold(if action == "change" {
+                CapturePhase::Read
+            } else {
+                CapturePhase::Staged
+            }))
         };
         let (_, token) = f.begin(
             "file.capture",
             f.capture_params("body", true, "failed-capture"),
             "writer",
         );
+        if action != "change" {
+            f.continue_capture().unwrap();
+        }
         if let Some(hold) = &mut hold {
             hold.entered();
             assert_eq!(
                 fs::read_dir(f.directory.0.join("store/staging"))
                     .unwrap()
                     .count(),
-                1
+                if action == "change" { 0 } else { 1 }
             );
             assert!(!object_path(&f, b"staged before commit").exists());
             assert_eq!(

@@ -62,6 +62,11 @@ enum WorkerRequest {
         task: crate::storage::file_inventory::InventoryTask,
         result: Result<crate::storage::file_inventory::InventoryResult, KernelError>,
     },
+    CaptureHashed {
+        request: Value,
+        task: crate::storage::capture_resources::CaptureTask,
+        result: Result<crate::storage::capture_resources::HashedCapture, KernelError>,
+    },
     CaptureDone {
         request: Value,
         task: crate::storage::capture_resources::CaptureTask,
@@ -660,16 +665,15 @@ impl Kernel {
             let spawned = thread::Builder::new()
                 .name("file-capture".into())
                 .spawn(move || {
-                    let result =
-                        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| task.run()))
-                            .unwrap_or_else(|_| {
-                                Err(KernelError::Storage("capture worker panicked".into()))
-                            });
-                    let _ = completed.send(WorkerRequest::CaptureDone {
-                        request,
-                        task,
-                        result,
-                    });
+                    if task.store() {
+                        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| task.hash_sources()))
+                            .unwrap_or_else(|_| Err(KernelError::Storage("capture worker panicked".into())));
+                        let _ = completed.send(WorkerRequest::CaptureHashed { request, task, result });
+                    } else {
+                        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| task.run()))
+                            .unwrap_or_else(|_| Err(KernelError::Storage("capture worker panicked".into())));
+                        let _ = completed.send(WorkerRequest::CaptureDone { request, task, result });
+                    }
                 });
             match spawned {
                 Ok(worker) => self.file_workers.push((cancellation, worker)),
@@ -805,6 +809,51 @@ impl Kernel {
         let result = result?;
         if method == "storage.gc" { self.collect_obsolete_materialized_views(completions)?; }
         Ok(Some(response_ok(id, result)))
+    }
+
+    fn continue_file_capture(
+        &mut self,
+        request: Value,
+        mut task: crate::storage::capture_resources::CaptureTask,
+        result: Result<crate::storage::capture_resources::HashedCapture, KernelError>,
+        revoked_grants: &Mutex<HashSet<String>>,
+        completions: &mpsc::Sender<WorkerRequest>,
+    ) -> Result<(), KernelError> {
+        let lease_id = task.lease_id().to_owned();
+        let continued = (|| {
+            let storage = self.storage.as_mut()
+                .ok_or_else(|| KernelError::Authorization("kernel stopped".into()))?;
+            let (grant, _) = storage.authorize(
+                request["grantId"].as_str(), &self.epoch,
+                self.host_id.as_deref().unwrap_or(""),
+                self.host_generation.as_deref().unwrap_or(""),
+                request["method"].as_str().unwrap_or(""), &request["params"],
+            )?;
+            if revoked_grants.lock().map(|revoked| revoked.contains(&grant.grant_id)).unwrap_or(true) {
+                return Err(KernelError::Authorization("grant is revoked".into()));
+            }
+            let hashed = result?;
+            storage.retain_capture_objects(&mut task, &hashed, &grant)?;
+            let cancellation = task.cancellation();
+            // Queued completion may be consumed before this worker tail returns.
+            let retention = task.retain_worker_objects();
+            let completed = completions.clone();
+            self.file_workers.retain(|(_, worker)| !worker.is_finished());
+            let worker = thread::Builder::new().name("file-capture".into()).spawn(move || {
+                let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| task.finish_sources(hashed)))
+                    .unwrap_or_else(|_| Err(KernelError::Storage("capture worker panicked".into())));
+                let _ = completed.send(WorkerRequest::CaptureDone { request, task, result });
+                drop(retention);
+            })?;
+            self.file_workers.push((cancellation, worker));
+            Ok(())
+        })();
+        if continued.is_err() {
+            if let Some(storage) = self.storage.as_mut() {
+                storage.finish_retained_file_lease(&lease_id);
+            }
+        }
+        continued
     }
 
     fn complete_file_capture(
@@ -1611,6 +1660,23 @@ pub(crate) fn run() -> Result<(), Box<dyn std::error::Error>> {
                     if worker_response_tx.send(response).is_err() {
                         break;
                     }
+                    continue;
+                }
+                WorkerRequest::CaptureHashed { request, task, result } => {
+                    let id = request["id"].as_str().unwrap_or("").to_owned();
+                    let continued = if stopping {
+                        if let Some(storage) = kernel.storage.as_mut() {
+                            storage.finish_retained_file_lease(task.lease_id());
+                        }
+                        Err(KernelError::Cancelled)
+                    } else {
+                        kernel.continue_file_capture(request, task, result, &worker_revoked_grants, &capture_completions)
+                    };
+                    if let Err(error) = continued {
+                        worker_cancellations.lock().ok().map(|mut active| active.remove(&id));
+                        if worker_response_tx.send(response_error(&id, &error)).is_err() { break; }
+                    }
+                    // The same request/credit remains active across the continuation.
                     continue;
                 }
                 WorkerRequest::CaptureDone {

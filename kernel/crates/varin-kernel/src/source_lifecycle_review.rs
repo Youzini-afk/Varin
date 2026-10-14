@@ -427,7 +427,7 @@ impl Review {
                 let params = call["params"].clone();
                 validate_method_params("file.captureBatch", &params)?;
                 let grant_id = call["grantId"].as_str();
-                let task = {
+                let mut task = {
                     let mut storage = self.fixture.storage.lock().unwrap();
                     let (grant, authorized) = storage.authorize(
                         grant_id,
@@ -444,7 +444,16 @@ impl Review {
                         Arc::new(AtomicBool::new(false)),
                     )?
                 };
-                let body = task.run();
+                let body = (|| {
+                    if !task.store() { return task.run(); }
+                    let hashed = task.hash_sources()?;
+                    {
+                        let mut storage = self.fixture.storage.lock().unwrap();
+                        let (grant, _) = storage.authorize(grant_id, EPOCH, HOST, GENERATION, "file.captureBatch", &params)?;
+                        storage.retain_capture_objects(&mut task, &hashed, &grant)?;
+                    }
+                    task.finish_sources(hashed)
+                })();
                 let mut storage = self.fixture.storage.lock().unwrap();
                 let result = (|| {
                     let (grant, _) = storage.authorize(
