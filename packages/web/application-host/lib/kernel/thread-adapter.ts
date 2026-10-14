@@ -404,7 +404,7 @@ export class ThreadAdapter {
     return { runtime: 'agent', ...result };
   }
 
-  async compact(input: ThreadCompact, signal = new AbortController().signal) {
+  async compact(input: ThreadCompact, signal: AbortSignal = new AbortController().signal) {
     await this.requireIdentity(input, signal);
     const key = createHash('sha256').update(JSON.stringify([input.threadId, input.branchId, input.key])).digest('hex');
     const jobs = await this.runtime.contextJobs(input.branchId, signal);

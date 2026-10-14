@@ -3175,7 +3175,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     const localSelection = input.requiredBinding && managed
       ? selectMcpServers(input.requiredBinding, owner => owner.kind === 'local') : input.requiredBinding;
     const localLease = localSelection ? await owner.restore(localSelection, signal) : owner.snapshot();
-    let lease = localLease;
+    let lease: import('@varin/pi-host/mcp-authority').McpAuthorityLease = localLease;
     let targetReady = false;
     let targetLease: import('./lib/kernel/managed-mcp-lease.js').ManagedMcpLease | undefined;
     if (managed) {
