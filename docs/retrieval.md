@@ -3,8 +3,8 @@
 检索给出证据，上下文决定某次请求实际收到什么，知识保存显式保留的信息。三者共享来源身份，不能互相代替：索引可以重建，
 记忆可以纠正，已经受理的请求仍须保留当时使用的精确材料。
 
-[Agent runtime](runtime.md) 拥有不可变 request/context 与后台 inference；Pi 使用自己的历史和
-[harness 接入](../packages/pi-host/src/harness/README.md)。两者消费 Host 领域服务，不再造文件、文档或知识权威。
+[Agent runtime](runtime.md) 拥有不可变 request/context 与后台 inference，消费既有 Host 领域服务；
+执行适配器不另造文件、文档或知识权威。
 
 ## 证据先绑定来源
 
@@ -27,7 +27,7 @@ Host 搜索将 inventory/content 计算交给 Rust compute，保留原来源及�
 - LSP 使用所属语言进程与版本化文档视图。固定来源必须使用自己的文本/环境，不能借用不一致的 live server 结果。
 
 共享 Explore planner 和 progressive selection 在 `packages/protocol`；Host 算法在 `harness/explore*.ts`。
-Pi 与 Agent adapter 分别包裹其原请求、回执、取消和交付寿命。
+原生 adapter 保留原请求、回执、取消和交付寿命。
 
 候选量/来源预算是覆盖事实，不是置信度。graph/index 缺口保持可见。Graph 给 path，真正文本须重读并重新定位 symbol/literal
 才输出位置；过期关系可以不带行号。可选 relation enrichment 不能让成功文本搜索失败，也不能挤掉 unread/partial 提示。
@@ -37,7 +37,7 @@ Structure 使用 native tree-sitter grammar/recipe 与适用 LSP fallback。小�
 结构不支持/失败时保留短文本窗口和诊断，不丢命中。
 
 入口：[workspace search](../packages/web/application-host/lib/search/DOCUMENTATION.md)、
-[Explore service](../packages/web/application-host/lib/harness/explore-service.ts)、
+[Explore](../packages/web/application-host/lib/harness/explore.ts)、
 [structure/graph](../packages/web/application-host/lib/structure/DOCUMENTATION.md)、
 [LSP](../packages/web/application-host/lib/lsp/DOCUMENTATION.md)。
 
@@ -47,12 +47,11 @@ Structure 使用 native tree-sitter grammar/recipe 与适用 LSP fallback。小�
 新 generation 发布不会改写已有 reader 的 pin；相同路径或 provider 展示名不足以复用。
 
 Native 前台 query/document embedding、rerank、decision、generation 使用原 query session 和递增 ordinal。
-Catalog 管受理、dispatch、usage、receipt 与恢复；Host 配置、凭据、egress、protocol adapter 保持原归属，不为辅助请求启动 Pi
-AgentSession。后台文档索引继续使用现有 index owner。
+Catalog 管受理、dispatch、usage、receipt 与恢复；Host 配置、凭据、egress、protocol adapter 保持原归属。辅助推理直接使用原生 inference 路径。后台文档索引继续使用现有 index owner。
 
 `localBekko` 是已有本地 embedding 组件。Native 未配置 embedding 选择可用它；显式 remote、disabled、invalid、unavailable
 不得偷偷 fallback。组件身份包括经过验证的 manifest/model/tokenizer/recipe/runtime。
-这不是新本地专用推理包、通用本地 LLM 或 imagegen，也不改变 Pi/knowledge-vector 默认。
+它只承担相应 embedding 工作；knowledge-vector 的原有配置与索引 owner 保持独立。
 
 本地 grain 在 encoder entry 前取得原 dispatch 许可；排队取消、实际完成和 worker exit 提供不同回执。
 observer abort 不能证明 active compute 停止。Provider usage 在答案校验前保留，缺维度仍缺，估算不能变成真实 token/价格。
@@ -69,6 +68,10 @@ DNS/proxy/TLS 和取消，外部 URL 仍是不可信输入。
 
 Web snapshot 和本地文档捕获保留原件、来源、reader scope 与 revision。提取文本、outline/table/figure 与 page image 是同一材料
 的不同视图。PDF 文本不能证明视觉忠实，页面读取交付真正 typed image。刷新 URL 产生新观察，不改写已引用来源。
+
+原生输入的 PDF upload 经过 ThreadMaterials 作用域校验，用 documentReader 与 MaterialStore 保留原始字节。
+submit、三种 enqueue 与 child continuation 冻结已授权 snapshot 的来源信息，`document_read` 继续读取同一原件；
+浏览器只传原始文件，既不提取正文，也不把任意 snapshot ID 变成访问授权。
 
 材料集合保存引用和显式跨任务 share grant，知道他人 material ID 不等于有权限。读取/模型选材重查原 grant；来源失败不变空文档。
 artifact、collection、log follow-up 使用原发布事实和耐久 occurrence。
@@ -88,7 +91,7 @@ artifact、collection、log follow-up 使用原发布事实和耐久 occurrence�
 或普遍 token 折扣。
 
 Bot 知识用原 KnowledgeStore 和可选 organizer。Bot owner 来自 Host/Catalog binding，不信任 caller 的 mode label；
-Bot 不收到普通 Agent 笔记/prompt override。Pi 与 Agent 来源 span 分别保留原历史身份和精确文字范围，Markdown 渲染不重定义 offset。
+Bot 不收到普通 Agent 笔记/prompt override。来源 span 保留真实 Thread/branch/item 身份和精确文字范围，Markdown 渲染不重定义 offset。
 
 显式保存、自动提议、纠正和遗忘均保留 provenance，推断与明确要求分开。已审来源覆盖包括空判断并可重启恢复，变更来源重开范围。
 Prepared proposal 核对原 mutation receipt，不在写入未知时另生成答案。原文 reader 对被引来源返回 changed/missing/unavailable，

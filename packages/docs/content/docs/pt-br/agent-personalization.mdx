@@ -1,0 +1,16 @@
+---
+title: "Memória e instruções do Agent"
+description: "Gerencie notas e instruções dos Agents comuns por escopo."
+---
+
+# Memória e instruções do Agent
+
+Em **Configurações → Memória**, crie, edite, exclua ou mova notas entre escopos global, projeto e conversa. O painel de memória da conversa e a ferramenta `memory` usam as mesmas notas. Um filho não herda automaticamente as notas da conversa principal.
+
+Notas salvas ficam disponíveis imediatamente. Conversas ativas recebem fatos novos sem reescrever o prefixo de memória congelado. Aplicar com sucesso um resumo de contexto atualiza esse snapshot.
+
+Em **Configurações → System prompt**, edite seções de instruções. Densidade, estilo e autonomia inserem texto editável. Alterações globais, de projeto e de conversa se aplicam nessa ordem. **Restore defaults** remove apenas as do escopo escolhido. Mudanças entram em um limite seguro entre solicitações; as já preparadas não mudam.
+
+A prévia inclui instruções montadas e memória capturada. A visualização da última solicitação, quando disponível, não comprova recebimento pelo provedor. Para arquivos de instruções e skills, use **Refresh instructions and skills** após editar.
+
+Bots mantêm instruções e memória separadas em **Varin Bot**, sem receber notas ou ajustes dos Agents comuns.

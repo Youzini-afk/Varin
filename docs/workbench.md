@@ -117,7 +117,7 @@ LSP 使用 `undo` failureHandling，不承诺文件系统与编辑器的绝对�
 删除后 workspace command 不伪造仍存在的文档版本。普通重构无需 Agent Run。
 
 恢复 journal 位于 Host 的 document-recovery namespace，绑定 workspace、用户/recovery session 和资源。
-它是带 revision 的未保存数据，不进入普通日志或 Pi JSONL。Restore 产生待审阅草稿，不覆盖项目文件；
+它是带 revision 的未保存数据，不进入普通日志或对话历史。Restore 产生待审阅草稿，不覆盖项目文件；
 旧 workspace epoch 和互相冲突的别名草稿保留区别。Save/discard 和 owner teardown 协调 journal 清理，
 不以任意天数、数量或字节上限代替恢复语义。
 
@@ -167,18 +167,19 @@ action/decoration，不暴露可 dispose 的 raw handle，也不授予文件权�
 
 ## 对话连续性
 
-Pi 产品路径以 Pi JSONL 和 live worker 为权威，`usePiSessionStore` 分别投影 preview、live entries、
-本地 submission 和 view state。冷会话 preview 可在 worker 未启动时显示，但不代表可执行。
-可选 Agent runtime 的 Thread 界面使用 `ThreadsAPI` 和原生事实，不写 Pi history，详见[运行时](runtime.md)。
+Thread 界面通过 `ThreadsAPI` 与 `ThreadProjection` 读取原生 Catalog 的快照、持久历史和临时进度，
+不维护第二份执行状态。客户端用 Host、Thread 和 branch 身份隔离草稿，切换后迟到的响应不能写入新视图。
 
-Pi send 在原生受理并对账前是本地 submission transaction。确定失败恢复被消费的 draft 与 attachment；
-传输结果不明则保持 uncertain，不自动重发。Native Queue/Steer 拥有已受理消息及 revision；
-编辑、删除或提升队列消息不通过清空并重建整条队列实现。
+发送保存原 request key、正文、图片、PDF snapshot 和选定配置。明确未受理时可以恢复修改；受理结果未知时保留冻结输入，
+重试使用原 key 并核对回执，不重新上传 PDF，也不自动生成另一个输入。成功晚回执只清理原草稿中已受理的内容。
+已受理队列沿自身 revision 编辑、取消或交付，不靠清空重建模拟变更。
 
-内置 timeline 将用户输入和 Agent 回应组成一轮，tool result 归入原 tool-call ID。
-已完成历史与 live output 共用一个 virtual list 和 scroll controller。跟随末尾、新轮次锚定和手动阅读
-分别管理，真实用户导航优先。重新进入会话时，根据真实更新跟随工作，或恢复原阅读位置。
-流式正文不应重建全部历史轮次，也不在虚拟列表重挂载后重播 reveal 动画。
+原生 composer 提供多行输入、skills、编辑器/评论上下文、图片和 PDF 附件。PDF 原件由 Host 保存，附件打开同一作用域的
+reader；页面选区使用真实图像。submit、三种 enqueue 和 child continuation 都保留相同的固定材料来源。
+旧 Pi 输入组件已移除，不另建兼容编辑器。
+
+新建多 Run 会为各候选记录实际 Thread/worktree 与受理状态。部分失败或结果未知保留已创建对象，供用户核对或继续；
+不能为恢复空界面而自动删除可能已经执行的工作。来源选择、导航项目与执行 cwd 分开，切换项目不会隐式搬迁活跃 Run。
 
 界面呈现实报的 usage、mutation receipt 和进度观察。文件 preview 不证明写入成功；工具完成、写入失败、
 working branch 和 unsaved draft 分开显示。未知扩展 entry 仍可用 generic/raw detail，扩展 renderer
@@ -192,7 +193,7 @@ owner 保存。Thread PDF 和 typed media 使用当前 Thread 的 material/holde
 
 共享[设置目录](../packages/application-client/src/settings-catalog.ts) 定义稳定 ID、字段、scope、发现和动作。
 [Host settings service](../packages/web/application-host/lib/harness/settings-service.ts) 路由到 app settings、
-Pi settings、绑定客户端或原领域 action owner。查询目录不安装软件、不启动推理，也不证明能力已接线。
+原生 Agent settings、绑定客户端或原领域 action owner。查询目录不安装软件、不启动推理，也不证明能力已接线。
 Owner/channel 缺失、平台不支持、只读和真实可执行动作分别表达。
 
 更新使用 owner revision 和局部语义变更。同 owner 的 app 字段可一次 CAS；跨 owner 返回各自真实结果，
@@ -203,9 +204,8 @@ Owner/channel 缺失、平台不支持、只读和真实可执行动作分别表
 设备本地变更使用认证后的 session-to-Surface binding，并等待实际应用 acknowledgment。
 没有绑定客户端返回 unavailable，多个返回 ambiguous，不能广播修改。凭据留在原 owner，只暴露配置状态。
 
-Agent profile 用 `AgentProfilesAPI` 管理共享字段及 runtime-specific tools。Editor 保留 Host、editing runtime
-和打开时 revision；刷新不抹掉未保存草稿。省略 tools、显式空集合和 reset 含义不同。
-Pi plugin Agent 继续由 provider 管理，仅出现在 Pi 编辑模式；已受理 Run 保留冻结配置。
+Agent profile 用 `AgentProfilesAPI` 管理模型、指令和工具选择。Editor 保留 Host 和打开时 revision，
+刷新不抹掉未保存草稿。省略 tools、显式空集合和 reset 含义不同；已受理 Run 保留冻结配置。
 
 ## 能力降级与验证边界
 

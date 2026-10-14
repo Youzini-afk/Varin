@@ -11,7 +11,7 @@ package.json 为准；文档解释职责、机制、约束和不显然的取舍�
 | 文件来源、WorkingState、进程、跨 Host 和恢复 | [资源](resources.md) |
 | 上下文、检索、材料、知识和记忆 | [检索与上下文](retrieval.md) |
 | 外壳、Profile、Documents 和编辑器 | [工作台](workbench.md) |
-| Varin 扩展、Pi 集成和运行时能力组合 | [扩展](extensions.md) |
+| Varin 扩展和原生运行时能力组合 | [扩展](extensions.md) |
 | 信任、权限和特权边界 | [安全](security.md) |
 | 开发命令与验证选择 | [开发](development.md)、[性能](performance.md) |
 | 仍需真实环境证据的运行时场景 | [运行时验收](runtime-acceptance.md) |
@@ -22,10 +22,10 @@ package.json 为准；文档解释职责、机制、约束和不显然的取舍�
 源码旁的 README / DOCUMENTATION 保留模块特有的不变量和实际入口：
 
 - [Rust 内核](../kernel/README.md)、[Agent runtime crate](../kernel/crates/varin-runtime/README.md)、[Host adapters](../packages/web/application-host/lib/kernel/DOCUMENTATION.md)
-- [Pi harness](../packages/pi-host/src/harness/README.md)、[Host harness](../packages/web/application-host/lib/harness/DOCUMENTATION.md)
+- [Host harness](../packages/web/application-host/lib/harness/DOCUMENTATION.md)
 - [Documents](../packages/web/application-host/lib/documents/DOCUMENTATION.md)、[UI](../packages/ui/DOCUMENTATION.md)、[Knowledge](../packages/web/application-host/lib/knowledge/DOCUMENTATION.md)
 - [模型、账号与设置](../packages/web/application-host/lib/models/DOCUMENTATION.md)、[MCP 服务](../packages/web/application-host/lib/mcp/DOCUMENTATION.md)、[Computer Use](../packages/web/application-host/lib/computer/DOCUMENTATION.md)
 - [application-client](../packages/application-client/README.md)、[protocol](../packages/protocol/README.md)、[extension-host](../packages/extension-host/README.md)
 
-当前默认仍是 Pi；Agent runtime 为显式选择。支持边界写在所属领域，不能从旧的“阶段完成”推导默认已切换、Pi 已移除，
-或所有安装包、模型、双机和桌面平台都已通过验证。
+当前对话由原生 Agent runtime 执行。旧设计、过程记录和已移除运行时的指导留在 Git 历史；
+源码接线、定向测试、安装包与真实环境验收分别说明，不互相代替。

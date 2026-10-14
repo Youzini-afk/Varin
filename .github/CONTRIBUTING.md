@@ -23,9 +23,10 @@ covers setup, commands and verification, and [architecture](../docs/architecture
 Read the owning implementation, its consumers and the nearest README or DOCUMENTATION before editing.
 Keep the change focused and preserve unrelated work. Follow existing code style and shared UI components.
 
-Pi is the default conversation runtime. The opt-in Rust Agent runtime has its own history and execution
-owners; both use shared Host services. Follow the actual owner described in the architecture rather than
-copying state into another layer. Changing the default runtime or migrating user assets needs explicit agreement.
+The native Rust Agent runtime is the product's conversation and execution owner. Thread/branch history,
+queues, Runs and Operations belong to its Catalog; trusted Application Host services supply models,
+credentials and domain capabilities. Follow those owners rather than copying state into another layer.
+Historical Pi assets are preserved without importing them or restoring a fallback runtime.
 
 Use public extension interfaces and preserve plugin-owned configuration and data. Privileged operations
 belong in the trusted Host, never in a renderer. Check the applicable [security](../docs/security.md)

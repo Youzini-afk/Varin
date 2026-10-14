@@ -81,7 +81,7 @@ Recovery 是已知修改的 journal，不是工作区备份。turn 开始只建�
 后来用户编辑保留为冲突。确认脏缓冲恢复使用原 Registry owner、instance、revision；离线或未知 dirty-state 仍可重试，
 不能当作“没有脏缓冲”。
 
-对话判别字段选择 Pi 原生 tree 或 Agent HistoryBranch 导航。导航响应丢失查原 command receipt，不重复导航，不仅比较当前 head，
+对话恢复使用真实 Thread/HistoryBranch 导航。导航响应丢失查原 command receipt，不重复导航，不仅比较当前 head，
 也不立即补偿文件。只有明确拒绝才补偿仍等于本操作 output 的路径。Undo/重启继续原 operation/file phase。
 
 Managed 多 Host 恢复由对话 Host 先持久化 metadata-only coordinator 和固定 participant 身份，再联系文件 owner。
@@ -115,7 +115,7 @@ Service forward 有自己的 listener/bridge、原操作和清理。选择 Compu
 
 ## Computer Use 与平台边界
 
-ComputerService 拥有发现、driver、物理输入 lane、assignment、人工控制和远端路由。Agent Thread/Run 与 Pi session 显式区分。
+ComputerService 拥有发现、driver、物理输入 lane、assignment、人工控制和远端路由；执行绑定保留真实 Thread/Run。
 一个物理桌面同时只有一个 controller，可有多个 observer；不同窗口不是独立桌面。
 
 assignment 在资源 Host 预留成功后才发布 grant。输入使用原 assignment/epoch，handback 后需新观察；远端重启不会悄悄续旧 token。

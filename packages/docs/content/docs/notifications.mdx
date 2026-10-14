@@ -5,30 +5,11 @@ description: Get told when a session needs you or finishes.
 
 # Notifications
 
-Notifications tell you when something needs your attention so you don't have to watch the screen — a session finished, hit an error, asked a question, or needs permission to do something. Set them up at **Settings → Varin → Notifications**.
+Open **Settings → Varin → Notifications** and allow notifications on each device. Native conversation events notify you when a response finishes, a run fails, or approval or an answer is needed. Completion notifications respect the completion setting; attention requests remain separate.
 
-## Turn them on
+Delivery depends on the connected desktop, browser push or mobile push service and system permissions. The Host must remain running. Notifications open the original Thread and branch when that delivery channel supports navigation.
 
-1. Open **Settings → Varin → Notifications**.
-2. Allow notifications when your browser or system asks.
-3. Choose what you want to be told about:
-   - a session **finishes**
-   - a session hits an **error**
-   - a session **asks a question**
-   - a session needs **permission**
-   - **subtasks** complete
+The title is the Thread’s title, falling back to “Varin”. The body is fixed status text, not the agent’s reply. This also applies to APNs, so a conversation title may appear on an iPhone lock screen. Native events do not use the old editable message templates, and app-icon badge synchronization is not implemented.
 
-## How they reach you
-
-- on **desktop**, you get native system notifications
-- in a **browser or installed app**, you get web push notifications, so they arrive even when the tab is in the background
-
-Sessions set to auto-accept won't nag you with permission notifications.
-
-## Customize the wording
-
-Each kind of notification has a title and message template you can edit, using fields like the agent name and model. There's also a limit on how much of the last message is included, so notifications stay short.
-
-## Related
-
-- [Voice Mode](/voice/) — hear replies read aloud instead
+- [Mobile Apps & PWA](/mobile/)
+- [Security](/security/)

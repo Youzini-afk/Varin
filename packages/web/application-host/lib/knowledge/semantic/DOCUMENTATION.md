@@ -1,8 +1,8 @@
 # Semantic index
 
-Code-semantic index for explore’s third recall path (design 6.1 / 3.16, D-166–D-193).
+Code-semantic index for Explore’s semantic recall path.
 Host-only writer. Not the authoritative workspace `.tdb`. Knowledge-base vectors are a sibling
-derived store (`../vectors/`); they reuse `harness.embed` but never this local-model fallback.
+derived store (`../vectors/`); they reuse retained native inference but never this local-model fallback.
 
 ## Purpose-specific Host inference
 
@@ -10,7 +10,7 @@ derived store (`../vectors/`); they reuse `harness.embed` but never this local-m
 Native retrieval's query/document embedding, decision, rerank and Explore generation consume one original
 query session in `inference-requests.ts`, with one ordinal allocator for actual requests. The
 `HostCredentialAuthority`, global purpose settings, egress and original protocol adapters remain
-their owners; no Pi AgentSession/workspace worker is started. Catalog owns native request admission,
+their owners. Catalog owns native request admission,
 dispatch, original receipt, Goal usage and recovery. Background document indexing retains its
 separate existing index owner below. Request/response/raw-usage bodies live in ContentStore. Private retained
 credentials/headers never enter those records.
@@ -26,8 +26,8 @@ the SDK from interpreting the persistence failure as permission to send another 
 
 `local-inference.ts` adapts the existing installed encoder for native query and foreground fixed-view
 vectors. An unconfigured embedding selection uses the installed component; explicit remote, disabled,
-invalid or unavailable selections never fall back. The existing HTTP settings DTO remains unconfigured
-for Pi/knowledge-vector consumers, so this does not enroll a knowledge index or change Pi defaults.
+invalid or unavailable selections never fall back. The HTTP settings DTO remains unconfigured for index-status consumers when local inference is selected.
+Knowledge-vector recall keeps its separate enrollment and embedding policy.
 Workspace native selection is one tagged HTTP/local lease. Local Catalog bindings carry the component
 ID/version, canonical verified-manifest digest, model revision and worker protocol, with no endpoint or
 credential. The digest includes the manifest's model/tokenizer/recipe/runtime hashes and enters the
@@ -83,17 +83,13 @@ Host, connection, endpoint identity and workspace. Coordinator index selection, 
 settings and same-named local publications cannot redirect that source. Target authorization and
 bytes remain at the source owner; model credentials, requests and usage remain with the Agent owner.
 
-The older Pi workspace broker retains
-its existing failure/cancellation projection; this native lifecycle is not a claim that those older
-observer semantics were replaced.
-
 ## Index and embedding owners
 
 - Identities: `identity.ts` — vector space, index recipe, `{ scopeKind, scopeId }`. Remote spaces use
   `remoteEmbeddingSpaceId` from protocol parts (no credentials).
 - Embedder: `backend.ts` — unconfigured → the installed local encoder only when the optional component is installed;
-  otherwise the semantic source is unavailable. `harness.embedding` set → `remote-embedder.ts`
-  via workspace `harness.embed`. Configured remote never falls back to the local model in the same query.
+  otherwise the semantic source is unavailable. Configured remote inference uses `remote-embedder.ts`
+  through the retained native lease. Configured remote never falls back to the local model in the same query.
 - Chunking: `chunker.ts` — tree-sitter containers, backend input length, continue-split of long lines.
   Semantic eligibility follows recognized text language identities, independently of the tree-sitter
   grammar list. Languages such as Scala use native text units with path, line range and content
@@ -150,8 +146,8 @@ observer semantics were replaced.
   alone does not invalidate compatible document assets; current source/binding/credential checks
   still apply and query vectors retain their account partition. Concurrent cold invocations remain
   separate inference owners; cross-query in-flight paid deduplication is not claimed. Release aborts
-  preparation and waits for its actual work before releasing the retained reader. Live/Pi background
-  ownership and defaults remain unchanged. Transient source coverage, captured publication coverage
+  preparation and waits for its actual work before releasing the retained reader. Live background
+  indexing retains its own owner. Transient source coverage, captured publication coverage
   and binding readiness are separate; materialized reads are versioned per file, not an atomic project.
 - Overlay: `query-view.ts` pins surface/thread drafts at query start; masked disk paths cannot leak
   old vectors. Thread view is fixed baseline + this branch’s delta.
@@ -303,12 +299,11 @@ observer semantics were replaced.
   new derived index; the previous cache is preserved until explicitly cleaned up. This storage
   choice affects the code-semantic index, not the authoritative knowledge database, symbol graph,
   or installed local encoder component.
-- Remote embedding: Pi sends OpenAI-compatible requests. A provider's 400/413 response to a batch
-  causes that rejected batch to split recursively; results retain input order and vector-space
-  identity. A single rejected input remains an error and the scan reports partial/failed coverage.
-  Temporary HTTP 429/5xx failures retry the same batch with cancellable backoff and Retry-After;
-  the adapter defaults to two additional attempts and accepts a configurable retry count. Permanent
-  errors remain errors. HTTP rerank sends text strings and maps returned indexes to local material IDs.
+- Remote embedding: `runtime-inference.ts` sends OpenAI-compatible requests through the original
+  retained binding and Catalog receipt. The native path uses zero automatic HTTP retries; a failed or
+  unknown dispatched request is not replayed to repair observation. Results retain input order and
+  vector-space identity, and incomplete batches remain partial/failed rather than successful empty
+  coverage. Rerank returns scores against the caller's original material IDs.
 - Optional component (D-288): `local-component.ts` owns explicit download/import, manifest and file
   verification, a short native inference check process, and atomic activation under
   `dataDir/optional-components/local-semantic`. `local-component-routes.ts` exposes authenticated

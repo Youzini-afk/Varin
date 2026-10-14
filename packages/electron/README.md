@@ -14,22 +14,18 @@ Desktop starts the Varin web server in the same Electron main process. There is 
 
 The `main.ts` source imports `@varin/web/server/index.js` and calls `startWebUiServer()`; builds execute the generated `dist-bundle/main.mjs`. The Electron window then loads the UI from the local server in development, or from packaged `resources/web-dist` assets in packaged builds.
 
-Normal startup resolves the bundled Pi runtime, or the installation explicitly selected by the user.
-It does not scan PATH or package managers. The production catalog worker's handshake establishes readiness;
-there is no temporary probe worker before it. Startup remains on the loading screen while that handshake
-is pending. Settings → Runtime → Rediscover explicitly inventories other installations and prepares external
-install/upgrade actions; a missing selected runtime is reported rather than silently replaced.
-
-That embedded Application Host starts the private Rust system kernel from `resources/kernel`; storage,
-file/materialization, PTY/process, and fixed-view compute remain Host services and do not become a second
-Electron backend or renderer IPC surface.
+The embedded Application Host starts the native Rust kernel from `resources/kernel`. Its Agent Catalog
+owns Thread/branch identity, history, queues and accepted execution. Storage, file/materialization,
+PTY/process and fixed-view compute remain Host services; they do not become a second Electron backend
+or renderer IPC surface. The UI observes native readiness and the Thread Catalog before presenting
+conversation navigation. Missing or incompatible packaged runtime assets fail explicitly.
 
 The workspace/user knowledge database is held by a private Application Host storage process using
 Electron in Node mode. Its synchronous native queries and checkpoints do not execute on the window
 thread. This does not move the Web server or introduce an Electron-specific backend; see
 [knowledge storage](../web/application-host/lib/knowledge/DOCUMENTATION.md) for persistence and failure semantics.
 
-Same-origin session-chat iframes complete an authenticated parent-frame handshake before creating their SDK client. The parent supplies its active in-memory endpoint and credentials; when relay is active it also supplies the public relay descriptor without any pairing grant, because Electron preload and IPC are unavailable inside the iframe. The iframe establishes its own transport and rebinds its SDK before rendering. Additional windows retain their own per-window runtime bootstrap instead of being overwritten by the main window. Credentials are never placed in iframe URLs, and other child pages do not receive this runtime state.
+Same-origin embedded Thread iframes complete an authenticated parent-frame handshake before binding their Host APIs. The parent supplies its active in-memory endpoint and credentials; when relay is active it also supplies the public relay descriptor without any pairing grant, because Electron preload and IPC are unavailable inside the iframe. The iframe establishes its own authenticated transport before rendering. Additional windows retain their own per-window runtime bootstrap instead of being overwritten by the main window. Credentials are never placed in iframe URLs, and other child pages do not receive this runtime state.
 
 The `preload.ts` bridge exposes desktop-only APIs to the web UI through `window.__VARIN_DESKTOP__`. Privileged commands are checked in `main.ts`, not only in the UI.
 
@@ -44,7 +40,6 @@ The `preload.ts` bridge exposes desktop-only APIs to the web UI through `window.
 | `renderer-security-policy.ts` | Trusted-origin policy and remote-safe command gate for the preload bridge |
 | `scripts/electron-dev.mjs` | Desktop dev launcher with Vite HMR support |
 | `scripts/build-web-assets.mjs` | Builds `packages/web` and stages UI assets into `resources/web-dist` |
-| `pi-runtime.ts` | Resolves and starts the packaged Pi host through Electron's Node mode |
 | `scripts/bundle-main.mjs` | Bundles Electron main code into `dist-bundle/main.mjs` for packaging |
 | `scripts/verify-native.mjs` | Runs the staged release-kernel and TriviumDB smoke under Electron's Node runtime |
 | `scripts/package.mjs` | Runs `electron-builder`; release automation can explicitly select unsigned Windows or macOS packaging |
@@ -54,11 +49,11 @@ The TypeScript sources are bundled into `dist-bundle/main.mjs` and `dist-bundle/
 
 ## Desktop IPC contract
 
-All 58 `desktop_*` commands, the preload bootstrap payload, desktop events, and shared DTOs (hosts, SSH, updates, capture, dialog) are typed in a single framework-neutral contract at `packages/application-client/src/desktop.ts`, exposed to the native bundle through the focused `@varin/application-client/desktop` subpath.
+All `desktop_*` commands, the preload bootstrap payload, desktop events, and shared DTOs (hosts, SSH, updates, capture, dialog) are typed in a single framework-neutral contract at `packages/application-client/src/desktop.ts`, exposed to the native bundle through the focused `@varin/application-client/desktop` subpath.
 
 The contract exports:
 
-- `VarinDesktopCommandMap` — a map from command name to `{ args, result }` for all 58 commands
+- `VarinDesktopCommandMap` — a map from command name to `{ args, result }` for the exhaustive command catalog
 - `VarinDesktopBridge` — the typed bridge interface implemented by preload and consumed by the UI
 - `VARIN_DESKTOP_COMMAND_LIST` — the canonical command catalog (used by architecture tests)
 - `VARIN_REMOTE_SAFE_DESKTOP_COMMANDS` — the subset allowed for non-local renderers
@@ -108,7 +103,7 @@ bun run electron:build
 That runs, in order:
 
 1. `build:web-assets` to build the web UI and copy it into `packages/electron/resources/web-dist`.
-2. `prepare:pi-runtime` to compile the Pi host bootstrap and runtime broker.
+2. `prepare:runtime` to build the shared runtime dependencies and Application Host.
 3. `bundle:main` to create `packages/electron/dist-bundle/main.mjs`.
 4. `verify:native` to prepare target native libraries, start the manifest-verified release kernel,
    and perform a durable TriviumDB read/write through Electron's Node runtime. Storage and PTY no
@@ -145,12 +140,11 @@ Desktop file filters omit JS/TS source maps, generated Host declarations, duplic
 SDK-only sources/types. They do not blanket-remove `src`, TypeScript runtime inputs or Python stubs.
 `node-module-file-policy.cjs` explicitly retains the built-in tsserver standard `.d.ts` libraries,
 which electron-builder otherwise excludes. `afterPack` compiles a small Array/String/Promise program
-with the packaged TypeScript runtime, in addition to the Pi handshake and PDF/Canvas checks.
+with the packaged TypeScript runtime, alongside PDF/Canvas checks.
 The kernel resource filter ships only the current executable and manifest, not stale build outputs.
-The packaged Pi check enables Host thread tools and creates a real session before reading and closing
-it; catalog readiness alone cannot establish that a conversation can open successfully.
-Pi workers and native/runtime assets remain outside ASAR; reducing installation file count is not
-permission to make external Node processes depend on Electron's virtual filesystem.
+Node workers and native/runtime assets remain outside ASAR; reducing installation file count is not
+permission to make external Node processes depend on Electron's virtual filesystem. Packaged runtime
+checks and Catalog readiness do not alone establish a successful authenticated model conversation.
 
 The first upgrade from a file-heavy older release still pays that old release's uninstall cost; after
 that transition, both install and later uninstall operate on the reduced payload. To compare only the
@@ -227,8 +221,8 @@ Release ARM64 packages run natively on GitHub's `windows-11-arm` runner. The wor
 `VARIN_TARGET_ARCH=arm64`, packages with `--win --arm64`, executes the unpacked ARM64 application,
 and publishes `latest-arm64.yml` beside the architecture-specific installer and blockmap.
 
-After packaging, verify that the unpacked application starts the default bundled Pi runtime using only
-packaged dependencies, then check the renderer app-ready signal/error boundary, lazy materialization and a
+After packaging, verify that the unpacked application starts its native kernel using only packaged
+dependencies, then check the renderer app-ready signal/error boundary, Thread Catalog readiness, lazy materialization and a
 real hover request through the built-in TypeScript language service, plus a real terminal create/close
 cycle. Merely finding compiled Host files is not proof that their unpacked assets or the bundled runtime
 can execute:
@@ -247,7 +241,7 @@ workflow currently produces unsigned `dmg` and `zip` assets by explicitly disabl
 hardened runtime, DMG signing, and notarization. A future signed distribution can supply Apple signing
 credentials and restore those production signing options without changing the application payload.
 
-Windows packaging uses `electron-builder` with the NSIS target. For reliable native module rebuilds and NSIS installer creation, run Windows builds on a Windows runner or host. The default x64 path uses `node-pty`'s published N-API prebuild and therefore does not require Visual Studio's optional Spectre libraries; set `VARIN_REBUILD_NODE_PTY_FROM_SOURCE=1` only when intentionally testing its C++ source build. If no Windows signing environment is present, `package.mjs` intentionally disables code signing and produces an unsigned installer.
+Windows packaging uses `electron-builder` with the NSIS target. Use a matching Windows runner or host for native dependencies and NSIS installer creation. PTYs and process control belong to the Rust kernel; packaging rejects retired `node-pty` and `bun-pty` authorities. If no Windows signing environment is present, `package.mjs` intentionally disables code signing and produces an unsigned installer.
 
 ### Code signing
 
@@ -298,24 +292,16 @@ The package supports macOS, Windows, and Linux desktop features. Linux AppImage 
 
 The macOS menu bar item is enabled by default and can be disabled in General settings. The setting applies after restart; while disabled, Desktop does not create the native tray controller or start the renderer subscriptions, polling, quota refresh, or IPC updates that feed it.
 
-## Pi runtime
+## Packaged runtime boundary
 
-Packaged Desktop builds include Varin's compiled Host bootstrap and runtime broker, but runtime
-execution no longer binds to a permanently bundled copy of the three Pi SDK packages. The Runtime
-Manager discovers a user-level Pi installation, verifies its package root and Node executable, and
-accepts it only after the Host handshake succeeds. Onboarding and Settings may select, install, or
-upgrade that installation; a newer Pi is retained, and no downgrade or silent upgrade is performed.
+Desktop ships the compiled Application Host, its native kernel executable/manifest and the runtime
+assets needed by lazily activated services. Electron's executable supplies Node mode to Host-owned
+workers, so the desktop shell does not require a separately installed Node runtime. Those workers
+retain the same owners as Web deployments; Electron adds no conversation broker or alternate store.
 
-Electron's executable provides Node mode for the Varin Host process, so running the desktop shell
-does not require a separately installed Node runtime. Pi remains an independent user-level tool and
-can still be used by the Pi CLI outside Varin. Cloud distributions deliberately keep a pinned Pi
-runtime because their unattended hosts have different reproducibility needs.
-
-The official ordinary installer still has to prove that its final dependency inventory contains no
-unused Pi SDK copy; the optional offline distribution may instead carry an explicitly verified
-standalone installation payload. The production dependencies that normal Node workers do require
-remain unpacked for filesystem module resolution. Chromium locale files are limited to Varin's
-supported interface languages.
+Production dependencies required by Node workers remain unpacked for filesystem module resolution.
+Chromium locale files are limited to Varin's supported interface languages. Keep the shipped LICENSE,
+THIRD_PARTY_NOTICES and kernel notices with the distribution.
 
 ## Common env vars
 
@@ -328,7 +314,6 @@ supported interface languages.
 | `VARIN_HMR_API_PORT` | Preferred API port for desktop dev, default `3901` |
 | `VARIN_RUNTIME=desktop` | Set by Electron before starting the web server |
 | `VARIN_TARGET_ARCH` | Explicit desktop package architecture (`x64` or `arm64`); Linux requires it to match the native host |
-| `VARIN_REBUILD_NODE_PTY_FROM_SOURCE=1` | Opts Windows packaging into the `node-pty` C++ source build instead of its verified published prebuild |
 | `VARIN_DESKTOP_NOTIFY=true` | Enables desktop notification flow in the web server |
 | `VARIN_SKIP_API_COMPRESSION=true` | Defaulted by Desktop to reduce local CPU overhead |
 | `VARIN_STARTUP_PERF=1` | Enables privacy-safe startup phase timings in Desktop/server logs; disabled by default |
@@ -366,9 +351,9 @@ Development builds use a separate user data directory named `Varin Dev`, so dev 
 
 ## Things to be careful with
 
-- Keep desktop-specific code in this package. Pi runtime behavior belongs in the host/broker packages.
+- Keep desktop-specific code in this package. Runtime behavior belongs in the Application Host and Rust kernel.
 - Use hidden Windows process launches for background helpers. Avoid visible console flashes.
-- Keep `@varin/web` and its runtime packages external in `bundle-main.mjs`; the packaged Host, Pi workers, kernel manifest and assets must resolve from the release layout.
+- Keep `@varin/web` and its runtime packages external in `bundle-main.mjs`; the packaged Host, Node workers, kernel manifest and assets must resolve from the release layout.
 - Run `verify:native` after changing Electron, Rust-kernel packaging, TriviumDB, sherpa, or target architecture; do not restore addon rebuilds for storage or PTY.
 - Test both HMR dev mode and bundled UI mode when changing startup, preload, routing, or packaged asset behavior.
 

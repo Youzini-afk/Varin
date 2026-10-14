@@ -10,119 +10,50 @@
 [![Docker Images](https://github.com/Youzini-afk/Varin/actions/workflows/docker.yml/badge.svg)](https://github.com/Youzini-afk/Varin/actions/workflows/docker.yml)
 [![License: AGPL v3](https://img.shields.io/badge/License-AGPL_v3-blue.svg)](../../LICENSE)
 
-**獨立的 Agent 工作台與完整 Harness，面向程式設計、研究和其他專案工作：以本地與桌面體驗為中心，
-同時涵蓋 Web、編輯器與行動端。**
+**獨立的 Agent 工作空間與執行框架，用於程式開發、研究和專案工作，涵蓋桌面、Web 與行動端。**
 
-它內建 [Pi](https://github.com/earendil-works/pi) 執行時期；模型與提供商堆疊、工作階段樹、套件管理器與擴充模型
-仍由 Pi 提供，而 Varin 負責周圍的工具環境、工作狀態、復原、檢索、上下文策略、任務治理與工作台介面。
-它直接使用 Pi 的公開 SDK，而不是擷取終端輸出。
-
-Workbench Profile 可選擇四套內建外殼：**Agent Workspace**、**IDE Workbench**、
-**Research Workbench** 與 **Varin Bot**。它們都是普通的 Varin 擴充，可以整體替換，也可以
-只替換其中的部分。Agent Workspace 以工作階段與任務為中心；IDE Workbench 將編輯器、搜尋、Git、
-診斷與偵錯和可停駐的智慧體面板結合。
-
-Agent Workspace、Research Workbench 與 Varin Bot 支援桌面、Web 與行動端；IDE Workbench
-支援桌面與 Web。工作側重與所選外殼彼此獨立。
-
-Pi 仍是預設執行時；本分支另有明確選用的 Rust Agent runtime，不會自動遷移 Pi 資料或切換預設。現行邊界見[文件](../../docs/README.md)。
+Varin 使用自己的原生 Rust Agent runtime。Catalog 擁有 Thread、分支、持久對話歷史與執行狀態。
+共用 Application Host 負責模型連線與帳號、Agent 資源設定、MCP 設定和可信工作區服務。
+用戶端透過同一套應用 API 呈現並控制這些服務。詳見[架構](../../docs/architecture.md)。
 
 > [!IMPORTANT]
-> Varin 目前仍處於 1.0 之前的活躍開發階段。各產品端與私有執行時協定會同步演進，較舊組建
-> 不保證與較新組建互通。請備份重要工作區；長期部署時，請固定到已經驗證的映像摘要。
-
-## 產品介面
-
-以下截圖使用隔離的 `demo-workspace` 與匿名範例檔案產生。
-
-### Agent Workspace
-
-專案與工作階段始終可見，主區域將目前的智慧體、上下文工具與輸入框集中在同一個工作空間中。
-
-![Varin Agent Workspace](assets/agent-workspace.png)
-
-### IDE Workbench
-
-IDE Profile 將工作區導覽與編輯器基礎設施，和完整的 Pi 智慧體並排組合，而不是把聊天拆成另一個應用。
-
-![Varin IDE Workbench](assets/ide-workbench.png)
-
-### 行動端工作空間
-
-回應式介面在手機螢幕上保留同一套專案、智慧體控制、上下文介面與輸入框。
-
-<p align="center">
-  <img src="assets/mobile-workspace.png" alt="Varin 行動端工作空間" width="390" />
-</p>
+> Varin 尚未達到 1.0，正在積極開發。產品介面與私有執行階段協定同步演進，新舊版本不保證互通。
+> 請備份重要工作區，並在持久部署中固定經過驗證的映像檔摘要。現有使用者資產不會被自動匯入、遷移或改寫；
+> 不支援的內部儲存格式會被拒絕開啟。
 
 ## Varin 提供什麼
 
-### 受治理的 Agent Harness
+- **原生對話：** Thread 與分支歷史、串流回應、輸入佇列、模型與思考級別選擇、子任務、計畫、權限和復原，
+  均由原生 Catalog 支撐。[執行階段](../../docs/runtime.md)
+- **程式開發工作區：** 檔案、差異、Git、worktree、終端機、工作區搜尋、語言伺服器和偵錯。
+  桌面與 Web 共用 Monaco，行動端輕量編輯器使用同一個文件權威，並明確處理未儲存的緩衝區與衝突。
+  [工作台](../../docs/workbench.md)
+- **執行與復原：** 經准入的來源區分即時檔案、快照和實體化工作。Rust 擁有儲存與執行資源；
+  權限、取消意圖和實際完成是獨立事實。[資源與復原](../../docs/resources.md)
+- **研究與上下文：** 精確和語意檢索、語言導覽、作用域筆記、Bot 知識、Web 與學術探索，
+  以及保留來源和頁面影像的 PDF 材料。[檢索與上下文](../../docs/retrieval.md)
+- **Host 管理的設定：** 透過專用設定配置模型渠道、帳號、端點、Agent 指令與技能、MCP 連線。
+  憑證和特權執行由可信 owner 持有。[模型](../../packages/web/application-host/lib/models/DOCUMENTATION.md)、
+  [Agent 資源](../../packages/web/application-host/lib/agent-resources/DOCUMENTATION.md)、
+  [MCP](../../packages/web/application-host/lib/mcp/DOCUMENTATION.md)
+- **本地與遠端使用：** Electron 內嵌 Application Host，Web 和 Capacitor 行動用戶端連線至同一 Host。
+  遠端 Host、配對、通道及容器/SSH 部署保留明確的存取與平台邊界。
+  [安全](../../docs/security.md) · [維運](../../docs/ops/README.md)
 
-- **Thread、Run 與不可變工作狀態：** 工作被組織為 Thread 與 Run，其檔案變更以不可變 root 發布。
-  智慧體在隔離的虛擬或具體化工作區中起草，再把經過審閱的結果合併回來，而不是對你的檢出目錄
-  隨手修改。
-- **唯一的權限門：** 單個 `tool_call` 確認涵蓋 harness 工具、Pi 內建工具、MCP 工具、套件工具與
-  巢狀執行緒工具。工作階段授權始終繫結在獲批的工具、動作、工作區、路徑與網路目標上。
-- **跟隨智慧體的復原：** Host 擁有的復原服務把智慧體的變更與你自己的編輯記入同一組檢查點，
-  受影響檔案回退、復原/重做與當機復原可以跨越多次工具呼叫運作，無需掃描整個工作區。
-- **原生的工具環境：** shell 監督器執行真實 PTY，支援自動轉入背景、`get_output`、
-  `write_to_process` 與 `kill_shell`；`edit`/`write`/`apply_patch` 附帶編輯後診斷與按路徑租約；
-  過長的結果變成可分頁的 `OutputRef`；套件管理器輸出按命令整理，而不是原樣傾倒。
+四個內建 Workbench Profile 分別選擇 **Agent Workspace**、**IDE Workbench**、**Research Workbench**
+或 **Varin Bot**。Agent、Research 和 Bot 支援桌面、Web 與行動端，IDE 支援桌面與 Web。
+這些 Profile 都是 Varin 擴充套件，可以替換整個外殼或個別貢獻；工作焦點、文件和 Thread 身分獨立於介面呈現。
 
-### 上下文、檢索與知識
+模型供應商、Computer/VM 和封裝支援取決於實際環境。針對性測試不等於完整的平台驗收；
+詳見[執行階段驗收](../../docs/runtime-acceptance.md)。
 
-請求保留選定上下文和來源修訂；壓縮成功才發布候選。精確搜尋、Explore、符號圖與語言導覽提供不同證據路徑，部分或過期覆蓋保持可見。普通 Agent 筆記是明確範圍的文字；Bot 知識及可選背景整理保留原始來源、修正和回執。Web、學術與 PDF 工具區分探索、原件、擷取文字和頁面影像。
+## 開發 Varin 擴充套件
 
-### 真正的程式設計工作空間
+Varin 擴充套件透過公開契約貢獻工作台介面和可信 Host 能力。開發工具套件包括 `@varin/extension-contract`、
+`@varin/extension-sdk`、選用的 React 19 介接器 `@varin/extension-react`、`@varin/extension-surface`
+和 `@varin/extension-cli`。
 
-- **Pi 原生對話：** 支援串流回應、分支、工作階段樹導覽、壓縮、引導與後續訊息佇列、模型與思考
-  級別選擇，以及工作階段重新命名、封存、還原與刪除。
-- **工作區工具：** 檔案、Diff、Git、工作樹、終端、SSH 主機、遠端執行個體、程式碼評論與編輯器
-  上下文，共用目前的 Pi 工作階段及其工作目錄。
-- **編輯器級基礎設施：** 一套帶版本的文件權威與真實的衝突處理；桌面/Web 的 Agent 與 IDE 共用
-  Monaco model、編輯器群組、工作區搜尋、宿主側語言伺服器與標準偵錯配接器，行動/嵌入式編輯器
-  透過輕量 CodeMirror adapter 接入同一文件權威。智慧體的修改會與你未儲存的緩衝區協調，而不是
-  直接覆蓋。
-- **自訂提供商：** 設定 Pi 原生的提供商分層、認證、模型探索與自訂端點，不把憑證複製到
-  渲染處理序儲存中。
-
-### 可重組，涵蓋多端
-
-- **不另造一套外掛系統：** 可以安裝、更新、移除與檢查 Pi `PackageManager` 接受的任意套件。
-  尚未專門適配的擴充仍可使用通用的命令、工具、條目、通知與 UI 橋接。
-- **常用外掛的專用設定介面：** 已維護的外掛擁有針對性的 GUI，同時繼續以外掛自己的原生
-  JSON/JSONC 檔案、命令、資料庫與遷移邏輯為權威。
-- **可重組的工作台：** 選擇 Agent、IDE、Research 或 Bot Profile，也可以自建。既能替換整個外殼，也能只替換導覽、
-  編輯器、面板、Composer、Timeline 或狀態列，並混用官方與社群貢獻。切換是即時的，不重新整理文件、
-  不重啟 Pi 執行時、不遺失共用的工作區狀態。
-- **多個產品端：** Electron、Web 與 Capacitor 行動端外殼共用一套 React UI，並透過明確的執行時
-  能力與宿主通訊。
-- **雲端與遠端運行：** 支援帶認證的 WebSocket、Relay/隧道、多架構容器，以及經過健康檢查和
-  可回復的原子 SSH 部署。
-
-## 已維護的擴充整合
-
-Varin 不會 fork 這些擴充，也不會複製它們的私有狀態。已維護的配接器只消費各擴充公開的命令、
-事件、設定檔案與能力協定——包括子智慧體集群、上下文管理、工作區歷史、MCP 服務、Web 存取、
-記憶系統、背景任務與 LSP/工具鏈設定——因此外掛可以繼續獨立更新。
-
-每個擴充的整合面——Varin 讀取或呼叫哪些命令、事件與原生設定，以及哪些檔案仍歸外掛所有——記錄在
-[擴充整合契約](../../docs/extensions.md)。Varin 不逐版本認證外掛與 Pi 的搭配。
-
-## 開發 Varin 擴充
-
-Varin 應用擴充與 Pi 外掛是兩個獨立的產品物件：前者擴展 Varin 的工作台、頁面與可信宿主，
-後者執行於 Pi 智慧體中。規劃中的 npm 工具鏈不要求檢出 Varin 原始碼，也不要求擴充匯入產品私有 UI；
-`@varin/*` 套件尚未發布：
-
-- `@varin/extension-contract`：清單、貢獻、服務、路由與探索協定及 JSON Schema；
-- `@varin/extension-sdk`：與 UI 框架無關的 Surface、隔離執行域與 Host 開發 API；
-- `@varin/extension-react`：可選的 React 19 配接器；
-- `@varin/extension-surface`：供進階測試與替代宿主使用的底層生命週期與註冊表；
-- `@varin/extension-cli`：專案初始化、檢查、組建與一致性測試。
-
-這些套件發布後，可以用以下命令建立完整的擴充專案：
+當所用 registry 中有可用的發行版本時：
 
 ```sh
 npx @varin/extension-cli init ./my-extension --id dev.example.my-extension --name "My Extension"
@@ -132,33 +63,25 @@ npx varin-extension build
 npx varin-extension test
 ```
 
-完整的清單格式、能力、生命週期、儲存、發布與測試說明見
-[Varin 擴充開發指南](../../docs/ops/varin-extension-authoring.md)。
+原始碼工作流程、manifest、能力、生命週期、發布與測試契約見[擴充套件](../../docs/extensions.md)及
+[開發指南](../../docs/ops/varin-extension-authoring.md)。
 
 ## 下載桌面版
 
-目前尚未發布 Varin 桌面套件。[GitHub Releases](https://github.com/Youzini-afk/Varin/releases) 頁面保留歷史
-資產；在 Varin 套件發布前，請使用下方的原始碼或 Docker 方式。
+請在 [GitHub Releases](https://github.com/Youzini-afk/Varin/releases) 查看可用產物及平台、版本資訊。
+原始碼和容器使用方式如下。
 
 ## 從原始碼開始
 
-### 環境需求
+前提：Node.js 22.19 或更新版本（原始碼開發基線為 Node.js 24）、Bun 1.3.14、Git，
+以及 [kernel/rust-toolchain.toml](../../kernel/rust-toolchain.toml) 指定的 Rust 工具鏈。
+平台設定與驗證見[開發指南](../../docs/development.md)。
 
-- Node.js 22.19 或更高版本；Node.js 24 是目前支援的原始碼開發基線
-- Bun 1.3.14
-- 與 `kernel/rust-toolchain.toml` 相符的 Rust 工具鏈（rustup 會自動選擇）
-- Git
-- 在 Windows 上執行 Pi shell 工具時，需要 Git for Windows 與 Git Bash
+Rust kernel 是必要元件。沒有 staged binary 時，原始碼開發可以透過 Cargo 啟動它；
+`bun run kernel:build` 產生封裝布局所需、經 manifest 驗證的 release 執行檔。
+就緒檢查針對實際 Application Host 與原生 Thread catalog。
 
-Rust 系統內核是必需的執行時元件，不是可選加速器。原始碼開發模式下，若沒有已暫存的二進位檔，
-Host 會透過 Cargo 直接執行它；`bun run kernel:build` 產出套件配置要求的、附 manifest 校驗的
-發行可執行檔。
-
-Varin 內建捆綁的 Pi 執行時，並透過 Runtime Manager 探索使用者級 Pi 安裝，由它選擇、安裝或僅向上
-升級 Pi；完成真實 Host 握手後即可使用，無需重啟 Varin。Electron 內建執行應用所需的 Node 環境，
-但 Pi 仍獨立管理。平台能力與安裝驗收以實際產物和目標環境為準，原始碼組建不證明完整桌面、VM 或模型操作鏈。容器保留固定的自包含 Pi 執行時。
-
-### 執行 Web 開發環境
+### Web 開發
 
 ```bash
 git clone https://github.com/Youzini-afk/Varin.git
@@ -167,36 +90,36 @@ bun install --frozen-lockfile
 bun run dev
 ```
 
-開啟終端輸出的 Vite 位址。Varin 會選擇可用的開發連接埠，並同時啟動 UI 與可信 API/執行時服務。
+開啟終端機印出的 Vite URL。此命令在可用開發連接埠啟動 UI 與可信 Application Host。
+開始模型工作前，請在設定中配置模型連線與帳號。
 
-### 執行桌面應用
+### 桌面開發
 
 ```bash
 bun run electron:dev
 ```
 
-需要測試更接近安裝套件的內建資源模式時，執行：
+若要測試封裝的 UI 資源：
 
 ```bash
 bun run electron:dev:bundled
 ```
 
-### 組建 Windows 安裝套件
+### Windows 安裝程式
 
-請在 Windows 上執行：
+在 Windows 上執行：
 
 ```powershell
 bun run electron:build:win
 bun run electron:smoke:win
 ```
 
-NSIS 安裝套件、更新中繼資料與 blockmap 會輸出到 `packages/electron/dist`。沒有設定程式碼簽署
-憑證時，組建會有意產生未簽署安裝套件。簽署方式與其他平台說明見
-[桌面套件指南](../../packages/electron/README.md#packaging)。
+NSIS 安裝程式、更新中繼資料和 blockmap 輸出至 `packages/electron/dist`。未設定簽署憑證的建置不帶簽章。
+詳見[桌面封裝](../../packages/electron/README.md#packaging)。
 
-## 執行雲端映像
+## 執行雲端映像檔
 
-Compose 預設使用精簡映像 `ghcr.io/youzini-afk/varin-slim:latest`。在 Linux Docker 主機上執行：
+Compose 預設使用 `ghcr.io/youzini-afk/varin-slim:latest`。在 Linux Docker 主機上：
 
 ```bash
 mkdir -p data/varin data/ssh data/cloudflared workspaces
@@ -207,117 +130,33 @@ docker compose up -d
 curl --fail http://127.0.0.1:3000/health
 ```
 
-開啟 `http://127.0.0.1:3000`，使用剛產生的密碼登入。任何面向公網的部署都應置於 TLS 反向代理
-或經過審核的隧道之後，具體轉發要求見[反向代理設定](../../docs/ops/REVERSE_PROXY.md)。生產環境請將
-`VARIN_IMAGE` 固定為已驗證的不可變摘要，不要依賴浮動標籤。
+開啟 `http://127.0.0.1:3000`，使用產生的密碼。面向網際網路的部署需要 TLS 反向代理或經核准的通道，
+並遵守[轉送規則](../../docs/ops/REVERSE_PROXY.md)。正式部署請將 `VARIN_IMAGE` 固定為經過驗證的不可變摘要。
 
-若智慧體要在容器裡編譯 Python、Java、Go 或 Rust，疊加工具鏈覆寫層：
+如需容器內的 Python、Java、Go 或 Rust 開發工具：
 
 ```bash
 docker compose -f docker-compose.yml -f docker-compose.toolbelt.yml up -d
 ```
 
-映像同時發布 `linux/amd64` 與 `linux/arm64` 版本，並帶有 provenance 與 SBOM 證明。持久化路徑、
-環境變數、容器及 SSH 回復的完整約定見[雲端部署](../../docs/ops/cloud-deployment.md)。
+持久化路徑、環境變數、映像檔變體、支援的架構，以及具健康檢查和回復機制的 SSH 部署，見
+[雲端部署](../../docs/ops/cloud-deployment.md)。
 
-## 架構
+## 架構與開發
 
-```mermaid
-flowchart LR
-    S["渲染器：由 Workbench Profile 選定外殼擴充"] --> C["@varin/application-client"]
-    S --> D["文件、搜尋、語言與執行偵錯 API"]
-    C --> T["帶認證的 HTTP/WebSocket 或編輯器傳輸"]
-    T --> A["應用宿主：@varin/web 服務"]
-    D --> A
-    A --> K["varin-kernel：私有 Rust 系統內核"]
-    A --> B["@varin/runtime-broker"]
-    B --> H["隔離的 @varin/pi-host 工作處理序"]
-    H --> P["Pi SDK + 受信任的 Pi 套件"]
-```
+從[文件索引](../../docs/README.md)、[架構](../../docs/architecture.md)和[開發指南](../../docs/development.md)
+開始。Application Host 整合原生 Catalog 執行、Rust 擁有的儲存與資源，以及獨立的知識和擴充套件 owner；
+renderer 不擁有憑證或持久執行。
 
-應用宿主是唯一的可信後端。每個宿主擁有一個私有 `varin-kernel` 子處理序，它是持久化與貼近機器
-資源的生產權威：不可變工作狀態 root、內容物件與 GC、復原中繼資料、canonical 檔案資源與具體化、
-PTY 與管道處理序樹、固定視圖的檔案與結構計算。宿主保留產品策略——actor 准入、文件協調、
-Thread/Run 生命週期、知識與模型編排——並透過私有 framed stdio 協定與內核通訊，從不開放公開
-連接埠。每類資源只有一個生產寫者，內核之後不再保留 TypeScript 兜底權威。
+貢獻前請閱讀 [CONTRIBUTING](../CONTRIBUTING.md) 和 [AGENTS](../../AGENTS.md)。命令以 package scripts
+為準，驗證應針對改動選擇。
 
-Broker 管理一個目錄工作處理序與每個工作階段各自的工作處理序。渲染器重新載入不會終止正在執行
-的任務，Pi 工作處理序異常也不會讓渲染器一同當機。跨處理序傳輸的是 Varin 協定 DTO；SDK 回呼、
-憑證物件與擴充實作細節不會越過這條邊界。
+感謝 [LinuxDO](https://linux.do) 社群的支持。
 
-Electron 在主處理序裡執行同一個宿主，而不是再造一套桌面後端；只有視窗、選單、對話框這類真正的
-原生能力才跨過 Electron preload 邊界。
+## 來源與授權
 
-第三方 Pi 套件是擁有目前使用者作業系統權限的可執行程式碼。Varin 會展示觀察到的能力，並對專案內
-可執行資源設定授權門檻，但不會把受信任擴充宣傳成完整的沙箱。在公開遠端執行個體或安裝陌生程式碼
-之前，請閱讀[安全政策](../SECURITY.md)和[安全模型](../../docs/security.md)。
+Varin 是一個獨立專案，源自維護者的 OpenChamber 分支。
 
-## 儲存庫結構
-
-| 路徑 | 職責 |
-| --- | --- |
-| `kernel/` | 私有 Rust 系統內核：工作狀態、檔案資源、處理序與計算 |
-| `packages/application-client` | 與框架無關的 `RuntimeAPIs`、傳輸、帶類型錯誤與桌面 IPC 契約 |
-| `packages/ui` | 共用的 Pi 原生 React UI、狀態、設定與擴充介面 |
-| `packages/web` | 瀏覽器/遠端前端、可信 Application Host 與雲端 CLI |
-| `packages/electron` | 原生桌面外殼、特權邊界、套件、SSH 與更新 |
-| `packages/mobile` | 連接 Varin 服務端的 Capacitor iOS/Android 外殼 |
-| `packages/protocol` | 帶版本且可安全 JSON 序列化的工作處理序/產品端協定 |
-| `packages/runtime-client` | 可在瀏覽器中使用的執行時請求/事件客戶端 |
-| `packages/runtime-broker` | 目錄/工作階段工作處理序的管理、路由與關閉 |
-| `packages/pi-host` | 嵌入 Pi SDK 與擴充的隔離 Node 工作處理序 |
-| `packages/settings-store` | 各 Host 共用的原子化設定檔持久化 |
-| `packages/extension-contract` | 清單、貢獻、工作台、服務與探索協定 |
-| `packages/extension-surface` | 與框架無關的歸屬域與交易式 Surface 註冊表 |
-| `packages/extension-sdk`、`-react`、`-cli` | 公開的作者 SDK、React 配接器與作者工具鏈 |
-| `packages/extension-host` | 可信應用宿主的目錄、構件、儲存與服務 |
-| `packages/extension-loader` | 帶認證的 managed Surface 模組載入器與隔離執行域 |
-| `packages/extension-builtins` | Varin 內建擴充的清單，含四套官方外殼 |
-| `packages/docs` | 面向使用者的文件站原始碼 |
-| `docs` | 架構、harness、內核、工作台、遷移、復原、雲端與安全約定 |
-| `scripts` | 開發、內核組建/測量、發布、雲端、部署與校驗工具 |
-
-## 開發與校驗
-
-以根目錄或各套件的 `package.json` 腳本為準。下面這組本地基線涵蓋 CI 的主要品質門檻：
-
-```bash
-bun install --frozen-lockfile
-bun run type-check
-bun run lint
-bun run test:pi
-bun run test:kernel
-bun run test:cloud
-bun run build
-bun run test:pi:dist
-```
-
-`bun run kernel:check` 是 Rust 快速編譯檢查；`bun run test:kernel` 針對組建出的發行可執行檔
-執行不可略過的原生權威套件。`bun run test:docs` 測試文件校驗器；
-`bun run docs:validate` 一次檢查使用者文件與工程文件內容。
-
-CI 固定為三條職責不同的門禁：Ubuntu 原始碼品質、Windows 執行時行為與 Ubuntu 生產組建。
-型別檢查、lint 與全倉測試只在權威門禁中執行一次；Windows 只補充平台相關測試。雲端/執行時輸入
-發生變化時，Docker 工作流程只驗證容器契約，並組建配套的精簡與工具鏈基礎映像及應用映像；兩個
-候選應用都通過不可變摘要煙測後，才會提升可安裝標籤。
-
-參與貢獻前，請閱讀[工程開發指南](../../docs/development.md)、[貢獻指南](../CONTRIBUTING.md)和精簡的
-儲存庫邊界說明 [AGENTS.md](../../AGENTS.md)。
-
-## 文件導覽
-
-- [文件導覽](../../docs/README.md)
-- [開發與驗證](../../docs/development.md)
-- [執行時](../../docs/runtime.md)
-- [資源與復原](../../docs/resources.md)
-- [工作台與擴充](../../docs/extensions.md)
-- [安全](../../docs/security.md)
-- [維運](../../docs/ops/README.md)
-
-## 專案沿革與授權條款
-
-Varin 是維護者 OpenChamber fork 的 Pi 原生重構。
-
-Varin 作為組合後的完整作品，按照
-[GNU Affero General Public License v3.0](../../LICENSE)（`AGPL-3.0-only`）發布。透過網路向使用者提供
-修改版時，必須按照授權條款要求向這些使用者提供對應原始碼。
+組合後的作品以 [GNU Affero General Public License v3.0](../../LICENSE)（`AGPL-3.0-only`）散布。
+透過網路向使用者提供修改版本時，必須按授權條款要求提供對應原始碼。保留的著作權與第三方義務見
+[THIRD_PARTY_NOTICES](../../THIRD_PARTY_NOTICES.md)。

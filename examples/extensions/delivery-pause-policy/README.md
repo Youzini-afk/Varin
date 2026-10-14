@@ -30,7 +30,7 @@ Select the provider through existing service routing, using the document's curre
 }
 ```
 
-A project rule can use a real `projectId` instead. Installation does not switch the product's Pi default.
+A project rule can use a real `projectId` instead. Installation alone does not select the policy.
 A new native Thread run shows its first delivery and pause reason. Queueing another message leaves the
 Run paused. Choose **Resume run** to submit the exact `runId` and `waitId` shown by the current snapshot.
 The second delivery appears before the Run completes. A failed subsequent launch preparation has its

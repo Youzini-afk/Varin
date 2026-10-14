@@ -1,35 +1,43 @@
 ---
-title: Tarefas Agendadas
-description: Execute um prompt automaticamente em uma agenda.
+title: "Tarefas agendadas e acompanhamentos"
+description: "Agende trabalho nativo ou continue uma conversa sob uma condição."
 ---
 
-# Tarefas Agendadas
+# Tarefas agendadas e acompanhamentos
 
-Uma tarefa agendada executa um prompt para você em uma agenda — por exemplo, um "resumir as mudanças de ontem" diário ou uma limpeza semanal. Quando ela é executada, o Varin inicia uma nova sessão e envia o prompt sozinho. Abra o agendador pelo botão no topo da barra lateral de sessões.
+## Tarefas de calendário
 
-## Criar uma tarefa
+Abra o agendador e escolha um projeto. Defina instruções, agenda única, diária, semanal ou cron, fuso IANA e tratamento de horários perdidos: pular ou executar uma vez o último.
 
-1. Abra a caixa de diálogo de tarefas agendadas pela barra lateral de sessões.
-2. Adicione uma tarefa e dê a ela um nome.
-3. Escolha quando ela é executada:
-   - **diária** — em um ou mais horários a cada dia
-   - **semanal** — em dias da semana e horários escolhidos
-   - **uma vez** — uma única data e hora
-4. Defina o que ela faz: o prompt a enviar, e o provedor, modelo e agente a usar. O prompt pode ser um comando de barra, como `/review`.
-5. Salve e certifique-se de que a tarefa está ativada.
+**New work** cria um Thread por ocorrência. Selecione modelo registrado, fonte e acesso: snapshot somente leitura, cópia editável isolada ou diretório ativo. Você pode adicionar **Continuing Goal** e um orçamento de saída. **Existing work** aponta para Thread e branch exatos e herda modelo, fonte, permissões e objetivo.
 
-Você pode executar qualquer tarefa imediatamente com **run now** para verificar se ela faz o que você espera.
+Ative a agenda quando estiver pronta. **Run now** aceita uma ocorrência; abra a conversa para conferir o resultado. Desativar a definição retém trabalho agendado ainda não entregue. Parar uma execução não desativa horários futuros. O Application Host deve continuar ativo.
 
-Marque **Executar como objetivo** para que a execução persiga o prompt até concluir em vez de parar após uma resposta — veja [Objetivos de sessão](/pt-br/session-goals/).
+## Loops Markdown
 
-## Como é o sucesso
+Use `.agents/loops/` no projeto ou `~/.agents/loops/` para o usuário. Substitua os IDs pelos do canal salvo:
 
-Após uma execução, a tarefa mostra quando rodou pela última vez, se teve êxito e um link para a sessão que ela criou. Se uma execução falha, o erro também é mostrado ali.
+```markdown
+---
+name: daily-review
+runtime: agent
+schedule: "0 9 * * *"
+timezone: UTC
+enabled: false
+target:
+  kind: new_work
+  model: { providerId: my-channel, modelId: my-model }
+  source: { kind: project }
+  sourceMode: fixed_branch
+  goal: null
+---
+Resuma as mudanças do repositório desde ontem.
+```
 
-## Tenha em mente
+Nome, cron, fuso explícito, corpo, `runtime: agent` e `target` nativo são obrigatórios. O arquivo é a definição original; edições verificam sua revisão. A descoberta não reescreve arquivos nem importa definições antigas incompatíveis. Uma alteração inválida mantém a última tarefa nativa válida suspensa até o reparo.
 
-As tarefas só disparam enquanto o servidor do Varin estiver em execução. Se você o fechar, as execuções agendadas ficam pausadas até ele voltar a funcionar.
+## Acompanhamentos da conversa
 
-## Relacionado
+Use **Follow-ups** no agendador ou **Schedule a follow-up** na conversa. Isso continua a mesma conversa após um horário, parada de processo ou job, condição de arquivo, artefato ou coleta de pesquisa, evento de log ou limiar de máquina. Combine qualquer condição ou todas.
 
-- [Comandos](/pt-br/commands/) — reutilize um comando de barra como o prompt
+Escolha uma vez ou cada mudança observada nas condições repetíveis. Pausas, perguntas pendentes e limites de objetivos continuam valendo; falhas de observação podem perder mudanças. Confira o histórico, pause, retome ou cancele. Cancelar impede trabalho futuro e não entregue, preservando resultados e jobs observados.

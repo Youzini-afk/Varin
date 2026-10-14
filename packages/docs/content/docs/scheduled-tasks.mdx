@@ -1,39 +1,43 @@
 ---
-title: Scheduled Tasks
-description: Run a Pi prompt automatically on a schedule.
+title: "Scheduled tasks and follow-ups"
+description: "Schedule native calendar work or continue a conversation on a condition."
 ---
 
-# Scheduled Tasks
+# Scheduled tasks and follow-ups
 
-A scheduled task starts a new Pi session and sends a prompt at the configured time. Open the scheduler from the session sidebar.
+## Calendar tasks
 
-## Create a task in Varin
+Open the scheduler and choose a project. Create a task with an instruction, a once, daily, weekly or cron schedule, an IANA timezone and a missed-slot policy: skip or run the latest missed slot once.
 
-Choose a project, add a task, then select a daily, weekly, one-time, or cron schedule. Choose the Pi provider, model, and thinking level, and enter the prompt or slash command. **Run now** starts the same task immediately. **Run as goal** starts a Pi session goal for work that should continue beyond one reply.
+Choose **New work** to create a Thread for each occurrence. Select a registered model, source and workspace access: read-only snapshot, isolated editable copy or live workspace. You can add a **Continuing Goal** with an optional output-token budget. **Existing work** instead targets an exact Thread and branch and inherits its model, source, permissions and goal.
 
-## Define a loop in Markdown
+Enable scheduled fires when ready. **Run now** accepts an occurrence; it does not mean the work completed. Open its conversation for results and controls. Disabling a definition holds undelivered scheduled work; stopping a run does not disable future slots. The Application Host must be running.
 
-A loop is a portable scheduled task whose definition is a Markdown file. Place it in the current project’s `.agents/loops/` directory, or in `~/.agents/loops/` for all projects:
+## Markdown loops
+
+Project `.agents/loops/` and user `~/.agents/loops/` files can define cron tasks. Replace the model IDs below with IDs from your saved model channel:
 
 ```markdown
 ---
-name: daily-digest
+name: daily-review
+runtime: agent
 schedule: "0 9 * * *"
-enabled: true
-model: openai-codex/gpt-5.3-codex
-thinking: high
-agent: reviewer
-timezone: Asia/Shanghai
-run_as_goal: true
-goal_token_budget: 25000
+timezone: UTC
+enabled: false
+target:
+  kind: new_work
+  model: { providerId: my-channel, modelId: my-model }
+  source: { kind: project }
+  sourceMode: fixed_branch
+  goal: null
 ---
-Summarize repository changes since yesterday.
+Review repository changes since yesterday.
 ```
 
-The file is the authoritative definition. Varin’s task list edits that Markdown directly, writes the enabled toggle back to frontmatter, and deletes the file only after confirmation. If an agent or another editor changes the file while the editor is open, saving reports a revision conflict rather than overwriting it.
+The file owns the definition. Edits use revision checks; discovery does not rewrite files. `runtime: agent`, a native `target`, an explicit timezone, name, cron schedule and body are required. Unsupported old definitions are not automatically imported or rewritten. Invalid replacements hold the last valid native task until repaired.
 
-`name`, `schedule`, `model`, and the Markdown body are required. `model` uses `provider/model`. `enabled` defaults to `false`, so a repository cannot start unattended model runs merely because it was cloned or pulled. `thinking`, `agent`, `timezone`, `run_as_goal`, and `goal_token_budget` are optional Pi fields. Loop files use cron schedules; the GUI also supports daily, weekly, and one-time schedules.
+## Conversation follow-ups
 
-Varin checks the nearest project directory first, then its ancestors up to the Git worktree root, then the user directory. A higher-priority loop with the same name shadows lower definitions. If a file is temporarily invalid during editing or conflict resolution, its last valid task and runtime history remain available and the parse error is shown. Renaming a loop in frontmatter keeps that history, and Varin cleans up obsolete duplicate projections left by older versions. Removing the file removes only its loop task; an ordinary GUI task with the same name is never taken over.
+Use the scheduler's **Follow-ups** view or **Schedule a follow-up** inside a conversation. A follow-up continues that conversation after a time, process/job stop, file condition, research artifact/collection, log event or machine-metric threshold. Conditions can be combined as any or all.
 
-Tasks run only while the Varin server is running. Runtime history—last run, next run, result, duration, and created Pi session—stays in Varin’s project state and is not written into the Markdown file.
+Choose once, or each observed change for supported repeatable conditions. Pauses, unanswered questions and goal limits remain in effect. Observation gaps can miss changes. Pause, resume or cancel the registration and inspect its occurrence history. Cancelling prevents future and undelivered work; existing results and observed jobs remain.

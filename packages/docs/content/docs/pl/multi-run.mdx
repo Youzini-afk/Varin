@@ -5,28 +5,11 @@ description: Uruchom ten sam prompt na kilku modelach lub w kilku sesjach naraz.
 
 # Multi-run
 
-Multi-run uruchamia kilka sesji z jednego formularza — przydatne do wypróbowania tego samego zadania na różnych modelach i porównania wyników. Otwórz go z przycisku u góry paska bocznego sesji.
+Multi-run tworzy natywny Thread dla każdego wybranego modelu. Wybierz projekt, nazwij serię, dodaj grupy poleceń i modeli, a następnie uruchom. Nie ma stałego limitu pięciu modeli.
 
-## Rozpocznij multi-run
+Izolacja tworzy osobny Git worktree i gałąź dla każdego uruchomienia. Bez niej uruchomienia współdzielą rzeczywisty folder projektu i mogą zmieniać te same pliki. Sprawdź polecenia przygotowawcze.
 
-1. Otwórz launcher multi-run.
-2. Wybierz projekt i nazwij grupę uruchomień.
-3. Napisz prompt i wybierz modele, na których ma się uruchomić (do pięciu na grupę).
-4. Wybierz, czy **isolate runs**.
-5. Uruchom.
+Sprawdź każdą próbę. Niepowodzenie lub niepotwierdzony wynik zachowuje utworzone Threads i worktrees. Ponów bez zmiany wyboru, aby uzgodnić oryginalne żądanie. Niepotwierdzone utworzenie worktree sprawdź najpierw w Git na pierwotnym Host. **Stop launching** zatrzymuje nowe uruchomienia; przyjęta praca trwa dalej.
 
-Każdy model dostaje własną sesję i wszystkie startują z Twoim promptem.
-
-## Izolowane uruchomienia
-
-Włącz **isolate runs**, aby każde uruchomienie miało własny [worktree](/pl/worktrees/) i gałąź, dzięki czemu nigdy nie dotykają tych samych plików. Wymaga to repozytorium git — dla folderów, które nim nie są, jest automatycznie wyłączone. Wybierz gałąź, od której startują uruchomienia.
-
-Gdy izolacja jest wyłączona, każde uruchomienie jest zwykłą sesją w folderze projektu.
-
-## Porównywanie wyników
-
-Każde uruchomienie to zwykła sesja, którą możesz otworzyć, przeczytać i zachować lub odrzucić. Jeśli uruchomiłeś sesje, aby porównać podejścia, przejrzyj je obok siebie i przenieś najlepsze dalej.
-
-## Powiązane
-
-- [Sesje worktree](/pl/worktrees/) — jak izolacja działa pod spodem
+- [Sesje worktree](/pl/worktrees/)
+- [Projekty](/pl/projects/)

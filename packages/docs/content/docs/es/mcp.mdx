@@ -5,26 +5,11 @@ description: Añade servidores MCP para dar herramientas extra a los agentes.
 
 # Servidores MCP
 
-Un servidor MCP da a tus agentes herramientas adicionales: cosas como buscar en una base de datos, llamar a una API o leer un servicio que usas. Añádelos en **Settings → MCP**.
+Abre **Ajustes → MCP** en el Host que deba gestionar la conexión. Selecciona el origen de configuración y añade un servidor: comando, argumentos y entorno para un proceso local, o URL y cabeceras para un servicio remoto. Usa solo servidores cuyo código y acceso a datos conozcas.
 
-## Añade un servidor
+Guarda el documento, pulsa Connect o Reconnect y revisa estado y cantidad de herramientas. Inicia sesión si el servidor admite autorización. Los orígenes globales y de proyecto muestran sus rutas; la configuración de proyecto requiere confianza. Puedes editar campos o configuración sin procesar.
 
-1. Abre **Settings → MCP**.
-2. Añade un servidor y elige su tipo:
-   - **local** — Varin ejecuta un comando en tu máquina. Le das el comando que debe ejecutar y, si hace falta, variables de entorno.
-   - **remote** — Varin se conecta a una URL que aloja otra persona. Le das la URL y cualquier encabezado que necesite (por ejemplo, un token de autenticación).
-3. Guarda. El servidor está activo de forma predeterminada; puedes desactivarlo sin eliminarlo.
+Guardar no sustituye los recursos ya capturados por un Thread activo. Revisa los recursos de la conversación y actualiza explícitamente su instantánea. Los permisos, preguntas y solicitudes de sampling aparecen en la conversación.
 
-## Dónde se aplica
-
-Elige el ámbito al añadir un servidor:
-
-- **personal** — disponible en todos los proyectos
-- **proyecto** — disponible solo en el proyecto actual, y guardado junto con los demás ajustes del proyecto
-
-Los nombres de los servidores usan letras minúsculas, números, guiones y guiones bajos.
-
-## Relacionado
-
-- [Proveedores, modelos y agentes](/es/providers/) — conecta primero un modelo
-- [Skills](/es/skills/) — otra forma de ampliar lo que pueden hacer los agentes
+- [Canales de modelos](/es/providers/)
+- [Habilidades](/es/skills/)

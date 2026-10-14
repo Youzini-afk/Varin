@@ -1,38 +1,18 @@
 ---
-title: 智能体控制工具
-description: 让智能体从聊天中管理 Varin 会话、worktree 和计划任务。
+title: "Agent 工具"
+description: "了解协调原生工作的工具。"
 ---
 
-# 智能体控制工具
+# Agent 工具
 
-使用 Varin 智能体控制工具，直接从聊天中管理应用内的工作。当 Varin 运行自己的本地 Pi 运行时时，此工具在桌面端和 Web 上可用。无需安装单独的工具，也无需运行 shell 命令。
+原生对话依据已受理的模型、来源、角色和权限提供工具。直接描述需要的结果；每项操作仍须通过自身的授权检查。
 
-## 可以提出哪些请求
+- `dispatch`、`child_status`、`child_report` 和 `wait_child` 协调委派任务。
+- `threads` 和 `read_thread` 查看当前任务家族中的对话，不授予全部对话或其他任务文件的访问权。
+- `follow_up` 管理时间或观察条件触发的后续指令。
+- `goal_report` 明确报告已建立的持续目标完成或受阻。
+- `resource_read` 读取已准入指令与技能；`memory` 管理获准范围内的笔记。
 
-用自然语言告诉智能体即可。例如：
+工具可见不等于拥有文件写入、进程或外部服务权限。只读对话访问不会启动目标模型或授予执行控制。受理工作不等于工作完成，请查看原始结果和状态。
 
-- “在此项目中创建一个新的 Varin 会话，使用 `openai/gpt-5.6-sol` 模型，并向它发送此提示：审查身份验证流程。”
-- “在单独的 worktree 中为此任务创建一个新的 Varin 会话，并让它为登录流程添加测试。”
-- “使用 Varin 列出我最近的 10 个会话，并包含它们的当前状态。”
-- “在 Varin 中创建名为 Weekday review 的计划任务，每个工作日 09:00 发送此提示：审查自上次运行以来的更改。”
-- “立即运行名为 Weekday review 的 Varin 计划任务。”
-- “检查名为 Authentication review 的 Varin 会话，并显示最新的助手回复。”
-
-该工具可以列出项目和模型偏好、创建和继续会话、分叉会话、创建隔离的 worktree 会话，以及管理计划任务。以这种方式启动的会话会像普通会话一样显示在 Varin 中，因此你可以打开并自行继续工作。
-
-## 注意事项
-
-- 新会话提示默认会立即返回。请在 Varin 中跟进会话，或稍后让智能体检查结果。
-- 只有在你明确要求时才会创建单独的 worktree。当前 worktree 中未提交的更改不会复制过去。
-- 该工具不能删除会话或 worktree、注册项目路径、运行任意 shell 命令或调用任意 URL。
-
-## 开启或关闭工具
-
-打开 **Settings**，更改 **Agent control tool**，然后保存。该设置应用于当前的 Varin 运行时。
-
-
-## 相关内容
-
-- [计划任务](/zh-cn/scheduled-tasks/)
-- [Worktree 会话](/zh-cn/worktrees/)
-- [会话目标](/zh-cn/session-goals/)
+参阅 [持续目标](/zh-cn/session-goals/)、[计划任务与后续任务](/zh-cn/scheduled-tasks/) 和 [技能](/zh-cn/skills/)。

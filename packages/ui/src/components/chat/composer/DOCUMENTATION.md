@@ -1,134 +1,67 @@
-# Composer
+# Composer helpers and native input
 
-The shared Pi prompt composer is orchestrated by
-`components/pi-session/PiComposer.tsx`. Agent Profile, IDE Profile, desktop,
-Web, mobile, and mini chat all reach the same component
-through `PiChatView`; they do not own separate send semantics.
+The product composer lives in `components/thread/ThreadConversation.tsx`. It uses a multiline textarea,
+model/thinking controls, image and PDF attachments, skill selection and editor context. This directory
+holds reusable attachment, text, language and editor helpers; its CodeMirror editor is not the owner of
+native Thread submission.
 
 ## Ownership
 
 | Area | Owner |
-|---|---|
-| Prompt text, images, and pending first-turn configuration | `usePiDraftStore` |
-| Existing session model and thinking level | Pi runtime `SessionSnapshot` |
-| Provider/model catalog | `usePiProviderStore` and `ModelPickerList` |
-| New-session defaults | Pi settings, with Varin project metadata allowed to override the model |
-| Prompt parsing and rendering | `language/` and `editor/`; sends use the composed draft directly |
-| Process execution and model mutation | Pi Host through `usePiSessionStore` |
+| --- | --- |
+| Draft text, images, material references, model choice and prepared source | `useThreadDraftStore` |
+| Selected conversation and branch | `useThreadStore` and the native Thread Catalog |
+| Current Run, history, queue and model selection | `ThreadsAPI` and `ThreadProjection` |
+| Delivery observation and uncertain retry | `lib/agent-runtime/threadInputDelivery.ts` |
+| Editor attachments and unsaved text | `lib/agent-editor` and the Document Registry |
+| Registered models and skills | Authenticated Host model/resource APIs |
 
-The UI may stage a model or thinking choice for a session that does not exist
-yet. It must not pretend that choice is live: `PiChatView` creates the session,
-applies the staged model, applies a compatible explicit thinking level, and
-only then sends the first prompt. Once the session exists, the returned
-`SessionSnapshot` is authoritative.
+Drafts are in-memory and keyed by Host plus Thread/branch. They are not persisted conversation history.
+Host replacement, branch changes and unmount fence asynchronous file reads and presentation updates.
+The selected model's supported thinking levels and image capability govern the controls; live model
+selection goes through the Run owner and its desired/active selection projection.
 
-`undefined` in a pending draft means “inherit”. It is not copied into a second
-global settings system. The composer displays the effective Pi/project default
-while retaining that distinction, so selecting “Default” remains meaningful.
+## Input composition and delivery
 
-## Prompt language and editor
+`ThreadResources` supplies skill selection. Choosing one inserts `/skill:<name>` into the draft; the
+Host resolves the resource against the real execution checkpoint. History projects skill metadata
+separately from the unchanged user text, and `ThreadSkillMaterials` reads the original resource.
 
-`language/` is the single source of truth for composer syntax. It recognizes
-known `/command`, `/skill`, and `#snippet` tokens plus prompt markdown and path
-references. Unknown tokens remain ordinary prose.
+Editor attachment chips and inline comments retain their Host, Thread/branch and document revisions.
+Submission projects captured context into the input while keeping unsaved content explicitly identified.
+A confirmed receipt acknowledges only the captured attachments and comments, so later edits remain.
 
-`editor/ComposerEditor.tsx` wraps CodeMirror, but its document is still a plain
-string. The imperative surface is intentionally limited to caret operations
-needed by autocomplete, dictation, and restored drafts; model selection and
-send policy stay outside the editor.
+An idle root Thread uses `submit` with a stable command key and expected head. A running Thread uses
+`enqueue` with `boundary`, `interrupt`, or `next_run` delivery. A settled delegated child uses
+`collaboration.continueChild` with its exact previous Run and expected head; active delegated children
+use boundary/interrupt input. Queuing input does not resume an explicit policy Pause.
 
-CodeMirror owns text, selection, wrapping, undo history, and prompt
-decorations. The native-selection overlay in `editor/theme.ts` is retained for
-iOS handles and for selections over decorated tokens. Do not replace it with a
-textarea/mirror pair: those two layers drift when typography changes and on
-mobile wrapping.
+`deliverThreadInput` joins an already-running observation for the same original command. An uncertain
+response retains the exact input, model, source, media and key. Explicit retry uses that intent; it does
+not capture a newer draft or resend under a new key. Only an explicit first-attempt `not_started`
+rejection can release the pending input. A real receipt clears only the original captured draft values.
+If separate Goal registration is still pending after submit acceptance, retry retains the accepted Run
+and does not submit the message again.
 
-## Model and thinking controls
+## PDF and image attachments
 
-`PiComposerModelControls` is part of the composer rather than the chat header.
-The model trigger reuses the shared searchable model catalog, favorites,
-recents, provider ordering, availability filtering, and mobile overlay. The
-thinking menu is derived from the effective model's
-`supportedThinkingLevels`; a stale explicit level is cleared when the user
-chooses a model that cannot run it.
+The native picker, clipboard and drop target accept images and PDFs. Images remain explicit inline
+image inputs and require an image-capable model.
 
-The global `open_model_selector` shortcut controls the picker anchored to the
-active composer. Inactive profile surfaces must not mount a competing modal.
+PDFs use `ThreadsAPI.materials.upload(identity, { filename, mimeType: 'application/pdf', data })`.
+The client encodes the original bytes as base64; the authenticated Host's document reader and
+MaterialStore retain them and return a fixed PDF snapshot. The composer keeps its `snapshotId`, filename
+and optional source hash. It does not upload into the workspace or extract PDF text in the browser.
 
-## Layout and motion
-
-The footer separates configuration controls from the action corner. Container queries use the
-composer's actual width in either shell; a narrow model row moves above the leading/actions row rather
-than moving Send between columns. `PiChatView` supplies a view-scoped motion identity for the first-send
-transition. Text, selection, queued revisions and attachments retain the owners listed above.
-
-The pending draft, history hydration and live conversation share one mounted composer shell.
-Its placement moves between the centered Agent start screen and the bottom of the conversation;
-the inner editor resets only when its runtime/session draft owner changes. Loading does not replace
-the input with a skeleton: the selected draft remains editable, known configuration stays visible,
-and unresolved configuration shows a local loading label. Sending into an existing session waits
-for its native worker, while a pending draft can still create a session using runtime defaults.
-`PiConversationSurface` retains only the previous painted scene while the target history is pending,
-keeps that scene inert, and crossfades when the target is available. Runtime changes discard that
-projection. It does not introduce another history, draft or scroll authority.
-
-Native queue changes animate by message identity. An exiting queue row is inert and releases its edit
-form immediately, so a draft retained after dequeue is not displayed or editable twice.
-
-The input surface uses a subtle top highlight and soft downward shadows for elevation in both themes.
-Focus adds two diffuse layers: a brighter halo close to the surface and a soft outer falloff.
-Dark themes use stronger light; light themes keep a gentler shadow. The halo follows input focus;
-Agent generation does not animate the input surface. The existing border and rounded corners remain.
-These effects are paint-only and retain the composer dimensions and existing reduced-motion behavior.
-
-`usePiMessageHandoff` binds paint-only transfers to the enclosing view. Draft transfers use the existing
-submission ID and its native timeline anchor; queue transfers use the admitted queue ID forwarded on
-native user-message events, including the persisted entry handoff. Equal message text never selects an
-origin. The short overlay clips the visible content without scaling text, receives no input and leaves
-submission, draft recovery and scrolling with their existing owners. Navigation, manual scrolling,
-resize, failure and reduced motion release the projection. Offscreen sources use destination arrival.
-
-## PDF attachments
-
-Pi Composer accepts PDFs through its file picker and drop target. It uploads
-each PDF through the existing Workspace API into the session's actual `cwd`:
-`.varin/attachments/<safe-session-or-pending-scope>/<upload-uuid>/<original-basename>`.
-The Host-returned absolute path and a Markdown link using the original filename
-are inserted into the draft. The built-in PDF reader can open that local path.
-A pending first-turn draft uses a stable `pending-<uuid>` scope, so creating its
-Pi session needs no file move.
-
-The PDF remains a regular workspace file and is not encoded as a Pi image
-attachment or JSONL image record. Removing its draft reference, cancelling a
-draft, or switching sessions does not delete the uploaded file. The unique
-per-file directory avoids overwriting a same-named PDF without inspecting or
-rewriting the user's `.gitignore`.
-
-PDF upload is unavailable while the selected child thread reads from a virtual
-WorkingState view: Workspace API writes to disk, while that thread's
-`document.readSource` reads its immutable WorkingState snapshot. Materialized
-thread sessions and ordinary disk-backed Pi sessions continue to use the
-workspace upload path.
-
-## Submission order
-
-For a first prompt:
-
-1. Create the Pi session in the chosen workspace.
-2. Transfer the pending draft to the new session so a later configuration
-   failure cannot orphan the user's text.
-3. Apply the explicit draft model, or the Varin project model when present.
-4. Apply an explicit thinking level after checking the selected model.
-5. Compose the user's draft, snippets, inline comments, editor context, and
-   goal state.
-6. Send through Pi `prompt`.
-
-For an existing busy session, the configured follow-up behavior decides between
-Pi `steer` and `followUp`. The composer never emulates those queues locally.
+Submit, all three queue modes and child continuation carry that same retained snapshot reference.
+An uncertain input locks further PDF upload/removal so a retry cannot silently replace its material.
+Removing a draft chip is a local draft change, not deletion of the retained material. `ThreadMaterials`
+provides the enclosing reader and region destination; selected regions return only to that guarded
+Thread/branch composer.
 
 ## Verification
 
-Pure configuration/default resolution and submission assembly are unit tested.
-Rendering, focus, IME, mobile keyboards, clipboard images, and overlay handoff
-still require a real browser or shell check; type-checking alone does not prove
-those behaviors.
+`ThreadConversation.behavior.test.tsx` covers native composition and delivery behavior;
+`ThreadMaterials.behavior.test.tsx` covers material integration. Use focused helper tests when changing
+this directory. Rendering, focus, IME, mobile keyboards and real clipboard/drop behavior still require
+a browser or shell check; type-checking alone does not establish them.

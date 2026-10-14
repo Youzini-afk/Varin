@@ -29,9 +29,8 @@ const result = await session.evaluate({ cellId, script });
 Each session has its own Node `REPLServer` context. Node owns parsing, top-level
 await, returned-Promise resolution and persistent `let`, `const`, class, function,
 closure and object state. There is no `AsyncFunction`/globals-dictionary substitute.
-Launch the containing Node process or Pi worker with `--experimental-repl-await`
-so the embedding process's flags cannot silently disable that contract. The package retains the existing Node >=22.19.0 product minimum; this change was
-verified on Node 24.19.0, without a separate Node 22 run.
+Launch the containing Node process with `--experimental-repl-await` so its flags cannot silently
+disable that contract. The package requires Node >=22.19.0.
 
 The default context supplies `tools.invoke(input)`, `print(...values)`, `emitImage(image)`
 and a Node `console` whose output is associated with the calling cell. Print/console
@@ -50,17 +49,14 @@ and forwarding an image does not manufacture a nested model tool/result exchange
 The Host supplies `outputPart` for typed output; a custom embedding without it gets
 an explicit error from `emitImage`, rather than silently losing an image.
 
-A transport adapter can use `createNodeReplSession<Input, Receipt>` and the optional
-`install({ context, invoke, output })` hook to install its existing SDK. Supplying
-`install` replaces the default `tools` and `emitImage` installation; it does not add Native tool
-permissions to a Pi adapter. `print` and `console` remain available. The Pi adapter
-owns its method/argument and error mapping and imports this evaluator rather than
-maintaining another lexical engine. A third optional `ErrorInfo extends ScriptError`
-type parameter and `serializeError(error)` let the adapter explicitly preserve its
-own error facts, such as Pi's `actionSent`/`retry`; Native keeps only message/code.
-A failing custom projection falls back to a base error without extra facts.
-The hook and callbacks are trusted embedding
-code, not an authority that script authors can use to change the original Run.
+A trusted embedding can use `createNodeReplSession<Input, Receipt>` and the optional
+`install({ context, invoke, output })` hook to install its SDK. Supplying `install` replaces the default
+`tools` and `emitImage` installation; `print` and `console` remain available. The embedding owns its
+method/argument and error mapping rather than maintaining another lexical engine.
+A third optional `ErrorInfo extends ScriptError` type parameter and `serializeError(error)` allow an
+explicit error projection. Native transport preserves message/code; a failing custom projection falls
+back to the base error. These hooks are trusted embedding code, not authority for script authors to
+change the original Run or its permissions.
 
 `invoke` and output always read their real `AsyncLocalStorage` scope. A function
 saved in an earlier cell uses the scope of its current caller. Timers and Promise

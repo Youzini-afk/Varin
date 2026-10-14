@@ -1,38 +1,14 @@
 ---
-title: Context
-description: See how much of the model's memory a session is using.
+title: "Context"
+description: "Inspect native context checkpoints and retained history."
 ---
 
 # Context
 
-Every model can only hold so much of a conversation at once — its context. Varin shows how full that is, so you can tell when a session is getting close to the limit and a reply might start dropping older detail.
+Open the right sidebar's **Context** view to inspect the selected Thread and branch, current run state, context data and retained history. Individual history records can be expanded or copied. Earlier records remain accessible through the conversation's history navigation.
 
-## The quick indicator
+Within the conversation, **Instructions and skills** shows captured resource versions and diagnostics. **Refresh instructions and skills** prepares a new snapshot for later requests without rewriting in-flight requests or accepted inputs.
 
-While you chat, a small gauge shows the percentage of context used. It changes color as you fill up:
+**Context summaries** shows the current checkpoint and summary jobs. When available, you can apply a completed, current summary, cancel an unfinished summary or resume its preparation. Completing summary preparation is separate from applying it.
 
-- green — plenty of room
-- yellow — getting full (around three-quarters)
-- red — nearly full
-
-Hover it (or tap it on mobile) to see exact token counts.
-
-## The full context panel
-
-Open the **Context** tab in the right sidebar for a fuller picture of the current session:
-
-- the model in use and when the session started
-- total tokens against the model's limit
-- message and cost totals
-- a breakdown of the last reply's tokens
-- a rough split of what's taking up context (your messages, the agent's, tool output)
-
-The breakdown is an estimate, not an exact count — use it to spot what's filling the window, not for billing.
-
-## What to do when it's full
-
-Start a fresh session for a new task instead of letting one session grow forever. A shorter context is faster and keeps the model focused.
-
-## Related
-
-- [Projects](/projects/) — sessions are grouped per project
+Token consumption is available under [Usage](/usage/). Those receipts are not a percentage of the model's remaining context. Start a new conversation when you want a separate task and history.

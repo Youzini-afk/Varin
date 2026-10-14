@@ -12,7 +12,7 @@ A fixed read-only parent source has no implicit workspace writeback target.
 
 Integration uses the original WorkingResult, three-way merge, Documents version checks and durable
 file journal. `files-only` coverage includes file and Document content recovery; it does not mean
-bypassing dirty editor buffers, and does not include Pi conversation-history rollback. A conflict may
+bypassing dirty editor buffers, and does not include conversation-history rollback. A conflict may
 coexist with successfully applied paths. Inspect the original `effect`, receipt and affected paths.
 Cancellation or a lost response is not proof that an already-dispatched change had no effect.
 

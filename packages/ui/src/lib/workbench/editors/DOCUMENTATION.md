@@ -44,7 +44,7 @@ the selected nested Git root relative to the outer workspace, and both persist w
 working side is the live document buffer, while the staged side and original side are immutable
 snapshots. Stage, unstage, and discard refuse to race a dirty editor buffer.
 
-The IDE Workbench's secondary sidebar hosts the Agent session only. Notes and todos stay with the
+The IDE Workbench's secondary sidebar hosts the native Agent conversation. Notes and todos stay with the
 Agent profile, and Git diffs open here in the editor area, so the retired `context` secondary view
 migrates to `session` while extension-contributed secondary views are preserved.
 
@@ -85,7 +85,7 @@ SSE subscriptions only while a Run view is visible. Hidden views drop those list
 do not keep refreshing. Agent attachments may cite a test failure or stack frame as prompt
 text; they never grant process, debug, or test-runner capability.
 
-Agent/editor coordination lives in `lib/agent-editor`: attachments are runtime+session scoped,
+Agent/editor coordination lives in `lib/agent-editor`: attachments are Host+Thread/branch scoped,
 unsaved snapshots are explicit prompt text, tool path hints never override DocumentsAPI watches,
 and patch accept/reject uses a revision-checked Document Registry transaction. Active-editor context
 is selected by visible view ownership; a disposed or hidden integration cannot become an arbitrary

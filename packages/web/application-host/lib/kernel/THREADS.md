@@ -1,7 +1,6 @@
 # Thread Application Host consumer
 
-`thread-adapter.ts` admits explicitly selected `agent` runtime identities through the
-existing Application Host. It never creates, opens or writes a Pi session. Rust owns the
+`thread-adapter.ts` admits native `agent` Thread identities through the Application Host. Rust owns the
 thread/branch, history, queue, Run, Operation and durable events. The Host holds no second
 conversation store. `thread-routes.ts` uses the same authentication middleware as
 other Application Host routes; `@varin/application-client` owns its framework-neutral API
@@ -28,17 +27,15 @@ cancellation returns the authority's actual cancellation/effect state; it does n
 completion of background processes. Operation inspection exposes actual handoff/external
 receipt facts.
 
-The Agent workbench has an explicit thread selector using the shared layout and Markdown
-renderer. Its projection controller reconstructs durable history, queue and operation facts and
-keeps transient progress separate. This is a vertical integration, not Pi parity. Default main-chat
-cutover, full multimodal coverage, remaining general-event sources and policy-origin domain
-consumers, remote environments and the broader capabilities recorded in the runtime implementation
-plan still require their named owners. Memory, questions, automatic summary preparation and bound
-MCP/ordinary extension tools already have native paths; each retains its documented scope.
-Next-run admission uses the saved launch credential scope and the core environment-owner reference
-to retain a materialized directory, rather than resetting files to the original source. Independent
-verification owns the restart, source-continuity and HTTP acceptance evidence. No public model endpoint,
-credential, grant or arbitrary kernel-method passthrough is accepted by these routes.
+The product workbench and default main conversation use this native path. The projection controller
+reconstructs durable history, queue and Operation facts while keeping transient progress separate.
+Host/Thread/branch changes fence stale asynchronous results. The multiline composer, skills, editor
+context, images and retained PDF attachments use this same admission boundary.
+
+Next-run admission uses the saved launch credential scope and core environment-owner reference to
+retain a materialized directory, rather than resetting it to the original source. Public requests
+cannot supply arbitrary model endpoints, credentials, grants or kernel methods. A failed or unknown
+multi-run submission retains its Thread and worktree for reconciliation instead of destructive rollback.
 
 Initial input acceptance, source/credential selection and receipt are committed atomically by the
 submit-with-launch path. Successor input likewise inherits the nonsecret selection in its
@@ -56,8 +53,7 @@ credential-bound next-run completion. It uses fake credentials and proves no liv
 
 `research-runtime.ts` connects the original Experiment/Source/Resource services to genuine Catalog
 invocations. The same authenticated `/api/threads/research/*` routes expose the framework-neutral
-`ThreadsAPI.research` to `ThreadConversation` and the shared Research facts view. No Pi session is
-created for these callers. Read scope is the actual task family; control remains the caller Thread
+`ThreadsAPI.research` to `ThreadConversation` and the shared Research facts view. Read scope is the actual task family; control remains the caller Thread
 and its descendants. Changing a branch or source does not hide older independent jobs. Historical
 read/control and admission of new work are separate decisions.
 
@@ -71,8 +67,7 @@ hints, not durable execution receipts.
 
 The shared UI displays service-derived control permission, preserves rerun intent after an uncertain
 response, pages original logs/artifact bytes and rejects stale results after identity changes.
-Closing the view cancels observations only. The default Pi Research root and final product migration
-remain separate from this explicit Agent Thread consumer.
+Closing the view cancels observations only; it does not cancel independent experiments.
 
 ## Image input vertical
 
@@ -82,7 +77,7 @@ to typed attachments. Images remain in the existing chunked conversation content
 there is no second upload database. Image-only input has no artificial empty text block.
 Text-only queue edits retain accepted images under the same revision CAS; an explicit images
 array replaces/removes them. The shared browser file reader and attachment strip are used by
-both the existing Pi composer and the conversation.
+the native conversation composer.
 
 The trusted model catalog's image capability is frozen in model configuration. Known text-only
 models reject image input before admission, including queued edits; provider-specific formats
@@ -93,9 +88,21 @@ PDFs and arbitrary URLs/local/blob refs are not accepted as image substitutes.
 This path uses the existing HTTP JSON policy (50MB) and framed kernel transport (16MiB). Size
 errors retain the UI draft/images and surface an actionable error. Accumulated history is read through head-anchored reference pages and immutable body chunks,
 so the Host does not ask one framed RPC to return the complete inline conversation. Individual
-input uploads still use the existing request frame boundary. Streaming attachment uploads must
-reuse the existing content/attachment authority when that path is implemented.
+input uploads still use the existing request frame boundary. Image bodies use that existing content authority. PDF attachments instead use the scoped material path below.
 
+
+## Retained PDF attachments
+
+`ThreadsAPI.materials.upload` accepts the filename, PDF MIME type and original base64 bytes under a
+validated Thread/branch identity. `web-runtime.ts` checks the scope and bytes, then calls
+`documentReader.ingest`; MaterialStore retains the original PDF and returns its fixed source snapshot.
+The browser does not extract or replace its contents, and no new Rust PDF transport is introduced.
+
+Submit, all three enqueue modes and child continuation retain that snapshot. The Host resolves each
+`snapshotId` through the original scoped material owner and adds verified references to native input;
+`document_read` reads the retained original later. The UI opens the same PDF reader and keeps the
+captured snapshot across an unknown retry. A known non-admission can release the draft for editing.
+Switching Host/Thread/branch or unmounting fences stale upload results.
 
 ## Paged conversation projection
 
@@ -114,7 +121,7 @@ just because their originating tool message scrolled outside the newest page.
 
 ## Conversation branching
 
-The authenticated `fork` route accepts a identity, an immutable ancestor and a stable
+The authenticated `fork` route accepts an identity, an immutable ancestor and a stable
 client request key. The Host derives the new branch identity; Rust validates the ancestry and
 complete tool-call/result exchanges, and owns the idempotent branch creation. Retrying after the
 branch advances still refers to its original creation, rather than comparing its mutable head.
@@ -125,9 +132,8 @@ retain their creation key; switching Host or conversation invalidates pending na
 This action is explicitly conversation-only. It preserves original history and opaque provider
 items and the frozen system instructions/memory snapshot. It does not copy an active Run, process,
 workspace/tool grant, model selection or conversation summary. A fork replays its original history
-through the chosen cut, so a later summary cannot hide earlier messages. The UI explains this before creation and asks for a model on the new branch. Resource
-forking and default main-chat replacement remain distinct work; no Pi session is created or used
-as a fallback.
+through the chosen cut, so a later summary cannot hide earlier messages. The UI explains this before creation and asks for a model on the new branch. Resource forking
+retains its separate Source and resource authority.
 
 
 ## Explicit context summary jobs
@@ -151,7 +157,7 @@ It does not retry unknown model effects or select a replacement paid model.
 
 This section describes explicit user-triggered compaction. Automatic capacity preparation, frozen
 instructions/skills and memory have their own owners and admission contracts; this route does not
-substitute for those contracts or establish Pi parity. Source branches and ongoing runs remain
+substitute for those contracts. Source branches and ongoing runs remain
 independent of the summary job; only a successful explicit publication changes later context views.
 
 
@@ -178,25 +184,25 @@ source; a newly prepared selection cannot be silently discarded into queued inpu
 Editable copies are separate working directories, not security sandboxes, and commands may have
 external effects. Changes are not automatically copied into the selected original folder. Source
 snapshots remain rooted alongside the conversation; conversation deletion and source
-release UI are not delivered by this preparation path. Managed file/process/query and child-result
-operations keep that target Host throughout execution. Cross-Host combined file recovery and the
-explicit managed-source exclusions in [the owner documentation](DOCUMENTATION.md#managed-source-consumers)
-remain unavailable; selecting a target does not imply all environment capabilities have migrated.
+release are separate resource operations. Managed file/process/query and child-result operations keep
+that target Host throughout execution. Cross-Host recovery uses original participant plans and target
+receipts; it does not claim cross-Host atomicity. See [managed Source consumers](DOCUMENTATION.md#managed-source-consumers).
 
 
 ## Initial trusted context
 
 Production Host admission resolves ordinary main-thread context through `thread-context.ts`.
-It reads the existing `agent.personalization` catalog, applies the shared global → project → session
-section rules, and renders the matching notes with the existing protocol renderer. Session
-scope uses the thread ID; configured project membership is resolved by the Host from the admitted
+It reads the existing `agent.personalization` catalog, applies the shared global → project → Thread
+section rules, and renders the matching notes with the existing protocol renderer. Thread
+scope uses the Thread ID; configured project membership is resolved by the Host from the admitted
 workspace, never from renderer-supplied project/profile text. Bot personas remain a separate owner.
 
-For a selected workspace, root `AGENTS.md` comes from its exact immutable WorkingState branch/revision
-pin. The request records the workspace/branch/revision/root and file-object identity, including an
-explicit absent-file identity. Symlinks, invalid text and unavailable content are not silently treated
-as empty instructions. This slice does not load ancestor/nested instruction files, `SYSTEM.md`,
-`APPEND_SYSTEM.md`, skills or Pi extension resources.
+`thread-resource-scope.ts` prepares native global and trusted-project resources from the exact admitted
+Source. `thread-context.ts` renders the captured system, appended system, instructions and skill
+catalog with their original identities. Fixed-source reads retain their branch/revision; live and
+managed Sources retain their actual owner. Explicit resource refresh prepares a candidate before
+checkpoint publication. Symlinks, invalid text, missing material and unavailable access remain distinct.
+See [resource admission](../agent-resources/DOCUMENTATION.md) for discovery, ancestry and scoped reads.
 
 Rust commits the initial effective system prompt, instruction source identities and memory checkpoint
 in the same transaction as the first admitted input and launch selection. Failed admission publishes
@@ -222,18 +228,16 @@ Already prepared/dispatched ModelStep requests retain their recorded contents an
 context compilation sees the new checkpoint. Compaction candidates based on a superseded checkpoint
 cannot publish over it, and an explicit compaction request may need retry after a concurrent edit.
 
-Refresh replaces the system snapshot at a committed context boundary. It does not claim Pi's
-cache-prefix stability or its tail-message mutation-receipt algorithm. Memory tools, dynamic
-workspace instruction reload, skills and Pi extension context remain separate work. Context without
-a typed personalization basis cannot be live-refreshed; no inference/import from edited system text
-is attempted.
+Refresh replaces the system snapshot at a committed context boundary. Ordinary notes, frozen memory
+snapshots, resource refresh and selected context transforms retain their own receipt/publication rules.
+Context without the required typed provenance cannot be inferred from edited system text or imported.
 
 ## User clarification
 
 Ordinary Runs include the built-in `ask_user` v1 tool, with a required `question`
 and optional string `options`. It accepts a durable question Operation and returns a real job
 acceptance, not an answer. The policy parks on the matching existing Wait before another
-model request. No Pi session, Promise-owned question store, or additional database is involved.
+model request. No Promise-owned question store or additional database is involved.
 Compaction jobs do not receive this tool.
 
 The same operation/Wait path serves a model call or a policy tool-graph node. A policy can read
@@ -304,5 +308,4 @@ independent controls that could bypass a Goal pause.
 HTTP client, authenticated registered routes and actual launch-consumer logic with controlled RPC
 facts. UI behavior tests cover retained drafts, conflicts, uncertain writes and late views. Native
 Goal authority is separately exercised in Rust; these checks do not claim an unexecuted product
-Host/kernel transport round trip. User acceptance precedes user-managed runtime cutover and asset
-migration.
+Host/kernel transport round trip. Historical assets are preserved without an automatic migration.

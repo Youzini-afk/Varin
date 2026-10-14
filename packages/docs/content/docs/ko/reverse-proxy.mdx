@@ -15,15 +15,14 @@ Nginx, Nginx Proxy Manager, Caddy, Cloudflare 또는 다른 리버스 프록시 
 
 ## 프록시가 지원해야 하는 것
 
-- 실시간 메시지 전송을 위한 WebSocket:
-  - `/api/varin/runtime/ws`
+- WebSocket:
   - `/api/dictation/ws`
   - `/api/terminal/ws`
   - `/api/varin/realtime-proxy/ws`
 - 버퍼링 없는 SSE:
   - `/api/notifications/stream`
   - `/api/varin/events`
-  - `/api/varin/runtime-manager/events`
+  - `/api/threads/observe`
   - `/api/varin/realtime-proxy/sse`
 - 첨부 파일 및 파일 작업을 위한 대용량 요청 본문
 - 실시간 스트림과 터미널 세션을 위한 긴 읽기 타임아웃
@@ -66,7 +65,7 @@ proxy_set_header X-Forwarded-Host $host;
 
 gzip off;
 
-location ~ ^/api/(varin/runtime|varin/realtime-proxy|terminal|dictation)/ws$ {
+location ~ ^/api/(varin/realtime-proxy|terminal|dictation)/ws$ {
     proxy_pass http://127.0.0.1:3000;
     proxy_set_header Upgrade $http_upgrade;
     proxy_set_header Connection "upgrade";
@@ -80,7 +79,7 @@ location ~ ^/api/(varin/runtime|varin/realtime-proxy|terminal|dictation)/ws$ {
     proxy_send_timeout 3600s;
 }
 
-location ~ ^/api/(notifications/stream|varin/(events|runtime-manager/events|realtime-proxy/sse))$ {
+location ~ ^/api/(threads/observe|notifications/stream|varin/(events|realtime-proxy/sse))$ {
     proxy_pass http://127.0.0.1:3000;
     proxy_set_header Host $host;
     proxy_set_header X-Real-IP $remote_addr;
@@ -118,8 +117,8 @@ Nginx Proxy Manager에서 **Websockets Support**를 켜세요. 호스트의 Adva
 
 ### 페이지는 로드되지만 메시지 전송이 실패함
 
-- 프록시에서 WebSocket이 활성화되지 않음
-- `/api/varin/runtime/ws`가 올바르게 전달되지 않음
+- `POST /api/threads/*` 인증과 전달을 확인하세요.
+- `GET /api/threads/observe`는 버퍼링·캐시 없이 SSE를 전송해야 합니다.
 
 ### 알림 또는 실시간 상태가 업데이트되지 않음
 

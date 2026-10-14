@@ -8,9 +8,10 @@ There is no special kernel callback or second asset writer.
 The Host derives the project from the permission-admitted invocation's real workspace source.
 The extension cannot supply a project path, credentials, origin or Run authority. Model and
 policy calls use the same invocation, effect receipt and original project/Markdown service.
-Project scheduling currently requires a source on the coordinating Host. A managed file source
-reports an actionable unavailable result before looking up any local project; open that project
-on its owning Host to manage its schedules.
+Project scheduling requires an admitted project Source. A managed Source routes to its owning
+Host through `createManagedScheduleOwner`; the target validates the original Source and current
+whole-project permission, then uses the same project/Markdown owner and original operation receipt.
+An unavailable target does not fall back to a same-named local project.
 A new GUI definition without an ID derives a stable ID from its original operation; manual
 run-now uses that same original operation identity for an uncertain retry.
 
@@ -20,8 +21,8 @@ timezone, a schedule, and a `target`. New work selects `kind: "new_work"`, a reg
 or `live_root`), and `goal: null` or `{ budget: null | { maxOutputTokens } }`. Existing work
 uses `{ kind: "existing_work", threadId, branchId }` and retains that work's actual selection.
 `missedPolicy` is `skip` or `coalesce_once`; defaults preserve one overdue once occurrence
-and skip unobserved recurring slots. The existing Pi selection remains unchanged unless the
-external definition explicitly selects Agent.
+and skip unobserved recurring slots. Definitions retain explicit native Thread targets and model
+selections; historical session targets are not imported.
 
 Run-now returns the accepted occurrence identity, not execution success. Inspect the original
 Thread/Run/Goal for progress and results. Disabling holds scheduled unconsumed work; cancelling

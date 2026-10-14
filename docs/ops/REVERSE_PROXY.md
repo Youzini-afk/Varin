@@ -14,12 +14,12 @@ proxy must forward the complete origin rather than selecting only ordinary REST 
 ## Current realtime routes
 
 Varin no longer exposes the former OpenCode `/api/event`, `/api/global/event`, or matching
-WebSocket routes. A proxy for the current Pi-native product must preserve:
+WebSocket routes. A proxy for the native product must preserve:
 
 | Transport | Routes | Requirement |
 | --- | --- | --- |
-| WebSocket | `/api/varin/runtime/ws`, `/api/terminal/ws`, `/api/dictation/ws`, `/api/varin/realtime-proxy/ws` | Forward the HTTP/1.1 upgrade and keep long read timeouts |
-| SSE | `/api/varin/events`, `/api/notifications/stream`, `/api/varin/runtime-manager/events`, `/api/varin/realtime-proxy/sse` | Disable proxy buffering, caching, and response transformation |
+| WebSocket | `/api/terminal/ws`, `/api/dictation/ws`, `/api/varin/realtime-proxy/ws` | Forward the HTTP/1.1 upgrade and keep long read timeouts |
+| SSE | `/api/varin/events`, `/api/notifications/stream`, `/api/threads/observe`, `/api/varin/realtime-proxy/sse` | Disable proxy buffering, caching, and response transformation |
 | HTTP | `/api/*`, `/auth/*`, `/health`, application assets | Preserve method, body, cookies, authorization, and normal forwarded headers |
 
 The application authenticates these routes and checks WebSocket origins. Do not strip cookies,
@@ -50,7 +50,7 @@ server {
     # Configure ssl_certificate / ssl_certificate_key for your deployment.
     client_max_body_size 100m;
 
-    location ~ ^/api/(varin/runtime|varin/realtime-proxy|terminal|dictation)/ws$ {
+    location ~ ^/api/(varin/realtime-proxy|terminal|dictation)/ws$ {
         proxy_pass http://varin;
         proxy_http_version 1.1;
         proxy_set_header Upgrade $http_upgrade;
@@ -64,7 +64,7 @@ server {
         proxy_send_timeout 1h;
     }
 
-    location ~ ^/api/(notifications/stream|varin/(events|runtime-manager/events|realtime-proxy/sse))$ {
+    location ~ ^/api/(threads/observe|notifications/stream|varin/(events|realtime-proxy/sse))$ {
         proxy_pass http://varin;
         proxy_http_version 1.1;
         proxy_set_header Connection '';
@@ -126,7 +126,7 @@ varin.example.com {
 After configuring the proxy, verify more than the HTML page:
 
 1. Sign in through the public HTTPS origin and reload the page.
-2. Open or create a Pi session and confirm live output reaches the timeline.
+2. Open or create a Thread and confirm live output reaches the timeline.
 3. Open a terminal, send input, resize it, detach, and reattach.
 4. Leave the page open long enough to receive a notification or scheduled-task SSE update.
 5. Upload an attachment large enough to exercise the configured body limit.

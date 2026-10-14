@@ -23,10 +23,11 @@ explique l'installation, les commandes et la validation ; l'[architecture](../..
 Lisez l'implémentation responsable, ses consommateurs et le README ou DOCUMENTATION le plus proche.
 Gardez la modification ciblée, préservez le travail sans rapport et suivez le style et les composants UI existants.
 
-Pi est le runtime de conversation par défaut. Le runtime Rust Agent, sélectionné explicitement, possède
-ses propres responsables de l'historique et de l'exécution ; les deux utilisent les services Host partagés.
-Respectez les responsabilités décrites dans l'architecture sans copier l'état dans une autre couche.
-Un changement du runtime par défaut ou une migration des données utilisateur nécessite un accord explicite.
+Le runtime natif Rust Agent gère les conversations et l'exécution du produit. Son Catalog possède
+l'historique Thread/branche, les files, les Runs et les Operations ; l'Application Host de confiance
+fournit les modèles, les identifiants et les services métier. Respectez ces responsabilités sans
+copier l'état dans une autre couche. Les anciennes données Pi sont préservées sans importation ni
+rétablissement d'un runtime de secours.
 
 Intégrez les extensions par leurs interfaces publiques et préservez leurs configurations et données.
 Les opérations privilégiées appartiennent au Host de confiance, jamais au renderer. Consultez les règles

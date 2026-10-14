@@ -1,0 +1,16 @@
+---
+title: "Memoria e instrucciones del agente"
+description: "Gestiona notas e instrucciones de los Agents ordinarios por ámbito."
+---
+
+# Memoria e instrucciones del agente
+
+En **Settings → Memory**, crea, edita, elimina o mueve notas entre ámbitos global, proyecto y conversación. El panel de memoria de la conversación y la herramienta `memory` usan las mismas notas. Un hijo no hereda automáticamente las notas de la conversación principal.
+
+Las notas guardadas están disponibles inmediatamente. Las conversaciones activas reciben los nuevos datos sin reescribir el prefijo de memoria congelado; aplicar correctamente un resumen de contexto actualiza esa instantánea.
+
+En **Settings → System prompt**, edita secciones de instrucciones. Los controles de densidad, estilo y autonomía insertan texto editable. Las modificaciones globales, de proyecto y de conversación se aplican en ese orden. **Restore defaults** elimina solo las del ámbito elegido. Los cambios se aplican en un límite seguro entre solicitudes; las ya preparadas no cambian.
+
+La vista previa incluye las instrucciones ensambladas y la memoria capturada. La vista de última solicitud, cuando está disponible, no demuestra recepción por el proveedor. Para archivos de instrucciones y habilidades, usa **Refresh instructions and skills** después de editarlos.
+
+Los Bots conservan instrucciones y memoria propias en **Varin Bot**, separadas de las notas y preferencias ordinarias.

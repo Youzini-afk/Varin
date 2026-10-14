@@ -1,7 +1,7 @@
 # 扩展归属与运行时组合
 
 Varin 扩展通过 manifest、capability client、service 和 contribution 扩展 Application Host 与工作台。
-Pi package 独立扩展 Pi Agent。可选 Rust Agent runtime 通过执行绑定消费选中的 Varin service，
+Rust Agent runtime 通过执行绑定消费选中的 Varin service，
 不另建安装器，也不把历史权威交给扩展。相邻职责见[架构](architecture.md)、[运行时](runtime.md)和[工作台](workbench.md)。
 
 本文解释当前机制与失败边界。精确作者 API、schema 字段和示例由[作者指南](ops/varin-extension-authoring.md)
@@ -22,7 +22,7 @@ Pi package 独立扩展 Pi Agent。可选 Rust Agent runtime 通过执行绑定�
 
 受信任 Web server 是 Application Host，嵌入 Electron 时也不改变这一归属。远程 Web 和 mobile 使用
 该 server 的扩展安装及兼容 Surface entrypoint；headless Host 无需窗口即可激活服务。
-切换 Pi runtime 不移动 Application Host 的扩展目录、asset、grant 或 storage。
+客户端切换 Host 或工作台不搬迁已安装的扩展目录、asset、grant 或 storage。
 
 普通产品 Shell、editor/renderer、页面、命令和 provider 与外部扩展共用 registry。
 Core 保留 bootstrap、认证、合同校验、生命周期和恢复基础。完整自定义 Shell 不必使用 React、
@@ -56,7 +56,7 @@ callback 所用的 grant，候选失败保留旧实现也不能保留已撤销�
 
 Extension storage 管理 namespace、revision 和原子持久化，扩展管理自身 schema。
 `storage.open` 为各 scope/key 打开独立文档。Disable 保留数据与 layout reference。
-Remove 和 delete-data 是两个选择；删除仅限该扩展 namespace，不包括项目文件、Pi package 或插件私有数据库。
+Remove 和 delete-data 是两个选择；删除仅限该扩展 namespace，不包括项目文件或其他服务的私有数据库。
 读取失败、malformed、missing 与有效空数据始终分开。
 
 ## 模型接入贡献
@@ -176,7 +176,7 @@ child 只能从仍被保留的原 binding 派生 pin。撤权沿实际依赖边�
 
 ## Rust Agent 组合与工具动作
 
-Pi 仍是默认产品路径。Rust Agent 通过 [CompositionRegistry 及 resolver](../kernel/crates/varin-runtime/src/composition.rs)
+Rust Agent 通过 [CompositionRegistry 及 resolver](../kernel/crates/varin-runtime/src/composition.rs)
 发布已准备好的 scope-local binding，只解析选中 root 及其依赖。配置、安装、异步准备和资源准入仍属于
 原 owner；registry 的短同步提交不做 network、activation 或 cleanup。
 
@@ -226,22 +226,7 @@ Accepted-Run tool discovery 读取该 Run 冻结的目录。两者来源不同�
 完整 Host 丢失后，catalog 可能恢复已提交选择，而 Operation 仍为 unknown。
 恢复不会重放 Agent effect 或重新 capture 可变来源来制造一张确定回执。
 
-## Pi 兼容与图形适配
+## 验证边界
 
-Pi PackageManager 与 extension runner 拥有 Pi 安装、settings、resource、command 和 session execution。
-Plugin Settings 通过[配置 owner](../packages/pi-host/src/config-text-authority-resolver.ts) 编辑 native revisioned
-JSON/JSONC，保留未知字段。专用表单只编辑已理解字段，其余通过 native-document editor 暴露。
-Varin UI 不读插件私有数据库，也不将插件状态复制为第二份 Varin store。
-
-Adapter 观察公开注册 command、event 或 versioned contract。Command presence 只证明已加载，
-不证明外部 binary/provider 健康。Configured、installed、loaded、unavailable、failed 与成功空结果分开。
-Active MCP 的 transport/OAuth 属于 Pi 原生或选中 replacement owner，UI 不合并带凭据来源。
-Varin workspace recovery 是独立 Host service，不使用可选 `pi-workspace-history` 的状态替代。
-
-Bundled Pi version 只有 `packages/pi-host/package.json` 一处来源。维护的 adapter test 验证消费合同，
-不是永久逐版本兼容认证。可选 `scripts/smoke-extension.mjs` 只证明 entrypoint loading 和公开注册，
-不覆盖付费 provider、模型推理、恢复或完整 UI 旅程。
-
-生命周期测试随 Host、loader 和 Surface owner 维护，native consumer test 验证其实际绑定边界。
-局部 helper 测试不能代替扩展/provider/UI 的实际集成或平台/打包验收。
-公共包发布与默认产品运行时切换仍是单独的发行决定。
+生命周期测试随 Host、loader 和 Surface owner 维护，native consumer test 验证实际绑定边界。
+局部 helper 测试不能代替扩展、provider、UI 的实际集成或平台、打包验收。公共包发布仍是独立发行操作。

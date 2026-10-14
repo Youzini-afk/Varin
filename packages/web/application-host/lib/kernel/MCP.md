@@ -2,9 +2,8 @@
 
 Agent MCP configuration, OAuth storage, connections and their tool catalogs are owned by the shared
 Application Host [`McpAuthority`](../mcp/DOCUMENTATION.md) in `lib/mcp`. This adapter leases that
-owner; it creates no MCP client, installer or secret store and never starts a Pi AgentSession.
-Pi remains the default runtime and retains a separate `@varin/pi-host/mcp-authority` instance,
-configuration and accounts. Sharing runtime interaction adapters does not merge those owners.
+owner; it creates no second MCP client, installer or secret store. Native settings, trust and
+credential owners serve every product Thread. Historical Pi configuration and accounts are not imported.
 
 ## Preparation and frozen identity
 
@@ -172,8 +171,7 @@ interaction owner below. Basic sampling uses the separate two-review model execu
 ## Reviewed server-initiated form and URL requests
 
 The original authority's installed receiver supplies form/URL capability during protocol connection.
-Each authority advertises only the interaction capabilities its own receiver supports; the separate
-Pi authority can use the same interaction adapter without sharing the native client. Each real native
+The authority advertises only the interaction capabilities its receiver supports. Each native
 call supplies its Operation/executor identity, not a second enabled-tools or grant list. Known related-task identity wins over the HTTP
 response stream even if another call owns that stream. Unknown Task or unassociated ordinary stdio
 requests receive an explicit unavailable-association error rather than an inferred current Thread.

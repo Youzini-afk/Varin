@@ -32,7 +32,7 @@ Select its provider in existing service routing, with a real project ID:
 
 Use the routing document's current `expectedRevision` when updating. A session rule uses the native
 thread ID as `sessionId`. Explicit selection failures never silently choose another policy.
-This policy runs on the native runtime path; installation does not switch the product's Pi default.
+This policy runs on the native runtime path; installation alone does not select it for a Thread.
 
 ## Prepare the selected project's evidence
 

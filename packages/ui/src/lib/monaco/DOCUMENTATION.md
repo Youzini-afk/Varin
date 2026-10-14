@@ -48,6 +48,6 @@ Do not import the `monaco-editor` root entrypoint, `editor.main`, or
 language features; semantic language capability remains behind `RuntimeAPIs.language`.
 
 Agent collaboration consumes the same visible view owner as editor commands. Selection/file/diff
-attachments carry runtime, workspace, document-instance, and session identity; inline comments remain
-session drafts; patch review applies an atomic Document Registry workspace edit and leaves a dirty
+attachments carry runtime, workspace, document-instance, and Thread/branch identity; inline comments remain
+conversation drafts; patch review applies an atomic Document Registry workspace edit and leaves a dirty
 buffer for explicit save. No collaboration path writes around the registry or exposes a Monaco handle.

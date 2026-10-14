@@ -1,13 +1,13 @@
 // APNs (Apple Push Notification service) runtime for the native iOS mobile app.
 //
-// Device tokens are persisted per UI session (mirrors push-runtime.js). Delivery has two
+// Device tokens are persisted per UI session (mirrors push-runtime.ts). Delivery has two
 // modes, chosen at send time:
-//   - Relay (explicit): POST tokens + generic text to VARIN_PUSH_RELAY_URL, whose service
+//   - Relay (explicit): POST tokens + notification payload to VARIN_PUSH_RELAY_URL, whose service
 //     holds the selected project APNs key and signs+sends.
 //   - Direct: sign an ES256 JWT with Node crypto and send over HTTP/2 ourselves for
 //     self-hosters who configure VARIN_APNS_*.
-// Wired into the same trigger fanout as web push (see runtime.js); the relay carries only
-// generic, model-based text (no session content) — see APNS.md.
+// Native Thread notifications use the Thread title and fixed status text from thread-runtime.ts.
+// This transport forwards that payload through the configured channel; see APNS.md.
 
 import {
   getOrCreateRelaySigningKeypair,
@@ -487,7 +487,7 @@ export const createApnsRuntime = (deps: ApnsRuntimeDependencies) => {
     });
 
   // Relay mode is explicit: the selected service owns the APNs key, while this server POSTs
-  // device tokens + generic text and receives token-drop results. Without a relay URL, direct
+  // device tokens and the notification payload, then receives token-drop results. Without a relay URL, direct
   // mode below uses the deployment's VARIN_APNS_* configuration when available.
   const resolveRelayConfig = (): RelayConfig | null => {
     if (trimmedEnv('VARIN_PUSH_RELAY_DISABLED') === 'true') return null;

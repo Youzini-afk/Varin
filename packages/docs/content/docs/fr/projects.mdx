@@ -5,29 +5,15 @@ description: Organisez votre travail en projets et passez de l’un à l’autre
 
 # Projets
 
-Un projet est un dossier de votre ordinateur qu’Varin suit — généralement un codebase. Changer de projet change le dossier dans lequel l’agent travaille, ainsi que les sessions et paramètres de ce projet.
+Un projet est un dossier sur le Host connecté. Ouvrez-le avec le sélecteur de projets ou l’explorateur ; Paramètres → Projets gère son nom, sa couleur, son icône et ses actions. Le projet parcouru et la source d’exécution d’une conversation sont distincts : changer de projet ne redirige pas un Thread en cours.
 
-## Ajouter un projet
+Dans la conversation, développez **Workspace**, choisissez le Host et le dossier source, puis le mode :
+- **Read-only file snapshot** : fichiers figés pour lire, lister et chercher
+- **Isolated editable copy** : copie capturée pour modifier et exécuter des commandes ; les changements ne sont pas recopiés automatiquement
+- **Live workspace** : fichiers enregistrés du dossier réel ; les modifications sont immédiates
 
-Vous pouvez ajouter un projet depuis plusieurs endroits :
+Cliquez sur **Prepare workspace** et vérifiez le résultat avant l’envoi. Les instantanés peuvent inclure les brouillons des éditeurs de cette fenêtre sur le même Host ; le mode live utilise uniquement les fichiers enregistrés. Les chemins distants appartiennent au Host sélectionné. Les copies modifiables et les commandes ne sont pas des bacs à sable de sécurité.
 
-- l’entrée **Ajouter un projet** dans la palette de commandes
-- le bouton **+** en haut de la barre latérale des sessions
-- le navigateur de dossiers lorsque vous choisissez un répertoire
-
-Pointez vers un dossier et Varin s’en souvient. Le nom vient du dossier ; vous pouvez le modifier plus tard.
-
-## Changer de projet
-
-Choisissez un projet dans la barre latérale pour le rendre actif. Tout — sessions, git, notes — suit le projet ouvert.
-
-## Rendre un projet reconnaissable
-
-Ouvrez **Paramètres → Projets** pour donner à un projet un nom, une couleur ou une icône personnalisés. Varin essaie de trouver une icône automatiquement — voir [Icônes de projet](/fr/project-icons/).
-
-
-## Pages liées
-
-- [Notes, todos et plans de projet](/fr/notes-todos-plans/) — garder des notes de travail par projet
-- [Actions de projet](/fr/project-actions/) — enregistrer les commandes que vous lancez souvent
-- [Contexte](/fr/context/) — voir quelle part de la mémoire du modèle une session utilise
+- [Sessions worktree](/fr/worktrees/)
+- [Notes, todos et plans de projet](/fr/notes-todos-plans/)
+- [Actions de projet](/fr/project-actions/)

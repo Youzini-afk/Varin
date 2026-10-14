@@ -3,7 +3,7 @@
 These modules implement the Agent runtime's `ModelProvider` boundary. They serialize immutable
 semantic history, execute one request, parse protocol events and preserve continuation originals.
 They do not own a conversation loop, tool authorization or a credential store. The default product
-runtime still uses Pi; see [runtime ownership](../../../../../docs/runtime.md).
+runtime uses this native path; see [runtime ownership](../../../../../docs/runtime.md).
 
 The native base catalog is declared in [builtins.rs](builtins.rs) and validated by its family-specific
 options. Reviewed Host model contributions register [brokered codecs](extensions.rs) into the same

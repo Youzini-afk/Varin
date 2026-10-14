@@ -5,31 +5,13 @@ description: Resolva problemas comuns de worktree e git.
 
 # Worktrees e Git
 
-Problemas que surgem com [sessões de worktree](/pt-br/worktrees/) e a [visão de git](/pt-br/git/), e como resolvê-los.
+Antes de repetir uma operação, confira o Host e a pasta originais. Uma falha ou resposta perdida pode deixar um worktree ou Thread real. Inspecione Worktrees e Git; não exclua a conversa para reparar um problema separado da pasta.
 
-## Um worktree precisa de atenção
+Se a pasta mudou de lugar, restaure ou repare seu registro Git worktree. Revise mudanças locais antes de continuar ou abortar merge, rebase ou cherry-pick. Se um nome já existe, confira o trabalho antes de escolher outro.
 
-O Varin sinaliza um worktree quando algo está errado:
+Mensagens de commit e descrições de PR usam o modelo utilitário ou padrão do Host. Verifique canal, modelo, credenciais e arquivos preparados ou intervalo de commits. Não exigem conversa ativa. Investigue resultados desconhecidos antes de iniciar outra solicitação.
 
-- **pasta ausente** — a pasta do worktree foi excluída ou movida fora do Varin; remova a sessão e crie um worktree novo
-- **branch detached ou unborn** — o worktree não está em um branch normal; faça checkout dele em um
-- **merge, rebase ou cherry-pick em andamento** — uma operação ficou pela metade; conclua-a ou aborte-a pela visão de git
-
-## Não consigo criar um worktree
-
-- **branch já existe** — escolha um nome de branch diferente, ou use a opção de branch existente
-- **nome já em uso** — escolha um nome de worktree diferente
-
-## A geração de commit ou PR falha
-
-Gerar uma mensagem de commit ou descrição de PR roda na sua sessão ativa, então você precisa de uma sessão aberta com um modelo funcional selecionado. Abra ou escolha uma sessão e tente novamente.
-
-## Problemas de SSH ou de caminho no Windows
-
-- certifique-se de que a chave SSH que o repositório usa é a definida na sua [identidade git](/pt-br/git-identities/)
-- no Windows, o git usa caminhos no estilo Unix (como `/c/Users/...`) — o Varin lida com isso, mas caminhos de chave SSH personalizados devem seguir a mesma forma
-
-## Relacionado
-
-- [Sessões de Worktree](/pt-br/worktrees/) — como os worktrees são criados e removidos
-- [Identidades Git](/pt-br/git-identities/) — defina a chave e a identidade certas por repositório
+- [Sessões de Worktree](/pt-br/worktrees/)
+- [Fluxos de Git e GitHub](/pt-br/git/)
+- [Identidades Git](/pt-br/git-identities/)
+- [Canais de modelos](/pt-br/providers/)

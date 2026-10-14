@@ -1,9 +1,7 @@
 # Authoring Varin extensions
 
-Varin extensions customize the Varin application host and workbench. They are a separate product
-object from Pi packages: installing or disabling a Varin extension never installs, disables, or
-rewrites a Pi package. A repository may publish both, but each keeps its own manifest, lifecycle,
-configuration, and update policy.
+Varin extensions customize the Application Host and workbench and contribute services to the native
+Agent runtime. Each extension has an explicit manifest, lifecycle, reviewed capabilities and storage namespace.
 
 This guide covers the public authoring path. It does not require imports from `packages/ui`, private
 React components, or a source checkout of Varin.
@@ -209,10 +207,6 @@ with the supplied resource identity. Reads include the current Varin buffer and 
 writes must include both `expectedRevision` and `expectedDocumentVersion`, so an isolated realm cannot
 silently overwrite a newer local edit.
 
-Do not publish a new npm tag from this handoff. The coordinated next public version is **0.2.0** for
-`extension-contract`, `extension-sdk`, `extension-react`, `extension-cli`, `extension-surface`, and
-`extension-host`. Wait for an explicit publish approval.
-
 ## Manifest authority
 
 `varin.extension.json` is the authoritative package contract. `package.json` remains npm/package
@@ -225,7 +219,7 @@ metadata; its version must match the manifest version.
   "id": "dev.example.memory-workbench",
   "displayName": "Memory Workbench",
   "version": "1.2.0",
-  "engines": { "varin": ">=0.1.0 <0.2.0" },
+  "engines": { "varin": "*" },
   "metadata": {
     "description": "A custom memory workspace",
     "homepage": "https://example.dev/memory-workbench",
@@ -248,9 +242,6 @@ metadata; its version must match the manifest version.
       }
     ]
   },
-  "requires": {
-    "services": [{ "id": "varin.sessions", "version": 1, "binding": "single", "realms": ["surface"] }]
-  },
   "provides": {
     "services": [{ "id": "dev.example.memory", "version": 1, "multiple": true }]
   },
@@ -258,8 +249,7 @@ metadata; its version must match the manifest version.
     "host": ["extension-storage"],
     "surface": ["notifications"]
   },
-  "storage": { "schemaVersion": 1 },
-  "integrates": { "piPackages": ["pi-observational-memory"] }
+  "storage": { "schemaVersion": 1 }
 }
 ```
 
@@ -271,8 +261,8 @@ Manifest IDs, entrypoint IDs, contribution IDs, and service IDs use lowercase na
 Contribution IDs must be qualified by the extension ID. Entrypoint files are forward-slash relative
 paths and cannot escape the package.
 
-`integrates.piPackages` is discovery/navigation metadata only. It does not grant access to a Pi
-package and does not couple either lifecycle.
+Declare native service dependencies in `requires.services`. The retired `integrates` manifest field
+is rejected; discovery metadata never grants capability access.
 
 ## Execution modes
 
@@ -722,7 +712,7 @@ requests Host or Surface capabilities is installed disabled; decide every reques
 enable it with the ordinary lifecycle switch. A denial is still a completed decision—the extension
 may activate with only the capabilities actually granted and must handle their absence.
 
-The application host owns installation and execution. Switching the active Pi runtime does not move
+The Application Host owns installation and execution. Changing a workbench profile does not move
 or reinstall Varin extensions. Web/cloud and Electron-hosted Web use the server application host.
 A Surface reports unsupported/waiting state when
 an entrypoint or capability is unavailable there instead of disabling compatible Surfaces.
@@ -775,11 +765,11 @@ The Extension Inspector uses public host and Surface state. It shows:
 - document, language, debug, and test service ownership from granted capabilities and live Host providers;
 - live Host and Surface service providers;
 - optional Monaco active-view and owner-scoped decoration registration counts;
-- required services and companion Pi-package metadata;
+- required native services and their selected providers;
 - capability decisions and extension-attributed catalog/runtime diagnostics.
 
 Diagnostics remain attributed to extension, entrypoint, realm, and generation. The Inspector does
-not scrape private plugin databases, package working trees, credentials, or Pi session content.
+not scrape private plugin databases, package working trees, credentials, or conversation content.
 
 ## Disable, remove, and retained data
 
@@ -791,7 +781,7 @@ Remove first deactivates the extension and then deletes its catalog installation
 distribution extensions cannot be removed through this action; they can be disabled or omitted by a
 distribution. The removal dialog makes the data choice explicit: **retain data** is the default, while
 **delete extension data** removes only that extension's validated Varin storage namespace after the
-catalog record is removed. Neither choice deletes project files, Pi package data, plugin-native data,
+catalog record is removed. Neither choice deletes project files, other services’ private data,
 workspace files, or shared artifact-cache material.
 
 ## Workbench distribution profiles
@@ -910,5 +900,4 @@ provision. Method entries carry `inputSchema`, `outputSchema`, optional descript
 relative and do not expose Host installation paths. Import that same descriptor at activation.
 Ordinary tool execute metadata derives from the existing tool declaration. The context-fragments
 provider is a complete built-in method example; owners without such declarations report
-`undeclared`. This phase does not claim complete metadata for every legacy service or full
-Application API reflection. No catalog is injected into every prompt or tool result.
+`undeclared`. Discovery does not synthesize missing method contracts or full Application API reflection. No catalog is injected into every prompt or tool result.

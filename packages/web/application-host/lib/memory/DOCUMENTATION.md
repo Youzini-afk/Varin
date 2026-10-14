@@ -1,56 +1,21 @@
 # Memory ownership and Agent personalization
 
-Ordinary Agent memory is explicit, lightweight text. `agent-personalization.ts` owns one
-Rust typed record (`agent.personalization`) containing global, project and session notes
-and scoped system-prompt edits. Projects use the configured project ID, including its
-additional folders. Session notes use the native Pi session ID. There is no implicit
-import of old knowledge records or background extraction for ordinary chats.
+Ordinary Agent memory is explicit, lightweight text. `agent-personalization.ts` owns one Rust typed
+record (`agent.personalization`) containing global, project and Thread notes and scoped system-prompt
+edits. Projects use the configured project ID; Thread notes use the native Thread ID. There is no
+implicit import of historical sessions or knowledge records and no background extraction for ordinary chats.
 
-`agent-memory-services.ts` routes ordinary `memory` calls to this authority. Omitted scope
-means the current session; the tool's `user` and `workspace` scopes mean global and project.
-The tool cannot read another project's or session's notes. Selected-message saves preserve
-the chosen text for user editing without calling the memory organizer. The settings catalog
-and authenticated `/api/agent-personalization` routes expose CRUD, scope changes, and prompt
-edits. Writes publish only after the Rust receipt. UI edits carry their opened revision;
-a conflict stays visible instead of silently overwriting another edit.
-The personalization path participates in the production JSON-body middleware for memory saves,
-deletes and prompt saves. Its HTTP regression uses that middleware rather than a test-only global parser.
+`kernel/memory-owner.ts` routes native memory tools through the admitted Run, operation and scopes.
+The tool cannot read another project's or Thread's notes. Selected-message saves preserve chosen text
+for editing without calling the Bot organizer. Authenticated `/api/agent-personalization` routes expose
+CRUD, scope changes and prompt edits. Writes publish after their Rust receipt; UI edits carry the
+opened revision and expose conflicts rather than silently overwriting a later edit.
 
-`session.instructions` resolves the actor's current ownership, project, catalog revision and
-thread role. Tool presentation uses that identity at the run boundary: ordinary memory has
-global/project/session note parameters; Bot memory has provenance and revision-chain parameters.
-Main/Worker/read-only Computer and team presentation describes the calling role. A project scope
-is only offered when the conversation has a project. Host authorization remains authoritative.
-
-Pi applies global, project, then session prompt section overrides. Matching notes establish a
-system memory snapshot when the first run starts. The snapshot and its system sections are recorded in the native Pi branch;
-it stays unchanged while memory mutations arrive at the conversation tail. Direct memory results
-carry saved text/deletion and the committed revision. Nested calls, including Codemode, forward
-the same receipts through the enclosing tool result without relying on the script to print them.
-External/UI changes are retained as `varin-memory` messages only after the provider starts responding;
-failed requests retry undelivered changes. Per-entry receipt revisions handle out-of-order parallel
-results. Writes still commit immediately to the Rust authority; new conversations see current notes.
-
-A successful compaction stores the new `agentMemorySnapshot` and effective `systemMessage` in the same native compaction entry.
-Request-boundary capacity validation includes the new snapshot before publication. Preparing, cancelling or failing a
-summary never advances the snapshot. Reopening or navigating a branch reconstructs its checkpoint
-and delivered changes from Pi history; this is not another memory database. The next request renders
-the stored snapshot and appends any newer changes. Deleting the last note removes every memory section
-at the next committed snapshot. Compaction can change the cached prefix; this design avoids memory
-mutations rewriting that prefix between compactions, without promising provider cache hits.
-
-Unchanged official sections continue to follow the runtime;
-explicit edits remain user-owned. Reset removes only that scope's overrides. `SYSTEM.md`,
-`APPEND_SYSTEM.md`, project instructions, extensions and skills retain native Pi loading.
-The settings page shows the current memory snapshot in the assembled preview and the last system text observed at
-the actual model-request boundary. The latter is an in-memory observation of an attempted
-request, not evidence of provider delivery, and is lost when the worker stops.
-
-Bot ownership is determined by the original Host registry or Catalog Thread binding, not a caller-supplied mode. Bot requests
-never receive Agent prompt overrides or Agent notes. Bot memory continues through
-`memory-service.ts`, Bot/user/current-conversation knowledge stores, `recall`, and the optional organizer.
-The organizer only enumerates Bots; ordinary context assembly bypasses knowledge recall.
-Plans, observations, materials, symbol indexing and other knowledge-store users remain intact.
+Bot ownership comes from the Catalog Thread binding, never a caller-supplied mode. Bot requests
+exclude ordinary Agent prompt overrides and notes. They use `memory-service.ts`, Bot/user/current-Thread
+knowledge stores, recall and the optional organizer. Plans, observations, materials and indexing keep
+their existing knowledge-store owners. Native resources and skills have their separate
+[resource owner](../agent-resources/DOCUMENTATION.md).
 
 ## Bot background inference
 
@@ -83,7 +48,7 @@ MemoryService/source-revision path. Ordinary Agent selection stays a no-model ed
 Agent Bot entries use the same memory domain. `bot-history.ts` reads original immutable HistoryItems
 through Catalog-owned Bot, Thread, branch and ancestor checks. Native source spans retain the actual
 Thread/item identity and their branch/head read witness; the witness is not a second coverage or
-deduplication key. Pi entries, events and Run reports keep their distinct typed source identities.
+deduplication key. Events and Run reports retain their distinct typed source identities.
 Host and UI use the same text projection and UTF-16 offsets, so Markdown rendering cannot change a
 saved selection. Changed, missing and unavailable originals remain different source results.
 
@@ -101,7 +66,7 @@ projected into the original native memory state and real request facts, while an
 RequestSnapshot remains immutable. Forgetting a corrected item removes its retained correction body.
 Only successful summary publication replaces the system checkpoint; preparing or finishing a candidate
 does not itself publish it. The organizer and explicit selection preview enumerate the same native
-sources rather than synthesizing Pi sessions.
+sources.
 
 For Bot recall, the original ContextJob freezes a typed reference to the selected immutable memory
 projection and includes those actual facts in its summarization material. Only successful publication
@@ -115,22 +80,19 @@ catalog are removed. Product actions use `actionInstructions.ts`; native skills 
 editable resources. Existing user-owned prompt files are not deleted, but Varin no longer
 loads them as command templates.
 
-Verification owners: `agent-personalization.native.test.ts` exercises real Rust persistence,
-scope isolation and stale edits; Pi `session-e2e.test.ts` exercises actual outgoing requests
-with a faux provider; UI `AgentSettings.behavior.test.tsx` covers editing and scope selection.
-
+## Ordinary Thread context
 
 Native conversations use this same catalog through `kernel/thread-context.ts`. A trusted
 Host admission supplies mode, role and nullable project; the current-thread scope is the actual
 native Thread ID. The generic preparer requires that scope explicitly. Its `main` adapter alone
 resolves a main conversation's project from the admitted workspace. Child contexts do not inherit
-parent session notes or a parent's assembled system prompt. Bot contexts exclude ordinary notes
+parent Thread notes or a parent's assembled system prompt. Bot contexts exclude ordinary notes
 and prompt profiles.
 
 `memory` exposes read/search and revision-checked save/delete. Native calls carry their real
 Run, request/call-derived operation and admitted scopes through the private epoch-fenced memory
-bridge. The existing personalization typed record remains the only note writer. The current document
-adds only per-note latest revision metadata and its last mutation receipt. Historical receipts reuse
+bridge. The existing personalization typed record remains the only note writer. The stored document
+contains per-note latest revision metadata and its last mutation receipt. Historical receipts reuse
 the existing atomic `storage.record.put` operation result: a lost return is reconciled using the
 same stable origin and exact intent, never by repeating the mutation. `runtime.memory.reconcile`
 queries those original receipts on an independent worker and settles the original native operation.
@@ -140,10 +102,9 @@ the old scope and addition in the new scope.
 
 The native conversation exposes the existing notes editor with its admitted global, project and
 current-Thread scopes. It reuses the ordinary notes routes, editor and CAS rather than another store.
-The Host resolves native session scopes from the persisted Thread and context checkpoints; a
-native namespace only selects that lookup and does not grant a role. Missing, inconsistent or
-unavailable native ownership fails closed. The legacy Pi resolver is retained only for Pi identities.
-Bot contexts have no ordinary-notes entry, and the Host independently rejects their session writes.
+The Host resolves Thread scopes from the persisted Thread and context checkpoints. A namespace
+does not grant a role; missing, inconsistent or unavailable native ownership fails closed. Bot
+contexts have no ordinary-notes entry, and the Host independently rejects their Thread-note writes.
 
 An immutable context checkpoint now separates the frozen memory snapshot from current explicit
 prompt configuration. Ordinary note edits are immediately readable but do not rewrite the system
@@ -172,9 +133,9 @@ Explicit compaction freezes a candidate memory snapshot and prompt configuration
 range. Successful publication atomically replaces summary, snapshot and effective system. Newer
 notes and original conversation tail survive. Failed/cancelled candidates leave the old checkpoint;
 profile CAS rejects stale candidates, and deleting the last note clears its memory sections in the
-next successful snapshot. This is explicit compaction, not automatic budget compression.
+next successful snapshot. Automatic capacity preparation uses its own selected policy and the same publication boundaries.
 
-Context domain 3 is checked through read-only SQLite before any writable open/recovery. Unsupported
+The current context domain format is checked through read-only SQLite before any writable open/recovery. Unsupported
 or malformed native context formats preserve their assets. Declared TEXT primary keys and revision
 uniqueness require complete non-partial BINARY/ASC indexes; foreign-key targets/actions are checked.
 ASC is the canonical format requirement, not a claim that DESC weakens uniqueness. No migration or silent reconstruction is
@@ -182,7 +143,9 @@ provided. Per-note tombstones and original typed-record operation receipts are r
 conversation checkpoints or unresolved effects may reference them. No automatic receipt/tombstone
 GC is claimed; the memory owner does not release those operation records prematurely.
 
-Native implementation verification is owned by the independent memory delivery review suites;
-implementation/build status and acceptance evidence are recorded in the implementation plan after
-source and binary freeze. These contracts do not imply that the complete native context design or
-Pi cutover is finished.
+## Verification
+
+`agent-personalization.native.test.ts` covers real Rust persistence, scope isolation and stale edits.
+Native memory delivery suites exercise request facts and checkpoint publication; UI behavior tests
+cover editing and scope selection. These local checks do not establish live-provider or installed-product
+acceptance. Use the [development guide](../../../../../docs/development.md) for current commands.

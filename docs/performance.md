@@ -6,10 +6,8 @@
 ## 当前取舍
 
 - Documents 按已提交 registry 惰性建立 ID/path 索引并共享冷加载；失败候选不发布索引。热精确查找变轻，首次索引和全列表仍随规模增长。
-- Pi Thread Registry 复用已提交 catalog 身份/派生索引，同时保留目录发现及重启/损坏检查。Catalog 写入仍是整份工作。
 - Node IPC 直接校验已解码 envelope，不第二次 stringify/parse；文本 framing 仍有 decoder。Rust control/content 分开保护取消元数据。
-- Pi timeline 保持历史 row，只更新 live overlay，overlay 绑定实际 row generation，避免复用 row 借到新内容。
-  这减少 React 工作，不是浏览器 FPS 保证。
+- Thread projection 分开读取持久历史和临时输出，重连按原事件 cursor 追平；UI 更新成本与实际浏览器帧率仍需独立测量。
 - Knowledge 在 storage owner 内完成 revision 检查及完整 block 评分，只传紧凑 document score。
   首次索引和高维评分仍有成本；authority/semantic 进程分离保护无关写入。
 - Native compute 复用捕获 digest，每语言只缓存最近完整 tree-sitter recipe。编译失败保留旧缓存；频繁换 recipe 会重编译，
@@ -33,11 +31,8 @@
 
 ```sh
 node --import tsx scripts/measure-document-registry.mjs
-node --import tsx packages/web/scripts/thread-registry-perf.ts
 node --import tsx packages/web/scripts/perf-knowledge-recall.ts 1000 8 2048 engine
 node --import tsx packages/web/scripts/perf-knowledge-recall.ts 1000 8 2048 ipc
-node packages/runtime-broker/scripts/measure-ipc.mjs
-VARIN_PERF_UI=1 bun run --cwd packages/ui test src/components/pi-session/PiTimeline.streaming.test.tsx
 ```
 
 `scripts/measure-kernel.mjs` 接受 `--compute-hotpaths`、输出 JSON 路径和 staged release executable。

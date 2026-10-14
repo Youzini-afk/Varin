@@ -2,10 +2,9 @@
 
 Native model adapters receive transient dispatch headers through the Application Host's private
 credential bridge. The Host [model service](../../../../../packages/web/application-host/lib/models/DOCUMENTATION.md)
-owns native account configuration, login, refresh and credential-source selection. It does not load
-Pi's SDK or use Pi's account store. Pi remains the default conversation runtime and retains its own
-credential authority for existing Pi sessions. Neither path creates a second writer for the other's
-assets.
+owns account configuration, login, refresh and credential-source selection. The native product does
+not load Pi's SDK or import its account store. Historical credentials and other user assets remain
+untouched; they cannot authorize native dispatch.
 
 ## Owners and entry points
 
@@ -23,7 +22,7 @@ assets.
   not a second production credential store.
 
 Storage, revisioned settings and OAuth interactions are documented with the model service. This file
-covers the native dispatch boundary, not the separate Pi worker credential protocol.
+covers the private native dispatch boundary.
 
 ## Frozen identity and lifetime
 
@@ -96,8 +95,9 @@ Rust adapter does not load the cloud credential chain or persist signing secrets
 
 Native Anthropic subscription OAuth uses the Host's own OAuth provider and account storage. The
 selected `anthropicOauth` mode fixes the matching identity/tool-name/header/body contract and is
-checked around resolution. API-key mode does not inherit that contract. Pi's workload-federation
-helpers are not evidence of native channel support.
+checked around resolution. API-key mode does not inherit that contract. Explicit workload federation
+is separately owned by the Host's `anthropic-auth.ts` and selected `anthropic-federation` source;
+its identity-file exchange does not enable subscription-only request decoration.
 
 Codex requires both a Bearer token and the selected account header. The Host authorization flow
 owns that account metadata; the Rust adapter cannot decode an arbitrary JWT to invent authority.
