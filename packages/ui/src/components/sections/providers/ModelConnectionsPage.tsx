@@ -1,5 +1,5 @@
 import React from 'react';
-import { createModelConnectionsHttpAPI, getRuntimeEndpointGeneration, subscribeRuntimeEndpointChanged, type ModelChannel, type ChannelModel, type ModelConnectionsSnapshot, type DiscoveredModel, type ConnectionAuthentication, type AuthorizationState } from '@varin/application-client';
+import { createModelConnectionsHttpAPI, getRuntimeEndpointGeneration, subscribeRuntimeEndpointChanged, type ModelChannel, type ModelConnectionOptions, type ChannelModel, type ModelConnectionsSnapshot, type DiscoveredModel, type ConnectionAuthentication, type AuthorizationState } from '@varin/application-client';
 import { SettingsPageLayout } from '../shared/SettingsPageLayout';
 import { SettingsSection, SettingsFieldRow } from '../shared/SettingsSection';
 import { AuthorizationPanel } from '../shared/AuthorizationPanel';
@@ -47,6 +47,12 @@ export function ModelConnectionsPage() {
   const choose = (channel: ModelChannel) => { cancelAuthorization(); setInvalidFields(new Set()); setEditorGeneration(value => value + 1); setDraft(structuredClone(channel)); setBaseRevision(snapshot!.revision); setCandidates([]); setSecret(''); setError(null); };
   const type = snapshot?.types.find(type => type.id === draft?.type);
   const edit = (patch: Partial<ModelChannel>) => setDraft(value => value ? { ...value, ...patch } : value);
+  const editConnection = (patch: Partial<ModelConnectionOptions>) => {
+    if (!draft) return;
+    const connection = { ...draft.connection, ...patch };
+    for (const key of Object.keys(connection) as (keyof ModelConnectionOptions)[]) if (connection[key] === undefined) delete connection[key];
+    edit({ connection: Object.keys(connection).length ? connection : undefined });
+  };
   const editModel = (index: number, patch: Partial<ChannelModel>) => { if (draft) edit({ models: draft.models.map((model, i) => i === index ? { ...model, ...patch } : model) }); };
   const validity = (key: string, valid: boolean) => setInvalidFields(previous => { if (previous.has(key) === !valid) return previous; const next = new Set(previous); if (valid) next.delete(key); else next.add(key); return next; });
   const run = async (work: () => Promise<void>) => {
@@ -84,9 +90,27 @@ export function ModelConnectionsPage() {
           <SettingsFieldRow label={t('settings.models.type')}><Select value={draft.type} disabled={busy} onValueChange={id => {
             const next = snapshot.types.find(type => type.id === id)!;
             setInvalidFields(new Set());
-            edit({ type: id, baseUrl: next.defaultBaseUrl ?? '', parameters: {}, models: [], authentication: next.authentication.includes('credential') ? { kind: 'credential', reference: '' } : { kind: next.authentication[0]! } as ConnectionAuthentication });
+            edit({ type: id, baseUrl: next.defaultBaseUrl ?? '', connection: undefined, parameters: {}, models: [], authentication: next.authentication.includes('credential') ? { kind: 'credential', reference: '' } : { kind: next.authentication[0]! } as ConnectionAuthentication });
           }}><SelectTrigger size="settings" aria-label={t('settings.models.type')}><SelectValue /></SelectTrigger><SelectContent>{snapshot.types.map(type => <SelectItem key={type.id} value={type.id}>{type.name}</SelectItem>)}</SelectContent></Select></SettingsFieldRow>
           <SettingsFieldRow label={t('settings.models.endpoint')}><Input value={draft.baseUrl} disabled={busy} onChange={event => edit({ baseUrl: event.target.value })} /></SettingsFieldRow>
+          <details className="space-y-3"><summary className="cursor-pointer typography-meta">{t('settings.models.network')}</summary>
+            <SettingsFieldRow label={t('settings.models.proxy')}><Select value={draft.connection?.proxy?.mode ?? 'host'} disabled={busy} onValueChange={mode => editConnection({ proxy: mode === 'host' ? undefined : mode === 'direct' ? { mode } : { mode: 'proxy', url: '' } })}>
+              <SelectTrigger size="settings" aria-label={t('settings.models.proxy')}><SelectValue /></SelectTrigger><SelectContent>
+                <SelectItem value="host">{t('settings.models.proxyHost')}</SelectItem><SelectItem value="direct">{t('settings.models.proxyDirect')}</SelectItem><SelectItem value="proxy">{t('settings.models.proxyCustom')}</SelectItem>
+              </SelectContent></Select></SettingsFieldRow>
+            {draft.connection?.proxy?.mode === 'proxy' ? <SettingsFieldRow label={t('settings.models.proxyUrl')}><Input aria-label={t('settings.models.proxyUrl')} value={draft.connection.proxy.url} disabled={busy} placeholder="http://127.0.0.1:8080" onChange={event => editConnection({ proxy: { mode: 'proxy', url: event.target.value } })} /></SettingsFieldRow> : null}
+            <p className="typography-micro text-muted-foreground">{t('settings.models.proxyHint')}</p>
+            <SettingsFieldRow label={t('settings.models.headers')}><JsonObjectField value={draft.connection?.headers} label={t('settings.models.headers')} disabled={busy} validate={headers => Object.values(headers).every(value => typeof value === 'string')} onValidityChange={valid => validity('connection:headers', valid)} onChange={headers => {
+              editConnection({ headers: headers as Record<string, string> | undefined });
+            }} /></SettingsFieldRow>
+            <p className="typography-micro text-muted-foreground">{t('settings.models.headersHint')}</p>
+            <p className="typography-micro text-muted-foreground">{t('settings.models.pathsHint')}</p>
+            {type.operations.filter(operation => operation !== 'decision' || type.protocol !== 'llama-cpp-classify').map(operation => <SettingsFieldRow key={operation} label={t(`settings.models.operation.${operation}`)}><Input aria-label={`${t('settings.models.path')}: ${t(`settings.models.operation.${operation}`)}`} value={draft.connection?.paths?.[operation] ?? ''} disabled={busy} placeholder={t('settings.models.default')} onChange={event => {
+              const paths = { ...draft.connection?.paths };
+              if (event.target.value) paths[operation] = event.target.value; else delete paths[operation];
+              editConnection({ paths: Object.keys(paths).length ? paths : undefined });
+            }} /></SettingsFieldRow>)}
+          </details>
           <SettingsFieldRow label={t('settings.models.authentication')}><Select value={draft.authentication.kind} disabled={busy} onValueChange={kind => edit({ authentication: kind === 'credential' ? { kind, reference: '' } : kind === 'environment' ? { kind, variable: '' } : { kind } as ConnectionAuthentication })}>
             <SelectTrigger size="settings" aria-label={t('settings.models.authentication')}><SelectValue /></SelectTrigger><SelectContent>{type.authentication.map(kind => <SelectItem key={kind} value={kind}>{t(`settings.models.auth.${kind}`)}</SelectItem>)}</SelectContent>
           </Select></SettingsFieldRow>
@@ -119,7 +143,7 @@ export function ModelConnectionsPage() {
               <label className="flex items-center gap-2 typography-meta"><Checkbox checked={model.input?.includes('image') ?? false} disabled={busy} onChange={checked => editModel(index, { input: checked ? [...model.input ?? ['text'], 'image'] : (model.input ?? ['text']).filter(value => value !== 'image') })} />{t('settings.models.imageInput')}</label>
               <SettingsFieldRow label={t('settings.models.reasoning')}><Select disabled={busy} value={model.reasoning === undefined ? 'unknown' : model.reasoning ? 'yes' : 'no'} onValueChange={value => { const next = { ...model }; if (value === 'unknown') delete next.reasoning; else next.reasoning = value === 'yes'; edit({ models: draft.models.map((entry, i) => i === index ? next : entry) }); }}><SelectTrigger size="settings" aria-label={t('settings.models.reasoning')}><SelectValue /></SelectTrigger><SelectContent><SelectItem value="unknown">{t('settings.models.default')}</SelectItem><SelectItem value="yes">{t('settings.models.enabled')}</SelectItem><SelectItem value="no">{t('settings.models.disabled')}</SelectItem></SelectContent></Select></SettingsFieldRow>
             </> : null}
-            <details><summary className="cursor-pointer typography-meta">{t('settings.models.parameters')}</summary>{(['parameters', 'compat', 'thinkingLevelMap'] as const).map(field => <SettingsFieldRow key={field} label={t(`settings.models.${field}`)}><JsonObjectField value={model[field] as Record<string, JsonValue> | undefined} label={t(`settings.models.${field}`)} disabled={busy} onValidityChange={valid => validity(`${model.id}:${field}`, valid)} onChange={value => { const next = { ...model }; if (value === undefined) delete next[field]; else Object.assign(next, { [field]: value }); edit({ models: draft.models.map((entry, i) => i === index ? next : entry) }); }} /></SettingsFieldRow>)}</details>
+            <details><summary className="cursor-pointer typography-meta">{t('settings.models.parameters')}</summary>{(['parameters', 'compat', 'thinkingLevelMap', 'image'] as const).map(field => <SettingsFieldRow key={field} label={t(`settings.models.${field}`)}><JsonObjectField value={model[field] as Record<string, JsonValue> | undefined} label={t(`settings.models.${field}`)} disabled={busy} onValidityChange={valid => validity(`${model.id}:${field}`, valid)} onChange={value => { const next = { ...model }; if (value === undefined) delete next[field]; else Object.assign(next, { [field]: value }); edit({ models: draft.models.map((entry, i) => i === index ? next : entry) }); }} /></SettingsFieldRow>)}</details>
           </div>)}
           <div className="flex gap-2"><Input aria-label={t('settings.models.modelId')} placeholder={t('settings.models.modelId')} value={modelId} disabled={busy} onChange={event => setModelId(event.target.value)} /><Button variant="outline" disabled={busy || !modelId.trim()} onClick={() => addModel(modelId)}>{t('settings.models.addModel')}</Button></div>
           {type.discovery && snapshot.channels.some(channel => channel.id === draft.id) ? <Button variant="outline" disabled={busy} onClick={() => { void run(async () => setCandidates((await api.discover(draft.id)).models)); }}>{t('settings.models.discover')}</Button> : null}

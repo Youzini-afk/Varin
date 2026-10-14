@@ -621,6 +621,12 @@ pub trait ModelProvider: Send + Sync {
 
     /// Serialize and validate the semantic view. Reject unsupported attachment kinds explicitly.
     fn serialize(&self, view: &RequestView, reuse: Option<&mut RequestCompileReuse>) -> Result<RequestBody, ExecutionError>;
+    /// Brokered encoders retain the original caller until their callback has actually drained.
+    /// Pure in-process adapters use the same entry without an additional execution owner.
+    fn serialize_cancellable(&self, view: &RequestView, reuse: Option<&mut RequestCompileReuse>, cancel: &CancellationToken) -> Result<RequestBody, ExecutionError> {
+        if cancel.is_cancelled() { return Err(ExecutionError::new("cancelled", "request compilation cancelled")); }
+        self.serialize(view, reuse)
+    }
     /// Optional pure serializer/usage contract. Unknown adapters retain the explicit local estimate.
     fn request_budget_protocol(&self) -> Option<crate::context_capacity::RequestBudgetProtocol> {
         None
@@ -2244,6 +2250,7 @@ impl<
                         instructions,
                         evidence,
                         policy_state.clone(),
+                        &cancel,
                     ) {
                         Ok(job) => job,
                         Err(error)
@@ -2521,8 +2528,8 @@ impl<
                         selected_model.as_ref().map(|selected| selected.provider.clone()));
                     let serialized =
                         match guarded("provider_serialize_panicked", || match &selected_model {
-                            Some(selected) => selected.provider.serialize(&view, Some(&mut request_compile_reuse)),
-                            None => self.provider.serialize(&view, Some(&mut request_compile_reuse)),
+                            Some(selected) => selected.provider.serialize_cancellable(&view, Some(&mut request_compile_reuse), &model_cancel),
+                            None => self.provider.serialize_cancellable(&view, Some(&mut request_compile_reuse), &model_cancel),
                         }) {
                             Ok(serialized) => serialized,
                             Err(error) => finish!('agent, RunState::Failed, None, Some(error)),
@@ -2536,8 +2543,8 @@ impl<
                         proposed.binding.memory_checkpoint = context.memory_checkpoint;
                         proposed.binding.resource_activations = crate::catalog::resources::retained_activations(&proposed.history);
                         let serialized = guarded("provider_serialize_panicked", || match &selected_model {
-                            Some(selected) => selected.provider.serialize(&proposed, None),
-                            None => self.provider.serialize(&proposed, None),
+                            Some(selected) => selected.provider.serialize_cancellable(&proposed, None, &model_cancel),
+                            None => self.provider.serialize_cancellable(&proposed, None, &model_cancel),
                         })?;
                         // A changed checkpoint cannot borrow the previous request's usage calibration.
                         Ok(crate::context_capacity::estimate_request(&proposed, &serialized))

@@ -81,7 +81,7 @@ operation owner records.
 
 ## Model, tool and extension bridges
 
-Model and credential selection uses the existing authorities. Runtime provider adapters freeze the
+Model and credential selection uses the native [Host model service](../models/DOCUMENTATION.md). Runtime provider adapters freeze the
 selected request contract; Host credentials are retained privately, not stored in snapshots. Purpose-
 specific retrieval and memory inference share actual Catalog admission/receipts without creating a Pi
 worker. Provider details belong to [providers](../../../../../kernel/crates/varin-runtime/src/providers/README.md).
@@ -95,7 +95,7 @@ Context transforms and budgets are selected extension capabilities. Their candid
 versioned and separate from the immutable request already sent. Runtime contract discovery exposes the
 actual selected registry metadata, not guessed support from an extension manifest alone.
 
-MCP uses the shared [Host authority](../../../../pi-host/src/mcp-authority.md). Configuration identity and
+MCP uses the native shared [Host authority](../mcp/DOCUMENTATION.md), separate from Pi's owner. Configuration identity and
 live owner generation differ: re-enabling an equal configuration creates a fresh binding, while revoked
 old exchanges stay revoked. Managed MCP source stop starts the exact target stop before joining its
 pending observer acknowledgement. Original stop/receipt/resource cleanup remains necessary; cancelling

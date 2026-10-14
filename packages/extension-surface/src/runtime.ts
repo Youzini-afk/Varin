@@ -340,7 +340,7 @@ export class SurfaceExtensionRuntime {
   activateWithCommit(
     options: SurfaceActivationOptions,
     activation: SurfaceActivation,
-    commit: (signal: AbortSignal) => void | Promise<void>,
+    commit: (signal: AbortSignal, preparation: { preparedConsumerCount: number }) => void | Promise<void>,
   ): Promise<SurfaceOwnerHandle> {
     return this.activateBatchWithCommit([{ activation, options }], commit)
       .then((handles) => handles[0] as SurfaceOwnerHandle);
@@ -353,7 +353,7 @@ export class SurfaceExtensionRuntime {
 
   activateBatchWithCommit(
     requests: readonly { activation: SurfaceActivation; options: SurfaceActivationOptions }[],
-    commit: (signal: AbortSignal) => void | Promise<void>,
+    commit: (signal: AbortSignal, preparation: { preparedConsumerCount: number }) => void | Promise<void>,
   ): Promise<SurfaceOwnerHandle[]> {
     if (requests.length === 0) return Promise.resolve([]);
     const extensionId = requests[0]?.options.owner.extensionId as string;
@@ -545,7 +545,7 @@ export class SurfaceExtensionRuntime {
             ...leases.flatMap((lease) => lease.signal ? [lease.signal] : []),
           ]);
           commitSignal.throwIfAborted();
-          await commit(commitSignal);
+          await commit(commitSignal, { preparedConsumerCount: leases.length });
           // The external commit is the transaction boundary. A newer queued lifecycle request may
           // arrive while it is in flight; publish this committed generation first, then let that
           // queued request replace or deactivate it without turning a successful catalog commit

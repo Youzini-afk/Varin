@@ -18,6 +18,8 @@ export interface SecretStore {
 }
 export interface ResolvedCredential { auth: { apiKey?: string; headers?: Record<string, string | null>; baseUrl?: string }; source?: string }
 export interface OAuthProvider {
+  /** Retain the exact reviewed implementation for a captured execution. */
+  capture?(): { provider: OAuthProvider; release(): void };
   refresh(value: Extract<AccountCredential['value'], { kind: 'oauth' }>): Promise<Extract<AccountCredential['value'], { kind: 'oauth' }>>;
   headers(value: Extract<AccountCredential['value'], { kind: 'oauth' }>): Record<string, string>;
 }
@@ -43,11 +45,37 @@ export class CredentialService {
   readonly #refreshes = new Map<string, Promise<AccountCredential>>();
   readonly #dynamic = new Map<string, { value: string; account: string }>();
   readonly #oauth = new Map<string, OAuthProvider>();
+  readonly #oauthOwners = new Map<string, string>();
   constructor(readonly authorityId: string, readonly store: SecretStore) {}
   registerOAuth(id: string, provider: OAuthProvider) {
     if (this.#oauth.has(id)) throw new Error(`Authentication provider already registered: ${id}`);
     this.#oauth.set(id, provider);
     return () => { if (this.#oauth.get(id) === provider) this.#oauth.delete(id); };
+  }
+  prepareOAuthReplacement(owner: string, providers: readonly { id: string; provider: OAuthProvider }[]): () => void {
+    const next = new Map<string, OAuthProvider>();
+    for (const value of providers) {
+      if (next.has(value.id) || this.#oauth.has(value.id) && this.#oauthOwners.get(value.id) !== owner) throw new Error(`Authentication provider already registered: ${value.id}`);
+      next.set(value.id, value.provider);
+    }
+    return () => {
+      for (const [id, current] of this.#oauthOwners) if (current === owner) { this.#oauth.delete(id); this.#oauthOwners.delete(id); }
+      for (const [id, provider] of next) { this.#oauth.set(id, provider); this.#oauthOwners.set(id, owner); }
+    };
+  }
+  async captureResolver(source: ConnectionAuthentication, reference: string) {
+    const record = source.kind === 'credential' ? await this.#read(source.reference) : undefined;
+    const oauth = record?.value.kind === 'oauth' ? this.#oauth.get(record.value.provider) : undefined;
+    if (record?.value.kind === 'oauth' && !oauth) return invalid('oauth-provider-unavailable', 'The selected authentication provider is unavailable');
+    const captured = oauth?.capture?.();
+    let released = false;
+    return {
+      resolve: (signal?: AbortSignal, dispatch?: CredentialDispatch) => {
+        if (released) return Promise.reject(new ModelConfigurationError('credential-binding-released', 'The account binding has been released'));
+        return this.#resolve(source, reference, signal, dispatch, record && oauth ? { account: record, provider: captured?.provider ?? oauth } : undefined);
+      },
+      release: () => { if (!released) { released = true; captured?.release(); } },
+    };
   }
   async #read(reference: string): Promise<AccountCredential> {
     if (!reference) return invalid('credential-reference-missing', 'Select a credential');
@@ -111,16 +139,18 @@ export class CredentialService {
     if (source.kind === 'none') return { reference, authority: this.authorityId, account: 'anonymous', generation: 0 };
     return invalid('credential-resolver-required', 'Cloud authentication must be resolved by its registered owner');
   }
-  async #fresh(reference: string, record: AccountCredential): Promise<AccountCredential> {
+  async #fresh(reference: string, record: AccountCredential, capturedProvider?: OAuthProvider): Promise<AccountCredential> {
     if (record.value.kind !== 'oauth' || record.value.expiresAt === undefined || record.value.expiresAt > Date.now()) return record;
     const key = JSON.stringify([reference, record.account, record.generation]);
     let pending = this.#refreshes.get(key);
     if (!pending) {
-      const provider = this.#oauth.get(record.value.provider);
+      const provider = capturedProvider ?? this.#oauth.get(record.value.provider);
       if (!provider) return invalid('oauth-provider-unavailable', 'The selected authentication provider is unavailable');
       const oauth = record.value;
+      const retained = provider.capture?.();
       pending = (async () => {
-        const value = await provider.refresh(oauth);
+        try {
+        const value = await (retained?.provider ?? provider).refresh(oauth);
         if (value.provider !== oauth.provider || value.accountId !== oauth.accountId) return invalid('credential-account-changed', 'Sign in again to confirm the account');
         const next = { ...record, value };
         await this.store.modify(reference, raw => {
@@ -129,21 +159,28 @@ export class CredentialService {
           return JSON.stringify(next);
         });
         return next;
+        } finally { retained?.release(); }
       })();
       this.#refreshes.set(key, pending);
       void pending.then(() => { if (this.#refreshes.get(key) === pending) this.#refreshes.delete(key); }, () => { if (this.#refreshes.get(key) === pending) this.#refreshes.delete(key); });
     }
     return pending;
   }
-  async resolve(source: ConnectionAuthentication, reference: string, signal?: AbortSignal, _dispatch?: CredentialDispatch): Promise<ResolvedCredential> {
+  resolve(source: ConnectionAuthentication, reference: string, signal?: AbortSignal, dispatch?: CredentialDispatch): Promise<ResolvedCredential> {
+    return this.#resolve(source, reference, signal, dispatch);
+  }
+  async #resolve(source: ConnectionAuthentication, reference: string, signal?: AbortSignal, _dispatch?: CredentialDispatch,
+    captured?: { account: AccountCredential; provider: OAuthProvider }): Promise<ResolvedCredential> {
     signal?.throwIfAborted();
     if (source.kind === 'none') return { auth: {}, source: 'anonymous' };
     if (source.kind === 'environment') return { auth: { apiKey: this.#environment(source, reference).value }, source: 'environment' };
     if (source.kind !== 'credential') return invalid('credential-resolver-required', 'Cloud authentication must be resolved by its registered owner');
     const record = await this.#read(source.reference);
-    const fresh = await waitWithSignal(this.#fresh(source.reference, record), signal);
+    if (captured && (!sameAccount(captured.account, record) || record.value.kind !== 'oauth'
+      || captured.account.value.kind !== 'oauth' || record.value.provider !== captured.account.value.provider)) return invalid('credential-scope-changed', 'The selected account changed');
+    const provider = record.value.kind === 'oauth' ? captured?.provider ?? this.#oauth.get(record.value.provider) : undefined;
+    const fresh = await waitWithSignal(this.#fresh(source.reference, record, provider), signal);
     if (fresh.value.kind === 'api-key') return { auth: { apiKey: fresh.value.key }, source: 'credential file' };
-    const provider = this.#oauth.get(fresh.value.provider);
     if (!provider) return invalid('oauth-provider-unavailable', 'The selected authentication provider is unavailable');
     return { auth: { headers: provider.headers(fresh.value) }, source: 'oauth' };
   }

@@ -1,4 +1,15 @@
 export const settingsDict = {
+  "settings.models.network": "네트워크 및 프로토콜",
+  "settings.models.proxy": "프록시",
+  "settings.models.proxyHost": "Host 설정 사용",
+  "settings.models.proxyDirect": "직접 연결",
+  "settings.models.proxyCustom": "사용자 지정 프록시",
+  "settings.models.proxyUrl": "프록시 URL",
+  "settings.models.proxyHint": "HTTP(S) 프록시 원본 주소만 입력하세요. 인증 정보는 포함하지 마세요.",
+  "settings.models.headers": "민감하지 않은 헤더",
+  "settings.models.headersHint": "JSON 문자열 값만 입력하세요. API 키, 토큰, 쿠키는 인증 설정에서 관리하세요.",
+  "settings.models.path": "프로토콜 경로",
+  "settings.models.pathsHint": "선택 경로는 /로 시작하며 엔드포인트의 기존 경로에 추가됩니다. 비워 두면 기본값을 사용합니다.",
   "settings.agents.configured": "구성됨",
   // New profile controls use the English fallback until localized.
   "settings.agents.editRuntime": "Edit tools for runtime",
@@ -3972,4 +3983,5 @@ export const settingsDict = {
   "settings.varin.recovery.storage.historyDescription": "복구 기록이 남아 있는 작업 공간만 표시합니다. 정리해도 참조된 체크포인트와 작업 공간 버전은 유지됩니다.",
   "settings.varin.recovery.storage.cleanupShared": "참조되지 않은 콘텐츠 정리",
   "settings.varin.recovery.storage.cleanupNothing": "회수할 콘텐츠가 없습니다. 참조된 체크포인트와 작업 공간 버전은 유지됩니다.",
+  "settings.models.image": "이미지 기능 (마스크, 매개변수 스키마)",
 } as const;

@@ -1,4 +1,4 @@
-import { expect, it } from 'vitest';
+import { expect, it, vi } from 'vitest';
 import { createModelAuthority } from './model-authority.js';
 import { CredentialBridge, type PrivateCredentialResponse } from './credential-bridge.js';
 import { ExistingHostCredentialOwner, type CredentialOwnerOptions, type CredentialScope } from './credential-owner.js';
@@ -25,8 +25,11 @@ it('model selection preserves capacity, thinking mapping and sampling through cr
   await authority.rebindModel(explicit.configuration, scope);
   await expect(authority.resolveModel({ providerId: 'fixture-provider', modelId: 'deepseek-fixture', temperature: Number.NaN })).rejects.toMatchObject({ code: 'model-temperature-invalid' });
   topP = 0.9;
-  await expect(authority.rebindModel(configuration, scope)).rejects.toMatchObject({ code: 'model-configuration-changed' });
-  await expect(authority.rebindModel(explicit.configuration, scope)).rejects.toMatchObject({ code: 'model-configuration-changed' });
+  const recovered = await authority.rebindModel(configuration, scope);
+  const recoveredExplicit = await authority.rebindModel(explicit.configuration, scope);
+  expect(configuration.modelOptions).toMatchObject({ samplingParams: { top_p: 0.8 } });
+  expect((await recovered.resolve(scope)).headers.authorization).toBe('Bearer fake-test-key');
+  recovered.release(); recoveredExplicit.release();
 });
 function owner(overrides: Partial<CredentialOwnerOptions> = {}) {
   return new ExistingHostCredentialOwner({ providerId: 'fixture-provider', providerFamily: 'openai-responses', endpoint: 'https://model.example.test/v1/responses', currentScope: async () => ({ ...scope }), runtime: { getAuth: async () => ({ auth: { apiKey: 'fake-test-key' } }) }, ...overrides });
@@ -208,6 +211,7 @@ it('trusted header-only connection supports provider-specific authentication hea
 });
 
 it.each([
+  ['https://aiplatform.googleapis.com/v1', 'us-central1', 'https://us-central1-aiplatform.googleapis.com/v1/projects/fixture-project/locations/us-central1/publishers/google/models/gemini-fixture:streamGenerateContent'],
   ['', 'us-central1', 'https://us-central1-aiplatform.googleapis.com/v1/projects/fixture-project/locations/us-central1/publishers/google/models/gemini-fixture:streamGenerateContent'],
   ['https://{location}-aiplatform.googleapis.com', 'global', 'https://aiplatform.googleapis.com/v1/projects/fixture-project/locations/global/publishers/google/models/gemini-fixture:streamGenerateContent'],
   ['https://vertex.example.test/custom/v1', 'us-central1', 'https://vertex.example.test/custom/v1/publishers/google/models/gemini-fixture:streamGenerateContent'],
@@ -251,4 +255,41 @@ it('private dispatch accepts only the digest contract and preserves request iden
   }
   expect(dispatches).toHaveLength(1);
   bridge.close();
+});
+
+it('releases captured authentication only after retained owners and cancelled refresh actually drain', async () => {
+  let complete!: (value: { auth: { apiKey: string } }) => void;
+  const release = vi.fn();
+  const scope = { reference: 'captured', authority: 'host', account: 'account', generation: 1 };
+  const owner = new ExistingHostCredentialOwner({ runtime: { getAuth: async () => new Promise(resolve => { complete = resolve; }) },
+    providerId: 'channel', providerFamily: 'openai-responses', endpoint: 'https://example.test/v1/responses',
+    currentScope: async () => scope, release });
+  const retained = owner.retain(); owner.release();
+  const abort = new AbortController(); const result = owner.resolve(scope, abort.signal);
+  await Promise.resolve(); await Promise.resolve();
+  abort.abort(); await expect(result).rejects.toMatchObject({ code: 'credential-cancelled' });
+  retained(); expect(release).not.toHaveBeenCalled();
+  complete({ auth: { apiKey: 'test' } });
+  await vi.waitFor(() => expect(release).toHaveBeenCalledTimes(1));
+  owner.release(); retained(); expect(release).toHaveBeenCalledTimes(1);
+  await expect(owner.scope()).rejects.toMatchObject({ code: 'credential-owner-released' });
+});
+
+
+it('finds the original separately scoped child binding through a retained parent fork', async () => {
+  const mainReleased = vi.fn(), childReleased = vi.fn();
+  const childScope = { ...scope, account: 'child-account' };
+  const main = owner({ bindingIdentity: 'main', release: mainReleased });
+  const child = owner({ bindingIdentity: 'child-original', currentScope: async () => childScope, release: childReleased });
+  await child.scope(); main.retainDependency(child); child.release();
+  const bridge = new CredentialBridge(() => 'epoch', async () => {}, () => {});
+  await bridge.register('parent', main); main.release();
+  const successor = bridge.findOwner('main', scope)!;
+  await bridge.retainQueuedModel('successor', successor); successor.release(); bridge.unregister('parent');
+  expect(bridge.findOwner('child-original', scope)).toBeUndefined();
+  const dispatch = bridge.findOwner('child-original', childScope)!;
+  expect(dispatch).toBeInstanceOf(ExistingHostCredentialOwner);
+  bridge.close(); expect(childReleased).not.toHaveBeenCalled();
+  expect((await dispatch.resolve(childScope)).headers.authorization).toBe('Bearer fake-test-key');
+  dispatch.release(); expect(childReleased).toHaveBeenCalledOnce(); expect(mainReleased).toHaveBeenCalledOnce();
 });

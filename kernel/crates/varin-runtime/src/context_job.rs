@@ -448,6 +448,10 @@ impl ModelProvider for SummaryProvider {
         }
         self.0.serialize(view, reuse)
     }
+    fn serialize_cancellable(&self, view: &RequestView, reuse: Option<&mut RequestCompileReuse>, cancel: &CancellationToken) -> Result<RequestBody, ExecutionError> {
+        if !view.binding.tools.is_empty() { return Err(ExecutionError::new("compaction_tools", "summary requests cannot carry tools")); }
+        self.0.serialize_cancellable(view, reuse, cancel)
+    }
     fn generate(
         &self,
         request: &RequestSnapshot,

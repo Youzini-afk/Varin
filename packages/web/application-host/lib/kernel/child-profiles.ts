@@ -2,12 +2,19 @@
  * This reads no secrets, prepares no child and owns no configuration or execution state. */
 import { createHash } from 'node:crypto';
 import { HarnessSettingsValidationError, agentPresetTools, resolveAgentTools, mergeHarnessSettings, observePresets, type HarnessSettingsInput, type WorkFocusId } from '@varin/protocol';
+import type { ExistingHostCredentialOwner } from './credential-owner.js';
 import type { ThreadModelAuthority } from './thread-adapter.js';
 import type { ThreadThinkingLevel } from '@varin/application-client';
 import type { ChildCapabilityDescriptor, ChildCapabilityFailure, ChildDispatchCatalog, ChildModelBinding, ChildPreset } from './protocol.generated.js';
 import { waitWithSignal } from '../cancellation.js';
+import { waitForModelBinding } from './model-binding-lifetime.js';
 
-export interface ChildProfileInput { parent: ChildModelBinding; workFocus?: WorkFocusId }
+export interface ChildProfileInput {
+  parent: ChildModelBinding;
+  workFocus?: WorkFocusId;
+  /** The original parent selection retains implementations referenced by its frozen child catalog. */
+  modelOwner?: ExistingHostCredentialOwner;
+}
 export type ChildProfilePreparer = (input: ChildProfileInput, signal?: AbortSignal) => Promise<ChildDispatchCatalog>;
 const record = (value: unknown): value is Record<string, unknown> => value !== null && typeof value === 'object' && !Array.isArray(value);
 const canonical = (value: unknown): unknown => Array.isArray(value) ? value.map(canonical)
@@ -61,16 +68,23 @@ export function createChildProfilePreparer(owners: {
           ...((parent.configuration.modelOptions as { temperature?: number } | undefined)?.temperature === undefined ? {}
             : { temperature: (parent.configuration.modelOptions as { temperature: number }).temperature }),
         } : {};
-        const resolved = await waitWithSignal(owners.models.resolveModel({ ...entry.model, ...inherited, ...overrides }), signal);
-        const scope = await waitWithSignal(resolved.credentialOwner.scope(), signal);
-        profile.model = { configuration: resolved.configuration, credential_scope: scope };
-        if (entry.modelSource === 'inherit') {
-          if (!parent.credential_scope) throw new Error('Inherited Host model requires its original scope');
-          // The mapping metadata used to normalize overrides must still match the original
-          // parent generation; changed catalog defaults cannot silently enter an inherited model.
-          await waitWithSignal(owners.models.rebindModel(parent.configuration, parent.credential_scope), signal);
-          profile.inherit_base = structuredClone(parent);
-        }
+        const resolved = await waitForModelBinding(owners.models.resolveModel({ ...entry.model, ...inherited, ...overrides }),
+          model => model.credentialOwner.release(), signal);
+        try {
+          const scope = await waitWithSignal(resolved.credentialOwner.scope(), signal);
+          profile.model = { configuration: resolved.configuration, credential_scope: scope };
+          if (entry.modelSource === 'inherit') {
+            if (!parent.credential_scope) throw new Error('Inherited Host model requires its original scope');
+            // The mapping metadata used to normalize overrides must still match the original
+            // parent generation; changed catalog defaults cannot silently enter an inherited model.
+            const inheritedOwner = await waitForModelBinding(owners.models.rebindModel(parent.configuration, parent.credential_scope),
+              owner => owner.release(), signal);
+            try { profile.inherit_base = structuredClone(parent); }
+            finally { inheritedOwner.release(); }
+          }
+          signal?.throwIfAborted();
+          input.modelOwner?.retainDependency(resolved.credentialOwner);
+        } finally { resolved.credentialOwner.release(); }
       } catch {
         signal?.throwIfAborted(); profile.model = null; profile.inherit_base = null; profile.unavailable = unavailable('child-model-unavailable');
       }

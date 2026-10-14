@@ -1,3 +1,4 @@
+import type { VarinExtensionRestartHandoff } from "./restart-handoff.js";
 export const VARIN_EXTENSION_MANIFEST_SCHEMA_VERSION = 1 as const;
 export const VARIN_EXTENSION_CATALOG_SCHEMA_VERSION = 1 as const;
 export const VARIN_EXTENSION_MANIFEST_FILE = "varin.extension.json" as const;
@@ -239,6 +240,7 @@ export interface VarinExtensionActualState {
 }
 
 export interface VarinExtensionInstallationRecord {
+  restartHandoffs?: VarinExtensionRestartHandoff[];
   candidate?: VarinExtensionCandidateRecord;
   capabilityGrants: VarinExtensionCapabilityGrant[];
   desired: VarinExtensionDesiredState;
@@ -287,6 +289,7 @@ export interface VarinExtensionPublicCandidate {
 }
 
 export interface VarinExtensionCatalogEntry {
+  restartHandoffs?: VarinExtensionRestartHandoff[];
   actual: VarinExtensionActualState[];
   candidate?: VarinExtensionPublicCandidate;
   capabilityGrants: VarinExtensionCapabilityGrant[];
@@ -347,6 +350,8 @@ export interface VarinExtensionHostPreparationIdentity {
 
 /** Trusted Surface-host evidence scoped to its live local preparation transaction. */
 export interface VarinExtensionSurfaceReadiness {
+  /** Validated connected-consumer preparation leases; zero proves module readiness only. */
+  preparedConsumerCount?: number;
   hostPreparation: VarinExtensionHostPreparationIdentity;
   realmId: string;
   surface: VarinApplicationSurface;

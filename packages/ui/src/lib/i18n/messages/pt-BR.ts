@@ -3,6 +3,13 @@ import { settingsDict } from './pt-BR.settings';
 
 export const dict: Record<I18nKey, string> = {
   ...settingsDict,
+  "filesView.workspaceEdit.operation.create": "Criar",
+  "filesView.workspaceEdit.operation.rename": "Renomear",
+  "filesView.workspaceEdit.operation.delete": "Excluir",
+  "filesView.workspaceEdit.draftAffected": "Rascunho não salvo afetado; uma cópia de recuperação será mantida",
+  "filesView.workspaceEdit.recoveryTitle": "Recuperação de alterações do espaço de trabalho",
+  "filesView.workspaceEdit.recoveryDrafts": "Mostrar rascunhos originais",
+  "filesView.workspaceEdit.recoveryNoDrafts": "Esta operação não tem rascunhos originais não salvos.",
   "computer.feedback.title": "Ações do Agent no desktop",
   "computer.feedback.type": "Digitando",
   "computer.feedback.value": "Definindo valor",
@@ -604,6 +611,7 @@ export const dict: Record<I18nKey, string> = {
   'filesView.workspaceEdit.unavailable': 'Não há renomeação nem ação de código disponível neste local.',
   'filesView.workspaceEdit.stale': 'O documento ou o serviço de linguagem mudou. Tente novamente.',
   'filesView.workspaceEdit.cancelled': 'As alterações não foram aplicadas.',
+  'filesView.workspaceEdit.commandFailed': 'As alterações foram aplicadas, mas o comando associado falhou',
   'filesView.workspaceEdit.failed': 'Não foi possível aplicar as alterações do serviço de linguagem',
   'filesView.workspaceEdit.appliedSingle': '{count} arquivo alterado',
   'filesView.workspaceEdit.appliedMany': '{count} arquivos alterados',

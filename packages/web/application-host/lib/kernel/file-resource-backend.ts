@@ -381,7 +381,7 @@ export class KernelFileResourceBackend implements RecoveryFileStore {
     identity: RecoveryIdentity,
     relativePath = "",
     scopes?: readonly string[],
-    options: { signal?: AbortSignal } = {},
+    options: { signal?: AbortSignal; includeInternalEntries?: boolean } = {},
   ): Promise<string[]> {
     const context = await this.bind(identity);
     const output: string[] = [];
@@ -395,6 +395,7 @@ export class KernelFileResourceBackend implements RecoveryFileStore {
         ...(scopes && scopes.length > 0 ? { scopes: scopes.map(normalizeRelative) } : {}),
         ...(cursor === undefined ? {} : { cursor }),
         pageSize: 1024,
+        ...(options.includeInternalEntries === undefined ? {} : { includeInternalEntries: options.includeInternalEntries }),
         ...(expectedFingerprint === undefined ? {} : { expectedFingerprint }),
       }, options.signal);
       const page = Array.isArray(value.paths) && value.paths.every((entry) => typeof entry === "string")

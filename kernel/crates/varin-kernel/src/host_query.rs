@@ -114,6 +114,12 @@ impl OwnerChannel {
             .send(value)
             .map_err(|_| self.failed("channel_closed"))
     }
+    pub(crate) fn release_binding(&self, binding_id: &str) {
+        let epoch = self.state.lock().ok().and_then(|state| state.epoch.clone());
+        if let Some(epoch) = epoch {
+            let _ = self.send(json!({"v":1,"kind":format!("{}-release", self.namespace),"kernelEpoch":epoch,"bindingId":binding_id}));
+        }
+    }
     pub(crate) fn query(
         &self,
         query: Value,

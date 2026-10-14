@@ -4,6 +4,7 @@ import { parseHTML } from 'linkedom';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import type { DocumentsAPI, RuntimeAPIs, ThreadIdentity, ThreadPreparedSource, ThreadsAPI } from '@varin/application-client';
 import { bindDocumentRegistry, resetDocumentRegistry } from '@/lib/documents/session';
+import { unconfiguredWorkspaceEdits } from '@/lib/documents/workspace-edit.test-helper';
 import { registerRuntimeAPIs } from '@/lib/runtime-api/registry';
 import { ThreadSourcePicker } from './ThreadSourcePicker';
 
@@ -55,6 +56,7 @@ async function fixture() {
   const resolveWorkspace = vi.fn<DocumentsAPI['resolveWorkspace']>(async () => ({ workspaceId: selected.workspaceId, hostId: 'host', epoch: 1 }));
   const write = vi.fn<DocumentsAPI['write']>(async () => { throw new Error('Draft preparation must not save'); });
   const documents: DocumentsAPI = {
+    ...unconfiguredWorkspaceEdits,
     resolveWorkspace,
     resolveResourceIdentity: async resource => ({ coordinationId: `host\0${resource.workspaceId}\0${resource.resourceId}`, aliases: [resource] }),
     read: async resource => ({ status: 'ready', epoch: 1, resource, revision: 'disk-revision', content: saved.get(resource.workspaceId)!, encoding: 'utf-8', bom: false, byteLength: 14 }),
@@ -63,7 +65,7 @@ async function fixture() {
     clearDirtyBuffers: async () => ({ cleared: true }), watch: () => ({ close() {} }),
     listRecoveryJournals: async () => [], writeRecoveryJournal: async () => ({ status: 'missing', journalId: 'none' }),
     move: async request => ({ status: 'missing', resource: request.from }), delete: async request => ({ status: 'missing', resource: request.resource }),
-    readRecoveryJournal: async journalId => ({ status: 'missing', journalId }), deleteRecoveryJournal: async journalId => ({ status: 'missing', journalId }),
+    readRecoveryJournal: async journalId => ({ status: 'missing', journalId }), deleteRecoveryJournal: async request => ({ status: 'missing', journalId: request.journalId }),
   };
   registerRuntimeAPIs({ documents } as RuntimeAPIs);
   const registry = bindDocumentRegistry(documents);

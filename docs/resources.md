@@ -125,6 +125,8 @@ Stop 指向原执行/assignment，关闭旧准入并排空真实输入 writer。
 unconfirmed stop 保持分离。证据只留元数据，排除键入文本、脚本、凭据和文件正文，不宣称完整视觉重演。
 
 Linux 已有受管桌面、Chromium/CDP、LibreOffice/UNO，以及 Linux x64 本地 libvirt guest 配方，但不因此证明真实 KVM、
-多机 GUI、安装升级或应用身份验收。Windows/macOS 不继承 Linux bridge。macOS 仍是现有 JXA/capture 路线；稳定原生 bundle
-和正式 Wayland RemoteDesktop/ScreenCast session 属于实现缺口，不能混成仅缺测试机器。
+多机 GUI、安装升级或应用身份验收。Windows/macOS 不继承 Linux bridge。macOS 已接入常驻 Swift bundle，使用
+AX、ScreenCaptureKit 与 CGEvent；Wayland 已接入常驻 RemoteDesktop/ScreenCast portal、PipeWire 捕获和协商的 D-Bus 输入。
+两者共享原 ComputerService 控制与观察 owner，作业取消不等于撤销画面授权。macOS SDK 编译、真实签名与权限流程，
+以及真实 Wayland compositor、PipeWire、输入/缩放和授权撤销仍需实机验收；源码接线和替身测试不证明这些结果。
 详见 [ComputerService](../packages/web/application-host/lib/computer/DOCUMENTATION.md) 与[driver](../packages/computer-driver/README.md)。

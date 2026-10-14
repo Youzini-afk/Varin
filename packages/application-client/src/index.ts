@@ -32,3 +32,5 @@ export * from "./agent-profiles.js";
 export * from "./agent-profiles-http.js";
 export * from "./model-connections.js";
 export * from "./mcp-connections.js";
+
+export * from "./documents-workspace-edit.js";

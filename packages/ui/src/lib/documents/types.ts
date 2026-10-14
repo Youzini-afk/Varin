@@ -124,6 +124,8 @@ export type DocumentWorkspaceEditInput = {
 export type DocumentWorkspaceEditFailureReason =
   | 'workspace-mismatch'
   | 'resource-operation-unsupported'
+  | 'operation-pending'
+  | 'needs-attention'
   | 'missing'
   | 'binary'
   | 'unsupported-encoding'
@@ -146,6 +148,10 @@ export type DocumentWorkspaceEditPreviewFile = {
   beforeContent: string;
   afterContent: string;
   editCount: number;
+  kind?: 'text' | 'create' | 'rename' | 'delete';
+  from?: DocumentIdentity;
+  affectsDraft?: boolean;
+  annotationIds?: string[];
 };
 
 export type DocumentWorkspaceEditPreview = {
@@ -155,6 +161,7 @@ export type DocumentWorkspaceEditPreview = {
   origin: string;
   files: DocumentWorkspaceEditPreviewFile[];
   requiresConfirmation: boolean;
+  changeAnnotations?: DocumentWorkspaceEditInput['changeAnnotations'];
 };
 
 export type DocumentWorkspaceEditPrepareResult =

@@ -275,7 +275,7 @@ fn execute_node(
         binding,
         history: context.history,
     };
-    let serialized = engine.provider.serialize(&view, None)?;
+    let serialized = engine.provider.serialize_cancellable(&view, None, cancel)?;
     let preview =
         |_: ContextProjection| Err(error("summary requests cannot launch recursive compaction"));
     if !matches!(

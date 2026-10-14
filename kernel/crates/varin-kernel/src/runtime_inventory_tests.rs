@@ -386,6 +386,14 @@ fn file_inventory_scopes_hidden_paths_missing_and_measure_facts() {
             "other/secret"
         ])
     );
+    // Workspace resource operations must retain every actual descendant, including
+    // metadata names, without weakening the original grant or changing normal scans.
+    let mut complete = f.params("");
+    complete["includeInternalEntries"] = json!(true);
+    assert_eq!(
+        f.inventory("file.scan", complete, "reader").unwrap()["paths"],
+        json!([".git", ".git/config", ".varin", ".varin/state", "allowed", "allowed/a", "allowed/nested", "allowed/nested/b", "other", "other/secret"])
+    );
     // Explicit scopes preserve the old ability to inventory a named metadata directory.
     let mut explicit = f.params("");
     explicit["scopes"] = json!([".git"]);

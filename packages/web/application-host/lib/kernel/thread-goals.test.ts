@@ -63,6 +63,7 @@ function fixture() {
   } as unknown as KernelClient);
   const models = { resolveModel: vi.fn(async () => ({ configuration: {} as ModelSessionConfiguration, credentialOwner: {
     scope: async () => ({ reference: 'scope', authority: 'fixture', account: 'account', generation: 1 }),
+    release() {}, retain: () => () => {},
   } as ExistingHostCredentialOwner })), rebindModel: vi.fn() };
   const adapter = new ThreadAdapter(runtime, models, vi.fn(), vi.fn());
   const routes = new Map<string, RequestHandler[]>();

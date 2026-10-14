@@ -9,11 +9,14 @@ interface DocumentResource {
 }
 
 export interface WatchEvent {
+  operationId?: string;
   sourceId: string;
   generation: number;
   kind: string;
   sequence: number;
   resource?: DocumentResource;
+  from?: DocumentResource;
+  revision?: string;
   reason?: string;
 }
 
@@ -38,6 +41,7 @@ export interface WorkspaceWatcher {
   readonly generation: number;
   readonly position: WatchPosition;
   readonly coverage: WatchCoverage;
+  publishMutation(event: ({ kind: 'created' | 'changed' | 'deleted'; resource: DocumentResource } | { kind: 'moved'; resource: DocumentResource; from: DocumentResource }) & { operationId?: string }): void;
   overflow(): void;
   reconnect(): void;
   authorityChanged(): void;
@@ -285,6 +289,12 @@ export const createWorkspaceWatcher = ({
   start();
 
   return {
+    publishMutation(event) {
+      if (closed) return;
+      onNamespaceInvalidated?.(event.resource.resourceId);
+      if (event.kind === 'moved') onNamespaceInvalidated?.(event.from.resourceId);
+      onEvent({ ...event, sourceId, generation, sequence: nextSequence() });
+    },
     get ready() { return ready; },
     get connected() {
       return !closed && watcher !== null && (watcher.connected ?? true);

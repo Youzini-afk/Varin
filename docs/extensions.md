@@ -59,6 +59,30 @@ Extension storage 管理 namespace、revision 和原子持久化，扩展管理�
 Remove 和 delete-data 是两个选择；删除仅限该扩展 namespace，不包括项目文件、Pi package 或插件私有数据库。
 读取失败、malformed、missing 与有效空数据始终分开。
 
+## 模型接入贡献
+
+`varin.models@1` 沿同一 Host service 与 composition 提供渠道类型、候选模型目录、认证方式和协议实现。
+单个 provider 可直接解析；多个 provider 通过已有 ordered routing 明确选择。描述校验与准备失败保留上一有效目录，
+贡献中的模型只是候选材料，不会自动保存渠道、恢复用户删除的模型或改写用途绑定。
+
+自定义 SSE 协议通过类型化 `serialize` / `parse` 回调处理原始请求和协议帧；模型 HTTP、SSE framing、
+凭据派发、Operation、usage 和恢复仍由 Rust 执行。`ModelAdapterRegistry` 固定实际 adapter binding，
+不仅比较作者声明的版本；受理准备持有原 composition lease，普通替换不能把旧选择转给新实现。
+耐久配置保存 artifact/composition 与 adapter 元数据的内容身份，进程内 pin UUID 不进入续接身份；
+相同已核验内容在新进程重建可以重新绑定，不同内容仍不能冒充原选择。
+取消只发停止意图，原 broker callback 回应或进程真正退出后才释放其执行寿命。内核断连先取消并等待真实 callback
+结束，清除旧 epoch 的产品贡献；新内核 ready 后重新准备，不把旧 binding ID 交给新进程。
+
+扩展 OAuth 需要已审查的 `varin.models.authentication` 权限。Host 只向该身份传递相关 token，
+其 call-scoped HTTP client 只能 POST 到该 provider 声明的精确 HTTPS token endpoint，禁止重定向和自动重试。
+登录沿用工作台交互，凭据保存、账号身份与合并刷新沿用同一 credential owner；取消等待不取消已发生的 token 轮换保存。
+API key 必须有显式 header 映射，协议编解码器不接触秘密。当前跨进程 codec 的执行合同是 chat/SSE，
+其它操作必须已有对应的原生协议实现，不能因声明一种能力就假定支持。
+
+作者接口与可运行协议样例见 [SDK](../packages/extension-sdk/README.md) 和
+[自定义文本/SSE 协议](../examples/extensions/model-protocol/README.md)。没有新增安装器、动态库加载、
+模型请求数据库或自动跨渠道重试。
+
 ## 激活、发布与退役
 
 Manifest declaration 可在激活前发现。Lazy entrypoint 等待真实 command、contribution-visible、workspace
@@ -110,9 +134,20 @@ Host preparation ID 与本地成员 generation。Catalog commit 重查 artifact�
 响应丢失要读取权威状态。一个 Surface 失败不能丢弃仍由待应用请求持有的有效共享 Host preparation。
 这里没有持久全局窗口注册表，也不声称整个进程或多窗口的原子事务。
 
-Trusted-native Host 前后代不能安全并行准备。Grouped hot update 返回
-`trusted_native_group_update_requires_restart_handoff`。支持路径是 disable、在 disabled 状态下 apply
-已审查候选、重启 Application Host、再 enable。未分组 native update 保留显式 apply/restart 路径。
+Trusted-native Host 前后代不能安全并行准备。普通“应用更新”不重启 Host；enabled native 候选需要
+管理页中明确选择“重启并应用”。Host 先核验不可变候选、已审查权限与固定依赖图，在原 Catalog
+记录带稳定 ID 的更新意图和旧选择，再交给实际启动 owner 沿正常停止流程重启。未提供 restart owner
+的启动方式明确返回不可用，不把 shutdown 当作重启。
+
+新进程在普通激活前恢复交接，先准备候选，禁止把同一扩展的旧代码先载入。只重建 Runtime 对象不等于
+干净进程。具名 Surface group 仍由现有本地 transaction 和已连接 contribution consumer 准备实际挂载；
+原 Host preparation、成员 generation 及已验证 consumer lease 数随提交保存在原更新记录中。
+lease 数为零只证明模块已准备，不证明界面挂载或 paint。等待 Surface 不阻塞 Host 启动，无关服务继续工作。
+
+交接状态区分待重启、准备中、等待具名 Surface、已应用、失败及恢复旧版本的待重启/已恢复。
+提交前失败保留旧 selected artifact，已进入进程的候选不通过 cleanup 假装消失。失败或被中断的交接
+不会在下次启动自动重试；用户可明确新建重试，或重启恢复旧版本。每次更新保留原 ID 与结果，成功的
+Catalog selection 和 applied 结果一起持久提交。响应丢失及随后清理失败读取原提交事实，不改写成未应用。
 单纯 staging 或 review 都不授权激活。
 
 ## Service routing 与精确绑定

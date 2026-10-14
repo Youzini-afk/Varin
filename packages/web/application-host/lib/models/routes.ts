@@ -1,8 +1,9 @@
 import type { Express, RequestHandler } from 'express';
 import type { ModelsService } from './service.js';
 import { object, ModelConfigurationError } from './configuration.js';
+import type { EgressFetch } from '../harness/egress.js';
 
-export function registerModelRoutes(app: Express, models: ModelsService, requireAuth: RequestHandler, fetchImpl: typeof fetch) {
+export function registerModelRoutes(app: Express, models: ModelsService, requireAuth: RequestHandler, fetchImpl: EgressFetch) {
   const actions = {
     read: () => models.read(),
     save: (input: Record<string, unknown>) => models.save(input.channel as Parameters<ModelsService['save']>[0], input.expectedRevision as string),

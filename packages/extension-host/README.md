@@ -233,12 +233,28 @@ Staging a replacement withdraws only obsolete preparation and does not cold-acti
 provider. Ordinary replacement preserves frozen exchange/child pins and their original retirement;
 explicit disable/revocation retains its existing stronger cancellation semantics.
 
-Trusted-native Host modules cannot safely prepare beside a loaded predecessor. Such a grouped
-update reports `trusted_native_group_update_requires_restart_handoff`, retains the old selection,
-and does not use the old cold-restart shortcut to bypass Surface readiness. The supported explicit
-path is to disable the extension, apply the reviewed candidate while disabled, restart the
-application Host, then enable it. Disabled selection does not activate or fake a Host preparation.
-A hot grouped native restart handoff is not implemented by this update contract.
+Trusted-native Host modules cannot safely prepare beside a loaded predecessor. Ordinary application
+reports `trusted_native_group_update_requires_restart_handoff`; it never restarts the Host implicitly.
+`requestRestartHandoff` verifies the exact candidate, reviewed grants, immutable artifacts and fixed
+dependency composition, then persists the caller's stable attempt ID with the original selected identity
+in the Catalog. The Application Host launch owner performs the explicit normal shutdown/relaunch.
+A launch without a restart owner reports unavailability before recording an intent.
+
+`start()` claims pending handoffs before ordinary reconciliation. Preparation runs independently of
+startup, never loading that extension's old selection in the new process. Process identity is shared
+by every Runtime instance in the same actual process. Required Surface members use the existing real
+consumer mount transaction; the original preparation, member generations and validated consumer lease
+count are retained with the atomic Catalog selection/result. Zero consumers means module readiness,
+not a mounted or painted screen. There is no global window registry.
+
+Failed or interrupted attempts become durable failures and are not retried by another boot. Explicit
+retry gets a new attempt ID while preserving previous results. Explicit recovery records a clean restart
+before restoring the previous selected artifact. Replacing/discarding a candidate or changing desired
+state/review invalidates its pending intent. Once publication commits, response loss and cleanup failure
+cannot replace the applied result. The management UI reads the same Catalog history and exposes pending,
+preparing, waiting-Surface, applied, failed and recovery states. Cross-process tests evaluate actual native
+modules and use the real Surface loader and Workbench mount consumer; they do not certify packaged app
+relaunch or platform behavior.
 
 An unpublished broker crash invalidates only its own preparation, never a still-valid selected
 predecessor. If the Catalog has already selected the candidate, subsequent stop/crash does not roll
@@ -258,3 +274,21 @@ in-flight accounting remains authoritative. Disable/revocation blocks fresh prep
 admission. Already admitted checkpoint/request bytes remain historical facts and recover unchanged.
 Context routing uses the existing default-user namespace, admitted project/Thread and the resource
 snapshot's original configuration `projectRoot` as workspace namespace, never its execution cwd.
+
+Model contributions use the same `varin.models@1` service collection and reviewed capability owners.
+The product `ModelsExtensionOwner` prepares the complete channel/catalog/authentication candidate,
+then publishes actual brokered adapters to Rust's original `ModelAdapterRegistry`. Invalid candidates
+leave the previous model catalog authoritative. Native and brokered adapters share the runtime binding
+contract; ordinary compatible channels can reuse a native protocol without creating another codec.
+The fixed private adapter binding ID includes the actual service generation, even when the author
+keeps the same declared adapter version. Durable configuration separately uses the content hash of
+the artifact/composition and adapter metadata; a process-local pin UUID never makes identical verified
+content unrecoverable after restart. Captured selections retain a Rust composition lease before
+model admission, and release it with the existing credential/request owner.
+
+Protocol callbacks are ordinary broker requests. Abort requests cooperation; pending callback and
+service-pin accounting survive until the original response or actual process exit. HTTP and SSE remain
+Rust-owned, and the original request owns usage and continuation evidence. Kernel disconnection aborts
+and drains actual Host callbacks, removes stale product contributions and resets the registry epoch;
+a new ready epoch prepares fresh candidates. Shutdown does not depend on static Rust destructors
+sending release notifications after the control channel has closed.

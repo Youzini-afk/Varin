@@ -375,15 +375,16 @@ describe("computer service (BC4)", () => {
     // The native helper supplies PNG bytes; its IHDR dimensions differ from window units at 2x scale.
     const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aZr8AAAAASUVORK5CYII=', 'base64');
     png.writeUInt32BE(1600, 16); png.writeUInt32BE(1200, 20);
-    const snapshot = { ...appSnapshot(), windowHandle: 73, dpiScale: 2 };
+    const snapshot = { ...appSnapshot(), windowHandle: 73, dpiScale: 2, nativeTarget: "capture-session-1", capturedAt: "2026-10-14T00:00:00Z" };
     const driver = makeDriver(async op => op.tool === 'get_app_state'
       ? okResponse({ snapshot: { ...snapshot, ...(op.screenshot ? { screenshotPngBase64: png.toString('base64'), screenshotSource: 'window' } : {}) } })
       : op.tool === 'click' ? { id: 'x', ok: false, rejected: true, error: 'Window geometry changed' } : okResponse());
     const { service } = makeService(driver);
     const raster = await service.observe({ app: 'notepad', includeScreenshot: true });
     const tree = await service.observe({ app: 'notepad', includeScreenshot: false });
+    expect(raster.capturedAt).toBe(snapshot.capturedAt);
     const result = await service.act({ action: { kind: 'click', app: '42', x: 240, y: 160, observationId: raster.id } });
-    expect(driver.calls.find(op => op.tool === 'click')).toMatchObject({ x: 120, y: 80, window: 73, expected_bounds: snapshot.windowBounds, expected_dpi: 2, capture_source: 'window', return_state: 'none' });
+    expect(driver.calls.find(op => op.tool === 'click')).toMatchObject({ x: 120, y: 80, window: 73, expected_bounds: snapshot.windowBounds, expected_dpi: 2, platform_target: 'capture-session-1', capture_source: 'window', return_state: 'none' });
     expect(result).toMatchObject({ accepted: false, detail: 'Window geometry changed', receipt: { effect: 'none' } });
     expect(await service.act({ action: { kind: 'click', app: '42', elementIndex: 0, observationId: raster.id } })).toMatchObject({ accepted: false, receipt: { effect: 'none', reason: { code: 'target-changed' } } });
     expect(await service.act({ action: { kind: 'click', app: '42', x: 1, y: 1, observationId: tree.id } })).toMatchObject({ accepted: false, receipt: { effect: 'none', reason: { code: 'target-changed' } } });

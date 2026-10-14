@@ -182,7 +182,7 @@ export function createLinuxDesktop(options: { dataDir: string; driverDir: string
       if (current.state !== 'running') throw new HarnessServiceError('unavailable', current.detail ?? `Desktop is ${current.state}`);
       const asUser = process.getuid?.() === 0 && current.uid !== 0;
       return { command: asUser ? 'runuser' : '/usr/bin/python3', args: asUser ? ['-u', current.user!, '--', '/usr/bin/python3', current.driver!] : [current.driver!],
-        env: { ...process.env, ...current.environment } };
+        env: { ...process.env, ...current.environment, WAYLAND_DISPLAY: undefined } };
     },
     async dispose() { await Promise.allSettled([operation, installOperation]); },
   };

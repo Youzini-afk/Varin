@@ -5,7 +5,7 @@ use crate::model::PathState;
 use serde::Deserialize;
 use serde_json::Value;
 
-pub(crate) const KERNEL_PROTOCOL_VERSION: u64 = 40;
+pub(crate) const KERNEL_PROTOCOL_VERSION: u64 = 41;
 pub(crate) const KERNEL_MAX_FRAME_BYTES: usize = 16777216;
 pub(crate) const KERNEL_REQUEST_WINDOW: usize = 2;
 pub(crate) const KERNEL_CONTROL_METHODS: &[&str] = &[
@@ -185,6 +185,32 @@ pub(crate) const KERNEL_RUNTIME_DATA_METHODS: &[&str] = &[
 #[derive(Clone, Debug, Deserialize)]
 #[serde(transparent)]
 pub(crate) struct RequiredNullable<T>(pub(crate) Option<T>);
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct ModelAdaptersRetainParams {
+    pub(crate) binding_id: String,
+    pub(crate) lease_id: String,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct ModelAdaptersReleaseParams {
+    pub(crate) lease_id: String,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct ModelAdaptersPublishParams {
+    pub(crate) expected_revision: i64,
+    pub(crate) adapters: Vec<ModelAdapterContribution>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct ModelAdaptersRevokeParams {
+    pub(crate) binding_id: String,
+}
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -1644,6 +1670,7 @@ pub(crate) struct KernelFileScanParams {
     pub(crate) workspace_id: String,
     pub(crate) root_id: String,
     pub(crate) path: String,
+    pub(crate) include_internal_entries: Option<bool>,
     pub(crate) scopes: Option<Vec<String>>,
     pub(crate) cursor: Option<i64>,
     pub(crate) page_size: Option<i64>,
@@ -2673,6 +2700,17 @@ pub(crate) type SourceResourceAction = crate::source_resources::SourceResourceAc
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct ModelAdapterContribution {
+    pub(crate) identity: String,
+    pub(crate) id: String,
+    pub(crate) version: String,
+    pub(crate) protocol_family: String,
+    pub(crate) binding_id: String,
+    pub(crate) headers: std::collections::BTreeMap<String, String>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct ModelSessionConfiguration {
     pub(crate) provider_id: Option<String>,
     pub(crate) provider_family: String,
@@ -2691,6 +2729,11 @@ pub(crate) struct ModelSessionConfiguration {
     pub(crate) anthropic_oauth: Option<bool>,
     pub(crate) adapter_id: Option<String>,
     pub(crate) adapter_version: Option<String>,
+    pub(crate) aws_region: Option<String>,
+    pub(crate) adapter_identity: Option<String>,
+    pub(crate) adapter_binding_id: Option<String>,
+    pub(crate) connection:
+        Option<varin_runtime::providers::connection_options::ModelHttpConfiguration>,
     pub(crate) context_window_tokens: Option<i64>,
     pub(crate) thinking_level: Option<String>,
     pub(crate) model_options: Option<Value>,
@@ -3139,6 +3182,26 @@ pub(crate) struct ContextFragment {
 
 pub(crate) fn validate_generated_method_params(method: &str, params: &Value) -> Result<(), String> {
     match method {
+        "model.adapters.retain" => {
+            serde_json::from_value::<ModelAdaptersRetainParams>(params.clone())
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        }
+        "model.adapters.release" => {
+            serde_json::from_value::<ModelAdaptersReleaseParams>(params.clone())
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        }
+        "model.adapters.publish" => {
+            serde_json::from_value::<ModelAdaptersPublishParams>(params.clone())
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        }
+        "model.adapters.revoke" => {
+            serde_json::from_value::<ModelAdaptersRevokeParams>(params.clone())
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        }
         "runtime.followup.registration.prepare" => {
             serde_json::from_value::<FollowupFilePrepareParams>(params.clone())
                 .map(|_| ())

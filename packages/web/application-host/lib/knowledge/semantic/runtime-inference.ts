@@ -12,6 +12,7 @@ import {
   type HarnessEmbedParams, type HarnessEmbedResult,
 } from '@varin/protocol';
 import { EmbeddingResponseError, requestOpenAICompatibleEmbeddings, parseOpenAICompatibleEmbeddings, embeddingWireUsage, type EmbeddingUsage } from '@varin/protocol/node/embeddings';
+import type { EgressOverride } from '../../harness/egress.js';
 import { waitWithSignal } from '../../cancellation.js';
 import { semanticInferenceOperationKey, type SemanticInferenceLedger, type SemanticInferenceLedgerIdentity, type SemanticInferenceOperation, type SemanticInferenceFactFilter } from './inference-ledger-contract.js';
 import { ExistingHostCredentialOwner, type CredentialScope, type ExistingModelAuthRuntime } from '../../kernel/credential-owner.js';
@@ -30,6 +31,9 @@ export interface SemanticProviderBinding {
   getAuth(): ReturnType<ExistingModelAuthRuntime['getAuth']>;
   allowAnonymous?: boolean;
   requestModelId?: string;
+  release?(): void;
+  headers?: Record<string, string>;
+  egressOverride?: EgressOverride;
 }
 export interface SemanticInferenceAuthority extends Partial<DecisionInferenceAuthority>, Partial<RerankInferenceAuthority> {
   resolveEmbeddingBinding(providerId: string, modelId: string): Promise<SemanticProviderBinding>;
@@ -131,6 +135,7 @@ export function createSemanticInference(
   let closed = false;
   let closing: Promise<void> | undefined;
   const controllers = new Set<AbortController>();
+  const leases = new Set<() => void>();
   const pending = new Set<Promise<void>>();
   const transports = new Set<Promise<unknown>>();
   let pendingSettlements = 0;
@@ -146,21 +151,25 @@ export function createSemanticInference(
   };
   const digest = (value: string) => createHash('sha256').update(value).digest('hex');
   const capture = async (): Promise<SemanticInferenceLease> => {
+    let capturedProvider: SemanticProviderBinding | undefined;
+    let capturedCredentials: ExistingHostCredentialOwner | undefined;
+    let transferred = false;
     try {
       if (closed) return fail('unavailable', 'embedding-owner-closed');
       const settings = settingsFrom(await readGlobalSettings());
       const capturedRevocation = revocationGeneration;
       const ledger = options.ledger;
-      const provider = await authority.resolveEmbeddingBinding(settings.providerId, settings.modelId);
+      const provider = capturedProvider = await authority.resolveEmbeddingBinding(settings.providerId, settings.modelId);
       if (JSON.stringify(settingsFrom(await readGlobalSettings())) !== JSON.stringify(settings) || capturedRevocation !== revocationGeneration) return fail('unavailable', 'embedding-selection-changed');
       const binding: HarnessResolvedEmbeddingBinding = Object.freeze({ ...settings,
         maxTokens: settings.maxTokens ?? REMOTE_EMBEDDING_DEFAULT_MAX_TOKENS, configurationId: provider.configurationId });
       const identity: SemanticInferenceIdentity = Object.freeze({ providerId: binding.providerId,
         modelId: binding.modelId, protocol: binding.protocol, configurationId: binding.configurationId,
         endpoint: provider.requestUrl, credentialScope: Object.freeze({ ...provider.credentialScope }) });
-      const credentials = new ExistingHostCredentialOwner({ providerId: provider.credentialRef,
+      const credentials = capturedCredentials = new ExistingHostCredentialOwner({ providerId: provider.credentialRef,
         providerFamily: 'openai-completions', endpoint: provider.requestUrl,
-        currentScope: provider.currentScope, runtime: { getAuth: provider.getAuth }, allowAnonymous: provider.allowAnonymous ?? false });
+        currentScope: provider.currentScope, runtime: { getAuth: provider.getAuth }, allowAnonymous: provider.allowAnonymous ?? false,
+        release: () => provider.release?.() });
       let references = 0;
       let revoked = false;
       const retain = (): SemanticInferenceLease => {
@@ -189,10 +198,16 @@ export function createSemanticInference(
           signal?.throwIfAborted();
           if (closed || released) return fail('unavailable', 'embedding-lease-released');
         };
+        const release = () => {
+          if (released) return;
+          released = true; references--; controller.abort(); controllers.delete(controller); leases.delete(release);
+          if (references === 0) credentials.release();
+        };
+        leases.add(release);
         return {
           binding, identity, assertAvailable,
           retain: () => { if (closed || released) return fail('unavailable', 'embedding-lease-released'); return retain(); },
-          release: () => { if (released) return; released = true; references--; controller.abort(); controllers.delete(controller); },
+          release,
           consume: async (call, params) => {
             if (!options.requests) return fail('unavailable', 'embedding-request-owner-unavailable');
             const signal = AbortSignal.any([call.signal, controller.signal, ...(params.signal ? [params.signal] : [])]);
@@ -220,8 +235,9 @@ export function createSemanticInference(
               await validate();
               return { ...cached, batchId: params.batchId };
             }
-            const connection = await options.requests.egress.prepare(provider.requestUrl);
+            const connection = await options.requests.egress.prepare(provider.requestUrl, provider.egressOverride);
             const result = await requestOpenAICompatibleEmbeddings({ baseUrl: provider.baseUrl,
+              ...(provider.headers ? { headers: provider.headers } : {}),
               ...(provider.endpoint ? { endpoint: provider.endpoint } : {}), model: provider.requestModelId ?? binding.modelId,
               input: params.items.map(item => item.text), ...(binding.dimensions === undefined ? {} : { dimensions: binding.dimensions }),
               signal, maxRetries: 0, redirect: 'manual',
@@ -331,11 +347,21 @@ export function createSemanticInference(
                   items: admission.result.items.map((item, index) => ({ ...item, id: params.items[index]!.id })), receipt: frozenReceipt(receipt) };
               }
               token = admission.token;
+              const connection = options.requests ? await options.requests.egress.prepare(provider.requestUrl, provider.egressOverride) : undefined;
+              if (!connection && provider.egressOverride) return fail('unavailable', 'embedding-egress-owner-unavailable');
+              const fetchImpl: typeof fetch | undefined = options.fetchImpl ?? (connection
+                ? (input, init) => {
+                  // Only the captured Egress connection may choose the dispatcher.
+                  const { dispatcher: _dispatcher, ...requestInit }: RequestInit & { dispatcher?: unknown } = init ?? {};
+                  return connection.fetch(typeof input === 'string' ? input : input instanceof URL ? input.href : input.url, requestInit);
+                }
+                : undefined);
               transportConstructed = true;
               const request = requestOpenAICompatibleEmbeddings({ baseUrl: provider.baseUrl,
+                ...(provider.headers ? { headers: provider.headers } : {}),
                 ...(provider.endpoint ? { endpoint: provider.endpoint } : {}), model: provider.requestModelId ?? binding.modelId,
                 input: params.items.map(item => item.text), ...(binding.dimensions === undefined ? {} : { dimensions: binding.dimensions }),
-                signal, maxRetries: 0, redirect: 'error', ...(options.fetchImpl ? { fetchImpl: options.fetchImpl } : {}),
+                signal, maxRetries: 0, redirect: 'error', ...(fetchImpl ? { fetchImpl } : {}),
                 beforeDispatch: async request => {
                   await assertAvailable(signal);
                   const auth = await credentials.resolve(identity.credentialScope, signal, { method: 'POST', endpoint: request.url,
@@ -416,8 +442,15 @@ export function createSemanticInference(
           },
         };
       };
-      return retain();
+      const lease = retain(); transferred = true;
+      return lease;
     } catch (error) { throw safeFailure(error); }
+    finally {
+      if (!transferred) {
+        if (capturedCredentials) capturedCredentials.release();
+        else capturedProvider?.release?.();
+      }
+    }
   };
   return {
     readGlobalSettings, capture,
@@ -451,12 +484,11 @@ export function createSemanticInference(
       if (closing) return closing;
       closed = true;
       closing = (async () => {
-        for (const controller of controllers) controller.abort();
-        controllers.clear();
-        await Promise.all([...pending]);
-        await Promise.allSettled([...transports]);
+        for (const release of [...leases]) release();
         decision?.close();
         rerank?.close();
+        await Promise.all([...pending]);
+        await Promise.allSettled([...transports]);
         await requests?.close();
         await options.ledger?.close();
       })().catch(error => { closing = undefined; throw error; });

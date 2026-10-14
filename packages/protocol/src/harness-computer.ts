@@ -387,6 +387,12 @@ export interface ComputerCapabilities {
   interruptibleInput?: boolean;
   /** Occluded/offscreen window content capture (not just the screen grid). */
   occludedCapture?: boolean;
+  /** Independent macOS permission checks; probing never requests authorization. */
+  permissions?: { accessibility?: "granted" | "not-granted"; screenCapture?: "granted" | "not-granted" };
+  /** Lifecycle and negotiated input transport of the original portal session. */
+  authorization?: "idle" | "starting" | "active" | "closed";
+  inputTransport?: "dbus" | "eis" | null;
+  availableDevices?: number;
   status: "ready" | "unavailable" | "unprobed";
   /** Honest reason when a capability is missing or the driver failed. */
   detail?: string;
@@ -450,6 +456,8 @@ export interface ComputerObservation {
   windowTitle?: string;
   /** The window this observation bound to, when the driver resolved one. */
   windowHandle?: number;
+  /** Opaque native capture generation; the Host returns it only to the original driver. */
+  nativeTarget?: string;
   /** Window DPI scale (physical px per logical px) at capture time. */
   dpiScale?: number;
   /** All top-level windows the observed process owned at capture time. */
@@ -526,7 +534,7 @@ export interface ComputerActionResult {
 
 export interface ComputerActionReceipt {
   effect: "none" | "dispatched" | "partial" | "verified" | "unknown";
-  reason?: { code: "target-changed" | "focus-changed" | "target-unavailable" | "unsupported" | "input-rejected" | "cancelled" | "control-changed" | "connection-lost" | "verification-failed" | "driver-error"; message: string };
+  reason?: { code: "target-changed" | "focus-changed" | "target-unavailable" | "unsupported" | "input-rejected" | "cancelled" | "control-changed" | "connection-lost" | "session-closed" | "verification-failed" | "driver-error"; message: string };
   recovery?: "observe" | "reconnect" | "wait-for-control";
   /** Counts accepted input events, not characters visible in an app. */
   dispatchedEvents?: number;

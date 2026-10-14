@@ -7,7 +7,12 @@ import { waitWithSignal } from '../cancellation.js';
 import { ModelConfigurationError, object } from './configuration.js';
 
 type Token = Extract<AccountCredential['value'], { kind: 'oauth' }>;
-export interface ModelOAuthProvider extends OAuthProvider { id: string; name: string; login(prompt: AuthorizationPrompt): Promise<Token> }
+export interface ModelOAuthProvider extends OAuthProvider {
+  id: string; name: string;
+  /** Hold the selected implementation before asynchronous account preparation starts. */
+  captureLogin?(): { login(prompt: AuthorizationPrompt): Promise<Token>; release(): void };
+  login(prompt: AuthorizationPrompt): Promise<Token>;
+}
 const fail = (code: string, message: string): never => { throw new ModelConfigurationError(code, message); };
 async function post(fetchImpl: typeof fetch, url: string, body: Record<string, string>, json: boolean, signal?: AbortSignal) {
   const response = await fetchImpl(url, { method: 'POST', headers: { accept: 'application/json', 'content-type': json ? 'application/json' : 'application/x-www-form-urlencoded' },

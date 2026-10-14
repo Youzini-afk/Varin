@@ -959,7 +959,7 @@ export const createLanguageSupervisor = ({
             configuration: true,
             workspaceFolders: true,
             symbol: { resolveSupport: { properties: ['location.range'] }, tagSupport: { valueSet: [1] } },
-            workspaceEdit: { documentChanges: true, changeAnnotationSupport: { groupsOnLabel: true } },
+            workspaceEdit: { documentChanges: true, resourceOperations: ['create', 'rename', 'delete'], failureHandling: 'undo', changeAnnotationSupport: { groupsOnLabel: true } },
             executeCommand: { dynamicRegistration: false },
           },
         },

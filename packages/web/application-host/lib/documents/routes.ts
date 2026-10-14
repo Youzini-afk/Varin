@@ -6,6 +6,13 @@ interface DocumentAuthority {
   resolveResourceIdentity(resource: unknown, options?: unknown): Promise<unknown>;
   read(resource: unknown): Promise<unknown>;
   write(request: unknown): Promise<unknown>;
+  prepareWorkspaceEdit(request: unknown): Promise<unknown>;
+  discardWorkspaceEdit(request: unknown): Promise<unknown>;
+  applyWorkspaceEdit(request: unknown): Promise<unknown>;
+  readWorkspaceEdit(request: unknown): Promise<unknown>;
+  readWorkspaceEditRecovery(request: unknown): Promise<unknown>;
+  undoWorkspaceEdit(request: unknown): Promise<unknown>;
+  listWorkspaceEdits(workspaceId: string): Promise<unknown>;
   move(request: unknown): Promise<unknown>;
   delete(request: unknown): Promise<unknown>;
   publishDirtyBuffers(request: unknown): Promise<unknown>;
@@ -76,6 +83,16 @@ export const registerDocumentRoutes = (app: Express, {
     } catch (error) {
       return sendError(res, error);
     }
+  });
+
+  for (const [route, method] of [
+    ['prepare', 'prepareWorkspaceEdit'], ['apply', 'applyWorkspaceEdit'], ['discard', 'discardWorkspaceEdit'],
+    ['read', 'readWorkspaceEdit'], ['undo', 'undoWorkspaceEdit'], ['recovery', 'readWorkspaceEditRecovery'],
+  ] as const) app.post(`/api/documents/workspace-edit/${route}`, requireAuth, async (req: Request, res: Response) => {
+    try { return res.json(await documents[method](readBody(req))); } catch (error) { return sendError(res, error); }
+  });
+  app.post('/api/documents/workspace-edit/list', requireAuth, async (req: Request, res: Response) => {
+    try { return res.json(await documents.listWorkspaceEdits(String(readBody(req).workspaceId ?? ''))); } catch (error) { return sendError(res, error); }
   });
 
   app.post('/api/documents/write', requireAuth, async (req: Request, res: Response) => {

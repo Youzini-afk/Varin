@@ -365,3 +365,21 @@ test('routing mutations preserve ordered and unavailable members through refresh
   expect(updates[2].rule).not.toHaveProperty('providerKey');
   stopVarinExtensionCatalog();
 });
+
+test('accepted restart intent is not reported as failed because the Host disconnects before a refresh', async () => {
+  const current = snapshot();
+  let reads = 0;
+  const requests: Array<{ handoffId: string }> = [];
+  Object.defineProperty(globalThis, 'window', { configurable: true, value: { __VARIN_RUNTIME_APIS__: { extensions: {
+    hostState: async () => { reads += 1; if (reads > 1) throw new Error('Host is restarting'); return current; },
+    waitForHostState: () => new Promise(() => undefined),
+    requestRestartHandoff: async (request: { handoffId: string }) => { requests.push(request); return { ...current.catalog, revision: 2 }; },
+  } } } });
+  const { restartVarinExtensionCandidate, getVarinExtensionCatalogState, stopVarinExtensionCatalog } = await import('./catalog-store');
+  await restartVarinExtensionCandidate('dev.example.removable', `sha256-${'a'.repeat(64)}`);
+  expect(requests).toHaveLength(1);
+  expect(requests[0].handoffId).toBeTruthy();
+  expect(reads).toBe(1);
+  expect(getVarinExtensionCatalogState().error).toBeNull();
+  stopVarinExtensionCatalog();
+});

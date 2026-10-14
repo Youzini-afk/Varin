@@ -137,6 +137,9 @@ impl<T> CompositionPlan<T> {
     pub fn revision(&self) -> u64 {
         self.revision
     }
+    pub fn schemas(&self) -> impl Iterator<Item = (&str, &Value)> {
+        self.bindings.iter().map(|(name, binding)| (name.as_str(), binding.schema()))
+    }
     pub fn bind(&self, capability: &str) -> Result<BindingHandle<T>, CompositionError> {
         self.bindings
             .get(capability)

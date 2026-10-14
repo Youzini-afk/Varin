@@ -193,6 +193,7 @@ def desktop_session(data):
         run(["xauth", "-f", str(authority), "add", display, "MIT-MAGIC-COOKIE-1", cookie])
         environment = {**os.environ, "DISPLAY": display, "XAUTHORITY": str(authority), "XDG_SESSION_TYPE": "x11",
                        "NO_AT_BRIDGE": "0", "GTK_MODULES": "gail:atk-bridge", "HOME": config["home"]}
+        environment.pop("WAYLAND_DISPLAY", None)
         persistent = data / "persistent"
         profile = persistent / "chromium"
         profile.mkdir(parents=True, exist_ok=True)

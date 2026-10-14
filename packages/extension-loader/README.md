@@ -72,3 +72,10 @@ own pins; ordinary replacement does not cancel those calls through the stream si
 retirement, and loader stop close the original streams. An error, revocation, or unexpected stream end
 invalidates that combination and retires its consumers; the stream client never reconnects or silently
 reselects an existing handle. The separate catalog watcher continues ordinary catalog reconciliation.
+
+For trusted-native Host updates, the watcher prepares an explicitly requested group only while its
+original clean-process handoff is preparing or waiting for Surface readiness. Pending restart and failed
+attempts cannot make a Surface load a new Host generation in the old process. Publication includes the
+actual validated connected-consumer lease count in addition to Host preparation and member generations.
+A count of zero establishes module preparation only. A failed final participant records the original
+handoff failure; another still-connected candidate participant retains its shared Host preparation.

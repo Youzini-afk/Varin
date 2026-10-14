@@ -4,10 +4,11 @@ Resident platform helpers for Computer Use (BC4). A driver runs inside the
 target desktop session and speaks a line-delimited JSON protocol on
 stdin/stdout:
 
-Each desktop has one ordered input/observation helper and a separate read-only
-capture helper for live viewers. Long native actions cannot queue-block the
-viewer. The Host coalesces concurrent startup of each helper; the capture helper
-never changes the Agent's stored observations or input ownership.
+Each desktop has one ordered input/observation lane. macOS and Wayland keep
+one native session owner with a separate concurrent, read-only capture lane;
+Windows and X11 use a separate capture process. Long native actions cannot
+queue-block the viewer. Concurrent viewer requests share a frame read, never
+replace the Agent's observation, and never acquire another physical controller.
 
 ```
 in : {"id":"<request>","tool":"<op>", ...params}
@@ -80,8 +81,63 @@ response is a partial outcome, not a clean rejection.
 | platform | host entry | backend |
 | --- | --- | --- |
 | Windows | `windows/driver-host.ps1` (powershell.exe, stdin loop) | UIA element patterns + real pointer/keyboard input by default; explicit `app_post` for Win32 messages; `PrintWindow` capture with screen-copy fallback; per-process `EnumWindows` inventory |
-| Linux | `linux/driver-host.py` (python3, stdin loop) | AT-SPI tree/actions + `Atspi.generate_*` input; Gdk pixbuf capture on X11. Wayland reports no reliable screenshot/coordinate input until a consented RemoteDesktop/ScreenCast session exists; element actions may still work. |
-| macOS | `macos/driver-host.js` (osascript -l JavaScript, stdin loop) | JXA driver: CGWindowList windows + System Events AX tree + CGEvent input + `CGWindowListCreateImage` capture. **Unverified** — no real-machine evidence yet; `capabilities.detail` says so |
+| Linux | `linux/driver-host.py` (python3, resident protocol reader) | X11 uses AT-SPI and Gdk. Wayland uses `portal_session.py`/`portal_backend.py`: one RemoteDesktop + ScreenCast authorization, retained GStreamer PipeWire capture, and negotiated D-Bus input. |
+| macOS | `macos/Varin Computer.app/Contents/MacOS/VarinComputer` | Native Swift helper: Accessibility tree/actions, retained ScreenCaptureKit streams, and CGEvent input. Separate input/capture queues share the stable `com.varin.computer` application identity. Native build and real-machine behavior still require macOS verification. |
+
+### Native platform sessions
+
+macOS builds require Xcode command-line tools and the macOS SDK. The Application
+Host build compiles the helper for the selected x64/arm64 target and stages it
+inside that Host generation. For a source-only helper build, run
+`node packages/computer-driver/macos/build-helper.mjs`. There is no JXA fallback.
+The baseline is macOS 13, so both snapshots and live viewers use retained
+ScreenCaptureKit streams; macOS 14 additionally suppresses window shadows via
+its supported configuration. Output is cropped to the actual stream content
+rectangle, and screenshot pixel dimensions are separate from AX/CG window units.
+Window IDs, owning PID, geometry, display scale, AX identity and native focus are
+rechecked before input. A covered click target is rejected. Permission probes do
+not request consent, capture, focus or type; Accessibility and Screen Recording
+are reported independently. An actual capture requests Screen Recording access.
+Accessibility permission is granted by the user in macOS settings.
+
+Development helper builds use an explicit ad-hoc signature. Set
+`VARIN_COMPUTER_SIGN_IDENTITY` to sign a standalone Host helper with a named
+identity. Electron packaging verifies the helper architecture/signature and its
+normal signing pass signs the nested app with the distribution identity. An
+explicit unsigned Electron build remains ad-hoc; a stable bundle ID alone does
+not guarantee that macOS retains permission across unsigned builds or updates.
+
+Wayland requires the session bus, the compositor's RemoteDesktop/ScreenCast
+portal backend, Python GObject/Gio, GStreamer introspection, and the `pipewiresrc`,
+`videoconvert`, `pngenc` and `appsink` plugins. Debian/Ubuntu packages include
+`python3-gi`, `gir1.2-gstreamer-1.0`, `gstreamer1.0-pipewire`,
+`gstreamer1.0-plugins-base` and `gstreamer1.0-plugins-good`, plus the desktop's
+portal backend. Preparing the managed Xvnc desktop does not configure a local
+Wayland compositor or install its portal backend.
+
+Observe `Shared desktop` (PID 0), or open the viewer, to request the system
+chooser. Its selected stream and actual granted device mask stay with the helper
+across operations. This implementation negotiates the documented D-Bus Notify
+transport before input; it does not establish EIS or mix the two transports.
+A portal without those input methods remains observation-only. Coordinates bind
+the original stream/node (and PipeWire serial when provided), logical size and
+actual PNG size. A missing logical size disables absolute pointer input rather
+than guessing a scale. No arbitrary AT-SPI app tree is merged with a portal image;
+this backend exposes the authorized screen as its target. It does not promise
+application-specific focus verification for a screen-only portal target.
+
+Cancelling a job drains its original input and releases its virtual keys/buttons;
+it does not close a valid capture session held by viewers. Portal closure or
+stream failure fences later input with `session-closed`; a changed raster fences
+old coordinates. Viewer polling does not keep reopening a closed chooser. A new
+explicit observation can request a new session, whose target handles differ
+from the old session. Host takeover/handback still invalidates stored observations
+and queued input; a new controller observation is required after handback.
+
+Linux protocol/session tests do not establish compositor, PipeWire or macOS
+native behavior. Real permission dialogs, source/scale changes, multiple monitors,
+accessibility matching, Unicode input and distribution signing remain platform
+acceptance work; no real-machine validation was run for this implementation.
 
 The **Prepare Desktop** action on a Debian or Ubuntu Linux Host installs its
 native graphical dependencies and creates a systemd-managed Xvnc session.
@@ -180,7 +236,8 @@ Host cancellation drops queued input and signals the in-flight op. On Windows,
 held-key tracking and a release channel independently of the MTA PowerShell UIA
 worker. A `<id>.release` command fences the owner and writes an atomic release
 acknowledgement before the Host closes the helper. Linux/macOS use the request
-cancel flag followed by `release_input`. A crashed helper loses its
+cancel flag followed by `release_input`, keeping the original shared capture
+session alive during ordinary job cancellation. A crashed helper loses its
 tracking state; a replacement cannot safely send blanket key-up events because
 they could release a person's held keys or mouse buttons. A lost driver response
 therefore leaves the action effect and any held-input state unknown. Post-action

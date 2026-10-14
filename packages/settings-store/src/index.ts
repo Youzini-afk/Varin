@@ -294,3 +294,5 @@ export const createSettingsFileStore = ({
 
   return { filePath: resolvedPath, read, readSync, replace, transact, update };
 };
+
+export { readProjectTrust, resolvePiAgentDirectory } from './project-trust.js';

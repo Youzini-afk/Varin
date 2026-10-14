@@ -3,6 +3,7 @@
 import { createHash } from 'node:crypto';
 import { parseHarnessModelSlots, resolveHarnessModelSlot } from '@varin/protocol';
 import { waitWithSignal } from '../cancellation.js';
+import { waitForModelBinding } from './model-binding-lifetime.js';
 import type { ThreadModelAuthority } from './thread-adapter.js';
 import type { PolicyModelCapability, ModelSessionConfiguration, CredentialScope } from './protocol.generated.js';
 import type { ExistingHostCredentialOwner } from './credential-owner.js';
@@ -53,7 +54,8 @@ export function createPolicyModelPreparer(options: {
       if (previous.configuration_identity !== identity
         || previous.binding_id !== `policy:${input.generation}:agentPlanning:${identity}`) throw new Error('policy-model-selection-changed');
       // Restore the committed model directly. Current settings and routing are unrelated intent.
-      const credentialOwner = await waitWithSignal(options.models.rebindModel(previous.configuration, previous.credential_scope), signal);
+      const credentialOwner = await waitForModelBinding(options.models.rebindModel(previous.configuration, previous.credential_scope),
+        owner => owner.release(), signal);
       return [{ capability: structuredClone(previous), credentialOwner }];
     }
     const unavailable = (status: PolicyModelCapability['status']): PreparedPolicyModel[] => [{ capability: { ...base, status } }];
@@ -70,16 +72,20 @@ export function createPolicyModelPreparer(options: {
     const selection = resolveHarnessModelSlot('agentPlanning', slots, null);
     if (!selection) return unavailable('unconfigured');
     let resolved;
-    try { resolved = await waitWithSignal(options.models.resolveModel(selection), signal); }
+    try { resolved = await waitForModelBinding(options.models.resolveModel(selection), model => model.credentialOwner.release(), signal); }
     catch { signal?.throwIfAborted(); return unavailable('unavailable'); }
-    signal?.throwIfAborted();
-    let scope;
-    try { scope = await waitWithSignal(resolved.credentialOwner.scope(), signal); }
-    catch { signal?.throwIfAborted(); return unavailable('unavailable'); }
-    const identity = configurationIdentity(resolved.configuration, scope);
-    const bindingId = `policy:${input.generation}:agentPlanning:${identity}`;
-    const capability: PolicyModelCapability = { ...base, status: 'available', binding_id: bindingId,
-      configuration_identity: identity, configuration: resolved.configuration, credential_scope: scope };
-    return [{ capability, credentialOwner: resolved.credentialOwner }];
+    let transferred = false;
+    try {
+      signal?.throwIfAborted();
+      let scope;
+      try { scope = await waitWithSignal(resolved.credentialOwner.scope(), signal); }
+      catch { signal?.throwIfAborted(); return unavailable('unavailable'); }
+      const identity = configurationIdentity(resolved.configuration, scope);
+      const bindingId = `policy:${input.generation}:agentPlanning:${identity}`;
+      const capability: PolicyModelCapability = { ...base, status: 'available', binding_id: bindingId,
+        configuration_identity: identity, configuration: resolved.configuration, credential_scope: scope };
+      transferred = true;
+      return [{ capability, credentialOwner: resolved.credentialOwner }];
+    } finally { if (!transferred) resolved.credentialOwner.release(); }
   };
 }

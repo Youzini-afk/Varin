@@ -2,6 +2,16 @@
 
 Varin message recovery is an operation journal, not a workspace archive.
 
+## Ordinary workspace edits
+
+Documents refactors use the same Rust operation/file journal as `workspace-edit`, without a conversation
+checkpoint or Agent Run. Their first durable row retains the ordered plan, original disk states and
+surface draft baselines before any effect. Each dispatch and observed result is recorded on that row.
+Undo and startup reconciliation remain conditional on original root/epoch, writer admission and the
+last confirmed path or buffer state. Unknown surface outcomes and later edits are needs-attention,
+not guessed successes. The existing Recovery panel lists each unresolved resource and exposes its
+original draft; it does not replay a batch to recover a lost HTTP response.
+
 ## Normal turn path
 
 1. A bound user turn creates one lightweight checkpoint row. No workspace path is read.

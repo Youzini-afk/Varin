@@ -502,7 +502,7 @@ test("remove retains storage by default and deletes only when explicitly request
   }
 });
 
-test("trusted-native Host updates remain on the prior generation until application restart", async () => {
+test("recreating a Runtime in the same process cannot satisfy a trusted-native restart handoff", async () => {
   const dataDir = await temporaryDirectory("varin-native-runtime-");
   const v1 = await temporaryDirectory("varin-native-v1-");
   const v2 = await temporaryDirectory("varin-native-v2-");
@@ -510,74 +510,28 @@ test("trusted-native Host updates remain on the prior generation until applicati
   await writeHostExtension(v2, "2.0.0", 1, "ok", "native");
   const brokerScript = fileURLToPath(new URL("../broker/broker-child.mjs", import.meta.url));
   const first = await ApplicationExtensionRuntime.create({ brokerScript, dataDir, varinVersion });
-  const started = await first.start();
-  const installed = await first.installOrStage({
-    expectedRevision: started.catalog.revision,
-    source: { display: "Native v1", kind: "local", specifier: v1 },
-  });
-  assert.equal(await first.invokeService({ args: [], method: "generation", serviceId, version: 1 }), "1.0.0");
-  const staged = await first.installOrStage({
-    expectedRevision: installed.revision,
-    source: { display: "Native v2", kind: "local", specifier: v2 },
-  });
-  assert.equal(staged.extensions[0]?.selectedVersion, "1.0.0");
-  assert.equal((await first.state()).catalog.extensions[0]?.actual.find((state) => state.realmKind === "host")?.status, "active");
-  assert.equal(await first.invokeService({ args: [], method: "generation", serviceId, version: 1 }), "1.0.0");
-  const requested = await first.requestCandidateApplication({
-    candidateIntegrity: staged.extensions[0]?.candidate?.integrity,
-    expectedRevision: staged.revision,
-    extensionId,
-  });
-  assert.equal(requested.extensions[0]?.candidate?.applyRequested, true);
-  await assert.rejects(
-    () => first.prepareCandidate(extensionId, staged.extensions[0]?.candidate?.integrity ?? ""),
-    /requires an application-host restart/,
-  );
-  assert.equal((await first.state()).catalog.extensions[0]?.actual.find((state) => state.realmKind === "host")?.status, "restart-required");
-  await first.stop();
-
-  const restarted = await ApplicationExtensionRuntime.create({ brokerScript, dataDir, varinVersion });
+  let integrity = '';
   try {
-    await restarted.start();
-    const state = await restarted.state();
-    assert.equal(state.catalog.extensions[0]?.selectedVersion, "2.0.0");
-    assert.equal(await restarted.invokeService({ args: [], method: "generation", serviceId, version: 1 }), "2.0.0");
-  } finally {
-    await restarted.stop();
-  }
-
-  const groupedData = await temporaryDirectory("varin-native-group-");
-  await writeHostExtension(v1, "1.0.0", 1, "ok", "native", true);
-  await writeHostExtension(v2, "2.0.0", 1, "ok", "native", true);
-  let grouped = await ApplicationExtensionRuntime.create({ brokerScript, dataDir: groupedData, varinVersion });
+    const started = await first.start();
+    const installed = await first.installOrStage({ expectedRevision: started.catalog.revision,
+      source: { display: "Native v1", kind: "local", specifier: v1 } });
+    await first.activateExtension(extensionId);
+    const staged = await first.installOrStage({ expectedRevision: installed.revision,
+      source: { display: "Native v2", kind: "local", specifier: v2 } });
+    integrity = staged.extensions[0]!.candidate!.integrity;
+    const requested = await first.requestCandidateApplication({ candidateIntegrity: integrity, expectedRevision: staged.revision, extensionId });
+    await assert.rejects(first.prepareCandidate(extensionId, integrity), /restart handoff/);
+    assert.equal((await first.state()).catalog.extensions[0]!.selectedVersion, "1.0.0");
+    await first.requestRestartHandoff({ extensionId, candidateIntegrity: integrity, expectedRevision: requested.revision, handoffId: "same-process-test" });
+    assert.equal(await first.invokeService({ args: [], method: "generation", serviceId, version: 1 }), "1.0.0");
+  } finally { await first.stop(); }
+  const recreated = await ApplicationExtensionRuntime.create({ brokerScript, dataDir, varinVersion });
   try {
-    const start = await grouped.start();
-    const initial = await grouped.installOrStage({ expectedRevision: start.catalog.revision,
-      source: { display: "Native group v1", kind: "local", specifier: v1 } });
-    assert.equal(await grouped.invokeService({ args: [], method: "generation", serviceId, version: 1 }), "1.0.0");
-    const update = await grouped.installOrStage({ expectedRevision: initial.revision,
-      source: { display: "Native group v2", kind: "local", specifier: v2 } });
-    const candidateIntegrity = update.extensions[0]!.candidate!.integrity;
-    const applied = await grouped.applyPackageCandidate({ extensionId, candidateIntegrity, expectedRevision: update.revision });
-    assert.equal(applied.outcome, "application_requested");
-    assert.ok((await grouped.state()).catalog.extensions[0]!.actual.some(actual => actual.diagnostics.some(diagnostic =>
-      diagnostic.code === "trusted_native_group_update_requires_restart_handoff")));
-    await grouped.stop();
-    grouped = await ApplicationExtensionRuntime.create({ brokerScript, dataDir: groupedData, varinVersion });
-    const recovered = await grouped.start();
-    assert.equal(recovered.catalog.extensions[0]!.selectedVersion, "1.0.0", "cold restart cannot select an unprepared native group");
-    assert.equal(await grouped.invokeService({ args: [], method: "generation", serviceId, version: 1 }), "1.0.0");
-    const disabled = await grouped.setEnabled(extensionId, false, recovered.catalog.revision);
-    const chosen = await grouped.selectCandidate({ extensionId, candidateIntegrity, expectedRevision: disabled.revision });
-    assert.equal(chosen.extensions[0]!.selectedVersion, "2.0.0");
-    assert.equal(chosen.extensions[0]!.desired.enabled, false);
-    assert.equal((await grouped.state()).services.providers.length, 0, "disabled selection cannot prepare or activate a native Host");
-    await grouped.stop();
-    grouped = await ApplicationExtensionRuntime.create({ brokerScript, dataDir: groupedData, varinVersion });
-    const cold = await grouped.start();
-    await grouped.setEnabled(extensionId, true, cold.catalog.revision);
-    assert.equal(await grouped.invokeService({ args: [], method: "generation", serviceId, version: 1 }), "2.0.0");
-  } finally { await grouped.stop(); }
+    const state = await recreated.start();
+    assert.equal(state.catalog.extensions[0]!.selectedVersion, "1.0.0");
+    assert.equal(state.catalog.extensions[0]!.restartHandoffs!.at(-1)!.status, "pending-restart");
+    await assert.rejects(recreated.prepareCandidate(extensionId, integrity), /restart|recovery/i);
+  } finally { await recreated.stop(); }
 });
 
 test("persistent routes select different real providers by session and isolate provider withdrawal", { timeout: 30_000 }, async () => {

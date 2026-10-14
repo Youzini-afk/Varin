@@ -1,5 +1,9 @@
 import type {
   DocumentsAPI,
+  VarinWorkspaceEditBuffer,
+  VarinWorkspaceEditSurfaceChange,
+  VarinWorkspaceEditSurfaceReceipt,
+  VarinWorkspaceEditReceipt,
   VarinDirtyStateBarrierEvent,
   VarinDocumentSurfaceOperationEvent,
   VarinDocumentSurfaceOperationPayload,
@@ -72,6 +76,7 @@ type PreparedWorkspaceDocument = {
   changes: DocumentChange[];
   editCount: number;
   wasOpen: boolean;
+  versionSteps: number;
 };
 
 type PreparedWorkspaceEdit = {
@@ -132,7 +137,7 @@ const prepareTextChanges = (
     left.from - right.from || left.to - right.to || left.index - right.index
   ));
   for (let index = 1; index < ascending.length; index += 1) {
-    if (ascending[index - 1].to > ascending[index].from) return { status: 'overlapping-ranges' };
+    if (ascending[index - 1]!.to > ascending[index]!.from) return { status: 'overlapping-ranges' };
   }
   const descending = [...changes]
     .sort((left, right) => right.from - left.from || right.to - left.to || right.index - left.index)
@@ -188,6 +193,7 @@ const emptyRecord = (
 
 const applyRead = (record: DocumentRecord, result: VarinDocumentReadResult): DocumentRecord => {
   if (result.status === 'missing') {
+    if (record.status === 'deleted' && record.baseRevision === null) return { ...record, workspaceEpoch: result.epoch, byteLength: 0, errorMessage: null };
     if (record.baseRevision !== null) {
       const ancestorContent = record.conflict?.ancestorContent ?? record.baseContent;
       const ancestorRevision = record.conflict?.ancestorRevision ?? record.baseRevision;
@@ -328,9 +334,16 @@ export class DocumentRegistry {
   private readonly watches = new Map<string, Subscription>();
   private readonly journalTimers = new Map<string, ReturnType<typeof setTimeout>>();
   private readonly journalOperations = new Map<string, Promise<void>>();
+  private readonly hostWorkspaceEdits = new Map<string, { workspaceId: string; generation: number; preview: DocumentWorkspaceEditPreview; started: boolean }>();
+  private readonly displacedDocumentInstances = new Set<string>();
+  private readonly subscriptionInstances = new WeakMap<DocumentListener, string>();
+  private readonly workspaceSurfaceOperations = new Set<string>();
+  private readonly workspaceSurfaceReceipts = new Map<string, VarinWorkspaceEditSurfaceReceipt>();
+  private readonly resourceMoveListeners = new Set<(from: DocumentIdentity, to: DocumentIdentity) => void>();
   private readonly preparedWorkspaceEdits = new Map<string, PreparedWorkspaceEdit>();
   private readonly workspaceEditUndoGroups = new Map<string, WorkspaceEditUndoGroup>();
   private readonly dirtyBarriers = new Map<string, DirtyBarrierHold>();
+  private readonly deferredResourceMoves: Array<Extract<VarinWorkspaceFileEvent, { kind: 'moved' }>> = [];
   private readonly deferredWatchReloads = new Map<string, DocumentIdentity>();
   private disposed = false;
   private disposePromise: Promise<void> | null = null;
@@ -417,6 +430,10 @@ export class DocumentRegistry {
     return this.records.get(this.keyFor(identity));
   }
 
+  getByDocumentInstance(documentInstanceId: string): DocumentRecord | undefined {
+    return [...this.records.values()].find(record => record.documentInstanceId === documentInstanceId);
+  }
+
   meta(identity: DocumentIdentity): DocumentMeta | undefined {
     const record = this.get(identity);
     return record ? toDocumentMeta(record) : undefined;
@@ -425,12 +442,19 @@ export class DocumentRegistry {
   subscribe(identity: DocumentIdentity, listener: DocumentListener): () => void {
     const key = `${identity.workspaceId}\0${identity.resourceId}`;
     const set = this.listeners.get(key) ?? new Set();
-    set.add(listener);
+    const subscription: DocumentListener = record => {
+      if (!this.subscriptionInstances.has(subscription)) this.subscriptionInstances.set(subscription, record.documentInstanceId);
+      const instance = this.subscriptionInstances.get(subscription)!;
+      if (instance !== record.documentInstanceId && this.displacedDocumentInstances.has(instance)) return;
+      listener(record);
+    };
+    const initial = this.get(identity);
+    if (initial) this.subscriptionInstances.set(subscription, initial.documentInstanceId);
+    set.add(subscription);
     this.listeners.set(key, set);
     return () => {
-      const current = this.listeners.get(key);
-      current?.delete(listener);
-      if (current && current.size === 0) this.listeners.delete(key);
+      // The subscription follows its document through a rename.
+      for (const [currentKey, current] of this.listeners) if (current.delete(subscription) && current.size === 0) this.listeners.delete(currentKey);
     };
   }
 
@@ -653,7 +677,9 @@ export class DocumentRegistry {
       ...(existing ?? emptyRecord(identity, generation, this.createDocumentInstanceId())),
       identity,
       connectionGeneration: generation,
-      status: 'loading',
+      // A controlled deletion is a recoverable document state, not a fresh
+      // missing-file open. Keep its tombstone while checking disk again.
+      status: existing?.status === 'deleted' && existing.baseRevision === null ? 'deleted' : 'loading',
     };
     this.commit(loading);
     this.ensureWatch(identity.workspaceId);
@@ -762,8 +788,8 @@ export class DocumentRegistry {
       left.from - right.from || left.to - right.to || left.index - right.index
     ));
     for (let index = 1; index < ascending.length; index += 1) {
-      const previous = ascending[index - 1];
-      const candidate = ascending[index];
+      const previous = ascending[index - 1]!;
+      const candidate = ascending[index]!;
       if (previous.to > candidate.from) {
         return { status: 'invalid', reason: 'overlapping-ranges', record: current };
       }
@@ -781,14 +807,196 @@ export class DocumentRegistry {
     return { status: 'applied', record: next };
   }
 
+  subscribeResourceMoves(listener: (from: DocumentIdentity, to: DocumentIdentity) => void): () => void {
+    this.resourceMoveListeners.add(listener);
+    return () => { this.resourceMoveListeners.delete(listener); };
+  }
+
+  private workspaceBuffer(record: DocumentRecord, resource = record.identity): VarinWorkspaceEditBuffer {
+    if (!['ready', 'missing', 'deleted'].includes(record.status) || record.saving) {
+      throw new Error(`Document is ${record.saving ? 'saving' : record.status}: ${resource.resourceId}`);
+    }
+    return {
+      resource: { workspaceId: resource.workspaceId, resourceId: resource.resourceId },
+      documentInstanceId: record.documentInstanceId, localEditRevision: record.localEditRevision,
+      baseRevision: record.baseRevision, buffer: record.buffer, baseContent: record.baseContent,
+      encoding: record.encoding, bom: record.bom, lineEnding: record.lineEnding,
+      status: record.status as VarinWorkspaceEditBuffer['status'],
+    };
+  }
+
+  private async prepareHostWorkspaceEdit(input: DocumentWorkspaceEditInput): Promise<DocumentWorkspaceEditPrepareResult> {
+    const generation = this.getGeneration();
+    const groupId = input.groupId?.trim() || crypto.randomUUID();
+    const paths = input.changes.flatMap(change => change.kind === 'rename' ? [change.from, change.to] : [change.identity]);
+    if (paths.some(identity => identity.workspaceId !== input.workspaceId)) return { status: 'rejected', failures: [{ reason: 'workspace-mismatch', message: 'Workspace edit targets another workspace' }] };
+    try {
+      this.ensureWatch(input.workspaceId);
+      const buffers = [...this.records.values()].flatMap(record => this.aliasesFor(record.identity)
+        .filter(alias => alias.workspaceId === input.workspaceId && paths.some(path => alias.resourceId === path.resourceId || alias.resourceId.startsWith(`${path.resourceId}/`)))
+        .map(alias => this.workspaceBuffer(record, alias)));
+      await this.publishDirtyWorkspace(input.workspaceId);
+      const result = await this.documents.prepareWorkspaceEdit({ operationId: groupId, workspaceId: input.workspaceId, origin: input.origin,
+        ...this.surfaceOwner(), buffers,
+        edit: { documentChanges: input.changes.map(change => {
+          if (change.kind === 'rename') return { ...change };
+          const { identity, ...rest } = change;
+          return { ...rest, resource: identity };
+        }), ...(input.changeAnnotations ? { changeAnnotations: input.changeAnnotations } : {}) } });
+      if (generation !== this.getGeneration() || this.disposed) throw new Error('Application Host changed while preparing workspace edit');
+      if (result.status === 'rejected') return { status: 'rejected', failures: result.failures.map(failure => ({ reason: 'stale-plan', message: failure.message,
+        ...(failure.resource ? { identity: failure.resource } : {}) })) };
+      const preview: DocumentWorkspaceEditPreview = { status: 'ready', groupId, workspaceId: input.workspaceId, origin: input.origin,
+        files: result.files.map(({ resource, ...file }) => ({ ...file, identity: resource })), requiresConfirmation: result.requiresConfirmation,
+        ...(input.changeAnnotations ? { changeAnnotations: input.changeAnnotations } : {}) };
+      this.hostWorkspaceEdits.set(groupId, { workspaceId: input.workspaceId, generation, preview, started: false });
+      return preview;
+    } catch (error) { return { status: 'rejected', failures: [{ reason: 'not-ready', message: error instanceof Error ? error.message : String(error) }] }; }
+  }
+
+  private async applyHostWorkspaceEdit(groupId: string): Promise<DocumentWorkspaceEditApplyResult> {
+    const plan = this.hostWorkspaceEdits.get(groupId)!;
+    if (plan.generation !== this.getGeneration()) return { status: 'rejected', failures: [{ reason: 'stale-plan', message: 'Application Host changed after preview' }] };
+    const request = { workspaceId: plan.workspaceId, operationId: groupId };
+    let result: VarinWorkspaceEditReceipt | { status: 'missing' };
+    if (plan.started) result = await this.documents.readWorkspaceEdit(request);
+    else {
+      plan.started = true;
+      try { result = await this.documents.applyWorkspaceEdit(request); }
+      catch { result = await this.documents.readWorkspaceEdit(request); }
+    }
+    while (result.status === 'pending' && !this.disposed && plan.generation === this.getGeneration()) {
+      await new Promise(resolve => setTimeout(resolve, 250));
+      if (this.disposed || plan.generation !== this.getGeneration()) break;
+      result = await this.documents.readWorkspaceEdit(request);
+    }
+    if (result.status === 'applied') return { status: 'applied', groupId,
+      records: result.affectedResources.flatMap(identity => { const record = this.get(identity); return record ? [record] : []; }) };
+    if (result.status === 'needs-attention') for (const identity of result.affectedResources) if (this.get(identity)) void this.open(identity, { reload: true }).catch(error => this.reportJournalFailure(error));
+    return { status: 'rejected', failures: [{ reason: result.status === 'pending' || result.status === 'missing' ? 'operation-pending'
+      : result.status === 'needs-attention' ? 'needs-attention' : 'stale-plan',
+      message: result.status === 'missing' ? 'The original workspace edit receipt is not available; the batch was not repeated'
+        : result.failures[0]?.message ?? `Workspace edit is ${result.status}` }] };
+  }
+
+  private async executeWorkspaceSurfaceChange(
+    change: VarinWorkspaceEditSurfaceChange, barrierId: string | undefined, workspaceId: string,
+  ): Promise<VarinWorkspaceEditSurfaceReceipt> {
+    if (change.mode === 'capture') {
+      if (this.disposed) throw new Error('Document registry is disposed');
+      const buffers = [...this.records.values()].flatMap(record => this.aliasesFor(record.identity)
+        .filter(alias => alias.workspaceId === workspaceId && change.captureScopes?.some(scope =>
+          alias.resourceId === scope.resource.resourceId || (scope.subtree && alias.resourceId.startsWith(`${scope.resource.resourceId}/`))))
+        .map(alias => ({ resource: { workspaceId, resourceId: alias.resourceId }, buffer: this.workspaceBuffer(record, alias) })));
+      return { stepId: change.stepId, status: 'applied', buffers };
+    }
+    const previousReceipt = this.workspaceSurfaceReceipts.get(change.stepId);
+    if (previousReceipt) return previousReceipt;
+    const barrier = barrierId ? this.dirtyBarriers.get(barrierId) : undefined;
+    const check = () => {
+      if (this.disposed || !barrier?.active || barrier.workspaceId !== workspaceId
+        || [...change.before, ...change.after].some(slot => slot.resource.workspaceId !== workspaceId
+          || !barrier.paths.has(this.barrierPath(slot.resource.resourceId, barrier.caseSensitive)))) throw new Error('Workspace edit buffer barrier is no longer held');
+      for (const slot of change.before) {
+        const current = this.get(slot.resource);
+        if (!slot.buffer) { if (current) throw new Error(`Document was opened after preview: ${slot.resource.resourceId}`); }
+        else if (!current || current.connectionGeneration !== this.getGeneration()
+          || JSON.stringify(this.workspaceBuffer(current, slot.resource)) !== JSON.stringify(slot.buffer)) {
+          throw new Error(`Document changed after preview: ${slot.resource.resourceId}`);
+        }
+      }
+    };
+    check();
+    if (change.mode === 'validate') return { stepId: change.stepId, status: 'applied', buffers: structuredClone(change.after) };
+    // Resolve the new physical names without opening/saving any buffers under the barrier.
+    const identities = await Promise.all(change.after.filter(slot => slot.buffer).map(async slot => ({ slot,
+      resolved: await this.documents.resolveResourceIdentity(slot.resource) })));
+    check();
+    const beforeRecords = change.before.flatMap(slot => { const record = this.get(slot.resource); return record ? [record] : []; });
+    const byInstance = new Map(beforeRecords.map(record => [record.documentInstanceId, record]));
+    const moved: Array<{ before: DocumentRecord; after: DocumentRecord }> = [];
+    const removed = new Set(beforeRecords.map(record => this.keyFor(record.identity)));
+    // Clear old alias ownership before adding destination records. Notifications come after the whole state change.
+    for (const record of beforeRecords) {
+      this.records.delete(this.keyFor(record.identity));
+      this.deferredWatchReloads.delete(this.keyFor(record.identity));
+      const timer = this.journalTimers.get(this.keyFor(record.identity));
+      if (timer) clearTimeout(timer);
+      this.journalTimers.delete(this.keyFor(record.identity));
+      for (const alias of this.aliasesFor(record.identity)) {
+        const dirty = new Set(this.dirtyIdsByWorkspace.get(alias.workspaceId) ?? []); dirty.delete(alias.resourceId);
+        this.dirtyIdsByWorkspace.set(alias.workspaceId, dirty);
+      }
+    }
+    for (const [alias, coordination] of this.coordinationByAlias) if (removed.has(coordination)) {
+      this.coordinationByAlias.delete(alias); this.availableAliases.delete(alias);
+    }
+    for (const coordination of removed) this.aliasesByCoordination.delete(coordination);
+    const records = identities.map(({ slot, resolved }) => {
+      const buffer = slot.buffer!;
+      const old = byInstance.get(buffer.documentInstanceId);
+      const identity = { ...slot.resource, coordinationId: resolved.coordinationId };
+      const aliases = new Map<string, DocumentIdentity>();
+      for (const alias of resolved.aliases) {
+        const id = `${alias.workspaceId}\0${alias.resourceId}`;
+        aliases.set(id, { ...alias, coordinationId: resolved.coordinationId });
+        this.coordinationByAlias.set(id, resolved.coordinationId); this.availableAliases.add(id);
+      }
+      this.aliasesByCoordination.set(resolved.coordinationId, aliases);
+      const isMove = Boolean(old && (old.identity.resourceId !== identity.resourceId || old.identity.workspaceId !== identity.workspaceId));
+      const record: DocumentRecord = { ...(old ?? emptyRecord(identity, this.getGeneration(), buffer.documentInstanceId)), identity,
+        workspaceEpoch: change.epoch, buffer: buffer.buffer, baseContent: buffer.baseContent, baseRevision: buffer.baseRevision,
+        localEditRevision: buffer.localEditRevision, encoding: buffer.encoding, bom: buffer.bom, lineEnding: buffer.lineEnding,
+        status: buffer.status, dirty: buffer.buffer !== buffer.baseContent, saving: false, conflict: null, errorMessage: null,
+        lastOrigin: change.origin, lastChanges: null, ...(isMove ? { recoveryJournalId: null, recoveryJournalRevision: null } : {}) };
+      if (isMove) moved.push({ before: old!, after: record });
+      return record;
+    });
+    for (const { before, after } of moved) {
+      const oldKey = `${before.identity.workspaceId}\0${before.identity.resourceId}`;
+      const newKey = `${after.identity.workspaceId}\0${after.identity.resourceId}`;
+      const listeners = this.listeners.get(oldKey);
+      if (listeners) {
+        const target = this.listeners.get(newKey) ?? new Set<DocumentListener>();
+        for (const listener of [...listeners]) if (this.subscriptionInstances.get(listener) === before.documentInstanceId) {
+          listeners.delete(listener); target.add(listener);
+        }
+        if (listeners.size === 0) this.listeners.delete(oldKey);
+        this.listeners.set(newKey, target);
+      }
+    }
+    const afterInstances = new Set(records.map(record => record.documentInstanceId));
+    for (const record of beforeRecords) if (!afterInstances.has(record.documentInstanceId)) this.displacedDocumentInstances.add(record.documentInstanceId);
+    for (const record of records) this.displacedDocumentInstances.delete(record.documentInstanceId);
+    this.invalidateWorkspaceEditUndoGroups(beforeRecords.map(record => record.identity));
+    this.commitAtomic(records, workspaceId);
+    for (const { before, after } of moved) for (const listener of this.resourceMoveListeners) {
+      try { listener(before.identity, after.identity); } catch (error) { this.reportJournalFailure(error); }
+    }
+    // Record the exact applied receipt before asynchronous journal work. Delivery loss cannot repeat this step.
+    const receipt: VarinWorkspaceEditSurfaceReceipt = { stepId: change.stepId, status: 'applied', buffers: structuredClone(change.after) };
+    this.workspaceSurfaceReceipts.set(change.stepId, receipt);
+    for (const { before, after } of moved) {
+      try {
+      if (after.dirty) await this.writeJournalRecord(after, true);
+      if (before.recoveryJournalId && before.recoveryJournalRevision !== null) await this.documents.deleteRecoveryJournal({
+        token: { workspaceId: before.identity.workspaceId, epoch: change.epoch, owner: { kind: 'document-recovery', id: this.recoverySessionId, generation: this.getGeneration() } },
+        journalId: before.recoveryJournalId, expectedRevision: before.recoveryJournalRevision,
+      });
+      } catch (error) { receipt.message = `Draft recovery migration failed: ${error instanceof Error ? error.message : String(error)}`; }
+    }
+    return receipt;
+  }
+
   async prepareWorkspaceEdit(input: DocumentWorkspaceEditInput): Promise<DocumentWorkspaceEditPrepareResult> {
     this.assertActive();
+    if (input.changes.some(change => change.kind !== 'text')) return this.prepareHostWorkspaceEdit(input);
     const generation = this.getGeneration();
     const failures: DocumentWorkspaceEditFailure[] = [];
     const documentsByKey = new Map<string, PreparedWorkspaceDocument>();
     for (const change of input.changes) {
       if (change.kind !== 'text') {
-        failures.push({ reason: 'resource-operation-unsupported', message: 'Workspace resource changes require the Host batch mutation contract' });
+        failures.push({ reason: 'not-ready', message: 'Resource operation requires a prepared Host plan' });
         continue;
       }
       if (change.identity.workspaceId !== input.workspaceId) {
@@ -805,7 +1013,7 @@ export class DocumentRegistry {
             emptyRecord(identity, generation, this.createDocumentInstanceId()),
             await this.documents.read(identity),
           );
-          document = { before: structuredClone(before), afterBuffer: before.buffer, changes: [], editCount: 0, wasOpen: Boolean(existing) };
+          document = { before: structuredClone(before), afterBuffer: before.buffer, changes: [], editCount: 0, wasOpen: Boolean(existing), versionSteps: 0 };
           documentsByKey.set(key, document);
         }
         const record = document.before;
@@ -817,8 +1025,8 @@ export class DocumentRegistry {
           failures.push({ identity, reason, message: record.saving ? 'Document is currently being saved' : `Document is ${record.status}` });
           continue;
         }
-        if (change.version !== null && change.version !== record.localEditRevision) {
-          failures.push({ identity, reason: 'stale-version', message: `Document version changed from ${change.version} to ${record.localEditRevision}` });
+        if (change.version !== null && change.version !== record.localEditRevision + document.versionSteps) {
+          failures.push({ identity, reason: 'stale-version', message: `Document version changed from ${change.version} to ${record.localEditRevision + document.versionSteps}` });
           continue;
         }
         const prepared = prepareTextChanges(document.afterBuffer, change.edits);
@@ -829,6 +1037,7 @@ export class DocumentRegistry {
         }
         document.afterBuffer = prepared.buffer;
         document.editCount += change.edits.length;
+        document.versionSteps += 1;
       } catch (error) {
         failures.push({ identity: change.identity, reason: 'not-ready', message: error instanceof Error ? error.message : 'Document could not be loaded' });
       }
@@ -837,7 +1046,7 @@ export class DocumentRegistry {
       failures.push({ reason: 'stale-plan', message: 'Application Host changed while preparing the workspace edit' });
     }
     if (failures.length > 0) return { status: 'rejected', failures };
-    const documents = [...documentsByKey.values()].filter(document => document.afterBuffer !== document.before.buffer);
+    const documents = [...documentsByKey.values()];
     for (const document of documents) {
       const change = replacementBetween(document.before.buffer, document.afterBuffer);
       document.changes = change ? [change] : [];
@@ -849,6 +1058,8 @@ export class DocumentRegistry {
     const annotationIds = new Set(input.changes.flatMap(change => change.kind === 'text'
       ? change.edits.flatMap(edit => edit.annotationId ? [edit.annotationId] : [])
       : change.annotationId ? [change.annotationId] : []));
+    const missingAnnotation = [...annotationIds].find(annotationId => !input.changeAnnotations?.[annotationId]);
+    if (missingAnnotation) return { status: 'rejected', failures: [{ reason: 'stale-plan', message: `Unknown change annotation: ${missingAnnotation}` }] };
     const requiresConfirmation = [...annotationIds].some((annotationId) => (
       input.changeAnnotations?.[annotationId]?.needsConfirmation === true
     ));
@@ -862,8 +1073,10 @@ export class DocumentRegistry {
         beforeContent: document.before.buffer,
         afterContent: document.afterBuffer,
         editCount: document.editCount,
+        annotationIds: [...annotationIds],
       })),
       requiresConfirmation,
+      ...(input.changeAnnotations ? { changeAnnotations: input.changeAnnotations } : {}),
     };
     this.preparedWorkspaceEdits.set(groupId, { generation, preview, documents });
     return preview;
@@ -871,6 +1084,7 @@ export class DocumentRegistry {
 
   async applyWorkspaceEdit(groupId: string): Promise<DocumentWorkspaceEditApplyResult> {
     this.assertActive();
+    if (this.hostWorkspaceEdits.has(groupId)) return this.applyHostWorkspaceEdit(groupId);
     const prepared = this.preparedWorkspaceEdits.get(groupId);
     if (!prepared) {
       return {
@@ -891,6 +1105,8 @@ export class DocumentRegistry {
     if (prepared.generation !== this.getGeneration()) {
       failures.push({ reason: 'stale-plan', message: 'Application Host changed after the workspace edit was previewed' });
     }
+    const currentWorkspace = await this.documents.resolveWorkspace({ workspaceId: prepared.preview.workspaceId });
+    if (prepared.documents.some(document => document.before.workspaceEpoch !== currentWorkspace.epoch)) failures.push({ reason: 'stale-plan', message: 'Workspace epoch changed after preview' });
     const diskSnapshots = new Map<string, DocumentRecord>();
     await Promise.all(prepared.documents.filter((document) => !document.wasOpen).map(async (document) => {
       try {
@@ -940,6 +1156,7 @@ export class DocumentRegistry {
         });
       }
     }
+    if (prepared.generation !== this.getGeneration()) failures.push({ reason: 'stale-plan', message: 'Application Host changed while validating workspace edit' });
     if (failures.length > 0) {
       this.preparedWorkspaceEdits.delete(groupId);
       return { status: 'rejected', failures };
@@ -951,7 +1168,7 @@ export class DocumentRegistry {
         ...current,
         buffer: document.afterBuffer,
         dirty: document.afterBuffer !== current.baseContent,
-        localEditRevision: current.localEditRevision + 1,
+        localEditRevision: current.localEditRevision + document.versionSteps,
         status: 'ready' as const,
         lastOrigin: prepared.preview.origin,
         lastChanges: document.changes,
@@ -964,7 +1181,7 @@ export class DocumentRegistry {
       groupId,
       documents: records.map((record, index) => ({
         identity: record.identity,
-        beforeBuffer: prepared.documents[index].before.buffer,
+        beforeBuffer: prepared.documents[index]!.before.buffer,
         appliedBuffer: record.buffer,
         appliedRevision: record.localEditRevision,
       })),
@@ -974,11 +1191,30 @@ export class DocumentRegistry {
   }
 
   discardWorkspaceEdit(groupId: string): void {
+    const host = this.hostWorkspaceEdits.get(groupId);
+    if (host && !host.started) {
+      this.hostWorkspaceEdits.delete(groupId);
+      void this.documents.discardWorkspaceEdit({ workspaceId: host.workspaceId, operationId: groupId }).catch(error => this.reportJournalFailure(error));
+    }
     this.preparedWorkspaceEdits.delete(groupId);
   }
 
-  undoWorkspaceEdit(groupId: string): DocumentWorkspaceEditUndoResult {
+  async undoWorkspaceEdit(groupId: string): Promise<DocumentWorkspaceEditUndoResult> {
     this.assertActive();
+    const host = this.hostWorkspaceEdits.get(groupId);
+    if (host) {
+      const request = { workspaceId: host.workspaceId, operationId: groupId };
+      let result: VarinWorkspaceEditReceipt | { status: 'missing' };
+      try { result = await this.documents.undoWorkspaceEdit(request); } catch { result = await this.documents.readWorkspaceEdit(request); }
+      while (result.status === 'pending' && !this.disposed && host.generation === this.getGeneration()) {
+        await new Promise(resolve => setTimeout(resolve, 250));
+        if (this.disposed || host.generation !== this.getGeneration()) break;
+        result = await this.documents.readWorkspaceEdit(request);
+      }
+      if (result.status === 'undone' || result.status === 'compensated') return { status: 'undone', groupId, records: result.affectedResources.flatMap(identity => { const record = this.get(identity); return record ? [record] : []; }) };
+      return { status: 'rejected', groupId, failures: [{ reason: result.status === 'needs-attention' ? 'needs-attention' : 'stale-plan',
+        message: result.status === 'missing' ? 'Workspace edit receipt is unavailable' : result.failures[0]?.message ?? 'Workspace edit undo is not complete' }] };
+    }
     const group = this.workspaceEditUndoGroups.get(groupId);
     if (!group) return { status: 'unavailable', groupId };
     const failures: DocumentWorkspaceEditFailure[] = [];
@@ -1232,6 +1468,7 @@ export class DocumentRegistry {
         existing.active = false;
         existing.release();
         this.dirtyBarriers.delete(event.barrierId);
+        for (const move of this.deferredResourceMoves.splice(0)) this.handleWatchEvent(move, move.from.workspaceId);
         for (const [key, identity] of this.deferredWatchReloads) {
           if (this.isDirtyBarrierHeld(identity)) continue;
           this.deferredWatchReloads.delete(key);
@@ -1255,6 +1492,13 @@ export class DocumentRegistry {
     this.dirtyBarriers.set(event.barrierId, barrier);
     try {
       if (!await this.waitForDirtyBarrierOperations(barrier) || !barrier.active) return;
+      const journalWrites = [...this.records.values()].filter(record => this.aliasesFor(record.identity).some(alias => alias.workspaceId === event.workspaceId && barrier.paths.has(this.barrierPath(alias.resourceId, barrier.caseSensitive))));
+      for (const record of journalWrites) {
+        const timer = this.journalTimers.get(this.keyFor(record.identity));
+        if (timer) clearTimeout(timer);
+        this.journalTimers.delete(this.keyFor(record.identity));
+      }
+      await Promise.all(journalWrites.map(record => this.journalOperations.get(this.keyFor(record.identity))));
       await this.publishDirtyWorkspace(event.workspaceId);
       if (!barrier.active) return;
       const result = await this.documents.ackDirtyStateBarrier?.({
@@ -1277,6 +1521,7 @@ export class DocumentRegistry {
   }
 
   handleWatchEvent(event: VarinWorkspaceFileEvent, resetWorkspaceId?: string): void {
+    if (event.operationId && (this.hostWorkspaceEdits.has(event.operationId) || this.workspaceSurfaceOperations.has(event.operationId))) return;
     if (event.kind === 'invalidated') {
       // An entry (including an atomically replaced directory) invalidates open
       // descendants; only the Documents read can establish their actual state.
@@ -1284,7 +1529,7 @@ export class DocumentRegistry {
         if (this.aliasesFor(record.identity).some(alias => alias.workspaceId === event.resource.workspaceId
           && (alias.resourceId === event.resource.resourceId || alias.resourceId.startsWith(`${event.resource.resourceId}/`)))) {
           if (this.deferWatchReload(record) || record.status === 'loading' || record.saving) continue;
-          void this.open(record.identity, { reload: true });
+          void this.open(record.identity, { reload: true }).catch(error => this.reportJournalFailure(error));
         }
       }
       return;
@@ -1295,9 +1540,19 @@ export class DocumentRegistry {
       ));
       for (const record of records) {
         if (this.deferWatchReload(record) || record.status === 'loading') continue;
-        void this.open(record.identity, { reload: true });
+        void this.open(record.identity, { reload: true }).catch(error => this.reportJournalFailure(error));
       }
       return;
+    }
+    if (event.kind === 'moved') {
+      if (this.isDirtyBarrierHeld(event.from) || this.isDirtyBarrierHeld(event.resource)) {
+        this.deferredResourceMoves.push(event);
+        return;
+      }
+      const descendants = [...this.records.values()].flatMap(record => this.aliasesFor(record.identity)
+        .filter(alias => alias.workspaceId === event.from.workspaceId && alias.resourceId.startsWith(`${event.from.resourceId}/`)));
+      for (const descendant of descendants) this.handleWatchEvent({ ...event, from: descendant,
+        resource: { workspaceId: event.resource.workspaceId, resourceId: event.resource.resourceId + descendant.resourceId.slice(event.from.resourceId.length) } }, resetWorkspaceId);
     }
     const identity = event.kind === 'moved' ? event.from : event.resource;
     const current = this.records.get(this.keyFor(identity));
@@ -1321,6 +1576,7 @@ export class DocumentRegistry {
         identity: event.resource,
       };
       this.commit(moved);
+      for (const listener of this.resourceMoveListeners) { try { listener(current.identity, moved.identity); } catch (error) { this.reportJournalFailure(error); } }
       const prevListeners = this.listeners.get(previousKey);
       if (prevListeners) {
         this.listeners.delete(previousKey);
@@ -1345,7 +1601,7 @@ export class DocumentRegistry {
         const externalSource = peekAgentFileChangeHint(record.identity) ? 'agent' : 'disk';
         if (latest.externalSource === externalSource) return;
         this.commit({ ...latest, externalSource });
-      });
+      }).catch(error => this.reportJournalFailure(error));
     }
   }
 
@@ -1395,6 +1651,11 @@ export class DocumentRegistry {
     this.openOperations.clear();
     this.dirtyIdsByWorkspace.clear();
     this.workspaceVersions.clear();
+    this.hostWorkspaceEdits.clear();
+    this.workspaceSurfaceReceipts.clear();
+    this.workspaceSurfaceOperations.clear();
+    this.displacedDocumentInstances.clear();
+    this.resourceMoveListeners.clear();
     this.preparedWorkspaceEdits.clear();
     this.workspaceEditUndoGroups.clear();
     for (const barrier of this.dirtyBarriers.values()) {
@@ -1403,6 +1664,7 @@ export class DocumentRegistry {
     }
     this.dirtyBarriers.clear();
     this.deferredWatchReloads.clear();
+    this.deferredResourceMoves.length = 0;
     for (const workspaceId of dirtyWorkspaces) {
       const previous = this.dirtyPublicationTails.get(workspaceId) ?? Promise.resolve();
       const generation = this.getGeneration();
@@ -1634,6 +1896,17 @@ export class DocumentRegistry {
       this.reportJournalFailure(error);
       return;
     }
+    if (payload.action === 'workspace-edit') {
+      const change = payload.workspaceEdit;
+      if (!change) return;
+      if (change.mode !== 'capture') this.workspaceSurfaceOperations.add(payload.operationId);
+      let receipt: VarinWorkspaceEditSurfaceReceipt;
+      try { receipt = await this.executeWorkspaceSurfaceChange(change, payload.barrierId, payload.workspaceId); }
+      catch (error) { receipt = { stepId: change.stepId, status: 'rejected', buffers: [], message: error instanceof Error ? error.message : String(error) }; }
+      try { await this.documents.completeSurfaceOperation({ ...owner, operationId: payload.operationId, requestId: payload.requestId,
+        resources: [], workspaceId: payload.workspaceId, workspaceEdit: receipt }); } catch (error) { this.reportJournalFailure(error); }
+      return;
+    }
     const failed = (message: string): VarinDocumentSurfaceOperationResourceResult[] => payload.targets.map((target) => ({
       resource: target.resource,
       status: 'failed',
@@ -1733,15 +2006,15 @@ export class DocumentRegistry {
       this.invalidateWorkspaceEditUndoGroups(restored.map(record => record.identity));
       this.commitAtomic(restored, payload.workspaceId);
       await Promise.all([...new Set(restored.flatMap(record => this.aliasesFor(record.identity).map(alias => alias.workspaceId)))].map(id => this.publishDirtyWorkspace(id)));
-      return Promise.all(restored.map(async (record, index) => ({ resource: records[index].target.resource,
+      return Promise.all(restored.map(async (record, index) => ({ resource: records[index]!.target.resource,
         status: 'restored' as const, documentInstanceId: record.documentInstanceId,
-        beforeLocalEditRevision: records[index].record.localEditRevision, beforeHash: records[index].hash,
+        beforeLocalEditRevision: records[index]!.record.localEditRevision, beforeHash: records[index]!.hash,
         afterLocalEditRevision: record.localEditRevision, afterHash: await bufferHash(record.buffer),
       })));
     }
 
     if (payload.action === 'undo') {
-      const undone = this.undoWorkspaceEdit(payload.operationId);
+      const undone = await this.undoWorkspaceEdit(payload.operationId);
       if (undone.status !== 'undone') {
         const message = undone.status === 'unavailable'
           ? 'The surface undo baseline is unavailable'
@@ -1962,6 +2235,7 @@ export class DocumentRegistry {
   }
 
   private reportJournalFailure(error: unknown): void {
+    if (this.disposed) return;
     console.error('[Documents] Failed to persist recovery journal:', error);
   }
 

@@ -1,3 +1,4 @@
+import { parseVarinExtensionRestartHandoffs } from "./restart-handoff.js";
 import { parseVarinSurfaceServiceInvocationLease } from './surface-service-lease.js';
 import { VarinExtensionContractError } from "./contract-error.js";
 export { VarinExtensionContractError } from "./contract-error.js";
@@ -877,6 +878,7 @@ export function parseVarinExtensionInstallationRecord(value: unknown, path = "in
   }
   throwIssues("Varin extension installation", issues);
   return {
+    ...(value.restartHandoffs === undefined ? {} : { restartHandoffs: parseVarinExtensionRestartHandoffs(value.restartHandoffs) }),
     manifest,
     source,
     desired,
@@ -1103,6 +1105,7 @@ function parsePublicCatalogEntry(value: unknown, path: string, issues: string[])
     }
   }
   return {
+    ...(value.restartHandoffs === undefined ? {} : { restartHandoffs: parseVarinExtensionRestartHandoffs(value.restartHandoffs) }),
     manifest,
     source: {
       ...sourceProvenance(source, `${path}.source`, issues),
@@ -1345,7 +1348,9 @@ export function parseVarinExtensionCandidatePublicationRequest(value: unknown): 
     return { entrypointId, generation: positiveRevision(member.generation, `${path}.generation`, issues) };
   }) : (issues.push("surfaceReadiness.members must be an array"), []);
   if (!members.length) issues.push("surfaceReadiness.members must not be empty");
+  const preparedConsumerCount = raw.preparedConsumerCount === undefined ? undefined : positiveRevision(raw.preparedConsumerCount, "surfaceReadiness.preparedConsumerCount", issues, true);
   const readiness: VarinExtensionSurfaceReadiness = {
+    ...(preparedConsumerCount === undefined ? {} : { preparedConsumerCount }),
     hostPreparation: parseHostPreparation(raw.hostPreparation, "surfaceReadiness.hostPreparation", issues),
     realmId: realmId ?? "invalid", surface: surface as VarinApplicationSurface, members,
   };

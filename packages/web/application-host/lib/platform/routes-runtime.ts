@@ -60,6 +60,7 @@ export interface PlatformRouteDependencies {
   extensionCatalog: ExtensionRouteDependencies['extensionCatalog'];
   extensionPackages: ExtensionRouteDependencies['extensionPackages'];
   extensionRuntime: ExtensionRouteDependencies['extensionRuntime'];
+  restartApplicationHost?: () => Promise<void>;
   formatSettingsResponse: SettingsHelpers['formatSettingsResponse'];
   fsPromises: typeof fsPromisesModule;
   getPiRuntimeBroker?: PiRuntimeDependencies['getPiRuntimeBroker'];
@@ -178,6 +179,7 @@ export const createPlatformRoutesRuntime = ({
       extensionCatalog,
       extensionPackages,
       extensionRuntime,
+      restartApplicationHost,
       uiAuthController,
       documents,
       fileResources,
@@ -193,6 +195,7 @@ export const createPlatformRoutesRuntime = ({
       ...(documents ? { documents } : {}),
       readProjects: async () => sanitizeProjects((await readSettingsFromDisk()).projects) ?? [],
       ...(extensionRuntime !== undefined ? { extensionRuntime } : {}),
+      ...(restartApplicationHost ? { restartApplicationHost } : {}),
     });
 
     registerSettingsUtilityRoutes(app, {

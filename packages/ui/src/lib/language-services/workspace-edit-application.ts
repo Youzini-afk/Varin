@@ -57,6 +57,6 @@ export const applyLanguageWorkspaceEdit = async (options: {
   }
   const applied = await registry.applyWorkspaceEdit(prepared.groupId);
   return applied.status === 'applied'
-    ? { status: 'applied', groupId: applied.groupId, changedFiles: applied.records.length }
+    ? { status: 'applied', groupId: applied.groupId, changedFiles: prepared.files.length }
     : { status: 'rejected', message: applied.failures[0]?.message ?? 'Workspace edit became stale' };
 };

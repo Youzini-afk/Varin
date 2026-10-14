@@ -338,7 +338,7 @@
     }
   }
 ],
-  "runtimeExports": [
+  "runtimeExports": ["ModelHttpConfiguration",
  "FileObservationAuthority",
   "InferenceReceiptPendingParams",
   "InferenceSessionParams",
@@ -831,8 +831,8 @@
   "MediaReadChunk",
   "ChildSourceAuthority"
 ],
-  "protocolVersion": 40,
-  "runtimeStructs": {"ContentCollectionReport":{"fields":{"status":{"type":"ContentCollectionStatus"},"phase":{"type":"ContentCollectionPhase"},"removedObjects":{"type":"number"},"removedBytes":{"type":"number"},"removedStagingFiles":{"type":"number"},"reason":{"type":"string | null"}}},"ModelSessionConfiguration":{"fields":{"providerId":{"type":"string","optional":true},"providerFamily":{"type":"string"},"model":{"type":"string"},"endpoint":{"type":"string"},"credentialEnvironment":{"type":"string | null"},"allowAnonymous":{"type":"boolean"},"acceptsImages":{"type":"boolean","optional":true},"configurationGeneration":{"type":"number"},"maxOutputTokens":{"type":"number | null"},"azureDeployment":{"type":"string | null","optional":true},"azureApiVersion":{"type":"string | null","optional":true},"legacyMaxTokens":{"type":"boolean","optional":true},"includeStreamUsage":{"type":"boolean","optional":true},"reasoningEffort":{"type":"string | null","optional":true},"anthropicOauth":{"type":"boolean","optional":true},"adapterId":{"type":"string","optional":true},"adapterVersion":{"type":"string","optional":true},"contextWindowTokens":{"type":"number","optional":true},"thinkingLevel":{"type":"string","optional":true},"modelOptions":{"type":"unknown","optional":true}}},"KernelWorkingResultCandidate":{"fields":{"publicationId":{"type":"string"},"candidateOperationId":{"type":"string"},"workspaceId":{"type":"string"},"branchId":{"type":"string"},"root":{"type":"string"},"baseRoot":{"type":"string"},"writeRevision":{"type":"number"},"pinId":{"type":"string"},"basePinId":{"type":"string"}}}},
+  "protocolVersion": 41,
+  "runtimeStructs": {"ContentCollectionReport":{"fields":{"status":{"type":"ContentCollectionStatus"},"phase":{"type":"ContentCollectionPhase"},"removedObjects":{"type":"number"},"removedBytes":{"type":"number"},"removedStagingFiles":{"type":"number"},"reason":{"type":"string | null"}}},"ModelSessionConfiguration":{"fields":{"providerId":{"type":"string","optional":true},"providerFamily":{"type":"string"},"model":{"type":"string"},"endpoint":{"type":"string"},"credentialEnvironment":{"type":"string | null"},"allowAnonymous":{"type":"boolean"},"acceptsImages":{"type":"boolean","optional":true},"configurationGeneration":{"type":"number"},"maxOutputTokens":{"type":"number | null"},"azureDeployment":{"type":"string | null","optional":true},"azureApiVersion":{"type":"string | null","optional":true},"legacyMaxTokens":{"type":"boolean","optional":true},"includeStreamUsage":{"type":"boolean","optional":true},"reasoningEffort":{"type":"string | null","optional":true},"anthropicOauth":{"type":"boolean","optional":true},"adapterId":{"type":"string","optional":true},"adapterVersion":{"type":"string","optional":true},"awsRegion":{"type":"string","optional":true},"adapterIdentity":{"type":"string","optional":true},"adapterBindingId":{"type":"string","optional":true},"connection":{"type":"ModelHttpConfiguration","optional":true},"contextWindowTokens":{"type":"number","optional":true},"thinkingLevel":{"type":"string","optional":true},"modelOptions":{"type":"unknown","optional":true}}},"KernelWorkingResultCandidate":{"fields":{"publicationId":{"type":"string"},"candidateOperationId":{"type":"string"},"workspaceId":{"type":"string"},"branchId":{"type":"string"},"root":{"type":"string"},"baseRoot":{"type":"string"},"writeRevision":{"type":"number"},"pinId":{"type":"string"},"basePinId":{"type":"string"}}}},
   "runtimeEnums": {
     "McpInteractionMode": ["Form", "Url", "Sampling"],
     "McpInteractionChoice": ["Accept", "Decline", "Cancel"],
@@ -1129,6 +1129,10 @@
   "response": {"v": 1, "kind": "response", "id": "request-id", "ok": true, "result": {}},
   "requestUnion": true,
   "methodParams": {
+"model.adapters.retain":"ModelAdaptersRetainParams",
+"model.adapters.release":"ModelAdaptersReleaseParams",
+"model.adapters.publish":"ModelAdaptersPublishParams",
+"model.adapters.revoke":"ModelAdaptersRevokeParams",
 "runtime.followup.registration.prepare":"FollowupFilePrepareParams",
 "source.authority.inspect_read_scope":"SourceReadScopeParams",
 "source.authority.close_read_scope":"SourceReadScopeParams",
@@ -1483,6 +1487,27 @@
 "source.resource.release": "SourceResourceControlParams"
   },
   "dto": {
+"ModelHttpConfiguration":{"raw":"export interface ModelHttpConfiguration { headers?:Record<string,string>; proxy?:{mode:\"direct\"}|{mode:\"proxy\";url:string} }","rustType":"varin_runtime::providers::connection_options::ModelHttpConfiguration"},
+"ModelAdaptersRetainParams":{"fields":{"bindingId":{"type":"string"},"leaseId":{"type":"string"}}},
+"ModelAdaptersReleaseParams":{"fields":{"leaseId":{"type":"string"}}},
+    "HistoryRange": {"raw":"export interface HistoryRange { branch_id:string; ancestor_id:string|null; leaf_id:string|null }"},
+    "ModelOpaqueItem": {"raw":"export interface ModelOpaqueItem { connection_identity:string; family:string; adapter_version:string; value:unknown }"},
+    "ModelToolCall": {"raw":"export interface ModelToolCall { call_id:string; name:string; schema_version:string; arguments:unknown }"},
+    "ModelToolCompletion": {"raw":"export type ModelToolCompletion = {kind:'not_dispatched';reason:string} | {kind:'result';outcome:Outcome;effect:Effect;content:OutputBody<ResolvedMedia>} | {kind:'job_accepted';operation_id:string;phase:string;effect:Effect;lifetime:Lifetime;content?:OutputBody<ResolvedMedia>};"},
+    "ModelContent": {"raw":"export type ModelContent = {kind:'text'|'reasoning_summary';text:string} | {kind:'media';media:ResolvedMedia} | {kind:'output';output:OutputBody<ResolvedMedia>} | {kind:'tool_call';call:ModelToolCall} | {kind:'tool_result';result:{request_id:string;call_id:string;completion:ModelToolCompletion}} | {kind:'provider_only'};"},
+    "ModelConversationItem": {"raw":"export interface ModelConversationItem { resource_activation?:ResourceActivation; id:string; provenance:ContentProvenance; content:ModelContent; opaque:ModelOpaqueItem|null }"},
+    "RequestBinding": {"raw":"export interface RequestBinding { child_dispatch:unknown|null; goal:{id:string;generation:number}|null; resource_activations:ResourceActivation[]; resource_checkpoint_id:string|null; connection_identity:string; provider_family:string; model:string; credential_ref:string|null; configuration_generation:number; tool_schema_generation:number; tools:LaunchTool[]; instruction_sources:string[]; memory_checkpoint:string|null; attachment_refs:string[]; environment_cursor:number; history_range:HistoryRange }"},
+    "RequestOrigin": {"raw":"export type RequestOrigin = {kind:'auxiliary_inference';operation_id:string;parent_operation_id:string;purpose:string} | {kind:'mcp_sampling';interaction_id:string;operation_id:string;parent_operation_id:string} | {kind:'conversation';compaction:{planHash:string;nodeId:string}|null;step:number;history_range:HistoryRange} | {kind:'policy_model_job';action_id:string;purpose:string;boundary_id:string};"},
+    "RequestView": {"raw":"export interface RequestView { request_id:string; run_id:string; origin:RequestOrigin; binding:RequestBinding; history:ModelConversationItem[] }"},
+    "ModelUsageReceipt": {"raw":"export interface ModelUsageReceipt { measurement:'missing'|'estimated'|'actual'; input_tokens:number|null; output_tokens:number|null; cached_input_tokens:number|null; cache_write_tokens:number|null; reasoning_tokens:number|null; raw:unknown|null; pricing_version:string|null }"},
+    "ProviderEvent": {"raw":"export type ProviderEvent = {kind:'text_delta';item_id:string;text:string} | {kind:'tool_arguments_delta';call_id:string;delta:string} | {kind:'item_completed';item:{id:string;content:ModelContent;opaque:ModelOpaqueItem|null}} | {kind:'usage';receipt:ModelUsageReceipt};"},
+    "FinishReason": {"raw":"export type FinishReason = 'stop'|'tool_calls'|'length'|'content_filter';"},
+    "ModelProtocolCall": {"raw":"export type ModelProtocolCall = {kind:'serialize';configuration:ModelSessionConfiguration;request:RequestView} | {kind:'parse';request_id:string;run_id:string;connection_identity:string;frame:string|null;state:unknown};"},
+    "ModelProtocolResult": {"raw":"export type ModelProtocolResult = {kind:'body';body:unknown} | {kind:'parsed';events:ProviderEvent[];state:unknown;finish:FinishReason|null};"},
+    "ModelAdapterContribution": {"fields":{"identity":{"type":"string"},"id":{"type":"string"},"version":{"type":"string"},"protocolFamily":{"type":"string"},"bindingId":{"type":"string"},"headers":{"type":"Record<string, string>"}}},
+    "ModelAdaptersPublishParams": {"fields":{"expectedRevision":{"type":"number"},"adapters":{"type":"ModelAdapterContribution[]"}}},
+    "ModelAdaptersRevokeParams": {"fields":{"bindingId":{"type":"string"}}},
+
 "FileObservationAuthority":{"raw": "export interface FileObservationAuthority {coordinatorHostId:string;authorityId:string;resourceEpoch:string;}"},
 "FileObservationRegistrationScope":{"raw": "export interface FileObservationRegistrationScope {coordinatorHostId:string;branchId:string;key:string;}"},
 "FileObservationRequest":{"raw": "export interface FileObservationRequest {resource_authority:FileObservationAuthority|null;registration_scope:FileObservationRegistrationScope|null;followup_id:string;source_index:number;source_run_id:string;thread_id:string;actor:FollowupActor;source:LaunchSource;path:string;condition:FileCondition;intent_ref:unknown;}", "rustType": "varin_runtime::catalog::followups::FileObservationRequest"},
@@ -2034,7 +2059,7 @@
     "CredentialScope": {"fields":{"reference":{"type":"string"},"authority":{"type":"string"},"account":{"type":"string"},"generation":{"type":"number"}}},
     "RunCancellationReceipt": {"raw":"export type RunCancellationReceipt = Omit<Run, 'configuration'>;"},
     "OperationCancellationReceipt": {"raw":"export type OperationCancellationReceipt = Omit<Operation, 'intent' | 'result' | 'external_receipt'>;"},
-    "ModelSessionConfiguration": {"fields": {"providerId": {"type": "string", "optional": true}, "providerFamily": {"type": "string"}, "model": {"type": "string"}, "endpoint": {"type": "string"}, "credentialEnvironment": {"type": "string | null"}, "allowAnonymous": {"type": "boolean"}, "acceptsImages": {"type": "boolean", "optional": true}, "configurationGeneration": {"type": "number"}, "maxOutputTokens": {"type": "number | null"}, "azureDeployment": {"type": "string | null", "optional": true}, "azureApiVersion": {"type": "string | null", "optional": true}, "legacyMaxTokens": {"type": "boolean", "optional": true}, "includeStreamUsage": {"type": "boolean", "optional": true}, "reasoningEffort": {"type": "string | null", "optional": true}, "anthropicOauth": {"type": "boolean", "optional": true}, "adapterId": {"type": "string", "optional": true}, "adapterVersion": {"type": "string", "optional": true}, "contextWindowTokens": {"type": "number", "optional": true}, "thinkingLevel": {"type": "string", "optional": true}, "modelOptions": {"type": "unknown", "optional": true}}},
+    "ModelSessionConfiguration": {"fields": {"providerId": {"type": "string", "optional": true}, "providerFamily": {"type": "string"}, "model": {"type": "string"}, "endpoint": {"type": "string"}, "credentialEnvironment": {"type": "string | null"}, "allowAnonymous": {"type": "boolean"}, "acceptsImages": {"type": "boolean", "optional": true}, "configurationGeneration": {"type": "number"}, "maxOutputTokens": {"type": "number | null"}, "azureDeployment": {"type": "string | null", "optional": true}, "azureApiVersion": {"type": "string | null", "optional": true}, "legacyMaxTokens": {"type": "boolean", "optional": true}, "includeStreamUsage": {"type": "boolean", "optional": true}, "reasoningEffort": {"type": "string | null", "optional": true}, "anthropicOauth": {"type": "boolean", "optional": true}, "adapterId": {"type": "string", "optional": true}, "adapterVersion": {"type": "string", "optional": true}, "awsRegion": {"type": "string", "optional": true}, "adapterIdentity": {"type": "string", "optional": true}, "adapterBindingId": {"type": "string", "optional": true}, "connection": {"type": "ModelHttpConfiguration", "optional": true}, "contextWindowTokens": {"type": "number", "optional": true}, "thinkingLevel": {"type": "string", "optional": true}, "modelOptions": {"type": "unknown", "optional": true}}},
     "RunStartReceipt": {"fields": {"runId": {"type": "string"}, "epoch": {"type": "number"}}},
     "RunState": {"raw": "export type RunState = \"accepted\" | \"preparing\" | \"runnable\" | \"generating\" | \"executing\" | \"waiting\" | \"completed\" | \"failed\" | \"cancelled\";"},
     "OperationPhase": {"raw": "export type OperationPhase = \"accepted\" | \"preparing\" | \"queued\" | \"running\" | \"waiting\" | \"settling\" | \"terminal\";"},
@@ -2211,7 +2236,7 @@
       "operationId": {"type": "string"}, "workspaceId": {"type": "string"}, "rootId": {"type": "string"}, "fromPath": {"type": "string"}, "toPath": {"type": "string"}, "targetMustBeMissing": {"type": "boolean", "optional": true}, "expectedFromJson": {"type": "string", "optional": true}, "expectedToJson": {"type": "string", "optional": true}, "leaseId": {"type": "string", "optional": true}
     }},
     "KernelFileScanParams": {"fields": {
-      "workspaceId": {"type": "string"}, "rootId": {"type": "string"}, "path": {"type": "string"}, "scopes": {"type": "string[]", "optional": true}, "cursor": {"type": "number", "optional": true}, "pageSize": {"type": "number", "optional": true}, "expectedFingerprint": {"type": "string", "optional": true}, "leaseId": {"type": "string", "optional": true}
+      "workspaceId": {"type": "string"}, "rootId": {"type": "string"}, "path": {"type": "string"}, "includeInternalEntries": {"type": "boolean", "optional": true}, "scopes": {"type": "string[]", "optional": true}, "cursor": {"type": "number", "optional": true}, "pageSize": {"type": "number", "optional": true}, "expectedFingerprint": {"type": "string", "optional": true}, "leaseId": {"type": "string", "optional": true}
     }},
     "KernelFileMeasureParams": {"fields": {
       "workspaceId": {"type": "string"}, "rootId": {"type": "string"}, "path": {"type": "string"}
@@ -2834,6 +2859,10 @@
 "ChildSourceDelegation": {"rustType":"varin_runtime::catalog::dispatch::ChildSourceDelegation","fields":{"work_mode":{"type":"ChildWorkMode"},"process":{"type":"boolean"},"configured_preset":{"type":"boolean"},"selection_ref":{"type":"unknown"}}}
   },
   "methods": {
+"model.adapters.retain":"Retain an exact active model implementation before accepting its configuration",
+"model.adapters.release":"Release the original accepted model implementation lease",
+"model.adapters.publish":"Publish the complete prepared Host model adapter composition",
+"model.adapters.revoke":"Revoke an exact retained Host model adapter binding",
 "runtime.mcp.interaction.context":"Read the exact original interaction and frozen MCP server owner for transport cleanup",
 "runtime.mcp.interaction.delivery.released":"Acknowledge release of the original managed interaction delivery reference",
 "runtime.followup.registration.prepare":"Private original file observation owner",

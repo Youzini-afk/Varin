@@ -200,6 +200,7 @@ export const refreshVarinExtensionCatalog = async (): Promise<void> => {
 const runMutation = (
   extensionId: string,
   mutate: (snapshot: VarinExtensionCatalogSnapshot) => Promise<VarinExtensionCatalogSnapshot>,
+  refreshAfter = true,
 ): Promise<void> => {
   const operation = mutationQueue.then(async () => {
     await startVarinExtensionCatalog();
@@ -216,8 +217,10 @@ const runMutation = (
           snapshot: state.snapshot ? { ...state.snapshot, catalog } : state.snapshot,
         });
       }
-      const refreshed = await extensionsApi().hostState();
-      acceptSnapshot(refreshed, requestGeneration);
+      if (refreshAfter) {
+        const refreshed = await extensionsApi().hostState();
+        acceptSnapshot(refreshed, requestGeneration);
+      }
     } catch (error) {
       if (requestGeneration === generation) {
         const message = error instanceof Error ? error.message : String(error);
@@ -390,3 +393,19 @@ export const resetVarinExtensionCatalogForTests = (
   state = initialState();
   listeners.clear();
 };
+
+/** An explicit restart action has its own stable ID, including after response loss. */
+export const restartVarinExtensionCandidate = (extensionId: string, candidateIntegrity: string): Promise<void> => {
+  const handoffId = crypto.randomUUID();
+  return runMutation(extensionId, async catalog => {
+    try { return await extensionsApi().requestRestartHandoff({ extensionId, candidateIntegrity, expectedRevision: catalog.revision, handoffId }); }
+    catch (error) {
+      const observed = await extensionsApi().hostState().catch(() => undefined);
+      if (observed?.catalog.authoritative && observed.catalog.extensions.some(entry => entry.manifest.id === extensionId && entry.restartHandoffs?.some(handoff => handoff.id === handoffId))) return observed.catalog;
+      throw error;
+    }
+  }, false);
+};
+
+export const recoverVarinExtensionRestart = (extensionId: string, handoffId: string): Promise<void> => runMutation(extensionId,
+  catalog => extensionsApi().recoverRestartHandoff({ extensionId, handoffId, expectedRevision: catalog.revision }), false);

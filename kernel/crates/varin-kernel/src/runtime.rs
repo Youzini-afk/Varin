@@ -240,6 +240,7 @@ struct Kernel {
     )>,
     pending_root_registrations: HashMap<String, PendingRootRegistration>,
     active_materializations: usize,
+    model_protocol: Option<crate::model_protocol::ModelProtocolOwner>,
     source_resources:Option<crate::tools::KernelResourceClient>,
     source_request_cancel:Option<varin_runtime::execution::CancellationToken>,
     source_tasks:HashMap<String,varin_runtime::execution::CancellationToken>,
@@ -276,6 +277,7 @@ impl Kernel {
             blob_read_hold: None,
             pending_root_registrations: HashMap::new(),
             active_materializations: 0,
+            model_protocol: None,
             source_resources:None,
             source_request_cancel:None,
             source_tasks:HashMap::new(),
@@ -461,6 +463,15 @@ impl Kernel {
                 storage.shutdown_processes()?;
             }
             return Ok(Some(response_ok(id, json!({"stopping": true}))));
+        }
+        if matches!(method, "model.adapters.publish" | "model.adapters.revoke" | "model.adapters.retain" | "model.adapters.release") {
+            if request.get("grantId").is_some() { return Err(KernelError::Authorization("model adapter composition requires authenticated Host ownership".into())); }
+            let owner = self.model_protocol.as_ref().ok_or_else(|| KernelError::Operation("model protocol owner unavailable".into()))?;
+            let result = if method == "model.adapters.publish" { owner.publish(serde_json::from_value(params_value)?)? }
+                else if method == "model.adapters.retain" { owner.retain(serde_json::from_value(params_value)?)? }
+                else if method == "model.adapters.release" { owner.release(serde_json::from_value(params_value)?)? }
+                else { owner.revoke(serde_json::from_value(params_value)?)? };
+            return Ok(Some(response_ok(id, result)));
         }
         let storage = self
             .storage
@@ -1093,6 +1104,7 @@ pub(crate) fn run() -> Result<(), Box<dyn std::error::Error>> {
     let revoked_grants = Arc::new(Mutex::new(HashSet::<String>::new()));
     let admission_epoch = Arc::new(Mutex::new(None::<String>));
     let credential_bridge = crate::credential_bridge::CredentialBridge::new(response_tx.clone());
+    let model_protocol = crate::model_protocol::ModelProtocolOwner::new(response_tx.clone());
     let mcp_bridge = crate::host_tools::ToolBridge::new(response_tx.clone());
     let memory_bridge = crate::host_query::OwnerChannel::new("memory", response_tx.clone());
     let context_bridge = crate::host_query::OwnerChannel::new("context", response_tx.clone());
@@ -1355,6 +1367,7 @@ pub(crate) fn run() -> Result<(), Box<dyn std::error::Error>> {
     let worker_revoked_grants = revoked_grants.clone();
     let worker_admission_epoch = admission_epoch.clone();
     let worker_credentials = credential_bridge.clone();
+    let worker_model_protocol = model_protocol.clone();
     let worker_mcp = mcp_bridge.clone();
     let worker_language = language_bridge.clone();
     let worker_memory = memory_bridge.clone();
@@ -1371,6 +1384,7 @@ pub(crate) fn run() -> Result<(), Box<dyn std::error::Error>> {
     let worker = thread::spawn(move || {
         let mut kernel = Kernel::new(transport_epoch);
         kernel.agent_control = worker_agent_control;
+        kernel.model_protocol = Some(worker_model_protocol.clone());
         kernel.source_resources=Some(source_resources);
         let mut stopping = false;
         for message in request_rx {
@@ -1901,6 +1915,7 @@ pub(crate) fn run() -> Result<(), Box<dyn std::error::Error>> {
                     .and_then(Value::as_str)
                 {
                     let _ = worker_credentials.initialize(epoch);
+                    worker_model_protocol.initialize(epoch);
                     worker_mcp.initialize(epoch);
                     worker_language.initialize(epoch);
                     worker_memory.initialize(epoch);
@@ -2144,6 +2159,7 @@ pub(crate) fn run() -> Result<(), Box<dyn std::error::Error>> {
             mcp_bridge.receive(request);
             continue;
         }
+        if request.get("kind").and_then(Value::as_str) == Some("model-protocol-response") { model_protocol.receive(request); continue; }
         if request.get("kind").and_then(Value::as_str) == Some("credential-response") {
             credential_bridge.receive(request);
             continue;
@@ -2414,6 +2430,7 @@ pub(crate) fn run() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
     credential_bridge.close();
+    model_protocol.close();
     mcp_bridge.close();
     language_bridge.close();
     memory_bridge.close();

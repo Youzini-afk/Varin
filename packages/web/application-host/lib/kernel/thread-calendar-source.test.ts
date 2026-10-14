@@ -17,7 +17,7 @@ function fixture(selection: CalendarSource) {
       model: { providerId: 'fixture', modelId: 'model' }, goal: null } }, instruction: 'Original calendar instruction', owner_epoch: 4 } as CalendarPreparation;
   const runtime = { thread: vi.fn(async () => ({ thread_id: identity.threadId, branches: [{ branch_id: identity.branchId }] })),
     admitCalendar: vi.fn(async () => ({ id: work.occurrence.id, run_id: 'run:original' })) };
-  const credentialOwner = { scope: async () => scope } as ExistingHostCredentialOwner;
+  const credentialOwner = { scope: async () => scope, release: vi.fn() } as unknown as ExistingHostCredentialOwner;
   const configuration: ModelSessionConfiguration = { model: 'model', providerFamily: 'fixture', endpoint: 'https://fixture.invalid',
     credentialEnvironment: null, allowAnonymous: true, acceptsImages: false, configurationGeneration: 1, maxOutputTokens: null };
   const models = { resolveModel: vi.fn(async () => ({ configuration, credentialOwner })),

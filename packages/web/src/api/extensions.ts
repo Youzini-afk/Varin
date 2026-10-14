@@ -201,6 +201,14 @@ export const createWebExtensionsAPI = (): ExtensionsAPI => ({
     const response = await applicationHostRequest('/api/varin/extensions/v1/candidates/prepare', { candidateIntegrity, extensionId }, signal);
     return parseVarinExtensionCandidatePreparationResult(await readJsonOrThrow(response));
   },
+  requestRestartHandoff: async request => {
+    const payload = await readJsonOrThrow(await applicationHostRequest('/api/varin/extensions/v1/candidates/restart-handoff', request));
+    return parseVarinExtensionCatalogSnapshot((payload as { snapshot: unknown }).snapshot);
+  },
+  recoverRestartHandoff: async request => {
+    const payload = await readJsonOrThrow(await applicationHostRequest('/api/varin/extensions/v1/candidates/recover-restart-handoff', request));
+    return parseVarinExtensionCatalogSnapshot((payload as { snapshot: unknown }).snapshot);
+  },
   requestCandidateApplication: async (request: VarinExtensionCandidateSelectionRequest) => {
     const payload = await readJsonOrThrow(await applicationHostRequest('/api/varin/extensions/v1/candidates/request-application', request));
     if (!payload || typeof payload !== 'object' || !('snapshot' in payload)) throw new Error('Varin extension candidate application response is malformed');

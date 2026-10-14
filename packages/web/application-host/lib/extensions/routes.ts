@@ -20,6 +20,8 @@ import {
   parseVarinRuntimeContractRequest,
   type VarinRuntimeContractScope,
   parseVarinExtensionActualState,
+  parseVarinExtensionRestartHandoffRequest,
+  parseVarinExtensionRestartRecoveryRequest,
   parseVarinExtensionCandidateCapabilityReviewRequest,
   parseVarinExtensionCapabilityReviewRequest,
   parseVarinExtensionHostStateWaitRequest,
@@ -33,6 +35,7 @@ interface ExtensionRouteDependencies {
   extensionCatalog: ApplicationExtensionCatalog;
   extensionPackages: ExtensionPackageManager;
   extensionRuntime?: ApplicationExtensionRuntime | null;
+  restartApplicationHost?: () => Promise<void>;
   documents?: Pick<DocumentAuthority, 'lookupWorkspacePath'>;
   readProjects?: () => Promise<Array<ProjectFolders & { id: string }>>;
   uiAuthController: {
@@ -155,6 +158,7 @@ export const registerExtensionRoutes = (app: Express, {
   extensionCatalog,
   extensionPackages,
   extensionRuntime,
+  restartApplicationHost,
   documents,
   readProjects,
   uiAuthController,
@@ -391,6 +395,36 @@ export const registerExtensionRoutes = (app: Express, {
       }
     },
   );
+
+  const restartDispatches = new Set<string>();
+  for (const recovery of [false, true]) {
+    app.post(`/api/varin/extensions/v1/candidates/${recovery ? 'recover-restart-handoff' : 'restart-handoff'}`,
+      uiAuthController.requireAuth, async (req, res) => {
+        if (!extensionRuntime || !restartApplicationHost) return res.status(501).json({ error: {
+          code: 'host_restart_unavailable', message: 'This Application Host launch owner does not provide restart', retryable: false,
+        } });
+        try {
+          const request = recovery ? parseVarinExtensionRestartRecoveryRequest(req.body) : parseVarinExtensionRestartHandoffRequest(req.body);
+          const snapshot = recovery ? await extensionRuntime.recoverRestartHandoff(request) : await extensionRuntime.requestRestartHandoff(request);
+          const handoff = snapshot.extensions.find(value => value.manifest.id === request.extensionId)?.restartHandoffs?.find(value => value.id === request.handoffId);
+          // Retrying a lost response reads the original result. Never restart an applied or failed attempt.
+          if (handoff && handoff.status === (recovery ? 'restore-pending-restart' : 'pending-restart')) {
+            const dispatch = () => {
+              const dispatchKey = `${request.extensionId}\0${request.handoffId}\0${handoff.status}`;
+              if (restartDispatches.has(dispatchKey)) return;
+              restartDispatches.add(dispatchKey);
+              void restartApplicationHost().catch(error => extensionRuntime.reportRestartFailure(request.extensionId, request.handoffId, error))
+                .catch(error => console.error('[VarinExtensions] Restart failure could not be recorded:', error instanceof Error ? error.message : 'Unknown failure'));
+            };
+            res.once('finish', dispatch); res.once('close', dispatch);
+            // Durable acceptance belongs to the Host even if the observer disconnected
+            // while Catalog committed. Both terminal events share the same exact intent.
+            if (res.destroyed || res.writableFinished) dispatch();
+          }
+          return res.json({ snapshot });
+        } catch (error) { return sendMutationError(res, error); }
+      });
+  }
 
   app.post(
     '/api/varin/extensions/v1/candidates/request-application',

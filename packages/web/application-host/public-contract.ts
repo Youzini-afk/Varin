@@ -56,6 +56,8 @@ export interface StartWebUiServerOptions {
   pickPiPackageRoot?: (() => Promise<string | null>) | undefined;
   port?: number | undefined;
   requirePiRuntime?: boolean | undefined;
+  /** The embedding process owns a real stop and clean-process relaunch. */
+  restartApplicationHost?: (() => Promise<void>) | undefined;
   /** Trusted desktop-only offscreen renderer used by harness.web.render. */
   renderWebPage?: ((url: string, signal?: AbortSignal) => Promise<string>) | undefined;
   standalonePayloadDir?: string | undefined;

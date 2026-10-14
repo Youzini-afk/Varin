@@ -1,4 +1,15 @@
 export const settingsDict = {
+  "settings.models.network": "Мережа та протокол",
+  "settings.models.proxy": "Проксі",
+  "settings.models.proxyHost": "Використовувати налаштування Host",
+  "settings.models.proxyDirect": "Пряме з’єднання",
+  "settings.models.proxyCustom": "Власний проксі",
+  "settings.models.proxyUrl": "URL проксі",
+  "settings.models.proxyHint": "Лише адреса джерела HTTP(S) проксі, без облікових даних.",
+  "settings.models.headers": "Заголовки без конфіденційних даних",
+  "settings.models.headersHint": "Лише рядкові значення JSON. Ключі API, токени й cookie зберігайте в налаштуваннях автентифікації.",
+  "settings.models.path": "Шлях протоколу",
+  "settings.models.pathsHint": "Необов’язкові шляхи починаються з / і додаються до шляху кінцевої точки. Порожнє поле означає типове значення.",
   "settings.agents.configured": "Налаштовано",
   // New profile controls use the English fallback until localized.
   "settings.agents.editRuntime": "Edit tools for runtime",
@@ -3969,4 +3980,5 @@ export const settingsDict = {
   "settings.varin.recovery.storage.historyDescription": "Показано лише робочі простори зі збереженою історією відновлення. Очищення зберігає контрольні точки та версії, на які є посилання.",
   "settings.varin.recovery.storage.cleanupShared": "Очистити вміст без посилань",
   "settings.varin.recovery.storage.cleanupNothing": "Немає вмісту для звільнення. Контрольні точки та версії, на які є посилання, зберігаються.",
+  "settings.models.image": "Можливості зображень (маска, схеми параметрів)",
 } as const;

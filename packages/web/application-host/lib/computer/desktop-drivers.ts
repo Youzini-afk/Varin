@@ -2,8 +2,8 @@ import { randomUUID } from 'node:crypto';
 import type { ComputerDesktop } from '@varin/protocol';
 import { createDriverSession, type ComputerDriverSession, type DriverSpawnSpec } from './driver-host.js';
 
-/** Input and live capture have separate native processes. Long input cannot
- * block the viewer, and capturing never replaces the Agent's element indices. */
+/** Platform session owners multiplex live capture independently from input.
+ * Other drivers keep a separate read-only process; neither changes Agent trees. */
 export function createDesktopDriverPool(options: {
   resolve(desktopId: string): Promise<{ desktop: ComputerDesktop; spec: DriverSpawnSpec }>;
   createDriver?: (spec: DriverSpawnSpec) => ComputerDriverSession;
@@ -15,15 +15,26 @@ export function createDesktopDriverPool(options: {
   const loading = new Map<string, Promise<{ driver: ComputerDriverSession; desktop: ComputerDesktop }>>();
   const resetting = new Map<string, Promise<void>>();
   let closed = false;
-  const acquire = (desktopId: string, purpose: 'input' | 'capture' = 'input'): Promise<{ driver: ComputerDriverSession; desktop: ComputerDesktop }> => {
+  const acquire = (desktopId: string, purpose: 'input' | 'capture' = 'input', joiningStartup = false): Promise<{ driver: ComputerDriverSession; desktop: ComputerDesktop }> => {
     if (closed) return Promise.reject(new Error('Desktop driver owner has stopped'));
     const reset = resetting.get(desktopId);
-    if (reset) return reset.then(() => acquire(desktopId, purpose));
+    if (reset && !joiningStartup) return reset.then(() => acquire(desktopId, purpose));
     const key = `${purpose}:${desktopId}`;
     const pending = loading.get(key);
     if (pending) return pending;
     const task = (async () => {
       const { desktop, spec } = await options.resolve(desktopId);
+      if (purpose === 'capture' && spec.sharedDesktopSession) {
+        const { driver } = await acquire(desktopId, 'input', true);
+        if (!driver.capture) throw new Error('The platform session does not provide an independent capture lane');
+        // The input/session owner alone closes the shared helper. Dropping a
+        // viewer or cancelling a job must not revoke the portal authorization.
+        const captureDriver: ComputerDriverSession = { request: (op, requestOptions) => op.tool === 'capture_frame'
+          ? driver.capture!(requestOptions) : Promise.reject(new Error('The shared capture lane is read-only')),
+          cancel: () => false, alive: () => driver.alive(), dispose: () => {},
+          get capabilities() { return driver.capabilities; } };
+        return { desktop, driver: captureDriver };
+      }
       const drivers = purpose === 'input' ? inputs : captures;
       const existing = drivers.get(desktopId);
       if (existing?.alive()) return { driver: existing, desktop };
@@ -65,7 +76,7 @@ export function createDesktopDriverPool(options: {
     return pending;
   };
   return {
-    inputs, acquire,
+    inputs, acquire: (desktopId: string, purpose: 'input' | 'capture' = 'input') => acquire(desktopId, purpose),
     inputOwnerId: (driver: ComputerDriverSession) => inputIdentities.get(driver),
     reset,
     async dispose() {

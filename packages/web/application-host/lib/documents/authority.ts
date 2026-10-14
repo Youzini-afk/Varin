@@ -1,3 +1,6 @@
+import { isDeepStrictEqual } from 'node:util';
+import type { VarinWorkspaceEditBuffer, VarinWorkspaceEditBufferSlot, VarinWorkspaceEditSurfaceChange, VarinWorkspaceEditSurfaceReceipt } from '@varin/application-client';
+import { createWorkspaceEditCoordinator, WorkspaceEditSurfaceAppliedError, WorkspaceEditSurfaceRejectedError } from './workspace-edit.js';
 import fs from 'node:fs';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { isAbortError, waitWithSignal } from '../cancellation.js';
@@ -254,7 +257,8 @@ export interface DocumentSurfaceRestoreState {
 }
 
 export interface DocumentSurfaceOperationRequest {
-  action: 'capture' | 'apply' | 'undo' | 'restore';
+  workspaceEdit?: VarinWorkspaceEditSurfaceChange;
+  action: 'capture' | 'apply' | 'undo' | 'restore' | 'workspace-edit';
   barrierId?: string;
   generation: number;
   operationId: string;
@@ -265,6 +269,7 @@ export interface DocumentSurfaceOperationRequest {
 }
 
 export interface DocumentSurfaceOperationResult {
+  workspaceEditBuffer?: VarinWorkspaceEditBuffer | null;
   resource: DocumentResource;
   status: 'captured' | 'applied' | 'undone' | 'restored' | 'failed';
   documentInstanceId?: string;
@@ -1889,26 +1894,27 @@ export const createDocumentAuthority = (options: DocumentAuthorityOptions) => {
     request: DocumentSurfaceOperationRequest,
     options: { signal?: AbortSignal } = {},
   ): Promise<DocumentSurfaceOperationResult[]> => {
-    if (!request || !['capture', 'apply', 'undo', 'restore'].includes(request.action)
+    if (!request || !['capture', 'apply', 'undo', 'restore', 'workspace-edit'].includes(request.action)
       || typeof request.operationId !== 'string' || !request.operationId
       || typeof request.ownerId !== 'string' || !request.ownerId
       || typeof request.workspaceId !== 'string' || !request.workspaceId
       || typeof request.registrationId !== 'string' || !request.registrationId
       || !Number.isSafeInteger(request.generation) || request.generation < 0
-      || !Array.isArray(request.targets) || request.targets.length === 0) {
+      || !Array.isArray(request.targets) || (request.targets.length === 0 && request.action !== 'workspace-edit')) {
       throw new DocumentAuthorityError('Document surface operation is malformed', { code: 'failed', statusCode: 400 });
     }
     await loadWorkspace(request.workspaceId);
     const key = dirtyBufferKey(request.ownerId, request.workspaceId);
     const surface = dirtySurfaces.get(key);
     const publication = dirtyBuffersByOwner.get(key);
+    const captureWorkspaceEdit = request.action === 'workspace-edit' && request.workspaceEdit?.mode === 'capture';
     if (!surface || surface.registrationId !== request.registrationId || surface.generation !== request.generation
-      || !publication || publication.generation !== request.generation) {
+      || (!publication && !captureWorkspaceEdit) || (publication && publication.generation !== request.generation)) {
       throw new DocumentAuthorityError('Document surface owner is no longer connected', {
         code: 'stale-completion', statusCode: 409,
       });
     }
-    const published = new Map(publication.resources.map((resource) => [resource.resource.resourceId, resource]));
+    const published = new Map((publication?.resources ?? []).map((resource) => [resource.resource.resourceId, resource]));
     const barrier = request.barrierId ? dirtyBarriers.get(request.barrierId) : undefined;
     if (request.action === 'restore' || request.barrierId !== undefined) {
       if (!barrier || barrier.released || barrier.workspaceId !== request.workspaceId
@@ -1918,6 +1924,15 @@ export const createDocumentAuthority = (options: DocumentAuthorityOptions) => {
             : resourceId.toLowerCase() === target.resource.resourceId.toLowerCase()
         )))) {
         throw new DocumentAuthorityError('Document recovery barrier is no longer held', { code: 'stale-completion', statusCode: 409 });
+      }
+    }
+    if (request.action === 'workspace-edit') {
+      const change = request.workspaceEdit;
+      if (!change || !['capture', 'validate', 'apply'].includes(change.mode) || !Array.isArray(change.before) || !Array.isArray(change.after)
+        || (captureWorkspaceEdit ? !Array.isArray(change.captureScopes) || change.captureScopes.some(scope => scope.resource.workspaceId !== request.workspaceId) : !barrier
+        || [...change.before, ...change.after].some(slot => slot.resource.workspaceId !== request.workspaceId
+          || !barrier!.paths.includes(slot.resource.resourceId)))) {
+        throw new DocumentAuthorityError('Workspace edit surface request is outside its barrier', { code: 'stale-completion', statusCode: 409 });
       }
     }
     const seen = new Set<string>();
@@ -2012,6 +2027,7 @@ export const createDocumentAuthority = (options: DocumentAuthorityOptions) => {
       operationId: pending.operationId,
       requestId: pending.requestId,
       targets: structuredClone(pending.targets),
+      ...(pending.workspaceEdit ? { workspaceEdit: structuredClone(pending.workspaceEdit) } : {}),
       workspaceId: pending.workspaceId,
     };
   };
@@ -2025,6 +2041,30 @@ export const createDocumentAuthority = (options: DocumentAuthorityOptions) => {
     };
     if (request.operationId !== pending.operationId || !Array.isArray(request.resources)) {
       throw completionError('Document surface operation completion is malformed', { code: 'failed', statusCode: 400 });
+    }
+    if (pending.action === 'workspace-edit') {
+      const receipt = request.workspaceEdit as VarinWorkspaceEditSurfaceReceipt | undefined;
+      const change = pending.workspaceEdit!;
+      if (!receipt || receipt.stepId !== change.stepId || !['applied', 'rejected'].includes(receipt.status)
+        || !Array.isArray(receipt.buffers) || (receipt.message !== undefined && typeof receipt.message !== 'string')
+        || (receipt.status === 'applied' && (change.mode === 'capture'
+          ? receipt.buffers.some(slot => slot.resource.workspaceId !== pending.workspaceId || !slot.buffer
+            || !isDeepStrictEqual(slot.resource, slot.buffer.resource) || !change.captureScopes?.some(scope => slot.resource.resourceId === scope.resource.resourceId
+              || (scope.subtree && slot.resource.resourceId.startsWith(`${scope.resource.resourceId}/`))))
+          : !isDeepStrictEqual(receipt.buffers, change.after)))) {
+        throw completionError('Workspace edit surface receipt does not match its dispatch', { code: 'stale-completion', statusCode: 409 });
+      }
+      pendingSurfaceOperations.delete(requestId);
+      pending.cleanup();
+      if (receipt.status === 'rejected') pending.reject(new WorkspaceEditSurfaceRejectedError(receipt.message ?? 'Workspace edit buffer changed'));
+      else if (change.mode === 'capture') pending.resolve(receipt.buffers.map(slot => ({ resource: slot.resource, status: 'captured', workspaceEditBuffer: slot.buffer })));
+      else {
+        surfaceSnapshots.invalidateOwnerEdit({ ownerId: pending.ownerId, ownerGeneration: pending.generation,
+          workspaceId: pending.workspaceId, resourceIds: [...new Set([...change.before, ...change.after].map(slot => slot.resource.resourceId))] });
+        if (receipt.message) pending.reject(new WorkspaceEditSurfaceAppliedError(receipt.message));
+        else pending.resolve([]);
+      }
+      return { accepted: true };
     }
     const targets = new Set(pending.targets.map((target) => target.resource.resourceId));
     const targetByPath = new Map(pending.targets.map((target) => [target.resource.resourceId, target]));
@@ -2457,6 +2497,7 @@ export const createDocumentAuthority = (options: DocumentAuthorityOptions) => {
   const dispose = (): Promise<void> => {
     if (disposePromise) return disposePromise;
     disposed = true;
+    const workspaceEditDisposal = workspaceEdits.dispose();
     const records = [...watchers.values()];
     watchers.clear();
     for (const record of records) {
@@ -2482,13 +2523,80 @@ export const createDocumentAuthority = (options: DocumentAuthorityOptions) => {
       }));
     }
     surfaceSnapshots.dispose();
-    const mutationDisposal = mutations.dispose();
     disposePromise = (async () => {
+      await workspaceEditDisposal;
       await Promise.allSettled(records.map((record) => record.ready));
-      await mutationDisposal;
+      await mutations.dispose();
     })();
     return disposePromise;
   };
+
+  const workspaceEdits = createWorkspaceEditCoordinator({
+    hostId,
+    storage: (workspaceId, callback) => {
+      if (!durableMutationStorage) throw new DocumentAuthorityError('Workspace edit storage is unavailable', { code: 'failed', statusCode: 503 });
+      return durableMutationStorage(workspaceId, callback);
+    },
+    resources: runResourceOperation,
+    inspect: async workspaceId => ({ root: (await loadWorkspace(workspaceId)).root, epoch: (await mutations.inspect(workspaceId)).epoch }),
+    owner: (workspaceId, ownerId, generation) => {
+      const owner = dirtySurfaces.get(dirtyBufferKey(ownerId, workspaceId));
+      if (!owner || owner.generation !== generation) throw new DocumentAuthorityError('Document surface is unavailable', { code: 'stale-completion', statusCode: 409 });
+      return { ownerId, generation, registrationId: owner.registrationId };
+    },
+    read,
+    resolve: resolveResourceIdentity,
+    barrier: (workspaceId, paths) => beginDirtyStateBarrier(workspaceId, paths),
+    assertBarrier: barrierId => {
+      const barrier = dirtyBarriers.get(barrierId);
+      if (!barrier || barrier.released || barrier.pending.size > 0) throw new DocumentAuthorityError('Workspace edit barrier was lost', { code: 'stale-completion', statusCode: 409 });
+    },
+    captureSurfaces: async (workspaceId, scopes, owner, buffers) => {
+      const result: Array<{ owner: { ownerId: string; generation: number; registrationId: string }; buffers: VarinWorkspaceEditBufferSlot[] }> = owner
+        ? [{ owner, buffers: buffers.map(buffer => ({ resource: buffer.resource, buffer })) }] : [];
+      for (const candidate of dirtySurfaces.values()) {
+        if (candidate.workspaceId !== workspaceId || candidate.ownerId === owner?.ownerId) continue;
+        const captured = await requestSurfaceOperation({ action: 'workspace-edit', workspaceId,
+          ownerId: candidate.ownerId, generation: candidate.generation, registrationId: candidate.registrationId,
+          operationId: randomUUID(), targets: [], workspaceEdit: { stepId: randomUUID(), mode: 'capture', epoch: 0,
+            origin: 'workspace-edit-preview', before: [], after: [], captureScopes: scopes.map(scope => ({
+              resource: { workspaceId, resourceId: scope.resourceId }, subtree: scope.scope === 'subtree' })) } });
+        if (captured.length || !owner) result.push({ owner: { ownerId: candidate.ownerId, generation: candidate.generation, registrationId: candidate.registrationId },
+          buffers: captured.map(entry => ({ resource: entry.resource, buffer: entry.workspaceEditBuffer! })) });
+      }
+      return result;
+    },
+    validateDirtyOwners: async (workspaceId, paths, surfaces) => {
+      for (const publication of await inspectDirtyBuffers(workspaceId)) for (const current of publication.resources) {
+        if (!paths.includes(current.resource.resourceId)) continue;
+        const baseline = surfaces.find(surface => surface.owner.ownerId === publication.ownerId
+          && surface.owner.registrationId === publication.registrationId && surface.owner.generation === publication.generation);
+        const buffer = baseline?.buffers.find(slot => slot.resource.resourceId === current.resource.resourceId)?.buffer;
+        if (!buffer || current.documentInstanceId !== buffer.documentInstanceId || current.localEditRevision !== buffer.localEditRevision
+          || current.baseRevision !== buffer.baseRevision) {
+          throw new DocumentAuthorityError(`A different or changed draft owns ${current.resource.resourceId}`, { code: 'stale-completion', statusCode: 409 });
+        }
+      }
+    },
+    surface: async (workspaceId, owner, barrierId, operationId, workspaceEdit) => {
+      await requestSurfaceOperation({ action: 'workspace-edit', workspaceId, ...owner, barrierId, operationId, workspaceEdit, targets: [] });
+    },
+    mutate: async (workspaceId, epoch, operationId, callback) => {
+      const writer = await mutations.registerWriter({ workspaceId, epoch, owner: { kind: 'workspace-edit', id: operationId } }, { purpose: 'workspace-edit' });
+      try { return await callback(); } finally { try { await writer.markMutated(); } finally { await writer.close(); } }
+    },
+    notify: (workspaceId, action, reversed, operationId) => {
+      if (action.rename) watcherController(workspaceId)?.publishMutation({ kind: 'moved', operationId,
+        from: { workspaceId, resourceId: reversed ? action.rename.to : action.rename.from },
+        resource: { workspaceId, resourceId: reversed ? action.rename.from : action.rename.to } });
+      else for (const [resourceId, state] of Object.entries(reversed ? action.before : action.after)) watcherController(workspaceId)?.publishMutation({
+        kind: state.kind === 'missing' ? 'deleted' : (reversed ? action.after : action.before)[resourceId]?.kind === 'missing' ? 'created' : 'changed', operationId, resource: { workspaceId, resourceId } });
+      const states = reversed ? action.before : action.after;
+      for (const [resourceId, state] of Object.entries(states)) publishMutation({ workspaceId, resourceId,
+        kind: state.kind === 'missing' ? 'deleted' : (reversed ? action.after : action.before)[resourceId]?.kind === 'missing' ? 'created' : 'modified',
+        owner: { kind: 'workspace-edit', id: 'documents' } });
+    },
+  });
 
   return {
     hostId,
@@ -2528,6 +2636,14 @@ export const createDocumentAuthority = (options: DocumentAuthorityOptions) => {
     runResourceOperation,
     read,
     readSnapshot,
+    prepareWorkspaceEdit: workspaceEdits.prepare,
+    discardWorkspaceEdit: async (request: { workspaceId: string; operationId: string }) => workspaceEdits.discard(request),
+    applyWorkspaceEdit: workspaceEdits.apply,
+    readWorkspaceEdit: workspaceEdits.read,
+    readWorkspaceEditRecovery: workspaceEdits.recovery,
+    undoWorkspaceEdit: workspaceEdits.undo,
+    listWorkspaceEdits: workspaceEdits.list,
+    reconcileWorkspaceEdits: workspaceEdits.reconcile,
     write,
     move,
     delete: remove,

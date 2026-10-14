@@ -1,5 +1,5 @@
 import type { VarinExtensionServiceProvision } from '@varin/extension-contract';
-import { imageToolContract, type ImageToolPurpose } from '@varin/protocol';
+import { imageToolContract, type ImageToolPurpose, type ImageModelInfo } from '@varin/protocol';
 export const VARIN_BUILTIN_IMAGES_EXTENSION_ID = 'varin.builtin.images';
 export const IMAGES_CAPABILITY = 'images';
 export const IMAGE_TOOL_DECLARATIONS: readonly VarinExtensionServiceProvision[] = (['generation', 'editing'] as const).map(purpose => ({
@@ -8,7 +8,7 @@ export const IMAGE_TOOL_DECLARATIONS: readonly VarinExtensionServiceProvision[] 
     outputSchema: { type: 'object' } },
 }));
 /** Narrow the shared declaration to parameters provided by the chosen adapter. */
-export function imageToolDeclaration(declaration: VarinExtensionServiceProvision, model: { parameters: readonly string[]; supportsMask: boolean }): VarinExtensionServiceProvision {
+export function imageToolDeclaration(declaration: VarinExtensionServiceProvision, model: Pick<ImageModelInfo, 'parameters' | 'supportsMask' | 'parameterSchemas'>): VarinExtensionServiceProvision {
   const next = structuredClone(declaration);
   next.tool!.inputSchema = imageToolContract(declaration.id.split('.').at(-1) as ImageToolPurpose, model).inputSchema;
   return next;

@@ -68,6 +68,9 @@ impl ModelProvider for WithPolicyModels {
     fn serialize(&self, view: &RequestView, reuse: Option<&mut RequestCompileReuse>) -> Result<RequestBody, ExecutionError> {
         self.primary.serialize(view, reuse)
     }
+    fn serialize_cancellable(&self, view: &RequestView, reuse: Option<&mut RequestCompileReuse>, cancel: &CancellationToken) -> Result<RequestBody, ExecutionError> {
+        self.primary.serialize_cancellable(view, reuse, cancel)
+    }
     fn generate(
         &self,
         request: &RequestSnapshot,
@@ -173,6 +176,7 @@ impl<
         instructions: Vec<String>,
         evidence: Vec<PolicyEvidenceRef>,
         state: Value,
+        cancel: &CancellationToken,
     ) -> Result<PolicyModelState, ExecutionError> {
         let bound = self
             .provider
@@ -306,7 +310,7 @@ impl<
             history: request_history.into_iter().map(Into::into).collect(),
         };
         let serialized = guarded("provider_serialize_panicked", || {
-            bound.provider.serialize(&view, None)
+            bound.provider.serialize_cancellable(&view, None, cancel)
         })?;
         let snapshot = RequestSnapshot { view, serialized };
         let intent = PolicyModelIntent::PolicyModelJobV1 {

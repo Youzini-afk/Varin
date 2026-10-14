@@ -2,6 +2,8 @@ import type { ChannelTypeInfo, ModelChannel } from '@varin/application-client';
 import type { JsonValue } from '@varin/protocol';
 
 export interface ChannelType extends ChannelTypeInfo {
+  adapter?: { id: string; version: string; endpointPath: string; bindingId: string; identity: string; capture(): Promise<() => void> };
+  credentialHeader?: { name: string; prefix: string };
   discoveryRequest?(channel: ModelChannel): { url: string; headers?: Record<string, string> };
   parseDiscovery?(response: unknown): Array<{ id: string; name: string }>;
 }
@@ -50,12 +52,24 @@ export const BUILTIN_CHANNEL_TYPES: readonly ChannelType[] = [
 
 export class ChannelTypes {
   readonly #types = new Map<string, ChannelType>();
+  readonly #owners = new Map<string, string>();
   constructor() { for (const type of BUILTIN_CHANNEL_TYPES) this.register(type); }
   register(type: ChannelType) {
     if (this.#types.has(type.id)) throw new Error(`Channel type already registered: ${type.id}`);
     this.#types.set(type.id, type);
     return () => { if (this.#types.get(type.id) === type) this.#types.delete(type.id); };
   }
+  prepareReplacement(owner: string, types: readonly ChannelType[]): () => void {
+    const next = new Map<string, ChannelType>();
+    for (const type of types) {
+      if (next.has(type.id) || this.#types.has(type.id) && this.#owners.get(type.id) !== owner) throw new Error(`Channel type already registered: ${type.id}`);
+      next.set(type.id, type);
+    }
+    return () => {
+      for (const [id, current] of this.#owners) if (current === owner) { this.#types.delete(id); this.#owners.delete(id); }
+      for (const [id, type] of next) { this.#types.set(id, type); this.#owners.set(id, owner); }
+    };
+  }
   get(id: string) { return this.#types.get(id); }
-  list(): ChannelTypeInfo[] { return [...this.#types.values()].map(({ discoveryRequest: _request, parseDiscovery: _parse, ...info }) => structuredClone(info)); }
+  list(): ChannelTypeInfo[] { return [...this.#types.values()].map(({ discoveryRequest: _request, parseDiscovery: _parse, adapter: _adapter, credentialHeader: _credential, ...info }) => structuredClone(info)); }
 }

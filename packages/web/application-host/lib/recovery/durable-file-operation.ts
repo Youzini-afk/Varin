@@ -172,7 +172,7 @@ export interface HostFileResourceBackend {
     identity: RecoveryIdentity,
     relativePath?: string,
     scopes?: readonly string[],
-    options?: { signal?: AbortSignal },
+    options?: { signal?: AbortSignal; includeInternalEntries?: boolean },
   ): Promise<string[]>;
   measure(
     identity: RecoveryIdentity,

@@ -1,4 +1,15 @@
 export const settingsDict = {
+  "settings.models.network": "網路與協定",
+  "settings.models.proxy": "代理",
+  "settings.models.proxyHost": "使用 Host 設定",
+  "settings.models.proxyDirect": "直接連線",
+  "settings.models.proxyCustom": "自訂代理",
+  "settings.models.proxyUrl": "代理網址",
+  "settings.models.proxyHint": "僅填寫 HTTP(S) 代理來源網址，不包含帳號或密碼。",
+  "settings.models.headers": "非敏感請求標頭",
+  "settings.models.headersHint": "填寫 JSON 字串值。API 金鑰、權杖和 Cookie 請透過驗證設定。",
+  "settings.models.path": "協定路徑",
+  "settings.models.pathsHint": "選填路徑以 / 開頭，附加至端點現有路徑後；留空使用協定預設值。",
   "settings.models.title": "模型渠道",
   "settings.models.description": "設定 Agent 執行階段使用的連線與模型。",
   "settings.models.addChannel": "新增渠道",
@@ -4053,4 +4064,5 @@ export const settingsDict = {
   "settings.models.parameters": "參數",
   "settings.models.compat": "協定選項",
   "settings.models.thinkingLevelMap": "推理層級對應",
+  "settings.models.image": "圖像能力（遮罩、參數約束）",
 } as const;

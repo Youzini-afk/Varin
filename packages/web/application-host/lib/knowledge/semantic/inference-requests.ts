@@ -326,7 +326,7 @@ export function createInferenceRequests(options: InferenceRequestsOptions) {
             }
             started = true;
             // Egress alone owns the dispatcher; SDK transport hints cannot replace its route.
-            const { dispatcher: _dispatcher, ...requestInit } = input.init;
+            const { dispatcher: _dispatcher, ...requestInit }: RequestInit & { dispatcher?: unknown } = input.init;
             response = await input.connection.fetch(input.destination, { ...requestInit, redirect: 'manual', signal: requestSignal });
             httpStatus = response.status;
             const bytes = new Uint8Array(await response.arrayBuffer());

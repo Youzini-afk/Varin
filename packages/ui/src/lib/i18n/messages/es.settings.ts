@@ -1,4 +1,15 @@
 export const settingsDict = {
+  "settings.models.network": "Red y protocolo",
+  "settings.models.proxy": "Proxy",
+  "settings.models.proxyHost": "Usar la configuración del Host",
+  "settings.models.proxyDirect": "Conexión directa",
+  "settings.models.proxyCustom": "Proxy personalizado",
+  "settings.models.proxyUrl": "URL del proxy",
+  "settings.models.proxyHint": "Solo el origen HTTP(S) del proxy. No incluyas credenciales.",
+  "settings.models.headers": "Cabeceras no sensibles",
+  "settings.models.headersHint": "Solo valores de texto JSON. Guarda claves API, tokens y cookies en la configuración de autenticación.",
+  "settings.models.path": "Ruta del protocolo",
+  "settings.models.pathsHint": "Las rutas opcionales empiezan por / y se añaden a la ruta del endpoint. Déjalas vacías para usar el valor predeterminado.",
   "settings.agents.configured": "Configurado",
   // New profile controls use the English fallback until localized.
   "settings.agents.editRuntime": "Edit tools for runtime",
@@ -3970,4 +3981,5 @@ export const settingsDict = {
   "settings.varin.recovery.storage.historyDescription": "Solo se muestran espacios de trabajo con historial de recuperación. La limpieza conserva los puntos de control y las versiones que siguen referenciados.",
   "settings.varin.recovery.storage.cleanupShared": "Limpiar contenido sin referencias",
   "settings.varin.recovery.storage.cleanupNothing": "No hay contenido que recuperar. Se conservan los puntos de control y las versiones referenciados.",
+  "settings.models.image": "Capacidades de imagen (máscara, esquemas de parámetros)",
 } as const;

@@ -17,14 +17,6 @@ package.json 为准；文档解释职责、机制、约束和不显然的取舍�
 | 仍需真实环境证据的运行时场景 | [运行时验收](runtime-acceptance.md) |
 | 部署、恢复、扩展开发和依赖维护 | [操作指南](ops/README.md) |
 
-## 进行中的设计
-
-[能力补齐设计](capability-design.md)：Documents 批量修改、分别配置模型的图像生成与编辑工具、
-同进程扩展更新交接，以及 macOS / Wayland Computer Use。
-
-[模型渠道、认证与 MCP 服务设计](model-mcp-design.md)：渠道接入与模型管理、独立认证与配置服务、
-MCP 实现接入，以及这些能力对 Pi SDK 依赖的替换。这些方案尚待实施完成，与上面的当前系统说明分开阅读。
-
 ## 源码旁的说明
 
 源码旁的 README / DOCUMENTATION 保留模块特有的不变量和实际入口：
@@ -32,6 +24,7 @@ MCP 实现接入，以及这些能力对 Pi SDK 依赖的替换。这些方案�
 - [Rust 内核](../kernel/README.md)、[Agent runtime crate](../kernel/crates/varin-runtime/README.md)、[Host adapters](../packages/web/application-host/lib/kernel/DOCUMENTATION.md)
 - [Pi harness](../packages/pi-host/src/harness/README.md)、[Host harness](../packages/web/application-host/lib/harness/DOCUMENTATION.md)
 - [Documents](../packages/web/application-host/lib/documents/DOCUMENTATION.md)、[UI](../packages/ui/DOCUMENTATION.md)、[Knowledge](../packages/web/application-host/lib/knowledge/DOCUMENTATION.md)
+- [模型、账号与设置](../packages/web/application-host/lib/models/DOCUMENTATION.md)、[MCP 服务](../packages/web/application-host/lib/mcp/DOCUMENTATION.md)、[Computer Use](../packages/web/application-host/lib/computer/DOCUMENTATION.md)
 - [application-client](../packages/application-client/README.md)、[protocol](../packages/protocol/README.md)、[extension-host](../packages/extension-host/README.md)
 
 当前默认仍是 Pi；Agent runtime 为显式选择。支持边界写在所属领域，不能从旧的“阶段完成”推导默认已切换、Pi 已移除，

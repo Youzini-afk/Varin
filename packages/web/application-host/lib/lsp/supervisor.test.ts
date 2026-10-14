@@ -169,6 +169,13 @@ describe('language supervisor', () => {
         generation: 1,
         command: 'fixture.not-declared',
       })).toMatchObject({ status: 'failed', reason: 'unsupported' });
+      const releaseCommand = language.retainWorkspace(resource.workspaceId);
+      await language.syncDocument({ resource, languageId: 'typescript', documentVersion: 1, reason: 'close' });
+      expect(await language.executeCommand({ resource, languageId: 'typescript', providerId: 'fixture', generation: 1,
+        command: 'fixture.finish', arguments: ['after-delete'] })).toMatchObject({ status: 'ready', value: { finished: 'after-delete' } });
+      expect(await language.executeCommand({ resource, languageId: 'typescript', providerId: 'fixture', generation: 0,
+        command: 'fixture.finish' })).toMatchObject({ status: 'stale' });
+      releaseCommand();
     } finally {
       await language.dispose();
       await harness.cleanup();

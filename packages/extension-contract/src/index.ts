@@ -33,3 +33,8 @@ export * from "./package-authoring.js";
 export * from "./service-composition.js";
 export * from "./surface-service-lease.js";
 export * from "./surface-manifest-owner.js";
+
+export * from "./restart-handoff.js";
+
+export * from "./models.js";
+export * from "./model-protocol.generated.js";

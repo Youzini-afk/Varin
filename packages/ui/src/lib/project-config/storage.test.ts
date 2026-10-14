@@ -1,3 +1,4 @@
+import { unconfiguredWorkspaceEdits } from '../documents/workspace-edit.test-helper';
 import { describe, expect, test } from 'vitest';
 import type {
   DocumentsAPI,
@@ -36,6 +37,7 @@ const createRuntime = () => {
     return { workspaceId: REPO_WORKSPACE, resourceId: path.slice(REPO.length).replace(/^\//, '') };
   };
   const documents: DocumentsAPI = {
+    ...unconfiguredWorkspaceEdits,
     clearDirtyBuffers: async () => ({ cleared: true }),
     publishDirtyBuffers: async (request) => ({ ...request, updatedAt: '2026-08-28T00:00:00.000Z' }),
     resolveWorkspace: async ({ path }) => ({

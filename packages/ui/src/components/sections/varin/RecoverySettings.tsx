@@ -1,3 +1,4 @@
+import { WorkspaceEditRecovery } from './WorkspaceEditRecovery';
 import React from 'react';
 import type {
   RecoveryStorageLocation,
@@ -450,6 +451,7 @@ export const RecoverySettings: React.FC = () => {
         title={t('settings.varin.recovery.title')}
         description={t('settings.varin.recovery.description')}
       >
+      <WorkspaceEditRecovery workspaceIds={[...storageWorkspaces.map(workspace => workspace.workspaceId), ...(workspaceId ? [workspaceId] : [])]} />
       <SettingsRadioGroup aria-label={t('settings.varin.recovery.preference.aria')}>
         {RECOVERY_PREFERENCES.map((option) => (
           <SettingsRadioOption

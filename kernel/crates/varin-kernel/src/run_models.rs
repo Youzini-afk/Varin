@@ -307,6 +307,9 @@ impl ModelProvider for SelectedProvider {
     fn serialize(&self, view: &RequestView, reuse: Option<&mut varin_runtime::execution::RequestCompileReuse>) -> Result<varin_runtime::execution::RequestBody, ExecutionError> {
         self.primary.serialize(view, reuse)
     }
+    fn serialize_cancellable(&self, view: &RequestView, reuse: Option<&mut varin_runtime::execution::RequestCompileReuse>, cancel: &CancellationToken) -> Result<varin_runtime::execution::RequestBody, ExecutionError> {
+        self.primary.serialize_cancellable(view, reuse, cancel)
+    }
     fn generate(
         &self,
         request: &RequestSnapshot,

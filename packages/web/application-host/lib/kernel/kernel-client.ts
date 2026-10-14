@@ -1,3 +1,5 @@
+import { modelCredentialBindingIdentity } from './model-binding-lifetime.js';
+import { ModelProtocolBridge, type ModelProtocolOwner, type PrivateModelProtocolResponse } from './model-protocol-bridge.js';
 import { ManagedSourceBridge, type ManagedSourceOwner, type PrivateManagedSourceFrame } from './managed-source-bridge.js';
 import { FileObservationBridge, type PrivateFileObservationResponse } from './file-observation-bridge.js';
 import type { FileObservationOwner } from './file-observation-owner.js';
@@ -553,6 +555,7 @@ export class KernelClient {
     return () => this.agentRuntimeListeners.delete(listener);
   }
   private readonly credentialBridge: CredentialBridge;
+  private readonly modelProtocolBridge: ModelProtocolBridge;
   private readonly toolBridge: ToolBridge;
   private readonly mcpReleaseListeners = new Set<(runId: string) => void>();
   private readonly languageBridge: LanguageBridge;
@@ -588,6 +591,7 @@ export class KernelClient {
 
   constructor(options: KernelClientOptions) {
     this.managedSourceBridge = new ManagedSourceBridge(() => this.epoch, frame => this.write(frame), () => this.failAll(new KernelClientError({ code: 'source-channel-failed', message: 'Managed source channel failed', retryable: false }), true));
+    this.modelProtocolBridge = new ModelProtocolBridge(() => this.epoch, frame => this.write(frame), () => this.failAll(new KernelClientError({ code: 'model-protocol-channel-failed', message: 'Model protocol channel failed', retryable: false }), true));
     this.options = options;
     this.spawnProcess = options.spawnProcess ?? spawn;
     this.policyBridge = new AgentPolicyBridge(() => this.epoch, response => this.write(response),
@@ -621,12 +625,38 @@ export class KernelClient {
   }
 
 
+  setModelProtocolOwner(owner: ModelProtocolOwner): void { this.modelProtocolBridge.setOwner(owner); }
+  modelProtocolDisconnected(): Promise<void> { return this.modelProtocolBridge.disconnected(); }
+  async publishModelAdapters(params: KernelMethodParams['model.adapters.publish']): Promise<{ revision: number }> {
+    await this.start();
+    return this.requestRaw('model.adapters.publish', params, { allowBootstrap: true });
+  }
+  async retainModelAdapter(bindingId: string, leaseId: string): Promise<void> {
+    await this.start();
+    await this.requestRaw('model.adapters.retain', { bindingId, leaseId }, { allowBootstrap: true });
+  }
+  async releaseModelAdapter(leaseId: string): Promise<void> {
+    if (!this.isReady) return;
+    await this.requestRaw('model.adapters.release', { leaseId }, { allowBootstrap: true });
+  }
+  async revokeModelAdapter(bindingId: string): Promise<void> {
+    if (!this.isReady) return;
+    await this.requestRaw('model.adapters.revoke', { bindingId }, { allowBootstrap: true });
+  }
   /** Host-only owner registration. This is not exposed through tool grants or renderer APIs. */
   async registerCredentialOwner(runId: string, owner: ExistingHostCredentialOwner, signal?: AbortSignal, bindingId?: string, lifetime?: import('./credential-bridge.js').CredentialLifetime): Promise<CredentialScope> {
     if (!this.handshakeResult) await this.start();
     signal?.throwIfAborted();
     return this.credentialBridge.register(runId, owner, signal, bindingId, lifetime);
   }
+  findModelCredentialOwner(configuration: import('./protocol.generated.js').ModelSessionConfiguration, scope: CredentialScope): ExistingHostCredentialOwner | undefined {
+    return this.credentialBridge.findOwner(modelCredentialBindingIdentity(configuration), scope);
+  }
+  async retainQueuedModelCredentialOwner(runId: string, owner: ExistingHostCredentialOwner): Promise<void> {
+    if (!this.handshakeResult) await this.start();
+    await this.credentialBridge.retainQueuedModel(runId, owner);
+  }
+  releaseQueuedModelCredentialOwner(runId: string, owner: ExistingHostCredentialOwner): void { this.credentialBridge.releaseQueuedModel(runId, owner); }
   unregisterCredentialOwner(runId: string, bindingId?: string | null): void { this.credentialBridge.unregister(runId, bindingId); }
   async registerMcpOwner(runId: string, lease: McpToolLease): Promise<McpBinding> {
     if (!this.handshakeResult) await this.start();
@@ -933,7 +963,7 @@ export class KernelClient {
         pending?.release();
         return;
       }
-      if (this.managedSourceBridge.consume(response) || this.credentialBridge.consume(response) || this.fileObservationBridge.consume(response) || this.resourceBridge.consume(response) || this.contextBridge.consume(response) || this.memoryBridge.consume(response) || this.planBridge.consume(response) || this.languageBridge.consume(response) || this.retrievalBridge.consume(response) || this.toolBridge.consume(response) || this.policyBridge.consume(response)) return;
+      if (this.modelProtocolBridge.consume(response) || this.managedSourceBridge.consume(response) || this.credentialBridge.consume(response) || this.fileObservationBridge.consume(response) || this.resourceBridge.consume(response) || this.contextBridge.consume(response) || this.memoryBridge.consume(response) || this.planBridge.consume(response) || this.languageBridge.consume(response) || this.retrievalBridge.consume(response) || this.toolBridge.consume(response) || this.policyBridge.consume(response)) return;
       if (response.kind === "runtime-event") {
         if (response.v !== KERNEL_PROTOCOL_VERSION || response.kernelEpoch !== this.epoch
           || !["durable", "progress"].includes(response.stream)
@@ -1001,6 +1031,7 @@ export class KernelClient {
     }
     this.transportFailed = true;
     this.credentialBridge.close();
+    this.modelProtocolBridge.close();
     this.toolBridge.reset();
     this.languageBridge.close();
     this.managedSourceBridge.close();
@@ -1032,7 +1063,7 @@ export class KernelClient {
     if (terminate && this.child && !this.child.killed) this.child.kill();
   }
 
-  private async write(request: PrivateManagedSourceFrame | KernelRequest | PrivateCredentialResponse | PrivateToolFrame | PrivatePolicyResponse | PrivateMemoryResponse | PrivateContextResponse | PrivateResourceResponse | PrivateFileObservationResponse | PrivatePlanResponse | PrivateLanguageResponse | PrivateRetrievalResponse): Promise<void> {
+  private async write(request: PrivateModelProtocolResponse | PrivateManagedSourceFrame | KernelRequest | PrivateCredentialResponse | PrivateToolFrame | PrivatePolicyResponse | PrivateMemoryResponse | PrivateContextResponse | PrivateResourceResponse | PrivateFileObservationResponse | PrivatePlanResponse | PrivateLanguageResponse | PrivateRetrievalResponse): Promise<void> {
     const transport = this.transport;
     if (!transport) throw new KernelClientError({ code: "kernel-disconnected", message: "Rust kernel transport is unavailable", retryable: true });
     const control = request.kind === "cancel" || request.kind === "credential-response" || request.kind === "host-tool-revoked" || request.kind === "file-observation-response"
@@ -1746,6 +1777,7 @@ export class KernelClient {
   private async closeInternal(): Promise<void> {
     this.closed = true;
     this.credentialBridge.close();
+    this.modelProtocolBridge.close();
     this.toolBridge.reset();
     this.languageBridge.close();
     this.managedSourceBridge.close();

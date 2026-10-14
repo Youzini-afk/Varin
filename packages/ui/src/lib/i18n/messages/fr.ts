@@ -2,6 +2,13 @@ import { settingsDict } from './fr.settings';
 
 export const dict = {
   ...settingsDict,
+  "filesView.workspaceEdit.operation.create": "Créer",
+  "filesView.workspaceEdit.operation.rename": "Renommer",
+  "filesView.workspaceEdit.operation.delete": "Supprimer",
+  "filesView.workspaceEdit.draftAffected": "Brouillon non enregistré concerné ; une copie de récupération sera conservée",
+  "filesView.workspaceEdit.recoveryTitle": "Récupération des modifications de l’espace de travail",
+  "filesView.workspaceEdit.recoveryDrafts": "Afficher les brouillons d’origine",
+  "filesView.workspaceEdit.recoveryNoDrafts": "Cette opération ne contient aucun brouillon d’origine non enregistré.",
   "computer.feedback.title": "Actions de bureau de l’Agent",
   "computer.feedback.type": "Saisie",
   "computer.feedback.value": "Définition de valeur",
@@ -1703,6 +1710,7 @@ export const dict = {
   'filesView.workspaceEdit.unavailable': 'Aucun renommage ni aucune action de code n’est disponible à cet emplacement.',
   'filesView.workspaceEdit.stale': 'Le document ou le service de langage a changé. Réessayez.',
   'filesView.workspaceEdit.cancelled': 'Les modifications n’ont pas été appliquées.',
+  'filesView.workspaceEdit.commandFailed': 'Les modifications ont été appliquées, mais la commande associée a échoué',
   'filesView.workspaceEdit.failed': 'Impossible d’appliquer les modifications du service de langage',
   'filesView.workspaceEdit.appliedSingle': '{count} fichier modifié',
   'filesView.workspaceEdit.appliedMany': '{count} fichiers modifiés',

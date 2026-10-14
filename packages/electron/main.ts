@@ -1677,6 +1677,11 @@ const spawnLocalServer = async () => {
   desktopComputerFeedback?.dispose(); desktopComputerFeedback = computerFeedback;
   app.once('before-quit', () => { computerFeedback.dispose(); computerControls.dispose(); });
   const handle = await startWebUiServer({
+    restartApplicationHost: async () => {
+      await prepareForQuit();
+      app.relaunch();
+      app.exit(0);
+    },
     onComputerGesture: gesture => { computerControls.avoid(gesture); computerFeedback.show(gesture); },
     onComputerControl: control => computerControls.update(control),
     onComputerControlsReady: controls => computerControls.bind(controls),

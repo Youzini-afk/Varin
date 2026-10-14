@@ -8,6 +8,8 @@ import {
   parseVarinExtensionCatalogDocument,
   parseVarinExtensionHostIdentityDocument,
   parseVarinExtensionInstallationRecord,
+  type VarinExtensionRestartHandoff,
+  type VarinExtensionRestartCommit,
   type VarinExtensionCatalogDocument,
   type VarinExtensionCapabilityDecision,
   type VarinExtensionCapabilityGrant,
@@ -197,6 +199,24 @@ function capabilitiesReviewed(record: VarinExtensionInstallationRecord): boolean
 function assertCanEnable(record: VarinExtensionInstallationRecord): void {
   if (!capabilitiesReviewed(record)) {
     throw new Error(`Varin extension capabilities require review before activation: ${record.manifest.id}`);
+  }
+}
+
+function assertRestartCandidate(record: VarinExtensionInstallationRecord, handoff: VarinExtensionRestartHandoff): void {
+  const candidate = record.candidate;
+  if (!record.desired.enabled || record.desired.revision !== handoff.desiredRevision
+    || record.integrity !== handoff.selectedIntegrity || record.selectedVersion !== handoff.selectedVersion
+    || !candidate?.capabilitiesReviewed || candidate.integrity !== handoff.candidateIntegrity
+    || !sameCapabilityGrants(candidate.capabilityGrants, handoff.capabilityGrants)
+    || JSON.stringify(candidate.manifest.updateReadiness?.surfaceEntrypoints ?? []) !== JSON.stringify(handoff.surfaceEntrypoints)) {
+    throw new Error('Restart handoff candidate, selection, review, or desired state changed');
+  }
+}
+
+function failPendingRestart(record: VarinExtensionInstallationRecord, now: string, code: string, message: string): void {
+  const handoff = record.restartHandoffs?.at(-1);
+  if (handoff && ['pending-restart', 'preparing', 'waiting-surface'].includes(handoff.status)) {
+    Object.assign(handoff, { status: 'failed', updatedAt: now, failure: { code, message } });
   }
 }
 
@@ -483,6 +503,7 @@ export class ExtensionCatalogStore {
       const capabilityGrants = record.capabilityGrants
         .filter((grant) => candidateKeys.has(capabilityKey(grant)))
         .map((grant) => ({ ...grant, manifestVersion: candidate.manifest.version, updatedAt: now }));
+      failPendingRestart(record, now, 'candidate_replaced', 'The restart candidate was replaced');
       record.candidate = {
         ...structuredClone(candidate),
         applyRequested: false,
@@ -535,6 +556,7 @@ export class ExtensionCatalogStore {
     candidateIntegrity: string,
     expectedRevision: number,
     validateBeforeCommit?: () => void,
+    restartCommit?: VarinExtensionRestartCommit,
   ): Promise<CatalogReadState> {
     return this.#mutate(expectedRevision, (document, now) => {
       const record = document.extensions[extensionId];
@@ -548,6 +570,16 @@ export class ExtensionCatalogStore {
       }
       if (!candidate.applyRequested) {
         throw new Error(`Varin extension candidate application was not requested: ${extensionId}`);
+      }
+      const handoff = record.restartHandoffs?.at(-1);
+      if (handoff && !['applied', 'restored'].includes(handoff.status)) {
+        if (!restartCommit || handoff.id !== restartCommit.id || handoff.executionProcessId !== restartCommit.processId
+          || !['preparing', 'waiting-surface'].includes(handoff.status)) throw new Error('Restart handoff is not prepared in this process');
+        assertRestartCandidate(record, handoff);
+        if (handoff.surfaceEntrypoints.length && restartCommit.surfaceReadiness?.preparedConsumerCount === undefined) throw new Error('Restart handoff requires the original Surface consumer preparation receipt');
+        handoff.status = 'applied';
+        handoff.updatedAt = now;
+        if (restartCommit.surfaceReadiness) handoff.surfaceReadiness = structuredClone(restartCommit.surfaceReadiness);
       }
       // Pure Host-owned readiness/owner check after the real catalog lock and CAS checks.
       validateBeforeCommit?.();
@@ -595,10 +627,55 @@ export class ExtensionCatalogStore {
       const record = document.extensions[extensionId];
       if (!record) throw new Error(`Varin extension is not installed: ${extensionId}`);
       if (!record.candidate || record.candidate.integrity !== candidateIntegrity) return false;
+      failPendingRestart(record, now, 'candidate_discarded', 'The restart candidate was discarded');
       delete record.candidate;
       record.updatedAt = now;
       return true;
     });
+  }
+
+  requestRestartHandoff(extensionId: string, handoff: VarinExtensionRestartHandoff, expectedRevision: number): Promise<CatalogReadState> {
+    return this.#mutate(expectedRevision, (document, now) => {
+      const record = document.extensions[extensionId];
+      if (!record) throw new Error(`Varin extension is not installed: ${extensionId}`);
+      if (record.restartHandoffs?.some(value => value.id === handoff.id)) throw new Error('Restart handoff identity already exists');
+      if (record.restartHandoffs?.some(value => !['applied', 'failed', 'restored'].includes(value.status))) throw new Error('A restart handoff is already pending');
+      assertRestartCandidate(record, handoff);
+      if (record.candidate?.manifest.entrypoints?.host?.mode !== 'native' && record.manifest.entrypoints?.host?.mode !== 'native') throw new Error('Restart handoff requires a trusted-native Host entrypoint');
+      record.candidate!.applyRequested = true;
+      (record.restartHandoffs ??= []).push(structuredClone(handoff));
+      record.updatedAt = now;
+      return true;
+    });
+  }
+
+  /** CAS retries only on unrelated Catalog writers; terminal original results always win. */
+  async transitionRestartHandoff(extensionId: string, id: string, from: VarinExtensionRestartHandoff['status'][],
+    update: Partial<Pick<VarinExtensionRestartHandoff, 'status' | 'executionProcessId' | 'restoreRequestedProcessId' | 'failure'>>,
+    expectedRevision?: number): Promise<CatalogReadState> {
+    for (;;) {
+      const revision = expectedRevision ?? (await this.read()).document.revision;
+      try {
+        return await this.#mutate(revision, (document, now) => {
+          const record = document.extensions[extensionId];
+          const handoff = record?.restartHandoffs?.find(value => value.id === id);
+          if (!record || !handoff) throw new Error('Restart handoff is no longer available');
+          if (!from.includes(handoff.status)) return false;
+          if (update.status === 'preparing') assertRestartCandidate(record, handoff);
+          if (['preparing', 'restore-pending-restart', 'restored'].includes(update.status ?? '') && record.restartHandoffs?.at(-1)?.id !== id) throw new Error('A newer restart handoff owns this extension');
+          if (update.status === 'restore-pending-restart' || update.status === 'restored') {
+            if (record.integrity !== handoff.selectedIntegrity) throw new Error('The original selected artifact changed');
+            if (record.candidate?.integrity === handoff.candidateIntegrity) record.candidate.applyRequested = false;
+          }
+          Object.assign(handoff, structuredClone(update), { updatedAt: now });
+          record.updatedAt = now;
+          return true;
+        });
+      } catch (error) {
+        if (expectedRevision === undefined && error instanceof ExtensionCatalogRevisionConflictError) continue;
+        throw error;
+      }
+    }
   }
 
   async #mutate(

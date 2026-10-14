@@ -100,7 +100,7 @@ export function createHostCompositionPlan(catalog: VarinExtensionCatalogSnapshot
 }
 
 /** Rehydrate the original choices, not today's routing. Changed grants/artifacts cannot be guessed. */
-export function restoreHostCompositionPlan(value: unknown, catalog: VarinExtensionCatalogSnapshot): HostCompositionPlan {
+export function restoreHostCompositionPlan(value: unknown, catalog: VarinExtensionCatalogSnapshot, candidateSelection?: { extensionId: string; integrity: string }): HostCompositionPlan {
   if (!catalog.authoritative) throw new Error('Cannot restore services from a stale catalog');
   const composition = parseVarinHostServiceComposition(value);
   const definitions = new Map(composition.nodes.map(node => [node.id, node]));
@@ -111,19 +111,22 @@ export function restoreHostCompositionPlan(value: unknown, catalog: VarinExtensi
     const { id: _id, ...body } = node;
     if (compositionHash(body) !== id) throw new Error('Host composition node identity differs from its contents');
     const entry = catalog.extensions.find(entry => entry.manifest.id === node.extensionId);
-    if (!entry?.desired.enabled || !entry.manifest.entrypoints?.host || entry.integrity !== node.artifactIntegrity
-      || entry.selectedVersion !== node.extensionVersion) throw new Error(`Frozen Host artifact is unavailable: ${node.extensionId}`);
-    const current = entry.capabilityGrants.filter(grant => grant.realm === 'host' && grant.manifestVersion === node.extensionVersion)
+    const candidate = node.extensionId === candidateSelection?.extensionId ? entry?.candidate : undefined;
+    const selection = candidate ?? entry;
+    if (candidateSelection?.extensionId === node.extensionId && candidate?.integrity !== candidateSelection.integrity) throw new Error('Frozen Host candidate changed');
+    if (!entry?.desired.enabled || !selection?.manifest.entrypoints?.host || selection.integrity !== node.artifactIntegrity
+      || (candidate?.resolvedVersion ?? entry.selectedVersion) !== node.extensionVersion) throw new Error(`Frozen Host artifact is unavailable: ${node.extensionId}`);
+    const current = selection.capabilityGrants.filter(grant => grant.realm === 'host' && grant.manifestVersion === node.extensionVersion)
       .map(({ capability, granted }) => ({ capability, granted })).sort((a, b) => a.capability.localeCompare(b.capability));
     if (canonicalServiceComposition(current) !== canonicalServiceComposition(node.grants)) throw new Error(`Frozen Host capability review changed: ${node.extensionId}`);
-    const declared = (entry.manifest.requires?.services ?? []).filter(requirement => requirement.realms.includes('host'));
+    const declared = (selection.manifest.requires?.services ?? []).filter(requirement => requirement.realms.includes('host'));
     if (declared.length !== node.dependencies.length) throw new Error('Frozen Host dependency declaration changed');
     const dependencies = node.dependencies.map(dependency => {
       const requirement = declared.find(item => item.id === dependency.id && item.version === dependency.version);
       if (!requirement || (requirement.binding ?? 'single') !== dependency.binding || (requirement.optional ?? false) !== dependency.optional) throw new Error('Frozen Host dependency declaration changed');
       return { requirement, providers: dependency.providers.map(provider => visit(provider.nodeId)) };
     });
-    const result: HostCompositionNode = { entry, node, dependencies, slot: 'selected' };
+    const result: HostCompositionNode = { entry, node, dependencies, slot: candidate ? 'candidate' : 'selected' };
     memo.set(id, result); return result;
   };
   return { root: visit(composition.root), composition, routingRevision: -1, scope: {} };
