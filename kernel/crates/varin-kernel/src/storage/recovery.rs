@@ -73,6 +73,45 @@ impl Storage {
                 )));
             }
         }
+        if params_value.get("conversation").is_some() {
+            let conversation = Self::recovery_conversation(params_value)?;
+            self.require_recovery_owner(grant_id, None, conversation["threadId"].as_str(), params_value["runId"].as_str())?;
+        }
+        // Original persisted owners are checked before a cached transition can return.
+        if let Some(operation) = params_value.get("operationId").and_then(Value::as_str) {
+            let owner: Option<(Option<String>, Option<String>, Option<String>)> = self.conn.query_row(
+                "SELECT session_id, thread_id, run_id FROM recovery_operations WHERE workspace_id=?1 AND operation_id=?2",
+                params![workspace_id, operation], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            ).optional()?;
+            if let Some((session, thread, run)) = owner {
+                self.require_recovery_owner(grant_id, session.as_deref(), thread.as_deref(), run.as_deref())?;
+            }
+        }
+        if let Some(execution) = params_value.get("executionId").and_then(Value::as_str) {
+            let owner: Option<(Option<String>, String, Option<String>)> = self.conn.query_row(
+                "SELECT session_id, conversation_json, run_id FROM recovery_turns WHERE workspace_id=?1 AND execution_id=?2",
+                params![workspace_id, execution], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            ).optional()?;
+            if let Some((session, conversation, run)) = owner {
+                let conversation = Self::recovery_conversation(&json!({"conversation":serde_json::from_str::<Value>(&conversation)?}))?;
+                self.require_recovery_owner(grant_id, session.as_deref(), conversation["threadId"].as_str(), run.as_deref())?;
+            }
+        }
+        if let Some(checkpoint) = params_value.get("checkpointId").and_then(Value::as_str) {
+            let owner: Option<(Option<String>, Option<String>)> = self.conn.query_row(
+                "SELECT session_id, conversation_json FROM recovery_checkpoints WHERE workspace_id=?1 AND id=?2",
+                params![workspace_id, checkpoint], |row| Ok((row.get(0)?, row.get(1)?)),
+            ).optional()?;
+            if let Some((session, conversation)) = owner {
+                if session.is_some() {
+                    return Err(KernelError::Authorization("legacy session checkpoint cannot authorize native recovery".into()));
+                }
+                if let Some(conversation) = conversation {
+                    let conversation = Self::recovery_conversation(&json!({"conversation":serde_json::from_str::<Value>(&conversation)?}))?;
+                    self.require_recovery_owner(grant_id, None, conversation["threadId"].as_str(), None)?;
+                }
+            }
+        }
         Ok(workspace_id.to_string())
     }
 

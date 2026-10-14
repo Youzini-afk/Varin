@@ -49,6 +49,8 @@ pub(crate) mod materialization;
 pub(crate) mod materialized_views;
 mod objects;
 mod operations;
+#[cfg(test)]
+mod native_authority_tests;
 pub(crate) mod process_interactions;
 mod process_resources;
 mod records;

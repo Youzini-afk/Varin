@@ -39,6 +39,23 @@ impl Storage {
         authorized_grant: &Grant,
     ) -> Result<Value, KernelError> {
         self.sweep_compute_readers()?;
+        // Ownership is rechecked before idempotent dispatch can return a stored receipt.
+        if matches!(method, "storage.record.put" | "storage.record.release" | "working.result.put" | "working.result.release" | "working.draft.put" | "working.draft.release") {
+            self.validate_domain_record_identity(authorized_params, grant_id.unwrap_or(""))?;
+            if let (Some(workspace), Some(record)) = (
+                authorized_params.get("workspaceId").and_then(Value::as_str),
+                authorized_params.get("recordId").and_then(Value::as_str),
+            ) {
+                if let Some(value) = self.domain_record_value(workspace, record)? {
+                    if !self.grant_can_access_domain_record(&value, grant_id.unwrap_or(""))? {
+                        return Err(KernelError::Authorization("record belongs to another actor".into()));
+                    }
+                }
+            }
+        }
+        if method.starts_with("recovery.") {
+            self.recovery_workspace(authorized_params, grant_id.unwrap_or(""))?;
+        }
         let storage = self;
         match method {
             method if method.starts_with("compute.") => {
@@ -176,82 +193,6 @@ impl Storage {
                     authorized_params,
                     grant_id.unwrap_or(""),
                     "working.draft",
-                )
-            }),
-            "working.verification.put" => {
-                idempotent(storage, method, authorized_params, |storage| {
-                    let kind = authorized_params
-                        .get("kind")
-                        .and_then(Value::as_str)
-                        .ok_or_else(|| {
-                            KernelError::Operation("verification kind is required".to_string())
-                        })?;
-                    let record_type = match kind {
-                        "child" => "working.verification.child",
-                        "parent" => "working.verification.parent",
-                        _ => {
-                            return Err(KernelError::Operation(
-                                "verification kind is invalid".to_string(),
-                            ))
-                        }
-                    };
-                    storage.working_record_put(
-                        method,
-                        record_type,
-                        "recorded",
-                        "document",
-                        authorized_params,
-                        grant_id.unwrap_or(""),
-                    )
-                })
-            }
-            "working.verification.list" => {
-                let kind = authorized_params
-                    .get("kind")
-                    .and_then(Value::as_str)
-                    .ok_or_else(|| {
-                        KernelError::Operation("verification kind is required".to_string())
-                    })?;
-                let record_type = match kind {
-                    "child" => "working.verification.child",
-                    "parent" => "working.verification.parent",
-                    _ => {
-                        return Err(KernelError::Operation(
-                            "verification kind is invalid".to_string(),
-                        ))
-                    }
-                };
-                storage.working_record_list(authorized_params, grant_id.unwrap_or(""), record_type)
-            }
-            "working.verification.release" => {
-                idempotent(storage, method, authorized_params, |storage| {
-                    storage.working_record_release(
-                        authorized_params,
-                        grant_id.unwrap_or(""),
-                        "working.verification",
-                    )
-                })
-            }
-            "working.review.put" => idempotent(storage, method, authorized_params, |storage| {
-                storage.working_record_put(
-                    method,
-                    "working.review",
-                    "recorded",
-                    "document",
-                    authorized_params,
-                    grant_id.unwrap_or(""),
-                )
-            }),
-            "working.review.list" => storage.working_record_list(
-                authorized_params,
-                grant_id.unwrap_or(""),
-                "working.review",
-            ),
-            "working.review.release" => idempotent(storage, method, authorized_params, |storage| {
-                storage.working_record_release(
-                    authorized_params,
-                    grant_id.unwrap_or(""),
-                    "working.review",
                 )
             }),
             "branch.create.begin" => {

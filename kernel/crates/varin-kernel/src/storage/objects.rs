@@ -480,17 +480,7 @@ impl Storage {
     }
 
     pub(super) fn grant_workspace(&self, grant_id: &str) -> Option<String> {
-        self.conn
-            .query_row(
-                "SELECT grant_json FROM grants WHERE grant_id = ?1",
-                params![grant_id],
-                |row| row.get::<_, String>(0),
-            )
-            .optional()
-            .ok()
-            .flatten()
-            .and_then(|value| serde_json::from_str::<Grant>(&value).ok())
-            .and_then(|grant| grant.owning_workspace)
+        self.load_grant(grant_id).ok().and_then(|grant| grant.owning_workspace)
     }
 
     pub(super) fn validate_blob_read_source(

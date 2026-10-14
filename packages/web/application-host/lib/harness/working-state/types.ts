@@ -236,15 +236,6 @@ export interface WorkingStateRootStore {
   listDurableOperations(kind?: string): Promise<Record<string, unknown>[]>;
   listBranchObjectReferences(branchId: string): Promise<Array<{ hash: string; byteLength: number | null }>>;
   listDraftObjectReferences(id: string): Promise<Array<{ hash: string; byteLength: number | null }>>;
-  listChildVerifications(threadId: string): Promise<ResultVerificationBundle[]>;
-  listParentVerifications(threadId: string): Promise<ParentVerificationBundle[]>;
-  listReviewRecords(threadId: string): Promise<ResultReviewRecord[]>;
-  getChildVerification(threadId: string, revision: number): Promise<ResultVerificationBundle | null>;
-  getParentVerification(threadId: string, revision?: number): Promise<ParentVerificationBundle | null>;
-  getReviewRecord(threadId: string, revision: number): Promise<ResultReviewRecord | null>;
-  putChildVerification(threadId: string, bundle: ResultVerificationBundle): Promise<void>;
-  putParentVerification(threadId: string, branchId: string, bundle: ParentVerificationBundle): Promise<void>;
-  putReviewRecord(threadId: string, branchId: string, record: ResultReviewRecord): Promise<void>;
 }
 
 export interface WorkspaceWorkingStateRootAccess {
