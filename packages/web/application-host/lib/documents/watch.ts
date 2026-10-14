@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import fs, { type WatchOptions } from 'node:fs';
 import type path from 'node:path';
-import { watchWindowsDirectory } from './windows-watch.js';
+import { watchNativeDirectory } from './directory-watch.js';
 
 interface DocumentResource {
   workspaceId: string;
@@ -23,6 +23,13 @@ export interface WatchPosition {
   sequence: number;
 }
 
+export interface WatchCoverage {
+  namespace: 'complete' | 'unknown';
+  content: 'unknown';
+  reason?: string;
+}
+const unknownCoverage: WatchCoverage = { namespace: 'unknown', content: 'unknown' };
+
 export interface WorkspaceWatcher {
   readonly ready: Promise<void>;
   /** Whether the original native watch handle is currently attached. */
@@ -30,6 +37,7 @@ export interface WorkspaceWatcher {
   readonly sourceId: string;
   readonly generation: number;
   readonly position: WatchPosition;
+  readonly coverage: WatchCoverage;
   overflow(): void;
   reconnect(): void;
   authorityChanged(): void;
@@ -38,6 +46,7 @@ export interface WorkspaceWatcher {
 }
 
 export interface NativeWatcher {
+  readonly coverage?: WatchCoverage;
   readonly ready?: Promise<void>;
   readonly connected?: boolean;
   settle?(): Promise<void>;
@@ -65,6 +74,8 @@ export interface WorkspaceWatcherOptions {
   pathModule: typeof path;
   overflowLimit?: number;
   onEvent: (event: WatchEvent) => void;
+  /** Raw path invalidation precedes async metadata projection. No content proof. */
+  onNamespaceInvalidated?: (relativePath?: string) => void;
   sourceId?: string;
 }
 
@@ -92,6 +103,7 @@ export const createWorkspaceWatcher = ({
   pathModule,
   overflowLimit,
   onEvent,
+  onNamespaceInvalidated,
   sourceId = randomUUID(),
 }: WorkspaceWatcherOptions): WorkspaceWatcher => {
   let sequence = 0;
@@ -124,6 +136,7 @@ export const createWorkspaceWatcher = ({
 
   const reset = (reason: string): void => {
     batch.clear();
+    onNamespaceInvalidated?.();
     generation += 1;
     sequence = 0;
     emit({ kind: 'reset', sequence: nextSequence(), reason });
@@ -199,6 +212,12 @@ export const createWorkspaceWatcher = ({
       return;
     }
     const absolutePath = pathModule.resolve(rootPath, filename);
+    const relative = relativeFrom(absolutePath);
+    if (!relative) { reset('authority-changed'); return; }
+    // Content notifications do not change membership. In particular Windows can
+    // emit directory LAST_WRITE after read-only enumeration; its separate name
+    // stream is the namespace witness. File bytes retain their original hashes.
+    if (eventType !== 'content') onNamespaceInvalidated?.(relative);
     const previous = batch.get(absolutePath);
     batch.set(absolutePath, previous ? mergeEventType(previous, eventType) : eventType);
     if (overflowLimit !== undefined && Number.isSafeInteger(overflowLimit) && overflowLimit > 0 && batch.size > overflowLimit) {
@@ -212,36 +231,55 @@ export const createWorkspaceWatcher = ({
     const changed = (eventType: string, filename: string | Buffer | null) => {
       queuePath(eventType === 'rename' || eventType === 'content' ? eventType : 'change', typeof filename === 'string' ? filename : '');
     };
-    const current = process.platform === 'win32' && fsModule === fs
-      ? watchWindowsDirectory(rootPath, changed)
+    const linuxNative = process.platform === 'linux' && fsModule === fs;
+    let current = (process.platform === 'win32' || process.platform === 'linux') && fsModule === fs
+      ? watchNativeDirectory(rootPath, changed)
       : fsModule.watch(rootPath, { recursive: true, persistent: false } as WatchOptions, changed);
     watcher = current;
-    ready = (current.ready ?? Promise.resolve()).catch(error => {
+    const observeFailure = (original: NativeWatcher): void => {
+      original.on('error', (error: Error) => {
+        if (closed || reconnectScheduled || watcher !== original) return;
+        reconnectScheduled = true;
+        original.close();
+        watcher = null;
+        const reason = (error as Error & { reason?: string }).reason;
+        reset(reason === 'overflow' ? 'overflow' : reason === 'watch-gap' ? 'gap' : 'authority-changed');
+        ready = new Promise<void>((resolve, reject) => {
+          setTimeout(() => {
+            reconnectScheduled = false;
+            if (closed) { reject(new Error('Workspace watch is closed')); return; }
+            try {
+              start();
+              void ready.then(() => { reset('reconnected'); resolve(); }, error => { reset('authority-changed'); reject(error); });
+            } catch (error) {
+              reset('authority-changed');
+              reject(error);
+            }
+          }, 0);
+        });
+        void ready.catch(() => undefined);
+      });
+    };
+    observeFailure(current);
+    ready = (async () => {
+      let openingFailed = false;
+      try { await current.ready; }
+      catch (error) { if (!linuxNative) throw error; openingFailed = true; }
+      if (closed || watcher !== current) throw new Error('Workspace watch changed while opening');
+      if (linuxNative && (openingFailed || current.coverage?.namespace !== 'complete')) {
+        // Unsupported filesystems/watch limits keep the original Node invalidation path.
+        // It makes no namespace completeness claim and cannot spin a native reconnect loop.
+        current.close();
+        current = fsModule.watch(rootPath, { recursive: true, persistent: false } as WatchOptions, changed);
+        watcher = current;
+        observeFailure(current);
+        await current.ready;
+      }
+    })().catch(error => {
       if (watcher === current) { current.close(); watcher = null; }
       throw error;
     });
     void ready.catch(() => undefined);
-    current.on('error', () => {
-      if (closed || reconnectScheduled || watcher !== current) return;
-      reconnectScheduled = true;
-      current.close();
-      watcher = null;
-      reset('authority-changed');
-      ready = new Promise<void>((resolve, reject) => {
-        setTimeout(() => {
-          reconnectScheduled = false;
-          if (closed) { reject(new Error('Workspace watch is closed')); return; }
-          try {
-            start();
-            void ready.then(() => { reset('reconnected'); resolve(); }, error => { reset('authority-changed'); reject(error); });
-          } catch (error) {
-            reset('authority-changed');
-            reject(error);
-          }
-        }, 0);
-      });
-      void ready.catch(() => undefined);
-    });
   };
 
   start();
@@ -251,6 +289,7 @@ export const createWorkspaceWatcher = ({
     get connected() {
       return !closed && watcher !== null && (watcher.connected ?? true);
     },
+    get coverage() { return !closed && watcher ? watcher.coverage ?? unknownCoverage : unknownCoverage; },
     get sourceId() {
       return sourceId;
     },

@@ -19,21 +19,42 @@ Text editors and workspace text helpers consume DocumentsAPI. `FilesAPI` remains
 
 ## Filesystem observation
 
-`watch.ts` projects filesystem hints into invalidation generations; it never establishes content revisions.
-Windows uses `windows-watch.ts` and the packaged kernel's private `--watch-directories` mode. This helper
-owns notification handles independently of Catalog, Storage and tool execution. It subscribes separately
-to names/attributes/security and content changes, excludes access time, and lets Documents ignore
-directory-only content timestamps. Windows can emit a delayed directory LAST_WRITE notification on
-first enumeration with unchanged metadata; directory modes still arrive through the attribute stream.
-The parent subscription observes root metadata/replacement, and flush validates the named root identity.
-No directory inventory or file body cache is needed. Other platforms retain their Node watcher.
+`watch.ts` projects filesystem notifications into invalidation generations; it never establishes content
+revisions. Windows and supported Linux roots use `directory-watch.ts` and the packaged kernel's private
+`--watch-directories` mode. The helper owns only OS observation handles, outside Catalog, Storage and tool
+execution. Windows retains its separate names/attributes/security and content subscriptions, root-parent
+observation and named-root identity check. Its flush remains a notification-delivery boundary with unknown
+namespace/content coverage. Other backends, including unsupported Linux filesystems, keep Node hints with
+unknown coverage. Unavailable native coverage does not enter an immediate retry loop.
 
-Documents capture, language views and managed file observation await subscription readiness. `settle()`
-joins native notification delivery and Host metadata processing; it does not wait for the directory to
-become quiet. Overflow or handle loss invalidates the generation. A reconnect replaces readiness, and
-closing a subscription settles its pending callers. Idle subscriptions do not keep the Host process alive;
-the last close or Host pipe EOF releases the helper. Stable capture retains its two state reads and inventory
-check in addition to these observation hints.
+Linux namespace coverage is limited to the explicitly supported local filesystem and unchanged mount graph.
+The original recursive inotify subscription watches directories before discovering their children. New/moved
+subtrees remain dirty for the admitted Storage scanner; queue overflow, watch loss, unresolved directory move,
+root replacement or mount change loses coverage. The same `/proc/self/mounts` poll witness, paired with named-root path checks before and after the fence,
+detects mount changes including mount/unmount ABA. Any changed poll immediately discards this observation
+generation; poll itself is not a permanent latch. Explicit flush crosses each original directory's VFS shared-lock barrier
+before consuming a finite inotify queue prefix. Queue order alone is insufficient: a visible VFS name mutation
+can pause before queuing fsnotify. The barrier costs O(watched directories) syscalls and held directory handles;
+it does not enumerate every child entry or wait for filesystem quiet. It proves namespace observation before
+the final capture fence, not an atomic filesystem snapshot or content coherence. File bodies always follow the
+existing capture hashes and complete state verification. Windows/network/unsupported roots still fully recheck
+their directory inventory; no Windows filesystem guarantee is inferred from Linux checks.
+
+Documents keeps one latest namespace inventory on its original root watcher after a stable capture. This is
+only path metadata, not a branch, blob pin, grant or another task record. Adjacent captures under continuous
+coverage reuse the unchanged path set and ask the current admitted Rust scanner for dirty subtrees only.
+Raw invalidations enter this metadata before asynchronous `stat` projections; `.git`/`.varin` remain excluded
+from the root inventory, while explicit capture scopes retain their separate rules. Epoch/generation changes,
+reset, reconnect and Host restart lose reuse. Failed/cancelled Documents captures do not advance it. A successful
+`completeCapture` may retain verified namespace metadata independently of a later branch-create failure; that
+metadata says nothing about whether the Source operation committed. Original kernel capture/publication still
+checks the current owner and every file body. Closing the Host drops the metadata and all retained watches.
+
+Capture, language views and managed file observation await subscription readiness. `settle()` joins the finite
+native fence and Host metadata processing. Overflow or handle loss invalidates the generation; reconnect
+replaces readiness. Closing a subscription settles its pending callers. Idle subscriptions do not keep the Host
+process alive; the last root owner or Host pipe EOF releases the helper. The namespace owner can outlive an
+individual capture's temporary listener, which is what makes cross-capture reuse possible.
 
 ## Routes
 

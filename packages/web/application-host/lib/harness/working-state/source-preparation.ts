@@ -1,6 +1,7 @@
 /** Shared source capture. Documents owns the capture window; Rust owns bytes and roots. */
 import type { createDocumentAuthority, DirtyBufferPublication } from '../../documents/authority.js';
 import type { CaptureToken } from '../../documents/mutation-authority.js';
+import { CaptureInventoryChangedError } from '../../documents/capture-inventory.js';
 import { stateIdentity } from '../../recovery/journal-files.js';
 import type { ChildSourceProvenance, SourceResourceCapture, SourceDraftProvenance } from '../../kernel/protocol.generated.js';
 type CapturedSourceProvenance = Exclude<ChildSourceProvenance, { consistency: 'fixed-root' }>;
@@ -26,6 +27,8 @@ export interface StableDirectoryCaptureInput {
   inspectInventory(directory: string, signal?: AbortSignal): Promise<BaselineInventory>;
   /** A caller may already have inspected Git for the immutable-baseline reuse path. */
   inventory?: BaselineInventory;
+  /** Original Documents observation may prove namespace continuity, never file bytes. */
+  directoryInventory?: { read(): Promise<readonly string[]>; verify(): Promise<void> };
   signal?: AbortSignal;
   onProgress?: (completed: number, total: number) => void;
   changed?: (detail: string) => Error;
@@ -52,7 +55,14 @@ export async function captureStableDirectoryBaseline(input: StableDirectoryCaptu
   };
   rejectGitlinks(inventory);
   const scopePaths = scopes.length ? [...new Set(await store.listCaptureScopePaths(directory, scopes, signal))].sort() : [];
-  const baselinePaths = inventory.kind === 'git' ? inventory.paths : await store.listWorkspaceBaselinePaths(directory, signal);
+  let baselinePaths: readonly string[];
+  try {
+    baselinePaths = inventory.kind === 'git' ? inventory.paths
+      : input.directoryInventory ? await input.directoryInventory.read() : await store.listWorkspaceBaselinePaths(directory, signal);
+  } catch (error) {
+    if (error instanceof CaptureInventoryChangedError) throw changed(error.message);
+    throw error;
+  }
   const paths = inventory.kind === 'git'
     ? withAncestorDirectories([...baselinePaths, ...scopePaths, ...input.capturePaths ?? []])
     : [...new Set([...baselinePaths, ...input.capturePaths ?? []])].sort();
@@ -72,6 +82,13 @@ export async function captureStableDirectoryBaseline(input: StableDirectoryCaptu
       const after = await input.inspectInventory(directory, signal);
       rejectGitlinks(after);
       if (after.kind !== 'git' || gitBaselineFingerprint(after) !== identity) throw changed('Git inventory');
+    } else if (input.directoryInventory) {
+      try { await input.directoryInventory.verify(); }
+      catch (error) {
+        signal?.throwIfAborted();
+        if (error instanceof CaptureInventoryChangedError) throw changed(`directory paths: ${error.message}`);
+        throw error;
+      }
     } else {
       const after = await store.listWorkspaceBaselinePaths(directory, signal);
       if (directoryBaselineFingerprint(after) !== identity) throw changed('directory paths');
@@ -98,7 +115,7 @@ export async function captureStableDirectoryBaseline(input: StableDirectoryCaptu
 }
 
 export type SourceCaptureDocuments = Pick<ReturnType<typeof createDocumentAuthority>,
-  'beginDirtyStateBarrier' | 'beginCapture' | 'completeCapture' | 'inspectDirtyBuffers' | 'inspectMutation' | 'inspectWorkspace' | 'resolveWorkspace'>;
+  'beginDirtyStateBarrier' | 'beginCapture' | 'captureInventory' | 'completeCapture' | 'discardCapture' | 'inspectDirtyBuffers' | 'inspectMutation' | 'inspectWorkspace' | 'resolveWorkspace'>;
 
 export interface SourceResourceCapturePlan {
   resources: SourceResourceCapture;
@@ -185,7 +202,10 @@ export async function captureStableSourceBaseline(
       captureWorkspaceId, branchId: input.branchId, editorDrafts, ...(signal ? { signal } : {}) });
     captured = await captureStableDirectoryBaseline({ ...input,
       captureScopes: [...input.captureScopes, ...resources?.captureScopes ?? []],
-      ...(resources ? { capturePaths: resources.observedPaths } : {}), inspectInventory: owners.inspectInventory });
+      ...(resources ? { capturePaths: resources.observedPaths } : {}), inspectInventory: owners.inspectInventory,
+      directoryInventory: documents.captureInventory(token, scopes => scopes
+        ? store.listCaptureScopePaths(input.directory, scopes, signal)
+        : store.listWorkspaceBaselinePaths(input.directory, signal), signal) });
     const effective = editorDrafts.length ? await overlayDraftsOnBaseline({ baseState: captured.states, drafts: editorDrafts,
       putObject: async bytes => { signal?.throwIfAborted(); const object = await store.putObject(bytes);
         if (object.release) draftOwners.push(object.release); return object; } }) : { effectiveState: captured.states, changedPaths: [] };
@@ -211,11 +231,15 @@ export async function captureStableSourceBaseline(
     return { branch, provenance };
   } catch (error) {
     if (captured) await store.releaseCapturedStates(captured.states);
+    if (error instanceof CaptureInventoryChangedError) {
+      signal?.throwIfAborted();
+      throw new SourceCaptureError(error.message);
+    }
     throw error;
   } finally {
     // Cleanup does not reuse an aborted signal: the existing capture subscription
     // and barrier still need to release their actual owner resources.
-    if (token) await documents.completeCapture(token).catch(() => undefined);
+    if (token) documents.discardCapture(token);
     try { await barrier.release(); }
     finally {
       const releases = await Promise.allSettled(draftOwners.map(release => release()));

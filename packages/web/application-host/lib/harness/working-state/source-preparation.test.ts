@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
+import { CaptureInventoryChangedError } from '../../documents/capture-inventory.js';
 import { captureStableDirectoryBaseline, captureStableSourceBaseline, type SourceCaptureDocuments } from './source-preparation.js';
 import type { BaselineInventory } from './workspace-baseline.js';
 import type { RecoveryState, WorkingStateRootStore } from './types.js';
@@ -30,6 +31,13 @@ function fixture(initial: Record<string, RecoveryState> = { 'file.txt': { kind: 
     beginDirtyStateBarrier: vi.fn(async () => barrier),
     beginCapture: vi.fn(async () => ({ captureId: 'capture', workspaceId: 'workspace' })),
     completeCapture: complete,
+    discardCapture: vi.fn(),
+    captureInventory: (_capture: unknown, scan: () => Promise<string[]>) => {
+      let paths: string[];
+      return { read: async () => paths = await scan(), verify: async () => {
+        if (JSON.stringify(await scan()) !== JSON.stringify(paths)) throw new CaptureInventoryChangedError();
+      } };
+    },
     inspectMutation: vi.fn(async () => ({ activeWriters: [] })),
     inspectDirtyBuffers: vi.fn(async () => []),
   } as unknown as SourceCaptureDocuments;

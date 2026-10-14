@@ -20,7 +20,7 @@ child to exit. A missing executable, protocol mismatch, malformed response, revo
 an explicit Host failure; it never selects the old backend as a fallback.
 
 `kernel-launch.ts` shares executable selection and manifest checks with private helper modes.
-On Windows, Documents starts `--watch-directories` as a separate notification process using the same
+On Windows and Linux, Documents starts `--watch-directories` as a separate notification process using the same
 artifact. Its private JSON-line pipe carries subscription control and metadata only, with no Catalog,
 storage owner, file body or tool request. See [Documents observation](../documents/DOCUMENTATION.md#filesystem-observation).
 
@@ -364,7 +364,10 @@ does not. This preserves stable per-file capture, not a simultaneous filesystem 
 keeps the request credit and actual lease exclusion until worker completion. Lease release and grant
 revocation defer exclusion cleanup while that reader remains active; mutations cannot reuse its lease.
 The Host batches paths for bounded protocol responses and waits for the capture's actual receipt before
-abandoning owners. Inventory selection, Documents authority, and task isolation remain unchanged.
+abandoning owners. The original Documents root may reuse verified namespace metadata across captures:
+continuous supported Linux observation rescans only dirty subtrees, while unknown coverage performs the full
+inventory checks. This changes enumeration cost, not body hashing or publication authority; see
+[Documents filesystem observation](../documents/DOCUMENTATION.md#filesystem-observation).
 
 The selected native tool adapter binds file reads explicitly. `sourceMode: "fixed_branch"`
 (the default when omitted) reads the bound immutable `fileSource` revision. `"materialized"`
@@ -409,8 +412,8 @@ fails rather than falling back to its own disk writer. Document Registry still o
 undo. Workspace/Git/bulk adapters that are not yet native Rust operations register exact/subtree writers with
 the same gate.
 
-R3 extends the same file-resource authority to baseline and managed execution directories. `file.scan` pages
-Host-admitted filesystem inventories while excluding `.git`/`.varin`; `file.capture` installs the selected
+R3 extends the same file-resource authority to baseline and managed execution directories. The existing
+`compute` inventory worker streams Host-admitted paths once while excluding `.git`/`.varin`; `file.capture` installs the selected
 body bytes as same-grant objects so WorkingState branch creation can consume them without owner rebinding.
 WorkingState recaptures the selected paths before publishing a baseline or materialized result and refuses a
 mixed view when content, metadata, or inventory changes. Git still supplies staged/unstaged/untracked, index

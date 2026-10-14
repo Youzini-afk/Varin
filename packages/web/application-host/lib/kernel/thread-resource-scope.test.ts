@@ -8,6 +8,7 @@ import type { ThreadSource } from '@varin/application-client';
 import { createAgentResourceAuthority, type PreparedAgentResources } from '../agent-resources/authority.js';
 import { contentVersion } from '../agent-resources/source-reader.js';
 import { captureStableSourceBaseline, type SourceCaptureDocuments } from '../harness/working-state/source-preparation.js';
+import { createCaptureInventory, type CaptureInventoryCandidate } from '../documents/capture-inventory.js';
 import type { RecoveryState, WorkingBranchCreateOptions, WorkingSourcePreparation, WorkingStateRootStore, WorkspaceWorkingStateRootAccess } from '../harness/working-state/types.js';
 import { createThreadResourceScope, parseSourceResourceCapture, ResourceScopeError, type ThreadResourceScopeOwners } from './thread-resource-scope.js';
 
@@ -82,6 +83,14 @@ async function fixture(files: Record<string, string>) {
     beginDirtyStateBarrier: vi.fn(async () => ({ settle: async () => undefined, release: async () => undefined })),
     beginCapture: vi.fn(async () => ({ captureId: 'capture', workspaceId: 'workspace' })),
     completeCapture: vi.fn(async () => ({ stable: true, reasons: [] })),
+    discardCapture: vi.fn(),
+    captureInventory: (_capture: unknown, scan: () => Promise<string[]>) => {
+      const inventory = createCaptureInventory();
+      const position = { epoch: 1, sourceId: 'resource-fixture', generation: 1, complete: false };
+      let candidate: CaptureInventoryCandidate;
+      return { read: async () => { candidate = await inventory.prepare({ ...position, scan }); return candidate.paths; },
+        verify: async () => inventory.verify(candidate, position, scan) };
+    },
     inspectMutation: vi.fn(async () => ({ activeWriters: [] })), inspectDirtyBuffers: vi.fn(async () => []),
     readSnapshot: vi.fn(async ({ resourceId }: { resourceId: string }) => {
       try {
