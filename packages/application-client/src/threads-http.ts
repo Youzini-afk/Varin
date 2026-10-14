@@ -35,6 +35,7 @@ export function createThreadsHttpAPI(): ThreadsAPI {
   };
   return {
     materials: {
+      upload: (identity, request, signal) => post('materials/upload', { ...identity, request }, signal),
       read: (identity, request, signal) => post('materials/read', { ...identity, request }, signal),
       readSource: (selection, request, signal) => post('materials/read-source', { ...selection, request }, signal),
       readArtifact: (selection, request, signal) => post('materials/read-artifact', { ...selection, request }, signal),

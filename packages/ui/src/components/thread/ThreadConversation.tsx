@@ -7,8 +7,9 @@ import { projectEditorContextAttachments } from '@/lib/agent-editor/projection';
 import { useInlineCommentDraftStore } from '@/stores/useInlineCommentDraftStore';
 import { appendInlineComments } from '@/lib/messages/inlineComments';
 import { useThreadStore, threadHostKey, threadIdentityKey } from '@/stores/useThreadStore';
-import { useThreadDraftStore, EMPTY_THREAD_DRAFT, type ThreadPendingInput } from '@/stores/useThreadDraftStore';
+import { useThreadDraftStore, EMPTY_THREAD_DRAFT, type ThreadPendingInput, type ThreadMaterialAttachment } from '@/stores/useThreadDraftStore';
 import { ThreadMaterials } from './ThreadMaterials';
+import { ThreadMaterialAttachments } from './ThreadMaterialAttachments';
 import { buildPdfMaterialCitationMarkdown } from '@/lib/materials/pdfMaterialCitation';
 import { ComputerAutomationSection } from '@/components/thread/ComputerAutomationSection';
 import { useComputerAutomation } from '@/stores/useComputerAutomation';
@@ -35,6 +36,7 @@ import { ThreadRecovery } from './ThreadRecovery';
 import type { ImageAttachment, InferenceBinding, InferenceReceipt } from '@varin/protocol';
 import { ImageAttachmentStrip } from '@/components/chat/composer/ImageAttachmentStrip';
 import { fileToImageAttachment } from '@/components/chat/composer/imageAttachments';
+import { fileToBase64 } from '@/components/chat/composer/fileAttachments';
 import { useI18n } from '@/lib/i18n';
 import React from 'react';
 import { createModelConnectionsHttpAPI, threadMemorySourceText, threadSourceFailureMessage, ThreadRequestError, getRuntimeEndpointGeneration, subscribeRuntimeEndpointChanged } from '@varin/application-client';
@@ -168,9 +170,10 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
   const draft = useThreadDraftStore(state => state.drafts[draftKey] ?? EMPTY_THREAD_DRAFT);
   const setText = React.useCallback((value: React.SetStateAction<string>) => useThreadDraftStore.getState().patch(draftKey, current => ({ text: typeof value === 'function' ? value(current.text) : value })), [draftKey]);
   const setImages = React.useCallback((value: React.SetStateAction<ImageAttachment[]>) => useThreadDraftStore.getState().patch(draftKey, current => ({ images: typeof value === 'function' ? value(current.images) : value })), [draftKey]);
+  const setMaterials = React.useCallback((value: React.SetStateAction<ThreadMaterialAttachment[]>) => useThreadDraftStore.getState().patch(draftKey, current => ({ materials: typeof value === 'function' ? value(current.materials) : value })), [draftKey]);
   const setPreparedSource = React.useCallback((preparedSource: ThreadPreparedSource | null) => useThreadDraftStore.getState().patch(draftKey, { preparedSource }), [draftKey]);
   const setInputMode = React.useCallback((inputMode: 'boundary' | 'interrupt' | 'next_run') => useThreadDraftStore.getState().patch(draftKey, { inputMode }), [draftKey]);
-  const { text, images, preparedSource, inputMode } = draft;
+  const { text, images, materials, preparedSource, inputMode } = draft;
   React.useSyncExternalStore(subscribeEditorContextAttachments, getEditorContextAttachmentsRevision, () => 0);
   const editorContext = listEditorContextAttachments(threadHostKey(), draftKey);
   const inlineBuckets = useInlineCommentDraftStore(state => state.drafts);
@@ -192,7 +195,9 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
     set current(pendingInput: ThreadPendingInput | undefined) { useThreadDraftStore.getState().patch(draftKey, { pendingInput }); },
   }), [draftKey]);
   const fileInput = React.useRef<HTMLInputElement | null>(null);
+  const pdfInput = React.useRef<HTMLInputElement | null>(null);
   const fileReadGeneration = React.useRef(0);
+  const fileRead = React.useRef<AbortController | null>(null);
   const [readingFiles, setReadingFiles] = React.useState(false);
   const [preparingSource, setPreparingSource] = React.useState(false);
   const [snapshotState, setSnapshot] = React.useState<ThreadSnapshot>();
@@ -225,9 +230,10 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
     setPreparingSource(false);
     pendingAction.current = null; setPending(false); setError(undefined);
     setSnapshot(undefined); setProgress(''); setReadingFiles(false); fileReadGeneration.current += 1;
+    fileRead.current?.abort(); fileRead.current = null;
     const view = new ThreadProjection(api, identity, value => { snapshotHost.current = host; setSnapshot(value); if (typeof document !== 'undefined' && document.visibilityState !== 'hidden') void useThreadStore.getState().markRead(identity.threadId, value.thread.activity_cursor).catch(() => {}); }, value => setError(value instanceof Error ? value.message : 'Thread unavailable'), setProgress);
     projection.current = view; view.start();
-    return () => { identityGeneration.current += 1; historyGeneration.current += 1; fileReadGeneration.current += 1; view.close(); };
+    return () => { identityGeneration.current += 1; historyGeneration.current += 1; fileReadGeneration.current += 1; fileRead.current?.abort(); fileRead.current = null; view.close(); };
   }, [api, identity, host]);
   const snapshot = snapshotHost.current === host && snapshotState?.identity.threadId === identity.threadId && snapshotState?.identity.branchId === identity.branchId ? snapshotState : undefined;
   const workRevision = snapshot ? JSON.stringify([snapshot.activeRun?.id, snapshot.activeRun?.state,
@@ -316,16 +322,38 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
       });
     }
   };
-  const addImages = async (files: File[]) => {
+  const addFiles = async (files: File[]) => {
+    // DOM events can arrive twice before React publishes the disabled state. An uncertain
+    // input keeps its exact retained snapshots, so selecting again cannot retransmit them.
+    if (!files.length || readOnly || fileRead.current || pendingAction.current || pendingInput.current) return;
     const generation = fileReadGeneration.current;
+    const controller = new AbortController(); fileRead.current = controller;
+    const current = () => !controller.signal.aborted && generation === fileReadGeneration.current
+      && host === getRuntimeEndpointGeneration() && fileRead.current === controller;
+    const isPdf = (file: File) => file.type === 'application/pdf' || /\.pdf$/i.test(file.name);
     setReadingFiles(true); setError(undefined);
     try {
-      if (acceptsImages === false) throw new Error('The selected model does not accept images');
-      if (files.some(file => !file.type.startsWith('image/'))) throw new Error('This attachment action accepts images; other files need their material workflow');
-      const added = await Promise.all(files.map(fileToImageAttachment));
-      if (generation === fileReadGeneration.current) setImages(current => [...current, ...added]);
-    } catch (value) { if (generation === fileReadGeneration.current) setError(value instanceof Error ? value.message : 'Could not read images'); }
-    finally { if (generation === fileReadGeneration.current) setReadingFiles(false); }
+      if (files.some(file => !isPdf(file) && !file.type.startsWith('image/'))) throw new Error(t('chat.fileAttachment.unsupportedType'));
+      if (acceptsImages === false && files.some(file => !isPdf(file))) throw new Error('The selected model does not accept images');
+      for (const file of files) {
+        if (!current()) return;
+        if (isPdf(file)) {
+          const data = await fileToBase64(file);
+          if (!current()) return;
+          const result = await api.materials.upload(identity, { filename: file.name, mimeType: 'application/pdf', data }, controller.signal);
+          if (!current()) return;
+          const retained = result.status === 'ok' ? result.sourceSnapshot ?? result.snapshot : undefined;
+          if (!retained?.snapshotId || retained.document?.kind !== 'pdf') throw new Error(t('chat.fileAttachment.pdfNotRetained'));
+          const material = { snapshotId: retained.snapshotId, filename: file.name, sourceHash: retained.document.source?.contentHash };
+          setMaterials(previous => previous.some(item => item.snapshotId === material.snapshotId) ? previous : [...previous, material]);
+        } else {
+          const image = await fileToImageAttachment(file);
+          if (!current()) return;
+          setImages(previous => [...previous, image]);
+        }
+      }
+    } catch (value) { if (current()) setError(value instanceof Error ? value.message : t('chat.fileAttachment.toast.attachFailed')); }
+    finally { if (current()) { fileRead.current = null; setReadingFiles(false); } }
   };
   const selectModel = (provider: string, model: string, thinking: ThreadThinkingLevel) => {
     if (active && run) {
@@ -383,7 +411,7 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
   const previousHistory = historyView ? historyView.previous : snapshot?.historyPage.previous;
   const memorySelection = getRegisteredRuntimeAPIs()?.bots?.selection;
   const memoryHead = historyView?.head ?? snapshot?.historyPage.head;
-  const submissionFingerprint = () => JSON.stringify([identity.threadId, identity.branchId, projectedText, images, providerId, modelId, thinkingLevel, inputMode, preparedSource?.source]);
+  const submissionFingerprint = () => JSON.stringify([identity.threadId, identity.branchId, projectedText, images, materials, providerId, modelId, thinkingLevel, inputMode, preparedSource?.source]);
   const sourceCannotBeApplied = active && Boolean(preparedSource) && !pendingInput.current;
   return <ThreadMaterials api={api.materials} identity={identity} onAddRegion={readOnly || acceptsImages === false ? undefined : region => {
     if (pendingAction.current) throw new Error('Wait for the current message before adding a PDF selection.');
@@ -512,15 +540,16 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
     {readOnly && error && <p role="alert" className="px-4 text-sm text-destructive">{error}</p>}
     {!readOnly && <form className="mx-auto w-full max-w-3xl space-y-2 p-4" onSubmit={event => {
       event.preventDefault();
-      if (preparingSource || sourceCannotBeApplied || recovery.blocked) return;
+      if (preparingSource || sourceCannotBeApplied || recovery.blocked || fileRead.current) return;
       const generation = identityGeneration.current;
       void act(async () => {
         const fingerprint = submissionFingerprint();
         if (!pendingInput.current) {
           const key = crypto.randomUUID();
-          const submit = { ...identity, key, text: projectedText, images, expectedHead: branch?.head ?? null, model: { providerId, modelId, thinkingLevel }, ...(preparedSource ? { source: preparedSource.source } : {}) };
-          const queued = { ...identity, key, text: projectedText, images, mode: inputMode };
-          const continuation = { ...identity, key, text: projectedText, images, previousRunId: run?.id ?? '', expectedHead: branch?.head ?? null };
+          const attachments = materials.length ? { materials: materials.map(({ snapshotId }) => ({ snapshotId })) } : {};
+          const submit = { ...identity, key, text: projectedText, images, ...attachments, expectedHead: branch?.head ?? null, model: { providerId, modelId, thinkingLevel }, ...(preparedSource ? { source: preparedSource.source } : {}) };
+          const queued = { ...identity, key, text: projectedText, images, ...attachments, mode: inputMode };
+          const continuation = { ...identity, key, text: projectedText, images, ...attachments, previousRunId: run?.id ?? '', expectedHead: branch?.head ?? null };
           if (!active && delegated && (!api.collaboration || !run)) throw new Error('Child continuation is unavailable');
           pendingInput.current = { fingerprint, editorText: text, editorContext, inlineContext, preparedSource, status: 'sending', ...(active ? { kind: 'enqueue' as const, input: queued }
             : delegated ? { kind: 'continue' as const, input: continuation } : { kind: 'submit' as const, input: submit }) };
@@ -536,6 +565,7 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
           pendingInput: undefined, preparedSource: current.preparedSource === original.preparedSource ? null : current.preparedSource,
           text: current.text === original.editorText ? '' : current.text,
           images: current.images.filter(image => !(original.input.images ?? []).includes(image)),
+          materials: current.materials.filter(material => !(original.input.materials ?? []).some(item => item.snapshotId === material.snapshotId)),
         } : {});
         if (generation !== identityGeneration.current || host !== getRuntimeEndpointGeneration()) return;
         returnToLatest();
@@ -581,16 +611,22 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
       </div>}
       <ImageAttachmentStrip images={images} removeLabel={t('chat.fileAttachment.actions.removeImage')}
         onRemove={index => setImages(current => current.filter((_, candidate) => candidate !== index))} />
+      <ThreadMaterialAttachments materials={materials} locked={pending || Boolean(draft.pendingInput)}
+        onRemove={snapshotId => { if (!pendingAction.current && !pendingInput.current) setMaterials(current => current.filter(material => material.snapshotId !== snapshotId)); }} />
+      {readingFiles && <p role="status">{t('chat.fileAttachment.uploading')}</p>}
       <input ref={fileInput} type="file" accept="image/*" multiple hidden aria-label="Choose image attachments"
-        onChange={event => { const files = [...(event.target.files ?? [])]; event.target.value = ''; void addImages(files); }} />
+        onChange={event => { const files = [...(event.target.files ?? [])]; event.target.value = ''; void addFiles(files); }} />
+      <input ref={pdfInput} type="file" accept="application/pdf,.pdf" multiple hidden aria-label={t('chat.fileAttachment.actions.choosePdfs')}
+        onChange={event => { const files = [...(event.target.files ?? [])]; event.target.value = ''; void addFiles(files); }} />
       <AutoReviewBanner identity={identity} />
       <Textarea ref={messageInput} aria-label="Message thread" data-chat-input="true" value={text} onChange={event => setText(event.target.value)}
-        onPaste={event => { const files = [...event.clipboardData.files].filter(file => file.type.startsWith('image/')); if (files.length) { event.preventDefault(); void addImages(files); } }}
+        onPaste={event => { const files = [...event.clipboardData.files]; if (files.length) { event.preventDefault(); void addFiles(files); } }}
         onDragOver={event => { if (event.dataTransfer.types.includes('Files')) event.preventDefault(); }}
-        onDrop={event => { const files = [...event.dataTransfer.files]; if (files.length) { event.preventDefault(); void addImages(files); } }} />
+        onDrop={event => { const files = [...event.dataTransfer.files]; if (files.length) { event.preventDefault(); void addFiles(files); } }} />
       <div className="flex gap-2">
-        <Button type="button" variant="ghost" disabled={readingFiles || acceptsImages === false} onClick={() => fileInput.current?.click()}>Attach images</Button>
-        <Button type="submit" disabled={pending || (!draft.pendingInput && (preparingDelegation || preparingSource || sourceCannotBeApplied || readingFiles || (images.length > 0 && acceptsImages === false) || (!text.trim() && !images.length && !inlineDrafts.length && !editorContext.length) || (!active && (delegated ? !api.collaboration || !run : !providerId || !modelId))))}>{draft.pendingInput ? 'Retry delivery' : active ? 'Queue message' : delegated ? 'Continue child' : 'Send'}</Button>
+        <Button type="button" variant="ghost" disabled={pending || Boolean(draft.pendingInput) || readingFiles || acceptsImages === false} onClick={() => fileInput.current?.click()}>Attach images</Button>
+        <Button type="button" variant="ghost" disabled={pending || Boolean(draft.pendingInput) || readingFiles} onClick={() => pdfInput.current?.click()}>{t('chat.fileAttachment.actions.attachPdfs')}</Button>
+        <Button type="submit" disabled={pending || (!draft.pendingInput && (preparingDelegation || preparingSource || sourceCannotBeApplied || readingFiles || (images.length > 0 && acceptsImages === false) || (!text.trim() && !images.length && !materials.length && !inlineDrafts.length && !editorContext.length) || (!active && (delegated ? !api.collaboration || !run : !providerId || !modelId))))}>{draft.pendingInput ? 'Retry delivery' : active ? 'Queue message' : delegated ? 'Continue child' : 'Send'}</Button>
         {active && branch?.active_run_id && <Button type="button" variant="outline" onClick={() => void act(() => api.cancelRun(branch.active_run_id!), true)}>Stop run</Button>}
         {run && pause && <Button type="button" variant="outline" disabled={pending || run.cancel_requested} onClick={() => void act(() => api.resume(run.id, pause.wait_id))}>Resume run</Button>}
         {active && run && policyUpdate && policyIncompatible && <Button type="button" variant="outline" disabled={pending || run.cancel_requested} onClick={() => void act(() => api.restartPolicy(identity, run.id, policyUpdate.selection_id))}>Restart strategy state</Button>}

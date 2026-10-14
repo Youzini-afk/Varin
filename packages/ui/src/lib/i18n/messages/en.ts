@@ -1,6 +1,12 @@
 import { settingsDict } from './en.settings';
 
 export const dict = {
+  "chat.fileAttachment.actions.attachPdfs": "Attach PDFs",
+  "chat.fileAttachment.actions.choosePdfs": "Choose PDF attachments",
+  "chat.fileAttachment.pdfAttachments": "PDF attachments",
+  "chat.fileAttachment.uploading": "Preparing attachments…",
+  "chat.fileAttachment.unsupportedType": "Attach an image or PDF file.",
+  "chat.fileAttachment.pdfNotRetained": "The PDF was not retained. No attachment was added.",
   "filesView.workspaceEdit.operation.create": "Create",
   "filesView.workspaceEdit.operation.rename": "Rename",
   "filesView.workspaceEdit.operation.delete": "Delete",

@@ -11,6 +11,8 @@ import type { ThreadToolInspection, ThreadMcpSamplingRequestReview } from '@vari
 import type { PlanService } from './plan-service.js';
 import type { ImageAttachment } from '@varin/protocol';
 import { threadInput } from './thread-images.js';
+import { materialInputText, parseThreadMaterials, type ThreadInputMaterials } from './thread-material-input.js';
+import type { ThreadMaterialAttachment } from '@varin/application-client';
 import { listThreadFollowups } from './thread-followups.js';
 import { listThreadGoals } from './thread-goals.js';
 import { createHash } from 'node:crypto';
@@ -53,6 +55,17 @@ export class ThreadAdapter {
     private readonly prepareSkillInput?: ThreadSkillInputPreparer,
     private readonly processTerminals?: import('@varin/application-client').ThreadProcessesAPI,
     private readonly prepareChildProfiles?: ChildProfilePreparer) {}
+
+  private inputMaterials?: ThreadInputMaterials;
+  bindMaterials(owner: ThreadInputMaterials): void { this.inputMaterials = owner; }
+  private async prepareInput(input: ThreadIdentity & { text: string; images?: ImageAttachment[]; materials?: ThreadMaterialAttachment[] }, signal?: AbortSignal) {
+    const selected = parseThreadMaterials(input.materials);
+    if (!selected?.length) return threadInput(input.text, input.images);
+    if (!this.inputMaterials) throw new Error('Thread material admission is unavailable');
+    const materials = await this.inputMaterials(input, selected, signal);
+    signal?.throwIfAborted();
+    return threadInput(materialInputText(input.text, materials), input.images);
+  }
 
   private compaction?: ContextCompactionOwner;
   bindCompaction(owner: ContextCompactionOwner): void { this.compaction = owner; }
@@ -287,11 +300,12 @@ export class ThreadAdapter {
       await this.requireIdentity(input, signal);
       const child = await this.runtime.childForThread(input.threadId, signal);
       if (!child || child.child_branch_id !== input.branchId) throw new Error('Continuation requires the original child branch');
+      const preparedInput = await this.prepareInput(input, signal);
       // This call is the durable input acceptance. Cold source/configuration preparation belongs
       // to the existing event-driven collaboration owner, including after Host restart.
       admissionStarted = true;
       return await this.runtime.acceptChildContinuation({ key: input.key, childOperationId: child.operation_id,
-        previousRunId: input.previousRunId, expectedHead: input.expectedHead, input: threadInput(input.text, input.images) }, signal);
+        previousRunId: input.previousRunId, expectedHead: input.expectedHead, input: preparedInput }, signal);
     } catch (error) {
       if (!admissionStarted || error instanceof KernelRequestError && error.method === 'runtime.child.continuation.accept' && error.settlement === 'not_dispatched') {
         throw new ThreadPreAdmissionError(error, 'thread-request-failed');
@@ -604,7 +618,7 @@ export class ThreadAdapter {
       try {
         this.assertImagesSupported(input.images, model.configuration);
         const command: InputSubmitParams = { key: input.key, threadId: input.threadId, branchId: input.branchId,
-          expectedHead: input.expectedHead, input: threadInput(input.text, input.images), configuration: model.configuration,
+          expectedHead: input.expectedHead, input: await this.prepareInput(input), configuration: model.configuration,
           launch: { inheritSource: input.source === undefined, source: input.source ? {
             resourceOwner: input.source.resourceOwner, workspaceId: input.source.workspaceId, executionWorkspaceId: input.source.executionWorkspaceId,
             branchId: input.source.branchId ?? null, revision: input.source.revision ?? null, mode: input.source.mode, liveRoot: input.source.liveRoot ?? null, ...(input.source.environmentRunId ? { environmentRunId: input.source.environmentRunId } : {}),
@@ -678,7 +692,7 @@ export class ThreadAdapter {
     }
   }
 
-  async enqueue(input: ThreadIdentity & { key: string; text: string; images?: ImageAttachment[]; mode: InputMode }) {
+  async enqueue(input: ThreadIdentity & { key: string; text: string; images?: ImageAttachment[]; materials?: ThreadMaterialAttachment[]; mode: InputMode }) {
     let admissionStarted = false;
     try {
       const thread = await this.requireIdentity(input);
@@ -696,7 +710,7 @@ export class ThreadAdapter {
         if (!previous) throw new Error('An initial model selection is required');
         this.assertImagesSupported(input.images, selected.desired?.configuration ?? previous.configuration);
         const command: InputEnqueueParams = { key: input.key, threadId: input.threadId, branchId: input.branchId,
-          mode: input.mode, input: threadInput(input.text, input.images) };
+          mode: input.mode, input: await this.prepareInput(input) };
         let inputPreparation: InputResourcePreparation | undefined;
         if (parseExplicitSkillCommand(input.text)) {
           const existing = await this.runtime.enqueueReceipt(command);

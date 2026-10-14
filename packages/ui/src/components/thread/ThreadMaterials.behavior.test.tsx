@@ -242,6 +242,7 @@ function researchFixture(artifacts: ExperimentArtifactView[] = [originalArtifact
     artifact: vi.fn(), logs: vi.fn(), cancel: vi.fn(), collect: vi.fn(), submit: vi.fn(),
   } satisfies ThreadResearchAPI;
   const materials = {
+    upload: vi.fn<ThreadMaterialsAPI['upload']>(),
     readSource: vi.fn<ThreadMaterialsAPI['readSource']>(),
     readArtifact: vi.fn<ThreadMaterialsAPI['readArtifact']>(async () => okOverview('snapshot-artifact', 'hash-a')),
     read: vi.fn<ThreadMaterialsAPI['read']>(async (_owner, request) => respond(request)),

@@ -4,6 +4,12 @@ import { settingsDict } from './ja.settings';
 export const dict: Record<I18nKey, string> = {
   ...enDict,
   ...settingsDict,
+  "chat.fileAttachment.actions.attachPdfs": "PDF を添付",
+  "chat.fileAttachment.actions.choosePdfs": "添付する PDF を選択",
+  "chat.fileAttachment.pdfAttachments": "PDF 添付ファイル",
+  "chat.fileAttachment.uploading": "添付ファイルを準備中…",
+  "chat.fileAttachment.unsupportedType": "画像または PDF ファイルを添付してください。",
+  "chat.fileAttachment.pdfNotRetained": "PDF が保存されなかったため、添付されていません。",
   "computer.feedback.title": "Agent のデスクトップ操作",
   "computer.feedback.type": "入力中",
   "computer.feedback.value": "値を設定",

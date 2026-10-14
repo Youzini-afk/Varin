@@ -28,7 +28,7 @@ vi.mock('@/lib/varinEvents', () => ({
   },
 }));
 
-const materials: ThreadMaterialsAPI = { read: vi.fn(), readSource: vi.fn(), readArtifact: vi.fn() };
+const materials: ThreadMaterialsAPI = { upload: vi.fn(), read: vi.fn(), readSource: vi.fn(), readArtifact: vi.fn() };
 
 const attempt = {
   attemptId: 'attempt-1',

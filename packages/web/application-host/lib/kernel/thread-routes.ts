@@ -1,3 +1,4 @@
+import { parseThreadMaterials } from './thread-material-input.js';
 import { normalizeThreadSourcePreparation, parseSourceResourceOwner } from './thread-sources.js';
 import { threadSourceFailureMessage } from '@varin/application-client';
 import { sourceFailureCode } from './source-admission-error.js';
@@ -74,6 +75,7 @@ const inputBeforeAdmission = <T>(decode: () => T): T => {
 /** Mounted in the existing authenticated Application Host, shared by Web and Electron. */
 export function registerThreadRoutes(app: Express, adapter: ThreadAdapter, requireAuth: RequestHandler, research?: ThreadResearchAPI, computer?: ThreadComputerAPI, materials?: ThreadMaterialsAPI): void {
   const fields: Record<string, readonly string[]> = {
+    'materials/upload': ['runtime', 'threadId', 'branchId', 'request'],
     'materials/read': ['runtime', 'threadId', 'branchId', 'request'],
     'materials/read-source': ['runtime', 'threadId', 'branchId', 'sourceRunId', 'request'],
     'materials/read-artifact': ['runtime', 'threadId', 'branchId', 'sourceRunId', 'request'],
@@ -112,7 +114,7 @@ export function registerThreadRoutes(app: Express, adapter: ThreadAdapter, requi
     'family/runs': ['runtime', 'threadId', 'branchId', 'request'],
     'family/read': ['runtime', 'threadId', 'branchId', 'request'],
     'family/item': ['runtime', 'threadId', 'branchId', 'request'],
-    'child/continue': ['runtime', 'threadId', 'branchId', 'key', 'previousRunId', 'expectedHead', 'text', 'images'],
+    'child/continue': ['runtime', 'threadId', 'branchId', 'key', 'previousRunId', 'expectedHead', 'text', 'images', 'materials'],
     'child/executions': ['runtime', 'threadId', 'branchId', 'operationId'],
     'child/execution/report': ['runtime', 'threadId', 'branchId', 'executionId', 'itemId', 'offset', 'maxBytes'],
     'child/report': ['runtime', 'threadId', 'branchId', 'operationId', 'itemId', 'offset', 'maxBytes'],
@@ -146,9 +148,9 @@ export function registerThreadRoutes(app: Express, adapter: ThreadAdapter, requi
     update: ['runtime', 'threadId', 'key', 'expectedRevision', 'title', 'pinned', 'archived'],
     delete: ['runtime', 'threadId', 'key', 'expectedRevision'],
     read: ['runtime', 'threadId', 'key', 'throughCursor'],
-    create: ['key'], list: ['query', 'archived'], models: [], submit: ['runtime', 'threadId', 'branchId', 'key', 'text', 'images', 'expectedHead', 'model', 'source'],
+    create: ['key'], list: ['query', 'archived'], models: [], submit: ['runtime', 'threadId', 'branchId', 'key', 'text', 'images', 'materials', 'expectedHead', 'model', 'source'],
     usage: ['runtime', 'threadId', 'branchId'],
-    snapshot: ['runtime', 'threadId', 'branchId'], 'history/page': ['runtime', 'threadId', 'branchId', 'headId', 'beforeId'], enqueue: ['runtime', 'threadId', 'branchId', 'key', 'text', 'images', 'mode'],
+    snapshot: ['runtime', 'threadId', 'branchId'], 'history/page': ['runtime', 'threadId', 'branchId', 'headId', 'beforeId'], enqueue: ['runtime', 'threadId', 'branchId', 'key', 'text', 'images', 'materials', 'mode'],
     'input/edit': ['inputId', 'expectedRevision', 'text', 'images'], 'input/cancel': ['inputId', 'expectedRevision'],
     run: ['runId'], 'run/cancel': ['runId'], 'run/resume': ['runId', 'waitId'], 'run/retry-preparation': ['runId'], operation: ['operationId'], 'operation/cancel': ['operationId'], events: ['cursor'],
   };
@@ -198,6 +200,7 @@ export function registerThreadRoutes(app: Express, adapter: ThreadAdapter, requi
   const selection = (body: Record<string, unknown>): ThreadResearchSelection => ({ ...identity(body), sourceRunId: text(body.sourceRunId) });
   if (materials) {
     // The material owner validates the request and derives its domain from the real Thread.
+    post('materials/upload', (body, signal) => materials.upload(identity(body), object(body.request) as unknown as import('@varin/application-client').ThreadMaterialUpload, signal));
     post('materials/read', (body, signal) => materials.read(identity(body), object(body.request) as ThreadMaterialReadRequest, signal));
     post('materials/read-source', (body, signal) => materials.readSource(selection(body), object(body.request) as ThreadMaterialSourceReadRequest, signal));
     post('materials/read-artifact', (body, signal) => materials.readArtifact(selection(body), object(body.request) as ThreadMaterialArtifactReadRequest, signal));
@@ -292,9 +295,10 @@ export function registerThreadRoutes(app: Express, adapter: ThreadAdapter, requi
     const input = inputBeforeAdmission(() => {
       if (typeof body.text !== 'string') throw new Error('Input text is required');
       const images = parseThreadImages(body.images);
+      const materials = parseThreadMaterials(body.materials);
       return { ...identity(body), key: text(body.key), previousRunId: text(body.previousRunId),
         expectedHead: body.expectedHead === null ? null : text(body.expectedHead), text: body.text,
-        ...(images === undefined ? {} : { images }) };
+        ...(images === undefined ? {} : { images }), ...(materials === undefined ? {} : { materials }) };
     });
     return adapter.continueChild(input, signal);
   });
@@ -402,8 +406,9 @@ export function registerThreadRoutes(app: Express, adapter: ThreadAdapter, requi
   post('submit', async body => {
     const input = inputBeforeAdmission(() => {
       const images = parseThreadImages(body.images);
-      if (typeof body.text !== 'string' || (!body.text.length && !images?.length)) throw new Error('Text or images are required');
-      const input: ThreadSubmit = { ...identity(body), key: text(body.key), text: body.text, ...(images === undefined ? {} : { images }),
+      const materials = parseThreadMaterials(body.materials);
+      if (typeof body.text !== 'string' || (!body.text.length && !images?.length && !materials?.length)) throw new Error('Text, images or materials are required');
+      const input: ThreadSubmit = { ...identity(body), key: text(body.key), text: body.text, ...(images === undefined ? {} : { images }), ...(materials === undefined ? {} : { materials }),
         expectedHead: body.expectedHead === null ? null : text(body.expectedHead),
         model: modelSelection(body.model) };
       if (body.source !== undefined) {
@@ -437,8 +442,9 @@ export function registerThreadRoutes(app: Express, adapter: ThreadAdapter, requi
       const selected = identity(body);
       if (!['boundary', 'interrupt', 'next_run'].includes(String(body.mode))) throw new Error('Invalid input mode');
       const images = parseThreadImages(body.images);
-      if (typeof body.text !== 'string' || (!body.text.length && !images?.length)) throw new Error('Text or images are required');
-      return { ...selected, key: text(body.key), text: body.text, ...(images === undefined ? {} : { images }), mode: body.mode as 'boundary' | 'interrupt' | 'next_run' };
+      const materials = parseThreadMaterials(body.materials);
+      if (typeof body.text !== 'string' || (!body.text.length && !images?.length && !materials?.length)) throw new Error('Text, images or materials are required');
+      return { ...selected, key: text(body.key), text: body.text, ...(images === undefined ? {} : { images }), ...(materials === undefined ? {} : { materials }), mode: body.mode as 'boundary' | 'interrupt' | 'next_run' };
     });
     return adapter.enqueue(input);
   });

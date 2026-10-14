@@ -38,7 +38,7 @@ function fixture() {
   const requireAuth: RequestHandler = (request, response, next) => {
     if (request.headers.authorization !== 'fixture-session') { response.status(401).end(); return; } next();
   };
-  registerThreadRoutes(app, {} as ThreadAdapter, requireAuth, undefined, undefined, { read, readArtifact, readSource });
+  registerThreadRoutes(app, {} as ThreadAdapter, requireAuth, undefined, undefined, { read, readArtifact, readSource, upload: vi.fn(async () => result) });
   const request = async (body: unknown, authenticated = true, onResponse?: (response: EventEmitter) => void, path = '/api/threads/materials/read') => {
     let status = 200; let output: unknown;
     const response = Object.assign(new EventEmitter(), { writableEnded: false,

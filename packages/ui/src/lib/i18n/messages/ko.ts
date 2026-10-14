@@ -4,6 +4,12 @@ import { settingsDict } from './ko.settings';
 export const dict: Record<I18nKey, string> = {
   ...enDict,
   ...settingsDict,
+  "chat.fileAttachment.actions.attachPdfs": "PDF 첨부",
+  "chat.fileAttachment.actions.choosePdfs": "첨부할 PDF 선택",
+  "chat.fileAttachment.pdfAttachments": "PDF 첨부 파일",
+  "chat.fileAttachment.uploading": "첨부 파일 준비 중…",
+  "chat.fileAttachment.unsupportedType": "이미지 또는 PDF 파일을 첨부하세요.",
+  "chat.fileAttachment.pdfNotRetained": "PDF가 저장되지 않아 첨부 파일이 추가되지 않았습니다.",
   "computer.feedback.title": "Agent 데스크톱 동작",
   "computer.feedback.type": "입력 중",
   "computer.feedback.value": "값 설정",

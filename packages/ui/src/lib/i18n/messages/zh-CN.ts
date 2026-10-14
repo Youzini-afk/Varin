@@ -4,6 +4,12 @@ import { settingsDict } from './zh-CN.settings';
 export const dict: Record<I18nKey, string> = {
   ...enDict,
   ...settingsDict,
+  "chat.fileAttachment.actions.attachPdfs": "添加 PDF",
+  "chat.fileAttachment.actions.choosePdfs": "选择 PDF 附件",
+  "chat.fileAttachment.pdfAttachments": "PDF 附件",
+  "chat.fileAttachment.uploading": "正在准备附件…",
+  "chat.fileAttachment.unsupportedType": "请添加图片或 PDF 文件。",
+  "chat.fileAttachment.pdfNotRetained": "PDF 未保存，未添加附件。",
   'onboarding.native.chooseDescription': '使用本地 Varin 运行时，或连接远程 Varin Host。',
   'onboarding.native.description': 'Varin 内置原生运行时，由 Application Host 管理会话和执行。',
   'onboarding.native.checking': '正在检查原生运行时…',

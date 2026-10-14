@@ -17,16 +17,23 @@ export type ThreadPendingInput = {
   | { kind: 'enqueue'; input: Parameters<ThreadsAPI['enqueue']>[0] }
   | { kind: 'continue'; input: Parameters<NonNullable<ThreadsAPI['collaboration']>['continueChild']>[0] }
 );
+/** A retained PDF reference, never the original upload bytes or a filesystem grant. */
+export interface ThreadMaterialAttachment {
+  snapshotId: string;
+  filename: string;
+  sourceHash?: string;
+}
 export interface ThreadDraft {
   text: string;
   images: ImageAttachment[];
+  materials: ThreadMaterialAttachment[];
   model?: ThreadModel;
   inputMode: 'boundary' | 'interrupt' | 'next_run';
   preparedSource: ThreadPreparedSource | null;
   workspacePath?: string;
   pendingInput?: ThreadPendingInput;
 }
-export const EMPTY_THREAD_DRAFT: ThreadDraft = Object.freeze({ text: '', images: [], inputMode: 'boundary', preparedSource: null });
+export const EMPTY_THREAD_DRAFT: ThreadDraft = Object.freeze({ text: '', images: [], materials: [], inputMode: 'boundary', preparedSource: null });
 /** Composer state only; accepted execution and history remain with the native Catalog. Never persisted. */
 export const useThreadDraftStore = create<{
   drafts: Record<string, ThreadDraft>;
