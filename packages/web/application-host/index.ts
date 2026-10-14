@@ -361,7 +361,7 @@ const shouldSkipApiCompression = (): boolean => {
 const SSE_PATHS = new Set([
   '/api/notifications/stream',
   '/api/varin/events',
-  '/api/varin/runtime-manager/events',
+  '/api/threads/observe',
   '/api/varin/realtime-proxy/sse',
 ]);
 
