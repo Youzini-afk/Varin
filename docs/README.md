@@ -17,6 +17,13 @@ package.json 为准；文档解释职责、机制、约束和不显然的取舍�
 | 仍需真实环境证据的运行时场景 | [运行时验收](runtime-acceptance.md) |
 | 部署、恢复、扩展开发和依赖维护 | [操作指南](ops/README.md) |
 
+## 进行中的设计
+
+[能力补齐设计](capability-design.md)：Documents 批量修改、分别配置模型的图像生成与编辑工具、
+同进程扩展更新交接，以及 macOS / Wayland Computer Use。这些方案尚待实现，与上面的当前系统说明分开阅读。
+
+## 源码旁的说明
+
 源码旁的 README / DOCUMENTATION 保留模块特有的不变量和实际入口：
 
 - [Rust 内核](../kernel/README.md)、[Agent runtime crate](../kernel/crates/varin-runtime/README.md)、[Host adapters](../packages/web/application-host/lib/kernel/DOCUMENTATION.md)
