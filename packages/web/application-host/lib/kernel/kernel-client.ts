@@ -612,7 +612,10 @@ export class KernelClient {
       () => this.failAll(new KernelClientError({ code: "language-channel-failed", message: "Private language channel failed", retryable: false }), true));
     this.toolBridge = new ToolBridge(() => this.epoch, response => this.write(response),
       () => this.failAll(new KernelClientError({ code: "mcp-channel-failed", message: "Private MCP channel failed", retryable: false }), true),
-      runId => { void this.languageBridge.releaseSource({ runId }).catch(() => undefined); for (const listener of this.mcpReleaseListeners) { try { listener(runId); } catch { this.mcpReleaseListeners.delete(listener); } } });
+      (runId, terminal) => { if (terminal) this.credentialBridge.unregister(runId); void this.languageBridge.releaseSource({ runId }).catch(() => undefined); for (const listener of this.mcpReleaseListeners) { try { listener(runId); } catch { this.mcpReleaseListeners.delete(listener); } } }, undefined,
+      { retain: (binding, model, selection) => this.credentialBridge.retainChildModel(binding, model, selection),
+        release: (runId, operationId) => this.credentialBridge.releaseChildModel(runId, operationId),
+        reconcile: children => this.credentialBridge.reconcileChildModels(children) });
     this.credentialBridge = new CredentialBridge(() => this.epoch,
       response => this.write(response),
       () => this.failAll(new KernelClientError({ code: "credential-channel-failed", message: "Private credential channel failed", retryable: false }), true));

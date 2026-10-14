@@ -1,4 +1,7 @@
 import { waitWithSignal } from '../cancellation.js';
+import { isDeepStrictEqual } from 'node:util';
+import type { ChildModelBinding, SourceMcpChildBinding, McpBinding, ExtensionToolBinding } from './protocol.generated.js';
+import { modelCredentialBindingIdentity } from './model-binding-lifetime.js';
 /** Private Host/kernel rendezvous. Secret replies bypass public RPC, event buses and histories. */
 import { ExistingHostCredentialOwner, CredentialOwnerError, type CredentialScope, type CredentialDispatch } from './credential-owner.js';
 export interface PrivateCredentialResponse {
@@ -7,7 +10,9 @@ export interface PrivateCredentialResponse {
   error?: { code: string; message: string };
 }
 interface Request { v: 1; kind: 'credential-request'; id: string; kernelEpoch: string; runId: string; bindingId?: string | null; scope: CredentialScope; dispatch?: CredentialDispatch | null }
-export type CredentialLifetime = { kind: 'run' } | { kind: 'operation'; operationId: string; assertLive?: () => Promise<void> };
+export type ChildModelHandoffSelection = { mcp: McpBinding | null; extensions: ExtensionToolBinding[] };
+export type CredentialLifetime = { kind: 'run' } | { kind: 'operation'; operationId: string; assertLive?: () => Promise<void> }
+  | { kind: 'child-operation'; binding: SourceMcpChildBinding; selection: ChildModelHandoffSelection };
 interface OwnerEntry { lifetime: CredentialLifetime; runId: string; owner: ExistingHostCredentialOwner; scope: CredentialScope; epoch: string; release: () => void; abort: AbortController; active: Set<string> }
 const record = (value: unknown): value is Record<string, unknown> => Boolean(value && typeof value === 'object' && !Array.isArray(value));
 const scopeValid = (value: unknown): value is CredentialScope => record(value)
@@ -24,7 +29,9 @@ export class CredentialBridge {
   async register(runId: string, owner: ExistingHostCredentialOwner, signal?: AbortSignal, bindingId?: string, lifetime: CredentialLifetime = { kind: 'run' }): Promise<CredentialScope> {
     const key = ownerKey(runId, bindingId);
     const epoch = this.currentEpoch();
-    if (!epoch || !runId || bindingId === '' || (lifetime.kind === 'operation' && (!lifetime.operationId || !bindingId)) || this.#owners.has(key)) throw new CredentialOwnerError('credential-owner-registration-invalid');
+    if (!epoch || !runId || bindingId === '' || (lifetime.kind === 'operation' && (!lifetime.operationId || !bindingId))
+      || (lifetime.kind === 'child-operation' && (!bindingId || !lifetime.binding.operationId || lifetime.binding.parentRunId !== runId))
+      || this.#owners.has(key)) throw new CredentialOwnerError('credential-owner-registration-invalid');
     const release = owner.retain();
     try {
       const scope = await waitWithSignal(owner.scope(), signal);
@@ -34,13 +41,55 @@ export class CredentialBridge {
       return { ...scope };
     } catch (error) { release(); throw error; }
   }
-  findOwner(identity: string, scope: CredentialScope): ExistingHostCredentialOwner | undefined {
+  findOwner(identity: string, scope: CredentialScope, runId?: string): ExistingHostCredentialOwner | undefined {
     for (const entry of this.#owners.values()) {
-      if (entry.epoch !== this.currentEpoch()) continue;
+      if (entry.epoch !== this.currentEpoch() || (runId !== undefined && entry.runId !== runId)) continue;
       if (entry.owner.bindingIdentity === identity && same(entry.scope, scope)) return entry.owner.fork();
-      const dependency = entry.owner.findRetained(identity, scope); if (dependency) return dependency;
+      const dependency = entry.owner.findRetained(identity, scope);
+      if (dependency) {
+        // Child admission inherits the complete frozen dispatch catalog. Retain its
+        // original selection graph as well as the chosen preset for nested dispatch.
+        if (runId !== undefined) dependency.retainDependency(entry.owner);
+        return dependency;
+      }
     }
     return undefined;
+  }
+  /** ACK-before-admission handoff; the parent's terminal release cannot retire this child duty. */
+  async retainChildModel(binding: SourceMcpChildBinding, model: ChildModelBinding, selection: ChildModelHandoffSelection): Promise<boolean> {
+    if (!model.credential_scope) return true;
+    if (!scopeValid(model.credential_scope)) return false;
+    const identity = modelCredentialBindingIdentity(model.configuration);
+    const bindingId = `child:model:${binding.operationId}`;
+    const key = ownerKey(binding.parentRunId, bindingId);
+    const matches = () => {
+      const entry = this.#owners.get(key);
+      return Boolean(entry && entry.epoch === this.currentEpoch() && entry.lifetime.kind === 'child-operation'
+        && isDeepStrictEqual(entry.lifetime.binding, binding) && isDeepStrictEqual(entry.lifetime.selection, selection)
+        && entry.owner.bindingIdentity === identity
+        && same(entry.scope, model.credential_scope!));
+    };
+    if (this.#owners.has(key)) return matches();
+    const owner = this.findOwner(identity, model.credential_scope, binding.parentRunId);
+    if (!owner) return false;
+    try {
+      await this.register(binding.parentRunId, owner, undefined, bindingId,
+        { kind: 'child-operation', binding: structuredClone(binding), selection: structuredClone(selection) });
+      return true;
+    } catch (error) { if (matches()) return true; throw error; }
+    finally { owner.release(); }
+  }
+  releaseChildModel(parentRunId: string, operationId: string): void {
+    const bindingId = `child:model:${operationId}`;
+    if (this.#owners.get(ownerKey(parentRunId, bindingId))?.lifetime.kind === 'child-operation') this.unregister(parentRunId, bindingId);
+  }
+  reconcileChildModels(children: readonly { operation_id: string; report: unknown }[]): void {
+    const facts = new Map(children.map(child => [child.operation_id, child]));
+    for (const entry of this.#owners.values()) {
+      if (entry.lifetime.kind !== 'child-operation') continue;
+      const binding = entry.lifetime.binding, child = facts.get(binding.operationId);
+      if (child?.report || (!child && entry.epoch !== this.currentEpoch())) this.releaseChildModel(binding.parentRunId, binding.operationId);
+    }
   }
   async retainQueuedModel(runId: string, owner: ExistingHostCredentialOwner): Promise<void> {
     const identity = owner.bindingIdentity;

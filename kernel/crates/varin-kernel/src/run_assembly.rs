@@ -588,8 +588,6 @@ impl RunAssembly {
         Ok(PreparedLaunch::Start(start))
     }
     pub fn observe_completion(&self, handle: RunHandle) {
-        let responses = self.responses.clone();
-        let epoch = self.epoch.clone();
         let run_id = handle.run_id.clone();
         let catalog = self.runtime.catalog();
         let models = self.models.clone();
@@ -606,9 +604,6 @@ impl RunAssembly {
                 models.release(&run_id);
                 tools.release(&run_id);
                 policy.release(&run_id);
-                let _ = responses.send(
-                    json!({"v":1,"kind":"host-tool-owner-release","kernelEpoch":epoch,"runId":run_id}),
-                );
             }
         });
     }

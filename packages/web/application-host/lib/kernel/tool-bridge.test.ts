@@ -27,7 +27,7 @@ const call: HostToolCall = {
   schemaVersion: '1',
   arguments: {},
 };
-function fixture() {
+function fixture(childModels?: ConstructorParameters<typeof ToolBridge>[5]) {
   let epoch: string | null = 'epoch';
   const frames: PrivateToolFrame[] = [],
     released: string[] = [],
@@ -54,6 +54,7 @@ function fixture() {
     },
     () => {},
     error => { childReleaseErrors.push(error); },
+    childModels,
   );
   const lease = (
     identity: string,
@@ -401,6 +402,7 @@ it('keeps accepted child owners through parent completion and channel reset, the
       executionOwner: { kind: 'kernel' },
       executionEpoch: 7,
       mcpBinding: null,
+      modelBinding: null,
       extensionBindings: [original.extensionBinding],
     });
   }
@@ -491,8 +493,8 @@ function deferred<T>() {
   const promise = new Promise<T>((yes, no) => { resolve = yes; reject = no; });
   return { promise, resolve, reject };
 }
-function childFixture(managed = true) {
-  const f = fixture();
+function childFixture(managed = true, childModels?: ConstructorParameters<typeof ToolBridge>[5]) {
+  const f = fixture(childModels);
   const binding: McpBinding = {
     reference: 'original-mcp', generation: 4,
     provenance: { servers: { original: {
@@ -513,7 +515,7 @@ function childFixture(managed = true) {
   const frame = (operationId = original.operationId, id = operationId) => ({
     v: 1, kind: 'host-tool-child-retain', id, kernelEpoch: 'epoch', parentRunId: 'run',
     childOperationId: operationId, executionOwner: original.executionOwner, executionEpoch: original.executionEpoch,
-    mcpBinding: structuredClone(binding), extensionBindings: [],
+    mcpBinding: structuredClone(binding), extensionBindings: [], modelBinding: null,
   });
   return { ...f, binding, lease, original, frame };
 }
@@ -714,4 +716,39 @@ it('cannot replace a child dependency with another valid owner after its origina
   expect(replacements).toBe(0); expect(f.released).toEqual([]);
   fail = false; await f.bridge.releaseChild('run', 'child-operation');
   expect(f.released).toEqual(['original-mcp']); f.bridge.close();
+});
+
+it('mixed child failure releases only its acquired model handoff and cannot erase a different original selection', async () => {
+  const { CredentialBridge } = await import('./credential-bridge.js');
+  const { ExistingHostCredentialOwner } = await import('./credential-owner.js');
+  const { modelCredentialBindingIdentity } = await import('./model-binding-lifetime.js');
+  const model = { configuration: { providerId: 'model', providerFamily: 'openai-completions', model: 'original',
+    endpoint: 'https://model.invalid/chat/completions', allowAnonymous: false, credentialEnvironment: null,
+    maxOutputTokens: null, configurationGeneration: 1 },
+    credential_scope: { reference: 'model', authority: 'original', account: 'account', generation: 1 } };
+  let disposed = 0;
+  const credentials = new CredentialBridge(() => 'epoch', async () => {}, () => {});
+  const identity = modelCredentialBindingIdentity(model.configuration);
+  const owner = new ExistingHostCredentialOwner({ providerId: 'model', providerFamily: 'openai-completions',
+    endpoint: model.configuration.endpoint, bindingIdentity: identity, currentScope: async () => model.credential_scope,
+    runtime: { getAuth: async () => undefined }, release: () => { disposed++; } });
+  await credentials.register('run', owner); owner.release();
+  const f = childFixture(true, { retain: (binding, model, selection) => credentials.retainChildModel(binding, model, selection),
+    release: (run, operation) => credentials.releaseChildModel(run, operation), reconcile: children => credentials.reconcileChildModels(children) });
+  f.lease.retainChild = async () => { throw new Error('MCP original retain failed'); };
+  f.bridge.register('run', f.lease);
+  try {
+    f.bridge.consume({ ...f.frame('pure', 'pure-accepted'), mcpBinding: null, modelBinding: model }); await tick();
+    expect(f.frames.at(-1)).toMatchObject({ id: 'pure-accepted', ok: true });
+    f.bridge.consume({ ...f.frame('pure', 'changed-selection'), modelBinding: model }); await tick();
+    expect(f.frames.at(-1)).toMatchObject({ id: 'changed-selection', ok: false });
+    f.bridge.consume({ ...f.frame('mixed', 'mixed-failure'), modelBinding: model }); await tick();
+    expect(f.frames.at(-1)).toMatchObject({ id: 'mixed-failure', ok: false });
+    credentials.unregister('run');
+    expect(disposed).toBe(0);
+    await f.bridge.releaseChild('run', 'pure');
+    expect(disposed).toBe(1);
+    await f.bridge.releaseChild('run', 'mixed');
+    expect(disposed).toBe(1);
+  } finally { f.bridge.close(); credentials.close(); }
 });

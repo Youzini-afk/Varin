@@ -13,6 +13,7 @@ import type {
   McpBinding,
   HostToolErrorMarker,
   SourceMcpChildBinding,
+  ChildModelBinding,
 } from './protocol.generated.js';
 export type HostToolSchema = LaunchTool;
 export interface HostToolBinding {
@@ -143,6 +144,8 @@ interface ChildHolder {
   binding: SourceMcpChildBinding;
   mcp: McpBinding | null;
   extensions: ExtensionToolBinding[];
+  model: ChildModelBinding | null;
+  modelRetained: boolean;
   owners: { key: string; entry: OwnerEntry }[];
   requests: Set<string>;
   accepted: boolean;
@@ -221,9 +224,15 @@ export class ToolBridge {
     private readonly currentEpoch: () => string | null,
     private readonly send: (response: PrivateToolFrame) => Promise<void>,
     private readonly transportFailed: () => void,
-    private readonly released: (runId: string) => void = () => {},
+    private readonly released: (runId: string, terminal: boolean) => void = () => {},
     private readonly childReleaseFailed: (error: unknown) => void = () => {
       console.error('host_tool_child_release_failed');
+    },
+    private readonly childModels?: {
+      retain(binding: SourceMcpChildBinding, model: ChildModelBinding,
+        selection: { mcp: McpBinding | null; extensions: ExtensionToolBinding[] }): Promise<boolean>;
+      release(parentRunId: string, operationId: string): void;
+      reconcile(children: readonly { operation_id: string; report: unknown }[]): void;
     },
   ) {}
   register(
@@ -396,8 +405,8 @@ export class ToolBridge {
       : undefined;
   }
   /** Run termination withdraws admission. Original callbacks and unacknowledged facts retain leases. */
-  unregister(runId: string): void {
-    this.released(runId);
+  unregister(runId: string, terminal = false): void {
+    this.released(runId, terminal);
     this.#selected.delete(runId);
     for (const [key, entry] of this.#owners.get(runId) ?? []) {
       entry.closing = true;
@@ -442,6 +451,10 @@ export class ToolBridge {
     holder.releaseRequested = true;
     if (holder.releasing) return holder.releasing;
     const detach = () => {
+      if (holder.modelRetained) {
+        holder.modelRetained = false;
+        this.childModels?.release(holder.binding.parentRunId, holder.binding.operationId);
+      }
       for (const { key, entry } of holder.owners) {
         if (entry.childHolders.get(holder.binding.operationId) === holder)
           entry.childHolders.delete(holder.binding.operationId);
@@ -476,6 +489,7 @@ export class ToolBridge {
     return pending;
   }
   releaseChild(parentRunId: string, childOperationId: string): Promise<void> {
+    this.childModels?.release(parentRunId, childOperationId);
     const holders = new Set<ChildHolder>();
     for (const entry of this.#owners.get(parentRunId)?.values() ?? []) {
       const holder = entry.childHolders.get(childOperationId);
@@ -488,6 +502,7 @@ export class ToolBridge {
   reconcileChildren(
     children: readonly { operation_id: string; report: unknown }[],
   ): void {
+    this.childModels?.reconcile(children);
     const facts = new Map(children.map((child) => [child.operation_id, child]));
     const releasing = new Set<ChildHolder>();
     for (const entries of this.#owners.values())
@@ -506,6 +521,7 @@ export class ToolBridge {
     binding: SourceMcpChildBinding,
     mcp: McpBinding | null,
     extensions: ExtensionToolBinding[],
+    model: ChildModelBinding | null,
   ): Promise<boolean> {
     const epoch = this.currentEpoch();
     if (!epoch) return false;
@@ -562,28 +578,38 @@ export class ToolBridge {
       if (live.size !== 1 || existing.epoch !== epoch
         || previous.some(value => value !== existing) || existing.releaseRequested
         || !isDeepStrictEqual(existing.binding, binding)
+        || !isDeepStrictEqual(existing.model, model)
         || !isDeepStrictEqual(existing.mcp, mcp)
         || !isDeepStrictEqual(existing.extensions, extensions)) return false;
       existing.requests.add(requestId);
       return existing.retained ?? existing.accepted;
     }
+    // A model-only child has no tool holder. Its operation-lifetime registration lives
+    // in the existing credential bridge and uses the same release/reconcile controls.
+    if (!selected.length) return model ? await this.childModels?.retain(binding, model, { mcp, extensions }) ?? false : true;
     const holder: ChildHolder = {
       epoch, binding: structuredClone(binding), mcp: structuredClone(mcp),
-      extensions: structuredClone(extensions), owners: selected, requests: new Set([requestId]),
+      extensions: structuredClone(extensions), model: structuredClone(model), modelRetained: false,
+      owners: selected, requests: new Set([requestId]),
       accepted: false, releaseRequested: false, handles: new Set(),
     };
     // Pin every exact selected lease before any asynchronous definition retention.
     for (const { entry } of selected) entry.childHolders.set(binding.operationId, holder);
-    if (!mcpOwner?.lease.retainChild || !mcp) {
+    if ((!mcpOwner?.lease.retainChild || !mcp) && !model) {
       holder.accepted = true;
       return true;
     }
-    const lease = mcpOwner.lease;
+    const lease = mcpOwner?.lease;
     holder.acquiring = Promise.resolve().then(async () => {
-      const handle = await lease.retainChild!(structuredClone(binding), structuredClone(mcp));
-      if (!handle || typeof handle.release !== 'function')
-        throw new Error('host_tool_child_retention_invalid');
-      holder.handles.add(handle);
+      if (model) {
+        if (!(await this.childModels?.retain(binding, model, { mcp, extensions }))) throw new Error('child_model_original_owner_unavailable');
+        holder.modelRetained = true;
+      }
+      if (lease?.retainChild && mcp) {
+        const handle = await lease.retainChild(structuredClone(binding), structuredClone(mcp));
+        if (!handle || typeof handle.release !== 'function') throw new Error('host_tool_child_retention_invalid');
+        holder.handles.add(handle);
+      }
     });
     holder.retained = (async () => {
       let failure: unknown, valid = false;
@@ -591,7 +617,7 @@ export class ToolBridge {
         await holder.acquiring;
         valid = !holder.releaseRequested && epoch === this.currentEpoch()
           && selected.every(({ entry }) => !entry.closing)
-          && mcp!.tools.every(tool => mcpOwner!.lease.available(tool))
+          && (!mcp || mcp.tools.every(tool => mcpOwner!.lease.available(tool)))
           && extensions.every(extension => selected.some(({ entry }) =>
             isDeepStrictEqual(entry.lease.extensionBinding, extension) && entry.lease.available(extension.tool)));
       } catch (error) { failure = error; }
@@ -657,6 +683,8 @@ export class ToolBridge {
         !Array.isArray(v.extensionBindings) ||
         !v.extensionBindings.every(record) ||
         (v.mcpBinding !== null && !record(v.mcpBinding)) ||
+        (v.modelBinding !== null && (!record(v.modelBinding) || !record(v.modelBinding.configuration)
+          || (v.modelBinding.credential_scope !== null && !record(v.modelBinding.credential_scope)))) ||
         !exact(v, [
           'v',
           'kind',
@@ -668,6 +696,7 @@ export class ToolBridge {
           'executionEpoch',
           'mcpBinding',
           'extensionBindings',
+          'modelBinding',
         ])
       )
         return true;
@@ -679,6 +708,7 @@ export class ToolBridge {
           executionEpoch: v.executionEpoch as number },
         structuredClone(v.mcpBinding) as McpBinding | null,
         structuredClone(v.extensionBindings) as unknown as ExtensionToolBinding[],
+        structuredClone(v.modelBinding) as ChildModelBinding | null,
       ).then(
         ok => this.#reply(request, ok
           ? { ok }
@@ -717,7 +747,7 @@ export class ToolBridge {
     }
     if (v.kind === 'host-tool-owner-release') {
       if (text(v.runId) && exact(v, ['v', 'kind', 'kernelEpoch', 'runId']))
-        this.unregister(v.runId);
+        this.unregister(v.runId, true);
       return true;
     }
     if (v.kind === 'host-tool-binding-deactivate') {

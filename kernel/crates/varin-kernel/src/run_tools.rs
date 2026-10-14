@@ -416,10 +416,12 @@ impl RunTools {
             return Ok(true);
         }
     }
+    /// All callers have observed terminal Run state, including queued Runs without a worker.
     pub fn release(&self, run: &str) {
         if let Ok(mut slots) = self.slots.lock() {
             slots.remove(run);
         }
+        self.bridge.release_owner(run);
     }
 }
 struct ScopedTools {
