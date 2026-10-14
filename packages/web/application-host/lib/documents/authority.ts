@@ -34,7 +34,8 @@ import {
   isDocumentAuthorityError,
 } from './errors.js';
 import { encodeDocumentText, inspectDocumentBytes, revisionFromBytes } from './inspect.js';
-import { createWorkspaceMutationAuthority } from './mutation-authority.js';
+import { createWorkspaceMutationAuthority, type CaptureToken } from './mutation-authority.js';
+import { createCaptureInventory } from './capture-inventory.js';
 import {
   createRecoveryJournalStore,
   type RecoveryJournalDeleteRequest,
@@ -170,11 +171,14 @@ interface WatcherRecord {
   listeners: Set<(event: WatchEvent) => void>;
   controller: WorkspaceWatcher | null;
   ready: Promise<WorkspaceWatcher | null> | null;
+  inventory: ReturnType<typeof createCaptureInventory>;
+  inventoryRetained: boolean;
 }
 
 interface CaptureWatch {
   subscription: WatchSubscription;
   controller: WorkspaceWatcher;
+  inventory?: { record: WatcherRecord; candidate: Awaited<ReturnType<ReturnType<typeof createCaptureInventory>["prepare"]>> };
 }
 
 interface DirtySurfaceRequest {
@@ -1334,7 +1338,8 @@ export const createDocumentAuthority = (options: DocumentAuthorityOptions) => {
     }
     let record: WatcherRecord | undefined = watchers.get(workspaceId);
     if (!record) {
-      const newRecord: WatcherRecord = { listeners: new Set(), controller: null, ready: null };
+      const newRecord: WatcherRecord = { listeners: new Set(), controller: null, ready: null,
+        inventory: createCaptureInventory(), inventoryRetained: false };
       watchers.set(workspaceId, newRecord);
       newRecord.ready = Promise.all([loadWorkspace(workspaceId), mutations.inspect(workspaceId)]).then(async ([workspace]) => {
         const controller = createWorkspaceWatcher({
@@ -1344,6 +1349,7 @@ export const createDocumentAuthority = (options: DocumentAuthorityOptions) => {
           fsPromises,
           pathModule,
           ...(overflowLimit !== undefined ? { overflowLimit } : {}),
+          onNamespaceInvalidated: relative => newRecord.inventory.invalidate(relative),
           onEvent: (event) => {
             void mutations.observeWatchEvent(workspaceId, event).catch(() => undefined);
             for (const current of newRecord.listeners) current(event);
@@ -1371,7 +1377,7 @@ export const createDocumentAuthority = (options: DocumentAuthorityOptions) => {
       settle: () => Promise.resolve(rec.ready).then((controller) => controller?.settle()),
       close() {
         rec.listeners.delete(listener);
-        if (rec.listeners.size === 0) {
+        if (rec.listeners.size === 0 && !rec.inventoryRetained) {
           rec.controller?.close();
           if (watchers.get(workspaceId) === rec) watchers.delete(workspaceId);
         }
@@ -1407,6 +1413,42 @@ export const createDocumentAuthority = (options: DocumentAuthorityOptions) => {
     }
   };
 
+  /** The existing root observer owns only reusable namespace metadata. Bytes are
+   * always captured through the caller's freshly admitted Rust resource owner. */
+  const captureInventory = (capture: CaptureToken, scan: (scopes?: readonly string[]) => Promise<string[]>, signal?: AbortSignal) => {
+    const tracked = captureWatches.get(capture.captureId);
+    const record = watchers.get(capture.workspaceId);
+    if (!tracked || !record || record.controller !== tracked.controller) {
+      throw new DocumentAuthorityError('Original capture observation is unavailable', { code: 'failed', statusCode: 409 });
+    }
+    const identity = () => ({ epoch: capture.epoch, ...tracked.controller.position,
+      complete: tracked.controller.connected && tracked.controller.coverage.namespace === 'complete' });
+    const current = (): void => {
+      signal?.throwIfAborted();
+      if (captureWatches.get(capture.captureId) !== tracked || watchers.get(capture.workspaceId) !== record
+        || record.controller !== tracked.controller) throw new Error('Original capture observation changed');
+    };
+    return {
+      read: async (): Promise<readonly string[]> => {
+        current();
+        if (tracked.inventory) throw new Error('Capture inventory was already prepared');
+        const candidate = await waitWithSignal(record.inventory.prepare({ ...identity(), scan }), signal);
+        current();
+        tracked.inventory = { record, candidate };
+        return candidate.paths;
+      },
+      verify: async (): Promise<void> => {
+        current();
+        const candidate = tracked.inventory?.candidate;
+        if (!candidate) throw new Error('Capture inventory was not prepared');
+        await waitWithSignal(tracked.controller.settle(), signal);
+        current();
+        await waitWithSignal(record.inventory.verify(candidate, identity(), scan), signal);
+        current();
+      },
+    };
+  };
+
   const discardCapture = (capture: unknown): void => {
     const captureId = (capture as { captureId?: string })?.captureId;
     const tracked = captureId ? captureWatches.get(captureId) : undefined;
@@ -1420,7 +1462,19 @@ export const createDocumentAuthority = (options: DocumentAuthorityOptions) => {
     try {
       signal?.throwIfAborted();
       await waitWithSignal(Promise.resolve(tracked?.controller.settle()), signal);
-      return await waitWithSignal(mutations.completeCapture(capture as never), signal);
+      const completed = await waitWithSignal(mutations.completeCapture(capture as never), signal);
+      if (completed.stable && tracked?.inventory) {
+        const { record, candidate } = tracked.inventory;
+        if (disposed || watchers.get(completed.workspaceId) !== record || record.controller !== tracked.controller) {
+          throw new Error('Capture inventory owner changed before completion');
+        }
+        const complete = tracked.controller.connected && tracked.controller.coverage.namespace === 'complete';
+        record.inventory.commit(candidate, { epoch: (capture as CaptureToken).epoch, ...tracked.controller.position, complete });
+        // Lazy lifetime of this Documents root. A reset invalidates the metadata;
+        // Host disposal closes the retained original watch. No branch or file body is pinned.
+        record.inventoryRetained = complete;
+      }
+      return completed;
     } finally {
       discardCapture(capture);
     }
@@ -2521,6 +2575,7 @@ export const createDocumentAuthority = (options: DocumentAuthorityOptions) => {
     inspectMutation: mutations.inspect,
     subscribeMutationState: mutations.subscribe,
     beginCapture,
+    captureInventory,
     completeCapture,
     discardCapture,
     dispose,

@@ -1,11 +1,11 @@
-/** One private process multiplexes Windows directory subscriptions. It owns only
+/** One private process multiplexes native directory subscriptions. It owns only
  * OS notification handles; Documents still owns revisions and capture decisions. */
 import { EventEmitter } from 'node:events';
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { createInterface } from 'node:readline';
 import { prepareKernelCommand } from '../kernel/kernel-launch.js';
-import type { NativeWatcher } from './watch.js';
+import type { NativeWatcher, WatchCoverage } from './watch.js';
 
 function deferred<T>() {
   let resolve!: (value: T) => void, reject!: (reason: Error) => void;
@@ -14,7 +14,15 @@ function deferred<T>() {
   return { promise, resolve, reject };
 }
 const asError = (error: unknown) => error instanceof Error ? error : new Error(String(error));
-type Frame = { v: number; kind: string; id?: string; request?: string; message?: string; events?: Array<{ kind: string; path?: string }> };
+type Frame = { v: number; kind: string; id?: string; request?: string; message?: string; reason?: string; coverage?: WatchCoverage; events?: Array<{ kind: string; path?: string; scope?: 'exact' | 'subtree'; reason?: string }> };
+const unknownCoverage: WatchCoverage = { namespace: 'unknown', content: 'unknown' };
+function readCoverage(value: Frame['coverage']): WatchCoverage {
+  if (value === undefined) return unknownCoverage;
+  if ((value.namespace !== 'complete' && value.namespace !== 'unknown') || value.content !== 'unknown') {
+    throw new Error('Invalid directory observation coverage');
+  }
+  return { namespace: value.namespace, content: 'unknown', ...(typeof value.reason === 'string' ? { reason: value.reason } : {}) };
+}
 
 class DirectoryWatch extends EventEmitter implements NativeWatcher {
   readonly id = randomUUID();
@@ -23,24 +31,27 @@ class DirectoryWatch extends EventEmitter implements NativeWatcher {
   private readonly flushes = new Map<string, ReturnType<typeof deferred<void>>>();
   private closed = false;
   private attached = false;
+  private observedCoverage: WatchCoverage = unknownCoverage;
+  get coverage() { return this.closed ? unknownCoverage : this.observedCoverage; }
   get connected() { return this.attached && !this.closed; }
   get pending() { return !this.attached || this.flushes.size > 0; }
   constructor(readonly manager: WatchProcess, readonly path: string,
     readonly changed: (event: string, filename: string | null) => void) { super(); }
   receive(frame: Frame) {
     if (this.closed) return;
-    if (frame.kind === 'ready') { this.attached = true; this.opening.resolve(); }
+    if (frame.kind === 'ready') { this.observedCoverage = readCoverage(frame.coverage); this.attached = true; this.opening.resolve(); }
     else if (frame.kind === 'events') {
       if (!this.attached || !Array.isArray(frame.events)) throw new Error('Directory notification arrived without its subscription');
       for (const event of frame.events) {
-        if (event.kind === 'reset') this.changed('change', null);
+        if (event.kind === 'reset') { this.observedCoverage = unknownCoverage; this.changed('change', null); }
         else if (['change', 'rename', 'content'].includes(event.kind) && typeof event.path === 'string') this.changed(event.kind, event.path);
-        else throw new Error('Invalid Windows directory notification');
+        else throw new Error('Invalid native directory notification');
       }
     } else if (frame.kind === 'flushed' && typeof frame.request === 'string') {
+      this.observedCoverage = readCoverage(frame.coverage);
       const pending = this.flushes.get(frame.request);
       this.flushes.delete(frame.request); pending?.resolve();
-    } else if (frame.kind === 'error') this.fail(new Error(frame.message ?? 'Directory observation failed'));
+    } else if (frame.kind === 'error') this.fail(Object.assign(new Error(frame.message ?? 'Directory observation failed'), { reason: frame.reason }));
     else if (frame.kind === 'closed') this.fail(new Error('Directory subscription ended'));
     else throw new Error('Invalid directory observer response');
     this.manager.updateReference();
@@ -145,7 +156,7 @@ class WatchProcess {
   }
 }
 let shared: WatchProcess | undefined;
-export function watchWindowsDirectory(path: string, changed: (event: string, filename: string | null) => void): NativeWatcher {
+export function watchNativeDirectory(path: string, changed: (event: string, filename: string | null) => void): NativeWatcher {
   shared ??= new WatchProcess();
   return shared.watch(path, changed);
 }

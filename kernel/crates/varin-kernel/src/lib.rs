@@ -11,6 +11,8 @@ mod continuation_wake;
 mod credential_bridge;
 #[cfg(windows)]
 mod directory_watch;
+#[cfg(target_os = "linux")]
+mod directory_watch_linux;
 mod error;
 mod family_tools;
 mod file_observation;
@@ -42,6 +44,10 @@ mod tools;
 mod transport;
 
 pub fn run() -> Result<(), Box<dyn std::error::Error>> {
+    #[cfg(target_os = "linux")]
+    if std::env::args().any(|arg| arg == "--watch-directories") {
+        return directory_watch_linux::run();
+    }
     #[cfg(windows)]
     if std::env::args().any(|arg| arg == "--watch-directories") {
         return directory_watch::run();
