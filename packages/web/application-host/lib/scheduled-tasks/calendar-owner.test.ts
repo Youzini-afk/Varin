@@ -4,14 +4,14 @@ import os from 'node:os';
 import path from 'node:path';
 import type { CalendarDefinition, CalendarOccurrence, CalendarPreparation, CalendarProject, CalendarSyncParams, CalendarPending, AgentRuntimeStreamEvent } from '@varin/protocol';
 import type { AgentRuntimeClient } from '../kernel/agent-runtime-client.js';
-import { KernelClientError } from '../kernel/kernel-client.js';
+import { KernelClientError } from '../kernel/kernel-error.js';
 import { KERNEL_PROTOCOL_VERSION } from '../kernel/protocol.generated.js';
 import { CalendarOwner } from './calendar-owner.js';
 import { createScheduledTasksRuntime } from './runtime.js';
 import { createScheduledTaskService, readScheduledProjects } from './service.js';
 import { createProjectConfigRuntime } from '../projects/project-config.js';
 
-const target: CalendarDefinition['target'] = { kind: 'new_work', model: { providerId: 'fixture', modelId: 'model' }, sourceMode: 'fixed_branch', goal: null };
+const target: CalendarDefinition['target'] = { kind: 'new_work', source: { kind: 'project' }, model: { providerId: 'fixture', modelId: 'model' }, sourceMode: 'fixed_branch', goal: null };
 const definition: CalendarDefinition = { id: 'calendar:original', project_id: 'project', task_id: 'task', asset_revision: 'asset', asset_kind: 'gui', revision: 1, generation: 1,
   name: 'Original calendar', enabled: true, deleted: false, timezone: 'UTC', rule: { kind: 'once', date: '2020-01-01', time: '09:00' }, missed_policy: 'coalesce_once', target,
   synchronized: true, once_acceptance: null, activation_hold: null, next_at_ms: null, calculation_pending: false, calculation_failure: null };

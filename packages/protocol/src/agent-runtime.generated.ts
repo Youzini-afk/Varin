@@ -516,8 +516,12 @@ export type CalendarMissedPolicy = 'skip' | 'coalesce_once';
 
 export interface CalendarModel { providerId: string; modelId: string; thinkingLevel?: string; temperature?: number }
 
+export type CalendarSource =
+  | { kind: 'project' }
+  | { kind: 'workspace'; resourceOwner: SourceResourceOwner; workspaceId: string };
+
 export type CalendarTarget =
-  | { kind: 'new_work'; model: CalendarModel; sourceMode: SourceMode; goal: { budget: GoalBudget | null } | null }
+  | { kind: 'new_work'; model: CalendarModel; source: CalendarSource; sourceMode: SourceMode; goal: { budget: GoalBudget | null } | null }
   | { kind: 'existing_work'; threadId: string; branchId: string };
 
 export type CalendarOnceAcceptanceOwner = 'pi' | 'agent';
@@ -1391,7 +1395,7 @@ export interface ThreadSummary {
   observer_project_ids: Array<string | null>;
 }
 
-export type AgentRuntimeStreamEvent = {v: 37; kind: 'runtime-event'; kernelEpoch: string} & ({stream: 'durable'; cursor: number} | {stream: 'progress'; runId: string; streamId: string; sequence: number; event: unknown});
+export type AgentRuntimeStreamEvent = {v: 38; kind: 'runtime-event'; kernelEpoch: string} & ({stream: 'durable'; cursor: number} | {stream: 'progress'; runId: string; streamId: string; sequence: number; event: unknown});
 
 export type SourceMode = 'fixed_branch' | 'materialized' | 'live_root';
 

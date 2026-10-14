@@ -1,6 +1,7 @@
 import fsPromises from 'node:fs/promises';
 import type { ScheduledTaskRunReceipt } from '@varin/application-client';
 import path from 'node:path';
+import { parseSourceResourceOwner, type SourceDirectory } from '../kernel/thread-sources.js';
 import {
   deleteLoopFile,
   LoopRevisionConflictError,
@@ -68,6 +69,9 @@ export const createScheduledTaskService = (dependencies: ScheduledTaskServiceDep
     scheduledTasksRuntime,
   } = dependencies;
 
+  let sourceDirectory: SourceDirectory | undefined;
+  const bindSourceDirectory = (directory: SourceDirectory): void => { sourceDirectory = directory; };
+
   const listProjects = async (): Promise<ProjectRecord[]> => {
     return readScheduledProjects(readSettingsFromDisk, sanitizeProjects);
   };
@@ -79,6 +83,26 @@ export const createScheduledTaskService = (dependencies: ScheduledTaskServiceDep
     const project = projects.find((entry) => entry.id === normalized) || null;
     if (!project) throw new ScheduledTaskError('Project not found', 404);
     return project;
+  };
+
+  const listSources = async (projectID: unknown, signal?: AbortSignal) => {
+    await findProjectByID(projectID);
+    signal?.throwIfAborted();
+    if (!sourceDirectory) throw new ScheduledTaskError('Source directory is unavailable', 503);
+    return sourceDirectory.list(signal);
+  };
+
+  const resolveSource = async (projectID: unknown, value: unknown, signal?: AbortSignal) => {
+    await findProjectByID(projectID);
+    const request = asRecord(value);
+    if (!request || Object.keys(request).some(key => !['resourceOwner', 'path'].includes(key))
+      || !asNonEmptyString(request.path)) throw new ScheduledTaskError('A source resource owner and path are required', 400);
+    let resourceOwner: ReturnType<typeof parseSourceResourceOwner>;
+    try { resourceOwner = parseSourceResourceOwner(request.resourceOwner); }
+    catch { throw new ScheduledTaskError('Source resource owner is invalid', 400); }
+    signal?.throwIfAborted();
+    if (!sourceDirectory) throw new ScheduledTaskError('Source directory is unavailable', 503);
+    return sourceDirectory.resolve({ resourceOwner, path: request.path as string }, signal);
   };
 
   const resolveProjectID = async ({ projectId, directory }: {
@@ -319,6 +343,9 @@ export const createScheduledTaskService = (dependencies: ScheduledTaskServiceDep
   const globalStatus = async () => scheduledTasksRuntime.getStatus();
 
   return {
+    bindSourceDirectory,
+    listSources,
+    resolveSource,
     listProjects,
     resolveProjectID,
     list,

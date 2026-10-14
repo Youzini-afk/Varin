@@ -1475,6 +1475,7 @@ fn cold_calendar_skill_keeps_real_environment_proof_through_compaction_gc_and_re
                 thinking_level: None,
                 temperature: None,
             },
+            source: varin_runtime::catalog::calendar::Source::Project,
             source_mode: varin_runtime::SourceMode::FixedBranch,
             goal: None,
         },

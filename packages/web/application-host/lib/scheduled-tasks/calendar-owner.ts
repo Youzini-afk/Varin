@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import type { ScheduledTask } from '@varin/application-client';
 import type { CalendarOnceAcceptance, CalendarDefinitionInput, CalendarOccurrence, CalendarPreparation, CalendarRule } from '@varin/protocol';
 import type { AgentRuntimeClient } from '../kernel/agent-runtime-client.js';
-import { KernelClientError } from '../kernel/kernel-client.js';
+import { KernelClientError } from '../kernel/kernel-error.js';
 import { calculateCalendarSlots } from './recurrence.js';
 
 interface CalendarOwners {

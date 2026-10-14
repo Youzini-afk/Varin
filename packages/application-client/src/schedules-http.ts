@@ -25,6 +25,16 @@ export function createScheduledTasksHttpAPI(): ScheduledTasksAPI {
     return value as Awaited<ReturnType<ScheduledTasksAPI['list']>>;
   };
   return {
+    async listSources(project, signal) {
+      const value = await request<Awaited<ReturnType<ScheduledTasksAPI['listSources']>>>(`${base(project)}/sources`, 'GET', undefined, signal);
+      if (!Array.isArray(value.targets) || !Array.isArray(value.unavailable)) throw new Error('Invalid scheduled task source list');
+      return value;
+    },
+    async resolveSource(project, source, signal) {
+      const value = await request<Awaited<ReturnType<ScheduledTasksAPI['resolveSource']>>>(`${base(project)}/sources/resolve`, 'POST', source, signal);
+      if (!value.resourceOwner || typeof value.workspaceId !== 'string' || !value.workspaceId.trim() || typeof value.path !== 'string' || !value.path.trim()) throw new Error('Invalid scheduled task source registration');
+      return value;
+    },
     list: (project, signal) => tasks(request(base(project), 'GET', undefined, signal)),
     upsert: (project, task) => tasks(request(base(project), 'PUT', { task })),
     remove: (project, task) => tasks(request(base(project, task), 'DELETE')),

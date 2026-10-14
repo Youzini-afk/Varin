@@ -1846,6 +1846,12 @@ Disabled, invalid or previous-runtime-active definitions hold unconsumed work. D
 cancels unconsumed inputs, retaining delivered results; Run/tree stop cancels the accepted set while
 leaving future standing calendar slots intact. Native non-overlap reads real Run/Goal lifecycle.
 
+Catalog 72 / private wire 38 require an explicit Source on new-work calendar targets. Project selects
+the project's local source; workspace selects its exact resource owner and workspace identity. These
+location references grant no access: Host ThreadSource admission still owns actual source preparation.
+The frozen occurrence selection survives definition replacement and reopening. Older internal formats
+are rejected; only the external asset parser defaults an omitted selection to project.
+
 Cold preparation resolves the registered model, actual source and main project context outside the
 control transaction. Atomic admission commits their original Run, Environment input, optional Goal
 and explicit skill activation. Existing work keeps its admitted scope and exact child predecessor /

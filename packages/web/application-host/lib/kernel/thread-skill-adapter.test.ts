@@ -178,7 +178,7 @@ it('cold calendar admission preserves explicit skill input and transfers a succe
   const source: ThreadSource = { mode: 'fixed_branch', resourceOwner: { kind: 'local' as const }, workspaceId: 'calendar-project', executionWorkspaceId: 'calendar-execution', branchId: 'calendar-source', revision: 1, tools: [] };
   vi.spyOn(f.adapter, 'prepareSource').mockResolvedValue({ source, path: f.root } as Awaited<ReturnType<ThreadAdapter['prepareSource']>>);
   const occurrence = { id: 'calendar:occurrence', revision: 3, thread_id: identity.threadId, branch_id: identity.branchId };
-  const work = { occurrence, definition: { target: { kind: 'new_work', model, sourceMode: 'fixed_branch', goal: null } }, instruction: rawText, owner_epoch: 2 } as import('./protocol.generated.js').CalendarPreparation;
+  const work = { occurrence, definition: { project_id: 'selected-project', target: { kind: 'new_work', source: { kind: 'workspace', resourceOwner: { kind: 'local' }, workspaceId: 'calendar-project' }, model, sourceMode: 'fixed_branch', goal: null } }, instruction: rawText, owner_epoch: 2 } as import('./protocol.generated.js').CalendarPreparation;
   const preparation = new AbortController();
   await f.adapter.prepareCalendarWork(work, 'calendar-project', preparation.signal);
   preparation.abort(); // The occurrence leaves the pending preparation scan after admission.

@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import os from 'os';
 import path from 'path';
 import { mkdtemp, rm, readFile, writeFile } from 'fs/promises';
-import { createProjectConfigRuntime } from './project-config.js';
+import { createProjectConfigRuntime, normalizeCalendarTarget } from './project-config.js';
 import type { ScheduledTask } from './project-config.js';
 
 const requireTask = (task: ScheduledTask | undefined): ScheduledTask => {
@@ -399,5 +399,38 @@ describe('project-config runtime', () => {
     } finally {
       await cleanup();
     }
+  });
+});
+
+describe('Agent calendar source assets', () => {
+  const newWork = { kind: 'new_work', model: { providerId: 'provider', modelId: 'model' }, sourceMode: 'fixed_branch', goal: null };
+
+  it('normalizes only an omitted external source to the owning project and persists explicit registration identity', async () => {
+    expect(normalizeCalendarTarget(newWork)).toEqual({ ...newWork, source: { kind: 'project' } });
+    const { runtime, cleanup } = await createRuntime();
+    try {
+      const source = { kind: 'workspace', resourceOwner: { kind: 'managed_host', hostId: 'host-original', connectionId: 'connection-original', endpointIdentity: 'endpoint-original' }, workspaceId: 'registered:opaque-source' };
+      await runtime.upsertScheduledTask('project-test', { name: 'Remote calendar', runtime: 'agent', enabled: false,
+        schedule: { kind: 'daily', time: '09:00', timezone: 'UTC' }, execution: { prompt: 'Review saved source' }, target: { ...newWork, source } });
+      const saved = requireTask((await runtime.listScheduledTasks('project-test'))[0]);
+      expect(saved.target).toEqual({ ...newWork, source });
+      const raw = JSON.parse(await readFile(runtime.resolveProjectConfigPath('project-test'), 'utf8'));
+      expect(raw.scheduledTasks[0].target.source).toEqual(source);
+      delete raw.scheduledTasks[0].target.source;
+      await writeFile(runtime.resolveProjectConfigPath('project-test'), JSON.stringify(raw));
+      expect(requireTask((await runtime.listScheduledTasks('project-test'))[0]).target).toEqual({ ...newWork, source: { kind: 'project' } });
+    } finally { await cleanup(); }
+  });
+
+  it('rejects malformed, credential-bearing, path-only and existing-work source overrides', () => {
+    for (const source of [null, {}, { kind: 'project', workspaceId: 'extra' },
+      { kind: 'workspace', path: '/not-a-registration', resourceOwner: { kind: 'local' } },
+      { kind: 'workspace', workspaceId: ' ', resourceOwner: { kind: 'local' } },
+      { kind: 'workspace', workspaceId: 'registered', resourceOwner: { kind: 'local', token: 'not-allowed' } },
+      { kind: 'workspace', workspaceId: 'registered', resourceOwner: { kind: 'managed_host', hostId: 'host', connectionId: 'connection' } },
+      { kind: 'workspace', workspaceId: 'registered', resourceOwner: { kind: 'managed_host', hostId: 'host', connectionId: 'connection', endpointIdentity: 'endpoint', token: 'not-allowed' } },
+    ]) expect(() => normalizeCalendarTarget({ ...newWork, source })).toThrow('source');
+    expect(() => normalizeCalendarTarget({ kind: 'existing_work', threadId: 'thread', branchId: 'branch', source: { kind: 'project' } })).toThrow('inherits');
+    expect(normalizeCalendarTarget({ ...newWork, source: { kind: 'workspace', workspaceId: 'registered', resourceOwner: { kind: 'local' } } })).toMatchObject({ source: { kind: 'workspace', workspaceId: 'registered', resourceOwner: { kind: 'local' } } });
   });
 });

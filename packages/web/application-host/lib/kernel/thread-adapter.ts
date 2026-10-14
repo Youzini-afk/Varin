@@ -1,3 +1,4 @@
+import type { SourceDirectory } from './thread-sources.js';
 import { sourceFailureCode } from './source-admission-error.js';
 import type { McpInteractionListParams, McpInteractionReadParams, McpInteractionRespondParams, McpSamplingOutputReviewParams } from '@varin/protocol';
 import type { MediaReadParams, MediaReadChunk } from './protocol.generated.js';
@@ -15,7 +16,7 @@ import type { ThreadIdentity, ThreadModel, ThreadModelInfo, ThreadSubmit, Thread
 import type { InputMode, InitialContext, InputSubmitParams, InputEnqueueParams, InputResourcePreparation, ContextResources, PreparedExplicitSkill, ModelSessionConfiguration, CredentialScope, AgentRuntimeStreamEvent, PolicyResumeReceipt } from './protocol.generated.js';
 import type { ExistingHostCredentialOwner } from './credential-owner.js';
 import { isAbortError, waitWithSignal } from '../cancellation.js';
-import { AgentRuntimeClient } from './agent-runtime-client.js';
+import type { AgentRuntimeClient } from './agent-runtime-client.js';
 import type { ContextPreparer } from './thread-context.js';
 import type { ThreadSkillInputPreparer } from './thread-skill-input.js';
 import { parseExplicitSkillCommand } from '../agent-resources/activation.js';
@@ -48,17 +49,17 @@ export class ThreadAdapter {
     private readonly processTerminals?: import('@varin/application-client').ThreadProcessesAPI,
     private readonly prepareChildProfiles?: ChildProfilePreparer) {}
 
-  private sourceDirectory?: ThreadSourcesAPI;
-  bindSourceDirectory(directory: ThreadSourcesAPI): void { this.sourceDirectory = directory; }
+  private sourceDirectory?: SourceDirectory;
+  bindSourceDirectory(directory: SourceDirectory): void { this.sourceDirectory = directory; }
   async listSourceTargets(identity: ThreadIdentity, signal?: AbortSignal) {
     await this.requireIdentity(identity);
     if (!this.sourceDirectory) throw new Error('Source directory is unavailable');
-    return this.sourceDirectory.list(identity, signal);
+    return this.sourceDirectory.list(signal);
   }
   async resolveSource(identity: ThreadIdentity, request: Parameters<ThreadSourcesAPI['resolve']>[1], signal?: AbortSignal) {
     await this.requireIdentity(identity);
     if (!this.sourceDirectory) throw new Error('Source directory is unavailable');
-    return this.sourceDirectory.resolve(identity, request, signal);
+    return this.sourceDirectory.resolve(request, signal);
   }
 
   private recoveryReader?: (identity: ThreadIdentity) => Promise<NonNullable<ThreadSnapshot['recovery']>>;
@@ -473,18 +474,30 @@ export class ThreadAdapter {
 
   /** Cold calendar work is prepared by the same source/model/context owners as User submission.
    * Catalog supplies the occurrence identity and original instruction; this cannot forge User input. */
-  async prepareCalendarWork(preparation: import('./protocol.generated.js').CalendarPreparation, workspaceId: string, signal: AbortSignal) {
+  async prepareCalendarWork(preparation: import('./protocol.generated.js').CalendarPreparation, projectPath: string, signal: AbortSignal) {
     const { occurrence, definition } = preparation;
     if (definition.target.kind !== 'new_work') throw new Error('Calendar work is not a cold submission');
     const identity: ThreadIdentity = { runtime: 'agent', threadId: occurrence.thread_id, branchId: occurrence.branch_id };
     await this.requireIdentity(identity);
     signal.throwIfAborted();
-    const { source } = await this.prepareSource({ ...identity, key: occurrence.id, resourceOwner: { kind: 'local' }, workspaceId, mode: definition.target.sourceMode, content: { mode: 'saved-files' }, captureScopes: [] }, signal);
+    // Only an explicit project source resolves the coordinator's project path. A
+    // workspace selection retains its registered Host and namespace even offline.
+    const selected = definition.target.source;
+    const location = selected.kind === 'workspace' ? selected
+      : await this.resolveSource(identity, { resourceOwner: { kind: 'local' }, path: projectPath }, signal);
     signal.throwIfAborted();
-    await this.admitSource(source, identity);
+    const { source } = await this.prepareSource({ ...identity, key: occurrence.id, resourceOwner: location.resourceOwner,
+      workspaceId: location.workspaceId, mode: definition.target.sourceMode, content: { mode: 'saved-files' }, captureScopes: [] }, signal);
+    signal.throwIfAborted();
+    await this.admitSource(source, identity, undefined, signal);
+    signal.throwIfAborted();
     const model = await this.models.resolveModel(definition.target.model as ThreadModel);
     if (!this.prepareContext) throw new Error('Calendar context preparation is unavailable');
-    const initialContext = await this.prepareContext.main(identity, source, signal);
+    // The calendar definition is the admitted project scope, independently of
+    // where its files execute. The resource owner still prepares the actual view.
+    const initialContext = await this.prepareContext(identity, source, {
+      mode: 'agent', threadRole: 'main', projectId: definition.project_id,
+    }, signal);
     const skill = await this.skillInput(identity, initialContext.resources, preparation.instruction, signal);
     const childDispatch = this.prepareChildProfiles ? await this.prepareChildProfiles({ parent: {
       configuration: model.configuration, credential_scope: await model.credentialOwner.scope(),

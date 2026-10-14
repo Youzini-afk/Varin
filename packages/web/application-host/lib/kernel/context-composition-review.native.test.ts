@@ -12,7 +12,7 @@ import { createContextComposition } from './context-composition.js';
 import { createRequire } from 'node:module';
 import { createThreadContext } from './thread-context.js';
 import { createAgentPersonalization } from '../memory/agent-personalization.js';
-import { createThreadSourcePreparer } from './thread-sources.js';
+import { createThreadSourcePreparer, createThreadSourceDirectory } from './thread-sources.js';
 import { createDocumentAuthority } from '../documents/authority.js';
 import { KernelStorageAdapter, createKernelWorkspaceWorkingStateAccess } from './storage-adapter.js';
 import express from 'express';
@@ -273,11 +273,12 @@ it('calendar GUI assets reach original source/model/context owners, consume a ge
   };
   const install = async (f: Awaited<ReturnType<typeof fixture>>) => {
     const projects = async () => [{ id: 'selected-project', path: f.workspace }];
+    f.adapter.bindSourceDirectory(createThreadSourceDirectory({ documents: f.documents }));
     const config = createProjectConfigRuntime({ fsPromises: fs, path, projectsDirPath: path.join(f.root, 'project-config') });
     const scheduler = createScheduledTasksRuntime({ projectConfigRuntime: config, listProjects: projects, executeTask: async () => { throw new Error('Native calendar cannot dispatch Pi'); } });
     const errors: unknown[] = [];
     scheduler.setCalendarOwner(new CalendarOwner({ runtime: f.runtime, projects, hasPiWork: scheduler.hasPiWork,
-      prepare: async (work, project, signal) => f.adapter.prepareCalendarWork(work, (await f.documents.resolveWorkspace({ path: project })).workspaceId, signal), onChanged() {}, onError: error => errors.push(error) }));
+      prepare: (work, project, signal) => f.adapter.prepareCalendarWork(work, project, signal), onChanged() {}, onError: error => errors.push(error) }));
     const service = createScheduledTaskService({ projectConfigRuntime: config, scheduledTasksRuntime: scheduler, readSettingsFromDisk: async () => ({ projects: await projects() }), sanitizeProjects: value => value as Awaited<ReturnType<typeof projects>> });
     registerScheduledTaskRoutes(f.app, { scheduledTaskService: service, projectConfigRuntime: config, scheduledTasksRuntime: scheduler,
       readSettingsFromDisk: async () => ({ projects: await projects() }), sanitizeProjects: value => value as Awaited<ReturnType<typeof projects>>,
@@ -289,7 +290,7 @@ it('calendar GUI assets reach original source/model/context owners, consume a ge
   const instruction = '  Original calendar Environment input\nwith preserved whitespace  ';
   await host.api.upsert('selected-project', { id: 'calendar-task', runtime: 'agent', name: 'Cold project work', enabled: false,
     schedule: { kind: 'once', date: '2020-01-01', time: '09:00', timezone: 'UTC' }, execution: { prompt: instruction },
-    missedPolicy: 'coalesce_once', target: { kind: 'new_work', model: { providerId: 'fixture-provider', modelId: 'fixture-model' }, sourceMode: 'fixed_branch', goal: null } });
+    missedPolicy: 'coalesce_once', target: { kind: 'new_work', source: { kind: 'project' }, model: { providerId: 'fixture-provider', modelId: 'fixture-model' }, sourceMode: 'fixed_branch', goal: null } });
   const accepted = await host.api.run('selected-project', 'calendar-task', 'original-manual-key');
   if (accepted.runtime !== 'agent') throw new Error('Native calendar returned a Pi receipt');
   expect(accepted).not.toHaveProperty('sessionId');

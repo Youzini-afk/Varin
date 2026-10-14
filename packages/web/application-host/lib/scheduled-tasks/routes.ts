@@ -1,7 +1,9 @@
 import type { Express, Request, RequestHandler, Response } from 'express';
 import { createHash } from 'node:crypto';
-import { createScheduledTaskService } from './service.js';
-import { KernelClientError } from '../kernel/kernel-client.js';
+import { createScheduledTaskService, ScheduledTaskError } from './service.js';
+import { sourceFailureCode } from '../kernel/source-admission-error.js';
+import { threadSourceFailureMessage } from '@varin/application-client';
+import { KernelClientError } from '../kernel/kernel-error.js';
 
 type ServiceDependencies = Parameters<typeof createScheduledTaskService>[0];
 
@@ -189,6 +191,32 @@ export const registerScheduledTaskRoutes = (app: Express, dependencies: Schedule
     scheduledTaskService = createScheduledTaskService(dependencies),
     requireAuth,
   } = dependencies;
+
+  // Authenticated project scope uses the same source directory as ordinary work, without a temporary Thread.
+  const sourceRequest = (action: (req: Request, projectId: string, signal: AbortSignal) => Promise<unknown>): RequestHandler => async (req, res) => {
+    const projectId = parseProjectID(req);
+    if (!projectId) { res.status(400).json({ error: 'projectId is required' }); return; }
+    const controller = new AbortController();
+    const closed = () => { if (!res.writableEnded) controller.abort(new DOMException('Request closed', 'AbortError')); };
+    res.once('close', closed);
+    try {
+      const result = await action(req, projectId, controller.signal);
+      controller.signal.throwIfAborted();
+      res.json(result);
+    }
+    catch (error) {
+      if (controller.signal.aborted) return;
+      const sourceCode = sourceFailureCode(error);
+      if (sourceCode) res.status(sourceCode === 'source_authority_denied' ? 403 : sourceCode === 'source_registration_missing' ? 404 : 409)
+        .json({ code: sourceCode, error: threadSourceFailureMessage(sourceCode) });
+      else if (error instanceof ScheduledTaskError) res.status(error.statusCode).json({ error: error.message });
+      else res.status(500).json({ error: 'Scheduled task source request failed' });
+    } finally { res.off('close', closed); }
+  };
+  app.get('/api/projects/:projectId/scheduled-tasks/sources', requireAuth,
+    sourceRequest((_req, projectId, signal) => scheduledTaskService.listSources(projectId, signal)));
+  app.post('/api/projects/:projectId/scheduled-tasks/sources/resolve', requireAuth,
+    sourceRequest((req, projectId, signal) => scheduledTaskService.resolveSource(projectId, req.body, signal)));
 
   app.get('/api/projects/:projectId/scheduled-tasks', requireAuth, async (req, res) => {
     const projectID = parseProjectID(req);

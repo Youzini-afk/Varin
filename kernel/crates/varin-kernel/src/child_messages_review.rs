@@ -742,6 +742,7 @@ fn native_calendar_deadline_observes_one_true_cold_thread_without_host_timer_or_
                 thinking_level: None,
                 temperature: None,
             },
+            source: varin_runtime::catalog::calendar::Source::Project,
             source_mode: varin_runtime::SourceMode::LiveRoot,
             goal: None,
         },

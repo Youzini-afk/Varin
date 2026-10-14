@@ -3336,7 +3336,9 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       settings: () => hostCredentialAuthority.readGlobalInferenceSettings(),
       capabilities: signal => agentRuntime.childCapabilities(signal),
     }));
-  threads.bindSourceDirectory(createThreadSourceDirectory({ documents: documentsAuthority, remote: managedSourceConsumers.threads }));
+  const sourceDirectory = createThreadSourceDirectory({ documents: documentsAuthority, remote: managedSourceConsumers.threads });
+  threads.bindSourceDirectory(sourceDirectory);
+  scheduledTaskService.bindSourceDirectory(sourceDirectory);
   const targetSourceQuery = createSourceQueryService({ kernel: kernelClient, documents: documentsAuthority,
     validateLiveSource: liveSources.validate, storage: kernelStorageAdapter,
     resourceOwners: threadResourceOwners, languageSupervisor, structureSource: () => structureSource });
@@ -3425,7 +3427,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   const calendarOwner = new CalendarOwner({ runtime: agentRuntime,
     projects: () => readScheduledProjects(readSettingsFromDisk, sanitizeProjects),
     hasPiWork: scheduledTasksRuntime.hasPiWork,
-    prepare: async (work, projectPath, signal) => threads.prepareCalendarWork(work, (await documentsAuthority.resolveWorkspace({ path: projectPath })).workspaceId, signal),
+    prepare: (work, projectPath, signal) => threads.prepareCalendarWork(work, projectPath, signal),
     onChanged: () => { for (const client of uiVarinEventClients) { try { writeSseEvent(client, { type: 'varin:scheduled-task-changed', properties: {} }); } catch { uiVarinEventClients.delete(client); } } },
     onError: () => console.warn('[Calendar] preparation or asset synchronization requires attention'),
   });

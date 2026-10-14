@@ -72,7 +72,7 @@ it('the ordinary scheduled task example edits its admitted project and returns n
       return retained!.lease.execute(invocation, signal, owner);
     };
     const task = { name: 'Original calendar', runtime: 'agent', enabled: false, execution: { prompt: 'Original instruction' }, schedule: { kind: 'daily', times: ['09:00'], timezone: 'UTC' },
-      target: { kind: 'new_work', model: { providerId: 'fixture', modelId: 'model', temperature: 0 }, sourceMode: 'fixed_branch', goal: null } };
+      target: { kind: 'new_work', source: { kind: 'project' }, model: { providerId: 'fixture', modelId: 'model', temperature: 0 }, sourceMode: 'fixed_branch', goal: null } };
     expect(await execute({ action: 'upsert', task })).toMatchObject({ completion: { outcome: 'succeeded', effect: 'confirmed' }, executor_stopped: true });
     const [stored] = await config.listScheduledTasks('project');
     expect(stored?.execution).toEqual(task.execution); expect(stored?.target).toEqual(task.target);

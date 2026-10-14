@@ -72,6 +72,41 @@ pub struct ModelSelection {
 pub struct InitialGoal {
     pub budget: Option<goals::GoalBudget>,
 }
+/// An asset's selected location, not a grant. The Host still admits the actual ThreadSource.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(
+    tag = "kind",
+    rename_all = "snake_case",
+    rename_all_fields = "camelCase",
+    deny_unknown_fields
+)]
+pub enum Source {
+    Project,
+    Workspace {
+        resource_owner: launches::SourceResourceOwner,
+        workspace_id: String,
+    },
+}
+impl Source {
+    fn validate(&self) -> bool {
+        match self {
+            Self::Project => true,
+            Self::Workspace {
+                resource_owner,
+                workspace_id,
+            } => resource_owner.validate() && !workspace_id.trim().is_empty(),
+        }
+    }
+    fn matches(&self, source: &launches::SourceSelection) -> bool {
+        match self {
+            Self::Project => source.resource_owner.is_local(),
+            Self::Workspace {
+                resource_owner,
+                workspace_id,
+            } => resource_owner == &source.resource_owner && workspace_id == &source.workspace_id,
+        }
+    }
+}
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(
     tag = "kind",
@@ -82,6 +117,7 @@ pub struct InitialGoal {
 pub enum Target {
     NewWork {
         model: ModelSelection,
+        source: Source,
         source_mode: SourceMode,
         goal: Option<InitialGoal>,
     },
@@ -718,6 +754,11 @@ impl SyncPreparation {
                 {
                     return Err(RuntimeError::Invalid(
                         "calendar model selection is invalid".into(),
+                    ))
+                }
+                Target::NewWork { source, .. } if !source.validate() => {
+                    return Err(RuntimeError::Invalid(
+                        "calendar source selection is invalid".into(),
                     ))
                 }
                 Target::ExistingWork {
@@ -1448,10 +1489,12 @@ impl Catalog {
     pub fn capture_calendar_preparation(&self, id: &str) -> Result<PreparationRead> {
         let o: Occurrence = record(&self.db, "calendar_occurrences", id)?;
         let d: Definition = record(&self.db, "calendar_definitions", &o.definition_id)?;
+        let mut definition = project_definition(&self.db, &d)?;
+        definition.target = o.target.clone();
         Ok(PreparationRead {
             view: PreparationView {
                 occurrence: project_occurrence(&self.db, &d, &o)?,
-                definition: project_definition(&self.db, &d)?,
+                definition,
                 instruction: String::new(),
                 owner_epoch: self.epoch,
             },
@@ -1861,6 +1904,7 @@ impl ColdPreparation {
     pub fn load(mut self, launch: launches::LaunchSelection) -> Result<PreparedCold> {
         let Target::NewWork {
             model,
+            source,
             source_mode,
             goal,
         } = &self.occurrence.target
@@ -1886,7 +1930,7 @@ impl ColdPreparation {
             || launch
                 .source
                 .as_ref()
-                .is_none_or(|source| source.mode != *source_mode)
+                .is_none_or(|candidate| candidate.mode != *source_mode || !source.matches(candidate))
         {
             return Err(RuntimeError::Conflict(
                 "calendar candidate does not match its selected model/source".into(),

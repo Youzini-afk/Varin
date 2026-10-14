@@ -35,6 +35,7 @@ fn definition(goal: bool) -> DefinitionInput {
                 thinking_level: None,
                 temperature: None,
             },
+            source: Source::Project,
             source_mode: SourceMode::LiveRoot,
             goal: goal.then_some(InitialGoal {
                 budget: Some(goals::GoalBudget {
@@ -103,6 +104,13 @@ fn context(
     (context::ContextProposal{key:format!("initial:{}",o.branch_id),branch_id:o.branch_id.clone(),through_id:None,expected_revision:0,summary:String::new(),effective_system_prompt:"Frozen main context".into(),instruction_sources:vec![],memory_checkpoint:None},serde_json::from_value(json!({"mode":"agent","threadRole":"main","revision":1,"configurationDigest":"fixture","memorySnapshot":{"revision":0,"memories":[]},"sessionId":o.thread_id,"projectId":"project","originalSections":[{"name":"system","content":"Frozen main context"}],"instructionSources":[]})).unwrap())
 }
 fn prepare(db: &Catalog, o: &OccurrenceView) -> PreparedCold {
+    prepare_with_launch(db, o, launch()).unwrap()
+}
+fn prepare_with_launch(
+    db: &Catalog,
+    o: &OccurrenceView,
+    selected: launches::LaunchSelection,
+) -> Result<PreparedCold> {
     let (context, basis) = context(o);
     db.prepare_calendar_submission(
         &o.id,
@@ -113,10 +121,29 @@ fn prepare(db: &Catalog, o: &OccurrenceView) -> PreparedCold {
         basis,
         None,
         None,
-    )
-    .unwrap()
-    .load(launch())
-    .unwrap()
+    )?
+    .load(selected)
+}
+fn managed_launch() -> launches::LaunchSelection {
+    let mut selected = launch();
+    let source = selected.source.as_mut().unwrap();
+    source.resource_owner = launches::SourceResourceOwner::ManagedHost {
+        host_id: "target-host".into(),
+        connection_id: "target-connection".into(),
+        endpoint_identity: "target-endpoint".into(),
+    };
+    source.live_root.as_mut().unwrap().host_id = "target-host".into();
+    selected
+}
+fn select_workspace(input: &mut DefinitionInput, selected: &launches::LaunchSelection) {
+    let Target::NewWork { source, .. } = &mut input.target else {
+        unreachable!()
+    };
+    let selected = selected.source.as_ref().unwrap();
+    *source = Source::Workspace {
+        resource_owner: selected.resource_owner.clone(),
+        workspace_id: selected.workspace_id.clone(),
+    };
 }
 fn finish(db: &mut Catalog, id: &str) {
     for next in [RunState::Preparing, RunState::Runnable, RunState::Completed] {
@@ -125,6 +152,136 @@ fn finish(db: &mut Catalog, id: &str) {
             .unwrap();
     }
 }
+#[test]
+fn source_requires_explicit_well_formed_location_before_sync() {
+    let f = Fixture::new();
+    let mut missing = serde_json::to_value(definition(false)).unwrap();
+    missing["target"].as_object_mut().unwrap().remove("source");
+    assert!(serde_json::from_value::<DefinitionInput>(missing).is_err());
+    for source in [
+        json!({"kind":"workspace","resourceOwner":{"kind":"local"},"workspaceId":""}),
+        json!({"kind":"workspace","resourceOwner":{"kind":"local"},"workspaceId":"  "}),
+        json!({"kind":"workspace","workspaceId":"workspace"}),
+        json!({"kind":"workspace","resourceOwner":{"kind":"other"},"workspaceId":"workspace"}),
+        json!({"kind":"workspace","resourceOwner":{"kind":"managed_host","hostId":"","connectionId":"connection","endpointIdentity":"endpoint"},"workspaceId":"workspace"}),
+        json!({"kind":"workspace","resourceOwner":{"kind":"managed_host","hostId":"host","connectionId":" ","endpointIdentity":"endpoint"},"workspaceId":"workspace"}),
+        json!({"kind":"workspace","resourceOwner":{"kind":"managed_host","hostId":"host","connectionId":"connection","endpointIdentity":""},"workspaceId":"workspace"}),
+    ] {
+        let mut wire = serde_json::to_value(definition(false)).unwrap();
+        wire["target"]["source"] = source.clone();
+        if let Ok(input) = serde_json::from_value::<DefinitionInput>(wire) {
+            assert!(matches!(
+                f.db.prepare_calendar_sync("project".into(), None, vec![input])
+                    .unwrap().load(),
+                Err(RuntimeError::Invalid(_))
+            ), "invalid location was accepted: {source}");
+        }
+        assert!(f.db.calendar_project("project").unwrap().definitions.is_empty());
+    }
+    drop(f.db);
+    std::fs::remove_dir_all(f.path).unwrap();
+}
+
+#[test]
+fn source_cold_admission_binds_exact_owner_workspace_and_mode() {
+    let mut f = Fixture::new();
+    let mut input = definition(false);
+    let selected = managed_launch();
+    select_workspace(&mut input, &selected);
+    let d = sync(&mut f.db, &input);
+    let occurrence = f.db.run_calendar_now(&d.id, d.revision, "managed").unwrap();
+    let mut candidates = vec![launch()]; // Same workspace name on the coordinator is not a fallback.
+    let mut absent = selected.clone();
+    absent.source = None;
+    candidates.push(absent);
+    for field in ["hostId", "connectionId", "endpointIdentity", "workspace_id"] {
+        let mut candidate = serde_json::to_value(&selected).unwrap();
+        if field == "workspace_id" {
+            candidate["source"][field] = json!("other-workspace");
+        } else {
+            candidate["source"]["resource_owner"][field] = json!("other-owner");
+            if field == "hostId" {
+                candidate["source"]["live_root"]["hostId"] = json!("other-owner");
+            }
+        }
+        candidates.push(serde_json::from_value(candidate).unwrap());
+    }
+    let mut changed_mode = selected.clone();
+    let source = changed_mode.source.as_mut().unwrap();
+    source.mode = SourceMode::FixedBranch;
+    source.live_root = None;
+    source.branch_id = Some("fixed-source".into());
+    source.revision = Some(1);
+    candidates.push(changed_mode);
+    for candidate in candidates {
+        if let Some(source) = &candidate.source {
+            source.validate().unwrap();
+        }
+        assert!(matches!(
+            prepare_with_launch(&f.db, &occurrence, candidate),
+            Err(RuntimeError::Conflict(message))
+                if message == "calendar candidate does not match its selected model/source"
+        ));
+        assert!(latest_run(&f.db.db, &occurrence.branch_id).unwrap().is_none());
+        assert!(f.db.history(&occurrence.branch_id).unwrap().is_empty());
+    }
+    let prepared = prepare_with_launch(&f.db, &occurrence, selected.clone()).unwrap();
+    let admitted = f.db.admit_calendar_submission(prepared).unwrap();
+    assert_eq!(
+        f.db.launch_intent(admitted.run_id.as_ref().unwrap()).unwrap().unwrap().selection.source,
+        selected.source
+    );
+    drop(f.db);
+    std::fs::remove_dir_all(f.path).unwrap();
+}
+
+#[test]
+fn source_occurrence_survives_reopen_and_replacement_without_rebinding_old_work() {
+    let mut f = Fixture::new();
+    let mut input = definition(false);
+    let selected = managed_launch();
+    select_workspace(&mut input, &selected);
+    let original = input.target.clone();
+    let d = sync(&mut f.db, &input);
+    let occurrence = f.db.run_calendar_now(&d.id, d.revision, "original-source").unwrap();
+    drop(f.db);
+    let mut db = Catalog::open(&f.path).unwrap();
+    sync(&mut db, &input);
+    let preparation = db.capture_calendar_preparation(&occurrence.id).unwrap().load().unwrap();
+    assert_eq!(preparation.definition.target, original);
+    let prepared = prepare_with_launch(&db, &preparation.occurrence, selected.clone()).unwrap();
+    input.target = definition(false).target;
+    input.asset_revision = "asset:2".into();
+    let replaced = sync(&mut db, &input);
+    assert_ne!(replaced.generation, d.generation);
+    assert!(matches!(db.admit_calendar_submission(prepared), Err(RuntimeError::DispatchCancelled)));
+    let old = db.capture_calendar_preparation(&occurrence.id).unwrap().load().unwrap();
+    assert_eq!(old.definition.target, original);
+    assert_eq!(old.occurrence.state, OccurrenceState::Cancelled);
+    assert!(matches!(
+        prepare_with_launch(&db, &old.occurrence, selected.clone()),
+        Err(RuntimeError::DispatchCancelled)
+    ));
+    assert!(latest_run(&db.db, &occurrence.branch_id).unwrap().is_none());
+    let new = db.run_calendar_now(&d.id, replaced.revision, "project-source").unwrap();
+    assert!(matches!(
+        prepare_with_launch(&db, &new, selected),
+        Err(RuntimeError::Conflict(message))
+            if message == "calendar candidate does not match its selected model/source"
+    ));
+    let prepared = prepare(&db, &new);
+    assert!(db.admit_calendar_submission(prepared).unwrap().run_id.is_some());
+    drop(db);
+    let db = Catalog::open(&f.path).unwrap();
+    assert_eq!(
+        db.capture_calendar_preparation(&occurrence.id).unwrap().load().unwrap().definition.target,
+        original
+    );
+    assert_eq!(db.calendar_occurrence(&occurrence.id).unwrap().state, OccurrenceState::Cancelled);
+    drop(db);
+    std::fs::remove_dir_all(f.path).unwrap();
+}
+
 #[test]
 fn cold_occurrence_and_initial_goal_use_original_run_history_and_terminal_owners() {
     let mut f = Fixture::new();
