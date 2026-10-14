@@ -197,5 +197,5 @@ Windows automatic selection excludes hidden, cloaked, shell/helper and 1×1 plac
 it prefers the foreground application window, then a non-minimized titled window. Explicit handles
 retain their exact targets; ambiguous title selectors report the need to choose a handle.
 
-See the [BC acceptance record](../../docs/reviews/bot-computer-use.md)
-for remaining native platform and packaging work.
+See [current platform limits](../../docs/resources.md#computer-use-与平台边界)
+and [runtime acceptance](../../docs/runtime-acceptance.md) for native/installed-product boundaries.

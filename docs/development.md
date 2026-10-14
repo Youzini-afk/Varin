@@ -7,14 +7,11 @@ cross-project contribution and trust boundaries.
 ## Sources of truth
 
 Code, types, schemas, tests and package scripts define executable behavior. The nearest module
-`README.md` or `DOCUMENTATION.md` explains its owner and non-obvious invariants. Cross-cutting contracts
-live in [design](design/README.md), implementation work in [plans](plan/README.md), and recorded
-verification in [reviews](reviews/README.md). Historical plans and decisions explain earlier choices,
-not a second current implementation.
+README or DOCUMENTATION explains its owner and non-obvious invariants; the [documentation index](README.md)
+links the few cross-cutting contracts. Git keeps historical plans and validation batches.
 
-When these disagree, inspect the callers and relevant commits, then update the responsible document or
-implementation. Use [status](status.md) for delivery boundaries rather than inferring them from an old
-phase heading. The repository uses ordinary documentation, not project-local workflow Skills.
+Pi remains the default. The opt-in Agent runtime has distinct history and execution owners, described in
+[runtime](runtime.md). Do not infer product-wide support from a focused fixture or an old completion label.
 
 ## Start a development environment
 
@@ -36,7 +33,7 @@ packaging, signing or device instructions.
 
 ## Knowledge map
 
-The [domain-to-owner map](README.md#按领域找实现) is the shared navigation table. A typical change starts
+The [documentation index](README.md) is the shared navigation table. A typical change starts
 at the owning module and follows its actual consumers, not by reading every design or historical stage.
 [Protocol](../packages/protocol/README.md) and [application-client](../packages/application-client/README.md)
 are the cross-package contract entry points; [Host harness](../packages/web/application-host/lib/harness/DOCUMENTATION.md)
@@ -61,8 +58,8 @@ Choose verification by the failure a change could introduce:
 Broaden a check when it can expose a different failure class. Do not add a test automatically for every
 wording, presentation or type edit, or repeat an expensive successful build after an unrelated change.
 A simulated provider can establish request wiring; it does not establish model quality or latency.
-[Test design](design/testing-ci-design.md) explains the repository's evidence model; historical cleanup
-results live in the [testing audit](archive/testing-ci-audit.md).
+Record which owner, consumer and environment a check exercised. Historical test counts are not a current
+branch certification; remaining real-environment scenarios are in [runtime acceptance](runtime-acceptance.md).
 
 ## Repository and build facts
 

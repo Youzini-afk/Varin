@@ -30,6 +30,8 @@ Agent Workspace, Research Workbench et Varin Bot prennent en charge le bureau, l
 IDE Workbench prend en charge le bureau et le web. L’orientation du travail reste indépendante
 de l’interface sélectionnée.
 
+Pi reste le runtime par défaut. Cette branche propose aussi un runtime Agent Rust sur choix explicite, sans migration automatique des données Pi ni changement du défaut. Voir la [documentation actuelle](../../docs/README.md).
+
 > [!IMPORTANT]
 > Varin est en pré-1.0 et en développement actif. Les surfaces produit et le protocole d'exécution
 > privé avancent pour l'instant ensemble : rien ne garantit qu'une ancienne version interopère avec
@@ -88,18 +90,7 @@ le compositeur sur un écran de téléphone.
 
 ### Contexte, recherche et connaissances
 
-- **Assemblage structuré du contexte :** une couche Zone 2 injecte les faits observés de l'espace de
-  travail — vos modifications, commandes de terminal, diagnostics, état Git — sans toucher au prompt
-  système. Un memory keeper entretient la mémoire durable selon les modes off/assist/takeover, et la
-  compaction côté hôte peut prendre en charge le résumé sans appels de modèle supplémentaires.
-- **Recherche en couches :** `grep` pour la correspondance exacte, `explore`/`related` pour la
-  découverte groupée adossée à un graphe de symboles et à la structure tree-sitter, et `recall`
-  contre une base de connaissances par espace de travail, avec embeddings et reclassement
-  facultatifs. Chaque couche est directement accessible ; aucune n'exige l'échec préalable d'une
-  autre.
-- **Outils web natifs :** `webfetch` avec politique SSRF et de domaines, extraction, PDF et cache ;
-  `websearch` via des fournisseurs configurés par l'utilisateur ; un panneau de sources ; et le
-  rendu de pages hors écran sur la surface bureau.
+Chaque requête conserve le contexte et la révision des sources sélectionnés ; seule une compaction réussie publie son résultat. Recherche exacte, Explore, graphe et navigation de langage fournissent des preuves distinctes, avec couverture partielle ou périmée explicite. Les notes Agent sont du texte explicite et délimité ; les connaissances Bot et leur organisation facultative conservent sources, corrections et reçus. Les outils Web, scientifiques et PDF distinguent découverte, originaux, texte extrait et images de pages.
 
 ### Un véritable espace de travail de développement
 
@@ -149,7 +140,7 @@ LSP/outillage — ce qui permet à ces paquets de continuer à évoluer de leur 
 
 La surface d'intégration de chaque adaptateur — les commandes, événements et fichiers de
 configuration natifs qu'il lit ou invoque, et les fichiers qui restent détenus par le plugin — est
-consignée dans [le contrat d'intégration des extensions](../../docs/design/extension-compatibility.md). Varin
+consignée dans [le contrat d'intégration des extensions](../../docs/extensions.md). Varin
 ne certifie pas les versions de plugins face aux versions de Pi.
 
 ## Développer des extensions Varin
@@ -207,11 +198,7 @@ Varin embarque une exécution Pi intégrée et détecte les installations de Pi 
 via le Runtime Manager, qui peut sélectionner, installer ou mettre à niveau Pi sans le rétrograder.
 Varin ne devient prêt qu'après une véritable poignée de main avec le Host, et n'a pas besoin de
 redémarrer après activation. Electron contient l'exécution Node nécessaire à l'application, tandis
-que Pi reste un outil géré indépendamment. Les paquets de bureau natifs x64/ARM64 pour Windows, Linux
-et macOS sont validés sur des runners correspondants pour le démarrage de l'application, le Runtime
-Manager, la santé et le cycle de vie du terminal ; les installeurs hors ligne facultatifs restent à
-faire. Les conteneurs conservent une exécution Pi épinglée et autonome, pour une exécution reproductible
-sans surveillance.
+que Pi reste un outil géré indépendamment. Le support et la validation doivent être vérifiés pour l'artefact et la plateforme concernés ; un build source ne valide pas tous les parcours desktop, VM ou modèle. Les conteneurs gardent un runtime Pi épinglé et autonome.
 
 ### Lancer la surface de développement web
 
@@ -320,7 +307,7 @@ dialogue, franchissent la frontière du preload Electron.
 Les paquets Pi tiers sont du code exécutable disposant des permissions système de l'utilisateur.
 Varin affiche les capacités observées et conditionne l'accès aux ressources exécutables locales au
 projet, mais il ne prétend pas transformer des extensions de confiance en bac à sable complet. Lisez
-la [politique de sécurité](../SECURITY.md) et le [modèle de sécurité](../../docs/design/security.md) avant
+la [politique de sécurité](../SECURITY.md) et le [modèle de sécurité](../../docs/security.md) avant
 d'exposer une instance distante ou d'installer du code inconnu.
 
 ## Organisation du dépôt
@@ -381,21 +368,15 @@ Avant de contribuer, lisez [le guide d'ingénierie](../../docs/development.md),
 [CONTRIBUTING.md](../CONTRIBUTING.md) et les règles propres au dépôt dans
 [AGENTS.md](../../AGENTS.md).
 
-## Documentation de conception et d'exploitation
+## Documentation
 
-- [Architecture](../../docs/architecture.md)
-- [Guide d'ingénierie](../../docs/development.md)
-- [Feuille de route](../../docs/roadmap.md)
-- [Contrat du harness d'agent](../../docs/design/agent-harness.md) (en chinois simplifié), avec [l'état de livraison](../../docs/status.md), [le plan](../../docs/plan/agent-harness-plan.md) et [le journal des décisions](../../docs/decisions/README.md)
-- [Conception du noyau système Rust](../../docs/design/rust-kernel-design.md) et [compte rendu d'audit](../../docs/archive/rust-kernel-audit.md)
-- [Contrat du workbench composable et de l'IDE](../../docs/design/composable-workbench.md) (en chinois simplifié)
-- [Plateforme d'éditeur de fichiers unifié](../../docs/design/unified-file-editor-platform.md)
-- [Plateforme d'extensions Varin](../../docs/design/varin-extension-platform.md)
-- [Contrat de migration d'OpenChamber vers Pi](../../docs/ops/openchamber-pi-migration.md)
-- [Conception de l'interface et de la possession des plugins](../../docs/design/plugin-gui-design.md)
-- [Modèle de restauration](../../docs/ops/recovery.md)
-- [Déploiement cloud](../../docs/ops/cloud-deployment.md)
-- [Modèle de sécurité](../../docs/design/security.md)
+- [Documentation](../../docs/README.md)
+- [Développement et vérification](../../docs/development.md)
+- [Runtime](../../docs/runtime.md)
+- [Ressources et restauration](../../docs/resources.md)
+- [Workbench et extensions](../../docs/extensions.md)
+- [Sécurité](../../docs/security.md)
+- [Exploitation](../../docs/ops/README.md)
 
 ## Filiation et licence
 

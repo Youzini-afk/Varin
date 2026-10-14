@@ -164,7 +164,7 @@ the Markdown content revision through as a CAS guard; `schedule.run` waits for t
 the tool uses the harness maximum request timeout and a longer-running task reports timeout while its true
 terminal state lands in `state`. Manual run-now uses the same global/project admission queue and may run a disabled task; disabling controls future calendar fires, not an explicit invocation. `schedule.status` is scoped to the caller's project, while the existing desktop status route retains its global quit-risk view.
 
-Native follow-ups are implemented under [Stage W / D-307](../../../../../docs/design/agent-follow-up-design.md):
+Pi follow-ups use the existing [Host harness](../harness/DOCUMENTATION.md) owner:
 the `follow_up` tool, the durable follow-up service, and session-level waiting UI reuse the existing
 Thread/Run lifecycle, kernel records, and broker admission. Calendar/Markdown tasks retain their external definition owner. Pi loops create new sessions; Agent
 calendars explicitly select new or existing work. The same asset ID never grants both execution owners.
@@ -178,5 +178,5 @@ current action-specific file/configuration/execution permissions. The original i
 occurrence key stay fixed across a lost reply. An unresolved dispatch is observed through its original
 Storage receipt rather than replayed. This differs from a calendar `new_work` task selecting a remote
 resource Source: in that case the original calendar coordinator still owns its occurrence and context.
-See [kernel schedule receipts](../kernel/DOCUMENTATION.md#managed-project-schedule-receipts) for durable
+See [kernel schedule receipts](../kernel/DOCUMENTATION.md#managed-source-consumers) for durable
 completion and cleanup ownership.

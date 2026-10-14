@@ -1,102 +1,65 @@
 # Varin contributor guide
 
-## Start from current authority
+Start with [docs/architecture.md](docs/architecture.md), [docs/development.md](docs/development.md)
+and the nearest module README/DOCUMENTATION. Code, types, schemas, tests and package scripts define
+executable behavior; docs explain responsibility and intent. Git retains historical designs and delivery
+records. Correct stale prose rather than appending another contradictory update.
 
-Varin keeps project knowledge in ordinary repository documentation, next to the code it describes.
-Start with [docs/development.md](docs/development.md), [docs/architecture.md](docs/architecture.md), and
-the nearest `README.md` or `DOCUMENTATION.md` in the owning package or module.
+## Product and ownership
 
-Code, types, tests, schemas, and `package.json` scripts are executable authority. Documentation explains
-ownership and intent. If prose and implementation disagree, inspect recent commits and callers, decide
-which behavior is current, and update the stale side in the same change. Historical plans and the local
-OpenChamber checkouts are reference material, not current authority.
+- Varin is an independent workspace and harness originating from the maintainer's OpenChamber fork.
+  All changes happen in this repository; external OpenChamber checkouts remain read-only.
+- Pi remains the default conversation runtime. The Rust Agent runtime is opt-in, with its own tagged
+  Thread/branch identities and Catalog. Do not silently migrate assets, flip the default or remove Pi.
+  OpenCode contracts and the former VS Code companion are retired, not fallback targets.
+- Preserve existing provider/auth, remote/pairing/relay, allowed-directory, external-access audit,
+  session/history/queue and platform capabilities when changing their owner. Preserve LICENSE and
+  THIRD_PARTY_NOTICES obligations independently of documentation cleanup.
+- `application-client` owns framework-neutral RuntimeAPIs/DTOs/failures; `ui` owns React, projections,
+  Document Registry and editor groups. Privileged work belongs to trusted owners, never renderers.
+- `web` owns the Application Host. Electron embeds it and adds the native shell; mobile connects to it.
+  Do not introduce a second Electron backend. Runtime, protocol and extension packages retain their
+  named process/contract boundaries in [architecture](docs/architecture.md).
+- Rust is the production authority for transferred storage, file, materialization, process and compute
+  resources. The Agent Catalog additionally owns native execution. No parallel TS writer or fallback
+  authority may be reintroduced. KnowledgeStore and Pi retain their separate documented domains.
 
-The repository deliberately has no project-local workflow Skills. Do not add one merely to repeat a
-module document, prescribe routine steps, or encode a one-off failure. A Skill is justified only when
-the user explicitly wants a reusable, tool-specific operation that cannot be made clearer or more
-reliable as code, a script, or normal documentation.
+## Invariants
 
-## Product boundary
+- Workbench shell selection and work focus are independent. Presentation does not own runtime identity,
+  documents, terminals or durable execution. Publish a prepared candidate only at its actual commit boundary.
+- DocumentsAPI is the text-content path; FilesAPI is browse/binary/CRUD; WorkspaceAPI is project/tree/Git/upload.
+  Desktop/Web use the shared Monaco path; mobile/embedded CodeMirror adapters share the same content/save owner.
+- Source identity, execution placement and navigation project are distinct. FixedBranch currently has no
+  writable/MCP execution cwd; ManagedSources do not imply arbitrary multi-parent automatic merging.
+  These are current support boundaries, not speculative permanent restrictions.
+- Cancellation intent, effect outcome and actual executor stop are different. HTTP abort or rejected
+  observation does not release original readers, writers, assignments or source cleanup responsibility.
+- Missing, empty, invalid, stale, unavailable, failed, conflicting and unknown states stay distinct.
+  Failed or superseded preparation leaves the previous valid generation authoritative.
+- There is no compatibility requirement for obsolete internal formats. Reject unsupported/malformed stores
+  without overwriting assets; do not add automatic internal-format upgrade/import paths. Current-format
+  durability/recovery still applies. Workspace files, Git, native Pi data and external config remain assets.
+- Do not invent hard limits without a concrete protocol/platform/safety/data/resource reason. Defaults,
+  warnings, budgets and hard rejection are different contracts.
+- Keep filesystem, network, credential, shell and process behavior in the proper trusted owner. Validate
+  process/network input. Never log credentials, prompt bodies, bearer/pairing data or file contents.
 
-- Varin is an independent Agent workspace and harness with a bundled Pi runtime, originating from
-  the maintainer's OpenChamber fork. All Varin edits, commits, and pushes happen in this repository;
-  external OpenChamber checkouts remain read-only.
-- The OpenCode cutover is complete. Do not restore OpenCode contracts, compatibility facades, parallel
-  implementations, or dead migration paths.
-- Preserve the fork capabilities recorded in
-  [docs/ops/openchamber-pi-migration.md](docs/ops/openchamber-pi-migration.md) unless a reviewed Pi-native
-  implementation is behaviorally and security-equivalent.
-- Do not add speculative restrictions. A limit needs a concrete protocol, platform, safety, data, or
-  measured resource failure behind it; defaults, warnings, and configurable budgets are distinct from
-  hard rejection.
-- There are no users requiring backward compatibility for Varin's internal formats. Replace obsolete
-  contracts and storage directly; remove old readers, writers, compatibility branches, and fallback
-  backends. Do not build internal-format upgrade/import machinery. Workspace files, Git history, native
-  Pi data, and external configuration remain assets; handing off unfinished work does not require keeping
-  the old internal schema. Normal durability and recovery still apply within the current format (D-253).
+## Changes and verification
 
-## Ownership and trust boundaries
+Inspect the implementation, actual consumers and focused tests before changing behavior. Use the nearest
+package.json for commands. Select checks by the failure class: local behavior, shared consumers, native
+resources, target packaging or actual performance. Do not repeat broad checks that cannot change the decision.
 
-- `packages/application-client` owns the framework-neutral `RuntimeAPIs` aggregate interface, all API
-  interfaces, typed failures, and pure DTO types. It has no React, Zustand, or UI component dependencies.
-- `packages/ui` owns shared React presentation, Pi domain state, the Document Registry, and the Editor
-  Workbench Kernel. It does not own privileged processes or the runtime-facing client contracts.
-- `packages/web` owns Web/remote surfaces and the trusted application host, including document, search,
-  language, task, debug, test, and Pi runtime services.
-- `packages/electron` is the native shell. It hosts the Web application host in-process and must not
-  grow a parallel backend.
-- `packages/mobile` is a Capacitor client connected to a Varin server.
-- Runtime, protocol, and extension packages own their named process and contract boundaries as mapped in
-  [docs/architecture.md](docs/architecture.md).
-- Stage R in [docs/plan/agent-harness-plan.md](docs/plan/agent-harness-plan.md) completed the Rust system-kernel
-  transition at D-282; [docs/design/rust-kernel-design.md](docs/design/rust-kernel-design.md) owns its implemented boundaries.
-  Rust is the production authority for the transferred state, file, materialization, process, and compute
-  resources. Do not reintroduce dual TS/Rust writers or fallback authorities. The kernel is a private
-  Application Host component shared by surfaces, not a second Electron backend. Delivery facts remain in
-  harness status.
+Tests should exercise product behavior, not source text, CSS classes, enum copies or DTOs constructed in the
+test itself. New tests are not mandatory for every prose/presentation/type edit. Remove obsolete/redundant
+checks without one-for-one replacement. Installed-product smoke stays focused on working startup/capabilities;
+detailed failure combinations belong with their owner.
 
-Never execute Pi extensions in a renderer. Keep privileged filesystem, network, credential, shell, and
-process behavior in the application host, Electron main/preload, or Pi host as appropriate. Validate
-untrusted process/network input and never log credentials, prompt bodies,
-bearer/pairing data, or file contents.
+Name modules and APIs for responsibility, not migration labels. Keep current main engineering docs in Chinese
+and existing source-adjacent/package documentation in its established language. Do not create a parallel
+bilingual copy, permanent cleanup log, complex documentation governance or project-local workflow Skill.
 
-## Workbench and data invariants
-
-- Agent Workspace (`default`), IDE Workbench (`varin.ide`), Research Workbench (`varin.research`), and
-  Bot Workbench (`varin.bot`) are extension-provided shells selected through Workbench Profiles.
-  Work focus is independent session execution configuration; project or session navigation never
-  changes the selected shell.
-- Shells own presentation. Documents, editor groups, terminals, Git, profiles, and runtime identity
-  remain in the shared kernel or their trusted host authority.
-- `DocumentsAPI` is the single text-content path. `FilesAPI` remains browse/binary/CRUD and
-  `WorkspaceAPI` remains project/tree/Git/upload.
-- Desktop/Web Agent and IDE share the Monaco document path. Mobile and embedded editors use their
-  purpose-specific CodeMirror adapters. None creates another buffer,
-  dirty-state, save, or language-process authority.
-- Pi session JSONL, Pi settings/packages, and plugin-native configuration remain their documented
-  authorities. Missing, empty, malformed, stale, failed, and conflicting states must not collapse into
-  the same successful empty result.
-- Commit a profile, shell, provider, or owner generation only after its candidate is ready. Failed or
-  superseded work leaves the previous authoritative generation active.
-
-## Changes, verification, and Git
-
-Name modules, APIs, tools and internal records for their responsibility. Do not prefix the agent
-runtime with migration labels such as `native`, or retain old names as compatibility aliases.
-
-Inspect the owning implementation, consumers, and focused tests before changing behavior. Choose
-verification by what could actually regress: a local change needs focused evidence; a shared contract
-needs its real consumers; packaging and platform behavior need the relevant runtime or smoke check.
-Do not repeat broad checks that cannot change the decision. The command source of truth is the nearest
-`package.json`; repository development and validation details live in
-[docs/development.md](docs/development.md).
-
-Do not add a test automatically for every edit or fix. Reuse existing behavior coverage; simple
-presentation changes and static type shapes often need no new test. Tests must exercise product
-behavior, not copy implementation text, CSS classes, enum lists, or assert values from a literal they
-just constructed. Remove obsolete and redundant tests without requiring one-for-one replacements.
-Keep release smoke focused on the installed product's startup and working capabilities; detailed
-failure combinations belong to their owning behavior tests, and visual preferences are not release gates.
-
-Preserve unrelated user changes and avoid destructive Git operations. Keep coherent phases reviewable,
-commit and push completed phases, and report what was and was not verified.
+Preserve unrelated user edits and avoid destructive Git operations. Keep coherent phases reviewable, commit
+and push authorized completed work, and report exactly what did and did not run. Publication, deployment,
+credential changes and final runtime migration need their own authority.

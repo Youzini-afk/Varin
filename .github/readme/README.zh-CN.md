@@ -25,6 +25,8 @@ Workbench Profile 可选择四套内置外壳：**Agent Workspace**、**IDE Work
 Agent Workspace、Research Workbench 和 Varin Bot 支持桌面、Web 与移动端；IDE Workbench
 支持桌面与 Web。工作侧重与所选外壳相互独立。
 
+Pi 仍是默认运行时；本分支另有显式选择的 Rust Agent runtime，不会自动迁移 Pi 数据或切换默认。当前边界见[文档](../../docs/README.md)。
+
 > [!IMPORTANT]
 > Varin 目前仍处于 1.0 之前的活跃开发阶段。各产品端和私有运行时协议会同步演进，较旧构建
 > 不保证与较新构建互通。请备份重要工作区；长期部署时，请固定到已经验证的镜像摘要。
@@ -70,14 +72,7 @@ IDE Profile 将工作区导航和编辑器基础设施与完整的 Pi 智能体�
 
 ### 上下文、检索与知识
 
-- **结构化上下文组装：** Zone 2 层把观察到的工作区事实——你的编辑、终端命令、诊断、Git 状态——
-  注入上下文，而不改动系统提示词。memory keeper 以 off/assist/takeover 三种模式维护持久记忆，
-  Host 侧压缩可以接管摘要工作且不产生额外模型调用。
-- **分层检索：** 精确匹配用 `grep`；分组发现用 `explore`/`related`，由符号图和 tree-sitter
-  结构支撑；持久记忆用 `recall` 查询每个工作区的知识库，可选 embedding 与重排。每一层都可以
-  直接使用，不要求上一层先失败。
-- **原生 Web 工具：** `webfetch` 带 SSRF 与域名策略、正文提取、PDF 和缓存；`websearch` 走用户
-  配置的提供商；来源面板；桌面端离屏页面渲染。
+请求保留选定上下文和来源修订；压缩成功才发布候选。精确搜索、Explore、符号图与语言导航提供不同证据路径，部分或过期覆盖保持可见。普通 Agent 笔记是显式范围文本；Bot 知识及可选后台整理保留原始来源、纠正和回执。Web、学术与 PDF 工具区分发现、原件、提取文字和页面图像。
 
 ### 真正的编程工作空间
 
@@ -112,7 +107,7 @@ Varin 不会 fork 这些扩展，也不会复制它们的私有状态。已维�
 记忆系统、后台任务和 LSP/工具链配置——因此插件可以继续独立更新。
 
 每个扩展的集成面——Varin 读取或调用哪些命令、事件和原生配置，以及哪些文件仍归插件所有——记录在
-[扩展集成契约](../../docs/design/extension-compatibility.md)。Varin 不逐版本认证插件与 Pi 的搭配。
+[扩展集成契约](../../docs/extensions.md)。Varin 不逐版本认证插件与 Pi 的搭配。
 
 ## 开发 Varin 扩展
 
@@ -160,9 +155,7 @@ Rust 系统内核是必需的运行时组件，不是可选加速器。源码开
 
 Varin 自带捆绑的 Pi 运行时，并通过 Runtime Manager 发现用户级 Pi 安装，由它选择、安装或仅向上
 升级 Pi；完成真实 Host 握手后即可使用，无需重启 Varin。Electron 自带运行应用所需的 Node 环境，
-但 Pi 本身仍作为独立的用户级工具存在。Windows、Linux 和 macOS 的 x64/ARM64 原生桌面包均在对应
-架构的 runner 上验证应用启动、Runtime Manager、健康检查和终端生命周期；可选离线包仍待后续提供。
-容器固定自带经过验证的 Pi 运行时，以保证无人值守部署可复现。
+但 Pi 仍独立管理。平台能力与安装验收以实际产物和目标环境为准，源码构建不证明完整桌面、VM 或模型操作链。容器保留固定的自包含 Pi 运行时。
 
 ### 运行 Web 开发环境
 
@@ -256,7 +249,7 @@ Electron 在主进程里运行同一个宿主，而不是再造一套桌面后�
 
 第三方 Pi 包是拥有当前用户操作系统权限的可执行代码。Varin 会展示观察到的能力，并对项目内
 可执行资源设置授权门槛，但不会把受信任扩展宣传成完整的沙箱。在公开远程实例或安装陌生代码之前，
-请阅读[安全策略](../translations/SECURITY.zh-CN.md)和[安全模型](../../docs/design/security.md)。
+请阅读[安全策略](../translations/SECURITY.zh-CN.md)和[安全模型](../../docs/security.md)。
 
 ## 仓库结构
 
@@ -310,21 +303,15 @@ CI 固定为三条职责不同的门禁：Ubuntu 源码质量、Windows 运行�
 参与贡献前，请阅读[工程开发指南](../../docs/development.md)、[贡献指南](../translations/CONTRIBUTING.zh-CN.md)和精简的
 仓库边界说明 [AGENTS.md](../../AGENTS.md)。
 
-## 设计与运维文档
+## 文档导航
 
-- [工程开发与知识导航](../../docs/development.md)
-- [架构](../../docs/architecture.md)
-- [路线图](../../docs/roadmap.md)
-- [Agent Harness 契约](../../docs/design/agent-harness.md)，附[交付状态](../../docs/status.md)、[实施计划](../../docs/plan/agent-harness-plan.md)与[决策日志](../../docs/decisions/README.md)
-- [Rust 系统内核设计](../../docs/design/rust-kernel-design.md)与[审查记录](../../docs/archive/rust-kernel-audit.md)
-- [可组合工作台与 IDE 约定](../../docs/design/composable-workbench.md)
-- [统一文件编辑器平台](../../docs/design/unified-file-editor-platform.md)
-- [Varin 扩展平台](../../docs/design/varin-extension-platform.md)
-- [从 OpenChamber 迁移到 Pi 的约定](../../docs/ops/openchamber-pi-migration.md)
-- [插件 GUI 与状态归属设计](../../docs/design/plugin-gui-design.md)
-- [恢复模型](../../docs/ops/recovery.md)
-- [云端部署](../../docs/ops/cloud-deployment.md)
-- [安全模型](../../docs/design/security.md)
+- [文档导航](../../docs/README.md)
+- [开发与验证](../../docs/development.md)
+- [运行时](../../docs/runtime.md)
+- [资源与恢复](../../docs/resources.md)
+- [工作台与扩展](../../docs/extensions.md)
+- [安全](../../docs/security.md)
+- [运维](../../docs/ops/README.md)
 
 ## 项目沿革与许可证
 

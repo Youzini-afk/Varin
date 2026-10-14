@@ -2,8 +2,8 @@
  * Fast Decision Model (快速决策模型) — a vendor-neutral structured-judgment
  * capability. This is not a chat slot, not a rerank endpoint, and not free-text
  * generation: the caller supplies a goal, authorized material, and typed
- * questions; Pi's native classifier API owns the provider protocol. See
- * docs/design/fast-decision-model-design.md.
+ * questions; the selected Pi or Agent inference owner handles its provider
+ * protocol. See docs/retrieval.md.
  */
 
 import { HarnessInferenceSettingsValidationError } from "./harness-inference.js";

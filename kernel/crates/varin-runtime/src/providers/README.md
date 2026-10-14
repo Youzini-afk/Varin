@@ -1,193 +1,144 @@
-# Native model adapters
+# Model adapters
 
-This module implements OpenAI Responses, OpenAI Chat Completions, Azure Responses and Anthropic Messages as execution `ModelProvider`s.
-It is not a claim that every configured Pi provider, OAuth flow, or production Host path has migrated.
+These modules implement the Agent runtime's `ModelProvider` boundary. They serialize immutable
+semantic history, execute one request, parse protocol events and preserve continuation originals.
+They do not own a conversation loop, tool authorization or a credential store. The default product
+runtime still uses Pi; see [runtime ownership](../../../../../docs/runtime.md).
 
-## Dispatch boundary
+The authoritative installed families are declared in [builtins.rs](builtins.rs), validated by its
+family-specific options, and selected from the trusted Host [model catalog](../../../../../packages/web/application-host/lib/kernel/model-authority.ts).
+The renderer chooses registered model IDs, not arbitrary endpoints or auth headers.
 
-`serialize` compiles semantic history into a credential-free immutable request body. Same-family,
-version-1 provider originals with the same nonempty trusted connection identity are replayed without flattening encrypted reasoning, signatures, citations,
-or server-tool blocks. Cross-family provider-only items are omitted by the shared history projection; portable
-text and client-tool exchanges are rebuilt. Unsupported local/multimodal references fail explicitly.
-The Host must materialize attachments before compilation. Tool schemas use the frozen request's versions.
+## Current protocol families
 
-`ModelProvider::serialize(view, reuse)` returns the single `RequestBody` contract. Responses, Azure
-Responses and Codex can reuse immutable per-item JSON fragments and tool schemas from the original Run
-worker's latest holder. Codex additionally retains one joined instructions fragment for its exact
-ordered system-item Arc sequence (including the default empty-system instructions). System validation
-and original join/filter ordering still apply on every call. The actual adapter/lease, configuration/schema/model/connection, checkpoint and
-source `Arc` identities bound reuse; previews pass no holder. Every call still enters the pinned adapter's
-lease validation. Grouped protocols run their existing complete compiler before entering the same body
-contract; their transcript blocks are not treated as independently reusable semantic items.
+| Family | Adapter and important protocol boundary |
+| --- | --- |
+| `openai-responses` | [responses.rs](responses.rs): complete Responses events and original encrypted/reasoning items |
+| `openai-completions` | [chat.rs](chat.rs): one choice; complete tool finish plus `[DONE]`; trailing usage retained |
+| `azure-openai-responses` | [azure.rs](azure.rs): distinct continuation family, explicit deployment and API version |
+| `anthropic-messages` | [anthropic.rs](anthropic.rs): validated block order/types and retained signed/server-tool originals |
+| `google-generative-ai`, `google-vertex` | [google.rs](google.rs): GenerateContent, ordered thought signatures, paired function names/IDs |
+| `mistral-conversations` | [mistral.rs](mistral.rs): the configured SDK family's `/v1/chat/completions` protocol |
+| `openai-codex-responses` | [codex.rs](codex.rs): Codex-specific SSE body/headers and bound account identity |
+| `bedrock-converse-stream` | [bedrock.rs](bedrock.rs), [aws_eventstream.rs](aws_eventstream.rs): AWS binary eventstream and ConverseStream |
+| `pi-messages` | [pi_messages.rs](pi_messages.rs): the locked Pi message HTTP protocol, without a Pi AgentSession/loop |
 
-Fragments retain raw JSON and the original UTF-8 size contribution, not a second parsed `Value` tree.
-Envelope configuration edits invalidate that body's frozen encoding without changing a cloned snapshot.
-After all outer configuration, one complete raw JSON buffer is frozen. `Bytes::from_owner` shares its
-allocation with HTTP and Bedrock signing, while ContentStore serializes the borrowed raw body and
-recovers it directly from bytes. Signing, persisted recovery and HTTP therefore retain the same actual
-bytes, including valid noncanonical JSON. Textual receipts retain their original key order/provenance.
-Freezing and durable snapshot encoding still copy complete bytes; retained fragments plus the contiguous
-wire buffer are not a universal peak-memory reduction. No remote incremental request is implied.
+These are concrete adapters, not aliases for one generic OpenAI-compatible body. Protocol fixtures
+and loopback tests do not establish parity with every service option or live account.
 
-`Connection` resolves a credential reference immediately before dispatch through `CredentialResolver`.
-`EnvironmentCredentialResolver` is a concrete implementation for trusted reference-to-environment-header
-bindings. It never treats an arbitrary reference as an environment variable name. A Host credential
-broker can implement the same interface, including OAuth refresh coordination; OAuth is not implemented
-by the environment resolver. Authentication headers never enter request snapshots or debug output.
+## Immutable request boundary
 
-`ReqwestTransport` lazily creates one persistent reqwest TLS client and Tokio executor per transport instance. Model steps share that client and connection pool; concurrent requests have independent futures and cancellation. No global tenant or credential cache is used. A trusted
-ClientBuilder factory supplies proxy/DNS/certificate policy. Redirects and automatic retries are disabled.
-Cancellation drops the active send/read future. Calling this synchronous adapter from an async runtime
-returns `worker_required`; use a blocking execution worker. The default has no generation deadline;
-the caller can configure one through ClientBuilder and can always cancel the run.
+`ModelProvider::serialize(view, reuse)` returns [RequestBody](../request_body.rs), containing no
+credentials. Same-family/version originals are replayed only under the same nonempty trusted
+connection identity and applicable model constraints. Cross-family projection drops provider-only
+items but rebuilds portable text and complete client-tool exchanges. Signatures, citations and
+encrypted reasoning are never flattened into invented ordinary text. Attachments must already be
+materialized; unsupported media/protocol combinations fail explicitly.
 
-## Stream semantics
+Responses, Azure and Codex reuse independent item fragments and tool schemas from the original Run
+worker's latest-only holder. Codex also reuses the joined instructions fragment only for its exact
+ordered system-item sequence. The actual adapter lease, configuration/schema/model/connection,
+checkpoint and immutable item identities govern reuse. Preview has no holder. Grouped Chat,
+Anthropic, Google, Mistral, Bedrock and Pi protocols retain their complete compilers.
 
-SSE framing supports byte-fragmented UTF-8, CR/LF/CRLF, multiline data, comments, and an initial BOM.
-Each event has a configurable memory budget. Partial deltas are not admitted as complete tools. A clean
-HTTP EOF does not establish model completion. Completed duplicate Responses items must have identical
-original bodies. Anthropic block order and delta/block types are validated.
+Every call validates the pinned adapter. Outer options finish before final bytes freeze. One raw JSON
+allocation is shared with HTTP and Bedrock signing; ContentStore retains/reopens those same bytes,
+including valid noncanonical JSON. No transport may reserialize the body after signing. Retained
+fragments plus a complete wire buffer still cost memory; vector scans, final assembly, durable
+encoding/hashing and media work remain. This is local reuse, not remote incremental transmission.
 
-Provider machine error codes are retained when well-formed; error messages remain generic because remote
-error bodies can echo secrets or prompt content. HTTP status, request IDs and numeric Retry-After headers
-are returned without automatically repeating potentially paid calls. Raw usage is retained separately
-from standardized actual/estimated/missing measurements. Missing usage is never a synthetic zero.
+## Dispatch and stream semantics
 
-Anthropic `pause_turn` currently fails explicitly as `unsupported_stop_reason`: the orchestration layer
-needs a distinct resumable server-work contract before that can be treated as completion. Provider-native
-server tools can be preserved in received history but are not declared as executable client tools.
-Other protocol families, cloud-identity signing, built-in remote tool configuration and purpose-specific
-embedding/rerank/image requests require their own adapters and admission contracts.
+[Connection and transport](mod.rs) resolve the credential reference immediately before dispatch via
+`CredentialResolver`. Production uses the [Host authority](AUTH.md); the explicit environment resolver
+only maps trusted references to configured environment/header bindings and performs no OAuth flow.
+Header values never enter snapshots, histories, public events or Debug output.
 
-Protocol references: OpenAI streaming responses and reasoning guides, Anthropic streaming Messages docs.
-https://developers.openai.com/api/docs/guides/streaming-responses
-https://developers.openai.com/api/docs/guides/reasoning
-https://platform.claude.com/docs/en/build-with-claude/streaming
+`ReqwestTransport` lazily creates a persistent TLS client and Tokio I/O executor per transport instance;
+production bindings share the default instance/pool. Requests have independent cancellation/futures.
+A trusted ClientBuilder supplies proxy/DNS/certificate policy. Redirects and automatic retries are
+disabled. No default generation deadline is imposed here; configured deadlines and cancellation are
+separate controls. Synchronous execution belongs on a worker; an async-runtime caller receives
+`worker_required` rather than blocking that runtime.
 
-## Chat and Azure contracts
+SSE supports fragmented UTF-8, CR/LF/CRLF, multiline data, comments and an initial BOM, with a
+configurable event memory budget. Partial tool deltas never become complete calls. HTTP EOF alone
+does not prove model completion; each family supplies its actual terminal rule. Responses duplicate
+completed items must preserve exactly the same original body. Error messages are sanitized because
+remote bodies may echo prompts/secrets; safe machine codes, HTTP status, request IDs and numeric
+Retry-After remain available. The runtime does not repeat a potentially paid request automatically.
 
-Chat requests one choice and accepts complete function calls only after a tool-call finish reason and
-`[DONE]`. It retains usage chunks arriving after the finish reason. The complete assistant wire message
-is preserved once; semantic tool items are retained separately for cross-family compilation, without
-duplicating calls during same-family replay. `legacy_max_tokens`, `include_stream_usage` and
-`reasoning_effort` are explicit configuration choices. Unsupported vendor delta extensions fail rather
-than being silently erased. This is not full behavioral parity with every OpenAI-compatible service.
+Raw usage and normalized actual/estimated/missing measurements remain distinct. Absent measurements
+are not synthetic zero. The adapter declares its transcript grouping and complete-input interpretation
+for request-budget calibration; that estimate does not alter usage receipts or pricing.
 
-Azure has its own `azure-openai-responses` continuation family. The host supplies a complete Responses
-endpoint, deployment name and API version. The adapter verifies/appends the API version query, uses the
-deployment in the request model field and shares Responses event parsing. API-key authentication uses
-an `api-key` environment-header binding; a separate credential resolver must implement Entra token
-refresh. Resource defaults and deployment maps are resolved by the host, not guessed from hostnames.
+## Family-specific reasons and limits
 
-## GenerateContent contract
+### Responses, Chat and Azure
 
-`GoogleProvider::new` selects `google-generative-ai`; `GoogleProvider::vertex` selects `google-vertex`.
-Both require a complete `:streamGenerateContent` endpoint and validate/add `alt=sse`. They share the
-GenerateContent request/response protocol, while continuation data remains family- and model-scoped.
-Original parts are preserved in order, including thought signatures on text/function/server-tool
-parts. Switching models strips signed originals and retains only portable semantic content.
-Function responses recover their name and optional wire ID from the paired call. Partial-argument
-function streaming is explicitly unsupported, rather than admitting an unfinished call.
+Responses preserves original output items for same-connection continuation. Chat preserves one full
+assistant wire message while retaining semantic calls for cross-family replay, avoiding duplicate calls.
+`legacy_max_tokens`, stream usage and reasoning choices are explicit configuration, and unsupported
+vendor deltas fail rather than disappearing.
 
-Google uses an explicit transport clean-EOF mode: EOF is successful only after a protocol finish reason,
-and trailing usage receipts are retained. Other adapters retain their existing terminal-event rules.
-API-key Gemini headers and explicitly resolved Vertex bearer/API-key headers use CredentialResolver;
-ADC discovery, service-account signing and token refresh are not implemented here.
+Azure requires the complete endpoint, deployment and API version selected by the Host. It validates
+or appends the API-version query and uses deployment as the request model. Resource defaults and
+maps are Host configuration, not hostname guesses. Auth resolver extensibility alone is not evidence
+that every Entra login/refresh path is integrated.
 
-Grounding: locked Pi SDK 1.0.4 `api/google-generative-ai.js`, `google-vertex.js`, `google-shared.js`, plus
-https://ai.google.dev/api/generate-content and https://ai.google.dev/gemini-api/docs/thought-signatures.
+### Anthropic and GenerateContent
 
-## Remaining parity boundaries
+Anthropic preserves block/signature identity. Its subscription OAuth mode is an explicit frozen model
+configuration, including the required identity system block, headers and tool-name mapping; API-key
+and workload-federation requests do not accidentally inherit that body contract. `pause_turn` currently
+fails as unsupported because resumable server work needs an orchestration contract, not a fabricated
+completed Run. Received provider server tools are not automatically declared executable client tools.
 
-- Responses, Anthropic, Chat and Azure have native streaming serializers/parsers and reviewer-owned
-  fixture/loopback checks. Check current verification reports for the exact tested revision.
-- Google/Vertex have native GenerateContent serialization/parsing and signed-part replay; review tests
-  and production factory wiring are separate gates, not implied by the module's presence.
-- Codex SSE serialization and required bound-account headers are implemented. Codex WebSocket/compression
-  parity, Bedrock AWS credential-chain/SigV4 signing, the separate stateful Mistral Conversations API and
-  pi-messages remain explicit work.
-- Environment-key lookup and an injected transactional native OAuth broker are implemented. The broker
-  supports scope pinning and cancellation-safe refresh/persistence; the Host store/private bridge is now wired and checked with temporary/fake credentials. Platform
-  keychain integration, Entra/ADC/AWS identity and live-auth verification remain separate work.
-- Purpose-specific execution must follow the actual configured capability and its existing consumer,
-  not a list of hypothetical products. A generic base URL alias does not implement server-job
-  continuation or a different inference protocol. Current delivery and remaining concrete paths are
-  recorded in the runtime implementation ledger. Native image generation is deferred from the current
-  delivery by the user; existing Pi image calls and native typed-media transport are distinct facts.
+Google and Vertex use complete `:streamGenerateContent` endpoints with `alt=sse`. EOF is accepted
+only after a finish reason; trailing usage is retained. Original thought signatures are model-scoped.
+Changing models keeps portable content and drops incompatible originals. Partial-argument function
+streaming currently fails explicitly. Gemini API keys, Vertex express API keys and Host-owned ADC
+are different authentication/routing paths; see [AUTH.md](AUTH.md).
 
-## Mistral configured-family contract
+### Mistral and Pi messages
 
-The locked SDK names its native `/v1/chat/completions` transport `mistral-conversations`. This module
-implements that existing configured family, not Mistral's separate stateful Conversations API.
-`MistralProvider` applies a distinct profile to the common chat event machinery: nine-character
-alphanumeric tool IDs are allocated consistently across calls/results, typed text/thinking arrays
-are replayed, adjacent thinking chunks are joined without empty-text separators, object-form tool
-arguments are supported, `model_length` maps to an output-length stop, and either DONE or clean EOF
-requires a prior finish reason. OpenAI Chat retains its original stricter DONE contract.
+`mistral-conversations` names the locked SDK's chat-completions family, not Mistral's separate stateful
+Conversations API. The profile has consistent nine-character alphanumeric tool IDs, typed text/thinking
+arrays, joined thinking chunks, object-form tool arguments and `model_length` handling. DONE or clean
+EOF needs a prior finish reason. Its explicit prompt-cache key also supplies request-local `x-affinity`.
+These semantics must not weaken the OpenAI Chat adapter's terminal contract.
 
-`max_tokens`, optional `prompt_mode`/`reasoning_effort` and explicit `prompt_cache_key` are serialized;
-the cache key is also the request-local `x-affinity` header. Credentials use the standard Bearer
-resolver. Cached-token variants are normalized while retaining the complete raw usage object.
+`pi-messages` preserves that HTTP wire format's signed blocks, tool pairing and native usage. Using
+this adapter does not invoke Pi's agent execution loop or migrate Pi histories into Catalog.
 
-Connection scoping is enforced by every serializer and every emitted original. Empty or mismatched
-connection identities lose their opaque continuation while keeping semantic text/tool history.
-The trusted factory derives identities from validated endpoint and configuration/reference facts;
-the environment-only credential prototype still requires a generation bump when account identity
-changes. A full credential broker must carry authoritative credential identity/version at cutover.
+### Codex SSE
 
-## Native auth module
+Codex requires its authorized `/codex/responses` endpoint, top-level system instructions, encrypted
+reasoning inclusion, `store:false`, session/request identity and a frozen branch/Run-derived cache key.
+The credential binding must supply both Bearer authorization and the account header; the adapter does
+not decode JWTs to invent account authority. It uses honest Varin originator/user-agent metadata.
 
-`auth::CredentialBroker` is a dispatch resolver over an injected `CredentialStore`. Its public
-`CredentialScope` is nonsecret metadata: reference, authority, account and relink generation. Ordinary
-same-account token rotation does not change that generation. Each transaction checks the pinned scope
-before resolving or refreshing and again before returning headers. The backing store is the sole writer
-and must persist a successful refresh before returning; no credential-file fallback exists here.
+The locked contract does not accept output-capacity/sampling parameters on this path; those options
+fail rather than pretending to enforce a wire budget. WebSocket incremental state, account-keyed socket
+pooling and zstd are not implemented by the SSE adapter. Live account authorization requires separate acceptance.
 
-Caller cancellation races the credential worker without cancelling an already-started refresh. The
-broker's runtime shuts down in the background so dropping a cancelled caller cannot discard the only
-valid rotated refresh token. Store transactions are keyed per credential; unrelated connections do not
-share an authentication lock. `HttpOAuthRefresher` implements registered HTTPS public-client form/JSON
-refreshes with timeout, response budget, disabled redirects and disabled retries. It does not perform
-login, broaden scopes, store client secrets or discover cloud identities.
+### Bedrock
 
-See `AUTH.md` for the Host/platform authority boundary. The Application Host now supplies the existing shared credential owner over the private kernel bridge,
-and brokered Pi runtimes delegate to that same owner. Real temporary-store and Pi-worker IPC checks
-supplement the synthetic broker tests; live cloud authentication remains unverified.
+ConverseStream uses `/model/{encodedModelId}/converse-stream` and AWS binary eventstream, not SSE.
+The decoder validates prelude/message CRC32, fragmented frames, content type and event budgets. Success
+requires `messageStop` plus a complete final frame; trailing usage is retained. Exceptions are sanitized
+and never trigger retries. Signed reasoning/redacted bytes remain model/connection-scoped originals.
 
-## Codex SSE contract
+The Host resolves bearer keys or its existing AWS credential-chain/SigV4 owner. Model ARN region takes
+precedence for standard endpoints; explicitly registered custom endpoints remain intact. Private auth
+messages carry method, endpoint and the SHA-256 digest of exact frozen HTTP bytes, not prompt bodies.
+Configured options are implemented by the actual serializer; full SDK option/live-cloud parity is
+not implied by this transport.
 
-`CodexProvider` uses the distinct `openai-codex-responses` family and requires a complete authorized
-`/codex/responses` endpoint. It extracts textual system instructions into the required top-level field,
-keeps encrypted reasoning, enables parallel tool calls, and preserves the frozen branch/run cache
-identity as a 64-character SHA256 key. It sends the SSE beta header, honest Varin user-agent/originator,
-session identity and the individual request ID. A guard requires both a Bearer token and account header
-from the explicit credential binding; it never decodes JWTs to invent verified account authority.
+## Verification
 
-The locked SDK does not send `max_output_tokens` to this backend; the adapter does not pretend a common
-configuration capacity is a supported Codex wire budget. Run-budget policy remains a separate concern.
-WebSocket incremental state, account-keyed socket pooling, zstd and full capability parity are not
-implemented by this SSE-only path. Real account authorization remains a separate acceptance gate; Host store wiring is now present; no live credentials were used to develop or validate these modules.
-
-## Bedrock ConverseStream dispatch binding
-
-`bedrock-converse-stream` uses the actual `/model/{encodedModelId}/converse-stream` API and AWS
-binary eventstream, not SSE. The shared transport validates its content type; the decoder validates
-both prelude and message CRC32, supports fragmented frames, and enforces the caller-configured event
-memory budget. EOF is successful only after `messageStop` and a complete final frame. Trailing usage
-metadata is retained. Event exceptions are sanitized and do not trigger retries. Signed reasoning and
-redacted bytes retain their model/connection-scoped originals; tool calls are admitted only after
-complete JSON arguments and use consistent IDs on replay. Images use admitted inline bytes.
-
-The production Host factory selects this family and resolves existing stored/configured bearer keys
-through the sole credential owner. Standard AWS endpoint region follows a model ARN or explicit owner
-region; custom registered endpoints remain intact. AWS profile/default-chain identity and SigV4 use
-the existing Host credential owner and locked SDK signer (see `AUTH.md`). The private dispatch carries
-only method, registered endpoint and `payloadSha256`: a lowercase SHA-256 digest of the frozen HTTP
-bytes produced by the shared Rust serializer. Request content stays out of credential-control frames.
-Native model-specific reasoning configuration, documents, cache policy and additional model fields
-are not yet equivalent to all SDK options; live Bedrock/cloud-auth parity remains unverified.
-
-Protocol sources: locked Pi SDK 1.0.4 `api/bedrock-converse-stream.js`,
-https://docs.aws.amazon.com/bedrock/latest/APIReference/API_runtime_ConverseStream.html,
-https://smithy.io/2.0/aws/amazon-eventstream.html, and
-https://docs.aws.amazon.com/bedrock/latest/userguide/api-keys.html.
+[tests.rs](tests.rs) and module-local tests cover serializers, framing, opaque replay, usage,
+cancellation and loopback requests. Host auth/configuration tests cover the production selection and
+private bridge separately. Live provider accounts, network/proxy environments and platform credential
+chains require appropriate acceptance. See [development](../../../../../docs/development.md) for
+verification entry points; historical pass counts belong in Git, not this contract.

@@ -25,6 +25,8 @@ Workbench Profile 可選擇四套內建外殼：**Agent Workspace**、**IDE Work
 Agent Workspace、Research Workbench 與 Varin Bot 支援桌面、Web 與行動端；IDE Workbench
 支援桌面與 Web。工作側重與所選外殼彼此獨立。
 
+Pi 仍是預設執行時；本分支另有明確選用的 Rust Agent runtime，不會自動遷移 Pi 資料或切換預設。現行邊界見[文件](../../docs/README.md)。
+
 > [!IMPORTANT]
 > Varin 目前仍處於 1.0 之前的活躍開發階段。各產品端與私有執行時協定會同步演進，較舊組建
 > 不保證與較新組建互通。請備份重要工作區；長期部署時，請固定到已經驗證的映像摘要。
@@ -70,14 +72,7 @@ IDE Profile 將工作區導覽與編輯器基礎設施，和完整的 Pi 智慧�
 
 ### 上下文、檢索與知識
 
-- **結構化上下文組裝：** Zone 2 層把觀察到的工作區事實——你的編輯、終端命令、診斷、Git 狀態——
-  注入上下文，而不改動系統提示詞。memory keeper 以 off/assist/takeover 三種模式維護持久記憶，
-  Host 側壓縮可以接管摘要工作且不產生額外模型呼叫。
-- **分層檢索：** 精確比對用 `grep`；分組發現用 `explore`/`related`，由符號圖與 tree-sitter
-  結構支撐；持久記憶用 `recall` 查詢每個工作區的知識庫，可選 embedding 與重排。每一層都可以
-  直接使用，不要求上一層先失敗。
-- **原生 Web 工具：** `webfetch` 帶 SSRF 與網域策略、正文擷取、PDF 與快取；`websearch` 走使用者
-  設定的提供商；來源面板；桌面端離屏頁面渲染。
+請求保留選定上下文和來源修訂；壓縮成功才發布候選。精確搜尋、Explore、符號圖與語言導覽提供不同證據路徑，部分或過期覆蓋保持可見。普通 Agent 筆記是明確範圍的文字；Bot 知識及可選背景整理保留原始來源、修正和回執。Web、學術與 PDF 工具區分探索、原件、擷取文字和頁面影像。
 
 ### 真正的程式設計工作空間
 
@@ -113,7 +108,7 @@ Varin 不會 fork 這些擴充，也不會複製它們的私有狀態。已維�
 記憶系統、背景任務與 LSP/工具鏈設定——因此外掛可以繼續獨立更新。
 
 每個擴充的整合面——Varin 讀取或呼叫哪些命令、事件與原生設定，以及哪些檔案仍歸外掛所有——記錄在
-[擴充整合契約](../../docs/design/extension-compatibility.md)。Varin 不逐版本認證外掛與 Pi 的搭配。
+[擴充整合契約](../../docs/extensions.md)。Varin 不逐版本認證外掛與 Pi 的搭配。
 
 ## 開發 Varin 擴充
 
@@ -161,9 +156,7 @@ Host 會透過 Cargo 直接執行它；`bun run kernel:build` 產出套件配置
 
 Varin 內建捆綁的 Pi 執行時，並透過 Runtime Manager 探索使用者級 Pi 安裝，由它選擇、安裝或僅向上
 升級 Pi；完成真實 Host 握手後即可使用，無需重啟 Varin。Electron 內建執行應用所需的 Node 環境，
-但 Pi 本身仍作為獨立的使用者級工具存在。Windows、Linux 與 macOS 的 x64/ARM64 原生桌面套件均在
-對應架構的 runner 上驗證應用啟動、Runtime Manager、健康檢查與終端生命週期；可選離線套件仍待後續
-提供。容器固定內建經過驗證的 Pi 執行時，以保證無人值守部署可重現。
+但 Pi 仍獨立管理。平台能力與安裝驗收以實際產物和目標環境為準，原始碼組建不證明完整桌面、VM 或模型操作鏈。容器保留固定的自包含 Pi 執行時。
 
 ### 執行 Web 開發環境
 
@@ -257,7 +250,7 @@ Electron 在主處理序裡執行同一個宿主，而不是再造一套桌面�
 
 第三方 Pi 套件是擁有目前使用者作業系統權限的可執行程式碼。Varin 會展示觀察到的能力，並對專案內
 可執行資源設定授權門檻，但不會把受信任擴充宣傳成完整的沙箱。在公開遠端執行個體或安裝陌生程式碼
-之前，請閱讀[安全政策](../SECURITY.md)和[安全模型](../../docs/design/security.md)。
+之前，請閱讀[安全政策](../SECURITY.md)和[安全模型](../../docs/security.md)。
 
 ## 儲存庫結構
 
@@ -311,21 +304,15 @@ CI 固定為三條職責不同的門禁：Ubuntu 原始碼品質、Windows 執�
 參與貢獻前，請閱讀[工程開發指南](../../docs/development.md)、[貢獻指南](../CONTRIBUTING.md)和精簡的
 儲存庫邊界說明 [AGENTS.md](../../AGENTS.md)。
 
-## 設計與維運文件
+## 文件導覽
 
-- [工程開發與知識導覽](../../docs/development.md)
-- [架構](../../docs/architecture.md)
-- [路線圖](../../docs/roadmap.md)
-- [Agent Harness 契約](../../docs/design/agent-harness.md)，附[交付狀態](../../docs/status.md)、[實施計畫](../../docs/plan/agent-harness-plan.md)與[決策日誌](../../docs/decisions/README.md)
-- [Rust 系統內核設計](../../docs/design/rust-kernel-design.md)與[審查記錄](../../docs/archive/rust-kernel-audit.md)
-- [可組合工作台與 IDE 約定](../../docs/design/composable-workbench.md)
-- [統一檔案編輯器平台](../../docs/design/unified-file-editor-platform.md)
-- [Varin 擴充平台](../../docs/design/varin-extension-platform.md)
-- [從 OpenChamber 遷移到 Pi 的約定](../../docs/ops/openchamber-pi-migration.md)
-- [外掛 GUI 與狀態歸屬設計](../../docs/design/plugin-gui-design.md)
-- [復原模型](../../docs/ops/recovery.md)
-- [雲端部署](../../docs/ops/cloud-deployment.md)
-- [安全模型](../../docs/design/security.md)
+- [文件導覽](../../docs/README.md)
+- [開發與驗證](../../docs/development.md)
+- [執行時](../../docs/runtime.md)
+- [資源與復原](../../docs/resources.md)
+- [工作台與擴充](../../docs/extensions.md)
+- [安全](../../docs/security.md)
+- [維運](../../docs/ops/README.md)
 
 ## 專案沿革與授權條款
 
