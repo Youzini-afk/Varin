@@ -26,7 +26,7 @@ fn model_only_binding_has_no_tool_grant_and_credentials_remain_dispatch_only() {
     let view = RequestView {
         request_id: "request".into(),
         run_id: "run".into(),
-        origin: varin_runtime::execution::RequestOrigin::Conversation { step: 1, history_range: start.binding.history_range.clone() },
+        origin: varin_runtime::execution::RequestOrigin::Conversation { compaction: None, step: 1, history_range: start.binding.history_range.clone() },
         binding: start.binding,
         history: vec![],
     };
@@ -50,7 +50,7 @@ fn absent_credentials_require_explicit_anonymous_configuration() {
     let view = RequestView {
         request_id: "request".into(),
         run_id: "run".into(),
-        origin: varin_runtime::execution::RequestOrigin::Conversation { step: 1, history_range: start.binding.history_range.clone() },
+        origin: varin_runtime::execution::RequestOrigin::Conversation { compaction: None, step: 1, history_range: start.binding.history_range.clone() },
         binding: start.binding,
         history: vec![],
     };
@@ -138,7 +138,7 @@ fn factory_chat_and_azure_reach_the_selected_protocol_and_credential_header() {
         let view = RequestView {
             request_id: "request".into(),
             run_id: "run".into(),
-            origin: varin_runtime::execution::RequestOrigin::Conversation { step: 1, history_range: start.binding.history_range.clone() },
+            origin: varin_runtime::execution::RequestOrigin::Conversation { compaction: None, step: 1, history_range: start.binding.history_range.clone() },
             binding: start.binding,
             history: vec![],
         };
@@ -189,7 +189,7 @@ fn adapter_options_reject_wrong_family_and_frozen_input_replacement() {
     assert!(matches!(model_session::bind(config.clone()), Err(error) if error.code=="sampling_parameters"));
     config.model_options = Some(serde_json::json!({"temperature":0.3,"samplingParams":{"top_p":0.8}}));
     let start = model_session::bind(config).unwrap();
-    let view = RequestView { request_id:"request".into(),run_id:"run".into(),origin:varin_runtime::execution::RequestOrigin::Conversation { step:1,history_range:start.binding.history_range.clone() },binding:start.binding,history:vec![] };
+    let view = RequestView { request_id:"request".into(),run_id:"run".into(),origin:varin_runtime::execution::RequestOrigin::Conversation { compaction: None, step:1,history_range:start.binding.history_range.clone() },binding:start.binding,history:vec![] };
     let payload = start.provider.serialize(&view).unwrap();
     assert_eq!(payload["temperature"], 0.3); assert_eq!(payload["top_p"],0.8); assert_eq!(payload["model"],"local-test");
 }

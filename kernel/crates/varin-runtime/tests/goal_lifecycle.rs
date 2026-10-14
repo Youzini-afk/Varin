@@ -85,7 +85,7 @@ impl Fixture {
                     request_id: id.into(),
                     run_id: self.run.clone(),
                     origin: RequestOrigin::Conversation {
-                        step: 1,
+                        compaction: None, step: 1,
                         history_range: range.clone(),
                     },
                     binding: RequestBinding {

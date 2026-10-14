@@ -463,7 +463,7 @@ impl Fixture {
                 request_id: "parent-request".into(),
                 run_id: receipt.run_id.clone(),
                 origin: RequestOrigin::Conversation {
-                    step: 1,
+                    compaction: None, step: 1,
                     history_range: range.clone(),
                 },
                 binding: RequestBinding {
@@ -653,7 +653,7 @@ impl Fixture {
                 request_id: request_id.clone(),
                 run_id: self.context.run_id.clone(),
                 origin: RequestOrigin::Conversation {
-                    step: 2,
+                    compaction: None, step: 2,
                     history_range: range.clone(),
                 },
                 binding: RequestBinding {

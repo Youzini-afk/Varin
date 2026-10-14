@@ -78,7 +78,7 @@ fn snapshot(
         request_id: id.into(),
         run_id: run.into(),
         origin: RequestOrigin::Conversation {
-            step: 1,
+            compaction: None, step: 1,
             history_range: binding.history_range.clone(),
         },
         binding,
@@ -290,7 +290,7 @@ fn actual_serializers_keep_cache_semantics_full_tail_and_exact_prefix_invalidati
             request_id: "first".into(),
             run_id: "run".into(),
             origin: RequestOrigin::Conversation {
-                step: 1,
+                compaction: None, step: 1,
                 history_range: binding.history_range.clone(),
             },
             binding,
@@ -391,7 +391,7 @@ fn calibration_preserves_opaque_media_and_unmeasured_flags_and_rejects_incomplet
         request_id: "opaque".into(),
         run_id: "run".into(),
         origin: RequestOrigin::Conversation {
-            step: 1,
+            compaction: None, step: 1,
             history_range: binding.history_range.clone(),
         },
         binding,

@@ -85,7 +85,7 @@ fn model_call(
                     request_id: request.into(),
                     run_id: run.into(),
                     origin: RequestOrigin::Conversation {
-                        step: 1,
+                        compaction: None, step: 1,
                         history_range: range,
                     },
                     binding,

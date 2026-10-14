@@ -1271,22 +1271,47 @@ Both operation cancellation and model-generation interruption address the same r
 
 ## Explicit context compaction
 
-`Catalog::create_context_job` admits a summarization Run and its dedicated branch atomically. The
-job fixes an original-history ancestor, checkpoint revision and continuation instruction/memory
-snapshot. Its model launch uses the normal durable request, output, cancellation and recovery paths;
-`context_job::configure_compaction_start` supplies the fixed source-part policy and a tool-free provider
-binding. Historical source items are quoted with their identities and roles as external data under
-summarizer instructions, rather than replayed as live user instructions or tool calls.
+`runtime.context_job.preview` is a pure read of the original ancestor/checkpoint cut. It shares the
+`FrozenSummarySource` loader with create, holds the original ContentStore publication lease while
+copying bytes, and admits no Run or preview ledger. It returns addressable, unbudgeted quotations,
+opaque-free media, a `sourceCutHash` and the selected model budget. Original roles, source identities
+and tool-pair validation belong to Core. A source range is a valid UTF-8 byte range on the exact
+quoted text; media references always select the whole item.
 
-The source branch remains usable while the job runs. `publish_context_job` accepts only that Run's
-successful, complete textual generations for every frozen part and rechecks the source ancestor and checkpoint
-revision. Publishing preserves both original history and newly appended tail items. A failed,
-cancelled, incomplete or stale candidate does not replace the active checkpoint. Job branches reject
-additional input; list/inspect APIs retain the original admission and make pending work discoverable
-after restart. Manual jobs explicitly freeze the native/manual recipe. Automatic jobs additionally
-freeze the chosen strategy's immutable artifact/configuration identity, background/blocking mode and
-optional summary guidance in this same ContentStore recipe. The core summarizer system and tool-free
-output rules always apply; additional guidance participates in the original partition estimate.
+Create reloads the original cut and checks the hash before its short admission transaction. The hash
+covers the actual prior checkpoint, selected source identities/order/roles/body references, frozen
+memory/resources/personalization, continuation guidance, quote format and the producer-visible model
+budget. Appended tail N is excluded. Private dispatch configuration and credential scope are bound
+independently by the original Run launch; they are not producer inputs. A memory/budget/cut change
+rejects the candidate. A later credential/configuration substitution rejects original-key admission.
+
+`Catalog::create_context_job` atomically admits the original summary Run and its isolated branch.
+Its ContentStore recipe retains both the exact original request (`compaction: null` explicitly asks
+for the builtin) and the resolved producer/plan/source references. Compaction producers are separate
+from Budget Decision strategies. Extension identity includes the exact artifact, configuration,
+provider and validated complete Host composition; recovery never selects a current replacement.
+
+The builtin fold and extension `model_plan` use the same frozen plan executor. Node IDs are unique,
+dependencies name earlier nodes, and all node outputs must reach the declared final node. Independent
+leaves and merge trees are legal; execution is topological and serial, not physically parallel. Each
+original RequestPrepared/ModelStep carries a typed planHash/nodeId association and Catalog indexes
+that relationship atomically. Requests use only their specified source ranges and prior-node outputs,
+under Core summarizer instructions with no tools. The complete provider serialization is checked
+against the model input budget before RequestPrepared; an oversized node fails without paid dispatch
+or recursive compaction. Media costs remain explicitly unmeasured by the ordinary local estimator.
+
+A `text` plan completes the same original Run with zero ModelSteps and no fabricated usage. Production
+RunAssembly uses an explicit NoModelProvider/NoTools binding and the admitted nonsecret launch identity;
+it neither parses dispatch-only configuration nor looks up credentials. A public registered model
+capacity description is sufficient for its preview/create path.
+
+Publication requires that original Run's successful completion. A model plan publishes the output
+associated with its exact finalNodeId after checking all required original nodes; a text plan publishes
+its frozen text. Source ancestry, owner cancellation, checkpoint/memory CAS and foreground capacity
+checks remain on the existing path. Original history and new tail items remain intact. Cancellation
+of a completed but unpublished summary records the original Run cancel flag/revision and fences an
+already-prepared publication without rewriting output or usage. Job branches reject extra input;
+inspect/list expose compaction kind/producer/sourceCutHash/planHash from the original recipe.
 
 The original owner/checkpoint/model/credential identity admits one automatic job. Failed or unknown
 work is not silently rekeyed after a routing change. Simultaneously prepared candidates are checked at

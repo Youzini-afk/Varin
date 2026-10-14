@@ -169,7 +169,7 @@ fn model_call(db: &mut Catalog, receipt: &Receipt, checkpoint: &str) -> ToolOrig
             request_id: "model-step".into(),
             run_id: receipt.run_id.clone(),
             origin: RequestOrigin::Conversation {
-                step: 1,
+                compaction: None, step: 1,
                 history_range: binding.history_range.clone(),
             },
             binding,
@@ -680,6 +680,7 @@ fn compaction_copies_original_resource_bytes_even_before_previous_summary_bounda
     previous.summary = "Summary after the earlier boundary".into();
     let original = db.publish_context(previous).unwrap();
     let request = varin_runtime::context_job::ContextJobRequest {
+            compaction: None,
             summary_recipe: varin_runtime::context_job::ContextSummaryRecipe::manual(),
         owner_run_id: None,
         personalization: original.personalization.clone(),
@@ -702,7 +703,7 @@ fn compaction_copies_original_resource_bytes_even_before_previous_summary_bounda
             request_id: "summary-step".into(),
             run_id: job.receipt.run_id.clone(),
             origin: RequestOrigin::Conversation {
-                step: 1,
+                compaction: None, step: 1,
                 history_range: binding.history_range.clone(),
             },
             binding,

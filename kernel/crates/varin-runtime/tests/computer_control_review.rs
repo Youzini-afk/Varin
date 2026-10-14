@@ -135,6 +135,7 @@ fn idle_root_handback_uses_original_launch_and_lost_ack_reopen_is_idempotent() {
         .db
         .create_context_job(
             varin_runtime::context_job::ContextJobRequest {
+            compaction: None,
             summary_recipe: varin_runtime::context_job::ContextSummaryRecipe::manual(),
                 owner_run_id: None,
                 personalization: None,

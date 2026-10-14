@@ -321,7 +321,7 @@ mod tests {
             request_id: "request".into(),
             run_id: "run".into(),
             origin: RequestOrigin::Conversation {
-                step: 1,
+                compaction: None, step: 1,
                 history_range: HistoryRange {
                     branch_id: "branch".into(),
                     ancestor_id: None,

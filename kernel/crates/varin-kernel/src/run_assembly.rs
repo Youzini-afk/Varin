@@ -108,13 +108,29 @@ impl RunAssembly {
             crate::plan::eligible(&catalog, &run.id)
                 .map_err(|error| KernelError::Authorization(error.to_string()))?
         };
-        let summary_parts = runtime
-            .catalog()
-            .lock()
-            .map_err(|_| KernelError::Storage("catalog owner failed".into()))?
-            .context_job_parts(&run.id)
+        let summary_read = {
+            let owner = runtime.catalog();
+            let catalog = owner
+                .lock()
+                .map_err(|_| KernelError::Storage("catalog owner failed".into()))?;
+            if catalog.is_context_job(&run.id).map_err(domain)? {
+                Some(catalog.capture_context_job(&run.id).map_err(domain)?)
+            } else {
+                None
+            }
+        };
+        // Recipe hydration is outside Catalog ownership and protected by its original lease.
+        let summary_plan = summary_read
+            .map(|read| read.load_execution())
+            .transpose()
             .map_err(domain)?;
-        let is_context_job = summary_parts.is_some();
+        let is_context_job = summary_plan.is_some();
+        let text_compaction = summary_plan.as_ref().is_some_and(|execution| {
+            matches!(
+                execution.plan,
+                varin_runtime::context_job::ContextCompactionPlan::Text { .. }
+            )
+        });
         let is_child = runtime
             .catalog()
             .lock()
@@ -133,10 +149,17 @@ impl RunAssembly {
                 "context jobs use their fixed tool-free launch".into(),
             ));
         }
-        let configuration = serde_json::from_value(run.configuration.clone())?;
         check_cancelled()?;
         let mut selected_credential_scope = None;
-        let mut start = if let Some(scope) = p.credential_scope {
+        let mut start = if text_compaction {
+            let read = runtime.catalog().lock().map_err(|_|KernelError::Storage("catalog owner failed".into()))?.capture_launch(&run.id).map_err(domain)?.ok_or_else(||KernelError::Protocol("text summary launch is missing".into()))?;
+            let launch = read.load().map_err(domain)?;
+            selected_credential_scope = launch.selection.credential_scope.clone();
+            if p.credential_scope.is_some() { return Err(KernelError::Protocol("text compaction uses its original credential identity without credential rebinding".into())); }
+            Ok(varin_runtime::context_job::text_compaction_start(&launch.selection))
+        } else {
+            let configuration = serde_json::from_value(run.configuration.clone())?;
+            if let Some(scope) = p.credential_scope {
             let scope = varin_runtime::providers::auth::CredentialScope {
                 reference: scope.reference,
                 authority: scope.authority,
@@ -167,11 +190,12 @@ impl RunAssembly {
             model_session::bind_with_credentials(configuration, resolver, scope)
         } else {
             model_session::bind(configuration)
+            }
         }
         .map_err(|e| KernelError::Operation(e.to_string()))?;
         check_cancelled()?;
-        if let Some(parts) = summary_parts {
-            start = varin_runtime::context_job::configure_compaction_start(start, parts);
+        if let Some(plan) = summary_plan {
+            start = varin_runtime::context_job::configure_compaction_start(start, plan);
         }
         let policy_launch = runtime
             .catalog()

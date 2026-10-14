@@ -363,7 +363,7 @@ impl ContentCollection {
         roots.push_str(" UNION ALL SELECT json_extract(body,'$.intent.request_ref') FROM operations WHERE json_extract(body,'$.intent.kind')='user_host_job'");
         roots.push_str(" UNION ALL SELECT json_extract(body,'$.objective_ref') FROM goals UNION ALL SELECT json_extract(body,'$.start_intent') FROM goals UNION ALL SELECT json_extract(body,'$.reason_ref') FROM goals WHERE json_extract(body,'$.reason_ref') IS NOT NULL");
         roots.push_str(" UNION ALL SELECT body FROM context_checkpoints UNION ALL SELECT body FROM memory_states");
-        roots.push_str(" UNION ALL SELECT recipe FROM context_jobs UNION ALL SELECT body FROM context_job_parts");
+        roots.push_str(" UNION ALL SELECT recipe FROM context_jobs");
         roots.push_str(" UNION ALL SELECT json_extract(data,'$.composition') FROM events WHERE kind='run.tools_activated'");
         roots.push_str(" UNION ALL SELECT json_extract(body,'$.selection.tools_ref') FROM run_launches
             UNION ALL SELECT json_extract(body,'$.selection.base_tools_ref') FROM run_launches

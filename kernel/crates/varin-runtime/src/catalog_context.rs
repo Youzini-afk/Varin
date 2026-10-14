@@ -456,12 +456,10 @@ impl Catalog {
             })
         };
         if self.is_context_job(run_id)? {
-            let (part, previous) = self.context_job_input(run_id)?;
+            let outputs = self.context_job_outputs(run_id)?;
             return Ok(Some(capture(ContextReadKind::Summary {
-                content: self.content.clone(),
                 job: self.capture_context_job(run_id)?,
-                part,
-                previous,
+                outputs,
             })?));
         }
         let active:Option<(String,Option<String>,String)>=self.db.query_row("SELECT c.id,c.through_id,c.body FROM active_contexts a JOIN context_checkpoints c ON c.id=a.checkpoint_id WHERE a.branch_id=?1",[&run.branch_id],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?))).optional()?;
@@ -600,10 +598,8 @@ enum ContextReadKind {
         through_id: Option<String>,
     },
     Summary {
-        content: crate::content::ContentStore,
         job: super::context_jobs::ContextJobRead,
-        part: Value,
-        previous: Option<(String, Value)>,
+        outputs: Vec<super::context_jobs::ContextNodeOutput>,
     },
 }
 impl ContextRead {
@@ -674,57 +670,7 @@ impl ContextRead {
                     trusted_receipts,
                 )
             }
-            ContextReadKind::Summary {
-                content,
-                job,
-                part,
-                previous,
-            } => {
-                let request = job.request()?;
-                let mut history = vec![ConversationItem {
-                    resource_activation: None,
-                    id: format!("context-job:{}:system", request.key),
-                    provenance: Provenance::SystemInstruction {
-                        source: "context_compaction:v2".into(),
-                    },
-                    content: Content::Text {
-                        text: crate::context_job::SUMMARIZER_SYSTEM.into(),
-                    },
-                    opaque: None,
-                }];
-                if let Some((request_id, reference)) = previous {
-                    let summary = crate::context_material::summary_text(&content, &reference)?;
-                    history.push(ConversationItem {
-                        resource_activation: None,
-                        id: format!("context-job:{}:summary-so-far:{request_id}", request.key),
-                        provenance: Provenance::ExternalData {
-                            source: format!("model-output:{request_id}"),
-                        },
-                        content: Content::Text { text: summary },
-                        opaque: None,
-                    });
-                }
-                let material = content.load_items(&part, &|| false)?;
-                history.extend(material);
-                history.push(ConversationItem {
-                    resource_activation: None,
-                    id: format!("context-job:{}:request", request.key),
-                    provenance: Provenance::UserInstruction {
-                        input_id: request.key.clone(),
-                    },
-                    content: Content::Text {
-                        text: request.summary_recipe.request_text(),
-                    },
-                    opaque: None,
-                });
-                return Ok(ContextProjection {
-                    resource_checkpoint_id: None,
-                    checkpoint_id: format!("context-job:{}", request.key),
-                    history,
-                    instruction_sources: vec!["context_compaction:v2".into()],
-                    memory_checkpoint: None,
-                });
-            }
+            ContextReadKind::Summary { job, outputs } => return job.compile(outputs),
         };
         let checkpoint: ContextCheckpoint = serde_json::from_value(content.load(&reference)?)?;
         let mut history = Vec::new();
@@ -806,6 +752,7 @@ impl ContextRead {
             baseline.as_ref(),
         )?);
         Ok(ContextProjection {
+            compaction: None,
             resource_checkpoint_id: checkpoint.resources.as_ref().map(|_| checkpoint_id.clone()),
             checkpoint_id,
             history,

@@ -404,6 +404,7 @@ pub enum RequestOrigin {
         parent_operation_id: String,
     },
     Conversation {
+        compaction: Option<crate::context_job::ContextCompactionStep>,
         step: u64,
         history_range: HistoryRange,
     },
@@ -1131,6 +1132,7 @@ pub enum ExecutionRecord {
 /// Never retain a transaction or lock after return. Error means no new work may be dispatched.
 #[derive(Debug, Clone)]
 pub struct ContextProjection {
+    pub compaction: Option<crate::context_job::ContextCompactionStep>,
     pub resource_checkpoint_id: Option<String>,
     pub checkpoint_id: String,
     pub history: Vec<ConversationItem>,
@@ -2288,11 +2290,13 @@ impl<
                         ExecutionError::new("step_overflow", "model step identity exhausted")
                     })?;
                     let mut binding = input.binding.clone();
+                    let mut compaction = None;
                     if let Some(context) = self.persistence.compile_context(
                         &input.run_id,
                         input.owner_generation,
                         history_cursor.as_deref(),
                     )? {
+                        compaction = context.compaction;
                         history = context.history;
                         binding.resource_checkpoint_id = context.resource_checkpoint_id;
                         binding.instruction_sources = context.instruction_sources;
@@ -2353,6 +2357,7 @@ impl<
                         ),
                         run_id: input.run_id.clone(),
                         origin: RequestOrigin::Conversation {
+                            compaction,
                             step: steps,
                             history_range: binding.history_range.clone(),
                         },

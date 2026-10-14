@@ -1,185 +1,367 @@
-//! Frozen summary excerpts. Partitioning is preparation, not a token measurement or an input limit.
+//! Core-owned quotation, source identity and frozen summary-plan validation.
 use crate::{catalog::RuntimeError, context_capacity::estimate_item, context_job::*, execution::*};
 use serde::Deserialize;
 use serde_json::{Value, json};
-
+use sha2::{Digest, Sha256};
+use std::collections::{BTreeMap, BTreeSet};
 type Result<T> = std::result::Result<T, RuntimeError>;
+pub(crate) const QUOTE_FORMAT: u64 = 1;
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct Capacity {
     context_window_tokens: Option<u64>,
     max_output_tokens: Option<u64>,
 }
-fn data(key: &str, item: &ConversationItem, suffix: &str, text: String) -> ConversationItem {
-    ConversationItem {
-        resource_activation: None,
-        id: format!("context-job:{key}:source:{}:{suffix}", item.id),
-        provenance: Provenance::ExternalData {
-            source: format!("history:{}", item.id),
-        },
-        content: Content::Text { text },
-        opaque: None,
+pub(crate) fn hash(value: &impl serde::Serialize) -> Result<String> {
+    fn canonical(value: Value) -> Value {
+        match value {
+            Value::Object(object) => Value::Object(
+                object
+                    .into_iter()
+                    .map(|(k, v)| (k, canonical(v)))
+                    .collect::<BTreeMap<_, _>>()
+                    .into_iter()
+                    .collect(),
+            ),
+            Value::Array(array) => Value::Array(array.into_iter().map(canonical).collect()),
+            value => value,
+        }
     }
+    Ok(format!(
+        "sha256-{}",
+        hex::encode(Sha256::digest(serde_json::to_vec(&canonical(
+            serde_json::to_value(value)?
+        ))?))
+    ))
 }
-fn floor(text: &str, mut end: usize) -> usize {
-    while !text.is_char_boundary(end) {
-        end -= 1;
-    }
-    end
-}
-fn excerpts(
-    key: &str,
-    mut item: ConversationItem,
-    budget: Option<u64>,
-) -> Result<Vec<ConversationItem>> {
-    item.opaque = None;
-    // Media stays media. Quoting an inline payload as text would inflate context and lose the
-    // selected adapter's multimodal input. Its token cost is unknown, not assigned a fake price.
-    if matches!(item.content, Content::Media { .. }) {
-        return Ok(vec![ConversationItem {
-            resource_activation: None,
-            id: format!("context-job:{key}:source:{}", item.id),
-            provenance: Provenance::ExternalData {
-                source: format!("history:{}", item.id),
-            },
-            content: item.content,
-            opaque: None,
-        }]);
-    }
-    // Tool-free summary evidence preserves explicitly ordered parts without inventing calls.
-    let parts = match &mut item.content {
-        Content::Output { output } => std::mem::take(&mut output.parts),
-        Content::ToolResult { result } => match &mut result.completion {
-            ToolCompletion::Result { content, .. }
-            | ToolCompletion::JobAccepted {
-                content: Some(content),
-                ..
-            } => std::mem::take(&mut content.parts),
-            _ => Vec::new(),
-        },
-        _ => Vec::new(),
+pub(crate) fn model_budget(
+    configuration: &Value,
+    recipe: &ContextSummaryRecipe,
+) -> Result<ContextCompactionModelBudget> {
+    let capacity: Capacity = serde_json::from_value(configuration.clone())?;
+    let fixed = (SUMMARIZER_SYSTEM.len() as u64 + recipe.request_text().len() as u64).div_ceil(4);
+    let source_budget_tokens = match (capacity.context_window_tokens, capacity.max_output_tokens) {
+        (Some(window), Some(output)) => Some(
+            window
+                .saturating_sub(output.saturating_mul(2))
+                .saturating_sub(fixed),
+        ),
+        _ => None,
     };
-    if !parts.is_empty() {
-        let source_id = item.id.clone();
-        let mut result = excerpts(key, item, budget)?;
+    Ok(ContextCompactionModelBudget {
+        context_window_tokens: capacity.context_window_tokens,
+        max_output_tokens: capacity.max_output_tokens,
+        source_budget_tokens,
+    })
+}
+pub(crate) fn quote_sources(
+    key: &str,
+    history: Vec<ConversationItem>,
+) -> Result<Vec<ContextCompactionSource>> {
+    fn quote(
+        key: &str,
+        mut item: ConversationItem,
+        out: &mut Vec<ContextCompactionSource>,
+    ) -> Result<()> {
+        item.opaque = None;
+        let parts = match &mut item.content {
+            Content::Output { output } => std::mem::take(&mut output.parts),
+            Content::ToolResult { result } => match &mut result.completion {
+                ToolCompletion::Result { content, .. }
+                | ToolCompletion::JobAccepted {
+                    content: Some(content),
+                    ..
+                } => std::mem::take(&mut content.parts),
+                _ => Vec::new(),
+            },
+            _ => Vec::new(),
+        };
+        let source_id = format!("context-job:{key}:source:{}", item.id);
+        let media = if let Content::Media { media } = &item.content {
+            Some(media.clone())
+        } else {
+            None
+        };
+        let text = if media.is_some() {
+            serde_json::to_string(
+                &json!({"id":item.id,"provenance":item.provenance,"content":{"kind":"media","sourceId":format!("{source_id}:media")}}),
+            )?
+        } else {
+            serde_json::to_string(&item)?
+        };
+        out.push(ContextCompactionSource {
+            source_id: source_id.clone(),
+            item: ConversationItem {
+                resource_activation: None,
+                id: source_id.clone(),
+                provenance: Provenance::ExternalData {
+                    source: format!("history:{}", item.id),
+                },
+                content: Content::Text { text },
+                opaque: None,
+            },
+        });
+        if let Some(media) = media {
+            out.push(ContextCompactionSource {
+                source_id: format!("{source_id}:media"),
+                item: ConversationItem {
+                    resource_activation: None,
+                    id: format!("{source_id}:media"),
+                    provenance: Provenance::ExternalData {
+                        source: format!("history:{}", item.id),
+                    },
+                    content: Content::Media { media },
+                    opaque: None,
+                },
+            });
+        }
         for (index, part) in parts.into_iter().enumerate() {
             let content = match part {
                 OutputPart::Text { text } => Content::Text { text },
                 OutputPart::Media { media } => Content::Media { media },
             };
-            result.extend(excerpts(
+            quote(
                 key,
                 ConversationItem {
                     resource_activation: None,
-                    id: format!("{source_id}:part:{index}"),
-                    provenance: Provenance::ExternalData {
-                        source: format!("history:{source_id}"),
-                    },
+                    id: format!("{}:part:{index}", item.id),
+                    provenance: item.provenance.clone(),
                     content,
                     opaque: None,
                 },
-                budget,
-            )?);
+                out,
+            )?;
         }
-        return Ok(result);
+        Ok(())
     }
-    let whole = data(key, &item, "whole", serde_json::to_string(&item)?);
-    let Some(budget) = budget.filter(|budget| estimate_item(&whole) > *budget) else {
-        return Ok(vec![whole]);
-    };
-    drop(whole);
-    let body = serde_json::to_string(&item.content)?;
-    let mut result = Vec::new();
-    let mut start = 0;
-    while start < body.len() {
-        let mut end = floor(
-            &body,
-            start
-                .saturating_add(usize::try_from(budget.saturating_mul(4)).unwrap_or(usize::MAX))
-                .min(body.len()),
-        );
-        loop {
-            if end <= start {
-                return Err(RuntimeError::Invalid(
-                    "selected summary capacity cannot represent a source excerpt".into(),
-                ));
-            }
-            let fragment = data(
-                key,
-                &item,
-                &start.to_string(),
-                serde_json::to_string(&json!({"id":item.id,"provenance":item.provenance,
-                "utf8_range":{"start":start,"end":end,"total":body.len()},"content_fragment":&body[start..end]}))?,
-            );
-            let cost = estimate_item(&fragment);
-            if cost <= budget {
-                result.push(fragment);
-                break;
-            }
-            // Serialized escaping and source identity count too. Shrink strictly, on a UTF-8
-            // boundary, until the complete excerpt fits this preparation budget.
-            let next = (end - start).saturating_mul(usize::try_from(budget).unwrap_or(usize::MAX))
-                / usize::try_from(cost).unwrap_or(usize::MAX);
-            end = floor(&body, start + next.min(end - start - 1));
-        }
-        start = end;
-    }
-    Ok(result)
-}
-pub(crate) fn partition(
-    key: &str,
-    configuration: &Value,
-    recipe: &ContextSummaryRecipe,
-    prior: Option<ConversationItem>,
-    history: Vec<ConversationItem>,
-) -> Result<Vec<Vec<ConversationItem>>> {
-    let capacity: Capacity = serde_json::from_value(configuration.clone())?;
-    let fixed = (SUMMARIZER_SYSTEM.len() as u64 + recipe.request_text().len() as u64).div_ceil(4);
-    let budget = match (capacity.context_window_tokens, capacity.max_output_tokens) {
-        (Some(window), Some(output)) => {
-            // Each later request carries the previous summary and reserves the selected output.
-            let remaining = window
-                .saturating_sub(output.saturating_mul(2))
-                .saturating_sub(fixed);
-            if remaining == 0 {
-                return Err(RuntimeError::Invalid(
-                    "selected model leaves no source budget for a continuation summary".into(),
-                ));
-            }
-            Some(remaining)
-        }
-        _ => None,
-    };
-    let mut material = Vec::new();
-    if let Some(prior) = prior {
-        if budget.is_none_or(|budget| estimate_item(&prior) <= budget) {
-            material.push(prior);
-        } else {
-            material.extend(excerpts(key, prior, budget)?);
-        }
-    }
+    let mut sources = Vec::new();
     for item in history {
-        material.extend(excerpts(key, item, budget)?);
+        quote(key, item, &mut sources)?;
     }
-    let mut parts = Vec::new();
-    let mut part = Vec::new();
+    let mut ids = BTreeSet::new();
+    if sources.is_empty() || sources.iter().any(|source| !ids.insert(&source.source_id)) {
+        return Err(RuntimeError::Invalid(
+            "empty or ambiguous summary source".into(),
+        ));
+    }
+    Ok(sources)
+}
+pub(crate) fn source_item(
+    source: &ContextCompactionSource,
+    range: Option<&ContextCompactionRange>,
+) -> Result<ConversationItem> {
+    let mut item = source.item.clone();
+    if let Some(range) = range {
+        let Content::Text { text } = &item.content else {
+            return Err(RuntimeError::Invalid(
+                "media summary sources require a whole-item reference".into(),
+            ));
+        };
+        let start = usize::try_from(range.start)
+            .map_err(|_| RuntimeError::Invalid("invalid source range".into()))?;
+        let end = usize::try_from(range.end)
+            .map_err(|_| RuntimeError::Invalid("invalid source range".into()))?;
+        if start >= end
+            || end > text.len()
+            || !text.is_char_boundary(start)
+            || !text.is_char_boundary(end)
+        {
+            return Err(RuntimeError::Invalid(
+                "summary source range is not a valid UTF-8 text range".into(),
+            ));
+        }
+        item.content = Content::Text {
+            text: serde_json::to_string(
+                &json!({"sourceId":source.source_id,"utf8Range":{"start":start,"end":end,"total":text.len()},"quotedSourceFragment":&text[start..end]}),
+            )?,
+        };
+        item.id = format!("{}:{start}:{end}", item.id);
+    }
+    Ok(item)
+}
+pub(crate) fn validate_plan(
+    plan: &ContextCompactionPlan,
+    preview: &ContextCompactionPreview,
+) -> Result<()> {
+    if plan.source_cut_hash() != preview.source_cut_hash {
+        return Err(RuntimeError::Conflict(
+            "context compaction source cut changed".into(),
+        ));
+    }
+    let ContextCompactionPlan::ModelPlan {
+        nodes,
+        final_node_id,
+        ..
+    } = plan
+    else {
+        if matches!(plan, ContextCompactionPlan::Text { text, .. } if !text.trim().is_empty()) {
+            return Ok(());
+        }
+        return Err(RuntimeError::Invalid(
+            "text compaction candidate is empty".into(),
+        ));
+    };
+    let sources: BTreeMap<_, _> = preview
+        .sources
+        .iter()
+        .map(|source| (&source.source_id, source))
+        .collect();
+    let mut earlier = BTreeMap::new();
+    for node in nodes {
+        if node.id.trim().is_empty() || earlier.contains_key(&node.id) || node.inputs.is_empty() {
+            return Err(RuntimeError::Invalid(
+                "summary plan has an empty or duplicate node".into(),
+            ));
+        }
+        for input in &node.inputs {
+            match input {
+                ContextCompactionInput::Source { source_id, range } => {
+                    let source = sources.get(source_id).ok_or_else(|| {
+                        RuntimeError::Invalid("summary source is not in the frozen cut".into())
+                    })?;
+                    source_item(source, range.as_ref())?;
+                }
+                ContextCompactionInput::NodeOutput { node_id } => {
+                    if !earlier.contains_key(node_id) {
+                        return Err(RuntimeError::Invalid(
+                            "summary node dependency must name an earlier node".into(),
+                        ));
+                    }
+                }
+            }
+        }
+        earlier.insert(&node.id, node);
+    }
+    if !earlier.contains_key(final_node_id) {
+        return Err(RuntimeError::Invalid(
+            "summary final node is missing".into(),
+        ));
+    }
+    let mut needed = BTreeSet::new();
+    let mut stack = vec![final_node_id];
+    while let Some(id) = stack.pop() {
+        if needed.insert(id) {
+            for input in &earlier[id].inputs {
+                if let ContextCompactionInput::NodeOutput { node_id } = input {
+                    stack.push(node_id);
+                }
+            }
+        }
+    }
+    if needed.len() != nodes.len() {
+        return Err(RuntimeError::Invalid(
+            "summary plan contains output unreachable from the final node".into(),
+        ));
+    }
+    Ok(())
+}
+pub(crate) fn builtin_plan(preview: &ContextCompactionPreview) -> Result<ContextCompactionPlan> {
+    let budget = preview.model_budget.source_budget_tokens;
+    if budget == Some(0) {
+        return Err(RuntimeError::Invalid(
+            "selected model leaves no source budget for a continuation summary".into(),
+        ));
+    }
+    let mut inputs = Vec::new();
+    for source in &preview.sources {
+        if budget.is_none_or(|budget| estimate_item(&source.item) <= budget)
+            || !matches!(source.item.content, Content::Text { .. })
+        {
+            inputs.push((
+                ContextCompactionInput::Source {
+                    source_id: source.source_id.clone(),
+                    range: None,
+                },
+                estimate_item(&source.item),
+            ));
+            continue;
+        }
+        let Content::Text { text } = &source.item.content else {
+            unreachable!()
+        };
+        let budget = budget.expect("oversized source has budget");
+        let mut start = 0;
+        while start < text.len() {
+            let mut end = start
+                .saturating_add(usize::try_from(budget.saturating_mul(4)).unwrap_or(usize::MAX))
+                .min(text.len());
+            while !text.is_char_boundary(end) {
+                end -= 1;
+            }
+            loop {
+                if end <= start {
+                    return Err(RuntimeError::Invalid(
+                        "selected summary capacity cannot represent a source excerpt".into(),
+                    ));
+                }
+                let range = ContextCompactionRange {
+                    start: start as u64,
+                    end: end as u64,
+                };
+                let cost = estimate_item(&source_item(source, Some(&range))?);
+                if cost <= budget {
+                    inputs.push((
+                        ContextCompactionInput::Source {
+                            source_id: source.source_id.clone(),
+                            range: Some(range),
+                        },
+                        cost,
+                    ));
+                    break;
+                }
+                let next = (end - start)
+                    .saturating_mul(usize::try_from(budget).unwrap_or(usize::MAX))
+                    / usize::try_from(cost).unwrap_or(usize::MAX);
+                end = start + next.min(end - start - 1);
+                while !text.is_char_boundary(end) {
+                    end -= 1;
+                }
+            }
+            start = end;
+        }
+    }
+    let mut groups = Vec::new();
+    let mut group = Vec::new();
     let mut used = 0u64;
-    for item in material {
-        let cost = estimate_item(&item);
-        if !part.is_empty() && budget.is_some_and(|budget| cost > budget.saturating_sub(used)) {
-            parts.push(std::mem::take(&mut part));
+    for (input, cost) in inputs {
+        if !group.is_empty() && budget.is_some_and(|budget| cost > budget.saturating_sub(used)) {
+            groups.push(std::mem::take(&mut group));
             used = 0;
         }
         used = used.saturating_add(cost);
-        part.push(item);
+        group.push(input);
     }
-    if !part.is_empty() {
-        parts.push(part);
+    if !group.is_empty() {
+        groups.push(group);
     }
-    if parts.is_empty() {
-        return Err(RuntimeError::Invalid("summary source is empty".into()));
+    let mut nodes = Vec::new();
+    for (index, mut inputs) in groups.into_iter().enumerate() {
+        if index > 0 {
+            inputs.insert(
+                0,
+                ContextCompactionInput::NodeOutput {
+                    node_id: format!("fold:{}", index - 1),
+                },
+            );
+        }
+        nodes.push(ContextCompactionNode {
+            id: format!("fold:{index}"),
+            instructions: None,
+            inputs,
+        });
     }
-    Ok(parts)
+    let final_node_id = nodes
+        .last()
+        .ok_or_else(|| RuntimeError::Invalid("summary source is empty".into()))?
+        .id
+        .clone();
+    let plan = ContextCompactionPlan::ModelPlan {
+        source_cut_hash: preview.source_cut_hash.clone(),
+        nodes,
+        final_node_id,
+    };
+    validate_plan(&plan, preview)?;
+    Ok(plan)
 }
 
 pub(crate) fn summary_text(

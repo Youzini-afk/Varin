@@ -107,7 +107,7 @@ fn fixture(budget: u64) -> Fixture {
                     request_id: "request".into(),
                     run_id: run.clone(),
                     origin: RequestOrigin::Conversation {
-                        step: 0,
+                        compaction: None, step: 0,
                         history_range: range,
                     },
                     binding,

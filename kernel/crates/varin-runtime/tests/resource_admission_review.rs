@@ -20,7 +20,7 @@ fn request_snapshot(receipt: &Receipt) -> varin_runtime::execution::RequestSnaps
             request_id: "model-1".into(),
             run_id: receipt.run_id.clone(),
             origin: RequestOrigin::Conversation {
-                step: 1,
+                compaction: None, step: 1,
                 history_range: HistoryRange {
                     branch_id: receipt.branch_id.clone(),
                     ancestor_id: None,

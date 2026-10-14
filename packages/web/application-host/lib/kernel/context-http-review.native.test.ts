@@ -48,10 +48,11 @@ async function fixture(existingRoot?: string, existingEndpoint?: string) {
     currentScope: async () => ({ reference: 'fixture-reference', authority: 'fixture-existing-owner', account: 'fixture-local-handle', generation: 1 }),
     runtime: { getAuth: async () => ({ auth: { apiKey: secret } }) },
   });
-  const configuration = { providerFamily: 'openai-responses', model: 'fixture-model', endpoint, credentialEnvironment: null, allowAnonymous: false, configurationGeneration: 1, maxOutputTokens: 64 };
+  const configuration = { providerId: 'fixture-provider', providerFamily: 'openai-responses', model: 'fixture-model', endpoint, credentialEnvironment: null, allowAnonymous: false, configurationGeneration: 1, maxOutputTokens: 64 };
   const launchErrors: unknown[] = [];
   const rebound: unknown[] = [];
   const adapter = new ThreadAdapter(new AgentRuntimeClient(kernel), {
+    describeModel: async selection => ({ providerId: selection.providerId, model: selection.modelId, contextWindowTokens: null, maxOutputTokens: configuration.maxOutputTokens }),
     resolveModel: async selection => {
       if (selection.providerId !== 'fixture-provider' || selection.modelId !== 'fixture-model') throw new Error('unselected model');
       return { configuration, credentialOwner: owner };

@@ -1,3 +1,5 @@
+import { admitContextJobCandidate, contextCompactionScope } from './context-job-preparation.js';
+import type { ContextCompactionOwner } from './context-compaction.js';
 import type { SourceDirectory } from './thread-sources.js';
 import { sourceFailureCode } from './source-admission-error.js';
 import type { McpInteractionListParams, McpInteractionReadParams, McpInteractionRespondParams, McpSamplingOutputReviewParams } from '@varin/protocol';
@@ -24,6 +26,7 @@ import { ResourceScopeError } from './thread-resource-scope.js';
 
 export interface ThreadModelAuthority {
   listModels?(): Promise<ThreadModelInfo[]>;
+  describeModel?(selection: ThreadModel): Promise<{ providerId: string; model: string; contextWindowTokens: number | null; maxOutputTokens: number | null; thinkingLevel?: string; modelOptions?: unknown }>;
   resolveModel(selection: ThreadModel): Promise<{ configuration: ModelSessionConfiguration; credentialOwner: ExistingHostCredentialOwner }>;
   rebindModel(configuration: ModelSessionConfiguration, expectedScope: CredentialScope): Promise<ExistingHostCredentialOwner>;
 }
@@ -49,6 +52,8 @@ export class ThreadAdapter {
     private readonly processTerminals?: import('@varin/application-client').ThreadProcessesAPI,
     private readonly prepareChildProfiles?: ChildProfilePreparer) {}
 
+  private compaction?: ContextCompactionOwner;
+  bindCompaction(owner: ContextCompactionOwner): void { this.compaction = owner; }
   private sourceDirectory?: SourceDirectory;
   bindSourceDirectory(directory: SourceDirectory): void { this.sourceDirectory = directory; }
   async listSourceTargets(identity: ThreadIdentity, signal?: AbortSignal) {
@@ -399,24 +404,48 @@ export class ThreadAdapter {
     return { runtime: 'agent', ...result };
   }
 
-  async compact(input: ThreadCompact) {
-    await this.requireIdentity(input);
-    await this.refreshContext(input);
+  async compact(input: ThreadCompact, signal = new AbortController().signal) {
+    await this.requireIdentity(input, signal);
     const key = createHash('sha256').update(JSON.stringify([input.threadId, input.branchId, input.key])).digest('hex');
-    const [checkpoint, jobs] = await Promise.all([this.runtime.context(input.branchId), this.runtime.contextJobs(input.branchId)]);
-    // An uncertain create retry keeps its original prompt/memory recipe even after publication.
+    const jobs = await this.runtime.contextJobs(input.branchId, signal);
     const previous = jobs.find(job => job.request.key === key);
-    const candidate = !previous && checkpoint && this.prepareContext?.compact ? await this.prepareContext.compact(checkpoint) : undefined;
-    const recipe = previous?.request ?? (candidate ? { effective_system_prompt: candidate.effectiveSystemPrompt,
-      instruction_sources: candidate.instructionSources, memory_checkpoint: candidate.memoryCheckpoint } : checkpoint?.proposal);
-    const personalization = previous?.request.personalization ?? candidate?.personalization ?? checkpoint?.personalization;
-    const model = await this.models.resolveModel(input.model);
-    const job = await this.runtime.createContextJob({ summaryRecipe: previous ? previous.request.summary_recipe : { strategy: { kind: 'builtin', name: 'manual', version: '1' }, mode: 'manual', configurationIdentity: null, additionalInstructions: null }, key, branchId: input.branchId, throughId: input.throughId,
-      expectedRevision: input.expectedRevision, effectiveSystemPrompt: recipe?.effective_system_prompt ?? '',
-      instructionSources: recipe?.instruction_sources ?? [], memoryCheckpoint: recipe?.memory_checkpoint ?? null,
-      ...(personalization ? { personalization } : {}),
-      configuration: model.configuration, credentialScope: await model.credentialOwner.scope() });
-    void this.continueLaunch(job.receipt.run_id, { credentialOwner: model.credentialOwner }).catch(() => undefined);
+    if (previous) {
+      // Recalling an original key does not depend on today's algorithm package,
+      // personalization configuration or credential availability.
+      const run = await this.runtime.run(previous.receipt.run_id, signal);
+      const configuration = run.configuration as ModelSessionConfiguration;
+      if (previous.request.branch_id !== input.branchId || previous.request.through_id !== input.throughId
+        || previous.request.expected_revision !== input.expectedRevision || previous.request.owner_run_id
+        || configuration.providerId !== input.model.providerId || configuration.model !== input.model.modelId
+        || input.model.thinkingLevel !== undefined && configuration.thinkingLevel !== input.model.thinkingLevel
+        || input.model.temperature !== undefined && (configuration.modelOptions as { temperature?: number } | undefined)?.temperature !== input.model.temperature) {
+        throw new Error('Context job key already belongs to another selection');
+      }
+      void this.continueLaunch(previous.receipt.run_id).catch(() => undefined);
+      return previous;
+    }
+    await this.refreshContext(input, signal);
+    const checkpoint = await this.runtime.context(input.branchId, signal);
+    const candidate = checkpoint && this.prepareContext?.compact ? await this.prepareContext.compact(checkpoint, signal) : undefined;
+    const recipe = candidate ? { effective_system_prompt: candidate.effectiveSystemPrompt,
+      instruction_sources: candidate.instructionSources, memory_checkpoint: candidate.memoryCheckpoint } : checkpoint?.proposal;
+    const personalization = candidate?.personalization ?? checkpoint?.personalization;
+    if (!this.models.describeModel) throw new Error('Model capacity description is unavailable');
+    const description = await this.models.describeModel(input.model);
+    let model: Awaited<ReturnType<ThreadModelAuthority['resolveModel']>> | undefined;
+    const { job } = await admitContextJobCandidate(this.runtime, this.compaction,
+      contextCompactionScope(input.threadId, personalization, candidate?.resources ?? checkpoint?.resources),
+      { summaryRecipe: { strategy: { kind: 'builtin', name: 'manual', version: '1' }, mode: 'manual', configurationIdentity: null, additionalInstructions: null },
+        key, branchId: input.branchId, throughId: input.throughId, expectedRevision: input.expectedRevision,
+        effectiveSystemPrompt: recipe?.effective_system_prompt ?? '', instructionSources: recipe?.instruction_sources ?? [],
+        memoryCheckpoint: recipe?.memory_checkpoint ?? null, ...(personalization ? { personalization } : {}),
+        configuration: description }, signal, async () => {
+        model = await this.models.resolveModel(input.model);
+        if ((model.configuration.contextWindowTokens ?? null) !== description.contextWindowTokens
+          || (model.configuration.maxOutputTokens ?? null) !== description.maxOutputTokens) throw new Error('Model capacity changed during compaction preparation');
+        return { configuration: model.configuration, credentialScope: await model.credentialOwner.scope() };
+      });
+    void this.continueLaunch(job.receipt.run_id, model ? { credentialOwner: model.credentialOwner } : {}).catch(() => undefined);
     return job;
   }
 
@@ -842,6 +871,14 @@ export class ThreadAdapter {
       if (!run.thread_id.startsWith('thread:') && !run.thread_id.startsWith('context-job-thread:')) throw new Error('Run is not owned by a thread');
       const identity: ThreadIdentity = { runtime: 'agent', threadId: run.thread_id, branchId: run.branch_id };
       if (run.thread_id.startsWith('thread:')) await this.refreshContext(identity, signal);
+      if (run.thread_id.startsWith('context-job-thread:')) {
+        const job = await this.runtime.contextJob(runId, signal);
+        if (job.compaction.kind === 'text') {
+          // A frozen pure candidate has no model dispatch or credential dependency.
+          await this.runtime.startRun(runId, signal);
+          return;
+        }
+      }
       const source = launch.selection.source;
       if (source && source.mode !== 'live_root' && source.branch_id !== null && source.revision !== null) {
         const admission = this.admitSource({ resourceOwner: source.resource_owner, mode: source.mode, workspaceId: source.workspace_id,

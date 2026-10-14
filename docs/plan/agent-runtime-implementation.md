@@ -1,12 +1,36 @@
 # 原生 Agent 运行时实施
 
-状态：实施中，尚未切换生产运行时。更新：2026-10-13（Asia/Singapore）。
+状态：实施中，尚未切换生产运行时。更新：2026-10-14（Asia/Singapore）。
 
 综合结构审阅见[2026-10-09 实现审阅](../reviews/runtime-2026-10-09.md)，后续实现及独立行为验证见[控制路径隔离增量](../reviews/runtime-control-isolation-2026-10-09.md)。前次源码与编译审阅、各阶段行为验证分别记录；历史通过记录不代替当前代码的证据。两份设计的整体交付仍未完成。
 
 目标是完整实现[完整运行时设计](../design/agent-runtime-design.md)和[能力组合设计](../design/runtime-extensibility-design.md)共同定义的长期运行底座：及时交互、低开销执行、按真实资源调度、深层能力组合和可替换策略。完成聊天循环、迁移已有工具或删除 Pi 都不是单独的完成标准；Pi 退出是这套设计落地后的一个结果。当前生产仍使用 Pi session worker、TypeScript Host 协调和 Rust 资源内核；现有权威见[架构](../architecture.md)。
 
 交付边界（2026-10-10 用户确认）：本轮完成两设计能力与可复跑验收入口，整理实现证据、未验范围和迁移前清单，交用户先验收。默认 runtime 切换、Pi 删除和用户资产全面迁移由用户在验收后负责。本分工不缩减设计能力范围，也不把未执行的产品或平台验证算作通过。
+
+## 2026-10-14 增量：完整压缩算法 Provider
+
+`varin.context.compaction@1` 与原预算 Decision 分离，显式选择后由同一实际 service pin
+完成 describe/prepare。Provider 可返回纯文本候选，或有真实独立依赖的模型节点计划；核心
+不再强制线性 fold。随附例子产生独立叶子摘要和成对归并树，当前执行策略是拓扑串行，
+没有将计划的可并行性写成已实现并行推理。
+
+纯 preview 与 create 共用原引用/祖先/记忆加载器，sourceCut 锁冻结引用、实际可见正文及
+modelBudget 等规划输入；完整模型配置和凭据由原 create/Launch 独立固定。首次纯文本只读
+注册模型容量描述，不访问凭据、动态认证或模型路由环境；已受理工作重开不重新调用算法。
+计划与 producer/composition 原身份随 ContentStore recipe 保存，节点由原 RequestPrepared
+明确关联实际 ModelStep；正常用量、取消、GC、候选发布和 checkpoint CAS 保留原权威。
+纯文本正常完成原 Run 且零 ModelStep；模型节点在真实序列化后仍检查完整请求容量。
+
+Catalog **73** / wire **39** 直接替换内部格式。已完成候选的取消仍留下原取消事实，拒绝
+迟到发布，不改已交付历史。跨 ModelStep 稳定前缀和非 Git 目录跨次增量捕获仍是独立后续。
+
+定点证据：真实 Catalog/Engine **16/16**，实际 Kernel description-only 初次执行和重开
+**1/1**；包含 Rust preview → 实际 SDK/示例 → 原七节点计划/发布桥。Contract/SDK/原
+Registry/示例 **18/18**，Host 受理/纯模型描述/真实启动 owner **7/7**、ContextService
+**3/3**。Contract/SDK/示例类型与生成协议检查通过；整体 Host 类型图仍受缺失依赖阻塞，
+受影响主文件无诊断。旧需预构建 Host 的预算组合测试保持 ignored，没有据此声称通过，
+没有全量构建/测试、付费模型、实机或物理多 Host 验收。
 
 ## 2026-10-13 增量：原 managed PTY 与包来源清理恢复
 

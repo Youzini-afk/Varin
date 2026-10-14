@@ -1341,6 +1341,7 @@ impl Catalog {
                     "INSERT INTO model_steps(id,run_id,state,body) VALUES(?1,?2,'prepared',?3)",
                     params![step.id, run_id, encode(&step)?],
                 )?;
+                super::context_jobs::record_step(&tx, run_id, snapshot)?;
             }
             ExecutionRecord::RequestNotDispatched { request_id, reason } => {
                 close_prepared_request(&tx, &run, request_id, *reason)?;

@@ -162,7 +162,7 @@ impl Harness {
                         request_id: id.clone(),
                         run_id: run.id.clone(),
                         origin: RequestOrigin::Conversation {
-                            step: self.sequence as u64,
+                            compaction: None, step: self.sequence as u64,
                             history_range: range,
                         },
                         binding,

@@ -243,6 +243,13 @@ impl Review {
                         let mut jobs=reads.into_iter().map(|r|r.load().map_err(domain)).collect::<Result<Vec<_>,_>>()?;
                         Ok(if list { serde_json::to_value(jobs)? } else { serde_json::to_value(jobs.remove(0))? })
                     }
+                    "runtime.context_job.preview" => {
+                        let _:ContextJobPreviewParams=serde_json::from_value(params.clone())?;
+                        let mut params=params; params.as_object_mut().unwrap().insert("compaction".into(),Value::Null);
+                        let p:ContextJobCreateParams=serde_json::from_value(params)?;
+                        let prepare=prepare_context_job_mode(&owner.lock().unwrap(),p,true)?;
+                        Ok(serde_json::to_value(prepare.preview().map_err(domain)?)?)
+                    }
                     "runtime.context_job.create" => {
                         let p:ContextJobCreateParams=serde_json::from_value(params)?;
                         let prepare=prepare_context_job(&owner.lock().unwrap(),p)?;
@@ -283,9 +290,8 @@ impl Review {
                         let PreparedLaunch::Start(mut start)=assembly.prepare(prepared,None,||false)? else { panic!("Run expected") };
                         start.provider=Arc::new(ControlledModel { serializer:start.provider.clone(), actual_input_tokens, sends:sends.clone() });
                         start.context_preparation=Arc::new(ObservedContext(start.context_preparation));
-                        if let Some(parts)=owner.lock().unwrap().context_job_parts(&run.id).map_err(domain)? {
-                            start=varin_runtime::context_job::configure_compaction_start(start,parts);
-                        }
+                        let job_read = { let catalog=owner.lock().unwrap(); if catalog.is_context_job(&run.id).map_err(domain)? { Some(catalog.capture_context_job(&run.id).map_err(domain)?) } else { None } };
+                        if let Some(read)=job_read { start=varin_runtime::context_job::configure_compaction_start(start,read.load_execution().map_err(domain)?); }
                         let handle=runtime.start(&run.id,start).map_err(|e|KernelError::Operation(e.to_string()))?;
                         let result=json!({"runId":handle.run_id,"epoch":handle.epoch}); assembly.observe_completion(handle); Ok(result)
                     }

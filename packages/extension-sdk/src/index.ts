@@ -700,6 +700,7 @@ export const defineTestProvider = (
 
 export * from "./context-fragments.js";
 export * from "./context-budget.js";
+export * from "./context-compaction.js";
 
 export * from "./agent-policy.js";
 

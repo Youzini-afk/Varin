@@ -166,7 +166,7 @@ fn snapshot(run: &str, head: &str, id: &str, projection: ContextProjection) -> R
         request_id: id.into(),
         run_id: run.into(),
         origin: RequestOrigin::Conversation {
-            step: 1,
+            compaction: None, step: 1,
             history_range: range.clone(),
         },
         binding: RequestBinding {

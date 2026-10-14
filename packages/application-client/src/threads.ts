@@ -1,4 +1,4 @@
-import type { AgentInputContext, ChildSourceProvenance, ContextSummaryRecipe, SourceFailureCode, SourceResourceOwner } from '@varin/protocol';
+import type { AgentInputContext, ChildSourceProvenance, ContextSummaryRecipe, ContextCompactionCandidate, ContextCompactionProducer, SourceFailureCode, SourceResourceOwner } from '@varin/protocol';
 import type { DocumentReadRequest, FetchResult } from '@varin/protocol';
 import type { McpInteractionListParams, McpInteractionReadParams, McpInteractionRespondParams, McpInteractionPage, McpInteractionView, McpSamplingRequestReviewParams, McpSamplingOutputReviewParams } from '@varin/protocol';
 import type { MediaReadParams, MediaReadChunk } from '@varin/protocol';
@@ -82,7 +82,8 @@ export interface ThreadHistoryPage {
 }
 /** Durable context records projected by the Host; original conversation history stays intact. */
 export interface ContextJob {
-  request: { summary_recipe: ContextSummaryRecipe; owner_run_id?: string; personalization?: ContextPersonalization; key: string; branch_id: string; through_id: string; expected_revision: number;
+  compaction: { producer: ContextCompactionProducer; kind: 'text' | 'model_plan'; sourceCutHash: string; planHash: string };
+  request: { compaction: ContextCompactionCandidate | null; summary_recipe: ContextSummaryRecipe; owner_run_id?: string; personalization?: ContextPersonalization; key: string; branch_id: string; through_id: string; expected_revision: number;
     effective_system_prompt: string; instruction_sources: string[]; memory_checkpoint: string | null };
   receipt: InputSubmitReceipt;
 }

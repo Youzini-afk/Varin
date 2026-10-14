@@ -70,7 +70,7 @@ impl Fixture {
                     request_id: "spawn-request".into(),
                     run_id: self.run.clone(),
                     origin: RequestOrigin::Conversation {
-                        step: 0,
+                        compaction: None, step: 0,
                         history_range: range,
                     },
                     binding,
@@ -192,7 +192,7 @@ impl Fixture {
                     request_id: request.clone(),
                     run_id: self.run.clone(),
                     origin: RequestOrigin::Conversation {
-                        step: 1,
+                        compaction: None, step: 1,
                         history_range: range,
                     },
                     binding,
