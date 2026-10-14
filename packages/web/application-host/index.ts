@@ -1,3 +1,4 @@
+import { createContextCompaction } from './lib/kernel/context-compaction.js';
 import { createThreadRecoveryNavigation, createThreadRecoveryFileResolver } from './lib/recovery/thread-navigation.js';
 import { createBotMemoryOwner } from './lib/kernel/bot-memory-owner.js';
 import { createBotHistory } from './lib/memory/bot-history.js';
@@ -3309,6 +3310,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   kernelClient.setMemoryOwner(createMemoryOwner({ personalization: agentPersonalization, prepareContext: threadContext,
     bot: createBotMemoryOwner({ runtime: agentRuntime, history: botHistory, memory: memoryService, prepareContext: threadContext,
       knowledge: input => knowledgeContextRuntime.knowledgeForThread(input) }) }));
+  const contextCompaction = createContextCompaction(extensionRuntime);
   const contextService=new ContextService(agentRuntime,threadContext,async(run,launch,signal)=>{
     const source=launch?.selection.source;
     const root=source?.resource_owner.kind === 'local' ? (await documentsAuthority.admitWorkspaceRegistration(source.workspace_id)).canonicalPath : undefined;
@@ -3318,6 +3320,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       ...(model.providerId?{providerId:model.providerId}:{}),modelId:model.model});
     return {policy,scope:{sessionId:run.thread_id,...(admitted?.projectId?{projectId:admitted.projectId}:{}),...(root?{workspaceId:root}:{})}};
   },(runId,signal)=>threads.continueLaunch(runId,{signal}),createContextBudget(extensionRuntime));
+  contextService.bindCompaction(contextCompaction);
   kernelClient.setContextOwner(contextService);
   const prepareThreadSource = createThreadSourcePreparer({
     inspectInventory: (directory, signal) => threadWorktreeRuntime.inspectGitBaselineInventory(directory, signal),
@@ -3338,6 +3341,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     }));
   const sourceDirectory = createThreadSourceDirectory({ documents: documentsAuthority, remote: managedSourceConsumers.threads });
   threads.bindSourceDirectory(sourceDirectory);
+  threads.bindCompaction(contextCompaction);
   scheduledTaskService.bindSourceDirectory(sourceDirectory);
   const targetSourceQuery = createSourceQueryService({ kernel: kernelClient, documents: documentsAuthority,
     validateLiveSource: liveSources.validate, storage: kernelStorageAdapter,

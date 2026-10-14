@@ -279,7 +279,7 @@ fn resource_builtin_uses_frozen_checkpoint_and_current_cancellation_without_oper
                 request_id: "model".into(),
                 run_id: receipt.run_id.clone(),
                 origin: RequestOrigin::Conversation {
-                    step: 1,
+                    compaction: None, step: 1,
                     history_range: range,
                 },
                 binding,

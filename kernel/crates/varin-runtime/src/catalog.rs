@@ -42,7 +42,7 @@ pub enum RuntimeError {
     Format(i64),
 }
 type Result<T> = std::result::Result<T, RuntimeError>;
-pub(crate) const FORMAT: i64 = 72;
+pub(crate) const FORMAT: i64 = 73;
 fn sql_number(value: u64) -> Result<i64> {
     i64::try_from(value).map_err(|_| RuntimeError::Invalid("integer exceeds catalog range".into()))
 }
@@ -336,7 +336,7 @@ impl Catalog {
     fn submit_admission(
         &mut self,
         prepared: submissions::PreparedSubmission,
-        context_job: Option<(&context_jobs::ContextJobAdmission, &[Value])>,
+        context_job: Option<&context_jobs::ContextJobAdmission>,
     ) -> Result<Receipt> {
         let tx = self.db.transaction()?;
         let receipt = Self::submit_admission_tx(&tx, self.epoch, &prepared, context_job)?;
@@ -347,7 +347,7 @@ impl Catalog {
         tx: &Transaction<'_>,
         catalog_epoch: u64,
         prepared: &submissions::PreparedSubmission,
-        context_job: Option<(&context_jobs::ContextJobAdmission, &[Value])>,
+        context_job: Option<&context_jobs::ContextJobAdmission>,
     ) -> Result<Receipt> {
         // The caller retains the publication lease through its outer commit. Taking this by
         // value would drop that lease before a consume-and-admit transaction commits its roots.
@@ -389,7 +389,7 @@ impl Catalog {
             }
             return Ok(serde_json::from_str(&receipt)?);
         }
-        let source_thread = if let Some((job, _)) = context_job {
+        let source_thread = if let Some(job) = context_job {
             Some(tx.query_row("SELECT thread_id FROM branches WHERE id=?1", [&job.branch_id], |r| r.get::<_, String>(0))?)
         } else if let submissions::SubmissionOrigin::Child { parent_thread_id, .. } = origin {
             Some(parent_thread_id.clone())
@@ -587,8 +587,8 @@ impl Catalog {
         // The exact delegated trigger must be visible to Goal admission in this same
         // transaction. A new explicit User Run may outlive a completed parent Goal.
         goals::bind_admission(tx, &run)?;
-        if let Some((job, parts)) = context_job {
-            job.publish(&tx, &receipt.run_id, parts)?;
+        if let Some(job) = context_job {
+            job.publish(&tx, &receipt.run_id)?;
         }
         Ok(receipt)
     }
@@ -1016,6 +1016,7 @@ impl Catalog {
         epoch: u64,
         request: Value,
     ) -> Result<ModelStep> {
+        if self.is_context_job(run_id)? { return Err(RuntimeError::Invalid("summary ModelSteps require the original typed RequestPrepared path".into())); }
         let _synchronous = self.content.begin_synchronous()?;
         let request_ref = self.content.save(&request)?;
         let tx = self.db.transaction()?;
@@ -1819,6 +1820,14 @@ pub(super) fn request_cancel_run_in(tx: &Transaction<'_>, id: &str) -> Result<Ru
     mcp_resources::cancel_run(tx, id, false)?;
     mcp_interactions::cancel_run(tx, id, false)?;
     inference::cancel_children(tx, None, Some(id))?;
+    // Ready summary output remains a cancellable unpublished candidate. Preserve its original
+    // completion and usage while fencing both fresh and already-prepared publication.
+    if run.state == RunState::Completed && !run.cancel_requested
+        && tx.query_row("SELECT EXISTS(SELECT 1 FROM context_jobs WHERE run_id=?1)",[id],|row|row.get::<_,bool>(0))? {
+        run.cancel_requested=true; run.revision+=1; put(tx,"runs",id,&run)?;
+        event(tx,id,run.revision,"run.cancel_requested",Value::Null)?;
+        return Ok(run);
+    }
     if run.state.terminal() || run.cancel_requested {
         return Ok(run);
     }

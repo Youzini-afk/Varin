@@ -61,7 +61,7 @@ import type {
   FollowupControlParams,
   ContextRefreshParams,
   ResourceRefreshParams, ResourceSnapshotParams, ContextResources,
-  ContextJobCreateParams,
+  ContextJobCreateParams, ContextJobPreviewParams, ContextCompactionPreview,
   HistoryPage,
   HistoryPageParams,
   HistoryReference,
@@ -310,6 +310,9 @@ export class AgentRuntimeClient {
       this.run(runId, signal),
       this.launch(runId, signal),
     ]);
+    // ContextJobs own a frozen tool-free plan, including pure text runs. Current
+    // extension routing cannot add capabilities or block their original recovery.
+    if (launch?.selection.policy.name === 'context_compaction') return [];
     const required = launch?.selection.extension_bindings ?? [];
     if (!this.prepareExtensionOwner) {
       if (required.length)
@@ -998,6 +1001,9 @@ export class AgentRuntimeClient {
       { runId },
       signal,
     );
+  }
+  previewContextJob(input: ContextJobPreviewParams, signal?: AbortSignal): Promise<ContextCompactionPreview> {
+    return this.kernel.agentRuntimeRequest('runtime.context_job.preview', input, signal);
   }
   createContextJob(
     input: ContextJobCreateParams,

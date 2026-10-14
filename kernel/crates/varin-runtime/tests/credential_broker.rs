@@ -313,7 +313,7 @@ fn injected_factory_uses_authoritative_broker_without_environment_fallback() {
     let view = RequestView {
         request_id: "request".into(),
         run_id: "run".into(),
-        origin: varin_runtime::execution::RequestOrigin::Conversation { step: 1, history_range: start.binding.history_range.clone() },
+        origin: varin_runtime::execution::RequestOrigin::Conversation { compaction: None, step: 1, history_range: start.binding.history_range.clone() },
         binding: start.binding,
         history: vec![],
     };

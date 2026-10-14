@@ -1,0 +1,402 @@
+{
+  "schemaVersion": 1,
+  "id": "example.context-compaction",
+  "version": "1.0.0",
+  "engines": {
+    "varin": "*"
+  },
+  "displayName": "Independent Source Compaction",
+  "entrypoints": {
+    "host": {
+      "file": "host.cjs",
+      "mode": "brokered",
+      "activation": [
+        "service-request"
+      ]
+    }
+  },
+  "provides": {
+    "services": [
+      {
+        "id": "varin.context.compaction",
+        "version": 1,
+        "contract": {
+          "methods": {
+            "describe": {
+              "inputSchema": {
+                "type": "array",
+                "maxItems": 0
+              },
+              "outputSchema": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "identity": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                      "name": {
+                        "type": "string",
+                        "minLength": 1,
+                        "pattern": "\\S"
+                      },
+                      "version": {
+                        "type": "string",
+                        "minLength": 1,
+                        "pattern": "\\S"
+                      }
+                    },
+                    "required": [
+                      "name",
+                      "version"
+                    ]
+                  },
+                  "configuration": {}
+                },
+                "required": [
+                  "identity",
+                  "configuration"
+                ]
+              }
+            },
+            "prepare": {
+              "inputSchema": {
+                "type": "array",
+                "minItems": 1,
+                "maxItems": 1,
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "sourceCutHash": {
+                      "type": "string",
+                      "minLength": 1,
+                      "pattern": "\\S"
+                    },
+                    "sources": {
+                      "type": "array",
+                      "minItems": 1,
+                      "items": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "properties": {
+                          "sourceId": {
+                            "type": "string",
+                            "minLength": 1,
+                            "pattern": "\\S"
+                          },
+                          "item": {
+                            "type": "object",
+                            "additionalProperties": false,
+                            "properties": {
+                              "id": {
+                                "type": "string",
+                                "minLength": 1,
+                                "pattern": "\\S"
+                              },
+                              "provenance": {
+                                "type": "object",
+                                "additionalProperties": false,
+                                "properties": {
+                                  "kind": {
+                                    "const": "external_data"
+                                  },
+                                  "source": {
+                                    "type": "string",
+                                    "minLength": 1,
+                                    "pattern": "\\S"
+                                  }
+                                },
+                                "required": [
+                                  "kind",
+                                  "source"
+                                ]
+                              },
+                              "opaque": {
+                                "type": "null"
+                              },
+                              "content": {
+                                "oneOf": [
+                                  {
+                                    "type": "object",
+                                    "additionalProperties": false,
+                                    "properties": {
+                                      "kind": {
+                                        "const": "text"
+                                      },
+                                      "text": {
+                                        "type": "string"
+                                      }
+                                    },
+                                    "required": [
+                                      "kind",
+                                      "text"
+                                    ]
+                                  },
+                                  {
+                                    "type": "object",
+                                    "additionalProperties": false,
+                                    "properties": {
+                                      "kind": {
+                                        "const": "media"
+                                      },
+                                      "media": {
+                                        "type": "object",
+                                        "additionalProperties": false,
+                                        "properties": {
+                                          "media_type": {
+                                            "type": "string",
+                                            "minLength": 1,
+                                            "pattern": "\\S"
+                                          },
+                                          "data_base64": {
+                                            "type": "string"
+                                          },
+                                          "source": {
+                                            "type": "object"
+                                          }
+                                        },
+                                        "required": [
+                                          "media_type",
+                                          "data_base64",
+                                          "source"
+                                        ]
+                                      }
+                                    },
+                                    "required": [
+                                      "kind",
+                                      "media"
+                                    ]
+                                  }
+                                ]
+                              }
+                            },
+                            "required": [
+                              "id",
+                              "provenance",
+                              "opaque",
+                              "content"
+                            ]
+                          }
+                        },
+                        "required": [
+                          "sourceId",
+                          "item"
+                        ]
+                      }
+                    },
+                    "modelBudget": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "properties": {
+                        "contextWindowTokens": {
+                          "anyOf": [
+                            {
+                              "type": "integer",
+                              "minimum": 0,
+                              "maximum": 9007199254740991
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "maxOutputTokens": {
+                          "anyOf": [
+                            {
+                              "type": "integer",
+                              "minimum": 0,
+                              "maximum": 9007199254740991
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "sourceBudgetTokens": {
+                          "anyOf": [
+                            {
+                              "type": "integer",
+                              "minimum": 0,
+                              "maximum": 9007199254740991
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        }
+                      },
+                      "required": [
+                        "contextWindowTokens",
+                        "maxOutputTokens",
+                        "sourceBudgetTokens"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "sourceCutHash",
+                    "sources",
+                    "modelBudget"
+                  ]
+                }
+              },
+              "outputSchema": {
+                "oneOf": [
+                  {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                      "kind": {
+                        "const": "text"
+                      },
+                      "sourceCutHash": {
+                        "type": "string",
+                        "minLength": 1,
+                        "pattern": "\\S"
+                      },
+                      "text": {
+                        "type": "string",
+                        "minLength": 1,
+                        "pattern": "\\S"
+                      }
+                    },
+                    "required": [
+                      "kind",
+                      "sourceCutHash",
+                      "text"
+                    ]
+                  },
+                  {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                      "kind": {
+                        "const": "model_plan"
+                      },
+                      "sourceCutHash": {
+                        "type": "string",
+                        "minLength": 1,
+                        "pattern": "\\S"
+                      },
+                      "nodes": {
+                        "type": "array",
+                        "minItems": 1,
+                        "items": {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "properties": {
+                            "id": {
+                              "type": "string",
+                              "minLength": 1,
+                              "pattern": "\\S"
+                            },
+                            "instructions": {
+                              "type": [
+                                "string",
+                                "null"
+                              ]
+                            },
+                            "inputs": {
+                              "type": "array",
+                              "minItems": 1,
+                              "items": {
+                                "oneOf": [
+                                  {
+                                    "type": "object",
+                                    "additionalProperties": false,
+                                    "properties": {
+                                      "kind": {
+                                        "const": "source"
+                                      },
+                                      "sourceId": {
+                                        "type": "string",
+                                        "minLength": 1,
+                                        "pattern": "\\S"
+                                      },
+                                      "range": {
+                                        "anyOf": [
+                                          {
+                                            "type": "null"
+                                          },
+                                          {
+                                            "type": "object",
+                                            "additionalProperties": false,
+                                            "properties": {
+                                              "start": {
+                                                "type": "integer",
+                                                "minimum": 0,
+                                                "maximum": 9007199254740991
+                                              },
+                                              "end": {
+                                                "type": "integer",
+                                                "minimum": 0,
+                                                "maximum": 9007199254740991
+                                              }
+                                            },
+                                            "required": [
+                                              "start",
+                                              "end"
+                                            ]
+                                          }
+                                        ]
+                                      }
+                                    },
+                                    "required": [
+                                      "kind",
+                                      "sourceId",
+                                      "range"
+                                    ]
+                                  },
+                                  {
+                                    "type": "object",
+                                    "additionalProperties": false,
+                                    "properties": {
+                                      "kind": {
+                                        "const": "node_output"
+                                      },
+                                      "nodeId": {
+                                        "type": "string",
+                                        "minLength": 1,
+                                        "pattern": "\\S"
+                                      }
+                                    },
+                                    "required": [
+                                      "kind",
+                                      "nodeId"
+                                    ]
+                                  }
+                                ]
+                              }
+                            }
+                          },
+                          "required": [
+                            "id",
+                            "instructions",
+                            "inputs"
+                          ]
+                        }
+                      },
+                      "finalNodeId": {
+                        "type": "string",
+                        "minLength": 1,
+                        "pattern": "\\S"
+                      }
+                    },
+                    "required": [
+                      "kind",
+                      "sourceCutHash",
+                      "nodes",
+                      "finalNodeId"
+                    ]
+                  }
+                ]
+              }
+            }
+          },
+          "participation": "provider"
+        },
+        "multiple": true
+      }
+    ]
+  }
+}

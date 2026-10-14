@@ -1395,7 +1395,7 @@ export interface ThreadSummary {
   observer_project_ids: Array<string | null>;
 }
 
-export type AgentRuntimeStreamEvent = {v: 38; kind: 'runtime-event'; kernelEpoch: string} & ({stream: 'durable'; cursor: number} | {stream: 'progress'; runId: string; streamId: string; sequence: number; event: unknown});
+export type AgentRuntimeStreamEvent = {v: 39; kind: 'runtime-event'; kernelEpoch: string} & ({stream: 'durable'; cursor: number} | {stream: 'progress'; runId: string; streamId: string; sequence: number; event: unknown});
 
 export type SourceMode = 'fixed_branch' | 'materialized' | 'live_root';
 
@@ -1860,7 +1860,43 @@ export interface ContextSummaryRecipe {
   additionalInstructions: string | null;
 }
 
+export type ContextCompactionProducer = {kind:'builtin';name:'fold';version:'1'} | {kind:'extension';providerKey:string;providerId:string;extensionId:string;extensionVersion:string;serviceId:'varin.context.compaction';serviceVersion:1;artifactIntegrity:string;composition:HostServiceComposition;configurationIdentity:string;declaredIdentity:LaunchPolicy};
+
+export interface ContextCompactionRange {start:number;end:number}
+
+export type ContextCompactionInput = {kind:'source';sourceId:string;range:ContextCompactionRange|null} | {kind:'node_output';nodeId:string};
+
+export interface ContextCompactionNode {id:string;instructions:string|null;inputs:ContextCompactionInput[]}
+
+export type ContextCompactionPlan = {kind:'text';sourceCutHash:string;text:string} | {kind:'model_plan';sourceCutHash:string;nodes:ContextCompactionNode[];finalNodeId:string};
+
+export interface ContextCompactionCandidate {producer:ContextCompactionProducer;plan:ContextCompactionPlan}
+
+export interface ContextCompactionSource {sourceId:string;item:{id:string;provenance:{kind:'external_data';source:string};content:{kind:'text';text:string}|{kind:'media';media:ResolvedMedia};opaque:null}}
+
+export interface ContextCompactionModelBudget {contextWindowTokens:number|null;maxOutputTokens:number|null;sourceBudgetTokens:number|null}
+
+export interface ContextCompactionPreview {sourceCutHash:string;sources:ContextCompactionSource[];modelBudget:ContextCompactionModelBudget}
+
+export interface ContextCompactionMetadata {producer:ContextCompactionProducer;kind:'text'|'model_plan';sourceCutHash:string;planHash:string}
+
+export interface ContextJobPreviewParams {
+  summaryRecipe: ContextSummaryRecipe;
+  ownerRunId?: string;
+  personalization?: ContextPersonalization;
+  key: string;
+  branchId: string;
+  throughId: string;
+  expectedRevision: number;
+  effectiveSystemPrompt: string;
+  instructionSources: string[];
+  memoryCheckpoint: string | null;
+  configuration: unknown;
+  credentialScope?: CredentialScope;
+}
+
 export interface ContextJobCreateParams {
+  compaction: ContextCompactionCandidate | null;
   summaryRecipe: ContextSummaryRecipe;
   ownerRunId?: string;
   personalization?: ContextPersonalization;

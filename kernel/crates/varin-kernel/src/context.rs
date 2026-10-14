@@ -456,7 +456,7 @@ mod tests {
             request_id: "request".into(),
             run_id: receipt.run_id,
             origin: RequestOrigin::Conversation {
-                step: 0,
+                compaction: None, step: 0,
                 history_range: range.clone(),
             },
             binding: RequestBinding {

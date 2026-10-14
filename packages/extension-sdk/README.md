@@ -191,3 +191,17 @@ instructions. Core rejects a new background Decision when `settings.backgroundPr
 Do not perform retrieval, model requests or tools inside this callback. The native default
 remains selected until the user explicitly routes this service; summary generation and recovery remain
 owned by the original runtime.
+
+`provideContextCompaction(context, { identity, configuration, prepare })` registers the pure
+`varin.context.compaction@1` Provider with `VARIN_CONTEXT_COMPACTION_SERVICE`. It receives detached,
+recursively frozen source quotations and returns direct text or a complete model plan. The SDK checks
+the exact cut and references before returning. Preparation must not call models, tools or external
+services; model nodes request normal core-owned execution. A single actual pin covers describe,
+prepare and native admission. Accepted plans belong to the original ContextJob and survive provider
+replacement/unload without calling it again on recovery. See the [independent source merge-tree
+example](../../examples/extensions/context-compaction/README.md).
+The preparation input contains only frozen quotations, their cut hash and `modelBudget`, alongside
+this Provider's own frozen algorithm configuration. The cut binds those source/budget facts.
+A model plan's full model configuration and credential scope are frozen separately by native
+create/Launch. Direct text does not resolve model credentials or model-configuration routing, including
+its first admission; compaction service selection remains on the original scoped service router.

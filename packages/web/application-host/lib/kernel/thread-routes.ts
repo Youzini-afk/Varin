@@ -361,9 +361,9 @@ export function registerThreadRoutes(app: Express, adapter: ThreadAdapter, requi
     return adapter.prepareSource(normalizeThreadSourcePreparation({ ...identity(body), resourceOwner: parseSourceResourceOwner(body.resourceOwner), key: text(body.key), workspaceId: text(body.workspaceId), mode: body.mode,
       content: body.content, captureScopes: body.captureScopes } as import('@varin/application-client').ThreadPrepareSource), signal);
   });
-  post('context/compact', body => {
+  post('context/compact', (body, signal) => {
     return adapter.compact({ ...identity(body), key: text(body.key), throughId: text(body.throughId), expectedRevision: revision(body.expectedRevision),
-      model: modelSelection(body.model) });
+      model: modelSelection(body.model) }, signal);
   });
   post('context/publish', body => adapter.publishContext(identity(body), text(body.runId)));
   post('context/cancel', body => adapter.cancelContext(identity(body), text(body.runId)));

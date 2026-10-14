@@ -102,7 +102,7 @@ fn bot_scope_waits_for_real_provider_and_operation_workers_then_preserves_unknow
                 request_id: "aux-request".into(),
                 run_id: receipt.run_id.clone(),
                 origin: RequestOrigin::Conversation {
-                    step: 1,
+                    compaction: None, step: 1,
                     history_range: range,
                 },
                 binding,

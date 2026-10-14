@@ -149,6 +149,17 @@ export function createModelAuthority(authority: ModelAuthority) {
         .map(model => ({ providerId: model.providerId, modelId: model.modelId, name: model.name, acceptsImages: model.input?.includes('image') ?? false,
           ...(model.contextWindow === undefined ? {} : { contextWindowTokens: model.contextWindow }), thinkingLevels: thinkingLevels(model) }));
     },
+    /** Public model metadata for pure planning. Never consult auth mode, routing
+     * environment, account scopes, credential helpers or a provider connection. */
+    async describeModel(selection: ThreadModel) {
+      const model = await authority.selectedModel(selection.providerId, selection.modelId);
+      if (model.contextWindow !== undefined && (!Number.isSafeInteger(model.contextWindow) || model.contextWindow <= 0)) return failed('model-context-capacity-invalid');
+      const max = model.api === 'openai-codex-responses' ? null
+        : Number.isSafeInteger(model.maxTokens) && model.maxTokens > 0 ? model.maxTokens : null;
+      const resolved = modelOptions(model, selection.thinkingLevel, max, selection.temperature);
+      return { providerId: model.providerId, model: model.modelId, ...resolved,
+        contextWindowTokens: model.contextWindow ?? null, maxOutputTokens: max };
+    },
     async resolveModel(selection: ThreadModel) {
       const model = await authority.selectedModel(selection.providerId, selection.modelId);
       const configuration = await configurationFor(model, selection.thinkingLevel, selection.temperature);

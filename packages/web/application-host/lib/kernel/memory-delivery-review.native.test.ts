@@ -55,7 +55,7 @@ async function fixture(reply: (body: Record<string, unknown>, response: ServerRe
     currentScope: async () => ({ reference: 'fixture-reference', authority: 'fixture-existing-owner', account: 'fixture-local-handle', generation: 1 }),
     runtime: { getAuth: async () => ({ auth: { apiKey: secret } }) },
   });
-  const configuration = { providerFamily: 'openai-responses', model: 'fixture-model', endpoint, credentialEnvironment: null, allowAnonymous: false, configurationGeneration: 1, maxOutputTokens: 64 };
+  const configuration = { providerId: 'fixture-provider', providerFamily: 'openai-responses', model: 'fixture-model', endpoint, credentialEnvironment: null, allowAnonymous: false, configurationGeneration: 1, maxOutputTokens: 64 };
   const launchErrors: unknown[] = [];
   const workspace = path.join(root, 'workspace'); await fs.mkdir(workspace, { recursive: true });
   const documents = createDocumentAuthority({ hostId: 'memory-review', dataDir: path.join(root, 'documents'), isAllowedRoot: async () => true, isTrusted: async () => true });
@@ -87,6 +87,7 @@ async function fixture(reply: (body: Record<string, unknown>, response: ServerRe
   cleanups.push(close);
 
   const adapter = new ThreadAdapter(new AgentRuntimeClient(kernel, undefined, undefined, undefined, undefined, undefined, (id, signal) => documents.admitWorkspaceRegistration(id, signal)), {
+    describeModel: async selection => ({ providerId: selection.providerId, model: selection.modelId, contextWindowTokens: null, maxOutputTokens: configuration.maxOutputTokens }),
     resolveModel: async selection => {
       if (selection.providerId !== 'fixture-provider' || selection.modelId !== 'fixture-model') throw new Error('unselected model');
       return { configuration, credentialOwner: owner };

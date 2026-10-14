@@ -428,7 +428,7 @@ fn request_snapshot(receipt: &Receipt) -> crate::execution::RequestSnapshot {
             request_id: "model-1".into(),
             run_id: receipt.run_id.clone(),
             origin: RequestOrigin::Conversation {
-                step: 1,
+                compaction: None, step: 1,
                 history_range: HistoryRange {
                     branch_id: receipt.branch_id.clone(),
                     ancestor_id: None,
@@ -2299,7 +2299,7 @@ fn independent_reused_provider_id_across_model_steps_preserves_each_original_and
     second_snapshot.view.binding.history_range.leaf_id = Some(first.id.clone());
     second_snapshot.view.history = db.execution_history("main").unwrap();
     second_snapshot.view.origin = crate::execution::RequestOrigin::Conversation {
-        step: 2,
+        compaction: None, step: 2,
         history_range: second_snapshot.view.binding.history_range.clone(),
     };
     independent_prepare(&mut db, &receipt, second_snapshot);

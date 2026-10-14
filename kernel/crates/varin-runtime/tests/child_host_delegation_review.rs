@@ -551,7 +551,7 @@ fn child_result_waits_for_original_workspace_and_service_callbacks_but_not_globa
                         request_id: "child-host-request".into(),
                         run_id: run.clone(),
                         origin: RequestOrigin::Conversation {
-                            step: 1,
+                            compaction: None, step: 1,
                             history_range: binding.history_range.clone(),
                         },
                         binding,

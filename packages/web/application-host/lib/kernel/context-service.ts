@@ -1,4 +1,6 @@
-import { KernelClientError } from './kernel-client.js';
+import { KernelClientError } from './kernel-error.js';
+import { admitContextJobCandidate, contextCompactionScope } from './context-job-preparation.js';
+import type { ContextCompactionOwner } from './context-compaction.js';
 import { isDeepStrictEqual } from 'node:util';
 import { createHash } from 'node:crypto';
 import { waitWithSignal } from '../cancellation.js';
@@ -25,6 +27,8 @@ type CompactQuery = Extract<ContextQuery,{action:'compact'}>;
 export class ContextService implements ContextOwner {
   private readonly jobs=new Map<string,Job>();
   private readonly timing:ContextPreparationTiming;
+  private compaction?:ContextCompactionOwner;
+  bindCompaction(owner:ContextCompactionOwner):void {this.compaction=owner;}
   private readonly observations=new Map<string,{requestId:string;identity:string}>();
   constructor(private readonly runtime:AgentRuntimeClient,
     private readonly prepareContext:ContextPreparer,
@@ -42,9 +46,12 @@ export class ContextService implements ContextOwner {
       signal.throwIfAborted();
       let timing;
       if (query.action==='prepare' && query.observation) {
+        // Native adaptive timing describes the builtin fold only. Selecting an
+        // algorithm must not inherit an unrelated earlier fold duration.
+        const algorithmSelected=policy.enabled && this.compaction ? await this.compaction.selected(scope,signal) : false;
         const identity=createHash('sha256').update(JSON.stringify([run.thread_id,run.branch_id,run.configuration,
           launch?.selection ?? null,launch?.policy_generation ?? null,launch?.policy_target ?? null,
-          policy.configurationIdentity,query.observation.identity])).digest('hex');
+          policy.configurationIdentity,query.observation.identity,algorithmSelected])).digest('hex');
         this.observations.set(run.branch_id,{requestId:query.requestId,identity});
         timing=this.timing.observe(run.branch_id,identity,query.requestId,query.expectedRevision,query.observation);
       }
@@ -120,13 +127,17 @@ export class ContextService implements ContextOwner {
     signal.throwIfAborted();
     let job:ContextJob;
     try {
-      job=await this.runtime.createContextJob({summaryRecipe:query.summaryRecipe,key,ownerRunId:run.id,branchId:run.branch_id,throughId:query.throughId,expectedRevision:query.expectedRevision,
+      const admission=await admitContextJobCandidate(this.runtime,this.compaction,
+        contextCompactionScope(run.thread_id,personalization,candidate?.resources ?? checkpoint?.resources),
+        {summaryRecipe:query.summaryRecipe,key,ownerRunId:run.id,branchId:run.branch_id,throughId:query.throughId,expectedRevision:query.expectedRevision,
         effectiveSystemPrompt:recipe?.effective_system_prompt ?? '',instructionSources:recipe?.instruction_sources ?? [],memoryCheckpoint:recipe?.memory_checkpoint ?? null,
         ...(personalization?{personalization}:{}),configuration,...(scope?{credentialScope:scope}:{})},signal);
+      job=admission.job;
       // Only a fully observed new admission can produce a duration. Recovered/accepted
       // jobs retain their original receipts, but observation time is not preparation time.
       const observed=this.observations.get(run.branch_id);
-      if (observed?.requestId===query.requestId && query.summaryRecipe.strategy.kind==='builtin') {
+      if (!admission.recovered && observed?.requestId===query.requestId && query.summaryRecipe.strategy.kind==='builtin'
+        && job.compaction.producer.kind==='builtin' && job.compaction.kind==='model_plan') {
         const measure=this.timing.start(run.branch_id,observed.identity);
         if(measure) work.measure=measure;
       }

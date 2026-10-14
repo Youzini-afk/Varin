@@ -119,7 +119,7 @@ impl Fixture {
                     request_id: "request".into(),
                     run_id: fixture.run.clone(),
                     origin: RequestOrigin::Conversation {
-                        step: 1,
+                        compaction: None, step: 1,
                         history_range: range,
                     },
                     binding,
@@ -1086,7 +1086,7 @@ fn report_dependency(f: &mut Fixture, request: &str, wait: Option<String>) {
                 request_id: request.into(),
                 run_id: f.run.clone(),
                 origin: RequestOrigin::Conversation {
-                    step: 2,
+                    compaction: None, step: 2,
                     history_range: range,
                 },
                 binding,

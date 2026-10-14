@@ -1974,17 +1974,25 @@ pub(crate) fn spawn(
                             return Ok(Value::Null);
                         }
                         if method == "runtime.context_job.create"
+                            || method == "runtime.context_job.preview"
                             || method == "runtime.context_job.publish"
                         {
                             let catalog = runtime.catalog();
-                            let create = if method == "runtime.context_job.create" {
-                                let p: ContextJobCreateParams =
-                                    serde_json::from_value(params.clone())?;
-                                Some(prepare_context_job(
+                            let preview = method == "runtime.context_job.preview";
+                            let create = if method == "runtime.context_job.create" || preview {
+                                let mut preparation_params = params.clone();
+                                if preview {
+                                    // Validate the separate preview DTO: it never accepts a candidate.
+                                    let _: ContextJobPreviewParams = serde_json::from_value(params.clone())?;
+                                    preparation_params.as_object_mut().ok_or_else(||KernelError::Protocol("preview parameters must be an object".into()))?.insert("compaction".into(),Value::Null);
+                                }
+                                let p: ContextJobCreateParams = serde_json::from_value(preparation_params)?;
+                                Some(prepare_context_job_mode(
                                     &*catalog.lock().map_err(|_| {
                                         KernelError::Storage("catalog owner failed".into())
                                     })?,
                                     p,
+                                    preview,
                                 )?)
                             } else {
                                 None
@@ -2013,6 +2021,7 @@ pub(crate) fn spawn(
                                         return Err(KernelError::Cancelled);
                                     }
                                     if let Some(create) = create {
+                                        if preview { return Ok(serde_json::to_value(create.preview().map_err(domain)?)?); }
                                         let prepared = create.load().map_err(domain)?;
                                         if cancelled.load(Ordering::Acquire) {
                                             return Err(KernelError::Cancelled);
@@ -2943,12 +2952,18 @@ pub(crate) fn personalization_basis(
     )
 }
 
+#[cfg(test)]
 fn prepare_context_job(
     catalog: &Catalog,
     p: ContextJobCreateParams,
 ) -> Result<varin_runtime::catalog::context_jobs::ContextJobPreparation, KernelError> {
-    let configuration: varin_runtime::ModelSessionConfiguration =
-        serde_json::from_value(p.configuration.clone())?;
+    prepare_context_job_mode(catalog, p, false)
+}
+fn prepare_context_job_mode(
+    catalog: &Catalog,
+    p: ContextJobCreateParams,
+    preview: bool,
+) -> Result<varin_runtime::catalog::context_jobs::ContextJobPreparation, KernelError> {
     let scope = p
         .credential_scope
         .map(|scope| {
@@ -2962,28 +2977,42 @@ fn prepare_context_job(
             })
         })
         .transpose()?;
-    let identity = if let Some(scope) = scope.as_ref() {
-        model_session::connection_identity_with_scope(&configuration, scope)
+    let launch = if preview
+        || p.compaction.0.as_ref().is_some_and(|candidate| {
+            matches!(
+                candidate.plan,
+                varin_runtime::context_job::ContextCompactionPlan::Text { .. }
+            )
+        }) {
+        varin_runtime::context_job::text_compaction_launch(&p.configuration, scope)
+            .map_err(domain)?
     } else {
-        model_session::connection_identity(&configuration)
-    }
-    .map_err(|error| KernelError::Protocol(error.to_string()))?;
-    let launch = varin_runtime::catalog::launches::LaunchSelection {
-        child_dispatch: None,
-        policy_models: Vec::new(),
-        extension_bindings: Vec::new(),
-        mcp_binding: None,
-        credential_scope: scope,
-        connection_identity: identity,
-        provider_family: configuration.provider_family,
-        model: configuration.model,
-        configuration_generation: configuration.configuration_generation,
-        tool_schema_generation: 0,
-        tools: Vec::new(),
-        policy: varin_runtime::context_job::policy_identity(),
-        source: None,
+        let configuration: varin_runtime::ModelSessionConfiguration =
+            serde_json::from_value(p.configuration.clone())?;
+        let identity = if let Some(scope) = scope.as_ref() {
+            model_session::connection_identity_with_scope(&configuration, scope)
+        } else {
+            model_session::connection_identity(&configuration)
+        }
+        .map_err(|error| KernelError::Protocol(error.to_string()))?;
+        varin_runtime::catalog::launches::LaunchSelection {
+            child_dispatch: None,
+            policy_models: Vec::new(),
+            extension_bindings: Vec::new(),
+            mcp_binding: None,
+            credential_scope: scope,
+            connection_identity: identity,
+            provider_family: configuration.provider_family,
+            model: configuration.model,
+            configuration_generation: configuration.configuration_generation,
+            tool_schema_generation: 0,
+            tools: Vec::new(),
+            policy: varin_runtime::context_job::policy_identity(),
+            source: None,
+        }
     };
     let request = varin_runtime::catalog::context_jobs::ContextJobRequest {
+        compaction: p.compaction.0,
         summary_recipe: p.summary_recipe,
         owner_run_id: p.owner_run_id,
         personalization: p.personalization.map(personalization_basis).transpose()?,
@@ -3000,6 +3029,7 @@ fn prepare_context_job(
         .prepare_context_job(request, launch, p.configuration)
         .map_err(domain)
 }
+
 #[cfg(test)]
 mod run_scope_review {
     use super::*;
@@ -3319,3 +3349,7 @@ mod bot_gate_host_review;
 #[cfg(test)]
 #[path = "managed_source_review.rs"]
 mod managed_source_review;
+
+#[cfg(test)]
+#[path = "context_compaction_review.rs"]
+mod context_compaction_review;

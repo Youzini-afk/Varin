@@ -65,7 +65,7 @@ fn second_process(f: &mut Fixture) -> String {
                 request_id: request.into(),
                 run_id: f.run.clone(),
                 origin: RequestOrigin::Conversation {
-                    step: 2,
+                    compaction: None, step: 2,
                     history_range: range.clone(),
                 },
                 binding: RequestBinding {

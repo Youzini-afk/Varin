@@ -44,3 +44,7 @@ These use the ordinary installed brokered Host extension and project service-rou
 
 These use ordinary installed services and their reviewed Host capabilities. Their manifests supply the
 same tool declarations used by model/policy admission and inspection.
+
+## Context algorithm examples
+
+- [Independent Source Compaction](context-compaction/README.md): a pure `varin.context.compaction@1` Provider producing independent source summaries and a merge tree, or a small direct extractive candidate. Core executes and commits the frozen plan.

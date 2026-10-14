@@ -61,7 +61,7 @@ fn subscription_tool_names_roundtrip_without_rewriting_signed_thinking_or_api_ke
         request_id: "request".into(),
         run_id: "run".into(),
         origin: RequestOrigin::Conversation {
-            step: 1,
+            compaction: None, step: 1,
             history_range: HistoryRange {
                 branch_id: "main".into(),
                 ancestor_id: None,

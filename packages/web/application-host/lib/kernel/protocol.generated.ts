@@ -3,7 +3,7 @@
  * Do not hand-edit the wire shapes; run `node scripts/generate-kernel-protocol.mjs`.
  */
 
-export const KERNEL_PROTOCOL_VERSION = 38 as const;
+export const KERNEL_PROTOCOL_VERSION = 39 as const;
 export const KERNEL_REQUEST_WINDOW = 2 as const;
 export const KERNEL_MAX_FRAME_BYTES = 16777216 as const;
 export const KERNEL_CONTROL_METHODS = ["source.authority.seal","source.mcp.holder","source.mcp.delivery","source.script.control","source.authority.release_scope","source.resource.cancel","source.authority.release","runtime.bot.scope.inspect","runtime.bot.gate.publish","runtime.bot.thread.create","runtime.bot.scope.suspend","runtime.bot.scope.status","runtime.bot.scope.resume","runtime.inference.session","runtime.inference.receipt_pending","runtime.inference.dispatch","runtime.inference.status","runtime.mcp.interaction.inspect","runtime.mcp.interaction.delivery.released","runtime.mcp.interaction.pending","runtime.mcp.interaction.response.begin","runtime.mcp.interaction.response.settle","runtime.mcp.interaction.close","runtime.mcp.interaction.complete","runtime.mcp.interaction.release_source","runtime.computer.event.cancel","runtime.computer.request.cancel","runtime.computer.request.reconcile","runtime.followup.registrations.pending","runtime.followup.registration.cancel","runtime.operation.status","runtime.child.cancel","runtime.child.capabilities","runtime.source.tools","runtime.tree.cancel","runtime.goal.control","runtime.followup.control","runtime.followup.files","runtime.followup.file.release","runtime.policy.select","runtime.policy.cancel","runtime.policy.fail","runtime.policy.inspect","kernel.handshake","kernel.ping","kernel.shutdown","authority.grant.revoke","authority.grant.retire","runtime.status","runtime.tools.select","runtime.run.inspect","runtime.run.scope","runtime.run.cancel","runtime.run.resume","runtime.operation.inspect","runtime.operation.cancel","runtime.process.access","process.interaction.inspect","runtime.input.cancel","runtime.input.inspect","runtime.admission.inspect","process.inspect","process.kill","process.resize","process.release","process.subscription.ack","process.subscription.unsubscribe","runtime.calendar.occurrence.control","runtime.calendar.calculation.retry"] as const;
@@ -11,7 +11,7 @@ export const KERNEL_CONTROL_RESPONSE_METHODS = ["source.authority.seal","source.
 export const KERNEL_DEFERRED_RESPONSE_METHODS = ["process.write","process.resize","runtime.tools.invoke","file.lease.wait"] as const;
 export const KERNEL_INPUT_ORDER_PARAMS = {"runtime.thread.create":"branchId","runtime.branch.fork":"branchId","runtime.branch.navigate":"branchId","runtime.input.submit":"branchId","runtime.input.enqueue":"branchId","runtime.input.edit":"inputId"} as const;
 export const KERNEL_RUNTIME_DATA_METHODS = ["runtime.memory_work.admit","runtime.memory_work.read","runtime.memory_work.status","runtime.memory_work.list","runtime.memory_work.update","runtime.inference.generate","runtime.inference.admit","runtime.inference.settle","runtime.mcp.sampling.review_output","runtime.mcp.sampling.review_request","runtime.mcp.sampling.generate","runtime.mcp.interaction.open","runtime.mcp.interaction.error.open","runtime.mcp.interaction.list","runtime.mcp.interaction.read","runtime.mcp.interaction.respond","runtime.tools.invoke","runtime.history.body","runtime.output.media.read"] as const;
-export const KERNEL_PROTOCOL_SCHEMA = "varin.kernel.v38" as const;
+export const KERNEL_PROTOCOL_SCHEMA = "varin.kernel.v39" as const;
 
 export type KernelMethod =
   | "runtime.mcp.interaction.context"
@@ -111,6 +111,7 @@ export type KernelMethod =
   | "runtime.branch.fork"
   | "runtime.plan.view"
   | "runtime.plan.contains"
+  | "runtime.context_job.preview"
   | "runtime.context_job.create"
   | "runtime.context_job.inspect"
   | "runtime.context_job.list"
@@ -2163,7 +2164,7 @@ export interface ThreadSummary {
   observer_project_ids: Array<string | null>;
 }
 
-export type AgentRuntimeStreamEvent = {v: 38; kind: 'runtime-event'; kernelEpoch: string} & ({stream: 'durable'; cursor: number} | {stream: 'progress'; runId: string; streamId: string; sequence: number; event: unknown});
+export type AgentRuntimeStreamEvent = {v: 39; kind: 'runtime-event'; kernelEpoch: string} & ({stream: 'durable'; cursor: number} | {stream: 'progress'; runId: string; streamId: string; sequence: number; event: unknown});
 
 export type SourceMode = 'fixed_branch' | 'materialized' | 'live_root';
 
@@ -2687,7 +2688,43 @@ export interface ContextSummaryRecipe {
   additionalInstructions: string | null;
 }
 
+export type ContextCompactionProducer = {kind:'builtin';name:'fold';version:'1'} | {kind:'extension';providerKey:string;providerId:string;extensionId:string;extensionVersion:string;serviceId:'varin.context.compaction';serviceVersion:1;artifactIntegrity:string;composition:HostServiceComposition;configurationIdentity:string;declaredIdentity:LaunchPolicy};
+
+export interface ContextCompactionRange {start:number;end:number}
+
+export type ContextCompactionInput = {kind:'source';sourceId:string;range:ContextCompactionRange|null} | {kind:'node_output';nodeId:string};
+
+export interface ContextCompactionNode {id:string;instructions:string|null;inputs:ContextCompactionInput[]}
+
+export type ContextCompactionPlan = {kind:'text';sourceCutHash:string;text:string} | {kind:'model_plan';sourceCutHash:string;nodes:ContextCompactionNode[];finalNodeId:string};
+
+export interface ContextCompactionCandidate {producer:ContextCompactionProducer;plan:ContextCompactionPlan}
+
+export interface ContextCompactionSource {sourceId:string;item:{id:string;provenance:{kind:'external_data';source:string};content:{kind:'text';text:string}|{kind:'media';media:ResolvedMedia};opaque:null}}
+
+export interface ContextCompactionModelBudget {contextWindowTokens:number|null;maxOutputTokens:number|null;sourceBudgetTokens:number|null}
+
+export interface ContextCompactionPreview {sourceCutHash:string;sources:ContextCompactionSource[];modelBudget:ContextCompactionModelBudget}
+
+export interface ContextCompactionMetadata {producer:ContextCompactionProducer;kind:'text'|'model_plan';sourceCutHash:string;planHash:string}
+
+export interface ContextJobPreviewParams {
+  summaryRecipe: ContextSummaryRecipe;
+  ownerRunId?: string;
+  personalization?: ContextPersonalization;
+  key: string;
+  branchId: string;
+  throughId: string;
+  expectedRevision: number;
+  effectiveSystemPrompt: string;
+  instructionSources: string[];
+  memoryCheckpoint: string | null;
+  configuration: unknown;
+  credentialScope?: CredentialScope;
+}
+
 export interface ContextJobCreateParams {
+  compaction: ContextCompactionCandidate | null;
   summaryRecipe: ContextSummaryRecipe;
   ownerRunId?: string;
   personalization?: ContextPersonalization;
@@ -5642,6 +5679,7 @@ export type KernelMethodParams = {
   "runtime.branch.fork": BranchForkParams;
   "runtime.plan.view": PlanViewParams;
   "runtime.plan.contains": PlanContainsParams;
+  "runtime.context_job.preview": ContextJobPreviewParams;
   "runtime.context_job.create": ContextJobCreateParams;
   "runtime.context_job.inspect": RunParams;
   "runtime.context_job.list": HistoryParams;
@@ -6878,6 +6916,15 @@ export type KernelRequest =
       id: string;
       method: "runtime.plan.contains";
       params: PlanContainsParams;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "runtime.context_job.preview";
+      params: ContextJobPreviewParams;
       epoch?: string;
       grantId?: string;
     }

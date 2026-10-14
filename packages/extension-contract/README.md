@@ -164,3 +164,15 @@ ancestor metadata. It returns `continue` or `compact` with a candidate `throughI
 background/blocking mode and optional summary guidance. No history bodies, credentials, tools, private
 policy state or model access are supplied. Core validates ancestry and preserves its summary safety
 instructions, real inference usage and atomic checkpoint publication.
+
+`VARIN_CONTEXT_COMPACTION_SERVICE` declares `varin.context.compaction@1`, a pure Provider separate
+from the budget Decision. `describe` fixes identity/configuration; `prepare` receives addressable,
+unbudgeted, opaque-free source quotations and model budget facts. It returns direct text or a complete
+topologically ordered model plan. Source ranges use UTF-8 byte offsets; media references are whole.
+The parser rejects stale cuts, unknown/forward references, split code points and unused model nodes.
+Core executes normal serial ModelSteps, retains original usage and commits the final candidate through
+the original ContextJob. The Provider has no model/tool/history-write capability through this API.
+The source-cut hash binds those exact quotations and `modelBudget`, not a model credential grant.
+The native create/Launch boundary separately fixes the full model configuration and credential scope
+for a `model_plan`. A direct `text` candidate needs no model credential/configuration resolution on
+initial admission or recovery; selecting the compaction Provider still uses ordinary service routing.

@@ -59,7 +59,7 @@ it.each(['main', 'child'])('stages a %s candidate, measures only new work, and r
     run: async (id: string) => id === 'parent' ? parent : id === 'next' ? successor : { ...parent, id: 'summary', state: summaryState },
     launch: async () => null, context: async () => checkpoint, contextJobs: async () => jobs,
     createContextJob: vi.fn(async (input: { key: string }) => {
-      const job = { request: { key: input.key, owner_run_id: 'parent', branch_id: parent.branch_id, through_id: 'prefix', expected_revision: 1, summary_recipe: recipe }, receipt: { run_id: 'summary' } };
+      const job = { compaction: { producer: { kind: 'builtin', name: 'fold', version: '1' }, kind: 'model_plan', sourceCutHash: 'cut', planHash: 'plan' }, request: { key: input.key, owner_run_id: 'parent', branch_id: parent.branch_id, through_id: 'prefix', expected_revision: 1, summary_recipe: recipe }, receipt: { run_id: 'summary' } };
       jobs.push(job as never); return job;
     }),
     publishContextJob,

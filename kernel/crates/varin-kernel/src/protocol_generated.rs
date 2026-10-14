@@ -5,7 +5,7 @@ use crate::model::PathState;
 use serde::Deserialize;
 use serde_json::Value;
 
-pub(crate) const KERNEL_PROTOCOL_VERSION: u64 = 38;
+pub(crate) const KERNEL_PROTOCOL_VERSION: u64 = 39;
 pub(crate) const KERNEL_MAX_FRAME_BYTES: usize = 16777216;
 pub(crate) const KERNEL_REQUEST_WINDOW: usize = 2;
 pub(crate) const KERNEL_CONTROL_METHODS: &[&str] = &[
@@ -943,7 +943,25 @@ pub(crate) struct PlanContainsParams {
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct ContextJobPreviewParams {
+    pub(crate) summary_recipe: varin_runtime::context_job::ContextSummaryRecipe,
+    pub(crate) owner_run_id: Option<String>,
+    pub(crate) personalization: Option<ContextPersonalization>,
+    pub(crate) key: String,
+    pub(crate) branch_id: String,
+    pub(crate) through_id: String,
+    pub(crate) expected_revision: i64,
+    pub(crate) effective_system_prompt: String,
+    pub(crate) instruction_sources: Vec<String>,
+    pub(crate) memory_checkpoint: RequiredNullable<String>,
+    pub(crate) configuration: Value,
+    pub(crate) credential_scope: Option<CredentialScope>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct ContextJobCreateParams {
+    pub(crate) compaction: RequiredNullable<varin_runtime::context_job::ContextCompactionCandidate>,
     pub(crate) summary_recipe: varin_runtime::context_job::ContextSummaryRecipe,
     pub(crate) owner_run_id: Option<String>,
     pub(crate) personalization: Option<ContextPersonalization>,
@@ -3597,6 +3615,11 @@ pub(crate) fn validate_generated_method_params(method: &str, params: &Value) -> 
         "runtime.plan.contains" => serde_json::from_value::<PlanContainsParams>(params.clone())
             .map(|_| ())
             .map_err(|error| error.to_string()),
+        "runtime.context_job.preview" => {
+            serde_json::from_value::<ContextJobPreviewParams>(params.clone())
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        }
         "runtime.context_job.create" => {
             serde_json::from_value::<ContextJobCreateParams>(params.clone())
                 .map(|_| ())

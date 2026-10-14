@@ -176,7 +176,7 @@ fn ordinary_service_model_and_policy_share_real_directory_permission_dispatch_an
                             request_id: request_id.clone(),
                             run_id: run.clone(),
                             origin: RequestOrigin::Conversation {
-                                step: 1,
+                                compaction: None, step: 1,
                                 history_range: binding.history_range.clone(),
                             },
                             binding: binding.clone(),

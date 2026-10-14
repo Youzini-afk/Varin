@@ -227,7 +227,7 @@ fn replay_scenario(tail_phase: Option<&str>) {
                     request_id: "integration-request".into(),
                     run_id: run.run_id.clone(),
                     origin: RequestOrigin::Conversation {
-                        step: 1,
+                        compaction: None, step: 1,
                         history_range: range,
                     },
                     binding,

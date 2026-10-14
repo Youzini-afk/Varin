@@ -1026,7 +1026,7 @@ fn begin_package_call(db: &mut Catalog, params: Value) -> Result<Value, KernelEr
                     request_id: request_id.clone(),
                     run_id: submitted.run_id.clone(),
                     origin: RequestOrigin::Conversation {
-                        step: 1,
+                        compaction: None, step: 1,
                         history_range: binding.history_range.clone(),
                     },
                     binding,
@@ -1180,7 +1180,7 @@ fn coordinator_read(
                         request_id: request_id.clone(),
                         run_id: run.into(),
                         origin: RequestOrigin::Conversation {
-                            step: 1,
+                            compaction: None, step: 1,
                             history_range: request.history_range.clone(),
                         },
                         binding: request.clone(),
@@ -2074,7 +2074,7 @@ fn environment_forward_canonical_acceptance_survives_unknown_and_terminal_host_r
                     request_id: "forward-request".into(),
                     run_id: run.clone(),
                     origin: RequestOrigin::Conversation {
-                        step: 1,
+                        compaction: None, step: 1,
                         history_range: binding.history_range.clone(),
                     },
                     binding,
@@ -2313,7 +2313,7 @@ fn native_file_followup(
                     request_id: "native-file-request".into(),
                     run_id: run.into(),
                     origin: RequestOrigin::Conversation {
-                        step: 1,
+                        compaction: None, step: 1,
                         history_range: request.history_range.clone(),
                     },
                     binding: request,

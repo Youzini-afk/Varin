@@ -130,9 +130,212 @@ impl ContextSummaryRecipe {
     }
 }
 
+/// An algorithm producer is distinct from the policy which decides when to compact.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(
+    tag = "kind",
+    rename_all = "snake_case",
+    rename_all_fields = "camelCase",
+    deny_unknown_fields
+)]
+pub enum ContextCompactionProducer {
+    Builtin {
+        name: String,
+        version: String,
+    },
+    Extension {
+        provider_key: String,
+        provider_id: String,
+        extension_id: String,
+        extension_version: String,
+        service_id: String,
+        service_version: u64,
+        artifact_integrity: String,
+        composition: crate::catalog::service_composition::HostServiceComposition,
+        configuration_identity: String,
+        declared_identity: PolicyIdentity,
+    },
+}
+impl ContextCompactionProducer {
+    pub fn builtin() -> Self {
+        Self::Builtin {
+            name: "fold".into(),
+            version: "1".into(),
+        }
+    }
+    pub fn validate(&self) -> Result<(), crate::RuntimeError> {
+        use crate::RuntimeError;
+        match self {
+            Self::Builtin { name, version } if name == "fold" && version == "1" => Ok(()),
+            Self::Extension {
+                provider_key,
+                provider_id,
+                extension_id,
+                extension_version,
+                service_id,
+                service_version,
+                artifact_integrity,
+                composition,
+                configuration_identity,
+                declared_identity,
+            } => {
+                composition.validate_root(
+                    extension_id,
+                    extension_version,
+                    artifact_integrity,
+                    provider_key,
+                    service_id,
+                    *service_version,
+                )?;
+                if service_id != "varin.context.compaction"
+                    || *service_version != 1
+                    || [
+                        provider_id,
+                        configuration_identity,
+                        &declared_identity.name,
+                        &declared_identity.version,
+                    ]
+                    .iter()
+                    .any(|s| s.trim().is_empty())
+                {
+                    return Err(RuntimeError::Invalid(
+                        "invalid frozen compaction producer".into(),
+                    ));
+                }
+                Ok(())
+            }
+            _ => Err(RuntimeError::Invalid(
+                "unsupported builtin compaction producer".into(),
+            )),
+        }
+    }
+}
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ContextCompactionRange {
+    pub start: u64,
+    pub end: u64,
+}
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(
+    tag = "kind",
+    rename_all = "snake_case",
+    rename_all_fields = "camelCase",
+    deny_unknown_fields
+)]
+pub enum ContextCompactionInput {
+    Source {
+        source_id: String,
+        #[serde(deserialize_with = "required_option")]
+        range: Option<ContextCompactionRange>,
+    },
+    NodeOutput {
+        node_id: String,
+    },
+}
+fn required_option<'de, D: serde::Deserializer<'de>, T: Deserialize<'de>>(
+    deserializer: D,
+) -> Result<Option<T>, D::Error> {
+    Option::<T>::deserialize(deserializer)
+}
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ContextCompactionNode {
+    pub id: String,
+    #[serde(deserialize_with = "required_text")]
+    pub instructions: Option<String>,
+    pub inputs: Vec<ContextCompactionInput>,
+}
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(
+    tag = "kind",
+    rename_all = "snake_case",
+    rename_all_fields = "camelCase",
+    deny_unknown_fields
+)]
+pub enum ContextCompactionPlan {
+    Text {
+        source_cut_hash: String,
+        text: String,
+    },
+    ModelPlan {
+        source_cut_hash: String,
+        nodes: Vec<ContextCompactionNode>,
+        final_node_id: String,
+    },
+}
+impl ContextCompactionPlan {
+    pub fn source_cut_hash(&self) -> &str {
+        match self {
+            Self::Text {
+                source_cut_hash, ..
+            }
+            | Self::ModelPlan {
+                source_cut_hash, ..
+            } => source_cut_hash,
+        }
+    }
+    pub fn kind(&self) -> &'static str {
+        if matches!(self, Self::Text { .. }) {
+            "text"
+        } else {
+            "model_plan"
+        }
+    }
+    pub fn nodes(&self) -> &[ContextCompactionNode] {
+        match self {
+            Self::ModelPlan { nodes, .. } => nodes,
+            _ => &[],
+        }
+    }
+}
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ContextCompactionCandidate {
+    pub producer: ContextCompactionProducer,
+    pub plan: ContextCompactionPlan,
+}
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ContextCompactionSource {
+    pub source_id: String,
+    pub item: ConversationItem,
+}
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ContextCompactionModelBudget {
+    pub context_window_tokens: Option<u64>,
+    pub max_output_tokens: Option<u64>,
+    pub source_budget_tokens: Option<u64>,
+}
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ContextCompactionPreview {
+    pub source_cut_hash: String,
+    pub sources: Vec<ContextCompactionSource>,
+    pub model_budget: ContextCompactionModelBudget,
+}
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ContextCompactionMetadata {
+    pub producer: ContextCompactionProducer,
+    pub kind: String,
+    pub source_cut_hash: String,
+    pub plan_hash: String,
+}
+/// Typed association persisted in the original RequestPrepared snapshot and indexed by Catalog.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ContextCompactionStep {
+    pub plan_hash: String,
+    pub node_id: String,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct ContextJobRequest {
+    #[serde(deserialize_with = "required_option")]
+    pub compaction: Option<ContextCompactionCandidate>,
     pub summary_recipe: ContextSummaryRecipe,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub owner_run_id: Option<String>,
@@ -149,6 +352,7 @@ pub struct ContextJobRequest {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct ContextJob {
+    pub compaction: ContextCompactionMetadata,
     pub request: ContextJobRequest,
     pub receipt: crate::Receipt,
 }
@@ -170,21 +374,66 @@ pub const SUMMARY_REQUEST: &str = "Update the continuation summary using the ear
 pub fn policy_identity() -> PolicyIdentity {
     PolicyIdentity {
         name: "context_compaction".into(),
-        version: "2".into(),
+        version: "3".into(),
     }
 }
 
 /// The caller supplies an explicitly selected, authenticated model binding. This function never
 /// chooses a model, resolves credentials, starts a worker, or makes a provider request.
-pub fn configure_compaction_start(mut start: RunStart, parts: u64) -> RunStart {
-    start.context_preparation = Arc::new(NoopContextPreparation);
+pub struct ContextCompactionExecution {
+    pub plan: ContextCompactionPlan,
+    pub model_budget: ContextCompactionModelBudget,
+}
+pub fn configure_compaction_start(
+    mut start: RunStart,
+    execution: ContextCompactionExecution,
+) -> RunStart {
+    let ContextCompactionExecution { plan, model_budget } = execution;
+    start.context_preparation = Arc::new(SummaryCapacity(model_budget));
     start.binding.tools.clear();
     start.binding.tool_schema_generation = 0;
-    start.provider = Arc::new(SummaryProvider(start.provider));
+    start.provider = if matches!(plan, ContextCompactionPlan::Text { .. }) {
+        Arc::new(NoModelProvider)
+    } else {
+        Arc::new(SummaryProvider(start.provider))
+    };
     start.tools = Arc::new(NoTools);
-    start.policy = Arc::new(SummaryPolicy { parts });
+    start.policy = Arc::new(SummaryPolicy {
+        nodes: plan.nodes().iter().map(|node| node.id.clone()).collect(),
+    });
     start.policy_state = Value::Null;
     start
+}
+/// Check the complete actual serializer output before RequestPrepared. Summary plans cannot
+/// recursively launch more compaction or silently drop evidence to repair an oversized node.
+struct SummaryCapacity(ContextCompactionModelBudget);
+impl ContextPreparation for SummaryCapacity {
+    fn prepare(&self, _: &str, _: u64, _: &CancellationToken) -> Result<(), ExecutionError> {
+        Ok(())
+    }
+    fn prepare_request(
+        &self,
+        _: u64,
+        view: &RequestView,
+        serialized: &Value,
+        _: Option<crate::context_capacity::RequestBudgetProtocol>,
+        _: &dyn Fn(
+            ContextProjection,
+        ) -> Result<crate::context_capacity::InputEstimate, ExecutionError>,
+        _: &CancellationToken,
+    ) -> Result<ContextRequestPreparation, ExecutionError> {
+        if let Some(window) = self.0.context_window_tokens {
+            let available = window.saturating_sub(self.0.max_output_tokens.unwrap_or(0));
+            let estimate = crate::context_capacity::estimate_request(view, serialized);
+            if estimate.estimated_tokens > available {
+                return Err(ExecutionError::new(
+                    "context_capacity",
+                    "complete summary node input exceeds the selected model capacity",
+                ));
+            }
+        }
+        Ok(ContextRequestPreparation::Ready)
+    }
 }
 struct SummaryProvider(Arc<dyn ModelProvider>);
 impl ModelProvider for SummaryProvider {
@@ -238,7 +487,7 @@ impl ModelProvider for SummaryProvider {
     }
 }
 struct SummaryPolicy {
-    parts: u64,
+    nodes: Vec<String>,
 }
 impl AgentPolicy for SummaryPolicy {
     fn identity(&self) -> PolicyIdentity {
@@ -249,36 +498,134 @@ impl AgentPolicy for SummaryPolicy {
         _: &PolicyView<'_>,
         event: &PolicyEvent,
         state: &Value,
-        _cancel: &CancellationToken,
+        _: &CancellationToken,
     ) -> Result<PolicyDecision, ExecutionError> {
-        let mut completed = if state.is_null() {
-            0
-        } else {
-            state.as_u64().ok_or_else(|| {
-                ExecutionError::new("compaction_progress", "summary progress is malformed")
-            })?
-        };
-        let action = match event {
-            PolicyEvent::Started if completed < self.parts => PolicyAction::RequestModel,
+        let next = match event {
+            PolicyEvent::Started if state.is_null() => self.nodes.first(),
             PolicyEvent::ModelCompleted {
                 reason: FinishReason::Stop,
                 tool_calls: 0,
-            } if completed < self.parts => {
-                completed += 1;
-                if completed == self.parts {
-                    PolicyAction::Complete
-                } else {
-                    PolicyAction::RequestModel
-                }
+            } => {
+                let id = state.as_str().ok_or_else(|| {
+                    ExecutionError::new("compaction_progress", "summary node identity is missing")
+                })?;
+                let position = self
+                    .nodes
+                    .iter()
+                    .position(|node| node == id)
+                    .ok_or_else(|| {
+                        ExecutionError::new(
+                            "compaction_progress",
+                            "summary node is not in the frozen plan",
+                        )
+                    })?;
+                self.nodes.get(position + 1)
             }
-            _ => PolicyAction::Fail {
-                reason: "summary generation or frozen source progress is incomplete".into(),
-            },
+            _ => {
+                return Ok(PolicyDecision {
+                    action: PolicyAction::Fail {
+                        reason: "summary generation or frozen plan progress is incomplete".into(),
+                    },
+                    state: state.clone(),
+                });
+            }
         };
         Ok(PolicyDecision {
-            action,
-            state: Value::from(completed),
+            action: if next.is_some() {
+                PolicyAction::RequestModel
+            } else {
+                PolicyAction::Complete
+            },
+            state: next.map_or(Value::Null, |id| Value::String(id.clone())),
         })
+    }
+}
+/// Text candidates never bind a model adapter, resolve credentials, serialize, or dispatch.
+pub struct NoModelProvider;
+impl ModelProvider for NoModelProvider {
+    fn serialize(&self, _: &RequestView) -> Result<Value, ExecutionError> {
+        Err(ExecutionError::new(
+            "compaction_no_model",
+            "text compaction has no model provider",
+        ))
+    }
+    fn generate(
+        &self,
+        _: &RequestSnapshot,
+        _: &CancellationToken,
+        _: &mut dyn FnMut(ProviderEvent) -> Result<(), ExecutionError>,
+    ) -> Result<FinishReason, ModelFailure> {
+        Err(ModelFailure {
+            code: "compaction_no_model".into(),
+            message: "text compaction has no model provider".into(),
+            retry_after_ms: None,
+            provider_request_id: None,
+        })
+    }
+}
+/// Non-dispatching identity for a description-only text job. No adapter or credential owner runs.
+pub fn text_compaction_launch(
+    configuration: &Value,
+    scope: Option<crate::providers::auth::CredentialScope>,
+) -> Result<crate::catalog::launches::LaunchSelection, crate::RuntimeError> {
+    let model = configuration
+        .get("model")
+        .and_then(Value::as_str)
+        .filter(|model| !model.trim().is_empty())
+        .ok_or_else(|| {
+            crate::RuntimeError::Invalid(
+                "summary model description requires a model identity".into(),
+            )
+        })?;
+    Ok(crate::catalog::launches::LaunchSelection {
+        child_dispatch: None,
+        policy_models: Vec::new(),
+        extension_bindings: Vec::new(),
+        mcp_binding: None,
+        credential_scope: scope,
+        connection_identity: crate::context_material::hash(configuration)?,
+        provider_family: "context_compaction_text".into(),
+        model: model.into(),
+        configuration_generation: 0,
+        tool_schema_generation: 0,
+        tools: Vec::new(),
+        policy: policy_identity(),
+        source: None,
+    })
+}
+pub fn text_compaction_start(selection: &crate::catalog::launches::LaunchSelection) -> RunStart {
+    RunStart {
+        context_preparation: Arc::new(NoopContextPreparation),
+        binding: RequestBinding {
+            child_dispatch: None,
+            goal: None,
+            resource_activations: Vec::new(),
+            resource_checkpoint_id: None,
+            connection_identity: selection.connection_identity.clone(),
+            provider_family: selection.provider_family.clone(),
+            model: selection.model.clone(),
+            credential_ref: selection
+                .credential_scope
+                .as_ref()
+                .map(|scope| scope.reference.clone()),
+            configuration_generation: selection.configuration_generation,
+            tool_schema_generation: 0,
+            tools: Vec::new(),
+            instruction_sources: Vec::new(),
+            memory_checkpoint: None,
+            attachment_refs: Vec::new(),
+            environment_cursor: 0,
+            history_range: HistoryRange {
+                branch_id: String::new(),
+                ancestor_id: None,
+                leaf_id: None,
+            },
+        },
+        provider: Arc::new(NoModelProvider),
+        tools: Arc::new(NoTools),
+        policy: Arc::new(SummaryPolicy { nodes: Vec::new() }),
+        policy_state: Value::Null,
+        progress: ProgressSink::default(),
     }
 }
 struct NoTools;
