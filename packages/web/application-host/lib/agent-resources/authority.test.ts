@@ -14,11 +14,12 @@ import { createRecoveryFileStore } from '../recovery/file-store.test-helper.js';
 import { WorkingStateStore } from '../harness/working-state/working-state-store.js';
 import { asTestWorkingStateRootStore } from '../harness/working-state/working-state-root-adapter.test-helper.js';
 
+const nativeResources = (resources: unknown) => JSON.stringify({ resources });
 const roots: string[] = [];
 const authority = createAgentResourceAuthority();
 const skill = (name: string, body: string, extra = '') => `---\nname: ${name}\ndescription: ${name} description\n${extra}---\n${body}\n`;
 const scope = (extra: Partial<AdmittedAgentResourceScope> = {}): AdmittedAgentResourceScope => ({
-  threadId: 'thread', branchId: 'branch', mode: 'agent', threadRole: 'main', projectId: 'project', sourceIdentity: 'source-v1', projectTrusted: true, ...extra,
+  threadId: 'thread', branchId: 'branch', mode: 'agent', threadRole: 'main', projectId: 'project', sourceIdentity: 'source-v1', projectTrusted: true, ...(extra.user ? { userSettings: extra.user } : {}), ...extra,
 });
 async function fixture(files: Record<string, string | Uint8Array>, name = 'resources') {
   const root = await mkdtemp(path.join(os.tmpdir(), `varin-${name}-`)); roots.push(root);
@@ -53,10 +54,10 @@ describe('Agent resource owner', () => {
     const user = await fixture({ 'SYSTEM.md': 'user system', 'APPEND_SYSTEM.md': 'user append', 'AGENTS.md': 'user context',
       'skills/quiet/SKILL.md': skill('quiet', 'QUIET SECRET BODY', 'disable-model-invocation: true\n'),
       'skills/review/SKILL.md': skill('review', 'REVIEW SECRET BODY') }, 'user');
-    const project = await fixture({ '.pi/SYSTEM.md': '', '.pi/APPEND_SYSTEM.md': 'project append', 'AGENTS.md': 'ordinary root',
+    const project = await fixture({ '.varin/resources/SYSTEM.md': '', '.varin/resources/APPEND_SYSTEM.md': 'project append', 'AGENTS.md': 'ordinary root',
       'AGENTS.override.md': 'overriding root', 'src/AGENTS.MD': 'source directory', 'sibling/AGENTS.md': 'SIBLING' }, 'project');
     const snapshot = await prepared(scope({ user: user.domain, project: { ...project.domain, cwd: '' }, instructionDirectories: ['src'] }));
-    expect(snapshot.system?.origin).toBe('project');
+    expect(snapshot.system).toMatchObject({ origin: 'project', appliesTo: '' });
     const rendered = resourceSections(snapshot, 'runtime', 'resource_read');
     expect(rendered.preamble).toBe('runtime');
     expect(rendered.append_system).toBe('project append');
@@ -76,14 +77,14 @@ describe('Agent resource owner', () => {
   });
 
   it('uses project explicit, project auto, user explicit, user auto, then package name priority with real settings and assets', async () => {
-    const user = await fixture({ 'settings.json': JSON.stringify({ skills: ['configured'], packages: ['pkg'] }),
+    const user = await fixture({ 'agent-settings.json': nativeResources({ skills: ['configured'], packages: ['pkg'] }),
       'configured/SKILL.md': skill('shared', 'USER EXPLICIT'), 'skills/auto/SKILL.md': skill('shared', 'USER AUTO'),
       'skills/user-wins/SKILL.md': skill('user-wins', 'USER BEATS PACKAGE') }, 'user');
-    const project = await fixture({ '.pi/settings.json': JSON.stringify({ skills: ['explicit'] }),
-      '.pi/explicit/SKILL.md': skill('shared', 'PROJECT EXPLICIT'), '.pi/skills/auto/SKILL.md': skill('shared', 'PROJECT AUTO'),
-      '.pi/skills/project-wins/SKILL.md': skill('project-wins', 'PROJECT AUTO BEATS USER'),
+    const project = await fixture({ '.varin/settings.json': nativeResources({ skills: ['explicit'] }),
+      '.varin/resources/explicit/SKILL.md': skill('shared', 'PROJECT EXPLICIT'), '.varin/resources/skills/auto/SKILL.md': skill('shared', 'PROJECT AUTO'),
+      '.varin/resources/skills/project-wins/SKILL.md': skill('project-wins', 'PROJECT AUTO BEATS USER'),
       '.agents/skills/from-agent/SKILL.md': skill('agent-root', 'AGENTS ROOT') }, 'project');
-    const pkg = await fixture({ 'package.json': JSON.stringify({ pi: { skills: ['skills'] } }),
+    const pkg = await fixture({ 'package.json': JSON.stringify({ varin: { skills: ['skills'] } }),
       'skills/pkg/SKILL.md': skill('shared', 'PACKAGE'), 'skills/user-wins/SKILL.md': skill('user-wins', 'PACKAGE LOSES') }, 'pkg');
     const snapshot = await prepared(scope({ user: user.domain, project: { ...project.domain, cwd: '' },
       installedPackages: [{ ...pkg.domain, identity: 'pkg', source: 'pkg', scope: 'user' }] }));
@@ -97,13 +98,13 @@ describe('Agent resource owner', () => {
   });
 
   it('does not read untrusted project settings/system/skills and does not silently turn malformed settings into defaults', async () => {
-    const project = await fixture({ '.pi/settings.json': '{ broken', '.pi/SYSTEM.md': 'untrusted', 'AGENTS.md': 'admitted directory guidance' }, 'project');
+    const project = await fixture({ '.varin/settings.json': '{ broken', '.varin/resources/SYSTEM.md': 'untrusted', 'AGENTS.md': 'admitted directory guidance' }, 'project');
     const user = await fixture({ 'SYSTEM.md': 'user system' }, 'user');
     const read = vi.fn(project.reader.read.bind(project.reader));
     const snapshot = await prepared(scope({ user: user.domain, projectTrusted: false, project: { reader: { ...project.reader, read }, cwd: '' } }));
     expect(snapshot.system?.origin).toBe('user');
-    expect(read.mock.calls.every(([target]) => !target.startsWith('.pi/'))).toBe(true);
-    expect(await authority.prepare(scope({ project: { ...project.domain, cwd: '' } }))).toMatchObject({ status: 'invalid', path: '.pi/settings.json' });
+    expect(read.mock.calls.every(([target]) => !target.startsWith('.varin/resources/'))).toBe(true);
+    expect(await authority.prepare(scope({ project: { ...project.domain, cwd: '' } }))).toMatchObject({ status: 'invalid', path: '.varin/settings.json' });
   });
 
   it.each(['posix', 'win32'] as const)('retains old captured skill bytes and bundle support files with %s file identities', async platform => {
@@ -168,7 +169,7 @@ describe('Agent resource owner', () => {
     expect(await files.reader.read('invalid.md')).toMatchObject({ status: 'invalid' });
     const controller = new AbortController(); let release!: () => void;
     const blocking: ResourceReader = { ...files.reader, read: async (target, signal) => {
-      if (target === 'settings.json') { await new Promise<void>(resolve => { release = resolve; }); }
+      if (target === 'agent-settings.json') { await new Promise<void>(resolve => { release = resolve; }); }
       return signal?.aborted ? resourceFailure(files.reader, target, 'cancelled', 'cancelled') : files.reader.read(target, signal);
     } };
     const slow = authority.prepare(scope({ user: { reader: blocking } }), controller.signal);
@@ -209,12 +210,12 @@ describe('Agent resource owner', () => {
     expect(resourceEnabled(file, [], { emptyDisables: true })).toBe(false);
     expect(packageDelta(file, ['-skills/review', '+skills/review'])).toBe(true);
     expect(packageDelta(file, [])).toBeUndefined();
-    const user = await fixture({ 'settings.json': JSON.stringify({ packages: [{ source: 'p', skills: [] }, 'q', { source: 'empty-default' }, { source: 'empty-overridden', skills: ['skills/override'] }] }) }, 'user');
-    const project = await fixture({ '.pi/settings.json': JSON.stringify({ packages: [{ source: 'q', autoload: false, skills: ['-skills/review'] }] }) }, 'project');
-    const p = await fixture({ 'package.json': JSON.stringify({ pi: { skills: ['skills'] } }), 'skills/p/SKILL.md': skill('p', 'disabled') }, 'package-p');
-    const q = await fixture({ 'package.json': JSON.stringify({ pi: { skills: ['skills'] } }), 'skills/review/SKILL.md': skill('review', 'disabled delta'),
+    const user = await fixture({ 'agent-settings.json': nativeResources({ packages: [{ source: 'p', skills: [] }, 'q', { source: 'empty-default' }, { source: 'empty-overridden', skills: ['skills/override'] }] }) }, 'user');
+    const project = await fixture({ '.varin/settings.json': nativeResources({ packages: [{ source: 'q', autoload: false, skills: ['-skills/review'] }] }) }, 'project');
+    const p = await fixture({ 'package.json': JSON.stringify({ varin: { skills: ['skills'] } }), 'skills/p/SKILL.md': skill('p', 'disabled') }, 'package-p');
+    const q = await fixture({ 'package.json': JSON.stringify({ varin: { skills: ['skills'] } }), 'skills/review/SKILL.md': skill('review', 'disabled delta'),
       'skills/keep/SKILL.md': skill('keep', 'inherited') }, 'package-q');
-    const empty = await fixture({ 'package.json': JSON.stringify({ pi: { skills: [] } }),
+    const empty = await fixture({ 'package.json': JSON.stringify({ varin: { skills: [] } }),
       'skills/override/SKILL.md': skill('override', 'only an explicit settings filter may enable this') }, 'package-empty');
     const snapshot = await prepared(scope({ user: user.domain, project: { ...project.domain, cwd: '' }, installedPackages: [
       { ...empty.domain, identity: 'empty-default', source: 'empty-default', scope: 'user' },
@@ -228,10 +229,10 @@ describe('Agent resource owner', () => {
   });
 
   it('applies settings glob includes without treating them as source paths, and expands package manifest globs', async () => {
-    const user = await fixture({ 'settings.json': JSON.stringify({ skills: ['configured', '*selected*'], packages: ['p'] }),
+    const user = await fixture({ 'agent-settings.json': nativeResources({ skills: ['configured', '*selected*'], packages: ['p'] }),
       'configured/selected/SKILL.md': skill('selected', 'selected'), 'configured/other/SKILL.md': skill('other', 'excluded'),
       'skills/default/SKILL.md': skill('default', 'auto unaffected by plain includes') }, 'user');
-    const pkg = await fixture({ 'package.json': JSON.stringify({ pi: { skills: ['custom/**/*.md'] } }),
+    const pkg = await fixture({ 'package.json': JSON.stringify({ varin: { skills: ['custom/**/*.md'] } }),
       'custom/nested/deeper/note.md': skill('globbed', 'globbed'), 'custom/.hidden/note.md': skill('hidden', 'hidden') }, 'package');
     const snapshot = await prepared(scope({ user: user.domain, installedPackages: [{ ...pkg.domain, identity: 'p', source: 'p', scope: 'user' }] }));
     expect(snapshot.skills.map(item => item.name)).toEqual(['selected', 'default', 'globbed']);
@@ -239,7 +240,7 @@ describe('Agent resource owner', () => {
   });
 
   it('requires explicit frozen ancestor capsules and reports uncaptured external configuration rather than live fallback', async () => {
-    const project = await fixture({ '.pi/settings.json': JSON.stringify({ skills: ['../../external'] }) }, 'project');
+    const project = await fixture({ '.varin/settings.json': nativeResources({ skills: ['../../../external'] }) }, 'project');
     const absent = CONTEXT_FILE_NAMES.filter(name => name !== 'AGENTS.md');
     const file: CapturedResource = { reference: { domainId: 'ancestor', viewId: 'captured-v1', path: 'AGENTS.md', canonicalId: 'original:/ancestor/AGENTS.md', version: contentVersion('ancestor original') }, content: 'ancestor original' };
     const outerPath = '.agents/skills/outer/SKILL.md';
@@ -255,17 +256,17 @@ describe('Agent resource owner', () => {
     expect(snapshot.skills.map(item => item.name)).toEqual(['outer']);
 
     expect(resourceSections(snapshot, 'runtime', 'resource_read').workspace_instructions).toContain('ancestor original');
-    expect(snapshot.diagnostics).toContainEqual(expect.objectContaining({ kind: 'read', status: 'denied', location: expect.objectContaining({ path: '../../external' }) }));
+    expect(snapshot.diagnostics).toContainEqual(expect.objectContaining({ kind: 'read', status: 'denied', location: expect.objectContaining({ path: '../../../external' }) }));
     expect(await authority.prepare(scope({ ancestors: [{ reader: project.reader, appliesTo: '' }] }))).toMatchObject({ status: 'unavailable' });
     const empty = createCapsuleResourceReader({ domainId: 'old', viewId: 'old-v1', files: [], directories: [] });
     expect(await authority.prepare(scope({ ancestors: [{ reader: empty, appliesTo: '' }] }))).toMatchObject({ status: 'unavailable', path: 'AGENTS.override.md' });
   });
 
   it('uses the existing pinned WorkingState API after live files change, and never treats uncovered Git absence as missing', async () => {
-    const project = await fixture({ '.pi/settings.json': '{}', '.pi/SYSTEM.md': 'fixed system', 'AGENTS.md': 'fixed root',
-      'src/AGENTS.md': 'fixed nested', '.pi/skills/review/SKILL.md': skill('review', 'FIXED SKILL'), '.pi/skills/review/reference.txt': 'FIXED REFERENCE' }, 'project');
-    await symlink('.pi/skills/review', path.join(project.root, 'linked-skill'));
-    await symlink('../.pi/skills/review/reference.txt', path.join(project.root, 'src/linked-reference'));
+    const project = await fixture({ '.varin/settings.json': '{}', '.varin/resources/SYSTEM.md': 'fixed system', 'AGENTS.md': 'fixed root',
+      'src/AGENTS.md': 'fixed nested', '.varin/resources/skills/review/SKILL.md': skill('review', 'FIXED SKILL'), '.varin/resources/skills/review/reference.txt': 'FIXED REFERENCE' }, 'project');
+    await symlink('.varin/resources/skills/review', path.join(project.root, 'linked-skill'));
+    await symlink('../.varin/resources/skills/review/reference.txt', path.join(project.root, 'src/linked-reference'));
     await symlink('cycle-b', path.join(project.root, 'cycle-a'));
     await symlink('cycle-a', path.join(project.root, 'cycle-b'));
     await symlink('.', path.join(project.root, 'self'));
@@ -279,7 +280,7 @@ describe('Agent resource owner', () => {
     const store = await WorkingStateStore.open(context);
     const adapter = asTestWorkingStateRootStore(store, context);
     try {
-      const paths = ['.pi', '.pi/settings.json', '.pi/SYSTEM.md', 'AGENTS.md', 'src', 'src/AGENTS.md', '.pi/skills', '.pi/skills/review', '.pi/skills/review/SKILL.md', '.pi/skills/review/reference.txt'];
+      const paths = ['.varin', '.varin/resources', '.varin/settings.json', '.varin/resources/SYSTEM.md', 'AGENTS.md', 'src', 'src/AGENTS.md', '.varin/resources/skills', '.varin/resources/skills/review', '.varin/resources/skills/review/SKILL.md', '.varin/resources/skills/review/reference.txt'];
       const states = await store.captureDirectory(project.root, paths);
       // The legacy file fixture follows realpath even for a leaf link; production capture preserves it.
       // Read actual link values separately so this test still drives the original pinned tree API.
@@ -290,15 +291,15 @@ describe('Agent resource owner', () => {
       const pin = await adapter.pinBranch('source', { revision: 0 });
       try {
         const reader = createPinnedResourceReader({ domainId: 'project', store: adapter, pin, coverage: { kind: 'complete' } });
-        expect(await reader.read('linked-skill/SKILL.md')).toMatchObject({ status: 'ready', reference: { canonicalId: 'resource:project/.pi/skills/review/SKILL.md' } });
+        expect(await reader.read('linked-skill/SKILL.md')).toMatchObject({ status: 'ready', reference: { canonicalId: 'resource:project/.varin/resources/skills/review/SKILL.md' } });
         expect(await reader.read('src/linked-reference')).toMatchObject({ status: 'ready', content: 'FIXED REFERENCE' });
         expect(await reader.read('self/self/AGENTS.md')).toMatchObject({ status: 'ready', content: 'fixed root' });
         expect(await reader.list('linked-skill')).toMatchObject({ status: 'ready', entries: expect.arrayContaining([{ name: 'SKILL.md', kind: 'file' }]) });
         expect(await reader.read('cycle-a')).toMatchObject({ status: 'invalid', reason: expect.stringContaining('cycle') });
         expect(await reader.read('external')).toMatchObject({ status: 'unavailable', reason: expect.stringContaining('External symlink') });
-        await writeFile(path.join(project.root, '.pi/SYSTEM.md'), 'later system');
+        await writeFile(path.join(project.root, '.varin/resources/SYSTEM.md'), 'later system');
         await rm(path.join(project.root, 'src/AGENTS.md'));
-        await writeFile(path.join(project.root, '.pi/skills/review/SKILL.md'), skill('review', 'LATER SKILL'));
+        await writeFile(path.join(project.root, '.varin/resources/skills/review/SKILL.md'), skill('review', 'LATER SKILL'));
         const snapshot = await prepared(scope({ project: { reader, cwd: '' } }));
         expect(resourceSections(snapshot, 'runtime', 'resource_read').preamble).toBe('fixed system');
         const nested = await authority.read({ snapshot, readers: [reader] }, { kind: 'instruction-scope', targetPath: 'src/main.ts' });
@@ -308,7 +309,7 @@ describe('Agent resource owner', () => {
         const incomplete = createPinnedResourceReader({ domainId: 'old-git', store: adapter, pin, coverage: { kind: 'selected', paths: ['known-missing'], subtrees: [] } });
         expect(await incomplete.read('unknown-ignored')).toMatchObject({ status: 'unavailable' });
         expect(await incomplete.read('known-missing')).toMatchObject({ status: 'missing' });
-        expect(await incomplete.list('.pi/skills')).toMatchObject({ status: 'unavailable' });
+        expect(await incomplete.list('.varin/resources/skills')).toMatchObject({ status: 'unavailable' });
         expect(await incomplete.read('AGENTS.md')).toMatchObject({ status: 'ready', content: 'fixed root' });
       } finally { await pin.release(); }
     } finally { database.close(); }

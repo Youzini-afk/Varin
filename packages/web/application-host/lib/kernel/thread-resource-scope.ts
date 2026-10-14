@@ -6,9 +6,9 @@ import { lstat, stat } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import type { ThreadIdentity, ThreadSource } from '@varin/application-client';
-import type { InstalledAgentResourcePackage } from '@varin/pi-host/agent-resource-configuration';
+import type { InstalledAgentResourcePackage } from '../agent-resources/packages.js';
 import { canonicalBundleContains, createAgentResourceAuthority, type AdmittedAgentResourceScope, type PreparedAgentResources, type ResourceDomain } from '../agent-resources/authority.js';
-import { isLocalPattern, parseResourceSettings } from '../agent-resources/configuration.js';
+import { isLocalPattern, parseResourceSettings, type ResourceSettings } from '../agent-resources/configuration.js';
 import { ancestorDirectories, CONTEXT_FILE_NAMES } from '../agent-resources/formats.js';
 import { contentVersion, createAdmittedDirectoryReader, createCapsuleResourceReader, createDocumentResourceReader, createPinnedResourceReader,
   referenceKey, relativeResourcePath, resourceFailure, type ResourceDirectoryEntry, type ResourceDirectoryResult,
@@ -62,7 +62,7 @@ export interface ThreadResourceScopeOwners {
     withSourceRead: ThreadResourceScopeOwners['withSourceRead'];
     withLiveSourceRead<T>(source: Extract<ThreadSource, { mode: 'live_root' }>, consume: (store: WorkingStateRootStore) => Promise<T>, signal?: AbortSignal): Promise<T>;
   };
-  agentDir: string;
+  dataDirectory: string;
   homeDir?: string;
   documents: Pick<DocumentAuthority, 'inspectWorkspace' | 'readSnapshot' | 'admitWorkspaceRegistration'>;
   workingStates: WorkspaceWorkingStateRootAccess;
@@ -70,7 +70,7 @@ export interface ThreadResourceScopeOwners {
   projectTrusted(root: string): boolean | Promise<boolean>;
   /** Existing Git owner resolves linked-worktree identity; no second Git parser. */
   resolvePrimaryWorktreeRoot?(directory: string): Promise<{ root: string }>;
-  configuration(root?: string): Promise<{ packages: InstalledAgentResourcePackage[] }>;
+  configuration(root?: string, resources?: ResourceSettings): Promise<{ packages: InstalledAgentResourcePackage[] }>;
   /** Existing Storage authority, readonly grant and exact branch/view. No physical root or effect methods. */
   withSourceRead<T>(input: ResourceSourceReadInput, consume: (view: ResourceSourceReadView) => Promise<T>): Promise<T>;
 }
@@ -279,7 +279,7 @@ async function listSourceDirectory(store: WorkingStateRootStore, root: string, r
 }
 
 function domainReaders(scope: AdmittedAgentResourceScope): ResourceReader[] {
-  const domains = [scope.project, scope.user, scope.userAgents, ...scope.ancestors ?? [],
+  const domains = [scope.project, scope.user, scope.userSettings, scope.userAgents, ...scope.ancestors ?? [],
     ...scope.configuredPaths?.map(item => item.target) ?? [], ...scope.installedPackages ?? []];
   return [...new Map(domains.filter((item): item is ResourceDomain => Boolean(item)).map(item => [referenceKey({ ...item.reader, path: '' }), item.reader])).values()];
 }
@@ -292,7 +292,8 @@ const configuredAbsolute = (raw: string, base: string, home: string) => raw === 
 
 export function createThreadResourceScope(owners: ThreadResourceScopeOwners): ThreadResourceScope {
   const home = path.resolve(owners.homeDir ?? process.env.HOME ?? os.homedir());
-  const agentDir = path.resolve(owners.agentDir);
+  const dataDirectory = path.resolve(owners.dataDirectory);
+  const resourceRoot = path.join(dataDirectory, 'resources');
   const authority = createAgentResourceAuthority();
   const withSourceRead: ThreadResourceScopeOwners['withSourceRead'] = (input, consume) => (owners.targetAuthority?.withSourceRead ?? owners.withSourceRead)(input, consume);
 
@@ -303,14 +304,16 @@ export function createThreadResourceScope(owners: ThreadResourceScopeOwners): Th
     return { reader: await resourceAssetReader(canonical, id, previous?.viewId ?? `resource-capture:${randomUUID()}`), displayRoot: canonical };
   };
   const addUser = async (scope: AdmittedAgentResourceScope, options: ThreadResourceScopeOptions) => {
-    scope.user = await freshDomain(agentDir, 'agent-dir', options.snapshot);
+    scope.user = await freshDomain(resourceRoot, 'user-resources', options.snapshot);
+    scope.userSettings = await freshDomain(dataDirectory, 'user-settings', options.snapshot);
     scope.userAgents = await freshDomain(path.join(home, '.agents'), 'home-agents', options.snapshot);
     if (options.snapshot) return;
-    const settings = await scope.user.reader.read('settings.json', options.signal);
+    const settings = await scope.userSettings.reader.read('agent-settings.json', options.signal);
+    const resources = settings.status === 'ready' ? capturedSettings(settings) : { skills: [], packages: [] };
     if (settings.status === 'ready') {
-      for (const configuredPath of capturedSettings(settings).skills.filter(value => !isLocalPattern(value))) {
-        const absolute = configuredAbsolute(configuredPath, agentDir, home);
-        if (isPathWithinRoot(absolute, agentDir) && !path.isAbsolute(configuredPath) && !configuredPath.startsWith('~')) continue;
+      for (const configuredPath of resources.skills.filter(value => !isLocalPattern(value))) {
+        const absolute = configuredAbsolute(configuredPath, resourceRoot, home);
+        if (isPathWithinRoot(absolute, resourceRoot) && !path.isAbsolute(configuredPath) && !configuredPath.startsWith('~')) continue;
         const canonical = await canonicalizePathIdentity(absolute, { allowMissing: true });
         let directory = ''; let root = canonical;
         try { if (!(await stat(canonical)).isDirectory()) { directory = path.basename(canonical); root = path.dirname(canonical); } }
@@ -319,7 +322,7 @@ export function createThreadResourceScope(owners: ThreadResourceScopeOwners): Th
         (scope.configuredPaths ??= []).push({ scope: 'user', configuredPath, target, independentUserResource: true });
       }
     }
-    const configuration = await owners.configuration();
+    const configuration = await owners.configuration(undefined, resources);
     for (const pkg of configuration.packages.filter(item => item.scope === 'user')) {
       (scope.installedPackages ??= []).push({ ...await freshDomain(pkg.installedPath, 'user-package'), identity: pkg.identity, source: pkg.source, scope: 'user' });
     }
@@ -452,7 +455,7 @@ export function createThreadResourceScope(owners: ThreadResourceScopeOwners): Th
         const worktree = nearestGit === root ? observed.reader : captures.get(nearestGit)?.reader;
         const primaryReader = captures.get(primary)?.reader;
         if (worktree && primaryReader) {
-          // Pi shadows only the primary file with the selected worktree alias's basename.
+          // A linked worktree shadows only the primary file with the selected worktree alias's basename.
           for (const name of CONTEXT_FILE_NAMES) {
             const selected = await worktree.read(name, signal);
             if (selected.status !== 'ready') continue;
@@ -465,15 +468,16 @@ export function createThreadResourceScope(owners: ThreadResourceScopeOwners): Th
     }
     scope.shadowedContextCanonicalIds = capture.shadowedContextCanonicalIds;
     if (trusted) {
-      const config = await observed.reader.read('.pi/settings.json', signal);
+      const config = await observed.reader.read('.varin/settings.json', signal);
+      const resources = config.status === 'ready' ? capturedSettings(config) : { skills: [], packages: [] };
       if (config.status === 'ready') {
-        for (const configuredPath of capturedSettings(config).skills.filter(value => !isLocalPattern(value))) {
-          const admitted = await captureDomain(configuredAbsolute(configuredPath, path.join(root, '.pi'), home));
+        for (const configuredPath of resources.skills.filter(value => !isLocalPattern(value))) {
+          const admitted = await captureDomain(configuredAbsolute(configuredPath, path.join(root, '.varin', 'resources'), home));
           scope.configuredPaths!.push({ scope: 'project', configuredPath, target: { reader: admitted.reader, directory: admitted.directory, displayRoot: admitted.root } });
           capture.configuredPaths.push({ configuredPath, target: admitted.target });
         }
       }
-      const configuration = await owners.configuration(root);
+      const configuration = await owners.configuration(root, resources);
       for (const pkg of configuration.packages.filter(item => item.scope === 'project')) {
         const admitted = await captureDomain(pkg.installedPath);
         scope.installedPackages!.push({ reader: admitted.reader, directory: admitted.directory, displayRoot: admitted.root, identity: pkg.identity, source: pkg.source, scope: 'project' });

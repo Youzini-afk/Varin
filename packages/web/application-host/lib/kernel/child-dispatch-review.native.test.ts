@@ -17,7 +17,7 @@ import { ApplicationExtensionRuntime } from '@varin/extension-host';
 import { createAgentPolicy } from './agent-policy.js';
 import { afterEach, expect, it } from 'vitest';
 import { configureRuntimeUrlResolver, createAgentProfilesHttpAPI, createThreadsHttpAPI, setRuntimeExtraHeaders, type ThreadIdentity } from '@varin/application-client';
-import { GlobalSettingsAuthority } from '@varin/pi-host/settings-authority';
+import { AgentSettingsService } from '../models/settings.js';
 import { createDocumentAuthority } from '../documents/authority.js';
 import { createAgentPersonalization } from '../memory/agent-personalization.js';
 import { openUserKnowledgeStore } from '../harness/recall-tool.js';
@@ -198,7 +198,7 @@ async function fixture(reply: (request: RecordedRequest, index: number) => void,
       if (selection.providerId !== model.providerId || selection.modelId !== model.modelId) throw new Error('Unknown fixture model');
       return { configuration, credentialOwner };
     }, rebindModel: async () => credentialOwner };
-    const settings = new GlobalSettingsAuthority(agentDir);
+    const settings = new AgentSettingsService(agentDir, () => false);
     const profiles = createAgentProfilesAPI({ settings, capabilities: signal => runtime.childCapabilities(signal) });
     const adapter = new ThreadAdapter(runtime, models, createThreadSourceAdmission({ documents, withSourceRead: (input, consume) => storage.withResourceRead(input, consume), runtime }), (_runId, error) => { errors.push(error); }, createThreadSourcePreparer({ inspectInventory: async () => ({ kind: 'directory' }), sourceTools: mode => kernel.agentRuntimeRequest('runtime.source.tools', { mode }),  documents, workingStates, prepareResources: resources.prepareSourceCapture }), prepareContext, plans, undefined, undefined,
       createChildProfilePreparer({ settings: async () => (await settings.read()).document, capabilities: signal => runtime.childCapabilities(signal), models }));
@@ -691,11 +691,6 @@ it('a saved runtime-specific preset stays frozen across a later edit and Host/ke
   const original = saved.snapshot.profiles.find(profile => profile.id === saved.profileId)!;
   if (original.config.kind !== 'custom') throw new Error('Expected the newly saved custom profile');
   preset = `custom:${original.config.key}`;
-  const pi = await h.profiles.read({ runtime: 'pi' });
-  const piProfile = pi.profiles.find(profile => profile.id === saved.profileId)!;
-  expect(piProfile.tools.source).toBe('unconfigured');
-  await h.profiles.save({ runtime: 'pi', expectedRevision: pi.revision, id: saved.profileId,
-    config: piProfile.config, tools: ['read'] });
   expect((await h.profiles.read({ runtime: 'agent' })).profiles.find(profile => profile.id === saved.profileId)?.tools)
     .toEqual({ source: 'explicit', names: ['file_read'] });
   const identity = await h.api.create('child-review-reopen-prepare');
@@ -707,7 +702,6 @@ it('a saved runtime-specific preset stays frozen across a later edit and Host/ke
   const current = await h.profiles.read({ runtime: 'agent' });
   await h.profiles.save({ runtime: 'agent', expectedRevision: current.revision, id: saved.profileId,
     config: { ...original.config, agent: { ...original.config.agent, instructions: 'LATER_PROFILE_INSTRUCTIONS' } }, tools: [] });
-  expect((await h.profiles.read({ runtime: 'pi' })).profiles.find(profile => profile.id === saved.profileId)?.tools.names).toEqual(['read']);
   await h.close();
   await fs.writeFile(path.join(f.workspace, 'source.txt'), 'new live data after restart');
   const reopened = await f.openHost();

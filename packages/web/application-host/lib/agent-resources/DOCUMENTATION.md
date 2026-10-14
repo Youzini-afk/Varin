@@ -11,9 +11,9 @@ The native Thread path uses this owner through `kernel/thread-resource-scope.ts`
 ContentStore-backed ContextCheckpoint. ModelStep and policy calls retain the exact checkpoint they
 selected; a resource refresh publishes by revision without changing an in-flight call.
 
-Native explicit `/skill` input activation uses this same owner. Convergence of the older Pi resource
-catalog/commands and editors remains separate work. This slice does not activate Pi loaders/extensions, resolve/install packages,
-invoke a model, or replace the existing settings and trust authorities.
+Native explicit `/skill` input activation uses this same owner. Resources share the native
+`AgentSettingsService` transaction and `ProjectTrustService` admission. This module never executes
+package code, installs packages, invokes a model, or writes settings. Old Pi assets are not read or imported.
 
 ## Two operations
 
@@ -42,21 +42,24 @@ consumer's actual registered read-tool name; this module does not invent a `read
 
 ## Admission and existing owners
 
-- Project settings come from `cwd/.pi/settings.json` in the admitted source reader. `projectTrusted` comes
-  from the existing `ProjectTrustStore` decision. Only project settings/SYSTEM/APPEND/skills are gated by
-  that decision; directory context files follow the already-admitted source, matching the locked Pi rule.
+- Project settings come from `cwd/.varin/settings.json` in the admitted source reader. Resource options
+  live in its `resources` object; files live in `cwd/.varin/resources`. `projectTrusted` comes from native
+  `VARIN_DATA_DIR/project-trust.json`. Project settings/SYSTEM/APPEND/skills require that decision;
+  directory context files follow the already-admitted source.
   Each skill records its actual selection’s `requiresProjectTrust` dependency, including project package
   overrides. Revoking project trust does not disable independent user skills or directory instructions.
-- User resources come from an exact admitted agent-directory domain and, separately, an optional
-  `HOME/.agents` domain. Discovery reads only the expected configuration/instruction/skill paths.
+- Global resource options come from `VARIN_DATA_DIR/agent-settings.json`, sharing model/harness settings
+  validation and revision CAS. User resource files have a separate exact `VARIN_DATA_DIR/resources` domain
+  and optional `HOME/.agents` domain. Discovery reads only the expected configuration/instruction/skill paths.
   Neither domain becomes a model-controlled arbitrary file or process grant.
 - `installedPackages` accepts canonical identity, original source/scope and the already installed asset
-  reader supplied by the existing package authority. The host can derive these from the read-only
-  `PackageAuthorityHost.listPackages` / `DefaultPackageManager.listConfiguredPackages` path. Do not call
-  `DefaultPackageManager.resolve`, a loader reload, or an installation method to obtain them.
+  reader supplied by `packages.ts`. Local sources resolve beneath the selected resource directory;
+  remote source labels require an explicit `installedPath`. Missing installations remain diagnostics.
+  Package resolution uses the exact captured settings, so an edit during preparation cannot pair a new
+  configuration with an older directory selection. No network install, cache probing or loader is involved.
   Source-contained project package files must use the source pin. Independent user/package assets need
   their own precise view and publication, not a claim that they belong to the project pin.
-- Configured relative paths are resolved against the original user agent directory or project `.pi` base.
+- Configured relative paths are resolved against the original user or project resource directory.
   Normalizing `..` is allowed when the result remains in the admitted domain. Absolute, home-relative,
   out-of-domain, or separately mounted paths require an exact `configuredPaths` mapping prepared by the
   existing source/resource admission owner. A fixed project dependency uses an immutable capsule unless
@@ -66,8 +69,8 @@ consumer's actual registered read-tool name; this module does not invent a `read
   worktree admission can supply canonical context identities shadowed by the selected linked worktree.
   Ancestors marked `includeSkills` contribute their captured `.agents/skills` after source-local skill
   roots, inner-to-outer; admission marks only ancestors inside the original nearest-Git-root skill chain.
-- Existing settings and `RevisionedTextFileEditor` remain the writers. Saving an asset does not mutate an
-  existing snapshot. The consumer prepares and conditionally publishes a new candidate.
+- `AgentSettingsService` remains the only native settings writer. Resource files use their existing
+  admitted document/file owner. Saving an asset does not mutate an existing snapshot. The consumer prepares and conditionally publishes a new candidate.
 
 ## Reader adapters and consistency
 
@@ -140,17 +143,17 @@ later live files, and do not label every old pin complete or reject every old pi
   An on-demand target chain excludes sibling directories.
 - SYSTEM and APPEND each choose trusted project over user independently; append files are not summed.
 - Skills: project explicit paths, project auto discovery, user explicit paths, user auto discovery, packages.
-  Existing array order is preserved. Project `.pi` precedes `.agents` from cwd toward its admitted nearest
-  Git/root boundary; user agent-dir skills precede `HOME/.agents/skills`. The caller supplies that boundary
+  Existing array order is preserved. Project `.varin/resources` precedes `.agents` from cwd toward its admitted nearest
+  Git/root boundary; user resource-dir skills precede `HOME/.agents/skills`. The caller supplies that boundary
   from existing source/Git admission; this owner never walks out of its source to discover one.
 - Canonical resource duplicates and same-name losers retain diagnostics. Project package identity wins;
   `autoload:false` is an ordered delta over an existing user package. Package `skills: []` disables that
-  resource type. A package manifest's `pi.skills: []` remains empty for a source-only structured
+  resource type. A package manifest's `varin.skills: []` remains empty for a source-only structured
   settings entry too; only an actual skills filter or autoload delta can override that manifest default.
-  Plain filters, `!glob`, `+exact-path`, and `-exact-path` preserve the locked SDK order.
+  Plain filters, `!glob`, `+exact-path`, and `-exact-path` apply include, exclude, exact include, exact exclude in that order.
   Local wildcard filter entries do not create source paths. Explicit package manifest globs expand only
   visible paths beneath their admitted prefix. Unconfigured packages are not scanned.
-- A root SKILL.md stops recursion. Pi roots admit direct markdown files; `.agents` discovery preserves
+- A root SKILL.md stops recursion. Native roots admit direct markdown files; `.agents` discovery preserves
   its separate nested-markdown behavior. Existing `.gitignore`, `.ignore`, `.fdignore` rules are read from
   the same view. Dot directories and node_modules are skipped by ordinary skill discovery.
 - YAML parsing preserves the locked BOM/CRLF and delimiter semantics. Missing/empty descriptions are not
@@ -158,11 +161,11 @@ later live files, and do not label every old pin complete or reject every old pi
   not new hard limits. Unknown frontmatter is ignored by metadata; `allowed-tools` grants nothing.
   `disable-model-invocation` hides automatic metadata only, so explicit user invocation can still select it.
 
-## Native consumer and remaining convergence
+## Native consumer and package boundary
 
 `thread-resource-scope.ts` binds actual user/project settings, trust and installed assets, plus the source
 receipt's capsules and coverage. Main and child paths use their own admitted identity. Installed package
-identity comes from the read-only Pi package configuration adapter, without loader execution or install.
+identity comes from native explicit package admission, without loader execution or install.
 A source-contained dependency uses its pin; external ancestors/configured assets use captured capsules.
 
 The runtime's `ContextResources` holds the original source provenance and full snapshot. Input source
@@ -182,13 +185,23 @@ Cancellation and epoch checks fence the original call. A missing original reader
 later live content cannot substitute for the frozen body. Capture-only additions require explicit refresh.
 
 The authenticated resource refresh route and Thread UI use the displayed checkpoint revision. Stale,
-failed or cancelled preparation leaves the old generation visible. Older Pi catalog/command convergence
-and full resource editing UI remain to be connected before claiming one complete product consumer.
-Bot knowledge/persona remains separate from ordinary memory.
+failed or cancelled preparation leaves the old generation visible. Bot knowledge/persona remains
+separate from ordinary memory.
+
+`resources.packages` accepts a local directory string or `{ source, installedPath?, skills?, autoload? }`.
+For example, `{ "source": "npm:@example/skills@1", "installedPath": "packages/example" }` consumes an
+already installed native directory. npm identities omit the version; `git:https://...#ref` identities
+omit the revision. Package manifests use `package.json` → `varin.skills`; a Pi-only manifest is invalid.
+Plain native directories may use the conventional `skills` folder without a manifest.
+
+Varin's `ExtensionPackageManager` remains the executable extension installation owner. Its extension
+manifest/lifecycle and this read-only skill-resource manifest are separate contracts. Pi-specific
+`packages.install/update/remove` and plugin loaders are not exposed here; replacing them with a second
+network installer would introduce another authority. The resource owner never guesses Pi installation paths.
 
 ### Explicit input material
 
-`activation.ts` recognizes the locked SDK's leading `/skill:` syntax and first ASCII-space delimiter;
+`activation.ts` recognizes leading `/skill:` syntax and first ASCII-space delimiter;
 only arguments are trimmed. Name diagnostics remain warnings. `thread-skill-input.ts` selects from the
 full published snapshot, rechecks its existing resource admission and parses the captured SKILL.md
 without reopening live files or settings. Unknown, malformed, unavailable and denied selections retain

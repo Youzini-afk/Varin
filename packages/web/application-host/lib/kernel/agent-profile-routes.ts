@@ -17,10 +17,10 @@ export function registerAgentProfileRoutes(app: Express, profiles: AgentProfiles
           return;
         }
         const body = input as Record<string, unknown>;
-        if ((body.runtime !== 'pi' && body.runtime !== 'agent')
+        if (body.runtime !== 'agent'
           || (action !== 'read' && (typeof body.expectedRevision !== 'string' || !body.expectedRevision))
           || (action === 'remove' && typeof body.id !== 'string')) {
-          response.status(400).json({ code: 'agent-profile-invalid', message: 'Choose a runtime and reload the agent settings before editing.' });
+          response.status(400).json({ code: 'agent-profile-invalid', message: 'Reload native agent settings before editing.' });
           return;
         }
         const result = action === 'read' ? await profiles.read({ runtime: body.runtime }, abort.signal)

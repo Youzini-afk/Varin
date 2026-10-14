@@ -1,8 +1,6 @@
 import { readdir } from 'node:fs/promises';
 import path from 'node:path';
 import type { BotSummary } from '@varin/application-client';
-import type { ThreadRegistry } from '../harness/thread-registry.js';
-import type { ThreadRuntime } from '../harness/thread-runtime.js';
 import { botScopeId, threadScopeId, knowledgeStoreKeyForScope, scopeOfScopeId } from '../harness/owner-scope.js';
 import type { KernelFileResourceBackend } from '../kernel/file-resource-backend.js';
 import { knowledgeVectorScopeKey } from '../knowledge/vectors/store.js';
@@ -12,10 +10,7 @@ import type { RecoveryIdentity } from '../recovery/journal-files.js';
 export function createBotDataCleanup(options: {
   dataDir: string;
   hostId: string;
-  registry: Pick<ThreadRegistry, 'listWorkspaceThreadSnapshots' | 'listWorkspaceRunSessionIds'>;
-  deleteThread: ThreadRuntime['deleteUser'];
-  deleteSession(sessionId: string): Promise<unknown>;
-  deleteAgentScope?(bot: BotSummary): Promise<void>;
+  deleteAgentScope(bot: BotSummary): Promise<void>;
   closeMemory(scopeId: string, storeKey: string): Promise<void>;
   releaseRemoteScope(scopeId: string): Promise<void>;
   files: Pick<KernelFileResourceBackend, 'remove'>;
@@ -28,28 +23,7 @@ export function createBotDataCleanup(options: {
       throw new Error('Invalid Bot data directory');
     }
     const scopeId = botScopeId(bot.id);
-    if (bot.entry.runtime === 'agent') {
-      if (!options.deleteAgentScope) throw new Error('Agent Bot deletion owner is unavailable');
-      await options.deleteAgentScope(bot);
-    }
-    const snapshots = bot.entry.runtime === 'agent' ? [] : await options.registry.listWorkspaceThreadSnapshots(scopeId);
-    const sessions = new Set([
-      ...(bot.entry.runtime === "pi" && bot.entry.sessionId ? [bot.entry.sessionId] : []),
-      ...bot.activity.work.flatMap((item) => item.runtime === "pi" && item.sessionId ? [item.sessionId] : []),
-      ...await options.registry.listWorkspaceRunSessionIds(scopeId),
-    ]);
-    const ids = new Set(snapshots.map(({ thread }) => thread.id));
-    for (const { thread } of snapshots) {
-      if (thread.parent.kind === 'thread' && ids.has(thread.parent.id)) continue;
-      const result = await options.deleteThread(scopeId, thread.parent, thread.id);
-      if (result.status !== 'complete') {
-        throw new Error(result.nodeResults.filter((node) => node.status !== 'complete')
-          .map((node) => `${node.threadId}: ${node.error ?? node.status}`).join('\n'));
-      }
-    }
-    if ((await options.registry.listWorkspaceThreadSnapshots(scopeId)).length) throw new Error('Bot work cleanup is incomplete');
-    // Native Pi deletion owns transcripts and closes their follow-ups. Never unlink JSONL here.
-    for (const sessionId of sessions) await options.deleteSession(sessionId);
+    await options.deleteAgentScope(bot);
     await options.releaseRemoteScope(scopeId);
     const identity: RecoveryIdentity = {
       authorityId: scopeId, workspaceId: scopeId, canonicalRoot: options.dataDir, filesystemProfile: 'host-data',
@@ -59,7 +33,7 @@ export function createBotDataCleanup(options: {
     try { names = await readdir(path.join(options.dataDir, knowledgeDir)); }
     catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; names = []; }
     // Sleep's original Run refs survive Catalog cleanup and retain local-store cleanup on retry.
-    const stores = new Set([scopeId, ...bot.activity.work.flatMap(work => work.runtime === 'agent' ? [threadScopeId(work.threadId)] : [])]);
+    const stores = new Set([scopeId, ...bot.activity.work.map(work => threadScopeId(work.threadId))]);
     for (const ownedScope of stores) {
       const storeKey = knowledgeStoreKeyForScope(ownedScope);
       await options.closeMemory(ownedScope, storeKey);

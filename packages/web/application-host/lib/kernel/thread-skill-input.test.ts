@@ -18,7 +18,7 @@ async function fixture() {
   const userRoot = path.join(root, 'user');
   const projectRoot = path.join(root, 'project');
   for (const [relative, content] of Object.entries({ 'user/skills/shared/SKILL.md': file('shared', 'USER FALLBACK'),
-    'user/skills/independent/SKILL.md': file('independent', 'USER BODY'), 'project/.pi/skills/shared/SKILL.md': file('shared', 'PROJECT BODY') })) {
+    'user/skills/independent/SKILL.md': file('independent', 'USER BODY'), 'project/.varin/resources/skills/shared/SKILL.md': file('shared', 'PROJECT BODY') })) {
     await mkdir(path.dirname(path.join(root, relative)), { recursive: true });
     await writeFile(path.join(root, relative), content);
   }
@@ -32,7 +32,7 @@ async function fixture() {
     execution_workspace_id: 'workspace', branch_id: 'original-source', revision: 1, live_root: null } };
   const unexpected = vi.fn(async () => { throw new Error('Skill activation must not open a source or rediscover resources'); });
   const trust = vi.fn<ThreadResourceScopeOwners['projectTrusted']>(() => true);
-  const scope = createThreadResourceScope({ agentDir: userRoot, workingStates: { withBranchStore: unexpected },
+  const scope = createThreadResourceScope({ dataDirectory: userRoot, workingStates: { withBranchStore: unexpected },
     documents: { admitWorkspaceRegistration: async () => ({ workspaceId: 'workspace', canonicalPath: root, hostId: 'test', kind: 'directory' }), inspectWorkspace: unexpected, readSnapshot: unexpected }, configuration: unexpected,
     validateLiveSource: unexpected, withSourceRead: unexpected, projectTrusted: trust });
   return { root, projectRoot, resources, unexpected, trust, scope, prepare: createThreadSkillInputPreparer(scope) };

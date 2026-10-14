@@ -1,11 +1,10 @@
-/** User profile settings, independent of Pi sessions. Persistence stays with SettingsManager. */
+/** Native agent profiles share the revisioned Agent settings owner. */
 import { randomUUID } from 'node:crypto';
-import type { GlobalSettingsAuthority, GlobalSettingsSnapshot } from '@varin/pi-host/settings-authority';
 import {
-  EXECUTION_PRESETS, RESEARCH_CAPABILITY_DEFINITIONS, HarnessSettingsValidationError,
+  EXECUTION_PRESETS, HarnessSettingsValidationError,
   agentPresetTools, mergeHarnessSettings, parseHarnessAgent, parseHarnessModelSlots,
   resolveAgentTools, updateAgentToolSelection,
-  type AgentRuntime, type HarnessSettingsInput, type HarnessModelBinding,
+  type HarnessSettingsInput, type HarnessModelBinding,
   type HarnessCustomAgent, type JsonValue, type ChildCapabilityDescriptor,
 } from '@varin/protocol';
 import type {
@@ -13,13 +12,19 @@ import type {
 } from '@varin/application-client';
 import { waitWithSignal } from '../cancellation.js';
 
+export interface GlobalSettingsSnapshot { document: Record<string, JsonValue>; revision: string }
+export interface AgentProfileSettingsOwner {
+  read(): Promise<GlobalSettingsSnapshot>;
+  updateHarness(expectedRevision: string, update: (harness: Record<string, JsonValue>) => Record<string, JsonValue>): Promise<GlobalSettingsSnapshot>;
+}
+
 const record = (value: unknown): value is Record<string, unknown> => Boolean(value && typeof value === 'object' && !Array.isArray(value));
 class ProfileRequestFailure extends Error {
   constructor(readonly code: string, message: string, readonly status = 400) { super(message); }
 }
 const invalid = (message: string): never => { throw new ProfileRequestFailure('agent-profile-invalid', message); };
-function runtime(value: unknown): AgentRuntime {
-  if (value !== 'pi' && value !== 'agent') return invalid('Choose Pi or Agent as the configuration runtime.');
+function runtime(value: unknown): 'agent' {
+  if (value !== 'agent') return invalid('Choose the native Agent runtime.');
   return value;
 }
 function settings(snapshot: GlobalSettingsSnapshot) {
@@ -37,23 +42,16 @@ function sharedAgent(agent: HarnessCustomAgent) {
   const { tools: _tools, ...shared } = agent;
   return shared;
 }
-function definitions(target: AgentRuntime, capabilities: ChildCapabilityDescriptor[] | null) {
-  const native = capabilities && agentPresetTools(capabilities);
-  return [
-    ...Object.values(EXECUTION_PRESETS).map(definition => ({ slot: definition.slot, name: definition.id,
-      description: definition.teamDescription, instructions: definition.systemPromptFragment,
-      worktree: definition.worktree, workFocus: definition.workFocus ?? [],
-      tools: target === 'agent' ? native![definition.id as 'worker' | 'retrieval'] : definition.tools })),
-    ...(target === 'pi' ? Object.values(RESEARCH_CAPABILITY_DEFINITIONS).map(definition => ({
-      slot: definition.slot, name: definition.capability, description: definition.systemPromptFragment,
-      instructions: definition.systemPromptFragment, worktree: definition.worktree,
-      workFocus: ['research' as const], tools: definition.tools,
-    })) : []),
-  ];
+function definitions(capabilities: ChildCapabilityDescriptor[]) {
+  const native = agentPresetTools(capabilities);
+  return Object.values(EXECUTION_PRESETS).map(definition => ({ slot: definition.slot, name: definition.id,
+    description: definition.teamDescription, instructions: definition.systemPromptFragment,
+    worktree: definition.worktree, workFocus: definition.workFocus ?? [],
+    tools: native[definition.id as 'worker' | 'retrieval'] }));
 }
-function project(snapshot: GlobalSettingsSnapshot, target: AgentRuntime, capabilities: ChildCapabilityDescriptor[] | null): AgentProfilesSnapshot {
+function project(snapshot: GlobalSettingsSnapshot, target: 'agent', capabilities: ChildCapabilityDescriptor[]): AgentProfilesSnapshot {
   const selected = settings(snapshot);
-  const profiles: AgentProfileView[] = definitions(target, capabilities).map(definition => {
+  const profiles: AgentProfileView[] = definitions(capabilities).map(definition => {
     const binding = selected.models[definition.slot] ?? {};
     const overrides = binding.agent;
     const model = binding.providerId && binding.modelId ? { providerId: binding.providerId, modelId: binding.modelId } : null;
@@ -95,14 +93,11 @@ function validateSave(input: AgentProfileSaveRequest): void {
 }
 
 export function createAgentProfilesAPI(owners: {
-  settings: Pick<GlobalSettingsAuthority, 'read' | 'updateHarness'>;
-  agentSettings?: Pick<GlobalSettingsAuthority, 'read' | 'updateHarness'>;
+  settings: AgentProfileSettingsOwner;
   capabilities(signal?: AbortSignal): Promise<ChildCapabilityDescriptor[]>;
   onChanged?(): void;
 }): AgentProfilesAPI {
-  const settingsFor = (target: AgentRuntime) => target === 'agent' ? owners.agentSettings ?? owners.settings : owners.settings;
-  const capabilities = async (target: AgentRuntime, signal?: AbortSignal) => {
-    if (target === 'pi') return null;
+  const capabilities = async (signal?: AbortSignal) => {
     try { return await waitWithSignal(owners.capabilities(signal), signal); }
     catch {
       signal?.throwIfAborted();
@@ -112,24 +107,24 @@ export function createAgentProfilesAPI(owners: {
   return {
     async read(input, signal) {
       const target = runtime(input.runtime);
-      const [snapshot, tools] = await Promise.all([waitWithSignal(settingsFor(target).read(), signal), capabilities(target, signal)]);
+      const [snapshot, tools] = await Promise.all([waitWithSignal(owners.settings.read(), signal), capabilities(signal)]);
       return project(snapshot, target, tools);
     },
     async save(input, signal) {
       validateSave(input);
       const target = runtime(input.runtime);
-      const tools = await capabilities(target, signal);
+      const tools = await capabilities(signal);
       const config: AgentProfileConfig = input.config;
       let profileId = input.id;
       if (!profileId && (config.kind !== 'custom' || config.key !== '' || !Array.isArray(input.tools))) {
         invalid('New agents require a custom profile and an explicit tool selection for this runtime.');
       }
-      const builtin = definitions(target, tools).find(definition => config.kind === 'builtin' && definition.slot === config.slot);
+      const builtin = definitions(tools).find(definition => config.kind === 'builtin' && definition.slot === config.slot);
       if (config.kind === 'builtin' && (!builtin || profileId !== `varin:builtin:${config.slot}`)) invalid('Select a built-in profile available in this runtime.');
       if (config.kind === 'custom' && profileId !== undefined && profileId !== `varin:custom:${config.key}`) invalid('The selected agent identity changed. Reload agent settings.');
       signal?.throwIfAborted();
       // The callback sees the current document protected by the original revision CAS.
-      const snapshot = await settingsFor(target).updateHarness(input.expectedRevision, harness => {
+      const snapshot = await owners.settings.updateHarness(input.expectedRevision, harness => {
         const selected = mergeHarnessSettings(harness as HarnessSettingsInput, {});
         if (config.kind === 'builtin') {
           const original = selected.models[config.slot];
@@ -155,9 +150,9 @@ export function createAgentProfilesAPI(owners: {
     async remove(input, signal) {
       const target = runtime(input.runtime);
       if (typeof input.id !== 'string' || !input.id.startsWith('varin:custom:')) invalid('Only custom agent profiles can be deleted.');
-      const tools = await capabilities(target, signal);
+      const tools = await capabilities(signal);
       signal?.throwIfAborted();
-      const snapshot = await settingsFor(target).updateHarness(input.expectedRevision, harness => {
+      const snapshot = await owners.settings.updateHarness(input.expectedRevision, harness => {
         const key = input.id.slice('varin:custom:'.length);
         const selected = mergeHarnessSettings(harness as HarnessSettingsInput, {});
         if (!Object.hasOwn(selected.agents, key)) throw new ProfileRequestFailure('agent-profile-not-found', 'This agent was removed. Reload agent settings.');

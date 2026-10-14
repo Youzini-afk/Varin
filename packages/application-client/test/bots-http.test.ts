@@ -37,3 +37,11 @@ it('rejects cancelled and old-Host Bot response bodies', async () => {
     await assert.rejects(stale, error => error instanceof BotRequestError && error.code === 'host-changed');
   } finally { globalThis.fetch = original; }
 });
+
+it('rejects a legacy Bot entry instead of constructing a native identity', async () => {
+  const original = globalThis.fetch;
+  globalThis.fetch = async () => Response.json({ bots: [{ ...bot, entry: { runtime: 'pi', sessionId: 'original' } }] });
+  try {
+    await assert.rejects(createBotsHttpAPI().list(), error => error instanceof BotRequestError && error.code === 'invalid-response');
+  } finally { globalThis.fetch = original; }
+});

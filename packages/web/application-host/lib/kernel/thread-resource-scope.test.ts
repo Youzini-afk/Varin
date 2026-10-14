@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { lstat, mkdir, mkdtemp, readFile, readdir, readlink, rm, symlink, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import type { InstalledAgentResourcePackage } from '@varin/pi-host/agent-resource-configuration';
+import type { InstalledAgentResourcePackage } from '../agent-resources/packages.js';
 import type { ThreadSource } from '@varin/application-client';
 import { createAgentResourceAuthority, type PreparedAgentResources } from '../agent-resources/authority.js';
 import { contentVersion } from '../agent-resources/source-reader.js';
@@ -12,6 +12,7 @@ import { createCaptureInventory, type CaptureInventoryCandidate } from '../docum
 import type { RecoveryState, WorkingBranchCreateOptions, WorkingSourcePreparation, WorkingStateRootStore, WorkspaceWorkingStateRootAccess } from '../harness/working-state/types.js';
 import { createThreadResourceScope, parseSourceResourceCapture, ResourceScopeError, type ThreadResourceScopeOwners } from './thread-resource-scope.js';
 
+const nativeResources = (resources: unknown) => JSON.stringify({ resources });
 const roots: string[] = [];
 const identity = { runtime: 'agent' as const, threadId: 'thread', branchId: 'conversation' };
 const admitted = { mode: 'agent' as const, threadRole: 'main', projectId: 'project' };
@@ -103,7 +104,7 @@ async function fixture(files: Record<string, string>) {
   const trust = { value: true };
   const packages: InstalledAgentResourcePackage[] = [];
   const sourceReads = vi.fn();
-  const options = { agentDir, homeDir: home, documents, workingStates, validateLiveSource: vi.fn(async () => undefined),
+  const options = { dataDirectory: agentDir, homeDir: home, documents, workingStates, validateLiveSource: vi.fn(async () => undefined),
     projectTrusted: () => trust.value, configuration: async () => ({ packages }),
     withSourceRead: async <T>(input: import('./thread-resource-scope.js').ResourceSourceReadInput, consume: (view: import('./thread-resource-scope.js').ResourceSourceReadView) => Promise<T>) => {
       sourceReads(input);
@@ -129,11 +130,11 @@ async function read(f: Awaited<ReturnType<typeof fixture>>, snapshot: PreparedAg
 }
 
 async function reviewDraftResourceClosure() {
-  const f = await fixture({ 'AGENTS.md': 'ROOT', '.gitignore': '.pi', '.pi/settings.json': '{}' });
+  const f = await fixture({ 'AGENTS.md': 'ROOT', '.gitignore': '.varin', '.varin/settings.json': '{}' });
   await f.write('extra/SKILL.md', skill('external-draft', 'ORIGINAL EXTERNAL'));
   const editorDrafts = [
-    { path: '.pi/settings.json', content: Buffer.from(JSON.stringify({ skills: ['../../extra/SKILL.md'] })) },
-    { path: '.pi/skills/fresh/SKILL.md', content: Buffer.from(skill('fresh-draft', 'UNSAVED LOCAL')) },
+    { path: '.varin/settings.json', content: Buffer.from(nativeResources({ skills: ['../../../extra/SKILL.md'] })) },
+    { path: '.varin/resources/skills/fresh/SKILL.md', content: Buffer.from(skill('fresh-draft', 'UNSAVED LOCAL')) },
   ];
   const prepared = await captureStableSourceBaseline({ store: f.store, workspaceId: 'workspace', captureWorkspaceId: 'workspace', branchId: 'source',
     directory: f.root, captureScopes: [], content: { mode: 'fixed-draft-baseline' }, editorDrafts },
@@ -147,20 +148,33 @@ async function reviewDraftResourceClosure() {
     assert(result.status === 'ready' && result.kind === 'skill');
     assert(result.file.content.includes(original!));
   }
-  assert.equal(await readFile(path.join(f.root, '.pi/settings.json'), 'utf8'), '{}');
+  assert.equal(await readFile(path.join(f.root, '.varin/settings.json'), 'utf8'), '{}');
 }
 
 describe('Thread source resource admission', () => {
+  it('does not select legacy Pi configuration or skill roots even when the native project is trusted', async () => {
+    const f = await fixture({ '.pi/settings.json': '{legacy invalid', '.pi/skills/legacy/SKILL.md': skill('legacy', 'OLD ASSET'),
+      '.varin/resources/skills/native/SKILL.md': skill('native', 'NATIVE BODY') });
+    await f.write('agent/settings.json', '{legacy invalid');
+    await f.write('agent/skills/legacy-user/SKILL.md', skill('legacy-user', 'OLD USER ASSET'));
+    await f.prepare();
+    const snapshot = await f.candidate();
+    expect(snapshot.skills.map(item => item.name)).toEqual(['native']);
+    expect(snapshot.observations.some(item => item.path.startsWith('.pi/'))).toBe(false);
+    expect(await readFile(path.join(f.root, '.pi/settings.json'), 'utf8')).toBe('{legacy invalid');
+    expect(await readFile(path.join(f.agentDir, 'settings.json'), 'utf8')).toBe('{legacy invalid');
+  });
+
   it('captures draft settings dependencies and draft-only skill directories through the same fixed source', reviewDraftResourceClosure);
   it('captures only required ignored roots in the original source transaction, retaining original bytes after live changes', async () => {
-    const f = await fixture({ 'AGENTS.md': 'ROOT', '.gitignore': '.pi\nignored\n', '.pi/settings.json': '{}',
-      '.pi/skills/review/SKILL.md': skill('review', 'ORIGINAL'), '.pi/skills/review/reference.txt': 'ORIGINAL SUPPORT', 'ignored/unrelated.txt': 'EXCLUDED' });
+    const f = await fixture({ 'AGENTS.md': 'ROOT', '.gitignore': '.varin\nignored\n', '.varin/settings.json': '{}',
+      '.varin/resources/skills/review/SKILL.md': skill('review', 'ORIGINAL'), '.varin/resources/skills/review/reference.txt': 'ORIGINAL SUPPORT', 'ignored/unrelated.txt': 'EXCLUDED' });
     const prepared = await f.prepare();
-    expect(prepared.provenance.resources?.coverage).toMatchObject({ kind: 'selected', subtrees: ['.pi/skills', '.pi/skills/review'] });
+    expect(prepared.provenance.resources?.coverage).toMatchObject({ kind: 'selected', subtrees: ['.varin/resources/skills', '.varin/resources/skills/review'] });
     expect(f.branches.get('source')!.states['ignored/unrelated.txt']).toBeUndefined();
     expect(f.scans.flat()).not.toContain('.');
-    await f.write('workspace/.pi/skills/review/SKILL.md', skill('review', 'LATER'));
-    await f.write('workspace/.pi/skills/review/reference.txt', 'LATER SUPPORT');
+    await f.write('workspace/.varin/resources/skills/review/SKILL.md', skill('review', 'LATER'));
+    await f.write('workspace/.varin/resources/skills/review/reference.txt', 'LATER SUPPORT');
     const snapshot = await f.candidate();
     const body = await read(f, snapshot, 'review');
     expect(body.status === 'ready' && body.kind === 'skill' && body.file.content).toContain('ORIGINAL');
@@ -169,32 +183,32 @@ describe('Thread source resource admission', () => {
     expect(f.release).toHaveBeenCalledTimes(2);
     expect(f.sourceReads).toHaveBeenCalledTimes(2);
     expect(f.sourceReads.mock.calls[0]?.[0]).toMatchObject({ paths: [''] });
-    expect(f.sourceReads.mock.calls[1]?.[0]).toMatchObject({ paths: ['.pi/skills/review'], runId: 'run' });
+    expect(f.sourceReads.mock.calls[1]?.[0]).toMatchObject({ paths: ['.varin/resources/skills/review'], runId: 'run' });
     expect(parseSourceResourceCapture(prepared.provenance.resources)).toEqual(prepared.provenance.resources);
   });
 
   it('freezes external ancestors, configured skills and auto skill/SYSTEM symlinks into the same original receipt', async () => {
-    const f = await fixture({ 'AGENTS.md': 'ROOT', '.gitignore': '.pi', '.pi/settings.json': JSON.stringify({ skills: ['../../external'] }) });
+    const f = await fixture({ 'AGENTS.md': 'ROOT', '.gitignore': '.varin', '.varin/settings.json': nativeResources({ skills: ['../../../external'] }) });
     await f.write('AGENTS.md', 'ANCESTOR ORIGINAL');
     await f.write('external/SKILL.md', skill('outside', 'EXTERNAL ORIGINAL'));
     await f.write('external/support.txt', 'EXTERNAL SUPPORT');
     await f.write('unrelated/secret.txt', 'DO NOT CAPTURE');
     await symlink('../unrelated', path.join(f.base, 'external/outside'));
     await f.write('preamble.md', 'SYSTEM ORIGINAL');
-    await mkdir(path.join(f.root, '.pi/skills'), { recursive: true });
-    await symlink(path.join(f.base, 'external'), path.join(f.root, '.pi/skills/alias'));
-    await symlink(path.join(f.base, 'preamble.md'), path.join(f.root, '.pi/SYSTEM.md'));
+    await mkdir(path.join(f.root, '.varin/resources/skills'), { recursive: true });
+    await symlink(path.join(f.base, 'external'), path.join(f.root, '.varin/resources/skills/alias'));
+    await symlink(path.join(f.base, 'preamble.md'), path.join(f.root, '.varin/resources/SYSTEM.md'));
     const prepared = await f.prepare();
     const external = prepared.provenance.resources?.configuredPaths[0]?.target;
     expect(external?.kind === 'capsule' && external.capsule.files.some(file => file.content === 'DO NOT CAPTURE')).toBe(false);
     expect(external?.kind === 'capsule' && external.capsule.failures.some(failure => failure.path === 'outside' && failure.status === 'denied')).toBe(true);
-    expect(prepared.provenance.resources?.sourceLinks.map(link => link.path)).toEqual(expect.arrayContaining(['.pi/SYSTEM.md', '.pi/skills/alias']));
+    expect(prepared.provenance.resources?.sourceLinks.map(link => link.path)).toEqual(expect.arrayContaining(['.varin/resources/SYSTEM.md', '.varin/resources/skills/alias']));
     await f.write('AGENTS.md', 'ANCESTOR LATER');
     await f.write('external/SKILL.md', skill('outside', 'EXTERNAL LATER'));
     await f.write('external/support.txt', 'SUPPORT LATER');
     await f.write('preamble.md', 'SYSTEM LATER');
     const snapshot = await f.candidate();
-    expect(snapshot.capturedFiles.find(file => file.reference.path === '.pi/SYSTEM.md')?.content).toBe('SYSTEM ORIGINAL');
+    expect(snapshot.capturedFiles.find(file => file.reference.path === '.varin/resources/SYSTEM.md')?.content).toBe('SYSTEM ORIGINAL');
     expect(snapshot.capturedFiles.some(file => file.content === 'ANCESTOR ORIGINAL')).toBe(true);
     expect(snapshot.skills.filter(skill => skill.name === 'outside')).toHaveLength(1);
     const body = await read(f, snapshot, 'outside');
@@ -204,10 +218,10 @@ describe('Thread source resource admission', () => {
   });
 
   it('rejects source dependency changes before branch publication and preserves absence evidence', async () => {
-    const f = await fixture({ 'AGENTS.md': 'ROOT', '.gitignore': '.pi', '.pi/settings.json': '{}' });
+    const f = await fixture({ 'AGENTS.md': 'ROOT', '.gitignore': '.varin', '.varin/settings.json': '{}' });
     const prepareResources = async (...args: Parameters<typeof f.scope.prepareSourceCapture>) => {
       const plan = await f.scope.prepareSourceCapture(...args);
-      await f.write('workspace/.pi/settings.json', '{"skills":["different"]}');
+      await f.write('workspace/.varin/settings.json', '{"resources":{"skills":["different"]}}');
       return plan;
     };
     await expect(captureStableSourceBaseline({ store: f.store, workspaceId: 'workspace', captureWorkspaceId: 'workspace', branchId: 'source',
@@ -217,7 +231,7 @@ describe('Thread source resource admission', () => {
   });
 
   it('serves frozen bodies after the original root and branch become unavailable, without obtaining another source grant', async () => {
-    const f = await fixture({ 'AGENTS.md': 'ROOT', '.gitignore': '.pi', '.pi/settings.json': '{}', '.pi/skills/review/SKILL.md': skill('review', 'FROZEN') });
+    const f = await fixture({ 'AGENTS.md': 'ROOT', '.gitignore': '.varin', '.varin/settings.json': '{}', '.varin/resources/skills/review/SKILL.md': skill('review', 'FROZEN') });
     await f.prepare(); const snapshot = await f.candidate();
     f.sourceReads.mockClear();
     const request = { kind: 'skill' as const, resourceId: snapshot.skills.find(skill => skill.name === 'review')!.id };
@@ -237,10 +251,10 @@ describe('Thread source resource admission', () => {
   });
 
   it('keeps independent user resources and directory context readable after project trust revocation', async () => {
-    const f = await fixture({ 'AGENTS.md': 'ROOT', '.gitignore': '', '.pi/settings.json': '{}' });
-    await f.write('agent/skills/global/SKILL.md', skill('global', 'USER ORIGINAL'));
+    const f = await fixture({ 'AGENTS.md': 'ROOT', '.gitignore': '', '.varin/settings.json': '{}' });
+    await f.write('agent/resources/skills/global/SKILL.md', skill('global', 'USER ORIGINAL'));
     await f.prepare(); const snapshot = await f.candidate();
-    await rm(path.join(f.agentDir, 'skills'), { recursive: true });
+    await rm(path.join(f.agentDir, 'resources', 'skills'), { recursive: true });
     const body = await read(f, snapshot, 'global');
     expect(body.status === 'ready' && body.kind === 'skill' && body.file.content).toContain('USER ORIGINAL');
     expect(await read(f, snapshot, 'global', 'later.txt')).toMatchObject({ status: 'unavailable' });
@@ -252,12 +266,12 @@ describe('Thread source resource admission', () => {
   });
 
   it('retains actual package selection trust dependencies, including project deltas over user packages', async () => {
-    const f = await fixture({ 'AGENTS.md': 'ROOT', '.gitignore': '.pi', '.pi/settings.json': JSON.stringify({ packages: [
+    const f = await fixture({ 'AGENTS.md': 'ROOT', '.gitignore': '.varin', '.varin/settings.json': nativeResources({ packages: [
       { source: 'npm:shared', autoload: false, skills: ['+skills/project/SKILL.md'] }, 'npm:project-only',
     ] }) });
-    await f.write('agent/settings.json', JSON.stringify({ packages: ['npm:shared', 'npm:user-only'] }));
+    await f.write('agent/agent-settings.json', nativeResources({ packages: ['npm:shared', 'npm:user-only'] }));
     for (const [name, names] of [['shared', ['project', 'fallback']], ['user-only', ['user-package']], ['project-only', ['project-package']]] as const) {
-      await f.write(`packages/${name}/package.json`, JSON.stringify({ pi: { skills: ['skills'] } }));
+      await f.write(`packages/${name}/package.json`, JSON.stringify({ varin: { skills: ['skills'] } }));
       for (const skillName of names) await f.write(`packages/${name}/skills/${skillName}/SKILL.md`, skill(skillName, `${skillName} ORIGINAL`));
       f.packages.push({ identity: `npm:${name}`, source: `npm:${name}`, installedPath: path.join(f.base, 'packages', name), scope: name === 'project-only' ? 'project' : 'user' });
       if (name === 'shared') f.packages.push({ ...f.packages.at(-1)!, scope: 'project' });
@@ -272,7 +286,7 @@ describe('Thread source resource admission', () => {
   });
 
   it('freezes the selected nested-worktree context shadow through the existing Git owner', async () => {
-    const f = await fixture({ 'AGENTS.md': 'WORKTREE', '.git': 'gitdir: ../.git/worktrees/nested', '.gitignore': '', '.pi/settings.json': '{}' });
+    const f = await fixture({ 'AGENTS.md': 'WORKTREE', '.git': 'gitdir: ../.git/worktrees/nested', '.gitignore': '', '.varin/settings.json': '{}' });
     await f.write('AGENTS.md', 'PRIMARY');
     await mkdir(path.join(f.base, '.git'), { recursive: true });
     const gitOwner = vi.fn(async () => ({ root: f.base }));

@@ -13,11 +13,8 @@ const string = (value: unknown): string => typeof value === 'string' ? value : i
 const nullableString = (value: unknown) => value === null || typeof value === 'string';
 const strings = (value: unknown): string[] => Array.isArray(value) ? value.map(string) : invalid();
 const array = <T>(value: unknown, decode: (item: unknown) => T): T[] => Array.isArray(value) ? value.map(decode) : invalid();
-const entry = (value: unknown, ready = false): BotEntry => {
+const entry = (value: unknown): BotEntry => {
   const input = record(value);
-  if (input.runtime === 'pi' && nullableString(input.sessionId) && (!ready || typeof input.sessionId === 'string' && input.sessionId.length > 0)) {
-    return { runtime: 'pi', sessionId: input.sessionId as string | null };
-  }
   if (input.runtime === 'agent' && typeof input.threadId === 'string' && input.threadId && typeof input.branchId === 'string' && input.branchId) {
     return { runtime: 'agent', threadId: input.threadId, branchId: input.branchId };
   }
@@ -39,8 +36,7 @@ export const decodeBot = (value: unknown): BotSummary => {
     string(activity.operationId);
     array(activity.work, value => {
       const work = record(value); string(work.threadId);
-      if (work.runtime === 'pi') { if (!nullableString(work.sessionId) || !nullableString(work.runId)) invalid(); }
-      else if (work.runtime === 'agent') { string(work.branchId); string(work.runId); } else invalid();
+      if (work.runtime === 'agent') { string(work.branchId); string(work.runId); } else invalid();
       if (['resume', 'stopped', 'resumed'].some(key => typeof work[key] !== 'boolean')) invalid();
     });
     array(activity.machines, value => {
@@ -57,24 +53,17 @@ export const decodeBot = (value: unknown): BotSummary => {
   return bot as unknown as BotSummary;
 };
 export const decodeBotEntryResult = (value: unknown): BotEntryResult => {
-  const result = record(value); const bot = decodeBot(result.bot); const target = entry(result.entry, true);
-  if (bot.entry.runtime !== target.runtime || (target.runtime === 'agent'
-    ? bot.entry.runtime !== 'agent' || bot.entry.threadId !== target.threadId || bot.entry.branchId !== target.branchId
-    : bot.entry.runtime !== 'pi' || bot.entry.sessionId !== target.sessionId)) invalid();
+  const result = record(value); const bot = decodeBot(result.bot); const target = entry(result.entry);
+  if (bot.entry.threadId !== target.threadId || bot.entry.branchId !== target.branchId) invalid();
   if (result.model !== null) { const model = record(result.model); string(model.providerId); string(model.modelId); }
   return { bot, entry: target, model: result.model } as BotEntryResult;
 };
 export const decodeBotWork = (value: unknown): BotWorkItem => {
   const work = record(value); const thread = record(work.thread);
-  if (work.runtime === 'pi') {
-    string(thread.id); string(thread.brief); string(thread.lifecycle); string(thread.attention);
-    if (!nullableString(work.sessionId)) invalid();
-    if (work.activeRun !== null) { const run = record(work.activeRun); string(run.id); string(run.workerState); }
-  } else if (work.runtime === 'agent') {
-    const identity = entry(work.identity, true);
-    if (identity.runtime !== 'agent' || identity.threadId !== string(thread.thread_id)
+  if (work.runtime === 'agent') {
+    const identity = entry(work.identity);
+    if (identity.threadId !== string(thread.thread_id)
       || !['bot-root', 'work'].includes(string(work.purpose)) || !nullableString(thread.bot_id)) invalid();
-    if (identity.runtime !== 'agent') return invalid();
     const branchId = identity.branchId;
     const branches = array(thread.branches, value => {
       const branch = record(value); string(branch.branch_id); if (!nullableString(branch.head) || !nullableString(branch.active_run_id)) invalid();
@@ -163,8 +152,6 @@ export function createBotsHttpAPI(): BotsAPI {
     changeState: async (id, action) => decodeBot((await request(`${path(id)}/${action}`, 'POST')).bot),
     entry: async (id, signal) => decodeBotEntryResult(await request(`${path(id)}/entry`, 'POST', undefined, signal)),
     work: async (id, signal) => array((await request(`${path(id)}/work`, 'GET', undefined, signal)).threads, decodeBotWork),
-    sessionIds: async signal => strings((await request('/api/harness/bots/session-ids', 'GET', undefined, signal)).sessionIds),
-    forSession: async (id, signal) => { const result = await request(`/api/harness/sessions/${encodeURIComponent(id)}/bot`, 'GET', undefined, signal); return result.bot === null ? null : decodeBot(result.bot); },
     memory: {
       list: async (id, signal) => array((await request(`${path(id)}/memory`, 'GET', undefined, signal)).items, memoryItem),
       source: async (id, memoryId, signal) => array((await request(`${path(id)}/memory/${memoryId}/source`, 'GET', undefined, signal)).sources, sourceExcerpt),

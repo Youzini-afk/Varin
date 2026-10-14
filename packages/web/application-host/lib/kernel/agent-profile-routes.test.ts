@@ -4,20 +4,20 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { Express, Request, Response as ExpressResponse, RequestHandler } from 'express';
 import { expect, it } from 'vitest';
-import { GlobalSettingsAuthority } from '@varin/pi-host/settings-authority';
+import { AgentSettingsService } from '../models/settings.js';
 import { createAgentProfilesHttpAPI } from '@varin/application-client';
 import { createAgentProfilesAPI } from './agent-profiles.js';
 import { registerAgentProfileRoutes } from './agent-profile-routes.js';
 
 it('retains the actual owner failure through registered routes and the public HTTP client', async () => {
   const root = await mkdtemp(join(tmpdir(), 'profile-http-owner-'));
-  const path = join(root, 'settings.json');
+  const path = join(root, 'agent-settings.json');
   const originalFetch = globalThis.fetch;
   const handlers = new Map<string, RequestHandler>();
   const requireAuth: RequestHandler = (_request, _response, next) => next();
   let nativeUnavailable = false;
   let nativeRequests = 0;
-  const service = createAgentProfilesAPI({ settings: new GlobalSettingsAuthority(root), capabilities: async () => {
+  const service = createAgentProfilesAPI({ settings: new AgentSettingsService(root, () => false), capabilities: async () => {
     nativeRequests += 1;
     if (nativeUnavailable) throw new Error('private implementation detail must not cross HTTP');
     return [];
@@ -43,15 +43,15 @@ it('retains the actual owner failure through registered routes and the public HT
     const api = createAgentProfilesHttpAPI();
     for (const field of ['models', 'agents']) {
       await writeFile(path, JSON.stringify({ harness: { [field]: [] } }));
-      await expect(api.read({ runtime: 'pi' })).rejects.toMatchObject({ status: 400, code: 'agent-settings-invalid', message: `harness.${field} must be an object` });
+      await expect(api.read({ runtime: 'agent' })).rejects.toMatchObject({ status: 400, code: 'agent-settings-invalid', message: `harness.${field} must be an object` });
     }
-    expect(nativeRequests).toBe(0);
+    expect(nativeRequests).toBe(2);
     await writeFile(path, JSON.stringify({ secret: 'not a profile field', harness: {} }));
-    const view = await api.read({ runtime: 'pi' });
+    const view = await api.read({ runtime: 'agent' });
     expect(JSON.stringify(view)).not.toContain('not a profile field');
     const worker = view.profiles.find(profile => profile.id === 'varin:builtin:worker')!;
-    const saved = await api.save({ runtime: 'pi', expectedRevision: view.revision, id: worker.id, config: worker.config, tools: [] });
-    await expect(api.save({ runtime: 'pi', expectedRevision: view.revision, id: worker.id, config: worker.config })).rejects.toMatchObject({
+    const saved = await api.save({ runtime: 'agent', expectedRevision: view.revision, id: worker.id, config: worker.config, tools: [] });
+    await expect(api.save({ runtime: 'agent', expectedRevision: view.revision, id: worker.id, config: worker.config })).rejects.toMatchObject({
       status: 409, code: 'agent-settings-conflict', message: 'Agent settings changed. Reload them before saving.',
     });
     expect(saved.snapshot.profiles.find(profile => profile.id === worker.id)?.tools).toEqual({ source: 'explicit', names: [] });

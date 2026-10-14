@@ -20,7 +20,7 @@ async function fixture(files: Record<string, string>) {
   const reader = await createAdmittedDirectoryReader({ domainId: 'user', viewId: 'captured-user', root });
   const prepare = async () => {
     const result = await createAgentResourceAuthority().prepare({ threadId: 'thread', branchId: 'branch', mode: 'agent', threadRole: 'main',
-      projectId: null, sourceIdentity: null, projectTrusted: false, user: { reader, displayRoot: root } });
+      projectId: null, sourceIdentity: null, projectTrusted: false, user: { reader, displayRoot: root }, userSettings: { reader, displayRoot: root } });
     if (result.status !== 'ready') throw new Error(result.reason);
     return result.snapshot;
   };
@@ -33,7 +33,7 @@ const activate = (snapshot: PreparedAgentResources, text = '/skill:review args')
 };
 
 describe('Explicit skill resource preparation', () => {
-  it('recognizes only a leading SDK command and preserves the ASCII-space parsing boundary', () => {
+  it('recognizes only a leading skill command and preserves the ASCII-space parsing boundary', () => {
     for (const text of [' /skill:review', '\n/skill:review', 'please /skill:review', '`/skill:review`', '/skill', '/skill review']) {
       expect(parseExplicitSkillCommand(text)).toBeNull();
     }
@@ -45,7 +45,7 @@ describe('Explicit skill resource preparation', () => {
 
   it('uses the frozen hidden winner, retains exact resource provenance and never reopens a changed asset', async () => {
     const original = '\uFEFF---\r\nname: review\r\ndescription: review description\r\ndisable-model-invocation: true\r\nallowed-tools: [shell]\r\n---\r\n  ORIGINAL $ARGUMENTS\r\n';
-    const f = await fixture({ 'settings.json': JSON.stringify({ skills: ['selected'] }), 'selected/SKILL.md': original,
+    const f = await fixture({ 'agent-settings.json': JSON.stringify({ resources: { skills: ['selected'] } }), 'selected/SKILL.md': original,
       'skills/loser/SKILL.md': skillFile('review', 'COLLISION LOSER') });
     const snapshot = await f.prepare();
     expect(resourceSections(snapshot, 'runtime', 'resource_read').skills ?? '').not.toContain('review description');
@@ -105,7 +105,7 @@ describe('Explicit skill resource preparation', () => {
   });
 
   it('retains a root skill name derived from the original admitted directory', async () => {
-    const f = await fixture({ 'settings.json': JSON.stringify({ skills: ['.'] }),
+    const f = await fixture({ 'agent-settings.json': JSON.stringify({ resources: { skills: ['.'] } }),
       'SKILL.md': '---\ndescription: Root directory skill\n---\nROOT BODY' });
     const snapshot = await f.prepare();
     const selected = snapshot.skills[0]!;

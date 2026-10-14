@@ -21,21 +21,21 @@ function fixture() {
   return { create, update, ensureEntry, listWork, call };
 }
 describe('Bot routes without a network listener', () => {
-  it('admits explicit Agent creation and returns the original tagged entry', async () => {
+  it('creates native Bots without a runtime selector and returns the original tagged entry', async () => {
     const f = fixture();
-    expect((await f.call('POST', '/api/harness/bots', { name: 'Bot', runtime: 'agent' })).status).toBe(201);
-    expect(f.create).toHaveBeenCalledWith({ name: 'Bot', runtime: 'agent' });
+    expect((await f.call('POST', '/api/harness/bots', { name: 'Bot' })).status).toBe(201);
+    expect(f.create).toHaveBeenCalledWith({ name: 'Bot' });
     expect((await f.call('POST', '/api/harness/bots/bot/entry')).body).toEqual({ bot, entry, model: null });
     expect(f.ensureEntry).toHaveBeenCalledWith('bot');
     const work = await f.call('GET', '/api/harness/bots/bot/work');
     expect(work.status).toBe(200);
     expect(work.body).toMatchObject({ threads: [{ identity: entry, purpose: 'work', desktops: [], artifacts: [] }] });
   });
-  it('preserves Pi omission and rejects runtime changes instead of silently accepting them', async () => {
+  it('rejects runtime selectors and entry changes instead of silently accepting them', async () => {
     const f = fixture();
-    await f.call('POST', '/api/harness/bots', { name: 'Pi Bot' });
-    expect(f.create).toHaveBeenCalledWith({ name: 'Pi Bot' });
-    expect((await f.call('POST', '/api/harness/bots', { runtime: 'unknown' })).status).toBe(400);
+    await f.call('POST', '/api/harness/bots', { name: 'Native Bot' });
+    expect(f.create).toHaveBeenCalledWith({ name: 'Native Bot' });
+    for (const runtime of ['pi', 'agent', 'unknown']) expect((await f.call('POST', '/api/harness/bots', { runtime })).status).toBe(400);
     expect((await f.call('POST', '/api/harness/bots/bot/update', { runtime: 'agent' })).status).toBe(400);
     expect((await f.call('POST', '/api/harness/bots/bot/update', { entry })).status).toBe(400);
     expect(f.update).not.toHaveBeenCalled();

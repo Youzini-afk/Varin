@@ -4,8 +4,6 @@ import { randomUUID } from "node:crypto";
 import type { KernelClient, KernelScopedClient } from "../kernel/kernel-client.js";
 import type { BotExecutionGate, KernelRecordResult } from "../kernel/protocol.generated.js";
 import { HarnessServiceError } from "../harness/service-error.js";
-import { botScopeId } from "../harness/owner-scope.js";
-import type { ThreadRegistry } from "../harness/thread-registry.js";
 import type {
   BotActivity,
   BotCreateInput,
@@ -41,25 +39,7 @@ export interface BotServiceOptions {
   hostId: string;
   /** Directory containing Host-owned data; Bot home directories live below it. */
   dataDir: string;
-  registry: Pick<ThreadRegistry, "listRuns" | "listWorkspaceThreadSnapshots" | "listWorkspaceRunSessionIds">;
-  /** Create a fresh Pi session bound to the Bot's home directory. */
-  createSession(input: {
-    cwd: string;
-    name?: string;
-    model?: BotModelSelection;
-  }): Promise<{ sessionId: string }>;
-  /** Reopen a persisted Pi session (or return the live one). */
-  openSession(input: { sessionId: string; cwd?: string; model?: BotModelSelection }): Promise<{
-    sessionId: string;
-    model?: { provider: string; id: string };
-  }>;
-  /**
-   * Apply a profile model change to an already-running entry worker. Absent
-   * or failing workers keep the durable write; the next open re-applies.
-   */
-  applyModel?: (input: { sessionId: string; model: BotModelSelection | null }) => Promise<void>;
-  applyInstructions?: (input: { sessionId: string; instructions: string | null }) => Promise<void>;
-  agent?: {
+  agent: {
     ensureEntry(bot: BotSummary): Promise<ThreadIdentity>;
     model(bot: BotSummary): Promise<BotModelSelection | null>;
     listWork(bot: BotSummary, includeEntry: boolean): Promise<BotWorkItem[]>;
@@ -89,12 +69,14 @@ const parseProfile = (record: KernelRecordResult): BotProfile | null => {
     const raw = JSON.parse(record.payloadJson) as unknown;
     if (!isObject(raw)) return null;
     if (typeof raw.id !== "string" || typeof raw.name !== "string") return null;
-    if (typeof raw.coordinatorHostId !== "string") return null;
-    // Unsupported internal formats remain untouched and are never interpreted as Pi defaults.
-    if ('entrySessionId' in raw || !isObject(raw.entry)
-      || !(raw.entry.runtime === 'pi' && (raw.entry.sessionId === null || typeof raw.entry.sessionId === 'string')
-        || raw.entry.runtime === 'agent' && typeof raw.entry.threadId === 'string' && raw.entry.threadId.length > 0
-          && typeof raw.entry.branchId === 'string' && raw.entry.branchId.length > 0)) return null;
+    if (typeof raw.coordinatorHostId !== "string" || !raw.coordinatorHostId
+      || typeof raw.homeDir !== "string" || !raw.homeDir
+      || (raw.instructions !== null && typeof raw.instructions !== 'string')
+      || (raw.model !== null && !parseModel(raw.model))) return null;
+    // Unsupported formats remain untouched; no legacy asset conversion is performed.
+    if ('entrySessionId' in raw || !isObject(raw.entry) || raw.entry.runtime !== 'agent'
+      || typeof raw.entry.threadId !== 'string' || !raw.entry.threadId
+      || typeof raw.entry.branchId !== 'string' || !raw.entry.branchId) return null;
     const id = record.recordId.split(":")[1];
     if (!id || raw.id !== id) return null;
     if (raw.deletion !== undefined && (!isObject(raw.deletion) || typeof raw.deletion.operationId !== 'string'
@@ -106,7 +88,7 @@ const parseProfile = (record: KernelRecordResult): BotProfile | null => {
       model: parseModel(raw.model),
       coordinatorHostId: raw.coordinatorHostId,
       homeDir: typeof raw.homeDir === "string" ? raw.homeDir : "",
-      entry: raw.entry as BotProfile["entry"],
+      entry: { runtime: 'agent', threadId: raw.entry.threadId, branchId: raw.entry.branchId },
       pinnedAt: typeof raw.pinnedAt === "string" ? raw.pinnedAt : null,
       archiveRequested: raw.archiveRequested === true,
       ...(raw.deletion === undefined ? {} : { deletion: raw.deletion as NonNullable<BotProfile['deletion']> }),
@@ -128,9 +110,7 @@ const parseActivity = (value: unknown): BotActivity => {
     || !Array.isArray(value.work) || !Array.isArray(value.machines)
     || (value.error !== null && typeof value.error !== "string")
     || !value.work.every((item) => isObject(item) && typeof item.threadId === "string"
-      && (item.runtime === "pi" && (item.sessionId === null || typeof item.sessionId === "string")
-        && (item.runId === null || typeof item.runId === "string")
-        || item.runtime === "agent" && typeof item.branchId === "string" && typeof item.runId === "string")
+      && item.runtime === "agent" && typeof item.branchId === "string" && typeof item.runId === "string"
       && [item.resume, item.stopped, item.resumed].every((flag) => typeof flag === "boolean"))
     || !value.machines.every((item) => isObject(item) && typeof item.machineId === "string" && typeof item.label === "string"
       && ["pending", "stopping", "stopped", "starting", "ready", "kept-running"].includes(String(item.state)))) {
@@ -155,25 +135,10 @@ export interface BotService {
   executionGate(botId: string): Promise<BotExecutionGate>;
   reconcile(): Promise<void>;
   dispose(): Promise<void>;
-  /**
-   * Resolve (creating if necessary) the Bot's long-lived entry session. A
-   * persisted session that no longer exists is cleared and a fresh entry is
-   * created — the Bot's work association lives on the Thread scope, so losing
-   * one entry session never loses the work.
-   */
+  /** Materialize and resolve the allocated native entry without changing its identity. */
   ensureEntry(botId: string): Promise<BotEntryResult>;
-  /** Which Bot (if any) owns this session as its entry conversation. */
-  botForSession(sessionId: string): Promise<BotSummary | null>;
-  /** Threads owned by the Bot's owner scope — its real associated work. */
+  /** Threads owned by the Bot's owner scope, including original executor references. */
   listWork(botId: string, includeEntry?: boolean): Promise<BotWorkItem[]>;
-  /** Every Pi conversation owned by a Bot, including older Runs and archived Bots. */
-  listSessionIds(): Promise<string[]>;
-  /**
-   * Called when a session is deleted: clears a stale entry binding so the next
-   * entry resolution creates a fresh conversation instead of re-anchoring a
-   * dead session.
-   */
-  releaseEntry(sessionId: string): Promise<void>;
 }
 
 export function createBotService(options: BotServiceOptions): BotService {
@@ -206,13 +171,6 @@ export function createBotService(options: BotServiceOptions): BotService {
     const profile = parseProfile(record);
     return profile ? { ...profile, archived: record.state === "archived" } : null;
   };
-
-  /**
-   * session→bot index consulted on every `agent_start` through the bot-root
-   * runtime; populated on the first lookup and invalidated on each write.
-   */
-  let sessionIndex: Map<string, string> | null = null;
-  let catalogGeneration = 0;
 
   const recordFor = async (botId: string): Promise<KernelRecordResult | null> => {
     const client = await scoped();
@@ -251,7 +209,7 @@ export function createBotService(options: BotServiceOptions): BotService {
       model: null,
       coordinatorHostId: options.hostId,
       homeDir: join(options.dataDir, "bots", botId),
-      entry: { runtime: "pi", sessionId: null },
+      entry: { runtime: "agent", threadId: `thread:bot:${botId}`, branchId: `branch:bot:${botId}` },
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     };
@@ -276,10 +234,6 @@ export function createBotService(options: BotServiceOptions): BotService {
       ...(typeof revision === "number" ? { expectedRecordRevision: revision } : {}),
     });
     const summary = toSummary(result) ?? { ...next, archived: state === "archived" };
-    // Rebuild the session index from the authoritative write so a moved or
-    // cleared entry binding cannot keep an old sessionId mapped.
-    catalogGeneration += 1;
-    sessionIndex = null;
     await publishExecutionGate(result);
     options.onChange?.(summary);
     return summary;
@@ -318,7 +272,7 @@ export function createBotService(options: BotServiceOptions): BotService {
   };
 
   const create: BotService["create"] = async (input = {}) => {
-    if (input.runtime !== undefined && input.runtime !== "pi" && input.runtime !== "agent") throw new HarnessServiceError("invalid-params", "Bot runtime must be pi or agent");
+    if ("runtime" in input) throw new HarnessServiceError("invalid-params", "Bot runtime selection is unsupported");
     const botId = randomUUID();
     const homeDir = join(options.dataDir, "bots", botId);
     await mkdir(homeDir, { recursive: true });
@@ -329,12 +283,9 @@ export function createBotService(options: BotServiceOptions): BotService {
       model: input.model ?? null,
       homeDir,
       createdAt: now,
-      entry: input.runtime === "agent" ? { runtime: "agent", threadId: `thread:bot:${botId}`, branchId: `branch:bot:${botId}` } : { runtime: "pi", sessionId: null },
+      entry: { runtime: "agent", threadId: `thread:bot:${botId}`, branchId: `branch:bot:${botId}` },
     });
-    if (bot.entry.runtime === 'agent') {
-      if (!options.agent) throw new HarnessServiceError('unavailable', 'Agent Bot profile was saved, but its entry runtime is unavailable. Retry opening the Bot after runtime recovery.');
-      await options.agent.ensureEntry(bot);
-    }
+    await options.agent.ensureEntry(bot);
     return bot;
   };
 
@@ -356,23 +307,7 @@ export function createBotService(options: BotServiceOptions): BotService {
     if (patch.model !== undefined) updates.model = patch.model;
     if (patch.pinned !== undefined) updates.pinnedAt = patch.pinned ? (toSummary(existing)?.pinnedAt ?? new Date().toISOString()) : null;
     const summary = await write(botId, "active", updates, existing.recordRevision);
-    // Keep a live entry worker on the profile's current model. A closed or
-    // unreachable worker is retried by the model passed on the next open;
-    // clearing the preference likewise applies from the next open.
-    if (summary.entry.runtime === "pi" && summary.entry.sessionId && await canExecute(botId) && (patch.model !== undefined || patch.instructions !== undefined)) {
-      try {
-        if (patch.model !== undefined) await options.applyModel?.({ sessionId: summary.entry.runtime === "pi" ? summary.entry.sessionId! : "", model: patch.model });
-        if (patch.instructions !== undefined) await options.applyInstructions?.({
-          sessionId: summary.entry.runtime === "pi" ? summary.entry.sessionId! : "", instructions: summary.instructions,
-        });
-      } catch (error) {
-        options.onError?.(error);
-        if (!isObject(error) || error.code !== "session_not_found") {
-          throw new HarnessServiceError("unavailable", "Bot profile was saved, but the live entry could not apply it. Reopen the entry conversation.");
-        }
-      }
-    }
-    if (summary.entry.runtime === 'agent' && (patch.instructions !== undefined || patch.model !== undefined)) await options.agent?.applyProfile?.(summary);
+    if (patch.instructions !== undefined || patch.model !== undefined) await options.agent.applyProfile?.(summary);
     return summary;
   });
 
@@ -433,7 +368,7 @@ export function createBotService(options: BotServiceOptions): BotService {
           if (disposed) return;
           if (work.stopped) continue;
           try { await runtime.stop(bot, work); work.stopped = true; }
-          catch (error) { failures.push(`${work.threadId || (work.runtime === "pi" ? work.sessionId : work.runId)}: ${error instanceof Error ? error.message : String(error)}`); }
+          catch (error) { failures.push(`${work.threadId || work.runId}: ${error instanceof Error ? error.message : String(error)}`); }
           bot = await checkpoint(botId, activity);
         }
         try { const execution = await runtime.stopScope(bot); if (execution) activity.execution = execution; }
@@ -556,8 +491,6 @@ export function createBotService(options: BotServiceOptions): BotService {
         if (!current) return;
         if (current.deletion?.operationId !== deletion.operationId) throw new Error('Bot deletion was superseded');
         await (await scoped()).releaseRecord(`bot.delete:${deletion.operationId}`, BOT_CATALOG_WORKSPACE_ID, `bot.profile:${bot.id}`);
-        catalogGeneration++;
-        sessionIndex = null;
         options.onDeleted?.(bot.id);
       });
     } catch (error) {
@@ -596,108 +529,14 @@ export function createBotService(options: BotServiceOptions): BotService {
     if (!bot) throw new HarnessServiceError("not-found", `Unknown Bot "${botId}"`);
     if (bot.deletion) throw new HarnessServiceError('unavailable', 'This Bot is being deleted');
     if (bot.archived) throw new HarnessServiceError("invalid-params", `Bot "${botId}" is archived`);
-    if (bot.entry.runtime === 'agent') {
-      if (!options.agent) throw new HarnessServiceError('unavailable', 'Agent Bot runtime is unavailable');
-      const entry = await options.agent.ensureEntry(bot);
-      return { bot, entry, model: await options.agent.model(bot) };
-    }
-    if (bot.activity && bot.activity.state !== "awake") {
-      if (!bot.entry.sessionId) throw new HarnessServiceError("unavailable", "Wake this Bot to start its first conversation");
-      return { bot, entry: { runtime: "pi", sessionId: bot.entry.sessionId }, model: bot.model };
-    }
-    if (bot.entry.sessionId) {
-      try {
-        const session = await options.openSession({
-          sessionId: bot.entry.sessionId,
-          cwd: bot.homeDir,
-          ...(bot.model ? { model: bot.model } : {}),
-        });
-        // The broker returns an existing live worker without applying the
-        // `openSession` model argument. Reconcile that worker before exposing
-        // the entry as ready; a closed worker already opened on the preference.
-        if (bot.model && options.applyModel && (session.model?.provider !== bot.model.providerId
-          || session.model.id !== bot.model.modelId)) {
-          await options.applyModel({ sessionId: session.sessionId, model: bot.model });
-        }
-        if (!bot.model) await options.applyModel?.({ sessionId: session.sessionId, model: null });
-        await options.applyInstructions?.({ sessionId: session.sessionId, instructions: bot.instructions });
-        return { bot, entry: { runtime: "pi", sessionId: session.sessionId }, model: session.model ? { providerId: session.model.provider, modelId: session.model.id } : bot.model };
-      } catch (error) {
-        if (!isObject(error) || error.code !== "session_not_found") throw error;
-        // The persisted entry session is gone (deleted or never materialized
-        // on this Host). Clear it and create a fresh entry below — the Bot's
-        // work lives on its Thread scope, not on this one conversation.
-      }
-    }
-    await mkdir(bot.homeDir, { recursive: true });
-    const session = await options.createSession({
-      cwd: bot.homeDir,
-      name: bot.name,
-      ...(bot.model ? { model: bot.model } : {}),
-    });
-    // Return the session only once the durable owner binding was committed.
-    // An IPC/storage failure is not a successful entry without Bot identity.
-    const updated = await write(botId, "active", { entry: { runtime: "pi", sessionId: session.sessionId } });
-    await options.applyInstructions?.({ sessionId: session.sessionId, instructions: updated.instructions });
-    return { bot: updated, entry: { runtime: "pi", sessionId: session.sessionId }, model: updated.model };
+    const entry = await options.agent.ensureEntry(bot);
+    return { bot, entry, model: await options.agent.model(bot) };
   });
-
-  const botForSession: BotService["botForSession"] = async (sessionId) => {
-    if (!sessionId) return null;
-    while (!sessionIndex) {
-      const generation = catalogGeneration;
-      const bots = await list();
-      if (generation !== catalogGeneration) continue;
-      sessionIndex = new Map(bots.flatMap((bot) => (
-        bot.entry.runtime === "pi" && bot.entry.sessionId ? [[bot.entry.sessionId, bot.id] as const] : []
-      )));
-    }
-    const botId = sessionIndex.get(sessionId);
-    return botId ? get(botId) : null;
-  };
 
   const listWork: BotService["listWork"] = async (botId, includeEntry = false) => {
     const bot = await get(botId);
     if (!bot) throw new HarnessServiceError('not-found', 'Unknown Bot');
-    if (bot.entry.runtime === 'agent') {
-      if (!options.agent) throw new HarnessServiceError('unavailable', 'Agent Bot runtime is unavailable');
-      return options.agent.listWork(bot, includeEntry);
-    }
-    const snapshots = await options.registry.listWorkspaceThreadSnapshots(botScopeId(botId));
-    const items: BotWorkItem[] = [];
-    for (const { thread, activeRun } of snapshots) {
-      if (thread.purpose === "bot-root" && !includeEntry) continue;
-      // The latest Run's session is the reopenable surface for this work.
-      const runs = await options.registry.listRuns(botScopeId(botId), thread.id);
-      const sessionId = activeRun?.sessionId ?? runs.at(-1)?.sessionId ?? null;
-      items.push({ runtime: "pi", thread, activeRun, sessionId });
-    }
-    return items;
-  };
-
-  const listSessionIds: BotService["listSessionIds"] = async () => {
-    const bots = await list();
-    const runIds = await Promise.all(bots.map((bot) => bot.entry.runtime === "pi" ? options.registry.listWorkspaceRunSessionIds(botScopeId(bot.id)) : Promise.resolve([])));
-    const ids = new Set<string>();
-    for (const [index, bot] of bots.entries()) {
-      if (bot.entry.runtime === "pi" && bot.entry.sessionId) ids.add(bot.entry.sessionId);
-      for (const sessionId of runIds[index] ?? []) ids.add(sessionId);
-    }
-    return [...ids];
-  };
-
-  const releaseEntry: BotService["releaseEntry"] = async (sessionId) => {
-    const bots = await list();
-    for (const bot of bots) {
-      if (bot.entry.runtime !== "pi" || bot.entry.sessionId !== sessionId || bot.archived || bot.deletion) continue;
-      await serialize(bot.id, async () => {
-        const existing = await recordFor(bot.id);
-        if (!existing) return;
-        const profile = parseProfile(existing);
-        if (profile?.entry.runtime !== "pi" || profile.entry.sessionId !== sessionId || profile.deletion) return;
-        await write(bot.id, "active", { entry: { runtime: "pi", sessionId: null } }, existing.recordRevision);
-      });
-    }
+    return options.agent.listWork(bot, includeEntry);
   };
 
   return {
@@ -751,9 +590,6 @@ export function createBotService(options: BotServiceOptions): BotService {
       await Promise.allSettled(operations.values());
     },
     ensureEntry,
-    botForSession,
     listWork,
-    listSessionIds,
-    releaseEntry,
   };
 }

@@ -277,7 +277,7 @@ it('calendar GUI assets reach original source/model/context owners, consume a ge
     const config = createProjectConfigRuntime({ fsPromises: fs, path, projectsDirPath: path.join(f.root, 'project-config') });
     const scheduler = createScheduledTasksRuntime({ projectConfigRuntime: config, listProjects: projects, executeTask: async () => { throw new Error('Native calendar cannot dispatch Pi'); } });
     const errors: unknown[] = [];
-    scheduler.setCalendarOwner(new CalendarOwner({ runtime: f.runtime, projects, hasPiWork: scheduler.hasPiWork,
+    scheduler.setCalendarOwner(new CalendarOwner({ runtime: f.runtime, projects,
       prepare: (work, project, signal) => f.adapter.prepareCalendarWork(work, project, signal), onChanged() {}, onError: error => errors.push(error) }));
     const service = createScheduledTaskService({ projectConfigRuntime: config, scheduledTasksRuntime: scheduler, readSettingsFromDisk: async () => ({ projects: await projects() }), sanitizeProjects: value => value as Awaited<ReturnType<typeof projects>> });
     registerScheduledTaskRoutes(f.app, { scheduledTaskService: service, projectConfigRuntime: config, scheduledTasksRuntime: scheduler,

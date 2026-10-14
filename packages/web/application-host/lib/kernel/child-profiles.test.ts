@@ -78,16 +78,16 @@ it('prepares defaults and explicitly saved runtime profiles from the original se
   const { mkdtemp, writeFile, readFile, rm } = await import('node:fs/promises');
   const { join } = await import('node:path');
   const { tmpdir } = await import('node:os');
-  const { GlobalSettingsAuthority } = await import('@varin/pi-host/settings-authority');
+  const { AgentSettingsService } = await import('../models/settings.js');
   const { createAgentProfilesAPI } = await import('./agent-profiles.js');
   const root = await mkdtemp(join(tmpdir(), 'profile-owner-'));
   try {
-    const path = join(root, 'settings.json');
+    const path = join(root, 'agent-settings.json');
     await writeFile(path, JSON.stringify({ unchanged: { keep: true }, harness: { unrelated: 'asset', agents: {
       pi: agent({ tools: ['read'] }), native: agent({ tools: ['file_read'] }),
     } } }));
     const f = await fixture();
-    const settings = new GlobalSettingsAuthority(root);
+    const settings = new AgentSettingsService(root, () => false);
     const profiles = createAgentProfilesAPI({ settings, capabilities: async () => f.capabilities });
     const prepare = createChildProfilePreparer({ settings: async () => (await settings.read()).document,
       models: f.models, capabilities: async () => f.capabilities });
@@ -131,16 +131,16 @@ it('edits and removes original retained legacy profiles through the existing nor
   const { mkdtemp, writeFile, readFile, rm } = await import('node:fs/promises');
   const { join } = await import('node:path');
   const { tmpdir } = await import('node:os');
-  const { GlobalSettingsAuthority } = await import('@varin/pi-host/settings-authority');
+  const { AgentSettingsService } = await import('../models/settings.js');
   const { createAgentProfilesAPI } = await import('./agent-profiles.js');
   const root = await mkdtemp(join(tmpdir(), 'profile-legacy-'));
-  const path = join(root, 'settings.json');
+  const path = join(root, 'agent-settings.json');
   const original = JSON.stringify({ untouched: ['user asset'], harness: { unrelated: 'kept', models: {
     review: { agent: { name: 'Review asset', tools: ['file_read'], instructions: 'Original instructions' } },
   } } });
   try {
     await writeFile(path, original);
-    const profiles = createAgentProfilesAPI({ settings: new GlobalSettingsAuthority(root), capabilities: async () => [] });
+    const profiles = createAgentProfilesAPI({ settings: new AgentSettingsService(root, () => false), capabilities: async () => [] });
     const view = await profiles.read({ runtime: 'agent' });
     expect(await readFile(path, 'utf8')).toBe(original);
     const retained = view.profiles.find(profile => profile.id === 'varin:custom:saved-review')!;

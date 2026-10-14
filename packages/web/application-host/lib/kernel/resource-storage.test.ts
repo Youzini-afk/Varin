@@ -7,7 +7,7 @@ import { KernelStorageAdapter } from './storage-adapter.js';
 import type { ResourceSourceReadInput } from './thread-resource-scope.js';
 
 function fixture() {
-  const file = { path: '.pi/skills/review/SKILL.md', state: { kind: 'regular-file', objectHash: 'sha256-body', byteLength: 4, mode: 0o644 } };
+  const file = { path: '.varin/resources/skills/review/SKILL.md', state: { kind: 'regular-file', objectHash: 'sha256-body', byteLength: 4, mode: 0o644 } };
   const branch = { branchId: 'source', workspaceId: 'original', root: 'fixed-root', currentRoot: 'later-root', revision: 7,
     writeRevision: 8, headRevision: 7, view: 'revision', captureScopes: [], draftBasePaths: [], createdAt: 1, updatedAt: 2, entries: [file], nextCursor: null };
   const pin = { ...branch, pinId: 'resource-pin', writeRevision: 7 };
@@ -24,7 +24,7 @@ function fixture() {
   const adapter = new KernelStorageAdapter({ client: client as unknown as KernelClient, hostId: 'host', storageRoot: '/unused', resolveWorkspaceRoot });
   const input: ResourceSourceReadInput = { identity: { runtime: 'agent', threadId: 'fork', branchId: 'fork-conversation' }, runId: 'new-run',
     source: { mode: 'fixed_branch', resourceOwner: { kind: 'local' as const }, workspaceId: 'original', executionWorkspaceId: 'original-execution', branchId: 'source', revision: 7, tools: [] },
-    paths: ['.pi/skills/review'] };
+    paths: ['.varin/resources/skills/review'] };
   return { adapter, client, scoped, resolveWorkspaceRoot, input, file };
 }
 
@@ -38,13 +38,13 @@ describe('frozen resource Storage admission', () => {
       const file = await store.readPath('source', f.file.path, { pin });
       expect(file?.state).toEqual(f.file.state);
       expect(await store.readContent(file!)).toEqual(Buffer.from('BODY'));
-      expect((await store.listPaths('source', ['.pi/skills/review'], { pin }))?.entries).toHaveLength(1);
+      expect((await store.listPaths('source', ['.varin/resources/skills/review'], { pin }))?.entries).toHaveLength(1);
       return 'read';
     });
     expect(result).toBe('read');
     expect(f.client.issueGrant).toHaveBeenCalledOnce();
     expect(f.client.issueGrant).toHaveBeenCalledWith({ grantId: expect.stringMatching(/^resource-read:/), threadId: 'fork', runId: 'new-run',
-      owningWorkspace: 'original', executionWorkspace: 'original-execution', capabilities: ['storage.read'], pathScopes: ['.pi/skills/review'] }, undefined);
+      owningWorkspace: 'original', executionWorkspace: 'original-execution', capabilities: ['storage.read'], pathScopes: ['.varin/resources/skills/review'] }, undefined);
     expect(f.scoped.pinBranch).toHaveBeenCalledWith(expect.objectContaining({ branchId: 'source', revision: 7 }), undefined);
     expect(f.scoped.getBlob).toHaveBeenCalledWith('sha256-body', { pinId: 'resource-pin', path: f.file.path }, expect.anything());
     expect(f.resolveWorkspaceRoot).not.toHaveBeenCalled();

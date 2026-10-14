@@ -5,6 +5,8 @@ import { mkdtemp, rm, readFile, writeFile } from 'fs/promises';
 import { createProjectConfigRuntime, normalizeCalendarTarget } from './project-config.js';
 import type { ScheduledTask } from './project-config.js';
 
+const nativeTarget = { kind: 'new_work', model: { providerId: 'provider', modelId: 'model' }, sourceMode: 'fixed_branch', goal: null } as const;
+
 const requireTask = (task: ScheduledTask | undefined): ScheduledTask => {
   if (!task) throw new Error('Expected a scheduled task');
   return task;
@@ -33,6 +35,7 @@ describe('project-config runtime', () => {
       const result = await runtime.upsertScheduledTask('project-test', {
         name: 'Nightly digest',
         enabled: true,
+        target: nativeTarget,
         schedule: {
           kind: 'daily',
           time: '09:30',
@@ -40,8 +43,6 @@ describe('project-config runtime', () => {
         },
         execution: {
           prompt: 'Summarize repository changes',
-          providerID: 'openai',
-          modelID: 'gpt-4.1',
         },
       });
 
@@ -65,8 +66,10 @@ describe('project-config runtime', () => {
       const result = await runtime.upsertScheduledTask('project-test', {
         name,
         enabled: true,
+        runtime: 'agent',
+        target: nativeTarget,
         schedule: { kind: 'cron', cron: '0 9 * * *', timezone: 'UTC' },
-        execution: { prompt, providerID: 'openai', modelID: 'gpt-4.1' },
+        execution: { prompt },
       });
       expect(result.task.name).toBe(name);
       expect(result.task.execution.prompt).toBe(prompt);
@@ -81,6 +84,8 @@ describe('project-config runtime', () => {
       await expect(runtime.upsertScheduledTask('project-test', {
         name: 'Invalid cron task',
         enabled: true,
+        runtime: 'agent',
+        target: nativeTarget,
         schedule: {
           kind: 'cron',
           cron: 'invalid cron',
@@ -88,8 +93,6 @@ describe('project-config runtime', () => {
         },
         execution: {
           prompt: 'Run checks',
-          providerID: 'openai',
-          modelID: 'gpt-4.1',
         },
       })).rejects.toThrow('schedule.cron is invalid');
     } finally {
@@ -119,8 +122,10 @@ describe('project-config runtime', () => {
       await runtime.upsertScheduledTask(projectID, {
         name: 'nightly',
         enabled: true,
+        runtime: 'agent',
+        target: nativeTarget,
         schedule: { kind: 'daily', time: '09:00', timezone: 'UTC' },
-        execution: { prompt: 'run', providerID: 'openai', modelID: 'gpt-4.1' },
+        execution: { prompt: 'run' },
       });
 
       const raw = JSON.parse(await readFile(filePath, 'utf8'));
@@ -150,9 +155,11 @@ describe('project-config runtime', () => {
             id: 'task-existing',
             name: 'nightly',
             enabled: true,
+            runtime: 'agent',
+            target: nativeTarget,
             schedule: { kind: 'daily', times: ['09:00'], timezone: 'UTC' },
-            execution: { prompt: 'run', providerID: 'openai', modelID: 'gpt-4.1' },
-            state: { createdAt: 10, updatedAt: 20, lastStatus: 'idle' },
+            execution: { prompt: 'run' },
+            state: { createdAt: 10, updatedAt: 20 },
           }],
         }, null, 2),
         'utf8',
@@ -175,6 +182,8 @@ describe('project-config runtime', () => {
       const result = await runtime.upsertScheduledTask('project-test', {
         name: 'One-time review',
         enabled: true,
+        runtime: 'agent',
+        target: nativeTarget,
         schedule: {
           kind: 'once',
           date: '2026-04-20',
@@ -183,8 +192,6 @@ describe('project-config runtime', () => {
         },
         execution: {
           prompt: 'Create a release summary',
-          providerID: 'openai',
-          modelID: 'gpt-4.1',
         },
       });
 
@@ -203,12 +210,11 @@ describe('project-config runtime', () => {
       const created = await runtime.upsertScheduledTask('project-test', {
         name: 'Original',
         enabled: false,
+        runtime: 'agent',
+        target: nativeTarget,
         schedule: { kind: 'daily', times: ['09:00'], timezone: 'UTC' },
         execution: {
           prompt: 'original prompt',
-          providerID: 'openai',
-          modelID: 'gpt-5',
-          thinkingLevel: 'high',
         },
       });
       const patched = await runtime.upsertScheduledTask('project-test', {
@@ -223,17 +229,18 @@ describe('project-config runtime', () => {
         id: created.task.id,
         name: 'Renamed',
         enabled: false,
+        runtime: 'agent',
+        target: nativeTarget,
         schedule: { kind: 'daily', times: ['09:00'], timezone: 'Asia/Shanghai' },
         execution: {
           prompt: 'updated prompt',
-          providerID: 'openai',
-          modelID: 'gpt-5',
-          thinkingLevel: 'high',
         },
       });
       expect(patched.task.state.createdAt).toBe(created.task.state.createdAt);
       await expect(runtime.upsertScheduledTask('project-test', {
         id: created.task.id,
+        runtime: 'agent',
+        target: nativeTarget,
         schedule: [],
       })).rejects.toThrow(/schedule must be an object/i);
     } finally {
@@ -247,8 +254,10 @@ describe('project-config runtime', () => {
       await expect(runtime.upsertScheduledTask('project-test', {
         name: 'not-a-loop',
         enabled: true,
+        runtime: 'agent',
+        target: nativeTarget,
         schedule: { kind: 'cron', cron: '0 9 * * *', timezone: 'UTC' },
-        execution: { prompt: 'run', providerID: 'openai', modelID: 'gpt-5' },
+        execution: { prompt: 'run' },
         loopFile: '/repo/.agents/loops/injected.md',
       })).rejects.toThrow(/loop metadata/i);
     } finally {
@@ -262,15 +271,19 @@ describe('project-config runtime', () => {
       await runtime.upsertScheduledTask('project-test', {
         name: 'digest',
         enabled: true,
+        runtime: 'agent',
+        target: nativeTarget,
         schedule: { kind: 'daily', time: '09:00', timezone: 'UTC' },
-        execution: { prompt: 'json prompt', providerID: 'openai', modelID: 'gpt-4.1' },
+        execution: { prompt: 'json prompt' },
       });
       const loops = [{
         definition: {
           name: 'digest',
           enabled: true,
+          runtime: 'agent',
+          target: nativeTarget,
           schedule: { kind: 'cron', cron: '0 10 * * *', timezone: 'UTC' },
-          execution: { prompt: 'loop prompt', providerID: 'openai', modelID: 'gpt-4.1' },
+          execution: { prompt: 'loop prompt' },
         },
         filePath: '/repo/.agents/loops/digest.md',
         revision: 'rev-1',
@@ -301,8 +314,10 @@ describe('project-config runtime', () => {
       const definition = {
         name: 'digest',
         enabled: true,
+        runtime: 'agent',
+        target: nativeTarget,
         schedule: { kind: 'cron', cron: '0 9 * * *', timezone: 'UTC' },
-        execution: { prompt: 'run', providerID: 'openai', modelID: 'gpt-4.1' },
+        execution: { prompt: 'run' },
       };
       const filePath = '/repo/.agents/loops/digest.md';
       const first = await runtime.reconcileLoopTasks('project-test', [{
@@ -339,8 +354,10 @@ describe('project-config runtime', () => {
         definition: {
           name: 'digest',
           enabled: true,
+          runtime: 'agent',
+          target: nativeTarget,
           schedule: { kind: 'cron', cron: '0 9 * * *', timezone: 'UTC' },
-          execution: { prompt: 'run', providerID: 'openai', modelID: 'gpt-4.1' },
+          execution: { prompt: 'run' },
         },
         filePath: '/repo/.agents/loops/digest.md',
         revision: 'rev-1',
@@ -370,8 +387,10 @@ describe('project-config runtime', () => {
       const definition = {
         name: 'digest',
         enabled: true,
+        runtime: 'agent',
+        target: nativeTarget,
         schedule: { kind: 'cron', cron: '0 9 * * *', timezone: 'UTC' },
-        execution: { prompt: 'run', providerID: 'openai', modelID: 'gpt-4.1' },
+        execution: { prompt: 'run' },
       };
       await runtime.reconcileLoopTasks('project-test', [{
         definition,
@@ -432,5 +451,115 @@ describe('Agent calendar source assets', () => {
     ]) expect(() => normalizeCalendarTarget({ ...newWork, source })).toThrow('source');
     expect(() => normalizeCalendarTarget({ kind: 'existing_work', threadId: 'thread', branchId: 'branch', source: { kind: 'project' } })).toThrow('inherits');
     expect(normalizeCalendarTarget({ ...newWork, source: { kind: 'workspace', workspaceId: 'registered', resourceOwner: { kind: 'local' } } })).toMatchObject({ source: { kind: 'workspace', workspaceId: 'registered', resourceOwner: { kind: 'local' } } });
+  });
+});
+
+describe('native calendar asset integrity', () => {
+  const definition = {
+    runtime: 'agent', name: 'review', enabled: true, target: nativeTarget,
+    schedule: { kind: 'once', date: '2026-11-01', time: '01:30', timezone: 'America/New_York' },
+    execution: { prompt: '  Keep the original instruction bytes.\n' },
+  };
+  const persisted = { ...definition, id: 'saved', state: { createdAt: 10, updatedAt: 20 } };
+
+  it.each([
+    ['absent runtime', { ...persisted, runtime: undefined }],
+    ['Pi runtime', { ...persisted, runtime: 'pi' }],
+    ['Pi loop projection', { ...persisted, runtime: 'pi', loopFile: '/repo/legacy.md' }],
+    ['unknown runtime', { ...persisted, runtime: 'other' }],
+    ['null runtime', { ...persisted, runtime: null }],
+    ['missing target', { ...persisted, target: undefined }],
+    ['old execution', { ...persisted, execution: { prompt: 'run', providerID: 'provider', modelID: 'model' } }],
+    ['old execution state', { ...persisted, state: { createdAt: 10, updatedAt: 20, lastStatus: 'idle' } }],
+    ['owner handoff', { ...persisted, pendingCalendarHandoff: { definitionId: 'previous', generation: 1 } }],
+    ['once receipt', { ...persisted, onceAcceptance: { owner: 'pi', acceptanceId: 'previous', scheduledAtMs: 10, acceptedAtMs: 10 } }],
+    ['missing id', { ...persisted, id: undefined }],
+    ['missing state', { ...persisted, state: undefined }],
+    ['missing timezone', { ...persisted, schedule: { kind: 'daily', times: ['09:00'] } }],
+  ])('rejects %s without rewriting or deleting the original project asset', async (_name, task) => {
+    const { runtime, cleanup } = await createRuntime();
+    try {
+      const configPath = runtime.resolveProjectConfigPath('project-test');
+      const original = JSON.stringify({ version: 1, scheduledTasks: [task], projectNotes: 'keep me' }, null, 3);
+      await writeFile(configPath, original);
+      for (const operation of [
+        () => runtime.listScheduledTasks('project-test'),
+        () => runtime.upsertScheduledTask('project-test', { ...definition, id: 'new' }),
+        () => runtime.deleteScheduledTask('project-test', 'saved'),
+        () => runtime.reconcileLoopTasks('project-test', []),
+      ]) {
+        await expect(operation()).rejects.toThrow();
+        expect(await readFile(configPath, 'utf8')).toBe(original);
+      }
+    } finally { await cleanup(); }
+  });
+
+  it.each(['{', 'null', '[]', '{"scheduledTasks":null}', '{"scheduledTasks":{}}', '{"scheduledTasks":[null]}', '{"version":2,"scheduledTasks":[]}'])('never treats malformed project data as an empty calendar: %s', async content => {
+    const { runtime, cleanup } = await createRuntime();
+    try {
+      const configPath = runtime.resolveProjectConfigPath('project-test');
+      await writeFile(configPath, content);
+      await expect(runtime.listScheduledTasks('project-test')).rejects.toThrow();
+      await expect(runtime.reconcileLoopTasks('project-test', [])).rejects.toThrow();
+      expect(await readFile(configPath, 'utf8')).toBe(content);
+    } finally { await cleanup(); }
+  });
+
+  it('preserves native once metadata and prompt bytes without persisting execution facts', async () => {
+    const { runtime, cleanup } = await createRuntime();
+    try {
+      const created = await runtime.upsertScheduledTask('project-test', definition);
+      expect(created.task.runtime).toBe('agent');
+      expect(created.task.missedPolicy).toBe('coalesce_once');
+      expect(created.task.schedule).toEqual(definition.schedule);
+      expect(created.task.execution).toEqual(definition.execution);
+      expect(Object.keys(created.task.state).sort()).toEqual(['createdAt', 'updatedAt']);
+      const reread = await runtime.listScheduledTasks('project-test');
+      expect(reread).toEqual([created.task]);
+    } finally { await cleanup(); }
+  });
+
+  it.each([undefined, null, {}, [null], [{}]])('rejects malformed discovery instead of erasing saved loops: %s', async discovery => {
+    const { runtime, cleanup } = await createRuntime();
+    try {
+      await runtime.reconcileLoopTasks('project-test', [{ definition, filePath: '/repo/review.md', revision: 'first', scope: 'project' }]);
+      const configPath = runtime.resolveProjectConfigPath('project-test');
+      const original = await readFile(configPath, 'utf8');
+      await expect(runtime.reconcileLoopTasks('project-test', discovery)).rejects.toThrow();
+      expect(await readFile(configPath, 'utf8')).toBe(original);
+    } finally { await cleanup(); }
+  });
+
+  it('reports a newly discovered unsupported loop without rewriting other project assets', async () => {
+    const { runtime, cleanup } = await createRuntime();
+    try {
+      await runtime.upsertScheduledTask('project-test', definition);
+      const configPath = runtime.resolveProjectConfigPath('project-test');
+      const original = await readFile(configPath, 'utf8');
+      for (const loop of [
+        { definition: { ...definition, runtime: 'pi' }, filePath: '/repo/legacy.md' },
+        { definition: null, filePath: '/repo/malformed.md', error: 'Invalid YAML' },
+      ]) {
+        await expect(runtime.reconcileLoopTasks('project-test', [loop])).rejects.toThrow('Invalid loop');
+        expect(await readFile(configPath, 'utf8')).toBe(original);
+      }
+    } finally { await cleanup(); }
+  });
+
+  it.each([
+    { ...definition, runtime: undefined },
+    { ...definition, runtime: 'pi' },
+    { ...definition, target: undefined },
+    { ...definition, execution: { prompt: 'replacement', modelID: 'legacy' } },
+  ])('holds a previous native projection when supplied an invalid replacement', async replacement => {
+    const { runtime, cleanup } = await createRuntime();
+    try {
+      const loop = { definition, filePath: '/repo/review.md', revision: 'first', scope: 'project' };
+      const first = requireTask((await runtime.reconcileLoopTasks('project-test', [loop]))[0]);
+      const next = requireTask((await runtime.reconcileLoopTasks('project-test', [{ ...loop, definition: replacement, revision: 'invalid' }]))[0]);
+      expect(next).toMatchObject({ id: first.id, runtime: 'agent', target: first.target, execution: first.execution, schedule: first.schedule, state: first.state, loopRevision: 'invalid' });
+      expect(next.loopError).toBeTruthy();
+      expect(await runtime.listScheduledTasks('project-test')).toEqual([next]);
+    } finally { await cleanup(); }
   });
 });

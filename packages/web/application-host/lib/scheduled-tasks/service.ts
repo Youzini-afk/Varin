@@ -287,23 +287,10 @@ export const createScheduledTaskService = (dependencies: ScheduledTaskServiceDep
     if (!normalizedTaskID) throw new ScheduledTaskError('taskId is required', 400);
     const task = (await scheduledTasksRuntime.syncProject(project.id)).find(value => value.id === normalizedTaskID);
     if (!task) throw new ScheduledTaskError('Task not found', 404);
-    if (task.runtime === 'agent') {
-      const requestKey = asNonEmptyString(key);
-      if (!requestKey) throw new ScheduledTaskError('A stable run-now key is required', 400);
-      const owner = scheduledTasksRuntime.calendarOwner();
-      if (!owner) throw new ScheduledTaskError('Calendar owner is unavailable', 503);
-      return { runtime: 'agent', task, occurrence: await owner.run(project.id, task.id, requestKey) };
-    }
-    const result = await scheduledTasksRuntime.runNow(project.id, normalizedTaskID);
-    if (result.running || result.queued) {
-      throw new ScheduledTaskError(result.error || 'Task already running', 409);
-    }
-    if (result.skipped) throw new ScheduledTaskError('Task not found', 404);
-    if (!result.ok) {
-      throw new ScheduledTaskError(result.error || 'Task run failed', 500, { task: result.task });
-    }
-    if (!result.sessionID) throw new ScheduledTaskError('Pi session receipt is unavailable', 500);
-    return { runtime: 'pi', task: result.task ?? null, sessionId: result.sessionID };
+    const requestKey = asNonEmptyString(key);
+    if (!requestKey) throw new ScheduledTaskError('A stable run-now key is required', 400);
+    const owner = scheduledTasksRuntime.calendarOwner();
+    return { runtime: 'agent', task, occurrence: await owner.run(project.id, task.id, requestKey) };
   };
 
   const setEnabled = async (projectID: unknown, taskID: unknown, enabled: boolean, expectedRevision?: unknown) => {
