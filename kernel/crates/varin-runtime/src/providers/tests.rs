@@ -1718,6 +1718,51 @@ fn typed_parallel_tool_output_reaches_each_actual_provider_without_pair_or_json_
         );
     }
 }
+
+#[test]
+fn message_reuse_preserves_grouping_and_tool_dependencies_after_history_changes() {
+    for family in MEDIA_FAMILIES {
+        let provider = media_provider(family, true);
+        let mut request = paired_media_view(family, "image/png");
+        let mut reuse = RequestCompileReuse::new();
+        reuse.prepare(&request, 1, None, 1, None);
+        let first = provider.serialize(&request, Some(&mut reuse)).unwrap();
+        let warm = provider.serialize(&request, Some(&mut reuse)).unwrap();
+        assert_eq!(first.wire_bytes(), warm.wire_bytes(), "{family}");
+        let field = match family {
+            responses::FAMILY | azure::FAMILY | codex::FAMILY => "input",
+            google::FAMILY | google::VERTEX_FAMILY => "contents",
+            pi_messages::FAMILY => "context.messages",
+            _ => "messages",
+        };
+        assert!(first.shared_fragments(&warm, field) > 0, "{family} reuses complete groups");
+        let restored: RequestBody = serde_json::from_slice(&first.wire_bytes()).unwrap();
+        let protocol = provider.request_budget_protocol().unwrap();
+        assert!(restored.transcript_prefix(&warm, protocol.transcript, protocol.coalesced_content), "{family}, recovered prefix");
+        for change in 0..3 {
+            match change {
+                0 => request.history.push(Arc::new(ConversationItem {
+                    id: "next-assistant".into(), resource_activation: None,
+                    provenance: Provenance::Assistant,
+                    content: Content::Text { text: "next assistant 汉字 🧭".into() }, opaque: None,
+                })),
+                1 => {
+                    let Content::ToolCall { call } = &mut Arc::make_mut(&mut request.history[0]).content else { unreachable!() };
+                    call.name = "changed-tool-name".into();
+                }
+                _ => { request.history.remove(1); request.history.remove(2); }
+            }
+            let cached = provider.serialize(&request, Some(&mut reuse)).unwrap();
+            let cold = provider.serialize(&request, None).unwrap();
+            assert_eq!(cached.wire_bytes(), cold.wire_bytes(), "{family}, history change {change}");
+        }
+        let before = provider.serialize(&request, Some(&mut reuse)).unwrap();
+        reuse.prepare(&request, 1, Some("new-checkpoint".into()), 1, None);
+        let after = provider.serialize(&request, Some(&mut reuse)).unwrap();
+        assert_eq!(before.shared_fragments(&after, field), 0, "{family}, checkpoint changed");
+        assert_eq!(before.wire_bytes(), after.wire_bytes());
+    }
+}
 #[test]
 fn external_and_sampling_media_outputs_keep_their_original_roles_in_each_protocol() {
     for family in MEDIA_FAMILIES {

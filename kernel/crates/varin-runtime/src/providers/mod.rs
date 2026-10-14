@@ -9,6 +9,7 @@ mod builtins;
 pub mod chat;
 pub mod codex;
 pub mod google;
+pub(crate) mod groups;
 pub mod host_auth;
 pub mod mistral;
 pub mod pi_messages;

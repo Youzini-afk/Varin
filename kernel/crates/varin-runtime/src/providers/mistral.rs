@@ -64,6 +64,112 @@ impl Ids {
         }
     }
 }
+/// Allocate IDs in original wire order, before consulting the derived message cache.
+pub(super) struct MessageEncoding<'a> {
+    ids: Ids,
+    names: BTreeMap<&'a str, &'a str>,
+}
+#[derive(serde::Serialize)]
+pub(super) struct MappedMessage {
+    result: Option<(String, String)>,
+    calls: Vec<String>,
+}
+impl<'a> MessageEncoding<'a> {
+    pub(super) fn new(view: &'a RequestView) -> Self {
+        let names = view
+            .history
+            .iter()
+            .filter_map(|item| match &item.content {
+                Content::ToolCall { call } => Some((call.call_id.as_str(), call.name.as_str())),
+                _ => None,
+            })
+            .collect();
+        Self {
+            ids: Ids::default(),
+            names,
+        }
+    }
+    pub(super) fn prepare(
+        &mut self,
+        items: &[ProjectedHistoryItem<'_>],
+        media: bool,
+    ) -> Result<MappedMessage, ExecutionError> {
+        let mut mapped = MappedMessage {
+            result: None,
+            calls: Vec::new(),
+        };
+        if media {
+            return Ok(mapped);
+        }
+        let first = items.first().expect("Chat message source");
+        let result = if let Some(original) = first.opaque {
+            if original.value["role"] == "tool" {
+                Some(original.value["tool_call_id"].as_str().ok_or_else(|| {
+                    ExecutionError::new(
+                        "invalid_history_pairing",
+                        "Mistral tool result lacks call identity",
+                    )
+                })?)
+            } else {
+                None
+            }
+        } else if let Content::ToolResult { result } = &first.item.content {
+            Some(result.call_id.as_str())
+        } else {
+            None
+        };
+        if let Some(id) = result {
+            let name = self.names.get(id).ok_or_else(|| {
+                ExecutionError::new(
+                    "invalid_history_pairing",
+                    "Mistral tool result lacks call name",
+                )
+            })?;
+            mapped.result = Some((self.ids.map(id), (*name).into()));
+        }
+        for projected in items {
+            if let Some(original) = projected.opaque {
+                if let Some(calls) = original.value["tool_calls"].as_array() {
+                    for call in calls {
+                        let id = call["id"].as_str().ok_or_else(|| {
+                            ExecutionError::new(
+                                "invalid_history_pairing",
+                                "Mistral tool call lacks identity",
+                            )
+                        })?;
+                        mapped.calls.push(self.ids.map(id));
+                    }
+                }
+            } else if let Content::ToolCall { call } = &projected.item.content {
+                mapped.calls.push(self.ids.map(&call.call_id));
+            }
+        }
+        Ok(mapped)
+    }
+}
+impl MappedMessage {
+    pub(super) fn apply(self, message: &mut Value) {
+        if message["role"] == "assistant" {
+            message["prefix"] = json!(false);
+        }
+        if let Some((id, name)) = self.result {
+            message["tool_call_id"] = Value::String(id);
+            message["name"] = Value::String(name);
+        }
+        if let Some(calls) = message["tool_calls"].as_array_mut() {
+            for (call, id) in calls.iter_mut().zip(self.calls) {
+                call["id"] = Value::String(id);
+            }
+        }
+        if let Some(parts) = message["content"].as_array_mut() {
+            for part in parts {
+                if part["type"] == "image_url" && part["image_url"].is_object() {
+                    part["image_url"] = part["image_url"]["url"].take();
+                }
+            }
+        }
+    }
+}
 impl ModelProvider for MistralProvider {
     fn request_budget_protocol(&self) -> Option<crate::context_capacity::RequestBudgetProtocol> {
         self.inner.request_budget_protocol()
@@ -72,66 +178,17 @@ impl ModelProvider for MistralProvider {
     fn serialize(
         &self,
         view: &RequestView,
-        _reuse: Option<&mut RequestCompileReuse>,
+        reuse: Option<&mut RequestCompileReuse>,
     ) -> Result<RequestBody, ExecutionError> {
-        let mut body = self.inner.compile_body(view)?;
-        body.as_object_mut().expect("compiled object").remove("n");
+        let mut body = self.inner.compile_body(view, reuse)?;
+        body.remove("n");
         if let Some(mode) = &self.prompt_mode {
-            body["prompt_mode"] = json!(mode);
+            body.insert("prompt_mode", json!(mode));
         }
         if let Some(key) = &self.prompt_cache_key {
-            body["prompt_cache_key"] = json!(key);
+            body.insert("prompt_cache_key", json!(key));
         }
-        let mut ids = Ids::default();
-        let mut names = BTreeMap::new();
-        for item in &view.history {
-            if let Content::ToolCall { call } = &item.content {
-                names.insert(call.call_id.clone(), call.name.clone());
-            }
-        }
-        for message in body["messages"].as_array_mut().expect("compiled messages") {
-            if message["role"] == "assistant" {
-                message["prefix"] = json!(false);
-            }
-            if message["role"] == "tool" {
-                let id = message["tool_call_id"]
-                    .as_str()
-                    .ok_or_else(|| {
-                        ExecutionError::new(
-                            "invalid_history_pairing",
-                            "Mistral tool result lacks call identity",
-                        )
-                    })?
-                    .to_owned();
-                message["name"] = json!(names.get(&id).ok_or_else(|| ExecutionError::new(
-                    "invalid_history_pairing",
-                    "Mistral tool result lacks call name"
-                ))?);
-                message["tool_call_id"] = json!(ids.map(&id));
-            }
-            if let Some(calls) = message["tool_calls"].as_array_mut() {
-                for call in calls {
-                    let id = call["id"]
-                        .as_str()
-                        .ok_or_else(|| {
-                            ExecutionError::new(
-                                "invalid_history_pairing",
-                                "Mistral tool call lacks identity",
-                            )
-                        })?
-                        .to_owned();
-                    call["id"] = json!(ids.map(&id));
-                }
-            }
-            if let Some(parts) = message["content"].as_array_mut() {
-                for part in parts {
-                    if part["type"] == "image_url" && part["image_url"].is_object() {
-                        part["image_url"] = part["image_url"]["url"].take();
-                    }
-                }
-            }
-        }
-        Ok(body.into())
+        Ok(body)
     }
     fn generate(
         &self,

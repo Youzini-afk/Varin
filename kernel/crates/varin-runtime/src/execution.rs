@@ -430,6 +430,7 @@ pub struct RequestSnapshot<M = ResolvedMedia, S = RequestBody> {
 
 /// Semantic history is portable; opaque continuation items are confined to their protocol family.
 /// Multimodal input must be handled or rejected by the adapter's `serialize`, never dropped here.
+#[derive(Clone, Copy)]
 pub(crate) struct ProjectedHistoryItem<'a> {
     pub item: &'a Arc<ConversationItem>,
     pub opaque: Option<&'a OpaqueProviderItem>,
@@ -642,6 +643,7 @@ pub struct RequestCompileReuse {
         BTreeMap<usize, (Arc<ConversationItem>, Arc<crate::request_body::FrozenJson>)>,
     pub(crate) responses_tools: Option<Vec<Arc<crate::request_body::FrozenJson>>>,
     pub(crate) codex_instructions: Option<(ConversationHistory, Arc<crate::request_body::FrozenJson>)>,
+    pub(crate) groups: crate::providers::groups::CompiledGroups,
 }
 struct RequestCompileIdentity {
     run: String,
@@ -659,6 +661,7 @@ impl RequestCompileReuse {
             responses: BTreeMap::new(),
             responses_tools: None,
             codex_instructions: None,
+            groups: Default::default(),
         }
     }
     pub(crate) fn prepare(
@@ -691,6 +694,7 @@ impl RequestCompileReuse {
             self.responses.clear();
             self.responses_tools = None;
             self.codex_instructions = None;
+            self.groups = Default::default();
             self.identity = Some(RequestCompileIdentity {
                 run: view.run_id.clone(),
                 epoch,

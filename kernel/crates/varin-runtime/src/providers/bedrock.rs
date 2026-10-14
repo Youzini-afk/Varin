@@ -18,18 +18,6 @@ impl BedrockProvider {
         }
     }
 }
-fn push(messages: &mut Vec<Value>, role: &str, block: Value) {
-    if let Some(last) = messages.last_mut().filter(|v| v["role"] == role) {
-        last["content"]
-            .as_array_mut()
-            .expect("constructed content")
-            .push(block);
-    } else {
-        let mut message = json!({"role":role});
-        message["content"] = Value::Array(vec![block]);
-        messages.push(message);
-    }
-}
 fn tool_id(id: &str) -> String {
     if !id.is_empty()
         && id.len() <= 64
@@ -72,6 +60,45 @@ fn bedrock_parts(parts: Vec<ProviderPart<'_>>) -> Result<Vec<Value>, ExecutionEr
     }
     Ok(blocks)
 }
+fn bedrock_blocks(
+    items: &[ProjectedHistoryItem<'_>],
+    model: &str,
+) -> Result<Vec<Value>, ExecutionError> {
+    let mut blocks = Vec::new();
+    for projected in items {
+        let item = projected.item;
+        if let Some(original) = projected.opaque {
+            if original.value["model"] == model {
+                let block = original
+                    .value
+                    .get("block")
+                    .filter(|v| v.is_object())
+                    .ok_or_else(|| {
+                        ExecutionError::new(
+                            "invalid_opaque",
+                            "Bedrock continuation lacks its original block",
+                        )
+                    })?;
+                blocks.push(block.clone());
+                continue;
+            }
+        }
+        match &item.content {
+            Content::Text { text } | Content::ReasoningSummary { text } => blocks.push(json!({"text":text})),
+            Content::ToolCall { call } => blocks.push(json!({"toolUse":{"toolUseId":tool_id(&call.call_id),"name":call.name,"input":call.arguments}})),
+            Content::ToolResult { result } => {
+                let success = matches!(&result.completion, ToolCompletion::Result { outcome: crate::types::Outcome::Succeeded, .. } | ToolCompletion::JobAccepted { .. });
+                let mut block = json!({"toolResult":{"toolUseId":tool_id(&result.call_id),"status":if success{"success"}else{"error"}}});
+                block["toolResult"]["content"] = Value::Array(bedrock_parts(completion_parts(&result.completion))?);
+                blocks.push(block);
+            }
+            Content::Media { media } => blocks.extend(bedrock_parts(vec![ProviderPart::Media { media }])?),
+            Content::Output { output } => blocks.extend(bedrock_parts(evidence_parts(output, &item.provenance))?),
+            Content::ProviderOnly => {}
+        }
+    }
+    Ok(blocks)
+}
 impl ModelProvider for BedrockProvider {
     fn request_budget_protocol(&self) -> Option<crate::context_capacity::RequestBudgetProtocol> {
         Some(crate::context_capacity::RequestBudgetProtocol {
@@ -81,92 +108,83 @@ impl ModelProvider for BedrockProvider {
         })
     }
 
-    fn serialize(&self, view: &RequestView, _reuse: Option<&mut RequestCompileReuse>) -> Result<RequestBody, ExecutionError> {
+    fn serialize(
+        &self,
+        view: &RequestView,
+        mut reuse: Option<&mut RequestCompileReuse>,
+    ) -> Result<RequestBody, ExecutionError> {
         validate_view(view, FAMILY)?;
         validate_images(view, &self.connection)?;
+        let (system, groups) = groups::group_history(
+            project_history(&view.history, FAMILY, &view.binding.connection_identity),
+            |projected| {
+                if let Some(original) = projected.opaque {
+                    if original.adapter_version != "1" {
+                        return Err(ExecutionError::new(
+                            "opaque_version",
+                            "unsupported Bedrock continuation version",
+                        ));
+                    }
+                    if original.value["model"] == view.binding.model {
+                        return Ok(Some("assistant"));
+                    }
+                }
+                let item = projected.item;
+                let role = if item.provenance.is_assistant() {
+                    "assistant"
+                } else {
+                    "user"
+                };
+                Ok(match &item.content {
+                    Content::Text { text } | Content::ReasoningSummary { text } => {
+                        if item.provenance.is_system() {
+                            Some("system")
+                        } else if text.is_empty() {
+                            None
+                        } else {
+                            Some(role)
+                        }
+                    }
+                    Content::ToolCall { .. } => Some("assistant"),
+                    Content::ToolResult { .. } | Content::Media { .. } => Some("user"),
+                    Content::Output { output }
+                        if output.parts.is_empty()
+                            && matches!(item.provenance, Provenance::Sampling { .. }) =>
+                    {
+                        None
+                    }
+                    Content::Output { .. } => Some(evidence_role(&item.provenance, role)),
+                    Content::ProviderOnly => None,
+                })
+            },
+        )?;
+        let mut compiler = groups::GroupCompiler::new(reuse.as_deref_mut());
         let mut messages = Vec::new();
-        let mut system = Vec::new();
-        for projected in project_history(&view.history, FAMILY, &view.binding.connection_identity) {
-            let item = projected.item;
-            if let Some(original) = projected.opaque {
-                if original.adapter_version != "1" {
-                    return Err(ExecutionError::new(
-                        "opaque_version",
-                        "unsupported Bedrock continuation version",
-                    ));
-                }
-                if original.value["model"] == view.binding.model {
-                    let block = original
-                        .value
-                        .get("block")
-                        .filter(|v| v.is_object())
-                        .ok_or_else(|| {
-                            ExecutionError::new(
-                                "invalid_opaque",
-                                "Bedrock continuation lacks its original block",
-                            )
-                        })?;
-                    push(&mut messages, "assistant", block.clone());
-                    continue;
-                }
-            }
-            let role = if item.provenance.is_assistant() {
-                "assistant"
-            } else {
-                "user"
-            };
-            match &item.content {
-                Content::Text { text } | Content::ReasoningSummary { text } => {
-                    if item.provenance.is_system() {
-                        system.push(json!({"text":text}));
-                    } else if !text.is_empty() {
-                        push(&mut messages, role, json!({"text":text}));
-                    }
-                }
-                Content::ToolCall { call } => push(
-                    &mut messages,
-                    "assistant",
-                    json!({"toolUse":{"toolUseId":tool_id(&call.call_id),"name":call.name,"input":call.arguments}}),
-                ),
-                Content::ToolResult { result } => {
-                    let success = matches!(
-                        &result.completion,
-                        ToolCompletion::Result {
-                            outcome: crate::types::Outcome::Succeeded,
-                            ..
-                        } | ToolCompletion::JobAccepted { .. }
-                    );
-                    let mut block = json!({"toolResult":{"toolUseId":tool_id(&result.call_id),"status":if success{"success"}else{"error"}}});
-                    block["toolResult"]["content"] =
-                        Value::Array(bedrock_parts(completion_parts(&result.completion))?);
-                    push(&mut messages, "user", block);
-                }
-                Content::Media { media } => {
-                    for block in bedrock_parts(vec![ProviderPart::Media { media }])? {
-                        push(&mut messages, "user", block);
-                    }
-                }
-                Content::Output { output } => {
-                    let role = evidence_role(&item.provenance, role);
-                    for block in bedrock_parts(evidence_parts(output, &item.provenance))? {
-                        push(&mut messages, role, block);
-                    }
-                }
-                Content::ProviderOnly => {}
-            }
+        for (role, items) in groups {
+            messages.push(compiler.group(role, &items, || {
+                Ok(json!({"role":role,"content":bedrock_blocks(&items, &view.binding.model)?}))
+            })?);
         }
-        let mut body = json!({});
-        body["messages"] = Value::Array(messages);
+        let mut body = RequestBody::from(json!({}));
+        body.insert_fragments("messages", messages);
         if !system.is_empty() {
-            body["system"] = Value::Array(system);
+            body.insert_frozen(
+                "system",
+                compiler.group("system", &system, || {
+                    Ok(Value::Array(bedrock_blocks(&system, &view.binding.model)?))
+                })?,
+            );
         }
         if let Some(max) = self.max_output_tokens {
-            body["inferenceConfig"] = json!({"maxTokens":max});
+            body.insert("inferenceConfig", json!({"maxTokens":max}));
         }
         if !view.binding.tools.is_empty() {
-            body["toolConfig"] = json!({"tools":view.binding.tools.iter().map(|t|json!({"toolSpec":{"name":t.name,"description":t.description,"inputSchema":{"json":t.schema}}})).collect::<Vec<_>>()});
+            body.insert_frozen("toolConfig", compiler.field("toolConfig", || {
+                json!({"tools":view.binding.tools.iter().map(|t|json!({"toolSpec":{"name":t.name,"description":t.description,"inputSchema":{"json":t.schema}}})).collect::<Vec<_>>()})
+            }));
         }
-        Ok(body.into())
+        compiler.finish(reuse);
+        Ok(body)
     }
     fn generate(
         &self,

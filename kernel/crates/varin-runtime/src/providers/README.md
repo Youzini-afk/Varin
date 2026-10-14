@@ -38,8 +38,12 @@ materialized; unsupported media/protocol combinations fail explicitly.
 Responses, Azure and Codex reuse independent item fragments and tool schemas from the original Run
 worker's latest-only holder. Codex also reuses the joined instructions fragment only for its exact
 ordered system-item sequence. The actual adapter lease, configuration/schema/model/connection,
-checkpoint and immutable item identities govern reuse. Preview has no holder. Grouped Chat,
-Anthropic, Google, Mistral, Bedrock and Pi protocols retain their complete compilers.
+checkpoint and immutable item identities govern reuse. Preview has no holder. Chat, Anthropic,
+Google/Vertex, Mistral, Bedrock and Pi retain complete encoded message groups. Group keys include
+the actual ordered sources and opaque projection, with original call dependencies for results and
+Mistral's request-wide wire-ID allocation. System items keep each protocol's placement and grouping.
+Only the latest request's groups survive; appending to a group rebuilds it without rebuilding earlier
+groups. Pi's nested context carries these fragments through final serialization without a parsed copy.
 
 Every call validates the pinned adapter. Outer options finish before final bytes freeze. One raw JSON
 allocation is shared with HTTP and Bedrock signing; ContentStore retains/reopens those same bytes,

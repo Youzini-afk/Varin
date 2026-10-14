@@ -35,6 +35,7 @@ impl Serialize for FrozenJson {
 enum Field {
     Json(Arc<FrozenJson>),
     Array(Vec<Arc<FrozenJson>>),
+    Object(Box<RequestBody>),
 }
 impl Field {
     fn new(value: Value) -> Self {
@@ -49,6 +50,7 @@ impl Field {
             Self::Array(items) => items.iter().fold(2u64, |size, value| {
                 size.saturating_add(value.estimated_bytes).saturating_add(1)
             }),
+            Self::Object(body) => body.estimated_bytes(),
         }
     }
     fn value(&self) -> Value {
@@ -60,6 +62,7 @@ impl Field {
                     .map(|value| serde_json::from_str(value.raw.get()).expect("validated JSON"))
                     .collect(),
             ),
+            Self::Object(body) => body.to_value(),
         }
     }
     fn exact(&self, other: &Self) -> bool {
@@ -71,7 +74,9 @@ impl Field {
                         .zip(b)
                         .all(|(a, b)| Arc::ptr_eq(a, b) || a.raw.get() == b.raw.get())
             }
-            _ => false,
+            (Self::Object(a), Self::Object(b)) => a.wire_bytes() == b.wire_bytes(),
+            _ => to_raw_value(self).expect("request field").get()
+                == to_raw_value(other).expect("request field").get(),
         }
     }
 }
@@ -80,6 +85,7 @@ impl Serialize for Field {
         match self {
             Self::Json(value) => value.serialize(serializer),
             Self::Array(items) => items.serialize(serializer),
+            Self::Object(body) => body.root.serialize(serializer),
         }
     }
 }
@@ -196,6 +202,13 @@ impl RequestBody {
         fields.insert(key.into(), Field::Array(items));
         self.encoded.take();
     }
+    pub(crate) fn insert_object(&mut self, key: &str, body: RequestBody) {
+        let Root::Object(fields) = &mut self.root else {
+            panic!("provider envelope must be an object")
+        };
+        fields.insert(key.into(), Field::Object(Box::new(body)));
+        self.encoded.take();
+    }
     pub(crate) fn estimated_bytes(&self) -> u64 {
         let Root::Object(fields) = &self.root else {
             let Root::Json(value) = &self.root else {
@@ -260,6 +273,16 @@ impl RequestBody {
                         (Field::Json(a), Field::Json(b), _) => {
                             raw_prefix(&a.raw, &b.raw, rest, coalesced)
                         }
+                        (Field::Object(a), Field::Object(b), _) => {
+                            a.transcript_prefix(b, rest, coalesced)
+                        }
+                        (Field::Object(_), Field::Json(_), _)
+                        | (Field::Json(_), Field::Object(_), _) => raw_prefix(
+                            &to_raw_value(value).expect("request field"),
+                            &to_raw_value(next).expect("request field"),
+                            rest,
+                            coalesced,
+                        ),
                         _ => false,
                     }
                 })
@@ -277,6 +300,12 @@ impl RequestBody {
         let (Root::Object(a), Root::Object(b)) = (&self.root, &next.root) else {
             return 0;
         };
+        if let Some((outer, inner)) = key.split_once('.') {
+            return match (a.get(outer), b.get(outer)) {
+                (Some(Field::Object(a)), Some(Field::Object(b))) => a.shared_fragments(b, inner),
+                _ => 0,
+            };
+        }
         let (Some(Field::Array(a)), Some(Field::Array(b))) = (a.get(key), b.get(key)) else {
             return 0;
         };
