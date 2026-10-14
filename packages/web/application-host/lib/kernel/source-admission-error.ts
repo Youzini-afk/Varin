@@ -1,7 +1,7 @@
 /** Source-owner failures projected into the existing launch and tool error paths. */
 import { threadSourceFailureMessage } from '@varin/application-client';
 import { DocumentUntrustedError, DocumentWorkspaceUnavailableError, DocumentWorkspaceUnregisteredError } from '../documents/errors.js';
-import { KernelClientError } from './kernel-client.js';
+import { KernelClientError } from './kernel-error.js';
 import type { SourceFailureCode } from './protocol.generated.js';
 
 export class SourceAdmissionError extends Error {

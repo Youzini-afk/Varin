@@ -1,4 +1,5 @@
-import type { CalendarOnceAcceptance, CalendarDefinition, CalendarMissedPolicy, CalendarOccurrence, CalendarTarget, ThinkingLevel } from '@varin/protocol';
+import type { CalendarOnceAcceptance, CalendarDefinition, CalendarMissedPolicy, CalendarOccurrence, CalendarTarget, SourceResourceOwner, ThinkingLevel } from '@varin/protocol';
+import type { ThreadResolvedSource, ThreadSourceTargets } from './threads.js';
 
 /** External GUI/Markdown definition. Native execution facts are read separately from Catalog. */
 export type ScheduledTaskStatus = 'idle' | 'running' | 'success' | 'error';
@@ -35,6 +36,9 @@ export interface ScheduledTaskLoopDocument { content: string; path: string; revi
 export type ScheduledTaskRunReceipt = { runtime: 'pi'; sessionId: string; task: ScheduledTask | null }
   | { runtime: 'agent'; occurrence: CalendarOccurrence; task: ScheduledTask };
 export interface ScheduledTasksAPI {
+  /** Project-scoped discovery and registration reuse the Host source authority without creating work. */
+  listSources(projectId: string, signal?: AbortSignal): Promise<ThreadSourceTargets>;
+  resolveSource(projectId: string, request: { resourceOwner: SourceResourceOwner; path: string }, signal?: AbortSignal): Promise<ThreadResolvedSource>;
   list(projectId: string, signal?: AbortSignal): Promise<ScheduledTask[]>;
   upsert(projectId: string, task: Partial<ScheduledTask>): Promise<ScheduledTask[]>;
   remove(projectId: string, taskId: string): Promise<ScheduledTask[]>;

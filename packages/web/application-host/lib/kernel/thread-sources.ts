@@ -13,9 +13,13 @@ import { isDeepStrictEqual } from 'node:util';
 import type { ThreadIdentity, ThreadSource, ThreadPrepareSource, ThreadPreparedSource, ThreadSourcesAPI } from '@varin/application-client';
 import type { WorkspaceWorkingStateRootAccess } from '../harness/working-state/types.js';
 
-export interface ThreadSourceRemoteOwner {
-  list: ThreadSourcesAPI['list'];
-  resolve: ThreadSourcesAPI['resolve'];
+/** Resource discovery is independent of Thread existence. Callers admit their own
+ * project/Thread scope before using this shared directory; it never grants execution. */
+export interface SourceDirectory {
+  list(signal?: AbortSignal): ReturnType<ThreadSourcesAPI['list']>;
+  resolve(request: Parameters<ThreadSourcesAPI['resolve']>[1], signal?: AbortSignal): ReturnType<ThreadSourcesAPI['resolve']>;
+}
+export interface ThreadSourceRemoteOwner extends SourceDirectory {
   prepare(input: ThreadPrepareSource, signal?: AbortSignal): Promise<ThreadPreparedSource>;
   admit(source: ThreadSource, identity: ThreadIdentity, runId?: string, signal?: AbortSignal): Promise<void>;
 }
@@ -35,20 +39,20 @@ export function parseSourceResourceOwner(value: unknown): SourceResourceOwner {
 export function createThreadSourceDirectory(options: {
   documents: Pick<DocumentAuthority, 'resolveWorkspace' | 'admitWorkspaceRegistration'>;
   remote?: Pick<ThreadSourceRemoteOwner, 'list' | 'resolve'>;
-}): ThreadSourcesAPI {
+}): SourceDirectory {
   return {
-    async list(identity, signal) {
+    async list(signal) {
       signal?.throwIfAborted();
-      const remote = await options.remote?.list(identity, signal);
+      const remote = await options.remote?.list(signal);
       return { targets: [{ resourceOwner: { kind: 'local' }, label: 'This Host', capabilities: [] }, ...(remote?.targets ?? [])],
         unavailable: remote?.unavailable ?? [] };
     },
-    async resolve(identity, request, signal) {
+    async resolve(request, signal) {
       const resourceOwner = parseSourceResourceOwner(request.resourceOwner);
       signal?.throwIfAborted();
       if (resourceOwner.kind === 'managed_host') {
         if (!options.remote) throw new SourceAdmissionError('source_unavailable');
-        return options.remote.resolve(identity, { ...request, resourceOwner }, signal);
+        return options.remote.resolve({ ...request, resourceOwner }, signal);
       }
       const workspace = await options.documents.resolveWorkspace({ path: request.path });
       const registration = await options.documents.admitWorkspaceRegistration(workspace.workspaceId, signal);

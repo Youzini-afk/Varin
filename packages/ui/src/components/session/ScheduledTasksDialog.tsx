@@ -175,7 +175,7 @@ export function ScheduledTasksDialog() {
   const [calendarEditorTask, setCalendarEditorTask] = React.useState<ScheduledTask | null>(null);
   const [calendarWork, setCalendarWork] = React.useState<ThreadIdentity | null>(null);
   const runKeys = React.useRef(new Map<string, string>());
-  React.useEffect(() => subscribeRuntimeEndpointWillChange(() => { runKeys.current.clear(); setCalendarWork(null); setCalendarEditorOpen(false); }), []);
+  React.useEffect(() => subscribeRuntimeEndpointWillChange(() => { runKeys.current.clear(); setCalendarWork(null); setCalendarEditorOpen(false); setCalendarEditorTask(null); }), []);
   const open = useUIStore((state) => state.isScheduledTasksDialogOpen);
   const setOpen = useUIStore((state) => state.setScheduledTasksDialogOpen);
   const isMobile = useUIStore((state) => state.isMobile);
@@ -694,7 +694,7 @@ export function ScheduledTasksDialog() {
         </div>
       ) : null}
 
-      <CalendarTaskEditorDialog open={calendarEditorOpen} task={calendarEditorTask} onOpenChange={setCalendarEditorOpen} onSave={handleSaveTask} />
+      <CalendarTaskEditorDialog open={calendarEditorOpen} projectId={selectedProjectID} task={calendarEditorTask} onOpenChange={setCalendarEditorOpen} onSave={handleSaveTask} />
       <Dialog open={calendarWork !== null} onOpenChange={value => { if (!value) setCalendarWork(null); }}><DialogContent className="h-[85vh] max-w-5xl overflow-hidden"><DialogTitle>Calendar work</DialogTitle>
         {calendarWork && threads && <ThreadConversation api={threads} identity={calendarWork} onBranchCreated={setCalendarWork} />}
       </DialogContent></Dialog>

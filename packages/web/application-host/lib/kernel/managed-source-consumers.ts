@@ -51,8 +51,8 @@ export function createManagedSourceConsumers(options: ManagedSourceConsumerOptio
     }
   };
   const threads: ThreadSourceRemoteOwner = {
-    list: (_identity, signal) => options.registry.sourceTargets(signal),
-    async resolve(_identity, request, signal) {
+    list: signal => options.registry.sourceTargets(signal),
+    async resolve(request, signal) {
       if (request.resourceOwner.kind !== 'managed_host') throw new Error('Managed source requires its exact target owner');
       const client = await options.registry.source(request.resourceOwner, signal);
       const resolved = await client.resolve({ coordinatorHostId: options.coordinatorHostId(), path: request.path }, signal);

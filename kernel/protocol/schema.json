@@ -777,6 +777,7 @@
   "CalendarRule",
   "CalendarMissedPolicy",
   "CalendarModel",
+  "CalendarSource",
   "CalendarTarget",
   "CalendarDefinitionInput",
   "CalendarDefinition",
@@ -819,7 +820,7 @@
   "MediaReadChunk",
   "ChildSourceAuthority"
 ],
-  "protocolVersion": 37,
+  "protocolVersion": 38,
   "runtimeStructs": {"ContentCollectionReport":{"fields":{"status":{"type":"ContentCollectionStatus"},"phase":{"type":"ContentCollectionPhase"},"removedObjects":{"type":"number"},"removedBytes":{"type":"number"},"removedStagingFiles":{"type":"number"},"reason":{"type":"string | null"}}},"ModelSessionConfiguration":{"fields":{"providerId":{"type":"string","optional":true},"providerFamily":{"type":"string"},"model":{"type":"string"},"endpoint":{"type":"string"},"credentialEnvironment":{"type":"string | null"},"allowAnonymous":{"type":"boolean"},"acceptsImages":{"type":"boolean","optional":true},"configurationGeneration":{"type":"number"},"maxOutputTokens":{"type":"number | null"},"azureDeployment":{"type":"string | null","optional":true},"azureApiVersion":{"type":"string | null","optional":true},"legacyMaxTokens":{"type":"boolean","optional":true},"includeStreamUsage":{"type":"boolean","optional":true},"reasoningEffort":{"type":"string | null","optional":true},"anthropicOauth":{"type":"boolean","optional":true},"adapterId":{"type":"string","optional":true},"adapterVersion":{"type":"string","optional":true},"contextWindowTokens":{"type":"number","optional":true},"thinkingLevel":{"type":"string","optional":true},"modelOptions":{"type":"unknown","optional":true}}},"KernelWorkingResultCandidate":{"fields":{"publicationId":{"type":"string"},"candidateOperationId":{"type":"string"},"workspaceId":{"type":"string"},"branchId":{"type":"string"},"root":{"type":"string"},"baseRoot":{"type":"string"},"writeRevision":{"type":"number"},"pinId":{"type":"string"},"basePinId":{"type":"string"}}}},
   "runtimeEnums": {
     "McpInteractionMode": ["Form", "Url", "Sampling"],
@@ -1725,7 +1726,8 @@
     "CalendarRule": {"raw":"export type CalendarRule =\n  | { kind: 'once'; date: string; time: string }\n  | { kind: 'daily'; times: string[] }\n  | { kind: 'weekly'; times: string[]; weekdays: number[] }\n  | { kind: 'cron'; expression: string };","rustType":"varin_runtime::catalog::calendar::Rule"},
     "CalendarMissedPolicy": {"raw":"export type CalendarMissedPolicy = 'skip' | 'coalesce_once';","rustType":"varin_runtime::catalog::calendar::MissedPolicy"},
     "CalendarModel": {"raw":"export interface CalendarModel { providerId: string; modelId: string; thinkingLevel?: string; temperature?: number }","rustType":"varin_runtime::catalog::calendar::ModelSelection"},
-    "CalendarTarget": {"raw":"export type CalendarTarget =\n  | { kind: 'new_work'; model: CalendarModel; sourceMode: SourceMode; goal: { budget: GoalBudget | null } | null }\n  | { kind: 'existing_work'; threadId: string; branchId: string };","rustType":"varin_runtime::catalog::calendar::Target"},
+    "CalendarSource": {"raw":"export type CalendarSource =\n  | { kind: 'project' }\n  | { kind: 'workspace'; resourceOwner: SourceResourceOwner; workspaceId: string };","rustType":"varin_runtime::catalog::calendar::Source"},
+    "CalendarTarget": {"raw":"export type CalendarTarget =\n  | { kind: 'new_work'; model: CalendarModel; source: CalendarSource; sourceMode: SourceMode; goal: { budget: GoalBudget | null } | null }\n  | { kind: 'existing_work'; threadId: string; branchId: string };","rustType":"varin_runtime::catalog::calendar::Target"},
     "CalendarOnceAcceptanceOwner": {"raw":"export type CalendarOnceAcceptanceOwner = 'pi' | 'agent';","rustType":"varin_runtime::catalog::calendar::OnceAcceptanceOwner"},
     "CalendarOnceAcceptance": {"raw":"export interface CalendarOnceAcceptance { owner: CalendarOnceAcceptanceOwner; acceptanceId: string; scheduledAtMs: number; acceptedAtMs: number; }","rustType":"varin_runtime::catalog::calendar::OnceAcceptance"},
     "CalendarDefinitionInput": {"raw":"export interface CalendarDefinitionInput {\n  taskId: string;\n  assetRevision: string;\n  assetKind: 'gui' | 'loop';\n  name: string;\n  enabled: boolean;\n  onceAcceptance: CalendarOnceAcceptance | null;\n  activationHold: 'previous_runtime_active' | 'asset_invalid' | null;\n  timezone: string;\n  rule: CalendarRule;\n  missedPolicy: CalendarMissedPolicy;\n  target: CalendarTarget;\n  instruction: string;\n}","rustType":"varin_runtime::catalog::calendar::DefinitionInput"},

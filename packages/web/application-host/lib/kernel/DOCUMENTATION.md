@@ -1379,7 +1379,7 @@ original Source explicitly retires. Recovered finite subscribe ACKs and proven f
 settle the original execution barrier without replacing already-published Unknown conversation history.
 Focused evidence covers actual coordinator/target modules with controlled ports, native receipt fences
 and Catalog persistence; it does not assert a full two-Host SDK lifecycle. The current
-internal formats are Storage 22, Agent Catalog 71 and private wire 37; older formats are rejected by
+internal formats are Storage 22, Agent Catalog 72 and private wire 38; older formats are rejected by
 the existing read-only gate with data preserved, without automatic migration or cleanup.
 
 Managed finite reverse interactions now use the same trusted SDK scope and original Source address.

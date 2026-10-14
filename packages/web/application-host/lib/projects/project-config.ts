@@ -9,7 +9,7 @@ const MAX_LAST_ERROR_LENGTH = 2_000;
 const PI_THINKING_LEVELS = new Set(['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max']);
 
 import type { ScheduledTask, ScheduledTaskExecution, ScheduledTaskSchedule, ScheduledTaskState, ScheduledTaskStatus } from '@varin/application-client';
-import type { CalendarOnceAcceptance, CalendarTarget, ThinkingLevel } from '@varin/protocol';
+import type { CalendarOnceAcceptance, CalendarSource, CalendarTarget, SourceResourceOwner, ThinkingLevel } from '@varin/protocol';
 export type { ScheduledTask, ScheduledTaskExecution, ScheduledTaskSchedule, ScheduledTaskState, ScheduledTaskStatus } from '@varin/application-client';
 
 interface NormalizedLoopInput {
@@ -269,6 +269,25 @@ const normalizeSchedule = (value: unknown, existingSchedule?: ScheduledTaskSched
   return { kind, cron, timezone };
 };
 
+/** External assets without an explicit source retain their project-owned source intent. */
+const normalizeCalendarSource = (value: unknown): CalendarSource => {
+  if (value === undefined) return { kind: 'project' };
+  const source = asRecord(value);
+  if (source?.kind === 'project' && Object.keys(source).length === 1) return { kind: 'project' };
+  if (source?.kind !== 'workspace' || Object.keys(source).some(key => !['kind', 'resourceOwner', 'workspaceId'].includes(key))
+    || !asNonEmptyString(source.workspaceId)) throw new Error('task.target.source is invalid');
+  const owner = asRecord(source.resourceOwner);
+  let resourceOwner: SourceResourceOwner;
+  if (owner?.kind === 'local' && Object.keys(owner).length === 1) resourceOwner = { kind: 'local' };
+  else if (owner?.kind === 'managed_host' && Object.keys(owner).length === 4
+    && ['hostId', 'connectionId', 'endpointIdentity'].every(key => asNonEmptyString(owner[key]))) {
+    resourceOwner = { kind: 'managed_host', hostId: owner.hostId as string,
+      connectionId: owner.connectionId as string, endpointIdentity: owner.endpointIdentity as string };
+  } else throw new Error('task.target.source.resourceOwner is invalid');
+  // Identity is opaque. Never replace a missing registration with a local path or normalize owner IDs.
+  return { kind: 'workspace', resourceOwner, workspaceId: source.workspaceId as string };
+};
+
 /** Validate only declared selections. Host admission resolves real models, source and credentials. */
 export const normalizeCalendarTarget = (value: unknown): CalendarTarget => {
   const target = asRecord(value);
@@ -279,7 +298,7 @@ export const normalizeCalendarTarget = (value: unknown): CalendarTarget => {
     if (!threadId || !branchId) throw new Error('Existing work requires threadId and branchId');
     return { kind: 'existing_work', threadId, branchId };
   }
-  if (target.kind !== 'new_work' || Object.keys(target).some(key => !['kind', 'model', 'sourceMode', 'goal'].includes(key))) throw new Error('task.target is invalid');
+  if (target.kind !== 'new_work' || Object.keys(target).some(key => !['kind', 'model', 'source', 'sourceMode', 'goal'].includes(key))) throw new Error('task.target is invalid');
   if (!['fixed_branch', 'materialized', 'live_root'].includes(String(target.sourceMode))) throw new Error('task.target.sourceMode is required');
   const model = asRecord(target.model);
   const providerId = asNonEmptyString(model?.providerId), modelId = asNonEmptyString(model?.modelId);
@@ -297,7 +316,7 @@ export const normalizeCalendarTarget = (value: unknown): CalendarTarget => {
       goal = { budget: { maxOutputTokens: budget.maxOutputTokens } };
     }
   }
-  return { kind: 'new_work', sourceMode: target.sourceMode as Extract<CalendarTarget, { kind: 'new_work' }>['sourceMode'], goal,
+  return { kind: 'new_work', source: normalizeCalendarSource(target.source), sourceMode: target.sourceMode as Extract<CalendarTarget, { kind: 'new_work' }>['sourceMode'], goal,
     model: { providerId, modelId, ...(typeof model.thinkingLevel === 'string' ? { thinkingLevel: model.thinkingLevel } : {}), ...(typeof model.temperature === 'number' ? { temperature: model.temperature } : {}) } };
 };
 

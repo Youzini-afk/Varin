@@ -26,9 +26,18 @@ An ambiguous once wall time selects its earliest actual UTC instant consistently
 cursor. The existing cron parser owns cron arithmetic; hashed `H` fields use one stable definition/generation seed for every direction and restart. Dates outside the native timer's signed-i64
 nanosecond range fail explicitly, per definition, without stopping other calendars.
 
-New work selects registered `providerId` / `modelId`, optional thinking/temperature, source mode
+New work selects registered `providerId` / `modelId`, optional thinking/temperature, an explicit
+`source` and source mode
 (`fixed_branch`, `materialized`, `live_root`) and an explicit nullable Goal budget. Existing work
 selects only its exact `threadId` / `branchId`; it cannot replace that work's authority or model.
+`source: { kind: "project" }` uses the definition's local project. A workspace source stores the
+registered `workspaceId` and exact `resourceOwner` returned by the shared source directory, including
+the managed Host, connection and endpoint identities. It never stores credentials or substitutes a
+path for a missing registration. Only external JSON/Markdown without `source` is normalized to
+`{ kind: "project" }`; internal calendar DTOs require the selection. Source discovery and path
+resolution are authenticated and project-scoped, do not create a Thread, and reuse the ordinary
+Thread source directory. An unavailable managed Host keeps the saved selection visible for editing;
+it does not silently switch the definition back to project source.
 A stable Run-now key returns **an accepted occurrence**, not execution success. Its actual Run/Goal
 facts drive status and non-overlap; paused/waiting/budget-blocked Goals remain active. The shared UI
 opens the real ThreadConversation for execution controls and results. Finished occurrences move to
@@ -96,6 +105,7 @@ missed_policy: skip
 target:
   kind: new_work
   model: { providerId: configured-provider, modelId: configured-model }
+  source: { kind: project }
   sourceMode: fixed_branch
   goal: null
 ---
@@ -114,6 +124,8 @@ The list route reconciles disk files before returning tasks, and the runtime wat
 ## Routes
 
 - `GET|PUT|DELETE /api/projects/:projectId/scheduled-tasks`
+- `GET /api/projects/:projectId/scheduled-tasks/sources`
+- `POST /api/projects/:projectId/scheduled-tasks/sources/resolve`
 - `GET|PUT|PATCH|DELETE /api/projects/:projectId/scheduled-tasks/:taskId/loop-file`
 - `POST /api/projects/:projectId/scheduled-tasks/:taskId/run` (native requires stable `key`)
 - `POST /api/projects/:projectId/scheduled-tasks/:taskId/occurrences/:occurrenceId/control` (original revision; cancel/retry)
