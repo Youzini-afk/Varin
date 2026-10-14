@@ -566,8 +566,8 @@ fn actual_engine_consumes_cold_calendar_context_and_accounts_initial_goal_usage(
         seen: Mutex<Vec<RequestSnapshot>>,
     }
     impl ModelProvider for Provider {
-        fn serialize(&self, view: &RequestView) -> std::result::Result<Value, ExecutionError> {
-            Ok(serde_json::to_value(view).unwrap())
+        fn serialize(&self, view: &RequestView, _reuse: Option<&mut crate::execution::RequestCompileReuse>) -> std::result::Result<crate::execution::RequestBody, ExecutionError> {
+            Ok(serde_json::to_value(view).unwrap().into())
         }
         fn generate(
             &self,
@@ -1380,7 +1380,7 @@ fn accepted_cold_slot_remains_exportable_after_tombstone_before_any_run_exists()
 fn cold_zero_budget_goal_parks_before_any_model_serialization_or_inference() {
     struct NeverCalled;
     impl ModelProvider for NeverCalled {
-        fn serialize(&self, _: &RequestView) -> std::result::Result<Value, ExecutionError> {
+        fn serialize(&self, _: &RequestView, _reuse: Option<&mut crate::execution::RequestCompileReuse>) -> std::result::Result<crate::execution::RequestBody, ExecutionError> {
             panic!("zero-budget Goal must gate before model serialization")
         }
         fn generate(

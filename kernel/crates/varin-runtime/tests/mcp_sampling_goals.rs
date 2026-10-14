@@ -113,7 +113,7 @@ fn fixture(budget: u64) -> Fixture {
                     binding,
                     history: vec![],
                 },
-                serialized: json!({}),
+                serialized: json!({}).into(),
             }.into(),
         },
     );
@@ -262,7 +262,7 @@ fn fixture(budget: u64) -> Fixture {
         &decoded,
     )
     .unwrap();
-    let serialized = selected.provider.serialize(&view).unwrap();
+    let serialized = selected.provider.serialize(&view, None).unwrap();
     let snapshot = RequestSnapshot { view, serialized };
     let body = db.prepare_sampling_content().snapshot(&snapshot).unwrap();
     db.prepare_mcp_sampling(

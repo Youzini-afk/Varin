@@ -110,11 +110,11 @@ fn subscription_tool_names_roundtrip_without_rewriting_signed_thinking_or_api_ke
             opaque: None,
         }.into()],
     };
-    let api = provider.serialize(&view).unwrap();
+    let api = provider.serialize(&view, None).unwrap().to_value();
     assert_eq!(api["tools"][0]["name"], "read");
     assert_eq!(api["system"], json!([]));
     provider.oauth = true;
-    let serialized = provider.serialize(&view).unwrap();
+    let serialized = provider.serialize(&view, None).unwrap().to_value();
     assert_eq!(serialized["tools"][0]["name"], "Read");
     assert!(serialized["system"][0]["text"]
         .as_str()
@@ -122,7 +122,7 @@ fn subscription_tool_names_roundtrip_without_rewriting_signed_thinking_or_api_ke
         .contains("Claude Code"));
     let snapshot = RequestSnapshot {
         view: view.clone(),
-        serialized,
+        serialized: serialized.into(),
     };
     let mut output = vec![];
     assert_eq!(
@@ -146,7 +146,7 @@ fn subscription_tool_names_roundtrip_without_rewriting_signed_thinking_or_api_ke
             opaque: item.opaque,
         }.into());
     }
-    let replay = provider.serialize(&view).unwrap();
+    let replay = provider.serialize(&view, None).unwrap().to_value();
     let blocks = replay["messages"]
         .as_array()
         .unwrap()

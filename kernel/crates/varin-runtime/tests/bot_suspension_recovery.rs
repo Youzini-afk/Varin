@@ -67,8 +67,8 @@ struct Provider {
     hold: Option<(mpsc::Sender<()>, Mutex<mpsc::Receiver<()>>)>,
 }
 impl ModelProvider for Provider {
-    fn serialize(&self, view: &RequestView) -> Result<Value, ExecutionError> {
-        Ok(json!({"original":view,"marker":"independent-original-body"}))
+    fn serialize(&self, view: &RequestView, _reuse: Option<&mut varin_runtime::execution::RequestCompileReuse>) -> Result<varin_runtime::execution::RequestBody, ExecutionError> {
+        Ok(json!({"original":view,"marker":"independent-original-body"}).into())
     }
     fn generate(
         &self,

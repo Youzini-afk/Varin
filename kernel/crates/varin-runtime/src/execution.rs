@@ -7,6 +7,7 @@
 pub use crate::output::{
     IncomingMedia, OutputBody, OutputPart, OutputSource, ResolvedMedia, StoredMedia,
 };
+pub use crate::request_body::RequestBody;
 use crate::types::{Effect, ExecutorOwner, Lifetime, Outcome, RunState};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -422,7 +423,7 @@ pub enum RequestOrigin {
 /// The provider receives an immutable reference to the exact durably prepared request.
 /// Storage projections may borrow the serialized body while replacing media references.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct RequestSnapshot<M = ResolvedMedia, S = Value> {
+pub struct RequestSnapshot<M = ResolvedMedia, S = RequestBody> {
     pub view: RequestView<M>,
     pub serialized: S,
 }
@@ -430,7 +431,7 @@ pub struct RequestSnapshot<M = ResolvedMedia, S = Value> {
 /// Semantic history is portable; opaque continuation items are confined to their protocol family.
 /// Multimodal input must be handled or rejected by the adapter's `serialize`, never dropped here.
 pub(crate) struct ProjectedHistoryItem<'a> {
-    pub item: &'a ConversationItem,
+    pub item: &'a Arc<ConversationItem>,
     pub opaque: Option<&'a OpaqueProviderItem>,
 }
 
@@ -618,7 +619,7 @@ pub trait ModelProvider: Send + Sync {
     }
 
     /// Serialize and validate the semantic view. Reject unsupported attachment kinds explicitly.
-    fn serialize(&self, view: &RequestView) -> Result<Value, ExecutionError>;
+    fn serialize(&self, view: &RequestView, reuse: Option<&mut RequestCompileReuse>) -> Result<RequestBody, ExecutionError>;
     /// Optional pure serializer/usage contract. Unknown adapters retain the explicit local estimate.
     fn request_budget_protocol(&self) -> Option<crate::context_capacity::RequestBudgetProtocol> {
         None
@@ -631,6 +632,75 @@ pub trait ModelProvider: Send + Sync {
         cancel: &CancellationToken,
         emit: &mut dyn FnMut(ProviderEvent) -> Result<(), ExecutionError>,
     ) -> Result<FinishReason, ModelFailure>;
+}
+
+/// Pure derived fragments held only by the original Run worker. Callers still enter the
+/// selected serializer (including its lease validation) on every request. No authorization is cached.
+pub struct RequestCompileReuse {
+    identity: Option<RequestCompileIdentity>,
+    pub(crate) responses:
+        BTreeMap<usize, (Arc<ConversationItem>, Arc<crate::request_body::FrozenJson>)>,
+    pub(crate) responses_tools: Option<Vec<Arc<crate::request_body::FrozenJson>>>,
+    pub(crate) codex_instructions: Option<(ConversationHistory, Arc<crate::request_body::FrozenJson>)>,
+}
+struct RequestCompileIdentity {
+    run: String,
+    epoch: u64,
+    checkpoint: Option<String>,
+    adapter: usize,
+    // Retain the actual selected adapter/lease so pointer identity cannot be recycled.
+    _selected: Option<Arc<dyn ModelProvider>>,
+    binding: RequestBinding,
+}
+impl RequestCompileReuse {
+    pub(crate) fn new() -> Self {
+        Self {
+            identity: None,
+            responses: BTreeMap::new(),
+            responses_tools: None,
+            codex_instructions: None,
+        }
+    }
+    pub(crate) fn prepare(
+        &mut self,
+        view: &RequestView,
+        epoch: u64,
+        checkpoint: Option<String>,
+        adapter: usize,
+        selected: Option<Arc<dyn ModelProvider>>,
+    ) {
+        let b = &view.binding;
+        let hit = self.identity.as_ref().is_some_and(|old| {
+            let a = &old.binding;
+            old.run == view.run_id
+                && old.epoch == epoch
+                && old.checkpoint == checkpoint
+                && old.adapter == adapter
+                && a.history_range.branch_id == b.history_range.branch_id
+                && a.history_range.ancestor_id == b.history_range.ancestor_id
+                && a.provider_family == b.provider_family
+                && a.connection_identity == b.connection_identity
+                && a.model == b.model
+                && a.credential_ref == b.credential_ref
+                && a.configuration_generation == b.configuration_generation
+                && a.tool_schema_generation == b.tool_schema_generation
+                && a.tools == b.tools
+                && a.resource_checkpoint_id == b.resource_checkpoint_id
+        });
+        if !hit {
+            self.responses.clear();
+            self.responses_tools = None;
+            self.codex_instructions = None;
+            self.identity = Some(RequestCompileIdentity {
+                run: view.run_id.clone(),
+                epoch,
+                checkpoint,
+                adapter,
+                _selected: selected,
+                binding: b.clone(),
+            });
+        }
+    }
 }
 
 #[derive(Clone)]
@@ -1730,7 +1800,7 @@ pub trait ContextPreparation: Send + Sync {
         &self,
         _owner_generation: u64,
         _view: &RequestView,
-        _serialized: &Value,
+        _serialized: &RequestBody,
         _budget_protocol: Option<crate::context_capacity::RequestBudgetProtocol>,
         _preview: &dyn Fn(ContextProjection) -> Result<crate::context_capacity::InputEstimate, ExecutionError>,
         _cancel: &CancellationToken,
@@ -1796,6 +1866,7 @@ impl<
         )?;
         let mut context_reuse = crate::catalog::context::ContextCompileReuse::default();
         let mut history_projection_reuse = HistoryProjectionReuse::default();
+        let mut request_compile_reuse = RequestCompileReuse::new();
         let mut history = input.history.clone();
         let mut history_cursor = input
             .binding
@@ -2348,12 +2419,14 @@ impl<
                     })?;
                     let mut binding = input.binding.clone();
                     let mut compaction = None;
+                    let mut context_checkpoint = None;
                     if let Some(context) = self.persistence.compile_context(
                         &input.run_id,
                         input.owner_generation,
                         history_cursor.as_deref(),
                         Some(&mut context_reuse),
                     )? {
+                        context_checkpoint = Some(context.checkpoint_id);
                         compaction = context.compaction;
                         history = context.history;
                         binding.resource_checkpoint_id = context.resource_checkpoint_id;
@@ -2429,10 +2502,15 @@ impl<
                         history: request_history,
                     };
                     let model_cancel = cancel.child(&format!("model:{}", view.request_id));
+                    request_compile_reuse.prepare(&view, input.owner_generation, context_checkpoint,
+                        selected_model.as_ref().map_or_else(
+                            || Arc::as_ptr(&self.provider) as *const () as usize,
+                            |selected| Arc::as_ptr(&selected.provider) as *const () as usize),
+                        selected_model.as_ref().map(|selected| selected.provider.clone()));
                     let serialized =
                         match guarded("provider_serialize_panicked", || match &selected_model {
-                            Some(selected) => selected.provider.serialize(&view),
-                            None => self.provider.serialize(&view),
+                            Some(selected) => selected.provider.serialize(&view, Some(&mut request_compile_reuse)),
+                            None => self.provider.serialize(&view, Some(&mut request_compile_reuse)),
                         }) {
                             Ok(serialized) => serialized,
                             Err(error) => finish!('agent, RunState::Failed, None, Some(error)),
@@ -2446,8 +2524,8 @@ impl<
                         proposed.binding.memory_checkpoint = context.memory_checkpoint;
                         proposed.binding.resource_activations = crate::catalog::resources::retained_activations(&proposed.history);
                         let serialized = guarded("provider_serialize_panicked", || match &selected_model {
-                            Some(selected) => selected.provider.serialize(&proposed),
-                            None => self.provider.serialize(&proposed),
+                            Some(selected) => selected.provider.serialize(&proposed, None),
+                            None => self.provider.serialize(&proposed, None),
                         })?;
                         // A changed checkpoint cannot borrow the previous request's usage calibration.
                         Ok(crate::context_capacity::estimate_request(&proposed, &serialized))
@@ -2482,6 +2560,8 @@ impl<
                             finish!('agent, RunState::Failed, None, Some(error));
                         }
                     }
+                    // All outer configuration is complete; prepared storage and dispatch share these bytes.
+                    let _ = serialized.wire_bytes();
                     let snapshot = Arc::new(RequestSnapshot { view, serialized });
                     match self.commit(
                         &input,

@@ -331,7 +331,7 @@ fn prepare(
             },
         ].into_iter().map(Into::into).collect(),
     };
-    let serialized = bound.provider.serialize(&view)?;
+    let serialized = bound.provider.serialize(&view, None)?;
     let snapshot = RequestSnapshot { view, serialized };
     let prep = owner.lock().map_err(failure)?.prepare_inference_content();
     let body = prep

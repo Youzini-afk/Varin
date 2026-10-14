@@ -85,7 +85,7 @@ fn snapshot(
         history: db.execution_history(branch).unwrap(),
     };
     RequestSnapshot {
-        serialized: provider.serialize(&view).unwrap(),
+        serialized: provider.serialize(&view, None).unwrap(),
         view,
     }
 }
@@ -209,7 +209,7 @@ fn original_success_survives_new_run_reopen_and_later_unknown_but_latest_mismatc
     );
     // Anthropic merged adjacent user content into one wire message, yet the exact prefix remains.
     assert_eq!(
-        candidate.serialized["messages"].as_array().unwrap().len(),
+        candidate.serialized.to_value()["messages"].as_array().unwrap().len(),
         1
     );
     for (id, outcome, receipt) in [
@@ -274,6 +274,16 @@ fn actual_serializers_keep_cache_semantics_full_tail_and_exact_prefix_invalidati
     let providers: Vec<(Box<dyn ModelProvider>, &str, u64)> = vec![
         (Box::new(anthropic()), anthropic::FAMILY, 900),
         (
+            Box::new(pi_messages::PiMessagesProvider {
+                connection: connection(),
+                max_output_tokens: Some(100),
+                reasoning: None,
+                cache_retention: None,
+            }),
+            pi_messages::FAMILY,
+            900,
+        ),
+        (
             Box::new(responses::ResponsesProvider::new(connection())),
             responses::FAMILY,
             100,
@@ -297,7 +307,7 @@ fn actual_serializers_keep_cache_semantics_full_tail_and_exact_prefix_invalidati
             history: vec![text("first", "original text").into()],
         };
         let original = RequestSnapshot {
-            serialized: provider.serialize(&view).unwrap(),
+            serialized: provider.serialize(&view, None).unwrap(),
             view,
         };
         let receipt = actual(100);
@@ -306,7 +316,7 @@ fn actual_serializers_keep_cache_semantics_full_tail_and_exact_prefix_invalidati
         current
             .history
             .push(text("tail", &"完整新增材料".repeat(100)).into());
-        let serialized = provider.serialize(&current).unwrap();
+        let serialized = provider.serialize(&current, None).unwrap();
         let local = estimate_request(&current, &serialized);
         let calibrated = calibrated_estimate(&current, &serialized, &original, &receipt, protocol);
         assert_eq!(
@@ -350,15 +360,16 @@ fn actual_serializers_keep_cache_semantics_full_tail_and_exact_prefix_invalidati
                     }
                 }
             }
-            let changed_body = provider.serialize(&changed).unwrap();
+            let changed_body = provider.serialize(&changed, None).unwrap();
             assert_eq!(
                 calibrated_estimate(&changed, &changed_body, &original, &receipt, protocol).method,
                 estimate_request(&changed, &changed_body).method,
                 "{family}: {mutation}"
             );
         }
-        let mut body = serialized.clone();
+        let mut body = serialized.to_value();
         body["new_fixed_option"] = json!(true);
+        let body = body.into();
         assert_eq!(
             calibrated_estimate(&current, &body, &original, &receipt, protocol).method,
             local.method
@@ -401,7 +412,7 @@ fn calibration_preserves_opaque_media_and_unmeasured_flags_and_rejects_incomplet
         opaque:Some(OpaqueProviderItem{family:anthropic::FAMILY.into(),connection_identity:"fixture".into(),adapter_version:"1".into(),
             value:json!({"type":"thinking","thinking":"retained opaque original","signature":"original-signature"})})}.into());
     let original = RequestSnapshot {
-        serialized: provider.serialize(&view).unwrap(),
+        serialized: provider.serialize(&view, None).unwrap(),
         view,
     };
     let saved_original = original.clone();
@@ -425,7 +436,7 @@ fn calibration_preserves_opaque_media_and_unmeasured_flags_and_rejects_incomplet
         },
         opaque: None,
     }.into());
-    let serialized = provider.serialize(&current).unwrap();
+    let serialized = provider.serialize(&current, None).unwrap();
     let saved_body = serialized.clone();
     let protocol = provider.request_budget_protocol().unwrap();
     let receipt = actual(100);

@@ -375,8 +375,8 @@ fn product_bot_wake_keeps_manual_pause_and_untriggered_wait_at_the_original_host
 #[derive(Default)]
 struct ProductMemoryModel(Mutex<Vec<RequestSnapshot>>);
 impl ModelProvider for ProductMemoryModel {
-    fn serialize(&self, view: &RequestView) -> Result<Value, ExecutionError> {
-        Ok(serde_json::to_value(view).unwrap())
+    fn serialize(&self, view: &RequestView, _reuse: Option<&mut varin_runtime::execution::RequestCompileReuse>) -> Result<varin_runtime::execution::RequestBody, ExecutionError> {
+        Ok(serde_json::to_value(view).unwrap().into())
     }
     fn generate(
         &self,

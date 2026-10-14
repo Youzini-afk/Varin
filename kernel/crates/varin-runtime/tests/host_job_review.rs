@@ -170,7 +170,7 @@ impl Fixture {
                     binding,
                     history: vec![],
                 },
-                serialized: json!({}),
+                serialized: json!({}).into(),
             }
             .into(),
         });
@@ -683,8 +683,8 @@ impl ToolExecutor for RaceTools {
 }
 struct RaceProvider;
 impl ModelProvider for RaceProvider {
-    fn serialize(&self, v: &RequestView) -> std::result::Result<Value, ExecutionError> {
-        Ok(serde_json::to_value(v).unwrap())
+    fn serialize(&self, v: &RequestView, _reuse: Option<&mut varin_runtime::execution::RequestCompileReuse>) -> std::result::Result<varin_runtime::execution::RequestBody, ExecutionError> {
+        Ok(serde_json::to_value(v).unwrap().into())
     }
     fn generate(
         &self,

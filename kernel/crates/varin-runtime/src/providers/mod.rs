@@ -71,15 +71,6 @@ pub struct CredentialDispatch {
     /// SHA-256 of the exact frozen HTTP bytes, never the request body on the control channel.
     pub payload_sha256: String,
 }
-/// One serializer supplies both the signature input and the HTTP request bytes.
-fn request_body(body: &Value) -> Result<Vec<u8>, ModelFailure> {
-    serde_json::to_vec(body).map_err(|_| {
-        failure(
-            "request_serialization",
-            "model request could not be serialized",
-        )
-    })
-}
 pub trait CredentialResolver: Send + Sync {
     /// Return dispatch-only headers. Implementations own refresh/single-flight and cancellation.
     fn headers(
@@ -99,7 +90,7 @@ pub trait CredentialResolver: Send + Sync {
 pub struct HttpRequest<'a> {
     pub endpoint: &'a str,
     pub headers: reqwest::header::HeaderMap,
-    pub body: &'a Value,
+    pub body: &'a RequestBody,
 }
 pub trait HttpTransport: Send + Sync {
     fn stream(
@@ -243,7 +234,7 @@ impl ReqwestTransport {
             })
             .as_ref()
             .map_err(Clone::clone)?;
-        let body = request_body(request.body)?;
+        let body = request.body.wire_bytes();
         let mut headers = request.headers;
         headers.insert(
             reqwest::header::ACCEPT,

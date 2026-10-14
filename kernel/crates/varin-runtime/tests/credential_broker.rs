@@ -317,7 +317,7 @@ fn injected_factory_uses_authoritative_broker_without_environment_fallback() {
         binding: start.binding,
         history: vec![],
     };
-    let serialized = start.provider.serialize(&view).unwrap();
+    let serialized = start.provider.serialize(&view, None).unwrap();
     assert!(!serialized.to_string().contains("broker-only-fixture"));
     let result = start.provider.generate(
         &RequestSnapshot { view, serialized },

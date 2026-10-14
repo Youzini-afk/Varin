@@ -190,7 +190,7 @@ fn snapshot(run: &str, head: &str, id: &str, projection: ContextProjection) -> R
         history: projection.history,
     };
     RequestSnapshot {
-        serialized: serde_json::to_value(&view).unwrap(),
+        serialized: serde_json::to_value(&view).unwrap().into(),
         view,
     }
 }
@@ -297,7 +297,7 @@ fn policy_model_quoted_real_memory_facts_keep_selection_send_and_commit_separate
         },
         opaque: None,
     }.into()];
-    planning.serialized = serde_json::to_value(&planning.view).unwrap();
+    planning.serialized = serde_json::to_value(&planning.view).unwrap().into();
     let intent = PolicyModelIntent::PolicyModelJobV1 {
         action_id: action.clone(),
         boundary,
@@ -920,8 +920,8 @@ fn policy_memory_mutation_uses_original_receipt_for_evidence_or_tail_delivery() 
     #[derive(Default)]
     struct Capture(Mutex<Vec<RequestSnapshot>>);
     impl ModelProvider for Capture {
-        fn serialize(&self, view: &RequestView) -> Result<Value, ExecutionError> {
-            Ok(serde_json::to_value(view).unwrap())
+        fn serialize(&self, view: &RequestView, _reuse: Option<&mut varin_runtime::execution::RequestCompileReuse>) -> Result<varin_runtime::execution::RequestBody, ExecutionError> {
+            Ok(serde_json::to_value(view).unwrap().into())
         }
         fn generate(
             &self,

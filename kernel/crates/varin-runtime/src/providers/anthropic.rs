@@ -138,7 +138,7 @@ impl ModelProvider for AnthropicProvider {
         })
     }
 
-    fn serialize(&self, view: &RequestView) -> Result<Value, ExecutionError> {
+    fn serialize(&self, view: &RequestView, _reuse: Option<&mut RequestCompileReuse>) -> Result<RequestBody, ExecutionError> {
         validate_view(view, FAMILY)?;
         validate_images(view, &self.connection)?;
         if self.max_tokens == 0 {
@@ -224,7 +224,7 @@ impl ModelProvider for AnthropicProvider {
         if let Some(thinking) = &self.thinking {
             result["thinking"] = thinking.clone();
         }
-        Ok(result)
+        Ok(result.into())
     }
     fn generate(
         &self,

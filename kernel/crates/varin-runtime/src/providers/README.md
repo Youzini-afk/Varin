@@ -11,11 +11,23 @@ or server-tool blocks. Cross-family provider-only items are omitted by the share
 text and client-tool exchanges are rebuilt. Unsupported local/multimodal references fail explicitly.
 The Host must materialize attachments before compilation. Tool schemas use the frozen request's versions.
 
-Adapters borrow that frozen history, output parts and continuation data. Only the final wire body owns
-their serialized values; constructed blocks and message arrays move into it without another deep copy.
-Textual execution receipts retain their original key order and external-data provenance. The execution
-engine still owns the semantic snapshot needed for persistence. This avoids intermediate copies within
-one request; it does not implement stable-prefix caching between requests.
+`ModelProvider::serialize(view, reuse)` returns the single `RequestBody` contract. Responses, Azure
+Responses and Codex can reuse immutable per-item JSON fragments and tool schemas from the original Run
+worker's latest holder. Codex additionally retains one joined instructions fragment for its exact
+ordered system-item Arc sequence (including the default empty-system instructions). System validation
+and original join/filter ordering still apply on every call. The actual adapter/lease, configuration/schema/model/connection, checkpoint and
+source `Arc` identities bound reuse; previews pass no holder. Every call still enters the pinned adapter's
+lease validation. Grouped protocols run their existing complete compiler before entering the same body
+contract; their transcript blocks are not treated as independently reusable semantic items.
+
+Fragments retain raw JSON and the original UTF-8 size contribution, not a second parsed `Value` tree.
+Envelope configuration edits invalidate that body's frozen encoding without changing a cloned snapshot.
+After all outer configuration, one complete raw JSON buffer is frozen. `Bytes::from_owner` shares its
+allocation with HTTP and Bedrock signing, while ContentStore serializes the borrowed raw body and
+recovers it directly from bytes. Signing, persisted recovery and HTTP therefore retain the same actual
+bytes, including valid noncanonical JSON. Textual receipts retain their original key order/provenance.
+Freezing and durable snapshot encoding still copy complete bytes; retained fragments plus the contiguous
+wire buffer are not a universal peak-memory reduction. No remote incremental request is implied.
 
 `Connection` resolves a credential reference immediately before dispatch through `CredentialResolver`.
 `EnvironmentCredentialResolver` is a concrete implementation for trusted reference-to-environment-header

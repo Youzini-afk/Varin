@@ -30,7 +30,7 @@ fn model_only_binding_has_no_tool_grant_and_credentials_remain_dispatch_only() {
         binding: start.binding,
         history: vec![],
     };
-    let serialized = start.provider.serialize(&view).unwrap();
+    let serialized = start.provider.serialize(&view, None).unwrap();
     assert!(!serialized.to_string().contains(&variable));
     assert!(serialized.get("authorization").is_none());
     let error = start
@@ -54,7 +54,7 @@ fn absent_credentials_require_explicit_anonymous_configuration() {
         binding: start.binding,
         history: vec![],
     };
-    let serialized = start.provider.serialize(&view).unwrap();
+    let serialized = start.provider.serialize(&view, None).unwrap();
     assert_eq!(
         start
             .provider
@@ -142,13 +142,14 @@ fn factory_chat_and_azure_reach_the_selected_protocol_and_credential_header() {
             binding: start.binding,
             history: vec![],
         };
-        let serialized = start.provider.serialize(&view).unwrap();
+        let serialized = start.provider.serialize(&view, None).unwrap();
+        let body = serialized.to_value();
         if family == "openai-completions" {
-            assert_eq!(serialized["max_tokens"], 100);
+            assert_eq!(body["max_tokens"], 100);
             assert!(serialized.get("stream_options").is_none());
-            assert_eq!(serialized["reasoning_effort"], "low");
+            assert_eq!(body["reasoning_effort"], "low");
         } else {
-            assert_eq!(serialized["model"], "explicit-deployment");
+            assert_eq!(body["model"], "explicit-deployment");
         }
         assert!(!serialized.to_string().contains("fixture-only"));
         let mut events = Vec::new();
@@ -190,6 +191,6 @@ fn adapter_options_reject_wrong_family_and_frozen_input_replacement() {
     config.model_options = Some(serde_json::json!({"temperature":0.3,"samplingParams":{"top_p":0.8}}));
     let start = model_session::bind(config).unwrap();
     let view = RequestView { request_id:"request".into(),run_id:"run".into(),origin:varin_runtime::execution::RequestOrigin::Conversation { compaction: None, step:1,history_range:start.binding.history_range.clone() },binding:start.binding,history:vec![] };
-    let payload = start.provider.serialize(&view).unwrap();
+    let payload = start.provider.serialize(&view, None).unwrap().to_value();
     assert_eq!(payload["temperature"], 0.3); assert_eq!(payload["top_p"],0.8); assert_eq!(payload["model"],"local-test");
 }

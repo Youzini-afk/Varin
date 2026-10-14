@@ -188,9 +188,9 @@ impl ModelProvider for PinnedProvider {
         self.inner.request_budget_protocol()
     }
 
-    fn serialize(&self, view: &RequestView) -> Result<Value, ExecutionError> {
+    fn serialize(&self, view: &RequestView, reuse: Option<&mut RequestCompileReuse>) -> Result<RequestBody, ExecutionError> {
         self.lease.validate().map_err(composition_error)?;
-        self.inner.serialize(view)
+        self.inner.serialize(view, reuse)
     }
     fn generate(
         &self,
@@ -269,8 +269,8 @@ mod tests {
         value: &'static str,
     }
     impl ModelProvider for Provider {
-        fn serialize(&self, _: &RequestView) -> Result<Value, ExecutionError> {
-            Ok(json!({"implementation":self.value}))
+        fn serialize(&self, _: &RequestView, _reuse: Option<&mut crate::execution::RequestCompileReuse>) -> Result<crate::execution::RequestBody, ExecutionError> {
+            Ok(json!({"implementation":self.value}).into())
         }
         fn generate(
             &self,
@@ -342,15 +342,15 @@ mod tests {
             .binding,
             history: vec![],
         };
-        assert_eq!(provider.serialize(&view).unwrap()["implementation"], "old");
+        assert_eq!(provider.serialize(&view, None).unwrap().to_value()["implementation"], "old");
         let current = registry
             .select(&config)
             .unwrap()
             .bind(&config, connection())
             .unwrap();
-        assert_eq!(current.serialize(&view).unwrap()["implementation"], "new");
+        assert_eq!(current.serialize(&view, None).unwrap().to_value()["implementation"], "new");
         let snapshot = RequestSnapshot {
-            serialized: provider.serialize(&view).unwrap(),
+            serialized: provider.serialize(&view, None).unwrap(),
             view: view.clone(),
         };
         let worker = std::thread::spawn(move || {
@@ -360,6 +360,6 @@ mod tests {
             .unwrap();
         assert!(registry.revoke_binding(id));
         assert_eq!(worker.join().unwrap().unwrap_err().code, "cancelled");
-        assert!(current.serialize(&view).is_ok());
+        assert!(current.serialize(&view, None).is_ok());
     }
 }

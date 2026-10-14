@@ -41,7 +41,7 @@ impl HttpTransport for Stream {
             "Bearer controlled-memory-fixture-key"
         );
         assert_eq!(
-            request.body["model"],
+            request.body.get("model").unwrap(),
             if self.mode.starts_with("selection") {
                 "configured-organizer"
             } else {
@@ -55,7 +55,7 @@ impl HttpTransport for Stream {
             .is_none_or(|v| v.as_array().is_some_and(Vec::is_empty)));
         let request_number = {
             let mut requests = self.requests.lock().unwrap();
-            requests.push(request.body.clone());
+            requests.push(request.body.to_value());
             requests.len()
         };
         if self.mode == "cancel" {

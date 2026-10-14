@@ -86,9 +86,9 @@ struct FinalModel {
     requests: Arc<Mutex<Vec<RequestView>>>,
 }
 impl ModelProvider for FinalModel {
-    fn serialize(&self, view: &RequestView) -> Result<Value, ExecutionError> {
+    fn serialize(&self, view: &RequestView, _reuse: Option<&mut varin_runtime::execution::RequestCompileReuse>) -> Result<varin_runtime::execution::RequestBody, ExecutionError> {
         self.requests.lock().unwrap().push(view.clone());
-        Ok(serde_json::to_value(view).unwrap())
+        Ok(serde_json::to_value(view).unwrap().into())
     }
     fn generate(
         &self,
@@ -115,7 +115,7 @@ struct MediaModel {
     wires: Arc<Mutex<Vec<Value>>>,
 }
 impl ModelProvider for MediaModel {
-    fn serialize(&self, view: &RequestView) -> Result<Value, ExecutionError> {
+    fn serialize(&self, view: &RequestView, reuse: Option<&mut varin_runtime::execution::RequestCompileReuse>) -> Result<varin_runtime::execution::RequestBody, ExecutionError> {
         use varin_runtime::providers::{
             Connection, EnvironmentCredentialResolver, ReqwestTransport,
         };
@@ -126,9 +126,9 @@ impl ModelProvider for MediaModel {
         );
         connection.accepts_images = Some(true);
         let wire = varin_runtime::providers::responses::ResponsesProvider::new(connection)
-            .serialize(view)?;
+            .serialize(view, reuse)?;
         self.requests.lock().unwrap().push(view.clone());
-        self.wires.lock().unwrap().push(wire.clone());
+        self.wires.lock().unwrap().push(wire.to_value());
         Ok(wire)
     }
     fn generate(

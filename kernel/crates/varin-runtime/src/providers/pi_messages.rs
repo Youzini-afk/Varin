@@ -64,7 +64,7 @@ impl ModelProvider for PiMessagesProvider {
         })
     }
 
-    fn serialize(&self, view: &RequestView) -> Result<Value, ExecutionError> {
+    fn serialize(&self, view: &RequestView, _reuse: Option<&mut RequestCompileReuse>) -> Result<RequestBody, ExecutionError> {
         validate_view(view, FAMILY)?;
         validate_images(view, &self.connection)?;
         let mut messages = Vec::new();
@@ -182,7 +182,7 @@ impl ModelProvider for PiMessagesProvider {
         let mut body = json!({"model":view.binding.model,"context":{}});
         body["context"]["messages"] = Value::Array(messages);
         body["options"] = options;
-        Ok(body)
+        Ok(body.into())
     }
     fn generate(
         &self,

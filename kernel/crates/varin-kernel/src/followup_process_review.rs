@@ -91,7 +91,7 @@ fn model_call(
                     binding,
                     history: vec![],
                 },
-                serialized: json!({}),
+                serialized: json!({}).into(),
             }.into(),
         },
     );

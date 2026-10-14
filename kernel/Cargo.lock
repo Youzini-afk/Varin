@@ -2031,6 +2031,7 @@ name = "varin-runtime"
 version = "0.1.0"
 dependencies = [
  "base64 0.22.1",
+ "bytes",
  "fs2",
  "hex",
  "reqwest",

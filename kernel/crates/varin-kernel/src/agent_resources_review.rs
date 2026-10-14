@@ -285,7 +285,7 @@ fn resource_builtin_uses_frozen_checkpoint_and_current_cancellation_without_oper
                 binding,
                 history: projected.history,
             },
-            serialized: json!({}),
+            serialized: json!({}).into(),
         };
         let epoch = catalog.epoch();
         if !policy_call {

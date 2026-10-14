@@ -897,7 +897,7 @@ fn child_reopen_restores_exact_planning_operation_and_never_replays_dispatched_w
             history: vec![],
         };
         let snapshot = RequestSnapshot {
-            serialized: model.provider.serialize(&view).unwrap(),
+            serialized: model.provider.serialize(&view, None).unwrap(),
             view,
         };
         let intent = PolicyModelIntent::PolicyModelJobV1 {

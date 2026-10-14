@@ -557,7 +557,7 @@ fn child_result_waits_for_original_workspace_and_service_callbacks_but_not_globa
                         binding,
                         history: vec![],
                     },
-                    serialized: json!({"fixture":"Host callbacks"}),
+                    serialized: json!({"fixture":"Host callbacks"}).into(),
                 }.into(),
             },
         )

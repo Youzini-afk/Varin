@@ -282,22 +282,15 @@ impl<M: Clone, S> crate::execution::RequestSnapshot<M, S> {
         })
     }
 }
+#[path = "output_snapshot.rs"]
+mod snapshot_storage;
+
 impl crate::content::ContentStore {
     pub(crate) fn save_snapshot(
         &self,
         snapshot: &crate::execution::RequestSnapshot,
     ) -> Result<Value, crate::catalog::RuntimeError> {
-        let mut dependencies = Vec::new();
-        let stored = crate::execution::RequestSnapshot {
-            view: snapshot.view.clone(),
-            serialized: &snapshot.serialized,
-        }
-        .map_media(|media| {
-            let stored = self.store_media(media)?;
-            dependencies.push(stored.content_ref.content_object.clone());
-            Ok::<_, crate::catalog::RuntimeError>(stored)
-        })?;
-        self.save_with_dependencies(&serde_json::to_value(stored)?, dependencies)
+        snapshot_storage::save(self, snapshot)
     }
     pub(crate) fn load_snapshot(
         &self,
@@ -311,7 +304,7 @@ impl crate::content::ContentStore {
         cancelled: &dyn Fn() -> bool,
     ) -> Result<crate::execution::RequestSnapshot, crate::catalog::RuntimeError> {
         let snapshot: crate::execution::RequestSnapshot<StoredMedia> =
-            serde_json::from_value(self.load_cancellable(reference, cancelled)?)?;
+            serde_json::from_slice(&self.load_bytes(reference, cancelled)?)?;
         snapshot.map_media(|media| self.resolve_media_cancellable(media, cancelled))
     }
 }

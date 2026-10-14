@@ -162,7 +162,7 @@ impl AgentPolicy for Policy {
     }
 }
 impl ModelProvider for Model {
-    fn serialize(&self, view: &RequestView) -> Result<Value, ExecutionError> {
+    fn serialize(&self, view: &RequestView, reuse: Option<&mut varin_runtime::execution::RequestCompileReuse>) -> Result<varin_runtime::execution::RequestBody, ExecutionError> {
         use varin_runtime::providers::{
             Connection, EnvironmentCredentialResolver, ReqwestTransport,
         };
@@ -173,9 +173,9 @@ impl ModelProvider for Model {
         );
         connection.accepts_images = Some(true);
         let wire = varin_runtime::providers::responses::ResponsesProvider::new(connection)
-            .serialize(view)?;
+            .serialize(view, reuse)?;
         self.views.lock().unwrap().push(view.clone());
-        self.wires.lock().unwrap().push(wire.clone());
+        self.wires.lock().unwrap().push(wire.to_value());
         Ok(wire)
     }
     fn generate(

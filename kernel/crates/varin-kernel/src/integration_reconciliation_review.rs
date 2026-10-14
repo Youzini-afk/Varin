@@ -233,7 +233,7 @@ fn replay_scenario(tail_phase: Option<&str>) {
                     binding,
                     history: vec![],
                 },
-                serialized: json!({}),
+                serialized: json!({}).into(),
             }.into(),
         },
         ExecutionRecord::ModelDispatched {

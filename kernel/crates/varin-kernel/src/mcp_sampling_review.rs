@@ -34,7 +34,7 @@ impl HttpTransport for Stream {
             request.headers["authorization"],
             "Bearer fixture-only-sampling-credential"
         );
-        self.requests.lock().unwrap().push(request.body.clone());
+        self.requests.lock().unwrap().push(request.body.to_value());
         if request
             .body
             .to_string()

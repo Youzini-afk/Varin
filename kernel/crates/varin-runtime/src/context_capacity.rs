@@ -1,6 +1,6 @@
 //! Local request estimates. They are never reported as provider measurements.
 use crate::execution::{
-    Content, RequestOrigin, RequestSnapshot, RequestView, UsageMeasurement, UsageReceipt,
+    Content, RequestBody, RequestOrigin, RequestSnapshot, RequestView, UsageMeasurement, UsageReceipt,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -36,50 +36,15 @@ pub struct RequestBudgetProtocol {
 }
 
 impl RequestBudgetProtocol {
-    fn serialized_prefix(self, previous: &Value, current: &Value) -> bool {
-        fn along(previous: &Value, current: &Value, path: &[&str], content: Option<&str>) -> bool {
-            if let Some((key, rest)) = path.split_first() {
-                let (Some(left), Some(right)) = (previous.as_object(), current.as_object()) else {
-                    return false;
-                };
-                return left.len() == right.len()
-                    && left.iter().all(|(field, value)| {
-                        right.get(field).is_some_and(|next| {
-                            if field == key {
-                                along(value, next, rest, content)
-                            } else {
-                                value == next
-                            }
-                        })
-                    })
-                    && left.contains_key(*key);
-            }
-            let (Some(left), Some(right)) = (previous.as_array(), current.as_array()) else {
-                return false;
-            };
-            left.len() <= right.len()
-                && left
-                    .iter()
-                    .zip(right)
-                    .enumerate()
-                    .all(|(index, (value, next))| {
-                        value == next
-                            || (index + 1 == left.len()
-                                && content.is_some_and(|field| {
-                                    // Only the serializer's declared final block array may grow. Role, opaque
-                                    // fields and every existing block remain exact; no semantic fields are erased.
-                                    along(value, next, &[field], None)
-                                }))
-                    })
-        }
-        along(previous, current, self.transcript, self.coalesced_content)
+    fn serialized_prefix(self, previous: &RequestBody, current: &RequestBody) -> bool {
+        previous.transcript_prefix(current, self.transcript, self.coalesced_content)
     }
 }
 
 /// Apply one latest successful observation. A mismatch never searches for an older match.
 pub fn calibrated_estimate(
     view: &RequestView,
-    serialized: &Value,
+    serialized: &RequestBody,
     previous: &RequestSnapshot,
     usage: &UsageReceipt,
     protocol: RequestBudgetProtocol,
@@ -134,7 +99,7 @@ fn media(object: &serde_json::Map<String, Value>) -> bool {
         || object.contains_key("inline_data")
         || object.contains_key("image") && object.len() == 1
 }
-fn size(value: &Value) -> u64 {
+pub(crate) fn size(value: &Value) -> u64 {
     match value {
         Value::Null => 4,
         Value::Bool(value) => {
@@ -172,9 +137,9 @@ fn size(value: &Value) -> u64 {
             }),
     }
 }
-pub fn estimate_request(view: &RequestView, serialized: &Value) -> InputEstimate {
+pub fn estimate_request(view: &RequestView, serialized: &RequestBody) -> InputEstimate {
     InputEstimate {
-        estimated_tokens: size(serialized).div_ceil(4),
+        estimated_tokens: serialized.estimated_bytes().div_ceil(4),
         unmeasured_media: view
             .history
             .iter()

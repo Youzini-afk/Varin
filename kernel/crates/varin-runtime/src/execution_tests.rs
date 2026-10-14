@@ -161,11 +161,11 @@ enum Mode {
     PartialFailure,
 }
 impl ModelProvider for Provider {
-    fn serialize(&self, view: &RequestView) -> Result<Value, ExecutionError> {
+    fn serialize(&self, view: &RequestView, _reuse: Option<&mut crate::execution::RequestCompileReuse>) -> Result<crate::execution::RequestBody, ExecutionError> {
         if matches!(self.mode, Mode::CancelPrepared) {
             self.cancel.cancel();
         }
-        Ok(serde_json::to_value(view).unwrap())
+        Ok(serde_json::to_value(view).unwrap().into())
     }
     fn generate(
         &self,
@@ -352,8 +352,8 @@ fn supervisor_control_reaches_provider_while_catalog_is_locked() {
         stopped: std::sync::mpsc::Sender<()>,
     }
     impl ModelProvider for WaitingProvider {
-        fn serialize(&self, v: &RequestView) -> Result<Value, ExecutionError> {
-            Ok(serde_json::to_value(v).unwrap())
+        fn serialize(&self, v: &RequestView, _reuse: Option<&mut crate::execution::RequestCompileReuse>) -> Result<crate::execution::RequestBody, ExecutionError> {
+            Ok(serde_json::to_value(v).unwrap().into())
         }
         fn generate(
             &self,
@@ -516,8 +516,8 @@ fn worker_commit_conflict_cannot_leave_a_workerless_run_generating() {
         catalog: Arc<Mutex<Catalog>>,
     }
     impl ModelProvider for ConcurrentInput {
-        fn serialize(&self, view: &RequestView) -> Result<Value, ExecutionError> {
-            Ok(serde_json::to_value(view).unwrap())
+        fn serialize(&self, view: &RequestView, _reuse: Option<&mut crate::execution::RequestCompileReuse>) -> Result<crate::execution::RequestBody, ExecutionError> {
+            Ok(serde_json::to_value(view).unwrap().into())
         }
         fn generate(
             &self,
@@ -640,8 +640,8 @@ fn worker_commit_conflict_cannot_leave_a_workerless_run_generating() {
 fn independent_fast_tool_finishes_while_another_tool_is_still_running() {
     struct BatchProvider(AtomicUsize);
     impl ModelProvider for BatchProvider {
-        fn serialize(&self, v: &RequestView) -> Result<Value, ExecutionError> {
-            Ok(serde_json::to_value(v).unwrap())
+        fn serialize(&self, v: &RequestView, _reuse: Option<&mut crate::execution::RequestCompileReuse>) -> Result<crate::execution::RequestBody, ExecutionError> {
+            Ok(serde_json::to_value(v).unwrap().into())
         }
         fn generate(
             &self,
@@ -793,8 +793,8 @@ fn independent_fast_tool_finishes_while_another_tool_is_still_running() {
 fn cancelling_one_queued_operation_does_not_fail_its_run_or_execute_it() {
     struct TwoWrites(AtomicUsize);
     impl ModelProvider for TwoWrites {
-        fn serialize(&self, v: &RequestView) -> Result<Value, ExecutionError> {
-            Ok(serde_json::to_value(v).unwrap())
+        fn serialize(&self, v: &RequestView, _reuse: Option<&mut crate::execution::RequestCompileReuse>) -> Result<crate::execution::RequestBody, ExecutionError> {
+            Ok(serde_json::to_value(v).unwrap().into())
         }
         fn generate(
             &self,
@@ -1059,8 +1059,8 @@ fn cancelling_an_admitted_unstarted_run_releases_its_branch() {
 fn input_arriving_between_completion_decision_and_commit_is_not_lost() {
     struct AnswerProvider(AtomicUsize);
     impl ModelProvider for AnswerProvider {
-        fn serialize(&self, v: &RequestView) -> Result<Value, ExecutionError> {
-            Ok(serde_json::to_value(v).unwrap())
+        fn serialize(&self, v: &RequestView, _reuse: Option<&mut crate::execution::RequestCompileReuse>) -> Result<crate::execution::RequestBody, ExecutionError> {
+            Ok(serde_json::to_value(v).unwrap().into())
         }
         fn generate(
             &self,
@@ -1188,12 +1188,12 @@ fn interrupt_during_request_serialization_prevents_stale_generation() {
         stale: AtomicUsize,
     }
     impl ModelProvider for GatedSerializer {
-        fn serialize(&self, view: &RequestView) -> Result<Value, ExecutionError> {
+        fn serialize(&self, view: &RequestView, _reuse: Option<&mut crate::execution::RequestCompileReuse>) -> Result<crate::execution::RequestBody, ExecutionError> {
             if !self.first.swap(true, Ordering::SeqCst) {
                 self.entered.send(()).unwrap();
                 self.release.lock().unwrap().recv().unwrap();
             }
-            Ok(serde_json::to_value(view).unwrap())
+            Ok(serde_json::to_value(view).unwrap().into())
         }
         fn generate(
             &self,
@@ -1300,7 +1300,7 @@ fn recovered_completed_output_never_resends_model_or_reexecutes_cached_receipts(
                 binding: original_input.binding.clone(),
                 history: original_input.history.clone(),
             },
-            serialized: json!({"request":"must never send again"}),
+            serialized: json!({"request":"must never send again"}).into(),
         };
         let calls: Vec<ToolCall> = (1..=2)
             .map(|n| ToolCall {
@@ -1466,7 +1466,7 @@ fn recovered_completed_output_never_resends_model_or_reexecutes_cached_receipts(
 fn active_context_compiles_summary_and_tail_without_destroying_original_history() {
     struct ContextProvider;
     impl ModelProvider for ContextProvider {
-        fn serialize(&self, view: &RequestView) -> Result<Value, ExecutionError> {
+        fn serialize(&self, view: &RequestView, _reuse: Option<&mut crate::execution::RequestCompileReuse>) -> Result<crate::execution::RequestBody, ExecutionError> {
             assert!(matches!(
                 &view.history[0].provenance,
                 Provenance::SystemInstruction { .. }
@@ -1487,7 +1487,7 @@ fn active_context_compiles_summary_and_tail_without_destroying_original_history(
             assert!(!view.history.iter().any(
                 |item| matches!(&item.content,Content::Text{text} if text=="read then answer")
             ));
-            Ok(serde_json::to_value(view).unwrap())
+            Ok(serde_json::to_value(view).unwrap().into())
         }
         fn generate(
             &self,
@@ -1631,7 +1631,7 @@ fn context_prefix_reuse_rehydrates_only_new_history_across_real_model_steps() {
         }
     }
     #[derive(Default)]
-    struct Transport(Mutex<Vec<Value>>);
+    struct Transport(Mutex<Vec<RequestBody>>);
     impl HttpTransport for Transport {
         fn stream(
             &self,
@@ -1740,7 +1740,7 @@ fn context_prefix_reuse_rehydrates_only_new_history_across_real_model_steps() {
             &self,
             _: u64,
             view: &RequestView,
-            _: &Value,
+            _: &RequestBody,
             _: Option<crate::context_capacity::RequestBudgetProtocol>,
             _: &dyn Fn(
                 ContextProjection,
@@ -1872,6 +1872,14 @@ fn context_prefix_reuse_rehydrates_only_new_history_across_real_model_steps() {
         let credentials = Arc::new(Credentials(AtomicUsize::new(0)));
         let (progress, _receiver) = ProgressSink::channel(1);
         let views = Arc::new(Mutex::new(Vec::new()));
+        let config: crate::ModelSessionConfiguration = serde_json::from_value(json!({
+            "providerFamily":responses::FAMILY,"model":input.binding.model,"endpoint":"https://fixture.invalid",
+            "credentialEnvironment":null,"allowAnonymous":true,"configurationGeneration":1,
+            "maxOutputTokens":null,"modelOptions":{"temperature":0.125}
+        })).unwrap();
+        // Use the actual registry lease and configured wrapper, not a lighter test serializer.
+        let selected = crate::providers::registry::model_adapters().read().unwrap().select(&config).unwrap();
+        let provider = selected.bind(&config, Connection::new("https://fixture.invalid", credentials.clone(), transport.clone())).unwrap();
         let engine = ExecutionEngine {
             persistence: db.clone(),
             context_preparation: Arc::new(Preparation {
@@ -1880,11 +1888,7 @@ fn context_prefix_reuse_rehydrates_only_new_history_across_real_model_steps() {
                 replace,
                 views: views.clone(),
             }),
-            provider: Arc::new(responses::ResponsesProvider::new(Connection::new(
-                "https://fixture.invalid",
-                credentials.clone(),
-                transport.clone(),
-            ))),
+            provider,
             tools: Arc::new(Tools::default()),
             policy: Arc::new(DefaultAgentPolicy),
             progress,
@@ -1912,7 +1916,11 @@ fn context_prefix_reuse_rehydrates_only_new_history_across_real_model_steps() {
             counts.len() >= 3,
             "the second step hydrates its actual tool exchange"
         );
-        let requests = transport.0.lock().unwrap();
+        let bodies = transport.0.lock().unwrap();
+        assert_eq!(bodies[0].shared_fragments(&bodies[1], "input"), if replace {0} else {4},
+            "system, large text, media, and sanitized foreign content reuse frozen Responses fragments; checkpoint replacement invalidates them");
+        assert_eq!(bodies[0].shared_fragments(&bodies[1], "tools"), usize::from(!replace), "unchanged tools reuse their encoded schema");
+        let requests: Vec<_> = bodies.iter().map(RequestBody::to_value).collect();
         assert_eq!(requests.len(), 2);
         assert_eq!(
             credentials.0.load(Ordering::SeqCst),
@@ -2007,6 +2015,9 @@ fn context_prefix_reuse_rehydrates_only_new_history_across_real_model_steps() {
                 .unwrap()
                 .load_snapshot(&reference)
                 .unwrap();
+            assert_eq!(restored.serialized.wire_bytes(), bodies[index].wire_bytes(),
+                "reopened ContentStore restores the exact bytes used by HTTP");
+            assert_eq!(requests[index]["temperature"], 0.125, "outer configured fields precede freezing");
             assert_eq!(
                 &restored.view, view,
                 "stored media resolution restores the complete immutable semantic view"

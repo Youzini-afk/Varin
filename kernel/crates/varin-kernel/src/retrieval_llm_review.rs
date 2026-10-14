@@ -33,7 +33,8 @@ impl HttpTransport for Stream {
             request.headers["authorization"],
             "Bearer controlled-explore-key"
         );
-        assert_eq!(request.body["model"], "explore-model");
+        let body = request.body.to_value();
+        assert_eq!(body["model"], "explore-model");
         assert!(!request.body.to_string().contains("FORBIDDEN_SOURCE"));
         assert!(!request.body.to_string().contains("private/secret.ts"));
         assert!(request
@@ -42,7 +43,7 @@ impl HttpTransport for Stream {
             .is_none_or(|v| v.as_array().is_some_and(Vec::is_empty)));
         let ordinal = {
             let mut requests = self.requests.lock().unwrap();
-            requests.push(request.body.clone());
+            requests.push(body.clone());
             requests.len() as u64
         };
         if self.mode == "llm-stop" {
@@ -73,7 +74,7 @@ impl HttpTransport for Stream {
             });
         }
         let mut text = String::new();
-        if let Some(items) = request.body["input"].as_array() {
+        if let Some(items) = body["input"].as_array() {
             for item in items {
                 if let Some(content) = item["content"].as_array() {
                     for part in content {

@@ -216,7 +216,7 @@ impl varin_runtime::execution::ContextPreparation for BindingPreparation {
         &self,
         epoch: u64,
         view: &varin_runtime::execution::RequestView,
-        serialized: &serde_json::Value,
+        serialized: &varin_runtime::execution::RequestBody,
         budget_protocol: Option<varin_runtime::context_capacity::RequestBudgetProtocol>,
         preview: &dyn Fn(varin_runtime::execution::ContextProjection) -> Result<varin_runtime::context_capacity::InputEstimate, varin_runtime::execution::ExecutionError>,
         cancel: &varin_runtime::execution::CancellationToken,

@@ -351,8 +351,8 @@ mod engines {
 
     struct Provider(AtomicUsize);
     impl ModelProvider for Provider {
-        fn serialize(&self, v: &RequestView) -> Result<Value, ExecutionError> {
-            Ok(serde_json::to_value(v).unwrap())
+        fn serialize(&self, v: &RequestView, _reuse: Option<&mut varin_runtime::execution::RequestCompileReuse>) -> Result<varin_runtime::execution::RequestBody, ExecutionError> {
+            Ok(serde_json::to_value(v).unwrap().into())
         }
         fn generate(
             &self,

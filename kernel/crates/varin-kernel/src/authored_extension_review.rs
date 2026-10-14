@@ -39,8 +39,8 @@ struct Model {
     commands: mpsc::Sender<Value>,
 }
 impl ModelProvider for Model {
-    fn serialize(&self, view: &RequestView) -> Result<Value, ExecutionError> {
-        Ok(serde_json::to_value(view).unwrap())
+    fn serialize(&self, view: &RequestView, _reuse: Option<&mut varin_runtime::execution::RequestCompileReuse>) -> Result<varin_runtime::execution::RequestBody, ExecutionError> {
+        Ok(serde_json::to_value(view).unwrap().into())
     }
     fn generate(
         &self,

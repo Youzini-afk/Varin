@@ -540,7 +540,7 @@ mod tests {
             &decoded,
         )
         .unwrap();
-        let serialized = bound.provider.serialize(&view).unwrap();
+        let serialized = bound.provider.serialize(&view, None).unwrap();
         RequestSnapshot { view, serialized }
     }
     #[test]
@@ -549,20 +549,20 @@ mod tests {
             json!({"systemPrompt":"This request only","messages":[{"role":"user","content":[{"type":"text","text":"Question"},{"type":"image","data":"aW1hZ2U=","mimeType":"image/png"}]},{"role":"assistant","content":{"type":"text","text":"Prior answer"}}],"maxTokens":24,"temperature":0.3}),
             crate::providers::responses::FAMILY,
         );
-        assert_eq!(snapshot.serialized["max_output_tokens"], 24);
-        assert_eq!(snapshot.serialized["temperature"], 0.3);
-        assert_eq!(snapshot.serialized["input"][0]["role"], "system");
+        assert_eq!(snapshot.serialized.to_value()["max_output_tokens"], 24);
+        assert_eq!(snapshot.serialized.to_value()["temperature"], 0.3);
+        assert_eq!(snapshot.serialized.to_value()["input"][0]["role"], "system");
         assert_eq!(
-            snapshot.serialized["input"][0]["content"],
+            snapshot.serialized.to_value()["input"][0]["content"],
             "This request only"
         );
-        assert_eq!(snapshot.serialized["input"][1]["role"], "user");
-        assert_eq!(snapshot.serialized["input"][2]["role"], "assistant");
+        assert_eq!(snapshot.serialized.to_value()["input"][1]["role"], "user");
+        assert_eq!(snapshot.serialized.to_value()["input"][2]["role"], "assistant");
         assert_eq!(
-            snapshot.serialized["input"][2]["content"][0]["text"],
+            snapshot.serialized.to_value()["input"][2]["content"][0]["text"],
             "Prior answer"
         );
-        assert_eq!(snapshot.serialized["tools"], json!([]));
+        assert_eq!(snapshot.serialized.to_value()["tools"], json!([]));
         assert!(snapshot.view.binding.history_range.branch_id.is_empty());
         assert!(snapshot.view.binding.memory_checkpoint.is_none());
         assert!(
@@ -624,8 +624,8 @@ mod tests {
     fn stop_sequences_use_actual_adapter_fields_and_capacity_is_never_expanded() {
         let request = json!({"messages":[{"role":"user","content":{"type":"text","text":"test"}}],"maxTokens":1024,"stopSequences":["END"]});
         let snapshot = snapshot(request, crate::providers::chat::FAMILY);
-        assert_eq!(snapshot.serialized["max_completion_tokens"], 512);
-        assert_eq!(snapshot.serialized["stop"], json!(["END"]));
+        assert_eq!(snapshot.serialized.to_value()["max_completion_tokens"], 512);
+        assert_eq!(snapshot.serialized.to_value()["stop"], json!(["END"]));
     }
     struct Peer {
         tools: bool,
@@ -633,8 +633,8 @@ mod tests {
         cancel_before_output: bool,
     }
     impl ModelProvider for Peer {
-        fn serialize(&self, _: &RequestView) -> Result<Value, ExecutionError> {
-            Ok(json!({}))
+        fn serialize(&self, _: &RequestView, _reuse: Option<&mut crate::execution::RequestCompileReuse>) -> Result<crate::execution::RequestBody, ExecutionError> {
+            Ok(json!({}).into())
         }
         fn generate(
             &self,
@@ -822,7 +822,7 @@ mod tests {
             )
             .unwrap();
             assert!(
-                bound.provider.serialize(&view).is_ok(),
+                bound.provider.serialize(&view, None).is_ok(),
                 "the selected configuration is initially valid"
             );
             let effective = configure(original.clone(), &request).unwrap();
@@ -842,7 +842,7 @@ mod tests {
             )
             .unwrap();
             assert_eq!(
-                bound.provider.serialize(&view).unwrap_err().code,
+                bound.provider.serialize(&view, None).unwrap_err().code,
                 "model-thinking-output-capacity-insufficient"
             );
         }

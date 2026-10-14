@@ -137,8 +137,8 @@ fn model_start(
     start
 }
 impl ModelProvider for Model {
-    fn serialize(&self, view: &RequestView) -> Result<Value, ExecutionError> {
-        self.serializer.serialize(view)
+    fn serialize(&self, view: &RequestView, reuse: Option<&mut varin_runtime::execution::RequestCompileReuse>) -> Result<varin_runtime::execution::RequestBody, ExecutionError> {
+        self.serializer.serialize(view, reuse)
     }
     fn generate(
         &self,
@@ -196,7 +196,8 @@ fn assert_context(request: &RequestSnapshot, data: &str) {
     let serialized = request.serialized.to_string();
     assert!(serialized.contains("ORIGINAL USER PROFILE"));
     assert!(!serialized.contains("UNSELECTED C"));
-    let input = request.serialized["input"].as_array().unwrap();
+    let body = request.serialized.to_value();
+    let input = body["input"].as_array().unwrap();
     let a = input
         .iter()
         .find(|item| item.to_string().contains("A INSTRUCTION"))

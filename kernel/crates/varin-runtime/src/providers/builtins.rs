@@ -352,16 +352,35 @@ impl ModelProvider for ConfiguredProvider {
         self.inner.request_budget_protocol()
     }
 
-    fn serialize(&self, view: &RequestView) -> Result<Value, ExecutionError> {
-        let mut value = self.inner.serialize(view)?;
-        merge(&mut value, &self.fields);
+    fn serialize(
+        &self,
+        view: &RequestView,
+        reuse: Option<&mut RequestCompileReuse>,
+    ) -> Result<RequestBody, ExecutionError> {
+        let mut value = self.inner.serialize(view, reuse)?;
+        if let Some(fields) = self.fields.as_object() {
+            for (key, field) in fields {
+                let mut merged = value.get(key).unwrap_or(Value::Null);
+                if field.is_object() && merged.is_object() {
+                    merge(&mut merged, field);
+                } else {
+                    merged = field.clone();
+                }
+                value.insert(key, merged);
+            }
+        }
         if view.binding.provider_family == bedrock::FAMILY {
             // Bedrock applies the same resolved Anthropic manual-thinking fields after
             // Converse serialization. Check their final cap with the original shared rule.
             anthropic::validate_thinking_capacity(
                 view,
-                value.get("additionalModelRequestFields").and_then(|fields| fields.get("thinking")),
-                value["inferenceConfig"]["maxTokens"].as_u64(),
+                value
+                    .get("additionalModelRequestFields")
+                    .as_ref()
+                    .and_then(|fields| fields.get("thinking")),
+                value
+                    .get("inferenceConfig")
+                    .and_then(|fields| fields["maxTokens"].as_u64()),
             )?;
         }
         Ok(value)

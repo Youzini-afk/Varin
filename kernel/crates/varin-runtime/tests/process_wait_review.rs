@@ -76,7 +76,7 @@ impl Fixture {
                     binding,
                     history: vec![],
                 },
-                serialized: json!({}),
+                serialized: json!({}).into(),
             }.into(),
         });
         self.record(ExecutionRecord::ModelDispatched {
@@ -198,7 +198,7 @@ impl Fixture {
                     binding,
                     history: vec![],
                 },
-                serialized: json!({}),
+                serialized: json!({}).into(),
             }.into(),
         });
         self.record(ExecutionRecord::ModelDispatched {

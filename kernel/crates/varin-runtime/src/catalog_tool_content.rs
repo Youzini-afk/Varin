@@ -144,7 +144,7 @@ impl RequestBudgetRead {
     pub fn estimate(
         self,
         view: &crate::execution::RequestView,
-        serialized: &Value,
+        serialized: &crate::execution::RequestBody,
         protocol: crate::context_capacity::RequestBudgetProtocol,
         cancel: &crate::execution::CancellationToken,
     ) -> Result<crate::context_capacity::InputEstimate> {

@@ -61,9 +61,13 @@ impl ModelProvider for AzureResponsesProvider {
         self.inner.request_budget_protocol()
     }
 
-    fn serialize(&self, view: &RequestView) -> Result<Value, ExecutionError> {
-        let mut value = self.inner.serialize(view)?;
-        value["model"] = Value::String(self.deployment.clone());
+    fn serialize(
+        &self,
+        view: &RequestView,
+        reuse: Option<&mut RequestCompileReuse>,
+    ) -> Result<RequestBody, ExecutionError> {
+        let mut value = self.inner.serialize(view, reuse)?;
+        value.insert("model", Value::String(self.deployment.clone()));
         Ok(value)
     }
     fn generate(

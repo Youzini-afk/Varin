@@ -103,7 +103,7 @@ impl ModelProvider for GoogleProvider {
         })
     }
 
-    fn serialize(&self, view: &RequestView) -> Result<Value, ExecutionError> {
+    fn serialize(&self, view: &RequestView, _reuse: Option<&mut RequestCompileReuse>) -> Result<RequestBody, ExecutionError> {
         validate_view(view, self.family)?;
         validate_images(view, &self.connection)?;
         let mut contents = Vec::new();
@@ -249,7 +249,7 @@ impl ModelProvider for GoogleProvider {
         if let Some(thinking) = &self.thinking_config {
             body["generationConfig"]["thinkingConfig"] = thinking.clone();
         }
-        Ok(body)
+        Ok(body.into())
     }
     fn generate(
         &self,
