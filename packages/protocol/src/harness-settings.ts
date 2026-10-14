@@ -17,6 +17,7 @@ import {
 import { mergePolicies, type PermissionMode, type PermissionRule } from "./permission-gate.js";
 import { type HarnessCustomAgent } from "./harness-agents.js";
 import { normalizeHarnessAgentConfiguration, type HarnessModelBinding } from "./harness-model-slots.js";
+import { parseHarnessImageSettings, type HarnessImageSettings } from './harness-images.js';
 
 /** A provider + model pair, as stored in a model slot. */
 export interface ModelSelection {
@@ -252,6 +253,7 @@ export type HarnessSettingsInput = Omit<Partial<HarnessSettings>, "context" | "n
 };
 
 export interface HarnessSettings {
+  images?: HarnessImageSettings;
   tools: Partial<Record<string, boolean>>;
   shell: "auto" | "git-bash" | "powershell" | "wsl";
   output: { visibleBytes: number };
@@ -403,6 +405,7 @@ export function mergeHarnessSettings(
     nextStep: userNextStep,
     codeRetrieval: userCodeRetrieval,
     computer: userComputer,
+    images: userImages,
     ...userRest
   } = user;
   const {
@@ -415,6 +418,7 @@ export function mergeHarnessSettings(
     nextStep: _workspaceNextStep,
     codeRetrieval: _workspaceCodeRetrieval,
     computer: _workspaceComputer,
+    images: _workspaceImages,
     ...workspaceRest
   } = workspace;
   const askBeforeKeys = new Set([
@@ -462,6 +466,7 @@ export function mergeHarnessSettings(
     // auxiliary requests to another provider.
     models: agentConfiguration.models,
     agents: agentConfiguration.agents,
+    images: (() => { try { return parseHarnessImageSettings(userImages); } catch { return {}; } })(),
     // An optional, externally edited judgment choice must not prevent chat
     // creation. Its direct consumer reports the invalid choice and keeps source
     // ranking; settings.update validates new writes separately.

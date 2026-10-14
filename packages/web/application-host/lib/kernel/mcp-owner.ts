@@ -12,7 +12,7 @@ import type {
   McpAuthorityTool,
   McpAuthorityService,
   McpServiceRequest,
-} from '@varin/pi-host/mcp-authority';
+} from '../mcp/authority.js';
 import type { KernelClient } from './kernel-client.js';
 import { permissionService } from './permission-service.js';
 import type {
@@ -22,9 +22,9 @@ import type {
   ToolExecutionReceipt,
 } from './tool-bridge.js';
 import { MCP_CAPABILITIES, type McpBinding, type McpBuiltinOperation } from './protocol.generated.js';
-import { compileToolJsonSchema } from '@varin/pi-host/tool-schema';
+import { compileToolJsonSchema } from '../models/schema.js';
 import { projectMcpOutput } from './mcp-output.js';
-import { McpAuthorityError, requiresMcpTask } from '@varin/pi-host/mcp-authority';
+import { McpAuthorityError, requiresMcpTask } from '../mcp/authority.js';
 import type { McpTaskRuntime } from './mcp-task-runtime.js';
 import type { McpResourceRuntime } from './mcp-resource-runtime.js';
 import { HostToolAdmissionError } from './tool-admission.js';
@@ -330,6 +330,8 @@ export function createMcpLease(options: McpOwnerOptions): McpToolLease {
             ? await lease.discover(selected.server, signal)
             : lease.binding.tools;
           const services = selected.server ? await lease.discoverServices(selected.server, signal) : [];
+          const cached = selected.server ? [] : await lease.cachedTools(signal);
+          const liveNames = new Set(tools.map(tool => `${tool.server}\u0000${tool.tool}`));
           const query = selected.query.toLocaleLowerCase();
           const readiness = lease.inspect();
           return receipt(
@@ -347,7 +349,7 @@ export function createMcpLease(options: McpOwnerOptions): McpToolLease {
                         options.unavailableWorkspaceScope,
                     }
                   : {}),
-                tools: tools
+                tools: [...tools
                   .filter((tool) =>
                     `${tool.name} ${tool.description}`
                       .toLocaleLowerCase()
@@ -361,7 +363,8 @@ export function createMcpLease(options: McpOwnerOptions): McpToolLease {
                     inputSchema: tool.inputSchema,
                     schemaVersion: tool.schemaVersion,
                     taskSupport: tool.taskSupport, taskCapable: tool.taskCapable,
-                  })),
+                  })), ...cached.filter(tool => !liveNames.has(`${tool.server}\u0000${tool.tool}`)
+                    && `${tool.name} ${tool.description}`.toLocaleLowerCase().includes(query))],
               }, parts: [] },
             },
             true,

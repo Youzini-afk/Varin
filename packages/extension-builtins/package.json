@@ -31,6 +31,7 @@
     "test:dist": "bun run test:packaging"
   },
   "dependencies": {
+    "@varin/protocol": "workspace:*",
     "@varin/extension-contract": "workspace:*"
   },
   "devDependencies": {

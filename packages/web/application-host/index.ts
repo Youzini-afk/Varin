@@ -12,8 +12,11 @@ import { createExtensionPackageOwner, VARIN_EXTENSION_PACKAGES_CAPABILITY } from
 import { createRetrievalModelStage } from './lib/kernel/retrieval-model.js';
 import { mergeHarnessWebDomainPolicy } from '@varin/protocol';
 import { createResearchDecisionRuntime, RESEARCH_DECISION_CAPABILITY } from './lib/kernel/research-decision.js';
+import { createImageRuntime, IMAGES_CAPABILITY } from './lib/kernel/image-runtime.js';
+import { createMediaResourceStore } from './lib/harness/media-resources.js';
 import { createResearchDiscoveryRuntime, RESEARCH_DISCOVERY_CAPABILITY } from './lib/kernel/research-discovery.js';
-import { readHostSettingsSnapshot } from '@varin/pi-host/settings-authority';
+import { ModelsService } from './lib/models/service.js';
+import { registerModelRoutes } from './lib/models/routes.js';
 import { createWebRuntime, WEB_CAPABILITY } from './lib/kernel/web-runtime.js';
 import { createMaterialReceiptReconciler } from './lib/kernel/material-receipts.js';
 import { createDocumentSources } from './lib/kernel/document-sources.js';
@@ -22,7 +25,6 @@ import { createScriptRuntime, SCRIPT_CAPABILITY } from './lib/kernel/script-runt
 import { createNestedToolOwner, VARIN_RUNTIME_TOOLS_CAPABILITY } from './lib/kernel/nested-tool-owner.js';
 import { createRuntimeContractOwner } from './lib/kernel/runtime-contract-owner.js';
 import { VARIN_RUNTIME_CONTRACTS_CAPABILITY } from '@varin/extension-contract';
-import { readHostHarnessSettings } from '@varin/pi-host/settings-authority';
 import { DocumentsFileObservationOwner } from './lib/kernel/file-observation-owner.js';
 import { FileObservationService } from './lib/kernel/file-observation-service.js';
 import { createScheduleToolOwner, SCHEDULE_CAPABILITY } from './lib/kernel/schedule-tool-owner.js';
@@ -64,7 +66,10 @@ import { createContextComposition } from './lib/kernel/context-composition.js';
 import { createPolicyModelPreparer } from './lib/kernel/policy-models.js';
 import { createAgentPolicy } from './lib/kernel/agent-policy.js';
 import { RunObservers } from './lib/kernel/run-observers.js';
-import { McpAuthority, McpCompositions, composeMcpAuthorityLeases, type McpCompositionScope, mcpHostAgentDir, mcpHostProjectTrusted, readMcpHostPermissionPolicy } from '@varin/pi-host/mcp-authority';
+import { McpAuthority as PiMcpAuthority, mcpHostAgentDir, mcpHostProjectTrusted } from '@varin/pi-host/mcp-authority';
+import { McpAuthority, McpCompositions, composeMcpAuthorityLeases, StdioTransport, type McpCompositionScope } from './lib/mcp/authority.js';
+import { createMcpProcessTransport } from './lib/kernel/mcp-process-transport.js';
+import { createMcpSettings } from './lib/mcp/settings.js';
 import { createMcpInteractionRuntime } from './lib/kernel/mcp-interaction-runtime.js';
 import { createMcpResourceRuntime } from './lib/kernel/mcp-resource-runtime.js';
 import { createMcpResourceRecovery } from './lib/kernel/mcp-resource-recovery.js';
@@ -2046,6 +2051,8 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   const collaborationOwner: { current?: ThreadCollaboration } = {};
   const computerRuntimeOwner: { current?: ReturnType<typeof createComputerRuntime> } = {};
   const researchDecisionOwner: { current?: ReturnType<typeof createResearchDecisionRuntime> } = {};
+  const imageRuntimeOwner: { current?: ReturnType<typeof createImageRuntime> } = {};
+  const extensionConfigurationListeners = new Set<() => void>();
   const researchDiscoveryOwner: { current?: ReturnType<typeof createResearchDiscoveryRuntime> } = {};
   const webRuntimeOwner: { current?: ReturnType<typeof createWebRuntime> } = {};
   const resolveComputerWork = async (work: import('@varin/protocol').ComputerWorkRef) => {
@@ -2388,6 +2395,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   const sourceViews = createSourceViewStore(createKernelWorkspaceWorkingStateAccess(kernelStorageAdapter));
   const retrievalArtifacts = createRetrievalArtifactAccess(harnessWorkingStates);
   const materialStorage = createMaterialStorageAccess({ kernel: kernelClient, storage: kernelStorageAdapter, legacy: harnessWorkingStates });
+  const mediaResources = createMediaResourceStore(materialStorage);
   const webMaterials = createWebMaterialStore(materialStorage);
   webMaterialAccess.put = webMaterials.put;
   webMaterialAccess.read = webMaterials.read;
@@ -3096,18 +3104,80 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   }, { appliesToWorkFocus: ['research'] });
   const hostCredentialAuthority = options.piRuntimeBroker?.credentialAuthority ?? sharedHostCredentialAuthority(process.env.VARIN_AGENT_DIR);
   const mcpAgentDir = mcpHostAgentDir(process.env.VARIN_AGENT_DIR);
+  const modelsService = new ModelsService(VARIN_DATA_DIR, { projectTrusted: cwd => mcpHostProjectTrusted(mcpAgentDir, cwd), fetch: egressRuntime.fetch as typeof globalThis.fetch });
+  const agentMcpDir = VARIN_DATA_DIR;
+  const agentMcpPolicy = async (cwd: string, trusted: boolean) => {
+    const harness = await modelsService.settings.harness(trusted ? cwd : undefined);
+    return { mode: harness.permissions?.mode ?? 'normal', rules: harness.permissions?.rules ?? [] };
+  };
+  const globalMcpProcesses = createKernelProcessService({ client: kernelClient, resolveIdentity: async () => {
+    const canonicalRoot = await canonicalizePathIdentity(agentMcpDir);
+    const workspaceId = `mcp-host:${hostId}`;
+    return { workspaceId, executionWorkspaceId: workspaceId, canonicalRoot };
+  } });
+  registerModelRoutes(app, modelsService, uiAuthController?.requireAuth ?? ((_request, _response, next) => next()), egressRuntime.fetch as typeof globalThis.fetch);
+  const unsubscribeModelSettings = modelsService.settings.subscribe((scope, _cwd, revision) => {
+    for (const listener of extensionConfigurationListeners) listener();
+    for (const client of uiVarinEventClients) {
+      try { writeSseEvent(client, { type: 'varin:settings-changed', properties: { owner: 'agent-settings', scope, revision, ids: [] } }); }
+      catch { uiVarinEventClients.delete(client); }
+    }
+  });
+  let modelCatalogRevision = 0;
+  const unsubscribeModels = modelsService.subscribe(kind => {
+    for (const listener of extensionConfigurationListeners) listener();
+    const revision = String(++modelCatalogRevision), ids = [kind === 'authorization' ? 'model-authorization' : kind === 'credentials' ? 'model-credentials' : 'model-channels'];
+    for (const client of uiVarinEventClients) {
+      try { writeSseEvent(client, { type: 'varin:settings-changed', properties: { owner: 'agent-settings', scope: 'host', revision, ids } }); }
+      catch { uiVarinEventClients.delete(client); }
+    }
+  });
   const mcpAuthority = new McpAuthority({
+    reportDirectoryError: () => console.error('[MCP] Capability directory could not be persisted'),
+    providerCredentialFiles: (_scope, providers) => providers.length ? [modelsService.credentialPath] : [],
+    fetch: egressRuntime.fetch as typeof globalThis.fetch,
     adaptTransport: (scope, transport) => scope.resourceOwner.kind === 'managed_host'
-      ? targetMcpService.adaptTransport(scope, transport) : transport,
+      ? targetMcpService.adaptTransport(scope, transport) : transport instanceof StdioTransport
+        ? createMcpProcessTransport(transport.options, (options, signal) =>
+          (scope.executionScope === 'global' ? globalMcpProcesses : kernelProcesses).spawn(options.command, options.args ?? [], {
+            cwd: options.cwd ?? scope.executionCwd, signal, stdio: 'pipe',
+            env: options.inheritEnv === false ? { ...options.env } : { ...process.env, ...options.env },
+          }), { child: null }) : transport,
     interactions: (input, scope) => scope.resourceOwner.kind === 'managed_host'
       ? targetMcpService.receiveInteraction(scope, input) : mcpInteractionRuntime.receiver(input),
     sampling: (input, scope) => scope.resourceOwner.kind === 'managed_host'
       ? targetMcpService.receiveSampling(scope, input) : mcpInteractionRuntime.samplingReceiver(input),
     interactionErrors: (input, scope) => scope.resourceOwner.kind === 'managed_host'
       ? targetMcpService.receiveInteractionError(scope, input) : mcpInteractionRuntime.errorReceiver(input),
+    providerToken: async (_scope, provider) => (await modelsService.getAuth(provider))?.auth.apiKey,
+    credentialScope: async (_scope, provider) => modelsService.currentScope(provider),
+  });
+  const piMcpAuthority = new PiMcpAuthority({
+    interactions: input => mcpInteractionRuntime.receiver(input),
+    sampling: input => mcpInteractionRuntime.samplingReceiver(input),
+    interactionErrors: input => mcpInteractionRuntime.errorReceiver(input),
     providerToken: async (_scope, provider) => (await hostCredentialAuthority.getAuth(provider))?.auth.apiKey,
     credentialScope: async (_scope, provider) => hostCredentialAuthority.currentScope(provider),
   });
+  let mcpSettingsRevision = 0;
+  const mcpSettings = createMcpSettings({ authority: mcpAuthority,
+    resolveScope: async (cwd, signal) => {
+      const workspace = cwd ? await documentsAuthority.resolveWorkspace({ path: cwd }) : undefined;
+      signal.throwIfAborted();
+      const root = workspace ? (await documentsAuthority.admitWorkspaceRegistration(workspace.workspaceId, signal)).canonicalPath : agentMcpDir;
+      return { resourceOwner: { kind: 'local' }, agentDir: agentMcpDir, configCwd: root, executionCwd: root,
+        environmentId: workspace ? `${hostId}:${workspace.workspaceId}` : `${hostId}:global`,
+        executionScope: workspace ? 'workspace' : 'global', projectTrusted: !!workspace && mcpHostProjectTrusted(mcpAgentDir, root), sessionId: 'mcp-settings' };
+    },
+    changed: () => {
+      const revision = String(++mcpSettingsRevision);
+      for (const client of uiVarinEventClients) {
+        try { writeSseEvent(client, { type: 'varin:settings-changed', properties: { owner: 'agent-settings', scope: 'host', revision, ids: ['mcp'] } }); }
+        catch { uiVarinEventClients.delete(client); }
+      }
+    },
+  });
+  mcpSettings.register(app, uiAuthController?.requireAuth ?? ((_request, _response, next) => next()));
   const mcpCompositions = new McpCompositions(mcpAuthority, (code, reference) => { console.error('[MCP]', code, reference); });
   const agentMcpScopes = new Map<string, { identity: string; ready: Promise<McpCompositionScope> }>();
   const releaseAgentMcpScope = (runId: string) => {
@@ -3118,9 +3188,9 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   kernelClient.onToolReleased(releaseAgentMcpScope);
   kernelClient.subscribeExit(() => { for (const runId of agentMcpScopes.keys()) releaseAgentMcpScope(runId); });
   const prepareAgentPolicy = createAgentPolicy(extensionRuntime);
-  const modelAuthority = createModelAuthority(hostCredentialAuthority);
+  const modelAuthority = createModelAuthority(modelsService);
   const botAgentModel = async (bot: import('@varin/application-client').BotSummary) => {
-    const global = (await readHostSettingsSnapshot(mcpAgentDir)).global;
+    const global = (await modelsService.settings.snapshot()).global;
     const selection = bot.model ?? (typeof global.defaultProvider === 'string' && typeof global.defaultModel === 'string'
       ? { providerId: global.defaultProvider, modelId: global.defaultModel } : null);
     if (selection && !(await modelAuthority.listModels()).some(model => model.providerId === selection.providerId && model.modelId === selection.modelId)) throw new Error('Bot model is no longer registered. Select an available Agent model in Bot settings.');
@@ -3129,10 +3199,10 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   const liveSources = createLiveSourceOwner({ documents: documentsAuthority, kernel: kernelClient });
   const prepareChildMcp = createChildMcpPreparer({
     managed: createManagedChildMcpPreparer({ runtime: () => agentRuntime, createLease: input => createManagedMcpLease({ ...input, ...(managedMcpInteractionsOwner.current ? { interactions: managedMcpInteractionsOwner.current } : {}) }) }),
-    authority: mcpAuthority, tasks:()=>mcpTaskRuntime, resources:()=>mcpResourceRuntime, kernel: kernelClient, agentDir: mcpAgentDir, hostId,
+    authority: mcpAuthority, tasks:()=>mcpTaskRuntime, resources:()=>mcpResourceRuntime, kernel: kernelClient, agentDir: agentMcpDir, hostId,
     admitWorkspaceRegistration: (id, signal) => documentsAuthority.admitWorkspaceRegistration(id, signal),
     projectTrusted: cwd => mcpHostProjectTrusted(mcpAgentDir, cwd),
-    currentPolicy: async (cwd, trusted) => readMcpHostPermissionPolicy(mcpAgentDir, cwd, trusted),
+    currentPolicy: agentMcpPolicy,
   });
   managedMcpOwner.current = createManagedMcpPreparer({ runtime: () => agentRuntime, createLease: input => createManagedMcpLease({ ...input, ...(managedMcpInteractionsOwner.current ? { interactions: managedMcpInteractionsOwner.current } : {}) }),
     changed: runId => { void agentRuntime.refreshMcp(runId).catch(() => console.error('[MCP] Target contribution preparation requires attention')); },
@@ -3144,10 +3214,10 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     // in the neutral Host scope; they must not borrow the mutable project directory.
     const workspace = input.source?.resourceOwner.kind === 'local' && input.executionCwd
       ? await documentsAuthority.admitWorkspaceRegistration(input.source.workspaceId, signal) : undefined;
-    const configCwd = workspace?.canonicalPath ?? mcpAgentDir;
+    const configCwd = workspace?.canonicalPath ?? agentMcpDir;
     const scope = {
       resourceOwner: { kind: 'local' as const },
-      agentDir: mcpAgentDir, configCwd, executionCwd: workspace ? input.executionCwd! : mcpAgentDir,
+      agentDir: agentMcpDir, configCwd, executionCwd: workspace ? input.executionCwd! : agentMcpDir,
       environmentId: workspace ? `${hostId}:${input.source!.executionWorkspaceId}` : `${hostId}:global`,
       executionScope: workspace ? 'workspace' as const : 'global' as const,
       projectTrusted: Boolean(workspace) && mcpHostProjectTrusted(mcpAgentDir, configCwd),
@@ -3175,7 +3245,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     const localSelection = input.requiredBinding && managed
       ? selectMcpServers(input.requiredBinding, owner => owner.kind === 'local') : input.requiredBinding;
     const localLease = localSelection ? await owner.restore(localSelection, signal) : owner.snapshot();
-    let lease: import('@varin/pi-host/mcp-authority').McpAuthorityLease = localLease;
+    let lease: import('./lib/mcp/authority.js').McpAuthorityLease = localLease;
     let targetReady = false;
     let targetLease: import('./lib/kernel/managed-mcp-lease.js').ManagedMcpLease | undefined;
     if (managed) {
@@ -3208,7 +3278,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       currentPolicy: async () => {
         const trusted = Boolean(workspace) && mcpHostProjectTrusted(mcpAgentDir, configCwd);
         if (scope.projectTrusted && !trusted) throw new Error('MCP project trust was revoked');
-        return readMcpHostPermissionPolicy(mcpAgentDir, configCwd, trusted);
+        return agentMcpPolicy(configCwd, trusted);
       },
     }); } catch (error) { lease.release(); throw error; }
   }, {
@@ -3219,21 +3289,24 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       ...(input.projectId ? { projectId: input.projectId } : {}) }, changed, signal),
   }, createPolicyModelPreparer({ models: modelAuthority,
     // This is a user-scoped role. Native Threads do not impersonate Pi sessions.
-    settings: async () => ({ global: await hostCredentialAuthority.readGlobalInferenceSettings() }),
-  }), liveSources.validate, createExtensionTools({runtime:extensionRuntime,kernel:kernelClient,prepareConfiguration: async (run, required) => {
+    settings: async () => ({ global: await modelsService.readGlobalInferenceSettings() }),
+  }), liveSources.validate, createExtensionTools({runtime:extensionRuntime,kernel:kernelClient,
+    subscribeConfiguration: listener => { extensionConfigurationListeners.add(listener); return () => extensionConfigurationListeners.delete(listener); },
+    prepareConfiguration: async (run, required) => {
     if (!scriptRuntimeOwner.current) throw new Error('Script tool preparation is unavailable');
     if (!computerRuntimeOwner.current) throw new ComputerError('computer-owner-unavailable', 'Computer tool preparation is unavailable');
     if (!webRuntimeOwner.current) throw new Error('Web tool preparation is unavailable');
     if (!researchDiscoveryOwner.current) throw new Error('Scholarly search tool preparation is unavailable');
     if (!researchDecisionOwner.current) throw new Error('Research decision tool preparation is unavailable');
-    return researchDecisionOwner.current.prepareConfiguration(run, required, await researchDiscoveryOwner.current.prepareConfiguration(run, required,
+    if (!imageRuntimeOwner.current) throw new Error('Image tool preparation is unavailable');
+    return imageRuntimeOwner.current.prepareConfiguration(run, required, await researchDecisionOwner.current.prepareConfiguration(run, required, await researchDiscoveryOwner.current.prepareConfiguration(run, required,
       await webRuntimeOwner.current.prepareConfiguration(run, required,
-        await scriptRuntimeOwner.current.prepareConfiguration(await computerRuntimeOwner.current.prepareConfiguration(run, required), run.source))));
+        await scriptRuntimeOwner.current.prepareConfiguration(await computerRuntimeOwner.current.prepareConfiguration(run, required), run.source)))));
   },currentPolicy:async runId=>{
     const launch=await kernelClient.agentRuntimeRequest<import('./lib/kernel/protocol.generated.js').LaunchIntent|null,'runtime.launch.inspect'>('runtime.launch.inspect',{runId});
     const workspace=launch?.selection.source?.resource_owner.kind === 'local'?await documentsAuthority.admitWorkspaceRegistration(launch.selection.source.workspace_id):undefined;
     const cwd=workspace?.canonicalPath??mcpAgentDir;
-    return readMcpHostPermissionPolicy(mcpAgentDir,cwd,Boolean(workspace)&&mcpHostProjectTrusted(mcpAgentDir,cwd));
+    return agentMcpPolicy(cwd,Boolean(workspace)&&mcpHostProjectTrusted(mcpAgentDir,cwd));
   }}), documentsAuthority.admitWorkspaceRegistration);
   agentRuntime.bindManagedSources(managedRemoteTargets);
   managedRecoveryCoordinator = createManagedRecoveryCoordinator({ coordinatorHostId: agentRuntime.coordinatorHostId,
@@ -3246,20 +3319,21 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     remote: managedSourceConsumers.query,
     sources: createSourceQueryOwner({ kernel: kernelClient, documents: documentsAuthority,
       validateLiveSource: liveSources.validate, remote: managedSourceConsumers.query }) }));
+  const documentSources = createDocumentSources({ kernel: kernelClient, runtime: agentRuntime,
+    resolveLiveSource: liveSources.validate, experiments: experimentService });
   webRuntimeOwner.current = createWebRuntime({ runtime: agentRuntime, webFetch: webFetchService, documentReader, materials: webMaterials,
     collections: materialCollectionsService,
-    documentSources: createDocumentSources({ kernel: kernelClient, runtime: agentRuntime,
-      resolveLiveSource: liveSources.validate, experiments: experimentService }),
+    documentSources,
     fetch: egressRuntime.fetch as typeof globalThis.fetch, readAuth: readPiAuthFile,
     settings: async source => {
       const root = source?.resource_owner.kind === 'local' ? (await documentsAuthority.admitWorkspaceRegistration(source.workspace_id)).canonicalPath : undefined;
-      return readHostSettingsSnapshot(mcpAgentDir, root, root !== undefined && mcpHostProjectTrusted(mcpAgentDir, root));
+      return modelsService.settings.snapshot(root);
     },
   });
   researchDiscoveryOwner.current = createResearchDiscoveryRuntime({ service: researchSearchService,
     settings: async source => {
       const root = source?.resource_owner.kind === 'local' ? (await documentsAuthority.admitWorkspaceRegistration(source.workspace_id)).canonicalPath : undefined;
-      return readHostSettingsSnapshot(mcpAgentDir, root, root !== undefined && mcpHostProjectTrusted(mcpAgentDir, root));
+      return modelsService.settings.snapshot(root);
     },
   });
   const fileObservationOwner = new DocumentsFileObservationOwner(documentsAuthority, liveSources.validate,
@@ -3351,7 +3425,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       terminal: () => terminalRuntime, resolveLiveSource: liveSources.validate,
       onError: () => console.error('[Thread] Original process terminal requires attention'),
     }), createChildProfilePreparer({ models: modelAuthority,
-      settings: () => hostCredentialAuthority.readGlobalInferenceSettings(),
+      settings: () => modelsService.readGlobalInferenceSettings(),
       capabilities: signal => agentRuntime.childCapabilities(signal),
     }));
   const sourceDirectory = createThreadSourceDirectory({ documents: documentsAuthority, remote: managedSourceConsumers.threads });
@@ -3376,7 +3450,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     workspaceRoot: async workspaceId => (await documentsAuthority.admitWorkspaceRegistration(workspaceId)).canonicalPath,
     receipts: targetScheduleReceipts,
     onReceiptError: operationId => console.error('[Schedules] Original target receipt publication is pending:', operationId) });
-  const targetMcpService = createManagedMcpService({ kernel: kernelClient, authority: mcpAuthority, compositions: mcpCompositions, agentDir: mcpAgentDir, hostId,
+  const targetMcpService = createManagedMcpService({ kernel: kernelClient, authority: mcpAuthority, compositions: mcpCompositions, agentDir: agentMcpDir, hostId,
     admitSource: async (scope, signal) => {
       await kernelClient.sourceRequest('source.service.call', { principalId: scope.principal.principalId,
         coordinatorHostId: scope.coordinatorHostId, authorityId: scope.authorityId, resourceEpoch: scope.resourceEpoch,
@@ -3469,8 +3543,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   computerRuntimeOwner.current = createComputerRuntime({ kernel: kernelClient, runtime: agentRuntime, computers: computerService, enabled: async runId => {
     const launch = await kernelClient.agentRuntimeRequest<import('./lib/kernel/protocol.generated.js').LaunchIntent | null, 'runtime.launch.inspect'>('runtime.launch.inspect', { runId });
     const workspace = launch?.selection.source?.resource_owner.kind === 'local' ? await documentsAuthority.admitWorkspaceRegistration(launch.selection.source.workspace_id) : undefined;
-    const cwd = workspace?.canonicalPath ?? mcpAgentDir;
-    return readHostHarnessSettings(mcpAgentDir, cwd, Boolean(workspace) && mcpHostProjectTrusted(mcpAgentDir, cwd)).tools?.computer !== false;
+    return (await modelsService.settings.harness(workspace?.canonicalPath)).tools?.computer !== false;
   } });
   const mcpInteractionRuntime = createMcpInteractionRuntime({kernel:kernelClient,runtime:agentRuntime,onError:()=>console.error('[MCP] Original user interaction requires reconciliation')});
   agentRuntime.setMcpInteractionOwner(mcpInteractionRuntime);
@@ -3478,7 +3551,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     onError: () => console.error('[MCP] Original remote interaction delivery requires reconciliation') });
   managedMcpInteractionsOwner.current = managedMcpInteractions;
   agentRuntime.setManagedMcpInteractions(managedMcpInteractions);
-  const mcpTaskRecovery = createMcpTaskRecovery({kernel:kernelClient,authority:mcpAuthority,agentDir:mcpAgentDir,hostId,runtime:agentRuntime,interactions:managedMcpInteractions,
+  const mcpTaskRecovery = createMcpTaskRecovery({kernel:kernelClient,authority:mcpAuthority,agentDir:agentMcpDir,hostId,runtime:agentRuntime,interactions:managedMcpInteractions,
       admitWorkspaceRegistration:(id,signal)=>documentsAuthority.admitWorkspaceRegistration(id,signal),projectTrusted:cwd=>mcpHostProjectTrusted(mcpAgentDir,cwd),
       validateLiveSource:async(source,signal)=>{
         if(source.mode!=='live_root'||!source.live_root)throw new Error('MCP Task live source missing');
@@ -3490,9 +3563,9 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     onError:()=>console.error('[MCP] Original task reconciliation requires attention'),
   });
   mcpTaskRuntimeOwner.current = mcpTaskRuntime;
-  const mcpResourceRecovery=createMcpResourceRecovery({kernel:kernelClient,authority:mcpAuthority,agentDir:mcpAgentDir,hostId,runtime:agentRuntime,interactions:managedMcpInteractions,
+  const mcpResourceRecovery=createMcpResourceRecovery({kernel:kernelClient,authority:mcpAuthority,agentDir:agentMcpDir,hostId,runtime:agentRuntime,interactions:managedMcpInteractions,
       admitWorkspaceRegistration:(id,signal)=>documentsAuthority.admitWorkspaceRegistration(id,signal),projectTrusted:cwd=>mcpHostProjectTrusted(mcpAgentDir,cwd),
-      currentPolicy:async(cwd,trusted)=>readMcpHostPermissionPolicy(mcpAgentDir,cwd,trusted),
+      currentPolicy:agentMcpPolicy,
       validateLiveSource:async(source,signal)=>{if(source.mode!=='live_root'||!source.live_root)throw new Error('MCP resource original live source missing');
         await liveSources.validate({workspaceId:source.workspace_id,executionWorkspaceId:source.execution_workspace_id,liveRoot:source.live_root},signal);},
     });
@@ -3509,6 +3582,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   computerRuntimeOwner.current.start(error => console.error('[Computer] Native execution cleanup is unconfirmed:', error instanceof Error ? error.message : String(error)));
   registerThreadRoutes(app, threads, uiAuthController?.requireAuth ?? ((_request, _response, next) => next()), researchRuntime.user, computerRuntimeOwner.current.user, webRuntimeOwner.current.user);
   registerAgentProfileRoutes(app, createAgentProfilesAPI({ settings: hostCredentialAuthority.globalSettingsAuthority,
+    agentSettings: modelsService.settings,
     capabilities: signal => agentRuntime.childCapabilities(signal),
     onChanged: () => {
       for (const client of uiVarinEventClients) {
@@ -4021,13 +4095,13 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     backgroundIntervalMs: semanticIndexConfig.requestIntervalMs,
   });
   const semanticVectorCache = createVectorCache();
-  const semanticInference = createSemanticInference(hostCredentialAuthority, {
-    readGlobalSettings: () => hostCredentialAuthority.readGlobalInferenceSettings(),
+  const semanticInference = createSemanticInference(modelsService, {
+    readGlobalSettings: () => modelsService.readGlobalInferenceSettings(),
   }, { ledger: createSemanticInferenceLedger({ dataDir: VARIN_DATA_DIR, hostId }),
     requests: { kernel: kernelClient, runtime: agentRuntime, egress: egressRuntime,
       onError: () => console.error('[Inference] Original inference receipt requires attention') } });
   const memoryInference = createMemoryInference({ kernel: kernelClient, runtime: agentRuntime, models: modelAuthority,
-    authority: hostCredentialAuthority, decision: semanticInference, canExecuteScope: canExecuteBotScope,
+    authority: modelsService, decision: semanticInference, canExecuteScope: canExecuteBotScope,
     validateScope: async scopeId => {
       if (!isBotScopeId(scopeId)) throw new Error('Only a registered Bot owns memory inference');
       const bot = await botService.get(botIdFromScopeId(scopeId));
@@ -4037,8 +4111,18 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   researchDecisionOwner.current = createResearchDecisionRuntime({ inference: semanticInference, materials: webRuntimeOwner.current,
     settings: async source => {
       const root = source?.resource_owner.kind === 'local' ? (await documentsAuthority.admitWorkspaceRegistration(source.workspace_id)).canonicalPath : undefined;
-      return readHostSettingsSnapshot(mcpAgentDir, root, root !== undefined && mcpHostProjectTrusted(mcpAgentDir, root));
+      return modelsService.settings.snapshot(root);
     },
+  });
+  imageRuntimeOwner.current = createImageRuntime({ authority: modelsService, requests: semanticInference.requests!,
+    egress: egressRuntime, media: mediaResources, documents: documentSources, runtime: agentRuntime,
+    settings: async source => {
+      const root = source?.resource_owner.kind === 'local' ? (await documentsAuthority.admitWorkspaceRegistration(source.workspace_id)).canonicalPath : undefined;
+      return modelsService.settings.snapshot(root);
+    } });
+  app.get('/api/images/models', uiAuthController?.requireAuth ?? ((_request, _response, next) => next()), async (_request, response) => {
+    try { response.json({ models: await imageRuntimeOwner.current!.models() }); }
+    catch { response.status(503).json({ error: 'Image model catalog is unavailable' }); }
   });
   const semanticRuntime = createWorkspaceSemanticRuntime({
     runtimeInference: semanticInference,
@@ -4086,7 +4170,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   const retrievalSources = createRetrievalSourceOwner({ kernel: kernelClient, documents: documentsAuthority,
     validateLiveSource: liveSources.validate, remote: managedSourceConsumers.query });
   const retrievalModel = createRetrievalModelStage({ inference: semanticInference, models: modelAuthority,
-    readGlobalSettings: () => hostCredentialAuthority.readGlobalInferenceSettings(), kernel: kernelClient, sources: retrievalSources });
+    readGlobalSettings: () => modelsService.readGlobalInferenceSettings(), kernel: kernelClient, sources: retrievalSources });
   const retrievalComposition = createRetrievalComposition(extensionRuntime, {
     prepareModel: (scope, signal) => {
       if (!scope.query) throw new Error('Native retrieval model requires its original query');
@@ -4671,6 +4755,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   });
   const unregisterMaterialToolCapability = extensionRuntime.capabilities.register(MATERIAL_SNAPSHOT_CAPABILITY, webRuntimeOwner.current.snapshotCapability);
   const unregisterResearchDecisionCapability = extensionRuntime.capabilities.register(RESEARCH_DECISION_CAPABILITY, researchDecisionOwner.current.capability);
+  const unregisterImagesCapability = extensionRuntime.capabilities.register(IMAGES_CAPABILITY, imageRuntimeOwner.current.capability);
   const unregisterResearchDiscoveryCapability = extensionRuntime.capabilities.register(RESEARCH_DISCOVERY_CAPABILITY, researchDiscoveryOwner.current.capability);
   const unregisterWebCapability = extensionRuntime.capabilities.register(WEB_CAPABILITY, webRuntimeOwner.current.capability);
   const unregisterExtensionPackageCapability = extensionRuntime.capabilities.register(
@@ -4822,7 +4907,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     cancelExploreQuery: (actor, queryId) => harnessServiceHost.exploreQueryStore.cancel(actor, queryId),
   });
   registerHarnessServices(harnessRouter, harnessServiceHost);
-  const mcpHarness = createMcpHarnessServices(mcpAuthority, async ctx => {
+  const mcpHarness = createMcpHarnessServices(piMcpAuthority, async ctx => {
     // Read the existing session authority so one-session trust is not mistaken for denial.
     // Unlike settings.get (which reloads files), this scope cut is read-only and out-of-band.
     const settings = await piRuntimeBroker.requestForSession(ctx.sessionId, 'settings.context', {});
@@ -4910,6 +4995,9 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   // their owners and catalog observers have been assembled.
   memoryOrganizer.start();
   const brokerUnsubscribe = piRuntimeBroker.subscribe((event) => {
+    if (event.kind === 'host' && (event.envelope.event === 'config.changed' || event.envelope.event === 'provider.config.changed')) {
+      for (const changed of extensionConfigurationListeners) changed();
+    }
     semanticRuntime.processEvent(event);
     piSessionAutomation.processBrokerEvent(event);
     piSessionTitles.processBrokerEvent(event);
@@ -5266,6 +5354,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       unregisterMaterialToolCapability();
       unregisterWebCapability();
       unregisterResearchDecisionCapability();
+      unregisterImagesCapability();
       unregisterResearchDiscoveryCapability();
       unregisterChildIntegrationCapability();
       unregisterScheduleCapability();
@@ -5306,14 +5395,19 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
         connections.shutdownAll(),
       ]);
       const processShutdownErrors = [...inferenceShutdownErrors, ...processShutdown.flatMap((result) => result.status === 'rejected' ? [result.reason] : [])];
+      mcpHarness.dispose();
+      mcpSettings.close();
+      mcpCompositions.close();
+      await Promise.all([mcpAuthority.close(), piMcpAuthority.close()]);
+      await globalMcpProcesses.dispose().catch((error: unknown) => { processShutdownErrors.push(error); });
       await languageToolProcesses.dispose().catch((error: unknown) => { processShutdownErrors.push(error); });
       await documentProcesses.dispose().catch((error: unknown) => { processShutdownErrors.push(error); });
       await kernelProcesses.dispose().catch((error: unknown) => { processShutdownErrors.push(error); });
       for (const error of processShutdownErrors) console.error('[VarinKernel] Native process shutdown incomplete:', errorMessage(error));
       await piRuntimeGateway.stop();
-      mcpHarness.dispose();
-      mcpCompositions.close();
-      await mcpAuthority.close();
+      unsubscribeModelSettings();
+      unsubscribeModels();
+      modelsService.authorizations.close();
       await recoveryTurnCoordinator.dispose();
       await piWriterTracker.dispose();
       await documentsAuthority.dispose();

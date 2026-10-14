@@ -1,7 +1,7 @@
 import { EventEmitter } from 'node:events';
 import { PassThrough, Writable } from 'node:stream';
 import { afterEach, expect, test, vi } from 'vitest';
-import { McpConnectionClosedError, McpMessageTooLargeError, type JsonRpcMessage, type StdioTransportOptions } from '@varin/pi-host/mcp-authority';
+import { McpConnectionClosedError, McpMessageTooLargeError, type JsonRpcMessage, type StdioTransportOptions } from '../mcp/authority.js';
 import { ManagedProcessLaunchError, type ManagedPipedProcessHandle, type ManagedProcessOwner } from '../process/types.js';
 import { createMcpProcessTransport, type McpProcessSpawn } from './mcp-process-transport.js';
 
@@ -58,13 +58,13 @@ function fixture(overrides: Partial<StdioTransportOptions> = {}, launch?: McpPro
   return { ...port, owner, options, spawn, transport, messages, errors, closed };
 }
 
-test('uses trusted SDK options and frames raw split UTF-8/CRLF bytes with the SDK parser', async () => {
+test('uses trusted process options and frames split UTF-8/CRLF JSON-RPC messages', async () => {
   const f = fixture();
   await f.transport.start();
   expect(f.spawn).toHaveBeenCalledTimes(1);
   expect(f.spawn.mock.calls[0]?.[0]).toBe(f.options);
   expect(f.spawn.mock.calls[0]?.[1].aborted).toBe(false);
-  const first = { jsonrpc: '2.0', id: 1, result: 'a🦀界b' };
+  const first = { jsonrpc: '2.0', id: 1, result: { text: 'a🦀界b' } };
   const wire = Buffer.from(`${JSON.stringify(first)}\r\n`);
   const split = wire.indexOf(Buffer.from('🦀')) + 2;
   f.child.stdout.write(wire.subarray(0, split));
@@ -73,18 +73,18 @@ test('uses trusted SDK options and frames raw split UTF-8/CRLF bytes with the SD
   expect(f.messages).toEqual([]);
   f.child.stdout.write(Buffer.concat([wire.subarray(-1), Buffer.from('\r\n \n{"jsonrpc":"2.0","method":"ready"}\n')]));
   expect(f.messages).toEqual([first, { jsonrpc: '2.0', method: 'ready' }]);
-  f.child.stdout.write('{"jsonrpc":"1.0","id":2,"result":true}\nnot json\n{"jsonrpc":"2.0","id":3,"result":true}\n');
+  f.child.stdout.write('{"jsonrpc":"1.0","id":2,"result":{}}\nnot json\n{"jsonrpc":"2.0","id":3,"result":{}}\n');
   expect(f.errors).toHaveLength(2);
-  expect(f.errors[0]).toMatchObject({ name: 'McpError', code: -32600, message: 'Invalid JSON-RPC message' });
-  expect(f.messages.at(-1)).toEqual({ jsonrpc: '2.0', id: 3, result: true });
+  expect(f.errors[0]).toMatchObject({ code: -32600, message: 'Invalid JSON-RPC message' });
+  expect(f.messages.at(-1)).toEqual({ jsonrpc: '2.0', id: 3, result: {} });
   f.finish(); await f.transport.close();
 });
 
-test('preserves the SDK 16 MiB frame default and rejects a split oversized frame with its actual typed error', async () => {
+test('preserves the configured frame budget and reports an oversized split frame', async () => {
   const f = fixture(); await f.transport.start();
   const limit = 16 * 1024 * 1024;
-  const empty = JSON.stringify({ jsonrpc: '2.0', id: 1, result: '' });
-  const wire = JSON.stringify({ jsonrpc: '2.0', id: 1, result: 'x'.repeat(limit - Buffer.byteLength(empty)) });
+  const empty = JSON.stringify({ jsonrpc: '2.0', id: 1, result: { text: '' } });
+  const wire = JSON.stringify({ jsonrpc: '2.0', id: 1, result: { text: 'x'.repeat(limit - Buffer.byteLength(empty)) } });
   expect(Buffer.byteLength(wire)).toBe(limit);
   f.child.stdout.write(wire); f.child.stdout.write('\n');
   expect(f.messages).toHaveLength(1);

@@ -785,140 +785,70 @@ export class DocumentRegistry {
     this.assertActive();
     const generation = this.getGeneration();
     const failures: DocumentWorkspaceEditFailure[] = [];
-    if (input.resourceOperations && input.resourceOperations.length > 0) {
-      failures.push({
-        reason: 'resource-operation-unsupported',
-        message: 'Workspace resource create, rename, and delete operations require a Host batch mutation contract',
-      });
-    }
-    const grouped = new Map<string, {
-      identity: DocumentIdentity;
-      edits: DocumentWorkspaceTextEdit[];
-      versions: Set<number>;
-    }>();
-    for (const change of input.textEdits) {
+    const documentsByKey = new Map<string, PreparedWorkspaceDocument>();
+    for (const change of input.changes) {
+      if (change.kind !== 'text') {
+        failures.push({ reason: 'resource-operation-unsupported', message: 'Workspace resource changes require the Host batch mutation contract' });
+        continue;
+      }
       if (change.identity.workspaceId !== input.workspaceId) {
-        failures.push({
-          identity: change.identity,
-          reason: 'workspace-mismatch',
-          message: 'Workspace edit targets another workspace',
-        });
+        failures.push({ identity: change.identity, reason: 'workspace-mismatch', message: 'Workspace edit targets another workspace' });
         continue;
       }
-      let resolved: DocumentIdentity;
       try {
-        resolved = await this.resolveIdentity(change.identity);
+        const identity = await this.resolveIdentity(change.identity);
+        const key = this.keyFor(identity);
+        let document = documentsByKey.get(key);
+        if (!document) {
+          const existing = this.records.get(key);
+          const before = existing ?? applyRead(
+            emptyRecord(identity, generation, this.createDocumentInstanceId()),
+            await this.documents.read(identity),
+          );
+          document = { before: structuredClone(before), afterBuffer: before.buffer, changes: [], editCount: 0, wasOpen: Boolean(existing) };
+          documentsByKey.set(key, document);
+        }
+        const record = document.before;
+        const reason = record.saving ? 'saving' : record.status === 'ready' ? null
+          : record.status === 'deleted' ? 'missing'
+          : ['binary', 'unsupported-encoding', 'conflict', 'missing'].includes(record.status) ? record.status as 'binary' | 'unsupported-encoding' | 'conflict' | 'missing'
+          : 'not-ready';
+        if (reason) {
+          failures.push({ identity, reason, message: record.saving ? 'Document is currently being saved' : `Document is ${record.status}` });
+          continue;
+        }
+        if (change.version !== null && change.version !== record.localEditRevision) {
+          failures.push({ identity, reason: 'stale-version', message: `Document version changed from ${change.version} to ${record.localEditRevision}` });
+          continue;
+        }
+        const prepared = prepareTextChanges(document.afterBuffer, change.edits);
+        if (prepared.status !== 'ready') {
+          failures.push({ identity, reason: prepared.status, message: prepared.status === 'invalid-range'
+            ? 'Workspace edit contains a range outside the current document' : 'Workspace edit contains overlapping ranges' });
+          continue;
+        }
+        document.afterBuffer = prepared.buffer;
+        document.editCount += change.edits.length;
       } catch (error) {
-        failures.push({ identity: change.identity, reason: 'not-ready', message: error instanceof Error ? error.message : 'Document identity is unavailable' });
-        continue;
-      }
-      const key = this.keyFor(resolved);
-      const item = grouped.get(key) ?? { identity: resolved, edits: [], versions: new Set<number>() };
-      item.edits.push(...change.edits);
-      if (change.version !== null) item.versions.add(change.version);
-      grouped.set(key, item);
-    }
-    for (const item of grouped.values()) {
-      if (item.versions.size > 1) {
-        failures.push({
-          identity: item.identity,
-          reason: 'stale-version',
-          message: 'Workspace edit contains conflicting document versions',
-        });
+        failures.push({ identity: change.identity, reason: 'not-ready', message: error instanceof Error ? error.message : 'Document could not be loaded' });
       }
     }
-    if (failures.length > 0) return { status: 'rejected', failures };
-
-    const loaded = await Promise.all([...grouped.values()].map(async (item) => {
-      const existing = this.records.get(this.keyFor(item.identity));
-      if (existing) return { item, record: existing, wasOpen: true };
-      try {
-        const result = await this.documents.read(item.identity);
-        const record = applyRead(
-          emptyRecord(item.identity, generation, this.createDocumentInstanceId()),
-          result,
-        );
-        return { item, record, wasOpen: false };
-      } catch (error) {
-        failures.push({
-          identity: item.identity,
-          reason: 'not-ready',
-          message: error instanceof Error ? error.message : 'Document could not be loaded',
-        });
-        return null;
-      }
-    }));
     if (this.disposed || generation !== this.getGeneration()) {
-      return {
-        status: 'rejected',
-        failures: [{ reason: 'stale-plan', message: 'Application Host changed while preparing the workspace edit' }],
-      };
-    }
-    const documents: PreparedWorkspaceDocument[] = [];
-    for (const loadedItem of loaded) {
-      if (!loadedItem) continue;
-      const { item, record, wasOpen } = loadedItem;
-      if (record.saving) {
-        failures.push({ identity: item.identity, reason: 'saving', message: 'Document is currently being saved' });
-        continue;
-      }
-      if (record.status === 'binary') {
-        failures.push({ identity: item.identity, reason: 'binary', message: 'Binary documents cannot receive text edits' });
-        continue;
-      }
-      if (record.status === 'unsupported-encoding') {
-        failures.push({ identity: item.identity, reason: 'unsupported-encoding', message: 'Document encoding is not editable' });
-        continue;
-      }
-      if (record.status === 'conflict') {
-        failures.push({ identity: item.identity, reason: 'conflict', message: 'Document already has an unresolved disk conflict' });
-        continue;
-      }
-      if (record.status === 'missing' || record.status === 'deleted') {
-        failures.push({ identity: item.identity, reason: 'missing', message: 'Document does not exist' });
-        continue;
-      }
-      if (record.status !== 'ready') {
-        failures.push({ identity: item.identity, reason: 'not-ready', message: 'Document is not ready for editing' });
-        continue;
-      }
-      const expectedVersion = item.versions.values().next().value as number | undefined;
-      if (expectedVersion !== undefined && expectedVersion !== record.localEditRevision) {
-        failures.push({
-          identity: item.identity,
-          reason: 'stale-version',
-          message: `Document version changed from ${expectedVersion} to ${record.localEditRevision}`,
-        });
-        continue;
-      }
-      const prepared = prepareTextChanges(record.buffer, item.edits);
-      if (prepared.status !== 'ready') {
-        failures.push({
-          identity: item.identity,
-          reason: prepared.status,
-          message: prepared.status === 'invalid-range'
-            ? 'Workspace edit contains a range outside the current document'
-            : 'Workspace edit contains overlapping ranges',
-        });
-        continue;
-      }
-      if (prepared.buffer === record.buffer) continue;
-      documents.push({
-        before: structuredClone(record),
-        afterBuffer: prepared.buffer,
-        changes: prepared.changes,
-        editCount: item.edits.length,
-        wasOpen,
-      });
+      failures.push({ reason: 'stale-plan', message: 'Application Host changed while preparing the workspace edit' });
     }
     if (failures.length > 0) return { status: 'rejected', failures };
+    const documents = [...documentsByKey.values()].filter(document => document.afterBuffer !== document.before.buffer);
+    for (const document of documents) {
+      const change = replacementBetween(document.before.buffer, document.afterBuffer);
+      document.changes = change ? [change] : [];
+    }
     const groupId = input.groupId?.trim() || crypto.randomUUID();
     if (input.groupId && this.preparedWorkspaceEdits.has(groupId)) {
       this.preparedWorkspaceEdits.delete(groupId);
     }
-    const annotationIds = new Set(input.textEdits.flatMap((change) => (
-      change.edits.map((edit) => edit.annotationId).filter((value): value is string => Boolean(value))
-    )));
+    const annotationIds = new Set(input.changes.flatMap(change => change.kind === 'text'
+      ? change.edits.flatMap(edit => edit.annotationId ? [edit.annotationId] : [])
+      : change.annotationId ? [change.annotationId] : []));
     const requiresConfirmation = [...annotationIds].some((annotationId) => (
       input.changeAnnotations?.[annotationId]?.needsConfirmation === true
     ));
@@ -1859,7 +1789,8 @@ export class DocumentRegistry {
       workspaceId: payload.workspaceId,
       origin: 'thread-integration',
       groupId: payload.operationId,
-      textEdits: records.map(({ target, record }) => ({
+      changes: records.map(({ target, record }) => ({
+        kind: 'text',
         identity: target.resource,
         version: record.localEditRevision,
         edits: [{

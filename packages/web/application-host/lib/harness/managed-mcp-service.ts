@@ -1,8 +1,8 @@
 /** Target-side contribution views over the existing MCP authority. Catalog stays on A. */
 import { randomUUID } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
-import type { McpAuthority, McpCompositionSnapshot, McpAuthorityScope, McpAuthorityTool, McpAuthorityService, McpTransport, McpInteractionRequest, McpErrorInteraction } from '@varin/pi-host/mcp-authority';
-import type { McpCompositions, McpCompositionScope } from '@varin/pi-host/mcp-authority';
+import type { McpAuthority, McpCompositionSnapshot, McpAuthorityScope, McpAuthorityTool, McpAuthorityService, McpTransport, McpInteractionRequest, McpErrorInteraction } from '../mcp/authority.js';
+import type { McpCompositions, McpCompositionScope } from '../mcp/authority.js';
 import type { ManagedSourceLocalScope, ManagedSourceCleanupScope } from './managed-remote-types.js';
 import type { KernelClient } from '../kernel/kernel-client.js';
 import { createManagedMcpTasks, mcpTaskFailure } from './managed-mcp-tasks.js';
@@ -376,6 +376,7 @@ export function createManagedMcpService(options: {
         if (!tasks) throw new ManagedMcpAdmissionError('mcp_task_source_unavailable');
         return tasks.start(scope, action, signal);
       case 'discover': return retainTools(await lease.discover(action.server, active));
+      case 'cached_tools': return lease.cachedTools(active);
       case 'prepare_tool': { const tool = await lease.prepareTool(action.server, action.tool, action.schemaVersion, active); retainTools([tool]); return tool; }
       case 'discover_services': return (await lease.discoverServices(action.server, active)).map(retainService);
       case 'prepare_service': {

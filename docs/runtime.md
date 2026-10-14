@@ -236,6 +236,23 @@ AgentPolicy 返回动作和状态，核心负责合法执行与提交。Provider
 派发前通过[共享 Host 凭据服务](../kernel/crates/varin-runtime/src/providers/AUTH.md)解析认证，
 秘密不进入请求快照、公共事件或历史。持久化、HTTP 和 body signing 使用同一份冻结请求字节。
 
+Agent 的渠道和用途设置由 Host [models](../packages/web/application-host/lib/models/service.ts) 管理，
+直接提供 `/api/models/*`；模型渠道保存在 `VARIN_DATA_DIR/models.json`，全局用途设置保存在
+`agent-settings.json`，受信任项目可提供 `.varin/settings.json`。渠道模型 ID 与实际请求模型 ID
+分开：用户设置引用稳定的目录 ID，协议请求使用模型 ID 或部署名。显示名称变化不更换执行身份。
+模型账号与 MCP 授权分别保存在 `model-auth.json`、`mcp-auth.json`，共用文件锁与原子保存组件；
+读取不创建文件，凭据刷新仍属于原账号。浏览器授权可由 Host 本地回调或用户粘贴回调完成。
+MCP 配置与授权文件异步准备后发布快照，工具绑定检查只读内存。作用域持有对应来源的文件订阅；
+外部编辑重新准备受影响配置，主动保存等待发布后返回。损坏来源保留上次有效定义，禁用和移除按撤回处理。
+取消请求只结束该请求对账号刷新的等待，共享刷新仍完成 token 保存。
+
+Agent [MCP 服务](../packages/web/application-host/lib/mcp/authority.ts) 读取 Host `mcp.json`、用户明确配置
+的外部来源和受信任项目 `.mcp.json`。同名连接整项替换，`mcpPolicies` 保存独立策略覆盖；设置页
+保存选定的原文件并检查 revision。stdio 走 Rust 进程服务，HTTP 使用独立协议客户端。
+工具、资源和提示目录分别准备；`mcp-directory.json` 是异步保存的发现缓存，离线查找不启动服务器。
+缓存按定义、执行环境与账号区分，执行仍需取得当前声明和原 Operation 的授权。配置文件与账号文件
+的外部修改会通知相关消费者；更换普通配置不会重写已发出的请求。Pi 会话保留其原 MCP 服务与资产。
+
 Run worker 只保留最近的不可变历史前缀，按 epoch/Run/branch/checkpoint/祖先身份复用；
 新记忆、Goal 和策略证据仍逐边界投影，导航、checkpoint 变化和 worker 退出会丢弃缓存。
 Responses/Azure/Codex 复用独立 item/schema 片段；Chat、Anthropic、Google/Vertex、Mistral、Bedrock、
@@ -246,7 +263,8 @@ Pi 按各自协议复用完整消息组。分组还包含工具调用名称、�
 
 用途推理沿现有 decision/rerank/embedding 配置与消费者执行，详见[检索与知识](retrieval.md)。
 `localBekko` 复用已有本地 ONNX embedding 组件，不是新建本地专用推理栈。
-当前交付暂不包含 Agent 图像生成；typed image 传输与旧 Pi 图像调用不代表该能力已实现。
+Agent 的 `image_generate`、`image_edit` 分别使用配置的生成和编辑模型；未配置的工具不加入模型工具集合。
+两者复用原推理请求、用量回执和媒体资源服务，结果通过资源引用读取，原图保留。
 
 ## 恢复与验证边界
 

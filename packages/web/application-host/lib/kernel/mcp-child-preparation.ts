@@ -1,7 +1,8 @@
 /** Original MCP definitions rebound to an admitted child's own execution view.
  * Configuration, transports and credentials remain owned by the shared McpAuthority. */
 import { isDeepStrictEqual } from 'node:util';
-import { composeMcpAuthorityLeases, type McpAuthority, type McpAuthorityOwnedLease } from '@varin/pi-host/mcp-authority';
+import { resolve } from 'node:path';
+import { composeMcpAuthorityLeases, type McpAuthority, type McpAuthorityOwnedLease } from '../mcp/authority.js';
 import type { McpProvenance, McpServerOwner, PermissionPolicy } from '@varin/protocol';
 import type { McpPreparation } from './agent-runtime-client.js';
 import type { KernelClient } from './kernel-client.js';
@@ -24,6 +25,7 @@ export function createChildMcpPreparer(owners: {
   projectTrusted(cwd: string): boolean;
   currentPolicy(cwd: string, trusted: boolean): Promise<PermissionPolicy>;
 }): (input: McpPreparation, signal?: AbortSignal) => Promise<McpToolLease> {
+  owners = { ...owners, agentDir: resolve(owners.agentDir) };
   return async (input, signal) => {
     signal?.throwIfAborted();
     const selection = input.delegatedBinding ?? input.requiredBinding;
@@ -55,7 +57,7 @@ export function createChildMcpPreparer(owners: {
     if (needsWorkspace && (!input.source || !input.executionCwd))
       throw new Error('Child MCP requires an execution view matching its fixed source');
     const workspace = needsWorkspace && input.source
-      ? await owners.admitWorkspaceRegistration(input.source.workspaceId, signal) : undefined;
+      ? { canonicalPath: resolve((await owners.admitWorkspaceRegistration(input.source.workspaceId, signal)).canonicalPath) } : undefined;
     signal?.throwIfAborted();
     for (const { owner } of groups) {
       const configuration = owner.configuration;
@@ -89,7 +91,7 @@ export function createChildMcpPreparer(owners: {
     const acquired: Array<Pick<McpAuthorityOwnedLease, 'releaseAndDrain'>> = [];
     let managed: ManagedChildMcpContribution | undefined;
     try {
-      const candidates: Array<Promise<{ lease: import('@varin/pi-host/mcp-authority').McpAuthorityLease; servers: string[] }>> = groups.map(async ({ owner, provenance }) => {
+      const candidates: Array<Promise<{ lease: import('../mcp/authority.js').McpAuthorityLease; servers: string[] }>> = groups.map(async ({ owner, provenance }) => {
         try {
           attempt.signal.throwIfAborted();
           const configuration = owner.configuration;

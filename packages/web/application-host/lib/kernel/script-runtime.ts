@@ -4,7 +4,7 @@ import { SCRIPT_CAPABILITY, SCRIPT_TOOL_DECLARATIONS } from '@varin/extension-bu
 import { parseVarinToolJson, type JsonValue, type NestedToolInput, type NestedToolReceipt } from '@varin/extension-contract';
 import type { HostCapabilityCallContext, HostCapabilityHandler } from '@varin/extension-host';
 import { SCRIPT_PROTOCOL_VERSION, ScriptFrameDecoder, encodeScriptFrame, parseScriptWorkerFrame, type ScriptHostFrame, type ScriptWorkerFrame } from '@varin/script-runtime';
-import { compileToolJsonSchema } from '@varin/pi-host/tool-schema';
+import { compileToolJsonSchema } from '../models/schema.js';
 import type { AgentRuntimeClient } from './agent-runtime-client.js';
 import type { KernelClient } from './kernel-client.js';
 import type { ExtensionToolOwnerOptions } from './extension-tool-owner.js';

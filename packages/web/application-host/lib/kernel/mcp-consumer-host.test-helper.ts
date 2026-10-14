@@ -7,7 +7,7 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { ApplicationExtensionRuntime } from '@varin/extension-host';
 import { parseVarinExtensionManifest } from '@varin/extension-contract';
-import type { McpAuthority } from '@varin/pi-host/mcp-authority';
+import type { McpAuthority } from '../mcp/authority.js';
 import type { KernelClient } from './kernel-client.js';
 import type { McpTaskRuntime } from './mcp-task-runtime.js';
 import type { McpResourceRuntime } from './mcp-resource-runtime.js';

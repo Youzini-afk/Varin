@@ -1,6 +1,6 @@
 /** Original dispatch dependency cuts. Storage owns references; this owner only holds live definitions. */
 import { isDeepStrictEqual } from 'node:util';
-import type { McpCompositionDefinitions, McpCompositionSnapshot, McpDefinitionLease } from '@varin/pi-host/mcp-authority';
+import type { McpCompositionDefinitions, McpCompositionSnapshot, McpDefinitionLease } from '../mcp/authority.js';
 import type { KernelClient } from '../kernel/kernel-client.js';
 import type { McpBinding, SourceAuthorityAddress, SourceAuthorityResult, SourceMcpChildBinding, SourceMcpChildResult } from '../kernel/protocol.generated.js';
 import type { ManagedSourceCleanupScope } from './managed-remote-types.js';

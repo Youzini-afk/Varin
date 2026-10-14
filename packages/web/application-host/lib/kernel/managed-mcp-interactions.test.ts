@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { expect, it, vi } from 'vitest';
-import { McpSamplingRejectedError } from '@varin/pi-host/mcp-errors';
-import type { McpInteractionRequest, McpErrorInteraction } from '@varin/pi-host/mcp-authority';
+import { McpSamplingRejectedError } from '../mcp/errors.js';
+import type { McpInteractionRequest, McpErrorInteraction } from '../mcp/authority.js';
 import type { ManagedSourceClient } from '../harness/managed-remote-client.js';
 import type { ManagedMcpInteractionAction, ManagedMcpInteractionBody, ManagedMcpInteractionInspection } from '../harness/managed-mcp-contract.js';
 import type { KernelClient } from './kernel-client.js';

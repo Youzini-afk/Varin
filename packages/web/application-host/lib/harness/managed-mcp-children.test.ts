@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { McpCompositionSnapshot } from '@varin/pi-host/mcp-authority';
+import type { McpCompositionSnapshot } from '../mcp/authority.js';
 import type { KernelClient } from '../kernel/kernel-client.js';
 import type { McpBinding, SourceMcpChildBinding, SourceMcpChildParams, SourceMcpChildResult } from '../kernel/protocol.generated.js';
 import { createManagedMcpChildren } from './managed-mcp-children.js';

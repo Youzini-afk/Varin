@@ -2,7 +2,7 @@
 import assert from 'node:assert/strict';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { McpAuthority, McpCompositions, type McpCompositionScope, type McpAuthorityOptions } from '@varin/pi-host/mcp-authority';
+import { McpAuthority, McpCompositions, type McpCompositionScope, type McpAuthorityOptions } from '../mcp/authority.js';
 import type { AgentRuntimeClient } from './agent-runtime-client.js';
 import type { KernelClient } from './kernel-client.js';
 import type { ToolBridge } from './tool-bridge.js';
@@ -12,6 +12,7 @@ import { createMcpTaskRuntime } from './mcp-task-runtime.js';
 import { createMcpTaskRecovery } from './mcp-task-recovery.js';
 import { createInteractionConsumer } from './mcp-interaction-consumer.test-helper.js';
 import { createInteractionHttpPeer, writeInteractionStdioConfiguration } from './mcp-interaction-peer.test-helper.js';
+import { fixtureMcpStdio } from './mcp-stdio.test-helper.js';
 
 export async function createInteractionFixture(options: { root: string; mode: 'http' | 'stdio'; kernel: KernelClient;
   runtime: AgentRuntimeClient; bridge: ToolBridge; sampling?: boolean; onError(error: Error): void }) {
@@ -23,13 +24,11 @@ export async function createInteractionFixture(options: { root: string; mode: 'h
   if (http) { await mkdir(agentDir, { recursive: true }); await writeFile(join(agentDir, 'mcp.json'), JSON.stringify({ mcpServers: {
     original: { url: 'https://receiver.invalid/mcp', exposure: 'direct' },
   } })); }
-  // Resolve the actual installed SDK from its owning package, not an invented replacement transport.
-  const sdkUrl = new URL('../node_modules/@earendil-works/pi-mcp/dist/index.js', import.meta.resolve('@varin/pi-host/mcp-authority'));
-  const { StreamableHttpTransport } = await import(sdkUrl.href) as { StreamableHttpTransport: new (options: { url: string; fetch: ReturnType<typeof createInteractionHttpPeer>['fetch'] }) => ReturnType<NonNullable<McpAuthorityOptions['createTransport']>> };
   const authority = new McpAuthority({ interactions: input => interactions.receiver(input),
+    adaptTransport: fixtureMcpStdio,
     interactionErrors: input => interactions.errorReceiver(input),
     ...(options.sampling ? { sampling: input => interactions.samplingReceiver(input) } satisfies Partial<McpAuthorityOptions> : {}),
-    ...(http ? { createTransport: () => new StreamableHttpTransport({ url: 'https://receiver.invalid/mcp', fetch: http.fetch }) } : {}) });
+    ...(http ? { fetch: http.fetch as typeof globalThis.fetch } : {}) });
   const compositions = new McpCompositions(authority, code => options.onError(new Error(code)));
   const recovery = createMcpTaskRecovery({ kernel, authority, agentDir, hostId: 'fixture-host',
     admitWorkspaceRegistration: async () => { throw new Error('Source-less interaction acquired a workspace'); }, projectTrusted: () => false,

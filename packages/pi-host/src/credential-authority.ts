@@ -18,6 +18,7 @@ import { ProviderConfigurationManager } from './provider-configuration.js';
 import { embeddingConfigurationId, embeddingRequestUrl } from '@varin/protocol/node/embeddings';
 import { rerankRequestUrl } from './harness/http-rerank.js';
 import { classifierRequestRoutes, isSupportedClassifierApi, type ClassifierRequestRoute } from './harness/native-classifier.js';
+import { imageModelInfo } from '@varin/protocol';
 
 export interface HostEmbeddingProviderBinding {
   providerId: string;
@@ -37,6 +38,7 @@ export interface HostInferenceProviderBinding extends HostEmbeddingProviderBindi
   routes: readonly ClassifierRequestRoute[];
   /** Private resolved model, never serialized into Catalog or public metadata. */
   nativeModel?: import("@earendil-works/pi-ai").ClassifierModel<import("@earendil-works/pi-ai").ClassifierApi>;
+  imageModel?: import('@varin/protocol').ImageModelInfo;
 }
 export interface HostSelectedModel {
   providerId: string; modelId: string; name: string; api: string; baseUrl: string;
@@ -541,17 +543,30 @@ export class HostCredentialAuthority implements CredentialStore {
   resolveRerankBinding(providerId: string, modelId: string, endpoint?: string): Promise<HostInferenceProviderBinding> {
     return this.#resolveInferenceBinding(providerId, modelId, 'rerank', endpoint);
   }
-  async #resolveInferenceBinding(providerId: string, modelId: string, kind: 'embedding' | 'decision' | 'rerank', endpointOverride?: string): Promise<HostInferenceProviderBinding> {
+  resolveImageBinding(providerId: string, modelId: string): Promise<HostInferenceProviderBinding> {
+    return this.#resolveInferenceBinding(providerId, modelId, 'image');
+  }
+  async listImageModels(): Promise<import('@varin/protocol').ImageModelInfo[]> {
+    const runtime = await this.#inferenceOwner().inferenceRuntime(this.#modelsPath ? dirname(this.#modelsPath) : getAgentDir());
+    return runtime.getModelsOfType('image').flatMap(model => {
+      const info = imageModelInfo(model);
+      return info && model.output.includes('image') ? [info] : [];
+    });
+  }
+  async #resolveInferenceBinding(providerId: string, modelId: string, kind: 'embedding' | 'decision' | 'rerank' | 'image', endpointOverride?: string): Promise<HostInferenceProviderBinding> {
     const providers = this.#inferenceOwner();
     const cwd = this.#modelsPath ? dirname(this.#modelsPath) : getAgentDir();
     const resolveProvider = async () => {
       const runtime = await providers.inferenceRuntime(cwd);
       const provider = runtime.getProvider(providerId);
-      const model = kind === 'decision' ? runtime.getModelOfType('classifier', providerId, modelId) : runtime.getModel(providerId, modelId);
+      const model = kind === 'decision' ? runtime.getModelOfType('classifier', providerId, modelId)
+        : kind === 'image' ? runtime.getModelOfType('image', providerId, modelId) : runtime.getModel(providerId, modelId);
+      const imageModel = kind === 'image' && model?.type === 'image' && model.output.includes('image') ? imageModelInfo(model) : undefined;
+      if (kind === 'image' && !imageModel) throw publicFailure('image-model-unavailable');
       let editable: Awaited<ReturnType<ProviderConfigurationManager['effectiveConfig']>> | undefined;
       try { editable = await providers.effectiveConfig(cwd, providerId, false); }
       catch (error) { if (!(error && typeof error === 'object' && 'code' in error && error.code === 'provider_config_not_found')) throw error; }
-      const capability = (await providers.effectiveCapabilities(cwd, providerId, false))?.[kind];
+      const capability = kind === 'image' ? undefined : (await providers.effectiveCapabilities(cwd, providerId, false))?.[kind];
       if (capability?.enabled === false) {
         this.#inferenceRevocations.set(`${kind}:${providerId}`, (this.#inferenceRevocations.get(`${kind}:${providerId}`) ?? 0) + 1);
         throw publicFailure(`${kind}-provider-disabled`);
@@ -562,12 +577,13 @@ export class HostCredentialAuthority implements CredentialStore {
       const baseUrl = capabilityModel?.baseUrl ?? capability?.baseUrl ?? (capability && kind !== 'decision' ? undefined : model?.baseUrl) ?? editable?.baseUrl ?? provider?.baseUrl;
       if (!baseUrl) throw publicFailure(`${kind}-endpoint-unavailable`);
       const endpoint = endpointOverride ?? capability?.endpoint;
-      const api = kind === 'decision' ? capabilityModel?.api ?? model?.api ?? 'typesafe-system-one' : kind === 'rerank' ? 'http-rerank' : 'openai-compatible';
+      const api = kind === 'image' ? imageModel!.api : kind === 'decision' ? capabilityModel?.api ?? model?.api ?? 'typesafe-system-one' : kind === 'rerank' ? 'http-rerank' : 'openai-compatible';
       if (kind === 'decision' && !isSupportedClassifierApi(api)) {
         throw publicFailure('decision-api-unavailable');
       }
       let routes: readonly ClassifierRequestRoute[];
-      try { routes = kind !== 'decision' ? [{ requestUrl: new URL(kind === 'rerank' ? rerankRequestUrl(baseUrl, endpoint) : embeddingRequestUrl(baseUrl, endpoint)).toString(), requestKind: 'model_compute' }]
+      try { routes = kind === 'image' ? (api === 'openrouter-images' ? ['chat/completions'] : ['images/generations', 'images/edits']).map(route => ({ requestUrl: new URL(route, baseUrl.replace(/\/?$/, '/')).toString(), requestKind: 'model_compute' as const }))
+        : kind !== 'decision' ? [{ requestUrl: new URL(kind === 'rerank' ? rerankRequestUrl(baseUrl, endpoint) : embeddingRequestUrl(baseUrl, endpoint)).toString(), requestKind: 'model_compute' }]
         : classifierRequestRoutes(api, baseUrl, endpoint); } catch { throw publicFailure(`${kind}-endpoint-invalid`); }
       for (const route of routes) {
         const url = new URL(route.requestUrl);
@@ -576,12 +592,13 @@ export class HostCredentialAuthority implements CredentialStore {
           if (/^(key|api[_-]?key|access[_-]?token|refresh[_-]?token|authorization|password|secret|signature|sig)$/i.test(name)) throw publicFailure(`${kind}-endpoint-invalid`);
         }
       }
-      const headerSources = kind === 'decision' ? await providers.inferenceCredentialSources(cwd, providerId, modelId) : undefined;
+      const headerSources = kind === 'decision' || kind === 'image' ? await providers.inferenceCredentialSources(cwd, providerId, modelId, kind === 'image' ? 'image' : 'classifier') : undefined;
       const modelHeaders = headerSources?.sources.flatMap(entry => (entry as { modelHeaders?: unknown[] }).modelHeaders ?? []).filter(value => value !== undefined) ?? [];
       const modelHeaderRevision = modelHeaders.length ? headerSources?.revision : undefined;
       return { api, baseUrl, ...(endpoint ? { endpoint } : {}), routes: Object.freeze(routes.map(route => Object.freeze({ ...route }))), requestUrl: routes.at(-1)!.requestUrl,
         modelHeaders, ...(modelHeaderRevision === undefined ? {} : { modelHeaderRevision }),
         ...(kind === 'decision' && model?.type === 'classifier' ? { nativeModel: model } : {}),
+        ...(imageModel ? { imageModel } : {}),
         credentialRef: capability?.credentialRef ?? providerId, configured: Boolean(editable) };
     };
     const selected = await resolveProvider();
@@ -613,7 +630,7 @@ export class HostCredentialAuthority implements CredentialStore {
     let scope = initial.scope;
     let modelOwnerKey: string | undefined;
     if (selected.modelHeaders.length || Object.keys(modelHeaders).length) {
-      const ownerKey = JSON.stringify(['decision', selected.credentialRef, providerId, modelId]);
+      const ownerKey = JSON.stringify([kind, selected.credentialRef, providerId, modelId]);
       modelOwnerKey = ownerKey;
       const source = JSON.stringify({ owner: initial.scope, expressions: selected.modelHeaders, values: modelHeaders });
       let current = this.#inferenceCredentialBindings.get(ownerKey);
@@ -636,9 +653,9 @@ export class HostCredentialAuthority implements CredentialStore {
         // Only availability and credential ownership are live. Model/endpoint candidate edits
         // never redirect or retire the already retained binding, even if that candidate fails.
         const sources = await providers.inferenceCredentialSources(cwd, providerId);
-        const capability = (await providers.effectiveCapabilities(cwd, providerId, false))?.[kind];
-        if (kind === 'decision') {
-          const current = await providers.inferenceCredentialSources(cwd, providerId, modelId);
+        const capability = kind === 'image' ? undefined : (await providers.effectiveCapabilities(cwd, providerId, false))?.[kind];
+        if (kind === 'decision' || kind === 'image') {
+          const current = await providers.inferenceCredentialSources(cwd, providerId, modelId, kind === 'image' ? 'image' : 'classifier');
           const headers = current.sources.flatMap(entry => (entry as { modelHeaders?: unknown[] }).modelHeaders ?? []).filter(value => value !== undefined);
           if (!isDeepStrictEqual(headers, selected.modelHeaders)) revoked = 'credential-scope-changed';
         }
@@ -656,7 +673,8 @@ export class HostCredentialAuthority implements CredentialStore {
         revoked = 'credential-scope-changed'; throw publicFailure(revoked);
       }
     };
-    return { providerId, modelId, api: selected.api, routes: selected.routes, ...(selected.nativeModel ? { nativeModel: selected.nativeModel } : {}), baseUrl: selected.baseUrl, ...(selected.endpoint ? { endpoint: selected.endpoint } : {}),
+    return { providerId, modelId, api: selected.api, routes: selected.routes, ...(selected.nativeModel ? { nativeModel: selected.nativeModel } : {}),
+      ...(selected.imageModel ? { imageModel: selected.imageModel } : {}), baseUrl: selected.baseUrl, ...(selected.endpoint ? { endpoint: selected.endpoint } : {}),
       requestUrl: selected.requestUrl, configurationId: kind === 'embedding' ? embeddingConfigurationId(providerId, modelId, selected.baseUrl, selected.endpoint)
         : createHash('sha256').update(JSON.stringify({ providerId, modelId, api: selected.api, endpoint: selected.requestUrl, credentialRef: selected.credentialRef, credentialScope: scope, modelHeaderRevision: selected.modelHeaderRevision, schema: `${kind}.v1` })).digest('hex'),
       credentialRef: selected.credentialRef, credentialScope: Object.freeze({ ...scope }), assertAvailable,

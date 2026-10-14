@@ -1,8 +1,8 @@
 /** Coordinator projection of original Source SDK receivers. Catalog remains the review/model owner. */
 import { createHash, randomUUID } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
-import { McpAuthorityError, McpSamplingRejectedError } from '@varin/pi-host/mcp-errors';
-import type { McpInteractionOrigin, McpInteractionRequest, McpErrorInteractionItem } from '@varin/pi-host/mcp-authority';
+import { McpAuthorityError, McpSamplingRejectedError } from '../mcp/errors.js';
+import type { McpInteractionOrigin, McpInteractionRequest, McpErrorInteractionItem } from '../mcp/authority.js';
 import type { ManagedSourceClient } from '../harness/managed-remote-client.js';
 import type { ManagedSourceAddress } from '../harness/managed-remote-types.js';
 import type { ManagedMcpInteractionAction, ManagedMcpInteractionBody, ManagedMcpInteractionInspection,

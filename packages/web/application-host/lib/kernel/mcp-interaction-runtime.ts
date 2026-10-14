@@ -1,10 +1,10 @@
 /** Live responders for Catalog-owned MCP input records. No durable state or connection authority here. */
 import { createHash } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
-import { McpSamplingRejectedError } from '@varin/pi-host/mcp-errors';
+import { McpSamplingRejectedError } from '../mcp/errors.js';
 import { publishMcpInteractionRequest, isDefiniteMcpPublicationFailure } from './mcp-interaction-publication.js';
-import { decodeElicitationRequest, validateElicitationResponse, decodeUrlElicitationError } from '@varin/pi-host/mcp-interactions';
-import type { McpInteractionRequest, McpInteractionReceiver, McpErrorInteractionItem, McpErrorInteractionReceiver } from '@varin/pi-host/mcp-authority';
+import { decodeElicitationRequest, validateElicitationResponse, decodeUrlElicitationError } from '../mcp/interactions.js';
+import type { McpInteractionRequest, McpInteractionReceiver, McpErrorInteractionItem, McpErrorInteractionReceiver } from '../mcp/authority.js';
 import type { AgentRuntimeClient } from './agent-runtime-client.js';
 import type { KernelClient } from './kernel-client.js';
 import type { McpInteractionBinding, McpInteractionRecord, McpInteractionView, McpInteractionRespondParams, McpElicitationResponse, McpInteractionAvailability, McpInteractionDelivery } from './protocol.generated.js';

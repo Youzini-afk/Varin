@@ -1,8 +1,10 @@
 import { responsesMetadataText } from './responses-wire.test-helper.js';
 import { resourceScopeFixture } from './resource-scope.test-helper.js';
-import { resolvePiSdkSpecifier } from '@varin/pi-host/sdk';
+import { createDefaultTransport } from '../mcp/connection.js';
+import { StdioTransport } from '../mcp/transport.js';
+import { fixtureMcpStdio } from './mcp-stdio.test-helper.js';
 import { createMcpLease } from './mcp-owner.js';
-import { McpAuthority, McpCompositions, type McpAuthorityLease, type McpCompositionScope } from '@varin/pi-host/mcp-authority';
+import { McpAuthority, McpCompositions, type McpAuthorityLease, type McpCompositionScope } from '../mcp/authority.js';
 import { createThreadContext } from './thread-context.js';
 import { createAgentPersonalization } from '../memory/agent-personalization.js';
 import { createMemoryOwner } from './memory-owner.js';
@@ -43,6 +45,7 @@ async function fixture(reply: (body: Record<string, unknown>, response: ServerRe
   const root = existingRoot ?? await fs.mkdtemp(path.join(os.tmpdir(), 'varin-http-review-'));
   const kernel = createKernelClient({ hostId: 'http-review', storageRoot: root, buildVersion, kernelPath, allowCargoDevRunner: false });
   cleanups.push(async () => { await kernel.close(); if (!existingRoot) await fs.rm(root, { recursive: true, force: true }); });
+  await kernel.start();
   const secret = 'fake-http-provider-key-not-a-real-secret';
   const requests: Array<{ body: Record<string, unknown>; authorization?: string }> = [];
   const provider = createServer((request, response) => {
@@ -91,13 +94,10 @@ process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:request.id,result})+'\\n')
     unused: { command: process.execPath, args: ['-e', `require('node:fs').writeFileSync(${JSON.stringify(unusedPath)}, 'should not start')`], exposure: selectedServers==='composed'?'codemode':'direct' },
   } }));
   // Increase only this fixture's real stdio framing budget when testing the independent frame boundary.
-  const sdk = maxMessageBytes ? await import(resolvePiSdkSpecifier(path.join(repository, 'packages/pi-host'), '@earendil-works/pi-coding-agent')) : undefined;
-  const transportRuntime = sdk ? await sdk.loadMcpRuntime() : undefined;
-  const mcp = new McpAuthority(maxMessageBytes ? { createTransport: (...args) => {
-    const base = transportRuntime.createDefaultTransport(...args);
-    const Transport = base.constructor as new (options: Record<string, unknown>) => typeof base;
-    return new Transport({ ...base.options, maxMessageBytes });
-  } } : {}); cleanups.push(() => mcp.close());
+  const mcp = new McpAuthority({ adaptTransport: fixtureMcpStdio, ...(maxMessageBytes ? { createTransport: (...args: Parameters<typeof createDefaultTransport>) => {
+    const base = createDefaultTransport(...args);
+    return base instanceof StdioTransport ? new StdioTransport({ ...base.options, maxMessageBytes }) : base;
+  } } : {}) }); cleanups.push(() => mcp.close());
   const scope = (threadId: string) => ({ resourceOwner: { kind: 'local' as const }, agentDir, configCwd: workspace, executionCwd: workspace,
     environmentId: 'fixture-environment', executionScope: 'workspace' as const, projectTrusted: true, sessionId: threadId });
   const compositionErrors: string[]=[];
@@ -133,7 +133,9 @@ process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:request.id,result})+'\\n')
   const hostUrl = await listen(createServer(app));
   configureRuntimeUrlResolver({ apiBaseUrl: hostUrl, realtimeBaseUrl: hostUrl });
   setRuntimeExtraHeaders({ 'x-fixture-auth': 'fixture-client' });
-  return { transportTrace, effectsPath, startsPath, unusedPath, script, agentDir, scope, mcp, compositions, composition: (runId:string)=>scopes.get(runId)!,compositionErrors, endpoint, personalization, workspace, documents, workingStates, close, kernel, api: createThreadsHttpAPI(), runtime: adapter.runtime, hostUrl, secret, requests, launchErrors, root, closeKernel: () => kernel.close() };
+  const api = createThreadsHttpAPI(), create = api.create;
+  api.create = async key => { try { return await create(key); } catch (error) { throw new Error(`Fixture Thread creation: ${(error as { code?: string }).code ?? 'unknown'}`, { cause: error }); } };
+  return { transportTrace, effectsPath, startsPath, unusedPath, script, agentDir, scope, mcp, compositions, composition: (runId:string)=>scopes.get(runId)!,compositionErrors, endpoint, personalization, workspace, documents, workingStates, close, kernel, api, runtime: adapter.runtime, hostUrl, secret, requests, launchErrors, root, closeKernel: () => kernel.close() };
 }
 
 async function addPreparingDependency(f: Awaited<ReturnType<typeof fixture>>) {
@@ -240,15 +242,19 @@ it('a real configuration watch prepares a new MCP directory while the frozen req
   const configPath = path.join(f.agentDir, 'mcp.json');
   const initialConfig = await fs.readFile(configPath, 'utf8');
   await fs.writeFile(configPath, '{ invalid configuration');
-  await expect(f.runtime.refreshMcp(receipt.run_id)).rejects.toThrow('mcp-config-invalid');
+  await expect.poll(() => f.mcp.configuration(f.scope(identity.threadId)).errors.length).toBeGreaterThan(0);
+  await f.runtime.refreshMcp(receipt.run_id);
   expect(f.kernel.mcpBinding(receipt.run_id)).toEqual(original);
   await fs.writeFile(configPath, initialConfig);
+  await expect.poll(() => f.mcp.configuration(f.scope(identity.threadId)).errors.length).toBe(0);
   await f.kernel.agentRuntimeRequest('runtime.tools.select', { runId: receipt.run_id, selectionId: 'obsolete-candidate' });
   await f.kernel.agentRuntimeRequest('runtime.tools.select', { runId: receipt.run_id, selectionId: 'newer-desire' });
   expect(await f.kernel.agentRuntimeRequest('runtime.tools.ready', { runId: receipt.run_id, selectionId: 'obsolete-candidate', binding: f.kernel.mcpLiveBinding(receipt.run_id)! })).toEqual({ ready: false });
   let updated!: () => void; let failed!: (error: unknown) => void;
   const ready = new Promise<void>((resolve, reject) => { updated = resolve; failed = reject; });
-  const unsubscribe = await f.mcp.subscribe(f.scope(identity.threadId), () => { void f.runtime.refreshMcp(receipt.run_id).then(updated, failed); });
+  const unsubscribe = await f.mcp.subscribe(f.scope(identity.threadId), change => {
+    if (change.kind !== 'state') void f.runtime.refreshMcp(receipt.run_id).then(updated, failed);
+  });
   cleanups.push(async () => { unsubscribe(); });
   const nextScript = path.join(f.root, 'next-mcp.mjs');
   const nextEffects = path.join(f.root, 'next-effects.jsonl');
@@ -294,7 +300,7 @@ it('disabling a real selected MCP dependency ends its outstanding permission wai
   const identity=await f.api.create('disabled-mcp');
   const receipt=await f.api.submit({...identity,key:'disabled-mcp-input',expectedHead:null,text:'try this tool',model:{providerId:'fixture-provider',modelId:'fixture-model'}});
   await expect.poll(async()=>(await f.api.snapshot(identity)).operations.some(op=>op.waiting_on?.startsWith('permission:')),{timeout:15_000}).toBe(true);
-  const opened=f.mcp.open(f.scope(identity.threadId));
+  const opened=await f.mcp.open(f.scope(identity.threadId));
   try {await f.mcp.updateConfig(opened.scope,'fixture',{enabled:false});} finally {f.mcp.closeScope(opened.scope);}
   await expect.poll(async()=>(await f.api.run(receipt.run_id)).state,{timeout:15_000}).toBe('completed');
   expect(await fs.readFile(f.effectsPath,'utf8').catch(()=>'' )).toBe('');
@@ -405,7 +411,7 @@ it('reenabling an identically described dependency gives new work a fresh owner 
   const originalLive=f.kernel.mcpLiveBinding(receipt.run_id)!;
   const tool=original.tools.find(tool=>tool.name.startsWith('mcp__fixture__'))!;
   const initial=owner.snapshot();const implementation=initial.implementationIdentity;initial.release();
-  const patch=async(enabled:boolean)=>{const opened=f.mcp.open(f.scope(identity.threadId));try{await f.mcp.updateConfig(opened.scope,'fixture',{enabled});}finally{f.mcp.closeScope(opened.scope);}};
+  const patch=async(enabled:boolean)=>{const opened=await f.mcp.open(f.scope(identity.threadId));try{await f.mcp.updateConfig(opened.scope,'fixture',{enabled});}finally{f.mcp.closeScope(opened.scope);}};
   await patch(false);await expect.poll(ready,{timeout:15_000}).toBe(false);
   await patch(true);await expect.poll(ready,{timeout:15_000}).toBe(true);
   const next=owner.snapshot();expect(next.implementationIdentity).not.toBe(implementation);next.release();

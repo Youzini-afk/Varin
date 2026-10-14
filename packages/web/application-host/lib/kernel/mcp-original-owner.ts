@@ -1,7 +1,7 @@
 /** Reacquire an original frozen MCP owner without replacing its source, endpoint or credentials. */
 import { stat } from 'node:fs/promises';
-import { McpAuthorityError } from '@varin/pi-host/mcp-errors';
-import type { McpAuthority, McpAuthorityLease } from '@varin/pi-host/mcp-authority';
+import { McpAuthorityError } from '../mcp/errors.js';
+import type { McpAuthority, McpAuthorityLease } from '../mcp/authority.js';
 import type { KernelClient } from './kernel-client.js';
 import type { McpEndpoint, LaunchSource, McpBinding } from './protocol.generated.js';
 import { admitMaterializedRoot, originalMaterializationLocation } from './source-launch.js';

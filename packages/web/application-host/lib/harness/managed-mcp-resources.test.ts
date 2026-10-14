@@ -1,5 +1,5 @@
 import { expect, it } from 'vitest';
-import type { McpAuthorityService, McpResourceChange, McpResourceRelease } from '@varin/pi-host/mcp-authority';
+import type { McpAuthorityService, McpResourceChange, McpResourceRelease } from '../mcp/authority.js';
 import type { McpResourceBinding, SourceMcpCreationOutcome, SourceMcpHolder } from '../kernel/protocol.generated.js';
 import { createManagedMcpResources } from './managed-mcp-resources.js';
 import type { ManagedMcpResourceAction } from './managed-mcp-contract.js';

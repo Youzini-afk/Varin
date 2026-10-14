@@ -1,5 +1,5 @@
 import { expect, it, vi } from 'vitest';
-import type { McpInteractionRequest } from '@varin/pi-host/mcp-authority';
+import type { McpInteractionRequest } from '../mcp/authority.js';
 import type { KernelClient } from './kernel-client.js';
 import type { McpInteractionBinding, McpInteractionRecord, McpInteractionView, McpElicitationResponse, KernelMethodParams } from './protocol.generated.js';
 import { createMcpInteractionRuntime } from './mcp-interaction-runtime.js';

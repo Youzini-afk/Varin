@@ -50,7 +50,8 @@ Web / Electron / mobile renderer
 | 普通 Agent 笔记与指令编辑 | Host personalization / Rust typed record | 显式笔记不依赖语义召回或后台提炼 |
 | 计划、Bot 知识、观察、符号图 | 现有 KnowledgeStore 私有 writer | CAS 和来源与真正提交修改的 owner 同在 |
 | 语义向量与索引 | 独立派生存储进程 | 长索引任务不能占满计划/记忆写入队列 |
-| 模型凭据、包配置 | 现有 Host/Pi/provider owner | renderer 和耐久 prompt 不持有密钥 |
+| Agent 模型渠道、账号、用途设置与 MCP | Host models / credentials / mcp 服务 | 与 Pi 的模型及配置资产分开；renderer 和耐久 prompt 不持有密钥 |
+| Pi 模型、凭据与包配置 | Pi/provider owner | 保留旧会话的原配置和账号归属 |
 | 外壳、布局、视图状态 | UI kernel 与选中扩展 | 呈现切换不能重建文档、终端或会话 |
 
 Host 的 Pi Thread/Run registry 协调 Pi 工作，不是 Rust Agent Catalog。共享恢复、排程、Bot 和 Computer 边界通过

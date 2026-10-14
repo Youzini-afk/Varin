@@ -1,7 +1,7 @@
 /** Original target MCP Task references. Catalog and Task scheduling stay on the coordinator. */
 import { createHash } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
-import type { McpAuthorityLease, McpTaskLease, McpTaskResponse } from '@varin/pi-host/mcp-authority';
+import type { McpAuthorityLease, McpTaskLease, McpTaskResponse } from '../mcp/authority.js';
 import type { KernelClient } from '../kernel/kernel-client.js';
 import type { SourceAuthorityAddress, SourceMcpHolderBinding, SourceMcpHolder, SourceMcpCreationOutcome,
   SourceMcpCreationReceiptResult, SourceMcpHolderResult } from '../kernel/protocol.generated.js';

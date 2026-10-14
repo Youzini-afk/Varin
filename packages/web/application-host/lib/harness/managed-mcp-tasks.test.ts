@@ -90,7 +90,7 @@ it('an original release tombstone rejects late start and changed Operation bindi
 });
 it('uses the real coordinator projection across Run release, preserving typed errors and detached durable ownership', async () => {
   const { createManagedMcpTaskLease } = await import('../kernel/managed-mcp-task-lease.js');
-  const { McpTaskRequestError } = await import('@varin/pi-host/mcp-errors');
+  const { McpTaskRequestError } = await import('../mcp/errors.js');
   const f = fixture(), run = new AbortController(), signal = new AbortController().signal;
   let failControl = false;
   const client = { async service(input: { operation: { action: ManagedMcpTaskAction } }, active: AbortSignal) {

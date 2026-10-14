@@ -1,7 +1,7 @@
 /** One-shot child execution preparation. Storage owns proof; ordinary views own RPC admission. */
 import { isDeepStrictEqual } from 'node:util';
 import { composeMcpAuthorityLeases, type McpAuthority, type McpAuthorityOwnedLease, type McpAuthorityScope,
-  type McpCompositionSnapshot, type McpDefinitionLease } from '@varin/pi-host/mcp-authority';
+  type McpCompositionSnapshot, type McpDefinitionLease } from '../mcp/authority.js';
 import type { KernelClient } from '../kernel/kernel-client.js';
 import type { McpBinding, McpChildDerivationReceipt, McpProvenance, SourceAuthorityAddress,
   SourceMcpDerivationOutcome, SourceMcpDerivationResult } from '../kernel/protocol.generated.js';

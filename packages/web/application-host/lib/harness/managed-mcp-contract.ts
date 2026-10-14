@@ -1,5 +1,5 @@
 /** Closed source-local MCP requests. No paths, credentials or arbitrary Host method names. */
-import type { McpAuthorityBinding, McpAuthorityService, McpServiceRequest, McpInteractionOrigin } from '@varin/pi-host/mcp-authority';
+import type { McpAuthorityBinding, McpAuthorityService, McpServiceRequest, McpInteractionOrigin } from '../mcp/authority.js';
 import type { McpBinding, McpEndpoint, McpResourceBinding, McpInteractionBinding, SourceMcpDeliveryReceipt, SourceMcpHolderBinding, SourceMcpCreationOutcome, SourceMcpChildBinding, McpChildDerivationOrigin, McpChildDerivationReceipt, SourceMcpDerivationResult } from '../kernel/protocol.generated.js';
 
 /** The body projection crosses the content lane, never an authority control snapshot. */
@@ -40,7 +40,7 @@ export function isManagedMcpResourceContinuation(action: ManagedMcpAction): acti
 export interface ManagedMcpResourceSnapshot {
   listenerId: string;
   revision: number;
-  changes: Array<{ revision: number; change: import('@varin/pi-host/mcp-authority').McpResourceChange }>;
+  changes: Array<{ revision: number; change: import('../mcp/authority.js').McpResourceChange }>;
 }
 /** Original SDK responders are observed over the authenticated Source address. */
 export type ManagedMcpInteractionResponse =
@@ -73,6 +73,7 @@ export type ManagedMcpAction = ManagedMcpTaskAction | ManagedMcpResourceAction |
   | { kind: 'changed'; incarnation: string; after: number }
   | { kind: 'release'; handleId: string; creationRequestId: string }
   | { kind: 'discover'; handleId: string; server: string }
+  | { kind: 'cached_tools'; handleId: string }
   | { kind: 'prepare_tool'; handleId: string; server: string; tool: string; schemaVersion: string }
   | { kind: 'discover_services'; handleId: string; server: string }
   | { kind: 'prepare_service'; handleId: string; server: string; serviceKind: McpAuthorityService['kind']; schemaVersion: string }

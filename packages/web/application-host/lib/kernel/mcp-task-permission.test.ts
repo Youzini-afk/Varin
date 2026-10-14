@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { McpAuthority } from '@varin/pi-host/mcp-authority';
+import { McpAuthority } from '../mcp/authority.js';
 import { createMcpLease } from './mcp-owner.js';
 import { permissionService } from './permission-service.js';
 import { MCP_CAPABILITIES, type HostToolCall } from './protocol.generated.js';

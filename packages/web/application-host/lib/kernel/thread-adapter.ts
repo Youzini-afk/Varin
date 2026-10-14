@@ -416,7 +416,7 @@ export class ThreadAdapter {
       const configuration = run.configuration as ModelSessionConfiguration;
       if (previous.request.branch_id !== input.branchId || previous.request.through_id !== input.throughId
         || previous.request.expected_revision !== input.expectedRevision || previous.request.owner_run_id
-        || configuration.providerId !== input.model.providerId || configuration.model !== input.model.modelId
+        || configuration.providerId !== input.model.providerId || ((configuration.modelOptions as { catalogModelId?: string } | undefined)?.catalogModelId ?? configuration.model) !== input.model.modelId
         || input.model.thinkingLevel !== undefined && configuration.thinkingLevel !== input.model.thinkingLevel
         || input.model.temperature !== undefined && (configuration.modelOptions as { temperature?: number } | undefined)?.temperature !== input.model.temperature) {
         throw new Error('Context job key already belongs to another selection');

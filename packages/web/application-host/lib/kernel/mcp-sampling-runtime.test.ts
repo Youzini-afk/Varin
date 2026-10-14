@@ -1,5 +1,5 @@
 import { expect, it, vi } from 'vitest';
-import { McpSamplingRejectedError, type McpInteractionRequest } from '@varin/pi-host/mcp-authority';
+import { McpSamplingRejectedError, type McpInteractionRequest } from '../mcp/authority.js';
 import { createMcpInteractionRuntime, type SamplingModelSelection } from './mcp-interaction-runtime.js';
 import type { KernelClient } from './kernel-client.js';
 import type { McpInteractionRecord, McpInteractionView, McpSamplingGeneration } from './protocol.generated.js';

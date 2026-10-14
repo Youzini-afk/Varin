@@ -1,7 +1,7 @@
 /** Target MCP pipes under the original Source grant and native process receipts. */
 import { randomUUID } from 'node:crypto';
 import path from 'node:path';
-import { StdioTransport, StreamableHttpTransport, type McpTransport, type StdioTransportOptions } from '@varin/pi-host/mcp-authority';
+import { StdioTransport, StreamableHttpTransport, type McpTransport, type StdioTransportOptions } from '../mcp/authority.js';
 import { KernelManagedProcess } from './process-service.js';
 import type { KernelClient } from './kernel-client.js';
 import { KernelRequestError } from './kernel-error.js';

@@ -1,7 +1,7 @@
 /** Local notification projection of one original target observer. No remote replay cursor. */
 import { randomUUID } from 'node:crypto';
-import { McpAuthorityError } from '@varin/pi-host/mcp-errors';
-import type { McpResourceObserver, McpResourceChange, McpResourceRelease } from '@varin/pi-host/mcp-authority';
+import { McpAuthorityError } from '../mcp/errors.js';
+import type { McpResourceObserver, McpResourceChange, McpResourceRelease } from '../mcp/authority.js';
 import type { ManagedSourceClient } from '../harness/managed-remote-client.js';
 import type { ManagedSourceAddress } from '../harness/managed-remote-types.js';
 import type { ManagedMcpResourceAction, ManagedMcpResourceSnapshot } from '../harness/managed-mcp-contract.js';

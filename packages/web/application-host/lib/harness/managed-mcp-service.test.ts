@@ -1,7 +1,7 @@
 import { expect, it } from 'vitest';
 import { createManagedMcpService } from './managed-mcp-service.js';
 import type { ManagedSourceLocalScope } from './managed-remote-types.js';
-import type { McpAuthorityLease, McpAuthorityScope, McpCompositionScope } from '@varin/pi-host/mcp-authority';
+import type { McpAuthorityLease, McpAuthorityScope, McpCompositionScope } from '../mcp/authority.js';
 
 const original = (): ManagedSourceLocalScope => ({
   principal: { principalId: 'caller-a', capabilities: ['filesystem:read', 'terminal:use', 'process:control'] },

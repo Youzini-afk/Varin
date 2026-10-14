@@ -96,9 +96,11 @@ function validateSave(input: AgentProfileSaveRequest): void {
 
 export function createAgentProfilesAPI(owners: {
   settings: Pick<GlobalSettingsAuthority, 'read' | 'updateHarness'>;
+  agentSettings?: Pick<GlobalSettingsAuthority, 'read' | 'updateHarness'>;
   capabilities(signal?: AbortSignal): Promise<ChildCapabilityDescriptor[]>;
   onChanged?(): void;
 }): AgentProfilesAPI {
+  const settingsFor = (target: AgentRuntime) => target === 'agent' ? owners.agentSettings ?? owners.settings : owners.settings;
   const capabilities = async (target: AgentRuntime, signal?: AbortSignal) => {
     if (target === 'pi') return null;
     try { return await waitWithSignal(owners.capabilities(signal), signal); }
@@ -110,7 +112,7 @@ export function createAgentProfilesAPI(owners: {
   return {
     async read(input, signal) {
       const target = runtime(input.runtime);
-      const [snapshot, tools] = await Promise.all([waitWithSignal(owners.settings.read(), signal), capabilities(target, signal)]);
+      const [snapshot, tools] = await Promise.all([waitWithSignal(settingsFor(target).read(), signal), capabilities(target, signal)]);
       return project(snapshot, target, tools);
     },
     async save(input, signal) {
@@ -127,7 +129,7 @@ export function createAgentProfilesAPI(owners: {
       if (config.kind === 'custom' && profileId !== undefined && profileId !== `varin:custom:${config.key}`) invalid('The selected agent identity changed. Reload agent settings.');
       signal?.throwIfAborted();
       // The callback sees the current document protected by the original revision CAS.
-      const snapshot = await owners.settings.updateHarness(input.expectedRevision, harness => {
+      const snapshot = await settingsFor(target).updateHarness(input.expectedRevision, harness => {
         const selected = mergeHarnessSettings(harness as HarnessSettingsInput, {});
         if (config.kind === 'builtin') {
           const original = selected.models[config.slot];
@@ -155,7 +157,7 @@ export function createAgentProfilesAPI(owners: {
       if (typeof input.id !== 'string' || !input.id.startsWith('varin:custom:')) invalid('Only custom agent profiles can be deleted.');
       const tools = await capabilities(target, signal);
       signal?.throwIfAborted();
-      const snapshot = await owners.settings.updateHarness(input.expectedRevision, harness => {
+      const snapshot = await settingsFor(target).updateHarness(input.expectedRevision, harness => {
         const key = input.id.slice('varin:custom:'.length);
         const selected = mergeHarnessSettings(harness as HarnessSettingsInput, {});
         if (!Object.hasOwn(selected.agents, key)) throw new ProfileRequestFailure('agent-profile-not-found', 'This agent was removed. Reload agent settings.');

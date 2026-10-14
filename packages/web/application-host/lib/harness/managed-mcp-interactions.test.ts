@@ -1,7 +1,7 @@
 import { expect, it } from 'vitest';
 import { createHash } from 'node:crypto';
-import { McpSamplingRejectedError } from '@varin/pi-host/mcp-errors';
-import type { McpInteractionRequest, McpErrorInteractionItem } from '@varin/pi-host/mcp-authority';
+import { McpSamplingRejectedError } from '../mcp/errors.js';
+import type { McpInteractionRequest, McpErrorInteractionItem } from '../mcp/authority.js';
 import type { McpInteractionBinding, SourceMcpDeliveryParams, SourceMcpDeliveryReceipt, SourceMcpDeliveryResult, SourceMcpHolderBinding } from '../kernel/protocol.generated.js';
 import type { ManagedMcpInteractionAction, ManagedMcpInteractionInspection, ManagedMcpInteractionSnapshot } from './managed-mcp-contract.js';
 import { createManagedMcpInteractions, type ManagedMcpInteractionScope } from './managed-mcp-interactions.js';
@@ -221,7 +221,7 @@ it('routes the actual managed service callback only under its exact original con
     source: { resource_owner: { kind: 'managed_host', hostId: 'target', connectionId: 'connection', endpointIdentity: 'endpoint' },
       workspace_id: 'workspace', execution_workspace_id: 'child', mode: 'materialized', branch_id: 'branch', revision: 4, live_root: null },
     physicalRoot: { hostId: 'target', canonicalRoot: '/target/child', rootId: 'root' }, grant: {} as never };
-  let originalScope!: import('@varin/pi-host/mcp-authority').McpAuthorityScope, forwarded: unknown;
+  let originalScope!: import('../mcp/authority.js').McpAuthorityScope, forwarded: unknown;
   const service = createManagedMcpService({ hostId: 'target', agentDir: '/target/agent', kernel: {
     sourceRequest: async (method: string, params: SourceMcpDeliveryParams) => method === 'source.authority.inspect'
       ? { purpose: 'mcp_owner', source: local.source } : f.kernel.sourceRequest(method, params),
@@ -233,8 +233,8 @@ it('routes the actual managed service callback only under its exact original con
           implementationIdentity: 'original-sdk', release() {}, revocationSignal: signal,
           async callTool(_name: string, _args: unknown, options: { beforeDispatch?: () => Promise<void>; interaction?: unknown }) {
             await options.beforeDispatch?.(); forwarded = options.interaction; return { content: [] };
-          } } as unknown as import('@varin/pi-host/mcp-authority').McpAuthorityLease;
-      } } as import('@varin/pi-host/mcp-authority').McpCompositionScope;
+          } } as unknown as import('../mcp/authority.js').McpAuthorityLease;
+      } } as import('../mcp/authority.js').McpCompositionScope;
     } },
   });
   expect(await service.request(local, { kind: 'snapshot', handleId: 'view', creationRequestId: 'creation' })).toMatchObject({ ok: true });

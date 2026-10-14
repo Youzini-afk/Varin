@@ -1,4 +1,6 @@
 import { ENVIRONMENT_FORWARD_CAPABILITY, ENVIRONMENT_FORWARD_TOOL_DECLARATIONS, VARIN_BUILTIN_ENVIRONMENT_FORWARD_EXTENSION_ID } from './environment-forward-tools.js';
+import { IMAGES_CAPABILITY, IMAGE_TOOL_DECLARATIONS, VARIN_BUILTIN_IMAGES_EXTENSION_ID } from './image-tools.js';
+export { IMAGES_CAPABILITY, IMAGE_TOOL_DECLARATIONS, VARIN_BUILTIN_IMAGES_EXTENSION_ID, imageToolDeclaration } from './image-tools.js';
 export { ENVIRONMENT_FORWARD_CAPABILITY, ENVIRONMENT_FORWARD_TOOL_DECLARATIONS, VARIN_BUILTIN_ENVIRONMENT_FORWARD_EXTENSION_ID } from './environment-forward-tools.js';
 import { EXTENSION_PACKAGE_TOOL_DECLARATION, RUNTIME_CONTRACT_TOOL_DECLARATIONS, VARIN_BUILTIN_RUNTIME_CONTRACTS_EXTENSION_ID } from './runtime-contract-tools.js';
 export { EXTENSION_PACKAGE_TOOL_DECLARATION, RUNTIME_CONTRACT_TOOL_DECLARATIONS, VARIN_BUILTIN_RUNTIME_CONTRACTS_EXTENSION_ID } from './runtime-contract-tools.js';
@@ -625,6 +627,13 @@ export const VARIN_BUILTIN_RESEARCH_DECISION_EXTENSION: VarinBuiltinExtensionDef
     capabilities: { host: [RESEARCH_DECISION_CAPABILITY] }, provides: { services: [...RESEARCH_DECISION_TOOL_DECLARATIONS] } },
 };
 
+export const VARIN_BUILTIN_IMAGES_EXTENSION: VarinBuiltinExtensionDefinition = {
+  enabledByDefault: true,
+  manifest: { id: VARIN_BUILTIN_IMAGES_EXTENSION_ID, displayName: 'Image generation and editing', version: '1.0.0', schemaVersion: 1, engines: { varin: '*' },
+    entrypoints: { host: { activation: ['service-request'], file: 'host.cjs', mode: 'brokered' } },
+    capabilities: { host: [IMAGES_CAPABILITY] }, provides: { services: [...IMAGE_TOOL_DECLARATIONS] } },
+};
+
 export const VARIN_BUILTIN_RESEARCH_DISCOVERY_EXTENSION: VarinBuiltinExtensionDefinition = {
   enabledByDefault: true,
   manifest: { id: VARIN_BUILTIN_RESEARCH_DISCOVERY_EXTENSION_ID, displayName: 'Scholarly discovery', version: '1.0.0', schemaVersion: 1, engines: { varin: '*' },
@@ -750,6 +759,7 @@ export const VARIN_BUILTIN_EXTENSION_DEFINITIONS: readonly VarinBuiltinExtension
   VARIN_BUILTIN_WEB_EXTENSION,
   VARIN_BUILTIN_RESEARCH_DISCOVERY_EXTENSION,
   VARIN_BUILTIN_RESEARCH_DECISION_EXTENSION,
+  VARIN_BUILTIN_IMAGES_EXTENSION,
   VARIN_BUILTIN_SCRIPT_EXTENSION,
   VARIN_BUILTIN_RUNTIME_CONTRACTS_EXTENSION,
   VARIN_BUILTIN_RETRIEVAL_STRUCTURED_EXTENSION,

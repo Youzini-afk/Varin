@@ -2,7 +2,7 @@ import { EventEmitter } from 'node:events';
 import type { Express, Request, RequestHandler, Response as ExpressResponse } from 'express';
 import { afterEach, expect, it, vi } from 'vitest';
 import { createThreadsHttpAPI } from '@varin/application-client';
-import type { McpAuthorityLease, McpAuthorityService, McpResourceChange, McpResourceRelease } from '@varin/pi-host/mcp-authority';
+import type { McpAuthorityLease, McpAuthorityService, McpResourceChange, McpResourceRelease } from '../mcp/authority.js';
 import type { ThreadIdentity } from '@varin/application-client';
 import { AgentRuntimeClient } from './agent-runtime-client.js';
 import { KernelClientError, type KernelClient } from './kernel-client.js';

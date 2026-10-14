@@ -1,7 +1,7 @@
 import { resourceScopeFixture } from './resource-scope.test-helper.js';
 import { createMcpLease } from './mcp-owner.js';
 import { createMemoryOwner } from './memory-owner.js';
-import type { McpAuthorityLease } from '@varin/pi-host/mcp-authority';
+import type { McpAuthorityLease } from '../mcp/authority.js';
 import type { PermissionPolicy } from '@varin/protocol';
 import { createThreadContext } from './thread-context.js';
 import { createAgentPersonalization } from '../memory/agent-personalization.js';
@@ -96,6 +96,7 @@ async function fixture(reply: (body: Record<string, unknown>, response: ServerRe
         servers: [{ name: 'fixture-server', description: 'Fixture', resourceKey: 'fixture-server:effect', hasDirectTools: true, exposure: 'direct', configurationScope: 'global', executionScope: 'global', status: 'connected', cachedToolCount: 0, connectedToolCount: 1, selected: true }], tools: [{ name: 'fixture_send', server: 'fixture-server', tool: 'send', schemaVersion: 'schema-1', taskSupport:'forbidden', taskCapable:false, resourceKey: 'fixture-server:effect', configurationScope: 'global', executionScope: 'global', exposure: 'direct', description: 'Send exact text to the fixture sink', annotations: { readOnlyHint: true }, inputSchema: { type: 'object', properties: { text: { type: 'string' } }, required: ['text'], additionalProperties: false } }] },
       inspect: () => ({ configErrorCount: 0, configuredServerCount: 1, connectedServerCount: 1, cachedToolCount: 0, servers: [] }),
       async discover() { throw new Error('unexpected fixture discovery'); },
+      async cachedTools() { return []; },
       async prepareTool() { throw new Error('unexpected deferred fixture tool'); },
       assertCallable() { if (released || !callable) throw new Error('fixture_owner_changed'); },
       revocationSignal: () => revocation.signal,

@@ -38,7 +38,8 @@ export function createChildProfilePreparer(owners: {
     }
     const descriptors = await waitWithSignal(owners.capabilities(signal), signal);
     const parent = input.parent;
-    const main = parent.configuration.providerId ? { providerId: parent.configuration.providerId, modelId: parent.configuration.model } : null;
+    const catalogModelId = (parent.configuration.modelOptions as { catalogModelId?: string } | undefined)?.catalogModelId ?? parent.configuration.model;
+    const main = parent.configuration.providerId ? { providerId: parent.configuration.providerId, modelId: catalogModelId } : null;
     const observations = observePresets(settings.models, main, settings.agents, input.workFocus, 'agent', agentPresetTools(descriptors));
     const presets = await Promise.all(observations.map(async (entry): Promise<ChildPreset> => {
       const definition = entry.definition;

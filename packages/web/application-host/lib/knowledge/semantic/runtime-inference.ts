@@ -28,6 +28,8 @@ export interface SemanticProviderBinding {
   assertAvailable(): Promise<void>;
   currentScope(): Promise<CredentialScope>;
   getAuth(): ReturnType<ExistingModelAuthRuntime['getAuth']>;
+  allowAnonymous?: boolean;
+  requestModelId?: string;
 }
 export interface SemanticInferenceAuthority extends Partial<DecisionInferenceAuthority>, Partial<RerankInferenceAuthority> {
   resolveEmbeddingBinding(providerId: string, modelId: string): Promise<SemanticProviderBinding>;
@@ -158,7 +160,7 @@ export function createSemanticInference(
         endpoint: provider.requestUrl, credentialScope: Object.freeze({ ...provider.credentialScope }) });
       const credentials = new ExistingHostCredentialOwner({ providerId: provider.credentialRef,
         providerFamily: 'openai-completions', endpoint: provider.requestUrl,
-        currentScope: provider.currentScope, runtime: { getAuth: provider.getAuth } });
+        currentScope: provider.currentScope, runtime: { getAuth: provider.getAuth }, allowAnonymous: provider.allowAnonymous ?? false });
       let references = 0;
       let revoked = false;
       const retain = (): SemanticInferenceLease => {
@@ -220,7 +222,7 @@ export function createSemanticInference(
             }
             const connection = await options.requests.egress.prepare(provider.requestUrl);
             const result = await requestOpenAICompatibleEmbeddings({ baseUrl: provider.baseUrl,
-              ...(provider.endpoint ? { endpoint: provider.endpoint } : {}), model: binding.modelId,
+              ...(provider.endpoint ? { endpoint: provider.endpoint } : {}), model: provider.requestModelId ?? binding.modelId,
               input: params.items.map(item => item.text), ...(binding.dimensions === undefined ? {} : { dimensions: binding.dimensions }),
               signal, maxRetries: 0, redirect: 'manual',
               beforeDispatch: async request => {
@@ -243,7 +245,7 @@ export function createSemanticInference(
                   observe: raw => {
                     const usage = embeddingWireUsage(raw);
                     let valid = false;
-                    try { parseOpenAICompatibleEmbeddings(raw, { input: params.items.map(item => item.text), model: binding.modelId,
+                    try { parseOpenAICompatibleEmbeddings(raw, { input: params.items.map(item => item.text), model: provider.requestModelId ?? binding.modelId,
                       ...(binding.dimensions === undefined ? {} : { dimensions: binding.dimensions }) }); valid = true; } catch { /* Original usage precedes vector validation. */ }
                     return { valid, rawUsage: record(raw) ? raw.usage ?? null : null,
                       ...(usage ? { usage: { measurement: 'actual' as const, inputTokens: usage.inputTokens ?? null, outputTokens: null } } : {}) };
@@ -331,7 +333,7 @@ export function createSemanticInference(
               token = admission.token;
               transportConstructed = true;
               const request = requestOpenAICompatibleEmbeddings({ baseUrl: provider.baseUrl,
-                ...(provider.endpoint ? { endpoint: provider.endpoint } : {}), model: binding.modelId,
+                ...(provider.endpoint ? { endpoint: provider.endpoint } : {}), model: provider.requestModelId ?? binding.modelId,
                 input: params.items.map(item => item.text), ...(binding.dimensions === undefined ? {} : { dimensions: binding.dimensions }),
                 signal, maxRetries: 0, redirect: 'error', ...(options.fetchImpl ? { fetchImpl: options.fetchImpl } : {}),
                 beforeDispatch: async request => {

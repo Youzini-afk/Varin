@@ -734,7 +734,7 @@ it('retries summary generation without duplicating the job and applies its compl
   f.view.historyPage = { head: 'summary-cut', previous: null };
   const run = { ...initialSnapshot(true).activeRun!, id: 'summary-run', state: 'completed' as const };
   const compact = vi.fn<ThreadsAPI['compact']>().mockRejectedValueOnce(new Error('uncertain summary acceptance')).mockImplementation(async input => {
-    const job = { request: { summary_recipe: { strategy: { kind: 'builtin' as const, name: 'manual', version: '1' }, mode: 'manual' as const, configurationIdentity: null, additionalInstructions: null }, key: input.key, branch_id: input.branchId, through_id: input.throughId, expected_revision: input.expectedRevision, effective_system_prompt: '', instruction_sources: [], memory_checkpoint: null }, receipt: { thread_id: 'context-job-thread:fixture', branch_id: 'context-job-branch:fixture', run_id: run.id, input_id: 'summary-input', cursor: 2 } };
+    const job = { compaction: { producer: { kind: 'builtin' as const, name: 'fold' as const, version: '1' as const }, kind: 'model_plan' as const, sourceCutHash: 'fixture-cut', planHash: 'fixture-plan' }, request: { compaction: null, summary_recipe: { strategy: { kind: 'builtin' as const, name: 'manual', version: '1' }, mode: 'manual' as const, configurationIdentity: null, additionalInstructions: null }, key: input.key, branch_id: input.branchId, through_id: input.throughId, expected_revision: input.expectedRevision, effective_system_prompt: '', instruction_sources: [], memory_checkpoint: null }, receipt: { thread_id: 'context-job-thread:fixture', branch_id: 'context-job-branch:fixture', run_id: run.id, input_id: 'summary-input', cursor: 2 } };
     f.view.context.jobs = [{ job, run }];
     return job;
   });
@@ -2109,7 +2109,7 @@ it('keeps accepted remote task control after its Run ends and distinguishes canc
     host_job: { binding: { operationId: 'local:original-dispatch', executionOwner: { kind: 'external', identity: 'original-mcp', epoch: 'original-owner' },
       domain: 'mcp', domainVersion: 1, subject: { kind: 'mcp', dispatchId: 'local:original-dispatch',
         endpoint: { server: 'original-server', resourceKey: 'original-server-resource', configurationVersion: 'configuration', credentialVersion: 'opaque-grant' } } },
-      acceptanceRef: 'original-acceptance', mcpTask: { revision: 1, task: { taskId: 'remote:receiver-task', status: 'working', createdAt: '2026-10-11T18:00:00Z', lastUpdatedAt: '2026-10-11T18:00:01Z', ttl: null },
+      mcpHolderReleased: false, acceptanceRef: 'original-acceptance', mcpTask: { revision: 1, task: { taskId: 'remote:receiver-task', status: 'working', createdAt: '2026-10-11T18:00:00Z', lastUpdatedAt: '2026-10-11T18:00:01Z', ttl: null },
         observationRef: 'original-observation', availability: 'available', resultReady: false } },
   };
   f.view.operations = [operation];
@@ -2161,7 +2161,7 @@ function resourceObservation(): ThreadSnapshot['operations'][number] {
         endpoint: { server: 'original-resource-server', resourceKey: 'original-resource-key', configurationVersion: 'frozen-config', credentialVersion: 'original-grant' },
         schemaVersion: 'original-resources-schema', uri: 'file:///opaque/server-resource?revision=original' },
       sourceScope: 'workspace', acceptanceRef: { content_object: 'resource-acceptance' }, listenerId: 'original-listener',
-      availability: 'active', localReleased: false, remoteCleanup: 'not_requested', lastEventCursor: 11, problem: null,
+      availability: 'active', mcpHolderReleased: false, localReleased: false, remoteCleanup: 'not_requested', lastEventCursor: 11, problem: null,
     },
   };
 }

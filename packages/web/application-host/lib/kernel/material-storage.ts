@@ -29,7 +29,7 @@ export function createMaterialStorageAccess(options: {
         // interpret explicit grants/persisted collections. It does not authorize
         // writes: only the original mutation entrances receive storage.write.
         capabilities: ['storage.read', 'storage.maintenance',
-          ...(['web-snapshot-put', 'material-collections-write'].includes(purpose) ? ['storage.write'] : [])],
+          ...(['web-snapshot-put', 'material-collections-write', 'media-resource-put'].includes(purpose) ? ['storage.write'] : [])],
       });
       try {
         const context = await options.storage.contextFromBranchGrant({ grant,

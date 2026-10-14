@@ -1,7 +1,7 @@
 import {
   McpConnectionClosedError, McpMessageTooLargeError, parseJsonRpcMessage,
   type JsonRpcMessage, type McpTransport, type StdioTransportOptions,
-} from '@varin/pi-host/mcp-authority';
+} from '../mcp/authority.js';
 import {
   launchOwnedProcess, ManagedProcessLaunchError, terminateManagedProcess,
   type ManagedPipedProcessHandle, type ManagedProcessOwner,

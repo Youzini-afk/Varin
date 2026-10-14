@@ -209,9 +209,9 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
   const branch = snapshot?.thread.branches.find(value => value.branch_id === identity.branchId);
   const run = snapshot?.activeRun ?? branch?.latest_run;
   const samplingConfiguration = (snapshot?.modelSelection.active?.configuration ?? run?.configuration) as
-    { providerId?: string; model?: string; thinkingLevel?: ThreadThinkingLevel; modelOptions?: { temperature?: number } } | undefined;
+    { providerId?: string; model?: string; thinkingLevel?: ThreadThinkingLevel; modelOptions?: { temperature?: number; catalogModelId?: string } } | undefined;
   const samplingModel: ThreadModel | undefined = samplingConfiguration?.providerId && samplingConfiguration.model ? {
-    providerId: samplingConfiguration.providerId, modelId: samplingConfiguration.model,
+    providerId: samplingConfiguration.providerId, modelId: samplingConfiguration.modelOptions?.catalogModelId ?? samplingConfiguration.model,
     ...(samplingConfiguration.thinkingLevel === undefined ? {} : { thinkingLevel: samplingConfiguration.thinkingLevel }),
     ...(samplingConfiguration.modelOptions?.temperature === undefined ? {} : { temperature: samplingConfiguration.modelOptions.temperature }),
   } : undefined;
@@ -230,8 +230,8 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
   const acceptsImages = active || delegated ? (run?.configuration as { acceptsImages?: boolean } | undefined)?.acceptsImages
     : models.find(model => model.providerId === providerId && model.modelId === modelId)?.acceptsImages;
   React.useEffect(() => {
-    const config = (snapshot?.modelSelection.desired?.configuration ?? run?.configuration) as { providerId?: string; model?: string; thinkingLevel?: ThreadThinkingLevel } | undefined;
-    if (config?.providerId && config.model && (active || !providerId && preferredModel === undefined)) { setProviderId(config.providerId); setModelId(config.model); setThinkingLevel(config.thinkingLevel ?? 'off'); }
+    const config = (snapshot?.modelSelection.desired?.configuration ?? run?.configuration) as { providerId?: string; model?: string; thinkingLevel?: ThreadThinkingLevel; modelOptions?: { catalogModelId?: string } } | undefined;
+    if (config?.providerId && config.model && (active || !providerId && preferredModel === undefined)) { setProviderId(config.providerId); setModelId(config.modelOptions?.catalogModelId ?? config.model); setThinkingLevel(config.thinkingLevel ?? 'off'); }
   }, [run?.configuration, snapshot?.modelSelection.desired, active, providerId, preferredModel]);
   React.useEffect(() => {
     if (!snapshot || preferredModel === undefined) return;

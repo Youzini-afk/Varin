@@ -1,7 +1,7 @@
 /** Recover original acknowledgements/views; creation and cleanup never substitute a new owner. */
 import { isDeepStrictEqual } from 'node:util';
-import { McpAuthorityError } from '@varin/pi-host/mcp-errors';
-import type { McpResourceObserver, McpResourceChange, McpResourceRelease } from '@varin/pi-host/mcp-authority';
+import { McpAuthorityError } from '../mcp/errors.js';
+import type { McpResourceObserver, McpResourceChange, McpResourceRelease } from '../mcp/authority.js';
 import { evaluateGate, type PermissionPolicy } from '@varin/protocol';
 import type { McpResourcePending, LaunchSource, McpBinding, SourceMcpCreationOutcome, SourceMcpCreationError, Operation } from './protocol.generated.js';
 import type { McpResourceCreationRecovery } from './mcp-resource-runtime.js';
@@ -100,7 +100,7 @@ export function createMcpResourceRecovery(options: McpOriginalOwnerOptions & {
       if (observed.receipt?.outcome?.kind === 'accepted') throw new McpAuthorityError('mcp-resource-original-receipt-changed');
       return observed.receipt?.outcome ?? null;
     },
-    async cleanup(op: McpResourcePending, signal: AbortSignal, cleanup?: { interaction: import('@varin/pi-host/mcp-authority').McpInteractionOrigin; signal: AbortSignal }): Promise<McpResourceRelease> {
+    async cleanup(op: McpResourcePending, signal: AbortSignal, cleanup?: { interaction: import('../mcp/authority.js').McpInteractionOrigin; signal: AbortSignal }): Promise<McpResourceRelease> {
       const selected = await context(op, signal);
       if (selected.server.owner.resource_owner.kind !== 'managed_host') throw new McpAuthorityError('mcp-resource-cleanup-owner-changed');
       const target = await managed(selected, signal);

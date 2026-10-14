@@ -236,13 +236,18 @@ export const createSettingsFileStore = ({
   const writeUnlocked = async (settings: VarinSettingsDocument): Promise<void> => {
     assertObject(settings);
     await fsPromises.mkdir(directory, { recursive: true, mode: 0o700 });
-    if (processLike.platform !== 'win32') await fsPromises.chmod(directory, 0o700);
+    let mode = 0o600;
+    let preserveMode = false;
+    if (processLike.platform !== 'win32') {
+      try { mode = (await fsPromises.stat(resolvedPath)).mode & 0o777; preserveMode = true; }
+      catch (error) { if (errorCode(error) !== 'ENOENT') throw error; }
+    }
     const temporaryPath = `${resolvedPath}.tmp-${processLike.pid}-${randomUUID()}`;
     try {
-      await fsPromises.writeFile(temporaryPath, JSON.stringify(settings, null, 2), { encoding: 'utf8', mode: 0o600 });
-      if (processLike.platform !== 'win32') await fsPromises.chmod(temporaryPath, 0o600);
+      await fsPromises.writeFile(temporaryPath, JSON.stringify(settings, null, 2), { encoding: 'utf8', mode });
+      // Apply the existing file's mode to our replacement, independently of this process's umask.
+      if (preserveMode) await fsPromises.chmod(temporaryPath, mode);
       await replaceFile(temporaryPath);
-      if (processLike.platform !== 'win32') await fsPromises.chmod(resolvedPath, 0o600);
     } finally {
       await fsPromises.rm(temporaryPath, { force: true });
     }

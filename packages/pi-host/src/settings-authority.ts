@@ -2,7 +2,7 @@ import { join } from 'node:path';
 import { SettingsManager } from '@earendil-works/pi-coding-agent';
 import {
   HarnessSettingsValidationError, HarnessInferenceSettingsValidationError, PermissionPolicyValidationError,
-  mergeHarnessSettings, parseHarnessEmbeddingSettings, parseHarnessRerankSettings, parseHarnessFastDecisionSettings,
+  mergeHarnessSettings, parseHarnessEmbeddingSettings, parseHarnessRerankSettings, parseHarnessFastDecisionSettings, parseHarnessImageSettings,
   resolveHarnessCodeRetrievalSettings, resolveHarnessDocumentReadingSettings, resolveHarnessContextSettings,
   type HarnessSettingsInput, type HarnessContextSettings, type JsonValue, type PiSettingsSnapshot, type PiConfigScope,
 } from '@varin/protocol';
@@ -102,6 +102,7 @@ export async function commitSettingsUpdate(settings: SettingsManager, agentDir: 
     parseHarnessEmbeddingSettings(globalHarness.embedding);
     parseHarnessRerankSettings(globalHarness.rerank);
     parseHarnessFastDecisionSettings(globalHarness.fastDecision);
+    parseHarnessImageSettings(globalHarness.images);
     resolveHarnessCodeRetrievalSettings(globalHarness.codeRetrieval);
     resolveHarnessDocumentReadingSettings(globalHarness.documentReading);
     if (scope === "global") {

@@ -1,5 +1,5 @@
 import React from 'react';
-import { getRuntimeKey } from '@varin/application-client';
+import { createModelConnectionsHttpAPI, getRuntimeKey } from '@varin/application-client';
 import { getPiRuntimeConnection } from '@/lib/pi-runtime/client';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { reportSettingsSaveState } from '@/lib/persistence';
@@ -9,25 +9,26 @@ import { HarnessSettingsController } from './harness-settings-state';
 // Only retain controllers with unfinished edits when their page unmounts.
 const controllers = new Map<string, { controller: HarnessSettingsController; users: number }>();
 
-export function useHarnessSettings() {
+export function useHarnessSettings(runtime: 'agent' | 'pi' = 'agent') {
   const cwd = useDirectoryStore((state) => state.currentDirectory);
-  const targetKey = JSON.stringify([getRuntimeKey(), cwd]);
+  const targetKey = JSON.stringify([getRuntimeKey(), cwd, runtime]);
   const entry = React.useMemo(() => {
     const existing = controllers.get(targetKey);
     if (existing) return existing;
     // Capture this runtime connection; a delayed save cannot follow a host switch.
-    const connection = getPiRuntimeConnection();
+    const connection = runtime === 'pi' ? getPiRuntimeConnection() : null;
+    const models = runtime === 'agent' ? createModelConnectionsHttpAPI() : null;
     const target = { cwd };
     const controller = new HarnessSettingsController({
-      read: async () => (await connection).client.request('settings.get', target),
-      write: async (harness, expectedRevision) => (await connection).client.request('settings.update', {
+      read: async () => models ? models.readSettings(cwd) : (await connection!).client.request('settings.get', target),
+      write: async (harness, expectedRevision) => models ? models.updateSettings({ cwd, scope: 'global', expectedRevision, set: { harness }, remove: [] }) : (await connection!).client.request('settings.update', {
         ...target, scope: 'global', expectedRevision, remove: [], set: { harness },
       }),
     });
     const next = { controller, users: 0 };
     controllers.set(targetKey, next);
     return next;
-  }, [cwd, targetKey]);
+  }, [cwd, targetKey, runtime]);
   const { controller } = entry;
   const state = React.useSyncExternalStore(controller.subscribe, controller.getSnapshot, controller.getSnapshot);
   React.useEffect(() => {
@@ -47,10 +48,10 @@ export function useHarnessSettings() {
     };
   }, [controller, entry, targetKey]);
   React.useEffect(() => subscribeVarinEvents((event) => {
-    if (event.type === 'settings-changed' && event.owner === 'pi-settings') {
+    if (event.type === 'settings-changed' && event.owner === (runtime === 'agent' ? 'agent-settings' : 'pi-settings')) {
       void controller.refresh();
     }
-  }), [controller]);
+  }), [controller, runtime]);
   React.useEffect(() => {
     if (state.status === 'saving' || state.status === 'saved' || state.status === 'error') {
       reportSettingsSaveState(state.status);
