@@ -1,6 +1,6 @@
 //! Durable ingress held outside the active history until a legal model boundary.
 use super::*;
-use crate::execution::{ConversationItem, InputBatch};
+use crate::execution::InputBatch;
 
 #[derive(Debug, Clone, Serialize, serde::Deserialize, PartialEq)]
 pub struct EnqueueInput {

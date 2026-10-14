@@ -75,7 +75,7 @@ fn pi_messages_fragmented_signed_thinking_and_tool_exchange_roundtrip() {
                 provenance: Provenance::Assistant,
                 content: item.content,
                 opaque: item.opaque,
-            }),
+            }.into()),
             _ => None,
         })
         .collect();
@@ -97,7 +97,7 @@ fn pi_messages_fragmented_signed_thinking_and_tool_exchange_roundtrip() {
             },
         },
         opaque: None,
-    });
+    }.into());
     let wire = provider.serialize(&replay).unwrap();
     assert_eq!(
         wire["context"]["messages"][0]["toolsAdded"][0]["name"],
@@ -207,7 +207,7 @@ fn responses_fragmented_utf8_opaque_tool_and_usage_roundtrip() {
             provenance: Provenance::Assistant,
             content: i.content,
             opaque: i.opaque,
-        })
+        }.into())
         .collect();
     let serialized = p.serialize(&v).unwrap();
     assert_eq!(serialized["input"][0], reasoning);
@@ -297,7 +297,7 @@ fn anthropic_signature_and_server_tool_remain_opaque() {
             provenance: Provenance::Assistant,
             content: i.content,
             opaque: i.opaque,
-        })
+        }.into())
         .collect();
     let out = p.serialize(&v).unwrap();
     assert_eq!(out["messages"][0]["content"][0]["signature"], "signed");
@@ -617,7 +617,7 @@ fn chat_complete_tool_fragments_replay_once_and_keep_usage_after_finish() {
             provenance: Provenance::Assistant,
             content: i.content,
             opaque: i.opaque,
-        })
+        }.into())
         .collect();
     let replay = p.serialize(&v).unwrap();
     assert_eq!(replay["messages"].as_array().unwrap().len(), 1);
@@ -741,7 +741,7 @@ fn google_signed_parts_replay_in_place_and_optional_call_ids_pair_by_name() {
             provenance: Provenance::Assistant,
             content: i.content,
             opaque: i.opaque,
-        })
+        }.into())
         .collect();
     v.history.push(ConversationItem {
         resource_activation: None,
@@ -761,7 +761,7 @@ fn google_signed_parts_replay_in_place_and_optional_call_ids_pair_by_name() {
             },
         },
         opaque: None,
-    });
+    }.into());
     let replay = p.serialize(&v).unwrap();
     assert_eq!(replay["contents"][0]["parts"][0], text);
     assert_eq!(replay["contents"][0]["parts"][1], call);
@@ -863,7 +863,7 @@ fn same_protocol_other_connection_never_receives_opaque_history() {
                     provenance: Provenance::Assistant,
                     content: item.content,
                     opaque: item.opaque,
-                })
+                }.into())
             } else {
                 None
             }
@@ -887,7 +887,7 @@ fn same_protocol_other_connection_never_receives_opaque_history() {
     assert!(changed.contains("portable answer"));
     v.binding.connection_identity.clear();
     for item in &mut v.history {
-        item.opaque.as_mut().unwrap().connection_identity.clear();
+        Arc::make_mut(item).opaque.as_mut().unwrap().connection_identity.clear();
     }
     let unidentified = p.serialize(&v).unwrap().to_string();
     assert!(!unidentified.contains("connection-owned"));
@@ -914,7 +914,7 @@ fn mistral_wire_id_collision_keeps_both_tool_result_pairs() {
                 },
             },
             opaque: None,
-        });
+        }.into());
     }
     for id in [&first, &second] {
         v.history.push(ConversationItem {
@@ -935,7 +935,7 @@ fn mistral_wire_id_collision_keeps_both_tool_result_pairs() {
                 },
             },
             opaque: None,
-        });
+        }.into());
     }
     let body = p.serialize(&v).unwrap();
     let calls = body["messages"][0]["tool_calls"].as_array().unwrap();
@@ -1091,7 +1091,7 @@ fn codex_fixture_separates_instructions_and_pins_session_headers() {
             },
             opaque: None,
         },
-    ];
+    ].into_iter().map(Into::into).collect();
     let body = provider.serialize(&v).unwrap();
     assert_eq!(body["instructions"], "Follow the fixture task");
     assert_eq!(body["input"].as_array().unwrap().len(), 1);
@@ -1185,12 +1185,12 @@ fn explicit_model_image_capability_rejects_attachment_before_request_serializati
             .unwrap(),
         },
         opaque: None,
-    });
+    }.into());
     assert_eq!(
         provider.serialize(&request).unwrap_err().code,
         "unsupported_model_image"
     );
-    request.history[0].content = Content::Text {
+    Arc::make_mut(&mut request.history[0]).content = Content::Text {
         text: "ordinary text".into(),
     };
     assert!(provider.serialize(&request).is_ok());
@@ -1283,7 +1283,7 @@ fn bedrock_fragmented_binary_preserves_reasoning_tool_and_trailing_usage() {
             provenance: Provenance::Assistant,
             content: item.content,
             opaque: item.opaque,
-        })
+        }.into())
         .collect();
     let replay = provider.serialize(&request).unwrap();
     assert_eq!(
@@ -1470,7 +1470,7 @@ fn policy_output_is_assistant_history_in_every_provider_family() {
                 text: "独立交付 🧭".into(),
             },
             opaque: None,
-        });
+        }.into());
         let wire = provider
             .serialize(&request)
             .unwrap_or_else(|error| panic!("{family}: {error}"));
@@ -1543,7 +1543,7 @@ fn paired_media_view(family: &str, mime: &str) -> RequestView {
                 },
             },
             opaque: None,
-        });
+        }.into());
     }
     for call_id in ["first", "second"] {
         let mut output:crate::output::OutputBody=json!({"receipt":"complete","imageBase64":"ordinary-json-remains-data","type":"image","image":{"unrelated":true}}).into();
@@ -1592,7 +1592,7 @@ fn paired_media_view(family: &str, mime: &str) -> RequestView {
                 },
             },
             opaque: None,
-        });
+        }.into());
     }
     // Forces the buffered adapters to flush at the next semantic item, rather than only at EOF.
     request.history.push(ConversationItem {
@@ -1605,7 +1605,7 @@ fn paired_media_view(family: &str, mime: &str) -> RequestView {
             text: "next real user instruction".into(),
         },
         opaque: None,
-    });
+    }.into());
     crate::execution::validate_history_pairs(&request.history).unwrap();
     request
 }
@@ -1769,7 +1769,7 @@ fn external_and_sampling_media_outputs_keep_their_original_roles_in_each_protoco
                     output: content.clone(),
                 },
                 opaque: None,
-            }];
+            }].into_iter().map(Into::into).collect();
             let wire = media_provider(family, true).serialize(&request).unwrap();
             let encoded = wire.to_string();
             assert_eq!(encoded.matches(MEDIA_PNG).count(), 1, "{family}");
@@ -1816,7 +1816,7 @@ fn accepted_job_and_not_dispatched_receipts_keep_their_data_and_media_in_each_pr
     for family in MEDIA_FAMILIES {
         for with_content in [false, true] {
             let mut request = paired_media_view(family, "image/png");
-            let Content::ToolResult { result } = &mut request.history[2].content else {
+            let Content::ToolResult { result } = &mut Arc::make_mut(&mut request.history[2]).content else {
                 unreachable!()
             };
             let ToolCompletion::Result { content, .. } = &result.completion else {
@@ -1834,7 +1834,7 @@ fn accepted_job_and_not_dispatched_receipts_keep_their_data_and_media_in_each_pr
                 lifetime: crate::Lifetime::Thread,
                 content,
             };
-            let Content::ToolResult { result } = &mut request.history[3].content else {
+            let Content::ToolResult { result } = &mut Arc::make_mut(&mut request.history[3]).content else {
                 unreachable!()
             };
             result.completion = ToolCompletion::NotDispatched {
@@ -1972,7 +1972,7 @@ fn opaque_continuations_keep_original_connection_version_and_model_boundaries_in
                     value: continuation_value(family, "original-private-only"),
                 }),
             },
-        ];
+        ].into_iter().map(Into::into).collect();
         let provider = media_provider(family, true);
         let original = provider.serialize(&request).unwrap().to_string();
         assert!(
@@ -1981,7 +1981,7 @@ fn opaque_continuations_keep_original_connection_version_and_model_boundaries_in
             "{family}"
         );
         for item in &mut request.history {
-            item.opaque.as_mut().unwrap().adapter_version = "unknown-version".into();
+            Arc::make_mut(item).opaque.as_mut().unwrap().adapter_version = "unknown-version".into();
         }
         assert_eq!(
             provider.serialize(&request).unwrap_err().code,
@@ -1999,7 +1999,7 @@ fn opaque_continuations_keep_original_connection_version_and_model_boundaries_in
         }
         request.binding.connection_identity = "fixture-connection".into();
         for item in &mut request.history {
-            item.opaque.as_mut().unwrap().family = "another-protocol".into();
+            Arc::make_mut(item).opaque.as_mut().unwrap().family = "another-protocol".into();
         }
         let portable = provider.serialize(&request).unwrap().to_string();
         assert!(
@@ -2011,7 +2011,7 @@ fn opaque_continuations_keep_original_connection_version_and_model_boundaries_in
             google::FAMILY | google::VERTEX_FAMILY | bedrock::FAMILY | pi_messages::FAMILY
         ) {
             for item in &mut request.history {
-                let opaque = item.opaque.as_mut().unwrap();
+                let opaque = Arc::make_mut(item).opaque.as_mut().unwrap();
                 opaque.family = family.into();
                 opaque.adapter_version = "1".into();
             }

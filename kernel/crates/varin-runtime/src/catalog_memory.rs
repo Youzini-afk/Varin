@@ -117,10 +117,10 @@ pub fn allowed(basis: &personalization::PersonalizationBasis, scope: &Value) -> 
 pub(super) fn project(
     state: Option<&MemoryState>,
     basis: Option<&personalization::PersonalizationBasis>,
-    history: &[ConversationItem],
+    history: &[std::sync::Arc<ConversationItem>],
     trusted_receipts: &BTreeMap<String, Value>,
     bot_baseline: Option<&MemoryState>,
-) -> Result<Vec<ConversationItem>> {
+) -> Result<crate::execution::ConversationHistory> {
     let (Some(state), Some(basis)) = (state, basis) else {
         return Ok(Vec::new());
     };
@@ -173,7 +173,7 @@ pub(super) fn project(
                     provenance: Provenance::EnvironmentFact { event_id: identity },
                     content: Content::Text { text },
                     opaque: None,
-                });
+                }.into());
             }
         }
         return Ok(result);
@@ -255,7 +255,7 @@ pub(super) fn project(
                 ),
             },
             opaque: None,
-        });
+        }.into());
     }
     Ok(result)
 }

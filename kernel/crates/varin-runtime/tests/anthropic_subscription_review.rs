@@ -108,7 +108,7 @@ fn subscription_tool_names_roundtrip_without_rewriting_signed_thinking_or_api_ke
                 text: "Read fixture".into(),
             },
             opaque: None,
-        }],
+        }.into()],
     };
     let api = provider.serialize(&view).unwrap();
     assert_eq!(api["tools"][0]["name"], "read");
@@ -144,7 +144,7 @@ fn subscription_tool_names_roundtrip_without_rewriting_signed_thinking_or_api_ke
             provenance: Provenance::Assistant,
             content: item.content,
             opaque: item.opaque,
-        });
+        }.into());
     }
     let replay = provider.serialize(&view).unwrap();
     let blocks = replay["messages"]

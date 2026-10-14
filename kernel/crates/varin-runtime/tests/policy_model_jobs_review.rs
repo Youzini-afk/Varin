@@ -596,7 +596,7 @@ fn quoted_history_catalog_wait_diagnostic() {
     for mib in [1, 32, 64] {
         let f = Fixture::new();
         let (intent, mut snapshot) = frozen_job(&f, json!({"request":true}));
-        let quoted: Vec<ConversationItem> = vec![ConversationItem {
+        let quoted: varin_runtime::execution::ConversationHistory = vec![ConversationItem {
             resource_activation: None,
             id: "source".into(),
             provenance: Provenance::UserInstruction {
@@ -606,7 +606,7 @@ fn quoted_history_catalog_wait_diagnostic() {
                 text: "a".repeat(mib * 1024 * 1024),
             },
             opaque: None,
-        }];
+        }.into()];
         snapshot.view.history.push(ConversationItem {
             resource_activation: None,
             id: "quoted-context".into(),
@@ -620,7 +620,7 @@ fn quoted_history_catalog_wait_diagnostic() {
                 },
             },
             opaque: None,
-        });
+        }.into());
         f.db.admit_policy_model(
             &f.input.run_id,
             f.input.owner_generation,

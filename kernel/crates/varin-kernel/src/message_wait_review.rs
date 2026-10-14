@@ -363,7 +363,7 @@ fn new_user_input_ends_all_observers_without_withdrawing_messages_and_terminal_c
 }
 struct FinalModel {
     calls: AtomicUsize,
-    seen: Mutex<Vec<ConversationItem>>,
+    seen: Mutex<varin_runtime::execution::ConversationHistory>,
 }
 impl ModelProvider for FinalModel {
     fn serialize(&self, view: &RequestView) -> Result<Value, ExecutionError> {
@@ -390,7 +390,7 @@ impl ModelProvider for FinalModel {
         Ok(FinishReason::Stop)
     }
 }
-fn resume(f: &Fixture) -> Vec<ConversationItem> {
+fn resume(f: &Fixture) -> varin_runtime::execution::ConversationHistory {
     f.prepare_policy(0, "http://127.0.0.1:1/unused-planner");
     let mut start = f.start(0);
     let provider = Arc::new(FinalModel {

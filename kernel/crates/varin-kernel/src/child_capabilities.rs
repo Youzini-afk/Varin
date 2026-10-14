@@ -112,7 +112,7 @@ impl varin_runtime::execution::ContextPreparation for BindingPreparation {
         binding: &mut varin_runtime::execution::RequestBinding,
         cancel: &varin_runtime::execution::CancellationToken,
     ) -> Result<
-        Vec<varin_runtime::execution::ConversationItem>,
+        varin_runtime::execution::ConversationHistory,
         varin_runtime::execution::ExecutionError,
     > {
         use sha2::{Digest, Sha256};
@@ -200,7 +200,7 @@ impl varin_runtime::execution::ContextPreparation for BindingPreparation {
                 },
                 content: Content::Text { text },
                 opaque: None,
-            });
+            }.into());
         }
         Ok(context)
     }

@@ -612,7 +612,7 @@ struct CompiledContextPrefix {
     identity: ContextPrefixIdentity,
     head: Option<String>,
     checkpoint: ContextCheckpoint,
-    history: Vec<ConversationItem>,
+    history: crate::execution::ConversationHistory,
     fixed_items: usize,
     instruction_sources: Vec<String>,
 }
@@ -779,7 +779,7 @@ impl ContextRead {
                             text: checkpoint.proposal.effective_system_prompt.clone(),
                         },
                         opaque: None,
-                    });
+                    }.into());
                 }
                 if let Some(fragments) = fragments {
                     history.extend(
@@ -799,13 +799,13 @@ impl ContextRead {
                             text: checkpoint.proposal.summary.clone(),
                         },
                         opaque: None,
-                    });
+                    }.into());
                 }
                 history.extend(
                     checkpoint
                         .resource_activations
                         .iter()
-                        .map(resources::ResourceActivation::summary_reference),
+                        .map(|activation| activation.summary_reference().into()),
                 );
                 CompiledContextPrefix {
                     identity,

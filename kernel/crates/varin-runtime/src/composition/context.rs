@@ -68,7 +68,7 @@ enum FragmentTransform {
     Ordered(Vec<Arc<FragmentTransform>>),
 }
 impl FragmentTransform {
-    fn apply(&self, checkpoint: &str, output: &mut Vec<ConversationItem>) {
+    fn apply(&self, checkpoint: &str, output: &mut crate::execution::ConversationHistory) {
         match self {
             Self::Ordered(members) => {
                 for member in members {
@@ -97,7 +97,7 @@ impl FragmentTransform {
                             text: section.content.clone(),
                         },
                         opaque: None,
-                    });
+                    }.into());
                 }
             }
         }
@@ -240,7 +240,7 @@ impl BoundContextFragments {
     }
     /// Once admitted, declaration bytes are context facts. Later Host disable blocks new
     /// preparation; it does not revoke already committed history or retract dispatched requests.
-    pub fn apply(&self, checkpoint: &str) -> Result<Vec<ConversationItem>, String> {
+    pub fn apply(&self, checkpoint: &str) -> Result<crate::execution::ConversationHistory, String> {
         let call = self.pins.begin_call(BINDING).map_err(|e| e.to_string())?;
         let mut output = Vec::new();
         call.implementation()

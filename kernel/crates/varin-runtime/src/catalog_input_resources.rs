@@ -212,7 +212,7 @@ impl SkillInvocation {
     }
 }
 /// Only typed retained input material contributes authority. Text mentioning an ID never does.
-pub fn retained_activations(history: &[ConversationItem]) -> Vec<ResourceActivation> {
+pub fn retained_activations(history: &[std::sync::Arc<ConversationItem>]) -> Vec<ResourceActivation> {
     history
         .iter()
         .filter_map(|item| {

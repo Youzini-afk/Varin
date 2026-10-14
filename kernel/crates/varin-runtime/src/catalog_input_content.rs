@@ -402,7 +402,7 @@ pub struct PreparedInputDelivery {
     pub(super) run: Run,
     pub(super) head: Option<String>,
     pub(super) selected: Vec<QueuedInputMetadata>,
-    pub(super) items: Vec<ConversationItem>,
+    pub(super) items: crate::execution::ConversationHistory,
     pub(super) _publication: crate::content::ContentPublication,
 }
 impl InputDeliveryPreparation {

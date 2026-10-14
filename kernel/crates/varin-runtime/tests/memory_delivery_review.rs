@@ -296,7 +296,7 @@ fn policy_model_quoted_real_memory_facts_keep_selection_send_and_commit_separate
             },
         },
         opaque: None,
-    }];
+    }.into()];
     planning.serialized = serde_json::to_value(&planning.view).unwrap();
     let intent = PolicyModelIntent::PolicyModelJobV1 {
         action_id: action.clone(),

@@ -589,7 +589,7 @@ impl Catalog {
 pub(super) fn hydrate_source(
     content: &crate::content::ContentStore,
     metadata: Vec<HistoryItem>,
-) -> Result<Vec<ConversationItem>> {
+) -> Result<crate::execution::ConversationHistory> {
     let mut history = Vec::new();
     for item in metadata {
         let item = content.hydrate_history(item)?;
@@ -699,7 +699,7 @@ impl ContextJobRead {
                     item.id.clone(),
                     ContextCompactionSource {
                         source_id: item.id.clone(),
-                        item,
+                        item: std::sync::Arc::unwrap_or_clone(item),
                     },
                 )
             })
@@ -763,7 +763,7 @@ impl ContextJobRead {
             },
             content: Content::Text { text: instructions },
             opaque: None,
-        });
+        }.into());
         Ok(crate::execution::ContextProjection {
             compaction: Some(ContextCompactionStep {
                 plan_hash: recipe.plan_hash,
@@ -771,7 +771,7 @@ impl ContextJobRead {
             }),
             resource_checkpoint_id: None,
             checkpoint_id: format!("context-job:{}", recipe.request.key),
-            history,
+            history: history.into_iter().map(Into::into).collect(),
             instruction_sources: vec!["context_compaction:v3".into()],
             memory_checkpoint: None,
         })
@@ -957,7 +957,7 @@ impl ContextJobPreparation {
             });
 
         if let Some(prior) = prior {
-            history.insert(0, prior);
+            history.insert(0, prior.into());
         }
         let sources = crate::context_material::quote_sources(&self.request.key, history)?;
         let source_cut_hash = crate::context_material::hash(&json!({
@@ -1031,7 +1031,7 @@ impl ContextJobPreparation {
                     .preview
                     .sources
                     .into_iter()
-                    .map(|source| source.item)
+                    .map(|source| source.item.into())
                     .collect::<Vec<_>>(),
             )?;
             ContextJobRecipe {

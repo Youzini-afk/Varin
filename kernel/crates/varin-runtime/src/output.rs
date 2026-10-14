@@ -259,7 +259,7 @@ impl<M> crate::execution::ConversationItem<M> {
         })
     }
 }
-impl<M, S> crate::execution::RequestSnapshot<M, S> {
+impl<M: Clone, S> crate::execution::RequestSnapshot<M, S> {
     pub fn map_media<N, E>(
         self,
         mut map: impl FnMut(M) -> Result<N, E>,
@@ -276,7 +276,7 @@ impl<M, S> crate::execution::RequestSnapshot<M, S> {
                 history: view
                     .history
                     .into_iter()
-                    .map(|item| item.map_media(&mut map))
+                    .map(|item| std::sync::Arc::unwrap_or_clone(item).map_media(&mut map).map(std::sync::Arc::new))
                     .collect::<Result<_, E>>()?,
             },
         })
@@ -575,14 +575,14 @@ pub use policy::PolicyResultFormat;
 impl crate::content::ContentStore {
     pub(crate) fn save_items(
         &self,
-        items: &[crate::execution::ConversationItem],
+        items: &[std::sync::Arc<crate::execution::ConversationItem>],
     ) -> Result<Value, crate::catalog::RuntimeError> {
         let mut dependencies = Vec::new();
         let stored = items
             .iter()
             .cloned()
             .map(|item| {
-                item.map_media(|media| {
+                std::sync::Arc::unwrap_or_clone(item).map_media(|media| {
                     let stored = self.store_media(media)?;
                     dependencies.push(stored.content_ref.content_object.clone());
                     Ok::<_, crate::catalog::RuntimeError>(stored)
@@ -595,12 +595,12 @@ impl crate::content::ContentStore {
         &self,
         reference: &Value,
         cancelled: &dyn Fn() -> bool,
-    ) -> Result<Vec<crate::execution::ConversationItem>, crate::catalog::RuntimeError> {
+    ) -> Result<crate::execution::ConversationHistory, crate::catalog::RuntimeError> {
         let stored: Vec<crate::execution::ConversationItem<StoredMedia>> =
             serde_json::from_value(self.load_cancellable(reference, cancelled)?)?;
         stored
             .into_iter()
-            .map(|item| item.map_media(|media| self.resolve_media_cancellable(media, cancelled)))
+            .map(|item| item.map_media(|media| self.resolve_media_cancellable(media, cancelled)).map(std::sync::Arc::new))
             .collect()
     }
 }

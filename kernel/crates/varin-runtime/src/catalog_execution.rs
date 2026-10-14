@@ -757,7 +757,7 @@ fn provider_originals(items: &[ProviderItem]) -> Vec<ProviderOriginal> {
         })
         .collect()
 }
-fn history_items(record: &ExecutionRecord) -> Vec<ConversationItem> {
+fn history_items(record: &ExecutionRecord) -> crate::execution::ConversationHistory {
     match record {
         ExecutionRecord::ModelFinished {
             request_id,
@@ -766,7 +766,7 @@ fn history_items(record: &ExecutionRecord) -> Vec<ConversationItem> {
             ..
         } => items
             .iter()
-            .map(|item| model_history_item(request_id, item))
+            .map(|item| model_history_item(request_id, item).into())
             .collect(),
         ExecutionRecord::ToolBatchCommitted {
             request_id,
@@ -783,7 +783,7 @@ fn history_items(record: &ExecutionRecord) -> Vec<ConversationItem> {
                     result: result.clone(),
                 },
                 opaque: None,
-            })
+            }.into())
             .collect(),
         _ => Vec::new(),
     }
@@ -1027,7 +1027,7 @@ impl ExecutionBodyPreparation {
     }
 }
 impl Catalog {
-    pub fn execution_history(&self, branch: &str) -> Result<Vec<ConversationItem>> {
+    pub fn execution_history(&self, branch: &str) -> Result<crate::execution::ConversationHistory> {
         let mut result = Vec::new();
         for item in self.history(branch)? {
             result.extend(history_input_items(&item.id, item.source, &item.content)?);
@@ -2093,7 +2093,7 @@ pub(super) fn history_input_items(
     id: &str,
     source: HistorySource,
     content: &Value,
-) -> Result<Vec<ConversationItem>> {
+) -> Result<crate::execution::ConversationHistory> {
     if source == HistorySource::User {
         return user_input_items(id, content);
     }
@@ -2107,13 +2107,13 @@ pub(super) fn history_input_items(
     // provenance retains the fact identity; the projected item must address
     // this branch's actual history entry, including its recipient suffix.
     item.id = id.into();
-    Ok(vec![item])
+    Ok(vec![item.into()])
 }
 
 /// A user record may project several typed parts; the final projected part retains the
 /// original entry identity so frozen branch ranges still address the durable history head.
 /// No attachment bytes are loaded or downgraded to text here.
-pub(super) fn user_input_items(id: &str, input: &Value) -> Result<Vec<ConversationItem>> {
+pub(super) fn user_input_items(id: &str, input: &Value) -> Result<crate::execution::ConversationHistory> {
     let mut parts = Vec::new();
     if let Some(text) = input.as_str() {
         parts.push(Content::Text { text: text.into() });
@@ -2156,9 +2156,9 @@ pub(super) fn user_input_items(id: &str, input: &Value) -> Result<Vec<Conversati
         return Err(RuntimeError::Invalid("user input has no content".into()));
     }
     let last = parts.len() - 1;
-    let mut items: Vec<ConversationItem> = resources::invocations(input)?
+    let mut items: crate::execution::ConversationHistory = resources::invocations(input)?
         .iter()
-        .map(|entry| entry.project(id))
+        .map(|entry| entry.project(id).into())
         .collect();
     items.extend(
         parts
@@ -2176,7 +2176,7 @@ pub(super) fn user_input_items(id: &str, input: &Value) -> Result<Vec<Conversati
                 },
                 content,
                 opaque: None,
-            }),
+            }.into()),
     );
     Ok(items)
 }

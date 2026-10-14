@@ -67,7 +67,7 @@ fn trigger(binding: &HostJobBinding) -> FollowupRegistrationTrigger {
         operation_id: binding.operation_id.clone(),
     }
 }
-fn deliver(f: &mut Fixture) -> Vec<ConversationItem> {
+fn deliver(f: &mut Fixture) -> varin_runtime::execution::ConversationHistory {
     let p =
         f.db.prepare_input_delivery(
             &f.run,
@@ -478,7 +478,7 @@ fn winning_job_stop_keeps_its_original_unknown_body_after_refinement_gc_and_reop
     let items = deliver(&mut f);
     assert_eq!(items.len(), 2);
     for item in items {
-        let Content::Output { output } = item.content else {
+        let Content::Output { output } = &item.content else {
             panic!("follow-up output")
         };
         let text = serde_json::to_string(&output.data).unwrap();

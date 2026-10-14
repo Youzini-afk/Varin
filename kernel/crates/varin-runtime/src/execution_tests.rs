@@ -32,18 +32,27 @@ fn input_with_bot(db: &Arc<Mutex<Catalog>>, bot: Option<&str>) -> ExecutionInput
     input_with_payload(db, bot, json!({"text":"read then answer"}))
 }
 fn input_with_payload(db: &Arc<Mutex<Catalog>>, bot: Option<&str>, payload: Value) -> ExecutionInput {
+    input_with_frozen_context(db, bot, payload, None, None)
+}
+fn input_with_frozen_context(
+    db: &Arc<Mutex<Catalog>>,
+    bot: Option<&str>,
+    payload: Value,
+    checkpoint: Option<crate::catalog::context::ContextProposal>,
+    basis: Option<crate::catalog::personalization::PersonalizationBasis>,
+) -> ExecutionInput {
     let mut db = db.lock().unwrap();
     if let Some(bot) = bot { db.create_bot_thread("thread", "main", bot).unwrap(); }
     else { db.create_thread("thread", "main").unwrap(); }
     let receipt = db
-        .submit(&SubmitInput {
+        .submit_with_context_snapshot(&SubmitInput {
             key: "input".into(),
             thread_id: "thread".into(),
             branch_id: "main".into(),
             expected_head: None,
             input: payload,
             configuration: json!({"provider":"test"}),
-        })
+        }, None, false, checkpoint, basis)
         .unwrap();
     ExecutionInput {
         run_id: receipt.run_id,
@@ -1595,6 +1604,19 @@ mod bot_suspension;
 #[test]
 fn context_prefix_reuse_rehydrates_only_new_history_across_real_model_steps() {
     use crate::catalog::context::ContextProposal;
+    use crate::catalog::goals::GoalScope;
+    use crate::catalog::memory::{MemorySnapshot, MemoryState};
+    use crate::catalog::personalization::{PersonalizationBasis, SystemSection};
+
+    fn note(text: &str) -> Value {
+        json!({"id":1,"scope":{"kind":"global"},"content":text,"updatedAt":"2026-10-14T00:00:00.000Z"})
+    }
+    fn goal_scope() -> GoalScope {
+        GoalScope {
+            thread_id: "thread".into(),
+            branch_id: "main".into(),
+        }
+    }
     use crate::providers::{Connection, CredentialResolver, HttpRequest, HttpTransport, responses};
 
     struct Credentials(AtomicUsize);
@@ -1644,10 +1666,17 @@ fn context_prefix_reuse_rehydrates_only_new_history_across_real_model_steps() {
         db: Arc<Mutex<Catalog>>,
         calls: AtomicUsize,
         replace: bool,
+        views: Arc<Mutex<Vec<RequestView>>>,
     }
     impl ContextPreparation for Preparation {
-        fn prepare(&self, _: &str, _: u64, _: &CancellationToken) -> Result<(), ExecutionError> {
-            if self.calls.fetch_add(1, Ordering::SeqCst) == 1 && self.replace {
+        fn prepare(
+            &self,
+            run: &str,
+            epoch: u64,
+            _: &CancellationToken,
+        ) -> Result<(), ExecutionError> {
+            let step = self.calls.fetch_add(1, Ordering::SeqCst);
+            if step == 1 && self.replace {
                 self.db
                     .lock()
                     .unwrap()
@@ -1663,25 +1692,78 @@ fn context_prefix_reuse_rehydrates_only_new_history_across_real_model_steps() {
                     })
                     .unwrap();
             }
+            let prepared = self
+                .db
+                .lock()
+                .unwrap()
+                .prepare_memory_sync(
+                    run,
+                    epoch,
+                    MemoryState {
+                        revision: step as u64 + 2,
+                        memories: vec![note(if step == 0 {
+                            "FIRST_NOTE"
+                        } else {
+                            "CURRENT_NOTE"
+                        })],
+                        note_revisions: BTreeMap::from([("1".into(), step as u64 + 2)]),
+                        known: BTreeMap::new(),
+                        bot_knowledge: None,
+                    },
+                )
+                .unwrap();
+            let prepared = prepared.load().unwrap();
+            assert!(
+                self.db
+                    .lock()
+                    .unwrap()
+                    .publish_memory_state(prepared)
+                    .unwrap()
+            );
+            if step == 1 {
+                let prepared = self
+                    .db
+                    .lock()
+                    .unwrap()
+                    .prepare_goal_update("goal", 1, goal_scope(), "CURRENT_GOAL".into(), None)
+                    .unwrap();
+                let prepared = prepared.load().unwrap();
+                self.db
+                    .lock()
+                    .unwrap()
+                    .admit_goal_mutation(prepared)
+                    .unwrap();
+            }
             Ok(())
+        }
+        fn prepare_request(
+            &self,
+            _: u64,
+            view: &RequestView,
+            _: &Value,
+            _: Option<crate::context_capacity::RequestBudgetProtocol>,
+            _: &dyn Fn(
+                ContextProjection,
+            )
+                -> Result<crate::context_capacity::InputEstimate, ExecutionError>,
+            _: &CancellationToken,
+        ) -> Result<ContextRequestPreparation, ExecutionError> {
+            // Observe the actual Engine candidate consumed by the real Responses adapter.
+            self.views.lock().unwrap().push(view.clone());
+            Ok(ContextRequestPreparation::Ready)
         }
     }
     for replace in [false, true] {
         let fixture = Fixture::new();
         let db = fixture.catalog();
-        let mut input = input_with_payload(
+        let mut input = input_with_frozen_context(
             &db,
             None,
             json!({
                 "text": "stable source material ".repeat(8192),
                 "attachments":[{"media_type":"image/png","data_base64":"aW1hZ2U6Zml4ZWQ="}]
             }),
-        );
-        input.binding.provider_family = responses::FAMILY.into();
-        let original_head = input.binding.history_range.leaf_id.clone().unwrap();
-        db.lock()
-            .unwrap()
-            .publish_context(ContextProposal {
+            Some(ContextProposal {
                 key: "stable-prefix".into(),
                 branch_id: "main".into(),
                 through_id: None,
@@ -1689,9 +1771,96 @@ fn context_prefix_reuse_rehydrates_only_new_history_across_real_model_steps() {
                 summary: String::new(),
                 effective_system_prompt: "Stable system".into(),
                 instruction_sources: vec!["initial".into()],
-                memory_checkpoint: None,
-            })
-            .unwrap();
+                memory_checkpoint: Some("memory:1".into()),
+            }),
+            Some(PersonalizationBasis {
+                mode: "agent".into(),
+                thread_role: "main".into(),
+                revision: 1,
+                configuration_digest: "fixture".into(),
+                memory_snapshot: MemorySnapshot {
+                    revision: 1,
+                    memories: vec![note("BASELINE_NOTE")],
+                },
+                context_composition: None,
+                session_id: "thread".into(),
+                project_id: None,
+                original_sections: vec![SystemSection {
+                    name: "preamble".into(),
+                    content: "Stable system".into(),
+                }],
+                instruction_sources: vec!["initial".into()],
+            }),
+        );
+        input.binding.provider_family = responses::FAMILY.into();
+        let original_head = input.binding.history_range.leaf_id.clone().unwrap();
+        let mut foreign_id = String::new();
+        let mut opaque_only_id = String::new();
+        {
+            let mut catalog = db.lock().unwrap();
+            catalog
+                .bind_launch(
+                    &input.run_id,
+                    crate::catalog::launches::LaunchSelection::from_binding(
+                        &input.binding,
+                        DefaultAgentPolicy.identity(),
+                        None,
+                    ),
+                )
+                .unwrap();
+            for (id, content) in [
+                (
+                    "portable",
+                    Content::Text {
+                        text: "portable foreign source ".repeat(8192),
+                    },
+                ),
+                ("opaque-only", Content::ProviderOnly),
+            ] {
+                let head = catalog.head("main").unwrap();
+                let item = ConversationItem::<ResolvedMedia> {
+                    resource_activation: None,
+                    id: id.into(),
+                    provenance: Provenance::Assistant,
+                    content,
+                    opaque: Some(OpaqueProviderItem {
+                        family: "foreign-protocol".into(),
+                        connection_identity: "foreign-connection".into(),
+                        adapter_version: "1".into(),
+                        value: json!({"secret":"FOREIGN_WIRE_SECRET"}),
+                    }),
+                };
+                let row = catalog
+                    .append_history(
+                        &input.run_id,
+                        input.owner_generation,
+                        head.as_deref(),
+                        crate::HistorySource::Assistant,
+                        serde_json::to_value(item).unwrap(),
+                        None,
+                    )
+                    .unwrap();
+                if id == "portable" {
+                    foreign_id = row.id;
+                } else {
+                    opaque_only_id = row.id;
+                }
+            }
+            input.binding.history_range.leaf_id = catalog.head("main").unwrap();
+            input.history = catalog.execution_history("main").unwrap();
+            let prepared = catalog
+                .prepare_goal_start(
+                    "goal",
+                    &input.run_id,
+                    goal_scope(),
+                    "FIRST_GOAL".into(),
+                    None,
+                )
+                .unwrap();
+            drop(catalog);
+            let prepared = prepared.load().unwrap();
+            db.lock().unwrap().admit_goal_mutation(prepared).unwrap();
+        }
         let hydrations = Arc::new(Mutex::new(BTreeMap::<String, usize>::new()));
         let seen = hydrations.clone();
         db.lock()
@@ -1702,12 +1871,14 @@ fn context_prefix_reuse_rehydrates_only_new_history_across_real_model_steps() {
         let transport = Arc::new(Transport::default());
         let credentials = Arc::new(Credentials(AtomicUsize::new(0)));
         let (progress, _receiver) = ProgressSink::channel(1);
+        let views = Arc::new(Mutex::new(Vec::new()));
         let engine = ExecutionEngine {
             persistence: db.clone(),
             context_preparation: Arc::new(Preparation {
                 db: db.clone(),
                 calls: AtomicUsize::new(0),
                 replace,
+                views: views.clone(),
             }),
             provider: Arc::new(responses::ResponsesProvider::new(Connection::new(
                 "https://fixture.invalid",
@@ -1718,12 +1889,17 @@ fn context_prefix_reuse_rehydrates_only_new_history_across_real_model_steps() {
             policy: Arc::new(DefaultAgentPolicy),
             progress,
         };
-        assert_eq!(
-            engine
-                .run(input, CancellationToken::default())
+        let report = engine.run(input, CancellationToken::default()).unwrap();
+        assert_eq!(report.state, RunState::Completed, "{:?}", report.failure);
+        assert!(
+            report
+                .history
+                .iter()
+                .find(|item| item.id == foreign_id)
                 .unwrap()
-                .state,
-            RunState::Completed
+                .opaque
+                .is_some(),
+            "request projection never erases the original history's opaque ownership"
         );
         db.lock().unwrap().set_context_history_read_hook(None);
         let counts = hydrations.lock().unwrap();
@@ -1745,11 +1921,105 @@ fn context_prefix_reuse_rehydrates_only_new_history_across_real_model_steps() {
         );
         let first = requests[0]["input"].as_array().unwrap();
         let second = requests[1]["input"].as_array().unwrap();
+        let views = views.lock().unwrap();
+        assert_eq!(views.len(), 2);
+        let mut shared = 0;
+        for (index, item) in views[0].history.iter().enumerate() {
+            if matches!(item.provenance, Provenance::UserInstruction { .. })
+                || item.id == foreign_id
+            {
+                let next = views[1]
+                    .history
+                    .iter()
+                    .position(|next| next.id == item.id)
+                    .unwrap();
+                assert_eq!(
+                    Arc::ptr_eq(item, &views[1].history[next]),
+                    !replace,
+                    "unchanged context shares actual semantic allocations; replacement compiles new ones"
+                );
+                assert_eq!(
+                    first[index], second[next],
+                    "complete wire values retain original text/media"
+                );
+                shared += usize::from(Arc::ptr_eq(item, &views[1].history[next]));
+            }
+        }
         assert_eq!(
-            &second[1..first.len()],
-            &first[1..],
-            "each complete wire request retains original text and media"
+            shared,
+            if replace { 0 } else { 3 },
+            "text, media, and sanitized foreign content share allocations"
         );
+        for (index, view) in views.iter().enumerate() {
+            assert!(view.history.iter().all(|item| item.id != opaque_only_id));
+            assert!(
+                view.history
+                    .iter()
+                    .find(|item| item.id == foreign_id)
+                    .unwrap()
+                    .opaque
+                    .is_none()
+            );
+            let text = serde_json::to_string(&requests[index]).unwrap();
+            assert!(!text.contains("FOREIGN_WIRE_SECRET"));
+            assert!(text.contains(if index == 0 {
+                "FIRST_NOTE"
+            } else {
+                "CURRENT_NOTE"
+            }));
+            assert!(!text.contains(if index == 0 {
+                "CURRENT_NOTE"
+            } else {
+                "FIRST_NOTE"
+            }));
+            assert!(text.contains(if index == 0 {
+                "FIRST_GOAL"
+            } else {
+                "CURRENT_GOAL"
+            }));
+            assert!(!text.contains(if index == 0 {
+                "CURRENT_GOAL"
+            } else {
+                "FIRST_GOAL"
+            }));
+            assert_eq!(
+                view.binding.goal.as_ref().unwrap().generation,
+                index as u64 + 1
+            );
+            let stored = db
+                .lock()
+                .unwrap()
+                .capture_model_step_read(&view.request_id)
+                .unwrap()
+                .load_request()
+                .unwrap();
+            assert_eq!(
+                stored["serialized"], requests[index],
+                "RequestPrepared retains the actual provider body"
+            );
+            let reference = db
+                .lock()
+                .unwrap()
+                .model_step_metadata(&view.request_id)
+                .unwrap()
+                .request;
+            let restored = crate::content::ContentStore::open(fixture.path.join("content"))
+                .unwrap()
+                .load_snapshot(&reference)
+                .unwrap();
+            assert_eq!(
+                &restored.view, view,
+                "stored media resolution restores the complete immutable semantic view"
+            );
+            assert!(
+                stored["view"]["history"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .all(|item| item.get("id").is_some() && item.get("content").is_some()),
+                "shared history preserves existing serde item shape"
+            );
+        }
         assert_eq!(
             second[0]["content"],
             if replace {
@@ -1777,6 +2047,96 @@ fn context_prefix_reuse_rehydrates_only_new_history_across_real_model_steps() {
         );
         assert_eq!(requests[1]["tools"], requests[0]["tools"]);
     }
+}
+
+#[test]
+fn context_prefix_projection_retains_only_current_source_and_connection() {
+    let original = Arc::new(ConversationItem::<ResolvedMedia> {
+        resource_activation: None,
+        id: "same-history-id".into(),
+        provenance: Provenance::Assistant,
+        content: Content::Text {
+            text: "immutable source".into(),
+        },
+        opaque: Some(OpaqueProviderItem {
+            family: "original-family".into(),
+            connection_identity: "original-connection".into(),
+            adapter_version: "1".into(),
+            value: json!({"signature":"original"}),
+        }),
+    });
+    let mut reuse = HistoryProjectionReuse::default();
+    let first = compile_history(
+        [&original],
+        "selected-family",
+        "selected-connection",
+        Some(&mut reuse),
+    );
+    let second = compile_history(
+        [&original],
+        "selected-family",
+        "selected-connection",
+        Some(&mut reuse),
+    );
+    assert!(Arc::ptr_eq(&first[0], &second[0]));
+    assert!(first[0].opaque.is_none());
+    assert!(original.opaque.is_some());
+    let obsolete = Arc::downgrade(&first[0]);
+    drop(first);
+    drop(second);
+    assert!(
+        obsolete.upgrade().is_some(),
+        "latest projection retains its sanitized allocation"
+    );
+
+    // A checkpoint rehydration is a different immutable source even if it has the same history ID.
+    let mut changed = original.as_ref().clone();
+    changed.content = Content::Text {
+        text: "replacement source".into(),
+    };
+    let changed = Arc::new(changed);
+    let next = compile_history(
+        [&changed],
+        "selected-family",
+        "selected-connection",
+        Some(&mut reuse),
+    );
+    assert!(
+        obsolete.upgrade().is_none(),
+        "superseded checkpoint projections are released"
+    );
+    assert_eq!(next[0].content, changed.content);
+    let changed_projection = Arc::downgrade(&next[0]);
+    drop(next);
+    let own = compile_history(
+        [&changed],
+        "original-family",
+        "original-connection",
+        Some(&mut reuse),
+    );
+    assert!(Arc::ptr_eq(&own[0], &changed));
+    assert!(
+        own[0].opaque.is_some(),
+        "returning to the owner must not reuse its stripped projection"
+    );
+    assert!(changed_projection.upgrade().is_none());
+    let next = compile_history(
+        [&changed],
+        "original-family",
+        "other-connection",
+        Some(&mut reuse),
+    );
+    assert!(
+        next[0].opaque.is_none(),
+        "same family with another connection cannot replay originals"
+    );
+    let current = Arc::downgrade(&next[0]);
+    drop(next);
+    drop(reuse);
+    assert!(
+        current.upgrade().is_none(),
+        "worker exit releases the latest projection"
+    );
 }
 
 #[test]

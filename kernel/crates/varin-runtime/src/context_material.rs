@@ -56,7 +56,7 @@ pub(crate) fn model_budget(
 }
 pub(crate) fn quote_sources(
     key: &str,
-    history: Vec<ConversationItem>,
+    history: crate::execution::ConversationHistory,
 ) -> Result<Vec<ContextCompactionSource>> {
     fn quote(
         key: &str,
@@ -136,7 +136,7 @@ pub(crate) fn quote_sources(
     }
     let mut sources = Vec::new();
     for item in history {
-        quote(key, item, &mut sources)?;
+        quote(key, std::sync::Arc::unwrap_or_clone(item), &mut sources)?;
     }
     let mut ids = BTreeSet::new();
     if sources.is_empty() || sources.iter().any(|source| !ids.insert(&source.source_id)) {
@@ -442,7 +442,7 @@ mod tests {
         };
         let preview = ContextCompactionPreview {
             source_cut_hash: "unicode-cut".into(),
-            sources: quote_sources("job", vec![source.clone(), image.clone()]).unwrap(),
+            sources: quote_sources("job", vec![source.clone().into(), image.clone().into()]).unwrap(),
             model_budget: model_budget(
                 &json!({"contextWindowTokens":600,"maxOutputTokens":64}),
                 &ContextSummaryRecipe::manual(),
@@ -584,7 +584,7 @@ mod tests {
                 value: json!({"secret":"do not summarize private continuation"}),
             });
             media.push(image);
-            originals.push(item);
+            originals.push(item.into());
         }
         let preview = ContextCompactionPreview {
             source_cut_hash: "mixed-cut".into(),

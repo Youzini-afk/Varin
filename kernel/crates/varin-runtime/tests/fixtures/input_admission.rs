@@ -76,7 +76,7 @@ pub trait InputAdmission {
         run: &str,
         epoch: u64,
         head: Option<&str>,
-    ) -> Result<Vec<varin_runtime::execution::ConversationItem>>;
+    ) -> Result<varin_runtime::execution::ConversationHistory>;
     fn prepare_child(
         &mut self,
         operation: &str,
@@ -223,7 +223,7 @@ impl InputAdmission for Catalog {
         run: &str,
         epoch: u64,
         head: Option<&str>,
-    ) -> Result<Vec<varin_runtime::execution::ConversationItem>> {
+    ) -> Result<varin_runtime::execution::ConversationHistory> {
         loop {
             let prepared = self.prepare_input_delivery(run, epoch, head)?.load()?;
             if let Some(items) = self.admit_input_delivery(prepared)? {
