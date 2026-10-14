@@ -380,13 +380,17 @@ pub struct RequestBinding {
     pub history_range: HistoryRange,
 }
 
+/// Immutable item segments shared by the original Run worker and its prepared requests.
+/// The vector owns only handles; serde retains the existing history array/item representation.
+pub type ConversationHistory<M = ResolvedMedia> = Vec<Arc<ConversationItem<M>>>;
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct RequestView<M = ResolvedMedia> {
     pub request_id: String,
     pub run_id: String,
     pub origin: RequestOrigin,
     pub binding: RequestBinding,
-    pub history: Vec<ConversationItem<M>>,
+    pub history: ConversationHistory<M>,
 }
 
 /// Explicit request identity: auxiliary work never masquerades as a conversation ModelStep.
@@ -432,7 +436,7 @@ pub(crate) struct ProjectedHistoryItem<'a> {
 
 /// Adapters borrow the immutable semantic input and copy only what enters the wire body.
 pub(crate) fn project_history<'a>(
-    history: &'a [ConversationItem],
+    history: &'a [Arc<ConversationItem>],
     family: &'a str,
     connection_identity: &'a str,
 ) -> impl Iterator<Item = ProjectedHistoryItem<'a>> + 'a {
@@ -450,24 +454,74 @@ pub(crate) fn project_history<'a>(
     })
 }
 
-/// The prepared request owns its semantic snapshot independently of mutable run history.
-pub fn compile_history(
-    history: &[ConversationItem],
+/// Only the latest request's foreign-opaque projections are retained by its Run worker.
+/// Holding each original Arc makes pointer identity unambiguous even after other owners drop it.
+#[derive(Default)]
+struct HistoryProjectionReuse {
+    connection: Option<(String, String)>,
+    items: BTreeMap<usize, (Arc<ConversationItem>, Arc<ConversationItem>)>,
+}
+
+/// Share immutable semantic items; strip another connection's opaque continuation only once.
+/// This derived projection never authorizes access or dispatch and is not persisted separately.
+fn compile_history<'a>(
+    history: impl IntoIterator<Item = &'a Arc<ConversationItem>>,
     family: &str,
     connection_identity: &str,
-) -> Vec<ConversationItem> {
-    project_history(history, family, connection_identity)
-        .map(|projected| {
-            let item = projected.item;
-            ConversationItem {
-                resource_activation: item.resource_activation.clone(),
-                id: item.id.clone(),
-                provenance: item.provenance.clone(),
-                content: item.content.clone(),
-                opaque: projected.opaque.cloned(),
-            }
+    reuse: Option<&mut HistoryProjectionReuse>,
+) -> ConversationHistory {
+    let mut reuse = reuse;
+    let mut previous = reuse
+        .as_mut()
+        .filter(|reuse| {
+            reuse
+                .connection
+                .as_ref()
+                .is_some_and(|(old_family, old_connection)| {
+                    old_family == family && old_connection == connection_identity
+                })
         })
-        .collect()
+        .map(|reuse| std::mem::take(&mut reuse.items))
+        .unwrap_or_default();
+    let history = history.into_iter();
+    let mut current = BTreeMap::new();
+    let mut result = Vec::with_capacity(history.size_hint().1.unwrap_or(0));
+    for source in history {
+        let opaque = source.opaque.as_ref().filter(|opaque| {
+            opaque.family == family
+                && !opaque.connection_identity.is_empty()
+                && opaque.connection_identity == connection_identity
+        });
+        if matches!(source.content, Content::ProviderOnly) && opaque.is_none() {
+            continue;
+        }
+        if source.opaque.is_none() || opaque.is_some() {
+            result.push(source.clone());
+            continue;
+        }
+        let identity = Arc::as_ptr(source) as usize;
+        let item = previous
+            .remove(&identity)
+            .map(|(_, projected)| projected)
+            .unwrap_or_else(|| {
+                Arc::new(ConversationItem {
+                    resource_activation: source.resource_activation.clone(),
+                    id: source.id.clone(),
+                    provenance: source.provenance.clone(),
+                    content: source.content.clone(),
+                    opaque: None,
+                })
+            });
+        if reuse.is_some() {
+            current.insert(identity, (source.clone(), item.clone()));
+        }
+        result.push(item);
+    }
+    if let Some(reuse) = reuse {
+        reuse.connection = Some((family.into(), connection_identity.into()));
+        reuse.items = current;
+    }
+    result
 }
 
 #[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
@@ -1135,7 +1189,7 @@ pub struct ContextProjection {
     pub compaction: Option<crate::context_job::ContextCompactionStep>,
     pub resource_checkpoint_id: Option<String>,
     pub checkpoint_id: String,
-    pub history: Vec<ConversationItem>,
+    pub history: ConversationHistory,
     pub instruction_sources: Vec<String>,
     pub memory_checkpoint: Option<String>,
 }
@@ -1397,7 +1451,7 @@ pub trait Persistence: Send + Sync + 'static {
 /// A committed ingress batch carries activation separately from content provenance.
 #[derive(Debug, Clone, Default)]
 pub struct InputBatch {
-    pub items: Vec<ConversationItem>,
+    pub items: ConversationHistory,
     pub input_ids: Vec<String>,
     pub activating: bool,
 }
@@ -1557,7 +1611,7 @@ impl PolicyEvent {
 pub struct PolicyView<'a> {
     pub run_id: &'a str,
     pub state: RunState,
-    pub history: &'a [ConversationItem],
+    pub history: &'a [Arc<ConversationItem>],
     pub pending_tool_calls: usize,
     pub model_capabilities: Vec<PolicyModelAvailability>,
 }
@@ -1628,7 +1682,7 @@ pub struct ExecutionInput {
     pub run_id: String,
     pub owner_generation: u64,
     pub binding: RequestBinding,
-    pub history: Vec<ConversationItem>,
+    pub history: ConversationHistory,
     pub policy_state: Value,
     /// Number already committed in this run, supplied by the durable resume path.
     pub completed_model_steps: u64,
@@ -1637,7 +1691,7 @@ pub struct ExecutionInput {
 #[derive(Debug, Clone)]
 pub struct ExecutionReport {
     pub state: RunState,
-    pub history: Vec<ConversationItem>,
+    pub history: ConversationHistory,
     pub policy_state: Value,
     pub model_steps: u64,
     pub waiting_on: Option<String>,
@@ -1660,7 +1714,7 @@ pub trait ContextPreparation: Send + Sync {
         _owner_generation: u64,
         _binding: &mut RequestBinding,
         _cancel: &CancellationToken,
-    ) -> Result<Vec<ConversationItem>, ExecutionError> {
+    ) -> Result<ConversationHistory, ExecutionError> {
         Ok(Vec::new())
     }
 
@@ -1741,6 +1795,7 @@ impl<
             },
         )?;
         let mut context_reuse = crate::catalog::context::ContextCompileReuse::default();
+        let mut history_projection_reuse = HistoryProjectionReuse::default();
         let mut history = input.history.clone();
         let mut history_cursor = input
             .binding
@@ -2072,7 +2127,7 @@ impl<
                                 item_id: item.id.clone(),
                             };
                             control_state = Some(policy_state.clone());
-                            history.push(item);
+                            history.push(item.into());
                         }
                         PolicyControlReceipt::Paused { wait_id, .. } => {
                             return Ok(ExecutionReport {
@@ -2339,18 +2394,24 @@ impl<
                     // the existing system prefix and before growing history. Keep Goal's original
                     // provenance (and provider user role); neither these items nor their placement
                     // rewrite conversation history or an already prepared request.
-                    let project_request = |history: &[ConversationItem]| {
-                        let mut request_history = compile_history(history, &binding.provider_family, &binding.connection_identity);
+                    let project_request = |history: &[Arc<ConversationItem>], reuse: Option<&mut HistoryProjectionReuse>| {
+                        let suppressed: BTreeSet<_> = request_evidence.iter()
+                            .flat_map(|evidence| evidence.memory_facts.iter()).collect();
+                        let retained = history.iter().filter(|item| !matches!(
+                            &item.provenance, Provenance::EnvironmentFact { event_id }
+                                if suppressed.contains(event_id)));
+                        let mut request_history = compile_history(retained,
+                            &binding.provider_family, &binding.connection_identity, reuse);
                         for item in &request_evidence {
                             request_history.retain(|previous| !matches!(&previous.provenance, Provenance::EnvironmentFact { event_id } if item.memory_facts.contains(event_id)));
-                            request_history.push(item.item.clone());
+                            request_history.push(item.item.clone().into());
                         }
                         let prefix = request_history.iter().take_while(|item| item.provenance.is_system()).count();
                         request_history.splice(prefix..prefix,
-                            binding_context.iter().cloned().chain(goal.as_ref().and_then(|g| g.item.clone())));
+                            binding_context.iter().cloned().chain(goal.as_ref().and_then(|g| g.item.clone()).map(Arc::new)));
                         request_history
                     };
-                    let request_history = project_request(&history);
+                    let request_history = project_request(&history, Some(&mut history_projection_reuse));
                     binding.resource_activations =
                         crate::catalog::resources::retained_activations(&request_history);
                     let view = RequestView {
@@ -2379,7 +2440,7 @@ impl<
                     let preview = |context: ContextProjection| {
                         validate_history_pairs(&context.history)?;
                         let mut proposed = view.clone();
-                        proposed.history = project_request(&context.history);
+                        proposed.history = project_request(&context.history, None);
                         proposed.binding.resource_checkpoint_id = context.resource_checkpoint_id;
                         proposed.binding.instruction_sources = context.instruction_sources;
                         proposed.binding.memory_checkpoint = context.memory_checkpoint;
@@ -2580,7 +2641,7 @@ impl<
                         .last()
                         .map(|item| item.id.clone())
                         .or(history_cursor);
-                    history.extend(committed);
+                    history.extend(committed.into_iter().map(Arc::new));
                     event = PolicyEvent::ModelCompleted {
                         reason,
                         tool_calls: calls.len(),
@@ -2632,7 +2693,7 @@ impl<
                                 result: result.clone(),
                             },
                             opaque: None,
-                        });
+                        }.into());
                     }
                     state = RunState::Runnable;
                     self.commit(
@@ -2663,7 +2724,7 @@ impl<
         input: &ExecutionInput,
         snapshot: &RequestSnapshot,
         calls: Vec<ToolCall>,
-        history: &mut Vec<ConversationItem>,
+        history: &mut ConversationHistory,
         cached: &BTreeMap<String, ToolResult>,
         completion: ToolCompletion,
     ) -> Result<(), ExecutionError> {
@@ -2696,7 +2757,7 @@ impl<
                 },
                 content: Content::ToolResult { result },
                 opaque: None,
-            });
+            }.into());
         }
         Ok(())
     }
@@ -3281,7 +3342,7 @@ fn normalize_completion(
     }
 }
 
-pub(crate) fn validate_history_pairs(history: &[ConversationItem]) -> Result<(), ExecutionError> {
+pub(crate) fn validate_history_pairs(history: &[Arc<ConversationItem>]) -> Result<(), ExecutionError> {
     let mut pending = BTreeSet::new();
     let mut returning_results = false;
     for item in history {

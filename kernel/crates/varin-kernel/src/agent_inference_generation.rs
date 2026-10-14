@@ -329,7 +329,7 @@ fn prepare(
                 content: Content::Text { text: p.user },
                 opaque: None,
             },
-        ],
+        ].into_iter().map(Into::into).collect(),
     };
     let serialized = bound.provider.serialize(&view)?;
     let snapshot = RequestSnapshot { view, serialized };

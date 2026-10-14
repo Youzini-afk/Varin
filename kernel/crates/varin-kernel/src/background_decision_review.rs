@@ -283,9 +283,9 @@ fn execute_with_receipt_fault(
         .unwrap()
         .into_iter()
         .filter_map(|item| {
-            if let Content::ToolResult { result } = item.content {
-                if let ToolCompletion::Result { content, .. } = result.completion {
-                    return Some((result.call_id, content.data));
+            if let Content::ToolResult { result } = &item.content {
+                if let ToolCompletion::Result { content, .. } = &result.completion {
+                    return Some((result.call_id.clone(), content.data.clone()));
                 }
             }
             None

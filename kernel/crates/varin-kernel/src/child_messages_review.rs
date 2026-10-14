@@ -619,17 +619,17 @@ fn followup_get_list_and_control_consume_real_retained_user_instruction_from_bot
                 .execution_history(&f.run.branch_id)
                 .unwrap()
             {
-                if let Content::ToolResult { result } = item.content {
+                if let Content::ToolResult { result } = &item.content {
                     if result.call_id.starts_with("manage-") {
                         let ToolCompletion::Result {
                             outcome: varin_runtime::Outcome::Succeeded,
                             content,
                             ..
-                        } = result.completion
+                        } = &result.completion
                         else {
                             panic!("actual ModelStep management result failed")
                         };
-                        values.push((result.call_id, content.data));
+                        values.push((result.call_id.clone(), content.data.clone()));
                     }
                 }
             }
@@ -1202,7 +1202,7 @@ fn repeating_tool_wait_returns_first_occurrence_even_when_later_edges_precede_wa
             .into_iter()
             .find(|item| item.id.starts_with("followup-observation-result:"))
             .unwrap();
-        let Content::Text { text } = item.content else {
+        let Content::Text { text } = &item.content else {
             panic!("observation fact")
         };
         assert!(text.contains(&history[0].id));

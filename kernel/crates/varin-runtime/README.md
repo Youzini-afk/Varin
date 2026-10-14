@@ -78,9 +78,16 @@ writing Pi session files or the Host harness's existing execution records.
   navigation and recovery compile afresh. Current memory/receipts, Goal and policy context still
   project at each boundary, and all admission and dispatch authorization stays live. The worker drops
   the cache on exit, including waiting and cancellation; no global cache or second history ledger owns
-  it. This removes repeated retained-body I/O, parsing, media hydration and fixed-context assembly.
-  Semantic request vectors still clone their owned values, and providers still compile and encode a
-  complete request. It is not provider wire-fragment reuse or evidence of remote cache discounts.
+  it. This removes repeated stable context/history body I/O, parsing, media hydration and fixed-context
+  assembly. `ConversationHistory` is the single vector of immutable item `Arc`s used by compilation,
+  policy views and prepared requests. Later requests copy handles instead of retained text, media and
+  opaque payloads. A worker-local latest projection retains a sanitized item only while its actual
+  source `Arc` and provider family/connection match; foreign provider-only items remain omitted.
+  Changed checkpoints and connection identities replace those derived entries without mutating original
+  history. Current memory, Goal and policy evidence are still freshly projected. Vector assembly and
+  validation scan items; media storage projection can still clone semantic bodies, while durable JSON
+  encoding and provider serialization still visit the complete request. Provider wire fragments and
+  HTTP encoding are not reused, and this is not evidence of remote cache discounts.
 - User answers prepare content outside Catalog and commit its identity with the original question,
   branch, wait and owner guards. Equal retries deliver once; conflicting answers and late cancelled
   work fail. Waiting/cancellation lookup selects the actual Run's questions instead of decoding all

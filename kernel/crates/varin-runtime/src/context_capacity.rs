@@ -245,7 +245,7 @@ pub fn budget_candidates(view: &RequestView) -> Vec<BudgetCandidate> {
     let total = view
         .history
         .iter()
-        .map(estimate_item)
+        .map(|item| estimate_item(item))
         .fold(0u64, u64::saturating_add);
     let mut prefix = 0u64;
     let mut pending = std::collections::BTreeSet::new();
@@ -341,7 +341,7 @@ pub fn native_candidate<'a>(
     let history_tokens = view
         .history
         .iter()
-        .map(estimate_item)
+        .map(|item| estimate_item(item))
         .fold(0u64, u64::saturating_add);
     let original_start = view
         .history
@@ -357,7 +357,7 @@ pub fn native_candidate<'a>(
         .unwrap_or(view.history.len());
     let prefix = view.history[..original_start].iter().filter(|item| !matches!(&item.provenance,
         crate::execution::Provenance::ExternalData { source } if source.starts_with("conversation-summary:")))
-        .map(estimate_item).fold(0u64, u64::saturating_add);
+        .map(|item| estimate_item(item)).fold(0u64, u64::saturating_add);
     let fixed = estimate
         .estimated_tokens
         .saturating_sub(history_tokens)
@@ -471,7 +471,7 @@ mod preparation_tests {
                 text: "S".repeat(800),
             },
             opaque: None,
-        });
+        }.into());
         for n in 0..10 {
             let id = format!("user-{n}");
             view.history.push(crate::execution::ConversationItem {
@@ -482,7 +482,7 @@ mod preparation_tests {
                     text: "T".repeat(400),
                 },
                 opaque: None,
-            });
+            }.into());
         }
         let candidates = budget_candidates(&view);
         let cold = PreparationTiming::default();

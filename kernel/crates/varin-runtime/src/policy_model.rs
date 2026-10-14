@@ -167,7 +167,7 @@ impl<
     pub(super) fn admit_model_job(
         &self,
         input: &ExecutionInput,
-        history: &[ConversationItem],
+        history: &[std::sync::Arc<ConversationItem>],
         head: Option<&str>,
         capability_id: String,
         instructions: Vec<String>,
@@ -227,13 +227,14 @@ impl<
             .or(input.binding.memory_checkpoint.clone());
         // Quote the committed semantic context; never replay user/tool/assistant roles as an
         // auxiliary conversation or carry a main provider's opaque continuation across roles.
-        let mut quoted: Vec<ConversationItem> = committed
+        let mut quoted: crate::execution::ConversationHistory = committed
             .iter()
             .filter(|item| !matches!(item.content, Content::ProviderOnly))
             .cloned()
-            .map(|mut item| {
+            .map(|item| {
+                let mut item = std::sync::Arc::unwrap_or_clone(item);
                 item.opaque = None;
-                item
+                std::sync::Arc::new(item)
             })
             .collect();
         let mut request_history = vec![
@@ -302,7 +303,7 @@ impl<
                 boundary_id: boundary.id.clone(),
             },
             binding,
-            history: request_history,
+            history: request_history.into_iter().map(Into::into).collect(),
         };
         let serialized = guarded("provider_serialize_panicked", || {
             bound.provider.serialize(&view)
@@ -582,13 +583,13 @@ struct ContextMedia {
 struct QuotedContext {
     history: Vec<ConversationItem<ContextMedia>>,
 }
-fn quote_context(history: &[ConversationItem]) -> Result<OutputBody, ExecutionError> {
+fn quote_context(history: &[std::sync::Arc<ConversationItem>]) -> Result<OutputBody, ExecutionError> {
     let mut parts = Vec::new();
     let quoted = history
         .iter()
         .cloned()
         .map(|item| {
-            item.map_media(|media| {
+            std::sync::Arc::unwrap_or_clone(item).map_media(|media| {
                 let reference = ContextMedia {
                     part_index: parts.len(),
                     media_type: media.media_type.clone(),
@@ -607,7 +608,7 @@ fn quote_context(history: &[ConversationItem]) -> Result<OutputBody, ExecutionEr
 }
 pub(crate) fn quoted_context(
     output: &OutputBody,
-) -> Result<Vec<ConversationItem>, crate::catalog::RuntimeError> {
+) -> Result<crate::execution::ConversationHistory, crate::catalog::RuntimeError> {
     let quoted: QuotedContext = serde_json::from_value(output.data.clone())?;
     quoted
         .history
@@ -623,7 +624,7 @@ pub(crate) fn quoted_context(
                 _ => Err(crate::catalog::RuntimeError::Invalid(
                     "quoted media differs from its original output part".into(),
                 )),
-            })
+            }).map(std::sync::Arc::new)
         })
         .collect()
 }

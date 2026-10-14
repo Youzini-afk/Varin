@@ -1568,7 +1568,7 @@ fn prepared_snapshot_preserves_typed_media_and_opaque_provider_body_through_gc_a
         },
         opaque: Some(OpaqueProviderItem { connection_identity: "fixture-connection".into(), family: "test".into(), adapter_version: "1".into(),
             value: json!({"signature":[null,42,"unaltered"]}) }),
-    });
+    }.into());
     // Image-shaped provider JSON is opaque material, independent of the typed
     // media dependency retained in the same immutable RequestSnapshot.
     snapshot.serialized = json!({"provider":"mock","unknown":[null,true,17],"image":{"media_type":"image/png","data":encoded}});

@@ -367,7 +367,7 @@ pub fn request_view(
             },
             content,
             opaque: None,
-        });
+        }.into());
     };
     if let Some(text) = &request.system_prompt {
         push(SamplingRole::System, Content::Text { text: text.clone() });

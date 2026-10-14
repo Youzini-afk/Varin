@@ -93,7 +93,7 @@ impl ContextPreparation for ObservedContext {
         epoch: u64,
         binding: &mut RequestBinding,
         cancel: &CancellationToken,
-    ) -> Result<Vec<ConversationItem>, ExecutionError> {
+    ) -> Result<varin_runtime::execution::ConversationHistory, ExecutionError> {
         self.0.prepare_binding(run, epoch, binding, cancel)
     }
     fn prepare(

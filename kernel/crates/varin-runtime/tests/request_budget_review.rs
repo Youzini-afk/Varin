@@ -294,7 +294,7 @@ fn actual_serializers_keep_cache_semantics_full_tail_and_exact_prefix_invalidati
                 history_range: binding.history_range.clone(),
             },
             binding,
-            history: vec![text("first", "original text")],
+            history: vec![text("first", "original text").into()],
         };
         let original = RequestSnapshot {
             serialized: provider.serialize(&view).unwrap(),
@@ -305,7 +305,7 @@ fn actual_serializers_keep_cache_semantics_full_tail_and_exact_prefix_invalidati
         let mut current = original.view.clone();
         current
             .history
-            .push(text("tail", &"完整新增材料".repeat(100)));
+            .push(text("tail", &"完整新增材料".repeat(100)).into());
         let serialized = provider.serialize(&current).unwrap();
         let local = estimate_request(&current, &serialized);
         let calibrated = calibrated_estimate(&current, &serialized, &original, &receipt, protocol);
@@ -345,7 +345,7 @@ fn actual_serializers_keep_cache_semantics_full_tail_and_exact_prefix_invalidati
                     }
                 }
                 _ => {
-                    changed.history[0].content = Content::Text {
+                    Arc::make_mut(&mut changed.history[0]).content = Content::Text {
                         text: "edited original".into(),
                     }
                 }
@@ -395,11 +395,11 @@ fn calibration_preserves_opaque_media_and_unmeasured_flags_and_rejects_incomplet
             history_range: binding.history_range.clone(),
         },
         binding,
-        history: vec![text("first", "original")],
+        history: vec![text("first", "original").into()],
     };
     view.history.push(ConversationItem{id:"signed".into(),resource_activation:None,provenance:Provenance::Assistant,content:Content::ProviderOnly,
         opaque:Some(OpaqueProviderItem{family:anthropic::FAMILY.into(),connection_identity:"fixture".into(),adapter_version:"1".into(),
-            value:json!({"type":"thinking","thinking":"retained opaque original","signature":"original-signature"})})});
+            value:json!({"type":"thinking","thinking":"retained opaque original","signature":"original-signature"})})}.into());
     let original = RequestSnapshot {
         serialized: provider.serialize(&view).unwrap(),
         view,
@@ -424,7 +424,7 @@ fn calibration_preserves_opaque_media_and_unmeasured_flags_and_rejects_incomplet
             },
         },
         opaque: None,
-    });
+    }.into());
     let serialized = provider.serialize(&current).unwrap();
     let saved_body = serialized.clone();
     let protocol = provider.request_budget_protocol().unwrap();

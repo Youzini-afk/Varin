@@ -59,7 +59,7 @@ impl ContextPreparation for CapacityPreparation {
         epoch: u64,
         binding: &mut RequestBinding,
         cancel: &CancellationToken,
-    ) -> Result<Vec<ConversationItem>, ExecutionError> {
+    ) -> Result<varin_runtime::execution::ConversationHistory, ExecutionError> {
         self.inner.prepare_binding(run_id, epoch, binding, cancel)
     }
     fn prepare(
@@ -487,7 +487,7 @@ mod tests {
                     text: "Original source".into(),
                 },
                 opaque: None,
-            }],
+            }.into()],
         };
         let catalog = Arc::new(Mutex::new(catalog));
         let (output, requests) = mpsc::sync_channel(8);

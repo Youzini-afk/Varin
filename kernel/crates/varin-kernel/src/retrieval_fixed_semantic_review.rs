@@ -2,7 +2,7 @@
 use super::*;
 use base64::Engine;
 
-fn results(history: &[ConversationItem]) -> Vec<&Value> {
+fn results(history: &[std::sync::Arc<ConversationItem>]) -> Vec<&Value> {
     history
         .iter()
         .filter_map(|item| match &item.content {

@@ -260,7 +260,7 @@ impl<
         input: &ExecutionInput,
         nodes: Vec<PolicyToolNode>,
         state: Value,
-        history: &[ConversationItem],
+        history: &[std::sync::Arc<ConversationItem>],
         head: Option<&str>,
         cancel: &CancellationToken,
     ) -> Result<PolicyGraphState, ExecutionError> {

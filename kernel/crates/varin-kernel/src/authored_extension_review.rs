@@ -806,7 +806,7 @@ fn run_authored_extension_chain(grouped: bool) {
             .execution_history(BRANCH)
             .map(|items| items
                 .into_iter()
-                .filter_map(|item| match item.content {
+                .filter_map(|item| match &item.content {
                     Content::ToolResult { result }
                         if !matches!(
                             result.completion,
@@ -815,7 +815,7 @@ fn run_authored_extension_chain(grouped: bool) {
                                 ..
                             }
                         ) =>
-                        Some(result),
+                        Some(result.clone()),
                     _ => None,
                 })
                 .collect::<Vec<_>>())
