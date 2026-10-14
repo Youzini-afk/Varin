@@ -267,6 +267,11 @@ class ManagedRecoveryRejected extends RecoveryPrimitiveError {
       { ...failure, operationId, origin: failure?.origin ?? 'storage' });
   }
 }
+class RecoveryCancellationRequested extends RecoveryPrimitiveError {
+  constructor(operationId: string) {
+    super('recovery-in-progress', 'Cancellation is recorded and awaits the original file owners', { operationId, origin: 'storage', retryable: true });
+  }
+}
 const revisionOf = (value: unknown): string => `sha256-${createHash("sha256").update(JSON.stringify(value)).digest("hex")}`;
 const isRecord = (value: unknown): value is Record<string, unknown> => Boolean(value) && typeof value === "object" && !Array.isArray(value);
 const requireRecord = (value: unknown, label: string): Record<string, unknown> => {
@@ -395,6 +400,7 @@ export const createWorkspaceRecoveryEngine = (options: CreateWorkspaceRecoveryEn
   const queues = new Map<string, Promise<unknown>>();
   const inFlight = new Set<Promise<unknown>>();
   const startupFailures = new Map<string, WorkspaceRecoveryFailure[]>();
+  const cancellationObservers = new Map<string, Set<() => void>>();
   let disposed = false;
   const coordinatorWorkspaces = new Set<string>();
   const operationWorkspaces = async (): Promise<Array<{ workspaceId: string }>> => [...new Map([
@@ -423,6 +429,8 @@ export const createWorkspaceRecoveryEngine = (options: CreateWorkspaceRecoveryEn
   };
   const runWorkspace = <T>(workspaceId: string, callback: () => Promise<T> | T) => runSerialized(`metadata\0${workspaceId}`, callback);
   const runOperation = <T>(operationId: string, callback: () => Promise<T> | T) => track(() => runSerialized(`operation\0${operationId}`, callback));
+  // Journal CAS is short and independent of the operation's file/network waits.
+  const runRecord = <T>(operationId: string, callback: () => Promise<T>) => runSerialized(`record\0${operationId}`, callback);
   const coordinateWorkspaceStorage: WorkspaceRecoveryEngine["coordinateWorkspaceStorage"] = (workspaceId, access, callback) => (
     access.mode === "shared" ? track(callback) : track(() => runWorkspace(workspaceId, callback))
   );
@@ -592,7 +600,7 @@ export const createWorkspaceRecoveryEngine = (options: CreateWorkspaceRecoveryEn
     relativePath: string,
     phase: OperationFilePhase,
     states: { expected?: RecoveryState; target?: RecoveryState; safety?: RecoveryState } = {},
-  ): Promise<void> => {
+  ): Promise<void> => runRecord(record.id, async () => {
     const file = rowsFor(await getOperation(record.plan.workspaceId, record.id)).find((value) => value.path === relativePath);
     if (!file) throw new RecoveryPrimitiveError("storage-malformed", `Recovery operation path is missing: ${relativePath}`, { origin: "storage" });
     if (file.phase === phase && Object.keys(states).length === 0) return;
@@ -606,10 +614,9 @@ export const createWorkspaceRecoveryEngine = (options: CreateWorkspaceRecoveryEn
       ...states,
       ...(record.plan.conversation.kind === "pi" ? { sessionId: record.plan.conversation.sessionId } : { threadId: record.plan.conversation.threadId }),
     });
-  };
-  const persist = async (record: CombinedOperationRecord): Promise<void> => {
+  });
+  const writeRecord = async (record: CombinedOperationRecord, operation: Record<string, unknown>): Promise<void> => {
     record.updatedAt = new Date().toISOString();
-    const operation = await getOperation(record.plan.workspaceId, record.id);
     await durable.completeOperation({
       operationId: record.id,
       workspaceId: record.plan.workspaceId,
@@ -619,6 +626,57 @@ export const createWorkspaceRecoveryEngine = (options: CreateWorkspaceRecoveryEn
       ...(record.failure ? { failure: record.failure as unknown as Record<string, unknown> } : {}),
       ...(record.plan.conversation.kind === "pi" ? { sessionId: record.plan.conversation.sessionId } : { threadId: record.plan.conversation.threadId }),
     });
+  };
+  const persist = async (record: CombinedOperationRecord): Promise<void> => runRecord(record.id, async () => {
+    const operation = await getOperation(record.plan.workspaceId, record.id);
+    const current = parseCombined(operation);
+    if (current.cancelRequested) record.cancelRequested = true;
+    const enteringCommit = (record.state === 'navigating-conversation' && current.state !== 'navigating-conversation')
+      || (record.fileParticipant && record.state === 'complete' && current.state !== 'complete');
+    if (enteringCommit && current.cancelRequested && !TERMINAL_STATES.has(current.state)) {
+      record.state = current.state;
+      throw new RecoveryCancellationRequested(record.id);
+    }
+    await writeRecord(record, operation);
+  });
+  const checkCancellation = async (record: CombinedOperationRecord): Promise<void> => {
+    const current = parseCombined(await getOperation(record.workspaceId, record.id));
+    if (current.cancelRequested) record.cancelRequested = true;
+    if (current.cancelRequested && current.state !== 'navigating-conversation' && !TERMINAL_STATES.has(current.state))
+      throw new RecoveryCancellationRequested(record.id);
+  };
+  const observeOwner = async <T>(record: CombinedOperationRecord, operation: () => Promise<T>): Promise<T> => {
+    let cancel!: () => void;
+    let cancelled = false;
+    const interrupted = new Promise<never>((_resolve, reject) => { cancel = () => { cancelled = true; reject(new RecoveryCancellationRequested(record.id)); }; });
+    const observers = cancellationObservers.get(record.id) ?? new Set<() => void>();
+    observers.add(cancel); cancellationObservers.set(record.id, observers);
+    try {
+      await Promise.race([checkCancellation(record), interrupted]);
+      if (cancelled) throw new RecoveryCancellationRequested(record.id);
+      // Interrupt this observation only. The original remote request may still be
+      // executing; compensation must obtain that owner's cancel/read receipt.
+      return await Promise.race([operation(), interrupted]);
+    } finally {
+      observers.delete(cancel);
+      if (!observers.size) cancellationObservers.delete(record.id);
+    }
+  };
+  const acceptCancellation = async (operationId: string, workspaceId: string, access?: RecoveryFileParticipantAccess): Promise<CombinedOperationRecord> => {
+    const record = await runRecord(operationId, async () => {
+      const operation = await getOperation(workspaceId, operationId);
+      const current = parseCombined(operation);
+      if (access ? !current.fileParticipant || !isDeepStrictEqual(current.fileParticipant.binding, access.binding) : Boolean(current.fileParticipant))
+        throw new RecoveryPrimitiveError('workspace-untrusted', 'Only the original owner can cancel this recovery operation', { origin: 'storage' });
+      if (!TERMINAL_STATES.has(current.state) && !current.cancelRequested) {
+        current.cancelRequested = true;
+        await writeRecord(current, operation);
+      }
+      return current;
+    });
+    if (record.cancelRequested && record.state !== 'navigating-conversation' && !TERMINAL_STATES.has(record.state))
+      for (const cancel of cancellationObservers.get(operationId) ?? []) cancel();
+    return record;
   };
   const createCombined = (record: CombinedOperationRecord) => durable.createOperation({
     operationId: record.id,
@@ -852,13 +910,14 @@ export const createWorkspaceRecoveryEngine = (options: CreateWorkspaceRecoveryEn
     await createCombined(record);
     return record.managedPreparation ? runOperation(record.id, async () => resolveManagedPreparation(parseCombined(await getOperation(record.workspaceId, record.id)))) : plan;
   };
-  const resolveManagedPreparation = async (record: CombinedOperationRecord): Promise<WorkspaceCombinedRecoveryPlan> => {
+  const resolveManagedPreparation = async (record: CombinedOperationRecord, forCancellation = false): Promise<WorkspaceCombinedRecoveryPlan> => {
     const pending = record.managedPreparation;
     if (!pending) return record.plan;
     try {
-      const participants = pending.undoOf
+      const prepare = async () => pending.undoOf
         ? await Promise.all((pending.originalParticipants ?? []).map(participant => requireManaged().prepareUndo(participant, record.id, pending.navigation)))
-        : await requireManaged().prepare(record.id, pending.input, pending.navigation, pending.turns);
+        : requireManaged().prepare(record.id, pending.input, pending.navigation, pending.turns);
+      const participants = forCancellation ? await prepare() : await observeOwner(record, prepare);
       const { revision: _revision, ...draft } = record.plan;
       record.plan = withManagedPlan(structuredClone(draft), participants);
       record.managedParticipants = participants;
@@ -867,6 +926,7 @@ export const createWorkspaceRecoveryEngine = (options: CreateWorkspaceRecoveryEn
       await persist(record);
       return record.plan;
     } catch (error) {
+      if (error instanceof RecoveryCancellationRequested) { record.failure = recoveryFailure(error); await persist(record); throw error; }
       const pendingFailure = new RecoveryPrimitiveError('recovery-in-progress', 'The original managed recovery preparation is awaiting its file owner',
         { operationId: record.id, retryable: true, origin: 'storage', cause: error });
       record.failure = recoveryFailure(pendingFailure);
@@ -880,15 +940,19 @@ export const createWorkspaceRecoveryEngine = (options: CreateWorkspaceRecoveryEn
     if (action !== 'read') { participant.requested = action; await persist(record); }
     let result: WorkspaceCombinedRecoveryOperationResult;
     let definiteFailure: WorkspaceRecoveryFailure | undefined;
+    const observe = <T>(request: () => Promise<T>) => action === 'apply' || (action === 'read' && record.state !== 'navigating-conversation')
+      ? observeOwner(record, request) : request();
     try {
-      result = action === 'apply' ? await port.apply(participant, input!) : await port[action](participant);
+      const request = () => action === 'apply' ? port.apply(participant, input!) : port[action](participant);
+      result = await observe(request);
       if (result.status === 'failed' && action !== 'read') {
         definiteFailure = result.failure;
-        result = await port.read(participant);
+        result = await observe(() => port.read(participant));
       }
     } catch (error) {
-      try { result = await port.read(participant); }
-      catch { throw new ManagedRecoveryPending(record.id, error); }
+      if (error instanceof RecoveryCancellationRequested) throw error;
+      try { result = await observe(() => port.read(participant)); }
+      catch (readError) { if (readError instanceof RecoveryCancellationRequested) throw readError; throw new ManagedRecoveryPending(record.id, error); }
     }
     if (result.status !== 'ready') throw new ManagedRecoveryPending(record.id, result.failure);
     const operation = result.operation;
@@ -903,6 +967,7 @@ export const createWorkspaceRecoveryEngine = (options: CreateWorkspaceRecoveryEn
   };
   const applyManaged = async (record: CombinedOperationRecord): Promise<void> => {
     for (const participant of record.managedParticipants ?? []) {
+      await checkCancellation(record);
       const input = record.applyInput;
       if (!input) throw new RecoveryPrimitiveError('storage-malformed', 'Managed recovery has no original apply decision', { origin: 'storage' });
       const prefix = managedRecoveryPath(participant, '');
@@ -911,6 +976,7 @@ export const createWorkspaceRecoveryEngine = (options: CreateWorkspaceRecoveryEn
         ...(input.confirmedConflicts ? { confirmedConflicts: input.confirmedConflicts.filter(value => value.path.startsWith(prefix)).map(value => ({ ...value, path: value.path.slice(prefix.length) })) } : {}),
       };
       let operation = await managedObservation(record, participant, participant.requested ? 'read' : 'apply', applyInput);
+      await checkCancellation(record);
       if (operation.state === 'planned' && participant.requested === 'apply') {
         // The dispatch may never have reached B. Re-enter only its same durable
         // operation and original decision; B's operation queue/CAS prevents a second effect.
@@ -1003,6 +1069,7 @@ export const createWorkspaceRecoveryEngine = (options: CreateWorkspaceRecoveryEn
       const localInput = { ...input, confirmedConflicts: input.confirmedConflicts.filter(conflict => Boolean(record.targets[conflict.path])) };
       validateConflicts(localConflicts, await conflictsFor(identity, root, record.targets), localInput);
       if (record.state === "planned") {
+        await checkCancellation(record);
         record.applyInput = input;
         for (const relativePath of Object.keys(record.targets)) {
           const safety = (await captureTarget(identity, record.targets, relativePath, true)).state;
@@ -1011,6 +1078,7 @@ export const createWorkspaceRecoveryEngine = (options: CreateWorkspaceRecoveryEn
           await prepareSurfaceSafety(identity, record, relativePath, barrier);
         }
         await barrier.settle();
+        await checkCancellation(record);
         validateConflicts(localConflicts, await conflictsFor(identity, root, record.targets), localInput);
         record.state = "applying-files";
         await persist(record);
@@ -1026,6 +1094,7 @@ export const createWorkspaceRecoveryEngine = (options: CreateWorkspaceRecoveryEn
           if (row.phase === "safety-observed" || (row.phase !== "apply-intent" && row.phase !== "pending")) continue;
           await barrier.settle();
           await gateTarget(identity, record.targets, row.path).run([{ resourceId: row.path, scope: "subtree" }], async () => {
+            await checkCancellation(record);
             const current = (await captureTarget(identity, record.targets, row.path, false)).state;
             if (!sameState(current, safetyFor(record, row.path))) {
               await transitionFile(record, row.path, "needs-attention");
@@ -1048,6 +1117,7 @@ export const createWorkspaceRecoveryEngine = (options: CreateWorkspaceRecoveryEn
           await persist(record);
         }
         await applyManaged(record);
+        await checkCancellation(record);
         record.fileState = record.plan.affectedPaths.length > 0 ? "restored" : "unchanged";
         record.state = "files-restored";
         await persist(record);
@@ -1090,6 +1160,14 @@ export const createWorkspaceRecoveryEngine = (options: CreateWorkspaceRecoveryEn
       record.state = "complete";
       await persist(record);
       return publicOperation(record);
+    } catch (error) {
+      if (!(error instanceof RecoveryCancellationRequested)) throw error;
+      const current = parseCombined(await getOperation(identity.workspaceId, record.id));
+      if (!TERMINAL_STATES.has(current.state) && current.state !== 'navigating-conversation') {
+        barrier ??= await targetBarrier(identity, current.targets);
+        await compensate(current, identity, root, barrier);
+      }
+      return publicOperation(parseCombined(await getOperation(identity.workspaceId, record.id)));
     } finally {
       await barrier?.release();
     }
@@ -1173,13 +1251,13 @@ export const createWorkspaceRecoveryEngine = (options: CreateWorkspaceRecoveryEn
   };
 
   const reconcileCombined = async (workspaceId: string, identity: RecoveryIdentity, stored: Record<string, unknown>): Promise<WorkspaceCombinedRecoveryOperation | null> => {
-    const record = parseCombined(stored);
-    if (record.managedPreparation) { await resolveManagedPreparation(record); if (!record.cancelRequested) return publicOperation(record); }
+    let record = parseCombined(stored);
+    if (record.managedPreparation) { await resolveManagedPreparation(record, record.cancelRequested); if (!record.cancelRequested) return publicOperation(record); }
     if ((record.state === "planned" && !record.cancelRequested) || TERMINAL_STATES.has(record.state)) return null;
     let barrier: TargetBarrierHandle | undefined;
     try {
       barrier = await targetBarrier(identity, record.targets);
-      if (record.state === 'compensating-files' || record.cancelRequested) {
+      if (record.state === 'compensating-files' || (record.cancelRequested && record.state !== 'navigating-conversation')) {
         await compensate(record, identity, identity.canonicalRoot, barrier);
         return publicOperation(record);
       }
@@ -1269,6 +1347,11 @@ export const createWorkspaceRecoveryEngine = (options: CreateWorkspaceRecoveryEn
         await persist(record);
       }
     } catch (error) {
+      if (error instanceof RecoveryCancellationRequested && record.state !== 'navigating-conversation' && barrier) {
+        record = parseCombined(await getOperation(record.workspaceId, record.id));
+        try { await compensate(record, identity, identity.canonicalRoot, barrier); return publicOperation(record); }
+        catch (compensationError) { error = compensationError; }
+      }
       if (error instanceof ManagedRecoveryRejected && (record.state === 'applying-files' || record.state === 'files-restored') && barrier) {
         record.failure = recoveryFailure(error);
         try { await compensate(record, identity, identity.canonicalRoot, barrier); return publicOperation(record); }
@@ -1376,6 +1459,10 @@ export const createWorkspaceRecoveryEngine = (options: CreateWorkspaceRecoveryEn
     return record.plan;
   };
   const finishParticipant = async (access: RecoveryFileParticipantAccess, action: 'read' | 'complete' | 'cancel' | 'compensate'): Promise<WorkspaceCombinedRecoveryOperationResult> => {
+    if (action === 'cancel' || action === 'compensate') {
+      const located = await locateParticipant(access);
+      await acceptCancellation(access.operationId, located.identity.workspaceId, access);
+    }
     return runOperation(access.operationId, async () => {
       const located = await locateParticipant(access);
       let record = located.record;
@@ -1420,10 +1507,11 @@ export const createWorkspaceRecoveryEngine = (options: CreateWorkspaceRecoveryEn
     }),
     cancelCombinedOperation: (operationId) => safe(async () => {
       const located = await locate(operationId);
+      await acceptCancellation(operationId, located.identity.workspaceId);
       return runOperation(operationId, async () => {
         const record = parseCombined(await getOperation(located.identity.workspaceId, operationId));
         if (record.fileParticipant) throw new RecoveryPrimitiveError('workspace-untrusted', 'Only the original coordinator can cancel this file participant', { origin: 'storage' });
-        if (record.managedPreparation) { record.cancelRequested = true; await persist(record); await resolveManagedPreparation(record); }
+        if (record.managedPreparation) await resolveManagedPreparation(record, true);
         if (record.state === "planned") {
           if (!record.managedParticipants?.length) { record.state = "aborted"; await persist(record); }
           else {

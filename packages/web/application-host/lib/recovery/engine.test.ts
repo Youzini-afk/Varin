@@ -1218,7 +1218,7 @@ describe('managed file participants in the original recovery journal', () => {
     const reopen = () => createWorkspaceRecoveryEngine({ ...metadata, authorityId: 'host-A', dataDir: a.harness.dataDir,
       documents: a.harness.authority, durableRecoveryStore: a.durable, fileStore: aFiles,
       managedRecovery: remote, sessionNavigation: navigation });
-    return { a, b, remote, navigation, prepared, apply, capture, binding, reopen };
+    return { a, b, remote, navigation, prepared, apply, capture, binding, reopen, bFileStore: bFiles };
   };
 
   it('restores on B, navigates only A, and undoes from B-owned safety without A file access', async () => {
@@ -1398,6 +1398,140 @@ describe('managed file participants in the original recovery journal', () => {
     expect(navigation.commit).not.toHaveBeenCalled();
     expect(await fs.promises.readFile(path.join(a.harness.workspaceRoot, 'note.txt'), 'utf8')).toBe('after-A');
     expect(await fs.promises.readFile(path.join(b.harness.workspaceRoot, 'note.txt'), 'utf8')).toBe('later-user-B');
+    await restarted.dispose();
+  });
+
+
+  it('records cancellation outside a withheld B reply and finishes the original participants before that reply is released', async () => {
+    const { a, b, remote, navigation, prepared, apply } = await createPair(true);
+    let releaseReply!: () => void;
+    const replyGate = new Promise<void>(resolve => { releaseReply = resolve; });
+    let applied!: () => void;
+    const appliedAtB = new Promise<void>(resolve => { applied = resolve; });
+    const dispatch = remote.apply;
+    remote.apply = vi.fn(async (...args: Parameters<typeof dispatch>) => {
+      const receipt = await dispatch(...args); applied(); await replyGate; return receipt;
+    });
+    const applying = a.engine.applyCombinedRecovery(apply);
+    await appliedAtB;
+    try {
+      const cancelling = a.engine.cancelCombinedOperation(prepared.plan.id);
+      const result = await Promise.race([cancelling, new Promise<never>((_resolve, reject) => setTimeout(() => reject(new Error('Cancellation waited for the withheld apply reply')), 2000))]);
+      expect(ready(result).operation.state).toBe('compensated');
+      expect(ready(await applying).operation.state).toBe('compensated');
+      const stored = a.durable.snapshot(prepared.plan.workspaceId, prepared.plan.id)!;
+      expect((stored.result ?? stored.data).cancelRequested).toBe(true);
+      expect(remote.cancel).toHaveBeenCalled();
+      expect(navigation.commit).not.toHaveBeenCalled();
+      expect(await fs.promises.readFile(path.join(a.harness.workspaceRoot, 'note.txt'), 'utf8')).toBe('after-A');
+      expect(await fs.promises.readFile(path.join(b.harness.workspaceRoot, 'note.txt'), 'utf8')).toBe('after-B');
+    } finally { releaseReply(); await applying; }
+    await Promise.resolve();
+    expect(ready(await a.engine.getCombinedOperation(prepared.plan.id)).operation.state).toBe('compensated');
+  });
+
+
+  it('records B cancellation before its in-flight file owner settles without treating observation interruption as stopped work', async () => {
+    const { a, b, remote, navigation, prepared, apply, bFileStore } = await createPair(true);
+    let releaseWrite!: () => void;
+    const writeGate = new Promise<void>(resolve => { releaseWrite = resolve; });
+    let wrote!: () => void;
+    const wroteAtB = new Promise<void>(resolve => { wrote = resolve; });
+    const write = bFileStore.applyState;
+    bFileStore.applyState = async (...args) => { await write(...args); wrote(); await writeGate; };
+    const applying = a.engine.applyCombinedRecovery(apply);
+    await wroteAtB;
+    const stored = a.durable.snapshot(prepared.plan.workspaceId, prepared.plan.id)!;
+    const participant = ((stored.result ?? stored.data).managedParticipants as import('./managed-recovery-coordinator.js').ManagedRecoveryParticipant[])[0]!;
+    let cancelled = false;
+    const cancelling = a.engine.cancelCombinedOperation(prepared.plan.id).then(result => { cancelled = true; return result; });
+    try {
+      await expect.poll(() => {
+        const operation = b.durable.snapshot(participant.workspaceId, participant.id)!;
+        return (operation.result ?? operation.data).cancelRequested;
+      }, { timeout: 2000 }).toBe(true);
+      expect(cancelled).toBe(false);
+      expect(ready(await b.engine.getCombinedOperation(participant.id)).operation.state).toBe('applying-files');
+      expect(remote.cancel).toHaveBeenCalled();
+      expect(navigation.commit).not.toHaveBeenCalled();
+    } finally { releaseWrite(); }
+    expect(ready(await cancelling).operation.state).toBe('compensated');
+    expect(ready(await applying).operation.state).toBe('compensated');
+    for (const [durable, workspaceId, id] of [[a.durable, prepared.plan.workspaceId, prepared.plan.id], [b.durable, participant.workspaceId, participant.id]] as const) {
+      const operation = durable.snapshot(workspaceId, id)!;
+      expect((operation.result ?? operation.data).cancelRequested).toBe(true);
+    }
+    expect(await fs.promises.readFile(path.join(a.harness.workspaceRoot, 'note.txt'), 'utf8')).toBe('after-A');
+    expect(await fs.promises.readFile(path.join(b.harness.workspaceRoot, 'note.txt'), 'utf8')).toBe('after-B');
+  });
+
+  it('cancels the original pending preparation and ignores its late successful reply', async () => {
+    const { a, b, remote, navigation, prepared } = await createPair();
+    ready(await a.engine.cancelCombinedOperation(prepared.plan.id));
+    const input = { workspaceId: prepared.plan.workspaceId, conversation: prepared.plan.conversation, entryId: prepared.plan.entryId };
+    let releaseReply!: () => void;
+    const replyGate = new Promise<void>(resolve => { releaseReply = resolve; });
+    let preparedAtB!: (id: string) => void;
+    const bPrepared = new Promise<string>(resolve => { preparedAtB = resolve; });
+    const prepare = remote.prepare;
+    let calls = 0;
+    remote.prepare = vi.fn(async (...args: Parameters<typeof prepare>) => {
+      const result = await prepare(...args);
+      if (++calls === 1) { preparedAtB(args[0]); await replyGate; }
+      return result;
+    });
+    const preparing = a.engine.prepareCombinedRecovery(input);
+    const operationId = await bPrepared;
+    try {
+      const cancelling = a.engine.cancelCombinedOperation(operationId);
+      const result = await Promise.race([cancelling, new Promise<never>((_resolve, reject) => setTimeout(() => reject(new Error('Cancellation waited for the old preparation reply')), 2000))]);
+      expect(ready(result).operation.state).toBe('compensated');
+      expect(await preparing).toMatchObject({ status: 'failed', failure: { operationId } });
+      expect(remote.apply).not.toHaveBeenCalled();
+      expect(navigation.commit).not.toHaveBeenCalled();
+      const bOperations = await b.durable.listOperations(b.harness.identity.workspaceId, 'combined');
+      expect(bOperations).toHaveLength(2);
+      expect(bOperations.every(operation => operation.state === 'aborted')).toBe(true);
+    } finally { releaseReply(); await preparing; }
+    await Promise.resolve();
+    const record = a.durable.snapshot(prepared.plan.workspaceId, operationId)!;
+    expect((record.result ?? record.data).cancelRequested).toBe(true);
+    expect(ready(await a.engine.getCombinedOperation(operationId)).operation.state).toBe('compensated');
+  });
+
+  it('keeps late cancellation durable while an already-issued navigation remains unknown and resolves its original receipt', async () => {
+    const { a, b, remote, navigation, prepared, apply, reopen } = await createPair(true);
+    let releaseNavigation!: () => void;
+    const navigationGate = new Promise<void>(resolve => { releaseNavigation = resolve; });
+    let navigating!: () => void;
+    const navigationStarted = new Promise<void>(resolve => { navigating = resolve; });
+    navigation.commit = vi.fn(async () => {
+      navigating(); await navigationGate;
+      throw new RecoveryPrimitiveError('navigation-conflict', 'Original Catalog receipt is unknown', { retryable: true, origin: 'navigation' });
+    });
+    const applying = a.engine.applyCombinedRecovery(apply);
+    await navigationStarted;
+    const cancelling = a.engine.cancelCombinedOperation(prepared.plan.id);
+    try {
+      await expect.poll(() => {
+        const record = a.durable.snapshot(prepared.plan.workspaceId, prepared.plan.id)!;
+        return (record.result ?? record.data).cancelRequested;
+      }, { timeout: 2000 }).toBe(true);
+      expect(remote.cancel).not.toHaveBeenCalled();
+    } finally { releaseNavigation(); }
+    expect(await applying).toMatchObject({ status: 'failed', failure: { code: 'navigation-conflict' } });
+    expect(ready(await cancelling).operation.state).toBe('navigating-conversation');
+    expect(remote.cancel).not.toHaveBeenCalled();
+    expect(await fs.promises.readFile(path.join(a.harness.workspaceRoot, 'note.txt'), 'utf8')).toBe('before-A');
+    expect(await fs.promises.readFile(path.join(b.harness.workspaceRoot, 'note.txt'), 'utf8')).toBe('before-B');
+    await a.engine.dispose();
+    navigation.commit = vi.fn(async () => ({ navigationMarkerId: prepared.plan.id }));
+    const restarted = reopen();
+    expect((await restarted.resumeCombinedOperations())[0]?.state).toBe('complete');
+    expect(navigation.commit).toHaveBeenCalledWith(expect.objectContaining({ operationId: prepared.plan.id }));
+    expect(remote.cancel).not.toHaveBeenCalled();
+    const record = a.durable.snapshot(prepared.plan.workspaceId, prepared.plan.id)!;
+    expect((record.result ?? record.data).cancelRequested).toBe(true);
     await restarted.dispose();
   });
 

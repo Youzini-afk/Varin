@@ -711,6 +711,18 @@ export class BrokeredHostSupervisor {
     if (resolved.status !== 'resolved') throw new Error('Host service selection is unavailable');
     await Promise.all(resolved.extensionIds.map(id => this.activateExtension(id)));
   }
+  /** Removing a selected Host entrypoint closes new admission, while accepted
+   * exchanges keep their original dependency pins until normal retirement drains. */
+  #retireHostSelection(extensionId: string): void {
+    const contains = (composition: VarinHostServiceComposition) => composition.nodes.some(node => node.extensionId === extensionId);
+    for (const pending of this.#pending.values()) if (contains(compositionForNode(pending.node)))
+      pending.controller.abort(new Error(`Selected Host entrypoint was removed: ${extensionId}`));
+    for (const [id, anchor] of this.#anchors) if (contains(anchor.composition)) {
+      this.#anchors.delete(id); anchor.release();
+    }
+    for (const root of [...this.#roots]) if (contains(root.plan.composition)) this.#roots.delete(root);
+    for (const instance of [...this.#active.values()]) if (instance.published && contains(instance.composition)) this.#retire(instance);
+  }
   #revoke(extensionId: string): void {
     this.#epochs.set(extensionId, (this.#epochs.get(extensionId) ?? 0) + 1);
     for (const pending of this.#pending.values()) if (pending.node.node.extensionId === extensionId) pending.controller.abort(new Error(`Host owner revoked: ${extensionId}`));
@@ -918,7 +930,12 @@ export class BrokeredHostSupervisor {
       return await this.#enqueue(extensionId, async () => {
         signal?.throwIfAborted(); this.#assertRunning();
         const group = this.#staged.get(extensionId);
-        if (!group) return this.#packages.selectCandidate({ extensionId, candidateIntegrity: integrity, expectedRevision }, () => signal?.throwIfAborted());
+        if (!group) {
+          const selected = await this.#packages.selectCandidate({ extensionId, candidateIntegrity: integrity, expectedRevision }, () => signal?.throwIfAborted());
+          if (!selected.extensions.find(entry => entry.manifest.id === extensionId)?.manifest.entrypoints?.host)
+            this.#retireHostSelection(extensionId);
+          return selected;
+        }
         if (group.integrity !== integrity) throw new Error('Host candidate preparation changed');
         const current = (await this.#catalog.snapshot()).extensions.find(entry => entry.manifest.id === extensionId);
         const manifest = current?.candidate?.manifest;

@@ -133,3 +133,72 @@ it('seals ordinary views without draining the retained original daemon, then dra
   expect(await f.service.release(scope)).toEqual({ executorStopped: true, taskControlsDrained: true });
   expect(nativeDrains).toBe(1);
 });
+
+it('starts forced native Source stop before a pending resource ACK and still joins its actual drain', async () => {
+  const gate = () => {
+    let resolve!: () => void;
+    const promise = new Promise<void>(yes => { resolve = yes; });
+    return { promise, resolve };
+  };
+  const acknowledgement = gate(), subscribed = gate(), nativeStopped = gate();
+  const scope = original();
+  const endpoint = { server: 'peer', resourceKey: 'original-daemon', configurationVersion: 'config', credentialVersion: 'credential' };
+  const declaration = { server: 'peer', kind: 'resources' as const, resourceKey: endpoint.resourceKey, schemaVersion: 'schema', subscribe: true };
+  const binding: import('../kernel/protocol.generated.js').McpResourceBinding = { operationId: 'observe',
+    executionOwner: { kind: 'external', identity: 'coordinator', epoch: 'coordinator-epoch' }, endpoint, schemaVersion: 'schema', uri: 'opaque:original' };
+  let holder: import('../kernel/protocol.generated.js').SourceMcpHolder | undefined;
+  let outcome: import('../kernel/protocol.generated.js').SourceMcpCreationOutcome | undefined;
+  let nativeDrains = 0, stopped = false, closed = false;
+  const kernel = { async sourceRequest(method: string, params: Record<string, unknown>) {
+    if (method === 'source.mcp.creation_receipt') {
+      if (params.action === 'begin') {
+        holder = { binding: params.binding as import('../kernel/protocol.generated.js').SourceMcpHolderBinding,
+          released: false, creationReceipt: { requestHash: String(params.requestHash), outcomeRef: null } };
+        return { dispatch: true, holder, outcome: null };
+      }
+      if (params.action === 'settle') {
+        outcome = params.outcome as import('../kernel/protocol.generated.js').SourceMcpCreationOutcome;
+        holder!.creationReceipt!.outcomeRef = { objectHash: 'original-ack', byteLength: 1 };
+      }
+      return { dispatch: false, holder, outcome };
+    }
+    if (method === 'source.mcp.holder') return { holder, grantState: 'active', authority: { phase: 'ready' } };
+    throw new Error(`Unexpected ${method}`);
+  } };
+  const service = createManagedMcpService({ hostId: 'host-b', agentDir: '/b/agent',
+    kernel: kernel as unknown as import('../kernel/kernel-client.js').KernelClient,
+    admitWorkspaceRegistration: async () => ({ canonicalPath: '/b/original-project' }),
+    projectTrusted: () => true, admitSource: async () => {},
+    transportOwner: () => ({ adapt: transport => transport, async drain() { nativeDrains++; await nativeStopped.promise; stopped = true; },
+      executorsStopped: () => stopped }),
+    compositions: { async observe() { return {
+      release() {}, async releaseAndDrain() {}, snapshot() { return {
+        binding: { reference: 'original', generation: 1, provenance: { servers: {} }, tools: [], servers: [], readiness: {}, serverSelections: [] },
+        implementationIdentity: 'original-transport', release() {}, resourceEndpoint: () => endpoint,
+        async observeResource(_service: unknown, _uri: string, options: Parameters<McpAuthorityLease['observeResource']>[2]) {
+          await options.beforeDispatch?.(); subscribed.resolve(); await acknowledgement.promise;
+          return { listenerId: 'original-observer', endpoint, acknowledgement: { original: true },
+            async detach() { return { status: 'acknowledged' as const, acknowledgement: {} }; } };
+        },
+      } as unknown as McpAuthorityLease; },
+    } as unknown as McpCompositionScope; } },
+  });
+  expect((await service.request(scope, { kind: 'snapshot', handleId: 'view', creationRequestId: 'create' })).ok).toBe(true);
+  const creation = service.request(scope, { kind: 'resource_subscribe', handleId: 'view', binding, service: declaration });
+  await subscribed.promise;
+  expect(await service.release(scope, { retainMcpHolders: true })).toEqual({ executorStopped: false, taskControlsDrained: false });
+  expect(nativeDrains).toBe(0);
+  const closing = service.release(scope).then(result => { closed = true; return result; });
+  await new Promise<void>(resolve => setImmediate(resolve));
+  const stopRequestedBeforeAck = nativeDrains, closedBeforeAck = closed;
+  acknowledgement.resolve(); await creation;
+  await new Promise<void>(resolve => setImmediate(resolve));
+  const closedBeforeNativeStop = closed;
+  nativeStopped.resolve();
+  expect(await closing).toEqual({ executorStopped: true, taskControlsDrained: true });
+  expect(stopRequestedBeforeAck).toBe(1);
+  expect(closedBeforeAck).toBe(false);
+  expect(closedBeforeNativeStop).toBe(false);
+  expect(holder?.released).toBe(false);
+  expect(outcome).toMatchObject({ kind: 'subscribed', acknowledgement: { original: true } });
+});

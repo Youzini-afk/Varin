@@ -2273,3 +2273,124 @@ fn context_prefix_reuse_rebuilds_an_older_captured_head_and_keeps_live_memory() 
         "captured memory and history stay fixed to their original read"
     );
 }
+
+// A real binding preparation can return its cancellation error after Sleep/Stop
+// has already fenced the original Run, before any request or graph is admitted.
+fn binding_preparation_control_case(graph: bool, sleeping: bool) {
+    use crate::catalog::bot::{BotGate, BotSuspension};
+    use std::sync::mpsc;
+    use std::time::Duration;
+
+    struct HeldBinding {
+        entered: mpsc::Sender<()>,
+        release: Mutex<mpsc::Receiver<()>>,
+    }
+    impl ContextPreparation for HeldBinding {
+        fn prepare_binding(
+            &self,
+            _: &str,
+            _: u64,
+            _: &mut RequestBinding,
+            cancel: &CancellationToken,
+        ) -> Result<ConversationHistory, ExecutionError> {
+            self.entered.send(()).unwrap();
+            self.release.lock().unwrap().recv().unwrap();
+            assert!(cancel.is_cancelled());
+            Err(ExecutionError::new("child_delegation", "Run cancelled"))
+        }
+        fn prepare(&self, _: &str, _: u64, _: &CancellationToken) -> Result<(), ExecutionError> {
+            Ok(())
+        }
+    }
+    struct SelectedAction(bool);
+    impl AgentPolicy for SelectedAction {
+        fn identity(&self) -> PolicyIdentity {
+            PolicyIdentity { name: "binding-control-review".into(), version: "1".into() }
+        }
+        fn decide(
+            &self,
+            _: &PolicyView<'_>,
+            _: &PolicyEvent,
+            _: &Value,
+            _: &CancellationToken,
+        ) -> Result<PolicyDecision, ExecutionError> {
+            Ok(PolicyDecision {
+                state: json!({"pending":"must not replace prior state"}),
+                action: if self.0 {
+                    PolicyAction::ToolGraph { nodes: vec![PolicyToolNode {
+                        id: "read-node".into(), depends_on: vec![],
+                        call: ToolCall { call_id: "read-call".into(), name: "read".into(),
+                            schema_version: "1".into(), arguments: json!({}) },
+                    }] }
+                } else { PolicyAction::RequestModel },
+            })
+        }
+    }
+
+    let fixture = Fixture::new();
+    let catalog = fixture.catalog();
+    if sleeping {
+        catalog.lock().unwrap().publish_bot_gate(BotGate {
+            bot_id: "bot".into(), profile_revision: 1,
+            activity_operation_id: Some("original-sleep".into()), permitted: true,
+        }).unwrap();
+    }
+    let input = input_with_bot(&catalog, sleeping.then_some("bot"));
+    let run_id = input.run_id.clone();
+    let cancel = CancellationToken::default();
+    let original = engine(catalog.clone(), Mode::ToolThenAnswer, cancel.clone(), ProgressSink::default());
+    let provider = original.provider.clone();
+    let tools = original.tools.clone();
+    let (entered, waiting) = mpsc::channel();
+    let (release, held) = mpsc::channel();
+    let engine = ExecutionEngine {
+        persistence: catalog.clone(),
+        context_preparation: Arc::new(HeldBinding { entered, release: Mutex::new(held) }),
+        provider: provider.clone(), tools: tools.clone(),
+        policy: Arc::new(SelectedAction(graph)), progress: ProgressSink::default(),
+    };
+    let worker_cancel = cancel.clone();
+    let worker = std::thread::spawn(move || engine.run(input, worker_cancel));
+    waiting.recv_timeout(Duration::from_secs(3)).unwrap();
+    let suspension = BotSuspension { bot_id: "bot".into(),
+        profile_revision: 2, activity_operation_id: "original-sleep".into() };
+    {
+        let mut owner = catalog.lock().unwrap();
+        if sleeping {
+            owner.publish_bot_gate(BotGate { bot_id: "bot".into(), profile_revision: 2,
+                activity_operation_id: Some("original-sleep".into()), permitted: false }).unwrap();
+            owner.suspend_bot_scope(suspension.clone()).unwrap();
+        } else {
+            owner.request_cancel_run(&run_id).unwrap();
+        }
+    }
+    cancel.cancel();
+    release.send(()).unwrap();
+    let report = worker.join().unwrap().unwrap();
+    let expected = if sleeping { RunState::Waiting } else { RunState::Cancelled };
+    assert_eq!(report.state, expected, "binding errors must preserve the original control meaning");
+    assert_eq!(report.policy_state, Value::Null, "unexecuted decision state must roll back");
+    assert_eq!(provider.calls.load(Ordering::SeqCst), 0);
+    assert_eq!(tools.calls.load(Ordering::SeqCst), 0);
+    let mut owner = catalog.lock().unwrap();
+    let run = owner.run(&run_id).unwrap();
+    assert_eq!(run.state, expected);
+    assert_eq!(run.cancel_requested, !sleeping);
+    assert_eq!(owner.history("main").unwrap().len(), 1);
+    if sleeping {
+        assert!(run.waiting_on.as_deref().unwrap().starts_with("execution-recovery:"));
+        owner.publish_bot_gate(BotGate { bot_id: "bot".into(), profile_revision: 3,
+            activity_operation_id: Some("original-sleep".into()), permitted: true }).unwrap();
+        let resumed = owner.resume_bot_scope(&BotSuspension { profile_revision: 3, ..suspension }).unwrap();
+        assert_eq!(resumed.resumed_run_ids, vec![run_id]);
+        assert!(resumed.blocked_run_ids.is_empty());
+    }
+}
+#[test]
+fn binding_preparation_cancel_preserves_model_control() { binding_preparation_control_case(false, false); }
+#[test]
+fn binding_preparation_cancel_preserves_graph_control() { binding_preparation_control_case(true, false); }
+#[test]
+fn binding_preparation_sleep_preserves_model_control() { binding_preparation_control_case(false, true); }
+#[test]
+fn binding_preparation_sleep_preserves_graph_control() { binding_preparation_control_case(true, true); }
