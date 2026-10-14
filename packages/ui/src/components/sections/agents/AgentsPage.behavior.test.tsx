@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { beforeEach, afterEach, test, expect, vi } from 'vitest';
 import { createAgentProfilesHttpAPI, type AgentProfilesAPI, type AgentProfileSaveRequest, type AgentRuntime } from '@varin/application-client';
-import { GlobalSettingsAuthority } from '../../../../../pi-host/src/settings-authority';
+import { AgentSettingsService } from '../../../../../web/application-host/lib/models/settings';
 import { createAgentProfilesAPI, agentProfileFailure } from '../../../../../web/application-host/lib/kernel/agent-profiles';
 import { I18nProvider } from '@/lib/i18n';
 import { AgentsPage } from './AgentsPage';
@@ -16,19 +16,11 @@ import { agentProfileDrafts } from './agent-profile-draft';
 
 const fixture = vi.hoisted(() => ({ api: {} as { agentProfiles: AgentProfilesAPI; threads: { listModels: ReturnType<typeof vi.fn> } },
   piCatalog: vi.fn(), piModel: vi.fn(), host: '', writes: [] as AgentProfileSaveRequest[] }));
-vi.mock('@/lib/pi-runtime/agent-providers', () => ({ listPiAgentProviders: () => { throw new Error('Unexpected Pi catalog request in profile test'); } }));
 vi.mock('@/hooks/useRuntimeAPIs', () => ({ useRuntimeAPIs: () => fixture.api }));
 vi.mock('@/stores/useDirectoryStore', () => ({ useDirectoryStore: (select: (state: { currentDirectory: string }) => unknown) => select({ currentDirectory: '/workspace' }) }));
 vi.mock('@/stores/useProjectsStore', () => ({ useProjectsStore: (select: (state: object) => unknown) => select({ projects: [], activeProjectId: null }) }));
 vi.mock('@/lib/varinEvents', () => ({ subscribeVarinEvents: () => () => {} }));
 vi.mock('@/lib/persistence', () => ({ reportSettingsSaveState: vi.fn() }));
-vi.mock('./useAgentsPageCatalog', () => ({ useAgentsPageCatalog: () => {
-  fixture.piCatalog();
-  return { focus: 'code', targetKey: 'pi-plugins', state: { providerFilter: 'all', definitionRequest: null }, selected: null,
-    catalog: { agents: [], providers: [], diagnostics: [] }, agents: [], refresh: async () => {} };
-} }));
-vi.mock('./PluginAgentDetails', () => ({ PluginAgentDetails: () => <div data-plugin-detail /> }));
-vi.mock('./ModelSelector', () => ({ ModelSelector: () => { fixture.piModel(); return <div data-pi-model-selector />; } }));
 vi.mock('@/components/sections/shared/SettingsSidebarLayout', () => ({ SettingsSidebarLayout: ({ children, header }: { children: React.ReactNode; header: React.ReactNode }) => <aside>{header}{children}</aside> }));
 vi.mock('@/components/sections/shared/SettingsPageLayout', () => ({ SettingsPageLayout: ({ children, title, headerEnd }: { children: React.ReactNode; title: React.ReactNode; headerEnd: React.ReactNode }) => <main><h1>{title}</h1>{headerEnd}{children}</main> }));
 vi.mock('@/components/ui/dialog', () => ({ Dialog: ({ open, children }: { open: boolean; children: React.ReactNode }) => open ? <div role="dialog">{children}</div> : null,
@@ -46,11 +38,11 @@ const custom = { name: 'Saved helper', description: 'Existing explicit tools', i
   model: { providerId: 'local', modelId: 'fixture' }, worktree: 'none', workFocus: [] };
 beforeEach(async () => {
   directory = await mkdtemp(join(tmpdir(), 'varin-agent-settings-ui-'));
-  await writeFile(join(directory, 'settings.json'), JSON.stringify({ harness: {
+  await writeFile(join(directory, 'agent-settings.json'), JSON.stringify({ harness: {
     models: { retrievalAgent: { providerId: 'local', modelId: 'fixture' } },
-    agents: { legacy: { ...custom, tools: ['read', 'external_tool'] }, split: { ...custom, name: 'Runtime helper', tools: { pi: ['read'], agent: [] } } },
+    agents: { legacy: { ...custom, tools: ['read', 'external_tool'] }, split: { ...custom, name: 'Runtime helper', tools: [] } },
   } }));
-  owner = createAgentProfilesAPI({ settings: new GlobalSettingsAuthority(directory),
+  owner = createAgentProfilesAPI({ settings: new AgentSettingsService(directory, () => true),
     // Controlled registered-directory input; this test does not establish Rust IPC discovery.
     capabilities: async () => [
       { name: 'file_read', version: '1', source_requirement: 'source', default_presets: ['worker', 'retrieval'] },
@@ -98,42 +90,32 @@ const edit = async (label: string, value: string) => {
   const input = container.querySelector<HTMLInputElement>(`[aria-label="${label}"]`)!;
   await act(async () => { input.value = value; input.dispatchEvent(new Event('input', { bubbles: true })); });
 };
-const switchRuntime = async (runtime: AgentRuntime) => { await act(async () => selectAgentProfilesRuntime(runtime)); await settle(); };
 const save = async () => { await act(async () => container.querySelector('form')!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }))); await settle(); };
-const persisted = async () => JSON.parse(await readFile(join(directory, 'settings.json'), 'utf8'));
+const persisted = async () => JSON.parse(await readFile(join(directory, 'agent-settings.json'), 'utf8'));
 
-test('renders actual Host worker/retrieval defaults and native model catalog without mounting Pi consumers', async () => {
+test('renders actual Host worker/retrieval defaults and native model catalog from native settings', async () => {
   await render();
   expect(container.querySelector('[data-agent-id="varin:builtin:worker"]')).not.toBeNull();
   expect(container.querySelector('[data-agent-id="varin:builtin:retrievalAgent"]')).not.toBeNull();
   expect(container.querySelector<HTMLTextAreaElement>('[aria-label="Tools (comma or newline separated)"]')?.value).toBe('file_read, file_write');
   expect(container.querySelector('[data-tools-source="default"]')).not.toBeNull();
   expect(fixture.api.threads.listModels).toHaveBeenCalled();
-  expect(fixture.piCatalog).not.toHaveBeenCalled(); expect(fixture.piModel).not.toHaveBeenCalled();
   await click(container.querySelector('[data-agent-id="varin:builtin:retrievalAgent"] button')!);
   expect(container.querySelector<HTMLTextAreaElement>('[aria-label="Tools (comma or newline separated)"]')?.value).toBe('file_read');
-  expect(container.textContent).toContain('shared by Pi and Varin Agent');
+
 });
 
-test('preserves old explicit names on shared edits and isolates empty/reset/missing tool choices by runtime', async () => {
+test('preserves explicit tool names on ordinary profile edits and supports empty/reset choices', async () => {
   await render(); await act(async () => selectAgentProfile('varin:custom:legacy')); await settle();
-  expect(container.textContent).toContain('Not in the built-in directory');
   await click(container.querySelector('main [role="switch"]')!); await save();
   expect(Object.hasOwn(fixture.writes.at(-1)!, 'tools')).toBe(false);
   expect((await persisted()).harness.agents.legacy.tools).toEqual(['read', 'external_tool']);
   await act(async () => selectAgentProfile('varin:custom:split')); await settle();
   expect(container.querySelector('[data-tools-source="explicit"]')).not.toBeNull();
-  expect(container.querySelector<HTMLTextAreaElement>('[aria-label="Tools (comma or newline separated)"]')?.value).toBe('');
   await click(button('Reset runtime tools')); await save();
-  expect(fixture.writes.at(-1)!.tools).toBeNull();
-  expect((await persisted()).harness.agents.split.tools).toEqual({ pi: ['read'] });
-  expect(container.querySelector('[data-tools-source="unconfigured"]')).not.toBeNull();
+  expect((await persisted()).harness.agents.split.tools).toBeUndefined();
   await click(button('Use no tools')); await save();
-  expect((await persisted()).harness.agents.split.tools).toEqual({ pi: ['read'], agent: [] });
-  await switchRuntime('pi');
-  expect(fixture.piCatalog).toHaveBeenCalled(); expect(fixture.piModel).toHaveBeenCalled();
-  await act(async () => selectAgentProfile('varin:custom:split')); await settle();
-  expect(container.querySelector<HTMLTextAreaElement>('[aria-label="Tools (comma or newline separated)"]')?.value).toBe('read');
+  expect((await persisted()).harness.agents.split.tools).toEqual([]);
 });
 
 test('creates a custom Agent through the Host API with explicit runtime tools and all shared fields', async () => {
@@ -145,11 +127,11 @@ test('creates a custom Agent through the Host API with explicit runtime tools an
   expect(input.id).toBeUndefined(); expect(input.config).toMatchObject({ kind: 'custom', key: '', agent: { name: 'New helper', description: 'Created here', instructions: 'Inspect the source.', enabled: true, worktree: 'none', workFocus: [] } });
   expect(input.tools).toEqual(['file_read']);
   const added = Object.values((await persisted()).harness.agents).find((value: unknown) => (value as { name: string }).name === 'New helper');
-  expect(added).toMatchObject({ tools: { agent: ['file_read'] } });
+  expect(added).toMatchObject({ tools: ['file_read'] });
   expect(container.querySelector('h1')?.textContent).toBe('New helper');
 });
 
-test('keeps draft revisions across refresh and runtime switches; conflicts do not silently retry or overwrite', async () => {
+test('keeps draft revisions across refresh; conflicts do not silently retry or overwrite', async () => {
   await render(); await act(async () => selectAgentProfile('varin:custom:legacy')); await settle();
   await click(container.querySelector('main [role="switch"]')!);
   const before = await owner.read({ runtime: 'agent' });
@@ -157,7 +139,6 @@ test('keeps draft revisions across refresh and runtime switches; conflicts do no
   if (external.config.kind !== 'custom') throw new Error('Expected custom fixture');
   await owner.save({ runtime: 'agent', expectedRevision: before.revision, id: external.id, config: { ...external.config, agent: { ...external.config.agent, description: 'External change' } } });
   await click(button('Refresh'));
-  await switchRuntime('pi'); await switchRuntime('agent');
   await act(async () => selectAgentProfile('varin:custom:legacy')); await settle();
   expect(container.querySelector('[role="switch"]')?.getAttribute('aria-checked')).toBe('false');
   await save();
@@ -167,23 +148,4 @@ test('keeps draft revisions across refresh and runtime switches; conflicts do no
   await click(button('Discard draft'));
   expect(container.querySelector('[role="switch"]')?.getAttribute('aria-checked')).toBe('true');
   expect(container.querySelector<HTMLInputElement>('[aria-label="Responsibility"]')?.value).toBe('External change');
-});
-
-test('discards delayed read and save projections after switching the editing runtime', async () => {
-  hold = { action: 'read', runtime: 'agent' };
-  await render();
-  expect(hold.release).toBeDefined();
-  await switchRuntime('pi');
-  const pendingRead = hold; hold = undefined;
-  await act(async () => pendingRead.release?.()); await settle();
-  expect(container.querySelector('form')?.getAttribute('data-runtime')).toBe('pi');
-  await switchRuntime('agent');
-  hold = { action: 'save', runtime: 'agent' };
-  await click(container.querySelector('main [role="switch"]')!); await save();
-  expect(hold.release).toBeDefined();
-  await switchRuntime('pi');
-  const pendingSave = hold; hold = undefined;
-  await act(async () => pendingSave.release?.()); await settle();
-  expect(container.querySelector('form')?.getAttribute('data-runtime')).toBe('pi');
-  expect(container.querySelector('main [role="switch"]')?.getAttribute('aria-checked')).toBe('false');
 });

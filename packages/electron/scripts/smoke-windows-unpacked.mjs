@@ -12,10 +12,6 @@ const electronDir = path.resolve(__dirname, '..');
 const appPath = path.resolve(process.argv[2] ?? path.join(electronDir, 'dist', 'win-unpacked', 'Varin.exe'));
 const smokeEnvironment = { ...process.env };
 for (const variable of [
-  'VARIN_PI_SOURCE',
-  'VARIN_PI_CUSTOM_ROOT',
-  'VARIN_PI_CUSTOM_NODE',
-  'VARIN_PI_PACKAGE_ROOT',
   'VARIN_AGENT_DIR',
   'VARIN_RUNTIME_SOURCE',
   'VARIN_SKIP_LOCAL_SERVER',
@@ -504,7 +500,7 @@ const waitForRenderer = async (userDataDir) => {
   const devTools = await connectDevTools(target.webSocketDebuggerUrl);
   try {
     let lastState;
-    let continuedFromBundledWelcome = false;
+    let continuedFromLocalWelcome = false;
     for (let attempt = 0; attempt < 80; attempt += 1) {
       const evaluation = await devTools.evaluate(`(() => {
         let diagnostics = null;
@@ -516,8 +512,8 @@ const waitForRenderer = async (userDataDir) => {
         return {
           bodyText: document.body?.innerText?.slice(0, 4000) ?? '',
           diagnostics,
-          localRuntimeContinueReady: document.querySelector('[data-pi-local-runtime-continue="true"]:not(:disabled)') !== null,
-          mainWorkspace: document.querySelector('[data-pi-composer-shell="true"]') !== null,
+          localRuntimeContinueReady: document.querySelector('[data-native-local-runtime-continue="true"]:not(:disabled)') !== null,
+          mainWorkspace: window.__varinStartupDiagnostics?.bootView?.screen === 'main' && window.__varinStartupDiagnostics?.runtimeReady === true && window.__varinStartupDiagnostics?.catalogLoaded === true && !window.__varinStartupDiagnostics?.catalogError,
           ready: window.__varinAppReady === true,
         };
       })()`);
@@ -539,24 +535,20 @@ const waitForRenderer = async (userDataDir) => {
         const monaco = MONACO_SMOKE_ENABLED ? await runMonacoSmoke(devTools) : null;
         return { consoleMessages: devTools.consoleMessages, exceptions: devTools.exceptions, mode: 'main', monaco, state: lastState };
       }
-      const runtimeSnapshot = lastState?.diagnostics?.runtimeSnapshot;
-      const bundledRuntimeReady = runtimeSnapshot?.status === 'ready'
-        && runtimeSnapshot.active?.id === 'bundled'
-        && runtimeSnapshot.active?.source === 'bundled';
-      if (!continuedFromBundledWelcome && bundledRuntimeReady && lastState?.localRuntimeContinueReady === true) {
+      if (!continuedFromLocalWelcome && lastState?.localRuntimeContinueReady === true) {
         const continuation = await devTools.evaluate(`(() => {
-          const action = document.querySelector('[data-pi-local-runtime-continue="true"]:not(:disabled)');
+          const action = document.querySelector('[data-native-local-runtime-continue="true"]:not(:disabled)');
           if (!(action instanceof HTMLButtonElement)) return false;
           action.click();
           return true;
         })()`);
         if (continuation?.exceptionDetails) {
           throw describeSmokeFailure(
-            `Packaged bundled-runtime welcome continuation failed: ${continuation.exceptionDetails.text}`,
+            `Packaged local-runtime welcome continuation failed: ${continuation.exceptionDetails.text}`,
             { consoleMessages: devTools.consoleMessages, exceptions: devTools.exceptions, lastState },
           );
         }
-        continuedFromBundledWelcome = continuation?.result?.value === true;
+        continuedFromLocalWelcome = continuation?.result?.value === true;
       }
       await delay(250);
     }
@@ -573,11 +565,9 @@ const waitForRenderer = async (userDataDir) => {
 
 const smokeRoot = await fsp.mkdtemp(path.join(os.tmpdir(), 'varin-win-smoke-'));
 const userDataDir = path.join(smokeRoot, 'user-data');
-const agentDir = path.join(smokeRoot, 'pi-agent');
 const smokeWorkspaceRoot = path.join(smokeRoot, 'workspace');
 try {
   await fsp.mkdir(userDataDir, { recursive: true });
-  await fsp.mkdir(agentDir, { recursive: true });
   await fsp.mkdir(smokeWorkspaceRoot, { recursive: true });
   await fsp.writeFile(
     path.join(smokeWorkspaceRoot, 'packaged-language-smoke.ts'),
@@ -599,7 +589,6 @@ const child = spawn(appPath, [
   cwd: path.dirname(appPath),
   env: {
     ...smokeEnvironment,
-    PI_CODING_AGENT_DIR: agentDir,
     VARIN_DATA_DIR: userDataDir,
     VARIN_WORKSPACE_ROOT: smokeWorkspaceRoot,
   },
@@ -665,22 +654,16 @@ try {
   if (closed?.success !== true) throw new Error(`Packaged terminal close returned ${JSON.stringify(closed)}`);
 
   const renderer = await waitForRenderer(userDataDir);
-  const runtimeSnapshot = renderer.state?.diagnostics?.runtimeSnapshot;
-  if (
-    runtimeSnapshot?.status !== 'ready'
-    || runtimeSnapshot.active?.id !== 'bundled'
-    || runtimeSnapshot.active?.source !== 'bundled'
-  ) {
-    throw describeSmokeFailure('Packaged renderer did not start the bundled Pi runtime.', renderer);
+  if (health.kernel?.ready !== true || !health.kernel?.epoch) {
+    throw new Error(`Packaged native kernel is unavailable: ${JSON.stringify(health.kernel)}`);
   }
-  const piVersion = runtimeSnapshot.active.version ?? 'unknown';
   console.log(JSON.stringify({
     appPath,
     builtinLanguage,
     builtinRecovery,
     health: 'ok',
     localSemantic,
-    piVersion,
+    nativeKernel: health.kernel,
     profile: 'clean',
     renderer: renderer.state?.ready === true ? 'app-ready' : 'not-ready',
     monaco: renderer.monaco,
@@ -701,7 +684,7 @@ try {
     });
   }
   await delay(500);
-  // Windows can keep the Pi agent directory open briefly after the process tree
+  // Windows can keep the native data directory open briefly after the process tree
   // has been terminated. Retry the removal instead of turning that teardown
   // race into a failed package smoke check.
   await fsp.rm(smokeRoot, { recursive: true, force: true, maxRetries: 20, retryDelay: 250 });

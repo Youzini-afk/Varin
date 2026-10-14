@@ -1,7 +1,7 @@
 import React from 'react';
 import { Button } from '@/components/ui/button';
-import { PiRecoveryDialog } from '../pi-session/PiRecoveryDialog';
-import { combinedRecoveryStatus, isCombinedRecoverySettled } from '../pi-session/combinedRecoveryResult';
+import { RecoveryDialog } from '../recovery/RecoveryDialog';
+import { combinedRecoveryStatus, isCombinedRecoverySettled } from '../recovery/combinedRecoveryResult';
 import type { useThreadRecovery } from './useThreadRecovery';
 
 export function ThreadRecovery({ recovery, disabled }: { recovery: ReturnType<typeof useThreadRecovery>; disabled: boolean }) {
@@ -30,7 +30,7 @@ export function ThreadRecovery({ recovery, disabled }: { recovery: ReturnType<ty
         </div>)}
       </details>}
     </section>}
-    {recovery.dialogOpen && recovery.combined && <PiRecoveryDialog key={recovery.combined.plan.id} open
+    {recovery.dialogOpen && recovery.combined && <RecoveryDialog key={recovery.combined.plan.id} open
       plan={recovery.combined.plan} initialAttempt={recovery.combined.attempt} onAttempt={recovery.onAttempt}
       allowConversationOnly={recovery.canChooseConversationOnly}
       onClose={recovery.closeDialog} onCombinedResult={recovery.acceptCombined} onConversationOnly={recovery.conversationOnly} />}

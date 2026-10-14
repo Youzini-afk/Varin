@@ -11,7 +11,7 @@ const vm = (id: string): ComputerVmDescriptor => ({ machineId: id, name: id, sta
   binding: { domainUuid: id, guest: { state: 'ready', connectionId: `vm:${id}`, hostId: `guest-${id}` } },
 } as ComputerVmDescriptor);
 const desktop = (id: string): ComputerDesktop => ({ id: `desktop-${id}`, machineId: id,
-  label: id, kind: 'remote-session', status: 'available', work: [{ work: { runtime: 'agent', threadId: 't', branchId: 'main' }, registry: null, at: '' }] });
+  label: id, kind: 'remote-session', status: 'available', work: [{ work: { runtime: 'agent', threadId: 't', branchId: 'main' }, at: '' }] });
 const setup = () => {
   let machines = [vm('owned')];
   let desktops = [desktop('owned')];
@@ -69,7 +69,7 @@ it('retains a failed stop and refuses wake replay of an unknown original effect'
 it('only shuts down exclusive Bot VMs, retaining shared and coordinator machines', async () => {
   const { runtime, setMachines, setDesktops } = setup();
   const coordinator = vm('coordinator'); coordinator.binding.guest!.hostId = 'coordinator';
-  const shared = desktop('shared'); shared.work!.push({ work: { runtime: 'agent', threadId: 'other', branchId: 'main' }, registry: null, at: '' });
+  const shared = desktop('shared'); shared.work!.push({ work: { runtime: 'agent', threadId: 'other', branchId: 'main' }, at: '' });
   setMachines([vm('owned'), vm('shared'), coordinator]); setDesktops([desktop('owned'), shared, desktop('coordinator')]);
   expect((await runtime.planMachines(bot)).map(item => [item.machineId, item.state])).toEqual([
     ['owned', 'pending'], ['shared', 'kept-running'], ['coordinator', 'kept-running'],

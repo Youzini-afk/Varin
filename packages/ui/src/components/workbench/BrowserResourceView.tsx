@@ -8,8 +8,9 @@ import { openExternalUrl } from '@/lib/url';
 import { invokeDesktopCommand } from '@/lib/desktopNative';
 import { useUIStore } from '@/stores/useUIStore';
 import { registerBrowserMaterialCapture } from '@/lib/agent-editor/material-navigation';
-import { usePiSessionStore } from '@/stores/usePiSessionStore';
-import { addPiDraftImageFile, usePiDraftStore } from '@/stores/usePiDraftStore';
+import { useThreadStore } from '@/stores/useThreadStore';
+import { addThreadDraftImage } from '@/lib/agent-runtime/draftAttachments';
+import { appendThreadDraftText } from '@/lib/agent-runtime/threadNavigation';
 import { runtimeFetch, getRuntimeUrlResolver, getRuntimeApiBaseUrl, refreshRuntimeUrlAuthToken } from '@varin/application-client';
 import { isPreviewElementMetadata, formatPreviewAnnotationMarkdown, renderPreviewScreenshot, desktopAnnotationToFile, getCachedProxyTarget, getBrowserProxyTargetKey, previewProxyTargetCache, type PreviewElementMetadata } from '@/lib/preview/screenshot-capture';
 import { DESKTOP_BROWSER_INSPECT_SCRIPT, DESKTOP_BROWSER_CANCEL_INSPECT_SCRIPT, DESKTOP_BROWSER_SAME_WEBVIEW_NAVIGATION_SCRIPT, normalizeBrowserUrl, runIframeScript, stripPreviewQueryParams, type PreviewBridgeMessage, type PreviewProxyState } from '@/lib/preview/browser-view';
@@ -54,8 +55,7 @@ const IframeBrowserPane: React.FC<DesktopBrowserPaneProps> = ({ initialUrl, dire
   const [hoverTarget, setHoverTarget] = React.useState<PreviewElementMetadata | null>(null);
   const [proxyState, setProxyState] = React.useState<PreviewProxyState>({ status: 'idle' });
   const [urlAuthReadyKey, setUrlAuthReadyKey] = React.useState('');
-  const currentSessionId = usePiSessionStore((state) => state.currentSessionId);
-  const appendPiDraftText = usePiDraftStore((state) => state.appendText);
+  const currentSessionId = useThreadStore(state => state.selectedIdentity);
 
   const persistUrl = React.useCallback((url: string) => {
     if (!url || url === 'about:blank' || !directory || !tabID) return;
@@ -301,10 +301,10 @@ const IframeBrowserPane: React.FC<DesktopBrowserPaneProps> = ({ initialUrl, dire
     const file = iframe ? await renderPreviewScreenshot(iframe, target) : null;
     const screenshotAttached = Boolean(file);
     if (file) {
-      await addPiDraftImageFile(sessionKey, file);
+      await addThreadDraftImage(sessionKey, file);
     }
 
-    appendPiDraftText(sessionKey, formatPreviewAnnotationMarkdown({
+    appendThreadDraftText(sessionKey, formatPreviewAnnotationMarkdown({
         pageUrl: currentUrl,
         viewport,
         devicePixelRatio: window.devicePixelRatio || 1,
@@ -315,7 +315,7 @@ const IframeBrowserPane: React.FC<DesktopBrowserPaneProps> = ({ initialUrl, dire
           : 'contextPanel.preview.inspect.attachAnnotation'),
       }));
     toast.success(t('contextPanel.preview.inspect.attached'));
-  }, [appendPiDraftText, currentSessionId, currentUrl, t]);
+  }, [appendThreadDraftText, currentSessionId, currentUrl, t]);
 
   const cancelInspect = React.useCallback(() => {
     const iframe = iframeRef.current;
@@ -564,8 +564,7 @@ const DesktopBrowserPane: React.FC<DesktopBrowserPaneProps> = ({ initialUrl, dir
     setContextPanelTabTargetPath(directory, tabID, url);
     onNavigateRef.current?.(url);
   }, [directory, tabID, setContextPanelTabTargetPath]);
-  const currentSessionId = usePiSessionStore((state) => state.currentSessionId);
-  const appendPiDraftText = usePiDraftStore((state) => state.appendText);
+  const currentSessionId = useThreadStore(state => state.selectedIdentity);
 
   // Listen to webview navigation events
   React.useEffect(() => {
@@ -728,10 +727,10 @@ const DesktopBrowserPane: React.FC<DesktopBrowserPaneProps> = ({ initialUrl, dir
         const file = await desktopAnnotationToFile(capture.base64, capture.width, capture.height, cssWidth, cssHeight, target);
         const screenshotAttached = Boolean(file);
         if (file) {
-          await addPiDraftImageFile(sessionKey, file);
+          await addThreadDraftImage(sessionKey, file);
         }
 
-        appendPiDraftText(sessionKey, formatPreviewAnnotationMarkdown({
+        appendThreadDraftText(sessionKey, formatPreviewAnnotationMarkdown({
             pageUrl: currentUrl,
             viewport: { width: cssWidth, height: cssHeight },
             devicePixelRatio: window.devicePixelRatio || 1,
@@ -742,7 +741,7 @@ const DesktopBrowserPane: React.FC<DesktopBrowserPaneProps> = ({ initialUrl, dir
         toast.success(t('contextPanel.preview.inspect.attached'));
       })
       .catch(() => setIsInspecting(false));
-  }, [appendPiDraftText, currentSessionId, currentUrl, isInspecting, t]);
+  }, [appendThreadDraftText, currentSessionId, currentUrl, isInspecting, t]);
 
   return (
     <div className="absolute inset-0 flex flex-col bg-background">

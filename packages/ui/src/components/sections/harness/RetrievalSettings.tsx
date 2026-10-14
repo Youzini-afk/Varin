@@ -166,7 +166,7 @@ function FastDecisionSettings({ harness, update }: HarnessSettingsPageProps) {
     setFields(next);
     if (!next.providerId.trim() || !next.modelId.trim()) return;
     update({ fastDecision: { default: {
-      protocol: 'pi-classifier',
+      protocol: 'typed-classifier',
       providerId: next.providerId.trim(),
       modelId: next.modelId.trim(),
       ...(next.endpoint.trim() ? { endpoint: next.endpoint.trim() } : {}),

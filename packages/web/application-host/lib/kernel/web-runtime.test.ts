@@ -1,6 +1,6 @@
 import { expect, it } from 'vitest';
 import { WEB_TOOL_DECLARATIONS, COMPUTER_TOOL_DECLARATIONS } from '@varin/extension-builtins';
-import type { PiSettingsSnapshot } from '@varin/protocol';
+import type { AgentSettingsSnapshot } from '@varin/application-client';
 import { createDocumentReader } from '../harness/document-reading.js';
 import { createWebFetch } from '../harness/web-fetch.js';
 import { createMaterialStoreFixture } from '../harness/web-materials.test-helper.js';
@@ -15,7 +15,7 @@ it('freezes Web configuration failures at its own declarations and preserves the
     webFetch: createWebFetch({ ssrf: { check: unused, isSameHost: () => false }, materials }),
     fetch: unused, readAuth: unused, settings,
   });
-  const snapshot: PiSettingsSnapshot = { global: { harness: { web: { domains: { block: ['blocked.example'] } } } },
+  const snapshot: AgentSettingsSnapshot = { global: { harness: { web: { domains: { block: ['blocked.example'] } } } },
     project: {}, globalRevision: 'accepted', projectRevision: 'unselected', projectTrusted: false };
   const run = { runId: 'run', threadId: 'thread', source: null };
   const accepted = await make(async source => { expect(source).toBeNull(); return snapshot; }).prepareConfiguration(run, []);

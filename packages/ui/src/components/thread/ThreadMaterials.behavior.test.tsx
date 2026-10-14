@@ -39,20 +39,19 @@ vi.mock('@/components/ui/dialog', () => ({
 }));
 vi.mock('@/components/chat/MarkdownRenderer', () => ({ MarkdownRenderer: ({ content }: { content: string }) => <p>{content}</p>, SimpleMarkdownRenderer: ({ content }: { content: string }) => <div data-testid="pdf-text">{content}</div> }));
 vi.mock('@/lib/i18n', () => ({ useI18n: () => ({ t: mocks.translate }) }));
-vi.mock('@/lib/pi-runtime/addPdfMaterialToDraft', () => ({ addPdfMaterialRegionToDraft: mocks.addRegion }));
 vi.mock('@/lib/varinEvents', () => ({ subscribeVarinEvents: () => () => {} }));
 
-import { usePiSessionStore } from '@/stores/usePiSessionStore';
+import { useThreadDraftStore } from '@/stores/useThreadDraftStore';
+import { threadSummary } from '@/test/threadFixtures';
 import { ThreadMaterials } from './ThreadMaterials';
 import { ThreadRequestError } from '@varin/application-client';
 import type { ThreadMaterialsAPI, ThreadIdentity, ThreadResearchAPI, ThreadSnapshot, ThreadSubmit, ThreadsAPI } from '@varin/application-client';
 import { ThreadResearch } from './ThreadResearch';
 import { ThreadConversation } from './ThreadConversation';
-import { ResearchFactsView } from '@/workbenches/research/ResearchFactsPanel';
 import { ThreadContent } from './ThreadContent';
 import { historyParts } from '@/lib/agent-runtime/thread-content';
 import { usePdfMaterialLinkInteractions } from '@/components/materials/usePdfMaterialLinkInteractions';
-import { PDF_MATERIAL_OPEN_EVENT, formatPdfMaterialCitationUrl, pdfMaterialMarkdownHref } from '@/lib/pi-runtime/pdfMaterialCitation';
+import { PDF_MATERIAL_OPEN_EVENT, formatPdfMaterialCitationUrl, pdfMaterialMarkdownHref } from '@/lib/materials/pdfMaterialCitation';
 
 const deferred = <T,>() => {
   let resolve!: (value: T) => void;
@@ -114,7 +113,7 @@ beforeEach(() => {
   container = document.createElement('div');
   document.body.appendChild(container);
   root = createRoot(container);
-  usePiSessionStore.setState({ currentSessionId: null, runtimeKey: 'runtime-a' });
+  useThreadDraftStore.setState({ drafts: {} });
   mocks.runtimeKey = 'runtime-a'; mocks.generation = 1;
   mocks.runtimeFetch.mockReset();
   mocks.addRegion.mockReset().mockReturnValue('added');
@@ -243,6 +242,7 @@ function researchFixture(artifacts: ExperimentArtifactView[] = [originalArtifact
     artifact: vi.fn(), logs: vi.fn(), cancel: vi.fn(), collect: vi.fn(), submit: vi.fn(),
   } satisfies ThreadResearchAPI;
   const materials = {
+    readSource: vi.fn<ThreadMaterialsAPI['readSource']>(),
     readArtifact: vi.fn<ThreadMaterialsAPI['readArtifact']>(async () => okOverview('snapshot-artifact', 'hash-a')),
     read: vi.fn<ThreadMaterialsAPI['read']>(async (_owner, request) => respond(request)),
   } satisfies ThreadMaterialsAPI;
@@ -338,39 +338,17 @@ it('keeps unavailable artifact metadata and original reader failure codes withou
   expect(f.materials.read).not.toHaveBeenCalled(); expect(container.querySelector('img')).toBeNull();
 });
 
-it('keeps the Pi ArtifactRow on its original session adapter and the same shared reader', async () => {
-  usePiSessionStore.setState({ currentSessionId: 'session-1', runtimeKey: 'runtime-a' });
-  mocks.runtimeFetch.mockImplementation(async (input: string, init?: RequestInit) => {
-    if (input.endsWith('/experiments')) return Response.json({ attempts: [originalAttempt] });
-    if (input.endsWith('/resources')) return Response.json({ machines: [], generatedAt: 1 });
-    if (input.endsWith('/sources')) return Response.json({ sources: [] });
-    if (input.endsWith(`/experiments/${encodeURIComponent(originalAttempt.attemptId)}`)) return Response.json({ attempt: originalAttempt, artifacts: [originalArtifact] });
-    if (input.endsWith('/materials/read')) {
-      expect(JSON.parse(String(init?.body))).toEqual({ artifact: { attemptId: originalAttempt.attemptId, artifactId: originalArtifact.artifactId }, view: 'overview' });
-      return Response.json(okOverview('pi-artifact', 'hash-a'));
-    }
-    if (input.includes('/materials/pi-artifact/page?')) return new Response(new Blob(['png'], { type: 'image/png' }));
-    throw new Error(`Unexpected fixture route ${input}`);
-  });
-  await act(async () => { root.render(<ResearchFactsView owner="session-1" workspaceId="workspace:pi" />); await settle(); });
-  await click('research-facts.viewDetails'); await click('harness.pdf.openReader');
-  await act(settle);
-  expect(container.querySelector('img')?.getAttribute('src'), container.textContent ?? '').toBe('blob:page-1');
-  expect(mocks.runtimeFetch.mock.calls.every(([input]) => String(input).startsWith('/api/harness/sessions/session-1/'))).toBe(true);
-  await click('Close material'); expect(container.querySelector('[role="dialog"]')).toBeNull();
-});
-
 /** Exercise the actual conversation composer, not an alternate material draft store. */
 function artifactConversationFixture() {
   const f = researchFixture();
   const unused = async (): Promise<never> => { throw new Error('Unused fixture API'); };
   const snapshot = async (work: ThreadIdentity): Promise<ThreadSnapshot> => ({ identity: work, eventCursor: 0,
-    thread: { thread_id: work.threadId, bot_id: null, observer_project_ids: [null], branches: [{ branch_id: work.branchId, head: null, active_run_id: null, latest_run: null }] },
+    thread: threadSummary(work.threadId, { main_branch_id: work.branchId, branches: [{ branch_id: work.branchId, head: null, active_run_id: null, latest_run: null }] }),
     activeRun: null, history: [], historyPage: { head: null, previous: null }, inputs: [], operations: [], followups: [], goals: [],
     launch: null, modelSelection: { desired: null, active: null }, policySelection: null, context: { checkpoint: null, jobs: [] } });
   const submit = vi.fn(async (input: ThreadSubmit) => ({ thread_id: input.threadId, branch_id: input.branchId,
     run_id: 'run:submitted', input_id: 'input:submitted', cursor: 1 }));
-  const api: ThreadsAPI = {
+  const api: ThreadsAPI = { usage: unused,
     materials: f.materials, research: f.api,
     computer: { state: async work => ({ state: { work, rootWork: work, currentExecution: null, currentRootExecution: null,
       active: false, status: 'enabled', leases: [], requests: [], cleanups: [] }, activities: [] }), stop: unused, decide: unused },
@@ -378,7 +356,7 @@ function artifactConversationFixture() {
     followups: { jobSources: async () => [], register: unused, list: unused, get: unused, occurrence: unused, occurrences: unused,
       control: unused, pendingRegistrations: async () => [], cancelRegistration: unused },
     listModels: async () => [{ providerId: 'fixture-provider', modelId: 'fixture-model', acceptsImages: true }],
-    list: unused, create: unused, mediaRead: unused, listMcpInteractions: async () => ({ items: [], nextCursor: null }),
+    list: unused, create: unused, update: unused, delete: unused, markRead: unused, mediaRead: unused, listMcpInteractions: async () => ({ items: [], nextCursor: null }),
     readMcpInteraction: unused, respondMcpInteraction: unused, reviewMcpSamplingRequest: unused, reviewMcpSamplingOutput: unused,
     snapshot, submit, enqueue: unused, editInput: unused, cancelInput: unused, cancelRun: unused,
     sources: { list: async () => ({ targets: [{ resourceOwner: { kind: 'local' }, label: 'This Host', capabilities: [] }], unavailable: [] }), resolve: unused },

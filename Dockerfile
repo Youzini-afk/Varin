@@ -59,11 +59,7 @@ COPY packages/extension-react/package.json ./packages/extension-react/package.js
 COPY packages/extension-sdk/package.json ./packages/extension-sdk/package.json
 COPY packages/extension-surface/package.json ./packages/extension-surface/package.json
 COPY packages/mobile/package.json ./packages/mobile/package.json
-COPY packages/pi-host/package.json ./packages/pi-host/package.json
-COPY packages/pi-host/patches ./packages/pi-host/patches
 COPY packages/protocol/package.json ./packages/protocol/package.json
-COPY packages/runtime-broker/package.json ./packages/runtime-broker/package.json
-COPY packages/runtime-client/package.json ./packages/runtime-client/package.json
 COPY packages/settings-store/package.json ./packages/settings-store/package.json
 COPY packages/ui/package.json ./packages/ui/package.json
 COPY packages/web/package.json ./packages/web/package.json
@@ -92,7 +88,7 @@ ENV HOME=/home/varin \
 COPY --from=builder --chown=varin:varin /app/artifacts/cloud-runtime/ ./
 RUN --mount=type=cache,target=/home/varin/.cache/bun,uid=1000,gid=1000 \
   bun install --production --frozen-lockfile --cache-dir=/home/varin/.cache/bun \
-  && node --input-type=module -e "import { createRequire } from 'node:module'; import { existsSync } from 'node:fs'; import path from 'node:path'; const broker = await import('./packages/web/node_modules/@varin/runtime-broker/dist/index.js'); if (typeof broker.resolveBundledPiHostEntry !== 'function') throw new Error('Varin runtime broker is missing resolveBundledPiHostEntry'); const entry = broker.resolveBundledPiHostEntry(); if (typeof entry !== 'string' || entry.length === 0) throw new Error('Varin host entry did not resolve'); const webRequire = createRequire(new URL('./packages/web/package.json', import.meta.url)); webRequire.resolve('sherpa-onnx-node'); const pdfMain = webRequire.resolve('pdfjs-dist/legacy/build/pdf.mjs'); const pdfRequire = createRequire(pdfMain); const canvas = pdfRequire('@napi-rs/canvas'); const surface = canvas.createCanvas(2, 2); const context = surface.getContext('2d'); context.fillStyle = '#ff0000'; context.fillRect(0, 0, 1, 1); if (context.getImageData(0, 0, 1, 1).data[0] !== 255) throw new Error('PDF Canvas native runtime did not draw'); const pdfRoot = path.dirname(webRequire.resolve('pdfjs-dist/package.json')); for (const asset of ['legacy/build/pdf.worker.mjs', 'cmaps/Adobe-GB1-0.bcmap', 'standard_fonts/FoxitDingbats.pfb']) if (!existsSync(path.join(pdfRoot, asset))) throw new Error('PDF.js runtime asset is missing: ' + asset); console.log('Varin PDF.js assets and native Canvas runtime are available');" \
+  && node --input-type=module -e "import { createRequire } from 'node:module'; import { existsSync } from 'node:fs'; import path from 'node:path'; const webRequire = createRequire(new URL('./packages/web/package.json', import.meta.url)); webRequire.resolve('sherpa-onnx-node'); const pdfMain = webRequire.resolve('pdfjs-dist/legacy/build/pdf.mjs'); const pdfRequire = createRequire(pdfMain); const canvas = pdfRequire('@napi-rs/canvas'); const surface = canvas.createCanvas(2, 2); const context = surface.getContext('2d'); context.fillStyle = '#ff0000'; context.fillRect(0, 0, 1, 1); if (context.getImageData(0, 0, 1, 1).data[0] !== 255) throw new Error('PDF Canvas native runtime did not draw'); const pdfRoot = path.dirname(webRequire.resolve('pdfjs-dist/package.json')); for (const asset of ['legacy/build/pdf.worker.mjs', 'cmaps/Adobe-GB1-0.bcmap', 'standard_fonts/FoxitDingbats.pfb']) if (!existsSync(path.join(pdfRoot, asset))) throw new Error('PDF.js runtime asset is missing: ' + asset); console.log('Varin PDF.js assets and native Canvas runtime are available');" \
   && node verify-kernel.mjs packages/web
 
 COPY --chmod=0755 scripts/docker-entrypoint.sh /usr/local/bin/varin-entrypoint

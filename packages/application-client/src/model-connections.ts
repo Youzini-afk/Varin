@@ -17,7 +17,8 @@ export type ConnectionAuthentication =
   | { kind: 'credential'; reference: string }
   | { kind: 'environment'; variable: string }
   | { kind: 'google-adc'; file?: string }
-  | { kind: 'aws-chain'; profile?: string };
+  | { kind: 'aws-chain'; profile?: string }
+  | { kind: 'anthropic-federation'; identityTokenFile: string; organizationId: string; federationRuleId: string; serviceAccountId?: string; workspaceId?: string };
 export interface ChannelModel {
   id: string;
   requestModelId?: string;

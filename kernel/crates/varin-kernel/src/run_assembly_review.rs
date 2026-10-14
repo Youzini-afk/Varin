@@ -29,7 +29,7 @@ fn child_assembly_rebinds_only_admitted_extension_and_activates_its_own_static_o
     };
     let basis = serde_json::from_value(json!({"mode":"agent","threadRole":"worker","revision":0,
         "configurationDigest":"fixture:child","memorySnapshot":{"revision":0,"memories":[]},
-        "sessionId":child.child_thread_id,"projectId":child.project_id,
+        "threadId":child.child_thread_id,"projectId":child.project_id,
         "originalSections":[{"name":"preamble","content":"Child"}],"instructionSources":["fixture:child"]})).unwrap();
     let child =
         f.db.prepare_child(&child.operation_id, source.clone(), proposal, basis)

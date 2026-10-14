@@ -4,7 +4,6 @@ import type { PathLike } from 'node:fs';
 import { describe, expect, it, vi } from 'vitest';
 import { createDocumentRootGuard } from './allowed-roots.js';
 import { createDocumentAuthorityHarness } from './contract-fixtures.js';
-import { createHarnessPathAuthority } from '../harness/path-authority.js';
 
 describe('document root guard', () => {
   it('compares Windows roots by canonical path identity', async () => {
@@ -48,14 +47,9 @@ describe('document root guard', () => {
     const guard = createDocumentRootGuard({ fsPromises: fs.promises, pathModule: path, workspace: { root: '/unused', lockdown: false } });
     const h = await createDocumentAuthorityHarness({ authority: { isAllowedRoot: guard, isTrusted: guard } });
     try {
-      const paths = createHarnessPathAuthority({ authorityId: h.identity.hostId, documents: h.authority });
-      const actor = {
-        authorityInstanceId: h.identity.hostId, sessionId: 'root-session', workerId: 'worker', workerGeneration: 1,
-        workspaceId: h.identity.workspaceId, cwd: h.workspaceRoot, grantedCapabilities: ['write.document'] as const,
-      };
-      const resolved = await paths.resolve(actor, '../external.txt', { allowMissing: true });
-      expect(resolved).not.toBeNull();
-      const resource = { workspaceId: resolved!.workspaceId, resourceId: resolved!.resourceId };
+      const externalPath = path.join(h.root, 'external.txt');
+      const mapping = await h.authority.ensureResourceRoot(externalPath, 'file');
+      const resource = { workspaceId: mapping.workspaceId, resourceId: '' };
       const state = await h.authority.resolveWorkspace({ workspaceId: resource.workspaceId });
       const result = await h.authority.write({
         resource, content: 'external content', encoding: 'utf-8', bom: false, expectedRevision: null,
@@ -63,7 +57,7 @@ describe('document root guard', () => {
       });
       expect(result.status).toBe('written');
       expect(await fs.promises.readFile(path.join(h.root, 'external.txt'), 'utf8')).toBe('external content');
-      expect(await paths.readAuthorizedFile(actor, resolved!)).toEqual(Buffer.from('external content'));
+      expect(await h.authority.read(resource)).toMatchObject({ status: 'ready', content: 'external content' });
     } finally { await h.cleanup(); }
   });
 });

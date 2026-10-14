@@ -328,11 +328,13 @@ function FollowupOccurrences({ api, family, mediaRead, identity, item }: { api: 
 }
 
 /** Original definitions and delivery facts; no client timer or execution queue. */
-export function ThreadFollowups({ api, family, mediaRead, research, identity, run, operations, followups, pending, act, cancelObservation }: {
+export function ThreadFollowups({ api, family, mediaRead, research, identity, run, operations, followups, pending, act, cancelObservation, createOpen, onCreateOpenChange }: {
   api: ThreadFollowupsAPI; family?: ThreadFamilyAPI; mediaRead: ThreadsAPI['mediaRead']; research?: ThreadResearchAPI; identity: ThreadIdentity; run?: Run; operations: Operation[]; followups: Followup[];
+  createOpen?: boolean; onCreateOpenChange?(open: boolean): void;
   pending: boolean; act(work: () => Promise<unknown>): Promise<void>; cancelObservation(operationId: string): Promise<void>;
 }) {
   const [editing, setEditing] = React.useState(false);
+  React.useEffect(() => { if (createOpen && run) { setEditing(true); onCreateOpenChange?.(false); } }, [createOpen, run, onCreateOpenChange]);
   const [showPast, setShowPast] = React.useState(false);
   const [kind, setKind] = React.useState<FollowupRegisterParams['trigger']['kind']>('at');
   const [repeat, setRepeat] = React.useState<'once' | 'each'>('once');

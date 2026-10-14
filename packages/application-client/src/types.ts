@@ -1,6 +1,6 @@
 import type { VarinExtensionRestartHandoffRequest, VarinExtensionRestartRecoveryRequest } from "@varin/extension-contract";
 import type { DocumentsWorkspaceEditAPI, VarinWorkspaceEditSurfaceChange, VarinWorkspaceEditSurfaceReceipt } from './documents-workspace-edit.js';
-import type { AgentInputContext, AgentInputSnapshotConsumer, PiRuntimeSnapshot, WorkFocusId } from '@varin/protocol';
+import type { AgentInputContext, AgentInputSnapshotConsumer, WorkFocusId } from '@varin/protocol';
 import type { WorktreeMetadata, DraftStarterRef, FileEditorSettingsPatch } from './ui-dto.js';
 import type {
   VarinApplicationSurface,
@@ -1564,25 +1564,6 @@ export interface ExtensionsAPI {
   waitForHostState(request: VarinExtensionHostStateWaitRequest, signal?: AbortSignal): Promise<VarinExtensionHostStateSnapshot>;
 }
 
-export interface PiRuntimeManagementCapabilities {
-  install: boolean;
-  openLocation: boolean;
-  pickPackageRoot: boolean;
-}
-
-export interface PiRuntimeManagementAPI {
-  activate(id: string): Promise<PiRuntimeSnapshot>;
-  activateCustom(packageRoot: string, nodePath?: string): Promise<PiRuntimeSnapshot>;
-  capabilities: PiRuntimeManagementCapabilities;
-  getSnapshot(): Promise<PiRuntimeSnapshot>;
-  install(): Promise<PiRuntimeSnapshot>;
-  openLocation(targetPath: string): Promise<void>;
-  pickPackageRoot(): Promise<string | null>;
-  refresh(): Promise<PiRuntimeSnapshot>;
-  subscribe(listener: (snapshot: PiRuntimeSnapshot) => void): () => void;
-  upgrade(): Promise<PiRuntimeSnapshot>;
-}
-
 export interface VarinWorkspaceIdentity {
   workspaceId: string;
   hostId: string;
@@ -2543,7 +2524,6 @@ export interface RuntimeAPIs {
   schedules?: import("./schedules.js").ScheduledTasksAPI;
   threads?: import("./threads.js").ThreadsAPI;
   runtime: RuntimeDescriptor;
-  piRuntime?: PiRuntimeManagementAPI;
   terminal: TerminalAPI;
   git: GitAPI;
   workspace?: WorkspaceAPI;

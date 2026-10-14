@@ -5,23 +5,37 @@
     "moduleResolution": "NodeNext",
     "baseUrl": ".",
     "paths": {
-      "@varin/extension-contract": ["packages/extension-contract/src/index.ts"],
-      "@varin/extension-builtins": ["packages/extension-builtins/src/index.ts"],
-      "@varin/extension-host": ["packages/extension-host/src/index.ts"],
-      "@varin/extension-loader": ["packages/extension-loader/src/index.ts"],
-      "@varin/extension-react": ["packages/extension-react/src/index.ts"],
-      "@varin/extension-sdk": ["packages/extension-sdk/src/index.ts"],
-      "@varin/extension-surface": ["packages/extension-surface/src/index.ts"],
-      "@varin/pi-host": ["packages/pi-host/src/index.ts"],
-      "@varin/pi-host/discovery": ["packages/pi-host/src/runtime-discovery.ts"],
-      "@varin/pi-host/sdk": ["packages/pi-host/src/pi-sdk-packages.ts"],
-      "@varin/pi-host/mcp-authority": ["packages/pi-host/src/mcp-authority.ts"],
-      "@varin/pi-host/credentials": ["packages/pi-host/src/credential-authority.ts"],
-      "@varin/protocol": ["packages/protocol/src/index.ts"],
-      "@varin/protocol/node/embeddings": ["packages/protocol/src/node/embeddings.ts"],
-      "@varin/runtime-client": ["packages/runtime-client/src/index.ts"]
+      "@varin/extension-contract": [
+        "packages/extension-contract/src/index.ts"
+      ],
+      "@varin/extension-builtins": [
+        "packages/extension-builtins/src/index.ts"
+      ],
+      "@varin/extension-host": [
+        "packages/extension-host/src/index.ts"
+      ],
+      "@varin/extension-loader": [
+        "packages/extension-loader/src/index.ts"
+      ],
+      "@varin/extension-react": [
+        "packages/extension-react/src/index.ts"
+      ],
+      "@varin/extension-sdk": [
+        "packages/extension-sdk/src/index.ts"
+      ],
+      "@varin/extension-surface": [
+        "packages/extension-surface/src/index.ts"
+      ],
+      "@varin/protocol": [
+        "packages/protocol/src/index.ts"
+      ],
+      "@varin/protocol/node/embeddings": [
+        "packages/protocol/src/node/embeddings.ts"
+      ]
     },
-    "lib": ["ES2023"],
+    "lib": [
+      "ES2023"
+    ],
     "strict": true,
     "noUncheckedIndexedAccess": true,
     "exactOptionalPropertyTypes": true,

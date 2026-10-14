@@ -27,7 +27,11 @@ type CompactQuery = Extract<ContextQuery,{action:'compact'}>;
 export class ContextService implements ContextOwner {
   private readonly jobs=new Map<string,Job>();
   private readonly timing:ContextPreparationTiming;
+  // close() ends the current kernel epoch, while the Host owner can be rebound.
+  private lifetime=new AbortController();
   private compaction?:ContextCompactionOwner;
+  private publishObservations?: (run:Run,signal:AbortSignal)=>Promise<void>;
+  bindObservations(publish:(run:Run,signal:AbortSignal)=>Promise<void>):void { this.publishObservations=publish; }
   bindCompaction(owner:ContextCompactionOwner):void {this.compaction=owner;}
   private readonly observations=new Map<string,{requestId:string;identity:string}>();
   constructor(private readonly runtime:AgentRuntimeClient,
@@ -35,12 +39,16 @@ export class ContextService implements ContextOwner {
     private readonly readPolicy:(run:Run,launch:LaunchIntent|null,signal:AbortSignal)=>Promise<ContextPolicyPreparation>,
     private readonly continueRun:(runId:string,signal?:AbortSignal)=>Promise<void>,
     private readonly budget:ContextBudgetOwner | null, now?:()=>number) { this.timing=new ContextPreparationTiming(now); }
-  close():void {for(const job of this.jobs.values()) job.controller.abort();this.jobs.clear();this.timing.clear();this.observations.clear();}
+  close():void {this.lifetime.abort();this.lifetime=new AbortController();for(const job of this.jobs.values()) job.controller.abort();this.jobs.clear();this.timing.clear();this.observations.clear();}
   async query(query:ContextQuery,signal:AbortSignal):Promise<ContextResult> {
+    signal=AbortSignal.any([signal,this.lifetime.signal]);
     signal.throwIfAborted();
     const run=await this.runtime.run(query.runId,signal);
+    signal.throwIfAborted();
     if(run.cancel_requested || ['completed','failed','cancelled'].includes(run.state)) return {status:'failed',code:'context_owner_closed'};
+    if(query.action==='prepare' && this.publishObservations) { await waitWithSignal(this.publishObservations(run,signal),signal); signal.throwIfAborted(); }
     const launch=await this.runtime.launch(run.id,signal);
+    signal.throwIfAborted();
     if(query.action==='prepare' || query.action==='decide') {
       const {policy,scope}=await this.readPolicy(run,launch,signal);
       signal.throwIfAborted();
@@ -56,7 +64,7 @@ export class ContextService implements ContextOwner {
         timing=this.timing.observe(run.branch_id,identity,query.requestId,query.expectedRevision,query.observation);
       }
       if (!policy.enabled || !this.budget) return {status:'ready',policy,...(timing?{timing}:{}),external:false};
-      if (scope.sessionId!==run.thread_id) throw new Error('Context budget scope belongs to another Thread');
+      if (scope.threadId!==run.thread_id) throw new Error('Context budget scope belongs to another Thread');
       if (query.action === 'prepare') return {status:'ready',policy,...(timing?{timing}:{}),external:await this.budget.selected(scope,signal)};
       const input={...query.input, inputBudgetTokens:Math.max(0,query.input.capacityTokens-policy.reserveTokens),
         settings:{reserveTokens:policy.reserveTokens,keepRecentTokens:policy.keepRecentTokens,

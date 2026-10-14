@@ -1293,8 +1293,7 @@ export const registerCommonRequestMiddleware = (
       req.path.startsWith('/api/push') ||
       req.path.startsWith('/api/mobile') ||
       req.path.startsWith('/api/notifications') ||
-      req.path.startsWith('/api/session-folders') ||
-      req.path.startsWith('/api/small-model') ||
+      req.path.startsWith('/api/model-text') ||
       req.path.startsWith('/api/walkthrough') ||
       req.path.startsWith('/api/text') ||
       req.path.startsWith('/api/voice') ||
@@ -1302,7 +1301,15 @@ export const registerCommonRequestMiddleware = (
       req.path.startsWith('/api/varin/extensions') ||
       req.path.startsWith('/api/varin/tunnel')
     ) {
-      express.json({ limit: '50mb' })(req, res, next);
+      express.json({ limit: '50mb' })(req, res, error => {
+        // This parser runs before Thread admission. A generic upstream 4xx does not carry this guarantee.
+        if (req.path.startsWith('/api/threads/') && error && (error.type === 'entity.too.large' || error.type === 'entity.parse.failed')) {
+          const tooLarge = error.type === 'entity.too.large';
+          res.status(tooLarge ? 413 : 400).json({ code: tooLarge ? 'http-body-too-large' : 'thread-request-invalid', admission: 'not_started' });
+          return;
+        }
+        next(error);
+      });
     } else if (req.path.startsWith('/api')) {
       next();
     } else {

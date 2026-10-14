@@ -35,8 +35,8 @@ async function fixture(mode: 'brokered' | 'native' = 'brokered', reviewedDepende
   const route = async (projectId: string, provider: string, allowFallback = false) => runtime.upsertServiceRoutingRule({
     expectedRevision: (await runtime.routing.read()).document.revision,
     rule: { serviceId: 'example.dependency', version: 1, scope: { projectId }, providerKeys: [`${provider}:host:example.dependency@1`], allowFallback } });
-  const prepare = (projectId: string, sessionId: string) => runtime.prepareService({ serviceId: 'example.composed', version: 1,
-    method: 'read', args: [], routing: { projectId, sessionId } });
+  const prepare = (projectId: string, threadId: string) => runtime.prepareService({ serviceId: 'example.composed', version: 1,
+    method: 'read', args: [], routing: { projectId, threadId } });
   return { runtime, route, prepare, directory, async close() { await runtime.stop(); await rm(directory, { recursive: true, force: true }); } };
 }
 for (const mode of ['brokered', 'native'] as const) test(`${mode}: activation captures scoped dependencies and identical graphs share`, { timeout: 30_000 }, async () => {

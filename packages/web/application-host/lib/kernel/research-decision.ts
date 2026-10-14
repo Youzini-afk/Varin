@@ -1,10 +1,11 @@
+import type { AgentSettingsSnapshot } from '@varin/application-client';
 /** Ordinary installed research_decide, using original material and inference owners. */
 import { isDeepStrictEqual } from 'node:util';
 import { RESEARCH_DECISION_CAPABILITY, RESEARCH_DECISION_TOOL_DECLARATIONS } from '@varin/extension-builtins';
 import { parseVarinToolJson } from '@varin/extension-contract';
 import type { HostCapabilityHandler } from '@varin/extension-host';
 import { compileToolJsonSchema } from '../models/schema.js';
-import type { PiSettingsSnapshot, ResearchDecideParams } from '@varin/protocol';
+import type { ResearchDecideParams } from '@varin/protocol';
 import { executeResearchDecide } from '../harness/research-decide.js';
 import { HarnessServiceError } from '../harness/service-error.js';
 import type { SemanticInference } from '../knowledge/semantic/runtime-inference.js';
@@ -17,7 +18,7 @@ export { RESEARCH_DECISION_CAPABILITY };
 const declaration = RESEARCH_DECISION_TOOL_DECLARATIONS[0]!;
 const validate = compileToolJsonSchema(declaration.tool!.inputSchema);
 const object = (value: unknown): value is Record<string, unknown> => !!value && typeof value === 'object' && !Array.isArray(value);
-function enabled(snapshot: PiSettingsSnapshot): boolean {
+function enabled(snapshot: AgentSettingsSnapshot): boolean {
   const global = object(snapshot.global.harness) ? snapshot.global.harness : {};
   const project = snapshot.projectTrusted && object(snapshot.project.harness) ? snapshot.project.harness : {};
   const tools = { ...(object(global.tools) ? global.tools : {}), ...(object(project.tools) ? project.tools : {}) };
@@ -34,7 +35,7 @@ function restored(identity: string | null | undefined): boolean {
 export function createResearchDecisionRuntime(options: {
   inference: Pick<SemanticInference, 'captureDecision'>;
   materials: Pick<ReturnType<typeof createWebRuntime>, 'decisionMaterials'>;
-  settings(source: LaunchSource | null): Promise<PiSettingsSnapshot>;
+  settings(source: LaunchSource | null): Promise<AgentSettingsSnapshot>;
 }) {
   const capability: HostCapabilityHandler = async (method, value, call) => {
     if (method !== 'decide' || !validate(value)) throw new HarnessServiceError('invalid-params', 'Provide a research goal, judgment kind and real candidates');

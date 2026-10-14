@@ -90,27 +90,27 @@ test('context caches only proven declarations and releases preparation on error/
   const describe = () => { descriptions++; return { sections: [{ name: 'scope', kind: 'data', content: 'original' }] }; };
   await f.publish('original', describe).finalized;
   const prepare = createContextComposition(f.runtime);
-  const first = await prepare({ sessionId: 'thread' });
+  const first = await prepare({ threadId: 'thread' });
   assert.equal(f.held.size, 0);
   assert.equal(f.services.ownerInUse(f.current.owner), false);
   const old = f.current;
   await f.services.retireOwner(old.owner);
   f.services.removeOwner(old.owner);
   await f.publish('original', describe).finalized;
-  assert.deepEqual(await prepare({ sessionId: 'thread' }), first);
+  assert.deepEqual(await prepare({ threadId: 'thread' }), first);
   assert.equal(descriptions, 1);
   assert.equal(f.prepares, 1, 'an unchanged graph needs no worker even after the describing generation was removed');
   await f.publish('changed', () => ({ sections: [{ name: 'scope', kind: 'data', content: 'changed' }] })).finalized;
-  assert.equal((await prepare({ sessionId: 'thread' }))?.transforms[0]?.sections[0]?.content, 'changed');
+  assert.equal((await prepare({ threadId: 'thread' }))?.transforms[0]?.sections[0]?.content, 'changed');
   assert.equal(f.held.size, 0);
   await f.publish('invalid', () => ({ sections: 'invalid' })).finalized;
-  await assert.rejects(prepare({ sessionId: 'thread' }), /sections array/);
+  await assert.rejects(prepare({ threadId: 'thread' }), /sections array/);
   assert.equal(f.held.size, 0);
 
   const entered = deferred(), finish = deferred();
   await f.publish('slow', async () => { entered.resolve(); await finish.promise; return { sections: [] }; }).finalized;
   const controller = new AbortController();
-  const pending = prepare({ sessionId: 'thread' }, controller.signal);
+  const pending = prepare({ threadId: 'thread' }, controller.signal);
   const rejected = assert.rejects(pending, /cancelled/);
   await entered.promise;
   controller.abort(new Error('cancelled'));
@@ -136,7 +136,7 @@ test('a cancelled budget decision releases its consumer leases while the origina
     estimate: { estimatedTokens: 10, unmeasuredMedia: 0, unmeasuredProviderItems: 0, method: 'fixture' },
     capacityTokens: 100, inputBudgetTokens: 80, settings: { reserveTokens: 20, keepRecentTokens: 10, backgroundPreparation: false, preparationWaterline: 0.7 }, candidates: [] };
   const controller = new AbortController();
-  const pending = createContextBudget(f.runtime).decide({ sessionId: 'thread' }, input, controller.signal);
+  const pending = createContextBudget(f.runtime).decide({ threadId: 'thread' }, input, controller.signal);
   const rejected = assert.rejects(pending, /cancelled/);
   await entered.promise;
   controller.abort(new Error('cancelled'));

@@ -31,7 +31,7 @@ async function fixture() {
     await runtime.installOrStage({ expectedRevision: (await runtime.state()).catalog.revision, source: { kind: 'local', display: id, specifier: folder } });
     return `${id}:host:varin.agent.policy@${version}`;
   };
-  const route = async (version: number, providerKey: string, scope: { projectId?: string; sessionId?: string }, allowFallback = false) =>
+  const route = async (version: number, providerKey: string, scope: { projectId?: string; threadId?: string }, allowFallback = false) =>
     runtime.upsertServiceRoutingRule({ expectedRevision: (await runtime.routing.read()).document.revision,
       rule: { serviceId: 'varin.agent.policy', version, providerKeys: [providerKey], scope, allowFallback } });
   return { root, runtime, install, route, prepare: createAgentPolicy(runtime) };
@@ -39,7 +39,7 @@ async function fixture() {
 
 it('absence, unselected old installation and another scope do not block the default policy', async () => {
   const f = await fixture();
-  const scope = { sessionId: 'thread', projectId: 'current' };
+  const scope = { threadId: 'thread', projectId: 'current' };
   expect(await f.prepare(scope)).toBeUndefined();
   const old = await f.install(1);
   expect(await f.prepare(scope)).toBeUndefined();
@@ -49,9 +49,9 @@ it('absence, unselected old installation and another scope do not block the defa
   expect(await f.prepare(scope)).toBeUndefined();
   const installed = await f.install(4);
   expect(await f.prepare(scope)).toBeUndefined();
-  await f.route(4, installed, { sessionId: 'another-thread' });
+  await f.route(4, installed, { threadId: 'another-thread' });
   expect(await f.prepare(scope)).toBeUndefined();
-  await f.route(4, installed, { sessionId: 'thread' });
+  await f.route(4, installed, { threadId: 'thread' });
   const lease = await f.prepare(scope);
   expect(lease?.binding.artifact.identity.name).toBe(`${installed}:installed-v4`);
   lease?.release();
@@ -61,19 +61,19 @@ it.each([false, true])('an explicit unsupported policy cannot be replaced by the
   const f = await fixture();
   const old = await f.install(1);
   await f.route(1, old, { projectId: 'current' }, allowFallback);
-  await expect(f.prepare({ sessionId: 'thread', projectId: 'current' })).rejects.toThrow(/version 1 is unsupported/);
+  await expect(f.prepare({ threadId: 'thread', projectId: 'current' })).rejects.toThrow(/version 1 is unsupported/);
   await f.install(4);
-  await expect(f.prepare({ sessionId: 'thread', projectId: 'current' })).rejects.toThrow(/version 1 is unsupported/);
+  await expect(f.prepare({ threadId: 'thread', projectId: 'current' })).rejects.toThrow(/version 1 is unsupported/);
   expect(f.runtime.services.getSnapshot().providers.some(provider => provider.extensionId === 'review.policy-v4')).toBe(false);
 });
 
 it('conflicting unsupported rules cannot disappear into optional-policy absence', async () => {
   const f = await fixture();
-  await f.route(1, 'review.one:host:varin.agent.policy@1', { projectId: 'current', sessionId: 'thread' });
+  await f.route(1, 'review.one:host:varin.agent.policy@1', { projectId: 'current', threadId: 'thread' });
   // User and project context have the same precedence within a session-specific rule.
   await f.runtime.upsertServiceRoutingRule({ expectedRevision: (await f.runtime.routing.read()).document.revision,
-    rule: { serviceId: 'varin.agent.policy', version: 1, providerKeys: ['review.two:host:varin.agent.policy@1'], scope: { userId: 'owner', sessionId: 'thread' }, allowFallback: false } });
-  const scope = { sessionId: 'thread', projectId: 'current', userId: 'owner' };
+    rule: { serviceId: 'varin.agent.policy', version: 1, providerKeys: ['review.two:host:varin.agent.policy@1'], scope: { userId: 'owner', threadId: 'thread' }, allowFallback: false } });
+  const scope = { threadId: 'thread', projectId: 'current', userId: 'owner' };
   expect(resolveVarinExtensionServiceRouting({ candidates: [], document: (await f.runtime.routing.read()).document, serviceId: 'varin.agent.policy', version: 1, context: scope }).status).toBe('ambiguous');
   await expect(f.prepare(scope)).rejects.toThrow(/version 1 is unsupported/);
 });
@@ -84,14 +84,14 @@ it('a real v4 selection remains usable alongside old routes and preserves its ex
   await f.route(1, old, { projectId: 'current' });
   const selected = await f.install(4);
   await f.route(4, selected, { projectId: 'current' });
-  const lease = await f.prepare({ sessionId: 'thread', projectId: 'current' });
+  const lease = await f.prepare({ threadId: 'thread', projectId: 'current' });
   expect(lease?.binding.artifact.identity.name).toBe(`${selected}:installed-v4`);
   try {
     expect(await lease!.decide({ view: { run_id: 'run', state: 'runnable', history_count: 0, history_head_id: null, pending_tool_calls: 0, model_capabilities: [] }, event: { kind: 'started' }, state: null }, new AbortController().signal))
       .toEqual({ action: { kind: 'complete' }, state: null });
     const childProvider = await f.install(4, 'review.child-policy');
-    await f.route(4, childProvider, { projectId: 'current', sessionId: 'thread:child' });
-    const childPolicy = await f.prepare({ sessionId: 'thread:child', projectId: 'current' });
+    await f.route(4, childProvider, { projectId: 'current', threadId: 'thread:child' });
+    const childPolicy = await f.prepare({ threadId: 'thread:child', projectId: 'current' });
     try {
       expect(childPolicy!.binding.artifact.providerKey).toBe(childProvider);
       expect(childPolicy!.binding.artifact.providerKey).not.toBe(lease!.binding.artifact.providerKey);
@@ -107,9 +107,9 @@ it('an explicit unsupported scoped routing selection is rejected without invokin
   const old = await f.install(1);
   await f.runtime.supervisor.activateExtension('review.policy-v1');
   await f.route(1, old, { projectId: 'current' });
-  await expect(f.prepare({ sessionId: 'thread', projectId: 'current' })).rejects.toThrow(/version 1 is unsupported/);
+  await expect(f.prepare({ threadId: 'thread', projectId: 'current' })).rejects.toThrow(/version 1 is unsupported/);
   await f.install(4);
-  await expect(f.prepare({ sessionId: 'thread', projectId: 'current' })).rejects.toThrow(/version 1 is unsupported/);
+  await expect(f.prepare({ threadId: 'thread', projectId: 'current' })).rejects.toThrow(/version 1 is unsupported/);
   expect(f.runtime.services.getSnapshot().providers.some(provider => provider.extensionId === 'review.policy-v4')).toBe(false);
 });
 
@@ -126,7 +126,7 @@ it('a routing change between version-intent inspection and provider preparation 
     if (++reads === 1) { entered(); await releaseGate; }
     return snapshot;
   };
-  const pending = f.prepare({ sessionId: 'thread', projectId: 'current' });
+  const pending = f.prepare({ threadId: 'thread', projectId: 'current' });
   try {
     await enteredGate;
     await f.route(1, 'review.policy-v1:host:varin.agent.policy@1', { projectId: 'current' });
@@ -149,7 +149,7 @@ it('a routing selection arriving while v4 absence is being resolved cannot silen
     if (++reads === 2) { entered(); await releaseGate; }
     return read();
   };
-  const pending = f.prepare({ sessionId: 'thread', projectId: 'current' });
+  const pending = f.prepare({ threadId: 'thread', projectId: 'current' });
   try {
     await enteredGate;
     await f.route(1, old, { projectId: 'current' });
@@ -168,8 +168,8 @@ it('an installed child SDK policy preserves exact retirement/rebind across deliv
     outfile: path.join(example, 'host.cjs'), alias: { '@varin/extension-sdk': path.join(repository, 'packages/extension-sdk/dist/index.js') } });
   await f.runtime.installOrStage({ expectedRevision: (await f.runtime.state()).catalog.revision,
     source: { kind: 'local', display: 'Delivery pause SDK example', specifier: example } });
-  await f.route(4, 'example.delivery-pause-policy:host:varin.agent.policy@4', { sessionId: 'thread:child-delivery' });
-  const lease = await f.prepare({ sessionId: 'thread:child-delivery' });
+  await f.route(4, 'example.delivery-pause-policy:host:varin.agent.policy@4', { threadId: 'thread:child-delivery' });
+  const lease = await f.prepare({ threadId: 'thread:child-delivery' });
   expect(lease?.binding.artifact.identity.name).toContain('example.delivery-pause-policy:host:varin.agent.policy@4:delivery-pause');
   try {
     const input: VarinAgentPolicyInput = { view: { run_id: 'run:child-delivery', state: 'runnable', history_count: 1,
@@ -186,10 +186,10 @@ it('an installed child SDK policy preserves exact retirement/rebind across deliv
     await f.runtime.requestCandidateApplication({ extensionId: 'example.delivery-pause-policy', candidateIntegrity: staged.candidateIntegrity, expectedRevision: (await f.runtime.state()).catalog.revision });
     const selecting = f.runtime.selectCandidate({ extensionId: 'example.delivery-pause-policy', candidateIntegrity: staged.candidateIntegrity, expectedRevision: (await f.runtime.state()).catalog.revision });
     await expect.poll(() => f.runtime.services.getSnapshot().providers.find(provider => provider.extensionId === 'example.delivery-pause-policy' && provider.status === 'active')?.providerId).not.toBe(lease!.binding.reference);
-    const restored = await f.prepare({ sessionId: 'thread:child-delivery', requiredBinding: lease!.binding.artifact });
+    const restored = await f.prepare({ threadId: 'thread:child-delivery', requiredBinding: lease!.binding.artifact });
     expect(restored!.binding.artifact).toEqual(lease!.binding.artifact);
     restored!.release();
-    const candidate = await f.prepare({ sessionId: 'thread:child-delivery' });
+    const candidate = await f.prepare({ threadId: 'thread:child-delivery' });
     const from = { identity: lease!.binding.artifact.identity, declaredIdentity: lease!.binding.artifact.declaredIdentity };
     const resumed = { ...input, state: pause.state, event: { kind: 'resumed' as const, action_id: 'pause:first', wait_id: 'pause-wait:first' } };
     expect(candidate!.binding.artifact.identity).not.toEqual(lease!.binding.artifact.identity);
@@ -200,9 +200,9 @@ it('an installed child SDK policy preserves exact retirement/rebind across deliv
     expect((await lease!.decide(resumed, signal)).action.kind).toBe('deliver');
     const leaseIdentity = candidate!.binding.artifact.identity;
     candidate!.release(); lease!.release(); await selecting;
-    await expect(f.prepare({ sessionId: 'thread:child-delivery', requiredBinding: lease!.binding.artifact })).rejects.toThrow('policy_exact_binding_unavailable');
+    await expect(f.prepare({ threadId: 'thread:child-delivery', requiredBinding: lease!.binding.artifact })).rejects.toThrow('policy_exact_binding_unavailable');
     // Reacquiring the installed artifact keeps checkpoint identity; it grants no right to resume.
-    const rebound = await f.prepare({ sessionId: 'thread:child-delivery' });
+    const rebound = await f.prepare({ threadId: 'thread:child-delivery' });
     try {
       expect(rebound!.binding.artifact.identity).toEqual(leaseIdentity);
       const unexpected = await rebound!.decide({ ...input, state: pause.state, event: { kind: 'input_delivered', input_ids: ['queued'] } }, signal);
@@ -219,38 +219,38 @@ it('an installed child SDK policy preserves exact retirement/rebind across deliv
 it('exact recovery binds the original installed artifact without consulting a changed route', async () => {
   const f = await fixture();
   const original = await f.install(4);
-  await f.route(4, original, { sessionId: 'recover' });
-  const first = await f.prepare({ sessionId: 'recover' });
+  await f.route(4, original, { threadId: 'recover' });
+  const first = await f.prepare({ threadId: 'recover' });
   const requiredBinding = first!.binding.artifact;
   const other = await f.install(4, 'review.other-policy');
-  await f.route(4, other, { sessionId: 'recover' });
-  const current = await f.prepare({ sessionId: 'recover' });
+  await f.route(4, other, { threadId: 'recover' });
+  const current = await f.prepare({ threadId: 'recover' });
   expect(current!.binding.artifact.providerKey).toBe(other);
-  const recovered = await f.prepare({ sessionId: 'recover', requiredBinding });
+  const recovered = await f.prepare({ threadId: 'recover', requiredBinding });
   expect(recovered!.binding.artifact).toEqual(requiredBinding);
-  await expect(f.prepare({ sessionId: 'recover', requiredBinding: { ...requiredBinding, configurationIdentity: 'changed' } })).rejects.toThrow('policy_exact_binding_unavailable');
-  await expect(f.prepare({ sessionId: 'recover', requiredBinding: { ...requiredBinding, artifactIntegrity: 'missing' } })).rejects.toThrow('policy_exact_binding_unavailable');
+  await expect(f.prepare({ threadId: 'recover', requiredBinding: { ...requiredBinding, configurationIdentity: 'changed' } })).rejects.toThrow('policy_exact_binding_unavailable');
+  await expect(f.prepare({ threadId: 'recover', requiredBinding: { ...requiredBinding, artifactIntegrity: 'missing' } })).rejects.toThrow('policy_exact_binding_unavailable');
   expect((await first!.decide({ view: { run_id: 'original', state: 'runnable', history_count: 0, history_head_id: null, pending_tool_calls: 0, model_capabilities: [] }, event: { kind: 'started' }, state: null }, new AbortController().signal)).action.kind).toBe('complete');
   await f.runtime.setEnabled('review.policy-v4', false, (await f.runtime.state()).catalog.revision);
   expect(first!.revocationSignal.aborted).toBe(true);
-  await expect(f.prepare({ sessionId: 'recover', requiredBinding })).rejects.toThrow('policy_exact_binding_unavailable');
+  await expect(f.prepare({ threadId: 'recover', requiredBinding })).rejects.toThrow('policy_exact_binding_unavailable');
   recovered!.release(); current!.release(); first!.release();
 });
 
 
 it('policy observation tracks the admitted routing scope and ignores unrelated project intent', async () => {
   const f = await fixture(); const selected = await f.install(4);
-  await f.route(4, selected, { sessionId: 'observed' });
-  const retained = await f.prepare({ sessionId: 'observed' });
+  await f.route(4, selected, { threadId: 'observed' });
+  const retained = await f.prepare({ threadId: 'observed' });
   const controller = new AbortController(); let changes = 0;
-  const close = f.prepare.observe({ sessionId: 'observed' }, () => { changes++; }, controller.signal);
+  const close = f.prepare.observe({ threadId: 'observed' }, () => { changes++; }, controller.signal);
   try {
     await expect.poll(() => changes).toBe(1);
     const other = await f.install(4, 'review.unrelated-policy');
-    await f.route(4, other, { sessionId: 'another-session' });
+    await f.route(4, other, { threadId: 'another-session' });
     await new Promise(resolve => setImmediate(resolve));
     expect(changes).toBe(1);
-    await f.route(4, other, { sessionId: 'observed' });
+    await f.route(4, other, { threadId: 'observed' });
     await expect.poll(() => changes).toBe(2);
   } finally { close(); controller.abort(); retained!.release(); }
 });
@@ -276,18 +276,18 @@ it('exact policy recovery selects the complete configuration among retained gene
     supervisor: { getRetainedArtifactIdentity: () => 'same-artifact', getRetainedComposition: () => composition },
   } as unknown as ApplicationExtensionRuntime;
   const prepare = createAgentPolicy(runtime);
-  const old = (await prepare({ projectId: 'config', sessionId: 'thread:old-child' }))!;
+  const old = (await prepare({ projectId: 'config', threadId: 'thread:old-child' }))!;
   const replacement = services.prepareOwnerReplacement(owner(2), provision('new'), { composition });
   replacement.commit();
-  const current = (await prepare({ projectId: 'config', sessionId: 'thread:new-child' }))!;
+  const current = (await prepare({ projectId: 'config', threadId: 'thread:new-child' }))!;
   try {
     expect(old.binding.artifact.configurationIdentity).not.toBe(current.binding.artifact.configurationIdentity);
     for (const original of [current, old]) {
-      const restored = await prepare({ projectId: 'config', sessionId: 'thread:restored-child', requiredBinding: original.binding.artifact });
+      const restored = await prepare({ projectId: 'config', threadId: 'thread:restored-child', requiredBinding: original.binding.artifact });
       try { expect(restored!.binding.artifact).toEqual(original.binding.artifact); }
       finally { restored?.release(); }
     }
-    await expect(prepare({ projectId: 'config', sessionId: 'thread:restored-child', requiredBinding: { ...current.binding.artifact, configurationIdentity: 'unavailable' } })).rejects.toThrow('policy_exact_binding_unavailable');
+    await expect(prepare({ projectId: 'config', threadId: 'thread:restored-child', requiredBinding: { ...current.binding.artifact, configurationIdentity: 'unavailable' } })).rejects.toThrow('policy_exact_binding_unavailable');
   } finally { current.release(); old.release(); await replacement.finalize(); }
-  await expect(prepare({ projectId: 'config', sessionId: 'thread:old-child', requiredBinding: old.binding.artifact })).rejects.toThrow('policy_exact_binding_unavailable');
+  await expect(prepare({ projectId: 'config', threadId: 'thread:old-child', requiredBinding: old.binding.artifact })).rejects.toThrow('policy_exact_binding_unavailable');
 });

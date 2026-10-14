@@ -6,7 +6,7 @@ import { ThreadMaterialDraftContext } from './ThreadMaterialDraftContext';
 
 /** The selected original research Run ingests the artifact; retained pages belong to its Thread. */
 export function ThreadArtifactPdfReader({ owner, artifact, title, onOpenChange }: {
-  owner: Exclude<ResearchFactsOwner, string>;
+  owner: ResearchFactsOwner;
   artifact: { attemptId: string; artifactId: string };
   title: string;
   onOpenChange(open: boolean): void;

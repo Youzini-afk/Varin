@@ -25,7 +25,7 @@ it('persists computer steps in the real kernel, pages every seq and survives reo
   let current = await start();
   try {
     await Promise.all(Array.from({ length: 8 }, (_, index) => current.service.open({ desktopId: 'local-console',
-      path: `private ${index}.txt`, sessionId: 'origin-session' })));
+      path: `private ${index}.txt` })));
     const first = await current.service.evidence({ desktopId: 'local-console', since: 0, limit: 3 });
     expect(first.entries.map((entry) => entry.seq)).toEqual([1, 2, 3]);
     expect(first.hasMore).toBe(true);

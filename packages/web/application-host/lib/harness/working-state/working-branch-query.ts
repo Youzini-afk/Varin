@@ -1,4 +1,4 @@
-import type { ExploreFileSnapshot } from "../explore-file-reader.js";
+import type { ExploreFileSnapshot } from "../file-snapshot.js";
 import { decodeSearchHit, type WorkspaceContentSearchRequest, type WorkspaceContentSearchOptions, type WorkspaceContentSearchResult } from "../../search/content.js";
 import type { WorkingStatePin, WorkingStateRootStore } from "./types.js";
 import type { WorkingStateFileQuery, WorkingStateQueryOptions, WorkingStateQueryResult } from "./query-contract.js";

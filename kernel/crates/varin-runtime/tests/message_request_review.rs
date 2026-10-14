@@ -138,7 +138,7 @@ fn idle_root_reopen_admits_one_actual_new_run_from_exact_launch_and_history() {
             source.mode = SourceMode::Materialized;
             source.environment_run_id = None;
             let source = launch.source.clone();
-            let basis=serde_json::from_value::<catalog::personalization::PersonalizationBasis>(json!({"mode":"agent","threadRole":"main","revision":1,"configurationDigest":"materialized-main","memorySnapshot":{"revision":0,"memories":[]},"sessionId":"thread:parent","projectId":null,"originalSections":[{"name":"system","content":"Root source context"}],"instructionSources":[]})).unwrap();
+            let basis=serde_json::from_value::<catalog::personalization::PersonalizationBasis>(json!({"mode":"agent","threadRole":"main","revision":1,"configurationDigest":"materialized-main","memorySnapshot":{"revision":0,"memories":[]},"threadId":"thread:parent","projectId":null,"originalSections":[{"name":"system","content":"Root source context"}],"instructionSources":[]})).unwrap();
             let resources=serde_json::from_value(json!({"source":source,"snapshot":{"id":"materialized-resources","scope":{"threadId":"thread:parent","branchId":"branch:parent","mode":"agent","threadRole":"main","projectId":null,"sourceIdentity":"materialized-owned","cwd":"/frozen","projectTrusted":false,"projectRoot":null},"readers":[],"project":null,"configurationDigest":"materialized-main","shadowedContextCanonicalIds":[],"system":null,"appendSystem":null,"instructions":[],"instructionScopes":[],"skills":[],"diagnostics":[],"capturedFiles":[],"observations":[]}})).unwrap();
             let proposal = catalog::context::ContextProposal {
                 key: "materialized-context".into(),
@@ -530,7 +530,7 @@ fn unreadable_unobserved_child_report_does_not_suppress_independent_request_acti
         instruction_sources: vec![],
         memory_checkpoint: None,
     };
-    let basis=serde_json::from_value(json!({"mode":"agent","threadRole":"worker","revision":0,"configurationDigest":"independent-child","memorySnapshot":{"revision":0,"memories":[]},"sessionId":child.child_thread_id,"projectId":child.project_id,"originalSections":[{"name":"system","content":"Read-only child"}],"instructionSources":[]})).unwrap();
+    let basis=serde_json::from_value(json!({"mode":"agent","threadRole":"worker","revision":0,"configurationDigest":"independent-child","memorySnapshot":{"revision":0,"memories":[]},"threadId":child.child_thread_id,"projectId":child.project_id,"originalSections":[{"name":"system","content":"Read-only child"}],"instructionSources":[]})).unwrap();
     let child =
         f.db.prepare_child(&child.execution_id, source, proposal, basis)
             .unwrap();

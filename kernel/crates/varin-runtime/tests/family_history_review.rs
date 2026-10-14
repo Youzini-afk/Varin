@@ -53,7 +53,7 @@ fn prepare(f: &mut Fixture, child: ChildTask) -> ChildTask {
         instruction_sources: vec![],
         memory_checkpoint: None,
     };
-    let basis=serde_json::from_value(json!({"mode":"agent","threadRole":"worker","revision":0,"configurationDigest":"family-test","memorySnapshot":{"revision":0,"memories":[]},"sessionId":child.child_thread_id,"projectId":child.project_id,"originalSections":[],"instructionSources":[]})).unwrap();
+    let basis=serde_json::from_value(json!({"mode":"agent","threadRole":"worker","revision":0,"configurationDigest":"family-test","memorySnapshot":{"revision":0,"memories":[]},"threadId":child.child_thread_id,"projectId":child.project_id,"originalSections":[],"instructionSources":[]})).unwrap();
     f.db.prepare_child(&child.operation_id, source, proposal, basis)
         .unwrap()
 }

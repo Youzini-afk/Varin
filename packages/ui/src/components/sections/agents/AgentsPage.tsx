@@ -7,20 +7,12 @@ import { useI18n } from '@/lib/i18n';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { agentProfileLabels } from './agent-profile-presentation';
 import { AgentProfileEditor } from './AgentProfileEditor';
-import { PluginAgentDetails } from './PluginAgentDetails';
-import { useAgentsPageCatalog } from './useAgentsPageCatalog';
 import { useAgentProfiles } from './useAgentProfiles';
 import { cancelAgentProfileCreation, removeAgentProfile, saveAgentProfile } from './agent-profiles-store';
 
 export function AgentsPage() {
   const profiles = useAgentProfiles();
-  return profiles.state.runtime === 'pi' && profiles.state.view === 'plugins'
-    ? <PiPluginDetails />
-    : <AgentProfilesDetails key={JSON.stringify([profiles.host, profiles.state.runtime])} {...profiles} />;
-}
-function PiPluginDetails() {
-  const { selected, state, targetKey } = useAgentsPageCatalog();
-  return <PluginAgentDetails key={`${targetKey}:${state.definitionRequest ?? selected?.id}`} agent={state.definitionRequest === 'create-agent' ? null : selected} />;
+  return <AgentProfilesDetails key={profiles.host} {...profiles} />;
 }
 function AgentProfilesDetails({ api, host, state, snapshot, refresh }: ReturnType<typeof useAgentProfiles>) {
   const { t } = useI18n();

@@ -1,9 +1,10 @@
+import type { AgentSettingsSnapshot } from '@varin/application-client';
 /** Ordinary native tool calls into the original scholarly metadata owner. */
 import { RESEARCH_DISCOVERY_CAPABILITY, RESEARCH_DISCOVERY_TOOL_DECLARATIONS } from '@varin/extension-builtins';
 import { parseVarinToolJson } from '@varin/extension-contract';
 import type { HostCapabilityHandler } from '@varin/extension-host';
 import { compileToolJsonSchema } from '../models/schema.js';
-import type { PiSettingsSnapshot, ScholarlySearchParams } from '@varin/protocol';
+import type { ScholarlySearchParams } from '@varin/protocol';
 import type { ScholarlySearchService } from '../harness/research-search.js';
 import { HarnessServiceError } from '../harness/service-error.js';
 import type { ExtensionToolConfiguration, ExtensionToolRun } from './extension-tool-owner.js';
@@ -15,7 +16,7 @@ const declarations = new Map(RESEARCH_DISCOVERY_TOOL_DECLARATIONS.map(declaratio
   { declaration, validate: compileToolJsonSchema(declaration.tool!.inputSchema) }]));
 const object = (value: unknown): value is Record<string, unknown> => value !== null && typeof value === 'object' && !Array.isArray(value);
 interface ResearchDiscoveryConfiguration { version: 1; enabled: boolean }
-function capture(snapshot: PiSettingsSnapshot): ResearchDiscoveryConfiguration {
+function capture(snapshot: AgentSettingsSnapshot): ResearchDiscoveryConfiguration {
   const global = object(snapshot.global.harness) ? snapshot.global.harness : {};
   const project = snapshot.projectTrusted && object(snapshot.project.harness) ? snapshot.project.harness : {};
   const tools = { ...(object(global.tools) ? global.tools : {}), ...(object(project.tools) ? project.tools : {}) };
@@ -35,7 +36,7 @@ function configuration(identity: string | null | undefined): ResearchDiscoveryCo
 export interface ResearchDiscoveryRuntimeOptions {
   service: ScholarlySearchService;
   /** Original user and trusted-project settings, without a Pi session or Web provider dependency. */
-  settings(source: LaunchSource | null): Promise<PiSettingsSnapshot>;
+  settings(source: LaunchSource | null): Promise<AgentSettingsSnapshot>;
 }
 export function createResearchDiscoveryRuntime(options: ResearchDiscoveryRuntimeOptions) {
   const capability: HostCapabilityHandler = async (method, value, call) => {

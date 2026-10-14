@@ -1,4 +1,4 @@
 import React from 'react';
-import { PiResourcePage } from '@/components/sections/resources/PiResourcePage';
+import { NativeResourcePage } from '@/components/sections/resources/NativeResourcePage';
 
-export const SkillsPage: React.FC = () => <PiResourcePage kind="skill" />;
+export const SkillsPage: React.FC = () => <NativeResourcePage kind="skill" />;

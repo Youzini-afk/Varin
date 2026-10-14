@@ -11,13 +11,10 @@ export type BuiltinSettingsRenderer =
   | 'extensions'
   | 'git'
   | 'language-support'
-  | 'plugins'
   | 'projects'
-  | 'providers'
   | 'model-connections'
   | 'mcp-connections'
   | 'remote-instances'
-  | 'runtime'
   | 'skills'
   | 'varin:general'
   | 'varin:visual'
@@ -58,13 +55,10 @@ export const BUILTIN_SETTINGS_PAGE_SPECS: readonly BuiltinSettingsPageSpec[] = [
   spec({ slug: 'remote-instances', title: 'Remote Instances', titleKey: 'settings.page.remoteInstances.title', group: 'projects', kind: 'single', icon: 'computer', order: 21, keywords: ['ssh', 'remote', 'instances', 'tunnels', 'forwarding', 'connection'] }, 'remote-instances'),
   spec({ slug: 'tunnel', title: 'External Tunnel', titleKey: 'settings.page.tunnel.title', group: 'projects', kind: 'single', icon: 'home-office', order: 22, badgeKey: 'settings.view.badge.beta', keywords: ['tunnel', 'external', 'cloudflare', 'qr', 'remote', 'mobile', 'share'] }, 'varin:tunnel'),
   spec({ slug: 'git', title: 'Git', titleKey: 'settings.page.git.title', group: 'projects', kind: 'single', icon: 'git-branch', order: 23, keywords: ['git', 'github', 'identity', 'identities', 'ssh', 'profiles', 'credentials', 'keys', 'commit', 'gitmoji', 'oauth', 'prs', 'issues'] }, 'git'),
-  spec({ slug: 'language-support', title: 'Language Support', titleKey: 'settings.page.languageSupport.title', group: 'pi', kind: 'single', icon: 'code-box', order: 38, keywords: ['language', 'languages', 'grammar', 'tree-sitter', 'structure', 'lsp', 'language server'] }, 'language-support'),
-  spec({ slug: 'runtime', title: 'Runtime', titleKey: 'settings.page.runtime.title', group: 'pi', kind: 'single', icon: 'terminal-box', order: 39, keywords: ['pi', 'runtime', 'install', 'upgrade', 'node', 'path', 'package root'] }, 'runtime'),
-  spec({ slug: 'providers', title: 'Providers', titleKey: 'settings.page.providers.title', group: 'pi', kind: 'split', icon: 'cloud', order: 40, keywords: ['provider', 'providers', 'models', 'model', 'api key', 'api keys', 'openai', 'anthropic', 'ollama', 'credentials'] }, 'providers'),
-  spec({ slug: 'commands', title: 'Commands', titleKey: 'settings.page.commands.title', group: 'pi', kind: 'single', icon: 'command', order: 43, keywords: ['pi', 'command', 'commands', 'slash command', 'extension command', 'prompt command', 'skill command'] }, 'commands'),
-  spec({ slug: 'skills', title: 'Skills', titleKey: 'settings.page.skills.title', group: 'pi', kind: 'split', icon: 'sparkling', order: 45, keywords: ['pi', 'skill', 'skills', 'skill.md', 'markdown', 'package resource'] }, 'skills'),
-  spec({ slug: 'plugins', title: 'Pi Packages', titleKey: 'settings.page.plugins.title', group: 'pi', kind: 'single', icon: 'plug-2', order: 47, keywords: ['pi', 'package', 'packages', 'plugin', 'plugins', 'extensions', 'npm', 'git', 'local path'] }, 'plugins'),
-  spec({ slug: 'extensions', title: 'Varin Extensions', titleKey: 'settings.page.extensions.title', group: 'pi', kind: 'single', icon: 'plug-2', order: 49, keywords: ['varin', 'extension', 'extensions', 'enable', 'disable', 'capabilities'] }, 'extensions'),
+  spec({ slug: 'language-support', title: 'Language Support', titleKey: 'settings.page.languageSupport.title', group: 'harness', kind: 'single', icon: 'code-box', order: 38, keywords: ['language', 'languages', 'grammar', 'tree-sitter', 'structure', 'lsp', 'language server'] }, 'language-support'),
+  spec({ slug: 'commands', title: 'Commands', titleKey: 'settings.page.commands.title', group: 'harness', kind: 'single', icon: 'command', order: 43, keywords: ['command', 'commands', 'slash command', 'extension command', 'prompt command', 'skill command'] }, 'commands'),
+  spec({ slug: 'skills', title: 'Skills', titleKey: 'settings.page.skills.title', group: 'harness', kind: 'split', icon: 'sparkling', order: 45, keywords: ['skill', 'skills', 'skill.md', 'markdown', 'package resource'] }, 'skills'),
+  spec({ slug: 'extensions', title: 'Varin Extensions', titleKey: 'settings.page.extensions.title', group: 'harness', kind: 'single', icon: 'plug-2', order: 49, keywords: ['varin', 'extension', 'extensions', 'enable', 'disable', 'capabilities'] }, 'extensions'),
 ];
 
 export const isBuiltinSettingsPageAvailable = (

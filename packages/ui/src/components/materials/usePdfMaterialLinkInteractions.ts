@@ -1,6 +1,6 @@
 import React from 'react';
 import { MaterialLinkContext } from './MaterialLinkContext';
-import { PDF_MATERIAL_OPEN_EVENT, pdfMaterialUrlFromMarkdownHref } from '@/lib/pi-runtime/pdfMaterialCitation';
+import { PDF_MATERIAL_OPEN_EVENT, pdfMaterialUrlFromMarkdownHref } from '@/lib/materials/pdfMaterialCitation';
 
 export const usePdfMaterialLinkInteractions = ({
   containerRef,

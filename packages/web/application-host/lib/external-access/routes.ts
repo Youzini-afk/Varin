@@ -1,7 +1,6 @@
 import type { spawn as spawnFunction } from 'node:child_process';
 import type { Stats } from 'node:fs';
 import type fsPromisesModule from 'node:fs/promises';
-import type osModule from 'node:os';
 import type pathModule from 'node:path';
 import type { Express, Request, Response } from 'express';
 import type { DocumentAuthority } from '../documents/authority.js';
@@ -55,7 +54,6 @@ interface ExternalRootRuntimeOptions {
   __dirname: string;
   deploymentRoot?: string;
   fsPromises: FsPromises;
-  os: typeof osModule;
   path: PathModule;
   varinDataDir: string;
   process: NodeJS.Process;
@@ -289,7 +287,6 @@ const sendError = (res: Response, error: unknown) => {
 export const createExternalAccessRootRuntime = ({
   fsPromises,
   path,
-  os,
   process,
   __dirname,
   varinDataDir,
@@ -309,11 +306,6 @@ export const createExternalAccessRootRuntime = ({
         startPaths: [process.cwd(), __dirname, serverPackageRoot],
       })
       || process.cwd();
-    const piAgentDir = typeof process.env.VARIN_AGENT_DIR === 'string' && process.env.VARIN_AGENT_DIR.trim()
-      ? process.env.VARIN_AGENT_DIR.trim()
-      : typeof process.env.PI_CODING_AGENT_DIR === 'string' && process.env.PI_CODING_AGENT_DIR.trim()
-        ? process.env.PI_CODING_AGENT_DIR.trim()
-        : path.join(os.homedir(), '.pi', 'agent');
 
     const roots: ExternalRootDefinition[] = [
       { id: 'deployment', label: 'Varin deployment', path: discoveredDeploymentRoot, source: 'deployment' },
@@ -321,7 +313,6 @@ export const createExternalAccessRootRuntime = ({
       { id: 'process-cwd', label: 'Server working directory', path: process.cwd(), source: 'process' },
       { id: 'data', label: 'Varin data', path: varinDataDir, source: 'data' },
       { id: 'logs', label: 'Varin logs', path: path.join(varinDataDir, 'logs'), source: 'logs' },
-      { id: 'pi-agent', label: 'Pi agent configuration', path: piAgentDir, source: 'pi-agent' },
     ];
 
     if (typeof resolveProjectDirectory === 'function') {
@@ -564,8 +555,7 @@ export const registerExternalAccessRoutes = (app: Express, dependencies: Externa
   const {
     fsPromises,
     path,
-    os,
-    process,
+      process,
     spawn,
     buildAugmentedPath,
     varinDataDir,
@@ -582,8 +572,7 @@ export const registerExternalAccessRoutes = (app: Express, dependencies: Externa
   const rootRuntime = createExternalAccessRootRuntime({
     fsPromises,
     path,
-    os,
-    process,
+      process,
     __dirname,
     varinDataDir,
     ...(resolveProjectDirectory ? { resolveProjectDirectory } : {}),

@@ -11,15 +11,8 @@ import {
   parseAgentInputSnapshotConsumer,
   type AgentInputSnapshotConsumer,
   type AgentInputContext,
-  type DocumentSurfaceWritePathResult,
-  type DocumentSurfaceWriteResult,
-  type DocumentWriteGuardResult,
 } from '@varin/protocol';
-import {
-  applyAgentSurfaceMutation,
-  type AgentSurfaceWriteChange,
-} from './surface-mutation.js';
-import { detectLineEnding, normalizeEditorLineEndings, serializeEditorContent } from './line-ending.js';
+import { detectLineEnding, normalizeEditorLineEndings } from './line-ending.js';
 import type { DurableFileOperationContext } from '../recovery/durable-file-operation.js';
 import {
   canonicalizePathIdentity,
@@ -60,7 +53,6 @@ import {
 } from './workspace-registry.js';
 import {
   createSurfaceSnapshotStore,
-  type SurfaceSnapshotInspectResult,
   type SurfaceSnapshotResource,
 } from './surface-snapshot-store.js';
 
@@ -69,13 +61,6 @@ import {
 export interface DocumentResource {
   workspaceId: string;
   resourceId: string;
-}
-
-/** An immutable source view may provide the same captured text/owner contract as a live turn snapshot. */
-export interface FixedSourceMutationView {
-  operationId: string;
-  inspect(resourceId: string, workspaceId: string): SurfaceSnapshotInspectResult;
-  owner(workspaceId: string): { ownerId: string; generation: number; workspaceId: string } | null;
 }
 
 export interface DocumentResourceOperation {
@@ -501,9 +486,6 @@ export const createDocumentAuthority = (options: DocumentAuthorityOptions) => {
   });
 
   const publishMutation = (event: DocumentMutationObservation): void => {
-    // A written path can no longer be answered from a draft captured before the
-    // write; this runs before the observer so a reader cannot race it (D-088).
-    surfaceSnapshots.observeWrite(event.workspaceId, event.resourceId);
     onIntegrationParentChanged(event.workspaceId, [event.resourceId]);
     try {
       void Promise.resolve(onMutation({ ...event, owner: { ...event.owner } })).catch((error: unknown) => {
@@ -511,25 +493,6 @@ export const createDocumentAuthority = (options: DocumentAuthorityOptions) => {
       });
     } catch (error) {
       console.warn(`[Documents] Mutation observer failed: ${(error as Error)?.message || error}`);
-    }
-  };
-
-  /**
-   * Record a write Varin observed outside the Documents write path — today
-   * the Pi mutation journal for the native `write` / `edit` / `apply_patch`
-   * tools. The absolute path is resolved against the workspace root; a path
-   * outside it (an isolated thread's worktree) supersedes nothing here.
-   */
-  const observeAgentWrite = async (workspaceId: string, absolutePath: string): Promise<void> => {
-    try {
-      const workspace = await loadWorkspace(workspaceId);
-      const canonicalPath = await canonicalizePathIdentity(absolutePath, { fsPromises, pathModule });
-      const relative = pathModule.relative(workspace.root, canonicalPath);
-      if (!relative || relative.startsWith('..') || pathModule.isAbsolute(relative)) return;
-      surfaceSnapshots.observeWrite(workspaceId, relative.split(pathModule.sep).join('/'));
-    } catch {
-      // An unresolvable workspace cannot invalidate a draft; the turn journal
-      // already reports the write itself.
     }
   };
 
@@ -1534,22 +1497,11 @@ export const createDocumentAuthority = (options: DocumentAuthorityOptions) => {
     };
   };
 
-  const invalidateUncertainSurfaceOperation = (operation: PendingDocumentSurfaceOperation): void => {
-    if (operation.action === 'capture') return;
-    surfaceSnapshots.invalidateOwnerEdit({
-      ownerId: operation.ownerId,
-      ownerGeneration: operation.generation,
-      workspaceId: operation.workspaceId,
-      resourceIds: operation.targets.map((target) => target.resource.resourceId),
-    });
-  };
-
   const rejectSurfaceOperationsForRegistration = (registrationId: string, reason: string): void => {
     for (const [requestId, operation] of pendingSurfaceOperations) {
       if (operation.registrationId !== registrationId) continue;
       pendingSurfaceOperations.delete(requestId);
       operation.cleanup();
-      invalidateUncertainSurfaceOperation(operation);
       operation.reject(new DocumentAuthorityError(reason, { code: 'stale-completion', statusCode: 409 }));
     }
   };
@@ -1989,7 +1941,6 @@ export const createDocumentAuthority = (options: DocumentAuthorityOptions) => {
         if (!pending) return;
         pendingSurfaceOperations.delete(requestId);
         cleanup();
-        invalidateUncertainSurfaceOperation(pending);
         reject(options.signal?.reason ?? new Error('Document surface operation was cancelled'));
       };
       const pending: PendingDocumentSurfaceOperation = {
@@ -2012,7 +1963,6 @@ export const createDocumentAuthority = (options: DocumentAuthorityOptions) => {
       } catch (error) {
         pendingSurfaceOperations.delete(requestId);
         cleanup();
-        invalidateUncertainSurfaceOperation(pending);
         reject(error);
       }
     });
@@ -2035,10 +1985,8 @@ export const createDocumentAuthority = (options: DocumentAuthorityOptions) => {
   const completeSurfaceOperation = async (value: unknown): Promise<{ accepted: boolean }> => {
     const request = value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {};
     const { pending, requestId } = assertSurfaceOperationCaller(request);
-    const completionError = (message: string, options: { code: DocumentAuthorityError['code']; statusCode: number }) => {
-      invalidateUncertainSurfaceOperation(pending);
-      return new DocumentAuthorityError(message, options);
-    };
+    const completionError = (message: string, options: { code: DocumentAuthorityError['code']; statusCode: number }) =>
+      new DocumentAuthorityError(message, options);
     if (request.operationId !== pending.operationId || !Array.isArray(request.resources)) {
       throw completionError('Document surface operation completion is malformed', { code: 'failed', statusCode: 400 });
     }
@@ -2059,8 +2007,6 @@ export const createDocumentAuthority = (options: DocumentAuthorityOptions) => {
       if (receipt.status === 'rejected') pending.reject(new WorkspaceEditSurfaceRejectedError(receipt.message ?? 'Workspace edit buffer changed'));
       else if (change.mode === 'capture') pending.resolve(receipt.buffers.map(slot => ({ resource: slot.resource, status: 'captured', workspaceEditBuffer: slot.buffer })));
       else {
-        surfaceSnapshots.invalidateOwnerEdit({ ownerId: pending.ownerId, ownerGeneration: pending.generation,
-          workspaceId: pending.workspaceId, resourceIds: [...new Set([...change.before, ...change.after].map(slot => slot.resource.resourceId))] });
         if (receipt.message) pending.reject(new WorkspaceEditSurfaceAppliedError(receipt.message));
         else pending.resolve([]);
       }
@@ -2122,10 +2068,6 @@ export const createDocumentAuthority = (options: DocumentAuthorityOptions) => {
           || result.afterLocalEditRevision !== target.localEditRevision + 1 || result.afterHash !== expectedHash) {
           throw completionError('Document recovery completion does not match its target', { code: 'stale-completion', statusCode: 409 });
         }
-        // A recovery changes the disk base as well as the live draft. Existing
-        // turn snapshots retain their original source and cannot follow that edit.
-        surfaceSnapshots.invalidateOwnerEdit({ ownerId: pending.ownerId, ownerGeneration: pending.generation,
-          workspaceId: pending.workspaceId, resourceIds: [result.resource.resourceId] });
         continue;
       }
       if (result.status !== 'applied' && result.status !== 'undone') continue;
@@ -2141,23 +2083,6 @@ export const createDocumentAuthority = (options: DocumentAuthorityOptions) => {
           code: 'stale-completion', statusCode: 409,
         });
       }
-      const serialized = serializeEditorContent(content, target.lineEnding);
-      surfaceSnapshots.applyOwnerEdit({
-        ownerId: pending.ownerId,
-        ownerGeneration: pending.generation,
-        workspaceId: pending.workspaceId,
-        resourceId: result.resource.resourceId,
-        expectedBaseRevision: target.baseRevision,
-        expectedLocalEditRevision: result.status === 'undone'
-          ? target.expectedAppliedRevision!
-          : target.localEditRevision,
-        nextLocalEditRevision: result.afterLocalEditRevision,
-        content: serialized,
-        encoding: target.encoding,
-        bom: target.bom,
-        bufferHash: result.afterHash,
-        lineEnding: target.lineEnding,
-      });
       const publication = dirtyBuffersByOwner.get(dirtyBufferKey(pending.ownerId, pending.workspaceId));
       if (publication) {
         dirtyBuffersByOwner.set(dirtyBufferKey(pending.ownerId, pending.workspaceId), {
@@ -2176,23 +2101,6 @@ export const createDocumentAuthority = (options: DocumentAuthorityOptions) => {
                 }
               : resource
           )),
-        });
-      }
-    }
-    for (const result of results) {
-      if (result.status !== 'failed') continue;
-      const target = targetByPath.get(result.resource.resourceId)!;
-      const expectedRevision = pending.action === 'undo' ? target.expectedAppliedRevision : target.localEditRevision;
-      const expectedHash = pending.action === 'undo' ? target.expectedAppliedHash : target.bufferHash;
-      const provenUnchanged = result.documentInstanceId === target.documentInstanceId
-        && result.afterLocalEditRevision === expectedRevision
-        && result.afterHash === expectedHash;
-      if (!provenUnchanged) {
-        surfaceSnapshots.invalidateOwnerEdit({
-          ownerId: pending.ownerId,
-          ownerGeneration: pending.generation,
-          workspaceId: pending.workspaceId,
-          resourceIds: [result.resource.resourceId],
         });
       }
     }
@@ -2322,178 +2230,6 @@ export const createDocumentAuthority = (options: DocumentAuthorityOptions) => {
     return surfaceSnapshots.release(consumer, context);
   };
 
-  const commitAgentInputSnapshot = (sessionId: string, value: unknown): { committed: boolean } => {
-    if (typeof sessionId !== 'string' || !sessionId) {
-      throw new DocumentAuthorityError('Agent input snapshot session is malformed', { code: 'failed', statusCode: 400 });
-    }
-    const context = parseAgentInputContext(value);
-    if (!context) {
-      throw new DocumentAuthorityError('Agent input context is malformed', { code: 'failed', statusCode: 400 });
-    }
-    return surfaceSnapshots.commit({ kind: 'pi-session', sessionId }, context);
-  };
-
-  const overlayAgentInputSnapshot = (
-    sessionId: string,
-    context: AgentInputContext,
-    resourceId: string,
-    workspaceId: string,
-  ) => surfaceSnapshots.overlay({ kind: 'pi-session', sessionId }, context, resourceId, workspaceId);
-
-  const applyAgentSurfaceWrite = async (
-    sessionId: string,
-    workspaceId: string,
-    context: AgentInputContext,
-    changes: readonly AgentSurfaceWriteChange[],
-    signal?: AbortSignal,
-    fixedView?: FixedSourceMutationView,
-  ): Promise<DocumentSurfaceWriteResult> => {
-    if (!durableMutationStorage) {
-      return {
-        status: 'unavailable',
-        results: changes.map((change) => ({ path: change.resourceId, target: 'disk', status: 'unavailable', message: 'Durable mutation storage is unavailable; nothing was written.' })),
-      };
-    }
-    const run = async (durable: DurableFileOperationContext): Promise<DocumentSurfaceWriteResult> => {
-      const { result } = await applyAgentSurfaceMutation({
-        inspectSnapshot: fixedView
-          ? (_sessionId, _context, resourceId, targetWorkspaceId) => fixedView.inspect(resourceId, targetWorkspaceId)
-          : (sessionId, context, resourceId, workspaceId) => surfaceSnapshots.inspect({ kind: 'pi-session', sessionId }, context, resourceId, workspaceId),
-        surfaceOwner: fixedView
-          ? (_sessionId, _context, targetWorkspaceId) => fixedView.owner(targetWorkspaceId)
-          : (sessionId, context, workspaceId) => surfaceSnapshots.owner({ kind: 'pi-session', sessionId }, context, workspaceId),
-        inspectDirtyBuffers,
-        requestSurfaceOperation,
-        inspectWorkspace: async (id) => mutations.inspect(id),
-        readDisk: async (id, resourceId) => {
-          const current = await read({ workspaceId: id, resourceId });
-          return {
-            status: current.status,
-            ...(current.status === 'ready'
-              ? {
-                  content: current.content,
-                  revision: current.revision,
-                  encoding: current.encoding,
-                  bom: current.bom,
-                }
-              : {}),
-            ...(current.status === 'binary'
-              ? { revision: current.revision }
-              : {}),
-            ...(current.status === 'unsupported-encoding'
-              ? {
-                  revision: current.revision,
-                  ...(current.candidates === undefined ? {} : { candidates: current.candidates }),
-                }
-              : {}),
-          };
-        },
-        writeDisk: async (request) => {
-          const written = await write({
-            resource: { workspaceId: request.workspaceId, resourceId: request.resourceId },
-            token: request.token,
-            content: request.content,
-            encoding: request.encoding,
-            bom: request.bom,
-            expectedRevision: request.expectedRevision,
-            operationId: request.operationId,
-          });
-          if (written.status === 'written') return { status: 'written', revision: written.revision };
-          return {
-            status: written.status === 'conflict' ? 'conflict' : 'conflict',
-            message: `${request.resourceId} could not be written on disk.`,
-          };
-        },
-        deleteDisk: async (request) => {
-          const deleted = await remove({
-            resource: { workspaceId: request.workspaceId, resourceId: request.resourceId },
-            token: request.token,
-            expectedRevision: request.expectedRevision,
-            operationId: request.operationId,
-          });
-          if (deleted.status === 'deleted') return { status: 'deleted' };
-          if (deleted.status === 'missing') return { status: 'missing' };
-          return { status: 'conflict', message: `${request.resourceId} could not be deleted on disk.` };
-        },
-        durable,
-      }, { sessionId, context, workspaceId, changes, ...(signal ? { signal } : {}), ...(fixedView ? { operationId: fixedView.operationId } : {}) });
-      return result;
-    };
-    return durableMutationStorage(workspaceId, (durable) => run(durable));
-  };
-
-  const confirmedAgentSurfaceOperation = async (
-    workspaceId: string, operationId: string, sessionId: string,
-  ): Promise<{ status: 'missing' | 'pending' } | { status: 'confirmed'; result: DocumentSurfaceWriteResult }> => {
-    if (!durableMutationStorage) return { status: 'pending' };
-    const operation = await durableMutationStorage(workspaceId, (durable) =>
-      durable.durableRecoveryStore.getOperation(workspaceId, operationId, sessionId));
-    if (!operation) return { status: 'missing' };
-    if (operation.kind !== 'agent-mutation' || operation.sessionId !== sessionId
-      || !['complete', 'aborted', 'compensated', 'conflict', 'needs-attention'].includes(String(operation.state))) return { status: 'pending' };
-    const result = operation.result;
-    if (!result || typeof result !== 'object' || !Array.isArray((result as Record<string, unknown>).results)) return { status: 'pending' };
-    const rows = (result as { results: unknown[] }).results;
-    if (!rows.every((row) => row && typeof row === 'object'
-      && typeof (row as { path?: unknown }).path === 'string'
-      && typeof (row as { status?: unknown }).status === 'string')) return { status: 'pending' };
-    // The caller uses the durable per-path outcomes to advance only confirmed
-    // editor writes; the aggregate status is not used as proof of success.
-    return { status: 'confirmed', result: { status: 'partial', operationId, results: rows as DocumentSurfaceWritePathResult[] } };
-  };
-
-  /**
-   * Classify whether a path still has a divergent fixed draft (D-089). Production
-   * root-session writes no longer use this as a refuse-to-save gate; they call
-   * `applyAgentSurfaceWrite` and edit the live buffer (D-225).
-   */
-  const inspectAgentWriteTarget = async (
-    sessionId: string,
-    context: AgentInputContext,
-    resourceId: string,
-    workspaceId: string,
-  ): Promise<DocumentWriteGuardResult> => {
-    const draft = surfaceSnapshots.read({ kind: 'pi-session', sessionId }, context, resourceId, workspaceId);
-    // No draft owns this path: either the turn reads disk anyway, or a write
-    // already superseded the draft, so reads and writes share one source.
-    if (draft.status === 'disk') return { status: 'allow' };
-    if (draft.status === 'unavailable') {
-      return {
-        status: 'unavailable',
-        message: `${resourceId} has unsaved editor changes but its fixed draft is unavailable (${draft.message}) `
-          + 'so Varin cannot tell whether writing would discard them. Nothing was written. This turn cannot '
-          + 'recover the draft, so retrying it returns the same answer: report the path to the user and read it '
-          + 'again in a later turn.',
-      };
-    }
-    if (context.source !== 'surface') return { status: 'allow' };
-    let disk;
-    try {
-      disk = await read({ workspaceId, resourceId });
-    } catch {
-      return {
-        status: 'unavailable',
-        message: `${resourceId} has unsaved editor changes and its current disk text could not be read, `
-          + 'so Varin cannot tell whether writing would discard them. Nothing was written. Retry or inspect '
-          + 'workspace availability.',
-      };
-    }
-    if (disk.status === 'ready' && disk.content === draft.content) return { status: 'allow' };
-    const reason = disk.status === 'missing'
-      ? `${resourceId} exists only as an unsaved editor draft.`
-      : disk.status === 'ready'
-        ? `${resourceId} has unsaved editor changes that differ from the file on disk.`
-        : `${resourceId} has unsaved editor changes and its disk content is ${disk.status}.`;
-    return {
-      status: 'conflict',
-      revision: draft.revision,
-      message: `${reason} You read the editor draft, but write and edit apply to disk, so writing now would `
-        + 'persist the user\'s unsaved changes without their decision. Nothing was written. Ask the user to save '
-        + 'the file, then retry. If they discard the changes instead, this turn still reads the captured draft, so '
-        + 'the write stays refused and the path has to be read again in a later turn.',
-    };
-  };
-
   const dispose = (): Promise<void> => {
     if (disposePromise) return disposePromise;
     disposed = true;
@@ -2517,7 +2253,6 @@ export const createDocumentAuthority = (options: DocumentAuthorityOptions) => {
     for (const [requestId, operation] of pendingSurfaceOperations) {
       pendingSurfaceOperations.delete(requestId);
       operation.cleanup();
-      invalidateUncertainSurfaceOperation(operation);
       operation.reject(new DocumentAuthorityError('Document authority was disposed during a surface operation', {
         code: 'stale-completion', statusCode: 409,
       }));
@@ -2658,22 +2393,10 @@ export const createDocumentAuthority = (options: DocumentAuthorityOptions) => {
     completeSurfaceOperation,
     captureAgentInputSnapshot,
     releaseAgentInputSnapshot,
-    commitAgentInputSnapshot,
-    overlayAgentInputSnapshot,
-    readAgentInputSnapshot: (sessionId: string, context: AgentInputContext, resourceId: string, workspaceId: string) => surfaceSnapshots.read({ kind: 'pi-session', sessionId }, context, resourceId, workspaceId),
-    inspectAgentInputSnapshot: (sessionId: string, context: AgentInputContext, resourceId: string, workspaceId: string) => surfaceSnapshots.inspect({ kind: 'pi-session', sessionId }, context, resourceId, workspaceId),
     cloneInputSnapshot: surfaceSnapshots.clone,
-    cloneAgentInputSnapshot: (sessionId: string, context: AgentInputContext) => surfaceSnapshots.clone({ kind: 'pi-session', sessionId }, context),
-    agentInputDraftPaths: (sessionId: string, context: AgentInputContext, workspaceId: string) => surfaceSnapshots.draftPaths({ kind: 'pi-session', sessionId }, context, workspaceId),
-    agentInputSurfaceOwner: (sessionId: string, context: AgentInputContext, workspaceId: string) => surfaceSnapshots.owner({ kind: 'pi-session', sessionId }, context, workspaceId),
-    applyAgentSurfaceWrite,
-    confirmedAgentSurfaceOperation,
     bindDurableMutationStorage: (fn: DurableMutationStorageFn | null) => {
       durableMutationStorage = fn;
     },
-    inspectAgentWriteTarget,
-    observeAgentWrite,
-    dropAgentInputSnapshots: (sessionId: string) => surfaceSnapshots.dropConsumer({ kind: 'pi-session', sessionId }),
     registerDirtySurface,
     beginDirtyStateBarrier,
     acknowledgeDirtyStateBarrier,

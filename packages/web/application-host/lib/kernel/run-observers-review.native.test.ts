@@ -22,7 +22,7 @@ const poll = (fn: () => unknown) => expect.poll(fn, { timeout: 10_000 });
 const serviceId = 'varin.run.activity';
 const key = (id = 'example.run-activity') => `${id}:host:${serviceId}@1`;
 const subscription = (thread = 'thread', id = 'example.run-activity', project: string | null = null) => JSON.stringify([`${serviceId}@1`, key(id), thread, project]);
-const context = (projectId: string) => ({effectiveSystemPrompt:'private prompt',instructionSources:[],memoryCheckpoint:null,personalization:{mode:'agent',threadRole:'main',memorySnapshot:{revision:0,memories:[]},configurationDigest:'review-profile-v1',revision:1,sessionId:'thread',projectId,originalSections:[],instructionSources:[]}});
+const context = (projectId: string) => ({effectiveSystemPrompt:'private prompt',instructionSources:[],memoryCheckpoint:null,personalization:{mode:'agent',threadRole:'main',memorySnapshot:{revision:0,memories:[]},configurationDigest:'review-profile-v1',revision:1,threadId:'thread',projectId,originalSections:[],instructionSources:[]}});
 async function fixture() {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'varin-observer-review-'));
   let child!: ChildProcessWithoutNullStreams;
@@ -44,10 +44,10 @@ async function fixture() {
     await extensions.installOrStage({ expectedRevision: (await extensions.state()).catalog.revision, source: { kind: 'local', display: id, specifier: dir } });
   }
   async function route(thread = 'thread', id = 'example.run-activity') {
-    await extensions.upsertServiceRoutingRule({ expectedRevision: (await extensions.routing.read()).document.revision, rule: { serviceId, version: 1, providerKeys: [key(id)], scope: { sessionId: thread }, allowFallback: false } });
+    await extensions.upsertServiceRoutingRule({ expectedRevision: (await extensions.routing.read()).document.revision, rule: { serviceId, version: 1, providerKeys: [key(id)], scope: { threadId: thread }, allowFallback: false } });
   }
   async function submit(thread = 'thread') { await runtime.createThread(thread, `${thread}-branch`); return runtime.submit({ key: `input-${thread}`, threadId: thread, branchId: `${thread}-branch`, expectedHead: null, input: { text: 'private content must not reach observer' }, configuration: {} }); }
-  const invoke = (method: string, args: JsonValue[] = [], thread = 'thread') => extensions.invokeService({ serviceId, version: 1, method, args, routing: { sessionId: thread } });
+  const invoke = (method: string, args: JsonValue[] = [], thread = 'thread') => extensions.invokeService({ serviceId, version: 1, method, args, routing: { threadId: thread } });
   return { root, runtime, kernel, extensions, errors, start, install, route, submit, invoke,
     async crash() { const exited = once(child, 'exit'); child.kill('SIGKILL'); await exited; } };
 }
@@ -103,7 +103,7 @@ it.each(['({...d, fact:{...d.fact,cursor:d.fact.cursor+1}})', '({...d, subscript
 it('routing replacement rejects old ACK while thread refresh is pending', async () => {
   const f = await fixture(); await f.install('example.old', gated()); await f.install(); await f.route('thread', 'example.old'); await f.submit(); f.start();
   await poll(() => f.invoke('seen')).toHaveLength(1);
-  const oldBinding = await f.extensions.prepareService({ serviceId, version:1, method:'release', args:[], routing:{sessionId:'thread'} });
+  const oldBinding = await f.extensions.prepareService({ serviceId, version:1, method:'release', args:[], routing:{threadId:'thread'} });
   let entered = false; let release!: () => void; const gate = new Promise<void>(resolve => release = resolve); const realThreads = f.runtime.threads.bind(f.runtime);
   vi.spyOn(f.runtime, 'threads').mockImplementation(async signal => { const result = await realThreads(signal); entered = true; await gate; return result; });
   await f.route(); await poll(() => entered).toBe(true);
@@ -129,7 +129,7 @@ it.each([null, 'project-a'])('lost ACK in scope %s replays after worker/kernel r
   await replacement.start(); const observers = new RunObservers(f.runtime, replacement, (_thread, error) => f.errors.push(error));
   cleanups.push(async () => { observers.stop(); await replacement.stop(); });
   await poll(() => f.runtime.observerEvents(id, 'thread', 64)).toEqual([]);
-  expect(await replacement.invokeService({serviceId,version:1,method:'getSnapshot',args:[id],routing:{sessionId:'thread'}})).toMatchObject({projection:{count:1}});
+  expect(await replacement.invokeService({serviceId,version:1,method:'getSnapshot',args:[id],routing:{threadId:'thread'}})).toMatchObject({projection:{count:1}});
 });
 it('a dirty wake between successful pump resolution and its finally drains real newly committed facts', async () => {
   const f = await fixture(); await f.install(); await f.route(); const receipt = await f.submit();
@@ -168,7 +168,7 @@ it('next real durable notification recovers a failed initial head read without k
 it('normal same-provider retirement admits an old pinned ACK and preserves its original committed fact', async () => {
   const f = await fixture(); await f.install('example.old', gated()); await f.route('thread', 'example.old'); await f.submit(); f.start();
   await poll(() => f.invoke('seen')).toHaveLength(1);
-  const binding = await f.extensions.prepareService({serviceId,version:1,method:'release',args:[],routing:{sessionId:'thread'}});
+  const binding = await f.extensions.prepareService({serviceId,version:1,method:'release',args:[],routing:{threadId:'thread'}});
   const old = binding.pin();
   // A changed module of the same provider prepares an ordinary new generation.
   await f.install('example.old', gated().replace('let seen = [];', "let seen = ['generation2'];"));
@@ -203,7 +203,7 @@ async function projectRoute(f: Awaited<ReturnType<typeof fixture>>, projectId: s
   await f.extensions.upsertServiceRoutingRule({expectedRevision:(await f.extensions.routing.read()).document.revision,rule:{serviceId,version:1,providerKeys: [key(id)],scope:{projectId},allowFallback:false}});
 }
 const projectInvoke = (f: Awaited<ReturnType<typeof fixture>>, projectId: string, id: string, method = 'getSnapshot') =>
-  f.extensions.invokeService({serviceId,version:1,method,args:method === 'getSnapshot' ? [subscription('thread',id,projectId)] : [],routing:{sessionId:'thread',projectId}});
+  f.extensions.invokeService({serviceId,version:1,method,args:method === 'getSnapshot' ? [subscription('thread',id,projectId)] : [],routing:{threadId:'thread',projectId}});
 async function submitScoped(f: Awaited<ReturnType<typeof fixture>>, branchId: string, projectId: string, key: string) {
   return f.runtime.submit({key,threadId:'thread',branchId,expectedHead:null,input:{text:key},configuration:{},initialContext:context(projectId)});
 }

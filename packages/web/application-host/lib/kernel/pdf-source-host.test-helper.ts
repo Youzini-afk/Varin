@@ -103,10 +103,10 @@ async function initialize(frame: Record<string, unknown>) {
     await actor.releaseBlob(artifact.ownerId); await kernel.revokeGrant(seed.grantId);
   }
   storage = new KernelStorageAdapter({ client: kernel, hostId: 'web-domain-host', storageRoot, resolveWorkspaceRoot: unreachable });
-  const access = createMaterialStorageAccess({ kernel, storage, legacy: { withBranchStore: unreachable } });
+  const access = createMaterialStorageAccess({ kernel, storage });
   const materials = createWebMaterialStore(access), documentReader = createDocumentReader({ materials });
   resources = createResourceService({ client: kernel });
-  experiments = createExperimentService({ client: kernel, resources, resolveWorkspaceRoot: unreachable, resolveBackend: unreachable,
+  experiments = createExperimentService({ client: kernel, resources, resolveBackend: unreachable,
     onError: error => write({ kind: 'fixture-failed', error: error.stack }) });
   const documentSources = createDocumentSources({ kernel, runtime, resolveLiveSource: live.validate, experiments });
   const webFetch = createWebFetch({ ssrf: { check: unreachable, isSameHost: () => false }, materials, documentReader });
@@ -119,7 +119,7 @@ async function initialize(frame: Record<string, unknown>) {
   await extensions.start(); await extensions.activateExtension(VARIN_BUILTIN_WEB_EXTENSION_ID);
   const prepare = createExtensionTools({ runtime: extensions, kernel, currentPolicy: async () => ({ mode: 'normal', rules: [] }),
     prepareConfiguration: (run, required) => web.prepareConfiguration(run, required) });
-  selected = await prepare({ threadId: selection.threadId, runId: selection.sourceRunId, source }, [], new AbortController().signal);
+  selected = await prepare({ threadId: selection.threadId, runId: selection.sourceRunId, branchId: (await runtime.run(selection.sourceRunId)).branch_id, source }, [], new AbortController().signal);
   const document = selected.initial.find(entry => entry.binding.tool.name === 'document_read'); assert(document);
   const registered = bridge.register(selection.sourceRunId, document.lease);
   write({ kind: 'fixture-prepared', source, bindings: [{ ownerId: registered.ownerId, generation: document.generation, binding: document.binding }] });

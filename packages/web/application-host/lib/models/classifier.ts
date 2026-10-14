@@ -198,7 +198,7 @@ export function classifierRawUsage(api: string, body: unknown): unknown {
     .filter(key => Object.hasOwn(body, key)).map(key => [key, body[key]]);
   return entries.length ? Object.fromEntries(entries) : null;
 }
-/** Missing fields remain missing. The SDK's normalized zeroes are not provider receipts. */
+/** Missing fields remain missing. Synthesized zeroes are not provider receipts. */
 export function classifierWireUsage(api: string, body: unknown): ClassifierResponse["usage"] {
   const raw = api === "llama-cpp-classify" ? body : classifierWireOutput(api, body)?.usage;
   if (!isRecord(raw)) return undefined;
@@ -227,7 +227,7 @@ export function classifierWireResult(api: string, modelId: string, questions: re
   return { answers, missing, ...(usage ? { usage } : {}), ...(servedModelId ? { servedModelId } : {}) };
 }
 
-/** A completion can be structurally valid while a label needs a deeper SDK readout. */
+/** A completion can be structurally valid while a label needs a deeper probability readout. */
 export function classifierWireResponseValid(api: string, modelId: string, questions: readonly FastDecisionQuestion[], body: unknown): boolean {
   if (api !== "llama-cpp-classify") return classifierWireResult(api, modelId, questions, body).answers.length > 0;
   if (!isRecord(body) || !Array.isArray(body.completion_probabilities)) return false;
@@ -315,7 +315,7 @@ export async function requestClassifier(request: ClassifierRequest): Promise<Cla
   const transport = new AbortController();
   const signal = request.signal ? AbortSignal.any([request.signal, transport.signal]) : transport.signal;
   const pending = new Set<Promise<Response>>();
-  let result;
+  let result: Awaited<ReturnType<ClassifierFunction>> | undefined;
   try {
     result = await (request.classify ?? (nativeModel.api === "llama-cpp-classify" ? classifyLlama : nativeModel.api === "cloudflare-workers-ai-system-one" ? classifyCloudflare : classifySystemOne))(nativeModel, {
       state: isRecord(request.state) ? toJsonValue(request.state) as ClassifierContext["state"] : { input: toJsonValue(request.state) },
@@ -332,10 +332,12 @@ export async function requestClassifier(request: ClassifierRequest): Promise<Cla
           const destination = request.endpoint ? `${request.baseUrl.replace(/\/+$/u, "")}${request.endpoint}` : url;
           const route = routes?.find(value => value.requestUrl === new URL(String(destination)).toString());
           if (routes && !route) throw new ClassifierRequestError("Classifier request left its selected protocol routes");
-          const response = await fetchImpl(destination, { ...init, signal: init?.signal ? AbortSignal.any([signal, init.signal]) : signal });
+          let response: Response;
+          try { response = await fetchImpl(destination, { ...init, signal: init?.signal ? AbortSignal.any([signal, init.signal]) : signal }); }
+          catch (error) { if (!route || route.requestKind === "model_compute") computeUsage.push(undefined); throw error; }
           let usage: ClassifierResponse["usage"];
           try {
-            // Drain preparation responses too: the SDK can finish after a sibling fails.
+            // Drain preparation responses too: sibling failure is not transport completion.
             const body: unknown = await response.clone().json();
             if (!route || route.requestKind === "model_compute") {
               if (isRecord(body) && response.ok) captured = body;
@@ -350,8 +352,11 @@ export async function requestClassifier(request: ClassifierRequest): Promise<Cla
         return work;
       },
     });
+  } catch {
+    // Failed adapters still publish the original response/usage observation below.
+    result = { answers: {}, stopReason: signal.aborted ? "aborted" : "error" };
   } finally {
-    // SDK Promise.all can reject before another preparation finishes. Stop any late
+    // Parallel preparation can reject before another preparation finishes. Stop any late
     // fallback/retry, then await the original transports instead of treating abort as drain.
     if (!result || result.stopReason !== "stop" || pending.size) transport.abort();
     await Promise.allSettled([...pending]);
@@ -363,7 +368,7 @@ export async function requestClassifier(request: ClassifierRequest): Promise<Cla
   for (const question of request.questions) {
     const native = result.answers[question.id];
     const wire = native?.type === "bool" ? { type: "noul", noul: native.probability } : native;
-    // Native System One currently fails the whole result on a skipped answer.
+    // A provider can fail after returning a valid subset of its answers.
     // Keep valid partial answers under Varin's existing missing-answer contract.
     const answer = readAnswer(question, wire ?? wireAnswers?.[question.id]);
     if (answer) answers.push(answer); else missing.push(question.id);

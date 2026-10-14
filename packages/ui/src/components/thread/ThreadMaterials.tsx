@@ -3,7 +3,7 @@ import { getRuntimeEndpointGeneration, subscribeRuntimeEndpointChanged, subscrib
 import type { ThreadIdentity, ThreadMaterialsAPI } from '@varin/application-client';
 import { PdfMaterialReader, type PdfMaterialDraft, type PdfMaterialReaderPort } from '@/components/materials/PdfMaterialReader';
 import { MaterialLinkContext } from '@/components/materials/MaterialLinkContext';
-import { formatPdfMaterialCitationUrl, parsePdfMaterialCitationUrl, type PdfMaterialCitation } from '@/lib/pi-runtime/pdfMaterialCitation';
+import { formatPdfMaterialCitationUrl, parsePdfMaterialCitationUrl, type PdfMaterialCitation } from '@/lib/materials/pdfMaterialCitation';
 import { Button } from '@/components/ui/button';
 import { ThreadMaterialDraftContext } from './ThreadMaterialDraftContext';
 

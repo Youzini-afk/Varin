@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import type { ComputerEvidenceEntry, ComputerEvidenceParams, ComputerEvidenceResult } from '@varin/protocol';
-import { parseComputerExecutionRef } from '@varin/protocol';
+import { parseComputerExecutionRef, sameComputerExecution } from '@varin/protocol';
 import type { KernelScopedClient } from '../kernel/kernel-client.js';
 import { HarnessServiceError } from '../harness/service-error.js';
 
@@ -26,8 +26,7 @@ export function createComputerEvidence(options: {
       const seq = reserved.recordRevision;
       await client.putRecord({ operationId: randomUUID(), workspaceId: options.workspaceId,
         recordId: stepId(desktopId, seq), recordType: 'computer.evidence.step', state: 'active',
-        payloadJson: JSON.stringify({ ...entry, seq, at: new Date().toISOString() }), ownerIds: [], references: [],
-        ...(entry.sessionId ? { sessionId: entry.sessionId } : {}) });
+        payloadJson: JSON.stringify({ ...entry, seq, at: new Date().toISOString() }), ownerIds: [], references: [] });
     });
     tails.set(desktopId, operation);
     try { await operation; }
@@ -56,7 +55,7 @@ export function createComputerEvidence(options: {
         let entry: ComputerEvidenceEntry;
         try { entry = JSON.parse(stored.payloadJson) as ComputerEvidenceEntry; }
         catch { throw new HarnessServiceError('unavailable', `Malformed computer evidence at sequence ${seq}`); }
-        if (entry.seq !== seq || typeof entry.at !== 'string' || !['observe', 'action'].includes(entry.lane)
+        if ('sessionId' in entry || entry.seq !== seq || typeof entry.at !== 'string' || !['observe', 'action'].includes(entry.lane)
           || typeof entry.tool !== 'string' || !['ok', 'error', 'cancelled', 'unknown', 'rejected'].includes(entry.outcome)) {
           throw new HarnessServiceError('unavailable', `Invalid computer evidence at sequence ${seq}`);
         }
@@ -64,7 +63,7 @@ export function createComputerEvidence(options: {
           try { entry.execution = parseComputerExecutionRef(entry.execution); }
           catch { throw new HarnessServiceError('unavailable', `Invalid computer execution evidence at sequence ${seq}`); }
         }
-        if (params.sessionId === undefined || entry.sessionId === params.sessionId) entries.push(entry);
+        if (params.execution === undefined || entry.execution && sameComputerExecution(params.execution, entry.execution)) entries.push(entry);
       }
       scanned = seq;
       seq += forward ? 1 : -1;

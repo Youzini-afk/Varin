@@ -9,7 +9,7 @@ export type OnboardingScreenMode = 'first-launch' | 'local-setup' | 'recovery';
 type OnboardingScreenProps = {
   /** Callback when user goes back from local-setup */
   onBack?: () => void;
-  /** Callback when the selected Pi runtime becomes available */
+  /** Callback when the native Application Host becomes available */
   onRuntimeAvailable?: () => void;
   /** Screen mode to render */
   mode?: OnboardingScreenMode;

@@ -2,10 +2,6 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { describe, it, expect } from "vitest";
 import { createKernelProcessService } from "./process-service.js";
-import { createKernelProcessIdentityResolver } from "./process-identity.js";
-import { createManagedRootAdmission } from "./managed-root-admission.js";
-import { createThreadRegistry } from "../harness/thread-registry.js";
-import { assertManagedWorktreeOwnership } from "../harness/worktree-ownership.js";
 import { createDocumentAuthorityHarness } from "../documents/contract-fixtures.js";
 import { createNativeProcessTestHarness, hasNativeProcessKernel } from "../process/native-process.test-helper.js";
 import { createLanguageSupervisor } from "../lsp/supervisor.js";
@@ -142,38 +138,5 @@ describe.skipIf(!hasNativeProcessKernel)("production consumers over Rust process
       expect((await starting).status).not.toBe("running");
       await until(async()=> (await f.service.list(f.docs.workspaceRoot)).every(p=>!p.writerActive));
     } finally {resume();await tasks.dispose();await f.cleanup();}
-  },30000);
-});
-
-
-describe.skipIf(!hasNativeProcessKernel)("production native process root admission",()=>{
-  it.each(["pending", "enrolled"] as const)("keeps retained Thread process ownership with %s Documents enrollment",async(enrollment)=>{
-    const docs=await createDocumentAuthorityHarness();
-    const native=createNativeProcessTestHarness(docs.authority);
-    const { client }=await native.get();
-    const registry=createThreadRegistry({dataDir:docs.dataDir,hostId:"process-identity"});
-    const managedRoot=path.join(enrollment === "pending" ? docs.root : docs.workspaceRoot,"managed");
-    const live=path.join(managedRoot,"thread");
-    const sibling=path.join(managedRoot,"unrecorded");
-    await fs.mkdir(live,{recursive:true});await fs.mkdir(sibling);
-    const execution = enrollment === "enrolled" ? (await docs.authority.resolveWorkspace({ path: live })).workspaceId : null;
-    if (execution) expect(execution).not.toBe(docs.identity.workspaceId);
-    const thread=await registry.createThread({scopeId:docs.identity.workspaceId,parent:{kind:"session",id:"parent"},brief:"Native admission",preset:"worker",kind:"implementation",createdBy:"user",concurrency:1,autoRun:false,worktree:"isolated",scope:[],tools:[],permissions:{}});
-    await registry.setWorktree(docs.identity.workspaceId,thread.id,{path:live,managedRoot,base:"zero-commit",materialized:true,viewMode:"materialized"});
-    const admission=createManagedRootAdmission({
-      listWorktrees:async(workspaceId)=>(await registry.listWorkspaceThreads(workspaceId)).flatMap(t=>t.worktree?[t.worktree]:[]),
-      assertOwnership:(worktree,operation,candidates)=>assertManagedWorktreeOwnership(worktree,operation,candidates,{authorizeManagedRoot:candidate=>candidate===managedRoot}),
-    });
-    const resolveIdentity=createKernelProcessIdentityResolver({documents:docs.authority,registry,admitManaged:admission.materialization});
-    const processes=createKernelProcessService({client,resolveIdentity});
-    try {
-      expect(await docs.authority.resolveScopeId(live)).toBe(execution);
-      expect(await resolveIdentity(live)).toMatchObject({ workspaceId: docs.identity.workspaceId, executionWorkspaceId: execution ?? docs.identity.workspaceId });
-      const child=await processes.spawn(process.execPath,["-e","process.stdout.write('retained-thread')"],{cwd:live,env:process.env});
-      let output="";child.stdout.setEncoding("utf8");child.stdout.on("data",(text:string)=>{output+=text;});child.stderr.resume();
-      await child.completion;expect(child.exitCode).toBe(0);expect(output).toBe("retained-thread");
-      if (enrollment === "pending") await expect(processes.spawn(process.execPath,["-e","process.exit(0)"],{cwd:sibling})).rejects.toThrow(/admitted|retained/);
-      expect(await docs.authority.resolveScopeId(live)).toBe(execution);
-    } finally {await processes.dispose();await registry.dispose();await native.dispose();await docs.cleanup();}
   },30000);
 });

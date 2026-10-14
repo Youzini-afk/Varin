@@ -1,68 +1,7 @@
-/**
- * Permission gate protocol types — shared between pi-host and web host.
- *
- * Design: design/harness-verification.md §9.1.2
- * Plan: plan/agent-harness-plan.md §3b.1
- */
+/** Shared permission policy validation and native tool admission. */
 
 export type PermissionMode = "normal" | "accept-edits" | "bypass" | "smart";
 export type PermissionDecision = "allow" | "ask" | "deny";
-export type PermissionAction = "read" | "write" | "process" | "network" | "thread" | "control" | "unknown";
-export type PermissionToolSourceKind = "harness" | "builtin" | "mcp" | "package" | "sdk" | "unknown";
-
-/** Credential-free identity for the concrete tool implementation selected by Pi. */
-export interface PermissionToolSource {
-  kind: PermissionToolSourceKind;
-  /** Stable source identity. Package ids/paths are allowed; prompt/tool bodies are not. */
-  id: string;
-  scope?: string;
-}
-
-/** Worker evidence sent to the Host before an interactive decision is made. */
-export interface PermissionInspectParams {
-  tool: string;
-  source: PermissionToolSource;
-  action: PermissionAction;
-  cwd: string;
-  /** Candidate filesystem resources. Host path authority canonicalizes these. */
-  paths: string[];
-  /** Origin-only HTTP(S) targets; query strings and credentials are intentionally excluded. */
-  networkTargets: string[];
-  /** Child-thread scopes/roles, never task/prompt text. */
-  threadScopes: string[];
-  evidenceComplete: boolean;
-}
-
-export interface PermissionCanonicalPath {
-  inputPath: string;
-  resolvedPath?: string;
-  workspaceId: string;
-  resourceId: string;
-  canonicalResourceId: string;
-}
-
-/** Host-authoritative, credential/body-free target used for grants and audit. */
-export interface PermissionInspectResult {
-  tool: string;
-  source: PermissionToolSource;
-  action: PermissionAction;
-  executionWorkspaceId: string | null;
-  owningWorkspaceId: string | null;
-  cwd: string;
-  paths: PermissionCanonicalPath[];
-  networkTargets: string[];
-  threadScopes: string[];
-  evidenceComplete: boolean;
-}
-
-export interface PermissionAuditRecord {
-  decision: PermissionDecision;
-  prompted: boolean;
-  remembered: boolean;
-  policyGeneration: string;
-  target: PermissionInspectResult;
-  reason?: string;
-}
 
 export interface PermissionRule {
   tool: string | "*";
@@ -78,14 +17,6 @@ export interface PermissionPolicy {
 export interface GateResult {
   decision: PermissionDecision;
   reason?: string;
-}
-
-/** Default decision after tool source/side effects have been normalized. */
-export function defaultDecisionForAction(action: PermissionAction, mode: PermissionMode): PermissionDecision {
-  if (mode === "bypass") return "allow";
-  if (action === "read" || action === "network" || action === "thread") return "allow";
-  if (action === "write") return mode === "accept-edits" ? "allow" : "ask";
-  return "ask";
 }
 
 export const MAX_PERMISSION_PATTERN_LENGTH = 512;
@@ -257,137 +188,13 @@ export function evaluateGate(
   // tools not covered by explicit/generated rules ask rather than pass through.
   return {
     decision: "ask",
-    reason: HARNESS_TOOL_META[tool]
-      ? "no matching rule for harness tool"
-      : "unknown tool requires confirmation",
+    reason: "no matching permission rule; tool requires confirmation",
   };
 }
 
-// ── High-risk detection ────────────────────────────────────────────
 
-/**
- * Categories that always ask, regardless of mode and regardless of a
- * session-scoped "always allow" grant (plan §3b.2). Each entry lists the
- * tools it applies to, the parameter to inspect, and the pattern.
- */
-export const HIGH_RISK_PATTERNS: ReadonlyArray<{
-  tools: readonly string[];
-  param: string;
-  pattern: string;
-}> = [
-  { tools: ["bash"], param: "command", pattern: "\\b(rm|sudo|chmod|chown|mkfs|dd)\\b" },
-  { tools: ["write_to_process"], param: "text", pattern: "\\b(rm|sudo|chmod|chown|mkfs|dd)\\b" },
-  { tools: ["bash"], param: "command", pattern: "\\bgit\\s+(push|reset|checkout|rebase|clean)\\b" },
-  { tools: ["write_to_process"], param: "text", pattern: "\\bgit\\s+(push|reset|checkout|rebase|clean)\\b" },
-  { tools: ["bash"], param: "command", pattern: "\\b(npm|bun|yarn|pnpm)\\s+(install|add|remove)\\b" },
-  { tools: ["write_to_process"], param: "text", pattern: "\\b(npm|bun|yarn|pnpm)\\s+(install|add|remove)\\b" },
-  { tools: ["bash"], param: "command", pattern: "\\.[Ee][Nn][Vv]|id_rsa|\\.[Ss][Ss][Hh]" },
-  { tools: ["write_to_process"], param: "text", pattern: "\\.[Ee][Nn][Vv]|id_rsa|\\.[Ss][Ss][Hh]" },
-  // Sensitive paths reached through the edit tools, not only through a shell.
-  { tools: ["write", "edit", "apply_patch"], param: "path", pattern: "\\.[Ee][Nn][Vv]|id_rsa|\\.[Ss][Ss][Hh]" },
-  { tools: ["write", "edit", "apply_patch"], param: "file_path", pattern: "\\.[Ee][Nn][Vv]|id_rsa|\\.[Ss][Ss][Hh]" },
-  { tools: ["apply_patch"], param: "patch", pattern: "\\*\\*\\* (?:Add|Update|Delete) File: .*?(?:\\.[Ee][Nn][Vv]|id_rsa|\\.[Ss][Ss][Hh])" },
-];
 
-export function isHighRisk(tool: string, params: Record<string, unknown>): boolean {
-  for (const entry of HIGH_RISK_PATTERNS) {
-    if (!entry.tools.includes(tool)) continue;
-    const value = params[entry.param];
-    if (typeof value !== "string") continue;
-    try {
-      if (new RegExp(entry.pattern).test(value)) return true;
-    } catch {
-      // ignore invalid regex
-    }
-  }
-  return false;
-}
 
-// ── Default rules (mutation-based, from HARNESS_TOOL_META) ────────
-
-import { HARNESS_TOOL_META, type HarnessToolMutation } from "./harness-tools.js";
-
-export function defaultRules(mode: PermissionMode, askBefore: Record<string, boolean> = {}): PermissionRule[] {
-  const rules: PermissionRule[] = [];
-
-  // Bypass is the user's explicit "do not ask" mode. A trusted workspace may
-  // still prepend a deny/ask overlay through mergePolicies.
-  if (mode !== "bypass") {
-    for (const entry of HIGH_RISK_PATTERNS) {
-      for (const tool of entry.tools) {
-        rules.push({
-          tool,
-          match: { param: entry.param, pattern: entry.pattern },
-          decision: "ask",
-        });
-      }
-    }
-  }
-
-  // Dispatch askBefore rules (per-preset) — must come BEFORE the
-  // mutation-based dispatch:allow rule so they match first.
-  for (const [preset, ask] of Object.entries(askBefore)) {
-    const literalPreset = preset.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-    rules.push({
-      tool: "dispatch",
-      match: { param: "preset", pattern: `^${literalPreset}$` },
-      decision: ask ? "ask" : "allow",
-    });
-  }
-
-  // Build rules from HARNESS_TOOL_META mutation attribute
-  for (const [tool, meta] of Object.entries(HARNESS_TOOL_META)) {
-    if (tool === "experiment") {
-      rules.push({ tool, match: { param: "action", pattern: "^(list|get|logs|artifact|wait)$" }, decision: "allow" });
-    }
-    if (tool === "memory") {
-      rules.push({ tool, match: { param: "action", pattern: "^(get|search)$" }, decision: "allow" });
-    }
-    if (meta.permissionAction === "control") {
-      rules.push({ tool, decision: mode === "bypass" ? "allow" : "ask" });
-      continue;
-    }
-    const mutation: HarnessToolMutation = meta.mutation;
-    if (mutation === "none") {
-      // Read-only tools always allowed
-      rules.push({ tool, decision: "allow" });
-    } else if (mutation === "journaled") {
-      // Edit tools: allow in accept-edits/bypass, ask in normal
-      rules.push({ tool, decision: (mode === "accept-edits" || mode === "bypass") ? "allow" : "ask" });
-    } else if (mutation === "process") {
-      // Shell tools: allow in bypass, ask otherwise
-      rules.push({ tool, decision: mode === "bypass" ? "allow" : "ask" });
-    }
-  }
-
-  // Catch-all: only in bypass mode. Non-harness tools pass through
-  // (evaluateGate returns "allow" for tools not in HARNESS_TOOL_META).
-  if (mode === "bypass") {
-    rules.push({ tool: "*", decision: "allow" });
-  }
-
-  return rules;
-}
-
-// ── Policy merge ───────────────────────────────────────────────────
-
-/** Missing or empty catalog overlays freeze to default normal, not live settings. */
-export function normalizeFrozenHarnessPermissions(value: unknown): PermissionPolicy {
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    return { mode: "normal", rules: [] };
-  }
-  const record = value as Record<string, unknown>;
-  const hasMode = typeof record.mode === "string";
-  const hasRules = Array.isArray(record.rules);
-  if (!hasMode && !hasRules) return { mode: "normal", rules: [] };
-  const mode = hasMode ? validatePermissionMode(record.mode, "frozen permission") : "normal";
-  const rules = hasRules
-    ? (record.rules as unknown[]).map((rule, index) => (
-      validatePermissionRule(rule as PermissionRule, `frozen permission[${index}]`)
-    ))
-    : [];
-  return { mode, rules };
-}
 
 export function mergePolicies(user: PermissionPolicy, workspace: Partial<PermissionPolicy>): PermissionPolicy {
   if (!Array.isArray(user.rules)) {

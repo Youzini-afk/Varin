@@ -4,7 +4,7 @@
  * These methods expose the shared settings catalog
  * (`@varin/application-client` `SETTINGS_CATALOG`) to harness workers.
  * Values are always resolved through the owning authority — the Varin
- * settings document, Pi `settings.json`, or the domain service an `action`
+ * settings document, native Agent settings, or the domain service an `action`
  * entry points at. The service never maintains a parallel store.
  */
 
@@ -28,7 +28,7 @@ export type SettingsEntryState =
 export interface SettingsSearchParams {
   query?: string;
   category?: string;
-  owner?: "app" | "pi-settings" | "client" | "action";
+  owner?: "app" | "agent-settings" | "client" | "action";
   id?: string;
   limit?: number;
   offset?: number;
@@ -37,7 +37,7 @@ export interface SettingsSearchParams {
 export interface SettingsSearchItem {
   id: string;
   category: string;
-  owner: "app" | "pi-settings" | "client" | "action";
+  owner: "app" | "agent-settings" | "client" | "action";
   /** i18n key for the human title (same key the settings page renders). */
   titleKey: string;
   /** Machine-usable paths this row controls, if any. */
@@ -90,11 +90,11 @@ export interface SettingsFieldValue {
 export interface SettingsReadParams {
   /** Stable catalog id. */
   id: string;
-  /** `pi-settings` entries: which file to read. Default `effective`. */
+  /** `agent-settings` entries: which file to read. Default `effective`. */
   scope?: SettingsValueScope;
   /** Include options, related entries, notes and help references. */
   detail?: boolean;
-  /** Legacy selector rejected by Host; client entries resolve Surface from caller session. */
+  /** Unsupported selector rejected by Host; client entries resolve Surface from caller Thread/branch. */
   surface?: string;
 }
 
@@ -114,7 +114,7 @@ export interface SettingsReadResult {
   /**
    * Content-hash revision of the owning document at read time — pass back as
    * `expectedRevision` in `settings.update` for compare-and-swap.
-   * `pi-settings` entries may carry one revision per scope.
+   * `agent-settings` entries may carry one revision per scope.
    */
   revision?: string;
   revisions?: { global?: string; project?: string };
@@ -148,7 +148,7 @@ export interface SettingsUpdateChange {
 
 export interface SettingsUpdateParams {
   id: string;
-  /** `pi-settings` entries: target file. Default `global`. */
+  /** `agent-settings` entries: target file. Default `global`. */
   scope?: "global" | "project";
   /** Field paths → values. May address one or several fields of the entry. */
   set?: Record<string, unknown>;
@@ -156,7 +156,7 @@ export interface SettingsUpdateParams {
   reset?: string[];
   /** CAS guard: revision previously returned by `settings.read`. */
   expectedRevision?: string;
-  /** Legacy selector rejected by Host; client entries resolve Surface from caller session. */
+  /** Unsupported selector rejected by Host; client entries resolve Surface from caller Thread/branch. */
   surface?: string;
   /**
    * Compound update: several catalog entries in one request. Each item shares
@@ -173,7 +173,7 @@ export interface SettingsUpdateItem {
   set?: Record<string, unknown>;
   reset?: string[];
   expectedRevision?: string;
-  /** Legacy selector rejected by Host; client entries resolve Surface from caller session. */
+  /** Unsupported selector rejected by Host; client entries resolve Surface from caller Thread/branch. */
   surface?: string;
 }
 

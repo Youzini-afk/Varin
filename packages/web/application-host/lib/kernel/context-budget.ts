@@ -7,7 +7,7 @@ import {
 } from '@varin/extension-contract';
 import { waitWithSignal } from '../cancellation.js';
 import type { ContextBudgetStrategy } from './protocol.generated.js';
-export interface ContextBudgetScope { sessionId: string; projectId?: string; workspaceId?: string }
+export interface ContextBudgetScope { threadId: string; projectId?: string; workspaceId?: string }
 export interface ContextBudgetOwner {
   selected(scope: ContextBudgetScope, signal: AbortSignal): Promise<boolean>;
   decide(scope: ContextBudgetScope, input: VarinContextBudgetInput, signal: AbortSignal): Promise<{

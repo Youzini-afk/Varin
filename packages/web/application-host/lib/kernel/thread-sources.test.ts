@@ -116,20 +116,31 @@ it('pins selected original Documents bytes/format/identity and reopens the recei
   } finally { await f.close(); }
 });
 
-it('keeps native snapshots immutable while preserving the real Pi own-write snapshot behavior and consumer isolation', () => {
+it('keeps native captures isolated by original Thread and branch without sharing mutable copies', () => {
   const snapshots = createSurfaceSnapshotStore();
-  const thread = { kind: 'thread' as const, threadId: 'same', branchId: 'branch' }, pi = { kind: 'pi-session' as const, sessionId: 'same' };
+  const thread = { kind: 'thread' as const, threadId: 'same', branchId: 'branch' };
   const resources = [{ resource: { workspaceId: 'workspace', resourceId: 'file' }, baseRevision: 'disk', localEditRevision: 1,
     content: 'ORIGINAL', encoding: 'utf-8', bom: false }];
   const fixed = snapshots.capture({ ownerId: 'editor', consumer: thread, resources });
-  const turn = snapshots.capture({ ownerId: 'editor', consumer: pi, resources });
-  snapshots.observeWrite('workspace', 'file');
-  assert.equal(snapshots.read(thread, fixed, 'file', 'workspace').status, 'ready');
-  assert.deepEqual(snapshots.read(pi, turn, 'file', 'workspace'), { status: 'disk', superseded: true });
-  assert.equal(snapshots.clone(pi, fixed).status, 'unavailable');
+  resources[0]!.content = 'LATER USER EDIT';
+  const next = snapshots.capture({ ownerId: 'editor', consumer: thread, resources });
+  assert.equal(snapshots.clone({ ...thread, threadId: 'other' }, fixed).status, 'unavailable');
+  assert.equal(snapshots.clone({ ...thread, branchId: 'other' }, fixed).status, 'unavailable');
   assert.equal(snapshots.release({ ...thread, branchId: 'different' }, fixed).released, false);
+  const cloned = snapshots.clone(thread, fixed);
+  assert.equal(cloned.status, 'ready');
+  assert.equal(cloned.resources[0]!.content, 'ORIGINAL');
+  cloned.resources[0]!.resource.resourceId = 'changed-copy';
+  const repeated = snapshots.clone(thread, fixed);
+  assert.equal(repeated.status, 'ready');
+  assert.equal(repeated.resources[0]!.resource.resourceId, 'file');
   assert.equal(snapshots.release(thread, fixed).released, true);
+  assert.equal(snapshots.clone(thread, fixed).status, 'unavailable');
+  const latest = snapshots.clone(thread, next);
+  assert.equal(latest.status, 'ready');
+  assert.equal(latest.resources[0]!.content, 'LATER USER EDIT');
   snapshots.dispose();
+  assert.equal(snapshots.clone(thread, next).status, 'unavailable');
 });
 
 it('does not cancel shared preparation for one observer and drains the last cancelled capture before retry', async () => {
@@ -156,7 +167,7 @@ it('releases draft upload leases on a changed capture without committing and rej
   try {
     const context = await f.snapshot();
     const input: ThreadPrepareSource = { ...f.input, content: { mode: 'surface-drafts', context } };
-    await assert.rejects(f.prepare({ ...input, threadId: 'thread:other' }), /expired/);
+    await assert.rejects(f.prepare({ ...input, threadId: 'thread:other' }), /unavailable/);
     await assert.rejects(f.prepare({ ...input, mode: 'live_root' }), /Live workspace/);
     assert(context.source === 'surface');
     await assert.rejects(f.prepare({ ...input, content: { mode: 'surface-drafts', context: { ...context,

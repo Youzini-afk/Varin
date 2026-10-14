@@ -1,7 +1,7 @@
 import { expect, it, vi } from 'vitest';
 import { RESEARCH_DISCOVERY_TOOL_DECLARATIONS, WEB_TOOL_DECLARATIONS } from '@varin/extension-builtins';
 import type { JsonValue } from '@varin/extension-contract';
-import type { PiSettingsSnapshot } from '@varin/protocol';
+import type { AgentSettingsSnapshot } from '@varin/application-client';
 import { createResearchSearchService } from '../harness/research-search.js';
 import { createResearchDiscoveryRuntime, type ResearchDiscoveryRuntimeOptions } from './research-discovery.js';
 import { withToolInvocation } from './tool-invocation.js';
@@ -10,7 +10,7 @@ import type { ToolExecutionReceipt } from './tool-bridge.js';
 const declaration = RESEARCH_DISCOVERY_TOOL_DECLARATIONS[0]!;
 const owner = { extensionId: 'varin.builtin.research-discovery', extensionVersion: '1.0.0', entrypointId: 'host', instanceKey: 'research-discovery-fixture', generation: 1 };
 const run = { runId: 'run', threadId: 'thread', source: null };
-const snapshot = (harness: Record<string, JsonValue> = {}, projectTrusted = false): PiSettingsSnapshot => ({
+const snapshot = (harness: Record<string, JsonValue> = {}, projectTrusted = false): AgentSettingsSnapshot => ({
   global: { harness }, project: { harness: { tools: { research_search: false } } },
   globalRevision: 'global', projectRevision: 'project', projectTrusted,
 });

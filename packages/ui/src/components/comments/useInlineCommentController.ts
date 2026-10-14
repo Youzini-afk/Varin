@@ -7,10 +7,10 @@ import {
   type InlineCommentDraft,
   type InlineCommentSource,
 } from '@/stores/useInlineCommentDraftStore';
-import { usePiSessionStore } from '@/stores/usePiSessionStore';
+import { useThreadStore, threadIdentityKey } from '@/stores/useThreadStore';
 import { useI18n } from '@/lib/i18n';
 import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
-import { getRuntimeKey } from '@varin/application-client';
+import { threadHostKey as getRuntimeKey } from '@/stores/useThreadStore';
 
 type LineRangeBase = {
   start: number;
@@ -58,15 +58,8 @@ export function useInlineCommentController<TRange extends LineRangeBase>(
   const { t } = useI18n();
   const { source, fileLabel, language, getCodeForRange, toStoreRange, fromDraftRange } = options;
 
-  const currentSessionId = usePiSessionStore((state) => state.currentSessionId);
+  const currentSessionId = useThreadStore(state => state.selectedIdentity ? threadIdentityKey(state.hostKey, state.selectedIdentity) : null);
   const effectiveDirectory = useEffectiveDirectory();
-  const sessionDirectory = usePiSessionStore((state) => (
-    state.currentSessionId
-      ? state.records[state.currentSessionId]?.snapshot?.cwd
-        ?? state.summaries.find((summary) => summary.id === state.currentSessionId)?.cwd
-        ?? null
-      : null
-  ));
 
   const addDraft = useInlineCommentDraftStore((state) => state.addDraft);
   const updateDraft = useInlineCommentDraftStore((state) => state.updateDraft);
@@ -77,7 +70,7 @@ export function useInlineCommentController<TRange extends LineRangeBase>(
   const [editingDraftId, setEditingDraftId] = React.useState<string | null>(null);
 
   const sessionKey = currentSessionId;
-  const draftDirectory = sessionDirectory ?? effectiveDirectory;
+  const draftDirectory = effectiveDirectory;
   const target = React.useMemo(() => {
     if (!sessionKey || !draftDirectory) return null;
     return { directory: draftDirectory, sessionKey };

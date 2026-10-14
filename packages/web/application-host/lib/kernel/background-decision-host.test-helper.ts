@@ -1,13 +1,13 @@
 /** Installed decision -> original PDF/credential owners -> Catalog, with controlled bytes.
  * Only request delivery is test stdio. No real listener/account/provider is used. */
 import assert from 'node:assert/strict';
-import { mkdir, writeFile } from 'node:fs/promises';
+import { mkdir } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { createInterface } from 'node:readline';
 import { ApplicationExtensionRuntime } from '@varin/extension-host';
 import { WEB_CAPABILITY, VARIN_BUILTIN_WEB_EXTENSION_ID, RESEARCH_DECISION_CAPABILITY,
   VARIN_BUILTIN_RESEARCH_DECISION_EXTENSION_ID } from '@varin/extension-builtins';
-import { HostCredentialAuthority } from '@varin/pi-host/credentials';
+import { ModelsService } from '../models/service.js';
 import type { ExtensionToolBinding } from './protocol.generated.js';
 import { KernelStorageAdapter } from './storage-adapter.js';
 import { createMaterialStorageAccess, threadMaterialScope } from './material-storage.js';
@@ -150,7 +150,7 @@ async function select(frame: Record<string,unknown>) {
   const runId=String(frame.runId), threadId=String(frame.threadId);
   const prepare=createExtensionTools({runtime:extensions,kernel,currentPolicy:async()=>({mode:'normal',rules:[]}),
     prepareConfiguration:async(run,required)=>decision.prepareConfiguration(run,required,await web.prepareConfiguration(run,required))});
-  const selected=await prepare({threadId,runId,source:null},(frame.required??[]) as ExtensionToolBinding[],new AbortController().signal);
+  const selected=await prepare({threadId,runId,branchId:(await runtime.run(runId)).branch_id,source:null},(frame.required??[]) as ExtensionToolBinding[],new AbortController().signal);
   scopes.push(selected);
   const bindings=selected.initial.filter(entry=>['research_decide','webfetch'].includes(entry.binding.tool.name)).map(entry=>{
     const registered=bridge.register(runId,entry.lease); return {ownerId:registered.ownerId,generation:entry.generation,binding:entry.binding};
@@ -179,15 +179,16 @@ async function initialize(frame:Record<string,unknown>) {
   const root=String(frame.root), agentDir=join(root,'agent'); await mkdir(agentDir,{recursive:true});
   const api=mode.startsWith('llama-')?'llama-cpp-classify':mode.startsWith('retry-')?'cloudflare-workers-ai-system-one':'typesafe-system-one';
   const baseUrl=mode.startsWith('llama-')?'https://classifier.invalid/router/v1':mode.startsWith('retry-')?'https://classifier.invalid/account/ai':'https://classifier.invalid';
-  await writeFile(join(agentDir,'models.json'),JSON.stringify({providers:{'decision-review':{
-    ...(mode==='llama-depth'?{}:{apiKey:'fixture-only-no-real-key'}),baseUrl,models:[{id:'classifier',type:'classifier',api}],
-    capabilities:{decision:{protocol:'pi-classifier',models:[{id:'classifier',api}]}}
-  }}}));
-  await writeFile(join(agentDir,'settings.json'),JSON.stringify({harness:{fastDecision:{default:{protocol:'pi-classifier',providerId:'decision-review',modelId:'classifier'}}}}));
-  const credentials=HostCredentialAuthority.open(agentDir);
+  const credentials=new ModelsService(agentDir,{projectTrusted:()=>false});
+  const reference=await credentials.storeCredential('fixture-only-no-real-key');
+  await credentials.save({id:'decision-review',name:'Decision fixture',type:api,enabled:true,baseUrl,
+    authentication:mode==='llama-depth'?{kind:'none'}:{kind:'credential',reference},parameters:{},
+    models:[{id:'classifier',name:'Classifier',enabled:true,operations:['decision']}]},(await credentials.read()).revision);
+  await credentials.settings.updateHarness((await credentials.settings.read()).revision,harness=>({...harness,
+    fastDecision:{default:{protocol:'typed-classifier',providerId:'decision-review',modelId:'classifier'}}}));
   inference=createSemanticInference(credentials,undefined,{requests:{kernel,runtime,egress}});
   storage=new KernelStorageAdapter({client:kernel,hostId:'web-domain-host',storageRoot:String(frame.storageRoot),resolveWorkspaceRoot:unreachable});
-  const access=createMaterialStorageAccess({kernel,storage,legacy:{withBranchStore:unreachable}});
+  const access=createMaterialStorageAccess({kernel,storage});
   const materials=createWebMaterialStore(access), documentReader=createDocumentReader({materials});
   const settings=async()=>({global:{},globalRevision:'fixture',project:{},projectRevision:'none',projectTrusted:false});
   web=createWebRuntime({runtime,webFetch:createWebFetch({ssrf:{check:checkSsrf,isSameHost},egress,materials,documentReader}),

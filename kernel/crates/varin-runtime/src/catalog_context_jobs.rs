@@ -1096,7 +1096,7 @@ impl ContextJobPreparation {
             let knowledge = state.bot_knowledge.as_ref().ok_or_else(|| {
                 RuntimeError::Invalid("Bot summary has no original Knowledge owner".into())
             })?;
-            if knowledge.thread_id != basis.session_id {
+            if knowledge.thread_id != basis.thread_id {
                 return Err(RuntimeError::Invalid(
                     "Bot summary Knowledge belongs to another Thread".into(),
                 ));

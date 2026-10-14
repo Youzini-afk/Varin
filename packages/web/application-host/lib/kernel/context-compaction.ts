@@ -8,7 +8,7 @@ import {
 import { waitWithSignal } from '../cancellation.js';
 import type { ContextCompactionCandidate } from './protocol.generated.js';
 
-export interface ContextCompactionScope { sessionId: string; projectId?: string; workspaceId?: string }
+export interface ContextCompactionScope { threadId: string; projectId?: string; workspaceId?: string }
 export interface ContextCompactionLease {
   /** Detached immutable candidate; admission, replay and publication belong to ContextJob. */
   candidate: ContextCompactionCandidate;

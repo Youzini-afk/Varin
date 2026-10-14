@@ -1,7 +1,8 @@
+import type { ThreadIdentity } from '@varin/application-client';
 import type { DocumentIdentity } from '@/lib/documents/types';
 import { workspacePathFromResourceId } from '@/lib/documents/path';
 import { openFileInMainEditor } from '@/lib/openFileInMainEditor';
-import { getRuntimeKey } from '@varin/application-client';
+import { threadHostKey as getRuntimeKey } from '@/stores/useThreadStore';
 import { activeEditorTab } from '@/lib/workbench/editors/groups';
 import { openWorkbenchEditor, patchEditorViewState, peekEditorWorkbench } from '@/lib/workbench/editors/session';
 import { createLegacyTextEditorViewState } from '@/lib/workbench/editors/view-state-core';
@@ -16,7 +17,6 @@ const byResource = new Map<string, EditorSessionLink>();
 const keyOf = (identity: DocumentIdentity): string => `${identity.workspaceId}\0${identity.resourceId}`;
 
 const rememberEditorSessionLink = (link: EditorSessionLink): void => {
-  if (link.sessionId === '') return;
   byResource.set(keyOf(link.identity), link);
 };
 
@@ -30,13 +30,13 @@ export const revealResourceInEditor = (input: {
   workspaceRoot: string;
   line?: number;
   column?: number;
-  sessionId?: string;
+  thread?: ThreadIdentity;
   entryId?: string;
   toolCallId?: string;
 }): void => {
   const identity = { workspaceId: input.workspaceId, resourceId: input.resourceId };
-  if (input.sessionId) {
-    const link: EditorSessionLink = { identity, sessionId: input.sessionId };
+  if (input.thread) {
+    const link: EditorSessionLink = { identity, thread: input.thread };
     if (input.entryId) link.entryId = input.entryId;
     if (input.toolCallId) link.toolCallId = input.toolCallId;
     rememberEditorSessionLink(link);

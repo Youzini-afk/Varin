@@ -17,7 +17,6 @@ export * from "./search-errors.js";
 export * from "./transport/index.js";
 export { projectFolders, projectPathKey, projectContainsPath } from './project-folders.js';
 export type { ProjectFolders } from './project-folders.js';
-export * from "./recommended-pi-packages.js";
 export * from "./threads.js";
 export * from "./threads-http.js";
 export * from "./thread-media.js";
@@ -34,3 +33,5 @@ export * from "./model-connections.js";
 export * from "./mcp-connections.js";
 
 export * from "./documents-workspace-edit.js";
+
+export * from './resource-management.js';

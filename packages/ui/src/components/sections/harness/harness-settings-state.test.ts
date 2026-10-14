@@ -1,8 +1,9 @@
+import type { AgentSettingsSnapshot } from '@varin/application-client';
 import { describe, expect, it, vi } from 'vitest';
-import type { JsonValue, PiSettingsSnapshot } from '@varin/protocol';
+import type { JsonValue } from '@varin/protocol';
 import { HarnessSettingsController } from './harness-settings-state';
 
-const snapshot = (harness: JsonValue, revision: string): PiSettingsSnapshot => ({
+const snapshot = (harness: JsonValue, revision: string): AgentSettingsSnapshot => ({
   global: { harness }, globalRevision: revision, project: {}, projectRevision: 'project', projectTrusted: false,
 });
 const deferred = <T,>() => { let resolve!: (value: T) => void; let reject!: (reason: Error) => void;
@@ -27,8 +28,8 @@ describe('Harness automatic saving', () => {
   });
 
   it('keeps rapid edits visible and sends them after the acknowledged revision without overwriting other settings', async () => {
-    const first = deferred<PiSettingsSnapshot>();
-    const second = deferred<PiSettingsSnapshot>();
+    const first = deferred<AgentSettingsSnapshot>();
+    const second = deferred<AgentSettingsSnapshot>();
     const write = vi.fn().mockImplementationOnce(() => first.promise).mockImplementationOnce(() => second.promise);
     const controller = new HarnessSettingsController({ read: async () => snapshot({ tools: { grep: true }, future: { keep: true } }, 'a'), write });
     await controller.load();
@@ -105,7 +106,7 @@ describe('Harness automatic saving', () => {
   });
 
   it('does not lose an external refresh that arrives while a save is in flight', async () => {
-    const pendingWrite = deferred<PiSettingsSnapshot>();
+    const pendingWrite = deferred<AgentSettingsSnapshot>();
     const read = vi.fn()
       .mockResolvedValueOnce(snapshot({ shell: 'auto' }, 'a'))
       .mockResolvedValueOnce(snapshot({ shell: 'wsl', nextStep: { enabled: true } }, 'c'));

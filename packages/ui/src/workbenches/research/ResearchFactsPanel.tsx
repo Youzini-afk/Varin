@@ -1,8 +1,6 @@
 import React from 'react';
 import type { ExperimentArtifactView, ExperimentAttemptView, ResourceGpuView, ResourceMachineView } from '@varin/protocol';
 import { Icon } from '@/components/icon/Icon';
-import { useHarnessThreadState } from '@/components/pi-session/HarnessThreadStateContext';
-import { PdfMaterialReader } from '@/components/pi-session/PdfMaterialReader';
 import { ThreadArtifactPdfReader } from '@/components/thread/ThreadArtifactPdfReader';
 import { subscribeVarinEvents } from '@/lib/varinEvents';
 import { useI18n } from '@/lib/i18n';
@@ -291,12 +289,7 @@ const ArtifactRow: React.FC<{
         {error ? <span role="alert" className="text-muted-foreground">{error}</span> : null}
       </li>
       {isPdf && downloadable && readerOpen ? (
-        typeof owner === 'string' ? <PdfMaterialReader
-          onOpenChange={open => { if (!open) setReaderSelection(null); }}
-          sessionId={owner}
-          title={artifact.name}
-          artifact={{ attemptId, artifactId: artifact.artifactId }}
-        /> : <ThreadArtifactPdfReader
+        <ThreadArtifactPdfReader
           onOpenChange={open => { if (!open) setReaderSelection(null); }}
           owner={owner}
           title={artifact.name}
@@ -443,17 +436,7 @@ const AttemptDetails: React.FC<{
   );
 };
 
-/**
- * Experiment/resource/source facts for the session's owning workspace (7F).
- * Facts come from the harness services through session-scoped routes; a
- * `harness-experiment-changed` event or stream reconnect triggers a reload.
- */
-export const ResearchFactsPanel: React.FC = () => {
-  const { parent, workspaceId } = useHarnessThreadState();
-  return <ResearchFactsView owner={parent.kind === 'session' ? parent.id : null} workspaceId={workspaceId} />;
-};
-
-/** Shared projection for actual Pi session and native Thread research authorities. */
+/** Native experiment/resource/source facts for the explicitly selected source Run. */
 export const ResearchFactsView: React.FC<{ owner: ResearchFactsOwner | null; workspaceId: string | null }> = ({ owner, workspaceId }) => {
   const { t } = useI18n();
   const [facts, setFacts] = React.useState<ResearchFactsSnapshot | null>(null);
@@ -591,7 +574,7 @@ export const ResearchFactsView: React.FC<{ owner: ResearchFactsOwner | null; wor
   const sources = facts?.sources ?? [];
   const machinesById = new Map(machines.map((machine) => [machine.machineId, machine]));
   const selectedAttempts = attempts.filter((attempt) => selectedAttemptIds.has(attempt.attemptId));
-  const canSubmit = typeof owner === 'string' || owner.canSubmit;
+  const canSubmit = owner.canSubmit;
   const cancellableSelected = selectedAttempts.filter((attempt) => attempt.permissions?.control !== false && ACTIVE_STATES.has(attempt.state));
   const rerunnableSelected = selectedAttempts.filter((attempt) => canSubmit && attempt.permissions?.control !== false && attempt.specId !== null && RERUNNABLE.has(attempt.state));
 

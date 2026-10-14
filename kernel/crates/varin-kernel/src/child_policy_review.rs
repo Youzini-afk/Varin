@@ -96,7 +96,7 @@ impl Fixture {
         };
         let basis = serde_json::from_value(json!({"mode":"agent","threadRole":"worker","revision":0,
             "configurationDigest":"fixture:child","memorySnapshot":{"revision":0,"memories":[]},
-            "sessionId":child.child_thread_id,"projectId":child.project_id,
+            "threadId":child.child_thread_id,"projectId":child.project_id,
             "originalSections":[{"name":"preamble","content":"Independent child"}],"instructionSources":["fixture:child"]})).unwrap();
         let child =
             f.db.prepare_child(&child.operation_id, source.clone(), proposal, basis)
@@ -264,7 +264,7 @@ impl Fixture {
         };
         let basis = serde_json::from_value(json!({"mode":"agent","threadRole":"worker","revision":0,
             "configurationDigest":"source-free-child","memorySnapshot":{"revision":0,"memories":[]},
-            "sessionId":child.child_thread_id,"projectId":child.project_id,
+            "threadId":child.child_thread_id,"projectId":child.project_id,
             "originalSections":[{"name":"preamble","content":"Independent capability worker"}],"instructionSources":[]})).unwrap();
         let prepared =
             f.db.capture_child_preparation(&child.execution_id, None, proposal, basis)
@@ -442,7 +442,7 @@ impl Fixture {
             "memory-request" => {
                 assert_eq!(frame["query"]["runId"], self.run.id);
                 assert_eq!(
-                    frame["query"]["scope"]["sessionId"],
+                    frame["query"]["scope"]["threadId"],
                     self.child.child_thread_id
                 );
                 assert_eq!(frame["query"]["action"], "synchronize");

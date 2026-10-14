@@ -106,7 +106,6 @@ async function fixture(reply: (body: Record<string, unknown>, response: ServerRe
     experiments = createExperimentService({ client: kernel, resources: computeResources, sources,
       sourceAuthority: createResearchSourceAuthority({ kernel, runtime: () => adapter.runtime,
         resolveLiveSource: async () => { throw new Error('This fixture uses its admitted materialized source'); } }),
-      resolveWorkspaceRoot: async id => (await documents.inspectWorkspace(id)).root,
       onError: error => { launchErrors.push(error); } });
     research = createResearchRuntime({ kernel, runtime: adapter.runtime, experiments, sources,
       resources: computeResources, onError: error => { launchErrors.push(error); } });

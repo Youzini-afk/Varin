@@ -4,7 +4,7 @@
   "license": "AGPL-3.0-only",
   "private": true,
   "type": "module",
-  "description": "Versioned wire protocol between Varin clients and Pi host workers.",
+  "description": "Shared native runtime, application, and resource contracts for Varin.",
   "files": [
     "dist"
   ],

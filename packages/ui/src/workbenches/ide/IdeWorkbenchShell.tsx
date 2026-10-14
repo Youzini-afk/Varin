@@ -26,8 +26,7 @@ import { AnimatePresence, motion } from 'motion/react';
 import { usePrefersReducedMotion } from '@/hooks/usePrefersReducedMotion';
 import { SidebarFilesTree } from '@/components/layout/SidebarFilesTree';
 import { RegularChatView } from '@/components/views/RegularChatView';
-import { PiInteractionHost } from '@/components/pi-session/PiInteractionHost';
-import { PiSessionSidebar } from '@/components/pi-session/PiSessionSidebar';
+import { ThreadSidebar } from '@/components/thread/ThreadSidebar';
 import { ScheduledTasksDialog } from '@/components/session/ScheduledTasksDialog';
 import { DirectoryExplorerDialog } from '@/components/session/DirectoryExplorerDialog';
 import { ArchiveView } from '@/components/views/ArchiveView';
@@ -696,7 +695,6 @@ export const IdeWorkbenchShell: React.FC<Record<string, unknown>> = () => {
         className="workbench-frame flex h-[100dvh] min-h-0 flex-col"
       >
         <CommandPalette fileOpenTarget="editor" />
-        <PiInteractionHost />
         <HelpDialog />
         <WorkspaceOverlays />
         <WorkbenchContributionSlot kind="panel" slot="workbench.overlay" />
@@ -1077,7 +1075,7 @@ export const IdeWorkbenchShell: React.FC<Record<string, unknown>> = () => {
                         <ErrorBoundary>
                           <WorkbenchReplacement
                             target={WORKBENCH_REPLACEMENT_TARGETS.sessionNavigator}
-                            fallback={<PiSessionSidebar onRequestClose={() => setSessionPickerOpen(false)} />}
+                            fallback={<ThreadSidebar />}
                           />
                         </ErrorBoundary>
                       </div>

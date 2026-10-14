@@ -69,7 +69,7 @@ it.each(['main', 'child'])('stages a %s candidate, measures only new work, and r
   const prepare = Object.assign(async () => { throw new Error('No initial context'); }, { main: async () => { throw new Error('No main context'); } });
   const service = new ContextService(runtime as unknown as AgentRuntimeClient, prepare as ContextPreparer,
     async () => ({ policy: { configurationIdentity: 'settings', enabled: true, reserveTokens: 100, keepRecentTokens: 20000,
-      explicitKeepRecentTokens: null, backgroundPreparation: true, preparationWaterline: 0.75 }, scope: { sessionId: parent.thread_id } }),
+      explicitKeepRecentTokens: null, backgroundPreparation: true, preparationWaterline: 0.75 }, scope: { threadId: parent.thread_id } }),
     async () => { throw new Error('A sendable parent must not restart'); }, null, () => now);
   const signal = new AbortController().signal;
   const observe = (requestId: string, tokens: number, runId = 'parent') => service.query({ action: 'prepare', runId, requestId,
@@ -95,11 +95,51 @@ it.each(['main', 'child'])('stages a %s candidate, measures only new work, and r
     service.close();
     const reopened = new ContextService(runtime as unknown as AgentRuntimeClient, prepare as ContextPreparer,
       async () => ({ policy: { configurationIdentity: 'settings', enabled: true, reserveTokens: 100, keepRecentTokens: 20000,
-        explicitKeepRecentTokens: null, backgroundPreparation: true, preparationWaterline: 0.75 }, scope: { sessionId: parent.thread_id } }), async () => {}, null, () => now);
+        explicitKeepRecentTokens: null, backgroundPreparation: true, preparationWaterline: 0.75 }, scope: { threadId: parent.thread_id } }), async () => {}, null, () => now);
     try {
       const cold = await reopened.query({ action: 'prepare', runId: 'next', requestId: 'd', expectedRevision: 1,
         observation: { identity: 'binding', estimatedTokens: 900 } }, signal);
       expect(cold).toMatchObject({ timing: { durationMs: null, tokensPerMs: null } });
     } finally { reopened.close(); }
   } finally { service.close(); }
+});
+
+it('waits for source-bound observation publication before preparing policy and honors cancellation', async () => {
+  const run = { id:'run', thread_id:'thread', branch_id:'branch', state:'running', cancel_requested:false, configuration:{} };
+  const runtime = { run:async()=>run,launch:async()=>null };
+  const prepare = Object.assign(async()=>{throw new Error('not initial');},{main:async()=>{throw new Error('not initial');}}) as ContextPreparer;
+  const policy = vi.fn(async()=>({policy:{configurationIdentity:'settings',enabled:false,reserveTokens:0,keepRecentTokens:0,explicitKeepRecentTokens:null,backgroundPreparation:false,preparationWaterline:1},scope:{threadId:'thread'}}));
+  const service = new ContextService(runtime as unknown as AgentRuntimeClient, prepare, policy, async()=>{},null);
+  let release!:()=>void; const held=new Promise<void>(done=>{release=done;});
+  const publish=vi.fn(async(_run:unknown,signal:AbortSignal)=>waitWithSignal(held,signal)); service.bindObservations(publish);
+  const controller=new AbortController(); const work=service.query({action:'prepare',runId:'run',requestId:'request',expectedRevision:1},controller.signal);
+  const rejected=expect(work).rejects.toThrow(); await vi.waitFor(()=>expect(publish).toHaveBeenCalledOnce()); expect(policy).not.toHaveBeenCalled();
+  controller.abort(); await rejected; release(); expect(policy).not.toHaveBeenCalled();
+  await service.query({action:'prepare',runId:'run',requestId:'next-request',expectedRevision:1},new AbortController().signal); expect(policy).toHaveBeenCalledOnce(); service.close();
+});
+
+it('closes old observation preparation and admits a fresh owner generation', async () => {
+  const run = { id: 'run', thread_id: 'thread', branch_id: 'branch', state: 'running', cancel_requested: false, configuration: {} };
+  const runtime = { run: vi.fn(async () => run), launch: vi.fn(async () => null) };
+  const prepare = Object.assign(async () => { throw new Error('not initial'); }, { main: async () => { throw new Error('not initial'); } }) as ContextPreparer;
+  const policy = vi.fn(async (): Promise<import('./context-service.js').ContextPolicyPreparation> => { throw new Error('A closed owner cannot prepare policy'); });
+  const service = new ContextService(runtime as unknown as AgentRuntimeClient, prepare, policy, async () => {}, null);
+  let release!: () => void;
+  const held = new Promise<void>(resolve => { release = resolve; });
+  const publish = vi.fn((_run: unknown, _signal: AbortSignal) => held);
+  service.bindObservations(publish);
+  const query = { action: 'prepare', runId: 'run', requestId: 'request', expectedRevision: 1 } as const;
+  const work = service.query(query, new AbortController().signal);
+  const rejected = expect(work).rejects.toThrow();
+  await vi.waitFor(() => expect(publish).toHaveBeenCalledOnce());
+  service.close(); await rejected;
+  expect(publish.mock.calls[0]![1].aborted).toBe(true);
+  release(); await Promise.resolve();
+  expect(runtime.launch).not.toHaveBeenCalled();
+  expect(policy).not.toHaveBeenCalled();
+  policy.mockImplementation(async () => ({ policy: { configurationIdentity: 'new-owner', enabled: false, reserveTokens: 0, keepRecentTokens: 0, explicitKeepRecentTokens: null, backgroundPreparation: false, preparationWaterline: 1 }, scope: { threadId: 'thread' } }));
+  await expect(service.query(query, new AbortController().signal)).resolves.toMatchObject({ status: 'ready' });
+  expect(runtime.run).toHaveBeenCalledTimes(2);
+  expect(publish.mock.calls[1]![1].aborted).toBe(false);
+  service.close();
 });

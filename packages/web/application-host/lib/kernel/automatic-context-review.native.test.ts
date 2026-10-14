@@ -66,7 +66,7 @@ it.each([
   const installOwner=()=>{
     const service=new ContextService(runtime,prepare,async(run)=>{
     const policy=await readContextPolicy({settings: await new AgentSettingsService(agentDir, () => false).snapshot(projectRoot),projectRoot,modelId:'fixture-model',providerId:'fixture'});
-    policies.push(policy);return {policy,scope:{sessionId:run.thread_id}};
+    policies.push(policy);return {policy,scope:{threadId:run.thread_id}};
     },async runId=>{await runtime.startRun(runId);},null);
     kernel.setContextOwner(service);return service;
   };

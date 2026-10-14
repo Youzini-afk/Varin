@@ -58,7 +58,7 @@ const readme = (options: { name: string; summary: string }): string => `# ${opti
 
 ${options.summary}
 
-This package extends the Varin Surface or Host. It is not a Pi package.
+This package extends the Varin Surface or Host through native service and contribution contracts.
 
 ## Commands
 

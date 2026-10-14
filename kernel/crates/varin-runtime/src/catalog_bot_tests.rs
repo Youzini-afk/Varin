@@ -283,7 +283,7 @@ fn bot_child_source_publication_obeys_derived_parent_gate() {
         instruction_sources: vec![],
         memory_checkpoint: None,
     };
-    let basis:crate::catalog::personalization::PersonalizationBasis=serde_json::from_value(json!({"mode":"bot","threadRole":"worker","revision":0,"configurationDigest":"original","memorySnapshot":{"revision":0,"memories":[]},"sessionId":child.child_thread_id,"projectId":child.project_id,"originalSections":[{"name":"preamble","content":"original child"}],"instructionSources":[]})).unwrap();
+    let basis:crate::catalog::personalization::PersonalizationBasis=serde_json::from_value(json!({"mode":"bot","threadRole":"worker","revision":0,"configurationDigest":"original","memorySnapshot":{"revision":0,"memories":[]},"threadId":child.child_thread_id,"projectId":child.project_id,"originalSections":[{"name":"preamble","content":"original child"}],"instructionSources":[]})).unwrap();
     f.db.publish_bot_gate(gate(2, false)).unwrap();
     assert!(matches!(
         f.db.prepare_child(

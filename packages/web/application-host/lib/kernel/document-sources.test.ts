@@ -110,7 +110,7 @@ it('uses the original research operation for tool artifact reads and the explici
   ]);
   expect(f.callers[0]!.owner).toMatchObject({ runtime: 'agent', actor: { kind: 'tool', toolName: 'document_read', callId: 'call', schemaVersion: 'accepted-schema' }, operationId: 'op', source: f.source });
   expect(f.callers[1]!.owner).toMatchObject({ runtime: 'agent', actor: { kind: 'reader' }, runId: 'run' });
-  expect(f.callers.every(caller => caller.access.kind === 'family' && caller.access.readThreadIds.includes('sibling') && !caller.sessionId)).toBe(true);
+  expect(f.callers.every(caller => caller.access.kind === 'family' && caller.access.readThreadIds.includes('sibling') && caller.owner.threadId === 'thread')).toBe(true);
   await expect(f.documents.tool({ ...f.authority, source: null }).readPath!('paper.pdf')).rejects.toMatchObject({ harnessCode: 'unavailable' });
 });
 

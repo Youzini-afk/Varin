@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { devtools, persist } from 'zustand/middleware';
-import { getRuntimeKey } from '@varin/application-client';
+import { threadHostKey as getRuntimeKey } from '@/stores/useThreadStore';
 import { normalizePath } from '@/lib/pathNormalization';
 import { createDeferredSafeJSONStorage } from './utils/safeStorage';
 
@@ -33,6 +33,7 @@ interface InlineCommentDraftState {
 }
 
 interface InlineCommentDraftActions {
+  acknowledgeDrafts: (key: string, drafts: readonly InlineCommentDraft[]) => void;
   addDraft: (target: InlineCommentDraftTarget, draft: Omit<InlineCommentDraft, 'id' | 'createdAt' | 'sessionKey'>) => string | null;
   updateDraft: (target: InlineCommentDraftTarget, draftId: string, updates: Partial<Omit<InlineCommentDraft, 'id' | 'createdAt' | 'sessionKey'>>) => void;
   removeDraft: (target: InlineCommentDraftTarget, draftId: string) => void;
@@ -178,6 +179,17 @@ export const useInlineCommentDraftStore = create<InlineCommentDraftStore>()(
       (set, get) => ({
         drafts: {},
         touchedAt: {},
+        acknowledgeDrafts: (key, captured) => {
+          const received = new Set(captured);
+          set(state => {
+            const current = state.drafts[key];
+            if (!current) return state;
+            const remaining = current.filter(draft => !received.has(draft));
+            if (remaining.length === current.length) return state;
+            if (!remaining.length) return removeDraftKey(state, key);
+            return { drafts: { ...state.drafts, [key]: remaining }, touchedAt: { ...state.touchedAt, [key]: Date.now() } };
+          });
+        },
         addDraft: (target, draft) => {
           const key = getCurrentKey(target);
           if (!key || (draft.source === 'terminal' && !draft.code.trim())) return null;
@@ -282,7 +294,7 @@ export const useInlineCommentDraftStore = create<InlineCommentDraftStore>()(
         },
       }),
       {
-        name: 'varin.inlineCommentDrafts.v1',
+        name: 'varin.threadInlineCommentDrafts.v1',
         storage: createDeferredSafeJSONStorage(),
         partialize: (state) => ({ drafts: state.drafts, touchedAt: state.touchedAt }),
       },

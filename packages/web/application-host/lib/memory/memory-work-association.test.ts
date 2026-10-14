@@ -3,6 +3,7 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { openWorkspaceKnowledge } from '../knowledge/store.js';
+import { sourceRevision } from './memory-sources.js';
 import { createMemoryService } from './memory-service.js';
 
 it('preserves both work associations when explicit Bot memory deduplicates across conversations', async () => {
@@ -13,19 +14,19 @@ it('preserves both work associations when explicit Bot memory deduplicates acros
     const owner = { scope: 'bot' as const, ownerId: 'test-bot' };
     const service = createMemoryService({
       storeForScopeId: async scope => scope === 'bot:test-bot' ? store : null,
-      userStore: async () => null, ownerForSession: async () => owner,
-      associationForSession: async sessionId => ({ sessionIds: [sessionId] }),
-      readSessionEntries: async sessionId => [{ id: `${sessionId}-user`, parentId: null, type: 'message', timestamp: '2026-10-12T00:00:00Z',
-        message: { role: 'user', timestamp: 1, content } }],
+      userStore: async () => null, ownerForThread: async () => owner,
+      associationForThread: async threadId => ({ threadIds: [threadId] }),
+      readHistorySource: async () => content,
     });
-    const first = await service.remember(owner, { content, source: { kind: 'memory.remember', sessionId: 'work-A' } });
-    const recall = (sessionId: string) => service.search(owner, 'continue-zebra', 5, { sessionId });
+    const source = (threadId: string) => ({ kind: 'memory.remember', threadId, spans: [{ kind: 'history-item' as const, id: `${threadId}-user`, threadId, branchId: `${threadId}-branch`, headId: `${threadId}-user`, revision: sourceRevision(content), start: 0, end: content.length }] });
+    const first = await service.remember(owner, { content, source: source('work-A') });
+    const recall = (threadId: string) => service.search(owner, 'continue-zebra', 5, { threadId });
     expect((await recall('work-A')).map(hit => hit.node.id)).toEqual([first.item.id]);
-    const duplicate = await service.remember(owner, { content, source: { kind: 'memory.remember', sessionId: 'work-B' } });
+    const duplicate = await service.remember(owner, { content, source: source('work-B') });
     expect(duplicate.duplicate).toBe(true);
     expect(duplicate.item.id).toBe(first.item.id);
     const sources = await service.readSource(owner, first.item.id);
-    expect(sources.map(({ span }) => span.kind === 'pi-entry' ? span.sessionId : null).sort()).toEqual(['work-A', 'work-B']);
+    expect(sources.map(({ span }) => span.threadId).sort()).toEqual(['work-A', 'work-B']);
     expect(sources.every(source => source.status === 'available')).toBe(true);
     expect((await recall('work-A')).map(hit => hit.node.id)).toEqual([first.item.id]);
     expect((await recall('work-B')).map(hit => hit.node.id)).toEqual([first.item.id]);

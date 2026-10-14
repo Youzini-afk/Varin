@@ -1,3 +1,8 @@
+import { createResourceManagement } from './lib/agent-resources/management.js';
+import { registerResourceManagementRoutes } from './lib/agent-resources/management-routes.js';
+import { createModelTextService } from './lib/model-text/service.js';
+import { createSourceGitInventory } from './lib/kernel/source-git-inventory.js';
+import { createThreadNotificationRuntime } from './lib/notifications/thread-runtime.js';
 import { createContextCompaction } from './lib/kernel/context-compaction.js';
 import { createThreadRecoveryNavigation, createThreadRecoveryFileResolver } from './lib/recovery/thread-navigation.js';
 import { createManagedRecoveryCoordinator, type ManagedRecoveryPort } from './lib/recovery/managed-recovery-coordinator.js';
@@ -10,7 +15,7 @@ import { registerThreadMemoryRoutes } from './lib/memory/thread-memory-routes.js
 import { createMemoryInference } from './lib/memory/memory-inference.js';
 import { createExtensionPackageOwner, VARIN_EXTENSION_PACKAGES_CAPABILITY } from "./lib/kernel/extension-package-owner.js";
 import { createRetrievalModelStage } from './lib/kernel/retrieval-model.js';
-import { mergeHarnessWebDomainPolicy } from '@varin/protocol';
+
 import { createResearchDecisionRuntime, RESEARCH_DECISION_CAPABILITY } from './lib/kernel/research-decision.js';
 import { createImageRuntime, IMAGES_CAPABILITY } from './lib/kernel/image-runtime.js';
 import { createMediaResourceStore } from './lib/harness/media-resources.js';
@@ -62,13 +67,14 @@ import { createThreadContext } from './lib/kernel/thread-context.js';
 import { createThreadResourceScope } from './lib/kernel/thread-resource-scope.js';
 import { createThreadSkillInputPreparer } from './lib/kernel/thread-skill-input.js';
 import { createResourceOwner } from './lib/kernel/resource-owner.js';
-import { readAgentResourceConfiguration } from '@varin/pi-host/agent-resource-configuration';
+import { readAgentResourceConfiguration } from './lib/agent-resources/packages.js';
+import { ProjectTrustService, registerProjectTrustRoutes } from './lib/models/project-trust.js';
+import { createMcpSourceProcessAdmission } from './lib/kernel/mcp-process-admission.js';
 import { createContextComposition } from './lib/kernel/context-composition.js';
 import { createPolicyModelPreparer } from './lib/kernel/policy-models.js';
 import { createAgentPolicy } from './lib/kernel/agent-policy.js';
 import { RunObservers } from './lib/kernel/run-observers.js';
-import { McpAuthority as PiMcpAuthority } from '@varin/pi-host/mcp-authority';
-import { readProjectTrust, resolvePiAgentDirectory } from '@varin/settings-store';
+
 import { McpAuthority, McpCompositions, composeMcpAuthorityLeases, StdioTransport, type McpCompositionScope } from './lib/mcp/authority.js';
 import { createMcpProcessTransport } from './lib/kernel/mcp-process-transport.js';
 import { createMcpSettings } from './lib/mcp/settings.js';
@@ -83,13 +89,14 @@ import { createManagedChildMcpPreparer } from './lib/kernel/managed-child-mcp-pr
 import { createExtensionTools } from './lib/kernel/extension-tool-owner.js';
 import { MATERIAL_SNAPSHOT_CAPABILITY } from './lib/kernel/material-tool-owner.js';
 import { createIntegrationToolOwner, createIntegrationTargetOpener, createIntegrationReceiptReconciler, CHILD_INTEGRATION_CAPABILITY } from './lib/kernel/integration-tool-owner.js';
-import { createMcpHarnessServices } from './lib/harness/mcp-service.js';
-import { sharedHostCredentialAuthority } from '@varin/runtime-broker';
+
 import { AgentRuntimeClient } from './lib/kernel/agent-runtime-client.js';
 import { createThreadProcesses } from './lib/kernel/thread-processes.js';
 import { createResearchRuntime, createResearchSourceAuthority, RESEARCH_CAPABILITY } from './lib/kernel/research-runtime.js';
 import { ThreadAdapter } from './lib/kernel/thread-adapter.js';
 import { registerThreadRoutes } from './lib/kernel/thread-routes.js';
+import { createSettingsToolOwner, SETTINGS_CAPABILITY } from './lib/kernel/settings-tool-owner.js';
+import { createEnvironmentForwardRuntime } from './lib/harness/environment-forwards.js';
 import { createAgentProfilesAPI } from './lib/kernel/agent-profiles.js';
 import { registerAgentProfileRoutes } from './lib/kernel/agent-profile-routes.js';
 import { registerRuntimeMaintenanceRoutes } from './lib/kernel/runtime-maintenance-routes.js';
@@ -115,54 +122,33 @@ import { spawn } from 'child_process';
 import { fileURLToPath } from 'url';
 import { createProxyMiddleware, responseInterceptor } from 'http-proxy-middleware';
 import webPush from 'web-push';
-import {
-  ApplicationExtensionCatalog,
-  ApplicationExtensionRuntime,
-  ExtensionPackageManager,
-} from '@varin/extension-host';
+import { ApplicationExtensionCatalog, ApplicationExtensionRuntime, ExtensionPackageManager } from '@varin/extension-host';
 import { VARIN_BUNDLED_LANGUAGE_SERVERS } from '@varin/extension-builtins';
 import { createDocumentAuthority, type DocumentAuthority, type DocumentMutationObservation } from './lib/documents/authority.js';
-import { createManagedRootAdmission } from './lib/kernel/managed-root-admission.js';
+
 import { createKernelProcessService } from './lib/kernel/process-service.js';
 import { createKernelProcessIdentityResolver } from './lib/kernel/process-identity.js';
 import { registerBuiltinWorkbenchLayoutService } from './lib/extensions/workbench-layout-service.js';
-import { toJsonValue } from './lib/extensions/json-value.js';
+
 import { createDocumentsCapabilityHandler } from './lib/documents/capability.js';
-import {
-  createWorkspaceRecoveryEngine,
-  type RecoverySessionNavigation,
-  type WorkspaceRecoveryEngine,
-} from './lib/recovery/engine.js';
+import { createWorkspaceRecoveryEngine, type RecoverySessionNavigation, type WorkspaceRecoveryEngine } from './lib/recovery/engine.js';
 import { createWorkspaceRecoveryCapabilityHandler } from './lib/recovery/capability.js';
-import { RecoveryPrimitiveError } from './lib/recovery/errors.js';
-import { createPiWorkspaceWriterTracker } from './lib/recovery/pi-writer-tracker.js';
-import { createRecoveryTurnCoordinator } from './lib/recovery/turn-coordinator.js';
-import { createLanguageSupervisor, SURFACE_LANGUAGE_VIEW } from './lib/lsp/supervisor.js';
+
+import { createLanguageSupervisor } from './lib/lsp/supervisor.js';
 import { createLanguagePrewarm } from './lib/lsp/prewarm.js';
 import { createManagedLanguageServers } from './lib/lsp/managed-servers.js';
 import { canonicalizePathIdentity, isPathWithinRoot } from './lib/workspace/path-safety.js';
 import { createLanguageCapabilityHandler, createWorkspaceSearchCapabilityHandler } from './lib/lsp/capability.js';
 import { createRunRuntime } from './lib/run/runtime.js';
-import {
-  createWorkspaceDebugCapabilityHandler,
-  createWorkspaceTasksCapabilityHandler,
-  createWorkspaceTestCapabilityHandler,
-} from './lib/run/capability.js';
+import { createWorkspaceDebugCapabilityHandler, createWorkspaceTasksCapabilityHandler, createWorkspaceTestCapabilityHandler } from './lib/run/capability.js';
 import { createWorkspaceContentSearch } from './lib/search/content.js';
 import { createDocumentRootGuard } from './lib/documents/allowed-roots.js';
 import { createWorkspaceConfig } from './lib/workspace/workspace-config.js';
 
-import { createHarnessRouter, buildHarnessRespondParams } from './lib/harness/router.js';
-import { createHarnessServiceHost, deriveHarnessCapabilities } from './lib/harness/service-host.js';
-import { createSourceViewRuntime } from './lib/harness/source-view-runtime.js';
-import { discoverShells } from './lib/harness/shell-discovery.js';
-import { createShellPathResolver } from './lib/harness/shell-path.js';
-import { createHarnessSessionRegistration } from './lib/harness/session-registration.js';
-import { performHarnessWebFetch, registerHarnessServices } from './lib/harness/harness-services.js';
-import { createUserThreadSendAdapter } from './lib/harness/thread-ui-adapter.js';
 import { openWorkspaceKnowledge, type KnowledgeStore } from './lib/knowledge/store.js';
-import { knowledgeStorageActivity } from './lib/knowledge/store-process.js';
+
 import { createKnowledgeContextRuntime } from './lib/knowledge/context-runtime.js';
+import { createContextObservationPublication } from './lib/knowledge/context-publication.js';
 import { createGitStatusObserver } from './lib/knowledge/git-status-runtime.js';
 import { createSymbolGraphRuntime } from './lib/knowledge/symbol-runtime.js';
 import { createProjectIndexScope, insideDirectory, excludedFromIndex, indexPathAllowed } from './lib/knowledge/index-scope.js';
@@ -177,41 +163,26 @@ import { createWorkspaceSemanticRuntime, GLOBAL_INFERENCE_SCOPE } from './lib/kn
 import { createEmbedScheduler } from './lib/knowledge/semantic/embed-scheduler.js';
 import { createVectorCache } from './lib/knowledge/semantic/vector-cache.js';
 import { createKnowledgeVectorRuntime } from './lib/knowledge/vectors/index.js';
-import type { KnowledgeVectorRuntime, MemoryRecallAssociation, MemoryRecallSource } from './lib/knowledge/vectors/index.js';
+import type { KnowledgeVectorRuntime, MemoryRecallSource } from './lib/knowledge/vectors/index.js';
 import { recallMemories } from './lib/memory/memory-recall.js';
 
+import { openUserKnowledgeStore } from './lib/harness/recall-tool.js';
 
-
-import { type TodoToolDeps } from './lib/harness/todo-tool.js';
-import { openUserKnowledgeStore, type RecallToolDeps } from './lib/harness/recall-tool.js';
-import { createThreadRegistry } from './lib/harness/thread-registry.js';
-
-import { createOnThreadDequeued } from './lib/harness/thread-dequeue.js';
-import { createThreadTranscriptReader } from './lib/harness/thread-transcript.js';
-import { createHarnessPathAuthority } from './lib/harness/path-authority.js';
-import { threadScopeId, isThreadScopeId, threadIdFromScopeId, sessionScopeId, isSessionScopeId, sessionIdFromScopeId, isSessionStoreKey, isBotStoreKey, isBotScopeId, botIdFromScopeId, botScopeId, knowledgeStoreKeyForScope, scopeOfScopeId } from './lib/harness/owner-scope.js';
+import { threadScopeId, isThreadScopeId, threadIdFromScopeId, isThreadStoreKey, isBotStoreKey, isBotScopeId, botIdFromScopeId, botScopeId, knowledgeStoreKeyForScope, scopeOfScopeId } from './lib/harness/owner-scope.js';
 import { createMemoryService } from './lib/memory/memory-service.js';
-import { createMemoryOrganizer, type OrganizerRunSource } from './lib/memory/memory-organizer.js';
-import { registerSelectionMemoryRoutes } from './lib/memory/selection-memory-routes.js';
+import { createMemoryOrganizer } from './lib/memory/memory-organizer.js';
+
 import { createAgentPersonalization } from './lib/memory/agent-personalization.js';
 import { registerAgentPersonalizationRoutes } from './lib/memory/agent-personalization-routes.js';
-import { createExploreFileReader } from './lib/harness/explore-file-reader.js';
-import { createThreadWorktreeRuntime } from './lib/harness/thread-worktree.js';
-import { createThreadRuntime } from './lib/harness/thread-runtime.js';
-import { createResearchRootRuntime } from './lib/harness/research-root-runtime.js';
-import { createAgentRootRuntime } from './lib/harness/agent-root-runtime.js';
-import { correlatedReply, createThreadWaitRuntime } from './lib/harness/thread-wait-runtime.js';
-import { isAttachedRootPurpose } from '@varin/protocol';
-import { createBotRootRuntime } from './lib/harness/bot-root-runtime.js';
+
 import { createBotService } from './lib/bots/bot-service.js';
 import { createBotLifecycleRuntime } from './lib/bots/bot-lifecycle-runtime.js';
 import { registerBotRoutes } from './lib/bots/bot-routes.js';
 import { createComputerService } from './lib/computer/computer-service.js';
-import { resolvePiComputerWork } from './lib/computer/computer-actor.js';
 import { ComputerError } from './lib/computer/computer-error.js';
 import { createComputerRuntime, COMPUTER_CAPABILITY } from './lib/kernel/computer-runtime.js';
 import { createEnvironmentForwardJobRuntime, ENVIRONMENT_FORWARD_CAPABILITY } from './lib/kernel/environment-forward-runtime.js';
-import { computerExecutionKey } from '@varin/protocol';
+
 import { HostSshManager } from './lib/connections/ssh-manager.js';
 import { registerConnectionRoutes } from './lib/connections/connection-routes.js';
 import { attachConnectionProxy } from './lib/connections/host-proxy.js';
@@ -220,42 +191,29 @@ import { registerComputerRoutes } from './lib/computer/computer-routes.js';
 import { attachDesktopMedia } from './lib/computer/desktop-media.js';
 import { attachServiceForward } from './lib/harness/environment-forward-server.js';
 import { createVmGuestRegistration } from './lib/computer/vm-guest-register.js';
-import { createWorktreeReclaimGuard } from './lib/harness/worktree-reclaim-guard.js';
-import { resolveThreadWorktreeSettings } from './lib/harness/thread-worktree-settings.js';
+
 import { createKernelWorkspaceWorkingStateAccess, KernelStorageAdapter } from './lib/kernel/storage-adapter.js';
 import { KernelFileResourceBackend } from './lib/kernel/file-resource-backend.js';
-import { KernelPathLockService } from './lib/kernel/file-resource-lock-service.js';
+
 import { KernelRecoveryContentStore, KernelRecoveryStore, createKernelRecoveryDirectFacade } from './lib/kernel/kernel-recovery-store.js';
-import { createRetrievalArtifactAccess } from './lib/harness/retrieval-artifacts.js';
 import { createWebMaterialStore, type WebMaterialStore } from './lib/harness/web-materials.js';
 import { createMaterialCollections as createMaterialCollectionsService } from './lib/harness/material-collections.js';
-import { createResearchDecideService, type ResearchDecideDeps } from './lib/harness/research-decide.js';
-import { ThreadExecutionViewRegistry } from './lib/harness/working-state/execution-view.js';
-import { createWorkingBranchLookups } from './lib/harness/working-state/working-branch-lookups.js';
-import { createWorkingBranchWriteServices } from './lib/harness/working-state/working-branch-writes.js';
-import { acquireVirtualWriteTicket, VirtualWriteGate } from './lib/harness/working-state/virtual-write-gate.js';
+
 import { IntegrationCoordinator } from './lib/harness/working-state/integration-coordinator.js';
-import { reconcileInterruptedKernelBranchIntegrations } from './lib/recovery/durable-file-operation.js';
-import { DEFAULT_HARNESS_SETTINGS, resolveHarnessDocumentReadingSettings, THINKING_LEVELS, type SessionSnapshot } from '@varin/protocol';
+
+import { THINKING_LEVELS } from '@varin/protocol';
 import { createSettingsService, settingsDocumentRevision } from './lib/harness/settings-service.js';
-import { createFollowUpService } from './lib/harness/followups.js';
-import { createFollowUpThreadSender } from './lib/harness/followup-delivery.js';
+
 import { createClientSurfaceBridge } from './lib/harness/client-surfaces.js';
 import { createSettingsActionRegistry } from './lib/harness/settings-actions.js';
 import { createKernelSettingsActionOperationStore } from './lib/harness/settings-operation-store.js';
 import * as gitIdentityStorage from './lib/git/identity-storage.js';
 import { getGitHubAuth, getGitHubAuthAccounts, isGhCliActive, isGhCliDisabled } from './lib/github/auth.js';
 import { getGhCliToken } from './lib/github/gh-cli-credential.js';
-import { getStatus as getGitStatus, resolvePrimaryWorktreeRoot } from './lib/git/service.js';
-import { createVerificationCoordinator } from './lib/harness/verification-coordinator.js';
-import { createSourceViewStore, SOURCE_VIEW_STORAGE_SCOPE } from './lib/harness/source-view-store.js';
+import { resolvePrimaryWorktreeRoot } from './lib/git/service.js';
+
 import { createKernelClient, KernelClientError, type KernelClient } from './lib/kernel/kernel-client.js';
-import { registerHarnessExperimentRoutes } from './lib/harness/experiment-routes.js';
-import { registerHarnessFollowUpRoutes } from './lib/harness/follow-up-routes.js';
-import { registerHarnessThreadRoutes } from './lib/harness/thread-routes.js';
-import { registerHarnessContextRoutes } from './lib/harness/context-routes.js';
-import { createLanguageSupervisorDiagnosticsProvider } from './lib/harness/diagnostics-adapter.js';
-import { createLspNavigationServices } from './lib/harness/lsp-nav.js';
+
 import { createRelationCollector } from './lib/knowledge/relations.js';
 import { createLspStructureProvider } from './lib/structure/lsp-provider.js';
 import { createStructureSource } from './lib/structure/source.js';
@@ -269,63 +227,35 @@ import { createLanguageSupportRuntime } from './lib/language-support/runtime.js'
 import { createWebFetch, type SsrfPolicy } from './lib/harness/web-fetch.js';
 import { createDocumentReader } from './lib/harness/document-reading.js';
 import { createPdfEngine } from './lib/harness/pdf-engine.js';
-import { createUserMaterialReadAdapter } from './lib/harness/material-read-ui-adapter.js';
-import { resolveHarnessWebBinding } from './lib/harness/harness-web-settings.js';
-import { encodeDocumentText } from './lib/documents/inspect.js';
-import { createWebSearchService, resolveConfiguredSearchProvider } from './lib/harness/web-search.js';
+
 import { createResearchSearchService } from './lib/harness/research-search.js';
 import { registerWebSearchCredentialRoutes } from './lib/harness/web-search-routes.js';
-import { registerPdfMaterialRoutes } from './lib/harness/pdf-material-routes.js';
+
 import { checkDesktopHttpUrl, checkSsrf, isSameHost } from './lib/harness/ssrf-policy.js';
 import { createEgressRuntime } from './lib/harness/egress.js';
 import { readEgressHostConfiguration } from './lib/harness/egress-settings.js';
 import { registerEgressRoutes } from './lib/harness/egress-routes.js';
-import { readPiAuthFile, removePiProviderAuth, savePiProviderAuth } from './lib/pi-config/storage.js';
+import { createServiceCredentialStore } from './lib/service-credentials/store.js';
 
 import { createUiAuth } from './lib/ui-auth/ui-auth.js';
 import { createManagedTunnelConfigRuntime } from './lib/tunnels/managed-config.js';
 import { createTunnelProviderRegistry } from './lib/tunnels/registry.js';
 import { createCloudflareTunnelProvider } from './lib/tunnels/providers/cloudflare.js';
 import { createNgrokTunnelProvider } from './lib/tunnels/providers/ngrok.js';
-import {
-  TUNNEL_MODE_MANAGED_LOCAL,
-  TUNNEL_MODE_MANAGED_REMOTE,
-  TUNNEL_MODE_QUICK,
-  TUNNEL_PROVIDER_CLOUDFLARE,
-  TunnelServiceError,
-  isSupportedTunnelMode,
-  normalizeOptionalPath,
-  normalizeTunnelMode,
-  normalizeTunnelProvider,
-  normalizeTunnelStartRequest,
-  type TunnelController,
-} from './lib/tunnels/types.js';
+import { TUNNEL_MODE_MANAGED_LOCAL, TUNNEL_MODE_MANAGED_REMOTE, TUNNEL_MODE_QUICK, TUNNEL_PROVIDER_CLOUDFLARE, TunnelServiceError, isSupportedTunnelMode, normalizeOptionalPath, normalizeTunnelMode, normalizeTunnelProvider, normalizeTunnelStartRequest, type TunnelController } from './lib/tunnels/types.js';
 import { createRequestSecurityRuntime } from './lib/security/request-security.js';
-import {
-  getInvalidBindHostErrorMessage,
-  getUnauthenticatedLanErrorMessage,
-  isNetworkExposedBindHost,
-  isUnsafeUnauthenticatedLanAllowed,
-  normalizeBindHost,
-} from './lib/security/bind-host.js';
+import { getInvalidBindHostErrorMessage, getUnauthenticatedLanErrorMessage, isNetworkExposedBindHost, isUnsafeUnauthenticatedLanAllowed, normalizeBindHost } from './lib/security/bind-host.js';
 import { registerTtsRoutes } from './lib/tts/routes.js';
 import { detectSayTtsCapability } from './lib/tts/capability-runtime.js';
 import { createTerminalRuntime } from './lib/terminal/runtime.js';
-import {
-  createTerminalCommandObserveAdapter,
-  createTerminalCommandProjector,
-} from './lib/knowledge/terminal-projection.js';
+import { createTerminalCommandObserveAdapter, createTerminalCommandProjector } from './lib/knowledge/terminal-projection.js';
 import { createDictationRuntime } from './lib/dictation/runtime.js';
 import { createFsSearchRuntime as createFsSearchRuntimeFactory } from './lib/fs/search.js';
 import { mintOutsideFileGrant } from './lib/fs/routes.js';
 import { registerNotificationRoutes } from './lib/notifications/routes.js';
-import {
-  createGlobalUiEventBroadcaster,
-  createNotificationEmitterRuntime,
-} from './lib/notifications/emitter-runtime.js';
+import { createGlobalUiEventBroadcaster, createNotificationEmitterRuntime } from './lib/notifications/emitter-runtime.js';
 import { createPushRuntime } from './lib/notifications/push-runtime.js';
 import { createApnsRuntime } from './lib/notifications/apns-runtime.js';
-import { createPiSessionRuntime } from './lib/notifications/pi-session-runtime.js';
 import { createMobileDeviceStore } from './lib/mobile/device-store.js';
 import { createMobilePairingRuntime } from './lib/mobile/pairing-runtime.js';
 import { createMobilePushRuntime } from './lib/mobile/push-runtime.js';
@@ -338,25 +268,13 @@ import { createPreviewProxyRuntime } from './lib/preview/proxy-runtime.js';
 import { attachRealtimeProxy } from './lib/realtime-proxy.js';
 import { createRelayService } from './lib/relay/service.js';
 import { createRelayHostLock } from './lib/relay/host-lock.js';
-import { PiRuntimeBrokerError, PiRuntimeLifecycle } from '@varin/runtime-broker';
-import {
-  attachPiSessionExecutionAdmission,
-  createWebPiRuntimeBroker,
-} from './lib/pi-runtime/broker.js';
-import { createPiRuntimeGateway } from './lib/pi-runtime/gateway.js';
+
 import { createScheduledTasksRuntime } from './lib/scheduled-tasks/runtime.js';
 import { createScheduledTaskService, readScheduledProjects } from './lib/scheduled-tasks/service.js';
-import { createPiScheduledTaskExecutor } from './lib/scheduled-tasks/pi-executor.js';
-import { createSessionSettleTracker } from './lib/scheduled-tasks/session-settle.js';
-import { createPiSessionAutomationRuntime } from './lib/pi-session-automation/runtime.js';
-import { createPiSessionTitleRuntime } from './lib/pi-session-automation/titles.js';
+
 import { createServerBootstrapRuntime } from './lib/platform/bootstrap-runtime.js';
 import { parseServeCliOptions } from './lib/platform/cli-options.js';
-import {
-  registerAuthAndAccessRoutes,
-  registerCommonRequestMiddleware,
-  registerServerStatusRoutes,
-} from './lib/platform/core-routes.js';
+import { registerAuthAndAccessRoutes, registerCommonRequestMiddleware, registerServerStatusRoutes } from './lib/platform/core-routes.js';
 import { createPlatformEnvironmentRuntime } from './lib/platform/environment-runtime.js';
 import { resolveVarinDataDir } from './lib/platform/data-paths.js';
 import { clearAppImageArgv0FromProcessEnv } from './lib/platform/inherited-env.js';
@@ -369,18 +287,13 @@ import { createServerStartupRuntime } from './lib/platform/server-startup-runtim
 import { createSettingsHelpers } from './lib/platform/settings-helpers.js';
 import { createSettingsNormalizationRuntime } from './lib/platform/settings-normalization-runtime.js';
 import { createSettingsRuntime } from './lib/platform/settings-runtime.js';
-import { recordStartupPerformance } from './lib/platform/startup-performance.js';
+
 import { createStaticRoutesRuntime } from './lib/platform/static-routes-runtime.js';
 import { createStartupPipelineRuntime } from './lib/platform/startup-pipeline-runtime.js';
 import { createThemeRuntime } from './lib/platform/theme-runtime.js';
 import { createTunnelAuth } from './lib/platform/tunnel-auth.js';
 import { createTunnelWiringRuntime } from './lib/platform/tunnel-wiring-runtime.js';
-import type {
-  DesktopNotificationPayload,
-  HostPiRuntimeBrokerFactoryOptions,
-  StartWebUiServerOptions,
-  WebUiServerController,
-} from './public-contract.js';
+import type { StartWebUiServerOptions, WebUiServerController } from './public-contract.js';
 export type * from './public-contract.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -403,56 +316,6 @@ const MAX_THEME_JSON_BYTES = 512 * 1024;
 const errorMessage = (error: unknown): string => (
   error instanceof Error ? error.message : String(error)
 );
-const recordOf = (value: unknown): Record<string, unknown> => (
-  value && typeof value === 'object' && !Array.isArray(value)
-    ? value as Record<string, unknown>
-    : {}
-);
-
-export function mergeSessionSnapshotForKnowledgeOwner(previousValue: unknown, nextValue: unknown): Record<string, unknown> {
-  const previous = recordOf(previousValue);
-  const next = recordOf(nextValue);
-  const previousWorkspace = recordOf(previous.workspace);
-  const nextWorkspace = recordOf(next.workspace);
-  const hasWorkspaceId = (value: unknown): value is string => typeof value === 'string' && value.trim().length > 0;
-  const ownerId = (workspace: Record<string, unknown>): string | null => (
-    workspace.kind === 'workspace'
-      ? hasWorkspaceId(workspace.authorityId)
-        ? workspace.authorityId
-        : hasWorkspaceId(workspace.id) ? workspace.id : null
-      : null
-  );
-  const previousOwner = ownerId(previousWorkspace);
-  const nextOwner = ownerId(nextWorkspace);
-  const canKeepKnownOwner = previousOwner !== null
-    && (nextWorkspace.kind === undefined || nextWorkspace.kind === 'workspace')
-    && (nextOwner === null || nextOwner === previousOwner);
-  const merged = { ...previous, ...next };
-  if (canKeepKnownOwner) {
-    // Pi can publish partial root-session snapshots. Carry its already known
-    // workspace identity through missing fields, while letting a different
-    // explicit owner replace the old snapshot.
-    const workspace: Record<string, unknown> = { ...previousWorkspace, ...nextWorkspace, kind: 'workspace' };
-    if (!hasWorkspaceId(nextWorkspace.authorityId) && hasWorkspaceId(previousWorkspace.authorityId)) {
-      workspace.authorityId = previousWorkspace.authorityId;
-    }
-    if (!hasWorkspaceId(nextWorkspace.id) && hasWorkspaceId(previousWorkspace.id)) {
-      workspace.id = previousWorkspace.id;
-    }
-    merged.workspace = workspace;
-  }
-  return merged;
-}
-
-export async function resolveKnowledgeScopeOwner(
-  resolveDurableOwner: () => Promise<{ owningScopeId: string } | null>,
-  fallbackScopeId: string | null,
-  snapshotWorkspaceId: string | null,
-): Promise<string | null> {
-  const owner = await resolveDurableOwner();
-  return owner?.owningScopeId ?? fallbackScopeId ?? snapshotWorkspaceId;
-}
-
 const isEnvFlagEnabled = (value: unknown): boolean => {
   if (value === true || value === 1) return true;
   if (typeof value !== 'string') return false;
@@ -684,16 +547,15 @@ const {
   emitDesktopNotification,
   broadcastUiNotification,
 } = notificationEmitterRuntime;
-let isPiSessionLive: (sessionId: string) => Promise<boolean> = async () => false;
+let isNativeThreadLive: (identity: { threadId: string; branchId: string }) => Promise<boolean> = async () => false;
 const clientSurfaceBridge = createClientSurfaceBridge({
   writeSseEvent,
-  isSessionLive: (sessionId) => isPiSessionLive(sessionId),
+  isThreadLive: identity => isNativeThreadLive(identity),
 });
 broadcastGlobalUiEvent = createGlobalUiEventBroadcaster({
   sseClients: uiNotificationClients,
   writeSseEvent,
 });
-const sessionRuntime = createPiSessionRuntime({ broadcastEvent: broadcastGlobalUiEvent });
 
 const projectConfigRuntime = createProjectConfigRuntime({
   fsPromises,
@@ -703,24 +565,6 @@ const projectConfigRuntime = createProjectConfigRuntime({
 const scheduledTasksRuntime = createScheduledTasksRuntime({
   projectConfigRuntime,
   listProjects: () => readScheduledProjects(readSettingsFromDisk, sanitizeProjects),
-  emitTaskRunEvent: (event) => {
-    for (const client of uiVarinEventClients) {
-      try {
-        writeSseEvent(client, {
-          type: 'varin:scheduled-task-ran',
-          properties: {
-            projectId: event.projectID,
-            taskId: event.taskID,
-            ranAt: event.ranAt,
-            status: event.status,
-            ...(event.sessionID ? { sessionId: event.sessionID } : {}),
-          },
-        });
-      } catch {
-        uiVarinEventClients.delete(client);
-      }
-    }
-  },
   logger: console,
 });
 const scheduledTaskService = createScheduledTaskService({
@@ -801,7 +645,6 @@ const gracefulShutdownRuntime = createGracefulShutdownRuntime({
   getExitOnShutdown: () => exitOnShutdown,
   getIsShuttingDown: () => isShuttingDown,
   setIsShuttingDown: (value) => { isShuttingDown = value; },
-  sessionRuntime,
   scheduledTasksRuntime,
   getTerminalRuntime: () => terminalRuntime,
   setTerminalRuntime: (value) => { terminalRuntime = value; },
@@ -960,19 +803,13 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   }));
   server = http.createServer(app);
   const serverStartedAt = new Date().toISOString();
-  type PiRuntimeHandshake = Awaited<ReturnType<PiRuntimeLifecycle['start']>> | null;
   type RelayService = ReturnType<typeof createRelayService>;
   type TunnelRuntimeContext = ReturnType<ReturnType<typeof createTunnelWiringRuntime>['initialize']>;
-  let piRuntimeHandshake: PiRuntimeHandshake = null;
-  let piRuntimeLifecycle: PiRuntimeLifecycle | null = null;
   let relayServiceInstance: RelayService | null = null;
   let tunnelRuntimeContext: TunnelRuntimeContext | null = null;
   let kernelClient: KernelClient | null = null;
   let realtimeProxyRuntime: Pick<ReturnType<typeof attachRealtimeProxy>, 'stop'> = { stop: () => {} };
   let dictationRuntime: ReturnType<typeof createDictationRuntime> | null = null;
-  const currentPiRuntimeHandshake = () => (
-    piRuntimeLifecycle ? piRuntimeLifecycle.handshake : piRuntimeHandshake
-  );
 
   const activePort = () => tunnelRuntimeContext?.getActivePort() || port;
   const resolvePairingTransports = (req: Request) => {
@@ -1018,22 +855,11 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     serverStartedAt,
     gracefulShutdown,
     getHealthSnapshot: () => {
-      const handshake = currentPiRuntimeHandshake();
       return {
         apiOnly,
         ...(process.env.VARIN_RELEASE_ID?.trim()
           ? { releaseId: process.env.VARIN_RELEASE_ID.trim() }
           : {}),
-        piRuntime: {
-          ready: Boolean(handshake),
-          capabilities: handshake?.capabilities ?? null,
-          hostVersion: handshake?.hostVersion ?? null,
-          nodeVersion: handshake?.runtime?.nodeVersion ?? null,
-          piVersion: handshake?.runtime?.piVersion ?? null,
-          protocolVersion: handshake?.protocolVersion ?? null,
-          source: handshake?.runtime?.source ?? null,
-          manager: piRuntimeLifecycle?.snapshot ?? null,
-        },
         kernel: kernelClient?.handshake
           ? {
               ready: kernelClient.isReady,
@@ -1077,7 +903,6 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     isUiVisible,
     getUiNotificationClients: () => uiNotificationClients,
     writeSseEvent,
-    sessionRuntime,
     setPushInitialized,
     fs,
     path,
@@ -1098,112 +923,6 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     getUiAuthController: () => uiAuthController,
     isRequestOriginAllowed,
   });
-
-  const requirePiRuntime = options.requirePiRuntime ?? process.env.VARIN_RUNTIME !== 'desktop';
-  type PiWriterTracker = ReturnType<typeof createPiWorkspaceWriterTracker>;
-  type RecoveryTurnCoordinator = ReturnType<typeof createRecoveryTurnCoordinator>;
-  type PiAdmissionRequest = Parameters<NonNullable<HostPiRuntimeBrokerFactoryOptions['admitSessionExecution']>>[0];
-  let piWriterTracker: PiWriterTracker | null = null;
-  let recoveryTurnCoordinator: RecoveryTurnCoordinator | null = null;
-  let assertBotSessionExecution = async (_sessionId: string): Promise<void> => {};
-  const admitPiSessionExecution = async (request: PiAdmissionRequest) => {
-    if (!piWriterTracker) {
-      throw new PiRuntimeBrokerError(
-        'runtime_not_ready',
-        'Pi workspace writer admission is not ready',
-        { retryable: true },
-      );
-    }
-    const assertCanExecute = async () => {
-      if (request.sessionId && request.phase !== 'worker-start') await assertBotSessionExecution(request.sessionId);
-    };
-    await assertCanExecute();
-    const lease = await (recoveryTurnCoordinator?.admit(request) ?? piWriterTracker.admit(request));
-    return { close: () => lease?.close(), assertCanExecute };
-  };
-  const piRuntimeBrokerFactory = options.createPiRuntimeBroker || ((brokerOptions: HostPiRuntimeBrokerFactoryOptions) => createWebPiRuntimeBroker({
-    agentDir: process.env.VARIN_AGENT_DIR,
-    clientVersion: VARIN_VERSION,
-    cwd: process.cwd(),
-    // The official Host always provides SSRF-guarded web.fetch. Reader-model
-    // execution stays inside pi-host so it uses the session's credential and
-    // model authority rather than creating a second model stack in the Host.
-    harnessDocumentRead: true,
-    harnessDocumentPathOverlay: true,
-    harnessWebRead: true,
-    // Provider identity is frozen per session from Pi settings. The Host
-    // service itself is always present, so changing provider does not require
-    // an application restart.
-    harnessWebSearch: true,
-    resolveProjectWorkFocus: async ({ cwd, workspace }) => {
-      if (workspace?.kind === 'unbound') return undefined;
-      const settings = await readSettingsFromDisk();
-      const projects = sanitizeProjects(settings.projects || []) ?? [];
-      const projectId = workspace?.kind === 'workspace' ? workspace.id : undefined;
-      const explicitProject = projectId === undefined
-        ? undefined
-        : projects.find((entry) => entry.id === projectId);
-      const project = explicitProject
-        ?? projects.find((entry) => projectContainsPath(entry, cwd));
-      return project?.defaultWorkFocus === 'code' || project?.defaultWorkFocus === 'research'
-        ? project.defaultWorkFocus
-        : undefined;
-    },
-    ...brokerOptions,
-  }));
-  const createPiRuntimeBroker = (brokerOptions: HostPiRuntimeBrokerFactoryOptions) => attachPiSessionExecutionAdmission(
-    piRuntimeBrokerFactory({
-      ...brokerOptions,
-      admitSessionExecution: admitPiSessionExecution,
-    }),
-    admitPiSessionExecution,
-  );
-  const standalonePayloadDir = options.standalonePayloadDir || process.env.VARIN_PI_STANDALONE_PAYLOAD;
-  piRuntimeLifecycle = options.piRuntimeLifecycle || new PiRuntimeLifecycle({
-    dataDir: VARIN_DATA_DIR,
-    createBroker: (brokerOptions) => createPiRuntimeBroker(brokerOptions),
-    ...(options.hostEntry ? { hostEntry: options.hostEntry } : {}),
-    ...(standalonePayloadDir
-      ? {
-          installer: {
-            standalonePayloadDir,
-          },
-        }
-      : {}),
-  });
-  const ownsPiRuntimeBroker = !options.piRuntimeBroker && !options.piRuntimeLifecycle;
-  const piRuntimeBroker = options.piRuntimeBroker || piRuntimeLifecycle.asBroker();
-  isPiSessionLive = async (sessionId) => (
-    (await piRuntimeBroker.listSessions()).some((session) => session.id === sessionId)
-  );
-  if (options.piRuntimeBroker) {
-    attachPiSessionExecutionAdmission(piRuntimeBroker, admitPiSessionExecution);
-  }
-  const getReadyPiRuntimeBroker = () => (
-    options.piRuntimeBroker
-    || (piRuntimeLifecycle?.currentBroker ? piRuntimeBroker : null)
-  );
-  const startPiRuntime = async () => {
-    recordStartupPerformance('pi-runtime.warmup.start');
-    try {
-      piRuntimeHandshake = await piRuntimeLifecycle.start() ?? null;
-      if (piRuntimeHandshake) {
-        recordStartupPerformance('pi-runtime.warmup.ready');
-        return;
-      }
-      if (requirePiRuntime) {
-        recordStartupPerformance('pi-runtime.warmup.error');
-        throw new Error('Pi runtime is not ready');
-      }
-    } catch (error) {
-      recordStartupPerformance('pi-runtime.warmup.error');
-      if (requirePiRuntime) throw error;
-      console.warn('[PiRuntime] Deferred runtime start:', errorMessage(error));
-    }
-  };
-  piRuntimeLifecycle.subscribe((snapshot) => {
-    if (snapshot.status === 'ready') piRuntimeHandshake = piRuntimeLifecycle.handshake ?? piRuntimeHandshake;
-  });
   if (!extensionRuntime) {
     extensionRuntime = await ApplicationExtensionRuntime.create({
       brokerScript: fileURLToPath(new URL('../broker/broker-child.mjs', import.meta.resolve('@varin/extension-host'))),
@@ -1221,87 +940,18 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     onExit: (error) => console.error('[VarinKernel] Kernel process exited:', error.message),
   });
   await kernelClient.start();
-  const sourceViewStorageRoot = path.join(VARIN_DATA_DIR, 'source-views');
-  await fsPromises.mkdir(sourceViewStorageRoot, { recursive: true });
-  const kernelSessionActors = new Map<string, { authorityInstanceId: string; sessionId: string; workerId: string; workerGeneration: number; runId?: string }>();
-  const scopeDirectory = async (scopeId: string): Promise<string> => {
-    if (isSessionScopeId(scopeId)) {
-      const sessionId = sessionIdFromScopeId(scopeId);
-      const summary = await piRuntimeBroker.requestForSession(sessionId, 'session.summary', { sessionId })
-        .catch(async () => (await piRuntimeBroker.listSessions()).find(candidate => candidate.id === sessionId));
-      if (!summary?.cwd) throw new Error(`Task session directory is unavailable: ${sessionId}`);
-      return summary.cwd;
-    }
-    if (isBotScopeId(scopeId)) return botScopeRoot(scopeId);
-    return (await documentsAuthority.inspectWorkspace(scopeId)).root;
-  };
-  const scopeDocumentWorkspace = async (scopeId: string): Promise<string> => isSessionScopeId(scopeId) || isBotScopeId(scopeId)
-      ? (await documentsAuthority.resolveWorkspace({ path: await scopeDirectory(scopeId) })).workspaceId : scopeId;
+  const scopeDirectory = async (scopeId: string): Promise<string> => { if (isBotScopeId(scopeId)) return botScopeRoot(scopeId); return (await documentsAuthority.inspectWorkspace(scopeId)).root; };
+  const scopeDocumentWorkspace = async (scopeId: string): Promise<string> => isBotScopeId(scopeId) ? (await documentsAuthority.resolveWorkspace({ path: await scopeDirectory(scopeId) })).workspaceId : scopeId;
   const recoveryCoordinatorWorkspace = `recovery-coordinator:${extensionRuntime.services.hostId}`;
   const kernelStorageAdapter = new KernelStorageAdapter({
     client: kernelClient,
     hostId: extensionRuntime.services.hostId,
     storageRoot: path.join(VARIN_DATA_DIR, 'kernel', extensionRuntime.services.hostId),
     recoveryCoordinatorWorkspace,
-    resolveWorkspaceRoot: async (workspaceId) => workspaceId === SOURCE_VIEW_STORAGE_SCOPE
-      ? sourceViewStorageRoot
-      : isSessionScopeId(workspaceId) || isBotScopeId(workspaceId) ? scopeDirectory(workspaceId)
-        : (await documentsAuthority.admitWorkspaceRegistration(workspaceId)).canonicalPath,
-    resolveActor: async (workspaceId, purpose, hint) => {
-      const maintenance = hint?.capabilities?.some((capability) => (
-        capability === 'recovery.maintenance' || capability === 'storage.maintenance'
-      ));
-      if (maintenance) {
-        if (hint?.owningWorkspace !== workspaceId) throw new Error(`Kernel maintenance identity does not own workspace ${workspaceId}`);
-        return hint;
-      }
-      const sessionId = hint?.sessionId;
-      if (!sessionId) throw new Error(`Kernel operation ${purpose} requires an exact session actor`);
-      const actor = kernelSessionActors.get(sessionId);
-      if (!actor) throw new Error(`Kernel actor session is not registered: ${sessionId}`);
-      const resolved = await harnessSessionRegistration.resolveActor(actor).catch(() => null);
-      if (!resolved?.workspaceId) throw new Error(`Kernel actor is stale: ${sessionId}`);
-      const binding = await threadRegistry.getSessionBinding(sessionId).catch(() => null);
-      const owningWorkspace = binding?.owningScopeId ?? resolved.workspaceId;
-      if (owningWorkspace !== workspaceId) throw new Error(`Kernel actor ${sessionId} does not own workspace ${workspaceId}`);
-      const threadId = binding?.threadId;
-      const runId = actor.runId ?? binding?.runId;
-      if (hint.threadId && hint.threadId !== threadId) throw new Error(`Kernel actor thread identity is stale: ${sessionId}`);
-      if (hint.runId && hint.runId !== runId) throw new Error(`Kernel actor run identity is stale: ${sessionId}`);
-      const executionRoot = (await documentsAuthority.inspectWorkspace(resolved.workspaceId)).root;
-      const pathScopes = (resolved.workspaceScope?.length ? resolved.workspaceScope : ['']).map((scope) => {
-        const relative = path.isAbsolute(scope) ? path.relative(executionRoot, scope) : scope;
-        const normalized = relative.replace(/\\/g, '/').replace(/^\.\//, '');
-        if (path.isAbsolute(relative) || normalized === '..' || normalized.startsWith('../')) {
-          throw new Error(`Kernel actor scope is outside its execution workspace: ${scope}`);
-        }
-        return normalized;
-      });
-      return {
-        authorityInstanceId: actor.authorityInstanceId,
-        workerId: actor.workerId,
-        workerGeneration: actor.workerGeneration,
-        sessionId,
-        ...(threadId ? { threadId } : {}),
-        ...(runId ? { runId } : {}),
-        owningWorkspace,
-        executionWorkspace: resolved.workspaceId,
-        pathScopes,
-        capabilities: [...resolved.grantedCapabilities],
-      };
-    },
+    resolveWorkspaceRoot: async (workspaceId) => isBotScopeId(workspaceId) ? scopeDirectory(workspaceId)
+      : (await documentsAuthority.admitWorkspaceRegistration(workspaceId)).canonicalPath,
   });
-  let resolveManagedContainer: ((directory: string, owningWorkspaceId: string) => Promise<{ workspaceId: string; canonicalRoot: string }>) | null = null;
-  const resolveKernelExecutionRoot = async (canonicalRoot: string, owningWorkspaceId: string) => {
-    try {
-      const resolved = await documentsAuthority.resolveWorkspace({ path: canonicalRoot });
-      const inspected = await documentsAuthority.inspectWorkspace(resolved.workspaceId);
-      return { workspaceId: resolved.workspaceId, canonicalRoot: inspected.root };
-    } catch (error) {
-      if (!resolveManagedContainer) throw error;
-      return resolveManagedContainer(canonicalRoot, owningWorkspaceId);
-    }
-  };
+  const resolveKernelExecutionRoot = async (canonicalRoot: string, _owningWorkspaceId: string) => { const resolved = await documentsAuthority.resolveWorkspace({ path: canonicalRoot }); const inspected = await documentsAuthority.inspectWorkspace(resolved.workspaceId); return { workspaceId: resolved.workspaceId, canonicalRoot: inspected.root }; };
   kernelStorageAdapter.bindFileRootResolver(resolveKernelExecutionRoot);
   const kernelFileResources = new KernelFileResourceBackend(kernelStorageAdapter, {
     resolveExecutionRoot: resolveKernelExecutionRoot,
@@ -1310,13 +960,6 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     resolveExecutionRoot: resolveKernelExecutionRoot,
     authorityPurpose: 'recovery-maintenance',
     authorityCapabilities: ['recovery.maintenance'],
-  });
-  const kernelPathLockService = new KernelPathLockService(kernelStorageAdapter, {
-    resolveOwningWorkspaceId: async (sessionId, executionWorkspaceId) => {
-      const binding = await threadRegistry.getSessionBinding(sessionId).catch(() => null);
-      return binding?.owningScopeId ?? executionWorkspaceId;
-    },
-    resolveWorkspaceRoot: async (workspaceId) => (await documentsAuthority.inspectWorkspace(workspaceId)).root,
   });
   const kernelRecoveryContentStore = new KernelRecoveryContentStore(
     kernelStorageAdapter,
@@ -1353,80 +996,10 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     ...(dirtyBarrierTimeoutMs !== undefined ? { dirtyBarrierTimeoutMs } : {}),
   });
   activeDocumentsAuthority = documentsAuthority;
-  const harnessPathAuthority = createHarnessPathAuthority({
-    authorityId: extensionRuntime.services.hostId,
-    documents: documentsAuthority,
-    fsPromises,
-    pathModule: path,
-    resolveInputPath: (actor, input, signal) => shellPathResolver(actor, input, signal),
-  });
-  piWriterTracker = createPiWorkspaceWriterTracker({ documents: documentsAuthority });
   const workspaceRecoveryEngines = new Map<string, WorkspaceRecoveryEngine>();
-  const assertRecoverySessionWorkspace = async (sessionId: string, workspaceId: string): Promise<void> => {
-    const snapshot = await piRuntimeBroker.requestForSession(sessionId, 'session.snapshot', { sessionId });
-    const authorityWorkspaceId = snapshot.workspace?.kind === 'workspace'
-      ? snapshot.workspace.authorityId ?? snapshot.workspace.id
-      : null;
-    if (authorityWorkspaceId !== workspaceId) {
-      throw new RecoveryPrimitiveError(
-        'navigation-conflict',
-        'The Pi session is no longer bound to the workspace selected for recovery',
-        { details: { sessionId, workspaceId } },
-      );
-    }
-  };
   let threadRecoveryReady = false;
   let managedRecoveryCoordinator: ManagedRecoveryPort | undefined;
-  const recoverySessionNavigation: RecoverySessionNavigation = {
-    ready: conversation => conversation.kind === 'pi' || threadRecoveryReady,
-    async commit(input) {
-      if (input.conversation.kind === 'thread') return threadRecoveryNavigation.commit(input);
-      await assertRecoverySessionWorkspace(input.conversation.sessionId, input.workspaceId);
-      return piRuntimeBroker.requestForSession(
-        input.conversation.sessionId,
-        'session.recovery.navigation.commit',
-        {
-          expectedLeafId: input.expectedLeafId,
-          operationId: input.operationId,
-          preparedTargetLeafId: input.preparedTargetLeafId,
-          sessionId: input.conversation.sessionId,
-          targetId: input.entryId,
-        },
-      );
-    },
-    async commitLeaf(input) {
-      if (input.conversation.kind === 'thread') return threadRecoveryNavigation.commitLeaf(input);
-      await assertRecoverySessionWorkspace(input.conversation.sessionId, input.workspaceId);
-      return piRuntimeBroker.requestForSession(
-        input.conversation.sessionId,
-        'session.recovery.navigation.commitLeaf',
-        {
-          expectedLeafId: input.expectedLeafId,
-          operationId: input.operationId,
-          preparedTargetLeafId: input.preparedTargetLeafId,
-          sessionId: input.conversation.sessionId,
-        },
-      );
-    },
-    async prepare(input) {
-      if (input.conversation.kind === 'thread') return threadRecoveryNavigation.prepare(input);
-      await assertRecoverySessionWorkspace(input.conversation.sessionId, input.workspaceId);
-      return piRuntimeBroker.requestForSession(
-        input.conversation.sessionId,
-        'session.recovery.navigation.prepare',
-        { sessionId: input.conversation.sessionId, targetId: input.entryId },
-      );
-    },
-    async prepareLeaf(input) {
-      if (input.conversation.kind === 'thread') return threadRecoveryNavigation.prepareLeaf(input);
-      await assertRecoverySessionWorkspace(input.conversation.sessionId, input.workspaceId);
-      return piRuntimeBroker.requestForSession(
-        input.conversation.sessionId,
-        'session.recovery.navigation.prepareLeaf',
-        { sessionId: input.conversation.sessionId, targetLeafId: input.targetLeafId },
-      );
-    },
-  };
+  const recoverySessionNavigation: RecoverySessionNavigation = { ready: () => threadRecoveryReady, commit: input => threadRecoveryNavigation.commit(input), commitLeaf: input => threadRecoveryNavigation.commitLeaf(input), prepare: input => threadRecoveryNavigation.prepare(input), prepareLeaf: input => threadRecoveryNavigation.prepareLeaf(input) };
   const resolveDirectoryApplyContext = async (directory: string, owningWorkspaceId?: string) => {
     const resolved = await documentsAuthority.resolveWorkspace({ path: directory });
     return {
@@ -1477,7 +1050,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   documentsAuthority.bindDurableMutationStorage((workspaceId, operation) => (
     foundationalRecoveryEngine.withWorkspaceStorage(
       workspaceId,
-      { mode: 'shared', purpose: 'agent-mutation', create: true },
+      { mode: 'shared', purpose: 'document-workspace-edit', create: true },
       (context) => operation(context),
     )
   ));
@@ -1488,28 +1061,8 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   } catch (error) {
     console.error('[WorkspaceRecovery] Startup workspace recovery requires attention:', errorMessage(error));
   }
-  const piRuntimeStartup = startPiRuntime();
-  if (requirePiRuntime || fencedRecoveryOperations.some(value => value.conversation.kind === 'pi')) await piRuntimeStartup;
-  else void piRuntimeStartup;
-  const combinedRecoveryStartup = piRuntimeStartup.then(() => (
-    foundationalRecoveryEngine.resumeCombinedOperations()
-  )).catch((error) => {
-    console.error('[WorkspaceRecovery] Startup combined recovery requires attention:', errorMessage(error));
-  });
-  if (fencedRecoveryOperations.some(value => value.conversation.kind === 'pi')) await combinedRecoveryStartup;
-  else void combinedRecoveryStartup;
   extensionRuntime.workbench.setWorkspaceScopeResolver((scopeId: unknown) => documentsAuthority.resolveScopeId(scopeId));
-  const kernelProcesses = createKernelProcessService({
-    client: kernelClient,
-    // Registry/admission are initialized before the first product process is
-    // launched; keep that startup dependency explicit without creating a fake root.
-    resolveIdentity: (cwd) => createKernelProcessIdentityResolver({
-      documents: documentsAuthority,
-      registry: threadRegistry,
-      admitManaged: (directory, owner) => managedRootAdmission.materialization(directory, owner),
-    })(cwd),
-    onError: (error) => console.error("[VarinProcess]", error.message),
-  });
+  const kernelProcesses = createKernelProcessService({ client: kernelClient, resolveIdentity: createKernelProcessIdentityResolver({ documents: documentsAuthority }), onError: error => console.error('[VarinProcess]', error.message) });
   // Installation programs are Host-owned tooling. They receive only this
   // private resource root; editor/agent LSP processes still use their workspace.
   const languageToolProcesses = createKernelProcessService({
@@ -1561,13 +1114,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   for (const [providerId, languageId] of managedLanguageProviders) {
     languageSupervisor.registerProvider({ providerId, command: providerId, languageIds: [languageId], source: 'builtin' });
   }
-  const kernelCompute = createKernelComputeService({
-    client: kernelClient,
-    resolveIdentity: (cwd) => createKernelProcessIdentityResolver({
-      documents: documentsAuthority, registry: threadRegistry,
-      admitManaged: (directory, owner) => managedRootAdmission.materialization(directory, owner),
-    })(cwd),
-  });
+  const kernelCompute = createKernelComputeService({ client: kernelClient, resolveIdentity: createKernelProcessIdentityResolver({ documents: documentsAuthority }) });
   // Experiment/resource/source authority (7C/7D, D-300). The service grant is
   // Host-internal — the same trust level as the native process host — so a
   // detached reconciler can inspect, stop and collect jobs after restarts.
@@ -1634,18 +1181,18 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     sources: sourceService,
     sourceAuthority: createResearchSourceAuthority({ kernel: kernelClient, runtime: () => agentRuntime,
       resolveLiveSource: (source, signal) => liveSources.validate(source, signal) }),
-    resolveWorkspaceRoot: async (workspaceId) => (await documentsAuthority.inspectWorkspace(workspaceId)).root,
     onError: (error) => console.error("[VarinExperiment]", error.message),
     onAttemptChanged: (workspaceId) => broadcastResearchFacts(workspaceId, 'attempt'),
     resolveBackend: (ctx, machineId, machine, caller) => managedRemoteTargets!.resolveBackend(ctx, machineId, machine, caller),
   });
-  // Agent-facing settings authority (D-306). Reads/writes go through the real
-  // owners — the app settings store and the Pi settings protocol — so the
-  // catalog the agent sees is the same one the settings UI edits.
+  // Agent tools and user settings surfaces share the same native owners and CAS.
   const settingsActionRegistry = createSettingsActionRegistry({
     semanticIndex: () => semanticIndexManagement,
-    requestWorkspace: (cwd, method, params) => piRuntimeBroker.requestForWorkspace(cwd, method as never, params as never),
-    requestSession: (sessionId, method, params) => piRuntimeBroker.requestForSession(sessionId, method as never, params as never),
+    models: () => modelsService,
+    modelFetch: (input, init) => egressRuntime.fetch(input, init),
+    mcpSettings: () => mcpSettings,
+    agentProfiles: () => agentProfiles,
+    extensionPackages: () => extensionPackages,
     resolveWorkspaceRoot: async (workspaceId) => (
       await documentsAuthority.inspectWorkspace(workspaceId).catch(() => null)
     )?.root ?? null,
@@ -1653,8 +1200,6 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     tunnel: () => tunnelRuntimeContext?.tunnelService ?? null,
     remoteClients: () => remoteClientAuthRuntime,
     languageSupport: () => languageSupportRuntime,
-    runtimeLifecycle: () => piRuntimeLifecycle,
-    agentPersonalization: () => agentPersonalization,
     gitIdentities: gitIdentityStorage,
     surfaceHint: () => {
       const surfaces = clientSurfaceBridge.list();
@@ -1677,7 +1222,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       settingsDocumentRevision,
     ),
   });
-  const settingsActionOperations = createKernelSettingsActionOperationStore(kernelStorageAdapter);
+  const settingsActionOperations = createKernelSettingsActionOperationStore({ kernel: kernelClient, storage: kernelStorageAdapter });
   const settingsService = createSettingsService({
     readAppSettings: () => readSettingsFromDisk(),
     persistAppSettings: (changes, removals, expectedRevision) => settingsRuntime.persistSettingsCas(
@@ -1686,7 +1231,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       expectedRevision,
       settingsDocumentRevision,
     ),
-    requestPi: (cwd, method, params) => piRuntimeBroker.requestForWorkspace(cwd, method, params as never),
+    agentSettings: () => modelsService.settings,
     resolveWorkspaceRoot: async (workspaceId) => (
       await documentsAuthority.inspectWorkspace(workspaceId).catch(() => null)
     )?.root ?? null,
@@ -1697,15 +1242,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       if (source === 'thinking-levels') {
         return THINKING_LEVELS.map((level) => ({ value: level }));
       }
-      if (source === 'models' && caller.workspaceId) {
-        const root = await documentsAuthority.inspectWorkspace(caller.workspaceId).then((ws) => ws.root).catch(() => null);
-        if (!root) return null;
-        const models = await piRuntimeBroker.requestForWorkspace(root, 'model.list', {}).catch(() => null);
-        return models?.filter((model) => model.available).map((model) => ({
-          value: model.id,
-          label: `${model.name} (${model.provider})`,
-        })) ?? null;
-      }
+      if (source === 'models') return (await modelsService.listModels()).map(model => ({ value: model.modelId, label: `${model.name} (${model.providerId})` }));
       return null;
     },
     onChanged: (change) => {
@@ -1730,6 +1267,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   // coordinator.
 
   // Web fetch service — SSRF-guarded, domain policy from workspace config
+  const serviceCredentials = createServiceCredentialStore(VARIN_DATA_DIR);
   const ssrfPolicy: SsrfPolicy = { check: options.desktopNetworkFetch ? checkDesktopHttpUrl : checkSsrf, isSameHost };
   // Single outbound egress authority: proxy/NO_PROXY policy + connect-path
   // SSRF classification shared by web.fetch and web.search providers.
@@ -1739,25 +1277,17 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     getHostConfiguration: async () => {
       const document = await readSettingsFromDisk();
       const network = document.outboundNetwork as { mode?: unknown } | undefined;
-      return readEgressHostConfiguration(document, network?.mode === 'proxy' ? readPiAuthFile() : {});
+      return readEgressHostConfiguration(document, network?.mode === 'proxy' ? serviceCredentials.read() : {});
     },
   });
   registerEgressRoutes(app, {
     requireAuth: uiAuthController.requireAuth,
     readSettings: readSettingsFromDisk,
-    readAuth: readPiAuthFile,
-    saveAuth: savePiProviderAuth,
-    removeAuth: removePiProviderAuth,
+    readAuth: serviceCredentials.read,
+    saveAuth: serviceCredentials.save,
+    removeAuth: serviceCredentials.remove,
     egress: egressRuntime,
   });
-  const retrievalEvidenceAccess: {
-    persistReceipt?: (
-      workspaceId: string,
-      receipt: import('./lib/harness/web-fetch-receipt.js').WebFetchReceiptDraft,
-      markdown: string,
-    ) => Promise<import('@varin/protocol').RetrievalUrlReceipt>;
-    syncThread?: (workspaceId: string, thread: import('@varin/protocol').Thread) => Promise<void>;
-  } = {};
   // Deferred until the kernel working-state access exists below; fetches
   // still deliver content but mint no snapshotId if it is unavailable.
   const webMaterialAccess: { put?: WebMaterialStore['put']; read?: WebMaterialStore['read']; findAnalysis?: WebMaterialStore['findAnalysis']; findAnalysisConfig?: WebMaterialStore['findAnalysisConfig'] } = {};
@@ -1781,40 +1311,8 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     egress: egressRuntime,
     documentReader,
     ...(options.renderWebPage ? { renderer: options.renderWebPage } : {}),
-    persistReceipt: async (workspaceId, receipt, markdown) => {
-      if (!retrievalEvidenceAccess.persistReceipt) throw new Error('Durable web receipt storage is unavailable');
-      return retrievalEvidenceAccess.persistReceipt(workspaceId, receipt, markdown);
-    },
     materials: materialStore,
   });
-  const webSearchService = createWebSearchService(
-    async ({ sessionId }) => {
-      const binding = harnessServiceHost.getWebBinding(sessionId);
-      if (!binding) return { unavailable: true as const, hint: 'Web search session settings are unavailable' };
-      if (binding.searchError) return { unavailable: true as const, hint: binding.searchError };
-      const search = binding.settings?.search;
-      return resolveConfiguredSearchProvider({
-        settings: search,
-        // Credential material is intentionally resolved live for every call.
-        // Revocation makes an old frozen binding unavailable immediately.
-        auth: search ? readPiAuthFile() : {},
-        // Search providers share the host egress policy (proxy/NO_PROXY/SSRF).
-        fetch: egressRuntime.fetch as typeof globalThis.fetch,
-      });
-    },
-    async ({ sessionId }) => {
-      const domains = harnessServiceHost.getWebBinding(sessionId)?.settings?.domains;
-      return {
-        ...(domains?.allow === undefined ? {} : { allow: [...domains.allow] }),
-        block: [...(domains?.block ?? [])],
-      };
-    },
-    // URL items share the exact web.fetch authority path: session binding,
-    // domain policy, renderer entitlement, and receipt minting.
-    {
-      fetchUrl: (url, ctx) => performHarnessWebFetch(harnessServiceHost, { url }, ctx),
-    },
-  );
   // Scholarly APIs share the same egress authority — proxies and SSRF
   // classification apply identically to every outbound consumer.
   const researchSearchService = createResearchSearchService({ fetch: egressRuntime.fetch as typeof globalThis.fetch });
@@ -1826,93 +1324,19 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   let userKnowledgeStoreLoad: Promise<KnowledgeStore> | null = null;
   let knowledgeVectors: KnowledgeVectorRuntime | null = null;
   const hostId = extensionRuntime.services.hostId;
-  let threadRuntime: ReturnType<typeof createThreadRuntime> | null = null;
-  let bindThreadKnowledgeSession = (_sessionId: string, _workspaceId: string): void => undefined;
-  const harnessShellActivity = {
-    hasActiveCommandAtDirectory: (_directory: string): boolean => false,
-    closeSessionShell: async (_sessionId: string): Promise<void> => {},
-  };
-  const sessionSnapshots = new Map<string, Record<string, unknown>>();
   const computerServiceRef: { current?: ReturnType<typeof createComputerService> } = {};
   const memoryOrganizerRef: { current?: ReturnType<typeof createMemoryOrganizer> } = {};
-  const threadWaitRuntimeRef: { current?: ReturnType<typeof createThreadWaitRuntime> } = {};
   let botAdmissionReady = false;
   let botLifecycleRuntime: ReturnType<typeof createBotLifecycleRuntime> | null = null;
   const canExecuteBotScope = async (scopeId: string): Promise<boolean> => !isBotScopeId(scopeId)
     || (botAdmissionReady && await botService.canExecute(botIdFromScopeId(scopeId)));
-  const threadRegistry = createThreadRegistry({
-    dataDir: VARIN_DATA_DIR,
-    hostId,
-    canExecuteScope: canExecuteBotScope,
-    onObserverError: (error) => {
-      console.error('[HarnessThreads] Observer failed:', errorMessage(error));
-    },
-    onThreadChanged: (workspaceId, parent, thread, activeRun) => {
-      threadWaitRuntimeRef.current?.observe(workspaceId, thread, activeRun);
-      threadRuntime?.observeCodeSubmissions(workspaceId, thread);
-      broadcastGlobalUiEvent?.({
-        type: 'varin:harness-thread-changed',
-        properties: { workspaceId, parent, thread, activeRun },
-      });
-      if (retrievalEvidenceAccess.syncThread) {
-        void threadRegistry.getThreadById(workspaceId, thread.id).then((current) => (
-          current ? retrievalEvidenceAccess.syncThread?.(workspaceId, current) : undefined
-        )).catch((error) => {
-          console.error('[HarnessThreads] Evidence ownership reconciliation failed:', errorMessage(error));
-        });
-      }
-      if (thread.lifecycle === 'archived') {
-        void followUpService.settleTarget(workspaceId, { kind: 'thread', id: thread.id }).catch((error: unknown) => {
-          console.error('[VarinFollowUp] Archive settle failed:', errorMessage(error));
-        });
-      }
-    },
-    onThreadDone: (workspaceId, parent, threadId, report) => {
-      broadcastGlobalUiEvent?.({
-        type: 'varin:harness-thread-done',
-        properties: { workspaceId, parent, threadId, report },
-      });
-      if (isBotScopeId(workspaceId)) memoryOrganizerRef.current?.noteScope(workspaceId);
-    },
-    onThreadReturned: (_scopeId, _parent, _threadId, run) => {
-      if (run.sessionId) void computerServiceRef.current?.finishExecution({ work: { runtime: 'pi', sessionId: run.sessionId }, runId: run.id }).catch(error => console.error('[Computer] Run cleanup failed:', errorMessage(error)));
-    },
-
-    onThreadDequeued: createOnThreadDequeued({
-      getRegistry: () => threadRegistry,
-      getRuntime: () => threadRuntime,
-      formatError: errorMessage,
-      onEndRunFailure: (_error, endError) => {
-        console.error('[HarnessThreads] Failed to record dequeued thread failure:', errorMessage(endError));
-      },
-    }),
-    onAdmissionFreed: (workspaceId, parent) => {
-      // A freed shared-budget slot retries deferred work: lost-run resume
-      // rechecks admission per Thread before starting anything (3.18C).
-      void threadRuntime?.resumeLostForParent(workspaceId, parent).catch((error: unknown) => {
-        console.error('[HarnessThreads] Lost-run resume after freed admission failed:', errorMessage(error));
-      });
-    },
-    onThreadRemoved: (workspaceId, threadId) => (
-      followUpService.settleTarget(workspaceId, { kind: 'thread', id: threadId })
-        .then(() => undefined)
-        .catch((error: unknown) => {
-          console.error('[VarinFollowUp] Thread-removal settle failed:', errorMessage(error));
-        })
-    ),
-  });
-  const threadRegistryStartup = await threadRegistry.reconcileAfterHostRestart();
-  for (const failure of threadRegistryStartup.failures) {
-    console.error(`[HarnessThreads] Startup reconciliation failed (${failure.code}) for ${failure.path}: ${failure.message}`);
-  }
   // BC0: durable Bot identity. The profile record lives in the kernel catalog;
   // the Bot's work is ordinary Threads under the `bot:<id>` owner scope, and
-  // its entry chat is a real unbound Pi session anchored to a `bot-root` Thread.
+  // its entry conversation is a native Thread and branch.
   const botService = createBotService({
     client: kernelClient,
     hostId,
     dataDir: VARIN_DATA_DIR,
-    registry: threadRegistry,
     agent: {
       ensureEntry: async bot => {
         if (bot.entry.runtime !== 'agent') throw new Error('Agent Bot identity is required');
@@ -1953,11 +1377,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     onChange: (bot) => broadcastGlobalUiEvent?.({ type: 'varin:bot-changed', properties: { botId: bot.id } }),
     onDeleted: (botId) => broadcastGlobalUiEvent?.({ type: 'varin:bot-changed', properties: { botId } }),
     removeData: createBotDataCleanup({
-      dataDir: VARIN_DATA_DIR, hostId, registry: threadRegistry,
-      deleteThread: (...args) => {
-        if (!threadRuntime) throw new Error('Thread runtime is not ready');
-        return threadRuntime.deleteUser(...args);
-      },
+      dataDir: VARIN_DATA_DIR, hostId,
       deleteAgentScope: async bot => {
         const gate = await botService.executionGate(bot.id);
         if (!gate.activityOperationId) throw new Error('Bot deletion requires the original Sleep intent');
@@ -1966,11 +1386,6 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
         await collaboration.releaseCancelledThreads(new Set(scope.threads.map(thread => thread.thread_id)));
         for (const run of scope.runs) await agentRuntime.retireSourceGrants(run.runId);
         await kernelClient.agentRuntimeRequest('runtime.bot.scope.remove', { botId: bot.id, profileRevision: gate.profileRevision, activityOperationId: gate.activityOperationId });
-      },
-      deleteSession: async (sessionId) => {
-        const result = await piRuntimeBroker.deleteSession(sessionId);
-        broadcastGlobalUiEvent?.({ type: 'varin:session-deleted', properties: { sessionId } });
-        return result;
       },
       releaseRemoteScope: (scopeId) => managedRemoteTargets.releaseScope(scopeId),
       closeMemory: async (scopeId, storeKey) => {
@@ -1982,28 +1397,6 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       },
       files: new KernelFileResourceBackend(kernelStorageAdapter, { authorityPurpose: 'bot-data-cleanup' }),
     }),
-    createSession: (input) => piRuntimeBroker.createSession(
-      input.cwd,
-      input.name,
-      undefined,
-      { kind: 'unbound' },
-      input.model ? { model: input.model } : undefined,
-    ),
-    openSession: (input) => piRuntimeBroker.openSession({ ...input, workspace: { kind: 'unbound' } }),
-    applyModel: async (input) => {
-      if (!input.model) {
-        await piRuntimeBroker.requestForSession(input.sessionId, 'model.resetDefault', { sessionId: input.sessionId });
-        return;
-      }
-      await piRuntimeBroker.requestForSession(input.sessionId, 'model.select', {
-        sessionId: input.sessionId,
-        provider: input.model.providerId,
-        modelId: input.model.modelId,
-      });
-    },
-    applyInstructions: async (input) => {
-      await piRuntimeBroker.requestForSession(input.sessionId, 'session.instructions.apply', input);
-    },
     onError: (error) => {
       console.error('[VarinBots]', errorMessage(error));
     },
@@ -2016,13 +1409,6 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   });
   await botService.publishExecutionGates();
   botAdmissionReady = true;
-  assertBotSessionExecution = async (sessionId) => {
-    const entry = await botService.botForSession(sessionId);
-    const owner = entry ? null : await threadRegistry.resolveSessionOwner(sessionId);
-    if ((entry && !await botService.canExecute(entry.id)) || (owner && !await canExecuteBotScope(owner.owningScopeId))) {
-      throw new PiRuntimeBrokerError('runtime_not_ready', 'This Bot is asleep or changing state. Wake it before continuing.', { retryable: true });
-    }
-  };
   const botScopeRoot = async (scopeId: string): Promise<string> => {
     const bot = await botService.get(botIdFromScopeId(scopeId));
     if (!bot) throw new Error(`Unknown Bot scope: ${scopeId}`);
@@ -2058,7 +1444,6 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   const researchDiscoveryOwner: { current?: ReturnType<typeof createResearchDiscoveryRuntime> } = {};
   const webRuntimeOwner: { current?: ReturnType<typeof createWebRuntime> } = {};
   const resolveComputerWork = async (work: import('@varin/protocol').ComputerWorkRef) => {
-    if (work.runtime === 'pi') return resolvePiComputerWork(threadRegistry, work.sessionId);
     if (!computerRuntimeOwner.current) throw new ComputerError('computer-owner-unavailable', 'The Agent Computer identity owner is unavailable');
     return computerRuntimeOwner.current.resolve(work);
   };
@@ -2066,21 +1451,9 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     localControlHolder: options.onComputerControlsReady ? desktopControlHolder : undefined,
     resolveActor: async work => (await resolveComputerWork(work))?.actor ?? null,
     resolveScope: async work => (await resolveComputerWork(work))?.scope ?? null,
-    bindDesktop: async (actor, desktopId) => {
-      if (!actor.registry || actor.execution.work.runtime !== 'pi') throw new ComputerError('computer-owner-unavailable', 'Agent desktop assignment decisions are not connected');
-      await threadRegistry.setThreadEnvironment(actor.registry.scopeId, actor.registry.threadId, { desktopId });
-    },
-    revokeSession: async (actor, desktopIds) => {
-      if (actor.execution.work.runtime === 'agent') {
-        await scriptRuntimeOwner.current?.cancelComputer(actor.execution.runId, desktopIds);
-        return;
-      }
-      await piRuntimeBroker.requestForSession(actor.execution.work.sessionId, 'session.computer.cancel', { sessionId: actor.execution.work.sessionId, runId: actor.execution.runId });
-    },
-    notifyActor: async (actor, text, wake, id, recipient = 'actor') => {
-      const work = recipient === 'root' ? actor.rootWork : actor.execution.work;
-      if (work.runtime !== 'pi') throw new ComputerError('computer-owner-unavailable', 'Agent Computer environment input is not connected');
-      await piRuntimeBroker.requestForSession(work.sessionId, wake ? 'agent.threadRequest' : 'agent.notify', { sessionId: work.sessionId, messageId: `computer:${id}`, text });
+    cancelExecutor: async (actor, desktopIds) => {
+      if (!scriptRuntimeOwner.current) throw new ComputerError('computer-owner-unavailable', 'The original script executor is unavailable');
+      await scriptRuntimeOwner.current.cancelComputer(actor.execution.runId, desktopIds);
     },
     onAutomationInvalidated: (event) => broadcastGlobalUiEvent?.({ type: 'varin:computer-automation-invalidated', properties: event }),
     onAutomationChange: (state) => {
@@ -2101,10 +1474,6 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     registerVmGuest: vmGuestRegistration.register,
     removeVmGuest: vmGuestRegistration.remove,
     resolveWork: async (work) => {
-      if (work.runtime === 'pi') {
-        const owner = await threadRegistry.resolveSessionOwner(work.sessionId);
-        return owner ? { scopeId: owner.owningScopeId, threadId: owner.threadId } : null;
-      }
       const thread = await agentRuntime.thread(work.threadId).catch(error => {
         if (error instanceof KernelClientError && error.code === 'not-found') return null;
         throw error;
@@ -2118,22 +1487,8 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       await computerRuntimeOwner.current.cancelControlEvents(command);
     },
     onControlEvent: async (event) => {
-      if (event.actor.execution.work.runtime === 'agent') {
-        if (!computerRuntimeOwner.current) throw new ComputerError('computer-owner-unavailable', 'The Agent Computer input owner is unavailable; the original fact remains pending');
-        await computerRuntimeOwner.current.acceptControlEvent(event);
-        return;
-      }
-      if (event.actor.execution.work.runtime !== 'pi' || !event.actor.registry) throw new ComputerError('computer-owner-unavailable', 'Agent Computer handback delivery is not connected; its original event remains pending');
-      await createFollowUpThreadSender({
-        registry: threadRegistry,
-        continueRun: (input) => threadRuntime!.continueRun(input),
-        sendToSession: (sessionId, message, meta) => threadRuntime!.send(sessionId, message, meta),
-      })({
-        scopeId: event.actor.registry!.scopeId, threadId: event.actor.registry!.threadId,
-        requestId: event.id, from: { kind: 'user', id: `desktop:${event.desktopId}` },
-        text: `Human returned control of desktop "${event.label}" (${event.desktopId}) at ${event.at}. Inspect the current desktop state before continuing; the human may have changed files or applications while holding control.`,
-      });
-      await computerService.automation.notifyHandoff(event.actor, `The user returned control of desktop "${event.label}". The assigned worker can observe the current scene and continue.`, `handback:${event.id}`, [computerExecutionKey(event.actor.execution)]);
+      if (!computerRuntimeOwner.current) throw new ComputerError('computer-owner-unavailable', 'The Computer input owner is unavailable; the original fact remains pending');
+      await computerRuntimeOwner.current.acceptControlEvent(event);
     },
     // BC6: remote desktops are served by the same `desktopHosts` connection
     // settings managed-remote resolves — apiUrl + clientToken authenticate
@@ -2161,8 +1516,6 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     storeForScopeId: getKnowledgeStoreForScope,
     userStore: getUserKnowledgeStore,
     threadStoreIfPresent: async threadId => await knowledgeStoreExistsForScope(threadScopeId(threadId)) ? getKnowledgeStoreForScope(threadScopeId(threadId)) : null,
-    sessionStoreIfPresent: async (sessionId) => await knowledgeStoreExistsForScope(sessionScopeId(sessionId))
-      ? getKnowledgeStoreForScope(sessionScopeId(sessionId)) : null,
     ownerForThread: async threadId => {
       const thread = await agentRuntime.thread(threadId);
       if (!thread.bot_id) throw new Error('Thread is not bound to a Bot');
@@ -2170,20 +1523,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     },
     associationForThread: threadId => workAssociationForThread(threadId),
     readHistorySource: async (botId, span) => (await botHistory.read(botId, span)).text,
-    ownerForSession: async (sessionId) => {
-      const scopeId = await owningKnowledgeScopeIdForSession(sessionId) ?? sessionScopeId(sessionId);
-      if (isBotScopeId(scopeId)) return { scope: 'bot', ownerId: botIdFromScopeId(scopeId) };
-      if (isSessionScopeId(scopeId)) return { scope: 'session', ownerId: sessionIdFromScopeId(scopeId) };
-      return { scope: 'workspace', ownerId: scopeId };
-    },
     vectors: () => knowledgeVectors,
-    associationForSession: (sessionId) => workAssociationForSession(sessionId),
-    readSessionEntries: async (sessionId, scope) => (await piRuntimeBroker.previewSessionEntries(sessionId, undefined, scope)).entries,
-    readRunReport: async (scopeId, threadId, runId) => {
-      const run = (await threadRegistry.listRuns(scopeId, threadId)).find((run) => run.id === runId);
-      if (!run?.report) return null;
-      return [run.report.conclusion, run.report.unresolved.length ? `Unresolved: ${run.report.unresolved.join('; ')}` : ''].filter(Boolean).join('\n\n');
-    },
     onChanged: (owner, ids) => {
       broadcastGlobalUiEvent?.({
         type: 'varin:harness-knowledge-changed',
@@ -2197,27 +1537,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     onError: (error) => console.error('[VarinMemory]', errorMessage(error)),
   });
   let personalizationRuntime: AgentRuntimeClient | undefined = undefined;
-  const agentPersonalization = createAgentPersonalization({
-    client: kernelClient,
-    context: createPersonalizationContextResolver({ runtime: () => personalizationRuntime, legacy: async (sessionId) => {
-      const binding = await threadRegistry.getSessionBinding(sessionId);
-      const thread = binding?.owner === 'spawned-child' ? await threadRegistry.getThreadById(binding.owningScopeId, binding.threadId) : null;
-      if (binding?.owner === 'spawned-child' && !thread) throw new Error('The session thread configuration is unavailable');
-      const threadRole = binding?.owner !== 'spawned-child' ? 'main' as const
-        : thread?.preset === 'retrieval' || thread?.kind === 'discussion' ? 'read-only' as const : 'worker' as const;
-      const scopeId = await owningKnowledgeScopeIdForSession(sessionId);
-      if (scopeId && isBotScopeId(scopeId)) return { bot: true, threadRole };
-      const snapshot = sessionSnapshots.get(sessionId);
-      const cwd = typeof snapshot?.cwd === 'string' ? snapshot.cwd : '';
-      const projects = sanitizeProjects((await readSettingsFromDisk()).projects) ?? [];
-      const project = projects.find(entry => cwd && projectContainsPath(entry, cwd));
-      return { bot: false, threadRole, ...(project ? { projectId: project.id } : {}) };
-    } }),
-    onChanged: () => {
-      broadcastGlobalUiEvent?.({ type: 'varin:agent-personalization-changed', properties: {} });
-      void refreshThreadPersonalization().catch(() => console.error('[Thread] Personalization refresh requires attention'));
-    },
-  });
+  const agentPersonalization = createAgentPersonalization({ client: kernelClient, context: createPersonalizationContextResolver({ runtime: () => personalizationRuntime }), onChanged: () => { broadcastGlobalUiEvent?.({ type: 'varin:agent-personalization-changed', properties: {} }); void refreshThreadPersonalization().catch(() => console.error('[Thread] Personalization refresh requires attention')); } });
   // Bot background memory organizer reads durable session/run sources.
   // filters them with the memory-organization fast decision when bound, and
   // narrates proposals through the models.memoryOrganizer slot on the original
@@ -2240,40 +1560,6 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     listScopeIds: async () => {
       return (await botService.list()).map((bot) => botScopeId(bot.id)).sort();
     },
-    listScopeSessions: async (scopeId) => {
-      const threads = await threadRegistry.listWorkspaceThreads(scopeId);
-      const ids = new Set<string>();
-      for (const thread of threads) {
-        for (const run of await threadRegistry.listRuns(scopeId, thread.id)) {
-          if (run.sessionId) ids.add(run.sessionId);
-        }
-      }
-      return [...ids];
-    },
-    listRunSources: async (scopeId) => {
-      const threads = await threadRegistry.listWorkspaceThreads(scopeId);
-      const sources: OrganizerRunSource[] = [];
-      for (const thread of threads) {
-        for (const run of await threadRegistry.listRuns(scopeId, thread.id)) {
-          if (!run.report) continue;
-          const report = run.report;
-          const unresolved = report.unresolved.length > 0 ? `Unresolved: ${report.unresolved.join('; ')}` : '';
-          sources.push({
-            threadId: thread.id,
-            threadTitle: thread.brief || thread.id,
-            runId: run.id,
-            sessionId: run.sessionId,
-            reportText: [report.conclusion, unresolved].filter(Boolean).join('\n\n'),
-            endedAt: run.endedAt,
-          });
-        }
-      }
-      return sources;
-    },
-    scopeForSession: async (sessionId) => {
-      const scope = await owningKnowledgeScopeIdForSession(sessionId);
-      return scope && isBotScopeId(scope) ? scope : null;
-    },
     canExecuteScope: canExecuteBotScope,
     // A Bot scope with no dedicated organizer slot inherits the Bot's own
     // model — Bot memory keeps organizing without a second configuration.
@@ -2282,831 +1568,36 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       const bot = await botService.get(botIdFromScopeId(scopeId));
       if (!bot || bot.archived) return null;
       if (bot.model) return bot.model;
-      if (bot.entry.runtime === 'agent') return botAgentModel(bot);
-      if (!bot.entry.sessionId) return null;
-      // An unset preference inherits the Bot entry's actual Pi selection,
-      // including Pi's default. It must not disable background memory or borrow
-      // whichever unrelated chat happens to be live.
-      const liveModel = recordOf(sessionSnapshots.get(bot.entry.sessionId)?.model);
-      if (typeof liveModel.provider === 'string' && typeof liveModel.id === 'string') {
-        return { providerId: liveModel.provider, modelId: liveModel.id };
-      }
-      const entries = (await piRuntimeBroker.previewSessionEntries(bot.entry.sessionId, bot.homeDir, 'branch')).entries;
-      const selected = entries.findLast((entry) => entry.type === 'model_change');
-      return selected?.type === 'model_change' ? { providerId: selected.provider, modelId: selected.modelId } : null;
+      return botAgentModel(bot);
     },
-    readEntries: async (sessionId) => (
-      (await piRuntimeBroker.previewSessionEntries(sessionId, undefined, 'all')).entries
-    ),
     memory: memoryService,
     onError: (error) => console.error('[VarinMemoryOrganizer]', errorMessage(error)),
   });
   memoryOrganizerRef.current = memoryOrganizer;
-  const threadTranscriptReader = createThreadTranscriptReader({
-    readSessionEntries: (sessionId) => piRuntimeBroker.previewSessionEntries(sessionId, undefined, 'all'),
-  });
-  const threadWorktreeRuntime = createThreadWorktreeRuntime({
-    spawnProcess: kernelProcesses.spawn,
-    authorizeManagedRoot: async (candidate) => {
-      const normalize = (value: string) => {
-        const resolved = path.resolve(value).replace(/\\/g, '/');
-        return process.platform === 'win32' ? resolved.toLowerCase() : resolved;
-      };
-      const canonical = async (value: string) => normalize(await fs.promises.realpath(value).catch(() => path.resolve(value)));
-      const observed = await canonical(candidate);
-      for (const rootName of ['worktrees', 'thread-scratch']) {
-        const applicationRoot = await canonical(path.join(VARIN_DATA_DIR, rootName));
-        const applicationRelative = path.relative(applicationRoot, observed);
-        if (applicationRelative
-          && !applicationRelative.startsWith('..')
-          && !path.isAbsolute(applicationRelative)
-          && applicationRelative.split(/[\\/]/).filter(Boolean).length === 1) {
-          return true;
-        }
-      }
-      if (path.basename(observed).toLowerCase() !== 'worktrees'
-        || path.basename(path.dirname(observed)).toLowerCase() !== '.varin') return false;
-      const workspaceRoot = path.dirname(path.dirname(observed));
-      try {
-        const identity = await documentsAuthority.resolveWorkspace({ path: workspaceRoot });
-        const inspected = await documentsAuthority.inspectWorkspace(identity.workspaceId);
-        return await canonical(inspected.root) === await canonical(workspaceRoot);
-      } catch {
-        return false;
-      }
-    },
-    removeManagedPath: async ({ workspaceId, managedRoot, path: targetPath, operationId }) => {
-      const relative = path.relative(managedRoot, targetPath).replace(/\\/g, '/');
-      if (!relative || relative === '..' || relative.startsWith('../') || path.isAbsolute(relative)) {
-        throw new Error(`Managed directory removal escaped its ownership root: ${targetPath}`);
-      }
-      const identity = {
-        authorityId: extensionRuntime.services.hostId,
-        canonicalRoot: managedRoot,
-        filesystemProfile: process.platform === 'win32' ? 'windows-local' : `${process.platform}-local`,
-        workspaceId,
-      };
-      await kernelFileResources.gateFor(identity).run(
-        [{ resourceId: relative, scope: 'subtree' }],
-        () => kernelFileResources.remove(identity, relative, {
-          recursive: true,
-          force: true,
-          operationId,
-        }),
-      );
-    },
-    createScratch: async (sourceRoot, threadId) => {
-      const workspaceKey = crypto.createHash('sha256').update(path.resolve(sourceRoot)).digest('hex');
-      const managedRoot = path.join(VARIN_DATA_DIR, 'thread-scratch', workspaceKey);
-      await fs.promises.mkdir(managedRoot, { recursive: true });
-      return { path: path.join(managedRoot, threadId), managedRoot };
-    },
-    createWorktree: async (directory, input) => {
-      const git = await import('./lib/git/service.js');
-      return git.createWorktree(directory, input, {
-        documents: documentsAuthority,
-        writerOwner: { kind: 'harness-thread', id: `create:${String(input.worktreeName ?? 'thread')}` },
-      });
-    },
-    getWorktreeBootstrapStatus: async (directory) => {
-      const git = await import('./lib/git/service.js');
-      return git.getWorktreeBootstrapStatus(directory);
-    },
-    gitBinary: platformEnvironmentRuntime.resolveGitBinaryForSpawn(),
-    env: {
-      ...process.env,
-      PATH: platformEnvironmentRuntime.buildAugmentedPath(),
-    },
-  });
-  const managedRootAdmission = createManagedRootAdmission({
-    listWorktrees: async (workspaceId) => (await threadRegistry.listWorkspaceThreadSnapshots(workspaceId))
-      .flatMap(({ thread }) => thread.worktree ? [thread.worktree] : []),
-    assertOwnership: (worktree, operation, candidates) => threadWorktreeRuntime.assertOwnership(worktree, operation, candidates),
-  });
-  kernelStorageAdapter.bindManagedRootResolver(managedRootAdmission.materialization);
-  resolveManagedContainer = managedRootAdmission.container;
-  const branchEntryIdsForSession = async (sessionId: string): Promise<string[]> => {
-    const branch = await piRuntimeBroker.requestForSession(sessionId, 'session.entries', {
-      sessionId,
-      scope: 'branch',
-    });
-    return branch.entries.map((entry) => entry.id);
-  };
+  const inspectSourceInventory = createSourceGitInventory({ spawn: kernelProcesses.spawn, gitBinary: platformEnvironmentRuntime.resolveGitBinaryForSpawn(), env: { ...process.env, PATH: platformEnvironmentRuntime.buildAugmentedPath() } });
   const harnessWorkingStates = createKernelWorkspaceWorkingStateAccess(kernelStorageAdapter, foundationalRecoveryEngine, kernelRecoveryStore, scopeDocumentWorkspace);
-  // Source views own private kernel records, not user workspace recovery or disk mutations.
-  const sourceViews = createSourceViewStore(createKernelWorkspaceWorkingStateAccess(kernelStorageAdapter));
-  const retrievalArtifacts = createRetrievalArtifactAccess(harnessWorkingStates);
-  const materialStorage = createMaterialStorageAccess({ kernel: kernelClient, storage: kernelStorageAdapter, legacy: harnessWorkingStates });
+  const materialStorage = createMaterialStorageAccess({ kernel: kernelClient, storage: kernelStorageAdapter });
   const mediaResources = createMediaResourceStore(materialStorage);
   const webMaterials = createWebMaterialStore(materialStorage);
   webMaterialAccess.put = webMaterials.put;
   webMaterialAccess.read = webMaterials.read;
   webMaterialAccess.findAnalysis = webMaterials.findAnalysis;
   webMaterialAccess.findAnalysisConfig = webMaterials.findAnalysisConfig;
-  const materialCollectionsService = createMaterialCollectionsService(materialStorage, {
-    materials: webMaterials,
-    // URL members go through the full web.fetch path: session binding,
-    // domain policy, renderer entitlement, and receipt authority.
-    fetchUrl: (params, ctx) => performHarnessWebFetch(harnessServiceHost, params, ctx),
-    resolveThreadId: async (sessionId) => {
-      const binding = await threadRegistry.getSessionBinding(sessionId);
-      return binding?.threadId;
-    },
-    // Same reachability rule as thread.send: parent, child, or same-parent
-    // sibling inside the caller's root-task family.
-    threadsRelated: async (fromThreadId, toThreadId, workspaceId) => {
-      const from = await threadRegistry.getThreadById(workspaceId, fromThreadId);
-      const to = await threadRegistry.getThreadById(workspaceId, toThreadId);
-      if (!from || !to) return false;
-      return (to.parent.kind === "thread" && to.parent.id === from.id)
-        || (from.parent.kind === "thread" && from.parent.id === to.id)
-        || (to.parent.kind === from.parent.kind && to.parent.id === from.parent.id);
-    },
-  });
-  // Fast-decision deps are bound after the semantic runtime exists; the
-  // service reads them at call time so an unconfigured purpose reports
-  // honestly instead of being absent.
-  const researchDecideDeps: ResearchDecideDeps = {
-    readCandidateText: async (request, authority, signal) => {
-      const sessionId = authority.sessionId;
-      const binding = sessionId ? harnessServiceHost.getWebBinding(sessionId) : undefined;
-      const policy = binding?.settings?.domains ?? (sessionId ? await harnessServiceHost.materialWebPolicy?.(sessionId) : undefined);
-      return webFetchService.fetch({ snapshotId: request.snapshotId, view: 'text',
-        ...(request.startLine === undefined ? {} : { position: { kind: 'lines', startLine: request.startLine,
-          ...(request.endLine === undefined ? {} : { endLine: request.endLine }) } }) }, {
-        workspaceId: authority.owningWorkspaceId, authority, signal, domainPolicy: mergeHarnessWebDomainPolicy(policy, undefined),
-        issueReceipt: false,
-      });
-    },
-    resolveThreadId: async (sessionId) => {
-      const binding = await threadRegistry.getSessionBinding(sessionId);
-      return binding?.threadId;
-    },
-  };
-  const researchDecideService = createResearchDecideService(researchDecideDeps);
-  retrievalEvidenceAccess.persistReceipt = retrievalArtifacts.persistReceipt;
-  retrievalEvidenceAccess.syncThread = retrievalArtifacts.syncThreadEvidence;
-  const retainedSourceViewIds = new Set<string>();
-  for (const workspaceId of await threadRegistry.listWorkspaceIds()) {
-    const workspaceThreads = await threadRegistry.listWorkspaceThreads(workspaceId);
-    for (const thread of workspaceThreads) if (thread.manifest.sourceViewId) retainedSourceViewIds.add(thread.manifest.sourceViewId);
-    await harnessWorkingStates.withBranchStore(
-      workspaceId,
-      'startup-branch-integration-reconcile',
-      (store, context) => {
-        if (!context) throw new Error('Working-state root context is unavailable');
-        if (!context.durableRecoveryStore) throw new Error('Durable recovery operation storage is unavailable');
-        return reconcileInterruptedKernelBranchIntegrations({ ...context, durableRecoveryStore: context.durableRecoveryStore }, store);
-      },
-      'exclusive',
-    );
-    await retrievalArtifacts.reconcileWorkspaceEvidence(
-      workspaceId,
-      workspaceThreads,
-    );
-  }
-  await sourceViews.reconcile(retainedSourceViewIds);
-  const threadExecutionViews = new ThreadExecutionViewRegistry();
-  const virtualWriteGate = new VirtualWriteGate();
-  const workingBranchLookups = createWorkingBranchLookups({
-    views: threadExecutionViews,
-    workingStates: harnessWorkingStates,
-  });
-  const workingBranchWrites = createWorkingBranchWriteServices({
-    views: threadExecutionViews,
-    workingStates: harnessWorkingStates,
-    writeGate: virtualWriteGate,
-  });
-  const sourceViewRuntime = createSourceViewRuntime({
-    documents: documentsAuthority,
-    registry: threadRegistry,
-    views: threadExecutionViews,
-    branchLookups: workingBranchLookups,
-    branchWrites: workingBranchWrites,
-    worktrees: threadWorktreeRuntime,
-    sourceViews,
-    materializeExecutionView: (sessionId, signal) => threadRuntime!.materializeExecutionView(sessionId, signal),
-  });
-  const verificationCoordinator = createVerificationCoordinator({
-    workingStates: harnessWorkingStates,
-    captureParentIdentity: async (workspaceId, parentRoot) => {
-      const inspected = await threadWorktreeRuntime.inspectWorkspaceIdentity(parentRoot);
-      if (inspected.status !== 'ready') return { treeHash: null, reason: inspected.reason };
-      const treeHash = await harnessWorkingStates.withBranchStore(
-        workspaceId,
-        'parent-command-input-identity',
-        (store) => store.captureSeededPathIdentity(parentRoot, inspected.changedFiles, inspected.baseRef),
-        'shared',
-      );
-      return { treeHash };
-    },
-    loadParentWindows: async (workspaceId, parentSessionId) => {
-      const binding = await threadRegistry.getSessionBinding(parentSessionId);
-      const owningWorkspaceId = binding?.owningScopeId ?? workspaceId;
-      const parent = binding
-        ? { kind: 'thread' as const, id: binding.threadId }
-        : { kind: 'session' as const, id: parentSessionId };
-      const children = await threadRegistry.listThreads(owningWorkspaceId, parent, true);
-      return harnessWorkingStates.withBranchStore(
-        owningWorkspaceId,
-        'parent-verification-window-restore',
-        async (store) => (await Promise.all(children.map(async (thread) => (
-          (await store.listParentVerifications(thread.id)).map((bundle) => ({ parent, threadId: thread.id, bundle }))
-        )))).flat(),
-        'shared',
-      );
-    },
-    onProjection: (workspaceId, threadId, projection) => threadRegistry.setVerification(workspaceId, threadId, projection).then(() => undefined),
-  });
-  const threadIntegrationCoordinator = new IntegrationCoordinator({
-    resolveDocumentWorkspaceId: scopeDocumentWorkspace,
-    workingStates: harnessWorkingStates,
-    inspectDirtyBuffers: (workspaceId) => documentsAuthority.inspectDirtyBuffers(workspaceId),
-    beginDirtyStateBarrier: (workspaceId, paths) => documentsAuthority.beginDirtyStateBarrier(workspaceId, paths),
-    requestSurfaceOperation: (request, options) => documentsAuthority.requestSurfaceOperation(request, options),
-    resolveDirectoryApplyContext,
-    holdParentVirtualWrite: async (sessionId, signal) => {
-      const ticket = await acquireVirtualWriteTicket(
-        virtualWriteGate,
-        sessionId,
-        () => {
-          const view = threadExecutionViews.get(sessionId);
-          return !!view && view.mode === 'virtual';
-        },
-        signal,
-      );
-      return ticket === 'disk'
-        ? { status: 'disk' as const }
-        : { status: 'virtual' as const, release: () => ticket.finish() };
-    },
-    resolveParentSessionId: (workspaceId, branchId) => (
-      threadExecutionViews.findByBranch(workspaceId, branchId)?.sessionId
-    ),
-    commitParentVirtualWrites: async (input) => {
-      const result = await input.store.commitVirtualWrites(
-        input.branchId,
-        input.expectedWriteRevision,
-        input.files,
-      );
-      const sessionId = input.sessionId
-        ?? threadExecutionViews.findByBranch(input.workspaceId, input.branchId)?.sessionId;
-      if (result.status === 'committed' && sessionId) {
-        const live = threadExecutionViews.get(sessionId);
-        if (live?.mode === 'virtual') {
-          threadExecutionViews.bind({ ...live, writeRevision: result.writeRevision });
-        }
-      }
-      return result;
-    },
-  });
-  threadRuntime = createThreadRuntime({
-    registry: threadRegistry,
-    stopExperimentsForThread: (workspaceId, threadId) => experimentService.stopForThreads(workspaceId, [threadId]),
-    deleteSession: (sessionId) => piRuntimeBroker.deleteSession(sessionId),
-    deleteKnowledgeSession: async (workspaceId, sessionId) => {
-      // Delete the session's event/block/session knowledge nodes through the
-      // existing KnowledgeStore.deleteSession (D-242 rework). Accepted
-      // workspace/user knowledge is retained.
-      const store = knowledgeStores.get(knowledgeStoreKeyForScope(workspaceId)) ?? null;
-      if (store) await store.deleteSession(sessionId);
-    },
-    releaseThreadEvidence: (workspaceId, threadId) => retrievalArtifacts.releaseThreadEvidence(workspaceId, threadId),
-    onThreadSessionBound: (sessionId, owningWorkspaceId) => bindThreadKnowledgeSession(sessionId, owningWorkspaceId),
-    worktrees: threadWorktreeRuntime,
-    workingStates: harnessWorkingStates,
-    executionViews: threadExecutionViews,
-    virtualWriteGate,
-    measureManagedDirectory: async (workspaceId, worktree) => {
-      if (!worktree.managedRoot) {
-        return { logicalBytes: null, allocatedBytes: null, unknown: true };
-      }
-      const relative = path.relative(worktree.managedRoot, worktree.path).replace(/\\/g, '/');
-      if (!relative || relative === '..' || relative.startsWith('../') || path.isAbsolute(relative)) {
-        return { logicalBytes: null, allocatedBytes: null, unknown: true };
-      }
-      return kernelFileResources.measure({
-        authorityId: extensionRuntime.services.hostId,
-        canonicalRoot: worktree.managedRoot,
-        filesystemProfile: process.platform === 'win32' ? 'windows-local' : `${process.platform}-local`,
-        workspaceId,
-      }, relative);
-    },
-    cloneAgentInputSnapshot: (sessionId, context) => documentsAuthority.cloneAgentInputSnapshot(sessionId, context),
-    agentInputSurfaceOwner: (sessionId, context, workspaceId) => documentsAuthority.agentInputSurfaceOwner(sessionId, context, workspaceId),
-    sourceViews,
-    resolveIntegrationCoordinator: () => threadIntegrationCoordinator,
-    canReclaimWorktree: createWorktreeReclaimGuard(documentsAuthority),
-    resolveBaselineApplyContext: resolveDirectoryApplyContext,
-    hasActiveCommands: (directory) => harnessShellActivity.hasActiveCommandAtDirectory(directory),
-    verification: verificationCoordinator,
-    worktreeSettings: DEFAULT_HARNESS_SETTINGS.worktree,
-    resolveWorktreeSettings: async (workspaceId, parent) => {
-      // Bot deletion closes every parent session. Cleanup accounting must not reopen one for display settings.
-      if (isBotScopeId(workspaceId) && (await botService.get(botIdFromScopeId(workspaceId)))?.deletion) {
-        return DEFAULT_HARNESS_SETTINGS.worktree;
-      }
-      const sessionId = parent.kind === 'session'
-        ? parent.id
-        : (await threadRegistry.getActiveRun(workspaceId, parent.id))?.sessionId;
-      if (!sessionId) throw new Error('Parent thread has no Pi session for worktree settings');
-      return resolveThreadWorktreeSettings(await piRuntimeBroker.requestForSession(sessionId, 'settings.get', {}));
-    },
-    // A `bot:` scope's working root is the Bot's durable home directory —
-    // there is no registered project workspace behind it.
-    resolveWorkspaceRoot: scopeDirectory,
-    resolveRuntimeWorkspaceId: async (cwd) => (await documentsAuthority.resolveWorkspace({ path: cwd })).workspaceId,
-    beginBaselineCapture: (workspaceId, ignoredWriterIds, signal) => documentsAuthority.beginCapture(workspaceId, { ignoredWriterIds }, signal),
-    completeBaselineCapture: async (capture, signal) => {
-      const completed = await documentsAuthority.completeCapture(capture, signal);
-      return { stable: completed.stable, reasons: completed.reasons };
-    },
-    beginDirtyStateBarrier: (workspaceId, paths, signal) => documentsAuthority.beginDirtyStateBarrier(workspaceId, paths, { signal }),
-    inspectBaselineWriters: async (workspaceId, root) => {
-      const writersOf = async (id: string) => {
-        const inspected = await documentsAuthority.inspectWorkspace(id) as {
-          activeWriters?: Array<{ writerId?: string; id?: string; purpose?: string; owner?: { kind: string; id: string }; startedAt?: string }>;
-        };
-        return Array.isArray(inspected.activeWriters) ? inspected.activeWriters : [];
-      };
-      const writers = [...await writersOf(workspaceId)];
-      try {
-        const resolved = await documentsAuthority.resolveWorkspace({ path: root });
-        if (resolved.workspaceId !== workspaceId) writers.push(...await writersOf(resolved.workspaceId));
-      } catch {
-        // Scratch and unregistered roots have no Documents writers of their own.
-      }
-      return writers.map((writer) => ({
-        id: writer.writerId ?? writer.id ?? "writer",
-        ...(writer.purpose === undefined ? {} : { purpose: writer.purpose }),
-        ...(writer.owner === undefined ? {} : { owner: writer.owner }),
-        ...(writer.startedAt === undefined ? {} : { startedAt: writer.startedAt }),
-      }));
-    },
-    readBlocks: async (sessionId) => {
-      const store = await getKnowledgeStoreForSession(sessionId);
-      if (!store) return null;
-      return (await store.getBlocks(sessionId, await branchEntryIdsForSession(sessionId)))
-        .map((block) => ({ label: block.label, content: block.content }));
-    },
-    withMergeWriter: async (workspaceId, threadId, operation) => {
-      const writer = await documentsAuthority.registerWriterForScope(
-        workspaceId,
-        { kind: 'harness-thread', id: `merge:${threadId}` },
-        { mode: 'process', purpose: 'harness-thread-merge' },
-      );
-      if (!writer) throw new Error('Thread integration has no workspace writer authority');
-      const outcome = await Promise.resolve().then(operation).then(
-        (value) => ({ ok: true as const, value }),
-        (error: unknown) => ({ ok: false as const, error }),
-      );
-      const applied = outcome.ok ? recordOf(outcome.value).appliedPaths : undefined;
-      const changed = !outcome.ok || (Array.isArray(applied) && applied.length > 0);
-      const cleanupErrors: unknown[] = [];
-      try { if (changed) await writer.markMutated(); }
-      catch (error) { cleanupErrors.push(error); }
-      try { await writer.close(); }
-      catch (error) { cleanupErrors.push(error); }
-      if (!outcome.ok) {
-        for (const error of cleanupErrors) console.error('[HarnessThreads] Merge writer cleanup failed:', errorMessage(error));
-        throw outcome.error;
-      }
-      if (cleanupErrors.length > 0) throw new AggregateError(cleanupErrors, 'Failed to finalize the merge writer');
-      return outcome.value;
-    },
-    sessions: {
-      create: (input) => piRuntimeBroker.createSession(
-        input.cwd,
-        input.name,
-        input.parentSession,
-        { authorityId: input.workspaceId, id: input.workspaceId, kind: 'workspace' },
-        {
-          ...(input.model ? { model: input.model } : {}),
-          ...(input.modelSettings === undefined ? {} : { modelSettings: input.modelSettings }),
-          ...(input.permissions ? { permissions: input.permissions } : {}),
-          ...(input.scope?.length ? { scope: input.scope } : {}),
-          tools: input.tools,
-          workFocus: input.workFocus,
-        },
-      ),
-      open: (input) => piRuntimeBroker.openSession({
-        cwd: input.cwd,
-        ...(input.modelSettings === undefined ? {} : { modelSettings: input.modelSettings }),
-        ...(input.model ? { model: input.model } : {}),
-        ...(input.permissions ? { permissions: input.permissions } : {}),
-        ...(input.scope?.length ? { scope: input.scope } : {}),
-        sessionId: input.sessionId,
-        workspace: { authorityId: input.workspaceId, id: input.workspaceId, kind: 'workspace' },
-        tools: input.tools,
-      }),
-      prompt: async (sessionId, text, instructions, images, inputContext) => {
-        const fixedContext = inputContext ?? await sourceViewRuntime.contextForSession(sessionId);
-        const result = await piRuntimeBroker.requestForSession(sessionId, 'agent.prompt', {
-          sessionId,
-          text,
-          ...(instructions ? { instructions } : {}),
-          ...(images?.length ? { images } : {}),
-          ...(fixedContext ? { inputContext: fixedContext } : {}),
-        });
-        if (!result.accepted) throw new Error(`Pi child session rejected its initial prompt: ${sessionId}`);
-      },
-      request: async (sessionId, text, messageId) => {
-        const result = await piRuntimeBroker.requestForSession(sessionId, 'agent.threadRequest', { sessionId, text, messageId });
-        if (!result.accepted) throw new Error(`Pi session rejected execution input: ${sessionId}`);
-      },
-      notify: async (sessionId, text, messageId) => {
-        if (!piRuntimeBroker.activeSessionIds.includes(sessionId)) await piRuntimeBroker.openSession({ sessionId });
-        const result = await piRuntimeBroker.requestForSession(sessionId, 'agent.notify', { sessionId, text, messageId });
-        if (!result.accepted) throw new Error(`Pi session rejected passive input: ${sessionId}`);
-      },
-      send: async (sessionId, text) => {
-        const inputContext = await sourceViewRuntime.contextForSession(sessionId);
-        const result = await piRuntimeBroker.requestForSession(sessionId, 'agent.followUp', {
-          sessionId, text, ...(inputContext ? { inputContext } : {}),
-        });
-        if (!result.accepted) throw new Error(`Pi child session rejected follow-up input: ${sessionId}`);
-      },
-      abort: async (sessionId) => { await piRuntimeBroker.requestForSession(sessionId, 'agent.abort', { sessionId }); },
-      close: async (sessionId) => {
-        await harnessShellActivity.closeSessionShell(sessionId);
-        await piRuntimeBroker.closeSession(sessionId);
-      },
-      snapshot: (sessionId) => piRuntimeBroker.requestForSession(sessionId, 'session.snapshot', { sessionId }),
-      summary: async (sessionId) => {
-        try {
-          return await piRuntimeBroker.requestForSession(sessionId, 'session.summary', { sessionId });
-        } catch (activeError) {
-          const summary = (await piRuntimeBroker.listSessions()).find((candidate) => candidate.id === sessionId);
-          if (summary) return summary;
-          throw activeError;
-        }
-      },
-      stats: (sessionId) => piRuntimeBroker.requestForSession(sessionId, 'session.stats', { sessionId }),
-      captureInput: (sessionId) => piRuntimeBroker.requestForSession(sessionId, 'session.input.capture', { sessionId }),
-      entries: (sessionId, scope = 'branch') => piRuntimeBroker.requestForSession(sessionId, 'session.entries', { sessionId, scope }),
-      readEntries: (sessionId, _cwd, scope = 'branch') => piRuntimeBroker.previewSessionEntries(sessionId, undefined, scope),
-    },
-    onError: (error) => {
-      console.error('[HarnessThreads] Runtime failed:', errorMessage(error));
-    },
-  });
-  // Durable follow-up registrations (D-307): the service owns observation and
-  // delivers occurrences through the real Thread/Run lifecycle — an active run
-  // gets an inform, a settled thread resumes via continueRun, and the shared
-  // budget parks extras as pending continuations. Never a second agent loop.
-  // Typed external follow-up sources. "github-pr" resolves the workspace's own
-  // checkout branch/remotes through the authenticated GitHub auth — the wire
-  // carries only a provider id + condition, never a URL or code. The resolver's
-  // response is already credential-free (repo/branch/PR facts only).
-  const followUpExternalSources = {
-    githubPr: {
-      // Deterministic adapter-owned spacing; the resolver itself caches and
-      // honors GitHub rate-limit backoff.
-      intervalMs: 60_000,
-      async query({ workspaceId, source }: {
-        workspaceId: string;
-        source: { branch?: string; remote?: string; condition: 'exists' | 'open' | 'merged' | 'closed' };
-      }) {
-        const workspace = await documentsAuthority.inspectWorkspace(workspaceId).catch(() => null);
-        const directory = workspace?.root;
-        if (!directory) {
-          return { matched: false, unavailable: true, facts: { reason: 'workspace root unknown' } };
-        }
-        const { getOctokitOrNull } = await import('./lib/github/index.js');
-        const octokit = getOctokitOrNull();
-        if (!octokit) {
-          return { matched: false, unavailable: true, facts: { reason: 'github not connected' } };
-        }
-        const branch = source.branch
-          ?? (await getGitStatus(directory).catch(() => null))?.current
-          ?? '';
-        if (!branch) {
-          return { matched: false, unavailable: true, facts: { reason: 'no git branch resolvable' } };
-        }
-        const { resolveGitHubPrStatus } = await import('./lib/github/pr-status.js');
-        const { isGitHubRateLimitError, noteGitHubRateLimit } = await import('./lib/github/rate-limit.js');
-        const status = await resolveGitHubPrStatus({
-          octokit,
-          directory,
-          branch,
-          ...(source.remote ? { remoteName: source.remote } : {}),
-        }).catch((error: unknown) => {
-          if (isGitHubRateLimitError(error)) {
-            noteGitHubRateLimit(error);
-            return null;
-          }
-          throw error;
-        });
-        if (status === null) {
-          return {
-            matched: false,
-            retryAfterMs: 60_000,
-            facts: { reason: 'github rate limited', branch },
-          };
-        }
-        const pr = status.pr;
-        const state = pr === null ? 'none'
-          : pr.merged_at ? 'merged'
-          : pr.state === 'open' ? 'open'
-          : 'closed';
-        const matched = source.condition === 'exists' ? pr !== null
-          : source.condition === 'merged' ? state === 'merged'
-          : source.condition === 'open' ? state === 'open'
-          : state === 'closed';
-        return {
-          matched,
-          ...(pr ? { eventId: `github-pr-${pr.number}-${state}` } : {}),
-          facts: {
-            branch,
-            remote: status.resolvedRemoteName ?? source.remote ?? null,
-            repository: status.repo ? `${status.repo.owner}/${status.repo.repo}` : null,
-            pr: pr === null ? null : {
-              number: pr.number,
-              state,
-              title: pr.title,
-              url: pr.html_url,
-            },
-            condition: source.condition,
-          },
-        };
-      },
-    },
-  };
-
-  const followUpService = createFollowUpService({
-    client: kernelClient,
-    canExecuteScope: canExecuteBotScope,
-    getThread: (workspaceId, threadId) => threadRegistry.getThreadById(workspaceId, threadId),
-    notifySession: async (sessionId, text, messageId) => {
-      const result = await piRuntimeBroker.requestForSession(sessionId, 'agent.notify', { sessionId, text, messageId });
-      if (!result.accepted) throw new Error(`Pi session rejected the follow-up inform: ${sessionId}`);
-    },
-    sessionRequest: async (sessionId, text, messageId) => {
-      const result = await piRuntimeBroker.requestForSession(sessionId, 'agent.threadRequest', { sessionId, text, messageId });
-      if (!result.accepted) throw new Error(`Pi session rejected the follow-up trigger: ${sessionId}`);
-    },
-    sessionBusy: async (sessionId) => {
-      const snapshot = await piRuntimeBroker.requestForSession(sessionId, 'session.snapshot', { sessionId }).catch(() => null);
-      return Boolean(snapshot && (snapshot.busy === true || snapshot.isStreaming === true));
-    },
-    sendToThread: createFollowUpThreadSender({
-      registry: threadRegistry,
-      continueRun: (input) => threadRuntime!.continueRun(input),
-      sendToSession: (sessionId, message, meta) => threadRuntime!.send(sessionId, message, meta),
-    }),
-    setFollowUpAttention: async (workspaceId, threadId, waitingFor) => {
-      const thread = await threadRegistry.getThreadById(workspaceId, threadId);
-      if (!thread) return;
-      if (waitingFor === null) {
-        // Never steal a user/permission wait that arrived meanwhile.
-        if (thread.attention === 'followup') {
-          await threadRegistry.setAttention(workspaceId, threadId, 'none', null);
-        }
-        return;
-      }
-      await threadRegistry.setAttention(workspaceId, threadId, 'followup', waitingFor);
-    },
-    requestForSession: (sessionId, method, params) => (
-      piRuntimeBroker.requestForSession(sessionId, method, { sessionId, ...params } as never)
-    ),
-    subscribeAttempts: (listener) => experimentService.subscribeAttempts(listener),
-    getAttempt: async (caller, attemptId) => {
-      try {
-        const result = await experimentService.get(caller, attemptId);
-        return result.attempt;
-      } catch (error) {
-        if ((error as { harnessCode?: string }).harnessCode === 'not-found') return null;
-        throw error;
-      }
-    },
-    getExperiment: async (caller, attemptId) => {
-      try {
-        const result = await experimentService.get(caller, attemptId);
-        return { attempt: result.attempt, artifacts: result.artifacts };
-      } catch (error) {
-        if ((error as { harnessCode?: string }).harnessCode === 'not-found') return null;
-        throw error;
-      }
-    },
-    readExperimentLog: (caller, params) => experimentService.logs(caller, params),
-    watchWorkspace: (workspaceId, listener) => {
-      try {
-        const subscription = documentsAuthority.watch(workspaceId, (event) => {
-          listener({
-            sourceId: event.sourceId,
-            kind: event.kind,
-            sequence: event.sequence,
-            generation: event.generation,
-            ...(event.resource ? { path: event.resource.resourceId } : {}),
-          });
-        });
-        return { ready: subscription.ready, close: () => subscription.close() };
-      } catch {
-        return null;
-      }
-    },
-    statWorkspaceFile: async (workspaceId, filePath) => {
-      const workspace = await documentsAuthority.inspectWorkspace(workspaceId).catch(() => null);
-      if (!workspace) return null;
-      const absolute = path.resolve(workspace.root, filePath);
-      const relative = path.relative(workspace.root, absolute);
-      if (relative.startsWith('..') || path.isAbsolute(relative)) return { exists: false };
-      try {
-        const stat = await fs.promises.stat(absolute);
-        return { exists: stat.isFile(), size: stat.size, mtimeMs: stat.mtimeMs };
-      } catch {
-        return { exists: false };
-      }
-    },
-    workspaceHasActiveWriters: async (workspaceId) => {
-      const state = await documentsAuthority.inspectMutation(workspaceId).catch(() => null);
-      return (state?.activeWriters?.length ?? 0) > 0;
-    },
-    subscribeResourceSamples: (listener) => resourceService.subscribeSamples(listener),
-    retainResourceSampling: (machineId) => resourceService.retainSampling(machineId),
-    getResourceSample: (machineId) => resourceService.getMachineSample(machineId),
-    // Desktop source (EE §8.3): the computer catalog is authoritative for
-    // status (remote mirrors included); file revision checks delegate to the
-    // managed-desktop artifact reader. Missing deps mean "not observable".
-    observeDesktop: async (desktopId) => {
-      const catalog = await computerService.list();
-      const desktop = catalog.desktops.find((entry) => entry.id === desktopId);
-      return { status: desktop?.status ?? null };
-    },
-    inspectDesktopArtifact: async (desktopId, relativePath) => {
-      try {
-        const version = await computerService.inspectArtifact(desktopId, relativePath);
-        return { sha256: version.sha256 };
-      } catch {
-        return null;
-      }
-    },
-    externalSource: (provider) => provider === 'github-pr' ? followUpExternalSources.githubPr : null,
-    getShellEvents: (workspaceId, sessionId, executionId, afterId) => (
-      knowledgeContextRuntime.shellEvents(workspaceId, sessionId, executionId, afterId)
-    ),
-    subscribeShellEvents: (listener) => knowledgeContextRuntime.subscribeShellEvents(listener),
-    getShellExecutionStatus: async (sessionId, executionId) => {
-      const supervisor = harnessServiceHost.getShellSupervisor(sessionId);
-      if (!supervisor) return null;
-      return supervisor.inspectExecution(executionId);
-    },
-    readShellExecutionOutput: async (sessionId, executionId, offset, length) => {
-      const supervisor = harnessServiceHost.getShellSupervisor(sessionId);
-      if (!supervisor) return null;
-      return supervisor.readExecutionOutput(executionId, offset, length);
-    },
-    onChange: (workspaceId) => broadcastResearchFacts(workspaceId, 'followup'),
-    onError: (error) => console.error('[VarinFollowUp]', error.message),
-  });
-  // Rebuild follow-up observers for every workspace that owns durable
-  // definitions. The kernel record store enumerates them directly — recovery
-  // does not depend on the Thread catalog, saved projects, or an open UI, and
-  // one failing workspace does not block the rest.
-  void (async () => {
-    for (const workspaceId of await followUpService.definitionWorkspaces()) {
-      await followUpService.reconcile(workspaceId).catch((error) => {
-        console.error(`[VarinFollowUp] Reconcile failed for ${workspaceId}:`, errorMessage(error));
-      });
-    }
-  })().catch((error) => console.error('[VarinFollowUp] Reconcile failed:', errorMessage(error)));
+  const materialCollectionsService = createMaterialCollectionsService(materialStorage, { materials: webMaterials });
+  const threadIntegrationCoordinator = new IntegrationCoordinator({ resolveDocumentWorkspaceId: scopeDocumentWorkspace, workingStates: harnessWorkingStates, inspectDirtyBuffers: workspaceId => documentsAuthority.inspectDirtyBuffers(workspaceId), beginDirtyStateBarrier: (workspaceId, paths) => documentsAuthority.beginDirtyStateBarrier(workspaceId, paths), requestSurfaceOperation: (request, options) => documentsAuthority.requestSurfaceOperation(request, options), resolveDirectoryApplyContext });
   void computerService.reconcileControlEvents().catch((error) => {
     console.error('[Computer] Handback delivery will retry:', errorMessage(error));
   });
-  observeThreadIntegrationParentChange = (workspaceId, resourceIds) => {
-    void threadRuntime!.invalidateIntegrationPreviews(workspaceId, resourceIds).catch((error: unknown) => {
-      console.error('[HarnessThreads] Integration preview invalidation failed:', errorMessage(error));
-    });
-  };
-  const researchRootRuntime = createResearchRootRuntime({
-    registry: threadRegistry,
-    getSessionSnapshot: (sessionId) => (
-      sessionSnapshots.get(sessionId) as unknown as SessionSnapshot | undefined
-    ) ?? null,
-    sessions: {
-      snapshot: (sessionId) => piRuntimeBroker.requestForSession(sessionId, 'session.snapshot', { sessionId }),
-      stats: (sessionId) => piRuntimeBroker.requestForSession(sessionId, 'session.stats', { sessionId }),
-      entries: (sessionId, scope = 'branch') => piRuntimeBroker.requestForSession(sessionId, 'session.entries', { sessionId, scope }),
+  const projectTrust = new ProjectTrustService(VARIN_DATA_DIR, (id, signal) => documentsAuthority.admitWorkspaceRegistration(id, signal));
+  registerProjectTrustRoutes(app, projectTrust, uiAuthController.requireAuth);
+  const modelsService = new ModelsService(VARIN_DATA_DIR, { projectTrusted: cwd => projectTrust.trusted(cwd), fetch: egressRuntime.fetch as typeof globalThis.fetch });
+  registerResourceManagementRoutes(app, createResourceManagement({ dataDirectory: VARIN_DATA_DIR, documents: documentsAuthority, settings: modelsService.settings,
+    resolveProjectRoot: async projectId => {
+      const projects = sanitizeProjects((await readSettingsFromDisk()).projects) ?? [];
+      const project = projects.find(entry => entry.id === projectId);
+      return project?.path ?? null;
     },
-    onError: (error) => {
-      console.error('[ResearchRoot] Runtime failed:', errorMessage(error));
-    },
-    rejectHarnessRequest: async (sessionId, requestId, message) => {
-      await piRuntimeBroker.requestForSession(
-        sessionId,
-        'harness.respond',
-        buildHarnessRespondParams(sessionId, requestId, {
-          ok: false,
-          error: { code: 'unavailable', message, retryable: true },
-        }),
-      );
-    },
-  });
-  // BC0: the same attached-root lifecycle, specialized for Bot entry chats —
-  const agentRootRuntime = createAgentRootRuntime({
-    registry: threadRegistry,
-    getSessionSnapshot: sessionId => (sessionSnapshots.get(sessionId) as unknown as SessionSnapshot | undefined) ?? null,
-    sessions: {
-      snapshot: sessionId => piRuntimeBroker.requestForSession(sessionId, 'session.snapshot', { sessionId }),
-      stats: sessionId => piRuntimeBroker.requestForSession(sessionId, 'session.stats', { sessionId }),
-      entries: (sessionId, scope = 'branch') => piRuntimeBroker.requestForSession(sessionId, 'session.entries', { sessionId, scope }),
-    },
-    onError: error => console.error('[AgentRoot] Runtime failed:', errorMessage(error)),
-    rejectHarnessRequest: async (sessionId, requestId, message) => {
-      await piRuntimeBroker.requestForSession(sessionId, 'harness.respond', buildHarnessRespondParams(sessionId, requestId,
-        { ok: false, error: { code: 'unavailable', message, retryable: true } }));
-    },
-  });
-  // a session whose durable `bot.profile` points at it attaches a `bot-root`
-  // Thread under the `bot:<id>` scope instead of a project workspace.
-  const botRootRuntime = createBotRootRuntime({
-    botForSession: (sessionId) => botService.botForSession(sessionId),
-    registry: threadRegistry,
-    getSessionSnapshot: (sessionId) => (
-      sessionSnapshots.get(sessionId) as unknown as SessionSnapshot | undefined
-    ) ?? null,
-    sessions: {
-      snapshot: (sessionId) => piRuntimeBroker.requestForSession(sessionId, 'session.snapshot', { sessionId }),
-      stats: (sessionId) => piRuntimeBroker.requestForSession(sessionId, 'session.stats', { sessionId }),
-      entries: (sessionId, scope = 'branch') => piRuntimeBroker.requestForSession(sessionId, 'session.entries', { sessionId, scope }),
-    },
-    onError: (error) => {
-      console.error('[BotRoot] Runtime failed:', errorMessage(error));
-    },
-    rejectHarnessRequest: async (sessionId, requestId, message) => {
-      await piRuntimeBroker.requestForSession(
-        sessionId,
-        'harness.respond',
-        buildHarnessRespondParams(sessionId, requestId, {
-          ok: false,
-          error: { code: 'unavailable', message, retryable: true },
-        }),
-      );
-    },
-  });
-  const threadWaitRuntime = createThreadWaitRuntime({
-    registry: threadRegistry,
-    onError: error => console.error('[ThreadWait] Recovery failed:', errorMessage(error)),
-    resume: async (scopeId, thread, wait) => {
-      if (!await threadRegistry.canExecuteScope(scopeId)) throw new Error('The task execution scope is unavailable');
-      const original = wait.replyTo ? thread.messages?.find(message => message.id === wait.replyTo && message.direction === 'out') : undefined;
-      const otherRequests = (thread.dependencyWaits ?? []).filter(other => other.replyTo && other.replyTo !== wait.replyTo).flatMap(other => {
-        const request = thread.messages?.find(message => message.id === other.replyTo && message.direction === 'out');
-        if (!request) return [];
-        const reply = correlatedReply(thread, request.id);
-        return [`Request ${request.id} to ${request.to.kind} ${request.to.id}:\n${request.text}\n`
-          + (reply ? `Reply already recorded:\n${reply.text}` : 'No reply was recorded at recovery. Reuse the original requestId if this answer is still needed.')];
-      });
-      const text = `${wait.reason ?? 'The dependency wait ended'}. Resume the overall task: ${thread.brief}\n`
-        + (original ? `Original request ${original.id} to ${original.to.kind} ${original.to.id}:\n${original.text}\nIf still waiting for its answer, reuse this requestId rather than sending it again.\n` : '')
-        + (otherRequests.length ? `Other reply waits from the interrupted execution:\n${otherRequests.join('\n\n')}\n` : '')
-        + 'Inspect relevant teammate work and continue implementation or integration.';
-      if (isAttachedRootPurpose(thread.purpose)) {
-        await piRuntimeBroker.openSession({ sessionId: wait.sessionId });
-        const result = await piRuntimeBroker.requestForSession(wait.sessionId, 'agent.threadRequest', { sessionId: wait.sessionId, messageId: wait.id, text });
-        if (!result.accepted) throw new Error('The waiting session did not accept its continuation');
-      } else {
-        await threadRuntime!.continueRun({ scopeId, parent: thread.parent, threadId: thread.id, mode: 'continue',
-          resumeSuspended: true, task: text, requestId: wait.id, from: { kind: 'thread', id: thread.id } });
-      }
-    },
-  });
-  threadWaitRuntimeRef.current = threadWaitRuntime;
-  piRuntimeBroker.setQuestionContinuation(async (sessionId, reply) => {
-    const owner = await threadRegistry.resolveSessionOwner(sessionId);
-    if (!owner || owner.owner === 'attached-root') return false;
-    const runs = await threadRegistry.listRuns(owner.owningScopeId, owner.threadId);
-    const prior = runs.find(candidate => candidate.request?.requestId === reply.messageId);
-    const run = prior ?? runs.find(candidate => candidate.id === owner.runId);
-    if (!run) throw new Error('The question thread run no longer exists');
-    if (!prior && run.outcome === null && run.workerState !== 'lost') return false;
-    const thread = await threadRegistry.getThreadById(owner.owningScopeId, owner.threadId);
-    if (!thread || !run.frozen) throw new Error('The question thread cannot be continued');
-    await threadRuntime!.continueRun({ scopeId: owner.owningScopeId, parent: thread.parent, threadId: thread.id,
-      mode: 'continue', resumeSuspended: true, task: reply.text, requestId: reply.messageId,
-      from: { kind: 'user', id: 'question' }, frozen: run.frozen });
-    return true;
-  });
-  piRuntimeBroker.setSessionRunCoordinator(async ({ snapshot }) => {
-    if (snapshot.workFocus?.active.id !== 'research' || snapshot.workspace?.kind === 'workspace') return;
-    try {
-      const identity = await documentsAuthority.resolveWorkspace({ path: snapshot.cwd });
-      return {
-        workspace: {
-          authorityId: identity.workspaceId,
-          id: identity.workspaceId,
-          kind: 'workspace' as const,
-        },
-      };
-    } catch (error) {
-      throw new Error(
-        `Research work focus requires an admitted workspace for ${snapshot.cwd}: ${errorMessage(error)}`,
-        { cause: error },
-      );
-    }
-  }, { appliesToWorkFocus: ['research'] });
-  const hostCredentialAuthority = options.piRuntimeBroker?.credentialAuthority ?? sharedHostCredentialAuthority(process.env.VARIN_AGENT_DIR);
-  const mcpAgentDir = resolvePiAgentDirectory(process.env.VARIN_AGENT_DIR);
-  const modelsService = new ModelsService(VARIN_DATA_DIR, { projectTrusted: cwd => readProjectTrust(mcpAgentDir, cwd) === true, fetch: egressRuntime.fetch as typeof globalThis.fetch });
+  }), uiAuthController.requireAuth);
   const modelExtensions = new ModelsExtensionOwner(extensionRuntime, modelsService, {
     publish: input => kernelClient.publishModelAdapters(input), revoke: bindingId => kernelClient.revokeModelAdapter(bindingId),
     retain: (bindingId, leaseId) => kernelClient.retainModelAdapter(bindingId, leaseId), release: leaseId => kernelClient.releaseModelAdapter(leaseId),
@@ -3136,6 +1627,13 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       catch { uiVarinEventClients.delete(client); }
     }
   });
+  const unsubscribeProjectTrust = projectTrust.subscribe(revision => {
+    for (const listener of extensionConfigurationListeners) listener();
+    for (const client of uiVarinEventClients) {
+      try { writeSseEvent(client, { type: 'varin:settings-changed', properties: { owner: 'agent-settings', scope: 'host', revision, ids: ['project-trust'] } }); }
+      catch { uiVarinEventClients.delete(client); }
+    }
+  });
   let modelCatalogRevision = 0;
   const unsubscribeModels = modelsService.subscribe(kind => {
     for (const listener of extensionConfigurationListeners) listener();
@@ -3152,7 +1650,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     adaptTransport: (scope, transport) => scope.resourceOwner.kind === 'managed_host'
       ? targetMcpService.adaptTransport(scope, transport) : transport instanceof StdioTransport
         ? createMcpProcessTransport(transport.options, (options, signal) =>
-          (scope.executionScope === 'global' ? globalMcpProcesses : kernelProcesses).spawn(options.command, options.args ?? [], {
+          (scope.admitProcess ? kernelProcesses.spawnAdmitted.bind(null, scope.admitProcess) : (scope.executionScope === 'global' ? globalMcpProcesses : kernelProcesses).spawn)(options.command, options.args ?? [], {
             cwd: options.cwd ?? scope.executionCwd, signal, stdio: 'pipe',
             env: options.inheritEnv === false ? { ...options.env } : { ...process.env, ...options.env },
           }), { child: null }) : transport,
@@ -3165,13 +1663,6 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     providerToken: async (_scope, provider) => modelsService.mcpBearerToken(provider),
     credentialScope: async (_scope, provider) => modelsService.currentScope(provider),
   });
-  const piMcpAuthority = new PiMcpAuthority({
-    interactions: input => mcpInteractionRuntime.receiver(input),
-    sampling: input => mcpInteractionRuntime.samplingReceiver(input),
-    interactionErrors: input => mcpInteractionRuntime.errorReceiver(input),
-    providerToken: async (_scope, provider) => (await hostCredentialAuthority.getAuth(provider))?.auth.apiKey,
-    credentialScope: async (_scope, provider) => hostCredentialAuthority.currentScope(provider),
-  });
   let mcpSettingsRevision = 0;
   const mcpSettings = createMcpSettings({ authority: mcpAuthority,
     resolveScope: async (cwd, signal) => {
@@ -3180,7 +1671,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       const root = workspace ? (await documentsAuthority.admitWorkspaceRegistration(workspace.workspaceId, signal)).canonicalPath : agentMcpDir;
       return { resourceOwner: { kind: 'local' }, agentDir: agentMcpDir, configCwd: root, executionCwd: root,
         environmentId: workspace ? `${hostId}:${workspace.workspaceId}` : `${hostId}:global`,
-        executionScope: workspace ? 'workspace' : 'global', projectTrusted: !!workspace && readProjectTrust(mcpAgentDir, root) === true, sessionId: 'mcp-settings' };
+        executionScope: workspace ? 'workspace' : 'global', projectTrusted: !!workspace && await projectTrust.trusted(root), sessionId: 'mcp-settings' };
     },
     changed: () => {
       const revision = String(++mcpSettingsRevision);
@@ -3210,11 +1701,26 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     return selection;
   };
   const liveSources = createLiveSourceOwner({ documents: documentsAuthority, kernel: kernelClient });
+  const mcpProcessAdmission = (input: import('./lib/kernel/agent-runtime-client.js').McpPreparation) => {
+    const source = input.source;
+    if (!source || !input.executionCwd) throw new Error('MCP process requires its original source');
+    return createMcpSourceProcessAdmission({ kernel: kernelClient, runId: input.runId, executionCwd: input.executionCwd,
+      source: { resource_owner: source.resourceOwner, workspace_id: source.workspaceId, execution_workspace_id: source.executionWorkspaceId,
+        branch_id: source.branchId ?? null, revision: source.revision ?? null, mode: source.mode, live_root: source.liveRoot ?? null,
+        ...(source.environmentRunId ? { environment_run_id: source.environmentRunId } : {}) },
+      admitWorkspaceRegistration: (id, signal) => documentsAuthority.admitWorkspaceRegistration(id, signal),
+      validateLiveSource: async (selected, signal) => {
+        if (selected.mode !== 'live_root' || !selected.live_root) throw new Error('MCP source is not live');
+        await liveSources.validate({ workspaceId: selected.workspace_id, executionWorkspaceId: selected.execution_workspace_id, liveRoot: selected.live_root }, signal);
+      },
+    });
+  };
   const prepareChildMcp = createChildMcpPreparer({
+    processAdmission: mcpProcessAdmission,
     managed: createManagedChildMcpPreparer({ runtime: () => agentRuntime, createLease: input => createManagedMcpLease({ ...input, ...(managedMcpInteractionsOwner.current ? { interactions: managedMcpInteractionsOwner.current } : {}) }) }),
     authority: mcpAuthority, tasks:()=>mcpTaskRuntime, resources:()=>mcpResourceRuntime, kernel: kernelClient, agentDir: agentMcpDir, hostId,
     admitWorkspaceRegistration: (id, signal) => documentsAuthority.admitWorkspaceRegistration(id, signal),
-    projectTrusted: cwd => readProjectTrust(mcpAgentDir, cwd) === true,
+    projectTrusted: cwd => projectTrust.trusted(cwd),
     currentPolicy: agentMcpPolicy,
   });
   managedMcpOwner.current = createManagedMcpPreparer({ runtime: () => agentRuntime, createLease: input => createManagedMcpLease({ ...input, ...(managedMcpInteractionsOwner.current ? { interactions: managedMcpInteractionsOwner.current } : {}) }),
@@ -3229,11 +1735,12 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       ? await documentsAuthority.admitWorkspaceRegistration(input.source.workspaceId, signal) : undefined;
     const configCwd = workspace?.canonicalPath ?? agentMcpDir;
     const scope = {
+      ...(workspace ? { admitProcess: mcpProcessAdmission(input) } : {}),
       resourceOwner: { kind: 'local' as const },
       agentDir: agentMcpDir, configCwd, executionCwd: workspace ? input.executionCwd! : agentMcpDir,
       environmentId: workspace ? `${hostId}:${input.source!.executionWorkspaceId}` : `${hostId}:global`,
       executionScope: workspace ? 'workspace' as const : 'global' as const,
-      projectTrusted: Boolean(workspace) && readProjectTrust(mcpAgentDir, configCwd) === true,
+      projectTrusted: Boolean(workspace) && await projectTrust.trusted(configCwd),
       sessionId: `agent:${input.threadId}`,
     };
     const identity = JSON.stringify(scope);
@@ -3289,19 +1796,19 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
         reason: managed ? 'The selected Host project MCP contribution is preparing or unavailable. Its tools are not being executed on this Host.' : 'Project MCP capabilities require a prepared execution environment matching the pinned source. Only global Host MCP capabilities are available for this read-only source.',
       } } : {}),
       currentPolicy: async () => {
-        const trusted = Boolean(workspace) && readProjectTrust(mcpAgentDir, configCwd) === true;
+        const trusted = Boolean(workspace) && await projectTrust.trusted(configCwd);
         if (scope.projectTrusted && !trusted) throw new Error('MCP project trust was revoked');
         return agentMcpPolicy(configCwd, trusted);
       },
     }); } catch (error) { lease.release(); throw error; }
   }, {
-    prepare: (input, signal) => prepareAgentPolicy({ sessionId: input.threadId,
+    prepare: (input, signal) => prepareAgentPolicy({ threadId: input.threadId,
       ...(input.projectId ? { projectId: input.projectId } : {}),
       ...(input.requiredBinding ? { requiredBinding: input.requiredBinding } : {}) }, signal),
-    observe: (input, changed, signal) => prepareAgentPolicy.observe({ sessionId: input.threadId,
+    observe: (input, changed, signal) => prepareAgentPolicy.observe({ threadId: input.threadId,
       ...(input.projectId ? { projectId: input.projectId } : {}) }, changed, signal),
   }, createPolicyModelPreparer({ models: modelAuthority,
-    // This is a user-scoped role. Native Threads do not impersonate Pi sessions.
+    // This is a user-scoped role. It does not inherit another Thread model binding.
     settings: async () => ({ global: await modelsService.readGlobalInferenceSettings() }),
   }), liveSources.validate, createExtensionTools({runtime:extensionRuntime,kernel:kernelClient,
     subscribeConfiguration: listener => { extensionConfigurationListeners.add(listener); return () => extensionConfigurationListeners.delete(listener); },
@@ -3318,8 +1825,8 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   },currentPolicy:async runId=>{
     const launch=await kernelClient.agentRuntimeRequest<import('./lib/kernel/protocol.generated.js').LaunchIntent|null,'runtime.launch.inspect'>('runtime.launch.inspect',{runId});
     const workspace=launch?.selection.source?.resource_owner.kind === 'local'?await documentsAuthority.admitWorkspaceRegistration(launch.selection.source.workspace_id):undefined;
-    const cwd=workspace?.canonicalPath??mcpAgentDir;
-    return agentMcpPolicy(cwd,Boolean(workspace)&&readProjectTrust(mcpAgentDir,cwd) === true);
+    const cwd=workspace?.canonicalPath??VARIN_DATA_DIR;
+    return agentMcpPolicy(cwd,Boolean(workspace) && await projectTrust.trusted(cwd));
   }}), documentsAuthority.admitWorkspaceRegistration);
   agentRuntime.bindManagedSources(managedRemoteTargets);
   managedRecoveryCoordinator = createManagedRecoveryCoordinator({ coordinatorHostId: agentRuntime.coordinatorHostId,
@@ -3337,7 +1844,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   webRuntimeOwner.current = createWebRuntime({ runtime: agentRuntime, webFetch: webFetchService, documentReader, materials: webMaterials,
     collections: materialCollectionsService,
     documentSources,
-    fetch: egressRuntime.fetch as typeof globalThis.fetch, readAuth: readPiAuthFile,
+    fetch: egressRuntime.fetch as typeof globalThis.fetch, readAuth: serviceCredentials.read,
     settings: async source => {
       const root = source?.resource_owner.kind === 'local' ? (await documentsAuthority.admitWorkspaceRegistration(source.workspace_id)).canonicalPath : undefined;
       return modelsService.settings.snapshot(root);
@@ -3355,6 +1862,23 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     () => console.error('[Followup] Original file observation requires attention'));
   kernelClient.setFileObservationOwner(fileObservationOwner);
   void fileObservations.recover();
+  const modelText = createModelTextService({ kernel: kernelClient, runtime: agentRuntime, models: modelAuthority,
+    readSettings: async () => (await modelsService.settings.read()).document,
+  });
+  const threadNotifications = createThreadNotificationRuntime({
+    runtime: agentRuntime,
+    onError: () => console.error('[Notifications] Native activity projection is unavailable'),
+    send: async payload => {
+      const settings = await readSettingsFromDisk();
+      if (settings.notifyOnCompletion === false && payload.kind !== 'attention') return;
+      const delivered = getIsWindowFocused() && settings.notificationMode !== 'always' ? false : emitDesktopNotification(payload);
+      broadcastUiNotification(payload, { desktopNotificationDelivered: delivered });
+      const pushPayload = { ...payload, data: { type: 'thread', threadId: payload.threadId, branchId: payload.branchId,
+        url: '/?thread=' + encodeURIComponent(payload.threadId) + '&branch=' + encodeURIComponent(payload.branchId) } };
+      await Promise.allSettled([sendPushToAllUiSessions(pushPayload, { requireNoSse: true }),
+        isAnyInteractiveClientVisible() ? Promise.resolve() : sendMobilePushToAllDevices(pushPayload), sendApnsToAllUiSessions(pushPayload)]);
+    },
+  });
   const runObservers = new RunObservers(agentRuntime, extensionRuntime, (threadId, _error) => {
     console.error('[RunObserver] Activity projection requires attention:', threadId ?? 'selection');
   });
@@ -3383,10 +1907,10 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   };
   const threadWorkingStates = createKernelWorkspaceWorkingStateAccess(kernelStorageAdapter);
   const threadResourceOwners: Parameters<typeof createThreadResourceScope>[0] = {
-    agentDir: mcpAgentDir, documents: documentsAuthority, workingStates: threadWorkingStates, resolvePrimaryWorktreeRoot,
+    dataDirectory: VARIN_DATA_DIR, documents: documentsAuthority, workingStates: threadWorkingStates, resolvePrimaryWorktreeRoot,
     validateLiveSource: liveSources.validate,
-    projectTrusted: root => readProjectTrust(mcpAgentDir, root) === true,
-    configuration: root => readAgentResourceConfiguration({ agentDir: mcpAgentDir, ...(root ? { cwd: root } : {}) }),
+    projectTrusted: root => projectTrust.trusted(root),
+    configuration: (root, resources) => readAgentResourceConfiguration({ dataDirectory: VARIN_DATA_DIR, settings: modelsService.settings, ...(root ? { cwd: root } : {}), ...(resources ? { resources } : {}) }),
     withSourceRead: (input, consume) => kernelStorageAdapter.withResourceRead(input, consume),
   };
   const threadResources = createThreadResourceScope({ ...threadResourceOwners, remote: managedSourceConsumers.resources });
@@ -3418,14 +1942,14 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     const root=source?.resource_owner.kind === 'local' ? (await documentsAuthority.admitWorkspaceRegistration(source.workspace_id)).canonicalPath : undefined;
     const admitted=await agentRuntime.contextScope(run.id,signal);
     const model=run.configuration as {providerId?:string;model:string};
-    const policy=await readContextPolicy({agentDir:mcpAgentDir,...(root?{projectRoot:root}:{}),projectTrusted:root!==undefined && readProjectTrust(mcpAgentDir,root) === true,
+    const policy=await readContextPolicy({settings:await modelsService.settings.snapshot(root),...(root?{projectRoot:root}:{}),
       ...(model.providerId?{providerId:model.providerId}:{}),modelId:model.model});
-    return {policy,scope:{sessionId:run.thread_id,...(admitted?.projectId?{projectId:admitted.projectId}:{}),...(root?{workspaceId:root}:{})}};
+    return {policy,scope:{threadId:run.thread_id,...(admitted?.projectId?{projectId:admitted.projectId}:{}),...(root?{workspaceId:root}:{})}};
   },(runId,signal)=>threads.continueLaunch(runId,{signal}),createContextBudget(extensionRuntime));
   contextService.bindCompaction(contextCompaction);
   kernelClient.setContextOwner(contextService);
   const prepareThreadSource = createThreadSourcePreparer({
-    inspectInventory: (directory, signal) => threadWorktreeRuntime.inspectGitBaselineInventory(directory, signal),
+    inspectInventory: (directory, signal) => inspectSourceInventory(directory, signal),
     sourceTools: mode => agentRuntime.sourceTools(mode), documents: documentsAuthority, liveSources,
     workingStates: threadWorkingStates, prepareResources: threadResources.prepareSourceCapture, remote: managedSourceConsumers.threads });
   const threads = new ThreadAdapter(agentRuntime,
@@ -3450,7 +1974,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     resourceOwners: threadResourceOwners, languageSupervisor, structureSource: () => structureSource });
   const targetChildSources = createManagedChildSourceService({ storage: kernelStorageAdapter,
     capture: { documents: documentsAuthority, prepareResources: threadResources.prepareSourceCapture,
-      inspectInventory: (directory, signal) => threadWorktreeRuntime.inspectGitBaselineInventory(directory, signal) } });
+      inspectInventory: (directory, signal) => inspectSourceInventory(directory, signal) } });
   const targetIntegrations = createManagedIntegrationService({ kernel: kernelClient, storage: kernelStorageAdapter,
     documents: documentsAuthority, recovery: foundationalRecoveryEngine, metadataReader: kernelRecoveryStore,
     coordinator: threadIntegrationCoordinator });
@@ -3472,7 +1996,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     transportOwner: (scope, readmit) => createManagedMcpProcesses({ kernel: kernelClient, scope, readmit,
       onError: () => console.error('[MCP] Original target process observation is unavailable') }),
     admitWorkspaceRegistration: (id, signal) => documentsAuthority.admitWorkspaceRegistration(id, signal),
-    projectTrusted: cwd => readProjectTrust(mcpAgentDir, cwd) === true,
+    projectTrusted: cwd => projectTrust.trusted(cwd),
   });
   kernelClient.subscribeExit(() => { void targetMcpService.close(); });
   managedRemoteExecution.setSourceOwner(createManagedSourceService({ kernel: kernelClient, hostId,
@@ -3532,7 +2056,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       return !botId || (await botService.executionGate(botId)).permitted;
     },
     kernel: kernelClient, storageAdapter: kernelStorageAdapter, resolveLiveSource: liveSources.validate,
-    sourceCaptureOwners: { documents: documentsAuthority, prepareResources: threadResources.prepareSourceCapture, inspectInventory: (directory, signal) => threadWorktreeRuntime.inspectGitBaselineInventory(directory, signal) },
+    sourceCaptureOwners: { documents: documentsAuthority, prepareResources: threadResources.prepareSourceCapture, inspectInventory: (directory, signal) => inspectSourceInventory(directory, signal) },
     reconcileDomainReceipts: async signal => { await Promise.all([reconcileIntegrationReceipts(signal), reconcileMaterialReceipts(signal), reconcileScheduleReceipts(signal)]); },
     continueRun: (runId, signal) => threads.continueLaunch(runId, { signal }), recoverLaunches: signal => threads.recover(signal),
     prepareContext: threadContext,
@@ -3546,7 +2070,6 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   void contextService.recover().catch(() => console.error('[Thread] Saved context job discovery requires attention'));
   const calendarOwner = new CalendarOwner({ runtime: agentRuntime,
     projects: () => readScheduledProjects(readSettingsFromDisk, sanitizeProjects),
-    hasPiWork: scheduledTasksRuntime.hasPiWork,
     prepare: (work, projectPath, signal) => threads.prepareCalendarWork(work, projectPath, signal),
     onChanged: () => { for (const client of uiVarinEventClients) { try { writeSseEvent(client, { type: 'varin:scheduled-task-changed', properties: {} }); } catch { uiVarinEventClients.delete(client); } } },
     onError: () => console.warn('[Calendar] preparation or asset synchronization requires attention'),
@@ -3565,7 +2088,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   managedMcpInteractionsOwner.current = managedMcpInteractions;
   agentRuntime.setManagedMcpInteractions(managedMcpInteractions);
   const mcpTaskRecovery = createMcpTaskRecovery({kernel:kernelClient,authority:mcpAuthority,agentDir:agentMcpDir,hostId,runtime:agentRuntime,interactions:managedMcpInteractions,
-      admitWorkspaceRegistration:(id,signal)=>documentsAuthority.admitWorkspaceRegistration(id,signal),projectTrusted:cwd=>readProjectTrust(mcpAgentDir,cwd) === true,
+      admitWorkspaceRegistration:(id,signal)=>documentsAuthority.admitWorkspaceRegistration(id,signal),projectTrusted:cwd=>projectTrust.trusted(cwd),
       validateLiveSource:async(source,signal)=>{
         if(source.mode!=='live_root'||!source.live_root)throw new Error('MCP Task live source missing');
         await liveSources.validate({workspaceId:source.workspace_id,executionWorkspaceId:source.execution_workspace_id,liveRoot:source.live_root},signal);
@@ -3577,7 +2100,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   });
   mcpTaskRuntimeOwner.current = mcpTaskRuntime;
   const mcpResourceRecovery=createMcpResourceRecovery({kernel:kernelClient,authority:mcpAuthority,agentDir:agentMcpDir,hostId,runtime:agentRuntime,interactions:managedMcpInteractions,
-      admitWorkspaceRegistration:(id,signal)=>documentsAuthority.admitWorkspaceRegistration(id,signal),projectTrusted:cwd=>readProjectTrust(mcpAgentDir,cwd) === true,
+      admitWorkspaceRegistration:(id,signal)=>documentsAuthority.admitWorkspaceRegistration(id,signal),projectTrusted:cwd=>projectTrust.trusted(cwd),
       currentPolicy:agentMcpPolicy,
       validateLiveSource:async(source,signal)=>{if(source.mode!=='live_root'||!source.live_root)throw new Error('MCP resource original live source missing');
         await liveSources.validate({workspaceId:source.workspace_id,executionWorkspaceId:source.execution_workspace_id,liveRoot:source.live_root},signal);},
@@ -3594,37 +2117,21 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   });
   computerRuntimeOwner.current.start(error => console.error('[Computer] Native execution cleanup is unconfirmed:', error instanceof Error ? error.message : String(error)));
   registerThreadRoutes(app, threads, uiAuthController?.requireAuth ?? ((_request, _response, next) => next()), researchRuntime.user, computerRuntimeOwner.current.user, webRuntimeOwner.current.user);
-  registerAgentProfileRoutes(app, createAgentProfilesAPI({ settings: hostCredentialAuthority.globalSettingsAuthority,
-    agentSettings: modelsService.settings,
+  const agentProfiles = createAgentProfilesAPI({ settings: modelsService.settings,
     capabilities: signal => agentRuntime.childCapabilities(signal),
     onChanged: () => {
       for (const client of uiVarinEventClients) {
-        try { writeSseEvent(client, { type: 'varin:settings-changed', properties: { owner: 'pi-settings' } }); }
+        try { writeSseEvent(client, { type: 'varin:settings-changed', properties: { owner: 'agent-settings' } }); }
         catch { uiVarinEventClients.delete(client); }
       }
     },
-  }), uiAuthController?.requireAuth ?? ((_request, _response, next) => next()));
+  });
+  registerAgentProfileRoutes(app, agentProfiles, uiAuthController.requireAuth);
+  isNativeThreadLive = async identity => {
+    const thread = await agentRuntime.thread(identity.threadId);
+    return thread.deleted_at_ms === null && thread.branches.some(branch => branch.branch_id === identity.branchId);
+  };
   registerRuntimeMaintenanceRoutes(app, agentRuntime, uiAuthController?.requireAuth ?? ((_request, _response, next) => next()));
-  registerHarnessThreadRoutes(app, {
-    registry: threadRegistry,
-    runtime: threadRuntime,
-    sendToThread: createUserThreadSendAdapter(() => harnessServiceHost, threadRuntime!),
-    ...(uiAuthController ? { requireAuth: uiAuthController.requireAuth } : {}),
-  });
-  registerHarnessExperimentRoutes(app, {
-    runtime: threadRuntime,
-    registry: threadRegistry,
-    experiments: experimentService,
-    resources: resourceService,
-    sources: sourceService,
-    ...(uiAuthController ? { requireAuth: uiAuthController.requireAuth } : {}),
-  });
-  registerHarnessFollowUpRoutes(app, {
-    runtime: threadRuntime,
-    registry: threadRegistry,
-    followUps: followUpService,
-    ...(uiAuthController ? { requireAuth: uiAuthController.requireAuth } : {}),
-  });
   registerBotRoutes(app, {
     bots: botService,
     memory: memoryService,
@@ -3659,84 +2166,15 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     ...(uiAuthController ? { requireAuth: uiAuthController.requireAuth } : {}),
     ...(uiAuthController?.resolveAuthContext ? { resolveAuthContext: uiAuthController.resolveAuthContext } : {}),
   });
-  registerHarnessContextRoutes(app, {
-    getStore: getKnowledgeStoreForSession,
-    getBranchEntryIds: branchEntryIdsForSession,
-    getUserStore: getUserKnowledgeStore,
-    memoryService,
-    memoryOwnerForSession: (sessionId) => memoryService.ownerForSession(sessionId),
-    onKnowledgeChanged: (sessionId, scope) => {
-      broadcastGlobalUiEvent?.({
-        type: 'varin:harness-knowledge-changed',
-        properties: { sessionId, scope },
-      });
-    },
-    ...(uiAuthController ? { requireAuth: uiAuthController.requireAuth } : {}),
-  });
   registerAgentPersonalizationRoutes(app, agentPersonalization, uiAuthController?.requireAuth ?? ((_req, _res, next) => next()));
   registerThreadMemoryRoutes(app, createThreadMemory({ history: botHistory, memory: memoryService,
     narrate: (scopeId, system, prompt, signal, selection) => memoryOrganizer.extractSelection(scopeId, system, prompt, signal, selection) }),
     uiAuthController?.requireAuth ?? ((_request, _response, next) => next()));
-  registerSelectionMemoryRoutes(app, {
-    agentPersonalization,
-    memory: memoryService,
-    entries: async (sessionId) => (await piRuntimeBroker.previewSessionEntries(sessionId, undefined, 'branch')).entries,
-    narrate: (scopeId, system, prompt, signal, selection) => memoryOrganizer.extractSelection(scopeId, system, prompt, signal, selection),
-    requireAuth: uiAuthController?.requireAuth ?? ((_request, _response, next) => next()),
-  });
   registerWebSearchCredentialRoutes(app, {
+    readAuth: serviceCredentials.read, saveAuth: serviceCredentials.save, removeAuth: serviceCredentials.remove,
     ...(uiAuthController ? { requireAuth: uiAuthController.requireAuth } : {}),
-  });
-  registerPdfMaterialRoutes(app, {
-    readDocument: createUserMaterialReadAdapter(() => harnessServiceHost, threadRuntime, harnessPathAuthority),
-    ...(uiAuthController ? { requireAuth: uiAuthController.requireAuth } : {}),
-  });
-  piRuntimeBroker.setSessionDeleteCoordinator(async ({ sessionId, summary }) => {
-    const rootScope = await threadRuntime!.rootScopeForSession(sessionId);
-    if (rootScope) {
-      const roots = (await threadRegistry.listThreads(
-        rootScope.scopeId,
-        { kind: 'session', id: sessionId },
-        true,
-      )).filter((thread) => isAttachedRootPurpose(thread.purpose) && thread.purpose !== 'bot-root');
-      if (roots.length) {
-        await researchRootRuntime.cancelSession(sessionId, 'user session deleted');
-        await agentRootRuntime.cancelSession(sessionId, 'user session deleted');
-        for (const root of roots) await threadRuntime!.kill(root.id, false, rootScope.scopeId);
-      }
-    }
-    // A Bot entry chat is disposable: deleting it cancels the attached Run and
-    // releases the entry binding, but the Bot's work Threads are owned by the
-    // `bot:<id>` scope — they are never cascade-killed with the conversation.
-    const entryBot = await botService.botForSession(sessionId).catch(() => null);
-    if (entryBot) {
-      await botRootRuntime.cancelSession(sessionId, 'bot entry session deleted');
-      await botService.releaseEntry(sessionId);
-    }
-    await threadRegistry.archiveThreadsForDeletedSessionAcrossWorkspaces(sessionId);
-    // Session deletion is a target-gone event: every durable wait bound to the
-    // session closes instead of outliving its delivery authority.
-    for (const followUpWorkspaceId of await followUpService.definitionWorkspaces()) {
-      // The broker deletes the session only after this coordinator resolves.
-      // Propagate settlement failures so a retry still has the session summary
-      // and delivery authority needed to close durable waits.
-      await followUpService.settleTarget(followUpWorkspaceId, { kind: 'session', id: sessionId });
-    }
-    if (summary.workspace?.kind !== 'workspace') return;
-    const workspaceId = summary.workspace.authorityId ?? summary.workspace.id;
-    await threadRegistry.cancelAllForParent(
-      workspaceId,
-      { kind: 'session', id: sessionId },
-      async (thread) => { await threadRuntime!.kill(thread.id, false, workspaceId); },
-    );
-  });
-  void threadRuntime.resumePendingDeletions().catch((error) => {
-    console.error('[HarnessThreads] Pending deletion recovery failed:', errorMessage(error));
   });
 
-  void threadRuntime.resumeCodeSubmissions().catch((error) => {
-    console.error('[HarnessThreads] Code submission recovery failed:', errorMessage(error));
-  });
   const catalogScan = {
     start(_workspaceId: string): void {},
   };
@@ -3745,7 +2183,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     // the persisted store key differs — records keep their real scope. BC0
     // adds `bot:<id>` scopes that resolve to the Bot's own memory store.
     const scope = isBotScopeId(scopeId) ? 'bot' as const
-      : isSessionScopeId(scopeId) || isThreadScopeId(scopeId) ? 'session' as const
+      : isThreadScopeId(scopeId) ? 'session' as const
         : 'workspace' as const;
     const assertMemoryOwner = async () => {
       if (isThreadScopeId(scopeId)) { if (!(await agentRuntime.thread(threadIdFromScopeId(scopeId))).bot_id) throw new Error('Thread memory has no Bot owner'); return; }
@@ -3770,12 +2208,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
         if (!store || !knowledgeVectors) return;
         knowledgeVectors.notify(store, scope, scopeId, scopeId, ids);
       },
-      onBlocksChanged: (sessionId) => {
-        broadcastGlobalUiEvent?.({
-          type: 'varin:harness-blocks-changed',
-          properties: { workspaceId: scopeId, sessionId },
-        });
-      },
+
     }).then(async (store) => {
       try { await assertMemoryOwner(); }
       catch (error) { await store.close(); throw error; }
@@ -3791,39 +2224,6 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     } finally {
       knowledgeStoreLoads.delete(storeKey);
     }
-  }
-
-  function snapshotKnowledgeWorkspaceId(sessionId: string): string | null {
-    const workspace = recordOf(sessionSnapshots.get(sessionId)?.workspace);
-    if (workspace.kind !== 'workspace') return null;
-    if (typeof workspace.authorityId === 'string' && workspace.authorityId.trim()) return workspace.authorityId;
-    return typeof workspace.id === 'string' && workspace.id.trim() ? workspace.id : null;
-  }
-
-  async function owningKnowledgeScopeIdForSession(
-    sessionId: string,
-    fallback: string | null = null,
-  ): Promise<string | null> {
-    const bot = await botService.botForSession(sessionId) ?? await consultBotForSession(sessionId);
-    if (bot) return `bot:${bot.id}`;
-    // RR4/E07: durable owner resolution. The active-run binding only exists
-    // while the run is live; the catalog scan still answers after the run
-    // settled or the Host restarted, without guessing from UI snapshots.
-    // A broken/unreadable catalog is an owner-resolution failure, not evidence
-    // that this session has no durable owner. Let it reach the caller instead
-    // of falling through to an execution workspace or a partial UI snapshot.
-    return resolveKnowledgeScopeOwner(
-      () => threadRegistry.resolveSessionOwner(sessionId),
-      fallback,
-      snapshotKnowledgeWorkspaceId(sessionId),
-    );
-  }
-
-  async function getKnowledgeStoreForSession(sessionId: string): Promise<KnowledgeStore | null> {
-    // HR0: a session's durable owner is its binding/catalog scope; an unbound
-    // chat falls back to its own session scope, never a guessed directory.
-    const scopeId = await owningKnowledgeScopeIdForSession(sessionId) ?? sessionScopeId(sessionId);
-    return getKnowledgeStoreForScope(scopeId);
   }
 
   async function getUserKnowledgeStore(): Promise<KnowledgeStore> {
@@ -3853,19 +2253,6 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     }
   }
 
-  // BC3: a consult session (kind:"discussion" + bot) belongs to the named Bot
-  // — persona instructions and the `bot:<id>` memory scope resolve through the
-  // Thread record, not the session's owning catalog scope.
-  const consultBotForSession = async (sessionId: string) => {
-    const binding = await threadRegistry.resolveSessionOwner(sessionId);
-    if (!binding) return null;
-    const thread = await threadRegistry.getThreadById(binding.owningScopeId, binding.threadId);
-    if (!thread?.consultBotId) return null;
-    const bot = await botService.get(thread.consultBotId);
-    if (!bot) throw new Error(`Consulted Bot is missing: ${thread.consultBotId}`);
-    return bot;
-  };
-
   const knowledgeStoreExistsForScope = (scopeId: string): Promise<boolean> => (
     fsPromises.access(path.join(VARIN_DATA_DIR, 'knowledge', hostId, `${knowledgeStoreKeyForScope(scopeId)}.tdb`))
       .then(() => true, (error: NodeJS.ErrnoException) => {
@@ -3874,45 +2261,9 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       })
   );
 
-  // BC3: a memory's work association is the session's bound Thread plus its
-  // ancestor chain (obligations the work inherited) and its follow-up
-  // Threads/Runs (obligations the work produced) — not merely the one
-  // threadId/runId of the current session binding.
-  const workAssociationForSession = async (sessionId: string): Promise<MemoryRecallAssociation> => {
-    const sessionIds = new Set<string>([sessionId]);
-    const threadIds = new Set<string>();
-    const runIds = new Set<string>();
-    const binding = await threadRegistry.resolveSessionOwner(sessionId);
-    if (!binding) return { sessionIds: [...sessionIds] };
-    const scopeId = binding.owningScopeId;
-    const includeThread = async (threadId: string): Promise<void> => {
-      if (threadIds.has(threadId)) return;
-      threadIds.add(threadId);
-      for (const run of await threadRegistry.listRuns(scopeId, threadId)) {
-        runIds.add(run.id);
-        if (run.sessionId) sessionIds.add(run.sessionId);
-      }
-    };
-    await includeThread(binding.threadId);
-    let cursor = await threadRegistry.getThreadById(scopeId, binding.threadId);
-    while (cursor?.parent.kind === 'thread' && !threadIds.has(cursor.parent.id)) {
-      const ancestorId = cursor.parent.id;
-      await includeThread(ancestorId);
-      cursor = await threadRegistry.getThreadById(scopeId, ancestorId);
-    }
-    const pending = [binding.threadId];
-    while (pending.length > 0) {
-      const current = pending.pop()!;
-      for (const child of await threadRegistry.listThreads(scopeId, { kind: 'thread', id: current }, true)) {
-        if (threadIds.has(child.id)) continue;
-        await includeThread(child.id);
-        pending.push(child.id);
-      }
-    }
-    return { sessionIds: [...sessionIds], threadIds: [...threadIds], runIds: [...runIds] };
-  };
-
+  const contextObservationPublication = createContextObservationPublication(kernelClient);
   const knowledgeContextRuntime = createKnowledgeContextRuntime({
+    threadSources: () => contextObservationPublication.sources(),
     goalForThread: async threadId => {
       const goals = await agentRuntime.goals(threadId);
       return goals.findLast(goal => goal.control === 'active')?.objective;
@@ -3923,69 +2274,17 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       if (await knowledgeStoreExistsForScope(threadScopeId(threadId))) sources.push({ authority: await getKnowledgeStoreForScope(threadScopeId(threadId)), scope: 'session', scopeId: threadScopeId(threadId) });
       const user = await getUserKnowledgeStore();
       if (user) sources.push({ authority: user, scope: 'user', scopeId: 'user' });
-      const semantic = semanticRuntimeHolder.current;
       const { results } = await recallMemories({ sources, query, k: 5, workspaceId, judgeWorkspaceId: workspaceId,
         associated: (await workAssociationForThread(threadId)) ?? {}, ...(knowledgeVectors ? { vectors: knowledgeVectors } : {}),
         ...(goal ? { goal } : {}), ...(signal ? { signal } : {}),
-        ...(semantic ? { fastDecision: { status: semantic.fastDecisionStatus, decide: semantic.fastDecision } } : {}) });
+ });
       return results;
     },
-    recallEnabled: async (sessionId) => isBotScopeId(await owningKnowledgeScopeIdForSession(sessionId) ?? ''),
     getStore: getKnowledgeStoreForScope,
     getUserStore: getUserKnowledgeStore,
-    resolveScope: async (sessionId) => await owningKnowledgeScopeIdForSession(sessionId) ?? sessionScopeId(sessionId),
-    getSessionStore: async (sessionId) => await knowledgeStoreExistsForScope(sessionScopeId(sessionId))
-      ? getKnowledgeStoreForScope(sessionScopeId(sessionId)) : null,
-    goalForSession: async (sessionId) => {
-      const binding = await threadRegistry.resolveSessionOwner(sessionId);
-      if (!binding) return undefined;
-      const thread = await threadRegistry.getThreadById(binding.owningScopeId, binding.threadId);
-      return thread?.brief.trim() || undefined;
-    },
-    // BC3: one selection service backs automatic recall and the `recall`
-    // tool — work-associated rows first, then scope-labeled text/vector hits,
-    // finally an optional memory-recall fast-decision pass. Retrieval never
-    // depends on the fast decision being configured or reachable.
-    recall: async ({ workspaceId, store, sessionId, query, goal, signal }) => {
-      const associated = await workAssociationForSession(sessionId);
-      const sources: MemoryRecallSource[] = [{
-        authority: store,
-        scope: scopeOfScopeId(workspaceId),
-        scopeId: workspaceId,
-      }];
-      const ownScopeId = sessionScopeId(sessionId);
-      if (ownScopeId !== workspaceId && await knowledgeStoreExistsForScope(ownScopeId)) {
-        const sessionStore = await getKnowledgeStoreForScope(ownScopeId);
-        if (sessionStore) sources.push({ authority: sessionStore, scope: 'session', scopeId: ownScopeId });
-      }
-      const userStore = await getUserKnowledgeStore();
-      if (userStore) sources.push({ authority: userStore, scope: 'user', scopeId: 'user' });
-      const semantic = semanticRuntimeHolder.current;
-      const executionWorkspaceId = snapshotKnowledgeWorkspaceId(sessionId);
-      const { results } = await recallMemories({
-        sources,
-        query,
-        k: 5,
-        ...(knowledgeVectors ? { vectors: knowledgeVectors } : {}),
-        workspaceId,
-        // A Bot or session scope without an execution workspace still judges
-        // through the shared global inference binding — recall never depends
-        // on a document workspace existing.
-        judgeWorkspaceId: executionWorkspaceId ?? workspaceId,
-        associated,
-        ...(goal !== undefined ? { goal } : {}),
-        ...(semantic ? {
-          fastDecision: {
-            status: semantic.fastDecisionStatus,
-            decide: semantic.fastDecision,
-          },
-        } : {}),
-        ...(signal ? { signal } : {}),
-      });
-      return results;
-    },
     onError: (error) => console.error('[HarnessKnowledge] Observer failed:', errorMessage(error)),
   });
+  contextService.bindObservations((run, signal) => contextObservationPublication.publish(knowledgeContextRuntime, run, signal));
   const catalogFileSearch = createFsSearchRuntimeFactory({ compute: kernelCompute });
   // A grammar catalog must not be able to stop the Host from starting: an
   // unreadable manifest means "nothing is installable", not "no server".
@@ -4028,8 +2327,6 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     createLspStructureProvider({
       documents: documentsAuthority,
       supervisor: languageSupervisor,
-      readSource: sourceViewRuntime.readSource,
-      resolveTarget: sourceViewRuntime.resolveLanguageTarget,
     }),
   ]);
   const projectDirectories = (settings: { projects?: unknown }) => (sanitizeProjects(settings.projects) ?? []).flatMap(projectFolders);
@@ -4037,27 +2334,6 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     documents: documentsAuthority, languages: languageSupportRuntime, supervisor: languageSupervisor,
     onError: error => console.error('[LanguagePrewarm]', errorMessage(error)),
   });
-  const prewarmSessions = new Map<string, { cwd: string }>();
-  const releaseSessionPrewarm = (sessionId: string): void => {
-    prewarmSessions.delete(sessionId);
-    languagePrewarm.releaseOwner(`session:${sessionId}`);
-  };
-  const prewarmSession = (sessionId: string, cwd: unknown, refresh = false): void => {
-    if (typeof cwd !== 'string' || !cwd) { releaseSessionPrewarm(sessionId); return; }
-    if (prewarmSessions.get(sessionId)?.cwd === cwd && !refresh) return;
-    const entry = { cwd };
-    prewarmSessions.set(sessionId, entry);
-    void documentsAuthority.resolveWorkspace({ path: cwd }).then(workspace => {
-      if (prewarmSessions.get(sessionId) !== entry) return;
-      languagePrewarm.setWorkspace(`session:${sessionId}`, workspace.workspaceId);
-      if (refresh) languagePrewarm.refreshWorkspace(workspace.workspaceId);
-    }).catch(error => {
-      if (prewarmSessions.get(sessionId) === entry) {
-        releaseSessionPrewarm(sessionId);
-        console.error('[LanguagePrewarm]', errorMessage(error));
-      }
-    });
-  };
   let prewarmProjectGeneration = 0;
   let prewarmProjectOwners = new Set<string>();
   const prewarmProject = (settings: { projects?: unknown; activeProjectId?: unknown }): void => {
@@ -4138,26 +2414,11 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     catch { response.status(503).json({ error: 'Image model catalog is unavailable' }); }
   });
   const semanticRuntime = createWorkspaceSemanticRuntime({
+    kernel: kernelClient,
     runtimeInference: semanticInference,
     dataDir: semanticIndexConfig.storageDirectory ?? VARIN_DATA_DIR,
     hostId,
-    // HR3: one shared worker serves settings/inference for every resource root;
-    // indexing no longer spawns a workspace worker per directory.
-    configCwd: VARIN_DATA_DIR,
     documents: documentsAuthority,
-    readDraft: async (sessionId, context, resourceId, workspaceId) => {
-      const source = await sourceViewRuntime.readSource(sessionId, context, resourceId, workspaceId);
-      if (source.status !== 'working-branch') return source;
-      if (source.message || source.missing || source.base64 === undefined) {
-        return { status: 'unavailable', message: source.message ?? 'The working-branch source is missing' };
-      }
-      return {
-        status: 'ready',
-        content: Buffer.from(source.base64, 'base64').toString('utf8'),
-        revision: source.revision,
-        source: 'working-branch',
-      };
-    },
     structureSource,
     searchFilesystemFiles: catalogFileSearch.searchFilesystemFiles,
     isIndexablePath: async (id, resourceId, signal, options) => catalogFileSearch.isSearchableFile(
@@ -4168,9 +2429,6 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     scheduler: semanticScheduler,
     getIndexScope: projectIndexScope.get,
     includeIgnoredDirectories: semanticIndexConfig.includeIgnoredDirectories ?? [],
-    getBroker: getReadyPiRuntimeBroker,
-    executionViews: threadExecutionViews,
-    workingBranches: workingBranchLookups,
     onBindingChanged: (workspaceId) => queueMicrotask(() => {
       // The shared inference state publishes global binding changes; every
       // knowledge scope resolves its embedder through it, so refresh all.
@@ -4217,7 +2475,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   });
   kernelClient.setRetrievalOwner(createRetrievalOwner({ sources: retrievalSources, kernel: kernelClient, inferenceRequests: semanticInference.requests!,
     preparePipeline: async (query, signal, inference) => retrievalComposition.prepare({ threadId: query.threadId, query, inference,
-      ...(query.source.resource_owner.kind === 'local' ? { workspaceId: await retrievalSources.routingWorkspace(query, signal) } : {}),
+      ...(query.source.resource_owner.kind === 'local' ? { configurationDirectory: await retrievalSources.routingWorkspace(query, signal), workspaceId: query.source.workspace_id } : {}),
       ...(query.projectId ? { projectId: query.projectId } : {}) }, signal),
   }));
 
@@ -4285,8 +2543,6 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       console.error('[ProjectIndex] Scope refresh failed:', errorMessage(error));
     });
   });
-  researchDecideDeps.fastDecisionStatus = semanticRuntime.fastDecisionStatus;
-  researchDecideDeps.fastDecision = semanticRuntime.fastDecision;
   registerLocalSemanticComponentRoutes(app, {
     manager: localSemanticComponent,
     ...(uiAuthController ? { requireAuth: uiAuthController.requireAuth } : {}),
@@ -4307,7 +2563,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   catalogScan.start = (workspaceId: string): void => {
     // Session-owned stores have no resource root to index; callers pass either
     // the scope id or its hashed store key depending on the loop they run in.
-    if (isThreadScopeId(workspaceId) || /^thread-[0-9a-f]{32}$/.test(workspaceId) || isSessionScopeId(workspaceId) || isSessionStoreKey(workspaceId)
+    if (isThreadScopeId(workspaceId) || isThreadStoreKey(workspaceId)
       || isBotScopeId(workspaceId) || isBotStoreKey(workspaceId)) return;
     queueMicrotask(() => {
       void symbolGraphRuntime.scanWorkspace(workspaceId).catch((error) => {
@@ -4321,7 +2577,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   };
   for (const storeKey of knowledgeStores.keys()) {
     // Store keys may be hashed session scopes — only real resource roots index.
-    if (isSessionStoreKey(storeKey) || isBotStoreKey(storeKey)) continue;
+    if (isThreadStoreKey(storeKey) || isBotStoreKey(storeKey)) continue;
     catalogScan.start(storeKey);
   }
   await indexDirectories.load();
@@ -4339,81 +2595,17 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     semanticRuntime.observeDocumentMutation(event);
   };
   const knowledgeLanguageSubscriptions = new Map<string, { close(): void }>();
-  const bindKnowledgeSession = (sessionId: string, scopeId: string): void => {
-    knowledgeContextRuntime.bindSession(sessionId, scopeId);
-    // Language subscriptions are workspace-addressed; session- and bot-owned
-    // scopes have no workspace LSP to observe.
-    if (isThreadScopeId(scopeId) || isSessionScopeId(scopeId) || isBotScopeId(scopeId) || knowledgeLanguageSubscriptions.has(scopeId)) return;
-    const workspaceId = scopeId;
-    knowledgeLanguageSubscriptions.set(workspaceId, languageSupervisor.subscribe(workspaceId, (value) => {
-      const event = recordOf(value);
-      if (event.kind !== 'diagnostics' || typeof event.resourceId !== 'string') return;
-      // Zone 2 reports diagnostics that follow a user edit, so only the editor
-      // view qualifies; the agent view's answers are the agent's own feedback.
-      if (event.view !== SURFACE_LANGUAGE_VIEW) return;
-      const diagnostics = Array.isArray(event.items)
-        ? event.items.map(recordOf).filter((item) => item.severity === 'error' || item.severity === 'warning')
-        : [];
-      if (diagnostics.length === 0) return;
-      knowledgeContextRuntime.observeDiagnostics({
-        workspaceId,
-        sessionId: 'lsp',
-        path: event.resourceId,
-        count: diagnostics.length,
-        worst: diagnostics.some((item) => item.severity === 'error') ? 'error' : 'warning',
-      });
-    }));
-  };
-  bindThreadKnowledgeSession = (sessionId, workspaceId) => {
-    bindKnowledgeSession(sessionId, workspaceId);
-    prewarmSession(sessionId, sessionSnapshots.get(sessionId)?.cwd, true);
-  };
 
   const terminalCommandProjector = createTerminalCommandProjector({
     resolveWorkspaceId: (cwd) => documentsAuthority.resolveScopeId(cwd),
     observe: createTerminalCommandObserveAdapter(knowledgeContextRuntime),
     drain: () => knowledgeContextRuntime.drain(),
-    listBoundSessions: (workspaceId) => knowledgeContextRuntime.listBoundSessions(workspaceId),
+    listBoundOwners: (workspaceId) => knowledgeContextRuntime.listBoundOwners(workspaceId),
     inspectCwd: (terminalId) => terminalRuntime?.inspectSession(terminalId)?.cwd,
     onError: (error) => {
       console.error('[HarnessKnowledge] Terminal command projection failed:', errorMessage(error));
     },
   });
-
-  // Zone 2 provider — assembles material from the knowledge store
-  async function zone2Provider(request: Parameters<typeof knowledgeContextRuntime.zone2Material>[0]) {
-    return knowledgeContextRuntime.zone2Material(request);
-  }
-
-  // Todo deps provider
-  async function todoDepsProvider(sessionId: string): Promise<TodoToolDeps> {
-    const store = await getKnowledgeStoreForSession(sessionId);
-    if (!store) throw new Error('No knowledge store for session');
-    return {
-      store,
-      sessionId,
-    };
-  }
-
-  // Recall deps provider
-  async function recallDepsProvider(sessionId: string, workspaceId: string | null): Promise<RecallToolDeps> {
-    const owningWorkspaceId = await owningKnowledgeScopeIdForSession(sessionId, workspaceId)
-      ?? sessionScopeId(sessionId);
-    const workspaceStore = await getKnowledgeStoreForScope(owningWorkspaceId);
-    const ownScopeId = sessionScopeId(sessionId);
-    const sessionStore = ownScopeId !== owningWorkspaceId && await knowledgeStoreExistsForScope(ownScopeId)
-      ? await getKnowledgeStoreForScope(ownScopeId)
-      : null;
-    return {
-      workspaceStore,
-      userStore: await getUserKnowledgeStore(),
-      ...(sessionStore ? { sessionStore } : {}),
-      sessionId,
-      workspaceId: owningWorkspaceId,
-      associated: await workAssociationForSession(sessionId),
-      ...(knowledgeVectors ? { vectors: knowledgeVectors } : {}),
-    };
-  }
 
   // D-240: one collector serves both entry points — lsp.* navigation writes its
   // already-obtained resolutions back, and related.query deliberately resolves
@@ -4422,349 +2614,6 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     documents: documentsAuthority,
     supervisor: languageSupervisor,
     getStore: (workspaceId) => knowledgeStores.get(knowledgeStoreKeyForScope(workspaceId)) ?? null,
-  });
-
-  const discoveredShells = discoverShells();
-  const shellPathResolver = createShellPathResolver({
-    interpreter: (sessionId) => harnessServiceHost.getInterpreter(sessionId),
-    spawn: kernelProcesses.spawn,
-  });
-  const harnessServiceHost = createHarnessServiceHost({
-    agentPersonalization,
-    discoveredShells,
-    memoryService,
-    computerService,
-    sessionInstructionsFor: async (sessionId) => (
-      (await botService.botForSession(sessionId) ?? await consultBotForSession(sessionId))?.instructions ?? null
-    ),
-    bots: { get: (botId) => botService.get(botId) },
-    pathLockService: kernelPathLockService,
-    verification: verificationCoordinator,
-    experimentService,
-    resourceService,
-    sourceService,
-    settingsService,
-    followUpService,
-    scheduledTaskService,
-    managedRemoteTargets,
-    readExploreFile: createExploreFileReader(
-      documentsAuthority,
-      harnessPathAuthority,
-      (sessionId, resourceId, workspaceId) => workingBranchLookups.exploreFile(sessionId, resourceId, workspaceId),
-      sourceViewRuntime.readExploreSource,
-    ),
-    storeRetrievalArtifact: retrievalArtifacts.storeArtifact,
-    readRetrievalArtifact: retrievalArtifacts.readArtifact,
-    readRetrievalArtifactSlice: retrievalArtifacts.readArtifactSlice,
-    protectRetrievalEvidence: async (input) => {
-      const current = await threadRegistry.getThreadById(input.workspaceId, input.threadId);
-      if (!current || current.activeRunId !== input.runId || current.pendingEvidence === undefined) {
-        if (current) await retrievalArtifacts.syncThreadEvidence(input.workspaceId, current);
-        throw new Error(`Retrieval evidence run is no longer active: ${input.runId}`);
-      }
-      await retrievalArtifacts.promotePendingEvidence(input);
-      const latest = await threadRegistry.getThreadById(input.workspaceId, input.threadId);
-      if (latest) await retrievalArtifacts.syncThreadEvidence(input.workspaceId, latest);
-    },
-    lookupWebFetchReceipt: retrievalArtifacts.lookupReceipt,
-    releaseRetrievalTemporaryArtifacts: retrievalArtifacts.releaseTemporaryArtifacts,
-    releaseWebFetchReceipts: async (sessionId, fallbackWorkspaceId) => {
-      const binding = await threadRegistry.getSessionBinding(sessionId).catch(() => null);
-      const workspaceId = binding?.owningScopeId ?? fallbackWorkspaceId ?? sessionScopeId(sessionId);
-      await retrievalArtifacts.releaseReceiptAuthority(workspaceId, {
-        owningWorkspaceId: workspaceId,
-        sessionId,
-        ...(binding ? { threadId: binding.threadId, runId: binding.runId } : {}),
-      });
-    },
-    pinWorkingBranchQuery: (sessionId, pinOptions) => workingBranchLookups.pinQuery(sessionId, pinOptions),
-    agentInputDraftPaths: (sessionId, context, workspaceId) => documentsAuthority.agentInputDraftPaths(sessionId, context, workspaceId),
-    documentReadSource: sourceViewRuntime.readSource,
-    documentPathOverlay: sourceViewRuntime.pathOverlay,
-    documentWriteGuard: sourceViewRuntime.writeGuard,
-    documentSurfaceWrite: sourceViewRuntime.surfaceWrite,
-    documentBranchWrite: sourceViewRuntime.branchWrite,
-    workingBranchEnsureMaterialized: (sessionId, signal) => {
-      if (!threadRuntime) {
-        return Promise.resolve({ status: "failed" as const, message: "Thread runtime is unavailable for materialization" });
-      }
-      return threadRuntime.materializeExecutionView(sessionId, signal);
-    },
-    commitAgentInputContext: sourceViewRuntime.commitContext,
-    releaseAgentInputContext: sourceViewRuntime.releaseContext,
-    dropAgentInputContexts: (sessionId) => documentsAuthority.dropAgentInputSnapshots(sessionId),
-    search: async (request, options) => workspaceContentSearch.searchContent({
-      query: request.query,
-      workspaceId: request.workspaceId,
-      maxResults: request.maxResults,
-      ...(request.before === undefined ? {} : { before: request.before }),
-      ...(request.after === undefined ? {} : { after: request.after }),
-      ...(request.paths === undefined ? {} : { paths: request.paths }),
-      ...(request.glob === undefined ? {} : { glob: request.glob }),
-      ...(request.excludeResourceIds === undefined ? {} : { excludeResourceIds: request.excludeResourceIds }),
-      ...(request.ignoreCase === undefined ? {} : { ignoreCase: request.ignoreCase }),
-      ...(request.fixedStrings === undefined ? {} : { fixedStrings: request.fixedStrings }),
-    }, options),
-    resolveWorkspaceRoot: async (workspaceId) => {
-      try {
-        const workspace = await documentsAuthority.getWorkspace(workspaceId);
-        return workspace.root;
-      } catch {
-        return null;
-      }
-    },
-    resolveScopeRoot: async (canonicalPath) => {
-      try {
-        const mapping = await documentsAuthority.ensureResourceRoot(canonicalPath, 'directory');
-        return { workspaceId: mapping.workspaceId, root: mapping.canonicalPath };
-      } catch {
-        return null;
-      }
-    },
-    pathAuthority: harnessPathAuthority,
-    defaultExplorePaths: async (actor) => {
-      const workspace = recordOf(sessionSnapshots.get(actor.sessionId)?.workspace);
-      if (workspace.kind !== 'workspace' || typeof workspace.id !== 'string') return [];
-      if (await botService.botForSession(actor.sessionId)) return [];
-      const projects = sanitizeProjects((await readSettingsFromDisk()).projects) ?? [];
-      const project = projects.find((entry) => entry.id === workspace.id);
-      // Isolated worktrees keep their execution view; project folder edits do
-      // not redirect an already-running isolated task back to the source tree.
-      if (!project || !actor.cwd || !projectContainsPath(project, actor.cwd)) return [];
-      const authorized = await Promise.all(projectFolders(project).map((directory) =>
-        harnessPathAuthority.resolve(actor, directory, { allowMissing: false })));
-      return authorized.filter((entry): entry is NonNullable<typeof entry> => entry !== null);
-    },
-    createTerminalSession: async (input) => {
-      const runtime = terminalRuntime;
-      if (!runtime?.createTerminalSession) {
-        throw new Error("Terminal runtime is not available");
-      }
-      return runtime.createTerminalSession(input);
-    },
-    registerWriter: async (sessionId, workspaceRoot) => {
-      const writer = await documentsAuthority.registerWriterForScope(
-        workspaceRoot,
-        { kind: 'harness-bash', id: sessionId },
-        { mode: 'process', purpose: 'harness-bash' },
-      );
-      if (!writer) throw new Error('Harness shell has no workspace writer authority');
-      return { close: async () => { await writer.close(); } };
-    },
-    diagnosticsProvider: createLanguageSupervisorDiagnosticsProvider(languageSupervisor, {
-      documents: documentsAuthority,
-      readSource: sourceViewRuntime.readSource,
-      resolveTarget: sourceViewRuntime.resolveLanguageTarget,
-    }),
-    lspNavigationServices: createLspNavigationServices({
-      documents: documentsAuthority,
-      supervisor: languageSupervisor,
-      readSource: sourceViewRuntime.readSource,
-      resolveTarget: sourceViewRuntime.resolveLanguageTarget,
-      // Write-behind (D-240): a disk-bound lsp.references/lsp.definition answer
-      // becomes graph rows so later related/explore queries reuse the
-      // resolution instead of re-asking the language view.
-      recordRelations: async (input) => {
-        const owningWorkspaceId = await owningKnowledgeScopeIdForSession(input.sessionId, input.workspaceId);
-        // A child execution view may contain unpublished branch text. It can use
-        // LSP answers in that view, but those rows must not enter the owning
-        // workspace graph as committed facts.
-        if (!owningWorkspaceId || owningWorkspaceId !== input.workspaceId) return { recorded: 0 };
-        const root = (await documentsAuthority.inspectWorkspace(input.workspaceId)).root;
-        if (!indexPathAllowed(projectIndexScope.get(), path.resolve(root, input.anchor.path))) return { recorded: 0 };
-        return relationCollector.record(owningWorkspaceId, { ...input,
-          sites: input.sites.filter((site) => indexPathAllowed(projectIndexScope.get(), path.resolve(root, site.path))) });
-      },
-    }),
-    structureSource,
-    // Reading relations must not open a database or start a catalog scan, so
-    // this consults an already-open store and reports "not answered" otherwise.
-    // The session's own knowledge work opens it (D-112).
-    graphRecall: async (sessionId, executionWorkspaceId) => {
-      const resourceStore = knowledgeStores.get(knowledgeStoreKeyForScope(executionWorkspaceId));
-      if (resourceStore) return {
-        workspaceId: executionWorkspaceId,
-        store: resourceStore,
-        directFactsCompatible: true,
-      };
-      const owningWorkspaceId = await owningKnowledgeScopeIdForSession(sessionId, executionWorkspaceId)
-        ?? sessionScopeId(sessionId);
-      if (!owningWorkspaceId) return null;
-      const store = knowledgeStores.get(knowledgeStoreKeyForScope(owningWorkspaceId));
-      return store ? {
-        workspaceId: owningWorkspaceId,
-        store,
-        directFactsCompatible: owningWorkspaceId === executionWorkspaceId,
-      } : null;
-    },
-    // Bounded live resolution for related.query — one references +
-    // call-hierarchy pass per exact-match definition (D-240).
-    relationCollector,
-    semanticRecall: semanticRuntime.semanticRecall,
-    harnessSettings: semanticRuntime.harnessSettings,
-    rerankExploreViews: semanticRuntime.rerankExploreViews,
-    fastDecisionStatus: semanticRuntime.fastDecisionStatus,
-    fastDecision: semanticRuntime.fastDecision,
-    permissionAudit: (record) => {
-      broadcastGlobalUiEvent?.({
-        type: 'varin:harness-permission-decision',
-        properties: record,
-      });
-    },
-    fileRelations: async (workspaceId, resourceId) => {
-      const store = knowledgeStores.get(knowledgeStoreKeyForScope(workspaceId));
-      if (!store) throw new Error(`knowledge store is not open for workspace ${workspaceId}`);
-      const relations = await store.getFileRelations(resourceId);
-      if (!relations) return null;
-      if (
-        relations.imports.length === 0
-        && relations.connections.length === 0
-        && relations.associations.length === 0
-        && relations.references.length === 0
-        && relations.calls.length === 0
-      ) {
-        return null;
-      }
-      return {
-        path: relations.path,
-        documentRevision: relations.documentRevision,
-        incomplete: relations.linksIncomplete,
-        imports: relations.imports.map(({ specifier, line }) => ({ specifier, line })),
-        connections: relations.connections.map(({ callee, literal, line }) => ({ callee, literal, line })),
-        associations: relations.associations.map(({ callee, literal, line }) => ({ callee, literal, line })),
-        references: relations.references.map((record) => ({
-          value: record.value,
-          line: record.line,
-          ...(record.caller !== undefined ? { caller: record.caller } : {}),
-          ...(record.targetPath !== undefined ? { targetPath: record.targetPath } : {}),
-          ...(record.targetName !== undefined ? { targetName: record.targetName } : {}),
-          pinned: record.pinned,
-          ...(record.staleTarget ? { staleTarget: true } : {}),
-          resolvedBy: record.resolvedBy,
-        })),
-        calls: relations.calls.map((record) => ({
-          callee: record.targetName ?? record.value,
-          line: record.line,
-          ...(record.caller !== undefined ? { caller: record.caller } : {}),
-          ...(record.targetPath !== undefined ? { targetPath: record.targetPath } : {}),
-          ...(record.targetName !== undefined ? { targetName: record.targetName } : {}),
-          pinned: record.pinned,
-          ...(record.staleTarget ? { staleTarget: true } : {}),
-          resolvedBy: record.resolvedBy,
-        })),
-      };
-    },
-    // Web services — fetch is always available (SSRF-guarded); read and search
-    // depend on reader model / search provider configuration, wired later.
-    webFetchService,
-    documentReader,
-    documentReadingSettings: async (sessionId) => {
-      const snapshot = await piRuntimeBroker.requestForSession(sessionId, 'settings.get', {});
-      return resolveHarnessDocumentReadingSettings(recordOf(snapshot.global.harness).documentReading);
-    },
-    materialWebPolicy: async (sessionId) => {
-      const snapshot = await piRuntimeBroker.requestForSession(sessionId, 'settings.get', {});
-      const domains = resolveHarnessWebBinding(snapshot).settings?.domains;
-      return { ...(domains?.allow === undefined ? {} : { allow: domains.allow }), block: domains?.block ?? [] };
-    },
-    readAuthorizedDiskFile: (ctx, authorized) => harnessPathAuthority.readAuthorizedFile(
-      ctx.actor,
-      authorized,
-      ctx.signal,
-    ),
-    readAuthorizedDiskPage: (ctx, authorized, page) => harnessPathAuthority.readAuthorizedPage(ctx.actor, authorized, page, ctx.signal),
-    readMaterialFile: async (ctx, authorized) => {
-      ctx.signal.throwIfAborted();
-      const before = await harnessPathAuthority.resolve(ctx.actor, authorized.inputPath, { allowMissing: true });
-      if (!before || before.canonicalResourceId !== authorized.canonicalResourceId) throw new Error('Document path changed before reading');
-      const source = await harnessServiceHost.documentReadSource!(ctx.sessionId, ctx.inputContext ?? { source: 'disk' }, authorized.resourceId, authorized.workspaceId);
-      let bytes: Buffer;
-      if (source.status === 'working-branch') {
-        if (source.message || source.missing || source.base64 === undefined) throw new Error(source.message ?? 'Document is unavailable in the working branch');
-        bytes = Buffer.from(source.base64, 'base64');
-      } else if (source.status === 'ready') {
-        bytes = encodeDocumentText(source);
-      } else if (source.status === 'unavailable') {
-        throw new Error(source.message);
-      } else {
-        bytes = await harnessPathAuthority.readAuthorizedFile(ctx.actor, authorized, ctx.signal);
-      }
-      const after = await harnessPathAuthority.resolve(ctx.actor, authorized.inputPath, { allowMissing: true });
-      ctx.signal.throwIfAborted();
-      if (!after || after.canonicalResourceId !== authorized.canonicalResourceId) throw new Error('Document path changed while reading');
-      return bytes;
-    },
-    ...(webSearchService ? { webSearchService } : {}),
-    networkDiagnostics: { diagnose: (url, override) => egressRuntime.diagnose(url, override) },
-    researchSearchService,
-    researchDecideService,
-    materialCollectionsService,
-    // Phase 2: knowledge, memory, zone2, compaction, todo, recall
-    zone2Provider,
-    onShellStarted: (sessionId, event) => knowledgeContextRuntime.observeShellStarted(sessionId, event).then(() => undefined),
-    onShellOutput: (sessionId, event) => knowledgeContextRuntime.observeShellOutput(sessionId, event).then(() => undefined),
-    onShellCompleted: (sessionId, event) => knowledgeContextRuntime.observeShellCompletion(sessionId, event).then(() => undefined),
-    onSessionCompacted: (sessionId) => knowledgeContextRuntime.resetSessionObservationBaselines(sessionId),
-    todoDepsProvider,
-    recallDepsProvider,
-    threadRegistry,
-    threadCaptureDraftBaseline: (sessionId, workspaceId, context) => threadRuntime!.captureDraftBaseline(sessionId, workspaceId, context),
-    threadPrepareIsolatedBranch: (input) => threadRuntime!.prepareIsolatedBranch(input),
-    threadDiscardPreparation: async (scopeId, parent, threadId) => {
-      // Use durable deletion so a failed cleanup keeps its branch/directory
-      // ownership and can resume after restart.
-      await threadRuntime!.deleteUser(scopeId, parent, threadId);
-    },
-    agentInputSurfaceOwner: documentsAuthority.agentInputSurfaceOwner,
-    threadTranscriptReader,
-    threadSpawnSession: (input) => threadRuntime!.spawn(input),
-    threadKillSession: (threadId: string, keepWorktree?: boolean, workspaceId?: string) => (
-      threadRuntime!.kill(threadId, keepWorktree, workspaceId)
-    ),
-    requireThreadMergeJournal: true,
-    threadApplyWorktreeDiff: (workspaceId, parent, threadId, resultRevision, executionId, extras) => (
-      threadRuntime!.merge(workspaceId, parent, threadId, resultRevision, executionId, extras)
-    ),
-    threadUpdateBaseline: (workspaceId, parent, threadId, resultRevision, extras) => (
-      threadRuntime!.updateBaseline(workspaceId, parent, threadId, resultRevision, extras)
-    ),
-    threadSubmitCode: (...args) => threadRuntime!.submitCode(...args),
-    threadSendToSession: async (sessionId, message, meta) => {
-      if (!piRuntimeBroker.activeSessionIds.includes(sessionId)) await piRuntimeBroker.openSession({ sessionId });
-      await threadRuntime!.send(sessionId, message, meta);
-    },
-    threadCaptureInputContext: (input) => threadRuntime!.captureInputContext(input.sessionId),
-    threadHistoryEntries: (sessionId) => piRuntimeBroker.previewSessionEntries(sessionId, undefined, "branch"),
-    runCompactionTask: (actor, spec, signal) => piRuntimeBroker.runCompactionTask(actor.sessionId, spec, {
-      signal,
-      registerWorker: (workerId) => harnessServiceHost.registerAuxiliaryActor(actor, workerId, spec.fixedLeafEntryId),
-      dropWorker: (workerId) => {
-        harnessRouter.cancelWorker(workerId);
-        harnessServiceHost.dropAuxiliaryActor(workerId);
-      },
-    }),
-    threadContinueRun: (input) => threadRuntime!.continueRun(input),
-    threadResumeLost: (workspaceId, parent) => threadRuntime!.resumeLostForParent(workspaceId, parent),
-  });
-  harnessShellActivity.hasActiveCommandAtDirectory = (directory) => (
-    harnessServiceHost.hasActiveCommandAtDirectory(directory)
-  );
-  harnessShellActivity.closeSessionShell = harnessServiceHost.closeSessionShell;
-  const harnessSessionRegistration = createHarnessSessionRegistration({
-    host: harnessServiceHost,
-    readSettings: async ({ actor }) => {
-      const broker = getReadyPiRuntimeBroker();
-      if (!broker) throw new Error('Pi settings are unavailable');
-      return broker.requestForSession(actor.sessionId, 'settings.get', {});
-    },
-    resolveWorkspaceRoot: async (workspaceId) => {
-      try {
-        const workspace = await documentsAuthority.inspectWorkspace(workspaceId);
-        return workspace.root;
-      } catch {
-        return null;
-      }
-    },
   });
   const unregisterMaterialToolCapability = extensionRuntime.capabilities.register(MATERIAL_SNAPSHOT_CAPABILITY, webRuntimeOwner.current.snapshotCapability);
   const unregisterResearchDecisionCapability = extensionRuntime.capabilities.register(RESEARCH_DECISION_CAPABILITY, researchDecisionOwner.current.capability);
@@ -4782,8 +2631,12 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   const unregisterNestedToolCapability = extensionRuntime.capabilities.register(VARIN_RUNTIME_TOOLS_CAPABILITY, createNestedToolOwner(kernelClient));
   const unregisterScriptCapability = extensionRuntime.capabilities.register(SCRIPT_CAPABILITY, scriptRuntimeOwner.current.capability);
   const unregisterComputerCapability = extensionRuntime.capabilities.register(COMPUTER_CAPABILITY, computerRuntimeOwner.current.capability);
+  const unregisterSettingsCapability = extensionRuntime.capabilities.register(SETTINGS_CAPABILITY, createSettingsToolOwner({ service: settingsService, runtime: agentRuntime,
+    localWorkspace: authority => authority.source?.resource_owner.kind === 'local' && authority.source.mode === 'live_root' ? authority.source.workspace_id : null,
+  }));
+  const environmentForwards = createEnvironmentForwardRuntime();
   const environmentForwardJobs = createEnvironmentForwardJobRuntime({ kernel: kernelClient, runtime: agentRuntime,
-    forwards: harnessServiceHost.environmentForwards, targets: managedRemoteTargets,
+    forwards: environmentForwards, targets: managedRemoteTargets,
     onError: () => console.error('[Environment] Original service forward requires reconciliation') });
   const unregisterEnvironmentForwardCapability = extensionRuntime.capabilities.register(ENVIRONMENT_FORWARD_CAPABILITY, environmentForwardJobs.capability);
   environmentForwardJobs.start();
@@ -4842,326 +2695,25 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     'workspace.test',
     createWorkspaceTestCapabilityHandler(runRuntime.tests),
   );
-  const unregisterPiRuntimeCapability = extensionRuntime.capabilities.register('pi-runtime', async (method, value) => {
-    if (method !== 'request' || !value || typeof value !== 'object' || Array.isArray(value)) {
-      throw new Error('The pi-runtime capability expects a request object');
-    }
-    const request = value;
-    const target = request.target && typeof request.target === 'object' && !Array.isArray(request.target)
-      ? request.target
-      : {};
-    const hostMethod = typeof request.method === 'string' ? request.method : '';
-    const params = request.params && typeof request.params === 'object' && !Array.isArray(request.params)
-      ? request.params
-      : {};
-    let result;
-    if (target.kind === 'catalog') result = await piRuntimeBroker.requestCatalogDynamic(hostMethod, params);
-    else if (target.kind === 'workspace' && typeof target.cwd === 'string') {
-      result = await piRuntimeBroker.requestForWorkspaceDynamic(target.cwd, hostMethod, params);
-    } else if (target.kind === 'session' && typeof target.sessionId === 'string') {
-      result = await piRuntimeBroker.requestForSessionDynamic(target.sessionId, hostMethod, params);
-    } else throw new Error('The pi-runtime capability target is invalid');
-    return toJsonValue(result ?? null);
-  });
   await extensionRuntime.start().catch((error) => {
     console.warn('[Varin Extensions] Host reconciliation failed:', error?.message || error);
   });
   const unregisterWorkbenchLayoutService = await registerBuiltinWorkbenchLayoutService(extensionRuntime);
-  // Scheduled runs report the real session outcome, not the dispatch receipt:
-  // the executor waits on the Pi event stream until the run settles (D-307).
-  const sessionSettleTracker = createSessionSettleTracker();
-  scheduledTasksRuntime.setExecutor(createPiScheduledTaskExecutor({
-    broker: piRuntimeBroker,
-    awaitCompletion: (sessionId) => sessionSettleTracker.waitForSettled(sessionId),
-    forgetCompletion: (sessionId) => sessionSettleTracker.forget(sessionId),
-  }));
-  const sessionNames = new Map<string, string>();
-  recoveryTurnCoordinator = createRecoveryTurnCoordinator({
-    documents: documentsAuthority,
-    getSessionSnapshot: (sessionId) => sessionSnapshots.get(sessionId) ?? null,
-    invokeService: (request) => extensionRuntime.invokeService(request),
-    respondMutation: async (request, accepted) => {
-      await piRuntimeBroker.requestForSession(
-        request.sessionId,
-        'workspace.mutation.respond',
-        { accepted, requestId: request.requestId, sessionId: request.sessionId },
-      );
-    },
-    observeToolWrite: async (workspaceId, absolutePath) => {
-      await documentsAuthority.observeAgentWrite(workspaceId, absolutePath);
-      const workspace = await documentsAuthority.getWorkspace(workspaceId);
-      languageSupervisor.observeDocumentMutation({ workspaceId, resourceId: path.relative(workspace.root, absolutePath), kind: 'modified' });
-      await semanticRuntime.observeToolWrite(workspaceId, absolutePath);
-    },
-    writerTracker: piWriterTracker,
-  });
-  // ── Harness router ─────────────────────────────────────────────────
-  // Consumes harness.request events from the broker stream (same
-  // subscription as recovery turn coordinator) and dispatches to the
-  // registered harness services.
-  const harnessRouter = createHarnessRouter({
-    onRequestDiagnostic: (event) => {
-      console.error('[HarnessDeadline]', JSON.stringify({ ...event, storage: knowledgeStorageActivity() }));
-    },
-    assertExecution: assertBotSessionExecution,
-    resolveWorkTarget: async (sessionId) => (await threadRegistry.threadEnvironmentForSession(sessionId))?.environment?.workTarget,
-    // Route by the requesting worker, not by session: a session's internal
-    // compaction worker is pinned for identity but is not the session worker.
-    respond: async (identity, requestId, outcome) => {
-      const delivered = await piRuntimeBroker.requestForWorker(
-        identity.workerId,
-        'harness.respond',
-        buildHarnessRespondParams(identity.sessionId, requestId, outcome),
-      );
-      if (!delivered.accepted) throw new Error('Harness response was no longer accepted by its worker');
-    },
-    resolveActor: (identity, signal) => harnessSessionRegistration.resolveActor(identity, signal),
-    authorizeWorkspacePath: (actor, candidate, options) => harnessPathAuthority.resolve(actor, candidate, options),
-    cancelExploreQuery: (actor, queryId) => harnessServiceHost.exploreQueryStore.cancel(actor, queryId),
-  });
-  registerHarnessServices(harnessRouter, harnessServiceHost);
-  const mcpHarness = createMcpHarnessServices(piMcpAuthority, async ctx => {
-    // Read the existing session authority so one-session trust is not mistaken for denial.
-    // Unlike settings.get (which reloads files), this scope cut is read-only and out-of-band.
-    const settings = await piRuntimeBroker.requestForSession(ctx.sessionId, 'settings.context', {});
-    const configCwd = ctx.actor.cwd ?? ctx.actor.authorityRoot ?? mcpAgentDir;
-    if (path.resolve(settings.cwd) !== path.resolve(configCwd)) throw new Error('MCP session configuration scope changed');
-    return {
-      resourceOwner: { kind: 'local' as const },
-      agentDir: mcpAgentDir, configCwd, executionCwd: ctx.actor.cwd ?? mcpAgentDir,
-      // MCP remains a Host-owned capability. A remote shell placement does not relocate it.
-      environmentId: ctx.workspaceId ? `${hostId}:${ctx.workspaceId}` : `${hostId}:global`,
-      executionScope: ctx.workspaceId ? 'workspace' : 'global',
-      projectTrusted: settings.projectTrusted, sessionId: ctx.sessionId,
-    };
-  });
-  harnessRouter.register('mcp.owner', mcpHarness.services['mcp.owner']);
   botLifecycleRuntime = createBotLifecycleRuntime({
-    hostId, registry: threadRegistry, runtime: threadRuntime, broker: piRuntimeBroker, computers: computerService,
+    hostId, computers: computerService,
     agent: { runtime: agentRuntime, kernel: kernelClient, gate: botId => botService.executionGate(botId),
       continueLaunch: runId => threads.continueLaunch(runId), drainScripts: runIds => scriptRuntimeOwner.current!.drainRuns(runIds),
       drainForwards: runIds => environmentForwardJobs.drainRuns(runIds),
       drainCollaborations: threadIds => collaboration.suspendThreads(threadIds) },
-    stopSessionProcesses: harnessServiceHost.closeSessionShell,
-    stopRoot: (sessionId) => botRootRuntime.cancelSession(sessionId, 'Bot sleeping'),
     stopMemory: (scopeId) => memoryOrganizer.suspendScope(scopeId),
     resumeMemory: (scopeId) => memoryOrganizer.resumeScope(scopeId),
     stopRemoteScope: (scopeId) => managedRemoteTargets.setScopeSleeping(scopeId, true),
     resumeRemoteScope: (scopeId) => managedRemoteTargets.setScopeSleeping(scopeId, false),
     remoteMachineOwners: (hostId) => managedRemoteTargets.ownersForMachine(`managed:${hostId}`),
-    wakeFollowUps: (scopeId) => followUpService.resumeScope(scopeId),
-  });
-  interface SessionNotificationRequest extends DesktopNotificationPayload {
-    body: string;
-    kind: 'completion' | 'error';
-    sessionId: string;
-    tag: string;
-    title: string;
-  }
-  const sendPiSessionNotification = async ({
-    body,
-    kind,
-    sessionId,
-    tag,
-    title,
-  }: SessionNotificationRequest): Promise<void> => {
-    const settings = await readSettingsFromDisk().catch(() => null);
-    if (settings?.notifyOnCompletion === false) return;
-    const payload = { body, kind, sessionId, tag, title };
-    const desktopDelivered = getIsWindowFocused() && settings?.notificationMode !== 'always'
-      ? false
-      : emitDesktopNotification(payload);
-    broadcastUiNotification(payload, { desktopNotificationDelivered: desktopDelivered });
-    const pushPayload = {
-      ...payload,
-      data: { type: 'session', sessionId, url: `/?session=${encodeURIComponent(sessionId)}` },
-    };
-    await Promise.allSettled([
-      sendPushToAllUiSessions(pushPayload, { requireNoSse: true }),
-      isAnyInteractiveClientVisible() ? Promise.resolve() : sendMobilePushToAllDevices(pushPayload),
-      sendApnsToAllUiSessions(pushPayload),
-    ]);
-  };
-  const piSessionTitles = createPiSessionTitleRuntime({
-    broker: piRuntimeBroker,
-    getSmallModelService: () => import('./lib/small-model/index.js'),
-  });
-  const piSessionAutomation = createPiSessionAutomationRuntime({
-    broker: piRuntimeBroker,
-    getSmallModelService: () => import('./lib/small-model/index.js'),
-    readSettings: readSettingsFromDisk,
-    onGoalSettled: async ({ goal, sessionId }) => {
-      const complete = goal.status === 'complete';
-      const statusLabel = goal.status === 'budgetLimited' ? 'budget reached' : goal.status;
-      await sendPiSessionNotification({
-        body: goal.note || goal.statusReason || (complete
-          ? 'The active goal was completed and independently verified.'
-          : `The active goal stopped: ${statusLabel}.`),
-        kind: complete ? 'completion' : 'error',
-        sessionId,
-        tag: `pi-goal-${sessionId}`,
-        title: sessionNames.get(sessionId) || (complete ? 'Varin goal complete' : 'Varin goal needs attention'),
-      });
-    },
   });
   // Recovery can open stores and inference consumers, so start only after
   // their owners and catalog observers have been assembled.
   memoryOrganizer.start();
-  const brokerUnsubscribe = piRuntimeBroker.subscribe((event) => {
-    if (event.kind === 'host' && (event.envelope.event === 'config.changed' || event.envelope.event === 'provider.config.changed')) {
-      for (const changed of extensionConfigurationListeners) changed();
-    }
-    semanticRuntime.processEvent(event);
-    piSessionAutomation.processBrokerEvent(event);
-    piSessionTitles.processBrokerEvent(event);
-    sessionRuntime.processBrokerEvent(event);
-    sessionSettleTracker.processEvent(event);
-    void piWriterTracker.processEvent(event);
-    void recoveryTurnCoordinator.processEvent(event);
-    void botRootRuntime.processEvent(event, async () => {
-      await researchRootRuntime.processEvent(event, async () => {
-        await agentRootRuntime.processEvent(event, async () => {
-          await harnessRouter.processEvent(event);
-          threadRuntime.processEvent(event);
-        });
-      });
-    }).catch((error) => {
-      console.error('[ResearchRoot] Event routing failed:', errorMessage(error));
-    });
-    if (event?.kind === 'worker.exit') {
-      // An auxiliary worker (a session's compaction worker) shares the
-      // session identity but is not the session worker; its exit must not
-      // tear down session registrations.
-      if (event.role === 'compaction') return;
-      if (event.sessionId) {
-        const ownsRegisteredSession = !event.actor || harnessSessionRegistration.hasActor(event.actor);
-        harnessSessionRegistration.dropSession(event.sessionId, event.actor);
-        void kernelStorageAdapter.revokeSession(event.sessionId);
-        kernelSessionActors.delete(event.sessionId);
-        // A worker exit still leaves durable source material behind — let the
-        // organizer cover whatever the session wrote before it went away.
-        memoryOrganizer.noteSessionSettled(event.sessionId);
-        if (ownsRegisteredSession) {
-          mcpHarness.disposeSession(event.sessionId);
-          releaseSessionPrewarm(event.sessionId);
-          clientSurfaceBridge.dropSession(event.sessionId);
-          sessionSnapshots.delete(event.sessionId);
-          sessionNames.delete(event.sessionId);
-          knowledgeContextRuntime.dropSession(event.sessionId);
-        }
-      }
-      return;
-    }
-    if (event?.kind !== 'host' || event.envelope?.kind !== 'event') return;
-    const envelope = event.envelope;
-    const envelopeData = recordOf(envelope.data);
-    const sessionId = event.sessionId ?? '';
-    if (envelope.event === 'session.closed' && sessionId) {
-      const ownsRegisteredSession = !event.actor || harnessSessionRegistration.hasActor(event.actor);
-      harnessSessionRegistration.dropSession(sessionId, event.actor);
-      void kernelStorageAdapter.revokeSession(sessionId);
-      kernelSessionActors.delete(sessionId);
-      memoryOrganizer.noteSessionSettled(sessionId);
-      if (ownsRegisteredSession) {
-        mcpHarness.disposeSession(sessionId);
-        releaseSessionPrewarm(sessionId);
-        clientSurfaceBridge.dropSession(sessionId);
-        knowledgeContextRuntime.dropSession(sessionId);
-      }
-      return;
-    }
-    if (envelope.event === 'session.snapshot' && sessionId) {
-      if (event.actor) kernelSessionActors.set(sessionId, event.actor);
-      const snapshot = mergeSessionSnapshotForKnowledgeOwner(sessionSnapshots.get(sessionId), envelopeData);
-      sessionSnapshots.set(sessionId, snapshot);
-      const name = typeof envelopeData.name === 'string' ? envelopeData.name.trim() : '';
-      if (name) sessionNames.set(sessionId, name);
-      // HR0: harness sessions register on session identity — a bound project
-      // workspace is classification, not an admission requirement. An unbound
-      // (no-project) chat registers with `workspaceId: null`; its durable
-      // owner scope is the session itself.
-      const workspace = recordOf(snapshot.workspace);
-      const harnessWorkspaceId = workspace?.kind === 'workspace'
-        ? typeof workspace.authorityId === 'string' && workspace.authorityId.trim()
-          ? workspace.authorityId
-          : typeof workspace.id === 'string' && workspace.id.trim()
-            ? workspace.id
-            : ''
-        : '';
-      prewarmSession(sessionId, snapshot.cwd);
-      if (event.actor && typeof envelopeData.cwd === 'string' && envelopeData.cwd) {
-        void owningKnowledgeScopeIdForSession(sessionId, harnessWorkspaceId || null).then((scopeId) => {
-          bindKnowledgeSession(
-            sessionId,
-            scopeId ?? sessionScopeId(sessionId),
-          );
-        }).catch((error) => {
-          console.error('[HarnessKnowledge] Session knowledge bind failed:', errorMessage(error));
-        });
-        const activeTools = Array.isArray(snapshot.activeTools)
-          ? snapshot.activeTools.filter((entry): entry is string => typeof entry === 'string')
-          : [];
-        void harnessSessionRegistration.register({
-          actor: event.actor,
-          workspaceId: harnessWorkspaceId || null,
-          workspaceRoot: envelopeData.cwd,
-          grantedCapabilities: deriveHarnessCapabilities(activeTools, {
-            documentRead: true,
-            documentPathOverlay: true,
-            threadRuntime: Boolean(harnessServiceHost.threadRegistry && harnessServiceHost.threadSpawnSession),
-            experiments: Boolean(harnessServiceHost.experimentService),
-            settings: Boolean(harnessServiceHost.settingsService),
-            followUps: Boolean(harnessServiceHost.followUpService),
-            scheduledTasks: Boolean(harnessServiceHost.scheduledTaskService),
-            computer: Boolean(harnessServiceHost.computerService),
-          }),
-        }).catch((error) => {
-          console.error('[Harness] Failed to register session shell:', errorMessage(error));
-        });
-        void (async () => {
-          const binding = await threadRegistry.getSessionBinding(sessionId);
-          await threadRuntime.resumeLostForParent(
-            binding?.owningScopeId ?? harnessWorkspaceId ?? sessionScopeId(sessionId),
-            binding
-              ? { kind: 'thread', id: binding.threadId }
-              : { kind: 'session', id: sessionId },
-          );
-        })().catch((error) => {
-          console.error('[HarnessThreads] Failed to resume child runs:', errorMessage(error));
-        });
-      }
-      return;
-    }
-    if (envelope.event !== 'agent.event' || !sessionId) return;
-    if (threadRuntime.isThreadSession(sessionId)) return;
-    const agentEvent = recordOf(envelopeData.event);
-    if (agentEvent?.type === 'agent_settled') return;
-    if (agentEvent?.type !== 'agent_end' || agentEvent.willRetry === true) return;
-    memoryOrganizer.noteSessionSettled(sessionId);
-    void (async () => {
-      const features = recordOf(sessionSnapshots.get(sessionId)?.features);
-      const goal = recordOf(features.goal);
-      if (goal.status === 'active') return;
-      const body = extractAssistantText(agentEvent.messages) || 'Pi finished the current task.';
-      const title = sessionNames.get(sessionId) || 'Varin task complete';
-      await sendPiSessionNotification({
-        title,
-        body,
-        tag: `pi-session-${sessionId}`,
-        kind: 'completion',
-        sessionId,
-      });
-    })();
-  });
-  void threadWaitRuntime.reconcile().catch(error => console.error('[ThreadWait] Reconcile failed:', errorMessage(error)));
-  const piRuntimeGateway = createPiRuntimeGateway({
-    server,
-    broker: piRuntimeBroker,
-    getBroker: getReadyPiRuntimeBroker,
-    uiAuthController,
-    isRequestOriginAllowed,
-    rejectWebSocketUpgrade,
-  });
 
   tunnelRuntimeContext = tunnelWiringRuntime.initialize(app, port);
   const { tunnelService, startTunnelWithNormalizedRequest } = tunnelRuntimeContext;
@@ -5204,6 +2756,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     fileSearch: catalogFileSearch,
     contentSearch: workspaceContentSearch,
     varinDataDir: VARIN_DATA_DIR,
+    modelText,
     varinUserConfigRoot: VARIN_USER_CONFIG_ROOT,
     varinVersion: VARIN_VERSION,
     runtimeName: process.env.VARIN_RUNTIME || 'web',
@@ -5221,18 +2774,11 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     projectConfigRuntime,
     scheduledTasksRuntime,
     scheduledTaskService,
-    piRuntimeBroker,
-    getPiRuntimeBroker: getReadyPiRuntimeBroker,
-    piRuntimeLifecycle,
-    ...(typeof options.pickPiPackageRoot === 'function' ? { pickPiPackageRoot: options.pickPiPackageRoot } : {}),
-    ...(typeof options.openFilesystemPath === 'function' ? { openFilesystemPath: options.openFilesystemPath } : {}),
     getVarinEventClients: () => uiVarinEventClients,
     writeSseEvent,
     surfaceBridge: clientSurfaceBridge,
     resolveAuthContext: uiAuthController.resolveAuthContext,
-    resolveSurfaceSession: async (sessionId) => (
-      (await piRuntimeBroker.listSessions()).some((session) => session.id === sessionId)
-    ),
+    resolveSurfaceThread: identity => isNativeThreadLive(identity),
     extensionCatalog,
     extensionPackages,
     extensionRuntime,
@@ -5244,7 +2790,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     languageSupervisor,
     languageSupport: languageSupportRuntime,
     runRuntime,
-    reloadRuntimeConfiguration: async () => { await piRuntimeLifecycle.ensureActiveBroker(); },
+
   });
 
   const previewProxyRuntime = createPreviewProxyRuntime({ crypto, URL, createProxyMiddleware, responseInterceptor });
@@ -5261,7 +2807,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     process,
     __dirname,
     express,
-    listRecentSessions: () => getReadyPiRuntimeBroker()?.listSessions?.() ?? [],
+    listRecentThreads: () => agentRuntime.threadCatalog({ archived: 'exclude' }),
     readSettingsFromDisk,
     normalizePwaAppName,
     normalizePwaOrientation,
@@ -5327,28 +2873,29 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       tunnel: { active: Boolean(tunnelService.getPublicUrl()) },
       scheduledTasks: await scheduledTasksRuntime.getStatus(),
     }),
-    isReady: () => Boolean(currentPiRuntimeHandshake()),
+    isReady: () => kernelClient.isReady,
     stop: async (shutdownOptions: { exitProcess?: boolean | undefined } = {}) => {
       // Stop timer/watcher producers before their runtime and storage
       // dependencies begin shutting down.
+      unsubscribeProjectTrust();
       managedMcpOwner.current?.close();
       await targetMcpService.close();
       await targetScheduleReceipts.dispose();
       await scriptRuntimeOwner.current?.dispose();
       await environmentForwardJobs.dispose();
+      await environmentForwards.dispose();
       computerRuntimeOwner.current?.stop();
+      await threadNotifications.dispose();
       runObservers.stop();
       collaboration.stop();
       await fileObservations.stop();
       scheduledTasksRuntime.stop();
       await botService.dispose();
-      followUpService.dispose();
-      piSessionAutomation.stop();
-      piSessionTitles.stop();
       unregisterRuntimeContractCapability();
       unregisterExtensionPackageCapability();
       unregisterNestedToolCapability();
       unregisterComputerCapability();
+      unregisterSettingsCapability();
       unregisterEnvironmentForwardCapability();
       unregisterScriptCapability();
       unregisterResearchCapability();
@@ -5359,12 +2906,8 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       await mcpTaskRuntime.dispose();
       await resourceService.dispose();
       experimentService.detachObservers();
-      brokerUnsubscribe();
-      harnessRouter.dispose();
-      await harnessSessionRegistration.dispose();
       await unregisterWorkbenchLayoutService();
       if (ownsExtensionRuntime) await extensionRuntime.stop();
-      unregisterPiRuntimeCapability();
       unregisterMaterialToolCapability();
       unregisterWebCapability();
       unregisterResearchDecisionCapability();
@@ -5382,13 +2925,12 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       terminalCommandSubscription.dispose();
       for (const subscription of knowledgeLanguageSubscriptions.values()) subscription.close();
       knowledgeLanguageSubscriptions.clear();
-      // Semantic and graph observers still read Documents and use the kernel/Pi
+      // Semantic and graph observers still read Documents and use the kernel
       // services. Stop them while those owners are alive; otherwise each late
       // document event can race a disposed mutation authority during shutdown.
       catalogScan.start = () => undefined;
       unsubscribeProjectIndex();
       prewarmProjectGeneration += 1;
-      prewarmSessions.clear();
       await languagePrewarm.dispose();
       projectIndexScope.dispose();
       await indexDirectories.dispose();
@@ -5397,35 +2939,32 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       // The organizer is a semantic-inference consumer; fence it before closing that owner.
       const inferenceShutdownErrors: unknown[] = [];
       await memoryOrganizer.dispose().catch((error: unknown) => { inferenceShutdownErrors.push(error); });
+      await modelText.close().catch((error: unknown) => { inferenceShutdownErrors.push(error); });
       await semanticInference.close().catch((error: unknown) => { inferenceShutdownErrors.push(error); });
       await symbolGraphRuntime.dispose();
       // Stop producers and drain their receipts while process grants are valid.
       // One refused exit must not prevent the other domains from shutting down.
       const processShutdown = await Promise.allSettled([
-        threadWaitRuntime?.dispose(), agentRootRuntime.dispose(), researchRootRuntime.dispose(), botRootRuntime.dispose(), threadRuntime.dispose(), terminalRuntime?.shutdown(), targetSourceQuery.dispose(), languageSupervisor.dispose(), managedLanguageServers.dispose(), runRuntime.dispose(),
+        terminalRuntime?.shutdown(), targetSourceQuery.dispose(), languageSupervisor.dispose(), managedLanguageServers.dispose(), runRuntime.dispose(),
         // Release every supervised native driver so no synthesized input is
         // left held down when the Host exits.
         computerService.dispose(),
         connections.shutdownAll(),
       ]);
       const processShutdownErrors = [...inferenceShutdownErrors, ...processShutdown.flatMap((result) => result.status === 'rejected' ? [result.reason] : [])];
-      mcpHarness.dispose();
       mcpSettings.close();
       mcpCompositions.close();
-      await Promise.all([mcpAuthority.close(), piMcpAuthority.close()]);
+      await mcpAuthority.close();
       await globalMcpProcesses.dispose().catch((error: unknown) => { processShutdownErrors.push(error); });
       await languageToolProcesses.dispose().catch((error: unknown) => { processShutdownErrors.push(error); });
       await documentProcesses.dispose().catch((error: unknown) => { processShutdownErrors.push(error); });
       await kernelProcesses.dispose().catch((error: unknown) => { processShutdownErrors.push(error); });
       for (const error of processShutdownErrors) console.error('[VarinKernel] Native process shutdown incomplete:', errorMessage(error));
-      await piRuntimeGateway.stop();
       unsubscribeModelSettings();
       unsubscribeModels();
       modelsService.authorizations.close();
       unsubscribeModelKernel();
       await modelExtensions.close();
-      await recoveryTurnCoordinator.dispose();
-      await piWriterTracker.dispose();
       await documentsAuthority.dispose();
       await Promise.allSettled([...workspaceRecoveryEngines.values()].map((engine) => engine.dispose()));
       workspaceRecoveryEngines.clear();
@@ -5434,7 +2973,6 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       await kernelStorageAdapter.dispose().catch((error) => console.error('[VarinKernel] Failed to revoke storage grants:', errorMessage(error)));
       await kernelClient?.close();
       await knowledgeVectors?.close();
-      if (ownsPiRuntimeBroker) await piRuntimeLifecycle.dispose();
       await knowledgeContextRuntime.dispose();
       await Promise.allSettled([...knowledgeStoreLoads.values()]);
       const knowledgeShutdown = await Promise.allSettled([...knowledgeStores].map(async ([workspaceId, store]) => {
@@ -5456,14 +2994,12 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
         processShutdownErrors.push(error);
         console.error('[KnowledgeStore] User-store shutdown incomplete:', errorMessage(error));
       }
-      await harnessServiceHost.dispose();
       try {
         await egressRuntime.close();
       } catch (error) {
         processShutdownErrors.push(error);
         console.error('[HarnessEgress] Shutdown incomplete:', errorMessage(error));
       }
-      await threadRegistry.dispose();
       realtimeProxyRuntime.stop();
       connectionProxy.stop();
       desktopMedia.stop();

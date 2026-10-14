@@ -1,3 +1,4 @@
+import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
 import React from 'react';
 import { createPortal } from 'react-dom';
 import type { editor as MonacoEditor } from 'monaco-editor/editor';
@@ -13,13 +14,13 @@ import { cn } from '@/lib/utils';
 import type { EditorViewState } from '@/lib/workbench/editors/types';
 import { patchEditorViewState } from '@/lib/workbench/editors/session';
 import {
-  activatePiEditorContextOwner,
-  publishPiEditorContext,
-  releasePiEditorContextOwner,
-} from '@/stores/usePiEditorContextStore';
+  activateEditorContextOwner,
+  publishEditorContext,
+  releaseEditorContextOwner,
+} from '@/stores/useEditorContextStore';
 import { useUIStore } from '@/stores/useUIStore';
-import { getRuntimeKey } from '@varin/application-client';
-import { usePiSessionStore } from '@/stores/usePiSessionStore';
+import { threadHostKey as getRuntimeKey } from '@/stores/useThreadStore';
+import { useThreadStore, threadIdentityKey } from '@/stores/useThreadStore';
 import {
   EMPTY_INLINE_COMMENT_DRAFTS,
   getInlineCommentDraftKey,
@@ -80,10 +81,8 @@ export const DocumentMonacoEditor: React.FC<DocumentMonacoEditorProps> = ({
   const fileEditorSettings = useUIStore((state) => state.fileEditorSettings);
   const fileEditorKeymap = useUIStore((state) => state.fileEditorKeymap);
   const updateFileEditorSettings = useUIStore((state) => state.updateFileEditorSettings);
-  const sessionId = usePiSessionStore((state) => state.currentSessionId);
-  const sessionDirectory = usePiSessionStore((state) => (
-    state.currentSessionId ? state.records[state.currentSessionId]?.snapshot?.cwd ?? null : null
-  ));
+  const sessionId = useThreadStore(state => state.selectedIdentity ? threadIdentityKey(state.hostKey, state.selectedIdentity) : null);
+  const sessionDirectory = useEffectiveDirectory();
   const inlineDraftKey = sessionId && sessionDirectory
     ? getInlineCommentDraftKey(getRuntimeKey(), sessionDirectory, sessionId)
     : null;
@@ -208,7 +207,7 @@ export const DocumentMonacoEditor: React.FC<DocumentMonacoEditorProps> = ({
       const open = recordRef.current;
       const hasSelection = Boolean(selection && !selection.isEmpty());
       if (!open?.documentInstanceId) return;
-      publishPiEditorContext(ownerId, {
+      publishEditorContext(ownerId, {
         documentInstanceId: open.documentInstanceId,
         fileName: identity.resourceId.split('/').pop() || identity.resourceId,
         filePath: path,
@@ -278,7 +277,7 @@ export const DocumentMonacoEditor: React.FC<DocumentMonacoEditorProps> = ({
       editorInstance.onDidScrollChange(scheduleCapture),
       editorInstance.onDidChangeHiddenAreas(scheduleCapture),
       editorInstance.onDidFocusEditorWidget(() => {
-        activatePiEditorContextOwner(ownerId);
+        activateEditorContextOwner(ownerId);
         scheduleCapture();
       }),
       editorInstance.addAction({
@@ -302,7 +301,7 @@ export const DocumentMonacoEditor: React.FC<DocumentMonacoEditorProps> = ({
       if (captureFrame !== null) cancelAnimationFrame(captureFrame);
       capture();
       captureContextRef.current = null;
-      releasePiEditorContextOwner(ownerId);
+      releaseEditorContextOwner(ownerId);
       closeInlineCommentRef.current?.();
       bridge.release(languageOwnerId);
       runDebugAdapter.dispose();

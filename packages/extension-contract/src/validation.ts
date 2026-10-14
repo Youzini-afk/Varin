@@ -556,9 +556,7 @@ export function parseVarinExtensionManifest(value: unknown): VarinExtensionManif
   if (value.capabilities !== undefined && !isRecord(value.capabilities)) issues.push("capabilities must be an object");
   const hostCapabilities = uniqueStrings(rawCapabilities.host, "capabilities.host", issues, true);
   const surfaceCapabilities = uniqueStrings(rawCapabilities.surface, "capabilities.surface", issues, true);
-  const rawIntegrates = isRecord(value.integrates) ? value.integrates : {};
-  if (value.integrates !== undefined && !isRecord(value.integrates)) issues.push("integrates must be an object");
-  const piPackages = uniqueStrings(rawIntegrates.piPackages, "integrates.piPackages", issues);
+  if (value.integrates !== undefined) issues.push("integrates is unsupported; declare native service dependencies in requires.services");
   const contributions = parseContributions(value.contributions, "contributions", issues);
   const rawMetadata = isRecord(value.metadata) ? value.metadata : {};
   if (value.metadata !== undefined && !isRecord(value.metadata)) issues.push("metadata must be an object");
@@ -623,7 +621,6 @@ export function parseVarinExtensionManifest(value: unknown): VarinExtensionManif
         ...(surfaceCapabilities.length > 0 ? { surface: surfaceCapabilities } : {}),
       },
     } : {}),
-    ...(piPackages.length > 0 ? { integrates: { piPackages } } : {}),
     ...(metadataDescription || metadataHomepage || metadataIcon || metadataKeywords.length > 0 || metadataRepository ? {
       metadata: {
         ...(metadataDescription ? { description: metadataDescription } : {}),

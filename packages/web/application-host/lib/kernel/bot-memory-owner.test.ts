@@ -16,7 +16,7 @@ it('captures real Knowledge correction then forgetting at the Bot request-materi
     try {
         const memoryOwner = { scope: 'bot' as const, ownerId: 'test-bot' };
         const memory = createMemoryService({ storeForScopeId: async () => store, userStore: async () => null,
-            ownerForSession: async () => memoryOwner, associationForThread: async (threadId) => ({ threadIds: [threadId] }) });
+            ownerForThread: async () => memoryOwner, associationForThread: async (threadId) => ({ threadIds: [threadId] }) });
         const knowledge = createKnowledgeContextRuntime({ getStore: async () => store,
             recallForThread: async ({ query, threadId }) => memory.search(memoryOwner, query, 8, { threadId }) });
         const runtime = { run: async () => ({ id: 'run', thread_id: 'thread', branch_id: 'main' }), thread: async () => ({ bot_id: 'test-bot' }) };
@@ -25,8 +25,8 @@ it('captures real Knowledge correction then forgetting at the Bot request-materi
             prepareContext: { refresh: async () => ({}) } as never, knowledge: knowledge.knowledgeForThread });
         const states: unknown[] = [];
         const sync = async () => {
-            const result = await owner({ action: 'synchronize', runId: 'run', scope: { botId: 'test-bot', mode: 'bot', sessionId: 'thread', projectId: null },
-                previousState: states.at(-1), checkpoint: { personalization: { mode: 'bot', sessionId: 'thread' } } as never }, new AbortController().signal);
+            const result = await owner({ action: 'synchronize', runId: 'run', scope: { botId: 'test-bot', mode: 'bot', threadId: 'thread', projectId: null },
+                previousState: states.at(-1), checkpoint: { personalization: { mode: 'bot', threadId: 'thread' } } as never }, new AbortController().signal);
             expect(result.status).toBe('ready');
             if (result.status !== 'ready')
                 throw new Error(result.message);
@@ -62,7 +62,7 @@ it('reads a committed original receipt with an aborted caller but aborts a not-y
     let release!: () => void;
     try {
         const target = { scope: 'bot' as const, ownerId: 'bot' };
-        const memory = createMemoryService({ storeForScopeId: async () => store, userStore: async () => null, ownerForSession: async () => target });
+        const memory = createMemoryService({ storeForScopeId: async () => store, userStore: async () => null, ownerForThread: async () => target });
         const text = 'Preserve the original signed deployment decision.';
         const runtime = { run: async (_id: string, signal?: AbortSignal) => { signal?.throwIfAborted(); return { id: 'run', thread_id: 'thread:bot', branch_id: 'branch', state: 'waiting' }; }, thread: async (_id: string, signal?: AbortSignal) => { signal?.throwIfAborted(); return { bot_id: 'bot' }; } };
         const history = { branch: async () => [{ role: 'user', text, span: { kind: 'history-item', id: 'user', threadId: 'thread:bot', branchId: 'branch', headId: 'user', revision: sourceRevision(text), start: 0, end: text.length } }] };
@@ -80,7 +80,7 @@ it('reads a committed original receipt with an aborted caller but aborts a not-y
                         }
                         return result;
                     } } }) });
-        const scope = { mode: 'bot' as const, sessionId: 'thread:bot', projectId: null, botId: 'bot', threadRole: 'main' };
+        const scope = { mode: 'bot' as const, threadId: 'thread:bot', projectId: null, botId: 'bot', threadRole: 'main' };
         const args: NonNullable<MemoryQuery['arguments']> = { action: 'remember', content: text, sourceText: text, nature: 'instruction' };
         const saved = await owner({ action: 'tool', runId: 'run', scope, origin: 'original-operation', arguments: args }, new AbortController().signal);
         expect(saved.status).toBe('ready');
@@ -127,8 +127,8 @@ it('keeps the latest user recall query across the original 100-item page boundar
     }) => ({ knowledge: [] }));
     const prepareContext = { refresh: async () => ({}) };
     const owner = createBotMemoryOwner({ runtime: runtime as never, history, memory: {} as never, prepareContext: prepareContext as never, knowledge: knowledge as never });
-    const result = await owner({ action: 'synchronize', runId: 'run', scope: { botId: 'bot', mode: 'bot', sessionId: 'thread:bot', projectId: null },
-        checkpoint: { personalization: { mode: 'bot', sessionId: 'thread:bot' } } as never }, new AbortController().signal);
+    const result = await owner({ action: 'synchronize', runId: 'run', scope: { botId: 'bot', mode: 'bot', threadId: 'thread:bot', projectId: null },
+        checkpoint: { personalization: { mode: 'bot', threadId: 'thread:bot' } } as never }, new AbortController().signal);
     expect(result.status).toBe('ready');
     expect(knowledge).toHaveBeenCalledOnce();
     expect(knowledge.mock.calls[0]![0]).toMatchObject({ query: 'CURRENT launch question' });
@@ -148,7 +148,7 @@ it('Sleep joins the original domain promise and only explicit pre-write evidence
         return { status: 'unknown', message: 'Aborted before the mutation owner was entered', mutationNotStarted: true };
     });
     const query: MemoryQuery = { action: 'tool', runId: 'original-run', origin: 'original-operation',
-        scope: { mode: 'bot', botId: 'bot', sessionId: 'thread', projectId: null }, arguments: { action: 'forget', id: 1 } };
+        scope: { mode: 'bot', botId: 'bot', threadId: 'thread', projectId: null }, arguments: { action: 'forget', id: 1 } };
     bridge.consume({ v: 1, kind: 'memory-request', id: 'tool', kernelEpoch: 'epoch', query });
     await entry;
     bridge.consume({ v: 1, kind: 'memory-cancel', id: 'tool', kernelEpoch: 'epoch' });

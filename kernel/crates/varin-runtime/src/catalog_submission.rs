@@ -334,7 +334,7 @@ impl PreparedSubmission {
             ));
         }
         if let Some(basis) = &personalization {
-            if basis.session_id != command.thread_id {
+            if basis.thread_id != command.thread_id {
                 return Err(RuntimeError::Invalid(
                     "personalization scope must identify the admitted thread".into(),
                 ));

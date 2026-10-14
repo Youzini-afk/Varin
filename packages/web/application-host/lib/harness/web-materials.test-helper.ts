@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import type { WorkingStateRootContext, WorkingStateRootStore, WorkspaceWorkingStateRootAccess } from "./working-state/types.js";
-import { createRetrievalArtifactAccess, type KernelRecordContext } from "./retrieval-artifacts.js";
+import { createMaterialLifecycle } from "./material-lifecycle.js";
+import type { KernelRecordContext } from "./kernel-records.js";
 import { createWebMaterialStore } from "./web-materials.js";
 
 /** Exercises the production material and collection owners over record/blob
@@ -10,9 +11,7 @@ type TestRecord = {
   workspaceId: string;
   recordType: string;
   state: string;
-  sessionId?: string;
   threadId?: string;
-  runId?: string;
   recordRevision: number;
   payloadJson: string;
   references: Array<{ slot: string; objectHash: string }>;
@@ -92,6 +91,6 @@ export const createMaterialStoreFixture = (options: {
     // records remain resolvable while nothing about the process survived.
     reopen: () => createWebMaterialStore(workingStates),
     materials: createWebMaterialStore(workingStates),
-    retrieval: createRetrievalArtifactAccess(workingStates),
+    lifecycle: createMaterialLifecycle(workingStates),
   };
 };

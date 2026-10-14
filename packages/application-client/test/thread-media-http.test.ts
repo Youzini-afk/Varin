@@ -72,3 +72,21 @@ it('preserves the Host failure and rejects a late response after cancellation or
     assert.equal(requests, 2);
   } finally { globalThis.fetch = original; }
 });
+
+it('preserves explicit admission evidence without inferring it from status, code, or malformed bodies', async () => {
+  const original = globalThis.fetch;
+  try {
+    for (const [status, body, admission] of [
+      [413, { code: 'http-body-too-large', admission: 'not_started' }, 'not_started'],
+      [400, { code: 'model-images-unsupported', admission: 'not_started' }, 'not_started'],
+      [409, { code: 'thread-conflict' }, undefined],
+      [413, { code: 'http-body-too-large' }, undefined],
+      [400, null, undefined],
+      [400, { admission: true }, undefined],
+    ] as const) {
+      globalThis.fetch = async () => Response.json(body, { status });
+      await assert.rejects(createThreadsHttpAPI().submit({ runtime: 'agent', threadId: 'thread', branchId: 'branch', key: 'input', expectedHead: null, text: 'original', model: { providerId: 'provider', modelId: 'model' } }),
+        error => error instanceof ThreadRequestError && error.status === status && error.admission === admission);
+    }
+  } finally { globalThis.fetch = original; }
+});

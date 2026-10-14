@@ -8,8 +8,6 @@ import { afterEach, it as vitestIt } from "vitest";
 import { createDocumentAuthorityHarness } from "../documents/contract-fixtures.js";
 import { KernelRecoveryContentStore, KernelRecoveryStore } from "./kernel-recovery-store.js";
 import { createDocumentAuthority } from "../documents/authority.js";
-import { assertManagedWorktreeOwnership } from "../harness/worktree-ownership.js";
-import { createManagedRootAdmission } from "./managed-root-admission.js";
 import { KernelFileResourceBackend } from "./file-resource-backend.js";
 import { createKernelClient, type KernelClient } from "./kernel-client.js";
 import { createKernelWorkspaceWorkingStateAccess, KernelStorageAdapter } from "./storage-adapter.js";
@@ -324,60 +322,6 @@ it("audit: an in-root alias cannot expand a restricted actor's canonical scope",
   const actor = await f.scoped("narrow-scope", "ws", ["allowed"]);
   await assert.rejects(actor.fileCapture({ ...f.address, operationId: "alias-scope", path: "allowed/secret.txt", store: false }), /scope/i);
 });
-
-it("audit: real Documents execution identity stays separate from managed-root materialization admission", async () => {
-  const f = await fixture();
-  const managedRoot = path.join(f.root, "managed");
-  const live = path.join(managedRoot, "thread-one");
-  await fs.mkdir(live, { recursive: true });
-  await fs.writeFile(path.join(f.workspace, "note.txt"), "baseline body");
-  const documents = createDocumentAuthority({ hostId: "audit", dataDir: path.join(f.root, "documents"), isAllowedRoot: async () => true, isTrusted: async () => true });
-  const owning = (await documents.resolveWorkspace({ path: f.workspace })).workspaceId;
-  const execution = (await documents.resolveWorkspace({ path: live })).workspaceId;
-  assert.notEqual(owning, execution);
-  const adapter = new KernelStorageAdapter({ client: f.host, hostId: "audit", storageRoot: f.storageRoot,
-    resolveWorkspaceRoot: async (workspaceId) => (await documents.inspectWorkspace(workspaceId)).root,
-    resolveActor: async (_workspaceId, _purpose, hint) => {
-      assert.ok(hint, "Host lifecycle must provide an explicit identity");
-      assert.ok(hint.capabilities?.includes("storage.maintenance"));
-      return hint;
-    },
-  });
-  adapter.bindFileRootResolver(async (directory) => {
-    const { workspaceId } = await documents.resolveWorkspace({ path: directory });
-    return { workspaceId, canonicalRoot: (await documents.inspectWorkspace(workspaceId)).root };
-  });
-  const admission = createManagedRootAdmission({
-    listWorktrees: async (workspaceId) => workspaceId === owning ? [{ path: live, managedRoot, base: "zero-commit", materialized: false }] : [],
-    assertOwnership: (worktree, operation, paths) => assertManagedWorktreeOwnership(worktree, operation, paths, {
-      authorizeManagedRoot: async (candidate) => candidate === managedRoot,
-    }),
-  });
-  adapter.bindManagedRootResolver(admission.materialization);
-  const access = createKernelWorkspaceWorkingStateAccess(adapter);
-  try {
-    await assert.rejects(admission.materialization(path.join(managedRoot, "unrecorded"), owning), /ownership/i);
-    await assert.rejects(admission.materialization(live, "another-owning-workspace"), /ownership/i);
-    await access.withBranchStore(owning, "thread-baseline-capture", async (store) => {
-      const states = await store.captureDirectory(f.workspace);
-      await store.createBranch(owning, "recorded-thread", states, "zero-commit");
-      const pin = await store.pinBranch("recorded-thread");
-      try { await store.materializePinManaged!(pin, live, "recorded-materialize"); }
-      finally { await pin.release(); }
-    }, "exclusive", { executionWorkspace: owning });
-    assert.equal(await fs.readFile(path.join(live, "note.txt"), "utf8"), "baseline body");
-    await fs.writeFile(path.join(live, "note.txt"), "shell result");
-    const result = await access.withBranchStore(owning, "thread-result-publish", (store) => store.publishDirectoryResult("recorded-thread", live), "exclusive", { executionWorkspace: execution });
-    assert.ok(result.changedPaths.includes("note.txt"));
-    assert.equal(await access.withBranchStore(owning, "thread-result-reclaim-check", (store) => store.directoryMatchesResult("recorded-thread", result.resultRevision, live), "shared", { executionWorkspace: execution }), true);
-    await fs.rm(live, { recursive: true });
-    await access.withBranchStore(owning, "thread-recorded-materialize", (store) => store.materializeResult("recorded-thread", result.resultRevision, live));
-    assert.equal(await fs.readFile(path.join(live, "note.txt"), "utf8"), "shell result");
-  } finally {
-    await adapter.dispose();
-    await documents.dispose();
-  }
-}, 30_000);
 
 it("audit: RecoveryFileStore applyState does not turn a conditional conflict into success", async () => {
   const f = await fixture();

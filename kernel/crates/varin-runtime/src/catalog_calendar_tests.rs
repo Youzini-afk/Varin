@@ -101,7 +101,7 @@ fn context(
     context::ContextProposal,
     personalization::PersonalizationBasis,
 ) {
-    (context::ContextProposal{key:format!("initial:{}",o.branch_id),branch_id:o.branch_id.clone(),through_id:None,expected_revision:0,summary:String::new(),effective_system_prompt:"Frozen main context".into(),instruction_sources:vec![],memory_checkpoint:None},serde_json::from_value(json!({"mode":"agent","threadRole":"main","revision":1,"configurationDigest":"fixture","memorySnapshot":{"revision":0,"memories":[]},"sessionId":o.thread_id,"projectId":"project","originalSections":[{"name":"system","content":"Frozen main context"}],"instructionSources":[]})).unwrap())
+    (context::ContextProposal{key:format!("initial:{}",o.branch_id),branch_id:o.branch_id.clone(),through_id:None,expected_revision:0,summary:String::new(),effective_system_prompt:"Frozen main context".into(),instruction_sources:vec![],memory_checkpoint:None},serde_json::from_value(json!({"mode":"agent","threadRole":"main","revision":1,"configurationDigest":"fixture","memorySnapshot":{"revision":0,"memories":[]},"threadId":o.thread_id,"projectId":"project","originalSections":[{"name":"system","content":"Frozen main context"}],"instructionSources":[]})).unwrap())
 }
 fn prepare(db: &Catalog, o: &OccurrenceView) -> PreparedCold {
     prepare_with_launch(db, o, launch()).unwrap()

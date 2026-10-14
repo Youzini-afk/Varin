@@ -72,7 +72,7 @@ export function registerTtsRoutes(app: Express, {
 
       if (!hasServerKey && !hasClientKey && !hasCustomBaseURL) {
         return res.status(503).json({
-          error: 'TTS service not available. Configure OpenAI credentials in Varin, provide an API key, or set a custom server URL in settings.'
+          error: 'TTS service not available. Set OPENAI_API_KEY on the Host, provide a speech API key, or set a custom server URL in settings.'
         });
       }
 

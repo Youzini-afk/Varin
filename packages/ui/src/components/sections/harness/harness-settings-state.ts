@@ -1,4 +1,5 @@
-import { mergeHarnessSettings, type HarnessSettings, type HarnessSettingsInput, type JsonValue, type PiSettingsSnapshot } from '@varin/protocol';
+import type { AgentSettingsSnapshot } from '@varin/application-client';
+import { mergeHarnessSettings, type HarnessSettings, type HarnessSettingsInput, type JsonValue } from '@varin/protocol';
 
 /** Objects merge, arrays replace, undefined removes a setting (restores inheritance). */
 export type HarnessSettingsPatch = { [key: string]: unknown };
@@ -23,8 +24,8 @@ export function patchHarnessSettings(base: unknown, patch: HarnessSettingsPatch)
 }
 
 interface Transport {
-  read: () => Promise<PiSettingsSnapshot>;
-  write: (harness: JsonValue, revision: string) => Promise<PiSettingsSnapshot>;
+  read: () => Promise<AgentSettingsSnapshot>;
+  write: (harness: JsonValue, revision: string) => Promise<AgentSettingsSnapshot>;
 }
 export interface HarnessSettingsState {
   harness: HarnessSettings | null;
@@ -34,7 +35,7 @@ export interface HarnessSettingsState {
 
 /** Serializes user edits against the latest acknowledged settings revision. */
 export class HarnessSettingsController {
-  private confirmed: PiSettingsSnapshot | null = null;
+  private confirmed: AgentSettingsSnapshot | null = null;
   private pending: HarnessSettingsPatch[] = [];
   private active: Promise<void> | null = null;
   private refreshRequested = false;

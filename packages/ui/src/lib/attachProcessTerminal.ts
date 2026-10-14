@@ -2,8 +2,6 @@ import { useTerminalStore, type TerminalProcessReference } from '@/stores/useTer
 import { useUIStore } from '@/stores/useUIStore';
 import type { SourceResourceOwner } from '@varin/protocol';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
-import { usePiSessionStore } from '@/stores/usePiSessionStore';
-import { resolvePiEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
 import { useWorkspaceStore } from '@/stores/useWorkspaceStore';
 
 const SHELL_ID = /^sh_\d+$/;
@@ -30,13 +28,7 @@ export function attachProcessTerminal(directory: string, sessionId: string, comm
   // workspace and carry that cwd only as terminal metadata, never resolve it on A.
   let navigationDirectory: string | undefined = cwd;
   if (resourceOwner.kind === 'managed_host') {
-    const sessions = usePiSessionStore.getState();
-    const currentSessionId = sessions.currentSessionId;
-    navigationDirectory = resolvePiEffectiveDirectory(
-      currentSessionId ? sessions.records[currentSessionId]?.snapshot?.cwd : undefined,
-      sessions.summaries.find(session => session.id === currentSessionId)?.cwd,
-      useDirectoryStore.getState().currentDirectory,
-    );
+    navigationDirectory = useDirectoryStore.getState().currentDirectory?.trim() || undefined;
   }
   const store = useTerminalStore.getState();
   const label = command?.trim() ? command.trim().split('\n')[0]?.slice(0, 40) : `Shell ${id}`;

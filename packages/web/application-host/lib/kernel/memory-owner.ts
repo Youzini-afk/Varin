@@ -6,7 +6,7 @@ import type { ContextPreparer } from './thread-context.js';
 export interface MemoryQuery {
   action: 'synchronize' | 'tool' | 'receipt';
   runId: string;
-  scope: { mode: 'agent' | 'bot'; sessionId: string; projectId: string | null; botId?: string | null; branchId?: string; threadRole?: string };
+  scope: { mode: 'agent' | 'bot'; threadId: string; projectId: string | null; botId?: string | null; branchId?: string; threadRole?: string };
   previousState?: unknown;
   origin?: string;
   arguments?: {
@@ -30,15 +30,15 @@ export function createMemoryOwner(options: { personalization: AgentPersonalizati
       }
       if (query.action !== 'receipt') signal.throwIfAborted();
       const admitted = query.scope;
-      if (!admitted || !['agent', 'bot'].includes(admitted.mode) || !admitted.sessionId
+      if (!admitted || !['agent', 'bot'].includes(admitted.mode) || !admitted.threadId
         || (admitted.projectId !== null && (typeof admitted.projectId !== 'string' || !admitted.projectId))) throw new AgentPersonalizationError('Invalid admitted memory scope');
       if (admitted.mode === 'bot') throw new AgentPersonalizationError('Bot memory requires its original Catalog binding');
-      const allowed = (scope: AgentMemoryScope) => scope.kind === 'global' || (scope.kind === 'session' && scope.id === admitted.sessionId)
+      const allowed = (scope: AgentMemoryScope) => scope.kind === 'global' || (scope.kind === 'thread' && scope.id === admitted.threadId)
         || (scope.kind === 'project' && scope.id === admitted.projectId);
       if (query.action === 'synchronize') {
         const checkpoint = query.checkpoint;
         if (!checkpoint?.personalization || !options.prepareContext.refresh
-          || checkpoint.personalization.sessionId !== admitted.sessionId || checkpoint.personalization.projectId !== admitted.projectId
+          || checkpoint.personalization.threadId !== admitted.threadId || checkpoint.personalization.projectId !== admitted.projectId
           || checkpoint.personalization.mode !== admitted.mode) throw new AgentPersonalizationError('Context does not identify the admitted memory owner');
         const context = await options.prepareContext.refresh(checkpoint, signal);
         const state = await options.personalization.runtimeState();
@@ -53,7 +53,7 @@ export function createMemoryOwner(options: { personalization: AgentPersonalizati
       const scope: AgentMemoryScope = args.scope === 'global' ? { kind: 'global' }
         : args.scope === 'project' ? admitted.projectId ? { kind: 'project', id: admitted.projectId }
           : (() => { throw new AgentPersonalizationError('This conversation has no project'); })()
-          : { kind: 'session', id: admitted.sessionId };
+          : { kind: 'thread', id: admitted.threadId };
       if (args.action === 'read' || args.action === 'search') {
         if (query.action !== 'tool') throw new AgentPersonalizationError('Reads have no mutation receipt');
         const catalog = await options.personalization.catalog();

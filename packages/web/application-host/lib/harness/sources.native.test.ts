@@ -1,4 +1,4 @@
-import { piResearchCaller } from './research-caller.fixture.js';
+import { nativeResearchCaller } from './native-research.fixture.js';
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -27,16 +27,16 @@ it.skipIf(!available)("retains source content after its original branch is relea
       { path: "dataset.txt", state: { kind: "regular-file", objectHash: blob.hash, byteLength: bytes.length, mode: 0o644 }, ownerId: blob.ownerId },
     ], draftBasePaths: [], captureScopes: [] });
     const sources = createSourceService({ client });
-    const source = await sources.register("ws", { kind: "dataset", objectHash: blob.hash }, piResearchCaller({workspaceId:"ws",executionWorkspaceId:"ws",sessionId: "session-a", threadId: "thread-a"}));
+    const source = await sources.register("ws", { kind: "dataset", objectHash: blob.hash }, nativeResearchCaller({workspaceId:"ws",executionWorkspaceId:"ws", threadId: "thread-a"}));
     await scoped.deleteBranch({ operationId: "delete-source-branch", branchId: "input" });
     await scoped.gc("source-gc");
     const body = await scoped.getBlob(blob.hash, { recordId: `research.source:${source.sourceId}`, slot: "content" });
     expect(Buffer.from(body.bytesBase64, "base64")).toEqual(bytes);
-    const other = piResearchCaller({ workspaceId: "ws", executionWorkspaceId: "ws", sessionId: "session-b", rootSessionId: "session-b", allowedThreadIds: ["thread-b"] });
+    const other = nativeResearchCaller({ workspaceId: "ws", executionWorkspaceId: "ws", rootThreadId: "session-b", readThreadIds: ["thread-b"] });
     expect((await sources.list("ws", {}, other)).sources).toEqual([]);
     await expect(sources.get("ws", source.sourceId, other)).rejects.toThrow(/outside/);
     await expect(sources.register("ws", { kind: "dataset", path: "src/../private.txt" }, other)).rejects.toThrow(/relative/);
-    const dotted = await sources.register("ws", { kind: "dataset", path: "src/foo..bar" }, piResearchCaller({workspaceId:"ws",executionWorkspaceId:"ws",workspaceScope: ["src"]}));
+    const dotted = await sources.register("ws", { kind: "dataset", path: "src/foo..bar" }, nativeResearchCaller({workspaceId:"ws",executionWorkspaceId:"ws",workspaceScope: ["src"]}));
     expect(dotted.path).toBe("src/foo..bar");
   } finally {
     await client.close();

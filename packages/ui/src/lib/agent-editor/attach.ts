@@ -1,4 +1,4 @@
-import { getRuntimeKey } from '@varin/application-client';
+import { threadHostKey as getRuntimeKey } from '@/stores/useThreadStore';
 import { getDocumentRegistry } from '@/lib/documents/session';
 import { languageIdFromResourceId } from '@/lib/language-services/language-id';
 import { addEditorContextAttachment } from './attachments';
@@ -8,7 +8,7 @@ import type { EditorContextAttachment, EditorContextAttachmentKind, EditorContex
 const fileNameOf = (resourceId: string): string => resourceId.split('/').pop() || resourceId;
 
 export const attachEditorContext = (input: {
-  sessionId: string;
+  threadKey: string;
   workspaceId: string;
   resourceId: string;
   kind: EditorContextAttachmentKind;
@@ -33,7 +33,7 @@ export const attachEditorContext = (input: {
   const attachment: EditorContextAttachment = {
     id: crypto.randomUUID(),
     runtimeKey,
-    sessionId: input.sessionId,
+    threadKey: input.threadKey,
     workspaceId: input.workspaceId,
     resourceId: input.resourceId,
     label: input.label ?? fileNameOf(input.resourceId),

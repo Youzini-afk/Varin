@@ -4,7 +4,7 @@
  * (@varin/web) and native modules — stays external so it resolves
  * from node_modules at runtime inside the packaged app.
  *
- * The Host remains external so packaged assets, Pi workers and the Rust
+ * The Host remains external so packaged assets, native workers and the Rust
  * executable resolve through their release layout, not the bundler cwd.
  */
 import path from 'node:path';
@@ -30,10 +30,6 @@ const result = await Bun.build({
     'electron',
     '@varin/web',
     '@varin/web/*',
-    '@varin/pi-host',
-    '@varin/pi-host/*',
-    '@varin/runtime-broker',
-    '@varin/runtime-broker/*',
   ],
   minify: false,
   sourcemap: 'none',

@@ -1,52 +1,25 @@
-import { openPiSessionFromNavigation } from '@/lib/pi-runtime/sessionNavigation';
+import type { ThreadIdentity } from '@varin/application-client';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
-import { useBotSessionIndex } from '@/stores/useBotSessionIndex';
-import { usePiSessionStore } from '@/stores/usePiSessionStore';
+import { useThreadStore } from '@/stores/useThreadStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useUIStore } from '@/stores/useUIStore';
 
-interface OrdinarySessionLocation {
-  runtimeKey: string;
-  sessionId: string | null;
-  directory: string;
-  projectId: string | null;
-}
-
-let ordinarySessionLocation: OrdinarySessionLocation | null = null;
-
+interface OrdinaryLocation { hostKey: string; identity: ThreadIdentity | null; directory: string; projectId: string | null; }
+let ordinaryLocation: OrdinaryLocation | null = null;
 export const rememberOrdinarySession = (): void => {
-  const sessions = usePiSessionStore.getState();
-  const sessionId = sessions.currentSessionId;
-  const index = useBotSessionIndex.getState();
-  ordinarySessionLocation = {
-    runtimeKey: sessions.runtimeKey,
-    sessionId: sessionId && index.runtimeKey === sessions.runtimeKey && index.ids?.has(sessionId)
-      ? null : sessionId,
-    directory: useDirectoryStore.getState().currentDirectory,
-    projectId: useProjectsStore.getState().activeProjectId,
-  };
+  const state = useThreadStore.getState();
+  const selected = state.threads.find(thread => thread.thread_id === state.selectedIdentity?.threadId);
+  ordinaryLocation = { hostKey: state.hostKey, identity: selected?.bot_id ? null : state.selectedIdentity,
+    directory: useDirectoryStore.getState().currentDirectory, projectId: useProjectsStore.getState().activeProjectId };
 };
-
 export const restoreOrdinarySession = (): void => {
-  const sessions = usePiSessionStore.getState();
-  const saved = ordinarySessionLocation?.runtimeKey === sessions.runtimeKey ? ordinarySessionLocation : null;
-  const projects = useProjectsStore.getState();
-  projects.setActiveProjectIdOnly(saved?.projectId ?? null);
+  const state = useThreadStore.getState();
+  const saved = ordinaryLocation?.hostKey === state.hostKey ? ordinaryLocation : null;
+  useProjectsStore.getState().setActiveProjectIdOnly(saved?.projectId ?? null);
   const directory = useDirectoryStore.getState();
-  const targetDirectory = saved?.directory || directory.homeDirectory;
-  if (targetDirectory && targetDirectory !== directory.currentDirectory) {
-    directory.setDirectory(targetDirectory, { showOverlay: false });
-  }
-  const sessionId = saved?.sessionId ?? null;
-  if (sessionId && sessions.records[sessionId]?.open) {
-    sessions.setCurrentSession(sessionId);
-  } else {
-    sessions.setCurrentSession(null);
-    if (sessionId) {
-      void openPiSessionFromNavigation({ sessionId, directory: saved?.directory }).catch((error: unknown) => {
-        console.error('[Workbench] Failed to restore ordinary session:', error);
-      });
-    }
-  }
+  const target = saved?.directory || directory.homeDirectory;
+  if (target && target !== directory.currentDirectory) directory.setDirectory(target, { showOverlay: false });
+  useThreadStore.setState({ selectedIdentity: null });
+  if (saved?.identity) void state.selectThread(saved.identity).catch(error => console.error('[Workbench] Conversation restore unavailable:', error));
   useUIStore.getState().setActiveMainTab('chat');
 };

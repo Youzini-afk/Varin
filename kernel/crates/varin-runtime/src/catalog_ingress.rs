@@ -13,6 +13,7 @@ pub(super) fn hold(
         return Ok(Some("bot_suspended".into()));
     }
     match row.origin {
+        InputOrigin::ContextObservation { .. } => context_observations::ingress_hold(db, row, run),
         InputOrigin::Followup { .. } => {
             Ok(followups::ingress_hold(db, row, run)?.map(|reason| format!("{reason:?}")))
         }
@@ -42,6 +43,7 @@ pub(super) fn insert_occurrence(
     history: &Value,
 ) -> Result<QueuedInputMetadata> {
     let origin_name = match origin {
+        InputOrigin::ContextObservation { .. } => "context_observation",
         InputOrigin::McpResource { .. } => "mcp_resource",
         InputOrigin::Followup { .. } => "followup",
         InputOrigin::Calendar { .. } => "calendar",
@@ -57,10 +59,10 @@ pub(super) fn insert_occurrence(
         InputOrigin::Followup { activation, .. } | InputOrigin::Calendar { activation, .. } | InputOrigin::ComputerRequest { activation, .. } | InputOrigin::ComputerEvent { activation, .. } => {
             activation.run_id().map(str::to_owned)
         }
-        InputOrigin::McpResource { .. } => None,
+        InputOrigin::ContextObservation { .. } | InputOrigin::McpResource { .. } => None,
         _ => unreachable!(),
     };
-    let passive = matches!(&origin, InputOrigin::McpResource { .. }) || matches!(&origin, InputOrigin::ComputerEvent { activation: activation::IngressActivationFact::Passive, .. });
+    let passive = matches!(&origin, InputOrigin::ContextObservation { .. } | InputOrigin::McpResource { .. }) || matches!(&origin, InputOrigin::ComputerEvent { activation: activation::IngressActivationFact::Passive, .. });
     let row = QueuedInputMetadata {
         id,
         thread_id: thread,

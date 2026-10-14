@@ -37,7 +37,7 @@ it('continues original research leaves after Job pending is empty and preserves 
       assert.equal(caller.workspaceId, binding.subject.workspaceId); assert.equal(caller.owner.runtime, 'agent');
       if (caller.owner.runtime !== 'agent') throw new Error('actual native reader required');
       assert.deepEqual(caller.owner.source, source);
-      assert.equal(caller.runId, observer.sourceRunId); assert.deepEqual(caller.access, { kind: 'family', readThreadIds: observer.readThreadIds, controlThreadIds: [] });
+      assert.equal(caller.owner.runId, observer.sourceRunId); assert.deepEqual(caller.access, { kind: 'family', readThreadIds: observer.readThreadIds, controlThreadIds: [] });
       const captured = version; reads++;
       if (reads === 1) { entered.resolve(); await release.promise; }
       return snapshot(captured);

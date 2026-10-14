@@ -63,7 +63,7 @@ async function fixture(before: string | null, navigationMode: 'normal' | 'reject
   const workspaceId = h.identity.workspaceId;
   const mutation = { executionId: 'execution-1', mutationId: 'mutation-1', path: note, toolCallId: 'tool-1', toolName: 'write' as const, workspaceId };
   expect(await native.engine.recordTurnStart({ activeWriterScopes: [], executionId: mutation.executionId, provenance: 'caused-by', runtimeGeneration: 1,
-    conversation: { kind: 'pi', sessionId: 'session-1' }, userEntryId: 'user-1', workerId: 'worker-1', workspaceId })).toMatchObject({ status: 'ready' });
+    conversation: { kind: 'thread', threadId: 'session-1', branchId: 'branch-1' }, userEntryId: 'user-1', workerId: 'worker-1', workspaceId })).toMatchObject({ status: 'ready' });
   expect(await native.engine.recordMutationBefore(mutation)).toMatchObject({ status: 'ready', recorded: true });
   const after = '\ufeffafter\r\n';
   await fs.writeFile(note, after);
@@ -80,7 +80,7 @@ async function fixture(before: string | null, navigationMode: 'normal' | 'reject
     get native() { return native; },
     async restart() { await registry.flushRecoveryJournals(); await native.dispose(); native = await open(); },
     async prepare() {
-      const result = await native.engine.prepareCombinedRecovery({ entryId: 'user-1', conversation: { kind: 'pi', sessionId: 'session-1' }, workspaceId });
+      const result = await native.engine.prepareCombinedRecovery({ entryId: 'user-1', conversation: { kind: 'thread', threadId: 'session-1', branchId: 'branch-1' }, workspaceId });
       if (result.status !== 'ready') throw new Error(result.failure.message);
       expect(result).toMatchObject({ status: 'ready', plan: { conflicts: [{ kind: 'dirty-buffer', path: 'note.txt' }] } });
       return result.plan;

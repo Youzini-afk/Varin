@@ -163,7 +163,7 @@ async function fixture(options: { main?: Reply; planner?: Reply; planningAuth?: 
       }, release: () => { if (!released) { released = true; pins--; } pin.release(); } };
     } };
   };
-  const runtime = new AgentRuntimeClient(kernel, undefined, { prepare: ({ threadId, requiredBinding }, signal) => createAgentPolicy(extensions)({ sessionId: threadId, projectId: 'planning-review', ...(requiredBinding ? { requiredBinding } : {}) }, signal), observe: ({threadId}, changed, signal) => createAgentPolicy(extensions).observe({sessionId:threadId,projectId:'planning-review'}, changed, signal) }, prepareModels, undefined, undefined, async (id, signal) => { if (!documents) throw new Error('No fixture source is registered'); return documents.admitWorkspaceRegistration(id, signal); });
+  const runtime = new AgentRuntimeClient(kernel, undefined, { prepare: ({ threadId, requiredBinding }, signal) => createAgentPolicy(extensions)({ threadId, projectId: 'planning-review', ...(requiredBinding ? { requiredBinding } : {}) }, signal), observe: ({threadId}, changed, signal) => createAgentPolicy(extensions).observe({threadId,projectId:'planning-review'}, changed, signal) }, prepareModels, undefined, undefined, async (id, signal) => { if (!documents) throw new Error('No fixture source is registered'); return documents.admitWorkspaceRegistration(id, signal); });
   const launchErrors: unknown[] = [];
   const adapter = new ThreadAdapter(runtime, models, async source => {
     if (!documents) throw new Error('No workspace is admitted');

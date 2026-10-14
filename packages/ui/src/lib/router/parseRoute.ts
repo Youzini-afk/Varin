@@ -14,7 +14,8 @@ export function parseRoute(searchParams?: URLSearchParams): RouteState {
   const params = searchParams ?? getSearchParams();
 
   return {
-    sessionId: parseSessionId(params),
+    threadId: parseThreadId(params),
+    branchId: params.get(ROUTE_PARAMS.BRANCH)?.trim() || null,
     directory: parseDirectory(params),
     tab: parseTab(params),
     settingsPath: parseSettingsPath(params),
@@ -41,8 +42,8 @@ function getSearchParams(): URLSearchParams {
  * Parse session ID from URL parameters.
  * Returns null if missing or empty.
  */
-function parseSessionId(params: URLSearchParams): string | null {
-  const value = params.get(ROUTE_PARAMS.SESSION);
+function parseThreadId(params: URLSearchParams): string | null {
+  const value = params.get(ROUTE_PARAMS.THREAD);
   if (!value || value.trim().length === 0) {
     return null;
   }
@@ -131,7 +132,8 @@ export function hasRouteParams(): boolean {
   try {
     const params = new URLSearchParams(window.location.search);
     return (
-      params.has(ROUTE_PARAMS.SESSION) ||
+      params.has(ROUTE_PARAMS.THREAD) ||
+      params.has(ROUTE_PARAMS.BRANCH) ||
       params.has(ROUTE_PARAMS.DIRECTORY) ||
       params.has(ROUTE_PARAMS.TAB) ||
       params.has(ROUTE_PARAMS.SETTINGS) ||

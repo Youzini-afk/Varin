@@ -39,7 +39,6 @@ const manifest = () => ({
     requiresCapabilities: ["commands"],
     data: { route: "memory" },
   }],
-  integrates: { piPackages: ["pi-observational-memory"] },
 });
 
 test("validates content-addressed managed entrypoint requests and asset bytes", () => {
@@ -358,4 +357,8 @@ test("dependency realms are explicit, nonempty and unique", () => {
   }
   const input = manifest(); input.requires.services[0]!.realms = ['surface'];
   assert.deepEqual(parseVarinExtensionManifest(input).requires!.services![0]!.realms, ['surface']);
+});
+
+test("rejects retired runtime package integration manifests", () => {
+  assert.throws(() => parseVarinExtensionManifest({ ...manifest(), integrates: { piPackages: ["legacy-package"] } }), /integrates is unsupported/);
 });

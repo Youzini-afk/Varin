@@ -5,6 +5,7 @@ import {
   VARIN_WORKSPACE_RECOVERY_SERVICE_VERSION,
   WorkspaceRecoveryContractError,
   createWorkspaceRecoveryAPI,
+  parseRecoveryConversation,
   parseRecoveryFileTarget,
   parseRecoveryStorageLocation,
   parseRecoveryRetentionPolicy,
@@ -26,7 +27,7 @@ const checkpoint = () => ({
   executionId: "execution-1",
   id: "checkpoint-1",
   sequence: 1,
-  conversation: { kind: "pi", sessionId: "session-1" },
+  conversation: { kind: 'thread', threadId: "session-1", branchId: 'branch-1' },
   source: "turn",
   state: "ready",
   workspaceId: "workspace-1",
@@ -126,7 +127,7 @@ test("keeps mutation boundaries, turn binding coverage, and entry binding explic
     provenance: "caused-by",
     runtimeGeneration: 1,
     runtimeKey: "worker-1@1",
-    conversation: { kind: "pi", sessionId: "session-1" },
+    conversation: { kind: 'thread', threadId: "session-1", branchId: 'branch-1' },
     startedAt: "2026-08-30T00:00:00.000Z",
     status: "ready",
     unrecordedResourceIds: [],
@@ -160,7 +161,7 @@ test("plans only affected paths and keeps conflict handling explicit", () => {
     id: "operation-1",
     removedEntryIds: ["user-1", "assistant-1"],
     revision: `sha256-${"a".repeat(64)}`,
-    conversation: { kind: "pi", sessionId: "session-1" },
+    conversation: { kind: 'thread', threadId: "session-1", branchId: 'branch-1' },
     targetLeafId: "leaf-1",
     uncoveredPaths: [],
     uncoveredReasons: [],
@@ -207,4 +208,17 @@ test("browser-safe API invokes the current checkpoint method", async () => {
     serviceId: "varin.workspace-recovery",
     version: 7,
   }]);
+});
+
+
+test("rejects retired or mixed conversation identities rather than coercing them to a native Thread", () => {
+  for (const conversation of [
+    { kind: "pi", sessionId: "old-history" },
+    { kind: "thread", threadId: "thread", branchId: "branch", sessionId: "old-history" },
+    { kind: "thread", threadId: "thread" },
+  ]) assert.throws(() => parseRecoveryConversation(conversation), WorkspaceRecoveryContractError);
+  const legacy = { ...checkpoint(), conversation: { kind: "pi", sessionId: "old-history" } };
+  const original = structuredClone(legacy);
+  assert.throws(() => parseWorkspaceRecoveryCheckpointSummary(legacy), WorkspaceRecoveryContractError);
+  assert.deepEqual(legacy, original);
 });

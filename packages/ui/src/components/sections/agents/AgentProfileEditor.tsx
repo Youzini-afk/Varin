@@ -97,9 +97,9 @@ export function AgentProfileEditor({ profile, snapshot, host, cwd, onSave, onCan
           <Input aria-label={t('settings.agents.page.field.temperature')} type="number" min="0" step="any" value={draft.temperature} disabled={busy} placeholder={t('chat.modelControls.default')} onChange={event => update({ temperature: event.target.value })} />
         </SettingsStackedField>
         <SettingsStackedField label={t('settings.varin.agents.detail.thinking')}><Select value={draft.thinkingLevel} disabled={busy} onValueChange={thinkingLevel => update({ thinkingLevel: thinkingLevel as ThinkingLevel | 'inherit' })}>
-          <SelectTrigger className="w-full"><SelectValue>{draft.thinkingLevel === 'inherit' ? t('chat.modelControls.default') : t(`settings.varin.pluginSettings.subagents.thinking.${draft.thinkingLevel}`)}</SelectValue></SelectTrigger><SelectContent>
+          <SelectTrigger className="w-full"><SelectValue>{draft.thinkingLevel === 'inherit' ? t('chat.modelControls.default') : t(`settings.agents.thinking.${draft.thinkingLevel}`)}</SelectValue></SelectTrigger><SelectContent>
             <SelectItem value="inherit">{t('chat.modelControls.default')}</SelectItem>
-            {THINKING_LEVELS.map(level => <SelectItem key={level} value={level}>{t(`settings.varin.pluginSettings.subagents.thinking.${level}`)}</SelectItem>)}
+            {THINKING_LEVELS.map(level => <SelectItem key={level} value={level}>{t(`settings.agents.thinking.${level}`)}</SelectItem>)}
           </SelectContent></Select></SettingsStackedField>
       </SettingsTwoColumn>
     </SettingsSection>

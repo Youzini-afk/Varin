@@ -445,20 +445,20 @@ fn child_context(
     };
     let basis = serde_json::from_value(json!({"mode":"agent","threadRole":"worker","revision":0,
         "configurationDigest":"review:child-profile:0","memorySnapshot":{"revision":0,"memories":[]},
-        "sessionId":child.child_thread_id,"projectId":child.project_id,
+        "threadId":child.child_thread_id,"projectId":child.project_id,
         "originalSections":[{"name":"preamble","content":"Read-only child"}],"instructionSources":["review:child"]})).unwrap();
     (source, proposal, basis)
 }
 
 #[test]
 fn child_prepare_rejects_late_cancelled_work_and_untrusted_parent_scope_without_admitting_a_run() {
-    for field in ["sessionId", "projectId", "mode", "threadRole"] {
+    for field in ["threadId", "projectId", "mode", "threadRole"] {
         let mut f = Fixture::new();
         let child = f.accept();
         let (source, proposal, basis) = child_context(&child);
         let mut wrong = serde_json::to_value(&basis).unwrap();
         wrong[field] = json!(match field {
-            "sessionId" => "thread:parent",
+            "threadId" => "thread:parent",
             "projectId" => "forged-project",
             "mode" => "bot",
             _ => "main",

@@ -105,7 +105,7 @@ fn prepare(f: &mut Fixture, child: &ChildTask) -> ChildTask {
     };
     let basis = serde_json::from_value(json!({"mode":"agent","threadRole":"worker","revision":0,
         "configurationDigest":"fixture:child","memorySnapshot":{"revision":0,"memories":[]},
-        "sessionId":child.child_thread_id,"projectId":child.project_id,
+        "threadId":child.child_thread_id,"projectId":child.project_id,
         "originalSections":[{"name":"preamble","content":"Selected child"}],"instructionSources":["fixture:child"]})).unwrap();
     f.db.prepare_child(&child.operation_id, source, proposal, basis)
         .unwrap()

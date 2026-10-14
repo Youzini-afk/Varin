@@ -4,7 +4,7 @@ import WidgetKit
 /// Runs on every incoming push that carries `mutable-content: 1` — even when the app is closed
 /// — and refreshes the widgets' shared snapshot so the home/lock-screen attention count and
 /// unread dot stay current without the app having to foreground. It makes NO network calls:
-/// it reads the count the server already put in `aps.badge` and the `sessionId` from the push,
+/// it reads the count the server already put in `aps.badge` and the `threadId` from the push,
 /// updates the App Group snapshot the app wrote, and reloads the widget timelines. The app
 /// still overwrites the snapshot with the authoritative full list on its next foreground.
 class NotificationService: UNNotificationServiceExtension {
@@ -37,9 +37,9 @@ class NotificationService: UNNotificationServiceExtension {
         guard let defaults = UserDefaults(suiteName: Self.appGroup) else { return }
 
         var snapshot: [String: Any] = [
-            "runtimeKey": request.content.userInfo["runtimeKey"] as? String ?? "",
+            "hostKey": request.content.userInfo["hostKey"] as? String ?? "",
             "attentionCount": 0,
-            "recentSessions": [],
+            "recentThreads": [],
         ]
         if let json = defaults.string(forKey: Self.snapshotKey),
            let data = json.data(using: .utf8),
@@ -47,15 +47,10 @@ class NotificationService: UNNotificationServiceExtension {
             snapshot = stored
         }
 
-        if let pushRuntimeKey = request.content.userInfo["runtimeKey"] as? String,
-           !pushRuntimeKey.isEmpty,
-           snapshot["runtimeKey"] as? String != pushRuntimeKey {
-            snapshot = [
-                "runtimeKey": pushRuntimeKey,
-                "attentionCount": 0,
-                "recentSessions": [],
-            ]
-        }
+        // A push for another Host must not replace this Host's widget snapshot.
+        guard let pushHostKey = request.content.userInfo["hostKey"] as? String,
+              !pushHostKey.isEmpty,
+              snapshot["hostKey"] as? String == pushHostKey else { return }
 
         // Attention count: authoritative server value carried in aps.badge.
         if let badge = request.content.badge as? Int {
@@ -64,12 +59,13 @@ class NotificationService: UNNotificationServiceExtension {
 
         // Mark the pushed session unread in the existing recent list (best-effort; the full
         // list/titles only refresh when the app next foregrounds).
-        if let sessionId = request.content.userInfo["sessionId"] as? String,
-           var sessions = snapshot["recentSessions"] as? [[String: Any]] {
-            for index in sessions.indices where sessions[index]["id"] as? String == sessionId {
+        if let threadId = request.content.userInfo["threadId"] as? String,
+           let branchId = request.content.userInfo["branchId"] as? String,
+           var sessions = snapshot["recentThreads"] as? [[String: Any]] {
+            for index in sessions.indices where sessions[index]["threadId"] as? String == threadId && sessions[index]["branchId"] as? String == branchId {
                 sessions[index]["unread"] = true
             }
-            snapshot["recentSessions"] = sessions
+            snapshot["recentThreads"] = sessions
         }
 
         if let data = try? JSONSerialization.data(withJSONObject: snapshot),

@@ -43,7 +43,7 @@ const createMaterialToolOwner = (materials: Parameters<typeof createOwner>[0]) =
 
 const put = (opened: ReturnType<typeof createMaterialStoreFixture>, body: string | Buffer) => opened.materials.put("ws", {
   sourceUrl: "https://example.com/material", finalUrl: "https://example.com/material", representation: "raw-text",
-}, Buffer.from(body), { owningWorkspaceId: "ws", sessionId: "pi-source", threadId: "thread", runId: "old-run" });
+}, Buffer.from(body), { kind: "thread", owningWorkspaceId: "ws", threadId: "thread" });
 
 describe("material snapshot capability", () => {
   it("installs the real SDK example and reads owned or granted material through its exact broker pin", async () => {
@@ -73,7 +73,7 @@ describe("material snapshot capability", () => {
         decisions: [{ capability: MATERIAL_SNAPSHOT_CAPABILITY, realm: "host", granted: true }] });
       await runtime.setEnabled(manifest.id, true, (await runtime.catalog.snapshot()).revision);
       const binding = await runtime.prepareService({ serviceId: descriptor.id, version: descriptor.version, method: "execute", args: [],
-        routing: { sessionId: "thread" } });
+        routing: { threadId: "thread" } });
       const provider = runtime.services.getSnapshot().providers.find(value => value.providerId === binding.providerId);
       if (!provider) throw new Error("The installed material example did not publish its provider");
       const pin = binding.pin();
@@ -91,15 +91,13 @@ describe("material snapshot capability", () => {
         };
         expect(await call("thread")).toMatchObject({ status: "ok", text: "Aé", nextOffset: 3, contentHash: ref.contentHash });
         expect(await call("receiver", true)).toMatchObject({ status: "unavailable" });
-        const collections = createMaterialCollections(opened.workingStates, { materials: opened.materials,
-          resolveThreadId: async sessionId => sessionId === "pi-source" ? "thread" : undefined,
-          threadsRelated: async (from, to) => from === "thread" && to === "receiver" });
-        const shared = await collections.handle({ action: "share", snapshotId: ref.snapshotId, targetThreadId: "receiver" }, {
-          sessionId: "pi-source", workspaceId: "ws", authorizedPaths: [], signal: new AbortController().signal,
-          actor: { authorityInstanceId: "material-test", workerId: "worker", workerGeneration: 1,
-            sessionId: "pi-source", workspaceId: "ws", grantedCapabilities: ["read.web"] },
+        const collections = createMaterialCollections(opened.workingStates, { materials: opened.materials });
+        const shared = await collections.execute({ action: "share", snapshotId: ref.snapshotId, targetThreadId: "receiver" }, {
+          authority: { kind: "thread", threadId: "thread", owningWorkspaceId: "ws" },
+          signal: new AbortController().signal,
+          threadsRelated: async (from, to) => from === "thread" && to === "receiver",
         });
-        expect(shared.status).toBe("ok");
+        expect(shared.result.status).toBe("ok");
         expect(await call("receiver", true, 3)).toMatchObject({ status: "ok", text: "🙂", nextOffset: 7, contentHash: ref.contentHash });
         await expect(pin.invoke("execute", [{ snapshotId: ref.snapshotId, offset: 0, maxBytes: 4 }])).rejects.toThrow("tool_invocation_unavailable");
       } finally { pin.release(); }

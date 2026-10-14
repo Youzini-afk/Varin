@@ -1,5 +1,6 @@
 import { resolveWorktreeTopLevel } from '../git/service.js';
-import { describeSmallModel, generateSmallModelText } from '../small-model/index.js';
+import { randomUUID } from 'node:crypto';
+import { parseModelTextReference } from '../model-text/service.js';
 import { buildDigest } from './digest.js';
 import { indexHunks } from './hunks.js';
 import { normalizeLanguage } from './languages.js';
@@ -13,7 +14,6 @@ import {
   writeCachedWalkthrough,
   writePointer,
 } from './store.js';
-import { readWalkthroughModelOverride } from './model-settings.js';
 import { loadSourceSections, parseSource, sourceKey, WalkthroughSourceError } from './sources.js';
 import type {
   BuiltDigest,
@@ -38,7 +38,7 @@ interface WalkthroughRequest {
   model?: string;
   source: unknown;
 }
-interface GenerateWalkthroughRequest extends WalkthroughRequest { force?: boolean }
+interface GenerateWalkthroughRequest extends WalkthroughRequest { force?: boolean; requestKey?: string; retryOf?: string }
 interface GenerationJob {
   controller: AbortController;
   promise: Promise<WalkthroughGenerationResult>;
@@ -78,7 +78,7 @@ const generationTimeoutMs = (hunkCount: number): number => Math.min(
 // return nothing when it runs out, which is a bill for no answer.
 //
 // So the ask is derived from the model rather than fixed. Varin's existing 4k
-// small-model reserve is the floor; roomier models can spend more on reasoning
+// utility output reserve is the floor; roomier models can spend more on reasoning
 // without reserving most of their context away from the diff.
 //
 // The reserve subtracted from the input budget is the same number, always: ask
@@ -97,7 +97,7 @@ const OUTPUT_CONTEXT_SHARE = 0.125;
 /**
  * Answer allowance for a specific model: as much as it admits it can emit,
  * bounded by a share of its context and never below Varin's existing
- * small-model output reserve.
+ * utility output reserve.
  */
 const walkthroughOutputTokens = ({ contextTokens, outputTokenLimit }: {
   contextTokens: number;
@@ -126,17 +126,6 @@ const fail = <Extra extends Record<string, unknown> = Record<string, never>>(
 // that comes back attaches to the running job instead of starting a second one,
 // and cancelling is an explicit request rather than a side effect of leaving.
 const jobs = new Map<string, GenerationJob>();
-
-// Providers that answered a schema request with a 4xx. Retrying the schema on
-// every generation means paying for a call we already know will fail, so the
-// refusal is remembered and the fallback goes first next time.
-//
-// Process-lifetime only, on purpose: a provider that gains structured-output
-// support should not need a settings change to be tried again — a restart is
-// enough, and the cost of one wasted first attempt after that is small.
-const schemaRefusedBy = new Set<string>();
-
-const modelKey = (model: WalkthroughModel): string => `${model.providerID}/${model.modelID}`;
 
 const jobKey = (repoRoot: string, sourceKeyValue: string): string => `${repoRoot}\0${sourceKeyValue}`;
 
@@ -198,20 +187,14 @@ export async function cancelWalkthroughGeneration({ directory, source: rawSource
 
 const modelLabel = (model: WalkthroughModel): string => `${model.providerID}/${model.modelID}`;
 
-/**
- * Resolve the model for this feature: the walkthrough override when set,
- * otherwise whatever the small-model chain resolves to.
- */
-/**
- * Resolve the model for this feature. An explicit per-review choice outranks the
- * saved setting, which in turn outranks the small-model chain — the user picking
- * a roomier model for a risky change is the most specific intent there is.
- */
-const resolveModel = (directory: string, explicitModel?: string): Promise<WalkthroughModel | null> => describeSmallModel({
-  directory,
-  outputReserveTokens: walkthroughOutputTokens,
-  overrideModel: explicitModel || readWalkthroughModelOverride() || undefined,
-});
+/** Explicit selection, native walkthrough setting, native utility setting, then configured default. */
+const resolveModel = (deps: WalkthroughDependencies, explicitModel?: string): Promise<WalkthroughModel | null> => {
+  if (!deps.modelText) return Promise.resolve(null);
+  return deps.modelText.describe({
+    outputReserveTokens: walkthroughOutputTokens,
+    model: parseModelTextReference(explicitModel), purpose: 'walkthrough',
+  });
+};
 
 export const __testing = { generationTimeoutMs, walkthroughOutputTokens };
 
@@ -297,7 +280,7 @@ export async function getWalkthrough(
   // the whole git pipeline twice.
   const [built, model] = await Promise.all([
     loadCurrentDiff(directory, source, deps),
-    resolveModel(directory, explicitModel).catch(() => null),
+    resolveModel(deps, explicitModel).catch(() => null),
   ]);
   const { files } = built;
   const hunkIndex = indexHunks(files);
@@ -430,7 +413,7 @@ function computeReadiness({ model, digest, files, fileCount, hunkCount, generate
  * nothing.
  */
 export async function generateWalkthrough(
-  { directory, source: rawSource, force = false, model: explicitModel, language: rawLanguage }: GenerateWalkthroughRequest,
+  { directory, source: rawSource, force = false, model: explicitModel, language: rawLanguage, requestKey, retryOf }: GenerateWalkthroughRequest,
   deps: WalkthroughDependencies = {},
 ): Promise<WalkthroughGenerationResult> {
   const source = parseSource(rawSource);
@@ -450,6 +433,7 @@ export async function generateWalkthrough(
     repoRoot,
     key,
     force,
+    requestKey, retryOf,
     ...(explicitModel ? { explicitModel } : {}),
     language,
     signal: controller.signal,
@@ -464,9 +448,11 @@ export async function generateWalkthrough(
   return promise;
 }
 
-async function runGeneration({ directory, source, repoRoot, key, force, explicitModel, language, signal }: {
+async function runGeneration({ directory, source, repoRoot, key, force, explicitModel, language, signal, requestKey, retryOf }: {
   directory: string;
   explicitModel?: string;
+  requestKey?: string | undefined;
+  retryOf?: string | undefined;
   force: boolean;
   key: string;
   language: WalkthroughLanguage;
@@ -475,13 +461,13 @@ async function runGeneration({ directory, source, repoRoot, key, force, explicit
   source: WalkthroughSource;
 }, deps: WalkthroughDependencies): Promise<WalkthroughGenerationResult> {
 
-  const model = await resolveModel(directory, explicitModel);
+  const model = await resolveModel(deps, explicitModel);
   if (!model) {
     throw fail('No model is available — sign in to a provider first', 404, { code: 'no-model' });
   }
   if (model.hasLogin === false) {
     throw fail(
-      `No Pi login found for provider "${model.providerID}" — sign in or choose a different model`,
+      `No usable credentials found for provider "${model.providerID}" — sign in or choose a different model`,
       401,
       { code: 'no-provider-login', model },
     );
@@ -522,6 +508,7 @@ async function runGeneration({ directory, source, repoRoot, key, force, explicit
         model: cached.model,
         language: cached.language ?? null,
         generatedAt: cached.generatedAt,
+        ...(cached.requestId ? {requestId:cached.requestId} : {}),
         fromCache: true,
         hunks: serializeHunks(files),
         hunkCount,
@@ -546,7 +533,7 @@ async function runGeneration({ directory, source, repoRoot, key, force, explicit
 
   if (model.structuredOutput === false) {
     throw fail(
-      `${modelLabel(model)} cannot produce structured output — choose a different small model`,
+      `${modelLabel(model)} cannot produce structured output — choose a different model`,
       409,
       { code: 'structured-output-unsupported', model },
     );
@@ -556,86 +543,24 @@ async function runGeneration({ directory, source, repoRoot, key, force, explicit
     prompt: string;
     responseSchema: typeof responseSchema | undefined;
     system: string;
-  }) => generateSmallModelText({
+  }) => {
+    if (!deps.modelText) throw fail('Native text generation is unavailable', 503);
+    return deps.modelText.generate({
+    key: requestKey ?? (force ? randomUUID() : `walkthrough:${cacheKey}`), purpose: 'walkthrough',
+    ...(retryOf ? { retryOf } : {}),
     prompt: options.prompt,
     system: options.system,
-    directory,
-    model: `${model.providerID}/${model.modelID}`,
+    model: { providerId: model.providerID, modelId: model.modelID },
     responseSchema: options.responseSchema,
-    onOverflow: 'error',
-    timeoutMs: generationTimeoutMs(hunkCount),
     // The number the input budget was already reduced by, not a fresh guess.
     maxOutputTokens: model.outputTokens ?? MIN_OUTPUT_TOKENS,
     signal,
   });
-
-  // Roughly half the catalog does not declare `structured_output`, and some of
-  // those providers reject the schema outright. A rejected request shape is not
-  // a dead end: the shape can travel in the prompt instead, and the response
-  // parser is already tolerant of imperfect JSON.
-  const withSchema = () => run({ prompt, system, responseSchema });
-  const withoutSchema = () => run({
-    prompt,
-    system: `${system}\n${JSON_SHAPE_INSTRUCTION}`,
-    responseSchema: undefined,
-  });
-
-  const asRequestFailure = (error: unknown): Error | null => {
-    const failure = error && typeof error === 'object' ? error as Record<string, unknown> : {};
-    const message = error instanceof Error ? error.message : 'Walkthrough request failed';
-    if (failure.code === 'context-too-small') {
-      return fail(message, 409, {
-        code: 'context-too-small',
-        model,
-        requiredChars: failure.requiredChars,
-        availableChars: failure.availableChars,
-      });
-    }
-    if (failure.code === 'output-exhausted') {
-      return fail(message, 409, { code: 'output-exhausted', model });
-    }
-    if (failure.code === 'no-provider-login') {
-      return fail(message, 401, { code: 'no-provider-login', model });
-    }
-    return null;
   };
 
-  const refusesSchema = (error: unknown): boolean => {
-    const failure = error && typeof error === 'object' ? error as Record<string, unknown> : {};
-    return failure.code === 'structured-output-unsupported'
-      || (Number(failure.status) >= 400 && Number(failure.status) < 500);
-  };
-
-  let raw: Awaited<ReturnType<typeof generateSmallModelText>>;
-  let usedSchema = false;
-
-  if (schemaRefusedBy.has(modelKey(model))) {
-    // Already known to refuse: skip straight to the fallback rather than pay
-    // for a call whose failure is a foregone conclusion.
-    setStage(repoRoot, key, 'retrying');
-    try {
-      raw = await withoutSchema();
-    } catch (error) {
-      throw asRequestFailure(error) ?? error;
-    }
-  } else {
-    try {
-      raw = await withSchema();
-      usedSchema = true;
-    } catch (error) {
-      const failure = asRequestFailure(error);
-      if (failure) throw failure;
-      if (!refusesSchema(error)) throw error;
-
-      schemaRefusedBy.add(modelKey(model));
-      setStage(repoRoot, key, 'retrying');
-      try {
-        raw = await withoutSchema();
-      } catch (fallbackError) {
-        throw asRequestFailure(fallbackError) ?? fallbackError;
-      }
-    }
-  }
+  // The native owner embeds this schema in the frozen request. A provider failure is
+  // never retried with another transport or a new key behind the user's back.
+  const raw = await run({ prompt, system: `${system}\n${JSON_SHAPE_INSTRUCTION}`, responseSchema });
 
   setStage(repoRoot, key, 'assembling');
 
@@ -643,26 +568,17 @@ async function runGeneration({ directory, source, repoRoot, key, force, explicit
   try {
     walkthrough = normalizeWalkthrough(parseModelJson(raw.text), idByAlias);
   } catch (error) {
-    // Without schema support the model was asked for JSON in prose and did not
-    // deliver: that is a capability problem the user can fix by switching model,
-    // so it gets the picker rather than a parser error.
-    if (!usedSchema) {
-      throw fail(
-        `${modelLabel(model)} could not return the structured response a walkthrough needs`,
-        409,
-        { code: 'structured-output-unsupported', model },
-      );
-    }
     throw fail(
-      `${modelLabel(model)} did not return a usable walkthrough — try a different small model`,
+      `${modelLabel(model)} did not return a usable walkthrough — choose a different model`,
       502,
-        { code: 'invalid-walkthrough', model, cause: error instanceof Error ? error.message : String(error) },
+        { code: 'invalid-walkthrough', requestId: raw.requestId, model, cause: error instanceof Error ? error.message : String(error) },
     );
   }
 
   const generatedAt = new Date().toISOString();
   const entry = {
     cacheKey,
+    requestId: raw.requestId,
     generatedAt,
     repoRoot,
     sourceKey: key,
@@ -671,8 +587,7 @@ async function runGeneration({ directory, source, repoRoot, key, force, explicit
     walkthrough,
   };
 
-  // A failed write costs a regeneration next time; it must never fail the
-  // request that already produced a good walkthrough.
+  // The original native response remains inspectable even if this derived cache write fails.
   writeCachedWalkthrough(cacheKey, entry);
   writePointer(repoRoot, key, { repoRoot, sourceKey: key, cacheKey, generatedAt });
 
@@ -682,6 +597,7 @@ async function runGeneration({ directory, source, repoRoot, key, force, explicit
     model: entry.model,
     language,
     generatedAt,
+    requestId: raw.requestId,
     fromCache: false,
     hunks: serializeHunks(files),
     hunkCount,

@@ -110,6 +110,7 @@ export function createSourceService(deps: SourceServiceDeps) {
     actor: ExperimentCaller,
   ): Promise<ResearchSourceView> => {
     const originalOwner = requireResearchOwner(actor);
+    if (workspaceId !== actor.workspaceId) throw new HarnessServiceError('denied', 'Research source workspace differs from its original owner');
     const kind = typeof params.kind === "string" ? params.kind.trim() : "";
     if (!SOURCE_KINDS.has(kind)) {
       throw new HarnessServiceError("invalid-params", `source kind must be one of ${[...SOURCE_KINDS].join(", ")}`);
@@ -124,7 +125,7 @@ export function createSourceService(deps: SourceServiceDeps) {
     if (!uri && !path && !objectHash) {
       throw new HarnessServiceError("invalid-params", "source requires a uri, path or objectHash locator");
     }
-    const sourceId = actor.owner.runtime === "agent" ? `source-${createHash("sha256").update(originalOwner.runtime === "agent" ? originalOwner.operationId : "").digest("hex")}` : `source-${randomUUID()}`;
+    const sourceId = `source-${createHash("sha256").update(originalOwner.operationId).digest("hex")}`;
     const scoped = await context(workspaceId);
     const prior = await scoped.getRecord(workspaceId, `${SOURCE_PREFIX}${sourceId}`);
     if (prior) {
@@ -132,7 +133,7 @@ export function createSourceService(deps: SourceServiceDeps) {
       const result = view(prior); if (!result) throw new HarnessServiceError("unavailable", "Original source registration is unreadable"); return result;
     }
     const record = await scoped.putRecord({
-      operationId: actor.owner.runtime === "agent" ? `research.source:${originalOwner.runtime === "agent" ? originalOwner.operationId : ""}` : `research.source:${randomUUID()}`,
+      operationId: `research.source:${originalOwner.operationId}`,
       recordId: `${SOURCE_PREFIX}${sourceId}`,
       workspaceId,
       recordType: "research.source",
@@ -152,9 +153,8 @@ export function createSourceService(deps: SourceServiceDeps) {
       }),
       ownerIds: [],
       references: objectHash ? [{ slot: "content", objectHash }] : [],
-      ...(actor.sessionId ? { sessionId: actor.sessionId } : {}),
-      ...(actor.threadId ? { threadId: actor.threadId } : {}),
-      ...(actor.runId ? { runId: actor.runId } : {}),
+      ...(originalOwner.threadId ? { threadId: originalOwner.threadId } : {}),
+      ...(originalOwner.runId ? { runId: originalOwner.runId } : {}),
     });
     const result = view(record);
     if (!result) throw new HarnessServiceError("failed", "registered source record is unreadable");

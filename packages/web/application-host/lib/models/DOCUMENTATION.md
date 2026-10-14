@@ -18,7 +18,7 @@ See [runtime ownership](../../../../../docs/runtime.md) and the
 | Channel types, validation, discovery and captured selections | `channel-types.ts`, `service.ts` |
 | Credential-free HTTP headers, operation paths and proxy validation | `connection.ts` |
 | Revisioned settings and file observation | `configuration.ts`, `settings.ts` |
-| Model account storage, OAuth and cloud credential sources | `credentials.ts`, `oauth.ts`, `google-auth.ts`, `aws-auth.ts` |
+| Model account storage, OAuth and cloud credential sources | `credentials.ts`, `oauth.ts`, `google-auth.ts`, `aws-auth.ts`, `anthropic-auth.ts` |
 | Reviewed extension contributions and exact service pins | `extensions.ts` |
 | Authenticated client access | `routes.ts`, `application-client/src/model-connections.ts` |
 
@@ -38,10 +38,18 @@ without removing independent valid channels. A first invalid load has no invente
 file transaction. Missing decisions are untrusted. Explicit true/false decisions inherit along canonical
 ancestors; deleting a direct decision exposes the ancestor decision, if any. The authenticated
 `/api/project-trust/read` and `/update` routes accept an existing workspace ID, resolve it through
-Documents admission, and never grant trust to a raw request path. Bad trust files are errors and remain
+Documents admission, and never grant trust to a raw request path. Updates pin both the reviewed canonical
+`expectedPath` and file revision, so reassigning a workspace while confirmation is open cannot transfer
+approval to another root. Change subscribers observe committed writes, external revocation and invalid
+files; the Host broadcasts `project-trust` invalidations through its existing settings event stream.
+Bad trust files are errors and remain
 untouched. `~/.pi/agent/trust.json`, Pi environment variables and legacy files have no native authority.
 Every new project resource/model/MCP access consults current trust; revocation does not rewrite accepted
-immutable input history.
+immutable input history. The settings, MCP and resource panels expose an asynchronous trust review.
+Changing Host/project, dismissal or invalidation retires pending approvals and stale callbacks.
+Revocation freezes cached project capabilities while re-reading the owner; dirty resource/MCP text
+remains available read-only when its original source is no longer admitted. A lost save response
+invalidates cached trust instead of claiming the write was rolled back.
 
 `agent-settings.json` and trusted `.varin/settings.json` also own the typed `compaction` and `resources`
 fields. Context policy is derived from a settings snapshot with its revisions and trusted project
@@ -86,6 +94,18 @@ or explicit anonymous access. Cloud libraries are direct dependencies: Google's 
 refresh and the AWS/Smithy owners resolve chains and sign native requests. No library is loaded
 through Pi's dependency tree. OAuth authorization uses the existing Host interaction owner with a
 local callback or manual callback response; an unrelated channel does not wait for that interaction.
+
+Anthropic workload identity is an explicit `anthropic-federation` authentication source: an absolute
+Host identity-token file, organization ID and federation rule ID, with optional service-account and
+workspace IDs. The Host exchanges the JWT using the documented JWT-bearer grant against the selected
+channel's `/v1/oauth/token` endpoint. HTTPS is required except for local loopback fixtures; credential
+redirects are rejected. No Pi configuration or ambient Anthropic environment variable is imported.
+Assertions and minted access tokens are never written to the channel catalog or credential store.
+The Host coalesces exchanges and refreshes cached tokens before expiry. It rechecks the identity file
+before and after resolving even a cached token; principal changes, withdrawal and channel revocation
+invalidate old handles. JWT rotation for the same issuer, subject and audience preserves identity.
+Federation uses bearer authentication and the OAuth API beta, but does not enable subscription-only
+Claude Code request decoration. Token exchange errors never publish remote bodies or secrets.
 
 `CredentialScope` binds authority, reference, account/source and generation without storing the
 secret as identity. Normal token rotation preserves the account. Replacement, relink, sign-out and

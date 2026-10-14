@@ -5,12 +5,13 @@ import os from 'node:os';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
+import { ModelsService } from '../../models/service.js';
 import { ExistingHostCredentialOwner } from '../../kernel/credential-owner.js';
 import { createSemanticInference, type SemanticInferenceLease } from './runtime-inference.js';
 import { createSemanticInferenceLedger, semanticInferenceOperationKey, type SemanticInferenceOperation } from './inference-ledger.js';
 
 const repository = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../../../../..');
-const { HostCredentialAuthority } = await import(pathToFileURL(path.join(repository, 'packages/pi-host/src/credential-authority.ts')).href);
+
 const cleanups: Array<() => Promise<void>> = [];
 afterEach(async () => { try { for (const cleanup of cleanups.splice(0).reverse()) await cleanup(); } finally { vi.restoreAllMocks(); } });
 const secret = 'fake-ledger-secret-not-for-real-services';
@@ -24,8 +25,8 @@ interface ControlledResponse {
 async function fixture(reply: (body: { input: string[]; model: string }, response: ControlledResponse, before: Awaited<ReturnType<ReturnType<typeof createSemanticInferenceLedger>['list']>>) => void) {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'varin-inference-ledger-review-')); cleanups.push(() => fs.rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }));
   const agentDir = path.join(root, 'agent'); await fs.mkdir(agentDir);
-  const authority = HostCredentialAuthority.open(agentDir);
-  await authority.modifyWithIntent('ledger-provider', 'replace', async () => ({ type: 'api_key', key: secret }));
+  const authority = new ModelsService(agentDir, { projectTrusted: () => false });
+  const credentialReference = await authority.storeCredential(secret, 'ledger-test-account');
   let requests = 0; const observed: unknown[] = [];
   let ledger = createSemanticInferenceLedger({ dataDir: root, hostId: 'ledger-review' });
   const fetchImpl: typeof fetch = async (_url, init) => {
@@ -44,16 +45,16 @@ async function fixture(reply: (body: { input: string[]; model: string }, respons
     });
   };
   const baseUrl = 'https://embedding.invalid/v1';
-  const settings = (modelId = 'a') => fs.writeFile(path.join(agentDir, 'settings.json'), JSON.stringify({ harness: { embedding: { protocol: 'openai-compatible', providerId: 'ledger-provider', modelId, dimensions: 2, maxTokens: 4096 } } }));
-  const models = (endpoint = baseUrl) => fs.writeFile(path.join(agentDir, 'models.json'), JSON.stringify({ providers: { 'ledger-provider': {
-    api: 'openai-completions', baseUrl: endpoint, models: [{ id: 'a', name: 'A' }, { id: 'b', name: 'B' }],
-    capabilities: { chat: false, embedding: { protocol: 'openai-compatible', models: [{ id: 'a', name: 'A' }, { id: 'b', name: 'B' }] } },
-  } } }));
+  const settings = (modelId = 'a') => fs.writeFile(path.join(agentDir, 'agent-settings.json'), JSON.stringify({ harness: { embedding: { protocol: 'openai-compatible', providerId: 'ledger-provider', modelId, dimensions: 2, maxTokens: 4096 } } }));
+  const models = async (endpoint = baseUrl) => authority.save({ id: 'ledger-provider', type: 'openai-compatible', name: 'Ledger', enabled: true,
+    baseUrl: endpoint, authentication: { kind: 'credential', reference: credentialReference }, parameters: {},
+    models: ['a', 'b'].map(id => ({ id, name: id, enabled: true, operations: ['embedding'] })),
+  }, (await authority.read()).revision);
   await settings(); await models();
   let inference = createSemanticInference(authority, undefined, { ledger, fetchImpl });
   cleanups.push(() => inference.close());
   const reopen = async () => { await inference.close(); ledger = createSemanticInferenceLedger({ dataDir: root, hostId: 'ledger-review' });
-    inference = createSemanticInference(HostCredentialAuthority.open(agentDir), undefined, { ledger, fetchImpl }); };
+    inference = createSemanticInference(new ModelsService(agentDir, { projectTrusted: () => false }), undefined, { ledger, fetchImpl }); };
   return { root, agentDir, authority, baseUrl, settings, models, observed, requests: () => requests, ledger: () => ledger, inference: () => inference, reopen };
 }
 function input(lease: SemanticInferenceLease, operationIdentity = indexOperation(), batchId = 'transport-one', text = privateText) {
@@ -73,7 +74,7 @@ it('completed index vectors survive restart without another HTTP, while changed 
   expect(reused.items[0]?.vector).toEqual(original.items[0]?.vector);
   expect(reused.items[0]?.id).toBe('new-item'); expect(reused.receipt.reused).toBe(true);
   expect(f.requests()).toBe(1); restored.release();
-  await f.authority.modifyWithIntent('ledger-provider', 'replace', async () => ({ type: 'api_key', key: 'fake-other-account' }));
+  await f.authority.storeCredential('fake-other-account', 'ledger-test-account');
   const changed = await f.inference().capture();
   await expect(changed.embed(input(changed))).rejects.toThrow(); changed.release();
   expect(f.requests()).toBe(1);
@@ -154,7 +155,7 @@ it('empty provider usage stays unknown while an explicitly measured zero remains
 
 it('parallel reads of malformed settings cannot drain another caller error and return stale ready configuration', async () => {
   const f = await fixture(success); const ready = await f.inference().capture(); ready.release();
-  await fs.writeFile(path.join(f.agentDir, 'settings.json'), '{ malformed settings');
+  await fs.writeFile(path.join(f.agentDir, 'agent-settings.json'), '{ malformed settings');
   const results = await Promise.all(Array.from({ length: 6 }, () => f.inference().describe()));
   expect(results.every(result => result.status !== 'ready')).toBe(true); expect(f.requests()).toBe(0);
 }, 30_000);
@@ -194,3 +195,47 @@ it('index resume waits for a provably finalized zero-dispatch attempt, and concu
     expect(facts.some(fact => fact.receipt.state === 'succeeded' && fact.hasResult)).toBe(true);
   } finally { releaseGate(); finishResponse?.(); lease.release(); }
 }, 40_000);
+
+it('native malformed candidates preserve the accepted lease, while explicit channel disable permanently revokes it', async () => {
+  const f = await fixture(success);
+  const original = await f.inference().capture();
+  try {
+    const settingsPath = path.join(f.agentDir, 'agent-settings.json');
+    await fs.writeFile(settingsPath, '{ invalid json');
+    expect((await f.inference().describe()).status).toBe('invalid');
+    await original.assertAvailable();
+    await fs.writeFile(settingsPath, JSON.stringify({ harness: { embedding: { protocol: 'invalid-protocol' } } }));
+    expect((await f.inference().describe()).status).toBe('invalid');
+    await original.assertAvailable();
+    await f.settings();
+    const channel = (await f.authority.read()).channels[0]!;
+    await f.authority.save({ ...channel, enabled: false }, (await f.authority.read()).revision);
+    expect((await f.inference().describe()).status).toBe('disabled');
+    await expect(original.assertAvailable()).rejects.toMatchObject({ code: 'model-channel-disabled' });
+    await f.authority.save(channel, (await f.authority.read()).revision);
+    await expect(original.assertAvailable()).rejects.toMatchObject({ code: 'embedding-disabled' });
+    const replacement = await f.inference().capture();
+    await replacement.assertAvailable(); replacement.release();
+    expect(f.requests()).toBe(0);
+  } finally { original.release(); }
+});
+
+it('native OAuth refresh preserves the captured account, and logout prevents another original dispatch', async () => {
+  const f = await fixture(success);
+  const refresh = vi.fn(async (value: { kind: 'oauth'; provider: string; accessToken: string; refreshToken?: string; expiresAt?: number }) =>
+    ({ ...value, accessToken: 'fake-refreshed-ledger-token', expiresAt: Date.now() + 3_600_000 }));
+  const unregister = f.authority.credentials.registerOAuth('ledger-test-refresh', {
+    refresh, headers: value => ({ authorization: `Bearer ${value.accessToken}` }),
+  });
+  await f.authority.credentials.linkOAuth({ kind: 'oauth', provider: 'ledger-test-refresh', accessToken: 'fake-expired-ledger-token', expiresAt: 0 }, 'ledger-test-account');
+  const lease = await f.inference().capture();
+  try {
+    const scope = lease.identity.credentialScope;
+    expect((await lease.embed(input(lease))).receipt.state).toBe('succeeded');
+    expect(refresh).toHaveBeenCalledOnce();
+    expect(await f.authority.currentScope('ledger-provider')).toEqual(scope);
+    await f.authority.removeCredential('ledger-test-account');
+    await expect(lease.embed(input(lease, indexOperation('after-logout')))).rejects.toThrow();
+    expect(f.requests()).toBe(1);
+  } finally { lease.release(); unregister(); }
+});

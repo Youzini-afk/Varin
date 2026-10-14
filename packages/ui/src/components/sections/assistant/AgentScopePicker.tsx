@@ -1,9 +1,7 @@
 import React from 'react';
 import type { AgentMemoryScope } from '@varin/protocol';
-import { getRuntimeKey } from '@varin/application-client';
-import { useBotSessionIndex, refreshBotSessionIndex, regularPiSessions } from '@/stores/useBotSessionIndex';
 import { useProjectsStore } from '@/stores/useProjectsStore';
-import { usePiSessionStore } from '@/stores/usePiSessionStore';
+import { useThreadStore } from '@/stores/useThreadStore';
 import { useI18n } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
 
@@ -13,18 +11,15 @@ export function AgentScopePicker({ scope, onChange, disabled }: {
   const { t } = useI18n();
   const projects = useProjectsStore(state => state.projects);
   const projectId = useProjectsStore(state => state.activeProjectId);
-  const summaries = usePiSessionStore(state => state.summaries);
-  const botIndex = useBotSessionIndex();
-  const runtimeKey = getRuntimeKey();
-  React.useEffect(() => { void refreshBotSessionIndex(runtimeKey); }, [runtimeKey]);
-  const sessions = React.useMemo(() => regularPiSessions(summaries, botIndex, runtimeKey), [summaries, botIndex, runtimeKey]);
-  const sessionId = usePiSessionStore(state => state.currentSessionId);
+  const summaries = useThreadStore(state => state.threads);
+  const threadId = useThreadStore(state => state.selectedIdentity?.threadId);
+  const threads = React.useMemo(() => summaries.filter(thread => !thread.bot_id).map(thread => ({ id: thread.thread_id, name: thread.title || thread.thread_id })), [summaries]);
   return <nav className="space-y-1" aria-label={t('assistant.scope')}>
-    {(['global', 'project', 'session'] as const).map(kind => <React.Fragment key={kind}>
-      <button type="button" disabled={disabled || (kind === 'project' && !projects.length) || (kind === 'session' && !sessions.length)}
+    {(['global', 'project', 'thread'] as const).map(kind => <React.Fragment key={kind}>
+      <button type="button" disabled={disabled || (kind === 'project' && !projects.length) || (kind === 'thread' && !threads.length)}
         aria-current={scope.kind === kind ? 'page' : undefined}
         onClick={() => onChange(kind === 'global' ? { kind } : { kind, id: kind === 'project'
-          ? projectId ?? projects[0]!.id : sessions.find(session => session.id === sessionId)?.id ?? sessions[0]!.id })}
+          ? projectId ?? projects[0]!.id : threads.find(thread => thread.id === threadId)?.id ?? threads[0]!.id })}
         className={cn('w-full rounded-md px-3 py-2 text-left typography-ui-label transition-colors disabled:opacity-40',
           scope.kind === kind ? 'bg-primary/10 text-foreground' : 'text-muted-foreground hover:bg-muted/50')}>
         {t(`assistant.scope.${kind}`)}
@@ -33,7 +28,7 @@ export function AgentScopePicker({ scope, onChange, disabled }: {
         aria-label={t(`assistant.scope.${kind}`)} onChange={event => onChange({ kind, id: event.target.value })}
         className="mb-3 w-full min-w-0 rounded-md border border-border bg-background px-2 py-2 typography-meta">
         {(kind === 'project' ? projects.map(project => ({ id: project.id, name: project.label || project.path }))
-          : sessions.map(session => ({ id: session.id, name: session.name || session.firstMessage || session.cwd })))
+          : threads.map(thread => ({ id: thread.id, name: thread.name })))
           .map(entry => <option key={entry.id} value={entry.id}>{entry.name}</option>)}
       </select> : null}
     </React.Fragment>)}

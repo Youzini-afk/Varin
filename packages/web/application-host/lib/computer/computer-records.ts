@@ -41,10 +41,10 @@ const invalid = (): never => { throw new ComputerError('computer-runtime-record-
 
 export function decodeComputerRuntime(body: Record<string, unknown>): ComputerRuntimeRecord {
   const nonempty = (value: unknown) => value !== undefined && value !== null && (!Array.isArray(value) || value.length > 0);
-  if (body.runtimeVersion !== 4 && ['usage', 'work', 'interrupted', 'handbackEvents', 'controlEvents', 'controlCancellations', 'physicalControl'].some(key => nonempty(body[key]))) {
+  if (body.runtimeVersion !== 5 && ['usage', 'work', 'interrupted', 'handbackEvents', 'controlEvents', 'controlCancellations', 'physicalControl'].some(key => nonempty(body[key]))) {
     throw new ComputerError('computer-runtime-format-unsupported', 'This desktop has an obsolete internal work/control record; stop its original physical session before resetting its runtime metadata');
   }
-  if (body.runtimeVersion !== undefined && body.runtimeVersion !== 4) return invalid();
+  if (body.runtimeVersion !== undefined && body.runtimeVersion !== 5) return invalid();
   try {
     const result: ComputerRuntimeRecord = { controlEvents: [], controlCancellations: [] };
     if (body.usage != null) {
@@ -56,12 +56,8 @@ export function decodeComputerRuntime(body: Record<string, unknown>): ComputerRu
       result.work = body.work.map((entry): ComputerWorkAssociation => {
         if (!object(entry) || !id(entry.at)) return invalid();
         const work = parseComputerWorkRef(entry.work);
-        if (work.runtime === 'agent') {
-          if (entry.registry !== null) return invalid();
-          return { work, registry: null, at: entry.at };
-        }
-        if (!object(entry.registry) || !id(entry.registry.scopeId) || !id(entry.registry.threadId)) return invalid();
-        return { work, registry: { scopeId: entry.registry.scopeId, threadId: entry.registry.threadId }, at: entry.at };
+        if ('registry' in entry) return invalid();
+        return { work, at: entry.at };
       });
     }
     if (body.interrupted != null) {

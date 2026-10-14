@@ -119,7 +119,7 @@ async function installExample(f: Awaited<ReturnType<typeof fixture>>) {
   await build({ entryPoints: [path.join(repository, 'examples/extensions/project-context/host.ts')], bundle: true, platform: 'node', format: 'cjs', outfile: path.join(example, 'host.cjs'), alias: { '@varin/extension-sdk': path.join(repository, 'packages/extension-sdk/dist/index.js') } });
   await f.extensions.installOrStage({ expectedRevision: (await f.extensions.state()).catalog.revision, source: { kind: 'local', display: 'Real example', specifier: example } });
 }
-async function route(f: Awaited<ReturnType<typeof fixture>>, providerKey: string, scope: {projectId?: string; sessionId?: string}) {
+async function route(f: Awaited<ReturnType<typeof fixture>>, providerKey: string, scope: {projectId?: string; threadId?: string}) {
   return f.extensions.upsertServiceRoutingRule({ expectedRevision: (await f.extensions.routing.read()).document.revision,
     rule: { allowFallback: false, providerKeys: [providerKey], scope, serviceId: 'varin.context.fragments', version: 1 } });
 }
@@ -137,7 +137,7 @@ it('packaged default and installable scoped example reach captured model request
   expect(old.personalization!.contextComposition!.transforms[0]!.sections[0]!.name).toBe('execution-reporting');
   await installExample(f);
   await route(f, 'example.project-context:host:varin.context.fragments@1', { projectId: 'selected-project' });
-  const other = await f.composition({ sessionId: 'other-session', projectId: 'different-project' });
+  const other = await f.composition({ threadId: 'other-session', projectId: 'different-project' });
   expect(other!.transforms[0]!.sections[0]!.name).toBe('execution-reporting');
   await f.adapter.refreshPersonalization();
   const refreshed = (await f.api.snapshot(identity)).context.checkpoint!;
@@ -174,7 +174,7 @@ it('packaged default and installable scoped example reach captured model request
 });
 it('a cache hit cannot return an old selection revision if routing changes before actual binding', async () => {
   const f = await fixture((_body, response) => complete(response, 'unused', 'unused'));
-  const scope = { sessionId: 'race-session', projectId: 'race-project' };
+  const scope = { threadId: 'race-session', projectId: 'race-project' };
   const first = await f.composition(scope);
   const originalRead = f.extensions.routing.read.bind(f.extensions.routing);
   let changed = false;
@@ -189,7 +189,7 @@ it('a cache hit cannot return an old selection revision if routing changes befor
 
 it('optional unavailable default is empty, but explicit missing and failing providers cannot silently erase context', async () => {
   const f = await fixture((_body, response) => complete(response, 'unused', 'unused'));
-  const scope = { sessionId: 'optional-session' };
+  const scope = { threadId: 'optional-session' };
   expect((await f.composition(scope))!.transforms[0]!.sections[0]!.name).toBe('execution-reporting');
   await f.extensions.setEnabled('varin.builtin.context-fragments', false, (await f.extensions.state()).catalog.revision);
   expect(await f.composition(scope)).toBeUndefined();
@@ -224,13 +224,13 @@ it('unchanged context preparation invokes describe once and reuses the real work
   };
   const generations = new Set<string>();
   for (let index = 0; index < 5; index++) {
-    const result = await f.composition({ sessionId: 'reuse-session' });
+    const result = await f.composition({ threadId: 'reuse-session' });
     generations.add(result!.transforms[0]!.providerId);
     expect(result!.transforms[0]!.sections[0]!.name).toBe('execution-reporting');
   }
-  const beforeRouting = await f.composition({ sessionId: 'reuse-session' });
+  const beforeRouting = await f.composition({ threadId: 'reuse-session' });
   await route(f, 'unrelated.missing:host:varin.context.fragments@1', { projectId: 'unrelated-project' });
-  const afterRouting = await f.composition({ sessionId: 'reuse-session' });
+  const afterRouting = await f.composition({ threadId: 'reuse-session' });
   expect(afterRouting).toEqual(beforeRouting);
   expect(describes).toBe(1);
   expect(generations.size).toBe(1);
@@ -252,10 +252,10 @@ it('selected describe failure preserves the checkpoint and data fragments stay o
     await fs.writeFile(path.join(folder, 'host.cjs'), `module.exports={activate(context){context.services.provide(${JSON.stringify(VARIN_CONTEXT_FRAGMENTS_SERVICE)},{describe(){${implementation}}})}}`);
     await f.extensions.installOrStage({ expectedRevision: (await f.extensions.state()).catalog.revision, source: { kind: 'local', display: id!, specifier: folder } });
   }
-  await route(f, 'review.fail-fragments:host:varin.context.fragments@1', { sessionId: identity.threadId });
+  await route(f, 'review.fail-fragments:host:varin.context.fragments@1', { threadId: identity.threadId });
   await expect(f.adapter.refreshPersonalization()).rejects.toThrow();
   expect((await f.api.snapshot(identity)).context.checkpoint).toEqual(before);
-  await route(f, 'review.data-fragments:host:varin.context.fragments@1', { sessionId: identity.threadId });
+  await route(f, 'review.data-fragments:host:varin.context.fragments@1', { threadId: identity.threadId });
   const second = await f.api.submit({ ...identity, key: 'second', expectedHead: (await f.api.snapshot(identity)).historyPage.head, text: 'second', model });
   await expect.poll(async () => (await f.api.run(second.run_id)).state).toBe('completed');
   const wire = f.requests.at(-1)!.body;
@@ -275,7 +275,7 @@ it('calendar GUI assets reach original source/model/context owners, consume a ge
     const projects = async () => [{ id: 'selected-project', path: f.workspace }];
     f.adapter.bindSourceDirectory(createThreadSourceDirectory({ documents: f.documents }));
     const config = createProjectConfigRuntime({ fsPromises: fs, path, projectsDirPath: path.join(f.root, 'project-config') });
-    const scheduler = createScheduledTasksRuntime({ projectConfigRuntime: config, listProjects: projects, executeTask: async () => { throw new Error('Native calendar cannot dispatch Pi'); } });
+    const scheduler = createScheduledTasksRuntime({ projectConfigRuntime: config, listProjects: projects });
     const errors: unknown[] = [];
     scheduler.setCalendarOwner(new CalendarOwner({ runtime: f.runtime, projects,
       prepare: (work, project, signal) => f.adapter.prepareCalendarWork(work, project, signal), onChanged() {}, onError: error => errors.push(error) }));
@@ -293,7 +293,7 @@ it('calendar GUI assets reach original source/model/context owners, consume a ge
     missedPolicy: 'coalesce_once', target: { kind: 'new_work', source: { kind: 'project' }, model: { providerId: 'fixture-provider', modelId: 'fixture-model' }, sourceMode: 'fixed_branch', goal: null } });
   const accepted = await host.api.run('selected-project', 'calendar-task', 'original-manual-key');
   if (accepted.runtime !== 'agent') throw new Error('Native calendar returned a Pi receipt');
-  expect(accepted).not.toHaveProperty('sessionId');
+  expect(accepted).not.toHaveProperty('threadId');
   await expect.poll(async () => (await host.api.list('selected-project'))[0]?.calendar?.occurrences[0]?.state, { timeout: 15_000 }).toBe('completed');
   const occurrence = (await host.api.list('selected-project'))[0]!.calendar!.occurrences[0]!;
   expect(occurrence.id).toBe(accepted.occurrence.id); expect(occurrence.run_id).toBeTruthy();

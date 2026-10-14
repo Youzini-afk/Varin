@@ -24,7 +24,6 @@ type MemoryTurn = DurableRecoveryChangeSelection["turns"][number] & {
   runtimeGeneration?: number;
   runtimeKey?: string;
   conversation?: RecoveryConversation;
-  sessionId?: string;
   settledAt?: string;
   startedAt?: string;
   userEntryId?: string;
@@ -34,7 +33,6 @@ type MemoryTurn = DurableRecoveryChangeSelection["turns"][number] & {
 type MemoryChange = DurableRecoveryChangeSelection["changes"][number] & {
   workspaceId: string;
   conversation?: RecoveryConversation;
-  sessionId?: string;
 };
 
 export interface InMemoryRecoveryDurablePort extends RecoveryDurableMetadataPort {
@@ -148,7 +146,6 @@ export const createInMemoryRecoveryDurablePort = (
         createdAt,
         updatedAt: createdAt,
         data: structuredClone(input.data),
-        ...(input.sessionId ? { sessionId: input.sessionId } : {}),
         ...(input.threadId ? { threadId: input.threadId } : {}),
         ...(input.runId ? { runId: input.runId } : {}),
         files: Object.entries(input.targets).sort(([left], [right]) => left.localeCompare(right)).map(([path, states]) => ({
@@ -241,8 +238,8 @@ export const createInMemoryRecoveryDurablePort = (
             if (input.entryIds && input.entryIds.length > 0) return executionIds.has(change.executionId);
             return true;
           })
-          .map(({ workspaceId: _workspaceId, sessionId: _sessionId, ...change }) => clone(change)),
-        turns: selectedTurns.map(({ workspaceId: _workspaceId, sessionId: _sessionId, userEntryId: _userEntryId, assistantEntryId: _assistantEntryId, provenance: _provenance, ...turn }) => clone(turn)),
+          .map(({ workspaceId: _workspaceId, ...change }) => clone(change)),
+        turns: selectedTurns.map(({ workspaceId: _workspaceId, userEntryId: _userEntryId, assistantEntryId: _assistantEntryId, provenance: _provenance, ...turn }) => clone(turn)),
       };
     },
     async recordIntegrationChanges(input) {
@@ -267,7 +264,6 @@ export const createInMemoryRecoveryDurablePort = (
           toolName: prior?.toolName ?? "thread.merge",
           before: prior?.before ?? clone(states.before),
           after: clone(states.after),
-          ...(turn.sessionId ? { sessionId: turn.sessionId } : {}),
         });
       }
       return true;
@@ -306,7 +302,6 @@ export const createInMemoryRecoveryDurablePort = (
           mutationId: input.mutationId,
           path: relative,
           sequence: changes.size + 1,
-          ...(turn.sessionId ? { sessionId: turn.sessionId } : {}),
           ...(turn.fileTarget ? { fileTarget: clone(turn.fileTarget) } : {}),
           toolName: input.toolName,
           before: clone(state),
@@ -392,7 +387,6 @@ export const createInMemoryRecoveryDurablePort = (
         sequence: ++turnSequence,
         conversation: input.conversation,
         ...(input.fileTarget ? { fileTarget: clone(input.fileTarget) } : {}),
-        ...(input.conversation.kind === "pi" ? { sessionId: input.conversation.sessionId } : {}),
         userEntryId: input.userEntryId,
         workerId: input.workerId,
         runtimeGeneration: input.runtimeGeneration,

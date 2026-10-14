@@ -45,7 +45,7 @@ fn source(mode: &str, branch: &str) -> SourceSelection {
 }
 fn basis(text: &str) -> PersonalizationBasis {
     serde_json::from_value(json!({"mode":"agent","threadRole":"main","revision":1,"configurationDigest":"profile-1",
-        "memorySnapshot":{"revision":7,"memories":[]},"sessionId":"thread","projectId":"project",
+        "memorySnapshot":{"revision":7,"memories":[]},"threadId":"thread","projectId":"project",
         "originalSections":[{"name":"instructions","content":text}],"instructionSources":["fixture-source"]})).unwrap()
 }
 fn resources(text: &str, source: Option<SourceSelection>) -> ContextResources {
@@ -1504,7 +1504,7 @@ fn cold_calendar_skill_keeps_real_environment_proof_through_compaction_gc_and_re
     initial.branch_id = occurrence.branch_id.clone();
     initial.key = format!("initial:{}", occurrence.branch_id);
     let mut personalization = basis("calendar main");
-    personalization.session_id = occurrence.thread_id.clone();
+    personalization.thread_id = occurrence.thread_id.clone();
     let candidate = ContextCheckpoint {
         bot_memory_snapshot: None,
         resource_activations: vec![],

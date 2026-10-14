@@ -1,4 +1,4 @@
-import { piResearchCaller } from './research-caller.fixture.js';
+import { nativeResearchCaller } from './native-research.fixture.js';
 import { describe, expect, it, vi } from "vitest";
 import { createManagedRemoteTargetRegistry } from "./managed-remote-client.js";
 import { ExperimentPreparationError } from "./experiment-backend.js";
@@ -33,7 +33,7 @@ describe("managed remote target recovery", () => {
       captureSemantics: { excludedDirectories: ['.git', '.varin'], gitignore: 'not-applied', ignoredFilesIncluded: true } };
     const resolved = await registry.resolveBackend({} as never, 'managed:remote-host',
       { payloadJson: JSON.stringify({ backend: 'managed-remote' }) } as never,
-      piResearchCaller({ workspaceId: 'workspace', executionWorkspaceId: 'workspace', allowedThreadIds: [] }));
+      nativeResearchCaller({ workspaceId: 'workspace', executionWorkspaceId: 'workspace', readThreadIds: [] }));
     expect(resolved).not.toBeNull();
     expect(await resolved!.reconcilePreparation!({ attemptId: 'attempt', input })).toBe('unknown');
     const controller = new AbortController(); let settled = false;
@@ -101,12 +101,11 @@ describe("managed remote target recovery", () => {
     const machine = {
       payloadJson: JSON.stringify({ backend: "managed-remote" }),
     } as never;
-    const caller = piResearchCaller({
+    const caller = nativeResearchCaller({
       workspaceId: "workspace-a",
       executionWorkspaceId: "workspace-a",
-      sessionId: "session-a",
-      rootSessionId: "session-a",
-      allowedThreadIds: [],
+      rootThreadId: "session-a",
+      readThreadIds: [],
     });
 
     await expect(registry.resolveBackend({} as never, "managed:remote-host", machine, caller)).resolves.toBeNull();

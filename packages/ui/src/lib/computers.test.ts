@@ -1,24 +1,22 @@
-import { expect, it, vi } from 'vitest';
-import { ThreadRequestError } from '@varin/application-client';
-import { readComputerAutomation, stopComputerAutomation, stopDesktopComputerWork } from './computers';
+import { afterEach, expect, it, vi } from 'vitest';
+import { createThreadsHttpAPI } from '@varin/application-client';
+import { stopDesktopComputerWork } from './computers';
+
+afterEach(() => vi.unstubAllGlobals());
 
 const transport = vi.hoisted(() => ({ fetch: vi.fn() }));
 vi.mock('@varin/application-client', async original => ({ ...await original<typeof import('@varin/application-client')>(), runtimeFetch: transport.fetch }));
 
-it('preserves the real Pi route and exact Stop Run while decoding original cleanup and typed failures', async () => {
-  const work = { runtime: 'pi' as const, sessionId: 'pi/session' };
+it('preserves original native Thread, branch and Run in computer operations', async () => {
+  vi.stubGlobal('fetch', transport.fetch);
+  const work = { runtime: 'agent' as const, threadId: 'thread/one', branchId: 'branch/original' };
   const execution = { work, runId: 'original-run' };
   const state = { work, rootWork: work, currentExecution: null, currentRootExecution: null,
     active: false, status: 'cancel-unconfirmed', leases: [], requests: [], cleanups: [{ execution, desktopId: 'desktop', status: 'cancel-unconfirmed' }] };
   transport.fetch.mockResolvedValueOnce(Response.json({ state, activities: [] })).mockResolvedValueOnce(Response.json({ state }));
-  const controller = new AbortController();
-  expect((await readComputerAutomation(work, controller.signal)).state.cleanups).toEqual(state.cleanups);
-  expect(transport.fetch.mock.calls[0]).toEqual(['/api/computers/automation?sessionId=pi%2Fsession', { cache: 'no-store', signal: controller.signal }]);
-  await stopComputerAutomation(execution, 'desktop');
-  expect(transport.fetch.mock.calls[1]![0]).toBe('/api/computers/automation/stop');
-  expect(JSON.parse(transport.fetch.mock.calls[1]![1].body)).toEqual({ sessionId: work.sessionId, runId: execution.runId, desktopId: 'desktop' });
-  transport.fetch.mockResolvedValueOnce(Response.json({ code: 'computer-owner-unavailable', error: 'private owner diagnostic' }, { status: 409 }));
-  await expect(stopComputerAutomation(execution, 'desktop')).rejects.toMatchObject({ name: 'ThreadRequestError', code: 'computer-owner-unavailable' } satisfies Partial<ThreadRequestError>);
+  expect((await createThreadsHttpAPI().computer.state(work)).state.cleanups).toEqual(state.cleanups);
+  await createThreadsHttpAPI().computer.stop(work, { runId: execution.runId, desktopId: 'desktop' });
+  expect(JSON.parse(transport.fetch.mock.calls[1]![1].body)).toMatchObject({ ...work, runId: 'original-run', desktopId: 'desktop' });
 });
 
 it('addresses physical desktop Stop only by the captured target epoch and keeps its typed stale failure', async () => {

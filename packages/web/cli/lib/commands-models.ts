@@ -1,50 +1,13 @@
 import { TunnelCliError, EXIT_CODE } from './cli-errors.js';
 import { resolveTargetPort } from './cli-api-target.js';
-import { requestVarinApi, requestRuntimeMethod } from './cli-runtime.js';
+import { requestThreadApi } from './cli-runtime.js';
 import { isJsonMode, printJson } from '../cli-output.js';
-import { recordOf, type CliOptions } from './cli-types.js';
+import type { CliOptions } from './cli-types.js';
+import type { ThreadModelInfo } from '@varin/application-client';
 
-const asNonEmptyString = (value: unknown): string | null => {
-  if (typeof value !== 'string') return null;
-  const trimmed = value.trim();
-  return trimmed.length > 0 ? trimmed : null;
-};
-
-const formatModelRef = (entry: unknown): string | null => {
-  const value = recordOf(entry);
-  const providerID = asNonEmptyString(value.provider) || asNonEmptyString(value.providerID) || asNonEmptyString(value.providerId);
-  const modelID = asNonEmptyString(value.modelID) || asNonEmptyString(value.modelId) || asNonEmptyString(value.id);
-  return providerID && modelID ? `${providerID}/${modelID}` : null;
-};
-
-const formatDefaultLine = ({ defaultModel, defaultAgent, defaultVariant }: Record<string, unknown>): string => {
-  const model = asNonEmptyString(defaultModel) || 'none';
-  const agent = asNonEmptyString(defaultAgent) || 'none';
-  const variant = asNonEmptyString(defaultVariant);
-  return `Default: \`${model}${variant ? ` (${variant})` : ''}\` / \`${agent}\``;
-};
-
-const formatModelsOutput = (settings: Record<string, unknown> = {}): string => {
-  const favorites = Array.isArray(settings.favoriteModels)
-    ? settings.favoriteModels.map(formatModelRef).filter(Boolean)
-    : [];
-  const recent = Array.isArray(settings.recentModels)
-    ? settings.recentModels.map(formatModelRef).filter(Boolean)
-    : [];
-  const available = Array.isArray(settings.availableModels)
-    ? settings.availableModels.map(formatModelRef).filter(Boolean)
-    : [];
-  const lines = [
-    formatDefaultLine(settings),
-    '',
-    'Favorites:',
-    ...(favorites.length > 0 ? favorites.map((model) => `- \`${model}\``) : ['- none']),
-    '',
-    'Recent:',
-    ...(recent.length > 0 ? recent.map((model) => `- \`${model}\``) : ['- none']),
-    ...(available.length > 0 ? ['', 'Available:', ...available.map((model) => `- \`${model}\``)] : []),
-  ];
-  return `${lines.join('\n')}\n`;
+const formatModelsOutput = (models: ThreadModelInfo[]): string => {
+  const lines = models.map(model => `- ${model.providerId}/${model.modelId}${model.name ? ` (${model.name})` : ''}${model.thinkingLevels?.length ? `; thinking: ${model.thinkingLevels.join(', ')}` : ''}`);
+  return `Available models:\n${lines.length ? lines.join('\n') : '- none'}\n`;
 };
 
 async function modelsCommand(options: CliOptions = {}, action = 'show'): Promise<void> {
@@ -57,17 +20,14 @@ async function modelsCommand(options: CliOptions = {}, action = 'show'): Promise
   }
 
   const port = await resolveTargetPort(options);
-  const [settings, availableModels] = await Promise.all([
-    requestVarinApi(port, '/api/config/settings', options),
-    requestRuntimeMethod(port, 'model.list', { cwd: process.cwd() }, options),
-  ]);
-  const result = { ...settings, availableModels: Array.isArray(availableModels) ? availableModels : [] };
+  const availableModels = await requestThreadApi<ThreadModelInfo[]>(port, 'models', {}, options);
+  const result = { availableModels };
 
   if (isJsonMode(options)) {
     printJson(result);
     return;
   }
-  process.stdout.write(formatModelsOutput(result));
+  process.stdout.write(formatModelsOutput(availableModels));
 }
 
-export { modelsCommand, formatModelsOutput, formatDefaultLine, formatModelRef };
+export { modelsCommand, formatModelsOutput };

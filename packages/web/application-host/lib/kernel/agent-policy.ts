@@ -20,7 +20,7 @@ export interface AgentPolicyLease {
   transitionState(input: VarinAgentPolicyTransitionInput, signal: AbortSignal): Promise<VarinAgentPolicyTransition>;
   release(): void;
 }
-export interface AgentPolicyScope { sessionId: string; projectId?: string; requiredBinding?: AgentPolicyArtifactBinding }
+export interface AgentPolicyScope { threadId: string; projectId?: string; requiredBinding?: AgentPolicyArtifactBinding }
 export interface AgentPolicyPreparer {
   (scope: AgentPolicyScope, signal?: AbortSignal): Promise<AgentPolicyLease | undefined>;
   observe(scope: Omit<AgentPolicyScope, 'requiredBinding'>, changed: () => void, signal: AbortSignal): () => void;
@@ -78,7 +78,7 @@ export function createAgentPolicy(runtime: ApplicationExtensionRuntime): AgentPo
     signal?.throwIfAborted();
     const required = scope.requiredBinding;
     const request = { serviceId: VARIN_AGENT_POLICY_SERVICE_ID, version: VARIN_AGENT_POLICY_VERSION,
-      method: 'describe', args: [], routing: { sessionId: scope.sessionId, ...(scope.projectId ? { projectId: scope.projectId } : {}) } };
+      method: 'describe', args: [], routing: { threadId: scope.threadId, ...(scope.projectId ? { projectId: scope.projectId } : {}) } };
     if (required) {
       if (required.serviceId !== VARIN_AGENT_POLICY_SERVICE_ID || required.serviceVersion !== VARIN_AGENT_POLICY_VERSION) throw new Error('policy_exact_binding_unavailable');
       const retained = runtime.services.getSnapshot().providers.filter(provider => provider.providerKey === required.providerKey

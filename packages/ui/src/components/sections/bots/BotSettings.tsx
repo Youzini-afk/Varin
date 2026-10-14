@@ -28,7 +28,11 @@ const BotDetailsDialog = React.lazy(() => import('./BotDetailsDialog').then((mod
  * instructions, preferred model, and the real work items in the Bot's owner
  * scope. Profiles are Host records; edits apply to the live entry worker.
  */
-export function BotSettings({ initialBotId, onDeleted }: { initialBotId?: string; onDeleted?(): void } = {}) {
+export function BotSettings(props: { initialBotId?: string; onDeleted?(): void } = {}) {
+  const host = React.useSyncExternalStore(subscribeRuntimeEndpointChanged, getRuntimeEndpointGeneration, getRuntimeEndpointGeneration);
+  return <BotSettingsForHost key={host} {...props} />;
+}
+function BotSettingsForHost({ initialBotId, onDeleted }: { initialBotId?: string; onDeleted?(): void }) {
   const { t } = useI18n();
   const host = React.useSyncExternalStore(subscribeRuntimeEndpointChanged, getRuntimeEndpointGeneration, getRuntimeEndpointGeneration);
   const [bots, setBots] = React.useState<BotSummary[] | null>(null);
@@ -41,7 +45,6 @@ export function BotSettings({ initialBotId, onDeleted }: { initialBotId?: string
   const [instructions, setInstructions] = React.useState('');
   const [createDialogOpen, setCreateDialogOpen] = React.useState(false);
   const [createName, setCreateName] = React.useState('');
-  const [createRuntime, setCreateRuntime] = React.useState<'pi' | 'agent'>('pi');
   const [renaming, setRenaming] = React.useState<BotSummary | null>(null);
   const [deleting, setDeleting] = React.useState<BotSummary | null>(null);
   const [memoryBot, setMemoryBot] = React.useState<BotSummary | null>(null);
@@ -124,7 +127,7 @@ export function BotSettings({ initialBotId, onDeleted }: { initialBotId?: string
     const trimmed = createName.trim();
     if (!trimmed) return;
     void run('create', async () => {
-      const created = renaming ? await updateBot(renaming.id, { name: trimmed }) : await createBot({ name: trimmed, runtime: createRuntime });
+      const created = renaming ? await updateBot(renaming.id, { name: trimmed }) : await createBot({ name: trimmed });
       await refresh();
       if (!renaming) setSelectedId(created.id);
       setCreateDialogOpen(false);
@@ -142,13 +145,7 @@ export function BotSettings({ initialBotId, onDeleted }: { initialBotId?: string
     });
   };
 
-  const workStateLabel = (item: BotWorkItem): string => {
-    if (item.runtime === 'agent') return item.activeRun?.state ?? 'Ready';
-    const { thread, activeRun } = item;
-    if (activeRun?.workerState === 'running' || activeRun?.workerState === 'starting') return activeRun.workerState;
-    if (thread.attention !== 'none') return `attention:${thread.attention}`;
-    return thread.lifecycle;
-  };
+  const workStateLabel = (item: BotWorkItem): string => item.activeRun?.state ?? 'Ready';
 
   const action = (bot: BotSummary, action: BotMenuAction) => {
     if (action === 'rename') { setError(null); setRenaming(bot); setCreateName(bot.name); setCreateDialogOpen(true); return; }
@@ -188,7 +185,6 @@ export function BotSettings({ initialBotId, onDeleted }: { initialBotId?: string
         <div>
           <Button variant="outline" size="sm" disabled={busy !== null} onClick={() => {
             setCreateName('');
-            setCreateRuntime('pi');
             setError(null);
             setRenaming(null);
             setCreateDialogOpen(true);
@@ -198,7 +194,6 @@ export function BotSettings({ initialBotId, onDeleted }: { initialBotId?: string
 
       {selected ? <SettingsSection title={t('settings.bots.section.profile')} contentClassName="space-y-5">
         {selected.deletion || !selected.archived ? <BotActivityBanner bot={selected} busy={busy !== null} onAction={(value) => action(selected, value)} /> : null}
-        <p className="typography-meta text-muted-foreground">Runtime · {selected.entry.runtime === 'agent' ? 'Agent' : 'Pi'}</p>
         <SettingsFieldRow label={t('settings.bots.name.label')}>
           <Input value={name} disabled={locked} onChange={(event) => setName(event.target.value)} />
         </SettingsFieldRow>
@@ -208,7 +203,7 @@ export function BotSettings({ initialBotId, onDeleted }: { initialBotId?: string
             onChange={(event) => setInstructions(event.target.value)} />
         </SettingsFieldRow>
         <SettingsFieldRow label={t('settings.bots.model.label')} description={t('settings.bots.model.description')}>
-          <BotModelSelector runtime={selected.entry.runtime} cwd={selected.homeDir} model={selected.model} disabled={locked} onChange={selectModel} />
+          <BotModelSelector model={selected.model} disabled={locked} onChange={selectModel} />
         </SettingsFieldRow>
         <div className="flex flex-wrap gap-2">
           <Button size="sm" disabled={locked
@@ -257,8 +252,6 @@ export function BotSettings({ initialBotId, onDeleted }: { initialBotId?: string
       open={createDialogOpen}
       title={t(renaming ? 'settings.bots.rename' : 'settings.bots.create')}
       name={createName}
-      runtime={createRuntime}
-      onRuntimeChange={renaming ? undefined : setCreateRuntime}
       busy={busy === 'create'}
       error={error}
       onNameChange={setCreateName}

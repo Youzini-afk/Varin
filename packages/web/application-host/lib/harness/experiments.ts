@@ -51,7 +51,6 @@ import { validateResources, type ResourceService } from "./resources.js";
 import type { SourceService } from "./sources.js";
 import {
   materializeExperimentAttempt,
-  prepareExperimentInput,
   ExperimentInputCaptureError,
   recoverExperimentInput,
   reconcileExperimentPreparation,
@@ -75,7 +74,7 @@ export const ATTEMPT_STATES: ReadonlySet<string> = new Set(["submitted", "queued
 export const isTerminalAttemptState = (state: ExperimentAttemptState): boolean => TERMINAL.has(state);
 
 export type { ExperimentCaller } from './research-identity.js';
-import { type ExperimentCaller, mayAccessResearch, requireResearchOwner, researchNamespace, researchMaintenanceCaller, researchOwner } from './research-identity.js';
+import { type ExperimentCaller, mayAccessResearch, requireResearchOwner, researchMaintenanceCaller, researchOwner } from './research-identity.js';
 
 export interface ExperimentContext {
   scoped: KernelScopedClient;
@@ -86,7 +85,7 @@ export interface ExperimentContext {
 // Host-internal service grant: same trust level as the native process host.
 // `storage.maintenance` (not `storage.admin`) is the narrowest capability that
 // lets an unbound service grant write records carrying caller attribution
-// (sessionId/threadId/runId) and read them back across actors — it grants no
+// (threadId/runId) and read them back across actors — it grants no
 // cross-workspace authority. `process.maintenance` covers inspecting and
 // stopping jobs owned by an earlier grant after a Host restart.
 const SERVICE_CAPABILITIES = [
@@ -152,7 +151,6 @@ interface ExperimentServiceDeps {
   resources: ResourceService;
   sources?: SourceService;
   /** Resolve the owning workspace's canonical root (default experiment cwd). */
-  resolveWorkspaceRoot: (workspaceId: string) => Promise<string | null>;
   /**
    * Resolve the execution backend for a machine record. The default resolves
    * only the local kernel; connection managers register richer resolution for
@@ -205,8 +203,7 @@ const digestId = (...parts: string[]): string => (
   createHash("sha256").update(parts.join("\0")).digest("hex")
 );
 
-const callerNamespace = (caller: ExperimentCaller): string => caller.owner.runtime === "agent"
-  ? JSON.stringify(["agent",caller.owner.rootThreadId,caller.owner.threadId,caller.owner.branchId]) : researchNamespace(caller);
+const callerNamespace = (caller: ExperimentCaller): string => JSON.stringify(["agent", caller.owner.rootThreadId, caller.owner.threadId, caller.owner.branchId]);
 
 const processIdFor = (workspaceId: string, attemptId: string) => (
   `experiment-${digestId(workspaceId, attemptId).slice(0, 40)}`
@@ -478,7 +475,7 @@ export function createExperimentService(deps: ExperimentServiceDeps) {
     if (!mayAccessResearch(caller, record, true)) throw new HarnessServiceError("denied", "Experiment control is outside the caller's task scope");
   };
   const callerView = (caller: ExperimentCaller, record: KernelRecordResult, view: ExperimentAttemptView): ExperimentAttemptView =>
-    caller.owner.runtime === 'agent' ? { ...view, permissions: { control: mayAccessResearch(caller, record, true) } } : view;
+    ({ ...view, permissions: { control: mayAccessResearch(caller, record, true) } });
 
   const assertRecordAllowed = (caller: ExperimentCaller, record: KernelRecordResult, noun: string): void => {
     if (!recordAllowed(caller, record)) {
@@ -691,9 +688,8 @@ export function createExperimentService(deps: ExperimentServiceDeps) {
       executionWorkspaceId: input.payload.executionWorkspaceId ?? caller.executionWorkspaceId }),
     ownerIds: input.ownerIds ?? [],
     references: input.references ?? [],
-    ...(caller.sessionId ? { sessionId: caller.sessionId } : {}),
-    ...(caller.threadId ? { threadId: caller.threadId } : {}),
-    ...(caller.runId ? { runId: caller.runId } : {}),
+    ...(caller.owner.threadId ? { threadId: caller.owner.threadId } : {}),
+    ...(caller.owner.runId ? { runId: caller.owner.runId } : {}),
     ...(input.expectedRecordRevision === undefined ? {} : { expectedRecordRevision: input.expectedRecordRevision }),
     });
     if (input.recordType === "experiment.artifact" && input.payload.internalLogChunk !== true) notify(workspaceId, String(input.payload.attemptId), null);
@@ -1193,7 +1189,7 @@ export function createExperimentService(deps: ExperimentServiceDeps) {
   // previous Host whose physical writer had not yet supplied a drain receipt.
   const retireAttemptAuthority = async (caller: ExperimentCaller): Promise<void> => {
     const owner=requireResearchOwner(caller);
-    if(owner.runtime === "agent") await deps.client.retireOperationGrants(owner.operationId);
+    await deps.client.retireOperationGrants(owner.operationId);
   };
 
   const releaseFinalizedJob = async (
@@ -1668,24 +1664,6 @@ export function createExperimentService(deps: ExperimentServiceDeps) {
     }
   };
 
-  const resolveCwd = async (
-    canonicalRoot: string,
-    cwd: string | undefined,
-    scope: readonly string[] | undefined,
-  ): Promise<string> => {
-    if (cwd === undefined) return "";
-    const absolute = await canonicalizePathIdentity(cwd);
-    if (absolute !== canonicalRoot && !absolute.startsWith(`${canonicalRoot}${path.sep}`)) {
-      throw new HarnessServiceError("forbidden", `Experiment cwd is outside the workspace root: ${cwd}`);
-    }
-    const relative = path.relative(canonicalRoot, absolute).replaceAll("\\", "/");
-    if (scope?.length) {
-      const allowed = scope.some((entry) => relative === "" || relative === entry || relative.startsWith(`${entry}/`));
-      if (!allowed) throw new HarnessServiceError("forbidden", `Experiment cwd is outside the actor scope: ${cwd}`);
-    }
-    return relative;
-  };
-
   const resolveInputs = async (
     caller: ExperimentCaller,
     inputs: readonly ExperimentInputRef[] | undefined,
@@ -1885,31 +1863,24 @@ export function createExperimentService(deps: ExperimentServiceDeps) {
       if (spec?.state !== "active") throw new HarnessServiceError("invalid-params", `Experiment spec is retired: ${params.specId}`);
     } else {
       resolvedInputs = await waitWithSignal(resolveInputs(caller, params.inputs), signal);
-      if (caller.owner.runtime === "agent") {
-        if (!deps.sourceAuthority) throw new HarnessServiceError("unavailable", "Original native research source owner is unavailable");
-        sourceAdmission = await deps.sourceAuthority.admit(caller, params.cwd, signal);
-        sourceRoot = sourceAdmission.kind === "physical" ? sourceAdmission.canonicalRoot : undefined;
-        sourceCwd = sourceAdmission.cwd;
-      } else {
-        const root = await waitWithSignal(deps.resolveWorkspaceRoot(caller.executionWorkspaceId), signal);
-        if (!root) throw new HarnessServiceError("unavailable", `Workspace root is unavailable: ${caller.executionWorkspaceId}`);
-        sourceRoot = await waitWithSignal(canonicalizePathIdentity(root), signal);
-        sourceCwd = await waitWithSignal(resolveCwd(sourceRoot, params.cwd, caller.workspaceScope), signal);
-      }
+      if (!deps.sourceAuthority) throw new HarnessServiceError("unavailable", "Original native research source owner is unavailable");
+      sourceAdmission = await deps.sourceAuthority.admit(caller, params.cwd, signal);
+      sourceRoot = sourceAdmission.kind === "physical" ? sourceAdmission.canonicalRoot : undefined;
+      sourceCwd = sourceAdmission.cwd;
     }
     const acceptedAt = now();
     const acceptedAttempt: ExperimentAttemptView = { attemptId, specId: spec?.specId ?? null, cancelRequested: false, backend: "unresolved",
       state: "submitted", collection: "none", createdAt: acceptedAt,
-      ...(caller.threadId ? {threadId:caller.threadId} : {}), ...(caller.runId ? {runId:caller.runId} : {}),
+      ...(caller.owner.threadId ? {threadId:caller.owner.threadId} : {}), ...(caller.owner.runId ? {runId:caller.owner.runId} : {}),
       ...(params.requestId ? {requestId:params.requestId} : {}), ...(params.retryOfAttemptId ? {retryOfAttemptId:params.retryOfAttemptId} : {}),
-      ...(caller.owner.runtime === "agent" ? { permissions: { control:true } } : {}) };
+      permissions: { control: true } };
     const acceptance = { spec, attempt: acceptedAttempt, text: describeAttempt(spec, acceptedAttempt) };
     let record: KernelRecordResult;
     try { record = await serializeAttempt(caller.workspaceId, attemptId, async () => {
       const existing = await getAttemptRecord(ctx, caller.workspaceId, attemptId);
       if (existing) return existing;
-      if (caller.threadId && sharedRuntime.stoppingThreads.has(`${caller.workspaceId}\0${caller.threadId}`)) {
-        throw new HarnessServiceError("unavailable", `Thread ${caller.threadId} is stopping and cannot submit a new experiment`);
+      if (caller.owner.threadId && sharedRuntime.stoppingThreads.has(`${caller.workspaceId}\0${caller.owner.threadId}`)) {
+        throw new HarnessServiceError("unavailable", `Thread ${caller.owner.threadId} is stopping and cannot submit a new experiment`);
       }
       signal?.throwIfAborted();
       try {
@@ -2024,10 +1995,8 @@ export function createExperimentService(deps: ExperimentServiceDeps) {
               signal.throwIfAborted();
             },
           };
-          inputSnapshot = caller.owner.runtime === "agent"
-            ? await (() => { if (!deps.sourceAuthority || !payload.sourceAdmission) throw new HarnessServiceError("unavailable", "Original native research source owner is unavailable");
-                return deps.sourceAuthority.capture(caller, payload.sourceAdmission as ExperimentSourceAdmission, captureOptions); })()
-            : await prepareExperimentInput(deps.client, caller, sourceRoot!, captureOptions);
+          if (!deps.sourceAuthority || !payload.sourceAdmission) throw new HarnessServiceError("unavailable", "Original native research source owner is unavailable");
+          inputSnapshot = await deps.sourceAuthority.capture(caller, payload.sourceAdmission as ExperimentSourceAdmission, captureOptions);
           await updateAttempt(ctx, caller.workspaceId, caller, attempt.attemptId, (current) => current.state,
             (p) => ({ ...p, captureDrained: true }));
         } catch (error) {
@@ -2043,7 +2012,7 @@ export function createExperimentService(deps: ExperimentServiceDeps) {
       const contentDigest = specDigest({ command: params.command!, args: params.args ?? [], cwd: payload.sourceCwd,
         env: params.env ?? {}, inputs, outputPaths: params.outputPaths ?? [], resources: params.resources ?? {}, inputRoot: inputSnapshot.root });
       // The immutable spec retains its creator's record access boundary; only content blobs deduplicate across owners.
-      const specOwner = caller.threadId ? ["thread", caller.threadId] : caller.sessionId ? ["session", caller.sessionId] : ["host"];
+      const specOwner = ["thread", caller.owner.threadId];
       const specId = `spec-${digestId(caller.workspaceId, callerNamespace(caller), ...specOwner, contentDigest).slice(0, 40)}`;
       // Record the sole possible recipient before publishing the spec, including lost-write-ACK recovery.
       record = await updateAttempt(ctx, caller.workspaceId, caller, attempt.attemptId, (view) => view.state,
@@ -2345,8 +2314,7 @@ export function createExperimentService(deps: ExperimentServiceDeps) {
     params: ExperimentSubmitParams,
     signal?: AbortSignal,
   ): Promise<{ spec: ExperimentSpecView | null; attempt: ExperimentAttemptView; text: string }> => {
-    if (!caller.threadId) return submitUnsafe(caller, params, signal);
-    const key = `${caller.workspaceId}\0${caller.threadId}`;
+    const key = `${caller.workspaceId}\0${caller.owner.threadId}`;
     const submitted = submitUnsafe(caller, params, signal);
     const subjectKey=params.requestId ? attemptKey(caller.workspaceId,attemptIdForRequest(caller,params.requestId)) : undefined;
     const subjectAdmissions=subjectKey ? sharedRuntime.submissionsByAttempt.get(subjectKey) ?? new Set<Promise<unknown>>() : undefined;
@@ -2431,7 +2399,7 @@ export function createExperimentService(deps: ExperimentServiceDeps) {
       signal?.throwIfAborted();
       const before = await requireAttempt(caller, subject.subjectId);
       const original = researchOwner(before.record);
-      if (original.runtime !== "agent" || original.operationId !== binding.operationId
+      if (original.operationId !== binding.operationId
         || !isDeepStrictEqual(original.executionOwner, binding.executionOwner)) {
         throw new HarnessServiceError("denied", "Artifact observation target differs from its original accepted owner");
       }
@@ -2441,7 +2409,7 @@ export function createExperimentService(deps: ExperimentServiceDeps) {
         assertRecordAllowed(caller, record, `experiment artifact: ${record.recordId}`);
         const artifact = artifactView(record), owner = researchOwner(record);
         if (!artifact || artifact.attemptId !== subject.subjectId || payloadOf(record).internalLogChunk === true
-          || owner.runtime !== "agent" || owner.operationId !== binding.operationId || !isDeepStrictEqual(owner.executionOwner, binding.executionOwner)) {
+          || owner.operationId !== binding.operationId || !isDeepStrictEqual(owner.executionOwner, binding.executionOwner)) {
           throw new HarnessServiceError("unavailable", "Original artifact metadata or provenance is unreadable");
         }
         if (selector.name && artifact.name !== selector.name && artifact.path !== selector.name) {
@@ -2631,7 +2599,7 @@ export function createExperimentService(deps: ExperimentServiceDeps) {
     const requireOriginal = (record: KernelRecordResult) => {
       assertRecordAllowed(caller, record, `experiment log owner: ${record.recordId}`);
       const owner = researchOwner(record);
-      if (owner.runtime !== "agent" || owner.operationId !== binding.operationId || !isDeepStrictEqual(owner.executionOwner, binding.executionOwner)) {
+      if (owner.operationId !== binding.operationId || !isDeepStrictEqual(owner.executionOwner, binding.executionOwner)) {
         throw new HarnessServiceError("denied", "Log observation differs from its original accepted owner");
       }
     };
@@ -2972,8 +2940,7 @@ export function createExperimentService(deps: ExperimentServiceDeps) {
     return attemptIdForRequest(caller,requestId);
   };
   const reconcileUnaccepted = async (caller: ExperimentCaller, attemptId: string): Promise<boolean> => {
-    const owner=requireResearchOwner(caller);
-    if(owner.runtime!=="agent") throw new Error("Original native domain owner is required");
+    requireResearchOwner(caller);
     // Original live admissions own their real promises across bridge replacement.
     if(sharedRuntime.submissionsByAttempt.get(attemptKey(caller.workspaceId,attemptId))?.size) return false;
     const ctx=await recordContext(caller.workspaceId);
@@ -2987,7 +2954,6 @@ export function createExperimentService(deps: ExperimentServiceDeps) {
     const record = await getAttemptRecord(ctx, workspaceId, attemptId);
     if (!record) return null;
     const caller = recordCaller(workspaceId, record);
-    if (caller.owner.runtime !== "agent") return null;
     const attempt = attemptView(record);
     if (!attempt) throw new HarnessServiceError("unavailable", "Native experiment receipt is unreadable");
     const payload = payloadOf(record);
@@ -2995,7 +2961,6 @@ export function createExperimentService(deps: ExperimentServiceDeps) {
     const stopped = originalOutputDrained(record, attempt, job);
     void reconcileAttempt(ctx, workspaceId, caller, record).catch(report);
     const owner = requireResearchOwner(caller);
-    if (owner.runtime !== "agent") return null;
     const accepted = payload.acceptance as import("@varin/protocol").ExperimentSubmitResult | undefined;
     if (!accepted || accepted.attempt.attemptId !== attemptId) throw new HarnessServiceError("unavailable", "Original experiment acceptance is missing");
     return { caller, owner, attempt: callerView(caller, record, attempt), recordRevision: record.recordRevision, executorStopped: stopped, accepted };

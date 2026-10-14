@@ -21,8 +21,8 @@ export type ViewTarget = 'files' | 'mcp' | 'instances' | 'update';
  * that keeps the "blocks" composable without leaking ad-hoc URL parsing into features.
  */
 export type DeepLinkIntent =
-  | { type: 'session'; sessionId: string; directory?: string }
-  | { type: 'new-session'; directory?: string; projectId?: string; agent?: string; model?: string }
+  | { type: 'thread'; threadId: string; branchId: string; hostKey: string; directory?: string }
+  | { type: 'new-thread'; directory?: string; projectId?: string }
   | { type: 'sessions'; filter?: SessionsFilter }
   | { type: 'status' }
   | { type: 'settings'; section?: string }
@@ -32,8 +32,8 @@ export type DeepLinkIntent =
 const trimSlashes = (value: string): string => value.replace(/^\/+|\/+$/g, '');
 
 const segmentsOf = (url: URL): string[] => {
-  // Custom-scheme URLs put the first route token in `host` (varin://session/<id>),
-  // but be tolerant of authority-less forms (varin:/session/<id>) where it lands in
+  // Custom-scheme URLs put the first route token in `host` (varin://thread/<id>),
+  // but be tolerant of authority-less forms (varin:/thread/<id>) where it lands in
   // the pathname instead.
   const pathSegments = trimSlashes(url.pathname).split('/').filter(Boolean);
   if (url.host) {
@@ -69,22 +69,23 @@ export function parseDeepLink(raw: string | null | undefined): DeepLinkIntent | 
   const query = url.searchParams;
 
   switch (route) {
-    case 'session': {
-      const sessionId = rest[0] || query.get('id') || '';
-      if (!sessionId) {
+    case 'thread': {
+      let threadId: string;
+      try { threadId = decodeURIComponent(rest[0] || ''); } catch { return null; }
+      const branchId = query.get('branch') || '';
+      const hostKey = query.get('host') || '';
+      if (!threadId || !branchId || !hostKey) {
         return null;
       }
-      return { type: 'session', sessionId, directory: query.get('dir') ?? undefined };
+      return { type: 'thread', threadId, branchId, hostKey, directory: query.get('dir') ?? undefined };
     }
 
     case 'new':
-    case 'new-session':
+    case 'new-thread':
       return {
-        type: 'new-session',
+        type: 'new-thread',
         directory: query.get('dir') ?? undefined,
         projectId: query.get('project') ?? undefined,
-        agent: query.get('agent') ?? undefined,
-        model: query.get('model') ?? undefined,
       };
 
     case 'sessions': {
@@ -144,14 +145,12 @@ export function buildDeepLink(intent: DeepLinkIntent): string {
   };
 
   switch (intent.type) {
-    case 'session':
-      return withQuery(`session/${encodeURIComponent(intent.sessionId)}`, { dir: intent.directory });
-    case 'new-session':
+    case 'thread':
+      return withQuery(`thread/${encodeURIComponent(intent.threadId)}`, { branch: intent.branchId, host: intent.hostKey, dir: intent.directory });
+    case 'new-thread':
       return withQuery('new', {
         dir: intent.directory,
         project: intent.projectId,
-        agent: intent.agent,
-        model: intent.model,
       });
     case 'sessions':
       return withQuery('sessions', { filter: intent.filter });

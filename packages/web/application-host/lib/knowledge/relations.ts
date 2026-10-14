@@ -95,7 +95,7 @@ export interface RelationRecordInput {
 }
 
 export interface RelationCollectorDeps {
-  documents: Pick<DocumentAuthority, "read" | "readSnapshot" | "readAgentInputSnapshot">;
+  documents: Pick<DocumentAuthority, "read" | "readSnapshot">;
   supervisor: LanguageSupervisor;
   /**
    * Already-open store for the workspace, or null — same already-open rule as

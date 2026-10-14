@@ -19,7 +19,7 @@ pub struct PersonalizationBasis {
     pub memory_snapshot: super::memory::MemorySnapshot,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub context_composition: Option<crate::composition::context::ContextComposition>,
-    pub session_id: String,
+    pub thread_id: String,
     pub project_id: Option<String>,
     pub original_sections: Vec<SystemSection>,
     pub instruction_sources: Vec<String>,
@@ -27,7 +27,7 @@ pub struct PersonalizationBasis {
 impl PersonalizationBasis {
     pub(super) fn same_scope_and_source(&self, other: &Self) -> bool {
         self.mode == other.mode && self.thread_role == other.thread_role
-            && self.session_id == other.session_id && self.project_id == other.project_id
+            && self.thread_id == other.thread_id && self.project_id == other.project_id
             && self.original_sections == other.original_sections
             && self.instruction_sources == other.instruction_sources
     }
@@ -43,11 +43,11 @@ impl PersonalizationBasis {
         }
         if let Some(composition) = &self.context_composition {
             composition.validate().map_err(RuntimeError::Invalid)?;
-            if composition.scope_id != self.session_id {
-                return Err(RuntimeError::Invalid("context composition belongs to another session scope".into()));
+            if composition.scope_id != self.thread_id {
+                return Err(RuntimeError::Invalid("context composition belongs to another Thread scope".into()));
             }
         }
-        if self.session_id.is_empty() || self.original_sections.iter().any(|section| section.name.is_empty()) {
+        if self.thread_id.is_empty() || self.original_sections.iter().any(|section| section.name.is_empty()) {
             return Err(RuntimeError::Invalid("personalization basis needs explicit scope and section identities".into()));
         }
         // Project IDs participate in the existing service-routing identity contract. An absent

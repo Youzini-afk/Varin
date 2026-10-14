@@ -13,15 +13,19 @@ const fixture = vi.hoisted(() => ({ catalog: {} as AgentPersonalizationCatalog, 
 vi.mock('./agentSettings', () => ({ useAgentSettings: () => ({ catalog: fixture.catalog, error: null, busy: false,
   runtime: 'local', load: fixture.load, update: fixture.update }) }));
 vi.mock('@/lib/i18n', () => ({ useI18n: () => ({ t: (key: string) => key }) }));
-vi.mock('@/lib/pi-runtime/client', () => ({ getPiRuntimeConnection: async () => ({ client: {
-  request: async () => fixture.snapshot, subscribe: () => () => {},
-} }) }));
-vi.mock('@/stores/usePiSessionStore', () => ({ usePiSessionStore: (select: (value: unknown) => unknown) => select({
-  currentSessionId: 'chat', summaries: [{ id: 'chat', cwd: '/repo', name: 'Current task' }], records: { chat: { open: true } },
+vi.mock('@/hooks/useRuntimeAPIs', () => { const apis = { threads: { snapshot: async () => ({ context: { checkpoint: {
+  proposal: { effective_system_prompt: fixture.snapshot.content }, personalization: {
+    mode: fixture.snapshot.mode, threadId: fixture.snapshot.threadId, threadRole: 'main', projectId: 'project-a', revision: fixture.snapshot.personalization.revision,
+    originalSections: Object.entries(fixture.snapshot.original).map(([name, content]) => ({ name, content })),
+    memorySnapshot: fixture.snapshot.memorySnapshot ?? { revision: fixture.catalog.revision, memories: fixture.catalog.memories },
+  },
+} } }) } }; return { useRuntimeAPIs: () => apis }; });
+vi.mock('@/stores/useThreadStore', () => ({ useThreadStore: (select: (value: unknown) => unknown) => select({
+  selectedIdentity: { runtime: 'agent', threadId: 'thread:chat', branchId: 'branch:chat' },
+  threads: [{ thread_id: 'thread:chat', title: 'Current task', bot_id: null, observer_project_ids: ['project-a'], branches: [{ branch_id: 'branch:chat' }] }],
 }) }));
 vi.mock('@/stores/useProjectsStore', () => ({ useProjectsStore: (select: (value: unknown) => unknown) => select({ projects: [fixture.project], activeProjectId: 'project-a' }) }));
 vi.mock('@/stores/useDirectoryStore', () => ({ useDirectoryStore: (select: (value: unknown) => unknown) => select({ currentDirectory: '/repo' }) }));
-vi.mock('@/stores/useBotSessionIndex', () => ({ useBotSessionIndex: () => ({}), refreshBotSessionIndex: async () => {}, regularPiSessions: (sessions: unknown) => sessions }));
 vi.mock('@/components/sections/shared/SettingsPageLayout', () => ({ SettingsPageLayout: ({ children }: React.PropsWithChildren) => <main>{children}</main> }));
 // Linkedom supplies input events; the shared textarea's browser change mapping is outside these behavior checks.
 vi.mock('@/components/ui/textarea', () => ({ Textarea: ({ onChange, ...props }: React.TextareaHTMLAttributes<HTMLTextAreaElement>) =>
@@ -36,8 +40,8 @@ beforeEach(() => {
     { id: 1, scope: { kind: 'global' }, content: 'Global note', updatedAt: '' },
     { id: 2, scope: { kind: 'project', id: 'project-a' }, content: 'Project note', updatedAt: '' },
   ] };
-  fixture.snapshot = { mode: 'agent', sessionId: 'chat', original: { preamble: 'Official identity', rules: 'Official rules', project_context: 'Project instructions', cwd: '/repo' },
-    sections: {}, content: '', personalization: { mode: 'agent', revision: 0, threadRole: 'main', sessionId: 'chat', profiles: [], memories: [] } };
+  fixture.snapshot = { mode: 'agent', threadId: 'thread:chat', original: { preamble: 'Official identity', rules: 'Official rules', project_context: 'Project instructions', cwd: '/repo' },
+    sections: {}, content: '', personalization: { mode: 'agent', revision: 0, threadRole: 'main', threadId: 'thread:chat', profiles: [], memories: [] } };
   fixture.update.mockReset().mockResolvedValue(true);
   container = document.createElement('div'); document.body.append(container); root = createRoot(container);
 });
@@ -75,7 +79,7 @@ test('shows scope-specific notes and keeps an edit on its selected project', asy
 });
 
 test('previews the conversation memory checkpoint while newly saved notes remain in the catalog', async () => {
-  fixture.snapshot.memorySnapshot = { revision: 2, sessionId: 'chat', memories: [{ id: 1, scope: { kind: 'global' }, content: 'Checkpoint note', updatedAt: '' }] };
+  fixture.snapshot.memorySnapshot = { revision: 2, threadId: 'thread:chat', memories: [{ id: 1, scope: { kind: 'global' }, content: 'Checkpoint note', updatedAt: '' }] };
   await act(async () => root.render(<AgentPromptPage />));
   expect(container.querySelector('pre')?.textContent).toContain('Checkpoint note');
   expect(container.querySelector('pre')?.textContent).not.toContain('Global note');
@@ -87,7 +91,7 @@ test('previews the conversation memory checkpoint while newly saved notes remain
 
 const threadIdentity = { runtime: 'agent' as const, threadId: 'thread:child', branchId: 'branch:child' };
 const contextBasis: ContextPersonalization = {
-  mode: 'agent', threadRole: 'worker', sessionId: threadIdentity.threadId, projectId: 'admitted-project', revision: 0,
+  mode: 'agent', threadRole: 'worker', threadId: threadIdentity.threadId, projectId: 'admitted-project', revision: 0,
   configurationDigest: 'review-profile', memorySnapshot: { revision: 0, memories: [] }, originalSections: [], instructionSources: [],
 };
 const chooseNativeScope = (value: string) => act(async () => {
@@ -98,18 +102,18 @@ const chooseNativeScope = (value: string) => act(async () => {
 
 test('native notes reuse the editor with admitted scopes and preserve the opened CAS revision', async () => {
   fixture.catalog.memories.push(
-    { id: 3, scope: { kind: 'session', id: threadIdentity.threadId }, content: 'Child private note', updatedAt: '' },
+    { id: 3, scope: { kind: 'thread', id: threadIdentity.threadId }, content: 'Child private note', updatedAt: '' },
     { id: 4, scope: { kind: 'project', id: 'admitted-project' }, content: 'Admitted project note', updatedAt: '' },
   );
   const render = () => act(async () => root.render(<ThreadMemory botId={null} identity={threadIdentity} basis={contextBasis} />));
   await render();
-  expect([...container.querySelectorAll('option')].map(option => option.value)).toEqual(['global', 'project:admitted-project', 'session:thread:child']);
+  expect([...container.querySelectorAll('option')].map(option => option.value)).toEqual(['global', 'project:admitted-project', 'thread:thread:child']);
   expect(container.textContent).toContain('Child private note');
   expect(container.textContent).not.toContain('Project note');
   await click('assistant.edit'); await type('Native draft');
   fixture.catalog = { ...fixture.catalog, revision: 9 };
   await render(); await click('assistant.save');
-  expect(fixture.update).toHaveBeenLastCalledWith('memory', { id: 3, scope: { kind: 'session', id: threadIdentity.threadId }, content: 'Native draft', revision: 4 });
+  expect(fixture.update).toHaveBeenLastCalledWith('memory', { id: 3, scope: { kind: 'thread', id: threadIdentity.threadId }, content: 'Native draft', revision: 4 });
   await chooseNativeScope('project:admitted-project');
   expect(container.textContent).toContain('Admitted project note');
   await click('assistant.delete');
@@ -120,12 +124,12 @@ test('native identity changes discard drafts and Bot or mismatched bases expose 
   await act(async () => root.render(<ThreadMemory botId={null} identity={threadIdentity} basis={contextBasis} />));
   await click('assistant.add'); await type('Old child private draft');
   const next = { ...threadIdentity, threadId: 'thread:next', branchId: 'branch:next' };
-  await act(async () => root.render(<ThreadMemory botId={null} identity={next} basis={{ ...contextBasis, sessionId: next.threadId, projectId: null }} />));
+  await act(async () => root.render(<ThreadMemory botId={null} identity={next} basis={{ ...contextBasis, threadId: next.threadId, projectId: null }} />));
   expect(container.querySelector('textarea')).toBeNull();
-  expect([...container.querySelectorAll('option')].map(option => option.value)).toEqual(['global', 'session:thread:next']);
+  expect([...container.querySelectorAll('option')].map(option => option.value)).toEqual(['global', 'thread:thread:next']);
   await click('assistant.add'); await type('Next private note'); await click('assistant.save');
-  expect(fixture.update).toHaveBeenLastCalledWith('memory', { scope: { kind: 'session', id: next.threadId }, content: 'Next private note', revision: 4 });
-  await act(async () => root.render(<ThreadMemory botId={null} identity={next} basis={{ ...contextBasis, mode: 'bot', sessionId: next.threadId }} />));
+  expect(fixture.update).toHaveBeenLastCalledWith('memory', { scope: { kind: 'thread', id: next.threadId }, content: 'Next private note', revision: 4 });
+  await act(async () => root.render(<ThreadMemory botId={null} identity={next} basis={{ ...contextBasis, mode: 'bot', threadId: next.threadId }} />));
   expect(container.textContent).toBe('');
   await act(async () => root.render(<ThreadMemory botId={null} identity={next} basis={contextBasis} />));
   expect(container.textContent).toBe('');

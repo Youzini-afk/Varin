@@ -40,7 +40,10 @@ import { dropdownTriggerVariants } from '@/components/ui/dropdown-trigger';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useGitHubAuthStore } from '@/stores/useGitHubAuthStore';
 import { useUIStore } from '@/stores/useUIStore';
-import { usePiSessionStore } from '@/stores/usePiSessionStore';
+import { useThreadStore } from '@/stores/useThreadStore';
+import type { ThreadIdentity } from '@varin/application-client';
+import { startThreadFromNavigation } from '@/lib/agent-runtime/threadNavigation';
+import { submitThreadPrompt } from '@/lib/agent-runtime/submitThreadPrompt';
 import { validateWorktreeCreate, createWorktree, listProjectWorktrees } from '@/lib/worktrees/worktreeManager';
 import { withWorktreeUpstreamDefaults } from '@/lib/worktrees/worktreeCreate';
 import { waitForWorktreeBootstrap } from '@/lib/worktrees/worktreeBootstrap';
@@ -192,7 +195,7 @@ const resolvePrWorktreeConfig = (pr: GitHubPullRequestSummary, localBranches: st
 interface NewWorktreeDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  onWorktreeCreated?: (worktreePath: string, options?: { sessionId?: string }) => void;
+  onWorktreeCreated?: (worktreePath: string, options?: { thread?: ThreadIdentity }) => void;
 }
 
 const buildIssueContextText = (args: {
@@ -449,7 +452,7 @@ export function NewWorktreeDialog({
   const [validationAbortController, setValidationAbortController] = React.useState<AbortController | null>(null);
 
   const sendLinkedContextMessage = React.useCallback(async (args: {
-    sessionId: string;
+    identity: ThreadIdentity;
     directory: string;
     issue: GitHubIssue | null;
     pr: GitHubPullRequestSummary | null;
@@ -484,13 +487,7 @@ export function NewWorktreeDialog({
         comments: commentsRes.comments ?? [],
       });
 
-      const accepted = await usePiSessionStore.getState().prompt(
-        args.sessionId,
-        visiblePromptText,
-        undefined,
-        `${instructionsText}\n\n${contextText}`,
-      );
-      if (!accepted) throw new Error('Pi rejected the linked issue prompt');
+      await submitThreadPrompt(args.identity, `${visiblePromptText}\n\n${instructionsText}\n\n${contextText}`, undefined, args.directory);
 
       toast.success(t('session.newWorktree.toast.sessionFromIssue'));
       return;
@@ -516,13 +513,7 @@ export function NewWorktreeDialog({
       const instructionsText = await actionInstruction('github.pr.review.instructions');
       const contextText = buildPullRequestContextText(prContext);
 
-      const accepted = await usePiSessionStore.getState().prompt(
-        args.sessionId,
-        visiblePromptText,
-        undefined,
-        `${instructionsText}\n\n${contextText}`,
-      );
-      if (!accepted) throw new Error('Pi rejected the linked pull request prompt');
+      await submitThreadPrompt(args.identity, `${visiblePromptText}\n\n${instructionsText}\n\n${contextText}`, undefined, args.directory);
 
       toast.success(t('session.newWorktree.toast.sessionFromPr'));
     }
@@ -813,7 +804,7 @@ export function NewWorktreeDialog({
 
       const metadata = await createWorktree(projectRef, resolvedArgs);
 
-      let createdSessionId: string | null = null;
+      let createdThread: ThreadIdentity | null = null;
 
       if (shouldCreateSession) {
         if (await getWorktreeSetupWaitEnabled(projectRef)) {
@@ -826,14 +817,9 @@ export function NewWorktreeDialog({
             ? `#${linkedPrState.number} ${linkedPrState.title}`.trim()
             : t('session.newWorktree.newSessionTitle');
 
-        const session = await usePiSessionStore.getState().createSession(
-          metadata.path,
-          sessionTitle,
-          undefined,
-          { id: projectRef.id, kind: 'workspace' },
-        );
-        createdSessionId = session.sessionId;
-        onWorktreeCreated?.(metadata.path, { sessionId: createdSessionId });
+        createdThread = await startThreadFromNavigation({ directory: metadata.path });
+        await useThreadStore.getState().updateThread(createdThread.threadId, { title: sessionTitle });
+        onWorktreeCreated?.(metadata.path, { thread: createdThread });
         onOpenChange(false);
         setIsCreating(false);
       } else {
@@ -859,9 +845,9 @@ export function NewWorktreeDialog({
         }),
       });
 
-      if (createdSessionId) {
+      if (createdThread) {
         void sendLinkedContextMessage({
-          sessionId: createdSessionId,
+          identity: createdThread,
           directory: metadata.path,
           issue: linkedIssue,
           pr: linkedPrState,

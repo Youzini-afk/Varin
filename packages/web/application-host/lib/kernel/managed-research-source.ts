@@ -40,8 +40,8 @@ const owner = (scope: ManagedSourceCleanupScope) => {
   const id = createHash('sha256').update(JSON.stringify(identity)).digest('hex');
   return { identity, recordId: `experiment.input-capture:${id}`, branchId: `experiment-source-${id}`,
     pinId: `experiment-source-pin:${id}`, caller: { workspaceId: scope.source.workspace_id,
-      executionWorkspaceId: scope.source.execution_workspace_id, threadId: scope.scope.threadId, runId: scope.scope.runId,
-      owner: { runtime: 'agent' as const, operationId: scope.operationId } } };
+      executionWorkspaceId: scope.source.execution_workspace_id,
+      owner: { threadId: scope.scope.threadId, runId: scope.scope.runId, runtime: 'agent' as const, operationId: scope.operationId } } };
 };
 const intentOf = (record: KernelRecordResult, identity: unknown): CaptureIntent => {
   const intent = JSON.parse(record.payloadJson) as CaptureIntent;
@@ -53,7 +53,7 @@ const intentOf = (record: KernelRecordResult, identity: unknown): CaptureIntent 
 const saveIntent = (scoped: KernelScopedClient, original: ReturnType<typeof owner>, value: CaptureIntent, record?: KernelRecordResult | null) =>
   scoped.putRecord({ operationId: `experiment-source-intent:${randomUUID()}`, recordId: original.recordId,
     workspaceId: original.caller.workspaceId, recordType: 'experiment.input-capture', state: 'capturing',
-    threadId: original.caller.threadId, runId: original.caller.runId,
+    threadId: original.caller.owner.threadId, runId: original.caller.owner.runId,
     payloadJson: JSON.stringify({ ...value, id: original.recordId.slice('experiment.input-capture:'.length), workspaceId: original.caller.workspaceId }),
     ownerIds: [], references: [], ...(record ? { expectedRecordRevision: record.recordRevision } : {}) });
 export function createManagedResearchSource(kernel: KernelClient) {
@@ -118,7 +118,7 @@ export function createManagedResearchSource(kernel: KernelClient) {
     // owns its temporary Storage records and input branch under the same Operation.
     const grant = await kernel.issueGrant({ grantId: `experiment-source-capture:${randomUUID()}`,
       owningWorkspace: original.caller.workspaceId, executionWorkspace: original.caller.executionWorkspaceId,
-      threadId: original.caller.threadId, runId: original.caller.runId, operationId: scope.grant.operationId,
+      threadId: original.caller.owner.threadId, runId: original.caller.owner.runId, operationId: scope.grant.operationId,
       capabilities: ['storage.read', 'storage.write'], pathScopes: [''] });
     const scoped = kernel.scoped(grant);
     try {
@@ -258,7 +258,7 @@ export function createManagedResearchSource(kernel: KernelClient) {
       // This is maintenance of the recorded input, not renewed permission to read the project.
       const grant = await kernel.issueGrant({ grantId: `experiment-source-cleanup:${randomUUID()}`,
         owningWorkspace: original.caller.workspaceId, executionWorkspace: original.caller.executionWorkspaceId,
-        threadId: original.caller.threadId, runId: original.caller.runId, operationId: scope.operationId,
+        threadId: original.caller.owner.threadId, runId: original.caller.owner.runId, operationId: scope.operationId,
         capabilities: ['storage.read', 'storage.write', 'storage.maintenance'], pathScopes: [''] });
       const scoped = kernel.scoped(grant);
       try {

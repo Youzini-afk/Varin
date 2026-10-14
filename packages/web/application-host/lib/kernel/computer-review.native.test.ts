@@ -133,7 +133,7 @@ it('source-less public Native work executes the shipped Computer tool, drains ex
   const api = createThreadsHttpAPI();
   const identity = await api.create('source-less-computer');
   const prepared = await extensions.prepareService({ serviceId: 'varin.computer.observe', version: 1,
-    method: 'execute', args: [], routing: { sessionId: identity.threadId } });
+    method: 'execute', args: [], routing: { threadId: identity.threadId, branchId: identity.branchId } });
   cleanups.push(async () => { prepared.release(); });
   expect((await api.computer.state(identity)).state).toMatchObject({ work: identity, currentExecution: null, currentRootExecution: null, active: false });
   expect(driverCalls.filter(call => !['release_input', 'ping', 'capabilities'].includes(call))).toEqual([]);
@@ -144,7 +144,8 @@ it('source-less public Native work executes the shipped Computer tool, drains ex
   expect((await runtime.launch(accepted.run_id))?.selection.source).toBeNull();
   const active = await api.computer.state(identity);
   expect(active.state.currentExecution).toEqual({ work: identity, runId: accepted.run_id });
-  expect(active.state.leases.some(lease => lease.access === 'control' && lease.actor.registry === null)).toBe(true);
+  expect(active.state.leases.some(lease => lease.access === 'control' && lease.actor.execution.work.threadId === identity.threadId
+    && lease.actor.execution.work.branchId === identity.branchId && lease.actor.execution.runId === accepted.run_id)).toBe(true);
   const stopped = await api.computer.stop(identity, { runId: accepted.run_id, desktopId: 'local-console' });
   expect(stopped.state.status).toBe('enabled');
   expect(stopped.state.leases).toEqual([]);

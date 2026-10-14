@@ -13,19 +13,18 @@ vi.mock('../git/service.js', () => ({
   getUntrackedDiffs: vi.fn(async () => []),
   listUntrackedPaths: vi.fn(async () => []),
 }));
-vi.mock('../small-model/index.js', () => ({
-  describeSmallModel: vi.fn(),
-  generateSmallModelText: vi.fn(),
-}));
+
 
 const { normalizeLanguage, languageName } = await import('./languages.js');
 const { buildPrompt } = await import('./prompt.js');
 const { buildCacheKey } = await import('./store.js');
-const { generateWalkthrough, getWalkthrough } = await import('./index.js');
-const smallModelModule = await import('../small-model/index.js');
+const { generateWalkthrough: nativeGenerateWalkthrough, getWalkthrough: nativeGetWalkthrough } = await import('./index.js');
+const describeModel = vi.fn<import('../model-text/service.js').ModelTextService['describe']>();
+const generateText = vi.fn<import('../model-text/service.js').ModelTextService['generate']>();
+const modelText = {describe:describeModel,generate:generateText};
+const generateWalkthrough = (input: Parameters<typeof nativeGenerateWalkthrough>[0]) => nativeGenerateWalkthrough(input, {modelText});
+const getWalkthrough = (input: Parameters<typeof nativeGetWalkthrough>[0]) => nativeGetWalkthrough(input, {modelText});
 const gitService = await import('../git/service.js');
-const describeSmallModel = vi.mocked(smallModelModule.describeSmallModel);
-const generateSmallModelText = vi.mocked(smallModelModule.generateSmallModelText);
 const getDiff = vi.mocked(gitService.getDiff);
 import type { WalkthroughLanguage, WalkthroughSource } from './types.js';
 
@@ -135,10 +134,10 @@ describe('cache key', () => {
 describe('generating in a language', () => {
   beforeEach(() => {
     fs.rmSync(path.join(TEMP_DATA_DIR, 'walkthroughs'), { recursive: true, force: true });
-    describeSmallModel.mockResolvedValue({
+    describeModel.mockResolvedValue({
       providerID: 'anthropic',
       modelID: 'claude-haiku-4-5',
-      source: 'config',
+      source: 'default' as const,
       hasLogin: true,
       inputCharBudget: 1_000_000,
       contextTokens: 250_000,
@@ -151,12 +150,12 @@ describe('generating in a language', () => {
       void directory;
       return options.staged ? '' : PATCH;
     });
-    generateSmallModelText.mockReset();
-    generateSmallModelText.mockResolvedValue({
+    generateText.mockReset();
+    generateText.mockResolvedValue({
+      requestId: 'model-text:test',
       text: RESPONSE,
-      providerID: 'anthropic',
-      modelID: 'claude-haiku-4-5',
-      source: 'config',
+      providerId: 'anthropic',
+      modelId: 'claude-haiku-4-5',
     });
   });
 
@@ -167,18 +166,18 @@ describe('generating in a language', () => {
   it('sends the instruction and records the language with the result', async () => {
     const result = await generateWalkthrough({ directory: '/repo', source: SOURCE, language: 'uk' });
 
-    expect(generateSmallModelText.mock.calls[0]?.[0].system).toMatch(/Write all prose in Ukrainian/);
+    expect(generateText.mock.calls[0]?.[0].system).toMatch(/Write all prose in Ukrainian/);
     expect(result.language).toBe('uk');
   });
 
   it('does not serve one language from the other language cache entry', async () => {
     await generateWalkthrough({ directory: '/repo', source: SOURCE, language: 'uk' });
-    generateSmallModelText.mockClear();
+    generateText.mockClear();
 
     const english = await generateWalkthrough({ directory: '/repo', source: SOURCE, language: 'en' });
 
     expect(english.fromCache).toBeFalsy();
-    expect(generateSmallModelText).toHaveBeenCalledTimes(1);
+    expect(generateText).toHaveBeenCalledTimes(1);
     expect(english.language).toBe('en');
   });
 
@@ -187,13 +186,13 @@ describe('generating in a language', () => {
   it('returns the earlier language from cache when it is asked for again', async () => {
     await generateWalkthrough({ directory: '/repo', source: SOURCE, language: 'uk' });
     await generateWalkthrough({ directory: '/repo', source: SOURCE, language: 'en' });
-    generateSmallModelText.mockClear();
+    generateText.mockClear();
 
     const back = await generateWalkthrough({ directory: '/repo', source: SOURCE, language: 'uk' });
 
     expect(back.fromCache).toBe(true);
     expect(back.language).toBe('uk');
-    expect(generateSmallModelText).not.toHaveBeenCalled();
+    expect(generateText).not.toHaveBeenCalled();
   });
 
   // The pointer only knows what was generated here last. After a language
@@ -203,24 +202,24 @@ describe('generating in a language', () => {
   it('reads back the walkthrough written in the language being asked for', async () => {
     await generateWalkthrough({ directory: '/repo', source: SOURCE, language: 'uk' });
     await generateWalkthrough({ directory: '/repo', source: SOURCE, language: 'en' });
-    generateSmallModelText.mockClear();
+    generateText.mockClear();
 
     const ukrainian = await getWalkthrough({ directory: '/repo', source: SOURCE, language: 'uk' });
 
     expect(ukrainian.language).toBe('uk');
     expect(ukrainian.walkthrough).toBeTruthy();
-    expect(generateSmallModelText).not.toHaveBeenCalled();
+    expect(generateText).not.toHaveBeenCalled();
   });
 
   it('switches back and forth without generating anything', async () => {
     await generateWalkthrough({ directory: '/repo', source: SOURCE, language: 'uk' });
     await generateWalkthrough({ directory: '/repo', source: SOURCE, language: 'ja' });
-    generateSmallModelText.mockClear();
+    generateText.mockClear();
 
     expect((await getWalkthrough({ directory: '/repo', source: SOURCE, language: 'uk' })).language).toBe('uk');
     expect((await getWalkthrough({ directory: '/repo', source: SOURCE, language: 'ja' })).language).toBe('ja');
     expect((await getWalkthrough({ directory: '/repo', source: SOURCE, language: 'uk' })).language).toBe('uk');
-    expect(generateSmallModelText).not.toHaveBeenCalled();
+    expect(generateText).not.toHaveBeenCalled();
   });
 
   // Falling back is still right: an English review beats an empty panel, and
@@ -238,6 +237,6 @@ describe('generating in a language', () => {
     const result = await generateWalkthrough({ directory: '/repo', source: SOURCE, language: 'kl' });
 
     expect(result.language).toBe('en');
-    expect(generateSmallModelText.mock.calls[0]?.[0].system).not.toMatch(/Write all prose/);
+    expect(generateText.mock.calls[0]?.[0].system).not.toMatch(/Write all prose/);
   });
 });

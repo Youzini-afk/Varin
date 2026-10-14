@@ -3,8 +3,8 @@ import React from 'react';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useI18n } from '@/lib/i18n';
 import { useUIStore } from '@/stores/useUIStore';
-import { usePiSessionStore } from '@/stores/usePiSessionStore';
-import { openPiSessionFromNavigation } from '@/lib/pi-runtime/sessionNavigation';
+import { useThreadStore } from '@/stores/useThreadStore';
+import { openThreadFromNavigation } from '@/lib/agent-runtime/threadNavigation';
 import { listComputers, type ComputerCatalog } from '@/lib/computers';
 import { ComputerDesktopPane } from '@/components/sections/computers/ComputerDesktopView';
 import type { ComputerDesktop } from '@varin/protocol';
@@ -44,12 +44,7 @@ export function ComputerWorkSurface({ directory, tabID }: { directory: string; t
     ? desktops.find((desktop) => desktop.id === selectedId) ?? null
     : null;
 
-  // The Host's last actual execution. Native work never opens a Pi session.
-  const usageSession = usePiSessionStore((state) => {
-    const work = selected?.usage?.execution.work;
-    const sessionId = work?.runtime === 'pi' ? work.sessionId : undefined;
-    return sessionId ? state.summaries.find((summary) => summary.id === sessionId) ?? null : null;
-  });
+  const usageThread = useThreadStore(state => { const work = selected?.usage?.execution.work; return work?.runtime === 'agent' ? state.threads.find(thread => thread.thread_id === work.threadId) : undefined; });
 
   // Default to the catalog default / sole desktop on first open.
   React.useEffect(() => {
@@ -88,18 +83,10 @@ export function ComputerWorkSurface({ directory, tabID }: { directory: string; t
         </button>
       </div>
       {error ? <p role="alert" className="typography-meta text-destructive">{error}</p> : null}
-      {selected?.usage && (selected.usage.execution.work.runtime === 'pi' ? (
-        <button
-          type="button"
-          className="typography-meta text-muted-foreground hover:text-foreground text-left"
-          onClick={() => { const work = selected.usage?.execution.work; if (work?.runtime === 'pi') void openPiSessionFromNavigation({ sessionId: work.sessionId }); }}
-        >
-          {t('contextPanel.computer.lastSession')}: {usageSession?.name || usageSession?.firstMessage?.slice(0, 60) || selected.usage.execution.work.sessionId}
-        </button>
-      ) : <p className="typography-meta break-all text-muted-foreground">
-        {t('computer.automation.agentWork', { threadId: selected.usage.execution.work.threadId, branchId: selected.usage.execution.work.branchId })}
-        {' · '}{t('computer.automation.execution', { runId: selected.usage.execution.runId })}
-      </p>)}
+      {selected?.usage?.execution.work.runtime === 'agent' && <button type="button" className="typography-meta break-all text-left text-muted-foreground hover:text-foreground"
+        onClick={() => { const work = selected.usage?.execution.work; if (work?.runtime === 'agent') void openThreadFromNavigation(work); }}>
+        {usageThread?.title || selected.usage.execution.work.threadId} · {selected.usage.execution.runId}
+      </button>}
       {selected ? (
         <ComputerDesktopPane key={selected.id} desktop={selected} />
       ) : catalog ? (

@@ -6,9 +6,9 @@ import { tmpdir } from "node:os";
 import { openKnowledgeStoreEngine } from "../knowledge/store-engine.js";
 import type { KnowledgeScope, KnowledgeStore, OrganizerProgress } from "../knowledge/store-contract.js";
 import { createMemoryService, type MemoryOwner, type MemoryService } from "./memory-service.js";
-import { createMemoryOrganizer, type OrganizerRunSource } from "./memory-organizer.js";
+import { createMemoryOrganizer } from "./memory-organizer.js";
 import { memorySourceClaims, type MemoryInference, type MemoryInferenceBinding, type MemoryWork, type MemorySelectionRequest } from "./memory-inference.js";
-import type { PiSessionEntry } from "@varin/protocol";
+import type { HistoryMemoryMaterial } from "./bot-history.js";
 import { estimateMemoryOrganizerInputTokens } from "@varin/protocol";
 import { sourceRevision } from "./memory-sources.js";
 
@@ -22,7 +22,7 @@ const openStore = async (scope: KnowledgeScope = "bot", name = `store-${++counte
 };
 
 const scopeOfStoreId = (scopeId: string): KnowledgeScope => (
-  scopeId.startsWith("bot:") ? "bot" : scopeId.startsWith("session:") ? "session" : "bot"
+  scopeId.startsWith("bot:") ? "bot" : scopeId.startsWith("thread:") ? "session" : "bot"
 );
 
 interface StubCall { method: string; params: Record<string, unknown> }
@@ -45,9 +45,7 @@ describe("memory organizer (BC2)", () => {
   let inferenceWorks: Map<string, MemoryWork>;
   let generations: Map<string, Promise<string>>;
   let nowMs: number;
-  let runSources: OrganizerRunSource[];
-  let scopeSessions: Map<string, string[]>;
-  let scopeForSession: (sessionId: string) => string | null;
+  let materials: HistoryMemoryMaterial[];
   let autoOrganize: { user: boolean; bot: boolean };
   let contextWindow: number | null;
   let organizerConfigured: boolean;
@@ -63,7 +61,7 @@ describe("memory organizer (BC2)", () => {
       return opened;
     },
     userStore: async () => userStore,
-    ownerForSession: async (sessionId) => ({ scope: "bot", ownerId: sessionId }),
+    ownerForThread: async (sessionId) => ({ scope: "bot", ownerId: sessionId }),
     ...overrides,
   });
 
@@ -173,10 +171,13 @@ describe("memory organizer (BC2)", () => {
     },
     hasStoreForScope: (scopeId) => stores.has(scopeId),
     listScopeIds: async () => [...stores.keys()],
-    listScopeSessions: async (scopeId) => scopeSessions.get(scopeId) ?? [],
-    listRunSources: async () => runSources,
-    scopeForSession: async (sessionId) => scopeForSession(sessionId),
-    readEntries: async () => [],
+    nativeMaterials: async () => materials,
+    readNativeSource: async (_scope, span) => {
+      const material = materials.find(item => item.span.id === span.id && item.span.threadId === span.threadId);
+      if (!material) throw new Error('Original source is unavailable');
+      return material.text;
+    },
+    scopeForThread: async () => 'bot:ws-1',
     memory: service,
     now: () => nowMs,
     onError: (error) => { console.error("[organizer]", error); },
@@ -203,9 +204,7 @@ describe("memory organizer (BC2)", () => {
     inferenceWorks = new Map();
     generations = new Map();
     nowMs = 1_000_000;
-    runSources = [];
-    scopeSessions = new Map();
-    scopeForSession = () => null;
+    materials = [];
     autoOrganize = { user: true, bot: true };
     contextWindow = 200_000;
     organizerConfigured = true;
@@ -225,822 +224,70 @@ describe("memory organizer (BC2)", () => {
     }
   });
 
-  it("keeps user memory out of startup source discovery and scheduled source reads", async () => {
-    const opened: string[] = [];
-    const workspaceStore = await openStore("bot", "bot:ws-1");
-    stores.set("bot:ws-1", workspaceStore);
-    const org = organizer(memory(), {
-      listScopeIds: async () => ["user", "session:s1", "ordinary-project", "bot:ws-1"],
-      hasStoreForScope: async () => true,
-      storeForScopeId: async (scopeId) => {
-        opened.push(scopeId);
-        if (scopeId !== "bot:ws-1") throw new Error("user memory already has its own writer");
-        return workspaceStore;
-      },
-    });
-    org.start();
-    org.noteScope("user");
-    await vi.advanceTimersByTimeAsync(5_000);
-    await org.dispose();
-    expect(opened).toEqual(["bot:ws-1"]);
-    await expect(userStore.listKnowledge({ scope: "user" })).resolves.toEqual([]);
+  const material = (id: string, text: string, witness = 'head'): HistoryMemoryMaterial => ({ role: 'user', text,
+    span: { kind: 'history-item', id, threadId: 'thread:bot', branchId: 'branch:bot', headId: witness,
+      revision: sourceRevision(text), start: 0, end: text.length } });
+  const setup = async (text = 'Use PostgreSQL for the catalog.') => {
+    const store = await openStore('bot', 'bot:ws-1'); stores.set('bot:ws-1', store);
+    materials = [material('h1', text)];
+    return store;
+  };
+  const proposal = (quote: string, content = quote) => JSON.stringify({ memories: [{ action: 'new', scope: 'bot', nature: 'decision', content, trigger: 'catalog', source: 'u0', quote }] });
+  const owner: MemoryOwner = { scope: 'bot', ownerId: 'ws-1' };
+  const settled = (store: KnowledgeStore) => wait(async () => (await store.listOrganizerProgress()).some(row => ['formed', 'reviewed-empty', 'failed'].includes(row.status)));
+
+  it('discovers only Bot sources, without opening ordinary or user stores', async () => {
+    const store = await setup(); const opened: string[] = [];
+    const org = organizer(memory(), { listScopeIds: async () => ['user', 'thread:ordinary', 'project', 'bot:ws-1'],
+      storeForScopeId: async scope => { opened.push(scope); return store; } });
+    org.start(); await wait(() => calls.some(call => call.method === 'generate')); await settled(store);
+    expect(new Set(opened)).toEqual(new Set(['bot:ws-1']));
   });
-
-  it("organizes durable session events into effective memory with inference provenance", async () => {
-    const ws = await stores.get("bot:ws-1") ?? await openStore("bot", "bot:ws-1");
-    stores.set("bot:ws-1", ws);
-    await ws.putEvent({ kind: "turn", at: 1, sessionId: "s1", text: "We decided to use Postgres for the catalog store.", source: "agent" });
-    scopeSessions.set("bot:ws-1", ["s1"]);
-    organizeText = JSON.stringify({
-      memories: [{
-        action: "new", scope: "bot", nature: "decision",
-        content: "Catalog store uses Postgres.", trigger: "database schema questions", source: "u0", quote: "We decided to use Postgres for the catalog store.",
-      }],
-    });
-    const org = organizer(memory());
-    org.noteScope("bot:ws-1");
-    await wait(async () => (await ws.listKnowledge({ scope: "bot" })).length === 1);
-    const [item] = await ws.listKnowledge({ scope: "bot" });
-    expect(item?.status).toBe("accepted");
-    expect(item?.nature).toBe("decision");
-    expect(item?.source?.kind).toBe("memory-organizer");
-    const progress = await progressFor("bot:ws-1", "session:s1");
-    expect(progress?.status).toBe("formed");
-    expect(progress?.produced).toEqual([item?.id]);
-    await org.dispose();
+  it('commits source-bound proposals and does not reprocess coverage after reopening', async () => {
+    const store = await setup(); organizeText = proposal(materials[0]!.text);
+    let org = organizer(memory()); org.noteScope('bot:ws-1'); await settled(store); await org.dispose();
+    const [item] = await store.listKnowledge({ scope: 'bot' });
+    expect(item).toMatchObject({ status: 'accepted', nature: 'decision', source: { kind: 'memory-organizer', threadId: 'thread:bot', spans: [{ kind: 'history-item', id: 'h1' }] } });
+    // Read witnesses may change, but original immutable item coverage does not.
+    materials = [material('h1', materials[0]!.text, 'later-head')];
+    org = organizer(memory()); org.noteScope('bot:ws-1'); await wait(() => org.pending === 0);
+    expect(calls.filter(call => call.method === 'generate')).toHaveLength(1);
   });
-
-  it('previews an explicit selection while automatic memory is disabled and cancels its inference', async () => {
-    autoOrganize = { user: false, bot: false };
-    const source = "Only this passage.";
-    const entry: PiSessionEntry = { type: "message", id: "entry-1", parentId: null,
-      timestamp: new Date(0).toISOString(), message: { role: "user", content: source, timestamp: 0 } };
-    scopeForSession = sessionId => sessionId === "s1" ? "bot:ws-1" : null;
-    const selection: MemorySelectionRequest = { requestKey: "selection-1", conversation: { runtime: "pi", sessionId: "s1" }, sources: [{
-      kind: "pi-entry", sessionId: "s1", id: entry.id, revision: sourceRevision(source), start: 0, end: source.length,
-    }] };
-    const prompt = JSON.stringify({ passages: [{ role: "user", text: source }] });
-    const org = organizer(memory(), { readEntries: async () => [entry] });
-    try {
-      const result = await org.extractSelection('bot:ws-1', 'Extract selected memory.', prompt, new AbortController().signal, selection);
-      expect(result).toBe(organizeText);
-      expect(stores.size).toBe(0);
-      let finish!: (value: string) => void;
-      organizeText = () => new Promise<string>((resolve) => { finish = resolve; releaseInference.push(() => resolve('{"memories":[]}')); });
-      const controller = new AbortController();
-      const pending = org.extractSelection('bot:ws-1', 'Extract.', prompt, controller.signal, { ...selection, requestKey: 'selection-2' });
-      const rejected = expect(pending).rejects.toThrow();
-      await wait(() => !!finish);
-      controller.abort();
-      finish('{"memories":[]}');
-      await rejected;
-      expect(calls.some((call) => call.method === 'generate.cancel')).toBe(true);
-    } finally { await org.dispose(); }
-  });
-
-  it("commits two distinct proposals from one source without self-conflicting", async () => {
-    const ws = await openStore("bot", "bot:ws-two-proposals");
-    stores.set("bot:ws-two-proposals", ws);
-    await ws.putEvent({ kind: "turn", at: 1, sessionId: "s1", text: "Use Postgres and release on Thursday.", source: "user" });
-    scopeSessions.set("bot:ws-two-proposals", ["s1"]);
-    organizeText = JSON.stringify({ memories: [
-      { action: "new", scope: "bot", content: "Catalog uses Postgres.", source: "u0", quote: "Use Postgres" },
-      { action: "new", scope: "bot", content: "Release day is Thursday.", source: "u0", quote: "release on Thursday." },
-    ] });
-    const org = organizer(memory());
-    org.noteScope("bot:ws-two-proposals");
-    await wait(async () => (await ws.getOrganizerProgress("session:s1"))?.status === "formed");
-    expect((await ws.listKnowledge({ scope: "bot", activeOnly: true })).map((item) => item.content).sort()).toEqual([
-      "Catalog uses Postgres.", "Release day is Thursday.",
-    ]);
-    await org.dispose();
-  });
-
-  it("drains an admitted memory write on sleep without starting the next prepared proposal", async () => {
-    const scopeId = "bot:ws-sleep-mid-commit";
-    const ws = await openStore("bot", scopeId);
-    stores.set(scopeId, ws);
-    const service = memory();
-    const owner: MemoryOwner = { scope: "bot", ownerId: "ws-sleep-mid-commit" };
-    const source = "Use Postgres and release on Thursday.";
-    await ws.putEvent({ kind: "turn", at: 1, sessionId: "s1", text: source, source: "user" });
-    scopeSessions.set(scopeId, ["s1"]);
-    organizeText = JSON.stringify({ memories: [
-      { action: "new", scope: "bot", content: "Catalog uses Postgres.", source: "u0", quote: "Use Postgres" },
-      { action: "new", scope: "bot", content: "Release day is Thursday.", source: "u0", quote: "release on Thursday." },
-    ] });
-    const remember = service.remember.bind(service);
-    let rememberCalls = 0;
-    service.remember = async (...args) => { rememberCalls++; return remember(...args); };
-    const create = ws.createKnowledgeIfAbsent.bind(ws);
-    let finish!: () => void;
-    let admitted = false;
-    // Pause inside the real MemoryService call, before its original store
-    // mutation completes. Sleep must drain this write, not discard its result.
-    ws.createKnowledgeIfAbsent = async (...args) => {
-      if (!admitted) {
-        admitted = true;
-        await new Promise<void>(resolve => { finish = resolve; releaseInference.push(resolve); });
-      }
-      return create(...args);
-    };
-    const org = organizer(service);
-    org.noteScope(scopeId);
-    await wait(() => Boolean(finish));
-    let drained = false;
-    const sleeping = org.suspendScope(scopeId).then(() => { drained = true; });
-    await setImmediate();
-    expect(drained).toBe(false);
-    finish();
-    await sleeping;
-
-    expect(rememberCalls).toBe(1);
-    const rows = await service.list(owner, { activeOnly: true });
-    expect(rows.map(row => row.content)).toEqual(["Catalog uses Postgres."]);
-    expect(rows[0]?.source?.kind).toBe("memory-organizer");
-    expect(rows[0]?.source?.proposalKey).toBeTruthy();
-    await expect(service.readSource(owner, rows[0]!.id)).resolves.toMatchObject([
-      { status: "available", text: "Use Postgres" },
-    ]);
-    const prepared = await ws.getOrganizerProgress("session:s1");
-    expect(prepared?.status).toBe("prepared");
-    expect(prepared?.lastError).toContain("suspended");
-    expect(prepared?.eventCursor).toBeUndefined();
-    expect(prepared?.proposals?.map(proposal => proposal.content)).toEqual([
-      "Catalog uses Postgres.", "Release day is Thursday.",
-    ]);
-    expect(prepared?.preparedSource?.key).toBe(rows[0]?.source?.key);
-    const remaining = prepared!.proposals![1]!.spans![0]!;
-    expect(source.slice(remaining.start, remaining.end)).toBe("release on Thursday.");
-    await org.dispose();
-  });
-
-  it("recovers all produced ids after the second proposal fails mid-commit", async () => {
-    const ws = await openStore("bot", "bot:ws-partial-commit");
-    stores.set("bot:ws-partial-commit", ws);
-    const service = memory();
-    const original = service.remember.bind(service);
-    let writes = 0;
-    (service as { remember: typeof original }).remember = async (...args) => {
-      if (++writes === 2) throw new Error("second write unavailable");
-      return original(...args);
-    };
-    await ws.putEvent({ kind: "turn", at: 1, sessionId: "s1", text: "Two decisions.", source: "user" });
-    scopeSessions.set("bot:ws-partial-commit", ["s1"]);
-    organizeText = JSON.stringify({ memories: [
-      { action: "new", scope: "bot", content: "Decision A.", source: "u0", quote: "Two decisions." },
-      { action: "new", scope: "bot", content: "Decision B.", source: "u0", quote: "Two decisions." },
-    ] });
-    const org = organizer(service);
-    org.noteScope("bot:ws-partial-commit");
-    await wait(async () => (await ws.getOrganizerProgress("session:s1"))?.lastError === "second write unavailable");
-    org.retryScope("bot:ws-partial-commit");
-    await wait(async () => (await ws.getOrganizerProgress("session:s1"))?.status === "formed");
-    const rows = await ws.listKnowledge({ scope: "bot", activeOnly: true });
-    expect(rows).toHaveLength(2);
-    expect((await ws.getOrganizerProgress("session:s1"))?.produced?.sort()).toEqual(rows.map((row) => row.id).sort());
-    await org.dispose();
-  });
-
-  it("replays a cross-store user proposal after a crash between durable memory and source progress", async () => {
-    const ws = await openStore("bot", "bot:ws-cross-store");
-    stores.set("bot:ws-cross-store", ws);
-    runSources = [{ threadId: "t1", threadTitle: "Summary task", runId: "r1", sessionId: null,
-      reportText: "The user prefers short summaries.", endedAt: null }];
-    organizeText = JSON.stringify({ memories: [{ action: "new", scope: "user",
-      content: "User prefers short summaries.", source: "u0", quote: "The user prefers short summaries." }] });
-    const putProgress = ws.putOrganizerProgress.bind(ws);
-    let interrupted = false;
-    (ws as { putOrganizerProgress: typeof putProgress }).putOrganizerProgress = async (row) => {
-      if (!interrupted && row.status === "formed") {
-        interrupted = true;
-        throw new Error("source progress unavailable");
-      }
-      return putProgress(row);
-    };
-    const first = organizer(memory());
-    first.noteScope("bot:ws-cross-store");
-    await wait(async () => (await ws.getOrganizerProgress("run:r1"))?.lastError === "source progress unavailable");
-    const [saved] = await userStore.listKnowledge({ scope: "user" });
-    expect(saved?.content).toBe("User prefers short summaries.");
-    const narrations = calls.filter((call) => call.method === "generate").length;
-    await first.dispose();
-    await ws.close();
-    await userStore.close();
-    const reopenedWs = await openStore("bot", "bot:ws-cross-store");
-    stores.set("bot:ws-cross-store", reopenedWs);
-    userStore = await openStore("user", "user-store");
-    expect((await reopenedWs.getOrganizerProgress("run:r1"))?.status).toBe("prepared");
-    expect((await userStore.listKnowledge({ scope: "user" })).map((item) => item.id)).toEqual([saved!.id]);
-    await userStore.updateAcceptedKnowledge(saved!.id, { content: "Human-edited summary preference.", trigger: "" }, "user", {
-      content: saved!.content, trigger: saved!.trigger, status: "accepted", invalidAt: null,
-    });
-    // The original Pi/Thread source is unavailable after restart. The durable
-    // proposal and memory provenance still establish that the write committed.
-    runSources = [];
-    autoOrganize.bot = false;
-    const resumed = organizer(memory());
-    resumed.noteScope("bot:ws-cross-store");
-    await wait(async () => (await reopenedWs.getOrganizerProgress("run:r1"))?.status === "formed");
-    expect(calls.filter((call) => call.method === "generate").length).toBe(narrations);
-    expect((await reopenedWs.getOrganizerProgress("run:r1"))?.produced).toEqual([saved!.id]);
-    expect((await userStore.listKnowledge({ scope: "user" })).map((item) => item.content)).toEqual(["Human-edited summary preference."]);
-    await resumed.dispose();
-  });
-
-  it("keeps an uncommitted prepared proposal pending if its source disappears", async () => {
-    const ws = await openStore("bot", "bot:ws-missing-prepared-source");
-    stores.set("bot:ws-missing-prepared-source", ws);
-    runSources = [{ threadId: "t1", threadTitle: "Task", runId: "r1", sessionId: null,
-      reportText: "A proposed decision.", endedAt: null }];
-    organizeText = JSON.stringify({ memories: [{ action: "new", scope: "bot",
-      content: "The decision is pending.", source: "u0", quote: "A proposed decision." }] });
-    const service = memory();
-    (service as { remember: MemoryService["remember"] }).remember = async () => { throw new Error("write unavailable"); };
-    const org = organizer(service);
-    org.noteScope("bot:ws-missing-prepared-source");
-    await wait(async () => (await ws.getOrganizerProgress("run:r1"))?.lastError === "write unavailable");
-    runSources = [];
-    org.retryScope("bot:ws-missing-prepared-source");
-    await wait(async () => (await ws.getOrganizerProgress("run:r1"))?.lastError?.includes("not all proposals were committed") === true);
-    expect((await ws.getOrganizerProgress("run:r1"))?.status).toBe("prepared");
-    expect(await ws.listKnowledge({ scope: "bot" })).toEqual([]);
-    await org.dispose();
-  });
-
-  it("does not reprocess covered events after progress commits", async () => {
-    const ws = await openStore("bot", "bot:ws-2");
-    stores.set("bot:ws-2", ws);
-    await ws.putEvent({ kind: "turn", at: 1, sessionId: "s1", text: "Decision recorded.", source: "agent" });
-    scopeSessions.set("bot:ws-2", ["s1"]);
-    const service = memory();
-    const org = organizer(service);
-    org.noteScope("bot:ws-2");
-    await wait(async () => (await progressFor("bot:ws-2", "session:s1"))?.status !== undefined
-      && ["formed", "reviewed-empty"].includes((await progressFor("bot:ws-2", "session:s1"))?.status ?? ""));
-    const callsAfterFirst = calls.filter((c) => c.method === "generate").length;
-    org.noteScope("bot:ws-2");
-    await vi.advanceTimersByTimeAsync(2200);
-    expect(calls.filter((c) => c.method === "generate").length).toBe(callsAfterFirst);
-    const next = await ws.putEvent({ kind: "turn", at: 2, sessionId: "s1", text: "A later decision in the same conversation.", source: "user" });
-    org.noteScope("bot:ws-2");
-    await wait(async () => (await progressFor("bot:ws-2", "session:s1"))?.eventCursor === next.id);
-    expect(calls.filter((c) => c.method === "generate").length).toBe(callsAfterFirst + 1);
-    await org.dispose();
-  });
-
-  it("forgetting one source range does not suppress a later decision in the same session", async () => {
-    const ws = await openStore("bot", "bot:ws-forgotten-range");
-    stores.set("bot:ws-forgotten-range", ws);
-    const service = memory();
-    const owner: MemoryOwner = { scope: "bot", ownerId: "ws-forgotten-range" };
-    await ws.putEvent({ kind: "turn", at: 1, sessionId: "s1", text: "Use SQLite for local state.", source: "user" });
-    scopeSessions.set("bot:ws-forgotten-range", ["s1"]);
-    let narrative = 0;
-    organizeText = () => JSON.stringify({ memories: [{
-      action: "new", scope: "bot", source: "u0",
-      content: ++narrative === 1 ? "Local state uses SQLite." : "Backups run every Thursday.",
-      quote: narrative === 1 ? "Use SQLite for local state." : "Backups are every Thursday.",
-    }] });
-    const org = organizer(service);
-    org.noteScope("bot:ws-forgotten-range");
-    await wait(async () => (await ws.getOrganizerProgress("session:s1"))?.status === "formed");
-    const [first] = await service.list(owner, { activeOnly: true });
-    expect(first?.source?.key).toBeTruthy();
-    await service.forget(owner, first!.id);
-    const later = await ws.putEvent({ kind: "turn", at: 2, sessionId: "s1", text: "Backups are every Thursday.", source: "user" });
-    org.noteScope("bot:ws-forgotten-range");
-    await wait(async () => (await ws.getOrganizerProgress("session:s1"))?.eventCursor === later.id);
-    expect((await service.list(owner, { activeOnly: true })).map((item) => item.content)).toEqual(["Backups run every Thursday."]);
-    await org.dispose();
-  });
-
-  it("retains a failed original generation without replaying it on automatic or explicit retry", async () => {
-    const ws = await openStore("bot", "bot:ws-3");
-    stores.set("bot:ws-3", ws);
-    await ws.putEvent({ kind: "turn", at: 1, sessionId: "s1", text: "Something worth keeping.", source: "agent" });
-    scopeSessions.set("bot:ws-3", ["s1"]);
-    let attempts = 0;
-    organizeText = () => { attempts += 1; throw new Error("original request failed"); };
-    const service = memory();
-    const org = organizer(service);
-    org.noteScope("bot:ws-3");
-    await wait(async () => (await progressFor("bot:ws-3", "session:s1"))?.status === "failed");
-    expect(attempts).toBe(1);
-    // Observing the failed original never starts another generation.
-    org.noteScope("bot:ws-3");
-    await vi.advanceTimersByTimeAsync(2200);
-    expect(attempts).toBe(1);
-    org.retryScope("bot:ws-3");
-    await vi.advanceTimersByTimeAsync(2200);
-    await wait(() => org.pending === 0);
-    expect(attempts).toBe(1);
-    expect(await progressFor("bot:ws-3", "session:s1")).toMatchObject({ status: "failed", lastError: "original request failed" });
-    expect((await progressFor("bot:ws-3", "session:s1"))?.eventCursor).toBeUndefined();
-    expect(await ws.listKnowledge({ scope: "bot" })).toEqual([]);
-    org.dispose();
-  });
-
-  it("retains unparseable model output as a failure without acknowledging empty coverage", async () => {
-    const ws = await openStore("bot", "bot:ws-4");
-    stores.set("bot:ws-4", ws);
-    await ws.putEvent({ kind: "turn", at: 1, sessionId: "s1", text: "Material.", source: "agent" });
-    scopeSessions.set("bot:ws-4", ["s1"]);
-    organizeText = "sorry, I cannot help with that";
-    const org = organizer(memory());
-    org.noteScope("bot:ws-4");
-    await wait(async () => (await progressFor("bot:ws-4", "session:s1"))?.status === "failed");
-    expect(await ws.listKnowledge({ scope: "bot" })).toEqual([]);
-    // A failed range must not advance coverage.
-    expect((await progressFor("bot:ws-4", "session:s1"))?.eventCursor).toBeUndefined();
-    org.dispose();
-  });
-
-  it("honours autoOrganize gates per scope", async () => {
-    autoOrganize = { user: true, bot: false };
-    const ws = await openStore("bot", "bot:ws-5");
-    stores.set("bot:ws-5", ws);
-    await ws.putEvent({ kind: "turn", at: 1, sessionId: "s1", text: "Material.", source: "agent" });
-    scopeSessions.set("bot:ws-5", ["s1"]);
-    const org = organizer(memory());
-    org.noteScope("bot:ws-5");
-    await vi.advanceTimersByTimeAsync(2200);
-    expect(calls.some(call => call.method === 'settings')).toBe(true);
-    expect(calls.filter((c) => c.method === "generate")).toEqual([]);
-    expect(await progressFor("bot:ws-5", "session:s1")).toBeNull();
-    org.dispose();
-  });
-
-  it("routes bot-scope proposals to the bot store and gates user-scope proposals", async () => {
-    const bot = await openStore("bot", "bot-scope-store");
-    stores.set("bot:b-1", bot);
-    await bot.putEvent({ kind: "turn", at: 1, sessionId: "s-bot", text: "The bot learned its owner prefers terse updates.", source: "agent" });
-    scopeSessions.set("bot:b-1", ["s-bot"]);
-    organizeText = JSON.stringify({
-      memories: [
-        { action: "new", scope: "bot", nature: "preference", content: "Owner prefers terse updates.", trigger: "status updates", source: "u0", quote: "The bot learned its owner prefers terse updates." },
-        { action: "new", scope: "user", content: "User-level fact should not land.", source: "u0", quote: "The bot learned its owner prefers terse updates." },
-      ],
-    });
-    autoOrganize = { user: false, bot: true };
-    const org = organizer(memory());
-    org.noteScope("bot:b-1");
-    await wait(async () => (await bot.listKnowledge({ scope: "bot" })).length === 1);
-    expect((await bot.listKnowledge({ scope: "bot" }))[0]?.content).toBe("Owner prefers terse updates.");
-    expect(await userStore.listKnowledge({ scope: "user" })).toEqual([]);
-    org.dispose();
-  });
-
-  it("uses the Bot profile model when the organizer slot is unset", async () => {
-    organizerConfigured = false;
-    const bot = await openStore("bot", "bot-inherited-model");
-    stores.set("bot:b-1", bot);
-    await bot.putEvent({ kind: "turn", at: 1, sessionId: "s-bot", text: "A durable Bot decision.", source: "user" });
-    scopeSessions.set("bot:b-1", ["s-bot"]);
-    const org = organizer(memory(), {
-      organizerModelForScope: async () => ({ providerId: "bot-provider", modelId: "bot-model" }),
-    });
-    org.noteScope("bot:b-1");
-    await wait(async () => (await bot.getOrganizerProgress("session:s-bot"))?.status === "reviewed-empty");
-    expect(calls.find((call) => call.method === "bind")?.params).toMatchObject({ providerId: "bot-provider", modelId: "bot-model" });
-    await org.dispose();
-  });
-
-  it("correct supersedes the existing revision instead of duplicating it", async () => {
-    const ws = await openStore("bot", "bot:ws-6");
-    stores.set("bot:ws-6", ws);
-    const service = memory();
-    const owner: MemoryOwner = { scope: "bot", ownerId: "ws-6" };
-    const existing = await service.remember(owner, {
-      content: "Catalog uses SQLite.", trigger: "db questions", nature: "decision",
-      source: { kind: "user-mark" }, commit: "accepted",
-    });
-    await ws.putEvent({ kind: "turn", at: 1, sessionId: "s1", text: "Correction: catalog moved to Postgres.", source: "agent" });
-    scopeSessions.set("bot:ws-6", ["s1"]);
-    organizeText = JSON.stringify({
-      memories: [{
-        action: "correct", scope: "bot", nature: "decision",
-        content: "Catalog uses Postgres.", trigger: "db questions",
-        target: `k:${existing.item.id}`, source: "u0",
-        quote: "Correction: catalog moved to Postgres.",
-      }],
-    });
-    const org = organizer(service);
-    org.noteScope("bot:ws-6");
-    await wait(async () => (await progressFor("bot:ws-6", "session:s1"))?.status === "formed");
-    const rows = await ws.listKnowledge({ scope: "bot" });
-    const active = rows.filter((row) => row.invalidAt === undefined);
-    expect(active.map((row) => row.content)).toEqual(["Catalog uses Postgres."]);
-    expect(active[0]?.status).toBe("accepted");
-    const previous = rows.find((row) => row.id === existing.item.id);
-    expect(previous?.invalidAt).not.toBeUndefined();
-    org.dispose();
-  });
-
-  it("replaying a prepared correction cannot overwrite a newer human edit", async () => {
-    const ws = await openStore("bot", "bot:ws-prepared-correction");
-    stores.set("bot:ws-prepared-correction", ws);
-    const service = memory();
-    const owner: MemoryOwner = { scope: "bot", ownerId: "ws-prepared-correction" };
-    const original = await service.remember(owner, { content: "Catalog uses SQLite.", trigger: "catalog" });
-    await ws.putEvent({ kind: "turn", at: 1, sessionId: "s1", text: "The catalog changed to Postgres.", source: "user" });
-    scopeSessions.set("bot:ws-prepared-correction", ["s1"]);
-    organizeText = JSON.stringify({ memories: [{ action: "correct", scope: "bot",
-      target: `k:${original.item.id}`, content: "Catalog uses Postgres.", source: "u0", quote: "The catalog changed to Postgres." }] });
-    const correct = service.correct.bind(service);
-    let failed = false;
-    (service as { correct: typeof correct }).correct = async (...args) => {
-      if (!failed) { failed = true; throw new Error("commit interrupted"); }
-      return correct(...args);
-    };
-    const org = organizer(service);
-    org.noteScope("bot:ws-prepared-correction");
-    await wait(async () => (await ws.getOrganizerProgress("session:s1"))?.lastError === "commit interrupted");
-    expect((await ws.getOrganizerProgress("session:s1"))?.proposals?.[0]?.expectedTarget?.content).toBe("Catalog uses SQLite.");
-    await correct(owner, original.item.id, { content: "User chose DuckDB.", expected: {
-      content: original.item.content, trigger: original.item.trigger, status: "accepted", invalidAt: null,
-    } });
-    org.retryScope("bot:ws-prepared-correction");
-    await wait(async () => (await ws.getOrganizerProgress("session:s1"))?.status === "reviewed-empty");
-    expect((await service.list(owner, { activeOnly: true })).map((item) => item.content)).toEqual(["User chose DuckDB."]);
-    await org.dispose();
-  });
-
-  it("does not acknowledge unreadable sources or invalid proposal rows as empty successes", async () => {
-    const store = await openStore("bot", "source-failure");
-    stores.set("bot:ws", store);
-    await store.putEvent({ kind: "turn", at: 1, sessionId: "s1", text: "Important source", source: "user" });
-    const org = organizer(memory(), { readEntries: async () => { throw new Error("session read failed"); } });
-    org.noteScope("bot:ws");
-    await wait(async () => (await store.getOrganizerProgress('session:s1'))?.status === 'failed');
-    expect(await store.getOrganizerProgress("session:s1")).toMatchObject({
-      status: "failed", lastError: "session read failed",
-    });
-    expect(calls.some((call) => call.method === "generate")).toBe(false);
-    await org.dispose();
-    organizeText = JSON.stringify({ memories: [{}] });
-    const retry = organizer(memory());
-    retry.retryScope("bot:ws");
-    await wait(async () => (await store.getOrganizerProgress("session:s1"))?.lastError?.includes("parseable proposals envelope") === true);
-    expect((await store.getOrganizerProgress("session:s1"))?.eventCursor).toBeUndefined();
-    await retry.dispose();
-  });
-
-  it("does not commit a late proposal after a human forget, and sends the entire covered source", async () => {
-    const store = await openStore("bot", "late-memory");
-    stores.set("bot:ws", store);
-    const service = memory();
-    const owner: MemoryOwner = { scope: "bot", ownerId: "ws" };
-    // The forgotten row was itself mined from this session — forgetting it
-    // suppresses re-derivation from the same logical source.
-    const saved = await service.remember(owner, {
-      content: "Old preference.", source: { kind: "memory-organizer", sessionId: "s1" },
-    });
-    const source = "Long source: " + "material ".repeat(900) + "last-material-marker";
-    const event = await store.putEvent({ kind: "turn", at: 1, sessionId: "s1", text: source, source: "user" });
-    let finish!: () => void;
-    let began!: () => void;
-    const started = new Promise<void>((resolve) => { began = resolve; });
-    organizeText = async () => {
-      began();
-      await new Promise<void>((resolve) => { finish = resolve; releaseInference.push(resolve); });
-      return JSON.stringify({ memories: [{ action: "new", scope: "bot", content: "A paraphrase of the forgotten preference.", source: "u0", quote: "last-material-marker" }] });
-    };
-    const org = organizer(service);
-    org.noteScope("bot:ws");
-    await wait(() => Boolean(finish));
-    await started;
-    expect(calls.find((call) => call.method === "generate")?.params.prompt).toContain("last-material-marker");
-    await service.remember(owner, { content: "Old preference.", source: { kind: "user-mark", sessionId: "s1", spans: [{
-      kind: "event", id: String(event.id), scopeId: "bot:ws", sessionId: "s1", revision: sourceRevision(source),
-      start: source.indexOf("last-material-marker"), end: source.length,
-    }] } });
+  it('preserves explicit forgotten coverage while organizing unrelated original text', async () => {
+    const store = await setup('Use SQLite. Backups run Thursday.'); const service = memory();
+    const saved = await service.remember(owner, { content: 'Use SQLite.', source: { kind: 'memory.remember', threadId: 'thread:bot', spans: [{ ...materials[0]!.span, end: 11 }] } });
     await service.forget(owner, saved.item.id);
-    finish();
-    // The forget bumps the revision between narrate and commit — the unit is
-    // durably prepared, and the replay drops the deduped proposal instead of
-    // resurrecting what the human just forgot.
-    await wait(async () => (await store.getOrganizerProgress("session:s1"))?.status === "prepared");
-    expect(await service.list(owner, { activeOnly: true })).toEqual([]);
-    org.noteScope("bot:ws");
-    await wait(async () => (await store.getOrganizerProgress("session:s1"))?.status === "reviewed-empty");
-    expect(await service.list(owner, { activeOnly: true })).toEqual([]);
-    await org.dispose();
+    const org = organizer(service); org.noteScope('bot:ws-1'); await settled(store);
+    const prompt = String(calls.find(call => call.method === 'generate')!.params.prompt);
+    expect(prompt).not.toContain('Use SQLite.'); expect(prompt).toContain('Backups run Thursday.');
   });
-
-  it("persists supplement proposals as a supplements edge to the target", async () => {
-    const ws = await openStore("bot", "bot:ws-supplement");
-    stores.set("bot:ws-supplement", ws);
-    const service = memory();
-    const owner: MemoryOwner = { scope: "bot", ownerId: "ws-supplement" };
-    const existing = await service.remember(owner, {
-      content: "Deploys run on Friday.", trigger: "release cadence", nature: "decision",
-    });
-    await ws.putEvent({ kind: "turn", at: 1, sessionId: "s1", text: "Releases moved to Thursday this quarter.", source: "agent" });
-    scopeSessions.set("bot:ws-supplement", ["s1"]);
-    organizeText = JSON.stringify({
-      memories: [{
-        action: "supplement", scope: "bot", nature: "decision",
-        content: "This quarter releases happen on Thursday.", trigger: "release cadence",
-        quote: "Releases moved to Thursday this quarter.",
-        target: `k:${existing.item.id}`, source: "u0",
-      }],
-    });
-    const org = organizer(service);
-    org.noteScope("bot:ws-supplement");
-    await wait(async () => (await progressFor("bot:ws-supplement", "session:s1"))?.status === "formed");
-    const rows = await ws.listKnowledge({ scope: "bot" });
-    const supplement = rows.find((row) => row.id !== existing.item.id);
-    expect(supplement?.content).toBe("This quarter releases happen on Thursday.");
-    expect(supplement?.supplements).toBe(existing.item.id);
-    expect((await ws.getKnowledge(existing.item.id))?.invalidAt).toBeUndefined();
-    await org.dispose();
+  it('retains a failed original generation instead of retrying it with a new paid request', async () => {
+    const store = await setup(); organizeText = () => { throw new Error('Original provider outcome unknown'); };
+    const org = organizer(memory()); org.noteScope('bot:ws-1'); await settled(store);
+    nowMs += 600_000; org.retryScope('bot:ws-1'); await wait(() => org.pending === 0);
+    expect(calls.filter(call => call.method === 'generate')).toHaveLength(1);
+    expect(await store.listKnowledge({})).toEqual([]);
   });
-
-  it("replays durably prepared proposals after a commit failure without re-narrating", async () => {
-    const ws = await openStore("bot", "bot:ws-prepared");
-    stores.set("bot:ws-prepared", ws);
-    const service = memory();
-    const original = service.remember.bind(service);
-    let failCommit = true;
-    (service as { remember: typeof original }).remember = async (...args) => {
-      if (failCommit) { failCommit = false; throw new Error("commit boom"); }
-      return original(...args);
-    };
-    await ws.putEvent({ kind: "turn", at: 1, sessionId: "s1", text: "The catalog store uses Postgres.", source: "agent" });
-    scopeSessions.set("bot:ws-prepared", ["s1"]);
-    organizeText = JSON.stringify({
-      memories: [{ action: "new", scope: "bot", content: "Catalog uses Postgres.", trigger: "db", source: "u0", quote: "The catalog store uses Postgres." }],
-    });
-    const org = organizer(service);
-    org.noteScope("bot:ws-prepared");
-    await wait(async () => (await progressFor("bot:ws-prepared", "session:s1"))?.status === "prepared");
-    const narrations = calls.filter((call) => call.method === "generate").length;
-    const prepared = await progressFor("bot:ws-prepared", "session:s1");
-    expect(prepared?.proposals?.length).toBe(1);
-    expect(prepared?.proposals?.[0]?.content).toBe("Catalog uses Postgres.");
-    expect(prepared?.lastError).toContain("commit boom");
-    const later = await ws.putEvent({ kind: "turn", at: 2, sessionId: "s1", text: "New work arrived while the first proposal was prepared.", source: "user" });
-    // The retry first replays the frozen range. The appended turn remains
-    // uncovered until the prepared proposal has committed.
-    org.noteScope("bot:ws-prepared");
-    await wait(async () => (await progressFor("bot:ws-prepared", "session:s1"))?.status === "formed");
-    expect(calls.filter((call) => call.method === "generate").length).toBe(narrations);
-    expect((await progressFor("bot:ws-prepared", "session:s1"))?.eventCursor).not.toBe(later.id);
-    const rows = await ws.listKnowledge({ scope: "bot" });
-    expect(rows.map((row) => row.content)).toEqual(["Catalog uses Postgres."]);
-    expect((await progressFor("bot:ws-prepared", "session:s1"))?.proposals).toBeUndefined();
-    await org.dispose();
+  it('does not publish stale proposals after a human memory change during generation', async () => {
+    const store = await setup(); const service = memory();
+    organizeText = async () => { await service.remember(owner, { content: 'Human correction wins.' }); return proposal(materials[0]!.text); };
+    const org = organizer(service); org.noteScope('bot:ws-1'); await wait(() => calls.some(call => call.method === 'generate')); await wait(() => org.pending === 0);
+    expect((await store.listKnowledge({})).map(item => item.content)).toEqual(['Human correction wins.']);
+    expect((await store.listOrganizerProgress()).some(row => row.status === 'prepared' && row.lastError?.includes('Memory changed'))).toBe(true);
   });
-
-  it("reopens coverage when a terminal row's source content changed", async () => {
-    const ws = await openStore("bot", "bot:ws-revise");
-    stores.set("bot:ws-revise", ws);
-    runSources.push({
-      threadId: "t1", threadTitle: "Job", runId: "r1", sessionId: "s1",
-      reportText: "The run shipped v1.", endedAt: null,
-    });
-    organizeText = JSON.stringify({ memories: [] });
-    const org = organizer(memory());
-    org.noteScope("bot:ws-revise");
-    await wait(async () => (await progressFor("bot:ws-revise", "run:r1"))?.status === "reviewed-empty");
-    const narrations = calls.filter((call) => call.method === "generate").length;
-    // A revised report under the same run id changes the fingerprint — the
-    // covered claim no longer matches and the range is reprocessed.
-    runSources = [{ ...runSources[0]!, reportText: "The run shipped v2 after a rollback." }];
-    org.noteScope("bot:ws-revise");
-    await wait(async () => calls.filter((call) => call.method === "generate").length === narrations + 1);
-    await org.dispose();
+  it('commits distinct proposals from one original source without self-conflicting', async () => {
+    const store = await setup('Use PostgreSQL. Backups run Thursday.');
+    organizeText = JSON.stringify({ memories: [JSON.parse(proposal('Use PostgreSQL.')).memories[0], JSON.parse(proposal('Backups run Thursday.')).memories[0]] });
+    const org = organizer(memory()); org.noteScope('bot:ws-1'); await settled(store);
+    expect(await store.listKnowledge({ scope: 'bot' })).toHaveLength(2);
+    expect((await store.listOrganizerProgress())[0]?.produced).toHaveLength(2);
   });
-
-  it("does not commit a report that changed while the model was narrating", async () => {
-    const ws = await openStore("bot", "bot:ws-live-report-change");
-    stores.set("bot:ws-live-report-change", ws);
-    runSources = [{ threadId: "t1", threadTitle: "Job", runId: "r1", sessionId: null,
-      reportText: "Release v1.", endedAt: null }];
-    let finish!: () => void;
-    let began!: () => void;
-    const started = new Promise<void>((resolve) => { began = resolve; });
-    let requests = 0;
-    organizeText = async () => {
-      if (++requests === 1) {
-        began();
-        await new Promise<void>((resolve) => { finish = resolve; releaseInference.push(resolve); });
-        return JSON.stringify({ memories: [{ action: "new", scope: "bot", content: "Release v1 shipped.", source: "u0", quote: "Release v1." }] });
-      }
-      return JSON.stringify({ memories: [] });
-    };
-    const errors: unknown[] = [];
-    const org = organizer(memory(), { onError: error => errors.push(error) });
-    org.noteScope("bot:ws-live-report-change");
-    await wait(() => Boolean(finish));
-    await started;
-    runSources = [{ ...runSources[0]!, reportText: "Release v2 after rollback." }];
-    finish();
-    await wait(() => errors.some(error => error instanceof Error && error.message.includes('source changed')));
-    await org.dispose();
-    expect(await ws.listKnowledge({ scope: "bot" })).toEqual([]);
-  });
-
-  it("subdivides an oversized run report into per-part coverage rows", async () => {
-    contextWindow = 8_000;
-    const ws = await openStore("bot", "bot:ws-chunk");
-    stores.set("bot:ws-chunk", ws);
-    runSources.push({
-      threadId: "t1", threadTitle: "Big job", runId: "r9", sessionId: "s1",
-      reportText: Array.from({ length: 400 }, (_, index) => `Finding ${index}: something worth noting.`).join("\n"),
-      endedAt: null,
-    });
-    const org = organizer(memory());
-    org.noteScope("bot:ws-chunk");
-    await wait(async () => (await progressFor("bot:ws-chunk", "run:r9"))?.status !== undefined);
-    await wait(async () => (await ws.listOrganizerProgress()).filter((row) => row.key.startsWith("run:r9")).length > 1);
-    const rows = (await ws.listOrganizerProgress()).filter((row) => row.key.startsWith("run:r9"));
-    expect(rows.length).toBeGreaterThan(1);
-    expect(rows.every((row) => row.status === "reviewed-empty" || row.status === "formed")).toBe(true);
-    await org.dispose();
-  });
-
-  it("keeps Run-report part boundaries stable after an adaptive budget retry", async () => {
-    contextWindow = 8_000;
-    const ws = await openStore("bot", "bot:ws-run-boundary");
-    stores.set("bot:ws-run-boundary", ws);
-    const reportText = "决".repeat(3_000);
-    runSources = [{ threadId: "t1", threadTitle: "Task", runId: "r1", sessionId: null,
-      reportText, endedAt: null }];
-    const first = organizer(memory());
-    first.noteScope("bot:ws-run-boundary");
-    await wait(async () => {
-      const rows = (await ws.listOrganizerProgress()).filter((row) => row.key.startsWith("run:r1"));
-      return rows.length > 1 && rows.every((row) => row.status === "reviewed-empty")
-        && rows.some((row) => row.runEndOffset === reportText.length);
-    }, 15_000);
-    await first.dispose();
-    const narrations = calls.filter((call) => call.method === "generate").length;
-    const settingsReads = calls.filter((call) => call.method === "settings").length;
-    const resumed = organizer(memory());
-    resumed.noteScope("bot:ws-run-boundary");
-    await wait(() => calls.filter((call) => call.method === "settings").length > settingsReads);
-    await wait(() => resumed.pending === 0);
-    expect(calls.filter((call) => call.method === "generate")).toHaveLength(narrations);
-    await resumed.dispose();
-  });
-
-  it("keeps the full source-and-memory prompt plus reserved output within model context", async () => {
-    contextWindow = 8_000;
-    const ws = await openStore("bot", "bot:ws-batch-capacity");
-    stores.set("bot:ws-batch-capacity", ws);
-    runSources = Array.from({ length: 8 }, (_, index) => ({
-      threadId: `t${index}`, threadTitle: `Job ${index}`, runId: `r${index}`,
-      sessionId: null, reportText: `Finding ${index}: ${"important detail ".repeat(180)}`, endedAt: null,
-    }));
-    const org = organizer(memory());
-    org.noteScope("bot:ws-batch-capacity");
-    await wait(() => calls.some((call) => call.method === "generate"));
-    const first = calls.find((call) => call.method === "generate")!;
-    expect(estimateMemoryOrganizerInputTokens(String(first.params.system), String(first.params.prompt))
-      + Number(first.params.maxOutputTokens)).toBeLessThanOrEqual(8_000);
-    await wait(async () => (await ws.listOrganizerProgress()).filter((row) => row.status === "reviewed-empty").length === 8, 30_000);
-    expect(calls.filter((call) => call.method === "generate").length).toBeGreaterThan(1);
-    await org.dispose();
-  });
-
-  it("accounts for existing memory text instead of overflowing a small model", async () => {
-    contextWindow = 8_000;
-    const ws = await openStore("bot", "bot:ws-existing-capacity");
-    stores.set("bot:ws-existing-capacity", ws);
-    const service = memory();
-    const owner: MemoryOwner = { scope: "bot", ownerId: "ws-existing-capacity" };
-    await service.remember(owner, { content: "HUGE-MEMORY " + "x".repeat(30_000) });
-    await service.remember(owner, { content: "Prefer concise reports." });
-    await ws.putEvent({ kind: "turn", at: 1, sessionId: "s1", text: "A new long-term decision.", source: "user" });
-    scopeSessions.set("bot:ws-existing-capacity", ["s1"]);
-    const org = organizer(service);
-    org.noteScope("bot:ws-existing-capacity");
-    await wait(() => calls.some((call) => call.method === "generate"));
-    const request = calls.find((call) => call.method === "generate")!;
-    expect(estimateMemoryOrganizerInputTokens(String(request.params.system), String(request.params.prompt))
-      + Number(request.params.maxOutputTokens)).toBeLessThanOrEqual(8_000);
-    expect(String(request.params.prompt)).not.toContain("HUGE-MEMORY");
-    expect(String(request.params.prompt)).toContain("Prefer concise reports.");
-    await org.dispose();
-  });
-
-  it("covers a long event in durable segments without losing text or splitting a surrogate pair", async () => {
-    contextWindow = 8_000;
-    const ws = await openStore("bot", "bot:ws-long-event");
-    stores.set("bot:ws-long-event", ws);
-    const source = "A".repeat(3_980) + "😀" + "B".repeat(4_200) + "LAST-EVENT";
-    const event = await ws.putEvent({ kind: "turn", at: 1, sessionId: "s1", text: source, source: "user" });
-    scopeSessions.set("bot:ws-long-event", ["s1"]);
-    const first = organizer(memory());
-    first.noteScope("bot:ws-long-event");
-    await wait(async () => (await ws.getOrganizerProgress("session:s1"))?.eventPartial !== undefined);
-    const partial = await ws.getOrganizerProgress("session:s1");
-    expect(partial?.eventCursor).toBeUndefined();
-    expect(partial?.eventPartial?.id).toBe(event.id);
-    await first.dispose();
-    const resumed = organizer(memory());
-    resumed.noteScope("bot:ws-long-event");
-    await wait(async () => (await ws.getOrganizerProgress("session:s1"))?.eventCursor === event.id, 15_000);
-    const complete = await ws.getOrganizerProgress("session:s1");
-    expect(complete?.eventPartial).toBeUndefined();
-    const pieces = calls.filter((call) => call.method === "generate")
-      .map((call) => String(call.params.prompt).split("[turn] ")[1] ?? "");
-    expect(pieces.join("")).toBe(source);
-    expect(pieces.join("")).not.toContain("�");
-    await resumed.dispose();
-  });
-
-  it("advances a long Pi message only after every segment has been covered", async () => {
-    contextWindow = 8_000;
-    const ws = await openStore("bot", "bot:ws-long-entry");
-    stores.set("bot:ws-long-entry", ws);
-    const source = "A".repeat(8_100) + "LAST-ENTRY";
-    const entry: PiSessionEntry = {
-      type: "message", id: "entry-1", parentId: null, timestamp: new Date(0).toISOString(),
-      message: { role: "user", content: source, timestamp: 0 },
-    };
-    scopeSessions.set("bot:ws-long-entry", ["s1"]);
-    const org = organizer(memory(), { readEntries: async () => [entry] });
-    org.noteScope("bot:ws-long-entry");
-    await wait(async () => (await ws.getOrganizerProgress("session:s1"))?.entryCursor === entry.id, 15_000);
-    expect((await ws.getOrganizerProgress("session:s1"))?.entryPartial).toBeUndefined();
-    const pieces = calls.filter((call) => call.method === "generate")
-      .map((call) => String(call.params.prompt).split("[user] ")[1] ?? "");
-    expect(pieces.join("")).toBe(source);
-    await org.dispose();
-  });
-
-  it("continues past the per-pass event scan without waiting for the periodic sweep", async () => {
-    const ws = await openStore("bot", "bot:ws-many-events");
-    stores.set("bot:ws-many-events", ws);
-    let lastId = 0;
-    for (let index = 0; index < 121; index += 1) {
-      lastId = (await ws.putEvent({ kind: "turn", at: index, sessionId: "s1",
-        text: `Decision ${index}.`, source: "user" })).id;
-    }
-    scopeSessions.set("bot:ws-many-events", ["s1"]);
-    const org = organizer(memory());
-    org.noteScope("bot:ws-many-events");
-    await wait(async () => (await ws.getOrganizerProgress("session:s1"))?.eventCursor === lastId, 10_000);
-    expect(calls.filter((call) => call.method === "generate")).toHaveLength(2);
-    await org.dispose();
-  });
-
-  it("shares precise explicit coverage, preserves unrelated text, and recovers native branch revisions", async () => {
-    const ws = await openStore("bot", "bot:ws-shared-source");
-    stores.set("bot:ws-shared-source", ws);
-    const owner: MemoryOwner = { scope: "bot", ownerId: "ws-shared-source" };
-    const entry = (id: string, content: string, parentId: string | null = null): PiSessionEntry => ({
-      type: "message", id, parentId, timestamp: new Date(0).toISOString(), message: { role: "user", content, timestamp: 0 },
-    });
-    let entries = [entry("a", "Use SQLite. Backups run Thursday.")];
-    const service = memory({ readSessionEntries: async () => entries });
-    const saved = await service.remember(owner, { content: "Local data uses SQLite.", sourceText: "Use SQLite.", source: { kind: "memory.remember", sessionId: "s1" } });
-    await service.forget(owner, saved.item.id);
-    scopeSessions.set("bot:ws-shared-source", ["s1"]);
-    let org = organizer(service, { readEntries: async () => entries });
-    org.noteScope("bot:ws-shared-source");
-    await wait(async () => (await ws.getOrganizerProgress("session:s1"))?.status === "reviewed-empty");
-    const first = String(calls.find((call) => call.method === "generate")!.params.prompt);
-    expect(first).not.toContain("Use SQLite.");
-    expect(first).toContain("Backups run Thursday.");
-    expect(await service.readSource(owner, saved.item.id)).toMatchObject([{ status: "available", text: "Use SQLite." }]);
-    await org.dispose();
-    await ws.close();
-    stores.set("bot:ws-shared-source", await openStore("bot", "bot:ws-shared-source"));
-    // The new active branch has a different leaf; prior native entries remain
-    // original evidence. Reorder the tree to prove coverage is not a list cursor.
-    entries = [entry("b", "New branch uses DuckDB.", "a"), ...entries];
-    org = organizer(memory(), { readEntries: async () => entries });
-    org.noteScope("bot:ws-shared-source");
-    await wait(() => calls.filter((call) => call.method === "generate").length === 2);
-    await wait(() => org.pending === 0);
-    const second = String(calls.filter((call) => call.method === "generate")[1]!.params.prompt);
-    expect(second).toContain("New branch uses DuckDB.");
-    expect(second).not.toContain("Backups run Thursday.");
-    entries = [entries[0]!, entry("a", "Use Postgres. Backups run Thursday.")];
-    org.noteScope("bot:ws-shared-source");
-    await wait(() => calls.filter((call) => call.method === "generate").length === 3);
-    expect(String(calls.filter((call) => call.method === "generate")[2]!.params.prompt)).toContain("Use Postgres.");
-    expect(await service.readSource(owner, saved.item.id)).toMatchObject([{ status: "changed" }]);
-    await expect(service.readSource({ scope: "bot", ownerId: "unrelated" }, saved.item.id)).rejects.toMatchObject({ code: "not-found" });
-    await org.dispose();
-  });
-
-  it("describes scope readiness and progress rows for the settings surface", async () => {
-    const ws = await openStore("bot", "bot:ws-describe");
-    stores.set("bot:ws-describe", ws);
-    const org = organizer(memory());
-    await ws.putEvent({ kind: "turn", at: 1, sessionId: "s1", text: "Worth keeping.", source: "agent" });
-    scopeSessions.set("bot:ws-describe", ["s1"]);
-    org.noteScope("bot:ws-describe");
-    await wait(async () => (await progressFor("bot:ws-describe", "session:s1"))?.status !== undefined);
-    const status = await org.describe("bot:ws-describe");
-    expect(status.enabled).toBe(true);
-    expect(status.model).toEqual({ providerId: "test-provider", modelId: "test-model" });
-    expect(status.rows.some((row) => row.key === "session:s1")).toBe(true);
-    await org.dispose();
+  it('extracts an explicit native selection while automatic organization is disabled', async () => {
+    await setup(); autoOrganize = { user: false, bot: false };
+    organizeText = JSON.stringify({ memories: [{ content: materials[0]!.text, trigger: '', nature: 'instruction', source: 's0', quote: materials[0]!.text }] });
+    const org = organizer(memory()); const span = materials[0]!.span;
+    const text = await org.extractSelection('bot:ws-1', 'extract', JSON.stringify({ passages: [{ role: 'user', text: materials[0]!.text }] }), new AbortController().signal,
+      { requestKey: 'selection', conversation: { runtime: 'agent', threadId: span.threadId, branchId: span.branchId, headId: span.headId }, sources: [span] });
+    expect(text).toContain('PostgreSQL'); expect(await memory().list(owner)).toEqual([]);
   });
 });

@@ -1,6 +1,10 @@
 import { beforeEach, describe, expect, test, vi } from 'vitest';
 import type { GitWorktreeBootstrapStatus } from '@varin/application-client';
 
+let host = 1;
+const willChange = new Set<() => void>();
+vi.doMock('@varin/application-client', async original => ({ ...await original<typeof import('@varin/application-client')>(),
+  getRuntimeEndpointGeneration: () => host, subscribeRuntimeEndpointWillChange: (listener: () => void) => { willChange.add(listener); return () => willChange.delete(listener); } }));
 const bootstrapStatusCalls: string[] = [];
 let bootstrapStatusResult: GitWorktreeBootstrapStatus = {
   status: 'ready',
@@ -133,7 +137,7 @@ describe('worktreeBootstrap.waitForWorktreeBootstrap', () => {
     await waitFor(() => statusResolvers.length === 2);
 
     statusResolvers[0]({ status: 'pending', phase: 'git-ready', error: null, updatedAt: 2 });
-    await expect(staleWaiter).rejects.toThrow('cancelled');
+    await expect(staleWaiter).rejects.toThrow('observation retired');
     expect(getWorktreeBootstrapState('/repo-wt')?.phase).toBe('directory-created');
 
     statusResolvers[1]({ status: 'pending', phase: 'git-ready', error: null, updatedAt: 3 });
@@ -238,4 +242,19 @@ describe('worktreeBootstrap.waitForWorktreeBootstrap', () => {
     expect(bootstrapStatusCalls).toEqual(['/repo-wt']);
     clearWorktreeBootstrapState('/repo-wt');
   });
+});
+
+test('retires old Host observers without failing or overwriting the replacement Host worktree', async () => {
+  let resolve!: (value: GitWorktreeBootstrapStatus) => void;
+  getBootstrapStatus = () => new Promise(done => { resolve = done; });
+  markWorktreeBootstrapPending('/same-path');
+  const waiter = waitForWorktreeBootstrap('/same-path');
+  const outcome = expect(waiter).rejects.toThrow('observation retired');
+  for (const listener of willChange) listener(); host += 1;
+  markWorktreeBootstrapPending('/same-path');
+  resolve({ status: 'ready', error: null, updatedAt: 100 });
+  await outcome;
+  expect(getWorktreeBootstrapState('/same-path')?.status).toBe('pending');
+  expect(toastErrors).toEqual([]);
+  clearWorktreeBootstrapState('/same-path');
 });

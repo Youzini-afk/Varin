@@ -10,7 +10,6 @@ impl Storage {
             .as_object()
             .ok_or_else(|| KernelError::Operation("recovery conversation must be tagged".into()))?;
         let fields: &[&str] = match value["kind"].as_str() {
-            Some("pi") => &["kind", "sessionId"],
             Some("thread") => &["kind", "threadId", "branchId"],
             _ => {
                 return Err(KernelError::Operation(
@@ -50,10 +49,12 @@ impl Storage {
                 "recovery workspace does not match actor grant".to_string(),
             ));
         }
-        for key in ["sessionId", "threadId", "runId"] {
+        if params_value.get("sessionId").is_some_and(|value| !value.is_null()) {
+            return Err(KernelError::Operation("recovery requires an original native Thread owner".into()));
+        }
+        for key in ["threadId", "runId"] {
             let supplied = params_value.get(key).and_then(Value::as_str);
             let expected = match key {
-                "sessionId" => grant.session_id.as_deref(),
                 "threadId" => grant.thread_id.as_deref(),
                 _ => grant.run_id.as_deref(),
             };
@@ -82,6 +83,9 @@ impl Storage {
         thread_id: Option<&str>,
         run_id: Option<&str>,
     ) -> Result<(), KernelError> {
+        if session_id.is_some() {
+            return Err(KernelError::Storage("unsupported legacy recovery owner; stored assets were not changed".into()));
+        }
         let grant = self.load_grant(grant_id)?;
         if grant.capabilities.contains("recovery.maintenance")
             || grant.capabilities.contains("storage.admin")
@@ -89,7 +93,6 @@ impl Storage {
             return Ok(());
         }
         let identities = [
-            ("sessionId", session_id, grant.session_id.as_deref()),
             ("threadId", thread_id, grant.thread_id.as_deref()),
             ("runId", run_id, grant.run_id.as_deref()),
         ];
@@ -406,11 +409,13 @@ impl Storage {
             params![workspace_id, id],
             |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?, row.get(5)?, row.get(6)?, row.get(7)?, row.get(8)?, row.get(9)?, row.get(10)?, row.get(11)?, row.get(12)?)),
         ).optional()?;
-        Ok(row.map(|(id, workspace_id, sequence, source, state, created_at, label, conversation_json, entry_id, execution_id, changed_path_count, byte_length, revision)| json!({
+        row.map(|(id, workspace_id, sequence, source, state, created_at, label, conversation_json, entry_id, execution_id, changed_path_count, byte_length, revision)| {
+            let conversation = conversation_json.map(|value| Self::recovery_conversation(&json!({"conversation": serde_json::from_str::<Value>(&value)?}))).transpose()?;
+            Ok(json!({
             "id": id, "workspaceId": workspace_id, "sequence": sequence, "source": source, "state": state, "createdAt": created_at,
-            "label": label, "conversation": conversation_json.and_then(|value| serde_json::from_str::<Value>(&value).ok()), "entryId": entry_id, "executionId": execution_id,
+            "label": label, "conversation": conversation, "entryId": entry_id, "executionId": execution_id,
             "changedPathCount": changed_path_count, "byteLength": byte_length, "revision": revision,
-        })))
+        })) }).transpose()
     }
 
     pub(super) fn recovery_turn_value(
@@ -450,8 +455,8 @@ impl Storage {
         Ok(Some(json!({
             "runId":run_id,"fileTarget":file_target.map(|value|serde_json::from_str::<Value>(&value)).transpose()?,
             "executionId": execution_id, "workspaceId": workspace_id, "runtimeKey": runtime_key, "runtimeGeneration": runtime_generation,
-            "workerId": worker_id, "conversation": serde_json::from_str::<Value>(&session_id)?,
-            "sessionId": serde_json::from_str::<Value>(&session_id)?.get("sessionId"), "userEntryId": user_entry_id, "assistantEntryId": assistant_entry_id,
+            "workerId": worker_id, "conversation": Self::recovery_conversation(&json!({"conversation": serde_json::from_str::<Value>(&session_id)?}))?,
+            "userEntryId": user_entry_id, "assistantEntryId": assistant_entry_id,
             "checkpointId": checkpoint_id, "activeWriterScopes": serde_json::from_str::<Value>(&active_writer_scopes_json)?, "provenance": provenance,
             "status": status, "observedResourceIds": serde_json::from_str::<Value>(&observed_resource_ids_json)?, "unrecordedResourceIds": serde_json::from_str::<Value>(&unrecorded_resource_ids_json)?,
             "failure": failure_json.and_then(|value| serde_json::from_str::<Value>(&value).ok()), "startedAt": started_at, "settledAt": settled_at, "revision": revision,
@@ -927,7 +932,7 @@ impl Storage {
         ).optional()?;
         let conversation = session_id
             .as_deref()
-            .map(serde_json::from_str::<Value>)
+            .map(|value| Self::recovery_conversation(&json!({"conversation": serde_json::from_str::<Value>(value)?})))
             .transpose()?;
         self.require_recovery_owner(
             grant_id,
@@ -1037,7 +1042,7 @@ impl Storage {
                 "checkpointId": checkpoint_id,
                 "sequence": sequence,
                 "status": status,
-                "conversation": serde_json::from_str::<Value>(&session_id)?,
+                "conversation": Self::recovery_conversation(&json!({"conversation": serde_json::from_str::<Value>(&session_id)?}))?,
                 "userEntryId": user_entry_id,
                 "assistantEntryId": assistant_entry_id,
                 "activeWriterScopes": serde_json::from_str::<Value>(&active_json)?,
@@ -1758,4 +1763,35 @@ fn physical_paths_overlap(left: &Path, right: &Path) -> bool {
         PathBuf::from(right.to_string_lossy().to_lowercase()),
     );
     left.starts_with(&right) || right.starts_with(&left)
+}
+
+#[cfg(test)]
+mod native_conversation_tests {
+    use super::*;
+
+    #[test]
+    fn requires_exact_native_thread_identity() {
+        let native = json!({"conversation":{"kind":"thread","threadId":"thread","branchId":"main"}});
+        assert_eq!(Storage::recovery_conversation(&native).unwrap(), native["conversation"]);
+        for conversation in [
+            json!({"kind":"pi","sessionId":"old-session"}),
+            json!({"kind":"thread","threadId":"thread"}),
+            json!({"kind":"thread","threadId":"thread","branchId":"main","sessionId":"old-session"}),
+        ] {
+            assert!(Storage::recovery_conversation(&json!({"conversation":conversation})).is_err());
+        }
+    }
+
+    #[test]
+    fn rejects_persisted_legacy_checkpoint_without_rewriting_it() {
+        let root = std::env::temp_dir().join(format!("recovery-native-owner-{}", Uuid::new_v4()));
+        let storage = Storage::open(&root, "host").unwrap();
+        let conversation = r#"{"kind":"pi","sessionId":"preserved-history"}"#;
+        storage.conn.execute("INSERT INTO recovery_checkpoints(id,workspace_id,sequence,source,state,created_at,conversation_json,revision) VALUES('old','workspace',1,'turn','ready','2026-10-14',?1,1)", params![conversation]).unwrap();
+        assert!(storage.recovery_checkpoint_value("workspace", "old").is_err());
+        let retained: String = storage.conn.query_row("SELECT conversation_json FROM recovery_checkpoints WHERE id='old'", [], |row| row.get(0)).unwrap();
+        assert_eq!(retained, conversation);
+        drop(storage);
+        fs::remove_dir_all(root).unwrap();
+    }
 }

@@ -6,7 +6,7 @@ import { registerUserFollowup } from './followup-source.js';
 import type { KernelClient } from './kernel-client.js';
 import type { ManagedSourceClient } from '../harness/managed-remote-client.js';
 import type { ManagedSourceBindRequest, ManagedSourceReleaseRequest } from '../harness/managed-remote-types.js';
-import type { Followup, FollowupFilePreparation, FollowupRegisterAdmissionParams, LaunchSource } from './protocol.generated.js';
+import type { Followup, FollowupFilePreparation, FollowupRegisterAdmissionParams, LaunchSource, ThreadSummary } from './protocol.generated.js';
 
 const owner = { kind: 'managed_host' as const, hostId: 'host-b', connectionId: 'configured-b', endpointIdentity: 'b-endpoint' };
 const identity = { runtime: 'agent' as const, threadId: 'thread-a', branchId: 'branch-a' };
@@ -82,7 +82,10 @@ function fixture(selected: LaunchSource) {
   } });
   const publicOwner = { runtime, requireIdentity: async (selectedIdentity: unknown) => {
     identities.push(selectedIdentity);
-    return { bot_id: null, thread_id: identity.threadId, branches: [], observer_project_ids: [] };
+    return { main_branch_id: identity.branchId, title: 'Original thread', revision: 1, created_at_ms: 0, updated_at_ms: 0,
+      pinned: false, archived: false, deleted_at_ms: null, activity_cursor: 0, read_cursor: 0, unread: false,
+      bot_id: null, thread_id: identity.threadId, branches: [{ branch_id: identity.branchId, head: null, active_run_id: null, latest_run: null }],
+      observer_project_ids: [] } satisfies ThreadSummary;
   } };
   return { kernel, runtime, binds, releases, registered, identities, preparations, prepared, inspected, inspection,
     register: (signal?: AbortSignal) => registerThreadFollowup(publicOwner, input, signal),

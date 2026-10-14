@@ -34,7 +34,7 @@ const failure = (status: LanguageResult['status'], message?: string): LanguageRe
  * libraries and explicit external configuration retain their real environment semantics.
  */
 export function createLanguageOwner({ documents, supervisor, sources, remote, targetAuthority }: {
-  documents: Pick<DocumentAuthority, 'readSnapshot' | 'readAgentInputSnapshot'>;
+  documents: Pick<DocumentAuthority, 'readSnapshot'>;
   supervisor: ReturnType<typeof createLanguageSupervisor>;
   sources: Pick<SourceQueryOwner, 'validateLanguage' | 'read' | 'processAdmission' | 'prepareLanguageView' | 'dispose'>;
   remote?: ManagedSourceQueryTransport;

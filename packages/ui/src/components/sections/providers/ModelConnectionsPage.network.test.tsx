@@ -81,3 +81,21 @@ test('invalid headers cannot save, closing discards edits, and a Host change cle
   expect(container.querySelector(`[aria-label="${embeddingLabel}"]`)).toBeNull();
   expect(fixtures.api.save).not.toHaveBeenCalled();
 });
+
+test('workload identity fields save explicit Host configuration and discard interrupted edits', async () => {
+  snapshot.channels[0] = { ...snapshot.channels[0]!, type: 'anthropic', authentication: { kind: 'anthropic-federation', identityTokenFile: '/host/identity.jwt', organizationId: 'org-original', federationRuleId: 'rule-original' } };
+  snapshot.types = [{ id: 'anthropic', name: 'Anthropic', protocol: 'anthropic-messages', authentication: ['anthropic-federation', 'none'], operations: ['chat'], discovery: false, parametersSchema: {} }];
+  await open();
+  const label = (field: string) => `settings.models.federation.${field}`;
+  expect((container.querySelector(`[aria-label="${label('identityTokenFile')}"]`) as HTMLInputElement).value).toBe('/host/identity.jwt');
+  await edit(label('organizationId'), 'org-new'); await edit(label('workspaceId'), 'default');
+  await click('settings.models.save');
+  expect(fixtures.api.save.mock.calls[0]?.[0].authentication).toEqual({ kind: 'anthropic-federation', identityTokenFile: '/host/identity.jwt', organizationId: 'org-new', federationRuleId: 'rule-original', workspaceId: 'default' });
+  await edit(label('workspaceId'), ''); await click('settings.models.save');
+  expect(fixtures.api.save.mock.calls[1]?.[0].authentication.workspaceId).toBeUndefined();
+  await edit(label('organizationId'), 'discarded'); await click('settings.models.close'); await click('Connection');
+  expect((container.querySelector(`[aria-label="${label('organizationId')}"]`) as HTMLInputElement).value).toBe('org-new');
+  await act(async () => { fixtures.generation += 1; fixtures.listeners.forEach(listener => listener()); });
+  expect(container.querySelector(`[aria-label="${label('identityTokenFile')}"]`)).toBeNull();
+  expect(fixtures.api.save).toHaveBeenCalledTimes(2);
+});

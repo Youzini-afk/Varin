@@ -21,7 +21,7 @@ export class PlanService {
     const context = await this.runtime.context(identity.branchId);
     const basis = context?.personalization;
     if (!basis) throw new PlanScopeUnavailable('plan-not-ready');
-    if (basis.sessionId !== identity.threadId) throw new Error('Context belongs to another Thread');
+    if (basis.threadId !== identity.threadId) throw new Error('Context belongs to another Thread');
     // Mode alone is not authority: a Bot keeps its original Catalog identity.
     const bot = (await this.runtime.thread(identity.threadId)).bot_id;
     if (basis.mode !== (bot ? 'bot' : 'agent')) {

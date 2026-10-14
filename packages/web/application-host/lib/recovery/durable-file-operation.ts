@@ -428,7 +428,7 @@ const applyKernelDurableFileOperation = async (
 ): Promise<DurableFileOperationResult> => {
   const durable = context.durableRecoveryStore;
   if (!durable) throw new Error("Rust recovery operation port is unavailable");
-  if (spec.operationBinding && (spec.executionId || spec.requireTurnBinding)) throw new Error("Runtime Integration cannot use a Pi turn binding");
+  if (spec.operationBinding && (spec.executionId || spec.requireTurnBinding)) throw new Error("Runtime Integration cannot use a turn binding");
   if (spec.requireTurnBinding && !spec.executionId) throw new Error("Parent turn recovery binding is required for integration");
   if (spec.executionId) {
     if (!durable.listChanges) throw new Error("Rust recovery turn reader is unavailable");

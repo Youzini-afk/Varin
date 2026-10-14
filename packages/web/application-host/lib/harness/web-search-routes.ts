@@ -1,6 +1,6 @@
 import type { Express, RequestHandler } from "express";
 import type { HarnessWebSearchProvider } from "@varin/protocol";
-import { readPiAuthFile, removePiProviderAuth, savePiProviderAuth } from "../pi-config/storage.js";
+import type { ServiceCredentialStore } from "../service-credentials/store.js";
 import { resolveSearchCredential } from "./web-search.js";
 
 const PROVIDERS = new Set<HarnessWebSearchProvider>(["brave", "exa", "tavily", "jina", "searxng"]);
@@ -15,20 +15,20 @@ const providerOf = (value: unknown): HarnessWebSearchProvider | null => (
 );
 
 export interface WebSearchCredentialRoutesOptions {
-  readAuth?: typeof readPiAuthFile;
-  removeAuth?: (...args: Parameters<typeof removePiProviderAuth>) => boolean | Promise<boolean>;
+  readAuth: ServiceCredentialStore['read'];
+  removeAuth: ServiceCredentialStore['remove'];
   requireAuth?: RequestHandler;
-  saveAuth?: (...args: Parameters<typeof savePiProviderAuth>) => unknown | Promise<unknown>;
+  saveAuth: ServiceCredentialStore['save'];
 }
 
 export const registerWebSearchCredentialRoutes = (
   app: Express,
-  options: WebSearchCredentialRoutesOptions = {},
+  options: WebSearchCredentialRoutesOptions,
 ): void => {
   const requireAuth = options.requireAuth ?? noAuth;
-  const readAuth = options.readAuth ?? readPiAuthFile;
-  const saveAuth = options.saveAuth ?? savePiProviderAuth;
-  const removeAuth = options.removeAuth ?? removePiProviderAuth;
+  const readAuth = options.readAuth;
+  const saveAuth = options.saveAuth;
+  const removeAuth = options.removeAuth;
 
   app.get("/api/harness/web-search/credentials/:provider", requireAuth, (request, response) => {
     response.setHeader("Cache-Control", "no-store");

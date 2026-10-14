@@ -204,7 +204,7 @@ pub(super) fn prepare_child(
     };
     let basis = serde_json::from_value(json!({"mode":"agent","threadRole":"worker","revision":0,
         "configurationDigest":"mcp-consumer-child","memorySnapshot":{"revision":0,"memories":[]},
-        "sessionId":child.child_thread_id,"projectId":null,"originalSections":[{"name":"preamble","content":"Source-less MCP consumer"}],"instructionSources":[]})).unwrap();
+        "threadId":child.child_thread_id,"projectId":null,"originalSections":[{"name":"preamble","content":"Source-less MCP consumer"}],"instructionSources":[]})).unwrap();
     let preparation = runtime
         .catalog()
         .lock()

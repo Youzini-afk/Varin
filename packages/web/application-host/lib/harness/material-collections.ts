@@ -4,10 +4,9 @@ import type {
   MaterialCollection, MaterialCollectionMember, MaterialCollectionSearchHit, MaterialCollectionSummary,
   MaterialGrant, MaterialsCollectionParams, MaterialsCollectionResult, WebSnapshotRef,
 } from "@varin/protocol";
-import type { HarnessService, HarnessServiceContext } from "./router.js";
 import { HarnessServiceError } from "./service-error.js";
 import type { WorkspaceWorkingStateRootAccess } from "./working-state/types.js";
-import { createWorkspaceOpSerializer, kernelContext, type KernelRecordContext } from "./retrieval-artifacts.js";
+import { createWorkspaceOpSerializer, kernelContext, type KernelRecordContext } from "./kernel-records.js";
 import type { WebMaterialStore, WebSnapshotReadAuthority } from "./web-materials.js";
 
 export const MATERIAL_COLLECTION_RECORD_TYPE = "material.collection";
@@ -31,9 +30,6 @@ export class MaterialCollectionMutationError extends Error {
 }
 export interface MaterialCollectionsDeps {
   materials?: WebMaterialStore;
-  fetchUrl?: (params: { url: string }, ctx: HarnessServiceContext) => ReturnType<FetchUrl>;
-  resolveThreadId?: (sessionId: string) => Promise<string | undefined>;
-  threadsRelated?: MaterialCollectionContext["threadsRelated"];
   now?: () => number;
   serializer?: ReturnType<typeof createWorkspaceOpSerializer>;
 }
@@ -57,8 +53,7 @@ const parseGrant = (record: Record): GrantPayload | null => {
 };
 const collection = ({ lastMutation: _mutation, ...value }: CollectionPayload): MaterialCollection => value;
 const grant = ({ lastMutation: _mutation, ...value }: GrantPayload): MaterialGrant => value;
-const writable = (record: Record, authority: WebSnapshotReadAuthority): boolean => record.threadId !== undefined
-  ? record.threadId === authority.threadId : record.sessionId === authority.sessionId && authority.threadId === undefined;
+const writable = (record: Record, authority: WebSnapshotReadAuthority): boolean => record.threadId === authority.threadId;
 const visible = (payload: CollectionPayload, record: Record, authority: WebSnapshotReadAuthority, grants: Set<string>): boolean => (
   payload.persisted || writable(record, authority) || authority.threadId !== undefined && grants.has(payload.collectionId)
 );
@@ -68,12 +63,11 @@ export const createMaterialCollections = (workingStates: WorkspaceWorkingStateRo
   const serializer = deps.serializer ?? createWorkspaceOpSerializer();
   const inScope = <T>(ctx: MaterialCollectionContext, purpose: string, work: (context: KernelRecordContext) => Promise<T>): Promise<T> => {
     const { authority } = ctx;
-    if (!authority.owningWorkspaceId) throw new HarnessServiceError("forbidden", "Material collections require an owning workspace");
-    const access: WorkspaceWorkingStateRootAccess = "kind" in authority && authority.kind === "thread"
-      ? { withBranchStore: (workspace, use, consume, mode) => {
+    if (!authority || authority.kind !== "thread" || !authority.threadId || !authority.owningWorkspaceId) throw new HarnessServiceError("forbidden", "Material collections require an admitted Thread authority");
+    const access: WorkspaceWorkingStateRootAccess = { withBranchStore: (workspace, use, consume, mode) => {
         if (workspace !== authority.owningWorkspaceId) throw new Error("Material authority changed its scope");
         return workingStates.withBranchStore(workspace, use, consume, mode, { threadId: authority.threadId });
-      } } : workingStates;
+      } };
     return kernelContext(access, authority.owningWorkspaceId, purpose, (_store, context) => work(context));
   };
   const grantsFor = async (context: KernelRecordContext, authority: WebSnapshotReadAuthority): Promise<Set<string>> => {
@@ -162,15 +156,13 @@ export const createMaterialCollections = (workingStates: WorkspaceWorkingStateRo
       const origin = ctx.origin ?? `material:${randomUUID()}`;
       value.lastMutation = { origin, inputHash: hashInput(params, ctx), ...(memberId ? { memberId } : {}), effect };
       ctx.signal?.throwIfAborted();
-      const sessionId = previous ? previous.sessionId : ctx.authority.sessionId;
       let stored: Record;
       try {
         // Do not pass observer cancellation into an admitted atomic write. Its original
         // promise and operation receipt, not an abort race, establish the effect.
         stored = await context.records.put({ operationId: materialMutationOperationId(origin), recordId: id,
           recordType: sharing ? MATERIAL_GRANT_RECORD_TYPE : MATERIAL_COLLECTION_RECORD_TYPE, state: "temporary",
-          ...(sessionId ? { sessionId } : {}),
-          ...(ctx.authority.threadId ? { threadId: ctx.authority.threadId } : {}),
+          threadId: ctx.authority.threadId,
           payloadJson: JSON.stringify(value), references,
           ...(previous ? { expectedRecordRevision: previous.recordRevision } : {}),
         });
@@ -278,7 +270,7 @@ export const createMaterialCollections = (workingStates: WorkspaceWorkingStateRo
       ctx.signal?.throwIfAborted();
       return result({ status: "ok", hits, ...(unreadable.length ? { unreadable } : {}) });
     }
-    if (!writable(selected.record, ctx.authority)) return result({ status: "denied", message: "Collection is owned by another Thread or session" });
+    if (!writable(selected.record, ctx.authority)) return result({ status: "denied", message: "Collection is owned by another Thread" });
     const payload = structuredClone(selected.payload);
     if (params.action === "remove") {
       const memberId = params.memberId?.trim();
@@ -322,12 +314,5 @@ export const createMaterialCollections = (workingStates: WorkspaceWorkingStateRo
     payload.members.push(member); payload.updatedAt = now();
     return commit(params, ctx, payload, selected.record, [...selected.record.references, ...(ref ? refs(member, ref) : [])], member.memberId);
   };
-  const handle: HarnessService<"materials.collections">["handle"] = async (params, context) => {
-    const threadId = await deps.resolveThreadId?.(context.sessionId);
-    if (!context.workspaceId) throw new HarnessServiceError("forbidden", "Material collections require an owning workspace");
-    return (await execute(params, { authority: { owningWorkspaceId: context.workspaceId, sessionId: context.sessionId, ...(threadId ? { threadId } : {}) },
-      signal: context.signal, ...(deps.fetchUrl ? { fetchUrl: input => deps.fetchUrl!(input, context) } : {}),
-      ...(deps.threadsRelated ? { threadsRelated: deps.threadsRelated } : {}) })).result;
-  };
-  return { handle, execute, receipt };
+  return { execute, receipt };
 };

@@ -13,7 +13,7 @@ interface Subscription {
   id: string;
   key: string;
   threadId: string;
-  scope: { sessionId: string; projectId?: string };
+  scope: { threadId: string; projectId?: string };
   binding: HostServiceBinding;
   controller: AbortController;
   dirty: boolean;
@@ -204,7 +204,7 @@ export class RunObservers {
     });
   }
 
-  private selectedProviderKey(selection: Selection, routing: { sessionId: string; projectId?: string }): string | undefined {
+  private selectedProviderKey(selection: Selection, routing: { threadId: string; projectId?: string }): string | undefined {
     const candidates = selection.catalog.extensions.filter(entry => entry.desired.enabled && entry.manifest.entrypoints?.host
       && entry.manifest.provides?.services?.some(service => service.id === VARIN_RUN_ACTIVITY_SERVICE_ID && service.version === VARIN_RUN_ACTIVITY_VERSION))
       .map(entry => ({ providerId: entry.manifest.id, providerKey: `${entry.manifest.id}:host:${VARIN_RUN_ACTIVITY_SERVICE_ID}@${VARIN_RUN_ACTIVITY_VERSION}` }));
@@ -220,7 +220,7 @@ export class RunObservers {
   private async selectScope(threadId: string, projectId: string | null, selection: Selection): Promise<void> {
     if (this.selection !== selection || this.lifetime.signal.aborted) return;
     const key = JSON.stringify([threadId, projectId]);
-    const routing = { sessionId: threadId, ...(projectId !== null ? { projectId } : {}) };
+    const routing = { threadId, ...(projectId !== null ? { projectId } : {}) };
     const providerKey = this.selectedProviderKey(selection, routing);
     if (!providerKey) { this.remove(key); return; }
     const id = JSON.stringify([`${VARIN_RUN_ACTIVITY_SERVICE_ID}@${VARIN_RUN_ACTIVITY_VERSION}`, providerKey, threadId, projectId]);

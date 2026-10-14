@@ -1,3 +1,5 @@
+import { createKnowledgeInference } from '../vectors/inference.js';
+import type { KernelClient } from '../../kernel/kernel-client.js';
 import type { LocalInferenceLease } from './local-inference.js';
 import { resolveScopedIndexRoots } from '../index-scope.js';
 import { createHash } from 'node:crypto';
@@ -7,13 +9,10 @@ import { SemanticInferenceError, type createSemanticInference, type SemanticInfe
 import type { RetrievalSemanticLease } from '../../kernel/retrieval-composition.js';
 import { randomUUID } from 'node:crypto';
 import path from 'node:path';
-import type { PiRuntimeBroker, PiRuntimeBrokerEvent } from '@varin/runtime-broker';
 import { FAST_DECISION_PURPOSES } from '@varin/protocol';
-import type { AgentInputContext, HarnessInferenceBindingSnapshot, PiSettingsSnapshot } from '@varin/protocol';
+import type { HarnessInferenceBindingSnapshot } from '@varin/protocol';
+import type { AgentSettingsSnapshot } from '@varin/application-client';
 import type { DocumentAuthority, DocumentMutationObservation } from '../../documents/authority.js';
-import type { HarnessServiceHost } from '../../harness/service-host.js';
-import type { createWorkingBranchLookups } from '../../harness/working-state/working-branch-lookups.js';
-import type { ThreadExecutionViewRegistry } from '../../harness/working-state/execution-view.js';
 import { createSemanticBackend } from './backend.js';
 import type { SemanticEmbedder } from './embedder.js';
 import { isAbortError, waitWithSignal } from '../../cancellation.js';
@@ -21,10 +20,8 @@ import { workspaceScope, defaultRecipeIdentity, recipeIdOf, spaceIdOf } from './
 import type { InferenceCall } from './inference-requests.js';
 import { pinSemanticQueryView, type SemanticDraftReadResult, type SemanticSourceView } from './query-view.js';
 import { createSemanticIndexRuntime, resolveSemanticScanRoots, type SemanticIndexRuntimeOptions, type SemanticScanOptions } from './runtime.js';
-import { requestWorkspaceInference, resolveInferenceBinding } from './workspace-inference.js';
-import { isBotScopeId, isSessionScopeId } from '../../harness/owner-scope.js';
+import { isBotScopeId, isThreadScopeId } from '../../harness/owner-scope.js';
 
-type InferenceBroker = Pick<PiRuntimeBroker, 'requestForWorkspace' | 'watchConfig' | 'unwatchConfig'>;
 type PathMutation = Pick<DocumentMutationObservation, 'workspaceId' | 'resourceId' | 'kind'>;
 
 /**
@@ -36,32 +33,15 @@ type PathMutation = Pick<DocumentMutationObservation, 'workspaceId' | 'resourceI
  */
 export const GLOBAL_INFERENCE_SCOPE = 'inference:global';
 const inferenceScopeId = (scopeId: string): string => (
-  isBotScopeId(scopeId) || isSessionScopeId(scopeId) || scopeId === 'user' ? GLOBAL_INFERENCE_SCOPE : scopeId
+  isBotScopeId(scopeId) || isThreadScopeId(scopeId) || scopeId === 'user' ? GLOBAL_INFERENCE_SCOPE : scopeId
 );
 
 export interface WorkspaceSemanticRuntimeOptions extends Omit<SemanticIndexRuntimeOptions, 'getEmbedder' | 'documents'> {
   /** Override the quiet first/retry interval in hosts that need different pacing. */
   reconcileMinimumIntervalMs?: number;
-  documents: Pick<DocumentAuthority, 'read' | 'inspectWorkspace' | 'watch' | 'agentInputDraftPaths' | 'readAgentInputSnapshot'>;
-  readDraft?: (
-    sessionId: string,
-    inputContext: AgentInputContext,
-    resourceId: string,
-    workspaceId: string,
-  ) => SemanticDraftReadResult | Promise<SemanticDraftReadResult>;
-  getBroker(): InferenceBroker | null;
-  /**
-   * HR3: one shared worker directory for settings/inference transport. Harness
-   * inference resolves global configuration only (project scope never feeds
-   * embedding/rerank/fast-decision), so every resource root can reuse the same
-   * worker instead of spawning a workspace worker per indexed directory.
-   * Root cwd still owns document reads and scan addressing.
-   */
-  configCwd: string;
-  /** Shared Host configuration/credential owner; never a Pi session or worker. */
-  runtimeInference?: ReturnType<typeof createSemanticInference>;
-  executionViews: Pick<ThreadExecutionViewRegistry, 'get'>;
-  workingBranches: Pick<ReturnType<typeof createWorkingBranchLookups>, 'pinQuery'>;
+  documents: Pick<DocumentAuthority, 'read' | 'inspectWorkspace' | 'watch'>;
+  runtimeInference: ReturnType<typeof createSemanticInference>;
+  kernel?: Pick<KernelClient, 'agentRuntimeRequest'>;
   onBindingChanged?: (workspaceId: string) => void;
 }
 
@@ -73,12 +53,10 @@ type WorkspaceState = {
   backend: ReturnType<typeof createSemanticBackend>;
   runtime: ReturnType<typeof createSemanticIndexRuntime>;
   binding: HarnessInferenceBindingSnapshot;
-  snapshot: PiSettingsSnapshot | null;
+  snapshot: AgentSettingsSnapshot | null;
   bindingKey: string;
   needsRefresh: boolean;
   refreshTail: Promise<void>;
-  watches: Array<{ id: string; broker: InferenceBroker }>;
-  watching: Promise<void> | null;
   documentWatch: { ready: Promise<boolean>; close(): void } | null;
   documentWatchReady: boolean;
   queryInference?: QueryInferenceSelection;
@@ -97,6 +75,7 @@ export function createWorkspaceSemanticRuntime(options: WorkspaceSemanticRuntime
     const scope = options.getIndexScope?.();
     return scope ? resolveScopedIndexRoots(root, scope) : resolveSemanticScanRoots(root, options.indexDirectories);
   };
+  const knowledgeInference = options.kernel ? createKnowledgeInference({ kernel: options.kernel, inference: options.runtimeInference }) : undefined;
   let localEmbedder = options.embedder;
   // Active and draining generations have explicit query/scan/worker pins. Retired
   // generations leave this shutdown-owner set after their actual work drains.
@@ -104,7 +83,6 @@ export function createWorkspaceSemanticRuntime(options: WorkspaceSemanticRuntime
   const states = new Map<string, WorkspaceState>();
   const loads = new Map<string, Promise<WorkspaceState>>();
   const maintenance = new Map<string, Promise<unknown>>();
-  const watchWorkspaces = new Map<string, string>();
   const pending = new Set<Promise<unknown>>();
   const retrievalQueries = new Set<object>();
   let epoch = 0;
@@ -179,12 +157,6 @@ export function createWorkspaceSemanticRuntime(options: WorkspaceSemanticRuntime
   const assertActive = (): void => {
     if (disposed) throw new Error('Workspace semantic runtime is closed');
   };
-  const unwatch = async (state: WorkspaceState): Promise<void> => {
-    await Promise.allSettled(state.watches.splice(0).map(({ id, broker }) => {
-      watchWorkspaces.delete(id);
-      return broker.unwatchConfig(id);
-    }));
-  };
   const markUnavailable = (state: WorkspaceState): void => {
     state.needsRefresh = true;
     state.snapshot = null;
@@ -198,18 +170,17 @@ export function createWorkspaceSemanticRuntime(options: WorkspaceSemanticRuntime
         ])),
       },
     };
-    state.backend.unavailable(new Error('Pi workspace binding is unavailable'));
+    state.backend.unavailable(new Error('Native inference binding is unavailable'));
     state.runtime.cancelScans();
   };
   const refreshNow = async (state: WorkspaceState, scanWhenChanged: boolean): Promise<void> => {
     if (disposed) return;
-    if (options.runtimeInference) {
-      const startedEpoch = epoch;
-      const selectedLocal = localEmbedder;
-      let candidate: QueryInferenceSelection | undefined;
-      try {
+const startedEpoch = epoch;
+const selectedLocal = localEmbedder;
+let candidate: QueryInferenceSelection | undefined;
+try {
         const settings = await options.runtimeInference.readGlobalSettings();
-        const snapshot: PiSettingsSnapshot = { global: settings as PiSettingsSnapshot['global'],
+        const snapshot: AgentSettingsSnapshot = { global: settings as AgentSettingsSnapshot['global'],
           globalRevision: createHash('sha256').update(JSON.stringify(settings)).digest('hex'),
           project: {}, projectRevision: '', projectTrusted: false };
         const described = await options.runtimeInference.describe();
@@ -244,7 +215,7 @@ export function createWorkspaceSemanticRuntime(options: WorkspaceSemanticRuntime
         } else {
           state.binding.embedding = { status: described.status === 'disabled' || described.status === 'ready' ? 'unavailable' : described.status,
             ...(described.status === 'ready' ? {} : { message: described.reason }) };
-          // The HTTP DTO remains unconfigured for existing Pi and knowledge-index consumers.
+          // The HTTP DTO remains unconfigured for index status consumers.
           if (described.status === 'unconfigured') state.backend.bind(undefined);
           else state.backend.unavailable(new Error('Selected Host embedding binding is unavailable'));
         }
@@ -274,37 +245,7 @@ export function createWorkspaceSemanticRuntime(options: WorkspaceSemanticRuntime
         state.runtime.cancelScans();
         state.queryInference?.lease.release(); delete state.queryInference;
       }
-      return;
-    }
-    const retrying = state.needsRefresh && state.binding.embedding.status === 'unavailable';
-    const startedEpoch = epoch;
-    const broker = options.getBroker();
-    if (!broker) { markUnavailable(state); return; }
-    const [settings, binding] = await Promise.allSettled([
-      broker.requestForWorkspace(options.configCwd, 'settings.get', {}),
-      broker.requestForWorkspace(options.configCwd, 'harness.inference.describe', {}),
-    ]);
-    // A worker replacement cannot publish the old worker's settings as current.
-    if (disposed || startedEpoch !== epoch || broker !== options.getBroker()) return;
-    state.snapshot = settings.status === 'fulfilled' ? settings.value : null;
-    state.needsRefresh = settings.status !== 'fulfilled' || binding.status !== 'fulfilled';
-    const next = resolveInferenceBinding(settings, binding);
-    // A describe response can succeed while a provider could not yet bind.
-    // Do not cache that transient failure until the next settings edit.
-    state.needsRefresh ||= next.embedding.status === 'unavailable' || next.rerank.status === 'unavailable'
-      || Object.values(next.fastDecision?.purposes ?? {}).some(status => status.status === 'unavailable');
-    const key = JSON.stringify(next.embedding);
-    const changed = key !== state.bindingKey;
-    state.binding = next;
-    state.bindingKey = key;
-    if (changed) state.runtime.cancelScans();
-    if (next.embedding.status === 'ready') state.backend.bind(next.embedding.binding);
-    else if (next.embedding.status === 'unconfigured') state.backend.bind(undefined);
-    else state.backend.unavailable(new Error(next.embedding.message ?? 'Embedding binding is unavailable'));
-    if (changed) {
-      try { options.onBindingChanged?.(state.workspaceId); } catch (error) { report(error); }
-    }
-    if (state.indexingEnabled && scanWhenChanged && (changed || retrying)) track(state.runtime.scanWorkspace(state.workspaceId));
+return;
   };
   const refresh = (state: WorkspaceState, scanWhenChanged = false): Promise<void> => {
     const task = state.refreshTail.then(() => refreshNow(state, scanWhenChanged));
@@ -366,37 +307,6 @@ export function createWorkspaceSemanticRuntime(options: WorkspaceSemanticRuntime
       return false;
     }
   };
-  const watch = async (state: WorkspaceState): Promise<void> => {
-    if (disposed || options.runtimeInference || state.watches.length > 0) return;
-    if (state.watching) return state.watching;
-    const broker = options.getBroker();
-    if (!broker) return;
-    const startedEpoch = epoch;
-    // A new subscription follows a period without reliable notifications.
-    // Read bindings again once it is registered, including on watch recovery.
-    state.needsRefresh = true;
-    state.watching = (async () => {
-      const results = await Promise.allSettled([
-        broker.watchConfig({ cwd: options.configCwd }, { kind: 'settings', scope: 'global' }),
-        broker.watchConfig({ cwd: options.configCwd }, { kind: 'document', path: 'models.json', scope: 'global' }),
-      ]);
-      for (const result of results) {
-        if (result.status !== 'fulfilled') continue;
-        const id = result.value.watchId;
-        if (disposed || startedEpoch !== epoch || broker !== options.getBroker()) {
-          await broker.unwatchConfig(id).catch(report);
-          continue;
-        }
-        state.watches.push({ id, broker });
-        watchWorkspaces.set(id, state.workspaceId);
-      }
-      if (!disposed && state.watches.length !== results.length) {
-        state.needsRefresh = true;
-        await unwatch(state);
-      }
-    })();
-    try { await state.watching; } finally { state.watching = null; }
-  };
   const getWorkspace = async (workspaceId: string, autoScan = true, queryOnly = false, configurationRoot?: string): Promise<WorkspaceState> => {
     await maintenance.get(workspaceId);
     assertActive();
@@ -407,10 +317,8 @@ export function createWorkspaceSemanticRuntime(options: WorkspaceSemanticRuntime
       if (configurationRoot === undefined) existing.indexingEnabled = workspaceId !== GLOBAL_INFERENCE_SCOPE
         && (await selectedRoots(existing.root)).length > 0;
       if (existing.indexingEnabled && !queryOnly) await ensureDocumentWatch(existing, true);
-      await watch(existing);
       // Also wait for a refresh already queued by config.changed.
-      if (existing.needsRefresh || options.runtimeInference) await refresh(existing, autoScan);
-      else await existing.refreshTail;
+      await refresh(existing, autoScan);
       assertActive();
       return existing;
     }
@@ -424,21 +332,7 @@ export function createWorkspaceSemanticRuntime(options: WorkspaceSemanticRuntime
       const indexingEnabled = configurationRoot === undefined && workspaceId !== GLOBAL_INFERENCE_SCOPE
         && (await selectedRoots(inspected.root)).length > 0;
       assertActive();
-      const backend = createSemanticBackend({
-        local: localEmbedder,
-        embedClient: {
-          embed: (params) => {
-            const broker = options.getBroker();
-            if (!broker) throw new Error('Pi workspace binding is unavailable');
-            return requestWorkspaceInference(broker, options.configCwd, 'harness.embed', {
-              purpose: params.purpose, providerId: params.providerId, modelId: params.modelId,
-              protocol: 'openai-compatible', configurationId: params.configurationId,
-              items: params.items, batchId: params.batchId, maxTokens: params.maxTokens,
-              ...(params.dimensions === undefined ? {} : { dimensions: params.dimensions }),
-            }, params.signal);
-          },
-        },
-      });
+      const backend = createSemanticBackend({ local: localEmbedder });
       const runtime = createSemanticIndexRuntime({ ...options, getEmbedder: () => backend.embedder });
       const state: WorkspaceState = {
         workspaceId, root: inspected.root, indexingEnabled, backend, runtime,
@@ -453,7 +347,7 @@ export function createWorkspaceSemanticRuntime(options: WorkspaceSemanticRuntime
           },
         },
         snapshot: null, bindingKey: '', needsRefresh: true, refreshTail: Promise.resolve(),
-        watches: [], watching: null, documentWatch: null, documentWatchReady: false,
+        documentWatch: null, documentWatchReady: false,
       };
       // Never let a query run against the local backend before settings resolve.
       markUnavailable(state);
@@ -464,7 +358,6 @@ export function createWorkspaceSemanticRuntime(options: WorkspaceSemanticRuntime
       if (indexingEnabled && !queryOnly) await ensureDocumentWatch(state, false);
       // Register observation before reading settings, so changes made while a
       // watch is being created are included in the first binding snapshot.
-      await watch(state);
       await refresh(state);
       if (autoScan && indexingEnabled && !disposed) track(runtime.scanWorkspace(workspaceId));
       await state.refreshTail;
@@ -473,89 +366,6 @@ export function createWorkspaceSemanticRuntime(options: WorkspaceSemanticRuntime
     })();
     loads.set(workspaceId, task);
     try { return await task; } finally { if (loads.get(workspaceId) === task) loads.delete(workspaceId); }
-  };
-
-  const legacyEmbedderFor = (state: WorkspaceState): SemanticEmbedder | undefined => {
-    if (!options.runtimeInference || state.binding.embedding.status !== 'ready') return undefined;
-    return createRemoteEmbedder({ binding: state.binding.embedding.binding,
-      knownDimensions: state.backend.embedder.space.dim, client: { embed: params => {
-        const broker = options.getBroker();
-        if (!broker) throw new Error('Pi workspace inference is unavailable');
-        const { signal, ...request } = params;
-        return requestWorkspaceInference(broker, options.configCwd, 'harness.embed', request, signal);
-      } } });
-  };
-  const semanticRecall: NonNullable<HarnessServiceHost['semanticRecall']> = async (workspaceId, question, limit, searchOptions) => {
-    searchOptions?.signal?.throwIfAborted();
-    const state = await waitWithSignal(getWorkspace(workspaceId), searchOptions?.signal);
-    const queryScope = options.getIndexScope?.();
-    if (queryScope ? (await resolveScopedIndexRoots(state.root, queryScope, true)).length === 0 : !state.indexingEnabled) return {
-      status: 'unavailable', coverage: 'empty', lifecycle: 'idle', hits: [],
-      note: 'This resource root is outside the selected semantic index directories.',
-    };
-    const selectedEmbedder = legacyEmbedderFor(state) ?? state.backend.embedder;
-    const releaseEmbedder = selectedEmbedder.retain?.();
-    let threadSnapshot: Awaited<ReturnType<typeof options.workingBranches.pinQuery>> | undefined;
-    try {
-      const sessionId = searchOptions?.sessionId;
-      const inputContext = searchOptions?.inputContext ?? { source: 'disk' as const };
-      const execution = sessionId ? options.executionViews.get(sessionId) : undefined;
-      threadSnapshot = searchOptions?.threadDocuments || searchOptions?.threadQuery || execution?.mode !== 'virtual' || !sessionId
-        ? undefined
-        : await options.workingBranches.pinQuery(sessionId, {
-            ...(searchOptions?.roots ? { roots: searchOptions.roots } : {}),
-            ...(searchOptions?.signal ? { signal: searchOptions.signal } : {}),
-          });
-      const threadDocuments = searchOptions?.threadDocuments;
-      const threadQuery = searchOptions?.threadQuery ?? threadSnapshot ?? undefined;
-      if (execution?.mode === 'virtual' && !threadDocuments && !threadQuery) throw new Error('Working-branch query view is unavailable');
-      const draftPaths = sessionId ? options.documents.agentInputDraftPaths(sessionId, inputContext, workspaceId)
-        : inputContext.source === 'surface'
-          ? inputContext.roots.find((root) => root.workspaceId === workspaceId)?.dirtyPaths ?? []
-          : undefined;
-      const view = await pinSemanticQueryView({
-        inputContext,
-        workspaceId,
-        ...(draftPaths === undefined ? {} : { draftPaths }),
-        ...(threadQuery ? { threadDocuments: [] } : threadDocuments ? { threadDocuments } : sessionId ? {
-          readDraft: (resourceId: string) => options.readDraft
-            ? options.readDraft(sessionId, inputContext, resourceId, workspaceId)
-            : options.documents.readAgentInputSnapshot(sessionId, inputContext, resourceId, workspaceId),
-        } : {}),
-      });
-      // Existing Pi callers retain their own query purpose/invocation transport.
-      // They share this index and the neutral wire implementation, never a fake
-      // native Run or a second workspace index. Native queries do not enter here.
-      const result = await state.runtime.search(workspaceScope(workspaceId), question, limit, {
-        embedder: selectedEmbedder,
-        ...(searchOptions?.signal ? { signal: searchOptions.signal } : {}),
-        ...(searchOptions?.roots ? { roots: searchOptions.roots } : {}),
-        ...(reconcilingWorkspaceId === workspaceId ? { waitForFirstPublish: false } : {}),
-        overlays: view.overlays, view: view.view,
-        ...(threadQuery ? { threadQuery } : {}),
-      });
-      const gaps = [...result.gaps];
-      const status = { ...result.status };
-      if (!state.documentWatchReady && !gaps.some((gap) => gap.reason === 'index-watch-unavailable')) {
-        gaps.push({ path: '.', reason: 'index-watch-unavailable' as const });
-        status.status = status.status === 'failed' || status.status === 'unavailable' ? status.status : 'incomplete';
-        if (status.coverage === 'complete') status.coverage = 'partial';
-      }
-      return {
-        status: status.status, coverage: status.coverage,
-        ...(result.status.generation ? { generation: result.status.generation } : {}),
-        ...(result.status.spaceId ? { spaceId: result.status.spaceId } : {}),
-        scope: result.status.scope, lifecycle: result.status.lifecycle, hits: result.hits,
-        ...(gaps.length > 0 ? { gaps } : {}),
-        note: !state.documentWatchReady
-          ? 'Filesystem watching is unavailable; changes and additions may be absent until periodic root reconciliation.'
-          : gaps.some((gap) => gap.reason === 'content-changed')
-            ? 'Changed indexed files were omitted and queued for reindexing. Periodic metadata reconciliation also discovers new files.'
-            : 'Disk hit revisions are checked against Documents. Periodic root reconciliation discovers additions missed by filesystem observation.',
-      };
-    } finally {
-      try { await threadSnapshot?.release(); } finally { releaseEmbedder?.(); }
-    }
   };
   const acquireQuery = async (input: {
     workspaceId: string;
@@ -697,100 +507,6 @@ export function createWorkspaceSemanticRuntime(options: WorkspaceSemanticRuntime
       throw error;
     }
   };
-  const refreshLegacyInference = async (state: WorkspaceState): Promise<void> => {
-    if (!options.runtimeInference) return;
-    const broker = options.getBroker();
-    if (!broker) throw new Error('Legacy inference binding is unavailable');
-    const binding = await broker.requestForWorkspace(options.configCwd, 'harness.inference.describe', {});
-    state.binding.rerank = binding.rerank;
-    if (binding.fastDecision) state.binding.fastDecision = binding.fastDecision;
-    else delete state.binding.fastDecision;
-  };
-  const harnessSettings: NonNullable<HarnessServiceHost['harnessSettings']> = async (workspaceId) => (
-    await getWorkspace(inferenceScopeId(workspaceId))
-  ).snapshot;
-  const rerankExploreViews: NonNullable<HarnessServiceHost['rerankExploreViews']> = async (input) => {
-    input.signal?.throwIfAborted();
-    const state = await waitWithSignal(getWorkspace(inferenceScopeId(input.workspaceId)), input.signal);
-    await refreshLegacyInference(state);
-    const broker = options.getBroker();
-    if (!broker) throw new Error('Pi workspace binding is unavailable');
-    const configured = state.binding.rerank.status === 'ready' ? state.binding.rerank.binding : undefined;
-    if (!configured) throw new Error('Rerank is not configured');
-    if (configured.protocol !== input.settings.protocol || configured.providerId !== input.settings.providerId
-      || configured.modelId !== input.settings.modelId || configured.endpoint !== input.settings.endpoint
-      || configured.maxDocumentTokens !== input.settings.maxDocumentTokens) {
-      throw new Error('Rerank settings changed after the query view was frozen');
-    }
-    const batchId = randomUUID();
-    const result = await requestWorkspaceInference(broker, options.configCwd, 'harness.rerank', {
-      providerId: configured.providerId, modelId: configured.modelId, protocol: 'http-rerank',
-      configurationId: configured.configurationId, query: input.query, documents: input.documents, batchId,
-      ...(configured.endpoint ? { endpoint: configured.endpoint } : {}),
-      ...(configured.maxDocumentTokens ? { maxDocumentTokens: configured.maxDocumentTokens } : {}),
-    }, input.signal);
-    if (result.batchId !== batchId || result.providerId !== configured.providerId || result.modelId !== configured.modelId) {
-      throw new Error('Rerank response does not match the submitted batch binding');
-    }
-    const seen = new Set<number>();
-    for (const score of result.scores) {
-      if (!Number.isInteger(score.index) || score.index < 0 || score.index >= input.documents.length
-        || seen.has(score.index) || score.id !== input.documents[score.index]?.id || !Number.isFinite(score.score)) {
-        throw new Error('Rerank response contains an invalid score identity');
-      }
-      seen.add(score.index);
-    }
-    if (seen.size === 0) throw new Error('Rerank response did not score any submitted document');
-    return result;
-  };
-  const fastDecisionStatus: NonNullable<HarnessServiceHost['fastDecisionStatus']> = async (
-    workspaceId,
-    purpose,
-  ) => {
-    const state = await getWorkspace(inferenceScopeId(workspaceId));
-    await refreshLegacyInference(state);
-    return state.binding.fastDecision?.purposes?.[purpose] ?? { status: 'unavailable' as const };
-  };
-  const fastDecision: NonNullable<HarnessServiceHost['fastDecision']> = async (input) => {
-    input.signal?.throwIfAborted();
-    const state = await waitWithSignal(getWorkspace(inferenceScopeId(input.workspaceId)), input.signal);
-    await refreshLegacyInference(state);
-    const broker = options.getBroker();
-    if (!broker) throw new Error('Pi workspace binding is unavailable');
-    const purposeStatus = state.binding.fastDecision?.purposes?.[input.purpose];
-    if (!purposeStatus || purposeStatus.status !== 'ready') {
-      throw new Error(
-        `Fast decision is ${purposeStatus?.status ?? 'unavailable'} for ${input.purpose}`,
-      );
-    }
-    const configured = purposeStatus.binding;
-    // The caller's binding was frozen at query start; a mid-flight settings or
-    // provider change is a mismatch, not a silent redirect.
-    if (configured.protocol !== input.settings.protocol
-      || configured.providerId !== input.settings.providerId
-      || configured.modelId !== input.settings.modelId
-      || configured.configurationId !== input.settings.configurationId
-      || configured.endpoint !== input.settings.endpoint) {
-      throw new Error('Fast decision settings changed after the query binding was frozen');
-    }
-    const batchId = randomUUID();
-    const result = await requestWorkspaceInference(broker, options.configCwd, 'harness.fastDecision', {
-      providerId: input.settings.providerId,
-      modelId: input.settings.modelId,
-      protocol: 'pi-classifier',
-      configurationId: input.settings.configurationId,
-      purpose: input.purpose,
-      goal: input.goal,
-      materials: input.materials,
-      questions: input.questions,
-      batchId,
-      ...(input.settings.endpoint ? { endpoint: input.settings.endpoint } : {}),
-    }, input.signal);
-    if (result.batchId !== batchId || result.providerId !== configured.providerId || result.modelId !== configured.modelId) {
-      throw new Error('Fast decision response does not match the submitted batch binding');
-    }
-    return result;
-  };
   const observeDocumentMutation = (event: PathMutation): void => {
     if (disposed) return;
     const state = states.get(event.workspaceId);
@@ -810,19 +526,6 @@ export function createWorkspaceSemanticRuntime(options: WorkspaceSemanticRuntime
     // old vectors now; backend setup and embedding stay off the tool response.
     observeDocumentMutation({ workspaceId, resourceId, kind: 'modified' });
   };
-  const processEvent = (event: PiRuntimeBrokerEvent): void => {
-    if (disposed) return;
-    if (event.kind === 'worker.exit' && event.role === 'workspace' && !options.runtimeInference) {
-      epoch++;
-      for (const state of states.values()) { markUnavailable(state); track(unwatch(state)); }
-    } else if (event.kind === 'host' && event.envelope.event === 'config.changed') {
-      const id = watchWorkspaces.get(event.envelope.data.watchId);
-      const state = id ? states.get(id) : undefined;
-      if (state) { state.needsRefresh = true; track(refresh(state, true)); }
-    } else if (event.kind === 'host' && event.envelope.event === 'provider.config.changed') {
-      for (const state of states.values()) { state.needsRefresh = true; track(refresh(state, true)); }
-    }
-  };
   return {
     queryStats: async () => {
       const values = await Promise.all([...states.values()].map(state => state.runtime.publishedReaderStats()));
@@ -831,7 +534,7 @@ export function createWorkspaceSemanticRuntime(options: WorkspaceSemanticRuntime
         retainedPublications: total.retainedPublications + value.retainedPublications,
       }), { activeReaders: 0, retainedPublications: 0 }) };
     },
-    acquireQuery, semanticRecall, harnessSettings, rerankExploreViews, fastDecisionStatus, fastDecision, observeDocumentMutation, observeToolWrite, processEvent,
+    acquireQuery, observeDocumentMutation, observeToolWrite,
     refreshIndexScope: async () => {
       for (const state of states.values()) {
         if (state.workspaceId === GLOBAL_INFERENCE_SCOPE) continue;
@@ -876,8 +579,6 @@ export function createWorkspaceSemanticRuntime(options: WorkspaceSemanticRuntime
           await state.runtime.dispose();
           state.queryInference?.lease.release();
           await state.refreshTail;
-          await state.watching;
-          await unwatch(state);
         }
         return work();
       })();
@@ -906,10 +607,12 @@ export function createWorkspaceSemanticRuntime(options: WorkspaceSemanticRuntime
       // Retired generations leave the owner set after their true pins/worker work drain.
       track((previous.retire?.() ?? previous.dispose?.() ?? Promise.resolve()).then(() => { localEmbedders.delete(previous); }));
     },
-    resolveKnowledgeEmbedder: async (scopeId: string) => {
-      const state = await getWorkspace(inferenceScopeId(scopeId));
-      if (state.binding.embedding.status === 'ready') return { status: 'ready' as const,
-        embedder: legacyEmbedderFor(state) ?? state.backend.embedder };
+    resolveKnowledgeEmbedder: async (workspaceId: string, scopeId = workspaceId) => {
+      const state = await getWorkspace(inferenceScopeId(workspaceId));
+      if (state.binding.embedding.status === 'ready') {
+        if (!knowledgeInference || state.queryInference?.kind !== 'http') return { status: 'unavailable' as const, message: 'Native Knowledge inference owner is unavailable' };
+        return { status: 'ready' as const, embedder: await knowledgeInference.resolve(scopeId, state.queryInference.lease) };
+      }
       if (state.binding.embedding.status === 'unconfigured') return { status: 'unconfigured' as const };
       return { status: state.binding.embedding.status === 'invalid' ? 'invalid' as const : 'unavailable' as const,
         ...(state.binding.embedding.message === undefined ? {} : { message: state.binding.embedding.message }) };
@@ -920,6 +623,7 @@ export function createWorkspaceSemanticRuntime(options: WorkspaceSemanticRuntime
     },
     dispose: async () => {
       disposed = true;
+      await knowledgeInference?.close();
       epoch++;
       if (reconcileTimer) clearTimeout(reconcileTimer);
       reconcileTimer = null;
@@ -937,8 +641,6 @@ export function createWorkspaceSemanticRuntime(options: WorkspaceSemanticRuntime
       await Promise.allSettled([...loads.values(), ...pending]);
       await Promise.allSettled([...states.values()].map(async (state) => {
         await state.refreshTail;
-        await state.watching;
-        await unwatch(state);
       }));
       for (const [id, state] of states) {
         state.queryInference?.lease.release();

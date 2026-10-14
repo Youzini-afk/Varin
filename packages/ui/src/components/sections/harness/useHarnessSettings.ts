@@ -1,6 +1,5 @@
 import React from 'react';
 import { createModelConnectionsHttpAPI, getRuntimeKey } from '@varin/application-client';
-import { getPiRuntimeConnection } from '@/lib/pi-runtime/client';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { reportSettingsSaveState } from '@/lib/persistence';
 import { subscribeVarinEvents } from '@/lib/varinEvents';
@@ -9,21 +8,17 @@ import { HarnessSettingsController } from './harness-settings-state';
 // Only retain controllers with unfinished edits when their page unmounts.
 const controllers = new Map<string, { controller: HarnessSettingsController; users: number }>();
 
-export function useHarnessSettings(runtime: 'agent' | 'pi' = 'agent') {
+export function useHarnessSettings(runtime: 'agent' = 'agent') {
   const cwd = useDirectoryStore((state) => state.currentDirectory);
   const targetKey = JSON.stringify([getRuntimeKey(), cwd, runtime]);
   const entry = React.useMemo(() => {
     const existing = controllers.get(targetKey);
     if (existing) return existing;
     // Capture this runtime connection; a delayed save cannot follow a host switch.
-    const connection = runtime === 'pi' ? getPiRuntimeConnection() : null;
-    const models = runtime === 'agent' ? createModelConnectionsHttpAPI() : null;
-    const target = { cwd };
+    const models = createModelConnectionsHttpAPI();
     const controller = new HarnessSettingsController({
-      read: async () => models ? models.readSettings(cwd) : (await connection!).client.request('settings.get', target),
-      write: async (harness, expectedRevision) => models ? models.updateSettings({ cwd, scope: 'global', expectedRevision, set: { harness }, remove: [] }) : (await connection!).client.request('settings.update', {
-        ...target, scope: 'global', expectedRevision, remove: [], set: { harness },
-      }),
+      read: async () => models.readSettings(cwd),
+      write: async (harness, expectedRevision) => models.updateSettings({ cwd, scope: 'global', expectedRevision, set: { harness }, remove: [] }),
     });
     const next = { controller, users: 0 };
     controllers.set(targetKey, next);
@@ -48,7 +43,7 @@ export function useHarnessSettings(runtime: 'agent' | 'pi' = 'agent') {
     };
   }, [controller, entry, targetKey]);
   React.useEffect(() => subscribeVarinEvents((event) => {
-    if (event.type === 'settings-changed' && event.owner === (runtime === 'agent' ? 'agent-settings' : 'pi-settings')) {
+    if (event.type === 'settings-changed' && event.owner === 'agent-settings') {
       void controller.refresh();
     }
   }), [controller, runtime]);

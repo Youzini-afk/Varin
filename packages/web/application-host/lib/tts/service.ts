@@ -6,7 +6,6 @@
  */
 
 import OpenAI from 'openai';
-import { readPiAuthFile as readAuthFile } from '../pi-config/storage.js';
 import { normalizeCustomOpenAIBaseURL } from './base-url.js';
 
 // Voice options from OpenAI
@@ -17,37 +16,9 @@ export const TTS_VOICES = [
 export type TTSVoice = typeof TTS_VOICES[number];
 
 function getOpenAIApiKey(): string | null {
-  // First check environment variable
-  const envKey = process.env.OPENAI_API_KEY;
-  if (envKey) {
-    return envKey;
-  }
-
-  // Then check Pi's canonical auth file (same as the usage tracker).
-  try {
-    const authValue = readAuthFile() as unknown;
-    const auth = authValue && typeof authValue === 'object' && !Array.isArray(authValue)
-      ? authValue as Record<string, unknown>
-      : {};
-    // Check for openai, codex, or chatgpt aliases
-    const openaiAuth = auth.openai || auth.codex || auth.chatgpt;
-    if (openaiAuth) {
-      // Handle both string format (just the token) and object format
-      if (typeof openaiAuth === 'string') {
-        return openaiAuth;
-      }
-      // Try access token first (OAuth), then regular token
-      if (openaiAuth && typeof openaiAuth === 'object' && !Array.isArray(openaiAuth)) {
-        const record = openaiAuth as Record<string, unknown>;
-        if (typeof record.access === 'string' && record.access) return record.access;
-        if (typeof record.token === 'string' && record.token) return record.token;
-      }
-    }
-  } catch (error) {
-    console.warn('[TTSService] Failed to read auth file:', error instanceof Error ? error.message : error);
-  }
-
-  return null;
+  // Speech uses its explicitly supplied credential or the Host environment.
+  // Conversation accounts are separate and are never discovered or imported.
+  return process.env.OPENAI_API_KEY?.trim() || null;
 }
 
 export interface GenerateSpeechOptions {
@@ -70,6 +41,12 @@ export class TTSService {
 
   private _getClient(): OpenAI | null {
     const apiKey = getOpenAIApiKey();
+
+    if (!apiKey) {
+      this._client = null;
+      this._lastApiKey = null;
+      return null;
+    }
 
     // If API key changed or client doesn't exist, create new client
     if (apiKey && (!this._client || this._lastApiKey !== apiKey)) {
@@ -117,7 +94,7 @@ export class TTSService {
     }
 
     if (!client) {
-      throw new Error('TTS service not available. Configure OpenAI credentials in Varin, provide an API key, or set a custom server URL in settings.');
+      throw new Error('TTS service not available. Set OPENAI_API_KEY on the Host, provide a speech API key, or set a custom server URL in settings.');
     }
 
     if (!text.trim()) {
@@ -156,35 +133,7 @@ export class TTSService {
    * Generate speech and return as a buffer (for caching)
    */
   async generateSpeechBuffer(options: GenerateSpeechOptions): Promise<Buffer> {
-    const client = this._getClient();
-    if (!client) {
-      throw new Error('OpenAI API key not configured. Set OPENAI_API_KEY or configure OpenAI credentials in Varin.');
-    }
-
-    const {
-      text,
-      voice = 'coral',
-      model = 'gpt-4o-mini-tts',
-      speed = 1.0,
-      instructions
-    } = options;
-
-    try {
-      const response = await client.audio.speech.create({
-        model,
-        voice,
-        input: text,
-        speed,
-        ...(instructions && { instructions }),
-        response_format: 'mp3',
-      } as Parameters<typeof client.audio.speech.create>[0]);
-
-      const arrayBuffer = await response.arrayBuffer();
-      return Buffer.from(arrayBuffer);
-    } catch (error) {
-      console.error('[TTSService] Error generating speech buffer:', error);
-      throw error;
-    }
+    return (await this.generateSpeechStream(options)).buffer;
   }
 }
 

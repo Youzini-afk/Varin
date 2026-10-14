@@ -164,7 +164,7 @@ fn context(
     (varin_runtime::catalog::context::ContextProposal { key: key.into(), branch_id: child.child_branch_id.clone(), through_id: None,
         expected_revision: 0, summary: String::new(), effective_system_prompt: "Child".into(), instruction_sources: vec![], memory_checkpoint: None },
         serde_json::from_value(json!({"mode":"agent","threadRole":"worker","revision":0,"configurationDigest":"child",
-            "memorySnapshot":{"revision":0,"memories":[]},"sessionId":child.child_thread_id,"projectId":null,
+            "memorySnapshot":{"revision":0,"memories":[]},"threadId":child.child_thread_id,"projectId":null,
             "originalSections":[{"name":"system","content":"Child"}],"instructionSources":[]})).unwrap())
 }
 fn cut(original: &HostToolBinding, name: &str) -> HostToolBinding {

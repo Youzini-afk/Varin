@@ -11,7 +11,7 @@ afterEach(() => {
 });
 
 for (const attributes of [
-    'data-chat-input="true" data-pi-chat-input="true"',
+    'data-chat-input="true"',
     'data-chat-input="true"',
 ]) {
     test(`focuses the editable content inside the composer (${attributes})`, () => {

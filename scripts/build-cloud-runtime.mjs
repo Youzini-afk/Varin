@@ -28,36 +28,16 @@ export const CLOUD_RUNTIME_PACKAGE_DIRS = Object.freeze([
   'extension-host',
   'protocol',
   'script-runtime',
-  'pi-host',
-  'runtime-broker',
   'settings-store',
   'web',
 ]);
 
 // All shipped native authorities use verified prebuilt binaries. No PTY source rebuild fallback.
 export const CLOUD_RUNTIME_TRUSTED_DEPENDENCIES = Object.freeze([]);
-const CLOUD_RUNTIME_PATCHED_PACKAGES = Object.freeze([
-  '@earendil-works/pi-ai',
-  '@earendil-works/pi-agent-core',
-  '@earendil-works/pi-coding-agent',
-  '@earendil-works/pi-mcp',
-]);
-
 const cloudRuntimePatches = (rootPackage) => {
-  const patches = rootPackage.patchedDependencies ?? {};
-  const piHost = readJson(path.join(repoRoot, 'packages', 'pi-host', 'package.json'));
-  const piPatches = Object.fromEntries(CLOUD_RUNTIME_PATCHED_PACKAGES.map((name) => {
-    const version = piHost.dependencies?.[name];
-    const key = `${name}@${version}`;
-    const relative = patches[key];
-    if (typeof relative !== 'string' || !relative.startsWith('packages/pi-host/patches/')) {
-      throw new Error(`Cloud runtime is missing its pinned Pi patch: ${key}`);
-    }
-    return [key, relative];
-  }));
-  const bracePatch = patches['braces@3.0.3'];
+  const bracePatch = rootPackage.patchedDependencies?.['braces@3.0.3'];
   if (bracePatch !== 'bun-patches/braces@3.0.3.patch') throw new Error('Cloud runtime is missing its pinned braces security patch');
-  return { ...piPatches, 'braces@3.0.3': bracePatch };
+  return { 'braces@3.0.3': bracePatch };
 };
 
 export const CLOUD_RUNTIME_FORBIDDEN_UPDATE_IDENTITIES = Object.freeze([
@@ -110,14 +90,6 @@ const packageFiles = Object.freeze({
     optional: [],
   },
   'script-runtime': { required: ['package.json', 'dist'], optional: [] },
-  'pi-host': {
-    required: ['package.json', 'dist', 'patches'],
-    optional: [],
-  },
-  'runtime-broker': {
-    required: ['package.json', 'dist'],
-    optional: [],
-  },
   'settings-store': {
     required: ['package.json', 'dist'],
     optional: [],
@@ -291,7 +263,7 @@ export const verifyCloudRuntimeLayout = (outputDir, { requireLock = true, requir
   }
   for (const relative of Object.values(rootManifest.patchedDependencies ?? {})) {
     if (typeof relative !== 'string' || relative.split(/[\\/]/).includes('..')
-      || (!relative.startsWith('packages/pi-host/patches/') && relative !== 'bun-patches/braces@3.0.3.patch')
+      || relative !== 'bun-patches/braces@3.0.3.patch'
       || !existsSync(path.join(outputDir, relative))) {
       throw new Error(`Cloud runtime patch is missing: ${String(relative)}`);
     }
@@ -341,8 +313,6 @@ export const verifyCloudRuntimeLayout = (outputDir, { requireLock = true, requir
   }
 
   if (requireInstall) {
-    const brokerLink = path.join(outputDir, 'packages', 'web', 'node_modules', '@varin', 'runtime-broker');
-    if (!existsSync(brokerLink)) throw new Error('Installed cloud runtime cannot resolve @varin/runtime-broker.');
     const extensionHostLink = path.join(outputDir, 'packages', 'web', 'node_modules', '@varin', 'extension-host');
     if (!existsSync(extensionHostLink)) throw new Error('Installed cloud runtime cannot resolve @varin/extension-host.');
     const extensionBuiltinsLink = path.join(outputDir, 'packages', 'web', 'node_modules', '@varin', 'extension-builtins');
@@ -396,13 +366,10 @@ export const installCloudRuntimeDependencies = (
       import { existsSync } from 'node:fs';
       import path from 'node:path';
       import { pathToFileURL } from 'node:url';
-      const broker = await import('./packages/web/node_modules/@varin/runtime-broker/dist/index.js');
       const extensions = await import('./packages/web/node_modules/@varin/extension-host/dist/index.js');
       const builtins = await import('./packages/web/node_modules/@varin/extension-builtins/dist/index.js');
       if (typeof extensions.ApplicationExtensionCatalog !== 'function') throw new Error('Varin extension host is unavailable');
       if (!Array.isArray(builtins.VARIN_BUNDLED_LANGUAGE_SERVERS)) throw new Error('Varin extension builtins are unavailable');
-      const entry = broker.resolveBundledPiHostEntry();
-      if (!entry) throw new Error('Pi host entry was not resolved');
       const webRequire = createRequire(new URL('./packages/web/package.json', import.meta.url));
       webRequire.resolve('sherpa-onnx-node');
       webRequire.resolve('web-tree-sitter');
@@ -419,13 +386,12 @@ export const installCloudRuntimeDependencies = (
         if (!existsSync(path.join(pdfjsRoot, asset))) throw new Error('PDF.js runtime asset is missing: ' + asset);
       }
       await import(pathToFileURL(pdfjsEntry).href);
-      console.log(entry);
       console.log('PDF.js assets and native Canvas runtime are available');
     `,
   ], {
     cwd: resolvedOutput,
     json,
-    label: 'Cloud runtime Pi and PDF runtime resolution',
+    label: 'Cloud native dependencies and PDF runtime resolution',
   });
   run('node', [path.join(resolvedOutput, 'verify-kernel.mjs'), path.join(resolvedOutput, 'packages/web')], { cwd: resolvedOutput, json, label: 'Cloud release kernel authority smoke' });
 };
@@ -443,12 +409,12 @@ const stageRuntimeTree = (outputDir) => {
   mkdirSync(path.join(outputDir, 'packages'), { recursive: true });
 
   const rootPackage = readJson(path.join(repoRoot, 'package.json'));
-  const piPatches = cloudRuntimePatches(rootPackage);
+  const runtimePatches = cloudRuntimePatches(rootPackage);
   writeFileSync(
     path.join(outputDir, 'package.json'),
     `${JSON.stringify(createRuntimeRootPackage(rootPackage), null, 2)}\n`,
   );
-  for (const relative of Object.values(piPatches)) {
+  for (const relative of Object.values(runtimePatches)) {
     copyEntry(path.join(repoRoot, relative), path.join(outputDir, relative), true);
   }
   copyEntry(path.join(repoRoot, 'scripts/smoke-kernel-release.mjs'), path.join(outputDir, 'verify-kernel.mjs'), true);

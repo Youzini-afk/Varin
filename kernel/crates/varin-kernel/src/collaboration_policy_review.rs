@@ -520,7 +520,7 @@ grant_id: "parent".into(),
         memory_checkpoint: None,
     };
     let basis=serde_json::from_value(json!({"mode":"agent","threadRole":"worker","revision":0,"configurationDigest":"test:child","memorySnapshot":{"revision":0,"memories":[]},
-        "sessionId":child.child_thread_id,"projectId":null,"originalSections":[{"name":"preamble","content":"Read-only child"}],"instructionSources":["test:child"]})).unwrap();
+        "threadId":child.child_thread_id,"projectId":null,"originalSections":[{"name":"preamble","content":"Read-only child"}],"instructionSources":["test:child"]})).unwrap();
     let preparation = db
         .lock()
         .unwrap()

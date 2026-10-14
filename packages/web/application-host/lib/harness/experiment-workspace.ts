@@ -25,10 +25,7 @@ export interface ExperimentWorkspaceCaller {
   workspaceId: string;
   /** Explicit execution identity. It is never inferred from workspaceId. */
   executionWorkspaceId: string;
-  sessionId?: string | undefined;
-  threadId?: string | undefined;
-  runId?: string | undefined;
-  owner?: { runtime: 'pi' } | { runtime: 'agent'; operationId?: string };
+  owner: { runtime: 'agent'; threadId: string; runId: string; operationId?: string };
 }
 
 export interface PrepareExperimentInputOptions {
@@ -124,6 +121,9 @@ const assertCaller = (caller: ExperimentWorkspaceCaller): void => {
   // Do not use `caller.workspaceId` as a fallback here. An invalid execution
   // identity must stop the operation instead of silently widening authority.
   asNonEmptyString(caller.executionWorkspaceId, "Experiment execution workspace identity");
+  if (caller.owner?.runtime !== "agent") throw new Error("Original native experiment owner is required");
+  asNonEmptyString(caller.owner.threadId, "Experiment Thread identity");
+  asNonEmptyString(caller.owner.runId, "Experiment Run identity");
 };
 
 const normalizeRelative = (value: string, label: string): string => {
@@ -209,10 +209,9 @@ const issueExperimentGrant = async (
     grantId: `experiment-workspace:${purpose}:${randomUUID()}`,
     owningWorkspace: caller.workspaceId,
     executionWorkspace: caller.executionWorkspaceId,
-    sessionId: caller.sessionId,
-    threadId: caller.threadId,
-    runId: caller.runId,
-    ...(caller.owner?.runtime === "agent" ? {operationId:caller.owner.operationId} : {}),
+    threadId: caller.owner.threadId,
+    runId: caller.owner.runId,
+    operationId: caller.owner.operationId,
     capabilities: purpose === "materialize"
       ? ["storage.read", "storage.write", "recovery", "recovery.maintenance", "process", "process.maintenance"]
       : ["storage.read", "storage.write"],

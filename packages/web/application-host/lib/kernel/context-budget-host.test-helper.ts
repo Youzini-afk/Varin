@@ -71,7 +71,7 @@ async function initialize(frame: Record<string, unknown>) {
     const policy = await readContextPolicy({ settings: await new AgentSettingsService(join(root, 'agent'), () => false).snapshot(), modelId: model.model,
       ...(model.providerId ? { providerId: model.providerId } : {}) });
     const scope = await runtime.contextScope(run.id);
-    return { policy, scope: { sessionId: run.thread_id, ...(scope?.projectId ? { projectId: scope.projectId } : {}) } };
+    return { policy, scope: { threadId: run.thread_id, ...(scope?.projectId ? { projectId: scope.projectId } : {}) } };
   }, async (id, signal) => { await runtime.startRun(id, signal); }, budget);
   kernel.setContextOwner(service);
   const resume = runtime.resumeContextJob.bind(runtime);
@@ -99,7 +99,7 @@ async function initialize(frame: Record<string, unknown>) {
     const child = frame.child as ChildTask;
     await extensions.upsertServiceRoutingRule({ expectedRevision: (await extensions.routing.read()).document.revision,
       rule: { serviceId: 'varin.context.budget', version: 1, providerKeys: ['example.context-budget:host:varin.context.budget@1'],
-        scope: { sessionId: child.child_thread_id }, allowFallback: false } });
+        scope: { threadId: child.child_thread_id }, allowFallback: false } });
     const childContext = await context({ runtime: 'agent', threadId: child.child_thread_id, branchId: child.child_branch_id }, null,
       { mode: 'agent', threadRole: 'worker', projectId: child.project_id, childProfile: child.selected_profile });
     const prepared = await runtime.prepareChild({ executionId: String(frame.executionId), source: null, context: childContext, expectedContextCheckpoint: null });
@@ -110,7 +110,7 @@ async function initialize(frame: Record<string, unknown>) {
     const parent = await service.query({ action: 'prepare', runId: child.parent_run_id, requestId: 'parent-scope-only', expectedRevision: 0 }, signal);
     assert.equal(selected.status, 'ready'); assert.equal(selected.status === 'ready' && selected.external, true);
     assert.equal(parent.status, 'ready'); assert.equal(parent.status === 'ready' && parent.external, false);
-    assert.equal(checkpoint.personalization?.sessionId, child.child_thread_id);
+    assert.equal(checkpoint.personalization?.threadId, child.child_thread_id);
     assert.equal(checkpoint.personalization?.threadRole, 'worker');
     assert.equal(observations.length, 0, 'Selection alone must not execute the Decision');
     service.close(); await extensions.stop(); await storage.dispose();

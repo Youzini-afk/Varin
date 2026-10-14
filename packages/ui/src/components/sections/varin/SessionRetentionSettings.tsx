@@ -12,7 +12,7 @@ import {
   SETTINGS_ICON_BUTTON_CLASS,
 } from '@/components/sections/shared/SettingsSection';
 import { useUIStore } from '@/stores/useUIStore';
-import { usePiSessionAutoCleanup } from '@/hooks/usePiSessionAutoCleanup';
+import { useThreadAutoCleanup } from '@/hooks/useThreadAutoCleanup';
 import { useI18n, type I18nKey } from '@/lib/i18n';
 
 const MIN_DAYS = 1;
@@ -32,7 +32,7 @@ export const SessionRetentionSettings: React.FC = () => {
   const setAutoDeleteAfterDays = useUIStore((state) => state.setAutoDeleteAfterDays);
   const setSessionRetentionAction = useUIStore((state) => state.setSessionRetentionAction);
 
-  const { candidates, isRunning, runCleanup, action } = usePiSessionAutoCleanup({ autoRun: false });
+  const { candidates, isRunning, runCleanup, action } = useThreadAutoCleanup({ autoRun: false });
   const pendingCount = candidates.length;
 
   const handleRunCleanup = React.useCallback(async () => {

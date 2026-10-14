@@ -219,7 +219,6 @@ export interface WorkingStateRootStore {
     operationId: string,
     signal?: AbortSignal,
   ): Promise<import("./materializer.js").MaterializeResult>;
-  measurePin(pin: WorkingStatePin): Promise<import("@varin/protocol").ThreadSpaceMeasurement>;
   directoryMatchesResult(branchId: string, revision: number, directory: string): Promise<boolean>;
   captureBranchCandidateIdentity(branchId: string, directory: string, changedPaths: string[]): Promise<string | null>;
   captureSeededPathIdentity(directory: string, changedPaths: string[], seed: string): Promise<string>;

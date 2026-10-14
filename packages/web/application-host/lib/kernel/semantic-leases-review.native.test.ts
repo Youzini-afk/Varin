@@ -4,7 +4,7 @@ import { createServer, type ServerResponse } from 'node:http';
 import { once } from 'node:events';
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import { fileURLToPath, pathToFileURL } from 'node:url';
+import { fileURLToPath } from 'node:url';
 import { afterEach, expect, it, vi } from 'vitest';
 import { ApplicationExtensionRuntime } from '@varin/extension-host';
 import { createRetrievalComposition } from './retrieval-composition.js';
@@ -19,10 +19,11 @@ import { createStructureSource } from '../structure/source.js';
 import { createTreeSitterStructureProvider } from '../structure/tree-sitter-provider.js';
 import { createFsSearchRuntime } from '../fs/search.js';
 import { retrievalFixture, responseTool, responseDone, latestOutput } from './retrieval-review.test-helper.js';
+import { ModelsService } from '../models/service.js';
 import type { RetrievalQuery } from './protocol.generated.js';
 
 const repository = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../../../..');
-const { HostCredentialAuthority } = await import(pathToFileURL(path.join(repository, 'packages/pi-host/src/credential-authority.ts')).href);
+
 const cleanups: Array<() => Promise<void>> = [];
 afterEach(async () => { for (const cleanup of cleanups.splice(0).reverse()) await cleanup(); vi.restoreAllMocks(); });
 const semanticKey = 'varin.builtin.retrieval-semantic:host:varin.retrieval.plan@1';
@@ -47,14 +48,13 @@ async function fixture(hooks: { concurrency?: number; conversation?: (body: Reco
   cleanups.push(async () => { server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve())); });
   const endpoint = `http://127.0.0.1:${address.port}/v1`;
   const agentDir = path.join(f.documents.root, 'semantic-agent'); await fs.mkdir(agentDir);
-  const authority = HostCredentialAuthority.open(agentDir);
-  await authority.modifyWithIntent('semantic-review', 'replace', async () => ({ type: 'api_key', key: 'fake-loopback-only-key' }));
-  const writeSettings = (model = 'model-a', extra: Record<string, unknown> = {}) => fs.writeFile(path.join(agentDir, 'settings.json'), JSON.stringify({ harness: { embedding: { protocol: 'openai-compatible', providerId: 'semantic-review', modelId: model, dimensions: 2, maxTokens: 2048, ...extra } } }));
-  const writeModels = (enabled = true) => fs.writeFile(path.join(agentDir, 'models.json'), JSON.stringify({ providers: { 'semantic-review': {
-    api: 'openai-completions', baseUrl: endpoint,
-    models: [{ id: 'model-a', name: 'Fixture A' }, { id: 'model-b', name: 'Fixture B' }],
-    capabilities: { chat: false, embedding: { protocol: 'openai-compatible', enabled, models: [{ id: 'model-a', name: 'Fixture A' }, { id: 'model-b', name: 'Fixture B' }] } },
-  } } }));
+  const authority = new ModelsService(agentDir, { projectTrusted: () => false });
+  const credentialReference = await authority.storeCredential('fake-loopback-only-key', 'semantic-test-account');
+  const writeSettings = (model = 'model-a', extra: Record<string, unknown> = {}) => fs.writeFile(path.join(agentDir, 'agent-settings.json'), JSON.stringify({ harness: { embedding: { protocol: 'openai-compatible', providerId: 'semantic-review', modelId: model, dimensions: 2, maxTokens: 2048, ...extra } } }));
+  const writeModels = async (enabled = true) => authority.save({ id: 'semantic-review', type: 'openai-compatible', name: 'Semantic', enabled,
+    baseUrl: endpoint, authentication: { kind: 'credential', reference: credentialReference }, parameters: {},
+    models: ['model-a', 'model-b'].map(id => ({ id, name: id, enabled: true, operations: ['embedding'] })),
+  }, (await authority.read()).revision);
   await writeModels(); await writeSettings();
   const ledger = createSemanticInferenceLedger({ dataDir: f.documents.dataDir, hostId: 'process-consumer' });
   const receipts: Array<import('../knowledge/semantic/runtime-inference.js').SemanticInferenceReceipt> = [];
@@ -65,13 +65,11 @@ async function fixture(hooks: { concurrency?: number; conversation?: (body: Reco
   const structure = createStructureSource([createTreeSitterStructureProvider({ compute: f.compute, parseBudgetMs: 30_000 })]);
   const filesystem = createFsSearchRuntime({ compute: f.compute });
   const local = createHashEmbedder(); const localCalls = vi.spyOn(local, 'embed');
-  const forbiddenPi = vi.fn(() => { throw new Error('Semantic must not request a Pi broker'); });
-  const workspace = createWorkspaceSemanticRuntime({ dataDir: f.documents.dataDir, hostId: 'process-consumer', configCwd: agentDir,
+  const workspace = createWorkspaceSemanticRuntime({ dataDir: f.documents.dataDir, hostId: 'process-consumer',
     documents: f.documents.authority, structureSource: structure, searchFilesystemFiles: filesystem.searchFilesystemFiles,
     isIndexablePath: async (id, resource, signal, options) => filesystem.isSearchableFile((await f.documents.authority.inspectWorkspace(id)).root, resource, signal, options),
     // These overlap tests explicitly allow three real HTTP slots; the production default is one.
-    scheduler: createEmbedScheduler({ concurrency: hooks.concurrency ?? 3 }), embedder: local, getIndexScope: scope.get, runtimeInference: inference, getBroker: forbiddenPi,
-    executionViews: { get: () => undefined }, workingBranches: { pinQuery: async () => null },
+    scheduler: createEmbedScheduler({ concurrency: hooks.concurrency ?? 3 }), embedder: local, getIndexScope: scope.get, runtimeInference: inference,
   }); cleanups.push(() => workspace.dispose());
   const extensions = await ApplicationExtensionRuntime.create({ dataDir: path.join(f.documents.root, 'extensions'), varinVersion: '0.9.24', brokerScript: path.join(repository, 'packages/extension-host/broker/broker-child.mjs') });
   await extensions.start(); cleanups.push(() => extensions.stop());
@@ -93,13 +91,13 @@ async function fixture(hooks: { concurrency?: number; conversation?: (body: Reco
   const run = async (id: string, roots = ['']) => { const admitted = await f.admit(id, ['code_retrieval'], roots); await admitted.start(); return admitted; };
   const completed = async (admitted: Awaited<ReturnType<typeof run>>) => { await expect.poll(async () => (await f.runtime.run(admitted.receipt.run_id)).state, { timeout: 20_000 }).toBe('completed'); return f.runtime.history(admitted.branchId); };
   cleanups.push(async () => { server.closeAllConnections(); });
-  return { ...f, authority, workspace, inference, ledger, receipts, scope, selections, queries, extensions, wires, forbiddenPi, localCalls, writeSettings, writeModels, scan, run, completed };
+  return { ...f, authority, workspace, inference, ledger, receipts, scope, selections, queries, extensions, wires, localCalls, writeSettings, writeModels, scan, run, completed };
 }
 function respondEmbedding(wire: Wire, response: ServerResponse) {
   response.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({ data: wire.input.map((text, index) => ({ index, embedding: text.includes('BETA_') ? [0, 1] : [1, 0] })) }));
 }
 
-it('real configured inference, registered indexing and installed semantic selection reach history without Pi calls or local fallback', async () => {
+it('real configured inference, registered indexing and installed semantic selection reach history without another runtime or local fallback', async () => {
   const f = await fixture();
   expect(f.workspace.indexStatuses()[0]?.status.coverage).toBe('complete');
   expect(f.wires.some(wire => wire.input.some(text => text.includes('ALPHA_SEMANTIC_EVIDENCE')))).toBe(true);
@@ -117,7 +115,7 @@ it('real configured inference, registered indexing and installed semantic select
   expect(queryOperations).toHaveLength(1);
   const queryOperation = await f.runtime.operation(queryOperations[0]!.subject);
   expect(queryOperation.intent).toMatchObject({ binding: { purpose: 'code-retrieval-query-embedding' } });
-  expect(f.forbiddenPi).not.toHaveBeenCalled(); expect(f.localCalls).not.toHaveBeenCalled();
+  expect(f.localCalls).not.toHaveBeenCalled();
   const sent = f.wires.length; f.scope.update([], [f.documents.workspaceRoot]); await f.workspace.refreshIndexScope();
   const pausedHistory = JSON.stringify(await f.completed(await f.run('semantic-paused-published')));
   expect(pausedHistory).toContain('ALPHA_SEMANTIC_EVIDENCE'); expect(pausedHistory).not.toContain('"reused":true'); expect(f.wires).toHaveLength(sent);
@@ -131,8 +129,8 @@ it('a cold selected semantic query remains incomplete without silently scanning,
   const f = await fixture({ cold: true }); const run = await f.run('semantic-cold'); const history = JSON.stringify(await f.completed(run));
   expect(f.wires).toHaveLength(0); expect(history).not.toContain('ALPHA_SEMANTIC_EVIDENCE');
   expect(f.selections[0]?.plan.semantic?.publishedRevision).toBeNull();
-  expect(history).toMatch(/partial|unavailable/); expect(f.forbiddenPi).not.toHaveBeenCalled();
-  await fs.writeFile(path.join(f.documents.root, 'semantic-agent/settings.json'), '{}');
+  expect(history).toMatch(/partial|unavailable/);
+  await fs.writeFile(path.join(f.documents.root, 'semantic-agent/agent-settings.json'), '{}');
   await f.completed(await f.run('semantic-unconfigured'));
   expect(f.selections[1]?.plan.semantic).toMatchObject({ bindingState: 'unconfigured', configurationId: null, providerId: null, modelId: null });
   await f.writeSettings('model-a', { protocol: 'invalid-protocol' }); await f.completed(await f.run('semantic-invalid'));
@@ -190,7 +188,7 @@ it('credential account replacement while inference waits blocks delivery under t
   const f = await fixture({ embedding: (wire, response) => { if (wire.input.includes(question)) { held = { wire, response }; return true; } return false; } });
   const run = await f.run('semantic-account-replaced'); await expect.poll(() => Boolean(held), { timeout: 15_000 }).toBe(true);
   const sent = f.wires.length;
-  await f.authority.modifyWithIntent('semantic-review', 'replace', async () => ({ type: 'api_key', key: 'fake-replacement-account-key' }));
+  await f.authority.storeCredential('fake-replacement-account-key', 'semantic-test-account');
   respondEmbedding(held!.wire, held!.response); const history = JSON.stringify(await f.completed(run));
   expect(history).not.toContain('ALPHA_SEMANTIC_EVIDENCE'); expect(history).not.toContain('BETA_SEMANTIC_EVIDENCE'); expect(f.wires).toHaveLength(sent);
 }, 45_000);

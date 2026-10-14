@@ -330,7 +330,7 @@ export class AgentRuntimeClient {
     >('runtime.run.scope', { runId }, signal);
     const projectId = admittedScope?.projectId;
     const scope = await this.prepareExtensionOwner(
-      { runId, threadId: run.thread_id, source: launch?.selection.source ?? null, ...(projectId ? { projectId } : {}), ...(child ? { fixed: true } : {}) },
+      { runId, threadId: run.thread_id, branchId: run.branch_id, source: launch?.selection.source ?? null, ...(projectId ? { projectId } : {}), ...(child ? { fixed: true } : {}) },
       required,
       AbortSignal.any([signal, state.controller.signal]),
     );

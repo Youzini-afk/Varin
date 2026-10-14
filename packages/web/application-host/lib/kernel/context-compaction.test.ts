@@ -16,7 +16,7 @@ const input = (): VarinContextCompactionInput => ({ sourceCutHash: 'original-cut
   modelBudget: { contextWindowTokens: 1000, maxOutputTokens: 200, sourceBudgetTokens: 500 },
 });
 const deferred = () => { let resolve!: () => void; const promise = new Promise<void>(done => { resolve = done; }); return { promise, resolve }; };
-const scope = { sessionId: 'thread', projectId: 'project', workspaceId: 'workspace' };
+const scope = { threadId: 'thread', projectId: 'project', workspaceId: 'workspace' };
 const providerKey = 'review.compaction:host:varin.context.compaction@1';
 /** Actual SDK handlers, routing resolver, registry, pins and owner. Runtime storage/preparation
  * ports are controlled here; this test does not assert an installed broker or native publication. */

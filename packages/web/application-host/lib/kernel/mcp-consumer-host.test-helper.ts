@@ -76,7 +76,7 @@ export default defineHostExtension({ activate(context) {
   const descriptor = manifest.provides!.services![0]!;
   const prepareExtension = async (threadId: string, required?: ExtensionToolBinding) => {
     const service = await runtime.prepareService({ serviceId: descriptor.id, version: descriptor.version, method: 'execute',
-      args: [], routing: { sessionId: threadId } });
+      args: [], routing: { threadId } });
     return retainExtensionTool({ runtime, kernel: options.kernel,
       currentPolicy: async () => ({ mode: 'normal', rules: [] }) }, service, required);
   };

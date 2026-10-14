@@ -5,7 +5,7 @@ import { sourceReadError } from './source-admission-error.js';
 import { isDeepStrictEqual } from 'node:util';
 import type { DocumentAuthority } from '../documents/authority.js';
 import { inspectDocumentBytes, revisionFromBytes } from '../documents/inspect.js';
-import type { ExploreFileSnapshot } from '../harness/explore-file-reader.js';
+import type { ExploreFileSnapshot } from '../harness/file-snapshot.js';
 import { normalizePathIdentity, stripWindowsNamespacePrefix } from '../workspace/path-safety.js';
 import type { KernelClient, KernelGrantHandle } from './kernel-client.js';
 import type { LiveSourceResolver } from './live-source.js';

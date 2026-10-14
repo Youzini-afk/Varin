@@ -4,8 +4,7 @@
  * Serves the shared `SETTINGS_CATALOG` through the owning authorities:
  *  - `app`         → the Varin settings document via the serialized store
  *                    (CAS by content-hash revision, atomic multi-field writes).
- *  - `pi-settings` → Pi `settings.get`/`settings.update` on the workspace
- *                    worker (the same path the settings UI uses).
+ *  - `agent-settings` → revisioned native global/project settings authority.
  *  - `client`      → one authenticated device Surface, which applies and
  *                    acknowledges its own local state.
  *  - `action`      → domain surfaces (extensions, providers, tunnel, …),
@@ -19,11 +18,11 @@ import {
   getSettingsCatalogEntry,
   listSettingsCategories,
   querySettingsCatalog,
+  type AgentSettingsSnapshot,
   type SettingsCatalogEntry,
   type SettingsFieldSpec,
 } from '@varin/application-client';
 import type {
-  PiSettingsSnapshot,
   SettingsActionParams,
   SettingsActionResult,
   SettingsFieldResult,
@@ -39,6 +38,8 @@ import type {
   SettingsUpdateResult,
 } from '@varin/protocol';
 import { mergeHarnessSettings } from '@varin/protocol';
+import { ModelConfigurationError } from '../models/configuration.js';
+import type { AgentSettingsService } from '../models/settings.js';
 import { HarnessServiceError } from './service-error.js';
 import type { VarinSettingsDocument } from '@varin/settings-store';
 import type {
@@ -50,11 +51,16 @@ import type {
 
 export interface SettingsServiceCaller {
   workspaceId: string | null;
-  sessionId: string;
+  threadId: string;
+  branchId: string;
+  runId?: string;
+  operationId?: string;
+  signal?: AbortSignal;
+  invocation?: import('../kernel/tool-invocation.js').ToolInvocationAuthority;
 }
 
 export interface SettingsActionOperationStore {
-  /** Exact entry-scoped lookup; operation ids are only meaningful for one entry/session. */
+  /** Exact entry-scoped lookup; operation ids are only meaningful for one entry/Thread/branch. */
   get(caller: SettingsServiceCaller, entryId: string, operationId: string): Promise<{
     id: string;
     entryId: string;
@@ -95,8 +101,8 @@ export interface SettingsServiceDeps {
     removals: readonly string[],
     expectedRevision: string | undefined,
   ): Promise<AppPersistOutcome>;
-  /** Pi runtime settings authority for the caller's workspace. */
-  requestPi(cwd: string, method: 'settings.get' | 'settings.update', params: unknown): Promise<PiSettingsSnapshot>;
+  /** Native revisioned settings owner; global configuration does not require a workspace. */
+  agentSettings(): Pick<AgentSettingsService, 'snapshot' | 'update'>;
   resolveWorkspaceRoot(workspaceId: string): Promise<string | null>;
   /** Best-effort dynamic option resolution; null = surface-resolved only. */
   resolveOptions?(
@@ -114,7 +120,7 @@ export interface SettingsServiceDeps {
   clientSurfaces?: ClientSurfaceBridge;
   /** Fires once per successful write with the affected catalog ids. */
   onChanged?(change: {
-    owner: 'app' | 'pi-settings' | 'client';
+    owner: 'app' | 'agent-settings' | 'client';
     ids: string[];
     scope: 'host' | 'global' | 'project' | 'client';
     revision: string;
@@ -136,17 +142,17 @@ export interface ClientSurfaceFieldResult {
 }
 
 export interface ClientSurfaceBridge {
-  /** Connected surfaces whose stream was Host-validated against one caller session. */
-  listForSession(sessionId: string): ClientSurfaceInfo[];
+  /** Connected surfaces whose stream was Host-validated against one caller Thread/branch. */
+  listForThread(identity: Pick<SettingsServiceCaller, 'threadId' | 'branchId'>): ClientSurfaceInfo[];
   /**
    * Read or apply client-owned fields on one surface. The bridge resolves the
-   * target: the Surface bound to the caller's authenticated session. Several
+   * target: the Surface bound to the caller's authenticated Thread/branch. Several
    * bound candidates = `ambiguous`; none = `unavailable`.
    */
   request(op: {
     type: 'read' | 'apply';
     entries: { id: string; values?: Record<string, unknown>; reset?: string[] }[];
-  }, target: { sessionId: string }): Promise<{
+  }, target: Pick<SettingsServiceCaller, 'threadId' | 'branchId'>): Promise<{
     surface: ClientSurfaceInfo;
     results: ClientSurfaceFieldResult[];
   }>;
@@ -208,7 +214,7 @@ const toSearchItem = (entry: SettingsCatalogEntry): SettingsSearchItem => ({
   owner: entry.owner,
   titleKey: entry.ui.titleKey,
   paths: entryFields(entry).map((field) => field.path),
-  writable: entry.owner === 'app' || entry.owner === 'pi-settings',
+  writable: entry.owner === 'app' || entry.owner === 'agent-settings',
   ...(entry.apply ? { apply: entry.apply } : {}),
   page: entry.ui.page,
   ...(entry.ui.keywords ? { keywords: [...entry.ui.keywords] } : {}),
@@ -370,15 +376,15 @@ export function createSettingsService(deps: SettingsServiceDeps): SettingsServic
     entries: readonly SettingsCatalogEntry[],
   ): Promise<(SettingsSearchItem['summary'] | undefined)[]> => {
     let appDocument: VarinSettingsDocument | null = null;
-    let piSnapshot: PiSettingsSnapshot | null = null;
+    let agentSnapshot: AgentSettingsSnapshot | null = null;
     const needApp = entries.some((entry) => entry.owner === 'app');
-    const needPi = entries.some((entry) => entry.owner === 'pi-settings');
+    const needAgent = entries.some((entry) => entry.owner === 'agent-settings');
     if (needApp) appDocument = await deps.readAppSettings().catch(() => null);
-    if (needPi && caller.workspaceId) {
-      const root = await deps.resolveWorkspaceRoot(caller.workspaceId).catch(() => null);
-      if (root) piSnapshot = await deps.requestPi(root, 'settings.get', {}).catch(() => null);
+    if (needAgent) {
+      const root = caller.workspaceId ? await deps.resolveWorkspaceRoot(caller.workspaceId).catch(() => null) : null;
+      agentSnapshot = await deps.agentSettings().snapshot(root ?? undefined).catch(() => null);
     }
-    const surfaceCount = deps.clientSurfaces?.listForSession(caller.sessionId).length ?? 0;
+    const surfaceCount = deps.clientSurfaces?.listForThread(caller).length ?? 0;
     const actionRoot = caller.workspaceId
       ? await deps.resolveWorkspaceRoot(caller.workspaceId).catch(() => null)
       : null;
@@ -423,11 +429,11 @@ export function createSettingsService(deps: SettingsServiceDeps): SettingsServic
         }
         return summary;
       }
-      if (entry.owner === 'pi-settings' && piSnapshot) {
-        const projectValue = single.scope === 'user' || !piSnapshot.projectTrusted
+      if (entry.owner === 'agent-settings' && agentSnapshot) {
+        const projectValue = single.scope === 'user' || !agentSnapshot.projectTrusted
           ? undefined
-          : getPath(piSnapshot.project, single.path);
-        const globalValue = getPath(piSnapshot.global, single.path);
+          : getPath(agentSnapshot.project, single.path);
+        const globalValue = getPath(agentSnapshot.global, single.path);
         const effective = projectValue ?? globalValue ?? single.default;
         if (single.kind === 'secret') {
           summary.isSet = effective !== undefined && effective !== null && effective !== '';
@@ -522,35 +528,22 @@ export function createSettingsService(deps: SettingsServiceDeps): SettingsServic
     return options ? { options } : {};
   };
 
-  const readPi = async (
+  const readAgent = async (
     entry: SettingsCatalogEntry,
     scope: 'global' | 'project' | 'effective',
     detail: boolean,
     caller: SettingsServiceCaller,
   ): Promise<SettingsReadResult> => {
-    if (!caller.workspaceId) {
-      return {
-        state: 'unavailable',
-        entry: toSearchItem(entry),
-        reason: 'pi-settings require a workspace-bound session',
-      };
-    }
-    const root = await deps.resolveWorkspaceRoot(caller.workspaceId);
-    if (!root) {
-      return {
-        state: 'unavailable',
-        entry: toSearchItem(entry),
-        reason: `cannot resolve workspace root for ${caller.workspaceId}`,
-      };
-    }
-    let snapshot: PiSettingsSnapshot;
+    const root = caller.workspaceId ? await deps.resolveWorkspaceRoot(caller.workspaceId) : null;
+    if (scope === 'project' && !root) return { state: 'unavailable', entry: toSearchItem(entry), reason: 'project settings require an admitted workspace' };
+    let snapshot: AgentSettingsSnapshot;
     try {
-      snapshot = await deps.requestPi(root, 'settings.get', {});
+      snapshot = await deps.agentSettings().snapshot(scope === 'global' ? undefined : root ?? undefined);
     } catch (error) {
       return {
-        state: 'unavailable',
-        entry: toSearchItem(entry),
-        reason: error instanceof Error ? error.message : String(error),
+        state: error instanceof SyntaxError || error instanceof ModelConfigurationError && error.code.includes('invalid')
+          || error instanceof Error && error.message === 'Settings file is malformed (non-object payload)' ? 'malformed' : 'unavailable',
+        entry: toSearchItem(entry), reason: error instanceof Error ? error.message : String(error),
       };
     }
     const fields = entryFields(entry);
@@ -621,12 +614,12 @@ export function createSettingsService(deps: SettingsServiceDeps): SettingsServic
         if (params.scope === 'global' || params.scope === 'project') {
           throw new HarnessServiceError(
             'denied',
-            `"${entry.id}" is host-owned; global/project scope is only valid for pi-settings entries`,
+            `"${entry.id}" is host-owned; global/project scope is only valid for agent-settings entries`,
           );
         }
         return readApp(entry, detail, caller);
-      case 'pi-settings':
-        return readPi(entry, params.scope ?? 'effective', detail, caller);
+      case 'agent-settings':
+        return readAgent(entry, params.scope ?? 'effective', detail, caller);
       case 'client':
         return readClient(entry, caller, params);
       case 'action':
@@ -649,7 +642,7 @@ export function createSettingsService(deps: SettingsServiceDeps): SettingsServic
       return {
         state: 'denied',
         entry: toSearchItem(entry),
-        reason: 'surface selection is Host-resolved from the caller session; model supplied surface ids are not accepted',
+        reason: 'surface selection is Host-resolved from the caller Thread/branch; model supplied surface ids are not accepted',
       };
     }
     const bridge = deps.clientSurfaces;
@@ -665,7 +658,7 @@ export function createSettingsService(deps: SettingsServiceDeps): SettingsServic
       response = await bridge.request({
         type: 'read',
         entries: [{ id: entry.id }],
-      }, { sessionId: caller.sessionId });
+      }, { threadId: caller.threadId, branchId: caller.branchId });
     } catch (error) {
       const code = error instanceof HarnessServiceError ? error.harnessCode : undefined;
       return {
@@ -776,7 +769,7 @@ export function createSettingsService(deps: SettingsServiceDeps): SettingsServic
         detail: `no owner adapter is wired for ${entry.actionRef.domain}`,
       };
     }
-    const args = params.args ?? {};
+    const args = { ...params.args, ...(params.operationId ? { operationId: params.operationId } : {}) };
     const requestedOperationId = params.operationId
       ?? (typeof args.operationId === 'string' && args.operationId.trim() ? args.operationId.trim() : undefined);
     const workspaceRoot = caller.workspaceId
@@ -813,7 +806,7 @@ export function createSettingsService(deps: SettingsServiceDeps): SettingsServic
       detail?: string,
       ownerVerb = params.verb,
     ): Promise<boolean> => {
-      if (!deps.actionOperations || !caller.workspaceId) return false;
+      if (!deps.actionOperations) return false;
       try {
         await deps.actionOperations.put(caller, {
           id: operation.id,
@@ -833,7 +826,7 @@ export function createSettingsService(deps: SettingsServiceDeps): SettingsServic
       if (!stored) {
         return {
           status: 'unavailable', entry: toSearchItem(entry), verb: params.verb,
-          detail: `settings operation ${requestedOperationId} has no durable record for this session`,
+          detail: `settings operation ${requestedOperationId} has no durable record for this Thread/branch`,
         };
       }
       if (stored.entryId !== entry.id) {
@@ -923,6 +916,9 @@ export function createSettingsService(deps: SettingsServiceDeps): SettingsServic
         operation: cancellation,
       };
     }
+    if (requestedOperationId && !await deps.actionOperations?.get(caller, entry.id, requestedOperationId)) {
+      return { status: 'denied', entry: toSearchItem(entry), verb: params.verb, detail: 'Operation does not belong to this Thread, branch and settings entry' };
+    }
     const declared = entry.actionRef.verbs ?? [];
     if (declared.length > 0 && !declared.includes(params.verb) && params.verb !== 'status') {
       return {
@@ -947,9 +943,7 @@ export function createSettingsService(deps: SettingsServiceDeps): SettingsServic
       || Boolean(capabilities.operation?.query);
     if (needsDurableOperation) {
       const operationStore = deps.actionOperations;
-      const unavailableDetail = !caller.workspaceId
-        ? 'asynchronous owner actions require a workspace-bound session'
-        : !operationStore
+      const unavailableDetail = !operationStore
           ? 'asynchronous owner actions require durable Host operation storage'
           : !capabilities.operation?.query
             ? 'owner marked this action asynchronous without a queryable operation identity'
@@ -968,7 +962,7 @@ export function createSettingsService(deps: SettingsServiceDeps): SettingsServic
       if (operationStore?.available && !await operationStore.available(caller).catch(() => false)) {
         return {
           status: 'unavailable', entry: toSearchItem(entry), verb: params.verb,
-          detail: 'Host cannot durably record this owner operation for the workspace/session',
+          detail: 'Host cannot durably record this owner operation for the Thread/branch',
         };
       }
       if (!operationStore?.available) {
@@ -1024,7 +1018,7 @@ export function createSettingsService(deps: SettingsServiceDeps): SettingsServic
           status: 'unavailable',
           entry: toSearchItem(entry),
           verb: params.verb,
-          detail: 'owner returned an operation identity but Host could not durably record it for this workspace/session',
+          detail: 'owner returned an operation identity but Host could not durably record it for this Thread/branch',
           ...(outcome.data !== undefined ? { data: outcome.data } : {}),
         };
       }
@@ -1222,12 +1216,12 @@ export function createSettingsService(deps: SettingsServiceDeps): SettingsServic
     params: SettingsUpdateParams,
   ): Promise<SettingsUpdateResult> => {
     if (params.surface) {
-      throw new HarnessServiceError('denied', 'surface selection is Host-resolved from the caller session; model supplied surface ids are not accepted');
+      throw new HarnessServiceError('denied', 'surface selection is Host-resolved from the caller Thread/branch; model supplied surface ids are not accepted');
     }
     if (params.scope !== undefined) {
       throw new HarnessServiceError(
         'denied',
-        `"${entry.id}" is host-owned; global/project scope is only valid for pi-settings entries`,
+        `"${entry.id}" is host-owned; global/project scope is only valid for agent-settings entries`,
       );
     }
     const { items, revision, effective } = await updateAppBatch(
@@ -1248,7 +1242,7 @@ export function createSettingsService(deps: SettingsServiceDeps): SettingsServic
     };
   };
 
-  interface PiWrite {
+  interface AgentWrite {
     entry: SettingsCatalogEntry;
     set: Record<string, unknown>;
     reset: string[];
@@ -1256,30 +1250,25 @@ export function createSettingsService(deps: SettingsServiceDeps): SettingsServic
   }
 
   /**
-   * Commit one or more pi-owner write specs at one scope in a single
-   * `settings.update` call — the Pi authority's revision CAS covers the merged
+   * Commit one or more Agent-owner write specs at one scope in a single
+   * `settings.update` call — the the native model credential ownerority's revision CAS covers the merged
    * top-level keys atomically.
    */
-  const updatePiBatch = async (
+  const updateAgentBatch = async (
     caller: SettingsServiceCaller,
     scope: 'global' | 'project',
-    writes: PiWrite[],
+    writes: AgentWrite[],
     expectedRevision?: string,
   ): Promise<{ items: SettingsItemResult[]; revision?: string; effective?: Record<string, unknown> }> => {
-    if (!caller.workspaceId) {
-      throw new HarnessServiceError('unavailable', 'pi-settings updates require a workspace-bound session');
-    }
-    const root = await deps.resolveWorkspaceRoot(caller.workspaceId);
-    if (!root) {
-      throw new HarnessServiceError('unavailable', `cannot resolve workspace root for ${caller.workspaceId}`);
-    }
+    const root = caller.workspaceId ? await deps.resolveWorkspaceRoot(caller.workspaceId) : null;
+    if (scope === 'project' && !root) throw new HarnessServiceError('unavailable', 'project settings require an admitted workspace');
     const duplicateCheck = rejectConflictingDuplicatePaths(writes);
     writes = duplicateCheck.accepted;
     const itemResults: SettingsItemResult[] = [...duplicateCheck.rejected];
     const set: Record<string, unknown> = {};
     const remove: string[] = [];
     const validEntryIds: string[] = [];
-    let snapshot = await deps.requestPi(root, 'settings.get', {});
+    let snapshot = await deps.agentSettings().snapshot(scope === 'global' ? undefined : root ?? undefined);
     const currentRevision = scope === 'project' ? snapshot.projectRevision : snapshot.globalRevision;
     for (const write of writes) {
       const guard = write.expectedRevision ?? expectedRevision;
@@ -1305,7 +1294,7 @@ export function createSettingsService(deps: SettingsServiceDeps): SettingsServic
           continue;
         }
         if (field.kind === 'secret') {
-          fieldResults.push({ path, status: 'failed', error: 'credential references are managed by Pi auth, not this service' });
+          fieldResults.push({ path, status: 'failed', error: 'credential references are managed by the native model credential owner, not this service' });
           continue;
         }
         if (scope === 'project' && field.scope === 'user') {
@@ -1327,7 +1316,7 @@ export function createSettingsService(deps: SettingsServiceDeps): SettingsServic
           continue;
         }
         if (field.kind === 'secret') {
-          fieldResults.push({ path, status: 'failed', error: 'credential references are managed by Pi auth, not this service' });
+          fieldResults.push({ path, status: 'failed', error: 'credential references are managed by the native model credential owner, not this service' });
           continue;
         }
         if (scope === 'project' && field.scope === 'user') {
@@ -1357,7 +1346,7 @@ export function createSettingsService(deps: SettingsServiceDeps): SettingsServic
     if (Object.keys(set).length === 0 && remove.length === 0) {
       return { items: itemResults, revision: currentRevision };
     }
-    // CAS: the pi authority pins the revision of the target scope file.
+    // CAS: the native settings authority pins the revision of the target scope file.
     // settings.update applies top-level keys only — nested paths
     // (harness.shell, …) are grouped into a read-modify-write of their root
     // object inside the same CAS revision.
@@ -1396,10 +1385,11 @@ export function createSettingsService(deps: SettingsServiceDeps): SettingsServic
       }
       topLevelSet[rootKey] = rootObject;
     }
-    const updated = await deps.requestPi(root, 'settings.update', {
+    const updated = await deps.agentSettings().update({
+      ...(scope === 'project' && root ? { cwd: root } : {}),
       scope,
       expectedRevision: currentRevision,
-      set: topLevelSet,
+      set: topLevelSet as Record<string, import('@varin/protocol').JsonValue>,
       remove: topLevelRemove,
     }).catch((error: unknown) => {
       throw new HarnessServiceError('failed', error instanceof Error ? error.message : String(error));
@@ -1412,7 +1402,7 @@ export function createSettingsService(deps: SettingsServiceDeps): SettingsServic
       effective[path] = getPath(nextLayer, path);
     }
     deps.onChanged?.({
-      owner: 'pi-settings',
+      owner: 'agent-settings',
       ids: validEntryIds,
       scope,
       revision,
@@ -1423,13 +1413,13 @@ export function createSettingsService(deps: SettingsServiceDeps): SettingsServic
     return { items: itemResults, revision, effective };
   };
 
-  const updatePi = async (
+  const updateAgent = async (
     entry: SettingsCatalogEntry,
     caller: SettingsServiceCaller,
     params: SettingsUpdateParams,
   ): Promise<SettingsUpdateResult> => {
     const scope = params.scope ?? 'global';
-    const { items, revision, effective } = await updatePiBatch(
+    const { items, revision, effective } = await updateAgentBatch(
       caller,
       scope,
       [{ entry, set: params.set ?? {}, reset: params.reset ?? [], expectedRevision: params.expectedRevision }],
@@ -1497,7 +1487,7 @@ export function createSettingsService(deps: SettingsServiceDeps): SettingsServic
           values,
           ...(resets.length > 0 ? { reset: resets } : {}),
         }],
-      }, { sessionId: caller.sessionId });
+      }, { threadId: caller.threadId, branchId: caller.branchId });
     } catch (error) {
       const code = error instanceof HarnessServiceError ? error.harnessCode : undefined;
       throw new HarnessServiceError(
@@ -1537,7 +1527,7 @@ export function createSettingsService(deps: SettingsServiceDeps): SettingsServic
 
   /**
    * Compound update: validate every item, then execute per owner group.
-   * Same-owner app items land in one CAS write; pi-settings merge per scope;
+   * Same-owner app items land in one CAS write; agent-settings merge per scope;
    * client items go to the resolved surface in one request; action entries
    * are reported as needing `settings.action`. Per-item results keep partial
    * success visible — no fake global transaction is implied.
@@ -1549,7 +1539,7 @@ export function createSettingsService(deps: SettingsServiceDeps): SettingsServic
     const items = params.items ?? [];
     const itemResults: SettingsItemResult[] = [];
     const appWrites: AppWrite[] = [];
-    const piByScope = new Map<'global' | 'project', PiWrite[]>();
+    const agentByScope = new Map<'global' | 'project', AgentWrite[]>();
     const clientEntries: { entry: SettingsCatalogEntry; params: SettingsUpdateItem }[] = [];
 
     for (const item of items) {
@@ -1562,16 +1552,16 @@ export function createSettingsService(deps: SettingsServiceDeps): SettingsServic
         case 'app':
           appWrites.push({ entry, set: item.set ?? {}, reset: item.reset ?? [], expectedRevision: item.expectedRevision });
           break;
-        case 'pi-settings': {
+        case 'agent-settings': {
           const scope = item.scope ?? 'global';
-          const list = piByScope.get(scope) ?? [];
+          const list = agentByScope.get(scope) ?? [];
           list.push({ entry, set: item.set ?? {}, reset: item.reset ?? [], expectedRevision: item.expectedRevision });
-          piByScope.set(scope, list);
+          agentByScope.set(scope, list);
           break;
         }
         case 'client': {
           if (item.surface || params.surface) {
-            itemResults.push({ id: item.id, status: 'failed', error: 'surface selection is Host-resolved from the caller session; model supplied surface ids are not accepted' });
+            itemResults.push({ id: item.id, status: 'failed', error: 'surface selection is Host-resolved from the caller Thread/branch; model supplied surface ids are not accepted' });
             break;
           }
           clientEntries.push({ entry, params: item });
@@ -1594,8 +1584,8 @@ export function createSettingsService(deps: SettingsServiceDeps): SettingsServic
       );
       itemResults.push(...batch.items);
     }
-    for (const [scope, writes] of piByScope) {
-      const batch = await updatePiBatch(caller, scope, writes);
+    for (const [scope, writes] of agentByScope) {
+      const batch = await updateAgentBatch(caller, scope, writes);
       itemResults.push(...batch.items);
     }
     for (const clientEntry of clientEntries) {
@@ -1650,8 +1640,8 @@ export function createSettingsService(deps: SettingsServiceDeps): SettingsServic
     switch (entry.owner) {
       case 'app':
         return updateApp(entry, caller, params);
-      case 'pi-settings':
-        return updatePi(entry, caller, params);
+      case 'agent-settings':
+        return updateAgent(entry, caller, params);
       case 'client':
         return updateClient(entry, caller, params);
       case 'action':

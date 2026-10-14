@@ -1,8 +1,9 @@
+import type { AgentSettingsSnapshot } from '@varin/application-client';
 /** Image tools retain their user-selected models, original inference calls and media owners. */
 import { IMAGES_CAPABILITY, IMAGE_TOOL_DECLARATIONS, imageToolDeclaration } from '@varin/extension-builtins';
 import type { HostCapabilityHandler } from '@varin/extension-host';
 import { parseVarinToolJson, type VarinExtensionServiceProvision } from '@varin/extension-contract';
-import { parseHarnessImageSettings, type ImageModelInfo, type ImageToolPurpose, type ImageToolRequest, type ImageToolResult, type PiSettingsSnapshot } from '@varin/protocol';
+import { parseHarnessImageSettings, type ImageModelInfo, type ImageToolPurpose, type ImageToolRequest, type ImageToolResult } from '@varin/protocol';
 import type { ModelsService, InferenceProviderBinding as HostInferenceProviderBinding } from '../models/service.js';
 import { imageMimeType, imageRequest, imageResponse, resolveImageBytes, type ImageBytes } from './image-model.js';
 import { compileToolJsonSchema } from '../models/schema.js';
@@ -32,7 +33,7 @@ const identityOf = (purpose: ImageToolPurpose, provider: HostInferenceProviderBi
 
 export function createImageRuntime(options: {
   authority: Pick<ModelsService, 'resolveImageBinding' | 'listImageModels'>;
-  settings(source: LaunchSource | null): Promise<PiSettingsSnapshot>;
+  settings(source: LaunchSource | null): Promise<AgentSettingsSnapshot>;
   requests: InferenceRequests;
   egress: Pick<EgressRuntime, 'prepare'>;
   media: MediaResourceStore;

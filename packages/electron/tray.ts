@@ -12,7 +12,7 @@
 // The live state lives in the renderer (Zustand). It is pushed here over the
 // existing IPC bridge via the `desktop_tray_update` command; this module owns
 // only presentation. Tray clicks call back through `onAction`, which main.mjs
-// routes to the renderer (focus-session, respond-permission, …) or handles
+// routes to the renderer (focus-thread, respond-permission, …) or handles
 // natively (show-main-window, quit).
 
 import { Tray, Menu, nativeImage, type MenuItemConstructorOptions, type NativeImage } from 'electron';
@@ -21,10 +21,11 @@ export interface TrayAction extends Record<string, unknown> {
   type: string;
 }
 
-interface TraySession {
+interface TrayThread {
   directory?: string | undefined;
   hasError?: boolean | undefined;
-  id: string;
+  threadId: string;
+  branchId: string;
   status?: string | undefined;
   subtitle?: string | undefined;
   title?: string | undefined;
@@ -36,14 +37,16 @@ interface TrayApproval {
   id: string;
   kind: string;
   label?: string | undefined;
-  sessionId: string;
-  sessionTitle?: string | undefined;
+  threadId: string;
+  branchId: string;
+  threadTitle?: string | undefined;
 }
 
 interface TraySnapshot {
   approvals?: TrayApproval[];
   instanceName?: string;
-  sessions?: TraySession[];
+  threads?: TrayThread[];
+  runtimeConfig?: import('./electron-runtime.js').RendererRuntimeConfig;
 }
 
 interface TrayCounts {
@@ -141,7 +144,7 @@ const truncate = (value: unknown, max: number): string => {
 
 // Which status icon key a session maps to. 'blank' (a transparent image)
 // reserves the same left gutter for idle rows so every row aligns.
-const statusIconKey = (session: TraySession): 'blank' | 'busy' | 'error' | 'retry' | 'unseen' => {
+const statusIconKey = (session: TrayThread): 'blank' | 'busy' | 'error' | 'retry' | 'unseen' => {
   if (session.status === 'busy') return 'busy';
   if (session.status === 'retry') return 'retry';
   if (session.hasError) return 'error';
@@ -149,7 +152,7 @@ const statusIconKey = (session: TraySession): 'blank' | 'busy' | 'error' | 'retr
   return 'blank';
 };
 
-const sessionLabel = (session: TraySession): string => {
+const sessionLabel = (session: TrayThread): string => {
   // The status is a native left icon (the ✓ already signals unread), so the
   // label is just the session title.
   return truncate(session.title || 'Untitled session', 40);
@@ -157,7 +160,7 @@ const sessionLabel = (session: TraySession): string => {
 
 const approvalLabel = (approval: TrayApproval): string => {
   const icon = approval.kind === 'permission' ? '⛔' : '❓';
-  const who = truncate(approval.sessionTitle || 'Session', 24);
+  const who = truncate(approval.threadTitle || 'Session', 24);
   const what = truncate(approval.label || (approval.kind === 'permission' ? 'Permission request' : 'Question'), 34);
   return `${icon} ${who} — ${what}`;
 };
@@ -299,7 +302,7 @@ export const createTrayController = ({ idleIconPath, unseenIconPath, breathIconP
   };
 
   const buildMenu = (snapshot: TraySnapshot) => {
-    const sessions = Array.isArray(snapshot.sessions) ? snapshot.sessions : [];
+    const sessions = Array.isArray(snapshot.threads) ? snapshot.threads : [];
     const approvals = Array.isArray(snapshot.approvals) ? snapshot.approvals : [];
     const header = typeof snapshot.instanceName === 'string' && snapshot.instanceName.trim()
       ? snapshot.instanceName.trim()
@@ -313,22 +316,9 @@ export const createTrayController = ({ idleIconPath, unseenIconPath, breathIconP
     if (approvals.length > 0) {
       template.push({ label: 'Needs your attention', enabled: false });
       const approvalItem = (approval: TrayApproval): MenuItemConstructorOptions => {
-        if (approval.kind === 'permission') {
-          return {
-            label: approvalLabel(approval),
-            submenu: [
-              { label: 'Allow once', click: () => onAction({ type: 'respond-permission', sessionId: approval.sessionId, id: approval.id, response: 'once' }) },
-              { label: 'Allow always', click: () => onAction({ type: 'respond-permission', sessionId: approval.sessionId, id: approval.id, response: 'always' }) },
-              { type: 'separator' },
-              { label: 'Deny', click: () => onAction({ type: 'respond-permission', sessionId: approval.sessionId, id: approval.id, response: 'reject' }) },
-              { type: 'separator' },
-              { label: 'Open in app', click: () => onAction({ type: 'focus-session', sessionId: approval.sessionId, directory: approval.directory || '' }) },
-            ],
-          };
-        }
         return {
           label: approvalLabel(approval),
-          click: () => onAction({ type: 'focus-session', sessionId: approval.sessionId, directory: approval.directory || '' }),
+          click: () => onAction({ type: 'focus-thread', threadId: approval.threadId, branchId: approval.branchId, directory: approval.directory || '', runtimeConfig: snapshot.runtimeConfig }),
         };
       };
       for (const approval of approvals.slice(0, MAX_APPROVALS)) {
@@ -344,7 +334,7 @@ export const createTrayController = ({ idleIconPath, unseenIconPath, breathIconP
       template.push({ type: 'separator' });
     }
 
-    const sessionItem = (session: TraySession): MenuItemConstructorOptions => ({
+    const sessionItem = (session: TrayThread): MenuItemConstructorOptions => ({
       label: sessionLabel(session),
       // Status icon on the left, centred across both lines; idle uses the blank
       // placeholder so every row keeps the same gutter.
@@ -353,7 +343,7 @@ export const createTrayController = ({ idleIconPath, unseenIconPath, breathIconP
         : {}),
       // Secondary smaller line (macOS): project · branch.
       ...(session.subtitle ? { sublabel: truncate(session.subtitle, 48) } : {}),
-      click: () => onAction({ type: 'focus-session', sessionId: session.id, directory: session.directory || '' }),
+      click: () => onAction({ type: 'focus-thread', threadId: session.threadId, branchId: session.branchId, directory: session.directory || '', runtimeConfig: snapshot.runtimeConfig }),
     });
 
     if (sessions.length > 0) {
@@ -374,7 +364,7 @@ export const createTrayController = ({ idleIconPath, unseenIconPath, breathIconP
 
     template.push(
       { type: 'separator' },
-      { label: 'New Session', click: () => onAction({ type: 'new-session' }) },
+      { label: 'New Session', click: () => onAction({ type: 'new-thread' }) },
     );
 
     if (isLinux || process.platform === 'win32') {
@@ -401,18 +391,19 @@ export const createTrayController = ({ idleIconPath, unseenIconPath, breathIconP
   // Lightweight signature of the menu-affecting content — skips nativeImage
   // and click handlers that can't be serialized. Cheaper than buildMenu itself.
   const menuKey = (snapshot: TraySnapshot): string => {
-    const sessions = Array.isArray(snapshot.sessions) ? snapshot.sessions : [];
+    const sessions = Array.isArray(snapshot.threads) ? snapshot.threads : [];
     const approvals = Array.isArray(snapshot.approvals) ? snapshot.approvals : [];
     return JSON.stringify({
+      r: snapshot.runtimeConfig?.apiBaseUrl + ':' + snapshot.runtimeConfig?.relayHostId,
       h: typeof snapshot.instanceName === 'string' ? snapshot.instanceName : '',
-      s: sessions.map((s) => `${s.id}|${s.title}|${s.status}|${s.unseen}|${s.hasError}|${s.subtitle}|${s.directory}`),
-      a: approvals.map((a) => `${a.id}|${a.kind}|${a.sessionId}|${a.sessionTitle}|${a.label}|${a.directory}`),
+      s: sessions.map((s) => `${s.threadId}|${s.branchId}|${s.title}|${s.status}|${s.unseen}|${s.hasError}|${s.subtitle}|${s.directory}`),
+      a: approvals.map((a) => `${a.id}|${a.kind}|${a.threadId}|${a.threadTitle}|${a.label}|${a.directory}`),
     });
   };
 
   const update = (rawSnapshot: TraySnapshot | null | undefined): void => {
     const snapshot: TraySnapshot = rawSnapshot && typeof rawSnapshot === 'object' ? rawSnapshot : {};
-    const sessions = Array.isArray(snapshot.sessions) ? snapshot.sessions : [];
+    const sessions = Array.isArray(snapshot.threads) ? snapshot.threads : [];
     const approvals = Array.isArray(snapshot.approvals) ? snapshot.approvals : [];
 
     const counts = {

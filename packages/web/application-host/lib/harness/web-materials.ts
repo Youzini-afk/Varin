@@ -1,26 +1,10 @@
-/**
- * D-315 / Stage L1: fixed web content snapshots.
- *
- * A snapshot pins the readable representation extracted from one fetch: the
- * source identity (requested + final URL), content hash, parser name, and the
- * stored text body. Positions reported against a snapshot (extracted-text
- * line ranges) stay valid for exactly this content — a refresh mints a new
- * snapshotId rather than mutating an existing one, so older references keep
- * resolving to the older content.
- *
- * Snapshots live in the same kernel record store as retrieval artifacts:
- * `web.snapshot` records with a `body` object reference. The record itself is
- * temporary and owned by the fetching session/thread/run; it is released by
- * the ordinary retrieval lifecycle (run settle, thread deletion, session
- * drop, workspace reconcile) unless another live record — promoted evidence,
- * a project source, another run's receipt — still references its body hash.
- * Sharing therefore never depends on possessing another run's receipt: a
- * consumer reads the snapshot under its own session authority.
- */
+/** Fixed content snapshots owned by a real native Thread. A refresh mints a
+ * new snapshot identity; explicit grants and persisted collection references
+ * retain access independently of the original fetching Run. */
 import { createHash, randomUUID } from "node:crypto";
-import type { RetrievalReceiptAuthority, WebSnapshotRef } from "@varin/protocol";
+import type { WebSnapshotRef } from "@varin/protocol";
 import type { WorkspaceWorkingStateRootAccess } from "./working-state/types.js";
-import { createWorkspaceOpSerializer, kernelContext } from "./retrieval-artifacts.js";
+import { createWorkspaceOpSerializer, kernelContext } from "./kernel-records.js";
 
 export const WEB_SNAPSHOT_RECORD_TYPE = "web.snapshot";
 const MATERIAL_GRANT_RECORD_TYPE = "material.grant";
@@ -48,11 +32,9 @@ export interface WebSnapshotContent {
 }
 
 /** Native callers have a real Thread, without manufacturing a Pi session. */
-export type ThreadMaterialAuthority = { kind: "thread"; owningWorkspaceId: string; threadId: string; sessionId?: never; runId?: never };
-export type WebMaterialAuthority = RetrievalReceiptAuthority | ThreadMaterialAuthority;
-export type WebSnapshotReadAuthority =
-  | Pick<RetrievalReceiptAuthority, "owningWorkspaceId" | "sessionId" | "threadId">
-  | ThreadMaterialAuthority;
+export type ThreadMaterialAuthority = { kind: "thread"; owningWorkspaceId: string; threadId: string };
+export type WebMaterialAuthority = ThreadMaterialAuthority;
+export type WebSnapshotReadAuthority = ThreadMaterialAuthority;
 
 export class WebSnapshotReadError extends Error {
   constructor(readonly code: "conflict" | "invalid-range" | "corrupt", message: string) {
@@ -83,8 +65,10 @@ export const createWebMaterialStore = (
 ) => {
   const now = deps.now ?? Date.now;
   const serializer = deps.serializer ?? createWorkspaceOpSerializer();
-  const access = (authority?: WebSnapshotReadAuthority): WorkspaceWorkingStateRootAccess => {
-    if (!authority || !("kind" in authority) || authority.kind !== "thread") return workingStates;
+  const access = (authority: WebSnapshotReadAuthority): WorkspaceWorkingStateRootAccess => {
+    if (!authority || authority.kind !== "thread" || !authority.threadId || !authority.owningWorkspaceId) {
+      throw new Error("Web snapshots require an admitted Thread authority");
+    }
     return { withBranchStore: (workspaceId, purpose, consume, mode) => {
       if (workspaceId !== authority.owningWorkspaceId) throw new Error("Material authority changed its scope");
       return workingStates.withBranchStore(workspaceId, purpose, consume, mode, { threadId: authority.threadId });
@@ -95,7 +79,7 @@ export const createWebMaterialStore = (
     workspaceId: string,
     draft: WebSnapshotDraft,
     body: Buffer,
-    authority?: WebMaterialAuthority,
+    authority: WebMaterialAuthority,
     options: {
       forceNew?: boolean;
       source?: { bytes: Buffer; contentType: string };
@@ -105,7 +89,7 @@ export const createWebMaterialStore = (
     workspaceId,
     "web-snapshot-put",
     async (store, context) => {
-      if (authority && authority.owningWorkspaceId !== workspaceId) {
+      if (authority.owningWorkspaceId !== workspaceId) {
         throw new Error("Web snapshot authority does not match its owning workspace");
       }
       const contentHash = hashBytes(body);
@@ -123,7 +107,7 @@ export const createWebMaterialStore = (
           }
         : undefined;
       // Reuse an existing snapshot only inside the same material authority.
-      // A snapshot record carries the owning session/thread, so returning a
+      // A snapshot record carries the owning Thread, so returning a
       // foreign record would make another Run depend on the first Run's
       // cleanup lifecycle. The body object is still content-addressed and is
       // reused by the new record.
@@ -131,13 +115,7 @@ export const createWebMaterialStore = (
         for (const record of await context.records.list({ recordType: WEB_SNAPSHOT_RECORD_TYPE })) {
           if (record.workspaceId !== undefined && record.workspaceId !== workspaceId) continue;
           if (record.state === "released") continue;
-          if (authority) {
-            if (record.threadId !== undefined) {
-              if (!authority.threadId || record.threadId !== authority.threadId) continue;
-            } else if (record.sessionId !== authority.sessionId || authority.threadId !== undefined) {
-              continue;
-            }
-          }
+          if (record.threadId !== authority.threadId) continue;
           const payload = parseSnapshotPayload(record.payloadJson);
           if (payload
             && payload.sourceUrl === draft.sourceUrl
@@ -180,9 +158,7 @@ export const createWebMaterialStore = (
         recordId,
         recordType: WEB_SNAPSHOT_RECORD_TYPE,
         state: "temporary",
-        ...(authority?.sessionId ? { sessionId: authority.sessionId } : {}),
-        ...(authority?.threadId ? { threadId: authority.threadId } : {}),
-        ...(authority?.runId ? { runId: authority.runId } : {}),
+        threadId: authority.threadId,
         payloadJson: JSON.stringify(ref),
         ownerIds: [ownerId, sourceOwnerId].filter((value): value is string => typeof value === "string"),
         references: [
@@ -197,7 +173,7 @@ export const createWebMaterialStore = (
   const read = async (
     workspaceId: string,
     snapshotId: string,
-    authority?: WebSnapshotReadAuthority,
+    authority: WebSnapshotReadAuthority,
     options: {
       includeSource?: boolean;
       /** Exact byte range; text/codepoint pagination belongs to the reader. */
@@ -207,11 +183,12 @@ export const createWebMaterialStore = (
     } = {},
   ): Promise<WebSnapshotContent | null> => {
     options.signal?.throwIfAborted();
-    if (authority && authority.owningWorkspaceId !== workspaceId) {
+    const scoped = access(authority);
+    if (authority.owningWorkspaceId !== workspaceId) {
       throw new Error("Web snapshot authority does not match its owning workspace");
     }
     const result = await kernelContext(
-      access(authority),
+      scoped,
       workspaceId,
       "web-snapshot-get",
       async (store, context) => {
@@ -224,15 +201,12 @@ export const createWebMaterialStore = (
           || (record.workspaceId !== undefined && record.workspaceId !== workspaceId)) {
           return null;
         }
-        if (authority
-          && (record.threadId !== undefined
-            ? !authority.threadId || record.threadId !== authority.threadId
-            : record.sessionId !== authority.sessionId || authority.threadId !== undefined)) {
+        if (record.threadId !== authority.threadId) {
           // The snapshot id is intentionally not a workspace-wide bearer token.
-          // A caller may reread it from the same Thread across sessions/Runs;
-          // another thread needs an explicit `material.grant` record issued by
+          // A caller may reread it from the same Thread across Runs;
+          // another Thread needs an explicit `material.grant` record issued by
           // the owning thread (D-315 L4). A foreign receipt id never applies.
-          const granted = authority.threadId !== undefined && await (async () => {
+          const granted = await (async () => {
             // Persisted collections are workspace-owned material assets. Their
             // member snapshots remain readable while the collection names them.
             for (const collectionRecord of await context.records.list({ recordType: MATERIAL_COLLECTION_RECORD_TYPE })) {
@@ -386,11 +360,7 @@ export const createWebMaterialStore = (
       workspaceId,
       "web-snapshot-find-analysis",
       async (_store, context) => (await context.records.list({ recordType: WEB_SNAPSHOT_RECORD_TYPE }))
-        .filter((record) => record.state !== "released" && (
-          record.threadId !== undefined
-            ? authority.threadId !== undefined && record.threadId === authority.threadId
-            : authority.threadId === undefined && record.sessionId === authority.sessionId
-        ))
+        .filter((record) => record.state !== "released" && record.threadId === authority.threadId)
         .map((record) => parseSnapshotPayload(record.payloadJson))
         .filter((ref): ref is WebSnapshotRef => ref?.document?.analysis?.id === analysisId
           && ref.document.source?.contentHash === sourceHash
@@ -416,11 +386,7 @@ export const createWebMaterialStore = (
     signal?.throwIfAborted();
     const candidates = await kernelContext(access(authority), workspaceId, "web-snapshot-find-analysis-config",
       async (_store, context) => (await context.records.list({ recordType: WEB_SNAPSHOT_RECORD_TYPE }))
-        .filter((record) => record.state !== "released" && (
-          record.threadId !== undefined
-            ? authority.threadId !== undefined && record.threadId === authority.threadId
-            : authority.threadId === undefined && record.sessionId === authority.sessionId
-        ))
+        .filter((record) => record.state !== "released" && record.threadId === authority.threadId)
         .map((record) => parseSnapshotPayload(record.payloadJson))
         .filter((ref): ref is WebSnapshotRef => ref?.document?.source?.contentHash === sourceHash
           && ref.document.sourceSnapshotId === sourceSnapshotId

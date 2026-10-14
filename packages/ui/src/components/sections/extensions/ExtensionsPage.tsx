@@ -1138,10 +1138,7 @@ const ExtensionCard: React.FC<{
                       {service.id}@{service.version}{service.optional ? ` · ${t('settings.varin.extensions.inspector.optional')}` : ''}
                     </div>
                   ))}
-                  {(entry.manifest.integrates?.piPackages ?? []).map((packageName) => (
-                    <div key={packageName} className="break-all typography-micro text-muted-foreground">Pi · {packageName}</div>
-                  ))}
-                  {(entry.manifest.requires?.services ?? []).length === 0 && (entry.manifest.integrates?.piPackages ?? []).length === 0
+                  {(entry.manifest.requires?.services ?? []).length === 0
                     ? <span className="typography-micro text-muted-foreground">—</span>
                     : null}
                 </div>

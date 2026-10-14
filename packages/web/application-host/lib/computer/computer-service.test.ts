@@ -127,27 +127,28 @@ afterEach(() => {
   for (const dir of dirs) if (existsSync(dir)) rmSync(dir, { recursive: true, force: true });
 });
 
-const piWork = (sessionId: string) => ({ runtime: 'pi' as const, sessionId });
-const piActor = (sessionId: string, runId = `${sessionId}:run`, rootSessionId = sessionId, rootRunId = runId): ComputerActor => ({
-  execution: { work: piWork(sessionId), runId }, rootWork: piWork(rootSessionId), rootExecution: { work: piWork(rootSessionId), runId: rootRunId },
-  registry: { scopeId: 'scope', threadId: sessionId }, label: sessionId, roleAccess: { kind: 'pi-role', readOnly: false },
+const nativeWork = (threadId: string) => ({ runtime: 'agent' as const, threadId, branchId: `${threadId}:branch` });
+const nativeActor = (fixtureThreadId: string, runId = `${fixtureThreadId}:run`, rootThreadId = fixtureThreadId, rootRunId = runId): ComputerActor => ({
+  execution: { work: nativeWork(fixtureThreadId), runId }, rootWork: nativeWork(rootThreadId), rootExecution: { work: nativeWork(rootThreadId), runId: rootRunId },
+  label: fixtureThreadId,
 });
 const directActions = new WeakMap<ReturnType<typeof createOwner>, ReturnType<typeof createOwner>['act']>();
 const createComputerService = (options: ComputerServiceOptions) => {
-  const resolveActor: NonNullable<ComputerServiceOptions['resolveActor']> = options.resolveActor ?? (async work => work.runtime === 'pi' ? piActor(work.sessionId) : null);
+  const resolveActor: NonNullable<ComputerServiceOptions['resolveActor']> = options.resolveActor ?? (async work => nativeActor(work.threadId));
   const resolveScope: NonNullable<ComputerServiceOptions['resolveScope']> = options.resolveScope ?? (async work => {
     const actor = await resolveActor(work); return actor ? { work, rootWork: actor.rootWork, currentExecution: actor.execution, currentRootExecution: actor.rootExecution } : null;
   });
-  const service = createOwner({ notifyActor: async () => {}, ...options, resolveActor, resolveScope });
+  const service = createOwner({ ...options, resolveActor, resolveScope }) as ReturnType<typeof createOwner> & { [K in 'observe' | 'act' | 'open' | 'browser' | 'office']: (params: Parameters<ReturnType<typeof createOwner>[K]>[0] & { fixtureThreadId?: string }) => ReturnType<ReturnType<typeof createOwner>[K]> };
   directActions.set(service, service.act);
   // Direct owner tests enter through the same real assignment admission as product tools.
   for (const name of ['observe', 'act', 'open', 'browser', 'office'] as const) {
-    const original = service[name].bind(service) as (params: { desktopId?: string; sessionId?: string }) => Promise<unknown>;
-    Object.assign(service, { [name]: async (params: { desktopId?: string; sessionId?: string }) => {
+    const original = service[name].bind(service) as (params: { desktopId?: string; fixtureThreadId?: string }) => Promise<unknown>;
+    Object.assign(service, { [name]: async (params: { desktopId?: string; fixtureThreadId?: string }) => {
       if (service.automation.context.getStore() || options.remoteHosts && !options.resolveActor) return original(params);
       const desktop = await service.resolveDesktop(params.desktopId);
-      const work = piWork(params.sessionId ?? 'main');
-      return service.automation.authorize(work, name === 'observe' || name === 'browser' && ['status', 'tabs', 'snapshot'].includes((params as { op?: string }).op ?? '') || name === 'office' && ['status', 'docs'].includes((params as { op?: string }).op ?? '') ? 'observe' : 'control', desktop, () => original(params));
+      const work = nativeWork(params.fixtureThreadId ?? 'main');
+      const { fixtureThreadId: _fixture, ...input } = params;
+      return service.automation.authorize(work, name === 'observe' || name === 'browser' && ['status', 'tabs', 'snapshot'].includes((params as { op?: string }).op ?? '') || name === 'office' && ['status', 'docs'].includes((params as { op?: string }).op ?? '') ? 'observe' : 'control', desktop, () => original(input));
     } });
   }
   return service;
@@ -155,7 +156,7 @@ const createComputerService = (options: ComputerServiceOptions) => {
 const makeService = (driver?: FakeDriver, extra: Partial<ComputerServiceOptions> = {}) => {
   const kernel = fakeKernel();
   let spec: DriverSpawnSpec | null = null;
-  const resolveActor: NonNullable<ComputerServiceOptions['resolveActor']> = extra.resolveActor ?? (async work => work.runtime === 'pi' ? piActor(work.sessionId) : null);
+  const resolveActor: NonNullable<ComputerServiceOptions['resolveActor']> = extra.resolveActor ?? (async work => nativeActor(work.threadId));
   const resolveScope: NonNullable<ComputerServiceOptions['resolveScope']> = extra.resolveScope ?? (async work => {
     const actor = await resolveActor(work); return actor ? { work, rootWork: actor.rootWork, currentExecution: actor.execution, currentRootExecution: actor.rootExecution } : null;
   });
@@ -166,6 +167,8 @@ const makeService = (driver?: FakeDriver, extra: Partial<ComputerServiceOptions>
     platform: "windows",
     dataDir: newDataDir(),
     createDriver: (s) => { spec = s; return driver ?? makeDriver(async () => okResponse()); },
+    onControlEvent: async () => {},
+    onControlEventCancel: async () => {},
     ...extra,
   });
   return { service, kernel, getSpec: () => spec };
@@ -202,21 +205,21 @@ describe("computer service (BC4)", () => {
     const server = app.listen(0, '127.0.0.1');
     await new Promise<void>(resolve => server.once('listening', resolve));
     const apiUrl = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
-    const main = piActor('main', 'run');
-    const source = () => makeService(undefined, { resolveActor: async () => main, notifyActor: async () => {},
+    const main = nativeActor('main', 'run');
+    const source = () => makeService(undefined, { resolveActor: async () => main,
       remoteHosts: async () => [{ id: 'target', label: 'VM', apiUrl }] }).service;
     const a = source(), b = source();
     try {
       const remoteId = (await a.list()).desktops.find(desktop => desktop.remote)?.id;
       expect(remoteId).toBeDefined(); await b.list();
       const id = remoteId!;
-      const call = <T>(service: typeof a, access: 'control' | 'observe', run: () => Promise<T>) => service.automation.authorize(piWork('main'), access, id, run);
+      const call = <T>(service: typeof a, access: 'control' | 'observe', run: () => Promise<T>) => service.automation.authorize(nativeWork('main'), access, id, run);
       const control = await call(a, 'control', () => a.control(id));
       await call(a, 'observe', () => a.observe({ desktopId: id, app: 'notepad' }));
       expect((await call(a, 'control', () => a.act({ desktopId: id, action: { kind: 'key', app: 'notepad', key: 'enter' }, automationEpoch: control.automationEpoch }))).accepted).toBe(true);
       const observed = await call(a, 'observe', () => a.observe({ desktopId: id, app: 'notepad' }));
       await call(b, 'observe', () => b.observe({ desktopId: id, app: 'notepad' }));
-      await b.automation.release(piWork('main'));
+      await b.automation.release(nativeWork('main'));
       expect((await call(a, 'control', () => a.act({ desktopId: id, action: { kind: 'click', app: 'notepad', observationId: observed.id, elementIndex: 1 }, automationEpoch: control.automationEpoch }))).accepted).toBe(true);
       await expect(call(b, 'control', () => b.act({ desktopId: id, action: { kind: 'key', app: 'notepad', key: 'enter' } }))).rejects.toMatchObject({ harnessCode: 'forbidden' });
       expect((await a.automation.stop(main.execution)).status).toBe('enabled');
@@ -225,33 +228,34 @@ describe("computer service (BC4)", () => {
       expect((await call(b, 'control', () => b.act({ desktopId: id, automationEpoch: resumedControl.automationEpoch,
         action: { kind: 'key', app: 'notepad', key: 'enter' } }))).accepted).toBe(true);
     } finally {
-      await Promise.allSettled([a.automation.release(piWork('main')), b.automation.release(piWork('main'))]);
+      await Promise.allSettled([a.automation.release(nativeWork('main')), b.automation.release(nativeWork('main'))]);
       await Promise.all([a.dispose(), b.dispose(), target.dispose()]);
       server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve()));
     }
   });
   it('keeps observations isolated per execution, fences old app epochs, and allows fresh work after user cancellation', async () => {
-    const actors = new Map<string, ComputerActor>(['main', 'lookup'].map(id => [id, { ...piActor(id, `${id}:run`, 'main', 'main:run'), roleAccess: { kind: 'pi-role', readOnly: id === 'lookup' } }]));
+    const actors = new Map<string, ComputerActor>(['main', 'lookup'].map(id => [id, nativeActor(id, `${id}:run`, 'main', 'main:run')]));
     const driver = makeDriver(async op => op.tool === 'get_app_state' ? okResponse({ snapshot: appSnapshot() }) : okResponse());
-    const { service } = makeService(driver, { resolveActor: async ref => actors.get(ref.runtime === 'pi' ? ref.sessionId : '') ?? null, notifyActor: async () => {} });
+    const { service } = makeService(driver, { resolveActor: async ref => actors.get(ref.threadId) ?? null });
     const c = service.automation;
     try {
-      const call = <T>(session: string, access: 'control' | 'observe', run: () => Promise<T>) => c.authorize(piWork(session), access, 'local-console', run);
+      const call = <T>(session: string, access: 'control' | 'observe', run: () => Promise<T>) => c.authorize(nativeWork(session), access, 'local-console', run);
       const control = await call('main', 'observe', () => service.control('local-console'));
       const observation = await call('main', 'observe', () => service.observe({ desktopId: 'local-console', app: 'notepad' }));
-      const requested = await c.request(piWork('lookup'), 'local-console', 'observe', 'Read UI'); await c.decide(piWork('main'), requested.id, true);
+      const child = actors.get('lookup')!;
+      await c.grantRequest(child.execution, child.rootWork, child.rootExecution, 'local-console', 'observe', 'original-assignment'); c.confirmRequest('original-assignment');
       await call('lookup', 'observe', () => service.observe({ desktopId: 'local-console', app: 'notepad' }));
       await expect(call('lookup', 'observe', () => service.observe({ desktopId: 'local-console', app: 'notepad', observationId: observation.id, offset: 1 })))
         .rejects.toMatchObject({ harnessCode: 'forbidden' });
       expect((await call('main', 'control', () => service.act({ desktopId: 'local-console', automationEpoch: control.automationEpoch,
         action: { kind: 'click', app: 'notepad', observationId: observation.id, elementIndex: 1 } }))).accepted).toBe(true);
-      await c.stop((await service.automation.snapshot(piWork('main'))).currentExecution!);
+      await c.stop((await service.automation.snapshot(nativeWork('main'))).currentExecution!);
       expect((await call('main', 'control', () => service.act({ desktopId: 'local-console', automationEpoch: control.automationEpoch,
         action: { kind: 'key', app: 'notepad', key: 'enter' } }))).accepted).toBe(false);
       await call('main', 'observe', () => service.observe({ desktopId: 'local-console', app: 'notepad' }));
       expect((await call('main', 'control', () => service.act({ desktopId: 'local-console', action: { kind: 'key', app: 'notepad', key: 'enter' } }))).accepted).toBe(true);
-      await c.finishRun(piActor('main').execution);
-      actors.set('main', piActor('main', 'next'));
+      await c.finishRun(nativeActor('main').execution);
+      actors.set('main', nativeActor('main', 'next'));
       expect((await call('main', 'control', () => service.act({ desktopId: 'local-console', automationEpoch: control.automationEpoch,
         action: { kind: 'key', app: 'notepad', key: 'enter' } }))).accepted).toBe(false);
     } finally { await service.dispose(); }
@@ -409,23 +413,23 @@ describe("computer service (BC4)", () => {
     const createDriver = vi.fn(() => driver);
     const service = createComputerService({ client: kernel.client as never, hostId: 'host-1', platform: 'windows', dataDir: newDataDir(), createDriver,
       onActivityChange: entry => changes.push(entry) });
-    expect(service.activities('s1')).toEqual([]);
+    expect(service.activities(nativeWork('s1'))).toEqual([]);
     expect(createDriver).not.toHaveBeenCalled();
-    const tree = await service.observe({ app: 'notepad', includeScreenshot: false, sessionId: 's1' });
+    const tree = await service.observe({ app: 'notepad', includeScreenshot: false, fixtureThreadId: 's1' });
     const probes = driver.calls.filter(op => op.tool === 'capabilities').length;
-    const action = service.act({ sessionId: 's1', action: { kind: 'key', app: '42', key: 'enter', observationId: tree.id } });
+    const action = service.act({ fixtureThreadId: 's1', action: { kind: 'key', app: '42', key: 'enter', observationId: tree.id } });
     await running;
     const before = driver.calls.length;
-    expect(service.activities('s1')).toMatchObject([{ desktopId: 'local-console', activity: { sessionId: 's1', app: 'notepad', operation: 'key', status: 'running' } }]);
-    expect(service.activities('other')).toEqual([]);
+    expect(service.activities(nativeWork('s1'))).toMatchObject([{ desktopId: 'local-console', activity: { execution: nativeActor('s1').execution, app: 'notepad', operation: 'key', status: 'running' } }]);
+    expect(service.activities(nativeWork('other'))).toEqual([]);
     expect(driver.calls).toHaveLength(before);
     finish(); await action;
-    expect(service.activities('s1')[0]?.activity.status).toBe('idle');
+    expect(service.activities(nativeWork('s1'))[0]?.activity.status).toBe('idle');
     expect(changes).toHaveLength(4);
     expect(driver.calls.filter(op => op.tool === 'get_app_state')).toHaveLength(1);
     expect(driver.calls.filter(op => op.tool === 'capture_frame')).toHaveLength(0);
     expect(driver.calls.filter(op => op.tool === 'capabilities')).toHaveLength(probes);
-    await service.observe({ app: '42', includeScreenshot: false, sessionId: 's1' });
+    await service.observe({ app: '42', includeScreenshot: false, fixtureThreadId: 's1' });
     expect(changes.at(-2)).toMatchObject({ activity: { app: 'notepad', operation: 'observe', status: 'running' } });
     await service.dispose();
   });
@@ -484,21 +488,21 @@ describe("computer service (BC4)", () => {
 
   it.each(['cancel-read', 'takeover-revoke', 'takeover-write', 'automation-cancel-read'] as const)(
     'physically stops the bound desktop before a blocked %s dependency', async mode => {
-      const gate = deferred(), gateEntered = deferred(), actionStarted = deferred();
+      const gate = deferred(), gateEntered = deferred(), actionStarted = deferred(), physicallyStopped = deferred();
       const actionResult = deferred<DriverResponse>();
       let armed = false, held = false;
       const blocked = async () => { gateEntered.resolve(); await gate.promise; };
-      const actor = piActor('main', 'run');
+      const actor = nativeActor('main', 'run');
       const driver = makeDriver(async op => {
         if (op.tool === 'type_text') { held = true; actionStarted.resolve(); return actionResult.promise; }
         return op.tool === 'get_app_state' ? okResponse({ snapshot: appSnapshot() }) : okResponse();
       });
       driver.interrupt = vi.fn(async () => {
-        held = false; actionResult.resolve(okResponse({ cancelled: true })); return { released: true };
+        held = false; physicallyStopped.resolve(); actionResult.resolve(okResponse({ cancelled: true })); return { released: true };
       });
       const { service, kernel } = makeService(driver, {
-        resolveActor: async () => actor, notifyActor: async () => {},
-        revokeSession: async () => { if (armed && mode === 'takeover-revoke') await blocked(); },
+        resolveActor: async () => actor,
+        cancelExecutor: async () => { if (armed && mode === 'takeover-revoke') await blocked(); },
       });
       const storage = kernel.client.scoped();
       const getRecord = storage.getRecord.bind(storage), putRecord = storage.putRecord.bind(storage);
@@ -511,8 +515,8 @@ describe("computer service (BC4)", () => {
         return putRecord(params);
       };
       try {
-        await service.automation.authorize(piWork('main'), 'observe', 'local-console', () => service.observe({ desktopId: 'local-console', app: 'notepad' }));
-        const action = service.automation.authorize(piWork('main'), 'control', 'local-console', () => service.act({
+        await service.automation.authorize(nativeWork('main'), 'observe', 'local-console', () => service.observe({ desktopId: 'local-console', app: 'notepad' }));
+        const action = service.automation.authorize(nativeWork('main'), 'control', 'local-console', () => service.act({
           desktopId: 'local-console', action: { kind: 'type', app: 'notepad', text: 'sample' },
         }));
         await actionStarted.promise;
@@ -521,13 +525,14 @@ describe("computer service (BC4)", () => {
           : mode === 'cancel-read' ? service.cancel('local-console')
             : service.takeover({ desktopId: 'local-console', holderId: 'viewer' });
         await gateEntered.promise;
+        await physicallyStopped.promise;
         expect(held).toBe(false);
         expect(driver.interrupt).toHaveBeenCalledOnce();
         armed = false; gate.resolve();
         const stopped = await stopping;
         if (stopped) expect(stopped.released).toBe(true);
         expect((await action).cancelled).toBe(true);
-        if (mode === 'automation-cancel-read') expect(await service.automation.snapshot(piWork('main'))).toMatchObject({ active: false, status: 'enabled' });
+        if (mode === 'automation-cancel-read') expect(await service.automation.snapshot(nativeWork('main'))).toMatchObject({ active: false, status: 'enabled' });
       } finally {
         armed = false; gate.resolve(); actionResult.resolve(okResponse()); await service.dispose();
       }
@@ -1029,7 +1034,7 @@ describe("computer service (BC6 remote hosts)", () => {
       }),
     });
     await service.list();
-    const artifact = await service.registerArtifact({ runtime: 'pi', sessionId: 's1' }, "remote:r1:remote-h:managed-linux", "Downloads/report.pdf");
+    const artifact = await service.registerArtifact(nativeWork('s1'), "remote:r1:remote-h:managed-linux", "Downloads/report.pdf");
     expect(artifact).toMatchObject({ sourceHostId: "remote-h", scopeId: "bot:b", threadId: "t1", sha256 });
     expect(await service.listArtifacts("bot:b")).toEqual([artifact]);
     const opened = await service.openArtifact(artifact.id);
@@ -1349,14 +1354,13 @@ describe("computer service work association (BC8)", () => {
     const kernel = fakeKernel();
     const delivered: string[] = [];
     const options = { client: kernel.client as never, hostId: "h", platform: "windows" as const, dataDir: newDataDir(),
-      resolveActor: async (): Promise<ComputerActor> => ({ ...piActor('s1', 'r1'), registry: { scopeId: 'bot:b', threadId: 't1' } }),
-      notifyActor: async () => {},
+      resolveActor: async (): Promise<ComputerActor> => nativeActor('s1', 'r1'),
       createDriver: () => makeDriver(async (op) => op.tool === "get_app_state" ? okResponse({ snapshot: appSnapshot() }) : okResponse()),
       resolveWork: async () => ({ scopeId: "bot:b", threadId: "t1" }) };
     const first = createComputerService({ ...options, onControlEvent: async (event) => { delivered.push(event.id); throw new Error("Thread unavailable"); } });
     await first.ensureLocal();
-    await first.automation.authorize(piWork('s1'), 'control', 'local-console', async () => {});
-    await first.observe({ desktopId: "local-console", app: "notepad", sessionId: "s1" });
+    await first.automation.authorize(nativeWork('s1'), 'control', 'local-console', async () => {});
+    await first.observe({ desktopId: "local-console", app: "notepad", fixtureThreadId: "s1" });
     const unsubscribe = await first.subscribeFrames("local-console", "viewer", () => {}, { frames: false });
     await first.takeover({ desktopId: "local-console", holderId: "viewer" });
     await first.handback({ desktopId: "local-console", holderId: "viewer" });
@@ -1376,26 +1380,26 @@ describe("computer service work association (BC8)", () => {
   it("keeps every actual Thread association across later work, probes, and Host restart", async () => {
     const kernel = fakeKernel();
     const options = { client: kernel.client as never, hostId: "h", platform: "windows" as const, dataDir: newDataDir(),
-      createDriver: () => makeDriver(async (op) => op.tool === "get_app_state" ? okResponse({ snapshot: appSnapshot() })
+      createDriver: () => makeDriver(async op => op.tool === "get_app_state" ? okResponse({ snapshot: appSnapshot() })
         : op.tool === "capabilities" ? okResponse({ capabilities: { platform: "windows", driver: "windows-uia", status: "ready" } }) : okResponse()),
-      resolveActor: async (work: import('@varin/protocol').ComputerWorkRef) => work.runtime === 'pi' ? { ...piActor(work.sessionId), registry: { scopeId: 'bot:b', threadId: work.sessionId === 's2' ? 't2' : 't1' } } : null };
+      resolveActor: async (work: import('@varin/protocol').ComputerWorkRef) => nativeActor(work.threadId),
+      resolveWork: async (work: import('@varin/protocol').ComputerWorkRef) => ({ scopeId: 'bot:b', threadId: work.threadId }) };
     const service = createComputerService(options);
     await service.ensureLocal();
-    for (const sessionId of ["s1", "s2", "s3"]) {
-      await service.observe({ desktopId: "local-console", app: "notepad", includeScreenshot: false, sessionId });
+    for (const fixtureThreadId of ["t1", "t2", "t1"]) {
+      await service.observe({ desktopId: "local-console", app: "notepad", includeScreenshot: false, fixtureThreadId });
     }
     await service.probe("local-console");
     const association = (await service.workDesktops("bot:b"))[0]?.work;
     expect(association).toHaveLength(2);
-    expect(association?.find((item) => item.registry?.threadId === "t1")?.work).toEqual(piWork("s3"));
-    expect(association?.find((item) => item.registry?.threadId === "t2")?.work).toEqual(piWork("s2"));
+    expect(association?.map(item => item.work.threadId).sort()).toEqual(['t1', 't2']);
     await service.dispose();
     const reopened = createComputerService(options);
     expect((await reopened.workDesktops("bot:b"))[0]?.work).toEqual(association);
     await reopened.dispose();
   });
 
-  it("observe/act stamp the calling session on the desktop record", async () => {
+  it("observe/act stamp the original native execution on the desktop record", async () => {
     const driver = makeDriver(async (op) => {
       if (op.tool === "get_app_state") return okResponse({ snapshot: appSnapshot() });
       return okResponse();
@@ -1406,18 +1410,18 @@ describe("computer service work association (BC8)", () => {
     let catalog = await service.list();
     expect(catalog.desktops[0]?.usage).toBeUndefined();
 
-    await service.observe({ desktopId: "local-console", app: "notepad", includeScreenshot: false, sessionId: "ses_work-1" });
+    await service.observe({ desktopId: "local-console", app: "notepad", includeScreenshot: false, fixtureThreadId: "ses_work-1" });
     catalog = await service.list();
-    expect(catalog.desktops[0]?.usage?.execution.work).toEqual(piWork("ses_work-1"));
+    expect(catalog.desktops[0]?.usage?.execution.work).toEqual(nativeWork("ses_work-1"));
 
     const observation = catalog.desktops[0] && (await service.observe({ desktopId: "local-console", app: "notepad", includeScreenshot: false }));
     await service.act({
       desktopId: "local-console",
       action: { kind: "key", app: "notepad", key: "enter" },
-      sessionId: "ses_work-2",
+      fixtureThreadId: "ses_work-2",
     });
     catalog = await service.list();
-    expect(catalog.desktops[0]?.usage?.execution.work).toEqual(piWork("ses_work-2"));
+    expect(catalog.desktops[0]?.usage?.execution.work).toEqual(nativeWork("ses_work-2"));
     expect(observation).toBeDefined();
   });
 
@@ -1429,10 +1433,10 @@ describe("computer service work association (BC8)", () => {
     });
     const { service } = makeService(driver);
     await service.ensureLocal();
-    await service.observe({ desktopId: "local-console", app: "notepad", includeScreenshot: false, sessionId: "ses_keep" });
+    await service.observe({ desktopId: "local-console", app: "notepad", includeScreenshot: false, fixtureThreadId: "ses_keep" });
     await service.probe("local-console");
     const catalog = await service.list();
-    expect(catalog.desktops[0]?.usage?.execution.work).toEqual(piWork("ses_keep"));
+    expect(catalog.desktops[0]?.usage?.execution.work).toEqual(nativeWork("ses_keep"));
   });
 });
 
@@ -1714,13 +1718,13 @@ describe("evidence journal (EE6, §10)", () => {
       op.tool === "get_app_state" ? okResponse({ snapshot: appSnapshot() }) : okResponse());
     const { service } = makeService(driver);
     await service.ensureLocal();
-    await service.observe({ desktopId: "local-console", app: "notepad", includeScreenshot: false, sessionId: "s1" });
-    await service.act({ desktopId: "local-console", sessionId: "s1",
+    await service.observe({ desktopId: "local-console", app: "notepad", includeScreenshot: false, fixtureThreadId: "s1" });
+    await service.act({ desktopId: "local-console", fixtureThreadId: "s1",
       action: { kind: "type", app: "notepad", text: "hunter2 secret" } });
     const { entries } = await service.evidence({ desktopId: "local-console" });
     expect(entries.length).toBe(2);
-    expect(entries[0]).toMatchObject({ tool: "observe", op: "observe", target: expect.stringMatching(/^sha256:/u), outcome: "ok", lane: "observe", sessionId: "s1" });
-    expect(entries[1]).toMatchObject({ tool: "act", op: "type", target: entries[0]?.target, outcome: "ok", lane: "action", sessionId: "s1" });
+    expect(entries[0]).toMatchObject({ tool: "observe", op: "observe", target: expect.stringMatching(/^sha256:/u), outcome: "ok", lane: "observe", execution: nativeActor("s1").execution });
+    expect(entries[1]).toMatchObject({ tool: "act", op: "type", target: entries[0]?.target, outcome: "ok", lane: "action", execution: nativeActor("s1").execution });
     expect(JSON.stringify(entries)).not.toContain("hunter2");
     await service.dispose();
   });
@@ -1740,14 +1744,14 @@ describe("evidence journal (EE6, §10)", () => {
     unsubscribe(); await service.dispose();
   });
 
-  it("evidence filters by sessionId and since without fabricating gaps", async () => {
+  it("evidence filters by original execution and since without fabricating gaps", async () => {
     const driver = makeDriver(async () => okResponse());
     const { service } = makeService(driver);
     await service.ensureLocal();
-    await service.open({ desktopId: "local-console", path: "C:/tmp/a.txt", sessionId: "s1" });
-    await service.automation.release(piWork("s1"));
-    await service.open({ desktopId: "local-console", path: "C:/tmp/b.txt", sessionId: "s2" });
-    const mine = await service.evidence({ desktopId: "local-console", sessionId: "s2" });
+    await service.open({ desktopId: "local-console", path: "C:/tmp/a.txt", fixtureThreadId: "s1" });
+    await service.automation.release(nativeWork("s1"));
+    await service.open({ desktopId: "local-console", path: "C:/tmp/b.txt", fixtureThreadId: "s2" });
+    const mine = await service.evidence({ desktopId: "local-console", execution: nativeActor("s2").execution });
     expect(mine.entries.length).toBe(1);
     expect(mine.entries[0]?.target).toBe(`sha256:${createHash('sha256').update('C:/tmp/b.txt').digest('hex')}`);
     const seen = mine.entries[0]!.seq;

@@ -1,40 +1,47 @@
-import { describe, expect, it, vi } from "vitest";
-import { getSettingsCatalogEntry } from "@varin/application-client";
-import { createSettingsActionRegistry, type SettingsActionDeps } from "./settings-actions.js";
+import { describe, expect, it, vi } from 'vitest';
+import { getSettingsCatalogEntry } from '@varin/application-client';
+import { createSettingsActionRegistry, type SettingsActionDeps } from './settings-actions.js';
 
-describe("agent management through the settings owner", () => {
-  it("reads MCP status and configuration from the caller's native session, including sessions without projects", async () => {
-    const snapshot = { provider: { state: "active" }, catalog: { version: 1, servers: [{ name: "fixture", transport: { kind: "stdio", command: "node" } }],
-      sources: [{ id: "user", target: { root: "user", path: "mcp.json", format: "json" } }] } };
-    const requestSession = vi.fn(async (_id: string, method: string) => method === "mcp.config.snapshot" ? snapshot : { exists: true, revision: "r1", content: "secret config" });
-    const requestWorkspace = vi.fn(async () => { throw new Error("metadata worker has no live MCP owner"); });
-    const adapter = createSettingsActionRegistry({ requestSession, requestWorkspace } as unknown as SettingsActionDeps).adapterFor("runtime:mcp")!;
-    const ctx = { caller: { sessionId: "active-session", workspaceId: null }, workspaceRoot: null };
-    const entry = getSettingsCatalogEntry("mcp.runtime")!;
-    expect(await adapter.describe(ctx, entry)).toMatchObject({ summary: "provider active, 1 configured servers" });
-    expect(await adapter.invoke(ctx, entry, "status", {})).toMatchObject({ status: "applied", data: { provider: { state: "active" } } });
-    const read = await adapter.invoke(ctx, entry, "read", { sourceId: "user" });
-    expect(read.status).toBe("applied");
-    expect(JSON.stringify(read)).not.toContain("secret config");
-    expect(requestSession).toHaveBeenLastCalledWith("active-session", "config.text.get", snapshot.catalog.sources[0]!.target);
-    expect(requestWorkspace).not.toHaveBeenCalled();
+const ctx = { caller: { threadId: 'thread', branchId: 'branch', workspaceId: null }, workspaceRoot: null };
+describe('native settings action owners', () => {
+  it('opens MCP without a project and keeps document revisions and credential redaction', async () => {
+    const invoke = vi.fn(async (action: string, args: Record<string, unknown>) => {
+      if (action === 'open' || action === 'read') return { view: 'view', servers: [{ name: 'native' }], sources: [{ path: '/data/mcp.json' }], issues: [] };
+      return { exists: true, revision: 'r1', path: args.path, content: 'secret-config' };
+    });
+    const adapter = createSettingsActionRegistry({ mcpSettings: () => ({ invoke }) } as unknown as SettingsActionDeps).adapterFor('runtime:mcp')!;
+    const entry = getSettingsCatalogEntry('mcp.configuration')!;
+    expect((await adapter.describe(ctx, entry)).summary).toBe('1 native MCP servers');
+    expect(invoke).toHaveBeenCalledWith('open', {}, undefined);
+    const read = await adapter.invoke(ctx, entry, 'read', { path: '/data/mcp.json' });
+    expect(JSON.stringify(read)).not.toContain('secret-config');
+    const noRevision = await adapter.invoke(ctx, entry, 'write', { path: '/data/mcp.json', content: '{}' });
+    expect(noRevision.status).toBe('failed');
+    expect(invoke.mock.calls.some(([action]) => action === 'document/save')).toBe(false);
+    await adapter.invoke(ctx, entry, 'write', { path: '/data/mcp.json', content: '{}', expectedRevision: 'r1' });
+    expect(invoke).toHaveBeenLastCalledWith('document/save', { view: 'view', path: '/data/mcp.json', content: '{}', expectedRevision: 'r1' }, undefined);
   });
-
-  it("supports workspace-less callers and forwards revisioned mutations only to an advertised owner action", async () => {
-    const catalog = { providers: [{ id: "varin", actions: [{ id: "create-agent" }] }],
-      agents: [{ id: "varin:custom:reader", providerId: "varin", actions: [{ id: "disable" }] }] };
-    const requestSession = vi.fn(async (_sessionId: string, method: string, _params: Record<string, unknown>) => method === "agentProvider.list"
-      ? catalog : { success: true, providerId: "varin", message: "Saved" });
-    const adapter = createSettingsActionRegistry({ requestSession } as unknown as SettingsActionDeps).adapterFor("service:agents")!;
-    const ctx = { caller: { sessionId: "without-project", workspaceId: null }, workspaceRoot: null };
-    const entry = getSettingsCatalogEntry("agents.catalog")!;
-    expect((await adapter.describe(ctx, entry)).unavailable).toBeUndefined();
-    const input = { expectedRevision: "read-revision", config: { name: "reader" } };
-    expect((await adapter.invoke(ctx, entry, "create", { providerId: "varin", input })).status).toBe("applied");
-    expect(requestSession).toHaveBeenLastCalledWith("without-project", "agentProvider.action", { providerId: "varin", action: "create-agent", input });
-    const before = requestSession.mock.calls.filter(call => call[1] === "agentProvider.action").length;
-    expect((await adapter.invoke(ctx, entry, "delete", { providerId: "varin", agentId: "varin:custom:reader", input: { expectedRevision: "r" } })).status).toBe("unavailable");
-    expect(requestSession.mock.calls.filter(call => call[1] === "agentProvider.action").length).toBe(before);
-    expect((await adapter.invoke(ctx, entry, "disable", { providerId: "varin", agentId: "varin:custom:reader", input: { expectedRevision: "r" } })).status).toBe("applied");
+  it('saves native profiles with explicit revision and runtime without a source workspace', async () => {
+    const save = vi.fn(async () => ({ profileId: 'varin:custom:new' }));
+    const owner = { read: async () => ({ profiles: [] }), save, remove: vi.fn() };
+    const adapter = createSettingsActionRegistry({ agentProfiles: () => owner } as unknown as SettingsActionDeps).adapterFor('service:agents')!;
+    const entry = getSettingsCatalogEntry('agents.catalog')!;
+    const config = { kind: 'custom', key: '', agent: { name: 'reader' } };
+    expect((await adapter.invoke(ctx, entry, 'create', { expectedRevision: 'r', config, tools: [] })).status).toBe('applied');
+    expect(save).toHaveBeenCalledWith({ runtime: 'agent', expectedRevision: 'r', config, tools: [] }, undefined);
+    expect((await adapter.invoke(ctx, entry, 'delete', { id: 'varin:custom:new' })).status).toBe('failed');
+    expect(owner.remove).not.toHaveBeenCalled();
+  });
+  it('uses original model OAuth references and redacts connection header secrets', async () => {
+    let status = 'pending';
+    const signIn = vi.fn(() => ({ id: 'auth', status }));
+    const owner = { read: async () => ({ revision: 'r', types: [], channels: [{ id: 'channel', baseUrl: 'https://example.test', connection: { headers: { authorization: 'secret' } } }] }),
+      signIn, authorizations: { read: () => ({ id: 'auth', status }), cancel: () => { status = 'cancelled'; } } };
+    const adapter = createSettingsActionRegistry({ models: () => owner } as unknown as SettingsActionDeps).adapterFor('runtime:providers')!;
+    const entry = getSettingsCatalogEntry('providers.auth')!;
+    expect(JSON.stringify(await adapter.describe(ctx, entry))).not.toContain('secret');
+    expect(await adapter.invoke(ctx, entry, 'login', { provider: 'oauth-owner', reference: 'account' })).toMatchObject({ status: 'pending', operation: { id: 'auth', state: 'running' } });
+    expect(signIn).toHaveBeenCalledWith('oauth-owner', 'account');
+    expect(await adapter.cancelOperation!(ctx, entry, 'auth', {})).toMatchObject({ operation: { id: 'auth', state: 'cancelled' } });
   });
 });

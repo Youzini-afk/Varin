@@ -95,11 +95,9 @@ module.exports = (context) => {
   );
 
   const requiredApplicationHostFiles = [
-    path.join('node_modules', '@varin', 'pi-host', 'dist', 'host-bootstrap.js'),
     path.join('node_modules', '@varin', 'script-runtime', 'dist', 'index.js'),
     path.join('node_modules', '@varin', 'script-runtime', 'dist', 'worker.js'),
     path.join('node_modules', '@varin', 'extension-builtins', 'dist', 'builtin-packages', 'scripts', 'host.cjs'),
-    path.join('node_modules', '@varin', 'runtime-broker', 'dist', 'index.js'),
     path.join('node_modules', '@varin', 'extension-host', 'dist', 'index.js'),
     path.join('node_modules', '@varin', 'extension-builtins', 'dist', 'builtin-packages', 'recovery', 'varin-builtin-fingerprint.txt'),
     path.join('node_modules', '@varin', 'extension-builtins', 'dist', 'builtin-packages', 'recovery', 'varin.extension.json'),
@@ -128,29 +126,15 @@ module.exports = (context) => {
   const bundledModelDirectory = path.join(unpackedNodeModulesPath, '@varin', 'web', 'server', 'lib', 'knowledge', 'semantic', 'runtime');
   if (fs.existsSync(bundledModelDirectory)) throw new Error('Local model weights entered the base installer');
 
-  const packagedHostEntry = path.join(
-    unpackedNodeModulesPath,
-    '@varin',
-    'pi-host',
-    'dist',
-    'host-bootstrap.js',
-  );
-  const packagedBrokerEntry = path.join(
-    unpackedNodeModulesPath,
-    '@varin',
-    'runtime-broker',
-    'dist',
-    'index.js',
-  );
   const packagedExecutable = context.electronPlatformName === 'darwin'
     ? path.join(context.appOutDir, `${context.packager.appInfo.productFilename}.app`, 'Contents', 'MacOS', context.packager.appInfo.productFilename)
     : path.join(context.appOutDir, context.electronPlatformName === 'win32'
       ? `${context.packager.appInfo.productFilename}.exe`
       : context.packager.appInfo.productFilename.toLowerCase());
   execFileSync(packagedExecutable, [
-    path.join(__dirname, 'verify-packaged-pi-host.mjs'),
-    packagedBrokerEntry,
-    packagedHostEntry,
+    path.resolve(__dirname, '../../../scripts/smoke-kernel-release.mjs'),
+    path.join(unpackedNodeModulesPath, '@varin', 'web'),
+    path.join(resourcesPath, 'kernel'),
   ], {
     cwd: path.resolve(__dirname, '..', '..', '..'),
     env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' },

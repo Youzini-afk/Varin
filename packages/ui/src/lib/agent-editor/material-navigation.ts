@@ -1,5 +1,6 @@
 import { VARIN_WORKBENCH_DEFAULT_PROFILE_ID, VARIN_WORKBENCH_IDE_PROFILE_ID } from '@varin/extension-contract';
-import { getRuntimeKey, subscribeRuntimeEndpointWillChange } from '@varin/application-client';
+import { subscribeRuntimeEndpointWillChange } from '@varin/application-client';
+import { threadHostKey as getRuntimeKey } from '@/stores/useThreadStore';
 import { getRegisteredRuntimeAPIs } from '@/lib/runtime-api/registry';
 import { selectActiveWorkbenchProfile } from '@/lib/extensions/workbench-shell-transition';
 import { activeEditorTab } from '@/lib/workbench/editors/groups';

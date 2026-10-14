@@ -9,7 +9,8 @@ import { createInterface } from 'node:readline';
 import type { Express, Request, RequestHandler, Response as ExpressResponse } from 'express';
 import { createThreadsHttpAPI, ThreadRequestError, type ThreadIdentity, type ThreadSource, type ThreadPrepareSource, type ThreadPreparedSource } from '@varin/application-client';
 import { createDocumentAuthority } from '../documents/authority.js';
-import { createThreadWorktreeRuntime } from '../harness/thread-worktree.js';
+import { spawn } from 'node:child_process';
+import { createSourceGitInventory } from './source-git-inventory.js';
 import { createAgentPersonalization } from '../memory/agent-personalization.js';
 import { KernelClient, KernelClientError, type KernelGrantHandle } from './kernel-client.js';
 import { AgentRuntimeClient } from './agent-runtime-client.js';
@@ -93,10 +94,7 @@ async function initialize(frame: Record<string, unknown>) {
   storage = new KernelStorageAdapter({ client: kernel, hostId: 'web-domain-host', storageRoot,
     resolveWorkspaceRoot: async workspaceId => (await documents.admitWorkspaceRegistration(workspaceId)).canonicalPath });
   const workingStates = createKernelWorkspaceWorkingStateAccess(storage), liveSources = createLiveSourceOwner({ documents, kernel });
-  const worktrees = createThreadWorktreeRuntime({
-    createWorktree: async () => { throw new Error('Source capture must not create a Git worktree'); },
-    getWorktreeBootstrapStatus: async () => { throw new Error('Source capture must not bootstrap a worktree'); },
-  });
+  const inspectInventory = createSourceGitInventory({ spawn, gitBinary: 'git', env: process.env });
   const withSourceRead = storage.withResourceRead.bind(storage);
   const resources = createThreadResourceScope({ dataDirectory: agentDir, homeDir: join(root, 'home'), documents, workingStates,
     validateLiveSource: liveSources.validate, projectTrusted: async () => trusted, configuration: async () => ({ packages: [] }), withSourceRead });
@@ -110,7 +108,7 @@ async function initialize(frame: Record<string, unknown>) {
   const credentialOwner = new ExistingHostCredentialOwner({ providerId: model.providerId, providerFamily: configuration.providerFamily,
     endpoint: configuration.endpoint, currentScope: async () => ({ reference: 'controlled-source', authority: 'fixture-owner', account: 'controlled', generation: 1 }),
     runtime: { getAuth: async () => { throw new Error('Controlled model must not request external credentials'); } } });
-  const prepareSource = createThreadSourcePreparer({ inspectInventory: worktrees.inspectGitBaselineInventory,
+  const prepareSource = createThreadSourcePreparer({ inspectInventory,
     sourceTools: mode => kernel.agentRuntimeRequest('runtime.source.tools', { mode }), documents, workingStates, liveSources,
     prepareResources: resources.prepareSourceCapture });
   adapter = new ThreadAdapter(runtime, { resolveModel: async selected => { assert.deepEqual(selected, model); return { configuration, credentialOwner }; },
@@ -129,7 +127,7 @@ async function initialize(frame: Record<string, unknown>) {
     const registration = selected ? await documents.admitWorkspaceRegistration(selected.workspace_id) : undefined;
     const policy=await readContextPolicy({ settings: await new AgentSettingsService(agentDir, () => trusted).snapshot(registration?.canonicalPath), ...(registration ? { projectRoot: registration.canonicalPath } : {}), modelId: model.modelId, providerId: model.providerId });
     const admitted=await runtime.contextScope(run.id,signal);
-    return {policy,scope:{sessionId:run.thread_id,...(admitted?.projectId?{projectId:admitted.projectId}:{}),
+    return {policy,scope:{threadId:run.thread_id,...(admitted?.projectId?{projectId:admitted.projectId}:{}),
       ...(registration?{workspaceId:registration.canonicalPath}:{})}};
   }, async runId => adapter.continueLaunch(runId), null));
   installHttp();
@@ -265,7 +263,7 @@ async function researchCleanup() {
       subjectId: `research-cleanup:${entry}`, threadId: identity.threadId, branchId: identity.branchId,
       sourceRunId: firstRun, key: `research-cleanup:${entry}`, domain: 'research.experiment', domainVersion: 1, request: {} });
     const caller: ExperimentCaller = { workspaceId: selected.workspace_id, executionWorkspaceId: selected.execution_workspace_id,
-      threadId: identity.threadId, runId: firstRun, workspaceScope: [''], access: { kind: 'maintenance' },
+      workspaceScope: [''], access: { kind: 'maintenance' },
       owner: { runtime: 'agent', actor: { kind: 'user', key: entry }, rootThreadId: identity.threadId,
         threadId: identity.threadId, branchId: identity.branchId, runId: firstRun, operationId: job.binding.operationId,
         executionOwner: job.binding.executionOwner, source: selected } };

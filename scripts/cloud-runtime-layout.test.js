@@ -56,14 +56,6 @@ const createFixture = () => {
     },
     protocol: { name: '@varin/protocol', dependencies: {} },
     'script-runtime': { name: '@varin/script-runtime', dependencies: { '@varin/protocol': '0.1.0' } },
-    'pi-host': { name: '@varin/pi-host', dependencies: { '@varin/protocol': '0.1.0', '@varin/script-runtime': '0.1.0' } },
-    'runtime-broker': {
-      name: '@varin/runtime-broker',
-      dependencies: {
-        '@varin/pi-host': '0.1.0',
-        '@varin/protocol': '0.1.0',
-      },
-    },
     'settings-store': { name: '@varin/settings-store', dependencies: {} },
     web: {
       name: '@varin/web',
@@ -72,7 +64,6 @@ const createFixture = () => {
         '@varin/extension-contract': 'workspace:*',
         '@varin/extension-host': 'workspace:*',
         '@varin/protocol': 'workspace:*',
-        '@varin/runtime-broker': 'workspace:*',
         '@varin/settings-store': 'workspace:*',
       },
     },
@@ -82,7 +73,6 @@ const createFixture = () => {
     const packageRoot = path.join(root, 'packages', directory);
     writeJson(path.join(packageRoot, 'package.json'), manifests[directory]);
     fs.mkdirSync(path.join(packageRoot, 'dist'), { recursive: true });
-    if (directory === 'pi-host') fs.mkdirSync(path.join(packageRoot, 'patches'));
     if (directory === 'web') {
       fs.mkdirSync(path.join(packageRoot, 'bin'), { recursive: true });
       fs.mkdirSync(path.join(packageRoot, 'server'), { recursive: true });
@@ -141,42 +131,24 @@ describe('Varin cloud runtime layout', () => {
     const fixture = createFixture();
     const serverDir = path.join(fixture, 'packages', 'web', 'server');
     const manifest = readJson(path.join(fixture, 'packages', 'web', 'package.json'));
-    manifest.dependencies['@varin/pi-host'] = 'workspace:*';
+    manifest.dependencies['@varin/application-client'] = 'workspace:*';
     fs.writeFileSync(path.join(serverDir, 'subpaths.js'), [
-      "import { McpAuthority } from '@varin/pi-host/mcp-authority';",
+      "import { Runtime } from '@varin/application-client/runtime';",
       "export { contract } from '@varin/extension-contract/nested/contract';",
     ].join('\n'));
     expect(findUndeclaredWorkspaceImports(serverDir, manifest)).toEqual([]);
 
     fs.appendFileSync(path.join(serverDir, 'subpaths.js'), [
-      "\nimport '@varin/pi-host-extra/mcp-authority';",
+      "\nimport '@varin/application-client-extra/runtime';",
       "import { missing } from '@varin/missing-runtime/nested/entry';",
     ].join('\n'));
     expect(findUndeclaredWorkspaceImports(serverDir, manifest)).toEqual([
-      'subpaths.js -> @varin/pi-host-extra/mcp-authority',
+      'subpaths.js -> @varin/application-client-extra/runtime',
       'subpaths.js -> @varin/missing-runtime/nested/entry',
     ]);
   });
 
-  it('ships the same pinned Pi SDK in the production dependency graph for every distribution', () => {
-    const hostManifest = readJson(path.join(repoRoot, 'packages', 'pi-host', 'package.json'));
-    for (const name of [
-      '@earendil-works/pi-agent-core',
-      '@earendil-works/pi-ai',
-      '@earendil-works/pi-coding-agent',
-    ]) {
-      expect(hostManifest.dependencies?.[name]).toMatch(/^\d+\.\d+\.\d+$/);
-    }
-    // Pi publishes these in lockstep, so a partial bump is a mistake worth failing on.
-    const piVersions = new Set([
-      hostManifest.dependencies?.['@earendil-works/pi-agent-core'],
-      hostManifest.dependencies?.['@earendil-works/pi-ai'],
-      hostManifest.dependencies?.['@earendil-works/pi-coding-agent'],
-    ]);
-    expect(piVersions.size).toBe(1);
-  });
-
-  it('contains the complete private Pi runtime dependency closure', () => {
+  it('contains the complete native application runtime dependency closure', () => {
     const packageNames = new Set(CLOUD_RUNTIME_PACKAGE_DIRS.map((directory) => (
       readJson(path.join(repoRoot, 'packages', directory, 'package.json')).name
     )));
@@ -196,19 +168,6 @@ describe('Varin cloud runtime layout', () => {
     expect(verifyCloudRuntimeLayout(fixture)).toMatchObject({
       schemaVersion: CLOUD_RUNTIME_SCHEMA_VERSION,
     });
-  });
-
-  it('requires the Pi SDK patches named by the deployable manifest', () => {
-    const fixture = createFixture();
-    const manifestPath = path.join(fixture, 'package.json');
-    const manifest = readJson(manifestPath);
-    manifest.patchedDependencies = {
-      '@earendil-works/pi-coding-agent@1.0.0': 'packages/pi-host/patches/pi-coding-agent.patch',
-    };
-    writeJson(manifestPath, manifest);
-    expect(() => verifyCloudRuntimeLayout(fixture)).toThrow('Cloud runtime patch is missing');
-    fs.writeFileSync(path.join(fixture, 'packages', 'pi-host', 'patches', 'pi-coding-agent.patch'), 'fixture patch\n');
-    expect(() => verifyCloudRuntimeLayout(fixture)).not.toThrow();
   });
 
   it('requires the runtime security patch referenced by the deployable manifest', () => {
@@ -237,9 +196,9 @@ describe('Varin cloud runtime layout', () => {
 
   it('requires compiled package outputs and a production lockfile', () => {
     const fixture = createFixture();
-    fs.rmSync(path.join(fixture, 'packages', 'pi-host', 'dist'), { recursive: true, force: true });
+    fs.rmSync(path.join(fixture, 'packages', 'extension-host', 'dist'), { recursive: true, force: true });
     expect(() => verifyCloudRuntimeLayout(fixture)).toThrow(
-      'Missing runtime package entry: packages/pi-host/dist',
+      'Missing runtime package entry: packages/extension-host/dist',
     );
 
     const secondFixture = createFixture();

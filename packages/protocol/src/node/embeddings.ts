@@ -1,6 +1,6 @@
 /**
  * OpenAI-compatible embeddings wire contract. Credentials are supplied by the
- * caller; this module never persists them. Host and Pi share this exact transport.
+ * caller; this module never persists them. The native inference owner supplies execution authority.
  * Node-only subpath: never exported through the browser-safe protocol root.
  */
 import { createHash } from "node:crypto";

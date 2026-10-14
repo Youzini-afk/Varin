@@ -200,7 +200,7 @@ fn nested_memory_uses_original_host_owner_and_delivers_once_without_outer_echo()
             match frame["kind"].as_str().unwrap() {
                 "memory-request" => {
                     assert_eq!(frame["query"]["runId"], f.run.id);
-                    assert_eq!(frame["query"]["scope"]["sessionId"], f.run.thread_id);
+                    assert_eq!(frame["query"]["scope"]["threadId"], f.run.thread_id);
                     let response = host.frame(&frame);
                     if frame["query"]["action"] == "tool"
                         && frame["query"]["arguments"]["action"] == "save"

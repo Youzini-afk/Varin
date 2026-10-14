@@ -439,7 +439,7 @@ export const createDocumentReader = (deps: { materials: Materials; engineFactory
     const nativeVersion = `${PDF_ENGINE_VERSION}/pdfjs:${probed.parserVersion}`;
     const versionKey = `${nativeVersion}${parser === "docling" ? `/docling:${toolVersions.docling ?? "unavailable"}` : ""}${parser === "native" && request.ocr === true ? `/ocr:${toolVersions.tesseract ?? "unavailable"}` : ""}`;
     const analysisId = hash(`${sourceHash}:${configHash}:${versionKey}`);
-    const cacheKey = `${ctx.workspaceId}:${sourceSnapshotId}:${analysisId}:${ctx.authority.threadId ?? `session:${ctx.authority.sessionId}`}`;
+    const cacheKey = `${ctx.workspaceId}:${sourceSnapshotId}:${analysisId}:${ctx.authority.threadId}`;
     let derived: WebSnapshotContent | null = null;
     if (deps.materials.findAnalysisConfig) {
       derived = await deps.materials.findAnalysisConfig(ctx.workspaceId, sourceHash, configHash, toolVersions, ctx.authority, sourceSnapshotId, ctx.signal);

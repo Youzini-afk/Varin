@@ -116,7 +116,7 @@ async function openHarness(options: { callback?: 'mask' | 'early' | 'tamper'; re
       decisions: manifest.capabilities!.host!.map(capability => ({ capability, realm: 'host' as const, granted: true })) });
     await runtime.setEnabled(manifest.id, true, (await runtime.catalog.snapshot()).revision);
     const selected = await runtime.prepareService({ serviceId: descriptor.id, version: descriptor.version,
-      method: 'execute', args: [], routing: { sessionId: run.thread_id } });
+      method: 'execute', args: [], routing: { threadId: run.thread_id, branchId: run.branch_id } });
     const callbackReplies: unknown[] = [];
     // Observe the actual broker response without substituting the original pin or its promise.
     const observed: HostServiceBinding = { ...selected, pin: () => {

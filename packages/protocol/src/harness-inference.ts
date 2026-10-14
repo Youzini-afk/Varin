@@ -5,7 +5,7 @@ import type {
 
 /**
  * Workspace-scoped embedding and rerank calls. These are not chat model slots.
- * Secrets stay in the Pi runtime; the Host only submits authorized text.
+ * The Host model owner resolves credentials and submits only authorized text.
  */
 
 /** Remote embedding window. Not the local MiniLM 512-token limit. */
@@ -23,7 +23,7 @@ export interface HarnessEmbeddingSettings {
   maxTokens?: number;
 }
 
-/** Credential-free provider/model configuration identity resolved by Pi. */
+/** Credential-free provider/model configuration identity resolved by the Host model owner. */
 export interface HarnessResolvedEmbeddingBinding extends HarnessEmbeddingSettings {
   configurationId: string;
 }
@@ -39,7 +39,7 @@ export interface HarnessRerankSettings {
   maxDocumentTokens?: number;
 }
 
-/** Credential-free provider/model configuration identity resolved by Pi. */
+/** Credential-free provider/model configuration identity resolved by the Host model owner. */
 export interface HarnessResolvedRerankBinding extends HarnessRerankSettings {
   configurationId: string;
 }
@@ -52,8 +52,7 @@ export interface HarnessInferenceBindingSnapshot {
     | { status: "ready"; binding: HarnessResolvedRerankBinding }
     | { status: "unconfigured" | "invalid" | "unavailable"; message?: string };
   /**
-   * Per-purpose fast-decision resolution. Absent when the worker predates the
-   * capability — consumers must treat a missing entry as unavailable.
+   * Per-purpose fast-decision resolution. A missing entry is unavailable.
    */
   fastDecision?: {
     purposes: Partial<Record<HarnessFastDecisionPurpose, HarnessFastDecisionPurposeStatus>>;
@@ -99,24 +98,6 @@ export interface HarnessEmbedResult {
   items: HarnessEmbedVector[];
 }
 
-export interface HarnessRerankDocument {
-  id: string;
-  text: string;
-  revision?: string;
-}
-
-export interface HarnessRerankParams {
-  configurationId: string;
-  providerId: string;
-  modelId: string;
-  protocol: HarnessRerankProtocol;
-  query: string;
-  documents: HarnessRerankDocument[];
-  batchId: string;
-  endpoint?: string;
-  maxDocumentTokens?: number;
-}
-
 export interface HarnessRerankScore {
   id: string;
   index: number;
@@ -131,39 +112,9 @@ export interface HarnessRerankResult {
 }
 
 /**
- * `harness.memoryOrganize` — one generative narration batch for the BC2
- * background organizer (Host -> Pi workspace worker). Unlike embed/rerank/
- * fastDecision this is a chat-model completion against the configured
- * `models.memoryOrganizer` slot; the worker resolves provider/auth and
- * rejects a request whose frozen binding no longer matches live settings.
- */
-export interface HarnessMemoryOrganizeParams {
-  batchId: string;
-  providerId: string;
-  modelId: string;
-  /** A Bot profile supplied this model because the global organizer slot is unset. */
-  modelSource?: "bot";
-  /** Output reservation used by both the Host planner and the Pi provider call. */
-  maxOutputTokens?: number;
-  /** System prompt — organizer contract and output schema. */
-  system: string;
-  /** User prompt — the source material and candidate memories to judge. */
-  prompt: string;
-}
-
-export interface HarnessMemoryOrganizeResult {
-  batchId: string;
-  providerId: string;
-  modelId: string;
-  /** Raw model text. The Host parses and validates proposals before commit. */
-  text: string;
-  usage?: { inputTokens?: number; outputTokens?: number };
-}
-
-/**
  * The organizer has no provider-independent exact tokenizer. Count the entire
  * UTF-8 bytes as a conservative upper estimate for byte-level tokenizers,
- * including the system contract and chat framing. Host planning and Pi
+ * including the system contract and chat framing. Host planning and inference
  * admission use this same estimate; providers with additional hidden framing
  * can still reject the request, which remains a visible retryable failure.
  */

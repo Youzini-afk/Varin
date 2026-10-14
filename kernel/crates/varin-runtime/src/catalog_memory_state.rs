@@ -173,7 +173,7 @@ impl MemoryStatePreparation {
             self.context.load()?.personalization.ok_or_else(|| {
                 RuntimeError::Invalid("memory requires owned personalization".into())
             })?;
-        if basis.session_id != self.run.thread_id {
+        if basis.thread_id != self.run.thread_id {
             return Err(RuntimeError::Conflict(
                 "memory scope differs from admitted thread".into(),
             ));
@@ -205,7 +205,7 @@ fn synchronize(
             .bot_knowledge
             .as_ref()
             .ok_or_else(|| RuntimeError::Invalid("Bot Knowledge projection is missing".into()))?;
-        if knowledge.thread_id != basis.session_id
+        if knowledge.thread_id != basis.thread_id
             || !state.memories.is_empty()
             || !state.known.is_empty()
             || !state.note_revisions.is_empty()

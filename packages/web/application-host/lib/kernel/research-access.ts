@@ -12,7 +12,7 @@ export function researchCaller(scope: ResearchScope, owner?: ResearchOwner): Exp
   return { workspaceId: scope.source.workspace_id, executionWorkspaceId: scope.source.execution_workspace_id,
     owner: owner ?? { runtime: 'agent', actor: { kind: 'reader' }, rootThreadId: scope.rootThreadId,
       threadId: scope.threadId, branchId: scope.branchId, runId: scope.sourceRunId, source: scope.source },
-    threadId: scope.threadId, runId: scope.sourceRunId, workspaceScope: [''],
+    workspaceScope: [''],
     access: { kind: 'family', readThreadIds: scope.readThreadIds, controlThreadIds: scope.controlThreadIds } };
 }
 

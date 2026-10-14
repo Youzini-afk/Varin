@@ -1,5 +1,5 @@
 import fs from 'node:fs';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { parseWorkspaceRecoveryCheckpointListResult } from '@varin/extension-contract';
 import type { HostCapabilityCallContext } from '@varin/extension-host';
 import {
@@ -82,7 +82,16 @@ describe('workspace.recovery-primitives Web Host capability', () => {
     }, context);
     expect(inherited).toMatchObject({ status: 'failed', failure: { code: 'unavailable' } });
     await expect(capability('createCheckpoint', { name: 'x', workspaceId: '' }, context)).rejects.toThrow(/workspaceId/);
-    await expect(capability('recordMutationBefore', {}, context)).rejects.toThrow(/executionId/);
+    await expect(capability('recordMutationBefore', {}, context)).rejects.toThrow(/original runtime owner/);
     await expect(capability('prepareCombinedRecovery', {}, context)).rejects.toThrow(/entryId/);
   });
+});
+
+it('keeps native journal anchors and mutations behind their original runtime owner', async () => {
+  const engine = { recordTurnStart: vi.fn(), recordTurnSettled: vi.fn(), recordMutationBefore: vi.fn(), recordMutationAfter: vi.fn() };
+  const handler = createWorkspaceRecoveryCapabilityHandler(engine as never);
+  for (const method of Object.keys(engine)) {
+    await expect(handler(method, { conversation: { kind: 'thread', threadId: 'thread', branchId: 'branch' } }, {} as never)).rejects.toThrow(/original runtime owner/);
+  }
+  for (const method of Object.values(engine)) expect(method).not.toHaveBeenCalled();
 });

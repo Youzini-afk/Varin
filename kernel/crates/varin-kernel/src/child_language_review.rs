@@ -279,7 +279,7 @@ fn prepare_child_source(review: &Review, child: &ChildTask, mode: SourceMode) ->
     let proposal = serde_json::from_value(json!({"key":format!("context:{}",child.operation_id),"branch_id":child.child_branch_id,
         "through_id":null,"expected_revision":0,"summary":"","effective_system_prompt":"Inspect only the admitted child source.","instruction_sources":[],"memory_checkpoint":null})).unwrap();
     let basis = serde_json::from_value(json!({"mode":"agent","threadRole":"worker","revision":0,"configurationDigest":"child-language-review",
-        "memorySnapshot":{"revision":0,"memories":[]},"sessionId":child.child_thread_id,"projectId":null,"originalSections":[],"instructionSources":[]})).unwrap();
+        "memorySnapshot":{"revision":0,"memories":[]},"threadId":child.child_thread_id,"projectId":null,"originalSections":[],"instructionSources":[]})).unwrap();
     let prepared = owner
         .lock()
         .unwrap()

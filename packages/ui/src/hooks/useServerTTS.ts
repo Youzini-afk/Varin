@@ -18,7 +18,8 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { usePreferencesStore } from '@/stores/usePreferencesStore';
-import { usePiSessionStore } from '@/stores/usePiSessionStore';
+import { useThreadStore, threadIdentityKey } from '@/stores/useThreadStore';
+import { useThreadDraftStore } from '@/stores/useThreadDraftStore';
 import { runtimeFetch } from '@varin/application-client';
 
 interface ServerTTSStatusCache {
@@ -136,10 +137,9 @@ export function useServerTTS(options: UseServerTTSOptions = {}): UseServerTTSRet
   const audioSourceRef = useRef<AudioBufferSourceNode | null>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
 
-  const currentModel = usePiSessionStore((state) => {
-    const sessionId = state.currentSessionId;
-    return sessionId ? state.records[sessionId]?.snapshot?.model : undefined;
-  });
+  const thread = useThreadStore(state => state.selectedIdentity);
+  const host = useThreadStore(state => state.hostKey);
+  const currentModel = useThreadDraftStore(state => thread ? state.drafts[threadIdentityKey(host, thread)]?.model : undefined);
   const openaiApiKey = usePreferencesStore((state) => state.openaiApiKey);
   const openaiCompatibleUrl = usePreferencesStore((state) => state.openaiCompatibleUrl);
   const openaiCompatibleApiKey = usePreferencesStore((state) => state.openaiCompatibleApiKey);
@@ -278,8 +278,8 @@ export function useServerTTS(options: UseServerTTSOptions = {}): UseServerTTSRet
           instructions: options?.instructions,
           summarize: false,
           // Use provided provider/model, or fall back to current chat model
-          providerId: options?.providerId || currentModel?.provider,
-          modelId: options?.modelId || currentModel?.id,
+          providerId: options?.providerId || currentModel?.providerId,
+          modelId: options?.modelId || currentModel?.modelId,
           // Send API key from settings if available
           apiKey: options?.baseURL ? (openaiCompatibleApiKey || undefined) : (openaiApiKey || undefined),
           // Send custom base URL for OpenAI-compatible servers

@@ -1,7 +1,7 @@
 import { unconfiguredWorkspaceEdits } from '../documents/workspace-edit.test-helper';
 import { afterEach, describe, expect, test } from 'vitest';
 import type { DocumentsAPI, VarinDocumentReadResult, VarinResourceReference } from '@varin/application-client';
-import { getRuntimeKey } from '@varin/application-client';
+import { threadHostKey as getRuntimeKey } from '@/stores/useThreadStore';
 import { bindDocumentRegistry, resetDocumentRegistry } from '@/lib/documents/session';
 import { applyPatchDecisionsToDocument } from './document-write';
 import { recordHintsFromToolCall, resetAgentFileChangeHints } from './hints';
@@ -124,7 +124,7 @@ describe('hinted agent reloads', () => {
     await registry.open(identity);
     recordHintsFromToolCall({
       runtimeKey: getRuntimeKey(),
-      sessionId: 'session-a',
+      threadKey: 'session-a',
       toolCallId: 'tool-1',
       toolName: 'write',
       args: { path: 'note.txt' },

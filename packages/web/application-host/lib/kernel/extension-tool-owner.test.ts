@@ -75,9 +75,8 @@ it('installed SDK declaration reaches shared bridge, compiled schemas, validated
       Buffer.from('Aé🙂中B'),
       {
         owningWorkspaceId: 'ws',
-        sessionId: 'old-pi',
+        kind: 'thread',
         threadId: 'thread',
-        runId: 'old-run',
       },
     );
     runtime = await ApplicationExtensionRuntime.create({
@@ -122,7 +121,7 @@ it('installed SDK declaration reaches shared bridge, compiled schemas, validated
       version: descriptor.version,
       method: 'execute',
       args: [],
-      routing: { sessionId: 'thread' },
+      routing: { threadId: 'thread' },
     });
     let invocation: HostToolCall | undefined;
     let tampered = false;
@@ -304,7 +303,7 @@ it('installed SDK declaration reaches shared bridge, compiled schemas, validated
       ),
     ).toMatchObject({ completion: { kind: 'not_dispatched' } });
    const scope = await createExtensionTools(options)(
-      { runId: 'second', threadId: 'thread', source: null },
+      { runId: 'second', threadId: 'thread', branchId: 'history-branch', source: null },
       [],
       new AbortController().signal,
     );
@@ -319,7 +318,7 @@ it('installed SDK declaration reaches shared bridge, compiled schemas, validated
     const computer = createComputerRuntime({ kernel, runtime: {} as never, enabled: async () => true,
       computers: { automation: { attachRequests: () => {} }, defaultDesktop: async () => { throw new Error('malformed original Computer default'); } } as never });
     const isolated = await createExtensionTools({ ...options, prepareConfiguration: computer.prepareConfiguration })(
-      { runId: 'independent-custom-selection', threadId: 'thread', source: null }, [], new AbortController().signal,
+      { runId: 'independent-custom-selection', threadId: 'thread', branchId: 'history-branch', source: null }, [], new AbortController().signal,
     );
     try {
       expect(isolated.initial.map(value => value.binding.serviceId)).toEqual([descriptor.id]);
@@ -328,12 +327,12 @@ it('installed SDK declaration reaches shared bridge, compiled schemas, validated
       }));
       // Exact saved bindings remain mandatory even though optional candidates isolate failure.
       await expect(createExtensionTools({ ...options, configurationIdentity: () => { throw new Error('required configuration unavailable'); } })(
-        { runId: 'required', threadId: 'thread', source: null }, [retained.binding], new AbortController().signal,
+        { runId: 'required', threadId: 'thread', branchId: 'history-branch', source: null }, [retained.binding], new AbortController().signal,
       )).rejects.toThrow(`extension_tool_configuration_unavailable:${descriptor.id}`);
     } finally { isolated.close(); for (const initial of isolated.initial) initial.lease.release(); }
     bridge.close();
     await expect(
-      retainExtensionTool(options, await runtime.prepareService({ serviceId: descriptor.id, version: descriptor.version, method: 'execute', args: [], routing: { sessionId: 'thread' } }), {
+      retainExtensionTool(options, await runtime.prepareService({ serviceId: descriptor.id, version: descriptor.version, method: 'execute', args: [], routing: { threadId: 'thread' } }), {
         ...retained.binding,
         artifactIntegrity: 'different-original-artifact',
       }),
@@ -459,7 +458,7 @@ it('real A-to-B routing keeps A on rejected B publication, ignores disabled B, a
           version: 1,
           providerKeys: [`${extensionId}:host:${serviceId}@1`],
           allowFallback: false,
-          scope: { sessionId: 'thread' },
+          scope: { threadId: 'thread' },
         },
       });
     await route(a);
@@ -508,10 +507,10 @@ it('real A-to-B routing keeps A on rejected B publication, ignores disabled B, a
       version: 1,
       method: 'execute',
       args: [],
-      routing: { sessionId: 'thread' },
+      routing: { threadId: 'thread' },
     });
    const scope = await createExtensionTools(options)(
-      { runId: 'run', threadId: 'thread', source: null },
+      { runId: 'run', threadId: 'thread', branchId: 'history-branch', source: null },
       [],
       new AbortController().signal,
     );
@@ -546,7 +545,7 @@ it('real A-to-B routing keeps A on rejected B publication, ignores disabled B, a
     // Reconstruct the saved exact A while current routing points to B. Only subsequent
     // new candidate preparation follows B; recovery never silently rewrites the old binding.
     const recovered = await createExtensionTools(options)(
-      { runId: 'recovered', threadId: 'thread', source: null },
+      { runId: 'recovered', threadId: 'thread', branchId: 'history-branch', source: null },
       [scope.initial[0]!.binding],
       new AbortController().signal,
     );
@@ -585,7 +584,7 @@ it('real A-to-B routing keeps A on rejected B publication, ignores disabled B, a
       expect(stale.catalog.authoritative).toBe(true);
       expect(stale.routing.authoritative).toBe(false);
       staleRecovered = await createExtensionTools(options)(
-        { runId: 'stale-recovery', threadId: 'thread', source: null },
+        { runId: 'stale-recovery', threadId: 'thread', branchId: 'history-branch', source: null },
         [scope.initial[0]!.binding],
         new AbortController().signal,
       );
@@ -599,7 +598,7 @@ it('real A-to-B routing keeps A on rejected B publication, ignores disabled B, a
       ).toBe(true);
       await expect(
         createExtensionTools(options)(
-          { runId: 'new-selection', threadId: 'thread', source: null },
+          { runId: 'new-selection', threadId: 'thread', branchId: 'history-branch', source: null },
           [],
           new AbortController().signal,
         ),
@@ -648,7 +647,7 @@ it('real A-to-B routing keeps A on rejected B publication, ignores disabled B, a
       version: 1,
       method: 'execute',
       args: [],
-      routing: { sessionId: 'thread' },
+      routing: { threadId: 'thread' },
     });
     const invalid = await retainExtensionTool(options, selected);
     leases.push(invalid);
@@ -698,7 +697,7 @@ it('real A-to-B routing keeps A on rejected B publication, ignores disabled B, a
     await expect.poll(() => removed).toEqual([a]);
     await expect(
       createExtensionTools(options)(
-        { runId: 'disabled', threadId: 'thread', source: null },
+        { runId: 'disabled', threadId: 'thread', branchId: 'history-branch', source: null },
         [scope.initial[0]!.binding],
         new AbortController().signal,
       ),

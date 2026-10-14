@@ -102,13 +102,13 @@ export const requestEmbeddedSessionRuntimeBootstrap = (): Promise<EmbeddedSessio
 };
 
 const buildEmbeddedSessionChatURLSignature = (
-  sessionID: string,
+  identity: import('@varin/application-client').ThreadIdentity,
   directory: string | null,
   readOnly: boolean,
-): string => JSON.stringify({ sessionID, directory: directory || '', readOnly: readOnly === true });
+): string => JSON.stringify({ threadId: identity.threadId, branchId: identity.branchId, directory: directory || '', readOnly: readOnly === true });
 
 export const buildEmbeddedSessionChatURL = (
-  sessionID: string,
+  identity: import('@varin/application-client').ThreadIdentity,
   directory: string | null,
   readOnly: boolean,
   theme: EmbeddedSessionChatThemeBootstrap,
@@ -118,18 +118,19 @@ export const buildEmbeddedSessionChatURL = (
   }
 
   const url = new URL(window.location.pathname, window.location.origin);
-  url.searchParams.set('piPanel', VARIN_EMBEDDED_SESSION_CHAT_PANEL);
+  url.searchParams.set('panel', VARIN_EMBEDDED_SESSION_CHAT_PANEL);
   url.searchParams.set('surface', 'desktop');
-  url.searchParams.set('piSessionId', sessionID);
+  url.searchParams.set('threadId', identity.threadId);
+  url.searchParams.set('branchId', identity.branchId);
   if (readOnly) {
-    url.searchParams.set('piReadOnly', '1');
+    url.searchParams.set('readOnly', '1');
   } else {
-    url.searchParams.delete('piReadOnly');
+    url.searchParams.delete('readOnly');
   }
   if (directory && directory.trim().length > 0) {
-    url.searchParams.set('piDirectory', directory);
+    url.searchParams.set('directory', directory);
   } else {
-    url.searchParams.delete('piDirectory');
+    url.searchParams.delete('directory');
   }
   url.searchParams.set('themeMode', theme.mode);
   url.searchParams.set('lightThemeId', theme.lightThemeId);
@@ -143,18 +144,18 @@ export const buildEmbeddedSessionChatURL = (
 export const getOrCreateEmbeddedSessionChatURL = (
   cache: Map<string, EmbeddedSessionChatURLCacheEntry>,
   tabID: string,
-  sessionID: string,
+  identity: import('@varin/application-client').ThreadIdentity,
   directory: string | null,
   readOnly: boolean,
   theme: EmbeddedSessionChatThemeBootstrap,
 ): string => {
-  const signature = buildEmbeddedSessionChatURLSignature(sessionID, directory, readOnly);
+  const signature = buildEmbeddedSessionChatURLSignature(identity, directory, readOnly);
   const existing = cache.get(tabID);
   if (existing?.signature === signature) {
     return existing.src;
   }
 
-  const src = buildEmbeddedSessionChatURL(sessionID, directory, readOnly, theme);
+  const src = buildEmbeddedSessionChatURL(identity, directory, readOnly, theme);
   cache.set(tabID, { signature, src });
   return src;
 };
@@ -190,7 +191,7 @@ export const isEmbeddedSessionChat = (): boolean => {
   }
   try {
     embeddedSessionChatCached =
-      new URLSearchParams(window.location.search).get('piPanel') === VARIN_EMBEDDED_SESSION_CHAT_PANEL;
+      new URLSearchParams(window.location.search).get('panel') === VARIN_EMBEDDED_SESSION_CHAT_PANEL;
     return embeddedSessionChatCached;
   } catch {
     embeddedSessionChatCached = false;
@@ -212,14 +213,11 @@ export const resetEmbeddedSessionChatCache = (): void => {
  * opened to show. Returns `null` outside the embedded iframe or when the
  * URL is malformed.
  */
-export const getEmbeddedSessionChatOriginSessionId = (): string | null => {
-  if (!isEmbeddedSessionChat()) {
-    return null;
-  }
+export const getEmbeddedSessionChatOriginIdentity = (): import('@varin/application-client').ThreadIdentity | null => {
+  if (!isEmbeddedSessionChat()) return null;
   try {
-    const sid = new URLSearchParams(window.location.search).get('piSessionId');
-    return sid && sid.trim().length > 0 ? sid.trim() : null;
-  } catch {
-    return null;
-  }
+    const params = new URLSearchParams(window.location.search);
+    const threadId = params.get('threadId')?.trim(); const branchId = params.get('branchId')?.trim();
+    return threadId && branchId ? { runtime: 'agent', threadId, branchId } : null;
+  } catch { return null; }
 };

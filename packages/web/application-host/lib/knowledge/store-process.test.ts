@@ -4,12 +4,24 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createRequire } from "node:module";
 import {
-  KnowledgeBlockConflictError, KnowledgeMutationError,
+  KnowledgeMutationError,
   openWorkspaceKnowledge, type KnowledgeStore,
 } from "./store.js";
 import { knowledgeStoreProcess } from "./store-process.js";
 import { purgeSemanticWorkspaceCache } from "./semantic/cache-maintenance.js";
+import type { PlanView } from "@varin/protocol";
 import type { StoreRequest } from "./store-protocol.js";
+
+const planView: PlanView = { threadId: "thread", branchId: "branch", headId: null, inheritedRef: null, forkBasis: null };
+const writePlan = async (store: KnowledgeStore, key: string, content: string) => {
+  const { latestRef } = await store.readPlanCandidate(planView);
+  return store.mutatePlan({ view: planView, origin: { kind: "user", key }, content, expectedRef: null,
+    selection: { latestRef, selectedRef: latestRef } });
+};
+const readPlan = async (store: KnowledgeStore) => {
+  const { latestRef } = await store.readPlanCandidate(planView);
+  return store.readPlan(planView, { latestRef, selectedRef: latestRef });
+};
 
 const roots: string[] = [];
 const stores: KnowledgeStore[] = [];
@@ -48,10 +60,10 @@ describe("knowledge storage process", () => {
     const refresh = store.resolveAssociationCandidates().then(result => { complete = true; return result; });
     try {
       await firstFile;
-      const plan = store.upsertBlock({ sessionId: "s", label: "plan", content: "- [x] done", updatedBy: "agent" });
-      const observations = store.getBlocks("s");
-      await plan;
-      expect((await observations)[0]?.content).toBe("- [x] done");
+      const plan = writePlan(store, "plan", "- [x] done");
+      const observations = store.listEvents({ sessionId: "run" });
+      expect((await plan).plan?.content).toBe("- [x] done");
+      expect(await observations).toEqual([]);
       expect(complete).toBe(false);
       await Promise.all([
         store.removeFileSymbols("producer.ts"),
@@ -78,12 +90,12 @@ describe("knowledge storage process", () => {
     let timer: ReturnType<typeof setTimeout> | undefined;
     try {
       await started;
-      const plan = store.upsertBlock({ sessionId: "s", label: "plan", content: "- [x] saved", updatedBy: "agent" });
+      const plan = writePlan(store, "saved", "- [x] saved");
       const result = await Promise.race([plan, new Promise<never>((_resolve, reject) => {
         timer = setTimeout(() => reject(new Error("Plan waited on the unrelated index owner")), 10_000);
       })]);
-      expect(result.content).toBe("- [x] saved");
-      expect((await store.getBlocks("s"))[0]?.content).toBe(result.content);
+      expect(result.plan?.content).toBe("- [x] saved");
+      expect((await readPlan(store))?.content).toBe(result.plan?.content);
     } finally {
       clearTimeout(timer);
       held.mockRestore();
@@ -105,13 +117,13 @@ describe("knowledge storage process", () => {
       return true;
     });
     let laterDone = false;
-    const first = store.getBlocks("s");
-    const later = other.getBlocks("s").then(value => { laterDone = true; return value; });
+    const first = store.listEvents({ sessionId: "run" });
+    const later = other.listEvents({ sessionId: "run" }).then(value => { laterDone = true; return value; });
     void later.catch(() => {});
     try {
       await expect(first).resolves.toEqual([]);
       expect(laterDone).toBe(false);
-      expect(owner.activity().inFlight).toEqual([{ method: "getBlocks", count: 1, oldestMs: expect.any(Number) }]);
+      expect(owner.activity().inFlight).toEqual([{ method: "listEvents", count: 1, oldestMs: expect.any(Number) }]);
     } finally { send.mockRestore(); completeLater?.(); }
     await expect(later).resolves.toEqual([]);
     expect(owner.activity().inFlight).toEqual([]);
@@ -135,18 +147,19 @@ describe("knowledge storage process", () => {
     const notifications: string[] = [];
     const store: KnowledgeStore = await openWorkspaceKnowledge({
       ...options,
-      onBlocksChanged: () => notifications.push("block"),
+      onPlanChanged: () => notifications.push("plan"),
       onKnowledgeChanged: () => notifications.push(store.knowledgeRevision()),
     });
     stores.push(store);
     const revision = store.knowledgeRevision();
-    const block = await store.upsertBlock({ sessionId: "s", label: "goal", content: "synthetic", updatedBy: "user" });
-    expect(notifications).toEqual(["block"]);
-    await expect(store.upsertBlock({ sessionId: "s", label: "goal", content: "stale", updatedBy: "user", expectedUpdatedAt: null }))
-      .rejects.toBeInstanceOf(KnowledgeBlockConflictError);
+    const original = await writePlan(store, "original", "synthetic");
+    expect(notifications).toEqual(["plan"]);
+    const conflict = await writePlan(store, "stale", "stale");
+    expect(conflict.receipt.status).toBe("conflict");
+    expect(conflict.plan).toEqual(original.plan);
     await expect(store.updateSuggestedKnowledge(999999, { content: "synthetic", trigger: "fixture" }))
       .rejects.toBeInstanceOf(KnowledgeMutationError);
-    expect((await store.getBlocks("s"))[0]).toEqual(block);
+    expect(await readPlan(store)).toEqual(original.plan);
     await store.putKnowledge({ scope: "workspace", status: "accepted", content: "synthetic", trigger: "fixture" });
     expect(store.knowledgeRevision()).not.toBe(revision);
     expect(notifications.at(-1)).toBe(store.knowledgeRevision());
@@ -184,7 +197,7 @@ describe("knowledge storage process", () => {
     await Promise.all([1, 2, 3].map(at => store.putEvent({
       kind: "turn", at, sessionId: "s", text: "synthetic", source: "agent",
     })));
-    const plan = await store.upsertBlock({ sessionId: "s", label: "plan", content: "- [x] durable plan", updatedBy: "agent" });
+    const plan = await writePlan(store, "durable", "- [x] durable plan");
     const memoryId = await store.putKnowledge({ scope: "workspace", status: "accepted", content: "Use the synthetic database", trigger: "database" });
     const owner = knowledgeStoreProcess();
     const pending = store.listEvents({ sessionId: "s" });
@@ -196,7 +209,7 @@ describe("knowledge storage process", () => {
     const reopened = await openWorkspaceKnowledge(options);
     stores.push(reopened);
     expect(await reopened.listEvents({ sessionId: "s" })).toHaveLength(3);
-    expect((await reopened.getBlocks("s"))[0]).toEqual(plan);
+    expect(await readPlan(reopened)).toEqual(plan.plan);
     expect((await reopened.recall("database", 5)).map(result => result.node.id)).toContain(memoryId);
     expect((await reopened.searchSymbols("durableSymbol", 5))[0]?.name).toBe("durableSymbol");
   });

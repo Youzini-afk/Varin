@@ -1,6 +1,6 @@
 /**
  * BC4 Computer Use: machine/desktop catalog, observation, action, and
- * cancellation contracts shared by the Host computer service, the Pi
+ * cancellation contracts shared by the Host computer service, the native
  * `computer` tool, and the settings surfaces.
  *
  * Ownership: a machine is a real computer (local host, remote machine, or a
@@ -85,12 +85,10 @@ export interface ComputerDesktop {
 
 export interface ComputerWorkAssociation {
   work: ComputerWorkRef;
-  registry: ComputerRegistryRef | null;
   at: string;
 }
 
 export interface ComputerActivity {
-  sessionId?: string;
   execution?: ComputerExecutionRef;
   app: string;
   operation: "observe" | ComputerAction["kind"];
@@ -101,19 +99,11 @@ export interface ComputerActivity {
 export interface ComputerActivityEntry { desktopId: string; activity: ComputerActivity }
 
 /** Runtime identity is part of the reference; matching strings never alias work. */
-export type ComputerWorkRef =
-  | { runtime: "pi"; sessionId: string }
-  | { runtime: "agent"; threadId: string; branchId: string };
+export type ComputerWorkRef = { runtime: "agent"; threadId: string; branchId: string };
 
 export interface ComputerExecutionRef {
   work: ComputerWorkRef;
   runId: string;
-}
-
-/** Actual Registry ownership, present only for a Pi execution. */
-export interface ComputerRegistryRef {
-  scopeId: string;
-  threadId: string;
 }
 
 /** Host-resolved execution identity; worker parameters never supply this authority. */
@@ -122,14 +112,12 @@ export interface ComputerActor {
   rootWork: ComputerWorkRef;
   /** A recipient can exist without a live root Run. Never synthesize an idle Run. */
   rootExecution: ComputerExecutionRef | null;
-  registry: ComputerRegistryRef | null;
   label: string;
   /** Native tools retain their original per-invocation permission checks; this is not an assignment grant. */
-  roleAccess: { kind: "pi-role"; readOnly: boolean } | { kind: "tool-invocation" };
+
 }
 
-export const computerWorkKey = (work: ComputerWorkRef): string => JSON.stringify(work.runtime === "pi"
-  ? [work.runtime, work.sessionId] : [work.runtime, work.threadId, work.branchId]);
+export const computerWorkKey = (work: ComputerWorkRef): string => JSON.stringify([work.runtime, work.threadId, work.branchId]);
 export const computerExecutionKey = (execution: ComputerExecutionRef): string =>
   JSON.stringify([computerWorkKey(execution.work), execution.runId]);
 export const sameComputerWork = (left: ComputerWorkRef, right: ComputerWorkRef): boolean =>
@@ -144,7 +132,6 @@ const computerId = (value: unknown): value is string => typeof value === "string
 /** Shared wire/storage decoder. Old session-shaped actors are not compatible records. */
 export function parseComputerWorkRef(value: unknown): ComputerWorkRef {
   if (computerObject(value)) {
-    if (value.runtime === "pi" && computerId(value.sessionId)) return { runtime: "pi", sessionId: value.sessionId };
     if (value.runtime === "agent" && computerId(value.threadId) && computerId(value.branchId)) {
       return { runtime: "agent", threadId: value.threadId, branchId: value.branchId };
     }
@@ -166,18 +153,8 @@ export function parseComputerActor(value: unknown): ComputerActor {
     || sameComputerWork(execution.work, rootWork) && (!rootExecution || !sameComputerExecution(execution, rootExecution))) {
     throw new Error("computer_actor_family_invalid");
   }
-  const role = value.roleAccess;
-  if (!computerObject(role) || (execution.work.runtime === "pi"
-    ? role.kind !== "pi-role" || typeof role.readOnly !== "boolean" || Object.keys(role).some(key => key !== "kind" && key !== "readOnly")
-    : role.kind !== "tool-invocation" || Object.keys(role).some(key => key !== "kind")) || "readOnly" in value) throw new Error("computer_actor_role_invalid");
-  const roleAccess: ComputerActor["roleAccess"] = role.kind === "pi-role"
-    ? { kind: "pi-role", readOnly: role.readOnly as boolean } : { kind: "tool-invocation" };
-  let registry: ComputerRegistryRef | null = null;
-  if (execution.work.runtime === "pi") {
-    if (!computerObject(value.registry) || !computerId(value.registry.scopeId) || !computerId(value.registry.threadId)) throw new Error("computer_actor_registry_invalid");
-    registry = { scopeId: value.registry.scopeId, threadId: value.registry.threadId };
-  } else if (value.registry !== null) throw new Error("computer_actor_registry_invalid");
-  return { execution, rootWork, rootExecution, registry, label: value.label, roleAccess };
+  if ('registry' in value || 'roleAccess' in value || 'readOnly' in value) throw new Error('computer_actor_identity_invalid');
+  return { execution, rootWork, rootExecution, label: value.label };
 }
 
 export type ComputerAccess = "observe" | "control";
@@ -232,11 +209,10 @@ export function parseComputerActivity(value: unknown): ComputerActivity {
   if (!computerObject(value) || !computerId(value.app) || !computerId(value.updatedAt)
     || !["observe", "click", "type", "key", "scroll", "drag", "set_value", "secondary"].includes(String(value.operation))
     || !["running", "idle", "error"].includes(String(value.status))
-    || value.sessionId !== undefined && !computerId(value.sessionId)) throw new Error("computer_activity_invalid");
+    || 'sessionId' in value) throw new Error("computer_activity_invalid");
   const execution = value.execution === undefined ? undefined : parseComputerExecutionRef(value.execution);
-  if (value.sessionId !== undefined && execution && (execution.work.runtime !== "pi" || execution.work.sessionId !== value.sessionId)) throw new Error("computer_activity_identity_invalid");
   return { app: value.app, updatedAt: value.updatedAt, operation: value.operation as ComputerActivity["operation"], status: value.status as ComputerActivity["status"],
-    ...(value.sessionId === undefined ? {} : { sessionId: value.sessionId }), ...(execution ? { execution } : {}) };
+    ...(execution ? { execution } : {}) };
 }
 
 /** A projection wake-up, not an assignment or a complete state replacement. */
@@ -309,7 +285,6 @@ export interface ComputerAccessParams {
 export interface ComputerGesture {
   id: string;
   desktopId: string;
-  sessionId?: string;
   execution?: ComputerExecutionRef;
   actorLabel?: string;
   kind: ComputerAction["kind"] | "move";
@@ -794,8 +769,6 @@ export interface ComputerEvidenceEntry {
   /** Per-desktop sequence; `since` resumes after a previously seen seq. */
   seq: number;
   at: string;
-  /** Session that issued the step, when known. */
-  sessionId?: string;
   /** Original admitted work and Run; labels and caller-provided session IDs never replace it. */
   execution?: ComputerExecutionRef;
   lane: "observe" | "action";
@@ -812,8 +785,8 @@ export interface ComputerEvidenceEntry {
 
 export interface ComputerEvidenceParams {
   desktopId?: string;
-  /** Restrict to steps issued by one session. */
-  sessionId?: string;
+  /** Restrict to one original admitted execution. */
+  execution?: ComputerExecutionRef;
   /** Return only entries with seq > since. */
   since?: number;
   /** Page size (default 50); with since, read oldest unseen steps first. */

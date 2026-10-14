@@ -3,13 +3,12 @@ import {
   VARIN_EDITOR_MONACO_SERVICE_ID,
   VARIN_EDITOR_MONACO_SERVICE_VERSION,
 } from '@varin/extension-contract';
-import type { RuntimeContextTarget } from '@varin/protocol';
 import { getRegisteredRuntimeAPIs } from '@/lib/runtime-api/registry';
-import { getPiSettings } from '@/lib/pi-runtime/settings';
-import { getRuntimeKey, subscribeRuntimeEndpointChanged } from '@varin/application-client';
+import { readProjectTrust, subscribeProjectTrustChanges } from '@/lib/projectTrust';
+import { getRuntimeKey, getRuntimeEndpointGeneration, subscribeRuntimeEndpointChanged } from '@varin/application-client';
 import { getResolvedWorkbenchWorkspaceId, subscribeWorkbenchWorkspace } from './workbench-workspace';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
-import { usePiSessionStore } from '@/stores/usePiSessionStore';
+import { useThreadStore } from '@/stores/useThreadStore';
 import { varinSurfaceRuntime } from './surface-runtime';
 import { surfaceServiceRoutingContext } from './surface-routing-context';
 import { startBuiltinVarinExtensions } from './builtin-surface-manager';
@@ -34,14 +33,14 @@ export const surfaceExtensionLoader = new SurfaceExtensionLoader({
   accessContext: (state) => {
     const directory = useDirectoryStore.getState().currentDirectory;
     const workspaceId = directory ? getResolvedWorkbenchWorkspaceId(directory) : undefined;
-    const sessionId = usePiSessionStore.getState().currentSessionId;
+    const identity = useThreadStore.getState().selectedIdentity;
     return {
       access: varinSurfaceRuntime.surface === 'desktop'
         || (typeof window !== 'undefined' && typeof window.__VARIN_LOCAL_ORIGIN__ === 'string') ? 'local' : 'remote',
       projectTrusted: activeProjectTrusted,
       routing: surfaceServiceRoutingContext({
         surface: varinSurfaceRuntime.surface, runtimeId: getRuntimeKey(),
-        ...(state ? { snapshot: state } : {}), ...(sessionId ? { sessionId } : {}),
+        ...(state ? { snapshot: state } : {}), ...(identity ? { threadId: identity.threadId, branchId: identity.branchId } : {}),
         ...(directory ? { configurationDirectory: directory } : {}),
         ...(workspaceId ? { documentWorkspaceId: workspaceId } : {}),
       }),
@@ -88,45 +87,39 @@ function reconcileSurfaceContext(): void {
 let trustOwnerKey = '';
 let trustGeneration = 0;
 
-const trustTarget = (): RuntimeContextTarget | null => {
-  const state = usePiSessionStore.getState();
-  if (state.currentSessionId) return { sessionId: state.currentSessionId };
-  if (state.catalogCwd) return { cwd: state.catalogCwd };
-  return null;
-};
-
-const refreshProjectTrustOwner = (): void => {
-  const target = trustTarget();
+const refreshProjectTrustOwner = (force = false): void => {
+  const directory = useDirectoryStore.getState().currentDirectory;
+  const workspaceId = directory ? getResolvedWorkbenchWorkspaceId(directory) : undefined;
+  const endpoint = getRuntimeEndpointGeneration();
   const runtimeKey = getRuntimeKey();
-  const nextOwnerKey = JSON.stringify([runtimeKey, target]);
-  if (nextOwnerKey === trustOwnerKey) return;
+  const nextOwnerKey = JSON.stringify([endpoint, runtimeKey, workspaceId]);
+  if (!force && nextOwnerKey === trustOwnerKey) return;
   trustOwnerKey = nextOwnerKey;
   const generation = ++trustGeneration;
   setVarinExtensionProjectTrust(false);
   reconcileSurfaceContext();
-  if (!target) return;
+  if (!workspaceId) return;
   void surfaceExtensionLoader.triggerActivation('workspace-match').catch((error) => {
     console.error('[Varin Extensions] Workspace Surface activation failed:', error);
   });
-  void getPiSettings(target).then((settings) => {
+  void readProjectTrust(workspaceId).then((trust) => {
     if (generation !== trustGeneration || nextOwnerKey !== trustOwnerKey || runtimeKey !== getRuntimeKey()) return;
-    setVarinExtensionProjectTrust(settings.projectTrusted);
+    setVarinExtensionProjectTrust(trust.decision === true);
   }).catch(() => {
     // A failed read is not evidence of either trusted or untrusted state. The new owner stays untrusted
     // until a complete authoritative catalog is observed.
   });
 };
 
-usePiSessionStore.subscribe((state, previous) => {
-  if (state.currentSessionId !== previous.currentSessionId || state.catalogCwd !== previous.catalogCwd) {
-    refreshProjectTrustOwner();
-  }
+useThreadStore.subscribe((state, previous) => {
+  if (state.selectedIdentity !== previous.selectedIdentity) reconcileSurfaceContext();
 });
 useDirectoryStore.subscribe((state, previous) => {
-  if (state.currentDirectory !== previous.currentDirectory) reconcileSurfaceContext();
+  if (state.currentDirectory !== previous.currentDirectory) refreshProjectTrustOwner();
 });
-subscribeWorkbenchWorkspace(reconcileSurfaceContext);
-subscribeRuntimeEndpointChanged(refreshProjectTrustOwner);
+subscribeWorkbenchWorkspace(() => refreshProjectTrustOwner());
+subscribeProjectTrustChanges(() => refreshProjectTrustOwner(true));
+subscribeRuntimeEndpointChanged(() => refreshProjectTrustOwner());
 refreshProjectTrustOwner();
 
 let initialReconcile: Promise<void> | null = null;

@@ -63,7 +63,7 @@ export function ThreadSourcePicker({ api, identity, initialPath, active, launch,
   }, []);
   React.useEffect(() => {
     setPreparing(false); setError(undefined); setPath(callbacks.current.initialPath ?? '');
-    callbacks.current.onPrepared(null); callbacks.current.onPreparingChange(false);
+    callbacks.current.onPreparingChange(false);
     return () => { void retire().catch(() => { /* The original Host may already be disconnected. */ }); };
   }, [api, host, identity.threadId, identity.branchId, retire]);
   React.useEffect(() => {
@@ -77,7 +77,7 @@ export function ThreadSourcePicker({ api, identity, initialPath, active, launch,
   React.useEffect(() => registerRuntimeEndpointSwitchBlocker(async () => {
     // Release on the original Host before the endpoint changes, including a late capture reply.
     const releasing = retire();
-    setPreparing(false); callbacks.current.onPreparingChange(false); callbacks.current.onPrepared(null);
+    setPreparing(false); callbacks.current.onPreparingChange(false);
     await releasing;
   }), [retire]);
   const invalidate = () => {

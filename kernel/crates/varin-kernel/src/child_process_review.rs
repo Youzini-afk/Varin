@@ -384,7 +384,7 @@ impl Harness {
         let prepared = preparation.load().unwrap();
         owner.lock().unwrap().attach_child_source(prepared).unwrap();
         let proposal = serde_json::from_value(json!({"key":format!("context-{name}"),"branch_id":child.child_branch_id,"through_id":null,"expected_revision":0,"summary":"","effective_system_prompt":"Configured child writer","instruction_sources":[],"memory_checkpoint":null})).unwrap();
-        let basis = serde_json::from_value(json!({"mode":"agent","threadRole":"worker","revision":0,"configurationDigest":"writer","memorySnapshot":{"revision":0,"memories":[]},"sessionId":child.child_thread_id,"projectId":null,"originalSections":[],"instructionSources":[]})).unwrap();
+        let basis = serde_json::from_value(json!({"mode":"agent","threadRole":"worker","revision":0,"configurationDigest":"writer","memorySnapshot":{"revision":0,"memories":[]},"threadId":child.child_thread_id,"projectId":null,"originalSections":[],"instructionSources":[]})).unwrap();
         let child = owner
             .lock()
             .unwrap()

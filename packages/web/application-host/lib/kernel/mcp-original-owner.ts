@@ -1,3 +1,4 @@
+import { createMcpSourceProcessAdmission } from './mcp-process-admission.js';
 /** Reacquire an original frozen MCP owner without replacing its source, endpoint or credentials. */
 import { stat } from 'node:fs/promises';
 import { McpAuthorityError } from '../mcp/errors.js';
@@ -67,7 +68,8 @@ export function createMcpOriginalOwnerRecovery(options: McpOriginalOwnerOptions)
                 executionCwd = await admitMaterializedRoot((await originalMaterializationLocation(handshake.storageRoot, source.workspace_id, source.environment_run_id ?? runId)).targetPath, signal);
             }
         }
-        const lease = await options.authority.acquire({ resourceOwner: owner.resource_owner, agentDir: configuration.agent_dir, configCwd: configuration.config_cwd,
+        const admitProcess = workspace && context.source ? createMcpSourceProcessAdmission({ ...options, runId, source: context.source, executionCwd }) : undefined;
+        const lease = await options.authority.acquire({ ...(admitProcess ? { admitProcess } : {}), resourceOwner: owner.resource_owner, agentDir: configuration.agent_dir, configCwd: configuration.config_cwd,
             projectTrusted: configuration.project_trusted, executionCwd, executionScope: owner.execution_scope,
             environmentId: workspace ? `${options.hostId}:${context.source!.execution_workspace_id}` : `${options.hostId}:global`, sessionId: `agent:${context.threadId}` }, { servers: [endpoint.server], signal, provenance: { ...original, servers: { [endpoint.server]: server } } });
         try { await revalidate(); signal.throwIfAborted(); return lease; }

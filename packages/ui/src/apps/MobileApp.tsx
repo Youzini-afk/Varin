@@ -4,9 +4,7 @@ import { Icon } from '@/components/icon/Icon';
 import type { IconName } from '@/components/icon/icons';
 import { McpIcon } from '@/components/icons/McpIcon';
 import { McpDropdownContent } from '@/components/mcp/McpDropdown';
-import { PiInteractionHost } from '@/components/pi-session/PiInteractionHost';
-import { PiSessionSwitcherDropdown } from '@/components/pi-session/PiSessionSwitcherDropdown';
-import { piSessionTitle } from '@/components/pi-session/sessionPresentation';
+import { ThreadSwitcherDropdown } from '@/components/thread/ThreadSwitcherDropdown';
 import { AboutSettings } from '@/components/sections/varin/AboutSettings';
 import { MobileAppUpdateToast } from '@/components/update/MobileAppUpdateToast';
 import { Button } from '@/components/ui/button';
@@ -35,8 +33,8 @@ import { useI18n } from '@/lib/i18n';
 import { isIPadApp } from '@/lib/platform';
 import { readStoredThemeState } from '@/lib/theme/themeStorage';
 import { resolveProjectForDirectory } from '@/lib/projectResolution';
-import { piSessionContextUsage, clampPercent, resolveUsageTone } from '@/lib/pi-runtime/sessionStats';
-import { SessionTokenUsage } from '@/components/pi-session/SessionTokenUsage';
+const clampPercent = (value: number) => Number.isFinite(value) ? Math.max(0, Math.min(100, value)) : null;
+const resolveUsageTone = (value: number) => value >= 90 ? 'critical' : value >= 75 ? 'warn' : 'normal';
 import { runtimeFetch } from '@varin/application-client';
 import { getRuntimeApiBaseUrl, subscribeRuntimeEndpointChanged, switchRuntimeEndpointSafely } from '@varin/application-client';
 import { workspaceEvents } from '@/lib/workspaceEvents';
@@ -48,12 +46,13 @@ import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { useFeatureFlagsStore } from '@/stores/useFeatureFlagsStore';
 import { useGitHubAuthStore } from '@/stores/useGitHubAuthStore';
 import { useGitStatus, useGitStore, useIsGitRepo } from '@/stores/useGitStore';
-import { usePiSessionStore } from '@/stores/usePiSessionStore';
+import { useThreadStore, bindThreadStore } from '@/stores/useThreadStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useUIStore } from '@/stores/useUIStore';
 import { useUpdateStore } from '@/stores/useUpdateStore';
 
-import { PiAppEffects } from './PiAppEffects';
+import { useKeyboardShortcuts } from '@/hooks/useKeyboardShortcuts';
+import { usePwaManifestSync } from '@/hooks/usePwaManifestSync';
 import { bindMobileWorkspaceShell } from './mobileWorkspaceShell';
 import { WorkbenchProfileBridge, WorkbenchReplacement, WORKBENCH_REPLACEMENT_TARGETS } from '@/lib/extensions/workbench-registry';
 import { WorkbenchShellHost } from '@/lib/extensions/workbench-shell-host';
@@ -100,8 +99,8 @@ const MOBILE_SETTINGS_PAGES = [
   'harness-index',
   'harness-web',
   'extensions',
-  'runtime',
-  'providers',
+  'model-connections',
+  'mcp-connections',
   'agents',
   'commands',
   'skills',
@@ -1543,7 +1542,7 @@ const SessionMetadataOverlay: React.FC<{
               </span>
             </MetadataRow>
           ) : null}
-          <SessionTokenUsage />
+
         </div>
       </div>
       <style>{`
@@ -1628,7 +1627,6 @@ const MobileOverflowMenu: React.FC<{
 const MobileSessionMetadataButton = React.memo(function MobileSessionMetadataButton({
   open,
   onOpenChange,
-  currentSessionId,
   gitDirectory,
   primaryLabel,
   secondaryLabel,
@@ -1643,10 +1641,6 @@ const MobileSessionMetadataButton = React.memo(function MobileSessionMetadataBut
   const { t } = useI18n();
   const { git } = useRuntimeAPIs();
   const metadataTriggerRef = React.useRef<HTMLButtonElement>(null);
-  const currentRecord = usePiSessionStore((state) => (
-    currentSessionId === null ? undefined : state.records[currentSessionId]
-  ));
-  const refreshStats = usePiSessionStore((state) => state.refreshStats);
   const isGitRepo = useIsGitRepo(gitDirectory);
   const gitStatus = useGitStatus(gitDirectory);
   const ensureStatus = useGitStore((state) => state.ensureStatus);
@@ -1668,30 +1662,7 @@ const MobileSessionMetadataButton = React.memo(function MobileSessionMetadataBut
 
 
 
-  React.useEffect(() => {
-    if (!currentSessionId || currentRecord?.snapshot?.busy) return;
-    void refreshStats(currentSessionId).catch(() => undefined);
-  }, [currentRecord?.snapshot?.busy, currentRecord?.snapshot?.leafId, currentSessionId, refreshStats]);
-
-
-  const contextUsage = piSessionContextUsage(currentRecord?.stats, currentRecord?.snapshot);
-  const contextPercentage = contextUsage && contextUsage.totalTokens > 0 && contextUsage.contextLimit > 0
-    ? Math.min(contextUsage.percentage, 999)
-    : null;
-  const contextTokens = contextPercentage !== null
-    ? `${formatTokens(contextUsage!.totalTokens)}/${formatTokens(contextUsage!.contextLimit)}`
-    : null;
-  const contextColorClass =
-    contextPercentage === null
-      ? ''
-      : contextPercentage >= 90
-        ? 'text-[var(--status-error)]'
-        : contextPercentage >= 75
-          ? 'text-[var(--status-warning)]'
-          : 'text-[var(--status-success)]';
-  const contextDisplay: ContextDisplay = contextPercentage !== null && contextTokens
-    ? { percentage: contextPercentage, tokens: contextTokens, colorClass: contextColorClass }
-    : null;
+  const contextDisplay: ContextDisplay = null;
 
   const branchLabel = isGitRepo === true
     ? (gitStatus?.current?.trim() || t('gitView.branch.detachedHead'))
@@ -1701,7 +1672,7 @@ const MobileSessionMetadataButton = React.memo(function MobileSessionMetadataBut
 
   return (
     <>
-      <PiSessionSwitcherDropdown align="start">
+      <ThreadSwitcherDropdown align="start">
         <button
           type="button"
           className="flex min-w-0 flex-1 items-center rounded-lg px-2 py-1.5 text-left transition-colors hover:bg-interactive-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
@@ -1715,7 +1686,7 @@ const MobileSessionMetadataButton = React.memo(function MobileSessionMetadataBut
             ) : null}
           </span>
         </button>
-      </PiSessionSwitcherDropdown>
+      </ThreadSwitcherDropdown>
       <button
         ref={metadataTriggerRef}
         type="button"
@@ -1754,16 +1725,10 @@ const MobileHeader: React.FC<{
   const { t } = useI18n();
   const [metadataOpen, setMetadataOpen] = React.useState(false);
   const currentDirectory = useDirectoryStore((state) => state.currentDirectory);
-  const currentSessionId = usePiSessionStore((state) => state.currentSessionId);
-  const currentSnapshot = usePiSessionStore((state) => (
-    state.currentSessionId === null ? undefined : state.records[state.currentSessionId]?.snapshot
-  ));
-  const currentSummary = usePiSessionStore((state) => (
-    state.currentSessionId === null
-      ? undefined
-      : state.summaries.find((summary) => summary.id === state.currentSessionId)
-  ));
-  const effectiveDirectory = currentSnapshot?.cwd || currentSummary?.cwd || currentDirectory;
+  const currentIdentity = useThreadStore(state => state.selectedIdentity);
+  const currentSessionId = currentIdentity?.threadId ?? null;
+  const currentSummary = useThreadStore(state => state.threads.find(thread => thread.thread_id === currentIdentity?.threadId));
+  const effectiveDirectory = currentDirectory;
   const gitDirectory = normalizePath(effectiveDirectory) || null;
   const projects = useProjectsStore((state) => state.projects);
 
@@ -1774,8 +1739,7 @@ const MobileHeader: React.FC<{
     return getProjectDisplayLabel(project, directory) || t('mobile.header.noProject');
   }, [effectiveDirectory, projects, t]);
 
-  const sessionTitle = currentSnapshot?.name?.trim()
-    || (currentSummary ? piSessionTitle(currentSummary, t('mobile.sessions.untitled')) : '');
+  const sessionTitle = currentSummary?.title || '';
   const primaryLabel = sessionTitle || (currentSessionId ? t('mobile.sessions.untitled') : projectLabel);
   const secondaryLabel = currentSessionId ? projectLabel : '';
 
@@ -1882,7 +1846,6 @@ const MobileShell: React.FC<{ onActiveConnectionDeleted: () => void }> = ({ onAc
   const [terminalOpen, setTerminalOpen] = React.useState(false);
   const [mcpOpen, setMcpOpen] = React.useState(false);
   const [instancesOpen, setInstancesOpen] = React.useState(false);
-  const [isMcpReconnecting, setIsMcpReconnecting] = React.useState(false);
   const [settingsOpen, setSettingsOpen] = React.useState(false);
   const [updateOpen, setUpdateOpen] = React.useState(false);
   const [settingsInitialMobileStage, setSettingsInitialMobileStage] = React.useState<'nav' | 'page-content'>('nav');
@@ -1895,8 +1858,7 @@ const MobileShell: React.FC<{ onActiveConnectionDeleted: () => void }> = ({ onAc
   const updateRuntimeType = useUpdateStore((state) => state.runtimeType);
   const settingsAutoUpdateChecksEnabled = usePreferencesStore((state) => state.settingsAutoUpdateChecksEnabled);
   const showCapacitorOnlyFeatures = React.useMemo(() => isCapacitorMobileApp(), []);
-  const currentPiSessionId = usePiSessionStore((state) => state.currentSessionId);
-  const executePiCommand = usePiSessionStore((state) => state.executeCommand);
+  const currentThreadId = useThreadStore((state) => state.selectedIdentity?.threadId ?? null);
   const gitStatus = useGitStatus(normalizePath(currentDirectory) || null);
   const dirtyChangeCount = gitStatus?.files?.length ?? 0;
   const surfaceVariant = mobileLayout.prefersSidePanels ? 'side' : 'sheet';
@@ -2048,7 +2010,7 @@ const MobileShell: React.FC<{ onActiveConnectionDeleted: () => void }> = ({ onAc
       ],
       { duration: 300, easing: 'cubic-bezier(0.22, 1, 0.36, 1)' },
     );
-  }, [currentPiSessionId]);
+  }, [currentThreadId]);
 
   const handleNativeBack = React.useCallback(() => {
     if (overflowOpen) {
@@ -2091,21 +2053,12 @@ const MobileShell: React.FC<{ onActiveConnectionDeleted: () => void }> = ({ onAc
   const showUpdateItem = settingsAutoUpdateChecksEnabled && updateAvailable && (updateRuntimeType === 'desktop' || updateRuntimeType === 'web');
 
   const openMcpSettings = React.useCallback(() => {
-    setSettingsPage('mcp');
+    setSettingsPage('mcp-connections');
     setMcpOpen(false);
     setSettingsInitialMobileStage('page-content');
     setSettingsOpen(true);
   }, [setSettingsPage]);
 
-  const reconnectMcpOverlay = React.useCallback(() => {
-    if (isMcpReconnecting || !currentPiSessionId) return;
-    setIsMcpReconnecting(true);
-    const minSpinPromise = new Promise((resolve) => window.setTimeout(resolve, 500));
-    const reconnectPromise = executePiCommand(currentPiSessionId, '/mcp reconnect').catch((error) => {
-      console.error('Failed to reconnect Pi MCP servers:', error);
-    });
-    void Promise.all([reconnectPromise, minSpinPromise]).finally(() => setIsMcpReconnecting(false));
-  }, [currentPiSessionId, executePiCommand, isMcpReconnecting]);
 
   const overflowItems: OverflowItem[] = React.useMemo(
     () => {
@@ -2432,17 +2385,7 @@ const MobileShell: React.FC<{ onActiveConnectionDeleted: () => void }> = ({ onAc
                     >
                       <Icon name="settings-3" className="h-5 w-5" />
                     </button>
-                    <button
-                      type="button"
-                      className="flex size-8 items-center justify-center rounded-full text-[var(--surface-mutedForeground)] transition-colors hover:bg-[var(--interactive-hover)] hover:text-[var(--surface-foreground)] disabled:opacity-60"
-                      onClick={reconnectMcpOverlay}
-                      disabled={isMcpReconnecting || !currentPiSessionId}
-                      aria-label={t('settings.varin.mcp.actions.reconnect')}
-                      title={t('settings.varin.mcp.actions.reconnect')}
-                      style={{ touchAction: 'manipulation' }}
-                    >
-                      <Icon name="refresh" className={cn('h-5 w-5', isMcpReconnecting && 'animate-spin')} />
-                    </button>
+
                     {closeButton}
                   </div>
                 </div>
@@ -2527,10 +2470,13 @@ const MobileShell: React.FC<{ onActiveConnectionDeleted: () => void }> = ({ onAc
 bindMobileWorkspaceShell((props) => <MobileShell {...props} />);
 
 export function MobileApp({ apis }: MobileAppProps) {
+  React.useEffect(() => apis.threads ? bindThreadStore(apis.threads) : undefined, [apis.threads]);
+  useKeyboardShortcuts();
+  usePwaManifestSync();
   const { t } = useI18n();
-  const piCatalogLoaded = usePiSessionStore((state) => state.catalogLoaded);
-  const piCatalogLoading = usePiSessionStore((state) => state.catalogLoading);
-  const loadPiCatalog = usePiSessionStore((state) => state.loadCatalog);
+  const catalogLoaded = useThreadStore((state) => state.catalogLoaded);
+  const catalogLoading = useThreadStore((state) => state.catalogLoading);
+  const loadCatalog = useThreadStore((state) => state.loadCatalog);
   const setIsMobile = useUIStore((state) => state.setIsMobile);
   const refreshGitHubAuthStatus = useGitHubAuthStore((state) => state.refreshStatus);
   const setPlanModeEnabled = useFeatureFlagsStore((state) => state.setPlanModeEnabled);
@@ -2541,7 +2487,7 @@ export function MobileApp({ apis }: MobileAppProps) {
   // splash so we don't flash the connect screen; 'done' means we either connected or
   // exhausted the attempt (then the connect screen shows).
   const [autoConnectPhase, setAutoConnectPhase] = React.useState<'pending' | 'attempting' | 'done'>('pending');
-  const [hasLoadedPiCatalog, setHasLoadedPiCatalog] = React.useState(piCatalogLoaded);
+  const [hasLoadedCatalog, setHasLoadedCatalog] = React.useState(catalogLoaded);
   // The instance the splash says we are connecting to. Read once on mount —
   // auto-connect targets the most-recent saved connection from the same list.
   const autoConnectLabel = React.useMemo(() => getAutoConnectTargetLabel(), []);
@@ -2576,7 +2522,7 @@ export function MobileApp({ apis }: MobileAppProps) {
     // runtime-endpoint-changed subscription (which re-bootstraps the app), so we
     // only refresh in place when the transport is 'unchanged'.
     const refreshInPlace = () => {
-      void loadPiCatalog();
+      void loadCatalog();
       void refreshGitHubAuthStatus(apis.github, { force: true });
     };
     const disconnect = () => {
@@ -2628,7 +2574,7 @@ export function MobileApp({ apis }: MobileAppProps) {
 
       refreshInPlace();
     });
-  }, [apis.github, loadPiCatalog, refreshGitHubAuthStatus]);
+  }, [apis.github, loadCatalog, refreshGitHubAuthStatus]);
 
   useNativeMobileChrome();
   useNativeMobileLifecycle(handleNativeResume);
@@ -2667,11 +2613,11 @@ export function MobileApp({ apis }: MobileAppProps) {
 
   // Switching instances (or disconnecting) only changes the runtime endpoint; the
   // Cross-instance changes reset instance-owned stores. Same-device LAN/relay
-  // swaps keep the shell mounted while the Pi runtime connection rebinds itself.
+  // swaps keep the shell mounted while the native runtime connection rebinds itself.
   React.useEffect(() => {
     return subscribeRuntimeEndpointChanged((detail) => {
       // A LAN⇄relay swap for the same device keeps project/UI state while the
-      // endpoint-aware Pi store drops its transport and reloads the catalog.
+      // endpoint-aware Thread store drops its transport and reloads the catalog.
       const sameDevice = Boolean(detail.runtimeKey) && detail.runtimeKey === detail.previousRuntimeKey;
       if (sameDevice) {
         setRuntimeEndpointEpoch((epoch) => epoch + 1);
@@ -2691,7 +2637,7 @@ export function MobileApp({ apis }: MobileAppProps) {
   // to the connect screen. A successful switchRuntimeEndpoint fires the endpoint-
   // changed subscription above, which bumps the epochs and bootstraps the app.
   React.useEffect(() => {
-    if (!isNativeMobileApp || piCatalogLoaded || getRuntimeApiBaseUrl()) {
+    if (!isNativeMobileApp || catalogLoaded || getRuntimeApiBaseUrl()) {
       setAutoConnectPhase('done');
       return;
     }
@@ -2727,22 +2673,22 @@ export function MobileApp({ apis }: MobileAppProps) {
     // could otherwise appear to load against a fake backend, leaving
     // the user in an empty shell after a disconnect.
     if (isNativeMobileApp && !getRuntimeApiBaseUrl()) return;
-    void loadPiCatalog().catch((catalogError) => {
-      console.warn('[Varin] failed to load the mobile Pi session catalog:', catalogError);
+    void loadCatalog().catch((catalogError) => {
+      console.warn('[Varin] failed to load the mobile Thread catalog:', catalogError);
     });
-  }, [isNativeMobileApp, loadPiCatalog, runtimeEndpointEpoch]);
+  }, [isNativeMobileApp, loadCatalog, runtimeEndpointEpoch]);
 
   React.useEffect(() => {
-    if (piCatalogLoaded) setHasLoadedPiCatalog(true);
-  }, [piCatalogLoaded]);
+    if (catalogLoaded) setHasLoadedCatalog(true);
+  }, [catalogLoaded]);
 
-  // Gated on the Pi catalog handshake (and re-run on instance switch): probing the
+  // Gated on the Thread catalog handshake (and re-run on instance switch): probing the
   // GitHub auth status before the runtime is reachable cached a "not connected"
   // answer that stuck until something else forced a re-check.
   React.useEffect(() => {
-    if (!piCatalogLoaded) return;
+    if (!catalogLoaded) return;
     void refreshGitHubAuthStatus(apis.github, { force: true });
-  }, [apis.github, piCatalogLoaded, refreshGitHubAuthStatus]);
+  }, [apis.github, catalogLoaded, refreshGitHubAuthStatus]);
 
   React.useEffect(() => {
     let cancelled = false;
@@ -2767,14 +2713,14 @@ export function MobileApp({ apis }: MobileAppProps) {
     // Native: only while an instance is selected and reconnecting. Browser: the
     // runtime is same-origin (no explicit base URL), so any not-connected spell
     // counts — the splash holds until this fires, then the error screen shows.
-    const waitingOnConnection = !piCatalogLoaded && (isNativeMobileApp ? Boolean(getRuntimeApiBaseUrl()) : true);
+    const waitingOnConnection = !catalogLoaded && (isNativeMobileApp ? Boolean(getRuntimeApiBaseUrl()) : true);
     if (!waitingOnConnection) {
       setShowConnectionRecovery(false);
       return;
     }
     const timeout = window.setTimeout(() => setShowConnectionRecovery(true), 8000);
     return () => window.clearTimeout(timeout);
-  }, [piCatalogLoaded, isNativeMobileApp, connectionEpoch, runtimeEndpointEpoch]);
+  }, [catalogLoaded, isNativeMobileApp, connectionEpoch, runtimeEndpointEpoch]);
 
   useAppFontEffects();
   usePushVisibilityBeacon({ enabled: true });
@@ -2786,20 +2732,20 @@ export function MobileApp({ apis }: MobileAppProps) {
   // intentionally disabled — they can't tell foreground from background in a WKWebView
   // (document.hasFocus() is unreliable) and leaked while the app was open; the in-app SSE
   // notification dispatch is no-op'd for native in renderMobileApp.
-  useNativePushRegistration({ enabled: isNativeMobileApp && piCatalogLoaded });
+  useNativePushRegistration({ enabled: isNativeMobileApp && catalogLoaded });
   // Single native deep-link entry point: notification taps AND the varin:// URL
   // scheme (widgets, Live Activities, external links). Registered unconditionally so a
   // cold-launch tap/open isn't lost on the connect/splash screen; intents stash until
   // the app is ready (connected + initialized) and shell handlers are registered.
-  useDeepLinkSource({ ready: isNativeMobileApp && piCatalogLoaded });
+  useDeepLinkSource({ ready: isNativeMobileApp && catalogLoaded });
   const fontsReady = useFontsReady();
 
-  // A runtime switch resets the Pi catalog. During an in-flight reload after a
+  // A runtime switch resets the Thread catalog. During an in-flight reload after a
   // back true on reconnect. We must NOT blank the whole app to a loader on those —
   // only on the initial connect / instance switch (connectionPhase 'connecting').
   // previously successful connection, keep MobileShell mounted so the
   // UI doesn't reload on every network blip.
-  const isReconnecting = !piCatalogLoaded && piCatalogLoading && hasLoadedPiCatalog;
+  const isReconnecting = !catalogLoaded && catalogLoading && hasLoadedCatalog;
 
   // Hold a logo splash until the UI web font is loaded, so the first UI the user sees
   // already uses the real font instead of flashing the fallback and reflowing (FOUT).
@@ -2817,7 +2763,7 @@ export function MobileApp({ apis }: MobileAppProps) {
   // be poisoned by a bootstrap that ran against the webview's own origin).
   const hasRuntimeEndpoint = Boolean(getRuntimeApiBaseUrl());
 
-  if (isNativeMobileApp && (!hasRuntimeEndpoint || (!piCatalogLoaded && !isReconnecting))) {
+  if (isNativeMobileApp && (!hasRuntimeEndpoint || (!catalogLoaded && !isReconnecting))) {
     // A runtime endpoint is already selected (first connect or switching instances):
     // show a loader while it re-bootstraps instead of flashing the onboarding screen.
     if (hasRuntimeEndpoint) {
@@ -2872,7 +2818,7 @@ export function MobileApp({ apis }: MobileAppProps) {
     return <MobileConnectionWelcome onConnected={() => setConnectionEpoch((value) => value + 1)} />;
   }
 
-  if (!piCatalogLoaded && !isReconnecting) {
+  if (!catalogLoaded && !isReconnecting) {
     // Browser: the initial connect takes a beat — hold the logo splash instead
     // of flashing the unreachable-server error while it resolves. The error
     // only shows once the recovery delay has expired (genuinely unreachable).
@@ -2898,10 +2844,9 @@ export function MobileApp({ apis }: MobileAppProps) {
       <RuntimeAPIProvider apis={apis}>
         <TooltipProvider delayDuration={300} skipDelayDuration={150}>
           <div className="h-full bg-background text-foreground">
-            <PiAppEffects backgroundWorkEnabled={piCatalogLoaded} />
+
             <AgentEditorCoordinator />
             <RunDebugCoordinator />
-            <PiInteractionHost />
             <MobileAppUpdateToast />
             <WorkbenchProfileBridge />
             <WorkbenchShellHost />

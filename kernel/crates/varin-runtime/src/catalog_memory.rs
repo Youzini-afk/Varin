@@ -78,7 +78,7 @@ impl BotMemorySnapshotRef {
 pub fn scope_key(scope: &Value) -> Result<String> {
     match scope.get("kind").and_then(Value::as_str) {
         Some("global") if scope.as_object().is_some_and(|v| v.len() == 1) => Ok("global".into()),
-        Some(kind @ ("project" | "session")) if scope.as_object().is_some_and(|v| v.len() == 2) => {
+        Some(kind @ ("project" | "thread")) if scope.as_object().is_some_and(|v| v.len() == 2) => {
             let id = scope
                 .get("id")
                 .and_then(Value::as_str)
@@ -110,7 +110,7 @@ pub fn allowed(basis: &personalization::PersonalizationBasis, scope: &Value) -> 
             Some("project") => {
                 scope.get("id").and_then(Value::as_str) == basis.project_id.as_deref()
             }
-            Some("session") => scope.get("id").and_then(Value::as_str) == Some(&basis.session_id),
+            Some("thread") => scope.get("id").and_then(Value::as_str) == Some(&basis.thread_id),
             _ => false,
         }
 }
@@ -155,7 +155,7 @@ pub(super) fn project(
                 }
                 let identity = format!(
                     "bot-memory:{}:{}:{}:{}:{}",
-                    basis.session_id,
+                    basis.thread_id,
                     state.revision,
                     kind,
                     row["scope"].as_str().unwrap_or(""),
@@ -227,7 +227,7 @@ pub(super) fn project(
         if carried {
             continue;
         }
-        let fact = format!("memory:{}:{revision}:{id}:{key}", basis.session_id);
+        let fact = format!("memory:{}:{revision}:{id}:{key}", basis.thread_id);
         let origin = trusted_receipts
             .values()
             .find(|receipt| {
@@ -267,6 +267,7 @@ pub(crate) struct PreparedMemoryDeliveries {
     request_id: String,
     branch_id: String,
     facts: std::collections::BTreeSet<(String, u64)>,
+    observations: Vec<(String, String)>,
     receipts: Vec<PreparedMemoryReceipt>,
 }
 enum MemoryReceiptOwner {
@@ -294,6 +295,7 @@ impl PreparedMemoryDeliveries {
             branch_id: snapshot.view.binding.history_range.branch_id.clone(),
             facts: std::collections::BTreeSet::new(),
             receipts: Vec::new(),
+            observations: Vec::new(),
         };
         for item in &snapshot.view.history {
             prepared.include(item)?;
@@ -311,6 +313,9 @@ impl PreparedMemoryDeliveries {
     }
     fn include(&mut self, item: &ConversationItem) -> Result<()> {
         match (&item.provenance, &item.content) {
+            (Provenance::EnvironmentFact { event_id }, Content::Text { .. }) if event_id.starts_with("observation:") => {
+                self.observations.push((event_id.clone(), super::context_observations::digest(&serde_json::to_value(item)?)?));
+            }
             (Provenance::EnvironmentFact { event_id }, Content::Text { text })
                 if event_id.starts_with("bot-memory:") =>
             {
@@ -403,6 +408,7 @@ pub(super) fn record_deliveries(
             "memory delivery request owner changed".into(),
         ));
     }
+    super::context_observations::record_deliveries(tx, prepared.observations, run, request_id, stage)?;
     let thread = &run.thread_id;
     let mut facts = prepared.facts;
     for candidate in prepared.receipts {

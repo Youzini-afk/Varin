@@ -1,8 +1,7 @@
 import { selectWebPageText } from "@varin/protocol";
-import type { FetchResult, HarnessWebDomainPolicy, RetrievalUrlReceipt, WebFetchRequest, WebReadPosition, WebSnapshotStructure } from "@varin/protocol";
+import type { FetchResult, HarnessWebDomainPolicy, WebFetchRequest, WebReadPosition, WebSnapshotStructure } from "@varin/protocol";
 import { isSameHost } from "./ssrf-policy.js";
 import { EGRESS_TIMEOUT, EgressError, type EgressRuntime } from "./egress.js";
-import { mintWebFetchReceipt, type WebFetchReceiptDraft } from "./web-fetch-receipt.js";
 import type { WebMaterialStore, WebMaterialAuthority } from "./web-materials.js";
 import { createDocumentReader, type DocumentReader, type DocumentReaderContext } from "./document-reading.js";
 
@@ -21,7 +20,6 @@ export interface WebFetchDeps {
   renderer?: (url: string, signal?: AbortSignal) => Promise<string>;
   cacheTtlMs?: number;
   maxBytes?: number;
-  persistReceipt?: (workspaceId: string, receipt: WebFetchReceiptDraft, markdown: string) => Promise<RetrievalUrlReceipt>;
   /** Durable snapshot store; when absent fetches still deliver content but mint no snapshotId. */
   materials?: Pick<WebMaterialStore, "put" | "read"> & Partial<Pick<WebMaterialStore, "findAnalysis">>;
   /** Shared with the independent document-reading Host service. */
@@ -41,7 +39,6 @@ export interface FetchContext {
   render?: boolean;
   domainPolicy?: DomainPolicy;
   signal?: AbortSignal;
-  issueReceipt?: boolean;
   /** A caller-requested refresh must create a new snapshot record even when
    * the fetched bytes are unchanged. */
   forceNewSnapshot?: boolean;
@@ -76,24 +73,6 @@ export function createWebFetch(deps: WebFetchDeps) {
       ...(ctx.engineOptions ? { engineOptions: ctx.engineOptions } : {}),
     };
   };
-  const withReceipt = async (
-    result: Extract<FetchResult, { status: "ok" }>,
-    workspaceId: string,
-    authority: WebMaterialAuthority,
-    issueReceipt: boolean,
-  ): Promise<Extract<FetchResult, { status: "ok" }>> => {
-    if (!issueReceipt || !deps.persistReceipt || !result.markdown || !authority.sessionId) return result;
-    const draft = mintWebFetchReceipt(result.finalUrl, result.markdown, authority);
-    try {
-      const receipt = await deps.persistReceipt(workspaceId, draft, result.markdown);
-      return { ...result, receipt };
-    } catch {
-      // Fetching content succeeded, but an unpersisted token must never become
-      // source-check authority.
-      return result;
-    }
-  };
-
   const checkDomainPolicy = (
     url: string,
     workspaceId: string,
@@ -627,20 +606,20 @@ export function createWebFetch(deps: WebFetchDeps) {
     if (found.ref.document?.kind === "pdf") {
       if (!documentReader) return { status: "failed", url: found.ref.finalUrl, reason: "PDF reader is unavailable" };
       const result = await documentReader.read({ ...request, snapshotId }, documentContext(ctx));
-      return result.status === "ok" ? withReceipt(result, ctx.workspaceId, ctx.authority, ctx.issueReceipt === true) : result;
+      return result;
     }
     if (request.view === "page-image") return { status: "page-image-unavailable", snapshotId,
       ...(request.page !== undefined ? { page: request.page } : {}), reason: "snapshot is not a PDF" };
     const selected = selectText(found.body.toString("utf8"), found.ref.structure, request, snapshotId);
     if (!("body" in selected)) return selected;
-    return withReceipt({
+    return {
       status: "ok", url: found.ref.sourceUrl, finalUrl: found.ref.finalUrl,
       contentType: found.ref.contentType ?? "text/markdown",
       ...(found.ref.title ? { title: found.ref.title } : {}),
       markdown: selected.body, bytes: found.body.byteLength, fromCache: false, rendered: found.ref.rendered === true,
       snapshot: found.ref, ...(found.ref.structure ? { structure: found.ref.structure } : {}),
       ...(selected.range ? { range: selected.range } : {}),
-    }, ctx.workspaceId, ctx.authority, ctx.issueReceipt === true);
+    };
   };
 
   const fetchUrl = async (input: WebFetchRequest | string, ctx: FetchContext): Promise<FetchResult> => {
@@ -691,7 +670,7 @@ export function createWebFetch(deps: WebFetchDeps) {
       const resolved = await documentReader.ingest({ source: sourceBytes, sourceUrl: url, finalUrl: result.finalUrl,
         contentType: result.contentType, ...(forceNew ? { forceNew: true } : {}) }, documentContext(ctx), pdfRequest);
       return resolved.status === "ok"
-        ? withReceipt({ ...resolved, fromCache }, ctx.workspaceId, ctx.authority, ctx.issueReceipt === true)
+        ? { ...resolved, fromCache }
         : resolved;
     };
 
@@ -710,9 +689,8 @@ export function createWebFetch(deps: WebFetchDeps) {
             return { status: "blocked", url: cached.result.finalUrl, reason: "domain-blocked" };
           }
           if (cached.sourceBytes) return deliverPdf(cached.result, cached.sourceBytes, false, true);
-          const { receipt: _oldReceipt, ...content } = cached.result;
-          const rebound = await attachSnapshot({ ...content, fromCache: true }, { ...ctx, forceNewSnapshot: false });
-          return applyView(positionSlice(await withReceipt(rebound, ctx.workspaceId, ctx.authority, ctx.issueReceipt === true)));
+          const rebound = await attachSnapshot({ ...cached.result, fromCache: true }, { ...ctx, forceNewSnapshot: false });
+          return applyView(positionSlice(rebound));
         }
         return cached.result;
       }
@@ -722,12 +700,12 @@ export function createWebFetch(deps: WebFetchDeps) {
       ctx.signal?.throwIfAborted();
       if (result.status !== "ok") return result;
       // The in-flight/cache result may have been produced under another
-      // session or thread. Rebind the content snapshot to this caller's
+      // Thread. Rebind the content snapshot to this caller's
       // authority while reusing the content-addressed body.
       const sourceBytes = sourceBytesForResult.get(result);
       if (sourceBytes) return deliverPdf(result, sourceBytes, forceNewSnapshot, false);
       const rebound = await attachSnapshot(result, { ...ctx, forceNewSnapshot });
-      return applyView(positionSlice(await withReceipt(rebound, ctx.workspaceId, ctx.authority, ctx.issueReceipt === true)));
+      return applyView(positionSlice(rebound));
     };
 
     // A refresh is intentionally a fresh request: it bypasses both the

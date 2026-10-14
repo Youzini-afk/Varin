@@ -1,21 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
-import type { HarnessServiceContext } from "./router.js";
 import { createResearchSearchService } from "./research-search.js";
 
-const context: HarnessServiceContext = {
-  actor: {
-    authorityInstanceId: "host",
-    sessionId: "session",
-    workerId: "worker",
-    workerGeneration: 1,
-    workspaceId: "workspace",
-    grantedCapabilities: ["read.web"],
-  },
-  authorizedPaths: [],
-  sessionId: "session",
-  workspaceId: "workspace",
-  signal: new AbortController().signal,
-};
+const context = { signal: new AbortController().signal };
 
 const json = (value: unknown): Response => new Response(JSON.stringify(value), {
   status: 200,

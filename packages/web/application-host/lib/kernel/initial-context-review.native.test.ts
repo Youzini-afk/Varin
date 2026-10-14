@@ -108,7 +108,7 @@ it('initial context preserves pinned AGENTS and request roles while current pers
   await f.personalization.savePrompt({ kind: 'project', id: 'selected-project' }, { sections: { project_rule: 'SELECTED PROJECT RULE' } }, (await f.personalization.catalog()).revision);
   await f.personalization.saveNote({ scope: { kind: 'global' }, content: 'GLOBAL NOTE FROZEN' });
   await f.personalization.saveNote({ scope: { kind: 'project', id: 'selected-project' }, content: 'SELECTED PROJECT NOTE' });
-  await f.personalization.saveNote({ scope: { kind: 'session', id: identity.threadId }, content: 'THIS SESSION NOTE' });
+  await f.personalization.saveNote({ scope: { kind: 'thread', id: identity.threadId }, content: 'THIS THREAD NOTE' });
   await f.personalization.saveNote({ scope: { kind: 'project', id: 'unrelated-project' }, content: 'MUST NOT LEAK OTHER PROJECT' });
   await fs.writeFile(path.join(f.workspace, 'AGENTS.md'), 'PINNED WORKSPACE INSTRUCTIONS');
   const prepared = await f.api.prepareSource({ ...identity, key: 'initial-context-source', resourceOwner: { kind: 'local' as const }, workspaceId: (await f.documents.resolveWorkspace({ path: f.workspace })).workspaceId, content: { mode: 'saved-files' }, captureScopes: [], mode: 'fixed_branch' });
@@ -123,7 +123,7 @@ it('initial context preserves pinned AGENTS and request roles while current pers
   const frozen = before.context.checkpoint!;
   expect(frozen.revision).toBe(1);
   const prompt = JSON.stringify(system(f.requests[0]!.body));
-  for (const text of ['GLOBAL PROFILE RULE', 'SELECTED PROJECT RULE', 'GLOBAL NOTE FROZEN', 'SELECTED PROJECT NOTE', 'THIS SESSION NOTE', 'PINNED WORKSPACE INSTRUCTIONS']) expect(prompt).toContain(text);
+  for (const text of ['GLOBAL PROFILE RULE', 'SELECTED PROJECT RULE', 'GLOBAL NOTE FROZEN', 'SELECTED PROJECT NOTE', 'THIS THREAD NOTE', 'PINNED WORKSPACE INSTRUCTIONS']) expect(prompt).toContain(text);
   for (const text of ['LATER DISK INSTRUCTIONS', 'MUST NOT LEAK OTHER PROJECT', 'USER TEXT MUST STAY USER']) expect(prompt).not.toContain(text);
   expect(JSON.stringify(messages(f.requests[0]!.body).filter(value => value.role === 'user'))).toContain('USER TEXT MUST STAY USER');
   expect(frozen.resources?.snapshot.instructions.some(entry => entry.reference.path === 'AGENTS.md' && entry.reference.version.startsWith('sha256-'))).toBe(true);

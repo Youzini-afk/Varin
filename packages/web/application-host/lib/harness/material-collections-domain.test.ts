@@ -3,7 +3,7 @@ import { createMaterialCollections, materialMutationOperationId } from './materi
 import { createMaterialStoreFixture } from './web-materials.test-helper.js';
 import type { MaterialCollectionContext } from './material-collections.js';
 import type { WorkspaceWorkingStateRootAccess, WorkingStateRootContext } from './working-state/types.js';
-import type { KernelRecordContext } from './retrieval-artifacts.js';
+import type { KernelRecordContext } from './kernel-records.js';
 const context = (threadId = 'a', origin?: string): MaterialCollectionContext => ({
   authority: { kind: 'thread', owningWorkspaceId: 'ws', threadId },
   ...(origin ? { origin } : {}), threadsRelated: async () => true,
@@ -26,7 +26,7 @@ describe('original material domain', () => {
     const [kept, unrelated] = await Promise.all([pdf('kept'), pdf('other')]);
     const created = await collections.execute({ action: 'create', persist: true }, context());
     const added = await collections.execute({ action: 'add', collectionId: created.result.collection!.collectionId, member: { kind: 'snapshot', snapshotId: kept.snapshotId } }, context());
-    await f.retrieval.releaseThreadEvidence('ws', 'a');
+    await f.lifecycle.releaseThreadMaterials('ws', 'a');
     expect((await f.reopen().read('ws', kept.snapshotId, context('b').authority, { includeSource: true }))?.source?.bytes.toString()).toBe('%PDF-kept');
     expect(await f.materials.read('ws', unrelated.snapshotId, context('b').authority)).toBeNull();
     expect((await collections.execute({ action: 'remove', collectionId: created.result.collection!.collectionId,
@@ -109,7 +109,7 @@ describe('original material domain', () => {
   });
 });
 
-it('retains a reshared collection and later source members until the last explicit sender grant is removed and original orphan reconciliation runs', async () => {
+it('retains a reshared collection and later source members until the last explicit sender grant is removed and the original owner releases its remaining references', async () => {
   const f = createMaterialStoreFixture(), collections = createMaterialCollections(f.workingStates, { materials: f.materials });
   const initial = await snapshot(f);
   const id = (await collections.execute({ action: 'create' }, context())).result.collection!.collectionId;
@@ -121,14 +121,14 @@ it('retains a reshared collection and later source members until the last explic
     representation: 'pdf-source-v1', document: { kind: 'pdf', parser: 'native' } }, Buffer.alloc(0), context().authority,
   { source: { bytes: Buffer.from('%PDF-later'), contentType: 'application/pdf' } });
   await collections.execute({ action: 'add', collectionId: id, member: { kind: 'snapshot', snapshotId: later.snapshotId } }, context());
-  await f.retrieval.releaseThreadEvidence('ws', 'a');
+  await f.lifecycle.releaseThreadMaterials('ws', 'a');
   expect((await collections.execute({ action: 'list' }, context('c'))).result.collections).toMatchObject([{ collectionId: id, memberCount: 2 }]);
   expect((await f.reopen().read('ws', initial.snapshotId, context('c').authority))?.body.toString()).toBe('needle original');
   expect((await f.reopen().read('ws', later.snapshotId, context('c').authority, { includeSource: true }))?.source?.bytes.toString()).toBe('%PDF-later');
   expect([...f.records.values()].filter(record => record.recordType === 'material.grant').map(record => record.threadId)).toEqual(['b']);
-  await f.retrieval.releaseThreadEvidence('ws', 'b');
+  await f.lifecycle.releaseThreadMaterials('ws', 'b');
   expect(await f.materials.read('ws', initial.snapshotId, context('c').authority)).toBeNull();
-  await f.retrieval.reconcileWorkspaceEvidence('ws', []);
+  await f.lifecycle.releaseThreadMaterials('ws', 'a');
   expect([...f.records.values()].filter(record => ['material.collection', 'material.grant', 'web.snapshot'].includes(record.recordType))).toEqual([]);
 });
 

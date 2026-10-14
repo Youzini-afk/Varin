@@ -5,14 +5,15 @@ import path from "node:path";
 import { afterEach, describe, it } from "vitest";
 import { KernelClientError, type KernelClient, type KernelScopedClient } from "../kernel/kernel-client.js";
 import { createLocalExperimentBackend, ExperimentPreparationError } from "./experiment-backend.js";
-import { materializeExperimentAttempt, reconcileExperimentPreparation, openExperimentInputTransfer, prepareExperimentInput, ExperimentInputCaptureError, type ExperimentInputSnapshot } from "./experiment-workspace.js";
+import { materializeExperimentAttempt, reconcileExperimentPreparation, openExperimentInputTransfer, prepareExperimentInput, ExperimentInputCaptureError, type ExperimentInputSnapshot, type ExperimentWorkspaceCaller } from "./experiment-workspace.js";
 
 const roots: string[] = [];
 afterEach(async () => { for (const root of roots.splice(0)) await fs.rm(root, { recursive: true, force: true }); });
 
 async function fixture() {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "varin-preparation-proof-")); roots.push(root);
-  const caller = { workspaceId: "ws", executionWorkspaceId: "exec" };
+  const caller: ExperimentWorkspaceCaller = { workspaceId: "ws", executionWorkspaceId: "exec",
+    owner: { runtime: "agent", threadId: "preparation-thread", runId: "preparation-run", operationId: "preparation-operation" } };
   const input: ExperimentInputSnapshot = {
     schemaVersion: 2, source: {kind:"physical-capture"}, branchId: "original-input", root: "sha256-original", sourceRoot: root,
     workspaceId: "ws", executionWorkspaceId: "exec", captureScopes: [], capturedPathCount: 0, inventoryFingerprint: "empty",

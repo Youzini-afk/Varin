@@ -1,5 +1,4 @@
 import React from 'react';
-import type { SessionSummary } from '@varin/protocol';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
@@ -15,7 +14,6 @@ import {
 import { SettingsInfoHint } from '@/components/sections/shared/SettingsInfoHint';
 import { Icon } from "@/components/icon/Icon";
 import { useProjectsStore } from '@/stores/useProjectsStore';
-import { usePiSessionStore } from '@/stores/usePiSessionStore';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { useDeviceInfo } from '@/lib/device';
 import { checkIsGitRepository } from '@/lib/gitApi';
@@ -26,7 +24,6 @@ import {
   saveWorktreeSetupWaitEnabled,
 } from '@/lib/project-config';
 import { listProjectWorktrees, removeProjectWorktree } from '@/lib/worktrees/worktreeManager';
-import { collectPiWorktreeSessions } from '@/lib/pi-runtime/worktreeSessions';
 import type { WorktreeMetadata } from '@/types/worktree';
 import { formatPathForDisplay, cn } from '@/lib/utils';
 import {
@@ -55,8 +52,6 @@ export const WorktreeSectionContent: React.FC<WorktreeSectionContentProps> = ({ 
 
   const projectPath = projectRefProp?.path ?? activeProject?.path ?? null;
 
-  const loadCatalog = usePiSessionStore((state) => state.loadCatalog);
-  const archiveSession = usePiSessionStore((state) => state.archiveSession);
   const homeDirectory = useDirectoryStore((state) => state.homeDirectory);
 
   const [setupCommands, setSetupCommands] = React.useState<string[]>([]);
@@ -67,7 +62,6 @@ export const WorktreeSectionContent: React.FC<WorktreeSectionContentProps> = ({ 
   const [availableWorktrees, setAvailableWorktrees] = React.useState<WorktreeMetadata[]>([]);
   const [isLoadingWorktrees, setIsLoadingWorktrees] = React.useState(false);
   const [deleteTarget, setDeleteTarget] = React.useState<{
-    sessions: SessionSummary[];
     worktree: WorktreeMetadata;
   } | null>(null);
   const [deleteLocalBranch, setDeleteLocalBranch] = React.useState(false);
@@ -279,32 +273,16 @@ export const WorktreeSectionContent: React.FC<WorktreeSectionContentProps> = ({ 
     }
   }, [projectRef]);
 
-  const handleDeleteWorktree = React.useCallback(async (worktree: WorktreeMetadata) => {
-    try {
-      const summaries = await loadCatalog();
-      setDeleteTarget({
-        sessions: collectPiWorktreeSessions(summaries, worktree.path),
-        worktree,
-      });
-      setDeleteLocalBranch(false);
-      setDeleteRemoteBranch(false);
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : String(error));
-    }
-  }, [loadCatalog]);
+  const handleDeleteWorktree = React.useCallback((worktree: WorktreeMetadata) => {
+    setDeleteTarget({ worktree });
+    setDeleteLocalBranch(false);
+    setDeleteRemoteBranch(false);
+  }, []);
 
   const confirmDeleteWorktree = React.useCallback(async () => {
     if (!deleteTarget || !projectRef) return;
     setDeletePending(true);
     try {
-      const sessionsToArchive = deleteTarget.sessions.filter((session) => session.archivedAt === undefined);
-      const archived = await Promise.allSettled(
-        sessionsToArchive.map((session) => archiveSession(session.id)),
-      );
-      if (archived.some((result) => result.status === 'rejected')) {
-        toast.error(t('sessions.sidebar.session.archive.error'));
-        return;
-      }
       await removeProjectWorktree(projectRef, deleteTarget.worktree, {
         deleteLocalBranch,
         deleteRemoteBranch,
@@ -321,7 +299,7 @@ export const WorktreeSectionContent: React.FC<WorktreeSectionContentProps> = ({ 
     } finally {
       setDeletePending(false);
     }
-  }, [archiveSession, deleteLocalBranch, deleteRemoteBranch, deleteTarget, projectRef, refreshWorktrees, t]);
+  }, [deleteLocalBranch, deleteRemoteBranch, deleteTarget, projectRef, refreshWorktrees, t]);
 
   const setupTooltip = (
     <SettingsInfoHint>
@@ -496,11 +474,6 @@ export const WorktreeSectionContent: React.FC<WorktreeSectionContentProps> = ({ 
               {deleteTarget.worktree.status?.isDirty ? (
                 <p className="typography-meta text-status-warning">
                   {t('mobile.projectEdit.deleteWorktreeDirty')}
-                </p>
-              ) : null}
-              {deleteTarget.sessions.length > 0 ? (
-                <p className="typography-meta text-muted-foreground">
-                  {t('mobile.projectEdit.deleteWorktreeArchiveNote', { count: deleteTarget.sessions.length })}
                 </p>
               ) : null}
               <label className="flex cursor-pointer items-center gap-2 typography-meta text-foreground">

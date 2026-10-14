@@ -67,7 +67,7 @@ async function select(frame: Record<string, unknown>) {
   denyScholar = frame.denyScholar === true;
   const prepare = createExtensionTools({ runtime: extensions, kernel, currentPolicy: async () => ({ mode: 'normal', rules: denyScholar ? [{ tool: 'research_search', decision: 'deny' }] : [] }),
     prepareConfiguration: async (run, required) => scholar.prepareConfiguration(run, required, await web.prepareConfiguration(run, required)) });
-  const selected = await prepare({ threadId, runId, source: null }, (frame.required ?? []) as ExtensionToolBinding[], new AbortController().signal);
+  const selected = await prepare({ threadId, runId, branchId: (await runtime.run(runId)).branch_id, source: null }, (frame.required ?? []) as ExtensionToolBinding[], new AbortController().signal);
   scopes.push(selected);
   const bindings = selected.initial.filter(entry => ['research_search', 'materials', 'document_read'].includes(entry.binding.tool.name)).map(entry => {
     const registered = bridge.register(runId, entry.lease);
@@ -78,7 +78,7 @@ async function select(frame: Record<string, unknown>) {
 async function initialize(frame: Record<string, unknown>) {
   fixture.initialize(frame);
   storage = new KernelStorageAdapter({ client: kernel, hostId: 'web-domain-host', storageRoot: String(frame.storageRoot), resolveWorkspaceRoot: unreachable });
-  const access = createMaterialStorageAccess({ kernel, storage, legacy: { withBranchStore: unreachable } });
+  const access = createMaterialStorageAccess({ kernel, storage });
   const materials = createWebMaterialStore(access), documentReader = createDocumentReader({ materials });
   const collections = createMaterialCollections(access, { materials });
   const settings = async () => ({ global: {}, globalRevision: 'default', project: {}, projectRevision: 'none', projectTrusted: false });

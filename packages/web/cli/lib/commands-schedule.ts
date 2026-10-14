@@ -2,7 +2,7 @@ import { TunnelCliError, EXIT_CODE } from './cli-errors.js';
 import path from 'node:path';
 import { resolveTargetPort } from './cli-api-target.js';
 import { parseGoalTokenBudget } from './cli-goal.js';
-import { requestVarinApi } from './cli-runtime.js';
+import { commandKey, requestVarinApi } from './cli-runtime.js';
 import {
   intro as clackIntro,
   outro as clackOutro,
@@ -27,13 +27,13 @@ const assertRequired = (value: unknown, flagName: string): string => {
   return normalized;
 };
 
-const parseModel = (value: unknown): { modelID: string; providerID: string } => {
+const parseModel = (value: unknown): { modelId: string; providerId: string } => {
   const model = assertRequired(value, '--model');
   const slash = model.indexOf('/');
   if (slash <= 0 || slash === model.length - 1) {
     throw new TunnelCliError('--model must be in provider/model format.', EXIT_CODE.USAGE_ERROR);
   }
-  return { providerID: model.slice(0, slash), modelID: model.slice(slash + 1) };
+  return { providerId: model.slice(0, slash), modelId: model.slice(slash + 1) };
 };
 
 const parseThinkingLevel = (value: unknown): string | null => {
@@ -77,21 +77,24 @@ const buildSchedule = (input: CliOptions): Record<string, unknown> => {
 };
 
 const buildScheduledTask = (input: CliOptions): Record<string, unknown> => {
-  const goalTokenBudget = input.goalTokenBudget;
-  const thinkingLevel = parseThinkingLevel(input.thinkingLevel);
-  const agent = asNonEmptyString(input.agent);
+  const budget = parseGoalTokenBudget(input);
+  const thinkingLevel = parseThinkingLevel(input.thinking);
+  const sourceMode = input.sourceMode ?? 'fixed_branch';
+  if (!['fixed_branch', 'materialized', 'live_root'].includes(sourceMode)) throw new TunnelCliError('Invalid --source-mode.', EXIT_CODE.USAGE_ERROR);
+  const existing = Boolean(input.thread || input.branch);
+  if (existing && (input.model || input.thinking || input.sourceMode || input.goal)) throw new TunnelCliError('Existing work inherits its model, source, and goal; omit new-work options.', EXIT_CODE.USAGE_ERROR);
   return {
+    runtime: 'agent',
+    ...(input.task ? { id: input.task } : {}),
     name: assertRequired(input.name, '--name'),
     enabled: input.disabled !== true,
     schedule: buildSchedule(input),
-    execution: {
-      prompt: assertRequired(input.prompt, '--prompt'),
-      ...parseModel(input.model),
-      ...(agent ? { agent } : {}),
-      ...(thinkingLevel ? { thinkingLevel } : {}),
-      ...(input.goal === true ? { runAsGoal: true } : {}),
-      ...(goalTokenBudget !== undefined ? { goalTokenBudget } : {}),
-    },
+    execution: { prompt: assertRequired(input.prompt, '--prompt') },
+    target: existing
+      ? { kind: 'existing_work', threadId: assertRequired(input.thread, '--thread'), branchId: assertRequired(input.branch, '--branch') }
+      : { kind: 'new_work', model: { ...parseModel(input.model), ...(thinkingLevel ? { thinkingLevel } : {}) },
+        source: { kind: 'project' }, sourceMode,
+        goal: input.goal ? { budget: budget === undefined ? null : { maxOutputTokens: budget } } : null },
   };
 };
 
@@ -112,11 +115,11 @@ const resolveProjectID = async (port: number, target: {
   return project.id;
 };
 
-const formatGoal = (execution: unknown): string => {
-  const value = recordOf(execution);
-  if (value.runAsGoal !== true) return 'goal:no';
-  return typeof value.goalTokenBudget === 'number' && Number.isFinite(value.goalTokenBudget)
-    ? `goal:yes budget:${value.goalTokenBudget}`
+const formatGoal = (target: unknown): string => {
+  const value = recordOf(recordOf(target).goal);
+  if (!recordOf(target).goal) return 'goal:no';
+  return typeof recordOf(value.budget).maxOutputTokens === 'number'
+    ? `goal:yes budget:${recordOf(value.budget).maxOutputTokens}`
     : 'goal:yes';
 };
 
@@ -138,7 +141,7 @@ const outputTasks = (options: CliOptions, tasks: unknown): void => {
   if (isQuietMode(options)) {
     for (const task of normalizedTasks) {
       const lastStatus = recordOf(task.state).lastStatus;
-      process.stdout.write(`${String(task.id ?? '')} enabled:${task.enabled === false ? 'no' : 'yes'} ${formatGoal(task.execution)} status:${typeof lastStatus === 'string' ? lastStatus : 'idle'} ${formatSchedule(task.schedule)} ${String(task.name ?? '')}\n`);
+      process.stdout.write(`${String(task.id ?? '')} enabled:${task.enabled === false ? 'no' : 'yes'} ${formatGoal(task.target)} status:${typeof lastStatus === 'string' ? lastStatus : 'idle'} ${formatSchedule(task.schedule)} ${String(task.name ?? '')}\n`);
     }
     return;
   }
@@ -152,7 +155,7 @@ const outputTasks = (options: CliOptions, tasks: unknown): void => {
   for (const task of normalizedTasks) {
     const status = task.enabled === false ? 'warning' : 'success';
     const lastStatus = recordOf(task.state).lastStatus;
-    const detail = `id: ${String(task.id ?? '')}; ${formatGoal(task.execution)}; status: ${typeof lastStatus === 'string' ? lastStatus : 'idle'}; ${formatSchedule(task.schedule)}`;
+    const detail = `id: ${String(task.id ?? '')}; ${formatGoal(task.target)}; status: ${typeof lastStatus === 'string' ? lastStatus : 'idle'}; ${formatSchedule(task.schedule)}`;
     logStatus(status, String(task.name || task.id || 'unnamed task'), detail);
   }
   clackOutro(`${normalizedTasks.length} task(s)`);
@@ -160,7 +163,7 @@ const outputTasks = (options: CliOptions, tasks: unknown): void => {
 
 async function scheduleCommand(options: CliOptions = {}, action = 'help'): Promise<void> {
   if (action === 'help') {
-    process.stdout.write(`Varin Schedule Commands\n\nUSAGE:\n  varin schedule status [OPTIONS]\n  varin schedule list (--project <projectId> | --dir <path>) [OPTIONS]\n  varin schedule create (--project <projectId> | --dir <path>) --name <name> --prompt <prompt> --model <provider/model> (--daily <HH:mm> | --weekly <0,1,2> --time <HH:mm> | --once <YYYY-MM-DD> --time <HH:mm> | --cron <expr>) [OPTIONS]\n  varin schedule run (--project <projectId> | --dir <path>) --task <taskId> [OPTIONS]\n  varin schedule delete (--project <projectId> | --dir <path>) --task <taskId> [OPTIONS]\n  varin schedule enable (--project <projectId> | --dir <path>) --task <taskId> [OPTIONS]\n  varin schedule disable (--project <projectId> | --dir <path>) --task <taskId> [OPTIONS]\n\nOPTIONS:\n  --project <projectId>   Project id from varin projects\n  --dir <path>            Resolve project by directory\n  -p, --port <port>       Varin server port\n  --timezone <zone>       IANA timezone for created tasks\n  --agent <id>            Pi agent role/profile instruction\n  --thinking <level>      Pi thinking level\n  --goal                  Treat the scheduled run as an end-to-end goal\n  --goal-token-budget <n> Goal token budget (1000-100000000; requires --goal)\n  --disabled              Create task disabled\n  --json                  Output machine-readable JSON\n  -q, --quiet             Print concise output\n`);
+    process.stdout.write(`Varin Schedule Commands\n\nUSAGE:\n  varin schedule status [OPTIONS]\n  varin schedule list (--project <projectId> | --dir <path>) [OPTIONS]\n  varin schedule create (--project <projectId> | --dir <path>) --name <name> --prompt <prompt> --model <provider/model> (--daily <HH:mm> | --weekly <0,1,2> --time <HH:mm> | --once <YYYY-MM-DD> --time <HH:mm> | --cron <expr>) [OPTIONS]\n  varin schedule run (--project <projectId> | --dir <path>) --task <taskId> [OPTIONS]\n  varin schedule delete (--project <projectId> | --dir <path>) --task <taskId> [OPTIONS]\n  varin schedule enable (--project <projectId> | --dir <path>) --task <taskId> [OPTIONS]\n  varin schedule disable (--project <projectId> | --dir <path>) --task <taskId> [OPTIONS]\n\nOPTIONS:\n  --project <projectId>   Project id from varin projects\n  --dir <path>            Resolve project by directory\n  -p, --port <port>       Varin server port\n  --timezone <zone>       IANA timezone for created tasks\n  --thread <id> --branch <id> Target existing native work instead of --model\n  --source-mode <mode>    fixed_branch (default), materialized, or live_root\n  --thinking <level>      Model thinking level\n  --goal                  Treat the scheduled run as an end-to-end goal\n  --goal-token-budget <n> Goal token budget (1000-100000000; requires --goal)\n  --disabled              Create task disabled\n  --json                  Output machine-readable JSON\n  -q, --quiet             Print concise output\n`);
     return;
   }
 
@@ -197,29 +200,11 @@ async function scheduleCommand(options: CliOptions = {}, action = 'help'): Promi
   }
 
   if (action === 'create') {
-    const goalTokenBudget = parseGoalTokenBudget(options);
-    const input = {
-      ...target,
-      name: options.name,
-      prompt: options.prompt,
-      model: options.model,
-      daily: options.daily,
-      weekly: options.weekly,
-      once: options.once,
-      time: options.time,
-      cron: options.cron,
-      timezone: options.timezone,
-      agent: options.agent,
-      thinkingLevel: options.thinking || options.variant,
-      goal: options.goal === true,
-      ...(goalTokenBudget !== undefined ? { goalTokenBudget } : {}),
-      disabled: options.disabled === true,
-    };
     const projectID = await resolveProjectID(port, target, options);
     const body = await requestVarinApi(port, `/api/projects/${encodeURIComponent(projectID)}/scheduled-tasks`, {
       ...options,
       method: 'PUT',
-      body: JSON.stringify({ task: buildScheduledTask(input) }),
+      body: JSON.stringify({ task: buildScheduledTask(options) }),
     });
     if (isJsonMode(options)) {
       printJson({ task: body?.task, created: body?.created === true });
@@ -231,7 +216,7 @@ async function scheduleCommand(options: CliOptions = {}, action = 'help'): Promi
     }
     clackIntro('Scheduled Task Created');
     const createdTask = recordOf(body.task);
-    logStatus('success', String(createdTask.name || options.name || 'scheduled task'), `id: ${String(createdTask.id || 'unknown')}; ${formatGoal(createdTask.execution)}; ${formatSchedule(createdTask.schedule)}`);
+    logStatus('success', String(createdTask.name || options.name || 'scheduled task'), `id: ${String(createdTask.id || 'unknown')}; ${formatGoal(createdTask.target)}; ${formatSchedule(createdTask.schedule)}`);
     clackOutro('created');
     return;
   }
@@ -239,20 +224,22 @@ async function scheduleCommand(options: CliOptions = {}, action = 'help'): Promi
   if (action === 'run') {
     const taskID = assertRequired(options.task, '--task');
     const projectID = await resolveProjectID(port, target, options);
+    const key = commandKey(options);
     const body = await requestVarinApi(port, `/api/projects/${encodeURIComponent(projectID)}/scheduled-tasks/${encodeURIComponent(taskID)}/run`, {
       ...options,
       method: 'POST',
+      body: JSON.stringify({ key }),
     });
     if (isJsonMode(options)) {
-      printJson({ task: body?.task, sessionId: body?.sessionId });
+      printJson({ ...body, key });
       return;
     }
     if (isQuietMode(options)) {
-      process.stdout.write(`${body?.sessionId || ''}\n`);
+      process.stdout.write(`${JSON.stringify({ key, occurrence: body.occurrence })}\n`);
       return;
     }
     clackIntro('Scheduled Task Run');
-    logStatus('success', String(recordOf(body.task).name || taskID), `session: ${String(body.sessionId || 'unknown')}`);
+    logStatus('success', String(recordOf(body.task).name || taskID), `occurrence: ${String(recordOf(body.occurrence).id || 'unknown')}; request: ${key}`);
     clackOutro('started');
     return;
   }

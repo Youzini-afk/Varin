@@ -47,29 +47,6 @@ describe("computer routes (BC4)", () => {
     const response = await request(app).post('/api/computers/desktops/local-console/act').send({ action: { kind: 'key', app: 'editor', key: 'enter' } });
     expect(response.status).toBe(409); expect(computers.act).not.toHaveBeenCalled();
   });
-  it('reads the session activity projection without probing the catalog or desktop', async () => {
-    const { app, computers } = fixture();
-    computers.activities = vi.fn(() => [{ desktopId: 'local-console', activity: { sessionId: 's1', app: 'notepad', operation: 'key', status: 'idle', updatedAt: 'now' } }]);
-    const response = await request(app).get('/api/computers/activity?sessionId=s1');
-    expect(response.status).toBe(200);
-    expect(response.body.activities[0].activity.app).toBe('notepad');
-    expect(computers.activities).toHaveBeenCalledWith('s1');
-    expect(computers.list).not.toHaveBeenCalled();
-    expect(computers.probe).not.toHaveBeenCalled();
-  });
-  it('preserves the originating session on remote observation and action requests', async () => {
-    const { app, computers } = fixture();
-    computers.observe = vi.fn(async () => ({ id: 'observation' }));
-    computers.act = vi.fn(async () => ({ accepted: true }));
-    expect((await request(app).post('/api/computers/desktops/local-console/observe')
-      .set('X-Varin-Computer-Lease', 'assigned')
-      .send({ app: 'editor', sessionId: 'origin' })).status).toBe(200);
-    expect((await request(app).post('/api/computers/desktops/local-console/act')
-      .set('X-Varin-Computer-Lease', 'assigned')
-      .send({ action: { kind: 'key', app: 'editor', key: 'enter' }, sessionId: 'origin' })).status).toBe(200);
-    expect(computers.observe).toHaveBeenCalledWith(expect.objectContaining({ sessionId: 'origin' }));
-    expect(computers.act).toHaveBeenCalledWith(expect.objectContaining({ sessionId: 'origin' }));
-  });
   it("streams the registered artifact revision with its exact file identity", async () => {
     const { app, computers } = fixture();
     computers.openArtifact = vi.fn(async () => ({ artifact: { relativePath: "Downloads/report.pdf", sha256: "a".repeat(64), byteLength: 3 },

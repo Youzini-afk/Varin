@@ -130,7 +130,7 @@ fn scope(
         return Err(error("memory mode differs from the actual Bot binding"));
     }
     Ok(
-        json!({"mode":basis.mode,"sessionId":basis.session_id,"projectId":basis.project_id,"threadRole":basis.thread_role,"botId":bot_id,"branchId":run.branch_id}),
+        json!({"mode":basis.mode,"threadId":basis.thread_id,"projectId":basis.project_id,"threadRole":basis.thread_role,"botId":bot_id,"branchId":run.branch_id}),
     )
 }
 fn basis(
@@ -146,7 +146,7 @@ fn basis(
     };
     if basis
         .as_ref()
-        .is_some_and(|basis| basis.session_id != run.thread_id)
+        .is_some_and(|basis| basis.thread_id != run.thread_id)
     {
         return Err(error("memory admission belongs to another thread"));
     }

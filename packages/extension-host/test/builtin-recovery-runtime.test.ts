@@ -5,7 +5,6 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
 import {
-  VARIN_BUILTIN_RECOVERY_EXTENSION,
   VARIN_BUILTIN_WORKSPACE_RECOVERY_EXTENSION,
   VARIN_BUILTIN_WORKSPACE_RECOVERY_EXTENSION_ID,
   VARIN_BUILTIN_WORKSPACE_RECOVERY_EXTENSION_VERSION,
@@ -16,7 +15,7 @@ import {
 } from "@varin/extension-contract";
 import { ApplicationExtensionRuntime } from "../src/application-runtime.js";
 
-test("the native recovery built-in declares a replaceable Host service without Pi package integration", () => {
+test("the native recovery built-in declares a replaceable Host service without package integration", () => {
   const manifest = VARIN_BUILTIN_WORKSPACE_RECOVERY_EXTENSION.manifest;
   assert.equal(manifest.id, "varin.builtin.recovery");
   assert.equal(manifest.version, VARIN_BUILTIN_WORKSPACE_RECOVERY_EXTENSION_VERSION);
@@ -29,9 +28,7 @@ test("the native recovery built-in declares a replaceable Host service without P
     multiple: true,
     version: VARIN_WORKSPACE_RECOVERY_SERVICE_VERSION,
   }]);
-  assert.equal(manifest.integrates, undefined);
-  assert.equal(VARIN_BUILTIN_RECOVERY_EXTENSION.manifest.id, "varin.builtin.pi-recovery");
-  assert.notEqual(VARIN_BUILTIN_RECOVERY_EXTENSION.manifest.id, manifest.id);
+  assert.equal("integrates" in manifest, false);
 });
 
 test("the built-in recovery Host activates on service invocation and withdraws on deactivation", async () => {

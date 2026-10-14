@@ -1790,7 +1790,7 @@ impl Catalog {
             ));
         }
         if basis.project_id.as_deref() != Some(d.view.project_id.as_str())
-            || basis.session_id != o.thread_id
+            || basis.thread_id != o.thread_id
             || basis.mode != "agent"
             || basis.thread_role != "main"
         {

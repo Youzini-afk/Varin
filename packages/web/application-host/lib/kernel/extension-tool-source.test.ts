@@ -1,6 +1,6 @@
 import { expect, it, vi } from 'vitest';
 import type { ApplicationExtensionRuntime, HostServiceBinding } from '@varin/extension-host';
-import type { VarinExtensionServiceProvision, VarinHostServiceComposition } from '@varin/extension-contract';
+import type { VarinExtensionServiceProvision, VarinExtensionServiceRoutingContext, VarinHostServiceComposition } from '@varin/extension-contract';
 import { SCRIPT_TOOL_DECLARATIONS } from '@varin/extension-builtins';
 import { createExtensionTools, type ExtensionToolLease, type ExtensionToolOwnerOptions } from './extension-tool-owner.js';
 import type { KernelClient } from './kernel-client.js';
@@ -27,6 +27,7 @@ function fixture(warm: boolean, configuration: Pick<ExtensionToolOwnerOptions, '
   const live = warm ? [...providers] : [];
   const signal = new AbortController().signal;
   let pins = 0;
+  const routing: VarinExtensionServiceRoutingContext[] = [];
   const bind = (id: string): HostServiceBinding => {
     const provider = providers.find(candidate => candidate.providerId === id)!;
     return { ...provider, composition, release() {}, descriptor: descriptors.find(descriptor => descriptor.id === id)!, pin() {
@@ -41,19 +42,21 @@ function fixture(warm: boolean, configuration: Pick<ExtensionToolOwnerOptions, '
       services: { providers: live, selections: {} } }; },
     services: { getSnapshot: () => ({ providers: live }), bind, bindPinned: bind },
     supervisor: { getRetainedArtifactIdentity: () => 'fixture-artifact', getRetainedComposition: () => composition },
-    async resolveServiceCompositions(request: {serviceId:string}) {
+    async resolveServiceCompositions(request: {serviceId:string; routing: VarinExtensionServiceRoutingContext}) {
+      routing.push(structuredClone(request.routing));
       const provider = providers.find(candidate => candidate.providerId === request.serviceId)!;
       return {routingRevision:0,services:[{providerKey:provider.providerKey,
         descriptor:descriptors.find(descriptor=>descriptor.id===request.serviceId),composition}]};
     },
-    async prepareService(request: { serviceId: string }) {
+    async prepareService(request: { serviceId: string; routing: VarinExtensionServiceRoutingContext }) {
+      routing.push(structuredClone(request.routing));
       const provider = providers.find(candidate => candidate.providerId === request.serviceId)!;
       if (!live.includes(provider)) live.push(provider);
       return bind(request.serviceId);
     },
     subscribe: () => () => {},
   } as unknown as ApplicationExtensionRuntime;
-  return { prepare: createExtensionTools({ runtime, kernel: {} as KernelClient, currentPolicy: async () => ({ mode: 'normal', rules: [] }), ...configuration }), pins: () => pins };
+  return { prepare: createExtensionTools({ runtime, kernel: {} as KernelClient, currentPolicy: async () => ({ mode: 'normal', rules: [] }), ...configuration }), pins: () => pins, routing };
 }
 const source = (mode: LaunchSource['mode']): LaunchSource => ({ resource_owner: {kind:'local'}, mode, workspace_id: 'workspace', execution_workspace_id: 'execution',
   branch_id: mode === 'live_root' ? null : 'branch', revision: mode === 'live_root' ? null : 1, environment_run_id: null,
@@ -64,7 +67,7 @@ it('warm and cold/dynamic ordinary discovery project owning source dependencies 
     const f = fixture(warm), leases: ExtensionToolLease[] = [];
     const expected = selected === null ? ['ordinary_0'] : selected.mode === 'fixed_branch' ? ['ordinary_0', 'ordinary_1']
       : selected.mode === 'materialized' ? ['ordinary_0', 'ordinary_1', 'ordinary_2'] : ['ordinary_0', 'ordinary_1', 'ordinary_2', 'ordinary_3'];
-    const scope = await f.prepare({ runId: 'run', threadId: 'thread', source: selected }, [], new AbortController().signal);
+    const scope = await f.prepare({ runId: 'run', threadId: 'thread', branchId: 'history-branch', source: selected }, [], new AbortController().signal);
     leases.push(...scope.initial);
     try {
       expect(scope.initial.map(lease => lease.binding.tool.name).sort()).toEqual(warm ? expected : []);
@@ -72,9 +75,11 @@ it('warm and cold/dynamic ordinary discovery project owning source dependencies 
       await vi.waitFor(() => expect(scope.inspect().filter(entry => entry.status === 'ready' || entry.status === 'unavailable')).toHaveLength(4));
       expect(scope.inspect().filter(entry => entry.status === 'ready').map(entry => entry.prepared!.tool.name).sort()).toEqual(expected);
       expect(f.pins()).toBe(expected.length);
+      expect(f.routing.length).toBeGreaterThan(0);
+      for (const context of f.routing) expect(context).toEqual({ threadId: 'thread', branchId: 'history-branch', sourceRunId: 'run' });
       for (const entry of scope.inspect().filter(entry => entry.status === 'unavailable')) expect(entry.error).toContain('extension_tool_source_unavailable');
       const physical = leases.find(lease => lease.binding.tool.name === 'ordinary_2');
-      if (physical) await expect(f.prepare({ runId: 'explicit', threadId: 'thread', source: null }, [physical.binding], new AbortController().signal)).rejects.toThrow('requires_physical');
+      if (physical) await expect(f.prepare({ runId: 'explicit', threadId: 'thread', branchId: 'history-branch', source: null }, [physical.binding], new AbortController().signal)).rejects.toThrow('requires_physical');
     } finally { scope.close(); for (const lease of leases) lease.lease.release(); }
     expect(f.pins()).toBe(0);
   }
@@ -92,7 +97,7 @@ it('failed Node configuration is local to actual scripts and leaves unrelated so
     expect(() => resolver(SCRIPT_TOOL_DECLARATIONS[0]!)).toThrow();
     expect(() => resolver(SCRIPT_TOOL_DECLARATIONS[0]!, 'required-original-node')).toThrow();
     const f = fixture(true, { prepareConfiguration: async () => resolver });
-    const scope = await f.prepare({ runId: 'unrelated', threadId: 'thread', source: null }, [], new AbortController().signal);
+    const scope = await f.prepare({ runId: 'unrelated', threadId: 'thread', branchId: 'history-branch', source: null }, [], new AbortController().signal);
     try {
       expect(scope.initial.map(lease => lease.binding.tool.name)).toEqual(['ordinary_0']);
       expect(scope.initial[0]!.binding.configurationIdentity).toBe('ordinary-configuration');

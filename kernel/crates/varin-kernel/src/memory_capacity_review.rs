@@ -87,7 +87,7 @@ enum Ending {
 fn combined(ending: Ending) {
     let root = std::env::temp_dir().join(format!("varin-memory-capacity-{}", uuid::Uuid::new_v4()));
     let db = Arc::new(Mutex::new(Catalog::open(&root.join("catalog")).unwrap()));
-    let basis: PersonalizationBasis = serde_json::from_value(json!({"mode":"agent","threadRole":"main","revision":0,"configurationDigest":"capacity-review","memorySnapshot":{"revision":0,"memories":[]},"sessionId":"thread","projectId":null,"originalSections":[{"name":"preamble","content":"system"}],"instructionSources":[]})).unwrap();
+    let basis: PersonalizationBasis = serde_json::from_value(json!({"mode":"agent","threadRole":"main","revision":0,"configurationDigest":"capacity-review","memorySnapshot":{"revision":0,"memories":[]},"threadId":"thread","projectId":null,"originalSections":[{"name":"preamble","content":"system"}],"instructionSources":[]})).unwrap();
     let mut input = {
         let mut db = db.lock().unwrap();
         db.create_thread("thread", "main").unwrap();

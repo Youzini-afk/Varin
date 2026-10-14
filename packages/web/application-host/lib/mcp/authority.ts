@@ -33,6 +33,8 @@ export type { McpTaskLease, McpEndpoint, McpTaskResponse } from './tasks.js';
 export type { McpAuthorityService, McpAuthorityPrompt, McpServiceKind, McpServiceRequest, McpServiceResult } from './protocol.js';
 
 export interface McpAuthorityScope {
+  /** Host-private original native source admission, never serialized to a server. */
+  admitProcess?: import('../process/types.js').ManagedProcessAdmission;
   /** Actual configuration/transport authority; supplied by the trusted host. */
   resourceOwner: SourceResourceOwner;
   /** Original managed Source permit, absent for local scopes. */

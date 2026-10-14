@@ -17,14 +17,14 @@ import { SortableTabsStrip, type SortableTabsStripItem } from '@/components/ui/s
 import { DiffIcon } from '@/components/icons/DiffIcon';
 import { useUIStore, type ContextPanelMode, type MainTab } from '@/stores/useUIStore';
 import { ContextPanelControls } from './ContextPanelControls';
-import { usePiSessionStore } from '@/stores/usePiSessionStore';
+import { useThreadStore } from '@/stores/useThreadStore';
+import { useDirectoryStore } from '@/stores/useDirectoryStore';
+import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useGitBranchLabel } from '@/stores/useGitStore';
 import { streamPerfCount } from '@/stores/utils/streamDebug';
 
 import { useDesktopWindowControlsLayout } from '@/hooks/useDesktopWindowControlsLayout';
-import { SessionTokenUsage } from '@/components/pi-session/SessionTokenUsage';
-import { ContextUsageDisplay } from '@/components/ui/ContextUsageDisplay';
 import { WindowsWindowControls } from '@/components/desktop/WindowsWindowControls';
 import { useDeviceInfo, useTabletStandalonePwaRuntime } from '@/lib/device';
 import { cn, hasModifier } from '@/lib/utils';
@@ -35,8 +35,7 @@ import { eventMatchesShortcut, getEffectiveShortcutCombo } from '@/lib/shortcuts
 import { OpenInAppButton } from '@/components/desktop/OpenInAppButton';
 import { ProjectActionsButton } from '@/components/layout/ProjectActionsButton';
 import { TitlebarLeftControls } from '@/components/layout/TitlebarLeftControls';
-import { PiSessionSwitcherDropdown } from '@/components/pi-session/PiSessionSwitcherDropdown';
-import { collectPiSessionSubtreeIds, piSessionTitle } from '@/components/pi-session/sessionPresentation';
+import { ThreadSwitcherDropdown } from '@/components/thread/ThreadSwitcherDropdown';
 import { invokeDesktop, isDesktopShell, startDesktopWindowDrag } from '@/lib/desktop';
 import { Icon } from "@/components/icon/Icon";
 import { useI18n } from '@/lib/i18n';
@@ -45,9 +44,8 @@ import { useShallow } from 'zustand/react/shallow';
 import type { IconName } from "@/components/icon/icons";
 import { toast } from '@/components/ui';
 import { copyTextToClipboard } from '@/lib/clipboard';
-import { buildExportFilename, downloadAsMarkdown, saveAsMarkdownDesktop } from '@/lib/pi-runtime/markdownExport';
-import { formatPiSessionAsMarkdown } from '@/lib/pi-runtime/exportSession';
-import { piSessionContextUsage } from '@/lib/pi-runtime/sessionStats';
+import { buildExportFilename, downloadAsMarkdown, saveAsMarkdownDesktop } from '@/lib/agent-runtime/markdownExport';
+import { exportThreadMarkdown } from '@/lib/agent-runtime/exportThread';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { WorkbenchServices } from './WorkbenchServices';
@@ -111,23 +109,14 @@ export const Header: React.FC<HeaderProps> = ({
   const shortcutOverrides = useUIStore((state) => state.shortcutOverrides);
 
 
-  const currentSessionId = usePiSessionStore((state) => state.currentSessionId);
-  const currentSessionRecord = usePiSessionStore((state) => (
-    state.currentSessionId === null ? undefined : state.records[state.currentSessionId]
-  ));
-  const currentSnapshot = currentSessionRecord?.snapshot;
-  const currentStats = currentSessionRecord?.stats;
-  const currentSessionSummary = usePiSessionStore((state) => (
-    state.currentSessionId === null
-      ? undefined
-      : state.summaries.find((summary) => summary.id === state.currentSessionId)
-  ));
-  const piSessionSummaries = usePiSessionStore((state) => state.summaries);
-  const archiveSession = usePiSessionStore((state) => state.archiveSession);
-  const deleteSession = usePiSessionStore((state) => state.deleteSession);
-  const refreshEntries = usePiSessionStore((state) => state.refreshEntries);
-  const refreshStats = usePiSessionStore((state) => state.refreshStats);
-  const renameSession = usePiSessionStore((state) => state.renameSession);
+  const { threads: threadAPI } = useRuntimeAPIs();
+  const identity = useThreadStore(state => state.selectedIdentity);
+  const currentSessionId = identity?.threadId ?? null;
+  const currentSessionSummary = useThreadStore(state => state.threads.find(thread => thread.thread_id === state.selectedIdentity?.threadId));
+  const archiveSession = React.useCallback((threadId: string) => useThreadStore.getState().updateThread(threadId, { archived: true }), []);
+  const deleteSession = useThreadStore(state => state.deleteThread);
+  const renameSession = React.useCallback((threadId: string, title: string) => useThreadStore.getState().updateThread(threadId, { title }), []);
+  const sessionDirectory = useDirectoryStore(state => state.currentDirectory);
   const activeProject = useProjectsStore(useShallow((state) => {
     if (!state.activeProjectId) {
       return null;
@@ -204,35 +193,9 @@ export const Header: React.FC<HeaderProps> = ({
     setIsDesktopApp(isDesktopShell());
   }, []);
 
-  const isCurrentSessionActive = Boolean(
-    currentSnapshot?.busy
-    || currentSnapshot?.isStreaming
-    || currentSnapshot?.isCompacting
-    || (currentSnapshot?.retryAttempt ?? 0) > 0,
-  );
-  const contextUsage = React.useMemo(
-    () => piSessionContextUsage(currentStats, currentSnapshot),
-    [currentSnapshot, currentStats],
-  );
-
-  useEffect(() => {
-    if (!currentSessionId || isCurrentSessionActive) return;
-    void refreshStats(currentSessionId).catch(() => undefined);
-  }, [currentSessionId, currentSnapshot?.leafId, isCurrentSessionActive, refreshStats]);
-
   const isSessionSwitcherOpen = useUIStore((state) => state.isSessionSwitcherOpen);
   const [isMobileServicesOpen, setIsMobileServicesOpen] = React.useState(false);
-  const [mobileServicesTab, setMobileServicesTab] = React.useState<'usage' | 'mcp'>('usage');
-  const showDesktopHeaderContextUsage = activeMainTab === 'chat' && !!contextUsage && contextUsage.totalTokens > 0;
-  const desktopHeaderDisplayPercentage = contextUsage && contextUsage.contextLimit > 0
-    ? Math.min(999, (contextUsage.totalTokens / contextUsage.contextLimit) * 100)
-    : 0;
-
-  // The Pi snapshot is authoritative for the active session directory.
-  const sessionDirectory = React.useMemo(() => {
-    return normalize(currentSnapshot?.cwd || currentSessionSummary?.cwd || '');
-  }, [currentSessionSummary?.cwd, currentSnapshot?.cwd]);
-
+  const [mobileServicesTab, setMobileServicesTab] = React.useState<'usage' | 'mcp'>('mcp');
   const openDirectory = React.useMemo(() => {
     return sessionDirectory || normalize(activeProject?.path || '');
   }, [activeProject?.path, sessionDirectory]);
@@ -242,14 +205,7 @@ export const Header: React.FC<HeaderProps> = ({
 
   const currentBranchLabel = useGitBranchLabel(openDirectory || null);
 
-  const currentSessionTitle = React.useMemo(() => {
-    const untitled = t('sessions.sidebar.session.untitled');
-    if (currentSessionSummary) return piSessionTitle(currentSessionSummary, untitled);
-    if (!currentSessionId) {
-      return activeProjectLabel ?? 'Varin';
-    }
-    return currentSnapshot?.name?.trim() || untitled;
-  }, [activeProjectLabel, currentSessionId, currentSessionSummary, currentSnapshot?.name, t]);
+  const currentSessionTitle = currentSessionSummary?.title || (identity ? t('sessions.sidebar.session.untitled') : activeProjectLabel ?? 'Varin');
   const [isRenamingHeaderSession, setIsRenamingHeaderSession] = React.useState(false);
   const [isHeaderSessionMenuOpen, setIsHeaderSessionMenuOpen] = React.useState(false);
   const pendingHeaderRenameRef = React.useRef(false);
@@ -311,16 +267,8 @@ export const Header: React.FC<HeaderProps> = ({
       return;
     }
     try {
-      const result = await refreshEntries(currentSessionId, 'all');
-      if (result.entries.length === 0) {
-        toast.error(t('sessions.sidebar.session.export.nothingToExport'));
-        return;
-      }
-      const markdown = formatPiSessionAsMarkdown(result.entries, {
-        cwd: sessionDirectory,
-        sessionId: currentSessionId,
-        title: currentSessionTitle,
-      });
+      if (!identity || !threadAPI) throw new Error('Conversation unavailable');
+      const markdown = await exportThreadMarkdown(threadAPI, identity, currentSessionTitle);
       const filename = buildExportFilename(currentSessionTitle);
       const savedPath = await saveAsMarkdownDesktop(markdown, filename);
       if (!savedPath) downloadAsMarkdown(markdown, filename);
@@ -328,13 +276,9 @@ export const Header: React.FC<HeaderProps> = ({
     } catch {
       toast.error(t('sessions.sidebar.session.export.failedLoadHistory'));
     }
-  }, [currentSessionId, currentSessionTitle, refreshEntries, sessionDirectory, t]);
+  }, [identity, threadAPI, currentSessionId, currentSessionTitle, t]);
 
-  const currentSessionSubtreeIds = React.useMemo(() => {
-    if (!currentSessionId) return [];
-    const ids = collectPiSessionSubtreeIds(piSessionSummaries, currentSessionId);
-    return ids.length > 0 ? ids : [currentSessionId];
-  }, [currentSessionId, piSessionSummaries]);
+  const currentSessionSubtreeIds = React.useMemo(() => currentSessionId ? [currentSessionId] : [], [currentSessionId]);
 
   const headerRetentionDescription = React.useMemo(() => {
     const childCount = Math.max(0, currentSessionSubtreeIds.length - 1);
@@ -381,7 +325,6 @@ export const Header: React.FC<HeaderProps> = ({
     )));
     const failed = results.filter((result) => (
       result.status === 'rejected'
-      || (action === 'delete' && result.status === 'fulfilled' && result.value !== true)
     ));
     if (failed.length > 0) {
       toast.error(t(action === 'archive'
@@ -872,7 +815,7 @@ export const Header: React.FC<HeaderProps> = ({
         ) : (
           <div className="app-region-no-drag mr-3 flex min-w-0 max-w-full items-center gap-0.5 py-0.5 -my-0.5 text-left">
             {!isSidebarOpen ? (
-              <PiSessionSwitcherDropdown align="start">
+              <ThreadSwitcherDropdown align="start">
                 <button
                   type="button"
                   className={desktopHeaderIconButtonClass}
@@ -880,7 +823,7 @@ export const Header: React.FC<HeaderProps> = ({
                 >
                   <Icon name="history" className="h-[18px] w-[18px]" />
                 </button>
-              </PiSessionSwitcherDropdown>
+              </ThreadSwitcherDropdown>
             ) : null}
             <div className="flex min-w-0 flex-col justify-center px-1">
               {isRenamingHeaderSession ? (
@@ -986,23 +929,6 @@ export const Header: React.FC<HeaderProps> = ({
         <div className="flex-1" />
 
         <div className="flex shrink-0 items-center gap-1">
-          {showDesktopHeaderContextUsage && contextUsage ? (
-            <ContextUsageDisplay
-              totalTokens={contextUsage.totalTokens}
-              percentage={desktopHeaderDisplayPercentage}
-              colorPercentage={contextUsage.percentage}
-              contextLimit={contextUsage.contextLimit}
-              outputLimit={contextUsage.outputLimit ?? 0}
-              size="compact"
-              hideIcon
-              showPercentIcon
-              onClick={handleOpenContextPanel}
-              pressed={isContextPanelActive}
-              className="mr-1.5"
-              valueClassName="typography-ui-label font-medium leading-none text-foreground"
-              percentIconClassName="h-4.5 w-4.5"
-            />
-          ) : null}
           <OpenInAppButton directory={actionDirectory} className="mr-1" />
           <WorkbenchServices />
           <ContextPanelControls />
@@ -1201,7 +1127,7 @@ export const Header: React.FC<HeaderProps> = ({
                     <McpDropdownContent active={isMobileServicesOpen && mobileServicesTab === 'mcp'} />
                   )}
 
-                  {mobileServicesTab === 'usage' && <div className="flex-1 overflow-y-auto pb-[calc(4rem+env(safe-area-inset-bottom))]"><SessionTokenUsage /></div>}
+                  {mobileServicesTab === 'usage' && <p className="p-4 text-sm text-muted-foreground">Usage is shown with each inference and the conversation Goal.</p>}
                 </div>
               </DropdownMenuContent>
             </DropdownMenu>

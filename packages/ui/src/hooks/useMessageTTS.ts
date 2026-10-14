@@ -7,13 +7,14 @@
 
 import { useCallback, useState } from 'react';
 import { usePreferencesStore } from '@/stores/usePreferencesStore';
-import { usePiSessionStore } from '@/stores/usePiSessionStore';
+import { useThreadStore, threadIdentityKey } from '@/stores/useThreadStore';
+import { useThreadDraftStore } from '@/stores/useThreadDraftStore';
 import { useServerTTS } from './useServerTTS';
 import { useSayTTS } from './useSayTTS';
 import { useLocalTTS } from './useLocalTTS';
 import { browserVoiceService } from '@/lib/voice/browserVoiceService';
 import { sanitizeForTTS } from '@/lib/voice/summarize';
-import { runtimeFetch } from '@varin/application-client';
+import { generateModelText } from '@/lib/modelText';
 
 // Below this length the reply is comfortable to listen to as-is; summarizing
 // would only add latency.
@@ -26,19 +27,8 @@ async function summarizeForSpeech(
     preferred: { providerID?: string; modelID?: string },
 ): Promise<string | null> {
     try {
-        const response = await runtimeFetch('/api/small-model/generate', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                prompt: text,
-                system: SUMMARIZE_SYSTEM_PROMPT,
-                ...(preferred.providerID ? { preferredProviderID: preferred.providerID } : {}),
-                ...(preferred.modelID ? { preferredModelID: preferred.modelID } : {}),
-            }),
-        });
-        if (!response.ok) return null;
-        const payload = await response.json().catch(() => null) as { text?: unknown } | null;
-        return typeof payload?.text === 'string' && payload.text.trim() ? payload.text.trim() : null;
+        const result = await generateModelText({ key: crypto.randomUUID(), purpose: 'text', prompt: text, system: SUMMARIZE_SYSTEM_PROMPT, ...(preferred.providerID && preferred.modelID ? { model: { providerId: preferred.providerID, modelId: preferred.modelID } } : {}) });
+        return result.text.trim() || null;
     } catch {
         return null;
     }
@@ -69,10 +59,9 @@ export function useMessageTTS(): UseMessageTTSReturn {
     const openaiCompatibleTtsModel = usePreferencesStore((state) => state.openaiCompatibleTtsModel);
     const showMessageTTSButtons = usePreferencesStore((state) => state.showMessageTTSButtons);
     const ttsInputMode = usePreferencesStore((state) => state.ttsInputMode);
-    const currentModel = usePiSessionStore((state) => {
-        const sessionId = state.currentSessionId;
-        return sessionId ? state.records[sessionId]?.snapshot?.model : undefined;
-    });
+    const thread = useThreadStore(state => state.selectedIdentity);
+    const host = useThreadStore(state => state.hostKey);
+    const currentModel = useThreadDraftStore(state => thread ? state.drafts[threadIdentityKey(host, thread)]?.model : undefined);
 
     const isServerProvider = voiceProvider === 'openai' || voiceProvider === 'openai-compatible';
     const shouldCheckOpenAIAvailability = showMessageTTSButtons && isServerProvider;
@@ -110,8 +99,8 @@ export function useMessageTTS(): UseMessageTTSReturn {
             let sourceText = text;
             if (ttsInputMode === 'summarized' && text.length >= TTS_SUMMARIZE_MIN_CHARS) {
                 const summary = await summarizeForSpeech(text, {
-                    providerID: currentModel?.provider,
-                    modelID: currentModel?.id,
+                    providerID: currentModel?.providerId,
+                    modelID: currentModel?.modelId,
                 });
                 if (summary) {
                     sourceText = summary;

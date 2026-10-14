@@ -392,7 +392,7 @@ impl Fixture {
                     expected_revision:0, summary:String::new(), effective_system_prompt:"Project main".into(),
                     instruction_sources:vec![], memory_checkpoint:None,
                 }),
-                project.map(|project| serde_json::from_value(json!({"mode":"agent","threadRole":"main","revision":1,"configurationDigest":"fixture-project","memorySnapshot":{"revision":0,"memories":[]},"sessionId":"thread:parent","projectId":project,"originalSections":[{"name":"system","content":"Project main"}],"instructionSources":[]})).unwrap()),
+                project.map(|project| serde_json::from_value(json!({"mode":"agent","threadRole":"main","revision":1,"configurationDigest":"fixture-project","memorySnapshot":{"revision":0,"memories":[]},"threadId":"thread:parent","projectId":project,"originalSections":[{"name":"system","content":"Project main"}],"instructionSources":[]})).unwrap()),
             )
             .unwrap();
         let prepared = db

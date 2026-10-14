@@ -136,10 +136,10 @@ export interface RecoveryOperationConflictQuery {
 export interface RecoveryDurableOperationPort {
   /** Register an already-owned candidate for transfer into the existing journal refs. */
   registerObjectOwner?(workspaceId: string, hash: string, ownerId: string): void;
-  createOperation(input: { operationId: string; workspaceId: string; kind: string; state: string; data: Record<string, unknown>; targets: Record<string, { expected?: RecoveryState; target?: RecoveryState; safety?: RecoveryState }>; surfacePaths?: readonly string[]; sessionId?: string; threadId?: string; runId?: string }): Promise<Record<string, unknown>>;
-  updateOperationFile(input: { operationId: string; workspaceId: string; path: string; expectedRevision: number; expectedPhase: string; phase: string; observedFingerprint?: string; expected?: RecoveryState; target?: RecoveryState; safety?: RecoveryState; sessionId?: string }): Promise<Record<string, unknown>>;
-  completeOperation(input: { operationId: string; workspaceId: string; expectedRevision: number; state: string; result?: Record<string, unknown>; failure?: Record<string, unknown>; sessionId?: string }): Promise<Record<string, unknown>>;
-  getOperation(workspaceId: string, operationId: string, sessionId?: string): Promise<Record<string, unknown> | null>;
+  createOperation(input: { operationId: string; workspaceId: string; kind: string; state: string; data: Record<string, unknown>; targets: Record<string, { expected?: RecoveryState; target?: RecoveryState; safety?: RecoveryState }>; surfacePaths?: readonly string[]; threadId?: string; runId?: string }): Promise<Record<string, unknown>>;
+  updateOperationFile(input: { operationId: string; workspaceId: string; path: string; expectedRevision: number; expectedPhase: string; phase: string; observedFingerprint?: string; expected?: RecoveryState; target?: RecoveryState; safety?: RecoveryState; threadId?: string }): Promise<Record<string, unknown>>;
+  completeOperation(input: { operationId: string; workspaceId: string; expectedRevision: number; state: string; result?: Record<string, unknown>; failure?: Record<string, unknown>; threadId?: string }): Promise<Record<string, unknown>>;
+  getOperation(workspaceId: string, operationId: string): Promise<Record<string, unknown> | null>;
   listOperations(workspaceId: string, kind?: string): Promise<Record<string, unknown>[]>;
   /** Original journal reservations across physical root aliases, restricted to the admitted target. */
   listOperationConflicts(input: RecoveryOperationConflictQuery): Promise<RecoveryOperationConflict[]>;
@@ -613,7 +613,7 @@ export const createWorkspaceRecoveryEngine = (options: CreateWorkspaceRecoveryEn
       expectedPhase: file.phase,
       phase,
       ...states,
-      ...(record.plan.conversation.kind === "pi" ? { sessionId: record.plan.conversation.sessionId } : { threadId: record.plan.conversation.threadId }),
+      threadId: record.plan.conversation.threadId,
     });
   });
   const writeRecord = async (record: CombinedOperationRecord, operation: Record<string, unknown>): Promise<void> => {
@@ -625,7 +625,7 @@ export const createWorkspaceRecoveryEngine = (options: CreateWorkspaceRecoveryEn
       state: record.state,
       result: record,
       ...(record.failure ? { failure: record.failure as unknown as Record<string, unknown> } : {}),
-      ...(record.plan.conversation.kind === "pi" ? { sessionId: record.plan.conversation.sessionId } : { threadId: record.plan.conversation.threadId }),
+      threadId: record.plan.conversation.threadId,
     });
   };
   const persist = async (record: CombinedOperationRecord): Promise<void> => runRecord(record.id, async () => {
@@ -686,7 +686,7 @@ export const createWorkspaceRecoveryEngine = (options: CreateWorkspaceRecoveryEn
     state: record.state,
     data: record,
     targets: record.targets,
-    ...(record.plan.conversation.kind === "pi" ? { sessionId: record.plan.conversation.sessionId } : { threadId: record.plan.conversation.threadId }),
+    threadId: record.plan.conversation.threadId,
   });
   const prepareSurfaceSafety = async (identity: RecoveryIdentity, record: CombinedOperationRecord, key: string, barrier: TargetBarrierHandle) => {
     const target = record.targets[key]!;
@@ -836,10 +836,6 @@ export const createWorkspaceRecoveryEngine = (options: CreateWorkspaceRecoveryEn
       if (prior.managedPreparation && !prior.managedPreparation.undoOf && prior.plan.entryId === input.entryId
         && isDeepStrictEqual(prior.plan.conversation, input.conversation) && prior.plan.expectedLeafId === navigation.expectedLeafId && prior.plan.targetLeafId === navigation.targetLeafId)
         return runOperation(prior.id, async () => resolveManagedPreparation(parseCombined(await getOperation(prior.workspaceId, prior.id))));
-    }
-    if (input.conversation.kind === "pi") {
-      const binding = await durable.resolveEntry(input);
-      if (binding.status !== "ready") throw new RecoveryPrimitiveError("checkpoint-incomplete", "The selected conversation entry has no ready checkpoint", { origin: "coverage" });
     }
     const removedEntryIds = [...new Set(navigation.removedEntryIds ?? [])];
     const loaded = await changesFor(input.workspaceId, input.conversation, removedEntryIds, navigation.journalTurns);
@@ -1401,13 +1397,6 @@ export const createWorkspaceRecoveryEngine = (options: CreateWorkspaceRecoveryEn
           failures.push(recoveryFailure(new RecoveryPrimitiveError('needs-attention', `Workspace edit ${edit.operationId} requires attention`, { operationId: edit.operationId, origin: 'storage' }), 'needs-attention'));
           startupFailures.set(registration.workspaceId, failures);
         }
-        const { reconcileInterruptedAgentMutations } = await import("../documents/agent-mutation-operation.js");
-        const mutations = await reconcileInterruptedAgentMutations(context);
-        if (mutations.needsAttention.length > 0) {
-          const failures = startupFailures.get(registration.workspaceId) ?? [];
-          failures.push(recoveryFailure(new RecoveryPrimitiveError("needs-attention", `Agent surface mutation recovery requires attention (${mutations.needsAttention.join(", ")})`, { operationId: mutations.needsAttention[0], origin: "storage" }), "needs-attention"));
-          startupFailures.set(registration.workspaceId, failures);
-        }
       })).catch((error) => {
         const failures = startupFailures.get(registration.workspaceId) ?? [];
         failures.push(recoveryFailure(error, "needs-attention"));
@@ -1617,7 +1606,9 @@ export const createWorkspaceRecoveryEngine = (options: CreateWorkspaceRecoveryEn
     setRetentionPolicy: async () => unavailable("Recovery retention policy is owned by the Rust kernel and is not configurable"),
     setStorageLocation: async () => unavailable("Rust recovery storage cannot be moved independently of kernel storage"),
     status: (workspaceId) => safe(async () => {
-      const attention = (await durable.listOperations(workspaceId)).filter((value) => ["agent-mutation", "workspace-edit"].includes(String(value.kind)) && value.state === "needs-attention");
+      const attention = (await durable.listOperations(workspaceId)).filter((value) =>
+        value.kind === "workspace-edit" && value.state === "needs-attention"
+        || value.kind === "agent-mutation" && !["complete", "aborted", "compensated", "conflict"].includes(String(value.state)));
       return {
         capabilities: {
           bindings: true,
@@ -1635,8 +1626,10 @@ export const createWorkspaceRecoveryEngine = (options: CreateWorkspaceRecoveryEn
         failures: [
           ...(startupFailures.get(workspaceId) ?? []),
           ...attention.map((value) => ({
-            code: "needs-attention" as const,
-            message: `${value.kind === "workspace-edit" ? "Workspace edit" : "Agent surface mutation"} ${String(value.operationId)} requires attention`,
+            code: value.kind === "agent-mutation" ? "storage-schema-retired" as const : "needs-attention" as const,
+            message: value.kind === "agent-mutation"
+              ? `Retired agent mutation ${String(value.operationId)} is unsupported; its original record and resources were preserved without replay or migration`
+              : `Workspace edit ${String(value.operationId)} requires attention`,
             operationId: String(value.operationId),
             origin: "storage" as const,
             retryable: false,

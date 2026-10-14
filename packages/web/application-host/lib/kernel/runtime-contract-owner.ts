@@ -20,7 +20,7 @@ export function createRuntimeContractOwner(options: {
         'runtime.run.scope', { runId: authority.runId }, context.signal);
       requireToolInvocation(context);
       const result = await options.extensions.queryContracts(request, { routing: {
-        sessionId: authority.threadId, ...(admitted?.projectId ? { projectId: admitted.projectId } : {}),
+        threadId: authority.threadId, sourceRunId: authority.runId, ...(admitted?.projectId ? { projectId: admitted.projectId } : {}),
       } }, context.signal);
       requireToolInvocation(context);
       return parseVarinToolJson(result);

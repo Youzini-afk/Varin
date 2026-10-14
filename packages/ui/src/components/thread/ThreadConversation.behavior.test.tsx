@@ -1,3 +1,6 @@
+import { addEditorContextAttachment, listEditorContextAttachments, resetEditorContextAttachments } from '@/lib/agent-editor/attachments';
+import { useInlineCommentDraftStore } from '@/stores/useInlineCommentDraftStore';
+import type { EditorContextAttachment } from '@/lib/agent-editor/types';
 import { registerRuntimeAPIs, getRegisteredRuntimeAPIs } from '@/lib/runtime-api/registry';
 import type { DocumentsAPI, RuntimeAPIs } from '@varin/application-client';
 import { attachProcessTerminal } from '@/lib/attachProcessTerminal';
@@ -9,6 +12,9 @@ import { ThreadRequestError } from '@varin/application-client';
 import type { ContextCheckpoint, ThreadIdentity, ThreadSnapshot, ThreadSubmit, ThreadsAPI } from '@varin/application-client';
 import type { ChildTask, DelegatedExecution, StoredMedia, McpInteractionView } from '@varin/protocol';
 import { ThreadConversation } from './ThreadConversation';
+import { useThreadDraftStore } from '@/stores/useThreadDraftStore';
+import { bindThreadStore, threadHostKey, threadIdentityKey, useThreadStore } from '@/stores/useThreadStore';
+import { ChatView } from '@/components/views/ChatView';
 import { AgentWorkspaceShell } from '@/workbenches/agent/AgentWorkspaceShell';
 import { useUIStore } from '@/stores/useUIStore';
 import type { WorkspaceCombinedRecoveryOperation, WorkspaceCombinedRecoveryPlan, WorkspaceRecoveryAPI } from '@varin/extension-contract';
@@ -35,9 +41,8 @@ vi.mock('@varin/application-client', async original => ({
 }));
 vi.mock('@/lib/attachProcessTerminal', () => ({ attachProcessTerminal: vi.fn() }));
 vi.mock('@/hooks/useRuntimeAPIs', () => ({ useRuntimeAPIs: () => ({ threads: runtimeState.api }) }));
-vi.mock('@/stores/useDirectoryStore', () => ({ useDirectoryStore: (selector: (state: { currentDirectory: string }) => unknown) => selector({ currentDirectory: '/workspace/project' }) }));
-vi.mock('@/stores/usePiSessionStore', () => ({ usePiSessionStore: { subscribe: () => () => {} } }));
-vi.mock('@/components/layout/MainLayout', () => ({ MainLayout: ({ renderConversation }: { renderConversation: (active: boolean) => React.ReactNode }) => <div>{renderConversation(true)}</div> }));
+vi.mock('@/stores/useDirectoryStore', () => ({ useDirectoryStore: Object.assign((selector: (state: { currentDirectory: string }) => unknown) => selector({ currentDirectory: '/workspace/project' }), { getState: () => ({ currentDirectory: '/workspace/project', setDirectory: () => {} }) }) }));
+vi.mock('@/components/layout/MainLayout', () => ({ MainLayout: ({ renderConversation }: { renderConversation?: (active: boolean) => React.ReactNode }) => <div>{renderConversation ? renderConversation(true) : <ChatView />}</div> }));
 vi.mock('@/components/views/RegularChatView', () => ({ RegularChatView: () => <div data-testid="existing-conversations" /> }));
 vi.mock('@/apps/mobileWorkspaceShell', () => ({ MobileWorkspaceShell: () => null }));
 vi.mock('@/lib/extensions/surface-runtime', () => ({ varinSurfaceRuntime: { surface: 'web' } }));
@@ -53,7 +58,7 @@ const storedImage: StoredMedia = { media_type: 'image/png', content_ref: { conte
 const identity: ThreadIdentity = { runtime: 'agent', threadId: 'thread:ui-fixture', branchId: 'branch:ui-fixture' };
 function initialSnapshot(active = false): ThreadSnapshot {
   const run = { id: 'ui-run', thread_id: identity.threadId, branch_id: identity.branchId, state: 'generating' as const, revision: 1, epoch: 1, configuration: { providerId: 'fixture-provider', model: 'fixture-model' }, cancel_requested: false, waiting_on: null };
-  return { identity, eventCursor: 0, thread: { thread_id: identity.threadId, bot_id: null, observer_project_ids: [null], branches: [{ branch_id: identity.branchId, head: null, active_run_id: active ? run.id : null, latest_run: active ? run : null }] }, activeRun: active ? run : null,
+  return { identity, eventCursor: 0, thread: { thread_id: identity.threadId, main_branch_id: identity.branchId, title: '', revision: 1, created_at_ms: 0, updated_at_ms: 0, pinned: false, archived: false, deleted_at_ms: null, activity_cursor: 0, read_cursor: 0, unread: false, bot_id: null, observer_project_ids: [null], branches: [{ branch_id: identity.branchId, head: null, active_run_id: active ? run.id : null, latest_run: active ? run : null }] }, activeRun: active ? run : null,
     history: [], historyPage: { head: null, previous: null }, inputs: [], operations: [], followups: [], goals: [], launch: null, modelSelection: {desired:null,active:null}, policySelection: null, context: { checkpoint: null, jobs: [] } };
 }
 function fixture(active = false) {
@@ -72,7 +77,7 @@ function fixture(active = false) {
   });
   let listener: Parameters<ThreadsAPI['observe']>[1] | undefined;
   const unused = async (): Promise<never> => { throw new Error('unused fixture API'); };
-  const api: ThreadsAPI = { materials: { read: vi.fn(unused), readArtifact: vi.fn(unused) }, computer: { state: vi.fn<ThreadsAPI['computer']['state']>(async target => ({ state: { work: target, rootWork: target, currentExecution: null, currentRootExecution: null, active: false, status: 'enabled', leases: [], requests: [], cleanups: [] }, activities: [] })), stop: vi.fn(unused), decide: vi.fn(unused) }, goals: { start: vi.fn(unused), update: unused, control: unused, list: async () => view.goals }, resources: { refresh: unused }, followups: { jobSources: async () => [], register: unused, list: unused, get: unused, occurrence: unused, occurrences: unused, control: unused, pendingRegistrations: async () => [], cancelRegistration: unused }, listModels: async () => [{ providerId: 'fixture-provider', modelId: 'fixture-model' }], list: async () => [view.thread], create: async () => identity,
+  const api: ThreadsAPI = { usage: unused, update: unused, delete: unused, markRead: unused, materials: { readSource: vi.fn(unused), read: vi.fn(unused), readArtifact: vi.fn(unused) }, computer: { state: vi.fn<ThreadsAPI['computer']['state']>(async target => ({ state: { work: target, rootWork: target, currentExecution: null, currentRootExecution: null, active: false, status: 'enabled', leases: [], requests: [], cleanups: [] }, activities: [] })), stop: vi.fn(unused), decide: vi.fn(unused) }, goals: { start: vi.fn(unused), update: unused, control: unused, list: async () => view.goals }, resources: { refresh: unused }, followups: { jobSources: async () => [], register: unused, list: unused, get: unused, occurrence: unused, occurrences: unused, control: unused, pendingRegistrations: async () => [], cancelRegistration: unused }, listModels: async () => [{ providerId: 'fixture-provider', modelId: 'fixture-model' }], list: async () => [view.thread], create: async () => identity,
     mediaRead: vi.fn(async input => ({ media: storedImage, partIndex: input.partIndex, chunkIndex: 0, chunkCount: 1, totalBytes: Buffer.from(imageData, 'base64').length, bytesBase64: imageData })),
     listMcpInteractions: vi.fn(async () => ({ items: [], nextCursor: null })), readMcpInteraction: unused, respondMcpInteraction: unused,
     reviewMcpSamplingRequest: unused, reviewMcpSamplingOutput: unused,
@@ -90,6 +95,9 @@ let container: HTMLDivElement;
 beforeEach(() => {
   vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:test-image');
   vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => {});
+  useThreadDraftStore.setState({ drafts: {} });
+  useInlineCommentDraftStore.setState({ drafts: {}, touchedAt: {} });
+  resetEditorContextAttachments();
   endpoint.generation = 1;
   recoveryService.api = undefined;
   useUIStore.setState({ recoveryPreference: 'conversation' });
@@ -383,23 +391,82 @@ it.each(['any', 'all'] as const)('registers %s conditions as one retained intent
 });
 
 
-it('Agent workspace entry opens an explicit conversation and switches back to existing conversations', async () => {
-  const f = fixture();
-  const create = vi.fn(f.api.create);
-  f.api.create = create;
-  runtimeState.api = f.api;
-  await act(async () => { root.render(<AgentWorkspaceShell />); });
-  expect(container.querySelector('[data-testid="existing-conversations"]')).not.toBeNull();
-  await act(async () => { button('New conversation').click(); });
-  expect(create).toHaveBeenCalledOnce();
-  expect(typeof create.mock.calls[0]![0]).toBe('string');
-  expect(container.querySelector('[aria-label="Thread conversation"]')).not.toBeNull();
-  expect(container.querySelector('[data-testid="existing-conversations"]')).toBeNull();
-  await edit('[aria-label="Conversation runtime"]', '', 'change');
-  expect(container.querySelector('[aria-label="Thread conversation"]')).toBeNull();
-  expect(container.querySelector('[data-testid="existing-conversations"]')).not.toBeNull();
+it('ordinary Agent workspace creates a native Thread directly and opens its canonical branch', async () => {
+  const f = fixture(); const create = vi.fn(f.api.create); f.api.create = create; runtimeState.api = f.api;
+  let unbind: (() => void) | undefined;
+  try {
+    await act(async () => { unbind = bindThreadStore(f.api); });
+    useThreadStore.setState({ selectedIdentity: null });
+    await act(async () => { root.render(<AgentWorkspaceShell />); });
+    await act(async () => { button('sessions.sidebar.header.actions.newSession').click(); });
+    expect(create).toHaveBeenCalledOnce();
+    expect(useThreadStore.getState().selectedIdentity).toEqual(identity);
+    expect(container.querySelector('[aria-label="Thread conversation"]')).not.toBeNull();
+    expect(container.querySelector('[aria-label="Conversation runtime"]')).toBeNull();
+  } finally { await act(async () => unbind?.()); }
 });
 
+it('freezes editor and inline context on an unknown send and acknowledges only captured revisions', async () => {
+  const f = fixture(); f.submit.mockRejectedValueOnce(new Error('lost receipt'));
+  const host = threadHostKey(); const threadKey = threadIdentityKey(host, identity);
+  const attachment: EditorContextAttachment = { id: 'editor-1', runtimeKey: host, threadKey, workspaceId: 'workspace-a', resourceId: 'file-a',
+    label: 'code.ts', documentInstanceId: 'document-a', documentRevision: 'disk-1', localEditRevision: 1,
+    source: 'unsaved-buffer', kind: 'selection', text: 'original editor context', range: { startLine: 1, startColumn: 1, endLine: 1, endColumn: 5 } };
+  addEditorContextAttachment(attachment);
+  const target = { directory: '/workspace/project', sessionKey: threadKey };
+  const inlineId = useInlineCommentDraftStore.getState().addDraft(target, { source: 'diff', fileLabel: 'code.ts', startLine: 2, endLine: 2,
+    code: 'original code', language: 'typescript', text: 'original inline context' })!;
+  await act(async () => { root.render(<ThreadConversation api={f.api} identity={identity} />); });
+  await edit('[aria-label="Registered model"]', JSON.stringify(['fixture-provider', 'fixture-model']), 'change');
+  // Context-only submission is a real input even when the text editor is empty.
+  expect(button('Send').disabled).toBe(false);
+  await submitForm(container.querySelector('form')!);
+  expect(f.submit.mock.calls[0][0].text).toContain('original editor context');
+  expect(f.submit.mock.calls[0][0].text).toContain('original inline context');
+  await act(async () => {
+    addEditorContextAttachment({ ...attachment, localEditRevision: 2, text: 'newer editor context' });
+    useInlineCommentDraftStore.getState().updateDraft(target, inlineId, { text: 'newer inline context' });
+  });
+  await submitForm(container.querySelector('form')!);
+  expect(f.submit.mock.calls[1][0]).toEqual(f.submit.mock.calls[0][0]);
+  expect(listEditorContextAttachments(host, threadKey)[0].text).toBe('newer editor context');
+  expect(useInlineCommentDraftStore.getState().getDrafts(target)[0].text).toBe('newer inline context');
+});
+
+it('a late accepted receipt clears only its original branch draft after navigation', async () => {
+  const f = fixture(); let accept!: (value: Awaited<ReturnType<ThreadsAPI['submit']>>) => void;
+  f.submit.mockImplementationOnce(() => new Promise(resolve => { accept = resolve; }));
+  await act(async () => { root.render(<ThreadConversation api={f.api} identity={identity} />); });
+  await edit('[aria-label="Registered model"]', JSON.stringify(['fixture-provider', 'fixture-model']), 'change');
+  await edit('[aria-label="Message thread"]', 'accepted original');
+  await submitForm(container.querySelector('form')!);
+  const fork = { ...identity, branchId: 'branch:late' };
+  await act(async () => { root.render(<ThreadConversation api={f.api} identity={fork} />); });
+  await edit('[aria-label="Message thread"]', 'keep fork draft');
+  await act(async () => { accept({ thread_id: identity.threadId, branch_id: identity.branchId, run_id: 'accepted', input_id: 'accepted', cursor: 2 }); });
+  expect(container.querySelector<HTMLTextAreaElement>('[aria-label="Message thread"]')!.value).toBe('keep fork draft');
+  expect(useThreadDraftStore.getState().drafts[threadIdentityKey(threadHostKey(), identity)].text).toBe('');
+  expect(useThreadDraftStore.getState().drafts[threadIdentityKey(threadHostKey(), identity)].pendingInput).toBeUndefined();
+});
+
+it('retains original text, image bytes and request identity across branch navigation after a lost receipt', async () => {
+  const f = fixture(); f.submit.mockRejectedValueOnce(new Error('lost receipt'));
+  await act(async () => { root.render(<ThreadConversation api={f.api} identity={identity} />); });
+  await edit('[aria-label="Registered model"]', JSON.stringify(['fixture-provider', 'fixture-model']), 'change');
+  await edit('[aria-label="Message thread"]', 'original message');
+  await submitForm(container.querySelector('form')!);
+  const original = f.submit.mock.calls[0][0];
+  const fork = { ...identity, branchId: 'branch:other' };
+  await act(async () => { root.render(<ThreadConversation api={f.api} identity={fork} />); });
+  await edit('[aria-label="Message thread"]', 'other draft');
+  await act(async () => { root.render(<ThreadConversation api={f.api} identity={identity} />); });
+  expect(container.querySelector<HTMLTextAreaElement>('[aria-label="Message thread"]')!.value).toBe('original message');
+  await edit('[aria-label="Message thread"]', 'newer editor text');
+  await submitForm(container.querySelector('form')!);
+  expect(f.submit.mock.calls[1][0]).toEqual(original);
+  expect(container.querySelector<HTMLTextAreaElement>('[aria-label="Message thread"]')!.value).toBe('newer editor text');
+  expect(useThreadDraftStore.getState().drafts[threadIdentityKey(threadHostKey(), fork)].text).toBe('other draft');
+});
 
 it('shared file picker previews image-only input, retains bytes/key on failure, and supports removing a selected image', async () => {
   const f = fixture();
@@ -562,7 +629,7 @@ it('projects a registered source failure without exposing upstream detail or los
 
 it('adds a hidden skill command and retains the draft and image through a resource conflict and retry', async () => {
   const f = fixture();
-  const failure = new ThreadRequestError(409, 'resource-stale');
+  const failure = new ThreadRequestError(409, 'resource-stale', 'not_started');
   failure.message = 'Private skill body at /not-for-ui/secret.md';
   f.submit.mockRejectedValueOnce(failure);
   const refresh = vi.fn<ThreadsAPI['resources']['refresh']>(async input => {
@@ -2615,13 +2682,16 @@ it('thread recovery observes the original combined operation after uncertain fil
   expect(container.querySelector<HTMLTextAreaElement>('[aria-label="Message thread"]')!.value).toBe('Original user instruction');
 });
 
-it('thread recovery requires dirty buffers to be resolved and cancels the unused file plan before conversation-only navigation', async () => {
+it('thread recovery previews the exact dirty buffer and cancels the unused file plan before conversation-only navigation', async () => {
   const f = navigationFixture(); const recovery = combinedFixture(f, { conflicts: [{ kind: 'dirty-buffer', path: 'result.txt', message: 'Unsaved editor', fingerprint: 'dirty-revision' }] });
   useUIStore.setState({ recoveryPreference: 'both' });
   await act(async () => root.render(<ThreadConversation api={f.api} identity={identity} />));
   await act(async () => button('Restore before this message').click());
-  expect(container.textContent).toContain('Save or discard the affected editor buffers first');
-  expect(button('settings.varin.recovery.preference.both.label')).toBeUndefined();
+  expect(container.textContent).toContain('result.txt: Unsaved editor');
+  expect(container.textContent).toContain('They are preserved for undo');
+  const combined = [...container.querySelectorAll<HTMLButtonElement>('button')].find(item => item.textContent?.includes('settings.varin.recovery.preference.both.label'))!;
+  expect(combined.disabled).toBe(false);
+  expect(recovery.applyCombinedRecovery).not.toHaveBeenCalled();
   const conversation = [...container.querySelectorAll<HTMLButtonElement>('button')].find(item => item.textContent?.includes('settings.varin.recovery.preference.conversation.label'))!;
   await act(async () => conversation.click());
   expect(recovery.cancelCombinedOperation).toHaveBeenCalledWith('original-recovery');
@@ -2762,7 +2832,7 @@ it.each([false, true])('thread recovery rebuilds independent navigation Undo aft
   f.view.recovery = { navigation: receipt, operations: [], ...(combinedUnavailable ? { combinedUnavailable: 'Managed file recovery is unavailable. Conversation navigation remains available.' } : {}) };
   await act(async () => { root.unmount(); }); root = createRoot(container);
   await act(async () => root.render(<ThreadConversation api={f.api} identity={identity} />));
-  expect(container.querySelector<HTMLTextAreaElement>('[aria-label="Message thread"]')!.value).toBe('');
+  expect(container.querySelector<HTMLTextAreaElement>('[aria-label="Message thread"]')!.value).toBe('Original user instruction');
   expect(f.navigate).toHaveBeenCalledOnce();
   await edit('[aria-label="Message thread"]', 'Fresh draft after reopening');
   await act(async () => button('Undo conversation recovery').click());
@@ -2778,7 +2848,7 @@ it('thread recovery reopens combined recovery through its original operation and
   await act(async () => { root.unmount(); }); root = createRoot(container);
   await act(async () => root.render(<ThreadConversation api={f.api} identity={identity} />));
   expect(button('Undo conversation recovery')).toBeUndefined();
-  expect(container.querySelector<HTMLTextAreaElement>('[aria-label="Message thread"]')!.value).toBe('');
+  expect(container.querySelector<HTMLTextAreaElement>('[aria-label="Message thread"]')!.value).toBe('Original user instruction');
   await act(async () => button('Undo saved conversation and file recovery').click());
   expect(recovery.prepareCombinedUndo).toHaveBeenCalledWith(recovery.operation.id);
   expect(f.navigate).not.toHaveBeenCalled();
@@ -2837,4 +2907,40 @@ it('keeps an unavailable managed file owner explicit and preserves conversation-
   expect(conversation).toBeDefined();
   await act(async () => conversation!.click());
   expect(f.navigate).toHaveBeenCalledOnce(); expect(recovery.prepareCombinedRecovery).toHaveBeenCalledOnce(); expect(recovery.applyCombinedRecovery).not.toHaveBeenCalled();
+});
+
+
+it.each([[413, 'http-body-too-large'], [400, 'model-images-unsupported']] as const)('allows corrected images and model after explicit pre-admission rejection %s', async (status, code) => {
+  const f = fixture();
+  f.api.listModels = async () => [{ providerId: 'fixture-provider', modelId: 'fixture-model' }, { providerId: 'fixture-provider', modelId: 'replacement' }];
+  f.submit.mockRejectedValueOnce(new ThreadRequestError(status, code, 'not_started'));
+  const key = threadIdentityKey(threadHostKey(), identity);
+  useThreadDraftStore.getState().patch(key, { text: 'Original', images: [{ mimeType: 'image/png', data: imageData }], model: { providerId: 'fixture-provider', modelId: 'fixture-model' } });
+  await act(async () => root.render(<ThreadConversation api={f.api} identity={identity} />));
+  await submitForm(container.querySelector('form')!);
+  expect(useThreadDraftStore.getState().drafts[key].pendingInput).toBeUndefined();
+  await act(async () => container.querySelector<HTMLButtonElement>('form button[aria-label="chat.fileAttachment.actions.removeImage"]')!.click());
+  await edit('[aria-label="Registered model"]', JSON.stringify(['fixture-provider', 'replacement']), 'change');
+  await edit('[aria-label="Message thread"]', 'Corrected');
+  await submitForm(container.querySelector('form')!);
+  const [original, corrected] = f.submit.mock.calls.map(call => call[0]);
+  expect(corrected.key).not.toBe(original.key);
+  expect(corrected).toMatchObject({ text: 'Corrected', images: [], model: { modelId: 'replacement' } });
+});
+
+it('keeps an uncertain queued input through an unrelated 409 and a later pre-admission rejection', async () => {
+  const f = fixture(true);
+  f.enqueue.mockRejectedValueOnce(new Error('reply lost')).mockRejectedValueOnce(new ThreadRequestError(400, 'model-images-unsupported', 'not_started'));
+  f.cancelRun.mockRejectedValueOnce(new ThreadRequestError(409, 'thread-conflict'));
+  await act(async () => root.render(<ThreadConversation api={f.api} identity={identity} />));
+  await edit('[aria-label="Message thread"]', 'Original queue');
+  await submitForm(container.querySelector('form')!);
+  await act(async () => button('Stop run').click());
+  await edit('[aria-label="Message thread"]', 'Newer draft');
+  await submitForm(container.querySelector('form')!);
+  expect(button('Retry delivery')).toBeDefined();
+  await submitForm(container.querySelector('form')!);
+  expect(f.enqueue.mock.calls[1]).toEqual(f.enqueue.mock.calls[0]);
+  expect(f.enqueue.mock.calls[2]).toEqual(f.enqueue.mock.calls[0]);
+  expect(container.querySelector<HTMLTextAreaElement>('[aria-label="Message thread"]')?.value).toBe('Newer draft');
 });

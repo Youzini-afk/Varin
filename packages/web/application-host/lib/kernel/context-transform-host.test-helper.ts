@@ -135,17 +135,17 @@ async function handle(frame: Record<string, unknown>) {
   if (frame.kind === 'fixture-child') {
     const child = frame.child as unknown as ChildTask;
     await extensions.upsertServiceRoutingRule({ expectedRevision: (await extensions.routing.read()).document.revision,
-      rule: { allowFallback: false, providerKeys: [key('b'), key('a')], scope: { sessionId: child.child_thread_id },
+      rule: { allowFallback: false, providerKeys: [key('b'), key('a')], scope: { threadId: child.child_thread_id },
         serviceId: 'varin.context.fragments', version: 1 } });
     const initial = await context({ runtime: 'agent', threadId: child.child_thread_id, branchId: child.child_branch_id }, null,
       { mode: 'agent', threadRole: 'worker', projectId: child.project_id, childProfile: child.selected_profile });
-    assert.equal(initial.personalization?.sessionId, child.child_thread_id);
+    assert.equal(initial.personalization?.threadId, child.child_thread_id);
     assert.equal(initial.resources?.snapshot.scope.threadRole, 'worker');
     const receipt = await runtime.prepareChild({ executionId: String(frame.executionId), source: null, context: initial, expectedContextCheckpoint: null });
     const checkpoint = await runtime.context(child.child_branch_id);
     assert(checkpoint);
     const refresh = await context.refreshResources!(checkpoint);
-    assert.equal(refresh.personalization?.sessionId, child.child_thread_id);
+    assert.equal(refresh.personalization?.threadId, child.child_thread_id);
     assert.deepEqual(refresh.personalization?.contextComposition, initial.personalization?.contextComposition);
     const parentCheckpoint = await runtime.context(branchId);
     assert(parentCheckpoint);

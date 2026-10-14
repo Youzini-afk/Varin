@@ -1,225 +1,12 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { ComputerActor } from '@varin/protocol';
 import { createComputerAutomation } from './computer-automation.js';
-import { decodeComputerRuntime } from './computer-records.js';
-
-const work = (sessionId: string) => ({ runtime: 'pi' as const, sessionId });
-const actor = (sessionId: string, readOnly = false, rootSessionId = 'main'): ComputerActor => ({
-  execution: { work: work(sessionId), runId: `${sessionId}:run` }, rootWork: work(rootSessionId),
-  rootExecution: { work: work(rootSessionId), runId: `${rootSessionId}:run` },
-  registry: { scopeId: 'scope', threadId: sessionId }, label: sessionId, roleAccess: { kind: 'pi-role', readOnly } });
-function fixture(extra: Pick<Parameters<typeof createComputerAutomation>[0], 'pendingReleases' | 'cancelWork'> = {}) {
-  const actors = new Map(['main', 'worker', 'lookup'].map(id => [id, actor(id, id === 'lookup')]));
-  const release = vi.fn(async () => ({ released: true }));
-  const notify = vi.fn(async () => {}), revoke = vi.fn(async () => {});
-  const resolveActor = vi.fn(async (ref: import('@varin/protocol').ComputerWorkRef) => actors.get(ref.runtime === 'pi' ? ref.sessionId : '') ?? null);
-  const coordinator = createComputerAutomation({ resolveActor,
-    resolveScope: async ref => { const a = actors.get(ref.runtime === 'pi' ? ref.sessionId : '')!; return { work: ref, rootWork: a.rootWork, currentExecution: a.execution, currentRootExecution: a.rootExecution }; }, release,
-    controlAvailable: () => true, notify, revokeSession: revoke, bindDesktop: async () => {}, onChange: () => {}, ...extra });
-  return { actors, release, notify, revoke, coordinator, resolveActor };
-}
-describe('Computer Use execution and physical desktop ownership', () => {
-  it('cancels only its actual admitted dispatch without revoking sibling work', async () => {
-    const { coordinator: c, revoke } = fixture();
-    let first!: import('./computer-automation.js').ComputerAdmission;
-    let second!: import('./computer-automation.js').ComputerAdmission;
-    let readyA!: () => void, readyB!: () => void, finish!: () => void;
-    const a = new Promise<void>(resolve => { readyA = resolve; });
-    const b = new Promise<void>(resolve => { readyB = resolve; });
-    const drained = new Promise<void>(resolve => { finish = resolve; });
-    let physicallyCancelled = false;
-    const one = c.authorize(work('main'), 'control', 'desktop-A', async () => {
-      first = c.context.getStore()!;
-      first.signal.addEventListener('abort', () => { physicallyCancelled = true; }, { once: true });
-      readyA(); await drained; first.assert();
-    });
-    const failed = expect(one).rejects.toThrow('cell cancelled');
-    const two = c.authorize(work('main'), 'control', 'desktop-B', async () => {
-      second = c.context.getStore()!; readyB(); await drained; second.assert();
-    });
-    await Promise.all([a, b]);
-    first.cancel(new Error('cell cancelled'));
-    expect(physicallyCancelled).toBe(true);
-    expect(second.signal.aborted).toBe(false);
-    expect(revoke).not.toHaveBeenCalled();
-    finish(); await failed; await two;
-    await c.authorize(work('main'), 'control', 'desktop-A', async () => {});
-  });
-
-  it('requires child requests, wakes the main thread once, waits on events, and coordinates the main thread too', async () => {
-    const { coordinator: c, notify } = fixture();
-    await expect(c.authorize(work('worker'), 'observe', 'desktop', async () => {})).rejects.toMatchObject({ harnessCode: 'forbidden' });
-    await c.authorize(work('main'), 'control', 'desktop', async () => {});
-    const request = await c.request(work('worker'), 'desktop', 'control', 'Finish a dialog');
-    expect((await c.request(work('worker'), 'desktop', 'control', 'Finish a dialog')).id).toBe(request.id);
-    expect(notify).toHaveBeenCalledTimes(1);
-    const waited = c.wait(work('worker'), request.id, new AbortController().signal);
-    await c.decide(work('main'), request.id, true);
-    expect((await waited).status).toBe('granted');
-    await c.authorize(work('worker'), 'control', 'desktop', async () => {});
-    await expect(c.authorize(work('main'), 'control', 'desktop', async () => {})).rejects.toMatchObject({ harnessCode: 'forbidden' });
-    await c.authorize(work('main'), 'control', 'other-vm', async () => {});
-    await c.release(work('worker'));
-    await c.authorize(work('main'), 'control', 'desktop', async () => {});
-  });
-  it('lets retrieval observe alongside a writer but never grant itself control', async () => {
-    const { coordinator: c } = fixture();
-    await c.authorize(work('main'), 'control', 'desktop', async () => {});
-    const request = await c.request(work('lookup'), 'desktop', 'observe', 'Read the current UI');
-    await c.decide(work('main'), request.id, true);
-    await c.authorize(work('lookup'), 'observe', 'desktop', async () => {});
-    await expect(c.authorize(work('lookup'), 'control', 'desktop', async () => {})).rejects.toMatchObject({ harnessCode: 'forbidden' });
-    await expect(c.request(work('lookup'), 'other-vm', 'control', 'Write')).rejects.toMatchObject({ harnessCode: 'forbidden' });
-    await expect(c.decide(work('worker'), request.id, true)).rejects.toMatchObject({ harnessCode: 'forbidden' });
-  });
-  it('keeps requests made while the main thread was idle visible after it wakes', async () => {
-    const { coordinator: c, actors } = fixture();
-    actors.set('worker', { ...actor('worker'), rootExecution: null });
-    const request = await c.request(work('worker'), 'desktop', 'control', 'Continue UI work');
-    expect((await c.snapshot(work('main'))).requests).toContainEqual(expect.objectContaining({ id: request.id, status: 'pending' }));
-  });
-  it('cancels active tickets and scripts, then permits fresh work in the same run', async () => {
-    const { coordinator: c, revoke, notify } = fixture();
-    let resume!: () => void;
-    let admitted!: () => void;
-    const ready = new Promise<void>(resolve => { admitted = resolve; });
-    const active = c.authorize(work('main'), 'control', 'desktop', async () => {
-      const ticket = c.context.getStore()!; admitted(); await new Promise<void>(resolve => { resume = resolve; }); ticket.assert();
-    });
-    const failed = expect(active).rejects.toBeDefined();
-    await ready; expect(await c.stop(actor('main').execution)).toMatchObject({ status: 'enabled', active: false }); resume(); await failed;
-    expect(revoke).toHaveBeenCalledWith(expect.objectContaining({ execution: actor('main').execution }), ['desktop']);
-    expect(notify).toHaveBeenCalledWith(expect.objectContaining({ execution: actor('main').execution }), expect.stringContaining('user manually cancelled'), false, expect.any(String));
-    await c.authorize(work('main'), 'observe', 'desktop', async () => {});
-    expect((await c.request(work('worker'), 'desktop', 'control', 'Fresh work')).status).toBe('pending');
-    await c.authorize(work('main'), 'control', 'desktop', async () => {});
-  });
-  it('keeps a failed release visibly unconfirmed until retry succeeds', async () => {
-    const { coordinator: c, release } = fixture();
-    await c.authorize(work('main'), 'control', 'desktop', async () => {});
-    release.mockResolvedValueOnce({ released: false });
-    expect((await c.stop(actor('main').execution)).status).toBe('cancel-unconfirmed');
-    expect((await c.stop(actor('main').execution)).status).toBe('enabled');
-    expect(release).toHaveBeenCalledTimes(2);
-  });
-  it('joins concurrent finishes to the same release and preserves another work on the shared desktop', async () => {
-    const { coordinator: c, actors, release } = fixture();
-    actors.set('other', actor('other', false, 'other'));
-    let finish!: (value: { released: boolean }) => void;
-    const pending = new Promise<{ released: boolean }>(resolve => { finish = resolve; });
-    release.mockImplementationOnce(async () => pending);
-    await c.authorize(work('main'), 'control', 'shared', async () => {});
-    await c.authorize(work('other'), 'observe', 'shared', async () => {});
-    const first = c.finishRun(actor('main').execution);
-    const firstRejected = expect(first).rejects.toThrow('resource release was not confirmed');
-    await vi.waitFor(() => expect(release).toHaveBeenCalledTimes(1));
-    let secondSettled = false;
-    const second = c.finishRun(actor('main').execution);
-    void second.then(() => { secondSettled = true; }, () => { secondSettled = true; });
-    const secondRejected = expect(second).rejects.toThrow('resource release was not confirmed');
-    await new Promise<void>(resolve => setImmediate(resolve));
-    expect(secondSettled).toBe(false);
-    expect((await c.snapshot(work('main'))).status).toBe('cancelling');
-    expect((await c.snapshot(work('other'))).leases).toHaveLength(1);
-    finish({ released: false });
-    await Promise.all([firstRejected, secondRejected]);
-    expect(release).toHaveBeenCalledTimes(1);
-    expect((await c.snapshot(work('main'))).status).toBe('cancel-unconfirmed');
-    await c.finishRun(actor('main').execution);
-    expect(release).toHaveBeenCalledTimes(2);
-    expect(await c.snapshot(work('main'))).toMatchObject({ active: false, status: 'enabled', cleanups: [] });
-    expect((await c.snapshot(work('other'))).leases).toHaveLength(1);
-  });
-  it('finishes a restored physical marker only after its original owner confirms release', async () => {
-    const original = actor('main');
-    const restored = decodeComputerRuntime({ runtimeVersion: 4, physicalControl: {
-      owner: { hostId: 'original-host', controlEpoch: 'previous-epoch', inputOwnerId: 'original-input-writer' },
-      holder: { kind: 'assignment', assignmentId: 'original-assignment', actor: original },
-      since: '2026-10-12T00:00:00Z',
-    } });
-    if (restored.physicalControl?.holder.kind !== 'assignment') throw new Error('Wrong restored marker');
-    const saved = restored.physicalControl.holder.actor;
-    let pending = true;
-    const cleanup = vi.fn(async () => { pending = false; });
-    cleanup.mockRejectedValueOnce(new Error('The original input owner has not confirmed release'));
-    const { coordinator: c, resolveActor, release } = fixture({
-      pendingReleases: () => pending ? [{ actor: saved, desktopId: 'shared' }] : [], cancelWork: cleanup,
-    });
-    resolveActor.mockResolvedValue(null);
-    expect(c.acceptedExecutions()).toEqual([original.execution]);
-    await expect(c.finishRun(original.execution)).rejects.toThrow('resource release was not confirmed');
-    expect(cleanup).toHaveBeenCalledExactlyOnceWith(original, ['shared'], expect.any(String));
-    expect(release).not.toHaveBeenCalled();
-    expect(await c.snapshot(work('main'))).toMatchObject({ active: true, status: 'cancel-unconfirmed' });
-    await c.finishRun(original.execution);
-    expect(cleanup).toHaveBeenCalledTimes(2);
-    expect(await c.snapshot(work('main'))).toMatchObject({ active: false, status: 'enabled', cleanups: [] });
-  });
-  it('coordinates physical desktops across Host origins and revokes opaque assignments on takeover', async () => {
-    const { coordinator: c } = fixture();
-    const first = await c.claim('host-a:lifetime', 'first', actor('main'), 'desktop', 'control');
-    const observer = await c.claim('host-b:lifetime', 'observe', actor('lookup', true), 'desktop', 'observe');
-    await c.delegated(observer, 'desktop', 'observe', async () => {});
-    await expect(c.claim('host-b:lifetime', 'second', actor('main'), 'desktop', 'control')).rejects.toMatchObject({ harnessCode: 'forbidden' });
-    await expect(c.authorize(work('main'), 'control', 'desktop', async () => {})).rejects.toMatchObject({ harnessCode: 'forbidden' });
-    await c.dropClaim('host-b:lifetime', 'observe', actor('lookup', true), 'desktop', 'observe');
-    await c.delegated(first, 'desktop', 'control', async () => {});
-    c.resetDesktop('desktop');
-    await expect(c.delegated(first, 'desktop', 'control', async () => {})).rejects.toMatchObject({ harnessCode: 'forbidden' });
-    await c.claim('host-b:lifetime', 'fresh', actor('main'), 'desktop', 'control');
-  });
-  it('fences a delayed remote claim after release and permits a fresh work segment', async () => {
-    const { coordinator: c } = fixture();
-    await c.dropClaim('peer', 'delayed', actor('main'), 'desktop', 'control');
-    await expect(c.claim('peer', 'delayed', actor('main'), 'desktop', 'control')).rejects.toMatchObject({ harnessCode: 'forbidden' });
-    const token = await c.claim('peer', 'fresh', actor('main'), 'desktop', 'control');
-    await c.dropClaim('peer', 'delayed', actor('main'), 'desktop', 'control');
-    await c.delegated(token, 'desktop', 'control', async () => {});
-  });
-  it('exact child Stop fences an earlier resolve even when the same Run receives a fresh grant', async () => {
-    const { coordinator: c, resolveActor } = fixture();
-    const initial = await c.request(work('worker'), 'desktop', 'control', 'initial');
-    await c.decide(work('main'), initial.id, true);
-    let resume!: () => void;
-    const gate = new Promise<void>(resolve => { resume = resolve; });
-    resolveActor.mockImplementationOnce(async () => { await gate; return actor('worker'); });
-    const execute = vi.fn(async () => {});
-    const old = c.authorize(work('worker'), 'control', 'desktop', execute);
-    const rejected = expect(old).rejects.toThrow(/cancelled before admission/);
-    await c.stop(actor('worker').execution);
-    const fresh = await c.request(work('worker'), 'desktop', 'control', 'fresh');
-    await c.decide(work('main'), fresh.id, true);
-    resume(); await rejected; expect(execute).not.toHaveBeenCalled();
-    await c.authorize(work('worker'), 'control', 'desktop', async () => {});
-  });
-  it('an ended local execution cannot terminate a peer with the same real identity', async () => {
-    const { coordinator: c } = fixture();
-    await c.finishRun(actor('main').execution);
-    const token = await c.claim('peer-host', 'assignment', actor('main'), 'desktop', 'control');
-    await c.delegated(token, 'desktop', 'control', async () => {});
-    await c.dropClaim('other-host', 'assignment', actor('main'), 'desktop', 'control');
-    await c.delegated(token, 'desktop', 'control', async () => {});
-  });
-  it('old execution cleanup stays exact after a new current Run starts', async () => {
-    const { coordinator: c, actors } = fixture();
-    await c.authorize(work('main'), 'control', 'desktop', async () => {});
-    const original = actor('main').execution;
-    const newer = { ...actor('main'), execution: { work: work('main'), runId: 'new' }, rootExecution: { work: work('main'), runId: 'new' } };
-    actors.set('main', newer);
-    expect((await c.snapshot(work('main'))).cleanups).toContainEqual({ execution: original, desktopId: 'desktop', status: 'cancel-unconfirmed' });
-    await c.stop(original);
-    await c.authorize(work('main'), 'control', 'desktop', async () => {});
-    await expect(c.stop(original)).rejects.toMatchObject({ computerCode: 'computer-execution-stale' });
-    expect(c.controller('desktop')?.execution.runId).toBe('new');
-  });
-
-});
 
 describe('Catalog-backed Native assignments', () => {
   const native = (threadId: string, runId = `${threadId}:run`, rootRun = 'main:run'): ComputerActor => {
     const work = { runtime: 'agent' as const, threadId, branchId: `${threadId}:branch` };
     const rootWork = { runtime: 'agent' as const, threadId: 'main', branchId: 'main:branch' };
-    return { execution: { work, runId }, rootWork, rootExecution: { work: rootWork, runId: rootRun }, registry: null, label: threadId, roleAccess: { kind: 'tool-invocation' } };
+    return { execution: { work, runId }, rootWork, rootExecution: { work: rootWork, runId: rootRun }, label: threadId };
   };
   function nativeFixture() {
     const actors = new Map(['main', 'worker'].map(id => [id, native(id)]));
@@ -228,7 +15,7 @@ describe('Catalog-backed Native assignments', () => {
     const c = createComputerAutomation({
       resolveActor: async work => work.runtime === 'agent' ? actors.get(work.threadId) ?? null : null,
       resolveScope: async work => { const actor = work.runtime === 'agent' ? actors.get(work.threadId) : null; return actor ? { work, rootWork: actor.rootWork, currentExecution: actor.execution, currentRootExecution: actor.rootExecution } : null; },
-      release, controlAvailable: () => true, notify: async () => {}, revokeSession: async () => {}, bindDesktop: async () => {}, onChange: () => {},
+      release, controlAvailable: () => true, cancelExecutor: async () => {}, onChange: () => {},
     });
     c.attachRequests({ snapshot: async () => [], cancel });
     return { c, actors, release, cancel };
@@ -281,7 +68,7 @@ describe('Catalog-backed Native assignments', () => {
       resolveScope: async work => ({ work, rootWork: child.rootWork, currentExecution: child.execution, currentRootExecution: child.rootExecution }),
       pendingReleases: () => [{ actor: child, desktopId: 'desktop' }],
       cancelWork: cleanup, release: async () => ({ released: false }), controlAvailable: () => false,
-      notify: async () => {}, revokeSession: async () => {}, bindDesktop: async () => {}, onChange: () => {},
+      cancelExecutor: async () => {}, onChange: () => {},
     });
     c.attachRequests({ snapshot: async () => [], cancel: async () => catalog });
     const stopping = c.stop(child.execution, 'desktop');
