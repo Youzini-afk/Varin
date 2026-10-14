@@ -748,6 +748,9 @@ impl Catalog {
             Some(basis)
         };
         let tx = self.db.transaction()?;
+        if prepared.ingress.is_none() {
+            threads::require_available(&tx, &run.thread_id)?;
+        }
         let current = execution(&tx, &previous.execution_id)?;
         let actual: Run = record(&tx, "runs", &run.id)?;
         let actual_launch: launch_content::LaunchMetadata = record(&tx, "run_launches", &run.id)?;

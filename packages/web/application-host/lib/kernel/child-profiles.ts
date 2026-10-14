@@ -68,19 +68,15 @@ export function createChildProfilePreparer(owners: {
           ...((parent.configuration.modelOptions as { temperature?: number } | undefined)?.temperature === undefined ? {}
             : { temperature: (parent.configuration.modelOptions as { temperature: number }).temperature }),
         } : {};
-        const resolved = await waitForModelBinding(owners.models.resolveModel({ ...entry.model, ...inherited, ...overrides }),
+        if (entry.modelSource === 'inherit' && !parent.credential_scope) throw new Error('Inherited Host model requires its original scope');
+        const resolved = await waitForModelBinding(owners.models.resolveModel({ ...entry.model, ...inherited, ...overrides },
+          entry.modelSource === 'inherit' ? { configuration: parent.configuration, credentialScope: parent.credential_scope! } : undefined),
           model => model.credentialOwner.release(), signal);
         try {
           const scope = await waitWithSignal(resolved.credentialOwner.scope(), signal);
           profile.model = { configuration: resolved.configuration, credential_scope: scope };
           if (entry.modelSource === 'inherit') {
-            if (!parent.credential_scope) throw new Error('Inherited Host model requires its original scope');
-            // The mapping metadata used to normalize overrides must still match the original
-            // parent generation; changed catalog defaults cannot silently enter an inherited model.
-            const inheritedOwner = await waitForModelBinding(owners.models.rebindModel(parent.configuration, parent.credential_scope),
-              owner => owner.release(), signal);
-            try { profile.inherit_base = structuredClone(parent); }
-            finally { inheritedOwner.release(); }
+            profile.inherit_base = structuredClone(parent);
           }
           signal?.throwIfAborted();
           input.modelOwner?.retainDependency(resolved.credentialOwner);

@@ -23,49 +23,7 @@ impl Catalog {
             .map_err(Into::into)
     }
     pub fn inspect_thread(&self, thread_id: &str) -> Result<Value> {
-        let exists: bool = self.db.query_row(
-            "SELECT EXISTS(SELECT 1 FROM threads WHERE id=?1)",
-            [thread_id],
-            |r| r.get(0),
-        )?;
-        if !exists {
-            return Err(RuntimeError::NotFound(thread_id.into()));
-        }
-        let mut statement = self
-            .db
-            .prepare("SELECT id,head,active_run FROM branches WHERE thread_id=?1 ORDER BY rowid")?;
-        let rows = statement.query_map([thread_id], |row| {
-            Ok((
-                row.get::<_, String>(0)?,
-                row.get::<_, Option<String>>(1)?,
-                row.get::<_, Option<String>>(2)?,
-            ))
-        })?;
-        let mut branches = Vec::new();
-        for row in rows {
-            let (branch_id, head, active_run_id) = row?;
-            let latest: Option<String> = self
-                .db
-                .query_row(
-                    "SELECT body FROM runs WHERE branch_id=?1 ORDER BY rowid DESC LIMIT 1",
-                    [&branch_id],
-                    |r| r.get(0),
-                )
-                .optional()?;
-            let latest_run = latest
-                .map(|raw| serde_json::from_str::<Run>(&raw))
-                .transpose()?;
-            branches.push(json!({"branch_id":branch_id,"head":head,"active_run_id":active_run_id,"latest_run":latest_run}));
-        }
-        // Scope is bound at Run admission, including queued Runs, and survives later context
-        // publication. Read only small checkpoint metadata; never hydrate prompt bodies here.
-        let mut scopes = self.db.prepare(
-            "SELECT DISTINCT c.project_id FROM runs r JOIN branches b ON b.id=r.branch_id
-             LEFT JOIN context_checkpoints c ON c.id=r.context_checkpoint_id
-             WHERE b.thread_id=?1 ORDER BY c.project_id")?;
-        let observer_project_ids = scopes.query_map([thread_id], |row| row.get::<_, Option<String>>(0))?
-            .collect::<std::result::Result<Vec<_>, _>>()?;
-        Ok(json!({"thread_id":thread_id,"bot_id":self.bot_for_thread(thread_id)?,"branches":branches,"observer_project_ids":observer_project_ids}))
+        threads::inspect(&self.db, thread_id)
     }
     pub fn list_threads(&self) -> Result<Vec<Value>> {
         let ids: Vec<String> = {

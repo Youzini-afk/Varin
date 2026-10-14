@@ -47,6 +47,7 @@ pub(super) enum SubmissionOrigin {
     Summary,
 }
 pub struct PreparedSubmission {
+    pub(super) title: Option<String>,
     pub(super) input_id: String,
     pub(super) run_id: String,
     pub(super) identity: SubmissionIdentity,
@@ -224,6 +225,7 @@ impl SubmissionPreparation {
                 .0
                 .clone();
             return Ok(PreparedSubmission {
+                title: None,
                 input_id: receipt.input_id,
                 run_id: receipt.run_id,
                 identity: SubmissionIdentity {
@@ -522,6 +524,7 @@ impl PreparedSubmission {
             .map(|selection| launch_content::LaunchSelectionMetadata::stage(&content, selection))
             .transpose()?;
         Ok(Self {
+            title: threads::input_title(&command.input),
             input_id,
             run_id,
             identity: SubmissionIdentity {

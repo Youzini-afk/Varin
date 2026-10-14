@@ -19,6 +19,7 @@ pub(super) struct QueueIdentity {
     pub configuration: Option<Value>,
 }
 pub struct PreparedQueueInput {
+    pub(super) title: Option<String>,
     pub(super) checkpoint: Option<Option<String>>,
     pub(super) identity: QueueIdentity,
     pub(super) epoch: u64,
@@ -111,6 +112,7 @@ impl QueuePreparation {
             )
         };
         Ok(PreparedQueueInput {
+            title: threads::input_title(&command.input),
             identity: QueueIdentity {
                 input_id,
                 key: command.key,

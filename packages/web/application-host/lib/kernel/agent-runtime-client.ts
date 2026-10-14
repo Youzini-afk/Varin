@@ -872,6 +872,18 @@ export class AgentRuntimeClient {
   threads(signal?: AbortSignal): Promise<ThreadSummary[]> {
     return this.kernel.agentRuntimeRequest('runtime.thread.list', {}, signal);
   }
+  threadCatalog(query: import('./protocol.generated.js').ThreadCatalogQuery = {}, signal?: AbortSignal): Promise<ThreadSummary[]> {
+    return this.kernel.agentRuntimeRequest('runtime.thread.catalog.list', query, signal);
+  }
+  updateThread(input: import('./protocol.generated.js').ThreadMetadataUpdateParams, signal?: AbortSignal): Promise<ThreadSummary> {
+    return this.kernel.agentRuntimeRequest('runtime.thread.update', input, signal);
+  }
+  deleteThread(input: import('./protocol.generated.js').ThreadDeleteParams, signal?: AbortSignal): Promise<ThreadSummary> {
+    return this.kernel.agentRuntimeRequest('runtime.thread.delete', input, signal);
+  }
+  markThreadRead(input: import('./protocol.generated.js').ThreadReadPositionParams, signal?: AbortSignal): Promise<ThreadSummary> {
+    return this.kernel.agentRuntimeRequest('runtime.thread.read', input, signal);
+  }
   botScope(botId: string, signal?: AbortSignal): Promise<import('./protocol.generated.js').BotScopeView> {
     return this.kernel.agentRuntimeRequest('runtime.bot.scope.inspect', { botId }, signal);
   }

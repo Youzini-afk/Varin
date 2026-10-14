@@ -400,6 +400,10 @@ impl Catalog {
         }
         let tx = self.db.transaction()?;
         let identity = &prepared.identity;
+        if matches!(identity.actor, MessageActor::User) {
+            threads::require_available(&tx, &identity.sender_thread_id)?;
+            threads::require_available(&tx, &identity.target_thread_id)?;
+        }
         // Recheck the actual family and original reverse route after body preparation.
         let routing = MessageInput {
             wait: None,

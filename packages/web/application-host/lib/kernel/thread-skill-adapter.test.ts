@@ -54,6 +54,8 @@ async function fixture() {
   const runtime = {
     admitCalendar: vi.fn<AgentRuntimeClient['admitCalendar']>(async input => ({ id: input.occurrenceId, run_id: run.id } as import('./protocol.generated.js').CalendarOccurrence)),
     thread: vi.fn<AgentRuntimeClient['thread']>(async () => ({ bot_id: null, thread_id: identity.threadId, observer_project_ids: [],
+      main_branch_id: identity.branchId, title: 'Skills', revision: 1, created_at_ms: 0, updated_at_ms: 0,
+      pinned: false, archived: false, deleted_at_ms: null, activity_cursor: 0, read_cursor: 0, unread: false,
       branches: [{ branch_id: identity.branchId, active_run_id: run.id, head: null, latest_run: run }] })),
     run: vi.fn<AgentRuntimeClient['run']>(async () => run), input: vi.fn<AgentRuntimeClient['input']>(async () => queued),
     context: vi.fn<AgentRuntimeClient['context']>(async () => checkpoint(a)), launch: vi.fn<AgentRuntimeClient['launch']>(async () => null),
@@ -63,7 +65,7 @@ async function fixture() {
     editInput: vi.fn<AgentRuntimeClient['editInput']>(async () => ({ ...queued, revision: queued.revision + 1 })),
   };
   const unexpectedRead = vi.fn(async () => { throw new Error('Input preparation cannot reopen resources'); });
-  const scope = createThreadResourceScope({ agentDir: root, workingStates: { withBranchStore: unexpectedRead },
+  const scope = createThreadResourceScope({ dataDirectory: root, workingStates: { withBranchStore: unexpectedRead },
     documents: { admitWorkspaceRegistration: async () => ({ workspaceId: 'workspace', canonicalPath: root, hostId: 'test', kind: 'directory' }), inspectWorkspace: unexpectedRead, readSnapshot: unexpectedRead }, configuration: unexpectedRead,
     validateLiveSource: unexpectedRead, withSourceRead: unexpectedRead, projectTrusted: () => false });
   const prepareSkill = vi.fn(createThreadSkillInputPreparer(scope));

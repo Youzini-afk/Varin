@@ -22,6 +22,15 @@ selection validation and object cleanup; the UI sends a frozen branch/revision s
 referenced by a version and bytes actually removed by cleanup are distinct fields. These DTOs do not
 add an Agent tool or a second state store.
 
+`ThreadsAPI.list` searches native Thread title/identity and controls archive visibility. Each summary
+has a stable `main_branch_id`, metadata revision, timestamps, pin/archive/tombstone facts and durable
+activity/read cursors. `update` and `delete` retain their original command key and expected revision
+for uncertain retries; `markRead` acknowledges only the cursor actually presented. Same-key replies
+are original receipts, so a late response cannot replace a newer cached summary. Delete hides product
+navigation and closes fresh user admission; it does not cancel accepted execution or release resources.
+Those original owners continue to discover and settle hidden work. Restore is `update({ archived:
+false, ... })`; deletion is a retained tombstone, not archive or physical collection.
+
 `ThreadsAPI.sources` lists configured source Hosts and resolves a folder through the selected Host’s
 Documents owner. The returned `resourceOwner` freezes the Host, configured connection and non-secret
 endpoint identity. `ThreadsAPI.prepareSource` takes that owner, a Documents-resolved `workspaceId`, stable key, source mode,

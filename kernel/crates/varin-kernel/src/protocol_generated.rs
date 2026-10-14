@@ -5,7 +5,7 @@ use crate::model::PathState;
 use serde::Deserialize;
 use serde_json::Value;
 
-pub(crate) const KERNEL_PROTOCOL_VERSION: u64 = 41;
+pub(crate) const KERNEL_PROTOCOL_VERSION: u64 = 42;
 pub(crate) const KERNEL_MAX_FRAME_BYTES: usize = 16777216;
 pub(crate) const KERNEL_REQUEST_WINDOW: usize = 2;
 pub(crate) const KERNEL_CONTROL_METHODS: &[&str] = &[
@@ -1061,6 +1061,14 @@ pub(crate) struct LaunchFailedParams {
     pub(crate) run_id: String,
     pub(crate) code: String,
 }
+
+pub(crate) type ThreadCatalogQuery = varin_runtime::catalog::threads::ThreadListQuery;
+
+pub(crate) type ThreadMetadataUpdateParams = varin_runtime::catalog::threads::ThreadUpdate;
+
+pub(crate) type ThreadDeleteParams = varin_runtime::catalog::threads::ThreadDelete;
+
+pub(crate) type ThreadReadPositionParams = varin_runtime::catalog::threads::ThreadRead;
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -3745,6 +3753,22 @@ pub(crate) fn validate_generated_method_params(method: &str, params: &Value) -> 
             .map(|_| ())
             .map_err(|error| error.to_string()),
         "runtime.thread.list" => serde_json::from_value::<KernelEmptyParams>(params.clone())
+            .map(|_| ())
+            .map_err(|error| error.to_string()),
+        "runtime.thread.catalog.list" => {
+            serde_json::from_value::<ThreadCatalogQuery>(params.clone())
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        }
+        "runtime.thread.update" => {
+            serde_json::from_value::<ThreadMetadataUpdateParams>(params.clone())
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        }
+        "runtime.thread.delete" => serde_json::from_value::<ThreadDeleteParams>(params.clone())
+            .map(|_| ())
+            .map_err(|error| error.to_string()),
+        "runtime.thread.read" => serde_json::from_value::<ThreadReadPositionParams>(params.clone())
             .map(|_| ())
             .map_err(|error| error.to_string()),
         "runtime.input.enqueue" => serde_json::from_value::<InputEnqueueParams>(params.clone())

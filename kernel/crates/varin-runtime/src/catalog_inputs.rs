@@ -256,6 +256,7 @@ impl Catalog {
         prepared: PreparedQueueInput,
     ) -> Result<QueuedInputAdmission> {
         let PreparedQueueInput {
+            title,
             identity: command,
             epoch,
             history: history_content,
@@ -289,6 +290,8 @@ impl Catalog {
                 accepted: false,
             });
         }
+        super::threads::require_available(&tx, &command.thread_id)?;
+        super::threads::initialize_title(&tx, &command.thread_id, title.as_deref())?;
         if let Some(expected) = checkpoint {
             let active: Option<String> = tx
                 .query_row(

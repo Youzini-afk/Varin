@@ -624,6 +624,7 @@ impl RequestActivationPreparation {
                 }
                 let intent=content.save(&json!({"input_id":row.id,"previous_run_id":run.id,"previous_run_revision":run.revision,"launch_revision":launch.revision}))?;
                 let submission = submissions::PreparedSubmission {
+                    title: None,
                     input_id: row.id.clone(),
                     run_id: id(),
                     identity: submissions::SubmissionIdentity {

@@ -12,6 +12,7 @@ This document is the local code map and maintenance boundary, not an implementat
 | Responsibility | Entry points |
 | --- | --- |
 | Single durable owner, short metadata transactions, format preflight | [catalog.rs](src/catalog.rs) |
+| Thread titles, archive/pin, read positions and visibility tombstones | [catalog_threads.rs](src/catalog_threads.rs) |
 | Worker lifecycle, cancellation, policy actions, model/tool settlement | [execution.rs](src/execution.rs), [supervisor.rs](src/supervisor.rs) |
 | History/request commit, safe restoration, explicit navigation | [catalog_execution.rs](src/catalog_execution.rs), [catalog_recovery.rs](src/catalog_recovery.rs), [catalog_navigation.rs](src/catalog_navigation.rs) |
 | Immutable bodies, media, publication and collection | [content.rs](src/content.rs), [output.rs](src/output.rs), [content_collection.rs](src/content_collection.rs) |
@@ -54,6 +55,14 @@ second maintenance ledger or add old-format fallback readers.
 - Current memory is a request projection of the existing Memory owner. It is not a second note store.
   Only successful original delivery facts advance acknowledgement; summaries/navigation never delete
   the underlying memory to make a context projection agree.
+
+Thread product metadata is committed with its event and original command receipt. Rename, pin,
+archive and delete use a metadata revision; read acknowledgements monotonically advance only through
+the observed durable event cursor. Metadata changes do not create unread activity. A delete is a
+visibility tombstone, not cancellation or content/resource collection. It rejects new user input,
+messages, explicit child continuations and forks while already accepted queue/child/Run work retains
+its original execution and settlement duties. Internal owner discovery includes archived/deleted
+Threads; the separate product Catalog query omits tombstones and auxiliary inference Threads.
 
 ## Request and context cost model
 

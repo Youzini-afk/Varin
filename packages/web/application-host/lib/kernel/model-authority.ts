@@ -183,13 +183,22 @@ export function createModelAuthority(authority: ModelAuthority) {
       return { providerId: model.providerId, model: model.modelId, ...resolved,
         contextWindowTokens: model.contextWindow ?? null, maxOutputTokens: max };
     },
-    async resolveModel(selection: ThreadModel) {
-      const captured = authority.captureModel ? await authority.captureModel(selection.providerId, selection.modelId)
+    async resolveModel(selection: ThreadModel, inherited?: { configuration: ModelSessionConfiguration; credentialScope: CredentialScope }) {
+      const captured = authority.captureModel ? await authority.captureModel(selection.providerId, selection.modelId, inherited?.configuration)
         : { model: await authority.selectedModel(selection.providerId, selection.modelId), authority };
       try {
+        if (inherited) {
+          const original = inherited.configuration;
+          const base = await configurationFor(captured.model, original.thinkingLevel as ThreadThinkingLevel | undefined,
+            (original.modelOptions as { temperature?: number } | undefined)?.temperature, captured.authority);
+          // Deriving new overrides needs the original normalization metadata, unlike
+          // simply rebinding an already-normalized request. Never mix today's defaults.
+          if (base.configurationGeneration !== original.configurationGeneration) return failed('model-configuration-changed');
+        }
         const configuration = await configurationFor(captured.model, selection.thinkingLevel, selection.temperature, captured.authority);
         const credentialOwner = ownerFor(configuration, captured.authority, captured.release);
-        await credentialOwner.scope();
+        const scope = await credentialOwner.scope();
+        if (inherited && !sameScope(scope, inherited.credentialScope)) return failed('credential-scope-changed');
         return { configuration, credentialOwner, acceptsImages: configuration.acceptsImages ?? false };
       } catch (error) { captured.release?.(); throw error; }
     },

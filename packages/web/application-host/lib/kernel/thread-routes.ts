@@ -138,7 +138,10 @@ export function registerThreadRoutes(app: Express, adapter: ThreadAdapter, requi
     'policy/inspect': ['runtime','threadId','branchId','runId'],
     'policy/restart': ['runtime','threadId','branchId','runId','selectionId'],
     'policy/cancel': ['runtime','threadId','branchId','runId','selectionId'],
-    create: ['key'], list: [], models: [], submit: ['runtime', 'threadId', 'branchId', 'key', 'text', 'images', 'expectedHead', 'model', 'source'],
+    update: ['runtime', 'threadId', 'key', 'expectedRevision', 'title', 'pinned', 'archived'],
+    delete: ['runtime', 'threadId', 'key', 'expectedRevision'],
+    read: ['runtime', 'threadId', 'key', 'throughCursor'],
+    create: ['key'], list: ['query', 'archived'], models: [], submit: ['runtime', 'threadId', 'branchId', 'key', 'text', 'images', 'expectedHead', 'model', 'source'],
     snapshot: ['runtime', 'threadId', 'branchId'], 'history/page': ['runtime', 'threadId', 'branchId', 'headId', 'beforeId'], enqueue: ['runtime', 'threadId', 'branchId', 'key', 'text', 'images', 'mode'],
     'input/edit': ['inputId', 'expectedRevision', 'text', 'images'], 'input/cancel': ['inputId', 'expectedRevision'],
     run: ['runId'], 'run/cancel': ['runId'], 'run/resume': ['runId', 'waitId'], 'run/retry-preparation': ['runId'], operation: ['operationId'], 'operation/cancel': ['operationId'], events: ['cursor'],
@@ -347,7 +350,24 @@ export function registerThreadRoutes(app: Express, adapter: ThreadAdapter, requi
   post('policy/cancel', (body, signal) => adapter.cancelPolicyUpdate(identity(body), text(body.runId), text(body.selectionId), signal));
   post('models', () => adapter.listModels());
   post('model/select',body=>adapter.selectModel({...identity(body),runId:text(body.runId),key:text(body.key),model:modelSelection(body.model)}));
-  post('list', async () => (await adapter.runtime.threads()).filter(thread => thread.thread_id.startsWith('thread:')));
+  const catalogIdentity = (body: Record<string, unknown>): import('@varin/application-client').ThreadCatalogIdentity => {
+    if (body.runtime !== 'agent') throw new Error('Explicit Thread runtime selection is required');
+    return { runtime: 'agent', threadId: text(body.threadId) };
+  };
+  post('list', (body, signal) => {
+    if (body.query !== undefined && typeof body.query !== 'string') throw new Error('Search query must be a string');
+    if (body.archived !== undefined && !['exclude', 'include', 'only'].includes(String(body.archived))) throw new Error('Invalid archive filter');
+    return adapter.list(body as import('@varin/application-client').ThreadListOptions, signal);
+  });
+  post('update', body => {
+    for (const field of ['pinned', 'archived']) if (body[field] !== undefined && typeof body[field] !== 'boolean') throw new Error('Thread flag must be boolean');
+    return adapter.update({ ...catalogIdentity(body), key: text(body.key), expectedRevision: revision(body.expectedRevision),
+      ...(body.title === undefined ? {} : { title: text(body.title) }),
+      ...(body.pinned === undefined ? {} : { pinned: body.pinned as boolean }),
+      ...(body.archived === undefined ? {} : { archived: body.archived as boolean }) });
+  });
+  post('delete', body => adapter.delete({ ...catalogIdentity(body), key: text(body.key), expectedRevision: revision(body.expectedRevision) }));
+  post('read', body => adapter.markRead({ ...catalogIdentity(body), key: text(body.key), throughCursor: revision(body.throughCursor) }));
   post('create', body => adapter.create(text(body.key)));
   post('recovery/source', (body, signal) => adapter.recoverySource({ ...identity(body), entryId: text(body.entryId) }, signal));
   post('navigation/prepare', (body, signal) => adapter.prepareNavigation({ ...identity(body), entryId: text(body.entryId) }, signal));
