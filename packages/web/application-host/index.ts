@@ -68,6 +68,7 @@ import { createMcpTaskRuntime } from './lib/kernel/mcp-task-runtime.js';
 import { createMcpTaskRecovery } from './lib/kernel/mcp-task-recovery.js';
 import { createMcpLease } from './lib/kernel/mcp-owner.js';
 import { createChildMcpPreparer } from './lib/kernel/mcp-child-preparation.js';
+import { createManagedChildMcpPreparer } from './lib/kernel/managed-child-mcp-preparation.js';
 import { createExtensionTools } from './lib/kernel/extension-tool-owner.js';
 import { MATERIAL_SNAPSHOT_CAPABILITY } from './lib/kernel/material-tool-owner.js';
 import { createIntegrationToolOwner, createIntegrationTargetOpener, createIntegrationReceiptReconciler, CHILD_INTEGRATION_CAPABILITY } from './lib/kernel/integration-tool-owner.js';
@@ -3112,7 +3113,9 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     return selection;
   };
   const liveSources = createLiveSourceOwner({ documents: documentsAuthority, kernel: kernelClient });
-  const prepareChildMcp = createChildMcpPreparer({ authority: mcpAuthority, tasks:()=>mcpTaskRuntime, resources:()=>mcpResourceRuntime, kernel: kernelClient, agentDir: mcpAgentDir, hostId,
+  const prepareChildMcp = createChildMcpPreparer({
+    managed: createManagedChildMcpPreparer({ runtime: () => agentRuntime, createLease: input => createManagedMcpLease({ ...input, ...(managedMcpInteractionsOwner.current ? { interactions: managedMcpInteractionsOwner.current } : {}) }) }),
+    authority: mcpAuthority, tasks:()=>mcpTaskRuntime, resources:()=>mcpResourceRuntime, kernel: kernelClient, agentDir: mcpAgentDir, hostId,
     admitWorkspaceRegistration: (id, signal) => documentsAuthority.admitWorkspaceRegistration(id, signal),
     projectTrusted: cwd => mcpHostProjectTrusted(mcpAgentDir, cwd),
     currentPolicy: async (cwd, trusted) => readMcpHostPermissionPolicy(mcpAgentDir, cwd, trusted),
@@ -3343,7 +3346,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   const targetIntegrations = createManagedIntegrationService({ kernel: kernelClient, storage: kernelStorageAdapter,
     documents: documentsAuthority, recovery: foundationalRecoveryEngine, metadataReader: kernelRecoveryStore,
     coordinator: threadIntegrationCoordinator });
-  const targetMcpService = createManagedMcpService({ kernel: kernelClient, compositions: mcpCompositions, agentDir: mcpAgentDir, hostId,
+  const targetMcpService = createManagedMcpService({ kernel: kernelClient, authority: mcpAuthority, compositions: mcpCompositions, agentDir: mcpAgentDir, hostId,
     admitSource: async (scope, signal) => {
       await kernelClient.sourceRequest('source.service.call', { principalId: scope.principal.principalId,
         coordinatorHostId: scope.coordinatorHostId, authorityId: scope.authorityId, resourceEpoch: scope.resourceEpoch,
@@ -3361,6 +3364,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     mcpTaskContinuation: (scope, action, signal) => targetMcpService.taskContinuation(scope, action, signal),
     mcpResourceContinuation: (scope, action, signal) => targetMcpService.resourceContinuation(scope, action, signal),
     mcpInteractionContinuation: (scope, action, signal) => targetMcpService.interactionContinuation(scope, action, signal),
+    mcpDerivationContinuation: (scope, action, signal) => targetMcpService.derivationContinuation(scope, action, signal),
     mcpChildContinuation: (scope, action, signal) => targetMcpService.childContinuation(scope, action, signal),
     languageAvailable: true, releaseSource: async (scope, retention) => {
       const [, mcp] = await Promise.all([targetSourceQuery.release(scope), targetMcpService.release(scope, retention)]);

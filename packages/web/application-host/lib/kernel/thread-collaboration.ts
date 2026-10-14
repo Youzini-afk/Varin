@@ -1,3 +1,5 @@
+import { isDeepStrictEqual } from 'node:util';
+import { releaseManagedChildDerivations } from './managed-child-mcp-preparation.js';
 import { releaseManagedChildDependencies } from './managed-mcp-child-retention.js';
 import { sourceFailureCode } from './source-admission-error.js';
 import { parseExplicitSkillCommand } from '../agent-resources/activation.js';
@@ -401,19 +403,29 @@ export class ThreadCollaboration {
   private async releaseHandoff(child: DelegatedExecution, signal: AbortSignal): Promise<void> {
     if (child.resources_released || (!child.receipt && !child.report) || (child.source?.kind !== 'ready' && child.source?.kind !== 'absent' && !child.report)) return;
     const { kernel, runtime } = this.owners;
+    const selection = child.launch.mcp_binding;
+    const managed = selection && Object.values(selection.provenance.servers).some(server => server.owner.resource_owner.kind === 'managed_host');
+    // A Run receipt precedes source/credential/MCP preparation. Keep the original
+    // definition cut until Catalog publishes its independent child binding.
+    const current = !child.report && child.receipt && managed
+      ? await runtime.launch(child.receipt.run_id, signal) : null;
+    const transferred = Boolean(child.report || current?.selection.mcp_binding
+      && !isDeepStrictEqual(current.selection.mcp_binding, selection));
+    if (transferred && managed) await releaseManagedChildDerivations(runtime, child, signal);
     if (child.trigger.kind === 'dispatch') {
-      const selection = child.launch.mcp_binding;
-      if (selection && Object.values(selection.provenance.servers).some(server => server.owner.resource_owner.kind === 'managed_host')) {
+      if (transferred && managed) {
         const original = await runtime.operation(child.child_operation_id, signal);
         if (original.id !== child.child_operation_id || original.run_id !== child.parent_run_id || !original.execution_owner)
           throw new Error('Original child dependency owner is unavailable');
         await releaseManagedChildDependencies(runtime, { operationId: original.id, parentRunId: original.run_id,
           executionOwner: original.execution_owner, executionEpoch: original.epoch }, selection, signal);
       }
-      await kernel.releaseChildToolHandoff(child.parent_run_id, child.child_operation_id);
+      // MCP commit alone does not transfer separately prepared extension pins.
+      // Successful startRun owns the fast path; terminal discovery owns its retry.
+      if (child.report) await kernel.releaseChildToolHandoff(child.parent_run_id, child.child_operation_id);
     }
-    if (child.receipt && child.source?.kind !== 'absent') await runtime.releaseMcpResourceSource(child.receipt.run_id);
     if (child.source?.kind === 'absent') {
+      if (!child.report) return;
       signal.throwIfAborted();
       await runtime.releaseChildResources(child.execution_id, signal);
       return;

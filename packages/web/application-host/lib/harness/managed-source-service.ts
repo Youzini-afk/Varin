@@ -13,7 +13,7 @@ import { normalizeThreadSourcePreparation } from '../kernel/thread-sources.js';
 import { normalizePathIdentity } from '../workspace/path-safety.js';
 import { ManagedSourceDrainedError } from './managed-source-drain.js';
 import { resolveScriptNodeBinding, scriptNodeSpawnInput } from '../kernel/script-node-binding.js';
-import { isManagedMcpChildContinuation, isManagedMcpTaskContinuation, isManagedMcpResourceContinuation, isManagedMcpInteractionContinuation } from './managed-mcp-contract.js';
+import { isManagedMcpDerivationContinuation, isManagedMcpChildContinuation, isManagedMcpTaskContinuation, isManagedMcpResourceContinuation, isManagedMcpInteractionContinuation } from './managed-mcp-contract.js';
 import { createManagedSourceProcesses } from './managed-source-processes.js';
 import type { ManagedSourceAddress, ManagedSourceBindRequest, ManagedSourceBinding, ManagedSourceCapabilities,
   ManagedSourcePrincipal, ManagedSourceService, ManagedSourceServiceHandler, ManagedSourceLocalScope,
@@ -30,6 +30,8 @@ export interface ManagedSourceServiceOptions {
   serviceOperation?: ManagedSourceServiceHandler;
   releaseMcpView?(scope: ManagedSourceCleanupScope,
     action: Extract<import('./managed-mcp-contract.js').ManagedMcpAction, { kind: 'release' }>): Promise<import('./managed-mcp-contract.js').ManagedMcpReply>;
+  mcpDerivationContinuation?(scope: ManagedSourceCleanupScope,
+    action: Extract<import('./managed-mcp-contract.js').ManagedMcpAction, { kind: 'derivation_inspect' | 'derivation_release' }>, signal?: AbortSignal): Promise<import('./managed-mcp-contract.js').ManagedMcpReply>;
   mcpChildContinuation?(scope: ManagedSourceCleanupScope,
     action: Extract<import('./managed-mcp-contract.js').ManagedMcpAction, { kind: 'child_inspect' | 'child_release' }>, signal?: AbortSignal): Promise<import('./managed-mcp-contract.js').ManagedMcpReply>;
   mcpTaskContinuation?(scope: ManagedSourceCleanupScope,
@@ -412,8 +414,8 @@ export function createManagedSourceService(options: ManagedSourceServiceOptions)
     },
     async service(principal, input, signal) {
       const mcpRelease = input.operation.kind === 'mcp' && input.operation.action.kind === 'release';
-      const mcpContinuation = input.operation.kind === 'mcp' && (isManagedMcpChildContinuation(input.operation.action) || isManagedMcpTaskContinuation(input.operation.action) || isManagedMcpResourceContinuation(input.operation.action) || isManagedMcpInteractionContinuation(input.operation.action));
-      if (mcpRelease || mcpContinuation && input.operation.kind === 'mcp' && ['child_inspect', 'child_release', 'task_inspect', 'task_release', 'task_cancel', 'resource_inspect', 'resource_release', 'interaction_inspect', 'interaction_ack', 'interaction_release', 'interaction_close'].includes(input.operation.action.kind)) requirePrincipal(principal, input.coordinatorHostId);
+      const mcpContinuation = input.operation.kind === 'mcp' && (isManagedMcpDerivationContinuation(input.operation.action) || isManagedMcpChildContinuation(input.operation.action) || isManagedMcpTaskContinuation(input.operation.action) || isManagedMcpResourceContinuation(input.operation.action) || isManagedMcpInteractionContinuation(input.operation.action));
+      if (mcpRelease || mcpContinuation && input.operation.kind === 'mcp' && ['derivation_inspect', 'derivation_release', 'child_inspect', 'child_release', 'task_inspect', 'task_release', 'task_cancel', 'resource_inspect', 'resource_release', 'interaction_inspect', 'interaction_ack', 'interaction_release', 'interaction_close'].includes(input.operation.action.kind)) requirePrincipal(principal, input.coordinatorHostId);
       else requireReadPrincipal(principal, input.coordinatorHostId);
       const key = serviceKey(principal, input);
       const original = services.get(key);
@@ -436,7 +438,7 @@ export function createManagedSourceService(options: ManagedSourceServiceOptions)
         controller.signal.throwIfAborted();
         if (operation.kind === 'mcp') {
           const action = operation.action;
-          if (action.kind === 'snapshot' && action.creationRequestId !== input.requestId)
+          if ((action.kind === 'snapshot' || action.kind === 'derive') && action.creationRequestId !== input.requestId)
             throw new SourceAdmissionError('source_changed');
           if (action.kind === 'release') {
             if (!action.creationRequestId || action.creationRequestId === input.requestId) throw new SourceAdmissionError('source_changed');
@@ -453,6 +455,11 @@ export function createManagedSourceService(options: ManagedSourceServiceOptions)
           && !(operation.kind === 'native_resource' && operation.action.kind === 'process_observation')) throw new SourceAdmissionError('source_authority_denied');
         if (authority.purpose === 'mcp_owner' && operation.kind !== 'mcp' && operation.kind !== 'validate'
           || operation.kind === 'mcp' && authority.purpose !== 'mcp_owner') throw new SourceAdmissionError('source_authority_denied');
+        if (operation.kind === 'mcp' && isManagedMcpDerivationContinuation(operation.action)) {
+          if (!options.mcpDerivationContinuation) throw new SourceAdmissionError('source_unavailable');
+          dispatched = true;
+          return options.mcpDerivationContinuation(cleanupScope(principal, input.coordinatorHostId, authority), operation.action, controller.signal);
+        }
         if (operation.kind === 'mcp' && isManagedMcpChildContinuation(operation.action)) {
           if (!options.mcpChildContinuation) throw new SourceAdmissionError('source_unavailable');
           dispatched = true;

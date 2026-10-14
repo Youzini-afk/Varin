@@ -1505,7 +1505,7 @@ pub(crate) fn spawn(
                                             .map_err(|_| {
                                                 KernelError::Storage("catalog owner failed".into())
                                             })?
-                                            .prepare_mcp_change(&p.run_id, binding)
+                                            .prepare_mcp_change_with_derivations(&p.run_id, binding, p.derivations.unwrap_or_default())
                                             .map_err(domain)?;
                                         let prepared = preparation.load().map_err(domain)?;
                                         let mut catalog = owner.lock().map_err(|_| {

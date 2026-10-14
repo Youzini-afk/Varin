@@ -1544,10 +1544,20 @@ impl Catalog {
                 // A dispatched effect is reconciled under its original intent generation.
                 // Only work that may actually be readmitted acquires this owner's epoch.
                 // Run/graph fencing still governs every new execution and receipt consumer.
+                // An accepted dispatch still owns its target-side source/MCP handoff.
+                // Its real child relation closes readmission even while the Job is Preparing.
+                let accepted_child_dispatch = op.execution_owner.is_some()
+                    && op.executor.as_deref() == Some(collaboration::DISPATCH_TOOL)
+                    && tx.query_row(
+                        "SELECT EXISTS(SELECT 1 FROM child_tasks WHERE id=?1)",
+                        [&op.id],
+                        |row| row.get::<_, bool>(0),
+                    )?;
                 let preserve_dispatch_epoch = matches!(
                     op.effect,
                     Effect::Dispatched | Effect::Partial | Effect::Unknown
-                ) || op.phase == OperationPhase::Running && op.execution_owner.is_some();
+                ) || op.phase == OperationPhase::Running && op.execution_owner.is_some()
+                    || accepted_child_dispatch;
                 // Recovery terminates an already running read-only executor too.
                 // Its original dependency/stop receipts still bind this epoch;
                 // Effect::None does not mean it may be readmitted under a new one.

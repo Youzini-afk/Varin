@@ -1,3 +1,4 @@
+import { commitPreparedMcpBinding } from './mcp-preparation-commit.js';
 import { SourceAdmissionError } from './source-admission-error.js';
 import type { SourceFailureCode } from './protocol.generated.js';
 import type { OperationCallCompletion, IncomingMedia, OutputPart } from './protocol.generated.js';
@@ -97,6 +98,7 @@ export interface McpPreparation {
   requiredBinding?: McpBinding;
   delegatedBinding?: McpBinding;
   fixed?: boolean;
+  child?: import('./protocol.generated.js').DelegatedExecution;
 }
 export interface RunPolicyScope { runId: string; threadId: string; projectId?: string }
 export interface RunPolicyPreparer {
@@ -1185,7 +1187,7 @@ export class AgentRuntimeClient {
         threadId: run.thread_id,
         source,
         ...(executionCwd ? { executionCwd } : {}),
-        ...(child ? { fixed: true } : {}),
+        ...(child ? { fixed: true, child } : {}),
       };
       if (!child) this.mcpPreparations.set(runId, input);
       const preparation = this.prepareMcpOwner(
@@ -1214,12 +1216,7 @@ export class AgentRuntimeClient {
       }
       try {
         signal?.throwIfAborted();
-        await this.kernel.agentRuntimeRequest(
-          'runtime.launch.mcp.prepare',
-          { runId, binding: lease.binding },
-          signal,
-        );
-        return await this.kernel.registerMcpOwner(runId, lease);
+        return await commitPreparedMcpBinding(this.kernel, runId, lease, () => this.launch(runId), signal);
       } catch (error) {
         lease.release();
         throw error;

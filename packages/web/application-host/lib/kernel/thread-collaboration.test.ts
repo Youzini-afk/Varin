@@ -42,12 +42,19 @@ function fixture(owner: 'local' | 'managed' = 'managed') {
   const service = {
     bind: vi.fn(async (_input: Parameters<ManagedSourceClient['bind']>[0]) => ({ authorityId: 'cleanup-authority', resourceEpoch: 'original-B-epoch', source })),
     service: vi.fn(async (input: Parameters<ManagedSourceClient['service']>[0]) => {
+      if (input.operation.kind === 'mcp' && input.operation.action.kind === 'child_release') {
+        trace.push('mcp-dependencies-released');
+        return { ok: true, value: { retire: false, dependenciesDrained: true } };
+      }
       expect(input.operation).toEqual({ kind: 'child_release', execution: structuredClone(child) });
       trace.push('handoff-release'); return { released: true };
     }),
     release: vi.fn(async () => { trace.push('cleanup-authority-retired'); }),
+    inspectScope: vi.fn(async () => []),
   };
   const runtime = {
+    launch: vi.fn(async () => ({ selection: child.launch })),
+    operation: vi.fn(async () => ({ id: child.child_operation_id, run_id: child.parent_run_id, execution_owner: { kind: 'host', host_id: 'coordinator-A', incarnation: 'A-epoch' }, epoch: 2 })),
     coordinatorHostId: 'coordinator-A', onEvent: () => () => {}, onExit: () => () => {}, onReady: () => () => {},
     reconcileObservations: async () => [], children: async () => [], unacceptedChildDependencies: async () => [],
     childExecutions: async () => [structuredClone(child)], childExecution: async () => structuredClone(child),
@@ -89,6 +96,7 @@ it.each(['local', 'managed'] as const)('%s child stays discoverable from launch 
     expect(f.continueRun).toHaveBeenCalledOnce();
     expect(f.child.resources_released).toBe(false);
     expect(f.runtime.retireSourceGrants).not.toHaveBeenCalled();
+    expect(f.runtime.releaseMcpResourceSource).not.toHaveBeenCalled();
     f.complete();
     const report = structuredClone(f.child.report), source = structuredClone(f.child.source), result = structuredClone(f.child.code_result);
     f.runtime.retireSourceGrants.mockRejectedValueOnce(new Error('Original source retirement remains pending'));
@@ -186,5 +194,36 @@ it('failed preparation without a Run still releases the original handoff and unu
       branchId: 'child-source:original-execution' }, expect.any(AbortSignal));
     expect(f.runtime.retireSourceGrants).not.toHaveBeenCalled();
     expect(f.trace.indexOf('cleanup-authority-retired')).toBeLessThan(f.trace.indexOf('resources-released'));
+  } finally { collaboration.stop(); }
+});
+
+
+it('keeps parent definitions and Host handoff after pre-MCP continueLaunch failure, then transfers only after saved child binding commits', async () => {
+  const f = fixture();
+  f.child.launch.mcp_binding = { reference: 'parent-binding', generation: 1, tools: [], routes: {}, resources: {},
+    provenance: { servers: { project: { definition_version: 'original-definition', resource_key: 'parent-resource',
+      owner: { resource_owner: f.source.resource_owner, execution_scope: 'workspace',
+        configuration: { agent_dir: '/b-agent', config_cwd: '/b-project', project_trusted: true },
+        source_authority: { coordinator_host_id: 'coordinator-A', authority_id: 'parent-mcp', resource_epoch: 'parent-epoch' } } } } } };
+  f.continueRun.mockRejectedValueOnce(new Error('Credential rebind unavailable before MCP preparation'));
+  let collaboration = f.open();
+  try {
+    await collaboration.recover();
+    await vi.waitFor(() => expect(f.errors).toHaveLength(1)); await tick();
+    expect(f.trace).not.toContain('mcp-dependencies-released');
+    expect(f.kernel.releaseChildToolHandoff).not.toHaveBeenCalled();
+    expect(f.child.resources_released).toBe(false);
+    collaboration.stop();
+    f.continueRun.mockImplementationOnce(async () => {
+      f.runtime.launch.mockResolvedValue({ selection: { ...f.child.launch, source: f.child.source!.kind === 'ready' ? f.child.source!.selection : null,
+        mcp_binding: { ...f.child.launch.mcp_binding!, reference: 'actual-child-binding' } } });
+    });
+    collaboration = f.open(); await collaboration.recover();
+    await vi.waitFor(() => expect(f.trace).toContain('mcp-dependencies-released')); await tick();
+    expect(f.continueRun).toHaveBeenCalledTimes(2);
+    // Independent extension pins remain until actual startRun or terminal cleanup.
+    expect(f.kernel.releaseChildToolHandoff).not.toHaveBeenCalled();
+    expect(f.runtime.releaseMcpResourceSource).not.toHaveBeenCalled();
+    expect(f.child.resources_released).toBe(false);
   } finally { collaboration.stop(); }
 });

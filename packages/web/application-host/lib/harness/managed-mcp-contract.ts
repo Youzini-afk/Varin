@@ -1,6 +1,6 @@
 /** Closed source-local MCP requests. No paths, credentials or arbitrary Host method names. */
 import type { McpAuthorityBinding, McpAuthorityService, McpServiceRequest, McpInteractionOrigin } from '@varin/pi-host/mcp-authority';
-import type { McpBinding, McpEndpoint, McpResourceBinding, McpInteractionBinding, SourceMcpDeliveryReceipt, SourceMcpHolderBinding, SourceMcpCreationOutcome, SourceMcpChildBinding } from '../kernel/protocol.generated.js';
+import type { McpBinding, McpEndpoint, McpResourceBinding, McpInteractionBinding, SourceMcpDeliveryReceipt, SourceMcpHolderBinding, SourceMcpCreationOutcome, SourceMcpChildBinding, McpChildDerivationOrigin, McpChildDerivationReceipt, SourceMcpDerivationResult } from '../kernel/protocol.generated.js';
 
 /** The body projection crosses the content lane, never an authority control snapshot. */
 export interface ManagedMcpTaskCreationReceipt { requestHash: string; outcome: SourceMcpCreationOutcome | null }
@@ -20,6 +20,15 @@ export type ManagedMcpChildAction =
 export function isManagedMcpChildContinuation(action: ManagedMcpAction): action is Exclude<ManagedMcpChildAction, { kind: 'child_retain' }> {
   return action.kind === 'child_inspect' || action.kind === 'child_release';
 }
+/** Admission names the actual child Source. Native Storage resolves its proof. */
+export type ManagedMcpDerivationAction =
+  | { kind: 'derive'; handleId: string; creationRequestId: string; executionId: string; origin: McpChildDerivationOrigin; selection?: McpBinding }
+  | { kind: 'derivation_inspect' | 'derivation_release'; executionId: string };
+export function isManagedMcpDerivationContinuation(action: ManagedMcpAction): action is Exclude<ManagedMcpDerivationAction, { kind: 'derive' }> {
+  return action.kind === 'derivation_inspect' || action.kind === 'derivation_release';
+}
+export interface ManagedMcpDerivationSnapshot { snapshot: ManagedMcpSnapshot; receipt: McpChildDerivationReceipt }
+export type ManagedMcpDerivationInspection = SourceMcpDerivationResult & { live: boolean; prepared?: ManagedMcpDerivationSnapshot };
 export type ManagedMcpResourceAction =
   | { kind: 'resource_subscribe'; handleId: string; binding: McpResourceBinding; service: McpAuthorityService }
   | { kind: 'resource_inspect'; binding: McpResourceBinding; fenceUnstarted?: boolean }
@@ -59,7 +68,7 @@ export type ManagedMcpInteractionBody =
   | { kind: 'elicitation' | 'sampling'; deliveryId: string; binding: McpInteractionBinding; request: Record<string, unknown> }
   | { kind: 'error'; request: Record<string, unknown>; items: Array<{ deliveryId: string; binding: McpInteractionBinding;
       presentation: Extract<import('@varin/protocol').McpElicitationPresentation, { mode: 'url' }> }> };
-export type ManagedMcpAction = ManagedMcpTaskAction | ManagedMcpResourceAction | ManagedMcpInteractionAction | ManagedMcpChildAction
+export type ManagedMcpAction = ManagedMcpTaskAction | ManagedMcpResourceAction | ManagedMcpInteractionAction | ManagedMcpChildAction | ManagedMcpDerivationAction
   | { kind: 'snapshot'; handleId: string; creationRequestId: string; selection?: McpBinding }
   | { kind: 'changed'; incarnation: string; after: number }
   | { kind: 'release'; handleId: string; creationRequestId: string }

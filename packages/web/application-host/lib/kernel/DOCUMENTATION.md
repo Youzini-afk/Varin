@@ -1073,8 +1073,12 @@ child's fresh invocation scope and current permission policy are checked for eve
 execution scope and configuration directory/trust alongside its frozen definition; the composition
 has no shared owner that can relabel a sibling. Local child preparation groups complete frozen owners,
 acquires each exact dependency cut and composes them once. All candidates drain on preparation failure,
-including late acquisitions. Managed child contributions still require original Source retention and
-derivation before they can join this composition. Workspace MCP receives
+including late acquisitions. A managed contribution derives the retained original definition cut on
+its actual Materialized child Source, then joins the same composition with local/global owners.
+Dispatch uses the original acknowledged definition token; an explicit continuation may acquire only
+the exact frozen definition versions on its new child Source. One parent Source can contribute
+multiple complete configuration owners. FixedBranch children have no executable view, and multiple
+parent Source cuts cannot be merged into one child proof. Workspace MCP receives
 the child's real materialized cwd; global MCP keeps the neutral environment. One unused-launch CAS
 publishes the actual child binding, after which restoration requires it exactly. Direct tools preserve
 their original server and disambiguated public name; discovery cannot expand the frozen server set.
@@ -1088,7 +1092,22 @@ late preparation. `runtime.child.dependencies.pending` captures terminal unaccep
 and loads original invocation dependencies off the Catalog lock; its one cleanup acknowledgement waits
 for both file pins and managed definition references. Accepted children retain the same cleanup duty
 until their original dependencies and execution resources are released. Running read-only dispatch
-recovery preserves its original execution epoch, just like dispatched effects.
+recovery preserves its original execution epoch, just like dispatched effects. An accepted child
+also preserves that original dispatch epoch while source preparation is still pending.
+
+`source.mcp.derivation` constructs its proof from Storage's committed child handoff, revision-0 pin,
+restricted preparation grant and exact materialization receipt/directory identity. Caller-provided
+paths or handoff JSON do not substitute for those facts. Complete proof/outcome bytes use existing
+Storage objects and the content lane; short references live on the same Source authority. Catalog
+checks the original dispatch/continuation and frozen owner cut outside its lock, then rechecks
+eligibility before its single launch-binding commit. Only that commit or the original terminal-child
+cleanup releases proof bytes. Physical Source retirement drains views without acknowledging that
+publication. A settled derived lease remains owned by its child Source when an A-side projection
+closes; restoration reattaches that exact lease and preserves explicit revocations. Unsettled attempts
+still drain on cancellation. Source close drains the root and releases its heap references without
+acknowledging proof delivery. Release-before-begin fences late candidates, and an unavailable original
+preparation fails explicitly rather than reacquiring a newer definition. No separate child task/source
+ledger is introduced.
 After `runtime.run.start` has successfully bound independent child leases, Host releases the handoff.
 The collaboration consumer also releases terminal child holders and old-epoch unaccepted handoffs using
 real Catalog facts. A current-epoch missing ChildTask can still be between ACK and accept and is not
@@ -1360,7 +1379,7 @@ original Source explicitly retires. Recovered finite subscribe ACKs and proven f
 settle the original execution barrier without replacing already-published Unknown conversation history.
 Focused evidence covers actual coordinator/target modules with controlled ports, native receipt fences
 and Catalog persistence; it does not assert a full two-Host SDK lifecycle. The current
-internal formats are Storage 21, Agent Catalog 71 and private wire 36; older formats are rejected by
+internal formats are Storage 22, Agent Catalog 71 and private wire 37; older formats are rejected by
 the existing read-only gate with data preserved, without automatic migration or cleanup.
 
 Managed finite reverse interactions now use the same trusted SDK scope and original Source address.

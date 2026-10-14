@@ -251,6 +251,16 @@ impl Storage {
         )?.query_map([], |row| row.get::<_, String>(0))? {
             blobs.insert(row?);
         }
+        // Proof publication survives physical Source retirement until the original
+        // delegated launch or its terminal cleanup acknowledges it. It retains only bytes.
+        for field in ["requestRef", "outcomeRef"] {
+            for row in self.conn.prepare(&format!(
+                "SELECT json_extract(payload_json,'$.result.mcpDerivation.{field}.objectHash')
+                 FROM domain_records WHERE record_type='source.authority'
+                 AND json_extract(payload_json,'$.result.mcpDerivation.released')=0
+                 AND json_extract(payload_json,'$.result.mcpDerivation.{field}.objectHash') IS NOT NULL"
+            ))?.query_map([], |row| row.get::<_, String>(0))? { blobs.insert(row?); }
+        }
         for row in self
             .conn
             .prepare("SELECT object_hash FROM domain_record_refs")?

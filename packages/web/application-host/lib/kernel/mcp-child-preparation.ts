@@ -9,9 +9,12 @@ import type { McpResourceRuntime } from './mcp-resource-runtime.js';
 import type { McpTaskRuntime } from './mcp-task-runtime.js';
 import type { McpToolLease } from './tool-bridge.js';
 import { createMcpLease } from './mcp-owner.js';
+import { derivedChildMcpSelection, type ManagedChildMcpPreparer, type ManagedChildMcpContribution } from './managed-child-mcp-preparation.js';
+import { selectMcpServers } from './managed-mcp-preparation.js';
 
 export function createChildMcpPreparer(owners: {
   authority: McpAuthority;
+  managed?: ManagedChildMcpPreparer;
   tasks?:()=>McpTaskRuntime;
   resources?:()=>McpResourceRuntime;
   kernel: KernelClient;
@@ -30,8 +33,7 @@ export function createChildMcpPreparer(owners: {
     // Configuration precedence was already resolved by the original selection.
     const groups: Array<{ owner: McpServerOwner; provenance: McpProvenance }> = [];
     for (const [name, server] of Object.entries(selection.provenance.servers)) {
-      if (server.owner.resource_owner.kind !== 'local')
-        throw new Error('Child MCP requires its original target Host execution owner');
+      if (server.owner.resource_owner.kind !== 'local') continue;
       let group = groups.find(candidate => isDeepStrictEqual(candidate.owner, server.owner));
       if (!group) {
         group = { owner: server.owner, provenance: { servers: {} } };
@@ -39,15 +41,17 @@ export function createChildMcpPreparer(owners: {
       }
       group.provenance.servers[name] = server;
     }
+    const hasManaged = Object.values(selection.provenance.servers).some(server => server.owner.resource_owner.kind === 'managed_host');
+    if (hasManaged && !owners.managed) throw new Error('Child MCP requires its original target Host execution owner');
     // Catalog-owned controls need no endpoint, but keep the existing neutral lease.
-    if (!groups.length) groups.push({ owner: {
+    if (!groups.length && !hasManaged) groups.push({ owner: {
       resource_owner: { kind: 'local' }, source_authority: null,
       configuration: { agent_dir: owners.agentDir, config_cwd: owners.agentDir, project_trusted: false },
       execution_scope: 'global',
     }, provenance: { servers: {} } });
     const needsWorkspace = groups.some(group => group.owner.execution_scope === 'workspace');
     if (needsWorkspace && input.source?.resourceOwner.kind === 'managed_host')
-      throw new Error('Project MCP requires its original target Host execution owner. Managed file sources currently support coordinator-global MCP only.');
+      throw new Error('Local project MCP requires a local child execution view');
     if (needsWorkspace && (!input.source || !input.executionCwd))
       throw new Error('Child MCP requires an execution view matching its fixed source');
     const workspace = needsWorkspace && input.source
@@ -73,7 +77,8 @@ export function createChildMcpPreparer(owners: {
     // selection keeps global policy even when the child also has a private Source.
     const projectGroups = groups.filter(group => group.owner.configuration.config_cwd === workspace?.canonicalPath);
     const policyConfiguration = (projectGroups.find(group => group.owner.configuration.project_trusted)
-      ?? projectGroups[0] ?? groups[0]!).owner.configuration;
+      ?? projectGroups[0] ?? groups[0])?.owner.configuration
+      ?? { agent_dir: owners.agentDir, config_cwd: owners.agentDir, project_trusted: false };
     const directResources = new Set(selection.tools
       .filter(tool => ['direct', 'direct_task'].includes(selection.routes[tool.name]?.kind ?? ''))
       .map(tool => selection.resources[tool.name]).filter(Boolean));
@@ -81,9 +86,10 @@ export function createChildMcpPreparer(owners: {
     const abort = () => attempt.abort(signal?.reason);
     signal?.addEventListener('abort', abort, { once: true });
     if (signal?.aborted) abort();
-    const acquired: McpAuthorityOwnedLease[] = [];
+    const acquired: Array<Pick<McpAuthorityOwnedLease, 'releaseAndDrain'>> = [];
+    let managed: ManagedChildMcpContribution | undefined;
     try {
-      const prepared = await Promise.allSettled(groups.map(async ({ owner, provenance }) => {
+      const candidates: Array<Promise<{ lease: import('@varin/pi-host/mcp-authority').McpAuthorityLease; servers: string[] }>> = groups.map(async ({ owner, provenance }) => {
         try {
           attempt.signal.throwIfAborted();
           const configuration = owner.configuration;
@@ -112,7 +118,17 @@ export function createChildMcpPreparer(owners: {
           attempt.abort(error);
           throw error;
         }
-      }));
+      });
+      if (hasManaged) candidates.push((async () => {
+        try {
+          attempt.signal.throwIfAborted();
+          managed = await owners.managed!(input, attempt.signal);
+          acquired.push(managed.lease);
+          attempt.signal.throwIfAborted();
+          return { lease: managed.lease, servers: Object.keys(managed.lease.binding.provenance.servers) };
+        } catch (error) { attempt.abort(error); throw error; }
+      })());
+      const prepared = await Promise.allSettled(candidates);
       attempt.signal.throwIfAborted();
       const parts = prepared.map(result => {
         if (result.status === 'rejected') throw result.reason;
@@ -122,17 +138,27 @@ export function createChildMcpPreparer(owners: {
       // Preserve the original single-owner identity; mixed owners have one composed
       // binding, validated once against the whole frozen dependency selection.
       const lease = parts.length === 1 ? parts[0]!.lease : composeMcpAuthorityLeases(parts);
-      return createMcpLease({
+      const bindingSelection = managed?.receipt ? derivedChildMcpSelection(selection, managed.receipt) : selection;
+      const result = createMcpLease({
         lease,
         kernel: owners.kernel,
         ...(owners.tasks ? { tasks: owners.tasks() } : {}),
         ...(owners.resources ? { resources: owners.resources() } : {}),
-        selection,
+        selection: bindingSelection,
+        ...(managed ? { retainChild: (binding, selected) => {
+          const target = selectMcpServers(selected, owner => owner.kind === 'managed_host');
+          return Object.keys(target.provenance.servers).length
+            ? managed!.lease.retainChild(binding, target) : Promise.resolve({ release: async () => {} });
+        } } : {}),
         retarget: Boolean(input.delegatedBinding),
         currentPolicy: async () => {
           assertTrust();
           return owners.currentPolicy(policyConfiguration.config_cwd, policyConfiguration.project_trusted);
         },
+      });
+      return Object.assign(result, {
+        ...(managed?.receipt ? { derivations: [managed.receipt] } : {}),
+        ...(managed ? { releaseDerivations: () => managed!.releaseDerivation() } : {}),
       });
     } catch (error) {
       attempt.abort(error);

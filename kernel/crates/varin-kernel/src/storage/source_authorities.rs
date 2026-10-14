@@ -225,6 +225,7 @@ impl Storage {
             mcp_holders: Vec::new(),
             mcp_deliveries: Vec::new(),
             mcp_children: Vec::new(),
+            mcp_derivation: None,
         };
         let record = AuthorityRecord {
             principal_id: p.principal_id,
