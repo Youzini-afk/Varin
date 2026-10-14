@@ -2,7 +2,7 @@
  * Fast Decision Model (快速决策模型) — a vendor-neutral structured-judgment
  * capability. This is not a chat slot, not a rerank endpoint, and not free-text
  * generation: the caller supplies a goal, authorized material, and typed
- * questions; the selected Pi or Agent inference owner handles its provider
+ * questions; the native inference owner handles its provider
  * protocol. See docs/retrieval.md.
  */
 
@@ -21,9 +21,9 @@ import { HarnessInferenceSettingsValidationError } from "./harness-inference.js"
 export const FAST_DECISION_PURPOSES = ["explore", "web", "scholarly", "memory-organization", "memory-recall"] as const;
 export type HarnessFastDecisionPurpose = (typeof FAST_DECISION_PURPOSES)[number];
 
-export type HarnessFastDecisionProtocol = "pi-classifier";
+export type HarnessFastDecisionProtocol = "typed-classifier";
 
-/** One credential-free binding slot. Secrets stay in the Pi provider/auth layer. */
+/** One credential-free binding slot. Secrets stay in the Host model/auth owner. */
 export interface HarnessFastDecisionBinding {
   protocol: HarnessFastDecisionProtocol;
   providerId: string;
@@ -59,7 +59,7 @@ export function resolveFastDecisionPurpose(
   return { status: "unconfigured" };
 }
 
-/** Credential-free resolved binding identity, produced by the Pi side. */
+/** Credential-free resolved binding identity, produced by the Host inference owner. */
 export interface HarnessResolvedFastDecisionBinding extends HarnessFastDecisionBinding {
   configurationId: string;
 }
@@ -81,7 +81,7 @@ export interface HarnessFastDecisionCapabilities {
 
 export function fastDecisionCapabilities(protocol: HarnessFastDecisionProtocol): HarnessFastDecisionCapabilities {
   switch (protocol) {
-    case "pi-classifier":
+    case "typed-classifier":
       // Model/API-specific capacity is not a property of this generic protocol.
       return { judge: true, choose: true, score: true, modalities: ["text"] };
   }
@@ -190,8 +190,8 @@ const parseBinding = (value: unknown, path: string): HarnessFastDecisionBinding 
   if (!isRecord(value)) {
     throw new HarnessInferenceSettingsValidationError(`${path} must be a binding object`);
   }
-  if (value.protocol !== "pi-classifier") {
-    throw new HarnessInferenceSettingsValidationError(`${path}.protocol must be pi-classifier`);
+  if (value.protocol !== "typed-classifier") {
+    throw new HarnessInferenceSettingsValidationError(`${path}.protocol must be typed-classifier`);
   }
   const providerId = nonEmpty(value.providerId);
   if (!providerId) throw new HarnessInferenceSettingsValidationError(`${path}.providerId must be a non-empty string`);
@@ -199,7 +199,7 @@ const parseBinding = (value: unknown, path: string): HarnessFastDecisionBinding 
   if (!modelId) throw new HarnessInferenceSettingsValidationError(`${path}.modelId must be a non-empty string`);
   const endpoint = fastDecisionEndpoint(value.endpoint, `${path}.endpoint`);
   return {
-    protocol: "pi-classifier",
+    protocol: "typed-classifier",
     providerId,
     modelId,
     ...(endpoint === undefined ? {} : { endpoint }),

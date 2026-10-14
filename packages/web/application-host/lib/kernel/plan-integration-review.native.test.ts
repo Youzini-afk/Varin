@@ -61,7 +61,7 @@ async function fixture(existingRoot?: string) {
     const receipt = await runtime.submit({ key: `scope:${key}`, threadId: identity.threadId, branchId: identity.branchId,
       expectedHead: null, input: { text: 'Establish real main-thread context' }, configuration: {},
       initialContext: scopeContext.prepare ? await scopeContext.prepare(identity) : { effectiveSystemPrompt: 'PLAN_REVIEW_MAIN', instructionSources: ['plan-review'], memoryCheckpoint: 'plan-review:0',
-        personalization: { mode: 'agent', threadRole: 'main', sessionId: identity.threadId, projectId: null, revision: 0,
+        personalization: { mode: 'agent', threadRole: 'main', threadId: identity.threadId, projectId: null, revision: 0,
           configurationDigest: 'plan-review', memorySnapshot: { revision: 0, memories: [] },
           originalSections: [{ name: 'preamble', content: 'PLAN_REVIEW_MAIN' }], instructionSources: ['plan-review'] } } });
     await runtime.cancelRun(receipt.run_id);
@@ -268,7 +268,7 @@ async function toolFixture(reply: (body: Record<string, unknown>, turn: number) 
       await f.runtime.startRun(receipt.run_id);
     }
     await expect.poll(async () => ['completed', 'failed'].includes((await f.runtime.run(receipt.run_id)).state), { timeout: 10_000 }).toBe(true);
-    expect((await f.runtime.context(identity.branchId))?.personalization).toMatchObject({ mode, threadRole, sessionId: identity.threadId });
+    expect((await f.runtime.context(identity.branchId))?.personalization).toMatchObject({ mode, threadRole, threadId: identity.threadId });
     expect(requests.length).toBeGreaterThan(0);
     const diagnostics = process.env.VARIN_PLAN_REVIEW_DIAGNOSTICS;
     if (diagnostics) {

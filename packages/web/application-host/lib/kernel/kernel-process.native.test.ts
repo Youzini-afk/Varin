@@ -1,8 +1,6 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { createIsolatedTerminalSessionApi } from "../terminal/isolated-session-api.test-helper.js";
-import { createShellSupervisor } from "../harness/shell-supervisor.js";
-import { createOutputStore } from "../harness/output-store.js";
 import { spawn as nodeSpawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { TransportFixture } from "./tests/transport-fixture.js";
 import { createKernelProcessService } from "./process-service.js";
@@ -317,57 +315,26 @@ it("kernel restart reconciles an interrupted native tree without replaying its c
 },30_000);
 
 
-it("native terminal and shell consumers expose authority loss without releasing writers or inventing success", async () => {
+it("native terminal exposes authority loss without inventing an exit", async () => {
   const f=await fixture();
   const service=createKernelProcessService({client:f.host,resolveIdentity:async()=>({workspaceId:"ws",executionWorkspaceId:"ws",canonicalRoot:f.workspace})});
   const terminal=createIsolatedTerminalSessionApi({loadPtyProvider:async()=>service.ptyProvider});
-  const store=createOutputStore();
-  const handles: Awaited<ReturnType<typeof terminal.createTerminalSession>>[]=[];
-  let completed=0;let released=0;
-  const shell=createShellSupervisor({
-    sessionId:"lost-native-shell",cwd:path.join(f.workspace,"child"),outputStore:store,
-    interpreter:process.platform==="win32"
-      ?{kind:"powershell",command:"powershell.exe",args:["-NoLogo","-NoProfile","-NoExit"],env:{}}
-      :{kind:"bash",command:"bash",args:["-l"],env:{}},
-    createTerminalSession:async(input)=>{const h=await terminal.createTerminalSession(input);handles.push(h);return h;},
-    registerWriter:async()=>({close:async()=>{released++;}}),
-    commandLifecycle:{completed:()=>{completed++;}},
-  });
   try {
-    const command=process.platform==="win32"?"Start-Sleep -Seconds 60":"sleep 60";
-    const background=await shell.exec(command,{waitMs:50});
-    assert.ok(background.kind==="background"||background.kind==="preparing");
-    if(background.kind!=="background"&&background.kind!=="preparing")throw new Error(JSON.stringify(background));
-    const executionId=background.executionId!;
-    let shellId=background.kind==="background"?background.id:undefined;
-    const deadline=Date.now()+15_000;
-    while(!shellId){
-      const state=await shell.read(executionId);
-      shellId=state.shellId;
-      if(!shellId&&Date.now()>deadline)throw new Error("Native shell did not finish preparation");
-      if(!shellId)await pause();
-    }
-    const handle=handles[0]!;
+    const handle=await terminal.createTerminalSession({cwd:f.workspace,owner:"user",
+      spawn:{executable:process.execPath,args:["-e","setInterval(()=>{},1000)"]}});
     let exit=false;handle.onExit(()=>{exit=true;});
     const waiting=assert.rejects(handle.waitForExit(),/unavailable|unconfirmed/i);
     f.kernelChild.kill("SIGKILL");
     await waiting;
     assert.equal(terminal.inspectSession(handle.id)?.status,"error");
-    await assert.rejects(shell.read(shellId),/unavailable|unconfirmed/i);
-    assert.equal(exit,false);assert.equal(completed,0);assert.equal(released,0);
-    assert.equal(shell.hasActiveCommandAt(path.join(f.workspace,"child")),true);
-    await assert.rejects(shell.dispose(),/kernel|epoch|unconfirmed|pipe/i);
+    assert.equal(exit,false);
     await assert.rejects(terminal.shutdown(),/unconfirmed/i);
     assert.equal(terminal.inspectSession(handle.id)?.status,"error");
   } finally {
-    // Loss is the expected test outcome, not a fabricated successful close.
     await service.dispose().catch(()=>undefined);
     await terminal.shutdown().catch(()=>undefined);
-    await shell.dispose().catch(()=>undefined);
-    store.dispose();
   }
 },30_000);
-
 
 it("abrupt Host death closes its private kernel pipe and drains the native process tree", async () => {
   const root=await fs.mkdtemp(path.join(os.tmpdir(),"varin-native-process-host-loss-"));roots.push(root);

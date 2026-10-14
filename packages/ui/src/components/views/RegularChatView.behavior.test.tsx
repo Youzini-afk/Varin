@@ -2,12 +2,10 @@ import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { parseHTML } from 'linkedom';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
-import type { SessionSummary } from '@varin/protocol';
 import { RegularChatView } from './RegularChatView';
-import { regularPiSessions, useBotSessionIndex } from '@/stores/useBotSessionIndex';
+import { useThreadStore } from '@/stores/useThreadStore';
+import type { ThreadSummary } from '@varin/protocol';
 
-const session = vi.hoisted(() => ({ runtimeKey: 'host-a', currentSessionId: 'bot-entry' as string | null }));
-vi.mock('@/stores/usePiSessionStore', () => ({ usePiSessionStore: (selector: (state: typeof session) => unknown) => selector(session) }));
 vi.mock('@/lib/i18n', () => ({ useI18n: () => ({ t: (key: string) => key }) }));
 vi.mock('./ChatView', () => ({ ChatView: () => <div data-testid="chat-view" /> }));
 
@@ -21,8 +19,7 @@ beforeEach(() => {
   container = document.createElement('div');
   document.body.append(container);
   root = createRoot(container);
-  session.currentSessionId = 'bot-entry';
-  useBotSessionIndex.setState({ runtimeKey: 'host-a', ids: new Set(['bot-entry', 'bot-work']), loading: false, error: null });
+  useThreadStore.setState({ selectedIdentity: { runtime: 'agent', threadId: 'bot-entry', branchId: 'main' }, threads: ['bot-entry', 'bot-work', 'ordinary-thread'].map(thread_id => ({ thread_id, bot_id: thread_id.startsWith('bot-') ? 'bot' : null })) as ThreadSummary[] });
 });
 afterEach(() => {
   act(() => root.unmount());
@@ -34,18 +31,11 @@ it('does not mount a Bot entry or work conversation in an ordinary shell', async
   await act(async () => { root.render(<RegularChatView active />); });
   expect(container.querySelector('[data-testid="chat-view"]')).toBeNull();
 
-  session.currentSessionId = 'bot-work';
+  useThreadStore.setState({ selectedIdentity: { runtime: 'agent', threadId: 'bot-work', branchId: 'main' } });
   await act(async () => { root.render(<RegularChatView active />); });
   expect(container.querySelector('[data-testid="chat-view"]')).toBeNull();
 
-  session.currentSessionId = 'ordinary-session';
+  useThreadStore.setState({ selectedIdentity: { runtime: 'agent', threadId: 'ordinary-thread', branchId: 'main' } });
   await act(async () => { root.render(<RegularChatView active />); });
   expect(container.querySelector('[data-testid="chat-view"]')).not.toBeNull();
-});
-
-it('keeps Bot conversations out of ordinary session navigation, including while ownership loads', () => {
-  const summaries = ['bot-entry', 'ordinary-session', 'bot-work'].map((id) => ({ id })) as SessionSummary[];
-  expect(regularPiSessions(summaries, useBotSessionIndex.getState(), 'host-a').map((item) => item.id))
-    .toEqual(['ordinary-session']);
-  expect(regularPiSessions(summaries, { runtimeKey: 'host-b', ids: null }, 'host-a')).toEqual([]);
 });

@@ -20,7 +20,7 @@ import {
 } from '@/components/ui/dialog';
 import { SimpleMarkdownRenderer } from '@/components/chat/MarkdownRenderer';
 import { useI18n } from '@/lib/i18n';
-import { normalizePdfMaterialRegion } from '@/lib/pi-runtime/pdfMaterialCitation';
+import { normalizePdfMaterialRegion } from '@/lib/materials/pdfMaterialCitation';
 
 type ReaderView = 'page' | 'text' | 'structure';
 export type PdfReaderLocation = {
@@ -37,7 +37,7 @@ export interface PdfMaterialReaderPort {
   unavailable?: string;
   isCurrent(): boolean;
   read(request: DocumentReadRequest, signal?: AbortSignal): Promise<FetchResult>;
-  /** Pi retains its binary page endpoint. Other readers use the same read operation. */
+  /** Optional binary page transport; the default uses the document read operation. */
   readPage?(snapshotId: string, page: number, scale: number, signal: AbortSignal): Promise<Blob>;
   addRegion?(region: PdfMaterialDraft): void;
 }

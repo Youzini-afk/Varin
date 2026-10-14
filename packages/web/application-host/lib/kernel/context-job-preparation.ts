@@ -6,11 +6,11 @@ import type { AgentRuntimeClient } from './agent-runtime-client.js';
 import type { ContextCompactionOwner, ContextCompactionScope, ContextCompactionLease } from './context-compaction.js';
 import type { ContextJobPreviewParams, ContextPersonalization, ContextResources } from './protocol.generated.js';
 
-export function contextCompactionScope(sessionId: string, personalization?: ContextPersonalization,
+export function contextCompactionScope(threadId: string, personalization?: ContextPersonalization,
   resources?: ContextResources): ContextCompactionScope {
   const projectId = personalization?.projectId ?? resources?.snapshot.scope.projectId;
   const workspaceId = resources?.source?.resource_owner.kind !== 'managed_host' ? resources?.snapshot.scope.projectRoot : undefined;
-  return { sessionId, ...(projectId ? { projectId } : {}), ...(workspaceId ? { workspaceId } : {}) };
+  return { threadId, ...(projectId ? { projectId } : {}), ...(workspaceId ? { workspaceId } : {}) };
 }
 
 type Runtime = Pick<AgentRuntimeClient, 'previewContextJob' | 'createContextJob' | 'contextJobs' | 'run' | 'launch'>;

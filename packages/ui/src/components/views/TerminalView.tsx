@@ -1,9 +1,9 @@
 import React from 'react';
 
 import { EMPTY_TERMINAL_BUFFER, useTerminalStore } from '@/stores/useTerminalStore';
-import { usePiSessionStore } from '@/stores/usePiSessionStore';
+import { useThreadStore } from '@/stores/useThreadStore';
 import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
-import { ensurePiSessionDraftTarget } from '@/lib/pi-runtime/sessionDrafts';
+import { appendThreadDraftText, startThreadFromNavigation } from '@/lib/agent-runtime/threadNavigation';
 import { getRuntimeEndpointGeneration, type TerminalStreamEvent } from '@varin/application-client';
 import { useThemeSystem } from '@/contexts/useThemeSystem';
 import { useFontPreferences } from '@/hooks/useFontPreferences';
@@ -21,7 +21,6 @@ import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import { extractTerminalPreviewUrl, isTerminalPreviewUrlAvailable } from '@/lib/terminalPreview';
 import { useI18n } from '@/lib/i18n';
 import { PROJECT_ACTION_ICON_MAP, type ProjectActionIconKey } from '@/lib/projectActions';
-import { useInlineCommentDraftStore } from '@/stores/useInlineCommentDraftStore';
 import { applyTerminalModifier, terminalControlCharacter, terminalSequenceForKey, type TerminalModifier as Modifier, type TerminalQuickKey as MobileKey } from '@/lib/terminalInput';
 
 type TerminalViewProps = {
@@ -50,7 +49,7 @@ export const TerminalView: React.FC<TerminalViewProps> = ({ visible, directoryOv
     const showTerminalQuickKeysOnDesktop = useUIStore((state) => state.showTerminalQuickKeysOnDesktop);
     const showQuickKeys = isTouchTerminal || showTerminalQuickKeysOnDesktop;
 
-    const currentSessionId = usePiSessionStore((s) => s.currentSessionId);
+    const currentSessionId = useThreadStore(state => state.selectedIdentity?.threadId ?? null);
     const contextDirectory = useEffectiveDirectory() ?? null;
     const effectiveDirectory = directoryOverride ?? contextDirectory;
     const hasActiveContext = currentSessionId !== null || effectiveDirectory !== null;
@@ -66,7 +65,6 @@ export const TerminalView: React.FC<TerminalViewProps> = ({ visible, directoryOv
     const appendToBuffer = useTerminalStore((s) => s.appendToBuffer);
     const replaceBuffer = useTerminalStore((s) => s.replaceBuffer);
     const setTabPreviewUrl = useTerminalStore((s) => s.setTabPreviewUrl);
-    const addContextDraft = useInlineCommentDraftStore((s) => s.addDraft);
 
     const openContextPreview = useUIStore((state) => state.openContextPreview);
 
@@ -726,20 +724,13 @@ export const TerminalView: React.FC<TerminalViewProps> = ({ visible, directoryOv
         const selection = terminalControllerRef.current?.getSelection();
         if (!selection || !activeTab || !effectiveDirectory) return;
         try {
-            const target = await ensurePiSessionDraftTarget(effectiveDirectory);
-            addContextDraft(target, {
-                source: 'terminal',
-                fileLabel: activeTab.label,
-                startLine: selection.startLine,
-                endLine: selection.endLine,
-                code: selection.text,
-                language: activeTab.terminalSessionId ?? activeTab.id,
-                text: '',
-            });
+            const identity = useThreadStore.getState().selectedIdentity ?? await startThreadFromNavigation({ directory: effectiveDirectory });
+            appendThreadDraftText(identity, `Terminal ${activeTab.label}, lines ${selection.startLine}-${selection.endLine}:\n\n\`\`\`text\n${selection.text}\n\`\`\``);
+
         } catch (error) {
             toast.error(error instanceof Error ? error.message : String(error));
         }
-    }, [activeTab, addContextDraft, attachedOnly, effectiveDirectory]);
+    }, [activeTab, attachedOnly, effectiveDirectory]);
 
     const handleSelectTab = React.useCallback(
         (tabId: string) => {

@@ -18,7 +18,7 @@ import { isDesktopLocalOriginActive, isDesktopShell, isWebRuntime } from '@/lib/
 import { isCapacitorApp } from '@/lib/platform';
 import { useI18n } from '@/lib/i18n';
 import { subscribeRuntimeEndpointChanged } from '@varin/application-client';
-import { PiSettingsContributionSlot } from '@/lib/extensions/pi-integration-registry';
+import { RecoverySettings } from './RecoverySettings';
 import type { VarinSettingsSection } from './types';
 
 const useRuntimeEndpointEpoch = (): number => {
@@ -53,7 +53,7 @@ export const VarinSettingsPage: React.FC<VarinSettingsPageProps> = ({ section })
                 <DefaultsSettings />
                 {showDesktopNetworkSettings && <DesktopNetworkSettings />}
                 <SessionRetentionSettings />
-                <PiSettingsContributionSlot slot="settings.sessions.panels" />
+                <RecoverySettings />
                 {isWebRuntime() && !isDesktopShell() && !isCapacitorApp() && <PasskeySettings />}
                 {showAbout && <AboutSettings />}
             </SettingsPageLayout>
@@ -186,7 +186,7 @@ const SessionsSectionContent: React.FC = () => {
         <>
             <DefaultsSettings />
             <SessionRetentionSettings />
-            <PiSettingsContributionSlot slot="settings.sessions.panels" />
+            <RecoverySettings />
         </>
     );
 };

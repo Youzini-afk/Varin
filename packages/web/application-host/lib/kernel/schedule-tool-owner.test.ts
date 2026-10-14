@@ -24,7 +24,7 @@ it('the ordinary scheduled task example edits its admitted project and returns n
   let extensions: ApplicationExtensionRuntime | undefined;
   let retained: Awaited<ReturnType<typeof retainExtensionTool>> | undefined;
   const config = createProjectConfigRuntime({ fsPromises: fs, path, projectsDirPath: path.join(root, 'config') });
-  const scheduler = createScheduledTasksRuntime({ projectConfigRuntime: config, listProjects: async () => [{ id: 'project', path: root }], executeTask: async () => { throw new Error('Pi must not run'); } });
+  const scheduler = createScheduledTasksRuntime({ projectConfigRuntime: config, listProjects: async () => [{ id: 'project', path: root }] });
   const occurrence = { id: 'original-occurrence', state: 'preparing', thread_id: 'cold-thread', run_id: null } as CalendarOccurrence;
   const runCalendar = vi.fn(async () => occurrence);
   scheduler.setCalendarOwner({ sync: async (_id: string, tasks: unknown) => tasks, run: runCalendar, stop() {} } as unknown as CalendarOwner);
@@ -48,7 +48,7 @@ it('the ordinary scheduled task example edits its admitted project and returns n
     await extensions.reviewCapabilities({ extensionId: manifest.id, expectedRevision: (await extensions.catalog.snapshot()).revision,
       decisions: [{ capability: SCHEDULE_CAPABILITY, realm: 'host', granted: true }] });
     await extensions.setEnabled(manifest.id, true, (await extensions.catalog.snapshot()).revision);
-    const selected = await extensions.prepareService({ serviceId: descriptor.id, version: descriptor.version, method: 'execute', args: [], routing: { sessionId: 'thread' } });
+    const selected = await extensions.prepareService({ serviceId: descriptor.id, version: descriptor.version, method: 'execute', args: [], routing: { threadId: 'thread' } });
     const sourceBinding: LaunchSource = { resource_owner: {kind:'local'}, workspace_id: 'original-workspace', execution_workspace_id: 'source-execution', branch_id: 'source-branch', revision: 1, mode: 'fixed_branch', live_root: null, environment_run_id: 'source-run' };
     const run = { id: 'run', thread_id: 'thread', branch_id: 'branch', state: 'executing', revision: 1, epoch: 1, configuration: {}, cancel_requested: false, waiting_on: null } as Run;
     const launch = { run_id: run.id, selection: { source: sourceBinding } } as LaunchIntent;

@@ -93,7 +93,7 @@ fn submit_input(
     let plan_eligible = preparation.scope().is_some_and(|scope| {
         matches!(scope.mode.as_str(), "agent" | "bot")
             && scope.thread_role == "main"
-            && scope.session_id == preparation.thread_id()
+            && scope.thread_id == preparation.thread_id()
     });
     let inherit_source = p
         .launch
@@ -545,7 +545,7 @@ mod resource_receipt_tests {
             "launch":{"source":null,"enabledTools":[],"inheritSource":false},
             "initialContext":{"effectiveSystemPrompt":"old","instructionSources":[],"memoryCheckpoint":null,
                 "personalization":{"mode":"agent","threadRole":"main","revision":1,"configurationDigest":"fixture","memorySnapshot":{"revision":0,"memories":[]},
-                    "sessionId":"thread","projectId":null,"originalSections":[{"name":"system","content":"old"}],"instructionSources":[]}}});
+                    "threadId":"thread","projectId":null,"originalSections":[{"name":"system","content":"old"}],"instructionSources":[]}}});
         assert_eq!(
             submit_input(catalog.clone(), input.clone(), cancel.clone(), None, true).unwrap(),
             Value::Null

@@ -3,7 +3,7 @@ import type { SourceFailureCode } from './protocol.generated.js';
 import type { FastDecisionMaterial } from '@varin/protocol';
 import { contentHashOf } from '../knowledge/semantic/identity.js';
 import { createExploreQueryRun, formatExploreOutput, requiredExploreComponents, DEFAULT_BYTE_BUDGET, DEFAULT_EXCERPT_LIMIT, type ExploreDeps } from '../harness/explore.js';
-import type { ExploreFileSnapshot } from '../harness/explore-file-reader.js';
+import type { ExploreFileSnapshot } from '../harness/file-snapshot.js';
 import type { BoundRetrievalPipeline, PipelinePlan, RetrievalPipelineOwner, RetrievalSnippet, RetrievalStageKind, RetrievalStageStatus } from '../harness/retrieval-pipeline.js';
 import { waitWithSignal } from '../cancellation.js';
 import { decodeSearchHit, CONTENT_SEARCH_EXCLUDED_DIRS } from '../search/content.js';

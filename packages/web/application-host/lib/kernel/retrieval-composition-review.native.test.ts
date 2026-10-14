@@ -35,7 +35,7 @@ async function fixture(holdStructure = false) {
   const bindings: RetrievalPipelineBinding[] = [];
   f.kernel.setRetrievalOwner(createRetrievalOwner({ sources: createRetrievalSourceOwner({ documents: f.documents.authority, kernel: f.kernel, validateLiveSource: f.liveSources.validate }), kernel: f.kernel,
     preparePipeline: async (query, signal) => { const binding = await composition.prepare({ threadId: query.threadId, projectId: 'retrieval-project', workspaceId: f.documents.workspaceRoot }, signal); bindings.push(binding); return binding; } }));
-  const route = async (providerKey: string, scope: { projectId?: string; sessionId?: string } = { projectId: 'retrieval-project' }) => extensions.upsertServiceRoutingRule({ expectedRevision: (await extensions.routing.read()).document.revision,
+  const route = async (providerKey: string, scope: { projectId?: string; threadId?: string } = { projectId: 'retrieval-project' }) => extensions.upsertServiceRoutingRule({ expectedRevision: (await extensions.routing.read()).document.revision,
     rule: { allowFallback: false, providerKeys: [providerKey], scope, serviceId: 'varin.retrieval.plan', version: 1 } });
   return { ...f, extensions, structure, composition, bindings, route, gate, entered: () => entered };
 }

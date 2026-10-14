@@ -62,12 +62,12 @@ const digest = (value: unknown) => createHash('sha256').update(JSON.stringify(va
 export function createThreadContext(owners: ContextOwners): ContextPreparer {
   const render = async (basis: ContextPersonalization, resources: ContextResources | undefined, updateMemory = false, signal?: AbortSignal): Promise<InitialContext> => {
     signal?.throwIfAborted();
-    const bot = await owners.botForThread?.(basis.sessionId) ?? null;
+    const bot = await owners.botForThread?.(basis.threadId) ?? null;
     if ((basis.mode === 'bot') !== (bot !== null)) throw new Error('Context mode differs from the original Thread owner');
     const catalog = bot ? { revision: bot.revision, prompts: {}, memories: [] } : await owners.personalization.catalog();
     const scopes: AgentMemoryScope[] = [{ kind: 'global' },
       ...(basis.projectId ? [{ kind: 'project' as const, id: basis.projectId }] : []),
-      { kind: 'session', id: basis.sessionId }];
+      { kind: 'thread', id: basis.threadId }];
     const keys = new Set(scopes.map(agentScopeKey));
     const profiles = basis.mode === 'bot' ? [] : scopes.flatMap(scope => {
       const profile = catalog.prompts[agentScopeKey(scope)];
@@ -77,15 +77,15 @@ export function createThreadContext(owners: ContextOwners): ContextPreparer {
     const memorySnapshot = updateMemory && !bot ? { revision: catalog.revision,
       memories: basis.mode === 'bot' ? [] : catalog.memories.filter(note => keys.has(agentScopeKey(note.scope))) } : basis.memorySnapshot;
     const context: AgentPersonalizationContext = {
-      mode: basis.mode as AgentPersonalizationContext['mode'], threadRole: basis.threadRole as AgentPersonalizationContext['threadRole'], revision: memorySnapshot.revision, sessionId: basis.sessionId,
+      mode: basis.mode as AgentPersonalizationContext['mode'], threadRole: basis.threadRole as AgentPersonalizationContext['threadRole'], revision: memorySnapshot.revision, threadId: basis.threadId,
       ...(basis.projectId ? { projectId: basis.projectId } : {}),
       profiles, memories: memorySnapshot.memories as AgentMemoryNote[],
     };
     const original = Object.fromEntries(basis.originalSections.map(section => [section.name, section.content]));
     // projectRoot is the original admitted configuration namespace, never the execution cwd.
-    const composition = owners.composition ? await owners.composition({ sessionId: basis.sessionId,
+    const composition = owners.composition ? await owners.composition({ threadId: basis.threadId,
       ...(basis.projectId ? { projectId: basis.projectId } : {}),
-      ...(resources?.source?.resource_owner.kind !== 'managed_host' && resources?.snapshot.scope.projectRoot ? { workspaceId: resources.snapshot.scope.projectRoot } : {}) }, signal) : basis.contextComposition;
+      ...(resources?.source?.resource_owner.kind !== 'managed_host' && resources?.snapshot.scope.projectRoot ? { configurationDirectory: resources.snapshot.scope.projectRoot, ...(resources.source ? { workspaceId: resources.source.workspace_id } : {}) } : {}) }, signal) : basis.contextComposition;
     signal?.throwIfAborted();
     const { contextComposition: _oldComposition, ...provenance } = basis;
     const { runtime_identity: _profileIdentity, child_profile: _profileChild, ...personalized } = personalizeAgentSystemPrompt(original, context);
@@ -112,7 +112,7 @@ export function createThreadContext(owners: ContextOwners): ContextPreparer {
   const initial = async (identity: ThreadIdentity, source: ThreadSource | null, admitted: AdmittedContextScope, signal?: AbortSignal): Promise<InitialContext> => {
     const snapshot = await prepareResources(identity, source, admitted, signal ? { signal } : undefined);
     return render({ memorySnapshot: { revision: 0, memories: [] }, configurationDigest: '', mode: admitted.mode,
-      threadRole: admitted.threadRole, revision: 0, sessionId: identity.threadId, projectId: admitted.projectId,
+      threadRole: admitted.threadRole, revision: 0, threadId: identity.threadId, projectId: admitted.projectId,
       originalSections: Object.entries({ ...sections(snapshot), ...(admitted.childProfile?.instructions ? { child_profile: admitted.childProfile.instructions } : {}) }).map(([name, content]) => ({ name, content })),
       instructionSources: [...sources(snapshot), ...(admitted.childProfile?.preset_id ? [`agent.child-profile:${JSON.stringify({ catalogIdentity: admitted.childProfile.catalog_identity, presetId: admitted.childProfile.preset_id })}`] : [])] }, { source: resourceSource(source), snapshot }, true, signal);
   };
@@ -121,7 +121,7 @@ export function createThreadContext(owners: ContextOwners): ContextPreparer {
     const previous = checkpoint.resources; const basis = checkpoint.personalization;
     if (!previous || !basis) throw new Error('Context has no frozen resource provenance');
     const scope = previous.snapshot.scope;
-    if (scope.threadId !== basis.sessionId || scope.projectId !== basis.projectId || scope.mode !== basis.mode || scope.threadRole !== basis.threadRole) {
+    if (scope.threadId !== basis.threadId || scope.projectId !== basis.projectId || scope.mode !== basis.mode || scope.threadRole !== basis.threadRole) {
       throw new Error('Resource and context scopes do not match');
     }
     const snapshot = await prepareResources({ runtime: 'agent', threadId: scope.threadId, branchId: checkpoint.proposal.branch_id }, source,

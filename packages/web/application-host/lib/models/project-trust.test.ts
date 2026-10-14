@@ -33,25 +33,25 @@ it('trust is explicit, canonical and revisioned, independent of Pi, and gates na
   await mkdir(join(project, '.varin'));
   await writeFile(join(project, '.varin', 'settings.json'), JSON.stringify({ resources: { skills: ['extra'] } }));
   expect((await settings.snapshot(project)).project).toEqual({});
-  const accepted = await trust.update({ workspaceId: 'alias', decision: true, expectedRevision: initial.revision });
+  const accepted = await trust.update({ workspaceId: 'alias', expectedPath: project, decision: true, expectedRevision: initial.revision });
   expect(accepted).toMatchObject({ path: project, decision: true });
   expect((await settings.snapshot(project)).project.resources).toEqual({ skills: ['extra'] });
-  await expect(trust.update({ workspaceId: 'project', decision: false, expectedRevision: initial.revision })).rejects.toMatchObject({ code: 'config_conflict' });
-  const denied = await trust.update({ workspaceId: 'nested', decision: false, expectedRevision: accepted.revision });
+  await expect(trust.update({ workspaceId: 'project', expectedPath: project, decision: false, expectedRevision: initial.revision })).rejects.toMatchObject({ code: 'config_conflict' });
+  const denied = await trust.update({ workspaceId: 'nested', expectedPath: join(project, 'nested'), decision: false, expectedRevision: accepted.revision });
   expect(denied.decision).toBe(false);
-  const inherited = await trust.update({ workspaceId: 'nested', decision: null, expectedRevision: denied.revision });
+  const inherited = await trust.update({ workspaceId: 'nested', expectedPath: join(project, 'nested'), decision: null, expectedRevision: denied.revision });
   expect(inherited).toMatchObject({ decision: true, directDecision: null });
-  await trust.update({ workspaceId: 'project', decision: false, expectedRevision: inherited.revision });
+  await trust.update({ workspaceId: 'project', expectedPath: project, decision: false, expectedRevision: inherited.revision });
   expect((await settings.snapshot(project)).project).toEqual({});
   expect(await readFile(join(data, 'trust.json'), 'utf8')).toBe(JSON.stringify({ [project]: true }));
   await writeFile(join(data, 'project-trust.json'), '{broken');
   expect(() => trust.trusted(project)).toThrow();
-  await expect(trust.update({ workspaceId: 'project', decision: true, expectedRevision: initial.revision })).rejects.toThrow();
+  await expect(trust.update({ workspaceId: 'project', expectedPath: project, decision: true, expectedRevision: initial.revision })).rejects.toThrow();
   expect(await readFile(join(data, 'project-trust.json'), 'utf8')).toBe('{broken');
 });
 
 it('authenticated trust API admits workspace IDs and preserves CAS instead of accepting raw paths', async () => {
-  const { trust, data } = await fixture();
+  const { trust, data, project } = await fixture();
   const app = express(); app.use(express.json());
   registerProjectTrustRoutes(app, trust, (request, response, next) => request.headers.authorization === 'test-owner' ? next() : void response.sendStatus(401));
   const server = createServer(app); server.listen(0, '127.0.0.1'); await once(server, 'listening');
@@ -65,8 +65,48 @@ it('authenticated trust API admits workspace IDs and preserves CAS instead of ac
     expect((await request('read', { workspaceId: 'unregistered' })).status).toBe(503);
     expect(await readdir(data)).toEqual([]);
     const snapshot = await (await request('read', { workspaceId: 'project' })).json() as { revision: string };
-    const update = { workspaceId: 'project', decision: true, expectedRevision: snapshot.revision };
+    const update = { workspaceId: 'project', expectedPath: project, decision: true, expectedRevision: snapshot.revision };
     expect((await request('update', update)).status).toBe(200);
     expect((await request('update', { ...update, decision: false })).status).toBe(409);
   } finally { server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve())); }
+});
+
+it('refuses approval if a registered workspace now resolves to a different canonical root', async () => {
+  const { trust, project, data, root, workspaces } = await fixture();
+  const reviewed = await trust.snapshot('project');
+  const replacement = join(root, 'replacement'); await mkdir(replacement);
+  workspaces.set('project', replacement);
+  await expect(trust.update({ workspaceId: 'project', expectedPath: reviewed.path, expectedRevision: reviewed.revision, decision: true }))
+    .rejects.toMatchObject({ code: 'project_changed', status: 409 });
+  expect(trust.trusted(project)).toBe(false); expect(trust.trusted(replacement)).toBe(false); expect(await readdir(data)).toEqual([]);
+});
+
+it('notifies trust observers after a native update and keeps aborted approval unwritten', async () => {
+  const { trust, project } = await fixture();
+  const reviewed = await trust.snapshot('project'); const events: string[] = [];
+  const stop = trust.subscribe(revision => events.push(revision));
+  try {
+    const accepted = await trust.update({ workspaceId: 'project', expectedPath: project, expectedRevision: reviewed.revision, decision: true });
+    expect(events).toContain(accepted.revision);
+    const controller = new AbortController(); controller.abort();
+    await expect(trust.update({ workspaceId: 'project', expectedPath: project, expectedRevision: accepted.revision, decision: false }, controller.signal)).rejects.toThrow();
+    expect(trust.trusted(project)).toBe(true);
+  } finally { stop(); }
+});
+
+it('publishes external revocation and invalid-file observations without restoring a cached trust grant', async () => {
+  const { trust, project, data } = await fixture();
+  const reviewed = await trust.snapshot('project'); const events: string[] = [];
+  const stop = trust.subscribe(revision => events.push(revision));
+  try {
+    await expect.poll(() => events).toContain(reviewed.revision);
+    await trust.update({ workspaceId: 'project', expectedPath: project, expectedRevision: reviewed.revision, decision: true });
+    await writeFile(join(data, 'project-trust.json'), JSON.stringify({ [project]: false }));
+    await expect.poll(async () => events.includes((await trust.snapshot('project')).revision)).toBe(true);
+    expect(trust.trusted(project)).toBe(false);
+    await writeFile(join(data, 'project-trust.json'), '{broken');
+    await expect.poll(() => events).toContain('invalid');
+    expect(() => trust.trusted(project)).toThrow();
+    expect(await readFile(join(data, 'project-trust.json'), 'utf8')).toBe('{broken');
+  } finally { stop(); }
 });

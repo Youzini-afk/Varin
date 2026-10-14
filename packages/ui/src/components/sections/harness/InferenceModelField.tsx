@@ -27,11 +27,11 @@ export function InferenceModelField({ models, value, onCommit, label, placeholde
       }
     }}>
       <SelectTrigger size="settings" className="w-full" aria-label={label}>
-        <SelectValue>{manual || !selected ? t('settings.providers.page.custom.capability.manualModel') : selected.name || selected.id}</SelectValue>
+        <SelectValue>{manual || !selected ? t('settings.harness.models.manualModel') : selected.name || selected.id}</SelectValue>
       </SelectTrigger>
       <SelectContent>
         {models.map(model => <SelectItem key={model.id} value={`model:${model.id}`}>{model.name || model.id}</SelectItem>)}
-        <SelectItem value="__manual">{t('settings.providers.page.custom.capability.manualModel')}</SelectItem>
+        <SelectItem value="__manual">{t('settings.harness.models.manualModel')}</SelectItem>
       </SelectContent>
     </Select>}
     {(manual || !selected || models.length === 0) && <AutoSaveInput value={value} onCommit={id => {

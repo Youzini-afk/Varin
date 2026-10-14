@@ -8,22 +8,8 @@ import {
   resolveConfiguredSearchProvider,
   resolveSearchCredential,
 } from "./web-search.js";
-import type { HarnessServiceContext } from "./router.js";
 
-const context: HarnessServiceContext = {
-  actor: {
-    authorityInstanceId: "test-authority",
-    sessionId: "s1",
-    workerId: "test-worker",
-    workerGeneration: 1,
-    workspaceId: "ws",
-    grantedCapabilities: ["read.web"],
-  },
-  authorizedPaths: [],
-  sessionId: "s1",
-  workspaceId: "ws",
-  signal: new AbortController().signal,
-};
+const context = { signal: new AbortController().signal };
 
 const jsonResponse = (value: unknown, status = 200): Response => new Response(JSON.stringify(value), {
   status,

@@ -79,7 +79,7 @@ fn replay_scenario(tail_phase: Option<&str>) {
     source.revision = Some(0);
     source.mode = SourceMode::Materialized;
     let proposal=serde_json::from_value(json!({"key":"child-context","branch_id":child.child_branch_id,"through_id":null,"expected_revision":0,"summary":"","effective_system_prompt":"private child","instruction_sources":[],"memory_checkpoint":null})).unwrap();
-    let basis=serde_json::from_value(json!({"mode":"agent","threadRole":"worker","revision":0,"configurationDigest":"child-profile","memorySnapshot":{"revision":0,"memories":[]},"sessionId":child.child_thread_id,"projectId":null,"originalSections":[],"instructionSources":[]})).unwrap();
+    let basis=serde_json::from_value(json!({"mode":"agent","threadRole":"worker","revision":0,"configurationDigest":"child-profile","memorySnapshot":{"revision":0,"memories":[]},"threadId":child.child_thread_id,"projectId":null,"originalSections":[],"instructionSources":[]})).unwrap();
     let child =
         f.db.prepare_child(&child.operation_id, source, proposal, basis)
             .unwrap();

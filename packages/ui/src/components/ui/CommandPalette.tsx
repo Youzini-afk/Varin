@@ -16,10 +16,8 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { useUIStore } from '@/stores/useUIStore';
-import { isSessionPinned, useSessionPinnedStore } from '@/stores/useSessionPinnedStore';
-import { usePiSessionStore } from '@/stores/usePiSessionStore';
+import { useThreadStore } from '@/stores/useThreadStore';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
-import { useGitAllBranches, useGitStore } from '@/stores/useGitStore';
 import { useFileSearchStore } from '@/stores/useFileSearchStore';
 import { useDeviceInfo } from '@/lib/device';
 import { useDebouncedValue } from '@/hooks/useDebouncedValue';
@@ -28,7 +26,7 @@ import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import { getContextFileOpenFailureMessage, validateContextFileOpen } from '@/lib/contextFileOpenGuard';
 import { toast } from '@/components/ui';
 import { FileTypeIcon } from '@/components/icons/FileTypeIcon';
-import type { SessionSummary } from '@varin/protocol';
+import type { ThreadSummary } from '@varin/protocol';
 import { formatShortcutForDisplay, getEffectiveShortcutCombo } from '@/lib/shortcuts';
 import { isDesktopShell, isWebRuntime } from '@/lib/desktop';
 import { getSettingsNavIcon, type SettingsRuntimeContext } from '@/lib/settings/metadata';
@@ -45,21 +43,15 @@ import { truncatePathMiddle } from '@/lib/utils';
 import { useI18n } from '@/lib/i18n';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { buildCommandPaletteFileSearchKey, scoreCommandPaletteFiles } from './commandPaletteFilesState';
-import { comparePiSessions, piSessionTitle } from '@/components/pi-session/sessionPresentation';
+import { sortThreads } from '@/components/thread/ThreadSidebar';
 import {
-  openPiSessionFromNavigation,
-  startPiSessionDraftFromNavigation,
-} from '@/lib/pi-runtime/sessionNavigation';
-import { useResourceRuntimeTarget } from '@/components/sections/resources/useResourceRuntimeTarget';
-import {
-  refreshMcpSettingsAvailability,
-  useMcpSettingsAvailabilityState,
-} from '@/lib/settings/mcp-availability';
+  openThreadFromNavigation,
+  startThreadFromNavigation,
+} from '@/lib/agent-runtime/threadNavigation';
 import { useWorkbenchWorkspaceId } from '@/lib/extensions/workbench-workspace';
 import { resourceIdFromWorkspacePath } from '@/lib/documents/path';
 import { openWorkbenchEditor } from '@/lib/workbench/editors/session';
 
-const EMPTY_PINNED_SESSION_IDS = new Set<string>();
 
 type CommandEntry = {
   id: string;
@@ -71,7 +63,7 @@ type CommandEntry = {
 };
 
 type FileHit = { path: string; name: string; relativePath: string };
-const EMPTY_SESSIONS: SessionSummary[] = [];
+const EMPTY_SESSIONS: ThreadSummary[] = [];
 
 const normalizePath = (value: string): string => {
   if (!value) return '';
@@ -103,36 +95,21 @@ export const CommandPalette: React.FC<{ fileOpenTarget?: 'context' | 'editor' }>
   );
   const shortcutOverrides = useUIStore((s) => s.shortcutOverrides);
 
-  const sessionSummaries = usePiSessionStore(React.useCallback(
-    (state) => isCommandPaletteOpen ? state.summaries : EMPTY_SESSIONS,
+  const sessionSummaries = useThreadStore(React.useCallback(
+    (state) => isCommandPaletteOpen ? state.threads : EMPTY_SESSIONS,
     [isCommandPaletteOpen],
   ));
-  const catalogCwd = usePiSessionStore((state) => state.catalogCwd);
-  const catalogLoaded = usePiSessionStore((state) => state.catalogLoaded);
-  const catalogLoading = usePiSessionStore((state) => state.catalogLoading);
-  const prefetchSession = usePiSessionStore((state) => state.prefetchSession);
-  const pinnedSessionIds = useSessionPinnedStore(React.useCallback(
-    (state) => isCommandPaletteOpen ? state.ids : EMPTY_PINNED_SESSION_IDS,
-    [isCommandPaletteOpen],
-  ));
+  const catalogLoaded = useThreadStore(state => state.catalogLoaded);
+  const catalogLoading = useThreadStore(state => state.catalogLoading);
   const currentDirectory = useDirectoryStore((s) => s.currentDirectory);
   const projects = useProjectsStore((s) => s.projects);
   const effectiveDirectory = useEffectiveDirectory();
   const searchFiles = useFileSearchStore((s) => s.searchFiles);
-  const { documents, git: gitApi } = useRuntimeAPIs();
-  const ensureGitStatus = useGitStore((s) => s.ensureStatus);
+  const { documents } = useRuntimeAPIs();
   const { isMobile } = useDeviceInfo();
-  const { runtimeTarget: mcpRuntimeTarget, targetKey: mcpTargetKey } = useResourceRuntimeTarget();
-  const mcpAvailability = useMcpSettingsAvailabilityState();
-  const mcpInstalled = mcpAvailability.targetKey === mcpTargetKey
-    && mcpAvailability.installed === true;
+  const mcpInstalled = true;
   const settingsPageRegistrations = useSettingsPageRegistrations();
   const workbenchCommandRegistrations = useWorkbenchCommandRegistrations();
-
-  React.useEffect(() => {
-    if (!isCommandPaletteOpen) return;
-    void refreshMcpSettingsAvailability(mcpRuntimeTarget, mcpTargetKey);
-  }, [isCommandPaletteOpen, mcpRuntimeTarget, mcpTargetKey]);
 
   const currentRoot = React.useMemo(
     () => (effectiveDirectory ? normalizePath(effectiveDirectory) : null),
@@ -151,49 +128,29 @@ export const CommandPalette: React.FC<{ fileOpenTarget?: 'context' | 'editor' }>
   }, [isCommandPaletteOpen]);
 
   React.useEffect(() => {
-    if (!isCommandPaletteOpen || catalogLoading || (catalogLoaded && catalogCwd === null)) return;
-    void usePiSessionStore.getState().loadCatalog().catch((error) => {
-      toast.error('Failed to load Pi sessions', {
+    if (!isCommandPaletteOpen || catalogLoading || catalogLoaded) return;
+    void useThreadStore.getState().loadCatalog().catch((error) => {
+      toast.error('Failed to load conversations', {
         description: error instanceof Error ? error.message : String(error),
       });
     });
-  }, [catalogCwd, catalogLoaded, catalogLoading, isCommandPaletteOpen]);
+  }, [catalogLoaded, catalogLoading, isCommandPaletteOpen]);
 
   const activeSessions = React.useMemo(
-    () => sessionSummaries.filter((session) => session.archivedAt === undefined),
+    () => sessionSummaries.filter((session) => !session.archived && !session.bot_id && session.deleted_at_ms === null),
     [sessionSummaries],
   );
 
-  // Lazy-load git status for every session directory we plan to display so that
-  // branch labels become available across all projects, not only the active one.
-  // Deferred to idle to keep the first render (and the file-search effect) free
-  // from a flood of git store updates.
-  React.useEffect(() => {
-    if (!isCommandPaletteOpen || !gitApi) return;
-    const handle = setTimeout(() => {
-      const seen = new Set<string>();
-      for (const session of activeSessions) {
-        const dir = normalizePath(session.cwd);
-        if (!dir || seen.has(dir)) continue;
-        seen.add(dir);
-        void ensureGitStatus(dir, gitApi);
-      }
-    }, 0);
-    return () => clearTimeout(handle);
-  }, [isCommandPaletteOpen, activeSessions, gitApi, ensureGitStatus]);
-
-  const close = React.useCallback(() => setCommandPaletteOpen(false), [setCommandPaletteOpen]);
-  const run = React.useCallback(
-    (fn: () => void | Promise<void>) => () => {
-      close();
-      void fn();
-    },
-    [close],
-  );
 
   // ---------------------------------------------------------------------------
   // Commands
   // ---------------------------------------------------------------------------
+  const close = React.useCallback(() => setCommandPaletteOpen(false), [setCommandPaletteOpen]);
+  const run = React.useCallback((fn: () => void | Promise<void>) => () => {
+    setCommandPaletteOpen(false);
+    Promise.resolve().then(fn).catch(error => toast.error(error instanceof Error ? error.message : String(error)));
+  }, [setCommandPaletteOpen]);
+
   const commands = React.useMemo<CommandEntry[]>(() => {
     void fileEditorCommandTargetRevision;
     const executionContext = { currentDirectory, isMobile };
@@ -262,23 +219,7 @@ export const CommandPalette: React.FC<{ fileOpenTarget?: 'context' | 'editor' }>
   // ---------------------------------------------------------------------------
   // Sessions
   // ---------------------------------------------------------------------------
-  const orderedActiveSessions = React.useMemo(() => {
-    return activeSessions.slice().sort((left, right) => comparePiSessions(
-      left,
-      right,
-      (session) => isSessionPinned(pinnedSessionIds, session.cwd, session.id),
-    ));
-  }, [activeSessions, pinnedSessionIds]);
-
-  const allBranches = useGitAllBranches();
-
-  const branchForSession = React.useCallback(
-    (dir: string | null): string | null => {
-      if (dir) return allBranches.get(dir)?.trim() || null;
-      return null;
-    },
-    [allBranches],
-  );
+  const orderedActiveSessions = React.useMemo(() => sortThreads(activeSessions), [activeSessions]);
 
   // ---------------------------------------------------------------------------
   // File search
@@ -352,10 +293,8 @@ export const CommandPalette: React.FC<{ fileOpenTarget?: 'context' | 'editor' }>
   const scoredSessions = React.useMemo(() => {
     if (!hasQuery) return orderedActiveSessions.map((item) => ({ item, score: 0 }));
     return scoreByFuzzyQuery(orderedActiveSessions, liveTrimmed, (session) => [
-      piSessionTitle(session, t('commandPalette.session.untitled')),
-      session.cwd,
-      session.firstMessage,
-      session.allMessagesText,
+      session.title || t('commandPalette.session.untitled'),
+      session.thread_id,
     ].join('\n'), {
       threshold: 0.2,
     });
@@ -405,13 +344,12 @@ export const CommandPalette: React.FC<{ fileOpenTarget?: 'context' | 'editor' }>
   }, [hasQuery, scoredCommands, scoredSettings, scoredSessions, scoredFiles, scoredProjects]);
 
   const handleOpenSession = React.useCallback(
-    (session: SessionSummary) => {
+    (session: ThreadSummary) => {
       close();
-      void openPiSessionFromNavigation({
-        directory: session.cwd,
-        sessionId: session.id,
+      void openThreadFromNavigation({
+        threadId: session.thread_id,
       }).catch((error) => {
-        toast.error('Failed to open Pi session', {
+        toast.error('Failed to open conversation', {
           description: error instanceof Error ? error.message : String(error),
         });
       });
@@ -446,11 +384,11 @@ export const CommandPalette: React.FC<{ fileOpenTarget?: 'context' | 'editor' }>
   const handleOpenProject = React.useCallback(
     (projectId: string, projectPath: string) => {
       close();
-      void startPiSessionDraftFromNavigation({
+      useProjectsStore.getState().setActiveProjectIdOnly(projectId);
+      void startThreadFromNavigation({
         directory: projectPath,
-        projectId,
       }).catch((error) => {
-        toast.error('Failed to create Pi session', {
+        toast.error('Failed to create conversation', {
           description: error instanceof Error ? error.message : String(error),
         });
       });
@@ -515,25 +453,15 @@ export const CommandPalette: React.FC<{ fileOpenTarget?: 'context' | 'editor' }>
                 return (
                   <CommandGroup key="sessions">
                     {visibleSessions.map((session) => {
-                      const title = piSessionTitle(session, t('commandPalette.session.untitled'));
-                      const dir = normalizePath(session.cwd);
-                      const branch = branchForSession(dir);
+                      const title = session.title || t('commandPalette.session.untitled');
                       return (
                         <CommandItem
-                          key={session.id}
-                          value={`session:${session.id}`}
+                          key={session.thread_id}
+                          value={`session:${session.thread_id}`}
                           onSelect={() => handleOpenSession(session)}
-                          onFocus={() => { void prefetchSession(session.id, session.cwd).catch(() => undefined); }}
-                          onPointerEnter={() => { void prefetchSession(session.id, session.cwd).catch(() => undefined); }}
                         >
                           <Icon name="chat-ai-3" className="mr-2 h-4 w-4" />
                           <span className="truncate">{title}</span>
-                          {branch ? (
-                            <span className="ml-auto inline-flex items-center gap-1 text-muted-foreground typography-meta">
-                              <Icon name="git-branch" className="h-3 w-3" />
-                              <span className="truncate max-w-[160px]">{branch}</span>
-                            </span>
-                          ) : null}
                         </CommandItem>
                       );
                     })}

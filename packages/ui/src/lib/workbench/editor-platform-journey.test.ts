@@ -314,7 +314,7 @@ describe('unified editor cross-surface journey', () => {
     expect(model.getValue()).toBe('const result = 2;\n');
 
     const attached = attachEditorContext({
-      sessionId: 'session-main',
+      threadKey: 'thread-main',
       workspaceId,
       resourceId: identity.resourceId,
       kind: 'editor',

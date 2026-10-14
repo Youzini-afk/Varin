@@ -119,19 +119,29 @@ export function createMcpSettings(options: {
     'authorization/reply': input => { if (typeof input.redirect !== 'string') throw new ModelConfigurationError('invalid-params', 'Enter the authorization callback URL'); requireView(input.view).flows.reply(input.id as string, input.redirect); return {}; },
     'authorization/cancel': input => { requireView(input.view).flows.cancel(input.id as string); return {}; },
   };
+  const invoke = async (name: string, input: Record<string, unknown>, signal: AbortSignal = new AbortController().signal): Promise<unknown> => {
+    const action = actions[name];
+    if (!action) throw new ModelConfigurationError('invalid-params', 'Unknown MCP settings action');
+    if (name !== 'open' && name !== 'close') {
+      const view = requireView(input.view);
+      const current = await options.resolveScope(view.cwd, signal);
+      if (view.spec.projectTrusted && !current.projectTrusted) {
+        close(input.view as string);
+        throw new ModelConfigurationError('mcp-project-trust-revoked', 'Project trust changed. Reload MCP settings.', 403);
+      }
+    }
+    signal.throwIfAborted();
+    return action(input, signal);
+  };
   return {
+    invoke,
     register(app: Express, requireAuth: RequestHandler) {
-      for (const [name, action] of Object.entries(actions)) app.post(`/api/mcp/${name}`, requireAuth, async (request, response) => {
+      for (const name of Object.keys(actions)) app.post(`/api/mcp/${name}`, requireAuth, async (request, response) => {
         const controller = new AbortController(), cancel = () => { if (!response.writableEnded) controller.abort(); };
         response.once('close', cancel);
         try {
           if (!object(request.body)) throw new ModelConfigurationError('invalid-params', 'Invalid MCP settings request');
-          if (name !== 'open' && name !== 'close') {
-            const view = requireView(request.body.view);
-            const current = await options.resolveScope(view.cwd, controller.signal);
-            if (view.spec.projectTrusted && !current.projectTrusted) { close(request.body.view as string); throw new ModelConfigurationError('mcp-project-trust-revoked', 'Project trust changed. Reload MCP settings.', 403); }
-          }
-          response.json(await action(request.body, controller.signal));
+          response.json(await invoke(name, request.body, controller.signal));
         }
         catch (error) {
           if (error instanceof ModelConfigurationError) response.status(error.status).json({ code: error.code, message: error.message });

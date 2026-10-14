@@ -4,7 +4,7 @@ import { DesktopConnectionRecovery, type RecoveryVariant } from './DesktopConnec
 import { RemoteConnectionForm } from './RemoteConnectionForm';
 import { resolveRecoveryNextStep } from './desktopRecoveryRouting';
 import { desktopHostsGet, desktopHostsSet } from '@/lib/desktopHosts';
-import { disconnectPiRuntime, getPiRuntimeConnection } from '@/lib/pi-runtime/client';
+import { useThreadStore } from '@/stores/useThreadStore';
 
 type RecoveryScreenProps = {
   /** Recovery variant */
@@ -62,8 +62,7 @@ export function RecoveryScreen({
       return;
     }
 
-    await disconnectPiRuntime();
-    await getPiRuntimeConnection();
+    await useThreadStore.getState().loadCatalog();
     onRetry?.();
   }, [onRetry]);
 

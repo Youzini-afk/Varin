@@ -35,11 +35,13 @@ import {
 import { requestFileAccess } from '@/lib/desktop';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { useUIStore } from '@/stores/useUIStore';
-import { usePiSessionStore } from '@/stores/usePiSessionStore';
-import { usePiDraftStore } from '@/stores/usePiDraftStore';
+import { useThreadStore } from '@/stores/useThreadStore';
+import type { ThreadIdentity } from '@varin/application-client';
+import { submitThreadPrompt } from '@/lib/agent-runtime/submitThreadPrompt';
+import { appendThreadDraftText } from '@/lib/agent-runtime/threadNavigation';
 import { useProjectsStore } from '@/stores/useProjectsStore';
-import { createPiSessionFromNavigation } from '@/lib/pi-runtime/sessionNavigation';
-import { createPiWorktreeSession } from '@/lib/pi-runtime/worktreeSession';
+import { startThreadFromNavigation } from '@/lib/agent-runtime/threadNavigation';
+import { createWorktreeThread } from '@/lib/agent-runtime/worktreeThread';
 import { cn } from '@/lib/utils';
 import { actionInstruction } from '@/lib/actionInstructions';
 import { getCurrentIntlLocale, useI18n } from '@/lib/i18n';
@@ -186,8 +188,7 @@ export const ProjectNotesTodoPanel: React.FC<ProjectNotesTodoPanelProps> = ({
   const todoPanelStartYRef = React.useRef(0);
   const todoPanelStartHeightRef = React.useRef(todoPanelHeight);
 
-  const currentSessionId = usePiSessionStore((state) => state.currentSessionId);
-  const appendPiDraftText = usePiDraftStore((state) => state.appendText);
+  const currentIdentity = useThreadStore(state => state.selectedIdentity);
   const currentDirectory = useDirectoryStore((state) => state.currentDirectory);
   const openContextPanelTab = useUIStore((state) => state.openContextPanelTab);
   const setActiveMainTab = useUIStore((state) => state.setActiveMainTab);
@@ -487,17 +488,17 @@ export const ProjectNotesTodoPanel: React.FC<ProjectNotesTodoPanelProps> = ({
 
   const handleSendToCurrentSession = React.useCallback(
     (todoText: string) => {
-      if (!currentSessionId) {
+      if (!currentIdentity) {
         toast.error(t('rightSidebar.contextNotesTodo.toast.noActiveSession'));
         return;
       }
       routeToChat();
       const fenced = `\`\`\`md\n${todoText}\n\`\`\``;
-      appendPiDraftText(currentSessionId, fenced);
+      appendThreadDraftText(currentIdentity, fenced);
       toast.success(t('rightSidebar.contextNotesTodo.toast.sentToCurrentSession'));
       onActionComplete?.();
     },
-    [appendPiDraftText, currentSessionId, onActionComplete, routeToChat, t]
+    [currentIdentity, onActionComplete, routeToChat, t]
   );
 
   const handleSendToNewWorktreeSession = React.useCallback(
@@ -534,7 +535,8 @@ export const ProjectNotesTodoPanel: React.FC<ProjectNotesTodoPanelProps> = ({
       try {
         routeToChat();
 
-        let sessionId: string;
+        let identity: ThreadIdentity;
+        let directory = projectRef.path;
         if (pendingSendTarget.kind === 'worktree') {
           if (!canCreateWorktree) {
             toast.error(t('rightSidebar.contextNotesTodo.toast.worktreeRequiresGitRepo'));
@@ -544,23 +546,16 @@ export const ProjectNotesTodoPanel: React.FC<ProjectNotesTodoPanelProps> = ({
           if (projectsState.activeProjectId !== projectRef.id) {
             projectsState.setActiveProjectIdOnly(projectRef.id);
           }
-          sessionId = (await createPiWorktreeSession()).sessionId;
+          const created = await createWorktreeThread();
+          identity = created.identity; directory = created.path;
         } else {
-          sessionId = (await createPiSessionFromNavigation({
+          identity = await startThreadFromNavigation({
             directory: projectRef.path,
-            projectId: projectRef.id,
-          })).sessionId;
+          });
         }
 
-        const sessionState = usePiSessionStore.getState();
-        await sessionState.selectModel(sessionId, {
-          id: execution.modelID,
-          provider: execution.providerID,
-        });
-        await sessionState.selectThinking(sessionId, execution.thinkingLevel);
-        if (!await sessionState.prompt(sessionId, promptText)) {
-          throw new Error('The Pi runtime did not accept the todo prompt');
-        }
+        setPendingSendTarget(null);
+        await submitThreadPrompt(identity, promptText, { providerId: execution.providerID, modelId: execution.modelID, thinkingLevel: execution.thinkingLevel }, directory);
 
         toast.success(
           pendingSendTarget.kind === 'worktree'

@@ -1,12 +1,13 @@
 import React from 'react';
-import { usePiSessionStore } from '@/stores/usePiSessionStore';
+import { toast } from '@/components/ui';
+import { useThreadStore } from '@/stores/useThreadStore';
 import { useUIStore } from '@/stores/useUIStore';
 import { parseRoute, updateBrowserURL, hasRouteParams } from '@/lib/router';
 import type { RouteState, AppRouteState } from '@/lib/router';
 import type { MainTab } from '@/stores/useUIStore';
 import { resolveSettingsSlug } from '@/lib/settings/metadata';
 import { isEmbeddedSessionChat } from '@/components/layout/contextPanelEmbeddedChat';
-import { openPiSessionFromNavigation } from '@/lib/pi-runtime/sessionNavigation';
+import { openThreadFromNavigation } from '@/lib/agent-runtime/threadNavigation';
 
 /**
  * Hook that provides bidirectional URL routing for Varin.
@@ -19,9 +20,9 @@ import { openPiSessionFromNavigation } from '@/lib/pi-runtime/sessionNavigation'
  * Works in:
  * - Web: Full bidirectional sync
  * - Desktop: Full bidirectional sync
- * - Embedded session-chat iframe (`?piPanel=session-chat`): No URL updates.
+ * - Embedded session-chat iframe (`?panel=session-chat`): No URL updates.
  *   The iframe's session identity is fixed at mount (the parent builds the
- *   src with `sessionId`); in-place subtask navigation must NOT rewrite the
+ *   src with `threadId`); in-place subtask navigation must NOT rewrite the
  *   URL, otherwise the embedded Varin identity params get stripped and
  *   `isEmbeddedSessionChat()` starts returning false, breaking subsequent
  *   "Open subtask" clicks.
@@ -59,18 +60,10 @@ export function useRouter(options: { enabled?: boolean } = {}): void {
 
       try {
         // 1. Apply session first (may trigger async operations)
-        if (route.sessionId) {
-          const sessionState = usePiSessionStore.getState();
-          const current = sessionState.records[route.sessionId];
-          if (route.sessionId !== sessionState.currentSessionId || !current?.open || !current.snapshot) {
-            try {
-              await openPiSessionFromNavigation({
-                directory: route.directory,
-                sessionId: route.sessionId,
-              });
-            } catch (error) {
-              console.error('[router] failed to open Pi session:', error);
-            }
+        if (route.threadId) {
+          const sessionState = useThreadStore.getState();
+          if (route.threadId !== sessionState.selectedIdentity?.threadId || route.branchId !== sessionState.selectedIdentity?.branchId) {
+            await openThreadFromNavigation({ directory: route.directory, threadId: route.threadId, ...(route.branchId ? { branchId: route.branchId } : {}) });
           }
         }
 
@@ -99,6 +92,9 @@ export function useRouter(options: { enabled?: boolean } = {}): void {
         if (route.diffFile && (route.tab === 'diff' || !route.tab)) {
           navigateToDiff(route.diffFile);
         }
+      } catch (error) {
+        if (applyId === latestRouteApplyRef.current) toast.error(error instanceof Error ? error.message : String(error));
+        return false;
       } finally {
         activeRouteAppliesRef.current = Math.max(0, activeRouteAppliesRef.current - 1);
         isApplyingRouteRef.current = activeRouteAppliesRef.current > 0;
@@ -111,11 +107,12 @@ export function useRouter(options: { enabled?: boolean } = {}): void {
    * Get current app state for URL serialization.
    */
   const getCurrentAppState = React.useCallback((): AppRouteState => {
-    const sessionState = usePiSessionStore.getState();
+    const sessionState = useThreadStore.getState();
     const uiState = useUIStore.getState();
 
     return {
-      sessionId: sessionState.currentSessionId,
+      threadId: sessionState.selectedIdentity?.threadId ?? null,
+      branchId: sessionState.selectedIdentity?.branchId ?? null,
       tab: uiState.activeMainTab,
       isSettingsOpen: uiState.isSettingsDialogOpen,
       settingsPath: uiState.settingsPage,
@@ -160,16 +157,18 @@ export function useRouter(options: { enabled?: boolean } = {}): void {
 
     // Apply the initial route
     const initializeRoute = async () => {
-      await applyRoute(route);
+      const applied = await applyRoute(route);
+      if (applied === false) return;
 
       // After applying, update URL to normalized form (use replaceState).
       // Use the parsed route values instead of an immediate store snapshot so
-      // deep links do not briefly normalize `?session=...` back to `/` while
+      // deep links do not briefly normalize `?thread=...` back to `/` while
       // the session's directory/message bootstrap is still catching up.
       if (!isEmbeddedChat) {
         updateBrowserURL({
           ...getCurrentAppState(),
-          sessionId: route.sessionId ?? usePiSessionStore.getState().currentSessionId,
+          threadId: route.threadId ?? useThreadStore.getState().selectedIdentity?.threadId ?? null,
+          branchId: route.branchId ?? useThreadStore.getState().selectedIdentity?.branchId ?? null,
           tab: route.tab ?? useUIStore.getState().activeMainTab,
           settingsPath: route.settingsPath ?? useUIStore.getState().settingsPage,
           diffFile: route.diffFile ?? useUIStore.getState().pendingDiffFile,
@@ -186,17 +185,17 @@ export function useRouter(options: { enabled?: boolean } = {}): void {
       return;
     }
 
-    let prevSessionId: string | null = usePiSessionStore.getState().currentSessionId;
+    let prevSessionId = JSON.stringify(useThreadStore.getState().selectedIdentity);
 
-    const unsubscribe = usePiSessionStore.subscribe((state) => {
-      const sessionId = state.currentSessionId;
+    const unsubscribe = useThreadStore.subscribe((state) => {
+      const threadId = JSON.stringify(state.selectedIdentity);
 
       // Skip if no change or if we're currently applying a route
-      if (sessionId === prevSessionId || isApplyingRouteRef.current) {
+      if (threadId === prevSessionId || isApplyingRouteRef.current) {
         return;
       }
 
-      prevSessionId = sessionId;
+      prevSessionId = threadId;
       syncURLFromState();
     });
 

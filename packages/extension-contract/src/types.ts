@@ -135,9 +135,6 @@ export interface VarinExtensionManifest {
     surfaces?: VarinExtensionSurfaceEntrypoint[];
   };
   id: string;
-  integrates?: {
-    piPackages?: string[];
-  };
   metadata?: {
     description?: string;
     homepage?: string;

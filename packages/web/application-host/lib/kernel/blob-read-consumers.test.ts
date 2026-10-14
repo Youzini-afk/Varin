@@ -4,6 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { afterEach, it } from 'vitest';
 import { KernelClient, KernelClientError, type KernelGrantHandle } from './kernel-client.js';
+import { KERNEL_PROTOCOL_VERSION } from './protocol.generated.js';
 import { openExperimentInputTransfer } from '../harness/experiment-workspace.js';
 
 const roots: string[] = [];
@@ -33,8 +34,8 @@ async function fixture() {
   const cancellations: Array<{ id: string; discard: boolean }> = [];
   let readEntered!: (frame: Frame) => void;
   const entered = new Promise<Frame>(resolve => { readEntered = resolve; });
-  const reply = (frame: Frame, result: unknown) => owner.consumeFrame({ v: 1, kind: 'response', id: frame.id, ok: true, result });
-  const fail = (frame: Frame, code: string) => owner.consumeFrame({ v: 1, kind: 'response', id: frame.id, ok: false, error: { code, message: code } });
+  const reply = (frame: Frame, result: unknown) => owner.consumeFrame({ v: KERNEL_PROTOCOL_VERSION, kind: 'response', id: frame.id, ok: true, result });
+  const fail = (frame: Frame, code: string) => owner.consumeFrame({ v: KERNEL_PROTOCOL_VERSION, kind: 'response', id: frame.id, ok: false, error: { code, message: code } });
   owner.transport = {
     async send(frame, lane) {
       frames.push({ frame, lane });
@@ -90,7 +91,8 @@ it('the original input transfer waits for the read response before closing and r
     workspaceId: 'owning-workspace', executionWorkspaceId: 'execution-workspace',
     captureScopes: [], capturedPathCount: 1, inventoryFingerprint: null, captureSemantics: null,
   };
-  const transfer = await openExperimentInputTransfer(f.client, { workspaceId: input.workspaceId, executionWorkspaceId: input.executionWorkspaceId }, input);
+  const transfer = await openExperimentInputTransfer(f.client, { workspaceId: input.workspaceId, executionWorkspaceId: input.executionWorkspaceId,
+    owner: { runtime: 'agent', threadId: 'original-thread', runId: 'original-run', operationId: 'original-operation' } }, input);
   const controller = new AbortController();
   const iterator = transfer.readObject(hash, 3, controller.signal)[Symbol.asyncIterator]();
   let readSettled = false;

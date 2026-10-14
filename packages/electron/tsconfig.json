@@ -13,7 +13,6 @@
       "@varin/application-client": ["./node_modules/@varin/application-client/dist/index.d.ts"],
       "@varin/application-client/desktop": ["./node_modules/@varin/application-client/dist/desktop.d.ts"],
       "@varin/protocol": ["./node_modules/@varin/protocol/dist/index.d.ts"],
-      "@varin/runtime-broker": ["./node_modules/@varin/runtime-broker/dist/index.d.ts"],
       "@varin/settings-store": ["./node_modules/@varin/settings-store/dist/index.d.ts"],
       "@varin/web/server/index.js": ["./packages/web/.application-host-types/index.d.ts"],
       "@varin/web/server/*": ["./packages/web/.application-host-types/*"],

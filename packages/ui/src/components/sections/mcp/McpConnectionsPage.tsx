@@ -1,4 +1,6 @@
 import React from 'react';
+import { ProjectTrustSettings } from '@/components/sections/shared/ProjectTrustSettings';
+import { getProjectTrustGeneration, subscribeProjectTrustChanges } from '@/lib/projectTrust';
 import { json } from '@codemirror/lang-json';
 import { parse, type ParseError } from 'jsonc-parser';
 import { createMcpConnectionsHttpAPI, getRuntimeEndpointGeneration, subscribeRuntimeEndpointChanged, type McpConfigurationSnapshot, type McpConfigurationDocument, type AuthorizationState } from '@varin/application-client';
@@ -18,6 +20,7 @@ export function McpConnectionsPage() {
   const text = (key: string) => t(key as never);
   const cwd = useDirectoryStore(state => state.currentDirectory);
   const host = React.useSyncExternalStore(subscribeRuntimeEndpointChanged, getRuntimeEndpointGeneration, getRuntimeEndpointGeneration);
+  const trustVersion = React.useSyncExternalStore(subscribeProjectTrustChanges, getProjectTrustGeneration, getProjectTrustGeneration);
   const api = React.useMemo(() => createMcpConnectionsHttpAPI(host), [host]);
   const [snapshot, setSnapshot] = React.useState<McpConfigurationSnapshot | null>(null);
   const [path, setPath] = React.useState('');
@@ -33,14 +36,23 @@ export function McpConnectionsPage() {
   const revision = React.useRef(0);
   const extensions = React.useMemo(() => [json()], []);
   const dirty = document !== null && draft !== document.content;
+  const openedOwner = React.useRef<string | null>(null);
+  const preservedDraft = React.useRef(false);
+  const latestDraft = React.useRef({ dirty, path }); latestDraft.current = { dirty, path };
+  const documentAllowed = !!snapshot?.sources.some(source => source.path === document?.path);
   const valid = React.useMemo(() => { const errors: ParseError[] = []; const value = parse(draft, errors, { allowTrailingComma: true }); return errors.length === 0 && value !== null && typeof value === 'object' && !Array.isArray(value); }, [draft]);
   React.useEffect(() => {
     const controller = new AbortController();
+    const ownerKey = JSON.stringify([host, cwd]);
+    const keepDraft = openedOwner.current === ownerKey && latestDraft.current.dirty;
+    openedOwner.current = ownerKey; preservedDraft.current = keepDraft;
+    const retainedPath = latestDraft.current.path;
     active.current = null; authId.current = undefined; revision.current += 1;
-    setSnapshot(null); setDocument(null); setDraft(''); setPath(''); setError(''); setAuthorization(null);
+    setSnapshot(null); setBusy(false); setError(''); setAuthorization(null);
+    if (!keepDraft) { setDocument(null); setDraft(''); setPath(''); }
     void api.open(cwd || undefined, controller.signal).then(value => {
       if (controller.signal.aborted) { void api.close(value.view).catch(() => {}); return; }
-      active.current = { view: value.view, signal: controller.signal }; setSnapshot(value); setPath(value.sources[0]?.path ?? '');
+      active.current = { view: value.view, signal: controller.signal }; setSnapshot(value); setPath(keepDraft ? retainedPath : value.sources[0]?.path ?? '');
     }, error => { if (!controller.signal.aborted) setError(error instanceof Error ? error.message : String(error)); });
     const stop = subscribeVarinEvents(event => {
       if (event.type !== 'settings-changed' || event.owner !== 'agent-settings' || !event.ids.includes('mcp')) return;
@@ -49,18 +61,18 @@ export function McpConnectionsPage() {
       if (authId.current) void api.authorization(current.view, authId.current, current.signal).then(setAuthorization, error => { if (!controller.signal.aborted) setError(String(error)); });
     });
     return () => { const current = active.current; active.current = null; controller.abort(); stop(); if (current) void api.close(current.view).catch(() => {}); };
-  }, [api, cwd]);
+  }, [api, cwd, host, trustVersion]);
   const load = React.useCallback(async () => {
     const current = active.current; if (!current || !path) return;
     const request = ++revision.current;
     setDocument(null); setBusy(true); setError('');
     try {
       const next = await api.readDocument(current.view, path, current.signal);
-      if (request === revision.current && active.current === current) { setDocument(next); setDraft(next.content); }
+      if (request === revision.current && active.current === current) { preservedDraft.current = false; setDocument(next); setDraft(next.content); }
     } catch (error) { if (!current.signal.aborted && request === revision.current) setError(error instanceof Error ? error.message : String(error)); }
     finally { if (request === revision.current) setBusy(false); }
   }, [api, path]);
-  React.useEffect(() => { void load(); }, [load, snapshot?.view]);
+  React.useEffect(() => { if (!preservedDraft.current) void load(); }, [load, snapshot?.view]);
   const run = async (action: (current: NonNullable<typeof active.current>) => Promise<void>) => {
     const current = active.current; if (!current) return;
     setBusy(true); setError('');
@@ -68,6 +80,7 @@ export function McpConnectionsPage() {
     finally { if (active.current === current) setBusy(false); }
   };
   return <SettingsPageLayout title={t('settings.mcp.title')}>
+    <ProjectTrustSettings />
     {error ? <p role="alert" className="typography-meta text-destructive">{error}</p> : null}
     {snapshot?.issues.map((issue, index) => <p key={index} role="alert" className="typography-meta text-destructive">{issue}</p>)}
     {snapshot ? <>
@@ -92,10 +105,11 @@ export function McpConnectionsPage() {
           <Select value={path} disabled={busy || dirty} onValueChange={value => { setPath(value); setSelection({ mode: 'settings' }); }}><SelectTrigger size="settings" aria-label={text('settings.varin.mcp.config.source.label')}><SelectValue /></SelectTrigger><SelectContent>{snapshot.sources.map(source => <SelectItem key={source.path} value={source.path}>{source.path}</SelectItem>)}</SelectContent></Select>
         </SettingsFieldRow>
         {document ? <>
-          {valid ? <McpStructuredConfigEditor native project={snapshot.sources.find(source => source.path === path)?.scope === 'project'} content={draft} mode={selection.mode} serverName={selection.name} disabled={busy} onChange={setDraft} /> : null}
+          {!documentAllowed ? <p role="status" className="typography-meta text-muted-foreground">{t('settings.varin.mcp.config.untrusted')}</p> : null}
+          {valid ? <McpStructuredConfigEditor project={snapshot.sources.find(source => source.path === path)?.scope === 'project'} content={draft} mode={selection.mode} serverName={selection.name} disabled={busy || !documentAllowed} onChange={setDraft} /> : null}
           <Button variant="ghost" onClick={() => setRaw(value => !value)}>{text(raw ? 'settings.varin.mcp.config.raw.hide' : 'settings.varin.mcp.config.raw.show')}</Button>
-          {raw || !valid ? <div className="h-80 overflow-hidden rounded-md border border-border/60"><CodeMirrorEditor value={draft} onChange={setDraft} extensions={extensions} readOnly={busy} className="h-full" /></div> : null}
-          <div className="flex gap-2"><Button disabled={busy || !dirty || !valid} onClick={() => { void run(async current => { const saved = await api.saveDocument(current.view, document.path, draft, document.revision, current.signal); if (active.current === current) { setDocument(saved); setDraft(saved.content); setSnapshot(await api.read(current.view, current.signal)); } }); }}>{t('settings.models.save')}</Button><Button variant="outline" disabled={busy} onClick={() => { void load(); }}>{text(dirty ? 'settings.varin.mcp.config.actions.reloadDiscard' : 'settings.varin.mcp.config.actions.reload')}</Button></div>
+          {raw || !valid ? <div className="h-80 overflow-hidden rounded-md border border-border/60"><CodeMirrorEditor value={draft} onChange={setDraft} extensions={extensions} readOnly={busy || !documentAllowed} className="h-full" /></div> : null}
+          <div className="flex gap-2"><Button disabled={busy || !dirty || !valid || !documentAllowed} onClick={() => { void run(async current => { const saved = await api.saveDocument(current.view, document.path, draft, document.revision, current.signal); if (active.current === current) { setDocument(saved); setDraft(saved.content); setSnapshot(await api.read(current.view, current.signal)); } }); }}>{t('settings.models.save')}</Button><Button variant="outline" disabled={busy} onClick={() => { void load(); }}>{text(dirty ? 'settings.varin.mcp.config.actions.reloadDiscard' : 'settings.varin.mcp.config.actions.reload')}</Button></div>
         </> : null}
       </SettingsSection>
     </> : null}

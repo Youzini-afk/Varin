@@ -18,7 +18,7 @@ interface AgentProfilesState {
   showAllFocuses: boolean;
 }
 const initial: AgentProfilesState = {
-  runtime: 'pi', host: '', snapshot: null, loading: false, saving: false, error: null,
+  runtime: 'agent', host: '', snapshot: null, loading: false, saving: false, error: null,
   selectedId: null, creating: false, view: 'profiles', query: '', showAllFocuses: false,
 };
 let state = initial;

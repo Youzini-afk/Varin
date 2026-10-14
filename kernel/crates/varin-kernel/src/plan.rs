@@ -86,7 +86,7 @@ pub(crate) fn eligible(catalog: &Catalog, run_id: &str) -> Result<bool, Executio
         .map_err(error)?
         .is_some();
     let mode = if bot { "bot" } else { "agent" };
-    if basis.mode != mode || basis.session_id != run.thread_id {
+    if basis.mode != mode || basis.thread_id != run.thread_id {
         return Ok(false);
     }
     // A display role cannot manufacture child admission. Historical/cancelled child

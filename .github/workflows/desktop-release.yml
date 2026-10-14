@@ -47,7 +47,7 @@ jobs:
       - run: bun run lint
       - name: Build and verify native kernel authority
         run: node scripts/test-kernel-authority.mjs --build
-      - run: bun run test:pi
+      - run: bun run test:packages
       - run: bun run test:cloud
 
       - name: Build Linux x64 VM guest runtime
@@ -235,7 +235,7 @@ jobs:
         run: |
           set -euo pipefail
           bun run --cwd packages/electron build:web-assets
-          bun run --cwd packages/electron prepare:pi-runtime
+          bun run --cwd packages/electron prepare:runtime
           bun run --cwd packages/electron bundle:main
           bun run --cwd packages/electron verify:native
           args=("--${{ matrix.target }}" "--${{ matrix.architecture }}" "--publish=never")

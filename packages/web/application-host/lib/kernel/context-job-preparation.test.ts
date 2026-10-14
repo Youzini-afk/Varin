@@ -50,7 +50,7 @@ it('holds the original producer through create and recalls a committed original 
     f.runtime.contextJobs.mockResolvedValue([f.job]); f.revoked.abort(new Error('Producer revoked after commit'));
     throw new Error('Admission ACK lost');
   });
-  const result = await admitContextJobCandidate(f.runtime as unknown as AgentRuntimeClient, f.owner, { sessionId: 'thread:main' }, input, new AbortController().signal);
+  const result = await admitContextJobCandidate(f.runtime as unknown as AgentRuntimeClient, f.owner, { threadId: 'thread:main' }, input, new AbortController().signal);
   expect(result).toEqual({ job: f.job, recovered: true });
   expect(f.owner.prepare).toHaveBeenCalledOnce(); expect(f.runtime.createContextJob).toHaveBeenCalledOnce();
   expect(f.release).toHaveBeenCalledOnce();
@@ -59,14 +59,14 @@ it('does not accept another source recipe after an uncertain admission', async (
   const f = fixture(); const failure = new Error('Uncertain admission');
   f.runtime.createContextJob.mockRejectedValue(failure);
   f.runtime.contextJobs.mockResolvedValue([{ ...f.job, request: { ...f.job.request, effective_system_prompt: 'Different original body' } }]);
-  await expect(admitContextJobCandidate(f.runtime as unknown as AgentRuntimeClient, f.owner, { sessionId: 'thread:main' }, input, new AbortController().signal)).rejects.toBe(failure);
+  await expect(admitContextJobCandidate(f.runtime as unknown as AgentRuntimeClient, f.owner, { threadId: 'thread:main' }, input, new AbortController().signal)).rejects.toBe(failure);
   expect(f.release).toHaveBeenCalledOnce(); expect(f.runtime.createContextJob).toHaveBeenCalledOnce();
 });
 it('drops a late pure plan after caller cancellation without native admission', async () => {
   const f = fixture(); const stop = new AbortController();
   const prepare = f.owner.prepare;
   f.owner.prepare = async (...args) => { const lease = await prepare(...args); stop.abort(new Error('Request closed')); return lease; };
-  await expect(admitContextJobCandidate(f.runtime as unknown as AgentRuntimeClient, f.owner, { sessionId: 'thread:main' }, input, stop.signal)).rejects.toThrow('Request closed');
+  await expect(admitContextJobCandidate(f.runtime as unknown as AgentRuntimeClient, f.owner, { threadId: 'thread:main' }, input, stop.signal)).rejects.toThrow('Request closed');
   expect(f.runtime.createContextJob).not.toHaveBeenCalled(); expect(f.release).toHaveBeenCalledOnce();
 });
 it('recalls an accepted manual key and starts a frozen text job without current provider or model credentials', async () => {
@@ -133,7 +133,7 @@ it('binds a model plan only after pure planning, retaining the same producer and
     return { configuration: { ...description, providerFamily: 'openai-responses', endpoint: 'https://not-contacted.invalid/responses' }, credentialScope: input.credentialScope! };
   });
   const { credentialScope: _scope, ...previewInput } = input;
-  await admitContextJobCandidate(f.runtime as unknown as AgentRuntimeClient, f.owner, { sessionId: 'thread:main' }, { ...previewInput, configuration: description }, new AbortController().signal, bind);
+  await admitContextJobCandidate(f.runtime as unknown as AgentRuntimeClient, f.owner, { threadId: 'thread:main' }, { ...previewInput, configuration: description }, new AbortController().signal, bind);
   expect(bind).toHaveBeenCalledOnce(); expect(original).toHaveBeenCalledOnce();
   expect(f.runtime.createContextJob.mock.calls[0]![0]).toMatchObject({ configuration: { providerFamily: 'openai-responses' }, credentialScope: input.credentialScope,
     compaction: { producer: candidate.producer, plan: { kind: 'model_plan', sourceCutHash: 'cut' } } });

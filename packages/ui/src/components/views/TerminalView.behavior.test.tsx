@@ -28,10 +28,7 @@ vi.mock('@/stores/useDirectoryStore', () => ({ useDirectoryStore: Object.assign(
   (select: (state: { currentDirectory: string }) => unknown) => select({ currentDirectory: mocks.directory }),
   { getState: () => ({ currentDirectory: mocks.directory }) },
 ) }));
-vi.mock('@/stores/usePiSessionStore', () => {
-  const state = { currentSessionId: null, records: {}, summaries: [] };
-  return { usePiSessionStore: Object.assign((select: (value: typeof state) => unknown) => select(state), { getState: () => state }) };
-});
+
 vi.mock('@/stores/useProjectsStore', () => ({ useProjectsStore: { getState: vi.fn() } }));
 vi.mock('@/contexts/useThemeSystem', () => ({ useThemeSystem: () => ({ currentTheme: mocks.theme }) }));
 vi.mock('@/hooks/useFontPreferences', () => ({ useFontPreferences: () => ({ monoFont: 'monospace' }) }));
@@ -40,7 +37,6 @@ vi.mock('@/lib/terminalTheme', () => ({ convertThemeToXterm: () => ({ background
 vi.mock('@/lib/terminalPreview', async original => ({ ...await original<typeof import('@/lib/terminalPreview')>(), isTerminalPreviewUrlAvailable: mocks.probe }));
 vi.mock('@/lib/i18n', () => ({ useI18n: () => ({ t: mocks.t }) }));
 vi.mock('@/lib/utils', () => ({ cn: (...values: unknown[]) => values.filter(value => typeof value === 'string').join(' ') }));
-vi.mock('@/lib/pi-runtime/sessionDrafts', () => ({ ensurePiSessionDraftTarget: vi.fn() }));
 vi.mock('@/stores/useInlineCommentDraftStore', () => ({ useInlineCommentDraftStore: () => vi.fn() }));
 vi.mock('@/components/icon/Icon', () => ({ Icon: () => null }));
 vi.mock('@/components/ui', () => ({ toast: { error: vi.fn() } }));

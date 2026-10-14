@@ -75,7 +75,7 @@ it.each([1, 3])('real FileSearch uses configured %i-worker budget and scoped adm
   expect(turns).toBe(2);
   // Main launch actually installs B's MemoryTools and calls its production context owner.
   expect(memoryQueries.filter(query => query.action === 'synchronize' && query.runId === receipt.run_id)).toHaveLength(2);
-  expect(memoryQueries[0]?.scope).toEqual({ mode: 'agent', sessionId: 'family-thread', projectId: null });
+  expect(memoryQueries[0]?.scope).toEqual({ mode: 'agent', threadId: 'family-thread', projectId: null });
   for (const body of requestBodies) expect(body.tools).toEqual(expect.arrayContaining([expect.objectContaining({ name: 'memory' })]));
   const history = await runtimeClient.history('family-branch');
   const result = history.find(item => item.source === 'tool'); expect(result).toBeDefined();

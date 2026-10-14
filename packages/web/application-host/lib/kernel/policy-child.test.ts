@@ -37,9 +37,9 @@ async function fixture() {
     source: { kind: 'local', display: 'Collaboration policy example', specifier: source } });
   await runtime.upsertServiceRoutingRule({ expectedRevision: (await runtime.routing.read()).document.revision,
     rule: { serviceId: 'varin.agent.policy', version: 4, providerKeys: ['example.collaboration-policy:host:varin.agent.policy@4'],
-      scope: { sessionId: 'parent-thread' }, allowFallback: false } });
+      scope: { threadId: 'parent-thread' }, allowFallback: false } });
   const prepare = async (owner = runtime) => {
-    const lease = await createAgentPolicy(owner)({ sessionId: 'parent-thread' });
+    const lease = await createAgentPolicy(owner)({ threadId: 'parent-thread' });
     if (!lease) throw new Error('Installed example was not selected');
     cleanups.push(async () => { lease.release(); });
     return lease;

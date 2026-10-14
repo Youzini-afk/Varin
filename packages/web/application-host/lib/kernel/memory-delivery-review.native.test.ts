@@ -251,12 +251,12 @@ it('trusted child admission shares only global/project notes and Bot admission r
     [{ kind: 'global' }, 'SCOPE_GLOBAL'],
     [{ kind: 'project', id: 'admitted-project' }, 'SCOPE_ADMITTED_PROJECT'],
     [{ kind: 'project', id: 'selected-project' }, 'SCOPE_SIDEBAR_PROJECT_DO_NOT_USE'],
-    [{ kind: 'session', id: parent.threadId }, 'SCOPE_PARENT_PRIVATE'],
-    [{ kind: 'session', id: child.threadId }, 'SCOPE_CHILD_PRIVATE'],
+    [{ kind: 'thread', id: parent.threadId }, 'SCOPE_PARENT_PRIVATE'],
+    [{ kind: 'thread', id: child.threadId }, 'SCOPE_CHILD_PRIVATE'],
   ] as const) await f.personalization.saveNote({ scope, content });
   await f.personalization.savePrompt({ kind: 'global' }, { sections: { ordinary_rule: 'ORDINARY_PROFILE_ONLY' } }, (await f.personalization.catalog()).revision);
   const prepared = await f.prepareContext(child, null, { mode: 'agent', threadRole: 'worker', projectId: 'admitted-project' });
-  expect(prepared.personalization).toMatchObject({ mode: 'agent', threadRole: 'worker', sessionId: child.threadId, projectId: 'admitted-project' });
+  expect(prepared.personalization).toMatchObject({ mode: 'agent', threadRole: 'worker', threadId: child.threadId, projectId: 'admitted-project' });
   for (const value of ['SCOPE_GLOBAL', 'SCOPE_ADMITTED_PROJECT', 'SCOPE_CHILD_PRIVATE', 'ORDINARY_PROFILE_ONLY']) expect(prepared.effectiveSystemPrompt).toContain(value);
   for (const value of ['SCOPE_PARENT_PRIVATE', 'SCOPE_SIDEBAR_PROJECT_DO_NOT_USE']) expect(prepared.effectiveSystemPrompt).not.toContain(value);
   const noProject = await f.prepareContext(child, null, { mode: 'agent', threadRole: 'read-only', projectId: null });
@@ -310,7 +310,7 @@ it('the existing personalization document retains note identity and prompt secti
   expect(before.memories).toEqual([oldNote]);
   expect(before.prompts).toEqual(oldDocument.prompts);
   const saved = await f.personalization.mutation({ origin: 'review:preexisting:first-write', action: 'save', scope: { kind: 'global' }, content: 'NEW_USER_NOTE', revision: before.revision },
-    { mode: 'agent', sessionId: 'existing-asset-thread', projectId: null });
+    { mode: 'agent', threadId: 'existing-asset-thread', projectId: null });
   expect(saved.changes[0]!.id).toBe(42);
   expect(saved.revision).toBe(before.revision + 1);
   const after = await f.personalization.catalog();
@@ -324,9 +324,9 @@ it('a committed mutation with a lost Host receipt reconciles after reopen and an
   const f = await fixture((_body, response) => complete(response));
   const identity = await f.api.create('lost-memory-receipt');
   await turn(f, identity, 'initialize-frozen-memory');
-  const admitted = { mode: 'agent' as const, sessionId: identity.threadId, projectId: null };
+  const admitted = { mode: 'agent' as const, threadId: identity.threadId, projectId: null };
   const input = { origin: 'review:model-step:lost-receipt:call-1', action: 'save' as const,
-    scope: { kind: 'session' as const, id: identity.threadId }, content: 'COMMITTED_WITHOUT_HOST_RECEIPT', revision: 0 };
+    scope: { kind: 'thread' as const, id: identity.threadId }, content: 'COMMITTED_WITHOUT_HOST_RECEIPT', revision: 0 };
   const put = f.kernel.putRecord.bind(f.kernel);
   const getOperation = f.kernel.getOperation.bind(f.kernel);
   let committed = false;
@@ -372,8 +372,8 @@ it('a committed mutation with a lost Host receipt reconciles after reopen and an
 
 it('and UI mutations use one exact revision CAS and scope moves retain old-scope deletion evidence', async () => {
   const f = await fixture((_body, response) => complete(response));
-  const actor = { mode: 'agent' as const, sessionId: 'actor', projectId: 'project-a' };
-  const runtimeInput = { origin: 'review:cas:call-1', action: 'save' as const, scope: { kind: 'session' as const, id: actor.sessionId }, content: 'PLAN_CAS', revision: 0 };
+  const actor = { mode: 'agent' as const, threadId: 'actor', projectId: 'project-a' };
+  const runtimeInput = { origin: 'review:cas:call-1', action: 'save' as const, scope: { kind: 'thread' as const, id: actor.threadId }, content: 'PLAN_CAS', revision: 0 };
   const [native, ui] = await Promise.allSettled([
     f.personalization.mutation(runtimeInput, actor),
     f.personalization.saveNote({ scope: { kind: 'global' }, content: 'UI_CAS', revision: 0 }),
@@ -388,7 +388,7 @@ it('and UI mutations use one exact revision CAS and scope moves retain old-scope
     { id: note.id, scope: note.scope, note: null },
     { id: note.id, scope: moved.result.scope, note: moved.result },
   ]);
-  await expect(f.personalization.mutation({ ...runtimeInput, origin: 'review:cas:forbidden-scope', scope: { kind: 'session', id: 'another-thread' }, revision: moved.revision }, actor)).rejects.toMatchObject({ status: 403 });
+  await expect(f.personalization.mutation({ ...runtimeInput, origin: 'review:cas:forbidden-scope', scope: { kind: 'thread', id: 'another-thread' }, revision: moved.revision }, actor)).rejects.toMatchObject({ status: 403 });
   await expect(f.personalization.mutation({ ...runtimeInput, origin: 'review:cas:forbidden-id', id: note.id, revision: moved.revision }, actor)).rejects.toMatchObject({ status: 404 });
   await expect(f.personalization.mutation({ ...runtimeInput, origin: 'review:cas:bot', revision: moved.revision }, { ...actor, mode: 'bot' })).rejects.toThrow();
   expect((await f.personalization.catalog()).revision).toBe(moved.revision);
@@ -423,19 +423,19 @@ it('actual model tools share UI notes, keep reads cheap, enforce revision CAS an
   expect(results.map(result => result.call_id)).toEqual(['memory-read-empty', 'memory-save', 'memory-read-saved', 'memory-stale-write', 'memory-delete']);
   expect(results[0]!.completion).toMatchObject({ kind: 'result', outcome: 'succeeded', effect: 'none', content: { data: { revision: 0, notes: [] }, parts: [] } });
   expect(results[1]!.completion).toMatchObject({ kind: 'result', outcome: 'succeeded', effect: 'confirmed', content: { data: {
-    memoryReceipt: { revision: 1, changes: [{ id: 1, scope: { kind: 'session', id: identity.threadId }, note: { content: 'REAL_NATIVE_MEMORY' } }] },
+    memoryReceipt: { revision: 1, changes: [{ id: 1, scope: { kind: 'thread', id: identity.threadId }, note: { content: 'REAL_NATIVE_MEMORY' } }] },
   }, parts: [] } });
   expect(results[2]!.completion).toMatchObject({ kind: 'result', outcome: 'succeeded', effect: 'none', content: { data: { revision: 1,
-    notes: [{ id: 1, content: 'REAL_NATIVE_MEMORY', scope: { kind: 'session', id: identity.threadId } }] }, parts: [] } });
+    notes: [{ id: 1, content: 'REAL_NATIVE_MEMORY', scope: { kind: 'thread', id: identity.threadId } }] }, parts: [] } });
   expect(results[3]!.completion).toMatchObject({ kind: 'not_dispatched' });
   expect(results[4]!.completion).toMatchObject({ kind: 'result', outcome: 'succeeded', effect: 'confirmed', content: { data: {
-    memoryReceipt: { revision: 2, changes: [{ id: 1, scope: { kind: 'session', id: identity.threadId }, note: null }] },
+    memoryReceipt: { revision: 2, changes: [{ id: 1, scope: { kind: 'thread', id: identity.threadId }, note: null }] },
   }, parts: [] } });
   for (const request of f.requests) expect(JSON.stringify(system(request.body))).not.toContain('REAL_NATIVE_MEMORY');
   expect(history.filter(item => item.source === 'environment' && JSON.stringify(item).includes('REAL_NATIVE_MEMORY'))).toEqual([]);
   const toolQueries = f.memoryQueries.filter(query => query.action === 'tool');
   expect(toolQueries.map(query => query.arguments!.action)).toEqual(['read', 'save', 'read', 'save', 'delete']);
-  expect(toolQueries.every(query => query.scope.sessionId === identity.threadId && query.runId === run.run_id)).toBe(true);
+  expect(toolQueries.every(query => query.scope.threadId === identity.threadId && query.runId === run.run_id)).toBe(true);
   const origin = toolQueries.find(query => query.arguments!.action === 'save')!.origin!;
   expect(await f.personalization.mutationReceipt(origin)).toMatchObject({ revision: 1 });
   const events = await f.runtime.events(0, 512);
@@ -451,7 +451,7 @@ it('moving a note into another thread delivers a deletion to the old scope witho
   const child = await f.api.create('memory-scope-move-child');
   const original = await f.personalization.saveNote({ scope: { kind: 'global' }, content: 'PREVIOUSLY_GLOBAL_NOTE' });
   await turn(f, parent, 'parent-initial'); await turn(f, child, 'child-initial');
-  await f.personalization.saveNote({ id: original.result.id, scope: { kind: 'session', id: child.threadId }, content: 'CHILD_PRIVATE_AFTER_MOVE', revision: original.revision });
+  await f.personalization.saveNote({ id: original.result.id, scope: { kind: 'thread', id: child.threadId }, content: 'CHILD_PRIVATE_AFTER_MOVE', revision: original.revision });
   await turn(f, parent, 'parent-after-move');
   const parentRequest = f.requests.at(-1)!.body;
   expect(JSON.stringify(system(parentRequest))).toContain('PREVIOUSLY_GLOBAL_NOTE');

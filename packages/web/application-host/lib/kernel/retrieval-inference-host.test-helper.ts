@@ -10,7 +10,7 @@ import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { createInterface } from 'node:readline';
 import { ApplicationExtensionRuntime } from '@varin/extension-host';
-import { HostCredentialAuthority } from '@varin/pi-host/credentials';
+import { ModelsService } from '../models/service.js';
 import type { ThreadMaterialsAPI } from '@varin/application-client';
 import { createDocumentAuthority } from '../documents/authority.js';
 import { revisionFromBytes } from '../documents/inspect.js';
@@ -44,7 +44,7 @@ let kernel:KernelClient, runtime:AgentRuntimeClient;
 let documents:ReturnType<typeof createDocumentAuthority>, extensions:ApplicationExtensionRuntime;
 let inference:ReturnType<typeof createSemanticInference>, grant:KernelGrantHandle;
 let selectedSource:LaunchSource, sourceMode='live_root', physicalRoot:LaunchSource['live_root']=null;
-let credentials:HostCredentialAuthority;
+let credentials:ModelsService;
 let compute:ReturnType<typeof createKernelComputeService>, syntaxComputations=0;
 let releaseBody:()=>void=()=>{throw new Error('No original body to release');};
 const bodies:unknown[]=[];
@@ -207,15 +207,24 @@ async function initialize(frame:Record<string,unknown>) {
   await writeFile(join(workspace,'private','secret.ts'),'export const retrievalNeedle = "FORBIDDEN_SOURCE";\n');
   if(sourceMode!=='live_root'&&!fixedSemantic()&&!mode.startsWith('llm-')&&!mode.startsWith('decision-'))
     await writeFile(join(workspace,'allowed','a.ts'),'// original source padding\n'.repeat(4000)+'export const retrievalNeedle = "SOURCE_A";\n');
-  await writeFile(join(agentDir,'models.json'),JSON.stringify({providers:{rank:{apiKey:'controlled-rerank-key',baseUrl:'https://rerank.invalid/models',chat:false,
-    capabilities:{rerank:{protocol:'http-rerank',models:[{id:'ranker'}]},decision:{protocol:'pi-classifier',models:[{id:'classifier',api:'typesafe-system-one'}]}}},
-    embedding:{baseUrl:'https://embedding.invalid/v1',capabilities:{embedding:{protocol:'openai-compatible',models:[{id:'encoder'}]}}},
-    explore:{baseUrl:'https://explore.invalid/v1',apiKey:'controlled-explore-key',api:'openai-responses',models:[{id:'explore-model',name:'Original configured Explore',contextWindow:32768,maxTokens:2000,input:['text']}]}}}));
-  await writeFile(join(agentDir,'settings.json'),JSON.stringify({harness:{codeRetrieval:{decision:mode==='llm-auto'||mode==='semantic-auto'?'auto':usesExplore()||mode==='unconfigured-model'?'llm':mode.startsWith('decision-')?'fast-decision':fixedSemantic()?'source':['source','syntax','semantic','semantic-stop','semantic-invalid','semantic-missing','semantic-cold','semantic-cache','semantic-credential'].includes(mode)?'source':'rerank'},
+  credentials=new ModelsService(agentDir,{projectTrusted:()=>false});
+  await credentials.storeCredential('controlled-rerank-key','rank');
+  await credentials.storeCredential('controlled-explore-key','explore');
+  await credentials.storeCredential('controlled-embedding-key','embedding');
+  for(const channel of [
+    {id:'rank',type:'rerank',baseUrl:'https://rerank.invalid/models',reference:'rank',model:'ranker',operations:['rerank'] as const},
+    {id:'decision',type:'typesafe-system-one',baseUrl:'https://rerank.invalid/models',reference:'rank',model:'classifier',operations:['decision'] as const},
+    {id:'embedding',type:'openai-compatible',baseUrl:'https://embedding.invalid/v1',reference:'embedding',model:'encoder',operations:['embedding'] as const},
+    {id:'explore',type:'openai',baseUrl:'https://explore.invalid/v1',reference:'explore',model:'explore-model',operations:['chat'] as const},
+  ]) await credentials.save({id:channel.id,name:channel.id,type:channel.type,baseUrl:channel.baseUrl,enabled:true,
+    authentication:{kind:'credential',reference:channel.reference},parameters:{},
+    models:[{id:channel.model,name:channel.model,enabled:true,operations:[...channel.operations],
+      ...(channel.id==='explore'?{contextWindow:32768,maxOutputTokens:2000,input:['text' as const]}:{})}]},(await credentials.read()).revision);
+  await writeFile(join(agentDir,'agent-settings.json'),JSON.stringify({harness:{codeRetrieval:{decision:mode==='llm-auto'||mode==='semantic-auto'?'auto':usesExplore()||mode==='unconfigured-model'?'llm':mode.startsWith('decision-')?'fast-decision':fixedSemantic()?'source':['source','syntax','semantic','semantic-stop','semantic-invalid','semantic-missing','semantic-cold','semantic-cache','semantic-credential'].includes(mode)?'source':'rerank'},
     rerank:{protocol:'http-rerank',providerId:'rank',modelId:'ranker'},
     embedding:usesSemantic()&&!localSemantic()?{protocol:'openai-compatible',providerId:'embedding',modelId:'encoder',dimensions:2,maxTokens:2048}:undefined,
     models:usesExplore()?{explore:{providerId:'explore',modelId:'explore-model'}}:undefined,
-    fastDecision:usesDecision()?{default:{protocol:'pi-classifier',providerId:'rank',modelId:'classifier'}}:undefined}}));
+    fastDecision:usesDecision()?{default:{protocol:'typed-classifier',providerId:'decision',modelId:'classifier'}}:undefined}}));
   kernel=new KernelClient({hostId:HOST,hostGeneration:GENERATION,storageRoot:String(frame.storageRoot),buildVersion:'0.9.25'});
   // Replace delivery/handshake only. Original grant minting/token checks, bridges and runtime events remain.
   const transport=kernel as unknown as {epoch:string;started:boolean;handshakeResult:KernelHandshakeResult;consumeFrame(value:unknown):void};
@@ -249,8 +258,6 @@ async function initialize(frame:Record<string,unknown>) {
     physicalRoot=null;
     await kernel.revokeGrant(seed.grantId);
   }
-  credentials=HostCredentialAuthority.open(agentDir);
-  if(usesSemantic()&&!localSemantic()) await credentials.modifyWithIntent('embedding','replace',async()=>({type:'api_key',key:'controlled-embedding-key'}));
   if(usesSemantic()&&!localSemantic()) ledger=createSemanticInferenceLedger({dataDir:join(root,'semantic-data'),hostId:HOST});
   inference=createSemanticInference(credentials,undefined,{requests:{kernel,runtime,egress},...(ledger?{ledger}:{}),fetchImpl:async(_url,init)=>embeddingResponse(init!)});
   const sources=createRetrievalSourceOwner({kernel,documents,validateLiveSource:live.validate});
@@ -295,12 +302,11 @@ async function initialize(frame:Record<string,unknown>) {
       }
     }
     const filesystem=createFsSearchRuntime({compute});
-    semantic=createWorkspaceSemanticRuntime({dataDir:join(root,'semantic-data'),hostId:HOST,configCwd:agentDir,
+    semantic=createWorkspaceSemanticRuntime({dataDir:join(root,'semantic-data'),hostId:HOST,
       documents,structureSource:createStructureSource([syntax]),searchFilesystemFiles:filesystem.searchFilesystemFiles,
       isIndexablePath:async(id,resource,signal,options)=>filesystem.isSearchableFile((await documents.inspectWorkspace(id)).root,resource,signal,options),
       scheduler:createEmbedScheduler(),embedder:encoder,getIndexScope:indexScope.get,runtimeInference:inference,
-      getBroker:()=>{throw new Error('Native semantic must not create a Pi workspace');},
-      executionViews:{get:()=>undefined},workingBranches:{pinQuery:async()=>null},onError:error=>console.error('semantic fixture',error)});
+      onError:error=>console.error('semantic fixture',error)});
     if(mode!=='semantic-cold' && (!fixedSemantic() || mode==='semantic-fixed-warm')) {
       backgroundScan=true;
       try { await semantic.scanWorkspace(identity.workspaceId);await semantic.drain(); }
@@ -312,7 +318,7 @@ async function initialize(frame:Record<string,unknown>) {
     brokerScript:resolve('packages/extension-host/broker/broker-child.mjs')});
   await extensions.start();
   await extensions.upsertServiceRoutingRule({expectedRevision:(await extensions.routing.read()).document.revision,
-    rule:{scope:{sessionId:'thread:parent'},serviceId:'varin.retrieval.plan',version:1,allowFallback:false,
+    rule:{scope:{threadId:'thread:parent'},serviceId:'varin.retrieval.plan',version:1,allowFallback:false,
       providerKeys: [`varin.builtin.retrieval-${mode==='syntax'?'structured':mode==='semantic'||usesSemantic()?'semantic':'keyword'}:host:varin.retrieval.plan@1`]}});
   const composition=createRetrievalComposition(extensions,{structure:syntax,syntax,
     prepareSemantic:async(scope,signal)=>{
@@ -341,7 +347,7 @@ async function initialize(frame:Record<string,unknown>) {
     if(mode==='semantic-fixed-chain' && retrievalCalls===2)
       await editMaterialized('allowed/a.ts',semanticBody('EDITED_MAGENTA_CAPSULE_紫'),'repeat');
     if(mode==='semantic-fixed-chain' && retrievalCalls===3)
-      await credentials.modifyWithIntent('embedding','replace',async()=>({type:'api_key',key:'controlled-second-account-key'}));
+      await credentials.storeCredential('controlled-second-account-key','embedding');
     const expected=fixedSemantic()?await sourceDocuments():undefined;
     if (mode === 'semantic-local-stop' && !localCancelScheduled) {
       localCancelScheduled = true;
@@ -354,7 +360,7 @@ async function initialize(frame:Record<string,unknown>) {
     retrievalCalls++;
     if(fixedSemantic()) queryFacts.push({question:query.question,localCalls: (await localCalls()).length - localValidationCalls,documentRequests,indexRequests,embeddingRequests,fixedUnits,expected,
       status:result.status,stages:result.stages});
-    if(mode==='semantic-credential'&&retrievalCalls===1) await credentials.modifyWithIntent('embedding','replace',async()=>({type:'api_key',key:'controlled-second-account-key'}));
+    if(mode==='semantic-credential'&&retrievalCalls===1) await credentials.storeCredential('controlled-second-account-key','embedding');
     if(result.status==='failed') console.error('retrieval fixture failure',sourceMode,mode,result.message,result.stages);
     return result;
   });
@@ -368,7 +374,7 @@ async function handle(frame:Record<string,unknown>) {
   }
   if(frame.kind==='fixture-configure-child') {
     // A user-selected existing retrieval model, with no tool-array override.
-    const settingsPath=join(root,'agent','settings.json');
+    const settingsPath=join(root,'agent','agent-settings.json');
     const settings=JSON.parse(await readFile(settingsPath,'utf8')) as {harness:{models?:Record<string,unknown>}};
     settings.harness.models={...settings.harness.models,retrievalAgent:{providerId:'explore',modelId:'explore-model'}};
     await writeFile(settingsPath,JSON.stringify(settings));
@@ -385,7 +391,7 @@ async function handle(frame:Record<string,unknown>) {
     const source=frame.source as LaunchSource;
     const child=frame.kind==='fixture-select-child', threadId=child?String(frame.threadId):'thread:parent';
     if (child && localSemantic()) await extensions.upsertServiceRoutingRule({ expectedRevision: (await extensions.routing.read()).document.revision,
-      rule: { scope: { sessionId: threadId }, serviceId: 'varin.retrieval.plan', version: 1, allowFallback: false,
+      rule: { scope: { threadId }, serviceId: 'varin.retrieval.plan', version: 1, allowFallback: false,
         providerKeys: ['varin.builtin.retrieval-semantic:host:varin.retrieval.plan@1'] } });
     if(source.mode!=='live_root') {
       const seed=await kernel.issueGrant({grantId:`source-view-fixture-materialize:${runId}`,threadId,runId,

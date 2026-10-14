@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { FastDecisionAnswer } from "@varin/protocol";
 import { createExploreQueryRun } from "./explore.js";
-import type { ExploreFileSnapshot } from "./explore-file-reader.js";
+import type { ExploreFileSnapshot } from "./file-snapshot.js";
 import {
   resolveExploreFastDecision,
   runExploreFastDecisionLoop,
@@ -16,7 +16,7 @@ const ready = (content: string, revision = "rev-1"): ExploreFileSnapshot => ({
 });
 
 const binding = {
-  protocol: "pi-classifier" as const,
+  protocol: "typed-classifier" as const,
   providerId: "jev",
   modelId: "jev-1.13",
   configurationId: "cfg-1",

@@ -4,7 +4,7 @@
  * Design: design/harness-knowledge.md §7.1, §7.2, §7.2.1
  * Plan: plan/agent-harness-plan.md §2.1
  *
- * Node types: event, session, block, knowledge, organizer, file, symbol, link.
+ * Node types: event, knowledge, organizer, plan records, file, symbol, link.
  * Edges: supersedes (knowledge → knowledge), defines (file → symbol),
  * imports / connects / associates (file → link). Additive link kinds share the
  * file generation; gated association candidates are compact metadata on the
@@ -40,12 +40,6 @@ import {
   type EventRefs,
   type EventInput,
   type StoredEvent,
-  type SessionInput,
-  type BlockUpdatedBy,
-  type Block,
-  type BlockInput,
-  type BlockChange,
-  KnowledgeBlockConflictError,
   type KnowledgeScope,
   type KnowledgeStatus,
   type KnowledgeExpectedRevision,
@@ -107,7 +101,6 @@ const GRAPH_RESULT_CEILING = 1_000_000;
 const GRAPH_FLUSH_QUIET_MS = 250;
 /** Upper bound on deferral, so a long catalog scan still persists as it goes. */
 const GRAPH_FLUSH_MAX_DEFER_MS = 30_000;
-const BLOCK_NAME_RE = /^[a-z][a-z0-9_-]{0,31}$/;
 const MAX_RETENTION_BATCH = 5000;
 
 const commandIdFromPayload = (payload: Record<string, unknown>): string | undefined => {
@@ -218,30 +211,6 @@ export async function openKnowledgeStoreEngine(deps: KnowledgeStoreEngineOptions
     db.createIndex("active");
     db.createIndex("dedupeKey");
     db.createIndex("kind");
-    // Command events written before durable dedupe keys existed have enough
-    // information to be backfilled. Scan the indexed command-event subset when
-    // opening a store so the normal command path can use the persistent index
-    // rather than scanning the workspace for every observation. If an old row
-    // lacks a commandId there is no honest identity to invent, so it remains a
-    // legacy non-deduped row.
-    let migratedCommandDedupeKeys = false;
-    for (const id of db.indexedLookup({ type: "event", kind: "command" }, Math.max(1, db.nodeCount()))) {
-      const payload = db.getPayload(id) as Record<string, unknown> | null;
-      if (
-        !payload
-        || payload["type"] !== "event"
-        || payload["kind"] !== "command"
-        || (typeof payload["dedupeKey"] === "string" && payload["dedupeKey"].length > 0)
-        || typeof payload["sessionId"] !== "string"
-      ) continue;
-      const commandId = commandIdFromPayload(payload);
-      if (!commandId) continue;
-      db.patchPayload(id, {
-        $set: { dedupeKey: terminalCommandDedupeKey(payload["sessionId"] as string, commandId) },
-      });
-      migratedCommandDedupeKeys = true;
-    }
-    if (migratedCommandDedupeKeys) persistence.commit();
     // Symbol graph: equality lookups that used to be JS-side maps rebuilt on
     // every open (D-134 / D-139), and substring search over lowercased names and
     // paths. `substringLookup` needs three characters, so exact matches on short
@@ -258,15 +227,6 @@ export async function openKnowledgeStoreEngine(deps: KnowledgeStoreEngineOptions
     db.createIndex("hasAssociationCandidates");
 
     const placeholderVec = zeroVector(dim);
-    const publishBlocksChanged = (sessionId: string, change: BlockChange): void => {
-      try {
-        persistence.afterCommit(() => deps.onBlocksChanged?.(sessionId, change));
-      } catch {
-        // UI projection is observational and cannot turn a committed block write
-        // into a reported storage failure.
-      }
-    };
-
     // Session data and knowledge share this database with the much larger derived
     // symbol catalog. Select through persistent indexes BEFORE reading payloads:
     // even an empty session otherwise walks the entire catalog on the Host thread.
@@ -382,26 +342,6 @@ export async function openKnowledgeStoreEngine(deps: KnowledgeStoreEngineOptions
         } } : {}),
       };
     };
-    const organizerEventPartial = (value: unknown, key: string): { id: number; offset: number } | undefined => {
-      if (value === undefined) return undefined;
-      const row = value && typeof value === "object" && !Array.isArray(value)
-        ? value as Record<string, unknown> : null;
-      if (!row || !Number.isSafeInteger(row["id"]) || !Number.isSafeInteger(row["offset"])
-        || (row["offset"] as number) <= 0) {
-        throw new KnowledgeMutationError("invalid", `Invalid event segment in organizer row ${key}`);
-      }
-      return { id: row["id"] as number, offset: row["offset"] as number };
-    };
-    const organizerEntryPartial = (value: unknown, key: string): { id: string; offset: number } | undefined => {
-      if (value === undefined) return undefined;
-      const row = value && typeof value === "object" && !Array.isArray(value)
-        ? value as Record<string, unknown> : null;
-      if (!row || typeof row["id"] !== "string" || !row["id"]
-        || !Number.isSafeInteger(row["offset"]) || (row["offset"] as number) <= 0) {
-        throw new KnowledgeMutationError("invalid", `Invalid entry segment in organizer row ${key}`);
-      }
-      return { id: row["id"], offset: row["offset"] as number };
-    };
     const organizerProgressFromPayload = (p: Record<string, unknown>): OrganizerProgress | null => {
       if (p["type"] !== "organizer" || typeof p["key"] !== "string" || !p["key"]) return null;
       const status = p["status"];
@@ -416,38 +356,20 @@ export async function openKnowledgeStoreEngine(deps: KnowledgeStoreEngineOptions
       if (parsedProposals?.some((row) => row === null)) {
         throw new KnowledgeMutationError("invalid", `Prepared organizer row ${p["key"]} has an invalid proposal`);
       }
-      const preparedRange = p["preparedRange"] && typeof p["preparedRange"] === "object" && !Array.isArray(p["preparedRange"])
-        ? p["preparedRange"] as Record<string, unknown> : null;
       const preparedSource = p["preparedSource"] !== undefined
         ? knowledgeSourceFromPayload(p["preparedSource"]) : undefined;
       if (p["preparedSource"] !== undefined && !preparedSource) {
         throw new KnowledgeMutationError("invalid", `Prepared organizer row ${p["key"]} has invalid source identity`);
       }
-      const eventPartial = organizerEventPartial(p["eventPartial"], p["key"]);
-      const entryPartial = organizerEntryPartial(p["entryPartial"], p["key"]);
-      const preparedEventPartial = preparedRange ? organizerEventPartial(preparedRange["eventPartial"], p["key"]) : undefined;
-      const preparedEntryPartial = preparedRange ? organizerEntryPartial(preparedRange["entryPartial"], p["key"]) : undefined;
       return {
         key: p["key"],
         status: status as OrganizerProgressStatus,
         ...(typeof p["workId"] === "string" ? { workId: p["workId"] } : {}),
         ...(Array.isArray(p["coveredSources"]) ? { coveredSources: parseSourceSpans(p["coveredSources"]) } : {}),
         ...(typeof p["sourceKey"] === "string" && p["sourceKey"] ? { sourceKey: p["sourceKey"] as string } : {}),
-        ...(Number.isSafeInteger(p["eventCursor"]) ? { eventCursor: p["eventCursor"] as number } : {}),
-        ...(eventPartial ? { eventPartial } : {}),
-        ...(typeof p["entryCursor"] === "string" && p["entryCursor"] ? { entryCursor: p["entryCursor"] as string } : {}),
-        ...(entryPartial ? { entryPartial } : {}),
-        ...(Number.isSafeInteger(p["runEndOffset"]) && (p["runEndOffset"] as number) >= 0
-          ? { runEndOffset: p["runEndOffset"] as number } : {}),
         ...(Array.isArray(produced) && produced.every(Number.isSafeInteger) ? { produced: produced as number[] } : {}),
         ...(parsedProposals ? { proposals: parsedProposals as OrganizerPreparedProposal[] } : {}),
         ...(preparedSource ? { preparedSource } : {}),
-        ...(preparedRange ? { preparedRange: {
-          ...(Number.isSafeInteger(preparedRange["eventCursor"]) ? { eventCursor: preparedRange["eventCursor"] as number } : {}),
-          ...(preparedEventPartial ? { eventPartial: preparedEventPartial } : {}),
-          ...(typeof preparedRange["entryCursor"] === "string" ? { entryCursor: preparedRange["entryCursor"] as string } : {}),
-          ...(preparedEntryPartial ? { entryPartial: preparedEntryPartial } : {}),
-        } } : {}),
         updatedAt: p["updatedAt"],
         ...(typeof p["lastError"] === "string" && p["lastError"] ? { lastError: p["lastError"] as string } : {}),
       };
@@ -464,57 +386,6 @@ export async function openKnowledgeStoreEngine(deps: KnowledgeStoreEngineOptions
         if (currentInvalid !== expected.invalidAt) return false;
       }
       return true;
-    };
-
-    type StoredBlockNode = { id: number; payload: Record<string, unknown> };
-    const blockFromPayload = (payload: Record<string, unknown>): Block => ({
-      sessionId: payload["sessionId"] as string,
-      label: payload["label"] as string,
-      content: typeof payload["content"] === "string" ? payload["content"] : "",
-      updatedBy: payload["updatedBy"] as BlockUpdatedBy,
-      ...(payload["cursorTurn"] !== undefined ? { cursorTurn: payload["cursorTurn"] as number } : {}),
-      updatedAt: payload["updatedAt"] as number,
-      ...(payload["sourceLeafId"] !== undefined ? { sourceLeafId: payload["sourceLeafId"] as string | null } : {}),
-    });
-    const blockNodes = (sessionId: string, label?: string): StoredBlockNode[] => lookup({ type: "block", sessionId }).filter(({ payload }) => (
-      payload["type"] === "block"
-      && payload["sessionId"] === sessionId
-      && (label === undefined || payload["label"] === label)
-    ));
-    const isDeletedBlock = (node: StoredBlockNode): boolean => node.payload["deleted"] === true;
-    const sourceLeafOf = (node: StoredBlockNode): string | null => (
-      typeof node.payload["sourceLeafId"] === "string" ? node.payload["sourceLeafId"] as string : null
-    );
-    const newestNode = (nodes: StoredBlockNode[]): StoredBlockNode | null => (
-      nodes.toSorted((left, right) => (
-        Number(right.payload["updatedAt"] ?? 0) - Number(left.payload["updatedAt"] ?? 0)
-        || right.id - left.id
-      ))[0] ?? null
-    );
-    /** Resolve one label to the closest revision on the active ancestor path. */
-    const visibleBlockNode = (
-      nodes: StoredBlockNode[],
-      branchEntryIds: readonly string[],
-    ): StoredBlockNode | null => {
-      const rank = new Map(branchEntryIds.map((entryId, index) => [entryId, index]));
-      let selected: StoredBlockNode | null = null;
-      let selectedRank = Number.NEGATIVE_INFINITY;
-      for (const node of nodes) {
-        const sourceLeafId = sourceLeafOf(node);
-        const nodeRank = sourceLeafId === null ? -1 : rank.get(sourceLeafId);
-        if (nodeRank === undefined) continue;
-        const updatedAt = Number(node.payload["updatedAt"] ?? 0);
-        const selectedUpdatedAt = Number(selected?.payload["updatedAt"] ?? 0);
-        if (
-          selected === null
-          || nodeRank > selectedRank
-          || (nodeRank === selectedRank && (updatedAt > selectedUpdatedAt || (updatedAt === selectedUpdatedAt && node.id > selected.id)))
-        ) {
-          selected = node;
-          selectedRank = nodeRank;
-        }
-      }
-      return selected;
     };
 
     /**
@@ -910,16 +781,6 @@ export async function openKnowledgeStoreEngine(deps: KnowledgeStoreEngineOptions
         })).sort((left, right) => left.id - right.id);
       },
 
-      async listEventSessionIds(): Promise<string[]> {
-        const ids = new Set<string>();
-        for (const { payload } of lookup({ type: "event" })) {
-          if (payload["type"] !== "event") continue;
-          const sessionId = payload["sessionId"];
-          if (typeof sessionId === "string" && sessionId) ids.add(sessionId);
-        }
-        return [...ids].sort();
-      },
-
       async getOrganizerProgress(key: string): Promise<OrganizerProgress | null> {
         for (const { payload } of lookup({ type: "organizer" })) {
           if (payload["key"] !== key) continue;
@@ -937,15 +798,9 @@ export async function openKnowledgeStoreEngine(deps: KnowledgeStoreEngineOptions
             ...(progress.workId !== undefined ? { workId: progress.workId } : {}),
             ...(progress.coveredSources ? { coveredSources: progress.coveredSources } : {}),
             ...(progress.sourceKey !== undefined ? { sourceKey: progress.sourceKey } : {}),
-            ...(progress.eventCursor !== undefined ? { eventCursor: progress.eventCursor } : {}),
-            ...(progress.eventPartial !== undefined ? { eventPartial: { ...progress.eventPartial } } : {}),
-            ...(progress.entryCursor !== undefined ? { entryCursor: progress.entryCursor } : {}),
-            ...(progress.entryPartial !== undefined ? { entryPartial: { ...progress.entryPartial } } : {}),
-            ...(progress.runEndOffset !== undefined ? { runEndOffset: progress.runEndOffset } : {}),
             ...(progress.produced !== undefined ? { produced: [...progress.produced] } : {}),
             ...(progress.proposals !== undefined ? { proposals: progress.proposals.map((p) => ({ ...p })) } : {}),
             ...(progress.preparedSource !== undefined ? { preparedSource: { ...progress.preparedSource } } : {}),
-            ...(progress.preparedRange !== undefined ? { preparedRange: { ...progress.preparedRange } } : {}),
             updatedAt: progress.updatedAt,
             ...(progress.lastError ? { lastError: progress.lastError } : {}),
           };
@@ -955,15 +810,9 @@ export async function openKnowledgeStoreEngine(deps: KnowledgeStoreEngineOptions
           if (progress.workId === undefined) unset.workId = true;
           if (progress.sourceKey === undefined) unset.sourceKey = true;
           if (progress.coveredSources === undefined) unset.coveredSources = true;
-          if (progress.eventCursor === undefined) unset.eventCursor = true;
-          if (progress.eventPartial === undefined) unset.eventPartial = true;
-          if (progress.entryCursor === undefined) unset.entryCursor = true;
-          if (progress.entryPartial === undefined) unset.entryPartial = true;
-          if (progress.runEndOffset === undefined) unset.runEndOffset = true;
           if (progress.produced === undefined) unset.produced = true;
           if (progress.proposals === undefined) unset.proposals = true;
           if (progress.preparedSource === undefined) unset.preparedSource = true;
-          if (progress.preparedRange === undefined) unset.preparedRange = true;
           if (!progress.lastError) unset.lastError = true;
           const existing = lookup({ type: "organizer" }).filter(({ payload: p }) => p["key"] === progress.key);
           const [first, ...rest] = existing;
@@ -982,172 +831,6 @@ export async function openKnowledgeStoreEngine(deps: KnowledgeStoreEngineOptions
           .map(({ payload }) => organizerProgressFromPayload(payload))
           .filter((row): row is OrganizerProgress => row !== null)
           .sort((a, b) => a.key.localeCompare(b.key));
-      },
-
-      async putSession(s: SessionInput): Promise<NodeId> {
-        return enqueueWrite(() => {
-          const payload = {
-            type: "session",
-            sessionId: s.sessionId,
-            profile: s.profile,
-            workspaceId: s.workspaceId,
-            startedAt: s.startedAt,
-            harness: s.harness,
-          };
-          const id = db.insert(placeholderVec, payload);
-          persistence.commit();
-          return id;
-        });
-      },
-
-      async getBlocks(sessionId: string, branchEntryIds?: readonly string[]): Promise<Block[]> {
-        const nodes = blockNodes(sessionId);
-        if (branchEntryIds === undefined) {
-          // This unscoped view is retained only for migration/debug callers.
-          // Production model/UI consumers resolve an explicit active branch.
-          return nodes
-            .filter((node) => !isDeletedBlock(node))
-            .map((node) => blockFromPayload(node.payload))
-            .sort((a, b) => a.label.localeCompare(b.label) || a.updatedAt - b.updatedAt);
-        }
-        const byLabel = new Map<string, StoredBlockNode[]>();
-        for (const node of nodes) {
-          const label = node.payload["label"] as string;
-          const group = byLabel.get(label) ?? [];
-          group.push(node);
-          byLabel.set(label, group);
-        }
-        const visible: Block[] = [];
-        for (const candidates of byLabel.values()) {
-          const selected = visibleBlockNode(candidates, branchEntryIds);
-          if (selected && !isDeletedBlock(selected)) visible.push(blockFromPayload(selected.payload));
-        }
-        return visible.sort((a, b) => a.label.localeCompare(b.label));
-      },
-
-      async upsertBlock(b: BlockInput): Promise<Block> {
-        if (!BLOCK_NAME_RE.test(b.label)) {
-          throw new Error(`Invalid block name: ${b.label}`);
-        }
-        const inputSourceLeaf = b.sourceLeafId ?? null;
-        const branchEntryIds = b.branchEntryIds;
-        if (
-          inputSourceLeaf !== null
-          && branchEntryIds !== undefined
-          && branchEntryIds[branchEntryIds.length - 1] !== inputSourceLeaf
-        ) {
-          throw new Error("Block sourceLeafId must be the active branch leaf");
-        }
-        const { result, previous } = await enqueueWrite(() => {
-          const candidates = blockNodes(b.sessionId, b.label);
-          const resolvedNode = branchEntryIds === undefined
-            ? newestNode(candidates.filter((node) => sourceLeafOf(node) === inputSourceLeaf))
-            : visibleBlockNode(candidates, branchEntryIds);
-          const current = resolvedNode && !isDeletedBlock(resolvedNode)
-            ? blockFromPayload(resolvedNode.payload)
-            : null;
-          // Atomic CAS: check expectedUpdatedAt inside the write transaction.
-          if (
-            b.expectedUpdatedAt !== undefined
-            && ((b.expectedUpdatedAt === null && current !== null)
-              || (typeof b.expectedUpdatedAt === "number" && current?.updatedAt !== b.expectedUpdatedAt))
-          ) {
-            throw new KnowledgeBlockConflictError(current);
-          }
-          const now = Math.max(Date.now(), (current?.updatedAt ?? 0) + 1);
-
-          const payload = {
-            type: "block",
-            sessionId: b.sessionId,
-            label: b.label,
-            content: b.content,
-            updatedBy: b.updatedBy,
-            ...(b.cursorTurn !== undefined ? { cursorTurn: b.cursorTurn } : {}),
-            updatedAt: now,
-            sourceLeafId: inputSourceLeaf,
-            deleted: false,
-          };
-
-          const targetNode = newestNode(candidates.filter((node) => sourceLeafOf(node) === inputSourceLeaf));
-          if (targetNode) {
-            db.updatePayload(targetNode.id, payload);
-          } else {
-            db.insert(placeholderVec, payload);
-          }
-          persistence.commit();
-
-          return { previous: current, result: {
-            sessionId: b.sessionId,
-            label: b.label,
-            content: b.content,
-            updatedBy: b.updatedBy,
-            ...(b.cursorTurn !== undefined ? { cursorTurn: b.cursorTurn } : {}),
-            updatedAt: now,
-            sourceLeafId: inputSourceLeaf,
-          } };
-        });
-        publishBlocksChanged(b.sessionId, { previous, current: result });
-        return result;
-      },
-
-      async deleteBlock(
-        sessionId: string,
-        label: string,
-        options?: {
-          branchEntryIds?: readonly string[];
-          expectedUpdatedAt?: number | null;
-          sourceLeafId?: string | null;
-          updatedBy?: BlockUpdatedBy;
-          cursorTurn?: number;
-        },
-      ): Promise<void> {
-        const branchEntryIds = options?.branchEntryIds;
-        const expectedUpdatedAt = options?.expectedUpdatedAt;
-        const sourceLeafId = options?.sourceLeafId
-          ?? (branchEntryIds && branchEntryIds.length > 0 ? branchEntryIds[branchEntryIds.length - 1]! : null);
-        const previous = await enqueueWrite(() => {
-          const nodes = blockNodes(sessionId, label);
-          const resolvedNode = branchEntryIds === undefined
-            ? newestNode(nodes.filter((node) => sourceLeafOf(node) === sourceLeafId))
-            : visibleBlockNode(nodes, branchEntryIds);
-          const currentBlock = resolvedNode && !isDeletedBlock(resolvedNode)
-            ? blockFromPayload(resolvedNode.payload)
-            : null;
-          // Atomic CAS for delete: check expectedUpdatedAt inside the write transaction.
-          if (expectedUpdatedAt !== undefined) {
-            if (
-              (expectedUpdatedAt === null && currentBlock !== null)
-              || (typeof expectedUpdatedAt === "number" && currentBlock?.updatedAt !== expectedUpdatedAt)
-            ) {
-              throw new KnowledgeBlockConflictError(currentBlock);
-            }
-          }
-          if (branchEntryIds === undefined) {
-            // Legacy unscoped deletion retains its historical whole-session behavior.
-            for (const node of nodes) db.delete(node.id);
-            if (nodes.length > 0) persistence.commit();
-            return currentBlock;
-          }
-          if (!currentBlock) return null;
-          const timestamp = Math.max(Date.now(), currentBlock.updatedAt + 1);
-          const tombstone = {
-            type: "block",
-            sessionId,
-            label,
-            content: "",
-            updatedBy: options?.updatedBy ?? "agent",
-            ...(options?.cursorTurn !== undefined ? { cursorTurn: options.cursorTurn } : {}),
-            updatedAt: timestamp,
-            sourceLeafId,
-            deleted: true,
-          };
-          const targetNode = newestNode(nodes.filter((node) => sourceLeafOf(node) === sourceLeafId));
-          if (targetNode) db.updatePayload(targetNode.id, tombstone);
-          else db.insert(placeholderVec, tombstone);
-          persistence.commit();
-          return currentBlock;
-        });
-        publishBlocksChanged(sessionId, { previous, current: null });
       },
 
       async putKnowledge(k: KnowledgeInput): Promise<NodeId> {
@@ -2315,22 +1998,6 @@ export async function openKnowledgeStoreEngine(deps: KnowledgeStoreEngineOptions
           path: target,
           resolved: resolved.toSorted((left, right) => left.path.localeCompare(right.path) || left.specifier.localeCompare(right.specifier)),
         };
-      },
-
-      async deleteSession(sessionId: string): Promise<void> {
-        return enqueueWrite(() => {
-          // Delete all events, blocks, and session nodes for this session
-          const nodes = lookup({ sessionId }).filter(({ payload: p }) =>
-            p["type"] !== "knowledge" && p["sessionId"] === sessionId,
-          );
-          let count = 0;
-          for (const node of nodes) {
-            db.delete(node.id);
-            count++;
-            if (count >= MAX_RETENTION_BATCH) break;
-          }
-          if (count > 0) persistence.commit();
-        });
       },
 
       async runRetention(now: Date, policy: { eventRetentionDays: number }): Promise<{ removed: number }> {

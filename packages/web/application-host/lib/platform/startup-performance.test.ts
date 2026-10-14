@@ -23,7 +23,7 @@ describe('startup performance diagnostics', () => {
     delete process.env.VARIN_STARTUP_PERF;
     const info = vi.spyOn(console, 'info').mockImplementation(() => {});
 
-    recordStartupPerformance('pi-runtime.warmup.ready', { durationMs: 5 });
+    recordStartupPerformance('web.listener.ready', { durationMs: 5 });
 
     expect(info).not.toHaveBeenCalled();
   });
@@ -32,12 +32,12 @@ describe('startup performance diagnostics', () => {
     process.env.VARIN_STARTUP_PERF = '1';
     const info = vi.spyOn(console, 'info').mockImplementation(() => {});
 
-    recordStartupPerformance('pi-runtime.warmup.ready', {
+    recordStartupPerformance('web.listener.ready', {
       durationMs: 75,
       totalDurationMs: 100,
       attempt: 1,
       outcome: 'ready',
-      routeClass: 'session-messages',
+      routeClass: 'thread-messages',
       sessionID: 'secret-session',
       directory: '/secret/directory',
       token: 'secret-token',
@@ -46,12 +46,12 @@ describe('startup performance diagnostics', () => {
     expect(info).toHaveBeenCalledOnce();
     const event = loggedEvent(info);
     expect(event).toMatchObject({
-      phase: 'pi-runtime.warmup.ready',
+      phase: 'web.listener.ready',
       durationMs: 75,
       totalDurationMs: 100,
       attempt: 1,
       outcome: 'ready',
-      routeClass: 'session-messages',
+      routeClass: 'thread-messages',
     });
     expect(Number.isFinite(event.at)).toBe(true);
     expect(JSON.stringify(event)).not.toContain('secret');
@@ -62,7 +62,7 @@ describe('startup performance diagnostics', () => {
     const info = vi.spyOn(console, 'info').mockImplementation(() => {});
 
     recordStartupPerformance('secret.phase', { durationMs: 1 });
-    recordStartupPerformance('pi-runtime.warmup.error', {
+    recordStartupPerformance('web.pipeline.start', {
       durationMs: -1,
       attempt: 1.5,
       outcome: 'secret-outcome',
@@ -72,7 +72,7 @@ describe('startup performance diagnostics', () => {
     expect(info).toHaveBeenCalledOnce();
     const event = loggedEvent(info);
     expect(event).toEqual(expect.objectContaining({
-      phase: 'pi-runtime.warmup.error',
+      phase: 'web.pipeline.start',
     }));
     expect(event).not.toHaveProperty('durationMs');
     expect(event).not.toHaveProperty('attempt');

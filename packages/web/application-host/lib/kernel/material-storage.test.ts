@@ -2,7 +2,6 @@ import { expect, it, vi } from 'vitest';
 import { createMaterialStorageAccess, threadMaterialScope } from './material-storage.js';
 import type { KernelClient } from './kernel-client.js';
 import type { KernelStorageAdapter } from './storage-adapter.js';
-import type { WorkspaceWorkingStateRootAccess } from '../harness/working-state/types.js';
 
 it('keeps service grants private, separates read/write capabilities and preserves settled effects across cleanup failure', async () => {
   const calls: Record<string, unknown>[] = [], diagnostics: unknown[] = [];
@@ -14,9 +13,11 @@ it('keeps service grants private, separates read/write capabilities and preserve
     revokeGrant: vi.fn(async () => { await cleanup; throw cleanupError; }),
   } as unknown as KernelClient;
   const storage = { contextFromBranchGrant: async (context: unknown) => context } as unknown as KernelStorageAdapter;
-  const legacy = { withBranchStore: async () => { throw new Error('unexpected legacy scope'); } } as WorkspaceWorkingStateRootAccess;
-  const access = createMaterialStorageAccess({ kernel, storage, legacy, onCleanupError: error => { diagnostics.push(error); } });
+  const access = createMaterialStorageAccess({ kernel, storage, onCleanupError: error => { diagnostics.push(error); } });
   const scope = threadMaterialScope('root');
+  await expect(access.withBranchStore('workspace:legacy', 'material-collections-read', async () => null, 'exclusive', { threadId: 'reader' })).rejects.toThrow('Thread-family scope');
+  await expect(access.withBranchStore(threadMaterialScope(''), 'material-collections-read', async () => null, 'exclusive', { threadId: 'reader' })).rejects.toThrow('Thread-family scope');
+  expect(calls).toEqual([]);
   let settled = false;
   const pending = access.withBranchStore(scope, 'material-collections-write', async () => ({ effect: 'confirmed', committed: 'original' }), 'exclusive', { threadId: 'reader' })
     .finally(() => { settled = true; });

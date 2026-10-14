@@ -31,7 +31,7 @@ async function fixture() {
   const targetRoot = path.join(root, 'B', 'same-project'), coordinatorRoot = path.join(root, 'A', 'same-project');
   await fs.mkdir(targetRoot, { recursive: true }); await fs.mkdir(coordinatorRoot, { recursive: true });
   const config = createProjectConfigRuntime({ fsPromises: fs, path, projectsDirPath: path.join(root, 'B', 'config') });
-  const scheduler = createScheduledTasksRuntime({ projectConfigRuntime: config, listProjects: async () => [{ id: 'same-project', path: targetRoot }], executeTask: async () => { throw new Error('Pi must not run'); } });
+  const scheduler = createScheduledTasksRuntime({ projectConfigRuntime: config, listProjects: async () => [{ id: 'same-project', path: targetRoot }] });
   const occurrence = { id: 'original-B-occurrence', state: 'preparing', thread_id: 'B-calendar-thread', run_id: null } as CalendarOccurrence;
   const run = vi.fn(async () => occurrence), control = vi.fn(async () => ({ occurrence }));
   scheduler.setCalendarOwner({ sync: async (_id: string, tasks: unknown) => tasks, run, control, stop() {} } as unknown as CalendarOwner);
@@ -114,7 +114,7 @@ it('manages B project assets through the original A invocation and B occurrence 
 it('reads and CAS-edits the original B Markdown loop without turning a stale revision into a write', async () => {
   const f = await fixture(); const loops = path.join(f.targetRoot, '.agents', 'loops'); await fs.mkdir(loops, { recursive: true });
   const file = path.join(loops, 'weekly.md');
-  const content = '---\nname: Original loop\nmodel: fixture/model\nschedule: "0 9 * * 1"\nenabled: false\n---\nOriginal body\n';
+  const content = `---\nname: Original loop\nruntime: agent\nschedule: "0 9 * * 1"\ntimezone: UTC\nenabled: false\ntarget: ${JSON.stringify(task.target)}\n---\nOriginal body\n`;
   await fs.writeFile(file, content);
   const listed = await f.execute(f.invocation({ action: 'list' }));
   const tasks = (listed.data as { tasks: Array<{ id: string; loopFile?: string }> }).tasks;

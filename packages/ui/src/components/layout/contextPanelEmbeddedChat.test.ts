@@ -7,7 +7,7 @@ import {
   EMBEDDED_RUNTIME_BOOTSTRAP_RESPONSE,
   getActiveEmbeddedSessionChatTab,
   getOrCreateEmbeddedSessionChatURL,
-  getEmbeddedSessionChatOriginSessionId,
+  getEmbeddedSessionChatOriginIdentity,
   isEmbeddedSessionChat,
   requestEmbeddedSessionRuntimeBootstrap,
   resetEmbeddedSessionChatCache,
@@ -63,7 +63,7 @@ describe('embedded session chat URL', () => {
   test('includes compact parent theme bootstrap data', () => {
     const currentTheme = makeTheme('custom-dark', 'dark');
 
-    const src = buildEmbeddedSessionChatURL('ses_1', '/repo', false, {
+    const src = buildEmbeddedSessionChatURL({ runtime: 'agent', threadId: 'thread:1', branchId: 'branch:main' }, '/repo', false, {
       mode: 'system',
       lightThemeId: 'custom-light',
       darkThemeId: 'custom-dark',
@@ -71,7 +71,7 @@ describe('embedded session chat URL', () => {
     });
 
     const url = new URL(src);
-    expect(url.searchParams.get('piPanel')).toBe('session-chat');
+    expect(url.searchParams.get('panel')).toBe('session-chat');
     expect(url.searchParams.get('surface')).toBe('desktop');
     expect(url.searchParams.get('themeMode')).toBe('system');
     expect(url.searchParams.get('themeVariant')).toBe('dark');
@@ -87,7 +87,7 @@ describe('embedded session chat URL', () => {
     );
 
     const src = buildEmbeddedSessionChatURL(
-      'ses_abcdefghijklmnopqrstuvwxyz0123456789',
+      { runtime: 'agent', threadId: 'thread:abcdefghijklmnopqrstuvwxyz0123456789', branchId: 'branch:main' },
       '/workspace/projects/openchamber',
       true,
       {
@@ -99,7 +99,7 @@ describe('embedded session chat URL', () => {
     );
 
     const srcWithoutTokens = buildEmbeddedSessionChatURL(
-      'ses_abcdefghijklmnopqrstuvwxyz0123456789',
+      { runtime: 'agent', threadId: 'thread:abcdefghijklmnopqrstuvwxyz0123456789', branchId: 'branch:main' },
       '/workspace/projects/openchamber',
       true,
       {
@@ -116,14 +116,14 @@ describe('embedded session chat URL', () => {
 
   test('freezes bootstrap src per tab so live theme changes do not reload iframe', () => {
     const cache = new Map<string, EmbeddedSessionChatURLCacheEntry>();
-    const first = getOrCreateEmbeddedSessionChatURL(cache, 'tab-1', 'ses_1', '/repo', false, {
+    const first = getOrCreateEmbeddedSessionChatURL(cache, 'tab-1', { runtime: 'agent', threadId: 'thread:1', branchId: 'branch:main' }, '/repo', false, {
       mode: 'system',
       lightThemeId: 'light-a',
       darkThemeId: 'dark-a',
       currentTheme: makeTheme('dark-a', 'dark'),
     });
 
-    const second = getOrCreateEmbeddedSessionChatURL(cache, 'tab-1', 'ses_1', '/repo', false, {
+    const second = getOrCreateEmbeddedSessionChatURL(cache, 'tab-1', { runtime: 'agent', threadId: 'thread:1', branchId: 'branch:main' }, '/repo', false, {
       mode: 'light',
       lightThemeId: 'light-b',
       darkThemeId: 'dark-b',
@@ -143,18 +143,18 @@ describe('embedded session chat URL', () => {
       currentTheme: makeTheme('dark-a', 'dark'),
     };
 
-    const writable = getOrCreateEmbeddedSessionChatURL(cache, 'tab-1', 'ses_1', '/repo', false, theme);
-    const readOnly = getOrCreateEmbeddedSessionChatURL(cache, 'tab-1', 'ses_1', '/repo', true, theme);
+    const writable = getOrCreateEmbeddedSessionChatURL(cache, 'tab-1', { runtime: 'agent', threadId: 'thread:1', branchId: 'branch:main' }, '/repo', false, theme);
+    const readOnly = getOrCreateEmbeddedSessionChatURL(cache, 'tab-1', { runtime: 'agent', threadId: 'thread:1', branchId: 'branch:main' }, '/repo', true, theme);
 
     expect(readOnly).not.toBe(writable);
-    expect(new URL(writable).searchParams.get('piReadOnly')).toBeNull();
-    expect(new URL(readOnly).searchParams.get('piReadOnly')).toBe('1');
+    expect(new URL(writable).searchParams.get('readOnly')).toBeNull();
+    expect(new URL(readOnly).searchParams.get('readOnly')).toBe('1');
   });
 });
 
 describe('isEmbeddedSessionChat', () => {
   test('is true only for the session-chat panel search param', () => {
-    installWindowLocation('http://127.0.0.1:5173/app?piPanel=session-chat&piSessionId=ses_1');
+    installWindowLocation('http://127.0.0.1:5173/app?panel=session-chat&threadId=ses_1');
     resetEmbeddedSessionChatCache();
     expect(isEmbeddedSessionChat()).toBe(true);
 
@@ -170,7 +170,7 @@ describe('isEmbeddedSessionChat', () => {
   test('caches the first result so URL rewrites cannot flip it', () => {
     // The embedded iframe's identity is fixed at mount (the parent builds the
     // src); caching the first read keeps detection stable across URL rewrites.
-    installWindowLocation('http://127.0.0.1:5173/app?piPanel=session-chat&piSessionId=ses_1');
+    installWindowLocation('http://127.0.0.1:5173/app?panel=session-chat&threadId=ses_1');
     resetEmbeddedSessionChatCache();
 
     // First read: caches true.
@@ -186,33 +186,33 @@ describe('isEmbeddedSessionChat', () => {
   });
 });
 
-describe('getEmbeddedSessionChatOriginSessionId', () => {
+describe('getEmbeddedSessionChatOriginIdentity', () => {
   test('returns the URL sessionId when embedded', () => {
-    installWindowLocation('http://127.0.0.1:5173/app?piPanel=session-chat&piSessionId=ses_child&piDirectory=%2Frepo');
+    installWindowLocation('http://127.0.0.1:5173/app?panel=session-chat&threadId=ses_child&branchId=branch%3Amain&directory=%2Frepo');
     resetEmbeddedSessionChatCache();
-    expect(getEmbeddedSessionChatOriginSessionId()).toBe('ses_child');
+    expect(getEmbeddedSessionChatOriginIdentity()).toEqual({ runtime: 'agent', threadId: 'ses_child', branchId: 'branch:main' });
   });
 
   test('returns null outside the embedded iframe', () => {
     installWindowLocation('http://127.0.0.1:5173/app?session=ses_main');
     resetEmbeddedSessionChatCache();
-    expect(getEmbeddedSessionChatOriginSessionId()).toBeNull();
+    expect(getEmbeddedSessionChatOriginIdentity()).toBeNull();
 
     installWindowLocation('http://127.0.0.1:5173/app? sessionId=ses_orphan');
     resetEmbeddedSessionChatCache();
-    expect(getEmbeddedSessionChatOriginSessionId()).toBeNull();
+    expect(getEmbeddedSessionChatOriginIdentity()).toBeNull();
   });
 
   test('returns null when embedded URL is missing sessionId param', () => {
-    installWindowLocation('http://127.0.0.1:5173/app?piPanel=session-chat&piDirectory=%2Frepo');
+    installWindowLocation('http://127.0.0.1:5173/app?panel=session-chat&directory=%2Frepo');
     resetEmbeddedSessionChatCache();
-    expect(getEmbeddedSessionChatOriginSessionId()).toBeNull();
+    expect(getEmbeddedSessionChatOriginIdentity()).toBeNull();
   });
 
   test('trims whitespace', () => {
-    installWindowLocation('http://127.0.0.1:5173/app?piPanel=session-chat&piSessionId=%20%20ses_child%20%20');
+    installWindowLocation('http://127.0.0.1:5173/app?panel=session-chat&threadId=%20%20ses_child%20%20&branchId=branch%3Amain');
     resetEmbeddedSessionChatCache();
-    expect(getEmbeddedSessionChatOriginSessionId()).toBe('ses_child');
+    expect(getEmbeddedSessionChatOriginIdentity()).toEqual({ runtime: 'agent', threadId: 'ses_child', branchId: 'branch:main' });
   });
 });
 
@@ -268,7 +268,7 @@ describe('embedded runtime bootstrap handshake', () => {
         });
       },
     };
-    const url = new URL('varin-ui://app/index.html?piPanel=session-chat&piSessionId=ses_1');
+    const url = new URL('varin-ui://app/index.html?panel=session-chat&threadId=ses_1');
     Object.defineProperty(globalThis, 'window', {
       configurable: true,
       value: {
@@ -317,7 +317,7 @@ describe('embedded runtime bootstrap handshake', () => {
     let timeoutCleared = false;
     let retryCleared = false;
     const parent = { postMessage() {} };
-    const url = new URL('varin-ui://app/index.html?piPanel=session-chat&piSessionId=ses_1');
+    const url = new URL('varin-ui://app/index.html?panel=session-chat&threadId=ses_1');
     Object.defineProperty(globalThis, 'window', {
       configurable: true,
       value: {

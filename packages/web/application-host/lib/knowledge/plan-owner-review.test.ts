@@ -286,11 +286,9 @@ describe('plan independent owner review, real TriviumDB', () => {
     basis = undefined;
     await expect(service.read(identity)).rejects.toMatchObject({ code: 'plan-not-ready' });
   });
-  it('keeps plans out of legacy blocks and global knowledge views', async () => {
+  it('keeps native plans out of global knowledge and recall views', async () => {
     const { store } = await fixture();
     await write(store, view(), 'private-plan', null, 'thread private content');
-    expect(await store.getBlocks('thread')).toEqual([]);
-    expect(await store.getBlocks('a')).toEqual([]);
     expect(await store.listKnowledge({ scope: 'user', activeOnly: true })).toEqual([]);
     expect(await store.recall('thread private content', 5)).toEqual([]);
   });

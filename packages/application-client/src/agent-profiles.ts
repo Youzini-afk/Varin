@@ -51,7 +51,7 @@ export interface AgentProfilesSnapshot {
   runtime: AgentRuntime;
   revision: string;
   profiles: AgentProfileView[];
-  /** Pi has no equivalent global capability observation; null is not an empty directory. */
+  /** Null means capability observation is unavailable, not an empty directory. */
   capabilities: ChildCapabilityDescriptor[] | null;
 }
 

@@ -40,7 +40,7 @@ async function fixture() {
     const installed=await runtime.installOrStage({expectedRevision:(await runtime.state()).catalog.revision,source:{kind:'local',display:'budget owner',specifier:folder}});
     return installed;
   };
-  const route=async(scope:{sessionId?:string;projectId?:string})=>runtime.upsertServiceRoutingRule({expectedRevision:(await runtime.routing.read()).document.revision,
+  const route=async(scope:{threadId?:string;projectId?:string})=>runtime.upsertServiceRoutingRule({expectedRevision:(await runtime.routing.read()).document.revision,
     rule:{serviceId:'varin.context.budget',version:1,providerKeys: ['review.budget-owner:host:varin.context.budget@1'],scope,allowFallback:false}});
   return {runtime,install,route,preparedProviders,releasedProviders,preparedCompositions,budget:createContextBudget(runtime),close:async()=>{await runtime.stop();await fs.rm(root,{recursive:true,force:true});}};
 }
@@ -49,19 +49,19 @@ test('an installed-only budget stays cold; scoped selection uses the actual brok
   let retained:Awaited<ReturnType<typeof f.runtime.prepareService>>|undefined;
   try {
     await f.install(1);
-    assert.equal(await f.budget.selected({sessionId:'main'},signal()),false);
+    assert.equal(await f.budget.selected({threadId:'main'},signal()),false);
     assert.equal((await f.runtime.state()).services.providers.length,0);
-    await f.route({sessionId:'main'});
-    assert.equal(await f.budget.selected({sessionId:'child'},signal()),false);
+    await f.route({threadId:'main'});
+    assert.equal(await f.budget.selected({threadId:'child'},signal()),false);
     // Another actual consumer owns this generation; the budget itself retains no idle lease.
     retained=await f.runtime.prepareService({serviceId:'varin.context.budget',version:1,method:'describe',args:[],
-      routing:{userId:'default',sessionId:'main'}});
-    const result=await f.budget.decide({sessionId:'main'},input,signal());
+      routing:{userId:'default',threadId:'main'}});
+    const result=await f.budget.decide({threadId:'main'},input,signal());
     assert.equal(result?.decision.kind,'compact');
     assert.equal(result?.strategy.kind,'extension');
     assert.equal(result?.decision.kind==='compact' && result.decision.summaryInstructions,'v1:describe-1');
     assert.deepEqual(f.releasedProviders,f.preparedProviders.slice(1),'The actual decision releases its preparation binding');
-    const second=await f.budget.decide({sessionId:'main'},input,signal());
+    const second=await f.budget.decide({threadId:'main'},input,signal());
     assert.equal(second?.decision.kind==='compact' && second.decision.summaryInstructions,'v1:describe-1',
       'The same actual generation reuses its frozen description');
     assert.deepEqual(second?.strategy,result?.strategy);
@@ -69,19 +69,19 @@ test('an installed-only budget stays cold; scoped selection uses the actual brok
     assert.deepEqual(f.releasedProviders,f.preparedProviders.slice(1));
     // An unrelated route invalidates selection facts, not the selected immutable declaration.
     await f.route({projectId:'unrelated'});
-    const third=await f.budget.decide({sessionId:'main'},input,signal());
+    const third=await f.budget.decide({threadId:'main'},input,signal());
     assert.equal(third?.decision.kind==='compact' && third.decision.summaryInstructions,'v1:describe-1');
     assert.deepEqual(third?.strategy,result?.strategy);
     assert.equal(f.preparedProviders[3],retained.providerId);
     retained.release();retained=undefined;
     assert.deepEqual(f.releasedProviders,f.preparedProviders);
     await f.runtime.upsertServiceRoutingRule({expectedRevision:(await f.runtime.routing.read()).document.revision,
-      rule:{serviceId:'varin.context.budget',version:1,providerKeys:[],scope:{sessionId:'main'},allowFallback:true}});
-    assert.equal(await f.budget.selected({sessionId:'main'},signal()),true,'An explicit empty single selection is not absence');
-    await assert.rejects(f.budget.decide({sessionId:'main'},input,signal()),/requires exactly one provider/);
+      rule:{serviceId:'varin.context.budget',version:1,providerKeys:[],scope:{threadId:'main'},allowFallback:true}});
+    assert.equal(await f.budget.selected({threadId:'main'},signal()),true,'An explicit empty single selection is not absence');
+    await assert.rejects(f.budget.decide({threadId:'main'},input,signal()),/requires exactly one provider/);
     await f.runtime.removeServiceRoutingRule({expectedRevision:(await f.runtime.routing.read()).document.revision,
-      serviceId:'varin.context.budget',version:1,scope:{sessionId:'main'}});
-    assert.equal(await f.budget.selected({sessionId:'main'},signal()),false);
+      serviceId:'varin.context.budget',version:1,scope:{threadId:'main'}});
+    assert.equal(await f.budget.selected({threadId:'main'},signal()),false);
 
   } finally {retained?.release();await f.close();}
 });
@@ -90,17 +90,17 @@ test('a new worker rereads the budget configuration after storage CAS without ch
   const address={extensionId:'review.budget-owner',key:'state',scope:'application' as const};
   const configurationIdentity=(label:string)=>createHash('sha256').update(JSON.stringify({label})).digest('hex');
   try {
-    await f.install(1);await f.route({sessionId:'main'});
+    await f.install(1);await f.route({threadId:'main'});
     const initial=await f.runtime.storage.read(address);
     await f.runtime.storage.update(address,initial.document.revision,1,{configuration:{label:'alpha'}});
-    const first=await f.budget.decide({sessionId:'main'},input,signal());
+    const first=await f.budget.decide({threadId:'main'},input,signal());
     assert.equal(first?.decision.kind==='compact' && first.decision.summaryInstructions,'v1:describe-1:config-alpha');
     assert.ok(first?.strategy.kind==='extension');
     assert.equal(first.strategy.configurationIdentity,configurationIdentity('alpha'));
     assert.deepEqual(f.releasedProviders,f.preparedProviders);
     const stored=await f.runtime.storage.read(address);
     await f.runtime.storage.update(address,stored.document.revision,1,{configuration:{label:'beta'}});
-    const second=await f.budget.decide({sessionId:'main'},input,signal());
+    const second=await f.budget.decide({threadId:'main'},input,signal());
     assert.notEqual(f.preparedProviders[1],f.preparedProviders[0]);
     assert.equal(f.preparedCompositions[1],f.preparedCompositions[0]);
     assert.ok(second?.strategy.kind==='extension');
@@ -118,7 +118,7 @@ test('withdrawal during an unfinished decision rejects late output from the capt
   let entered!:()=>void;
   const ready=new Promise<void>(resolve=>{entered=resolve;});
   try {
-    await f.install(1);await f.route({sessionId:'main'});
+    await f.install(1);await f.route({threadId:'main'});
     const prepare=f.runtime.prepareService.bind(f.runtime);
     f.runtime.prepareService=async(...args)=>{
       const binding=await prepare(...args);
@@ -131,7 +131,7 @@ test('withdrawal during an unfinished decision rejects late output from the capt
         }};
       }};
     };
-    const pending=f.budget.decide({sessionId:'main'},input,signal());
+    const pending=f.budget.decide({threadId:'main'},input,signal());
     const rejected=assert.rejects(pending);
     await ready;
     await f.runtime.setEnabled('review.budget-owner',false,(await f.runtime.state()).catalog.revision);
@@ -145,7 +145,7 @@ test('ordinary replacement preserves the captured decision and selects the new r
   let entered!:()=>void;
   const ready=new Promise<void>(resolve=>{entered=resolve;});
   try {
-    await f.install(1);await f.route({sessionId:'main'});
+    await f.install(1);await f.route({threadId:'main'});
     const prepare=f.runtime.prepareService.bind(f.runtime);
     f.runtime.prepareService=async(...args)=>{
       const binding=await prepare(...args);
@@ -158,7 +158,7 @@ test('ordinary replacement preserves the captured decision and selects the new r
         }};
       }};
     };
-    const pending=f.budget.decide({sessionId:'main'},input,signal());
+    const pending=f.budget.decide({threadId:'main'},input,signal());
     await ready;
     const staged=await f.install(2);
     await f.runtime.applyPackageCandidate({extensionId:'review.budget-owner',
@@ -167,7 +167,7 @@ test('ordinary replacement preserves the captured decision and selects the new r
     const original=await pending;
     assert.equal(original?.decision.kind==='compact' && original.decision.summaryInstructions,'v1:describe-1');
     assert.equal(original?.strategy.version,'1');
-    const next=await f.budget.decide({sessionId:'main'},input,signal());
+    const next=await f.budget.decide({threadId:'main'},input,signal());
     assert.equal(next?.decision.kind==='compact' && next.decision.summaryInstructions,'v2:describe-1');
     assert.equal(next?.strategy.version,'2');
     assert.notDeepEqual(next?.strategy,original?.strategy);

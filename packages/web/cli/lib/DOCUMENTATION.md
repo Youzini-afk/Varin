@@ -6,9 +6,9 @@
 
 - `commands-serve.ts`: starts the Varin Web server in foreground or daemon mode and owns port selection, logs, and the PID/instance registry.
 - `commands-lifecycle.ts`, `commands-status.ts`, `commands-logs.ts`: stop, restart, discover, inspect, and read logs from Varin server instances.
-- `commands-session.ts`: operates directly on the Pi runtime HTTP dispatcher for session list/create/status/messages/send/fork, model and thinking selection, slash commands, waits, and optional worktree creation.
-- `commands-schedule.ts`: manages project scheduled tasks through Varin REST routes. Scheduled executions use Pi model and thinking fields.
-- `commands-models.ts`, `commands-projects.ts`: read Pi models and Varin project settings.
+- `commands-thread.ts`: uses the native Threads API for list/create/status/history/send/fork, exact Thread/branch identities, source preparation and original-Run terminal waiting. Mutation keys are generated once and printed before submission; explicit retry keys retain the original expected head.
+- `commands-schedule.ts`: manages project scheduled tasks through Varin REST routes. Run-now sends a stable idempotency key and returns the original native occurrence receipt.
+- `commands-models.ts`, `commands-projects.ts`: read native configured models and Varin project settings.
 - `commands-startup.ts`: manages native per-user startup integration.
 - `commands-connect-url.ts`: creates pairing-v2 `varin://` links backed by the shared pairing store.
 - `commands-tunnel.ts`: manages tunnel providers, profiles, diagnostics, lifecycle, and completion scripts.
@@ -16,7 +16,7 @@
 
 ## Shared Runtime
 
-- `cli-runtime.ts`: authenticated JSON access to `/api/varin/runtime/request` and Varin REST routes, plus Pi session idle waiting.
+- `cli-runtime.ts`: authenticated JSON access to `/api/threads/*` and Varin REST routes, plus original Run terminal waiting.
 - `cli-api-target.ts`: selects an explicit, desktop, or discovered Varin runtime.
 - `cli-args.ts`: argument parsing, help, completion scripts, defaults, and typo suggestions.
 - `cli-paths.ts`: Varin data, settings, log, run, and tunnel-state paths.
@@ -29,9 +29,9 @@
 
 ## Boundaries
 
-- The CLI talks to Varin and the Pi runtime only. It must not probe, launch, proxy, or configure OpenCode.
+- The CLI talks to the shared Application Host. It does not launch another conversation runtime.
 - `--json` emits JSON only; `--quiet` emits concise essential output.
-- Session methods use the typed Pi runtime dispatcher. Product REST routes are reserved for Varin-owned services such as settings, worktrees, schedules, pairing, and tunnels.
+- Conversation methods use native Thread/branch and original Run identities. Product REST routes are reserved for Varin-owned services such as settings, worktrees, schedules, pairing, and tunnels.
 - Cross-command dependencies are injected from `cli.ts`; modules in this directory must not import `cli.ts`.
 
 ## Interaction modes

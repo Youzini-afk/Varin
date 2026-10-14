@@ -191,7 +191,7 @@ impl ContextResources {
         if self.snapshot.id.is_empty()
             || self.snapshot.configuration_digest.is_empty()
             || scope.branch_id.is_empty()
-            || scope.thread_id != basis.session_id
+            || scope.thread_id != basis.thread_id
             || scope.mode != basis.mode
             || scope.thread_role != basis.thread_role
             || scope.project_id != basis.project_id

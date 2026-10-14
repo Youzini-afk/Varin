@@ -31,7 +31,7 @@ async function admitScope(runtime: AgentRuntimeClient, name: string, mode: 'agen
   await runtime.createThread(threadId, branchId);
   await runtime.submit({ key: `scope:${name}`, threadId, branchId, expectedHead: null, input: { text: 'admit the trusted fixture scope' }, configuration: {},
     initialContext: { effectiveSystemPrompt: 'FIXED_SCOPE_SYSTEM', instructionSources: ['scope-fixture'], memoryCheckpoint: 'scope-fixture:0',
-      personalization: { mode, threadRole: role, sessionId: threadId, projectId, revision: 0, configurationDigest: 'scope-fixture-profile',
+      personalization: { mode, threadRole: role, threadId: threadId, projectId, revision: 0, configurationDigest: 'scope-fixture-profile',
         memorySnapshot: { revision: 0, memories: [] }, originalSections: [{ name: 'preamble', content: 'FIXED_SCOPE_SYSTEM' }], instructionSources: ['scope-fixture'] } } });
   return { threadId, branchId };
 }
@@ -42,37 +42,32 @@ it('production scope resolution and HTTP notes share persisted identity, exact C
   const child = await admitScope(runtime, 'scope-child', 'agent', 'worker', 'project-a');
   const other = await admitScope(runtime, 'scope-other', 'agent', 'read-only', 'project-b');
   const bot = await admitScope(runtime, 'scope-bot', 'bot', 'main', 'project-a');
-  const legacyCalls: string[] = [];
-  const resolve = createPersonalizationContextResolver({ runtime: () => runtime, legacy: async id => {
-    legacyCalls.push(id); return { bot: false, threadRole: 'worker', projectId: 'pi-project' };
-  } });
+  const resolve = createPersonalizationContextResolver({ runtime: () => runtime });
   const service = createAgentPersonalization({ client: f.client, context: resolve });
   const app = express(); registerCommonRequestMiddleware(app, { express });
   registerAgentPersonalizationRoutes(app, service, (_req, _res, next) => next());
   const put = (scope: unknown, content: string, revision: number) => request(app).put('/api/agent-personalization/memory').send({ scope, content, revision });
   const global = await put({ kind: 'global' }, 'HTTP_GLOBAL', 0).expect(200);
   await put({ kind: 'project', id: 'project-a' }, 'HTTP_PROJECT_A', global.body.revision).expect(200);
-  const current = await put({ kind: 'session', id: main.threadId }, 'HTTP_MAIN_PRIVATE', 2).expect(200);
+  const current = await put({ kind: 'thread', id: main.threadId }, 'HTTP_MAIN_PRIVATE', 2).expect(200);
   expect((await service.context(main.threadId))).toMatchObject({ mode: 'agent', threadRole: 'main', projectId: 'project-a' });
   expect((await service.context(main.threadId)).memories.map(note => note.content)).toEqual(['HTTP_GLOBAL', 'HTTP_PROJECT_A', 'HTTP_MAIN_PRIVATE']);
   expect((await service.context(child.threadId))).toMatchObject({ threadRole: 'worker', projectId: 'project-a' });
   expect((await service.context(child.threadId)).memories.map(note => note.content)).toEqual(['HTTP_GLOBAL', 'HTTP_PROJECT_A']);
   expect((await service.context(other.threadId)).memories.map(note => note.content)).toEqual(['HTTP_GLOBAL']);
   const before = await service.catalog();
-  await request(app).put('/api/agent-personalization/memory').send({ id: current.body.result.id, scope: { kind: 'session', id: main.threadId }, content: 'STALE_UI_EDIT', revision: 2 }).expect(409);
-  await put({ kind: 'session', id: bot.threadId }, 'FORBIDDEN_BOT_NOTE', before.revision).expect(400);
-  await request(app).put('/api/agent-personalization/prompt').send({ scope: { kind: 'session', id: bot.threadId }, profile: { sections: { preamble: 'FORBIDDEN_BOT_PROFILE' } }, revision: before.revision }).expect(400);
+  await request(app).put('/api/agent-personalization/memory').send({ id: current.body.result.id, scope: { kind: 'thread', id: main.threadId }, content: 'STALE_UI_EDIT', revision: 2 }).expect(409);
+  await put({ kind: 'thread', id: bot.threadId }, 'FORBIDDEN_BOT_NOTE', before.revision).expect(400);
+  await request(app).put('/api/agent-personalization/prompt').send({ scope: { kind: 'thread', id: bot.threadId }, profile: { sections: { preamble: 'FORBIDDEN_BOT_PROFILE' } }, revision: before.revision }).expect(400);
   await runtime.createThread('thread:unadmitted', 'branch:unadmitted');
-  await put({ kind: 'session', id: 'thread:unadmitted' }, 'UNADMITTED_NOTE', before.revision).expect(409);
+  await put({ kind: 'thread', id: 'thread:unadmitted' }, 'UNADMITTED_NOTE', before.revision).expect(409);
   await expect(resolve('thread:missing')).rejects.toThrow();
   expect(await service.catalog()).toEqual(before);
-  expect(legacyCalls).toEqual([]);
-  expect(await resolve('pi-original-session')).toEqual({ bot: false, threadRole: 'worker', projectId: 'pi-project' });
-  expect(legacyCalls).toEqual(['pi-original-session']);
+  await expect(resolve('pi-original-session')).rejects.toThrow(/native Thread/);
   expect(await service.context(bot.threadId)).toMatchObject({ mode: 'bot', memories: [], profiles: [] });
   await f.client.close();
   const reopened = f.open(); const restored = new AgentRuntimeClient(reopened);
-  const resolveAgain = createPersonalizationContextResolver({ runtime: () => restored, legacy: async () => { throw new Error('scope must not query Pi'); } });
+  const resolveAgain = createPersonalizationContextResolver({ runtime: () => restored });
   expect(await resolveAgain(child.threadId)).toEqual({ bot: false, threadRole: 'worker', projectId: 'project-a' });
   expect(await resolveAgain(bot.threadId)).toEqual({ bot: true, threadRole: 'main', projectId: 'project-a' });
 });
@@ -110,23 +105,20 @@ it('operation lookup distinguishes missing, owned, foreign and orphan identities
 });
 
 it('resolver rejects unavailable ownership and inconsistent persisted branch scopes without legacy fallback', async () => {
-  let legacyCalls = 0;
-  const legacy = async () => { legacyCalls++; return { bot: false }; };
-  await expect(createPersonalizationContextResolver({ runtime: () => undefined, legacy })('thread:scope')).rejects.toThrow(/not ready/);
+  await expect(createPersonalizationContextResolver({ runtime: () => undefined })('thread:scope')).rejects.toThrow(/not ready/);
   const f = await fixture(); const runtime = new AgentRuntimeClient(f.client);
   const identity = await admitScope(runtime, 'scope-validation', 'agent', 'worker', 'project-a');
   const actualThread = await runtime.thread(identity.threadId);
   const actualContext = await runtime.context(identity.branchId);
   expect(actualContext?.personalization).toBeTruthy();
-  const resolve = (context: typeof actualContext, thread = actualThread) => createPersonalizationContextResolver({ legacy,
+  const resolve = (context: typeof actualContext, thread = actualThread) => createPersonalizationContextResolver({
     runtime: () => ({ thread: async () => thread, context: async () => context }) });
   await expect(resolve(actualContext, { ...actualThread, thread_id: 'thread:foreign' })(identity.threadId)).rejects.toThrow(/ownership/);
-  await expect(resolve({ ...actualContext!, personalization: { ...actualContext!.personalization!, sessionId: 'thread:foreign' } })(identity.threadId)).rejects.toThrow(/inconsistent/);
+  await expect(resolve({ ...actualContext!, personalization: { ...actualContext!.personalization!, threadId: 'thread:foreign' } })(identity.threadId)).rejects.toThrow(/inconsistent/);
   const branches = { ...actualThread, branches: [...actualThread.branches, { ...actualThread.branches[0]!, branch_id: 'branch:other' }] };
-  const inconsistent = createPersonalizationContextResolver({ legacy, runtime: () => ({ thread: async () => branches,
+  const inconsistent = createPersonalizationContextResolver({ runtime: () => ({ thread: async () => branches,
     context: async branch => branch === identity.branchId ? actualContext : { ...actualContext!, personalization: { ...actualContext!.personalization!, projectId: 'foreign-project' } } }) });
   await expect(inconsistent(identity.threadId)).rejects.toThrow(/inconsistent/);
-  expect(legacyCalls).toBe(0);
 });
 
 it.each([

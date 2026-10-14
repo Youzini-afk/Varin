@@ -9,7 +9,7 @@ import type { KernelRecordResult } from "../kernel/protocol.generated.js";
 import { createExperimentService, type ExperimentCaller } from "./experiments.js";
 import type { ExperimentBackend, ResolvedExperimentBackend } from "./experiment-backend.js";
 import type { ResourceService } from "./resources.js";
-import { piResearchCaller } from './research-caller.fixture.js';
+import { nativeResearchCaller, createResearchSourceFixture } from './native-research.fixture.js';
 import { createSourceService } from "./sources.js";
 
 const deferred = <T = void>() => {
@@ -33,7 +33,7 @@ async function fixture() {
   const branches = new Map<string, { root: string; paths: string[] }>();
   const events: string[] = [];
   const errors: Error[] = [];
-  const caller: ExperimentCaller = piResearchCaller({ workspaceId: "ws", executionWorkspaceId: "exec", sessionId: "session", threadId: "thread", runId: "run", rootSessionId: "root", workspaceScope: [] });
+  const caller: ExperimentCaller = nativeResearchCaller({ sourceRoot: root, workspaceId: "ws", executionWorkspaceId: "exec", threadId: "thread", runId: "run", rootThreadId: "root", workspaceScope: [] });
   let currentRoot = root;
   let backendAvailable = true;
   let beforeReadBranch: () => Promise<void> = async () => {};
@@ -152,12 +152,12 @@ async function fixture() {
   };
   const sources = createSourceService({ client });
   const makeService = (sourceAuthority?: import("../kernel/research-source.js").ResearchSourceAuthority, kernelClient = client) => {
-    const service = createExperimentService({ ...(sourceAuthority ? {sourceAuthority}:{}), client: kernelClient, resources, sources, resolveWorkspaceRoot: async () => { resolveCalls++; return currentRoot; }, resolveBackend: () => backendAvailable ? resolved : null, onError: (error) => errors.push(error) });
+    const service = createExperimentService({ sourceAuthority: sourceAuthority ?? createResearchSourceFixture(kernelClient, () => { resolveCalls++; return currentRoot; }), client: kernelClient, resources, sources, resolveBackend: () => backendAvailable ? resolved : null, onError: (error) => errors.push(error) });
     cleanup.push(() => service.dispose()); return service;
   };
   const service = makeService();
   const snapshot = { schemaVersion: 2, source: {kind:"physical-capture"}, branchId: "seed-branch", root: "sha256-seed", sourceRoot: root, workspaceId: "ws", executionWorkspaceId: "exec", captureScopes: [], capturedPathCount: 0, inventoryFingerprint: "seed", captureSemantics: { excludedDirectories: [".git", ".varin"], gitignore: "not-applied", ignoredFilesIncluded: true } };
-  records.set("experiment.spec:seed", { recordId: "experiment.spec:seed", workspaceId: "ws", recordType: "experiment.spec", state: "active", recordRevision: 1, payloadJson: JSON.stringify({ researchOwner: {runtime:"pi",rootSessionId:"root",sessionId:"session"},executionWorkspaceId:"exec", id: "seed", command: "fixture-command", args: [], inputs: [], outputPaths: [], inputSnapshot: snapshot, resources: { cpuCores: 1 } }), references: [], createdAt: 1, updatedAt: 1 });
+  records.set("experiment.spec:seed", { recordId: "experiment.spec:seed", workspaceId: "ws", recordType: "experiment.spec", state: "active", threadId: caller.owner.threadId, runId: caller.owner.runId, recordRevision: 1, payloadJson: JSON.stringify({ researchOwner: caller.owner,executionWorkspaceId:"exec", id: "seed", command: "fixture-command", args: [], inputs: [], outputPaths: [], inputSnapshot: snapshot, resources: { cpuCores: 1 } }), references: [], createdAt: 1, updatedAt: 1 });
   return { root, caller, client, resources, scoped, backend, records, branches, operations, events, errors, service, makeService, committed, activeLeases, sources,
     backendAvailable: (value: boolean) => { backendAvailable = value; },
     readBranch: (fn: typeof beforeReadBranch) => { beforeReadBranch = fn; },
@@ -375,7 +375,7 @@ describe("durable experiment admission with explicit Storage/backend fixtures", 
     f.scan(async () => { entered.resolve(); await gate.promise; });
     const first = await f.service.submit(f.caller, intent); await entered.promise;
     f.setRoot("/missing-new-source");
-    const resumed = piResearchCaller({ ...f.caller, runId: "new-run", executionWorkspaceId: "new-execution", allowedThreadIds: ["thread"] });
+    const resumed = nativeResearchCaller({ ...f.caller, runId: "new-run", executionWorkspaceId: "new-execution", readThreadIds: ["thread"] });
     const retry = await f.service.submit(resumed, intent);
     assert.equal(retry.attempt.attemptId, first.attempt.attemptId); assert.equal(retry.attempt.runId, "run");
     assert.equal(f.counters().resolveCalls, 1);
@@ -412,7 +412,7 @@ describe("durable experiment admission with explicit Storage/backend fixtures", 
     const f = await fixture();
     const first = await f.service.submit(f.caller, { ...intent, requestId: "first-candidate" });
     await until(() => f.counters().spawnCalls === 1);
-    const second = await f.service.submit(piResearchCaller({ ...f.caller, runId: "later-run" }), { ...intent, requestId: "duplicate-candidate" });
+    const second = await f.service.submit(nativeResearchCaller({ ...f.caller, runId: "later-run" }), { ...intent, requestId: "duplicate-candidate" });
     await until(() => f.counters().spawnCalls === 2);
     const a = await f.service.get(f.caller, first.attempt.attemptId); const b = await f.service.get(f.caller, second.attempt.attemptId);
     assert.equal(a.attempt.specId, b.attempt.specId); assert.equal(f.branches.size, 1);
@@ -423,8 +423,8 @@ describe("durable experiment admission with explicit Storage/backend fixtures", 
 
   it("keeps identical inline specs within each original creator's read boundary", async () => {
     const f = await fixture();
-    const firstCaller = piResearchCaller({ ...f.caller, threadId: "first-thread", allowedThreadIds: ["first-thread"] });
-    const secondCaller = piResearchCaller({ ...f.caller, threadId: "second-thread", allowedThreadIds: ["second-thread"] });
+    const firstCaller = nativeResearchCaller({ ...f.caller, threadId: "first-thread", readThreadIds: ["first-thread"] });
+    const secondCaller = nativeResearchCaller({ ...f.caller, threadId: "second-thread", readThreadIds: ["second-thread"] });
     const first = await f.service.submit(firstCaller, { ...intent, requestId: "first-owner" });
     await until(() => f.counters().spawnCalls === 1);
     const second = await f.service.submit(secondCaller, { ...intent, requestId: "second-owner" });
@@ -440,11 +440,11 @@ describe("durable experiment admission with explicit Storage/backend fixtures", 
   });
 
   it("authorizes source and retry metadata with the actual caller before admission", async () => {
-    const f = await fixture(); const caller = piResearchCaller({ ...f.caller, allowedThreadIds: ["thread"] });
-    const source = await f.sources.register("ws", { kind: "dataset", path: "input.txt" }, piResearchCaller({workspaceId:"ws",executionWorkspaceId:"exec",sessionId: "foreign-session", threadId: "foreign-thread", runId: "foreign-run", workspaceScope: [] }));
+    const f = await fixture(); const caller = nativeResearchCaller({ ...f.caller, readThreadIds: ["thread"] });
+    const source = await f.sources.register("ws", { kind: "dataset", path: "input.txt" }, nativeResearchCaller({workspaceId:"ws",executionWorkspaceId:"exec", threadId: "foreign-thread", runId: "foreign-run", workspaceScope: [] }));
     await assert.rejects(f.service.submit(caller, { ...intent, inputs: [{ sourceId: source.sourceId }] }), /outside the caller/);
     assert.equal([...f.records.values()].filter((record) => record.recordType === "experiment.attempt").length, 0);
-    const foreignCaller = piResearchCaller({...f.caller,threadId:"foreign-thread"});
+    const foreignCaller = nativeResearchCaller({...f.caller,threadId:"foreign-thread"});
     const foreign = await f.service.submit(foreignCaller, { requestId: "foreign-attempt", specId: "seed" });
     await f.service.cancel(foreignCaller, foreign.attempt.attemptId); await f.service.wait(foreignCaller, foreign.attempt.attemptId, 1000);
     const priorAttempts = [...f.records.values()].filter((record) => record.recordType === "experiment.attempt").length;
@@ -482,7 +482,7 @@ describe("durable experiment admission with explicit Storage/backend fixtures", 
   it("stops only its admitted thread set and admits future intents after the stop drains", async () => {
     const f = await fixture(); const entered = deferred(); const gate = deferred(); f.prepare(async () => { entered.resolve(); await gate.promise; });
     const first = await f.service.submit(f.caller, { requestId: "old", specId: "seed" }); await entered.promise;
-    const stopping = f.service.stopForThreads("ws", [f.caller.threadId!]);
+    const stopping = f.service.stopForThreads("ws", [f.caller.owner.threadId!]);
     await until(() => JSON.parse(f.records.get(`experiment.attempt:${first.attempt.attemptId}`)!.payloadJson).cancelRequested === true);
     await assert.rejects(f.service.submit(f.caller, { requestId: "during-stop", specId: "seed" }), /stopping/);
     gate.resolve(); await stopping;
@@ -572,7 +572,7 @@ it('installed ordinary research tools hand original model and policy invocations
   await extension.reviewCapabilities({extensionId:manifest.id,expectedRevision:(await extension.catalog.snapshot()).revision,decisions:[{capability:RESEARCH_CAPABILITY,realm:'host',granted:true}]});
   await extension.setEnabled(manifest.id,true,(await extension.catalog.snapshot()).revision);
   const descriptor=manifest.provides!.services!.find(s=>s.id==='example.research.submit')!;
-  const selected=await extension.prepareService({serviceId:descriptor.id,version:descriptor.version,method:'execute',args:[],routing:{sessionId:'thread'}});
+  const selected=await extension.prepareService({serviceId:descriptor.id,version:descriptor.version,method:'execute',args:[],routing:{}});
   const retained=await retainExtensionTool({runtime:extension,kernel,currentPolicy:async()=>({mode:'normal',rules:[{tool:descriptor.tool!.name,decision:'allow'}]})},selected);
   const frames:import('../kernel/tool-bridge.js').PrivateToolFrame[]=[];
   const bridge=new ToolBridge(()=> 'epoch',async frame=>{frames.push(frame);if(frame.kind==='host-tool-receipt')queueMicrotask(()=>bridge.consume({v:1,kind:'host-tool-receipt-ack',kernelEpoch:'epoch',id:frame.id,accepted:true}));},()=>assert.fail('Tool transport failed'));
@@ -604,7 +604,7 @@ it('installed ordinary research tools hand original model and policy invocations
   await research.reconcile();
   const selection={runtime:'agent' as const,threadId:'thread',branchId:'branch',sourceRunId:'run'};
   const rows=await research.user.list(selection);assert.equal(rows.attempts.length,2);assert.ok(rows.attempts.every(attempt=>attempt.permissions?.control));
-  const sibling:ExperimentCaller={workspaceId:'ws',executionWorkspaceId:'exec',threadId:'sibling',runId:'sibling-run',owner:{runtime:'agent',actor:{kind:'reader'},rootThreadId:'thread',threadId:'sibling',branchId:'sibling-branch',runId:'sibling-run',source},access:{kind:'family',readThreadIds:['thread','sibling'],controlThreadIds:['sibling']}};
+  const sibling:ExperimentCaller={workspaceId:'ws',executionWorkspaceId:'exec',owner:{runtime:'agent',actor:{kind:'reader'},rootThreadId:'thread',threadId:'sibling',branchId:'sibling-branch',runId:'sibling-run',source},access:{kind:'family',readThreadIds:['thread','sibling'],controlThreadIds:['sibling']}};
   const visible=await experiments.get(sibling,rows.attempts[0]!.attemptId);assert.equal(visible.attempt.permissions!.control,false);
   await assert.rejects(experiments.cancel(sibling,rows.attempts[0]!.attemptId),/not authorized|not allowed|not accessible|denied|control/i);
   if(sibling.owner.runtime!=='agent')throw new Error('native fixture identity');
@@ -631,7 +631,7 @@ it("publishes drained execution before slow collection and preserves its reader 
     live_root: { hostId: "fixture-host", canonicalRoot: f.root, rootId: "source-root" },
   };
   const caller: ExperimentCaller = {
-    workspaceId: "ws", executionWorkspaceId: "exec", threadId: "thread", runId: "run", workspaceScope: [],
+    workspaceId: "ws", executionWorkspaceId: "exec", workspaceScope: [],
     owner: { runtime: "agent", actor: { kind: "user", key: "slow-collection" }, rootThreadId: "thread",
       threadId: "thread", branchId: "branch", runId: "run", operationId: "slow-collection-op",
       executionOwner: { kind: "external", identity: "research.experiment", epoch: "original" }, source },
@@ -741,7 +741,7 @@ async function nativeArtifactFixture() {
   const { prepareExperimentInput } = await import('./experiment-workspace.js');
   const source = { resource_owner: { kind: 'local' as const }, workspace_id: 'ws', execution_workspace_id: 'exec', mode: 'live_root' as const,
     branch_id: null, revision: null, live_root: { hostId: 'fixture-host', canonicalRoot: f.root, rootId: 'source-root' } };
-  const caller: ExperimentCaller = { workspaceId: 'ws', executionWorkspaceId: 'exec', threadId: 'thread', runId: 'run', workspaceScope: [],
+  const caller: ExperimentCaller = { workspaceId: 'ws', executionWorkspaceId: 'exec', workspaceScope: [],
     owner: { runtime: 'agent', actor: { kind: 'user', key: 'artifacts' }, rootThreadId: 'thread', threadId: 'thread', branchId: 'branch', runId: 'run', operationId: 'artifact-job', executionOwner: { kind: 'external', identity: 'research.experiment', epoch: 'original' }, source },
     access: { kind: 'family', readThreadIds: ['thread'], controlThreadIds: ['thread'] } };
   const service = f.makeService({ async admit(_caller, cwd) { return { kind: 'physical', selection: source, canonicalRoot: f.root, cwd: cwd ?? '' }; },
@@ -764,7 +764,7 @@ it('observes durable artifact readiness during collection, stable completion rev
   assert.equal(first.artifacts[0]!.state, 'available'); assert.equal(first.artifacts[0]!.recordRevision, 1);
   assert.equal(first.completion, null); assert.ok(hints.includes(target.subject.subjectId));
   assert.equal((await f.service.nativeReceipt('ws', target.subject.subjectId))!.executorStopped, true);
-  const sibling: ExperimentCaller = { ...f.caller, threadId: 'sibling', runId: 'sibling-run', owner: { runtime: 'agent', actor: { kind: 'reader' }, rootThreadId: 'thread', threadId: 'sibling', branchId: 'sibling-branch', runId: 'sibling-run', source: f.source }, access: { kind: 'family', readThreadIds: ['thread', 'sibling'], controlThreadIds: ['sibling'] } };
+  const sibling: ExperimentCaller = { ...f.caller, owner: { runtime: 'agent', actor: { kind: 'reader' }, rootThreadId: 'thread', threadId: 'sibling', branchId: 'sibling-branch', runId: 'sibling-run', source: f.source }, access: { kind: 'family', readThreadIds: ['thread', 'sibling'], controlThreadIds: ['sibling'] } };
   assert.equal((await f.service.readArtifactObservation(sibling, target, { name: 'a' })).artifacts.length, 1);
   await assert.rejects(f.service.collect(sibling, target.subject.subjectId), /control/i);
   await assert.rejects(f.service.readArtifactObservation({ ...sibling, access: { kind: 'maintenance' } }, target, {}), /family reader/i);
@@ -822,7 +822,7 @@ it('reads only the original published log byte boundary, including raw UTF-8 spl
   const { prepareExperimentInput } = await import('./experiment-workspace.js');
   const f = await fixture();
   const source = { resource_owner: { kind: 'local' as const }, workspace_id: 'ws', execution_workspace_id: 'exec', mode: 'live_root' as const, branch_id: null, revision: null, live_root: { hostId: 'fixture-host', canonicalRoot: f.root, rootId: 'source-root' } };
-  const caller: ExperimentCaller = { workspaceId: 'ws', executionWorkspaceId: 'exec', threadId: 'thread', runId: 'run', workspaceScope: [],
+  const caller: ExperimentCaller = { workspaceId: 'ws', executionWorkspaceId: 'exec', workspaceScope: [],
     owner: { runtime: 'agent', actor: { kind: 'user', key: 'log-owner' }, rootThreadId: 'thread', threadId: 'thread', branchId: 'branch', runId: 'run', operationId: 'log-operation', executionOwner: { kind: 'external', identity: 'research.experiment', epoch: 'log-owner' }, source },
     access: { kind: 'family', readThreadIds: ['thread'], controlThreadIds: ['thread'] } };
   const service = f.makeService({ async admit() { return { kind: 'physical', selection: source, canonicalRoot: f.root, cwd: '' }; },

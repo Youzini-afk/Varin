@@ -18,7 +18,7 @@ export const createStaticRoutesRuntime = (dependencies: {
   __dirname: string;
   express: { static(root: string, options?: { setHeaders?(response: Response, filePath: string): void }): RequestHandler };
   fs: { existsSync(path: string): boolean };
-  listRecentSessions?: PwaManifestRouteDependencies['listRecentSessions'];
+  listRecentThreads: PwaManifestRouteDependencies['listRecentThreads'];
   normalizePwaAppName(value: unknown, fallback: string): unknown;
   normalizePwaOrientation(value: unknown, fallback: string): unknown;
   path: { join(...parts: string[]): string; resolve(path: string): string; sep: string };
@@ -32,7 +32,7 @@ export const createStaticRoutesRuntime = (dependencies: {
     process,
     __dirname,
     express,
-    listRecentSessions,
+    listRecentThreads,
     readSettingsFromDisk,
     normalizePwaAppName,
     normalizePwaOrientation,
@@ -72,7 +72,7 @@ export const createStaticRoutesRuntime = (dependencies: {
       }));
 
       registerPwaManifestRoute(app, {
-        listRecentSessions,
+        listRecentThreads,
         readSettingsFromDisk,
         normalizePwaAppName: (value, fallback) => {
           const normalized = normalizePwaAppName(value, fallback);

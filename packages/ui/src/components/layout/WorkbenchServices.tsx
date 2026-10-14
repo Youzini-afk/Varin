@@ -6,7 +6,7 @@ import { useUIStore } from '@/stores/useUIStore';
 import { useGitHubAuthStore } from '@/stores/useGitHubAuthStore';
 import { useTerminalStore } from '@/stores/useTerminalStore';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
-import { SessionTokenUsage } from '@/components/pi-session/SessionTokenUsage';
+import { ThreadTokenUsage } from '@/components/thread/ThreadTokenUsage';
 import { UpdateDialog } from '@/components/ui/UpdateDialog';
 import { McpDropdownContent } from '@/components/mcp/McpDropdown';
 import { McpIcon } from '@/components/icons/McpIcon';
@@ -295,7 +295,7 @@ const DesktopServicesMenu = React.memo(function DesktopServicesMenu({
           <McpDropdownContent active={isDesktopServicesOpen && desktopServicesTab === 'mcp'} />
         ) : null}
 
-        {desktopServicesTab === 'usage' ? <SessionTokenUsage /> : null}
+        {desktopServicesTab === 'usage' ? <ThreadTokenUsage /> : null}
 
         {showDevShutdown ? (
           <>

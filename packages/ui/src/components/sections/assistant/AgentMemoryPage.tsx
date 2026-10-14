@@ -75,7 +75,7 @@ export function AgentMemoryPage({ initialScope, scopes, embedded = false }: {
               <Button variant="ghost" size="sm" aria-label={t('assistant.delete')} disabled={settings.busy || !!draft} onClick={() => void remove(note)}><Icon name="delete-bin" className="size-4" /></Button></div>
           </div>
           <details className="mt-1 typography-micro text-muted-foreground"><summary className="cursor-pointer">{t('assistant.source')}</summary>
-            <p className="mt-1 break-all">{note.source?.label ?? '—'} · {new Date(note.updatedAt).toLocaleString()}{note.source?.sessionId ? ` · ${note.source.sessionId}` : ''}</p>
+            <p className="mt-1 break-all">{note.source?.label ?? '—'} · {new Date(note.updatedAt).toLocaleString()}{note.source?.threadId ? ` · ${note.source.threadId}` : ''}</p>
           </details>
         </article>)}</div>
       </div>

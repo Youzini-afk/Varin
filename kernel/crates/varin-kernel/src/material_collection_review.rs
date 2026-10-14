@@ -196,7 +196,7 @@ pub(super) fn admit_child(runtime: &Arc<RunSupervisor>, child: &ChildTask) -> St
         varin_runtime::catalog::context::ContextProposal { key:child.execution_id.clone(),branch_id:child.child_branch_id.clone(),through_id:None,
             expected_revision:0,summary:String::new(),effective_system_prompt:"Read shared material".into(),instruction_sources:vec![],memory_checkpoint:None },
         serde_json::from_value(json!({"mode":"agent","threadRole":"worker","revision":0,"configurationDigest":"material-review","memorySnapshot":{"revision":0,"memories":[]},
-            "sessionId":child.child_thread_id,"projectId":null,"originalSections":[{"name":"preamble","content":"Read shared material"}],"instructionSources":[]})).unwrap()).unwrap();
+            "threadId":child.child_thread_id,"projectId":null,"originalSections":[{"name":"preamble","content":"Read shared material"}],"instructionSources":[]})).unwrap()).unwrap();
     let admitted = owner
         .lock()
         .unwrap()

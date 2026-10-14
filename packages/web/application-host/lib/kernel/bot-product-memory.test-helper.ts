@@ -32,7 +32,7 @@ export async function installProductMemory(root: string, kernel: KernelClient, r
     };
     const history = createBotHistory(runtime);
     const memory = createMemoryService({ storeForScopeId: store, userStore: () => store('user'),
-        ownerForSession: async () => { throw new Error('Native Bot cannot become a Pi session'); }, ownerForThread,
+        ownerForThread,
         threadStoreIfPresent: id => store(threadScopeId(id)), associationForThread: async (id) => ({ threadIds: [id] }),
         readHistorySource: async (botId, span) => (await history.read(botId, span)).text,
     });

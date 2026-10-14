@@ -2,7 +2,6 @@ import React from 'react';
 import { create } from 'zustand';
 import { getRuntimeEndpointGeneration, subscribeRuntimeEndpointChanged, type ThreadComputerAPI } from '@varin/application-client';
 import { computerWorkKey, sameComputerExecution, sameComputerWork, type ComputerAccessRequest, type ComputerAutomationProjection, type ComputerExecutionRef, type ComputerWorkRef } from '@varin/protocol';
-import { readComputerAutomation, stopComputerAutomation } from '@/lib/computers';
 import { useI18n } from '@/lib/i18n';
 import { computerErrorText } from '@/lib/computerErrors';
 import { subscribeVarinEvents } from '@/lib/varinEvents';
@@ -22,7 +21,7 @@ const belongs = (view: View, work: ComputerWorkRef | undefined, selected: Comput
   || view.state?.requests.some(item => sameComputerWork(item.actor.execution.work, work))
   || view.state?.cleanups.some(item => sameComputerWork(item.execution.work, work))));
 
-function watch(key: string, work: ComputerWorkRef, host: number, api?: ThreadComputerAPI) {
+function watch(key: string, work: ComputerWorkRef, host: number, api: ThreadComputerAPI) {
   const existing = watchers.get(key);
   if (existing) { existing.refs += 1; return existing; }
   let active = true, read = 0, stateRevision = 0, activityRevision = 0, invalidationRevision = 0;
@@ -38,7 +37,7 @@ function watch(key: string, work: ComputerWorkRef, host: number, api?: ThreadCom
     const controller = new AbortController(); reading = controller;
     const started = ++read, stateAt = stateRevision, activityAt = activityRevision;
     try {
-      const snapshot = work.runtime === 'agent' && api ? await api.state(work, controller.signal) : await readComputerAutomation(work, controller.signal);
+      const snapshot = await api.state(work, controller.signal);
       if (!sameComputerWork(snapshot.state.work, work)) throw new Error('Computer state belongs to another conversation');
       if (current() && started === read) {
         const publishState = stateAt === stateRevision;
@@ -75,23 +74,21 @@ function watch(key: string, work: ComputerWorkRef, host: number, api?: ThreadCom
         stateRevision += 1; void refresh();
       }
     } else if (event.type === 'computer-activity') {
-      const activityWork = event.activity.execution?.work ?? (event.activity.sessionId ? { runtime: 'pi' as const, sessionId: event.activity.sessionId } : undefined);
+      const activityWork = event.activity.execution?.work;
       const known = view.activities.some(item => item.desktopId === event.desktopId);
       if (known || belongs(view, activityWork, work)) {
         activityRevision += 1;
         update(key, current => ({ ...current, activities: [...current.activities.filter(item => item.desktopId !== event.desktopId),
           ...(belongs(current, activityWork, work) ? [{ desktopId: event.desktopId, activity: event.activity }] : [])] }));
       }
-    } else if (event.type === 'harness-thread-changed' && work.runtime === 'pi'
-      && (event.activeRun?.sessionId && belongs(view, { runtime: 'pi', sessionId: event.activeRun.sessionId }, work)
-        || event.thread.parent.kind === 'session' && belongs(view, { runtime: 'pi', sessionId: event.thread.parent.id }, work))) void refresh();
+    }
   });
   const watcher: Watcher = {
     refs: 1, refresh,
     async decide(request, decision) {
       const displayed = useProjection.getState().views[key];
       const original = displayed?.state?.requests.find(item => item.id === request.id && item.revision === request.revision);
-      if (!current() || work.runtime !== 'agent' || !api || displayed?.busy || displayed?.decisionRequestId
+      if (!current() || displayed?.busy || displayed?.decisionRequestId
         || !displayed?.state || !sameComputerWork(work, displayed.state.rootWork)
         || original?.status !== 'pending') return;
       const commandId = JSON.stringify([request.id, request.revision, decision]);
@@ -128,9 +125,7 @@ function watch(key: string, work: ComputerWorkRef, host: number, api?: ThreadCom
       // Retain the button's exact execution, even if another Run starts before its response.
       update(key, view => ({ ...view, busy: true, error: null }));
       try {
-        const result = execution.work.runtime === 'agent' && api
-          ? await api.stop(execution.work, { runId: execution.runId, desktopId })
-          : await stopComputerAutomation(execution, desktopId);
+        const result = await api.stop(execution.work, { runId: execution.runId, desktopId });
         if (!current()) return;
         if (stateAt === stateRevision && readAt === read && invalidationAt === invalidationRevision && sameComputerWork(result.state.work, work)
           && preservesExecution(displayed?.currentExecution, result.state.currentExecution)
@@ -153,7 +148,7 @@ function watch(key: string, work: ComputerWorkRef, host: number, api?: ThreadCom
 }
 
 /** One read-only projection per Host and work, shared by its overview and desktop launcher. */
-export function useComputerAutomation(work: ComputerWorkRef, api?: ThreadComputerAPI, observedRunId?: string | null) {
+export function useComputerAutomation(work: ComputerWorkRef, api: ThreadComputerAPI, observedRunId?: string | null) {
   const { t } = useI18n();
   const host = React.useSyncExternalStore(subscribeRuntimeEndpointChanged, getRuntimeEndpointGeneration, getRuntimeEndpointGeneration);
   const workKey = computerWorkKey(work);
@@ -183,6 +178,6 @@ export function useComputerAutomation(work: ComputerWorkRef, api?: ThreadCompute
   const decide = React.useCallback(async (request: RequestRevision, decision: Decision['decision']) => {
     if (mounted.current?.key === key && host === getRuntimeEndpointGeneration()) await mounted.current.watcher.decide(request, decision);
   }, [host, key]);
-  const canDecideRequests = Boolean(api && work.runtime === 'agent' && view.state && sameComputerWork(view.state.rootWork, work));
+  const canDecideRequests = Boolean(view.state && sameComputerWork(view.state.rootWork, work));
   return { ...view, error: view.error === null ? null : computerErrorText(view.error, t), activities: view.activities.filter(entry => entry.activity.status === 'running'), stop, refresh, decide, canDecideRequests };
 }

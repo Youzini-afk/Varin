@@ -1,18 +1,14 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { mkdtemp, mkdir, writeFile, rm, symlink, readlink, rename } from 'node:fs/promises';
+import { mkdtemp, mkdir, writeFile, rm, symlink, rename } from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
 import { execFileSync } from 'node:child_process';
 import { createAgentResourceAuthority, type AdmittedAgentResourceScope, type PreparedAgentResources } from './authority.js';
-import { createAdmittedDirectoryReader, createCapsuleResourceReader, createDocumentResourceReader, createPinnedResourceReader,
+import { createAdmittedDirectoryReader, createCapsuleResourceReader, createDocumentResourceReader,
   contentVersion, resourceFailure, type CapturedResource, type ResourceReader } from './source-reader.js';
 import { CONTEXT_FILE_NAMES, parseSkill } from './formats.js';
 import { packageDelta, resourceEnabled } from './configuration.js';
 import { resourceSections } from './render.js';
-import { openRecoveryJournalCatalog } from '../recovery/journal-catalog.js';
-import { createRecoveryFileStore } from '../recovery/file-store.test-helper.js';
-import { WorkingStateStore } from '../harness/working-state/working-state-store.js';
-import { asTestWorkingStateRootStore } from '../harness/working-state/working-state-root-adapter.test-helper.js';
 
 const nativeResources = (resources: unknown) => JSON.stringify({ resources });
 const roots: string[] = [];
@@ -260,59 +256,6 @@ describe('Agent resource owner', () => {
     expect(await authority.prepare(scope({ ancestors: [{ reader: project.reader, appliesTo: '' }] }))).toMatchObject({ status: 'unavailable' });
     const empty = createCapsuleResourceReader({ domainId: 'old', viewId: 'old-v1', files: [], directories: [] });
     expect(await authority.prepare(scope({ ancestors: [{ reader: empty, appliesTo: '' }] }))).toMatchObject({ status: 'unavailable', path: 'AGENTS.override.md' });
-  });
-
-  it('uses the existing pinned WorkingState API after live files change, and never treats uncovered Git absence as missing', async () => {
-    const project = await fixture({ '.varin/settings.json': '{}', '.varin/resources/SYSTEM.md': 'fixed system', 'AGENTS.md': 'fixed root',
-      'src/AGENTS.md': 'fixed nested', '.varin/resources/skills/review/SKILL.md': skill('review', 'FIXED SKILL'), '.varin/resources/skills/review/reference.txt': 'FIXED REFERENCE' }, 'project');
-    await symlink('.varin/resources/skills/review', path.join(project.root, 'linked-skill'));
-    await symlink('../.varin/resources/skills/review/reference.txt', path.join(project.root, 'src/linked-reference'));
-    await symlink('cycle-b', path.join(project.root, 'cycle-a'));
-    await symlink('cycle-a', path.join(project.root, 'cycle-b'));
-    await symlink('.', path.join(project.root, 'self'));
-    await symlink('/external/not-in-pin', path.join(project.root, 'external'));
-    const recovery = path.join(project.root, 'store-outside-source');
-    const database = await openRecoveryJournalCatalog(recovery, { create: true });
-    if (!database) throw new Error('Test catalog unavailable');
-    const context = { root: recovery, database, fileStore: createRecoveryFileStore(),
-      identity: { authorityId: 'test', canonicalRoot: project.root, filesystemProfile: 'test', workspaceId: 'workspace' },
-      resourceOperationGate: { run: async <T>(_resources: readonly unknown[], operation: () => Promise<T>) => operation() } };
-    const store = await WorkingStateStore.open(context);
-    const adapter = asTestWorkingStateRootStore(store, context);
-    try {
-      const paths = ['.varin', '.varin/resources', '.varin/settings.json', '.varin/resources/SYSTEM.md', 'AGENTS.md', 'src', 'src/AGENTS.md', '.varin/resources/skills', '.varin/resources/skills/review', '.varin/resources/skills/review/SKILL.md', '.varin/resources/skills/review/reference.txt'];
-      const states = await store.captureDirectory(project.root, paths);
-      // The legacy file fixture follows realpath even for a leaf link; production capture preserves it.
-      // Read actual link values separately so this test still drives the original pinned tree API.
-      for (const link of ['linked-skill', 'src/linked-reference', 'cycle-a', 'cycle-b', 'self', 'external']) {
-        states[link] = { kind: 'symlink', symlinkTarget: await readlink(path.join(project.root, link)) };
-      }
-      await store.createBranch('workspace', 'source', states);
-      const pin = await adapter.pinBranch('source', { revision: 0 });
-      try {
-        const reader = createPinnedResourceReader({ domainId: 'project', store: adapter, pin, coverage: { kind: 'complete' } });
-        expect(await reader.read('linked-skill/SKILL.md')).toMatchObject({ status: 'ready', reference: { canonicalId: 'resource:project/.varin/resources/skills/review/SKILL.md' } });
-        expect(await reader.read('src/linked-reference')).toMatchObject({ status: 'ready', content: 'FIXED REFERENCE' });
-        expect(await reader.read('self/self/AGENTS.md')).toMatchObject({ status: 'ready', content: 'fixed root' });
-        expect(await reader.list('linked-skill')).toMatchObject({ status: 'ready', entries: expect.arrayContaining([{ name: 'SKILL.md', kind: 'file' }]) });
-        expect(await reader.read('cycle-a')).toMatchObject({ status: 'invalid', reason: expect.stringContaining('cycle') });
-        expect(await reader.read('external')).toMatchObject({ status: 'unavailable', reason: expect.stringContaining('External symlink') });
-        await writeFile(path.join(project.root, '.varin/resources/SYSTEM.md'), 'later system');
-        await rm(path.join(project.root, 'src/AGENTS.md'));
-        await writeFile(path.join(project.root, '.varin/resources/skills/review/SKILL.md'), skill('review', 'LATER SKILL'));
-        const snapshot = await prepared(scope({ project: { reader, cwd: '' } }));
-        expect(resourceSections(snapshot, 'runtime', 'resource_read').preamble).toBe('fixed system');
-        const nested = await authority.read({ snapshot, readers: [reader] }, { kind: 'instruction-scope', targetPath: 'src/main.ts' });
-        expect(nested.status === 'ready' && nested.kind === 'instruction-scope' && nested.instructions.map(item => item.content)).toEqual(['fixed root', 'fixed nested']);
-        const support = await authority.read({ snapshot, readers: [reader] }, { kind: 'skill-resource', resourceId: snapshot.skills[0]!.id, relativePath: 'reference.txt' });
-        expect(support.status === 'ready' && support.kind === 'skill-resource' && support.file.content).toBe('FIXED REFERENCE');
-        const incomplete = createPinnedResourceReader({ domainId: 'old-git', store: adapter, pin, coverage: { kind: 'selected', paths: ['known-missing'], subtrees: [] } });
-        expect(await incomplete.read('unknown-ignored')).toMatchObject({ status: 'unavailable' });
-        expect(await incomplete.read('known-missing')).toMatchObject({ status: 'missing' });
-        expect(await incomplete.list('.varin/resources/skills')).toMatchObject({ status: 'unavailable' });
-        expect(await incomplete.read('AGENTS.md')).toMatchObject({ status: 'ready', content: 'fixed root' });
-      } finally { await pin.release(); }
-    } finally { database.close(); }
   });
 
   it('adapts Documents revisions without promoting live readers to immutable snapshots', async () => {

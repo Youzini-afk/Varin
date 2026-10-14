@@ -17,7 +17,6 @@ export function createResearchArtifactObserver(options: { kernel: KernelClient; 
     const caller: ExperimentCaller = {
       workspaceId: subject.workspaceId,
       executionWorkspaceId: observer.source.execution_workspace_id,
-      threadId: observer.threadId, runId: observer.sourceRunId,
       owner: { runtime: 'agent', actor: { kind: 'reader' }, rootThreadId: observer.rootThreadId,
         threadId: observer.threadId, branchId: observer.branchId, runId: observer.sourceRunId, source: observer.source },
       access: { kind: 'family', readThreadIds: observer.readThreadIds, controlThreadIds: [] },

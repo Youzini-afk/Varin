@@ -33,6 +33,10 @@ pub enum InputActivation {
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum InputOrigin {
     UserIngress,
+    ContextObservation {
+        owner: super::context_observations::ContextObservationSource,
+        item_digest: String,
+    },
     McpResource {
         operation_id: String,
         fact_id: String,
@@ -72,7 +76,8 @@ impl InputOrigin {
     }
     pub(super) fn history_source(&self) -> HistorySource {
         match self {
-            Self::McpResource { .. }
+            Self::ContextObservation { .. }
+            | Self::McpResource { .. }
             | Self::Followup { .. }
             | Self::Calendar { .. }
             | Self::ComputerRequest { .. }
@@ -175,9 +180,9 @@ pub(super) fn initialize(tx: &Transaction<'_>) -> Result<()> {
                     "input queue exists without its schema identity".into(),
                 ));
             }
-            tx.execute_batch("CREATE TABLE input_queue(id TEXT PRIMARY KEY,branch_id TEXT NOT NULL REFERENCES branches(id),run_id TEXT REFERENCES runs(id),mode TEXT NOT NULL,state TEXT NOT NULL,cursor INTEGER NOT NULL,origin TEXT NOT NULL,activation TEXT NOT NULL,sender_thread_id TEXT,sender_branch_id TEXT,body TEXT NOT NULL); CREATE INDEX input_queue_pending ON input_queue(branch_id,state,activation,cursor); CREATE INDEX input_queue_outgoing ON input_queue(sender_thread_id,sender_branch_id,cursor); INSERT INTO runtime_domains(name,version) VALUES('input_queue',7);")?;
+            tx.execute_batch("CREATE TABLE input_queue(id TEXT PRIMARY KEY,branch_id TEXT NOT NULL REFERENCES branches(id),run_id TEXT REFERENCES runs(id),mode TEXT NOT NULL,state TEXT NOT NULL,cursor INTEGER NOT NULL,origin TEXT NOT NULL,activation TEXT NOT NULL,sender_thread_id TEXT,sender_branch_id TEXT,body TEXT NOT NULL); CREATE INDEX input_queue_pending ON input_queue(branch_id,state,activation,cursor); CREATE INDEX input_queue_outgoing ON input_queue(sender_thread_id,sender_branch_id,cursor); INSERT INTO runtime_domains(name,version) VALUES('input_queue',8);")?;
         }
-        Some(7) => check_format(tx)?,
+        Some(8) => check_format(tx)?,
         Some(version) => {
             return Err(RuntimeError::Invalid(format!(
                 "unsupported input queue domain version {version}; data was preserved"
@@ -194,7 +199,7 @@ pub(super) fn check_format(db: &Connection) -> Result<()> {
             |row| row.get(0),
         )
         .optional()?;
-    if version != Some(7) {
+    if version != Some(8) {
         return Err(RuntimeError::Invalid(
             "unsupported input queue format; data was preserved".into(),
         ));
@@ -750,8 +755,8 @@ pub(super) fn promote_next(tx: &Transaction<'_>, branch: &str) -> Result<Option<
 
 pub(super) fn has_boundary_inputs(db: &Connection, run_id: &str) -> Result<bool> {
     let run: Run = record(db, "runs", run_id)?;
-    let mut q=db.prepare("SELECT body FROM input_queue WHERE run_id=?1 AND state='queued' AND mode!='next_run' AND activation='activating'")?;
-    let rows = q.query_map([run_id], |r| r.get::<_, String>(0))?;
+    let mut q=db.prepare("SELECT body FROM input_queue WHERE branch_id=?2 AND state='queued' AND mode!='next_run' AND ((run_id=?1 AND activation='activating') OR origin='context_observation')")?;
+    let rows = q.query_map(params![run_id,run.branch_id], |r| r.get::<_, String>(0))?;
     for raw in rows {
         let row: QueuedInputMetadata = serde_json::from_str(&raw?)?;
         if ingress::hold(db, &row, Some(&run))?.is_none() {

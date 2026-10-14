@@ -23,6 +23,7 @@ import type { AgentRuntimeClient } from './agent-runtime-client.js';
 import type { ContextPreparer } from './thread-context.js';
 import type { ThreadSkillInputPreparer } from './thread-skill-input.js';
 import { parseExplicitSkillCommand } from '../agent-resources/activation.js';
+import { KernelRequestError } from './kernel-error.js';
 import { ResourceScopeError } from './thread-resource-scope.js';
 
 export interface ThreadModelAuthority {
@@ -35,10 +36,10 @@ export interface ThreadModelAuthority {
 /** This boundary has not invoked native generation admission. Do not infer that from error codes. */
 export class ThreadPreAdmissionError extends Error {
   readonly code: string;
-  constructor(reason: unknown) {
+  constructor(readonly reason: unknown, fallbackCode = 'mcp_sampling_model_selection_failed') {
     super('Thread request preparation failed before admission');
     this.code = reason && typeof reason === 'object' && 'code' in reason && typeof reason.code === 'string'
-      ? reason.code : 'mcp_sampling_model_selection_failed';
+      ? reason.code : fallbackCode;
   }
 }
 
@@ -281,14 +282,24 @@ export class ThreadAdapter {
     return this.runtime.familyItem({ ...request, callerThreadId: identity.threadId }, signal);
   }
   async continueChild(input: ThreadChildContinuation, signal?: AbortSignal) {
-    await this.requireIdentity(input, signal);
-    const child = await this.runtime.childForThread(input.threadId, signal);
-    if (!child || child.child_branch_id !== input.branchId) throw new Error('Continuation requires the original child branch');
-    // This call is the durable input acceptance. Cold source/configuration preparation belongs
-    // to the existing event-driven collaboration owner, including after Host restart.
-    return this.runtime.acceptChildContinuation({ key: input.key, childOperationId: child.operation_id,
-      previousRunId: input.previousRunId, expectedHead: input.expectedHead, input: threadInput(input.text, input.images) }, signal);
+    let admissionStarted = false;
+    try {
+      await this.requireIdentity(input, signal);
+      const child = await this.runtime.childForThread(input.threadId, signal);
+      if (!child || child.child_branch_id !== input.branchId) throw new Error('Continuation requires the original child branch');
+      // This call is the durable input acceptance. Cold source/configuration preparation belongs
+      // to the existing event-driven collaboration owner, including after Host restart.
+      admissionStarted = true;
+      return await this.runtime.acceptChildContinuation({ key: input.key, childOperationId: child.operation_id,
+        previousRunId: input.previousRunId, expectedHead: input.expectedHead, input: threadInput(input.text, input.images) }, signal);
+    } catch (error) {
+      if (!admissionStarted || error instanceof KernelRequestError && error.method === 'runtime.child.continuation.accept' && error.settlement === 'not_dispatched') {
+        throw new ThreadPreAdmissionError(error, 'thread-request-failed');
+      }
+      throw error;
+    }
   }
+
   async childExecutions(identity: ThreadIdentity, operationId?: string, signal?: AbortSignal) {
     await this.requireIdentity(identity, signal);
     const child = operationId ? await this.runtime.child(operationId, signal) : await this.runtime.childForThread(identity.threadId, signal);
@@ -584,119 +595,141 @@ export class ThreadAdapter {
   }
 
   async submit(input: ThreadSubmit) {
-    const thread = await this.requireIdentity(input);
-    await this.refreshContext(input);
-    if (input.source) await this.admitSource(input.source, input);
-    const model = await this.models.resolveModel(input.model);
+    let admissionStarted = false;
     try {
-      this.assertImagesSupported(input.images, model.configuration);
-      const command: InputSubmitParams = { key: input.key, threadId: input.threadId, branchId: input.branchId,
-        expectedHead: input.expectedHead, input: threadInput(input.text, input.images), configuration: model.configuration,
-        launch: { inheritSource: input.source === undefined, source: input.source ? {
-          resourceOwner: input.source.resourceOwner, workspaceId: input.source.workspaceId, executionWorkspaceId: input.source.executionWorkspaceId,
-          branchId: input.source.branchId ?? null, revision: input.source.revision ?? null, mode: input.source.mode, liveRoot: input.source.liveRoot ?? null, ...(input.source.environmentRunId ? { environmentRunId: input.source.environmentRunId } : {}),
-        } : null, enabledTools: input.source?.tools ?? [], credentialScope: await model.credentialOwner.scope() },
-      };
-      let initialContext: InitialContext | undefined;
-      const explicitSkill = parseExplicitSkillCommand(input.text) !== null;
-      const checkpoint = this.prepareContext || explicitSkill ? await this.runtime.context(input.branchId) : null;
-      const preparesResources = this.prepareContext && (input.source !== undefined || !checkpoint);
-      let inputPreparation: InputResourcePreparation | undefined;
-      if (preparesResources || explicitSkill || this.prepareChildProfiles) {
-        // An accepted command owns its original receipt. A later malformed settings file must not
-        // make an uncertain reply depend on re-preparing a replacement resource generation.
-        const existing = await this.runtime.inputReceipt(command);
-        if (existing) {
-          void this.continueLaunch(existing.run_id, { credentialOwner: model.credentialOwner }).catch(() => undefined);
-          return existing;
-        }
-        try {
-          if (this.prepareContext && checkpoint && input.source) {
-            if (!this.prepareContext!.forSource) throw new Error('Resource source preparation is unavailable');
-            initialContext = await this.prepareContext!.forSource(checkpoint, input.source);
-            command.expectedContextCheckpoint = checkpoint.id;
-          } else if (this.prepareContext && !checkpoint) {
-            let source = input.source ?? null;
-            if (!source) {
-              const latest = thread.branches.find(branch => branch.branch_id === input.branchId)?.latest_run;
-              const previous = latest ? await this.runtime.launch(latest.id) : null;
-              const inherited = previous?.selection.source;
-              if (inherited) {
-                const base = { resourceOwner: inherited.resource_owner, workspaceId: inherited.workspace_id, executionWorkspaceId: inherited.execution_workspace_id, tools: [] };
-                if (inherited.mode === 'live_root' && inherited.live_root) source = { ...base, mode: 'live_root', liveRoot: inherited.live_root };
-                else if (inherited.mode !== 'live_root' && inherited.branch_id && inherited.revision !== null) source = {
-                  ...base, branchId: inherited.branch_id, revision: inherited.revision, mode: inherited.mode, ...(inherited.environment_run_id ? { environmentRunId: inherited.environment_run_id } : {}),
-                };
+      const thread = await this.requireIdentity(input);
+      await this.refreshContext(input);
+      if (input.source) await this.admitSource(input.source, input);
+      const model = await this.models.resolveModel(input.model);
+      try {
+        this.assertImagesSupported(input.images, model.configuration);
+        const command: InputSubmitParams = { key: input.key, threadId: input.threadId, branchId: input.branchId,
+          expectedHead: input.expectedHead, input: threadInput(input.text, input.images), configuration: model.configuration,
+          launch: { inheritSource: input.source === undefined, source: input.source ? {
+            resourceOwner: input.source.resourceOwner, workspaceId: input.source.workspaceId, executionWorkspaceId: input.source.executionWorkspaceId,
+            branchId: input.source.branchId ?? null, revision: input.source.revision ?? null, mode: input.source.mode, liveRoot: input.source.liveRoot ?? null, ...(input.source.environmentRunId ? { environmentRunId: input.source.environmentRunId } : {}),
+          } : null, enabledTools: input.source?.tools ?? [], credentialScope: await model.credentialOwner.scope() },
+        };
+        let initialContext: InitialContext | undefined;
+        const explicitSkill = parseExplicitSkillCommand(input.text) !== null;
+        const checkpoint = this.prepareContext || explicitSkill ? await this.runtime.context(input.branchId) : null;
+        const preparesResources = this.prepareContext && (input.source !== undefined || !checkpoint);
+        let inputPreparation: InputResourcePreparation | undefined;
+        if (preparesResources || explicitSkill || this.prepareChildProfiles) {
+          // An accepted command owns its original receipt. A later malformed settings file must not
+          // make an uncertain reply depend on re-preparing a replacement resource generation.
+          const existing = await this.runtime.inputReceipt(command);
+          if (existing) {
+            admissionStarted = true;
+            void this.continueLaunch(existing.run_id, { credentialOwner: model.credentialOwner }).catch(() => undefined);
+            return existing;
+          }
+          try {
+            if (this.prepareContext && checkpoint && input.source) {
+              if (!this.prepareContext!.forSource) throw new Error('Resource source preparation is unavailable');
+              initialContext = await this.prepareContext!.forSource(checkpoint, input.source);
+              command.expectedContextCheckpoint = checkpoint.id;
+            } else if (this.prepareContext && !checkpoint) {
+              let source = input.source ?? null;
+              if (!source) {
+                const latest = thread.branches.find(branch => branch.branch_id === input.branchId)?.latest_run;
+                const previous = latest ? await this.runtime.launch(latest.id) : null;
+                const inherited = previous?.selection.source;
+                if (inherited) {
+                  const base = { resourceOwner: inherited.resource_owner, workspaceId: inherited.workspace_id, executionWorkspaceId: inherited.execution_workspace_id, tools: [] };
+                  if (inherited.mode === 'live_root' && inherited.live_root) source = { ...base, mode: 'live_root', liveRoot: inherited.live_root };
+                  else if (inherited.mode !== 'live_root' && inherited.branch_id && inherited.revision !== null) source = {
+                    ...base, branchId: inherited.branch_id, revision: inherited.revision, mode: inherited.mode, ...(inherited.environment_run_id ? { environmentRunId: inherited.environment_run_id } : {}),
+                  };
+                }
               }
+              initialContext = await this.prepareContext.main(input, source);
             }
-            initialContext = await this.prepareContext.main(input, source);
+            if (this.prepareChildProfiles) {
+              command.launch!.childDispatch = await this.prepareChildProfiles({ modelOwner: model.credentialOwner, parent: {
+                configuration: model.configuration, credential_scope: command.launch!.credentialScope ?? null,
+              } });
+            }
+            const skill = await this.skillInput(input, initialContext ? initialContext.resources : checkpoint?.resources, input.text);
+            if (skill) inputPreparation = { expectedContextCheckpoint: initialContext ? null : checkpoint?.id ?? null, skill };
+          } catch (error) {
+            // Another identical request can finish after the first read. Only its authoritative,
+            // matching receipt recovers this failure; a miss leaves the preparation error visible.
+            const accepted = await this.runtime.inputReceipt(command);
+            if (!accepted) throw error;
+            admissionStarted = true;
+            void this.continueLaunch(accepted.run_id, { credentialOwner: model.credentialOwner }).catch(() => undefined);
+            return accepted;
           }
-          if (this.prepareChildProfiles) {
-            command.launch!.childDispatch = await this.prepareChildProfiles({ modelOwner: model.credentialOwner, parent: {
-              configuration: model.configuration, credential_scope: command.launch!.credentialScope ?? null,
-            } });
-          }
-          const skill = await this.skillInput(input, initialContext ? initialContext.resources : checkpoint?.resources, input.text);
-          if (skill) inputPreparation = { expectedContextCheckpoint: initialContext ? null : checkpoint?.id ?? null, skill };
-        } catch (error) {
-          // Another identical request can finish after the first read. Only its authoritative,
-          // matching receipt recovers this failure; a miss leaves the preparation error visible.
-          const accepted = await this.runtime.inputReceipt(command);
-          if (!accepted) throw error;
-          void this.continueLaunch(accepted.run_id, { credentialOwner: model.credentialOwner }).catch(() => undefined);
-          return accepted;
         }
+        // The same Rust transaction accepts input, a new or replaced resource context, and the
+        // explicit source/credential/tool selection. A competing checkpoint leaves all of them unchanged.
+        admissionStarted = true;
+        const receipt = await this.runtime.submit({ ...command, ...(initialContext ? { initialContext } : {}), ...(inputPreparation ? { inputPreparation } : {}) });
+        // The shared launch owner closes the initial context-refresh gap before preparation.
+        void this.continueLaunch(receipt.run_id, { credentialOwner: model.credentialOwner }).catch(() => undefined);
+        return receipt;
+      } finally { model.credentialOwner.release(); }
+    } catch (error) {
+      if (!admissionStarted || error instanceof KernelRequestError && error.method === 'runtime.input.submit' && error.settlement === 'not_dispatched') {
+        throw new ThreadPreAdmissionError(error, 'thread-request-failed');
       }
-      // The same Rust transaction accepts input, a new or replaced resource context, and the
-      // explicit source/credential/tool selection. A competing checkpoint leaves all of them unchanged.
-      const receipt = await this.runtime.submit({ ...command, ...(initialContext ? { initialContext } : {}), ...(inputPreparation ? { inputPreparation } : {}) });
-      // The shared launch owner closes the initial context-refresh gap before preparation.
-      void this.continueLaunch(receipt.run_id, { credentialOwner: model.credentialOwner }).catch(() => undefined);
-      return receipt;
-    } finally { model.credentialOwner.release(); }
+      throw error;
+    }
   }
 
   async enqueue(input: ThreadIdentity & { key: string; text: string; images?: ImageAttachment[]; mode: InputMode }) {
-    const thread = await this.requireIdentity(input);
-    const branch = thread.branches.find(candidate => candidate.branch_id === input.branchId)!;
-    const previousId = branch.active_run_id ?? branch.latest_run?.id;
-    if (!previousId) throw new Error('An initial model selection is required');
-    const selected = await this.runtime.modelSelections(previousId);
-    const launch = await this.runtime.launch(previousId);
-    const configuration = selected.desired?.configuration ?? selected.active?.configuration ?? branch.latest_run?.configuration;
-    const scope = selected.desired?.credential_scope ?? selected.active?.credential_scope ?? launch?.selection.credential_scope;
-    // Capture before run() can observe terminal state and retire the predecessor's registrations.
-    const credentialOwner = configuration && scope ? this.runtime.retainedModelOwner(configuration as ModelSessionConfiguration, scope) : undefined;
+    let admissionStarted = false;
     try {
-      const previous = branch.active_run_id ? await this.runtime.run(branch.active_run_id) : branch.latest_run;
-      if (!previous) throw new Error('An initial model selection is required');
-      this.assertImagesSupported(input.images, selected.desired?.configuration ?? previous.configuration);
-      const command: InputEnqueueParams = { key: input.key, threadId: input.threadId, branchId: input.branchId,
-        mode: input.mode, input: threadInput(input.text, input.images) };
-      let inputPreparation: InputResourcePreparation | undefined;
-      if (parseExplicitSkillCommand(input.text)) {
-        const existing = await this.runtime.enqueueReceipt(command);
-        if (existing) {
-          await this.continueQueuedLaunch(existing.run_id, previousId, credentialOwner);
-          return existing;
+      const thread = await this.requireIdentity(input);
+      const branch = thread.branches.find(candidate => candidate.branch_id === input.branchId)!;
+      const previousId = branch.active_run_id ?? branch.latest_run?.id;
+      if (!previousId) throw new Error('An initial model selection is required');
+      const selected = await this.runtime.modelSelections(previousId);
+      const launch = await this.runtime.launch(previousId);
+      const configuration = selected.desired?.configuration ?? selected.active?.configuration ?? branch.latest_run?.configuration;
+      const scope = selected.desired?.credential_scope ?? selected.active?.credential_scope ?? launch?.selection.credential_scope;
+      // Capture before run() can observe terminal state and retire the predecessor's registrations.
+      const credentialOwner = configuration && scope ? this.runtime.retainedModelOwner(configuration as ModelSessionConfiguration, scope) : undefined;
+      try {
+        const previous = branch.active_run_id ? await this.runtime.run(branch.active_run_id) : branch.latest_run;
+        if (!previous) throw new Error('An initial model selection is required');
+        this.assertImagesSupported(input.images, selected.desired?.configuration ?? previous.configuration);
+        const command: InputEnqueueParams = { key: input.key, threadId: input.threadId, branchId: input.branchId,
+          mode: input.mode, input: threadInput(input.text, input.images) };
+        let inputPreparation: InputResourcePreparation | undefined;
+        if (parseExplicitSkillCommand(input.text)) {
+          const existing = await this.runtime.enqueueReceipt(command);
+          if (existing) {
+            admissionStarted = true;
+            await this.continueQueuedLaunch(existing.run_id, previousId, credentialOwner);
+            return existing;
+          }
+          try {
+            const checkpoint = await this.runtime.context(input.branchId);
+            const skill = await this.skillInput(input, checkpoint?.resources, input.text);
+            if (skill) inputPreparation = { expectedContextCheckpoint: checkpoint?.id ?? null, skill };
+          } catch (error) {
+            const accepted = await this.runtime.enqueueReceipt(command);
+            if (!accepted) throw error;
+            admissionStarted = true;
+            await this.continueQueuedLaunch(accepted.run_id, previousId, credentialOwner);
+            return accepted;
+          }
         }
-        try {
-          const checkpoint = await this.runtime.context(input.branchId);
-          const skill = await this.skillInput(input, checkpoint?.resources, input.text);
-          if (skill) inputPreparation = { expectedContextCheckpoint: checkpoint?.id ?? null, skill };
-        } catch (error) {
-          const accepted = await this.runtime.enqueueReceipt(command);
-          if (!accepted) throw error;
-          await this.continueQueuedLaunch(accepted.run_id, previousId, credentialOwner);
-          return accepted;
-        }
+        admissionStarted = true;
+        const receipt = await this.runtime.enqueue({ ...command, ...(inputPreparation ? { inputPreparation } : {}) });
+        // Context is synchronized by the Run's request preparation. An accepted input receipt
+        // must not wait for extension/MCP startup, source materialization or credential rebinding.
+        await this.continueQueuedLaunch(receipt.run_id, previousId, credentialOwner);
+        return receipt;
+      } finally { credentialOwner?.release(); }
+    } catch (error) {
+      if (!admissionStarted || error instanceof KernelRequestError && error.method === 'runtime.input.enqueue' && error.settlement === 'not_dispatched') {
+        throw new ThreadPreAdmissionError(error, 'thread-request-failed');
       }
-      const receipt = await this.runtime.enqueue({ ...command, ...(inputPreparation ? { inputPreparation } : {}) });
-      // Context is synchronized by the Run's request preparation. An accepted input receipt
-      // must not wait for extension/MCP startup, source materialization or credential rebinding.
-      await this.continueQueuedLaunch(receipt.run_id, previousId, credentialOwner);
-      return receipt;
-    } finally { credentialOwner?.release(); }
+      throw error;
+    }
   }
 
   private async continueQueuedLaunch(runId: string, previousRunId: string, inherited?: ExistingHostCredentialOwner): Promise<void> {

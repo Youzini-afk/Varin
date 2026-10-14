@@ -6,26 +6,21 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { MobileOverlayPanel } from '@/components/ui/MobileOverlayPanel';
 import { toast } from '@/components/ui';
 import { Icon } from "@/components/icon/Icon";
-import type { IconName } from "@/components/icon/icons";
 import { useUIStore } from '@/stores/useUIStore';
-import { formatTimeForPreference } from '@/lib/timeFormat';
-import type { TimeFormatPreference } from '@/stores/useUIStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
-import { openPiSessionFromNavigation } from '@/lib/pi-runtime/sessionNavigation';
 import { subscribeVarinEvents } from '@/lib/varinEvents';
 import { PROJECT_COLOR_MAP, PROJECT_ICON_MAP, ProjectIconImage } from '@/lib/projectMeta';
 import { useThemeSystem } from '@/contexts/useThemeSystem';
 import { cn, formatDirectoryName } from '@/lib/utils';
 import { useI18n } from '@/lib/i18n';
 import type { ProjectEntry } from '@varin/application-client';
-import { createScheduledTasksHttpAPI, getRuntimeEndpointGeneration, subscribeRuntimeEndpointWillChange, type ScheduledTask, type ScheduledTaskStatus, type ThreadIdentity } from '@varin/application-client';
+import { createScheduledTasksHttpAPI, getRuntimeEndpointGeneration, subscribeRuntimeEndpointWillChange, type ScheduledTask, type ThreadIdentity } from '@varin/application-client';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
 import { ThreadConversation } from '@/components/thread/ThreadConversation';
 import { CalendarTaskEditorDialog } from './CalendarTaskEditorDialog';
 const schedules = createScheduledTasksHttpAPI();
-import { ScheduledTaskEditorDialog } from './ScheduledTaskEditorDialog';
 import { ScheduledTaskLoopEditorDialog } from './ScheduledTaskLoopEditorDialog';
 import { canonicalizeTimezone } from '@/lib/timezones';
 import { FollowUpTasksPanel } from './FollowUpTasksPanel';
@@ -99,63 +94,7 @@ const formatSchedule = (task: ScheduledTask, t: ReturnType<typeof useI18n>['t'])
   return t('sessions.scheduledTasks.dialog.schedule.cron', { cron: task.schedule.cron || '' });
 };
 
-const formatClockTime = (value: number | undefined, timeFormatPreference: TimeFormatPreference): string => {
-  if (!value || !Number.isFinite(value)) {
-    return '';
-  }
-  return formatTimeForPreference(value, timeFormatPreference);
-};
-
-const formatRelativeTime = (value: number | undefined, t: ReturnType<typeof useI18n>['t']): string => {
-  if (!value || !Number.isFinite(value)) {
-    return '';
-  }
-  const diff = value - Date.now();
-  const abs = Math.abs(diff);
-  const minute = 60_000;
-  const hour = 60 * minute;
-  const day = 24 * hour;
-  const future = diff >= 0;
-  if (abs < minute) {
-    return future ? t('sessions.scheduledTasks.dialog.relativeTime.inLessThanOneMinute') : t('sessions.scheduledTasks.dialog.relativeTime.justNow');
-  }
-  if (abs < hour) {
-    const m = Math.round(abs / minute);
-    return future
-      ? t('sessions.scheduledTasks.dialog.relativeTime.inMinutes', { count: m })
-      : t('sessions.scheduledTasks.dialog.relativeTime.minutesAgo', { count: m });
-  }
-  if (abs < day) {
-    const h = Math.floor(abs / hour);
-    const m = Math.round((abs % hour) / minute);
-    const body = m > 0 ? `${h}h ${m}m` : `${h}h`;
-    return future
-      ? t('sessions.scheduledTasks.dialog.relativeTime.inDuration', { duration: body })
-      : t('sessions.scheduledTasks.dialog.relativeTime.durationAgo', { duration: body });
-  }
-  const d = Math.floor(abs / day);
-  const h = Math.round((abs % day) / hour);
-  const body = h > 0 ? `${d}d ${h}h` : `${d}d`;
-  return future
-    ? t('sessions.scheduledTasks.dialog.relativeTime.inDuration', { duration: body })
-    : t('sessions.scheduledTasks.dialog.relativeTime.durationAgo', { duration: body });
-};
-
 type StatusTone = 'success' | 'error' | 'warning' | 'muted';
-
-const STATUS_META: Record<
-  ScheduledTaskStatus,
-  {
-    tone: StatusTone;
-    Icon: IconName;
-    spin?: boolean;
-  }
-> = {
-  success: { tone: 'success', Icon: 'checkbox-circle' },
-  error: { tone: 'error', Icon: 'error-warning' },
-  running: { tone: 'warning', Icon: 'loader-4', spin: true },
-  idle: { tone: 'muted', Icon: 'pulse' },
-};
 
 const toneStyle = (tone: StatusTone): React.CSSProperties => {
   if (tone === 'muted') {
@@ -179,7 +118,6 @@ export function ScheduledTasksDialog() {
   const open = useUIStore((state) => state.isScheduledTasksDialogOpen);
   const setOpen = useUIStore((state) => state.setScheduledTasksDialogOpen);
   const isMobile = useUIStore((state) => state.isMobile);
-  const timeFormatPreference = useUIStore((state) => state.timeFormatPreference);
   const projects = useProjectsStore((state) => state.projects);
   const activeProject = useProjectsStore((state) => state.getActiveProject());
   const homeDirectory = useDirectoryStore((state) => state.homeDirectory);
@@ -196,8 +134,6 @@ export function ScheduledTasksDialog() {
   const [loading, setLoading] = React.useState(true);
   const [loadError, setLoadError] = React.useState<string | null>(null);
   const reloadGeneration = React.useRef(0);
-  const [editorOpen, setEditorOpen] = React.useState(false);
-  const [editorTask, setEditorTask] = React.useState<ScheduledTask | null>(null);
   const [loopEditorTask, setLoopEditorTask] = React.useState<ScheduledTask | null>(null);
   const [mutatingTaskID, setMutatingTaskID] = React.useState<string | null>(null);
 
@@ -259,7 +195,7 @@ export function ScheduledTasksDialog() {
         if (byName !== 0) {
           return byName;
         }
-        return (a.state?.nextRunAt || Number.MAX_SAFE_INTEGER) - (b.state?.nextRunAt || Number.MAX_SAFE_INTEGER);
+        return (a.calendar?.definition.next_at_ms || Number.MAX_SAFE_INTEGER) - (b.calendar?.definition.next_at_ms || Number.MAX_SAFE_INTEGER);
       });
       setTasks(nextTasks);
       setLoadError(null);
@@ -383,9 +319,7 @@ export function ScheduledTasksDialog() {
       setLoopEditorTask(task);
       return;
     }
-    if (task.runtime === 'agent') { setCalendarEditorTask(task); setCalendarEditorOpen(true); return; }
-    setEditorTask(task);
-    setEditorOpen(true);
+    setCalendarEditorTask(task); setCalendarEditorOpen(true);
   }, []);
 
   const handleRunNow = React.useCallback(async (task: ScheduledTask) => {
@@ -400,23 +334,16 @@ export function ScheduledTasksDialog() {
       const receipt = await schedules.run(selectedProjectID, task.id, key);
       if (host !== getRuntimeEndpointGeneration()) return;
       runKeys.current.delete(identity);
-      const sessionId = receipt.runtime === 'pi' ? receipt.sessionId : undefined;
-      if (receipt.runtime === 'agent') setCalendarWork({ runtime: 'agent', threadId: receipt.occurrence.thread_id, branchId: receipt.occurrence.branch_id });
+      setCalendarWork({ runtime: 'agent', threadId: receipt.occurrence.thread_id, branchId: receipt.occurrence.branch_id });
       await reloadTasks(selectedProjectID, { silent: true });
       toast.success(t('sessions.scheduledTasks.dialog.toast.started'));
-      if (sessionId) {
-        const project = projects.find((entry) => entry.id === selectedProjectID);
-        await openPiSessionFromNavigation({
-          directory: project?.path,
-          sessionId,
-        });
-      }
+
     } catch (error) {
       toast.error(error instanceof Error ? error.message : t('sessions.scheduledTasks.dialog.toast.runFailed'));
     } finally {
       setMutatingTaskID(null);
     }
-  }, [selectedProjectID, projects, reloadTasks, t]);
+  }, [selectedProjectID, reloadTasks, t]);
 
   const projectSelector = (
     <div className="ml-auto min-w-0">
@@ -453,13 +380,11 @@ export function ScheduledTasksDialog() {
 
   const openNewTaskEditor = () => {
     setView('scheduled');
-    setEditorTask(null);
-    setEditorOpen(true);
+    setCalendarEditorTask(null);
+    setCalendarEditorOpen(true);
   };
 
-  const completed = (task: ScheduledTask) => task.runtime === 'agent'
-    ? task.schedule.kind === 'once' && Boolean(task.calendar && !task.calendar.definition.calculation_pending && task.calendar.definition.next_at_ms === null && task.calendar.occurrences.some(value => value.reason.kind === 'scheduled') && task.calendar.occurrences.every(value => ['completed', 'failed', 'cancelled'].includes(value.state)))
-    : task.schedule.kind === 'once' && task.state.lastStatus === 'success' && !task.state.nextRunAt;
+  const completed = (task: ScheduledTask) => task.schedule.kind === 'once' && Boolean(task.calendar && !task.calendar.definition.calculation_pending && task.calendar.definition.next_at_ms === null && task.calendar.occurrences.some(value => value.reason.kind === 'scheduled') && task.calendar.occurrences.every(value => ['completed', 'failed', 'cancelled'].includes(value.state)));
   const visibleTasks = tasks.filter((task) => {
     const state = completed(task) ? 'completed' : task.enabled ? 'enabled' : 'paused';
     return (filter === 'all' || filter === state)
@@ -482,17 +407,7 @@ export function ScheduledTasksDialog() {
         <div className="space-y-1">
           {visibleTasks.map((task) => {
             const isBusy = mutatingTaskID === task.id;
-            const status = (task.state?.lastStatus || 'idle') as ScheduledTaskStatus;
-            const meta = STATUS_META[status];
-            const statusLabel = status === 'success'
-              ? t('sessions.scheduledTasks.dialog.status.success')
-              : status === 'error'
-                ? t('sessions.scheduledTasks.dialog.status.error')
-                : status === 'running'
-                  ? t('sessions.scheduledTasks.dialog.status.running')
-                  : t('sessions.scheduledTasks.dialog.status.idle');
-            const nextAt = task.state?.nextRunAt;
-            const lastAt = task.state?.lastRunAt;
+            const running = task.calendar?.occurrences.some(occurrence => !['completed', 'failed', 'cancelled'].includes(occurrence.state)) ?? false;
 
             return (
               <TaskListRow
@@ -500,7 +415,7 @@ export function ScheduledTasksDialog() {
                 title={task.name}
                 subtitle={formatSchedule(task, t)}
                 muted={!task.enabled}
-                icon={status === 'running' ? 'loader-4' : 'time'}
+                icon={running ? 'loader-4' : 'time'}
                 status={t(completed(task) ? 'tasksHub.completed' : task.enabled ? 'tasksHub.enabled' : 'tasksHub.paused')}
               >
                 <p className="whitespace-pre-wrap break-words text-foreground">{task.execution.prompt}</p>
@@ -513,63 +428,7 @@ export function ScheduledTasksDialog() {
                     </div>
                   ) : null}
 
-                {task.runtime !== 'agent' && task.onceAcceptance && <p className="text-sm">Once slot already accepted by {task.onceAcceptance.owner}. Automatic execution will not be repeated. Receipt: {task.onceAcceptance.acceptanceId}</p>}
-                {task.runtime === 'agent' ? <CalendarTaskStatus projectId={selectedProjectID} task={task} onChanged={() => reloadTasks(selectedProjectID, { silent: true })} onOpenWork={setCalendarWork} /> : <>
-                <div className="mt-3 flex flex-wrap items-center gap-x-5 gap-y-1 typography-micro text-muted-foreground">
-                  <span className="inline-flex items-center gap-1.5">
-                    <Icon name="timer" className="h-3.5 w-3.5" />
-                    <span className="font-medium text-foreground">{t('sessions.scheduledTasks.dialog.nextRun.label')}</span>
-                    {nextAt ? (
-                      <>
-                        <span className="text-foreground">{formatRelativeTime(nextAt, t)}</span>
-                        <span className="text-muted-foreground/50">·</span>
-                        <span>{formatClockTime(nextAt, timeFormatPreference)}</span>
-                      </>
-                    ) : (
-                      <span>—</span>
-                    )}
-                  </span>
-                  <span className="inline-flex items-center gap-1.5">
-                    <Icon name="history" className="h-3.5 w-3.5" />
-                    <span className="font-medium text-foreground">{t('sessions.scheduledTasks.dialog.lastRun.label')}</span>
-                    {status === 'running' ? (
-                      <span
-                        className="inline-flex items-center gap-1"
-                        style={{ color: 'var(--status-warning)' }}
-                      >
-                        <Icon name="loader-4" className="h-3.5 w-3.5 animate-spin" />
-                        {t('sessions.scheduledTasks.dialog.lastRun.runningNow')}
-                      </span>
-                    ) : lastAt ? (
-                      <>
-                        {meta.tone !== 'muted' ? (
-                          <span
-                            className="inline-flex items-center gap-1"
-                            style={{ color: `var(--status-${meta.tone})` }}
-                          >
-                            <Icon name={meta.Icon} className="h-3.5 w-3.5" />
-                            {statusLabel}
-                          </span>
-                        ) : null}
-                        <span className="text-muted-foreground/50">·</span>
-                        <span>{formatRelativeTime(lastAt, t)}</span>
-                      </>
-                    ) : (
-                      <span>{t('sessions.scheduledTasks.dialog.lastRun.never')}</span>
-                    )}
-                  </span>
-                </div>
-
-                {task.state?.lastError ? (
-                  <div
-                    className="mt-3 flex items-start gap-2 rounded-md border p-2 typography-micro"
-                    style={toneStyle('error')}
-                  >
-                    <Icon name="error-warning" className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-                    <span className="min-w-0 break-words">{task.state.lastError}</span>
-                  </div>
-                ) : null}
-                </>}
+                <CalendarTaskStatus projectId={selectedProjectID} task={task} onChanged={() => reloadTasks(selectedProjectID, { silent: true })} onOpenWork={setCalendarWork} />
                 {task.loopError ? (
                   <div
                     className="mt-3 flex items-start gap-2 rounded-md border p-2 typography-micro"
@@ -698,13 +557,6 @@ export function ScheduledTasksDialog() {
       <Dialog open={calendarWork !== null} onOpenChange={value => { if (!value) setCalendarWork(null); }}><DialogContent className="h-[85vh] max-w-5xl overflow-hidden"><DialogTitle>Calendar work</DialogTitle>
         {calendarWork && threads && <ThreadConversation api={threads} identity={calendarWork} onBranchCreated={setCalendarWork} />}
       </DialogContent></Dialog>
-      <ScheduledTaskEditorDialog
-        open={editorOpen}
-        projectDirectory={projects.find((project) => project.id === selectedProjectID)?.path ?? null}
-        task={editorTask}
-        onOpenChange={setEditorOpen}
-        onSave={handleSaveTask}
-      />
       <ScheduledTaskLoopEditorDialog
         open={Boolean(loopEditorTask)}
         projectID={selectedProjectID}

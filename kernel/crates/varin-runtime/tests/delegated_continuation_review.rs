@@ -28,7 +28,7 @@ fn context(child: &ChildTask, key: &str) -> (ContextProposal, PersonalizationBas
         instruction_sources: vec![],
         memory_checkpoint: None,
     };
-    let basis=serde_json::from_value(json!({"mode":"agent","threadRole":"worker","revision":1,"configurationDigest":"frozen-worker","memorySnapshot":{"revision":0,"memories":[]},"sessionId":child.child_thread_id,"projectId":child.project_id,"originalSections":[{"name":"system","content":"Frozen worker instructions"}],"instructionSources":[]})).unwrap();
+    let basis=serde_json::from_value(json!({"mode":"agent","threadRole":"worker","revision":1,"configurationDigest":"frozen-worker","memorySnapshot":{"revision":0,"memories":[]},"threadId":child.child_thread_id,"projectId":child.project_id,"originalSections":[{"name":"system","content":"Frozen worker instructions"}],"instructionSources":[]})).unwrap();
     (proposal, basis)
 }
 fn first(f: &mut Fixture) -> ChildTask {

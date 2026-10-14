@@ -329,4 +329,40 @@ describe('apns runtime direct fallback (relay disabled)', () => {
     expect(JSON.parse(Buffer.from(header, 'base64url').toString())).toEqual({ alg: 'ES256', kid: 'KEY123' });
     expect(JSON.parse(Buffer.from(claims, 'base64url').toString()).iss).toBe('TEAM123');
   });
+  it('binds each native deep link to its token registration instead of producer Host claims', async () => {
+    const fetchMock = vi.fn(async () => jsonResponse({ ok: true, results: [] }));
+    vi.stubGlobal('fetch', fetchMock);
+    process.env.VARIN_PUSH_RELAY_URL = 'https://relay.test/v1/push/send';
+    const runtime = createApnsRuntime(makeDeps());
+    const a = JSON.stringify(['https://a.test', 'server:a']);
+    const b = JSON.stringify(['https://b.test', 'server:b']);
+    await runtime.addOrUpdateApnsToken('auth-a', 'tokenA', undefined, 'ios', 'production', a);
+    await runtime.addOrUpdateApnsToken('auth-b', 'tokenB', undefined, 'ios', 'production', b);
+    fetchMock.mockClear();
+    await runtime.sendApnsToAllUiSessions({ title: 'Ready', data: { threadId: 'thread:1', branchId: 'branch:review', hostKey: 'forged', url: 'varin://session/fake' } });
+    const sends = fetchCalls(fetchMock).filter(isSend).map(([, init]) => JSON.parse(init.body));
+    expect(sends).toHaveLength(2);
+    for (const send of sends) {
+      const expected = send.tokens[0] === 'tokenA' ? a : b;
+      expect(send.data.hostKey).toBe(expected);
+      const url = new URL(send.data.url);
+      expect(url.hostname).toBe('thread'); expect(url.searchParams.get('branch')).toBe('branch:review'); expect(url.searchParams.get('host')).toBe(expected);
+    }
+  });
+
+  it('rebinds a device token once when its client registration changes Host transport', async () => {
+    const fetchMock = vi.fn(async () => jsonResponse({ ok: true, results: [] }));
+    vi.stubGlobal('fetch', fetchMock);
+    process.env.VARIN_PUSH_RELAY_URL = 'https://relay.test/v1/push/send';
+    const runtime = createApnsRuntime(makeDeps());
+    await runtime.addOrUpdateApnsToken('old-auth', 'same-token', undefined, 'ios', 'production', 'old-host');
+    await runtime.addOrUpdateApnsToken('new-auth', 'same-token', undefined, 'ios', 'production', 'current-host');
+    fetchMock.mockClear();
+    await runtime.sendApnsToAllUiSessions({ title: 'Ready', data: { threadId: 'thread:1', branchId: 'branch:1' } });
+    const sends = fetchCalls(fetchMock).filter(isSend).map(([, init]) => JSON.parse(init.body));
+    expect(sends).toHaveLength(1);
+    expect(sends[0].tokens).toEqual(['same-token']);
+    expect(sends[0].data.hostKey).toBe('current-host');
+  });
+
 });

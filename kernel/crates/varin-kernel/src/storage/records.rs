@@ -451,17 +451,14 @@ impl Storage {
             "settings.operation" => {
                 let id = required("id")?;
                 let entry_id = required("entryId")?;
-                let session_id = required("sessionId")?;
-                let envelope_session_id = envelope_session_id.ok_or_else(|| {
-                    KernelError::Operation(
-                        "settings operation envelope sessionId is required".to_string(),
-                    )
-                })?;
-                if session_id != envelope_session_id {
-                    return Err(KernelError::Operation(
-                        "settings operation payload sessionId does not match its envelope"
-                            .to_string(),
-                    ));
+                let thread_id = required("threadId")?;
+                let branch_id = required("branchId")?;
+                if envelope_session_id.is_some() || object.contains_key("sessionId") || object.contains_key("workspaceId") {
+                    return Err(KernelError::Operation("settings operations require native Thread/branch identity".into()));
+                }
+                let namespace = format!("thread-settings:{}", hex::encode(Sha256::digest(format!("{thread_id}\0{branch_id}").as_bytes())));
+                if workspace_id != namespace {
+                    return Err(KernelError::Operation("settings operation record namespace does not match its Thread/branch".into()));
                 }
                 let payload_state = required("state")?;
                 if payload_state != state {
@@ -472,8 +469,7 @@ impl Storage {
                 required("verb")?;
                 required("createdAt")?;
                 required("updatedAt")?;
-                same("workspaceId", workspace_id)?;
-                let identity = format!("{session_id}\0{entry_id}\0{id}");
+                let identity = format!("{thread_id}\0{branch_id}\0{entry_id}\0{id}");
                 let expected_record_id = format!(
                     "settings.operation:{}",
                     hex::encode(Sha256::digest(identity.as_bytes()))
@@ -899,6 +895,18 @@ impl Storage {
             return Err(KernelError::Operation(
                 "payloadJson must contain an object".to_string(),
             ));
+        }
+        if record_type == "settings.operation" {
+            let thread_id = payload.get("threadId").and_then(Value::as_str);
+            let branch_id = payload.get("branchId").and_then(Value::as_str);
+            let grant = self.load_grant(grant_id)?;
+            if thread_id.is_none() || branch_id.is_none()
+                || params_value.get("threadId").and_then(Value::as_str) != thread_id
+                || params_value.get("branchId").and_then(Value::as_str) != branch_id
+                || grant.thread_id.as_deref() != thread_id || grant.session_id.is_some()
+            {
+                return Err(KernelError::Authorization("settings operation does not match its original Thread/branch actor".into()));
+            }
         }
         Self::validate_domain_record_payload(
             record_type,
@@ -2157,6 +2165,41 @@ impl Storage {
 #[cfg(test)]
 mod artifact_page_tests {
     use super::*;
+    #[test]
+    fn native_settings_operations_preserve_thread_branch_and_original_record_actor() {
+        let root = std::env::temp_dir().join(format!("settings-operation-{}", Uuid::new_v4()));
+        let namespace = format!("thread-settings:{}", hex::encode(Sha256::digest(b"thread\0branch")));
+        let record_id = format!("settings.operation:{}", hex::encode(Sha256::digest(b"thread\0branch\0providers.auth\0owner-flow")));
+        let mut storage = Storage::open(&root, "host").unwrap();
+        for (id, thread) in [("original", "thread"), ("other", "foreign")] {
+            storage.issue_grant(&json!({"grantId":id,"hostGeneration":"generation","capabilities":["storage.read","storage.write"],
+                "pathScopes":[],"threadId":thread,"owningWorkspace":namespace,"executionWorkspace":namespace}),
+                "host","generation",&root.to_string_lossy(),"epoch").unwrap();
+        }
+        let payload = json!({"id":"owner-flow","threadId":"thread","branchId":"branch","entryId":"providers.auth",
+            "verb":"login","state":"running","createdAt":"now","updatedAt":"now"});
+        let input = json!({"operationId":"put-original","recordId":record_id,"workspaceId":namespace,"recordType":"settings.operation",
+            "state":"running","threadId":"thread","branchId":"branch","ownerIds":[],"references":[],"payloadJson":payload.to_string()});
+        let dispatch = |storage: &mut Storage, method: &str, input: &Value, actor: &str| {
+            let (grant, input) = storage.authorize(Some(actor), "epoch", "host", "generation", method, input)?;
+            storage.dispatch(method, &input, Some(actor), &grant)
+        };
+        assert!(matches!(dispatch(&mut storage, "storage.record.put", &input, "other"), Err(KernelError::Authorization(_))));
+        let mut mismatch = input.clone(); mismatch["branchId"] = json!("another");
+        assert!(dispatch(&mut storage, "storage.record.put", &mismatch, "original").is_err());
+        let result = dispatch(&mut storage, "storage.record.put", &input, "original").unwrap();
+        assert_eq!(result["threadId"], "thread"); assert_eq!(result["branchId"], "branch");
+        let read = json!({"workspaceId":namespace,"recordId":record_id});
+        assert!(matches!(dispatch(&mut storage, "storage.record.get", &read, "other"), Err(KernelError::Authorization(_))));
+        drop(storage);
+        let mut reopened = Storage::open(&root, "host").unwrap();
+        assert_eq!(dispatch(&mut reopened, "storage.record.get", &read, "original").unwrap(), result);
+        let mut legacy = input.clone(); legacy["operationId"] = json!("legacy"); legacy["sessionId"] = json!("fake");
+        assert!(dispatch(&mut reopened, "storage.record.put", &legacy, "original").is_err());
+        assert_eq!(dispatch(&mut reopened, "storage.record.get", &read, "original").unwrap(), result);
+        drop(reopened); std::fs::remove_dir_all(root).unwrap();
+    }
+
     #[test]
     fn original_artifact_index_pages_stably_excludes_chunks_and_rechecks_reader_authority() {
         let root = std::env::temp_dir().join(format!("artifact-index-{}", Uuid::new_v4()));

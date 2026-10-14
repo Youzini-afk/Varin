@@ -62,14 +62,12 @@ async function fixture(failSource: boolean, local = false, managed = false) {
     source.structure = structure;
   }
   const unavailable = () => { throw new Error('A source query must not inspect or watch the old live directory'); };
-  const documents = { inspectWorkspace: unavailable, read: unavailable, watch: unavailable,
-    agentInputDraftPaths: unavailable, readAgentInputSnapshot: unavailable } as unknown as DocumentAuthority;
+  const documents = { inspectWorkspace: unavailable, read: unavailable, watch: unavailable } as unknown as DocumentAuthority;
   const component = local ? await localComponentFixture(join(directory, 'component')) : undefined;
   const encoder = component ? createLocalSemanticEmbedder({ dataDir: '', pack: component.pack }) : createHashEmbedder();
-  const runtime = createWorkspaceSemanticRuntime({ dataDir: directory, hostId: 'source-inference', configCwd: directory,
+  const runtime = createWorkspaceSemanticRuntime({ dataDir: directory, hostId: 'source-inference',
     documents, structureSource: managed ? new Proxy({} as StructureSource, { get: () => { throw new Error('Managed source cannot use coordinator grammars'); } }) : structure,
-    ...(managed ? { getIndexScope: () => { throw new Error('Managed source cannot use coordinator index selection'); } } : {}), scheduler: createEmbedScheduler(), embedder: encoder, runtimeInference: inference,
-    getBroker: unavailable, executionViews: { get: () => undefined }, workingBranches: { pinQuery: async () => null } });
+    ...(managed ? { getIndexScope: () => { throw new Error('Managed source cannot use coordinator index selection'); } } : {}), scheduler: createEmbedScheduler(), embedder: encoder, runtimeInference: inference });
   let invocation = 0;
   const run = (beforeSearch?: () => void) => inference.requests!.run({ operationId: `original-query-${++invocation}`,
     executorOwner: { kind: 'external', identity: 'source-test', epoch: 'original-epoch' } }, new AbortController().signal, async call => {

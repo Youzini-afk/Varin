@@ -6,7 +6,7 @@
  * Plan: plan/agent-harness-plan.md §2.3
  *
  * Source determination:
- * - Document write with active `pi-worker` writer → 'agent'
+ * - Document write with active native Agent writer → 'agent'
  * - Document write without active writer → 'user' (editor save) or 'external'
  * - Terminal exit from harness shell supervisor → 'agent'
  * - Terminal exit from user terminal tab → 'user'
@@ -20,7 +20,7 @@ export interface DocumentWriteEvent {
   workspaceId: string;
   path: string;
   kind: "modified" | "created" | "deleted";
-  /** Whether a pi-worker (agent) writer was active at write time */
+  /** Whether a native Agent writer was active at write time */
   agentWriterActive: boolean;
   turnIndex?: number;
 }

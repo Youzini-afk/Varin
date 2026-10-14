@@ -1,13 +1,7 @@
-import { parseComputerAutomationProjection, parseComputerAutomationState } from '@varin/protocol';
-import { ThreadRequestError, createThreadsHttpAPI, getRuntimeEndpointGeneration, getRuntimeUrlResolver, runtimeFetch } from '@varin/application-client';
+import { ThreadRequestError, getRuntimeEndpointGeneration, getRuntimeUrlResolver, runtimeFetch } from '@varin/application-client';
 import { sha256 } from '@noble/hashes/sha2.js';
 import type {
   ComputerControlState,
-  ComputerActivityEntry,
-  ComputerAutomationState,
-  ComputerAutomationProjection,
-  ComputerExecutionRef,
-  ComputerWorkRef,
   ComputerGesture,
   ComputerArtifact,
   ComputerDesktop,
@@ -38,39 +32,6 @@ const readJson = async <T>(response: Response, fallback: string): Promise<T> => 
 export const listComputers = async (): Promise<ComputerCatalog> => (
   readJson<ComputerCatalog>(await runtimeFetch('/api/computers'), 'Unable to list computers')
 );
-
-/** No probing, screenshot capture or persistent desktop subscription. */
-export const readComputerActivity = async (sessionId: string): Promise<ComputerActivityEntry[]> => (
-  await readJson<{ activities: ComputerActivityEntry[] }>(
-    await runtimeFetch(`/api/computers/activity?sessionId=${encodeURIComponent(sessionId)}`), 'Unable to read computer activity',
-  )
-).activities;
-const threadComputer = createThreadsHttpAPI().computer;
-
-/** Both runtimes read the original Computer owner. Reading never captures or probes. */
-export const readComputerAutomation = async (work: ComputerWorkRef, signal?: AbortSignal): Promise<ComputerAutomationProjection> => {
-  if (work.runtime === 'agent') return threadComputer.state(work, signal);
-  const generation = getRuntimeEndpointGeneration();
-  signal?.throwIfAborted();
-  const result = await readJson<ComputerAutomationProjection>(
-    await runtimeFetch(`/api/computers/automation?sessionId=${encodeURIComponent(work.sessionId)}`, { cache: 'no-store', signal }), 'Unable to read Computer Use state');
-  signal?.throwIfAborted();
-  if (generation !== getRuntimeEndpointGeneration()) throw new Error('Application Host changed during computer request');
-  return parseComputerAutomationProjection(result);
-};
-
-export const stopComputerAutomation = async (execution: ComputerExecutionRef, desktopId?: string, signal?: AbortSignal): Promise<{ state: ComputerAutomationState }> => {
-  const { work, runId } = execution;
-  if (work.runtime === 'agent') return threadComputer.stop(work, { runId, desktopId }, signal);
-  const generation = getRuntimeEndpointGeneration();
-  signal?.throwIfAborted();
-  const result = await readJson<{ state: ComputerAutomationState }>(
-    await runtimeFetch('/api/computers/automation/stop', { method: 'POST', signal, headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ sessionId: work.sessionId, runId, desktopId }) }), 'Unable to confirm computer work cancellation');
-  signal?.throwIfAborted();
-  if (generation !== getRuntimeEndpointGeneration()) throw new Error('Application Host changed during computer request');
-  return { state: parseComputerAutomationState(result.state) };
-};
 
 /** Re-probe a desktop's driver; the response carries the real capability table. */
 export const probeComputerDesktop = async (desktopId: string): Promise<ComputerDesktop> => {

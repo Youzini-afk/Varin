@@ -10,6 +10,13 @@ import { readResourceSettings } from '../agent-resources/configuration.js';
 import { ConfigurationFile, ModelConfigurationError, object } from './configuration.js';
 
 export function validateAgentSettings(document: Record<string, unknown>): Record<string, JsonValue> {
+  for (const key of ['utilityModel', 'walkthroughModel'] as const) {
+    const value = document[key];
+    if (value !== undefined && (!object(value) || Object.keys(value).some(field => field !== 'providerId' && field !== 'modelId')
+      || typeof value.providerId !== 'string' || !value.providerId.trim() || typeof value.modelId !== 'string' || !value.modelId.trim())) {
+      throw new ModelConfigurationError('invalid_settings', `${key} requires a nonempty providerId and modelId`);
+    }
+  }
   parseCompactionSettings(document.compaction);
   try { readResourceSettings(document); } catch (error) { throw new ModelConfigurationError('invalid_settings', (error as Error).message); }
   if (document.harness !== undefined && !object(document.harness)) throw new ModelConfigurationError('invalid_settings', 'harness must be an object');

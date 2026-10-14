@@ -129,7 +129,7 @@ export function createAgentProfilesAPI(owners: {
         if (config.kind === 'builtin') {
           const original = selected.models[config.slot];
           const choice = input.tools === undefined ? original?.agent?.tools
-            : updateAgentToolSelection(original?.agent?.tools, target, input.tools);
+            : updateAgentToolSelection(input.tools);
           const binding = parseHarnessModelSlots({ [config.slot]: { ...config.binding,
             ...(config.binding.agent || choice !== undefined ? { agent: { ...config.binding.agent, ...(choice === undefined ? {} : { tools: choice }) } } : {}) } })[config.slot]!;
           return { ...harness, agents: selected.agents as unknown as JsonValue,
@@ -138,7 +138,7 @@ export function createAgentProfilesAPI(owners: {
         const key = profileId ? config.key : randomUUID();
         const original = Object.hasOwn(selected.agents, key) ? selected.agents[key] : undefined;
         if (profileId && !original) throw new ProfileRequestFailure('agent-profile-not-found', 'This agent was removed. Reload agent settings.');
-        const choice = input.tools === undefined ? original?.tools : updateAgentToolSelection(original?.tools, target, input.tools);
+        const choice = input.tools === undefined ? original?.tools : updateAgentToolSelection(input.tools);
         const agent = parseHarnessAgent({ ...config.agent, tools: choice });
         profileId = `varin:custom:${key}`;
         return { ...harness, models: selected.models as unknown as JsonValue,

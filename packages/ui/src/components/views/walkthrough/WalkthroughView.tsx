@@ -17,7 +17,6 @@ import { buildWalkthroughView } from '@/lib/walkthrough/model';
 import type { WalkthroughSource, WalkthroughWorkingTreeScope } from '@/lib/walkthrough/types';
 import { ModelSelector } from '@/components/sections/agents/ModelSelector';
 import { deriveBaseBranch, hasResolvableBaseBranch } from '@/components/views/git/baseBranch';
-import { runtimeFetch } from '@varin/application-client';
 import { useGitBranches, useGitStatus, useGitStore } from '@/stores/useGitStore';
 import { useGitHubAuthStore } from '@/stores/useGitHubAuthStore';
 import {
@@ -350,58 +349,18 @@ export const WalkthroughView = ({ directory }: WalkthroughViewProps) => {
   // Explicit pick first, then the model that actually produced what is on
   // screen, then whatever settings resolve to. The middle step is what makes
   // reopening a review show the model behind it rather than the default.
-  // Never present a provider without a usable login as the current selection —
-  // the picker already hides them from the menu; showing one as selected was
-  // the whole "why say so?" failure mode.
-  const [modelProviders, setModelProviders] = useState<string[] | undefined>(undefined);
-
-  const providerIsAuthenticated = (providerId: string | undefined) => {
-    if (!providerId) return false;
-    // Until the auth list loads, do not present a candidate as selected —
-    // otherwise an unauthenticated config model flashes in the picker.
-    if (modelProviders === undefined) return false;
-    return modelProviders.includes(providerId);
-  };
+  // Configured channel choices are not proof of credential availability; the Host
+  // resolves the actual model and reports any admission failure.
   const readinessModelRef = entry.readiness?.model
-    && entry.readiness.model.hasLogin !== false
-    && providerIsAuthenticated(entry.readiness.model.providerID)
     ? `${entry.readiness.model.providerID}/${entry.readiness.model.modelID}`
     : undefined;
   const resultModelRef = entry.result?.model
-    && providerIsAuthenticated(entry.result.model.providerID)
     ? `${entry.result.model.providerID}/${entry.result.model.modelID}`
     : undefined;
-  const selectedModelUsable = selectedModel
-    && providerIsAuthenticated(selectedModel.split('/')[0])
-    ? selectedModel
-    : undefined;
+  const selectedModelUsable = selectedModel;
   const activeModel = selectedModelUsable ?? resultModelRef ?? readinessModelRef;
   const [activeProviderId, ...activeModelParts] = (activeModel ?? '').split('/');
   const activeModelId = activeModelParts.join('/');
-
-  useEffect(() => {
-    if (modelProviders !== undefined) return;
-    let cancelled = false;
-    (async () => {
-      try {
-        const response = await runtimeFetch('/api/small-model', {
-          method: 'GET',
-          headers: { Accept: 'application/json' },
-        });
-        if (!response.ok) return;
-        const payload = (await response.json().catch(() => null)) as { authenticatedProviders?: unknown } | null;
-        if (!cancelled && Array.isArray(payload?.authenticatedProviders)) {
-          setModelProviders(payload.authenticatedProviders.filter((id): id is string => typeof id === 'string'));
-        }
-      } catch {
-        // Leave undefined: the picker then offers every provider, which is
-        // worse but not broken.
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [modelProviders]);
 
   // Only generation is worth interrupting. A read is a few hundred milliseconds
   // of git with nothing to cancel, and offering a Cancel button for it made the
@@ -616,7 +575,6 @@ export const WalkthroughView = ({ directory }: WalkthroughViewProps) => {
               selectModel(directory, source, providerId && modelId ? `${providerId}/${modelId}` : null);
             }}
             // While the auth list is loading, allow none — not every provider.
-            allowedProviderIds={modelProviders ?? []}
             tooltipsEnabled={false}
             dropdownPortalToBody
             className={cn('h-8 min-w-0', !compactHeader && 'max-w-48')}

@@ -58,8 +58,7 @@ async function initialize(frame: Record<string, unknown>) {
   const root = String(frame.root), threadId = String(frame.threadId), runId = String(frame.runId);
   storage = new KernelStorageAdapter({ client: kernel, hostId: 'web-domain-host', storageRoot,
     resolveWorkspaceRoot: async () => { throw new Error('Web-only work attempted to acquire a physical file root'); } });
-  const access = createMaterialStorageAccess({ kernel, storage,
-    legacy: { withBranchStore: async () => { throw new Error('Native material entered Pi workspace storage'); } } });
+  const access = createMaterialStorageAccess({ kernel, storage });
   materials = createWebMaterialStore(access);
   const documentReader = createDocumentReader({ materials });
   const webFetch = createWebFetch({ ssrf: { check: checkSsrf, isSameHost }, egress, materials, documentReader });
@@ -78,7 +77,7 @@ async function initialize(frame: Record<string, unknown>) {
   if (frame.readerOnly) { write({ kind: 'fixture-reader-ready' }); return; }
   const prepare = createExtensionTools({ runtime: extensions, kernel, currentPolicy: async () => ({ mode: 'normal', rules: [] }),
     prepareConfiguration: (run, required) => web.prepareConfiguration(run, required) });
-  selected = await prepare({ threadId, runId, source: null }, [], new AbortController().signal);
+  selected = await prepare({ threadId, runId, branchId: (await runtime.run(runId)).branch_id, source: null }, [], new AbortController().signal);
   assert(selected.initial.some(entry => entry.binding.tool.name === 'materials'));
   const bindings = selected.initial.filter(entry => entry.binding.tool.name !== 'materials').map(retained => {
     const registered = bridge.register(runId, retained.lease);

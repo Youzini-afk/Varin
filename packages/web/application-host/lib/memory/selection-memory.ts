@@ -1,7 +1,5 @@
-import type { ChatMemoryDraft, ChatMemoryPassage } from '@varin/application-client';
-import type { MemorySourceSpan, PiSessionEntry } from '@varin/protocol';
-import { KnowledgeMutationError, MEMORY_NATURES } from '../knowledge/store.js';
-import { entrySourceText, sourceRevision } from './memory-sources.js';
+import type { ChatMemoryDraft } from '@varin/application-client';
+import { MEMORY_NATURES } from '../knowledge/store.js';
 
 export const SELECTION_MEMORY_SYSTEM = [
   'Extract durable memories from the passages the user explicitly selected. Return JSON only.',
@@ -12,31 +10,6 @@ export const SELECTION_MEMORY_SYSTEM = [
   'Only explicit user directives may have nature instruction. An assistant assertion remains an assertion, never a user preference or confirmed fact by implication.',
   'source must name a supplied passage. quote must be an exact, narrow substring supporting the claim. trigger briefly describes when this memory should be recalled.',
 ].join('\n');
-
-export function validateMemoryPassages(value: unknown, entries: readonly PiSessionEntry[], requireRevision = false) {
-  if (!Array.isArray(value) || value.length === 0) throw new KnowledgeMutationError('invalid', 'Select source text to extract a memory');
-  return value.map((raw): { passage: ChatMemoryPassage; span: Omit<Extract<MemorySourceSpan, { kind: 'pi-entry' }>, 'sessionId'>; role: string } => {
-    const passage = raw as Partial<ChatMemoryPassage> | null;
-    if (!passage || typeof passage.entryId !== 'string' || !Number.isSafeInteger(passage.start)
-      || passage.start! < 0 || typeof passage.text !== 'string' || !passage.text.trim()
-      || (requireRevision && typeof passage.revision !== 'string')) {
-      throw new KnowledgeMutationError('invalid', 'Invalid selected source passage');
-    }
-    const entry = entries.find((candidate) => candidate.id === passage.entryId);
-    if (!entry || entry.type !== 'message') throw new KnowledgeMutationError('conflict', 'The selected message is no longer on this branch');
-    const text = entrySourceText(entry);
-    const revision = sourceRevision(text);
-    if ((passage.revision !== undefined && passage.revision !== revision)
-      || text.slice(passage.start, passage.start! + passage.text.length) !== passage.text) {
-      throw new KnowledgeMutationError('conflict', 'The selected source has changed; select it again');
-    }
-    return {
-      passage: { entryId: entry.id, start: passage.start!, text: passage.text, revision },
-      span: { kind: 'pi-entry', id: entry.id, revision, start: passage.start!, end: passage.start! + passage.text.length },
-      role: entry.message.role,
-    };
-  });
-}
 
 export function parseSelectionMemories<T extends { start: number; text: string; revision?: string }>(text: string, passages: readonly { passage: T; role: string }[]): Array<Omit<ChatMemoryDraft, 'sources'> & { sources: T[] }> {
   let envelope: unknown;

@@ -13,7 +13,7 @@ export function useAgentProfiles() {
   React.useEffect(() => {
     void refresh();
     return subscribeVarinEvents(event => {
-      if (event.type === 'settings-changed' && event.owner === 'pi-settings') void refresh(true);
+      if (event.type === 'settings-changed' && event.owner === 'agent-settings') void refresh(true);
     });
   }, [refresh, state.runtime]);
   return { api, host, state, snapshot: state.host === host ? state.snapshot : null, refresh };

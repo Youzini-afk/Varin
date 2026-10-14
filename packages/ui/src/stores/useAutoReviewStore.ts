@@ -1,95 +1,53 @@
+import type { InputSubmitReceipt } from '@varin/protocol';
+import type { ThreadIdentity, ThreadModel, ThreadSource, ThreadSubmit, ThreadUpdate } from '@varin/application-client';
 import { create } from 'zustand';
-import { persist } from 'zustand/middleware';
-import { createDeferredSafeJSONStorage } from '@/stores/utils/safeStorage';
 
-type AutoReviewPhase = 'waiting_for_reviewer' | 'waiting_for_implementer';
-type AutoReviewStatus = 'running' | 'completed' | 'stopped' | 'error';
-
-export type AutoReviewRun = {
-  originalSessionID: string;
-  reviewSessionID: string;
+export interface ReviewCommand {
+  input: ThreadSubmit;
+  status: 'sending' | 'unknown' | 'accepted' | 'rejected';
+  receipt?: InputSubmitReceipt;
+}
+export interface AutoReviewRun {
+  key: string;
+  hostKey: string;
+  hostGeneration: number;
+  original: ThreadIdentity;
+  review?: ThreadIdentity;
   directory: string;
-  runtimeKey: string;
-  status: AutoReviewStatus;
-  phase: AutoReviewPhase;
+  source: ThreadSource;
+  originalModel: ThreadModel;
+  reviewModel: ThreadModel;
+  originalHead: string | null;
+  reviewHead: string | null;
+  createKey: string;
+  reviewTitle: string;
+  titleCommand?: ThreadUpdate;
+  reviewTitled?: boolean;
+  autoReview: boolean;
+  generateHandoff: boolean;
+  status: 'running' | 'paused' | 'stopped' | 'completed';
+  phase: 'creating_review' | 'handoff' | 'review' | 'implementation';
   iteration: number;
   maxIterations: number;
-  lastForwardedMessageID?: string;
-  expectedAssistantParentID?: string;
-  waitAfterCreatedAt?: number;
+  prompt: string;
+  command?: ReviewCommand;
   error?: string;
-};
-
-type AutoReviewState = {
-  runsByOriginalSessionID: Record<string, AutoReviewRun>;
-  upsertRun: (run: AutoReviewRun) => void;
-  updateRun: (originalSessionID: string, updater: (run: AutoReviewRun) => AutoReviewRun) => void;
-  stopRun: (originalSessionID: string) => void;
-  completeRun: (originalSessionID: string) => void;
-  stopRunningRunsForRuntime: (runtimeKey: string) => void;
-  isRunningForSession: (sessionID: string) => boolean;
-};
-
-export const useAutoReviewStore = create<AutoReviewState>()(
-  persist(
-    (set, get) => ({
-      runsByOriginalSessionID: {},
-      upsertRun: (run) => set((state) => ({
-        runsByOriginalSessionID: {
-          ...state.runsByOriginalSessionID,
-          [run.originalSessionID]: run,
-        },
-      })),
-      updateRun: (originalSessionID, updater) => set((state) => {
-        const current = state.runsByOriginalSessionID[originalSessionID];
-        if (!current) return state;
-        return {
-          runsByOriginalSessionID: {
-            ...state.runsByOriginalSessionID,
-            [originalSessionID]: updater(current),
-          },
-        };
-      }),
-      stopRun: (originalSessionID) => set((state) => {
-        const current = state.runsByOriginalSessionID[originalSessionID];
-        if (!current) return state;
-        return {
-          runsByOriginalSessionID: {
-            ...state.runsByOriginalSessionID,
-            [originalSessionID]: { ...current, status: 'stopped' },
-          },
-        };
-      }),
-      completeRun: (originalSessionID) => set((state) => {
-        const current = state.runsByOriginalSessionID[originalSessionID];
-        if (!current) return state;
-        return {
-          runsByOriginalSessionID: {
-            ...state.runsByOriginalSessionID,
-            [originalSessionID]: { ...current, status: 'completed' },
-          },
-        };
-      }),
-      stopRunningRunsForRuntime: (runtimeKey) => set((state) => {
-        let changed = false;
-        const next = { ...state.runsByOriginalSessionID };
-        for (const [sessionID, run] of Object.entries(next)) {
-          if (run.runtimeKey === runtimeKey && run.status === 'running') {
-            next[sessionID] = { ...run, status: 'stopped' };
-            changed = true;
-          }
-        }
-        return changed ? { runsByOriginalSessionID: next } : state;
-      }),
-      isRunningForSession: (sessionID) => {
-        const run = get().runsByOriginalSessionID[sessionID];
-        return run?.status === 'running';
-      },
-    }),
-    {
-      name: 'auto-review-store',
-      storage: createDeferredSafeJSONStorage(),
-      partialize: (state) => ({ runsByOriginalSessionID: state.runsByOriginalSessionID }),
-    },
-  ),
-);
+}
+interface AutoReviewState {
+  runs: Record<string, AutoReviewRun>;
+  put(run: AutoReviewRun): void;
+  update(key: string, patch: Partial<AutoReviewRun>): void;
+  stopAll(): void;
+}
+/** Transient UI coordination only. Accepted commands and runs live in the native Catalog.
+ * Reloading does not restart forwarding or replay uncertain commands. */
+export const useAutoReviewStore = create<AutoReviewState>(set => ({
+  runs: {},
+  put: run => set(state => ({ runs: { ...state.runs, [run.key]: run } })),
+  update: (key, patch) => set(state => state.runs[key] ? { runs: {
+    ...state.runs, [key]: { ...state.runs[key], ...patch },
+  } } : state),
+  stopAll: () => set(state => ({ runs: Object.fromEntries(Object.entries(state.runs).map(([key, run]) => [key,
+    run.status === 'running' || run.status === 'paused' ? { ...run, status: 'stopped', error: 'Application Host changed. Accepted work remains with its original Host.' } : run,
+  ])) })),
+}));

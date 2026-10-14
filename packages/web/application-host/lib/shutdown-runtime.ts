@@ -1,4 +1,3 @@
-interface DisposableRuntime { dispose(): unknown }
 interface StoppableRuntime { stop(): Promise<unknown> | unknown }
 interface TerminalRuntime { shutdown(): Promise<unknown> }
 interface DocumentsAuthorityRuntime { dispose(): Promise<unknown> }
@@ -21,7 +20,6 @@ export interface GracefulShutdownDependencies<
   getUiAuthController(): UiAuth | null;
   process: { exit(code?: number): unknown };
   scheduledTasksRuntime?: StoppableRuntime | null | undefined;
-  sessionRuntime?: DisposableRuntime | null | undefined;
   setActiveTunnelController(value: Tunnel | null): void;
   setDocumentsAuthority?(value: Documents | null): void;
   setIsShuttingDown(value: boolean): void;
@@ -43,7 +41,6 @@ export const createGracefulShutdownRuntime = <
     getExitOnShutdown,
     getIsShuttingDown,
     setIsShuttingDown,
-    sessionRuntime,
     scheduledTasksRuntime,
     getTerminalRuntime,
     setTerminalRuntime,
@@ -66,7 +63,6 @@ export const createGracefulShutdownRuntime = <
     console.log('Starting graceful shutdown...');
     const exitProcess = typeof options.exitProcess === 'boolean' ? options.exitProcess : getExitOnShutdown();
 
-    sessionRuntime?.dispose?.();
     await scheduledTasksRuntime?.stop?.();
 
     const terminalRuntime = getTerminalRuntime();

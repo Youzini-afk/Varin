@@ -2,42 +2,24 @@ import { HarnessSettingsValidationError, type ModelSelection } from "./harness-s
 import { isWorkFocusId, type WorkFocusId } from "./work-focus.js";
 import { THINKING_LEVELS, type ThinkingLevel } from "./types.js";
 
-/** A plain array is an exact user choice for either runtime, never a name mapping. */
-export type AgentRuntime = "pi" | "agent";
-export type AgentToolSelection = string[] | Partial<Record<AgentRuntime, string[]>>;
-export interface AgentToolsView {
-  source: "default" | "explicit" | "unconfigured";
-  names: string[];
-}
+/** Exact native registered tool names. Missing inherits defaults; an empty list disables tools. */
+export type AgentRuntime = "agent";
+export type AgentToolSelection = string[];
+export interface AgentToolsView { source: "default" | "explicit" | "unconfigured"; names: string[] }
 
 export function parseAgentToolSelection(value: unknown): AgentToolSelection {
-  const names = (input: unknown): string[] => {
-    if (!Array.isArray(input) || input.some(name => typeof name !== "string" || !name.trim())) {
-      throw new HarnessSettingsValidationError("Agent tools must contain non-empty registered tool names");
-    }
-    return [...new Set(input as string[])];
-  };
-  if (Array.isArray(value)) return names(value);
-  if (!value || typeof value !== "object" || Object.keys(value).some(key => key !== "pi" && key !== "agent")) {
-    throw new HarnessSettingsValidationError("Agent tools must be an array or an object with pi and agent selections");
+  if (!Array.isArray(value) || value.some(name => typeof name !== "string" || !name.trim())) {
+    throw new HarnessSettingsValidationError("Agent tools must be an array of non-empty registered tool names");
   }
-  return Object.fromEntries(Object.entries(value).map(([runtime, input]) => [runtime, names(input)]));
+  return [...new Set(value as string[])];
 }
-
-/** One projection shared by configuration previews and both execution consumers. */
-export function resolveAgentTools(selection: AgentToolSelection | undefined, runtime: AgentRuntime, defaults?: readonly string[]): AgentToolsView {
-  const selected = Array.isArray(selection) ? selection : selection?.[runtime];
-  return selected !== undefined ? { source: "explicit", names: [...selected] }
+export function resolveAgentTools(selection: AgentToolSelection | undefined, _runtime: AgentRuntime, defaults?: readonly string[]): AgentToolsView {
+  return selection !== undefined ? { source: "explicit", names: parseAgentToolSelection(selection) }
     : defaults !== undefined ? { source: "default", names: [...defaults] }
       : { source: "unconfigured", names: [] };
 }
-
-/** Called only for an explicit tools edit. Other runtime choices remain unchanged. */
-export function updateAgentToolSelection(selection: AgentToolSelection | undefined, runtime: AgentRuntime, names: string[] | null): AgentToolSelection {
-  const next = Array.isArray(selection) ? { pi: [...selection], agent: [...selection] } : { ...selection };
-  if (names === null) delete next[runtime];
-  else next[runtime] = parseAgentToolSelection(names) as string[];
-  return next;
+export function updateAgentToolSelection(names: string[] | null): AgentToolSelection | undefined {
+  return names === null ? undefined : parseAgentToolSelection(names);
 }
 
 export interface HarnessAgentModelSettings {
@@ -61,7 +43,7 @@ export function parseHarnessAgentModelSettings(value: unknown): HarnessAgentMode
   if (Object.keys(input).some(key => key !== "temperature" && key !== "thinkingLevel")
     || (input.temperature !== undefined && (typeof input.temperature !== "number" || !Number.isFinite(input.temperature) || input.temperature < 0))
     || (input.thinkingLevel !== undefined && !THINKING_LEVELS.includes(input.thinkingLevel as ThinkingLevel))) {
-    throw new HarnessSettingsValidationError("Invalid agent model settings: temperature must be a finite non-negative number and thinkingLevel must be supported by Pi");
+    throw new HarnessSettingsValidationError("Invalid agent model settings: temperature must be a finite non-negative number and thinkingLevel must be supported by the model");
   }
   return { ...(input.temperature === undefined ? {} : { temperature: input.temperature as number }),
     ...(input.thinkingLevel === undefined ? {} : { thinkingLevel: input.thinkingLevel as ThinkingLevel }) };
@@ -88,7 +70,7 @@ export function parseHarnessAgentOverrides(value: unknown): HarnessAgentOverride
 }
 
 export function customizeHarnessAgent<T extends { tools: string[]; worktree: "none" | "isolated"; systemPromptFragment: string }>(
-  definition: T, overrides?: HarnessAgentOverrides, runtime: AgentRuntime = "pi",
+  definition: T, overrides?: HarnessAgentOverrides, runtime: AgentRuntime = "agent",
 ): T & { name?: string; description?: string; modelSettings?: HarnessAgentModelSettings } {
   return { ...definition,
     ...(overrides?.name === undefined ? {} : { name: overrides.name }),
@@ -108,20 +90,20 @@ export interface HarnessCustomAgent {
   /** Unset inherits the caller's model at dispatch. */
   model?: ModelSelection;
   modelSettings?: HarnessAgentModelSettings;
-  tools: AgentToolSelection;
+  tools?: AgentToolSelection;
   worktree: "none" | "isolated";
   /** Empty means available in either work focus. */
   workFocus: WorkFocusId[];
 }
 
 export function parseHarnessAgent(value: unknown): HarnessCustomAgent {
-  const fail = (): never => { throw new HarnessSettingsValidationError("Invalid agent definition: name, description, instructions, enabled, tools, worktree and workFocus are required; model is optional"); };
+  const fail = (): never => { throw new HarnessSettingsValidationError("Invalid agent definition: name, description, instructions, enabled, worktree and workFocus are required; model and tools are optional"); };
   if (!value || typeof value !== "object" || Array.isArray(value)) return fail();
   const v = value as Record<string, unknown>;
   if (Object.keys(v).some(key => !["name", "description", "instructions", "enabled", "model", "modelSettings", "tools", "worktree", "workFocus"].includes(key))
     || typeof v.name !== "string" || !v.name.trim()
     || typeof v.description !== "string" || typeof v.instructions !== "string"
-    || typeof v.enabled !== "boolean" || v.tools === undefined
+    || typeof v.enabled !== "boolean"
     || (v.worktree !== "none" && v.worktree !== "isolated") || !Array.isArray(v.workFocus) || !v.workFocus.every(isWorkFocusId)) return fail();
   let model: ModelSelection | undefined;
   if (v.model !== undefined) {
@@ -133,7 +115,7 @@ export function parseHarnessAgent(value: unknown): HarnessCustomAgent {
     model = { providerId: binding.providerId, modelId: binding.modelId };
   }
   return { name: v.name.trim(), description: v.description, instructions: v.instructions,
-    enabled: v.enabled, tools: parseAgentToolSelection(v.tools), worktree: v.worktree,
+    enabled: v.enabled, ...(v.tools === undefined ? {} : { tools: parseAgentToolSelection(v.tools) }), worktree: v.worktree,
     workFocus: [...new Set(v.workFocus as WorkFocusId[])], ...(model ? { model } : {}),
     ...(v.modelSettings === undefined ? {} : { modelSettings: parseHarnessAgentModelSettings(v.modelSettings) }) };
 }

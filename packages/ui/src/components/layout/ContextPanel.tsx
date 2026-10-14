@@ -9,7 +9,7 @@ import { Button } from '@/components/ui/button';
 import { SortableTabsStrip } from '@/components/ui/sortable-tabs-strip';
 import { TerminalView } from '@/components/views/TerminalView';
 import { ProjectContextPanel } from './RightSidebarTabs';
-import { PiRecoveryPanel } from './PiRecoveryPanel';
+import { WorkspaceRecoveryPanel } from './WorkspaceRecoveryPanel';
 import { ProjectActionsButton } from './ProjectActionsButton';
 import { useProjectActionsContext } from '@/hooks/useProjectActionsContext';
 import { SidebarFilesTree } from './SidebarFilesTree';
@@ -21,8 +21,10 @@ import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
 import { cn } from '@/lib/utils';
 import { useI18n } from '@/lib/i18n';
 import { useUIStore, type ContextPanelMode, type PendingDiffScope } from '@/stores/useUIStore';
-import { usePiSessionStore } from '@/stores/usePiSessionStore';
-import { addPiDraftImageFile, usePiDraftStore } from '@/stores/usePiDraftStore';
+import { useThreadStore, threadIdentityKey } from '@/stores/useThreadStore';
+import type { ThreadIdentity, ThreadSummary } from '@varin/application-client';
+import { addThreadDraftImage } from '@/lib/agent-runtime/draftAttachments';
+import { appendThreadDraftText } from '@/lib/agent-runtime/threadNavigation';
 import { contextPanelGitDirectoryScopeKey, useContextPanelGitDirectoryStore } from '@/stores/useContextPanelGitDirectoryStore';
 import { ContextPanelContent } from './ContextSidebarTab';
 import { toast } from '@/components/ui';
@@ -65,7 +67,7 @@ const GitDirectorySelector = lazyWithChunkRecovery(() => import('@/components/vi
 const PullRequestView = lazyWithChunkRecovery(() => import('@/components/views/PullRequestView').then((module) => ({ default: module.PullRequestView })));
 const PlanView = lazyWithChunkRecovery(() => import('@/components/views/PlanView').then((module) => ({ default: module.PlanView })));
 const ComputerWorkSurface = lazyWithChunkRecovery(() => import('@/components/sections/computers/ComputerWorkSurface').then((module) => ({ default: module.ComputerWorkSurface })));
-const HarnessSubtasksPanel = lazyWithChunkRecovery(() => import('@/components/pi-session/HarnessSubtasksPanel').then((module) => ({ default: module.HarnessSubtasksPanel })));
+const ThreadFamilyPanel = lazyWithChunkRecovery(() => import('./ThreadFamilyPanel').then(module => ({ default: module.ThreadFamilyPanel })));
 
 const CONTEXT_PANEL_MIN_WIDTH = 1;
 const CONTEXT_PANEL_MAX_WIDTH = 1400;
@@ -173,12 +175,12 @@ const getFileNameFromPath = (path: string | null): string | null => {
 };
 
 const getTabLabel = (
-  tab: { mode: ContextPanelMode; label: string | null; targetPath: string | null; dedupeKey?: string; sessionTitleFallback?: string | null; stagedDiff?: boolean },
+  tab: { thread?: ThreadIdentity; mode: ContextPanelMode; label: string | null; targetPath: string | null; dedupeKey?: string; sessionTitleFallback?: string | null; stagedDiff?: boolean },
   sessionTitleById: ReadonlyMap<string, string>,
   t: TranslateFn
 ): string => {
   if (tab.mode === 'chat') {
-    const sessionID = getSessionIDFromDedupeKey(tab.dedupeKey);
+    const sessionID = tab.thread?.threadId ?? null;
     if (sessionID) {
       const sessionTitle = sessionTitleById.get(sessionID)?.trim();
       if (sessionTitle) {
@@ -222,7 +224,7 @@ const getTabLabel = (
   return getModeLabel(tab.mode, t);
 };
 
-const getTabIcon = (tab: { mode: ContextPanelMode; targetPath: string | null }): React.ReactNode | undefined => {
+const getTabIcon = (tab: { thread?: ThreadIdentity; mode: ContextPanelMode; targetPath: string | null }): React.ReactNode | undefined => {
   if (tab.mode === 'threads') return <Icon name="chat-1" className="h-3.5 w-3.5" />;
   if (tab.mode === 'file') {
     return tab.targetPath
@@ -409,29 +411,20 @@ const EditorTreeColumn: React.FC<{ visible: boolean }> = ({ visible }) => {
   );
 };
 
-const getSessionIDFromDedupeKey = (dedupeKey: string | undefined): string | null => {
-  if (!dedupeKey || !dedupeKey.startsWith('session:')) {
-    return null;
-  }
-
-  const sessionID = dedupeKey.slice('session:'.length).trim();
-  return sessionID || null;
-};
-
-const buildSessionTitleMap = (sessions: Array<{ firstMessage?: string; id: string; name?: string }>, sessionIDs: readonly string[]): Map<string, string> => {
+const buildSessionTitleMap = (sessions: ThreadSummary[], sessionIDs: readonly string[]): Map<string, string> => {
   if (sessionIDs.length === 0) return EMPTY_SESSION_TITLE_MAP;
   const wanted = new Set(sessionIDs);
   const next = new Map<string, string>();
   for (const session of sessions) {
-    if (!wanted.has(session.id)) continue;
-    const title = (session.name || session.firstMessage?.split(/\r?\n/).find((line) => line.trim()))?.trim();
-    if (title) next.set(session.id, title);
+    if (!wanted.has(session.thread_id)) continue;
+    const title = session.title.trim();
+    if (title) next.set(session.thread_id, title);
   }
   return next.size === 0 ? EMPTY_SESSION_TITLE_MAP : next;
 };
 
 const useSessionTitleMap = (sessionIDs: readonly string[]): ReadonlyMap<string, string> => {
-  const summaries = usePiSessionStore((state) => state.summaries);
+  const summaries = useThreadStore(state => state.threads);
   return React.useMemo(
     () => buildSessionTitleMap(summaries, sessionIDs),
     [sessionIDs, summaries],
@@ -466,9 +459,8 @@ const PreviewPane: React.FC<PreviewPaneProps> = ({ rawUrl, onNavigate }) => {
   const [consoleEvents, setConsoleEvents] = React.useState<PreviewConsoleEvent[]>([]);
   const [inspectMode, setInspectMode] = React.useState(false);
   const [hoverTarget, setHoverTarget] = React.useState<PreviewElementMetadata | null>(null);
-  const currentSessionId = usePiSessionStore((state) => state.currentSessionId);
+  const currentSessionId = useThreadStore(state => state.selectedIdentity);
   const effectiveDirectory = useEffectiveDirectory();
-  const appendPiDraftText = usePiDraftStore((state) => state.appendText);
 
   let parsedUrl: URL | null = null;
   try {
@@ -630,14 +622,14 @@ const PreviewPane: React.FC<PreviewPaneProps> = ({ rawUrl, onNavigate }) => {
         const iframe = iframeRef.current;
         const screenshot = iframe ? await renderPreviewScreenshot(iframe, target) : null;
         if (screenshot) {
-          await addPiDraftImageFile(sessionKey, screenshot);
+          await addThreadDraftImage(sessionKey, screenshot);
           attachedScreenshot = true;
         }
       } catch {
         attachedScreenshot = false;
       }
 
-      appendPiDraftText(sessionKey, formatPreviewAnnotationMarkdown({
+      appendThreadDraftText(sessionKey, formatPreviewAnnotationMarkdown({
           pageUrl,
           viewport,
           devicePixelRatio,
@@ -647,7 +639,7 @@ const PreviewPane: React.FC<PreviewPaneProps> = ({ rawUrl, onNavigate }) => {
         }));
       toast.success(t('contextPanel.preview.inspect.attached'));
     })();
-  }, [appendPiDraftText, currentSessionId, effectiveDirectory, effectiveSrc, rawUrl, t]);
+  }, [currentSessionId, effectiveDirectory, effectiveSrc, rawUrl, t]);
 
   React.useEffect(() => {
     setBridgeReady(false);
@@ -853,12 +845,12 @@ const PreviewPane: React.FC<PreviewPaneProps> = ({ rawUrl, onNavigate }) => {
       return `[${timestamp}] [${event.level}] ${event.message}${details}`;
     }).join('\n');
 
-    appendPiDraftText(
+    appendThreadDraftText(
       sessionKey,
       `${t('contextPanel.preview.console.attachAnnotation')}\n\n\`\`\`text\n${header}${text}\n\`\`\``,
     );
     toast.success(t('contextPanel.preview.console.attached'));
-  }, [appendPiDraftText, consoleEvents, currentSessionId, effectiveDirectory, effectiveSrc, rawUrl, t]);
+  }, [consoleEvents, currentSessionId, effectiveDirectory, effectiveSrc, rawUrl, t]);
 
   // Out-of-band upstream probe: iframes don't expose HTTP status to the parent,
   // so when the proxy returns a 502 (upstream dev server is offline) the iframe
@@ -1227,17 +1219,10 @@ export const ContextPanel: React.FC = () => {
   const projectActionsContext = useProjectActionsContext();
   const effectiveDirectory = useEffectiveDirectory() ?? '';
   const directoryKey = React.useMemo(() => normalizeDirectoryKey(effectiveDirectory), [effectiveDirectory]);
-  const currentSessionId = usePiSessionStore((state) => state.currentSessionId);
-  const currentSessionDirectory = usePiSessionStore((state) => (
-    state.currentSessionId
-      ? state.records[state.currentSessionId]?.snapshot?.cwd
-        ?? state.summaries.find((summary) => summary.id === state.currentSessionId)?.cwd
-        ?? null
-      : null
-  ));
-  const gitSessionDirectory = currentSessionDirectory || effectiveDirectory || null;
+  const currentSessionId = useThreadStore(state => state.selectedIdentity);
+  const gitSessionDirectory = effectiveDirectory || null;
   const gitDirectoryScopeKey = React.useMemo(() => {
-    return contextPanelGitDirectoryScopeKey(currentSessionId, gitSessionDirectory);
+    return contextPanelGitDirectoryScopeKey(currentSessionId ? threadIdentityKey(useThreadStore.getState().hostKey, currentSessionId) : null, gitSessionDirectory);
   }, [currentSessionId, gitSessionDirectory]);
   const selectedGitDirectory = useContextPanelGitDirectoryStore((state) => (
     gitDirectoryScopeKey ? state.directories[gitDirectoryScopeKey] ?? null : null
@@ -1298,7 +1283,7 @@ export const ContextPanel: React.FC = () => {
     const ids: string[] = [];
     for (const tab of tabs) {
       if (tab.mode !== 'chat') continue;
-      const sessionID = getSessionIDFromDedupeKey(tab.dedupeKey);
+      const sessionID = tab.thread?.threadId ?? null;
       if (sessionID && !ids.includes(sessionID)) ids.push(sessionID);
     }
     return ids;
@@ -1500,11 +1485,11 @@ export const ContextPanel: React.FC = () => {
   );
   const activeChatTabID = isOpen && activeTab?.mode === 'chat' ? activeTab.id : null;
   const activeChatSessionID = isOpen && activeTab?.mode === 'chat'
-    ? getSessionIDFromDedupeKey(activeTab.dedupeKey)
+    ? activeTab.thread ?? null
     : null;
   const activeChatTab = getActiveEmbeddedSessionChatTab(chatTabs, activeChatTabID);
 
-  const getEmbeddedChatSrc = React.useCallback((tabID: string, sessionID: string, readOnly: boolean): string => {
+  const getEmbeddedChatSrc = React.useCallback((tabID: string, sessionID: ThreadIdentity, readOnly: boolean): string => {
     return getOrCreateEmbeddedSessionChatURL(chatFrameSrcByTabIDRef.current, tabID, sessionID, directoryKey || null, readOnly, {
       mode: themeMode,
       lightThemeId,
@@ -1680,9 +1665,9 @@ export const ContextPanel: React.FC = () => {
   const activeNonChatContent = activeTab?.mode === 'context'
         ? <ContextPanelContent />
         : activeTab?.mode === 'threads'
-            ? <HarnessSubtasksPanel />
+            ? <ThreadFamilyPanel />
         : activeTab?.mode === 'recovery'
-            ? <PiRecoveryPanel />
+            ? <WorkspaceRecoveryPanel />
         : activeTab?.mode === 'git'
             ? (
               <GitView
@@ -1975,7 +1960,7 @@ export const ContextPanel: React.FC = () => {
               chatFrameRefs.current.set(activeChatTab.id, node);
             }}
             src={activeChatSrc}
-            title={t('contextPanel.iframe.sessionChatTitle', { sessionID: activeChatSessionID })}
+            title={t('contextPanel.iframe.sessionChatTitle', { sessionID: activeChatSessionID.threadId })}
             className="absolute inset-0 h-full w-full border-0 bg-background"
             onLoad={() => {
               postThemeSyncToEmbeddedChat();

@@ -2,7 +2,7 @@ import type { BotCreateInput, BotUpdateInput, BotModelSelection, BotReadyEntry, 
 import { getRuntimeEndpointGeneration, subscribeRuntimeEndpointWillChange } from '@varin/application-client';
 import { create } from 'zustand';
 import { getRegisteredRuntimeAPIs } from '@/lib/runtime-api/registry';
-import { openPiSessionFromNavigation } from '@/lib/pi-runtime/sessionNavigation';
+import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { selectActiveWorkbenchProfile } from '@/lib/extensions/workbench-shell-transition';
 import { VARIN_WORKBENCH_BOT_PROFILE_ID } from '@varin/extension-contract';
 import { useUIStore } from '@/stores/useUIStore';
@@ -23,17 +23,16 @@ export const ensureBotEntry = (id: string, signal?: AbortSignal) => api().entry(
 export const listBotWork = (id: string, signal?: AbortSignal) => api().work(id, signal);
 
 /** View selection only. Identities are always returned by the Host. */
-export const useBotNavigation = create<{ botId: string | null; entry: BotReadyEntry | null; model: BotModelSelection | null }>(() => ({ botId: null, entry: null, model: null }));
+export const useBotNavigation = create<{ botId: string | null; entry: BotReadyEntry | null; model: BotModelSelection | null; archived?: boolean }>(() => ({ botId: null, entry: null, model: null }));
 subscribeRuntimeEndpointWillChange(() => useBotNavigation.setState({ botId: null, entry: null, model: null }));
-export const botWorkId = (item: BotWorkItem) => item.runtime === 'agent' ? JSON.stringify([item.identity.threadId, item.identity.branchId]) : item.thread.id;
-export const botWorkTitle = (item: BotWorkItem) => item.runtime === 'agent' ? item.identity.threadId : item.thread.brief || item.thread.id;
-export const botWorkEntry = (item: BotWorkItem): BotReadyEntry | null => item.runtime === 'agent' ? item.identity : item.sessionId ? { runtime: 'pi', sessionId: item.sessionId } : null;
-export const sameBotEntry = (a: BotReadyEntry | null | undefined, b: BotReadyEntry | null | undefined) => Boolean(a && b && a.runtime === b.runtime
-  && (a.runtime === 'agent' && b.runtime === 'agent' ? a.threadId === b.threadId && a.branchId === b.branchId : a.runtime === 'pi' && b.runtime === 'pi' && a.sessionId === b.sessionId));
-export const openBotConversation = async (botId: string, entry: BotReadyEntry, directory?: string, model: BotModelSelection | null = null): Promise<void> => {
-  const generation = getRuntimeEndpointGeneration();
-  if (entry.runtime === 'pi') await openPiSessionFromNavigation({ sessionId: entry.sessionId, ...(directory ? { directory } : {}) });
-  if (generation === getRuntimeEndpointGeneration()) useBotNavigation.setState({ botId, entry, model });
+export const botWorkId = (item: BotWorkItem) => JSON.stringify([item.identity.threadId, item.identity.branchId]);
+export const botWorkTitle = (item: BotWorkItem) => item.thread.title || item.identity.threadId;
+export const botWorkEntry = (item: BotWorkItem): BotReadyEntry => item.identity;
+export const sameBotEntry = (a: BotReadyEntry | null | undefined, b: BotReadyEntry | null | undefined) => Boolean(a && b && a.threadId === b.threadId && a.branchId === b.branchId);
+export const openBotConversation = async (botId: string, entry: BotReadyEntry, directory?: string, model: BotModelSelection | null = null, archived?: boolean): Promise<void> => {
+  // Bot work has a separate presentation selection; ordinary Thread navigation remains intact.
+  if (directory) useDirectoryStore.getState().setDirectory(directory, { showOverlay: false });
+  useBotNavigation.setState({ botId, entry, model, archived });
 };
 export const openBotEntryFor = async (botId: string): Promise<void> => {
   const generation = getRuntimeEndpointGeneration();

@@ -4,12 +4,30 @@ import {
   defaultVarinExtensionServiceRoutingDocument,
   resolveVarinExtensionServiceRouting,
   parseVarinExtensionServiceRoutingRule,
+  parseVarinExtensionServiceRoutingContext,
 } from "../src/index.js";
 
 const candidates = [
   { providerId: "alpha-generation-2", providerKey: "dev.alpha:host:memory@1" },
   { providerId: "beta-generation-4", providerKey: "dev.beta:host:memory@1" },
 ];
+
+test("Thread, branch and source Run routing remain separate native identities", () => {
+  const document = defaultVarinExtensionServiceRoutingDocument();
+  document.rules = [
+    { scope: { threadId: "thread-a" }, providerKeys: [candidates[0]!.providerKey] },
+    { scope: { threadId: "thread-a", branchId: "branch-a" }, providerKeys: [candidates[1]!.providerKey] },
+    { scope: { threadId: "thread-a", branchId: "branch-a", sourceRunId: "run-a" }, providerKeys: [candidates[0]!.providerKey] },
+  ].map(rule => ({ ...rule, allowFallback: false, serviceId: "memory", version: 1 }));
+  const resolve = (context: { threadId: string; branchId: string; sourceRunId: string }) =>
+    resolveVarinExtensionServiceRouting({ candidates, document, context, serviceId: "memory", version: 1 });
+  assert.deepEqual(resolve({ threadId: "thread-a", branchId: "branch-a", sourceRunId: "run-a" }).providerKeys, [candidates[0]!.providerKey]);
+  assert.deepEqual(resolve({ threadId: "thread-a", branchId: "branch-a", sourceRunId: "run-b" }).providerKeys, [candidates[1]!.providerKey]);
+  assert.deepEqual(resolve({ threadId: "thread-a", branchId: "branch-b", sourceRunId: "run-a" }).providerKeys, [candidates[0]!.providerKey]);
+  assert.equal(resolve({ threadId: "thread-b", branchId: "branch-a", sourceRunId: "run-a" }).status, "ambiguous");
+  assert.throws(() => parseVarinExtensionServiceRoutingContext({ sessionId: "thread-a" }), /Unknown service routing context field/);
+  assert.throws(() => parseVarinExtensionServiceRoutingContext({ threadId: "thread-a", branchId: " " }), /non-empty string/);
+});
 
 test("service routing resolves the most specific matching scope with a stable provider key", () => {
   const document = defaultVarinExtensionServiceRoutingDocument();
@@ -24,14 +42,14 @@ test("service routing resolves the most specific matching scope with a stable pr
     {
       allowFallback: false,
       providerKeys: [candidates[1]!.providerKey],
-      scope: { sessionId: "session-a", userId: "youzi" },
+      scope: { threadId: "thread-a", userId: "youzi" },
       serviceId: "memory",
       version: 1,
     },
   ];
   const resolution = resolveVarinExtensionServiceRouting({
     candidates,
-    context: { sessionId: "session-a", userId: "youzi" },
+    context: { threadId: "thread-a", userId: "youzi" },
     document,
     serviceId: "memory",
     version: 1,
@@ -46,7 +64,7 @@ test("service routing falls through only when the missing selection allows fallb
     {
       allowFallback: true,
       providerKeys: ["dev.missing:host:memory@1"],
-      scope: { sessionId: "session-a" },
+      scope: { threadId: "thread-a" },
       serviceId: "memory",
       version: 1,
     },
@@ -60,7 +78,7 @@ test("service routing falls through only when the missing selection allows fallb
   ];
   const resolution = resolveVarinExtensionServiceRouting({
     candidates,
-    context: { sessionId: "session-a", userId: "youzi" },
+    context: { threadId: "thread-a", userId: "youzi" },
     document,
     serviceId: "memory",
     version: 1,
@@ -72,7 +90,7 @@ test("service routing falls through only when the missing selection allows fallb
   document.rules[0]!.allowFallback = false;
   const unavailable = resolveVarinExtensionServiceRouting({
     candidates,
-    context: { sessionId: "session-a", userId: "youzi" },
+    context: { threadId: "thread-a", userId: "youzi" },
     document,
     serviceId: "memory",
     version: 1,
@@ -86,21 +104,21 @@ test("equally specific conflicting rules are explicit instead of load-order depe
     {
       allowFallback: false,
       providerKeys: [candidates[0]!.providerKey],
-      scope: { sessionId: "session-a", userId: "youzi" },
+      scope: { threadId: "thread-a", userId: "youzi" },
       serviceId: "memory",
       version: 1,
     },
     {
       allowFallback: false,
       providerKeys: [candidates[1]!.providerKey],
-      scope: { sessionId: "session-a", workspaceId: "/workspace" },
+      scope: { threadId: "thread-a", workspaceId: "/workspace" },
       serviceId: "memory",
       version: 1,
     },
   ];
   const resolution = resolveVarinExtensionServiceRouting({
     candidates,
-    context: { sessionId: "session-a", userId: "youzi", workspaceId: "/workspace" },
+    context: { threadId: "thread-a", userId: "youzi", workspaceId: "/workspace" },
     document,
     serviceId: "memory",
     version: 1,
@@ -133,13 +151,13 @@ test("ordered routing reports conflicts, missing required members and undeclared
   const document = defaultVarinExtensionServiceRoutingDocument();
   const ordered = candidates.map(candidate => ({ ...candidate, composition: "ordered" as const }));
   const rule = { allowFallback: false, providerKeys: candidates.map(candidate => candidate.providerKey),
-    scope: { sessionId: "session", userId: "default" }, serviceId: "memory", version: 1 };
+    scope: { threadId: "session", userId: "default" }, serviceId: "memory", version: 1 };
   document.rules = [rule];
-  const input = { candidates: ordered, document, context: { sessionId: "session", userId: "default", projectId: "project" },
+  const input = { candidates: ordered, document, context: { threadId: "session", userId: "default", projectId: "project" },
     serviceId: "memory", version: 1, composition: "ordered" as const };
   assert.equal(resolveVarinExtensionServiceRouting({ ...input, candidates: ordered.slice(0, 1) }).status, "unavailable");
   assert.equal(resolveVarinExtensionServiceRouting({ ...input, candidates }).diagnostics[0]?.code, "service_selection_composition_unsupported");
-  document.rules.push({ ...rule, providerKeys: [...rule.providerKeys].reverse(), scope: { sessionId: "session", projectId: "project" } });
+  document.rules.push({ ...rule, providerKeys: [...rule.providerKeys].reverse(), scope: { threadId: "session", projectId: "project" } });
   assert.equal(resolveVarinExtensionServiceRouting(input).status, "ambiguous");
   assert.throws(() => parseVarinExtensionServiceRoutingRule({ ...rule, providerKey: candidates[0]!.providerKey }));
   assert.throws(() => parseVarinExtensionServiceRoutingRule({ ...rule, providerKeys: ["same", "same"] }));

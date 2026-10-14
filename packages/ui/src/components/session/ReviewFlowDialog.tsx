@@ -1,6 +1,6 @@
 import React from 'react';
-import type { ThinkingLevel } from '@varin/protocol';
-import { PiAgentSelector } from '@/components/multirun/PiAgentSelector';
+import type { ThreadIdentity, ThreadThinkingLevel, ThreadModelInfo } from '@varin/application-client';
+import { getRuntimeEndpointGeneration } from '@varin/application-client';
 import { ModelSelector } from '@/components/sections/agents/ModelSelector';
 import { ThinkingPill } from '@/components/session/ThinkingPill';
 import { Checkbox } from '@/components/ui/checkbox';
@@ -14,23 +14,23 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { useI18n } from '@/lib/i18n';
-import { usePiProviderStore } from '@/stores/usePiProviderStore';
-import { usePiSessionStore } from '@/stores/usePiSessionStore';
-import type { MultiRunAgentSelection } from '@/types/multirun';
+import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
+import { useThreadStore } from '@/stores/useThreadStore';
+import { reviewModel } from '@/lib/reviewFlow';
 
 export type ReviewFlowExecution = {
-  agent: MultiRunAgentSelection | null;
   autoReview: boolean;
   generateHandoff: boolean;
   modelId: string;
   providerId: string;
-  thinkingLevel: ThinkingLevel;
+  thinkingLevel: ThreadThinkingLevel;
+  maxIterations: number;
 };
 
 type ReviewFlowDialogProps = {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  originalSessionId?: string | null;
+  original?: ThreadIdentity | null;
   projectDirectory: string | null;
   submitting?: boolean;
   onConfirm: (execution: ReviewFlowExecution) => Promise<void> | void;
@@ -39,9 +39,9 @@ type ReviewFlowDialogProps = {
 const initialExecution = (
   providerId = '',
   modelId = '',
-  thinkingLevel: ThinkingLevel = 'off',
+  thinkingLevel: ThreadThinkingLevel = 'off',
 ): ReviewFlowExecution => ({
-  agent: null,
+  maxIterations: 15,
   autoReview: false,
   generateHandoff: true,
   modelId,
@@ -52,65 +52,33 @@ const initialExecution = (
 export function ReviewFlowDialog({
   open,
   onOpenChange,
-  originalSessionId,
-  projectDirectory,
+  original,
   submitting = false,
   onConfirm,
 }: ReviewFlowDialogProps) {
   const { t } = useI18n();
-  const activeSessionId = usePiSessionStore((state) => originalSessionId ?? state.currentSessionId);
-  const sourceSnapshot = usePiSessionStore((state) => (
-    activeSessionId ? state.records[activeSessionId]?.snapshot : undefined
-  ));
-  const providers = usePiProviderStore((state) => state.providers);
-  const loadProviders = usePiProviderStore((state) => state.load);
+  const api = useRuntimeAPIs().threads;
+  const hostKey = useThreadStore(state => state.hostKey);
+  const [models, setModels] = React.useState<ThreadModelInfo[]>([]);
+  const [error, setError] = React.useState<string>();
   const [execution, setExecution] = React.useState<ReviewFlowExecution>(() => initialExecution());
-
   React.useEffect(() => {
-    if (!open) return;
-    const cwd = projectDirectory?.trim() || sourceSnapshot?.cwd.trim();
-    if (cwd) void loadProviders(cwd).catch(() => undefined);
-  }, [loadProviders, open, projectDirectory, sourceSnapshot?.cwd]);
-
-  React.useEffect(() => {
-    if (!open) return;
-    setExecution(initialExecution(
-      sourceSnapshot?.model?.provider,
-      sourceSnapshot?.model?.id,
-      sourceSnapshot?.thinkingLevel ?? 'off',
-    ));
-  }, [open, sourceSnapshot?.model?.id, sourceSnapshot?.model?.provider, sourceSnapshot?.thinkingLevel]);
-
-  React.useEffect(() => {
-    if (!open || providers.length === 0) return;
-    const provider = providers.find((item) => item.id === execution.providerId) ?? providers[0];
-    const model = provider?.models.find((item) => item.id === execution.modelId)
-      ?? provider?.models.find((item) => item.available)
-      ?? provider?.models[0];
-    if (!provider || !model) return;
-    const thinkingLevel = model.supportedThinkingLevels.includes(execution.thinkingLevel)
-      ? execution.thinkingLevel
-      : model.supportedThinkingLevels[0] ?? 'off';
-    if (
-      provider.id === execution.providerId
-      && model.id === execution.modelId
-      && thinkingLevel === execution.thinkingLevel
-    ) return;
-    setExecution((current) => ({
-      ...current,
-      modelId: model.id,
-      providerId: provider.id,
-      thinkingLevel,
-    }));
-  }, [execution.modelId, execution.providerId, execution.thinkingLevel, open, providers]);
-
-  const thinkingOptions = React.useMemo(() => (
-    providers
-      .find((provider) => provider.id === execution.providerId)
-      ?.models.find((model) => model.id === execution.modelId)
-      ?.supportedThinkingLevels ?? []
-  ), [execution.modelId, execution.providerId, providers]);
-  const canConfirm = execution.providerId.trim().length > 0 && execution.modelId.trim().length > 0;
+    if (!open || !api) return;
+    let alive = true;
+    const generation = getRuntimeEndpointGeneration();
+    setModels([]); setError(undefined); setExecution(initialExecution());
+    void Promise.all([api.listModels(), original ? api.snapshot(original) : Promise.resolve(undefined)]).then(([models, snapshot]) => {
+      if (!alive || generation !== getRuntimeEndpointGeneration()) return;
+      setModels(models);
+      const selected = snapshot ? reviewModel(snapshot) : undefined;
+      const model = models.find(item => item.providerId === selected?.providerId && item.modelId === selected.modelId) ?? models[0];
+      if (model) setExecution(initialExecution(model.providerId, model.modelId, model.thinkingLevels?.includes(selected?.thinkingLevel ?? 'off') ? selected?.thinkingLevel : model.thinkingLevels?.[0]));
+    }).catch(error => { if (alive && generation === getRuntimeEndpointGeneration()) setError(error instanceof Error ? error.message : 'Model catalog unavailable'); });
+    return () => { alive = false; };
+  }, [api, open, original, hostKey]);
+  const selectedModel = models.find(model => model.providerId === execution.providerId && model.modelId === execution.modelId);
+  const thinkingOptions = selectedModel?.thinkingLevels ?? [];
+  const canConfirm = Boolean(selectedModel) && (!execution.autoReview || Number.isSafeInteger(execution.maxIterations) && execution.maxIterations > 0);
 
   const handleSubmit = React.useCallback(() => {
     if (!canConfirm || submitting) return;
@@ -170,16 +138,14 @@ export function ReviewFlowDialog({
               className="max-w-[320px] justify-between"
               dropdownPortalToBody
               onChange={(providerId, modelId) => {
-                const model = providers
-                  .find((provider) => provider.id === providerId)
-                  ?.models.find((entry) => entry.id === modelId);
+                const model = models.find(entry => entry.providerId === providerId && entry.modelId === modelId);
                 setExecution((current) => ({
                   ...current,
                   modelId,
                   providerId,
-                  thinkingLevel: model?.supportedThinkingLevels.includes(current.thinkingLevel)
+                  thinkingLevel: model?.thinkingLevels?.includes(current.thinkingLevel)
                     ? current.thinkingLevel
-                    : model?.supportedThinkingLevels[0] ?? 'off',
+                    : model?.thinkingLevels?.[0] ?? 'off',
                 }));
               }}
             />
@@ -193,21 +159,18 @@ export function ReviewFlowDialog({
               disabled={thinkingOptions.length === 0 || submitting}
               onChange={(thinkingLevel) => setExecution((current) => ({
                 ...current,
-                thinkingLevel: thinkingLevel as ThinkingLevel,
+                thinkingLevel: thinkingLevel as ThreadThinkingLevel,
               }))}
             />
           </div>
 
-          <div className="flex flex-col gap-1.5">
-            <span className="typography-meta font-medium text-muted-foreground">{t('sessions.scheduledTasks.editor.agent.label')}</span>
-            <PiAgentSelector
-              cwd={projectDirectory}
-              value={execution.agent}
-              disabled={submitting}
-              portalToBody
-              onChange={(agent) => setExecution((current) => ({ ...current, agent }))}
-            />
-          </div>
+          {execution.autoReview && <label className="flex flex-col gap-1.5 typography-meta">
+            Maximum implementation rounds
+            <input type="number" min={1} step={1} value={execution.maxIterations} disabled={submitting}
+              onChange={event => setExecution(current => ({ ...current, maxIterations: Number(event.target.value) }))} />
+            <span>Automatic forwarding runs while this app stays open. Stopping forwarding leaves accepted runs available in their conversations.</span>
+          </label>}
+          {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
         </div>
 
         <DialogFooter>

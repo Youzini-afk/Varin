@@ -3,7 +3,7 @@ import remend from 'remend';
 import katex from 'katex';
 import DOMPurify from 'dompurify';
 import { buildAgentMentionUrl, parseAgentHref, parseSkillHref } from '@/lib/messages/inlineMessageLinks';
-import { pdfMaterialMarkdownHref } from '@/lib/pi-runtime/pdfMaterialCitation';
+import { pdfMaterialMarkdownHref } from '@/lib/materials/pdfMaterialCitation';
 import { highlightCodeInWorker } from './markdown-worker';
 import { escapeRawMarkdownHtml, MARKDOWN_FORBIDDEN_TAGS } from './markdownSecurity';
 

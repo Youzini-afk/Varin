@@ -56,7 +56,7 @@ const formatOne = (attachment: EditorContextAttachment): string => {
       : '- Range: entire buffer';
     return [
       `Attached unsaved editor snapshot for \`${attachment.label}\`.`,
-      'This text is a prompt snapshot. Pi file tools cannot see it on disk.',
+      'This text is a prompt snapshot. File tools do not see this buffer on disk.',
       pathLine,
       revisionLine,
       localLine,
@@ -66,7 +66,7 @@ const formatOne = (attachment: EditorContextAttachment): string => {
   }
   return [
     `Attached saved file \`${attachment.label}\`.`,
-    'Pi file tools can read the current disk contents. Unsaved editor buffers are not included.',
+    'The admitted source determines file access. Unsaved editor buffers are not included.',
     pathLine,
     revisionLine,
     localLine,

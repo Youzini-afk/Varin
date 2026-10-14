@@ -8,7 +8,7 @@ Rust kernel. Renderers never spawn language servers.
 
 - `supervisor.ts`: `createLanguageSupervisor({ documents, spawn, spawnAdmitted, releaseAdmittedContext, pathModule, env, isTrusted, hostViewIdleMs, hostViewDocumentLimit, now })`
 - `language-view.ts`: `createLanguageViewBinder({ documents, supervisor })` — binds one document in the
-  Host-owned view to a named text identity (fixed editor draft or disk revision)
+  Host-owned view to its admitted native source identity or explicit saved-disk revision
 - `jsonrpc.ts`: Content-Length framed JSON-RPC client/server
 - `routes.ts`: authenticated `/api/language/*` routes and SSE events, pinned to the `surface` view
 - `capability.ts`: `workspace.language` Host capability
@@ -52,9 +52,6 @@ editor's live buffer and an agent turn's fixed text (D-087):
   records the `contentRevision` it was synchronized from, and callers assert that revision with
   `expectedRevision`. It starts on the first Host request, closes least-recently-used documents past
   `hostViewDocumentLimit`, releases after `hostViewIdleMs`, and never replays documents on restart.
-- `agent:<content hash>` — a fixed draft view. Its captured buffers are synchronized together; identical
-  draft contents can share the same view across sessions. Fixed buffers and active query documents are
-  not LRU-evicted. These views expire independently of a retained project disk view.
 - `agent:source:<identity>` — an admitted native source, retained by actual Run/grant references; fixed sources prepare their own derived physical view.
   The original project namespace selects configuration; the admitted live root, managed working copy or fixed derived project
   supplies cwd, root URI, workspace folders, file mapping and its watcher. Compatible callers share the
@@ -63,15 +60,15 @@ editor's live buffer and an agent turn's fixed text (D-087):
 
 Language-capable child runs materialize their existing WorkingState execution directory before the
 first prompt. Navigation, diagnostics and LSP structure fallback resolve source aliases to that
-directory, so imports and project files are read from the child's workspace. Editor draft views use LSP
-buffer overlays; as with an editor, project configuration and unopened files remain server-managed.
-The protocol does not provide a whole-project historical snapshot, and cross-file locations remain
-unpinned rather than being stamped with the queried document's revision.
+directory, so imports and project files are read from the child's workspace. A fixed source uses its
+pinned branch's derived project, including drafts captured during source preparation. The binder never
+reinterprets a Thread as a session or substitutes a same-path live workspace. Cross-file locations remain
+admitted by the source owner rather than being stamped with the queried document's revision.
 
 Provider language families share a process (for example TS/TSX/JS). Document versions are assigned only
 after shared startup finishes, in the synchronous notification step. A view revision detects changes to
 other synchronized files while a query is answering. Filesystem/Document mutation events invalidate
-diagnostics and return changed disk buffers to server filesystem ownership; fixed drafts remain fixed.
+diagnostics and return changed disk buffers to server filesystem ownership; fixed-source documents remain fixed.
 
 ## Preparation and prewarming
 
@@ -171,7 +168,7 @@ Native Threads call this same supervisor through the private native language ada
 actual live, fixed or materialized source through the shared `SourceQueryOwner`, using the original frozen
 selection, Run grant and Documents registration. `KernelProcessService.spawnAdmitted` consumes a trusted
 source-owner callback; it is not a public path/cwd permission. Native navigation opts
-into strict URI/range projection and omission reasons; ordinary Pi/editor location shapes are unchanged.
+into strict URI/range projection and omission reasons; ordinary editor location shapes are unchanged.
 The supervisor retains diagnostic publications for native readers. Snapshot reads do not start
 a service or wait for a future publication; missing/unversioned evidence is pending, while changed view
 or generation is stale. Nonempty unversioned observations may be returned with explicit unversioned

@@ -27,7 +27,7 @@ export interface WorkspaceRecoveryFailure {
   retryable: boolean;
 }
 
-export type RecoveryConversation = { kind: "pi"; sessionId: string } | { kind: "thread"; threadId: string; branchId: string };
+export type RecoveryConversation = { kind: "thread"; threadId: string; branchId: string };
 type LocalRecoveryFileTarget = { kind: "workspace" } | { kind: "physical"; workspaceId: string; threadId: string; runId: string; rootId: string; canonicalRoot: string; executionWorkspaceId: string; sourceMode: "live_root" | "materialized" } | { kind: "fixed"; branchId: string; revision: number };
 export type RecoveryFileTarget = LocalRecoveryFileTarget
   | { kind: "managed"; hostId: string; target: Extract<LocalRecoveryFileTarget, { kind: "physical" }> };
@@ -422,9 +422,8 @@ export const parseWorkspaceRecoveryCheckpointQuery = (value: unknown): Workspace
 
 export const parseRecoveryConversation = (value: unknown): RecoveryConversation => {
   const raw = record(value, "Recovery conversation");
-  if (raw.kind === "pi") return { kind: "pi", sessionId: text(raw.sessionId, "conversation.sessionId") };
-  if (raw.kind === "thread") return { kind: "thread", threadId: text(raw.threadId, "conversation.threadId"), branchId: text(raw.branchId, "conversation.branchId") };
-  throw new WorkspaceRecoveryContractError("conversation.kind must identify pi or thread");
+  if (raw.kind === "thread" && Object.keys(raw).length === 3) return { kind: "thread", threadId: text(raw.threadId, "conversation.threadId"), branchId: text(raw.branchId, "conversation.branchId") };
+  throw new WorkspaceRecoveryContractError("conversation must identify one native Thread and HistoryBranch");
 };
 export const parseRecoveryFileTarget = (value: unknown): RecoveryFileTarget => {
   const raw = record(value, "Recovery file target");

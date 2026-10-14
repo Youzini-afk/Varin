@@ -262,7 +262,7 @@ test('an unreadable original operation never becomes false no-effect/stopped evi
   } finally { f.failReads(false); await f.dispose(); }
 });
 
-test('Pi and Agent share one listener owner without sharing cancellation; pinned channels drain before stop', async () => {
+test('native operations keep separate listener ownership and cancellation; pinned channels drain before stop', async () => {
   const transport = controlled();
   const channels: ControlledChannel[] = [];
   class ControlledChannel extends EventEmitter {
@@ -274,16 +274,18 @@ test('Pi and Agent share one listener owner without sharing cancellation; pinned
   }
   const target = clone(remote);
   const agent = { runtime: 'agent' as const, hostEpoch: transport.forwards.epoch, operationId: 'original-job' };
-  const pi = { runtime: 'pi' as const, sessionId: 'actual-pi-session' };
+  const independent = { runtime: 'agent' as const, hostEpoch: transport.forwards.epoch, operationId: 'independent-job' };
   try {
     await transport.forwards.open({ target, host: '127.0.0.1', port: 3000, threadId: 'thread', owner: agent, webSocket: ControlledChannel as unknown as typeof WebSocket });
-    await transport.forwards.open({ target, host: '127.0.0.1', port: 3001, threadId: 'pi-thread', owner: pi });
+    await transport.forwards.open({ target, host: '127.0.0.1', port: 3001, threadId: 'independent-thread', owner: independent });
     target.connection.apiUrl = 'https://replacement.invalid'; target.connection.requestHeaders.changed = 'new';
     const socket = new PassThrough();
     transport.listeners[0]!.accept(socket as unknown as Socket);
     assert.equal(channels.length, 1); assert.match(channels[0]!.url, /^wss:\/\/original\.invalid/);
     assert.equal(channels[0]!.options.headers.changed, undefined);
-    await transport.forwards.closeSession(pi.sessionId);
+    await transport.forwards.closeOwner(independent);
+    assert.equal(transport.forwards.inspect(independent).state, 'stopped');
+    transport.forwards.release(independent);
     assert.equal(transport.forwards.list(agent).length, 1);
     assert.equal(transport.listeners[0]!.listening, true);
     const closing = transport.forwards.closeOwner(agent); await turn();

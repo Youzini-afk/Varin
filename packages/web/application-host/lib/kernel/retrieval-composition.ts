@@ -16,8 +16,9 @@ import type { RetrievalQuery } from './protocol.generated.js';
 export interface RetrievalCompositionScope {
   threadId: string;
   projectId?: string;
-  /** The existing service-routing workspace identity is the canonical directory, not a ID. */
+  /** Workspace registration and configuration directory are distinct routing selectors. */
   workspaceId?: string;
+  configurationDirectory?: string;
   /** Original Run identity for the capability owner; never sent to the declaration extension. */
   query?: RetrievalQuery;
   /** Query-owned request session; private to the bound consumers, never extension arguments. */
@@ -74,9 +75,10 @@ export function createRetrievalComposition(runtime: ApplicationExtensionRuntime,
     async prepare(scope: RetrievalCompositionScope, signal?: AbortSignal): Promise<RetrievalPipelineBinding> {
       signal?.throwIfAborted();
       if (!scope.threadId.trim()) throw new Error('Retrieval requires a Thread identity');
-      const routingScope = { userId: 'default', sessionId: scope.threadId,
+      const routingScope = { userId: 'default', threadId: scope.threadId,
         ...(scope.projectId ? { projectId: scope.projectId } : {}),
-        ...(scope.workspaceId ? { workspaceId: scope.workspaceId } : {}) };
+        ...(scope.workspaceId ? { workspaceId: scope.workspaceId } : {}),
+        ...(scope.configurationDirectory ? { configurationDirectory: scope.configurationDirectory } : {}) };
       const scopeKey = JSON.stringify(routingScope);
       let cache = scopes.get(scopeKey);
       if (!cache) { cache = { requests: 0, candidateAdmission: 0, candidate: 0 }; scopes.set(scopeKey, cache); }

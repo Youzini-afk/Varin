@@ -8,16 +8,15 @@ import { createHashEmbedder, type SemanticEmbedder } from "../semantic/index.js"
 import { createEmbedScheduler } from "../semantic/embed-scheduler.js";
 import { createVectorCache } from "../semantic/vector-cache.js";
 import { remoteEmbeddingSpaceId } from "../semantic/identity.js";
-import { resolveInferenceBinding } from "../semantic/workspace-inference.js";
 import { openWorkspaceKnowledge, type KnowledgeStore } from "../store.js";
 import { createKnowledgeContextRuntime } from "../context-runtime.js";
 import { executeRecall } from "../../harness/recall-tool.js";
-import { createRecallSearchService } from "../../harness/harness-services.js";
 import { createKnowledgeVectorRuntime } from "./runtime.js";
 import { recallSources } from "./recall.js";
 import { knowledgeEmbedText } from "./identity.js";
 import { REMOTE_EMBEDDING_DEFAULT_MAX_TOKENS } from "@varin/protocol";
-import type { HarnessEmbedResult, HarnessResolvedEmbeddingBinding, PiSettingsSnapshot } from "@varin/protocol";
+import type { AgentSettingsSnapshot } from "@varin/application-client";
+import type { HarnessEmbedResult, HarnessResolvedEmbeddingBinding } from "@varin/protocol";
 
 const cleanup: Array<() => void | Promise<void>> = [];
 afterEach(async () => {
@@ -334,7 +333,7 @@ describe("production settings bind to public recall", () => {
   it("parses harness.embedding, binds the Host remote embedder, and returns the original knowledge", async () => {
     const dir = tempDir();
     const store = await openAuthority(dir, "prod-ws");
-    const snapshot: PiSettingsSnapshot = {
+    const snapshot: AgentSettingsSnapshot = {
       global: {
         harness: {
           embedding: {
@@ -365,10 +364,7 @@ describe("production settings bind to public recall", () => {
       },
       rerank: { status: "unconfigured" as const },
     };
-    const binding = resolveInferenceBinding(
-      { status: "fulfilled", value: snapshot },
-      { status: "fulfilled", value: described },
-    );
+    const binding = described;
     expect(binding.embedding.status).toBe("ready");
     const spaceId = remoteEmbeddingSpaceId({
       protocol: "openai-compatible",
@@ -424,26 +420,20 @@ describe("production settings bind to public recall", () => {
     cleanup.push(() => runtime.close());
     runtime.scheduleReconcile(store, "workspace", "prod-ws", "prod-ws");
     await runtime.waitForBuild("workspace", "prod-ws", "prod-ws");
-    const service = createRecallSearchService({
-      recallDepsProvider: async () => ({
-        workspaceStore: store,
-        userStore: null,
-        workspaceId: "prod-ws",
-        vectors: runtime,
-      }),
-    } as never);
-    const result = await service.handle({ query: "pineapple", k: 5 }, {
-      actor: { sessionId: "s", workspaceId: "prod-ws" },
-      signal: new AbortController().signal,
-    } as never);
-    expect(result.results[0]?.title).toContain("unique-token pineapple");
+    const result = await executeRecall("pineapple", 5, {
+      workspaceStore: store,
+      userStore: null,
+      workspaceId: "prod-ws",
+      vectors: runtime,
+    }, new AbortController().signal);
+    expect(result.results[0]?.node.payload?.content).toContain("unique-token pineapple");
     expect(result.results[0]?.via).toBe("vector");
     expect(result.details?.vector).toBe("used");
     expect(calls).toContain("document");
     expect(calls).toContain("query");
     const zone = createKnowledgeContextRuntime({
       getStore: async () => store,
-      recall: async ({ workspaceId, store: authority, query }) => {
+      recallForThread: async ({ workspaceId, store: authority, query }) => {
         const { results } = await executeRecall(query, 5, {
           workspaceStore: authority,
           userStore: null,
@@ -453,14 +443,9 @@ describe("production settings bind to public recall", () => {
         return results;
       },
     });
-    zone.bindSession("s", "prod-ws");
-    const material = await zone.zone2Material({
-      sessionId: "s",
-      sinceTurn: 0,
-      query: "pineapple",
-      contextUsage: null,
-    });
-    expect(material.material.knowledge.some((item) => item.title.includes("unique-token pineapple"))).toBe(true);
+    cleanup.push(() => zone.dispose());
+    const material = await zone.knowledgeForThread({ threadId: "native-recall-thread", scopeId: "prod-ws", query: "pineapple" });
+    expect(material.knowledge.some((item) => item.title.includes("unique-token pineapple"))).toBe(true);
   });
 
   it("pins work-associated rows on their own budget, not against ranked hits", async () => {

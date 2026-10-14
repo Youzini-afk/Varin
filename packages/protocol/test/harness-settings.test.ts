@@ -147,32 +147,12 @@ describe("harness settings", () => {
     assert.deepEqual(merged.models.worker, { providerId: "trusted", modelId: "user-model" });
   });
 
-  it("defaults background preparation on and maps the legacy memory opt-out", () => {
+  it("defaults background preparation on and respects the explicit user setting", () => {
     assert.deepEqual(mergeHarnessSettings({}, {}).context, {
       backgroundPreparation: true,
       preparationWaterline: 0.75,
       compactionRecovery: { enabled: true, streamIdleMs: 120_000, responseWaitMs: 300_000, maxRetries: 1 },
     });
-    assert.deepEqual(resolveHarnessContextSettings(undefined, { mode: "off" }), {
-      backgroundPreparation: false,
-      preparationWaterline: 0.75,
-      compactionRecovery: { enabled: true, streamIdleMs: 120_000, responseWaitMs: 300_000, maxRetries: 1 },
-    });
-    assert.deepEqual(resolveHarnessContextSettings(undefined, { shadowMode: false }), {
-      backgroundPreparation: false,
-      preparationWaterline: 0.75,
-      compactionRecovery: { enabled: true, streamIdleMs: 120_000, responseWaitMs: 300_000, maxRetries: 1 },
-    });
-    // A retired mode that kept background work on does not disable preparation.
-    assert.equal(
-      resolveHarnessContextSettings(undefined, { mode: "takeover" }).backgroundPreparation,
-      true,
-    );
-    // An explicit context setting wins over the legacy mapping.
-    assert.equal(
-      resolveHarnessContextSettings({ backgroundPreparation: true }, { mode: "off" }).backgroundPreparation,
-      true,
-    );
     assert.equal(
       mergeHarnessSettings({ context: { backgroundPreparation: false } }, {}).context.backgroundPreparation,
       false,
@@ -254,17 +234,17 @@ describe("harness settings", () => {
 
   it("rejects malformed context settings", () => {
     assert.throws(
-      () => resolveHarnessContextSettings({ backgroundPreparation: "yes" }, undefined),
+      () => resolveHarnessContextSettings({ backgroundPreparation: "yes" }),
       HarnessSettingsValidationError,
     );
     assert.throws(
-      () => resolveHarnessContextSettings({ preparationWaterline: 1.5 }, undefined),
+      () => resolveHarnessContextSettings({ preparationWaterline: 1.5 }),
       /between 0 and 1/,
     );
-    assert.throws(() => resolveHarnessContextSettings(false, undefined), /must be an object/);
-    assert.throws(() => resolveHarnessContextSettings({ compactionRecovery: { streamIdleMs: 0 } }, undefined), /streamIdleMs/);
-    assert.throws(() => resolveHarnessContextSettings({ compactionRecovery: { responseWaitMs: -1 } }, undefined), /responseWaitMs/);
-    assert.throws(() => resolveHarnessContextSettings({ compactionRecovery: { maxRetries: 1.5 } }, undefined), /maxRetries/);
+    assert.throws(() => resolveHarnessContextSettings(false), /must be an object/);
+    assert.throws(() => resolveHarnessContextSettings({ compactionRecovery: { streamIdleMs: 0 } }), /streamIdleMs/);
+    assert.throws(() => resolveHarnessContextSettings({ compactionRecovery: { responseWaitMs: -1 } }), /responseWaitMs/);
+    assert.throws(() => resolveHarnessContextSettings({ compactionRecovery: { maxRetries: 1.5 } }), /maxRetries/);
   });
 
   it("keeps compaction stall recovery user-owned and fills omitted settings", () => {

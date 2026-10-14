@@ -4,7 +4,7 @@ import type { ThreadIdentity, ThreadPlanAPI, ThreadPlanState } from '@varin/appl
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { MarkdownRenderer } from '@/components/chat/MarkdownRenderer';
-import { parseOverviewPlan } from '@/components/pi-session/harnessWorkOverviewPresentation';
+import { summarizePlan } from '@/lib/planSummary';
 import { subscribeVarinEvents } from '@/lib/varinEvents';
 
 type Props = { api: ThreadPlanAPI; identity: ThreadIdentity; contextRevision?: number };
@@ -99,7 +99,7 @@ function PlanCard({ api, identity, contextRevision, host }: Props & { host: numb
       } else setSaveError('Could not confirm the save. Your draft is kept; retry uses the same request.');
     } finally { if (generation === lifecycle.current && host === getRuntimeEndpointGeneration()) setSaving(false); }
   };
-  const summary = parseOverviewPlan(state?.plan?.content ?? '');
+  const summary = summarizePlan(state?.plan?.content ?? '');
   const changed = editing && basis && state && (basis.headId !== state.headId || basis.plan?.ref !== state.plan?.ref);
   return <section aria-label="Conversation plan" className="mx-auto max-w-3xl space-y-2 rounded border p-3 text-sm">
     <div className="font-medium">Conversation plan{summary.total > 0 ? ` · ${summary.done}/${summary.total} completed` : ''}</div>

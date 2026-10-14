@@ -28,7 +28,7 @@ const openStore = async (scope: KnowledgeScope = "workspace"): Promise<Knowledge
 };
 
 const scopeOfStoreId = (scopeId: string): KnowledgeScope => (
-  scopeId.startsWith("bot:") ? "bot" : scopeId.startsWith("session:") ? "session" : "workspace"
+  scopeId.startsWith("bot:") ? "bot" : scopeId.startsWith("thread:") ? "session" : "workspace"
 );
 
 describe("memory service (BC1)", () => {
@@ -43,8 +43,8 @@ describe("memory service (BC1)", () => {
       return opened;
     },
     userStore: async () => userStore,
-    sessionStoreIfPresent: async (sessionId) => stores.get(`session:${sessionId}`) ?? null,
-    ownerForSession: async (sessionId) => ({ scope: "workspace", ownerId: sessionId }),
+    threadStoreIfPresent: async (sessionId) => stores.get(`thread:${sessionId}`) ?? null,
+    ownerForThread: async (sessionId) => ({ scope: "workspace", ownerId: sessionId }),
   });
   const workspaceOwner: MemoryOwner = { scope: "workspace", ownerId: "ws-test" };
   const botOwner: MemoryOwner = { scope: "bot", ownerId: "bot-1" };
@@ -64,12 +64,12 @@ describe("memory service (BC1)", () => {
       content: "Release builds ship from the tagged commit only",
       trigger: "release",
       nature: "decision",
-      source: { kind: "user-mark", sessionId: "s-1" },
+      source: { kind: "user-mark", threadId: "thread:s-1" },
     });
     expect(result.created).toBe(true);
     expect(result.item.status).toBe("accepted");
     expect(result.item.nature).toBe("decision");
-    expect(result.item.source?.sessionId).toBe("s-1");
+    expect(result.item.source?.threadId).toBe("thread:s-1");
     const hits = await service().search(workspaceOwner, "tagged commit");
     expect(hits.some((hit) => hit.node.id === result.item.id)).toBe(true);
   });
@@ -148,10 +148,10 @@ describe("memory service (BC1)", () => {
     const svc = service();
     await svc.remember(botOwner, { content: "Handoff decision from the Bot" });
     await svc.remember({ scope: "user", ownerId: null }, { content: "Handoff preference from the user" });
-    await svc.remember({ scope: "session", ownerId: "s-1" }, { content: "Handoff note from this session" });
-    const hits = await svc.search(botOwner, "Handoff", 8, { sessionId: "s-1", includeShared: true });
+    await svc.remember({ scope: "session", ownerId: "thread:s-1" }, { content: "Handoff note from this session" });
+    const hits = await svc.search(botOwner, "Handoff", 8, { threadId: "thread:s-1", includeShared: true });
     expect(hits.map((hit) => hit.node.payload.scope)).toEqual(expect.arrayContaining(["bot", "user", "session"]));
-    const narrow = await svc.search(botOwner, "Handoff", 8, { sessionId: "s-1" });
+    const narrow = await svc.search(botOwner, "Handoff", 8, { threadId: "thread:s-1" });
     expect(narrow.map((hit) => hit.node.payload.scope)).toEqual(["bot"]);
   });
 

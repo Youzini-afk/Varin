@@ -67,6 +67,10 @@ const modelSelection = (value: unknown): ThreadModel => {
     ...(model.temperature === undefined ? {} : { temperature: model.temperature as number }) };
 };
 
+const inputBeforeAdmission = <T>(decode: () => T): T => {
+  try { return decode(); } catch (error) { throw new ThreadPreAdmissionError(error, 'thread-request-failed'); }
+};
+
 /** Mounted in the existing authenticated Application Host, shared by Web and Electron. */
 export function registerThreadRoutes(app: Express, adapter: ThreadAdapter, requireAuth: RequestHandler, research?: ThreadResearchAPI, computer?: ThreadComputerAPI, materials?: ThreadMaterialsAPI): void {
   const fields: Record<string, readonly string[]> = {
@@ -170,14 +174,15 @@ export function registerThreadRoutes(app: Express, adapter: ThreadAdapter, requi
           }
         } catch (error) {
           if (method.startsWith('computer/')) throw new ComputerError('computer-request-invalid', 'Choose an Agent Thread and branch; Stop also requires the exact Run shown in its Computer state');
-          throw error;
+          throw new ThreadPreAdmissionError(error, 'thread-request-failed');
         }
         response.json(await action(body, controller.signal));
       }
       catch (error) {
         // Errors from credentials/model services can contain upstream bodies. Do not echo them.
-        const sourceCode = sourceFailureCode(error);
-        if (sourceCode) { response.status(sourceCode === 'source_authority_denied' ? 403 : sourceCode === 'source_registration_missing' ? 404 : 409).json({ code: sourceCode, error: threadSourceFailureMessage(sourceCode) }); return; }
+        const sourceCode = sourceFailureCode(error instanceof ThreadPreAdmissionError ? error.reason : error);
+        const admission = error instanceof ThreadPreAdmissionError ? { admission: 'not_started' as const } : {};
+        if (sourceCode) { response.status(sourceCode === 'source_authority_denied' ? 403 : sourceCode === 'source_registration_missing' ? 404 : 409).json({ code: sourceCode, error: threadSourceFailureMessage(sourceCode), ...admission }); return; }
         const conflict = error instanceof PlanConflict || error instanceof KernelClientError && error.code === 'operation-error' && error.message.startsWith('operation error: conflict:');
         if (error instanceof ComputerError) { response.status(error.computerCode === 'computer-work-not-found' ? 404 : error.computerCode === 'computer-execution-stale' ? 409 : error.computerCode === 'computer-request-invalid' ? 400 : 503).json({ code: error.computerCode, error: error.message }); return; }
         const suppliedCode = conflict ? 'thread-conflict' : error instanceof HarnessServiceError ? error.harnessCode
@@ -186,7 +191,7 @@ export function registerThreadRoutes(app: Express, adapter: ThreadAdapter, requi
         const status = code.includes('conflict') ? 409 : code === 'denied' || code === 'forbidden' ? 403
           : code === 'not-found' ? 404 : code === 'unavailable' || code === 'timeout' ? 503 : 400;
         response.status(status).json({ code, error: 'Thread request could not be completed',
-          ...(error instanceof ThreadPreAdmissionError ? { admission: 'not_started' as const } : {}) });
+          ...admission });
       } finally { response.removeListener('close', closed); }
     });
   };
@@ -284,11 +289,14 @@ export function registerThreadRoutes(app: Express, adapter: ThreadAdapter, requi
   post('family/read', (body, signal) => adapter.familyRead(identity(body), familyRequest<FamilyReadParams>(body.request), signal));
   post('family/item', (body, signal) => adapter.familyItem(identity(body), familyRequest<FamilyItemParams>(body.request), signal));
   post('child/continue', (body, signal) => {
-    if (typeof body.text !== 'string') throw new Error('Input text is required');
-    const images = parseThreadImages(body.images);
-    return adapter.continueChild({ ...identity(body), key: text(body.key), previousRunId: text(body.previousRunId),
-      expectedHead: body.expectedHead === null ? null : text(body.expectedHead), text: body.text,
-      ...(images === undefined ? {} : { images }) }, signal);
+    const input = inputBeforeAdmission(() => {
+      if (typeof body.text !== 'string') throw new Error('Input text is required');
+      const images = parseThreadImages(body.images);
+      return { ...identity(body), key: text(body.key), previousRunId: text(body.previousRunId),
+        expectedHead: body.expectedHead === null ? null : text(body.expectedHead), text: body.text,
+        ...(images === undefined ? {} : { images }) };
+    });
+    return adapter.continueChild(input, signal);
   });
   post('child/executions', (body, signal) => adapter.childExecutions(identity(body), body.operationId === undefined ? undefined : text(body.operationId), signal));
   post('child/execution/report', (body, signal) => adapter.readChildExecutionReport(identity(body), text(body.executionId), text(body.itemId),
@@ -392,41 +400,47 @@ export function registerThreadRoutes(app: Express, adapter: ThreadAdapter, requi
   post('context/cancel', body => adapter.cancelContext(identity(body), text(body.runId)));
   post('context/resume', async body => { await adapter.resumeContext(identity(body), text(body.runId)); return {}; });
   post('submit', async body => {
-    const images = parseThreadImages(body.images);
-    if (typeof body.text !== 'string' || (!body.text.length && !images?.length)) throw new Error('Text or images are required');
-    const input: ThreadSubmit = { ...identity(body), key: text(body.key), text: body.text, ...(images === undefined ? {} : { images }),
-      expectedHead: body.expectedHead === null ? null : text(body.expectedHead),
-      model: modelSelection(body.model) };
-    if (body.source !== undefined) {
-      const source = object(body.source);
-      if (Object.keys(source).some(key => !['resourceOwner', 'workspaceId', 'executionWorkspaceId', 'branchId', 'revision', 'mode', 'tools', 'liveRoot', 'environmentRunId'].includes(key))) throw new Error('Unsupported source selection field');
-      if (source.mode !== 'fixed_branch' && source.mode !== 'materialized' && source.mode !== 'live_root') throw new Error('Invalid source mode');
-      if (source.environmentRunId !== undefined && source.mode !== 'materialized') throw new Error('Only a materialized source has an execution environment');
-      // The kernel resolves names against the same tool declarations used for admission.
-      if (!Array.isArray(source.tools) || source.tools.some(tool => typeof tool !== 'string' || !tool.length)) throw new Error('Tool names must be non-empty strings');
-      const base = { resourceOwner: parseSourceResourceOwner(source.resourceOwner), workspaceId: text(source.workspaceId), executionWorkspaceId: text(source.executionWorkspaceId),
-        tools: source.tools as NonNullable<ThreadSubmit['source']>['tools'] };
-      if (source.mode === 'live_root') {
-        if (source.branchId !== undefined || source.revision !== undefined) throw new Error('Live source cannot claim a fixed revision');
-        const root = object(source.liveRoot);
-        if (Object.keys(root).some(key => !['hostId', 'canonicalRoot', 'rootId'].includes(key))) throw new Error('Unsupported live root field');
-        input.source = { ...base, mode: 'live_root', liveRoot: { hostId: text(root.hostId), canonicalRoot: text(root.canonicalRoot), rootId: text(root.rootId) } };
-      } else {
-        if (source.liveRoot !== undefined) throw new Error('Fixed source cannot claim a live root');
-        input.source = { ...base, branchId: text(source.branchId), revision: revision(source.revision), mode: source.mode, ...(source.environmentRunId === undefined ? {} : { environmentRunId: text(source.environmentRunId) }) };
+    const input = inputBeforeAdmission(() => {
+      const images = parseThreadImages(body.images);
+      if (typeof body.text !== 'string' || (!body.text.length && !images?.length)) throw new Error('Text or images are required');
+      const input: ThreadSubmit = { ...identity(body), key: text(body.key), text: body.text, ...(images === undefined ? {} : { images }),
+        expectedHead: body.expectedHead === null ? null : text(body.expectedHead),
+        model: modelSelection(body.model) };
+      if (body.source !== undefined) {
+        const source = object(body.source);
+        if (Object.keys(source).some(key => !['resourceOwner', 'workspaceId', 'executionWorkspaceId', 'branchId', 'revision', 'mode', 'tools', 'liveRoot', 'environmentRunId'].includes(key))) throw new Error('Unsupported source selection field');
+        if (source.mode !== 'fixed_branch' && source.mode !== 'materialized' && source.mode !== 'live_root') throw new Error('Invalid source mode');
+        if (source.environmentRunId !== undefined && source.mode !== 'materialized') throw new Error('Only a materialized source has an execution environment');
+        // The kernel resolves names against the same tool declarations used for admission.
+        if (!Array.isArray(source.tools) || source.tools.some(tool => typeof tool !== 'string' || !tool.length)) throw new Error('Tool names must be non-empty strings');
+        const base = { resourceOwner: parseSourceResourceOwner(source.resourceOwner), workspaceId: text(source.workspaceId), executionWorkspaceId: text(source.executionWorkspaceId),
+          tools: source.tools as NonNullable<ThreadSubmit['source']>['tools'] };
+        if (source.mode === 'live_root') {
+          if (source.branchId !== undefined || source.revision !== undefined) throw new Error('Live source cannot claim a fixed revision');
+          const root = object(source.liveRoot);
+          if (Object.keys(root).some(key => !['hostId', 'canonicalRoot', 'rootId'].includes(key))) throw new Error('Unsupported live root field');
+          input.source = { ...base, mode: 'live_root', liveRoot: { hostId: text(root.hostId), canonicalRoot: text(root.canonicalRoot), rootId: text(root.rootId) } };
+        } else {
+          if (source.liveRoot !== undefined) throw new Error('Fixed source cannot claim a live root');
+          input.source = { ...base, branchId: text(source.branchId), revision: revision(source.revision), mode: source.mode, ...(source.environmentRunId === undefined ? {} : { environmentRunId: text(source.environmentRunId) }) };
+        }
       }
-    }
+      return input;
+    });
     return adapter.submit(input);
   });
   post('history/page', body => adapter.historyPage(identity(body), { headId: text(body.headId), beforeId: text(body.beforeId) }));
   post('snapshot', body => adapter.snapshot(identity(body)));
   post('usage', (body, signal) => adapter.usage(identity(body), signal));
   post('enqueue', async body => {
-    const selected = identity(body); await adapter.requireIdentity(selected);
-    if (!['boundary', 'interrupt', 'next_run'].includes(String(body.mode))) throw new Error('Invalid input mode');
-    const images = parseThreadImages(body.images);
-    if (typeof body.text !== 'string' || (!body.text.length && !images?.length)) throw new Error('Text or images are required');
-    return adapter.enqueue({ ...selected, key: text(body.key), text: body.text, ...(images === undefined ? {} : { images }), mode: body.mode as 'boundary' | 'interrupt' | 'next_run' });
+    const input = inputBeforeAdmission(() => {
+      const selected = identity(body);
+      if (!['boundary', 'interrupt', 'next_run'].includes(String(body.mode))) throw new Error('Invalid input mode');
+      const images = parseThreadImages(body.images);
+      if (typeof body.text !== 'string' || (!body.text.length && !images?.length)) throw new Error('Text or images are required');
+      return { ...selected, key: text(body.key), text: body.text, ...(images === undefined ? {} : { images }), mode: body.mode as 'boundary' | 'interrupt' | 'next_run' };
+    });
+    return adapter.enqueue(input);
   });
   post('media/read', (body, signal) => adapter.mediaRead(identity(body), {
     holder: object(body.holder) as unknown as OutputMediaHolder,

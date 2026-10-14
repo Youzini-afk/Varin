@@ -95,7 +95,7 @@ jobs:
           VARIN_TEST_KERNEL_EXECUTABLE: ${{ github.workspace }}/kernel/target/release/varin-kernel
         run: bun run test:rust
       - if: needs.changes.outputs.code == 'true'
-        run: bun run test:pi
+        run: bun run test:packages
       - if: needs.changes.outputs.code == 'true'
         name: Test desktop driver protocols
         run: python3 -m unittest discover -s packages/computer-driver/linux -p 'test_*.py'
@@ -182,7 +182,7 @@ jobs:
 
           verify_good() {
             test "$(basename "$(readlink -f "$ROOT/current")")" = "$GOOD_RELEASE"
-            node --input-type=module -e "const response=await fetch('http://127.0.0.1:${PORT}/health');const body=await response.json();if(!response.ok||body.status!=='ok'||body.releaseId!=='${GOOD_RELEASE}'||body.piRuntime?.ready!==true||body.piRuntime?.source!=='bundled')throw new Error(JSON.stringify(body));"
+            node --input-type=module -e "const response=await fetch('http://127.0.0.1:${PORT}/health');const body=await response.json();if(!response.ok||body.status!=='ok'||body.releaseId!=='${GOOD_RELEASE}'||body.kernel?.ready!==true)throw new Error(JSON.stringify(body));"
           }
 
           node scripts/build-cloud-runtime.mjs \
@@ -310,4 +310,4 @@ jobs:
           fi
 
           verify_good
-      - run: bun run test:pi:dist
+      - run: bun run test:packages:dist

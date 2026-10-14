@@ -549,3 +549,107 @@ fn local_unknown_entry_keeps_the_original_goal_barrier_and_late_receipt_refines_
     }).is_err(), "the local unknown-entry case does not relax HTTP owner evidence");
     let root = f.root.clone(); drop(f.db); std::fs::remove_dir_all(root).unwrap();
 }
+
+
+fn thread_usage(db: &Catalog, thread: &str, branch: &str) -> varin_runtime::catalog::usage::ThreadUsage {
+    db.capture_thread_usage(&varin_runtime::catalog::usage::ThreadUsageParams {
+        thread_id: thread.into(), branch_id: branch.into(),
+    }).unwrap().load(&|| false).unwrap()
+}
+
+#[test]
+fn thread_usage_counts_original_inference_once_and_keeps_missing_distinct_from_zero() {
+    let mut f = Fixture::new(100);
+    let first = f.admit(1); f.db.dispatch_inference(&first).unwrap();
+    let pending = thread_usage(&f.db, "thread", "branch");
+    let auxiliary = pending.rows.iter().find(|row| row.kind == "auxiliary").unwrap();
+    assert_eq!(auxiliary.pending_requests, 1);
+    assert_eq!(auxiliary.output_tokens.known, None);
+    assert_eq!(auxiliary.output_tokens.missing, 1);
+    let second = f.admit(2); f.db.dispatch_inference(&second).unwrap();
+    let preparation = f.admit_kind(3, InferenceRequestKind::Preparation);
+    f.db.dispatch_inference(&preparation).unwrap();
+    let undelivered = f.admit(4); f.db.dispatch_inference(&undelivered).unwrap();
+    let receipt = f.settle(&first, true, None);
+    let body = f.db.prepare_inference_content().write(&receipt.response).unwrap();
+    f.db.settle_inference(&receipt, body).unwrap(); // Original receipt replay never adds a request.
+    f.settle(&second, true, Some(0));
+    f.settle(&undelivered, false, None);
+    let usage = thread_usage(&f.db, "thread", "branch");
+    assert_eq!(usage.rows.len(), 2);
+    let main = usage.rows.iter().find(|row| row.kind == "conversation").unwrap();
+    assert_eq!(main.requests, 1); assert_eq!(main.input_tokens.known.as_deref(), Some("3"));
+    let auxiliary = usage.rows.iter().find(|row| row.kind == "auxiliary").unwrap();
+    assert_eq!(auxiliary.requests, 2); assert_eq!(auxiliary.pending_requests, 0);
+    assert_eq!(auxiliary.input_tokens.known.as_deref(), Some("22"));
+    assert_eq!(auxiliary.output_tokens.known.as_deref(), Some("0"));
+    assert_eq!(auxiliary.output_tokens.missing, 1);
+    assert_eq!(auxiliary.cached_input_tokens.known, None);
+    assert_eq!(usage.not_dispatched_requests, 1);
+    let root = f.root.clone(); drop(f.db); std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn thread_usage_is_branch_scoped_and_snapshot_cancellation_does_not_mutate_execution() {
+    let mut f = Fixture::new(100);
+    let request = f.admit(1); f.db.dispatch_inference(&request).unwrap();
+    let frozen = f.db.capture_thread_usage(&varin_runtime::catalog::usage::ThreadUsageParams {
+        thread_id: "thread".into(), branch_id: "branch".into(),
+    }).unwrap();
+    f.settle(&request, true, Some(7));
+    assert_eq!(frozen.load(&|| false).unwrap().rows.iter().find(|row| row.kind == "auxiliary").unwrap().pending_requests, 1);
+    assert_eq!(thread_usage(&f.db, "thread", "branch").rows.iter().find(|row| row.kind == "auxiliary").unwrap().output_tokens.known.as_deref(), Some("7"));
+    let original = f.db.model_step("request").unwrap().request;
+    let head = original["view"]["binding"]["history_range"]["leaf_id"].as_str();
+    f.db.fork_branch("branch", "fork", head).unwrap();
+    assert!(thread_usage(&f.db, "thread", "fork").rows.is_empty(), "inherited history does not duplicate execution costs");
+    f.db.create_thread("other-thread", "other-branch").unwrap();
+    assert!(thread_usage(&f.db, "other-thread", "other-branch").rows.is_empty());
+    assert!(f.db.capture_thread_usage(&varin_runtime::catalog::usage::ThreadUsageParams {
+        thread_id: "other-thread".into(), branch_id: "branch".into(),
+    }).is_err());
+    let read = f.db.capture_thread_usage(&varin_runtime::catalog::usage::ThreadUsageParams {
+        thread_id: "thread".into(), branch_id: "branch".into(),
+    }).unwrap();
+    assert!(matches!(read.load(&|| true), Err(RuntimeError::DispatchCancelled)));
+    assert_eq!(thread_usage(&f.db, "thread", "branch").rows.iter().map(|row| row.requests).sum::<u64>(), 2);
+    let root = f.root.clone(); drop(f.db); std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn thread_usage_ignores_mirrored_model_steps_and_preserves_large_receipt_totals() {
+    let mut f = Fixture::new(100);
+    let original = f.db.model_step("request").unwrap().request;
+    for index in 0..2 {
+        let id = format!("large-{index}");
+        f.db.prepare_model_step(&id, &f.run, f.db.epoch(), original.clone()).unwrap();
+        f.db.dispatch_model_step(&id, f.db.epoch()).unwrap();
+        f.db.settle_model_step(&id, f.db.epoch(), ModelStepState::Completed, vec![], Some(serde_json::to_value(UsageReceipt {
+            measurement: UsageMeasurement::Actual, input_tokens: Some(u64::MAX), output_tokens: Some(0), ..Default::default()
+        }).unwrap())).unwrap();
+    }
+    let mut mirrored = original.clone();
+    mirrored["view"]["origin"] = serde_json::to_value(RequestOrigin::AuxiliaryInference {
+        operation_id: "original-inference".into(), parent_operation_id: f.context.operation_id.clone(), purpose: "web".into(),
+    }).unwrap();
+    f.db.prepare_model_step("mirrored", &f.run, f.db.epoch(), mirrored).unwrap();
+    f.db.dispatch_model_step("mirrored", f.db.epoch()).unwrap();
+    f.db.settle_model_step("mirrored", f.db.epoch(), ModelStepState::Completed, vec![], Some(serde_json::to_value(UsageReceipt {
+        measurement: UsageMeasurement::Actual, input_tokens: Some(100), output_tokens: Some(100), ..Default::default()
+    }).unwrap())).unwrap();
+    f.db.prepare_model_step("estimated", &f.run, f.db.epoch(), original).unwrap();
+    f.db.dispatch_model_step("estimated", f.db.epoch()).unwrap();
+    f.db.settle_model_step("estimated", f.db.epoch(), ModelStepState::Interrupted, vec![], Some(serde_json::to_value(UsageReceipt {
+        measurement: UsageMeasurement::Estimated, input_tokens: Some(9), ..Default::default()
+    }).unwrap())).unwrap();
+    let usage = thread_usage(&f.db, "thread", "branch");
+    assert_eq!(usage.rows.len(), 2);
+    let actual = usage.rows.iter().find(|row| row.measurement == UsageMeasurement::Actual).unwrap();
+    assert_eq!(actual.requests, 3);
+    assert_eq!(actual.input_tokens.known.as_deref(), Some("36893488147419103233"));
+    assert_eq!(actual.output_tokens.known.as_deref(), Some("2"));
+    let estimated = usage.rows.iter().find(|row| row.measurement == UsageMeasurement::Estimated).unwrap();
+    assert_eq!(estimated.requests, 1); assert_eq!(estimated.input_tokens.known.as_deref(), Some("9"));
+    assert_eq!(estimated.output_tokens.known, None);
+    let root = f.root.clone(); drop(f.db); std::fs::remove_dir_all(root).unwrap();
+}

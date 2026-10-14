@@ -124,7 +124,7 @@ async function fixture(reply: (body: Record<string, unknown>, response: ServerRe
   const close = async () => { if (closed) return; closed = true; await extensions.stop(); if (!crashed) await storage.dispose(); await documents.dispose(); await kernel.close(); };
   cleanups.push(close);
 
-  const adapter = new ThreadAdapter(new AgentRuntimeClient(kernel, undefined, { prepare: ({threadId, requiredBinding}, signal) => createAgentPolicy(extensions)({sessionId:threadId,projectId:'selected-project', ...(requiredBinding ? { requiredBinding } : {})}, signal), observe: ({threadId}, changed, signal) => createAgentPolicy(extensions).observe({sessionId:threadId,projectId:'selected-project'}, changed, signal) }, undefined, undefined, undefined, (id, signal) => documents.admitWorkspaceRegistration(id, signal)), {
+  const adapter = new ThreadAdapter(new AgentRuntimeClient(kernel, undefined, { prepare: ({threadId, requiredBinding}, signal) => createAgentPolicy(extensions)({threadId:threadId,projectId:'selected-project', ...(requiredBinding ? { requiredBinding } : {})}, signal), observe: ({threadId}, changed, signal) => createAgentPolicy(extensions).observe({threadId:threadId,projectId:'selected-project'}, changed, signal) }, undefined, undefined, undefined, (id, signal) => documents.admitWorkspaceRegistration(id, signal)), {
     resolveModel: async selection => {
       if (selection.providerId !== 'fixture-provider' || selection.modelId !== 'fixture-model') throw new Error('unselected model');
       return { configuration, credentialOwner: owner };
@@ -156,7 +156,7 @@ async function installExample(f: Awaited<ReturnType<typeof fixture>>) {
   await build({ entryPoints: [path.join(repository, 'examples/extensions/evidence-policy/host.ts')], bundle: true, platform: 'node', format: 'cjs', outfile: path.join(example, 'host.cjs'), alias: { '@varin/extension-sdk': path.join(repository, 'packages/extension-sdk/dist/index.js') } });
   await f.extensions.installOrStage({ expectedRevision: (await f.extensions.state()).catalog.revision, source: { kind: 'local', display: 'Real example', specifier: example } });
 }
-async function route(f: Awaited<ReturnType<typeof fixture>>, providerKey: string, scope: {projectId?: string; sessionId?: string}) {
+async function route(f: Awaited<ReturnType<typeof fixture>>, providerKey: string, scope: {projectId?: string; threadId?: string}) {
   return f.extensions.upsertServiceRoutingRule({ expectedRevision: (await f.extensions.routing.read()).document.revision,
     rule: { allowFallback: false, providerKeys: [providerKey], scope, serviceId: 'varin.agent.policy', version: 4 } });
 }

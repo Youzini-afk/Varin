@@ -1,4 +1,4 @@
-import { getRuntimeKey } from '@varin/application-client';
+import { threadHostKey as getRuntimeKey } from '@/stores/useThreadStore';
 import { resourceIdFromWorkspacePath } from '@/lib/documents/path';
 import type { DocumentIdentity } from '@/lib/documents/types';
 import type { AgentFileChangeHint, AgentFileChangeKind, ToolFileChange } from './types';
@@ -117,7 +117,7 @@ const recordAgentFileChangeHint = (hint: AgentFileChangeHint): AgentFileChangeHi
   if (
     existing
     && existing.runtimeKey === hint.runtimeKey
-    && existing.sessionId === hint.sessionId
+    && existing.threadKey === hint.threadKey
     && existing.toolCallId === hint.toolCallId
   ) {
     return existing;
@@ -130,7 +130,7 @@ const recordAgentFileChangeHint = (hint: AgentFileChangeHint): AgentFileChangeHi
 
 export const recordHintsFromToolCall = (input: {
   runtimeKey: string;
-  sessionId: string;
+  threadKey: string;
   toolCallId: string;
   toolName: string;
   args: unknown;
@@ -148,7 +148,7 @@ export const recordHintsFromToolCall = (input: {
       : undefined;
     const hint: AgentFileChangeHint = {
       runtimeKey: input.runtimeKey,
-      sessionId: input.sessionId,
+      threadKey: input.threadKey,
       toolCallId: input.toolCallId,
       workspaceId: input.workspaceId,
       resourceId,

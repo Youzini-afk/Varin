@@ -53,30 +53,6 @@
         "scripts/**/*.{js,cjs,mjs}"
       ]
     },
-    "packages/pi-host": {
-      "entry": [
-        "src/index.ts",
-        "src/main.ts",
-        "src/host-bootstrap.ts",
-        "src/pi-sdk-resolver.ts",
-        "test/**/*.{test,spec}.{ts,mjs}"
-      ],
-      "project": [
-        "src/**/*.ts",
-        "test/**/*.{ts,mjs}"
-      ]
-    },
-    "packages/runtime-broker": {
-      "entry": [
-        "src/index.ts",
-        "src/core.ts",
-        "test/**/*.{test,spec}.{ts,mjs}"
-      ],
-      "project": [
-        "src/**/*.ts",
-        "test/**/*.{ts,mjs}"
-      ]
-    },
     "packages/extension-builtins": {
       "entry": [
         "src/index.ts",

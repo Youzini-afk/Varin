@@ -2,7 +2,6 @@ import React from 'react';
 import { VARIN_WORKBENCH_BOT_PROFILE_ID } from '@varin/extension-contract';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { WorkbenchProfileSwitcher } from '@/components/layout/WorkbenchProfileSwitcher';
-import { ChatView } from '@/components/views/ChatView';
 import { Icon } from '@/components/icon/Icon';
 import { Button } from '@/components/ui/button';
 import { useI18n } from '@/lib/i18n';
@@ -11,7 +10,8 @@ import { archiveBot, changeBotState, createBot, ensureBotEntry, listBots, listBo
 import { useWorkbenchProfileId } from '@/lib/workbench/profile-context';
 import { ThreadConversation } from '@/components/thread/ThreadConversation';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
-import { usePiSessionStore } from '@/stores/usePiSessionStore';
+import { useThreadStore } from '@/stores/useThreadStore';
+import { getRuntimeEndpointGeneration } from '@varin/application-client';
 import { useUIStore } from '@/stores/useUIStore';
 import { useDeviceInfo } from '@/lib/device';
 import { BotNameDialog } from '@/components/sections/bots/BotNameDialog';
@@ -32,7 +32,7 @@ export const BotWorkspaceShell: React.FC<Record<string, unknown>> = () => {
   // Candidate shells render before profile commit. They must never create a Bot
   // or change the shared session selection during that hidden render.
   const committed = useWorkbenchProfileId() === VARIN_WORKBENCH_BOT_PROFILE_ID;
-  const runtimeKey = usePiSessionStore((state) => state.runtimeKey);
+  const runtimeKey = useThreadStore((state) => state.hostKey);
   return <BotWorkspace key={runtimeKey} committed={committed} />;
 };
 
@@ -41,7 +41,8 @@ const BotWorkspace: React.FC<{ committed: boolean }> = ({ committed }) => {
   const { isMobile } = useDeviceInfo();
   const { threads } = useRuntimeAPIs();
   const navigation = useBotNavigation();
-  const currentSessionId = usePiSessionStore((state) => state.currentSessionId);
+  const catalogThread = useThreadStore(state => state.threads.find(thread => thread.thread_id === navigation.entry?.threadId));
+  const appliedNavigation = React.useRef<string | null>(null);
   const settingsOpen = useUIStore((state) => state.isSettingsDialogOpen);
   const [bots, setBots] = React.useState<BotSummary[] | null>(null);
   const [showArchived, setShowArchived] = React.useState(false);
@@ -53,13 +54,12 @@ const BotWorkspace: React.FC<{ committed: boolean }> = ({ committed }) => {
   const [actionBusy, setActionBusy] = React.useState<string | null>(null);
   const [nameDialog, setNameDialog] = React.useState<{ mode: 'create' } | { mode: 'rename'; bot: BotSummary } | null>(null);
   const [nameDraft, setNameDraft] = React.useState('');
-  const [createRuntime, setCreateRuntime] = React.useState<'pi' | 'agent'>('pi');
   const [deleting, setDeleting] = React.useState<BotSummary | null>(null);
   const [revision, refresh] = React.useReducer((value: number) => value + 1, 0);
   const opening = React.useRef<AbortController | null>(null);
   const selected = bots?.find((bot) => bot.id === selectedId);
   const profileModelKey = JSON.stringify(selected?.model ?? null);
-  const selectedRoot = selected?.entry.runtime === 'agent' && navigation.botId === selected.id && sameBotEntry(navigation.entry, selected.entry) ? selected.id : null;
+  const selectedRoot = selected && navigation.botId === selected.id && sameBotEntry(navigation.entry, selected.entry) ? selected.id : null;
   const [entryModel, setEntryModel] = React.useState<{ botId: string; profileModelKey: string; model: BotModelSelection | null }>();
   const readOnly = Boolean(selected?.archived || selected?.deletion || (selected?.activity && selected.activity.state !== 'awake'));
   const visibleBots = bots?.filter((bot) => bot.archived === showArchived);
@@ -67,9 +67,7 @@ const BotWorkspace: React.FC<{ committed: boolean }> = ({ committed }) => {
   botsRef.current = bots;
   const alive = React.useRef(true);
   const work = workResult?.botId === selectedId ? workResult.items : null;
-  const entryStreaming = usePiSessionStore((state) => (
-    selected?.entry.runtime === 'pi' && selected.entry.sessionId ? state.records[selected.entry.sessionId]?.snapshot?.isStreaming === true : false
-  ));
+
 
   React.useEffect(() => { alive.current = true; return () => { alive.current = false; opening.current?.abort(); }; }, []);
   React.useEffect(() => committed ? subscribeVarinEvents((event) => {
@@ -86,7 +84,6 @@ const BotWorkspace: React.FC<{ committed: boolean }> = ({ committed }) => {
       setError(null);
       setSelectedId((previous) => active.find((bot) => bot.id === useBotNavigation.getState().botId)?.id
         ?? active.find((bot) => bot.id === previous)?.id
-        ?? active.find((bot) => bot.entry.runtime === 'pi' && bot.entry.sessionId === usePiSessionStore.getState().currentSessionId)?.id
         ?? active[0]?.id ?? null);
     }).catch((cause: unknown) => {
       if (!controller.signal.aborted) setError(cause instanceof Error ? cause.message : String(cause));
@@ -98,18 +95,15 @@ const BotWorkspace: React.FC<{ committed: boolean }> = ({ committed }) => {
     opening.current?.abort();
     const controller = new AbortController();
     opening.current = controller;
-    const runtimeKey = usePiSessionStore.getState().runtimeKey;
+    const host = getRuntimeEndpointGeneration();
     setBusy(true);
     setError(null);
     try {
       const known = botsRef.current?.find((bot) => bot.id === botId);
       if (known?.deletion) return;
       const inactive = known && (known.archived || (known.activity && known.activity.state !== 'awake'));
-      if (inactive && known.entry.runtime === 'pi' && !known.entry.sessionId) return;
-      const { bot, entry, model } = inactive && (known.entry.runtime === 'agent' || known.entry.sessionId)
-        ? { bot: known, model: known.model, entry: known.entry.runtime === 'agent' ? known.entry : { runtime: 'pi' as const, sessionId: known.entry.sessionId! } }
-        : await ensureBotEntry(botId, controller.signal);
-      if (controller.signal.aborted || usePiSessionStore.getState().runtimeKey !== runtimeKey) return;
+      const { bot, entry, model } = inactive ? { bot: known, model: known.model, entry: known.entry } : await ensureBotEntry(botId, controller.signal);
+      if (controller.signal.aborted || getRuntimeEndpointGeneration() !== host) return;
       setBots((list) => list?.map((item) => item.id === bot.id ? bot : item) ?? [bot]);
       await openBotConversation(bot.id, entry, bot.homeDir, model);
     } catch (cause) {
@@ -134,11 +128,18 @@ const BotWorkspace: React.FC<{ committed: boolean }> = ({ committed }) => {
       if (!controller.signal.aborted) setError(cause instanceof Error ? cause.message : String(cause));
     });
     return () => controller.abort();
-  }, [committed, selectedId, settingsOpen, revision, entryStreaming]);
+  }, [committed, selectedId, settingsOpen, revision]);
 
   React.useEffect(() => {
-    if (navigation.botId && bots?.some(bot => bot.id === navigation.botId && bot.archived === showArchived)) setSelectedId(navigation.botId);
-  }, [navigation.botId, bots, showArchived]);
+    if (!navigation.botId || !navigation.entry) return;
+    const key = JSON.stringify([navigation.botId, navigation.entry]);
+    if (appliedNavigation.current === key) return;
+    const target = bots?.find(bot => bot.id === navigation.botId);
+    if (!target && navigation.archived === undefined) return;
+    appliedNavigation.current = key;
+    setShowArchived(target?.archived ?? navigation.archived!);
+    setSelectedId(navigation.botId);
+  }, [navigation.botId, navigation.entry, navigation.archived, bots]);
 
   React.useEffect(() => {
     if (!committed || !selectedRoot || readOnly) return;
@@ -154,7 +155,6 @@ const BotWorkspace: React.FC<{ committed: boolean }> = ({ committed }) => {
   const openCreateDialog = () => {
     setError(null);
     setNameDraft('');
-    setCreateRuntime('pi');
     setNameDialog({ mode: 'create' });
   };
 
@@ -166,6 +166,7 @@ const BotWorkspace: React.FC<{ committed: boolean }> = ({ committed }) => {
 
   const saveName = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+    const host = getRuntimeEndpointGeneration();
     const dialog = nameDialog;
     const trimmed = nameDraft.trim();
     if (!dialog || !trimmed) return;
@@ -174,8 +175,9 @@ const BotWorkspace: React.FC<{ committed: boolean }> = ({ committed }) => {
     setError(null);
     try {
       const bot = dialog.mode === 'create'
-        ? await createBot({ name: trimmed, runtime: createRuntime })
+        ? await createBot({ name: trimmed })
         : await updateBot(dialog.bot.id, { name: trimmed });
+      if (!alive.current || host !== getRuntimeEndpointGeneration()) return;
       setBots((list) => dialog.mode === 'create'
         ? [...(list ?? []), bot]
         : list?.map((item) => item.id === bot.id ? bot : item) ?? [bot]);
@@ -194,15 +196,15 @@ const BotWorkspace: React.FC<{ committed: boolean }> = ({ committed }) => {
     if (action === 'profile' || action === 'memory') { setDetails({ id: bot.id, name: bot.name, tab: action }); return; }
     setActionBusy(`${action}:${bot.id}`);
     setError(null);
-    const runtimeKey = usePiSessionStore.getState().runtimeKey;
+    const host = getRuntimeEndpointGeneration();
     try {
       const updated = action === 'pin' ? await updateBot(bot.id, { pinned: !bot.pinnedAt })
         : action === 'archive' ? await archiveBot(bot.id) : await changeBotState(bot.id, action);
-      if (!alive.current || usePiSessionStore.getState().runtimeKey !== runtimeKey) return;
+      if (!alive.current || getRuntimeEndpointGeneration() !== host) return;
       setBots((list) => list?.map((item) => item.id === updated.id ? updated : item) ?? [updated]);
       refresh();
     } catch (cause) {
-      if (alive.current && usePiSessionStore.getState().runtimeKey === runtimeKey) setError(cause instanceof Error ? cause.message : String(cause));
+      if (alive.current && getRuntimeEndpointGeneration() === host) setError(cause instanceof Error ? cause.message : String(cause));
     } finally {
       if (alive.current) setActionBusy(null);
     }
@@ -214,9 +216,8 @@ const BotWorkspace: React.FC<{ committed: boolean }> = ({ committed }) => {
     else { useBotNavigation.setState({ botId: null, entry: null }); setSelectedId(botId); }
   };
   const selectedEntry = navigation.botId === selectedId ? navigation.entry : null;
-  const ownsConversation = Boolean(selectedEntry && (selectedEntry.runtime === 'agent'
-    ? selected?.entry.runtime === 'agent' && (selectedEntry.threadId === selected.entry.threadId || work?.some(item => sameBotEntry(botWorkEntry(item), selectedEntry)))
-    : currentSessionId === selectedEntry.sessionId && (selected?.entry.runtime === 'pi' && currentSessionId === selected.entry.sessionId || work?.some(item => item.runtime === 'pi' && item.sessionId === currentSessionId))));
+  const ownsConversation = Boolean(selectedEntry && selected && (selectedEntry.threadId === selected.entry.threadId || work?.some(item => sameBotEntry(botWorkEntry(item), selectedEntry))
+    || catalogThread?.bot_id === selected.id && catalogThread.branches.some(branch => branch.branch_id === selectedEntry.branchId)));
   const rowClass = 'flex w-full items-center gap-2 rounded-md px-2 py-2 text-left typography-ui-label transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary';
 
   const navigator = () => (
@@ -276,12 +277,11 @@ const BotWorkspace: React.FC<{ committed: boolean }> = ({ committed }) => {
       <span className="flex-1 text-destructive">{error}</span>
       <Button variant="ghost" size="sm" onClick={() => { refresh(); if (selectedId) void openEntry(selectedId); }}>{t('research-workbench.retry')}</Button>
     </div> : null}
-    {ownsConversation && !busy ? <div className="min-h-0 flex-1">{selectedEntry?.runtime === 'agent' ? threads
-      ? <ThreadConversation key={`${selectedEntry.threadId}:${selectedEntry.branchId}`} api={threads} identity={selectedEntry} onWorkChanged={refresh}
+    {ownsConversation && !busy && active ? <div className="min-h-0 flex-1">{selectedEntry && threads
+      ? <ThreadConversation key={`${selectedEntry.threadId}:${selectedEntry.branchId}`} api={threads} identity={selectedEntry} initialWorkspacePath={selected?.homeDir} onWorkChanged={refresh}
         preferredModel={selectedRoot ? entryModel?.botId === selectedRoot && entryModel.profileModelKey === profileModelKey ? entryModel.model : null : undefined} readOnly={readOnly}
           onBranchCreated={entry => { if (selected) void openBotConversation(selected.id, entry); refresh(); }} />
-      : <p role="alert">Agent runtime unavailable</p>
-      : <ChatView active={active} readOnly={readOnly} autoOpenDraft={false} />}</div> : (
+      : <p role="alert">Conversation service unavailable</p>}</div> : (
       <div className="flex flex-1 flex-col items-center justify-center gap-4 px-6 text-center">
         <Icon name="robot" className="size-9 text-muted-foreground" />
         <h1 className="typography-title">Varin bot</h1>
@@ -289,15 +289,13 @@ const BotWorkspace: React.FC<{ committed: boolean }> = ({ committed }) => {
         {visibleBots?.length === 0 ? <>
           <p className="typography-body text-muted-foreground">{t(showArchived ? 'settings.bots.archivedEmpty' : 'settings.bots.empty')}</p>
           {!showArchived ? <Button disabled={busy || actionBusy !== null} onClick={openCreateDialog}>{t('settings.bots.create')}</Button> : null}
-        </> : selected && !selected.deletion && !busy && (!readOnly || selected.entry.runtime === 'agent' || selected.entry.sessionId) ? <Button onClick={() => { void openEntry(selected.id); }}>{t('settings.bots.openEntry')}</Button> : null}
+        </> : selected && !selected.deletion && !busy && selected.entry ? <Button onClick={() => { void openEntry(selected.id); }}>{t('settings.bots.openEntry')}</Button> : null}
       </div>
     )}
     <BotNameDialog
       open={nameDialog !== null}
       title={nameDialog?.mode === 'rename' ? t('settings.bots.rename') : t('settings.bots.create')}
       name={nameDraft}
-      runtime={createRuntime}
-      onRuntimeChange={nameDialog?.mode === 'create' ? setCreateRuntime : undefined}
       busy={actionBusy !== null}
       error={error}
       onNameChange={setNameDraft}

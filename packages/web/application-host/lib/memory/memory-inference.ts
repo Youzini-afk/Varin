@@ -35,7 +35,7 @@ export interface MemoryWork<R = unknown> {
 export interface MemorySelectionRequest {
   requestKey: string;
   retryOf?: string;
-  conversation: { runtime: 'pi'; sessionId: string } | { runtime: 'agent'; threadId: string; branchId: string; headId: string };
+  conversation: { runtime: 'agent'; threadId: string; branchId: string; headId: string };
   sources: MemorySourceSpan[];
 }
 export class MemoryInferenceError extends Error {

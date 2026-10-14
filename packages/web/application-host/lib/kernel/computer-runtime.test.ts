@@ -12,9 +12,6 @@ import { COMPUTER_CAPABILITY, COMPUTER_TOOL_DECLARATIONS, VARIN_BUILTIN_COMPUTER
 import { createComputerService, type ComputerServiceOptions } from '../computer/computer-service.js';
 import { registerBotRoutes } from '../bots/bot-routes.js';
 import type { BotService } from '../bots/bot-service.js';
-import { registerComputerServices } from '../harness/computer-services.js';
-import type { HarnessServiceContext } from '../harness/router.js';
-import type { HarnessServiceHost } from '../harness/service-host.js';
 import { registerComputerRoutes } from '../computer/computer-routes.js';
 import type { ComputerDriverSession, DriverResponse, DriverRequest } from '../computer/driver-host.js';
 import { parseComputerAutomationInvalidation, type ComputerWorkRef, type ComputerAutomationInvalidation } from '@varin/protocol';
@@ -108,11 +105,9 @@ async function fixture(records = new Map<string, KernelRecordResult>(), remote: 
     onControlEvent: async event => { await computer.acceptControlEvent(event); },
     onControlEventCancel: command => computer.cancelControlEvents(command),
     onAutomationInvalidated: event => { invalidations.push(parseComputerAutomationInvalidation(event)); },
-    resolveActor: async ref => ref.runtime === 'agent' ? (await computer.resolve(ref)).actor : {
-      execution: { work: ref, runId: 'pi-run' }, rootWork: ref, rootExecution: { work: ref, runId: 'pi-run' }, registry: { scopeId: 'scope', threadId: 'pi' }, label: 'Pi', roleAccess: { kind: 'pi-role', readOnly: false } },
-    resolveScope: async ref => ref.runtime === 'agent' ? (await computer.resolve(ref)).scope : null,
-    resolveWork: remote.resolveWork ?? (async ref => ref.runtime === 'agent' ? ref.branchId === `${ref.threadId}-branch` ? { scopeId: 'bot:bot', threadId: ref.threadId } : null
-      : { scopeId: 'scope', threadId: 'pi' }),
+    resolveActor: async ref => (await computer.resolve(ref)).actor,
+    resolveScope: async ref => (await computer.resolve(ref)).scope,
+    resolveWork: remote.resolveWork ?? (async ref => ref.branchId === `${ref.threadId}-branch` ? { scopeId: 'bot:bot', threadId: ref.threadId } : null),
   });
   const computer = createComputerRuntime({ kernel: kernel as never, runtime: runtime as never, computers, enabled: async () => enabled });
   async function invoke(method: string, args: Record<string, unknown>, threadId = 'root', policy = false, signal = new AbortController().signal, parentOperationId?: string) {
@@ -152,7 +147,7 @@ test('obsolete desktop stays visible and fenced without poisoning healthy work r
     const payload = JSON.parse(original.payloadJson);
     for (const [id, runtime] of [
       ['obsolete', { runtimeVersion: 1, usage: { sessionId: 'legacy', at: '2026-10-11' } }],
-      ['malformed', { runtimeVersion: 4, interrupted: { id: 'old', actor: { sessionId: 'legacy' } } }],
+      ['malformed', { runtimeVersion: 5, interrupted: { id: 'old', actor: { sessionId: 'legacy' } } }],
     ] as const) f.records.set(`computer.desktop:${id}`, { ...structuredClone(original), recordId: `computer.desktop:${id}`,
       payloadJson: JSON.stringify({ ...payload, id, label: id, ...runtime }) });
     const catalog = await f.computers.list();
@@ -242,7 +237,7 @@ test('actual release proof survives a failed durable clear and retries without a
   } finally { await f.cleanup(); }
 });
 
-test('target restart retains original peer assignment Unknown and rejects Pi, Agent and peer replacement control', async () => {
+test('target restart retains original peer assignment Unknown and rejects native and peer replacement control', async () => {
   const f = await fixture();
   let restarted: Awaited<ReturnType<typeof fixture>> | undefined;
   try {
@@ -255,8 +250,7 @@ test('target restart retains original peer assignment Unknown and rejects Pi, Ag
     await restarted.computers.probe('local-console');
     const fresh = restarted;
     await assert.rejects(fresh.computers.dropDesktopClaim('peer-host:original', 'assignment', actor, 'local-console', 'control'), /no release receipt|not confirmed|unknown/u);
-    await assert.rejects(fresh.computers.automation.authorize({ runtime: 'pi', sessionId: 'same' }, 'control', 'local-console', async () => {}), /unconfirmed|unresolved/u);
-    const rejected = await fresh.invoke('act', { desktopId: 'local-console', action: { kind: 'key', app: 'editor', key: 'enter' } });
+        const rejected = await fresh.invoke('act', { desktopId: 'local-console', action: { kind: 'key', app: 'editor', key: 'enter' } });
     if (rejected.receipt.completion.kind === 'result') assert.equal(rejected.receipt.completion.effect, 'none');
     await assert.rejects(fresh.computers.claimDesktop('other-host:new', 'replacement', actor, 'local-console', 'control'), /unconfirmed|unresolved/u);
     const record = JSON.parse(fresh.records.get('computer.desktop:local-console')!.payloadJson);
@@ -797,7 +791,7 @@ test('shipped Computer broker binds lifecycle and application declarations, keep
       return f.kernel.agentRuntimeRequest(method, params);
     } } as unknown as KernelClient;
     for (const method of ['prepare', 'desktop_lifecycle', 'artifact', 'control', 'browser_read', 'browser', 'office_read', 'office', 'open', 'evidence', 'environment']) {
-      const selected = await extensions.prepareService({ serviceId: `varin.computer.${method}`, version: 1, method: 'execute', args: [], routing: { sessionId: 'root' } });
+      const selected = await extensions.prepareService({ serviceId: `varin.computer.${method}`, version: 1, method: 'execute', args: [], routing: { threadId: 'root', branchId: 'root-branch', sourceRunId: 'root-run' } });
       retained.push(await retainExtensionTool({ runtime: extensions, kernel, configurationIdentity: captured,
         currentPolicy: async () => ({ mode: 'normal', rules: [{ tool: `computer_${method}`, decision: permission }] }) }, selected));
     }
@@ -1089,7 +1083,7 @@ test('desktop lifecycle tools prepare and transition the original managed owner 
     assertEffect(await f.invoke('prepare', { width: 1280, height: 800 }), 'confirmed');
     assert.deepEqual(f.changes, ['prepare']);
     const owned = await f.computers.workDesktops('bot:bot');
-    assert.ok(owned.some(desktop => desktop.id === 'managed-linux' && desktop.work?.some(association => association.work.runtime === 'agent' && association.registry === null)));
+    assert.ok(owned.some(desktop => desktop.id === 'managed-linux' && desktop.work?.some(association => association.work.threadId === 'root')));
     const control = await f.invoke('control', { desktopId: 'managed-linux' });
     const epoch = (control.content as { control: { automationEpoch: string } }).control.automationEpoch;
     assertEffect(await f.invoke('desktop_lifecycle', { desktopId: 'managed-linux', action: 'stop', automationEpoch: 'obsolete' }), 'none');
@@ -1241,9 +1235,9 @@ test('Computer artifacts use the native Thread scope and original Bot catalog wi
     assert.equal(artifact.sourceHostId, 'host'); assert.equal(artifact.sha256, revision);
     const bot = await computerRouter(source.computers, true)('/api/harness/bots/bot/work', {}, undefined, true, 'GET');
     assert.equal(bot.status, 200);
-    const entry = (bot.body as { threads: Array<{ artifacts: unknown[]; desktops: Array<{ id: string; work: Array<{ registry: unknown }> }> }> }).threads[0]!;
+    const entry = (bot.body as { threads: Array<{ artifacts: unknown[]; desktops: Array<{ id: string; work: Array<{ work: ComputerWorkRef }> }> }> }).threads[0]!;
     assert.deepEqual(entry.artifacts, [artifact]);
-    assert.equal(entry.desktops[0]?.id, desktopId); assert.equal(entry.desktops[0]?.work[0]?.registry, null);
+    assert.equal(entry.desktops[0]?.id, desktopId); assert.equal(entry.desktops[0]?.work[0]?.work.runtime, 'agent');
     const opened = await source.computers.openArtifact(artifact.id);
     const chunks: Buffer[] = []; for await (const chunk of opened.stream) chunks.push(Buffer.from(chunk));
     assert.equal(Buffer.concat(chunks).toString(), 'pdf');
@@ -1285,32 +1279,6 @@ test('human desktop preparation and lifecycle keep their authenticated product a
     assert.equal(f.computers.automation.controller('managed-linux'), null);
     assert.deepEqual(f.changes, ['prepare', 'stop']);
   } finally { await f.cleanup(); }
-});
-
-test('existing Pi harness consumers use the same lifecycle assignment and current typed artifact owner', async () => {
-  const target = await managedFixture();
-  let source: Awaited<ReturnType<typeof fixture>> | undefined;
-  try {
-    source = await remoteFixture(target, async (url, _body, send) => url.pathname.endsWith('/artifacts/inspect')
-      ? new Response(JSON.stringify({ version: { sha256: 'c'.repeat(64), byteLength: 3, modifiedAt: '1790712000000000000' } }), { headers: { 'x-varin-computer-host': 'host' } }) : send());
-    const services = new Map<string, { handle(params: never, ctx: HarnessServiceContext): Promise<unknown> }>();
-    registerComputerServices({ register(method, service) { services.set(method, service); } }, { computerService: source.computers } as HarnessServiceHost);
-    const ctx: HarnessServiceContext = {
-      sessionId: 'existing-pi-session', workspaceId: null, authorizedPaths: [], signal: new AbortController().signal,
-      actor: { authorityInstanceId: 'pi-authority', sessionId: 'existing-pi-session', runId: 'pi-run', workerId: 'pi-worker', workerGeneration: 1,
-        workspaceId: null, grantedCapabilities: ['control.computer'] },
-    };
-    const invoke = (method: string, params: Record<string, unknown>) => services.get(method)!.handle(params as never, ctx);
-    const prepared = await invoke('computer.prepare', { connectionId: 'peer' });
-    assert.equal((prepared as { desktop: { status: string } }).desktop.status, 'available');
-    const desktopId = 'remote:peer:host:managed-linux';
-    const artifact = (await invoke('computer.artifact', { desktopId, relativePath: 'Downloads/pi.pdf' }) as { artifact: { scopeId: string; threadId: string } }).artifact;
-    assert.equal(artifact.scopeId, 'scope'); assert.equal(artifact.threadId, 'pi');
-    assert.deepEqual(await source.computers.listArtifacts('scope'), [artifact]);
-    const stopped = await invoke('computer.desktopLifecycle', { desktopId, action: 'stop' });
-    assert.equal((stopped as { desktop: { status: string } }).desktop.status, 'stopped');
-    assert.deepEqual(target.changes, ['prepare', 'stop']);
-  } finally { await source?.cleanup(); await target.cleanup(); }
 });
 
 test('confirmed remote desktop stop reconciles its exact assignment without SSE and separates a lost drop ACK', async () => {

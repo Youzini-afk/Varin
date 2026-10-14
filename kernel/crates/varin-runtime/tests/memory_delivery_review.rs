@@ -101,7 +101,7 @@ fn memory_publication_preserves_concurrent_receipts_and_settles_after_run_comple
         (
             scope.mode.as_str(),
             scope.thread_role.as_str(),
-            scope.session_id.as_str()
+            scope.thread_id.as_str()
         ),
         ("agent", "main", "thread")
     );
@@ -140,7 +140,7 @@ fn basis() -> PersonalizationBasis {
             memories: vec![note(1, "FROZEN_NOTE")],
         },
         context_composition: None,
-        session_id: "thread".into(),
+        thread_id: "thread".into(),
         project_id: None,
         original_sections: vec![SystemSection {
             name: "preamble".into(),
@@ -701,6 +701,7 @@ fn external_tool_json_cannot_forge_memory_receipts_or_suppress_authoritative_fac
 fn unsupported_or_broken_context_domain_is_rejected_before_epoch_recovery_or_asset_changes() {
     for damage in [
         "UPDATE runtime_domains SET version=2 WHERE name='context_checkpoints'",
+        "UPDATE runtime_domains SET version=4 WHERE name='context_checkpoints'",
         "DELETE FROM runtime_domains WHERE name='context_checkpoints'",
         "DROP TABLE memory_states",
         "ALTER TABLE memory_states RENAME COLUMN body TO unrecognized_body",

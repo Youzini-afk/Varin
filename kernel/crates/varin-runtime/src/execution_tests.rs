@@ -1783,7 +1783,7 @@ fn context_prefix_reuse_rehydrates_only_new_history_across_real_model_steps() {
                     memories: vec![note("BASELINE_NOTE")],
                 },
                 context_composition: None,
-                session_id: "thread".into(),
+                thread_id: "thread".into(),
                 project_id: None,
                 original_sections: vec![SystemSection {
                     name: "preamble".into(),
@@ -2192,7 +2192,7 @@ fn context_prefix_reuse_rebuilds_an_older_captured_head_and_keeps_live_memory() 
                     memories: vec![note("ORIGINAL_NOTE")],
                 },
                 context_composition: None,
-                session_id: "thread".into(),
+                thread_id: "thread".into(),
                 project_id: None,
                 original_sections: vec![SystemSection {
                     name: "preamble".into(),

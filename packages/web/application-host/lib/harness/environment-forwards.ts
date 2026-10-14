@@ -6,8 +6,7 @@ import type { EnvironmentServiceAccess } from '@varin/protocol';
 import { HarnessServiceError } from './service-error.js';
 import type { ManagedTarget } from './managed-remote-client.js';
 
-export type EnvironmentForwardOwner = { runtime: 'pi'; sessionId: string }
-  | { runtime: 'agent'; operationId: string; hostEpoch: string };
+export type EnvironmentForwardOwner = { runtime: 'agent'; operationId: string; hostEpoch: string };
 export type EnvironmentForwardState = 'opening' | 'live' | 'stopping' | 'stopped';
 export interface EnvironmentForwardInspection { state: EnvironmentForwardState | 'absent'; access: EnvironmentServiceAccess | null }
 /** Original Host listener owner. Catalog owns Agent intent, cancellation and durable receipts. */
@@ -23,7 +22,6 @@ export interface EnvironmentForwardRuntime {
   /** Release a drained receipt only after its original Catalog acknowledgement. */
   release(owner: EnvironmentForwardOwner): void;
   closeRuntime(runtime: EnvironmentForwardOwner['runtime']): Promise<void>;
-  closeSession(sessionId: string): Promise<void>;
   onChanged(listener: () => void): () => void;
   dispose(): Promise<void>;
 }
@@ -32,9 +30,7 @@ interface LiveForward {
   sockets: Set<Duplex>; streams: Set<Duplex>; channels: Set<WebSocket>; state: EnvironmentForwardState;
   ready: Promise<void>; stopping?: Promise<void>; stopRequested: boolean;
 }
-const sameOwner = (a: EnvironmentForwardOwner, b: EnvironmentForwardOwner) => a.runtime === 'pi'
-  ? b.runtime === 'pi' && a.sessionId === b.sessionId
-  : b.runtime === 'agent' && a.operationId === b.operationId && a.hostEpoch === b.hostEpoch;
+const sameOwner = (a: EnvironmentForwardOwner, b: EnvironmentForwardOwner) => a.operationId === b.operationId && a.hostEpoch === b.hostEpoch;
 const wsUrlFor = (target: ManagedTarget, host: string, port: number): string => {
   const apiUrl = new URL(target.connection.apiUrl.replace(/\/$/, '') + '/');
   const url = new URL('/api/environment/forward', apiUrl);
@@ -76,7 +72,6 @@ export function createEnvironmentForwardRuntime(options: { createListener?: type
       for (const close of destroy) close();
       await Promise.all(drains);
       entry.channels.clear(); entry.sockets.clear(); entry.streams.clear(); entry.state = 'stopped';
-      if (entry.owner.runtime === 'pi') live.delete(id);
       notify();
     })();
     return entry.stopping;
@@ -84,7 +79,7 @@ export function createEnvironmentForwardRuntime(options: { createListener?: type
   const open: EnvironmentForwardRuntime['open'] = async ({ target: suppliedTarget, host, port, threadId, owner, signal, webSocket }) => {
     signal?.throwIfAborted();
     if (disposed) throw new HarnessServiceError('unavailable', 'Environment forwarding is closed');
-    if (owner.runtime === 'agent' && (owner.hostEpoch !== epoch || entriesFor(owner).length))
+    if (owner.hostEpoch !== epoch || entriesFor(owner).length)
       throw new HarnessServiceError('unavailable', 'Original forward owner is unavailable or already dispatched; reconcile instead of opening again');
     const target = { ...suppliedTarget, connection: { ...suppliedTarget.connection, requestHeaders: { ...suppliedTarget.connection.requestHeaders } } };
     const SocketImpl = webSocket ?? WebSocket;
@@ -144,7 +139,6 @@ export function createEnvironmentForwardRuntime(options: { createListener?: type
     closeOwner,
     release: owner => { for (const [id, entry] of entriesFor(owner)) { if (entry.state !== 'stopped') throw new Error('Cannot release a live forward owner'); live.delete(id); } },
     closeRuntime: async runtime => { await Promise.all([...live].filter(([, entry]) => entry.owner.runtime === runtime).map(([id, entry]) => stop(id, entry))); },
-    closeSession: sessionId => closeOwner({ runtime: 'pi', sessionId }),
     onChanged: listener => { changed.add(listener); return () => { changed.delete(listener); }; },
     dispose: async () => { disposed = true; await Promise.all([...live].map(([id, entry]) => stop(id, entry))); },
   };

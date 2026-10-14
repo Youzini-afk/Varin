@@ -11,10 +11,9 @@
  * explicit inherit. Unconfigured presets are omitted from the catalog and
  * rejected — they never borrow the main model silently.
  *
- * The catalog is a pure static table with no host dependencies, so it lives
- * in the protocol package: the host needs it to build a thread from a
- * preset, and pi-host needs it to build the `dispatch` tool's team prompt
- * and to reject presets whose model slot is not configured.
+ * The catalog is a pure static table with no host dependencies. Native
+ * profile preparation uses it to freeze Thread configuration and reject
+ * presets whose model slot is not configured.
  */
 
 import type { HarnessModelRole, ModelSelection } from "./harness-settings.js";
@@ -59,10 +58,9 @@ export interface ExecutionPreset {
 
 // ── Preset definitions ─────────────────────────────────────────────
 
-export const EXECUTION_PRESETS: Readonly<Record<PresetId, ExecutionPreset & { slot: HarnessModelRole }>> = {
+export const EXECUTION_PRESETS: Readonly<Record<PresetId, Omit<ExecutionPreset, "tools"> & { id: PresetId; slot: HarnessModelRole }>> = {
   worker: {
     id: "worker", slot: "worker",
-    tools: ["read", "edit", "write", "apply_patch", "bash", "computer", "grep", "find", "ls", "get_output", "write_to_process", "kill_shell", "explore", "related", "diagnostics", "symbols", "definition", "references", "hover", "webfetch", "document_read", "websearch", "todo", "dispatch", "threads", "wait", "send", "read_thread", "merge", "submit_code", "update", "kill"],
     worktree: "isolated",
     systemPromptFragment: "Complete the assigned work with awareness of the overall goal and related tasks. Read teammates' relevant work, coordinate shared interfaces directly, and inform the main agent of decisions affecting the overall design. Revisit the task boundary when evidence calls for it. Verify the actual result in proportion to its risk.",
     teamDescription: "independent implementation or other assigned work, including coordination and relevant verification",
@@ -70,52 +68,12 @@ export const EXECUTION_PRESETS: Readonly<Record<PresetId, ExecutionPreset & { sl
   "retrieval": {
     id: "retrieval",
     slot: "retrievalAgent",
-    tools: [
-      "read",
-      "computer",
-      "grep",
-      "find",
-      "ls",
-      "explore",
-      "related",
-      "recall",
-      "symbols",
-      "definition",
-      "references",
-      "hover",
-      "webfetch",
-      "document_read",
-      "websearch",
-      "research_search",
-      "research_decide",
-      "materials",
-      "threads",
-      "send",
-      "read_thread",
-      "wait",
-      "follow_up",
-      "submit_facts",
-    ],
     worktree: "none",
     systemPromptFragment:
       "Preset focus: information retrieval.",
     teamDescription: "multi-step fact retrieval",
   },
 };
-
-export function isPresetId(value: string): value is PresetId {
-  return Object.prototype.hasOwnProperty.call(EXECUTION_PRESETS, value);
-}
-
-// ── Catalog resolution ─────────────────────────────────────────────
-
-export interface ResolvedPreset {
-  id: string;
-  /** The original choice; equal model IDs do not imply inheritance. */
-  modelSource: "inherit" | "selected";
-  model: ModelSelection;
-  definition: ExecutionPreset;
-}
 
 /** Preparation/discovery can retain unavailable choices without authorizing them. */
 export interface PresetObservation {
@@ -131,15 +89,15 @@ export function observePresets(
   mainModel: ModelSelection | null,
   custom: Record<string, HarnessCustomAgent> = {},
   focus?: WorkFocusId,
-  runtime: AgentRuntime = "pi",
+  runtime: AgentRuntime = "agent",
   builtinTools?: Readonly<Record<PresetId, readonly string[]>>,
 ): PresetObservation[] {
+  if (!builtinTools) throw new Error("Agent runtime preset defaults are unavailable");
   const observations: PresetObservation[] = [];
   for (const preset of Object.values(EXECUTION_PRESETS)) {
     const binding = slots[preset.slot];
     const model = resolveHarnessModelSlot(preset.slot, slots, mainModel);
-    if (runtime === "agent" && !builtinTools) throw new Error("Agent runtime preset defaults are unavailable");
-    const definition = customizeHarnessAgent({ ...preset, tools: [...(builtinTools?.[preset.id as PresetId] ?? preset.tools)] }, binding?.agent, runtime);
+    const definition = customizeHarnessAgent({ ...preset, tools: [...builtinTools[preset.id]] }, binding?.agent, runtime);
     if (definition.description !== undefined) definition.teamDescription = definition.description;
     observations.push({ id: preset.id, model, definition,
       modelSource: binding?.providerId && binding.modelId ? "selected" : "inherit",
@@ -160,44 +118,4 @@ export function observePresets(
         name: agent.name, workFocus: [...agent.workFocus], ...(agent.modelSettings ? { modelSettings: { ...agent.modelSettings } } : {}) } });
   }
   return observations;
-}
-
-export function resolvePresets(
-  slots: Partial<Record<HarnessModelRole, HarnessModelBinding | null>>,
-  mainModel: ModelSelection | null,
-  custom: Record<string, HarnessCustomAgent> = {},
-  focus?: WorkFocusId,
-  runtime: AgentRuntime = "pi",
-  builtinTools?: Readonly<Record<PresetId, readonly string[]>>,
-): ResolvedPreset[] {
-  return observePresets(slots, mainModel, custom, focus, runtime, builtinTools).flatMap(entry => entry.availability === "available" && entry.model
-    ? [{ id: entry.id, model: entry.model, modelSource: entry.modelSource, definition: entry.definition }] : []);
-}
-
-// ── Team prompt ────────────────────────────────────────────────────
-
-/**
- * The team prompt is stable for a given available preset set. Its owner refreshes
- * the set at run boundaries when settings, model, or work focus changes.
- */
-export function buildTeamPrompt(presets: ResolvedPreset[], activeTools?: readonly string[], additionalProfiles: readonly { tools: readonly string[] }[] = [], role: import('./agent-personalization.js').AgentPersonalizationContext['threadRole'] = 'main'): string {
-  const available = (tool: string) => activeTools === undefined || activeTools.includes(tool);
-  const worker = presets.some(preset => preset.id === "worker");
-  const canDispatch = available("dispatch") && (presets.length > 0 || additionalProfiles.length > 0);
-  const responsibility = role === 'main'
-    ? 'This is the main thread, responsible for the overall task and final delivery. '
-    : role === 'worker'
-      ? 'This child thread has its own task and conversation; the parent handles integration and final delivery. '
-      : 'This is a read-only child thread for information retrieval or consultation. Its findings return to the requesting thread. ';
-  if (!canDispatch) return responsibility + 'No execution profile is enabled for new sub-agent dispatch.'
-    + (available('read_thread') ? ' read_thread can still inspect existing task-family conversations.' : '');
-  const writing = worker || [...presets.map(preset => preset.definition), ...additionalProfiles].some(profile => profile.tools.some(tool => ["write", "edit", "apply_patch", "bash", "experiment"].includes(tool)));
-  let guidance = responsibility;
-  if (!writing) guidance += 'The enabled profiles are read-only. ';
-  if (worker) guidance += 'dispatch(task) starts a worker using the current model and authorized tools; preset selects a configured profile. ';
-  else if (presets.length) guidance += 'dispatch(task, preset) starts a configured profile. ';
-  if (additionalProfiles.length) guidance += 'dispatch(task, capability) starts an enabled research capability. ';
-  const profiles = presets.map(preset => `${preset.id} (${preset.definition.name ? `${preset.definition.name}: ` : ""}${preset.definition.teamDescription})`).join(", ");
-  if (profiles) guidance += `Available profiles: ${profiles}. `;
-  return guidance + 'Threads run independently with separate conversations.';
 }

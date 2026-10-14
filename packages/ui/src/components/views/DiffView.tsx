@@ -40,7 +40,7 @@ import { fileDiffFromPatch } from '@/lib/diff/patchFileDiff';
 import { startReviewFlow } from '@/lib/reviewFlow';
 import { WALKTHROUGH_ACTION_CLASS } from '@/components/views/walkthrough/walkthroughAction';
 import { useWalkthroughStore } from '@/stores/useWalkthroughStore';
-import { usePiSessionStore } from '@/stores/usePiSessionStore';
+import { useThreadStore } from '@/stores/useThreadStore';
 import { getFirstChangedModifiedLineFromPatch } from './diffPatchUtils';
 import type { FileDiffMetadata } from '@pierre/diffs';
 import { MonacoFileDiffEditor } from '@/components/workbench/MonacoFileDiffEditor';
@@ -1038,13 +1038,13 @@ export const DiffView: React.FC<DiffViewProps> = ({
     const diffWrapLinesStore = useUIStore((state) => state.diffWrapLines);
     const setDiffWrapLines = useUIStore((state) => state.setDiffWrapLines);
     const openContextFileAtLine = useUIStore((state) => state.openContextFileAtLine);
-    const currentSessionId = usePiSessionStore((state) => state.currentSessionId);
+    const currentThread = useThreadStore((state) => state.selectedIdentity);
     const diffWrapLines = diffWrapLinesStore;
     const forcedStaged = activeDiffScope === 'staged' ? true : activeDiffScope === 'working' ? false : null;
     const activeDiffStaged = forcedStaged ?? displayFileStaged;
 
     const isMobileLayout = isMobile || screenWidth <= 768;
-    const showReviewAction = Boolean(currentSessionId) && !isMobileLayout;
+    const showReviewAction = Boolean(currentThread) && !isMobileLayout;
     const showWalkthroughAction = !isMobileLayout;
     const showFileSidebar = !hideStackedFileSidebar && !isMobileLayout && screenWidth >= 1024;
     const diffScrollRef = React.useRef<HTMLElement | null>(null);
@@ -1358,7 +1358,7 @@ export const DiffView: React.FC<DiffViewProps> = ({
     }, [cancelPendingScrollAlignment, changedFiles, queueVisibleStackedFilesSync]);
 
     const handleStartReviewFlow = React.useCallback(async (execution: ReviewFlowExecution) => {
-        if (!currentSessionId) return;
+        if (!currentThread) return;
         const directory = effectiveDirectory || '';
         if (!directory) {
             toast.error(t('diffView.reviewDialog.toast.noSessionDirectory'));
@@ -1368,14 +1368,11 @@ export const DiffView: React.FC<DiffViewProps> = ({
         setReviewFlowSubmitting(true);
         try {
             await startReviewFlow({
-                originalSessionId: currentSessionId,
+                original: currentThread,
                 directory,
-                providerId: execution.providerId,
-                modelId: execution.modelId,
-                agent: execution.agent,
-                thinkingLevel: execution.thinkingLevel,
+                model: { providerId: execution.providerId, modelId: execution.modelId, thinkingLevel: execution.thinkingLevel },
+                maxIterations: execution.maxIterations,
                 generateHandoff: execution.generateHandoff,
-                returnAfterHandoffRequest: execution.generateHandoff,
                 autoReview: execution.autoReview,
             });
             setReviewDialogOpen(false);
@@ -1385,7 +1382,7 @@ export const DiffView: React.FC<DiffViewProps> = ({
         } finally {
             setReviewFlowSubmitting(false);
         }
-    }, [currentSessionId, effectiveDirectory, t]);
+    }, [currentThread, effectiveDirectory, t]);
 
     const scrollToFile = React.useCallback((path: string): boolean => {
         const node = fileSectionRefs.current.get(path);
@@ -1795,7 +1792,7 @@ export const DiffView: React.FC<DiffViewProps> = ({
             <ReviewFlowDialog
                 open={reviewDialogOpen}
                 onOpenChange={setReviewDialogOpen}
-                originalSessionId={currentSessionId}
+                original={currentThread}
                 projectDirectory={effectiveDirectory ?? null}
                 submitting={reviewFlowSubmitting}
                 onConfirm={handleStartReviewFlow}

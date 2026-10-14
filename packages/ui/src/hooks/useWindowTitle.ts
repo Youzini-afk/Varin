@@ -4,8 +4,7 @@ import { isDesktopLocalOriginActive, isDesktopShell } from '@/lib/desktop';
 import { desktopHostsGet, getDesktopHostApiUrl, locationMatchesHost, redactSensitiveUrl } from '@/lib/desktopHosts';
 import { setDesktopWindowTitle } from '@/lib/desktopNative';
 import { getRuntimeApiBaseUrl, subscribeRuntimeEndpointChanged } from '@varin/application-client';
-import { findPiProjectForCwd } from '@/lib/pi-runtime/sessionNavigation';
-import { usePiSessionStore } from '@/stores/usePiSessionStore';
+import { useEffectiveDirectory } from './useEffectiveDirectory';
 
 const APP_TITLE = 'Varin';
 
@@ -27,21 +26,15 @@ const buildWindowTitle = (projectLabel: string | null, instanceLabel: string | n
 export const useWindowTitle = () => {
   const projects = useProjectsStore((state) => state.projects);
   const activeProjectId = useProjectsStore((state) => state.activeProjectId);
-  const currentPiCwd = usePiSessionStore((state) => {
-    const sessionId = state.currentSessionId;
-    if (!sessionId) return null;
-    return state.records[sessionId]?.snapshot?.cwd
-      ?? state.summaries.find((summary) => summary.id === sessionId)?.cwd
-      ?? null;
-  });
+  const currentDirectory = useEffectiveDirectory();
   const activeProject = React.useMemo(() => {
-    if (currentPiCwd) return findPiProjectForCwd(projects, currentPiCwd);
+    if (currentDirectory) return projects.filter(project => currentDirectory === project.path || currentDirectory.startsWith(`${project.path.replace(/[\\/]+$/, '')}/`)).sort((a, b) => b.path.length - a.path.length)[0] ?? null;
     if (!activeProjectId) return null;
     return projects.find((project) => project.id === activeProjectId) ?? null;
-  }, [activeProjectId, currentPiCwd, projects]);
+  }, [activeProjectId, currentDirectory, projects]);
 
   const projectLabel = React.useMemo(() => {
-    if (!activeProject) return currentPiCwd ? formatProjectLabel(getProjectNameFromPath(currentPiCwd)) : null;
+    if (!activeProject) return currentDirectory ? formatProjectLabel(getProjectNameFromPath(currentDirectory)) : null;
 
     const label = activeProject.label?.trim();
     if (label) {
@@ -54,7 +47,7 @@ export const useWindowTitle = () => {
     }
 
     return null;
-  }, [activeProject, currentPiCwd]);
+  }, [activeProject, currentDirectory]);
 
   const [instanceLabel, setInstanceLabel] = React.useState<string | null>(null);
 

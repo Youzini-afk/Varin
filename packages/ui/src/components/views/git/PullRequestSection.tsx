@@ -36,7 +36,7 @@ import { useUIStore } from '@/stores/useUIStore';
 import { useWalkthroughStore } from '@/stores/useWalkthroughStore';
 import { WALKTHROUGH_ACTION_CLASS } from '@/components/views/walkthrough/walkthroughAction';
 import { formatDateTimeForPreference } from '@/lib/timeFormat';
-import { ensurePiSessionDraftTarget } from '@/lib/pi-runtime/sessionDrafts';
+import { ensureThreadDraftTarget } from '@/lib/agent-runtime/threadDraftActions';
 import { useInlineCommentDraftStore, type InlineCommentDraftTarget } from '@/stores/useInlineCommentDraftStore';
 import { useGitHubAuthStore } from '@/stores/useGitHubAuthStore';
 import { getGitHubPrStatusKey, useGitHubPrStatusStore } from '@/stores/useGitHubPrStatusStore';
@@ -777,7 +777,7 @@ export const PullRequestSection: React.FC<{
   // user decides how to prompt and when to send.
   const resolveDraftTarget = React.useCallback(async (): Promise<InlineCommentDraftTarget | null> => {
     try {
-      return await ensurePiSessionDraftTarget(directory);
+      return await ensureThreadDraftTarget(directory);
     } catch (error) {
       toast.error(t('gitView.pr.toast.noActiveSession'), {
         description: error instanceof Error

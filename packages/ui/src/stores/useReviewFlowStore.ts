@@ -1,46 +1,29 @@
+import type { ThreadIdentity } from '@varin/application-client';
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import { createDeferredSafeJSONStorage } from './utils/safeStorage';
 
-export interface ReviewSessionLink {
+/** Navigation metadata only. Catalog remains the execution/history authority. */
+export interface ReviewThreadLink {
   directory: string;
-  originalSessionId: string;
-  reviewSessionId: string;
-  runtimeKey: string;
+  original: ThreadIdentity;
+  review: ThreadIdentity;
+  hostKey: string;
 }
-
+export const reviewLinkKey = (hostKey: string, identity: ThreadIdentity): string => (
+  JSON.stringify([hostKey, identity.threadId, identity.branchId])
+);
 interface ReviewFlowState {
-  linksByOriginal: Record<string, ReviewSessionLink>;
-  removeLink(runtimeKey: string, originalSessionId: string): void;
-  upsertLink(link: ReviewSessionLink): void;
+  linksByOriginal: Record<string, ReviewThreadLink>;
+  upsertLink(link: ReviewThreadLink): void;
 }
-
-export const reviewLinkKey = (runtimeKey: string, originalSessionId: string): string => (
-  `${runtimeKey}:${originalSessionId}`
-);
-
-export const useReviewFlowStore = create<ReviewFlowState>()(
-  persist(
-    (set) => ({
-      linksByOriginal: {},
-      removeLink: (runtimeKey, originalSessionId) => set((state) => {
-        const key = reviewLinkKey(runtimeKey, originalSessionId);
-        if (!(key in state.linksByOriginal)) return state;
-        const linksByOriginal = { ...state.linksByOriginal };
-        delete linksByOriginal[key];
-        return { linksByOriginal };
-      }),
-      upsertLink: (link) => set((state) => ({
-        linksByOriginal: {
-          ...state.linksByOriginal,
-          [reviewLinkKey(link.runtimeKey, link.originalSessionId)]: link,
-        },
-      })),
-    }),
-    {
-      name: 'varin-review-flow-links',
-      storage: createDeferredSafeJSONStorage(),
-      partialize: (state) => ({ linksByOriginal: state.linksByOriginal }),
-    },
-  ),
-);
+export const useReviewFlowStore = create<ReviewFlowState>()(persist(set => ({
+  linksByOriginal: {},
+  upsertLink: link => set(state => ({ linksByOriginal: {
+    ...state.linksByOriginal, [reviewLinkKey(link.hostKey, link.original)]: link,
+  } })),
+}), {
+  // Older session links are user assets; they are neither read nor imported.
+  name: 'varin-thread-review-links', storage: createDeferredSafeJSONStorage(),
+  partialize: state => ({ linksByOriginal: state.linksByOriginal }),
+}));

@@ -1,10 +1,14 @@
 import React from 'react';
+import { getRuntimeKey, getRuntimeEndpointGeneration } from '@varin/application-client';
+import { followThreadDeepLink } from './threadDeepLinkNavigation';
 
+import { connectMobileDeepLinkHost } from './mobileConnections';
 import { isCapacitorApp } from '@/lib/platform';
 import {
-  openPiSessionFromNavigation,
-  startPiSessionDraftFromNavigation,
-} from '@/lib/pi-runtime/sessionNavigation';
+  openThreadFromNavigation,
+  startThreadFromNavigation,
+} from '@/lib/agent-runtime/threadNavigation';
+import { useThreadStore } from '@/stores/useThreadStore';
 import { useUIStore } from '@/stores/useUIStore';
 
 import { buildDeepLink, parseDeepLink, type DeepLinkIntent, type SessionsFilter, type ViewTarget } from './deepLinks';
@@ -36,21 +40,29 @@ export interface DeepLinkHandlers {
 let handlers: DeepLinkHandlers = {};
 let ready = false;
 let pending: DeepLinkIntent | null = null;
+let navigationSequence = 0;
 
 const execute = (intent: DeepLinkIntent): boolean => {
   switch (intent.type) {
-    case 'session':
-      void openPiSessionFromNavigation({
-        directory: intent.directory ?? null,
-        sessionId: intent.sessionId,
-      }).catch((error) => console.warn('[Varin] failed to open deep-linked Pi session:', error));
+    case 'thread': {
+      const sequence = navigationSequence;
+      void followThreadDeepLink(intent, {
+        currentHostKey: () => useThreadStore.getState().hostKey,
+        currentRuntimeKey: getRuntimeKey,
+        endpointGeneration: getRuntimeEndpointGeneration,
+        isCurrent: () => sequence === navigationSequence,
+        connectHost: connectMobileDeepLinkHost,
+        loadCatalog: () => useThreadStore.getState().loadCatalog(),
+        openThread: openThreadFromNavigation,
+        openInstances: () => handlers.openView?.('instances'),
+      }).catch(error => console.warn('[Varin] failed to open deep-linked Thread:', error));
       return true;
+    }
 
-    case 'new-session':
-      void startPiSessionDraftFromNavigation({
+    case 'new-thread':
+      void startThreadFromNavigation({
         directory: intent.directory ?? null,
-        projectId: intent.projectId ?? null,
-      }).catch((error) => console.warn('[Varin] failed to start deep-linked Pi session draft:', error));
+      }).catch((error) => console.warn('[Varin] failed to start deep-linked Thread draft:', error));
       return true;
 
     case 'sessions':
@@ -94,6 +106,7 @@ const flush = (): void => {
 
 /** Apply an intent now if possible, otherwise stash it until the app is ready / a handler appears. */
 export const applyDeepLinkIntent = (intent: DeepLinkIntent): void => {
+  navigationSequence += 1;
   pending = intent;
   flush();
 };
@@ -166,16 +179,10 @@ export const useDeepLinkSource = (options: { ready: boolean }): void => {
         if (disposed) return;
         const handle = await PushNotifications.addListener('pushNotificationActionPerformed', (action) => {
           const data = action?.notification?.data as Record<string, unknown> | undefined;
-          // Prefer an explicit deep link in the payload (richest); fall back to a bare
-          // sessionId for backwards compatibility with existing push senders.
-          const url = typeof data?.url === 'string' ? data.url : typeof data?.deeplink === 'string' ? data.deeplink : undefined;
-          if (url) {
-            applyDeepLinkUrl(url);
-            return;
-          }
-          const sessionId = typeof data?.sessionId === 'string' ? data.sessionId : undefined;
-          if (sessionId) {
-            applyDeepLinkIntent({ type: 'session', sessionId });
+          const url = typeof data?.url === 'string' ? data.url : undefined;
+          if (url) { applyDeepLinkUrl(url); return; }
+          if (typeof data?.threadId === 'string' && typeof data?.branchId === 'string' && typeof data?.hostKey === 'string') {
+            applyDeepLinkIntent({ type: 'thread', threadId: data.threadId, branchId: data.branchId, hostKey: data.hostKey });
           }
         });
         if (disposed) {

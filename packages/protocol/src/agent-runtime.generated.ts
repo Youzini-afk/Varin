@@ -1427,7 +1427,7 @@ export interface ThreadSummary {
   observer_project_ids: Array<string | null>;
 }
 
-export type AgentRuntimeStreamEvent = {v: 43; kind: 'runtime-event'; kernelEpoch: string} & ({stream: 'durable'; cursor: number} | {stream: 'progress'; runId: string; streamId: string; sequence: number; event: unknown});
+export type AgentRuntimeStreamEvent = {v: 45; kind: 'runtime-event'; kernelEpoch: string} & ({stream: 'durable'; cursor: number} | {stream: 'progress'; runId: string; streamId: string; sequence: number; event: unknown});
 
 export type SourceMode = 'fixed_branch' | 'materialized' | 'live_root';
 
@@ -2075,7 +2075,7 @@ export interface ContextPersonalization {
   threadRole: string;
   contextComposition?: ContextComposition;
   revision: number;
-  sessionId: string;
+  threadId: string;
   projectId: string | null;
   originalSections: SystemSection[];
   instructionSources: string[];
@@ -2111,7 +2111,7 @@ export interface InputSubmitParams {
 export interface RunContextScope {
   mode: string;
   threadRole: string;
-  sessionId: string;
+  threadId: string;
   projectId: string | null;
 }
 

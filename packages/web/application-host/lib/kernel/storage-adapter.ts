@@ -1699,24 +1699,7 @@ export class KernelWorkingStateRootStore implements WorkingStateRootStore {
     return this.listBranchObjectReferences(document.branchId);
   }
 
-  async measurePin(pin: WorkingStatePin): Promise<import("@varin/protocol").ThreadSpaceMeasurement> {
-    this.assertPinForBranch(pin.branchId, pin);
-    let logical = 0;
-    let unknown = false;
-    let cursor: number | undefined;
-    do {
-      const page = parsePinTreeRead(await this.context.client.readPin({ pinId: pin.pinId, roots: [""], includeEntries: true, ...(cursor === undefined ? {} : { cursor }), pageSize: 256 }));
-      this.assertPinRead(pin, page);
-      for (const entry of page.entries) {
-        const state = fromKernelState(entry.state);
-        if (state.kind === "regular-file") logical += state.byteLength;
-        else if (state.kind === "symlink") logical += Buffer.byteLength(state.symlinkTarget, "utf8");
-        else if (state.kind === "unsupported") unknown = true;
-      }
-      cursor = page.nextCursor === null || page.nextCursor === undefined ? undefined : page.nextCursor;
-    } while (cursor !== undefined);
-    return { logicalBytes: unknown ? null : logical, allocatedBytes: null, unknown };
-  }
+
 
   async directoryMatchesResult(branchId: string, revision: number, directory: string): Promise<boolean> {
     const expectedRead = await this.listPaths(branchId, [""], { revision });

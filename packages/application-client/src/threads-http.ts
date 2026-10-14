@@ -20,7 +20,8 @@ export function createThreadsHttpAPI(): ThreadsAPI {
     signal?.throwIfAborted();
     if (generation !== getRuntimeEndpointGeneration()) throw new Error('Application Host changed during thread request');
     if (!response.ok) {
-      const failure = await response.json().catch(() => ({})) as { code?: unknown; admission?: unknown };
+      const body: unknown = await response.json().catch(() => undefined);
+      const failure = body && typeof body === 'object' ? body as { code?: unknown; admission?: unknown } : {};
       signal?.throwIfAborted();
       if (generation !== getRuntimeEndpointGeneration()) throw new Error('Application Host changed during thread request');
       throw new ThreadRequestError(response.status, typeof failure.code === 'string' ? failure.code

@@ -12,12 +12,11 @@ export const threadMaterialScope = (rootThreadId: string): string => `${PREFIX}$
 export function createMaterialStorageAccess(options: {
   kernel: KernelClient;
   storage: KernelStorageAdapter;
-  legacy: WorkspaceWorkingStateRootAccess;
   onCleanupError?(error: unknown): void;
 }): WorkspaceWorkingStateRootAccess {
   return {
-    async withBranchStore(scopeId, purpose, consume, mode, actor) {
-      if (!scopeId.startsWith(PREFIX)) return options.legacy.withBranchStore(scopeId, purpose, consume, mode, actor);
+    async withBranchStore(scopeId, purpose, consume, _mode, actor) {
+      if (!scopeId.startsWith(PREFIX) || scopeId.length === PREFIX.length) throw new Error('Material storage requires a Thread-family scope');
       if (!actor?.threadId || actor.sessionId || actor.runId
         || actor.executionWorkspace && actor.executionWorkspace !== scopeId) {
         throw new Error('Thread material storage requires its admitted Thread identity');

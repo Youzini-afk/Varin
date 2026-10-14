@@ -1,4 +1,4 @@
-/** Conversation plans reuse the KnowledgeStore owner, not Pi session identity. */
+/** Conversation plans are versioned by the KnowledgeStore owner. */
 import type { ToolOrigin } from './agent-runtime.generated.js';
 
 export type PlanRef = string;

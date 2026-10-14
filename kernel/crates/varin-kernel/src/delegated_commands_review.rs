@@ -32,7 +32,7 @@ fn public_continuation_source_prepare_and_exact_run_assembly_share_one_execution
     source.branch_id = Some(format!("child-source:{}", child.operation_id));
     source.revision = Some(0);
     let proposal=serde_json::from_value(json!({"key":"child-context","branch_id":child.child_branch_id,"through_id":null,"expected_revision":0,"summary":"","effective_system_prompt":"Original worker","instruction_sources":[],"memory_checkpoint":null})).unwrap();
-    let basis:varin_runtime::catalog::personalization::PersonalizationBasis=serde_json::from_value(json!({"mode":"agent","threadRole":"worker","revision":0,"configurationDigest":"original-worker","memorySnapshot":{"revision":0,"memories":[]},"sessionId":child.child_thread_id,"projectId":child.project_id,"originalSections":[],"instructionSources":[]})).unwrap();
+    let basis:varin_runtime::catalog::personalization::PersonalizationBasis=serde_json::from_value(json!({"mode":"agent","threadRole":"worker","revision":0,"configurationDigest":"original-worker","memorySnapshot":{"revision":0,"memories":[]},"threadId":child.child_thread_id,"projectId":child.project_id,"originalSections":[],"instructionSources":[]})).unwrap();
     let child =
         f.db.prepare_child(&child.execution_id, source, proposal, basis.clone())
             .unwrap();

@@ -2,20 +2,21 @@ import { expect, it, vi } from 'vitest';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { HostCredentialAuthority } from '@varin/pi-host/credentials';
+import { ModelsService } from '../../models/service.js';
 import { createSemanticInference } from './runtime-inference.js';
 
 it('keeps an accepted rerank candidate until actual settings Off permanently revokes that lease', async () => {
   const directory = await mkdtemp(join(tmpdir(), 'varin-rerank-selection-'));
-  const settings = join(directory, 'settings.json');
+  const settings = join(directory, 'agent-settings.json');
   const selected = { protocol: 'http-rerank', providerId: 'ranking', modelId: 'rank', endpoint: '/original' };
   const save = (rerank: unknown) => writeFile(settings, JSON.stringify({ harness: { ...(rerank === undefined ? {} : { rerank }) } }));
-  await writeFile(join(directory, 'models.json'), JSON.stringify({ providers: { ranking: {
-    baseUrl: 'https://ranking.invalid/v1', apiKey: 'fake-rerank-test-only',
-    capabilities: { rerank: { protocol: 'http-rerank', models: [{ id: 'rank' }] } },
-  } } }));
+  const authority = new ModelsService(directory, { projectTrusted: () => false });
+  const reference = await authority.storeCredential('fake-rerank-test-only');
+  await authority.save({ id: 'ranking', type: 'rerank', name: 'Ranking', enabled: true,
+    baseUrl: 'https://ranking.invalid/v1', authentication: { kind: 'credential', reference }, parameters: {},
+    models: [{ id: 'rank', name: 'Rank', enabled: true, operations: ['rerank'] }],
+  }, (await authority.read()).revision);
   await save(selected);
-  const authority = HostCredentialAuthority.open(directory);
   const forbiddenRequest = vi.fn(async () => { throw new Error('Revoked lease must never enter Catalog or HTTP'); });
   const inference = createSemanticInference(authority, undefined, { requests: {
     kernel: { agentRuntimeRequest: forbiddenRequest },

@@ -15,11 +15,11 @@ original draft; it does not replay a batch to recover a lost HTTP response.
 ## Normal turn path
 
 1. A bound user turn creates one lightweight checkpoint row. No workspace path is read.
-2. Host-backed Pi `write`/`edit` first resolve an isolated branch or the admitted
+2. Native `write`/`edit` first resolve an isolated branch or the admitted
    `document.surfaceWrite` path; `apply_patch` shares that authority.
 3. The Host records intent and before-state, then applies through Rust disk operations or the fixed
    Registry owner/revision. It records the actual final state before returning the mutation result.
-4. An unavailable mutation backend fails instead of allowing a parallel Pi-worker disk writer.
+4. An unavailable mutation backend fails instead of allowing a parallel Host disk writer.
    The generic journal-only native-tool wrapper is not this production disk path.
 5. Repeated writes preserve the first before-image and last after-image. Settlement compares actual
    watcher observations with the journal; uncontrolled shell/Git/external writes remain uncovered.
@@ -29,8 +29,8 @@ range binds a write to its latest real input; Environment/Agent input is not rel
 model request. `file.apply` commits its before-image intent and eventual receipt references with the
 same file-operation transaction. Current-format restart reconciliation completes that original record.
 Physical targets retain their original workspace, root, Run and execution workspace. The public
-conversation discriminator chooses Pi session navigation or Thread HistoryBranch navigation; neither
-owner is reconstructed from the other's identifier.
+conversation identity retains its native Thread and HistoryBranch. Unsupported persisted conversation
+identities are rejected without rewriting or deleting their assets.
 
 New sessions, ordinary prompts, and unchanged turns therefore perform no recursive scan. Work scales
 with the files actually written by the journalled tools.
@@ -87,17 +87,12 @@ For an agent-triggered merge, the final integration state and its safety-to-targ
 the active parent turn checkpoint in the same SQLite transaction. Normal conversation undo therefore uses
 the existing checkpoint path; a missing parent binding prevents any integration write.
 
-Root-session batches that mix Document Registry buffers and disk paths use a separate `agent-mutation`
-operation in this catalog. It validates every disk member under the Documents resource gate before any
-surface dispatch, records external dispatch/receipt/compensation stages, and restores only paths still equal
-to this operation's output. Durable `needs-attention` rows are included in recovery status and the Recovery
-panel. The current file store captures target-after following the disk write; a crash between those two
-steps remains needs-attention rather than being guessed or silently rolled back (D-232).
+Native Integration and ordinary workspace edits retain their own durable operation kinds, before/target identities, Surface dispatch receipts and conditional compensation. Retired `agent-mutation` operations have no native execution owner. Recovery reports unresolved records as `storage-schema-retired` and leaves their records and resources unchanged; it never replays them or fabricates Thread ownership.
 
 ## Coverage boundary
 
 Kernel-backed Application Host production contexts expose a Rust `RecoveryDurableOperationPort`. Combined
-Recovery, Integration, and agent surface/disk mutation intent and file phases use that port before the first
+Recovery, Integration, and ordinary workspace-edit intent and file phases use that port before the first
 side effect; local SQLite operation rows remain only in isolated fixtures. The port uses one operation
 revision for file CAS and terminal completion, so a lost response is reconciled by operation identity rather
 than replaying a mutation.

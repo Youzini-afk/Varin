@@ -1,4 +1,4 @@
-import type { Zone2Material, Zone2Knowledge } from '../harness/zone2.js';
+import type { KnowledgeRecallMaterial, KnowledgeRecallItem } from '../knowledge/recall-material.js';
 import type { MemorySourceSpan, MemoryNature } from '@varin/protocol';
 import type { AgentRuntimeClient } from './agent-runtime-client.js';
 import type { ContextPreparer } from './thread-context.js';
@@ -10,12 +10,12 @@ import { botScopeId } from '../harness/owner-scope.js';
 interface BotKnowledgeState {
     botId: string;
     threadId: string;
-    items: Zone2Knowledge[];
+    items: KnowledgeRecallItem[];
     invalidations: Array<{
         id: number;
         scope: 'bot' | 'user' | 'session';
     }>;
-    corrections: NonNullable<Zone2Material['knowledgeCorrections']>;
+    corrections: NonNullable<KnowledgeRecallMaterial['knowledgeCorrections']>;
 }
 const record = (value: unknown): Record<string, unknown> => value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {};
 const canonical = (value: unknown): string => JSON.stringify(value, (_key, part: unknown) => part && typeof part === 'object' && !Array.isArray(part) ? Object.fromEntries(Object.entries(part).sort(([left], [right]) => left.localeCompare(right))) : part);
@@ -35,7 +35,7 @@ export function createBotMemoryOwner(options: {
         query: string;
         knownMaterial: Record<string, string>;
         signal: AbortSignal;
-    }): Promise<Zone2Material>;
+    }): Promise<KnowledgeRecallMaterial>;
 }): MemoryToolOwner {
     return async (query, signal): Promise<MemoryResult> => {
         let mutationStarted = false;
@@ -45,14 +45,14 @@ export function createBotMemoryOwner(options: {
             const run = await options.runtime.run(query.runId, lookupSignal);
             const thread = await options.runtime.thread(run.thread_id, lookupSignal);
             const botId = thread.bot_id;
-            if (!botId || query.scope.sessionId !== run.thread_id || query.scope.botId !== botId)
+            if (!botId || query.scope.threadId !== run.thread_id || query.scope.botId !== botId)
                 invalid('Memory scope differs from the original Bot Run');
             const identity = { runtime: 'agent' as const, threadId: run.thread_id, branchId: run.branch_id };
             if (query.action === 'synchronize') {
                 if (!query.checkpoint?.personalization || !options.prepareContext.refresh)
                     invalid('Bot context is not admitted');
                 const checkpoint = query.checkpoint!;
-                if (checkpoint.personalization!.mode !== 'bot' || checkpoint.personalization!.sessionId !== run.thread_id)
+                if (checkpoint.personalization!.mode !== 'bot' || checkpoint.personalization!.threadId !== run.thread_id)
                     invalid('Bot context owner changed');
                 const context = await options.prepareContext.refresh!(checkpoint, signal);
                 const previous = record(query.previousState);
@@ -97,7 +97,7 @@ export function createBotMemoryOwner(options: {
                 invalid('Unknown Bot memory action');
             if (args.scope !== undefined && args.scope !== 'bot' && args.scope !== 'user' && args.scope !== 'session')
                 invalid('Bot memory scope must be bot, user or session');
-            const owner: MemoryOwner = args.scope === 'user' ? { scope: 'user', ownerId: null } : args.scope === 'session' ? { scope: 'session', ownerId: run.thread_id, runtime: 'agent' } : { scope: 'bot', ownerId: botId! };
+            const owner: MemoryOwner = args.scope === 'user' ? { scope: 'user', ownerId: null } : args.scope === 'session' ? { scope: 'session', ownerId: run.thread_id } : { scope: 'bot', ownerId: botId! };
             const id = args.id;
             if (['get', 'correct', 'forget'].includes(String(action)) && (!Number.isSafeInteger(id) || (id as number) <= 0))
                 invalid('Memory id must be a positive integer');

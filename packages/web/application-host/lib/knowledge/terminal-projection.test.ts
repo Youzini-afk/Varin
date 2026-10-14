@@ -15,15 +15,15 @@ const userCommand = (overrides: Partial<TerminalCommandRecord> = {}): TerminalCo
 });
 
 describe("terminal command projector", () => {
-  it("stores a user command for each bound session after drain", async () => {
+  it("stores a user command for each bound Run after drain", async () => {
     const observed: unknown[] = [];
     const projector = createTerminalCommandProjector({
       resolveWorkspaceId: async (cwd) => cwd === "/workspace" ? "ws-1" : null,
       observe: (event) => { observed.push(event); return true; },
       drain: async () => undefined,
-      listBoundSessions: () => ["session-a", "session-b"],
+      listBoundOwners: async () => [{ threadId: 'thread:a', branchId: 'branch:a', runId: 'run:a' }, { threadId: 'thread:b', branchId: 'branch:b', runId: 'run:b' }],
     });
-    await expect(projector.project(userCommand())).resolves.toEqual({ "session-a": true, "session-b": true });
+    await expect(projector.project(userCommand())).resolves.toEqual({ "run:a": true, "run:b": true });
     expect(observed).toHaveLength(2);
     expect(observed).toEqual([
       expect.objectContaining({
@@ -47,33 +47,33 @@ describe("terminal command projector", () => {
       resolveWorkspaceId: async () => null,
       observe: () => { observed += 1; return true; },
       drain: async () => undefined,
-      listBoundSessions: () => ["session-a"],
+      listBoundOwners: async () => [{ threadId: 'thread:a', branchId: 'branch:a', runId: 'run:a' }],
     });
     await projector.project(userCommand({ owner: "harness" }));
     await projector.project(userCommand({ owner: "user" }));
     expect(observed).toBe(0);
   });
 
-  it("reports per-session results when the drain fails", async () => {
+  it("reports per-Run results when the drain fails", async () => {
     const errors: unknown[] = [];
     const projector = createTerminalCommandProjector({
       resolveWorkspaceId: async () => "ws-1",
       observe: () => true,
       drain: async () => { throw new Error("drain failed"); },
-      listBoundSessions: () => ["session-a"],
+      listBoundOwners: async () => [{ threadId: 'thread:a', branchId: 'branch:a', runId: 'run:a' }],
       onError: (error) => { errors.push(error); },
     });
-    await expect(projector.project(userCommand())).resolves.toEqual({ "session-a": true });
+    await expect(projector.project(userCommand())).resolves.toEqual({ "run:a": true });
     expect(errors).toHaveLength(1);
   });
 
-  it("returns false for a session when the persistent write is a duplicate commandId", async () => {
+  it("returns false for a Run when the persistent write is a duplicate commandId", async () => {
     const projector = createTerminalCommandProjector({
       resolveWorkspaceId: async () => "ws-1",
       observe: async () => false,
       drain: async () => undefined,
-      listBoundSessions: () => ["session-a"],
+      listBoundOwners: async () => [{ threadId: 'thread:a', branchId: 'branch:a', runId: 'run:a' }],
     });
-    await expect(projector.project(userCommand())).resolves.toEqual({ "session-a": false });
+    await expect(projector.project(userCommand())).resolves.toEqual({ "run:a": false });
   });
 });

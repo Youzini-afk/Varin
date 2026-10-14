@@ -428,7 +428,7 @@ export interface ExtensionToolScope {
   close(): void;
 }
 export type ExtensionToolPreparer = (
-  run: ExtensionToolRun,
+  run: ExtensionToolRun & { branchId: string },
   required: ExtensionToolBinding[],
   signal: AbortSignal,
 ) => Promise<ExtensionToolScope>;
@@ -455,7 +455,7 @@ export function createExtensionTools(
     const watches = new Map<string, () => void>();
     const delivered = new Map<string, ExtensionToolLease>();
     const routingScope = {
-      sessionId: run.threadId,
+      threadId: run.threadId, branchId: run.branchId, sourceRunId: run.runId,
       ...(run.projectId ? { projectId: run.projectId } : {}),
     };
     const services = (state: VarinExtensionHostStateSnapshot) => {

@@ -6,7 +6,7 @@ import type { ComputerActor, ComputerControlState, ComputerDesktop } from '@vari
 import { ComputerDesktopPane } from './ComputerDesktopView';
 
 const mocks = vi.hoisted(() => ({
-  t: (key: string) => key, host: 1, listeners: new Set<() => void>(), stop: vi.fn(), localStop: vi.fn(), takeover: vi.fn(), handback: vi.fn(),
+  t: (key: string) => key, host: 1, listeners: new Set<() => void>(), stop: vi.fn(), takeover: vi.fn(), handback: vi.fn(),
   streams: [] as Array<{ onmessage: null | ((event: { data: string }) => void); onerror: null | (() => void); close: ReturnType<typeof vi.fn> }>,
 }));
 vi.mock('@varin/application-client', async original => ({ ...await original<typeof import('@varin/application-client')>(),
@@ -14,7 +14,7 @@ vi.mock('@varin/application-client', async original => ({ ...await original<type
   subscribeRuntimeEndpointChanged: (listener: () => void) => { mocks.listeners.add(listener); return () => { mocks.listeners.delete(listener); }; },
 }));
 vi.mock('@/lib/computers', () => ({
-  stopComputerAutomation: mocks.localStop, stopDesktopComputerWork: mocks.stop, handbackDesktop: mocks.handback, takeoverDesktop: mocks.takeover, sendDesktopInput: vi.fn(),
+  stopDesktopComputerWork: mocks.stop, handbackDesktop: mocks.handback, takeoverDesktop: mocks.takeover, sendDesktopInput: vi.fn(),
   subscribeDesktopStream: () => { const source = { onmessage: null, onerror: null, close: vi.fn() }; mocks.streams.push(source); return source; },
 }));
 vi.mock('@/lib/i18n', () => ({ useI18n: () => ({ t: mocks.t }) }));
@@ -23,7 +23,7 @@ vi.mock('./ComputerFeedback', () => ({ ComputerFeedback: () => null }));
 let root: Root | undefined;
 afterEach(async () => {
   await act(async () => root?.unmount()); root = undefined;
-  mocks.stop.mockReset(); mocks.localStop.mockReset(); mocks.takeover.mockReset(); mocks.handback.mockReset(); mocks.streams.length = 0; mocks.listeners.clear(); mocks.host = 1; vi.unstubAllGlobals();
+  mocks.stop.mockReset(); mocks.takeover.mockReset(); mocks.handback.mockReset(); mocks.streams.length = 0; mocks.listeners.clear(); mocks.host = 1; vi.unstubAllGlobals();
 });
 const desktop: ComputerDesktop = { id: 'desktop', label: 'Desktop', machineId: 'machine', kind: 'remote-session', status: 'available', remote: { connectionId: 'peer', desktopId: 'real-target', hostId: 'remote-host' } };
 const control = (operator?: ComputerActor): ComputerControlState => ({ desktopId: desktop.id, owner: 'agent', reachable: true,
@@ -40,12 +40,11 @@ it('routes a foreign operator through the pinned desktop and retains ownerless u
   const work = { runtime: 'agent' as const, threadId: 'child', branchId: 'branch' };
   const rootWork = { ...work, threadId: 'root' };
   const operator: ComputerActor = { execution: { work, runId: 'child-run' }, rootWork, rootExecution: { work: rootWork, runId: 'root-run' },
-    registry: null, label: 'Child', roleAccess: { kind: 'tool-invocation' } };
+    label: 'Child' };
   mocks.stop.mockResolvedValue({ control: { ...control(operator), workStatus: 'cancel-unconfirmed' }, released: false });
   await emit(0, control(operator));
   await act(async () => [...container.querySelectorAll('button')].find(button => button.textContent === 'computer.automation.stop')!.click());
   expect(mocks.stop).toHaveBeenCalledWith(desktop.id, 'physical-epoch');
-  expect(mocks.localStop).not.toHaveBeenCalled();
   await act(async () => { mocks.host += 1; for (const listener of mocks.listeners) listener(); });
   expect(mocks.streams[0]!.close).toHaveBeenCalledOnce();
   await emit(0, control(operator));
@@ -64,7 +63,7 @@ it('ignores a late physical Stop response after a newer control epoch or Host re
   const container = document.createElement('div'); document.body.append(container);
   await act(async () => { root = createRoot(container); root.render(<ComputerDesktopPane desktop={desktop} />); });
   const work = { runtime: 'agent' as const, threadId: 'same-as-local', branchId: 'same-as-local' };
-  const operator: ComputerActor = { execution: { work, runId: 'same-run' }, rootWork: work, rootExecution: { work, runId: 'same-run' }, registry: null, label: 'Remote Agent', roleAccess: { kind: 'tool-invocation' } };
+  const operator: ComputerActor = { execution: { work, runId: 'same-run' }, rootWork: work, rootExecution: { work, runId: 'same-run' }, label: 'Remote Agent' };
   const pending: Array<(result: { control: ComputerControlState; released: boolean }) => void> = [];
   mocks.stop.mockImplementation(() => new Promise(resolve => pending.push(resolve)));
   await emit(0, control(operator));
@@ -82,7 +81,6 @@ it('ignores a late physical Stop response after a newer control epoch or Host re
   expect(container.textContent).toContain('computer.automation.cancel-unconfirmed');
   await act(async () => stop().click());
   expect(mocks.stop).toHaveBeenLastCalledWith(desktop.id, 'other-host-epoch');
-  expect(mocks.localStop).not.toHaveBeenCalled();
 });
 
 it.each(['takeover', 'handback'] as const)('keeps newer unconfirmed control over a late %s reply', async action => {

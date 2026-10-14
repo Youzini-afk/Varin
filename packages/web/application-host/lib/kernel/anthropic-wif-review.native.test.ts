@@ -4,18 +4,17 @@ import { once } from 'node:events';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { fileURLToPath, pathToFileURL } from 'node:url';
+import { fileURLToPath } from 'node:url';
 import { afterEach, expect, it } from 'vitest';
 import { createThreadsHttpAPI, configureRuntimeUrlResolver, setRuntimeExtraHeaders } from '@varin/application-client';
 import { createModelAuthority } from './model-authority.js';
+import { ModelsService } from '../models/service.js';
 import { createKernelClient } from './kernel-client.js';
 import { AgentRuntimeClient } from './agent-runtime-client.js';
 import { ThreadAdapter } from './thread-adapter.js';
 import { registerThreadRoutes } from './thread-routes.js';
 import { registerCommonRequestMiddleware } from '../platform/core-routes.js';
 const repository = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../../../..');
-// Load the credential owner's source through a runtime fixture boundary; Host compilation owns only Host sources.
-const { HostCredentialAuthority } = await import(pathToFileURL(path.join(repository, 'packages/pi-host/src/credential-authority.ts')).href);
 const kernelPath = process.env.VARIN_TEST_KERNEL_PATH ?? path.join(repository, 'kernel/target/release/varin-kernel');
 const buildVersion = (JSON.parse(await fs.readFile(path.join(repository, 'package.json'), 'utf8')) as {version: string}).version;
 const cleanups: Array<() => Promise<void>> = [];
@@ -41,9 +40,12 @@ it.each([false,true])('Anthropic subscription=%s dispatch preserves its bearer, 
   ];response.end(events.map(event=>`event: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`).join(''));
  });}));
  const file=path.join(root,'assertion.jwt');await fs.writeFile(file,assertion);
- const agentDir=path.join(root,'agent');const authority=HostCredentialAuthority.open(agentDir);
- await authority.modifyWithIntent('anthropic','replace',async()=>subscription?{type:'oauth',access:token,refresh:'fake-subscription-refresh',expires:2000000000000}:{type:'api_key',env:{ANTHROPIC_IDENTITY_TOKEN_FILE:file,ANTHROPIC_ORGANIZATION_ID:'fixture-org',ANTHROPIC_FEDERATION_RULE_ID:'fixture-rule',ANTHROPIC_WORKSPACE_ID:'fixture-workspace'}});
- await fs.writeFile(path.join(agentDir,'models.json'),JSON.stringify({providers:{anthropic:{baseUrl:base,headers:{'anthropic-beta':'fixture-feature'},models:[{id:'claude-fixture',name:'Fixture',api:'anthropic-messages',maxTokens:128}]}}}));
+ const agentDir=path.join(root,'models');const authority=new ModelsService(agentDir,{projectTrusted:()=>false});
+ const reference='anthropic-account';
+ if(subscription) await authority.credentials.linkOAuth({kind:'oauth',provider:'anthropic',accessToken:token,refreshToken:'fake-subscription-refresh',expiresAt:2000000000000},reference);
+ await authority.save({id:'anthropic',name:'Anthropic fixture',type:'anthropic',enabled:true,baseUrl:base,
+  authentication:subscription?{kind:'credential',reference}:{kind:'anthropic-federation',identityTokenFile:file,organizationId:'fixture-org',federationRuleId:'fixture-rule',workspaceId:'fixture-workspace'},
+  connection:{headers:{'anthropic-beta':'fixture-feature'}},parameters:{},models:[{id:'claude-fixture',name:'Fixture',enabled:true,operations:['chat'],maxOutputTokens:128}]},(await authority.read()).revision);
  const kernel=createKernelClient({hostId:'wif-review',storageRoot:path.join(root,'kernel'),buildVersion,kernelPath,allowCargoDevRunner:false});cleanups.push(()=>kernel.close());
  const errors:unknown[]=[];const adapter=new ThreadAdapter(new AgentRuntimeClient(kernel),createModelAuthority(authority),async()=>{throw new Error('no source');},(_id,error)=>errors.push(error));
  const app=express();registerCommonRequestMiddleware(app,{express});registerThreadRoutes(app,adapter,(_req,_res,next)=>next());const host=await listen(createServer(app));configureRuntimeUrlResolver({apiBaseUrl:host,realtimeBaseUrl:host});
@@ -57,6 +59,7 @@ it.each([false,true])('Anthropic subscription=%s dispatch preserves its bearer, 
  else {expect(sent.headers['anthropic-beta']).toContain('oauth-2025-04-20');expect(JSON.stringify(sent.body.system)).not.toContain('Claude Code');}
  const snapshot=await api.snapshot(identity);expect(JSON.stringify(snapshot.history)).toContain('Actual federated answer.');
  const state=JSON.stringify({snapshot,events:await api.events(0),run:await api.run(receipt.run_id)});for(const secret of [token,assertion]) expect(state).not.toContain(secret);
- const disk=await fs.readFile(path.join(agentDir,'auth.json'),'utf8');if(!subscription) expect(disk).not.toContain(token);expect(disk).not.toContain(assertion);
+ const config=await fs.readFile(path.join(agentDir,'models.json'),'utf8');expect(config).not.toContain(token);expect(config).not.toContain(assertion);
+ if(!subscription) await expect(fs.readFile(path.join(agentDir,'model-auth.json'),'utf8')).rejects.toMatchObject({code:'ENOENT'});
  expect(errors).toEqual([]);
 },30_000);

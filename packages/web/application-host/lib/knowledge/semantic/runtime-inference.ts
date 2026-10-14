@@ -72,6 +72,8 @@ export interface SemanticInferenceRequest extends HarnessEmbedParams {
   onReceipt?(receipt: SemanticInferenceReceipt): void;
 }
 export interface SemanticQueryEmbeddingRequest extends HarnessEmbedParams {
+  /** Original Catalog parent domain; Knowledge work never impersonates code retrieval. */
+  domain?: 'knowledge';
   /** Candidate from the credential-scoped query cache; original source fences still apply. */
   cachedResult?: HarnessEmbedResult;
   signal?: AbortSignal;
@@ -109,13 +111,14 @@ function settingsFrom(document: unknown): HarnessEmbeddingSettings {
   if (!settings) return fail('unconfigured', 'embedding-unconfigured');
   return settings;
 }
+const invalidSettings = (error: unknown): boolean => error instanceof HarnessInferenceSettingsValidationError
+  || error instanceof SyntaxError || record(error) && error.code === 'invalid_settings';
 function safeFailure(error: unknown): SemanticInferenceError {
   if (error instanceof SemanticInferenceError) return error;
-  if (error instanceof HarnessInferenceSettingsValidationError) return new SemanticInferenceError('invalid', 'embedding-settings-invalid');
+  if (invalidSettings(error)) return new SemanticInferenceError('invalid', 'embedding-settings-invalid');
   const code = record(error) && typeof error.code === 'string' ? error.code : '';
-  if (code === 'inference-settings-invalid') return new SemanticInferenceError('invalid', 'embedding-settings-invalid');
-  if (code === 'embedding-provider-disabled') return new SemanticInferenceError('disabled', code);
-  if (code === 'embedding-endpoint-invalid' || code === 'embedding-protocol-invalid' || code === 'provider_config_invalid') {
+  if (code === 'model-channel-disabled' || code === 'model-disabled') return new SemanticInferenceError('disabled', code);
+  if (code === 'model-endpoint-invalid' || code === 'models-config-invalid' || code === 'channel-invalid' || code === 'channel-model-invalid') {
     return new SemanticInferenceError('invalid', 'embedding-provider-invalid');
   }
   return new SemanticInferenceError('unavailable', 'embedding-binding-unavailable');
@@ -185,14 +188,16 @@ export function createSemanticInference(
           // revocation and remains latched even if a later candidate re-enables the capability.
           let current: unknown;
           try { current = await readGlobalSettings(); }
-          catch (error) { if (!record(error) || error.code !== 'inference-settings-invalid') throw error; }
+          catch (error) { if (!invalidSettings(error)) throw error; }
           if (record(current) && record(current.harness) && record(current.harness.embedding)
             && current.harness.embedding.enabled === false) revoked = true;
           if (revoked || capturedRevocation !== revocationGeneration) return fail('disabled', 'embedding-disabled');
           try { await provider.assertAvailable(); }
           catch (error) {
             const code = record(error) ? error.code : undefined;
-            if (code === 'embedding-provider-disabled' || code === 'embedding-provider-removed' || code === 'credential-scope-changed') revoked = true;
+            if (code === 'model-channel-disabled' || code === 'model-channel-unavailable' || code === 'model-disabled'
+              || code === 'model-unavailable' || code === 'model-operation-unavailable' || code === 'credential-scope-changed'
+              || code === 'credential-missing') revoked = true;
             throw error;
           }
           signal?.throwIfAborted();
@@ -252,7 +257,8 @@ export function createSemanticInference(
                 const destination = new URL(String(url)).toString();
                 if (destination !== provider.requestUrl || init?.method !== 'POST' || typeof init.body !== 'string') return fail('invalid', 'embedding-request-binding-mismatch');
                 return call.request({ binding: { requestKind: 'model_compute', purpose: params.purpose === 'document'
-                  ? 'code-retrieval-document-embedding' : 'code-retrieval-query-embedding',
+                  ? params.domain === 'knowledge' ? 'knowledge-document-embedding' : 'code-retrieval-document-embedding'
+                  : params.domain === 'knowledge' ? 'knowledge-query-embedding' : 'code-retrieval-query-embedding',
                   providerId: binding.providerId, modelId: binding.modelId, configurationId: binding.configurationId,
                   executor: { kind: 'http', api: binding.protocol, endpoint: destination, credentialScope: identity.credentialScope } },
                   request: { purpose: params.purpose, wire: JSON.parse(init.body) }, destination, init, connection,
@@ -464,7 +470,7 @@ export function createSemanticInference(
         signal?.throwIfAborted();
         // Ordinary edits retain the accepted model; explicit disable remains latched.
         try { await readGlobalSettings(); }
-        catch (error) { if (!record(error) || error.code !== 'inference-settings-invalid') throw error; }
+        catch (error) { if (!invalidSettings(error)) throw error; }
         if (disabled || capturedRevocation !== revocationGeneration) return fail('disabled', 'embedding-disabled');
       });
     },

@@ -36,8 +36,6 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { promisify } from 'node:util';
 import updaterPkg from 'electron-updater';
 import type { UpdateCheckResult } from 'electron-updater';
-import type { HostHandshakeResult } from '@varin/protocol';
-import type { PiRuntimeBroker, PiRuntimeBrokerEvent } from '@varin/runtime-broker';
 import {
   isVarinDesktopCommand,
   type DesktopHostsConfig as DesktopHostsContract,
@@ -53,11 +51,7 @@ import { readHostConnections, writeHostConnections } from '@varin/web/server/lib
 import { createDesktopNetworkFetch } from './harness-network-fetch.js';
 import { createTray, createTrayController, type TrayAction } from './tray.js';
 import { NotificationListener } from './notification-listener.js';
-import {
-  createDesktopPiRuntimeBroker,
-  electronPiHostEntryCandidates,
-  resolveElectronPiHostEntry,
-} from './pi-runtime.js';
+import { routeThreadWindow, runtimeTargetKey, threadMiniChatUrl, threadWindowKey as buildThreadWindowKey } from './thread-window-target.js';
 import { resolveStartupUrlProbePlan, shouldIgnoreLoopbackConnectionLimit } from './startup-url-selection.js';
 import { sanitizeRuntimeRequestHeaders } from './runtime-request-headers.js';
 import { assertUpdaterCapability } from './updater-capability.js';
@@ -94,7 +88,6 @@ import {
   clearAppImageArgv0FromProcessEnv,
 } from '@varin/web/server/index.js';
 import { createSettingsFileStore, type VarinSettingsDocument } from '@varin/settings-store';
-import { PI_RUNTIME_ISSUE_HOST_ENTRY_UNAVAILABLE } from '@varin/protocol';
 
 const execFileAsync = promisify(execFile);
 
@@ -192,7 +185,7 @@ log.transports.console.level = isDev ? 'debug' : 'warn';
 // The in-process web server runs in this same Node process and uses plain
 // `console.log/warn/error`. Without piping console through electron-log,
 // that output never lands in ~/Library/Logs/Varin/main.log and we
-// can't diagnose issues (e.g. Pi runtime lifecycle, SSE disconnects) after
+// can't diagnose issues (e.g. native runtime lifecycle, SSE disconnects) after
 // the fact. Route all console calls through electron-log so server-side
 // diagnostics are persisted.
 Object.assign(console, log.functions);
@@ -330,12 +323,9 @@ interface DesktopState {
   lastFocusedWindowId: number | null;
   localOrigin: string | null;
   mainWindow: BrowserWindow | null;
-  miniChatWindowsBySession: Map<string, BrowserWindow>;
+  miniChatWindowsByThread: Map<string, BrowserWindow>;
   notificationListener: NotificationListener | null;
   pendingUpdate: DesktopPendingUpdate<UpdateCheckResult> | null;
-  piRuntimeBroker: PiRuntimeBroker | null;
-  piRuntimeHandshake: HostHandshakeResult | null;
-  piRuntimeStartPromise: Promise<HostHandshakeResult> | null;
   quitConfirmationPending: boolean;
   quitConfirmed: boolean;
   quitInProgress: boolean;
@@ -361,9 +351,6 @@ let desktopComputerFeedback: ReturnType<typeof createComputerFeedback> | null = 
 let desktopComputerControls: ReturnType<typeof createComputerControls> | null = null;
 const state: DesktopState = {
   serverHandle: null,
-  piRuntimeBroker: null,
-  piRuntimeHandshake: null,
-  piRuntimeStartPromise: null,
   sidecarUrl: null,
   localOrigin: null,
   apiBaseUrl: null,
@@ -387,7 +374,7 @@ const state: DesktopState = {
   focusedWindowIds: new Set<number>(),
   windowGeometryRevisions: new Map<string, number>(),
   windowGeometryTimers: new Map<string, ReturnType<typeof setTimeout>>(),
-  miniChatWindowsBySession: new Map<string, BrowserWindow>(),
+  miniChatWindowsByThread: new Map<string, BrowserWindow>(),
   sshStatuses: new Map<string, unknown>(),
   sshLogs: new Map<string, string[]>(),
   tray: null,
@@ -397,134 +384,6 @@ const state: DesktopState = {
   trayFocusListener: null,
   lastFocusedWindowId: null,
   keepAwakeBlockerId: null,
-};
-
-let resolvedDesktopPiHostEntry: string | undefined;
-const getDesktopPiHostEntry = (): string => {
-  if (resolvedDesktopPiHostEntry) return resolvedDesktopPiHostEntry;
-  const options = {
-    packaged: app.isPackaged,
-    resourcesPath: process.resourcesPath,
-  };
-  try {
-    resolvedDesktopPiHostEntry = resolveElectronPiHostEntry(options);
-  } catch (error) {
-    if (recordOf(error).code !== PI_RUNTIME_ISSUE_HOST_ENTRY_UNAVAILABLE) throw error;
-    const [expectedEntry] = electronPiHostEntryCandidates(options);
-    if (!expectedEntry) throw error;
-    // Keep the application host alive so Runtime Manager can publish a typed,
-    // repairable installation error instead of crashing the whole desktop app.
-    resolvedDesktopPiHostEntry = expectedEntry;
-    log.error('[pi-runtime] packaged Host entry is unavailable', {
-      expectedEntry,
-      error: error instanceof Error ? error.message : String(error),
-    });
-  }
-  return resolvedDesktopPiHostEntry;
-};
-
-const emitPiRuntimeEvent = (event: PiRuntimeBrokerEvent): void => {
-  if (event.kind === 'diagnostic') {
-    if (event.level === 'error') {
-      log.warn('[pi-runtime]', event.message, { role: event.role, workerId: event.workerId });
-    } else {
-      log.info('[pi-runtime]', event.message, { role: event.role, workerId: event.workerId });
-    }
-    return;
-  }
-  if (event.kind === 'worker.exit') {
-    const details = {
-      workerId: event.workerId,
-      role: event.role,
-      sessionId: event.sessionId || null,
-      code: event.code,
-      signal: event.signal,
-      expected: event.expected,
-    };
-    if (event.expected) log.info('[pi-runtime] worker exited', details);
-    else log.error('[pi-runtime] worker exited unexpectedly', details);
-    if (!event.expected && event.role === 'catalog') {
-      state.piRuntimeHandshake = null;
-      const timer = setTimeout(() => {
-        if (!state.piRuntimeBroker || state.quitRequested || state.backgroundShutdownComplete) return;
-        void ensurePiRuntime().catch((error) => {
-          log.error('[pi-runtime] catalog restart failed:', error);
-        });
-      }, 250);
-      timer.unref?.();
-    }
-    return;
-  }
-  if (event.envelope.event === 'host.error') {
-    log.warn('[pi-runtime] host error', {
-      workerId: event.workerId,
-      role: event.role,
-      sessionId: event.sessionId || null,
-      code: event.envelope.data.code,
-      message: event.envelope.data.message,
-    });
-  }
-};
-
-const ensurePiRuntime = async (): Promise<HostHandshakeResult> => {
-  if (state.piRuntimeStartPromise) return state.piRuntimeStartPromise;
-  if (state.piRuntimeBroker && state.piRuntimeHandshake) return state.piRuntimeHandshake;
-
-  const agentDir = typeof process.env.VARIN_AGENT_DIR === 'string'
-    ? process.env.VARIN_AGENT_DIR.trim()
-    : '';
-  const createdBroker = !state.piRuntimeBroker;
-  const broker = state.piRuntimeBroker || createDesktopPiRuntimeBroker({
-    ...(agentDir ? { agentDir } : {}),
-    clientVersion: APP_VERSION,
-    emit: emitPiRuntimeEvent,
-    hostEntry: getDesktopPiHostEntry(),
-    packaged: app.isPackaged,
-    resourcesPath: process.resourcesPath,
-  });
-  if (createdBroker) state.piRuntimeBroker = broker;
-  state.piRuntimeStartPromise = (async () => {
-    try {
-      const handshake = await broker.warmup();
-      state.piRuntimeHandshake = handshake;
-      log.info('[pi-runtime] ready', {
-        hostVersion: handshake.hostVersion,
-        protocolVersion: handshake.protocolVersion,
-        piVersion: handshake.runtime.piVersion,
-        nodeVersion: handshake.runtime.nodeVersion,
-        source: handshake.runtime.source,
-      });
-      return handshake;
-    } catch (error) {
-      if (createdBroker && state.piRuntimeBroker === broker) state.piRuntimeBroker = null;
-      state.piRuntimeHandshake = null;
-      if (createdBroker) await broker.dispose();
-      throw error;
-    } finally {
-      state.piRuntimeStartPromise = null;
-    }
-  })();
-  return state.piRuntimeStartPromise;
-};
-
-const shutdownPiRuntime = async (): Promise<void> => {
-  const starting = state.piRuntimeStartPromise;
-  if (starting) {
-    try {
-      await starting;
-    } catch {
-      // Startup already disposed its failed broker.
-    }
-  }
-  const broker = state.piRuntimeBroker;
-  state.piRuntimeBroker = null;
-  state.piRuntimeHandshake = null;
-  if (!broker) return;
-  try {
-    await broker.dispose();
-  } catch (error) {
-    log.warn('[pi-runtime] failed to stop Pi workers:', error);
-  }
 };
 
 const setDesktopKeepAwakeActive = (enabled: boolean): boolean => {
@@ -612,7 +471,6 @@ const shutdownBackgroundServices = async ({ allowDuringUpdate = false }: { allow
         return;
       }
       await killSidecar();
-      await shutdownPiRuntime();
       if (state.notificationListener) {
         state.notificationListener.stop();
         state.notificationListener = null;
@@ -697,7 +555,7 @@ const performConfirmedQuit = async () => {
 
 // Hard-stop signals (`Ctrl+C` on `electron:dev`, an external `kill`/SIGTERM,
 // terminal close) bypass the normal app-quit flow — which would orphan the
-// in-process web server's Pi runtime. Run the same background teardown the
+// in-process Application Host. Run the same background teardown the
 // quit path uses, then exit. The startup
 // reaper remains the backstop for an unhandled hard crash (SIGKILL).
 let hardStopInProgress = false;
@@ -902,7 +760,7 @@ const buildRendererRuntimeConfig = (
 ): RendererRuntimeConfig => {
   const apiBaseUrl = typeof runtimeConfig.apiBaseUrl === 'string' ? runtimeConfig.apiBaseUrl : (state.apiBaseUrl || '');
   const clientToken = typeof runtimeConfig.clientToken === 'string' ? runtimeConfig.clientToken : (state.clientToken || '');
-  const requestHeaders = sanitizeRuntimeRequestHeaders(runtimeConfig.requestHeaders || state.requestHeaders || {});
+  const requestHeaders = sanitizeRuntimeRequestHeaders(runtimeConfig.requestHeaders ?? state.requestHeaders ?? {});
   // Relay-capable hosts have no injectable HTTP base: the renderer reads this
   // host id, probes the direct leg, and falls back to the E2EE tunnel itself.
   const relayHostId = typeof runtimeConfig.relayHostId === 'string' ? runtimeConfig.relayHostId : '';
@@ -1407,7 +1265,7 @@ const NATIVE_NOTIFICATION_DEDUPE_TTL_MS = 5000;
 const getNativeNotificationClaimKey = (payload: Record<string, unknown>): string => {
   const tag = typeof payload?.tag === 'string' ? payload.tag.trim() : '';
   if (tag) return tag;
-  return [payload?.sessionId, payload?.kind, payload?.title, payload?.body]
+  return [payload?.threadId, payload?.branchId, payload?.kind, payload?.title, payload?.body]
     .filter((value): value is string => typeof value === 'string' && Boolean(value.trim()))
     .map((value) => value.trim())
     .join('|');
@@ -1433,7 +1291,7 @@ const claimNativeNotification = (payload: Record<string, unknown>): boolean => {
   return true;
 };
 
-const maybeShowNativeNotification = (rawInput: unknown): void => {
+const maybeShowNativeNotification = (rawInput: unknown, runtimeConfig: Partial<RendererRuntimeConfig> = {}): void => {
   const payload = normalizeNotificationInput(rawInput);
   const requireHidden = Boolean(payload.requireHidden ?? payload.require_hidden);
 
@@ -1445,7 +1303,7 @@ const maybeShowNativeNotification = (rawInput: unknown): void => {
     return;
   }
 
-  if (!claimNativeNotification(payload)) {
+  if (!claimNativeNotification({ ...payload, tag: `${runtimeTargetKey(runtimeConfig)}:${getNativeNotificationClaimKey(payload)}` })) {
     return;
   }
 
@@ -1453,9 +1311,10 @@ const maybeShowNativeNotification = (rawInput: unknown): void => {
     ? payload.title.trim()
     : 'Varin';
   const body = typeof payload.body === 'string' ? payload.body : '';
-  const sessionId = typeof payload.sessionId === 'string' && payload.sessionId.trim()
-    ? payload.sessionId.trim()
+  const threadId = typeof payload.threadId === 'string' && payload.threadId.trim()
+    ? payload.threadId.trim()
     : null;
+  const branchId = typeof payload.branchId === 'string' ? payload.branchId.trim() : '';
   const directory = typeof payload.directory === 'string' && payload.directory.trim()
     ? payload.directory.trim()
     : null;
@@ -1471,10 +1330,8 @@ const maybeShowNativeNotification = (rawInput: unknown): void => {
   const release = () => { activeNotifications.delete(notification); };
 
   notification.on('click', () => {
-    focusForegroundWindow();
-    if (sessionId) {
-      emitToAllWindows('varin:open-session', { sessionId, directory });
-    }
+    if (threadId && branchId) void focusMainWindowWithThread({ threadId, branchId, directory }, runtimeConfig);
+    else focusForegroundWindow();
     release();
   });
   notification.on('close', release);
@@ -1572,7 +1429,7 @@ const loadShellEnv = (): Record<string, string> | null => {
 // Merge the user's login-shell env (PATH, etc.) into this process before we
 import { pathLooksUserConfigured, mergePathValues } from '@varin/web/server/index.js';
 
-// import/start the server in-process. The server and its children (Pi host,
+// import/start the server in-process. The server and its children (native kernel,
 // git, etc.) inherit process.env directly now — there is no sidecar
 // subprocess to hand a custom env to.
 const inheritUserShellEnv = () => {
@@ -1668,7 +1525,6 @@ const spawnLocalServer = async () => {
   process.env.no_proxy = process.env.no_proxy || 'localhost,127.0.0.1';
 
   const { startWebUiServer } = await import('@varin/web/server/index.js');
-  const hostEntry = getDesktopPiHostEntry();
   const outboundSession = session.fromPartition('varin-harness-egress', { cache: false });
 
   const computerFeedback = createComputerFeedback();
@@ -1692,9 +1548,7 @@ const spawnLocalServer = async () => {
     uiPassword: desktopUiPassword || null,
     attachSignals: false,
     exitOnShutdown: false,
-    hostEntry,
     apiOnly: false,
-    requirePiRuntime: false,
     renderWebPage: async (url, signal) => {
       const result = await renderDesktopWebPage(url, signal ? { signal } : {});
       if (!result.html) {
@@ -1702,28 +1556,11 @@ const spawnLocalServer = async () => {
       }
       return result.html;
     },
-    createPiRuntimeBroker: (brokerOptions) => createDesktopPiRuntimeBroker({
-      ...(typeof process.env.VARIN_AGENT_DIR === 'string' && process.env.VARIN_AGENT_DIR.trim()
-        ? { agentDir: process.env.VARIN_AGENT_DIR.trim() }
-        : {}),
-      clientVersion: APP_VERSION,
-      emit: emitPiRuntimeEvent,
-      packaged: app.isPackaged,
-      resourcesPath: process.resourcesPath,
-      ...brokerOptions,
-    }),
-    pickPiPackageRoot: async () => {
-      const options: OpenDialogOptions = { properties: ['openDirectory', 'createDirectory'] };
-      const result = state.mainWindow
-        ? await dialog.showOpenDialog(state.mainWindow, options)
-        : await dialog.showOpenDialog(options);
-      return result.canceled ? null : result.filePaths[0] || null;
-    },
     openFilesystemPath: async (targetPath) => {
       const errorMessage = await shell.openPath(targetPath);
       if (errorMessage) throw new Error(errorMessage);
     },
-    onDesktopNotification: (payload) => maybeShowNativeNotification(payload),
+    onDesktopNotification: (payload) => maybeShowNativeNotification(payload, { apiBaseUrl: state.localOrigin || state.sidecarUrl || '', clientToken: readDesktopLocalClientToken(), requestHeaders: {} }),
     onConnectionStatus: (status) => emitToAllWindows('varin:ssh-instance-status', status),
     getIsWindowFocused: isAnyWindowFocused,
     getDesktopRuntimeConfig: () => ({
@@ -2130,6 +1967,9 @@ const setTaskbarProgress = (value: number): void => {
 };
 
 interface DeepLink {
+  branchId?: string | undefined;
+  hostId?: string | undefined;
+  runtimeConfig?: Partial<RendererRuntimeConfig> | undefined;
   directory?: string | undefined;
   raw?: string | undefined;
   type: string;
@@ -2173,7 +2013,7 @@ const parseDeepLink = (raw: unknown): DeepLink | null => {
     const value = segments.length > 0
       ? decodeURIComponent(segments.join('/'))
       : '';
-    return { type, value, raw: trimmed };
+    return { type, value, raw: trimmed, branchId: url.searchParams.get('branch') || undefined, hostId: url.searchParams.get('host') || undefined, directory: url.searchParams.get('dir') || undefined };
   } catch {
     return null;
   }
@@ -2424,8 +2264,11 @@ const dispatchDeepLink = (link: DeepLink | undefined): void => {
     log.warn('[electron] invalid connect deep-link payload');
     return;
   }
-  if (link.type === 'session' && link.value) {
-    emitToAllWindows('varin:open-session', { sessionId: link.value, directory: link.directory || '' });
+  if (link.type === 'thread' && link.value && link.branchId) {
+    const host = link.hostId ? readDesktopHostsConfig().hosts.find(host => host.id === link.hostId) : undefined;
+    if (link.hostId && !host) return;
+    const runtimeConfig = link.runtimeConfig ?? (host ? { apiBaseUrl: host.apiUrl || host.url, clientToken: host.clientToken || '', requestHeaders: sanitizeRuntimeRequestHeaders(host.requestHeaders), relayHostId: host.relay ? host.id : '' } : getWindowRuntimeConfig(state.mainWindow));
+    void focusMainWindowWithThread({ threadId: link.value, branchId: link.branchId, directory: link.directory || '' }, runtimeConfig);
     return;
   }
   if (link.type === 'host' && link.value) {
@@ -2948,13 +2791,14 @@ const createAdditionalWindow = async (
 
 interface MiniChatWindowInput {
   directory?: string | undefined;
-  mode: 'draft' | 'session';
+  mode: 'draft' | 'thread';
   projectId?: string | undefined;
   runtimeConfig?: Partial<RendererRuntimeConfig> | undefined;
-  sessionId?: string | undefined;
+  threadId?: string | undefined;
+  branchId?: string | undefined;
 }
 
-const buildMiniChatUrl = ({ mode, sessionId = '', directory = '', projectId = '' }: MiniChatWindowInput): string => {
+const buildMiniChatUrl = ({ mode, threadId = '', branchId = '', directory = '', projectId = '' }: MiniChatWindowInput): string => {
   const base = shouldUsePackagedUi()
     ? buildPackagedUiUrl('/mini-chat.html')
     : state.localOrigin || state.sidecarUrl;
@@ -2962,18 +2806,9 @@ const buildMiniChatUrl = ({ mode, sessionId = '', directory = '', projectId = ''
     throw new Error('Local UI is not available');
   }
 
-  const url = new URL(shouldUsePackagedUi() ? base : '/mini-chat.html', base);
-  url.searchParams.set('mode', mode === 'session' ? 'session' : 'draft');
-  if (sessionId) url.searchParams.set('sessionId', sessionId);
-  if (directory) url.searchParams.set('directory', directory);
-  if (projectId) url.searchParams.set('projectId', projectId);
-  return url.toString();
+  return threadMiniChatUrl(new URL(shouldUsePackagedUi() ? base : '/mini-chat.html', base).toString(), { mode, threadId, branchId, directory, projectId });
 };
 
-const miniChatSessionWindowKey = (runtimeConfig: Partial<RendererRuntimeConfig>, sessionId: string): string => {
-  const runtimeKey = normalizeHostUrl(runtimeConfig?.apiBaseUrl || state.apiBaseUrl || state.localOrigin || state.sidecarUrl || '') || 'local';
-  return `${runtimeKey}\n${sessionId}`;
-};
 
 const getWindowRuntimeConfig = (browserWindow: BrowserWindow | null | undefined): RendererRuntimeConfig => {
   const fallback = {
@@ -2994,26 +2829,28 @@ const getWindowRuntimeConfig = (browserWindow: BrowserWindow | null | undefined)
 
 const createMiniChatWindow = async ({
   mode,
-  sessionId = '',
+  threadId = '',
+  branchId = '',
   directory = '',
   projectId = '',
   runtimeConfig = {},
 }: MiniChatWindowInput): Promise<BrowserWindow> => {
   const effectiveRuntimeConfig = {
-    apiBaseUrl: normalizeHostUrl(runtimeConfig.apiBaseUrl || state.apiBaseUrl || state.localOrigin || state.sidecarUrl || '') || '',
-    clientToken: sanitizeClientTokenForStorage(runtimeConfig.clientToken || state.clientToken || '') || '',
-    requestHeaders: sanitizeRuntimeRequestHeaders(runtimeConfig.requestHeaders || state.requestHeaders || {}),
+    apiBaseUrl: normalizeHostUrl(runtimeConfig.apiBaseUrl ?? state.apiBaseUrl ?? state.localOrigin ?? state.sidecarUrl ?? '') || '',
+    clientToken: sanitizeClientTokenForStorage(runtimeConfig.clientToken ?? state.clientToken ?? '') || '',
+    requestHeaders: sanitizeRuntimeRequestHeaders(runtimeConfig.requestHeaders ?? state.requestHeaders ?? {}),
+    relayHostId: runtimeConfig.relayHostId ?? '',
   };
-  const sessionWindowKey = mode === 'session' && sessionId ? miniChatSessionWindowKey(effectiveRuntimeConfig, sessionId) : '';
-  if (mode === 'session' && sessionId) {
-    const existing = state.miniChatWindowsBySession.get(sessionWindowKey);
+  const threadWindowKey = mode === 'thread' && threadId ? buildThreadWindowKey(effectiveRuntimeConfig, { threadId, branchId }) : '';
+  if (mode === 'thread' && threadId) {
+    const existing = state.miniChatWindowsByThread.get(threadWindowKey);
     if (existing && !existing.isDestroyed()) {
       if (existing.isMinimized()) existing.restore();
       existing.show();
       existing.focus();
       return existing;
     }
-    state.miniChatWindowsBySession.delete(sessionWindowKey);
+    state.miniChatWindowsByThread.delete(threadWindowKey);
   }
 
   const desktopLocalOrigin = state.localOrigin || '';
@@ -3054,18 +2891,18 @@ const createMiniChatWindow = async ({
   browserWindow.__varinRuntimeConfig = effectiveRuntimeConfig;
   browserWindow.__varinInitScript = buildInitScript(desktopLocalOrigin, state.bootOutcome, desktopApiBaseUrl, desktopClientToken, desktopRequestHeaders);
   browserWindow.__varinMiniChat = true;
-  browserWindow.__varinMiniChatSessionId = sessionWindowKey;
+  browserWindow.__varinMiniChatThreadKey = threadWindowKey;
   browserWindow.__varinPinned = false;
 
-  if (sessionWindowKey) {
-    state.miniChatWindowsBySession.set(sessionWindowKey, browserWindow);
+  if (threadWindowKey) {
+    state.miniChatWindowsByThread.set(threadWindowKey, browserWindow);
   }
 
   browserWindow.on('closed', () => {
-    if (browserWindow.__varinMiniChatSessionId) {
-      const existing = state.miniChatWindowsBySession.get(browserWindow.__varinMiniChatSessionId);
+    if (browserWindow.__varinMiniChatThreadKey) {
+      const existing = state.miniChatWindowsByThread.get(browserWindow.__varinMiniChatThreadKey);
       if (existing?.id === browserWindow.id) {
-        state.miniChatWindowsBySession.delete(browserWindow.__varinMiniChatSessionId);
+        state.miniChatWindowsByThread.delete(browserWindow.__varinMiniChatThreadKey);
       }
     }
   });
@@ -3113,7 +2950,7 @@ const createMiniChatWindow = async ({
     }
   });
 
-  await navigateWindow(browserWindow, buildMiniChatUrl({ mode, sessionId, directory, projectId }));
+  await navigateWindow(browserWindow, buildMiniChatUrl({ mode, threadId, branchId, directory, projectId }));
   return browserWindow;
 };
 
@@ -3137,24 +2974,6 @@ const setMiniChatPinned = (browserWindow: BrowserWindow | null | undefined, pinn
   return { pinned: nextPinned };
 };
 
-const resolveMiniChatRuntimeConfig = (
-  browserWindow: BrowserWindow | null | undefined,
-  args: Record<string, unknown> = {},
-): RendererRuntimeConfig => {
-  const windowConfig = getWindowRuntimeConfig(browserWindow);
-  const argApiBaseUrl = typeof args.apiBaseUrl === 'string' ? args.apiBaseUrl : '';
-  const targetUrl = normalizeHostUrl(argApiBaseUrl || windowConfig.apiBaseUrl || state.apiBaseUrl || state.localOrigin || state.sidecarUrl || '');
-  const providedToken = sanitizeClientTokenForStorage(args.clientToken);
-  const storedToken = targetUrl ? resolveStoredClientTokenForUrl(targetUrl) : '';
-  const windowToken = targetUrl && sameOrigin(windowConfig.apiBaseUrl, targetUrl) ? windowConfig.clientToken : '';
-  const windowHeaders = targetUrl && sameOrigin(windowConfig.apiBaseUrl, targetUrl) ? windowConfig.requestHeaders : {};
-  return {
-    apiBaseUrl: targetUrl || '',
-    clientToken: providedToken || windowToken || storedToken || '',
-    requestHeaders: sanitizeRuntimeRequestHeaders(args.requestHeaders || windowHeaders || {}),
-  };
-};
-
 const resolveInitialUrl = async () => {
   const hmrApiPort = process.env.VARIN_HMR_API_PORT || '3901';
   const hmrUiPort = process.env.VARIN_HMR_UI_PORT || '5173';
@@ -3173,7 +2992,7 @@ const resolveInitialUrl = async () => {
       ? hmrApiUrl
       : await spawnLocalServer();
 
-  // Local server owns Pi discovery and activation. Do not block the window on a Pi worker.
+  // The embedded Application Host owns native runtime startup and readiness.
 
   const localUiUrl = usePackagedUi
     ? buildPackagedUiUrl('/index.html')
@@ -3311,7 +3130,7 @@ const setupTrayAndListener = (bootOutcome: BootOutcome | null): void => {
     clientToken,
     requestHeaders,
     onNotification: (payload) => {
-      maybeShowNativeNotification(payload);
+      maybeShowNativeNotification(payload, { apiBaseUrl: serverUrl, clientToken, requestHeaders });
     },
   });
   state.notificationListener.start().catch((error) => {
@@ -4263,13 +4082,13 @@ const handleInvoke = async (
     }
 
     case 'desktop_notify':
-      maybeShowNativeNotification(args);
+      maybeShowNativeNotification(args, getWindowRuntimeConfig(browserWindow));
       return null;
 
     case 'desktop_tray_update':
       if (state.trayController) {
         try {
-          state.trayController.update(args || {});
+          state.trayController.update({ ...args, runtimeConfig: getWindowRuntimeConfig(browserWindow) });
         } catch (error) {
           log.warn('[electron] tray update failed', error);
         }
@@ -4780,18 +4599,19 @@ const handleInvoke = async (
       return null;
     }
 
-    case 'desktop_open_session_mini_chat_window': {
-      const sessionId = typeof args.sessionId === 'string' ? args.sessionId.trim() : '';
-      if (!sessionId) throw new Error('Session id is required');
+    case 'desktop_open_thread_mini_chat_window': {
+      const threadId = typeof args.threadId === 'string' ? args.threadId.trim() : '';
+      const branchId = typeof args.branchId === 'string' ? args.branchId.trim() : '';
+      if (!threadId || !branchId) throw new Error('Thread and branch ids are required');
       const directory = typeof args.directory === 'string' ? args.directory.trim() : '';
-      await createMiniChatWindow({ mode: 'session', sessionId, directory, runtimeConfig: resolveMiniChatRuntimeConfig(browserWindow, args) });
+      await createMiniChatWindow({ mode: 'thread', threadId, branchId, directory, runtimeConfig: getWindowRuntimeConfig(browserWindow) });
       return null;
     }
 
     case 'desktop_open_draft_mini_chat_window': {
       const directory = typeof args.directory === 'string' ? args.directory.trim() : '';
       const projectId = typeof args.projectId === 'string' ? args.projectId.trim() : '';
-      await createMiniChatWindow({ mode: 'draft', directory, projectId, runtimeConfig: resolveMiniChatRuntimeConfig(browserWindow, args) });
+      await createMiniChatWindow({ mode: 'draft', directory, projectId, runtimeConfig: getWindowRuntimeConfig(browserWindow) });
       return null;
     }
 
@@ -4802,29 +4622,18 @@ const handleInvoke = async (
       return { pinned: Boolean(browserWindow?.__varinPinned) };
 
     case 'desktop_focus_main_window': {
-      const sessionId = typeof args.sessionId === 'string' ? args.sessionId.trim() : '';
+      const threadId = typeof args.threadId === 'string' ? args.threadId.trim() : '';
+      const branchId = typeof args.branchId === 'string' ? args.branchId.trim() : '';
       const directory = typeof args.directory === 'string' ? args.directory.trim() : '';
-      const mode = typeof args.mode === 'string' ? args.mode.trim() : '';
-      const projectId = typeof args.projectId === 'string' ? args.projectId.trim() : '';
-      const mainWindow = state.mainWindow && !state.mainWindow.isDestroyed() ? state.mainWindow : null;
-
-      // No live main window (e.g. "Open in main window" from a mini-chat after
-      // the main window was closed): create one and open the session in it. A
-      // fresh window can't take an immediate emit, so queue the session as a
-      // pending deep-link and let did-finish-load flush it once ready.
-      if (!mainWindow) {
-        if (sessionId) pendingDeepLinks.push({ type: 'session', value: sessionId, directory });
-        await openMainWindow();
-        return { focused: true };
-      }
-
-      if (mainWindow.isMinimized()) mainWindow.restore();
-      mainWindow.show();
-      mainWindow.focus();
-      if (sessionId) {
-        emitToWindow(mainWindow, 'varin:open-session', { sessionId, directory });
-      } else if (mode === 'draft') {
-        emitToWindow(mainWindow, 'varin:open-draft-session', { directory, projectId });
+      const runtimeConfig = getWindowRuntimeConfig(browserWindow);
+      if (threadId) {
+        if (!branchId) throw new Error('Branch id is required');
+        await focusMainWindowWithThread({ threadId, branchId, directory }, runtimeConfig);
+      } else {
+        await focusMainWindowRuntime(runtimeConfig);
+        if (args.mode === 'draft' && state.mainWindow) emitToWindow(state.mainWindow, 'varin:open-draft-thread', {
+          directory, projectId: typeof args.projectId === 'string' ? args.projectId : '',
+        });
       }
       return { focused: true };
     }
@@ -5369,7 +5178,7 @@ const setupTray = () => {
     });
     // Seed an empty snapshot so the icon appears immediately; the renderer
     // pushes the real state once the sync stores are mounted.
-    state.trayController.update({ sessions: [], approvals: [] });
+    state.trayController.update({ threads: [], approvals: [] });
     if (!state.trayFocusListener) {
       state.trayFocusListener = (_event, browserWindow) => {
         if (browserWindow && !browserWindow.isDestroyed()) {
@@ -5406,22 +5215,27 @@ const revealMainWindow = async () => {
 // freshly created window can't receive an immediate emit (its renderer hasn't
 // mounted its listeners yet), so we queue the session as a pending deep-link —
 // the did-finish-load handler flushes it once the window is ready.
-const focusMainWindowWithSession = async (sessionId: string, directory: string): Promise<void> => {
-  if (state.mainWindow && !state.mainWindow.isDestroyed()) {
-    if (state.mainWindow.isMinimized()) state.mainWindow.restore();
-    state.mainWindow.show();
-    state.mainWindow.focus();
-    if (sessionId) {
-      if (state.mainWindow.webContents.isLoading()) {
-        pendingDeepLinks.push({ type: 'session', value: sessionId, directory: directory || '' });
-        return;
-      }
-      emitToWindow(state.mainWindow, 'varin:open-session', { sessionId, directory: directory || '' });
-    }
-    return;
-  }
-  if (sessionId) pendingDeepLinks.push({ type: 'session', value: sessionId, directory: directory || '' });
-  await openMainWindow();
+const focusMainWindowRuntime = async (runtimeConfig: Partial<RendererRuntimeConfig>): Promise<BrowserWindow | null> => {
+  const current = state.mainWindow && !state.mainWindow.isDestroyed() ? state.mainWindow : null;
+  if (current && runtimeTargetKey(getWindowRuntimeConfig(current)) === runtimeTargetKey(runtimeConfig)) return revealMainWindow();
+  const targetUrl = shouldUsePackagedUi() ? buildPackagedUiUrl('/index.html') : state.localOrigin || state.sidecarUrl;
+  if (!targetUrl) return null;
+  return activateMainWindow(targetUrl, state.localOrigin, state.bootOutcome, runtimeConfig);
+};
+
+const focusMainWindowWithThread = async (
+  target: { threadId: string; branchId: string; directory: string | null },
+  runtimeConfig: Partial<RendererRuntimeConfig>,
+): Promise<void> => {
+  await routeThreadWindow<BrowserWindow, Partial<RendererRuntimeConfig>>(target, runtimeConfig, {
+    current: () => state.mainWindow && !state.mainWindow.isDestroyed() ? state.mainWindow : null,
+    host: getWindowRuntimeConfig,
+    loading: window => window.webContents.isLoading(),
+    activate: focusMainWindowRuntime,
+    focus: window => { if (window.isMinimized()) window.restore(); window.show(); window.focus(); },
+    queue: (identity, host) => { pendingDeepLinks.push({ type: 'thread', value: identity.threadId, branchId: identity.branchId, directory: identity.directory || '', runtimeConfig: host }); },
+    emit: (window, identity, host) => emitToWindow(window, 'varin:open-thread', { ...identity, apiBaseUrl: host.apiBaseUrl, relayHostId: host.relayHostId }),
+  });
 };
 
 const emitTrayActionWhenReady = async (action: TrayAction): Promise<boolean> => {
@@ -5477,22 +5291,23 @@ const dispatchTrayAction = async (action: TrayAction | undefined): Promise<void>
 
   // Tray session actions intentionally focus the main surface. Session-specific
   // mini windows are opened explicitly through the desktop mini-chat action.
-  if (action.type === 'focus-session') {
-    const sessionId = typeof action.sessionId === 'string' ? action.sessionId : '';
+  if (action.type === 'focus-thread') {
+    const threadId = typeof action.threadId === 'string' ? action.threadId : '';
     const directory = typeof action.directory === 'string' ? action.directory : '';
-    await focusMainWindowWithSession(sessionId, directory);
+    const branchId = typeof action.branchId === 'string' ? action.branchId : '';
+    if (threadId && branchId) await focusMainWindowWithThread({ threadId, branchId, directory }, recordOf(action.runtimeConfig) as Partial<RendererRuntimeConfig>);
     return;
   }
 
   const target = await revealMainWindow();
   if (!target || target.isDestroyed()) return;
 
-  if (action.type === 'new-session') {
+  if (action.type === 'new-thread') {
     if (target.id === state.mainWindow?.id && target.webContents.isLoading()) {
       pendingTrayActions.push(action);
       return;
     }
-    emitToWindow(target, 'varin:open-draft-session', { directory: '', projectId: '' });
+    emitToWindow(target, 'varin:open-draft-thread', { directory: '', projectId: '' });
   }
   // show-main-window: revealing the window above is the whole action.
 };

@@ -18,7 +18,7 @@ const position = { oneOf: [
   object({ kind: { const: 'element' }, element: { enum: ['table', 'figure', 'formula'] }, index: positiveInteger }, ['kind', 'element', 'index']),
   object({ kind: { const: 'appendix' } }, ['kind']),
 ] };
-const documentProperties = {
+const documentProperties: JsonObject = {
   snapshotId: text, view: { enum: ['overview', 'text', 'page-image', 'structure'] }, page: positiveInteger,
   pages: { anyOf: [{ const: 'all' }, { type: 'array', minItems: 1, items: positiveInteger }] },
   region, scale: { type: 'number', exclusiveMinimum: 0 }, ocr: { type: 'boolean' },

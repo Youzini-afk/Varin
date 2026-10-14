@@ -17,7 +17,7 @@ export interface RuntimeFetchOptions extends RequestInit {
 type FetchDelegate = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
 let nativeFetchDelegate: FetchDelegate | null = null;
 
-// Application-host APIs must not follow the active Pi Runtime resolver. The
+// Host-local APIs must not follow the selected remote Host resolver. The
 // runtime bridge retains the browser's original fetch here before patching
 // window.fetch, giving those APIs one explicit, testable transport boundary.
 export const fetchWithoutRuntimeRouting: FetchDelegate = (input, init) => (

@@ -29,7 +29,7 @@ export const BUILTIN_CHANNEL_TYPES: readonly ChannelType[] = [
   { ...direct('openai-compatible', 'OpenAI compatible', 'openai-completions'), operations: ['chat', 'embedding', 'rerank', 'image-generation', 'image-editing'], parametersSchema: schema({ imageApi: { enum: ['openai-images', 'openrouter-images'] } }) },
   direct('deepseek', 'DeepSeek', 'openai-completions', 'https://api.deepseek.com/v1'),
   { ...direct('openrouter', 'OpenRouter', 'openai-completions', 'https://openrouter.ai/api/v1'), operations: ['chat', 'image-generation', 'image-editing'], parametersSchema: schema({ imageApi: { enum: ['openrouter-images'] } }), oauthProviders: [{ id: 'openrouter', name: 'OpenRouter' }] },
-  { ...direct('anthropic', 'Anthropic', 'anthropic-messages', 'https://api.anthropic.com/v1'), oauthProviders: [{ id: 'anthropic', name: 'Claude Pro / Max' }], discoveryRequest: channel => ({ url: `${channel.baseUrl.replace(/\/+$/, '')}/models`, headers: { 'anthropic-version': '2023-06-01' } }) },
+  { ...direct('anthropic', 'Anthropic', 'anthropic-messages', 'https://api.anthropic.com/v1'), authentication: ['credential', 'environment', 'anthropic-federation', 'none'], oauthProviders: [{ id: 'anthropic', name: 'Claude Pro / Max' }], discoveryRequest: channel => ({ url: `${channel.baseUrl.replace(/\/+$/, '')}/models`, headers: { 'anthropic-version': '2023-06-01' } }) },
   { ...direct('gemini', 'Google Gemini', 'google-generative-ai', 'https://generativelanguage.googleapis.com/v1beta'), parseDiscovery: response => {
     if (!object(response) || !Array.isArray(response.models)) throw new Error('Model discovery returned an invalid list');
     return response.models.map(item => {

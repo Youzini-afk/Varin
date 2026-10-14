@@ -67,8 +67,8 @@ export function createComputerRuntime({ kernel, runtime, computers, enabled }: {
     const execution = value.currentRunId ? { work, runId: value.currentRunId } : null;
     const rootExecution = value.currentRootRunId ? { work: rootWork, runId: value.currentRootRunId } : null;
     return { scope: { work, rootWork, currentExecution: execution, currentRootExecution: rootExecution },
-      actor: value.canExecute && execution ? { execution, rootWork, rootExecution, registry: null,
-        label: value.threadId === value.rootThreadId ? 'Main agent' : 'Worker', roleAccess: { kind: 'tool-invocation' } } : null };
+      actor: value.canExecute && execution ? { execution, rootWork, rootExecution,
+        label: value.threadId === value.rootThreadId ? 'Main agent' : 'Worker' } : null };
   };
   const prepareConfiguration: NonNullable<ExtensionToolOwnerOptions['prepareConfiguration']> = async (_run, required) => {
     // Required bindings are the original immutable configuration, even after settings change.
@@ -109,7 +109,7 @@ export function createComputerRuntime({ kernel, runtime, computers, enabled }: {
   const executionOf = (request: ComputerRequestRecord): ComputerExecutionRef => ({ work: { runtime: 'agent', threadId: request.requester.threadId, branchId: request.requester.branchId }, runId: request.requester.runId });
   const actorOf = (request: ComputerRequestRecord): ComputerActor => ({ execution: executionOf(request), rootWork: { runtime: 'agent', threadId: request.rootThreadId, branchId: request.rootBranchId },
     rootExecution: request.claim?.manager ? { work: { runtime: 'agent', threadId: request.claim.manager.threadId, branchId: request.claim.manager.branchId }, runId: request.claim.manager.runId } : null,
-    registry: null, label: 'Worker', roleAccess: { kind: 'tool-invocation' } });
+     label: 'Worker' });
   const projectRequest = ({ request, reason, detail }: ComputerRequestView): ComputerAccessRequest => {
     const assignmentId = request.status === 'granted' ? request.claim?.assignmentId : undefined;
     const assignment = assignmentId ? computers.automation.assignmentState(assignmentId) : undefined;

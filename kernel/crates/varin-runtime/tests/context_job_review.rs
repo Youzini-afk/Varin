@@ -838,7 +838,7 @@ fn bot_summary_freezes_original_knowledge_and_publishes_only_its_baseline_with_g
     })
     .unwrap();
     db.create_bot_thread("thread", "main", "bot").unwrap();
-    let basis: PersonalizationBasis = serde_json::from_value(json!({"mode":"bot","threadRole":"main","revision":1,"configurationDigest":"bot-profile","memorySnapshot":{"revision":0,"memories":[]},"sessionId":"thread","projectId":null,"originalSections":[],"instructionSources":[]})).unwrap();
+    let basis: PersonalizationBasis = serde_json::from_value(json!({"mode":"bot","threadRole":"main","revision":1,"configurationDigest":"bot-profile","memorySnapshot":{"revision":0,"memories":[]},"threadId":"thread","projectId":null,"originalSections":[],"instructionSources":[]})).unwrap();
     let source = db
         .submit_with_context_snapshot(
             &SubmitInput {

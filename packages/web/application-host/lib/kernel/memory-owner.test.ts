@@ -21,7 +21,7 @@ function storageFixture() {
       return structuredClone(current);
     },
   };
-  return { client: { issueGrant: async () => ({}), scoped: () => scoped } as unknown as KernelClient, writes: () => writes };
+  return { client: { issueGrant: async () => ({}), scoped: () => scoped } as unknown as KernelClient, writes: () => writes, scoped };
 }
 
 it('child ordinary memory resolves self, preserves shared scopes and reconciles original receipts after a user edit', async () => {
@@ -30,13 +30,13 @@ it('child ordinary memory resolves self, preserves shared scopes and reconciles 
   let personalization = open();
   await personalization.saveNote({ scope: { kind: 'global' }, content: 'Shared global' });
   await personalization.saveNote({ scope: { kind: 'project', id: 'project-a' }, content: 'Shared project' });
-  const parent = await personalization.saveNote({ scope: { kind: 'session', id: 'parent' }, content: 'Parent private' });
-  await personalization.saveNote({ scope: { kind: 'session', id: 'sibling' }, content: 'Sibling private' });
+  const parent = await personalization.saveNote({ scope: { kind: 'thread', id: 'parent' }, content: 'Parent private' });
+  await personalization.saveNote({ scope: { kind: 'thread', id: 'sibling' }, content: 'Sibling private' });
   await personalization.saveNote({ scope: { kind: 'project', id: 'project-b' }, content: 'Foreign project' });
   const prepareContext = Object.assign(async () => { throw new Error('No context synchronization in this owner test'); },
     { main: async () => { throw new Error('No main context'); } }) as ContextPreparer;
   let owner = createMemoryOwner({ personalization, prepareContext });
-  const scope = { mode: 'agent' as const, sessionId: 'child', projectId: 'project-a' };
+  const scope = { mode: 'agent' as const, threadId: 'child', projectId: 'project-a' };
   const read = (args: MemoryQuery['arguments'] = { action: 'read' }) => owner({ action: 'tool', runId: 'child-run', scope, arguments: args }, new AbortController().signal);
   const visible = await read();
   expect(visible).toMatchObject({ status: 'ready', revision: 5, notes: [
@@ -47,8 +47,8 @@ it('child ordinary memory resolves self, preserves shared scopes and reconciles 
     arguments: { action: 'save', scope: 'currentThread', content: 'Child committed note', revision: 5 } };
   const saved = await owner(query, new AbortController().signal);
   expect(saved).toMatchObject({ status: 'ready', memoryReceipt: { origin: query.origin, revision: 6,
-    changes: [expect.objectContaining({ scope: { kind: 'session', id: 'child' } })] } });
-  const childNote = (await personalization.context('child')).memories.find(note => note.scope.kind === 'session')!;
+    changes: [expect.objectContaining({ scope: { kind: 'thread', id: 'child' } })] } });
+  const childNote = (await personalization.context('child')).memories.find(note => note.scope.kind === 'thread')!;
   expect(childNote.content).toBe('Child committed note');
   expect((await personalization.context('parent')).memories).not.toContainEqual(expect.objectContaining({ id: childNote.id }));
   const foreignUpdate: MemoryQuery = { ...query, origin: 'run:child-run:deny:node:update',
@@ -66,4 +66,20 @@ it('child ordinary memory resolves self, preserves shared scopes and reconciles 
   const cancelled = new AbortController(); cancelled.abort();
   expect(await owner({ ...query, origin: 'run:child-run:cancelled:node:save', arguments: { ...query.arguments!, revision: 7 } }, cancelled.signal)).toMatchObject({ status: 'unknown' });
   expect(storage.writes()).toBe(writes);
+});
+
+it.each([
+  { memories: [{ id: 1, scope: { kind: 'session', id: 'old-session' }, content: 'OLD_NOTE', updatedAt: '' }], prompts: {}, nextId: 2 },
+  { memories: [], prompts: { 'session:old-session': { sections: { preamble: 'OLD_PROMPT' } } }, nextId: 1 },
+  { memories: [{ id: 1, scope: { kind: 'global' }, content: 'OLD_NOTE', source: { sessionId: 'old-session', label: 'agent' }, updatedAt: '' }], prompts: {}, nextId: 2 },
+])('rejects obsolete personalization identities without rewriting the stored asset', async document => {
+  const storage = storageFixture();
+  await storage.scoped.putRecord({ operationId: 'seed-old-asset', workspaceId: '__varin_agent_personalization__', recordId: 'agent.personalization',
+    recordType: 'agent.personalization', state: 'active', payloadJson: JSON.stringify(document), ownerIds: [], references: [] });
+  const before = await storage.scoped.getRecord();
+  const personalization = createAgentPersonalization({ client: storage.client, context: async () => ({ bot: false }) });
+  await expect(personalization.catalog()).rejects.toThrow(/scope|identity/);
+  await expect(personalization.saveNote({ scope: { kind: 'global' }, content: 'NEW_NOTE' })).rejects.toThrow(/scope|identity/);
+  expect(storage.writes()).toBe(1);
+  expect(await storage.scoped.getRecord()).toEqual(before);
 });

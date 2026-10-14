@@ -85,8 +85,7 @@ const memoryItem = (value: unknown): BotMemoryItem => {
 };
 const sourceExcerpt = (value: unknown): MemorySourceExcerpt => {
   const source = record(value); const span = record(source.span);
-  const required = span.kind === 'pi-entry' ? ['sessionId'] : span.kind === 'event' ? ['scopeId', 'sessionId']
-    : span.kind === 'run-report' ? ['scopeId', 'threadId'] : span.kind === 'history-item' ? ['threadId', 'branchId', 'headId'] : null;
+  const required = span.kind === 'history-item' ? ['threadId', 'branchId', 'headId'] : null;
   if (!required || !Number.isSafeInteger(span.start) || !Number.isSafeInteger(span.end) || Number(span.start) < 0 || Number(span.end) <= Number(span.start)) invalid();
   for (const key of ['id', 'revision', ...required!]) string(span[key]);
   if (source.status === 'available') string(source.text);

@@ -10,7 +10,6 @@ import {
   type WebSearchRequest,
   type WebSearchResult,
 } from "@varin/protocol";
-import type { HarnessServiceContext } from "./router.js";
 import { HarnessServiceError } from "./service-error.js";
 
 export interface SearchProvider {
@@ -620,7 +619,7 @@ const mapFetchStatus = (fetch: FetchResult): Pick<WebSearchItem, "status" | "det
   }
 };
 
-export function createWebSearchService<C extends { signal: AbortSignal } = HarnessServiceContext>(
+export function createWebSearchService<C extends { signal: AbortSignal } = { signal: AbortSignal }>(
   resolveProvider: (ctx: C) => Promise<ResolveSearchProviderResult>,
   resolveDomainPolicy: (ctx: C) => Promise<HarnessWebDomainPolicy> = async () => ({ block: [] }),
   deps: {

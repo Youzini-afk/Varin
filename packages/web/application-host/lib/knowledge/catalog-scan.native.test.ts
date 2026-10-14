@@ -126,12 +126,12 @@ describe("cold workspace catalog scan", () => {
         localEditRevision: 1,
         resource: documents.resource("cold.ts"),
       }],
-      consumer: { kind: 'pi-session', sessionId: "catalog-session" },
+      consumer: { kind: 'thread', threadId: "catalog-session", branchId: 'main' },
     });
 
     const readDiskBody = vi.spyOn(documents.authority, "read");
     readDiskBody.mockClear();
-    const readAgentInputSnapshot = vi.spyOn(documents.authority, "readAgentInputSnapshot");
+    const cloneInputSnapshot = vi.spyOn(documents.authority, "cloneInputSnapshot");
     const search = createFsSearchRuntime({ compute: kernelCompute, path });
     const runtime = createSymbolGraphRuntime({
       getStore: async () => store,
@@ -150,7 +150,7 @@ describe("cold workspace catalog scan", () => {
     expect(duplicateScan).toBe(firstScan);
     await firstScan;
     expect(readDiskBody).not.toHaveBeenCalled();
-    expect(readAgentInputSnapshot).not.toHaveBeenCalled();
+    expect(cloneInputSnapshot).not.toHaveBeenCalled();
     expect((await store.searchSymbols("coldSymbol", 5)).map((entry) => entry.name)).toEqual(["coldSymbol"]);
     expect((await store.searchSymbols("dirtySymbol", 5))).toEqual([]);
     expect((await store.searchSymbols("jsOnly", 5)).map((entry) => entry.name)).toEqual(["jsOnly"]);

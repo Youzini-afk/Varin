@@ -1,6 +1,16 @@
+import { deliverThreadInput } from '@/lib/agent-runtime/threadInputDelivery';
+import { AutoReviewBanner } from '@/components/chat/AutoReviewBanner';
+import { ReviewTransferActions } from './ReviewTransferActions';
+import { EditorContextAttachmentChips } from '@/components/workbench/EditorContextAttachmentChips';
+import { acknowledgeEditorContextAttachments, getEditorContextAttachmentsRevision, listEditorContextAttachments, subscribeEditorContextAttachments } from '@/lib/agent-editor/attachments';
+import { projectEditorContextAttachments } from '@/lib/agent-editor/projection';
+import { useInlineCommentDraftStore } from '@/stores/useInlineCommentDraftStore';
+import { appendInlineComments } from '@/lib/messages/inlineComments';
+import { useThreadStore, threadHostKey, threadIdentityKey } from '@/stores/useThreadStore';
+import { useThreadDraftStore, EMPTY_THREAD_DRAFT, type ThreadPendingInput } from '@/stores/useThreadDraftStore';
 import { ThreadMaterials } from './ThreadMaterials';
-import { buildPdfMaterialCitationMarkdown } from '@/lib/pi-runtime/pdfMaterialCitation';
-import { ComputerAutomationSection } from '@/components/pi-session/ComputerAutomationSection';
+import { buildPdfMaterialCitationMarkdown } from '@/lib/materials/pdfMaterialCitation';
+import { ComputerAutomationSection } from '@/components/thread/ComputerAutomationSection';
 import { useComputerAutomation } from '@/stores/useComputerAutomation';
 import { ChildExecutions, ThreadExecutions } from './ThreadExecutions';
 import { ThreadMessages } from './ThreadMessages';
@@ -27,7 +37,7 @@ import { ImageAttachmentStrip } from '@/components/chat/composer/ImageAttachment
 import { fileToImageAttachment } from '@/components/chat/composer/imageAttachments';
 import { useI18n } from '@/lib/i18n';
 import React from 'react';
-import { threadMemorySourceText, threadSourceFailureMessage, ThreadRequestError, getRuntimeEndpointGeneration, subscribeRuntimeEndpointChanged } from '@varin/application-client';
+import { createModelConnectionsHttpAPI, threadMemorySourceText, threadSourceFailureMessage, ThreadRequestError, getRuntimeEndpointGeneration, subscribeRuntimeEndpointChanged } from '@varin/application-client';
 import type { ThreadIdentity, ThreadModel, ThreadModelInfo, ThreadThinkingLevel, ThreadSnapshot, ThreadsAPI, ThreadHistoryPage, ThreadPreparedSource } from '@varin/application-client';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
@@ -154,11 +164,36 @@ const resourceErrorMessages = new Map([
 export function ThreadConversation({ api, identity, onBranchCreated, initialWorkspacePath, preferredModel, onWorkChanged, readOnly = false }: { onWorkChanged?: () => void; preferredModel?: ThreadModel | null; readOnly?: boolean; api: ThreadsAPI; identity: ThreadIdentity; onBranchCreated?: (identity: ThreadIdentity) => void; initialWorkspacePath?: string }) {
   const { t } = useI18n();
   const host = React.useSyncExternalStore(subscribeRuntimeEndpointChanged, getRuntimeEndpointGeneration, getRuntimeEndpointGeneration);
-  const [images, setImages] = React.useState<ImageAttachment[]>([]);
+  const draftKey = threadIdentityKey(threadHostKey(), identity);
+  const draft = useThreadDraftStore(state => state.drafts[draftKey] ?? EMPTY_THREAD_DRAFT);
+  const setText = React.useCallback((value: React.SetStateAction<string>) => useThreadDraftStore.getState().patch(draftKey, current => ({ text: typeof value === 'function' ? value(current.text) : value })), [draftKey]);
+  const setImages = React.useCallback((value: React.SetStateAction<ImageAttachment[]>) => useThreadDraftStore.getState().patch(draftKey, current => ({ images: typeof value === 'function' ? value(current.images) : value })), [draftKey]);
+  const setPreparedSource = React.useCallback((preparedSource: ThreadPreparedSource | null) => useThreadDraftStore.getState().patch(draftKey, { preparedSource }), [draftKey]);
+  const setInputMode = React.useCallback((inputMode: 'boundary' | 'interrupt' | 'next_run') => useThreadDraftStore.getState().patch(draftKey, { inputMode }), [draftKey]);
+  const { text, images, preparedSource, inputMode } = draft;
+  React.useSyncExternalStore(subscribeEditorContextAttachments, getEditorContextAttachmentsRevision, () => 0);
+  const editorContext = listEditorContextAttachments(threadHostKey(), draftKey);
+  const inlineBuckets = useInlineCommentDraftStore(state => state.drafts);
+  const inlineContext = React.useMemo(() => Object.entries(inlineBuckets).flatMap(([key, drafts]) => {
+    const captured = drafts.filter(item => item.sessionKey === draftKey);
+    return captured.length ? [{ key, drafts: captured }] : [];
+  }), [inlineBuckets, draftKey]);
+  const inlineDrafts = inlineContext.flatMap(bucket => bucket.drafts);
+  const projectedText = projectEditorContextAttachments(appendInlineComments(text, inlineDrafts), editorContext);
+  const providerId = draft.model?.providerId ?? '';
+  const modelId = draft.model?.modelId ?? '';
+  const thinkingLevel = draft.model?.thinkingLevel ?? 'off';
+  const patchModel = React.useCallback((patch: Partial<ThreadModel>) => useThreadDraftStore.getState().patch(draftKey, current => ({ model: { providerId: '', modelId: '', ...current.model, ...patch } })), [draftKey]);
+  const setProviderId = React.useCallback((providerId: string) => patchModel({ providerId }), [patchModel]);
+  const setModelId = React.useCallback((modelId: string) => patchModel({ modelId }), [patchModel]);
+  const setThinkingLevel = React.useCallback((thinkingLevel: ThreadThinkingLevel) => patchModel({ thinkingLevel }), [patchModel]);
+  const pendingInput = React.useMemo(() => ({
+    get current() { return useThreadDraftStore.getState().drafts[draftKey]?.pendingInput; },
+    set current(pendingInput: ThreadPendingInput | undefined) { useThreadDraftStore.getState().patch(draftKey, { pendingInput }); },
+  }), [draftKey]);
   const fileInput = React.useRef<HTMLInputElement | null>(null);
   const fileReadGeneration = React.useRef(0);
   const [readingFiles, setReadingFiles] = React.useState(false);
-  const [preparedSource, setPreparedSource] = React.useState<ThreadPreparedSource | null>(null);
   const [preparingSource, setPreparingSource] = React.useState(false);
   const [snapshotState, setSnapshot] = React.useState<ThreadSnapshot>();
   const snapshotHost = React.useRef<number | undefined>(undefined);
@@ -169,13 +204,7 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
   const forkKeys = React.useRef(new Map<string, string>());
   const compactionKeys = React.useRef(new Map<string, string>());
   const [progress, setProgress] = React.useState('');
-  const [text, setText] = React.useState('');
   const messageInput = React.useRef<HTMLTextAreaElement | null>(null);
-  const draftRef = React.useRef({ text, images });
-  draftRef.current = { text, images };
-  const [providerId, setProviderId] = React.useState('');
-  const [modelId, setModelId] = React.useState('');
-  const [thinkingLevel, setThinkingLevel] = React.useState<ThreadThinkingLevel>('off');
   const appliedModelPreference = React.useRef<string | undefined>(undefined);
   const [models, setModels] = React.useState<ThreadModelInfo[]>([]);
   const [modelError, setModelError] = React.useState<string>();
@@ -187,18 +216,16 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
     return () => { active = false; };
   }, [api, host]);
   const [error, setError] = React.useState<string>();
-  const [inputMode, setInputMode] = React.useState<'boundary' | 'interrupt' | 'next_run'>('boundary');
   const [actionPending, setPending] = React.useState(false);
   const pendingAction = React.useRef<object | null>(null);
-  const pendingInput = React.useRef<{ fingerprint: string; send(): Promise<unknown> } | undefined>(undefined);
   const projection = React.useRef<ThreadProjection | undefined>(undefined);
   React.useEffect(() => {
     identityGeneration.current += 1; forkKeys.current.clear(); compactionKeys.current.clear();
     historyGeneration.current += 1; setHistoryView(null); setHistoryLoading(false);
-    setPreparedSource(null); setPreparingSource(false);
+    setPreparingSource(false);
     pendingAction.current = null; setPending(false); setError(undefined);
-    setSnapshot(undefined); setProgress(''); setImages([]); setReadingFiles(false); pendingInput.current = undefined; fileReadGeneration.current += 1;
-    const view = new ThreadProjection(api, identity, value => { snapshotHost.current = host; setSnapshot(value); }, value => setError(value instanceof Error ? value.message : 'Thread unavailable'), setProgress);
+    setSnapshot(undefined); setProgress(''); setReadingFiles(false); fileReadGeneration.current += 1;
+    const view = new ThreadProjection(api, identity, value => { snapshotHost.current = host; setSnapshot(value); if (typeof document !== 'undefined' && document.visibilityState !== 'hidden') void useThreadStore.getState().markRead(identity.threadId, value.thread.activity_cursor).catch(() => {}); }, value => setError(value instanceof Error ? value.message : 'Thread unavailable'), setProgress);
     projection.current = view; view.start();
     return () => { identityGeneration.current += 1; historyGeneration.current += 1; fileReadGeneration.current += 1; view.close(); };
   }, [api, identity, host]);
@@ -242,6 +269,24 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
     // changed Bot profile even when their latest Run was cancelled; later renders preserve edits.
     if (!active) { setProviderId(preferredModel?.providerId ?? ''); setModelId(preferredModel?.modelId ?? ''); setThinkingLevel(preferredModel?.thinkingLevel ?? 'off'); }
   }, [snapshot, active, host, identity.threadId, identity.branchId, preferredModel]);
+  const needsDefaultModel = Boolean(snapshot && !run && preferredModel === undefined && !providerId && !modelId);
+  React.useEffect(() => {
+    if (!needsDefaultModel) return;
+    const controller = new AbortController();
+    const workspacePath = draft.workspacePath ?? initialWorkspacePath;
+    void createModelConnectionsHttpAPI(host).readSettings(workspacePath, controller.signal).then(settings => {
+      if (controller.signal.aborted || host !== getRuntimeEndpointGeneration()) return;
+      const effective = { ...settings.global, ...(settings.projectTrusted ? settings.project : {}) };
+      if (typeof effective.defaultProvider !== 'string' || typeof effective.defaultModel !== 'string') return;
+      useThreadDraftStore.getState().patch(draftKey, current => {
+        if (current.model?.providerId || current.model?.modelId || current.workspacePath !== draft.workspacePath) return {};
+        const thinking = effective.defaultThinkingLevel;
+        return { model: { providerId: effective.defaultProvider as string, modelId: effective.defaultModel as string,
+          ...(typeof thinking === 'string' && ['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'].includes(thinking) ? { thinkingLevel: thinking as ThreadThinkingLevel } : {}) } };
+      });
+    }).catch(failure => { if (!controller.signal.aborted && host === getRuntimeEndpointGeneration()) setError(failure instanceof Error ? failure.message : String(failure)); });
+    return () => controller.abort();
+  }, [needsDefaultModel, host, draftKey, draft.workspacePath, initialWorkspacePath]);
   const act = async (work: () => Promise<unknown>, interrupt = false) => {
     if (readOnly || pendingAction.current && !interrupt) return;
     const action = {}; pendingAction.current = action;
@@ -251,7 +296,7 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
     try { await work(); if (current()) await projection.current?.refresh(); }
     catch (value) {
       if (!current()) return;
-      if (value instanceof ThreadRequestError && value.status === 409) { pendingInput.current = undefined; await projection.current?.refresh(); }
+      if (value instanceof ThreadRequestError && value.status === 409) await projection.current?.refresh();
       if (!current()) return;
       const resourceError = value instanceof ThreadRequestError ? threadSourceFailureMessage(value.code) ?? resourceErrorMessages.get(value.code) : undefined;
       setError(resourceError ?? (value instanceof ThreadRequestError && ['kernel-frame-too-large', 'http-body-too-large'].includes(value.code)
@@ -294,7 +339,7 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
     messageInput.current?.focus();
   };
   const returnToLatest = () => { historyGeneration.current += 1; setHistoryView(null); setHistoryLoading(false); };
-  const recovery = useThreadRecovery({ api, identity, host, snapshot, disabled: readOnly || active || actionPending, onRecovered: async editor => {
+  const recovery = useThreadRecovery({ api, identity, host, snapshot, disabled: readOnly || active || actionPending || Boolean(draft.pendingInput), onRecovered: async editor => {
     returnToLatest(); pendingInput.current = undefined; setPreparedSource(null);
     if (editor.editorText !== undefined) setText(editor.editorText);
     if (editor.editorImages !== undefined) setImages(editor.editorImages);
@@ -338,14 +383,14 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
   const previousHistory = historyView ? historyView.previous : snapshot?.historyPage.previous;
   const memorySelection = getRegisteredRuntimeAPIs()?.bots?.selection;
   const memoryHead = historyView?.head ?? snapshot?.historyPage.head;
-  const submissionFingerprint = () => JSON.stringify([identity.threadId, identity.branchId, text, images, providerId, modelId, thinkingLevel, inputMode, preparedSource?.source]);
-  const sourceCannotBeApplied = active && Boolean(preparedSource) && pendingInput.current?.fingerprint !== submissionFingerprint();
+  const submissionFingerprint = () => JSON.stringify([identity.threadId, identity.branchId, projectedText, images, providerId, modelId, thinkingLevel, inputMode, preparedSource?.source]);
+  const sourceCannotBeApplied = active && Boolean(preparedSource) && !pendingInput.current;
   return <ThreadMaterials api={api.materials} identity={identity} onAddRegion={readOnly || acceptsImages === false ? undefined : region => {
     if (pendingAction.current) throw new Error('Wait for the current message before adding a PDF selection.');
     setText(current => [current.trimEnd(), buildPdfMaterialCitationMarkdown(region.title, region)].filter(Boolean).join('\n\n'));
     setImages(current => [...current, region.image]);
     messageInput.current?.focus();
-  }}><section className="flex h-full min-h-0 flex-col" aria-label="Thread conversation">
+  }}><section className="flex h-full min-h-0 flex-col" aria-label="Thread conversation" data-thread-conversation="true">
     <div className="border-b px-4 py-2 text-xs text-muted-foreground">thread · {identity.threadId} · branch {identity.branchId.slice(-8)} · {run?.state ?? 'Ready'}{pause ? ' · Paused' : run?.waiting_on ? ` · ${run.waiting_on}` : ''}</div>
     <div className="min-h-0 flex-1 overflow-y-auto p-4 space-y-4">
       <div className="mx-auto flex max-w-3xl items-center gap-2">
@@ -363,6 +408,7 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
         <div className="mb-1 text-xs text-muted-foreground">{item.source}</div>
         <ThreadContent api={api} identity={identity} holder={{ kind: 'history', itemId: item.id }} parts={historyParts(item.content, item.source)} messageId={item.id} />
         <ThreadSkillMaterials content={item.content} />
+        {!readOnly && <ReviewTransferActions identity={identity} item={item} />}
         {!readOnly && (item.source === 'user' || item.source === 'assistant') && <Button variant="ghost" size="sm"
           disabled={pending || active || !snapshot} title={active ? 'Stop the current run before restoring conversation history.' : undefined} onClick={() => void recovery.recover(item.id)}>
           {item.source === 'user' ? 'Restore before this message' : 'Restore through this message'}
@@ -440,7 +486,7 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
       onAddSkill={addSkill}
       onRefresh={() => void act(() => api.resources.refresh({ ...identity, expectedRevision: snapshot.context.checkpoint!.revision }))} />}
     {delegated && <div className="mx-auto w-full max-w-3xl px-4"><ThreadExecutions key={`${host}:${identity.threadId}:${identity.branchId}`} api={api} identity={identity} executions={snapshot?.delegatedExecutions ?? []} /></div>}
-    {!readOnly && !delegated && <ThreadSourcePicker key={identity.branchId} api={api} identity={identity} initialPath={initialWorkspacePath}
+    {!readOnly && !delegated && <ThreadSourcePicker key={identity.branchId} api={api} identity={identity} initialPath={draft.workspacePath ?? initialWorkspacePath}
       active={active || pending} launch={snapshot?.launch ?? null} prepared={preparedSource} onPrepared={setPreparedSource} onPreparingChange={setPreparingSource} />}
     {snapshot && <details className="mx-auto max-h-64 w-full max-w-3xl shrink-0 overflow-y-auto px-4 text-xs text-muted-foreground">
       <summary className="cursor-pointer">Context summaries · checkpoint {snapshot.context.checkpoint?.revision ?? 0} · {snapshot.context.jobs.length} jobs</summary>
@@ -470,20 +516,29 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
       const generation = identityGeneration.current;
       void act(async () => {
         const fingerprint = submissionFingerprint();
-        if (pendingInput.current?.fingerprint !== fingerprint) {
+        if (!pendingInput.current) {
           const key = crypto.randomUUID();
-          const submit = { ...identity, key, text, images, expectedHead: branch?.head ?? null, model: { providerId, modelId, thinkingLevel }, ...(preparedSource ? { source: preparedSource.source } : {}) };
-          const queued = { ...identity, key, text, images, mode: inputMode };
-          const continuation = { ...identity, key, text, images, previousRunId: run?.id ?? '', expectedHead: branch?.head ?? null };
+          const submit = { ...identity, key, text: projectedText, images, expectedHead: branch?.head ?? null, model: { providerId, modelId, thinkingLevel }, ...(preparedSource ? { source: preparedSource.source } : {}) };
+          const queued = { ...identity, key, text: projectedText, images, mode: inputMode };
+          const continuation = { ...identity, key, text: projectedText, images, previousRunId: run?.id ?? '', expectedHead: branch?.head ?? null };
           if (!active && delegated && (!api.collaboration || !run)) throw new Error('Child continuation is unavailable');
-          pendingInput.current = { fingerprint, send: active ? () => api.enqueue(queued)
-            : delegated ? () => api.collaboration!.continueChild(continuation) : () => api.submit(submit) };
+          pendingInput.current = { fingerprint, editorText: text, editorContext, inlineContext, preparedSource, status: 'sending', ...(active ? { kind: 'enqueue' as const, input: queued }
+            : delegated ? { kind: 'continue' as const, input: continuation } : { kind: 'submit' as const, input: submit }) };
         }
-        await pendingInput.current.send();
+        const original = pendingInput.current;
+        await deliverThreadInput(api, original, next => {
+          useThreadDraftStore.getState().patch(draftKey, current => current.pendingInput?.input.key === original.input.key ? { pendingInput: next } : {});
+        });
+        acknowledgeEditorContextAttachments(original.editorContext ?? []);
+        for (const bucket of original.inlineContext ?? []) useInlineCommentDraftStore.getState().acknowledgeDrafts(bucket.key, bucket.drafts);
+        // A real receipt clears only the original captured editor bytes, even if its view unmounted.
+        useThreadDraftStore.getState().patch(draftKey, current => current.pendingInput?.input.key === original.input.key ? {
+          pendingInput: undefined, preparedSource: current.preparedSource === original.preparedSource ? null : current.preparedSource,
+          text: current.text === original.editorText ? '' : current.text,
+          images: current.images.filter(image => !(original.input.images ?? []).includes(image)),
+        } : {});
         if (generation !== identityGeneration.current || host !== getRuntimeEndpointGeneration()) return;
-        pendingInput.current = undefined; setPreparedSource(null); returnToLatest();
-        if (draftRef.current.text === text) setText('');
-        setImages(current => current.filter(image => !images.includes(image)));
+        returnToLatest();
       });
     }}>
       {delegated && !active && <p role="status" className="text-sm text-muted-foreground">{preparingDelegation
@@ -496,6 +551,7 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
       {policyUpdatePending && <p role="status" aria-label="Policy update" className="text-sm text-muted-foreground">{policyUpdate?.status === 'preparing' ? 'Preparing the selected strategy. The current strategy remains active.' : 'Strategy prepared for the next closed decision boundary.'}{pause ? ' This run remains paused until you resume it.' : ''}</p>}
       {policyUpdate?.status === 'failed' && <p role="status" aria-label="Policy update failed" className="text-sm text-muted-foreground">{policyIncompatible ? 'The selected strategy cannot preserve this private checkpoint. The current strategy remains active. Restarting strategy state keeps conversation history and independent tasks.' : `Strategy update was not applied: ${policyUpdate.failure ?? 'preparation failed'}`}</p>}
       {snapshot?.launch?.preparation_failure && <p role="alert" className="text-sm text-destructive">Preparation needs attention: {threadSourceFailureMessage(snapshot.launch.preparation_failure) ?? snapshot.launch.preparation_failure}</p>}
+      {draft.pendingInput?.status === 'unknown' && <p role="status" className="text-sm text-muted-foreground">{draft.pendingInput.kind === 'submit' && draft.pendingInput.acceptedRunId ? 'Message accepted. Retry finishes its Goal registration without sending the message again.' : 'Delivery is unconfirmed. Sending again checks the same original request; it does not create a second message.'}</p>}
       {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
       {snapshot?.modelSelection.desired?.status === 'failed' && <p role="alert" className="text-sm text-destructive">Model preparation failed: {snapshot.modelSelection.desired.failure}</p>}
       {snapshot?.modelSelection.desired && snapshot.modelSelection.desired.id !== snapshot.modelSelection.active?.id && snapshot.modelSelection.desired.status !== 'failed' && <p role="status" className="text-sm text-muted-foreground">Applies to the next model request</p>}
@@ -516,17 +572,25 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
         <option value="boundary">At next model boundary</option><option value="interrupt">Interrupt current generation</option>{!delegated && <option value="next_run">After current run</option>}
       </select>}
       {images.length > 0 && acceptsImages === false && <p role="alert" className="text-sm text-destructive">Choose an image-capable model or remove these images before sending</p>}
+      <EditorContextAttachmentChips threadKey={draftKey} />
+      {inlineContext.length > 0 && <div className="flex flex-wrap gap-1" aria-label="Attached context">
+        {inlineContext.flatMap(bucket => bucket.drafts.map(item => <Button key={item.id} type="button" size="sm" variant="outline"
+          title={item.text || item.fileLabel} onClick={() => useInlineCommentDraftStore.getState().acknowledgeDrafts(bucket.key, [item])}>
+          {item.fileLabel} · {item.startLine}–{item.endLine} ×
+        </Button>))}
+      </div>}
       <ImageAttachmentStrip images={images} removeLabel={t('chat.fileAttachment.actions.removeImage')}
         onRemove={index => setImages(current => current.filter((_, candidate) => candidate !== index))} />
       <input ref={fileInput} type="file" accept="image/*" multiple hidden aria-label="Choose image attachments"
         onChange={event => { const files = [...(event.target.files ?? [])]; event.target.value = ''; void addImages(files); }} />
-      <Textarea ref={messageInput} aria-label="Message thread" value={text} onChange={event => setText(event.target.value)}
+      <AutoReviewBanner identity={identity} />
+      <Textarea ref={messageInput} aria-label="Message thread" data-chat-input="true" value={text} onChange={event => setText(event.target.value)}
         onPaste={event => { const files = [...event.clipboardData.files].filter(file => file.type.startsWith('image/')); if (files.length) { event.preventDefault(); void addImages(files); } }}
         onDragOver={event => { if (event.dataTransfer.types.includes('Files')) event.preventDefault(); }}
         onDrop={event => { const files = [...event.dataTransfer.files]; if (files.length) { event.preventDefault(); void addImages(files); } }} />
       <div className="flex gap-2">
         <Button type="button" variant="ghost" disabled={readingFiles || acceptsImages === false} onClick={() => fileInput.current?.click()}>Attach images</Button>
-        <Button type="submit" disabled={pending || preparingDelegation || preparingSource || sourceCannotBeApplied || readingFiles || (images.length > 0 && acceptsImages === false) || (!text.trim() && !images.length) || (!active && (delegated ? !api.collaboration || !run : !providerId || !modelId))}>{active ? 'Queue message' : delegated ? 'Continue child' : 'Send'}</Button>
+        <Button type="submit" disabled={pending || (!draft.pendingInput && (preparingDelegation || preparingSource || sourceCannotBeApplied || readingFiles || (images.length > 0 && acceptsImages === false) || (!text.trim() && !images.length && !inlineDrafts.length && !editorContext.length) || (!active && (delegated ? !api.collaboration || !run : !providerId || !modelId))))}>{draft.pendingInput ? 'Retry delivery' : active ? 'Queue message' : delegated ? 'Continue child' : 'Send'}</Button>
         {active && branch?.active_run_id && <Button type="button" variant="outline" onClick={() => void act(() => api.cancelRun(branch.active_run_id!), true)}>Stop run</Button>}
         {run && pause && <Button type="button" variant="outline" disabled={pending || run.cancel_requested} onClick={() => void act(() => api.resume(run.id, pause.wait_id))}>Resume run</Button>}
         {active && run && policyUpdate && policyIncompatible && <Button type="button" variant="outline" disabled={pending || run.cancel_requested} onClick={() => void act(() => api.restartPolicy(identity, run.id, policyUpdate.selection_id))}>Restart strategy state</Button>}

@@ -94,7 +94,7 @@ export const RECALL_PROMPT_SNIPPET =
  * Open the user-level knowledge store at
  * {dataDir}/knowledge/{hostId}/user.tdb.
  * Knowledge nodes and explicitly scoped native plans share this physical owner.
- * Legacy session events/blocks remain prohibited; native plans are excluded from recall.
+ * Run observation events remain prohibited; native plans are excluded from recall.
  */
 export async function openUserKnowledgeStore(
   deps: {
@@ -117,20 +117,11 @@ export async function openUserKnowledgeStore(
   });
 
   // Wrap to reject non-knowledge writes
-  const origPutEvent = store.putEvent.bind(store);
-  const origPutSession = store.putSession.bind(store);
-  const origUpsertBlock = store.upsertBlock.bind(store);
   const origPutKnowledge = store.putKnowledge.bind(store);
 
   return {
     ...store,
     async putEvent() {
-      throw new Error("user.tdb only allows knowledge nodes");
-    },
-    async putSession() {
-      throw new Error("user.tdb only allows knowledge nodes");
-    },
-    async upsertBlock() {
       throw new Error("user.tdb only allows knowledge nodes");
     },
     async putKnowledge(input) {
@@ -147,6 +138,4 @@ export async function openUserKnowledgeStore(
       throw new Error("user.tdb does not allow file graph nodes");
     },
   };
-  // Suppress unused var warnings
-  void origPutEvent; void origPutSession; void origUpsertBlock;
 }

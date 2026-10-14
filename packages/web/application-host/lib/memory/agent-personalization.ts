@@ -22,6 +22,25 @@ const canonical = (value: unknown): string => JSON.stringify(value, (_key, item:
   if (!item || typeof item !== 'object' || Array.isArray(item)) return item;
   return Object.fromEntries(Object.entries(item).sort(([a], [b]) => a.localeCompare(b)));
 });
+const parseDocument = (payloadJson: string): Document => {
+  const document = JSON.parse(payloadJson) as Document;
+  if (!document || !Array.isArray(document.memories) || !document.prompts || typeof document.prompts !== 'object' || Array.isArray(document.prompts)
+    || !Number.isSafeInteger(document.nextId) || document.nextId < 1
+    || (document.noteRevisions !== undefined && (!document.noteRevisions || typeof document.noteRevisions !== 'object'
+      || Object.values(document.noteRevisions).some(value => !Number.isSafeInteger(value) || value < 1)))) {
+    throw new Error('Agent personalization is malformed');
+  }
+  for (const note of document.memories) {
+    parseAgentScope(note.scope);
+    if (note.source && ('sessionId' in note.source || (note.source.threadId !== undefined && typeof note.source.threadId !== 'string'))) {
+      throw new Error('Unsupported memory source identity; data preserved');
+    }
+  }
+  if (Object.keys(document.prompts).some(key => key !== 'global' && !/^(project|thread):.+$/s.test(key))) {
+    throw new Error('Unsupported prompt scope; data preserved');
+  }
+  return document;
+};
 const operationId = (origin: string) => `agent-personalization:${createHash('sha256').update(origin).digest('hex')}`;
 export class AgentPersonalizationError extends Error {
   constructor(message: string, readonly status = 400) { super(message); }
@@ -30,14 +49,14 @@ export function parseAgentScope(value: unknown): AgentMemoryScope {
   if (!value || typeof value !== 'object') throw new AgentPersonalizationError('Choose a memory scope');
   const scope = value as AgentMemoryScope;
   if (scope.kind === 'global') return { kind: 'global' };
-  if ((scope.kind === 'project' || scope.kind === 'session') && typeof scope.id === 'string' && scope.id.trim()) {
+  if ((scope.kind === 'project' || scope.kind === 'thread') && typeof scope.id === 'string' && scope.id.trim()) {
     return { kind: scope.kind, id: scope.id };
   }
   throw new AgentPersonalizationError('Invalid memory scope');
 }
 export function createAgentPersonalization(options: {
   client: KernelClient;
-  context(sessionId: string): Promise<{ bot: boolean; projectId?: string; threadRole?: AgentPersonalizationContext['threadRole'] }>;
+  context(threadId: string): Promise<{ bot: boolean; projectId?: string; threadRole?: AgentPersonalizationContext['threadRole'] }>;
   onChanged?(): void;
 }) {
   let connection: Promise<KernelScopedClient> | undefined;
@@ -47,12 +66,7 @@ export function createAgentPersonalization(options: {
   const read = async () => {
     const record = await (await client()).getRecord(WORKSPACE, RECORD);
     if (!record) return { document: { memories: [], prompts: {}, nextId: 1 } as Document, revision: 0 };
-    const document = JSON.parse(record.payloadJson) as Document;
-    if (!Array.isArray(document.memories) || !document.prompts || !Number.isSafeInteger(document.nextId)
-      || (document.noteRevisions !== undefined && (!document.noteRevisions || typeof document.noteRevisions !== 'object'
-        || Object.values(document.noteRevisions).some(value => !Number.isSafeInteger(value) || value < 1)))) {
-      throw new Error('Agent personalization is malformed');
-    }
+    const document = parseDocument(record.payloadJson);
     return { document, revision: record.recordRevision };
   };
   const findMutation = async (origin: string, intent?: unknown): Promise<MutationReceipt | null> => {
@@ -68,7 +82,7 @@ export function createAgentPersonalization(options: {
     if (result?.recordId !== RECORD || result.workspaceId !== WORKSPACE || typeof result.payloadJson !== 'string') {
       throw new Error('Memory operation belongs to another record');
     }
-    const document = JSON.parse(result.payloadJson) as Document;
+    const document = parseDocument(result.payloadJson);
     const mutation = document.lastMutation;
     if (!mutation || mutation.receipt.origin !== origin || mutation.receipt.revision !== result.recordRevision) {
       throw new Error('Memory operation has no matching atomic receipt');
@@ -130,20 +144,20 @@ export function createAgentPersonalization(options: {
     const { document, revision } = await read();
     return structuredClone({ memories: document.memories, prompts: document.prompts, revision });
   };
-  const context = async (sessionId: string): Promise<AgentPersonalizationContext> => {
-    const owner = await options.context(sessionId);
-    if (owner.bot) return { mode: 'bot', revision: 0, threadRole: owner.threadRole ?? 'main', sessionId, profiles: [], memories: [] };
-    const scopes: AgentMemoryScope[] = [{ kind: 'global' }, ...(owner.projectId ? [{ kind: 'project' as const, id: owner.projectId }] : []), { kind: 'session', id: sessionId }];
+  const context = async (threadId: string): Promise<AgentPersonalizationContext> => {
+    const owner = await options.context(threadId);
+    if (owner.bot) return { mode: 'bot', revision: 0, threadRole: owner.threadRole ?? 'main', threadId, profiles: [], memories: [] };
+    const scopes: AgentMemoryScope[] = [{ kind: 'global' }, ...(owner.projectId ? [{ kind: 'project' as const, id: owner.projectId }] : []), { kind: 'thread', id: threadId }];
     const keys = new Set(scopes.map(agentScopeKey));
     const { document, revision } = await read();
-    return structuredClone({ mode: 'agent', revision, threadRole: owner.threadRole ?? 'main', sessionId, ...(owner.projectId ? { projectId: owner.projectId } : {}),
+    return structuredClone({ mode: 'agent', revision, threadRole: owner.threadRole ?? 'main', threadId, ...(owner.projectId ? { projectId: owner.projectId } : {}),
       profiles: scopes.flatMap(scope => document.prompts[agentScopeKey(scope)] ? [{ scope, profile: document.prompts[agentScopeKey(scope)]! }] : []),
       memories: document.memories.filter(note => keys.has(agentScopeKey(note.scope))),
     });
   };
   const saveNote = async (input: { id?: number; scope: AgentMemoryScope; content: string; source?: AgentMemoryNote['source']; revision?: number }, identity?: { origin: string; intent: unknown; native: true }) => {
     const scope = parseAgentScope(input.scope);
-    if (!identity && scope.kind === 'session' && (await options.context(scope.id)).bot) throw new AgentPersonalizationError('Manage this Bot’s memory in its own settings');
+    if (!identity && scope.kind === 'thread' && (await options.context(scope.id)).bot) throw new AgentPersonalizationError('Manage this Bot’s memory in its own settings');
     if (typeof input.content !== 'string' || !input.content.trim()) throw new AgentPersonalizationError('Memory content is required');
     return mutate(input.revision, document => {
       const previous = input.id === undefined ? undefined : document.memories.find(note => note.id === input.id);
@@ -162,12 +176,12 @@ export function createAgentPersonalization(options: {
     },
     async mutationReceipt(origin: string, intent?: unknown) { return (await findMutation(origin, intent))?.receipt ?? null; },
     async mutation(input: { origin: string; action: 'save' | 'delete'; id?: number; scope: AgentMemoryScope; content?: string; revision: number },
-      admitted: { mode: 'agent' | 'bot'; sessionId: string; projectId: string | null }) {
+      admitted: { mode: 'agent' | 'bot'; threadId: string; projectId: string | null }) {
       if (admitted.mode !== 'agent') throw new AgentPersonalizationError('Bot memory has its own owner');
       const scope = parseAgentScope(input.scope);
       const allowed = (candidate: AgentMemoryScope) => candidate.kind === 'global'
         || (candidate.kind === 'project' && candidate.id === admitted.projectId)
-        || (candidate.kind === 'session' && candidate.id === admitted.sessionId);
+        || (candidate.kind === 'thread' && candidate.id === admitted.threadId);
       if (!allowed(scope)) throw new AgentPersonalizationError('Memory scope is outside this conversation', 403);
       if (!input.origin || !Number.isSafeInteger(input.revision) || input.revision < 0) throw new AgentPersonalizationError('Stable mutation origin and revision are required');
       const intent = { ...input, scope, admitted };
@@ -179,7 +193,7 @@ export function createAgentPersonalization(options: {
       if (input.id !== undefined && (!note || !allowed(note.scope))) throw new AgentPersonalizationError('Memory is unavailable in this conversation', 404);
       const identity = { origin: input.origin, intent, native: true as const };
       if (input.action === 'save') return (await saveNote({ ...(input.id === undefined ? {} : { id: input.id }), scope, content: input.content ?? '', revision: input.revision,
-        source: { sessionId: admitted.sessionId, label: 'agent' } }, identity)).receipt;
+        source: { threadId: admitted.threadId, label: 'agent' } }, identity)).receipt;
       return (await mutate(input.revision, document => {
         if (input.id === undefined || !document.memories.some(item => item.id === input.id)) throw new AgentPersonalizationError('Memory no longer exists', 404);
         document.memories = document.memories.filter(item => item.id !== input.id);
@@ -188,7 +202,7 @@ export function createAgentPersonalization(options: {
     },
     async removeNote(id: number, revision?: number) {
       const existing = (await read()).document.memories.find(note => note.id === id);
-      if (existing?.scope.kind === 'session' && (await options.context(existing.scope.id)).bot) throw new AgentPersonalizationError('Manage this Bot’s memory in its own settings');
+      if (existing?.scope.kind === 'thread' && (await options.context(existing.scope.id)).bot) throw new AgentPersonalizationError('Manage this Bot’s memory in its own settings');
       return mutate(revision, document => {
         if (!document.memories.some(note => note.id === id)) throw new AgentPersonalizationError('Memory no longer exists', 404);
         document.memories = document.memories.filter(note => note.id !== id);
@@ -197,7 +211,7 @@ export function createAgentPersonalization(options: {
     },
     async savePrompt(scopeInput: AgentMemoryScope, profile: AgentPromptProfile | null, revision: number) {
       const scope = parseAgentScope(scopeInput);
-      if (scope.kind === 'session' && (await options.context(scope.id)).bot) throw new AgentPersonalizationError('Manage this Bot’s instructions in its own settings');
+      if (scope.kind === 'thread' && (await options.context(scope.id)).bot) throw new AgentPersonalizationError('Manage this Bot’s instructions in its own settings');
       if (profile !== null && (!profile || !profile.sections || typeof profile.sections !== 'object' || Array.isArray(profile.sections)
         || Object.entries(profile.sections).some(([key, value]) => !/^[a-z][a-z0-9_-]*$/.test(key)
           || key.startsWith('agent_memory_') || (value !== null && typeof value !== 'string')))) {

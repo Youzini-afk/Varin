@@ -9,7 +9,7 @@
  * wrote — never an assumed success.
  */
 
-import { runtimeFetch } from '@varin/application-client';
+import { runtimeFetch, getRuntimeEndpointGeneration, type ThreadIdentity } from '@varin/application-client';
 import { useI18nStore } from '@/lib/i18n';
 import { useUIStore, type FileEditorKeymap } from '@/stores/useUIStore';
 import { usePreferencesStore } from '@/stores/usePreferencesStore';
@@ -23,7 +23,7 @@ import {
   setDesktopLaunchAtLogin,
 } from '@/lib/desktop';
 import { desktopHostsGet, desktopHostsSet } from '@/lib/desktopHosts';
-import { usePiSessionStore } from '@/stores/usePiSessionStore';
+import { useThreadStore, threadHostKey } from '@/stores/useThreadStore';
 
 const SURFACE_ID_STORAGE_KEY = 'varin.client-surface.window.v1';
 let cachedSurfaceId: string | null = null;
@@ -56,24 +56,24 @@ export const getClientSurfaceKind = (): ClientSurfaceKind => {
 };
 
 /** Extra query params so the Host can address this surface individually. */
-export const clientSurfaceQuery = (): Record<string, string> => ({
-  surface: getClientSurfaceId(),
-  kind: getClientSurfaceKind(),
-  ...(usePiSessionStore.getState().currentSessionId
-    ? { session: usePiSessionStore.getState().currentSessionId! }
-    : {}),
+export const selectedClientThread = (): ThreadIdentity | null => {
+  const state = useThreadStore.getState();
+  return state.hostKey === threadHostKey() ? state.selectedIdentity : null;
+};
+export const clientSurfaceQuery = (identity: ThreadIdentity | null): Record<string, string> => ({
+  surface: getClientSurfaceId(), kind: getClientSurfaceKind(),
+  ...(identity ? { threadId: identity.threadId, branchId: identity.branchId } : {}),
 });
 
-/** Establish the Host-side session binding before opening the targetable SSE stream. */
-export const bindClientSurfaceSession = async (sessionId: string): Promise<void> => {
+/** The Host checks the actual Catalog Thread/branch before issuing a one-use permit. */
+export const bindClientSurfaceThread = async (identity: ThreadIdentity): Promise<void> => {
+  const generation = getRuntimeEndpointGeneration();
   const response = await runtimeFetch('/api/varin/client-settings/bind', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ sessionId, surfaceId: getClientSurfaceId() }),
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ threadId: identity.threadId, branchId: identity.branchId, surfaceId: getClientSurfaceId() }),
   });
-  if (!response.ok) {
-    throw new Error(`client Surface binding failed (${response.status})`);
-  }
+  if (generation !== getRuntimeEndpointGeneration()) throw new Error('Application Host changed during Surface binding');
+  if (!response.ok) throw new Error(`client Surface binding failed (${response.status})`);
 };
 
 export interface ClientSettingsFieldResult {
@@ -254,6 +254,7 @@ const CLIENT_DEFAULTS: Record<string, Record<string, unknown>> = {
  * through its real surface authority and posts the per-entry facts back.
  */
 export const handleClientSettingsRequest = async (properties: Record<string, unknown>): Promise<void> => {
+  const generation = getRuntimeEndpointGeneration();
   const requestId = typeof properties.requestId === 'string' ? properties.requestId : '';
   const connectionId = typeof properties.connectionId === 'string' ? properties.connectionId : '';
   const surfaceId = typeof properties.surfaceId === 'string' ? properties.surfaceId : '';
@@ -263,6 +264,7 @@ export const handleClientSettingsRequest = async (properties: Record<string, unk
 
   const results: ClientSettingsFieldResult[] = [];
   for (const entry of entries) {
+    if (generation !== getRuntimeEndpointGeneration()) return;
     const authority = typeof entry.id === 'string' ? AUTHORITIES[entry.id] : undefined;
     if (!authority) {
       results.push({ id: String(entry.id ?? ''), status: 'unavailable', error: 'this surface does not own that setting' });
@@ -289,6 +291,7 @@ export const handleClientSettingsRequest = async (properties: Record<string, unk
   }
 
   try {
+    if (generation !== getRuntimeEndpointGeneration()) return;
     await runtimeFetch('/api/varin/client-settings/ack', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },

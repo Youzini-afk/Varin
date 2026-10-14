@@ -149,7 +149,7 @@ describe('Surface composition lease stream', () => {
     owner: { hostId: '2d7b1dc1-7ccd-4be7-9fd1-23f31dc8cf1a', realmId: 'window-test', extensionId: 'dev.example.consumer',
       extensionVersion: '1.0.0', entrypointId: 'main', generation: 1, desiredRevision: 1 },
     surface: 'web' as const, artifactIntegrity: 'sha256-lease', slot: 'selected' as const,
-    expectedRoutingRevision: 7, routing: { sessionId: 'thread-p' }, services: [],
+    expectedRoutingRevision: 7, routing: { threadId: 'thread-p' }, services: [],
   };
   const setup = () => Object.defineProperty(globalThis, 'window', { configurable: true,
     value: { __VARIN_LOCAL_ORIGIN__: 'http://127.0.0.1:57123', location: { href: 'varin-ui://app/', origin: 'varin-ui://app' } } });

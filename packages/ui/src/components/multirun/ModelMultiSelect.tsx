@@ -1,12 +1,13 @@
 import React from 'react';
-import type { ModelDescriptor } from '@varin/protocol';
+import type { ThreadThinkingLevel } from '@varin/application-client';
+import { toModelPickerProvider } from '@/lib/modelPicker';
 import { dropdownTriggerVariants } from '@/components/ui/dropdown-trigger';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { ProviderLogo } from '@/components/ui/ProviderLogo';
 import { Icon } from "@/components/icon/Icon";
 import { cn } from '@/lib/utils';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
-import { usePiProviderStore } from '@/stores/usePiProviderStore';
+import { useModelCatalogStore } from '@/stores/useModelCatalogStore';
 import { useUIStore } from '@/stores/useUIStore';
 import { useI18n } from '@/lib/i18n';
 import { ModelPickerList, type ModelPickerEntry, type ModelPickerProvider } from '@/components/model-picker/ModelPickerList';
@@ -14,27 +15,12 @@ import { ModelPickerList, type ModelPickerEntry, type ModelPickerProvider } from
 /** Chip height class - shared between chips and add button */
 const CHIP_HEIGHT_CLASS = 'h-7';
 
-const toPickerModel = (model: ModelDescriptor): ModelPickerEntry['model'] => ({
-  capabilities: {
-    attachment: model.input.includes('image'),
-    reasoning: model.supportedThinkingLevels.some((level) => level !== 'off'),
-    toolcall: true,
-  },
-  cost: model.cost,
-  id: model.id,
-  input: model.input,
-  limit: { context: model.contextWindow, output: model.maxTokens },
-  name: model.name,
-  provider: model.provider,
-  variants: Object.fromEntries(model.supportedThinkingLevels.map((level) => [level, {}])),
-});
-
 /** UI-only type with instanceId for React keys and duplicate tracking */
 export interface ModelSelectionWithId {
   providerID: string;
   modelID: string;
   displayName?: string;
-  variant?: string;
+  variant?: ThreadThinkingLevel;
   instanceId: string;
 }
 
@@ -74,7 +60,7 @@ const ModelChip: React.FC<{
 };
 
 export interface ModelMultiSelectProps {
-  /** Pi workspace whose provider/model catalog should be shown. */
+  /** Workspace navigation context; models come from the active Host. */
   cwd?: string | null;
   selectedModels: ModelSelectionWithId[];
   onAdd: (model: ModelSelectionWithId) => void;
@@ -122,13 +108,10 @@ export const ModelMultiSelect: React.FC<ModelMultiSelectProps> = ({
   const { t } = useI18n();
   const currentDirectory = useDirectoryStore((state) => state.currentDirectory);
   const targetDirectory = cwd?.trim() || currentDirectory?.trim() || '';
-  const piProviders = usePiProviderStore((state) => state.providers);
-  const loadProviders = usePiProviderStore((state) => state.load);
-  const providers = React.useMemo<ModelPickerProvider[]>(() => piProviders.map((provider) => ({
-    id: provider.id,
-    name: provider.name,
-    models: provider.models.filter((model) => model.available).map(toPickerModel),
-  })), [piProviders]);
+  const channels = useModelCatalogStore(state => state.channels);
+  const loadProviders = useModelCatalogStore(state => state.load);
+  const catalogError = useModelCatalogStore(state => state.error);
+  const providers = React.useMemo<ModelPickerProvider[]>(() => channels.map(toModelPickerProvider), [channels]);
   const modelsMetadata = React.useMemo(() => new Map(), []);
   const toggleFavoriteModel = useUIStore((state) => state.toggleFavoriteModel);
   const isFavoriteModel = useUIStore((state) => state.isFavoriteModel);
@@ -146,9 +129,8 @@ export const ModelMultiSelect: React.FC<ModelMultiSelectProps> = ({
   const canAddModel = maxModels === undefined || selectedModels.length < maxModels || isSingleSelect;
 
   React.useEffect(() => {
-    if (!targetDirectory) return;
-    void loadProviders(targetDirectory).catch((error) => {
-      console.warn('[pi-model-multi-select] failed to load models', error);
+    void loadProviders().catch((error) => {
+      console.warn('[model-multi-select] failed to load models', error);
     });
   }, [loadProviders, targetDirectory]);
 
@@ -282,6 +264,7 @@ export const ModelMultiSelect: React.FC<ModelMultiSelectProps> = ({
 
   return (
     <div className="space-y-2">
+      {catalogError && <p role="alert" className="text-sm text-destructive">{catalogError}</p>}
       <div className="flex flex-wrap gap-1.5 items-center">
         {/* Add model button (dropdown trigger) */}
         <div className={cn('relative', containerClassName)} ref={dropdownRef}>
@@ -375,7 +358,7 @@ export const ModelMultiSelect: React.FC<ModelMultiSelectProps> = ({
                       onValueChange={(value) => {
                         if (!onUpdate) return;
                         const nextVariant = value === DEFAULT_VARIANT_VALUE ? undefined : value;
-                        onUpdate(index, { ...model, variant: nextVariant });
+                        onUpdate(index, { ...model, variant: nextVariant as ThreadThinkingLevel | undefined });
                       }}
                     >
                       <SelectTrigger

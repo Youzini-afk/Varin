@@ -2,7 +2,6 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { createWebFetch } from "./web-fetch.js";
 import type { SsrfPolicy, DomainPolicy } from "./web-fetch.js";
 import { createMaterialStoreFixture } from "./web-materials.test-helper.js";
-import type { WebFetchReceiptDraft } from "./web-fetch-receipt.js";
 
 // Minimal SSRF mock that blocks known private addresses
 const createMockSsrf = (): SsrfPolicy => ({
@@ -33,24 +32,8 @@ const createMockSsrf = (): SsrfPolicy => ({
 const noDomainPolicy = (): DomainPolicy => ({ block: [] });
 const fetchContext = {
   workspaceId: "ws",
-  authority: { owningWorkspaceId: "ws", sessionId: "session-1" },
-  issueReceipt: true,
+  authority: { kind: "thread" as const, owningWorkspaceId: "ws", threadId: "session-1" },
 };
-const persistReceipt = async (_workspaceId: string, draft: WebFetchReceiptDraft, markdown: string) => ({
-  ...draft,
-  artifact: {
-    durability: "durable" as const,
-    hash: draft.contentHash,
-    byteLength: Buffer.byteLength(markdown),
-    recordId: `receipt:${draft.receiptId}`,
-    recordType: "retrieval.receipt" as const,
-    workspaceId: draft.authority.owningWorkspaceId,
-    sessionId: draft.authority.sessionId,
-    ...(draft.authority.threadId ? { threadId: draft.authority.threadId } : {}),
-    ...(draft.authority.runId ? { runId: draft.authority.runId } : {}),
-  },
-});
-
 describe("web-fetch service", () => {
   let originalFetch: typeof globalThis.fetch;
 
@@ -138,7 +121,6 @@ describe("web-fetch service", () => {
     const service = createWebFetch({
       ssrf: createMockSsrf(),
       domainPolicy: noDomainPolicy,
-      persistReceipt,
     });
     const result = await service.fetch("https://example.com/", fetchContext);
     expect(result.status).toBe("ok");
@@ -147,9 +129,6 @@ describe("web-fetch service", () => {
       expect(result.markdown.length).toBeGreaterThan(0);
       expect(result.rendered).toBe(false);
       expect(result.fromCache).toBe(false);
-      expect(result.receipt?.finalUrl).toBe("https://example.com/");
-      expect(result.receipt?.contentHash).toMatch(/^sha256-/);
-      expect(result.receipt?.artifact.hash).toBe(result.receipt?.contentHash);
     }
   });
 
@@ -212,45 +191,10 @@ describe("web-fetch service", () => {
     expect(allowed.status).toBe("ok");
     const blocked = await service.fetch("https://example.com/", {
       workspaceId: "blocked",
-      authority: { owningWorkspaceId: "blocked", sessionId: "session-b" },
+      authority: { kind: "thread" as const, owningWorkspaceId: "blocked", threadId: "session-b" },
     });
     expect(blocked).toMatchObject({ status: "blocked", reason: "domain-blocked" });
     expect(mockFetch).toHaveBeenCalledTimes(1);
-  });
-
-  it("does not return a source-check receipt when durable persistence fails", async () => {
-    globalThis.fetch = vi.fn().mockResolvedValue({
-      ok: true,
-      status: 200,
-      headers: new Headers({ "content-type": "text/plain" }),
-      text: async () => "content without a durable receipt",
-    }) as never;
-    const service = createWebFetch({
-      ssrf: createMockSsrf(),
-      domainPolicy: noDomainPolicy,
-      persistReceipt: async () => { throw new Error("disk unavailable"); },
-    });
-    const result = await service.fetch("https://example.com/durable", fetchContext);
-    expect(result.status).toBe("ok");
-    if (result.status === "ok") expect(result.receipt).toBeUndefined();
-  });
-
-  it("does not persist a receipt for an ordinary non-retrieval fetch", async () => {
-    globalThis.fetch = vi.fn().mockResolvedValue({
-      ok: true,
-      status: 200,
-      headers: new Headers({ "content-type": "text/plain" }),
-      text: async () => "ordinary browsing content",
-    }) as never;
-    const persist = vi.fn(persistReceipt);
-    const service = createWebFetch({ ssrf: createMockSsrf(), domainPolicy: noDomainPolicy, persistReceipt: persist });
-    const result = await service.fetch("https://example.com/ordinary", {
-      workspaceId: "ws",
-      authority: { owningWorkspaceId: "ws", sessionId: "ordinary-session" },
-    });
-    expect(result.status).toBe("ok");
-    if (result.status === "ok") expect(result.receipt).toBeUndefined();
-    expect(persist).not.toHaveBeenCalled();
   });
 
   it("aborts while reading the response body and does not cache the cancellation", async () => {
@@ -266,7 +210,7 @@ describe("web-fetch service", () => {
     const controller = new AbortController();
     const pending = service.fetch("https://example.com/slow-body", {
       workspaceId: "ws",
-      authority: { owningWorkspaceId: "ws", sessionId: "session-abort" },
+      authority: { kind: "thread" as const, owningWorkspaceId: "ws", threadId: "session-abort" },
       signal: controller.signal,
     });
     await new Promise((resolve) => setImmediate(resolve));
@@ -347,7 +291,7 @@ describe("web-fetch service", () => {
       },
       read: async (_ws: string, snapshotId: string) => snapshots.get(snapshotId) ?? null,
     };
-    const service = createWebFetch({ ssrf: createMockSsrf(), domainPolicy: noDomainPolicy, materials, persistReceipt });
+    const service = createWebFetch({ ssrf: createMockSsrf(), domainPolicy: noDomainPolicy, materials });
     const result = await service.fetch({ url: "https://example.com/pinned" }, fetchContext);
     expect(result.status).toBe("ok");
     if (result.status !== "ok") return;
@@ -358,8 +302,6 @@ describe("web-fetch service", () => {
     if (reread.status === "ok") {
       expect(reread.markdown).toBe(text);
       expect(reread.snapshot?.contentHash).toBe("sha256-stored");
-      // A snapshot read mints this caller's own receipt — not a foreign one.
-      expect(reread.receipt?.authority.sessionId).toBe("session-1");
     }
   });
 
@@ -380,15 +322,13 @@ describe("web-fetch service", () => {
       byteLength: 10, width: 100, height: 200, sourceHash: "sha256-source" };
     const read = vi.fn(async () => ({ status: "ok" as const, url: ref.sourceUrl, finalUrl: ref.finalUrl,
       contentType: "application/pdf", markdown: "", bytes: 0, fromCache: false, rendered: false, snapshot: ref, pageImage }));
-    const persist = vi.fn(persistReceipt);
     const service = createWebFetch({ ssrf: createMockSsrf(), domainPolicy: noDomainPolicy, materials,
-      persistReceipt: persist, documentReader: { read, ingest: vi.fn() } as unknown as import("./document-reading.js").DocumentReader });
+      documentReader: { read, ingest: vi.fn() } as unknown as import("./document-reading.js").DocumentReader });
     const result = await service.fetch({ snapshotId: ref.snapshotId, view: "page-image", page: 2 }, fetchContext);
     expect(result.status).toBe("ok");
     if (result.status === "ok") expect(result.pageImage).toEqual(pageImage);
     expect(read).toHaveBeenCalledWith(expect.objectContaining({ snapshotId: ref.snapshotId, page: 2, view: "page-image" }),
       expect.objectContaining({ workspaceId: "ws", authority: fetchContext.authority }));
-    expect(persist).not.toHaveBeenCalled();
   });
 
   it("shares downloaded PDF bytes but pins each caller's own source before analysis", async () => {
@@ -397,11 +337,11 @@ describe("web-fetch service", () => {
       headers: new Headers({ "content-type": "application/pdf" }),
       arrayBuffer: async () => source.buffer.slice(source.byteOffset, source.byteOffset + source.byteLength) }));
     globalThis.fetch = download as never;
-    const ingest = vi.fn(async (_input: unknown, ctx: { authority: { sessionId: string } }, request: { ocr?: boolean }) => ({
+    const ingest = vi.fn(async (_input: unknown, ctx: { authority: { threadId: string } }, request: { ocr?: boolean }) => ({
       status: "ok" as const, url: "https://example.com/shared.pdf", finalUrl: "https://example.com/shared.pdf",
       contentType: "application/pdf", markdown: request.ocr ? "OCR" : "native", bytes: 6,
       fromCache: false, rendered: false,
-      snapshot: { snapshotId: `source-${ctx.authority.sessionId}`, sourceUrl: "https://example.com/shared.pdf",
+      snapshot: { snapshotId: `source-${ctx.authority.threadId}`, sourceUrl: "https://example.com/shared.pdf",
         finalUrl: "https://example.com/shared.pdf", fetchedAt: 1, contentHash: "sha256-text",
         representation: "pdf-native-analysis", byteLength: 6 },
     }));
@@ -409,7 +349,7 @@ describe("web-fetch service", () => {
       documentReader: { ingest, read: vi.fn() } as unknown as import("./document-reading.js").DocumentReader });
     const a = await service.fetch({ url: "https://example.com/shared.pdf" }, fetchContext);
     const b = await service.fetch({ url: "https://example.com/shared.pdf", ocr: true }, {
-      ...fetchContext, authority: { ...fetchContext.authority, sessionId: "session-2" },
+      ...fetchContext, authority: { ...fetchContext.authority, threadId: "session-2" },
     });
     expect(download).toHaveBeenCalledTimes(1);
     expect(ingest).toHaveBeenCalledTimes(2);
@@ -492,7 +432,7 @@ describe("web-fetch service", () => {
     });
     const blocked = await guarded.fetch({ snapshotId: "snap-blocked" }, {
       workspaceId: "ws",
-      authority: { owningWorkspaceId: "ws", sessionId: "s" },
+      authority: { kind: "thread" as const, owningWorkspaceId: "ws", threadId: "s" },
     });
     expect(blocked).toMatchObject({ status: "blocked", reason: "domain-blocked" });
   });
@@ -509,9 +449,9 @@ describe("web-fetch service", () => {
     globalThis.fetch = mockFetch as never;
     const opened = createMaterialStoreFixture();
     const service = createWebFetch({ ssrf: createMockSsrf(), domainPolicy: noDomainPolicy, materials: opened.materials });
-    const ctx = (sessionId: string, signal?: AbortSignal) => ({
+    const ctx = (threadId: string, signal?: AbortSignal) => ({
       workspaceId: "ws",
-      authority: { owningWorkspaceId: "ws", sessionId },
+      authority: { kind: "thread" as const, owningWorkspaceId: "ws", threadId },
       ...(signal ? { signal } : {}),
     });
 
@@ -529,7 +469,7 @@ describe("web-fetch service", () => {
     expect(resultB.status).toBe("ok");
     if (resultB.status === "ok") expect(resultB.markdown).toContain("shared page body");
     expect(mockFetch).toHaveBeenCalledTimes(1);
-    expect([...opened.records.values()].map(record => record.sessionId)).toEqual(["session-b"]);
+    expect([...opened.records.values()].map(record => record.threadId)).toEqual(["session-b"]);
   });
 
   it("aborts the shared request when the last waiter leaves", async () => {
@@ -546,7 +486,7 @@ describe("web-fetch service", () => {
     const controller = new AbortController();
     const pending = service.fetch({ url: "https://example.com/last" }, {
       workspaceId: "ws",
-      authority: { owningWorkspaceId: "ws", sessionId: "session-only" },
+      authority: { kind: "thread" as const, owningWorkspaceId: "ws", threadId: "session-only" },
       signal: controller.signal,
     });
     await new Promise((resolve) => setImmediate(resolve));

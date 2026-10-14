@@ -10,7 +10,7 @@ import type { KernelClient } from './kernel-client.js';
 import type { ExtensionToolOwnerOptions } from './extension-tool-owner.js';
 import type { KernelMethod, KernelMethodParams, NodeBinding, Operation, OutputPart, IncomingMedia } from './protocol.generated.js';
 import type { ToolExecutionReceipt } from './tool-bridge.js';
-import { scheduleAtDeadline } from '../harness/shell-supervisor.js';
+import { scheduleAtDeadline } from '../deadline.js';
 import { resolveScriptNodeBinding, scriptNodeSpawnInput } from './script-node-binding.js';
 import { createManagedProcessClient } from './managed-process-client.js';
 import { stopManagedScript } from './managed-script-source.js';

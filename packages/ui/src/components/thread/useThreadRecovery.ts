@@ -5,8 +5,8 @@ import type { ImageAttachment, NavigationReceipt } from '@varin/protocol';
 import type { WorkspaceCombinedRecoveryApplyInput, WorkspaceCombinedRecoveryOperation, WorkspaceCombinedRecoveryPlan, WorkspaceRecoveryAPI } from '@varin/extension-contract';
 import { useUIStore } from '@/stores/useUIStore';
 import { getWorkspaceRecoveryAPI, requireWorkspaceRecoveryResult } from '@/lib/recovery/workspaceRecovery';
-import { applyCombinedRecoveryAndRead, assertCombinedRecoveryIdentity, combinedRecoveryStatus, isCombinedRecoverySettled } from '../pi-session/combinedRecoveryResult';
-import { shouldOpenRecoveryDialog } from '../pi-session/piRecoveryPolicy';
+import { applyCombinedRecoveryAndRead, assertCombinedRecoveryIdentity, combinedRecoveryStatus, isCombinedRecoverySettled } from '../recovery/combinedRecoveryResult';
+import { shouldOpenRecoveryDialog } from '../recovery/recoveryPolicy';
 
 type EditorContent = { editorText?: string; editorImages?: ImageAttachment[] };
 type Navigation = { input: Parameters<ThreadsAPI['navigate']>[0]; editor: EditorContent };

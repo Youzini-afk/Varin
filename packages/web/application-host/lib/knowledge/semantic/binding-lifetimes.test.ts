@@ -9,7 +9,7 @@ const deferred = <T>() => { let resolve!: (value: T) => void; const promise = ne
 const scope = { reference: 'provider', authority: 'original-extension', account: 'account', generation: 1 };
 const model = { providerId: 'provider', modelId: 'model' };
 const embedding = { ...model, protocol: 'openai-compatible', dimensions: 2, maxTokens: 4096 };
-const settings = { harness: { embedding, rerank: { ...model, protocol: 'http-rerank' }, fastDecision: { default: { ...model, protocol: 'pi-classifier' } } } };
+const settings = { harness: { embedding, rerank: { ...model, protocol: 'http-rerank' }, fastDecision: { default: { ...model, protocol: 'typed-classifier' } } } };
 function provider() {
   const release = vi.fn();
   return { ...model, baseUrl: 'https://model.invalid/v1', requestUrl: 'https://model.invalid/v1/embeddings', api: 'typesafe-system-one',

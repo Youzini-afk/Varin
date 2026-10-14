@@ -63,7 +63,7 @@ export function readSourceDrafts(input: {
   const resources = clone.resources.filter(resource => resource.resource.workspaceId === workspaceId)
     .sort((left, right) => left.resource.resourceId < right.resource.resourceId ? -1 : left.resource.resourceId > right.resource.resourceId ? 1 : 0);
   if (resources.length !== clone.resources.length || resources.length !== requested.length
-    || resources.some((resource, index) => resource.resource.resourceId !== requested[index]) || clone.supersededResources.length) {
+    || resources.some((resource, index) => resource.resource.resourceId !== requested[index])) {
     throw new Error('The selected editor source snapshot no longer matches its capture');
   }
   const drafts = parseSourceDraftProvenance({ threadId: consumer.threadId, branchId: consumer.branchId,

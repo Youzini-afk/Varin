@@ -83,7 +83,7 @@ async function select(frame: Record<string, unknown>) {
   const bindings = [];
   for (const descriptor of [query, probe]) {
     if (frame.onlyContract && descriptor === probe) continue;
-    const selected = await extensions.prepareService({ serviceId: descriptor.id, version: descriptor.version, method: 'execute', args: [], routing: { sessionId: String(frame.threadId) } });
+    const selected = await extensions.prepareService({ serviceId: descriptor.id, version: descriptor.version, method: 'execute', args: [], routing: { threadId: String(frame.threadId) } });
     const retained = await retainExtensionTool({ runtime: extensions, kernel, currentPolicy: async () => ({ mode: 'normal', rules: [{ tool: descriptor.tool!.name, decision: 'allow' }] }) }, selected);
     leases.push(retained);
     const registered = bridge.register(String(frame.runId), retained.lease);

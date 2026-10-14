@@ -1,37 +1,18 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
-  applyHarnessModelPreset,
   resolveHarnessModelSlot,
   mergeHarnessSettings,
   parseHarnessAgent,
-  resolvePresets,
-  resolveResearchCapabilities,
-  normalizeHarnessAgentConfiguration,
+  observePresets,
 } from "../src/index.js";
 
 describe("Harness model slots", () => {
-  it("retains user models and instructions when old built-in categories become worker profiles", () => {
-    const model = { providerId: "user", modelId: "chosen" };
-    const normalized = normalizeHarnessAgentConfiguration({
-      hardImplement: { ...model, agent: { instructions: "Keep the overall design coherent." } },
-      frontend: { ...model, enabled: false, agent: { name: "My UI profile", instructions: "Use the existing components.", tools: ["read", "edit"] } },
-    }, {});
-    assert.deepEqual(normalized.models.worker, { ...model, agent: { instructions: "Keep the overall design coherent." } });
-    const saved = normalized.agents["saved-frontend"]!;
-    assert.equal(saved.name, "My UI profile");
-    assert.equal(saved.enabled, false);
-    assert.equal(saved.instructions, "Use the existing components.");
-    assert.deepEqual(saved.tools, ["read", "edit"]);
-    assert.deepEqual(saved.model, model);
-    assert.deepEqual(normalizeHarnessAgentConfiguration(normalized.models, normalized.agents), normalized);
-  });
   it("disabled roles retain their configured model and cannot inherit the main model", () => {
     const main = { providerId: "p", modelId: "main" };
     const slots = { worker: { ...main, enabled: false }, researchInvestigation: { ...main, enabled: false } };
     assert.equal(resolveHarnessModelSlot("worker", slots, main), null);
-    assert.deepEqual(resolvePresets(slots, main), []);
-    assert.deepEqual(resolveResearchCapabilities(slots), []);
+    assert.equal(observePresets(slots, main, {}, undefined, 'agent', { worker: ['file_read'], retrieval: ['file_read'] }).find(profile => profile.id === "worker")!.availability, "disabled");
     assert.equal(slots.worker.modelId, "main");
     assert.deepEqual(resolveHarnessModelSlot("worker", { worker: { ...slots.worker, enabled: true } }, main), main);
   });
@@ -42,17 +23,17 @@ describe("Harness model slots", () => {
     const main = { providerId: "p", modelId: "main" };
     const settings = mergeHarnessSettings({ agents: { facts: agent } }, { agents: { facts: { ...agent, instructions: "untrusted override" } } });
     assert.equal(settings.agents.facts?.instructions, "Cite source lines.");
-    assert.equal(resolvePresets({}, main, settings.agents, "code").some(profile => profile.id === "custom:facts"), false);
-    const profile = resolvePresets({}, main, settings.agents, "research").find(profile => profile.id === "custom:facts")!;
+    assert.equal(observePresets({}, main, settings.agents, "code", "agent", { worker: ["file_read"], retrieval: ["file_read"] }).find(profile => profile.id === "custom:facts")!.availability, "scope_unavailable");
+    const profile = observePresets({}, main, settings.agents, "research", "agent", { worker: ["file_read"], retrieval: ["file_read"] }).find(profile => profile.id === "custom:facts")!;
     assert.deepEqual(profile.model, main);
     assert.equal(profile.modelSource, "inherit");
-    const explicitlySame = resolvePresets({}, main, { facts: { ...agent, model: main } }, "research").find(profile => profile.id === "custom:facts")!;
+    const explicitlySame = observePresets({}, main, { facts: { ...agent, model: main } }, "research", "agent", { worker: ["file_read"], retrieval: ["file_read"] }).find(profile => profile.id === "custom:facts")!;
     assert.equal(explicitlySame.modelSource, "selected");
-    assert.equal(resolvePresets({ worker: { ...main } }, main).find(profile => profile.id === "worker")!.modelSource, "selected");
-    assert.equal(resolvePresets({}, main).find(profile => profile.id === "worker")!.modelSource, "inherit");
+    assert.equal(observePresets({ worker: { ...main } }, main, {}, undefined, 'agent', { worker: ['file_read'], retrieval: ['file_read'] }).find(profile => profile.id === "worker")!.modelSource, "selected");
+    assert.equal(observePresets({}, main, {}, undefined, 'agent', { worker: ['file_read'], retrieval: ['file_read'] }).find(profile => profile.id === "worker")!.modelSource, "inherit");
     assert.deepEqual(profile.definition.tools, ["read", "grep"]);
     assert.equal(profile.definition.systemPromptFragment, agent.instructions);
-    assert.equal(resolvePresets({}, main, { facts: { ...agent, enabled: false } }, "research").some(profile => profile.id === "custom:facts"), false);
+    assert.equal(observePresets({}, main, { facts: { ...agent, enabled: false } }, "research", "agent", { worker: ["file_read"], retrieval: ["file_read"] }).find(profile => profile.id === "custom:facts")!.availability, "disabled");
     assert.throws(() => parseHarnessAgent({ ...agent, workFocus: ["invented"] }), /Invalid agent/);
     assert.throws(() => mergeHarnessSettings({ models: { worker: { providerId: "p" } } }, {}), /Invalid binding/);
   });
@@ -65,44 +46,23 @@ describe("Harness model slots", () => {
     }, main), { providerId: "anthropic", modelId: "claude-haiku" });
   });
 
-  it("fills auxiliary slots from an available provider family without overwriting main-default slots", () => {
-    const anthropic = applyHarnessModelPreset("anthropic", {
-      providerId: "anthropic",
-      modelIds: ["claude-sonnet", "claude-3-5-haiku"],
-    });
-    assert.equal(anthropic.reader?.modelId, "claude-3-5-haiku");
-    assert.equal(anthropic.memoryOrganizer?.modelId, "claude-3-5-haiku");
-    assert.equal(anthropic.nextStep, undefined, "a model preset must not enable next-step suggestions");
-    assert.equal(anthropic.worker, undefined);
 
-    const openai = applyHarnessModelPreset("openai", {
-      providerId: "openai",
-      modelIds: ["gpt-5", "gpt-5-mini", "gpt-5-nano"],
-    });
-    assert.equal(openai.explore?.modelId, "gpt-5-nano");
-    assert.deepEqual(applyHarnessModelPreset("gemini", {
-      providerId: "google",
-      modelIds: ["gemini-pro"],
-    }), {});
-  });
 });
 
 describe('Runtime tool selections', () => {
   it('keeps user arrays exact and resolves explicit runtime choices in one place', async () => {
-    const { parseAgentToolSelection, resolveAgentTools, updateAgentToolSelection, observePresets } = await import('../src/index.js');
+    const { parseAgentToolSelection, resolveAgentTools, updateAgentToolSelection } = await import('../src/index.js');
     const original = ['read', 'plugin_tool'];
     assert.deepEqual(resolveAgentTools(original, 'agent'), { source: 'explicit', names: original });
-    const edited = updateAgentToolSelection(original, 'agent', ['file_read']);
-    assert.deepEqual(edited, { pi: original, agent: ['file_read'] });
+    const edited = updateAgentToolSelection(['file_read']);
+    assert.deepEqual(edited, ['file_read']);
+    assert.equal(updateAgentToolSelection(null), undefined);
     assert.deepEqual(original, ['read', 'plugin_tool']);
-    assert.deepEqual(resolveAgentTools({ agent: [] }, 'agent'), { source: 'explicit', names: [] });
-    assert.deepEqual(resolveAgentTools({ agent: [] }, 'pi'), { source: 'unconfigured', names: [] });
-    assert.deepEqual(resolveAgentTools({ agent: [] }, 'pi', ['read']), { source: 'default', names: ['read'] });
-    assert.throws(() => parseAgentToolSelection({ future: ['read'] }), /pi and agent/);
+    assert.deepEqual(resolveAgentTools([], 'agent'), { source: 'explicit', names: [] });
+    assert.throws(() => parseAgentToolSelection({ future: ['read'] }), /array/);
     const settings = mergeHarnessSettings({ agents: { reader: { name: 'Reader', description: '', instructions: '', enabled: true,
-      tools: { agent: ['file_read'] }, worktree: 'none', workFocus: [] } } }, {});
+      tools: ['file_read'], worktree: 'none', workFocus: [] } } }, {});
     const model = { providerId: 'provider', modelId: 'model' };
-    assert.equal(observePresets({}, model, settings.agents, undefined, 'pi').find(p => p.id === 'custom:reader')?.availability, 'runtime_unconfigured');
     const native = observePresets({}, model, settings.agents, undefined, 'agent', { worker: ['file_write'], retrieval: ['file_read'] });
     assert.deepEqual(native.find(p => p.id === 'worker')?.definition.tools, ['file_write']);
     assert.deepEqual(native.find(p => p.id === 'custom:reader')?.definition.tools, ['file_read']);

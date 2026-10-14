@@ -39,10 +39,10 @@ import {
 import { patchEditorViewState, pinWorkbenchEditor, setEditorPreviewMode } from '@/lib/workbench/editors/session';
 import { applyEditorViewState, captureEditorViewState } from '@/lib/workbench/editors/view-state';
 import {
-  activatePiEditorContextOwner,
-  publishPiEditorContext,
-  releasePiEditorContextOwner,
-} from '@/stores/usePiEditorContextStore';
+  activateEditorContextOwner,
+  publishEditorContext,
+  releaseEditorContextOwner,
+} from '@/stores/useEditorContextStore';
 import type { DocumentIdentity } from '@/lib/documents/types';
 import { useUIStore } from '@/stores/useUIStore';
 import { getModifierLabel } from '@/lib/utils';
@@ -52,11 +52,11 @@ import {
 } from '@/lib/extensions/workbench-registry';
 import { listEditorProviders } from '@/lib/workbench/editors/providers';
 import { useDeviceInfo } from '@/lib/device';
-import { getRuntimeKey } from '@varin/application-client';
+import { threadHostKey as getRuntimeKey } from '@/stores/useThreadStore';
 import { createEditorDocumentController } from '@/lib/extensions/editor-document-controller';
 import { WorkbenchPdfReader } from './WorkbenchPdfReader';
-import { usePiSessionStore } from '@/stores/usePiSessionStore';
-import { usePiDraftStore } from '@/stores/usePiDraftStore';
+import { useThreadStore, threadIdentityKey } from '@/stores/useThreadStore';
+import { appendThreadDraftText } from '@/lib/agent-runtime/threadNavigation';
 import { BrowserResourceView } from './BrowserResourceView';
 import { attachEditorContext } from '@/lib/agent-editor/attach';
 import { focusChatInput } from '@/components/chat/composer/editor/dom';
@@ -108,12 +108,8 @@ export const ResourceEditorHost: React.FC<ResourceEditorHostProps> = ({
   const { t } = useI18n();
   const { files, runtime } = useRuntimeAPIs();
   const { isMobile } = useDeviceInfo();
-  const currentSessionId = usePiSessionStore((state) => state.currentSessionId);
-  const currentSessionWorkspaceId = usePiSessionStore((state) => {
-    if (!state.currentSessionId) return null;
-    const workspace = state.records[state.currentSessionId]?.snapshot?.workspace;
-    return workspace?.kind === 'workspace' ? workspace.id : null;
-  });
+  const currentIdentity = useThreadStore(state => state.selectedIdentity);
+  const currentSessionId = useThreadStore(state => state.selectedIdentity ? threadIdentityKey(state.hostKey, state.selectedIdentity) : null);
   const path = workspacePathFromResourceId(workspaceRoot, tab.resourceId);
   const displayPath = tab.providerId === BUILTIN_EDITOR_PROVIDER_IDS.browser ? tab.viewState.browserUrl ?? t('contextPanel.mode.browser') : tab.resourceId;
   const identity = React.useMemo<DocumentIdentity>(
@@ -221,7 +217,7 @@ export const ResourceEditorHost: React.FC<ResourceEditorHostProps> = ({
     const hasText = range.from !== range.to;
     const fromLine = view.state.doc.lineAt(range.from);
     const toLine = view.state.doc.lineAt(range.to);
-    publishPiEditorContext(editorContextOwnerId, {
+    publishEditorContext(editorContextOwnerId, {
       documentInstanceId: open.documentInstanceId,
       fileName: tab.resourceId.split('/').pop() || tab.resourceId,
       filePath: path,
@@ -253,7 +249,7 @@ export const ResourceEditorHost: React.FC<ResourceEditorHostProps> = ({
     }),
     EditorView.domEventHandlers({
       focus: (_event, view) => {
-        activatePiEditorContextOwner(editorContextOwnerId);
+        activateEditorContextOwner(editorContextOwnerId);
         publishCodeMirrorContext(view);
         return false;
       },
@@ -436,9 +432,9 @@ export const ResourceEditorHost: React.FC<ResourceEditorHostProps> = ({
       className="workbench-icon-button flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-interactive-hover hover:text-foreground disabled:opacity-40"
       onClick={() => {
         if (!currentSessionId) return;
-        if (activeProviderId === BUILTIN_EDITOR_PROVIDER_IDS.browser) usePiDraftStore.getState().appendText(currentSessionId, tab.viewState.browserUrl ?? '');
+        if (activeProviderId === BUILTIN_EDITOR_PROVIDER_IDS.browser) currentIdentity && appendThreadDraftText(currentIdentity, tab.viewState.browserUrl ?? '');
         else {
-          const result = attachEditorContext({ sessionId: currentSessionId, workspaceId, resourceId: tab.resourceId, kind: 'editor' });
+          const result = attachEditorContext({ threadKey: currentSessionId, workspaceId, resourceId: tab.resourceId, kind: 'editor' });
           if ('status' in result) { toast.error(t(result.status === 'missing-document' ? 'workbench.attachment.missing-document' : 'workbench.attachment.wrong-runtime')); return; }
         }
         window.dispatchEvent(new Event('varin:ide-focus-agent'));
@@ -446,7 +442,7 @@ export const ResourceEditorHost: React.FC<ResourceEditorHostProps> = ({
       }}><Icon name="attachment-2" className="size-3.5" /></button> : null}
     <MaterialViewActions workspaceId={workspaceId} workspaceRoot={workspaceRoot} tab={tab} />
     {needsText ? <DropdownMenu modal={false}>
-      <DropdownMenuTrigger asChild><button type="button" aria-label={t('chat.piComposer.options')} title={t('chat.piComposer.options')}
+      <DropdownMenuTrigger asChild><button type="button" aria-label={t('chat.composer.options')} title={t('chat.composer.options')}
         className="workbench-icon-button flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-interactive-hover hover:text-foreground">
         <Icon name="more" className="size-3.5" />
       </button></DropdownMenuTrigger>
@@ -539,7 +535,7 @@ export const ResourceEditorHost: React.FC<ResourceEditorHostProps> = ({
 
   if (activeProviderId === BUILTIN_EDITOR_PROVIDER_IDS.pdf || isPdfFile(path)) {
     const originalPdf = getRuntimeUrlResolver().authenticatedAsset('/api/fs/raw', { path, directory: workspaceRoot });
-    if (!currentSessionId || currentSessionWorkspaceId !== workspaceId) {
+    if (!currentIdentity) {
       return (
         <HostFrame chooser={ambiguousChooser} toolbar={toolbar}>
           <div className="flex h-full min-h-0 flex-col">
@@ -556,7 +552,7 @@ export const ResourceEditorHost: React.FC<ResourceEditorHostProps> = ({
         <WorkbenchPdfReader
           key={`${tab.viewId}:${currentSessionId}`}
           workspaceId={workspaceId}
-          sessionId={currentSessionId}
+          identity={currentIdentity}
           tab={tab}
           path={path}
           onOpenOriginal={() => {
@@ -688,7 +684,7 @@ export const ResourceEditorHost: React.FC<ResourceEditorHostProps> = ({
               }}
               onViewDestroy={() => {
                 codeMirrorViewRef.current = null;
-                releasePiEditorContextOwner(editorContextOwnerId);
+                releaseEditorContextOwner(editorContextOwnerId);
               }}
               vimMode={fileEditorKeymap === 'vim'}
             />

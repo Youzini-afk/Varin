@@ -455,7 +455,7 @@ describe('DocumentRegistry', () => {
       await registry.open(secondary);
       registry.applyTransaction(primary, 'unsaved\n', { origin: 'editor' });
       secondaryOnline = false;
-      const context = await registry.captureAgentInputContext({ kind: 'pi-session', sessionId: 'session-1' });
+      const context = await registry.captureAgentInputContext({ kind: 'thread', threadId: 'thread-1', branchId: 'main' });
       expect(context).toEqual({
         source: 'surface',
         roots: [{ workspaceId: primary.workspaceId, dirtyPaths: [primary.resourceId] }],
@@ -523,7 +523,7 @@ describe('DocumentRegistry', () => {
       await Promise.all([registry.open(first), registry.open(second)]);
       registry.applyTransaction(first, 'A draft\n', { origin: 'editor-a' });
       registry.applyTransaction(second, 'B draft\n', { origin: 'editor-b' });
-      const context = await registry.captureAgentInputContext({ kind: 'pi-session', sessionId: 'two-root-session' });
+      const context = await registry.captureAgentInputContext({ kind: 'thread', threadId: 'two-root-thread', branchId: 'main' });
       expect(context).toEqual({
         source: 'surface',
         roots: [
@@ -642,7 +642,7 @@ describe('DocumentRegistry', () => {
       registry.applyTransaction(first, 'A draft', { origin: 'editor' });
       registry.applyTransaction(second, 'B draft', { origin: 'editor' });
       delayIdentity = true;
-      const capture = registry.captureAgentInputContext({ kind: 'pi-session', sessionId: 'session-1' });
+      const capture = registry.captureAgentInputContext({ kind: 'thread', threadId: 'thread-1', branchId: 'main' });
       await new Promise((resolve) => setTimeout(resolve, 0));
       const startedTogether = releaseIdentity.length;
       delayIdentity = false;
@@ -699,7 +699,7 @@ describe('DocumentRegistry', () => {
       expect(registry.dirtyResourceIds(child.workspaceId).has(child.resourceId)).toBe(true);
       await waitForDirtyPublication((publication) => publication.workspaceId === child.workspaceId
         && publication.resources[0]?.resource.resourceId === child.resourceId);
-      const childContext = await registry.captureAgentInputContext({ kind: 'pi-session', sessionId: 'child-session' });
+      const childContext = await registry.captureAgentInputContext({ kind: 'thread', threadId: 'child-thread', branchId: 'main' });
       expect(childContext.source).toBe('surface');
       if (childContext.source !== 'surface') throw new Error('Expected child draft');
       expect(childContext.roots).toEqual([
@@ -707,7 +707,7 @@ describe('DocumentRegistry', () => {
         { workspaceId: parent.workspaceId, dirtyPaths: [parent.resourceId] },
       ]);
       expect(captures[0]?.resources[0]?.resource).toEqual(child);
-      const parentContext = await registry.captureAgentInputContext({ kind: 'pi-session', sessionId: 'parent-session' });
+      const parentContext = await registry.captureAgentInputContext({ kind: 'thread', threadId: 'parent-thread', branchId: 'main' });
       expect(parentContext.source).toBe('surface');
       if (parentContext.source !== 'surface') throw new Error('Expected parent draft');
       expect(parentContext.roots).toEqual(childContext.roots);
@@ -808,7 +808,7 @@ describe('DocumentRegistry', () => {
     await registry.open(identity);
     registry.applyTransaction(identity, 'edited\nnext\n', { origin: 'test' });
 
-    const captured = await registry.captureAgentInputContext({ kind: 'pi-session', sessionId: 'session-1' });
+    const captured = await registry.captureAgentInputContext({ kind: 'thread', threadId: 'thread-1', branchId: 'main' });
     expect(captured).toEqual({
       source: 'surface',
       roots: [{ workspaceId: identity.workspaceId, dirtyPaths: [identity.resourceId] }],

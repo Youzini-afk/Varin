@@ -1,3 +1,4 @@
+import type { ThreadIdentity } from '@varin/application-client';
 import type { DocumentIdentity } from '@/lib/documents/types';
 
 export type EditorContextAttachmentKind = 'editor' | 'selection' | 'diagnostic' | 'diff' | 'test-failure' | 'stack';
@@ -13,7 +14,7 @@ export type EditorContextRange = {
 export type EditorContextAttachment = {
   id: string;
   runtimeKey: string;
-  sessionId: string;
+  threadKey: string;
   workspaceId: string;
   resourceId: string;
   label: string;
@@ -33,7 +34,7 @@ export type AgentFileChangeKind = 'write' | 'edit' | 'patch' | 'delete' | 'move'
 
 export type AgentFileChangeHint = {
   runtimeKey: string;
-  sessionId: string;
+  threadKey: string;
   toolCallId: string;
   workspaceId: string;
   resourceId: string;
@@ -92,7 +93,7 @@ export type MergeRegionDecision = {
 
 export type EditorSessionLink = {
   identity: DocumentIdentity;
-  sessionId: string;
+  thread: ThreadIdentity;
   entryId?: string;
   toolCallId?: string;
 };

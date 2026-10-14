@@ -11,6 +11,7 @@ import { appendModelPath, modelEgressOverride, validateModelConnection } from '.
 import type { EgressFetch, EgressOverride } from '../harness/egress.js';
 import { AwsCredentialOwner } from './aws-auth.js';
 import { GoogleCredentialOwner } from './google-auth.js';
+import { AnthropicCredentialOwner, validateAnthropicFederation } from './anthropic-auth.js';
 import { rerankRequestUrl } from './rerank.js';
 import { modelOAuthProviders, type ModelOAuthProvider } from './oauth.js';
 import { AuthorizationFlows } from '../authorization-flows.js';
@@ -55,6 +56,7 @@ export class ModelsService {
   readonly credentialPath: string;
   readonly #aws = new AwsCredentialOwner();
   readonly #google = new GoogleCredentialOwner();
+  readonly #anthropic: AnthropicCredentialOwner;
   readonly #listeners = new Set<(kind: 'channels' | 'credentials' | 'authorization') => void>();
   readonly #parameterValidators = new Map<string, ReturnType<typeof compileToolJsonSchema>>();
   readonly #acceptedChannels = new Map<string, ModelChannel>();
@@ -65,6 +67,7 @@ export class ModelsService {
   #stopWatching: (() => void) | undefined;
   readonly authorizations = new AuthorizationFlows(() => this.#changed('authorization'));
   constructor(readonly directory: string, options: { projectTrusted(cwd: string): boolean; credentials?: CredentialService; fetch?: typeof fetch }) {
+    this.#anthropic = new AnthropicCredentialOwner(options.fetch ?? globalThis.fetch);
     this.credentialPath = join(directory, 'model-auth.json');
     this.credentials = options.credentials ?? new CredentialService(`varin-models:${directory}`, fileSecretStore(this.credentialPath));
     this.settings = new AgentSettingsService(directory, options.projectTrusted);
@@ -107,6 +110,7 @@ export class ModelsService {
       || auth.kind === 'environment' && !nonempty(auth.variable)
       || auth.kind === 'google-adc' && auth.file !== undefined && !nonempty(auth.file)
       || auth.kind === 'aws-chain' && auth.profile !== undefined && !nonempty(auth.profile)) return fail('channel-auth-invalid', 'Select a supported authentication source');
+    if (auth.kind === 'anthropic-federation') validateAnthropicFederation(auth, value.baseUrl);
     const schemaKey = revisionOf(type.parametersSchema);
     let validate = this.#parameterValidators.get(schemaKey);
     if (!validate) { validate = compileToolJsonSchema(type.parametersSchema); this.#parameterValidators.set(schemaKey, validate); }
@@ -152,6 +156,9 @@ export class ModelsService {
       try {
         this.validate(candidate);
         if (counts.get(candidate.id) !== 1) return fail('channel-id-conflict', 'Channel IDs must be unique');
+        const previous = this.#acceptedChannels.get(candidate.id);
+        if (previous?.authentication.kind === 'anthropic-federation'
+          && (revisionOf(previous.authentication) !== revisionOf(candidate.authentication) || previous.baseUrl !== candidate.baseUrl || previous.enabled !== candidate.enabled)) this.#anthropic.forget(candidate.id);
         ids.add(candidate.id); channels.push(candidate); this.#acceptedChannels.set(candidate.id, structuredClone(candidate));
       } catch (error) {
         issues.push({ ...(id === undefined ? {} : { channelId: id }), code: error instanceof ModelConfigurationError ? error.code : 'channel-invalid', message: error instanceof ModelConfigurationError ? error.message : 'Channel configuration is invalid' });
@@ -171,6 +178,7 @@ export class ModelsService {
   }
   async remove(id: string, expectedRevision: string) {
     await this.file.update(expectedRevision, document => ({ ...document, channels: document.channels.filter(channel => !object(channel) || channel.id !== id) }));
+    this.#anthropic.forget(id);
     return this.read();
   }
   #changed(kind: 'channels' | 'credentials' | 'authorization' = 'channels') { for (const listener of this.#listeners) { try { listener(kind); } catch { console.error('[Models] Change observer failed'); } } }
@@ -205,16 +213,23 @@ export class ModelsService {
   async #channel(id: string, accepted = false): Promise<ModelChannel> {
     const current = await (accepted ? this.file.current() : this.file.read());
     const channel = this.#resolved(current.document, accepted).channels.find(entry => entry.id === id);
-    if (!channel || !channel.enabled) return fail('model-channel-unavailable', 'The selected channel is disabled or missing');
+    if (!channel) { this.#anthropic.forget(id); return fail('model-channel-unavailable', 'The selected channel is missing'); }
+    if (!channel.enabled) { this.#anthropic.forget(id); return fail('model-channel-disabled', 'The selected channel is disabled'); }
     return channel;
   }
   #model(channel: ModelChannel, id: string, operation: ModelOperation) {
-    const model = channel.models.find(model => model.id === id && model.enabled && model.operations.includes(operation));
-    if (!model) return fail('model-unavailable', `The selected model does not support ${operation}`);
+    const model = channel.models.find(model => model.id === id);
+    if (!model) return fail('model-unavailable', 'The selected model is missing');
+    if (!model.enabled) return fail('model-disabled', 'The selected model is disabled');
+    if (!model.operations.includes(operation)) return fail('model-operation-unavailable', `The selected model does not support ${operation}`);
     return model;
   }
   async #scope(channel: ModelChannel): Promise<CredentialScope> {
     const auth = channel.authentication;
+    if (auth.kind === 'anthropic-federation') {
+      const source = await this.#anthropic.source(channel.id, channel.baseUrl, auth);
+      return { reference: channel.id, authority: this.credentials.authorityId, account: source.identity, generation: 0 };
+    }
     if (auth.kind === 'google-adc') {
       const source = await this.#google.source(auth.file ? { GOOGLE_APPLICATION_CREDENTIALS: auth.file } : undefined);
       return { reference: channel.id, authority: this.credentials.authorityId, account: source.identity, generation: 0 };
@@ -235,6 +250,10 @@ export class ModelsService {
   }
   async #auth(channel: ModelChannel, dispatch?: CredentialDispatch): Promise<ResolvedCredential> {
     const auth = channel.authentication;
+    if (auth.kind === 'anthropic-federation') {
+      const source = await this.#anthropic.source(channel.id, channel.baseUrl, auth);
+      return { auth: { headers: await this.#anthropic.headers(channel.id, source) }, source: 'anthropic-federation' };
+    }
     if (auth.kind === 'google-adc') {
       const source = await this.#google.source(auth.file ? { GOOGLE_APPLICATION_CREDENTIALS: auth.file } : undefined);
       return { auth: { headers: await this.#google.headers(source) }, source: 'google-adc' };

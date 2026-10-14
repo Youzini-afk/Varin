@@ -5,10 +5,11 @@ use crate::model::PathState;
 use serde::Deserialize;
 use serde_json::Value;
 
-pub(crate) const KERNEL_PROTOCOL_VERSION: u64 = 43;
+pub(crate) const KERNEL_PROTOCOL_VERSION: u64 = 45;
 pub(crate) const KERNEL_MAX_FRAME_BYTES: usize = 16777216;
 pub(crate) const KERNEL_REQUEST_WINDOW: usize = 2;
 pub(crate) const KERNEL_CONTROL_METHODS: &[&str] = &[
+    "runtime.context.observations.sources",
     "runtime.thread.usage",
     "runtime.knowledge_inference.finish",
     "runtime.knowledge_inference.cancel",
@@ -86,6 +87,8 @@ pub(crate) const KERNEL_CONTROL_METHODS: &[&str] = &[
     "runtime.calendar.calculation.retry",
 ];
 pub(crate) const KERNEL_CONTROL_RESPONSE_METHODS: &[&str] = &[
+    "runtime.context.observations.sources",
+    "runtime.context.observations.admit",
     "runtime.thread.usage",
     "source.authority.seal",
     "source.mcp.holder",
@@ -177,6 +180,7 @@ pub(crate) const KERNEL_INPUT_ORDER_PARAMS: &[(&str, &str)] = &[
     ("runtime.input.edit", "inputId"),
 ];
 pub(crate) const KERNEL_RUNTIME_DATA_METHODS: &[&str] = &[
+    "runtime.context.observations.admit",
     "runtime.knowledge_inference.admit",
     "runtime.knowledge_inference.read",
     "runtime.model_text.admit",
@@ -205,6 +209,19 @@ pub(crate) const KERNEL_RUNTIME_DATA_METHODS: &[&str] = &[
 #[derive(Clone, Debug, Deserialize)]
 #[serde(transparent)]
 pub(crate) struct RequiredNullable<T>(pub(crate) Option<T>);
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct ContextObservationSources {
+    pub(crate) run_id: Option<String>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct ContextObservationAdmit {
+    pub(crate) owner: varin_runtime::catalog::context_observations::ContextObservationSource,
+    pub(crate) events: Vec<varin_runtime::catalog::context_observations::ContextObservationFact>,
+}
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -2767,6 +2784,28 @@ pub(crate) type SourceIntegrationReceiptParams =
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct ContextObservationSource {
+    pub(crate) thread_id: String,
+    pub(crate) branch_id: String,
+    pub(crate) run_id: String,
+    pub(crate) anchor_id: String,
+    pub(crate) source: LaunchSource,
+    pub(crate) epoch: i64,
+}
+
+pub(crate) type ContextObservationFact =
+    varin_runtime::catalog::context_observations::ContextObservationFact;
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct ContextObservationReceipt {
+    pub(crate) id: String,
+    pub(crate) cursor: i64,
+    pub(crate) state: varin_runtime::InputState,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct HostToolErrorMarker {
     pub(crate) code: String,
     pub(crate) admission: Option<bool>,
@@ -2872,7 +2911,7 @@ pub(crate) struct ContextPersonalization {
     pub(crate) thread_role: String,
     pub(crate) context_composition: Option<ContextComposition>,
     pub(crate) revision: i64,
-    pub(crate) session_id: String,
+    pub(crate) thread_id: String,
     pub(crate) project_id: RequiredNullable<String>,
     pub(crate) original_sections: Vec<SystemSection>,
     pub(crate) instruction_sources: Vec<String>,
@@ -3128,6 +3167,25 @@ pub(crate) struct McpTaskResultInput {
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct LaunchSource {
+    #[serde(rename = "environment_run_id")]
+    pub(crate) environment_run_id: Option<RequiredNullable<String>>,
+    #[serde(rename = "workspace_id")]
+    pub(crate) workspace_id: String,
+    #[serde(rename = "execution_workspace_id")]
+    pub(crate) execution_workspace_id: String,
+    #[serde(rename = "branch_id")]
+    pub(crate) branch_id: RequiredNullable<String>,
+    pub(crate) revision: RequiredNullable<i64>,
+    pub(crate) mode: varin_runtime::SourceMode,
+    #[serde(rename = "live_root")]
+    pub(crate) live_root: RequiredNullable<LiveRoot>,
+    #[serde(rename = "resource_owner")]
+    pub(crate) resource_owner: varin_runtime::catalog::launches::SourceResourceOwner,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct MemorySnapshot {
     pub(crate) revision: i64,
     pub(crate) memories: Vec<Value>,
@@ -3258,6 +3316,16 @@ pub(crate) struct ContextFragment {
 
 pub(crate) fn validate_generated_method_params(method: &str, params: &Value) -> Result<(), String> {
     match method {
+        "runtime.context.observations.sources" => {
+            serde_json::from_value::<ContextObservationSources>(params.clone())
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        }
+        "runtime.context.observations.admit" => {
+            serde_json::from_value::<ContextObservationAdmit>(params.clone())
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        }
         "model.adapters.retain" => {
             serde_json::from_value::<ModelAdaptersRetainParams>(params.clone())
                 .map(|_| ())

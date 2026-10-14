@@ -17,16 +17,20 @@ export class ProjectTrustService {
     return { workspaceId, path: root, decision: projectTrustDecision(current.document, root),
       directDecision: Object.hasOwn(current.document, root) ? current.document[root]! : null, revision: current.revision };
   }
-  async update(input: { workspaceId: string; expectedRevision: string; decision: boolean | null }, signal?: AbortSignal) {
-    if (typeof input.workspaceId !== 'string' || !input.workspaceId || typeof input.expectedRevision !== 'string'
+  subscribe(listener: (revision: string) => void): () => void { return this.file.subscribe(listener); }
+  async update(input: { workspaceId: string; expectedPath: string; expectedRevision: string; decision: boolean | null }, signal?: AbortSignal) {
+    if (typeof input.workspaceId !== 'string' || !input.workspaceId || typeof input.expectedPath !== 'string' || !input.expectedPath || typeof input.expectedRevision !== 'string'
       || input.decision !== null && typeof input.decision !== 'boolean') throw new ModelConfigurationError('invalid_project_trust', 'Invalid project trust update');
     const current = await this.snapshot(input.workspaceId, signal);
+    if (current.path !== input.expectedPath) throw new ModelConfigurationError('project_changed', 'The selected project changed. Review trust again.', 409);
     signal?.throwIfAborted();
-    await this.file.update(input.expectedRevision, document => {
+    const saved = await this.file.update(input.expectedRevision, document => {
+      signal?.throwIfAborted();
       if (input.decision === null) delete document[current.path]; else document[current.path] = input.decision;
       return document;
     });
-    return this.snapshot(input.workspaceId, signal);
+    return { workspaceId: input.workspaceId, path: current.path, decision: projectTrustDecision(saved.document, current.path),
+      directDecision: Object.hasOwn(saved.document, current.path) ? saved.document[current.path]! : null, revision: saved.revision };
   }
 }
 

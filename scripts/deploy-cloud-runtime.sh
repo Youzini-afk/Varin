@@ -302,8 +302,8 @@ else
     packages/web/server/index.js \
     packages/web/dist \
     packages/protocol/dist/index.js \
-    packages/pi-host/dist/main.js \
-    packages/runtime-broker/dist/index.js; do
+    packages/web/kernel/manifest.json \
+    packages/extension-host/dist/index.js; do
     if [[ ! -e "${STAGING_DIR}/${required_path}" ]]; then
       echo "Cloud runtime archive is missing ${required_path}" >&2
       exit 1
@@ -335,16 +335,12 @@ else
     cd "$RELEASE_DIR"
     node --input-type=module -e '
       import { createRequire } from "node:module";
-      const broker = await import("./packages/web/node_modules/@varin/runtime-broker/dist/index.js");
-      const hostEntry = broker.resolveBundledPiHostEntry();
-      if (!hostEntry) throw new Error("Pi host entry could not be resolved");
       const require = createRequire(new URL("./packages/web/package.json", import.meta.url));
       require.resolve("sherpa-onnx-node");
       const builtins = await import("./packages/web/node_modules/@varin/extension-builtins/dist/index.js");
       if (!Array.isArray(builtins.VARIN_BUNDLED_LANGUAGE_SERVERS)) {
         throw new Error("Varin extension builtins are unavailable");
       }
-      console.log(`Verified Pi host: ${hostEntry}`);
     '
     node verify-kernel.mjs packages/web
   )
@@ -441,10 +437,9 @@ while (Date.now() < deadline) {
       && body.status === 'ok'
       && body.varinVersion === expectedVersion
       && body.releaseId === expectedReleaseId
-      && body.piRuntime?.ready === true
-      && body.piRuntime?.source === 'bundled'
+      && body.kernel?.ready === true
     ) {
-      console.log(`Varin ${body.varinVersion} is healthy with bundled Pi ${body.piRuntime.piVersion}.`);
+      console.log(`Varin ${body.varinVersion} is healthy with native kernel ${body.kernel.version}.`);
       process.exit(0);
     }
     lastError = `status=${response.status} body=${JSON.stringify(body)}`;

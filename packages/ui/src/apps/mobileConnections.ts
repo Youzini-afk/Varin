@@ -24,7 +24,7 @@ import { isCapacitorApp } from '@/lib/platform';
 import { adoptRelayTunnel, isRelayModeActive } from '@/lib/relay/runtime-tunnel';
 import { createRelayTunnelClient } from '@/lib/relay/tunnel-client';
 import { runtimeFetch } from '@varin/application-client';
-import { getRuntimeApiBaseUrl, getRuntimeKey, switchRuntimeEndpointSafely } from '@varin/application-client';
+import { getRuntimeApiBaseUrl, getRuntimeKey, getRuntimeEndpointGeneration, switchRuntimeEndpointSafely } from '@varin/application-client';
 
 const MOBILE_CONNECTIONS_STORAGE_KEY = 'varin.mobile.connections.v1';
 const MOBILE_SECURE_STORAGE_PREFIX = 'varin.mobile.';
@@ -1695,4 +1695,23 @@ export const useMobileConnection = (onConnected: () => void): UseMobileConnectio
     removeConnection,
     setError,
   };
+};
+
+/** Restore a notification/widget's registered Host using only saved connection metadata. */
+export const connectMobileDeepLinkHost = async (hostKey: string): Promise<boolean> => {
+  let requested: unknown;
+  try { requested = JSON.parse(hostKey); } catch { return false; }
+  if (!Array.isArray(requested) || requested.length !== 2 || requested.some(part => typeof part !== 'string')) return false;
+  const runtimeKey = requested[1] as string;
+  const candidate = readConnections().find(connection => secureTokenKeyOf(connection) === runtimeKey);
+  if (!candidate) return false;
+  if (getRuntimeKey() === runtimeKey) return true;
+  const generation = getRuntimeEndpointGeneration();
+  const token = isCapacitorApp() ? candidate.hasToken ? await readSecureToken(runtimeKey) : undefined : candidate.clientToken;
+  if (!token) return false;
+  const result = await probeConnectionCandidates(candidate.candidates, token, { fast: false });
+  if (result.status !== 'ok') return false;
+  if (generation !== getRuntimeEndpointGeneration()) { if (result.transport.kind === 'relay') result.transport.tunnel?.close(); return false; }
+  await switchToTransport(result.transport, token, { runtimeKey });
+  return true;
 };

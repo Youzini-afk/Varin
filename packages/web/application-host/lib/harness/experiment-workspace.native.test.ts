@@ -48,9 +48,7 @@ async function fixture() {
   const caller: ExperimentWorkspaceCaller = {
     workspaceId: "experiment-workspace",
     executionWorkspaceId: "experiment-workspace-execution",
-    sessionId: "experiment-session",
-    threadId: "experiment-thread",
-    runId: "experiment-run",
+    owner: { runtime: "agent", threadId: "experiment-thread", runId: "experiment-run", operationId: "experiment-operation" },
   };
   return { root, source, storageRoot, client, caller };
 }

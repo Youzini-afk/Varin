@@ -12,7 +12,7 @@ declare module 'electron' {
     __varinInitScript?: string | null | undefined;
     __varinLabel?: string | undefined;
     __varinMiniChat?: boolean | undefined;
-    __varinMiniChatSessionId?: string | undefined;
+    __varinMiniChatThreadKey?: string | undefined;
     __varinPinned?: boolean | undefined;
     __varinRuntimeConfig?: RendererRuntimeConfig | undefined;
     __varinTitleBarOverlayEnabled?: boolean | undefined;

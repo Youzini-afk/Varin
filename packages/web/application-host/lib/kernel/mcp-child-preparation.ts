@@ -24,6 +24,7 @@ export function createChildMcpPreparer(owners: {
   admitWorkspaceRegistration(id: string, signal?: AbortSignal): Promise<{ canonicalPath: string }>;
   projectTrusted(cwd: string): boolean;
   currentPolicy(cwd: string, trusted: boolean): Promise<PermissionPolicy>;
+  processAdmission?(input: McpPreparation): import('../process/types.js').ManagedProcessAdmission;
 }): (input: McpPreparation, signal?: AbortSignal) => Promise<McpToolLease> {
   owners = { ...owners, agentDir: resolve(owners.agentDir) };
   return async (input, signal) => {
@@ -97,6 +98,7 @@ export function createChildMcpPreparer(owners: {
           const configuration = owner.configuration;
           const workspaceScope = owner.execution_scope === 'workspace';
           const lease = await owners.authority.acquire({
+            ...(workspaceScope && owners.processAdmission ? { admitProcess: owners.processAdmission(input) } : {}),
             resourceOwner: owner.resource_owner,
             agentDir: configuration.agent_dir,
             configCwd: configuration.config_cwd,

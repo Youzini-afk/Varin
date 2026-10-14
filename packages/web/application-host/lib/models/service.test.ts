@@ -79,7 +79,11 @@ test('Host channels bind independently to Rust model configuration and anonymous
   const edited = channel(); edited.baseUrl = 'http://localhost:9999/v1';
   await models.save(edited, snapshot.revision);
   expect(accepted.configuration.endpoint).toBe('http://localhost:1234/v1/chat/completions');
-  await expect(authority.rebindModel(accepted.configuration, scope)).rejects.toThrow('model-configuration-changed');
+  const restored = await authority.rebindModel(accepted.configuration, scope);
+  try {
+    expect((await restored.resolve(scope)).headers).toEqual({});
+    expect(accepted.configuration.endpoint).toBe('http://localhost:1234/v1/chat/completions');
+  } finally { restored.release(); accepted.credentialOwner.release(); }
 });
 
 test('one invalid channel stays visible as an issue, leaves independent channels usable and never rewrites the source', async () => {

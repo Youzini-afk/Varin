@@ -665,7 +665,7 @@ fn exercise_child(
         memory_checkpoint: None,
     };
     let basis=serde_json::from_value(json!({"mode":"agent","threadRole":"worker","revision":0,"configurationDigest":"contract-child",
-        "memorySnapshot":{"revision":0,"memories":[]},"sessionId":child.child_thread_id,"projectId":null,"originalSections":[],"instructionSources":[]})).unwrap();
+        "memorySnapshot":{"revision":0,"memories":[]},"threadId":child.child_thread_id,"projectId":null,"originalSections":[],"instructionSources":[]})).unwrap();
     let prepared = parent
         .db
         .capture_child_preparation(&child.execution_id, None, proposal, basis)

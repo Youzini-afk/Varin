@@ -111,7 +111,7 @@ export function ModelConnectionsPage() {
               editConnection({ paths: Object.keys(paths).length ? paths : undefined });
             }} /></SettingsFieldRow>)}
           </details>
-          <SettingsFieldRow label={t('settings.models.authentication')}><Select value={draft.authentication.kind} disabled={busy} onValueChange={kind => edit({ authentication: kind === 'credential' ? { kind, reference: '' } : kind === 'environment' ? { kind, variable: '' } : { kind } as ConnectionAuthentication })}>
+          <SettingsFieldRow label={t('settings.models.authentication')}><Select value={draft.authentication.kind} disabled={busy} onValueChange={kind => edit({ authentication: kind === 'credential' ? { kind, reference: '' } : kind === 'environment' ? { kind, variable: '' } : kind === 'anthropic-federation' ? { kind, identityTokenFile: '', organizationId: '', federationRuleId: '' } : { kind } as ConnectionAuthentication })}>
             <SelectTrigger size="settings" aria-label={t('settings.models.authentication')}><SelectValue /></SelectTrigger><SelectContent>{type.authentication.map(kind => <SelectItem key={kind} value={kind}>{t(`settings.models.auth.${kind}`)}</SelectItem>)}</SelectContent>
           </Select></SettingsFieldRow>
           {draft.authentication.kind === 'credential' ? <SettingsFieldRow label={t('settings.models.apiKey')}><Input type="password" autoComplete="off" value={secret} disabled={busy} placeholder={draft.authentication.reference ? t('settings.models.credentialSaved') : ''} onChange={event => setSecret(event.target.value)} /></SettingsFieldRow> : null}
@@ -125,6 +125,20 @@ export function ModelConnectionsPage() {
           {draft.authentication.kind === 'environment' ? <SettingsFieldRow label={t('settings.models.environment')}><Input value={draft.authentication.variable} disabled={busy} onChange={event => edit({ authentication: { kind: 'environment', variable: event.target.value } })} /></SettingsFieldRow> : null}
           {draft.authentication.kind === 'google-adc' ? <SettingsFieldRow label={t('settings.models.credentialFile')}><Input value={draft.authentication.file ?? ''} disabled={busy} onChange={event => edit({ authentication: event.target.value ? { kind: 'google-adc', file: event.target.value } : { kind: 'google-adc' } })} /></SettingsFieldRow> : null}
           {draft.authentication.kind === 'aws-chain' ? <SettingsFieldRow label={t('settings.models.profile')}><Input value={draft.authentication.profile ?? ''} disabled={busy} onChange={event => edit({ authentication: event.target.value ? { kind: 'aws-chain', profile: event.target.value } : { kind: 'aws-chain' } })} /></SettingsFieldRow> : null}
+          {draft.authentication.kind === 'anthropic-federation' ? <>
+            <p className="typography-meta text-muted-foreground">{t('settings.models.federationHint')}</p>
+            {(['identityTokenFile', 'organizationId', 'federationRuleId', 'serviceAccountId', 'workspaceId'] as const).map(key => {
+              const authentication = draft.authentication as Extract<ConnectionAuthentication, { kind: 'anthropic-federation' }>;
+              return <SettingsFieldRow key={key} label={t(`settings.models.federation.${key}`)}><Input
+                value={authentication[key] ?? ''} disabled={busy} autoComplete="off" aria-label={t(`settings.models.federation.${key}`)}
+                onChange={event => {
+                  const next = { ...authentication };
+                  if (!event.target.value && (key === 'workspaceId' || key === 'serviceAccountId')) delete next[key];
+                  else next[key] = event.target.value;
+                  edit({ authentication: next });
+                }} /></SettingsFieldRow>;
+            })}
+          </> : null}
           {Object.entries((type.parametersSchema.properties ?? {}) as Record<string, Record<string, JsonValue>>).map(([key, schema]) => <SettingsFieldRow key={key} label={key}>
             {Array.isArray(schema.enum) ? <Select value={String(draft.parameters[key] ?? '__unset')} disabled={busy} onValueChange={value => { const parameters = { ...draft.parameters }; if (value === '__unset') delete parameters[key]; else parameters[key] = value; edit({ parameters }); }}><SelectTrigger size="settings" aria-label={key}><SelectValue /></SelectTrigger><SelectContent><SelectItem value="__unset">{t('settings.models.default')}</SelectItem>{schema.enum.map(value => <SelectItem key={String(value)} value={String(value)}>{String(value)}</SelectItem>)}</SelectContent></Select>
               : <Input value={String(draft.parameters[key] ?? '')} disabled={busy} onChange={event => { const parameters = { ...draft.parameters }; if (event.target.value) parameters[key] = event.target.value; else delete parameters[key]; edit({ parameters }); }} />}

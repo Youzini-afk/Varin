@@ -53,16 +53,6 @@ button,
   transition: background-color 180ms ease;
 }
 
-.pi-work-status-panel {
-  display: none;
-}
-
-@container (min-width: 1120px) {
-  .pi-work-status-panel {
-    display: flex;
-  }
-}
-
 /* ── macOS vibrancy ───────────────────────────────────────────────────────
    The window is created transparent with a native 'sidebar' NSVisualEffectView
    behind it. We keep the whole app opaque (bg-background covers the window)
@@ -1854,14 +1844,4 @@ html.desktop-runtime .markdown-content [data-varin-file-link="true"] {
 
 .varin-monaco-test-failure-line {
   background: color-mix(in srgb, var(--status-error) 8%, transparent);
-}
-
-/* Only new explore receipts animate. History and remounts do not replay work. */
-@keyframes pi-explore-arrival {
-  from { background: color-mix(in srgb, var(--foreground) 6%, transparent); }
-  to { background: transparent; }
-}
-.pi-explore-arrival { animation: pi-explore-arrival 240ms ease-out; }
-@media (prefers-reduced-motion: reduce) {
-  .pi-explore-arrival { animation: none; }
 }

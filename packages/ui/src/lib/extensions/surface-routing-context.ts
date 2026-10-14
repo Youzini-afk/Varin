@@ -10,7 +10,8 @@ export function surfaceServiceRoutingContext(input: {
   configurationDirectory?: string;
   documentWorkspaceId?: string;
   runtimeId: string;
-  sessionId?: string;
+  threadId?: string;
+  branchId?: string;
   snapshot?: VarinExtensionHostStateSnapshot;
   surface: VarinApplicationSurface;
 }): VarinExtensionServiceRoutingContext {
@@ -20,8 +21,10 @@ export function surfaceServiceRoutingContext(input: {
   }).profileId;
   return {
     userId: 'default', runtimeId: input.runtimeId,
-    ...(input.sessionId ? { sessionId: input.sessionId } : {}),
-    ...(input.configurationDirectory ? { workspaceId: input.configurationDirectory } : {}),
+    ...(input.threadId ? { threadId: input.threadId } : {}),
+    ...(input.branchId ? { branchId: input.branchId } : {}),
+    ...(input.configurationDirectory ? { configurationDirectory: input.configurationDirectory } : {}),
+    ...(input.documentWorkspaceId ? { workspaceId: input.documentWorkspaceId } : {}),
     ...(profileId ? { profileId } : {}),
   };
 }

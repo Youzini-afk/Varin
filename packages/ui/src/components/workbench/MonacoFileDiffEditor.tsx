@@ -1,3 +1,4 @@
+import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
 import React from 'react';
 import type { editor } from 'monaco-editor/editor';
 import type { JsonValue } from '@varin/extension-contract';
@@ -23,15 +24,15 @@ import { useWorkbenchProfileId } from '@/lib/workbench/profile-context';
 import type { EditorViewState } from '@/lib/workbench/editors/types';
 import { patchEditorViewState } from '@/lib/workbench/editors/session';
 import {
-  activatePiEditorContextOwner,
-  publishPiEditorContext,
-  releasePiEditorContextOwner,
-} from '@/stores/usePiEditorContextStore';
+  activateEditorContextOwner,
+  publishEditorContext,
+  releaseEditorContextOwner,
+} from '@/stores/useEditorContextStore';
 import { useUIStore } from '@/stores/useUIStore';
-import { getRuntimeKey } from '@varin/application-client';
+import { threadHostKey as getRuntimeKey } from '@/stores/useThreadStore';
 import { cn } from '@/lib/utils';
 import { createRunDebugEditorAdapter } from '@/lib/monaco/run-debug-editor-adapter';
-import { usePiSessionStore } from '@/stores/usePiSessionStore';
+import { useThreadStore, threadIdentityKey } from '@/stores/useThreadStore';
 import { attachEditorContext } from '@/lib/agent-editor/attach';
 import { resourceIdFromWorkspacePath } from '@/lib/documents/path';
 import { registerMonacoExtensionView } from '@/lib/monaco/extension-service';
@@ -78,10 +79,8 @@ export const MonacoFileDiffEditor: React.FC<MonacoFileDiffEditorProps> = ({
   const editorFontSize = useUIStore((state) => state.editorFontSize);
   const fileEditorSettings = useUIStore((state) => state.fileEditorSettings);
   const updateFileEditorSettings = useUIStore((state) => state.updateFileEditorSettings);
-  const sessionId = usePiSessionStore((state) => state.currentSessionId);
-  const sessionDirectory = usePiSessionStore((state) => (
-    state.currentSessionId ? state.records[state.currentSessionId]?.snapshot?.cwd ?? null : null
-  ));
+  const sessionId = useThreadStore(state => state.selectedIdentity ? threadIdentityKey(state.hostKey, state.selectedIdentity) : null);
+  const sessionDirectory = useEffectiveDirectory();
   const profileId = useWorkbenchProfileId();
   const hostRef = React.useRef<HTMLDivElement | null>(null);
   const instanceOwner = React.useId();
@@ -312,7 +311,7 @@ export const MonacoFileDiffEditor: React.FC<MonacoFileDiffEditorProps> = ({
       const selection = modifiedEditor.getSelection();
       const record = models.getRecordForModel(modifiedModel);
       if (!record?.documentInstanceId) return;
-      publishPiEditorContext(contextOwnerId, {
+      publishEditorContext(contextOwnerId, {
         documentInstanceId: record.documentInstanceId,
         fileName: identity.resourceId.split('/').pop() || identity.resourceId,
         filePath: path,
@@ -342,7 +341,7 @@ export const MonacoFileDiffEditor: React.FC<MonacoFileDiffEditorProps> = ({
       modifiedEditor.onDidChangeCursorSelection(scheduleCapture),
       modifiedEditor.onDidScrollChange(scheduleCapture),
       modifiedEditor.onDidFocusEditorWidget(() => {
-        activatePiEditorContextOwner(contextOwnerId);
+        activateEditorContextOwner(contextOwnerId);
         scheduleCapture();
       }),
       modifiedEditor.addAction({
@@ -362,7 +361,7 @@ export const MonacoFileDiffEditor: React.FC<MonacoFileDiffEditorProps> = ({
             return;
           }
           const result = attachEditorContext({
-            sessionId: currentSessionId,
+            threadKey: currentSessionId,
             workspaceId: identity.workspaceId,
             resourceId: identity.resourceId,
             kind: 'diff',
@@ -399,7 +398,7 @@ export const MonacoFileDiffEditor: React.FC<MonacoFileDiffEditorProps> = ({
         if (modelBinding.current === binding) modelBinding.current = null;
         if (captureFrame !== null) cancelAnimationFrame(captureFrame);
         capture();
-        releasePiEditorContextOwner(contextOwnerId);
+        releaseEditorContextOwner(contextOwnerId);
         disposeExtensionView();
         disposeCommandTarget();
         runDebugAdapter?.dispose();

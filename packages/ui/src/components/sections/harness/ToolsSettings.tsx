@@ -5,7 +5,6 @@ import { useI18n } from '@/lib/i18n';
 import { AutoSaveInput } from './AutoSaveInput';
 import type { HarnessSettingsPageProps } from './harness-settings-state';
 import { ImageToolsSettings } from './ImageToolsSettings';
-import { ConfigurationRuntime } from './ConfigurationModels';
 
 const tools = ['bash', 'grep', 'get_output', 'write_to_process', 'kill_shell', 'diagnostics', 'apply_patch'] as const;
 const researchTools = ['websearch', 'webfetch', 'document_read', 'research_search', 'materials', 'research_decide'] as const;
@@ -14,11 +13,10 @@ const shells = ['auto', 'git-bash', 'powershell', 'wsl'] as const;
 
 export function ToolsSettings({ harness, update }: HarnessSettingsPageProps) {
   const { t } = useI18n();
-  const runtime = React.useContext(ConfigurationRuntime);
   const validNumber = (value: string) => Number.isFinite(Number(value)) && Number(value) > 0
     ? null : t('settings.harness.positiveNumber');
   return <>
-    {runtime === 'agent' ? <ImageToolsSettings harness={harness} update={update} /> : null}
+    <ImageToolsSettings harness={harness} update={update} />
     <SettingsSection title={t('settings.page.harness.section.tools')} settingsItem="harness.tools" contentClassName="space-y-3">
       {tools.map((tool) => <SettingsCheckboxRow key={tool} checked={harness.tools[tool] !== false}
         onChange={(checked) => update({ tools: { [tool]: checked } })}

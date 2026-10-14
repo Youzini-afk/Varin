@@ -6,9 +6,8 @@ import path from "node:path";
 import { createHash } from "node:crypto";
 import { createKernelClient, KernelClient } from "./kernel-client.js";
 import type { KernelGrantHandle } from "./kernel-client.js";
-import { KERNEL_PROTOCOL_VERSION } from "./protocol.generated.js";
+import { KERNEL_PROTOCOL_VERSION, type ThreadSummary } from "./protocol.generated.js";
 import { KernelStorageAdapter } from "./storage-adapter.js";
-import { KernelPathLockService } from "./file-resource-lock-service.js";
 import { KernelRecoveryContentStore, KernelRecoveryStore, createKernelRecoveryDirectFacade } from "./kernel-recovery-store.js";
 import { createWorkspaceRecoveryEngine } from "../recovery/journal-engine.js";
 
@@ -1137,7 +1136,7 @@ test("domain record identity is workspace- and actor-scoped", { timeout: 30_000 
   );
 });
 
-test("typed recovery turn reads honor actor session identity", { timeout: 30_000 }, async (t) => {
+test("typed recovery turn reads honor the original native Thread actor identity", { timeout: 30_000 }, async (t) => {
   if (!(await fs.stat(kernelPath).then(() => true).catch(() => false))) {
     t.skip("release kernel has not been built in this checkout");
     return;
@@ -1147,12 +1146,20 @@ test("typed recovery turn reads honor actor session identity", { timeout: 30_000
   const host = createKernelClient({ hostId: "recovery-actor-host", hostGeneration: "recovery-actor-generation", storageRoot: root, buildVersion, kernelPath, allowCargoDevRunner: false });
   clients.push(host);
   await host.start();
-  const makeActor = async (grantId: string, sessionId: string) => host.scoped(await host.issueGrant({ grantId, hostGeneration: "recovery-actor-generation", sessionId, threadId: `${sessionId}-thread`, runId: `${sessionId}-run`, owningWorkspace: "recovery-actor-workspace", executionWorkspace: "recovery-actor-workspace", storageIdentity: host.handshake?.storageRoot, capabilities: ["storage.read", "storage.write", "recovery"], pathScopes: [""] }));
-  const owner = await makeActor("recovery-owner", "session-owner");
-  const other = await makeActor("recovery-other", "session-other");
-  await owner.recoveryTurnStart({ operationId: "recovery-actor-turn", workspaceId: "recovery-actor-workspace", executionId: "recovery-actor-execution", conversation: { kind: "pi", sessionId: "session-owner" }, userEntryId: "entry-owner", workerId: "worker", runtimeGeneration: 1, activeWriterScopes: [], provenance: "caused-by" });
-  await assert.rejects(other.recoveryTurnGet({ workspaceId: "recovery-actor-workspace", executionId: "recovery-actor-execution", conversation: { kind: "pi", sessionId: "session-owner" } }), /actor|authorization|session/i);
-  assert.deepEqual((await owner.recoveryTurnGet({ workspaceId: "recovery-actor-workspace", executionId: "recovery-actor-execution", conversation: { kind: "pi", sessionId: "session-owner" } }))?.conversation, { kind: "pi", sessionId: "session-owner" });
+  const makeActor = async (grantId: string, threadId: string) => {
+    const identity = await host.agentRuntimeRequest<{ threadId: string; branchId: string }, 'runtime.thread.create'>(
+      'runtime.thread.create', { threadId, branchId: `${threadId}:main` });
+    const scoped = host.scoped(await host.issueGrant({ grantId, hostGeneration: "recovery-actor-generation",
+      threadId: identity.threadId, owningWorkspace: "recovery-actor-workspace", executionWorkspace: "recovery-actor-workspace",
+      storageIdentity: host.handshake?.storageRoot, capabilities: ["storage.read", "storage.write", "recovery"], pathScopes: [""] }));
+    return { scoped, conversation: { kind: "thread" as const, ...identity } };
+  };
+  const owner = await makeActor("recovery-owner", "recovery-owner-thread");
+  const other = await makeActor("recovery-other", "recovery-other-thread");
+  await owner.scoped.recoveryTurnStart({ operationId: "recovery-actor-turn", workspaceId: "recovery-actor-workspace", executionId: "recovery-actor-execution", conversation: owner.conversation, userEntryId: "entry-owner", workerId: "kernel", runtimeGeneration: 1, activeWriterScopes: [], provenance: "caused-by" });
+  const lookup = { workspaceId: "recovery-actor-workspace", executionId: "recovery-actor-execution", conversation: owner.conversation };
+  await assert.rejects(other.scoped.recoveryTurnGet(lookup), /actor|authorization|thread/i);
+  assert.deepEqual((await owner.scoped.recoveryTurnGet(lookup))?.conversation, owner.conversation);
 });
 
 test("branch creation streams a normal input larger than one control frame", { timeout: 60_000 }, async (t) => {
@@ -1258,10 +1265,20 @@ test("real kernel typed recovery storage persists checkpoints, operation files, 
   const workspace = await fs.mkdtemp(path.join(os.tmpdir(), "varin-recovery-workspace-"));
   roots.push(root, workspace);
   await fs.writeFile(path.join(workspace, "a.txt"), "before");
+  const conversation = { kind: "thread" as const, threadId: "thread:recovery", branchId: "branch:recovery" };
+  let threadCreated = false;
   const makeEngine = async () => {
     const client = createKernelClient({ hostId: "kernel-recovery-host", storageRoot: root, buildVersion, kernelPath, allowCargoDevRunner: false });
     clients.push(client);
     await client.start();
+    if (!threadCreated) {
+      await client.agentRuntimeRequest('runtime.thread.create', { threadId: conversation.threadId, branchId: conversation.branchId });
+      threadCreated = true;
+    }
+    const thread = await client.agentRuntimeRequest<ThreadSummary, 'runtime.thread.inspect'>(
+      'runtime.thread.inspect', { threadId: conversation.threadId });
+    assert.equal(thread.main_branch_id, conversation.branchId);
+    assert.ok(thread.branches.some(branch => branch.branch_id === conversation.branchId));
     const adapter = new KernelStorageAdapter({ hostId: "kernel-recovery-host", storageRoot: root, client, resolveWorkspaceRoot: async () => workspace });
     const content = new KernelRecoveryContentStore(adapter, path.join(root, "recovery-cache"));
     const documents = {
@@ -1290,7 +1307,7 @@ test("real kernel typed recovery storage persists checkpoints, operation files, 
   };
 
   const first = await makeEngine();
-  await first.engine.recordTurnStart({ executionId: "execution-1", workspaceId: "workspace-test", conversation: { kind: "pi", sessionId: "session-1" }, userEntryId: "user-1", workerId: "worker-1", runtimeGeneration: 1, activeWriterScopes: [], provenance: "caused-by" });
+  await first.engine.recordTurnStart({ executionId: "execution-1", workspaceId: "workspace-test", conversation, userEntryId: "user-1", workerId: "worker-1", runtimeGeneration: 1, activeWriterScopes: [], provenance: "caused-by" });
   await first.engine.recordMutationBefore({ executionId: "execution-1", workspaceId: "workspace-test", path: "a.txt", toolName: "edit", mutationId: "mutation-1", toolCallId: "tool-call-1" });
   await fs.writeFile(path.join(workspace, "a.txt"), "after");
   await first.engine.recordMutationAfter({ executionId: "execution-1", workspaceId: "workspace-test", path: "a.txt", toolName: "edit", mutationId: "mutation-1", toolCallId: "tool-call-1", succeeded: true });
@@ -1303,7 +1320,7 @@ test("real kernel typed recovery storage persists checkpoints, operation files, 
   const checkpoints = await second.engine.listCheckpoints({ workspaceId: "workspace-test" });
   assert.equal(checkpoints.status, "ready");
   assert.equal(checkpoints.page.checkpoints.length, 1);
-  const resolved = await second.engine.resolveEntry({ workspaceId: "workspace-test", conversation: { kind: "pi", sessionId: "session-1" }, entryId: "user-1" });
+  const resolved = await second.engine.resolveEntry({ workspaceId: "workspace-test", conversation, entryId: "user-1" });
   assert.equal(resolved.status, "ready");
   assert.equal(resolved.binding?.checkpointId, checkpoints.page.checkpoints[0]?.id);
   await second.engine.dispose();
@@ -1574,51 +1591,6 @@ test("R2 file apply reconciles a committed disk side effect after kernel restart
   });
   assert.equal(retried.status, "applied");
   assert.equal(retried.reconciled, true);
-});
-
-test("R2 production fs.lock delegates overlap admission to the Rust file lease authority", { timeout: 30_000 }, async (t) => {
-  if (!(await fs.stat(kernelPath).then(() => true).catch(() => false))) {
-    t.skip("release kernel has not been built in this checkout");
-    return;
-  }
-  const storageRoot = await fs.mkdtemp(path.join(os.tmpdir(), "varin-kernel-path-lock-"));
-  const workspace = await fs.mkdtemp(path.join(os.tmpdir(), "varin-kernel-path-lock-workspace-"));
-  roots.push(storageRoot, workspace);
-  const host = createKernelClient({
-    hostId: "path-lock-host",
-    storageRoot,
-    buildVersion,
-    kernelPath,
-    allowCargoDevRunner: false,
-  });
-  clients.push(host);
-  await host.start();
-  const adapter = new KernelStorageAdapter({
-    client: host,
-    hostId: "path-lock-host",
-    storageRoot,
-    resolveWorkspaceRoot: async () => workspace,
-  });
-  const locks = new KernelPathLockService(adapter, {
-    resolveOwningWorkspaceId: async (_sessionId, executionWorkspaceId) => executionWorkspaceId,
-    resolveWorkspaceRoot: async () => workspace,
-  });
-  const resource = {
-    authorityId: "path-lock-host",
-    workspaceId: "path-lock-workspace",
-    canonicalResourceId: path.join(workspace, "file.txt"),
-    resourceId: "file.txt",
-  };
-  const first = await locks.acquire("session-one", resource, 1_000);
-  await assert.rejects(
-    locks.acquire("session-two", resource, 25),
-    /Lock timeout/i,
-  );
-  assert.equal(await locks.release("session-one", first), true);
-  const second = await locks.acquire("session-two", resource, 1_000);
-  assert.equal(await locks.release("session-two", second), true);
-  await locks.dispose();
-  await adapter.dispose();
 });
 
 test("R3 kernel scans a fixed workspace view and materializes an immutable root without Host body copies", { timeout: 30_000 }, async (t) => {

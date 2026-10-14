@@ -7,10 +7,11 @@ describe("web search credential routes", () => {
   it("stores a key under a fixed search-only ref and never returns it", async () => {
     const app = express();
     app.use(express.json());
-    const saveAuth = vi.fn();
+    const saveAuth = vi.fn(async () => undefined);
     registerWebSearchCredentialRoutes(app, {
       readAuth: () => ({}),
       saveAuth,
+      removeAuth: vi.fn(async () => false),
     });
     const response = await request(app)
       .put("/api/harness/web-search/credentials/brave")
@@ -28,10 +29,11 @@ describe("web search credential routes", () => {
   it("reports status, removes only the fixed ref, and authenticates before access", async () => {
     const app = express();
     app.use(express.json());
-    const removeAuth = vi.fn(() => true);
+    const removeAuth = vi.fn(async () => true);
     registerWebSearchCredentialRoutes(app, {
       readAuth: () => ({ "varin-web-search-exa": { key: "secret" } }),
       removeAuth,
+      saveAuth: vi.fn(async () => undefined),
     });
     await request(app)
       .get("/api/harness/web-search/credentials/exa")
@@ -43,6 +45,8 @@ describe("web search credential routes", () => {
     const readAuth = vi.fn();
     registerWebSearchCredentialRoutes(protectedApp, {
       readAuth,
+      saveAuth: vi.fn(async () => undefined),
+      removeAuth: vi.fn(async () => false),
       requireAuth: (_request, response) => { response.status(401).json({ error: "auth required" }); },
     });
     await request(protectedApp).get("/api/harness/web-search/credentials/exa").expect(401);
@@ -52,7 +56,9 @@ describe("web search credential routes", () => {
   it("rejects unknown providers and empty credentials", async () => {
     const app = express();
     app.use(express.json());
-    registerWebSearchCredentialRoutes(app);
+    registerWebSearchCredentialRoutes(app, {
+      readAuth: () => ({}), saveAuth: vi.fn(async () => undefined), removeAuth: vi.fn(async () => false),
+    });
     await request(app).get("/api/harness/web-search/credentials/unknown").expect(400);
     await request(app).put("/api/harness/web-search/credentials/brave").send({ apiKey: " " }).expect(400);
   });

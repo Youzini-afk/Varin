@@ -1,7 +1,7 @@
 {
   "name": "varin-monorepo",
   "version": "0.9.25",
-  "description": "An independent agent workspace and harness for coding and research, with a bundled Pi runtime.",
+  "description": "An independent agent workspace and native runtime for coding and research.",
   "private": true,
   "type": "module",
   "packageManager": "bun@1.3.14",
@@ -12,7 +12,6 @@
     "node": ">=22.0.0"
   },
   "keywords": [
-    "pi",
     "coding-agent",
     "ai",
     "coding",
@@ -32,7 +31,7 @@
     "build:monaco-smoke": "bun run --cwd packages/web build:monaco-smoke",
     "build:electron": "bun run --cwd packages/electron build",
     "build:mobile": "bun run --cwd packages/mobile build",
-    "build:runtime-dependencies": "bun run --cwd packages/settings-store build && bun run --cwd packages/protocol build && bun run --cwd packages/script-runtime build && bun run --cwd packages/pi-host build:raw && bun run --cwd packages/runtime-broker build:raw && bun run --cwd packages/runtime-client build:raw && bun run --cwd packages/extension-contract build && bun run --cwd packages/application-client build:raw && bun run --cwd packages/extension-surface build:raw && bun run --cwd packages/extension-sdk build:raw && bun run --cwd packages/extension-builtins build:raw && bun run --cwd packages/extension-host build:raw && bun run --cwd packages/extension-loader build:raw",
+    "build:runtime-dependencies": "bun run --cwd packages/settings-store build && bun run --cwd packages/protocol build && bun run --cwd packages/script-runtime build && bun run --cwd packages/extension-contract build && bun run --cwd packages/application-client build:raw && bun run --cwd packages/extension-surface build:raw && bun run --cwd packages/extension-sdk build:raw && bun run --cwd packages/extension-builtins build:raw && bun run --cwd packages/extension-host build:raw && bun run --cwd packages/extension-loader build:raw",
     "build:type-dependencies": "bun run build:runtime-dependencies && bun run --cwd packages/web build:application-host:types",
     "type-check": "bun run build:type-dependencies && bun run type-check:prepared",
     "type-check:prepared": "bun run --filter '!@varin/web' type-check && bun run --cwd packages/web type-check:prepared",
@@ -50,15 +49,12 @@
     "changelog-card": "node scripts/changelog-card/generate.mjs",
     "branding:generate": "bun run scripts/generate-product-brand-assets.ts && bun run --cwd packages/mobile branding:generate",
     "postinstall": "node ./scripts/fix-deprecation.js && node ./packages/electron/scripts/ensure-electron.mjs --best-effort",
-    "test:pi": "bun run --sequential --no-exit-on-error --filter '@varin/*' test",
-    "test:pi:dist": "bun run --sequential --no-exit-on-error --filter '@varin/*' test:dist",
     "test:node-smoke": "bun run --cwd packages/web test:node-smoke",
     "kernel:build": "node scripts/build-kernel.mjs",
     "kernel:check": "cargo check --manifest-path kernel/Cargo.toml",
     "test:rust": "cd kernel && cargo test --workspace --locked",
     "test:kernel": "node scripts/test-kernel-authority.mjs",
     "kernel:protocol": "node scripts/generate-kernel-protocol.mjs",
-    "check:pi": "bun run type-check && bun run test:pi",
     "test:cloud": "node --test scripts/host-production-boundary.test.mjs && bunx vitest run scripts/cloud-runtime-layout.test.js",
     "dev:web": "bun run --cwd packages/web build:watch",
     "dev:web:server": "bun run --cwd packages/web dev:server:watch",
@@ -112,7 +108,9 @@
     "release:npm:build": "bun run --cwd packages/extension-contract build && bun run --cwd packages/extension-surface build:raw && bun run --cwd packages/extension-sdk build:raw && bun run --cwd packages/extension-react build:raw && bun run --cwd packages/extension-cli build:raw && bun run --cwd packages/protocol build && bun run --cwd packages/application-client build:raw",
     "release:npm:package": "node scripts/npm-public-release.mjs package",
     "release:npm:publish": "node scripts/npm-public-release.mjs publish",
-    "smoke:extension": "node scripts/smoke-extension.mjs"
+    "test:packages": "bun run --sequential --no-exit-on-error --filter '@varin/*' test",
+    "test:packages:dist": "bun run --sequential --no-exit-on-error --filter '@varin/*' test:dist",
+    "check:packages": "bun run type-check && bun run test:packages"
   },
   "overrides": {
     "@humanfs/node": "0.16.8",
@@ -197,12 +195,7 @@
     "vitest": "^5.0.3"
   },
   "patchedDependencies": {
-    "@earendil-works/pi-mcp@1.0.4": "packages/pi-host/patches/@earendil-works%2Fpi-mcp@1.0.4.patch",
-    "@earendil-works/pi-ai@1.0.4": "packages/pi-host/patches/@earendil-works%2Fpi-ai@1.0.4.patch",
-    "@tanstack/virtual-core@3.17.3": "bun-patches/@tanstack+virtual-core+3.17.3.patch",
     "ghostty-web@0.4.0": "bun-patches/ghostty-web+0.4.0.patch",
-    "@earendil-works/pi-agent-core@1.0.4": "packages/pi-host/patches/@earendil-works%2Fpi-agent-core@1.0.4.patch",
-    "@earendil-works/pi-coding-agent@1.0.4": "packages/pi-host/patches/@earendil-works%2Fpi-coding-agent@1.0.4.patch",
     "braces@3.0.3": "bun-patches/braces@3.0.3.patch",
     "http-cache-semantics@4.2.0": "bun-patches/http-cache-semantics@4.2.0.patch",
     "sprintf-js@1.1.3": "bun-patches/sprintf-js@1.1.3.patch",

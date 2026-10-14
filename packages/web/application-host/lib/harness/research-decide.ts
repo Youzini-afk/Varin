@@ -31,9 +31,7 @@ import type {
   ResearchDecideRankedCandidate,
   ResearchDecideResult,
 } from "@varin/protocol";
-import type { HarnessService, HarnessServiceContext } from "./router.js";
 import { HarnessServiceError } from "./service-error.js";
-import type { HarnessServiceHost } from "./service-host.js";
 import type { WebSnapshotReadAuthority } from "./web-materials.js";
 
 /** Per-candidate excerpt budget so sections stay inside the state budget. */
@@ -65,13 +63,6 @@ export class ResearchDecisionFailure extends Error {
     super(message);
     this.name = "ResearchDecisionFailure";
   }
-}
-
-export interface ResearchDecideDeps {
-  fastDecisionStatus?: HarnessServiceHost["fastDecisionStatus"];
-  fastDecision?: HarnessServiceHost["fastDecision"];
-  readCandidateText: ResearchDecideContext["readCandidateText"];
-  resolveThreadId?: (sessionId: string) => Promise<string | undefined>;
 }
 
 const KIND_INSTRUCTIONS: Record<Exclude<ResearchDecideKind, "next">, string> = {
@@ -350,28 +341,5 @@ export async function executeResearchDecide(
     rejected,
     missing: [...missing].filter((id) => id !== "next" || params.kind === "next"),
     ...decisionProvenance(result, status.binding.configurationId),
-  };
-}
-
-/** Pi transport adapter; the shared domain receives an explicit trusted context. */
-export function createResearchDecideService(deps: ResearchDecideDeps): HarnessService<"research.decide"> {
-  return {
-    async handle(params: ResearchDecideParams, ctx: HarnessServiceContext): Promise<ResearchDecideResult> {
-      const workspaceId = ctx.workspaceId;
-      if (!workspaceId) throw new HarnessServiceError("forbidden", "research.decide requires an owning workspace");
-      const threadId = await deps.resolveThreadId?.(ctx.sessionId);
-      return executeResearchDecide(params, {
-        signal: ctx.signal,
-        authority: { owningWorkspaceId: workspaceId, sessionId: ctx.sessionId, ...(threadId ? { threadId } : {}) },
-        readCandidateText: deps.readCandidateText,
-        fastDecisionStatus: (purpose) => deps.fastDecision && deps.fastDecisionStatus
-          ? deps.fastDecisionStatus(workspaceId, purpose)
-          : Promise.resolve({ status: "unavailable" }),
-        fastDecision: (input) => {
-          if (!deps.fastDecision) throw new Error("fast decision service is unavailable");
-          return deps.fastDecision({ ...input, workspaceId });
-        },
-      });
-    },
   };
 }

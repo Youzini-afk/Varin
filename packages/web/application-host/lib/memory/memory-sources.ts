@@ -1,22 +1,12 @@
 import { createHash } from "node:crypto";
-import type { MemorySourceSpan, PiSessionEntry } from "@varin/protocol";
+import type { MemorySourceSpan } from "@varin/protocol";
 
 /** Shared by explicit remembering, background coverage, and original-source reads. */
 export const sourceRevision = (text: string): string => createHash("sha256").update(text).digest("hex");
 
-export const entrySourceText = (entry: PiSessionEntry): string => {
-  if (entry.type !== "message" || !("content" in entry.message)) return "";
-  const { content } = entry.message;
-  if (typeof content === "string") return content;
-  return content.filter((part) => part.type === "text").map((part) => part.text).join("\n");
-};
-
 /** Reading witnesses deliberately do not participate in source ownership or coverage. */
 export const sourceIdentity = (span: MemorySourceSpan): readonly string[] => {
   switch (span.kind) {
-    case 'pi-entry': return [span.kind, span.sessionId, span.id];
-    case 'event': return [span.kind, span.scopeId, span.sessionId, span.id];
-    case 'run-report': return [span.kind, span.scopeId, span.threadId, span.id];
     case 'history-item': return [span.kind, span.threadId, span.id];
   }
 };
@@ -62,8 +52,7 @@ export const parseSourceSpans = (value: unknown): MemorySourceSpan[] => {
     const span = raw as Record<string, unknown>;
     const common = text(span.id) && text(span.revision) && Number.isSafeInteger(span.start) && Number.isSafeInteger(span.end)
       && Number(span.start) >= 0 && Number(span.end) > Number(span.start);
-    const required = span.kind === 'pi-entry' ? ['sessionId'] : span.kind === 'event' ? ['scopeId', 'sessionId']
-      : span.kind === 'run-report' ? ['scopeId', 'threadId'] : span.kind === 'history-item' ? ['threadId', 'branchId', 'headId'] : null;
+    const required = span.kind === 'history-item' ? ['threadId', 'branchId', 'headId'] : null;
     if (!common || !required || required.some(key => !text(span[key]))
       || Object.keys(span).some(key => !['kind', 'id', 'revision', 'start', 'end', ...required].includes(key))) {
       throw new Error('Invalid memory source identity or range');

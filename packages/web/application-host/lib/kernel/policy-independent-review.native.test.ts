@@ -82,7 +82,7 @@ async function fixture(reply: (body: Record<string, unknown>, response: ServerRe
   const close = async () => { if (closed) return; closed = true; await storage.dispose(); await documents.dispose(); await kernel.close(); };
   cleanups.push(close);
 
-  const adapter = new ThreadAdapter(new AgentRuntimeClient(kernel, undefined, { prepare: ({threadId, requiredBinding}, signal) => createAgentPolicy(extensions)({sessionId:threadId,projectId:'selected-project', ...(requiredBinding ? { requiredBinding } : {})}, signal), observe: ({threadId}, changed, signal) => createAgentPolicy(extensions).observe({sessionId:threadId,projectId:'selected-project'}, changed, signal) }, undefined, undefined, undefined, (id, signal) => documents.admitWorkspaceRegistration(id, signal)), {
+  const adapter = new ThreadAdapter(new AgentRuntimeClient(kernel, undefined, { prepare: ({threadId, requiredBinding}, signal) => createAgentPolicy(extensions)({threadId:threadId,projectId:'selected-project', ...(requiredBinding ? { requiredBinding } : {})}, signal), observe: ({threadId}, changed, signal) => createAgentPolicy(extensions).observe({threadId:threadId,projectId:'selected-project'}, changed, signal) }, undefined, undefined, undefined, (id, signal) => documents.admitWorkspaceRegistration(id, signal)), {
     resolveModel: async selection => {
       if (selection.providerId !== 'fixture-provider' || selection.modelId !== 'fixture-model') throw new Error('unselected model');
       return { configuration, credentialOwner: owner };
@@ -116,7 +116,7 @@ async function installExample(f: Awaited<ReturnType<typeof fixture>>) {
   await build({ entryPoints: [path.join(repository, 'examples/extensions/evidence-policy/host.ts')], bundle: true, platform: 'node', format: 'cjs', outfile: path.join(example, 'host.cjs'), alias: { '@varin/extension-sdk': path.join(repository, 'packages/extension-sdk/dist/index.js') } });
   await f.extensions.installOrStage({ expectedRevision: (await f.extensions.state()).catalog.revision, source: { kind: 'local', display: 'Real example', specifier: example } });
 }
-async function route(f: Awaited<ReturnType<typeof fixture>>, providerKey: string, scope: {projectId?: string; sessionId?: string}) {
+async function route(f: Awaited<ReturnType<typeof fixture>>, providerKey: string, scope: {projectId?: string; threadId?: string}) {
   return f.extensions.upsertServiceRoutingRule({ expectedRevision: (await f.extensions.routing.read()).document.revision,
     rule: { allowFallback: false, providerKeys: [providerKey], scope, serviceId: 'varin.agent.policy', version: 4 } });
 }
@@ -190,10 +190,10 @@ it('malformed decision state fails closed before inference',async()=>{
 it('actual artifact replacement pins old implementation; later lease differs despite unchanged author version; revoke rejects',async()=>{
  const f=await fixture((_body,response)=>complete(response,'never','never'));
  await installCustom(f,'review.replace-policy',"describe(){return {identity:{name:'same',version:'1'},configuration:{budget:1},modelRoles:[],stateTransition:'unsupported'}},decide(){return {action:{kind:'complete'},state:{generation:1}}}");
- const prepare=createAgentPolicy(f.extensions);const old=await prepare({sessionId:'old',projectId:'selected-project'});expect(old).toBeDefined();
+ const prepare=createAgentPolicy(f.extensions);const old=await prepare({threadId:'old',projectId:'selected-project'});expect(old).toBeDefined();
  const folder=path.join(f.root,'review.replace-policy');await fs.writeFile(path.join(folder,'host.cjs'),"module.exports={activate(context){context.services.provide({id:'varin.agent.policy',version:4,multiple:true},{describe(){return {identity:{name:'same',version:'1'},configuration:{budget:1},modelRoles:[],stateTransition:'unsupported'}},decide(){return {action:{kind:'complete'},state:{generation:2}}}})}}");
  const staged=await f.extensions.reloadLocalSource({expectedRevision:(await f.extensions.state()).catalog.revision,extensionId:'review.replace-policy'}); if(staged.outcome!=='staged') throw new Error('not staged'); await f.extensions.requestCandidateApplication({extensionId:'review.replace-policy',candidateIntegrity:staged.candidateIntegrity,expectedRevision:(await f.extensions.state()).catalog.revision}); const selecting=f.extensions.selectCandidate({extensionId:'review.replace-policy',candidateIntegrity:staged.candidateIntegrity,expectedRevision:(await f.extensions.state()).catalog.revision}); await expect.poll(()=>f.extensions.services.getSnapshot().providers.find(p=>p.extensionId==='review.replace-policy'&&p.status==='active')?.providerId).not.toBe(old!.binding.reference);
- const timeout=AbortSignal.timeout(1500); const next=await prepare({sessionId:'new',projectId:'selected-project'},timeout);expect(next).toBeDefined();expect(next!.binding.artifact.identity.version).not.toBe(old!.binding.artifact.identity.version);
+ const timeout=AbortSignal.timeout(1500); const next=await prepare({threadId:'new',projectId:'selected-project'},timeout);expect(next).toBeDefined();expect(next!.binding.artifact.identity.version).not.toBe(old!.binding.artifact.identity.version);
  const input={view:{run_id:'r',state:'runnable',history_count:0,history_head_id:null,pending_tool_calls:0,model_capabilities:[]},event:{kind:'started' as const},state:null};
  expect((await old!.decide(input,new AbortController().signal)).state).toEqual({generation:1});expect((await next!.decide(input,new AbortController().signal)).state).toEqual({generation:2});
  old!.release(); await selecting; await f.extensions.setEnabled('review.replace-policy',false,(await f.extensions.state()).catalog.revision);

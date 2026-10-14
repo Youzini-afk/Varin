@@ -14,6 +14,17 @@ describe('core-routes', () => {
     vi.useRealTimers();
   });
 
+  it('marks only the Thread JSON parser rejection as not admitted', async () => {
+    const app = express();
+    // Exercise the real parser failure with a small test body budget.
+    registerCommonRequestMiddleware(app, { express: { ...express, json: () => express.json({ limit: 32 }) } as typeof express });
+    const admitted = vi.fn();
+    app.post('/api/threads/submit', (_req, res) => { admitted(); res.json({}); });
+    await request(app).post('/api/threads/submit').send({ text: 'x'.repeat(64) }).expect(413, { code: 'http-body-too-large', admission: 'not_started' });
+    await request(app).post('/api/threads/submit').set('Content-Type', 'application/json').send('{').expect(400, { code: 'thread-request-invalid', admission: 'not_started' });
+    expect(admitted).not.toHaveBeenCalled();
+  });
+
   it.each([
     '/api/documents/workspace/resolve',
     '/api/language/sync',

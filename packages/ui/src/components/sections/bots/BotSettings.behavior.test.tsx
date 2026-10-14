@@ -11,10 +11,9 @@ vi.mock('@/lib/bots', async original => ({ ...await original<typeof import('@/li
 vi.mock('@/lib/i18n', () => ({ useI18n: () => ({ t: (key: string) => key }) }));
 vi.mock('@/lib/varinEvents', () => ({ subscribeVarinEvents: () => () => {} }));
 vi.mock('@/components/icon/Icon', () => ({ Icon: () => null }));
-vi.mock('@/components/sections/agents/ModelSelector', () => ({ ModelSelector: () => null }));
+vi.mock('./BotModelSelector', () => ({ BotModelSelector: () => null }));
 vi.mock('@/components/sections/computers/ComputerDesktopView', () => ({ ComputerDesktopView: () => null }));
 vi.mock('@/lib/computers', () => ({ downloadComputerArtifact: vi.fn() }));
-vi.mock('@/lib/pi-runtime/sessionNavigation', () => ({ openPiSessionFromNavigation: vi.fn() }));
 vi.mock('@/components/ui/dialog', () => {
   const Section = ({ children }: { children?: React.ReactNode }) => <div>{children}</div>;
   return { Dialog: ({ open, children }: { open: boolean; children: React.ReactNode }) => open ? <section role="dialog">{children}</section> : null,
@@ -28,7 +27,7 @@ vi.mock('./BotNameDialog', () => ({ BotNameDialog: ({ open, onNameChange, onSubm
 </form> : null }));
 
 const bot = (id: string, archived = false): BotSummary => ({ id, name: id, archived, homeDir: `/bots/${id}`,
-  coordinatorHostId: 'host', entry: { runtime: 'pi', sessionId: null }, instructions: null, model: null, createdAt: '', updatedAt: '' });
+  coordinatorHostId: 'host', entry: { runtime: 'agent', threadId: `thread:${id}`, branchId: `branch:${id}` }, instructions: null, model: null, createdAt: '', updatedAt: '' });
 let container: HTMLDivElement;
 let root: Root;
 beforeEach(() => {

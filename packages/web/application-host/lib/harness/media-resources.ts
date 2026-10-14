@@ -3,7 +3,7 @@ import { randomUUID } from 'node:crypto';
 import type { ImageResourceReference } from '@varin/protocol';
 import type { ImageBytes } from '../kernel/image-model.js';
 import type { WorkspaceWorkingStateRootAccess } from './working-state/types.js';
-import { kernelContext } from './retrieval-artifacts.js';
+import { kernelContext } from './kernel-records.js';
 
 export interface MediaResourceAuthority { owningWorkspaceId: string; threadId: string }
 

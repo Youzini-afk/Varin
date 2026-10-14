@@ -180,16 +180,16 @@ async function fixture(reply: (request: RecordedRequest, index: number) => void,
       if (!extensions) throw new Error('Policy example is not installed');
       await extensions.upsertServiceRoutingRule({ expectedRevision: (await extensions.routing.read()).document.revision,
         rule: { serviceId: 'varin.agent.policy', version: 4, providerKeys: ['example.collaboration-policy:host:varin.agent.policy@4'],
-          scope: { sessionId: threadId }, allowFallback: false } });
+          scope: { threadId }, allowFallback: false } });
     };
     const policyDecisions: VarinAgentPolicyInput[] = [];
     const runtime = new AgentRuntimeClient(kernel, undefined, extensions ? { prepare: async ({ threadId, requiredBinding }, signal) => {
-      const lease = await createAgentPolicy(extensions)({ sessionId: threadId, projectId, ...(requiredBinding ? { requiredBinding } : {}) }, signal);
+      const lease = await createAgentPolicy(extensions)({ threadId, projectId, ...(requiredBinding ? { requiredBinding } : {}) }, signal);
       return lease && { ...lease, decide: async (input, signal) => {
         policyDecisions.push(structuredClone(input));
         return lease.decide(input, signal);
       } };
-    }, observe: ({threadId}, changed, signal) => createAgentPolicy(extensions).observe({sessionId:threadId,projectId}, changed, signal) } : undefined, undefined, undefined, undefined, (id, signal) => documents.admitWorkspaceRegistration(id, signal));
+    }, observe: ({threadId}, changed, signal) => createAgentPolicy(extensions).observe({threadId,projectId}, changed, signal) } : undefined, undefined, undefined, undefined, (id, signal) => documents.admitWorkspaceRegistration(id, signal));
     const knowledge = options.plans ? await openUserKnowledgeStore({ dataDir: root, hostId: 'child-review-host', embedding: null }) : undefined;
     const plans = knowledge ? new PlanService(runtime, async () => knowledge) : undefined;
     if (knowledge) kernel.setPlanOwner(createPlanOwner(async () => knowledge, runtime));
@@ -462,7 +462,7 @@ it('selected read-only child owns its ordinary notes and plan through real Host 
   });
   const h = await f.openHost({ plans: true, context: original => blockChild(original, entered, release) });
   const identity = await h.api.create('child-notes-plan');
-  await h.personalization.saveNote({ scope: { kind: 'session', id: identity.threadId }, content: 'PARENT_PRIVATE_NOTE' });
+  await h.personalization.saveNote({ scope: { kind: 'thread', id: identity.threadId }, content: 'PARENT_PRIVATE_NOTE' });
   await h.personalization.saveNote({ scope: { kind: 'project', id: 'child-review-project' }, content: 'SHARED_CHILD_PROJECT' });
   const prepared = await h.api.prepareSource({ ...identity, key: 'notes-plan-source', resourceOwner: { kind: 'local' as const }, workspaceId: (await h.documents.resolveWorkspace({ path: f.workspace })).workspaceId, content: { mode: 'saved-files' }, captureScopes: [], mode: 'fixed_branch' });
   prepared.source.tools = ['file_read'];
@@ -526,7 +526,7 @@ it('the configured retrieval preset returns before preparation and delivers one 
   await h.profiles.save({ runtime: 'agent', expectedRevision: catalog.revision, id: retrieval.id,
     config: { ...retrieval.config, binding: { ...retrieval.config.binding, ...model } } });
   const identity = await h.api.create('child-review-scope');
-  await h.personalization.saveNote({ scope: { kind: 'session', id: identity.threadId }, content: 'PARENT_SESSION_SECRET' });
+  await h.personalization.saveNote({ scope: { kind: 'thread', id: identity.threadId }, content: 'PARENT_SESSION_SECRET' });
   await h.personalization.saveNote({ scope: { kind: 'project', id: 'child-review-project' }, content: 'SHARED_ADMITTED_PROJECT_NOTE' });
   await h.personalization.saveNote({ scope: { kind: 'project', id: 'other-project' }, content: 'UNRELATED_CHANGED_PROJECT_NOTE' });
   const prepared = await h.api.prepareSource({ ...identity, key: 'fixed', resourceOwner: { kind: 'local' as const }, workspaceId: (await h.documents.resolveWorkspace({ path: f.workspace })).workspaceId, content: { mode: 'saved-files' }, captureScopes: [], mode: 'fixed_branch' });
@@ -555,7 +555,7 @@ it('the configured retrieval preset returns before preparation and delivers one 
   expect(JSON.stringify(childBodies.map(request => request.body))).not.toContain('PARENT_SESSION_SECRET');
   expect(JSON.stringify(childBodies.map(request => request.body))).not.toContain('UNRELATED_CHANGED_PROJECT_NOTE');
   const context = await h.runtime.context(child.child_branch_id);
-  expect(context?.personalization).toMatchObject({ mode: 'agent', threadRole: 'worker', projectId: 'child-review-project', sessionId: child.child_thread_id });
+  expect(context?.personalization).toMatchObject({ mode: 'agent', threadRole: 'worker', projectId: 'child-review-project', threadId: child.child_thread_id });
   const history = (await h.api.snapshot(identity)).history;
   const reports = history.filter(item => item.source === 'agent');
   expect(reports).toHaveLength(1);
@@ -1214,7 +1214,7 @@ for (const family of ['openai-responses', 'anthropic-messages'] as const) {
     }, family);
     const h = await f.openHost({ context: original => blockChild(original, entered, release) });
     const identity = await h.api.create(`combined-${family}`);
-    await h.personalization.saveNote({ scope: { kind: 'session', id: identity.threadId }, content: 'COMBINED_PARENT_PRIVATE' });
+    await h.personalization.saveNote({ scope: { kind: 'thread', id: identity.threadId }, content: 'COMBINED_PARENT_PRIVATE' });
     await h.personalization.saveNote({ scope: { kind: 'project', id: 'child-review-project' }, content: 'COMBINED_ADMITTED_PROJECT' });
     const prepared = await h.api.prepareSource({ ...identity, key: 'combined-fixed', resourceOwner: { kind: 'local' as const }, workspaceId: (await h.documents.resolveWorkspace({ path: f.workspace })).workspaceId, content: { mode: 'saved-files' }, captureScopes: [], mode: 'fixed_branch' });
     prepared.source.tools = ['file_read'];
@@ -1224,7 +1224,7 @@ for (const family of ['openai-responses', 'anthropic-messages'] as const) {
     expect(frozen.snapshot.serialized).toEqual(held!.body);
     const context = await h.runtime.context(identity.branchId);
     const catalog = await h.personalization.catalog();
-    await h.personalization.saveNote({ scope: { kind: 'session', id: identity.threadId }, content: pendingNote, revision: catalog.revision });
+    await h.personalization.saveNote({ scope: { kind: 'thread', id: identity.threadId }, content: pendingNote, revision: catalog.revision });
     f.setProject('unrelated-sidebar-project');
     release.release();
     await expect.poll(async () => (await h.runtime.child(operationId)).report?.outcome).toBe('succeeded');
@@ -1239,8 +1239,8 @@ for (const family of ['openai-responses', 'anthropic-messages'] as const) {
     expect(JSON.stringify(childRequests.map(value => value.body))).toContain('COMBINED_ADMITTED_PROJECT');
     expect(JSON.stringify(childRequests.map(value => value.body))).not.toContain('COMBINED_PARENT_PRIVATE');
     expect(JSON.stringify(childRequests.map(value => value.body))).not.toContain('COMBINED_MEMORY_PAYLOAD');
-    expect(h.memoryQueries.some(query => query.action === 'synchronize' && query.scope.sessionId === child.child_thread_id && query.scope.projectId === 'child-review-project')).toBe(true);
-    expect((await h.runtime.context(child.child_branch_id))?.personalization).toMatchObject({ mode: 'agent', threadRole: 'worker', sessionId: child.child_thread_id, projectId: 'child-review-project' });
+    expect(h.memoryQueries.some(query => query.action === 'synchronize' && query.scope.threadId === child.child_thread_id && query.scope.projectId === 'child-review-project')).toBe(true);
+    expect((await h.runtime.context(child.child_branch_id))?.personalization).toMatchObject({ mode: 'agent', threadRole: 'worker', threadId: child.child_thread_id, projectId: 'child-review-project' });
     combinedReply(family, held!.response, [tool('wait_child', { operationId }, 'combined-next-boundary')]);
     await expect.poll(async () => (await h.runtime.run(run.run_id)).state).toBe('completed');
     expect(await h.runtime.children()).toHaveLength(1);
@@ -1294,7 +1294,7 @@ it('combined recovery reconciles a lost memory receipt while resuming an accepte
   const noteQuery = h.memoryQueries.find(query => query.action === 'tool' && query.arguments?.action === 'save')!;
   expect(noteQuery.origin).toBeTruthy(); expect(h.memoryControl.droppedMutationReplies).toBe(1);
   expect((await h.personalization.catalog()).revision).toBe(1);
-  await h.personalization.saveNote({ scope: { kind: 'session', id: identity.threadId }, content: 'COMBINED_INTERVENING_UI', revision: 1 });
+  await h.personalization.saveNote({ scope: { kind: 'thread', id: identity.threadId }, content: 'COMBINED_INTERVENING_UI', revision: 1 });
   const before = await h.personalization.catalog();
   const parentRequests = parentSteps;
   await h.close();
@@ -1399,7 +1399,7 @@ for (const [defect, mutation] of Object.entries(combinedFormatDefects)) {
     });
     const h = await f.openHost();
     const identity = await h.api.create('combined-format');
-    await h.personalization.saveNote({ scope: { kind: 'session', id: identity.threadId }, content: 'FORMAT_MEMORY_SENTINEL' });
+    await h.personalization.saveNote({ scope: { kind: 'thread', id: identity.threadId }, content: 'FORMAT_MEMORY_SENTINEL' });
     const prepared = await h.api.prepareSource({ ...identity, key: 'format-fixed', resourceOwner: { kind: 'local' as const }, workspaceId: (await h.documents.resolveWorkspace({ path: f.workspace })).workspaceId, content: { mode: 'saved-files' }, captureScopes: [], mode: 'fixed_branch' });
     prepared.source.tools = ['file_read'];
     const run = await h.api.submit({ ...identity, key: 'format-input', expectedHead: null, text: 'Format fixture: dispatch and wait', model, source: prepared.source });

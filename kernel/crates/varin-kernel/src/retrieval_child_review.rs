@@ -304,7 +304,7 @@ pub(super) fn prepare_source(review: &mut Review, child: &ChildTask, mode: Sourc
     .unwrap();
     let basis = serde_json::from_value(json!({
         "mode":"agent","threadRole":"worker","revision":0,"configurationDigest":"child-retrieval-review",
-        "memorySnapshot":{"revision":0,"memories":[]},"sessionId":child.child_thread_id,"projectId":null,
+        "memorySnapshot":{"revision":0,"memories":[]},"threadId":child.child_thread_id,"projectId":null,
         "originalSections":[],"instructionSources":[]
     })).unwrap();
     let child = owner

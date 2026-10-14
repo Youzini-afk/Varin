@@ -184,4 +184,20 @@ describe('NotificationListener', () => {
     expect(updateHeaders['authorization']).toBe('Bearer tok');
     expect(updateHeaders['cookie']).toBeUndefined();
   });
+  test('receives native Thread and branch with the configured source Host', async () => {
+    const received: unknown[] = [];
+    const server = http.createServer((req, res) => {
+      if (req.url !== '/api/notifications/stream') { res.writeHead(404); res.end(); return; }
+      res.writeHead(200, { 'Content-Type': 'text/event-stream' });
+      res.end(`data: ${JSON.stringify({ type: 'varin:notification', properties: { threadId: 'thread:a', branchId: 'branch:b', title: 'Ready', sourceUrl: 'https://forged.invalid' } })}\n\n`);
+    });
+    const baseUrl = await listen(server);
+    const listener = new NotificationListener({ serverUrl: baseUrl, clientToken: 'token', logger: noopLogger, onNotification: detail => received.push(detail) });
+    listeners.push(listener); await listener.start();
+    await new Promise(resolve => setTimeout(resolve, 30)); listener.stop();
+    expect(received).toHaveLength(1);
+    expect(received[0]).toMatchObject({ threadId: 'thread:a', branchId: 'branch:b', sourceUrl: baseUrl });
+    expect(received[0]).not.toHaveProperty('sessionId');
+  });
+
 });

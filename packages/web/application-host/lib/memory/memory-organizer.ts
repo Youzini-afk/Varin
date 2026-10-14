@@ -1,6 +1,5 @@
 /**
- * Background memory organizer (BC2). Reads durable source material — session
- * events, Pi conversation entries, and settled thread-run reports — then asks
+ * Background memory organizer. Reads original native Bot history, then asks
  * the configured `models.memoryOrganizer` slot to narrate memory proposals.
  * The Host validates and commits proposals through the shared MemoryService;
  * coverage cursors live in the same store as the knowledge they produced, so
@@ -27,7 +26,6 @@ import {
   type HarnessFastDecisionPurposeStatus,
   type HarnessSettingsInput,
   type ModelSelection,
-  type PiSessionEntry,
   type MemorySourceSpan,
 } from "@varin/protocol";
 import { botIdFromScopeId, isBotScopeId } from "../harness/owner-scope.js";
@@ -43,13 +41,11 @@ import {
   type OrganizerPreparedProposal,
 } from "../knowledge/store.js";
 import type { MemoryOwner, MemoryService } from "./memory-service.js";
-import { entrySourceText, mergeSourceSpans, sourceIdentity, sourceRevision, uncoveredSourceSpans } from "./memory-sources.js";
+import { mergeSourceSpans, sourceIdentity, sourceRevision, uncoveredSourceSpans } from "./memory-sources.js";
 
 // ── Boundaries ─────────────────────────────────────────────────────
 
 const MAX_UNITS_PER_RUN = 8;
-const MAX_EVENTS_PER_SESSION = 120;
-const MAX_ENTRIES_PER_SESSION = 60;
 const MAX_EXISTING_MATERIALS = 60;
 const FAILED_RETRY_MS = 5 * 60_000;
 const SETTLE_DEBOUNCE_MS = 2_000;
@@ -67,35 +63,18 @@ const MEMORY_ORGANIZER_SYSTEM = [
 
 // ── Deps and source shapes ─────────────────────────────────────────
 
-export interface OrganizerRunSource {
-  threadId: string;
-  threadTitle: string;
-  runId: string;
-  sessionId: string | null;
-  reportText: string;
-  endedAt: string | null;
-}
-
 export interface MemoryOrganizerDeps {
-  /** Trusted original Bot work owner. No Pi workspace-inference worker. */
+  /** Trusted original Bot work owner. */
   getInference(): MemoryInference;
   storeForScopeId(scopeId: string): Promise<KnowledgeStore | null>;
   /** Whether the scope's store file already exists (cheap — no store open). */
   hasStoreForScope(scopeId: string): boolean | Promise<boolean>;
   /** Bot scopes from the durable Bot registry. */
   listScopeIds(): Promise<string[]>;
-  /** Sessions durably bound under a scope (thread runs incl. attached roots). */
-  listScopeSessions(scopeId: string): Promise<string[]>;
-  /** Terminal runs carrying a report under a scope. */
-  listRunSources(scopeId: string): Promise<OrganizerRunSource[]>;
   canExecuteScope?(scopeId: string): Promise<boolean>;
-  /** Returns the owning Bot scope, or null for ordinary Agent sessions. */
-  scopeForSession(sessionId: string): Promise<string | null>;
-  nativeMaterials?(scopeId: string): Promise<import('./bot-history.js').HistoryMemoryMaterial[]>;
-  readNativeSource?(scopeId: string, span: Extract<MemorySourceSpan, { kind: 'history-item' }>): Promise<string>;
-  scopeForThread?(threadId: string): Promise<string | null>;
-  /** Actual Pi entries, including inactive branches; never wakes a live worker. */
-  readEntries(sessionId: string): Promise<PiSessionEntry[]>;
+  nativeMaterials(scopeId: string): Promise<import('./bot-history.js').HistoryMemoryMaterial[]>;
+  readNativeSource(scopeId: string, span: Extract<MemorySourceSpan, { kind: 'history-item' }>): Promise<string>;
+  scopeForThread(threadId: string): Promise<string | null>;
   /**
    * Scope-level inference binding: when the `models.memoryOrganizer` slot is
    * unset, a `bot:<id>` scope inherits the Bot's own model so Bot memory keeps
@@ -118,18 +97,6 @@ interface OrganizerUnit {
   sourceKey: string;
   /** Stable range identity for forgetting, independent of source text edits. */
   rangeKey: string;
-  startEventCursor?: number;
-  startEventPartial?: { id: number; offset: number };
-  startEntryCursor?: string;
-  startEntryPartial?: { id: string; offset: number };
-  /** Next event cursor when this unit is covered. */
-  eventCursor?: number;
-  eventPartial?: { id: number; offset: number };
-  /** Next entry cursor when this unit is covered. */
-  entryCursor?: string;
-  entryPartial?: { id: string; offset: number };
-  runStartOffset?: number;
-  runEndOffset?: number;
   hasMoreSource?: boolean;
 }
 
@@ -155,10 +122,6 @@ const record = (value: unknown): Record<string, unknown> => (
   value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {}
 );
 
-const progressKeyForSession = (sessionId: string): string => `session:${sessionId}`;
-const progressKeyForRun = (runId: string, part: number): string =>
-  part === 0 ? `run:${runId}` : `run:${runId}:${part}`;
-
 /**
  * The coverage fingerprint binds a progress row to the exact range+content it
  * covered. A terminal row whose sourceKey no longer matches is stale — the
@@ -167,7 +130,6 @@ const progressKeyForRun = (runId: string, part: number): string =>
 const unitSourceKey = (scopeId: string, unit: OrganizerUnit | Omit<OrganizerUnit, "sourceKey" | "rangeKey">): string =>
   createHash("sha256").update(JSON.stringify([
     scopeId, unit.key, unit.source.spans?.map((span) => [...sourceIdentity(span), span.revision, span.start, span.end]), unit.texts,
-    ...(unit.runStartOffset === undefined ? [] : [unit.runStartOffset, unit.runEndOffset]),
   ])).digest("hex");
 const unitRangeKey = (scopeId: string, key: string, start: unknown, end: unknown): string =>
   createHash("sha256").update(JSON.stringify([scopeId, key, start, end])).digest("hex");
@@ -313,11 +275,6 @@ export function createMemoryOrganizer(deps: MemoryOrganizerDeps) {
   interface ProgressPatch {
     workId?: string;
     coveredSources?: MemorySourceSpan[];
-    eventCursor?: number;
-    eventPartial?: OrganizerProgress["eventPartial"] | null;
-    entryCursor?: string;
-    entryPartial?: OrganizerProgress["entryPartial"] | null;
-    runEndOffset?: number;
     produced?: number[];
     lastError?: string;
     /** Set the coverage fingerprint; `null` clears a stale one. */
@@ -325,8 +282,6 @@ export function createMemoryOrganizer(deps: MemoryOrganizerDeps) {
     /** Set durable prepared proposals; `null` clears them (terminal rows). */
     proposals?: OrganizerPreparedProposal[] | null;
     preparedSource?: KnowledgeSource | null;
-    /** Frozen end cursors for a prepared session range. */
-    preparedRange?: OrganizerProgress["preparedRange"] | null;
   }
 
   const putProgress = async (
@@ -342,12 +297,6 @@ export function createMemoryOrganizer(deps: MemoryOrganizerDeps) {
       : existing?.proposals !== undefined ? existing.proposals : null;
     const preparedSource = patch.preparedSource !== undefined ? patch.preparedSource
       : existing?.preparedSource !== undefined ? existing.preparedSource : null;
-    const preparedRange = patch.preparedRange !== undefined ? patch.preparedRange
-      : existing?.preparedRange !== undefined ? existing.preparedRange : null;
-    const eventPartial = patch.eventPartial !== undefined ? patch.eventPartial
-      : existing?.eventPartial !== undefined ? existing.eventPartial : null;
-    const entryPartial = patch.entryPartial !== undefined ? patch.entryPartial
-      : existing?.entryPartial !== undefined ? existing.entryPartial : null;
     await store.putOrganizerProgress({
       key,
       status,
@@ -355,209 +304,15 @@ export function createMemoryOrganizer(deps: MemoryOrganizerDeps) {
       coveredSources: mergeSourceSpans([...(existing?.coveredSources ?? []), ...(patch.coveredSources ?? []),
         ...((status === "formed" || status === "reviewed-empty") ? existing?.preparedSource?.spans ?? [] : [])]),
       ...(sourceKey !== null ? { sourceKey } : {}),
-      ...(patch.eventCursor !== undefined ? { eventCursor: patch.eventCursor } : existing?.eventCursor !== undefined ? { eventCursor: existing.eventCursor } : {}),
-      ...(eventPartial !== null ? { eventPartial } : {}),
-      ...(patch.entryCursor !== undefined ? { entryCursor: patch.entryCursor } : existing?.entryCursor ? { entryCursor: existing.entryCursor } : {}),
-      ...(entryPartial !== null ? { entryPartial } : {}),
-      ...(patch.runEndOffset !== undefined ? { runEndOffset: patch.runEndOffset }
-        : existing?.runEndOffset !== undefined ? { runEndOffset: existing.runEndOffset } : {}),
       ...(patch.produced !== undefined ? { produced: patch.produced } : existing?.produced ? { produced: existing.produced } : {}),
       ...(proposals !== null ? { proposals } : {}),
       ...(preparedSource !== null ? { preparedSource } : {}),
-      ...(preparedRange !== null ? { preparedRange } : {}),
       updatedAt: now(),
       ...(patch.lastError !== undefined ? { lastError: patch.lastError } : {}),
     });
   };
 
   // ── Source collection ────────────────────────────────────────────
-
-  const collectSessionUnit = async (
-    store: KnowledgeStore,
-    scopeId: string,
-    sessionId: string,
-    progress: OrganizerProgress | undefined,
-    timestamp: number,
-    unitChars: number,
-    force: boolean,
-    recordEmpty = true,
-  ): Promise<OrganizerUnit | null> => {
-    const key = progressKeyForSession(sessionId);
-    const texts: string[] = [];
-    const spans: MemorySourceSpan[] = [];
-    let eventCursor = progress?.eventCursor;
-    let eventPartial: OrganizerProgress["eventPartial"];
-    let entryCursor = progress?.entryCursor;
-    let entryPartial: OrganizerProgress["entryPartial"];
-    const frozen = progress?.status === "prepared" ? progress.preparedSource?.spans : undefined;
-    const capacity = frozen ? Number.MAX_SAFE_INTEGER : unitChars;
-    let chars = 0;
-    const [events, entries, localMemories, userMemories] = await Promise.all([
-      store.listEvents({ sessionId }), deps.readEntries(sessionId),
-      store.listKnowledge({}), deps.memory.list({ scope: "user", ownerId: null }),
-    ]);
-    const covered = [...(progress?.coveredSources ?? []), ...(!frozen ? reservedSources.get(scopeId) ?? [] : []), ...[...localMemories, ...userMemories]
-      .flatMap((item) => item.source?.spans ?? [])];
-    const materials = [
-      ...events.map((event) => ({ span: { kind: "event" as const, id: String(event.id), scopeId, sessionId,
-        revision: sourceRevision(event.text), start: 0, end: event.text.length }, text: event.text, label: event.kind })),
-      ...entries.filter((entry) => entry.type === "message" && entry.message.role !== "toolResult").map((entry) => {
-        const text = entrySourceText(entry);
-        return { span: { kind: "pi-entry" as const, id: entry.id, sessionId,
-          revision: sourceRevision(text), start: 0, end: text.length }, text,
-        label: entry.type === "message" ? entry.message.role : entry.type };
-      }),
-    ];
-    const pending = frozen ? frozen.map((span) => {
-      const material = materials.find((row) => row.span.kind === span.kind && row.span.id === span.id);
-      if (!material) throw new Error(`Prepared source is unavailable: ${span.kind} ${span.id}`);
-      if (material.span.revision !== span.revision || span.end > material.text.length) {
-        throw new SourceChangedError(`Prepared source changed: ${span.kind} ${span.id}`);
-      }
-      return { ...material, span };
-    }) : materials.flatMap((material) => uncoveredSourceSpans(material.span, covered)
-      .filter((span) => span.end > span.start).map((span) => ({ ...material, span })));
-    let hasMoreSource = false;
-    let eventCount = 0;
-    let entryCount = 0;
-    for (const [index, material] of pending.entries()) {
-      const { span, text, label } = material;
-      const prefix = `[${label}] `;
-      const available = capacity - chars - prefix.length;
-      const taken = available > 0 ? takePrefix(text, span.start, Math.min(available, span.end - span.start)) : 0;
-      if (taken <= 0) {
-        if (chars === 0) throw new Error(`Organizer model cannot fit source ${span.id}`);
-        hasMoreSource = true;
-        break;
-      }
-      texts.push(prefix + text.slice(span.start, span.start + taken));
-      spans.push({ ...span, end: span.start + taken });
-      chars += prefix.length + taken;
-      if (span.kind === "event") {
-        eventCount += 1;
-        if (span.start + taken < text.length) eventPartial = { id: Number(span.id), offset: span.start + taken };
-        else { eventCursor = Number(span.id); eventPartial = undefined; }
-      } else {
-        entryCount += 1;
-        if (span.start + taken < text.length) entryPartial = { id: span.id, offset: span.start + taken };
-        else { entryCursor = span.id; entryPartial = undefined; }
-      }
-      if (taken < span.end - span.start || (!frozen && (eventCount >= MAX_EVENTS_PER_SESSION || entryCount >= MAX_ENTRIES_PER_SESSION))) {
-        hasMoreSource = taken < span.end - span.start || index < pending.length - 1;
-        break;
-      }
-    }
-    if (texts.length === 0) {
-      if (progress?.status === "prepared") {
-        throw new Error(`Prepared source content is unavailable for session ${sessionId}`);
-      }
-      if (recordEmpty && !(reservedSources.get(scopeId)?.length) && (!progress || progress.status === "failed" || progress.status === "processing")) {
-        await mutationSettings(scopeId);
-        await putProgress(store, key, "reviewed-empty", {
-          eventPartial: null,
-          entryPartial: null,
-          sourceKey: null,
-          proposals: null,
-          preparedSource: null,
-          preparedRange: null,
-        });
-      }
-      return null;
-    }
-    const sourceEntryId = entryPartial?.id ?? entryCursor;
-    const unit = {
-      key,
-      label: `session ${sessionId}`,
-      texts,
-      source: { kind: "memory-organizer", sessionId, spans,
-        ...(sourceEntryId ? { entryId: sourceEntryId } : {}) },
-      ...(progress?.eventCursor !== undefined ? { startEventCursor: progress.eventCursor } : {}),
-      ...(progress?.eventPartial !== undefined ? { startEventPartial: progress.eventPartial } : {}),
-      ...(progress?.entryCursor !== undefined ? { startEntryCursor: progress.entryCursor } : {}),
-      ...(progress?.entryPartial !== undefined ? { startEntryPartial: progress.entryPartial } : {}),
-      ...(eventCursor !== undefined ? { eventCursor } : {}),
-      ...(eventPartial !== undefined ? { eventPartial } : {}),
-      ...(entryCursor !== undefined ? { entryCursor } : {}),
-      ...(entryPartial !== undefined ? { entryPartial } : {}),
-      ...(hasMoreSource ? { hasMoreSource } : {}),
-    };
-    const sourceKey = unitSourceKey(scopeId, unit);
-    // A failed original range cannot impose its backoff on later source bytes in this session.
-    if (progress?.status === "failed" && progress.sourceKey === sourceKey && !retryable(progress, timestamp, force)) return null;
-    return {
-      ...unit,
-      sourceKey,
-      rangeKey: unitRangeKey(scopeId, key, spans.map((span) => [...sourceIdentity(span), span.start, span.end]), null),
-    };
-  };
-
-  const collectRunUnits = async (
-    store: KnowledgeStore,
-    scopeId: string,
-    source: OrganizerRunSource,
-    timestamp: number,
-    progress: Map<string, OrganizerProgress>,
-    unitChars: number,
-    force: boolean,
-  ): Promise<OrganizerUnit[]> => {
-    // Oversized reports subdivide into per-chunk units; each part carries its
-    // own progress row so coverage survives a restart mid-report.
-    const chunks: Array<{ text: string; start: number; end: number }> = [];
-    let start = 0;
-    do {
-      const key = progressKeyForRun(source.runId, chunks.length);
-      const frozenEnd = progress.get(key)?.runEndOffset;
-      let end: number;
-      if (frozenEnd !== undefined && frozenEnd > start && frozenEnd <= source.reportText.length) {
-        end = frozenEnd;
-      } else {
-        const capEnd = Math.min(source.reportText.length, start + unitChars);
-        const newline = capEnd < source.reportText.length
-          ? source.reportText.lastIndexOf("\n", capEnd) : -1;
-        const preferred = newline >= start + Math.floor(unitChars / 2) ? newline : capEnd;
-        const taken = takePrefix(source.reportText, start, preferred - start);
-        if (taken <= 0 && start < source.reportText.length) {
-          throw new Error("Memory organizer source segment cannot fit one character");
-        }
-        end = start + taken;
-      }
-      chunks.push({ text: source.reportText.slice(start, end), start, end });
-      start = end;
-    } while (start < source.reportText.length);
-    const units: OrganizerUnit[] = [];
-    for (const [part, chunk] of chunks.entries()) {
-      const key = progressKeyForRun(source.runId, part);
-      const texts = [
-        `Task report for "${source.threadTitle}"${chunks.length > 1 ? ` (part ${part + 1})` : ""}:`,
-        chunk.text,
-      ];
-      const unit = {
-        key,
-        label: `run ${source.runId} (${source.threadTitle})`,
-        texts,
-        source: {
-          kind: "memory-organizer",
-          threadId: source.threadId,
-          runId: source.runId,
-          ...(source.sessionId ? { sessionId: source.sessionId } : {}),
-          spans: [{ kind: "run-report" as const, id: source.runId, scopeId, threadId: source.threadId,
-            revision: sourceRevision(source.reportText), start: chunk.start, end: chunk.end }],
-        },
-        runStartOffset: chunk.start,
-        runEndOffset: chunk.end,
-      };
-      const sourceKey = unitSourceKey(scopeId, unit);
-      if ((reservedSources.get(scopeId) ?? []).some(held => unit.source.spans.some(span => memorySourceClaims([span])[0]!.source === memorySourceClaims([held])[0]!.source && span.start < held.end && held.start < span.end))) continue;
-      const row = progress.get(key);
-      // Terminal coverage only stands while the fingerprint matches — a report
-      // rewritten under the same run id reopens the range. Failed rows wait
-      // out their backoff before reclaiming.
-      if (isCovered(row, sourceKey)) continue;
-      if (row?.status === "failed" && !retryable(row, timestamp, force)) continue;
-      units.push({ ...unit, sourceKey, rangeKey: unitRangeKey(scopeId, key, chunk.start, chunk.end) });
-    }
-    return units;
-  };
 
   const collectUnits = async (
     store: KnowledgeStore,
@@ -570,7 +325,7 @@ export function createMemoryOrganizer(deps: MemoryOrganizerDeps) {
     const progress = new Map(rows.map((row) => [row.key, row]));
     const units: OrganizerUnit[] = [];
 
-    const native = await deps.nativeMaterials?.(scopeId) ?? [];
+    const native = await deps.nativeMaterials(scopeId);
     if (native.length) {
       const memories = [...await store.listKnowledge({}), ...await deps.memory.list({ scope: 'user', ownerId: null })];
       const covered = [...rows.flatMap(row => row.coveredSources ?? []), ...(reservedSources.get(scopeId) ?? []), ...memories.flatMap(item => item.source?.spans ?? [])];
@@ -595,33 +350,6 @@ export function createMemoryOrganizer(deps: MemoryOrganizerDeps) {
       }
     }
 
-    for (const source of await deps.listRunSources(scopeId)) {
-      if (units.length >= MAX_UNITS_PER_RUN) break;
-      units.push(...await collectRunUnits(store, scopeId, source, timestamp, progress, unitChars, force));
-    }
-
-    const sessionIds = new Set<string>([
-      ...(await store.listEventSessionIds()),
-      ...(await deps.listScopeSessions(scopeId)),
-    ]);
-    for (const sessionId of [...sessionIds].sort()) {
-      if (units.length >= MAX_UNITS_PER_RUN) break;
-      const row = progress.get(progressKeyForSession(sessionId));
-      try {
-        const unit = await collectSessionUnit(store, scopeId, sessionId, row, timestamp, unitChars, force);
-        if (unit) units.push(unit);
-      } catch (error) {
-        if (row?.status !== "prepared") {
-          await putProgress(store, progressKeyForSession(sessionId), "failed", { lastError: error instanceof Error ? error.message : String(error) });
-          throw error;
-        }
-        await putProgress(store, row.key, error instanceof SourceChangedError ? "pending" : "prepared", {
-          ...(error instanceof SourceChangedError ? { proposals: null, preparedSource: null, preparedRange: null, sourceKey: null } : {}),
-          lastError: error instanceof Error ? error.message : String(error),
-        });
-        if (error instanceof SourceChangedError) queued.add(scopeId);
-      }
-    }
     return units.slice(0, MAX_UNITS_PER_RUN);
   };
 
@@ -794,20 +522,14 @@ export function createMemoryOrganizer(deps: MemoryOrganizerDeps) {
     // Re-read only to verify the frozen ranges; never re-collect/re-number today's materials.
     for (const span of unit.source.spans ?? []) {
       let text: string | undefined;
-      if (span.kind === 'history-item') text = await deps.readNativeSource?.(scopeId, span);
-      else if (span.kind === "run-report") text = (await deps.listRunSources(scopeId)).find(run => run.runId === span.id)?.reportText;
-      else if (span.kind === "event") text = (await store.listEvents({ sessionId: span.sessionId ?? unit.source.sessionId! })).find(event => String(event.id) === span.id)?.text;
-      else if (span.kind === "pi-entry") {
-        const entry = (await deps.readEntries(span.sessionId ?? unit.source.sessionId!)).find(entry => entry.id === span.id);
-        if (entry) text = entrySourceText(entry);
-      }
+      if (span.kind === 'history-item') text = await deps.readNativeSource(scopeId, span);
       if (text === undefined) throw new Error(`Original organizer source is unavailable: ${unit.key}`);
       if (sourceRevision(text) !== span.revision || span.end > text.length) throw new SourceChangedError(`Original organizer source changed: ${unit.key}`);
     }
   };
 
   /** A crash can leave memory durable while its source progress is still
-   * prepared. If the Pi source is now unavailable, recover the receipt from
+   * prepared. If the source is now unavailable, recover the receipt from
    * the committed memory's range identity; never invent an uncommitted write. */
   const settleCommittedPrepared = async (store: KnowledgeStore, scopeId: string): Promise<boolean> => {
     let settled = false;
@@ -831,21 +553,12 @@ export function createMemoryOrganizer(deps: MemoryOrganizerDeps) {
       // Some proposals may still need the original source for a safe replay.
       // Leave that receipt prepared. Only call it unavailable when the run
       // really has disappeared; a healthy pending commit is not a source error.
-      if (!complete) {
-        if (source.runId && !(await deps.listRunSources(scopeId)).some((run) => run.runId === source.runId)) {
-          await putProgress(store, row.key, "prepared", {
-            lastError: "Prepared source is unavailable and not all proposals were committed; restore the source or retry when it returns",
-          });
-        }
-        continue;
-      }
+      if (!complete) continue;
       await putProgress(store, row.key, produced.size > 0 ? "formed" : "reviewed-empty", {
-        ...(row.preparedRange?.eventCursor !== undefined ? { eventCursor: row.preparedRange.eventCursor } : {}),
-        eventPartial: row.preparedRange?.eventPartial ?? null,
-        ...(row.preparedRange?.entryCursor !== undefined ? { entryCursor: row.preparedRange.entryCursor } : {}),
-        entryPartial: row.preparedRange?.entryPartial ?? null,
+
+
         produced: [...produced], sourceKey: row.sourceKey,
-        proposals: null, preparedSource: null, preparedRange: null,
+        proposals: null, preparedSource: null,
       });
       settled = true;
     }
@@ -918,15 +631,12 @@ export function createMemoryOrganizer(deps: MemoryOrganizerDeps) {
         }
       }
       await putProgress(store, unit.key, produced.length > 0 ? "formed" : "reviewed-empty", {
-        ...(unit.eventCursor !== undefined ? { eventCursor: unit.eventCursor } : {}),
-        eventPartial: unit.eventPartial ?? null,
-        ...(unit.entryCursor !== undefined ? { entryCursor: unit.entryCursor } : {}),
-        entryPartial: unit.entryPartial ?? null,
+
+
         produced,
         sourceKey: unit.sourceKey,
         proposals: null,
         preparedSource: null,
-        preparedRange: null,
       });
     }
   };
@@ -960,9 +670,9 @@ export function createMemoryOrganizer(deps: MemoryOrganizerDeps) {
       await mutationSettings(scopeId);
       await putProgress(store, unit.key, "reviewed-empty", {
         workId: work.workId, sourceKey: unit.sourceKey, coveredSources: unit.source.spans ?? [],
-        ...(unit.eventCursor !== undefined ? { eventCursor: unit.eventCursor } : {}), eventPartial: unit.eventPartial ?? null,
-        ...(unit.entryCursor !== undefined ? { entryCursor: unit.entryCursor } : {}), entryPartial: unit.entryPartial ?? null,
-        proposals: null, preparedSource: null, preparedRange: null
+
+
+        proposals: null, preparedSource: null
       });
     }
     const preparedUnits: Array<{
@@ -1031,14 +741,7 @@ export function createMemoryOrganizer(deps: MemoryOrganizerDeps) {
           workId: work.workId,
           proposals,
           preparedSource: unit.source,
-          ...(unit.key.startsWith("session:") ? {
-            preparedRange: {
-              ...(unit.eventCursor !== undefined ? { eventCursor: unit.eventCursor } : {}),
-              ...(unit.eventPartial !== undefined ? { eventPartial: unit.eventPartial } : {}),
-              ...(unit.entryCursor !== undefined ? { entryCursor: unit.entryCursor } : {}),
-              ...(unit.entryPartial !== undefined ? { entryPartial: unit.entryPartial } : {}),
-            }
-          } : {}),
+
         });
         preparedUnits.push({ unit, proposals });
       }
@@ -1141,7 +844,7 @@ export function createMemoryOrganizer(deps: MemoryOrganizerDeps) {
       for (const unit of freshUnits)
         await putProgress(store, unit.key, "processing", {
           sourceKey: unit.sourceKey, workId: work.workId,
-          ...(unit.runEndOffset === undefined ? {} : { runEndOffset: unit.runEndOffset }), proposals: null, preparedSource: null, preparedRange: null
+
         });
       try {
         await prepareWork(store, scopeId, work);
@@ -1185,21 +888,16 @@ export function createMemoryOrganizer(deps: MemoryOrganizerDeps) {
       try {
         // Cheap sources first: a scope with no threads and no store file does
         // not get an empty .tdb created by a background sweep.
-        const runs = await deps.listRunSources(scopeId);
-        const sessions = await deps.listScopeSessions(scopeId);
-        const native = await deps.nativeMaterials?.(scopeId) ?? [];
+        const native = await deps.nativeMaterials(scopeId);
         const storeExists = await deps.hasStoreForScope(scopeId);
-        if (runs.length === 0 && sessions.length === 0 && native.length === 0 && !storeExists) continue;
+        if (native.length === 0 && !storeExists) continue;
         const store = await deps.storeForScopeId(scopeId);
         if (!store) continue;
         const timestamp = now();
         const rows = await store.listOrganizerProgress();
         const hasWork = rows.some((row) => retryable(row, timestamp));
         const hasSources = hasWork
-          || runs.length > 0
-          || sessions.length > 0
-          || native.length > 0
-          || (await store.listEventSessionIds()).length > 0;
+          || native.length > 0;
         if (hasWork || hasSources) schedule(scopeId);
       } catch (error) {
         report(error);
@@ -1236,14 +934,6 @@ export function createMemoryOrganizer(deps: MemoryOrganizerDeps) {
       if (disposed) return;
       track(sweep());
       armSweep();
-    },
-    /** A session's run settled — its owner's sources may have new material. */
-    noteSessionSettled(sessionId: string): void {
-      if (disposed) return;
-      track((async () => {
-        const scopeId = await deps.scopeForSession(sessionId);
-        if (scopeId) schedule(scopeId);
-      })());
     },
     /** A thread run completed (or a scope otherwise gained material). */
     noteScope(scopeId: string): void {
@@ -1307,8 +997,7 @@ export function createMemoryOrganizer(deps: MemoryOrganizerDeps) {
       }
       const assertSelection = async () => {
         const conversation = selection.conversation;
-        if (conversation.runtime === 'agent') {
-          if (!deps.readNativeSource || await deps.scopeForThread?.(conversation.threadId) !== scopeId)
+          if (await deps.scopeForThread(conversation.threadId) !== scopeId)
             throw new MemoryInferenceError('memory-work-owner-changed', 'The selected Thread owner changed.', 'none');
           for (const span of selection.sources) {
             if (span.kind !== 'history-item' || span.threadId !== conversation.threadId || span.branchId !== conversation.branchId || span.headId !== conversation.headId)
@@ -1317,16 +1006,7 @@ export function createMemoryOrganizer(deps: MemoryOrganizerDeps) {
             if (sourceRevision(text) !== span.revision || span.end > text.length)
               throw new MemoryInferenceError('memory-work-source-changed', 'The selected source changed. Select it again.', 'none');
           }
-        } else {
-          if (await deps.scopeForSession(conversation.sessionId) !== scopeId)
-            throw new MemoryInferenceError('memory-work-owner-changed', 'The selected conversation owner changed.', 'none');
-          const entries = await deps.readEntries(conversation.sessionId);
-          for (const span of selection.sources) {
-            const entry = entries.find(entry => entry.id === span.id);
-            if (span.kind !== 'pi-entry' || span.sessionId !== conversation.sessionId || !entry || sourceRevision(entrySourceText(entry)) !== span.revision)
-              throw new MemoryInferenceError('memory-work-source-changed', 'The selected source changed. Select it again.', 'none');
-          }
-        }
+
       };
       const result = await inference.generate(work, work.recipe.system, work.recipe.prompt, signal, assertSelection);
       signal.throwIfAborted();

@@ -214,6 +214,27 @@ describe('ordered workspace edits through Documents and the live Registry', () =
     expect(await fs.readFile(path.join(f.workspaceRoot, 'a.ts'), 'utf8')).toBe('saved');
   });
 
+  it('edits and undoes a normalized CRLF buffer while preserving saved BOM bytes and captured Thread input', async () => {
+    const f = await fixture();
+    const saved = Buffer.concat([Buffer.from([0xef, 0xbb, 0xbf]), Buffer.from('saved\r\n')]);
+    await fs.writeFile(path.join(f.workspaceRoot, 'draft.ts'), saved);
+    await f.registry.open(f.ref('draft.ts'));
+    f.registry.applyTransaction(f.ref('draft.ts'), 'draft\n', { origin: 'user' });
+    const consumer = { kind: 'thread' as const, threadId: 'thread-crlf', branchId: 'main' };
+    const context = await f.registry.captureAgentInputContext(consumer);
+    expect(f.authority.cloneInputSnapshot(consumer, context)).toMatchObject({ status: 'ready', resources: [
+      { content: 'draft\r\n', bom: true, lineEnding: 'crlf' },
+    ] });
+    const preview = ready(await f.prepare([f.text('draft.ts', 'edited ', 0)]));
+    expect(await f.registry.applyWorkspaceEdit(preview.groupId)).toMatchObject({ status: 'applied' });
+    expect(f.registry.get(f.ref('draft.ts'))).toMatchObject({ buffer: 'edited draft\n', dirty: true, bom: true, lineEnding: 'crlf' });
+    expect(await fs.readFile(path.join(f.workspaceRoot, 'draft.ts'))).toEqual(saved);
+    expect(f.authority.cloneInputSnapshot(consumer, context)).toMatchObject({ resources: [{ content: 'draft\r\n' }] });
+    expect(await f.registry.undoWorkspaceEdit(preview.groupId)).toMatchObject({ status: 'undone' });
+    expect(f.registry.get(f.ref('draft.ts'))).toMatchObject({ buffer: 'draft\n', dirty: true, bom: true, lineEnding: 'crlf' });
+    expect(await fs.readFile(path.join(f.workspaceRoot, 'draft.ts'))).toEqual(saved);
+  });
+
   it('revalidates every disk resource before the first buffer or resource mutation', async () => {
     const f = await fixture();
     await fs.writeFile(path.join(f.workspaceRoot, 'a.ts'), 'saved');

@@ -7,7 +7,7 @@ import { waitWithSignal } from '../cancellation.js';
 import type { ContextComposition, ContextTransform } from './protocol.generated.js';
 
 export interface ContextCompositionPreparer {
-  (scope: { sessionId: string; projectId?: string; workspaceId?: string }, signal?: AbortSignal): Promise<ContextComposition | undefined>;
+  (scope: { threadId: string; projectId?: string; workspaceId?: string; configurationDirectory?: string }, signal?: AbortSignal): Promise<ContextComposition | undefined>;
 }
 interface Declaration {
   providerKey: string;
@@ -24,12 +24,13 @@ export function createContextComposition(runtime: ApplicationExtensionRuntime): 
     signal?.throwIfAborted();
     const routing = await waitWithSignal(runtime.routing.read(), signal);
     if (!routing.authoritative) throw new Error('Context contribution routing is unavailable');
-    const scopeKey = JSON.stringify([scope.sessionId, scope.projectId ?? null, scope.workspaceId ?? null]);
-    const cached = prepared.get(scope.sessionId);
+    const scopeKey = JSON.stringify([scope.threadId, scope.projectId ?? null, scope.workspaceId ?? null, scope.configurationDirectory ?? null]);
+    const cached = prepared.get(scope.threadId);
     const request = { serviceId: VARIN_CONTEXT_FRAGMENTS_SERVICE_ID,
       version: VARIN_CONTEXT_FRAGMENTS_VERSION, method: VARIN_CONTEXT_FRAGMENTS_METHOD, args: [],
-      routing: { userId: 'default', sessionId: scope.sessionId, ...(scope.projectId ? { projectId: scope.projectId } : {}),
-        ...(scope.workspaceId ? { workspaceId: scope.workspaceId } : {}) } };
+      routing: { userId: 'default', threadId: scope.threadId, ...(scope.projectId ? { projectId: scope.projectId } : {}),
+        ...(scope.workspaceId ? { workspaceId: scope.workspaceId } : {}),
+        ...(scope.configurationDirectory ? { configurationDirectory: scope.configurationDirectory } : {}) } };
     const options = { expectedRoutingRevision: routing.document.revision, ...(signal ? { signal } : {}),
       defaultProviderKey: `${VARIN_BUILTIN_CONTEXT_FRAGMENTS_EXTENSION_ID}:host:${VARIN_CONTEXT_FRAGMENTS_SERVICE_ID}@${VARIN_CONTEXT_FRAGMENTS_VERSION}` };
     if (cached?.scopeKey === scopeKey) {
@@ -53,7 +54,7 @@ export function createContextComposition(runtime: ApplicationExtensionRuntime): 
     catch (error) {
       signal?.throwIfAborted();
       if (error instanceof HostServiceBindingError && error.code === 'missing') {
-        prepared.delete(scope.sessionId);
+        prepared.delete(scope.threadId);
         return undefined;
       }
       throw error;
@@ -89,8 +90,8 @@ export function createContextComposition(runtime: ApplicationExtensionRuntime): 
       const previous = cached?.value;
       const value: ContextComposition = previous && transforms.length === previous.transforms.length
         && transforms.every((transform, index) => transform === previous.transforms[index]) ? previous
-        : { scopeId: scope.sessionId, selectionRevision: routing.document.revision, transforms };
-      prepared.set(scope.sessionId, { value, scopeKey, declarations });
+        : { scopeId: scope.threadId, selectionRevision: routing.document.revision, transforms };
+      prepared.set(scope.threadId, { value, scopeKey, declarations });
       return structuredClone(value);
     } finally { for (const binding of collection.bindings) binding.release(); }
   };

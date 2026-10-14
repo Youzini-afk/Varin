@@ -286,7 +286,7 @@ fn child_context(
         memory_checkpoint: None,
     };
     let basis = serde_json::from_value(serde_json::json!({"mode":"agent","threadRole":"worker","revision":0,"configurationDigest":"review:child-profile:0","memorySnapshot":{"revision":0,"memories":[]},
-        "sessionId":child.child_thread_id,"projectId":child.project_id,
+        "threadId":child.child_thread_id,"projectId":child.project_id,
         "originalSections":[{"name":"preamble","content":"Read-only child"}],"instructionSources":["review:child"]})).unwrap();
     (source, proposal, basis)
 }

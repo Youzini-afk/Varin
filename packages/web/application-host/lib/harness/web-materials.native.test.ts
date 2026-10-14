@@ -4,10 +4,11 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { expect, it, vi } from "vitest";
 import { createKernelClient } from "../kernel/kernel-client.js";
-import { KernelStorageAdapter, createKernelWorkspaceWorkingStateAccess } from "../kernel/storage-adapter.js";
+import { KernelStorageAdapter } from "../kernel/storage-adapter.js";
 import { createMaterialCollections } from "./material-collections.js";
 import { createWebMaterialStore } from "./web-materials.js";
-import type { HarnessServiceContext } from "./router.js";
+import { createMaterialStorageAccess, threadMaterialScope } from "../kernel/material-storage.js";
+import type { MaterialCollectionContext } from "./material-collections.js";
 import { createWebFetch } from "./web-fetch.js";
 import { createDocumentReader } from "./document-reading.js";
 import { makePdf } from "./pdf-test-fixture.js";
@@ -20,33 +21,32 @@ it("persists web material, collection membership and related-thread access throu
     ?? path.join(repository, "kernel/target/release", process.platform === "win32" ? "varin-kernel.exe" : "varin-kernel");
   const client = createKernelClient({ hostId: "materials", storageRoot: root, buildVersion, kernelPath, allowCargoDevRunner: false });
   const adapter = new KernelStorageAdapter({ client, hostId: "materials", storageRoot: root, resolveWorkspaceRoot: async () => root });
-  const access = createKernelWorkspaceWorkingStateAccess(adapter);
+  const scopeId = threadMaterialScope("parent");
+  const access = createMaterialStorageAccess({ kernel: client, storage: adapter });
   const materials = createWebMaterialStore(access);
-  const collections = createMaterialCollections(access, {
-    materials,
-    resolveThreadId: async (sessionId) => sessionId,
+  const collections = createMaterialCollections(access, { materials });
+  const authority = (threadId: string) => ({ kind: "thread" as const, owningWorkspaceId: scopeId, threadId });
+  const context = (threadId: string): MaterialCollectionContext => ({
+    authority: authority(threadId), signal: new AbortController().signal,
     threadsRelated: async (from, to) => from === "parent" && to === "child",
   });
-  const authority = (sessionId: string) => ({ owningWorkspaceId: "workspace", sessionId, threadId: sessionId });
-  const context = (sessionId: string): HarnessServiceContext => ({
-    actor: { authorityInstanceId: "materials", workerId: "worker", workerGeneration: 1, sessionId, workspaceId: "workspace", grantedCapabilities: ["read.web"] },
-    authorizedPaths: [], sessionId, workspaceId: "workspace", signal: new AbortController().signal,
-  });
+  const execute = async (params: Parameters<typeof collections.execute>[0], ctx: MaterialCollectionContext) =>
+    (await collections.execute(params, ctx)).result;
   try {
     await client.start();
-    const chatAuthority = { owningWorkspaceId: "workspace", sessionId: "chat" };
-    const chatSnapshot = await materials.put("workspace", {
+    const chatAuthority = authority("chat");
+    const chatSnapshot = await materials.put(scopeId, {
       sourceUrl: "https://example.com/guide", finalUrl: "https://example.com/guide",
       representation: "markdown",
-    }, Buffer.from("Ordinary session material."), chatAuthority);
-    expect((await materials.read("workspace", chatSnapshot.snapshotId, chatAuthority))?.body.toString())
-      .toBe("Ordinary session material.");
-    expect(await materials.read("workspace", chatSnapshot.snapshotId, { ...chatAuthority, sessionId: "other" })).toBeNull();
+    }, Buffer.from("Ordinary Thread material."), chatAuthority);
+    expect((await materials.read(scopeId, chatSnapshot.snapshotId, chatAuthority))?.body.toString())
+      .toBe("Ordinary Thread material.");
+    expect(await materials.read(scopeId, chatSnapshot.snapshotId, { ...chatAuthority, threadId: "other" })).toBeNull();
     const fetcher = createWebFetch({ materials, ssrf: { check: async () => ({ blocked: false }), isSameHost: () => true } });
     vi.stubGlobal("fetch", async () => new Response(`<html><body><article><h1>Guide</h1><p>${"Durable snapshot content. ".repeat(30)}</p></article></body></html>`, {
       headers: { "content-type": "text/html" },
     }));
-    const chatContext = { workspaceId: "workspace", authority: chatAuthority };
+    const chatContext = { workspaceId: scopeId, authority: chatAuthority };
     const fetched = await fetcher.fetch({ url: "https://example.com/guide", refresh: true }, chatContext);
     if (fetched.status !== "ok" || !fetched.snapshot) throw new Error(`HTML fetch failed: ${JSON.stringify(fetched)}`);
     const reread = await fetcher.fetch({ snapshotId: fetched.snapshot.snapshotId }, chatContext);
@@ -65,24 +65,24 @@ it("persists web material, collection membership and related-thread access throu
     await expect(fetcher.fetch({ snapshotId: chatSnapshot.snapshotId }, chatContext)).rejects.toThrow("kernel connection failed");
     brokenRead.mockRestore();
     const source = Buffer.from("%PDF-fixed-source");
-    const ref = await materials.put("workspace", {
+    const ref = await materials.put(scopeId, {
       sourceUrl: "https://example.com/paper.pdf", finalUrl: "https://example.com/paper.pdf",
       contentType: "application/pdf", representation: "pdf-text", document: { kind: "pdf", parser: "native" },
     }, Buffer.from("A durable finding."), authority("parent"), {
       source: { bytes: source, contentType: "application/pdf" },
     });
-    expect((await materials.read("workspace", ref.snapshotId, authority("parent"), { includeSource: true }))?.source?.bytes).toEqual(source);
-    expect(await materials.read("workspace", ref.snapshotId, authority("child"))).toBeNull();
-    const created = await collections.handle({ action: "create", name: "Evidence" }, context("parent"));
+    expect((await materials.read(scopeId, ref.snapshotId, authority("parent"), { includeSource: true }))?.source?.bytes).toEqual(source);
+    expect(await materials.read(scopeId, ref.snapshotId, authority("child"))).toBeNull();
+    const created = await execute({ action: "create", name: "Evidence" }, context("parent"));
     expect(created.status).toBe("ok");
     const collectionId = created.collection!.collectionId;
-    expect((await collections.handle({ action: "add", collectionId, member: { kind: "snapshot", snapshotId: ref.snapshotId } }, context("parent"))).status).toBe("ok");
-    expect((await collections.handle({ action: "share", collectionId, targetThreadId: "child" }, context("parent"))).status).toBe("ok");
-    expect((await materials.read("workspace", ref.snapshotId, authority("child")))?.body.toString()).toBe("A durable finding.");
-    expect((await materials.read("workspace", ref.snapshotId, {
-      kind: "thread", owningWorkspaceId: "workspace", threadId: "child",
+    expect((await execute({ action: "add", collectionId, member: { kind: "snapshot", snapshotId: ref.snapshotId } }, context("parent"))).status).toBe("ok");
+    expect((await execute({ action: "share", collectionId, targetThreadId: "child" }, context("parent"))).status).toBe("ok");
+    expect((await materials.read(scopeId, ref.snapshotId, authority("child")))?.body.toString()).toBe("A durable finding.");
+    expect((await materials.read(scopeId, ref.snapshotId, {
+      kind: "thread", owningWorkspaceId: scopeId, threadId: "child",
     }, { byteRange: { offset: 2, length: 7 }, expectedContentHash: ref.contentHash }))?.body.toString()).toBe("durable");
-    expect(await materials.read("workspace", ref.snapshotId, authority("unrelated"))).toBeNull();
+    expect(await materials.read(scopeId, ref.snapshotId, authority("unrelated"))).toBeNull();
 
     // Restart the native storage owner, then reread through fresh Host facades.
     await adapter.dispose();
@@ -91,8 +91,8 @@ it("persists web material, collection membership and related-thread access throu
     const reopenedAdapter = new KernelStorageAdapter({ client: reopenedClient, hostId: "materials", storageRoot: root, resolveWorkspaceRoot: async () => root });
     try {
       await reopenedClient.start();
-      const reopened = createWebMaterialStore(createKernelWorkspaceWorkingStateAccess(reopenedAdapter));
-      const found = await reopened.read("workspace", ref.snapshotId, authority("child"), { includeSource: true });
+      const reopened = createWebMaterialStore(createMaterialStorageAccess({ kernel: reopenedClient, storage: reopenedAdapter }));
+      const found = await reopened.read(scopeId, ref.snapshotId, authority("child"), { includeSource: true });
       expect(found?.body.toString()).toBe("A durable finding.");
       expect(found?.source?.bytes).toEqual(source);
     } finally { await reopenedAdapter.dispose(); await reopenedClient.close(); }

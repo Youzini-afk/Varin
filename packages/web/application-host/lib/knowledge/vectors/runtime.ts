@@ -70,7 +70,7 @@ export function createKnowledgeVectorRuntime(options: {
   hostId: string;
   scheduler: EmbedScheduler;
   cache: SemanticVectorCache;
-  resolveEmbedder: (workspaceId: string) => Promise<KnowledgeEmbedderResolution>;
+  resolveEmbedder: (workspaceId: string, scopeId?: string) => Promise<KnowledgeEmbedderResolution>;
   onError?: (error: unknown) => void;
 }) {
   const stores = new Map<string, KnowledgeVectorStore>();
@@ -229,6 +229,8 @@ export function createKnowledgeVectorRuntime(options: {
   ): Promise<number[]> => {
     const spaceId = spaceIdOf(embedder.space);
     const cacheInput = { spaceId, purpose: "query" as const, embedText: text };
+    await embedder.prepare();
+    signal?.throwIfAborted();
     const cached = options.cache.get(cacheInput);
     if (cached) return cached;
     const localKey = `${spaceId}\0${text}`;
@@ -382,7 +384,7 @@ export function createKnowledgeVectorRuntime(options: {
   const reconcileRegistration = async (registration: Registration): Promise<void> => {
     const signal = scopeSignal(registration.scope, registration.scopeId);
     const resolved = await waitWithSignal(
-      options.resolveEmbedder(registration.workspaceId),
+      options.resolveEmbedder(registration.workspaceId, registration.scopeId),
       signal,
     );
     if (resolved.status !== "ready") {

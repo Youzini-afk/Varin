@@ -850,7 +850,7 @@ impl ChildPreparation {
             }
         }
         let scope = serde_json::to_value(&basis)?;
-        if basis.session_id != child.child_thread_id
+        if basis.thread_id != child.child_thread_id
             || basis.project_id != child.project_id
             || scope.get("mode").and_then(Value::as_str) != Some(if bot { "bot" } else { "agent" })
             || scope.get("threadRole").and_then(Value::as_str) != Some("worker")

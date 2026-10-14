@@ -142,7 +142,7 @@ export function createWebRuntime(options: WebRuntimeOptions) {
   });
   const fetchPage = (request: WebFetchRequest, owner: { workspaceId: string; authority: ThreadMaterialAuthority }, config: WebConfiguration, signal: AbortSignal): Promise<FetchResult> => {
     if (request.render === true && config.web.settings?.render !== true) return Promise.resolve({ status: 'renderer-unavailable', url: request.url ?? '', reason: 'disabled' });
-    return options.webFetch.fetch(request, { ...context(owner, config, signal), render: request.render === true, issueReceipt: false });
+    return options.webFetch.fetch(request, { ...context(owner, config, signal), render: request.render === true });
   };
   const search = createWebSearchService<{ owner: { workspaceId: string; authority: ThreadMaterialAuthority }; config: WebConfiguration; signal: AbortSignal }>(
     async ctx => ctx.config.web.searchError ? { unavailable: true, hint: ctx.config.web.searchError }
@@ -259,7 +259,7 @@ export function createWebRuntime(options: WebRuntimeOptions) {
         if (!isDeepStrictEqual(authority, owner.authority)) throw new HarnessServiceError('forbidden', 'Original decision material authority changed');
         const domainPolicy = resolveHarnessMaterialWebPolicy(await options.settings(invocation.source));
         const result = await options.webFetch.fetch({ snapshotId: request.snapshotId, view: 'text',
-          ...(request.startLine === undefined ? {} : { position: { kind: 'lines' as const, startLine: request.startLine, ...(request.endLine === undefined ? {} : { endLine: request.endLine }) } }) }, { workspaceId: owner.workspaceId, authority: owner.authority, signal: readSignal, domainPolicy, issueReceipt: false });
+          ...(request.startLine === undefined ? {} : { position: { kind: 'lines' as const, startLine: request.startLine, ...(request.endLine === undefined ? {} : { endLine: request.endLine }) } }) }, { workspaceId: owner.workspaceId, authority: owner.authority, signal: readSignal, domainPolicy });
         if (result.status === 'ok' && result.snapshot) {
           retained.set(result.snapshot.snapshotId, result.snapshot.contentHash);
           if (result.snapshot.snapshotId !== request.snapshotId) {

@@ -54,31 +54,6 @@ export function registerComputerRoutes(app: Express, { computers, requireAuth = 
     }
   });
 
-  // Pure in-memory projection: opening a chat must not probe or capture a desktop.
-  app.get("/api/computers/activity", requireAuth, (request: Request, response: Response) => {
-    response.setHeader("Cache-Control", "no-store");
-    response.json({ activities: computers.activities(typeof request.query.sessionId === "string" ? request.query.sessionId : undefined) });
-  });
-
-  app.get('/api/computers/automation', requireAuth, async (request, response) => {
-    response.setHeader('Cache-Control', 'no-store');
-    try {
-      if (typeof request.query.sessionId !== 'string' || !request.query.sessionId.trim()) throw new ComputerError('computer-request-invalid', 'Choose the Pi conversation whose Computer state you want to read');
-      const sessionId = request.query.sessionId;
-      const state = await computers.automation.snapshot({ runtime: 'pi', sessionId });
-      const works = new Set([computerWorkKey(state.work), computerWorkKey(state.rootWork), ...state.leases.map(lease => computerWorkKey(lease.actor.execution.work)), ...state.cleanups.map(item => computerWorkKey(item.execution.work))]);
-      response.json({ state, activities: computers.activities().filter(entry => entry.activity.execution ? works.has(computerWorkKey(entry.activity.execution.work)) : entry.activity.sessionId === sessionId) });
-    }
-    catch (error) { sendError(response, error, 'Unable to read Computer Use state'); }
-  });
-  app.post('/api/computers/automation/stop', requireAuth, async (request, response) => {
-    try {
-      if (typeof request.body?.sessionId !== 'string' || !request.body.sessionId.trim() || typeof request.body?.runId !== 'string' || !request.body.runId.trim()) throw new ComputerError('computer-request-invalid', 'Stop requires the Pi session and execution shown by the conversation');
-      if (Object.keys(request.body).some(key => !['sessionId', 'runId', 'desktopId'].includes(key)) || request.body.desktopId !== undefined && (typeof request.body.desktopId !== 'string' || !request.body.desktopId.trim())) throw new ComputerError('computer-request-invalid', 'Stop accepts the captured Pi session, Run and optional desktop only');
-      response.json({ state: await computers.automation.stop({ work: { runtime: 'pi', sessionId: request.body.sessionId }, runId: request.body.runId }, typeof request.body?.desktopId === 'string' ? request.body.desktopId : undefined) });
-    }
-    catch (error) { sendError(response, error, 'Unable to confirm Computer Use stop'); }
-  });
   app.post('/api/computers/desktops/:desktopId/stop', requireAuth, async (request, response) => {
     try {
       if (!request.body || typeof request.body.automationEpoch !== 'string' || Object.keys(request.body).some(key => key !== 'automationEpoch')) throw new ComputerError('computer-request-invalid', 'Stop requires only the control generation shown by this desktop view');
@@ -228,7 +203,6 @@ export function registerComputerRoutes(app: Express, { computers, requireAuth = 
         desktopId: String(request.params.desktopId ?? ""),
         app: typeof body.app === "string" ? body.app : "",
         signal: controller.signal,
-        ...(typeof body.sessionId === "string" ? { sessionId: body.sessionId } : {}),
         ...(body.window !== undefined && (typeof body.window === "number" || typeof body.window === "string")
           ? { window: body.window } : {}),
         ...(typeof body.includeScreenshot === "boolean" ? { includeScreenshot: body.includeScreenshot } : {}),
@@ -254,7 +228,6 @@ export function registerComputerRoutes(app: Express, { computers, requireAuth = 
         desktopId: String(request.params.desktopId ?? ""),
         action: request.body?.action,
         signal: controller.signal,
-        ...(typeof request.body?.sessionId === "string" ? { sessionId: request.body.sessionId } : {}),
         ...(typeof request.body?.automationEpoch === "string" ? { automationEpoch: request.body.automationEpoch } : {}),
       });
       response.json({ result });
@@ -309,7 +282,6 @@ export function registerComputerRoutes(app: Express, { computers, requireAuth = 
         ...(typeof body.command === "string" ? { command: body.command } : {}),
         ...(body.args !== undefined ? { args: body.args } : {}),
         ...(typeof body.automationEpoch === "string" ? { automationEpoch: body.automationEpoch } : {}),
-        ...(typeof body.sessionId === "string" ? { sessionId: body.sessionId } : {}),
       });
       response.json({ result });
     } catch (error) {
@@ -329,7 +301,6 @@ export function registerComputerRoutes(app: Express, { computers, requireAuth = 
         relativePath: typeof body.relativePath === "string" ? body.relativePath : "",
         contentBase64: body.contentBase64,
         signal: controller.signal,
-        ...(typeof body.sessionId === "string" ? { sessionId: body.sessionId } : {}),
       });
       response.json(result);
     } catch (error) {
@@ -350,7 +321,6 @@ export function registerComputerRoutes(app: Express, { computers, requireAuth = 
         ...(body.groups !== undefined ? { groups: body.groups } : {}),
         ...(body.packages !== undefined ? { packages: body.packages } : {}),
         signal: controller.signal,
-        ...(typeof body.sessionId === "string" ? { sessionId: body.sessionId } : {}),
       });
       response.json(result);
     } catch (error) {
@@ -370,7 +340,6 @@ export function registerComputerRoutes(app: Express, { computers, requireAuth = 
         op: body.op,
         signal: controller.signal,
         ...(typeof body.automationEpoch === "string" ? { automationEpoch: body.automationEpoch } : {}),
-        ...(typeof body.sessionId === "string" ? { sessionId: body.sessionId } : {}),
         ...(typeof body.tabId === "string" ? { tabId: body.tabId } : {}),
         ...(typeof body.binary === "string" ? { binary: body.binary } : {}),
         ...(typeof body.profile === "string" ? { profile: body.profile } : {}),
@@ -395,7 +364,6 @@ export function registerComputerRoutes(app: Express, { computers, requireAuth = 
         op: body.op,
         signal: controller.signal,
         ...(typeof body.automationEpoch === "string" ? { automationEpoch: body.automationEpoch } : {}),
-        ...(typeof body.sessionId === "string" ? { sessionId: body.sessionId } : {}),
         ...(typeof body.path === "string" ? { path: body.path } : {}),
         ...(typeof body.url === "string" ? { url: body.url } : {}),
         ...(body.act !== null && typeof body.act === "object" ? { act: body.act } : {}),
@@ -415,7 +383,6 @@ export function registerComputerRoutes(app: Express, { computers, requireAuth = 
       const result = await computers.evidence({
         desktopId: String(request.params.desktopId ?? ""),
         signal: controller.signal,
-        ...(typeof body.sessionId === "string" ? { sessionId: body.sessionId } : {}),
         ...(typeof body.since === "number" ? { since: body.since } : {}),
         ...(typeof body.limit === "number" ? { limit: body.limit } : {}),
       });

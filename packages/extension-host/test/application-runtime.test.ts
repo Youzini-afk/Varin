@@ -534,7 +534,7 @@ test("recreating a Runtime in the same process cannot satisfy a trusted-native r
   } finally { await recreated.stop(); }
 });
 
-test("persistent routes select different real providers by session and isolate provider withdrawal", { timeout: 30_000 }, async () => {
+test("persistent routes select different real providers by Thread and isolate provider withdrawal", { timeout: 30_000 }, async () => {
   const dataDir = await temporaryDirectory("varin-routing-runtime-");
   const alpha = await temporaryDirectory("varin-routing-alpha-");
   const beta = await temporaryDirectory("varin-routing-beta-");
@@ -575,7 +575,7 @@ test("persistent routes select different real providers by session and isolate p
       rule: {
         allowFallback: false,
         providerKeys: [alphaProvider.providerKey],
-        scope: { sessionId: "session-alpha" },
+        scope: { threadId: "thread-alpha" },
         serviceId,
         version: 1,
       },
@@ -585,40 +585,62 @@ test("persistent routes select different real providers by session and isolate p
       rule: {
         allowFallback: false,
         providerKeys: [betaProvider.providerKey],
-        scope: { sessionId: "session-beta" },
+        scope: { threadId: "thread-beta" },
         serviceId,
         version: 1,
       },
     });
     assert.equal(await runtime.invokeService({
-      args: [], method: "read", routing: { sessionId: "session-alpha" }, serviceId, version: 1,
+      args: [], method: "read", routing: { threadId: "thread-alpha" }, serviceId, version: 1,
     }), "alpha");
     assert.equal(await runtime.invokeService({
-      args: [], method: "read", routing: { sessionId: "session-beta" }, serviceId, version: 1,
+      args: [], method: "read", routing: { threadId: "thread-beta" }, serviceId, version: 1,
     }), "beta");
-    assert.equal(await runtime.invokeService({ args: [{ sessionId: "session-beta" }], method: "readRouted",
-      providerId: alphaProvider.providerId, serviceId, version: 1 }), "beta",
-      "An actual broker nested service call resolves the same scoped array through the registered owner");
+    await assert.rejects(runtime.invokeService({ args: [{ threadId: "thread-beta" }], method: "readRouted",
+      providerId: alphaProvider.providerId, serviceId, version: 1 }), /Host dependency options are invalid/,
+      "A broker cannot replace its prepared dependency identity with caller-supplied routing");
 
+    const branchScope = { threadId: "thread-alpha", branchId: "branch-beta" };
+    const runScope = { ...branchScope, sourceRunId: "run-alpha" };
+    for (const [scope, providerKey] of [[branchScope, betaProvider.providerKey], [runScope, alphaProvider.providerKey]] as const) {
+      await runtime.upsertServiceRoutingRule({ expectedRevision: (await runtime.routing.read()).document.revision,
+        rule: { allowFallback: false, providerKeys: [providerKey], scope, serviceId, version: 1 } });
+    }
+    const read = (routing: typeof branchScope & { sourceRunId?: string }) => runtime.invokeService({
+      args: [], method: "read", routing, serviceId, version: 1,
+    });
+    assert.equal(await read(branchScope), "beta");
+    assert.equal(await read(runScope), "alpha");
+    assert.equal(await read({ ...runScope, sourceRunId: "run-beta" }), "beta");
+    assert.equal(await read({ ...runScope, branchId: "branch-other" }), "alpha");
+    const accepted = await runtime.prepareService({ args: [], method: "read", routing: runScope, serviceId, version: 1 });
+    const pin = accepted.pin();
+    accepted.release();
+    try {
+      await runtime.upsertServiceRoutingRule({ expectedRevision: (await runtime.routing.read()).document.revision,
+        rule: { allowFallback: false, providerKeys: [betaProvider.providerKey], scope: runScope, serviceId, version: 1 } });
+      assert.equal(await read(runScope), "beta");
+      assert.equal(await pin.invoke("read", []), "alpha", "accepted work keeps its exact provider when current Run routing changes");
+    } finally { pin.release(); }
 
     for (const providerKeys of [[], [alphaProvider.providerKey, betaProvider.providerKey]]) {
       await runtime.upsertServiceRoutingRule({ expectedRevision: (await runtime.routing.read()).document.revision,
-        rule: { allowFallback: true, providerKeys, scope: { sessionId: "invalid-single" }, serviceId, version: 1 } });
-      await assert.rejects(runtime.prepareService({ args: [], method: "read", routing: { sessionId: "invalid-single" }, serviceId, version: 1 }),
+        rule: { allowFallback: true, providerKeys, scope: { threadId: "invalid-single" }, serviceId, version: 1 } });
+      await assert.rejects(runtime.prepareService({ args: [], method: "read", routing: { threadId: "invalid-single" }, serviceId, version: 1 }),
         /requires exactly one provider/);
-      await assert.rejects(runtime.invokeService({ args: [{ sessionId: "invalid-single" }], method: "readRouted",
-        providerId: alphaProvider.providerId, serviceId, version: 1 }), /requires exactly one provider/);
+      await assert.rejects(runtime.invokeService({ args: [{ threadId: "invalid-single" }], method: "readRouted",
+        providerId: alphaProvider.providerId, serviceId, version: 1 }), /Host dependency options are invalid/);
     }
-    await assert.rejects(runtime.prepareServiceCollection({ args: [], method: "read", routing: { sessionId: "session-beta" }, serviceId, version: 1 }),
+    await assert.rejects(runtime.prepareServiceCollection({ args: [], method: "read", routing: { threadId: "thread-beta" }, serviceId, version: 1 }),
       /declare ordered composition/);
 
     await runtime.setEnabled("dev.example.alpha", false, (await runtime.state()).catalog.revision);
     await assert.rejects(
-      runtime.invokeService({ args: [], method: "read", routing: { sessionId: "session-alpha" }, serviceId, version: 1 }),
+      runtime.invokeService({ args: [], method: "read", routing: { threadId: "thread-alpha" }, serviceId, version: 1 }),
       /Selected providers .* are unavailable/,
     );
     assert.equal(await runtime.invokeService({
-      args: [], method: "read", routing: { sessionId: "session-beta" }, serviceId, version: 1,
+      args: [], method: "read", routing: { threadId: "thread-beta" }, serviceId, version: 1,
     }), "beta");
 
     const beforeProfile = await runtime.state();

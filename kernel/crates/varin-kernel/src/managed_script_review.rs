@@ -786,7 +786,7 @@ fn run_case(scenario: Scenario) {
     db.create_thread("thread", "main").unwrap();
     let run=db.submit_with_context_snapshot(&SubmitInput{key:"script-input".into(),thread_id:"thread".into(),branch_id:"main".into(),expected_head:None,input:json!({"text":"Run the original managed Node environment"}),configuration:json!({})},Some(launch),false,
         Some(ContextProposal{key:"initial".into(),branch_id:"main".into(),through_id:None,expected_revision:0,summary:String::new(),effective_system_prompt:"system".into(),instruction_sources:vec![],memory_checkpoint:None}),
-        Some(serde_json::from_value(json!({"mode":"agent","threadRole":"main","revision":0,"configurationDigest":"script-review","memorySnapshot":{"revision":0,"memories":[]},"sessionId":"thread","projectId":null,"originalSections":[{"name":"preamble","content":"system"}],"instructionSources":[]})).unwrap())).unwrap().run_id;
+        Some(serde_json::from_value(json!({"mode":"agent","threadRole":"main","revision":0,"configurationDigest":"script-review","memorySnapshot":{"revision":0,"memories":[]},"threadId":"thread","projectId":null,"originalSections":[{"name":"preamble","content":"system"}],"instructionSources":[]})).unwrap())).unwrap().run_id;
     let runtime = Arc::new(RunSupervisor::new(db));
     let storage = Arc::new(Mutex::new(storage));
     let resources = KernelResourceClient::new(

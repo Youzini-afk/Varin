@@ -48,6 +48,8 @@ export interface AdmittedAgentResourceScope {
   supportingFiles?: { skillName: string; relativePath: string }[];
   dependencyDiagnostics?: ResourceFailure[];
 }
+/** Current management discovery has no execution identity and cannot publish a Run checkpoint. */
+export type ResourceCatalogScope = Pick<AdmittedAgentResourceScope, 'projectTrusted' | 'project' | 'user' | 'userSettings' | 'userAgents' | 'ancestors' | 'configuredPaths' | 'installedPackages' | 'dependencyDiagnostics'>;
 export type ResourceDiagnostic = AgentResourceDiagnostic;
 export type InstructionEntry = AgentResourceInstruction;
 export type SkillDescriptor = AgentResourceSkill;
@@ -89,6 +91,7 @@ function freezeData<T>(value: T): T {
 /** One preparation owns its observations. There is no cross-thread mutable cache or global I/O queue. */
 class Preparation {
   readonly captures = new Map<string, CapturedResource>();
+  readonly skillCandidates: ResourceCatalogCandidate[] = [];
   readonly observations = new Map<string, ResourceObservation>();
   readonly readers = new Map<string, ResourceReader>();
   readonly diagnostics: ResourceDiagnostic[] = [];
@@ -206,7 +209,7 @@ async function discover(preparation: Preparation, domain: ResourceDomain, target
   return result;
 }
 
-function configuredTarget(scope: AdmittedAgentResourceScope, domain: ResourceDomain, origin: 'user' | 'project', configuredPath: string): ResourceDomain | ResourceFailure {
+function configuredTarget(scope: ResourceCatalogScope, domain: ResourceDomain, origin: 'user' | 'project', configuredPath: string): ResourceDomain | ResourceFailure {
   const admitted = scope.configuredPaths?.find(entry => entry.scope === origin && entry.configuredPath === configuredPath);
   if (admitted) {
     if (origin === 'project' && scope.project?.reader.consistency === 'immutable' && admitted.target.reader.consistency !== 'immutable' && !admitted.independentUserResource) {
@@ -244,9 +247,9 @@ async function expandManifestGlob(preparation: Preparation, domain: ResourceDoma
   await walk(start);
   return matched.sort();
 }
-interface SkillCandidate { file: CapturedResource; domain: ResourceDomain; priority: number; origin: SkillDescriptor['origin']; requiresProjectTrust: boolean; enabled: boolean; packageIdentity?: string }
-async function collectSkills(preparation: Preparation, scope: AdmittedAgentResourceScope, userSettings: ResourceSettings, projectSettings: ResourceSettings, projectConfig?: ResourceDomain): Promise<SkillDescriptor[]> {
-  const candidates: SkillCandidate[] = [];
+export interface ResourceCatalogCandidate { file: CapturedResource; domain: ResourceDomain; priority: number; origin: SkillDescriptor['origin']; requiresProjectTrust: boolean; enabled: boolean; packageIdentity?: string }
+async function collectSkills(preparation: Preparation, scope: ResourceCatalogScope, userSettings: ResourceSettings, projectSettings: ResourceSettings, projectConfig?: ResourceDomain): Promise<SkillDescriptor[]> {
+  const candidates = preparation.skillCandidates;
   const add = async (domain: ResourceDomain, target: string, origin: 'user' | 'project', priority: number, patterns: string[], filterBase: string, mode: 'native' | 'agents' = 'native', overridesOnly = true) => {
     for (const file of await discover(preparation, domain, target, mode)) {
       const absolute = absoluteDisplay(domain, file.reference.path);
@@ -342,7 +345,7 @@ async function collectSkills(preparation: Preparation, scope: AdmittedAgentResou
     }
   }
   candidates.sort((a, b) => a.priority - b.priority);
-  const byCanonical = new Map<string, SkillCandidate>();
+  const byCanonical = new Map<string, ResourceCatalogCandidate>();
   const byName = new Map<string, SkillDescriptor>();
   for (const candidate of candidates) {
     const { file } = candidate;
@@ -424,6 +427,22 @@ async function boundFile(binding: AgentResourceBinding, reference: ResourceLocat
 /** Read-only prepare/read owner. It never publishes a generation, refreshes settings, or retains a pin. */
 export function createAgentResourceAuthority() {
   return {
+    async inspect(scope: ResourceCatalogScope, signal?: AbortSignal): Promise<ResourceResult<{ skills: SkillDescriptor[]; candidates: ResourceCatalogCandidate[]; diagnostics: ResourceDiagnostic[] }>> {
+      const preparation = new Preparation(signal);
+      try {
+        signal?.throwIfAborted();
+        const cwd = scope.project ? relativeResourcePath(scope.project.cwd) : '';
+        const projectConfig = scope.project && scope.projectTrusted ? { ...scope.project, directory: join(cwd, '.varin', 'resources') } : undefined;
+        const userSettings = await settings(preparation, scope.userSettings, 'agent-settings.json');
+        const projectSettings = await settings(preparation, scope.project && scope.projectTrusted ? { ...scope.project, directory: join(cwd, '.varin') } : undefined);
+        for (const diagnostic of scope.dependencyDiagnostics ?? []) preparation.diagnostic(diagnostic);
+        const skills = await collectSkills(preparation, scope, userSettings, projectSettings, projectConfig);
+        return { status: 'ready', skills, candidates: preparation.skillCandidates, diagnostics: preparation.diagnostics };
+      } catch (error) {
+        if (error instanceof PreparationFailure) return error.failure;
+        return { status: signal?.aborted ? 'cancelled' : 'unavailable', domainId: 'resource-management', viewId: 'current', path: '', reason: signal?.aborted ? 'Resource discovery was cancelled' : 'Resource discovery failed' };
+      }
+    },
     async prepare(scope: AdmittedAgentResourceScope, signal?: AbortSignal): Promise<ResourceResult<{ snapshot: PreparedAgentResources }>> {
       const preparation = new Preparation(signal);
       try {

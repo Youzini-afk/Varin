@@ -84,7 +84,7 @@ it('prepares defaults and explicitly saved runtime profiles from the original se
   try {
     const path = join(root, 'agent-settings.json');
     await writeFile(path, JSON.stringify({ unchanged: { keep: true }, harness: { unrelated: 'asset', agents: {
-      pi: agent({ tools: ['read'] }), native: agent({ tools: ['file_read'] }),
+      custom: agent({ tools: ['extension_read'] }), native: agent({ tools: ['file_read'] }),
     } } }));
     const f = await fixture();
     const settings = new AgentSettingsService(root, () => false);
@@ -100,14 +100,14 @@ it('prepares defaults and explicitly saved runtime profiles from the original se
     const frozen = await prepare({ parent: f.parent });
     expect(frozen.presets.find(p => p.id === 'worker')?.tools).toEqual(['file_read', 'file_write', 'process_spawn', 'ask_user']);
     expect(frozen.presets.find(p => p.id === 'retrieval')).toMatchObject({ tools: ['file_read'], unavailable: null });
-    expect(frozen.presets.find(p => p.id === 'custom:pi')?.tools).toEqual(['read']);
+    expect(frozen.presets.find(p => p.id === 'custom:custom')?.tools).toEqual(['extension_read']);
     expect(frozen.presets.find(p => p.id === 'custom:native')?.tools).toEqual(['file_read']);
-    const custom = view.profiles.find(profile => profile.id === 'varin:custom:pi')!;
+    const custom = view.profiles.find(profile => profile.id === 'varin:custom:custom')!;
     await profiles.save({ runtime: 'agent', expectedRevision: view.revision, id: custom.id, config: custom.config, tools: ['file_read'] });
-    expect(frozen.presets.find(p => p.id === 'custom:pi')?.tools).toEqual(['read']);
-    expect((await prepare({ parent: f.parent })).presets.find(p => p.id === 'custom:pi')?.tools).toEqual(['file_read']);
+    expect(frozen.presets.find(p => p.id === 'custom:custom')?.tools).toEqual(['extension_read']);
+    expect((await prepare({ parent: f.parent })).presets.find(p => p.id === 'custom:custom')?.tools).toEqual(['file_read']);
     const disk = JSON.parse(await readFile(path, 'utf8'));
-    expect(disk.harness.agents.pi.tools).toEqual({ pi: ['read'], agent: ['file_read'] });
+    expect(disk.harness.agents.custom.tools).toEqual(['file_read']);
     expect(disk.unchanged).toEqual({ keep: true });
     expect(disk.harness.unrelated).toBe('asset');
     expect(custom.config).not.toHaveProperty('agent.tools');
@@ -122,44 +122,31 @@ it('distinguishes runtime-unconfigured, explicit empty tools, invalid settings a
   for (const field of ['models', 'agents']) {
     expect((await compiler({ harness: { [field]: [] } })({ parent: f.parent })).normal_unavailable?.code).toBe('child-settings-invalid');
   }
-  const prepared = await compiler({ harness: { agents: { absent: agent({ tools: { pi: ['read'] } }), empty: agent({ tools: { agent: [] } }) } } })({ parent: f.parent });
+  const prepared = await compiler({ harness: { agents: { absent: agent({ tools: undefined }), empty: agent({ tools: [] }) } } })({ parent: f.parent });
   expect(prepared.presets.find(p => p.id === 'custom:absent')?.unavailable?.code).toBe('child-profile-runtime_unconfigured');
   expect(prepared.presets.find(p => p.id === 'custom:empty')).toMatchObject({ tools: [], tools_source: 'explicit', unavailable: null });
 });
 
-it('edits and removes original retained legacy profiles through the existing normalized owner', async () => {
+it('rejects unsupported settings without converting or rewriting the original asset', async () => {
   const { mkdtemp, writeFile, readFile, rm } = await import('node:fs/promises');
   const { join } = await import('node:path');
   const { tmpdir } = await import('node:os');
   const { AgentSettingsService } = await import('../models/settings.js');
   const { createAgentProfilesAPI } = await import('./agent-profiles.js');
-  const root = await mkdtemp(join(tmpdir(), 'profile-legacy-'));
+  const root = await mkdtemp(join(tmpdir(), 'profile-invalid-'));
   const path = join(root, 'agent-settings.json');
-  const original = JSON.stringify({ untouched: ['user asset'], harness: { unrelated: 'kept', models: {
-    review: { agent: { name: 'Review asset', tools: ['file_read'], instructions: 'Original instructions' } },
-  } } });
   try {
-    await writeFile(path, original);
     const profiles = createAgentProfilesAPI({ settings: new AgentSettingsService(root, () => false), capabilities: async () => [] });
-    const view = await profiles.read({ runtime: 'agent' });
-    expect(await readFile(path, 'utf8')).toBe(original);
-    const retained = view.profiles.find(profile => profile.id === 'varin:custom:saved-review')!;
-    if (retained.config.kind !== 'custom') throw new Error('expected retained user profile');
-    const saved = await profiles.save({ runtime: 'agent', expectedRevision: view.revision, id: retained.id,
-      config: { ...retained.config, agent: { ...retained.config.agent, name: 'Edited review' } } });
-    const disk = JSON.parse(await readFile(path, 'utf8'));
-    expect(disk.harness.models).not.toHaveProperty('review');
-    expect(disk.harness.agents['saved-review']).toMatchObject({ name: 'Edited review', tools: ['file_read'], instructions: 'Original instructions' });
-    expect(disk.untouched).toEqual(['user asset']);
-    expect(disk.harness.unrelated).toBe('kept');
-    expect(saved.snapshot.profiles.find(profile => profile.id === retained.id)?.tools).toEqual({ source: 'explicit', names: ['file_read'] });
-    await profiles.remove({ runtime: 'agent', expectedRevision: saved.snapshot.revision, id: retained.id });
-    expect((await profiles.read({ runtime: 'agent' })).profiles.some(profile => profile.id === retained.id)).toBe(false);
-    // Deleting the original projected profile must also work before any save normalization.
-    await writeFile(path, original);
-    const reloaded = await profiles.read({ runtime: 'agent' });
-    await profiles.remove({ runtime: 'agent', expectedRevision: reloaded.revision, id: retained.id });
-    expect((await profiles.read({ runtime: 'agent' })).profiles.some(profile => profile.id === retained.id)).toBe(false);
+    for (const harness of [
+      { models: { review: { agent: { instructions: 'Original instructions' } } } },
+      { memory: { mode: 'off' } },
+      { agents: { retained: agent({ tools: { pi: ['read'], agent: ['file_read'] } }) } },
+    ]) {
+      const original = JSON.stringify({ untouched: ['user asset'], harness });
+      await writeFile(path, original);
+      await expect(profiles.read({ runtime: 'agent' })).rejects.toThrow();
+      expect(await readFile(path, 'utf8')).toBe(original);
+    }
   } finally { await rm(root, { recursive: true, force: true }); }
 });
 
@@ -171,8 +158,8 @@ it('retains shipped-default provenance and explicit preset/custom arrays for exa
   expect(absent.presets.find(preset => preset.id === 'worker')).toMatchObject({ tools: ['file_read', 'file_write', 'process_spawn', 'ask_user'], tools_source: 'default', work_mode: 'isolated_write', unavailable: null });
   expect(absent.presets.find(preset => preset.id === 'retrieval')).toMatchObject({ tools: ['file_read'], tools_source: 'default' });
   expect(absent.native_capabilities).toEqual(f.capabilities);
-  settings = { harness: { models: { worker: { agent: { tools: { agent: ['file_read', 'process_spawn'] } } } },
-    agents: { explicit: agent({ tools: { agent: ['file_read'] } }) } } };
+  settings = { harness: { models: { worker: { agent: { tools: ['file_read', 'process_spawn'] } } },
+    agents: { explicit: agent({ tools: ['file_read'] }) } } };
   const explicit = await prepare({ parent: f.parent });
   expect(explicit.presets.find(preset => preset.id === 'worker')?.tools).toEqual(['file_read', 'process_spawn']);
   expect(explicit.presets.find(preset => preset.id === 'custom:explicit')?.tools).toEqual(['file_read']);

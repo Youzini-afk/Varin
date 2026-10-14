@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, test } from 'vitest';
-import { getRuntimeKey } from '@varin/application-client';
-import { addEditorContextAttachment, consumeEditorContextAttachments, listEditorContextAttachments, resetEditorContextAttachments, restoreEditorContextAttachments } from './attachments';
+import { threadHostKey as getRuntimeKey } from '@/stores/useThreadStore';
+import { addEditorContextAttachment, consumeEditorContextAttachments, listEditorContextAttachments, resetEditorContextAttachments, acknowledgeEditorContextAttachments, restoreEditorContextAttachments } from './attachments';
 import { projectEditorContextAttachments } from './projection';
 import { extractToolFileChanges, recordHintsFromToolCall, peekAgentFileChangeHint, resetAgentFileChangeHints } from './hints';
 import { applyHunkDecisions, parseUnifiedHunks } from './patch';
@@ -18,7 +18,7 @@ afterEach(() => {
 const attachment = (overrides: Partial<EditorContextAttachment> = {}): EditorContextAttachment => ({
   id: overrides.id ?? 'att-1',
   runtimeKey,
-  sessionId: 'session-a',
+  threadKey: 'session-a',
   workspaceId: 'ws-1',
   resourceId: 'src/a.ts',
   label: 'a.ts',
@@ -33,7 +33,7 @@ const attachment = (overrides: Partial<EditorContextAttachment> = {}): EditorCon
 describe('editor context attachments', () => {
   test('consume is scoped to runtime and session', () => {
     addEditorContextAttachment(attachment());
-    addEditorContextAttachment(attachment({ id: 'att-2', sessionId: 'session-b', resourceId: 'src/b.ts' }));
+    addEditorContextAttachment(attachment({ id: 'att-2', threadKey: 'session-b', resourceId: 'src/b.ts' }));
     expect(listEditorContextAttachments(runtimeKey, 'session-a')).toHaveLength(1);
     const taken = consumeEditorContextAttachments(runtimeKey, 'session-a');
     expect(taken).toHaveLength(1);
@@ -79,7 +79,7 @@ describe('editor context attachments', () => {
 describe('unsaved attachment projection', () => {
   test('saved attachments do not include buffer text and unsaved ones say disk cannot see them', () => {
     const saved = projectEditorContextAttachments('Please review', [attachment()]);
-    expect(saved).toContain('Pi file tools can read the current disk contents');
+    expect(saved).toContain('The admitted source determines file access');
     expect(saved).not.toContain('const value');
     const unsaved = projectEditorContextAttachments('', [attachment({
       source: 'unsaved-buffer',
@@ -87,7 +87,7 @@ describe('unsaved attachment projection', () => {
       text: 'const value = 1;',
       languageId: 'typescript',
     })]);
-    expect(unsaved).toContain('Pi file tools cannot see it on disk');
+    expect(unsaved).toContain('File tools do not see this buffer on disk');
     expect(unsaved).toContain('const value = 1;');
   });
 
@@ -130,7 +130,7 @@ describe('agent file change hints', () => {
   test('records a hint that watcher reconciliation can read', () => {
     recordHintsFromToolCall({
       runtimeKey,
-      sessionId: 'session-a',
+      threadKey: 'session-a',
       toolCallId: 'tool-1',
       toolName: 'write',
       args: { filePath: 'D:/work/src/a.ts' },
@@ -143,7 +143,7 @@ describe('agent file change hints', () => {
   test('does not project tool paths outside the authoritative workspace', () => {
     expect(recordHintsFromToolCall({
       runtimeKey,
-      sessionId: 'session-a',
+      threadKey: 'session-a',
       toolCallId: 'tool-outside',
       toolName: 'write',
       args: { path: '../outside.txt' },
@@ -227,4 +227,15 @@ describe('range slice', () => {
       endColumn: 5,
     })).toBe('beta');
   });
+});
+
+test('acknowledges only the captured editor revision and original branch', () => {
+  const original = attachment(); addEditorContextAttachment(original);
+  const replacement = addEditorContextAttachment(attachment({ text: 'new edit', localEditRevision: 4 }));
+  const other = attachment({ id: 'other', threadKey: 'another-branch' }); addEditorContextAttachment(other);
+  acknowledgeEditorContextAttachments([original]);
+  expect(listEditorContextAttachments(runtimeKey, 'session-a')).toEqual([replacement]);
+  acknowledgeEditorContextAttachments([replacement as EditorContextAttachment]);
+  expect(listEditorContextAttachments(runtimeKey, 'session-a')).toEqual([]);
+  expect(listEditorContextAttachments(runtimeKey, 'another-branch')).toEqual([other]);
 });

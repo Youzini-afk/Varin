@@ -1,4 +1,4 @@
-/** Pure extracted-page projection shared by the Web owner and its Pi presentation.
+/** Pure extracted-page projection shared by the Web owner and native material presentation.
  * It never changes the fixed material body or its source identity. */
 export function selectWebPageText(markdown: string, options: { find?: string; start_line?: number; end_line?: number }): string {
   if (options.find === undefined && options.start_line === undefined && options.end_line === undefined) return markdown;

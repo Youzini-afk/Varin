@@ -57,7 +57,7 @@ it('installed nested-tools uses actual SDK, broker scope, runtime capability and
       expect(Object.keys(input.call).sort()).toEqual(['arguments', 'callId', 'name']);
       expect(input.call.name).toBe('memory'); requests.push(structuredClone(input));
       const operationId = toolOperationId({ kind: 'nested_call', parent_operation_id: invocation.operationId }, input.call.callId);
-      const query: MemoryQuery = { action: 'tool', runId: invocation.runId, scope: { mode: 'agent', sessionId: 'thread', projectId: null },
+      const query: MemoryQuery = { action: 'tool', runId: invocation.runId, scope: { mode: 'agent', threadId: 'thread', projectId: null },
         origin: `run:${invocation.runId}:${operationId}`, arguments: input.call.arguments as NonNullable<MemoryQuery['arguments']> };
       queries.push(query);
       const response = await memory.dispatch({ v: 1, kind: 'memory-request', id: `memory-${requests.length}`, kernelEpoch: 'epoch', query });
@@ -70,7 +70,7 @@ it('installed nested-tools uses actual SDK, broker scope, runtime capability and
     await runtime.reviewCapabilities({ extensionId: manifest.id, expectedRevision: (await runtime.catalog.snapshot()).revision,
       decisions: [{ capability: VARIN_RUNTIME_TOOLS_CAPABILITY, realm: 'host', granted: true }] });
     await runtime.setEnabled(manifest.id, true, (await runtime.catalog.snapshot()).revision);
-    const selected = await runtime.prepareService({ serviceId: descriptor.id, version: descriptor.version, method: 'execute', args: [], routing: { sessionId: 'thread' } });
+    const selected = await runtime.prepareService({ serviceId: descriptor.id, version: descriptor.version, method: 'execute', args: [], routing: { threadId: 'thread' } });
     const retained = await retainExtensionTool({ runtime, kernel, currentPolicy: async () => ({ mode: 'normal', rules: [{ tool: descriptor.tool!.name, decision: 'allow' }] }) }, selected);
     const frames: PrivateToolFrame[] = [];
     bridge = new ToolBridge(() => 'epoch', async frame => {

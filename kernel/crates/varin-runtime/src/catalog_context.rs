@@ -41,7 +41,7 @@ impl ContextCheckpoint {
 pub struct ContextScope {
     pub mode: String,
     pub thread_role: String,
-    pub session_id: String,
+    pub thread_id: String,
     pub project_id: Option<String>,
 }
 impl From<&super::personalization::PersonalizationBasis> for ContextScope {
@@ -49,7 +49,7 @@ impl From<&super::personalization::PersonalizationBasis> for ContextScope {
         Self {
             mode: basis.mode.clone(),
             thread_role: basis.thread_role.clone(),
-            session_id: basis.session_id.clone(),
+            thread_id: basis.thread_id.clone(),
             project_id: basis.project_id.clone(),
         }
     }
@@ -62,7 +62,7 @@ pub(super) fn check_format(db: &Connection) -> Result<()> {
         [],
         |row| row.get(0),
     )?;
-    if version != 4 {
+    if version != 5 {
         return Err(RuntimeError::Invalid(
             "unsupported context checkpoint format; data preserved".into(),
         ));
@@ -247,9 +247,9 @@ pub(super) fn initialize(tx: &Transaction<'_>) -> Result<()> {
         .optional()?;
     match version {
         None => {
-            tx.execute_batch("CREATE TABLE memory_states(branch_id TEXT PRIMARY KEY REFERENCES branches(id),body TEXT NOT NULL); CREATE TABLE context_checkpoints(id TEXT PRIMARY KEY,branch_id TEXT NOT NULL REFERENCES branches(id),revision INTEGER NOT NULL,through_id TEXT REFERENCES history(id),body TEXT NOT NULL,project_id TEXT,scope TEXT,UNIQUE(branch_id,revision)); CREATE TABLE active_contexts(branch_id TEXT PRIMARY KEY REFERENCES branches(id),checkpoint_id TEXT NOT NULL REFERENCES context_checkpoints(id)); INSERT INTO runtime_domains(name,version) VALUES('context_checkpoints',4);")?;
+            tx.execute_batch("CREATE TABLE memory_states(branch_id TEXT PRIMARY KEY REFERENCES branches(id),body TEXT NOT NULL); CREATE TABLE context_checkpoints(id TEXT PRIMARY KEY,branch_id TEXT NOT NULL REFERENCES branches(id),revision INTEGER NOT NULL,through_id TEXT REFERENCES history(id),body TEXT NOT NULL,project_id TEXT,scope TEXT,UNIQUE(branch_id,revision)); CREATE TABLE active_contexts(branch_id TEXT PRIMARY KEY REFERENCES branches(id),checkpoint_id TEXT NOT NULL REFERENCES context_checkpoints(id)); INSERT INTO runtime_domains(name,version) VALUES('context_checkpoints',5);")?;
         }
-        Some(4) => {}
+        Some(5) => {}
         Some(_) => {
             return Err(RuntimeError::Invalid(
                 "unsupported context checkpoint format; data preserved".into(),

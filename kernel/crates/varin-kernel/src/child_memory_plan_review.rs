@@ -61,7 +61,7 @@ fn bot_plan_fixture() -> Fixture {
     };
     let basis = serde_json::from_value(json!({"mode":"bot","threadRole":"worker",
         "revision":0,"configurationDigest":"bot-plan-child","memorySnapshot":{"revision":0,"memories":[]},
-        "sessionId":child.child_thread_id,"projectId":child.project_id,
+        "threadId":child.child_thread_id,"projectId":child.project_id,
         "originalSections":[{"name":"preamble","content":"Bot plan child"}],"instructionSources":[]})).unwrap();
     let child =
         f.db.prepare_child(&child.operation_id, source.clone(), proposal, basis)
@@ -149,7 +149,7 @@ impl OwnerReplies {
         }
         let q = &frame["query"];
         if kind == "memory-request" && q["action"] == "synchronize" {
-            assert_eq!(q["scope"]["sessionId"], f.run.thread_id);
+            assert_eq!(q["scope"]["threadId"], f.run.thread_id);
             let checkpoint = &q["checkpoint"];
             let mut result = json!({"status":"ready","context":{"resources":checkpoint["resources"],
                 "effectiveSystemPrompt":checkpoint["proposal"]["effective_system_prompt"],
@@ -175,7 +175,7 @@ impl OwnerReplies {
             json!({"status":"unknown"})
         } else if kind == "memory-request" {
             assert_eq!(q["runId"], f.run.id);
-            assert_eq!(q["scope"]["sessionId"], f.run.thread_id);
+            assert_eq!(q["scope"]["threadId"], f.run.thread_id);
             assert_eq!(q["scope"]["projectId"], json!(f.child.project_id));
             if q["arguments"]["action"] == "save" {
                 assert_eq!(q["arguments"]["revision"], self.revision);
@@ -706,7 +706,7 @@ fn plan_scope_rejects_role_only_bot_foreign_and_missing_admissions() {
         }
         let basis=serde_json::from_value(json!({"mode":mode,"threadRole":role,"revision":0,
             "configurationDigest":"scope-test","memorySnapshot":{"revision":0,"memories":[]},
-            "sessionId":if session=="actual"{&thread}else{session},"projectId":null,
+            "threadId":if session=="actual"{&thread}else{session},"projectId":null,
             "originalSections":[{"name":"preamble","content":"Scope test"}],"instructionSources":[]})).unwrap();
         let receipt = db.submit_with_context_snapshot(
             &SubmitInput {

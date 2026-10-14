@@ -4,24 +4,27 @@ import WidgetKit
 // MARK: - Shared model + App Group reader
 
 /// One row of the session overview the app writes to the shared App Group.
-/// Mirrors MobileWidgetSession in packages/ui/src/apps/mobileWidgetSnapshot.ts.
-struct WidgetSession: Codable, Identifiable, Hashable {
-    let id: String
+/// Mirrors MobileWidgetThread in packages/ui/src/apps/mobileWidgetSnapshot.ts.
+struct WidgetThread: Codable, Identifiable, Hashable {
+    let threadId: String
+    let branchId: String
+    let url: String
+    var id: String { threadId + ":" + branchId }
     let title: String
     let unread: Bool
     /// Project label for the session's directory. Optional so snapshots written before this
     /// field existed still decode.
-    var project: String?
+
 }
 
 /// The session overview snapshot. Mirrors MobileWidgetSnapshot (same field names) so the
 /// JSON the app stores decodes directly.
 struct WidgetSnapshot: Codable {
-    var runtimeKey: String?
+    var hostKey: String?
     let attentionCount: Int
-    let recentSessions: [WidgetSession]
+    let recentThreads: [WidgetThread]
 
-    static let empty = WidgetSnapshot(runtimeKey: nil, attentionCount: 0, recentSessions: [])
+    static let empty = WidgetSnapshot(hostKey: nil, attentionCount: 0, recentThreads: [])
 }
 
 enum WidgetStore {
@@ -51,9 +54,8 @@ enum WidgetDeepLink {
     static func changes() -> URL { URL(string: "varin://changes")! }
     static func files() -> URL { URL(string: "varin://view/files")! }
     static func instances() -> URL { URL(string: "varin://view/instances")! }
-    static func session(_ id: String) -> URL {
-        let encoded = id.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? id
-        return URL(string: "varin://session/\(encoded)") ?? newSession()
+    static func thread(_ thread: WidgetThread) -> URL {
+        URL(string: thread.url) ?? newSession()
     }
 }
 

@@ -23,7 +23,7 @@ import { createManagedPackageSource } from './managed-package-source.js';
 
 export interface SourceQueryServiceOptions {
   kernel: KernelClient;
-  documents: Pick<DocumentAuthority, 'readSnapshot' | 'readAgentInputSnapshot' | 'admitWorkspaceRegistration'>;
+  documents: Pick<DocumentAuthority, 'readSnapshot' | 'admitWorkspaceRegistration'>;
   validateLiveSource: LiveSourceResolver;
   storage: Pick<KernelStorageAdapter, 'contextFromBranchGrant' | 'contextFromSourceGrant'>;
   resourceOwners: Omit<ThreadResourceScopeOwners, 'remote' | 'targetAuthority'>;

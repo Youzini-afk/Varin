@@ -186,7 +186,7 @@ export interface SourceServiceResults {
   mcp: import('./managed-mcp-contract.js').ManagedMcpReply;
   native_resource: unknown;
   validate: { pathScopes: string[] };
-  read: import('./explore-file-reader.js').ExploreFileSnapshot;
+  read: import('./file-snapshot.js').ExploreFileSnapshot;
   document_read: { bytesBase64: string; byteLength: number; sourceUrl: string; title: string; contentType: 'application/pdf' };
   package_capture: { captureId: string; snapshot: import('../kernel/extension-source.js').ExtensionSourceSnapshot };
   package_read: import('../kernel/protocol.generated.js').KernelObjectSlice;

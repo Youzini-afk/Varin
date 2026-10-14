@@ -146,7 +146,7 @@ fn read_only_resource_view_pins_reads_and_releases_only_its_owned_view() {
 fn basis(text: &str) -> PersonalizationBasis {
     serde_json::from_value(
         json!({"mode":"agent","threadRole":"main","revision":1,"configurationDigest":"profile",
-        "memorySnapshot":{"revision":0,"memories":[]},"sessionId":"thread","projectId":null,
+        "memorySnapshot":{"revision":0,"memories":[]},"threadId":"thread","projectId":null,
         "originalSections":[{"name":"system","content":text}],"instructionSources":[]}),
     )
     .unwrap()

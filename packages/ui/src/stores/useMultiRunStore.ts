@@ -1,29 +1,15 @@
-import { THINKING_LEVELS, type ImageAttachment, type ThinkingLevel } from '@varin/protocol';
 import { create } from 'zustand';
-import { devtools } from 'zustand/middleware';
-import type {
-  CreateMultiRunParams,
-  CreateMultiRunResult,
-  MultiRunFileAttachment,
-} from '@/types/multirun';
-import {
-  getWorktreeSetupWaitEnabled,
-  saveWorktreeSetupCommands,
-  type VarinProjectRef,
-} from '@/lib/project-config';
-import {
-  checkVarinGitRepository,
-  createVarinWorktree,
-  removeVarinWorktree,
-  resolveVarinRootTrackingRemote,
-} from '@/lib/varinWorktrees';
+import { getRuntimeEndpointGeneration, ThreadRequestError, type ThreadIdentity, type ThreadPreparedSource, type ThreadPrepareSource, type ThreadSubmit, type ThreadsAPI, type ThreadUpdate } from '@varin/application-client';
+import type { ImageAttachment, InputSubmitReceipt } from '@varin/protocol';
+import type { CreateMultiRunParams, CreateMultiRunResult, MultiRunFileAttachment, MultiRunModelSelection } from '@/types/multirun';
+import { getWorktreeSetupWaitEnabled, type VarinProjectRef } from '@/lib/project-config';
+import { checkVarinGitRepository, createVarinWorktree, resolveVarinRootTrackingRemote } from '@/lib/varinWorktrees';
 import { waitForWorktreeBootstrap } from '@/lib/worktrees/worktreeBootstrap';
+import { getRegisteredRuntimeAPIs } from '@/lib/runtime-api/registry';
+import { getMultiRunSessionTitle } from '@/lib/multirun/title';
 import { useDirectoryStore } from './useDirectoryStore';
 import { useProjectsStore } from './useProjectsStore';
-import { usePiSessionStore } from './usePiSessionStore';
-import { getMultiRunSessionTitle } from '@/lib/multirun/title';
-import { renderPiAgentInvocation } from '@/lib/piAgentInvocation';
-
+import { threadHostKey, useThreadStore } from './useThreadStore';
 const toGitSafeSlug = (value: string): string => value
   .normalize('NFKC')
   .toLocaleLowerCase()
@@ -51,10 +37,6 @@ const generateWorktreeNameSeed = (groupSlug: string, modelSlug: string): string 
 
 const errorMessage = (error: unknown): string => (
   error instanceof Error ? error.message : String(error)
-);
-
-const isThinkingLevel = (value: string | undefined): value is ThinkingLevel => (
-  value !== undefined && THINKING_LEVELS.includes(value as ThinkingLevel)
 );
 
 const dataUrlParts = (url: string): { base64: boolean; data: string; mime: string } | null => {
@@ -118,233 +100,180 @@ const prepareAttachments = (
   };
 };
 
-const resolveActiveProject = (): VarinProjectRef | null => {
-  const projectsState = useProjectsStore.getState();
-  const activeProjectId = projectsState.activeProjectId;
-  const project = activeProjectId
-    ? projectsState.projects.find((entry) => entry.id === activeProjectId)
-    : undefined;
-  if (project?.path) return { id: project.id, path: project.path };
 
-  const currentDirectory = useDirectoryStore.getState().currentDirectory ?? null;
-  if (!currentDirectory?.trim()) return null;
-  const normalized = currentDirectory.replace(/\\/g, '/').replace(/\/+$/, '') || currentDirectory;
-  return { id: `path:${normalized}`, path: normalized };
-};
-
-interface CreatedRun {
-  modelID: string;
+export interface MultiRunAttempt {
+  id: string;
+  model: MultiRunModelSelection;
   prompt: string;
-  providerID: string;
-  sessionId: string;
-  variant?: string;
-  worktreePath: string;
+  title: string;
+  preferredName: string;
+  createKey: string;
+  sourceKey: string;
+  worktreePath?: string;
+  worktreeUnknown?: boolean;
+  worktreeReady?: boolean;
+  identity?: ThreadIdentity;
+  titleCommand?: ThreadUpdate;
+  titled?: boolean;
+  sourceInput?: ThreadPrepareSource;
+  prepared?: ThreadPreparedSource;
+  input?: ThreadSubmit;
+  receipt?: InputSubmitReceipt;
+  status: 'pending' | 'preparing' | 'ready' | 'accepted' | 'unknown' | 'error' | 'stopped';
+  error?: string;
 }
-
-interface MultiRunState {
+interface Batch {
+  fingerprint: string;
+  generation: number;
+  hostKey: string;
+  groupSlug: string;
+  params: CreateMultiRunParams;
+  project: VarinProjectRef;
+  api: ThreadsAPI;
+  isolated?: boolean;
+  trackingRemote?: string | null;
+  waitForSetup?: boolean;
+  attempts: MultiRunAttempt[];
+  stopped: boolean;
+}
+interface MultiRunStore {
+  ownerHostKey: string | null;
   error: string | null;
   isLoading: boolean;
-}
-
-interface MultiRunActions {
+  attempts: MultiRunAttempt[];
   clearError(): void;
+  stopLaunching(): void;
+  keepResultsAndReset(): void;
   createMultiRun(params: CreateMultiRunParams): Promise<CreateMultiRunResult | null>;
 }
+let batch: Batch | undefined;
+let pending: Promise<CreateMultiRunResult | null> | undefined;
+const sameSelection = (left: ThreadIdentity | null, right: ThreadIdentity | null) => left?.threadId === right?.threadId && left?.branchId === right?.branchId;
+class BatchRetired extends Error {}
+const assertOwner = (owner: Batch) => {
+  if (owner.generation !== getRuntimeEndpointGeneration() || owner.hostKey !== threadHostKey()) throw new BatchRetired('Application Host changed. Existing work and uncertain outcomes remain with their original Host.');
+  if (owner.stopped) throw new BatchRetired('Launching stopped. Existing conversations and worktrees were retained.');
+};
+function createBatch(params: CreateMultiRunParams): Batch {
+  if (!params.name.trim() || !params.groups.length || params.groups.some(group => !group.prompt.trim() || !group.models.length)) throw new Error('Choose a name, prompt and model for every run group.');
+  const state = useProjectsStore.getState(); const project = state.projects.find(value => value.id === state.activeProjectId);
+  const path = project?.path ?? useDirectoryStore.getState().currentDirectory;
+  if (!path) throw new Error('Select a project on this Host.');
+  const api = getRegisteredRuntimeAPIs()?.threads; if (!api) throw new Error('Native thread execution is unavailable.');
+  const groupSlug = toGitSafeSlug(params.name.trim()) || stableFallbackSlug(params.name.trim());
+  const attachments = prepareAttachments(params.files);
+  const attempts = params.groups.flatMap((group, groupIndex) => group.models.map((model, modelIndex) => {
+    const runGroup = params.groups.length > 1 ? `g${groupIndex + 1}` : undefined;
+    const index = group.models.filter(value => value.providerID === model.providerID && value.modelID === model.modelID).length > 1
+      ? group.models.slice(0, modelIndex + 1).filter(value => value.providerID === model.providerID && value.modelID === model.modelID).length : undefined;
+    if (model.variant !== undefined && !['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'].includes(model.variant)) throw new Error('Unsupported thinking level.');
+    return { id: crypto.randomUUID(), model: { ...model }, prompt: [group.prompt, attachments.instructions].filter(Boolean).join('\n\n'),
+      title: getMultiRunSessionTitle({ groupSlug, runGroup, providerID: model.providerID, modelID: model.modelID, index }),
+      preferredName: [runGroup, generateWorktreeNameSeed(groupSlug, toModelSlug(model.providerID, model.modelID)), index].filter(value => value !== undefined).join('/'),
+      createKey: crypto.randomUUID(), sourceKey: crypto.randomUUID(), status: 'pending' as const };
+  }));
+  return { fingerprint: JSON.stringify(params), generation: getRuntimeEndpointGeneration(), hostKey: threadHostKey(), groupSlug,
+    params: structuredClone(params), project: { id: project?.id ?? `path:${path}`, path }, api, attempts, stopped: false };
+}
 
-type MultiRunStore = MultiRunState & MultiRunActions;
-
-export const useMultiRunStore = create<MultiRunStore>()(
-  devtools(
-    (set) => ({
-      error: null,
-      isLoading: false,
-
-      createMultiRun: async (params) => {
-        const groupName = params.name.trim();
-        if (!groupName) {
-          set({ error: 'Group name is required' });
-          return null;
-        }
-        if (params.groups.length === 0) {
-          set({ error: 'At least one run group is required' });
-          return null;
-        }
-        for (let index = 0; index < params.groups.length; index += 1) {
-          const group = params.groups[index];
-          if (!group.prompt.trim()) {
-            set({ error: `Group ${index + 1}: prompt is required` });
-            return null;
-          }
-          if (group.models.length === 0) {
-            set({ error: `Group ${index + 1}: select at least 1 model` });
-            return null;
-          }
-        }
-
-        set({ error: null, isLoading: true });
+/** Presentation/retry state only. Catalog, Git and source owners retain all accepted resources. */
+export const useMultiRunStore = create<MultiRunStore>((set) => {
+  const publish = (owner: Batch) => { if (batch === owner) set({ ownerHostKey: owner.hostKey, attempts: owner.attempts.map(attempt => ({ ...attempt })) }); };
+  const prepare = async (owner: Batch, attempt: MultiRunAttempt) => {
+    if (attempt.receipt) return;
+    assertOwner(owner); attempt.status = 'preparing'; attempt.error = undefined; publish(owner);
+    if (attempt.worktreeUnknown) throw new Error(`Worktree creation for ${attempt.preferredName} is unconfirmed. Inspect Git on the original Host; this action will not be replayed.`);
+    if (!attempt.worktreePath) {
+      if (owner.isolated) {
+        // Git creation has no idempotent command key. An uncertain result must never be replayed or cleaned up blindly.
+        attempt.worktreeUnknown = true; publish(owner); assertOwner(owner);
+        const worktree = await createVarinWorktree(owner.project, { branchName: attempt.preferredName, preferredName: attempt.preferredName,
+          worktreeName: attempt.preferredName, mode: 'new', resolvedRootTrackingRemote: owner.trackingRemote,
+          returnAfterDirectoryCreated: true, setupCommands: owner.params.setupCommands ?? [], startRef: owner.params.worktreeBaseBranch || 'HEAD' });
+        attempt.worktreePath = worktree.path; attempt.worktreeUnknown = false; publish(owner); assertOwner(owner);
+      } else attempt.worktreePath = owner.project.path;
+    }
+    if (!attempt.worktreeReady) {
+      if (owner.isolated && owner.waitForSetup) { assertOwner(owner); await waitForWorktreeBootstrap(attempt.worktreePath); assertOwner(owner); }
+      attempt.worktreeReady = true;
+    }
+    if (!attempt.identity) {
+      assertOwner(owner); attempt.identity = await owner.api.create(attempt.createKey); publish(owner); assertOwner(owner);
+    }
+    if (!attempt.titled) {
+      if (!attempt.titleCommand) {
+        assertOwner(owner); const snapshot = await owner.api.snapshot(attempt.identity); assertOwner(owner);
+        attempt.titleCommand = { runtime: 'agent', threadId: attempt.identity.threadId, key: crypto.randomUUID(), expectedRevision: snapshot.thread.revision, title: attempt.title };
+      }
+      assertOwner(owner); await owner.api.update(attempt.titleCommand); attempt.titled = true; assertOwner(owner);
+    }
+    if (!attempt.sourceInput) {
+      assertOwner(owner);
+      const workspace = await owner.api.sources.resolve(attempt.identity, { resourceOwner: { kind: 'local' }, path: attempt.worktreePath });
+      assertOwner(owner); attempt.sourceInput = { ...attempt.identity, key: attempt.sourceKey, resourceOwner: workspace.resourceOwner,
+        workspaceId: workspace.workspaceId, mode: 'live_root', content: { mode: 'saved-files' }, captureScopes: [] };
+    }
+    if (!attempt.prepared) {
+      assertOwner(owner); attempt.prepared = await owner.api.prepareSource(attempt.sourceInput); publish(owner); assertOwner(owner);
+    }
+    if (!attempt.input) {
+      const images = prepareAttachments(owner.params.files).images;
+      attempt.input = { ...attempt.identity, key: crypto.randomUUID(), expectedHead: null, text: attempt.prompt,
+        model: { providerId: attempt.model.providerID, modelId: attempt.model.modelID, ...(attempt.model.variant ? { thinkingLevel: attempt.model.variant } : {}) },
+        source: attempt.prepared.source, ...(images.length ? { images } : {}) };
+    }
+    attempt.status = 'ready'; publish(owner);
+  };
+  return {
+    ownerHostKey: null, error: null, isLoading: false, attempts: [],
+    clearError: () => set({ error: null }),
+    keepResultsAndReset: () => { if (!pending) { batch = undefined; set({ error: null }); } },
+    stopLaunching: () => { if (batch) { batch.stopped = true; set({ error: 'Launching stopped. Accepted work continues in its original conversations.' }); } },
+    createMultiRun(params) {
+      if (pending) return pending;
+      const work = (async () => {
+        let owner: Batch;
         try {
-          const project = resolveActiveProject();
-          if (!project) throw new Error('Select a project');
-          const directory = project.path;
-          const shouldIsolateRuns = await checkVarinGitRepository(directory) && params.isolateRuns !== false;
-          const normalizedGroupSlug = toGitSafeSlug(groupName);
-          const groupSlug = normalizedGroupSlug || stableFallbackSlug(groupName);
-          const rootTrackingRemote = shouldIsolateRuns
-            ? await resolveVarinRootTrackingRemote(directory)
-            : null;
-          const setupCommands = params.setupCommands?.filter((command) => command.trim().length > 0) ?? [];
-          const createdRuns: CreatedRun[] = [];
+          if (batch && batch.attempts.some(attempt => !attempt.receipt)) {
+            if (batch.fingerprint !== JSON.stringify(params)) throw new Error('This batch has unfinished or unconfirmed work. Retry its unchanged selections to reconcile the original commands.');
+            owner = batch; assertOwner(owner);
+          } else { owner = createBatch(params); batch = owner; }
+          set({ isLoading: true, error: null }); publish(owner);
+          const initialSelection = useThreadStore.getState().selectedIdentity;
+          if (owner.isolated === undefined) {
+            assertOwner(owner); const git = await checkVarinGitRepository(owner.project.path); assertOwner(owner);
+            owner.isolated = git && owner.params.isolateRuns !== false;
+            if (owner.isolated) {
+              owner.trackingRemote = await resolveVarinRootTrackingRemote(owner.project.path); assertOwner(owner);
+              owner.waitForSetup = await getWorktreeSetupWaitEnabled(owner.project); assertOwner(owner);
+            }
+          }
           const failures: CreateMultiRunResult['failures'] = [];
-          const piSessions = usePiSessionStore.getState();
-
-          for (let groupIndex = 0; groupIndex < params.groups.length; groupIndex += 1) {
-            const group = params.groups[groupIndex];
-            const modelCounts = new Map<string, number>();
-            for (const model of group.models) {
-              const key = `${model.providerID}:${model.modelID}`;
-              modelCounts.set(key, (modelCounts.get(key) ?? 0) + 1);
-            }
-            const modelIndexes = new Map<string, number>();
-
-            for (const model of group.models) {
-              const key = `${model.providerID}:${model.modelID}`;
-              const count = modelCounts.get(key) ?? 1;
-              const instance = (modelIndexes.get(key) ?? 0) + 1;
-              modelIndexes.set(key, instance);
-              const runGroup = params.groups.length > 1 ? `g${groupIndex + 1}` : undefined;
-              const modelSlug = toModelSlug(model.providerID, model.modelID);
-              const modelPart = count > 1 ? `${modelSlug}/${instance}` : modelSlug;
-              const preferredName = runGroup
-                ? `${runGroup}/${generateWorktreeNameSeed(groupSlug, modelPart)}`
-                : generateWorktreeNameSeed(groupSlug, modelPart);
-              const sessionTitle = getMultiRunSessionTitle({
-                groupSlug,
-                ...(runGroup === undefined ? {} : { runGroup }),
-                providerID: model.providerID,
-                modelID: model.modelID,
-                ...(count > 1 ? { index: instance } : {}),
-              });
-
-              let sessionId: string | undefined;
-              let worktreeMetadata: Awaited<ReturnType<typeof createVarinWorktree>> | undefined;
-              try {
-                let worktreePath = directory;
-                if (shouldIsolateRuns) {
-                  worktreeMetadata = await createVarinWorktree(project, {
-                    branchName: preferredName,
-                    mode: 'new',
-                    preferredName,
-                    resolvedRootTrackingRemote: rootTrackingRemote,
-                    returnAfterDirectoryCreated: true,
-                    setupCommands,
-                    startRef: params.worktreeBaseBranch || 'HEAD',
-                    worktreeName: preferredName,
-                  });
-                  worktreePath = worktreeMetadata.path;
-                  if (await getWorktreeSetupWaitEnabled(project)) {
-                    await waitForWorktreeBootstrap(worktreePath);
-                  }
-                }
-
-                const snapshot = await piSessions.createSession(
-                  worktreePath,
-                  sessionTitle,
-                  undefined,
-                  { id: project.id, kind: 'workspace' },
-                );
-                sessionId = snapshot.sessionId;
-                await piSessions.selectModel(sessionId, {
-                  id: model.modelID,
-                  provider: model.providerID,
-                });
-                if (model.variant !== undefined) {
-                  if (!isThinkingLevel(model.variant)) {
-                    throw new Error(`Unsupported Pi thinking level: ${model.variant}`);
-                  }
-                  await piSessions.selectThinking(sessionId, model.variant);
-                }
-                createdRuns.push({
-                  modelID: model.modelID,
-                  prompt: group.prompt,
-                  providerID: model.providerID,
-                  sessionId,
-                  ...(model.variant === undefined ? {} : { variant: model.variant }),
-                  worktreePath,
-                });
-              } catch (error) {
-                if (sessionId) await piSessions.deleteSession(sessionId).catch(() => undefined);
-                if (worktreeMetadata) {
-                  await removeVarinWorktree(project, worktreeMetadata, { deleteLocalBranch: true })
-                    .catch(() => undefined);
-                }
-                failures.push({
-                  message: errorMessage(error),
-                  modelID: model.modelID,
-                  providerID: model.providerID,
-                  stage: 'create',
-                });
-              }
-            }
+          for (const attempt of owner.attempts) {
+            try { await prepare(owner, attempt); }
+            catch (error) { attempt.status = error instanceof BatchRetired ? 'stopped' : error instanceof ThreadRequestError && error.admission === 'not_started' ? 'error' : 'unknown'; attempt.error = errorMessage(error); publish(owner);
+              failures.push({ message: attempt.error, providerID: attempt.model.providerID, modelID: attempt.model.modelID, stage: 'create' }); }
+            if (owner.generation !== getRuntimeEndpointGeneration() || owner.stopped) break;
           }
-
-          if (params.setupCommands !== undefined) {
-            void saveWorktreeSetupCommands(project, setupCommands).catch((error) => {
-              console.warn('[MultiRun] Failed to save worktree setup commands', error);
-            });
-          }
-          if (createdRuns.length === 0) {
-            const detail = failures.map((failure) => failure.message).filter(Boolean).join('; ');
-            throw new Error(detail ? `Failed to create any sessions: ${detail}` : 'Failed to create any sessions');
-          }
-
-          const attachments = prepareAttachments(params.files);
-          await Promise.all(createdRuns.map(async (run) => {
+          await Promise.all(owner.attempts.filter(attempt => attempt.status === 'ready' && !attempt.receipt).map(async attempt => {
             try {
-              const instructionParts = [attachments.instructions]
-                .filter((value): value is string => Boolean(value?.trim()));
-              const directInstructions = instructionParts.length > 0
-                ? instructionParts.join('\n\n')
-                : undefined;
-              const task = params.agent && directInstructions
-                ? `${run.prompt}\n\n<varin-run-instructions>\n${directInstructions}\n</varin-run-instructions>`
-                : run.prompt;
-              const text = params.agent ? renderPiAgentInvocation(params.agent, task) : task;
-              const accepted = await piSessions.prompt(
-                run.sessionId,
-                text,
-                attachments.images.length > 0 ? attachments.images : undefined,
-                params.agent ? undefined : directInstructions,
-              );
-              if (!accepted) throw new Error('The Pi runtime did not accept the prompt');
+              assertOwner(owner); attempt.receipt = await owner.api.submit(attempt.input!); attempt.status = 'accepted'; attempt.error = undefined;
             } catch (error) {
-              failures.push({
-                message: errorMessage(error),
-                modelID: run.modelID,
-                providerID: run.providerID,
-                stage: 'start',
-              });
-            }
+              attempt.status = error instanceof BatchRetired ? 'stopped' : error instanceof ThreadRequestError && error.admission === 'not_started' ? 'error' : 'unknown'; attempt.error = errorMessage(error);
+              failures.push({ message: attempt.error, providerID: attempt.model.providerID, modelID: attempt.model.modelID, stage: 'start' });
+            } finally { publish(owner); }
           }));
-
-          const sessionIds = createdRuns.map((run) => run.sessionId);
-          const firstSessionId = sessionIds[0] ?? null;
-          if (firstSessionId) piSessions.setCurrentSession(firstSessionId);
-          set({
-            error: failures.length > 0
-              ? `${failures.length} run${failures.length === 1 ? '' : 's'} failed to create or start`
-              : null,
-          });
-          return { failures, firstSessionId, groupSlug, sessionIds };
-        } catch (error) {
-          set({ error: errorMessage(error) || 'Failed to create Multi-Run' });
-          return null;
-        } finally {
-          set({ isLoading: false });
-        }
-      },
-
-      clearError: () => set({ error: null }),
-    }),
-    { name: 'multirun-store' },
-  ),
-);
+          assertOwner(owner);
+          await useThreadStore.getState().loadCatalog().catch(() => {}); assertOwner(owner);
+          const identities = owner.attempts.flatMap(attempt => attempt.identity ? [attempt.identity] : []);
+          const firstIdentity = identities[0] ?? null;
+          if (firstIdentity && !failures.length && sameSelection(initialSelection, useThreadStore.getState().selectedIdentity)) await useThreadStore.getState().selectThread(firstIdentity).catch(() => {});
+          set({ error: failures.length ? `${failures.length} run(s) need attention. Existing threads and worktrees were retained; retry keeps the original command keys.` : null });
+          return { failures, firstIdentity, identities, groupSlug: owner.groupSlug };
+        } catch (error) { set({ error: errorMessage(error) }); return null; }
+        finally { set({ isLoading: false }); }
+      })(); pending = work;
+      void work.finally(() => { if (pending === work) pending = undefined; }); return work;
+    },
+  };
+});

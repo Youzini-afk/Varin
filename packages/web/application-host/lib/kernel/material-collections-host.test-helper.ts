@@ -15,7 +15,7 @@ import { createWebFetch } from '../harness/web-fetch.js';
 import { createWebMaterialStore } from '../harness/web-materials.js';
 import { createDocumentReader } from '../harness/document-reading.js';
 import { createMaterialCollections } from '../harness/material-collections.js';
-import { createRetrievalArtifactAccess } from '../harness/retrieval-artifacts.js';
+import { createMaterialLifecycle } from '../harness/material-lifecycle.js';
 import { createMaterialReviewFixture, withMaterialReviewClient, writeMaterialFixtureFrame as write } from './material-review-fixture.test-helper.js';
 import { makePdf } from '../harness/pdf-test-fixture.js';
 const unreachable = async (): Promise<never> => { throw new Error('Collection fixture attempted network/model/file-source work'); };
@@ -36,7 +36,7 @@ async function select(frame: Record<string, unknown>) {
   const runId = String(frame.runId), threadId = String(frame.threadId);
   const prepare = createExtensionTools({ runtime: extensions, kernel, currentPolicy: async () => ({ mode: 'normal', rules: [] }),
     prepareConfiguration: (run, required) => web.prepareConfiguration(run, required) });
-  const selected = await prepare({ threadId, runId, source: null }, (frame.required ?? []) as ExtensionToolBinding[], new AbortController().signal);
+  const selected = await prepare({ threadId, runId, branchId: (await runtime.run(runId)).branch_id, source: null }, (frame.required ?? []) as ExtensionToolBinding[], new AbortController().signal);
   scopes.push(selected);
   const material = selected.initial.find(entry => entry.binding.tool.name === 'materials'); assert(material);
   const registered = bridge.register(runId, material.lease);
@@ -53,7 +53,7 @@ async function select(frame: Record<string, unknown>) {
 async function initialize(frame: Record<string, unknown>) {
   fixture.initialize(frame);
   storage = new KernelStorageAdapter({ client: kernel, hostId: 'web-domain-host', storageRoot: String(frame.storageRoot), resolveWorkspaceRoot: unreachable });
-  const access = createMaterialStorageAccess({ kernel, storage, legacy: { withBranchStore: unreachable }, onCleanupError: error => { throw error; } });
+  const access = createMaterialStorageAccess({ kernel, storage, onCleanupError: error => { throw error; } });
   const materials = createWebMaterialStore(access);
   reader = createDocumentReader({ materials }); collections = createMaterialCollections(access, { materials });
   const webFetch = createWebFetch({ ssrf: { check: unreachable, isSameHost: () => false }, materials, documentReader: reader });
@@ -92,7 +92,7 @@ async function cleanup(frame: Record<string, unknown>) {
     const originalContext = await storage.contextFromBranchGrant({ grant, owningWorkspaceId: scopeId, executionWorkspaceId: scopeId });
     const context = originalContext;
     const access = { withBranchStore: async <T>(_scope: string, _purpose: string, consume: (store: KernelWorkingStateRootStore, context: typeof originalContext) => Promise<T>): Promise<T> => consume(new KernelWorkingStateRootStore(context), context) };
-    await createRetrievalArtifactAccess(access).releaseThreadEvidence(scopeId, String(frame.threadId));
+    await createMaterialLifecycle(access).releaseThreadMaterials(scopeId, String(frame.threadId));
     await kernel.scoped(grant).gc(`fixture-gc:${String(frame.threadId)}`);
   } finally { await kernel.revokeGrant(grant.grantId); }
   write({ kind: 'fixture-cleaned' });

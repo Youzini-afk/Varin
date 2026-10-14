@@ -14,8 +14,8 @@ import { registerFsRoutes } from '../fs/routes.js';
 import { registerGitRoutes } from '../git/routes.js';
 import { registerGitHubRoutes } from '../github/routes.js';
 import { registerVarinEventRoutes, registerScheduledTaskRoutes } from '../scheduled-tasks/routes.js';
-import { registerSessionFoldersRoutes } from '../session-folders/routes.js';
-import { registerSmallModelRoutes } from '../small-model/routes.js';
+import { registerModelTextRoutes } from '../model-text/routes.js';
+import type { ModelTextService } from '../model-text/service.js';
 import { registerWalkthroughRoutes } from '../walkthrough/routes.js';
 import { registerSmartSearchRoutes } from '../smart-search/routes.js';
 import { registerWorkspaceRoutes } from '../workspace/workspace-routes.js';
@@ -26,15 +26,11 @@ import { registerLanguageSupportRoutes } from '../language-support/routes.js';
 import { registerRunRoutes } from '../run/routes.js';
 import { registerSettingsUtilityRoutes } from './core-routes.js';
 import { registerProjectIconRoutes } from './project-icon-routes.js';
-import { registerPiRuntimeHttpRoute } from './pi-runtime-http-route.js';
-import { registerRuntimeManagerRoutes } from './runtime-manager-routes.js';
 
 type ExtensionRouteDependencies = Parameters<typeof registerExtensionRoutes>[1];
 type ProjectIconDependencies = Parameters<typeof registerProjectIconRoutes>[1];
 type ScheduledTaskDependencies = Parameters<typeof registerScheduledTaskRoutes>[1];
 type VarinEventDependencies = Parameters<typeof registerVarinEventRoutes>[1];
-type PiRuntimeDependencies = Parameters<typeof registerPiRuntimeHttpRoute>[1];
-type RuntimeManagerDependencies = Parameters<typeof registerRuntimeManagerRoutes>[1];
 type FsRouteDependencies = Parameters<typeof registerFsRoutes>[1];
 type LanguageRouteDependencies = Parameters<typeof registerLanguageRoutes>[1];
 type RunRouteDependencies = Parameters<typeof registerRunRoutes>[1];
@@ -50,6 +46,7 @@ type SmartSearchDependencies = Parameters<typeof registerSmartSearchRoutes>[1];
 type SmartSearchSpawn = NonNullable<SmartSearchDependencies['spawn']>;
 
 export interface PlatformRouteDependencies {
+  modelText: ModelTextService;
   __dirname: string;
   buildAugmentedPath: EnvironmentRuntime['buildAugmentedPath'];
   fileSearch: ProjectIconDependencies['fileSearch'];
@@ -63,25 +60,20 @@ export interface PlatformRouteDependencies {
   restartApplicationHost?: () => Promise<void>;
   formatSettingsResponse: SettingsHelpers['formatSettingsResponse'];
   fsPromises: typeof fsPromisesModule;
-  getPiRuntimeBroker?: PiRuntimeDependencies['getPiRuntimeBroker'];
   getVarinEventClients: VarinEventDependencies['getVarinEventClients'];
   surfaceBridge?: VarinEventDependencies['surfaceBridge'];
-  resolveSurfaceSession?: VarinEventDependencies['resolveSurfaceSession'];
+  resolveSurfaceThread?: VarinEventDependencies['resolveSurfaceThread'];
   resolveAuthContext?: VarinEventDependencies['resolveAuthContext'];
   languageSupervisor?: LanguageRouteDependencies['language'];
   languageSupport?: import('../language-support/runtime.js').LanguageSupportRuntime;
   normalizeDirectoryPath: NormalizationRuntime['normalizeDirectoryPath'];
   onGitStatus?: (scope: string, status: unknown) => void | Promise<void>;
-  openFilesystemPath?: RuntimeManagerDependencies['openFilesystemPath'];
   os: typeof osModule;
   path: typeof pathModule;
   persistSettings: SettingsRuntime['persistSettings'];
   varinDataDir: string;
   varinUserConfigRoot: string;
   varinVersion: string;
-  pickPiPackageRoot?: RuntimeManagerDependencies['pickPiPackageRoot'];
-  piRuntimeBroker: PiRuntimeDependencies['piRuntimeBroker'];
-  piRuntimeLifecycle?: RuntimeManagerDependencies['lifecycle'];
   process: NodeJS.Process;
   projectConfigRuntime: ProjectConfigRuntime;
   readCustomThemesFromDisk: () => Promise<unknown>;
@@ -110,18 +102,12 @@ export const createPlatformRoutesRuntime = ({
 }: {
   clientReloadDelayMs: number;
 }) => {
-  let smallModelService: typeof import('../small-model/index.js') | null = null;
   let walkthroughService: (
     typeof import('../walkthrough/index.js')
     & { getPullRequestDiff: typeof import('../walkthrough/pull-request.js').getPullRequestDiff }
   ) | null = null;
 
-  const getSmallModelService = async (): Promise<typeof import('../small-model/index.js')> => {
-    smallModelService ??= await import('../small-model/index.js');
-    return smallModelService;
-  };
-
-  const getWalkthroughService = async (): Promise<NonNullable<typeof walkthroughService>> => {
+  const getWalkthroughService = async (modelText: ModelTextService): Promise<NonNullable<typeof walkthroughService> & { modelText: ModelTextService }> => {
     if (!walkthroughService) {
       const [service, pullRequest] = await Promise.all([
         import('../walkthrough/index.js'),
@@ -129,7 +115,7 @@ export const createPlatformRoutesRuntime = ({
       ]);
       walkthroughService = { ...service, getPullRequestDiff: pullRequest.getPullRequestDiff };
     }
-    return walkthroughService;
+    return { ...walkthroughService, modelText };
   };
 
   const registerRoutes = async (
@@ -165,15 +151,10 @@ export const createPlatformRoutesRuntime = ({
       projectConfigRuntime,
       scheduledTasksRuntime,
       scheduledTaskService,
-      piRuntimeBroker,
-      getPiRuntimeBroker,
-      piRuntimeLifecycle,
-      pickPiPackageRoot,
-      openFilesystemPath,
       getVarinEventClients,
       writeSseEvent,
       surfaceBridge,
-      resolveSurfaceSession,
+      resolveSurfaceThread,
       resolveAuthContext,
       reloadRuntimeConfiguration = async () => {},
       extensionCatalog,
@@ -204,18 +185,6 @@ export const createPlatformRoutesRuntime = ({
       clientReloadDelayMs,
     });
 
-    registerPiRuntimeHttpRoute(app, {
-      piRuntimeBroker,
-      ...(typeof getPiRuntimeBroker === 'function' ? { getPiRuntimeBroker } : {}),
-    });
-    if (piRuntimeLifecycle) {
-      registerRuntimeManagerRoutes(app, {
-        lifecycle: piRuntimeLifecycle,
-        ...(typeof pickPiPackageRoot === 'function' ? { pickPiPackageRoot } : {}),
-        ...(typeof openFilesystemPath === 'function' ? { openFilesystemPath } : {}),
-      });
-    }
-
     app.get('/api/config/settings', async (_req, res) => {
       try {
         const settings = await readSettingsFromDisk();
@@ -240,7 +209,6 @@ export const createPlatformRoutesRuntime = ({
     registerExternalAccessRoutes(app, {
       fsPromises,
       path,
-      os,
       process,
       spawn,
       buildAugmentedPath,
@@ -276,11 +244,11 @@ export const createPlatformRoutesRuntime = ({
       writeSseEvent,
       requireAuth: uiAuthController.requireAuth,
       ...(surfaceBridge ? { surfaceBridge } : {}),
-      ...(resolveSurfaceSession ? { resolveSurfaceSession } : {}),
+      ...(resolveSurfaceThread ? { resolveSurfaceThread } : {}),
       ...(resolveAuthContext ? { resolveAuthContext } : {}),
     });
-    registerSmallModelRoutes(app, { getSmallModelService });
-    registerWalkthroughRoutes(app, { getWalkthroughService });
+    registerModelTextRoutes(app, { service: dependencies.modelText });
+    registerWalkthroughRoutes(app, { getWalkthroughService: () => getWalkthroughService(dependencies.modelText) });
     registerGitHubRoutes(app);
     registerGitRoutes(app, { ...(documents ? { documents } : {}), ...(onGitStatus ? { onStatus: onGitStatus } : {}) });
     registerWorkspaceRoutes(app, {
@@ -294,7 +262,6 @@ export const createPlatformRoutesRuntime = ({
       ...(documents ? { documents } : {}),
       ...(onGitStatus ? { onGitStatus } : {}),
     });
-    registerSessionFoldersRoutes(app, { fsPromises, path, varinDataDir });
     registerFsRoutes(app, {
       os,
       path,

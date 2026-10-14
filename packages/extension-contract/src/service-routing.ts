@@ -16,7 +16,10 @@ export interface VarinExtensionServiceRoutingContext {
   profileId?: string;
   projectId?: string;
   runtimeId?: string;
-  sessionId?: string;
+  threadId?: string;
+  branchId?: string;
+  sourceRunId?: string;
+  configurationDirectory?: string;
   userId?: string;
   workspaceId?: string;
 }
@@ -95,7 +98,10 @@ const SCOPE_FIELDS = [
   "workspaceId",
   "projectId",
   "runtimeId",
-  "sessionId",
+  "threadId",
+  "branchId",
+  "sourceRunId",
+  "configurationDirectory",
   "agentId",
   "modelProviderId",
   "modelId",
@@ -134,6 +140,9 @@ export const parseVarinExtensionServiceRoutingContext = (
 ): VarinExtensionServiceRoutingContext => {
   const raw = record(value);
   if (!raw) throw invalidRouting("Service routing context must be an object");
+  for (const field of Object.keys(raw)) {
+    if (!(SCOPE_FIELDS as readonly string[]).includes(field)) throw invalidRouting(`Unknown service routing context field: ${field}`);
+  }
   const context: VarinExtensionServiceRoutingContext = {};
   for (const field of SCOPE_FIELDS) {
     if (raw[field] !== undefined) context[field] = text(raw[field], `scope.${field}`);
