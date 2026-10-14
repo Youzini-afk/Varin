@@ -831,7 +831,7 @@
   "MediaReadChunk",
   "ChildSourceAuthority"
 ],
-  "protocolVersion": 39,
+  "protocolVersion": 40,
   "runtimeStructs": {"ContentCollectionReport":{"fields":{"status":{"type":"ContentCollectionStatus"},"phase":{"type":"ContentCollectionPhase"},"removedObjects":{"type":"number"},"removedBytes":{"type":"number"},"removedStagingFiles":{"type":"number"},"reason":{"type":"string | null"}}},"ModelSessionConfiguration":{"fields":{"providerId":{"type":"string","optional":true},"providerFamily":{"type":"string"},"model":{"type":"string"},"endpoint":{"type":"string"},"credentialEnvironment":{"type":"string | null"},"allowAnonymous":{"type":"boolean"},"acceptsImages":{"type":"boolean","optional":true},"configurationGeneration":{"type":"number"},"maxOutputTokens":{"type":"number | null"},"azureDeployment":{"type":"string | null","optional":true},"azureApiVersion":{"type":"string | null","optional":true},"legacyMaxTokens":{"type":"boolean","optional":true},"includeStreamUsage":{"type":"boolean","optional":true},"reasoningEffort":{"type":"string | null","optional":true},"anthropicOauth":{"type":"boolean","optional":true},"adapterId":{"type":"string","optional":true},"adapterVersion":{"type":"string","optional":true},"contextWindowTokens":{"type":"number","optional":true},"thinkingLevel":{"type":"string","optional":true},"modelOptions":{"type":"unknown","optional":true}}},"KernelWorkingResultCandidate":{"fields":{"publicationId":{"type":"string"},"candidateOperationId":{"type":"string"},"workspaceId":{"type":"string"},"branchId":{"type":"string"},"root":{"type":"string"},"baseRoot":{"type":"string"},"writeRevision":{"type":"number"},"pinId":{"type":"string"},"basePinId":{"type":"string"}}}},
   "runtimeEnums": {
     "McpInteractionMode": ["Form", "Url", "Sampling"],
@@ -2196,7 +2196,7 @@
       "operationId": {"type": "string"}, "workspaceId": {"type": "string"}, "rootId": {"type": "string"}, "path": {"type": "string"}, "store": {"type": "boolean"}, "leaseId": {"type": "string", "optional": true}
     }},
     "KernelFileCaptureBatchParams": {"fields": {
-      "operationId": {"type": "string"}, "workspaceId": {"type": "string"}, "rootId": {"type": "string"}, "paths": {"type": "string[]"}, "store": {"type": "boolean"}, "leaseId": {"type": "string"}
+      "operationId": {"type": "string"}, "workspaceId": {"type": "string"}, "rootId": {"type": "string"}, "paths": {"type": "string[]"}, "store": {"type": "boolean"}, "leaseId": {"type": "string"}, "expectedStatesJson": {"type": "string", "optional": true}
     }},
     "KernelFileApplyParams": {"fields": {
       "operationId": {"type": "string"}, "workspaceId": {"type": "string"}, "reservationOperationId": {"type":"string","optional":true}, "rootId": {"type": "string"}, "path": {"type": "string"}, "targetJson": {"type": "string"}, "expectedJson": {"type": "string", "optional": true}, "ownerId": {"type": "string", "optional": true}, "leaseId": {"type": "string", "optional": true}

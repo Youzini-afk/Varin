@@ -40,6 +40,13 @@ the final capture fence, not an atomic filesystem snapshot or content coherence.
 existing capture hashes and complete state verification. Windows/network/unsupported roots still fully recheck
 their directory inventory; no Windows filesystem guarantee is inferred from Linux checks.
 
+Stored capture uses two complete source reads. Its later whole-baseline verification supplies the original
+physical states to `file.captureBatch`: one fresh full hash/state read compares against that existing reference,
+without establishing another reference by double-reading again. The Host retains physical modes before the
+Windows Git-index projection. Explicit scope files join the same body pass; their namespace is rechecked
+afterward. A fresh standalone observation still uses two passes. These reads retain the original leases,
+cancellation, root/grant admission and publication checks; no timestamp cache establishes unchanged bytes.
+
 Documents keeps one latest namespace inventory on its original root watcher after a stable capture. This is
 only path metadata, not a branch, blob pin, grant or another task record. Adjacent captures under continuous
 coverage reuse the unchanged path set and ask the current admitted Rust scanner for dirty subtrees only.

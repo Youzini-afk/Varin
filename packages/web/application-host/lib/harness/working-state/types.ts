@@ -185,7 +185,7 @@ export interface WorkingStateRootStore {
   /** Original branch-create receipt, independent of subsequent writes or rebase. Never recaptures disk. */
   readOriginalSource(branchId: string, options?: { signal?: AbortSignal }): Promise<WorkingOriginalSource | null>;
   createBranchFromPin(workspaceId: string, branchId: string, pin: WorkingStatePin, parentRef: string, draftBaselineId?: string | null, captureScopes?: string[], options?: WorkingBranchCreateOptions): Promise<WorkingBranchRoot>;
-  captureDirectory(directory: string, relativePaths?: string[], options?: { signal?: AbortSignal; onProgress?: (done: number, total: number) => void; store?: boolean; indexModes?: Map<string, string> | Record<string, string> }): Promise<Record<string, RecoveryState>>;
+  captureDirectory(directory: string, relativePaths?: string[], options?: { signal?: AbortSignal; onProgress?: (done: number, total: number) => void; store?: boolean; indexModes?: Map<string, string> | Record<string, string>; verifyCaptured?: Record<string, RecoveryState> }): Promise<Record<string, RecoveryState>>;
   /** Release only transient capture owners; retained branch/result objects remain owned. */
   releaseCapturedStates(states: Record<string, RecoveryState>): Promise<void>;
   listCaptureScopePaths(directory: string, scopes: readonly string[], signal?: AbortSignal): Promise<string[]>;

@@ -65,7 +65,7 @@ export async function captureStableDirectoryBaseline(input: StableDirectoryCaptu
   }
   const paths = inventory.kind === 'git'
     ? withAncestorDirectories([...baselinePaths, ...scopePaths, ...input.capturePaths ?? []])
-    : [...new Set([...baselinePaths, ...input.capturePaths ?? []])].sort();
+    : [...new Set([...baselinePaths, ...scopePaths, ...input.capturePaths ?? []])].sort();
   const identity = inventory.kind === 'git' ? gitBaselineFingerprint(inventory) : directoryBaselineFingerprint(baselinePaths);
   let captured: Record<string, RecoveryState> | undefined;
   try {
@@ -73,7 +73,7 @@ export async function captureStableDirectoryBaseline(input: StableDirectoryCaptu
     captured = await store.captureDirectory(directory, paths, { ...options, ...(input.onProgress ? { onProgress: input.onProgress } : {}) });
     signal?.throwIfAborted();
     const capturedPaths = Object.keys(captured).sort();
-    const observed = capturedPaths.length ? await store.captureDirectory(directory, capturedPaths, { ...options, store: false }) : {};
+    const observed = capturedPaths.length ? await store.captureDirectory(directory, capturedPaths, { ...options, store: false, verifyCaptured: captured }) : {};
     const different = capturedPaths.filter(file => stateIdentity(captured![file] ?? { kind: 'missing' }) !== stateIdentity(observed[file] ?? { kind: 'missing' }));
     if (different.length) throw changed(`captured content or metadata: ${different.slice(0, 8).join(',')}`);
     // Inventory follows the complete verification pass. An insertion during the
@@ -96,14 +96,8 @@ export async function captureStableDirectoryBaseline(input: StableDirectoryCaptu
     if (scopes.length) {
       const after = [...new Set(await store.listCaptureScopePaths(directory, scopes, signal))].sort();
       if (directoryBaselineFingerprint(after) !== directoryBaselineFingerprint(scopePaths)) throw changed('captureScopes paths');
-      const states = await store.captureDirectory(directory, after, { ...options, store: false });
-      if (after.some(file => stateIdentity(captured![file] ?? { kind: 'missing' }) !== stateIdentity(states[file] ?? { kind: 'missing' }))) {
-        throw changed('captureScopes content or metadata');
-      }
-      // Scope verification also reads files; check its inventory after it finishes.
-      if (directoryBaselineFingerprint(await store.listCaptureScopePaths(directory, scopes, signal)) !== directoryBaselineFingerprint(scopePaths)) {
-        throw changed('captureScopes paths');
-      }
+      // Scope bodies were included in the same complete verification pass. Only
+      // their namespace needs a separate check, after that pass has finished.
     }
     signal?.throwIfAborted();
     return { states: captured, baseRef: inventory.kind === 'git' ? inventory.baseRef : input.baseRef ?? 'zero-commit',

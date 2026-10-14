@@ -16,6 +16,9 @@
   换来不随历史数量增长的内存。
 - 支持的 Linux namespace 观察复用未变路径 inventory，但仍哈希所有捕获正文，fence 仍遍历 watched directory。
   Windows/unknown coverage 全量检查，见[Documents](../packages/web/application-host/lib/documents/DOCUMENTATION.md#filesystem-observation)。
+- 文件基线先捕获并保存正文，再用原始物理状态作一次完整验证读取；显式范围与普通路径共用这次正文验证。
+  常规文件由四次源读取降为三次，原先重复验证的范围文件由六次降为三次。对象校验、目录枚举和存储写入另计，
+  这不是跨捕获的正文缓存；每次仍读取全部选定正文。
 - Agent 请求按实际协议复用不可变 item 或完整消息组、工具 schema 和精确选定 wire bytes；
   工具结果复用同时核对原调用依赖，末组变化只重编该组。编译复用、provider 前缀缓存、真实计费应分别测量。
 - Agent 压缩按 DAG 的就绪队列并发执行模型节点，归并节点在自身依赖完成后立即启动；
