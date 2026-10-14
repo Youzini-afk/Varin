@@ -1253,10 +1253,32 @@ pub(super) fn source_metadata_until(
     head: Option<&str>,
     through: Option<&str>,
 ) -> Result<Vec<HistoryItem>> {
+    Ok(source_metadata_since(database, head, through, None)?.history)
+}
+
+pub(super) struct ContextSourceMetadata {
+    pub history: Vec<HistoryItem>,
+    pub reused_prefix: bool,
+}
+
+/// Stop at an already verified immutable head only when it is an ancestor of this read.
+/// Reaching the checkpoint first is an ordinary cache miss, not an ancestry error.
+pub(super) fn source_metadata_since(
+    database: &Connection,
+    head: Option<&str>,
+    through: Option<&str>,
+    cached_head: Option<&str>,
+) -> Result<ContextSourceMetadata> {
     let mut cursor = head.map(str::to_owned);
     let mut history = Vec::new();
     let mut visited = std::collections::BTreeSet::new();
-    while cursor.as_deref() != through {
+    let reused_prefix = loop {
+        if cached_head.is_some() && cursor.as_deref() == cached_head {
+            break true;
+        }
+        if cursor.as_deref() == through {
+            break false;
+        }
         let key = cursor.ok_or_else(|| {
             RuntimeError::Conflict(
                 "context boundary is not an ancestor of the selected history".into(),
@@ -1270,9 +1292,12 @@ pub(super) fn source_metadata_until(
         let item: HistoryItem = record(database, "history", &key)?;
         cursor = item.parent.clone();
         history.push(item);
-    }
+    };
     history.reverse();
-    Ok(history)
+    Ok(ContextSourceMetadata {
+        history,
+        reused_prefix,
+    })
 }
 
 pub(super) struct ContextNodeOutput {

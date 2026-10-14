@@ -240,8 +240,9 @@ impl Persistence for LoseDeliveryReply {
         run: &str,
         epoch: u64,
         head: Option<&str>,
+        reuse: Option<&mut varin_runtime::catalog::context::ContextCompileReuse>,
     ) -> Result<Option<ContextProjection>, ExecutionError> {
-        self.0.compile_context(run, epoch, head)
+        self.0.compile_context(run, epoch, head, reuse)
     }
     fn consume_inputs(
         &self,
@@ -618,8 +619,9 @@ impl Persistence for InputRace {
         r: &str,
         e: u64,
         h: Option<&str>,
+        reuse: Option<&mut varin_runtime::catalog::context::ContextCompileReuse>,
     ) -> Result<Option<ContextProjection>, ExecutionError> {
-        self.db.compile_context(r, e, h)
+        self.db.compile_context(r, e, h, reuse)
     }
     fn consume_inputs(
         &self,

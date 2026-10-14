@@ -1376,6 +1376,7 @@ pub trait Persistence: Send + Sync + 'static {
         run_id: &str,
         owner_generation: u64,
         expected_head: Option<&str>,
+        reuse: Option<&mut crate::catalog::context::ContextCompileReuse>,
     ) -> Result<Option<ContextProjection>, ExecutionError>;
 
     fn consume_inputs(
@@ -1739,6 +1740,7 @@ impl<
                 waiting_on: None,
             },
         )?;
+        let mut context_reuse = crate::catalog::context::ContextCompileReuse::default();
         let mut history = input.history.clone();
         let mut history_cursor = input
             .binding
@@ -2295,6 +2297,7 @@ impl<
                         &input.run_id,
                         input.owner_generation,
                         history_cursor.as_deref(),
+                        Some(&mut context_reuse),
                     )? {
                         compaction = context.compaction;
                         history = context.history;

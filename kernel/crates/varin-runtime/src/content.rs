@@ -95,6 +95,8 @@ struct ContentCoordination {
     io: RwLock<()>,
     #[cfg(test)]
     write_hook: Mutex<Option<Arc<dyn Fn(&Path) + Send + Sync>>>,
+    #[cfg(test)]
+    history_read_hook: Mutex<Option<Arc<dyn Fn(&str) + Send + Sync>>>,
 }
 /// Registered under Catalog ownership, retained across worker I/O and reference commit.
 /// Registration never waits for sweep; its sequence invalidates any older mark.
@@ -122,6 +124,10 @@ impl ContentStore {
     #[cfg(test)]
     pub(crate) fn set_write_hook(&self, hook: Option<Arc<dyn Fn(&Path) + Send + Sync>>) {
         *self.coordination.write_hook.lock().unwrap() = hook;
+    }
+    #[cfg(test)]
+    pub(crate) fn set_history_read_hook(&self, hook: Option<Arc<dyn Fn(&str) + Send + Sync>>) {
+        *self.coordination.history_read_hook.lock().unwrap() = hook;
     }
     pub(crate) fn begin_publication(&self) -> ContentPublication {
         let mut state = self
@@ -450,6 +456,13 @@ impl ContentStore {
         &self,
         mut item: crate::types::HistoryItem,
     ) -> Result<crate::types::HistoryItem> {
+        #[cfg(test)]
+        {
+            let hook = self.coordination.history_read_hook.lock().unwrap().clone();
+            if let Some(hook) = hook {
+                hook(&item.id);
+            }
+        }
         let (content, provider) = self.load_history_payload(&item.content)?;
         item.content = content;
         item.provider = provider;

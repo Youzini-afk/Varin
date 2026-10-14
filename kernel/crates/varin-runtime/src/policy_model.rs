@@ -213,7 +213,7 @@ impl<
         let action_id = format!("{}:policy:{}", input.run_id, boundary.id);
         let context =
             self.persistence
-                .compile_context(&input.run_id, input.owner_generation, head)?;
+                .compile_context(&input.run_id, input.owner_generation, head, None)?;
         let committed = context
             .as_ref()
             .map(|c| c.history.as_slice())

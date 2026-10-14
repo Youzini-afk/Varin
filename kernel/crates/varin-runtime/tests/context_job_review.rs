@@ -1941,8 +1941,9 @@ impl Persistence for SummaryCrashBoundary {
         r: &str,
         e: u64,
         h: Option<&str>,
+        reuse: Option<&mut varin_runtime::catalog::context::ContextCompileReuse>,
     ) -> Result<Option<ContextProjection>, ExecutionError> {
-        self.db.compile_context(r, e, h)
+        self.db.compile_context(r, e, h, reuse)
     }
     fn consume_inputs(
         &self,

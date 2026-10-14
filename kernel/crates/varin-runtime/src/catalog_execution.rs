@@ -553,6 +553,7 @@ impl Persistence for Mutex<Catalog> {
         run_id: &str,
         epoch: u64,
         expected_head: Option<&str>,
+        reuse: Option<&mut crate::catalog::context::ContextCompileReuse>,
     ) -> std::result::Result<Option<ContextProjection>, ExecutionError> {
         let read = {
             self.lock()
@@ -560,9 +561,16 @@ impl Persistence for Mutex<Catalog> {
                 .prepare_context_read(run_id, epoch, expected_head)
                 .map_err(|error| ExecutionError::new("context_compile", error.to_string()))?
         };
-        read.map(|read| read.load())
-            .transpose()
-            .map_err(|error| ExecutionError::new("context_content", error.to_string()))
+        match read {
+            Some(read) => read.load_reusing(reuse).map(Some),
+            None => {
+                if let Some(reuse) = reuse {
+                    *reuse = Default::default();
+                }
+                Ok(None)
+            }
+        }
+        .map_err(|error| ExecutionError::new("context_content", error.to_string()))
     }
 
     fn consume_inputs(

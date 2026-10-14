@@ -29,6 +29,9 @@ impl Drop for Fixture {
 }
 fn input(db: &Arc<Mutex<Catalog>>) -> ExecutionInput { input_with_bot(db, None) }
 fn input_with_bot(db: &Arc<Mutex<Catalog>>, bot: Option<&str>) -> ExecutionInput {
+    input_with_payload(db, bot, json!({"text":"read then answer"}))
+}
+fn input_with_payload(db: &Arc<Mutex<Catalog>>, bot: Option<&str>, payload: Value) -> ExecutionInput {
     let mut db = db.lock().unwrap();
     if let Some(bot) = bot { db.create_bot_thread("thread", "main", bot).unwrap(); }
     else { db.create_thread("thread", "main").unwrap(); }
@@ -38,7 +41,7 @@ fn input_with_bot(db: &Arc<Mutex<Catalog>>, bot: Option<&str>) -> ExecutionInput
             thread_id: "thread".into(),
             branch_id: "main".into(),
             expected_head: None,
-            input: json!({"text":"read then answer"}),
+            input: payload,
             configuration: json!({"provider":"test"}),
         })
         .unwrap();
@@ -1588,3 +1591,314 @@ fn active_context_compiles_summary_and_tail_without_destroying_original_history(
 
 #[path = "bot_suspension_execution_tests.rs"]
 mod bot_suspension;
+
+#[test]
+fn context_prefix_reuse_rehydrates_only_new_history_across_real_model_steps() {
+    use crate::catalog::context::ContextProposal;
+    use crate::providers::{Connection, CredentialResolver, HttpRequest, HttpTransport, responses};
+
+    struct Credentials(AtomicUsize);
+    impl CredentialResolver for Credentials {
+        fn headers(
+            &self,
+            _: Option<&str>,
+            _: &CancellationToken,
+        ) -> Result<reqwest::header::HeaderMap, ModelFailure> {
+            self.0.fetch_add(1, Ordering::SeqCst);
+            Ok(reqwest::header::HeaderMap::new())
+        }
+    }
+    #[derive(Default)]
+    struct Transport(Mutex<Vec<Value>>);
+    impl HttpTransport for Transport {
+        fn stream(
+            &self,
+            request: HttpRequest<'_>,
+            _: &CancellationToken,
+            receive: &mut dyn FnMut(&[u8]) -> Result<bool, ModelFailure>,
+        ) -> Result<(), ModelFailure> {
+            let mut requests = self.0.lock().unwrap();
+            let first = requests.is_empty();
+            requests.push(request.body.clone());
+            drop(requests);
+            let output = if first {
+                json!([{ "id":"first-call", "type":"function_call", "status":"completed",
+                    "call_id":"call-1", "name":"read", "arguments":"{}" }])
+            } else {
+                json!([{ "id":"answer", "type":"message", "status":"completed", "role":"assistant",
+                    "content":[{"type":"output_text","text":"done"}] }])
+            };
+            let frame = format!(
+                "data: {}\n\n",
+                json!({"type":"response.completed","response":{"output":output}})
+            );
+            for chunk in frame.as_bytes().chunks(17) {
+                if receive(chunk)? {
+                    break;
+                }
+            }
+            Ok(())
+        }
+    }
+    struct Preparation {
+        db: Arc<Mutex<Catalog>>,
+        calls: AtomicUsize,
+        replace: bool,
+    }
+    impl ContextPreparation for Preparation {
+        fn prepare(&self, _: &str, _: u64, _: &CancellationToken) -> Result<(), ExecutionError> {
+            if self.calls.fetch_add(1, Ordering::SeqCst) == 1 && self.replace {
+                self.db
+                    .lock()
+                    .unwrap()
+                    .publish_context(ContextProposal {
+                        key: "replacement-prefix".into(),
+                        branch_id: "main".into(),
+                        through_id: None,
+                        expected_revision: 1,
+                        summary: String::new(),
+                        effective_system_prompt: "Replacement system".into(),
+                        instruction_sources: vec!["replacement".into()],
+                        memory_checkpoint: None,
+                    })
+                    .unwrap();
+            }
+            Ok(())
+        }
+    }
+    for replace in [false, true] {
+        let fixture = Fixture::new();
+        let db = fixture.catalog();
+        let mut input = input_with_payload(
+            &db,
+            None,
+            json!({
+                "text": "stable source material ".repeat(8192),
+                "attachments":[{"media_type":"image/png","data_base64":"aW1hZ2U6Zml4ZWQ="}]
+            }),
+        );
+        input.binding.provider_family = responses::FAMILY.into();
+        let original_head = input.binding.history_range.leaf_id.clone().unwrap();
+        db.lock()
+            .unwrap()
+            .publish_context(ContextProposal {
+                key: "stable-prefix".into(),
+                branch_id: "main".into(),
+                through_id: None,
+                expected_revision: 0,
+                summary: String::new(),
+                effective_system_prompt: "Stable system".into(),
+                instruction_sources: vec!["initial".into()],
+                memory_checkpoint: None,
+            })
+            .unwrap();
+        let hydrations = Arc::new(Mutex::new(BTreeMap::<String, usize>::new()));
+        let seen = hydrations.clone();
+        db.lock()
+            .unwrap()
+            .set_context_history_read_hook(Some(Arc::new(move |id| {
+                *seen.lock().unwrap().entry(id.into()).or_default() += 1;
+            })));
+        let transport = Arc::new(Transport::default());
+        let credentials = Arc::new(Credentials(AtomicUsize::new(0)));
+        let (progress, _receiver) = ProgressSink::channel(1);
+        let engine = ExecutionEngine {
+            persistence: db.clone(),
+            context_preparation: Arc::new(Preparation {
+                db: db.clone(),
+                calls: AtomicUsize::new(0),
+                replace,
+            }),
+            provider: Arc::new(responses::ResponsesProvider::new(Connection::new(
+                "https://fixture.invalid",
+                credentials.clone(),
+                transport.clone(),
+            ))),
+            tools: Arc::new(Tools::default()),
+            policy: Arc::new(DefaultAgentPolicy),
+            progress,
+        };
+        assert_eq!(
+            engine
+                .run(input, CancellationToken::default())
+                .unwrap()
+                .state,
+            RunState::Completed
+        );
+        db.lock().unwrap().set_context_history_read_hook(None);
+        let counts = hydrations.lock().unwrap();
+        assert_eq!(
+            counts[&original_head],
+            if replace { 2 } else { 1 },
+            "unchanged retained text and media are hydrated once; a new checkpoint compiles afresh"
+        );
+        assert!(
+            counts.len() >= 3,
+            "the second step hydrates its actual tool exchange"
+        );
+        let requests = transport.0.lock().unwrap();
+        assert_eq!(requests.len(), 2);
+        assert_eq!(
+            credentials.0.load(Ordering::SeqCst),
+            2,
+            "authentication is resolved at every dispatch"
+        );
+        let first = requests[0]["input"].as_array().unwrap();
+        let second = requests[1]["input"].as_array().unwrap();
+        assert_eq!(
+            &second[1..first.len()],
+            &first[1..],
+            "each complete wire request retains original text and media"
+        );
+        assert_eq!(
+            second[0]["content"],
+            if replace {
+                "Replacement system"
+            } else {
+                "Stable system"
+            }
+        );
+        assert!(
+            first
+                .iter()
+                .any(|item| item["content"].as_array().is_some_and(|parts| parts
+                    .iter()
+                    .any(|part| part["image_url"] == "data:image/png;base64,aW1hZ2U6Zml4ZWQ=")))
+        );
+        assert!(
+            second
+                .iter()
+                .any(|item| item["type"] == "function_call" && item["call_id"] == "call-1")
+        );
+        assert!(
+            second
+                .iter()
+                .any(|item| item["type"] == "function_call_output" && item["call_id"] == "call-1")
+        );
+        assert_eq!(requests[1]["tools"], requests[0]["tools"]);
+    }
+}
+
+#[test]
+fn context_prefix_reuse_rebuilds_an_older_captured_head_and_keeps_live_memory() {
+    use crate::catalog::context::{ContextCompileReuse, ContextProposal};
+    use crate::catalog::memory::{MemorySnapshot, MemoryState};
+    use crate::catalog::personalization::{PersonalizationBasis, SystemSection};
+    let fixture = Fixture::new();
+    let db = fixture.catalog();
+    let note = |text: &str| json!({"id":1,"scope":{"kind":"global"},"content":text,"updatedAt":"2026-10-14T00:00:00.000Z"});
+    let mut catalog = db.lock().unwrap();
+    catalog.create_thread("thread", "main").unwrap();
+    let input = catalog
+        .submit_with_context_snapshot(
+            &SubmitInput {
+                key: "live-memory".into(),
+                thread_id: "thread".into(),
+                branch_id: "main".into(),
+                expected_head: None,
+                input: json!({"text":"original user"}),
+                configuration: json!({}),
+            },
+            None,
+            false,
+            Some(ContextProposal {
+                key: "initial".into(),
+                branch_id: "main".into(),
+                through_id: None,
+                expected_revision: 0,
+                summary: String::new(),
+                effective_system_prompt: "FROZEN_SYSTEM".into(),
+                instruction_sources: vec![],
+                memory_checkpoint: Some("memory:1".into()),
+            }),
+            Some(PersonalizationBasis {
+                mode: "agent".into(),
+                thread_role: "main".into(),
+                revision: 1,
+                configuration_digest: "fixture".into(),
+                memory_snapshot: MemorySnapshot {
+                    revision: 1,
+                    memories: vec![note("ORIGINAL_NOTE")],
+                },
+                context_composition: None,
+                session_id: "thread".into(),
+                project_id: None,
+                original_sections: vec![SystemSection {
+                    name: "preamble".into(),
+                    content: "FROZEN_SYSTEM".into(),
+                }],
+                instruction_sources: vec![],
+            }),
+        )
+        .unwrap();
+    let epoch = catalog.epoch();
+    let capture = |catalog: &Catalog, head: &str| {
+        catalog
+            .prepare_context_read(&input.run_id, epoch, Some(head))
+            .unwrap()
+            .unwrap()
+    };
+    let old_read = capture(&catalog, &input.input_id);
+    let first_read = capture(&catalog, &input.input_id);
+    drop(catalog);
+    let mut reuse = ContextCompileReuse::default();
+    let first = first_read.load_reusing(Some(&mut reuse)).unwrap();
+    let catalog = db.lock().unwrap();
+    let memory = catalog
+        .prepare_memory_sync(
+            &input.run_id,
+            epoch,
+            MemoryState {
+                revision: 2,
+                memories: vec![note("LATEST_NOTE")],
+                note_revisions: BTreeMap::from([("1".into(), 2)]),
+                known: BTreeMap::new(),
+                bot_knowledge: None,
+            },
+        )
+        .unwrap();
+    drop(catalog);
+    let memory = memory.load().unwrap();
+    let mut catalog = db.lock().unwrap();
+    assert!(catalog.publish_memory_state(memory).unwrap());
+    let tail = catalog
+        .append_history(
+            &input.run_id,
+            epoch,
+            Some(&input.input_id),
+            crate::HistorySource::Assistant,
+            serde_json::to_value(ConversationItem::<crate::output::ResolvedMedia> {
+                resource_activation: None,
+                id: "later".into(),
+                provenance: Provenance::Assistant,
+                content: Content::Text {
+                    text: "later descendant".into(),
+                },
+                opaque: None,
+            })
+            .unwrap(),
+            None,
+        )
+        .unwrap();
+    let next_read = capture(&catalog, &tail.id);
+    drop(catalog);
+    let next = next_read.load_reusing(Some(&mut reuse)).unwrap();
+    assert!(next.history.iter().any(
+        |item| matches!(&item.content, Content::Text { text } if text.contains("LATEST_NOTE"))
+    ));
+    assert_eq!(
+        next.history[0], first.history[0],
+        "new memory does not rewrite the fixed system prefix"
+    );
+    let old = old_read.load_reusing(Some(&mut reuse)).unwrap();
+    assert!(
+        !old.history.iter().any(
+            |item| matches!(&item.content, Content::Text { text } if text == "later descendant")
+        ),
+        "a previously captured read cannot inherit a cached descendant"
+    );
+    assert_eq!(
+        old.history, first.history,
+        "captured memory and history stay fixed to their original read"
+    );
+}

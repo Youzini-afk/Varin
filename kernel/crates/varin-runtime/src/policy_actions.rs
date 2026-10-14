@@ -270,7 +270,7 @@ impl<
             .policy_boundary(&input.run_id, input.owner_generation)?;
         let projected =
             self.persistence
-                .compile_context(&input.run_id, input.owner_generation, head)?;
+                .compile_context(&input.run_id, input.owner_generation, head, None)?;
         let resource_activations = crate::catalog::resources::retained_activations(
             projected
                 .as_ref()
