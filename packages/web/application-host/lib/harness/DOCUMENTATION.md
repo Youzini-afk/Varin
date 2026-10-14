@@ -1,1547 +1,179 @@
-# Agent Harness — Host Side
-
-The host-side harness provides task and resource services that the pi-host
-agent tools call via the `HostServicesBridge`. All services are registered
-on the `HarnessRouter` and dispatched from the broker event stream.
-
-[Computer Use admission](../computer/DOCUMENTATION.md) derives desktop grants from these real Thread/Run
-identities. Children request work-segment access from the main agent; exclusive control is enforced on
-the physical desktop's Host too. The work overview can revoke the root round and its descendants while
-preserving other tool execution. Assignment waits use decision events and the existing execution slots.
-
-Attached Agent/Bot/research roots order request admission after their lifecycle changes, then release the
-lifecycle queue while the Router executes the service. A slow handler must not serialize later tools or
-the same session's compaction-worker queries. Cancellation still goes directly to the Router, and root
-shutdown drains both lifecycle work and admitted requests.
-
-Dispatch owns its input preparation before Run admission: `preparing` threads are visible but cannot
-be dequeued. Once the fixed baseline is ready, admission atomically starts a Run or marks the thread
-`queued` for capacity. Dispatch preparation follows caller cancellation and actor lifetime rather than
-the generic transport deadline. Failed preparation uses durable thread cleanup; an interrupted Host
-restart marks unfinished preparation as stalled for recovery.
-
-LSP navigation and diagnostics carry request cancellation through document queues, resource leases,
-document synchronization and language-server requests. Cancelled queue entries never start file work;
-an acquired lease is released after the operation settles. Request phases appear only in the existing
-Host deadline diagnostics, not tool results.
-
-Tool-set snapshots refresh grants for the same worker generation, including a work-focus change.
-Registration keeps that worker's live shell and retrieval/input contexts; only a replacement generation
-retires them. Pending first registration uses the latest grants received while settings are loading.
-
-Scheduled-task grants follow the active `scheduled_task` tool and the Host's scheduler availability.
-They use the same project scheduler as the GUI; tool exposure alone must not leave every call forbidden.
-Web rendering separately requires the session's user-owned `harness.web.render` setting and a Host
-renderer. A disabled setting and an unsupported Host report distinct reasons. Static short pages remain
-readable; scripts alone do not establish that a page requires rendering, and script/style contents are
-excluded from extracted HTML text.
-
-Late native user-question replies reuse the broker's addressed-input path. For a settled child,
-the Host's question continuation callback resolves its durable session owner and starts a normal
-`continueRun` using the recorded model/tools/worktree configuration. The reply identity is the
-continuation request identity, so replay cannot start a second Run. Cancelling a retained question
-does not start a Run. Active-child replies reach their existing Pi run; ordinary roots stay ordinary.
-
-A session's project binding supplies organization and a default directory, not a filesystem
-boundary. Bound and unbound sessions can read/write explicit external paths and execute with an
-external `cwd` through the same path authority. External directories need no prior project
-registration; Documents resource roots are internal addressing records. Explicit actor scopes,
-Host deployment boundaries and normal operation permissions still apply. An explicit command cwd
-does not change the session default. Native acceptance covers cross-root writes/rereads and a
-permission-inspected external command followed by a command at the original default directory.
-
-## Shared MCP authority
-
-`mcp-service.ts` binds the Pi worker's `mcp.owner` requests to its authenticated actor and
-the Host's shared `McpAuthority`. Native execution uses the same owner directly. MCP
-configuration/OAuth storage remain their existing SDK files; only the Application Host
-owns live connections. See the [owner contract](../../../../pi-host/src/mcp-authority.md)
-for explicit preparation, frozen declaration/grant identities, resource keys and revocation.
-
-## Architecture
-
-```
-broker event stream ──→ HarnessRouter.processEvent()
-                           ├── shell.exec   → ShellSupervisor (per-session framing over terminal runtime) + verification start/end
-                           ├── shell.read   → ShellSupervisor observation (never a completion trigger)
-                           ├── shell.write  → ShellSupervisor
-                           ├── shell.kill   → ShellSupervisor
-                           ├── output.store → OutputStore (global)
-                           ├── output.read  → OutputStore
-                           ├── search.content → HarnessSearchService (surface overlay or exclusive WorkingState corpus)
-                           ├── document.readSource → fixed surface/working-branch bytes or Host-read authorized disk bytes
-                           ├── document.surfaceWrite → shared plan: write the fixed Registry buffer or return the disk sentinel
-                           ├── document.pathOverlay → surface merge paths or exclusive working-branch overlay
-                           ├── explore.search → same query engine, algorithm-only facade
-                           ├── explore.query.* → Host-owned short-lived query (start/plan/views/select/followup/finish/cancel/release)
-                           ├── related.query → already-open KnowledgeStore (file-level topology; not lsp.references)
-                           ├── fs.lock      → Rust kernel file-resource lease + Documents identity
-                           ├── lsp.diagnostics → LspDiagnosticsService
-                           ├── lsp.diagnosticsSnapshot → LspDiagnosticsService
-                           ├── memory.* → Agent personalization (ordinary notes) or Bot MemoryService/KnowledgeStore
-                           ├── zone2.assemble → admitted environment observations; Bot recall follows its memory owner
-                           └── thread.*     → ThreadRegistry + ThreadRuntime + native working state + verification binding / retrieval facts
-```
-
-## Components
-
-### Task collaboration (D-339)
-
-Common dispatch profiles are Worker and retrieval; an ordinary dispatch carries the Worker collaboration
-instructions while inheriting the caller's authorized tools and current model. Existing customized old
-profiles are retained as editable user profiles. Same-task discovery and history reads follow the durable
-task ancestry; read access does not grant sibling lifecycle control.
-
-`agent-root-runtime.ts` attaches ordinary main conversations to the existing Thread/Run authority.
-The request-local teammate roster and automatic teammate material exclude the observer's own Thread.
-The roster omits settled threads without attention or pending integration; explicit thread/history
-queries retain them. An empty roster adds no message to the model request.
-Directed inbound messages already enter native Pi history through its idempotent notification or
-continuation path; neither the sender nor recipient ledger is replayed as teammate material. Another
-Thread's conversations remain available through explicit history reads. Child results retain their
-independent cursors, and omitted material is not acknowledged as delivered.
-`wait` without a duration is an event subscription, not a periodic model call. Its targets, initial
-result/message positions, optional deadline and owning Run are persisted in `Thread.dependencyWaits`.
-`thread-wait-runtime.ts` rebuilds those subscriptions after restart and resumes lost executions only
-when a result, addressed request/reply, actionable failure or requested deadline satisfies the wait.
-The live service owns its response; durable recovery owns only lost/idle continuation. New user input
-interrupts the live wait through the Router and readmits the execution slot before returning. Shutdown
-aborts admitted Router services before draining attached-root queues. Task UI projects all attached
-roots and their branches; deleting a root cannot delete the user's native Pi transcript as a child asset.
-
-`working-state/code-submission.ts` orchestrates `submit_code` on the existing Registry/WorkingState/
-Integration authorities. Source capture intent is durable before native branch creation; an interrupted
-unaccepted capture releases its private branch, while queued/application receipts resume their fixed
-source after restart. Per-recipient lifecycle serialization encloses application and acknowledgment;
-filesystem gates/CAS remain path-scoped and do not disable other tools for a whole run. Stable operation
-IDs return the recorded application even if the recipient edited those files afterward. Acknowledged
-baselines fold only selected source changes; they exclude recipient edits and unsent source content.
-Later submissions and final merge use that baseline. A full integration retains its source snapshot and
-consumed receipt identities; later reversions are planned even when the source delta against its original
-baseline is empty. Acknowledgment invalidates previous previews. Lifecycle coordination precedes
-virtual-write admission; admitted merges pass their held ticket through Integration without reacquiring.
-Receipt messages are passive and retryable;
-`wait` consumes completed receipts, including receipts arriving just before wait registration. Shared
-private code branches are included in space accounting and released after their last Thread reference.
-
-Task owner scopes remain distinct from directory/resource identities. Session/Bot storage composes the
-owner's native grant with the real Documents resource workspace; surface capture/apply/undo use the
-actual receiver resource. Attached roots freeze the native session's effective permissions, and tool
-control respects the live authenticated actor's path scope. Switching ordinary/research focus retains
-the same task root and children.
-For Git baselines without drafts/ignored-copy scopes, a fresh raw-byte Git identity can reuse a retained
-immutable native baseline. Git filters and EOL conversion are bypassed; changed identities or lost/
-rebased roots return to capture. The derived cache retains a root reference and fingerprint, not file trees.
-Baseline admission excludes only the dispatching worker's recorded round writer. Concrete file/shell
-writers still block capture, and writer, mutation, epoch and filesystem-watch changes still invalidate it.
-
-### Bot sleep and wake
-
-BotService owns a tagged entry: an existing Pi session or an Agent Thread/branch. Explicit Agent
-creation allocates that identity with the profile; opening it idempotently admits the original Catalog
-binding. The default remains Pi. Updating a profile does not switch its runtime or import another
-entry's assets. The Host resolves the selected runtime's model configuration and returns the actual
-default with the entry rather than asking the renderer to choose the first model in a directory.
-
-BotService remains the identity/activity owner and publishes its original record revision to Catalog.
-A kernel epoch change invalidates the cached scoped grant and requires fresh gate publication.
-Children, context jobs and memory inference inherit the Bot through their original Catalog relations.
-Host Run preparation and domain calls keep their original registration until the underlying promise
-settles, even if the caller has already received cancellation. Native scope status separately reports
-Rust worker drain, unproven executor stops, unknown effects and unresolved model receipts.
-
-`bots/bot-service.ts` stores sleep intent, interrupted Run identities, confirmed stop/resume steps,
-remote machine progress and errors in the kernel-owned Bot profile. API calls return after intent
-is durable; Host-owned work continues independently of an open renderer. Startup resumes unfinished
-operations. An unsuccessful stop keeps execution admission closed and exposes its actual error.
-Archive uses this operation and only hides the Bot after it is asleep; restore preserves sleep.
-
-The registry gates creation, Run admission, worker publication, dequeue and lost-Run recovery by
-the owning Bot scope. Broker execution leases recheck Bot state on every request, including reused
-leases; the harness router rejects further tool calls. Due follow-ups retain their definitions while
-asleep and reconcile on wake. Project-owned calendar schedules retain their project ownership.
-Background memory inference is cancelled by scope and remains suspended until wake.
-
-`bots/bot-lifecycle-runtime.ts` closes the entry and delegated workers, their local supervised shells,
-and experiment attempts, retaining worktrees, transcripts and completed results. Managed remote shells
-carry Host-derived owner scopes. The target persists its scope admission gate and confirms process-tree
-termination through Rust before reporting success. Coordinator-side target receipts survive restart;
-an unreachable target is an incomplete stop, never proof of termination.
-
-Agent Sleep preserves the original Run's prepared work, waits, user pauses and completed results.
-Wake releases eligible holds and uses the existing continuation owner, whose launch checks still
-apply; it does not replay uncertain dispatch. Before reporting asleep, the lifecycle also joins Host
-preparation, domain mutations and scripts, then releases Computer control for each original execution,
-including historical Runs. Concurrent observers join the same physical release. A restored physical
-control marker must be cleared by its original driver's stop evidence. Failure keeps Sleep incomplete
-and retryable. Sharing a desktop prevents whole-machine shutdown, not release of this Bot's own input.
-
-Deletion first completes this same stop operation. Catalog removes only the Bot's original related
-work graph in one transaction; a live foreign reference or retained environment is an actionable
-failure. Cleanup of the original Bot and current-Thread knowledge stores is retryable from retained
-sleep work references. Workspace files, Git results, other owners' work and Pi assets are not swept.
-
-VM shutdown follows confirmed work termination. It applies only to associated managed VMs without
-other recorded work owners or human desktop control, and excludes the coordinator's own guest.
-Both desktop associations and remote shell/experiment ownership participate in the sharing check.
-ACPI request acceptance is distinct from observed `shutoff`; asynchronous polling has no invented
-shutdown deadline and the UI offers explicit retry. This is graceful power-off with disks retained,
-not an in-memory VM snapshot. Wake starts only VMs this operation stopped, waits for guest readiness,
-then admits continuation. The saved operation/attempt identity deduplicates retries and restart;
-completed work and independent user continuations are not replayed. Interrupted external side effects
-are not undone: the continuation explicitly inspects current state before acting.
-
-The authenticated UI can read `/api/harness/follow-ups` for the current Host's follow-up overview.
-`FollowUpService.listForHost` enumerates the owning workspaces from the kernel and projects visible
-definitions; internal composite leaves stay hidden. This read-only management method is not registered
-as an Agent tool. The overview uses the same durable authority as per-session strips and does not reconcile
-or trigger a model merely by being opened. Mutations still resolve the target session and retain the existing
-ownership/revision checks. Temporary enumeration grants are revoked after the query.
-Manual UI creation uses `POST /api/harness/sessions/:sessionId/follow-ups`; the Host derives the caller
-from that session and ignores request-supplied ownership fields. Shared service validation checks the
-trigger and resource scope before persisting it. The update endpoint also accepts a source replacement
-with the existing revision check. Neither endpoint introduces a second scheduler or storage authority.
-
-### Research root (`research-root-runtime.ts`, phase 7A)
-
-The research work focus uses the user's existing Pi session and selected model. On a real
-`agent_start`, `ResearchRootRuntime` attaches that session to a durable `research-root` Thread and a
-new Run. It observes broker lifecycle events and records the actual report, transcript range and cost;
-it does not create another model loop. The per-session event tail attaches the root before subsequent
-dispatch requests resolve their parent. Root ownership is `attached-root`; ordinary child sessions are
-`spawned-child`. Settling an attached root drops its live binding without a child-session tombstone,
-and keeps its research branches and results. Child lifecycle code must not close the user's session.
-
-The authenticated session thread projection returns `researchRoot` and `researchBranches` alongside
-ordinary threads. User actions on a retained branch are authorized through its durable research-root
-ancestry after the principal Run settles. Shell mounting is not an execution event. Capability, model,
-tools and resources are frozen per Run; missing model slots are unavailable rather than silently
-borrowed. Changing the worktree policy prepares the new Run through the fresh execution path, retaining
-the requested continuation identity separately from the actual mode. Managed remote/Slurm adapters
-and the full research evaluation remain separate delivery slices.
-
-### Research execution and facts (7B–7F acceptance)
-
-`research-access.ts` derives Pi model/UI callers from durable session bindings; the Agent adapter
-derives its callers from Catalog Thread/branch/source and actual family relationships.
-`research-identity.ts` records these distinct runtime owners and explicit family or maintenance access.
-Sharing a workspace does not authorize one root to inspect or cancel another root's
-attempts. A user root can view its research tree; a worker sees its own related parent, siblings and
-children. Read/resource/source capabilities do not grant experiment process control.
-
-`experiments.ts` owns orchestration over kernel records and the backend contract. A spec keeps ordered
-arguments and a fixed input root; an attempt owns an independent materialized directory under kernel
-storage. `experiment-workspace.ts` captures and checks source bytes through Rust, includes ignored
-files under the declared capture scope, excludes the kernel scan's `.git`/`.varin` metadata, and
-rewrites internal absolute links to remain inside the captured tree. It does not promise an OS sandbox.
-Capturing a large dependency/data tree has a real cost; spec reuse keeps the prior input root.
-Inline spec deduplication stays within the original creating Thread/session ownership. Explicit
-cross-Thread spec reuse still requires the current caller to be allowed to read that spec.
-Submission first resolves a caller/request identity against the original attempt receipt. A new request
-binds its canonical source, scope, cwd and normalized intent, then returns the durable `submitted`
-attempt before capture, placement, materialization or process dispatch. Its `specId` and returned spec
-are explicitly null until the immutable input exists. Pi calls derive a default request key from the
-original tool call; the research panel retains the same rerun key and body across an unknown response.
-A pending attempt is visible and cancellable, but cannot rerun or collect a nonexistent fixed spec.
-
-The accepted worker owns its lifetime independently of the submit response. Capture uses Rust's
-existing source lease and cancellable capture-batch worker; the original branch/create identity is
-saved before publication. Recovery reads that receipt and exact branch, never recaptures a missing
-committed branch from current files. Both inventory passes use Rust's independent metadata worker and
-retain that same source lease until the real response. Cancellation sends control immediately but waits
-for the worker acknowledgement; transport loss remains unknown, with reconciliation checking the
-original lease rather than claiming drain. Ordinary scan/measure reads need no new lease. Pagination
-still rescans the path inventory; its fingerprint is neither a content hash nor an OS snapshot. No file
-bytes are copied or hashed by the TypeScript control owner. Local artifact collection uses the same
-independent single-file capture reader and original blob owner as FileResourceBackend. Its ordinary
-unbound capture retains an exact native physical lease while reading; the backend waits for the real
-capture response before releasing its process/grant. A disconnected client cannot reuse its old scoped
-handle to release native ownership in a new epoch. Existing mutation/reconciliation observations remain
-synchronous; worker capture does not claim those separate handlers have also been isolated.
-
-Cancellation first commits `cancelRequested`/`stopping` through a short record update. It does not
-wait behind preparation, spawn, or workspace reconciliation. The original worker/late dispatch receipt
-must drain before terminal cleanup; a caller abort or disconnected HTTP request alone is not drain.
-Local materialization retains its original completion and, after an uncertain reply, checks the
-original committed root plus the actual target lease. Remote materialization retains a dispatched
-commit promise and only its original ready-material observation proves completion. Unknown effects
-remain visible and keep their commitments; recovery does not blindly prepare, reserve, or spawn again.
-Service replacement transfers observation only after an old admitted worker settles. Thread stop seals
-the current admission boundary and drains accepted work without permanently banning future runs.
-
-Machine capacity, observations and Varin commitments share a Host-level kernel catalog domain in
-`resources.ts`. Reservations are serialized across owning workspaces and survive service recreation;
-they do not claim OS isolation from external processes. Resource release can wake queued attempts in
-other workspaces. If an admission response is lost, `reconcileAdmission` observes the same original
-workspace/machine/attempt and resource request. A managed target reads its actual ResourceService
-allocation under the original authenticated principal and restores the original coordinator receipt;
-it does not reserve again. Missing facts remain unknown, while a retained released allocation is
-positive no-allocation evidence. Unknown CPU/GPU measurements remain unknown. `sources.ts` retains actual object
-references; a path or URI locator alone is provenance, not proof that remote content was downloaded.
-
-`experiment-routes.ts` exposes the same authorized facts to the research panel, including paged logs
-and streamed artifact downloads. The model's `experiment(action:"artifact")` reads collected text by
-byte page; binary bodies stay out of model text. UI refresh uses `/api/varin/events`, invalidates
-older requests on session changes, and exposes failures without replacing them with empty facts.
-
-Thread kill/delete closes the worker before stopping its independent attempts and reclaiming state.
-Normal Run settlement and archive do not terminate an experiment. Host shutdown detaches observers;
-the backend owns execution and reconnection facts. Backend uncertainty is not observed termination.
-Local and managed-remote adapters have implementations; registration alone does not prove a reachable
-backend, and injected transport/Storage tests do not establish a real remote-machine or Slurm run.
-The Agent adapter in `kernel/research-runtime.ts` uses these same original domain records. Catalog
-owns the actual tool/User invocation and exact domain subject association, immutable acceptance and
-subsequent execution receipts; it does not mirror experiment state. A selected ordinary Job tool
-returns acceptance only after the original domain attempt exists. An independent native observation
-uses Catalog Wait, rather than retaining an `experiments.wait()` Promise. Native User submit admits
-a real User command with its stable key, never a fake model call or Pi session. The authenticated
-Thread research API and shared facts view read the same attempt, logs, artifacts and permissions.
-
-Original artifact records expose their durable `recordRevision`; the attempt stores a
-`collectionCompletion` identity in the actual final collection CAS. Unrelated attempt updates do not
-create new completion facts. Never-spawned `not_started` requires original capture, preparation and
-admission to have truly drained. Artifact persistence failure cannot be swallowed into successful empty
-collection. A later explicit collect retries collection, not execution. Indexed keyset artifact reads
-remain in original Storage records and recheck the actual reader; no follow-up manifest is copied.
-
-`kernel/research-source.ts` binds the original live, materialized or exact fixed-revision source.
-Fixed input owns its original persistent pin until capture publishes or drains; physical capture uses
-the actual registered root. Source/transfer grants retain true Run attribution and their independent
-Operation lifetime, so ordinary Run retirement cannot cut off an accepted Thread job. Explicit
-revocation and original job cancellation still prevent new work. Tree stop selects original Catalog
-operations at its acceptance boundary and forwards cancellation to the original domain owner; later
-domain acceptance/cancellation is reconciled back through that same association.
-
-Full desktop restart and real-model research quality require their own evidence. D-301/7G request preparation and D-302/7H tool execution
-use the shared context and shell paths described below.
-
-### Service-forward ownership
-
-`environment-forwards.ts` owns each live listener, opening/closing work and its streams for both
-Pi sessions and Agent operations. The owner is typed; Agent work does not invent a Pi session.
-`kernel/environment-forward-runtime.ts` connects the ordinary builtin tools to the original
-Catalog HostJob. A local address creates no listener. A managed target is selected once from an
-explicit configured connection or the accepted source owner; source-less work defaults to local.
-The durable Job stores the credential-free target identity and the actual coordinating Host epoch.
-Credentials remain with the original configured connection and its live owner.
-
-Remote acceptance means the coordinating Host listener is ready, not that the service on the target
-has answered. Inspection, family reads, subtree cancellation and durable Wait consume the original
-Job. Closing it drains the exact listener and streams, not the remote service process. Lost replies
-are reconciled against that owner without opening a replacement. A different Host epoch alone does
-not prove the old listener stopped; an unavailable original owner stays explicitly unconfirmed.
-
-Bot Sleep includes these original Jobs in its existing scope drain, and wake never recreates a
-closed forward automatically. Host shutdown closes Agent listeners before disposing their receipt
-adapter. Pi session teardown continues through the same typed listener owner. Controlled listener
-tests exercise this lifecycle without opening sockets; real network forwarding and deployment
-require separate platform evidence.
-
-### HarnessServiceHost (`service-host.ts`)
-
-Global singleton that owns:
-- `OutputStore` — large output storage with per-session isolation
-- `ObservationCursorStore` — per-observer shell/diagnostics/thread baselines with prepare/commit delivery CAS, reset by compaction
-- `PathLockService` contract — production injects `KernelPathLockService`, which maps the already-authorized Documents resource to Rust `file.lease.*`; the in-process implementation remains a unit-test helper only
-- `HarnessSearchService` — wraps `createWorkspaceContentSearch`
-- `DiagnosticsProvider` — LSP diagnostics (optional)
-- Per-session `ShellSupervisor` registry
-
-### HarnessRouter (`router.ts`)
-
-The Pi adapter resolves embedding, reranking and fast decisions through its original provider capabilities.
-Native embedding and TypeSafe/Cloudflare/llama.cpp decisions use the existing Host inference/credential owner
-directly; native decision/rerank HTTP/Goal facts belong to Catalog. Native live, fixed-revision and materialized code retrieval
-uses dedicated rerank, the original progressive fast-decision loop, or the original Explore LLM planner
-and joint selector. Other model-stage purposes still require their own native integration.
-Their connection/credential defaults and model declarations are independent of the native chat API;
-the Host receives only frozen, credential-free bindings. User/operator metadata can override the
-operation's address, path and credential owner; project configuration cannot redirect background
-inference. Declared models are picker suggestions, and explicit undiscovered IDs remain usable.
-See [the provider contract](../../../../pi-host/src/PROVIDERS.md) for storage, precedence and disable behavior.
-
-`web.search` has a Host-owned keyless default (D-289): Exa MCP, then Parallel only on failure.
-`web-search.ts` owns direct HTTP/SSE tool calls and normalized source results; no MCP subprocess or
-model credentials are involved. Explicit providers retain their own credential contract and never
-silently switch to the free route. Settings bind the choice per worker generation; malformed explicit
-settings stay unavailable. Final domain filtering applies to all providers, and an empty allow set
-makes no network request. A valid empty response is distinct from transport/protocol failure. Default
-failover reports its actual provider and cause; cancellation stops the chain. Search snippets are
-discovery material, while the existing `web.fetch` service remains the original-page authority.
-
-`research.search` is the D-315 scholarly adapter. It is a Host-owned, read-only service over
-OpenAlex and Semantic Scholar with `search`, `paper`, and `relations` actions. Each call returns one
-page: search/citations use the provider continuation, while OpenAlex references/related use an
-explicit source-and-relation-bound offset into the original work's ID list. Semantic Scholar's
-graph API has no related-works endpoint and reports it unavailable. Relation results keep the
-source identity. Returned records retain provider identity, DOI/author
-metadata, optional abstract and open-access URL, and a `content` state (`metadata-only` or
-`open-location`). The adapter does not claim that metadata is paper content, does not merge works
-on title similarity alone, does not build a global citation graph, and returns provider errors and
-empty results distinctly.
-
-`kernel/research-discovery.ts` connects that same owner through the ordinary installed
-`varin.builtin.research-discovery` / `research_search` tool. Its single declaration supplies the
-manifest, schema and decoder; original extension call authorization and accepted Catalog identity
-remain in force for model, policy and source-less child calls. Only the original global/trusted-project
-`harness.tools.research_search` setting is frozen; unrelated Web/auth configuration is not its authority.
-Pi keeps its existing snake-case tool arguments through its original bridge. Provider limits apply
-to the requested single page; the adapter neither clamps nor automatically fetches extra pages.
-See the current [OpenAlex paging contract](https://help.openalex.org/api/paging/) and
-[Semantic Scholar API](https://api.semanticscholar.org/api-docs/).
-
-Fetch/body completion, including HTTP-error body cancellation, is awaited before the callback reports
-stopped. Abort prevents a dependent relation request; malformed required provider envelopes/identities
-fail instead of becoming an empty success, while absent optional fields remain valid. Metadata and
-open-access locations are ordinary external result data, not instructions or downloaded content.
-Selecting a paper identity into `materials`, or explicitly fetching its URL and reading the resulting
-snapshot, uses the original material/Storage/public-reader owners. Fast decisions use the separate
-ordinary `research_decide` tool described below. Dedicated rerank is connected to native live-root
-code retrieval; scholarly/material reranking remains separate consumer work.
-This metadata adapter does not open a Pi model session.
-
-`web.fetch` pins fetched bodies as `web.snapshot` kernel records (`web-materials.ts`): content-hash
-deduplicated bodies, explicit `refresh` minting a new snapshot id, snapshot-id rereads re-checking
-the current domain policy under the caller's authority, and per-waiter cancellation over shared
-in-flight requests. Structured reading exposes line ranges and, where the parser supports them,
-pages/headings/tables/figures; unsupported aspects report under `unparsed` rather than fabricating
-positions. `materials.collections` owns `material.collection` records (snapshot/URL/paper member
-references, collection-scoped keyword search, `persisted` workspace-readable sets) and the
-`material.grant` records behind `share` — an explicit cross-thread read grant that reuses the
-`thread.send` same-root relation rule and releases with the sender's thread. Grants let the
-receiver reread under its own session/thread authority; they never transfer the sender's receipts.
-
-Ordinary sessions own materials without a Thread/Run binding. Kernel record responses omit
-absent optional identities; JSON null is not a thread owner. Missing/released or unauthorized
-snapshots remain unavailable; malformed metadata, missing blob references and storage failures
-propagate as failures, including through both web and PDF readers.
-
-`../kernel/material-tool-owner.ts` adapts the same store to the call-scoped
-`materials.snapshot/read` capability. For native calls, the shared invocation resolves the actual
-Catalog Thread/family and the logical `thread-materials:<rootThreadId>` scope; extension parameters
-cannot supply either identity. The scope is independent of a file source or Pi session. Its narrow
-Host-private Storage service grants bind the actual Thread and exact logical namespace, with no
-synthetic Run lifetime, path/process authority or raw client exposed to tools. Read access includes
-`storage.read`/`storage.maintenance` so the original material owner can interpret persisted collections
-and explicit grants; mutation entrances additionally receive `storage.write`. Maintenance itself does
-not authorize writes. A shared family scope alone never authorizes another Thread's snapshots.
-Existing material grants and persisted collections remain the sole material sharing owner. Reads return an
-immutable snapshot/hash revision and UTF-8 byte page with an exact next cursor; invalid boundaries or
-budgets smaller than the next codepoint fail explicitly. Empty bodies, unavailable snapshots, conflicts
-and corrupt data stay distinct. Storage/transport failures reject, and cancelled or retired invocations
-cannot publish late content. The production blob owner reads the requested range, but its initial full
-object hash verification is not bounded by the response byte budget. This capability performs no fetch,
-document parsing or OCR.
-
-The ordinary `varin.builtin.web` extension exposes `websearch`, `webfetch`, `document_read` and `materials` through
-one declaration and the original ToolBridge. `kernel/web-runtime.ts` adapts their admitted calls into
-these owners, retaining the accepted Web/domain/render/OCR settings in the original tool binding;
-search credentials still resolve from their current owner at dispatch. A source-less Run reads user
-settings only. A selected source may add the original trusted-project settings, without a Pi AgentSession.
-Public Thread material reads recheck current domain/OCR settings under the actual Thread and branch.
-
-Shared HTTP/HTML/PDF work owns only raw content or analysis. Each caller publishes its own snapshot.
-One cancelled waiter does not stop other holders; the final waiter waits for the original producer to
-drain. A started snapshot write settles before its caller releases. A fetched HTML body survives a pin
-failure with explicit `snapshotError`, rather than claiming a usable snapshot. Known PDF pixels become
-typed media in native tool output while the complete metadata and source identity remain ordinary data.
-Native `document_read` also ingests local paths from the accepted original Run source and collected
-Experiment artifacts. `kernel/document-sources.ts` uses the existing source grant: fixed branches read
-the exact revision, live roots use the Documents-validated registration, and materialized runs capture
-their current managed working copy. It never requires selecting a second file/experiment tool, follows
-no leaf symlink, and keeps the grant and temporary capture owner until the original reads settle.
-`kernel/research-access.ts` projects the same Catalog research scope used by the research tools; an
-artifact read never creates an Experiment or grants its owner's material namespace. Public
-`ThreadsAPI.materials.readArtifact` carries the explicit original source Run; subsequent reader calls
-use the returned snapshot under the actual reader Thread. Source-less artifact selection remains
-unavailable under that original research source contract. No public local-path selector is introduced.
-
-Full and ranged material body/source reads page the same immutable record proof through Rust getBlob;
-the wire-frame maximum is not a PDF size limit. Metadata-only reader checks request zero body bytes but
-still validate the record and object. Cancellation awaits each started read/iterator and material
-commit before reporting drain. Scholarly discovery and TypeSafe/Cloudflare/llama.cpp decision now have ordinary
-native tools; extra reader-model prompts and other inference purposes remain separate integration work.
-
-`materials` uses the same explicit collection domain as the thin Pi adapter. It resolves its Thread,
-family and namespace from the original invocation, and checks sharing recipients in that family.
-Persisted collections are readable in their namespace but remain owner-only writable. Every attached
-snapshot, including a paper member's optional snapshot, must first be readable under the sender's
-original authority. Re-sharing is an explicit new grant from a readable sender; it does not require
-an invented recursive grant chain. Original collection/grant references retain body and PDF source.
-Thread removal releases that sender's grants; another live explicit grant can retain the original
-collection and snapshots until original workspace reconciliation. Run/Goal completion is not Thread
-deletion, and no new public native Thread-delete API is introduced.
-
-URL fetching and body/search reads do not hold the workspace mutation serializer. Final publication
-uses original record revision and Storage operation identity. Its atomic `record.put` receipt is the
-only mutation authority; short `lastMutation` metadata identifies the invocation/result projection,
-not a second journal. Cancellation before publication has no effect; admitted writes await their real
-result. An unresolved Storage result remains Unknown, not a claim that its writer stopped. Grant-cleanup
-failure is diagnosed without erasing a known committed result.
-
-`kernel/material-receipts.ts` reads original failed/committed Storage operations under the accepted
-builtin invocation, and sends the existing private ToolBridge LateReceipt. Reopening does not refetch
-URLs, repeat writes, require a current enabled extension, or register an old broker lease. Live callbacks
-must drain before reconciliation. Catalog validates the original fingerprint, execution owner and epoch;
-already-delivered Unknown history is retained even when the Operation's actual outcome becomes known.
-The existing collaboration reconciliation loop owns scheduling, not another polling service.
-
-Collection results expose their original snapshot selectors to existing public material reading.
-There is no new native collection browser, direct member button or public mutation API in this slice;
-`document_read` still produces the actual PDF projection consumed by the existing Thread PDF button.
-See the [finite collection/share acceptance](../../../../../docs/reviews/runtime-material-collections-2026-10-12.md).
-
-Harness deadline/cancellation diagnostics record the request method, admission/service/response
-phase, elapsed time, service completion and pending storage method counts. They contain no tool
-arguments or material contents. A late completion is recorded separately. Worker response rejection
-aborts deferred observation delivery, so a timed-out consumer cannot advance unseen context cursors.
-
-`egress.ts` is the executing Host's shared outbound path for `web.fetch`, Web search and scholarly
-search. Harness → Web exposes this Host's `outboundNetwork` setting. Desktop `auto` uses an
-isolated Electron network session when no Host environment proxy is configured, so the operating
-system owns proxy/PAC, DNS, and virtual-network routing. An explicit HTTP(S) proxy or Host
-environment proxy uses the shared CONNECT path; `direct` bypasses proxies. Desktop requests may
-intentionally reach local services, while non-desktop Hosts retain connect-time private-address
-checks. This boundary depends on the executing Host, never on a machine-specific fake-IP range.
-The proxy origin lives in Host settings; authentication lives separately in the Host's Pi auth owner and is
-bound to the selected endpoint. Requests freeze their configuration, inspect redirect targets on
-every hop, and report whether DNS was local or proxy-side without exposing credentials.
-
-`context.discover` scans only roots the session can already access. The Agent may give an explicit
-start path or continue an incomplete scan with the Host-signed cursor; each page reauthorizes
-its pending directories. The per-page time budget yields a continuation instead of discarding
-deep projects, and an authorized directory that cannot be read is listed under
-`unreadablePaths` rather than counted as scanned. Project discovery does not change permissions,
-the operation directory, or the query scope.
-
-### PDF material reading (`document-reading.ts`, `material-read-service.ts`, `pdf-engine.ts`)
-
-`document_read(path)` resolves a local path through its original runtime's source authority and ingests
-its original bytes before probing. Pi uses its admitted Documents path; native uses the durable Run
-source described above. `document_read(snapshotId)` reads an existing web or material snapshot under
-the caller's authority. The shared `readDocumentMaterial` core also accepts an original Experiment
-artifact byte stream, with each runtime retaining its own original authorization adapter; network `web.fetch` stores PDF source bytes in
-the same material store before it asks the reader to inspect them. The source object uses
-`representation: "pdf-source-v1"`; `document.source.contentHash` / `sourceHash` identifies the original
-PDF bytes, while the current readable snapshot's `contentHash` identifies its body. A derived view's
-`document.sourceSnapshotId` points back to the original for provenance. Subsequent reads use the current
-result's `snapshot.snapshotId`, not `sourceSnapshotId`.
-
-The four views do separate work:
-
-- `overview` returns source hash, source snapshot id, page count and rotated page geometry when probing
-  succeeds, plus `textStatus`; opening the original does not require full-text extraction.
-- `text` extracts PDF.js text for selected or all pages and can return page boundaries and literal find
-  hits. A text failure is represented separately from an unavailable original.
-- `page-image` uses packaged `pdfjs-dist` and `@napi-rs/canvas` to render actual PNG bytes, optionally at
-  a scale and normalized region. It does not require OCR or structural analysis, and does not use Poppler.
-- `structure` runs a native layout/text analysis or an explicit Docling analysis over the requested pages;
-  `ocr: true` separately requests Tesseract for selected pages. Only returned structures are exposed.
-  Unsupported, unavailable, missing, and failed results remain distinct from empty content.
-
-`WebDocumentRegion` coordinates are normalized `0..1` on the rotated page with a top-left origin, so a
-crop is stable across render scales. `sourceHash + page + region` anchors the original image. A derived
-`DocumentAnalysis` carries its own `id`, source hash, parser, actual parser `version`, selected pages, OCR
-choice, and status; layout/elements carry that `analysisId`. Parser/config/page-set changes create a new
-analysis identity without changing the original-page anchor. Docling's CLI parser version and output
-JSON `schemaVersion` are separate fields. A PDF-page link does not need an analysis version when it only
-references the original pixels.
-
-The built-in engine path is PDF.js + Canvas. Docling and Tesseract are optional Host-managed processes,
-not automatically installed. Trusted user settings `harness.documentReading.doclingCommand`,
-`tesseractCommand`, and `ocrLanguage` default to `docling`, `tesseract`, and `eng`; blank values restore
-those defaults. Host passes the configured executable and language to the managed process boundary;
-these strings are executable names/paths, never shell command text. If a runner or configured executable
-is unavailable, the requested operation reports that state. It does not silently claim an installation
-or substitute a different parser.
-
-The shared PDF reader core takes an explicit read port. The Pi adapter retains its session route;
-the native Thread adapter uses `ThreadsAPI.materials.read` → authenticated
-`POST /api/threads/materials/read` → the original Thread/domain/material owner. Thread/API/Host changes
-and close abort the current observation and reject late images. The current snapshot in a real tool
-result or a Thread-local citation opens this reader; it does not use a global Pi event or session store.
-
-The existing Pi authenticated reader routes use the same material identity: POST
-`/api/harness/sessions/:sessionId/materials/read` selects a view, and GET
-`/api/harness/sessions/:sessionId/materials/:snapshotId/page?page=&scale=` returns a rendered PNG.
-`varin-material://` UI references resolve to the current readable snapshot, page, optional normalized
-region, and optional analysis id. `sourceSnapshotId` remains provenance, not a request locator. Parser
-availability does not establish OCR/table/formula quality, cross-platform behavior, or full-package
-validation.
-
-`research.decide` (`research-decide.ts`) is the D-315 fast-decision consumer: callers submit real
-candidates (URLs, snapshots, paper identities, snapshot sections, or new query text) with a goal and
-a judgment kind (`relevance`/`reading-value`/`complementary`/`duplicate`/`continuation`/`next`).
-The service resolves the `web`/`scholarly` purpose binding through `fastDecisionStatus`, freezes
-`configurationId` for the call, validates snapshot candidates by actually reading them under the
-caller's authority, and maps answers to ranked results. Disabled, unconfigured, unavailable,
-failed, and cancelled states return honestly with the caller's order preserved (`fallback:"order"`);
-missing answers are reported, never zero. Ordinary partial failure preserves confirmed scores and
-choices, including a real zero, while cancellation or revoked authority suppresses answers. Each
-score instruction explicitly identifies the candidate, because SDK question keys are not prompt text.
-
-`executeResearchDecide` is the shared domain; the Pi service is a thin authority adapter. The ordinary
-native builtin enters through `kernel/research-decision.ts`, original invocation and material owners.
-Snapshot/section candidates use real text/PDF readers, not the raw snapshot container body. Invalid
-ranges and all-unreadable candidates do not dispatch, and Storage errors are not ACL-denied nulls.
-The trusted native inference adapter preserves original usage on malformed answers and cancellation;
-the old Pi broker's failure/cancellation projection is not replaced by this phase. Each native HTTP
-request, including an authorized SDK retry, is a separate original Catalog Operation with immutable
-input/configuration. llama.cpp preparation and model computation share controls, but only actual
-computation has exactly-once Goal accounting. Early SDK failure still waits for all real fetch/body
-work to drain. No second inference ledger or main-chat fallback
-is introduced. See the [inference owner](../knowledge/semantic/DOCUMENTATION.md).
-
-Consumes `harness.request` events from the broker stream and dispatches
-to registered services. Responds via `harness.respond` on the broker. The
-broker-pinned Actor must match the Host session registry and carry the method's
-frozen capability. Path-bearing methods are resolved through Documents and, for
-a restricted child Run, must also remain inside its scope.
-
-### Shell discovery (`shell-discovery.ts`)
-
-Host-owned, machine-level discovery. Production `index.ts` calls `discoverShells()`
-once when constructing `HarnessServiceHost`. The same Windows program roots used
-by Git binary resolution (`ProgramFiles`, `ProgramFiles(x86)`, `LocalAppData`)
-plus PATH and an already-resolved `git.exe` home are searched. When both
-`Git\bin\bash.exe` and `Git\usr\bin\bash.exe` exist, the Host records the
-`usr\bin` executable so the `bin` launcher is not spawned. Missing Git Bash is
-reported as such; a present install is not.
-
-`harness.shell` is not a Host-wide freeze. `index.ts` reads the session's Pi
-`settings.get` snapshot (user file + trusted project) at session register and
-passes that workspace's setting into `registerSession`. A running PTY is not
-hot-swapped; a later session or worker generation registers again. Two
-workspaces therefore cannot inherit each other's interpreter.
-`session-registration.ts` coalesces initialization by broker actor generation.
-The Router waits for its generation; close/replacement cancels old initialization,
-and late settings cannot restore an obsolete actor. Missing settings produce an
-unavailable interpreter rather than silently selecting `auto`.
-
-### ShellSupervisor (`shell-supervisor.ts`)
-
-Each ordinary command starts independently at its admitted cwd. Production creates its PTY through
-the terminal runtime (`createTerminalSession`); tests may inject a `ptyProvider`
-seam that wraps the same handle contract. There is not a second production
-process manager.
-
-- The session selects its interpreter; each command gets its own execution identity
-- Commands separated by sentinel markers (`__VARIN_SENTINEL_`)
-- Explicit or request-frozen default cwd; cd/env/venv changes do not carry to the next call
-- `waitMs` starts when the Host accepts the call and includes shell setup and
-  the foreground observation. If it expires before a PTY is ready, `shell.exec`
-  returns `kind: "preparing"` with an `exec_…` identity for read-only
-  `get_output`; that identity is not a runtime shell and cannot be written to or
-  killed. Once a PTY exists, an active command returns `kind: "background"`
-  with its real `sh_N` identity; the next foreground command starts a new shell
-- User attach and agent `get_output` / `write_to_process` use that same session
-- Owner, creation source, cwd, shell/spawn, writer, and retain identity must all
-  match before an existing running handle can be reused. HTTP cannot claim a
-  programmatic Harness id, and exited ids require explicit close before reuse.
-- Closing a terminal tab detaches only; `kill_shell` / force-kill / dispose
-  still wait for real process exit before releasing writers (D-204 / D-205 / D-206 / D-209)
-- `registerWriter` callback for `mode: 'process'` writer registration
-- Interpreter command is the discovered executable path, including spaces
-- PowerShell starts interactively under ConPTY with its own readiness/command wrappers.
-- Interrupt delivery does not mark a command exited. Shutdown waits for PTY exit
-  and writer release; a failed stop remains observable and retryable. ServiceHost
-  retains retiring supervisors after a session drop, and thread close awaits them.
-- Background completion is emitted once by PTY exit even when no caller reads
-  output. A failed writer release keeps directory protection and is retried by
-  disposal instead of being treated as a completed cleanup.
-- Shell start/completion enter the workspace Knowledge event owner. `follow_up`
-  may bind the returned executionId to exit/status/output-match conditions;
-  streamed output remains in the terminal/output owner and only compact match
-  and cursor observations are persisted. A Host restart that cannot reattach a
-  still-running local PTY marks that source unavailable.
-- `waitMs: 0` can return `preparing` before the terminal runtime accepts a
-  payload, or `background` with a real `sh_N` if startup completed first. The
-  stable `exec_…` reference is queryable during preparation; only a returned
-  runtime shell id supports stdin or termination. The foreground wait has no
-  process-kill meaning. The default is the session-resolved 10-second soft
-  setting, chosen from focused-check versus package-typecheck timings observed
-  during 7H and still configurable per workspace. Timing reports accepted,
-  sent, first output, detached, exited, and responded stages.
-- An explicitly longer `shell.exec` or `shell.read` wait is not shortened by
-  the generic one-hour Harness RPC ceiling. The requested wait owns its
-  deadline; cancellation and actor disposal still end the observation.
-- Foreground and background commands share a streaming control-record parser.
-  Input echo before the begin record and partial begin/cwd/exit records never enter
-  command output or advance its UTF-8 cursor. ANSI state survives PTY chunks;
-  actual process exit flushes remaining payload bytes. Both shells emit the begin
-  record before switching cwd, retaining real directory-error output too.
-- `shell.read(waitMs)` waits on output/exit events only when an incremental read
-  has no unread bytes. Explicit byte slices and static outputs remain immediate.
-  Request cancellation removes the observer without terminating the process;
-  `shell.write` and `shell.kill` do not share the observation wait and remain usable.
-- `shell.exec.toolCallId` and the generated `exec_…` reference resolve to one
-  idempotent acceptance record inside the current Host session. Repeating the
-  same tool call and command returns the existing foreground response; `shell.read`
-  can resolve its execution reference to the preparation state, real `sh_N`, or
-  completed output. A command mismatch is rejected. This in-memory map does not
-  claim restart durability: old `exec_…` / `sh_N` references report unavailable,
-  while paged `out_…` bodies remain Host-ephemeral and report expired after Host
-  replacement, session drop, or FIFO eviction.
-
-### OutputStore (`output-store.ts`)
-
-Stores large tool outputs (default 256 MiB per session) with handle-based
-retrieval. Handles are `out_XXX` format.
-These are authenticated session-local ephemeral references, not durable files or knowledge records.
-
-### Shell output organization (`output-organize/`)
-
-Default `bash` / incremental `get_output` display for vitest, tsc, eslint, and
-git (D-197). Full UTF-8 bytes stay in the supervisor buffer or OutputStore.
-Explicit `offset`/`length` remains raw. The generic `tool_result` head/tail cut
-does not run on `bash` or `get_output`.
-
-### PathLockService (`path-lock.ts`)
-
-The Host first resolves every input through Documents identity, deduplicates
-aliases, and acquires the complete path batch in canonical order. The returned
-opaque lease IDs are owner-bound. This coordinates Harness-managed writes in
-one Application Host; it does not claim to lock terminals, Git, external
-processes, or a second Host.
-
-### ThreadRegistry / ThreadRuntime
-
-Native built-in Worker/retrieval profiles keep optional user customizations in `harness.models[role].agent`; custom
-profiles use `harness.agents`. The protocol resolver supplies the same effective names, instructions,
-tools, worktree and model parameters to the catalog, ordinary dispatch and research routing.
-Review agents are dispatched on demand through that same path; publishing a result never schedules
-another review or establishes a review gate. A dispatch copies the profile into the launch manifest and Run snapshot. Temperature/thinking
-settings travel through the existing session adapter and broker on create/open, including dequeue,
-restore and continuation. Pi records them in a branch custom entry and applies temperature through
-its native stream seam; no alternate model loop or provider registry is involved.
-
-The registry persists a versioned atomic catalog in the owning task scope; a scope is not necessarily a directory workspace. `Thread` is
-durable work; `ThreadRun` is one execution attempt, and
-`ThreadLaunchManifest` freezes model-adjacent launch inputs.
-
-Read queries derive Thread, Run and historical-session indexes from the committed catalog
-generation. Public results remain detached copies. Mutable drafts never reuse those indexes;
-a failed write leaves the previous generation visible, and a successful atomic catalog write
-publishes a new generation before notifications. Progress notifications do not eagerly build
-the read indexes. Host-wide discovery still enumerates directories to find new scopes, but
-reuses already-loaded catalog generations rather than rereading and discarding their files.
-Concurrent discovery shares its in-flight enumeration; malformed newly discovered files remain
-retryable. Explicit restart reconciliation independently rereads every catalog and reports errors.
-
-`scripts/thread-registry-perf.ts` measures cold/warm snapshots and ordinary/historical session-owner
-queries against synthetic retained Threads/Runs in temporary directories, including catalog
-read counts and bytes. Run from the repository root with
-`node --import tsx packages/web/scripts/thread-registry-perf.ts`;
-`--threads`, `--scopes`, `--runs` and `--iterations` accept positive values using `--name=value`.
-It measures the registry APIs, including result cloning, not model or desktop latency.
-
-Isolated `dispatch` creates the Thread, then captures the disk baseline and WorkingBranch before it
-returns — including queued threads. Git inventory failures, capture-window parent
-writes, active Documents writers, and gitlinks fail the dispatch instead of
-inventing a complete branch. Capture failure or cancellation deletes the
-Thread. `dispatch` then commits a `starting` Run and returns immediately. The
-runtime later opens a real persisted Pi child session with the preset's or
-inherited active-tool allowlist, and projects broker events into
-progress, attention, report, durable transcript, integration, and verification
-state. A child session whose frozen allowlist includes nest tools can dispatch
-again: the Host resolves `parent.kind: "thread"`, narrows scope/permissions, and
-copies the parent branch view (or materialized directory) as the grandchild
-baseline. The frozen permission overlay is passed through `session.create/open`
-and can only be tightened by later live settings. Nested merge writes the
-grandchild result onto that parent authority — directory apply keeps recovery
-objects in the owning object library, branch apply is a durable Integration —
-before the parent result reaches the workspace. Killing or archiving a parent
-walks descendants in stable createdAt/id post-order and enters each child's own
-lifecycle serialization; restore is refused while an ancestor is archived or the
-cascade is in progress. Scope rejects a complete `..` segment, absolute paths,
-and drive-letter paths, not names such as `src/foo..bar`. Sibling threads may
-exchange directed messages inside their root task (below). D-339 task-family discovery and read access include siblings,
-ancestors and nested descendants using the catalog's actual root-session ancestry. Read access does not grant control
-of another member's Run. `read_thread` supports recent records, one-based inclusive ranges, stable entry-id continuation,
-entry expansion and search; it never starts the target. Zone 2 stays focused on direct children. After a successful publish, only same-Run observations whose start/end
-identity matches the fixed result are bound to that `resultRevision`. The
-result is available to the caller without creating another review Thread.
-Draft merge records that disk commands cannot verify unsaved buffers.
-
-`thread.dispatch` captures its admitted cwd, scope, fixed source view and branch baseline. Queueing and
-restart reuse those recorded identities rather than the parent's later directory or editor state.
-It does not restore a mutable operation-directory mirror or write a Pi work-context journal.
-Task ownership and Documents resource roots remain distinct; see [source views](../../../../../docs/design/resource-oriented-harness-design.md).
-
-Input origins are frozen per Run (`task`/`inherit`/`continue`/`fresh`). An
-`input: "inherit"` dispatch captures the parent session's committed input at
-dispatch time through `threadCaptureInputContext` — the last compaction summary
-plus the raw committed entries kept after it, rendered bounded — persists it on
-the manifest, and renders it in the child's initial prompt; a queued Thread
-never re-reads later parent state.
-The capture now comes from Pi's actual active context, preserving legal tool-call/result pairs, images and copied durable output bodies while excluding unfinished calls and future parent appends. A `fresh` Run gets a new session; its `history(run)` source is authorized only to retained Runs of that same Thread. Spawn, dequeue, lost resume, restore and continuation consume the new Run's frozen model/tools/permissions/scope rather than reconstructing them from long-lived Thread fields.
-
-`thread.send` carries directed messages inside one root task (3.18C). Reachable
-targets are relationship-bound: a Thread caller reaches actual members of its
-root task, including ancestors, siblings and descendants. `to: "parent"` resolves
-the parent Thread or session. A session caller reaches its task's descendants; cross-root and
-unrelated targets are denied. `inform` only delivers — to a running session it
-lands at the next input boundary, to a waiting target it stays `held`, and to a
-settled or queued Thread it is recorded durably for the next Run's input; it
-never starts execution. `request` asks for execution: on a waiting target it
-delivers and clears the wait, on a settled implementation Thread it calls
-`threadContinueRun` to start a new Run — `continue` reopens the retained
-session and prompts the new task, `fresh` reads the closed transcript through
-`sessions.readEntries` (`previewSessionEntries`), assembles a rebuilt input via
-`assembleFreshInput`, and spawns a new session on the retained worktree. A
-request on an active Thread delivers like inform and never starts a second
-Run. Messages persist as `in`/`out` records on the Thread; `requestId` makes
-retries observe the recorded outcome instead of duplicating delivery or
-execution. `replyTo` accepts either an ordinary received message or a request;
-with no explicit recipient the Host routes to the retained original sender. Only
-request replies resolve the original request on both ledgers. A held reply is
-already a durable answer and can satisfy the matching wait without waking unrelated work.
-Pi accepts `inform` through a persistent non-waking custom message and accepts `request` through an idempotent native execution receipt. Host commits delivery only after that input boundary accepts it; failed delivery cannot resolve a dependency. The authenticated UI and Pi tools use the same message service and stable request identity.
-
-`send(wait)` subscribes to the caller's exact message ledger and watches only its
-correlated reply. The original message ID and absolute deadline are durable; each
-parallel wait has its own identity. Live waits release the execution slot and all
-must become ready before reacquisition. New input interrupts waiting without
-revoking delivery; expiry and interruption remain message receipts. Recovery
-resumes lost/idle executions once on a correlated reply or retained deadline,
-includes other interrupted requests, and preserves late answers. Delivery text
-explains `send({replyTo, message})`; replying in one's own conversation is not delivery.
-
-Execution admission is root-wide (`countActiveInRoot`): every implementation
-Run under the same root session — including nested Threads — shares the
-configured concurrency budget, and dispatch, dequeue, lost-run resume,
-and continuations pass through the same count. A Thread
-waiting on a real dependency (`waitingFor: "thread"`) relinquishes its slot;
-`setAttention` and `endRun` re-evaluate `tryDequeue`, which promotes the oldest
-queued Thread or parked `pendingContinuation` in FIFO order. A `request` that
-arrives while the budget is full parks on the Thread as `pendingContinuation`
-(`delivery: "scheduled"`) and promotes through the same gate when a slot
-frees. `onAdmissionFreed` drives the deferred lost-run resume recheck, and a
-`wait` blocked on dependencies marks the same yield before subscribing — the
-mark itself never wakes the waiter — then re-admits the slot when it returns.
-
-`retrieval` is a Thread preset, not a second explore tool. `thread.dispatch`
-freezes the retrieval model slot, read-only allowlist, and scope, and does not
-copy parent blocks. The child delivers facts only through `submit_facts` →
-`thread.facts.set`. Host checks local paths and compact line ranges against
-Documents and the frozen scope, then marks sources source-checked. It does not
-prove a claim is true and does not infer completeness from empty unknowns.
-Oversized excerpts and child output handles are copied to durable artifacts.
-URL sources require a Host receipt bound to the exact final URL and authenticated
-owning workspace/session/thread/Run; ordinary webfetch does not mint one. Temporary
-artifact and receipt references exist before catalog promotion and are transferred
-or released transactionally. Pending evidence is bound to the active `runId`.
-Nested retrieval dispatches onto a normal isolated branch, whose scratch path and
-adjacent staging/result paths must stay below a persistent Host/backend-authorized
-`managedRoot`. It may materialize read-only input for LSP, but settle never publishes
-directory changes. Sealed `report.evidence` is visible through wait / UTF-8 byte-paged
-`read_thread` / Zone 2. Lost keeps pending evidence until the existing
-resume path starts a new Run. The report has no recommendation or priority
-fields. Unconfigured `models.retrievalAgent` omits the preset and Host rejects a
-retrieval dispatch that has no model.
-
-One unexpected worker exit is resumed in the same session/worktree as a new
-Run; a second consecutive crash becomes `stalled` instead of entering a crash
-loop. Interactive child prompts, event silence, and six identical tool
-signatures project to `permission`/`user`, `stalled`, and `looping`. The Web UI
-reads the same registry through `/api/harness/threads` and SSE, presenting work
-in the parent conversation and work overview. Shell tool messages expose their
-existing terminal attachment; task state does not require a settings workbench.
-
-### VerificationCoordinator (`verification-coordinator.ts`)
-
-Session-scoped command observations bind the authority instance, worker
-generation, Run, and binding generation at start and recheck them at completion.
-Production `shell.exec` records both boundaries; PTY exit completes background
-commands independently of `shell.read`. Git inputs use a base/HEAD seed plus the
-states of changed and explicitly captured paths, avoiding a per-command full-tree
-scan; non-Git inputs remain `uncertain`. Publication consumes eligible observations
-once. A fully applied parent merge opens a persisted window keyed by operation,
-result revision, and exact parent session; draft-unsaved and incomplete merge
-states do not. Review records additionally bind review thread and review Run.
-
-
-### HarnessSearchService (`search-service.ts`)
-
-Wraps the native workspace/WorkingState compute boundary with hit grouping,
-scoring, and formatting. It intersects an explicit request path with the actor
-or child scope before dispatch and validates returned resource IDs again.
-Root-session search uses the Host-admitted live root plus Registry-owned fixed
-draft/tombstone overlays; an isolated Thread uses a `WorkingBranchQuerySnapshot`
-whose `search`/`compute` operations remain bound to one immutable pin. There is
-no branch corpus/body mirror and no Host ripgrep fallback. Returns
-`SearchContentResult` with files, hits, and totals. Regex/fixed/case/glob
-semantics, result limits, and context lines are evaluated against the same
-native source revision; live-source drift becomes partial/failure evidence
-instead of attaching unrelated lines.
-
-### Native read source (`document.readSource`, pi-host `read-tool.ts`)
-
-The Router authorizes the requested path with `allowMissing` so an unsaved new
-document can be read. Documents selects fixed surface/WorkingBranch bytes or disk.
-For disk, the Host rechecks the authorized canonical target, opens one file handle, reads from
-that handle, and checks its identity and the request path again before returning bytes; Pi never
-reopens the original path. The normalized path identity is for comparisons and locks; the Host
-opens the separately retained, case-preserving resolved path so a Windows case-sensitive
-directory cannot redirect `A` to `a`. The Pi wrapper sends its line range and existing Pi
-display budget to the Host. `read-page.ts` scans bounded byte chunks and stops after the requested
-page; it does not count the remaining lines or encode the whole text file. Binary signatures and
-unsupported encodings return a type result before whole-file decoding. Long single lines retain
-Pi's output-size boundary without allocating that line. Supported images keep native Pi processing.
-Virtual branches hold one native pin while paging object slices; surface drafts page their existing
-immutable text; materialized aliases revalidate the owned child target. Disk identity also checks
-size and timestamps to reject in-place changes during a read. `apply_patch`
-uses the same Host-returned disk bytes for its patch base and conditional hash. This rejects the
-tested original-path and parent-junction replacement races; Node has no cross-platform
-directory-handle-relative open here, so it is not a proof against every adversarial ABA swap.
-The wrapper is registered only when the Host handshake advertises `harnessDocumentRead`.
-An isolated Thread Run bound to a WorkingBranch never returns disk bytes
-for these tools: `read` / `grep` / `find` / `ls` / `explore` consume
-the pinned native fixed view (`base ∪ delta`) with tombstones hidden before
-candidate selection, and provenance names the branch, revision, and origin.
-`find`/`ls` use native inventory, `grep` uses native search, and structure/chunk
-requests execute against that same pin. Missing branch content stays
-unavailable; none of these operations may fall back to the parent live tree.
-
-The fixed draft is one turn's input, not a standing authority. A confirmed Host-backed disk write
-supersedes that path so later read/search/enumeration/navigation/dispatch return to disk (D-088).
-Varin-mode Pi mutation tools do not maintain a second worker-local disk journal/writer. A root-session write
-whose path is still owned by this turn's snapshot goes through `document.surfaceWrite`
-instead: matching uses the fixed text, the live Registry buffer is updated in
-place, and later read/edit in the same turn see the new buffer (D-225). A later
-user edit is a conflict; compensation is conditional and must not overwrite that
-newer buffer. `agentInputDraftPaths` reports the dirty paths the fixed source
-still owns; an expired capture keeps every dirty path there and never degrades
-into a silent disk read. Shell and external writes stay unobserved, the same
-boundary the recovery journal reports.
-
-### Native surface write (`document.surfaceWrite`)
-
-`write` / `edit` / `apply_patch` share one Host plan after `document.branchWrite`
-returns the disk sentinel. Snapshot-owned paths write the Document Registry buffer through
-`requestSurfaceOperation`; unowned disk targets stay in the same Host plan and are applied by
-Documents through the Rust file-resource backend. Varin does not hand those targets back to a
-worker-local writer. Mixed `apply_patch` batches classify each path, persist `targetKinds`, and under
-one Rust resource lease validate every disk identity before dispatching a surface write. The typed
-recovery operation records external dispatch, compensation intent and observed Registry receipts;
-Rust file operations separately persist filesystem intent before their side effects and reconcile a
-started operation after kernel restart. Compensation remains conditional (`applied` / `conflict` /
-`compensated` / `needs-attention`) and never overwrites a later user edit. An explicit failed surface
-receipt proves that path was not applied; a dispatched request without a valid receipt is uncertain.
-Delete, NUL bytes, and other states a text buffer cannot express are `unavailable` to the Registry
-surface path, while supported disk states remain kernel file-resource operations.
-
-### Native find/ls path overlay (`document.pathOverlay`)
-
-The Router authorizes the requested root with `allowMissing`, so a dirty-only
-directory can be traversed. Documents validates the same session, workspace,
-and ready surface snapshot before returning content-free entries relative to
-that root. Each fixed file carries its surface revision; nested files also
-produce virtual directory ancestors. `find` filters those entries with the
-same picomatch basename/path semantics as `grep`, merges them with native fd
-results before applying the user limit, and reuses Pi's own formatting and
-50KB truncation. `ls` merges immediate disk and virtual children through Pi's
-native definition. A covered disk path keeps the fixed snapshot's file or
-directory type. Unrelated roots return the disk sentinel; an expired related
-snapshot returns unavailable and never substitutes disk output. The snapshot
-currently represents dirty text file existence only, so it has no deletion or
-rename tombstones. A working-branch overlay is exclusive: find/ls do not merge
-native disk, and tombstones hide files plus virtual ancestors.
-
-### Explore (`explore-service.ts`, `explore.ts`, `explore-file-reader.ts`)
-
-The Pi tool sends the question, optional literal `anchors`, and optional `paths` through the
-normal actor-scoped router. `paths` accepts absolute or session-cwd-relative files/directories;
-when present it confines the whole query, including anchor follow-ups. The visible result names
-the resolved search scope. Without `paths`, an unbound session searches its cwd. `budgetMs`
-controls the shared Host/Pi query deadline (default 120 seconds); expiry returns completed
-material with an explicit budget note. `limit` is the excerpt count only, and the selection
-model sees that limit before choosing groups. Rejected groups report the Host's reason.
-Candidate fetch uses a separate
-working budget (and an independent budget for anchors). Candidate mode assigns that budget
-breadth-first: one hit per matching file, then another round, until `hitsPerFile` or the budget
-is exhausted. A file with hits keeps at least one hit unless the file count itself exceeds the
-budget; those omitted files are `filesDropped`, distinct from a hit-level `partial`. That count is
-a floor: query terms and search roots match overlapping file sets, so the distinct union cannot be
-recovered from per-query counts. Explore carries the largest single-query drop and the body says
-"at least", rather than summing and claiming more files than were dropped. The tool schema accepts
-blank anchors because the Host filters them and reports them in `details.anchors`; a stricter
-schema would reject the whole call. Grep still
-depth-first-truncates with `fileScore`. Term groups keep identifier variants, quoted literals,
-and anchors together: variants expand matching, co-occurrence across groups raises rank, and
-anchors/literals stay the most distinctive seeds without becoming a hard filter.
-Search goes through `search-service` with `actor` and `inputContext` so dirty paths are excluded
-before the backend counts hits; explore does not match drafts itself. Candidates are ranked from
-hit metadata, then materialized on demand with bounded parallelism. Unread files are
-`not-requested`, never `empty`. Packing prefers complementary windows across files, then applies
-an explore byte budget below the generic 32 KiB truncation, including any `get_output` hint.
-The resolved search-scope prefix is inside that budget. The body reports the visible excerpt count;
-`query.finish.snippets` describes the complete blocks actually delivered,
-not every excerpt selected before packing. It first preserves the priority pack, then removes child
-ranges whose exact text is already present in a delivered range of the same path, revision and source.
-A child intersecting a parent's omitted interval, or a required child, is not deduplicated. Recovered space fills omitted blocks
-without evicting the remaining priority pack. Actual byte omissions mark the result partial; covered
-ranges are distinguished from byte omissions. Concurrent/repeated finish calls reuse the same pack and handle.
-The model-visible body is `path:start-end`, code, relevant source differences and actionable gaps.
-Internal model stages and retrieval diagnostics are not copied into the Pi tool result.
-OutputStore keeps the full text pack, all relation rows and unread-candidate refs without a diagnostic
-JSON appendix. The tool text mentions the handle only when more content remains. Symbol expansion and optional model enrichment remain
-separate planned sources.
-
-`harness.codeRetrieval.decision` is frozen at query start. In `auto`, the configured explore LLM owns
-joint selection and may plan searches; a ready fast-decision binding can independently own actions.
-Without an LLM, fast decision owns material judgment, or a configured reranker ranks material;
-without any model, source retrieval and deterministic packing still run. Explicit `llm`, `fast-decision`,
-`rerank`, `source`, and purpose `off` keep their meanings. A failed provider does not start a cascade
-of replacement paid requests. Embedding contributes an independent source. Rerank settings and the
-fast-decision configuration identity stay fixed for this query.
-
-Native `code_retrieval` runs this same fast-decision loop against its actual admitted source query
-before finish. It uses one original Host inference session across batches and SDK requests; the existing
-`research_decide` consumer shares that session contract. Source-issued material/action identities and
-original Documents/grant checks remain with the query owner. The loop reports known usage dimensions
-only, and an accounted failed batch stops before selection/followup while retaining earlier successful
-selection. Native Explore LLM uses the same pure `@varin/protocol` planner/selection loop as Pi,
-with the original query as its port. In auto it retains LLM selection and classifier actions concurrently;
-finish explicitly settles the parked action loop. Configuration/credential fences belong to each role,
-while source/grant and actual query-issued identities remain shared. Native generation uses the original
-Rust provider adapter, Catalog and private credential bridge, independently of the main chat request.
-Fixed queries read the retained branch revision; materialized queries read the actual working copy.
-Their shared source adapter uses existing native compute/blob readers and Documents decoding, without
-reading a substituted live directory. Non-live structure uses tree-sitter only; live LSP and published
-semantic readers are not substitutes for a missing source-specific capability. Rust alone reconstructs
-final evidence; Host final checks remain short authorization checks. See the
-[source retrieval review](../../../../../docs/reviews/runtime-source-retrieval-2026-10-12.md) for actual
-source/child/cancel evidence and remaining new-input admission boundaries.
-
-`query.views({seen,inputBytes})` returns ready ranges, current sequence, pending work and actions;
-it does not await all sources or structure. `query.wait({afterSequence})` registers a cancellable,
-race-free progress waiter. `plan` and `followup` admit work asynchronously; `actionsAccepted` is not
-an execution receipt. Fast-decision provenance counts completed operations separately. `select`
-returns the actual retained ranges, including clipped range identities, for the next comparison.
-Model bodies are not silently shortened to 8192 characters or a fixed 48 KiB page. Consumers page
-using configured capacity; an oversized individual view remains identifiable and provider capacity
-errors remain explicit.
-
-The shared executor continues authorized reads while models judge an available batch. The public tool
-waits for an in-flight decision before declaring the frontier quiet, allowing selected follow-ups to
-execute. The decision loop includes retained evidence and keys action reuse on that context. No graph
-is required for unread candidate reads, adjacent ranges, or literal names observed in source. Existing
-graph facts add resolved relationship actions. `prepare-structure` explicitly requests optional cold
-preparation; ordinary slices use warm structure. All actions remain scoped, version-bound and deduplicated.
-
-The visible delivery planner accounts for scope, headers, source blocks and output handle. Required
-members of a group (including overlapping groups) are delivered together or omitted together with a
-reported gap. Invalid later selection retains the previous valid selection; an explicit valid empty
-selection does not refill the answer with rejected hits. OutputStore is additional material, not a
-continued-query capability. No new Agent thread or training dependency is introduced.
-
-### Knowledge context runtime (`../knowledge/context-runtime.ts`)
-
-The context runtime fans committed user-originated Documents changes, version-bound diagnostics, existing Git refreshes, and generation-tagged user-terminal commands to the Pi sessions that own that workspace. Harness writes do not masquerade as user edits. Agent shell completion is a separate source keyed by execution identity, projected as a short terminal fact and output reference. It is distinct from user-terminal history and from the shell output byte cursor; raw retained tool-result receipts suppress duplicate completion notices.
-
-Before every model request, `zone2.assemble` prepares environment changes and new message/result material. `zone2.delivered` confirms their pending observation only after Pi has received a provider response start and retained the actual material in native history. A failed prepare or provider stream that fails before starting does not acknowledge delivery; retained receipts recover a lost ACK. Tool reads retain their own response-delivery cursors. Compaction and branch navigation derive retained receipts from native raw input, never from a ready summary candidate.
-
-`zone2.status` separately returns the complete current authorized team on every request, including unchanged rows. Each progress excerpt cites its real completed visible paragraph and Run. The snapshot has no delivery cursor, does not consume directed messages or result bodies, and is never appended to Pi history. Empty scope and unavailable facts remain distinct. Pi accounts for both additions before capacity admission and rebuilds them after compaction.
-
-Plans, user notes and accepted knowledge keep their existing authorities. `zone2-material.ts` compares revisions with retained Pi messages and only acknowledges fully represented sections. Knowledge identities include user/workspace scope; actual retirement/deletion is distinguished from a different retrieval ranking. Store-owned knowledge revisions invalidate query caches without scanning the whole catalogue on every request. Context usage stays in the normal UI. There is no keeper nudge, coverage takeover, `memory_edit`, decisions-block suggestion loop, or second context store.
-
-Thread message and result material is deduplicated by actual message/body identity, so a step or lifecycle update cannot re-emit old bodies. Nested child sessions resolve their owning Thread from the
-Host session binding (`sessionId → owning workspace / thread / run`) after
-catalog/run reconciliation, not from the execution workspace Documents assigns
-to scratch or materialized cwd. A missing or mismatched owner is denied; it
-cannot skip the thread tool allowlist. Knowledge, recall, suggestions, and
-Zone 2 knowledge resolve that owning workspace. Documents, LSP, shell, paths,
-and workspace semantic index stay on the execution workspace.
-A Run whose launch manifest explicitly carries blocks includes a tagged snapshot of the parent's then-current blocks.
-Initial child input identifies the parent relationship and configured role, and carries the assigned task and frozen input
-for implementation, retrieval, and consultation threads. User discussions retain their selected parent-message reference.
-When an implementation or retrieval Run settles, the runtime preserves the assistant report as free text without
-imposing or parsing section headings. Host-recorded issues, the child block snapshot, metrics, transcript bounds, and
-worktree facts remain separate fields before the registry commits the terminal Run and report together. Report reads
-include the complete assistant text alongside optional structured retrieval evidence; empty issue arrays are not
-presented as a claim that no work remains. Discussion threads, including agent-created consultations, currently remain
-active after a response and wait for further input; their replies are read through steps/transcript, with no terminal report.
-An isolated child fixes its logical baseline during dispatch, before the Pi session starts. Git still inventories
-HEAD plus staged, unstaged, tracked, deleted, and non-ignored untracked paths, index modes, and dirty-path content
-identities; a command failure is a failed capture, not an empty inventory. Unborn HEAD is `baseRef: "zero-commit"`
-and does not run `diff HEAD`. Gitlinks are listed and rejected rather than captured as empty directories. Actual
-filesystem inventory and body capture use kernel `file.scan` / `file.capture` through the same Host-admitted root
-and scoped grant that will create the WorkingBranch. The complete captured path set is recaptured before publish;
-Git inventory/content identity and frozen `captureScopes` are also rechecked, while the Documents capture generation
-and dirty-state barrier cover controlled writers. A mixed baseline is retryable `baseline-changed`, never a complete
-branch assembled from different moments. New virtual regular files receive the umask-derived default mode without
-creating a probe file in the user tree, so apply and compensation compare full `sameState` identities.
-
-Production WorkingState authority is the Rust format-v10 immutable root store; the old TS trie/catalog and local
-materializer remain test fixtures only. Direct read, grep/find/ls/explore pin, virtual write, baseline capture,
-materialization input, result publication, history release, and deletion use asynchronous root/path/domain APIs and
-do not retain an expanded workspace tree or a callback projection as a second production authority. Old internal
-WorkingState formats are rejected rather than migrated.
-Failed prepare deletes an
-unbound branch and scratch without touching a still-attached draft baseline.
-Spawn recaptures only when no `workBranchId` exists. The child stays on a
-virtual scratch until a path-binding tool runs. Same-name `edit` / `write` / `apply_patch` call `document.branchWrite`,
-which commits text into the unpublished WorkingState delta with `writeRevision` CAS
-and never writes the parent directory. Directory, binary, symlink, and unsupported
-states are rejected. The first `bash` or LSP navigation tool asks `workingBranch.ensureMaterialized`: the Host freezes the current
-`writeRevision` and waits for in-flight virtual writes, then the kernel materializes that pinned immutable root
-directly into the admitted managed path. Rust owns operation-specific staging/backup/promotion, object verification,
-and restart reconciliation; the older TS `materializationSwitch` journal is only a test/legacy seam when a kernel
-root store is not injected. Callers that arrive during the switch re-read the execution view: materialized returns
-disk, while a still-virtual branch accepts another WorkingState write.
-
-A Git parent receives only execution metadata after the Rust body exists. The Host creates a temporary linked
-`--no-checkout --detach` worktree, moves its `.git` admin binding to the live path, seeds the selected tree with
-`read-tree`, then runs `git add -A` and an internal baseline commit. Those Git operations establish the real index,
-clean/LFS/EOL/filter semantics and `executionBaseline` without copying workspace bytes back through TypeScript;
-a required filter failure aborts attachment and leaves the materialized file bytes unchanged. Unborn/inherited
-contexts use the existing isolated-init path. Reclaim removes the managed body through the kernel and prunes linked
-worktree metadata. Ordinary WorkingBranch reads still re-fetch the current view after the store lease;
-`explore.query.start` pins one immutable root/revision for lexical, structural, semantic, and original-text reads.
-
-Settlement publishes `publishHeadResult` while virtual. Once materialized, Git supplies tracked/untracked changed
-paths and index modes, while frozen `captureScopes` contribute both prior branch paths and current disk paths so
-ignored additions, edits, and deletions remain visible; non-Git views use the complete Rust inventory. Rust captures
-and revalidates those states, advances the branch root, and publishes an immutable WorkingResult. That root is the
-retained production result/archive identity, so no mandatory adjacent `.snapshot` is created. Merge and reopen read
-the selected native revision rather than the live child directory. Combined Integration/recovery uses the Rust typed
-operation/file journal and kernel file-resource apply path; there is no production TS SQLite recovery writer.
-Nested children reuse the same registry, Run, review, archive, and lost-resume
-path. Host restart resumes lost Runs for the snapshot session's owning Thread
-parent from the persisted session binding, so an execution-workspace snapshot
-cannot look up the wrong catalog.
-When dispatch carries dirty editor input, the runtime materializes drafts belonging
-to the target root in a persistent WorkingState draft baseline. Independent external
-drafts become an immutable `agent.source-view` record and content objects in a
-private kernel store; the Thread manifest holds its view ID. A parent/child root
-alias of the same physical file resolves to the child's current branch version.
-Queued or restarted Runs overlay target-root draft bytes into the branch base
-(and into a materialized directory only after a path-binding tool switches the Run)
-and use that effective state as branch
-revision zero. Virtual publication reads the live branch head; materialized
-publication reads the directory. Merge and migration continue to read the selected
-fixed result. Draft-derived paths are checked even when Git ignores them.
-External fixed drafts remain readable after the parent surface snapshot retires.
-Independent external draft writes use the captured editor owner and Documents'
-versioned surface operation. A durable pending source-view record precedes the
-editor side effect; a confirmed result advances the fixed bytes and version for
-subsequent child reads. An intervening user edit conflicts without touching the
-buffer. After a Host restart, the next read recovers confirmed writes from Documents'
-durable operation result; a prepare with no durable operation may be cleared
-only if the live owner, buffer hash, and edit revision still match the capture.
-Unknown outcomes remain unavailable instead of replaying the write or
-reading stale bytes. Same-file aliases still target the child's branch. Thread deletion releases the
-source view; startup reconciliation releases captures that never acquired a Thread.
-Configured `copyIgnored` roots are stored as branch `captureScopes`; nested
-children inherit or narrow that frozen list and do not reread live settings.
-Narrowed publication scans only those roots plus known changed paths, so ignored
-additions, updates, and deletions enter the native result and survive
-reclaim/materialize.
-Draft targets use the originating surface owner and its live Documents registration,
-document instance, content hash, revision and format. Agent calls resolve that owner
-from their fixed inputContext. Documents directs capture/apply/undo to the owning
-Registry; events carry metadata and authenticated requests carry body/receipts.
-The durable Integration records both disk and buffer targets before dispatch and
-does not complete before confirmation. Nested branch integration first acquires the
-parent write/switch gate, then opens the WorkingState store. It persists an applying
-intent (before/after revision, target states, retry identity, `targetKinds: "branch"`)
-before the parent CAS and writes complete afterward. Startup reconcile compares the
-live parent `writeRevision` to those slices; generic disk reconcile skips branch rows.
-`runWhenVirtual` waits on the real gate, switch completion, or cancel signal.
-Directory apply and startup reconcile resolve the execution Documents gate from
-the persisted parent directory; the object library stays on the owning recovery
-root. Queued dequeue passes the frozen manifest overlay into `session.create`.
-Conditional compensation/undo preserves
-subsequent edits; reconnect or restart cannot reinterpret a surface target as disk.
-`merge-ready` comes from a bound preview; resolution submissions must consume that
-binding. Preview reads and identical projections do not create event feedback loops.
-`thread.update` (3.18D) rebases the calling thread's working branch onto a selected
-published parent result revision — the explicit file-level counterpart to merge that
-directed messages and `fresh` continuation cannot substitute for. A three-way plan
-reads the child's revision-0 baseline, its current head, and the chosen parent
-revision: parent-only changes are adopted, the child's own deltas are kept, clean
-text edits merge, and divergent paths keep the child's bytes and are reported as
-conflicts. The kernel `branch.write` `baseRef`/`parentRef` path resolves the new
-immutable baseline, applies the complete delta set, and records the lineage under
-the expected `writeRevision` CAS, so a concurrent child write cannot be lost.
-Result records freeze their publish-time provenance — `baseRoot` plus per-path
-`baseStates`/`pathStates` validated by the kernel against the published roots — so
-an older revision still resolves against its original baseline after the rebase.
-Materialized worktrees are refreshed onto the new baseline under the same gate.
-A materialized update creates a staging branch, applies the planned directory change through the Rust durable Integration path, recaptures the complete execution directory, then CAS-updates the child branch. Its Registry handoff blocks bind/spawn/settle/partial publish/continue/restore/reclaim/lost resume until completion or startup reconciliation; deletion releases the staging branch. Virtual rebase performs one revision-bound CAS and reports a conflict instead of running a fixed retry loop.
-Idle reclaim runs only after the session closes, a durable result exists, and the
-Documents authority confirms that no related controlled writer or user remains.
-User archive keeps the report, transcript reference, native results, and original
-Pi session file; it does not use the session-delete path that clears `report`.
-Restore rematerializes the published result at the same path. If that path is
-occupied by other content, Host reports `path-occupied` and does not delete it.
-Occupancy uses kernel `file.measure` for production managed directories: logical bytes are always counted from the
-observed filesystem, Unix reports actual allocated blocks, and Windows leaves `allocatedBytes` unknown instead of
-copying logical size into a physical-allocation field. Shared content-addressed objects remain a separate projection. Reclaim stays
-blocked for `keep_worktree`, unfinished Integration, active writers, editor
-surfaces, background commands, or unverified/uncollected content. Budget uses
-only the user-configured `harness.worktree.budget`, across all parent sessions in
-the workspace, including known costs of first materialization and restore. Archive
-waits for preparation/setup and real session shutdown, and archives each
-descendant on that descendant's lifecycle turn before the parent. Restore binds the original
-session to a new Run; a failed restore stays archived and cannot open an occupied
-path. Restore of a descendant is refused while an ancestor is archived or being
-archived. The Documents reclaim guard remains held through deletion. Thread panel routes
-`GET /space` and archive/restore/reclaim share this Host projection.
-`POST .../threads/:threadId/send` delivers a directed message for the authenticated
-parent session through the same `thread.send` service the Pi Host tools use: the
-caller acts as the user, relationship authorization, the durable ledger, requestId
-idempotency, held/delivered semantics, and `continue`/`fresh` scheduling are
-identical. Child-session UI messages remain user-originated. Message receipts
-can address the actual task family without expanding lifecycle/integration controls.
-The list projection adds a deduplicated peer roster for message identities and
-native-session navigation. Service failures map `HarnessServiceError` codes to HTTP
-(400/403/404/503) instead of collapsing to 500.
-`GET .../threads/:threadId/history` and `POST .../history/release` manage selected
-old WorkingResult versions for the authenticated parent. Release holds the Thread
-lifecycle, storage lease, then a Registry snapshot guard while validating current
-results, Run inputs, review and Integration users. The guard ends before object
-collection. The current branch/report/transcript remains; completed Integration
-undo keeps its own safety/target objects. Metadata removal and physical cleanup
-have separate outcomes and the same branch/revision request can retry cleanup.
-`DELETE .../threads/:threadId` (D-242/D-254) removes the whole Thread through the same
-post-order cascade shape as archive: each node settles its active Run without
-minting a partial result, deletes every Pi session it owned (worker, transcript
-file, metadata via `piRuntimeBroker.deleteSession`), releases all result
-revisions plus the work branch and draft baseline under the storage lease,
-removes the managed directory (ownership assertion and user/writer guard still
-apply; keep_worktree does not — the record is being removed), then atomically
-removes the Thread and Run rows and unbinds session bindings. The operation,
-root thread, next phase, and last error are durable before side effects; Host
-restart resumes them. A failed descendant prevents the parent commit point.
-Knowledge and retrieval evidence references are required cleanup steps, and a
-directory or reference failure keeps the record for retry.
-WorkingState publishes metadata before removing old references and protects new
-write candidates until durable publication; startup reconciles derived references
-without interpreting a missing catalog as empty (D-239).
-The session-state sidebar reads/updates blocks through authenticated context
-routes. Block writes broadcast only an invalidation identity over SSE, never
-the block body. Thread metadata routes use the same UI-auth middleware.
-Ordinary Agent notes and scoped system-prompt edits use `agent-personalization` and its Rust typed
-record. Host `memory.*` routing resolves the actual session owner on each request. Bot calls retain
-MemoryService/KnowledgeStore and optional background organization; ordinary calls do not invoke
-semantic recall, automatic extraction or the retired `knowledge.suggest` model path.
-
-Bot knowledge mutations retain their source, revision, effective/suggested/dismissed states and
-same-scope checks. Source coverage and prepared proposals are durable; changed owners invalidate
-late UI results. These contracts and the ordinary-Agent distinction are maintained in
-[Memory ownership](../memory/DOCUMENTATION.md) and [Knowledge storage](../knowledge/DOCUMENTATION.md),
-rather than a second memory catalog description here.
-
-Interactive UI inputs carry a content-free `AgentInputContext`. The Documents
-authority has already validated and frozen any dirty buffers behind its opaque
-reference. `HostServicesBridge` attaches the current context to every Harness
-request; Router still derives session/workspace/scope from the broker actor.
-`explore.search` and `search.content` remove disk hits for dirty paths and match
-the fixed snapshot; the same-name `read` override obtains save-compatible bytes
-from `document.readSource`. Expired or unavailable dirty sources never fall back
-to disk. Other files retain the existing disk path. Thread dispatch copies the
-fixed content into persistent WorkingState before the temporary surface reference
-can be released.
-
-Language support status (`LanguageSupportAPI`) is computed when the settings
-page asks, not at boot: `searchFilesystemFiles` + `languageIdForPath`, cap
-8000 files, `partial` when truncated, 30s per-workspace cache (D-120). A
-structure request for an installable-but-missing language records an in-memory
-wanted id and still returns `unsupported` (D-121).
-
-### Settings caller and Surface targeting
-
-`settings.read`/`settings.update` resolve client-owned preferences from the
-Harness caller's live `sessionId`. The UI first authenticates and binds its
-current session through `/api/varin/client-settings/bind`; the event stream
-is targetable only after that Host-side binding and live broker validation.
-Surface ids are returned as facts and are never accepted as model selectors.
-Zero bound Surfaces is `unavailable`; multiple windows bound to one session are
-`ambiguous`. A reconnect or deleted session has no binding until the UI binds
-again.
-
-`settings.action` returns `operation` only when an owner supplies a real stable
-identity and status/cancel adapter. Host metadata is persisted through the Rust
-`settings.operation` record with caller session, entry and owner identity in
-the record key. Owner calls that await a terminal result report that result;
-an asynchronous owner without durable observation is `unavailable`, so the
-service does not leave a synthetic operation running across restart.
-
-### Follow-up sources and delivery
-
-Native Agent work uses Catalog FollowupDefinition/occurrence/typed ingress, through ordinary
-`follow_up` and `ThreadsAPI.followups`. Accepted domain Job sources reuse the original HostJobBinding,
-executor-stopped receipt and existing research runtime/domain notifications. `jobSources` reads short
-accepted Job metadata across the actual task family; the selected observer Run remains the continuation
-source. Bodies are loaded outside Catalog, and original ExperimentService retains outputs/artifact
-collection. Cancellation of an observation or follow-up does not cancel the observed Job. There is no
-native instance of the Pi FollowUpService or extra Host polling owner. Native root/child activation,
-Goal/question/pause gates and occurrence/history delivery remain the original runtime owners.
-
-Explicit native `repeat: each` uses the original Catalog occurrence rows and accepted source cursors.
-The existing file observation service keeps only transient watch handles/flights/wake coalescing;
-first delivery does not end repeated monitoring. Pause suspends reads and preserves pending facts;
-Cancel releases the original receipt after actual readers drain. It does not reconstruct coalesced or
-offline writes. The authenticated `POST /api/threads/followup/occurrences` route checks the selected
-Thread/branch using short metadata and pages original occurrences without loading the instruction.
-History/latest/UI state never becomes another execution or cancellation owner.
-
-Research `artifact` and `collection` leaves use the same original definitions and occurrences.
-`research-artifact-followups.ts` is a transient consumer of Catalog work and ExperimentService
-metadata, still discoverable after the Job has left pending execution reconciliation. Subscriptions
-precede the initial recheck and preserve hints arriving during a read. Its independent metadata flight
-cannot hold the original Job cancellation/receipt flight; disposal drains both without claiming that
-the original collector or executor stopped. Pause blocks new observation reads, and late results remain
-fenced by the definition and owner epoch. The actual family reader is used, never the maintenance
-creator's privilege. Target workspace and the observer's execution workspace remain distinct.
-
-Per-artifact revisions and original collection completion identity are deduplicated by Catalog's
-source facts. Coherent before/after collection metadata prevents an old final marker from certifying
-new partial results as missing. Full accepted metadata lives in ContentStore; artifact bytes stay with
-their original owner. The authenticated `POST /api/threads/followup/occurrence` route checks the selected
-Thread/branch before expanding an exact old occurrence, independently of the latest projection.
-
-Research `log_literal` and `log_end` use this same observer discovery and original accepted Job
-binding. `readLogObservation` reads raw bytes only through the original Job stdout/stderr high-water;
-chunk records persisted before that CAS are not published input. Its indexed Storage query and
-`getBlob` retain actual family/record authority. EOF requires original output drainage, even for an
-empty stream, independently of artifact collection. The ordinary display log reader shares that
-publication boundary but retains its own UTF-8 display pagination.
-
-`experiment-log-matcher.ts` performs exact incremental UTF-8 byte matching, including overlap and
-split pages, with cooperative CPU yields. Only Catalog persists offset/prefix/ended and accepted
-range evidence. Each match commits before the reader advances further. The literal comes from the
-original registration intent on demand; compiled patterns are transient and discarded when their
-work leaves the original scan. Source failures expose a short retryable diagnostic; original Resume
-retries without resetting cursor or intent. Log reads share the metadata flight, independently of
-research cancellation/terminal reconciliation. An exhausted combination releases unrelated original
-watch resources while preserving already accepted occurrences and the optional Wait result.
-
-Native machine `metric` conditions use `metric-followups.ts` and the same ResourceService as research
-reads and Pi metric observers. Subscription alone does not sample. Active local demand starts one
-shared flight immediately; subsequent flights use the owner's configurable 5-second default cadence
-after the preceding flight. Additional consumers do not reset that cadence. No active local demand
-means no timer; remote-only demand does not probe the local machine. There is no remote metric writer
-in this slice, so registered remote machines expose unsupported observation rather than fake values.
-
-ResourceService publishes the original sample record revision, measurement time and machine/Host
-provenance only after its existing Storage CAS. GPU selection uses the original UUID. Probe work is
-outside the machine commitment lock; admission commits against the actual current inventory and
-commitments without a second probe under the lock or a stale-GPU fallback. Resource release remains
-independent. The fixed `nvidia-smi` probe has an abortable, configurable observation budget and resolves
-only after its actual child close; cancellation intent alone does not prove process drainage.
-Service disposal stops/drains observation production while preserving original accepted-job cleanup.
-Scoped handles are rebuilt after kernel epochs, but an in-flight old probe retains its captured actor
-and cannot borrow that new authority to publish old measurements.
-
-The Native adapter subscribes before each new leaf's first snapshot and retains per-leaf callbacks
-until the original Catalog cursor confirms them, including lost replies. Work/demand discovery remains
-independent of slow sample observation, so Pause/Cancel releases demand without waiting for a held read.
-Only Catalog evaluates the threshold and atomically retains cursor/last-known predicate/edge; delivery
-uses the existing occurrence, Wait and ingress owners. Same-timestamp revisions remain distinct;
-missing/stale/disconnected values never mean false or zero. Reconnection checks current facts and
-reports a gap, not invented sample history. Existing Pi watcher groups retain/release the same sampler
-without changing their separate Pi observation and delivery ownership.
-
-The following `followups.ts` service describes the still-supported Pi runtime path.
-
-Run settlement clears execution yield and live input/stall attention. A retained follow-up wait has
-its own lifetime; worker loss retains recovery attention. An idle discussion uses the typed
-`discussion-ready` reason and is presented as idle, rather than as a pending user answer. Settled Run
-outcomes take precedence over old live input flags in both thread tools and workbench projections.
-Authenticated user routes resolve a session's durable catalog owner for follow-up and experiment
-management. A settled child's retired execution binding is not a missing registration. Agent tool
-access continues to resolve the live Run binding; historical management does not authorize execution
-as that retired Run.
-
-`followups.ts` stores definition, occurrence and compact observation identities
-through the kernel record boundary. `any`/`all` parents own hidden leaf
-definitions; compatible file, metric, attempt and external observers share the
-underlying subscription/query. File and metric edges become typed observations
-before a definition cursor advances. Ordinary shell start/completion facts are
-durable Knowledge events, while output stays with `ShellSupervisor`: registration
-first reads bytes already present at its cursor, then consumes live chunks and
-persists only match facts. A local shell that disappeared with its Host is
-`unavailable`, not restarted.
-
-Thread delivery calls the same directed-message ledger, target lock and
-admission path as `thread.send`; an occurrence id is the request identity across
-retry/reconcile. Root sessions retain the Pi broker's native receipt path.
-
-An Explore source deadline preserves already prepared, revision-bound windows and marks the result
-`partial` / `searchIncomplete`, whether it interrupts the source pump, document materialization or later
-graph enrichment. The store's timer may fire while one of those stages is awaiting I/O; partial delivery
-does not depend on the pump reaching its next loop turn first. Explicit query/request cancellation and
-an abort before the source deadline remain cancellations, never successful partial results.
-
-Raw Document reads and optional outline/classification use separate queues with the existing
-preparation parallelism. Output excerpt count no longer limits investigation reads. Each free read
-slot reconsiders current candidate ranking, so late sources are not trapped behind a frozen page.
-Acquired versioned text is immediately available to incremental consumers. Source deadline, user
-cancellation and late completion retain their distinct meanings; stale enhancement results cannot
-overwrite windows built from newer query evidence. Source scope and search-backend coverage limits
-are preserved and reported.
-
-`explore.search` asks an optional `structureSource` (see
-`lib/structure/DOCUMENTATION.md`) for a revision-bound outline after a file is
-materialized. Production tries tree-sitter, then the agent-view LSP outline.
-Slice units are containers (function/class/interface/…); a hit on an ordinary
-value binding stays inside the enclosing function or class (D-098). Small
-containers are emitted in full; large ones keep the signature, the hit block,
-omission markers, and a full-unit read entry. An earlier `empty` outline or a
-ready outline that misses a hit does not hide a later provider; that later call
-is `warmOnly` and will not start a cold language server (D-099). When the source
-is used for ordinary Explore slices, requests are explicitly `warmOnly`; native parsing remains available,
-and the provider chain preserves that caller policy. A chosen `prepare-structure` operation can request
-cold preparation through the existing owner and authorization path. When the source
-is missing, cold, unsupported, stale, or failed, explore falls back to the ±3
-line window and records that status on the snippet and in `details.structure`.
-After materialize, tree-sitter may classify hit lines so declaration names
-outrank comments and strings in unit-local ranking; unread candidates are not
-parsed. It does not call `documentSymbols` itself. `windowScore` is gone.
-
-After excerpts are chosen, an optional `fileRelations` callback may attach
-outbound graph facts for those paths only (`details.relations` and a compact
-English block in the visible/stored body). Confirmed `connections` stay
-distinct from unverified `associations`. That annotation does not change
-byte/candidate budgets (D-108 / D-112).
-
-Query parse is object-first (D-144): technical literals, quotes, and anchors
-are objects; ordinary sentence words are content and do not drive graph
-queries. Relation words are a closed table (register / import / define).
-
-A second, independent graph path (`graphRecall`, already-open store only) may
-add **path** candidates. Objects from the question run `findLinks` /
-`searchDefinitions` before the first pack (D-146, revising D-137). Seeds
-discovered after a read still expand. The graph never supplies line numbers
-for excerpts. After `readFile`, explore relocates the symbol name or literal
-in the current text and only then writes `hits`; if the name is gone, that
-window is omitted — it does not become line 1. Graph why/boost bind to the
-window that verified, not the file. Evidence units carry `arrival` / `assessment`
-/ `purpose` instead of a single grade; `connects` and `associates` stay different
-graph arrivals. `details.graph` reports
-`not-requested | ready | empty | unavailable | failed`, with unique-file
-`definitions` / `connections` / `associates`. An unusable graph leaves the rg
-excerpts in place. Graph `filesDropped` is a unique-path floor and is combined
-with rg by taking the maximum, not the sum (D-092). Direct clues get priority
-reads inside the existing `maxMaterializeReads` budget; a path already in the
-rg pool but not yet read can still be materialized. Ranking is by task-match
-tier (D-145); path order is only a tie-break. `limit` is a cap. Content-word
-rg skipped because a direct clue verified is `details.skippedQueries`
-`direct-verified`, distinct from unread `not-requested` (D-147).
-
-Relations are an annotation, so they never make a successful search fail
-(D-112). `fileRelations` throwing — a corrupt store, or no store open for that
-workspace — sets `details.relations.status` to `partial` / `unavailable` and
-prints one line saying the graph could not answer, without leaking the
-underlying error. That is a different result from an absent `relations`, which
-means no excerpt path had an edge. A graph revision that differs from the
-excerpt is reported as `stale` and printed **without** line numbers, since a
-moved line number is worse than none. Relation lines are pushed last in the
-visible budget — after omitted supports, unread candidates and issues — and are
-capped per file, because the annotation must not crowd out the channels that
-tell the agent what the result does not contain.
-
-`related.query` answers file-level topology for one path or symbol name:
-definitions, imports (resolved and visibly unresolved), reverse importers, and
-connection endpoints. It is not `lsp.references`. A missing open store is
-`unavailable`; the read path does not open a database. The text caps each
-section and a name anchor's walked paths, saying how many it left out, so a hub
-file cannot hand the generic tool-result truncation the choice of which section
-disappears. Truncated lists link to a session-bound `get_output` handle containing the full formatted
-relations. Filename-only guesses for ordinary source files do not add output rows.
-
-### LspNavigationServices (`lsp-nav.ts`)
-
-`symbols` / `definition` / `references` / `hover` bind the queried document in
-the Host language view through `createLanguageViewBinder`, following the same
-fixed source as `read`/`grep` for this turn, and assert that revision on the
-request. A `stale` answer re-binds once and retries. Results carry `revision` and
-`source`; positions in other files are marked `[unpinned]` because the language
-server read those files itself and LSP does not report the version it used.
-
-### LspDiagnosticsService (`diagnostics-service.ts`)
-
-`lsp.diagnostics` binds the path to its current disk text — the text an agent
-just wrote, never the editor buffer — and waits for the publication computed from
-that exact revision, returning `pending` on timeout. `lsp.diagnosticsSnapshot`
-binds without waiting and stays incremental. Both report `revision` and `source`.
-Cache lookups use the exact normalized resource identity.
-The adapter converts the language service's zero-based `range.start` to the
-one-based line and character positions used by Harness tools.
-Snapshot calls are incremental per observer and canonical resource by default;
-`full: true` is a non-mutating full view. `shell.read` follows the same rule when
-neither `offset` nor `length` is supplied, while static `out_*` handles remain
-explicit UTF-8 byte slices.
-
-## Wiring (index.ts)
-
-The harness is wired in `packages/web/application-host/index.ts`:
-
-1. `HarnessServiceHost` instantiated after `workspaceContentSearch` and
-   `languageSupervisor` are created.
-2. `HarnessRouter` created after `recoveryTurnCoordinator`, with broker response,
-   Actor resolution, and Documents-backed path authorization callbacks.
-3. `registerHarnessServices()` registers all services on the router.
-4. `harnessRouter.processEvent(event)` added to the broker subscription,
-   aligned with `recoveryTurnCoordinator.processEvent`.
-5. Session registration on `session.snapshot` event with bound workspace.
-6. Disposal in `stop()`.
-
-## Session Lifecycle
-
-- **Register**: `session.snapshot` event with `workspace.kind === 'workspace'`
-  resolves that workspace's `harness.shell` from Pi settings, then
-  `harnessServiceHost.registerSession()` creates a `ShellSupervisor` from the
-  Host's discovered interpreters. Unreadable settings and an invalid
-  `harness.shell` value are reported as unavailable.
-- **Drop**: `harnessServiceHost.dropSession()` retires the shell supervisor
-  and clears session-scoped output entries and observation cursors. Its commands remain visible to reclamation
-  until `closeSessionShell()` confirms shutdown and writer release.
-- **Dispose**: `harnessServiceHost.dispose()` disposes all sessions and
-  global services.
-
-## D-278 native lifecycle acceptance correction
-
-See [the authority audit](../../../../../docs/archive/rust-kernel-audit.md). At the D-278 audit point, native materialization,
-capture, and root publication primitives were wired but the cross-domain execution-generation transition was not yet
-accepted. The audit required a durable Host switch intent connecting selected root/writeRevision, kernel
-operationId/receipt, Git executionBaseline, and Registry/view binding; a failed Git attachment or Host exit after
-promotion could not be resolved by a new random operationId or a current-branch read. Uncollected live content was
-already protected by a kernel conflict rather than overwritten to force a retry through.
-
-Maintenance hints containing only executionWorkspace remain Host operations, not fake session actors. Production
-capture/settle/reclaim carries the real execution workspace. Managed materialization admission uses the owning
-workspace's retained Thread/worktree and existing ownership assertion; root selection does not create authority.
-Branch metadata read failures propagate; incomplete unit fixtures must be corrected instead of swallowing errors.
-
-## D-279 R2/R3 acceptance closure
-
-D-279 closes the D-278 gaps without adding another writer. Pending kernel file operations are surfaced to the Host
-with operation identity, affected paths, disposition, reason, and a proof-based reconcile action. Native
-materialization persists a fixed root/revision/writeRevision plus operationId and durable pin in the Thread Registry,
-then records kernel-materialized and Git-attached receipts. The pin is released before the Registry handoff is cleared;
-a release failure leaves the receipt available for restart retry. Setup timeout/abort waits for the actual child
-`close` event. R2/R3 are Complete; local platform machines and code signing remain outside those stage gates.
-
-## D-280 native command lifetime
-
-Harness shell and user terminals share the injected Rust PTY backend. The terminal runtime keeps
-OSC 633 command framing and display; Rust owns bytes, process tree and directory writer. Shell
-request/command errors caused by kernel loss never become exit code zero or a replacement shell.
-Incomplete stop keeps the command/writer retained and rejects callers. The old global Node socket
-unref workaround is removed. Thread setup also uses native pipes, awaits actual close and keeps
-unconfirmed native writers protected. Fixed-result verification accepts an unknown process exit
-without converting it to successful evidence. See [the process consumer map](../process/DOCUMENTATION.md).
-
-### Native retrieval composition
-
-`retrieval-pipeline.ts` binds the native code-retrieval stage selection without fabricating a Pi
-`ExploreQueryActor`. Native callers consume the same `createExploreQueryRun` algorithm with an explicit
-Run-granted source adapter; the session-keyed Explore store remains owned by its Pi caller. Pipeline
-selection publication is short and query-local capture is immutable. Prepared candidate failure leaves
-old selection usable; mutable provider resources remain with their existing owners. See the
-[Kernel native retrieval boundary](../kernel/DOCUMENTATION.md#native-code-retrieval) for authorization,
-source versions, disabled model defaults and current integration limits.
+# Host harness services
+
+This directory contains product task/resource services and the Pi HarnessRouter adapter. The same
+file, research, material, Computer, MCP and knowledge owners also serve Agent runtime adapters in
+`../kernel/`. Sharing a domain service does not merge Pi's ThreadRegistry with the Rust Agent Catalog.
+
+Read [architecture](../../../../../docs/architecture.md), [resources](../../../../../docs/resources.md)
+and [retrieval](../../../../../docs/retrieval.md) for cross-cutting contracts. Agent execution, durable
+Operations and native follow-ups are described in [runtime](../../../../../docs/runtime.md).
+
+## Pi request admission
+
+`router.ts` receives broker-authenticated worker events and dispatches allowlisted Host services.
+`service-host.ts` owns shared output/cursors and per-session services. `agent-root-runtime.ts`,
+`research-root-runtime.ts` and `attached-root-runtime.ts` attach real Pi sessions to their durable task
+owners; a shell mounting or a settings read does not create an execution.
+
+Root lifecycle admission precedes a request, but the lifecycle queue is released while the actual
+service runs. Slow tools must not serialize unrelated tools or compaction-worker queries. Cancellation
+reaches the Router independently; shutdown cancels admitted requests before draining root queues.
+A tool-set refresh in the same worker generation updates grants without replacing live shell/input
+state; worker replacement retires the old generation.
+
+Project binding supplies organization and a default cwd, not a universal filesystem boundary. Explicit
+paths/cwd resolve through actual Host path/allowed-directory policy. Changing one command's cwd does
+not change the session default. Path admission and resource leases still apply to unbound conversations.
+
+## Component map
+
+| Responsibility | Implementation |
+| --- | --- |
+| Authenticated Pi dispatch and service grants | `router.ts`, `service-host.ts` |
+| Task catalog, Run lifecycle, admission and waits | `thread-registry.ts`, `thread-runtime.ts`, `thread-wait-runtime.ts` |
+| Isolated sources, publication and selected code transfer | `working-state/` |
+| Real shell handles and command presentation | `shell-supervisor.ts`, `shell-discovery.ts` |
+| Large output and delivery cursors | `output-store.ts`, `observation-cursors.ts`, `output-organize/` |
+| Scoped native content search and progressive Explore | `search-service.ts`, `explore-service.ts`, `explore-query-*.ts` |
+| LSP navigation/diagnostics for the admitted view | `lsp-nav.ts`, `diagnostics-service.ts` |
+| URL discovery/fetch, scholarly records and original material | `web-search.ts`, `web-fetch.ts`, `research-search.ts`, `web-materials.ts` |
+| PDF/document views and material collections | `document-reading.ts`, `material-read-service.ts`, `material-collections.ts` |
+| Research attempt orchestration and fixed input | `experiments.ts`, `experiment-workspace.ts`, `experiment-backend.ts` |
+| Machine commitments and observations | `resources.ts` |
+| Environment placement and forwarding | `environment-services.ts`, `environment-forwards.ts` |
+| Pi durable follow-ups | `followups.ts` and its source observers |
+| Shared live MCP connections | `mcp-service.ts`, `managed-mcp-service.ts` |
+| Network target/proxy/redirect policy | `egress.ts` |
+
+The exact public service names and DTOs are in `packages/protocol`; the table is navigation, not a
+second API declaration. Some domains have narrower modules linked below.
+
+## Collaboration and immutable results
+
+Ordinary Pi dispatch uses Worker/retrieval configurations and the caller's admitted tool/model choices.
+Input preparation precedes Run admission: preparing work is visible but cannot be dequeued. Once its
+baseline is ready, admission starts or queues the Run. Cancellation follows the original actor lifetime.
+Task ancestry controls discovery/history reads; read access does not grant sibling lifecycle control.
+
+Directed messages enter Pi history through original idempotent notification/continuation paths. The
+teammate roster is request-local, excludes the observer and does not replay a second inbox into context.
+A wait without a duration is an event subscription, not repeated model polling. Persisted targets,
+positions and deadlines let the original owner restore subscriptions after restart. New addressed
+input can interrupt a live wait without pretending the dependency completed.
+
+`working-state/code-submission.ts` fixes selected source changes and records accepted/queued/applied
+separately. Stable operation identity returns the original receipt even after the recipient edits later.
+The acknowledged baseline folds only sent source changes, excluding recipient edits and unsent work.
+Integration uses the original source/base/target and conditional mutations, not an unqualified file copy.
+Attached root deletion does not delete the user's Pi transcript as if it were a child-owned asset.
+
+Rust-backed WorkingState, file gates and Recovery hold physical/durable authority. The old TS store or
+local SQLite journal exists only as an isolated fixture seam; production cannot fall back to it.
+
+## Files, documents and shell
+
+`document.readSource` and path overlays select authorized live bytes, fixed drafts or the exact working
+branch. `document.surfaceWrite` coordinates Registry buffers and admitted disk mutations through
+Documents and the Rust backend. The Pi worker does not become a fallback writer when the Host fails.
+Mixed batches retain intent, original Surface receipts, conditional compensation and needs-attention.
+See [Documents](../documents/DOCUMENTATION.md) and [Recovery](../recovery/DOCUMENTATION.md).
+
+ShellSupervisor adapts the existing terminal/native process owner. Each command fixes its own cwd;
+process handles retain stdin/output/stop identity. Observing output does not trigger completion, and
+cancelling an observation does not kill a process. Native exit/writer receipts decide release. Raw
+output is retained with bounded delivery; output organization changes presentation, not original bytes.
+See [process consumers](../process/DOCUMENTATION.md), [Terminal](../terminal/DOCUMENTATION.md) and
+[output organization](output-organize/DOCUMENTATION.md).
+
+## Retrieval and material
+
+Search/explore use admitted native sources and actual revisions. Host policy, candidate ranking and
+packing stay in TypeScript; Rust owns file traversal/body and structure computation. Graph relations
+are supplemental facts, not permission to trust old positions. The full mechanism belongs to
+[retrieval](../../../../../docs/retrieval.md) and [structure](../structure/DOCUMENTATION.md).
+
+Web search has a Host-owned keyless default and disclosed failure-only fallback; an explicitly selected
+provider never silently becomes another provider. Domain filtering applies before disclosure, an empty
+allowed set makes no request, valid empty results differ from failures, and cancellation ends the chain.
+Web fetch retains original-page/snapshot authority independently of discovery snippets.
+
+Scholarly search returns one provider page and its actual continuation, identity and metadata/content
+state. It does not merge records on title similarity or claim metadata is the paper. Local PDFs and Web
+materials share original-byte views, explicit grants, revision checks and actual page-image parts.
+Material collection sharing is an explicit owner operation, not access inferred from a known ID.
+
+## Research jobs
+
+`research-access.ts` and `research-identity.ts` derive Pi callers from durable session binding and Agent
+callers from Catalog Thread/branch/source/family. Sharing a workspace does not authorize another task's
+attempts. Read/resource capabilities do not imply process-control permission.
+
+`experiments.ts` returns the original durable submitted attempt before capture/placement/materialization.
+Until fixed input exists, its spec is explicitly absent; it is observable/cancellable but cannot rerun a
+nonexistent spec. Stable request identity reconciles accepted retries before another capture. Source and
+transfer grants retain their own Operation lifetime rather than being retired with an ordinary Run.
+
+The accepted worker owns its lifetime independently of the HTTP response. Attempt, execution backend,
+collected artifact and published log high-water remain distinct. A persisted chunk beyond that high-water
+is not delivered output. Collection failure cannot become successful empty artifacts; explicit collect
+retries collection, not execution. Read locators are provenance, not proof the bytes were downloaded.
+
+Agent research adapters bind the real Catalog invocation to these original domain records and use
+Catalog Wait for separate observation. User submit is a User command, never a synthetic ModelStep/Pi
+session. Native tree cancellation reaches the original attempt and reconciles its late receipt.
+Normal Run settlement/archive does not terminate independent experiments. Real remote-machine, Slurm,
+installed-product and model-quality coverage must be established separately.
+
+## Service-forward ownership
+
+`environment-forwards.ts` owns listeners, opening/closing work and streams for tagged Pi/Agent owners.
+`kernel/environment-forward-runtime.ts` binds Agent tools to the original Catalog HostJob. A local
+address creates no listener; a managed target is fixed once. Credentials stay with the configured
+connection owner, not durable Job metadata.
+
+Acceptance means the coordinator's listener is ready, not that the target service answered. Closing
+drains that exact listener and streams, not the remote process. Lost replies query the original owner
+without opening a replacement. An unavailable original epoch cannot prove physical stop. Bot Sleep
+includes these Jobs; wake does not silently recreate a closed forward. The loopback address is local to
+the coordinator and does not establish reachability from another operating desktop.
+
+## Bot lifecycle
+
+BotService owns a tagged Pi or Agent entry, profile and durable activity intent. Creating/updating a
+profile does not convert an existing runtime or import another entry's assets. Default creation remains
+Pi. Model resolution uses the actual selected runtime, not the renderer's first catalog item.
+
+Sleep closes new admission before cancelling original child, context, memory, process, domain and
+Computer work. Host preparation/mutations remain owned until their underlying promises settle even
+when their observers already cancelled. Unknown remote stop keeps Sleep incomplete. Wake releases
+eligible holds through normal continuation rules; it does not replay unknown effects or resolve user
+Pause/questions. Deletion first completes that same stop and respects foreign retained references.
+
+VM shutdown follows confirmed work termination and applies only to this operation's managed VM when
+other work/human control does not retain it. An ACPI request is not observed shutoff. Retry/restart uses
+the original identity; wake starts only VMs it stopped. Workspace files, other tasks and native Pi assets
+are not swept with a Bot record. See [Computer](../computer/DOCUMENTATION.md) and [memory](../memory/DOCUMENTATION.md).
+
+## Follow-ups and settings
+
+Pi `followups.ts` retains definitions, occurrences and source cursors in the original kernel records.
+Compatible observers share subscriptions; typed observations precede cursor advancement. Composite
+leaves remain implementation detail. Source-less/Agent follow-ups instead use their Catalog owner,
+with transient Host observation adapters described in [kernel adapters](../kernel/DOCUMENTATION.md).
+
+Deliveries use the original directed-message/continuation identity. A lost shell is unavailable, not
+restarted. An occurrence, optional Wait, delivery and watched resource have separate lifetimes. Opening
+a management view never triggers a model. User mutation routes derive the actual authenticated session
+owner; supplied body fields cannot override it.
+
+Settings tools route to actual owners and frozen Surface targeting. Tool exposure, configured readiness
+and permission are different. Project schedules use the same scheduler as their GUI; native managed
+project mutations go to the Source Host's original receipt owner. See
+[scheduled tasks](../scheduled-tasks/DOCUMENTATION.md) and [MCP authority](../../../../pi-host/src/mcp-authority.md).
+
+## Verification
+
+Use the existing Web focused suites for changed domains and native `test:kernel` for real resource
+consumers. Fake provider/transport/driver tests establish wiring and lifecycle only. Historical phase
+labels and test counts are not current all-platform acceptance. Commands and remaining real-environment
+checks are linked from [development](../../../../../docs/development.md).

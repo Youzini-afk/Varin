@@ -201,21 +201,9 @@ replace a still-unconfirmed process. Native language tools use the original Sour
 available to default Worker and read-only Retrieval profiles; the read-only child gains no file-write
 or process tool merely because the Host language backend needs a physical view.
 
-Focused native acceptance includes the real already-bundled TypeScript provider through all three
-native tools: cross-file definition/reference and actual unversioned diagnostics retained as pending.
-Versioned/pull correctness, independent preparation/cancellation, malformed URI/range rejection and
-stale source behavior also have controlled-provider coverage; existing Pi navigation and diagnostic
-adapter regressions passed. Exact suite counts and the frozen native build are recorded in the
-[implementation plan](../../../../../docs/plan/agent-runtime-implementation.md#已核验增量live-root-原生语言工具).
-This does not certify all language providers, external compiler environments or all deployment platforms.
-
-The [materialized-source review](../../../../../docs/reviews/runtime-source-language-2026-10-12.md)
-records actual working-copy imports/configuration, original Rust history, watcher recovery and precise
-reference retirement. It distinguishes cold TypeScript aliases, test-gated diagnostic publications,
-main Run execution and child-directory admission; none is promoted into an untested guarantee.
-The subsequent [fixed-language review](../../../../../docs/reviews/runtime-fixed-language-2026-10-12.md)
-records actual fixed-project imports/config, fresh queries after reopening, and actual read-only/Worker
-child language/report consumers. Worker code-result publication remains a separate tested boundary.
+Native tests include the bundled TypeScript provider and controlled versioned/pull/cancellation/error
+cases. Each establishes its actual source, Host and provider boundary; no claim covers every language,
+external compiler environment or deployment platform.
 
 ## Source-bound read-only query composition
 
@@ -235,8 +223,7 @@ The source adapter returns mapped edges with sites on the real `from` resource. 
 from the input anchor or target. Original Rust post-admission reads every target under the same source
 grant and retains actual observations separately from unproven cross-file computation versions. Existing
 editor and knowledge APIs continue using their existing methods. This does not move editor commands or
-workspace edits into a read-only native call. Evidence is recorded in the
-[language query review](../../../../../docs/reviews/runtime-language-queries-2026-10-12.md).
+workspace edits into a read-only native call. See the actual source-bound tests beside this module.
 
 For a mutable source file that was opened as a Host-owned disk overlay, a watcher read of changed
 text sends that exact reader observation through the original document-version sequence before

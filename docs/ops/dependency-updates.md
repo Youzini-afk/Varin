@@ -112,8 +112,8 @@ The 1.0 upgrade retains stable AgentSession and rebases the existing Host seams.
 of workspace scope/machine placement. Keep `docs/codemode.md`, `docs/models.md` and `docs/mcp.md` in the
 installed runtime. Native image fixtures mock only the paid provider response and exercise the real
 sandbox, reference reader, image journal and protocol projection. UI checks cover zero-token cost and
-combined model/tool receipts. The experimental durable runtime assessment is recorded in
-[Pi durable-runtime assessment](../reviews/pi-durable-runtime.md#pi-10-durable-runtime-assessment); it is not part of this production dependency change.
+combined model/tool receipts. Pi continues to use stable AgentSession. The opt-in Varin Agent runtime has its own
+[execution owner](../runtime.md); neither is the experimental Pi durable-runtime candidate.
 
 The report only runs default-branch code and reads PR metadata; it neither installs PR dependencies nor
 executes PR code or project tests. `node --test scripts/dependabot-report.test.mjs` exercises its parsing.

@@ -8,7 +8,7 @@ configuration, and update policy.
 This guide covers the public authoring path. It does not require imports from `packages/ui`, private
 React components, or a source checkout of Varin.
 
-## Planned public packages
+## Authoring packages
 
 | Package | Use |
 | --- | --- |
@@ -19,8 +19,9 @@ React components, or a source checkout of Varin.
 | `@varin/extension-react` | Optional React 19 adapter; React is not part of the core contract |
 | `@varin/extension-cli` | `init`, `check`, `build`, and `test` author workflow |
 
-These packages are prepared for public AGPL-3.0-only distribution but are not published to npm yet.
-Once available, extension code should import the SDK and contract, not Varin's product UI.
+These packages form the AGPL-3.0-only authoring distribution. Repository manifests define the current
+versions; release records define published availability. Extension code imports the SDK and contract,
+not Varin's product UI.
 
 ## Create a project
 
@@ -89,9 +90,8 @@ receive JSON-safe props defined in `@varin/extension-contract`
 (`VarinWorkbenchEditorActionsSlotProps`, `VarinWorkbenchPanelViewsSlotProps`).
 
 Animation does not impose an official page structure on a Shell. The versioned Transition Scene and
-future optional Motion-service boundary are specified in
-[Varin Motion and replaceable transition scenes](../design/varin-motion-platform.md). A complete Shell owns
-its internal elements and animation; Varin only coordinates cross-owner handoff.
+its current boundary are described in [workbench visual handoff](../workbench.md#visual-handoff).
+A complete Shell owns its internal elements and animation; Varin only coordinates cross-owner handoff.
 
 ### Transition Scene
 
@@ -738,17 +738,30 @@ selected version.
 
 1. The host validates the manifest, engine range, artifacts, integrity, and capability delta.
 2. Added capabilities receive explicit decisions in the Extensions page.
-3. **Apply update** persists application intent, stages Host and all compatible entrypoints in the
-   initiating Surface, and selects the candidate only after staging and validation succeed.
+3. **Apply update** persists application intent and prepares the candidate through the existing Host
+   and Surface lifecycle. The exact publication barrier depends on the manifest's update group below.
 4. **Discard update** removes the candidate record and its prepared generation.
 
-Failure preserves the selected artifact, desired state, active generation, storage, and layout.
-Immutable content-addressed files may remain in the application-host cache; they are not active or
-selected extension records.
+Before publication, candidate failure preserves the selected artifact and committed owners. After the
+Host's durable selection commits, a disconnected or failed Surface can retain its previous local owner
+but cannot roll back that selection. A lost response requires reading authoritative selected state;
+cleanup failure is not evidence of rollback. Immutable files remaining in the artifact cache are not
+by themselves active or selected records.
+
+By default, Host and Surface actual state are independent. Opt into an explicit candidate update group
+with `updateReadiness: { surfaceEntrypoints: ["panel"] }`. The group includes this extension's Host and
+every named entrypoint in one participating compatible Surface, including lazy and declarative members.
+Unlisted optional entrypoints and other windows do not join implicitly. Only an enabled, reviewed
+candidate with apply intent acquires this barrier; initial enable and selected-artifact recovery do not
+depend on a window. Connected consumers prepare real mounts before publication. With no connected
+consumer, readiness proves modules/resources, not a visible screen.
 
 Review completion never applies an update by itself. A trusted-native Host update records the apply
 request and reports `restart-required`; the application host completes that already-requested update
-on restart. Staged or merely reviewed native candidates do not move on restart.
+on restart. Staged or merely reviewed native candidates do not move on restart. A trusted-native Host
+update with an explicit Surface group cannot prepare alongside its predecessor: disable it, apply the
+reviewed candidate while disabled, restart the Host, then enable it. Hot grouped native restart handoff
+is not implemented. See [update failure ordering](../extensions.md#candidate-updates-and-failure-ordering).
 
 ## Inspector and diagnostics
 
@@ -788,9 +801,10 @@ Editing the set does not silently change lifecycle. **Apply set** performs one r
 mutation and reconciles the result. Missing extension IDs remain profile references so reinstalling a
 package can restore the intended distribution.
 
-The Extensions page supports creating, selecting, applying, and removing profiles. User and workspace
-layout selection remains separate from application-host desired extension state; this avoids a hidden
-global enable/disable when one window changes its workspace layout.
+The Extensions page supports creating, selecting, applying, and removing profiles. The selected profile
+is user/application state; workspace scope affects layout rather than automatically choosing a shell.
+The explicit enable-and-switch path can enable the selected shell with rollback if its commit fails;
+it does not apply the profile's full extension set. See [profile ownership](../workbench.md#profiles-and-shell-switching).
 
 ## Optional discovery catalogs
 
@@ -832,7 +846,7 @@ first-class workflow even when no catalog contains the extension.
 7. Stage an update and verify both apply and discard behavior before publishing it as the default.
 
 Varin's complete lifecycle, trust, data-ownership, contribution, workbench, and routing architecture
-is recorded in [varin-extension-platform.md](../design/varin-extension-platform.md).
+is recorded in [extension ownership and runtime composition](../extensions.md).
 
 ## Varin public tooling releases
 

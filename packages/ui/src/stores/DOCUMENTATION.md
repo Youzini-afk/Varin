@@ -100,7 +100,7 @@ to the real runtime/session key in the same paint as selection; slow hydration n
 The draft store continues to own the transfer, and creation still waits for the native reads before returning.
 
 Permission grants remain authoritative in the Application Host; renderer preferences are not a
-second permission store. See [the security contract](../../../../docs/design/security.md).
+second permission store. See [the security contract](../../../../docs/security.md).
 
 Shared safe storage treats durable failures per key. A quota or access failure creates an ephemeral override or tombstone for that key without disabling reads and writes for unrelated keys; later writes retry the durable backend. Deferred adapters retain failed operations for a later flush, and malformed Zustand JSON is removed and treated as missing so hydration can recover.
 

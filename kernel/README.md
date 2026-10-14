@@ -1,281 +1,117 @@
-# Varin Rust system kernel
+# Private Rust kernel
 
-This workspace contains the private kernel executable used by each Application Host. It is not a
-public server and it does not expose a TCP port. The Host supplies private local control/content
-endpoints and a one-time bearer through stdin bootstrap. Windows uses named pipes with overlapped
-I/O; Unix uses local sockets. Both connections authenticate the same fresh kernel epoch. Stderr
-is diagnostics only; requests and output no longer share stdin/stdout.
+Each Application Host owns one packaged `varin-kernel` executable. It combines the resource kernel
+with the opt-in Agent runtime, using separate domain authorities inside the same private component.
+It has no public TCP server and is shared by Web, Electron and remote Hosts.
 
-On Windows and Linux the same executable also supplies `--watch-directories`, a separate private Host helper.
-It owns OS notification handles and exchanges subscription/flush metadata over
-its stdin/stdout pipes. It does not initialize the runtime, acquire a storage owner or process tool
-requests. Documents owns admission, invalidation and capture decisions; see the
-[observation boundary](../packages/web/application-host/lib/documents/DOCUMENTATION.md#filesystem-observation).
+- [System architecture](../docs/architecture.md): product processes and state ownership
+- [Resources and recovery](../docs/resources.md): source selection, files, processes and journals
+- [Agent runtime](crates/varin-runtime/README.md): Catalog, execution, context and provider contracts
+- [Host adapters](../packages/web/application-host/lib/kernel/DOCUMENTATION.md): actual consumers
 
-Control envelopes use length-framed JSON. Content uses separately acknowledged UUID/sequence chunks,
-rotating between ready streams at the selected socket-buffer granularity. Frame size bounds individual
-packets, not total content. JSON body encoding/decoding runs outside the control readers and domain
-actors. Closing either connection invalidates that epoch. A request identity is registered before its
-body arrives, so cancellation can acknowledge and discard an unfinished upload without executing it.
+## Build and protocol
 
-The wire source is [`protocol/schema.json`](protocol/schema.json). TypeScript DTOs used by the Host
-client are generated at `packages/web/application-host/lib/kernel/protocol.generated.ts` and checked by
-`bun run kernel:protocol`.
-
-Build locally with:
-
-```text
-cargo check --manifest-path kernel/Cargo.toml
-bun run kernel:build
-```
-
-The native parser uses tree-sitter 0.27 and Wasmtime 48; grammar admission checks the
-grammar ABI independently of the JavaScript tooling version. `cargo audit --file kernel/Cargo.lock`
-checks the Rust dependency graph in CI alongside the JavaScript audit. Dependabot tracks `/kernel`
-so runtime security upgrades also reach the lockfile. Native compute tests accept
-`VARIN_TEST_KERNEL_PATH` for a separately built release executable when a running development
-Host has locked the default executable on Windows.
-
-Release packaging must copy the resulting executable outside an Electron `app.asar` archive and set
-`VARIN_KERNEL_PATH` (or use the release layout resolver). The kernel acquires an owner file in its
-storage root and rejects a second writer. Unsupported older/future formats and corrupt catalogs are
-errors, not permission to recreate a store. Format/schema checks precede staging cleanup; rejection
-preserves the catalog, retained objects and pending streams. Workspace files, Git, native Pi data and
-external configuration remain user assets.
-
-R1 storage commands are domain operations: durable content-object installation, immutable trie roots,
-write-revision CAS, published revisions, pins, idempotent operation IDs, recovery records, and GC.
-
-R2 adds a scoped file-resource domain rather than a generic filesystem escape hatch. The Host registers a
-Documents-authorized canonical root; the kernel owns exact/subtree overlap leases, typed file capture,
-conditional apply, mkdir/remove/rename, and restart reconciliation for started filesystem operations. Regular-file
-capture/apply reuses the kernel content-object store. Production Documents/Files/Recovery/Integration and Harness
-`fs.lock` share this authority. Registry buffers remain outside Rust.
-
-R3 extends that domain with `file.scan`, `file.measure`, and `file.materialize`. Production WorkingState baseline
-capture uses Host-admitted roots and same-grant content owners; immutable roots materialize through verified
-staging/backup/promotion with restart reconciliation. Linux/macOS attempt real clone backends and unsupported
-filesystems fall back to byte copy; Windows currently reports copy only and leaves physical allocation unknown.
-Materialization and its recovery observations run on independent workers. Storage retains the immutable
-source through the started journal and holds the actual physical target/staging/backup leases until each
-worker stops. Tree traversal, copying, hashing and verification do not occupy the shared resource owner;
-authorization, cancellation at promotion, directory moves and factual receipt commits stay with Storage.
-Root registration and explicit reconciliation use the same worker path. Interrupted directories are
-preserved when their state cannot be proved, and cleanup never recursively deletes later user content.
-Managed directory reclaim/delete also runs through the kernel. Git remains a semantic adapter for inventory,
-index/filter behavior, and linked-worktree metadata; it does not become another workspace-body writer.
-There is no arbitrary SQL or arbitrary filesystem-write method on the wire.
-
-`file.scan` and `file.measure` are finite metadata workers on the same `file_workers` lifecycle.
-Storage captures the original grant/root registration and later rechecks current authority; directory
-reads, stat calls, sorting, inventory hashing and result construction run outside its actor. Cancellation
-keeps the request registered until actual completion, and shutdown joins the reader before releasing
-Storage ownership. Scan fingerprints identify sorted paths, not file bytes or an atomic OS snapshot;
-pages still rescan and verify the original continuation fingerprint.
-
-An optional scan `leaseId` retains only a lease the caller already owns. Experiment preparation passes
-its existing source lease through both inventory passes and capture, so a lost response cannot falsely
-prove that source readers drained. Ordinary metadata reads acquire no new lease. Explicit release,
-revocation and retirement defer that retained lease's physical removal until the worker stops.
-See [inventory acceptance](../docs/reviews/runtime-file-inventory-2026-10-11.md).
-
-Single `file.capture` and `file.captureBatch` share source readers with file observations. Stored capture
-hashes the admitted sources, returns one batched continuation to Storage for transient exact-hash
-retention, then verifies existing objects and hashes every source again on the original file workers.
-Only missing objects stage their second source pass; existing objects retain their verified bytes.
-The continuation keeps the same request, cancellation, credit and physical lease, with no Host round trip.
-Both source hashes, object integrity verification and response construction stay outside the actor.
-Single capture retains its original `{path,stateJson,ownerId}` response and non-indexed operation owner;
-batch retains indexed owners. A supplied lease stays caller-owned. An unbound single capture temporarily
-retains an exact resource in the same physical lease map, preserving managed-writer exclusion until its
-reader stops. Admission checks and insertion use one canonical resource identity. Worker completion
-rechecks original authority, installs verified misses and commits fresh object ownership in Storage;
-finite rename/directory durability operations remain with that owner to preserve its existing GC order.
-Original mutation/reconciliation observations reuse the body algorithm synchronously and remain an
-explicit separate control boundary. See [capture acceptance](../docs/reviews/runtime-file-capture-2026-10-11.md).
-
-`storage.getBlob` and fixed-source native `file_read` share one immutable-object body worker.
-Storage admits the original grant and owner/record-slot/branch-path/pin-path source, recorded length
-and range. Filesystem metadata, cold whole-object integrity verification, range reads and base64/text
-projection run on the existing file workers. Completion rechecks current grant/source/cancellation and
-moves the prepared body; only a successfully verified and still-authorized completion warms the original
-process-local integrity cache. Losing the source never becomes an empty successful read.
-
-Transient exact-hash reader references join original GC roots and pending physical deletion checks.
-They retain bytes through concurrent readers, queued completion and actual worker exit, but grant no
-access rights and create no durable query Operation. Revocation closes authority without deleting an
-in-flight reader's bytes. Shutdown joins the same workers before releasing Storage ownership; reopening
-starts with no transient readers. Other Storage writes and GC traversal retain their existing execution
-boundaries. See [blob-reader acceptance](../docs/reviews/runtime-blob-reader-2026-10-11.md).
-
-R5 adds read-only `compute.start/read/cancel/release` and grammar-recipe registration over those admitted
-resources. A job reads exactly one source class: an immutable WorkingState pin, a registered live root, or
-explicit fixed objects. Pinned jobs clone a short-lived reader pin; live records carry the revision actually
-read; fixed Registry drafts arrive as content objects/tombstones. Scope and requested roots are applied before
-candidate selection. Native operations cover list/read/bytes/search and tree-sitter structure/chunks.
-
-Compute output uses bounded cursor records with backpressure. Two foreground workers are isolated from one
-background indexing worker, and cancellation reaches traversal/parser work before the reader reference is
-released. Native discovery obtains a typed observation handle from that same admitted job. Empty-page
-and terminal waits use coalescing notifications with registration before predicate recheck, outside the
-Storage actor; cancellation wakes the caller independently and cleanup retains the reader until the
-worker actually stops. Cursor acknowledgement releases producer credit before waiting for more output.
-Scoped cancellation registrations are removed on normal completion as well as cancellation.
-The Host still owns request policy, DTO projection, grammar installation admission, tokenizer-aware
-packing, embeddings/vector stores, TriviumDB, LSP protocol, and Pi/model orchestration. The kernel does not
-become another public search service or model runtime.
-
-## Interactive process component acceptance
-
-The original ProcessManager owns identified stdin/EOF and resize effects. Separate per-process stdin
-and resize queues preserve their accepted order without making resize wait for blocked input. Native
-`process_write` / `process_resize` tools and retained Agent terminal views use the same original process,
-Storage intent and guardian receipt. Body-admission credit is distinct from effect completion; the Host
-keeps the request's cancellation and shutdown ownership after that transport credit is returned.
-
-After building a fresh, manifest-matched kernel, the focused OS component cases can be run with:
+The toolchain is pinned by [rust-toolchain.toml](rust-toolchain.toml); dependencies are in Cargo.lock.
+From the repository root:
 
 ```sh
-VARIN_TEST_KERNEL_EXECUTABLE=/absolute/path/to/fresh/varin-kernel \
-  cargo test --manifest-path kernel/Cargo.toml -p varin-kernel --lib process_interaction_review:: -- --ignored --test-threads=1
-VARIN_TEST_KERNEL_EXECUTABLE=/absolute/path/to/fresh/varin-kernel \
-  cargo test --manifest-path kernel/Cargo.toml -p varin-kernel --lib native_input_uses_original_model_intent_and_guardian_receipt_then_reads_same_process -- --ignored
-VARIN_TEST_KERNEL_EXECUTABLE=/absolute/path/to/fresh/varin-kernel \
-  cargo test --manifest-path kernel/Cargo.toml -p varin-kernel --lib policy_todo_question_reopen_process_wait_and_explicit_resume_use_real_domains -- --ignored
+bun run kernel:check
+bun run kernel:build
+node scripts/generate-kernel-protocol.mjs --check
 ```
 
-These use real guardian pipes/PTYs and persistent domain stores with deterministic provider replies.
-They require their declared local process/PTY support; they do not constitute Application Host IPC,
-renderer/network or cross-platform product acceptance. The owning Host `request-credit.test.ts` and
-terminal `input-wire.test.ts` separately exercise actual consumers with in-memory transport fixtures.
-The regular native authority suite below remains the real Host-to-kernel acceptance entry.
+`kernel:build` stages a release executable with Application Host identity and architecture metadata.
+A plain Cargo build uses the crate defaults and is not interchangeable with a verified release artifact.
+Packaged Hosts check the adjacent manifest, executable hash and actual PE/ELF/Mach-O architecture.
+Electron stages it outside `app.asar`; Web/cloud use their package kernel layout.
 
-## Authority regression acceptance
+[protocol/schema.json](protocol/schema.json) is the private wire source. The generator emits Rust and
+TypeScript DTOs. Receiving owners reject malformed/unknown shapes and check domain identity rather
+than trusting supplied workspace, Run or operation IDs.
 
-`bun run test:kernel` requires the built release executable and executes the Node transport suite plus the Vitest
-authority, storage adapter, and combined Recovery suites. `node scripts/test-kernel-authority.mjs --build` builds
-with the toolchain pinned in this workspace before acceptance; existing Linux/Windows CI jobs run it.
+## Transport lifetime
 
-The D-278 [audit](../docs/archive/rust-kernel-audit.md) repairs retain independent native regression cases.
-D-279 subsequently closes its specific R2 pending-operation and R3 kernel/Git/Registry handoff gaps.
-D-280 closes native process authority, and D-281 closes fixed/live file and structure computation through the
-production search, Harness, symbol, and semantic consumers.
-Current milestone evidence is in [harness status](../docs/status.md).
+The Host provides private local control/content endpoints and a fresh bearer via stdin bootstrap.
+Unix uses local sockets; Windows uses overlapped named pipes. Stderr is diagnostic only. Both channels
+authenticate the same epoch, and loss of either invalidates it.
 
-Original research artifact records have separate partial indexes for artifact identity and log
-attempt/stream/byte offset. `storage.experiment.logChunks` pages the original log records under their actual
-record-read grant; it does not infer publication from the largest stored chunk. ExperimentService's
-original Job CAS owns the published byte high-water, and the shared immutable object reader owns
-body reads and cancellation. Storage format 15 requires these indexes and rejects old internal
-formats without rewriting user assets.
+Control uses framed JSON. Content uses separately acknowledged stream/sequence chunks, credit and fair
+rotation. Frame bounds limit packets, not total content. Body encoding/decoding runs outside the control
+reader and domain owner sections. A request is registered before its body arrives, so cancellation can
+stop/discard incomplete admission without executing it.
 
-## R4 native process resources
+Queued cancellation, observer cancellation and domain completion differ. Returning transport credit
+cannot prove an accepted executor stopped. Client/worker shutdown retains original requests, owner locks
+and physical resources until their actual work drains. A lost response remains an explicit failure or
+unknown outcome, never permission to start a fallback writer.
 
-The format-v15 catalog keeps process identities, outcomes and grant lifecycle in the same Storage. Scoped
-`process.spawn/inspect/list/read/write/resize/kill/release` operate on admitted roots/grants.
-A guardian is another invocation of this packaged executable, not another kernel/database or Node
-PTY shim. It owns a pipe or real PTY and reports a durable native tree-exit receipt.
+On Windows/Linux, `--watch-directories` is a separate helper mode of the same executable. It owns only
+OS notification handles and private metadata pipes, not Catalog, Storage or tool execution. Its coverage
+and reuse limits are in [Documents observation](../packages/web/application-host/lib/documents/DOCUMENTATION.md#filesystem-observation).
 
-Grant state is one durable Active/Retired/Revoked value. Retirement disables the old caller without
-revoking creation provenance for an already stopped process; it requires real stop evidence and never
-kills a process to manufacture that evidence. Explicit revocation remains denied after a later retire.
-The private retirement selector names one grant, the original Host/Run, or an exact operation owner,
-so a restarted Host does not rely on an old in-memory grant list. An operation-owned grant retains
-its actual source Run attribution, but normal Run retirement selects only run-owned grants. Independent
-research source/transfer/backend owners retain their grants until actual capture, reader and process
-bookkeeping drain. Whole-operation retirement queries the original persisted ownership and active-grant
-index; it is not a separate cleanup ledger. A delegated successor's read-only old spool access requires the
-Catalog's exact source lineage plus current and creating Storage authority; other old resources and
-process controls are not inherited. Existing subscription/admission cancellation closes retired callers.
+## Storage and file authority
 
-Raw channel-tagged output has a bounded 1 MiB per-process queue and at most 64 KiB read chunks.
-Slow readers apply backpressure. Input has sequence/content identity and acknowledgements;
-termination does not wait for output drainage. Release discards output but retains an identity
-tombstone to prevent replay. Listing is paged. Command/env plaintext is not in the process catalog.
+Storage has one OS-held owner lock and the current typed catalog/object schema. It validates supported
+format and structural identity before normal writable recovery. Unsupported/future/malformed/corrupt
+stores are errors and their assets are preserved. No second TS writer or internal-format upgrade/import
+backend is selected. Workspace files, Git, native Pi data and external configuration are separate assets.
 
-Windows uses named kill-on-close Jobs; Unix uses managed-session guardians, with Linux subreaper
-tracking for adopted descendants. Unproven epoch-loss exits remain unknown and protect directory
-reclamation. Storage retains its lock through process drainage. Guardian receipts precede terminal
-responses. No hostile OS-sandbox or physical power-cut claim follows from this implementation.
+Storage owns immutable tree roots, revisions, SHA-256 objects, pins, references, typed domain records,
+Recovery/Integration phases and idempotent original-operation receipts. Bytes are verified/flushed before
+references publish. Logical release and physical cleanup have distinct results; failed deletion remains
+retryable and cannot be reported as successful zero-byte cleanup.
 
-Pipe launches normally escape each argument. The private `windowsRawArguments` field appends an
-explicit Windows command-line fragment for shells such as CMD, whose `/c` input must retain its own
-quotes and operators. The shell owner supplies this fragment; it participates in the process identity
-hash. It is rejected on Unix and PTY launches, which use their normal argument transport.
+Host Documents admits a canonical root; scoped Rust file resources own exact/subtree leases, capture,
+conditional apply, mkdir/remove/rename, scan/measure/materialize and restart reconciliation. Waiting
+plans acquire their whole resource set, not partial leases. Read/read overlaps and disjoint work can
+proceed. Original grant/root identity is rechecked at effect/completion boundaries.
 
-Use `bun run kernel:build` to supply Application Host build identity and architecture. A plain
-Cargo build defaults to the crate identity and is not a production acceptance artifact. See
-[the Host consumer map](../packages/web/application-host/lib/process/DOCUMENTATION.md).
+Finite file workers perform hashing, cold blob verification, range reading, inventory and materialization
+outside Storage's short authority sections. Transient exact-hash references and physical leases remain
+until real worker exit. Cancellation/revocation closes access without deleting a reader's in-flight bytes.
+These references are retention, not a new authorization grant.
 
-## Native Run resource admission
+Materialization uses verified staging/backup/promotion and factual restart observations. Linux/macOS can
+try clone backends with byte-copy fallback; Windows currently reports copy and unknown allocation.
+Interrupted paths are not destructively cleaned up when their identity cannot be proved. Git stays a
+semantic inventory/filter/worktree adapter and never becomes a parallel body writer.
 
-The Catalog instance owns one `ResourceAdmission` shared by every supervisor-launched execution
-engine. A complete canonical plan is acquired atomically after permission/service readiness, before
-durable dispatch. Conflicting pending plans preserve arrival order; unrelated eligible plans bypass
-them. Read/read claims overlap. Cancellation and releases notify waiters directly through bounded,
-coalescing control channels; waiting never holds a Catalog transaction or a partial resource plan.
+## Process authority
 
-Trusted short read-only result calls own transient leases only. Effectful and job calls write
-`resource_occupancy` in their existing dispatch transaction; settlement removes synchronous occupancy
-in its existing receipt transaction. A background handoff retains operation-owned claims beyond the
-model exchange and Run. Cancellation is not stop evidence. Confirmed executor terminal receipts
-release occupancy, including receipts arriving before the exchange's handoff. A trusted process
-consumer passes actual tree-stop evidence separately from business outcome, so a stopped process
-with an indeterminate effect releases occupancy while an unconfirmed disappearance does not.
-Startup clears the dead local Result-contract dispatch windows and restores remaining Job occupancy
-before admitting new work; it never infers a detached executor stopped from a recovered
-indeterminate business effect. A returned synchronous result releases its local dispatch window even
-when the business effect is unknown; that outcome still requires reconciliation and is never replayed.
+`process/` and `storage/process_resources.rs` own admitted pipes/PTYs, raw channel output, sequence-bound
+input, resize, kill, release and durable process outcomes. A guardian is the same executable in another
+mode and has no SQLite connection. Windows uses named kill-on-close Jobs; Linux uses managed sessions
+with subreaper tracking; other Unix platforms retain their supported session observation.
 
-Native file plans use Storage's existing canonical lease identity (including alias roots, parent
-symlinks and platform case handling), freeze it before admission, and recheck it at the actual file
-effect boundary. File CAS/journal and physical leases remain Storage authority. Fixed-source reads
-include immutable branch revision identity. Discovery consumes Storage snapshots without keeping a
-whole-directory lease while searching. Arbitrary spawned programs record shared environment writer
-activity; a long-lived development server does not exclusively lock every file or later process in
-its environment. Logical scheduling cannot isolate arbitrary third-party filesystem effects; use
-conditional file versions and real isolated environments where required.
+Input and resize have independent ordered queues. Output applies bounded backpressure and termination
+does not wait for the observer to consume all bytes. Releasing output retains an identity tombstone.
+Active or unknown processes continue protecting their physical execution directory.
 
-MCP ordinary RPC scope claims serialize local dispatch windows only. A disconnected or cancelled RPC
-cannot prove remote execution stopped; its unknown effect is retained without replay, and the scope
-claim must not be presented as a remote filesystem/desktop lock or an MCP Tasks terminal receipt.
+Grant retirement closes the old caller while retaining valid stopped-process provenance. Explicit
+revocation remains denied; operation-owned grants can outlive their creating Run until actual resource
+and receipt drain. Unproven old-epoch exits remain unknown, including after a Host transport failure.
+This is lifecycle management, not a hostile-code sandbox or a physical power-loss guarantee.
 
-MCP composition prepares each direct dependency independently over the shared Host authority. Ready
-contributions publish at a closed model exchange; unrelated slow preparation does not delay the model.
-Durable schema/configuration identity is separate from the ephemeral live owner handle. Re-enabling an
-identically described dependency creates a fresh live binding while old revoked exchanges stay revoked.
-Each selected server freezes its resource owner, configuration/trust and execution scope. Child
-source requirements and writer drainage follow the selected tool's server rather than the whole
-composition; original resource/interaction cleanup keeps its own scope even after server removal.
-Recovery waits only for its recorded dependencies and restores that exact selection. Ready originals,
-including service-only contributions, do not wait for an unrelated replacement candidate. Retired connections
-drain their holders/calls, and Host shutdown awaits connection cleanup already in progress.
+## Compute and runtime
 
-## Selected context composition
+Native compute reads one admitted source class: immutable pin, live root or fixed objects. It provides
+inventory, bytes, search and tree-sitter structure/chunks through bounded cursors with backpressure.
+Cancellation reaches traversal/parser work and reader references release only on actual completion.
+Live hits carry the observed revision; a scan fingerprint identifies sorted paths, not atomic file bytes.
 
-Native context checkpoints retain an optional `personalization.contextComposition`: exact Host
-session scope and originating selection revision, plus an ordered `transforms` array retaining each
-provider identity, immutable declaration digest and named instruction/data sections. Ordinary Host service routing selects the brokered provider collection; the
-context contract accepts only a frozen declarative result, with no model/network/effect callback.
-The packaged default and `examples/extensions/project-context` use the same SDK contract.
+The Host retains request policy, tokenizer-aware packing, LSP protocol, embeddings, vector/knowledge
+stores and product coordination. The separate `varin-runtime` crate now also implements the Agent
+Catalog/engine and provider contracts. Pi's own loop remains in Pi workers. Do not infer that a compute
+job owns a model runtime or that the new Agent runtime replaced every Pi consumer.
 
-`composition/context.rs` uses the existing resolver and registry to prepare and publish the typed
-transform. A branch-local ephemeral cache reuses unchanged bindings; each context read pins its
-actual implementation. Body hydration and native transform invocation run outside the Catalog mutex.
-The compiled output becomes part of the normal immutable model snapshot; original history is not
-rewritten, and data fragments retain external-data provenance. A context-only selection change can
-advance its checkpoint without pretending ordinary memory changed. Invalid selected preparation
-preserves the previous checkpoint; ordinary absence is distinct from selected-provider failure.
+## Verification entry points
 
-This is one production Provider/Transform slice, not a general policy/observer implementation or a
-claim that all extension services have moved into Rust. Independent review covers actual broker
-selection and captured model requests, replacement/failure, unchanged binding reuse and old pins.
+`bun run test:rust` runs the Rust workspace suites under the pinned toolchain. Tests involving Host or
+guardian consumers need the built dependencies and a matching absolute `VARIN_TEST_KERNEL_EXECUTABLE`.
+`bun run test:kernel` runs the existing Node/Vitest native authority consumers against a staged release
+binary; `node scripts/test-kernel-authority.mjs --build` also builds that binary.
 
-
-Ordered context composition uses Catalog format 59 and private kernel protocol 19. Older internal
-catalogs are rejected at open before writable access; obsolete single-transform DTOs are rejected,
-without conversion or migration. Generated public context types follow the same schema. Provider
-`describe` remains v1. A transform emits only new typed context fragments, preserving provider/content/
-section identity and instruction/data provenance, including duplicate local names across providers.
-Empty composition adds no item; original history and real tool results are never rewritten. Replacement
-reuses unchanged member implementations, while already pinned requests retain their exact old order.
+Choose the focused cases for the changed owner. Native component tests, controlled providers, Host IPC,
+real OS processes, installed products and physical remote machines establish different facts. A passing
+suite in one category is not evidence that the others ran. Commands and CI selection are described in
+[development](../docs/development.md).

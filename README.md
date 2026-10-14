@@ -18,6 +18,10 @@ session tree, package manager, and extension model remain Pi-owned. Varin owns t
 environment, working state, recovery, retrieval, context policy, task governance, and workbench surfaces.
 It uses Pi's public SDK directly rather than scraping a terminal UI.
 
+Pi remains the default. This branch also provides an opt-in [Rust Agent runtime](docs/runtime.md)
+with its own durable Thread/branch history. It does not automatically migrate Pi assets or switch the
+product default. Current support and remaining real-environment checks are in the [documentation](docs/README.md).
+
 Workbench Profiles select four bundled shells: **Agent Workspace**, **IDE Workbench**,
 **Research Workbench**, and **Varin Bot**. They are ordinary Varin extensions; you can replace
 an entire shell or individual parts. Agent Workspace centers on sessions and tasks, while IDE
@@ -60,35 +64,27 @@ phone-sized screen.
 
 ## What Varin provides
 
-### A governed agent harness
+### Execution, resources and recovery
 
-- **Threads, runs, and immutable working state:** work is organized into threads and runs whose
-  file changes publish as immutable roots. Agents draft in isolated virtual or materialized
-  workspaces and merge reviewed results back, instead of making loose edits to your checkout.
-- **One permission gate:** a single `tool_call` confirmation covers harness tools, Pi built-ins,
-  MCP tools, package tools, and nested-thread tools. Session grants stay scoped to the tool,
-  action, workspace, paths, and network targets they were approved for.
-- **Recovery that follows the agent:** the Host-owned recovery service journals agent mutations
-  alongside your own edits into combined checkpoints, so affected-file rollback, undo/redo, and
-  crash recovery work across tool calls without scanning the whole workspace.
-- **A native tool environment:** the shell supervisor runs real PTYs with automatic background
-  promotion, `get_output`, `write_to_process`, and `kill_shell`; `edit`/`write`/`apply_patch` carry
-  post-edit diagnostics and per-path leases; oversized results become paginated `OutputRef`s; and
-  package-manager output is organized instead of dumped raw.
+- Threads coordinate work, while admitted sources distinguish live files, immutable snapshots and
+  materialized execution. Selected results use recorded base/source/target identities.
+- Tool permissions, resource grants and physical completion are separate. A cancelled observer or
+  network connection does not prove a command or remote effect stopped.
+- Affected-file recovery journals controlled mutations without scanning the whole project per turn.
+  Later edits, unknown dirty state and unjournalled shell/application changes retain explicit limits.
+- Host-owned terminals, language servers, debugging, tasks and file tools share the Rust resource
+  authority rather than running privileged work in the renderer.
 
-### Context, retrieval, and knowledge
+### Context, retrieval and knowledge
 
-- **Structured context assembly:** a Zone 2 layer injects observed workspace facts — your edits,
-  terminal commands, diagnostics, Git status — without touching the system prompt. A memory keeper
-  maintains durable memory in off/assist/takeover modes, and Host-side compaction can take over
-  summarization without extra model calls.
-- **Layered retrieval:** `grep` for exact match, `explore`/`related` for grouped discovery backed
-  by a symbol graph and tree-sitter structure, and `recall` against a per-workspace knowledge store
-  with optional embeddings and reranking. Each layer is reachable directly; none requires the
-  others to fail first.
-- **Native web tools:** `webfetch` with SSRF and domain policy, extraction, PDF, and caching;
-  `websearch` through user-configured providers; a sources panel; and offscreen page rendering on
-  the desktop surface.
+- Requests retain their selected context and source revisions. Background compaction publishes only
+  a successful candidate; preparing or cancelling a summary leaves the previous context intact.
+- Exact search, Explore, graph topology and language navigation offer different evidence paths, with
+  explicit partial/stale coverage and optional semantic/model assistance.
+- Ordinary Agent notes are explicit scoped text. Bot knowledge and optional background organization
+  retain original source ranges, corrections and mutation receipts.
+- Web, scholarly and PDF tools separate discovery metadata, retained originals, extracted text and
+  actual page images. External providers and Computer/VM capabilities have their own support limits.
 
 ### A real coding workspace
 
@@ -127,16 +123,14 @@ extension's public commands, events, settings files, and capability contracts �
 fleets, context managers, workspace history, MCP servers, web access, memory systems, background
 tasks, and LSP/tooling configuration — so package updates can continue to advance independently.
 
-See [maintained extension integration](docs/design/extension-compatibility.md) for the per-extension
-command, event, and native-configuration contract, and which files stay plugin-owned. Varin does
+See [maintained extension integration](docs/extensions.md) for the current ownership boundaries and source entry points. Varin does
 not certify plugin versions against Pi releases.
 
 ## Build Varin extensions
 
 Varin application extensions and Pi packages are separate product objects: the former extend the
-Varin workbench, surfaces, and trusted Host, while the latter execute inside the Pi agent. The planned
-npm toolchain requires neither a Varin source checkout nor imports from the product's private UI; the
-`@varin/*` packages are not published yet:
+Varin workbench, surfaces, and trusted Host, while the latter execute inside the Pi agent. The npm authoring toolchain is implemented in this repository and avoids product-private UI imports.
+Use available published versions or the source workflow in the authoring guide:
 
 - `@varin/extension-contract`: manifest, contribution, service, routing, and discovery contracts plus JSON Schema;
 - `@varin/extension-sdk`: framework-neutral Surface, isolated-realm, and Host authoring APIs;
@@ -144,7 +138,7 @@ npm toolchain requires neither a Varin source checkout nor imports from the prod
 - `@varin/extension-surface`: lower-level lifecycle and registries for advanced tests or alternate hosts;
 - `@varin/extension-cli`: project initialization, validation, building, and conformance testing.
 
-After the packages are published, create a complete extension project with:
+When the packages are available in your registry, create an extension project with:
 
 ```sh
 npx @varin/extension-cli init ./my-extension --id dev.example.my-extension --name "My Extension"
@@ -159,8 +153,8 @@ manifest, capability, lifecycle, storage, publishing, and testing contracts.
 
 ## Download Desktop
 
-Current Varin desktop packages are not published yet. The [GitHub Releases](https://github.com/Youzini-afk/Varin/releases)
-page retains historical assets; use the source or Docker instructions below until a Varin package is released.
+Check [GitHub Releases](https://github.com/Youzini-afk/Varin/releases) for published artifacts and their
+platform/version information. Source and container workflows are below.
 
 ## Get started from source
 
@@ -179,11 +173,9 @@ the manifest-verified release executable that packaged layouts require.
 Varin ships a bundled Pi runtime and discovers user-level Pi installations through the Runtime
 Manager, which can select, install, or upgrade Pi without downgrading it. Varin becomes ready only
 after a real Host handshake and does not need to restart after activation. Electron contains the
-Node runtime needed to run the application, while Pi remains an independently managed tool. Native
-x64/ARM64 desktop packages for Windows, Linux, and macOS are validated on matching runners for
-application startup, Runtime Manager, health, and terminal lifecycle; optional offline installers
-remain future work. Containers keep a pinned, self-contained Pi runtime for reproducible unattended
-execution.
+Node runtime needed to run the application, while Pi remains an independently managed tool. Packaging and platform support must be checked against the actual artifact and target runner;
+a successful source build is not complete desktop/VM/provider acceptance. Containers keep a pinned,
+self-contained Pi runtime for reproducible unattended execution.
 
 ### Run the Web development surface
 
@@ -248,118 +240,29 @@ overlay:
 docker compose -f docker-compose.yml -f docker-compose.toolbelt.yml up -d
 ```
 
-Images are published for `linux/amd64` and `linux/arm64` with provenance and SBOM attestations. The
+The image workflows target `linux/amd64` and `linux/arm64` with provenance and SBOM attestations. The
 complete persistent-path, environment, container, and SSH rollback contract is documented in
 [Cloud deployment](docs/ops/cloud-deployment.md).
 
-## Architecture
+## Architecture and development
 
-```mermaid
-flowchart LR
-    S["Renderer: a Workbench Profile selects the shell extension"] --> C["@varin/application-client"]
-    S --> D["Documents, search, language, and run APIs"]
-    C --> T["Authenticated HTTP/WebSocket or editor transport"]
-    T --> A["Application host (@varin/web)"]
-    D --> A
-    A --> K["varin-kernel: private Rust system kernel"]
-    A --> B["@varin/runtime-broker"]
-    B --> H["Isolated @varin/pi-host workers"]
-    H --> P["Pi SDK + trusted Pi packages"]
-```
+Web, Electron and mobile share the Application Host. Pi workers own Pi conversations; the opt-in
+Agent runtime owns its separate Catalog/history. Rust Storage owns files, working state, processes
+and recovery; existing Knowledge and extension owners retain their domains. See the
+[architecture](docs/architecture.md) for request flow and trust boundaries.
 
-The application host is the single trusted backend. Each host owns a private `varin-kernel` child
-process that is the production authority for durable and machine-adjacent resources: immutable
-working-state roots, content objects and GC, recovery metadata, canonical file resources and
-materialization, PTY and pipe process trees, and fixed-view file and structure computation. The host
-keeps product policy — actor admission, document coordination, thread and run lifecycle, knowledge,
-and model orchestration — and talks to the kernel over a private framed stdio protocol, never a
-public port. There is exactly one production writer per resource; no TypeScript fallback authority
-remains behind the kernel.
+- [Documentation index](docs/README.md)
+- [Development and verification](docs/development.md)
+- [Agent runtime](docs/runtime.md)
+- [Resources and recovery](docs/resources.md)
+- [Workbench](docs/workbench.md) and [extensions](docs/extensions.md)
+- [Security](docs/security.md)
+- [Deployment and operations](docs/ops/README.md)
 
-The broker owns a catalog worker plus per-session workers. A renderer reload does not terminate an
-active task, and a Pi worker failure does not crash the renderer. Protocol DTOs cross the process
-boundary; SDK callbacks, credential objects, and extension implementation details do not.
+Package scripts define commands; choose focused checks for the change instead of running every build
+and suite for prose edits. Read [CONTRIBUTING](.github/CONTRIBUTING.md) and [AGENTS](AGENTS.md) before contributing.
 
-Electron runs that same host in its main process rather than adding a parallel desktop backend; only
-native capability such as windows, menus, and dialogs crosses the Electron preload boundary.
-
-Third-party Pi packages are executable code with the user's operating-system permissions. Varin
-shows observed capabilities and gates project-local executable resources, but it does not claim to
-turn trusted extensions into a complete sandbox. Read the [security policy](.github/SECURITY.md) and
-[security model](docs/design/security.md) before exposing a remote instance or installing unfamiliar code.
-
-## Repository layout
-
-| Path | Responsibility |
-| --- | --- |
-| `kernel/` | Private Rust system kernel: working state, file resources, processes, and compute |
-| `packages/application-client` | Framework-neutral `RuntimeAPIs`, transports, typed failures, and the desktop IPC contract |
-| `packages/ui` | Shared Pi-native React UI, stores, settings, and extension surfaces |
-| `packages/web` | Browser/remote frontend, trusted Application Host, and cloud CLI |
-| `packages/electron` | Native desktop shell, privileged boundary, packaging, SSH, and updates |
-| `packages/mobile` | Capacitor iOS/Android shell connected to a Varin server |
-| `packages/protocol` | Versioned, JSON-safe worker and surface protocol |
-| `packages/runtime-client` | Browser-safe runtime request/event client |
-| `packages/runtime-broker` | Catalog/session worker ownership, routing, and shutdown |
-| `packages/pi-host` | Isolated Node worker embedding the Pi SDK and extensions |
-| `packages/settings-store` | Atomic settings-file persistence shared by the hosts |
-| `packages/extension-contract` | Manifest, contribution, workbench, service, and discovery contracts |
-| `packages/extension-surface` | Framework-neutral owner scopes and transactional Surface registries |
-| `packages/extension-sdk`, `-react`, `-cli` | Public authoring SDK, React adapter, and author tooling |
-| `packages/extension-host` | Trusted application-host catalog, artifacts, storage, and services |
-| `packages/extension-loader` | Authenticated managed Surface module loader and isolated realms |
-| `packages/extension-builtins` | Manifests for Varin's built-in extensions, including all four shells |
-| `packages/docs` | User-facing documentation site source |
-| `docs` | Architecture, harness, kernel, workbench, migration, recovery, cloud, and security contracts |
-| `scripts` | Development, kernel build/measurement, release, cloud, deployment, and validation tooling |
-
-## Development and validation
-
-Use root or package `package.json` scripts as the command source of truth. The broad local baseline
-matches the important CI gates:
-
-```bash
-bun install --frozen-lockfile
-bun run type-check
-bun run lint
-bun run test:pi
-bun run test:kernel
-bun run test:cloud
-bun run build
-bun run test:pi:dist
-```
-
-`bun run kernel:check` is the fast Rust compile check; `bun run test:kernel` runs the non-skipping
-native authority suite against the built release executable. `bun run test:docs` tests the
-documentation checker; `bun run docs:validate` checks public and engineering content together.
-
-CI exposes three stable gates with distinct responsibilities: Ubuntu source quality, Windows runtime
-behavior, and the Ubuntu production build. Type checking, lint, and the full workspace tests run once
-in their authoritative gate; Windows adds only platform-sensitive coverage. Changes to cloud/runtime
-inputs make the Docker workflow verify the container contract, build the coupled slim and toolbelt
-base/application images, smoke both applications by immutable digest, and promote tags only after
-both candidates pass.
-
-Before contributing, read [CONTRIBUTING.md](.github/CONTRIBUTING.md), the repository-specific rules in
-[AGENTS.md](AGENTS.md), and the [engineering guide](docs/development.md).
-
-## Design and operations documentation
-
-- [Architecture](docs/architecture.md)
-- [Engineering guide](docs/development.md)
-- [Roadmap](docs/roadmap.md)
-- [Agent harness contract](docs/design/agent-harness.md) (Chinese), with [delivery status](docs/status.md), [plan](docs/plan/agent-harness-plan.md), and [decision log](docs/decisions/README.md)
-- [Rust system kernel design](docs/design/rust-kernel-design.md) and [audit record](docs/archive/rust-kernel-audit.md)
-- [Composable workbench and IDE contract](docs/design/composable-workbench.md) (Chinese)
-- [Unified file editor platform](docs/design/unified-file-editor-platform.md)
-- [Varin extension platform](docs/design/varin-extension-platform.md)
-- [OpenChamber-to-Pi migration contract](docs/ops/openchamber-pi-migration.md)
-- [Plugin GUI and ownership design](docs/design/plugin-gui-design.md)
-- [Recovery model](docs/ops/recovery.md)
-- [Cloud deployment](docs/ops/cloud-deployment.md)
-- [Security model](docs/design/security.md)
-
-- Thanks to the [LinuxDO](https://linux.do) community for their support
+Thanks to the [LinuxDO](https://linux.do) community for their support.
 
 ## Lineage and license
 
@@ -368,3 +271,5 @@ Varin is a Pi-native refactor of the maintainer's OpenChamber fork.
 Varin as a combined work is distributed under the
 [GNU Affero General Public License v3.0](LICENSE) (`AGPL-3.0-only`). Modified versions offered to
 users over a network must make their corresponding source available as required by the license.
+
+Third-party notices and retained copyright obligations are in [THIRD_PARTY_NOTICES](THIRD_PARTY_NOTICES.md).

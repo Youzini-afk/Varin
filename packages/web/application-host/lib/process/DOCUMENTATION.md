@@ -39,7 +39,7 @@ and adapter work without inventing an exit code or rerunning the command.
 Agent terminal adoption uses the original Catalog process Operation and a fresh same-Run source grant.
 The view cannot launch a replacement shell or release the native spool. User stdin, automatic theme
 responses and resizing all await original interaction receipts; closing a view does not stop the job.
-See [the shared interaction contract](../kernel/DOCUMENTATION.md#acknowledged-interactions-and-original-agent-terminal-views).
+See [the shared interaction contract](../../../../../docs/resources.md#进程与-operation-寿命).
 
 ## Scope
 

@@ -183,8 +183,7 @@ a valid result; unconfigured models, invalid envelopes/citations and changed sou
 `memory get` with `includeSource` and the settings original-passages view read only
 the persisted ranges authorized by the selected memory. They report changed or
 missing originals instead of presenting another revision as the cited evidence.
-Current delivery evidence is in the
-[BC acceptance record](../../../../../docs/reviews/bot-computer-use.md).
+Current cross-domain behavior is summarized in [context and knowledge](../../../../../docs/retrieval.md).
 
 ### Runtime build
 
@@ -267,14 +266,6 @@ other deleted Thread owners; there is no plan-history purge API. Deleted Catalog
 expose those records through the public plan service. This is a retention boundary, not a claim
 that deleting a Bot erases all historical plan bytes.
 
-The initial 2026-10-09 native slice's independent acceptance included 22 real-owner/IPC cases and 22
-real-kernel Host cases; UI/client focused acceptance covers 18 cases. Production Host bundling
-and Host/UI typechecks passed. Receipt replay, fork identity, temporary selection staleness and
-generic recall isolation have direct counterexamples. The exact durable no-effect receipt test
-and 12 execution regressions passed at that snapshot. The 2026-10-10 tagged-origin extension passed
-25 owning tests, including the actual PrivatePlanBridge, KnowledgeStore worker and database with an
-explicit Catalog-ancestry fixture. It covers both model and policy origins, owner reopen, conflicting
-intent and original receipt lookup after a later edit. Current combined native/Host evidence and
-remaining validation boundaries are recorded in the
-[implementation plan](../../../../../docs/plan/agent-runtime-implementation.md); no power-loss or
-packaged cross-platform claim is made.
+Focused plan tests exercise the real KnowledgeStore/worker, original receipts, fork identity and stale
+selection, with separate Catalog ancestry fixtures and UI consumers. They do not establish power-loss
+or packaged cross-platform behavior. See [development](../../../../../docs/development.md) for check selection.

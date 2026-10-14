@@ -235,8 +235,7 @@ diagnostics rather than being silently discarded. Original `_meta` Task associat
 requesting task augmentation. Token limits are bounded by the reviewed original request and selected
 model capacity; unsupported adapter limits or stop sequences remain actionable errors. Provider
 completion, local executor stop, missing/actual usage and reply delivery are separate facts.
-The [sampling verification record](../../../../../docs/reviews/runtime-mcp-sampling-2026-10-11.md)
-separates actual native/Host/SDK composition, controlled model streams and product/platform limits.
+Controlled streams and native/Host/SDK fixtures do not certify real provider or installed-product behavior.
 
 ### Error-source URL requirements
 
@@ -270,11 +269,8 @@ or joining the next original Task read. It does not silently add retries to ordi
 An accepted server-request URL can retain its exact completion watcher after normal Task result
 retirement, as after an ordinary RPC. Sending ends with `rpc_closed`; the Task is not revived.
 Original cancel/source/Goal/owner-loss fences still withdraw that association, and Catalog rechecks
-them before publishing a delayed completion. The [error-source verification record](../../../../../docs/reviews/runtime-mcp-error-interactions-2026-10-11.md)
-keeps these protocol boundaries and evidence separate.
-
-The [verification record](../../../../../docs/reviews/runtime-mcp-interactions-2026-10-11.md) distinguishes
-original Rust/Host/SDK composition, controlled peer work and outstanding full product/platform checks.
+them before publishing a delayed completion. Actual protocol/Host/SDK composition and controlled peer behavior remain distinct from
+real network, provider and installed-product acceptance.
 
 ## Resource observers
 

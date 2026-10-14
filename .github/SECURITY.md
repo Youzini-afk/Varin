@@ -8,7 +8,7 @@ boundaries can have consequences beyond the application UI, so private and repro
 appreciated.
 
 The implementation threat model and release gates are documented separately in
-[docs/design/security.md](../docs/design/security.md).
+[docs/security.md](../docs/security.md).
 
 ## Supported versions
 

@@ -26,8 +26,8 @@ live in this package. Application surfaces import those constants; they must not
 string table. The distribution Agent profile keeps the stable ID `default` and the English fallback
 label `Agent`; official UI localizes that name. Its default `workbench.shell` contribution is
 `varin.builtin.agent-workspace.shell`. The optional IDE profile uses the stable ID `varin.ide`
-and `varin.builtin.ide-workbench.shell` on web and desktop only. Selecting a profile does not
-enable or disable extensions.
+and `varin.builtin.ide-workbench.shell` on web and desktop only. Applying a profile extension set is separate from selection. The explicit enable-and-switch
+mode path may enable its selected shell, with rollback if the profile commit fails.
 
 Shell contributions declare which replacement targets and slots they actually host per surface
 using the `varin-workbench-shell/v1` contract in `data`. The parser
@@ -36,9 +36,9 @@ entry, that no unsupported surface is declared, that targets and slots are uniqu
 `workbench.shell` and `workbench.transition` never appear as nested targets. Use
 `resolveVarinWorkbenchShellSurfaceSeams` to read the seams for a specific surface.
 
-Replaceable Motion and cross-Shell handoff are specified in
-[`docs/design/varin-motion-platform.md`](../../docs/design/varin-motion-platform.md). The contract describes
-transition lifecycles and owner identity; it does not prescribe which elements a Shell must render.
+Current transition lifecycle and owner boundaries are described in
+[the workbench contract](../../docs/workbench.md). The generic Motion/shared-element service is not implemented.
+The contract does not prescribe which elements a Shell must render.
 `transition-scene` contributions replace `workbench.transition`; the default cube scene is an
 ordinary enabled-by-default built-in contribution rather than a Core rendering requirement.
 
