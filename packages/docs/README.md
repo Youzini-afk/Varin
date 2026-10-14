@@ -1,50 +1,22 @@
 English | [简体中文](README.zh-CN.md)
 
-# Varin Docs Source
+# Varin public documentation
 
-This package is the source of truth for Varin public docs content.
-**English is the default language and source locale.**
+This directory contains the user-facing Markdown/MDX documentation for Varin's native
+Agent workspace. English is the source locale; eight translated locales cover the same tasks.
 
-## Layout
+- `content/docs/` — English pages at the root and translations in locale directories
+- `sidebar.config.json` — English route/label definitions with localized labels
+- [CONTRIBUTING.md](CONTRIBUTING.md) — writing, localization and review
+- [DEPLOYMENT.md](DEPLOYMENT.md) — validation and current publishing status
 
-- `content/docs/*.mdx` — English pages (source of truth, no URL prefix)
-- `content/docs/zh-cn/*.mdx` — Simplified Chinese translations
-- `content/docs/<locale>/*.mdx` — other translations (e.g. `uk/`, `pt-br/`, `fr/`); see
-  [CONTRIBUTING.md](CONTRIBUTING.md) → Localization
-- `sidebar.config.json` — Starlight sidebar; `label` is English, other languages live in
-  `translations`
-- `CONTRIBUTING.md` — English authoring guide
-- `CONTRIBUTING.zh-CN.md` — Simplified Chinese authoring guide
-- `DEPLOYMENT.md` — how this source is validated and what is not automated yet
-
-A future Starlight site should treat English as the root locale:
-
-```js
-locales: {
-  root: { label: "English", lang: "en" },
-  "zh-CN": { label: "简体中文", lang: "zh-CN" },
-  // ...
-}
-```
-
-## Local validation
-
-Run from repo root:
+From the repository root, run:
 
 ```bash
 bun run docs:validate
 ```
 
-This validates:
-
-- frontmatter (`title`, `description`) exists for every MDX page
-- sidebar links resolve to default (English) MDX routes
-- inline Markdown page links resolve; engineering documentation local links are also checked
-
-It does not check branding, translation quality, or whether commands still match the code.
-
-## Deployment model
-
-This repository owns the docs source. There is no separate website workflow in
-`.github/workflows` yet. Until a docs site is published, treat these pages as
-the canonical content for GitHub and any future Starlight renderer.
+The command checks required frontmatter, page/sidebar targets and engineering-document local
+links. It does not render MDX, check translation quality or prove product behavior. Verify
+examples against current code and package scripts. This directory has no standalone site
+renderer or package build.

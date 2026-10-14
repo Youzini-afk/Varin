@@ -1,8 +1,8 @@
 # Recovery and rollback
 
 Varin exposes conversation-only recovery and, where affected-file coverage is available, combined
-conversation/file recovery. Pi conversations navigate their native session tree; Agent Threads navigate
-their own HistoryBranch. Recovery does not import one runtime's history into the other.
+conversation/file recovery. Native Threads navigate their original HistoryBranch; file recovery
+retains the original resource owner and conditional mutation receipts. Historical stores are not imported.
 
 ## Choose the scope
 
@@ -42,8 +42,8 @@ Shared catalog/WAL totals are not per-workspace reclaimable history. GC respects
 branch and operation owners and reports actual cleanup failures.
 
 Replacement recovery providers can advertise other storage modes and management capabilities; the UI
-shows controls only when the selected provider supports them. Optional Pi packages such as
-`pi-workspace-history` and `pi-wtf` have their own commands/data and are not invoked by this recovery path.
+shows controls only when the selected provider supports them. The original journal and resource owners
+remain authoritative; a replacement provider does not authorize access to unrelated data.
 
 The [resource contract](../resources.md#受影响文件恢复) explains the mechanism; the
 [Recovery module](../../packages/web/application-host/lib/recovery/DOCUMENTATION.md) maps it to code.

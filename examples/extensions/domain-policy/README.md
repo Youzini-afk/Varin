@@ -52,8 +52,8 @@ the example. Do not resend input as a substitute for explicit resume.
 
 The installer pins an immutable artifact. Rebuilding an uninstalled source file does not change a
 running policy. This version deliberately declares no private-state migration hook; changing its
-implementation (policy state version 2) requires the ordinary policy selection/restart-state controls. Installing it does not
-change the product's default Pi runtime.
+implementation (policy state version 2) requires the ordinary policy selection/restart-state controls. Installing it alone does not
+select the policy for a Thread.
 
 ## Recovery and evidence
 

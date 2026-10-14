@@ -10,12 +10,9 @@ etc.), typed failures (`DocumentsError`, `FilesystemError`, `LanguageServicesErr
 `LanguageSupportError`, `RunServicesError`, `WorkspaceSearchError`), pure DTO types (`WorktreeMetadata`,
 `DraftStarterRef`, `FileEditorSettingsPatch`, `ThreadResultHistory`), and the single desktop IPC contract (`desktop.ts`).
 
-`AgentProfilesAPI` edits Pi or Agent profiles through the authenticated Host, without selecting a
-conversation runtime or creating a Pi Session. Read projections separate shared fields from the selected
-runtime's default, explicit or unconfigured tools. Save uses the original settings revision: omitted tools
-preserve the choice, `[]` selects no tools, and `null` resets that runtime. Deleting a custom profile removes
-it for both runtimes. `AgentProfilesError` retains the Host's safe failure code/message. Host changes and
-aborted reads cannot publish a stale settings view; accepted tasks retain their original frozen profile.
+`AgentProfilesAPI` edits native Agent profiles through the authenticated Host. It separates shared
+profile fields from the actual registered-tool directory and retains revision-checked settings writes;
+see [Agent profile settings](#agent-profile-settings). Accepted Runs keep their frozen profile.
 
 `thread-history.ts` describes the user-only Thread history list and release response. The Host owns
 selection validation and object cleanup; the UI sends a frozen branch/revision selection. Logical bytes
@@ -167,6 +164,14 @@ its original complete range before parsing `OutputBody<StoredMedia>`. Media uses
 report holder and exact execution ID, including later Runs. Both report readers accept AbortSignal;
 cancelling a read does not cancel the child or alter its report.
 
+`ThreadsAPI.materials.upload(identity, request, signal?)` accepts an original PDF as canonical
+base64 with its filename and `application/pdf` MIME type. The authenticated Host derives the material
+domain from the real Thread/branch and retains original bytes through its document reader and
+MaterialStore. The response supplies a fixed PDF snapshot; no workspace upload or browser-side text
+ingestion is involved. Submit, `boundary`/`interrupt`/`next_run` enqueue and child continuation accept
+`materials: [{ snapshotId }]`. Admission resolves provenance through the material owner; arbitrary
+paths and hashes are never grants. Uncertain retries keep the same snapshots and original input key.
+
 `ThreadsAPI.materials.read(identity, request, signal?)` reads a retained Web/PDF snapshot through the
 same authenticated Thread route. The request contains a fixed `snapshotId` and document view options;
 workspace, grants, source Runs, local paths and artifacts are not public selectors. The Host derives the
@@ -174,6 +179,11 @@ current domain from the real Thread/branch and rechecks current User reading/OCR
 is the original `FetchResult`, including distinguishable material, parser and image failures. A content
 hash verifies source equality; it never grants access. Endpoint/identity changes cancel or reject old
 reads, without cancelling a Run or changing the tool's frozen configuration.
+
+`ThreadsAPI.materials.readSource(selection, request, signal?)` reads an explicitly selected path
+through a retained research source Run. The Host derives source authority and resolves that path within
+the original source, including retained fixed/materialized views. This does not authorize arbitrary
+files on the coordinating Host.
 
 `ThreadsAPI.materials.readArtifact(selection, request, signal?)` uses an explicit retained research
 `sourceRunId` alongside the same Thread/branch identity. Its artifact reference is the original
@@ -194,11 +204,11 @@ Research `submit` requires a stable User request ID and exact intent. An uncerta
 retry that same pair. It admits an independent User command and original domain attempt without
 starting the historical source Run. `cancel` requests the original job's stop; closing a reader does
 not cancel a job. Collection remains a separate domain action. These APIs do not own a second
-experiment store or switch the Research workbench's default runtime.
+experiment store or turn a historical read into execution.
 
 The desktop contract defines:
 
-- `VarinDesktopCommandMap` — typed `{ args, result }` for all 58 `desktop_*` commands
+- `VarinDesktopCommandMap` — typed `{ args, result }` for the exhaustive `desktop_*` command catalog
 - `VarinDesktopBridge` — the typed bridge interface implemented by Electron preload and consumed by the UI
 - `PreloadBootstrapPayload` — discriminated union carrying credentials only for local pages
 - `VarinDesktopEventMap` — typed desktop events (update progress, SSH status, menu actions, etc.)
@@ -226,6 +236,20 @@ closed completion watcher does not remove the user's ability to review that reta
 shared panel fetches full JSON on demand; neither local choice nor explicit external navigation
 retries the old RPC or resumes its Run. Public identity checks remain the original Thread/branch path.
 
+## Transport and Host switching
+
+Ordinary authenticated APIs pass route paths to `runtimeFetch`. Browser-owned URLs such as iframes,
+downloads, assets and WebSockets use the runtime URL/auth resolver and their transport helper. Do not
+build a browser URL and pass it back into `runtimeFetch`, or place long-lived bearer credentials in a
+URL. Browser URL admission remains a narrow authenticated Host contract.
+
+React features consume RuntimeAPIs through the provider hooks. Framework-neutral consumers use the
+registered accessor only when a hook cannot own the lifecycle. Switching the current Host replaces
+endpoint/auth ownership and resets or rebinds existing consumers. Async work retains its original Host
+generation; old completions cannot publish into the new one. Asset caches include Host and content
+revision and revoke retired object URLs. Unsupported capabilities remain typed unavailable results,
+not empty successes or accidental route fallthrough.
+
 ## URL-auth mint lifetime
 
 `transport/runtime-auth.ts` owns the shared in-flight URL-token mint, including its 10-second
@@ -235,10 +259,9 @@ without restarting the application. Fetch receives the owner's abort signal and 
 checked before token publication, even when a transport ignores cancellation. Runtime/origin generation
 checks still prevent an old authority from overwriting a new token. Token values are never logged.
 
-The UI connection candidate separately bounds authentication, socket open and handshake as one startup
-attempt. A startup timeout means no agent input was dispatched by that candidate; a timeout after a
-prompt was sent has different, ambiguous execution semantics. `test/runtime-auth-timeout.test.ts`
-exercises a stalled response body, concurrent mint sharing, retry and late-publication rejection.
+`test/runtime-auth-timeout.test.ts` exercises a stalled response body, concurrent mint sharing,
+retry and late-publication rejection. Authentication or observation failure does not establish the
+outcome of input already accepted by the native Catalog.
 
 ## Task-family message contract
 
@@ -277,22 +300,22 @@ checks. The original ChildTask and `readReport` remain the dispatch-round view; 
 switch to the latest continuation. Active child boundary/interrupt input uses the ordinary queue;
 its next Run must use the dedicated continuation admission.
 
-## History
-
-This package was extracted from the former UI-owned API and transport modules to clarify the boundary
-between framework-neutral client behavior and React presentation.
-
 ## Agent profile settings
 
-`AgentProfilesAPI` reads and revision-checks updates to the original user Agent profile settings for
-an explicit `pi` or `agent` runtime. The Host returns editable shared configuration separately from
-runtime tool selection (`default`, `explicit`, or `unconfigured`) and the actual Agent capability
-directory. Pi's directory is `null`, not an observed empty list. Raw persisted tool-selection unions
-never enter these DTOs. Save omits tools to preserve them, sends `[]` for no tools, or `null` to reset
-only the selected runtime. Creation requires a custom config with an empty key and explicit tools;
-the Host allocates its identity. Removing a custom profile removes its shared definition for both
-runtimes. The HTTP client preserves the Host's safe failure code and message and rejects late
-responses after Host changes or cancellation. No operation changes the conversation runtime.
+`AgentProfilesAPI` reads and revision-checks the original user Agent profile settings for
+`runtime: 'agent'`. The Host returns editable configuration separately from tool selection
+(`default`, `explicit`, or `unconfigured`) and the actual capability directory. A `null` directory
+means observation is unavailable, not an empty list. Raw persisted settings do not become a second
+client authority. Save omits tools to preserve them, sends `[]` for no tools, or `null` to reset.
+Creation requires a custom config with an empty key and explicit tools; the Host allocates its
+identity. Removing a custom profile removes its shared definition. The HTTP client preserves the
+Host's safe failure code/message and rejects late responses after Host changes or cancellation.
+
+Model/authentication and MCP connections have separate Host APIs in `model-connections.ts` and
+`mcp-connections.ts`. `resource-management.ts` manages current user/project skills using a saved
+navigation project and revision-checked commands. The Host resolves project trust and source paths;
+renderer paths do not grant access. Editing these defaults does not replace resources already frozen
+into a Run checkpoint.
 
 ## Typed output media
 

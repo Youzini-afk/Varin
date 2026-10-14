@@ -9,7 +9,7 @@ Provider/MCP 凭据、会话正文、文件、草稿、来源历史、扩展配�
 bearer/pairing token、Authorization header、任意环境值或文件正文。外部模型/Web 服务是数据接收方，不是可信本地库。
 
 项目信任约束可执行资源和 MCP 配置；settings/skill 文本不能通过声明授予文件、进程或凭据访问。
-第三方 Pi package 和 trusted Host extension 是可执行代码，能力标签不降低其 OS 权限。
+第三方 Host extension 是可执行代码，能力标签不降低其 OS 权限。
 工具策略与逻辑资源准入不等于 hostile-code sandbox。
 
 远端客户端经过鉴权路由、显式 capability 和 allowed-directory policy。物理使用时规范化路径；workspace ID、
@@ -27,15 +27,17 @@ Host token、自定义 header、本地/relay 身份留在 main；敏感 bootstra
 
 ## Host、扩展与私有进程
 
-公开 Surface、extension broker、Pi worker、私有 kernel 协议是不同边界。接收 owner 核验身份、epoch、generation 与精确操作形状。
-传入别人的 session/Run ID 不能成为代其执行的权限。
+公开 Surface、extension broker 和私有 kernel 协议是不同边界。接收 owner 核验身份、epoch、generation 与精确操作形状。
+传入别人的 Thread/Run ID 不能成为代其执行的权限。
 
-Pi 扩展在 Pi worker；Varin brokered Host 扩展在受管 child；isolated Surface 只有授予的 capability。
+Varin brokered Host 扩展在受管 child；isolated Surface 只有授予的 capability。
 Trusted-native 有显式 trust/restart 语义。新代次准备不能破坏已受理 pin，撤权继续阻止旧 owner 的新调用。
 Surface 可见不证明其必需 Host generation 已 ready。
 
 Kernel bootstrap 经 stdin 传 fresh local endpoint 与一次 bearer，control/content 鉴权同一 epoch。
 Knowledge/semantic 存储也由私有 child 拥有，不建立未鉴权数据库或通用文件 API。
+旧 session/worker grant 字段保留为可读历史字节，但非空值拒权；旧 session-owned record、result candidate 与缓存回执
+不能绕过当前 owner 校验。拒绝不会迁移、删除或重写这些历史资产。
 
 ## 网络、恢复与停止
 

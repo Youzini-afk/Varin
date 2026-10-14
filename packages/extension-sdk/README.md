@@ -95,8 +95,8 @@ than calling models or tools in the decision handler. Core validates exchanges, 
 registered waits and cancellation. [The bounded evidence example](../../examples/extensions/evidence-policy/README.md)
 shows bounded evidence, [the collaboration example](../../examples/extensions/collaboration-policy/README.md)
 shows direct child dispatch and observation, and [delivery with explicit pause](../../examples/extensions/delivery-pause-policy/README.md)
-shows independent output and the original Run/Wait resume boundary. These examples do not switch the
-product's default runtime or give the policy ownership of core history.
+shows independent output and the original Run/Wait resume boundary. Installing these examples does
+not select their policy or give it ownership of core history.
 
 `provideRetrievalPlan(context, { configurationId, structure })` registers an immutable
 `varin.retrieval.plan@1` declaration with matching `inspect` schemas. Select `structure: 'builtin'`

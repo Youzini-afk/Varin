@@ -1,32 +1,21 @@
 English | [简体中文](DEPLOYMENT.zh-CN.md)
 
-# Docs Source Deployment
+# Documentation validation and publishing
 
-This repository owns Varin docs **source**. Rendering and hosting for a public
-docs site are not automated here yet.
+This repository contains the public documentation source. No docs-site renderer, hosting
+pipeline or automatic source sync is configured here.
 
-The default language is English: `content/docs/*.mdx` is the English source, and
-Simplified Chinese lives in `content/docs/zh-cn/`.
+Content is in `content/docs/`; navigation is in `sidebar.config.json`. English is the root
+locale. Locale directories and sidebar translation keys are listed in
+[CONTRIBUTING.md](CONTRIBUTING.md).
 
-## What exists today
-
-- Content lives in `packages/docs/content/docs/`
-- Navigation lives in `packages/docs/sidebar.config.json` (`label` is English)
-- CI runs `bun run docs:validate` on every pull request and push to `main`
-
-## What does not exist yet
-
-- `.github/workflows/docs-source.yml`
-- A separate website repository
-- Automatic sync to a hosted Starlight/Astro site
-
-When a docs site is added, package this directory as the content source, keep
-`docs:validate` as the gate, and document the renderer repository here. Starlight
-should use English as the root locale (`lang: "en"`) and Simplified Chinese as
-`zh-CN`.
-
-## Local check
+Run the same validation used by CI from the repository root:
 
 ```bash
 bun run docs:validate
 ```
+
+`.github/workflows/ci.yml` and `.github/workflows/desktop-release.yml` invoke this check.
+It validates frontmatter and local links, not a rendered site. A future renderer should
+consume this directory and preserve its routes and locale mapping; publication needs its
+own configured build and deployment workflow.

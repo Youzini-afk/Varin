@@ -1,15 +1,14 @@
 ---
-title: Tokens de cette conversation
-description: Ouvrez Utilisation dans le menu des services de l’en-tête pour voir les tokens de la conversation actuelle par fournisseur et modèle.
+title: "Tokens utilisés par branche"
+description: "Consultez les mesures originales de la branche sélectionnée."
 ---
 
-# Tokens de cette conversation
+# Tokens utilisés par branche
 
-Ouvrez **Utilisation** dans le menu des services de l’en-tête pour voir les tokens de la conversation actuelle par fournisseur et modèle.
+Ouvrez **Usage** dans le menu des services de l’en-tête. Le travail exécuté sur la branche sélectionnée est regroupé par modèle, fournisseur, catégorie et état de mesure : conversation, contexte, planification, échantillonnage MCP et inférences d’outils enregistrées.
 
-- **Entrée** : tokens d’entrée hors cache.
-- **Sortie** : tokens générés.
-- **Lecture du cache** : entrée réutilisée depuis le cache du fournisseur.
-- **Écriture du cache** : entrée enregistrée dans ce cache.
+Les compteurs d’entrée, sortie, lecture et écriture du cache et raisonnement apparaissent quand ils sont fournis. Leurs définitions peuvent se recouper : ne les additionnez pas tous et ne supposez pas que l’entrée exclut le cache.
 
-Les totaux proviennent du journal de session Pi et incluent les messages antérieurs à la compression, les branches inactives et les appels auxiliaires enregistrés. Les usages sans information de modèle sont affichés séparément. Chaque conversation enfant possède ses propres statistiques.
+Mesures réelles, estimations, données manquantes et requêtes en attente restent distinctes. Inconnu ne signifie pas zéro. Les requêtes sans envoi enregistré sont identifiées. Threads enfants et travaux auxiliaires indépendants ont leurs propres mesures. Il ne s’agit ni du total de toutes les branches ni d’une jauge de contexte. Aucun prix n’est estimé.
+
+En cas de déconnexion, le dernier instantané est signalé. Cliquez sur **Refresh** pour reconnecter. Voir [Contexte](/fr/context/) et [Objectifs](/fr/session-goals/).

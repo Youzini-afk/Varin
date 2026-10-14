@@ -1,15 +1,14 @@
 ---
-title: Tokeny tej rozmowy
-description: Otwórz Zużycie w menu usług nagłówka, aby zobaczyć tokeny bieżącej rozmowy według dostawcy i modelu.
+title: "Zużycie tokenów gałęzi"
+description: "Sprawdzaj oryginalne pomiary dla wybranej gałęzi."
 ---
 
-# Tokeny tej rozmowy
+# Zużycie tokenów gałęzi
 
-Otwórz **Zużycie** w menu usług nagłówka, aby zobaczyć tokeny bieżącej rozmowy według dostawcy i modelu.
+Otwórz **Usage** w menu usług nagłówka. Praca wykonana w wybranej gałęzi jest grupowana według modelu, dostawcy, rodzaju i stanu pomiaru: rozmowa, przetwarzanie kontekstu, planowanie, próbkowanie MCP i zarejestrowane wnioskowanie narzędzi.
 
-- **Wejście**: tokeny wejściowe bez pamięci podręcznej.
-- **Wyjście**: wygenerowane tokeny.
-- **Odczyt pamięci podręcznej**: wejście ponownie użyte z pamięci dostawcy.
-- **Zapis pamięci podręcznej**: wejście zapisane w tej pamięci.
+Gdy są raportowane, zobaczysz tokeny wejścia, wyjścia, odczytu i zapisu pamięci podręcznej oraz rozumowania. Definicje dostawców mogą się pokrywać. Nie sumuj wszystkich pól ani nie zakładaj, że wejście wyklucza pamięć podręczną.
 
-Sumy pochodzą z dziennika sesji Pi i obejmują wiadomości sprzed kompresji, nieaktywne gałęzie oraz zapisane wywołania pomocnicze. Zużycie bez informacji o modelu jest pokazane osobno. Każda rozmowa potomna ma własne statystyki.
+Pomiar rzeczywisty, oszacowanie, brak danych i oczekiwanie pozostają rozróżnione. Nieznane nie oznacza zera. Wskazane są także żądania bez zapisu wysłania. Podrzędne Threads i niezależna praca pomocnicza mają własne zużycie. To nie suma wszystkich gałęzi ani wskaźnik pojemności kontekstu; nie ma wyceny.
+
+Po rozłączeniu panel oznacza ostatnią migawkę. Użyj **Refresh**, aby połączyć ponownie. Zobacz [Kontekst](/pl/context/) i [Cele](/pl/session-goals/).

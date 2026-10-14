@@ -7,7 +7,7 @@ from `@varin/application-client` without hardcoding origins, IPC channels, crede
 
 [Workbench and presentation](../../docs/workbench.md) explains the cross-feature invariants.
 [Extensions](../../docs/extensions.md) explains contribution and service ownership.
-[Runtime](../../docs/runtime.md) separates the Pi product route from the opt-in Agent runtime.
+[Runtime](../../docs/runtime.md) explains the native Thread/branch, Catalog and Application Host boundary.
 Use these for architecture, then the local owner below for implementation changes.
 
 ## Module navigation
@@ -22,12 +22,11 @@ Use these for architecture, then the local owner below for implementation change
 | Desktop/Web file editor | [Monaco](src/lib/monaco/DOCUMENTATION.md) |
 | Mobile and embedded editors | [CodeMirror](src/lib/codemirror/DOCUMENTATION.md) |
 | Agent/editor attachments and patch review | [Agent/editor bridge](src/lib/agent-editor/DOCUMENTATION.md) |
-| HTTP, browser URLs, switching | [Runtime API boundary](src/lib/api/DOCUMENTATION.md) |
+| HTTP, browser URLs, switching | [Application client](../application-client/README.md) |
 | Shared projections and preferences | [Store ownership](src/stores/DOCUMENTATION.md) |
 | Agent resource-panel navigation | [Context surfaces](src/lib/surfaces/DOCUMENTATION.md) |
 | Settings primitives and save feedback | [Settings components](src/components/sections/shared/DOCUMENTATION.md) |
-| Pi conversation | `src/components/pi-session`, `src/lib/pi-runtime`, and `usePiSessionStore` |
-| Agent runtime conversation | `src/components/thread`, `src/lib/agent-runtime`, and `ThreadsAPI` |
+| Native conversation | `src/components/thread`, `src/lib/agent-runtime`, and `ThreadsAPI` |
 | Theme and shared chrome | `src/lib/theme`, `src/styles`, and `src/components/ui` |
 | Icons | [Sprite-backed Icon contract](src/components/icon/README.md) |
 
@@ -42,7 +41,7 @@ with their existing shared or Host owner. Same-Host directory resolution can ret
 but must not supply the previous workspace ID as the new target. Failed resolution, Host replacement,
 or a revoked contribution is a different state and cannot keep a stale authority alive.
 
-Async work captures Host/API epoch and its actual session, Thread, branch, resource, or contribution
+Async work captures Host/API epoch and its actual Thread, branch, resource, or contribution
 identity. Changing targets invalidates both the request and its intended mutation target. A cached view
 can preserve continuity but cannot turn missing, loading, failed, or inaccessible data into success.
 Complete authoritative snapshots and partial save responses have different merge semantics.
@@ -59,11 +58,10 @@ rolled back. Detailed lifecycle mechanics belong to the extension packages.
 
 ## Conversation and resource projections
 
-Pi's native entries, queue, commands, session generations and worker readiness remain authoritative.
-Cold previews can render before readiness but cannot admit execution. Optimistic submission is local
-until native reconciliation; uncertain delivery remains visible instead of automatically resending.
-A single virtual list and scroll controller preserve manual reading, new-turn anchoring, and follow-end.
-Renderer choices do not change the live event transport or invent progress, timing, or token facts.
+The native Catalog owns accepted input, history, queues and execution receipts. `useThreadStore`
+projects navigation and summary clocks; `ThreadProjection` observes the selected branch. Progress
+streams are transient and sequence-scoped. A lost connection rebuilds from durable history rather than
+inventing completion or automatically resending input. Drafts retain exact uncertain command intent.
 
 `ThreadConversation` projects native Agent facts through `ThreadsAPI`. Its child, family, follow-up,
 plan, Goal, permission, question and recovery components keep their original owner and revision.
@@ -75,9 +73,10 @@ like an image descriptor. On-demand reads retain the original holder, part ordin
 identity. Object URLs belong to the mounted view and are revoked on cancellation or target change.
 Incomplete output-body pages must not be rendered as a complete report or reinterpreted as Markdown.
 
-`components/materials/PdfMaterialReader` is the shared reader core. Pi and Thread adapters provide their
-actual transport and draft destination. Research artifacts first resolve through the original artifact
-owner and then use the returned fixed snapshot. Selected regions go to the enclosing conversation's
+`components/materials/PdfMaterialReader` is the shared reader core. Thread adapters provide the
+authenticated material transport and guarded draft destination. PDF upload retains original bytes in
+the Host material owner; submit, queues and child continuation carry a fixed snapshot reference.
+Research artifacts first resolve through the original artifact owner and then use the returned snapshot. Selected regions go to the enclosing conversation's
 guarded composer; there is no global material event that can target a different Thread.
 
 `lib/attachProcessTerminal` attaches an accepted process. Remote cwd and resource identity are metadata,
@@ -87,11 +86,11 @@ owner/branch/operation through the Host. Attached Jobs are not persisted as rest
 
 Computer activity is an event projection of the Host operation. Its launcher does not probe/capture
 screens or acquire control. Bot sleep/archive/delete progress is also Host-owned; opening history
-never wakes a Bot. Ordinary navigation observes the Bot session index before displaying conversations,
-so an unavailable ownership read cannot leak Bot conversations into an ordinary session list.
+never wakes a Bot. Ordinary navigation filters the native Catalog’s `bot_id` ownership before
+displaying conversations.
 
 Source files, Git snapshots, material pages, and editor drafts retain their own identities. Explicit
-resource roots resolve through Documents instead of borrowing a session's workspace. A file-change
+resource roots resolve through Documents instead of borrowing a conversation's workspace. A file-change
 preview only describes received arguments until a real result supplies its mutation outcome.
 
 ## Settings and authoring conventions
@@ -101,15 +100,14 @@ Settings UI consumes shared catalog identities and the original domain APIs. Dev
 unsaved field drafts and their opened revisions across refresh; conflict is not an instruction to
 resubmit an entire old document. Same-owner and cross-owner results retain their real atomicity.
 
-`components/sections/agents` uses `AgentProfilesAPI` for shared profile fields and runtime-specific tools.
-Pi plugin agents retain their provider catalog and management format. Host/runtime changes retire old
-reads and drafts; omitted tools, empty selection, and reset are distinct. Accepted Runs are not rewritten
-by editing a default. Functional models stay with their owning settings domains.
+`components/sections/agents` uses `AgentProfilesAPI` for native profiles and exact registered tool names.
+Host changes retire old reads and drafts; omitted tools, empty selection, and reset are distinct.
+Accepted Runs are not rewritten by editing a default. Functional models stay with their owning settings domains.
 
 Provider editing separates connection configuration, model discovery, and authentication. Discovery
 and login have different interaction identities and cancellation. Saving a configuration is not
 successful login. Credentials stay in their native owner, never renderer settings. See
-[provider authority](../pi-host/src/PROVIDERS.md) and
+[provider authority](../web/application-host/lib/models/DOCUMENTATION.md) and
 [memory/personalization authority](../web/application-host/lib/memory/DOCUMENTATION.md).
 
 Use semantic theme tokens for surfaces, actions, selection, feedback, and syntax. Theme changes update

@@ -181,5 +181,4 @@ dependency license obligations remain in [LICENSE](../../../../../LICENSE) and
 
 Local protocol/configuration tests establish specific behavior, not live account or deployment
 support. Provider accounts, OAuth interaction, proxy/DNS environments, cloud credential chains,
-headless/remote use and installed-product packaging still require their relevant acceptance. Pi's
-continued product dependencies do not make it the owner of these native services.
+headless/remote use and installed-product packaging still require their relevant acceptance.

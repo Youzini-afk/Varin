@@ -15,15 +15,14 @@ Nginx、Nginx Proxy Manager、Caddy、Cloudflare、その他のリバースプ�
 
 ## プロキシが対応すべきもの
 
-- ライブメッセージ転送用の WebSocket:
-  - `/api/varin/runtime/ws`
+- WebSocket:
   - `/api/dictation/ws`
   - `/api/terminal/ws`
   - `/api/varin/realtime-proxy/ws`
 - バッファリングなしの SSE:
   - `/api/notifications/stream`
   - `/api/varin/events`
-  - `/api/varin/runtime-manager/events`
+  - `/api/threads/observe`
   - `/api/varin/realtime-proxy/sse`
 - 添付ファイルとファイル操作向けの大きなリクエストボディ
 - ライブストリームとターミナルセッション向けの長い read timeout
@@ -66,7 +65,7 @@ proxy_set_header X-Forwarded-Host $host;
 
 gzip off;
 
-location ~ ^/api/(varin/runtime|varin/realtime-proxy|terminal|dictation)/ws$ {
+location ~ ^/api/(varin/realtime-proxy|terminal|dictation)/ws$ {
     proxy_pass http://127.0.0.1:3000;
     proxy_set_header Upgrade $http_upgrade;
     proxy_set_header Connection "upgrade";
@@ -80,7 +79,7 @@ location ~ ^/api/(varin/runtime|varin/realtime-proxy|terminal|dictation)/ws$ {
     proxy_send_timeout 3600s;
 }
 
-location ~ ^/api/(notifications/stream|varin/(events|runtime-manager/events|realtime-proxy/sse))$ {
+location ~ ^/api/(threads/observe|notifications/stream|varin/(events|realtime-proxy/sse))$ {
     proxy_pass http://127.0.0.1:3000;
     proxy_set_header Host $host;
     proxy_set_header X-Real-IP $remote_addr;
@@ -118,8 +117,8 @@ Nginx Proxy Manager で **Websockets Support** を有効にしてください。
 
 ### ページは読み込まれるが、メッセージ送信に失敗する
 
-- プロキシで WebSocket が有効になっていません
-- `/api/varin/runtime/ws` が正しく通っていません
+- `POST /api/threads/*` の認証と転送を確認してください。
+- `GET /api/threads/observe` の SSE はバッファーやキャッシュを使わず配信してください。
 
 ### 通知またはライブ状態が更新されない
 

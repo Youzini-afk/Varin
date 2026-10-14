@@ -2,20 +2,14 @@
 
 Varin's browser, remote, and trusted server runtime.
 
-This package serves the shared Varin UI and owns the Web-side platform services. Conversation and
-agent execution are provided by the bundled Pi runtime workspace:
+This package serves the shared Varin UI and owns the trusted Application Host. Native Thread routes
+use `@varin/application-client` and `@varin/protocol`; the packaged Rust `varin-kernel` contains the
+Agent Catalog and execution runtime. The Host supplies models, credentials, extensions and domain
+services without owning another conversation store or execution loop.
 
-```text
-@varin/web
-  -> @varin/runtime-broker
-     -> @varin/pi-host
-        -> @varin/protocol
-```
-
-The four packages and the manifest-verified Rust kernel are one release unit. Publishing or installing
-only the browser bundle is not a supported deployment path because it would omit the private broker,
-host, protocol, kernel executable, and their package exports. The canonical cloud builder stages
-`packages/web/kernel` and runs its release smoke before accepting the runtime.
+The Application Host, shared packages, UI and manifest-verified Rust kernel are one release unit.
+Publishing only the browser bundle is not a supported deployment. The canonical cloud builder stages
+`packages/web/kernel` and runs release smoke against the assembled runtime.
 
 ## Development
 
@@ -33,8 +27,8 @@ node scripts/build-cloud-runtime.mjs --install --no-archive
 node artifacts/cloud-runtime/packages/web/bin/cli.js serve --foreground
 ```
 
-The canonical cloud builder compiles the Pi host/broker and Web UI, creates a production lockfile,
-and preserves the workspace layout required by `resolveBundledPiHostEntry()`.
+The canonical cloud builder compiles the Application Host, shared packages and Web UI, stages the
+Rust executable, and creates the production dependency layout and lockfile.
 
 ## Type and test boundaries
 
@@ -44,7 +38,7 @@ their Node compiler settings; browser code retains its DOM settings. The existin
 imports let cross-layer tests use those generated signatures without recompiling the Host as browser
 code. Native Vitest resolves those same imports to the original Host source, so it does not substitute
 declarations or a mock implementation at runtime. `*.native.test.ts` still runs only through the
-[dedicated kernel acceptance entry](../../docs/development.md#repository-and-build-facts).
+[dedicated kernel acceptance entry](../../docs/development.md).
 
 The root aggregate prepares the same shared outputs and Host declarations once, then uses
 `type-check:prepared` for Web's remaining checks. That entry requires fresh dependencies and declarations.
@@ -85,7 +79,7 @@ behavior are documented in [Cloud deployment](../../docs/ops/cloud-deployment.md
 ## Runtime data
 
 Set `VARIN_DATA_DIR` to choose the persistent data root. The Linux default is
-`~/.config/varin`. It contains settings, runtime registry files, authentication keys, remote
+`~/.config/varin`. It contains settings, native Catalog/content data, authentication keys, remote
 clients, pairing state, notifications, tunnel state, workspace identity, and document recovery
 journals; it must remain outside immutable release directories.
 

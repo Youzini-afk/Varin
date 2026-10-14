@@ -1,51 +1,14 @@
 ---
-title: Dostawcy, modele i agenci
-description: Połącz dostawców AI, wybierz modele i skonfiguruj agentów.
+title: "Kanały modeli"
+description: "Połącz konta i wybierz modele dla natywnych rozmów."
 ---
 
-# Dostawcy, modele i agenci
+# Kanały modeli
 
-Zanim Varin cokolwiek zrobi, potrzebuje co najmniej jednego połączonego dostawcy AI. Ta strona opisuje łączenie dostawcy, wybór modelu i dostosowanie agentów.
+Otwórz **Ustawienia → Kanały modeli**, dodaj kanał i wybierz typ, punkt końcowy oraz obsługiwaną metodę uwierzytelniania. Zależnie od kanału dostępne są zapisany klucz API, logowanie, jawna zmienna środowiskowa, obsługiwana tożsamość chmurowa lub dostęp anonimowy.
 
-## Połącz dostawcę
+Dodaj modele według ID albo wyszukaj kandydatów w zapisanym kanale, który to obsługuje. Sprawdź i zapisz wybór: samo wyszukiwanie nie zmienia katalogu. Włącz kanał, model i potrzebną operację, np. czat, a następnie wybierz model w polu wiadomości.
 
-1. Otwórz **Settings → Providers**.
-2. Otwórz menu **Add provider** i wybierz dostawcę, który nie jest jeszcze połączony.
-3. Zaloguj się na jeden z dwóch sposobów, w zależności od dostawcy:
-   - **API key** — wklej klucz i zapisz.
-   - **Sign-in (device flow)** — Varin pokazuje link i krótki kod. Otwórz link, wpisz kod i zatwierdź. Varin dokończy połączenie samodzielnie.
+Application Host zarządza konfiguracją i kontami. Dane uwierzytelniające są przechowywane osobno od metadanych i nie trafiają do historii rozmowy. Brak lub wycofanie danych nie powoduje automatycznego wyboru innego konta. Zmiany dotyczą późniejszego przygotowania; przyjęta praca zachowuje pierwotny wybór.
 
-Gdy dostawca jest oznaczony jako połączony, jego modele stają się dostępne na czacie.
-
-Aby odłączyć, otwórz dostawcę i wybierz usunięcie logowania.
-
-## Wybierz model
-
-Model wybierasz tam, gdzie pracujesz:
-
-- na czacie użyj selektora modelu na pasku wiadomości, aby ustawić dostawcę i model dla tej sesji
-- dla agenta ustaw model domyślny (poniżej)
-
-## Skonfiguruj agentów
-
-Agent to nazwana konfiguracja — model, osobowość i to, co wolno mu robić.
-
-1. Otwórz **Settings → Agents**.
-2. Wybierz agenta albo utwórz nowego.
-3. Edytuj dowolne z:
-   - **description** — do czego służy agent
-   - **model** — jego model domyślny
-   - **temperature** — jak kreatywne są odpowiedzi
-   - **prompt** — stałe instrukcje, których zawsze przestrzega
-   - **tool rules** — z których narzędzi może korzystać
-
-## Gdzie żyją Twoje logowania
-
-Logowania dostawców przechowuje `AuthStorage` Pi, nie renderer. Klucze API i tokeny OAuth nigdy nie pojawiają się w metadanych dostawcy wysyłanych do UI. Warstwy `models.json` użytkownika, projektu i operatora zostają w swoich natywnych plikach.
-
-Jeśli ustawisz tego samego dostawcę w więcej niż jednym miejscu, wygrywa ustawienie najbardziej szczegółowe: zaufana warstwa projektu nadpisuje osobistą.
-
-## Powiązane
-
-- [Serwery MCP](/pl/mcp/) — dodaj dodatkowe narzędzia dla agentów
-- [Tokeny tej rozmowy](/pl/usage/)
+Zobacz [Pamięć i instrukcje](/pl/agent-personalization/) oraz [MCP](/pl/mcp/). Dostęp do modelu nie przyznaje praw do plików ani narzędzi.

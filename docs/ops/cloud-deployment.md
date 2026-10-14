@@ -1,25 +1,15 @@
 # Varin cloud deployment
 
-Varin has one cloud release layout shared by containers, local deployment checks, and SSH
-deployments. The layout contains the compiled Web server plus the complete private Pi runtime
-closure:
+Varin has one cloud release layout shared by containers, local deployment checks and SSH
+releases. It contains the compiled Web Host/UI/CLI, the application-client, protocol, script-runtime,
+settings-store and required extension packages, plus the target `packages/web/kernel` executable
+and manifest. The exact package closure is `CLOUD_RUNTIME_PACKAGE_DIRS` in
+[`scripts/build-cloud-runtime.mjs`](../../scripts/build-cloud-runtime.mjs).
 
-- `@varin/protocol`;
-- `@varin/pi-host`;
-- `@varin/runtime-broker`;
-- `@varin/settings-store`;
-- `@varin/web`;
-- the target `packages/web/kernel` executable and manifest.
-
-These packages remain one workspace because the broker resolves the bundled host through package
-exports and Pi loads runtime resources from the installed package tree. Desktop Host workers bind a
-selected Pi package root at process start; the cloud builder still copies the pinned
-`@earendil-works/pi-*` packages into the staged `pi-host` production graph so images stay
-self-contained. The cloud builder creates a dedicated production `bun.lock`; native dependencies are
-installed on the target OS and CPU instead of being copied from the developer machine. The Rust kernel
-is built for the release target, copied with its SHA-256/build/architecture manifest, and exercised by
-`verify-kernel.mjs` before an image or SSH release is accepted. Storage/PTY do not install a second
-`better-sqlite3` or Node PTY authority.
+The builder stages a dedicated production `bun.lock`; native dependencies are installed for the
+target OS and CPU rather than copied from a developer machine. The Rust executable is copied with
+its SHA-256/build/wire/architecture manifest and exercised by `verify-kernel.mjs`. There is no Pi
+worker or SDK dependency closure to install, and no second Node Storage or PTY authority.
 
 ## Container images
 
@@ -38,7 +28,7 @@ the matching base manifest digest produced by the same workflow, so it cannot si
 newer floating base halfway through a build. Images include provenance and SBOM attestations.
 
 Builds first publish uniquely named candidate manifests. CI pulls both application images by digest,
-starts each amd64 container, checks `/health`, and imports the bundled broker and Pi host. Only those
+starts each amd64 container, checks `/health`, and verifies the native Host package closure. Only those
 verified digests are promoted to `main`, `latest`, `sha-*`, or semantic-version tags; a failed or
 cancelled candidate leaves the previously verified installable tags untouched. Pull requests build
 the coupled slim and toolbelt image pairs against a private runner-local registry and run the same
@@ -78,25 +68,20 @@ The persistent paths are:
 | `data/cloudflared` | `/home/varin/.cloudflared` | managed-local Cloudflare configuration and credentials |
 | `workspaces` | `/home/varin/workspaces` | user projects |
 
-On the first runtime generation, Varin may download any missing foundational Pi packages into the
-agent directory inside `data/varin`. This bootstrap is deliberately outside `/health`, so a slow or
-temporarily unavailable package source does not make the Web service unhealthy. Creating the first
-new session waits for the bootstrap result and exposes any per-package failure in Pi Packages;
-existing sessions are not restarted. Keep the data mount persistent so user disable/removal intent
-and installed package artifacts survive container replacement.
+Keep the data mount persistent so settings, credentials, installed extension artifacts and native
+conversation/resource stores survive container replacement. Unsupported or corrupt internal stores
+fail without automatic migration or rewriting existing user assets.
 
-Verify both the HTTP service and bundled Pi worker:
+Verify the service and its native kernel readiness:
 
 ```bash
 curl --fail http://127.0.0.1:3000/health
-docker compose exec varin node --input-type=module -e \
-  "const broker=await import('./packages/web/node_modules/@varin/runtime-broker/dist/index.js'); console.log(broker.resolveBundledPiHostEntry())"
 ```
 
-`/health` is ready only when `piRuntime.ready` is true and reports `source: "bundled"`. Published
-images also expose `releaseId: image-<git-sha>`; SSH releases expose their content-addressed release
-id, so a probe cannot mistake a still-running previous process with the same semantic version for
-the new candidate.
+Deployment validation checks `status: "ok"`, the expected `varinVersion` and `releaseId`, and
+`kernel.ready: true`. An HTTP response by itself is not proof that the kernel is ready. Published
+images expose `releaseId: image-<git-sha>`; SSH releases use their content-addressed release ID, so a
+probe cannot mistake a previous process with the same semantic version for the candidate.
 
 ### Runtime environment
 
@@ -118,8 +103,8 @@ embedded in an image.
 ## SSH deployment
 
 The maintainer helper builds the same canonical cloud tree, uploads an immutable archive, verifies
-its SHA-256 digest on the remote host, installs production dependencies for that host, resolves the
-bundled Pi host, and only then replaces the active release.
+its SHA-256 digest on the remote host, installs production dependencies for that host, verifies the
+native package/executable closure, and only then replaces the active release.
 
 Remote requirements:
 
@@ -182,7 +167,7 @@ cache/bun/      reusable target-platform dependency cache
 The deploy helper builds and verifies the candidate while the active process keeps serving. It
 atomically switches `current` before stopping that process, so a link-switch failure leaves the
 active runtime untouched. After the switch it stops the old runtime, starts the candidate, and polls
-`/health` for the expected Varin version and a ready bundled Pi runtime. If startup or health
+`/health` for the expected Varin version and a ready native kernel. If startup or health
 validation fails, it stops the candidate, restores `current` to the previous release, restarts it,
 and verifies the rollback. Releases are not pruned automatically; the operator retains the full
 rollback history until deliberately removing old, inactive directories.
@@ -206,9 +191,8 @@ node scripts/build-cloud-runtime.mjs --install --no-archive
 node artifacts/cloud-runtime/packages/web/bin/cli.js serve --foreground
 ```
 
-The build fails when a private Pi workspace dependency is missing, compiled host/broker output is
-absent, the production lock cannot be generated, or the installed runtime cannot resolve its bundled
-Pi host.
+The build fails when a required workspace dependency or compiled Host output is missing, the
+production lock is inconsistent, or the staged native executable/manifest cannot be verified.
 
 When a runtime dependency or override changes, deliberately refresh and review the dedicated lock:
 

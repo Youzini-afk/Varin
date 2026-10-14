@@ -14,9 +14,9 @@ documents. Git preserves their history.
 
 - Varin is an independent workspace and harness originating from the maintainer's OpenChamber fork.
   All changes happen in this repository; external OpenChamber checkouts remain read-only.
-- Pi remains the default conversation runtime. The Rust Agent runtime is opt-in, with its own tagged
-  Thread/branch identities and Catalog. Do not silently migrate assets, flip the default or remove Pi.
-  OpenCode contracts and the former VS Code companion are retired, not fallback targets.
+- The Rust Agent runtime is the conversation execution owner, using native Thread/branch identities
+  and Catalog. Pi runtime packages, worker transport and product adapters are retired. Do not reintroduce
+  a parallel conversation owner or automatically migrate user assets.
 - Preserve existing provider/auth, remote/pairing/relay, allowed-directory, external-access audit,
   session/history/queue and platform capabilities when changing their owner. Preserve LICENSE and
   THIRD_PARTY_NOTICES obligations independently of documentation cleanup.
@@ -27,7 +27,7 @@ documents. Git preserves their history.
   named process/contract boundaries in [architecture](docs/architecture.md).
 - Rust is the production authority for transferred storage, file, materialization, process and compute
   resources. The Agent Catalog additionally owns native execution. No parallel TS writer or fallback
-  authority may be reintroduced. KnowledgeStore and Pi retain their separate documented domains.
+  authority may be reintroduced. KnowledgeStore retains its separate documented domain.
 
 ## Invariants
 
@@ -44,7 +44,7 @@ documents. Git preserves their history.
   Failed or superseded preparation leaves the previous valid generation authoritative.
 - There is no compatibility requirement for obsolete internal formats. Reject unsupported/malformed stores
   without overwriting assets; do not add automatic internal-format upgrade/import paths. Current-format
-  durability/recovery still applies. Workspace files, Git, native Pi data and external config remain assets.
+  durability/recovery still applies. Workspace files, Git, historical conversation data and external config remain assets.
 - Do not invent hard limits without a concrete protocol/platform/safety/data/resource reason. Defaults,
   warnings, budgets and hard rejection are different contracts.
 - Keep filesystem, network, credential, shell and process behavior in the proper trusted owner. Validate
@@ -67,4 +67,4 @@ bilingual copy, permanent cleanup log, complex documentation governance or proje
 
 Preserve unrelated user edits and avoid destructive Git operations. Keep coherent phases reviewable, commit
 and push authorized completed work, and report exactly what did and did not run. Publication, deployment,
-credential changes and final runtime migration need their own authority.
+and credential changes need their own authority.

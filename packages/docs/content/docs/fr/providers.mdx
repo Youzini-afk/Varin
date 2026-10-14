@@ -1,51 +1,14 @@
 ---
-title: Fournisseurs, modèles et agents
-description: Connectez des fournisseurs d’IA, choisissez des modèles et configurez des agents.
+title: "Canaux de modèles"
+description: "Connectez des comptes et choisissez les modèles des conversations natives."
 ---
 
-# Fournisseurs, modèles et agents
+# Canaux de modèles
 
-Avant que Varin puisse faire quoi que ce soit, il lui faut au moins un fournisseur d’IA connecté. Cette page couvre la connexion d’un fournisseur, le choix d’un modèle et l’ajustement des agents.
+Ouvrez **Paramètres → Canaux de modèles**, ajoutez un canal et choisissez son type, son endpoint et une méthode d’authentification proposée. Selon le canal : clé API enregistrée, connexion, variable d’environnement explicite, identité cloud prise en charge ou accès anonyme.
 
-## Connecter un fournisseur
+Ajoutez des modèles par ID, ou découvrez des candidats sur un canal enregistré compatible. Vérifiez puis enregistrez votre sélection : la découverte seule ne modifie pas le catalogue. Activez le canal, le modèle et l’opération nécessaire, puis sélectionnez le modèle dans la zone de saisie.
 
-1. Ouvrez **Settings → Providers**.
-2. Ouvrez le menu **Add provider** et choisissez un fournisseur qui n’est pas encore connecté.
-3. Connectez-vous de l’une des deux façons, selon le fournisseur :
-   - **API key** — collez votre clé et enregistrez.
-   - **Sign-in (device flow)** — Varin affiche un lien et un code court. Ouvrez le lien, saisissez le code et approuvez. Varin termine la connexion tout seul.
+L’Application Host gère la configuration et les comptes. Les identifiants sont conservés séparément des métadonnées et n’entrent pas dans l’historique. Un compte indisponible n’est pas remplacé automatiquement. Les modifications concernent les préparations ultérieures ; le travail accepté conserve sa sélection.
 
-Quand un fournisseur s’affiche comme connecté, ses modèles deviennent disponibles dans le chat.
-
-Pour déconnecter, ouvrez le fournisseur et choisissez de retirer sa connexion.
-
-## Choisir un modèle
-
-Vous choisissez le modèle là où vous travaillez :
-
-- dans le chat, utilisez le sélecteur de modèle de la barre de message pour définir le fournisseur et le modèle de cette session
-- par agent, définissez un modèle par défaut (ci-dessous)
-
-## Configurer des agents
-
-Un agent est une configuration nommée — un modèle, une personnalité, et ce qu’il a le droit de faire.
-
-1. Ouvrez **Settings → Agents**.
-2. Choisissez un agent, ou créez-en un nouveau.
-3. Modifiez n’importe lequel de :
-   - **description** — à quoi sert l’agent
-   - **model** — son modèle par défaut
-   - **temperature** — à quel point ses réponses sont créatives
-   - **prompt** — consignes permanentes qu’il suit toujours
-   - **tool rules** — quels outils il peut utiliser
-
-## Où vivent vos connexions
-
-Les connexions des fournisseurs sont stockées par `AuthStorage` de Pi, pas dans le renderer. Les clés API et les jetons OAuth n’apparaissent jamais dans les métadonnées de fournisseur envoyées à l’UI. Les couches `models.json` utilisateur, projet et operator restent dans leurs fichiers natifs.
-
-Si vous définissez le même fournisseur à plus d’un endroit, le réglage le plus spécifique l’emporte : une couche projet de confiance remplace votre couche personnelle.
-
-## Pages liées
-
-- [Serveurs MCP](/fr/mcp/) — ajouter des outils supplémentaires aux agents
-- [Tokens de cette conversation](/fr/usage/)
+Consultez [Mémoire et instructions](/fr/agent-personalization/) et [MCP](/fr/mcp/). L’accès au modèle n’accorde pas de droits sur les fichiers ou outils.

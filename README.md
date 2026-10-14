@@ -10,135 +10,58 @@ English | [简体中文](.github/readme/README.zh-CN.md) | [繁體中文](.githu
 [![Docker Images](https://github.com/Youzini-afk/Varin/actions/workflows/docker.yml/badge.svg)](https://github.com/Youzini-afk/Varin/actions/workflows/docker.yml)
 [![License: AGPL v3](https://img.shields.io/badge/License-AGPL_v3-blue.svg)](LICENSE)
 
-**An independent Agent workspace and full harness for coding, research, and other project work:
-usable across desktop, web, and mobile clients.**
+**An independent Agent workspace and harness for coding, research, and project work across desktop,
+web, and mobile.**
 
-It includes a bundled [Pi](https://github.com/earendil-works/pi) runtime, whose model and provider stack,
-session tree, package manager, and extension model remain Pi-owned. Varin owns the surrounding tool
-environment, working state, recovery, retrieval, context policy, task governance, and workbench surfaces.
-It uses Pi's public SDK directly rather than scraping a terminal UI.
-
-Pi remains the default. This branch also provides an opt-in [Rust Agent runtime](docs/runtime.md)
-with its own durable Thread/branch history. It does not automatically migrate Pi assets or switch the
-product default. Current support and remaining real-environment checks are in the [documentation](docs/README.md).
-
-Workbench Profiles select four bundled shells: **Agent Workspace**, **IDE Workbench**,
-**Research Workbench**, and **Varin Bot**. They are ordinary Varin extensions; you can replace
-an entire shell or individual parts. Agent Workspace centers on sessions and tasks, while IDE
-Workbench combines editors, search, Git, diagnostics, and debugging with a dockable agent.
-
-Agent Workspace, Research Workbench, and Varin Bot support desktop, web, and mobile. IDE Workbench
-supports desktop and web. Work focus is separate from the selected shell.
+Varin uses its native Rust Agent runtime. Its Catalog owns Threads, branches, durable conversation
+history, and execution. The shared Application Host owns model connections and accounts, agent
+resource setup, MCP configuration, and trusted workspace services. Clients display and control these
+services through the same application APIs. See the [architecture](docs/architecture.md).
 
 > [!IMPORTANT]
 > Varin is pre-1.0 and under active development. Product surfaces and the private runtime protocol
-> currently advance together, so older builds are not guaranteed to interoperate with newer ones.
-> Back up important workspaces and pin a tested image digest for persistent deployments.
-
-## Product surfaces
-
-The screenshots below come from an isolated `demo-workspace` with anonymous sample files.
-
-### Agent Workspace
-
-Sessions and projects stay visible while the main canvas keeps the active agent, context tools, and
-composer in one focused workspace.
-
-![Varin Agent Workspace](.github/readme/assets/agent-workspace.png)
-
-### IDE Workbench
-
-The IDE profile combines workspace navigation and editor infrastructure with a docked, fully capable
-Pi agent instead of treating chat as a separate application.
-
-![Varin IDE Workbench](.github/readme/assets/ide-workbench.png)
-
-### Mobile workspace
-
-The responsive workspace keeps the same project, agent controls, context surfaces, and composer on a
-phone-sized screen.
-
-<p align="center">
-  <img src=".github/readme/assets/mobile-workspace.png" alt="Varin mobile workspace" width="390" />
-</p>
+> advance together; older and newer builds are not guaranteed to interoperate. Back up important
+> workspaces and pin a tested image digest for persistent deployments. Existing user assets are not
+> automatically imported, migrated, or rewritten; unsupported internal store formats are rejected.
 
 ## What Varin provides
 
-### Execution, resources and recovery
+- **Native conversations:** Thread and branch history, streaming, queued input, model and thinking
+  selection, child tasks, plans, permissions, and recovery, all backed by the native Catalog.
+  [Runtime](docs/runtime.md)
+- **A coding workspace:** files, diffs, Git, worktrees, terminals, workspace search, language servers,
+  and debugging. Desktop and web share Monaco; mobile uses a lightweight editor against the same
+  document authority, with explicit unsaved-buffer and conflict handling. [Workbench](docs/workbench.md)
+- **Execution and recovery:** admitted sources distinguish live files, snapshots, and materialized
+  work. Rust owns storage and execution resources; permissions, cancellation, and actual completion
+  remain separate facts. [Resources and recovery](docs/resources.md)
+- **Research and context:** exact and semantic retrieval, language navigation, scoped notes, Bot
+  knowledge, web and scholarly discovery, and PDF materials with retained sources and page images.
+  [Retrieval and context](docs/retrieval.md)
+- **Host-owned setup:** configure model channels, accounts, endpoints, agent instructions and skills,
+  and MCP connections through dedicated settings. Credentials and privileged execution stay with
+  trusted owners. [Models](packages/web/application-host/lib/models/DOCUMENTATION.md),
+  [agent resources](packages/web/application-host/lib/agent-resources/DOCUMENTATION.md),
+  [MCP](packages/web/application-host/lib/mcp/DOCUMENTATION.md)
+- **Local and remote use:** Electron embeds the Application Host; web and Capacitor mobile clients
+  connect to it. Remote Hosts, pairing, tunnels, and container/SSH deployment retain explicit access
+  and platform boundaries. [Security](docs/security.md) · [Operations](docs/ops/README.md)
 
-- Threads coordinate work, while admitted sources distinguish live files, immutable snapshots and
-  materialized execution. Selected results use recorded base/source/target identities.
-- Tool permissions, resource grants and physical completion are separate. A cancelled observer or
-  network connection does not prove a command or remote effect stopped.
-- Affected-file recovery journals controlled mutations without scanning the whole project per turn.
-  Later edits, unknown dirty state and unjournalled shell/application changes retain explicit limits.
-- Host-owned terminals, language servers, debugging, tasks and file tools share the Rust resource
-  authority rather than running privileged work in the renderer.
+Four bundled Workbench Profiles select **Agent Workspace**, **IDE Workbench**, **Research Workbench**,
+or **Varin Bot**. Agent, Research, and Bot support desktop, web, and mobile; IDE supports desktop and
+web. Profiles are Varin extensions: replace an entire shell or individual contributions while work
+focus, documents, and Thread identity remain independent of presentation.
 
-### Context, retrieval and knowledge
-
-- Requests retain their selected context and source revisions. Background compaction publishes only
-  a successful candidate; preparing or cancelling a summary leaves the previous context intact.
-- Exact search, Explore, graph topology and language navigation offer different evidence paths, with
-  explicit partial/stale coverage and optional semantic/model assistance.
-- Ordinary Agent notes are explicit scoped text. Bot knowledge and optional background organization
-  retain original source ranges, corrections and mutation receipts.
-- Web, scholarly and PDF tools separate discovery metadata, retained originals, extracted text and
-  actual page images. External providers and Computer/VM capabilities have their own support limits.
-
-### A real coding workspace
-
-- **Pi-native conversations:** streaming, branching, tree navigation, compaction, steering and
-  follow-up queues, model and thinking selection, session rename, archive, restore, and deletion.
-- **Workspace tooling:** files, diffs, Git, worktrees, terminals, SSH hosts, remote instances,
-  comments, and editor context share the active Pi session and workspace.
-- **Editor-grade infrastructure:** one revisioned document authority with real conflict handling;
-  desktop/Web Agent and IDE surfaces share Monaco models, editor groups, workspace search,
-  host-owned language servers, and standards-conformant debug adapters, while mobile and embedded
-  editors use a lightweight CodeMirror adapter against the same authority. Agent edits reconcile
-  with your unsaved buffers instead of overwriting them.
-- **Custom providers:** configure Pi-native provider layers, authentication, model discovery, and
-  custom endpoints without mirroring credentials into renderer storage.
-
-### Composable and everywhere
-
-- **Packages without a parallel plugin system:** install, update, remove, and inspect any package
-  accepted by Pi's `PackageManager`. Unknown extensions still receive generic command, tool, entry,
-  notification, and UI handling.
-- **First-class plugin configuration:** maintained plugins get focused GUI surfaces while their own
-  native JSON/JSONC files, commands, databases, and migration logic remain authoritative.
-- **A recomposable workbench:** pick an Agent, IDE, Research, or Bot profile, or build your own. Replace the whole
-  shell or just the navigation, editor, panel, composer, timeline, or status bar, and mix first-party
-  with community contributions. Switching happens live, without reloading documents, restarting the
-  Pi runtime, or losing shared workspace state.
-- **Multiple product surfaces:** a shared React UI powers Electron, Web, and the Capacitor mobile
-  shell through explicit runtime capabilities.
-- **Cloud and remote operation:** authenticated WebSocket access, relay/tunnel support,
-  multi-architecture containers, and atomic SSH deployment with health validation and rollback.
-
-## Maintained extension integrations
-
-Varin does not fork Pi extensions or copy their private state. Maintained adapters consume each
-extension's public commands, events, settings files, and capability contracts — including subagent
-fleets, context managers, workspace history, MCP servers, web access, memory systems, background
-tasks, and LSP/tooling configuration — so package updates can continue to advance independently.
-
-See [maintained extension integration](docs/extensions.md) for the current ownership boundaries and source entry points. Varin does
-not certify plugin versions against Pi releases.
+Provider, Computer/VM, and packaging support depend on the actual environment. Focused tests do not
+establish complete platform acceptance; see [runtime acceptance](docs/runtime-acceptance.md).
 
 ## Build Varin extensions
 
-Varin application extensions and Pi packages are separate product objects: the former extend the
-Varin workbench, surfaces, and trusted Host, while the latter execute inside the Pi agent. The npm authoring toolchain is implemented in this repository and avoids product-private UI imports.
-Use available published versions or the source workflow in the authoring guide:
+Varin extensions contribute workbench surfaces and trusted Host capabilities through public contracts.
+The authoring packages are `@varin/extension-contract`, `@varin/extension-sdk`, the optional React 19
+adapter `@varin/extension-react`, `@varin/extension-surface`, and `@varin/extension-cli`.
 
-- `@varin/extension-contract`: manifest, contribution, service, routing, and discovery contracts plus JSON Schema;
-- `@varin/extension-sdk`: framework-neutral Surface, isolated-realm, and Host authoring APIs;
-- `@varin/extension-react`: optional React 19 adapter;
-- `@varin/extension-surface`: lower-level lifecycle and registries for advanced tests or alternate hosts;
-- `@varin/extension-cli`: project initialization, validation, building, and conformance testing.
-
-When the packages are available in your registry, create an extension project with:
+When published versions are available in your registry:
 
 ```sh
 npx @varin/extension-cli init ./my-extension --id dev.example.my-extension --name "My Extension"
@@ -148,36 +71,25 @@ npx varin-extension build
 npx varin-extension test
 ```
 
-See the [Varin extension authoring guide](docs/ops/varin-extension-authoring.md) for the complete
-manifest, capability, lifecycle, storage, publishing, and testing contracts.
+See [extensions](docs/extensions.md) and the [authoring guide](docs/ops/varin-extension-authoring.md)
+for the source workflow, manifests, capabilities, lifecycle, publishing, and testing.
 
 ## Download Desktop
 
-Check [GitHub Releases](https://github.com/Youzini-afk/Varin/releases) for published artifacts and their
-platform/version information. Source and container workflows are below.
+Check [GitHub Releases](https://github.com/Youzini-afk/Varin/releases) for available artifacts and their
+platform/version information. Source and container workflows follow.
 
 ## Get started from source
 
-### Prerequisites
+Prerequisites: Node.js 22.19 or newer (Node.js 24 is the source-development baseline), Bun 1.3.14,
+Git, and the Rust toolchain selected by [kernel/rust-toolchain.toml](kernel/rust-toolchain.toml).
+See the [development guide](docs/development.md) for platform setup and verification.
 
-- Node.js 22.19 or newer; Node.js 24 is the supported source-development baseline
-- Bun 1.3.14
-- A Rust toolchain matching `kernel/rust-toolchain.toml` (rustup selects it automatically)
-- Git
-- Git for Windows and Git Bash when running Pi shell tools on Windows
+The Rust kernel is required. Source development can run it through Cargo when no staged binary is
+present; `bun run kernel:build` produces the manifest-verified release executable required by packaged
+layouts. Readiness is checked against the actual Application Host and native Thread catalog.
 
-The Rust system kernel is a required runtime component, not an optional accelerator. Source
-development runs it through Cargo when no staged binary is present; `bun run kernel:build` produces
-the manifest-verified release executable that packaged layouts require.
-
-Varin ships a bundled Pi runtime and discovers user-level Pi installations through the Runtime
-Manager, which can select, install, or upgrade Pi without downgrading it. Varin becomes ready only
-after a real Host handshake and does not need to restart after activation. Electron contains the
-Node runtime needed to run the application, while Pi remains an independently managed tool. Packaging and platform support must be checked against the actual artifact and target runner;
-a successful source build is not complete desktop/VM/provider acceptance. Containers keep a pinned,
-self-contained Pi runtime for reproducible unattended execution.
-
-### Run the Web development surface
+### Web development
 
 ```bash
 git clone https://github.com/Youzini-afk/Varin.git
@@ -186,38 +98,36 @@ bun install --frozen-lockfile
 bun run dev
 ```
 
-Open the Vite URL printed in the terminal. Varin selects available development ports and starts
-the trusted API/runtime service alongside the UI.
+Open the Vite URL printed in the terminal. This starts the UI and trusted Application Host on available
+development ports. Configure model connections and accounts in settings before starting model work.
 
-### Run the desktop application
+### Desktop development
 
 ```bash
 bun run electron:dev
 ```
 
-Use the bundled-assets path when testing behavior closer to a packaged build:
+To exercise bundled UI assets:
 
 ```bash
 bun run electron:dev:bundled
 ```
 
-### Build a Windows installer
+### Windows installer
 
-Run this on Windows:
+Run on Windows:
 
 ```powershell
 bun run electron:build:win
 bun run electron:smoke:win
 ```
 
-The NSIS installer, update metadata, and blockmap are written to `packages/electron/dist`. Without
-code-signing credentials the installer is intentionally unsigned. See the
-[desktop packaging guide](packages/electron/README.md#packaging) for signing and platform details.
+The NSIS installer, update metadata, and blockmap are written to `packages/electron/dist`. Builds
+without signing credentials are unsigned. See [desktop packaging](packages/electron/README.md#packaging).
 
 ## Run the cloud image
 
-The Compose file uses the slim image `ghcr.io/youzini-afk/varin-slim:latest` by default. On a Linux
-Docker host:
+Compose uses `ghcr.io/youzini-afk/varin-slim:latest` by default. On a Linux Docker host:
 
 ```bash
 mkdir -p data/varin data/ssh data/cloudflared workspaces
@@ -228,48 +138,36 @@ docker compose up -d
 curl --fail http://127.0.0.1:3000/health
 ```
 
-Open `http://127.0.0.1:3000` and use the generated password. Put a TLS reverse proxy or an approved
-tunnel in front of any Internet-facing deployment; see [reverse proxy setup](docs/ops/REVERSE_PROXY.md)
-for the required forwarding rules. For production, set `VARIN_IMAGE` to a tested immutable digest
-instead of relying on a floating tag.
+Open `http://127.0.0.1:3000` and use the generated password. Internet-facing deployments need a TLS
+reverse proxy or approved tunnel with the required [forwarding rules](docs/ops/REVERSE_PROXY.md).
+For production, set `VARIN_IMAGE` to a tested immutable digest.
 
-If the agent needs to compile Python, Java, Go, or Rust inside the container, apply the toolbelt
-overlay:
+For Python, Java, Go, or Rust development tools in the container:
 
 ```bash
 docker compose -f docker-compose.yml -f docker-compose.toolbelt.yml up -d
 ```
 
-The image workflows target `linux/amd64` and `linux/arm64` with provenance and SBOM attestations. The
-complete persistent-path, environment, container, and SSH rollback contract is documented in
-[Cloud deployment](docs/ops/cloud-deployment.md).
+See [cloud deployment](docs/ops/cloud-deployment.md) for persistent paths, environment variables,
+image variants, supported architectures, and SSH deployment with health validation and rollback.
 
 ## Architecture and development
 
-Web, Electron and mobile share the Application Host. Pi workers own Pi conversations; the opt-in
-Agent runtime owns its separate Catalog/history. Rust Storage owns files, working state, processes
-and recovery; existing Knowledge and extension owners retain their domains. See the
-[architecture](docs/architecture.md) for request flow and trust boundaries.
+Start with the [documentation index](docs/README.md), [architecture](docs/architecture.md), and
+[development guide](docs/development.md). The Application Host integrates native Catalog execution,
+Rust-owned storage/resources, and the separate knowledge and extension owners; renderers do not own
+credentials or durable execution.
 
-- [Documentation index](docs/README.md)
-- [Development and verification](docs/development.md)
-- [Agent runtime](docs/runtime.md)
-- [Resources and recovery](docs/resources.md)
-- [Workbench](docs/workbench.md) and [extensions](docs/extensions.md)
-- [Security](docs/security.md)
-- [Deployment and operations](docs/ops/README.md)
-
-Package scripts define commands; choose focused checks for the change instead of running every build
-and suite for prose edits. Read [CONTRIBUTING](.github/CONTRIBUTING.md) and [AGENTS](AGENTS.md) before contributing.
+Read [CONTRIBUTING](.github/CONTRIBUTING.md) and [AGENTS](AGENTS.md) before contributing. Package scripts
+define commands; choose focused checks appropriate to the change.
 
 Thanks to the [LinuxDO](https://linux.do) community for their support.
 
 ## Lineage and license
 
-Varin is a Pi-native refactor of the maintainer's OpenChamber fork.
+Varin is an independent project originating from the maintainer's OpenChamber fork.
 
-Varin as a combined work is distributed under the
-[GNU Affero General Public License v3.0](LICENSE) (`AGPL-3.0-only`). Modified versions offered to
-users over a network must make their corresponding source available as required by the license.
-
-Third-party notices and retained copyright obligations are in [THIRD_PARTY_NOTICES](THIRD_PARTY_NOTICES.md).
+The combined work is distributed under the [GNU Affero General Public License v3.0](LICENSE)
+(`AGPL-3.0-only`). Modified versions offered over a network must provide their corresponding source
+as required by the license. Retained copyright and third-party obligations are in
+[THIRD_PARTY_NOTICES](THIRD_PARTY_NOTICES.md).

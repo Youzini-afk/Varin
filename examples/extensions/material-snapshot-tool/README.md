@@ -13,8 +13,8 @@ a slow or failed preparation does not hold unrelated tools or promise first-requ
 
 The handler calls the existing material owner with invocation-scoped capabilities. Core supplies
 the original Run source workspace and Thread; the tool cannot choose another authority by passing
-IDs. Existing snapshot grants and persisted collections retain their sharing rules. No Pi session,
-new material store, URL fetch, document parser or OCR process is created.
+IDs. Existing snapshot grants and persisted collections retain their sharing rules. No new
+material store, URL fetch, document parser or OCR process is created.
 
 `offset` and `maxBytes` are UTF-8 byte positions and budgets. Start at zero and continue with
 `nextOffset`; pass the returned `contentHash` as `expectedContentHash` to require the same immutable

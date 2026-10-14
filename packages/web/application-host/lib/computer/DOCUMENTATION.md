@@ -6,14 +6,10 @@ lane. It does not create another scheduler or another desktop backend.
 
 ## Thread identity and desktop assignments
 
-The protocol's `ComputerWorkRef` distinguishes Pi sessions from Agent Thread/branch identity;
-`ComputerExecutionRef` adds the actual Run. Idle work has no execution. Native work never acquires a
-synthetic Pi session or Registry record. The Rust `runtime.computer.scope` request resolves native
-lineage from the original Catalog and the branch's active Run, including source-less work; a context
-or auxiliary Run does not become the branch owner. Tool calls additionally validate their real
-ModelStep or PolicyAction Operation. `computer-actor.ts` resolves the Pi broker's session through the actual Registry Thread/Run and its durable
-ancestors. Attached Agent, research and Bot roots retain their main-agent role even though their Thread
-kind is `discussion`. Retrieval presets and ordinary discussion children receive observation only.
+The protocol's `ComputerWorkRef` identifies a native Thread/branch; `ComputerExecutionRef` adds its
+actual Run. Idle work has no execution. Rust `runtime.computer.scope` resolves lineage from Catalog
+and the branch's active Run, including source-less work; context or auxiliary Runs do not become the
+branch owner. Tool calls additionally validate their real ModelStep or PolicyAction Operation.
 The caller cannot supply a parent, Run or role to the model-facing API.
 
 Native calls use the shipped `varin.builtin.computer` ordinary extension. Its single declaration
@@ -66,7 +62,7 @@ response is malformed or rejected. Exit status alone does not prove that no file
 
 Browser screenshot data URLs are decoded by their producer adapter into typed media parts with the
 reported image MIME type. JSON keeps only its part index and other result metadata. The original
-evidence journal now retains the admitted work/Run as well as legacy Pi session association; it never
+evidence journal retains the admitted work/Run; it never
 substitutes a role label or records expressions, typed text, URLs with credentials or file bytes.
 An authenticated remote observer can read this same journal without requesting control.
 
@@ -81,7 +77,7 @@ Managed desktop preparation and start/stop use this same service and assignment.
 register the real configured Linux session as unprepared/unavailable, but does not install or start
 it. An automatic transition first acquires its real control assignment and checks its epoch. The
 original lane invalidates old observations and pending input before calling the lifecycle helper.
-Human product and Pi harness consumers use that same lifecycle owner. A setup helper without a
+Human product and native tool consumers use that same lifecycle owner. A setup helper without a
 cooperative cancellation protocol remains pending until its actual exit; cancelling an observer does
 not prove apt/bootstrap or its descendants stopped. The independent physical input stop stays separate.
 The target's completed stop reports the assignment IDs its original reset actually ended, restricted
@@ -90,8 +86,8 @@ observer admitted during setup, while leaving a new claim admitted after the res
 release ACK failures remain separately visible; they do not erase the confirmed desktop-stop receipt.
 
 Artifact registration accepts the actual `ComputerWorkRef`, resolves the original Thread/branch and
-Bot or Thread scope, and stores the existing `computer.artifact` record. Bot work views use native work
-identity rather than fabricating a Pi Registry association. Peer operations do not register a foreign
+Bot or Thread scope, and stores the existing `computer.artifact` record. Bot work views use the native work
+identity. Peer operations do not register a foreign
 Thread as local work on the resource Host; the coordinating Host's mirror retains its own association,
 while the resource Host keeps the original peer control and evidence. A missing local Thread is an
 explicit absence; storage/transport failures are not swallowed. Artifact downloads retain the source
@@ -119,27 +115,19 @@ adds one Environment fact after recovery. Cancelling this Wait leaves the reques
 alone. `granted` records the earlier ready assignment; `released`/`unavailable` reflect the current
 physical projection, not a rewrite of the decision. Each Native child assignment belongs to its own
 Run, so a root's natural completion does not terminate independent child work. Native actors carry
-per-tool invocation policy; Pi keeps its own read-only role rules. Neither adds a second grant list.
+per-tool invocation policy without a second grant list.
 
 Source-less pure-capability children use the original ChildTask admission with explicit absent file
 authority and no applicable file result. They retain their own Run, selected capabilities and original
 Computer permissions. Trusted handback uses the original execution/input path described below;
 persistent scripts invoke these same ordinary Computer tools through the original tools.invoke permission
 and dispatch scope. Closing their original script call triggers the same physical stop and drain path.
-These limits are independent of the existing Pi capabilities below; selected tools alone never grant
-a desktop assignment.
-
-Pi workers and retrieval threads have the `computer` tool when Computer Use is enabled. A child calls
-`computer` with `action:"request"`, desktopId, access (`observe` or `control`) and reason. The Host wakes
-the main conversation with the request identity. The main agent coordinates the work segment with
-`grant`/`deny`. A grant fixes the child's desktop environment without replacing its shell target.
-`wait:true` releases its execution slot and awaits a decision event without polling or a reply timer;
-the default returns immediately so the child can do other work. Abort, denial and Run termination
-settle that wait. `access` returns assignments and requests; `releaseAssignment` ends a work segment.
+Selected tools alone never grant a desktop assignment. Request, grant/deny, wait and release use the
+same Catalog request and physical assignment owners described above.
 
 There is one controller per physical desktop, including the main agent. Observers coexist with it.
 Separate windows on one desktop share control; separate desktops/VMs can run in parallel. Observation
-IDs are owned by session and Run, so another observer does not replace a controller's current tree.
+IDs are owned by Thread/branch and Run, so another observer does not replace a controller's current tree.
 Control epochs include the execution identity, invalidating cached application objects across rounds.
 
 Remote assignments are reserved at the owning Host before a source Host confirms a grant. Automatic
@@ -153,9 +141,8 @@ reservation requires explicit human takeover on the target; there is no speculat
 ## Cancel work and transfer control
 
 The conversation overview captures an exact execution: explicit root Stop captures its current Computer
-family, while child Stop targets that child. An idle root can stop a displayed live child assignment. Native
-uses `ThreadsAPI.computer` through the authenticated `/api/threads/computer/state`, `/decide` and `/stop` routes;
-Pi retains `automation/stop` with its actual session and displayed Run. Old cleanup is addressed by
+family, while child Stop targets that child. An idle root can stop a displayed live child assignment. The UI
+uses `ThreadsAPI.computer` through the authenticated `/api/threads/computer/state`, `/decide` and `/stop` routes. Cleanup is addressed by
 its own work and Run, including when shown under an idle root. Known accepted cleanup starts before
 waiting for a new identity projection; stale work cannot stop a replacement execution.
 
@@ -174,17 +161,17 @@ the original Catalog must confirm completed/failed/cancelled before `finishExecu
 binding update or kernel channel reset alone is not terminal evidence. Reconciliation has no timer or
 second execution ledger; original physical release rules still apply.
 
-Pi receives its existing passive user-cancellation notification. Native cancellation and takeover
+Native cancellation and takeover
 are typed Environment facts, transferred from the original desktop outbox to Catalog. They retain
 original actor/desktop/control identity and distinguish confirmed release from unknown cleanup.
 The operation reports any known partial effects. `cancelling` lasts through release; success returns to `enabled` and removes the work banner.
 `cancel-unconfirmed` preserves a real release failure for recovery. There is no stopped-round state.
 
-Human takeover requires an explicit action. It suspends the assignment, interrupts its active Pi script,
+Human takeover requires an explicit action. It suspends the assignment, interrupts its active automation,
 invalidates queued input and releases managed keys/buttons; physical mouse motion does not transfer
 ownership. Target/focus changes interrupt the affected action and retain Agent ownership. Handback
 keeps an otherwise live assignment, invalidates old observations and retains a durable continuation for the actor
-captured at takeover, with its root informed. Pi retains its existing current-Run behavior. Native
+captured at takeover, with its root informed. Native
 handback enters an eligible active Run at its legal input boundary, or uses the original root/child
 continuation owner after natural completion. The successor is a real Run with the original frozen
 launch and typed Environment history, including source-free children. Catalog derives root lineage;
@@ -249,12 +236,10 @@ same physical-owner identity; capture helpers may still restart independently.
 
 ## Feedback and presentation
 
-Native request decisions and physical changes emit the original family's short projection invalidation,
-not a partial state assembled from Pi's ephemeral requests. The shared event parser routes it to the
+Native request decisions and physical changes emit the original family's short projection invalidation. The shared event parser routes it to the
 current work's existing state reader; request-detail errors appear in the overview. In-flight reads
 finish and coalesce a trailing refresh, while original Host/selection/control fences reject late
-replies. This presentation work never blocks request acceptance or physical Stop. Pi keeps its original
-full-state notification path.
+replies. This presentation work never blocks request acceptance or physical Stop.
 
 
 Observations keep the native tree on the owning Host and return a display page (100 lines by default,

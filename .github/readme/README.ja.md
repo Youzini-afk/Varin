@@ -10,136 +10,56 @@
 [![Docker Images](https://github.com/Youzini-afk/Varin/actions/workflows/docker.yml/badge.svg)](https://github.com/Youzini-afk/Varin/actions/workflows/docker.yml)
 [![License: AGPL v3](https://img.shields.io/badge/License-AGPL_v3-blue.svg)](../../LICENSE)
 
-**コーディング、研究、その他のプロジェクト作業に対応する独立した Agent ワークスペース兼フル
-Harness。ローカル作業を中心に据えつつ、デスクトップ、Web、エディタ、モバイルのいずれからも使えます。**
+**コーディング、研究、プロジェクト作業のための独立した Agent ワークスペースと実行基盤。
+デスクトップ、Web、モバイルで利用できます。**
 
-Pi ランタイムを内蔵し、モデル/プロバイダースタック、セッションツリー、パッケージ
-マネージャー、拡張モデルは Pi が担います。Varin はツール環境、ワーキングステート、リカバリ、検索、
-コンテキストポリシー、タスクガバナンス、ワークベンチ画面を所有し、Pi の公開 SDK をそのまま使います。
-
-Workbench Profile では、**Agent Workspace**、**IDE Workbench**、**Research Workbench**、
-**Varin Bot** の 4 つの組み込みシェルを選べます。いずれも通常の Varin 拡張で、全体でも一部でも
-置き換えられます。Agent Workspace はセッションとタスクを中心に扱い、IDE Workbench はエディタ、
-検索、Git、診断、デバッグとドッキング可能なエージェントパネルを組み合わせます。
-
-Agent Workspace、Research Workbench、Varin Bot はデスクトップ、Web、モバイルに対応します。
-IDE Workbench はデスクトップと Web に対応します。作業の重点と選択中のシェルは独立しています。
-
-既定のランタイムは Pi です。このブランチには明示的に選択する Rust Agent runtime もありますが、Pi データの自動移行や既定の切り替えは行いません。[現在の仕様](../../docs/README.md)を参照してください。
+Varin は独自のネイティブ Rust Agent runtime を使用します。Catalog が Thread、ブランチ、永続的な
+会話履歴と実行を所有します。共通の Application Host がモデル接続とアカウント、Agent リソース設定、
+MCP 設定、信頼されたワークスペースサービスを管理します。各クライアントは同じアプリケーション API を
+通じてこれらを表示・操作します。[アーキテクチャ](../../docs/architecture.md)を参照してください。
 
 > [!IMPORTANT]
-> Varin は 1.0 前で、活発に開発中です。各プロダクトサーフェスとプライベートなランタイムプロトコルは
-> いまのところ同時に進むため、古いビルドが新しいビルドと相互運用できる保証はありません。重要な
-> ワークスペースはバックアップし、継続的なデプロイでは検証済みのイメージダイジェストに固定してください。
-
-## プロダクト画面
-
-以下のスクリーンショットは、隔離された `demo-workspace` と匿名のサンプルファイルから生成しています。
-
-### Agent Workspace
-
-セッションとプロジェクトを常に表示しながら、アクティブなエージェント、コンテキストツール、入力欄を
-一つの集中したワークスペースにまとめます。
-
-![Varin Agent Workspace](assets/agent-workspace.png)
-
-### IDE Workbench
-
-IDE プロファイルは、ワークスペースのナビゲーションとエディタ基盤を、ドッキングされた完全な Pi
-エージェントと組み合わせます。チャットを別アプリとして切り離しません。
-
-![Varin IDE Workbench](assets/ide-workbench.png)
-
-### モバイルワークスペース
-
-レスポンシブな画面でも、同じプロジェクト、エージェント操作、コンテキスト画面、入力欄を利用できます。
-
-<p align="center">
-  <img src="assets/mobile-workspace.png" alt="Varin モバイルワークスペース" width="390" />
-</p>
+> Varin は 1.0 未満で、活発に開発されています。製品 UI と非公開ランタイムプロトコルは同時に進化するため、
+> 新旧バージョンの相互運用は保証されません。重要なワークスペースをバックアップし、継続的なデプロイでは
+> 検証済みイメージのダイジェストを固定してください。既存のユーザー資産を自動インポート、移行、書き換えする
+> ことはありません。未対応の内部ストア形式は拒否されます。
 
 ## Varin が提供するもの
 
-### 統制されたエージェントハーネス
+- **ネイティブ会話：** Thread とブランチの履歴、ストリーミング、入力キュー、モデルと思考レベルの選択、
+  子タスク、計画、権限、復旧を、ネイティブ Catalog が支えます。[ランタイム](../../docs/runtime.md)
+- **開発ワークスペース：** ファイル、差分、Git、worktree、ターミナル、ワークスペース検索、言語サーバー、
+  デバッグ。デスクトップと Web は Monaco を共有し、モバイルの軽量エディターも同じ文書管理基盤を使います。
+  未保存バッファーと競合を明示的に扱います。[ワークベンチ](../../docs/workbench.md)
+- **実行と復旧：** 受け入れたソースはライブファイル、スナップショット、実体化した作業を区別します。
+  Rust がストレージと実行リソースを所有し、権限、キャンセル、実際の完了は別の事実として扱います。
+  [リソースと復旧](../../docs/resources.md)
+- **研究とコンテキスト：** 完全一致・セマンティック検索、コードナビゲーション、範囲を定めたノート、Bot の
+  知識、Web・学術情報の探索、ソースとページ画像を保持する PDF 資料。[検索とコンテキスト](../../docs/retrieval.md)
+- **Host が管理する設定：** 専用の設定画面でモデルチャネル、アカウント、エンドポイント、Agent の指示と
+  スキル、MCP 接続を構成できます。認証情報と特権実行は信頼された所有者が管理します。
+  [モデル](../../packages/web/application-host/lib/models/DOCUMENTATION.md)、
+  [Agent リソース](../../packages/web/application-host/lib/agent-resources/DOCUMENTATION.md)、
+  [MCP](../../packages/web/application-host/lib/mcp/DOCUMENTATION.md)
+- **ローカル・リモート利用：** Electron は Application Host を内蔵し、Web と Capacitor モバイルクライアントは
+  Host に接続します。リモート Host、ペアリング、トンネル、コンテナー/SSH デプロイには明示的なアクセスと
+  プラットフォームの境界があります。[セキュリティ](../../docs/security.md) · [運用](../../docs/ops/README.md)
 
-- **Thread、Run、そして不変のワーキングステート：** 作業は Thread と Run に整理され、そのファイル
-  変更は不変のルートとして公開されます。エージェントは隔離された仮想または実体化ワークスペースで
-  下書きし、レビュー済みの結果をマージして戻します。チェックアウトへ無秩序に書き込むことは
-  ありません。
-- **単一の権限ゲート：** 1 つの `tool_call` 確認が、ハーネスツール、Pi 組み込みツール、MCP ツール、
-  パッケージツール、ネストしたスレッドのツールをすべてカバーします。セッション許可は、承認された
-  ツール、アクション、ワークスペース、パス、ネットワーク対象にスコープされたままです。
-- **エージェントに追随するリカバリ：** Host 所有のリカバリサービスが、エージェントの変更とあなた
-  自身の編集を共通のチェックポイントに記録するため、影響ファイルのロールバック、アンドゥ/リドゥ、
-  クラッシュリカバリが、ワークスペース全体をスキャンせずにツール呼び出しをまたいで機能します。
-- **ネイティブなツール環境：** シェルスーパーバイザーは実際の PTY を実行し、自動バックグラウンド
-  移行、`get_output`、`write_to_process`、`kill_shell` を備えます。`edit`/`write`/`apply_patch`
-  には編集後診断とパス単位のリースが付き、大きすぎる結果はページング可能な `OutputRef` になり、
-  パッケージマネージャーの出力は生のまま流されるのではなく整理されます。
+4 つの組み込み Workbench Profile で **Agent Workspace**、**IDE Workbench**、**Research Workbench**、
+**Varin Bot** を選択できます。Agent、Research、Bot はデスクトップ、Web、モバイルに対応し、IDE は
+デスクトップと Web に対応します。Profile は Varin 拡張として、シェル全体や個々の構成要素を置き換えられます。
+作業の焦点、文書、Thread の識別は表示から独立しています。
 
-### コンテキスト、検索、ナレッジ
-
-各リクエストは選択済みの文脈とソース改訂を保持し、要約は成功した候補だけを公開します。完全一致検索、Explore、シンボルグラフ、言語ナビゲーションは異なる証拠を提供し、不完全・古い範囲を明示します。通常の Agent のノートは明示的なスコープ付きテキストです。Bot の知識と任意の背景整理は原典、訂正、処理の受領記録を保持します。Web・学術・PDF ツールは検索情報、原本、抽出文、ページ画像を区別します。
-
-### 本物のコーディングワークスペース
-
-- **Pi ネイティブな会話：** ストリーミング、分岐、ツリー移動、コンパクション、ステアリングと
-  フォローアップキュー、モデルと思考レベルの選択、セッションの名前変更、アーカイブ、復元、削除。
-- **ワークスペースのツール群：** ファイル、差分、Git、ワークツリー、ターミナル、SSH ホスト、
-  リモートインスタンス、コメント、エディタコンテキストが、アクティブな Pi セッションと
-  ワークスペースを共有します。
-- **エディタ級の基盤：** バージョン管理された単一のドキュメント権威と本物のコンフリクト処理。
-  デスクトップ/Web の Agent と IDE 画面は Monaco モデル、エディタグループ、ワークスペース検索、
-  ホスト所有の言語サーバー、標準準拠のデバッグアダプタを共有し、モバイル/組み込みエディタは
-  軽量な CodeMirror アダプタで同じ権威に接続します。エージェントの編集は、未保存のバッファを
-  上書きするのではなく調整します。
-- **カスタムプロバイダー：** Pi ネイティブなプロバイダー階層、認証、モデル検出、カスタム
-  エンドポイントを、認証情報をレンダラーストレージへ複製せずに設定できます。
-
-### 再構成可能で、どこにでも
-
-- **並行するプラグインシステムを持たないパッケージ：** Pi の `PackageManager` が受け入れる任意の
-  パッケージをインストール、更新、削除、検査できます。専用対応のない拡張にも、汎用のコマンド、
-  ツール、エントリ、通知、UI ハンドリングが提供されます。
-- **ファーストクラスのプラグイン設定：** 保守対象のプラグインには専用の GUI 画面があり、
-  プラグイン自身のネイティブな JSON/JSONC ファイル、コマンド、データベース、マイグレーション
-  ロジックは権威であり続けます。
-- **再構成可能なワークベンチ：** Agent、IDE、Research、Bot のプロファイルを選ぶか、自分で構築します。
-  シェル全体を置き換えることも、ナビゲーション、エディタ、パネル、コンポーザー、タイムライン、
-  ステータスバーだけを置き換えることもでき、公式とコミュニティの貢献を混在させられます。
-  切り替えはライブで行われ、ドキュメントの再読み込み、Pi ランタイムの再起動、共有ワークスペース
-  状態の喪失はありません。
-- **複数のプロダクト画面：** 共有の React UI が、明示的なランタイムケイパビリティを通じて
-  Electron、Web、Capacitor モバイルシェルを駆動します。
-- **クラウドとリモート運用：** 認証付き WebSocket アクセス、リレー/トンネル対応、マルチ
-  アーキテクチャコンテナ、ヘルス検証とロールバックを備えたアトミックな SSH デプロイ。
-
-## 保守対象の拡張インテグレーション
-
-Varin はこれらの拡張をフォークせず、プライベートな状態を複製しません。保守対象のアダプタは、
-各拡張の公開コマンド、イベント、設定ファイル、ケイパビリティ契約だけを消費します。対象は
-サブエージェントフリート、コンテキスト管理、ワークスペース履歴、MCP サーバー、Web アクセス、
-メモリシステム、バックグラウンドタスク、LSP/ツール設定で、パッケージの更新は独立して進められます。
-
-各アダプタの統合面——どのコマンド、イベント、ネイティブ設定を読み取りまたは呼び出すか、どのファイルが
-プラグイン所有のままか——は[拡張インテグレーション契約](../../docs/extensions.md)に記録されています。
-Varin はプラグインのバージョンを Pi のリリースに対して認証しません。
+モデルプロバイダー、Computer/VM、パッケージの対応状況は実環境に依存します。個別のテストだけでは
+プラットフォーム全体の検証にはなりません。[ランタイム受け入れ検証](../../docs/runtime-acceptance.md)を参照してください。
 
 ## Varin 拡張を開発する
 
-Varin アプリケーション拡張と Pi パッケージは別々のプロダクトオブジェクトです。前者は Varin の
-ワークベンチ、画面、信頼された Host を拡張し、後者は Pi エージェント内部で実行されます。予定されている
-npm ツールチェーンは Varin のソースチェックアウトも製品のプライベート UI からのインポートも必要と
-しません。`@varin/*` パッケージはまだ公開されていません。
+Varin 拡張は公開契約を通じてワークベンチ UI と信頼された Host 機能を追加します。開発用パッケージは
+`@varin/extension-contract`、`@varin/extension-sdk`、任意の React 19 アダプター `@varin/extension-react`、
+`@varin/extension-surface`、`@varin/extension-cli` です。
 
-- `@varin/extension-contract`：マニフェスト、コントリビューション、サービス、ルーティング、
-  ディスカバリの契約と JSON Schema。
-- `@varin/extension-sdk`：フレームワーク非依存の Surface、隔離 realm、Host オーサリング API。
-- `@varin/extension-react`：オプションの React 19 アダプタ。
-- `@varin/extension-surface`：高度なテストや代替ホスト向けの低レベルライフサイクルとレジストリ。
-- `@varin/extension-cli`：プロジェクト初期化、検証、ビルド、適合性テスト。
-
-パッケージ公開後は、次のコマンドで完全な拡張プロジェクトを作成できます。
+利用中のレジストリーで公開バージョンが提供されている場合：
 
 ```sh
 npx @varin/extension-cli init ./my-extension --id dev.example.my-extension --name "My Extension"
@@ -149,37 +69,25 @@ npx varin-extension build
 npx varin-extension test
 ```
 
-マニフェスト、ケイパビリティ、ライフサイクル、ストレージ、公開、テストの完全な契約は
-[Varin 拡張オーサリングガイド](../../docs/ops/varin-extension-authoring.md)を参照してください。
+ソースからの開発手順、manifest、機能、ライフサイクル、公開、テストについては
+[拡張](../../docs/extensions.md)と[開発ガイド](../../docs/ops/varin-extension-authoring.md)を参照してください。
 
 ## デスクトップ版をダウンロード
 
-現在の Varin デスクトップパッケージはまだ公開されていません。[GitHub Releases](https://github.com/Youzini-afk/Varin/releases)
-ページには過去のアセットが残っています。Varin パッケージが公開されるまでは、以下のソースまたは
-Docker の手順を使ってください。
+[GitHub Releases](https://github.com/Youzini-afk/Varin/releases) で利用可能な配布物と対応プラットフォーム、
+バージョンを確認してください。ソースとコンテナーの利用手順は以下のとおりです。
 
 ## ソースから始める
 
-### 前提条件
+必要なもの：Node.js 22.19 以降（ソース開発の基準は Node.js 24）、Bun 1.3.14、Git、
+[kernel/rust-toolchain.toml](../../kernel/rust-toolchain.toml) で指定された Rust ツールチェーン。
+プラットフォームの準備と検証は[開発ガイド](../../docs/development.md)を参照してください。
 
-- Node.js 22.19 以降。ソース開発のサポート基線は Node.js 24 です
-- Bun 1.3.14
-- `kernel/rust-toolchain.toml` に合致する Rust ツールチェーン（rustup が自動で選択します）
-- Git
-- Windows で Pi のシェルツールを実行する場合は Git for Windows と Git Bash
+Rust kernel は必須です。ソース開発では、配置済みバイナリーがない場合に Cargo から起動できます。
+`bun run kernel:build` は配布レイアウトに必要な、manifest 検証付き release 実行ファイルを生成します。
+準備状態は実際の Application Host とネイティブ Thread catalog に対して確認されます。
 
-Rust システムカーネルは必須のランタイムコンポーネントであり、オプションの高速化手段ではありません。
-ソース開発では、ステージ済みバイナリがない場合、Host が Cargo 経由で実行します。
-`bun run kernel:build` は、パッケージ済みレイアウトが要求するマニフェスト検証付きのリリース
-実行ファイルを生成します。
-
-Varin はバンドルされた Pi ランタイムを同梱し、Runtime Manager を通じてユーザー級の Pi インストールを
-検出します。Runtime Manager は Pi をダウングレードせずに選択、インストール、アップグレードできます。
-Varin は実際の Host ハンドシェイク後にのみ準備完了となり、アクティベーション後の再起動は不要です。
-Electron にはアプリケーションの実行に必要な Node ランタイムが含まれますが、Pi は独立して管理される
-ツールであり続けます。プラットフォームの対応とインストール検証は実際の成果物・環境ごとに確認します。ソースのビルド成功は全デスクトップ・VM・モデル経路の検証を意味しません。コンテナは固定された自己完結型の Pi ランタイムを保持します。
-
-### Web 開発画面を起動する
+### Web 開発
 
 ```bash
 git clone https://github.com/Youzini-afk/Varin.git
@@ -188,38 +96,36 @@ bun install --frozen-lockfile
 bun run dev
 ```
 
-ターミナルに表示される Vite の URL を開いてください。Varin は利用可能な開発ポートを選択し、
-UI とともに信頼された API/ランタイムサービスを起動します。
+ターミナルに表示される Vite URL を開いてください。UI と信頼された Application Host が利用可能な開発用ポートで
+起動します。モデルを使用する作業を始める前に、設定でモデル接続とアカウントを構成してください。
 
-### デスクトップアプリを起動する
+### デスクトップ開発
 
 ```bash
 bun run electron:dev
 ```
 
-パッケージ済みビルドに近い動作をテストする場合は、バンドル済みアセットのパスを使います。
+同梱された UI アセットをテストする場合：
 
 ```bash
 bun run electron:dev:bundled
 ```
 
-### Windows インストーラーをビルドする
+### Windows インストーラー
 
-Windows 上で実行してください。
+Windows 上で実行してください：
 
 ```powershell
 bun run electron:build:win
 bun run electron:smoke:win
 ```
 
-NSIS インストーラー、更新メタデータ、ブロックマップは `packages/electron/dist` に出力されます。
-コード署名の認証情報がない場合、インストーラーは意図的に未署名になります。署名とプラットフォームの
-詳細は[デスクトップパッケージガイド](../../packages/electron/README.md#packaging)を参照してください。
+NSIS インストーラー、更新メタデータ、blockmap は `packages/electron/dist` に出力されます。署名用認証情報が
+なければ未署名になります。[デスクトップのパッケージ化](../../packages/electron/README.md#packaging)を参照してください。
 
 ## クラウドイメージを実行する
 
-Compose ファイルはデフォルトでスリムイメージ `ghcr.io/youzini-afk/varin-slim:latest` を使います。
-Linux Docker ホスト上で：
+Compose は既定で `ghcr.io/youzini-afk/varin-slim:latest` を使用します。Linux Docker ホスト上で：
 
 ```bash
 mkdir -p data/varin data/ssh data/cloudflared workspaces
@@ -230,131 +136,35 @@ docker compose up -d
 curl --fail http://127.0.0.1:3000/health
 ```
 
-`http://127.0.0.1:3000` を開き、生成されたパスワードを使ってください。インターネットに面する
-デプロイの前には、TLS リバースプロキシまたは承認済みトンネルを置いてください。必要な転送ルールは
-[リバースプロキシの設定](../../docs/ops/REVERSE_PROXY.md)を参照してください。本番環境では、フローティング
-タグに頼らず、`VARIN_IMAGE` を検証済みのイミュータブルダイジェストに設定してください。
+`http://127.0.0.1:3000` を開き、生成したパスワードを使用してください。インターネットに公開する場合は、
+[転送ルール](../../docs/ops/REVERSE_PROXY.md)に従う TLS リバースプロキシまたは承認済みトンネルが必要です。
+本番では `VARIN_IMAGE` を検証済みの不変ダイジェストに固定してください。
 
-エージェントがコンテナ内で Python、Java、Go、Rust をコンパイルする必要がある場合は、ツールベルト
-オーバーレイを適用します。
+コンテナー内で Python、Java、Go、Rust の開発ツールが必要な場合：
 
 ```bash
 docker compose -f docker-compose.yml -f docker-compose.toolbelt.yml up -d
 ```
 
-イメージは `linux/amd64` と `linux/arm64` 向けに、provenance と SBOM アテステーション付きで公開されて
-います。永続パス、環境、コンテナ、SSH ロールバックの完全な契約は
-[クラウドデプロイ](../../docs/ops/cloud-deployment.md)に記載しています。
+永続化パス、環境変数、イメージの種類、対応アーキテクチャ、ヘルスチェックとロールバック付き SSH デプロイは
+[クラウドデプロイ](../../docs/ops/cloud-deployment.md)を参照してください。
 
-## アーキテクチャ
+## アーキテクチャと開発
 
-```mermaid
-flowchart LR
-    S["レンダラー：Workbench Profile がシェル拡張を選択"] --> C["@varin/application-client"]
-    S --> D["ドキュメント、検索、言語、実行系 API"]
-    C --> T["認証付き HTTP/WebSocket またはエディタ転送"]
-    T --> A["アプリケーションホスト：@varin/web サービス"]
-    D --> A
-    A --> K["varin-kernel：プライベートな Rust システムカーネル"]
-    A --> B["@varin/runtime-broker"]
-    B --> H["隔離された @varin/pi-host ワーカー"]
-    H --> P["Pi SDK + 信頼された Pi パッケージ"]
-```
+[ドキュメント索引](../../docs/README.md)、[アーキテクチャ](../../docs/architecture.md)、
+[開発ガイド](../../docs/development.md)から始めてください。Application Host はネイティブ Catalog の実行、
+Rust が所有するストレージとリソース、独立した知識・拡張の所有者を統合します。
+renderer は認証情報や永続的な実行を所有しません。
 
-アプリケーションホストは唯一の信頼されたバックエンドです。各ホストはプライベートな `varin-kernel`
-子プロセスを所有し、それが永続的でマシンに近いリソースの本番権威です。不変のワーキングステート
-ルート、コンテンツオブジェクトと GC、リカバリメタデータ、正規のファイルリソースと実体化、PTY と
-パイプのプロセスツリー、固定ビューのファイル/構造計算を担います。ホストはプロダクトポリシー——
-アクター admission、ドキュメント調整、Thread/Run ライフサイクル、ナレッジ、モデルオーケストレーション
-——を保持し、カーネルとは公開ポートではなくプライベートなフレーム化 stdio プロトコルで通信します。
-リソースごとに本番の書き込み者は 1 つだけであり、カーネルの背後に TypeScript のフォールバック権威は
-残っていません。
+貢献前に [CONTRIBUTING](../CONTRIBUTING.md) と [AGENTS](../../AGENTS.md) を読んでください。
+コマンドの定義は package scripts に従い、変更に適した検証を選択してください。
 
-ブローカーはカタログワーカーとセッションごとのワーカーを所有します。レンダラーの再読み込みは
-アクティブなタスクを終了させず、Pi ワーカーの障害がレンダラーをクラッシュさせることもありません。
-プロセス境界を越えるのはプロトコル DTO だけであり、SDK コールバック、認証情報オブジェクト、拡張の
-実装詳細は越えません。
-
-Electron は同じホストをメインプロセスで実行し、並列のデスクトップバックエンドを追加しません。
-ウィンドウ、メニュー、ダイアログのようなネイティブケイパビリティだけが Electron の preload 境界を
-越えます。
-
-サードパーティの Pi パッケージは、ユーザーの OS 権限を持つ実行可能コードです。Varin は観測された
-ケイパビリティを表示し、プロジェクトローカルの実行可能リソースにゲートを設けますが、信頼された拡張を
-完全なサンドボックスに変えるとは主張しません。リモートインスタンスを公開したり、不慣れなコードを
-インストールしたりする前に、[セキュリティポリシー](../SECURITY.md)と
-[セキュリティモデル](../../docs/security.md)を読んでください。
-
-## リポジトリ構成
-
-| パス | 役割 |
-| --- | --- |
-| `kernel/` | プライベートな Rust システムカーネル：ワーキングステート、ファイルリソース、プロセス、計算 |
-| `packages/application-client` | フレームワーク非依存の `RuntimeAPIs`、転送、型付きエラー、デスクトップ IPC 契約 |
-| `packages/ui` | 共有の Pi ネイティブ React UI、ストア、設定、拡張画面 |
-| `packages/web` | ブラウザ/リモートフロントエンド、信頼された Application Host、クラウド CLI |
-| `packages/electron` | ネイティブデスクトップシェル、特権境界、パッケージング、SSH、更新 |
-| `packages/mobile` | Varin サーバーに接続する Capacitor iOS/Android シェル |
-| `packages/protocol` | バージョン管理された JSON セーフなワーカー/画面プロトコル |
-| `packages/runtime-client` | ブラウザで安全なランタイムリクエスト/イベントクライアント |
-| `packages/runtime-broker` | カタログ/セッションワーカーの所有、ルーティング、シャットダウン |
-| `packages/pi-host` | Pi SDK と拡張を組み込む隔離 Node ワーカー |
-| `packages/settings-store` | 各ホストで共有されるアトミックな設定ファイル永続化 |
-| `packages/extension-contract` | マニフェスト、コントリビューション、ワークベンチ、サービス、ディスカバリ契約 |
-| `packages/extension-surface` | フレームワーク非依存のオーナースコープとトランザクショナルな Surface レジストリ |
-| `packages/extension-sdk`、`-react`、`-cli` | 公開オーサリング SDK、React アダプタ、作者向けツール |
-| `packages/extension-host` | 信頼されたアプリケーションホストのカタログ、アーティファクト、ストレージ、サービス |
-| `packages/extension-loader` | 認証済みの管理対象 Surface モジュールローダーと隔離 realm |
-| `packages/extension-builtins` | 4 つのシェルを含む Varin 組み込み拡張のマニフェスト |
-| `packages/docs` | ユーザー向けドキュメントサイトのソース |
-| `docs` | アーキテクチャ、ハーネス、カーネル、ワークベンチ、移行、リカバリ、クラウド、セキュリティの契約 |
-| `scripts` | 開発、カーネルビルド/計測、リリース、クラウド、デプロイ、検証ツール |
-
-## 開発と検証
-
-コマンドの基準はルートまたは各パッケージの `package.json` スクリプトです。広範なローカル基線は
-重要な CI ゲートと一致しています。
-
-```bash
-bun install --frozen-lockfile
-bun run type-check
-bun run lint
-bun run test:pi
-bun run test:kernel
-bun run test:cloud
-bun run build
-bun run test:pi:dist
-```
-
-`bun run kernel:check` は高速な Rust コンパイルチェック、`bun run test:kernel` はビルド済みのリリース
-実行ファイルに対してスキップ不可のネイティブ権威スイートを実行します。`bun run test:docs` は
-ドキュメント検証器をテストし、`bun run docs:validate` は公開文書とエンジニアリング文書の内容をまとめて検証します。
-
-CI は責務の異なる 3 つの安定したゲートを公開しています。Ubuntu でのソース品質、Windows での
-ランタイム動作、Ubuntu での本番ビルドです。型チェック、lint、ワークスペース全体のテストは、それぞれの
-権威ゲートで 1 回だけ実行され、Windows はプラットフォーム依存のカバレッジだけを追加します。
-クラウド/ランタイムの入力が変わると、Docker ワークフローはコンテナ契約を検証し、連動するスリム/
-ツールベルトのベース/アプリケーションイメージをビルドし、イミュータブルダイジェストで両方の
-アプリケーションをスモークし、両候補が合格した後にのみタグを昇格させます。
-
-貢献する前に [CONTRIBUTING.md](../CONTRIBUTING.md)、リポジトリ固有のルールである
-[AGENTS.md](../../AGENTS.md)、[エンジニアリングガイド](../../docs/development.md)を読んでください。
-
-## ドキュメント
-
-- [ドキュメント](../../docs/README.md)
-- [開発と検証](../../docs/development.md)
-- [ランタイム](../../docs/runtime.md)
-- [リソースと復元](../../docs/resources.md)
-- [ワークベンチと拡張](../../docs/extensions.md)
-- [セキュリティ](../../docs/security.md)
-- [運用](../../docs/ops/README.md)
+[LinuxDO](https://linux.do) コミュニティの支援に感謝します。
 
 ## 系譜とライセンス
 
-Varin はメンテナーの OpenChamber フォークを Pi ネイティブに作り替えたものです。
+Varin はメンテナーの OpenChamber フォークを起点とする独立したプロジェクトです。
 
-Varin は結合された著作物として
-[GNU Affero General Public License v3.0](../../LICENSE)（`AGPL-3.0-only`）の下で頒布されます。
-ネットワーク越しに改変版をユーザーへ提供する場合、ライセンスの要求に従って対応するソースコードを
-利用可能にする必要があります。
+結合された著作物は [GNU Affero General Public License v3.0](../../LICENSE)（`AGPL-3.0-only`）で配布されます。
+変更版をネットワーク経由で提供する場合は、ライセンスに従って対応するソースコードを提供する必要があります。
+保持される著作権表示と第三者への義務は [THIRD_PARTY_NOTICES](../../THIRD_PARTY_NOTICES.md) に記載されています。

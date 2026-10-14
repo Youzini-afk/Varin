@@ -1,8 +1,8 @@
 # Agent runtime crate
 
-`varin-runtime` owns Agent conversation history and execution facts. The explicit Agent Thread path
-uses it through `varin-kernel`; the default product path still uses Pi. This crate does not write Pi
-session JSONL or duplicate Host domain asset stores.
+`varin-runtime` owns Varin's native Thread/branch history and execution facts through `varin-kernel`.
+The product uses this Catalog for conversations, queued input, Runs, Operations and durable events.
+It does not import historical Pi sessions or duplicate Host domain asset stores.
 
 Read [runtime ownership and mechanisms](../../../docs/runtime.md) for the cross-layer contract.
 This document is the local code map and maintenance boundary, not an implementation timeline.

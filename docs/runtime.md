@@ -1,8 +1,8 @@
 # Agent 运行时
 
-当前产品默认仍使用内置 Pi。显式 Agent Thread 路径通过 Rust `varin-runtime` 执行，
-两条路径共用既有 Application Host 和资源服务。选择 Agent 路径不会导入 Pi JSONL、
-切换默认运行时、移除 Pi 或迁移用户资产。将来的切换应转移所有权，不能留下同一对话的双写者。
+产品对话通过 Rust `varin-runtime` 执行，Thread/branch 历史、输入受理与执行由 Catalog 统一拥有。
+既有 Application Host 继续承担模型账号、资源、扩展和领域服务。旧 Pi runtime 与产品入口已经移除，
+不自动导入或重写历史用户资产，也不保留第二个对话 writer。
 
 [架构](architecture.md)说明包和进程边界；[资源与恢复](resources.md)说明文件、进程和环境；
 [检索与知识](retrieval.md)说明材料和推理消费者；[扩展](extensions.md)说明作者接口。
@@ -237,7 +237,7 @@ AgentPolicy 返回动作和状态，核心负责合法执行与提交。Provider
 秘密不进入请求快照、公共事件或历史。持久化、HTTP 和 body signing 使用同一份冻结请求字节。
 
 Agent 的渠道、账号与用途设置由 Host [模型服务](../packages/web/application-host/lib/models/DOCUMENTATION.md)
-管理，通过独立 API 和配置文件服务设置、发现及登录，不依赖 Pi worker。渠道目录 ID、实际请求模型 ID、
+管理，通过领域 API 和配置文件服务设置、发现及登录。渠道目录 ID、实际请求模型 ID、
 固定连接和账号身份各有用途；普通配置更新只影响后续准备，明确撤权仍由原执行边界核验。
 扩展通过同一 composition 贡献渠道、目录、协议 codec 和认证。耐久 `adapterIdentity` 绑定确切 artifact/组合；
 `adapterBindingId` 指向实际活跃实现。原 Run、排队输入及 child 持有原 pin，不按今天的服务名重选。
@@ -246,7 +246,7 @@ Agent 的渠道、账号与用途设置由 Host [模型服务](../packages/web/a
 Agent [MCP 服务](../packages/web/application-host/lib/mcp/DOCUMENTATION.md) 独立管理配置、账号、连接和缓存。
 同名连接整项替换，工具、资源、资源模板和提示目录各自准备；离线缓存不构成执行授权。
 HTTP session 失效结束原连接，不重放已派发调用；下一次新 Operation 使用原租约配置重新准备并核对声明。
-stdio 沿 Rust 进程服务，Tasks、订阅和交互保留各自真实持有者。Pi 会话继续使用其原模型、账号与 MCP 资产。
+stdio 沿 Rust 进程服务，Tasks、订阅和交互保留各自真实持有者。旧配置资产不会自动导入或覆盖原生配置。
 
 Run worker 只保留最近的不可变历史前缀，按 epoch/Run/branch/checkpoint/祖先身份复用；
 新记忆、Goal 和策略证据仍逐边界投影，导航、checkpoint 变化和 worker 退出会丢弃缓存。
@@ -267,7 +267,7 @@ Agent 的 `image_generate`、`image_edit` 分别选择生成和编辑模型，�
 
 [Image runtime](../packages/web/application-host/lib/kernel/image-runtime.ts) 在原工具组合边界固定渠道、
 请求模型、连接、认证和 schema。后续设置修改不更换在途调用的绑定；恢复必须符合原配置身份。
-生成和编辑沿原 Operation、推理请求与用量回执执行，不创建 Pi 会话或另一套图像任务库。
+生成和编辑沿原 Operation、推理请求与用量回执执行，不另建图像任务库。
 
 输入图片与蒙版使用授权资源引用或原 Documents 路径；输出先保存到媒体资源，再返回有序媒体与稳定引用。
 临时图片 URL 由原执行方取回，后续编辑保留输入关联。收到的图片即使遇到取消也由原执行方继续保留；
@@ -282,4 +282,4 @@ Agent 的 `image_generate`、`image_edit` 分别选择生成和编辑模型，�
 
 源码和定向测试证明具体机制，不证明全部 provider/平台等价。真实账号、安装包断连/停止/恢复、
 实际代理、物理 managed Host、平台进程/桌面行为及规模性能需要各自的相关验收。
-按[开发指南](development.md)和最近 owner 的测试选择检查。默认切换及 Pi/用户资产迁移仍需后续明确决定。
+按[开发指南](development.md)和最近 owner 的测试选择检查；原生默认路径已经切换，未执行的实机验收仍保持未验证。

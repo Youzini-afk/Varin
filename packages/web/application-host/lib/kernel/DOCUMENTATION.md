@@ -14,7 +14,7 @@ those responsibilities to Host entry points.
 manifest/build/protocol/architecture, bootstrap the local authenticated epoch and carry separate control
 and content streams. `protocol.generated.ts` comes from `kernel/protocol/schema.json`; do not hand-edit it.
 
-Actor-scoped handles bind Host, epoch, session/Thread/Run, workspace and capability scope. Global management
+Actor-scoped handles bind Host, epoch, Thread/Run, workspace and capability scope. Global management
 is limited to its management operations and cannot silently substitute for an actor grant. Storage resolves
 authority from the original branch/pin/record/operation/object owner. A supplied hash is not blob access.
 
@@ -83,8 +83,7 @@ operation owner records.
 
 Model and credential selection uses the native [Host model service](../models/DOCUMENTATION.md). Runtime provider adapters freeze the
 selected request contract; Host credentials are retained privately, not stored in snapshots. Purpose-
-specific retrieval and memory inference share actual Catalog admission/receipts without creating a Pi
-worker. Provider details belong to [providers](../../../../../kernel/crates/varin-runtime/src/providers/README.md).
+specific retrieval and memory inference share actual Catalog admission/receipts. Provider details belong to [providers](../../../../../kernel/crates/varin-runtime/src/providers/README.md).
 
 `tool-invocation.ts`, `tool-bridge.ts`, `extension-tool-owner.ts`, `nested-tool-owner.ts` and the domain
 owners validate the original Run, ToolOrigin, operation/call, schema, binding and execution owner.
@@ -95,7 +94,7 @@ Context transforms and budgets are selected extension capabilities. Their candid
 versioned and separate from the immutable request already sent. Runtime contract discovery exposes the
 actual selected registry metadata, not guessed support from an extension manifest alone.
 
-MCP uses the native shared [Host authority](../mcp/DOCUMENTATION.md), separate from Pi's owner. Configuration identity and
+MCP uses the shared [Host authority](../mcp/DOCUMENTATION.md). Configuration identity and
 live owner generation differ: re-enabling an equal configuration creates a fresh binding, while revoked
 old exchanges stay revoked. Managed MCP source stop starts the exact target stop before joining its
 pending observer acknowledgement. Original stop/receipt/resource cleanup remains necessary; cancelling

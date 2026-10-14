@@ -5,26 +5,11 @@ description: Adicione servidores MCP para dar ferramentas extras aos agentes.
 
 # Servidores MCP
 
-Um servidor MCP dá aos seus agentes ferramentas extras — coisas como pesquisar em um banco de dados, chamar uma API ou ler um serviço que você usa. Adicione-os em **Settings → MCP**.
+Abra **Configurações → MCP** no Host responsável pela conexão. Escolha a origem da configuração e adicione um servidor: comando, argumentos e ambiente para processo local, ou URL e cabeçalhos para serviço remoto. Use apenas servidores cujo código e acesso a dados você conhece.
 
-## Adicionar um servidor
+Salve o documento, use Connect ou Reconnect e confira estado e quantidade de ferramentas. Entre na conta quando houver autorização. Origens globais e do projeto mostram seus caminhos; configuração do projeto exige confiança. Você pode editar campos ou a configuração bruta.
 
-1. Abra **Settings → MCP**.
-2. Adicione um servidor e escolha seu tipo:
-   - **local** — o Varin executa um comando na sua máquina. Você fornece o comando a ser executado e, se necessário, variáveis de ambiente.
-   - **remote** — o Varin conecta a uma URL hospedada por outra pessoa. Você fornece a URL e quaisquer cabeçalhos necessários (por exemplo, um token de autenticação).
-3. Salve. O servidor fica ativado por padrão; você pode desativá-lo sem excluí-lo.
+Salvar não substitui recursos já capturados por um Thread ativo. Confira os recursos da conversa e atualize explicitamente seu snapshot. Pedidos de permissão, perguntas e sampling aparecem na conversa.
 
-## Onde se aplica
-
-Escolha o escopo ao adicionar um servidor:
-
-- **personal** — disponível em todos os projetos
-- **project** — disponível apenas no projeto atual e salvo junto com as outras configurações do projeto
-
-Os nomes de servidor usam letras minúsculas, números, hifens e sublinhados.
-
-## Relacionado
-
-- [Provedores, Modelos e Agentes](/pt-br/providers/) — conecte um modelo primeiro
-- [Skills](/pt-br/skills/) — outra forma de ampliar o que os agentes podem fazer
+- [Canais de modelos](/pt-br/providers/)
+- [Skills](/pt-br/skills/)

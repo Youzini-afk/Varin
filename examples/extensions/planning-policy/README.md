@@ -31,8 +31,8 @@ Select the provider through existing service routing, with the routing document'
 }
 ```
 
-A session rule uses the native thread ID as `sessionId`. Use the selected native runtime path;
-installing this extension does not switch the product's Pi default or grant a native source/tool.
+A session-scoped routing rule uses the native Thread ID as `sessionId`. Installing this extension
+does not select its policy or grant a Source/tool capability.
 
 ## Explicit planning-model configuration
 

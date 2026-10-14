@@ -49,8 +49,9 @@ the `openContext*` actions in `useUIStore`.
   positions). Singleton surfaces (git, pr, notes, plan, context) and preview
   tabs intentionally remount on switch and must restore themselves from
   their stores/snapshots instead.
-- Recovery is a singleton surface. It follows the currently selected Pi session
-  and reads provider state from `usePiSessionStore`; history and snapshots
-  remain owned by Pi and the active recovery extensions.
+- Recovery is a singleton surface. `WorkspaceRecoveryPanel` follows the current workspace and
+  selected native Thread/branch. The versioned recovery service owns checkpoints and combined
+  file/history operations; the Catalog owns conversation navigation receipts. These are separate
+  authorities, and changing the Host or selection retires stale reads.
 - Runtime scope: desktop/web `MainLayout` only. The dedicated mobile shell has
   its own layout and does not consume this registry.

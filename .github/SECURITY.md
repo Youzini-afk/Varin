@@ -3,7 +3,7 @@ English | [简体中文](https://github.com/Youzini-afk/Varin/blob/main/.github/
 # Varin security policy
 
 Varin handles source code, terminal access, Git and SSH operations, model-provider credentials,
-Pi session history, extension configuration, and remote connections. A defect at one of these
+native Thread history, extension configuration, and remote connections. A defect at one of these
 boundaries can have consequences beyond the application UI, so private and reproducible reports are
 appreciated.
 
@@ -61,7 +61,7 @@ provide material status changes through the private thread.
 Reports are especially useful when they demonstrate a violation of an intended boundary in:
 
 - Electron main/preload IPC, window origin checks, deep links, updater, or packaged resources;
-- the Pi host, runtime broker, worker lifecycle, protocol parser, or cross-session event routing;
+- Application Host/kernel authority, native Catalog and executor lifetimes, private protocol parsing, or cross-Thread event routing;
 - Web authentication, cookies/tokens, pairing, Origin checks, WebSocket authorization, relay, or
   tunnel handling;
 - filesystem containment, symlink/junction resolution, file grants, worktrees, Git, terminal, PTY,
@@ -69,13 +69,13 @@ Reports are especially useful when they demonstrate a violation of an intended b
 - project trust, package installation, extension loading, MCP command approval, or capability
   escalation before consent;
 - model/provider authentication, credential storage, discovery redirects, or secret redaction;
-- Pi session recovery, workspace-history delegation, concurrent writes, rollback, or data deletion;
+- native conversation and resource recovery, source grants, concurrent writes, result publication, or data deletion;
 - cloud archives, Docker images, deployment locks, health validation, rollback, release identity,
   dependency installation, or build provenance;
 - leakage of prompts, source files, environment values, credentials, or private provider responses
   through logs, diagnostics, URLs, notifications, or renderer state.
 
-Vulnerabilities in Pi or a third-party extension should normally be reported to that project. Still
+Vulnerabilities in a third-party dependency or extension should normally be reported to that project. Still
 report the issue to Varin when its integration bypasses a Varin trust boundary, activates code
 before approval, exposes data beyond the capability shown to the user, or prevents an upstream fix
 from taking effect.
@@ -84,14 +84,11 @@ from taking effect.
 
 The following facts are important when deciding whether behavior is a Varin vulnerability:
 
-- **Pi packages are trusted executable code.** They run with the user's operating-system
-  permissions in an isolated worker process. Capability labels support an informed trust decision;
-  they are not a claim of a complete OS sandbox. A malicious package using permissions the user
-  explicitly granted is different from package code running before trust or escaping the stated
-  boundary.
-- **Projects can contain executable configuration.** Project-local Pi resources, MCP commands,
-  credential commands, hooks, and extension settings remain disabled until the trusted host accepts
-  the relevant project grant.
+- **Executable extensions and tools require trust.** Process separation and capability review do not
+  constitute a complete OS sandbox. Code using permissions the user explicitly granted is different
+  from code running before approval or escaping the stated boundary.
+- **Project configuration can enable executable capabilities.** Native project resources, MCP commands
+  and extension settings are subject to their trusted Host admission and current project grants.
 - **The renderer is untrusted relative to native hosts.** UI state alone never grants local file,
   process, credential, update, or SSH authority.
 - **Remote clients have explicit capabilities.** Being authenticated to the Web UI does not
@@ -126,13 +123,13 @@ given according to the reporter's preference.
 
 - Do not bind the Web service beyond loopback without a strong `VARIN_UI_PASSWORD`.
 - Use TLS through a trusted reverse proxy or an approved tunnel for traffic leaving the machine.
-- Treat every Pi package and project-local executable resource as code; review its source and
+- Treat every executable extension and project-local executable resource as code; review its source and
   requested capabilities before approval.
-- Keep Varin, Pi, maintained extensions, and the host operating system updated.
+- Keep Varin, maintained extensions, and the host operating system updated.
 - Keep persistent Varin data, workspaces, SSH material, and deployment environment files outside
   immutable release directories and protect them with appropriate filesystem permissions.
 - Pin production containers by digest, retain a known-good deployment, and verify `/health` reports
-  a ready bundled Pi runtime and the expected release identity.
+  the ready native runtime and expected release identity.
 - Do not place passwords, provider keys, tunnel tokens, or SSH material in images, build arguments,
   repositories, command histories, screenshots, or issue reports.
 
@@ -141,7 +138,7 @@ container attestations, immutable releases, and rollback behavior.
 
 ## Build and release integrity
 
-Repository CI performs frozen dependency installation, dependency audits, Pi dependency checks,
+Repository CI performs frozen dependency installation, dependency audits, native protocol checks,
 type checking, linting, tests, production builds, cloud-layout verification, and packaged-host smoke
 tests. Container candidates are built for `linux/amd64` and `linux/arm64` with provenance and SBOM
 attestations; installable tags are promoted only after an immutable application digest passes its

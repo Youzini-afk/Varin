@@ -15,15 +15,14 @@ Use this page if you run Varin behind Nginx, Nginx Proxy Manager, Caddy, Cloudfl
 
 ## What the proxy must support
 
-- WebSockets for live message transport:
-  - `/api/varin/runtime/ws`
+- WebSocket:
   - `/api/dictation/ws`
   - `/api/terminal/ws`
   - `/api/varin/realtime-proxy/ws`
 - SSE without buffering:
   - `/api/notifications/stream`
   - `/api/varin/events`
-  - `/api/varin/runtime-manager/events`
+  - `/api/threads/observe`
   - `/api/varin/realtime-proxy/sse`
 - Large request bodies for attachments and file operations
 - Long-lived read timeouts for live streams and terminal sessions
@@ -66,7 +65,7 @@ proxy_set_header X-Forwarded-Host $host;
 
 gzip off;
 
-location ~ ^/api/(varin/runtime|varin/realtime-proxy|terminal|dictation)/ws$ {
+location ~ ^/api/(varin/realtime-proxy|terminal|dictation)/ws$ {
     proxy_pass http://127.0.0.1:3000;
     proxy_set_header Upgrade $http_upgrade;
     proxy_set_header Connection "upgrade";
@@ -80,7 +79,7 @@ location ~ ^/api/(varin/runtime|varin/realtime-proxy|terminal|dictation)/ws$ {
     proxy_send_timeout 3600s;
 }
 
-location ~ ^/api/(notifications/stream|varin/(events|runtime-manager/events|realtime-proxy/sse))$ {
+location ~ ^/api/(threads/observe|notifications/stream|varin/(events|realtime-proxy/sse))$ {
     proxy_pass http://127.0.0.1:3000;
     proxy_set_header Host $host;
     proxy_set_header X-Real-IP $remote_addr;
@@ -118,8 +117,8 @@ Enable **Websockets Support** in Nginx Proxy Manager. Use the buffering, request
 
 ### Page loads, but sending messages fails
 
-- WebSockets are not enabled in the proxy
-- `/api/varin/runtime/ws` is not passing through correctly
+- Check authentication and forwarding for `POST /api/threads/*` requests.
+- Check that `GET /api/threads/observe` streams SSE without buffering or caching.
 
 ### Notifications or live status do not update
 

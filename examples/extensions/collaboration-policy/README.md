@@ -32,8 +32,7 @@ Select the provider through existing service routing, using the routing document
 }
 ```
 
-Use the selected native runtime path; installing this example does not switch the product's Pi
-default or grant a tool/source capability. Prepare a `fixed_branch` source with an authorized
+Installing this example alone does not select its native policy or grant a tool/Source capability. Prepare a `fixed_branch` source with an authorized
 whole-root read grant and the ordinary `file_read` tool. Create `source.txt` before capturing its
 fixed revision. Choose the parent model through normal model/credential settings. The child uses
 that exact admitted model and credential scope, with `workMode: read_only` and an explicit file-read tool subset. Running the example
@@ -66,7 +65,7 @@ failures in the report, not an empty successful answer.
 The example's task text and `source.txt` path are declared configuration in `host.ts`; they are
 not runtime restrictions. Its checkpoint stores orchestration phase, original child handle and
 read evidence references only. Core owns child status, Wait state, history, source authorization,
-call/terminal receipts and recovery. Child context remains independent of parent session notes,
+call/terminal receipts and recovery. Child context remains independent of parent Thread notes,
 and its tool subset remains file-only and read-only: no recursive dispatch, writes or new grants.
 In-flight work retains the selected policy artifact/configuration; this example does not promise
 hot migration of incompatible private state. The runtime also supports frozen configured presets and independent child processes; this deliberately

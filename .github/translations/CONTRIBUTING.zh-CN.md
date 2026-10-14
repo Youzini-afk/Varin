@@ -19,8 +19,9 @@
 修改前阅读负责该行为的实现、实际调用方和最近的 README 或 DOCUMENTATION。保持改动聚焦，
 保留无关工作，沿用既有代码风格和共享 UI 组件。
 
-Pi 是默认会话运行时。显式选择的 Rust Agent runtime 拥有独立的历史和执行管理，两者共用 Host 服务。
-按架构中实际的职责归属修改，避免把状态复制到另一层。切换默认运行时或迁移用户资产需要明确约定。
+原生 Rust Agent runtime 是产品的会话与执行所有者。Thread/branch 历史、队列、Run 和 Operation
+由 Catalog 管理；可信 Application Host 提供模型、凭据和领域能力。按实际职责归属修改，避免把状态
+复制到另一层。保留历史 Pi 资产，不导入这些资产，也不恢复备用运行时。
 
 通过公开接口集成扩展，保留插件自己的配置和数据。特权操作由可信 Host 执行，不能放到渲染器中。
 按涉及的能力阅读[安全](../../docs/security.md)和[扩展](../../docs/extensions.md)说明，

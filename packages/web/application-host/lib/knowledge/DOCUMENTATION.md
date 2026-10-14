@@ -39,7 +39,7 @@ contains the native implementation. `semantic/store.ts` orchestrates embeddings
 through the semantic owner; `semantic/store-engine.ts` owns its native generations.
 Opening, indexed reads, graph/vector computations, user writes, checkpoints and
 closing run in the corresponding owner. Cache maintenance uses the semantic owner.
-Electron uses its own executable in Node mode, like the existing Pi worker boundary.
+Electron uses its own executable in Node mode for this storage process.
 The Web Host uses the same component. No renderer API or public server is added.
 
 The last successful store close disconnects the process and waits for its exit,
@@ -132,7 +132,7 @@ single-writer ownership, and adds no candidate limit or longer tool timeout.
 
 ### Bot memory implementation boundary
 
-Bot and session scopes use hashed filename-safe keys through `owner-scope.ts`;
+Bot and Thread scopes use hashed filename-safe keys through `owner-scope.ts`;
 these identities are not document workspace roots. They share this storage worker,
 not a new database owner. Automatic memory enabled by the user commits effective
 `accepted` rows; claim nature and source still distinguish inference from explicit
@@ -149,8 +149,8 @@ existing memories is handled by narration and storage.
 
 New organizer proposals can supply the knowledge revision they observed. The
 single writer checks both committed and pending mutations before inserting them.
-Explicit and automatic memories carry the same original-source ranges (native Pi
-entry, event or Run report, revision and text offsets). A paraphrased explicit
+Explicit and automatic memories carry the same original-source ranges (native HistoryItem,
+event or Run report, revision and text offsets). A paraphrased explicit
 record cites `sourceText`; the Host resolves that exact passage on the caller's
 branch. Automatic proposals also cite a narrow quote. Covered and retired ranges
 are excluded before narration, and the storage writer checks late inferred
@@ -158,7 +158,7 @@ proposals against explicit/forgotten evidence. Explicit remembering can
 intentionally create a new active row.
 
 Organizer progress retains reviewed ranges, including empty judgments, across all
-native Pi branches. List cursors are presentation only; changed source revisions
+native Thread branches. List cursors are presentation only; changed source revisions
 reopen their ranges. Prepared proposals and their source ranges survive restart;
 committed provenance reconciles a crash between memory and coverage writes. This
 is recoverable progress, not a cross-store rollback transaction.
@@ -170,14 +170,14 @@ failure backoff for every newer entry in the same session, and an old work canno
 work's prepared row. Recovery uses original prepared proposals and committed provenance; it never
 turns the KnowledgeStore into a second inference scheduler or creates an incidental paid request.
 See [Bot background inference](../memory/DOCUMENTATION.md#bot-background-inference) for admission,
-Sleep, explicit Retry and the remaining native Bot entry boundary.
+Sleep and explicit Retry.
 
-Explicit chat selection extraction uses `memory/selection-memory-routes.ts`. Preview validates native
+Explicit chat selection extraction uses `memory/thread-memory.ts` and `memory/thread-memory-routes.ts`. Preview validates native
 branch text and exact offsets, calls the existing organizer narrator without automatic coverage/commit,
-and returns editable drafts with source revisions. Save resolves the session's real owner (including
-Bot/session scopes), validates the frozen owner and original revisions, then uses MemoryService.remember.
+and returns editable drafts with source revisions. Save resolves the Thread's real owner (including
+Bot/Thread scopes), validates the frozen owner and original revisions, then uses MemoryService.remember.
 Source ranges and `user-extracted` provenance use the same memory authority and original-source reader.
-Undo verifies the saved row revision and originating session before retiring it. An empty extraction is
+Undo verifies the saved row revision and originating Thread before retiring it. An empty extraction is
 a valid result; unconfigured models, invalid envelopes/citations and changed sources remain failures.
 
 `memory get` with `includeSource` and the settings original-passages view read only
@@ -207,7 +207,7 @@ Process-kill recovery is not equivalent to a power-loss guarantee.
 
 Native Agent and Bot main and admitted child Thread plans use this same private KnowledgeStore writer, in the existing
 user store as a physical home. `plan-store.ts` records explicit Thread/branch identities;
-it does not invent Pi session IDs, duplicate plans by Bot, or change legacy Pi plan scope. Version bodies, branch
+it does not invent session IDs or duplicate plans by Bot. Version bodies, branch
 current references, fork captures and reference-only mutation receipts live here. Native records
 have their own types and no legacy session identity, so block queries, user knowledge lists,
 recall and semantic knowledge indexing exclude them through their existing type filters.
@@ -222,8 +222,7 @@ the private bridge query. A reopened receipt lookup does not resolve today's pla
 the update; a later user edit stays current.
 User command keys are scoped to the authenticated Thread and branch. Replaying a lost response
 returns the original version, even after a later user edit, without another mutation. Storage
-failure remains unknown until the original receipt can be queried. Pi `expectedUpdatedAt` APIs
-remain separate.
+failure remains unknown until the original receipt can be queried.
 
 The Host verifies native Catalog identity and captures a fork at the chosen real history cut
 before creating the Catalog branch. Catalog stores only the immutable capture reference/basis.

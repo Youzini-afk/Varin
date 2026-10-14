@@ -1,7 +1,7 @@
 # Private Rust kernel
 
 Each Application Host owns one packaged `varin-kernel` executable. It combines the resource kernel
-with the opt-in Agent runtime, using separate domain authorities inside the same private component.
+with the native Agent runtime, using separate domain authorities inside the same private component.
 It has no public TCP server and is shared by Web, Electron and remote Hosts.
 
 - [System architecture](../docs/architecture.md): product processes and state ownership
@@ -56,6 +56,11 @@ format and structural identity before normal writable recovery. Unsupported/futu
 stores are errors and their assets are preserved. No second TS writer or internal-format upgrade/import
 backend is selected. Workspace files, Git, native Pi data and external configuration are separate assets.
 
+Native grants bind current Thread/Run authority. The four retired session identity fields remain
+null in new serialized grant records for historical decoding; non-null values cannot authorize access
+or grant reissue. Legacy session-owned records and candidate owners fail closed for overwrite,
+release, preparation replay and publication, including cached receipts. There is no user-asset rewrite.
+
 Storage owns immutable tree roots, revisions, SHA-256 objects, pins, references, typed domain records,
 Recovery/Integration phases and idempotent original-operation receipts. Bytes are verified/flushed before
 references publish. Logical release and physical cleanup have distinct results; failed deletion remains
@@ -100,9 +105,9 @@ Cancellation reaches traversal/parser work and reader references release only on
 Live hits carry the observed revision; a scan fingerprint identifies sorted paths, not atomic file bytes.
 
 The Host retains request policy, tokenizer-aware packing, LSP protocol, embeddings, vector/knowledge
-stores and product coordination. The separate `varin-runtime` crate now also implements the Agent
-Catalog/engine and provider contracts. Pi's own loop remains in Pi workers. Do not infer that a compute
-job owns a model runtime or that the new Agent runtime replaced every Pi consumer.
+stores and product coordination. The separate `varin-runtime` crate implements the Agent Catalog/engine and provider contracts.
+Compute and conversation execution retain distinct domain owners inside the packaged kernel; a
+compute job does not become a model runtime.
 
 ## Verification entry points
 

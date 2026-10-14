@@ -1,37 +1,18 @@
 ---
-title: Agent Control Tool
-description: Let an agent manage Varin sessions, worktrees, and scheduled tasks from chat.
+title: "Agent tools"
+description: "Understand the native tools used to coordinate work."
 ---
 
-# Agent Control Tool
+# Agent tools
 
-Use the Varin agent-control tool to manage work in the app directly from chat. It is available on desktop and web when Varin is running its local Pi runtime. There is no separate tool to install or shell command to run.
+Native conversations expose tools according to their accepted model, source, role and permissions. Ask for the outcome you need; available tools remain subject to their own authorization checks.
 
-## What you can ask
+- `dispatch`, `child_status`, `child_report` and `wait_child` coordinate delegated tasks.
+- `threads` and `read_thread` discover and inspect conversations in the current task family. They do not grant access to every conversation or to another task's files.
+- `follow_up` registers and manages instructions triggered by time or observed conditions.
+- `goal_report` reports an explicitly established continuing goal as complete or blocked.
+- `resource_read` reads admitted instruction and skill resources; `memory` manages notes within the agent's admitted scopes.
 
-Ask the agent in plain language. For example:
+Tool visibility is not permission to write files, run processes or contact external services. Read-only conversation access does not start the target model or grant execution control. Inspect original task results and statuses in the conversation before treating accepted work as finished.
 
-- "Create a new Varin session in this project, use the `openai/gpt-5.6-sol` model, and send it this prompt: review the authentication flow."
-- "Create a new Varin session for this task in a separate worktree, and ask it to add tests for the login flow."
-- "Use Varin to list my 10 most recent sessions and include their current status."
-- "Create a Varin scheduled task named Weekday review that sends this prompt at 09:00 every weekday: review changes since the last run."
-- "Run the Varin scheduled task named Weekday review now."
-- "Check the Varin session named Authentication review and show me its latest assistant response."
-
-The tool can list projects and model preferences, create and follow up on sessions, fork a session, create isolated worktree sessions, and manage scheduled tasks. Sessions started this way appear in Varin like any other session, so you can open them and continue the work yourself.
-
-## Keep in mind
-
-- New session prompts return immediately by default. Follow the session in Varin, or ask the agent to check it later.
-- A separate worktree is only created when you ask for one. Uncommitted changes from your current worktree are not copied into it.
-- The tool cannot delete sessions or worktrees, register project paths, run arbitrary shell commands, or call arbitrary URLs.
-
-## Turn the tool on or off
-
-Open **Settings**, change **Agent control tool**, then save. The setting applies to the current Varin runtime.
-
-## Related
-
-- [Scheduled Tasks](/scheduled-tasks/)
-- [Worktree Sessions](/worktrees/)
-- [Session Goals](/session-goals/)
+See [Continuing goals](/session-goals/), [Scheduled tasks and follow-ups](/scheduled-tasks/) and [Skills](/skills/).

@@ -1,14 +1,14 @@
 ---
-title: Commandes
-description: Consultez les commandes disponibles dans le runtime Pi actif.
+title: "Commandes"
+description: "Appelez les skills capturés dans le contexte de la conversation."
 ---
 
 # Commandes
 
-Ouvrez **Paramètres → Commandes** pour voir les commandes enregistrées par les extensions et les skills. Le catalogue affiche leur description, leur source, leur scope et leur invocation, que vous pouvez copier.
+**Paramètres → Commandes** affiche les skills actifs et valides de la bibliothèque sélectionnée, avec description et chemin. Commencez un message par `/skill:name`, suivi d’un espace et de vos instructions.
 
-Tapez `/` au début d’un message et sélectionnez une commande. Ajoutez des arguments après son nom si nécessaire. Les commandes d’extension sont traitées par leur plugin ; `/skill:name` charge les instructions du skill correspondant.
+Dans **Instructions and skills**, **Add /skill:name to draft** insère la commande sans envoyer le message. Les noms contenant des espaces ne peuvent pas utiliser cette syntaxe.
 
-Les commandes disponibles dépendent du runtime, de l’espace de travail et des ressources chargées. Gérez leurs sources dans **Paramètres → Skills** et **Paramètres → Pi Packages**.
+La conversation utilise une version capturée. Après une modification de bibliothèque, choisissez **Refresh instructions and skills** pour préparer un nouvel instantané. Les requêtes en cours et les entrées déjà acceptées conservent leurs ressources originales. La liste des paramètres ne signifie pas qu’une ancienne conversation a été actualisée.
 
-- [Skills](/fr/skills/)
+Consultez [Skills](/fr/skills/). Les raccourcis de l’espace de travail se règlent séparément.

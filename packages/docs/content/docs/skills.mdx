@@ -1,30 +1,16 @@
 ---
-title: Skills
-description: Create reusable instructions that agents load on demand.
+title: "Skills"
+description: "Create and use versioned instruction resources."
 ---
 
 # Skills
 
-A skill is a reusable set of instructions an agent can pull in when it's relevant — for example, "how we write commit messages" or "our API conventions." You manage them at **Settings → Skills**.
+A skill is a `SKILL.md` instruction resource with a name and description. The description helps the agent select relevant instructions; supporting files can provide additional material.
 
-To install ready-made skills instead of writing your own, see [Skills Catalog](/skills-catalog/).
+Open **Settings → Skills** to create, inspect, edit, copy or delete skills. Choose user scope or a trusted project. The editor shows the file path, origin, validity and whether the resource is writable. Read-only resources can be copied into a writable scope. Resolve project-trust prompts and diagnostics before relying on a project resource.
 
-## Create a skill
+Use a leading `/skill:name` message or the conversation's **Instructions and skills** panel to select a skill explicitly. The agent can also read admitted skills and their supporting files through `resource_read`. Skill text grants no extra tool or filesystem permissions.
 
-1. Open **Settings → Skills**.
-2. Create a skill and give it a name and a short description. The description is how the agent decides when the skill applies, so make it specific.
-3. Write the instructions. Add supporting files if the skill needs them.
-4. Choose where it lives:
-   - **personal** — available in every project
-   - **project** — available only in the current project
+Saved library edits do not replace captured conversation material. Use **Refresh instructions and skills**; later requests use the new snapshot while accepted requests retain theirs.
 
-## Use a skill in chat
-
-Type `/` in the middle of a message to bring up the skill picker, then choose one. The agent loads that skill's instructions for the response.
-
-A `/` at the very start of the message opens [commands](/commands/) instead.
-
-## Related
-
-- [Skills Catalog](/skills-catalog/) — install skills others have published
-- [Commands](/commands/) — commands available in the active runtime
+See [Commands](/commands/) and [Skills library](/skills-catalog/).

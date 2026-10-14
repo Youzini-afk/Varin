@@ -1,38 +1,18 @@
 ---
-title: Narzędzie sterowania agentem
-description: Pozwól agentowi zarządzać sesjami Varin, worktree i zaplanowanymi zadaniami z czatu.
+title: "Narzędzia Agenta"
+description: "Poznaj natywne narzędzia koordynacji pracy."
 ---
 
-# Narzędzie sterowania agentem
+# Narzędzia Agenta
 
-Użyj narzędzia sterowania agentem Varin, aby zarządzać pracą w aplikacji bezpośrednio z czatu. Jest dostępne na komputerze i w przeglądarce, gdy Varin uruchamia lokalne środowisko Pi. Nie ma osobnego narzędzia do zainstalowania ani polecenia powłoki do uruchomienia.
+Dostępne narzędzia zależą od przyjętego modelu, źródła, roli i uprawnień. Opisz oczekiwany wynik; każda operacja nadal podlega własnej kontroli zezwolenia.
 
-## O co możesz poprosić
+- `dispatch`, `child_status`, `child_report` i `wait_child` koordynują zadania delegowane.
+- `threads` i `read_thread` przeglądają rozmowy tej samej rodziny zadań, bez ogólnego dostępu do wszystkich rozmów czy plików.
+- `follow_up` zarządza instrukcjami uruchamianymi czasem lub warunkiem.
+- `goal_report` zgłasza zakończenie albo blokadę jawnie utworzonego celu.
+- `resource_read` czyta dopuszczone instrukcje i skille; `memory` zarządza notatkami w dozwolonych zakresach.
 
-Poproś agenta zwykłym językiem. Na przykład:
+Widoczność narzędzia nie przyznaje praw zapisu, uruchamiania procesów ani usług zewnętrznych. Odczyt rozmowy nie uruchamia jej modelu i nie daje kontroli wykonania. Przyjęcie zadania nie oznacza ukończenia: sprawdź oryginalne wyniki i stan.
 
-- „Utwórz nową sesję Varin w tym projekcie, użyj modelu `openai/gpt-5.6-sol` i wyślij jej ten prompt: przejrzyj przepływ uwierzytelniania.”
-- „Utwórz nową sesję Varin dla tego zadania w osobnym worktree i poproś o dodanie testów do przepływu logowania.”
-- „Użyj Varin, aby wylistować moje 10 najnowszych sesji i dołączyć ich bieżący status.”
-- „Utwórz zaplanowane zadanie Varin o nazwie Weekday review, które o 09:00 w każdy dzień roboczy wysyła ten prompt: przejrzyj zmiany od ostatniego uruchomienia.”
-- „Uruchom teraz zaplanowane zadanie Varin o nazwie Weekday review.”
-- „Sprawdź sesję Varin o nazwie Authentication review i pokaż mi jej najnowszą odpowiedź asystenta.”
-
-Narzędzie może listować projekty i preferencje modeli, tworzyć sesje i kontynuować je, forkować sesję, tworzyć izolowane sesje worktree oraz zarządzać zaplanowanymi zadaniami. Sesje uruchomione w ten sposób pojawiają się w Varin jak każda inna, więc możesz je otworzyć i kontynuować pracę samodzielnie.
-
-## Pamiętaj
-
-- Prompty nowej sesji domyślnie wracają od razu. Śledź sesję w Varin albo poproś agenta, by sprawdził ją później.
-- Osobny worktree powstaje tylko wtedy, gdy o niego poprosisz. Niezatwierdzone zmiany z bieżącego worktree nie są do niego kopiowane.
-- Narzędzie nie może usuwać sesji ani worktree, rejestrować ścieżek projektu, uruchamiać dowolnych poleceń powłoki ani wywoływać dowolnych URL-i.
-
-## Włączanie i wyłączanie narzędzia
-
-Otwórz **Settings**, zmień **Agent control tool**, a następnie zapisz. Ustawienie dotyczy bieżącego środowiska uruchomieniowego Varin.
-
-
-## Powiązane
-
-- [Zaplanowane zadania](/pl/scheduled-tasks/)
-- [Sesje worktree](/pl/worktrees/)
-- [Cele sesji](/pl/session-goals/)
+Zobacz [Cele](/pl/session-goals/), [Zadania zaplanowane](/pl/scheduled-tasks/) i [Skille](/pl/skills/).

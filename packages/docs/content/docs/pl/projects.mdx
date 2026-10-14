@@ -5,29 +5,15 @@ description: Organizuj swoją pracę w projekty i przełączaj się między nimi
 
 # Projekty
 
-Projekt to folder na Twoim komputerze, który Varin śledzi — zwykle jedna baza kodu. Przełączenie projektu zmienia folder, w którym pracuje agent, wraz z sesjami i ustawieniami tego projektu.
+Projekt to folder na połączonym Host. Otwórz go selektorem projektów lub przeglądarką folderów; Ustawienia → Projekty zarządza nazwą, kolorem, ikoną i akcjami. Przeglądany projekt i źródło wykonania rozmowy są niezależne: przełączenie projektu nie zmienia źródła działającego Thread.
 
-## Dodaj projekt
+W rozmowie rozwiń **Workspace**, wybierz Host i folder źródłowy, a następnie tryb:
+- **Read-only file snapshot**: stałe pliki do odczytu, listowania i wyszukiwania
+- **Isolated editable copy**: przechwycona kopia do edycji i poleceń; zmiany nie wracają automatycznie
+- **Live workspace**: zapisane pliki rzeczywistego folderu; edycja działa natychmiast
 
-Projekt możesz dodać z kilku miejsc:
+Kliknij **Prepare workspace** i sprawdź wynik przed wysłaniem. Migawki mogą zawierać szkice edytorów tego okna na tym samym Host; tryb live używa tylko zapisanych plików. Zdalne ścieżki należą do wybranego Host. Edytowalne kopie i polecenia nie są piaskownicami bezpieczeństwa.
 
-- pozycja **Add project** w palecie poleceń
-- przycisk **+** u góry paska bocznego sesji
-- przeglądarka folderów, gdy wybierasz katalog
-
-Wskaż folder, a Varin go zapamięta. Nazwa pochodzi od folderu; możesz ją później zmienić.
-
-## Przełączaj projekty
-
-Wybierz projekt z paska bocznego, aby go aktywować. Wszystko — sesje, git, notatki — podąża za otwartym projektem.
-
-## Spraw, by projekt był rozpoznawalny
-
-Otwórz **Settings → Projects**, aby nadać projektowi własną nazwę, kolor lub ikonę. Varin próbuje znaleźć ikonę automatycznie — zobacz [Ikony projektów](/pl/project-icons/).
-
-
-## Powiązane
-
-- [Notatki, listy zadań i plany projektu](/pl/notes-todos-plans/) — prowadź robocze notatki dla każdego projektu
-- [Akcje projektu](/pl/project-actions/) — zapisuj często uruchamiane polecenia
-- [Kontekst](/pl/context/) — zobacz, ile pamięci modelu zużywa sesja
+- [Sesje worktree](/pl/worktrees/)
+- [Notatki, listy zadań i plany projektu](/pl/notes-todos-plans/)
+- [Akcje projektu](/pl/project-actions/)

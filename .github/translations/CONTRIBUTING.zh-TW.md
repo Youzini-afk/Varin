@@ -19,8 +19,9 @@
 修改前閱讀負責該行為的實作、實際呼叫端和最近的 README 或 DOCUMENTATION。保持變更聚焦，
 保留無關工作，沿用既有程式碼風格和共用 UI 元件。
 
-Pi 是預設對話執行環境。明確選用的 Rust Agent runtime 擁有獨立的歷史和執行管理，兩者共用 Host 服務。
-按架構中實際的職責歸屬修改，避免將狀態複製到另一層。切換預設執行環境或遷移使用者資產需要明確約定。
+原生 Rust Agent runtime 是產品的對話與執行管理者。Thread/branch 歷史、佇列、Run 和 Operation
+由 Catalog 管理；受信任的 Application Host 提供模型、憑證和領域能力。依實際職責修改，避免將狀態
+複製到另一層。保留歷史 Pi 資產，不匯入這些資產，也不恢復備用執行環境。
 
 透過公開介面整合擴充功能，保留外掛程式自己的設定和資料。特權操作由受信任的 Host 執行，不能放在 Renderer 中。
 按涉及的功能閱讀[安全性](../../docs/security.md)和[擴充功能](../../docs/extensions.md)說明，

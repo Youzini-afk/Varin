@@ -10,7 +10,7 @@
 | 会话与文件恢复 | [Recovery](recovery.md) |
 | Varin 扩展开发 | [Extension authoring](varin-extension-authoring.md) |
 | 主题配置 | [Custom themes](CUSTOM_THEMES.md) |
-| 依赖、SDK patch 与生产锁 | [Dependency maintenance](dependency-updates.md) |
+| 依赖、原生消费者与生产锁 | [Dependency maintenance](dependency-updates.md) |
 | 用户站内容维护 | [贡献说明](../../packages/docs/CONTRIBUTING.md) |
 
 当前实现及支持边界见[架构](../architecture.md)，操作指南不另记阶段交付历史。
