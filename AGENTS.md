@@ -5,6 +5,11 @@ and the nearest module README/DOCUMENTATION. Code, types, schemas, tests and pac
 executable behavior; docs explain responsibility and intent. Git retains historical designs and delivery
 records. Correct stale prose rather than appending another contradictory update.
 
+Keep long-lived docs focused on the current system, its constraints and non-obvious rationale. Active
+designs and plans may remain while work is underway; distinguish proposals from implemented behavior.
+When they have served their purpose, fold useful rationale into current docs and remove the process
+documents. Git preserves their history.
+
 ## Product and ownership
 
 - Varin is an independent workspace and harness originating from the maintainer's OpenChamber fork.
