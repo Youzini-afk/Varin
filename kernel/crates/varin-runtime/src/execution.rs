@@ -839,7 +839,7 @@ pub enum ToolCompletion<M = ResolvedMedia> {
     },
 }
 impl ToolCompletion {
-    fn cancelled() -> Self {
+    pub(crate) fn cancelled() -> Self {
         Self::Result {
             outcome: Outcome::Cancelled,
             effect: Effect::None,

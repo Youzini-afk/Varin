@@ -4220,3 +4220,6 @@ fn native_inference_checkpoint_reopens_original_usage_and_opaque_without_replay(
 
 #[path = "catalog_bot_tests.rs"]
 mod bot_scope;
+
+#[path = "catalog_cancel_recovery_tests.rs"]
+mod cancelled_recovery;

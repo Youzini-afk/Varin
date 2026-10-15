@@ -89,6 +89,9 @@ struct Fixture {
 }
 impl Fixture {
     fn dispatched(cancel_before_crash: bool) -> Self {
+        Self::interrupted(cancel_before_crash, None)
+    }
+    fn interrupted(cancel_before_crash: bool, canonical_stop: Option<bool>) -> Self {
         let root =
             std::env::temp_dir().join(format!("varin-external-restart-{}", uuid::Uuid::new_v4()));
         let mut catalog = Catalog::open(&root).unwrap();
@@ -226,6 +229,29 @@ impl Fixture {
         }
         // The original external owner made its effect, then its caller lost the completion.
         std::fs::write(root.join("effect.txt"), "exactly once\n").unwrap();
+        if let Some(executor_stopped) = canonical_stop {
+            catalog
+                .commit_execution(
+                    &accepted.run_id,
+                    epoch,
+                    &ExecutionRecord::ToolSettled {
+                        context: ToolExecutionContext {
+                            run_id: accepted.run_id.clone(),
+                            operation_id: OPERATION.into(),
+                            origin: ToolOrigin::ModelStep {
+                                request_id: REQUEST.into(),
+                            },
+                        },
+                        completion: ToolCompletion::Result {
+                            outcome: Outcome::Indeterminate,
+                            effect: Effect::Unknown,
+                            content: json!({"owner":"original","outcome":"unavailable"}).into(),
+                        },
+                        executor_stopped,
+                    },
+                )
+                .unwrap();
+        }
         if cancel_before_crash {
             catalog.request_cancel_run(&accepted.run_id).unwrap();
         }
@@ -275,6 +301,22 @@ impl Fixture {
             std::fs::read_to_string(self.root.join("effect.txt")).unwrap(),
             "exactly once\n"
         );
+    }
+    fn request_path(&self) -> std::path::PathBuf {
+        let connection = rusqlite::Connection::open(self.root.join("conversation.sqlite")).unwrap();
+        let raw: String = connection
+            .query_row(
+                "SELECT body FROM model_steps WHERE id=?1",
+                [REQUEST],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let step: Value = serde_json::from_str(&raw).unwrap();
+        varin_runtime::content::object_path(
+            &self.root.join("content"),
+            step["request"]["content_object"].as_str().unwrap(),
+        )
+        .unwrap()
     }
 }
 impl Drop for Fixture {
@@ -396,4 +438,251 @@ fn unknown_effect_without_stop_stays_blocked_and_rejects_another_owner_epoch() {
     f.assert_no_replay();
     drop(catalog);
     supervisor.shutdown().unwrap();
+}
+
+#[test]
+fn precrash_cancel_with_late_original_stop_receipt_finishes_without_launch() {
+    let f = Fixture::dispatched(true);
+    let catalog = Catalog::open(&f.root).unwrap();
+    let supervisor = RunSupervisor::new(catalog);
+    assert_eq!(supervisor.cancel(&f.run).unwrap().state, RunState::Waiting);
+    {
+        let owner = supervisor.catalog();
+        let mut catalog = owner.lock().unwrap();
+        assert!(!catalog.run_startable(&f.run).unwrap());
+        catalog
+            .record_external_receipt_with_stop(OPERATION, f.receipt(), false)
+            .unwrap();
+    }
+    supervisor.reconcile_message_requests().unwrap();
+    assert!(supervisor.status().unwrap().is_empty());
+    assert_eq!(f.occupancy(), 1);
+    {
+        let owner = supervisor.catalog();
+        let mut catalog = owner.lock().unwrap();
+        catalog
+            .record_external_receipt_with_stop(OPERATION, f.receipt(), true)
+            .unwrap();
+    }
+    // The same real continuation pass used at startup/on receipts owns the cleanup.
+    supervisor.reconcile_message_requests().unwrap();
+    supervisor.advance_pending().unwrap();
+    supervisor.shutdown().unwrap();
+    let owner = supervisor.catalog();
+    let catalog = owner.lock().unwrap();
+    assert_eq!(catalog.run(&f.run).unwrap().state, RunState::Cancelled);
+    assert!(!catalog.run_startable(&f.run).unwrap());
+    let operation = catalog.operation(OPERATION).unwrap();
+    assert_eq!(operation.outcome, Some(Outcome::Indeterminate));
+    assert_eq!(operation.effect, Effect::Unknown);
+    assert!(operation.external_receipt.unwrap().executor_stopped);
+    assert_eq!(
+        catalog
+            .execution_history("branch")
+            .unwrap()
+            .iter()
+            .filter(|item| matches!(item.content, Content::ToolResult { .. }))
+            .count(),
+        1
+    );
+    assert_eq!(f.occupancy(), 0);
+    f.assert_no_replay();
+}
+
+#[test]
+fn cancelled_canonical_unknown_requires_original_executor_stop_even_with_call_receipt() {
+    for originally_stopped in [false, true] {
+        let f = Fixture::interrupted(true, Some(originally_stopped));
+        let supervisor = RunSupervisor::new(Catalog::open(&f.root).unwrap());
+        supervisor.reconcile_message_requests().unwrap();
+        if !originally_stopped {
+            assert!(supervisor.status().unwrap().is_empty());
+            assert_eq!(f.occupancy(), 1);
+            let owner = supervisor.catalog();
+            let mut catalog = owner.lock().unwrap();
+            assert_eq!(catalog.run(&f.run).unwrap().state, RunState::Waiting);
+            assert!(
+                catalog
+                    .operation(OPERATION)
+                    .unwrap()
+                    .call_completion
+                    .is_some()
+            );
+            assert!(
+                !catalog
+                    .execution_history("branch")
+                    .unwrap()
+                    .iter()
+                    .any(|item| matches!(item.content, Content::ToolResult { .. }))
+            );
+            catalog
+                .record_external_receipt_with_stop(OPERATION, f.receipt(), true)
+                .unwrap();
+        }
+        supervisor.reconcile_message_requests().unwrap();
+        supervisor.shutdown().unwrap();
+        let owner = supervisor.catalog();
+        let catalog = owner.lock().unwrap();
+        assert_eq!(catalog.run(&f.run).unwrap().state, RunState::Cancelled);
+        assert_eq!(
+            catalog.operation(OPERATION).unwrap().effect,
+            Effect::Unknown
+        );
+        assert_eq!(
+            catalog
+                .execution_history("branch")
+                .unwrap()
+                .iter()
+                .filter(|item| matches!(item.content, Content::ToolResult { .. }))
+                .count(),
+            1
+        );
+        assert_eq!(f.occupancy(), 0);
+        f.assert_no_replay();
+    }
+}
+
+#[test]
+fn cancelled_recovery_body_failure_retains_intent_and_receipt_then_retries_real_event_or_cancel() {
+    for retry_by_receipt in [false, true] {
+        let f = Fixture::dispatched(true);
+        let mut catalog = Catalog::open(&f.root).unwrap();
+        catalog
+            .record_external_receipt_with_stop(OPERATION, f.receipt(), true)
+            .unwrap();
+        let saved = catalog.operation(OPERATION).unwrap().external_receipt;
+        let request = f.request_path();
+        let body = std::fs::read(&request).unwrap();
+        std::fs::remove_file(&request).unwrap();
+        let supervisor = RunSupervisor::new(catalog);
+        let (wake, wakes) = std::sync::mpsc::channel();
+        supervisor.set_wake_sender(wake).unwrap();
+        supervisor.reconcile_message_requests().unwrap();
+        wakes
+            .recv_timeout(std::time::Duration::from_secs(5))
+            .unwrap();
+        // Completion is reapable even if its actual thread return races this wake.
+        supervisor.advance_pending().unwrap();
+        assert!(supervisor.status().unwrap().is_empty());
+        assert!(supervisor.execution_failure(&f.run).unwrap().is_some());
+        for _ in 0..3 {
+            supervisor.reconcile_message_requests().unwrap();
+        }
+        assert!(
+            wakes.try_recv().is_err(),
+            "unchanged body failure must not spin"
+        );
+        {
+            let owner = supervisor.catalog();
+            let catalog = owner.lock().unwrap();
+            let run = catalog.run(&f.run).unwrap();
+            assert!(run.cancel_requested);
+            assert_eq!(run.state, RunState::Waiting);
+            assert_eq!(
+                catalog.operation(OPERATION).unwrap().external_receipt,
+                saved
+            );
+            assert!(!catalog.run_startable(&f.run).unwrap());
+        }
+        std::fs::write(&request, body).unwrap();
+        if retry_by_receipt {
+            let owner = supervisor.catalog();
+            let mut catalog = owner.lock().unwrap();
+            let mut receipt = f.receipt();
+            receipt.outcome = Outcome::Succeeded;
+            receipt.effect = Effect::Confirmed;
+            receipt.result = json!({"owner":"original","outcome":"confirmed"}).into();
+            catalog
+                .record_external_receipt_with_stop(OPERATION, receipt, true)
+                .unwrap();
+        } else {
+            supervisor.cancel(&f.run).unwrap();
+        }
+        supervisor.reconcile_message_requests().unwrap();
+        supervisor.shutdown().unwrap();
+        let owner = supervisor.catalog();
+        let catalog = owner.lock().unwrap();
+        assert_eq!(catalog.run(&f.run).unwrap().state, RunState::Cancelled);
+        assert_eq!(
+            catalog.operation(OPERATION).unwrap().outcome,
+            Some(if retry_by_receipt {
+                Outcome::Succeeded
+            } else {
+                Outcome::Indeterminate
+            })
+        );
+        assert!(supervisor.execution_failure(&f.run).unwrap().is_none());
+        assert_eq!(
+            catalog
+                .execution_history("branch")
+                .unwrap()
+                .iter()
+                .filter(|item| matches!(item.content, Content::ToolResult { .. }))
+                .count(),
+            1
+        );
+        f.assert_no_replay();
+    }
+}
+
+#[test]
+fn cancelled_pairing_epoch_adoption_survives_failed_batch_commit_and_reopen() {
+    let f = Fixture::dispatched(true);
+    let mut catalog = Catalog::open(&f.root).unwrap();
+    let recovery_epoch = catalog.epoch();
+    catalog
+        .record_external_receipt_with_stop(OPERATION, f.receipt(), true)
+        .unwrap();
+    let raw = rusqlite::Connection::open(f.root.join("conversation.sqlite")).unwrap();
+    raw.execute_batch("CREATE TRIGGER interrupt_cancel_pairing BEFORE UPDATE OF committed ON tool_calls WHEN NEW.committed=1 BEGIN SELECT RAISE(ABORT,'simulated pairing commit interruption'); END;").unwrap();
+    let supervisor = RunSupervisor::new(catalog);
+    supervisor.reconcile_message_requests().unwrap();
+    supervisor.shutdown().unwrap();
+    assert!(supervisor.execution_failure(&f.run).unwrap().is_some());
+    {
+        let owner = supervisor.catalog();
+        let catalog = owner.lock().unwrap();
+        assert_eq!(catalog.model_step(REQUEST).unwrap().epoch, recovery_epoch);
+        assert_eq!(
+            catalog.model_step(REQUEST).unwrap().state,
+            ModelStepState::Completed
+        );
+        assert_eq!(catalog.run(&f.run).unwrap().state, RunState::Waiting);
+        assert!(catalog.run(&f.run).unwrap().cancel_requested);
+        assert_eq!(catalog.operation(OPERATION).unwrap().epoch, f.epoch);
+    }
+    assert_eq!(
+        raw.query_row(
+            "SELECT committed FROM tool_calls WHERE request_id=?1",
+            [REQUEST],
+            |row| row.get::<_, i64>(0)
+        )
+        .unwrap(),
+        0
+    );
+    drop(supervisor);
+    raw.execute_batch("DROP TRIGGER interrupt_cancel_pairing;")
+        .unwrap();
+    drop(raw);
+    let supervisor = RunSupervisor::new(Catalog::open(&f.root).unwrap());
+    supervisor.reconcile_message_requests().unwrap();
+    supervisor.shutdown().unwrap();
+    let owner = supervisor.catalog();
+    let catalog = owner.lock().unwrap();
+    assert_eq!(catalog.run(&f.run).unwrap().state, RunState::Cancelled);
+    assert_eq!(catalog.operation(OPERATION).unwrap().epoch, f.epoch);
+    assert_eq!(
+        catalog.operation(OPERATION).unwrap().effect,
+        Effect::Unknown
+    );
+    assert_eq!(
+        catalog
+            .execution_history("branch")
+            .unwrap()
+            .iter()
+            .filter(|item| matches!(item.content, Content::ToolResult { .. }))
+            .count(),
+        1
+    );
+    f.assert_no_replay();
 }

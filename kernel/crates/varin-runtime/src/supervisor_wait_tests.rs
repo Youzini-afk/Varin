@@ -69,6 +69,7 @@ fn simultaneous_wait_teardown_drains_once_without_holding_global_controls() {
             cancel: CancellationToken::default(),
             join: Some(worker),
             pending: None,
+            cancellation_done: None,
         },
     );
     let (done, completed) = mpsc::channel();

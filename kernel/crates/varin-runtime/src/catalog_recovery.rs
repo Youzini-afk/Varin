@@ -185,12 +185,88 @@ pub(crate) struct PreparedLaunch {
     pub recovery: Option<ExecutionRecovery>,
     pub cancel_requested: bool,
 }
+#[derive(Clone)]
 pub(crate) struct PreparationIdentity {
     run: Run,
     head: Option<String>,
     cursor: u64,
     goal: Option<goals::FrozenGoal>,
     launch: Option<super::launch_content::LaunchMetadata>,
+}
+
+/// Cancellation restores already-owned pairing only. It never assembles a new RunStart or
+/// acquires current provider, tool or Source permissions for the interrupted execution.
+pub(crate) struct CancellationRecoveryPreparation {
+    identity: PreparationIdentity,
+    step: ModelStep,
+    policy: PolicyIdentity,
+    database: std::path::PathBuf,
+    content: crate::content::ContentStore,
+    publication: crate::content::ContentPublication,
+    bodies: super::execution_persistence::ExecutionBodyPreparation,
+}
+pub(crate) struct PreparedCancellationRecovery {
+    recovered: PreparedRecovery,
+    record: ExecutionRecord,
+    bodies: super::execution_persistence::PreparedExecutionBodies,
+}
+impl CancellationRecoveryPreparation {
+    pub(crate) fn identity(&self) -> &PreparationIdentity {
+        &self.identity
+    }
+    pub(crate) fn load(self) -> Result<PreparedCancellationRecovery> {
+        let snapshot = self.content.load_snapshot(&self.step.request)?;
+        let mut binding = snapshot.view.binding;
+        binding.history_range.leaf_id = self.identity.head.clone();
+        let preparation = RecoveryPreparation {
+            execution: ExecutionPreparation {
+                run: self.identity.run,
+                binding,
+                policy: self.policy.clone(),
+                policy_state: Value::Null,
+                completed_model_steps: 0,
+                database: self.database,
+                content: self.content,
+                _publication: self.publication,
+            },
+            cursor: self.identity.cursor,
+            kind: RecoveryKind::Model { step: self.step, policy: self.policy },
+            cancellation_requires_recovery: true,
+            goal: self.identity.goal,
+            launch: self.identity.launch,
+        };
+        // The normal recovery reader validates the saved model output, exact ancestry and
+        // canonical receipts. No policy decision or executor is invoked by this reader.
+        let recovered = preparation.load(&CancellationToken::default())?
+            .ok_or_else(|| RuntimeError::Invalid("cancelled exchange read was abandoned".into()))?;
+        let recovery = recovered.recovery.as_ref()
+            .ok_or_else(|| RuntimeError::Conflict("cancelled exchange boundary changed".into()))?;
+        let (snapshot, calls) = recovery.pending.as_ref()
+            .ok_or_else(|| RuntimeError::Conflict("cancelled exchange is already paired".into()))?;
+        let record = ExecutionRecord::ToolBatchCommitted {
+            request_id: snapshot.view.request_id.clone(),
+            results: calls.iter().map(|call| recovery.receipts.get(&call.call_id).cloned()
+                .unwrap_or_else(|| ToolResult {
+                    request_id: snapshot.view.request_id.clone(),
+                    call_id: call.call_id.clone(),
+                    completion: ToolCompletion::cancelled(),
+                })).collect(),
+        };
+        let bodies = self.bodies.write(&record)?;
+        Ok(PreparedCancellationRecovery { recovered, record, bodies })
+    }
+}
+
+fn reconciled_terminal_stop(op: &Operation) -> bool {
+    op.phase == OperationPhase::Terminal
+        && op.external_receipt.as_ref().is_some_and(|receipt| {
+            receipt.executor_stopped
+                && op.outcome == Some(receipt.outcome)
+                && op.effect == receipt.effect
+                && op.result.as_ref() == Some(&OperationResultMetadata::Content {
+                    reference: receipt.result_ref.clone(),
+                })
+        })
 }
 
 impl RecoveryPreparation {
@@ -630,6 +706,131 @@ fn committed_model_history_head(
 }
 
 impl Catalog {
+    pub(crate) fn cancelled_recovery_runs(&self) -> Result<Vec<String>> {
+        let mut statement = self.db.prepare(
+            "SELECT id FROM runs WHERE json_extract(body,'$.cancel_requested')=1
+             AND json_extract(body,'$.state') NOT IN ('completed','failed','cancelled')",
+        )?;
+        let runs = statement.query_map([], |row| row.get(0))?
+            .collect::<std::result::Result<Vec<_>, _>>()?;
+        Ok(runs)
+    }
+
+    /// Called only after the Supervisor has reserved this Run against another worker.
+    /// Metadata readiness avoids rehydrating blocked external work on unrelated events.
+    pub(crate) fn capture_cancelled_recovery(
+        &mut self,
+        run_id: &str,
+    ) -> Result<Option<CancellationRecoveryPreparation>> {
+        let run = self.run(run_id)?;
+        if !run.cancel_requested || run.state.terminal() {
+            return Ok(None);
+        }
+        if self.cancel_preparing_execution(run_id, self.epoch)?.is_some() {
+            return Ok(None);
+        }
+        let run = self.run(run_id)?;
+        if !matches!(run.state, RunState::Accepted | RunState::Preparing | RunState::Runnable | RunState::Waiting)
+            || super::policy_body::has_pending_action(&self.db, run_id)?
+        {
+            return Ok(None);
+        }
+        let request: Option<String> = self.db.query_row(
+            "SELECT m.id FROM model_steps m JOIN tool_calls c ON c.request_id=m.id
+             WHERE m.run_id=?1 AND c.committed=0 ORDER BY m.rowid LIMIT 1",
+            [run_id], |row| row.get(0),
+        ).optional()?;
+        let Some(request) = request else { return Ok(None) };
+        let step: ModelStep = record(&self.db, "model_steps", &request)?;
+        if step.state != ModelStepState::Completed || step.superseded_by_input.is_some() {
+            return Ok(None);
+        }
+        let mut statement = self.db.prepare(
+            "SELECT call_id,receipt FROM tool_calls WHERE request_id=?1 AND committed=0",
+        )?;
+        for row in statement.query_map([&request], |row| Ok((row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?)))? {
+            let (call, receipt) = row?;
+            let key = format!("{request}:tool:{call}");
+            if let Some(op) = optional_record::<Operation>(&self.db, "operations", &key)? {
+                if !op.handed_off
+                    && (op.effect == Effect::Unknown || op.outcome == Some(Outcome::Indeterminate))
+                    && !reconciled_terminal_stop(&op)
+                {
+                    // Caller completion can be durable before physical stop. Only the original
+                    // executor's stop fact, never a receipt/empty occupancy alone, releases this
+                    // cancelled foreground exchange for recovery.
+                    let owner = serde_json::to_value(&op.execution_owner)?;
+                    let stopped: bool = self.db.query_row(
+                        "SELECT EXISTS(SELECT 1 FROM events WHERE subject=?1 AND kind='operation.invocation_executor_stopped' AND json_extract(data,'$.operationEpoch')=?2 AND json_extract(data,'$.executionOwner.kind') IS ?3 AND json_extract(data,'$.executionOwner.identity') IS ?4 AND json_extract(data,'$.executionOwner.epoch') IS ?5)",
+                        params![op.id, sql_number(op.epoch)?, owner["kind"].as_str(), owner["identity"].as_str(), owner["epoch"].as_str()],
+                        |row| row.get(0),
+                    )?;
+                    if !stopped { return Ok(None); }
+                }
+                if receipt.is_some() || op.call_completion.is_some()
+                    || (op.phase == OperationPhase::Accepted && op.effect == Effect::None)
+                {
+                    continue;
+                }
+                if op.phase != OperationPhase::Terminal
+                    || ((op.effect == Effect::Unknown || op.outcome == Some(Outcome::Indeterminate))
+                        && !reconciled_terminal_stop(&op))
+                {
+                    return Ok(None);
+                }
+            }
+        }
+        drop(statement);
+        let launch = self.launch_metadata(run_id)?;
+        let policy = super::policy_checkpoint::metadata(&self.db, run_id)?
+            .map(|checkpoint| checkpoint.identity)
+            .or_else(|| launch.as_ref().map(|launch| launch.selection.policy.clone()))
+            .unwrap_or_else(|| DefaultAgentPolicy.identity());
+        let identity = PreparationIdentity {
+            head: self.head(&run.branch_id)?,
+            cursor: self.preparation_cursor(&run)?,
+            goal: self.goal_binding(run_id)?,
+            launch,
+            run,
+        };
+        // Check the same active branch/Run owner before starting unlocked work, too. A lost
+        // owner is a control error, not a body failure to retry on every completion wake.
+        if !self.preparation_is_current(&identity)? { return Ok(None); }
+        Ok(Some(CancellationRecoveryPreparation {
+            identity,
+            step,
+            policy,
+            database: self.db.path().ok_or_else(|| RuntimeError::Invalid("Catalog has no persistent database".into()))?.into(),
+            content: self.content.clone(),
+            publication: self.content.begin_publication(),
+            bodies: self.prepare_execution_bodies(&ExecutionRecord::ToolBatchCommitted {
+                request_id: request, results: vec![],
+            })?,
+        }))
+    }
+
+    pub(crate) fn publish_cancelled_recovery(
+        &mut self,
+        prepared: PreparedCancellationRecovery,
+    ) -> Result<bool> {
+        let identity = prepared.recovered.preparation.identity();
+        if self.run(&identity.run.id)?.state.terminal() { return Ok(true); }
+        if !self.preparation_is_current(&identity)? { return Ok(false); }
+        if !identity.run.cancel_requested {
+            return Err(RuntimeError::Conflict("cancellation recovery lost its intent".into()));
+        }
+        let RecoveryKind::Model { mut step, .. } = prepared.recovered.preparation.kind else {
+            return Err(RuntimeError::Invalid("cancellation recovery is not a model exchange".into()));
+        };
+        // Adopt only the completed exchange's pairing owner. No dispatch becomes eligible.
+        // A crash before the ordinary batch commit leaves it unpaired and safely retryable.
+        step.epoch = self.epoch;
+        put(&self.db, "model_steps", &step.id, &step)?;
+        self.commit_prepared_execution(&identity.run.id, self.epoch, &prepared.record, prepared.bodies)?;
+        self.cancel_preparing_execution(&identity.run.id, self.epoch)?;
+        Ok(true)
+    }
+
     pub(super) fn capture_execution_preparation(
         &self,
         run_id: &str,
@@ -1046,19 +1247,9 @@ impl Catalog {
                 // A stopped original executor can truthfully leave its business effect unknown.
                 // That durable receipt closes the call without making it replayable or successful.
                 // Recovery's synthetic Unknown alone is insufficient, as is empty occupancy.
-                let reconciled_stop = op.phase == OperationPhase::Terminal
-                    && op.external_receipt.as_ref().is_some_and(|receipt| {
-                        receipt.executor_stopped
-                            && op.outcome == Some(receipt.outcome)
-                            && op.effect == receipt.effect
-                            && op.result.as_ref()
-                                == Some(&OperationResultMetadata::Content {
-                                    reference: receipt.result_ref.clone(),
-                                })
-                    });
                 if ((op.effect == Effect::Unknown
                     || op.outcome == Some(Outcome::Indeterminate))
-                    && !reconciled_stop)
+                    && !reconciled_terminal_stop(&op))
                     || (op.phase != OperationPhase::Terminal && op.effect != Effect::None)
                 {
                     return Err(RuntimeError::Conflict(

@@ -823,12 +823,12 @@ fn operation_id(request: &str, call: &str) -> String {
     format!("{request}:tool:{call}")
 }
 
-struct ExecutionBodyPreparation {
+pub(super) struct ExecutionBodyPreparation {
     content: crate::content::ContentStore,
     publication: crate::content::ContentPublication,
     frozen_request: Option<Value>,
 }
-struct PreparedExecutionBodies {
+pub(super) struct PreparedExecutionBodies {
     _publication: crate::content::ContentPublication,
     request: Option<Value>,
     tools_ref: Option<Value>,
@@ -847,7 +847,7 @@ struct PreparedExecutionBodies {
     results: std::collections::HashMap<String, OperationResultMetadata>,
 }
 impl ExecutionBodyPreparation {
-    fn write(self, record: &ExecutionRecord) -> Result<PreparedExecutionBodies> {
+    pub(super) fn write(self, record: &ExecutionRecord) -> Result<PreparedExecutionBodies> {
         let request = match record {
             ExecutionRecord::RequestPrepared { snapshot } => {
                 if snapshot.view.binding.resource_activations
@@ -1076,7 +1076,7 @@ impl Catalog {
         let prepared = self.prepare_execution_bodies(record)?.write(record)?;
         self.commit_prepared_execution(run_id, epoch, record, prepared)
     }
-    fn prepare_execution_bodies(
+    pub(super) fn prepare_execution_bodies(
         &self,
         record: &ExecutionRecord,
     ) -> Result<ExecutionBodyPreparation> {
@@ -1093,7 +1093,7 @@ impl Catalog {
             frozen_request,
         })
     }
-    fn commit_prepared_execution(
+    pub(super) fn commit_prepared_execution(
         &mut self,
         run_id: &str,
         epoch: u64,
