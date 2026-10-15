@@ -18,6 +18,8 @@ use fixture::Fixture;
 fn same_committed_origin_is_one_child_before_and_after_reopen_and_changed_task_conflicts() {
     let mut f = Fixture::new();
     let first = f.accept();
+    assert_eq!(f.db.inspect_thread(&first.child_thread_id).unwrap()["parent_thread_id"], first.parent_thread_id);
+    assert!(f.db.inspect_thread(&first.parent_thread_id).unwrap()["parent_thread_id"].is_null());
     assert_eq!(f.accept(), first);
     assert_eq!(f.db.child_tasks().unwrap().len(), 1);
     let mut changed = f.input.clone();

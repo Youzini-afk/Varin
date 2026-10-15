@@ -1238,7 +1238,6 @@ export const settingsDict = {
   'settings.page.notifications.title': 'Powiadomienia',
   'settings.page.notifications.description': 'Wybierz, kiedy i jak otrzymywać powiadomienia.',
   'settings.page.projects.title': 'Projekty',
-  'settings.page.providers.title': 'Dostawcy',
   'settings.page.knowledge.title': 'Wiedza',
   'settings.page.knowledge.description': 'Przeglądaj, edytuj i wycofuj wiedzę obszaru roboczego i użytkownika, w tym źródło oraz łańcuch zastąpień.',
   'settings.computers.setup.title': "Trwały pulpit Linux",
@@ -1806,8 +1805,6 @@ export const settingsDict = {
   'settings.view.home.cards.mcp.title': 'MCP',
   'settings.view.home.cards.plugins.title': 'Plugins',
 
-  'settings.view.home.cards.providers.description': 'Połącz modele + dane uwierzytelniające',
-  'settings.view.home.cards.providers.title': 'Dostawcy',
   'settings.view.home.cards.skillsCatalog.description': 'Zainstaluj skille z katalogów',
   'settings.view.home.cards.skillsCatalog.title': 'Katalog umiejętności',
   'settings.view.home.description': 'Przejdź do popularnych stron.',

@@ -16,7 +16,7 @@ type ChatViewProps = {
   threadPanelMode?: 'sidebar' | 'inline';
   threadPanelTitle?: string;
 };
-export const ChatView: React.FC<ChatViewProps> = ({ active = true, readOnly = false, conversationHeader }) => {
+export const ChatView: React.FC<ChatViewProps> = ({ active = true, readOnly = false, autoOpenDraft = true, conversationHeader }) => {
   const { t } = useI18n();
   const { threads: api } = useRuntimeAPIs();
   const identity = useThreadStore(state => state.selectedIdentity);
@@ -24,6 +24,11 @@ export const ChatView: React.FC<ChatViewProps> = ({ active = true, readOnly = fa
   const creating = useThreadStore(state => state.creating);
   const error = useThreadStore(state => state.creationError);
   const directory = useDirectoryStore(state => state.currentDirectory);
+  React.useEffect(() => {
+    if (active && autoOpenDraft && api && !identity && !creating && !error && !readOnly) {
+      void startThreadFromNavigation().catch(() => {});
+    }
+  }, [active, autoOpenDraft, api, identity, creating, error, readOnly, hostKey]);
   if (!active) return null;
   if (!api) return <p role="alert">Conversation service unavailable</p>;
   if (!identity) return <div className="flex h-full flex-col items-center justify-center gap-3">

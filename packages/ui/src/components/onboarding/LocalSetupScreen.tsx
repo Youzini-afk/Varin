@@ -50,11 +50,8 @@ export function LocalSetupScreen({
 
         <header className="space-y-2 text-center">
           <h1 className="text-3xl font-semibold tracking-tight text-foreground">
-            {t('onboarding.localSetup.title')}
+            {t('onboarding.chooser.tabs.localInstall')}
           </h1>
-          <p className="text-muted-foreground">
-            {t('onboarding.native.description')}
-          </p>
         </header>
 
         <LocalRuntimeCard onContinue={async () => {

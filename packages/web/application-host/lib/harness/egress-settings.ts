@@ -25,7 +25,7 @@ export function normalizeOutboundNetwork(value: unknown): RecordValue {
     ...(typeof value.credentialRef === 'string' ? { credentialRef: value.credentialRef } : {}) };
 }
 
-/** Fixed secret reference in the executing Host's Pi auth.json owner. */
+/** Fixed secret reference in the executing Host's service credential store. */
 export const OUTBOUND_PROXY_CREDENTIAL_REF = 'varin-host-egress-proxy';
 
 export function outboundProxyBinding(document: RecordValue): { credentialRef: string; proxyOrigin: string } | null {

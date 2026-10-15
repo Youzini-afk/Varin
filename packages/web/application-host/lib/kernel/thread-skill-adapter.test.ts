@@ -53,7 +53,7 @@ async function fixture() {
   const enqueueReceipt = { input_id: queued.id, run_id: run.id, mode: 'next_run' as const, cursor: 3 };
   const runtime = {
     admitCalendar: vi.fn<AgentRuntimeClient['admitCalendar']>(async input => ({ id: input.occurrenceId, run_id: run.id } as import('./protocol.generated.js').CalendarOccurrence)),
-    thread: vi.fn<AgentRuntimeClient['thread']>(async () => ({ bot_id: null, thread_id: identity.threadId, observer_project_ids: [],
+    thread: vi.fn<AgentRuntimeClient['thread']>(async () => ({ bot_id: null, thread_id: identity.threadId, parent_thread_id: null, observer_project_ids: [],
       main_branch_id: identity.branchId, title: 'Skills', revision: 1, created_at_ms: 0, updated_at_ms: 0,
       pinned: false, archived: false, deleted_at_ms: null, activity_cursor: 0, read_cursor: 0, unread: false,
       branches: [{ branch_id: identity.branchId, active_run_id: run.id, head: null, latest_run: run }] })),

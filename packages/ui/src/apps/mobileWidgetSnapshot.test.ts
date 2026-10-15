@@ -6,7 +6,7 @@ import { parseDeepLink } from './deepLinks';
 const previous = useThreadStore.getState();
 afterEach(() => useThreadStore.setState(previous, true));
 const thread = (id: string, values: Partial<ThreadSummary> = {}): ThreadSummary => ({
-  thread_id: id, bot_id: null, branches: [], observer_project_ids: [], main_branch_id: `${id}:main`,
+  thread_id: id, bot_id: null, branches: [], parent_thread_id: null, observer_project_ids: [], main_branch_id: `${id}:main`,
   title: id, revision: 1, created_at_ms: 1, updated_at_ms: 2, pinned: false, archived: false,
   deleted_at_ms: null, activity_cursor: 1, read_cursor: 0, unread: true, ...values,
 });

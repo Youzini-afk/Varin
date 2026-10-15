@@ -33,7 +33,7 @@ function fixture() {
     showRun: false, listError: false, writeError: null as Error | null };
   const requests = vi.fn(async (method: string, params: Record<string, unknown>, _signal?: AbortSignal): Promise<unknown> => {
     switch (method) {
-      case 'runtime.thread.inspect': return { thread_id: params.threadId, observer_project_ids: [], branches: [
+      case 'runtime.thread.inspect': return { thread_id: params.threadId, parent_thread_id: null, observer_project_ids: [], branches: [
         { branch_id: identity.branchId, active_run_id: facts.showRun ? source.id : null,
           head: null, latest_run: facts.showRun ? facts.source : null },
         { branch_id: 'branch:other', active_run_id: null, head: null, latest_run: null },

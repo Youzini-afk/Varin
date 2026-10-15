@@ -590,7 +590,7 @@ export class ThreadAdapter {
         mode: 'agent', threadRole: 'main', projectId: definition.project_id,
       }, signal);
       const skill = await this.skillInput(identity, initialContext.resources, preparation.instruction, signal);
-      const childDispatch = this.prepareChildProfiles ? await this.prepareChildProfiles({ modelOwner: model.credentialOwner, parent: {
+      const childDispatch = this.prepareChildProfiles ? await this.prepareChildProfiles({ projectId: definition.project_id, modelOwner: model.credentialOwner, parent: {
         configuration: model.configuration, credential_scope: await model.credentialOwner.scope(),
       } }, signal) : undefined;
       signal.throwIfAborted();
@@ -660,7 +660,7 @@ export class ThreadAdapter {
               initialContext = await this.prepareContext.main(input, source);
             }
             if (this.prepareChildProfiles) {
-              command.launch!.childDispatch = await this.prepareChildProfiles({ modelOwner: model.credentialOwner, parent: {
+              command.launch!.childDispatch = await this.prepareChildProfiles({ projectId: (initialContext?.personalization ?? checkpoint?.personalization)?.projectId ?? null, modelOwner: model.credentialOwner, parent: {
                 configuration: model.configuration, credential_scope: command.launch!.credentialScope ?? null,
               } });
             }

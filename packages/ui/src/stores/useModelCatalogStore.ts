@@ -8,13 +8,17 @@ export const useModelCatalogStore = create<{
 }>((set) => ({
   channels: [], loaded: false, loading: false, error: null,
   load() {
-    if (pending) return pending;
+    if (pending) { reloadAgain = true; return pending; }
     const operation = (async () => {
     const owner = getRuntimeEndpointGeneration(); const request = ++generation;
     set({ loading: true, error: null });
     try {
-      const snapshot = await createModelConnectionsHttpAPI(owner).read();
-      if (owner === getRuntimeEndpointGeneration() && request === generation) set({ channels: snapshot.channels, loaded: true, loading: false });
+      do {
+        reloadAgain = false;
+        const snapshot = await createModelConnectionsHttpAPI(owner).read();
+        if (owner !== getRuntimeEndpointGeneration() || request !== generation) return;
+        set({ channels: snapshot.channels, loaded: true, loading: false });
+      } while (reloadAgain);
     } catch (error) {
       if (owner === getRuntimeEndpointGeneration() && request === generation) set({ error: error instanceof Error ? error.message : String(error), loading: false });
       throw error;
@@ -27,4 +31,5 @@ export const useModelCatalogStore = create<{
 }));
 let generation = 0;
 let pending: Promise<void> | undefined;
-subscribeRuntimeEndpointWillChange(() => { generation += 1; pending = undefined; useModelCatalogStore.setState({ channels: [], loaded: false, loading: false, error: null }); });
+let reloadAgain = false;
+subscribeRuntimeEndpointWillChange(() => { generation += 1; pending = undefined; reloadAgain = false; useModelCatalogStore.setState({ channels: [], loaded: false, loading: false, error: null }); });

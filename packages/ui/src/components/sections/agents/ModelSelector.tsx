@@ -73,7 +73,7 @@ export const ModelSelector: React.FC<ModelSelectorProps> = ({
     const providersLoading = useModelCatalogStore((state) => state.loading);
     const providerError = useModelCatalogStore((state) => state.error);
     const loadProviders = useModelCatalogStore((state) => state.load);
-    const isReady = providersLoaded && !providersLoading;
+    const isReady = providersLoaded;
     const isUnavailable = Boolean(providerError) && !providersLoading;
     const triggerDisabled = disabled || (!isReady && !isUnavailable);
     const modelsMetadata = React.useMemo(() => new Map<string, ModelMetadata>(), []);
@@ -104,7 +104,8 @@ export const ModelSelector: React.FC<ModelSelectorProps> = ({
         if (!providersLoaded && !providersLoading && !providerError) void loadProviders().catch(() => undefined);
     }, [loadProviders, providersLoaded, providersLoading, providerError]);
     React.useEffect(() => subscribeVarinEvents(event => {
-        if (event.type === 'settings-changed' && event.owner === 'agent-settings') void loadProviders().catch(() => undefined);
+        if (event.type === 'stream-ready' || event.type === 'settings-changed' && event.owner === 'agent-settings'
+            && event.ids.some(id => id === 'model-channels' || id === 'model-credentials')) void loadProviders().catch(() => undefined);
     }), [loadProviders]);
 
     const retryProviders = () => {
@@ -194,7 +195,7 @@ export const ModelSelector: React.FC<ModelSelectorProps> = ({
             : modelLabel;
     }, [defaultSelectionLabel, effectiveModelId, effectiveProviderId, placeholder, providers, selectedModel, t]);
 
-    const picker = (
+    const picker = <>
         <ModelPickerList
             providers={providers}
             providerOrder={providerOrder}
@@ -216,7 +217,13 @@ export const ModelSelector: React.FC<ModelSelectorProps> = ({
             isFavorite={(entry) => isFavoriteModel(entry.providerID, entry.modelID)}
             onToggleFavorite={(entry) => toggleFavoriteModel(entry.providerID, entry.modelID)}
         />
-    );
+        <div className="border-t border-border/50 p-1.5">
+            <button type="button" className="flex w-full items-center gap-2 rounded-md px-2 py-2 text-left typography-meta text-muted-foreground hover:bg-interactive-hover hover:text-foreground"
+                onClick={() => { closePicker(); useUIStore.getState().setSettingsPage('model-connections'); useUIStore.getState().setSettingsDialogOpen(true); }}>
+                <Icon name="add" className="size-3.5" />{t('settings.models.addChannel')}
+            </button>
+        </div>
+    </>;
 
     if (isActuallyMobile) {
         return (

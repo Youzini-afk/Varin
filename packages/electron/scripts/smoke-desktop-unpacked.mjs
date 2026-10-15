@@ -4,6 +4,7 @@ import { existsSync } from 'node:fs';
 import fsp from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
+import { VARIN_WORKSPACE_RECOVERY_SERVICE_ID, VARIN_WORKSPACE_RECOVERY_SERVICE_VERSION } from '../../extension-contract/dist/index.js';
 
 const appPath = path.resolve(process.argv[2] ?? '');
 const appArguments = process.argv.slice(3);
@@ -302,8 +303,8 @@ try {
     body: JSON.stringify({
       args: [],
       method: 'listStorageWorkspaces',
-      serviceId: 'varin.workspace-recovery',
-      version: 5,
+      serviceId: VARIN_WORKSPACE_RECOVERY_SERVICE_ID,
+      version: VARIN_WORKSPACE_RECOVERY_SERVICE_VERSION,
     }),
     signal: AbortSignal.timeout(20_000),
   });

@@ -3,11 +3,13 @@ import type { EditorContextAttachment } from '@/lib/agent-editor/types';
 import type { InlineCommentDraft } from './useInlineCommentDraftStore';
 import type { ImageAttachment } from '@varin/protocol';
 import type { ThreadModel, ThreadPreparedSource, ThreadsAPI } from '@varin/application-client';
+import { useMessageQueueStore } from './messageQueueStore';
 
 export type ThreadPendingInput = {
   fingerprint: string;
   editorText: string;
   goalObjective?: string;
+  goalBudget?: number;
   editorContext?: readonly EditorContextAttachment[];
   inlineContext?: ReadonlyArray<{ key: string; drafts: readonly InlineCommentDraft[] }>;
   preparedSource?: ThreadPreparedSource | null;
@@ -31,6 +33,7 @@ export interface ThreadDraft {
   inputMode: 'boundary' | 'interrupt' | 'next_run';
   preparedSource: ThreadPreparedSource | null;
   workspacePath?: string;
+  goalArmed?: boolean;
   pendingInput?: ThreadPendingInput;
 }
 export const EMPTY_THREAD_DRAFT: ThreadDraft = Object.freeze({ text: '', images: [], materials: [], inputMode: 'boundary', preparedSource: null });
@@ -42,7 +45,8 @@ export const useThreadDraftStore = create<{
 }>((set) => ({
   drafts: {},
   patch: (key, patch) => set(state => {
-    const draft = state.drafts[key] ?? EMPTY_THREAD_DRAFT;
+    const draft = state.drafts[key] ?? { ...EMPTY_THREAD_DRAFT,
+      inputMode: useMessageQueueStore.getState().followUpBehavior === 'queue' ? 'next_run' as const : 'boundary' as const };
     return { drafts: { ...state.drafts, [key]: { ...draft, ...(typeof patch === 'function' ? patch(draft) : patch) } } };
   }),
   remove: key => set(state => { const drafts = { ...state.drafts }; delete drafts[key]; return { drafts }; }),

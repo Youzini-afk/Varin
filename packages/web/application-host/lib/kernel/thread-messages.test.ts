@@ -16,7 +16,7 @@ const target = { targetThreadId: 'thread:sibling', targetBranchId: 'branch:sibli
 function fixture() {
   const facts = { reply: {} as unknown, fail: false, block: false };
   const requests = vi.fn(async (method: string, params: Record<string, unknown>, signal?: AbortSignal): Promise<unknown> => {
-    if (method === 'runtime.thread.inspect') return { thread_id: params.threadId, observer_project_ids: [],
+    if (method === 'runtime.thread.inspect') return { thread_id: params.threadId, parent_thread_id: null, observer_project_ids: [],
       branches: [{ branch_id: identity.branchId, active_run_id: null, head: null, latest_run: null }] };
     if (method === 'runtime.observations.reconcile') return facts.reply;
     if (method.startsWith('runtime.messages.')) {

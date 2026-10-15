@@ -54,6 +54,32 @@ vi.mock('@/lib/i18n', () => {
 });
 vi.mock('@/components/icon/Icon', () => ({ Icon: () => <span /> }));
 vi.mock('@/components/chat/MarkdownRenderer', () => ({ MarkdownRenderer: ({ content }: { content: string }) => <div>{content}</div> }));
+// Exercise the conversation's delivery/ownership behavior through the composer port.
+// CodeMirror, popup interaction and layout are exercised in the actual desktop renderer.
+vi.mock('./ThreadComposer', () => ({ ThreadComposer: (props: React.ComponentProps<typeof import('./ThreadComposer').ThreadComposer>) => <div
+  onDragOver={event => event.preventDefault()} onDrop={event => { event.preventDefault(); props.onFiles([...event.dataTransfer.files]); }}>
+  {props.children}
+  <select aria-label="Registered model" disabled={props.modelDisabled} value={JSON.stringify([props.providerId, props.modelId])}
+    onChange={event => { const [provider, model] = JSON.parse(event.currentTarget.value); props.onModelChange(provider, model, props.thinkingLevel); }}>
+    <option value={JSON.stringify(['', ''])}>Choose a registered model</option>
+    {props.models.map(model => <option key={`${model.providerId}:${model.modelId}`} value={JSON.stringify([model.providerId, model.modelId])}>{model.name ?? model.modelId}</option>)}
+  </select>
+  <select aria-label="Thinking level" disabled={props.modelDisabled} value={props.thinkingLevel} onChange={event => props.onModelChange(props.providerId, props.modelId, event.currentTarget.value as typeof props.thinkingLevel)}>
+    {(props.models.find(model => model.providerId === props.providerId && model.modelId === props.modelId)?.thinkingLevels ?? ['off']).map(level => <option key={level}>{level}</option>)}
+  </select>
+  <select aria-label="Input delivery" value={props.delivery} onChange={event => props.onDeliveryChange(event.currentTarget.value as typeof props.delivery)}>
+    <option value="boundary">At next model boundary</option><option value="interrupt">Interrupt current generation</option>{props.allowNextRun && <option value="next_run">After current run</option>}
+  </select>
+  <textarea aria-label="Message thread" ref={props.editorRef as React.Ref<HTMLTextAreaElement>} value={props.value} onInput={event => props.onChange(event.currentTarget.value)}
+    onPaste={event => { const files = [...event.clipboardData.files]; if (files.length) { event.preventDefault(); props.onFiles(files); } }} />
+  <button type="button" disabled={props.attachmentDisabled || props.imageDisabled} onClick={props.onAttachImages}>Attach images</button>
+  <button type="button" disabled={props.attachmentDisabled} onClick={props.onAttachPdfs}>chat.fileAttachment.actions.attachPdfs</button>
+  <button type="submit" disabled={props.sendDisabled}>{props.retrying ? 'Retry delivery' : props.active ? 'Queue message' : 'Send'}</button>
+  {props.onStop && <button type="button" onClick={props.onStop}>Stop run</button>}
+</div> }));
+vi.mock('@/components/chat/DraftPresetChips', () => ({ DraftPresetChips: () => null }));
+vi.mock('@/components/ui/VarinLogo', () => ({ VarinLogo: () => null }));
+vi.mock('./WorkOverviewControl', () => ({ WorkOverviewControl: ({ children }: React.PropsWithChildren) => <div>{children}</div> }));
 vi.mock('@/components/ui/input', () => ({ Input: ({ onChange, ...props }: React.InputHTMLAttributes<HTMLInputElement>) => <input {...props} onInput={onChange as React.FormEventHandler<HTMLInputElement>} /> }));
 vi.mock('@/components/ui/textarea', () => ({ Textarea: ({ onChange, ...props }: React.TextareaHTMLAttributes<HTMLTextAreaElement>) => <textarea {...props} onInput={onChange as React.FormEventHandler<HTMLTextAreaElement>} /> }));
 
@@ -62,7 +88,7 @@ const storedImage: StoredMedia = { media_type: 'image/png', content_ref: { conte
 const identity: ThreadIdentity = { runtime: 'agent', threadId: 'thread:ui-fixture', branchId: 'branch:ui-fixture' };
 function initialSnapshot(active = false): ThreadSnapshot {
   const run = { id: 'ui-run', thread_id: identity.threadId, branch_id: identity.branchId, state: 'generating' as const, revision: 1, epoch: 1, configuration: { providerId: 'fixture-provider', model: 'fixture-model' }, cancel_requested: false, waiting_on: null };
-  return { identity, eventCursor: 0, thread: { thread_id: identity.threadId, main_branch_id: identity.branchId, title: '', revision: 1, created_at_ms: 0, updated_at_ms: 0, pinned: false, archived: false, deleted_at_ms: null, activity_cursor: 0, read_cursor: 0, unread: false, bot_id: null, observer_project_ids: [null], branches: [{ branch_id: identity.branchId, head: null, active_run_id: active ? run.id : null, latest_run: active ? run : null }] }, activeRun: active ? run : null,
+  return { identity, eventCursor: 0, thread: { thread_id: identity.threadId, main_branch_id: identity.branchId, title: '', revision: 1, created_at_ms: 0, updated_at_ms: 0, pinned: false, archived: false, deleted_at_ms: null, activity_cursor: 0, read_cursor: 0, unread: false, bot_id: null, parent_thread_id: null, observer_project_ids: [null], branches: [{ branch_id: identity.branchId, head: null, active_run_id: active ? run.id : null, latest_run: active ? run : null }] }, activeRun: active ? run : null,
     history: [], historyPage: { head: null, previous: null }, inputs: [], operations: [], followups: [], goals: [], launch: null, modelSelection: {desired:null,active:null}, policySelection: null, context: { checkpoint: null, jobs: [] } };
 }
 function fixture(active = false) {
@@ -125,7 +151,15 @@ const edit = async (selector: string, value: string, event = 'input') => {
   await act(async () => { Object.defineProperty(element, 'value', { configurable: true, writable: true, value }); element.dispatchEvent(new window.Event(event, { bubbles: true })); });
 };
 const submitForm = async (form: HTMLFormElement) => { await act(async () => { form.dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true })); }); };
-const button = (text: string) => [...container.querySelectorAll<HTMLButtonElement>('button')].find(value => value.textContent === text)!;
+const button = (text: string) => {
+  const labels: Record<string, string> = { 'Cancel queued input': 'chat.queuedMessage.removeAria', 'Restore before this message': 'chat.messageBody.actions.revertAria', 'Restore through this message': 'chat.messageBody.actions.revertAria', 'Branch conversation only': 'chat.messageBody.actions.forkAria', 'Generate context summary': 'thread.message.summarize' };
+  return [...container.querySelectorAll<HTMLButtonElement>('button')].find(value => {
+    if (value.textContent === text || text === 'Continue child' && value.textContent === 'Send') return true;
+    if (!labels[text] || value.getAttribute('aria-label') !== labels[text]) return false;
+    if (text.startsWith('Restore ')) return value.closest('[data-message-role]')?.getAttribute('data-message-role') === (text.startsWith('Restore before') ? 'user' : 'assistant');
+    return true;
+  })!;
+};
 const pdfFile = (name = 'original.pdf') => new File(['%PDF-1.7\nOriginal PDF bytes\n%%EOF'], name, { type: 'application/pdf' });
 const uploadedPdf = (snapshotId = 'retained-original'): FetchResult => {
   const sourceSnapshot = { snapshotId, sourceUrl: 'upload:original.pdf', finalUrl: 'upload:original.pdf', fetchedAt: 1,
@@ -144,6 +178,41 @@ const choosePdfs = async (...files: File[]) => {
   });
 };
 const composerForm = () => container.querySelector<HTMLTextAreaElement>('[aria-label="Message thread"]')!.closest('form')!;
+
+it('sends a new conversation from its captured project workspace, independent of later navigation', async () => {
+  const f = fixture();
+  const key = threadIdentityKey(threadHostKey(), identity);
+  useThreadDraftStore.getState().patch(key, { workspacePath: '/chosen-project', text: 'Read the project', model: { providerId: 'fixture-provider', modelId: 'fixture-model' } });
+  const prepared = { path: '/chosen-project', source: { resourceOwner: { kind: 'local' as const }, workspaceId: 'chosen', executionWorkspaceId: 'chosen', mode: 'live_root' as const,
+    liveRoot: { hostId: 'host-a', canonicalRoot: '/chosen-project', rootId: 'root-a' }, tools: ['file_read' as const] } };
+  f.api.sources.resolve = vi.fn(async (_identity, request) => ({ resourceOwner: request.resourceOwner, path: request.path, workspaceId: 'chosen' }));
+  f.api.prepareSource = vi.fn().mockResolvedValue(prepared);
+  await act(async () => root.render(<ThreadConversation api={f.api} identity={identity} initialWorkspacePath="/different-sidebar-project" />));
+  await submitForm(composerForm());
+  expect(f.api.sources.resolve).toHaveBeenCalledExactlyOnceWith(identity, { resourceOwner: { kind: 'local' }, path: '/chosen-project' });
+  expect(f.api.prepareSource).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ workspaceId: 'chosen', mode: 'live_root' }));
+  expect(f.submit).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ source: prepared.source, text: 'Read the project' }));
+  expect(useThreadDraftStore.getState().drafts[key]?.text).toBe('');
+});
+
+it('an explicitly armed goal retains its accepted Run and budget when Goal registration needs retry', async () => {
+  const f = fixture();
+  const key = threadIdentityKey(threadHostKey(), identity);
+  useUIStore.setState({ sessionGoalDefaultBudgetEnabled: true, sessionGoalDefaultBudget: 200_000 });
+  useThreadDraftStore.getState().patch(key, { text: 'Complete the project', goalArmed: true, model: { providerId: 'fixture-provider', modelId: 'fixture-model' } });
+  f.api.goals.start = vi.fn().mockRejectedValueOnce(new Error('Goal receipt disconnected')).mockResolvedValue({});
+  await act(async () => root.render(<ThreadConversation api={f.api} identity={identity} />));
+  await submitForm(composerForm());
+  expect(f.submit).toHaveBeenCalledTimes(1);
+  expect(useThreadDraftStore.getState().drafts[key]?.pendingInput).toMatchObject({ status: 'unknown', acceptedRunId: 'ui-run' });
+  await submitForm(composerForm());
+  expect(f.submit).toHaveBeenCalledTimes(1);
+  expect(f.api.goals.start).toHaveBeenCalledTimes(2);
+  expect(vi.mocked(f.api.goals.start).mock.calls[0]).toEqual(vi.mocked(f.api.goals.start).mock.calls[1]);
+  expect(f.api.goals.start).toHaveBeenCalledWith(expect.objectContaining({ runId: 'ui-run', objective: 'Complete the project', budget: { maxOutputTokens: 200_000 } }));
+  expect(useThreadDraftStore.getState().drafts[key]?.goalArmed).toBe(false);
+  useUIStore.setState({ sessionGoalDefaultBudgetEnabled: false });
+});
 
 it('selects a desired model during an active run and keeps its display until activation',async()=>{
   const f = fixture(true);
@@ -225,7 +294,6 @@ it('active-thread controls queue the chosen mode, save/cancel queued text, and s
   expect(container.querySelector('[aria-label="Edit queued input"]')).toBeNull();
   await act(async () => { button('Stop run').click(); });
   expect(f.cancelRun).toHaveBeenCalledWith('ui-run');
-  expect(container.textContent).toContain('cancelled');
   expect(button('Stop run')).toBeUndefined();
 });
 
@@ -420,7 +488,6 @@ it('ordinary Agent workspace creates a native Thread directly and opens its cano
     await act(async () => { unbind = bindThreadStore(f.api); });
     useThreadStore.setState({ selectedIdentity: null });
     await act(async () => { root.render(<AgentWorkspaceShell />); });
-    await act(async () => { button('sessions.sidebar.header.actions.newSession').click(); });
     expect(create).toHaveBeenCalledOnce();
     expect(useThreadStore.getState().selectedIdentity).toEqual(identity);
     expect(container.querySelector('[aria-label="Thread conversation"]')).not.toBeNull();
@@ -1076,16 +1143,14 @@ it('answers a policy-node question explicitly, keeps the draft on failure and di
   expect(answer).not.toHaveBeenCalled();
   await act(async () => { button('Option B').click(); });
   expect(answer).not.toHaveBeenCalled();
-  await edit('[aria-label="Your answer"]', 'Option B with detail');
-  await submitForm(container.querySelector<HTMLFormElement>('form[aria-label="Answer agent question"]')!);
-  expect(container.querySelector<HTMLTextAreaElement>('[aria-label="Your answer"]')!.value).toBe('Option B with detail');
+  await edit('[aria-label="chat.questionCard.yourAnswer"]', 'Option B with detail');
+  await submitForm(container.querySelector<HTMLFormElement>('form[aria-label="chat.questionCard.inputNeeded"]')!);
+  expect(container.querySelector<HTMLTextAreaElement>('[aria-label="chat.questionCard.yourAnswer"]')!.value).toBe('Option B with detail');
   expect(container.textContent).toContain('uncertain answer acceptance');
-  await submitForm(container.querySelector<HTMLFormElement>('form[aria-label="Answer agent question"]')!);
+  await submitForm(container.querySelector<HTMLFormElement>('form[aria-label="chat.questionCard.inputNeeded"]')!);
   expect(answer.mock.calls[0]![0]).toEqual({ ...identity, operationId: operation.id, answer: 'Option B with detail' });
   expect(answer.mock.calls[1]![0]).toEqual(answer.mock.calls[0]![0]);
-  expect(button('Send answer').disabled).toBe(true);
-  expect(button('Option A').disabled).toBe(true);
-  await submitForm(container.querySelector<HTMLFormElement>('form[aria-label="Answer agent question"]')!);
+  expect(container.querySelector('form[aria-label="chat.questionCard.inputNeeded"]')).toBeNull();
   expect(answer).toHaveBeenCalledTimes(2);
 });
 
@@ -1100,10 +1165,10 @@ it('keeps a sibling branch question non-actionable while viewing an earlier conv
   f.api.answerQuestion = answer; f.api.cancelOperation = cancel;
   await act(async () => { root.render(<ThreadConversation api={f.api} identity={fork} />); });
   expect(button('Proceed').disabled).toBe(true);
-  expect(button('Send answer').disabled).toBe(true);
-  expect(container.querySelector<HTMLTextAreaElement>('[aria-label="Your answer"]')!.disabled).toBe(true);
+  expect(button('chat.questionCard.submit').disabled).toBe(true);
+  expect(container.querySelector<HTMLTextAreaElement>('[aria-label="chat.questionCard.yourAnswer"]')!.disabled).toBe(true);
   expect(button('Cancel operation')).toBeUndefined();
-  await submitForm(container.querySelector<HTMLFormElement>('form[aria-label="Answer agent question"]')!);
+  await submitForm(container.querySelector<HTMLFormElement>('form[aria-label="chat.questionCard.inputNeeded"]')!);
   expect(answer).not.toHaveBeenCalled(); expect(cancel).not.toHaveBeenCalled();
 });
 

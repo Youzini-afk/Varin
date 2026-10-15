@@ -213,7 +213,7 @@ function observerRuntime() {
   let supplied = false;
   const runtime = {
     onEvent: () => () => {}, onExit: () => () => {}, onReady: () => () => {},
-    status: async () => ({ eventCursor: 1 }), threads: async () => [{ thread_id: 'thread', branches: [], observer_project_ids: [null] }],
+    status: async () => ({ eventCursor: 1 }), threads: async () => [{ thread_id: 'thread', branches: [], parent_thread_id: null, observer_project_ids: [null] }],
     observerEvents: async () => {
       if (supplied) return [];
       supplied = true;

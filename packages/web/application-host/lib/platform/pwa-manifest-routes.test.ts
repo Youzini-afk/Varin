@@ -33,7 +33,7 @@ const createResponse = (): TestResponse => ({
 const thread = (id: string, title: string, updated: number): ThreadSummary => ({
   thread_id: id, main_branch_id: `${id}:main`, title, updated_at_ms: updated,
   revision: 1, created_at_ms: 1, pinned: false, archived: false, deleted_at_ms: null,
-  activity_cursor: 1, read_cursor: 0, unread: true, bot_id: null, branches: [], observer_project_ids: [],
+  activity_cursor: 1, read_cursor: 0, unread: true, bot_id: null, branches: [], parent_thread_id: null, observer_project_ids: [],
 });
 
 describe('PWA manifest route', () => {

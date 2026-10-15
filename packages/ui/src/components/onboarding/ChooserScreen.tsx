@@ -60,9 +60,6 @@ export function ChooserScreen({ onRuntimeAvailable, localAvailable = true }: Cho
           <h1 className="text-2xl font-semibold tracking-tight text-foreground">
             {t('onboarding.chooser.title')}
           </h1>
-          <p className="text-sm text-muted-foreground">
-            {t('onboarding.native.chooseDescription')}
-          </p>
         </header>
 
         {isDesktopApp && localAvailable ? (
@@ -107,14 +104,7 @@ export function ChooserScreen({ onRuntimeAvailable, localAvailable = true }: Cho
           </div>
         ) : null}
 
-        {showLocal ? (
-          <div className="space-y-4">
-            <p className="text-center text-sm leading-relaxed text-muted-foreground">
-              {t('onboarding.native.description')}
-            </p>
-            <LocalRuntimeCard onContinue={useLocalRuntime} />
-          </div>
-        ) : null}
+        {showLocal ? <LocalRuntimeCard onContinue={useLocalRuntime} /> : null}
       </div>
     </div>
   );

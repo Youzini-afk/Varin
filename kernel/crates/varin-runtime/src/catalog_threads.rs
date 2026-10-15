@@ -345,6 +345,11 @@ pub(super) fn inspect(db: &Connection, thread_id: &str) -> Result<Value> {
         .ok_or_else(|| RuntimeError::Invalid("Thread has no initial branch".into()))?["branch_id"]
         .clone();
     summary["thread_id"] = json!(thread_id);
+    let parent_thread_id: Option<String> = db.query_row(
+        "SELECT json_extract(body,'$.parent_thread_id') FROM child_tasks WHERE child_thread_id=?1",
+        [thread_id], |row| row.get(0),
+    ).optional()?;
+    summary["parent_thread_id"] = json!(parent_thread_id);
     summary["bot_id"] = json!(bot::thread_bot(db, thread_id)?);
     summary["branches"] = json!(branches);
     summary["observer_project_ids"] = json!(observer_project_ids);

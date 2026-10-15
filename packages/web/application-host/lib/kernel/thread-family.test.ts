@@ -15,7 +15,7 @@ const target = { threadId: 'thread:sibling', branchId: 'branch:sibling' };
 function fixture() {
   const facts = { reply: {} as unknown, fail: false, block: false };
   const requests = vi.fn(async (method: string, params: Record<string, unknown>, signal?: AbortSignal): Promise<unknown> => {
-    if (method === 'runtime.thread.inspect') return { thread_id: params.threadId, observer_project_ids: [],
+    if (method === 'runtime.thread.inspect') return { thread_id: params.threadId, parent_thread_id: null, observer_project_ids: [],
       branches: [{ branch_id: identity.branchId, active_run_id: null, head: null, latest_run: null }] };
     if (method.startsWith('runtime.family.')) {
       if (facts.fail) throw new KernelClientError({ code: 'operation-error', message: 'operation error: conflict: private upstream detail' });

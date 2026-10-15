@@ -14,7 +14,7 @@ const identity: ThreadIdentity = { runtime: 'agent', threadId: 'thread-a', branc
 const summary = (patch: Partial<ThreadSummary> = {}): ThreadSummary => ({
   thread_id: identity.threadId, main_branch_id: identity.branchId, title: 'A', revision: 1, created_at_ms: 1, updated_at_ms: 1,
   pinned: false, archived: false, deleted_at_ms: null, activity_cursor: 4, read_cursor: 0, unread: true,
-  bot_id: null, observer_project_ids: [null], branches: [{ branch_id: identity.branchId, head: null, active_run_id: null, latest_run: null }], ...patch,
+  bot_id: null, parent_thread_id: null, observer_project_ids: [null], branches: [{ branch_id: identity.branchId, head: null, active_run_id: null, latest_run: null }], ...patch,
 });
 const deferred = <T,>() => { let resolve!: (value: T) => void; let reject!: (error: unknown) => void; const promise = new Promise<T>((yes, no) => { resolve = yes; reject = no; }); return { promise, resolve, reject }; };
 let cleanup: (() => void) | undefined;

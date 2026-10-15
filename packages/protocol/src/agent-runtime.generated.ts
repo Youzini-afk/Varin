@@ -1410,6 +1410,7 @@ export interface ThreadDeleteParams { threadId: string; key: string; expectedRev
 export interface ThreadReadPositionParams { threadId: string; key: string; throughCursor: number; }
 
 export interface ThreadSummary {
+  parent_thread_id: string | null;
   main_branch_id: string;
   title: string;
   revision: number;

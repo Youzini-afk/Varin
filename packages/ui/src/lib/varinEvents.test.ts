@@ -36,10 +36,10 @@ vi.doMock('@/lib/client-settings-bridge', () => ({
     bindCalls.push(identity.threadId);
     if (bindGate) await bindGate;
   },
-  clientSurfaceQuery: () => ({
+  clientSurfaceQuery: (identity: { threadId: string; branchId: string } | null) => ({
     surface: 'surface-test',
     kind: 'web',
-    ...(mockThreadId ? { threadId: mockThreadId, branchId: mockBranchId } : {}),
+    ...(identity ?? {}),
   }),
   handleClientSettingsRequest: async () => undefined,
 }));
@@ -146,19 +146,23 @@ describe('Varin events', () => {
     unsubscribe();
   });
 
-  test('binds a native Thread branch before opening SSE', async () => {
+  test('keeps broadcasts available while binding, and adds Thread addressing only after admission', async () => {
     mockThreadId = 'session-a';
     let release!: () => void;
     bindGate = new Promise<void>((resolve) => { release = resolve; });
     const { subscribeVarinEvents } = await import('./varinEvents');
-    const unsubscribe = subscribeVarinEvents(() => undefined);
+    const events: unknown[] = [];
+    const unsubscribe = subscribeVarinEvents(event => events.push(event));
 
     expect(bindCalls).toEqual(['session-a']);
-    expect(MockEventSource.instances).toHaveLength(0);
+    const broadcast = MockEventSource.instances[0]!;
+    expect(broadcast.url).not.toContain('threadId');
+    broadcast.onmessage?.({ data: JSON.stringify({ type: 'varin:settings-changed', properties: { owner: 'agent-settings', scope: 'host', revision: '2', ids: ['model-channels'] } }) });
+    expect(events).toEqual([{ type: 'settings-changed', owner: 'agent-settings', scope: 'host', revision: '2', ids: ['model-channels'] }]);
     release();
     await flushAsync();
-    expect(MockEventSource.instances).toHaveLength(1);
-    expect(MockEventSource.instances[0]?.url).toContain('threadId=session-a');
+    expect(broadcast.readyState).toBe(MockEventSource.CLOSED);
+    expect(MockEventSource.instances.at(-1)?.url).toContain('threadId=session-a');
     unsubscribe();
   });
 
@@ -167,7 +171,7 @@ describe('Varin events', () => {
     const { subscribeVarinEvents } = await import('./varinEvents');
     const unsubscribe = subscribeVarinEvents(() => undefined);
     await flushAsync();
-    const first = MockEventSource.instances[0];
+    const first = MockEventSource.instances.at(-1);
     expect(first?.url).toContain('threadId=session-a');
 
     mockThreadId = 'session-b';
@@ -203,12 +207,13 @@ describe('Varin events', () => {
     let release!: () => void;
     bindGate = new Promise<void>(resolve => { release = resolve; });
     runtimeListener?.();
-    const count = MockEventSource.instances.length;
     runtimeListener?.();
+    const latestBroadcast = MockEventSource.instances.at(-1)!;
     release(); await flushAsync();
-    expect(MockEventSource.instances).toHaveLength(count);
+    expect(MockEventSource.instances.at(-1)).toBe(latestBroadcast);
+    expect(latestBroadcast.url).not.toContain('threadId');
     bindGate = null; runtimeListener?.(); await flushAsync();
-    expect(MockEventSource.instances).toHaveLength(count + 1);
+    expect(MockEventSource.instances.at(-1)?.url).toContain('branchId=new-branch');
     unsubscribe();
   });
 

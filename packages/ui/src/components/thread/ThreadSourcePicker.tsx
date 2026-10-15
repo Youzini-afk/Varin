@@ -31,7 +31,7 @@ function releaseRequest(request: SourceRequest): Promise<void> {
   return request.releasing;
 }
 
-export function ThreadSourcePicker({ api, identity, initialPath, active, launch, prepared, onPrepared, onPreparingChange }: {
+export function ThreadSourcePicker({ api, identity, initialPath, active, launch, prepared, onPrepared, onPreparingChange, onUseChatOnly }: {
   api: Pick<ThreadsAPI, 'prepareSource' | 'sources'>;
   identity: ThreadIdentity;
   initialPath?: string;
@@ -40,6 +40,7 @@ export function ThreadSourcePicker({ api, identity, initialPath, active, launch,
   prepared: ThreadPreparedSource | null;
   onPrepared(value: ThreadPreparedSource | null): void;
   onPreparingChange(value: boolean): void;
+  onUseChatOnly?(): void;
 }) {
   const host = React.useSyncExternalStore(subscribeRuntimeEndpointChanged, getRuntimeEndpointGeneration, getRuntimeEndpointGeneration);
   const [targets, setTargets] = React.useState<ThreadSourceTargets>({ targets: [], unavailable: [] });
@@ -69,7 +70,7 @@ export function ThreadSourcePicker({ api, identity, initialPath, active, launch,
   React.useEffect(() => {
     const controller = new AbortController();
     setTargets({ targets: [], unavailable: [] }); setDirectoryError(undefined); setResourceOwner({ kind: 'local' });
-    void api.sources.list(identity, controller.signal).then(value => {
+    void api.sources.list({ runtime: 'agent', threadId: identity.threadId, branchId: identity.branchId }, controller.signal).then(value => {
       if (!controller.signal.aborted) setTargets(value);
     }, error => { if (!controller.signal.aborted) setDirectoryError(error instanceof Error ? error.message : 'Source Hosts could not be loaded'); });
     return () => controller.abort();
@@ -193,6 +194,7 @@ export function ThreadSourcePicker({ api, identity, initialPath, active, launch,
       {mode === 'materialized' && <p>File edits start in a separate working copy. Commands can have external effects; this is not a security sandbox. Changes are not copied back automatically.</p>}
       {active && <p>Workspace selection applies to a new run. Wait for the current run to finish before preparing another source.</p>}
       <Button type="button" variant="outline" size="sm" disabled={active || preparing || !path.trim() || !targets.targets.some(target => targetKey(target.resourceOwner) === targetKey(resourceOwner))} onClick={() => void prepare()}>{preparing ? 'Preparing workspace' : 'Prepare workspace'}</Button>
+      {!source && onUseChatOnly && <Button type="button" variant="ghost" size="sm" disabled={active || preparing} onClick={() => { invalidate(); onUseChatOnly(); }}>Chat only</Button>}
       {request.current && <Button type="button" variant="ghost" size="sm" onClick={invalidate}>{preparing ? 'Cancel preparation' : 'Discard captured request'}</Button>}
       {error && contentMode === 'surface-drafts' && <Button type="button" variant="ghost" size="sm" disabled={active || preparing} onClick={() => { invalidate(); void prepare(); }}>Capture drafts again</Button>}
       {prepared && <div aria-label="Prepared workspace">
@@ -207,7 +209,7 @@ export function ThreadSourcePicker({ api, identity, initialPath, active, launch,
             <p>Omitted draft paths: {provenance.omittedDraftPaths.length ? provenance.omittedDraftPaths.join(', ') : 'None'}</p>
           </>}
         </div>}
-        <Button type="button" variant="ghost" size="sm" disabled={preparing} onClick={invalidate}>{source ? 'Keep current workspace' : 'Remove prepared workspace'}</Button>
+        <Button type="button" variant="ghost" size="sm" disabled={preparing} onClick={() => { invalidate(); if (!source) onUseChatOnly?.(); }}>{source ? 'Keep current workspace' : 'Remove prepared workspace'}</Button>
       </div>}
       {error && <p role="alert" className="text-destructive">{error}</p>}
     </div>

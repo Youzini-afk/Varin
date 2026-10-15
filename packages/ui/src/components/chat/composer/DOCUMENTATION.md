@@ -1,9 +1,9 @@
 # Composer helpers and native input
 
-The product composer lives in `components/thread/ThreadConversation.tsx`. It uses a multiline textarea,
-model/thinking controls, image and PDF attachments, skill selection and editor context. This directory
-holds reusable attachment, text, language and editor helpers; its CodeMirror editor is not the owner of
-native Thread submission.
+`components/thread/ThreadConversation.tsx` owns input delivery. `ThreadComposer` presents its draft
+through the shared CodeMirror editor, model/thinking controls, dictation, image/PDF attachments and
+editor context. This directory holds reusable attachment, text, language and editor helpers; the
+editor does not own Thread submission. Work controls live in the conversation's work overview.
 
 ## Ownership
 

@@ -285,10 +285,6 @@ const connect = () => {
     return;
   }
 
-  if (eventSource && eventSource.readyState !== EventSource.CLOSED) {
-    return;
-  }
-
   const identity = selectedClientThread();
   const identityKey = identity ? JSON.stringify([identity.threadId, identity.branchId]) : null;
   if (identity && boundThreadKey !== identityKey) {
@@ -308,18 +304,22 @@ const connect = () => {
           threadBindingPromise = null;
           if (threadBindingTarget === bindingTarget) threadBindingTarget = null;
           if (listeners.size === 0) return;
-          if (bound) connect();
+          if (bound) { cleanupSource(); connect(); }
           else scheduleReconnect();
         });
     }
-    return;
   }
+
+  if (eventSource && eventSource.readyState !== EventSource.CLOSED) return;
 
   cleanupSource();
 
   // The surface query makes this connection individually addressable for
   // client-owned settings requests (Stage S).
-  const source = new EventSource(getRuntimeUrlResolver().sse('/api/varin/events', clientSurfaceQuery(identity)));
+  // Shared settings and activity do not depend on a conversation's client-control permit.
+  // Until binding succeeds, subscribe to broadcasts without claiming a Thread identity.
+  const boundIdentity = boundThreadKey === identityKey ? identity : null;
+  const source = new EventSource(getRuntimeUrlResolver().sse('/api/varin/events', clientSurfaceQuery(boundIdentity)));
   source.onopen = () => {
     if (eventSource !== source) return;
     resetHeartbeatTimer();

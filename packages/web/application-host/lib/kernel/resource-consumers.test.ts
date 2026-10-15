@@ -47,7 +47,7 @@ async function fixture() {
 function adapterFixture(saved: ContextCheckpoint, prepare: ContextPreparer, childProfiles?: import('./child-profiles.js').ChildProfilePreparer) {
   let active = structuredClone(saved);
   const runtime = {
-    thread: vi.fn(async () => ({ thread_id: identity.threadId, observer_project_ids: [], branches: [
+    thread: vi.fn(async () => ({ thread_id: identity.threadId, parent_thread_id: null, observer_project_ids: [], branches: [
       { branch_id: identity.branchId, active_run_id: null, head: 'history', latest_run: null }] })),
     context: vi.fn<AgentRuntimeClient['context']>(async () => structuredClone(active)),
     inputReceipt: vi.fn<AgentRuntimeClient['inputReceipt']>(async () => null),

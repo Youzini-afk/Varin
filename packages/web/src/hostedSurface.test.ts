@@ -14,14 +14,14 @@ describe('detectHostedSurface', () => {
   test('forces embedded session chat to desktop even in a narrow touch iframe', () => {
     expect(detectHostedSurface({
       ...mobileIframeInput,
-      search: '?piPanel=session-chat&piSessionId=child-123&piDirectory=%2Ftmp%2Fproject',
+      search: '?panel=session-chat&threadId=child-123&directory=%2Ftmp%2Fproject',
     })).toBe('desktop');
   });
 
   test('embedded session chat wins over a mobile surface override', () => {
     expect(detectHostedSurface({
       ...mobileIframeInput,
-      search: '?surface=mobile&piPanel=session-chat&piSessionId=child-123',
+      search: '?surface=mobile&panel=session-chat&threadId=child-123',
     })).toBe('desktop');
   });
 

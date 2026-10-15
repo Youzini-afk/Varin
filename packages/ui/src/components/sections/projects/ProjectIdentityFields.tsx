@@ -2,7 +2,7 @@ import React from 'react';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Icon } from '@/components/icon/Icon';
-import { ModelSelector } from '@/components/sections/agents/ModelSelector';
+import { ProjectDefaultModelField } from './ProjectDefaultModelField';
 import { PROJECT_COLORS, PROJECT_ICONS, PROJECT_COLOR_MAP as COLOR_MAP, ProjectIconImage } from '@/lib/projectMeta';
 import { useThemeSystem } from '@/contexts/useThemeSystem';
 import { useI18n } from '@/lib/i18n';
@@ -32,8 +32,6 @@ export const ProjectIdentityFields: React.FC<ProjectIdentityFieldsProps> = ({ fo
     setColor,
     iconBackground,
     setIconBackground,
-    parsedDefaultModel,
-    handleDefaultModelChange,
     defaultWorkFocus,
     setDefaultWorkFocus,
     isUploadingIcon,
@@ -82,12 +80,7 @@ export const ProjectIdentityFields: React.FC<ProjectIdentityFieldsProps> = ({ fo
         info={t('settings.projects.page.field.defaultModelDescription')}
         settingsItem="projects.default-model"
       >
-        <ModelSelector
-          providerId={parsedDefaultModel.providerId}
-          modelId={parsedDefaultModel.modelId}
-          onChange={handleDefaultModelChange}
-          className={cn('h-8 min-h-8 rounded-md px-3 max-w-48', PROJECT_SETTINGS_CONTROL_WIDTH)}
-        />
+        <ProjectDefaultModelField key={project.id} directory={project.path} />
       </ProjectSettingsSubsection>
 
       <ProjectSettingsSubsection

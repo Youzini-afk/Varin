@@ -1270,10 +1270,14 @@ export const registerCommonRequestMiddleware = (
       req.path.startsWith('/api/config/settings') ||
       req.path.startsWith('/api/agent-personalization') ||
       req.path.startsWith('/api/agent-profiles') ||
+      req.path.startsWith('/api/resources') ||
+      req.path.startsWith('/api/project-trust') ||
       req.path.startsWith('/api/models') ||
       req.path.startsWith('/api/mcp') ||
       req.path.startsWith('/api/bot-memory') ||
       req.path.startsWith('/api/computers') ||
+      req.path.startsWith('/api/harness/bots') ||
+      req.path.startsWith('/api/harness/web-search') ||
       (req.method === 'POST' && req.path.startsWith('/api/harness/managed-execution/')) ||
       req.path.startsWith('/api/auth') ||
       req.path.startsWith('/api/external') ||
@@ -1299,6 +1303,7 @@ export const registerCommonRequestMiddleware = (
       req.path.startsWith('/api/voice') ||
       req.path.startsWith('/api/tts') ||
       req.path.startsWith('/api/varin/extensions') ||
+      req.path.startsWith('/api/varin/client-settings') ||
       req.path.startsWith('/api/varin/tunnel')
     ) {
       express.json({ limit: '50mb' })(req, res, error => {
