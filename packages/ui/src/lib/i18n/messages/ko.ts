@@ -426,6 +426,7 @@ export const dict: Record<I18nKey, string> = {
   'harness.threads.backToList': "하위 작업으로 돌아가기",
   'harness.threads.actions': "작업 동작",
   'harness.threads.stop': "작업 중지",
+  'harness.threads.stopAll': "작업 및 하위 작업 중지",
   'harness.threads.actionFailed': "작업을 업데이트할 수 없습니다",
   'harness.threads.usingTool': "{tool} 사용 중",
   'harness.threads.ended': "종료됨 · {count}",

@@ -408,6 +408,7 @@ export const dict: Record<I18nKey, string> = {
   'harness.threads.backToList': "Volver a subtareas",
   'harness.threads.actions': "Acciones de tarea",
   'harness.threads.stop': "Detener tarea",
+  'harness.threads.stopAll': "Detener la tarea y las subtareas",
   'harness.threads.actionFailed': "No se pudo actualizar la tarea",
   'harness.threads.usingTool': "Usando {tool}",
   'harness.threads.ended': "Finalizadas · {count}",

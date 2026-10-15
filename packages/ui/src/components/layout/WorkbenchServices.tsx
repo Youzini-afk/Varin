@@ -295,7 +295,7 @@ const DesktopServicesMenu = React.memo(function DesktopServicesMenu({
           <McpDropdownContent active={isDesktopServicesOpen && desktopServicesTab === 'mcp'} />
         ) : null}
 
-        {desktopServicesTab === 'usage' ? <ThreadTokenUsage /> : null}
+        {desktopServicesTab === 'usage' ? <ThreadTokenUsage active={isDesktopServicesOpen} /> : null}
 
         {showDevShutdown ? (
           <>

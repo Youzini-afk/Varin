@@ -447,6 +447,7 @@ export const dict = {
   'harness.threads.backToList': "Retour aux sous-tâches",
   'harness.threads.actions': "Actions de la tâche",
   'harness.threads.stop': "Arrêter la tâche",
+  'harness.threads.stopAll': "Arrêter la tâche et ses sous-tâches",
   'harness.threads.actionFailed': "Impossible de modifier la tâche",
   'harness.threads.usingTool': "Utilisation de {tool}",
   'harness.threads.ended': "Terminées · {count}",

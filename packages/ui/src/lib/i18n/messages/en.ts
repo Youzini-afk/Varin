@@ -441,6 +441,7 @@ export const dict = {
   'harness.threads.backToList': "Back to subtasks",
   'harness.threads.actions': "Task actions",
   'harness.threads.stop': "Stop task",
+  'harness.threads.stopAll': "Stop task and children",
   'harness.threads.actionFailed': "Unable to update task",
   'harness.threads.usingTool': "Using {tool}",
   'harness.threads.ended': "Finished · {count}",

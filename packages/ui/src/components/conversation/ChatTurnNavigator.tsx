@@ -157,7 +157,7 @@ export const ChatTurnNavigator = React.memo(React.forwardRef<ChatTurnNavigatorHa
     onBlur={event => { if (!pointerInside.current && !event.currentTarget.contains(event.relatedTarget as Node | null)) preview.current?.hide(); }}
     onKeyDown={event => {
       if (event.key === 'Escape') { preview.current?.hide(); clearWave(); return; }
-      const ordinal = Number((event.target as HTMLElement).closest<HTMLButtonElement>('button[data-conversation-turn-marker]')?.dataset.chatTurnMarker);
+      const ordinal = Number((event.target as HTMLElement).closest<HTMLButtonElement>('button[data-conversation-turn-marker]')?.dataset.conversationTurnMarker);
       if (!Number.isInteger(ordinal)) return;
       const next = event.key === 'ArrowDown' ? Math.min(markers.length - 1, ordinal + 1)
         : event.key === 'ArrowUp' ? Math.max(0, ordinal - 1) : event.key === 'Home' ? 0

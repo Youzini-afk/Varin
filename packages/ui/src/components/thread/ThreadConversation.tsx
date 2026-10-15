@@ -61,7 +61,7 @@ import { cn, formatDirectoryName } from '@/lib/utils';
 import { MarkdownRenderer } from '@/components/chat/MarkdownRenderer';
 import { ThreadProjection } from '@/lib/agent-runtime/thread-projection';
 import { ThreadOutput } from './ThreadMedia';
-import { ThreadQueuedInput } from './ThreadQueuedInput';
+import { ThreadInputQueue } from './ThreadQueuedInput';
 import { ChildTasks } from '../conversation/ChildTasks';
 
 const operationCancelLabel = (operation: ThreadSnapshot['operations'][number]): string => {
@@ -180,6 +180,9 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
   const { t } = useI18n();
   const host = React.useSyncExternalStore(subscribeRuntimeEndpointChanged, getRuntimeEndpointGeneration, getRuntimeEndpointGeneration);
   const draftKey = threadIdentityKey(threadHostKey(), identity);
+  const viewScope = React.useMemo(() => ({ api, host, draftKey, readOnly }), [api, host, draftKey, readOnly]);
+  const currentViewScope = React.useRef(viewScope);
+  currentViewScope.current = viewScope;
   const [handoff] = React.useState(() => new MessageHandoff());
   const reducedMotion = usePrefersReducedMotion();
   React.useLayoutEffect(() => { handoff.select(String(host), draftKey, !readOnly, reducedMotion); }, [handoff, host, draftKey, readOnly, reducedMotion]);
@@ -261,11 +264,22 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
     pendingAction.current = null; setPending(false); setError(undefined);
     setSnapshot(undefined); setProgress(''); setHistoryOpen(false); setContextRunId(undefined); setReadingFiles(false); fileReadGeneration.current += 1;
     fileRead.current?.abort(); fileRead.current = null;
-    const view = new ThreadProjection(api, identity, value => { snapshotHost.current = host; handoff.observe(value); setSnapshot(value); if (typeof document !== 'undefined' && document.visibilityState !== 'hidden') void useThreadStore.getState().markRead(identity.threadId, value.thread.activity_cursor).catch(() => {}); }, value => setError(value instanceof Error ? value.message : 'Thread unavailable'), setProgress);
+    const view = new ThreadProjection(api, identity, value => { snapshotHost.current = host; handoff.observe(value); setSnapshot(value); }, value => setError(value instanceof Error ? value.message : 'Thread unavailable'), setProgress);
     projection.current = view; view.start();
     return () => { identityGeneration.current += 1; historyGeneration.current += 1; fileReadGeneration.current += 1; fileRead.current?.abort(); fileRead.current = null; view.close(); };
   }, [api, identity, host, handoff]);
   const snapshot = snapshotHost.current === host && snapshotState?.identity.threadId === identity.threadId && snapshotState?.identity.branchId === identity.branchId ? snapshotState : undefined;
+  React.useEffect(() => {
+    if (!snapshot || historyView || typeof document === 'undefined') return;
+    const acknowledge = () => {
+      if (document.visibilityState !== 'hidden' && host === getRuntimeEndpointGeneration()) {
+        void useThreadStore.getState().markRead(identity.threadId, snapshot.thread.activity_cursor).catch(() => {});
+      }
+    };
+    acknowledge();
+    document.addEventListener('visibilitychange', acknowledge);
+    return () => document.removeEventListener('visibilitychange', acknowledge);
+  }, [snapshot, historyView, host, identity.threadId]);
   const workRevision = snapshot ? JSON.stringify([snapshot.activeRun?.id, snapshot.activeRun?.state,
     snapshot.children?.map(child => [child.child_thread_id, child.state])]) : null;
   React.useEffect(() => { if (workRevision) onWorkChanged?.(); }, [workRevision, onWorkChanged]);
@@ -324,7 +338,7 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
     return () => controller.abort();
   }, [needsDefaultModel, host, draftKey, draft.workspacePath, initialWorkspacePath, defaultsVersion]);
   const act = async (work: () => Promise<unknown>, interrupt = false) => {
-    if (readOnly || pendingAction.current && !interrupt) return;
+    if (readOnly || currentViewScope.current !== viewScope || pendingAction.current && !interrupt) return;
     const action = {}; pendingAction.current = action;
     const generation = identityGeneration.current;
     const current = () => generation === identityGeneration.current && host === getRuntimeEndpointGeneration() && pendingAction.current === action;
@@ -442,7 +456,7 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
   const memorySelection = getRegisteredRuntimeAPIs()?.bots?.selection;
   const submissionFingerprint = () => JSON.stringify([identity.threadId, identity.branchId, projectedText, images, materials, providerId, modelId, thinkingLevel, inputMode, preparedSource?.source]);
   const sourceCannotBeApplied = active && Boolean(preparedSource) && !pendingInput.current;
-  const sendDisabled = pending || (!draft.pendingInput && (preparingDelegation || preparingSource || sourceCannotBeApplied || readingFiles
+  const sendDisabled = pending || (!draft.pendingInput && (!snapshot || preparingDelegation || preparingSource || sourceCannotBeApplied || readingFiles
     || (images.length > 0 && acceptsImages === false)
     || (!text.trim() && !images.length && !materials.length && !inlineDrafts.length && !editorContext.length)
     || (!active && (delegated ? !api.collaboration || !run : !providerId || !modelId))));
@@ -472,6 +486,8 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
       {snapshot && <ChildTasks api={api} identity={identity} children={snapshot.children ?? []}
         executions={snapshot.childExecutions ?? []} activity={snapshot.childActivity} pending={pending}
         cancel={!readOnly && api.collaboration ? operationId => act(() => api.collaboration!.cancelChild(identity, operationId)) : undefined} />}
+      {!readOnly && snapshot && api.collaboration && (run || snapshot.children?.length || delegated) && <Button variant="ghost" size="sm" disabled={pending}
+        onClick={() => void act(() => api.collaboration!.cancelTree(identity), true)}>{t('harness.threads.stopAll')}</Button>}
       {launch && <ThreadChildProfiles launch={launch.selection} />}
       {api.family && <ThreadFamily api={api.family} mediaRead={api.mediaRead} identity={identity} />}
       {!readOnly && api.messages && <ThreadMessages api={api.messages} family={api.family} identity={identity} eventCursor={snapshot?.eventCursor} cancelObservation={pending ? undefined : operationId => act(() => api.cancelOperation(operationId), true)} />}
@@ -556,9 +572,9 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
     <div className={cn('relative flex min-h-0 flex-1', empty && 'hidden')}>
     <ConversationSurface owner={String(host)} identity={draftKey} ready={Boolean(snapshot)} loadingLabel={t('common.loading')}>
     <ConversationTimeline api={api} identity={identity} snapshot={snapshot} history={visibleHistory}
-      progress={historyView ? '' : progress} cwd={emptyWorkspacePath ?? ''} working={active && !launch?.preparation_failure && !pause} readOnly={readOnly}
+      progress={historyView ? '' : progress} cwd={emptyWorkspacePath ?? ''} working={!historyView && active && !launch?.preparation_failure && !pause} readOnly={readOnly}
       memory={snapshot?.thread.bot_id ? memorySelection : undefined}
-      onQuote={quote => { if (!readOnly) { setText(current => [current.trimEnd(), quote].filter(Boolean).join('\n\n')); messageInput.current?.focus(); } }}
+      onQuote={quote => { if (!readOnly && currentViewScope.current === viewScope) { setText(current => [current.trimEnd(), quote].filter(Boolean).join('\n\n')); messageInput.current?.focus(); } }}
       onFork={!readOnly && !pending && onBranchCreated ? id => void forkFrom(id) : undefined}
       onRecover={!readOnly && !pending && !active && snapshot ? id => { showOverview('outputs'); void recovery.recover(id); } : undefined}
       header={<>      <div className="mx-auto flex max-w-3xl items-center gap-2">
@@ -580,10 +596,16 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
     {!readOnly && <div className="shrink-0 space-y-5 pb-4">
     {empty && <div className="chat-input-column flex flex-col items-center gap-5 pb-1 text-center"><VarinLogo width={24} height={24} decorative className="text-muted-foreground" /><h1 className="text-2xl font-medium tracking-tight text-foreground md:text-3xl">{emptyWorkspacePath ? t('chat.emptyState.draftTitleWithProject', { project: formatDirectoryName(emptyWorkspacePath) }) : t('chat.emptyState.draftTitle')}</h1></div>}
     {snapshot && <ThreadWorkStrips api={api} identity={identity} goals={snapshot.goals} followups={snapshot.followups} pending={pending} act={act} onGoal={() => showOverview('plan')} onFollowups={() => showOverview('outputs')} />}
-    <div className="chat-input-column conversation-composer-queue">      {!readOnly && snapshot?.inputs.filter(input => input.state === 'queued').map(input => <ThreadQueuedInput key={`${host}:${identity.threadId}:${identity.branchId}:${input.id}:${input.revision}`}
-        api={api} identity={identity} input={input} pending={pending}
-        onSave={(text, images) => act(() => images === undefined ? api.editInput(input.id, input.revision, text) : api.editInput(input.id, input.revision, text, images))}
-        onCancel={() => act(() => api.cancelInput(input.id, input.revision), true)} />)}</div>
+    <div className="chat-input-column conversation-composer-queue">{snapshot && <ThreadInputQueue key={`${host}:${identity.threadId}:${identity.branchId}`}
+      api={api} identity={identity} inputs={snapshot.inputs} pending={pending}
+      onSave={async (input, text, images) => {
+        let saved = false;
+        await act(async () => {
+          await (images === undefined ? api.editInput(input.id, input.revision, text) : api.editInput(input.id, input.revision, text, images));
+          saved = true;
+        });
+        return saved;
+      }} onCancel={input => act(() => api.cancelInput(input.id, input.revision), true)} />}</div>
     <form className="space-y-2" onSubmit={event => {
       event.preventDefault();
       if (sendDisabled || fileRead.current) return;

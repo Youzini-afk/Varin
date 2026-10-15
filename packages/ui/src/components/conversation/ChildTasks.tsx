@@ -54,7 +54,7 @@ export function ChildTasks({ api, identity, children, executions, activity, pend
         </details>}
         <div className="flex flex-wrap gap-1">
           <Button variant="ghost" size="sm" onClick={() => void open(child)}>{t('harness.threads.openConversation')}</Button>
-          {cancel && !childEnded(state) && <Button variant="ghost" size="sm" disabled={pending || latest?.cancel_requested}
+          {cancel && <Button variant="ghost" size="sm" disabled={pending || latest?.cancel_requested}
             onClick={() => void cancel(child.operation_id)}>{t('harness.threads.stop')}</Button>}
         </div>
       </div>

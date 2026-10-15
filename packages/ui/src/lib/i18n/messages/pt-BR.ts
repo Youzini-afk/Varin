@@ -430,6 +430,7 @@ export const dict: Record<I18nKey, string> = {
   'harness.threads.backToList': "Voltar às subtarefas",
   'harness.threads.actions': "Ações da tarefa",
   'harness.threads.stop': "Parar tarefa",
+  'harness.threads.stopAll': "Parar tarefa e subtarefas",
   'harness.threads.actionFailed': "Não foi possível atualizar a tarefa",
   'harness.threads.usingTool': "Usando {tool}",
   'harness.threads.ended': "Encerradas · {count}",

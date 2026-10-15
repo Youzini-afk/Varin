@@ -408,6 +408,7 @@ export const dict: Record<I18nKey, string> = {
   'harness.threads.backToList': "Повернутися до підзавдань",
   'harness.threads.actions': "Дії із завданням",
   'harness.threads.stop': "Зупинити завдання",
+  'harness.threads.stopAll': "Зупинити завдання та підзавдання",
   'harness.threads.actionFailed': "Не вдалося оновити завдання",
   'harness.threads.usingTool': "Використовується {tool}",
   'harness.threads.ended': "Завершені · {count}",

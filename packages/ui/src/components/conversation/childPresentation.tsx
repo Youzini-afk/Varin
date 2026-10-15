@@ -22,7 +22,7 @@ export function ChildFileResult({ result }: { result: ChildCodeResult }) {
   const { t } = useI18n();
   const label: Partial<Record<ChildCodeResult['kind'], I18nKey>> = {
     published: 'chat.children.filesPublished', no_changes: 'chat.children.noChanges',
-    settling: 'chat.children.settling', candidate: 'chat.children.settling', unavailable: 'chat.children.filesUnavailable',
+    pending: 'chat.children.settling', settling: 'chat.children.settling', candidate: 'chat.children.settling', unavailable: 'chat.children.filesUnavailable',
   };
   const key = label[result.kind];
   return key ? <p className={cn('typography-meta', result.kind === 'unavailable' ? 'text-destructive' : 'text-muted-foreground')}

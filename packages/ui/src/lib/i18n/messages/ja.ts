@@ -372,6 +372,7 @@ export const dict: Record<I18nKey, string> = {
   'harness.threads.backToList': "サブタスクに戻る",
   'harness.threads.actions': "タスクの操作",
   'harness.threads.stop': "タスクを停止",
+  'harness.threads.stopAll': "タスクと子タスクを停止",
   'harness.threads.actionFailed': "タスクを更新できませんでした",
   'harness.threads.usingTool': "{tool} を使用中",
   'harness.threads.ended': "終了済み · {count}",

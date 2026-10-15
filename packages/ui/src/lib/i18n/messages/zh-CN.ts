@@ -448,6 +448,7 @@ export const dict: Record<I18nKey, string> = {
   'harness.threads.backToList': "返回子任务",
   'harness.threads.actions': "任务操作",
   'harness.threads.stop': "停止任务",
+  'harness.threads.stopAll': "停止任务及所有子任务",
   'harness.threads.actionFailed': "任务操作失败",
   'harness.threads.usingTool': "正在使用 {tool}",
   'harness.threads.ended': "已结束 · {count}",

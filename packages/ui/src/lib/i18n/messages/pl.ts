@@ -427,6 +427,7 @@ export const dict: Record<I18nKey, string> = {
   'harness.threads.backToList': "Wróć do podzadań",
   'harness.threads.actions': "Działania zadania",
   'harness.threads.stop': "Zatrzymaj zadanie",
+  'harness.threads.stopAll': "Zatrzymaj zadanie i podzadania",
   'harness.threads.actionFailed': "Nie można zaktualizować zadania",
   'harness.threads.usingTool': "Używa {tool}",
   'harness.threads.ended': "Zakończone · {count}",

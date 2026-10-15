@@ -41,12 +41,13 @@ vi.mock('@varin/application-client', async original => ({
   subscribeRuntimeEndpointChanged: (listener: () => void) => { endpoint.listeners.add(listener); return () => endpoint.listeners.delete(listener); },
 }));
 vi.mock('@/lib/attachProcessTerminal', () => ({ attachProcessTerminal: vi.fn() }));
-vi.mock('@/hooks/useRuntimeAPIs', () => ({ useRuntimeAPIs: () => ({ threads: runtimeState.api }) }));
+vi.mock('@/hooks/useRuntimeAPIs', () => ({ useRuntimeAPIs: () => ({ ...getRegisteredRuntimeAPIs(), threads: runtimeState.api }) }));
 vi.mock('@/stores/useDirectoryStore', () => ({ useDirectoryStore: Object.assign((selector: (state: { currentDirectory: string }) => unknown) => selector({ currentDirectory: '/workspace/project' }), { getState: () => ({ currentDirectory: '/workspace/project', setDirectory: () => {} }) }) }));
 vi.mock('@/components/layout/MainLayout', () => ({ MainLayout: ({ renderConversation }: { renderConversation?: (active: boolean) => React.ReactNode }) => <div>{renderConversation ? renderConversation(true) : <ChatView />}</div> }));
 vi.mock('@/components/views/RegularChatView', () => ({ RegularChatView: () => <div data-testid="existing-conversations" /> }));
 vi.mock('@/apps/mobileWorkspaceShell', () => ({ MobileWorkspaceShell: () => null }));
 vi.mock('@/lib/extensions/surface-runtime', () => ({ varinSurfaceRuntime: { surface: 'web' } }));
+vi.mock('@/lib/extensions/workbench-registry', async original => ({ ...await original<typeof import('@/lib/extensions/workbench-registry')>(), useWorkbenchMatchRenderers: () => [], renderFirstWorkbenchMatch: () => undefined }));
 
 vi.mock('@/lib/i18n', () => {
   const t = (key: string) => key;
@@ -74,6 +75,8 @@ vi.mock('./ThreadComposer', () => ({ ThreadComposer: (props: React.ComponentProp
     onPaste={event => { const files = [...event.clipboardData.files]; if (files.length) { event.preventDefault(); props.onFiles(files); } }} />
   <button type="button" disabled={props.attachmentDisabled || props.imageDisabled} onClick={props.onAttachImages}>Attach images</button>
   <button type="button" disabled={props.attachmentDisabled} onClick={props.onAttachPdfs}>chat.fileAttachment.actions.attachPdfs</button>
+  <button type="button" disabled={!props.onCompact} onClick={props.onCompact}>Generate context summary</button>
+  <button type="button" onClick={props.onOpenHistory}>Open conversation history</button>
   <button type="submit" disabled={props.sendDisabled}>{props.retrying ? 'Retry delivery' : props.active ? 'Queue message' : 'Send'}</button>
   {props.onStop && <button type="button" onClick={props.onStop}>Stop run</button>}
 </div> }));
@@ -82,6 +85,20 @@ vi.mock('@/components/ui/VarinLogo', () => ({ VarinLogo: () => null }));
 vi.mock('./WorkOverviewControl', () => ({ WorkOverviewControl: ({ children }: React.PropsWithChildren) => <div>{children}</div> }));
 vi.mock('@/components/ui/input', () => ({ Input: ({ onChange, ...props }: React.InputHTMLAttributes<HTMLInputElement>) => <input {...props} onInput={onChange as React.FormEventHandler<HTMLInputElement>} /> }));
 vi.mock('@/components/ui/textarea', () => ({ Textarea: ({ onChange, ...props }: React.TextareaHTMLAttributes<HTMLTextAreaElement>) => <textarea {...props} onInput={onChange as React.FormEventHandler<HTMLTextAreaElement>} /> }));
+
+// This suite tests native conversation ownership and its real message controls. The
+// virtual viewport's geometry and scrolling require a browser, so render its rows here.
+vi.mock('@legendapp/list/react', () => ({ LegendList: React.forwardRef((props: {
+  data: Array<{ id: string }>; renderItem(input: { item: { id: string }; index: number }): React.ReactNode;
+  ListHeaderComponent?: React.ReactNode; ListFooterComponent?: React.ReactNode;
+}, ref) => {
+  const node = React.useRef<HTMLDivElement>(null);
+  React.useImperativeHandle(ref, () => ({ getScrollableNode: () => node.current,
+    getState: () => ({ data: props.data, scroll: 0, scrollLength: 600, contentLength: 600, positionAtIndex: () => 0 }),
+    scrollToIndex: async () => {}, scrollToOffset: async () => {}, scrollToEnd: async () => {},
+  }), [props.data]);
+  return <div ref={node}>{props.ListHeaderComponent}{props.data.map((item, index) => <React.Fragment key={item.id}>{props.renderItem({ item, index })}</React.Fragment>)}{props.ListFooterComponent}</div>;
+}) }));
 
 const imageData = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jhC0AAAAASUVORK5CYII=';
 const storedImage: StoredMedia = { media_type: 'image/png', content_ref: { content_object: 'sha256-original-image' }, source: { kind: 'operation', operation_id: 'capture' } };
@@ -136,6 +153,11 @@ beforeEach(() => {
   registerRuntimeAPIs({ documents } as RuntimeAPIs);
   const { document, window } = parseHTML('<!doctype html><html><body></body></html>');
   vi.stubGlobal('document', document); vi.stubGlobal('window', window); vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
+  vi.stubGlobal('HTMLElement', window.HTMLElement); vi.stubGlobal('Element', window.Element); vi.stubGlobal('Node', window.Node);
+  vi.stubGlobal('requestAnimationFrame', () => 0); vi.stubGlobal('cancelAnimationFrame', () => {});
+  vi.stubGlobal('getComputedStyle', () => ({ lineHeight: '20px', fontSize: '14px' }));
+  window.HTMLElement.prototype.scrollIntoView = () => {};
+  vi.stubGlobal('ResizeObserver', class { observe() {} disconnect() {} unobserve() {} });
   vi.stubGlobal('FileReader', class {
     result: string | null = null; error: Error | null = null; onload: (() => void) | null = null; onerror: (() => void) | null = null;
     readAsDataURL(file: File) {
@@ -147,16 +169,16 @@ beforeEach(() => {
 });
 afterEach(() => { act(() => root.unmount()); registerRuntimeAPIs(null); container.remove(); vi.unstubAllGlobals(); vi.restoreAllMocks(); });
 const edit = async (selector: string, value: string, event = 'input') => {
-  const element = container.querySelector<HTMLInputElement>(selector)!;
+  const element = document.querySelector<HTMLInputElement>(selector)!;
   await act(async () => { Object.defineProperty(element, 'value', { configurable: true, writable: true, value }); element.dispatchEvent(new window.Event(event, { bubbles: true })); });
 };
 const submitForm = async (form: HTMLFormElement) => { await act(async () => { form.dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true })); }); };
 const button = (text: string) => {
-  const labels: Record<string, string> = { 'Cancel queued input': 'chat.queuedMessage.removeAria', 'Restore before this message': 'chat.messageBody.actions.revertAria', 'Restore through this message': 'chat.messageBody.actions.revertAria', 'Branch conversation only': 'chat.messageBody.actions.forkAria', 'Generate context summary': 'thread.message.summarize' };
-  return [...container.querySelectorAll<HTMLButtonElement>('button')].find(value => {
-    if (value.textContent === text || text === 'Continue child' && value.textContent === 'Send') return true;
+  const labels: Record<string, string> = { 'Resume run': 'chat.run.resume', 'Retry preparation': 'chat.run.retryPreparation', 'Save queued input': 'settings.common.actions.saveChanges', 'Read report': 'chat.children.report', 'Read execution report': 'chat.children.report', 'Stop child subtree': 'harness.threads.stop', 'Cancel queued input': 'chat.queuedMessage.removeAria', 'Restore before this message': 'chat.messageBody.actions.revertAria', 'Restore through this message': 'chat.messageBody.actions.revertAria', 'Branch conversation only': 'chat.messageBody.actions.forkAria', 'Generate context summary': 'thread.message.summarize', 'View image': 'chat.media.view', 'Stop task and children': 'harness.threads.stopAll' };
+  return [...document.querySelectorAll<HTMLButtonElement>('button')].find(value => {
+    if (value.textContent === text || value.textContent === labels[text] || text === 'Continue child' && value.textContent === 'Send') return true;
     if (!labels[text] || value.getAttribute('aria-label') !== labels[text]) return false;
-    if (text.startsWith('Restore ')) return value.closest('[data-message-role]')?.getAttribute('data-message-role') === (text.startsWith('Restore before') ? 'user' : 'assistant');
+    if (text.startsWith('Restore ')) return value.closest('[data-conversation-message-role]')?.getAttribute('data-conversation-message-role') === (text.startsWith('Restore before') ? 'user' : 'assistant');
     return true;
   })!;
 };
@@ -178,6 +200,23 @@ const choosePdfs = async (...files: File[]) => {
   });
 };
 const composerForm = () => container.querySelector<HTMLTextAreaElement>('[aria-label="Message thread"]')!.closest('form')!;
+
+it('waits for the original snapshot before choosing submit or enqueue for a restored draft', async () => {
+  const f = fixture(true);
+  let finish!: (snapshot: ThreadSnapshot) => void;
+  f.api.snapshot = vi.fn().mockImplementationOnce(() => new Promise(resolve => { finish = resolve; })).mockImplementation(async () => structuredClone(f.view));
+  const key = threadIdentityKey(threadHostKey(), identity);
+  useThreadDraftStore.getState().patch(key, { text: 'Restored draft', inputMode: 'boundary', model: { providerId: 'fixture-provider', modelId: 'fixture-model' } });
+  await act(async () => root.render(<ThreadConversation api={f.api} identity={identity} />));
+  expect(button('Send').disabled).toBe(true);
+  await submitForm(composerForm());
+  expect(f.submit).not.toHaveBeenCalled(); expect(f.enqueue).not.toHaveBeenCalled();
+  await act(async () => finish(structuredClone(f.view)));
+  expect(button('Queue message').disabled).toBe(false);
+  await submitForm(composerForm());
+  expect(f.enqueue).toHaveBeenCalledWith(expect.objectContaining({ text: 'Restored draft', mode: 'boundary' }));
+  expect(f.submit).not.toHaveBeenCalled();
+});
 
 it('sends a new conversation from its captured project workspace, independent of later navigation', async () => {
   const f = fixture();
@@ -232,14 +271,14 @@ it('selects a desired model during an active run and keeps its display until act
   expect(selectModel).toHaveBeenCalledOnce();
   expect(selectModel.mock.calls[0]![0]).toMatchObject({...identity,runId:'ui-run',model:{providerId:'replacement-provider',modelId:'replacement-model'}});
   expect(selector.value).toBe(JSON.stringify(['replacement-provider','replacement-model']));
-  expect(container.textContent).toContain('Applies to the next model request');
+  expect(container.textContent).toContain('chat.model.nextRequest');
   expect(f.view.activeRun?.configuration).toMatchObject({model:'fixture-model'});
   f.view.activeRun!.configuration = f.view.modelSelection.desired!.configuration;
   f.view.modelSelection.desired!.status = 'active';
   f.view.modelSelection.active = f.view.modelSelection.desired;
   await act(async()=>f.emit({cursor:1,subject:'ui-run',revision:2,kind:'run.model_activated',data:{}}));
   expect(selector.value).toBe(JSON.stringify(['replacement-provider','replacement-model']));
-  expect(container.textContent).not.toContain('Applies to the next model request');
+  expect(container.textContent).not.toContain('chat.model.nextRequest');
 });
 
 it('renders the composer and retries an uncertain send with the same request identity and text', async () => {
@@ -286,12 +325,13 @@ it('active-thread controls queue the chosen mode, save/cancel queued text, and s
   await edit('[aria-label="Message thread"]', 'new queued instructions');
   await submitForm(container.querySelector<HTMLTextAreaElement>('[aria-label="Message thread"]')!.closest('form')!);
   expect(f.enqueue).toHaveBeenCalledWith(expect.objectContaining({ ...identity, mode: 'interrupt', text: 'new queued instructions' }));
-  await edit('[aria-label="Edit queued input"]', 'edited queued text');
-  await submitForm(container.querySelector<HTMLTextAreaElement>('[aria-label="Edit queued input"]')!.closest('form')!);
+  await act(async () => container.querySelector<HTMLButtonElement>('button[aria-label="chat.queuedMessage.edit"]')!.click());
+  await edit('textarea[aria-label="chat.queuedMessage.edit"]', 'edited queued text');
+  await submitForm(container.querySelector<HTMLTextAreaElement>('textarea[aria-label="chat.queuedMessage.edit"]')!.closest('form')!);
   expect(f.editInput).toHaveBeenCalledWith('queued-existing', 3, 'edited queued text');
   await act(async () => { button('Cancel queued input').click(); });
   expect(f.cancelInput).toHaveBeenCalledWith('queued-existing', 4);
-  expect(container.querySelector('[aria-label="Edit queued input"]')).toBeNull();
+  expect(container.querySelector('textarea[aria-label="chat.queuedMessage.edit"]')).toBeNull();
   await act(async () => { button('Stop run').click(); });
   expect(f.cancelRun).toHaveBeenCalledWith('ui-run');
   expect(button('Stop run')).toBeUndefined();
@@ -325,12 +365,14 @@ it.each(['file-backed', 'source-free'] as const)('keeps the original report, wai
   const cancelTree = vi.fn(async () => ({ target: { kind: 'thread' as const, thread_id: identity.threadId }, cursor: 5, run_count: 2, child_count: 1, process_count: 1 }));
   f.api.collaboration = { integration: vi.fn(), continueChild: async () => { throw new Error('No continuation'); }, executions: async () => [], readExecutionReport: async () => { throw new Error('No report'); }, children: async () => [child], readReport, cancelWait: async () => { throw new Error('No wait'); }, cancelChild, cancelTree };
   await act(async () => { root.render(<ThreadConversation api={f.api} identity={identity} />); });
-  const resultLabel = sourceFree ? 'File result not applicable' : 'Report complete; file result waiting for writers and original receipts';
-  expect(container.textContent).toContain(resultLabel);
+  const assertFileResult = () => sourceFree
+    ? expect(container.textContent).not.toMatch(/chat.children.(filesPublished|noChanges|settling|filesUnavailable)/)
+    : expect(container.textContent).toContain('chat.children.settling');
+  assertFileResult();
   if (sourceFree) {
-    const card = container.querySelector('[aria-label="Child task"]')!;
-    expect(card.textContent).toContain('No file source');
-    expect(card.textContent).toContain('Report · failed');
+    const card = container.querySelector('[aria-label="harness.threads.title"]')!;
+    expect(card.textContent).toContain('harness.threads.state.failed');
+    expect(card.textContent).toContain('The original child report');
     expect(card.textContent).not.toMatch(/Private working copy|Read-only source|Preparing a stable source|No file changes|File result (pending|unavailable)/);
   }
   expect(container.textContent).toContain('Background operation · running · In progress · effect: unknown');
@@ -340,11 +382,11 @@ it.each(['file-backed', 'source-free'] as const)('keeps the original report, wai
   await act(async () => { button('Cancel observation wait').click(); });
   expect(cancelOperation).toHaveBeenCalledExactlyOnceWith(observation.id);
   expect(cancelChild).not.toHaveBeenCalled();
-  expect(container.textContent).toContain(resultLabel);
+  assertFileResult();
   await act(async () => { button('Stop child subtree').click(); });
   expect(cancelChild).toHaveBeenCalledExactlyOnceWith(identity, 'original-child');
   // A short admission ACK is not a process-stop or file-publication fact.
-  expect(container.textContent).toContain(resultLabel);
+  assertFileResult();
   expect(container.textContent).toContain('Background operation · running · In progress · effect: unknown');
   await act(async () => { button('Stop task and children').click(); });
   expect(cancelTree).toHaveBeenCalledExactlyOnceWith(identity);
@@ -774,6 +816,28 @@ it('loads earlier images under a pinned head while live controls continue, then 
   expect(container.textContent).not.toContain('oldest image message');
 });
 
+it('acknowledges only visible live history and waits to mark newer activity until returning from an earlier page', async () => {
+  const f = fixture(true);
+  f.view.thread.activity_cursor = 1;
+  f.view.historyPage = { head: 'head', previous: 'previous' };
+  f.api.historyPage = async () => ({ head: 'head', previous: null, items: [] });
+  const markRead = vi.spyOn(useThreadStore.getState(), 'markRead').mockResolvedValue(undefined);
+  Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'hidden' });
+  await act(async () => root.render(<ThreadConversation api={f.api} identity={identity} />));
+  expect(markRead).not.toHaveBeenCalled();
+  Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'visible' });
+  await act(async () => document.dispatchEvent(new window.Event('visibilitychange')));
+  expect(markRead).toHaveBeenLastCalledWith(identity.threadId, 1);
+  await act(async () => button('Load earlier history').click());
+  markRead.mockClear();
+  f.view.thread.activity_cursor = 2;
+  await act(async () => f.emit({ cursor: 2, subject: 'ui-run', revision: 2, kind: 'history.appended', data: {} }));
+  await act(async () => document.dispatchEvent(new window.Event('visibilitychange')));
+  expect(markRead).not.toHaveBeenCalled();
+  await act(async () => button('Return to latest view').click());
+  expect(markRead).toHaveBeenLastCalledWith(identity.threadId, 2);
+});
+
 it('discards an earlier-page response after the selected branch changes', async () => {
   const f = fixture();
   f.view.historyPage = { head: 'old-head', previous: 'old-cursor' };
@@ -790,7 +854,7 @@ it('discards an earlier-page response after the selected branch changes', async 
   await act(async () => { resolvePage({ head: 'old-head', previous: null, items: [{ id: 'old-message', thread_id: identity.threadId, run_id: 'ui-run', parent: null, source: 'user', content: { text: 'history from the previous branch' }, provider: null }] }); });
   expect(container.textContent).not.toContain('history from the previous branch');
   expect(container.textContent).not.toContain('Viewing saved history');
-  expect(container.textContent).not.toContain('Loading earlier history');
+  expect([...container.querySelectorAll('button')].filter(value => !value.closest('[inert]')).map(value => value.textContent)).not.toContain('Loading earlier history');
 });
 
 it('retries a conversation fork with the same request key and opens only the accepted branch', async () => {
@@ -953,8 +1017,9 @@ it('projects frozen skill metadata separately from original history and editable
     input.revision = revision + 1; input.content = { text: edited, attachments }; return input;
   });
   await act(async () => root.render(<ThreadConversation api={f.api} identity={identity} />));
+  await act(async () => container.querySelector<HTMLButtonElement>('button[aria-label="chat.queuedMessage.edit"]')!.click());
   const history = container.querySelector('article')!;
-  const queued = () => container.querySelector<HTMLTextAreaElement>('[aria-label="Edit queued input"]')!;
+  const queued = () => container.querySelector<HTMLTextAreaElement>('textarea[aria-label="chat.queuedMessage.edit"]')!;
   for (const metadata of container.querySelectorAll('[aria-label="Skill materials"]')) {
     expect(metadata.textContent).toContain(invocation.name);
     expect(metadata.textContent).toContain(invocation.reference.version);
@@ -963,19 +1028,21 @@ it('projects frozen skill metadata separately from original history and editable
   }
   expect(container.querySelectorAll('[aria-label="Skill materials"]')).toHaveLength(2);
   expect(history.textContent).toContain(text);
-  expect(queued().defaultValue).toBe(text);
-  await act(async () => [...history.querySelectorAll('button')].find(value => value.textContent === 'View image')!.click());
+  expect(queued().value).toBe(text);
+  await act(async () => [...history.querySelectorAll('button')].find(value => value.textContent === 'chat.media.view')!.click());
   expect(history.querySelector('img')?.getAttribute('src')).toBe('blob:test-image');
   expect(container.textContent).not.toContain(invocation.body);
   expect(container.textContent).not.toContain('Private skill body');
 
   const edited = 'Ordinary queued instructions\nwith exact spacing.  ';
-  await edit('[aria-label="Edit queued input"]', edited);
+  await edit('textarea[aria-label="chat.queuedMessage.edit"]', edited);
   await submitForm(queued().closest('form')!);
   expect(f.editInput).toHaveBeenCalledExactlyOnceWith('skill-queued', 1, edited);
-  expect(queued().defaultValue).toBe(edited);
+  expect(queued()).toBeNull();
+  await act(async () => container.querySelector<HTMLButtonElement>('button[aria-label="chat.queuedMessage.edit"]')!.click());
+  expect(queued().value).toBe(edited);
   expect(queued().closest('form')?.querySelector('[aria-label="Skill materials"]')).toBeNull();
-  await act(async () => [...queued().closest('form')!.querySelectorAll('button')].find(value => value.textContent === 'View image')!.click());
+  await act(async () => [...queued().closest('form')!.querySelectorAll('button')].find(value => value.textContent === 'chat.media.view')!.click());
   expect(queued().closest('form')?.querySelector('img')?.getAttribute('src')).toBe('blob:test-image');
   expect(f.api.mediaRead).toHaveBeenLastCalledWith(expect.objectContaining({ holder: { kind: 'input', inputId: 'skill-queued', expectedRevision: 2 }, expectedContentRef: storedImage.content_ref.content_object }), expect.any(AbortSignal));
   expect(history.querySelector('[aria-label="Skill materials"]')).not.toBeNull();
@@ -1037,6 +1104,7 @@ it('retries summary generation without duplicating the job and applies its compl
   const f = fixture();
   f.view.history = [{ id: 'summary-cut', thread_id: identity.threadId, run_id: 'ui-run', parent: null, source: 'user', content: { text: 'original full message' }, provider: null }];
   f.view.historyPage = { head: 'summary-cut', previous: null };
+  f.view.thread.branches[0]!.head = 'summary-cut';
   const run = { ...initialSnapshot(true).activeRun!, id: 'summary-run', state: 'completed' as const };
   const compact = vi.fn<ThreadsAPI['compact']>().mockRejectedValueOnce(new Error('uncertain summary acceptance')).mockImplementation(async input => {
     const job = { compaction: { producer: { kind: 'builtin' as const, name: 'fold' as const, version: '1' as const }, kind: 'model_plan' as const, sourceCutHash: 'fixture-cut', planHash: 'fixture-plan' }, request: { compaction: null, summary_recipe: { strategy: { kind: 'builtin' as const, name: 'manual', version: '1' }, mode: 'manual' as const, configurationIdentity: null, additionalInstructions: null }, key: input.key, branch_id: input.branchId, through_id: input.throughId, expected_revision: input.expectedRevision, effective_system_prompt: '', instruction_sources: [], memory_checkpoint: null }, receipt: { thread_id: 'context-job-thread:fixture', branch_id: 'context-job-branch:fixture', run_id: run.id, input_id: 'summary-input', cursor: 2 } };
@@ -1144,13 +1212,13 @@ it('answers a policy-node question explicitly, keeps the draft on failure and di
   await act(async () => { button('Option B').click(); });
   expect(answer).not.toHaveBeenCalled();
   await edit('[aria-label="chat.questionCard.yourAnswer"]', 'Option B with detail');
-  await submitForm(container.querySelector<HTMLFormElement>('form[aria-label="chat.questionCard.inputNeeded"]')!);
-  expect(container.querySelector<HTMLTextAreaElement>('[aria-label="chat.questionCard.yourAnswer"]')!.value).toBe('Option B with detail');
+  await submitForm(document.querySelector<HTMLFormElement>('form[aria-label="chat.questionCard.inputNeeded"]')!);
+  expect(document.querySelector<HTMLTextAreaElement>('[aria-label="chat.questionCard.yourAnswer"]')!.value).toBe('Option B with detail');
   expect(container.textContent).toContain('uncertain answer acceptance');
-  await submitForm(container.querySelector<HTMLFormElement>('form[aria-label="chat.questionCard.inputNeeded"]')!);
+  await submitForm(document.querySelector<HTMLFormElement>('form[aria-label="chat.questionCard.inputNeeded"]')!);
   expect(answer.mock.calls[0]![0]).toEqual({ ...identity, operationId: operation.id, answer: 'Option B with detail' });
   expect(answer.mock.calls[1]![0]).toEqual(answer.mock.calls[0]![0]);
-  expect(container.querySelector('form[aria-label="chat.questionCard.inputNeeded"]')).toBeNull();
+  expect(document.querySelector('form[aria-label="chat.questionCard.inputNeeded"]')).toBeNull();
   expect(answer).toHaveBeenCalledTimes(2);
 });
 
@@ -1166,9 +1234,9 @@ it('keeps a sibling branch question non-actionable while viewing an earlier conv
   await act(async () => { root.render(<ThreadConversation api={f.api} identity={fork} />); });
   expect(button('Proceed').disabled).toBe(true);
   expect(button('chat.questionCard.submit').disabled).toBe(true);
-  expect(container.querySelector<HTMLTextAreaElement>('[aria-label="chat.questionCard.yourAnswer"]')!.disabled).toBe(true);
+  expect(document.querySelector<HTMLTextAreaElement>('[aria-label="chat.questionCard.yourAnswer"]')!.disabled).toBe(true);
   expect(button('Cancel operation')).toBeUndefined();
-  await submitForm(container.querySelector<HTMLFormElement>('form[aria-label="chat.questionCard.inputNeeded"]')!);
+  await submitForm(document.querySelector<HTMLFormElement>('form[aria-label="chat.questionCard.inputNeeded"]')!);
   expect(answer).not.toHaveBeenCalled(); expect(cancel).not.toHaveBeenCalled();
 });
 
@@ -1457,7 +1525,8 @@ it.each(['file-backed', 'source-free'] as const)('continues a completed %s child
     readReport: unused, cancelChild: unused, cancelWait: unused, cancelTree };
   await act(async () => { root.render(<ThreadConversation api={f.api} identity={identity} />); });
   expect(container.querySelector<HTMLSelectElement>('[aria-label="Registered model"]')?.disabled).toBe(true);
-  expect(container.textContent).toContain(sourceFree ? 'File result not applicable' : 'old-publication');
+  if (sourceFree) expect(container.textContent).not.toContain('chat.children.filesPublished');
+  else expect(container.textContent).toContain('chat.children.filesPublished');
   await edit('[aria-label="Message thread"]', 'Keep the next user instruction');
   await choosePdfs(pdfFile('child.pdf'));
   const form = container.querySelector<HTMLTextAreaElement>('[aria-label="Message thread"]')!.closest('form')!;
@@ -1472,13 +1541,13 @@ it.each(['file-backed', 'source-free'] as const)('continues a completed %s child
   expect(continueChild.mock.calls[0]![0]).not.toHaveProperty('model');
   expect(f.submit).not.toHaveBeenCalled(); expect(f.enqueue).not.toHaveBeenCalled();
   expect(container.textContent).toContain('Original report stays fixed');
-  expect(container.textContent).toContain('User continuation');
+  expect(container.textContent).toContain('chat.children.trigger.user');
   if (sourceFree) {
-    const executions = container.querySelector('[aria-label="Delegated executions"]')!;
-    expect(executions.textContent).toContain('No file source');
+    const executions = container;
+    expect(executions.textContent).not.toContain('chat.children.settling');
     expect(executions.textContent).not.toMatch(/File result: (pending|not_applicable)|No file changes|File result unavailable/);
-    expect(executions.textContent).toContain('User continuation · preparing');
-    expect(executions.textContent).toContain('Run: Not admitted yet');
+    expect(executions.textContent).toContain('chat.children.trigger.user');
+    expect(executions.textContent).toContain('harness.threads.state.starting');
     expect(button('Continue child').disabled).toBe(true);
   }
   await act(async () => { button('Read execution report').click(); });
@@ -1486,7 +1555,7 @@ it.each(['file-backed', 'source-free'] as const)('continues a completed %s child
   expect(container.textContent).toContain('old evidence');
   await act(async () => button('View image').click());
   expect(f.api.mediaRead).toHaveBeenCalledWith(expect.objectContaining({ holder: { kind: 'child_report', operationId: 'original-dispatch', executionId: 'old-execution', itemId: 'old-report' }, partIndex: 1 }), expect.any(AbortSignal));
-  expect(container.querySelector('[aria-label="Child report"] img')?.getAttribute('src')).toBe('blob:test-image');
+  expect(container.querySelector('[aria-label="chat.children.report"] img')?.getAttribute('src')).toBe('blob:test-image');
   expect(f.view.activeRun).toBeNull();
   await act(async () => { button('Stop task and children').click(); });
   expect(cancelTree).toHaveBeenCalledExactlyOnceWith(identity);
@@ -2365,8 +2434,9 @@ it('keeps stored images for a text edit, explicitly removes them with [], and re
   const editInput = vi.fn<ThreadsAPI['editInput']>(async (_id, _revision, _text, _images) => { throw new Error('Uncertain edit reply'); });
   f.api.editInput = editInput;
   await act(async () => root.render(<ThreadConversation api={f.api} identity={identity} />));
-  const form = () => container.querySelector('[aria-label="Edit queued input"]')!.closest('form')!;
-  await edit('[aria-label="Edit queued input"]', 'changed text');
+  await act(async () => container.querySelector<HTMLButtonElement>('button[aria-label="chat.queuedMessage.edit"]')!.click());
+  const form = () => container.querySelector('textarea[aria-label="chat.queuedMessage.edit"]')!.closest('form')!;
+  await edit('textarea[aria-label="chat.queuedMessage.edit"]', 'changed text');
   await submitForm(form());
   expect(editInput).toHaveBeenLastCalledWith('image-queue', 1, 'changed text');
   await act(async () => button('Remove queued images').click());
@@ -2398,7 +2468,7 @@ it('reads actual operation completion, result and external receipt images throug
   await act(async () => root.render(<ThreadConversation api={f.api} identity={identity} />));
   expect(f.api.mediaRead).not.toHaveBeenCalled();
   expect(container.textContent).toContain('failed'); expect(container.textContent).toContain('partial');
-  for (const view of [...container.querySelectorAll<HTMLButtonElement>('button')].filter(value => value.textContent === 'View image')) {
+  for (const view of [...document.querySelectorAll<HTMLButtonElement>('button')].filter(value => value.textContent === 'chat.media.view')) {
     await act(async () => view.click());
   }
   expect(vi.mocked(f.api.mediaRead).mock.calls.map(([input]) => input.holder)).toEqual(['completion', 'result', 'external_receipt'].map(output => ({ kind: 'operation', operationId: 'media-operation', output })));
@@ -2599,7 +2669,7 @@ it('projects original MCP interaction events onto idle Task requests without act
   expect(f.submit).not.toHaveBeenCalled(); expect(f.enqueue).not.toHaveBeenCalled();
   const other = { ...identity, branchId: 'branch:other' };
   await act(async () => root.render(<ThreadConversation api={f.api} identity={other} />));
-  expect(container.querySelector('[aria-label="MCP request request:server"]')).toBeNull();
+  expect([...container.querySelectorAll('[aria-label="MCP request request:server"]')].filter(element => !element.closest('[inert]'))).toHaveLength(0);
   expect(f.api.respondMcpInteraction).toHaveBeenCalledOnce();
 });
 
@@ -2835,7 +2905,9 @@ it('thread recovery retains assistant content and current draft while respecting
   const f = navigationFixture();
   await act(async () => root.render(<ThreadConversation api={f.api} identity={identity} />));
   await edit('[aria-label="Message thread"]', 'Keep this draft');
-  await act(async () => button('Restore through this message').click());
+  await act(async () => button('Open conversation history').click());
+  const assistant = [...container.querySelectorAll<HTMLButtonElement>('[role="option"]')].find(value => value.textContent?.includes('Retained assistant answer'))!;
+  await act(async () => assistant.dispatchEvent(new window.Event('dblclick', { bubbles: true })));
   expect(f.prepareNavigation).toHaveBeenCalledWith({ ...identity, entryId: f.assistant.id });
   expect(container.querySelectorAll('article')).toHaveLength(1);
   expect(container.textContent).toContain('Retained assistant answer');
@@ -2929,10 +3001,10 @@ it('thread recovery previews the exact dirty buffer and cancels the unused file 
   await act(async () => button('Restore before this message').click());
   expect(container.textContent).toContain('result.txt: Unsaved editor');
   expect(container.textContent).toContain('They are preserved for undo');
-  const combined = [...container.querySelectorAll<HTMLButtonElement>('button')].find(item => item.textContent?.includes('settings.varin.recovery.preference.both.label'))!;
+  const combined = [...document.querySelectorAll<HTMLButtonElement>('button')].find(item => item.textContent?.includes('settings.varin.recovery.preference.both.label'))!;
   expect(combined.disabled).toBe(false);
   expect(recovery.applyCombinedRecovery).not.toHaveBeenCalled();
-  const conversation = [...container.querySelectorAll<HTMLButtonElement>('button')].find(item => item.textContent?.includes('settings.varin.recovery.preference.conversation.label'))!;
+  const conversation = [...document.querySelectorAll<HTMLButtonElement>('button')].find(item => item.textContent?.includes('settings.varin.recovery.preference.conversation.label'))!;
   await act(async () => conversation.click());
   expect(recovery.cancelCombinedOperation).toHaveBeenCalledWith('original-recovery');
   expect(recovery.applyCombinedRecovery).not.toHaveBeenCalled(); expect(f.navigate).toHaveBeenCalledOnce();
@@ -2972,10 +3044,10 @@ it('thread recovery freezes a confirmed conflict acknowledgement and observes th
   await act(async () => root.render(<ThreadConversation api={f.api} identity={identity} />));
   await act(async () => button('Restore before this message').click());
   expect(container.textContent).toContain('shell.txt');
-  const apply = [...container.querySelectorAll<HTMLButtonElement>('button')].find(item => item.textContent?.includes('settings.varin.recovery.preference.both.label'))!;
+  const apply = [...document.querySelectorAll<HTMLButtonElement>('button')].find(item => item.textContent?.includes('settings.varin.recovery.preference.both.label'))!;
   await act(async () => apply.click());
   expect(recovery.applyCombinedRecovery).toHaveBeenCalledWith({ operationId: recovery.plan.id, expectedRevision: recovery.plan.revision, conflictPolicy: 'overwrite-confirmed', confirmedConflicts: [{ path: 'result.txt', fingerprint: 'external-revision' }] });
-  const conversation = [...container.querySelectorAll<HTMLButtonElement>('button')].find(item => item.textContent?.includes('settings.varin.recovery.preference.conversation.label'))!;
+  const conversation = [...document.querySelectorAll<HTMLButtonElement>('button')].find(item => item.textContent?.includes('settings.varin.recovery.preference.conversation.label'))!;
   expect(conversation.disabled).toBe(true);
   await act(async () => button('sessions.sidebar.dialogs.cancel').click());
   expect(container.querySelector('[role="dialog"]')).toBeNull();
@@ -2990,7 +3062,7 @@ it('thread recovery refuses conversation-only navigation when cancellation of it
   recovery.cancelCombinedOperation.mockRejectedValueOnce(new Error('Cancellation unconfirmed'));
   await act(async () => root.render(<ThreadConversation api={f.api} identity={identity} />));
   await act(async () => button('Restore before this message').click());
-  const conversation = [...container.querySelectorAll<HTMLButtonElement>('button')].find(item => item.textContent?.includes('settings.varin.recovery.preference.conversation.label'))!;
+  const conversation = [...document.querySelectorAll<HTMLButtonElement>('button')].find(item => item.textContent?.includes('settings.varin.recovery.preference.conversation.label'))!;
   await act(async () => conversation.click());
   expect(f.navigate).not.toHaveBeenCalled(); expect(recovery.applyCombinedRecovery).not.toHaveBeenCalled();
   expect(container.textContent).toContain('Cancellation unconfirmed');
@@ -3001,7 +3073,7 @@ it('thread recovery keeps an uncertain conversation-only choice after its file d
   f.navigate.mockRejectedValueOnce(new Error('Navigation response lost'));
   await act(async () => root.render(<ThreadConversation api={f.api} identity={identity} />));
   await act(async () => button('Restore before this message').click());
-  const conversation = [...container.querySelectorAll<HTMLButtonElement>('button')].find(item => item.textContent?.includes('settings.varin.recovery.preference.conversation.label'))!;
+  const conversation = [...document.querySelectorAll<HTMLButtonElement>('button')].find(item => item.textContent?.includes('settings.varin.recovery.preference.conversation.label'))!;
   await act(async () => conversation.click());
   expect(container.querySelector('[role="dialog"]')).toBeNull();
   expect(button('Retry conversation recovery')).toBeDefined(); expect(button('Send').disabled).toBe(true);
@@ -3016,7 +3088,7 @@ it('thread recovery runs one combined action for repeated modal clicks and survi
   await act(async () => root.render(<React.StrictMode><ThreadConversation api={f.api} identity={identity} /></React.StrictMode>));
   await act(async () => button('Restore before this message').click());
   expect(recovery.cancelCombinedOperation).not.toHaveBeenCalled();
-  const apply = [...container.querySelectorAll<HTMLButtonElement>('button')].find(item => item.textContent?.includes('settings.varin.recovery.preference.both.label'))!;
+  const apply = [...document.querySelectorAll<HTMLButtonElement>('button')].find(item => item.textContent?.includes('settings.varin.recovery.preference.both.label'))!;
   await act(async () => { apply.click(); apply.click(); });
   expect(recovery.applyCombinedRecovery).toHaveBeenCalledOnce();
   await act(async () => resolve({ status: 'ready', operation: recovery.operation }));
@@ -3143,7 +3215,7 @@ it('keeps an unavailable managed file owner explicit and preserves conversation-
   await act(async () => button('Restore before this message').click());
   expect(recovery.prepareCombinedRecovery).toHaveBeenCalledWith({ workspaceId: 'same-path-on-b', conversation: { kind: 'thread', threadId: identity.threadId, branchId: identity.branchId }, entryId: f.user.id }); expect(f.navigate).not.toHaveBeenCalled();
   expect(container.textContent).toContain('Original file Host is offline');
-  const conversation = [...container.querySelectorAll<HTMLButtonElement>('button')].find(item => item.textContent?.includes('Restore conversation only'));
+  const conversation = [...document.querySelectorAll<HTMLButtonElement>('button')].find(item => item.textContent?.includes('Restore conversation only'));
   expect(conversation).toBeDefined();
   await act(async () => conversation!.click());
   expect(f.navigate).toHaveBeenCalledOnce(); expect(recovery.prepareCombinedRecovery).toHaveBeenCalledOnce(); expect(recovery.applyCombinedRecovery).not.toHaveBeenCalled();

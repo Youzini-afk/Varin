@@ -331,7 +331,7 @@ export const ChatTimeline: React.FC<ChatTimelineProps> = (props) => {
       const readingLine = viewport.getBoundingClientRect().top + CHAT_TIMELINE_ANCHOR_OFFSET_PX;
       for (const message of element.querySelectorAll<HTMLElement>('[data-conversation-message-role]')) {
         if (message.getBoundingClientRect().top > readingLine) break;
-        if (message.dataset.chatMessageRole === 'user' || message.dataset.chatMessageRole === 'assistant') role = message.dataset.chatMessageRole;
+        if (message.dataset.conversationMessageRole === 'user' || message.dataset.conversationMessageRole === 'assistant') role = message.dataset.conversationMessageRole;
       }
     }
     turnNavigatorRef.current?.setVisibleIndex(index, role);

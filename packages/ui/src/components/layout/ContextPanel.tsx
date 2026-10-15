@@ -1663,7 +1663,7 @@ export const ContextPanel: React.FC = () => {
   }), [activeModeTabs, effectiveDirectory, sessionTitleById, t]);
 
   const activeNonChatContent = activeTab?.mode === 'context'
-        ? <ContextPanelContent />
+        ? <ContextPanelContent active={isOpen} />
         : activeTab?.mode === 'threads'
             ? <ThreadFamilyPanel />
         : activeTab?.mode === 'recovery'

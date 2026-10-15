@@ -277,7 +277,7 @@ const ChatToolDisclosure: React.FC<{
 
 function toolStatus(result: ChatToolResultMessage | undefined, execution: ChatToolExecutionState | undefined): ChatToolExecutionState['status'] {
   if (result?.status === 'background') return execution && execution.status !== 'running' ? execution.status : 'background';
-  return result ? result.status ?? (result.isError ? 'error' : 'success') : execution?.status ?? 'running';
+  return result ? result.status ?? (result.isError ? 'error' : 'success') : execution?.status ?? 'unknown';
 }
 
 const ChatToolStatus: React.FC<{ status: ChatToolExecutionState['status'] }> = ({ status }) => {
