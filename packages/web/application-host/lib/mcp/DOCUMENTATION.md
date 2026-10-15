@@ -32,6 +32,9 @@ never splices one source's command or URL with another source's credentials. `mc
 enablement/exposure overrides separately. Project configuration cannot select a user model account.
 
 Settings show actual source and state, save the selected original file and check its revision.
+The structured editor creates complete HTTP or stdio definitions; independent inherited overrides belong
+in `mcpPolicies` through the raw configuration editor. Closing a settings view releases only its own
+connection holders and sign-in flows. Failed or cancelled initial preparation releases the undisclosed view.
 Malformed sources keep their last valid snapshot and report an error; invalid individual entries
 do not disable independent valid servers. Actual source removal and explicit disablement have their
 own withdrawal semantics. Reads never clear or rewrite a bad file. The common project-trust reader

@@ -5,6 +5,7 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { ThreadRequestError, type ThreadIdentity, type ThreadsAPI } from '@varin/application-client';
 import type { McpInteractionItem, McpInteractionView } from '@varin/protocol';
 import { openExternalUrl } from '@/lib/url';
+import { I18nProvider } from '@/lib/i18n';
 import { ThreadMcpInteractions } from './ThreadMcpInteraction';
 
 vi.mock('@/lib/url', () => ({ openExternalUrl: vi.fn(async () => false) }));
@@ -63,7 +64,7 @@ const choose = async (value: string) => {
   const element = container.querySelector<HTMLSelectElement>('[aria-label="Choice"]')!;
   await act(async () => { Object.defineProperty(element, 'value', { configurable: true, writable: true, value }); element.dispatchEvent(new window.Event('change', { bubbles: true })); });
 };
-const render = async (api: API, cursor = 0) => { await act(async () => { root.render(<ThreadMcpInteractions api={api} identity={identity} eventCursor={cursor} />); }); };
+const render = async (api: API, cursor = 0) => { await act(async () => { root.render(<I18nProvider><ThreadMcpInteractions api={api} identity={identity} eventCursor={cursor} /></I18nProvider>); }); };
 
 it('renders owner fields as plain server text and sends false, zero, empty strings and arrays only after an explicit choice', async () => {
   const f = fixture(); await render(f.api);
@@ -110,7 +111,7 @@ it.each(['decline', 'cancel'] as const)('keeps %s distinct from acceptance and s
   expect(f.api.respondMcpInteraction.mock.calls[0]![0].response).toEqual({ action });
   f.set({ ...makeView(), record: { ...makeView().record, availability: 'connection_lost', revision: 3 } });
   await render(f.api, 10);
-  expect(container.textContent).toContain('Answered or closed requests');
+  expect(container.textContent).toContain('Closed requests');
   expect(button('Accept').disabled).toBe(true);
   await submit(); expect(f.api.respondMcpInteraction).toHaveBeenCalledOnce();
 });
@@ -150,7 +151,7 @@ it('opens only the exact displayed URL on a click and keeps opening, acceptance,
 it('replaces pages instead of loading all history and never sends cancellation when the view closes', async () => {
   const f = fixture(); const closed = { ...makeView(), record: { ...makeView().record, id: 'historical', availability: 'rpc_closed' as const } };
   f.api.listMcpInteractions.mockImplementation(async input => input.cursor ? { items: [item(closed)], nextCursor: null } : { items: [item(f.get())], nextCursor: 'opaque:next' });
-  await render(f.api); await click('More requests');
+  await render(f.api); await click('Earlier requests');
   expect(f.api.listMcpInteractions.mock.calls[1]![0]).toEqual({ ...identity, cursor: 'opaque:next', limit: 20 });
   expect(container.querySelector('[aria-label="MCP request elicitation:first"]')).toBeNull();
   expect(container.querySelector('[aria-label="MCP request historical"]')).not.toBeNull();

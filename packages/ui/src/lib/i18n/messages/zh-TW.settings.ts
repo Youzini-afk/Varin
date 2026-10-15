@@ -1,4 +1,6 @@
 export const settingsDict = {
+  "settings.models.discoveryHint": "先儲存連線設定再取得模型。取得結果只有在選取並儲存後才會加入模型清單。",
+  "settings.varin.mcp.structured.transport.unconfigured": "選擇傳輸方式",
   "assistant.scope.thread": "對話執行緒",
   "settings.projectTrust.title": "專案信任",
   "settings.projectTrust.trusted": "已信任",

@@ -9,7 +9,7 @@ import { NumberInput } from '@/components/ui/number-input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue, } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
 import { useI18n } from '@/lib/i18n';
-import { mcpServerTransport, mcpSourceBooleanState, parseMcpConfigObject, removeMcpConfigValue, setMcpConfigValue, switchMcpServerTransport, type McpServerTransportMode, } from './mcp-config-model';
+import { mcpServerTransport, mcpSourceBooleanState, parseMcpConfigObject, removeMcpConfigValue, setMcpConfigValue, switchMcpServerTransport, } from './mcp-config-model';
 interface McpStructuredConfigEditorProps {
     project?: boolean;
     content: string;
@@ -129,8 +129,7 @@ const SourceStringListField: React.FC<SourceFieldProps & {
       <Textarea value={values.join('\n')} disabled={disabled} aria-label={label} placeholder={placeholder} onChange={(event) => {
             const next = event.target.value
                 .split(/\r?\n/)
-                .map((entry) => entry.trim())
-                .filter(Boolean);
+                .filter(entry => entry.length > 0);
             if (next.length > 0)
                 onSet(path, next);
             else
@@ -306,18 +305,9 @@ export const McpStructuredConfigEditor: React.FC<McpStructuredConfigEditorProps>
             onCreatedServerNameChange?.(null);
         }
     };
-    const selectTransport = (next: McpServerTransportMode): void => {
-        if (!selectedName)
-            return;
-        let updated = switchMcpServerTransport(content, selectedName, next);
-        updated = next === 'unconfigured'
-            ? removeMcpConfigValue(updated, [...serverPath, 'type'])
-            : setMcpConfigValue(updated, [...serverPath, 'type'], next);
-        if (next === 'unconfigured') {
-            for (const field of ['timeout', 'description'])
-                updated = removeMcpConfigValue(updated, [...serverPath, field]);
-        }
-        onChange(updated);
+    const selectTransport = (next: string): void => {
+        if (!selectedName || (next !== 'stdio' && next !== 'http')) return;
+        onChange(switchMcpServerTransport(content, selectedName, next));
     };
     const setUrl = (url: string): void => { if (selectedName) setValue([...serverPath, 'url'], url); };
     return (<div className="space-y-5">
@@ -349,16 +339,16 @@ export const McpStructuredConfigEditor: React.FC<McpStructuredConfigEditorProps>
                 <SelectTrigger size="settings" className={SETTINGS_SELECT_ROW_TRIGGER_CLASS} aria-label={text('settings.varin.mcp.structured.transport')}>
                   <SelectValue>
                     {text(`settings.varin.mcp.structured.transport.${transport === 'unconfigured'
-                    ? 'inherited'
+                    ? 'unconfigured'
                     : transport === 'stdio'
                         ? 'localCommand'
                         : 'http'}`)}
                   </SelectValue>
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="unconfigured">
-                    {text('settings.varin.mcp.structured.transport.inherited')}
-                  </SelectItem>
+                  {transport === 'unconfigured' ? <SelectItem value="unconfigured" disabled>
+                    {text('settings.varin.mcp.structured.transport.unconfigured')}
+                  </SelectItem> : null}
                   <SelectItem value="stdio">
                     {text('settings.varin.mcp.structured.transport.localCommand')}
                   </SelectItem>

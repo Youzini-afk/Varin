@@ -5,8 +5,9 @@ import { afterEach, beforeEach, expect, test, vi } from 'vitest';
 import type { ModelChannel, ModelConnectionsSnapshot } from '@varin/application-client';
 import { ModelConnectionsPage } from './ModelConnectionsPage';
 
-const fixtures = vi.hoisted(() => ({ generation: 1, listeners: new Set<() => void>(), api: { read: vi.fn(), save: vi.fn(), cancelAuthorization: vi.fn() } }));
+const fixtures = vi.hoisted(() => ({ generation: 1, listeners: new Set<() => void>(), blockers: new Set<() => Promise<void>>(), api: { read: vi.fn(), save: vi.fn(), cancelAuthorization: vi.fn(), storeCredential: vi.fn(), discover: vi.fn(), signIn: vi.fn(), authorization: vi.fn() } }));
 vi.mock('@varin/application-client', () => ({
+  registerRuntimeEndpointSwitchBlocker: (listener: () => Promise<void>) => { fixtures.blockers.add(listener); return () => fixtures.blockers.delete(listener); },
   createModelConnectionsHttpAPI: () => ({ ...fixtures.api }),
   getRuntimeEndpointGeneration: () => fixtures.generation,
   subscribeRuntimeEndpointChanged: (listener: () => void) => { fixtures.listeners.add(listener); return () => fixtures.listeners.delete(listener); },
@@ -29,7 +30,8 @@ vi.mock('@/components/ui/select', () => ({
 
 let root: Root; let container: HTMLDivElement; let snapshot: ModelConnectionsSnapshot;
 beforeEach(() => {
-  fixtures.generation = 1; fixtures.listeners.clear(); vi.clearAllMocks();
+  fixtures.generation = 1; fixtures.listeners.clear(); fixtures.blockers.clear(); vi.resetAllMocks();
+  fixtures.api.cancelAuthorization.mockResolvedValue(undefined); fixtures.api.storeCredential.mockResolvedValue({ reference: 'stored' }); fixtures.api.discover.mockResolvedValue({ models: [{ id: 'discovered', name: 'Discovered', operations: ['embedding'] }] });
   const { document, window } = parseHTML('<!doctype html><html><body></body></html>');
   vi.stubGlobal('document', document); vi.stubGlobal('window', window); vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
   container = document.createElement('div'); document.body.append(container); root = createRoot(container);
@@ -98,4 +100,97 @@ test('workload identity fields save explicit Host configuration and discard inte
   await act(async () => { fixtures.generation += 1; fixtures.listeners.forEach(listener => listener()); });
   expect(container.querySelector(`[aria-label="${label('identityTokenFile')}"]`)).toBeNull();
   expect(fixtures.api.save).toHaveBeenCalledTimes(2);
+});
+
+
+test('changing authentication discards an entered key instead of overriding the selected source on save', async () => {
+  snapshot.types[0]!.authentication = ['credential', 'environment', 'none'];
+  snapshot.channels[0]!.authentication = { kind: 'credential', reference: 'original' };
+  await open();
+  await edit('settings.models.apiKey', 'unsaved-key');
+  await select('credential', 'environment');
+  await edit('settings.models.environment', 'MODEL_KEY');
+  await click('settings.models.save');
+  expect(fixtures.api.storeCredential).not.toHaveBeenCalled();
+  expect(fixtures.api.save.mock.calls[0]?.[0].authentication).toEqual({ kind: 'environment', variable: 'MODEL_KEY' });
+  await select('environment', 'credential');
+  expect((container.querySelector('[aria-label="settings.models.apiKey"]') as HTMLInputElement).value).toBe('');
+});
+
+test('changing channel type clears an entered credential belonging to the old type', async () => {
+  snapshot.types[0]!.authentication = ['credential', 'none'];
+  snapshot.channels[0]!.authentication = { kind: 'credential', reference: 'original' };
+  snapshot.types.push({ ...snapshot.types[0]!, id: 'replacement', name: 'Replacement', authentication: ['none'] });
+  await open(); await edit('settings.models.apiKey', 'old-type-key'); await select('local', 'replacement');
+  await click('settings.models.save');
+  expect(fixtures.api.storeCredential).not.toHaveBeenCalled();
+  expect(fixtures.api.save.mock.calls[0]?.[0].authentication).toEqual({ kind: 'none' });
+});
+
+test('discovery requires the displayed connection to be saved, and adds candidates only to the draft', async () => {
+  snapshot.types[0]!.discovery = true;
+  await open(); await edit('settings.models.endpoint', 'http://localhost/new');
+  expect(button('settings.models.discover').disabled).toBe(true);
+  await click('settings.models.save'); expect(button('settings.models.discover').disabled).toBe(false);
+  await click('settings.models.discover'); expect(fixtures.api.discover).toHaveBeenCalledWith('channel');
+  expect(fixtures.api.save).toHaveBeenCalledTimes(1);
+  await click('Discovered +'); expect(fixtures.api.save).toHaveBeenCalledTimes(1);
+  await click('settings.models.save');
+  expect(fixtures.api.save.mock.calls[1]?.[0].models).toEqual([{ id: 'discovered', name: 'Discovered', enabled: true, operations: ['embedding'] }]);
+});
+
+test('contributed catalog candidates are available without discovery and retain declared capabilities', async () => {
+  const candidate = { id: 'catalog', name: 'Catalog', enabled: true, operations: ['chat'] as const, contextWindow: 32000, maxOutputTokens: 2000, input: ['text', 'image'] as const };
+  snapshot.types[0]!.catalog = [{ ...candidate, operations: [...candidate.operations], input: [...candidate.input] }];
+  await open(); await click('Catalog +');
+  expect(fixtures.api.save).not.toHaveBeenCalled(); expect(fixtures.api.discover).not.toHaveBeenCalled();
+  await click('settings.models.save'); expect(fixtures.api.save.mock.calls[0]?.[0].models).toEqual([candidate]);
+});
+
+test('a late save failure from the previous Host cannot poison the new editor', async () => {
+  let reject!: (reason: Error) => void;
+  fixtures.api.save.mockImplementationOnce(() => new Promise((_resolve, fail) => { reject = fail; }));
+  await open(); await click('settings.models.save');
+  await act(async () => { fixtures.generation += 1; fixtures.listeners.forEach(listener => listener()); });
+  await click('Connection');
+  await act(async () => reject(new Error('old-host-error')));
+  expect(container.textContent).not.toContain('old-host-error');
+  expect(button('settings.models.save').disabled).toBe(false);
+});
+
+test('Host switching waits for an in-flight sign-in handle and cancels it on the original owner', async () => {
+  snapshot.channels[0]!.authentication = { kind: 'credential', reference: 'original' };
+  snapshot.types[0]!.authentication = ['credential']; snapshot.types[0]!.oauthProviders = [{ id: 'oauth', name: 'OAuth' }];
+  let resolve!: (state: { id: string; status: 'pending' }) => void;
+  fixtures.api.signIn.mockImplementationOnce(() => new Promise(done => { resolve = done; }));
+  fixtures.api.authorization.mockResolvedValue({ id: 'flow', status: 'pending' });
+  await open(); await click('settings.mcp.signIn · OAuth');
+  let completed = false;
+  const switching = Promise.all([...fixtures.blockers].map(blocker => blocker())).then(() => { completed = true; });
+  await act(async () => { await Promise.resolve(); }); expect(completed).toBe(false);
+  await act(async () => { resolve({ id: 'flow', status: 'pending' }); await switching; });
+  expect(fixtures.api.cancelAuthorization).toHaveBeenCalledWith('flow'); expect(completed).toBe(true);
+});
+
+test('unmounting during sign-in cancels the handle when it arrives', async () => {
+  snapshot.channels[0]!.authentication = { kind: 'credential', reference: 'original' };
+  snapshot.types[0]!.authentication = ['credential']; snapshot.types[0]!.oauthProviders = [{ id: 'oauth', name: 'OAuth' }];
+  let resolve!: (state: { id: string; status: 'pending' }) => void;
+  fixtures.api.signIn.mockImplementationOnce(() => new Promise(done => { resolve = done; }));
+  await open(); await click('settings.mcp.signIn · OAuth');
+  await act(async () => root.render(null));
+  await act(async () => resolve({ id: 'late-flow', status: 'pending' }));
+  expect(fixtures.api.cancelAuthorization).toHaveBeenCalledWith('late-flow'); expect(fixtures.api.authorization).not.toHaveBeenCalled();
+});
+
+
+test('changing the discovery connection retires its old candidates even after the new connection is saved', async () => {
+  snapshot.types[0]!.discovery = true;
+  await open(); await click('settings.models.discover');
+  expect(button('Discovered +')).toBeDefined();
+  await edit('settings.models.endpoint', 'http://localhost/replacement');
+  expect(button('Discovered +')).toBeUndefined();
+  await click('settings.models.save');
+  expect(button('Discovered +')).toBeUndefined();
+  expect(fixtures.api.discover).toHaveBeenCalledOnce();
 });

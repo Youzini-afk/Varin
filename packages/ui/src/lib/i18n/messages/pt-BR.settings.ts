@@ -1,4 +1,6 @@
 export const settingsDict = {
+  "settings.models.discoveryHint": "Salve as alterações de conexão antes de descobrir modelos. Os resultados só são adicionados ao selecionar e salvar.",
+  "settings.varin.mcp.structured.transport.unconfigured": "Escolha um transporte",
   "settings.projectTrust.title": "Confiança no projeto",
   "settings.projectTrust.trusted": "Confiável",
   "settings.projectTrust.untrusted": "Não confiável",

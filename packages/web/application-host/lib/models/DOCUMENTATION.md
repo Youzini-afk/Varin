@@ -72,6 +72,10 @@ remain explicit: image input alone does not enable image generation, editing or 
 Discovery and extension catalog candidates are read-only material. Applying a selection requires a
 configuration write; an empty or failed discovery does not delete saved models or purpose bindings.
 Configured values, unavailable types, missing credentials and disabled models remain distinguishable.
+Gemini and Anthropic discovery follow their opaque page cursors on the captured connection; cancellation,
+invalid/repeated cursors and later-page failures never publish a partial list as complete. Settings show
+contributed catalog candidates even without network discovery, and require connection changes to be saved
+before querying that connection. Selecting a candidate preserves its declared model capabilities.
 
 Connection options are explicit and credential-free:
 

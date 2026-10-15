@@ -3,8 +3,8 @@ import { createRoot, type Root } from 'react-dom/client';
 import { parseHTML } from 'linkedom';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import type { McpConfigurationSnapshot } from '@varin/application-client';
-const fixture = vi.hoisted(() => ({ version: 0, trust: true, listeners: new Set<() => void>(), api: { open: vi.fn(), close: vi.fn(), read: vi.fn(), readDocument: vi.fn(), saveDocument: vi.fn() } }));
-vi.mock('@varin/application-client', () => ({ createMcpConnectionsHttpAPI: () => fixture.api, getRuntimeEndpointGeneration: () => 1, subscribeRuntimeEndpointChanged: () => () => {} }));
+const fixture = vi.hoisted(() => ({ version: 0, trust: true, listeners: new Set<() => void>(), blockers: new Set<() => Promise<void>>(), api: { open: vi.fn(), close: vi.fn(), read: vi.fn(), readDocument: vi.fn(), saveDocument: vi.fn() } }));
+vi.mock('@varin/application-client', () => ({ createMcpConnectionsHttpAPI: () => fixture.api, registerRuntimeEndpointSwitchBlocker: (listener: () => Promise<void>) => { fixture.blockers.add(listener); return () => fixture.blockers.delete(listener); }, getRuntimeEndpointGeneration: () => 1, subscribeRuntimeEndpointChanged: () => () => {} }));
 vi.mock('@/lib/projectTrust', () => ({ getProjectTrustGeneration: () => fixture.version,
   subscribeProjectTrustChanges: (listener: () => void) => { fixture.listeners.add(listener); return () => fixture.listeners.delete(listener); } }));
 vi.mock('@/components/sections/shared/ProjectTrustSettings', () => ({ ProjectTrustSettings: () => <div>Trust controls</div> }));
@@ -57,4 +57,11 @@ it('does not let a late read from the revoked view replace the new untrusted vie
   await act(async () => complete({ path: '/project/.mcp.json', content: '{"revoked":true}', revision: 'old', exists: true }));
   expect(editor().getAttribute('data-content')).toBe('{}'); expect(container.textContent).not.toContain('revoked');
   expect(fixture.api.saveDocument).not.toHaveBeenCalled();
+});
+
+
+it('releases the original settings view before switching Hosts', async () => {
+  await act(async () => root.render(<McpConnectionsPage />));
+  await act(async () => { await Promise.all([...fixture.blockers].map(blocker => blocker())); });
+  expect(fixture.api.close).toHaveBeenCalledWith('view:1');
 });

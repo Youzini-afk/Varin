@@ -1,4 +1,6 @@
 export const settingsDict = {
+  "settings.models.discoveryHint": "Save connection changes before discovery. Discovered models are added only when you select and save them.",
+  "settings.varin.mcp.structured.transport.unconfigured": "Choose a transport",
   "settings.projectTrust.title": "Project trust",
   "settings.projectTrust.trusted": "Trusted",
   "settings.projectTrust.untrusted": "Not trusted",

@@ -24,7 +24,9 @@ export function createMcpSettings(options: {
   const snapshot = async (id: string): Promise<McpConfigurationSnapshot> => {
     const view = requireView(id);
     await options.authority.directory(view.spec, new AbortController().signal);
+    requireView(id);
     const loaded = config(view), readiness = await options.authority.inspect(view.spec);
+    requireView(id);
     return { view: id, issues: loaded.errors,
       sources: loaded.sources.map(path => ({ path, scope: path === loaded.projectConfig ? 'project' : 'global' })),
       servers: loaded.servers.map(entry => {
@@ -47,6 +49,7 @@ export function createMcpSettings(options: {
     const opened = await options.authority.open(view.spec), entry = opened.config.servers.find(server => server.name === name);
     view.scopes.add(opened.scope);
     try {
+      if (view.closed) throw new ModelConfigurationError('mcp-view-unavailable', 'MCP settings were closed');
       if (!entry) throw new ModelConfigurationError('mcp-server-unavailable', 'MCP server is no longer configured');
       const state = await options.authority.connect(opened.scope, entry);
       if (view.closed) throw new ModelConfigurationError('mcp-view-unavailable', 'MCP settings were closed');
@@ -68,7 +71,15 @@ export function createMcpSettings(options: {
       const id = randomUUID(), view: View = { cwd: input.cwd as string | undefined, spec, scopes: new Set(), connections: new Map(), flows: new AuthorizationFlows(options.changed), closed: false };
       views.set(id, view);
       void options.authority.subscribe(spec, options.changed).then(unwatch => { if (view.closed) unwatch(); else view.unwatch = unwatch; }, () => undefined);
-      return snapshot(id);
+      const aborted = () => close(id);
+      signal.addEventListener('abort', aborted, { once: true });
+      try {
+        signal.throwIfAborted();
+        const result = await snapshot(id);
+        signal.throwIfAborted();
+        return result;
+      } catch (error) { close(id); throw error; }
+      finally { signal.removeEventListener('abort', aborted); }
     },
     read: async input => { await options.authority.reload(requireView(input.view).spec); return snapshot(input.view as string); },
     close: input => { close(input.view as string); return {}; },

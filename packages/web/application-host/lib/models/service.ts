@@ -413,25 +413,40 @@ export class ModelsService {
       getAuth, retain, release };
   }
   async discover(id: string, fetchImpl: EgressFetch, signal?: AbortSignal) {
+    signal?.throwIfAborted();
     const channel = await this.#channel(id);
     const type = this.types.get(channel.type)!;
     if (!type.discovery || !type.discoveryRequest || !type.parseDiscovery) {
       if (type.catalog) return { models: structuredClone(type.catalog) };
       return fail('model-discovery-unavailable', 'Add models manually for this channel type');
     }
-    const request = type.discoveryRequest(channel);
-    endpoint(request.url);
     const expected = await this.#scope(channel);
-    const auth = await this.#auth(channel);
-    if (!sameScope(expected, await this.currentScope(id))) return fail('credential-scope-changed', 'The account changed during model discovery');
-    const headers = new Headers(request.headers);
-    for (const [key, value] of Object.entries(channel.connection?.headers ?? {})) headers.set(key, value);
-    for (const [key, value] of Object.entries(auth.auth.headers ?? {})) if (value !== null) headers.set(key, value);
-    if (auth.auth.apiKey) headers.set(type.protocol === 'anthropic-messages' ? 'x-api-key' : type.protocol.startsWith('google-') ? 'x-goog-api-key' : 'authorization', type.protocol === 'anthropic-messages' || type.protocol.startsWith('google-') ? auth.auth.apiKey : `Bearer ${auth.auth.apiKey}`);
-    const response = await fetchImpl(request.url, { headers, ...(signal ? { signal } : {}), redirect: 'manual' }, modelEgressOverride(channel.connection));
-    if (!response.ok) return fail('model-discovery-failed', `Model discovery failed (${response.status})`);
-    const models = type.parseDiscovery(await response.json());
-    if (!sameScope(expected, await this.currentScope(id))) return fail('credential-scope-changed', 'The account changed during model discovery');
-    return { models };
+    const models = new Map<string, { id: string; name: string }>();
+    const cursors = new Set<string>();
+    let cursor: string | undefined;
+    do {
+      signal?.throwIfAborted();
+      const request = type.discoveryRequest(channel, cursor);
+      endpoint(request.url);
+      const auth = await this.#auth(channel);
+      if (!sameScope(expected, await this.currentScope(id))) return fail('credential-scope-changed', 'The account changed during model discovery');
+      signal?.throwIfAborted();
+      const headers = new Headers(request.headers);
+      for (const [key, value] of Object.entries(channel.connection?.headers ?? {})) headers.set(key, value);
+      for (const [key, value] of Object.entries(auth.auth.headers ?? {})) if (value !== null) headers.set(key, value);
+      if (auth.auth.apiKey) headers.set(type.protocol === 'anthropic-messages' ? 'x-api-key' : type.protocol.startsWith('google-') ? 'x-goog-api-key' : 'authorization', type.protocol === 'anthropic-messages' || type.protocol.startsWith('google-') ? auth.auth.apiKey : `Bearer ${auth.auth.apiKey}`);
+      const response = await fetchImpl(request.url, { headers, ...(signal ? { signal } : {}), redirect: 'manual' }, modelEgressOverride(channel.connection));
+      if (!response.ok) return fail('model-discovery-failed', `Model discovery failed (${response.status})`);
+      const page: unknown = await response.json();
+      signal?.throwIfAborted();
+      for (const model of type.parseDiscovery(page)) if (!models.has(model.id)) models.set(model.id, model);
+      if (!sameScope(expected, await this.currentScope(id))) return fail('credential-scope-changed', 'The account changed during model discovery');
+      cursor = type.discoveryCursor?.(page);
+      if (cursor !== undefined) {
+        if (cursors.has(cursor)) return fail('model-discovery-pagination-invalid', 'Model discovery repeated a page cursor');
+        cursors.add(cursor);
+      }
+    } while (cursor !== undefined);
+    return { models: [...models.values()] };
   }
 }
