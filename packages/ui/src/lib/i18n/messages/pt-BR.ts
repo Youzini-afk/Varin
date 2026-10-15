@@ -3,6 +3,17 @@ import { settingsDict } from './pt-BR.settings';
 
 export const dict: Record<I18nKey, string> = {
   ...settingsDict,
+  "chat.toolResult.fileContents": "Conteúdo do arquivo: {path}",
+  "chat.toolResult.byteRange": "{bytes} de {total} bytes lidos · deslocamento {offset}",
+  "chat.toolResult.partial": "Arquivo parcial",
+  "chat.toolResult.emptyFile": "Arquivo vazio",
+  "chat.toolResult.emptyRange": "Nenhum byte retornado para este intervalo.",
+  "chat.toolResult.missing": "Arquivo não encontrado.",
+  "chat.toolResult.directory": "Este caminho é um diretório.",
+  "chat.toolResult.symlink": "Link simbólico → {target}",
+  "chat.toolResult.unsupported": "Este caminho não contém conteúdo de arquivo compatível.",
+  "chat.toolResult.bytes": "Este intervalo de bytes não é texto UTF-8.",
+
   "thread.settings.utilityModel": "Modelo auxiliar",
   "thread.settings.walkthroughModel": "Modelo de guia de alterações",
   "thread.settings.confirmDelete": "Confirmar exclusão de conversas",

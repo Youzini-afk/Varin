@@ -1,6 +1,17 @@
 import { settingsDict } from './en.settings';
 
 export const dict = {
+  "chat.toolResult.fileContents": "File contents: {path}",
+  "chat.toolResult.byteRange": "Read {bytes} of {total} bytes · offset {offset}",
+  "chat.toolResult.partial": "Partial file",
+  "chat.toolResult.emptyFile": "Empty file",
+  "chat.toolResult.emptyRange": "No bytes returned for this range.",
+  "chat.toolResult.missing": "File not found.",
+  "chat.toolResult.directory": "This path is a directory.",
+  "chat.toolResult.symlink": "Symbolic link → {target}",
+  "chat.toolResult.unsupported": "This path has no supported file contents.",
+  "chat.toolResult.bytes": "This byte range is not UTF-8 text.",
+
   "thread.settings.utilityModel": "Utility model",
   "thread.settings.walkthroughModel": "Walkthrough model",
   "thread.settings.confirmDelete": "Confirm conversation deletion",

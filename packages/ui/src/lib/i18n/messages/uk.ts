@@ -4,6 +4,17 @@ import { settingsDict } from './uk.settings';
 export const dict: Record<I18nKey, string> = {
   ...enDict,
   ...settingsDict,
+  "chat.toolResult.fileContents": "Вміст файлу: {path}",
+  "chat.toolResult.byteRange": "Прочитано {bytes} із {total} байтів · зсув {offset}",
+  "chat.toolResult.partial": "Частина файлу",
+  "chat.toolResult.emptyFile": "Порожній файл",
+  "chat.toolResult.emptyRange": "Для цього діапазону не повернуто байтів.",
+  "chat.toolResult.missing": "Файл не знайдено.",
+  "chat.toolResult.directory": "Цей шлях є каталогом.",
+  "chat.toolResult.symlink": "Символічне посилання → {target}",
+  "chat.toolResult.unsupported": "Цей шлях не містить підтримуваного вмісту файлу.",
+  "chat.toolResult.bytes": "Цей діапазон байтів не є текстом UTF-8.",
+
   "thread.settings.utilityModel": "Допоміжна модель",
   "thread.settings.walkthroughModel": "Модель огляду змін",
   "thread.settings.confirmDelete": "Підтверджувати видалення розмов",

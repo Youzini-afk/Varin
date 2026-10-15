@@ -4,6 +4,17 @@ import { settingsDict } from './ja.settings';
 export const dict: Record<I18nKey, string> = {
   ...enDict,
   ...settingsDict,
+  "chat.toolResult.fileContents": "ファイルの内容: {path}",
+  "chat.toolResult.byteRange": "{total} バイト中 {bytes} バイトを読み取り · オフセット {offset}",
+  "chat.toolResult.partial": "ファイルの一部",
+  "chat.toolResult.emptyFile": "空のファイル",
+  "chat.toolResult.emptyRange": "この範囲ではバイトが返されませんでした。",
+  "chat.toolResult.missing": "ファイルが見つかりません。",
+  "chat.toolResult.directory": "このパスはディレクトリです。",
+  "chat.toolResult.symlink": "シンボリックリンク → {target}",
+  "chat.toolResult.unsupported": "このパスには読み取り可能なファイル内容がありません。",
+  "chat.toolResult.bytes": "このバイト範囲は UTF-8 テキストではありません。",
+
   "thread.settings.utilityModel": "補助モデル",
   "thread.settings.walkthroughModel": "変更ガイドモデル",
   "thread.settings.confirmDelete": "会話の削除を確認",

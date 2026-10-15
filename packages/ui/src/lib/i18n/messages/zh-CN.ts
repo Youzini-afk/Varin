@@ -4,6 +4,17 @@ import { settingsDict } from './zh-CN.settings';
 export const dict: Record<I18nKey, string> = {
   ...enDict,
   ...settingsDict,
+  "chat.toolResult.fileContents": "文件内容：{path}",
+  "chat.toolResult.byteRange": "已读取 {bytes} / {total} 字节 · 偏移 {offset}",
+  "chat.toolResult.partial": "部分文件内容",
+  "chat.toolResult.emptyFile": "空文件",
+  "chat.toolResult.emptyRange": "此范围未返回任何字节。",
+  "chat.toolResult.missing": "文件不存在。",
+  "chat.toolResult.directory": "此路径是目录。",
+  "chat.toolResult.symlink": "符号链接 → {target}",
+  "chat.toolResult.unsupported": "此路径没有可支持读取的文件内容。",
+  "chat.toolResult.bytes": "此字节范围不是 UTF-8 文本。",
+
   "thread.settings.utilityModel": "小模型",
   "thread.settings.walkthroughModel": "改动导读模型",
   "thread.settings.confirmDelete": "显示删除对话框",

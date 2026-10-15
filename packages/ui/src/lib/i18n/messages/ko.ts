@@ -4,6 +4,17 @@ import { settingsDict } from './ko.settings';
 export const dict: Record<I18nKey, string> = {
   ...enDict,
   ...settingsDict,
+  "chat.toolResult.fileContents": "파일 내용: {path}",
+  "chat.toolResult.byteRange": "{total}바이트 중 {bytes}바이트 읽음 · 오프셋 {offset}",
+  "chat.toolResult.partial": "파일의 일부",
+  "chat.toolResult.emptyFile": "빈 파일",
+  "chat.toolResult.emptyRange": "이 범위에서 반환된 바이트가 없습니다.",
+  "chat.toolResult.missing": "파일을 찾을 수 없습니다.",
+  "chat.toolResult.directory": "이 경로는 디렉터리입니다.",
+  "chat.toolResult.symlink": "심볼릭 링크 → {target}",
+  "chat.toolResult.unsupported": "이 경로에는 지원되는 파일 내용이 없습니다.",
+  "chat.toolResult.bytes": "이 바이트 범위는 UTF-8 텍스트가 아닙니다.",
+
   "thread.settings.utilityModel": "보조 모델",
   "thread.settings.walkthroughModel": "변경 안내 모델",
   "thread.settings.confirmDelete": "대화 삭제 확인",

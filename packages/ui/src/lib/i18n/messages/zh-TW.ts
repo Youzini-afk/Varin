@@ -4,6 +4,17 @@ import { settingsDict } from './zh-TW.settings';
 export const dict: Record<I18nKey, string> = {
   ...enDict,
   ...settingsDict,
+  "chat.toolResult.fileContents": "檔案內容：{path}",
+  "chat.toolResult.byteRange": "已讀取 {bytes} / {total} 位元組 · 偏移 {offset}",
+  "chat.toolResult.partial": "部分檔案內容",
+  "chat.toolResult.emptyFile": "空檔案",
+  "chat.toolResult.emptyRange": "此範圍未傳回任何位元組。",
+  "chat.toolResult.missing": "檔案不存在。",
+  "chat.toolResult.directory": "此路徑是目錄。",
+  "chat.toolResult.symlink": "符號連結 → {target}",
+  "chat.toolResult.unsupported": "此路徑沒有支援讀取的檔案內容。",
+  "chat.toolResult.bytes": "此位元組範圍不是 UTF-8 文字。",
+
   "thread.settings.utilityModel": "小模型",
   "thread.settings.walkthroughModel": "變更導讀模型",
   "thread.settings.confirmDelete": "顯示刪除對話框",

@@ -4,6 +4,17 @@ import { settingsDict } from './pl.settings';
 export const dict: Record<I18nKey, string> = {
   ...enDict,
   ...settingsDict,
+  "chat.toolResult.fileContents": "Zawartość pliku: {path}",
+  "chat.toolResult.byteRange": "Odczytano {bytes} z {total} bajtów · przesunięcie {offset}",
+  "chat.toolResult.partial": "Część pliku",
+  "chat.toolResult.emptyFile": "Pusty plik",
+  "chat.toolResult.emptyRange": "Nie zwrócono bajtów dla tego zakresu.",
+  "chat.toolResult.missing": "Nie znaleziono pliku.",
+  "chat.toolResult.directory": "Ta ścieżka jest katalogiem.",
+  "chat.toolResult.symlink": "Dowiązanie symboliczne → {target}",
+  "chat.toolResult.unsupported": "Ta ścieżka nie zawiera obsługiwanej zawartości pliku.",
+  "chat.toolResult.bytes": "Ten zakres bajtów nie jest tekstem UTF-8.",
+
   "thread.settings.utilityModel": "Model pomocniczy",
   "thread.settings.walkthroughModel": "Model omówienia zmian",
   "thread.settings.confirmDelete": "Potwierdzaj usuwanie rozmów",

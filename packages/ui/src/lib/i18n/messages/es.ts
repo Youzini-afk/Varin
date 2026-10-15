@@ -4,6 +4,17 @@ import { settingsDict } from './es.settings';
 export const dict: Record<I18nKey, string> = {
   ...enDict,
   ...settingsDict,
+  "chat.toolResult.fileContents": "Contenido del archivo: {path}",
+  "chat.toolResult.byteRange": "{bytes} de {total} bytes leídos · desplazamiento {offset}",
+  "chat.toolResult.partial": "Archivo parcial",
+  "chat.toolResult.emptyFile": "Archivo vacío",
+  "chat.toolResult.emptyRange": "No se devolvieron bytes para este intervalo.",
+  "chat.toolResult.missing": "Archivo no encontrado.",
+  "chat.toolResult.directory": "Esta ruta es un directorio.",
+  "chat.toolResult.symlink": "Enlace simbólico → {target}",
+  "chat.toolResult.unsupported": "Esta ruta no contiene contenido de archivo compatible.",
+  "chat.toolResult.bytes": "Este intervalo de bytes no es texto UTF-8.",
+
   "thread.settings.utilityModel": "Modelo auxiliar",
   "thread.settings.walkthroughModel": "Modelo de guía de cambios",
   "thread.settings.confirmDelete": "Confirmar la eliminación de conversaciones",
