@@ -29,7 +29,13 @@ pub(super) fn canonical_lease_path(resolved: PathBuf) -> Result<PathBuf, KernelE
     let absolute = match fs::symlink_metadata(&resolved) {
         Ok(metadata) if !metadata.file_type().is_symlink() => fs::canonicalize(&resolved)?,
         Ok(_) => resolved,
-        Err(error) if error.kind() == io::ErrorKind::NotFound => resolved,
+        // A file ancestor has no descendants, but their admitted physical path
+        // still needs a lease for capture and a planned file/directory change.
+        Err(error)
+            if matches!(error.kind(), io::ErrorKind::NotFound | io::ErrorKind::NotADirectory) =>
+        {
+            resolved
+        }
         Err(error) => return Err(error.into()),
     };
     #[cfg(windows)]
