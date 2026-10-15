@@ -33,7 +33,7 @@ export function ThreadQueuedInput({ api, identity, input, pending, onSave, onCan
     } catch (value) { if (generation.current === current) setError(value instanceof Error ? value.message : 'Could not read these images.'); }
     finally { if (generation.current === current) setReading(false); }
   };
-  return <div className="mx-auto max-w-3xl rounded-xl border border-border/60 px-3 py-2 text-sm">
+  return <div data-queued-input={input.id} className="mx-auto max-w-3xl rounded-xl border border-border/60 px-3 py-2 text-sm">
     <div className="flex items-center gap-2 text-muted-foreground">
       <Icon name="time" className="size-3.5 shrink-0" />
       <span className="min-w-0 flex-1 truncate" title={inputText(input.content)}>{inputText(input.content) || t('chat.queuedMessage.empty')}</span>

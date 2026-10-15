@@ -14,8 +14,8 @@ export async function cycleThreadModel(direction?: -1 | 1): Promise<void> {
   const draftKey = threadIdentityKey(hostKey, identity);
   const draft = useThreadDraftStore.getState().drafts[draftKey];
   const run = snapshot.activeRun;
-  const config = (snapshot.modelSelection.desired?.configuration ?? run?.configuration) as { providerId?: string; model?: string; thinkingLevel?: ThreadModel['thinkingLevel']; modelOptions?: { catalogModelId?: string } } | undefined;
-  const current = run && config?.providerId && config.model ? { providerId: config.providerId, modelId: config.modelOptions?.catalogModelId ?? config.model, thinkingLevel: config.thinkingLevel } : draft?.model;
+  const config = (snapshot.modelSelection.desired?.configuration ?? run?.configuration) as { providerId?: string; model?: string; thinkingLevel?: ThreadModel['thinkingLevel']; catalogModelId?: string } | undefined;
+  const current = run && config?.providerId && config.model ? { providerId: config.providerId, modelId: config.catalogModelId ?? config.model, thinkingLevel: config.thinkingLevel } : draft?.model;
   let model: ThreadModel | undefined;
   if (direction) {
     const favorites = useUIStore.getState().favoriteModels;

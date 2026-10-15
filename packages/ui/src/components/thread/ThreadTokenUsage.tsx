@@ -1,3 +1,4 @@
+import { useI18n, type I18nKey } from '@/lib/i18n';
 import React from 'react';
 import { getRuntimeEndpointGeneration, subscribeRuntimeEndpointChanged } from '@varin/application-client';
 import type { ThreadUsage, UsageTokenCount } from '@varin/protocol';
@@ -5,15 +6,16 @@ import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import { useThreadStore } from '@/stores/useThreadStore';
 import { Button } from '@/components/ui/button';
 
-const metrics = [['inputTokens', 'Input'], ['outputTokens', 'Output'], ['cachedInputTokens', 'Cache read'], ['cacheWriteTokens', 'Cache write'], ['reasoningTokens', 'Reasoning']] as const;
-const kinds: Record<string, string> = { conversation: 'Conversation', context: 'Context work', planning: 'Planning', mcp_sampling: 'MCP sampling', auxiliary: 'Tool inference' };
+const metrics = [['inputTokens', 'input'], ['outputTokens', 'output'], ['cachedInputTokens', 'cacheRead'], ['cacheWriteTokens', 'cacheWrite'], ['reasoningTokens', 'reasoning']] as const;
+const kinds: Record<string, I18nKey> = { conversation: 'chat.usage.conversation', context: 'chat.usage.context', planning: 'chat.usage.planning', mcp_sampling: 'chat.usage.mcp_sampling', auxiliary: 'chat.usage.auxiliary' };
 function tokenLabel(value: UsageTokenCount): string {
-  if (value.known === null) return 'Unknown';
-  if (!/^\d+$/.test(value.known)) return 'Unavailable';
-  return `${BigInt(value.known).toLocaleString()}${value.missing ? ` recorded; ${value.missing} request(s) unreported` : ''}`;
+  if (value.known === null) return '—';
+  if (!/^\d+$/.test(value.known)) return '—';
+  return `${BigInt(value.known).toLocaleString()}${value.missing ? ' + ?' : ''}`;
 }
 /** Visible-demand projection of the original Catalog receipt metadata. */
 export function ThreadTokenUsage() {
+  const { t } = useI18n();
   const api = useRuntimeAPIs().threads;
   const identity = useThreadStore(state => state.selectedIdentity);
   const generation = React.useSyncExternalStore(subscribeRuntimeEndpointChanged, getRuntimeEndpointGeneration, getRuntimeEndpointGeneration);
@@ -52,22 +54,20 @@ export function ThreadTokenUsage() {
   }, [api, owner, generation, identity, refresh]);
   const shown = view.owner === owner ? view : undefined;
   return <section className="space-y-3 px-4 py-3" aria-label="Branch token usage">
-    <div className="flex items-center justify-between gap-2"><h3 className="font-semibold">Branch token usage</h3>
-      {identity && <Button type="button" variant="ghost" size="sm" onClick={() => setRefresh(value => value + 1)}>Refresh</Button>}
+    <div className="flex items-center justify-between gap-2"><h3 className="font-semibold">{t('chat.usage.title')}</h3>
+      {identity && <Button type="button" variant="ghost" size="sm" onClick={() => setRefresh(value => value + 1)}>{t('chat.mcp.refresh')}</Button>}
     </div>
     {!identity ? <p>Select a conversation to inspect usage.</p> : !api ? <p role="alert">Thread usage is unavailable.</p> : <>
-      <p className="text-xs text-muted-foreground">Work executed on this branch, including context and tool inference. Child threads and standalone utility work have their own usage. No price estimate is made.</p>
-      {shown?.error && <p role="alert">{shown.error}{shown.data ? ' Showing the last recorded snapshot.' : ''}</p>}
-      {!shown?.data && !shown?.error && <p role="status">Loading usage</p>}
+      {shown?.error && <p role="alert">{shown.error}</p>}
+      {!shown?.data && !shown?.error && <p role="status">{t('common.loading')}</p>}
       {shown?.data && <>
-        {!shown.data.rows.length && <p>No dispatched model usage recorded for this branch.</p>}
-        {shown.data.notDispatchedRequests > 0 && <p className="text-xs">{shown.data.notDispatchedRequests} request(s) have no dispatch recorded.</p>}
+        {!shown.data.rows.length && <p>{t('chat.usage.empty')}</p>}
         {shown.data.rows.map(row => <div key={JSON.stringify([row.kind, row.providerId, row.providerFamily, row.modelId, row.measurement])} className="space-y-2 rounded bg-[var(--surface-muted)] p-3">
           <div><p className="font-medium break-words">{row.modelId}</p>
-            <p className="text-xs text-muted-foreground">{row.providerId ?? row.providerFamily ?? 'Provider unavailable'} · {kinds[row.kind] ?? row.kind}</p>
-            <p className="text-xs">{row.requests} request(s) · {row.measurement === 'actual' ? 'Reported usage' : row.measurement === 'estimated' ? 'Estimated usage' : 'Usage not fully reported'}{row.pendingRequests > 0 ? ` · ${row.pendingRequests} pending` : ''}</p>
+            <p className="text-xs text-muted-foreground">{row.providerId ?? row.providerFamily ?? 'Provider unavailable'} · {kinds[row.kind] ? t(kinds[row.kind]) : row.kind}</p>
+            <p className="text-xs">{t('chat.usage.requests', { count: row.requests })} · {t(row.measurement === 'actual' ? 'chat.usage.actual' : row.measurement === 'estimated' ? 'chat.usage.estimated' : 'chat.usage.missing')}{row.pendingRequests > 0 ? ` · ${t('chat.usage.pending', { count: row.pendingRequests })}` : ''}</p>
           </div>
-          <dl className="space-y-1 text-sm">{metrics.map(([key, label]) => <div key={key} className="flex justify-between gap-3"><dt>{label}</dt><dd className="text-right tabular-nums">{tokenLabel(row[key])}</dd></div>)}</dl>
+          <dl className="space-y-1 text-sm">{metrics.map(([key, label]) => <div key={key} className="flex justify-between gap-3"><dt>{t(`contextSidebar.tokens.${label}`)}</dt><dd className="text-right tabular-nums">{tokenLabel(row[key])}</dd></div>)}</dl>
         </div>)}
       </>}
     </>}

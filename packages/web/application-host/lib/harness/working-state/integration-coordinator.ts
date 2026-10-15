@@ -25,6 +25,7 @@ import {
   finalizeDurableIntegrationUndone,
   finalizeDurableExternalOperation,
   inspectDurableIntegrationOperation,
+  projectIntegrationOperation,
   markDurableExternalUndoDispatched,
   markDurableIntegrationNeedsAttention,
   markDurableIntegrationUndoing,
@@ -41,6 +42,7 @@ import {
   type DurableIntegrationInspection,
 } from "../../recovery/durable-file-operation.js";
 import { sameState } from "../../recovery/journal-files.js";
+import { normalizePathIdentity } from "../../workspace/path-safety.js";
 import { inspectDocumentBytes } from "../../documents/inspect.js";
 
 export class DirectoryApplyUnresolvedError extends Error {
@@ -61,6 +63,7 @@ interface PlannedSurfaceTextEdit {
 }
 
 export interface IntegrationCoordinatorOptions {
+  readIntegrationOperation?: (workspaceId: string, operationId: string) => Promise<Record<string, unknown> | null>;
   resolveDocumentWorkspaceId?: (owningScopeId: string) => Promise<string>;
   workingStates: WorkspaceWorkingStateRootAccess;
   inspectDirtyBuffers?: (workspaceId: string) => Promise<DirtyBufferInspectPublication[]>;
@@ -118,11 +121,13 @@ export interface IntegrationPlanInput {
 }
 
 export type IntegrationOperationReceipt = IntegrationApplyResult & {
+  sourceRunId?: string;
+  failure?: string;
   changedFiles: string[];
   receipt?: { kind: "integration"; workspaceId: string; operationId: string; revision: number; state: string };
   effect?: "none" | "confirmed" | "partial" | "unknown";
   executorStopped?: boolean;
-  /** File contents include governed Documents buffers; Pi conversation checkpoints are excluded. */
+  /** File contents include governed Documents buffers; conversation history is independent. */
   recoveryCoverage?: "files-only";
 };
 
@@ -328,6 +333,7 @@ const projectPreview = (
 
 export class IntegrationCoordinator {
   private readonly workingStates: WorkspaceWorkingStateRootAccess;
+  private readonly readIntegrationOperation?: IntegrationCoordinatorOptions["readIntegrationOperation"];
   private readonly resolveDocumentWorkspaceId?: IntegrationCoordinatorOptions["resolveDocumentWorkspaceId"];
   private readonly inspectDirtyBuffers?: IntegrationCoordinatorOptions["inspectDirtyBuffers"];
   private readonly beginDirtyStateBarrier?: IntegrationCoordinatorOptions["beginDirtyStateBarrier"];
@@ -340,6 +346,7 @@ export class IntegrationCoordinator {
   private readonly merging = new Map<string, { identity: string; result: Promise<IntegrationOperationReceipt> }>();
 
   constructor(options: IntegrationCoordinatorOptions) {
+    this.readIntegrationOperation = options.readIntegrationOperation;
     this.workingStates = options.workingStates;
     this.resolveDocumentWorkspaceId = options.resolveDocumentWorkspaceId;
     this.inspectDirtyBuffers = options.inspectDirtyBuffers;
@@ -367,7 +374,7 @@ export class IntegrationCoordinator {
   private validateOperationInput(input: IntegrationPlanInput): void {
     const binding = input.operationBinding;
     if (!binding) return;
-    if (!input.scopedWorkingStates || !input.executionId || input.requireTurnBinding !== true
+    if (!input.scopedWorkingStates || input.executionId || input.requireTurnBinding
       || input.operationId !== `integration:${binding.operationId}`
       || input.workspaceId !== binding.result.workspaceId || input.branchId !== binding.result.branchId
       || input.threadId !== binding.childThreadId || input.resultRevision !== binding.result.resultRevision) {
@@ -379,7 +386,7 @@ export class IntegrationCoordinator {
       throw new Error("Runtime Integration requires its explicit writable source target");
     }
     if (binding.target.mode === "live_root"
-      && (binding.target.live_root?.canonicalRoot !== input.parentAuthority.directory
+      && (normalizePathIdentity(binding.target.live_root?.canonicalRoot ?? '') !== normalizePathIdentity(input.parentAuthority.directory)
         || input.parentAuthority.workspaceId !== binding.target.execution_workspace_id)) {
       throw new Error("Integration target differs from its admitted live root");
     }
@@ -416,7 +423,7 @@ export class IntegrationCoordinator {
     const status = state === "complete" ? "applied" : state === "conflict" ? "conflict"
       : state === "compensated" || state === "undone" ? "compensated" : "needs-attention";
     const remaining = operation.appliedPaths.filter(file => !operation.compensatedPaths.includes(file));
-    const effect = !terminalIntegrationStates.has(state) ? "unknown"
+    const effect = !terminalIntegrationStates.has(state) || !operation.executorStopped ? "unknown"
       : remaining.length === 0 ? operation.compensatedPaths.length > 0 ? "confirmed" : "none"
         : state === "complete" ? "confirmed" : "partial";
     return { operationId: operation.operationId, status, appliedPaths: operation.appliedPaths,
@@ -424,6 +431,8 @@ export class IntegrationCoordinator {
       needsAttentionPaths: operation.needsAttentionPaths, diffStats: operation.diffStats,
       changedFiles: Object.keys(operation.retryBinding?.childStates ?? {}).sort(),
       text: `Recorded integration ${operation.operationId}: ${state}`,
+      ...(operation.operationBinding ? { sourceRunId: operation.operationBinding.parentRunId } : {}),
+      ...(operation.failure ? { failure: operation.failure } : {}),
       ...(operation.operationBinding ? { receipt: { kind: "integration" as const, workspaceId,
         operationId: operation.operationId, revision: operation.revision, state }, effect,
         executorStopped: operation.executorStopped, recoveryCoverage: "files-only" as const } : {}) };
@@ -645,9 +654,32 @@ export class IntegrationCoordinator {
   }
 
   async previewResult(input: IntegrationPlanInput): Promise<ThreadIntegrationPreview> {
+    this.validateOperationInput(input);
     const planned = await this.plan(input);
     this.previewByThread.set(this.previewKey(input.workspaceId, input.threadId), { workspaceId: input.workspaceId, preview: planned.preview });
     return planned.preview;
+  }
+
+  /** Read only journals for this immutable result and original parent target. */
+  async listIntegrations(input: IntegrationPlanInput): Promise<IntegrationOperationReceipt[]> {
+    this.validateOperationInput(input);
+    return this.withWorkingStore(input.workspaceId, "integration-history", async (_store, context) => {
+      const rows = await context.durableRecoveryStore.listOperations(input.workspaceId, "integration");
+      const results: IntegrationOperationReceipt[] = [];
+      for (const row of rows) {
+        const binding = (row.data as { operationBinding?: IntegrationOperationBinding } | undefined)?.operationBinding, selected = input.operationBinding;
+        if (!binding || !selected || binding.parentThreadId !== selected.parentThreadId
+          || binding.parentBranchId !== selected.parentBranchId || binding.childExecutionId !== selected.childExecutionId
+          || !isDeepStrictEqual(binding.result, selected.result) || !isDeepStrictEqual(binding.target, selected.target)) continue;
+        const id = String(row.operationId);
+        const record = await (this.readIntegrationOperation
+          ? this.readIntegrationOperation(input.workspaceId, id) : context.durableRecoveryStore.getOperation(input.workspaceId, id));
+        if (!record) throw new Error('Original integration record is unavailable');
+        const operation = projectIntegrationOperation(id, record);
+        results.push(this.receiptResult(input.workspaceId, operation));
+      }
+      return results;
+    }, "shared", input.scopedWorkingStates);
   }
 
   private async holdParentBranchWrite(
@@ -1141,6 +1173,7 @@ export class IntegrationCoordinator {
     workspaceId: string;
     threadId: string;
     operationId: string;
+    scopedWorkingStates?: WorkspaceWorkingStateRootAccess;
     sourceOwner?: { ownerId: string; generation: number };
     signal?: AbortSignal;
     parentAuthority?: IntegrationPlanInput["parentAuthority"];
@@ -1152,6 +1185,7 @@ export class IntegrationCoordinator {
       "thread-result-integration-undo-inspect",
       (_store, context) => inspectDurableIntegrationOperation(context, input.operationId),
       "shared",
+      input.scopedWorkingStates,
     );
     if (inspection.threadId !== input.threadId) throw new Error(`Integration operation does not belong to thread ${input.threadId}`);
     let releaseParentWrite = (): void => undefined;
@@ -1168,6 +1202,17 @@ export class IntegrationCoordinator {
     return await this.withWorkingStore(input.workspaceId, "thread-result-integration-undo", async (store, context) => {
       const operation = await inspectDurableIntegrationOperation(context, input.operationId);
       if (operation.threadId !== input.threadId) throw new Error(`Integration operation does not belong to thread ${input.threadId}`);
+      const undoContext = async (target: { kind: "directory"; directory: string; workspaceId?: string }) => {
+        if (!input.scopedWorkingStates) return this.directoryApplyContext(context, target);
+        if (input.parentAuthority?.kind !== "directory" || !input.parentAuthority.workspaceId
+          || normalizePathIdentity(target.directory) !== normalizePathIdentity(context.identity.canonicalRoot)
+          || normalizePathIdentity(target.directory) !== normalizePathIdentity(input.parentAuthority.directory)) {
+          throw new Error("Undo target differs from its admitted source");
+        }
+        // Keep the original grant and gate together. A Documents gate would acquire
+        // a second lease while the scoped file port is waiting on that same path.
+        return { context, executionWorkspaceId: input.parentAuthority.workspaceId };
+      };
       if (operation.state === "undone") {
         const finalized = await finalizeDurableIntegrationUndone(context, input.operationId, operation.appliedPaths);
         this.previewByThread.delete(this.previewKey(input.workspaceId, input.threadId));
@@ -1182,11 +1227,11 @@ export class IntegrationCoordinator {
           current.applyCanonicalRoot ?? reservationContext.identity.canonicalRoot,
           current.reservedResources?.paths ?? Object.keys(current.targets), input.operationId);
         await markDurableIntegrationUndoing(reservationContext, input.operationId);
-      }, "exclusive");
+      }, "exclusive", input.scopedWorkingStates);
       if (operation.parentBranchId) await reserveUndo();
       else {
         const targetContext = operation.applyCanonicalRoot
-          ? (await this.directoryApplyContext(context, { kind: "directory", directory: operation.applyCanonicalRoot,
+          ? (await undoContext({ kind: "directory", directory: operation.applyCanonicalRoot,
             ...(operation.applyExecutionWorkspaceId ? { workspaceId: operation.applyExecutionWorkspaceId } : {}) })).context
           : context;
         await targetContext.resourceOperationGate.run((operation.reservedResources?.paths ?? Object.keys(operation.targets))
@@ -1220,7 +1265,7 @@ export class IntegrationCoordinator {
           let applyContext: DurableFileOperationContext;
           let applyExecutionWorkspaceId: string | undefined;
           try {
-            const resolved = await this.directoryApplyContext(context, authority);
+            const resolved = await undoContext(authority);
             applyContext = resolved.context;
             applyExecutionWorkspaceId = resolved.executionWorkspaceId;
           } catch (error) {
@@ -1372,7 +1417,7 @@ export class IntegrationCoordinator {
       let applyContext: DurableFileOperationContext = context as DurableFileOperationContext;
       if (operation.applyCanonicalRoot) {
         try {
-          applyContext = (await this.directoryApplyContext(context, {
+          applyContext = (await undoContext({
             kind: "directory",
             directory: operation.applyCanonicalRoot,
           })).context;
@@ -1476,7 +1521,7 @@ export class IntegrationCoordinator {
         this.previewByThread.delete(this.previewKey(input.workspaceId, input.threadId));
         if (undone.status === "pending") throw new Error(`Integration ${input.operationId} undo did not settle`);
       return { ...undone, status: undone.status as IntegrationApplyResult["status"] };
-    });
+    }, "shared", input.scopedWorkingStates);
     } finally {
       releaseParentWrite();
     }
@@ -1518,7 +1563,7 @@ export class IntegrationCoordinator {
     const overrides = input.baseStatesOverride ?? await input.resolveBaseStates?.(store);
     const result = storedResult && { ...storedResult, baseStates: { ...storedResult.baseStates, ...overrides },
       pathStates: { ...storedResult.pathStates }, changedPaths: [...storedResult.changedPaths] };
-    if (!result) throw new Error(`Working result not found: ${input.branchId}@${input.resultRevision}`);
+    if (!result || (input.operationBinding && result.root !== input.operationBinding.result.root)) throw new Error(`Working result not found or changed: ${input.branchId}@${input.resultRevision}`);
     if (overrides && Object.keys(overrides).length) {
       const paths = [...new Set([...result.changedPaths, ...Object.keys(overrides)])];
       const fixed = await store.readStateSlice(input.branchId, paths, { revision: input.resultRevision });
@@ -1671,8 +1716,10 @@ export class IntegrationCoordinator {
           mergeChildStates[file] = await editorStateFrom(store, result.pathStates[file]!);
         }
         const childText = await readableText(store, mergeChildStates[file]!);
+        const parentText = await readableText(store, parentState[file]!);
         const baselineText = await readableText(store, mergeBaseStates[file]!);
         if (childText !== undefined) texts[file] = { ...texts[file], child: childText };
+        if (parentText !== undefined) texts[file] = { ...texts[file], parent: parentText };
         if (baselineText !== undefined) texts[file] = { ...texts[file], baseline: baselineText };
       }
 

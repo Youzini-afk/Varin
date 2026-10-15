@@ -89,7 +89,9 @@ class Scope {
 
   constructor(readonly authority: McpAuthority, readonly scope: McpAuthorityScope, gateway: McpAuthorityOwnedLease,
     private readonly failed: (code: string, reference: string) => void) {
-    this.scope = freeze(structuredClone(scope));
+    // Configuration is a frozen value; process admission is a live Host capability.
+    const { admitProcess, ...configuration } = scope;
+    this.scope = Object.freeze({ ...freeze(structuredClone(configuration)), ...(admitProcess ? { admitProcess } : {}) });
     this.gateway = this.own(gateway);
     this.apply(gateway, false);
     this.track(authority.subscribe(this.scope, change => this.refresh(change)).then(unsubscribe => {

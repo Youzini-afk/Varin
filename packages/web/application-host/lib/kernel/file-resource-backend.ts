@@ -264,7 +264,7 @@ export class KernelFileResourceBackend implements RecoveryFileStore {
     identity: RecoveryIdentity,
     relativePath: string,
     state: RecoveryState,
-    options: { expected?: RecoveryState; ownerId?: string; operationId?: string; reservationOperationId?: string } = {},
+    options: { expected?: RecoveryState; ownerId?: string; recordId?: string; slot?: string; operationId?: string; reservationOperationId?: string } = {},
   ): Promise<{ status: "applied" | "conflict"; state: RecoveryState }> {
     await this.assertApplyState(identity, relativePath, state);
     const resolved = await this.relativePathFor(identity, relativePath);
@@ -281,6 +281,7 @@ export class KernelFileResourceBackend implements RecoveryFileStore {
       ...(options.reservationOperationId ? {reservationOperationId:options.reservationOperationId} : {}),
       ...(expected ? { expectedJson: JSON.stringify(expected) } : {}),
       ...(options.ownerId ? { ownerId: options.ownerId } : {}),
+      ...(options.recordId ? { recordId: options.recordId, slot: options.slot } : {}),
       ...(lease ? { leaseId: lease.leaseId } : {}),
     });
     if ((value.status !== "applied" && value.status !== "conflict") || typeof value.stateJson !== "string") {

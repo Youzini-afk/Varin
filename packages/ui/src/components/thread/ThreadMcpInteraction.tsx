@@ -1,3 +1,4 @@
+import { useI18n } from '@/lib/i18n';
 import React from 'react';
 import type { ThreadIdentity, ThreadModel, ThreadModelInfo, ThreadsAPI } from '@varin/application-client';
 import { ThreadRequestError } from '@varin/application-client';
@@ -201,6 +202,7 @@ export function ThreadMcpInteraction({ api, identity, view, update, models = [],
 export function ThreadMcpInteractions({ api, identity, eventCursor, models, selectedModel, modelError }: {
   api: InteractionAPI; identity: ThreadIdentity; eventCursor: number; models?: ThreadModelInfo[]; selectedModel?: ThreadModel; modelError?: string;
 }) {
+  const { t } = useI18n();
   const [items, setItems] = React.useState<McpInteractionItem[]>([]);
   const [cursor, setCursor] = React.useState<string>();
   const [nextCursor, setNextCursor] = React.useState<string | null>(null);
@@ -224,18 +226,16 @@ export function ThreadMcpInteractions({ api, identity, eventCursor, models, sele
   const update = (view: McpInteractionItem) => setItems(current => current.map(item => sameInteraction(item, view) ? newerInteraction(item, compactInteraction(view)) : item));
   const waiting = items.filter(canRespond);
   const history = items.filter(item => !canRespond(item));
+  if (!items.length && !error && !cursor) return null;
   return <section aria-label="MCP server requests" className="mx-auto max-w-3xl space-y-2">
-    <div className="flex items-center gap-2"><h3 className="text-sm font-medium">MCP server requests</h3>
-      <Button type="button" variant="ghost" size="sm" disabled={loading} onClick={() => setRefresh(value => value + 1)}>Refresh MCP requests</Button></div>
+    <div className="flex items-center gap-2"><h3 className="text-sm font-medium">{t('chat.mcp.requests')}</h3>
+      <Button type="button" variant="ghost" size="sm" disabled={loading} onClick={() => setRefresh(value => value + 1)}>{t('chat.mcp.refresh')}</Button></div>
     {error && <p role="alert">{error}</p>}
-    {!loading && !error && items.length === 0 && <p className="text-xs text-muted-foreground">No MCP requests on this page.</p>}
-    {waiting.length > 0 && <p className="text-xs font-medium">Awaiting your choice</p>}
     {waiting.map(view => <ThreadMcpInteraction key={`${view.record.binding.operationId}:${view.record.id}`} api={api} identity={identity} view={view} update={update} models={models} selectedModel={selectedModel} modelError={modelError} />)}
-    {history.length > 0 && <p className="text-xs font-medium">Answered or closed requests</p>}
-    {history.map(view => <ThreadMcpInteraction key={`${view.record.binding.operationId}:${view.record.id}`} api={api} identity={identity} view={view} update={update} models={models} selectedModel={selectedModel} modelError={modelError} />)}
+    {history.length > 0 && <details className="typography-meta text-muted-foreground"><summary className="cursor-pointer">{t('chat.mcp.closed')}</summary>{history.map(view => <ThreadMcpInteraction key={`${view.record.binding.operationId}:${view.record.id}`} api={api} identity={identity} view={view} update={update} models={models} selectedModel={selectedModel} modelError={modelError} />)}</details>}
     <div className="flex gap-2">
-      {cursor && <Button type="button" size="sm" variant="outline" disabled={loading} onClick={() => { setItems([]); setCursor(undefined); }}>Latest requests</Button>}
-      {nextCursor && <Button type="button" size="sm" variant="outline" disabled={loading} onClick={() => { setItems([]); setCursor(nextCursor); }}>More requests</Button>}
+      {cursor && <Button type="button" size="sm" variant="outline" disabled={loading} onClick={() => { setItems([]); setCursor(undefined); }}>{t('chat.mcp.latest')}</Button>}
+      {nextCursor && <Button type="button" size="sm" variant="outline" disabled={loading} onClick={() => { setItems([]); setCursor(nextCursor); }}>{t('chat.mcp.more')}</Button>}
     </div>
   </section>;
 }

@@ -1,6 +1,13 @@
+import { ContextHistoryDialog } from '../conversation/ContextHistoryDialog';
+import { ActiveEditorSuggestion } from '../conversation/ActiveEditorSuggestion';
+import { MessageHandoff } from '../conversation/messageHandoff';
+import { useTimelineViewStore } from '../conversation/timelineViewStore';
+import { usePrefersReducedMotion } from '@/hooks/usePrefersReducedMotion';
+import { ChatTreeDialog } from '../conversation/ChatTreeDialog';
+import { ConversationSurface } from '../conversation/ConversationSurface';
+import { ConversationTimeline } from '../conversation/ConversationTimeline';
 import { deliverThreadInput } from '@/lib/agent-runtime/threadInputDelivery';
 import { AutoReviewBanner } from '@/components/chat/AutoReviewBanner';
-import { ReviewTransferActions } from './ReviewTransferActions';
 import { EditorContextAttachmentChips } from '@/components/workbench/EditorContextAttachmentChips';
 import { acknowledgeEditorContextAttachments, getEditorContextAttachmentsRevision, listEditorContextAttachments, subscribeEditorContextAttachments } from '@/lib/agent-editor/attachments';
 import { projectEditorContextAttachments } from '@/lib/agent-editor/projection';
@@ -13,7 +20,7 @@ import { ThreadMaterialAttachments } from './ThreadMaterialAttachments';
 import { buildPdfMaterialCitationMarkdown } from '@/lib/materials/pdfMaterialCitation';
 import { ComputerAutomationSection } from '@/components/thread/ComputerAutomationSection';
 import { useComputerAutomation } from '@/stores/useComputerAutomation';
-import { ChildExecutions, ThreadExecutions } from './ThreadExecutions';
+import { ThreadExecutions } from './ThreadExecutions';
 import { ThreadMessages } from './ThreadMessages';
 import { ThreadFamily } from './ThreadFamily';
 import { attachProcessTerminal } from '@/lib/attachProcessTerminal';
@@ -23,12 +30,11 @@ import { ThreadGoal } from './ThreadGoal';
 import { ThreadFollowups } from './ThreadFollowups';
 import { ThreadResearch } from './ThreadResearch';
 import { ThreadMemory } from './ThreadMemory';
-import { ThreadMemorySelection } from './ThreadMemorySelection';
 import { getRegisteredRuntimeAPIs } from '@/lib/runtime-api/registry';
 import { ThreadResources } from './ThreadResources';
-import { ThreadSkillMaterials } from './ThreadSkillMaterials';
 import { ThreadPermission } from './ThreadPermission';
-import { ThreadQuestion } from './ThreadQuestion';
+import { ThreadQuestions } from './ThreadQuestions';
+import { ThreadWorkStrips } from './ThreadWorkStrips';
 import { ThreadMcpInteractions } from './ThreadMcpInteraction';
 import { ThreadSourcePicker } from './ThreadSourcePicker';
 import { useThreadRecovery } from './useThreadRecovery';
@@ -40,7 +46,7 @@ import { fileToBase64 } from '@/components/chat/composer/fileAttachments';
 import { useI18n } from '@/lib/i18n';
 import { subscribeVarinEvents } from '@/lib/varinEvents';
 import React from 'react';
-import { createModelConnectionsHttpAPI, threadMemorySourceText, threadSourceFailureMessage, ThreadRequestError, getRuntimeEndpointGeneration, subscribeRuntimeEndpointChanged } from '@varin/application-client';
+import { createModelConnectionsHttpAPI, threadSourceFailureMessage, ThreadRequestError, getRuntimeEndpointGeneration, subscribeRuntimeEndpointChanged } from '@varin/application-client';
 import type { ThreadIdentity, ThreadModel, ThreadModelInfo, ThreadThinkingLevel, ThreadSnapshot, ThreadsAPI, ThreadHistoryPage, ThreadPreparedSource } from '@varin/application-client';
 import { Button } from '@/components/ui/button';
 import { ThreadComposer } from './ThreadComposer';
@@ -51,19 +57,12 @@ import { WorkOverviewControl, type OverviewPeekRow } from './WorkOverviewControl
 import { WorkOverviewSection } from './WorkOverviewSection';
 import { EMPTY_WORK_OVERVIEW_CHOICES, useWorkOverviewStore } from '@/stores/useWorkOverviewStore';
 import { VarinLogo } from '@/components/ui/VarinLogo';
-import { Icon } from '@/components/icon/Icon';
 import { cn, formatDirectoryName } from '@/lib/utils';
 import { MarkdownRenderer } from '@/components/chat/MarkdownRenderer';
 import { ThreadProjection } from '@/lib/agent-runtime/thread-projection';
-import { historyParts } from '@/lib/agent-runtime/thread-content';
-import { projectTimeline } from '@/lib/agent-runtime/thread-timeline';
-import { ThreadMessage } from './ThreadMessage';
-import { ThreadNavigator } from './ThreadNavigator';
-import { copyTextToClipboard } from '@/lib/clipboard';
-import { toast } from '@/components/ui';
 import { ThreadOutput } from './ThreadMedia';
 import { ThreadQueuedInput } from './ThreadQueuedInput';
-import { ThreadChildReport } from './ThreadChildReport';
+import { ChildTasks } from '../conversation/ChildTasks';
 
 const operationCancelLabel = (operation: ThreadSnapshot['operations'][number]): string => {
   if ((operation.intent as { kind?: string } | null)?.kind === 'inference_request_v1') return 'Stop inference request';
@@ -181,6 +180,10 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
   const { t } = useI18n();
   const host = React.useSyncExternalStore(subscribeRuntimeEndpointChanged, getRuntimeEndpointGeneration, getRuntimeEndpointGeneration);
   const draftKey = threadIdentityKey(threadHostKey(), identity);
+  const [handoff] = React.useState(() => new MessageHandoff());
+  const reducedMotion = usePrefersReducedMotion();
+  React.useLayoutEffect(() => { handoff.select(String(host), draftKey, !readOnly, reducedMotion); }, [handoff, host, draftKey, readOnly, reducedMotion]);
+  React.useLayoutEffect(() => () => handoff.dispose(), [handoff]);
   const draft = useThreadDraftStore(state => state.drafts[draftKey] ?? EMPTY_THREAD_DRAFT);
   const setText = React.useCallback((value: React.SetStateAction<string>) => useThreadDraftStore.getState().patch(draftKey, current => ({ text: typeof value === 'function' ? value(current.text) : value })), [draftKey]);
   const setImages = React.useCallback((value: React.SetStateAction<ImageAttachment[]>) => useThreadDraftStore.getState().patch(draftKey, current => ({ images: typeof value === 'function' ? value(current.images) : value })), [draftKey]);
@@ -246,6 +249,8 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
     return () => { active = false; unsubscribe(); };
   }, [api, host, t]);
   const [error, setError] = React.useState<string>();
+  const [historyOpen, setHistoryOpen] = React.useState(false);
+  const [contextRunId, setContextRunId] = React.useState<string>();
   const [actionPending, setPending] = React.useState(false);
   const pendingAction = React.useRef<object | null>(null);
   const projection = React.useRef<ThreadProjection | undefined>(undefined);
@@ -254,12 +259,12 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
     historyGeneration.current += 1; setHistoryView(null); setHistoryLoading(false);
     setPreparingSource(false);
     pendingAction.current = null; setPending(false); setError(undefined);
-    setSnapshot(undefined); setProgress(''); setReadingFiles(false); fileReadGeneration.current += 1;
+    setSnapshot(undefined); setProgress(''); setHistoryOpen(false); setContextRunId(undefined); setReadingFiles(false); fileReadGeneration.current += 1;
     fileRead.current?.abort(); fileRead.current = null;
-    const view = new ThreadProjection(api, identity, value => { snapshotHost.current = host; setSnapshot(value); if (typeof document !== 'undefined' && document.visibilityState !== 'hidden') void useThreadStore.getState().markRead(identity.threadId, value.thread.activity_cursor).catch(() => {}); }, value => setError(value instanceof Error ? value.message : 'Thread unavailable'), setProgress);
+    const view = new ThreadProjection(api, identity, value => { snapshotHost.current = host; handoff.observe(value); setSnapshot(value); if (typeof document !== 'undefined' && document.visibilityState !== 'hidden') void useThreadStore.getState().markRead(identity.threadId, value.thread.activity_cursor).catch(() => {}); }, value => setError(value instanceof Error ? value.message : 'Thread unavailable'), setProgress);
     projection.current = view; view.start();
     return () => { identityGeneration.current += 1; historyGeneration.current += 1; fileReadGeneration.current += 1; fileRead.current?.abort(); fileRead.current = null; view.close(); };
-  }, [api, identity, host]);
+  }, [api, identity, host, handoff]);
   const snapshot = snapshotHost.current === host && snapshotState?.identity.threadId === identity.threadId && snapshotState?.identity.branchId === identity.branchId ? snapshotState : undefined;
   const workRevision = snapshot ? JSON.stringify([snapshot.activeRun?.id, snapshot.activeRun?.state,
     snapshot.children?.map(child => [child.child_thread_id, child.state])]) : null;
@@ -267,9 +272,9 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
   const branch = snapshot?.thread.branches.find(value => value.branch_id === identity.branchId);
   const run = snapshot?.activeRun ?? branch?.latest_run;
   const samplingConfiguration = (snapshot?.modelSelection.active?.configuration ?? run?.configuration) as
-    { providerId?: string; model?: string; thinkingLevel?: ThreadThinkingLevel; modelOptions?: { temperature?: number; catalogModelId?: string } } | undefined;
+    { providerId?: string; model?: string; thinkingLevel?: ThreadThinkingLevel; catalogModelId?: string; modelOptions?: { temperature?: number } } | undefined;
   const samplingModel: ThreadModel | undefined = samplingConfiguration?.providerId && samplingConfiguration.model ? {
-    providerId: samplingConfiguration.providerId, modelId: samplingConfiguration.modelOptions?.catalogModelId ?? samplingConfiguration.model,
+    providerId: samplingConfiguration.providerId, modelId: samplingConfiguration.catalogModelId ?? samplingConfiguration.model,
     ...(samplingConfiguration.thinkingLevel === undefined ? {} : { thinkingLevel: samplingConfiguration.thinkingLevel }),
     ...(samplingConfiguration.modelOptions?.temperature === undefined ? {} : { temperature: samplingConfiguration.modelOptions.temperature }),
   } : undefined;
@@ -288,8 +293,8 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
   const acceptsImages = active || delegated ? (run?.configuration as { acceptsImages?: boolean } | undefined)?.acceptsImages
     : models.find(model => model.providerId === providerId && model.modelId === modelId)?.acceptsImages;
   React.useEffect(() => {
-    const config = (snapshot?.modelSelection.desired?.configuration ?? run?.configuration) as { providerId?: string; model?: string; thinkingLevel?: ThreadThinkingLevel; modelOptions?: { catalogModelId?: string } } | undefined;
-    if (config?.providerId && config.model && (active || !providerId && preferredModel === undefined)) { setProviderId(config.providerId); setModelId(config.modelOptions?.catalogModelId ?? config.model); setThinkingLevel(config.thinkingLevel ?? 'off'); }
+    const config = (snapshot?.modelSelection.desired?.configuration ?? run?.configuration) as { providerId?: string; model?: string; thinkingLevel?: ThreadThinkingLevel; catalogModelId?: string } | undefined;
+    if (config?.providerId && config.model && (active || !providerId && preferredModel === undefined)) { setProviderId(config.providerId); setModelId(config.catalogModelId ?? config.model); setThinkingLevel(config.thinkingLevel ?? 'off'); }
   }, [run?.configuration, snapshot?.modelSelection.desired, active, providerId, preferredModel, setProviderId, setModelId, setThinkingLevel]);
   React.useEffect(() => {
     if (!snapshot || preferredModel === undefined) return;
@@ -435,7 +440,6 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
   const visibleHistory = historyView?.items ?? snapshot?.history ?? [];
   const previousHistory = historyView ? historyView.previous : snapshot?.historyPage.previous;
   const memorySelection = getRegisteredRuntimeAPIs()?.bots?.selection;
-  const memoryHead = historyView?.head ?? snapshot?.historyPage.head;
   const submissionFingerprint = () => JSON.stringify([identity.threadId, identity.branchId, projectedText, images, materials, providerId, modelId, thinkingLevel, inputMode, preparedSource?.source]);
   const sourceCannotBeApplied = active && Boolean(preparedSource) && !pendingInput.current;
   const sendDisabled = pending || (!draft.pendingInput && (preparingDelegation || preparingSource || sourceCannotBeApplied || readingFiles
@@ -452,12 +456,8 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
   if (snapshot?.operations.some(operation => operation.phase !== 'terminal')) overviewRows.push({ id: 'operations', section: 'outputs', icon: 'loader-4', label: t('harness.overview.outputs'), value: snapshot.operations.filter(operation => operation.phase !== 'terminal').length });
   if (hasComputer) overviewRows.push({ id: 'computer', section: 'computer', icon: 'computer', label: t('computer.automation.title') });
   const empty = Boolean(snapshot && !visibleHistory.length && !progress && !active);
-  const emptyWorkspacePath = preparedSource?.path ?? draft.workspacePath;
-  const scrollArea = React.useRef<HTMLDivElement>(null);
-  const stickToBottom = React.useRef(true);
-  React.useLayoutEffect(() => {
-    if (stickToBottom.current && !historyView) scrollArea.current?.scrollTo?.({ top: scrollArea.current.scrollHeight });
-  }, [visibleHistory.length, progress, historyView]);
+  const emptyWorkspacePath = preparedSource?.path ?? draft.workspacePath ?? launch?.selection.source?.live_root?.canonicalRoot;
+
   const overview = <WorkOverviewControl open={choices.overview ?? false} compactOpen={choices.compact ?? false}
     attention={Boolean(run?.waiting_on || recovery.unavailable || error)} rows={overviewRows}
     onOpenChange={open => disclosure(overviewKey, 'overview', open)} onCompactChange={open => disclosure(overviewKey, 'compact', open)}
@@ -469,30 +469,12 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
       {!readOnly && api.plan && <ThreadPlan api={api.plan} identity={identity} contextRevision={snapshot?.context.checkpoint?.revision} />}
       </WorkOverviewSection>
       <WorkOverviewSection title={t('harness.overview.threads')} icon="git-branch" open={choices.threads ?? false} onOpenChange={open => disclosure(overviewKey, 'threads', open)}>
+      {snapshot && <ChildTasks api={api} identity={identity} children={snapshot.children ?? []}
+        executions={snapshot.childExecutions ?? []} activity={snapshot.childActivity} pending={pending}
+        cancel={!readOnly && api.collaboration ? operationId => act(() => api.collaboration!.cancelChild(identity, operationId)) : undefined} />}
       {launch && <ThreadChildProfiles launch={launch.selection} />}
       {api.family && <ThreadFamily api={api.family} mediaRead={api.mediaRead} identity={identity} />}
       {!readOnly && api.messages && <ThreadMessages api={api.messages} family={api.family} identity={identity} eventCursor={snapshot?.eventCursor} cancelObservation={pending ? undefined : operationId => act(() => api.cancelOperation(operationId), true)} />}
-      {snapshot?.children?.map(child => <div key={child.operation_id} className="mx-auto max-w-3xl rounded border p-3 text-sm" aria-label="Child task">
-        <div>{child.selected_profile.preset_id ?? 'Normal child'}{child.source.kind !== 'absent' && ` · ${child.selected_profile.work_mode === 'read_only' ? 'Read-only source' : 'Private working copy'}`} · {child.state}</div>
-        <div className="text-xs text-muted-foreground">{child.source.kind === 'absent' ? 'No file source' : child.source.kind === 'pending' ? 'Preparing a stable source' : `Source ready · ${child.source.provenance.consistency}`}</div>
-        {child.source.kind === 'ready' && child.source.provenance.consistency !== 'fixed-root' && <div className="text-xs text-muted-foreground">{child.source.provenance.contentMode === 'saved-files' ? 'Saved files' : 'Fixed draft baseline'}{child.source.provenance.omittedDraftPaths.length > 0 ? ` · ${child.source.provenance.omittedDraftPaths.length} unsaved overlays omitted` : ''}</div>}
-        <div className="text-xs text-muted-foreground">{child.code_result.kind === 'published'
-          ? `File result fixed · revision ${child.code_result.result.result_revision} · effect: ${child.code_result.effect} · parent integration requires a separate action`
-          : child.code_result.kind === 'not_applicable' ? 'File result not applicable'
-          : child.code_result.kind === 'no_changes' ? 'No file changes'
-          : child.code_result.kind === 'unavailable' ? `File result unavailable · ${child.code_result.code} · effect: ${child.code_result.effect}`
-          : child.code_result.kind === 'candidate' ? 'File result fixed; publication pending'
-          : child.code_result.kind === 'settling' ? 'Waiting for child writers and original receipts before fixing the file result'
-          : child.report ? 'Report complete; file result waiting for writers and original receipts' : 'File result pending'}</div>
-        <div className="text-xs text-muted-foreground">{child.launch.model} · {child.selected_profile.tools.join(', ') || 'No tools'}</div>
-        <div className="text-xs text-muted-foreground">{child.child_thread_id}</div>
-        <p>{child.input.task}</p>
-        {child.report && <><div className="text-xs text-muted-foreground">Report · {child.report.outcome}</div><MarkdownRenderer messageId={`child:${child.operation_id}`} content={child.report.detail ?? "Report stored in child history."} /></>}
-        {child.report?.history_ids.map(itemId => <ThreadChildReport key={itemId} api={api} identity={identity} operationId={child.operation_id} itemId={itemId} />)}
-        <ChildExecutions key={`${host}:${identity.threadId}:${identity.branchId}:${child.operation_id}`} api={api} identity={identity} operationId={child.operation_id} />
-        {!readOnly && api.collaboration && <Button variant="ghost" size="sm" disabled={pending} onClick={() => void act(() => api.collaboration!.cancelChild(identity, child.operation_id))}>Stop child subtree</Button>}
-      </div>)}
-      {!readOnly && api.collaboration && <Button variant="outline" size="sm" disabled={pending} onClick={() => void act(() => api.collaboration!.cancelTree(identity))}>Stop task and children</Button>}
     {delegated && <div className="mx-auto w-full max-w-3xl px-4"><ThreadExecutions key={`${host}:${identity.threadId}:${identity.branchId}`} api={api} identity={identity} executions={snapshot?.delegatedExecutions ?? []} /></div>}
       </WorkOverviewSection>
       <WorkOverviewSection title={t('harness.overview.outputs')} icon="list-check-2" open={choices.outputs ?? false} onOpenChange={open => disclosure(overviewKey, 'outputs', open)}>
@@ -542,6 +524,7 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
         const superseded = (snapshot.context.checkpoint?.revision ?? 0) > job.request.expected_revision;
         const terminal = ['completed', 'cancelled', 'failed'].includes(jobRun.state);
         return <div key={jobRun.id} className="my-2 rounded border p-2">
+          <Button variant="ghost" size="sm" onClick={() => setContextRunId(jobRun.id)}>{t('chat.context.summaryProcess')}</Button>
           <p>Summary through {job.request.through_id.slice(-8)} · {published ? 'Applied' : jobRun.state}{!published && superseded ? ' · Checkpoint has changed' : ''}</p>
           {!readOnly && jobRun.state === 'completed' && !published && !superseded && <Button variant="ghost" size="sm" disabled={pending} onClick={() => void act(() => api.publishContext(identity, jobRun.id))}>Apply context summary</Button>}
           {!readOnly && !terminal && <Button variant="ghost" size="sm" disabled={pending} onClick={() => void act(() => api.cancelContext(identity, jobRun.id))}>Cancel summary</Button>}
@@ -563,59 +546,49 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
     setText(current => [current.trimEnd(), buildPdfMaterialCitationMarkdown(region.title, region)].filter(Boolean).join('\n\n'));
     setImages(current => [...current, region.image]);
     messageInput.current?.focus();
-  }}><section className="regular-chat-view relative flex h-full min-h-0 flex-col [container-type:inline-size]" aria-label="Thread conversation" data-thread-conversation="true">
+  }}><section ref={handoff.setRoot} className="regular-chat-view relative flex h-full min-h-0 flex-col [container-type:inline-size]" aria-label="Thread conversation" data-thread-conversation="true">
     {overview}
+    {contextRunId && <ContextHistoryDialog key={`${draftKey}:${contextRunId}`} api={api} identity={identity} runId={contextRunId} onClose={() => setContextRunId(undefined)} />}
+    {historyOpen && <ChatTreeDialog api={api} identity={identity} open onOpenChange={setHistoryOpen} busy={pending} recoverDisabled={active}
+      onFork={entry => { void forkFrom(entry.id); }} onRecover={entry => { showOverview('outputs'); void recovery.recover(entry.id); }} />}
+    {!readOnly && snapshot && <ThreadQuestions key={draftKey} operations={snapshot.operations} enabled={operation => !pending && run?.state === 'waiting' && run.waiting_on === operation.waiting_on}
+      onCancel={operation => act(() => api.cancelOperation(operation.id))} onAnswer={(operation, answer) => act(() => api.answerQuestion({ ...identity, operationId: operation.id, answer }))} />}
     <div className={cn('relative flex min-h-0 flex-1', empty && 'hidden')}>
-    {!empty && <ThreadNavigator items={visibleHistory} scrollArea={scrollArea} />}
-    <div ref={scrollArea} className="min-h-0 flex-1 overflow-y-auto p-4 space-y-4"
-      onScroll={event => { const el = event.currentTarget; stickToBottom.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80; }}>
-      <div className="mx-auto flex max-w-3xl items-center gap-2">
+    <ConversationSurface owner={String(host)} identity={draftKey} ready={Boolean(snapshot)} loadingLabel={t('common.loading')}>
+    <ConversationTimeline api={api} identity={identity} snapshot={snapshot} history={visibleHistory}
+      progress={historyView ? '' : progress} cwd={emptyWorkspacePath ?? ''} working={active && !launch?.preparation_failure && !pause} readOnly={readOnly}
+      memory={snapshot?.thread.bot_id ? memorySelection : undefined}
+      onQuote={quote => { if (!readOnly) { setText(current => [current.trimEnd(), quote].filter(Boolean).join('\n\n')); messageInput.current?.focus(); } }}
+      onFork={!readOnly && !pending && onBranchCreated ? id => void forkFrom(id) : undefined}
+      onRecover={!readOnly && !pending && !active && snapshot ? id => { showOverview('outputs'); void recovery.recover(id); } : undefined}
+      header={<>      <div className="mx-auto flex max-w-3xl items-center gap-2">
         {previousHistory && <Button variant="ghost" size="sm" disabled={historyLoading} onClick={() => void loadEarlier()}>{historyLoading ? 'Loading earlier history' : 'Load earlier history'}</Button>}
         {historyView && <Button variant="outline" size="sm" onClick={returnToLatest}>{historyView.head !== snapshot?.historyPage.head ? 'Show latest messages' : 'Return to latest view'}</Button>}
         {historyView && <span className="text-xs text-muted-foreground">Viewing saved history</span>}
       </div>
-      {projectTimeline(visibleHistory).map(({ item, result }) => <ThreadMessage key={item.id} api={api} identity={identity} item={item} result={result} running={active && item.run_id === run?.id}
-        onQuote={readOnly ? undefined : quote => { setText(current => [current.trimEnd(), quote.split('\n').map(line => `> ${line}`).join('\n'), ''].filter((part, index) => part || index === 2).join('\n\n')); messageInput.current?.focus(); }}
-        onFork={!readOnly && !pending && onBranchCreated ? () => void forkFrom(item.id) : undefined}
-        onRecover={!readOnly && !pending && !active && snapshot ? () => { showOverview('outputs'); void recovery.recover(item.id); } : undefined}>
-        <ThreadSkillMaterials content={item.content} />
-        {!readOnly && <ReviewTransferActions identity={identity} item={item} />}
-        <div className="flex items-center gap-1 text-muted-foreground opacity-60 transition-opacity group-hover/message:opacity-100 focus-within:opacity-100">
-          <button type="button" className="rounded-md p-1.5 hover:bg-interactive-hover" title={t('chat.messageBody.actions.copyMessage')} aria-label={t('chat.messageBody.actions.copyMessage')} onClick={() => {
-            const text = historyParts(item.content, item.source).flatMap(part => part.kind === 'text' ? [part.text] : []).join('\n\n');
-            void copyTextToClipboard(text).then(result => { if (!result.ok) toast.error(result.error); });
-          }}><Icon name="file-copy" className="size-3.5" /></button>
-          {!readOnly && (item.source === 'user' || item.source === 'assistant') && <button type="button" className="rounded-md p-1.5 hover:bg-interactive-hover disabled:opacity-40"
-            disabled={pending || active || !snapshot} title={t('chat.messageBody.actions.revertAria')} aria-label={t('chat.messageBody.actions.revertAria')} onClick={() => { showOverview('outputs'); void recovery.recover(item.id); }}><Icon name="history" className="size-3.5" /></button>}
-          {!readOnly && onBranchCreated && <button type="button" className="rounded-md p-1.5 hover:bg-interactive-hover disabled:opacity-40" disabled={pending}
-            title={t('chat.messageBody.actions.forkAria')} aria-label={t('chat.messageBody.actions.forkAria')} onClick={() => void forkFrom(item.id)}><Icon name="git-branch" className="size-3.5" /></button>}
-          {!readOnly && <button type="button" className="rounded-md p-1.5 hover:bg-interactive-hover disabled:opacity-40" disabled={pending || !snapshot || !providerId || !modelId}
-            title={t('thread.message.summarize')} aria-label={t('thread.message.summarize')} onClick={() => { showOverview('memory'); void compactThrough(item.id); }}><Icon name="stack" className="size-3.5" /></button>}
-        </div>
-        {!readOnly && snapshot?.thread.bot_id && memorySelection && memoryHead && threadMemorySourceText(item) && <ThreadMemorySelection
-          api={memorySelection} identity={{ ...identity, headId: memoryHead }} itemId={item.id} text={threadMemorySourceText(item)} />}
-      </ThreadMessage>)}
-      {!historyView && progress && <article className="mx-auto max-w-3xl" aria-label="Streaming assistant response"><MarkdownRenderer messageId={`${identity.threadId}:progress`} isStreaming content={progress} /></article>}
-      {snapshot?.operations.filter(operation => operation.id !== pause?.action_id).map(operation => <div key={operation.id} className="mx-auto max-w-3xl">
+</>}
+      footer={<>      {snapshot?.operations.filter(operation => operation.id !== pause?.action_id).map(operation => <div key={operation.id} className="mx-auto max-w-3xl">
         <ThreadPermission operation={operation} enabled={!readOnly && !pending && operation.run_id === run?.id && !run?.cancel_requested} onDecide={(permissionId, decision) => act(() => api.decidePermission({ ...identity, operationId: operation.id, permissionId, decision }))} />
-        {operation.executor === 'ask_user' && <ThreadQuestion operation={operation} enabled={!readOnly && !pending && run?.state === 'waiting' && run.waiting_on === operation.waiting_on} onAnswer={answer => act(() => api.answerQuestion({ ...identity, operationId: operation.id, answer }))} />}
       </div>)}
       {!readOnly && snapshot && <ThreadMcpInteractions key={`mcp:${host}:${identity.threadId}:${identity.branchId}`} api={api} identity={identity} eventCursor={snapshot.eventCursor}
         models={models} selectedModel={samplingModel} modelError={modelError} />}
-      {!readOnly && snapshot?.inputs.filter(input => input.state === 'queued').map(input => <ThreadQueuedInput key={`${host}:${identity.threadId}:${identity.branchId}:${input.id}:${input.revision}`}
-        api={api} identity={identity} input={input} pending={pending}
-        onSave={(text, images) => act(() => images === undefined ? api.editInput(input.id, input.revision, text) : api.editInput(input.id, input.revision, text, images))}
-        onCancel={() => act(() => api.cancelInput(input.id, input.revision), true)} />)}
-    </div>
+</>} />
+    </ConversationSurface>
     {readOnly && error && <p role="alert" className="px-4 text-sm text-destructive">{error}</p>}
     </div>
     {empty && <div className="min-h-6 flex-1" />}
-    {!readOnly && <div className="chat-input-column mx-auto w-full max-w-[960px] shrink-0 space-y-5 px-4 pb-4 md:px-6">
-    {empty && <div className="flex flex-col items-center gap-5 pb-1 text-center"><VarinLogo width={24} height={24} decorative className="text-muted-foreground" /><h1 className="text-2xl font-medium tracking-tight text-foreground md:text-3xl">{emptyWorkspacePath ? t('chat.emptyState.draftTitleWithProject', { project: formatDirectoryName(emptyWorkspacePath) }) : t('chat.emptyState.draftTitle')}</h1></div>}
+    {!readOnly && <div className="shrink-0 space-y-5 pb-4">
+    {empty && <div className="chat-input-column flex flex-col items-center gap-5 pb-1 text-center"><VarinLogo width={24} height={24} decorative className="text-muted-foreground" /><h1 className="text-2xl font-medium tracking-tight text-foreground md:text-3xl">{emptyWorkspacePath ? t('chat.emptyState.draftTitleWithProject', { project: formatDirectoryName(emptyWorkspacePath) }) : t('chat.emptyState.draftTitle')}</h1></div>}
+    {snapshot && <ThreadWorkStrips api={api} identity={identity} goals={snapshot.goals} followups={snapshot.followups} pending={pending} act={act} onGoal={() => showOverview('plan')} onFollowups={() => showOverview('outputs')} />}
+    <div className="chat-input-column conversation-composer-queue">      {!readOnly && snapshot?.inputs.filter(input => input.state === 'queued').map(input => <ThreadQueuedInput key={`${host}:${identity.threadId}:${identity.branchId}:${input.id}:${input.revision}`}
+        api={api} identity={identity} input={input} pending={pending}
+        onSave={(text, images) => act(() => images === undefined ? api.editInput(input.id, input.revision, text) : api.editInput(input.id, input.revision, text, images))}
+        onCancel={() => act(() => api.cancelInput(input.id, input.revision), true)} />)}</div>
     <form className="space-y-2" onSubmit={event => {
       event.preventDefault();
       if (sendDisabled || fileRead.current) return;
       const generation = identityGeneration.current;
+      const sourceRect = handoff.captureDraft();
       void act(async () => {
         const fingerprint = submissionFingerprint();
         if (!pendingInput.current) {
@@ -643,7 +616,7 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
             : delegated ? { kind: 'continue' as const, input: continuation } : { kind: 'submit' as const, input: submit }) };
         }
         const original = pendingInput.current;
-        await deliverThreadInput(api, original, next => {
+        const acceptedInputId = await deliverThreadInput(api, original, next => {
           useThreadDraftStore.getState().patch(draftKey, current => current.pendingInput?.input.key === original.input.key ? { pendingInput: next } : {});
         });
         acknowledgeEditorContextAttachments(original.editorContext ?? []);
@@ -658,9 +631,14 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
         } : {});
         if (generation !== identityGeneration.current || host !== getRuntimeEndpointGeneration()) return;
         returnToLatest();
+        if (acceptedInputId && original.kind !== 'enqueue') {
+          useTimelineViewStore.getState().anchor(draftKey, acceptedInputId);
+          handoff.submit(original.input.key, draftKey, sourceRect);
+          handoff.accepted(original.input.key, acceptedInputId);
+        }
       });
     }}>
-      {delegated && !active && <p role="status" className="text-sm text-muted-foreground">{preparingDelegation
+      {delegated && !active && preparingDelegation && <p role="status" className="text-sm text-muted-foreground">{preparingDelegation
         ? 'A delegated execution is preparing. Its original input remains accepted.'
         : 'Continue in a new Run using this child’s exact previous configuration and source selection. Previous reports and file results remain separate.'}</p>}
       {sourceCannotBeApplied && <p role="status" className="text-sm text-muted-foreground">The prepared workspace needs a new run. Keep the current workspace to queue this message, or wait for this run to finish.</p>}
@@ -668,20 +646,23 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
       {policy?.preparation && <p role="status" aria-label="Strategy preparation" className="text-sm text-muted-foreground">{policy.preparation.status === 'preparing' ? 'The Host is preparing a strategy candidate.' : `The Host could not prepare the strategy candidate: ${policy.preparation.code ?? 'preparation failed'}`}</p>}
       {policyUpdatePending && <p role="status" aria-label="Policy update" className="text-sm text-muted-foreground">{policyUpdate?.status === 'preparing' ? 'Preparing the selected strategy. The current strategy remains active.' : 'Strategy prepared for the next closed decision boundary.'}{pause ? ' This run remains paused until you resume it.' : ''}</p>}
       {policyUpdate?.status === 'failed' && <p role="status" aria-label="Policy update failed" className="text-sm text-muted-foreground">{policyIncompatible ? 'The selected strategy cannot preserve this private checkpoint. The current strategy remains active. Restarting strategy state keeps conversation history and independent tasks.' : `Strategy update was not applied: ${policyUpdate.failure ?? 'preparation failed'}`}</p>}
-      {snapshot?.launch?.preparation_failure && <p role="alert" className="text-sm text-destructive">Preparation needs attention: {threadSourceFailureMessage(snapshot.launch.preparation_failure) ?? snapshot.launch.preparation_failure}</p>}
-      {draft.pendingInput?.status === 'unknown' && <p role="status" className="text-sm text-muted-foreground">{draft.pendingInput.kind === 'submit' && draft.pendingInput.acceptedRunId ? 'Message accepted. Retry finishes its Goal registration without sending the message again.' : 'Delivery is unconfirmed. Sending again checks the same original request; it does not create a second message.'}</p>}
+      {snapshot?.launch?.preparation_failure && <p role="alert" className="text-sm text-destructive">{t('chat.run.preparationFailed', { reason: threadSourceFailureMessage(snapshot.launch.preparation_failure) ?? snapshot.launch.preparation_failure })}</p>}
+      {draft.pendingInput?.status === 'unknown' && <p role="status" className="text-sm text-muted-foreground">{draft.pendingInput.kind === 'submit' && draft.pendingInput.acceptedRunId ? t('chat.send.goalPending') : t('chat.send.unconfirmed')}</p>}
       {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
       {modelError && <p role="alert" className="text-sm text-destructive">{modelError}</p>}
-      {snapshot?.modelSelection.desired?.status === 'failed' && <p role="alert" className="text-sm text-destructive">Model preparation failed: {snapshot.modelSelection.desired.failure}</p>}
-      {snapshot?.modelSelection.desired && snapshot.modelSelection.desired.id !== snapshot.modelSelection.active?.id && snapshot.modelSelection.desired.status !== 'failed' && <p role="status" className="text-sm text-muted-foreground">Applies to the next model request</p>}
-      {images.length > 0 && acceptsImages === false && <p role="alert" className="text-sm text-destructive">Choose an image-capable model or remove these images before sending</p>}
+      {snapshot?.modelSelection.desired?.status === 'failed' && <p role="alert" className="text-sm text-destructive">{t('chat.model.preparationFailed', { reason: snapshot.modelSelection.desired.failure ?? '' })}</p>}
+      {snapshot?.modelSelection.desired && snapshot.modelSelection.desired.id !== snapshot.modelSelection.active?.id && snapshot.modelSelection.desired.status !== 'failed' && <p role="status" className="text-sm text-muted-foreground">{t('chat.model.nextRequest')}</p>}
+      {images.length > 0 && acceptsImages === false && <p role="alert" className="text-sm text-destructive">{t('chat.model.imagesUnsupported')}</p>}
       <input ref={fileInput} type="file" accept="image/*" multiple hidden aria-label="Choose image attachments"
         onChange={event => { const files = [...(event.target.files ?? [])]; event.target.value = ''; void addFiles(files); }} />
       <input ref={pdfInput} type="file" accept="application/pdf,.pdf" multiple hidden aria-label={t('chat.fileAttachment.actions.choosePdfs')}
         onChange={event => { const files = [...(event.target.files ?? [])]; event.target.value = ''; void addFiles(files); }} />
       <AutoReviewBanner identity={identity} />
       {draft.goalArmed && <p className="px-2 typography-meta text-primary">{t('thread.composer.goalArmed')}</p>}
-      <ThreadComposer editorRef={messageInput} value={text} onChange={setText} models={models}
+      <ThreadComposer onOpenHistory={() => setHistoryOpen(true)} identityKey={draftKey} placement={empty ? 'center' : 'bottom'}
+        messageHistory={visibleHistory.filter(item => item.source === 'user').slice().reverse().map(item => typeof item.content === 'string' ? item.content : typeof (item.content as { text?: unknown })?.text === 'string' ? (item.content as { text: string }).text : '')}
+        onCompact={branch?.head && !active && providerId && modelId ? () => { showOverview('memory'); void compactThrough(branch.head!); } : undefined}
+        editorRef={messageInput} value={text} onChange={setText} models={models}
         providerId={providerId} modelId={modelId} thinkingLevel={thinkingLevel} onModelChange={selectModel}
         modelDisabled={pending || (delegated && !active)} attachmentDisabled={pending || Boolean(draft.pendingInput) || readingFiles}
         imageDisabled={acceptsImages === false} sendDisabled={sendDisabled} pending={pending} active={active} retrying={Boolean(draft.pendingInput)}
@@ -698,7 +679,7 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
           : launch?.selection.source?.resource_owner.kind === 'local' && launch.selection.source.mode === 'live_root' ? launch.selection.source.live_root?.canonicalRoot
           : !launch?.selection.source ? draft.workspacePath : undefined}
         skills={snapshot?.context.checkpoint?.resources?.snapshot.skills.map(skill => skill.name) ?? []}>
-        <div className="space-y-2 px-3 empty:hidden">      <EditorContextAttachmentChips threadKey={draftKey} />
+        <div className="space-y-2 px-3 empty:hidden">{emptyWorkspacePath && <ActiveEditorSuggestion threadKey={draftKey} />}      <EditorContextAttachmentChips threadKey={draftKey} />
       {inlineContext.length > 0 && <div className="flex flex-wrap gap-1" aria-label="Attached context">
         {inlineContext.flatMap(bucket => bucket.drafts.map(item => <Button key={item.id} type="button" size="sm" variant="outline"
           title={item.text || item.fileLabel} onClick={() => useInlineCommentDraftStore.getState().acknowledgeDrafts(bucket.key, [item])}>
@@ -712,20 +693,20 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
       {readingFiles && <p role="status">{t('chat.fileAttachment.uploading')}</p>}
         </div>
       </ThreadComposer>
-      <div className="flex gap-2">
-        {run && pause && <Button type="button" variant="outline" disabled={pending || run.cancel_requested} onClick={() => void act(() => api.resume(run.id, pause.wait_id))}>Resume run</Button>}
+      <div className="chat-input-column flex gap-2">
+        {run && pause && <Button type="button" variant="outline" disabled={pending || run.cancel_requested} onClick={() => void act(() => api.resume(run.id, pause.wait_id))}>{t('chat.run.resume')}</Button>}
         {active && run && policyUpdate && policyIncompatible && <Button type="button" variant="outline" disabled={pending || run.cancel_requested} onClick={() => void act(() => api.restartPolicy(identity, run.id, policyUpdate.selection_id))}>Restart strategy state</Button>}
         {active && run && policyUpdate && policyUpdatePending && <Button type="button" variant="ghost" disabled={pending || run.cancel_requested} onClick={() => void act(() => api.cancelPolicyUpdate(identity, run.id, policyUpdate.selection_id))}>Cancel strategy update</Button>}
-        {run && launch?.startable && launch.requires_rebind && !pause && <Button type="button" variant="ghost" disabled={pending} onClick={() => void act(() => api.retryPreparation(run.id))}>Retry preparation</Button>}
+        {run && launch?.startable && launch.requires_rebind && !pause && <Button type="button" variant="ghost" disabled={pending} onClick={() => void act(() => api.retryPreparation(run.id))}>{t('chat.run.retryPreparation')}</Button>}
       </div>
     </form>
-    {empty && <DraftPresetChips cwd={draft.workspacePath ?? initialWorkspacePath} sessionId={identity.threadId} className="oc-draft-starters"
+    {empty && <div className="conversation-starters"><DraftPresetChips cwd={draft.workspacePath ?? initialWorkspacePath} sessionId={identity.threadId} className="oc-draft-starters"
       onSubmit={starter => {
         if (starter.ref.type === 'command' && starter.ref.name === 'craft-goal') { useThreadDraftStore.getState().patch(draftKey, { goalArmed: true }); messageInput.current?.focus(); return; }
         if (starter.ref.type === 'command' && starter.ref.name === 'schedule-task') { useUIStore.getState().setScheduledTasksDialogOpen(true); return; }
         setText(current => [current.trimEnd(), starter.submitText].filter(Boolean).join('\n\n'));
         messageInput.current?.focus();
-      }} />}
+      }} /></div>}
     </div>}
     {empty && <div className="min-h-6 flex-1" />}
   </section></ThreadMaterials>;

@@ -31,6 +31,44 @@ struct ViewMetadata { origin: RequestOrigin, binding: BindingMetadata }
 #[derive(Deserialize)]
 struct BindingMetadata { provider_family: String, model: String }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ModelPresentationParams { pub request_ids: Vec<String> }
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ModelPresentation {
+    pub request_id: String,
+    pub provider_family: String,
+    pub model_id: String,
+    pub usage: crate::catalog::inference::InferenceUsage,
+}
+pub struct ModelPresentationRead {
+    steps: Vec<ModelStep>, content: crate::content::ContentStore,
+    _publication: crate::content::ContentPublication,
+}
+impl Catalog {
+    /// The trusted history reader supplies IDs obtained from admitted assistant items.
+    pub fn capture_model_presentations(&self, ids: &[String]) -> Result<ModelPresentationRead> {
+        let steps = ids.iter().map(|id| record(&self.db, "model_steps", id)).collect::<Result<Vec<ModelStep>>>()?;
+        Ok(ModelPresentationRead { steps, content: self.content.clone(), _publication: self.content.begin_publication() })
+    }
+}
+impl ModelPresentationRead {
+    pub fn load(self, cancelled: &dyn Fn() -> bool) -> Result<Vec<ModelPresentation>> {
+        self.steps.into_iter().map(|step| {
+            if cancelled() { return Err(RuntimeError::DispatchCancelled); }
+            let metadata: SnapshotMetadata = serde_json::from_slice(&self.content.load_bytes(&step.request, cancelled)?)?;
+            let usage: UsageReceipt = step.usage.map(serde_json::from_value).transpose()?.unwrap_or_default();
+            Ok(ModelPresentation { request_id: step.id, provider_family: metadata.view.binding.provider_family,
+                model_id: metadata.view.binding.model, usage: crate::catalog::inference::InferenceUsage {
+                    measurement: usage.measurement, input_tokens: usage.input_tokens, output_tokens: usage.output_tokens,
+                    cached_input_tokens: usage.cached_input_tokens, cache_write_tokens: usage.cache_write_tokens,
+                    reasoning_tokens: usage.reasoning_tokens, pricing_version: usage.pricing_version,
+                } })
+        }).collect()
+    }
+}
+
 pub struct ThreadUsageRead {
     selection: ThreadUsageParams, cursor: u64, steps: Vec<ModelStep>, operations: Vec<Operation>,
     content: crate::content::ContentStore, _publication: crate::content::ContentPublication,

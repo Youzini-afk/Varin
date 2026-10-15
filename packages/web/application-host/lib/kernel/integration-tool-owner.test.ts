@@ -178,7 +178,7 @@ it('the installed example integrates a fixed publication from a later Run of the
       const admitted = h.mergeResult.mock.lastCall![0];
       expect(receipt).toEqual({ completion: { kind: 'result', outcome: 'succeeded', effect: 'confirmed',
         content: domainReceipt(admitted.operationId!) }, executor_stopped: true });
-      expect(admitted).toMatchObject({ executionId: h.journalAnchor.executionId, requireTurnBinding: true,
+      expect(admitted).toMatchObject({
         workspaceId: 'workspace', threadId: 'child-thread', branchId: 'child-source', resultRevision: 7,
         parentAuthority: { kind: 'directory', directory: '/fixture/parent-source', workspaceId: 'documents-workspace' },
         operationBinding: { kind: 'runtime_operation', parentRunId: 'later-parent-run', parentThreadId: 'parent-thread',

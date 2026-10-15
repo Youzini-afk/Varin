@@ -73,8 +73,10 @@ const inputBeforeAdmission = <T>(decode: () => T): T => {
 };
 
 /** Mounted in the existing authenticated Application Host, shared by Web and Electron. */
-export function registerThreadRoutes(app: Express, adapter: ThreadAdapter, requireAuth: RequestHandler, research?: ThreadResearchAPI, computer?: ThreadComputerAPI, materials?: ThreadMaterialsAPI): void {
+export function registerThreadRoutes(app: Express, adapter: ThreadAdapter, requireAuth: RequestHandler, research?: ThreadResearchAPI, computer?: ThreadComputerAPI, materials?: ThreadMaterialsAPI,
+  integrations?: Pick<ReturnType<typeof import('./thread-integrations.js').createThreadIntegrations>, 'submit'>): void {
   const fields: Record<string, readonly string[]> = {
+    'child/integration': ['runtime', 'threadId', 'branchId', 'key', 'executionId', 'publicationId', 'action', 'sourceOwner', 'expectedBindingFingerprint', 'resolutions', 'operationId', 'sourceRunId'],
     'materials/upload': ['runtime', 'threadId', 'branchId', 'request'],
     'materials/read': ['runtime', 'threadId', 'branchId', 'request'],
     'materials/read-source': ['runtime', 'threadId', 'branchId', 'sourceRunId', 'request'],
@@ -106,6 +108,8 @@ export function registerThreadRoutes(app: Express, adapter: ThreadAdapter, requi
     'source/resolve': ['runtime', 'threadId', 'branchId', 'resourceOwner', 'path'],
     'source/prepare': ['resourceOwner', 'runtime', 'threadId', 'branchId', 'key', 'workspaceId', 'mode', 'content', 'captureScopes'],
     'context/compact': ['runtime', 'threadId', 'branchId', 'key', 'throughId', 'expectedRevision', 'model'],
+    'context/history': ['runtime', 'threadId', 'branchId', 'runId', 'headId', 'beforeId'],
+    'history/file': ['runtime', 'threadId', 'branchId', 'itemId', 'path'],
     'context/publish': ['runtime', 'threadId', 'branchId', 'runId'], 'context/cancel': ['runtime', 'threadId', 'branchId', 'runId'], 'context/resume': ['runtime', 'threadId', 'branchId', 'runId'],
     'messages/send': ['runtime', 'threadId', 'branchId', 'request'],
     'messages/list': ['runtime', 'threadId', 'branchId', 'request'],
@@ -234,6 +238,22 @@ export function registerThreadRoutes(app: Express, adapter: ThreadAdapter, requi
     post('research/sources', (body, signal) => research.sources(selection(body), request(body.request, ['kind']), signal));
   }
   post('process/terminal', body => adapter.openProcessTerminal({ ...identity(body), operationId: text(body.operationId) }));
+  if (integrations) post('child/integration', body => {
+    const common = { ...identity(body), key: text(body.key), executionId: text(body.executionId), publicationId: text(body.publicationId),
+      ...(body.sourceOwner === undefined ? {} : { sourceOwner: { ownerId: text(object(body.sourceOwner).ownerId), generation: revision(object(body.sourceOwner).generation) } }) };
+    if (body.action === 'preview') return integrations.submit({ ...common, action: 'preview' });
+    if (body.action === 'undo') return integrations.submit({ ...common, action: 'undo', operationId: text(body.operationId), sourceRunId: text(body.sourceRunId) });
+    if (body.action !== 'apply' || !Array.isArray(body.resolutions)) throw new Error('Invalid integration action');
+    const resolutions = body.resolutions.map(value => {
+      const entry = object(value);
+      if (!['parent', 'child', 'base', 'text'].includes(String(entry.choice))) throw new Error('Invalid conflict choice');
+      if (entry.choice === 'text' && typeof entry.text !== 'string') throw new Error('Text resolution requires text');
+      return { path: text(entry.path), choice: entry.choice as import('@varin/protocol').ThreadConflictResolution['choice'],
+        ...(typeof entry.text === 'string' ? { text: entry.text } : {}), expectedParentRevision: text(entry.expectedParentRevision),
+        ...(entry.expectedLocalEditRevision === undefined ? {} : { expectedLocalEditRevision: revision(entry.expectedLocalEditRevision) }) };
+    });
+    return integrations.submit({ ...common, action: 'apply', expectedBindingFingerprint: text(body.expectedBindingFingerprint), resolutions });
+  });
   post('plan/read', (body, signal) => adapter.readPlan(identity(body), signal));
   post('plan/update', (body, signal) => {
     if (typeof body.content !== 'string') throw new Error('Plan content must be text');
@@ -401,6 +421,8 @@ export function registerThreadRoutes(app: Express, adapter: ThreadAdapter, requi
       model: modelSelection(body.model) }, signal);
   });
   post('context/publish', body => adapter.publishContext(identity(body), text(body.runId)));
+  post('context/history', body => adapter.contextHistory(identity(body), text(body.runId),
+    body.headId === undefined && body.beforeId === undefined ? undefined : { headId: text(body.headId), beforeId: text(body.beforeId) }));
   post('context/cancel', body => adapter.cancelContext(identity(body), text(body.runId)));
   post('context/resume', async body => { await adapter.resumeContext(identity(body), text(body.runId)); return {}; });
   post('submit', async body => {
@@ -435,6 +457,7 @@ export function registerThreadRoutes(app: Express, adapter: ThreadAdapter, requi
     return adapter.submit(input);
   });
   post('history/page', body => adapter.historyPage(identity(body), { headId: text(body.headId), beforeId: text(body.beforeId) }));
+  post('history/file', (body, signal) => adapter.fileTarget({ ...identity(body), itemId: text(body.itemId), path: text(body.path) }, signal));
   post('snapshot', body => adapter.snapshot(identity(body)));
   post('usage', (body, signal) => adapter.usage(identity(body), signal));
   post('enqueue', async body => {

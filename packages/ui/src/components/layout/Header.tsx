@@ -103,6 +103,7 @@ export const Header: React.FC<HeaderProps> = ({
   const setSessionSwitcherOpen = useUIStore((state) => state.setSessionSwitcherOpen);
   const toggleSidebar = useUIStore((state) => state.toggleSidebar);
   const isSidebarOpen = useUIStore((state) => state.isSidebarOpen);
+  const openContextOverview = useUIStore(state => state.openContextOverview);
   const openContextPlan = useUIStore((state) => state.openContextPlan);
   const closeContextPanel = useUIStore((state) => state.closeContextPanel);
   const activeMainTab = useUIStore((state) => state.activeMainTab);
@@ -916,6 +917,10 @@ export const Header: React.FC<HeaderProps> = ({
         <div className="flex shrink-0 items-center gap-1">
           <OpenInAppButton directory={actionDirectory} className="mr-1" />
           <WorkbenchServices />
+          {openDirectory && <Tooltip><TooltipTrigger asChild><button type="button" className={DESKTOP_HEADER_ICON_BUTTON_CLASS}
+            aria-label={t('contextSidebar.section.context')} aria-pressed={activeContextMode === 'context'}
+            onClick={() => activeContextMode === 'context' ? closeContextPanel(openDirectory) : openContextOverview(openDirectory)}><Icon name="pie-chart" className="size-4" /></button></TooltipTrigger>
+            <TooltipContent>{t('contextSidebar.section.context')}</TooltipContent></Tooltip>}
           <ContextPanelControls />
           <WindowsWindowControls visible={usesFramelessChrome && windowControlsSide === 'right'} position="right" />
         </div>

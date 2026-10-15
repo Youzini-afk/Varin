@@ -1,3 +1,4 @@
+import { useI18n } from '@/lib/i18n';
 import React from 'react';
 import { getRuntimeEndpointGeneration, ThreadRequestError, subscribeRuntimeEndpointChanged } from '@varin/application-client';
 import type { ThreadIdentity, ThreadPlanAPI, ThreadPlanState } from '@varin/application-client';
@@ -20,6 +21,7 @@ export function ThreadPlan({ api, identity, contextRevision }: Props) {
 }
 
 function PlanCard({ api, identity, contextRevision, host }: Props & { host: number }) {
+  const { t } = useI18n();
   const [state, setState] = React.useState<ThreadPlanState>();
   const [loading, setLoading] = React.useState(true);
   const [readError, setReadError] = React.useState<ReadFailure | null>(null);
@@ -91,40 +93,39 @@ function PlanCard({ api, identity, contextRevision, host }: Props & { host: numb
       const scope = scopeFailure(error);
       if (scope) {
         reads.current += 1; setLoading(false); setReadError(scope); setState(undefined); request.current = null;
-        setSaveError('This conversation cannot save a plan right now. Your draft is kept.');
+        setSaveError(t('chat.plan.cannotSave'));
       } else if (error instanceof ThreadRequestError && error.status === 409) {
         request.current = null; setConflict(true);
-        setSaveError('The plan or conversation changed. Your draft is kept. Review the current plan before saving again.');
+        setSaveError(t('chat.plan.conflict'));
         await refresh();
-      } else setSaveError('Could not confirm the save. Your draft is kept; retry uses the same request.');
+      } else setSaveError(t('chat.plan.retrySave'));
     } finally { if (generation === lifecycle.current && host === getRuntimeEndpointGeneration()) setSaving(false); }
   };
   const summary = summarizePlan(state?.plan?.content ?? '');
   const changed = editing && basis && state && (basis.headId !== state.headId || basis.plan?.ref !== state.plan?.ref);
   return <section aria-label="Conversation plan" className="mx-auto max-w-3xl space-y-2 rounded border p-3 text-sm">
-    <div className="font-medium">Conversation plan{summary.total > 0 ? ` · ${summary.done}/${summary.total} completed` : ''}</div>
-    {loading && <p role="status">Loading plan…</p>}
-    {readError === 'failed' && <p role="alert">Could not read the current plan. <Button variant="ghost" size="sm" onClick={() => void refresh()}>Retry reading plan</Button></p>}
-    {readError === 'not-ready' && <p role="status">The plan is not ready yet. Send the first message and wait for conversation setup; plan availability will refresh automatically.</p>}
-    {readError === 'unsupported' && <p role="status">Conversation plans are unavailable for this conversation scope.</p>}
+    <div className="font-medium">{t('chat.plan.title')}{summary.total > 0 ? ` · ${summary.done}/${summary.total}` : ''}</div>
+    {loading && <p role="status">{t('common.loading')}</p>}
+    {readError === 'failed' && <p role="alert">{t('chat.plan.unavailable')} <Button variant="ghost" size="sm" onClick={() => void refresh()}>{t('chat.mcp.refresh')}</Button></p>}
+    {readError === 'not-ready' && <p role="status">{t('chat.plan.notReady')}</p>}
+    {readError === 'unsupported' && <p role="status">{t('chat.plan.unsupported')}</p>}
     {state && <div aria-label="Current plan">
-      {state.plan === null ? <p>No plan yet.</p> : state.plan.content === '' ? <p>The plan is empty.</p>
+      {state.plan === null ? <p>{t('chat.plan.empty')}</p> : state.plan.content === '' ? <p>{t('chat.plan.empty')}</p>
         : <MarkdownRenderer messageId={`plan:${state.plan.ref}`} content={state.plan.content} />}
     </div>}
     {saveError && <p role="alert">{saveError}</p>}
     {editing ? <>
       <Textarea aria-label="Edit conversation plan" value={draft} disabled={saving || readError === 'not-ready' || readError === 'unsupported'} onChange={event => setDraft(event.target.value)} />
-      <p className="text-xs text-muted-foreground">Switching conversation, branch, or Host discards this unsaved draft.</p>
-      {changed && !conflict && <p role="status">The current plan or conversation changed while you were editing. Your draft is unchanged.</p>}
+      {changed && !conflict && <p role="status">{t('chat.plan.conflict')}</p>}
       {(changed || conflict) && <Button variant="outline" size="sm" disabled={saving || loading || Boolean(readError) || !state} onClick={() => {
         setBasis(state); setConflict(false); setSaveError(''); request.current = null;
-      }}>Keep draft against current revision</Button>}
+      }}>{t('chat.plan.rebase')}</Button>}
       <div className="flex gap-2">
-        <Button size="sm" disabled={saving || loading || Boolean(readError) || conflict} onClick={() => void save()}>{saving ? 'Saving plan…' : 'Save plan'}</Button>
-        <Button variant="ghost" size="sm" disabled={saving} onClick={() => { setEditing(false); setDraft(''); setBasis(undefined); setConflict(false); setSaveError(''); request.current = null; }}>Cancel edit</Button>
+        <Button size="sm" disabled={saving || loading || Boolean(readError) || conflict} onClick={() => void save()}>{t(saving ? 'chat.plan.saving' : 'chat.plan.save')}</Button>
+        <Button variant="ghost" size="sm" disabled={saving} onClick={() => { setEditing(false); setDraft(''); setBasis(undefined); setConflict(false); setSaveError(''); request.current = null; }}>{t('chat.plan.cancel')}</Button>
       </div>
     </> : !readError || readError === 'failed' ? <Button variant="outline" size="sm" disabled={!state || loading || Boolean(readError) || saving} onClick={() => {
       setBasis(state); setDraft(state?.plan?.content ?? ''); setEditing(true); setSaveError('');
-    }}>{state?.plan ? 'Edit plan' : 'Create plan'}</Button> : null}
+    }}>{t(state?.plan ? 'chat.plan.edit' : 'chat.plan.create')}</Button> : null}
   </section>;
 }

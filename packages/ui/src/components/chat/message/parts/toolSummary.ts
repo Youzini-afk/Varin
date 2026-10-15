@@ -25,6 +25,7 @@ export interface ToolSummary {
 
 /** Tool names that are read-only and can be grouped */
 const READ_ONLY_TOOLS = new Set([
+  "file_read", "file_list", "file_search", "language_diagnostics", "language_symbols", "language_document_symbols", "language_definition", "language_references", "language_hover", "language_call_hierarchy",
   "grep", "read", "find", "glob", "ls", "diagnostics", "symbols", "definition", "references", "hover", "webfetch", "websearch",
 ]);
 
@@ -54,6 +55,29 @@ export function getToolSummary(input: ToolSummaryInput): ToolSummary {
   const readOnly = READ_ONLY_TOOLS.has(name);
 
   switch (name) {
+    case "file_read": {
+      const path = asString(args?.path) ?? "";
+      return { text: path, readOnly };
+    }
+    case "file_list": case "file_search": {
+      const paths = Array.isArray(args?.paths) ? args.paths.join(", ") : "";
+      const query = asString(args?.query) ?? "";
+      const count = Array.isArray(details?.records) ? details.records.length : undefined;
+      return { text: [query, paths, count === undefined ? undefined : String(count)].filter(Boolean).join(" · "), readOnly };
+    }
+    case "file_write": case "file_edit":
+      return { text: asString(args?.path) ?? "", readOnly: false };
+    case "process_spawn":
+      return { text: [args?.command, ...(Array.isArray(args?.args) ? args.args : [])].filter(value => typeof value === "string").join(" "), readOnly: false };
+    case "code_retrieval":
+      return { text: asString(args?.question) ?? "", readOnly: false };
+    case "language_diagnostics": case "language_symbols": case "language_document_symbols":
+    case "language_definition": case "language_references": case "language_hover": case "language_call_hierarchy": {
+      const path = asString(args?.path) ?? "";
+      const line = asNumber(args?.line);
+      const character = asNumber(args?.character);
+      return { text: `${path}${line === undefined ? "" : `:${line + 1}${character === undefined ? "" : `:${character + 1}`}`}`, readOnly };
+    }
     case "grep": {
       const pattern = asString(args?.pattern) ?? "";
       const path = asString(args?.path) ?? "workspace";

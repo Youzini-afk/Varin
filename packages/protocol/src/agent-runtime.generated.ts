@@ -51,6 +51,12 @@ export interface InferenceSessionStatus {
   hasRequests: boolean;
 }
 
+export interface ModelPresentationParams {
+  requestIds: string[];
+}
+
+export interface ModelPresentation { requestId: string; providerFamily: string; modelId: string; usage: InferenceUsage; }
+
 export interface ThreadUsageParams {
   threadId: string;
   branchId: string;
@@ -1989,6 +1995,7 @@ export type RunCancellationReceipt = Omit<Run, 'configuration'>;
 export type OperationCancellationReceipt = Omit<Operation, 'intent' | 'result' | 'external_receipt'>;
 
 export interface ModelSessionConfiguration {
+  catalogModelId?: string;
   providerId?: string;
   providerFamily: string;
   model: string;

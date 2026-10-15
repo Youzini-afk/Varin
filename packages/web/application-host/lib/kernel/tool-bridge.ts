@@ -347,6 +347,13 @@ export class ToolBridge {
       ? { ownerId: key!, binding: structuredClone(owner.binding) }
       : undefined;
   }
+  /** Resolve an admitted declaration independently of the next prepared candidate. */
+  retainedExtensionBinding(runId: string, binding: ExtensionToolBinding): import('./protocol.generated.js').LiveExtensionToolBinding | undefined {
+    const original = [...this.#owners.get(runId)?.entries() ?? []].find(([, owner]) =>
+      !owner.closing && owner.epoch === this.currentEpoch() && isDeepStrictEqual(owner.lease.extensionBinding, binding)
+      && owner.lease.available(binding.tool));
+    return original ? { ownerId: original[0], generation: original[1].binding.generation, binding: structuredClone(binding) } : undefined;
+  }
   /** Actual retained callback completion, not physical stop or a new-epoch inference. */
   callbackEnded(runId: string, owner: ExecutorOwner, operationId: string): boolean | undefined {
     if (owner.kind !== 'external') return undefined;

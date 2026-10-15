@@ -79,7 +79,14 @@ export interface ThreadSubmit extends ThreadIdentity {
 export interface ThreadHistoryPage {
   head: string | null;
   previous: string | null;
-  items: HistoryItem[];
+  items: ThreadHistoryItem[];
+}
+/** Current file in the historical operation's original source, never the navigation project. */
+export type ThreadFileTarget = { kind: 'document'; workspaceId: string; root: string; resourceId: string }
+  | { kind: 'unavailable'; reason: 'no_source' | 'fixed_source' | 'managed_source' };
+/** Display metadata from the original frozen request; absent for non-model history. */
+export interface ThreadHistoryItem extends HistoryItem {
+  modelRequest?: import('@varin/protocol').ModelPresentation;
 }
 /** Durable context records projected by the Host; original conversation history stays intact. */
 export interface ContextJob {
@@ -131,6 +138,7 @@ export interface ThreadChildContinuation extends ThreadIdentity {
   materials?: ThreadMaterialAttachment[];
 }
 export interface ThreadCollaborationAPI {
+  integration(input: ThreadIntegrationCommand, signal?: AbortSignal): Promise<ThreadIntegrationState>;
   /** Explicit User input, retaining this child's exact previous execution configuration. */
   continueChild(input: ThreadChildContinuation, signal?: AbortSignal): Promise<DelegatedExecution>;
   executions(identity: ThreadIdentity, operationId?: string, signal?: AbortSignal): Promise<DelegatedExecution[]>;
@@ -140,6 +148,32 @@ export interface ThreadCollaborationAPI {
   cancelChild(identity: ThreadIdentity, operationId: string): Promise<TreeCancellationReceipt>;
   cancelWait(identity: ThreadIdentity, waitId: string): Promise<ChildWait>;
   cancelTree(identity: ThreadIdentity): Promise<TreeCancellationReceipt>;
+}
+export type ThreadIntegrationCommand = ThreadIdentity & {
+  key: string;
+  executionId: string;
+  publicationId: string;
+  sourceOwner?: { ownerId: string; generation: number };
+} & (
+  | { action: 'preview' }
+  | { action: 'apply'; expectedBindingFingerprint: string; resolutions: import('@varin/protocol').ThreadConflictResolution[] }
+  | { action: 'undo'; operationId: string; sourceRunId: string }
+);
+export interface ThreadIntegrationRecord {
+  sourceRunId: string;
+  operationId: string;
+  state: string;
+  appliedPaths: string[];
+  conflictPaths: string[];
+  needsAttentionPaths: string[];
+  failure?: string;
+  effect: 'none' | 'confirmed' | 'partial' | 'unknown';
+  executorStopped: boolean;
+}
+export interface ThreadIntegrationState {
+  preview?: import('@varin/protocol').ThreadIntegrationPreview;
+  operations: ThreadIntegrationRecord[];
+  problem?: string;
 }
 /** Prepare and atomically publish instructions and skills for this Thread branch. */
 export interface ThreadResourceRefresh extends ThreadIdentity {
@@ -189,7 +223,7 @@ export interface ThreadSnapshot {
   eventCursor: number;
   thread: ThreadSummary;
   activeRun: Run | null;
-  history: HistoryItem[];
+  history: ThreadHistoryItem[];
   historyPage: Pick<ThreadHistoryPage, 'head' | 'previous'>;
   inputs: QueuedInput[];
   operations: Operation[];
@@ -200,6 +234,9 @@ export interface ThreadSnapshot {
   policySelection: ThreadPolicyInspection | null;
   context: ThreadContextState;
   children?: ChildTask[];
+  /** Executions of this exact parent branch's children, in each child's admission order. */
+  childExecutions?: DelegatedExecution[];
+  childActivity?: Record<string, { state: 'preparing' | 'running' | 'waiting' | 'settling' | 'preparation_failed'; reason?: string }>;
   /** This Thread branch's own initial and subsequent delegated executions. */
   delegatedExecutions?: DelegatedExecution[];
 }
@@ -318,6 +355,7 @@ export interface ThreadsAPI {
   fork(input: ThreadIdentity & { key: string; headId: string | null }): Promise<ThreadIdentity>;
   compact(input: ThreadCompact): Promise<ContextJob>;
   publishContext(identity: ThreadIdentity, runId: string): Promise<ContextCheckpoint>;
+  contextHistory(identity: ThreadIdentity, runId: string, cursor?: { headId: string; beforeId: string }): Promise<ThreadHistoryPage>;
   cancelContext(identity: ThreadIdentity, runId: string): Promise<RunCancellationReceipt>;
   resumeContext(identity: ThreadIdentity, runId: string): Promise<void>;
   submit(input: ThreadSubmit): Promise<InputSubmitReceipt>;
@@ -327,6 +365,7 @@ export interface ThreadsAPI {
   /** Read one original-holder media chunk; the expected reference is identity, never authority. */
   mediaRead(input: ThreadIdentity & Omit<MediaReadParams, 'threadId' | 'branchId'>, signal?: AbortSignal): Promise<MediaReadChunk>;
   historyPage(identity: ThreadIdentity, cursor: { headId: string; beforeId: string }): Promise<ThreadHistoryPage>;
+  fileTarget(input: ThreadIdentity & { itemId: string; path: string }, signal?: AbortSignal): Promise<ThreadFileTarget>;
   snapshot(identity: ThreadIdentity): Promise<ThreadSnapshot>;
   /** Original execution usage on this branch, excluding child Threads and standalone utility work. */
   usage(identity: ThreadIdentity, signal?: AbortSignal): Promise<import('@varin/protocol').ThreadUsage>;

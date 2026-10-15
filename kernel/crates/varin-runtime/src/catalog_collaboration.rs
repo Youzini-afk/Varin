@@ -440,6 +440,7 @@ impl Catalog {
         let child_thread_id = format!("thread:child:{}", op.id);
         let child_branch_id = format!("branch:child:{}", op.id);
         tx.execute("INSERT INTO threads(id) VALUES(?1)", [&child_thread_id])?;
+        super::threads::initialize_title(&tx, &child_thread_id, prepared.title.as_deref())?;
         tx.execute(
             "INSERT INTO branches(id,thread_id,head) VALUES(?1,?2,NULL)",
             params![child_branch_id, child_thread_id],

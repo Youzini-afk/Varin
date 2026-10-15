@@ -513,7 +513,12 @@ export class ThreadCollaboration {
           workspaceId: source.workspaceId, executionWorkspaceId: source.executionWorkspaceId, branchId: source.branchId, revision: source.revision } : null,
           context, expectedContextCheckpoint: checkpoint?.id ?? null, ...(inputPreparation ? { inputPreparation } : {}) }, signal);
       }
-      if (child.receipt && child.state === 'ready') await this.owners.continueRun(child.receipt.run_id, signal);
+      if (child.receipt && child.state === 'ready') {
+        const launch = await runtime.launch(child.receipt.run_id, signal);
+        // A recorded preparation failure is the Retry boundary. Its own durable event
+        // must not repeatedly re-enter the same failed launch.
+        if (!launch?.preparation_failure) await this.owners.continueRun(child.receipt.run_id, signal);
+      }
       if (child.report && child.receipt && ['pending', 'settling', 'candidate'].includes(child.code_result.kind)) child = await this.settle(child, signal);
     } catch (error) {
       // A current definition/Goal pause can arrive after source preparation but before the

@@ -894,9 +894,14 @@ impl Catalog {
         let intent = match previous {
             Some(mut intent) => {
                 if intent.selection != selection {
-                    return Err(RuntimeError::Conflict(
-                        "launch selection changed; rebind must preserve its frozen identity".into(),
-                    ));
+                    let original = serde_json::to_value(&intent.selection)?;
+                    let candidate = serde_json::to_value(&selection)?;
+                    let changed = original.as_object().expect("launch metadata is an object")
+                        .iter().filter(|(key, value)| candidate.get(*key) != Some(*value))
+                        .map(|(key, _)| key.as_str()).collect::<Vec<_>>().join(", ");
+                    return Err(RuntimeError::Conflict(format!(
+                        "launch selection changed ({changed}); rebind must preserve its frozen identity"
+                    )));
                 }
                 if !bound
                     || (intent.bound_epoch == Some(self.epoch)

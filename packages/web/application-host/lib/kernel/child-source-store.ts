@@ -3,6 +3,7 @@
 import type { DelegatedExecution, ChildSourceProvenance, ChildSourcePin, LaunchSource } from './protocol.generated.js';
 import type { WorkingStateRootStore, WorkingStatePin } from '../harness/working-state/types.js';
 import { captureStableSourceBaseline, type StableSourcePreparationOwners } from '../harness/working-state/source-preparation.js';
+import { normalizePathIdentity } from '../workspace/path-safety.js';
 
 export interface ChildSourcePreparation {
   source: LaunchSource;
@@ -46,12 +47,13 @@ export async function prepareChildSourceStore(
     else {
       const physical = handoff.root.root;
       const resolved = await owners.capture.documents.resolveWorkspace({ path: physical.canonicalRoot });
-      if ((await owners.capture.documents.inspectWorkspace(resolved.workspaceId)).root !== physical.canonicalRoot) {
+      const directory = (await owners.capture.documents.inspectWorkspace(resolved.workspaceId)).root;
+      if (normalizePathIdentity(directory) !== normalizePathIdentity(physical.canonicalRoot)) {
         throw new Error('Child source Documents authority changed');
       }
       store = await owners.physical(physical);
       const captured = await captureStableSourceBaseline({ store, workspaceId: workspace,
-        captureWorkspaceId: resolved.workspaceId, branchId: sourceBranch, directory: physical.canonicalRoot,
+        captureWorkspaceId: resolved.workspaceId, branchId: sourceBranch, directory,
         captureScopes: [], content: { mode: 'saved-files' }, signal }, owners.capture);
       provenance = captured.provenance;
     }

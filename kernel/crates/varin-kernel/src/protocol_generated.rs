@@ -11,6 +11,7 @@ pub(crate) const KERNEL_REQUEST_WINDOW: usize = 2;
 pub(crate) const KERNEL_CONTROL_METHODS: &[&str] = &[
     "runtime.context.observations.sources",
     "runtime.thread.usage",
+    "runtime.model.presentations",
     "runtime.knowledge_inference.finish",
     "runtime.knowledge_inference.cancel",
     "runtime.knowledge_inference.status",
@@ -90,6 +91,7 @@ pub(crate) const KERNEL_CONTROL_RESPONSE_METHODS: &[&str] = &[
     "runtime.context.observations.sources",
     "runtime.context.observations.admit",
     "runtime.thread.usage",
+    "runtime.model.presentations",
     "source.authority.seal",
     "source.mcp.holder",
     "source.mcp.delivery",
@@ -1147,6 +1149,12 @@ pub(crate) struct ThreadUsageParams {
     pub(crate) branch_id: String,
 }
 
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct ModelPresentationParams {
+    pub(crate) request_ids: Vec<String>,
+}
+
 pub(crate) type ThreadCatalogQuery = varin_runtime::catalog::threads::ThreadListQuery;
 
 pub(crate) type ThreadMetadataUpdateParams = varin_runtime::catalog::threads::ThreadUpdate;
@@ -1435,6 +1443,7 @@ pub(crate) struct KernelProcessSpawnParams {
     pub(crate) windows_raw_arguments: Option<String>,
     pub(crate) env: Vec<KernelProcessEnvironmentEntry>,
     pub(crate) mode: String,
+    pub(crate) stdin_mode: Option<String>,
     pub(crate) cols: Option<i64>,
     pub(crate) rows: Option<i64>,
 }
@@ -1717,6 +1726,8 @@ pub(crate) struct KernelFileApplyParams {
     pub(crate) target_json: String,
     pub(crate) expected_json: Option<String>,
     pub(crate) owner_id: Option<String>,
+    pub(crate) record_id: Option<String>,
+    pub(crate) slot: Option<String>,
     pub(crate) lease_id: Option<String>,
 }
 
@@ -2793,6 +2804,7 @@ pub(crate) struct ModelAdapterContribution {
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct ModelSessionConfiguration {
+    pub(crate) catalog_model_id: Option<String>,
     pub(crate) provider_id: Option<String>,
     pub(crate) provider_family: String,
     pub(crate) model: String,
@@ -3869,6 +3881,11 @@ pub(crate) fn validate_generated_method_params(method: &str, params: &Value) -> 
         "runtime.thread.usage" => serde_json::from_value::<ThreadUsageParams>(params.clone())
             .map(|_| ())
             .map_err(|error| error.to_string()),
+        "runtime.model.presentations" => {
+            serde_json::from_value::<ModelPresentationParams>(params.clone())
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        }
         "runtime.thread.catalog.list" => {
             serde_json::from_value::<ThreadCatalogQuery>(params.clone())
                 .map(|_| ())

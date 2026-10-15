@@ -15,7 +15,7 @@ export type ThreadPendingInput = {
   preparedSource?: ThreadPreparedSource | null;
   status: 'sending' | 'unknown';
 } & (
-  | { kind: 'submit'; acceptedRunId?: string; input: Parameters<ThreadsAPI['submit']>[0] }
+  | { kind: 'submit'; acceptedRunId?: string; acceptedInputId?: string; input: Parameters<ThreadsAPI['submit']>[0] }
   | { kind: 'enqueue'; input: Parameters<ThreadsAPI['enqueue']>[0] }
   | { kind: 'continue'; input: Parameters<NonNullable<ThreadsAPI['collaboration']>['continueChild']>[0] }
 );

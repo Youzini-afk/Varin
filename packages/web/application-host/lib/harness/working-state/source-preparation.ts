@@ -3,6 +3,7 @@ import type { createDocumentAuthority, DirtyBufferPublication } from '../../docu
 import type { CaptureToken } from '../../documents/mutation-authority.js';
 import { CaptureInventoryChangedError } from '../../documents/capture-inventory.js';
 import { stateIdentity } from '../../recovery/journal-files.js';
+import { normalizePathIdentity } from '../../workspace/path-safety.js';
 import type { ChildSourceProvenance, SourceResourceCapture, SourceDraftProvenance } from '../../kernel/protocol.generated.js';
 type CapturedSourceProvenance = Exclude<ChildSourceProvenance, { consistency: 'fixed-root' }>;
 import { createBranchWithDraftBaseline, overlayDraftsOnBaseline } from './draft-baseline.js';
@@ -151,7 +152,7 @@ const draftPaths = (publications: readonly DirtyBufferPublication[]): string[] =
 )))].sort();
 
 /** New physical source preparation requires the real Documents owner. Saved-files
- * omits unsaved overlays, not their disk paths. Pi's existing fixed draft can be applied. */
+ * omits unsaved overlays, not their disk paths. A captured fixed draft can be applied. */
 export async function captureStableSourceBaseline(
   input: StableSourceCaptureInput,
   owners: StableSourcePreparationOwners,
@@ -168,11 +169,13 @@ export async function captureStableSourceBaseline(
     return { branch: restored.branch, provenance: restored.provenance };
   }
   const workspace = await documents.inspectWorkspace(captureWorkspaceId, signal ? { signal } : {});
-  if (workspace.root !== input.directory) throw new Error('Source capture directory differs from its admitted Documents root');
+  if (normalizePathIdentity(workspace.root) !== normalizePathIdentity(input.directory)) throw new Error('Source capture directory differs from its admitted Documents root');
   const barrier = await documents.beginDirtyStateBarrier(captureWorkspaceId, ['.'], { signal });
   let token: CaptureToken | undefined;
   let captured: StableDirectoryCapture | undefined;
   const draftOwners: Array<() => Promise<void>> = [];
+  let result: StableSourceCaptureResult | undefined;
+  const failures: unknown[] = [];
   try {
     token = await documents.beginCapture(captureWorkspaceId, {}, signal);
     const assertWriters = async (): Promise<void> => {
@@ -220,27 +223,22 @@ export async function captureStableSourceBaseline(
           subtrees: [...new Set([...scopes, ...resources.captureScopes])].filter(file => file === '.' || effective.effectiveState[file]?.kind === 'directory').map(file => file === '.' ? '' : file).sort() } } } : {}) };
     const branch = await store.createBranch(input.workspaceId, input.branchId, effective.effectiveState, captured.baseRef,
       effective.changedPaths, scopes, { sourceProvenance: provenance });
-    // Draft overlays can replace captured disk objects; only the committed root keeps bytes.
-    await store.releaseCapturedStates(captured.states);
-    return { branch, provenance };
+    result = { branch, provenance };
   } catch (error) {
-    if (captured) await store.releaseCapturedStates(captured.states);
-    if (error instanceof CaptureInventoryChangedError) {
-      signal?.throwIfAborted();
-      throw new SourceCaptureError(error.message);
-    }
-    throw error;
-  } finally {
-    // Cleanup does not reuse an aborted signal: the existing capture subscription
-    // and barrier still need to release their actual owner resources.
-    if (token) documents.discardCapture(token);
-    try { await barrier.release(); }
-    finally {
-      const releases = await Promise.allSettled(draftOwners.map(release => release()));
-      const failures = releases.filter((result): result is PromiseRejectedResult => result.status === 'rejected');
-      if (failures.length) throw new AggregateError(failures.map(result => result.reason), 'Source draft upload cleanup failed');
-    }
+    failures.push(error instanceof CaptureInventoryChangedError
+      ? signal?.aborted ? signal.reason : new SourceCaptureError(error.message) : error);
   }
+  // Release each captured owner once, including after a commit. Cleanup must drain
+  // without an aborted signal and must not replace the original capture failure.
+  const releases = await Promise.allSettled([
+    async () => { if (captured) await store.releaseCapturedStates(captured.states); },
+    async () => { try { if (token) documents.discardCapture(token); } finally { await barrier.release(); } },
+    ...draftOwners,
+  ].map(release => release()));
+  for (const release of releases) if (release.status === 'rejected') failures.push(release.reason);
+  if (failures.length === 1) throw failures[0];
+  if (failures.length) throw new AggregateError(failures, 'Source capture or cleanup failed');
+  return result!;
 }
 
 export async function createCapturedSourceBranch(

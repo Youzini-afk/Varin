@@ -1249,7 +1249,14 @@ impl Storage {
         if let Some(committed) = committed {
             return Ok(committed);
         }
-        if let Some(owner_id) = params.owner_id.as_ref() {
+        if params.record_id.is_some() || params.slot.is_some() {
+            let FileState::RegularFile { object_hash, .. } = &target else {
+                return Err(KernelError::Authorization("only a file target can use a content record".into()));
+            };
+            let mut reference = json!({"recordId":params.record_id,"slot":params.slot});
+            if let Some(owner) = &params.owner_id { reference["ownerId"] = json!(owner); }
+            self.validate_blob_read_source(&reference, object_hash, &grant.grant_id, false)?;
+        } else if let Some(owner_id) = params.owner_id.as_ref() {
             let FileState::RegularFile { object_hash, .. } = &target else {
                 return Err(KernelError::Authorization(
                     "only a file target can consume an object owner".to_string(),

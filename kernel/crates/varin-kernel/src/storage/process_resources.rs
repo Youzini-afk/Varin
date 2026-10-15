@@ -470,6 +470,13 @@ impl Storage {
                 "process mode must be pty or pipe".into(),
             ));
         }
+        let stdin_mode = match params_value.get("stdinMode") {
+            None => "pipe",
+            Some(_) => string(params_value, "stdinMode")?,
+        };
+        if !matches!(stdin_mode, "pipe" | "null") || (mode == "pty" && stdin_mode == "null") {
+            return Err(KernelError::Operation("stdinMode must be pipe, or null for a pipe process".into()));
+        }
         if let Some(raw) = params_value
             .get("windowsRawArguments")
             .and_then(Value::as_str)
@@ -526,7 +533,7 @@ impl Storage {
             None,
         )?;
         let record = json!({"processId":id,"kernelEpoch":grant.kernel_epoch,"workspaceId":workspace,
-            "cwd":cwd,"sourceRoot":root.canonical_root,"sourceRelativeCwd":canonical_relative,"mode":mode,"status":"starting","pid":null,"exitCode":null,"signal":null,
+            "cwd":cwd,"sourceRoot":root.canonical_root,"sourceRelativeCwd":canonical_relative,"mode":mode,"stdinMode":stdin_mode,"status":"starting","pid":null,"exitCode":null,"signal":null,
             "reason":null,"writerActive":true,"outputAvailable":false});
         let job_name = process::job_name(&self.root, id);
         self.conn.execute("INSERT INTO process_records(process_id,workspace_id,execution_workspace_id,grant_id,kernel_epoch,cwd,job_name,params_hash,status_json) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9)",
@@ -541,7 +548,7 @@ impl Storage {
             self.processes.spawn(id, json!({"processId":id,"kernelEpoch":grant.kernel_epoch,
                 "receiptPath":receipt_path,"jobName":job_name,"cwd":cwd,"command":command,"args":params_value["args"],
                 "windowsRawArguments":params_value["windowsRawArguments"],
-                "env":params_value["env"],"mode":mode,"cols":cols,"rows":rows,"runId":grant.run_id}))
+                "env":params_value["env"],"mode":mode,"stdinMode":stdin_mode,"cols":cols,"rows":rows,"runId":grant.run_id}))
         })();
         if let Err(error) = spawned {
             let mut failed = record;

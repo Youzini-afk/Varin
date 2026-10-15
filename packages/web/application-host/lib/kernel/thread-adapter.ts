@@ -71,6 +71,14 @@ export class ThreadAdapter {
   bindCompaction(owner: ContextCompactionOwner): void { this.compaction = owner; }
   private sourceDirectory?: SourceDirectory;
   bindSourceDirectory(directory: SourceDirectory): void { this.sourceDirectory = directory; }
+  private fileResolver?: import('./thread-file-target.js').ThreadFileTargetResolver;
+  bindFileResolver(resolver: import('./thread-file-target.js').ThreadFileTargetResolver): void { this.fileResolver = resolver; }
+  async fileTarget(input: ThreadIdentity & { itemId: string; path: string }, signal?: AbortSignal) {
+    const entry = await this.recoveryEntry({ ...input, entryId: input.itemId }, signal);
+    if (!this.fileResolver) throw new Error('File navigation is unavailable');
+    const launch = await this.runtime.launch(entry.run_id, signal);
+    return this.fileResolver(entry.run_id, launch?.selection.source ?? null, input.path, signal);
+  }
   async usage(identity: ThreadIdentity, signal?: AbortSignal) {
     await this.requireIdentity(identity, signal);
     return this.runtime.threadUsage(identity.threadId, identity.branchId, signal);
@@ -321,7 +329,7 @@ export class ThreadAdapter {
     // A historical fork remains readable without acquiring the original branch's executions.
     if (operationId === undefined && child.child_thread_id === identity.threadId && child.child_branch_id !== identity.branchId) return [];
     const own = child.child_thread_id === identity.threadId && child.child_branch_id === identity.branchId;
-    const parent = child.parent_thread_id === identity.threadId;
+    const parent = child.parent_thread_id === identity.threadId && child.parent_branch_id === identity.branchId;
     if (!own && !parent) throw new Error('Delegated executions belong to another Thread branch');
     return this.runtime.childExecutions(child.operation_id, signal);
   }
@@ -329,21 +337,23 @@ export class ThreadAdapter {
     await this.requireIdentity(identity, signal);
     const execution = await this.runtime.childExecution(executionId, signal);
     if (!(execution.child_thread_id === identity.threadId && execution.child_branch_id === identity.branchId)
-      && execution.parent_thread_id !== identity.threadId) throw new Error('Report belongs to another Thread branch');
+      && !(execution.parent_thread_id === identity.threadId && execution.parent_branch_id === identity.branchId)) throw new Error('Report belongs to another Thread branch');
     return this.runtime.readChildExecutionReport(executionId, itemId, offset, maxBytes, signal);
   }
   async readChildReport(identity: ThreadIdentity, operationId: string, itemId: string, offset = 0, maxBytes = 65536, signal?: AbortSignal) {
     await this.requireIdentity(identity, signal);
     const child = await this.runtime.child(operationId, signal);
-    if (child.parent_thread_id !== identity.threadId) throw new Error('Child belongs to another Thread');
+    if (child.parent_thread_id !== identity.threadId || child.parent_branch_id !== identity.branchId) throw new Error('Child belongs to another Thread branch');
     return this.runtime.readChildReport(operationId, itemId, offset, maxBytes, signal);
   }
   async children(identity: ThreadIdentity) {
     await this.requireIdentity(identity);
-    return (await this.runtime.children()).filter(child => child.parent_thread_id === identity.threadId);
+    return (await this.runtime.children()).filter(child => child.parent_thread_id === identity.threadId && child.parent_branch_id === identity.branchId);
   }
   async cancelChild(identity: ThreadIdentity, operationId: string) {
     await this.requireIdentity(identity);
+    const child = await this.runtime.child(operationId);
+    if (child.parent_thread_id !== identity.threadId || child.parent_branch_id !== identity.branchId) throw new Error('Child belongs to another Thread branch');
     return this.runtime.cancelTree({ kind: 'child', operation_id: operationId }, undefined, identity.threadId);
   }
   async cancelChildWait(identity: ThreadIdentity, waitId: string) {
@@ -351,7 +361,7 @@ export class ThreadAdapter {
     if (!waitId.startsWith('child-wait:')) throw new Error('Not a child observation wait');
     const operation = await this.runtime.operationStatus(waitId.slice('child-wait:'.length));
     const run = await this.requireRun(operation.run_id);
-    if (run.thread_id !== identity.threadId) throw new Error('Wait belongs to another parent Thread');
+    if (run.thread_id !== identity.threadId || run.branch_id !== identity.branchId) throw new Error('Wait belongs to another parent Thread branch');
     return this.runtime.cancelChildWait(waitId);
   }
   async cancelTree(identity: ThreadIdentity) {
@@ -475,7 +485,7 @@ export class ThreadAdapter {
       const configuration = run.configuration as ModelSessionConfiguration;
       if (previous.request.branch_id !== input.branchId || previous.request.through_id !== input.throughId
         || previous.request.expected_revision !== input.expectedRevision || previous.request.owner_run_id
-        || configuration.providerId !== input.model.providerId || ((configuration.modelOptions as { catalogModelId?: string } | undefined)?.catalogModelId ?? configuration.model) !== input.model.modelId
+        || configuration.providerId !== input.model.providerId || (configuration.catalogModelId ?? configuration.model) !== input.model.modelId
         || input.model.thinkingLevel !== undefined && configuration.thinkingLevel !== input.model.thinkingLevel
         || input.model.temperature !== undefined && (configuration.modelOptions as { temperature?: number } | undefined)?.temperature !== input.model.temperature) {
         throw new Error('Context job key already belongs to another selection');
@@ -544,6 +554,11 @@ export class ThreadAdapter {
     // notification refresh has not run yet. Ordinary notes do not advance this CAS.
     await this.refreshContext(identity);
     return this.runtime.publishContextJob(runId);
+  }
+
+  async contextHistory(identity: ThreadIdentity, runId: string, cursor?: { headId: string; beforeId: string }): Promise<ThreadHistoryPage> {
+    const job = await this.requireContextJob(identity, runId);
+    return this.readHistoryPage(job.receipt.branch_id, cursor);
   }
 
   async cancelContext(identity: ThreadIdentity, runId: string) {
@@ -859,22 +874,52 @@ export class ThreadAdapter {
     return this.readHistoryPage(identity.branchId, cursor);
   }
 
+  private readonly historyModelPresentations = new Map<string, import('@varin/protocol').ModelPresentation>();
+
   private async readHistoryPage(branchId: string, cursor?: { headId: string; beforeId?: string }): Promise<ThreadHistoryPage> {
     const page = await this.runtime.historyPage({ branchId, ...cursor, limit: 20 });
     const items = await Promise.all(page.items.map(item => this.runtime.historyItem(item)));
-    return { head: page.head, previous: page.previous, items };
+    const requests = new Map<string, string>();
+    for (const item of items) {
+      if (item.source !== 'assistant') continue;
+      const id = (item.content as { id?: unknown } | null)?.id;
+      if (typeof id !== 'string') continue;
+      // Runtime model_history_id encodes the request's byte length before the provider item ID.
+      const prefix = /^model-item:(\d+):/.exec(id);
+      if (prefix) requests.set(item.id, Buffer.from(id.slice(prefix[0].length)).subarray(0, Number(prefix[1])).toString('utf8'));
+    }
+    const missing = [...new Set(requests.values())].filter(id => !this.historyModelPresentations.has(id));
+    if (missing.length) for (const view of await this.runtime.modelPresentations(missing)) this.historyModelPresentations.set(view.requestId, view);
+    return { head: page.head, previous: page.previous, items: items.map(item => {
+      const requestId = requests.get(item.id);
+      const modelRequest = requestId && this.historyModelPresentations.get(requestId);
+      return modelRequest ? { ...item, modelRequest } : item;
+    }) };
   }
 
   async snapshot(identity: ThreadIdentity): Promise<ThreadSnapshot> {
     const { eventCursor } = await this.runtime.status();
     const thread = await this.requireIdentity(identity);
     const branch = thread.branches.find(branch => branch.branch_id === identity.branchId)!;
-    const [page, inputs, activeOperations, context, followups, goals] = await Promise.all([
+    const [page, inputs, activeOperations, context, followups, goals, childState, delegatedExecutions] = await Promise.all([
       this.readHistoryPage(identity.branchId, branch.head ? { headId: branch.head } : undefined),
       this.runtime.inputs(identity.branchId), this.runtime.activeOperations(identity.threadId, identity.branchId), this.context(identity),
       listThreadFollowups(this, identity),
       listThreadGoals(this, identity),
+      this.children(identity).then(async children => ({ children,
+        executions: (await Promise.all(children.map(child => this.runtime.childExecutions(child.operation_id)))).flat() })),
+      this.childExecutions(identity),
     ]);
+    const childActivity: NonNullable<ThreadSnapshot['childActivity']> = {};
+    const latestExecutions = new Map(childState.executions.map(execution => [execution.child_operation_id, execution]));
+    await Promise.all([...latestExecutions.values()].filter(execution => execution.state === 'ready' && execution.receipt).map(async execution => {
+      const runId = execution.receipt!.run_id;
+      const [run, launch] = await Promise.all([this.runtime.run(runId), this.runtime.launch(runId)]);
+      childActivity[execution.execution_id] = launch?.preparation_failure ? { state: 'preparation_failed', reason: launch.preparation_failure }
+        : run.waiting_on?.startsWith('preparation:') ? { state: 'preparing' }
+          : ['completed', 'failed', 'cancelled'].includes(run.state) ? { state: 'settling' }
+            : run.state === 'waiting' && launch?.pause ? { state: 'waiting' } : { state: 'running' };
+    }));
     const history = page.items;
     if (history.some(item => item.thread_id !== identity.threadId) || inputs.some(item => item.thread_id !== identity.threadId)) {
       throw new Error('Branch does not belong to the selected thread');
@@ -924,7 +969,8 @@ export class ThreadAdapter {
     const policySelection = shownRun && launch ? await this.runtime.inspectPolicy(shownRun.id) : null;
     const recovery = this.recoveryReader ? await this.recoveryReader(identity) : undefined;
     return { identity, ...(recovery ? { recovery } : {}), eventCursor, thread, activeRun, history, historyPage: { head: page.head, previous: page.previous }, inputs,
-      operations: [...operations.values()], followups, goals, launch, modelSelection, policySelection, context, children: await this.children(identity), delegatedExecutions: await this.childExecutions(identity) };
+      operations: [...operations.values()], followups, goals, launch, modelSelection, policySelection, context,
+      children: childState.children, childExecutions: childState.executions, childActivity, delegatedExecutions };
   }
 
   private async recordLaunchFailure(runId: string, error: unknown): Promise<void> {

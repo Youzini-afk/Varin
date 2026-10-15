@@ -42,6 +42,7 @@ pub struct Config {
     pub windows_raw_arguments: Option<String>,
     pub env: Vec<Environment>,
     pub mode: String,
+    pub stdin_mode: Option<String>,
     pub cols: u16,
     pub rows: u16,
 }
@@ -56,7 +57,7 @@ type Input = Box<dyn Write + Send>;
 type Reader = (String, Box<dyn Read + Send>);
 struct Spawned {
     child: Box<dyn PtyChild + Send + Sync>,
-    input: Input,
+    input: Option<Input>,
     master: Option<Box<dyn MasterPty + Send>>,
     readers: Vec<Reader>,
 }
@@ -107,7 +108,7 @@ fn spawn(config: &Config) -> Result<Spawned, Box<dyn std::error::Error>> {
         drop(pair.slave);
         Ok(Spawned {
             child,
-            input,
+            input: Some(input),
             master: Some(pair.master),
             readers: vec![("stdout".into(), reader)],
         })
@@ -118,7 +119,7 @@ fn spawn(config: &Config) -> Result<Spawned, Box<dyn std::error::Error>> {
             .current_dir(&config.cwd)
             .env_clear()
             .envs(config.env.iter().map(|v| (&v.name, &v.value)))
-            .stdin(Stdio::piped())
+            .stdin(if config.stdin_mode.as_deref() == Some("null") { Stdio::null() } else { Stdio::piped() })
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
         #[cfg(windows)]
@@ -143,12 +144,7 @@ fn spawn(config: &Config) -> Result<Spawned, Box<dyn std::error::Error>> {
             }
         }
         let mut child = command.spawn()?;
-        let input = Box::new(
-            child
-                .stdin
-                .take()
-                .ok_or_else(|| io::Error::other("missing stdin"))?,
-        );
+        let input = child.stdin.take().map(|input| Box::new(input) as Input);
         let readers: Vec<Reader> = vec![
             (
                 "stdout".into(),
@@ -282,7 +278,7 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
     let input_output = output.clone();
     let input_receipt_path = config.receipt_path.clone();
     let input_worker = thread::spawn(move || {
-        let mut input = Some(input);
+        let mut input = input;
         let mut active: Option<(InteractionReceipt, u64)> = None;
         for value in input_rx {
             if value["type"] == "finish" {
