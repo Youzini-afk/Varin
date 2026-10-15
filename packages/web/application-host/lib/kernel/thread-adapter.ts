@@ -967,11 +967,12 @@ export class ThreadAdapter {
     const latest = branch.latest_run;
     const activeRun = branch.active_run_id ? await this.runtime.run(branch.active_run_id) : null;
     const shownRun = activeRun ?? latest;
+    const runFailure = shownRun?.state === 'failed' ? await this.runtime.runFailure(shownRun.id) : null;
     const launch = shownRun ? await this.runtime.launch(shownRun.id) : null;
     const modelSelection = shownRun ? await this.runtime.modelSelections(shownRun.id) : {desired:null,active:null};
     const policySelection = shownRun && launch ? await this.runtime.inspectPolicy(shownRun.id) : null;
     const recovery = this.recoveryReader ? await this.recoveryReader(identity) : undefined;
-    return { identity, ...(recovery ? { recovery } : {}), eventCursor, thread, activeRun, history, historyPage: { head: page.head, previous: page.previous }, inputs,
+    return { identity, ...(recovery ? { recovery } : {}), eventCursor, thread, activeRun, runFailure, history, historyPage: { head: page.head, previous: page.previous }, inputs,
       operations: [...operations.values()], followups, goals, launch, modelSelection, policySelection, context,
       children: childState.children, childExecutions: childState.executions, childActivity, delegatedExecutions };
   }

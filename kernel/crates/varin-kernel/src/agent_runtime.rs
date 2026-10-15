@@ -2651,6 +2651,10 @@ fn dispatch(catalog: &mut Catalog, method: &str, params: Value) -> Result<Value,
                 catalog.run_context_scope(&p.run_id).map_err(domain)?,
             )?)
         }
+        "runtime.run.failure" => {
+            let p: RunParams = serde_json::from_value(params)?;
+            Ok(serde_json::to_value(catalog.run_failure(&p.run_id).map_err(domain)?)?)
+        }
         "runtime.run.inspect" | "runtime.run.cancel" => {
             let p: RunParams = serde_json::from_value(params)?;
             if method.ends_with("cancel") {

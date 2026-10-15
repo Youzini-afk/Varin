@@ -41,6 +41,9 @@ vi.mock('@varin/application-client', async original => ({
   subscribeRuntimeEndpointChanged: (listener: () => void) => { endpoint.listeners.add(listener); return () => endpoint.listeners.delete(listener); },
 }));
 vi.mock('@/lib/attachProcessTerminal', () => ({ attachProcessTerminal: vi.fn() }));
+// This fixture drives the Thread observer directly; the global Host event transport
+// has its own lifecycle tests and must not open a real connection from linkedom.
+vi.mock('@/lib/varinEvents', () => ({ subscribeVarinEvents: () => () => {} }));
 vi.mock('@/hooks/useRuntimeAPIs', () => ({ useRuntimeAPIs: () => ({ ...getRegisteredRuntimeAPIs(), threads: runtimeState.api }) }));
 vi.mock('@/stores/useDirectoryStore', () => ({ useDirectoryStore: Object.assign((selector: (state: { currentDirectory: string }) => unknown) => selector({ currentDirectory: '/workspace/project' }), { getState: () => ({ currentDirectory: '/workspace/project', setDirectory: () => {} }) }) }));
 vi.mock('@/components/layout/MainLayout', () => ({ MainLayout: ({ renderConversation }: { renderConversation?: (active: boolean) => React.ReactNode }) => <div>{renderConversation ? renderConversation(true) : <ChatView />}</div> }));
@@ -3255,4 +3258,32 @@ it('keeps an uncertain queued input through an unrelated 409 and a later pre-adm
   expect(f.enqueue.mock.calls[1]).toEqual(f.enqueue.mock.calls[0]);
   expect(f.enqueue.mock.calls[2]).toEqual(f.enqueue.mock.calls[0]);
   expect(container.querySelector<HTMLTextAreaElement>('[aria-label="Message thread"]')?.value).toBe('Newer draft');
+});
+
+it('shows the original terminal failure and distinguishes cancellation from a requested stop', async () => {
+  const f = fixture(true);
+  const run = f.view.activeRun!;
+  run.state = 'failed';
+  f.view.activeRun = null;
+  f.view.thread.branches[0]!.active_run_id = null;
+  f.view.thread.branches[0]!.latest_run = run;
+  f.view.runFailure = { runId: run.id, cursor: 7, code: 'context_candidate_capacity', message: 'The context summary does not fit. The original history remains unchanged.' };
+  await act(async () => root.render(<ThreadConversation api={f.api} identity={identity} />));
+  expect(container.querySelector('[aria-label="Run failed"]')?.textContent).toContain(f.view.runFailure.message);
+  expect(container.querySelector('[aria-label="Run cancelled"]')).toBeNull();
+  f.view.runFailure = { ...f.view.runFailure, runId: 'another-run', message: 'Another Run failure' };
+  await act(async () => f.emit({ cursor: 8, subject: run.id, revision: 2, kind: 'run.changed', data: {} }));
+  expect(container.querySelector('[aria-label="Run failed"]')?.textContent).toBe('harness.threads.state.failed');
+  run.state = 'generating'; run.cancel_requested = true;
+  f.view.activeRun = run;
+  f.view.thread.branches[0]!.active_run_id = run.id;
+  await act(async () => f.emit({ cursor: 9, subject: run.id, revision: 3, kind: 'run.changed', data: {} }));
+  expect(container.querySelector('[aria-label="Run failed"]')).toBeNull();
+  expect(container.querySelector('[aria-label="Run cancelled"]')).toBeNull();
+  run.state = 'cancelled'; f.view.activeRun = null;
+  f.view.thread.branches[0]!.active_run_id = null;
+  await act(async () => f.emit({ cursor: 10, subject: run.id, revision: 4, kind: 'run.changed', data: {} }));
+  expect(container.querySelector('[aria-label="Run cancelled"]')?.textContent).toBe('harness.threads.state.cancelled');
+  expect(container.querySelector('[aria-label="Run failed"]')).toBeNull();
+  expect(f.cancelRun).not.toHaveBeenCalled();
 });

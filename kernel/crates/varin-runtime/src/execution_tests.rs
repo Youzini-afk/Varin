@@ -2487,3 +2487,86 @@ fn binding_preparation_cancel_preserves_graph_control() { binding_preparation_co
 fn binding_preparation_sleep_preserves_model_control() { binding_preparation_control_case(false, true); }
 #[test]
 fn binding_preparation_sleep_preserves_graph_control() { binding_preparation_control_case(true, true); }
+
+#[test]
+fn terminal_failure_fact_survives_reopen_without_exposing_callback_content() {
+    struct FailingPreparation { early: bool, code: &'static str }
+    impl ContextPreparation for FailingPreparation {
+        fn prepare(&self, _: &str, _: u64, _: &CancellationToken) -> Result<(), ExecutionError> {
+            if self.early { Err(ExecutionError::new(self.code, "private callback body SECRET")) } else { Ok(()) }
+        }
+        fn prepare_request(
+            &self, _: u64, _: &RequestView, _: &RequestBody,
+            _: Option<crate::context_capacity::RequestBudgetProtocol>,
+            _: &dyn Fn(ContextProjection) -> Result<crate::context_capacity::InputEstimate, ExecutionError>,
+            _: &CancellationToken,
+        ) -> Result<ContextRequestPreparation, ExecutionError> {
+            Err(ExecutionError::new(self.code, "private callback body SECRET"))
+        }
+    }
+    for (early, raw_code, expected_code, event_kind) in [
+        (false, "context_candidate_capacity", "context_candidate_capacity", "run.failed"),
+        (false, "external_SECRET", "execution_failed", "run.failed"),
+        (true, "external_SECRET", "context_preparation_failed", "context.preparation_failed"),
+    ] {
+        let fixture = Fixture::new();
+        let db = fixture.catalog();
+        let input = input(&db);
+        let run_id = input.run_id.clone();
+        assert!(db.lock().unwrap().run_failure(&run_id).unwrap().is_none());
+        let cancel = CancellationToken::default();
+        let mut engine = engine(db.clone(), Mode::ToolThenAnswer, cancel.clone(), ProgressSink::default());
+        engine.context_preparation = Arc::new(FailingPreparation { early, code: raw_code });
+        let report = engine.run(input, cancel).unwrap();
+        assert_eq!(report.state, RunState::Failed);
+        assert_eq!(engine.provider.calls.load(Ordering::SeqCst), 0, "no model request was dispatched");
+        let failure = {
+            let db = db.lock().unwrap();
+            assert_eq!(db.run(&run_id).unwrap().state, RunState::Failed);
+            let failure = db.run_failure(&run_id).unwrap().unwrap();
+            assert_eq!(failure.code, expected_code);
+            assert_eq!(failure.run_id, run_id);
+            assert!(!failure.message.contains("SECRET"));
+            let events = db.events_after(0, 100).unwrap();
+            let original = events.iter().find(|event| event.cursor == failure.cursor).unwrap();
+            assert_eq!(original.subject, run_id);
+            assert_eq!(original.kind, event_kind);
+            assert_eq!(original.data["code"], expected_code);
+            assert!(!serde_json::to_string(&events).unwrap().contains("SECRET"));
+            failure
+        };
+        drop(engine);
+        drop(db);
+        let reopened = Catalog::open(&fixture.path).unwrap();
+        assert_eq!(reopened.run_failure(&run_id).unwrap(), Some(failure));
+        assert!(reopened.run_failure("missing-run").is_err(), "missing owner is not an absent failure");
+    }
+}
+
+#[test]
+fn cancellation_during_request_preparation_does_not_publish_a_failure_fact() {
+    struct CancellingPreparation;
+    impl ContextPreparation for CancellingPreparation {
+        fn prepare(&self, _: &str, _: u64, _: &CancellationToken) -> Result<(), ExecutionError> { Ok(()) }
+        fn prepare_request(
+            &self, _: u64, _: &RequestView, _: &RequestBody,
+            _: Option<crate::context_capacity::RequestBudgetProtocol>,
+            _: &dyn Fn(ContextProjection) -> Result<crate::context_capacity::InputEstimate, ExecutionError>,
+            cancel: &CancellationToken,
+        ) -> Result<ContextRequestPreparation, ExecutionError> {
+            cancel.cancel();
+            Err(ExecutionError::new("context_candidate_capacity", "a losing preparation error"))
+        }
+    }
+    let fixture = Fixture::new();
+    let db = fixture.catalog();
+    let input = input(&db);
+    let run_id = input.run_id.clone();
+    let cancel = CancellationToken::default();
+    let mut engine = engine(db.clone(), Mode::ToolThenAnswer, cancel.clone(), ProgressSink::default());
+    engine.context_preparation = Arc::new(CancellingPreparation);
+    assert_eq!(engine.run(input, cancel).unwrap().state, RunState::Cancelled);
+    let db = db.lock().unwrap();
+    assert!(db.run_failure(&run_id).unwrap().is_none());
+    assert!(!db.events_after(0, 100).unwrap().iter().any(|event| event.kind == "run.failed"));
+}

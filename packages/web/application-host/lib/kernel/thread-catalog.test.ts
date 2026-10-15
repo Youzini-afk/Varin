@@ -82,3 +82,37 @@ it('projects original Catalog CAS conflicts without changing the submitted comma
   await expect(f.api.update(command)).rejects.toMatchObject({ status: 409 });
   expect(f.requests.mock.calls[0]![1]).toEqual(f.requests.mock.calls[1]![1]);
 });
+
+it('projects only the displayed failed Run\'s original failure and preserves an unavailable read', async () => {
+  const f = fixture();
+  const identity = { runtime: 'agent' as const, threadId: 'thread:failure', branchId: 'branch:failure' };
+  const run = { id: 'run:failed', thread_id: identity.threadId, branch_id: identity.branchId,
+    state: 'failed', revision: 4, epoch: 1, configuration: {}, waiting_on: null, cancel_requested: false };
+  const failure = { runId: run.id, cursor: 42, code: 'context_candidate_capacity', message: 'The context summary does not fit. The original history remains unchanged.' };
+  let unreadable = false;
+  f.requests.mockImplementation(async (method, params) => {
+    switch (method) {
+      case 'runtime.thread.inspect': return { thread_id: identity.threadId, parent_thread_id: null, observer_project_ids: [], branches: [
+        { branch_id: identity.branchId, active_run_id: null, head: null, latest_run: run },
+      ] };
+      case 'runtime.status': return { eventCursor: 42 };
+      case 'runtime.history.page': return { head: null, previous: null, items: [] };
+      case 'runtime.context.inspect': case 'runtime.launch.inspect': case 'runtime.child.for_thread': return null;
+      case 'runtime.model.inspect': return { desired: null, active: null };
+      case 'runtime.run.failure':
+        expect(params).toEqual({ runId: run.id });
+        if (unreadable) throw new Error('Original failure unavailable');
+        return failure;
+      default: return [];
+    }
+  });
+  expect((await f.api.snapshot(identity)).runFailure).toEqual(failure);
+  expect(f.requests.mock.calls.filter(([method]) => method === 'runtime.run.failure')).toHaveLength(1);
+  expect(f.requests.mock.calls.some(([method]) => method === 'runtime.events.read')).toBe(false);
+  run.state = 'cancelled';
+  expect((await f.api.snapshot(identity)).runFailure).toBeNull();
+  expect(f.requests.mock.calls.filter(([method]) => method === 'runtime.run.failure')).toHaveLength(1);
+  run.state = 'failed'; unreadable = true;
+  await expect(f.api.snapshot(identity)).rejects.toMatchObject({ code: 'thread-request-failed' });
+  expect(f.requests.mock.calls.some(([method]) => /cancel|resume|retry/.test(method))).toBe(false);
+});

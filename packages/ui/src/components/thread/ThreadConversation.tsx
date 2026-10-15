@@ -564,6 +564,11 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
     messageInput.current?.focus();
   }}><section ref={handoff.setRoot} className="regular-chat-view relative flex h-full min-h-0 flex-col [container-type:inline-size]" aria-label="Thread conversation" data-thread-conversation="true">
     {overview}
+    {!historyView && run?.state === 'failed' && <div role="alert" aria-label="Run failed" className="mx-auto w-full max-w-3xl px-4 py-2 text-sm text-destructive">
+      <p>{t('harness.threads.state.failed')}</p>
+      {snapshot?.runFailure?.runId === run.id && <p>{snapshot.runFailure.message}</p>}
+    </div>}
+    {!historyView && run?.state === 'cancelled' && <p role="status" aria-label="Run cancelled" className="mx-auto w-full max-w-3xl px-4 py-2 text-sm text-muted-foreground">{t('harness.threads.state.cancelled')}</p>}
     {contextRunId && <ContextHistoryDialog key={`${draftKey}:${contextRunId}`} api={api} identity={identity} runId={contextRunId} onClose={() => setContextRunId(undefined)} />}
     {historyOpen && <ChatTreeDialog api={api} identity={identity} open onOpenChange={setHistoryOpen} busy={pending} recoverDisabled={active}
       onFork={entry => { void forkFrom(entry.id); }} onRecover={entry => { showOverview('outputs'); void recovery.recover(entry.id); }} />}

@@ -1208,6 +1208,10 @@ pub enum ExecutionRecord {
     ContextPreparationFailed {
         failure: ExecutionError,
     },
+    /// The same transaction owns both the terminal state and its safe failure fact.
+    ExecutionFailed {
+        failure: ExecutionError,
+    },
     RequestPrepared {
         // The executor and durable writer observe one frozen ModelStep, not
         // separate deep copies of its history and complete provider payload.
@@ -1948,7 +1952,12 @@ impl<
         macro_rules! finish {
             ($label:lifetime,$next:expr,$waiting:expr,$failure:expr $(,$rollback:expr)?)=>{{
                 let next:RunState=$next;let waiting_on:Option<String>=$waiting;let failure:Option<ExecutionError>=$failure;
-                match self.commit(&input,ExecutionRecord::StateChanged{state:next,waiting_on:waiting_on.clone()}) {
+                let record = if next == RunState::Failed {
+                    ExecutionRecord::ExecutionFailed { failure: failure.clone().unwrap_or_else(|| ExecutionError::new("execution_failed", "Run execution failed")) }
+                } else {
+                    ExecutionRecord::StateChanged { state: next, waiting_on: waiting_on.clone() }
+                };
+                match self.commit(&input,record) {
                     Err(error) if error.code=="input_pending"=>{ $(policy_state=$rollback;)? continue $label },
                     Err(error)=>return Err(error),
                     Ok(())=>return Ok(ExecutionReport{state:next,history,policy_state,model_steps:steps,waiting_on,failure}),
