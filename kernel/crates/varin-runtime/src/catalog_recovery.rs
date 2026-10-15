@@ -1043,8 +1043,22 @@ impl Catalog {
                     );
                     continue;
                 }
-                if op.effect == Effect::Unknown
-                    || op.outcome == Some(Outcome::Indeterminate)
+                // A stopped original executor can truthfully leave its business effect unknown.
+                // That durable receipt closes the call without making it replayable or successful.
+                // Recovery's synthetic Unknown alone is insufficient, as is empty occupancy.
+                let reconciled_stop = op.phase == OperationPhase::Terminal
+                    && op.external_receipt.as_ref().is_some_and(|receipt| {
+                        receipt.executor_stopped
+                            && op.outcome == Some(receipt.outcome)
+                            && op.effect == receipt.effect
+                            && op.result.as_ref()
+                                == Some(&OperationResultMetadata::Content {
+                                    reference: receipt.result_ref.clone(),
+                                })
+                    });
+                if ((op.effect == Effect::Unknown
+                    || op.outcome == Some(Outcome::Indeterminate))
+                    && !reconciled_stop)
                     || (op.phase != OperationPhase::Terminal && op.effect != Effect::None)
                 {
                     return Err(RuntimeError::Conflict(
