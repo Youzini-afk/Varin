@@ -39,7 +39,7 @@ contains the native implementation. `semantic/store.ts` orchestrates embeddings
 through the semantic owner; `semantic/store-engine.ts` owns its native generations.
 Opening, indexed reads, graph/vector computations, user writes, checkpoints and
 closing run in the corresponding owner. Cache maintenance uses the semantic owner.
-Electron uses its own executable in Node mode, like the existing Pi worker boundary.
+Electron uses its own executable in Node mode for this storage process.
 The Web Host uses the same component. No renderer API or public server is added.
 
 The last successful store close disconnects the process and waits for its exit,
@@ -132,13 +132,13 @@ single-writer ownership, and adds no candidate limit or longer tool timeout.
 
 ### Bot memory implementation boundary
 
-Bot and session scopes use hashed filename-safe keys through `owner-scope.ts`;
+Bot and Thread scopes use hashed filename-safe keys through `owner-scope.ts`;
 these identities are not document workspace roots. They share this storage worker,
 not a new database owner. Automatic memory enabled by the user commits effective
 `accepted` rows; claim nature and source still distinguish inference from explicit
 user requirements. Acceptance is not a persistence receipt or an authority level.
 
-The organizer discovers source events only in workspace and Bot stores. `user.tdb`
+The organizer enumerates registered Bots and discovers their existing source events. `user.tdb`
 is the shared memory destination and is opened exclusively through the Host's user
 store owner; directory discovery must not reopen it as a workspace event store.
 Narration receives the actual source scope and available destination scopes; the user
@@ -149,8 +149,8 @@ existing memories is handled by narration and storage.
 
 New organizer proposals can supply the knowledge revision they observed. The
 single writer checks both committed and pending mutations before inserting them.
-Explicit and automatic memories carry the same original-source ranges (native Pi
-entry, event or Run report, revision and text offsets). A paraphrased explicit
+Explicit and automatic memories carry the same original-source ranges (native HistoryItem,
+event or Run report, revision and text offsets). A paraphrased explicit
 record cites `sourceText`; the Host resolves that exact passage on the caller's
 branch. Automatic proposals also cite a narrow quote. Covered and retired ranges
 are excluded before narration, and the storage writer checks late inferred
@@ -158,24 +158,32 @@ proposals against explicit/forgotten evidence. Explicit remembering can
 intentionally create a new active row.
 
 Organizer progress retains reviewed ranges, including empty judgments, across all
-native Pi branches. List cursors are presentation only; changed source revisions
+native Thread branches. List cursors are presentation only; changed source revisions
 reopen their ranges. Prepared proposals and their source ranges survive restart;
 committed provenance reconciles a crash between memory and coverage writes. This
 is recoverable progress, not a cross-store rollback transaction.
 
-Explicit chat selection extraction uses `memory/selection-memory-routes.ts`. Preview validates native
+The original narrator and optional decision now execute as Catalog `MemoryWork` stages. Their whole
+fixed recipe, output, transport/finish evidence and usage live in the existing ContentStore/inference
+owner; `OrganizerProgress.workId` is only a reference. An unknown old source range cannot refresh the
+failure backoff for every newer entry in the same session, and an old work cannot overwrite another
+work's prepared row. Recovery uses original prepared proposals and committed provenance; it never
+turns the KnowledgeStore into a second inference scheduler or creates an incidental paid request.
+See [Bot background inference](../memory/DOCUMENTATION.md#bot-background-inference) for admission,
+Sleep and explicit Retry.
+
+Explicit chat selection extraction uses `memory/thread-memory.ts` and `memory/thread-memory-routes.ts`. Preview validates native
 branch text and exact offsets, calls the existing organizer narrator without automatic coverage/commit,
-and returns editable drafts with source revisions. Save resolves the session's real owner (including
-Bot/session scopes), validates the frozen owner and original revisions, then uses MemoryService.remember.
+and returns editable drafts with source revisions. Save resolves the Thread's real owner (including
+Bot/Thread scopes), validates the frozen owner and original revisions, then uses MemoryService.remember.
 Source ranges and `user-extracted` provenance use the same memory authority and original-source reader.
-Undo verifies the saved row revision and originating session before retiring it. An empty extraction is
+Undo verifies the saved row revision and originating Thread before retiring it. An empty extraction is
 a valid result; unconfigured models, invalid envelopes/citations and changed sources remain failures.
 
 `memory get` with `includeSource` and the settings original-passages view read only
 the persisted ranges authorized by the selected memory. They report changed or
 missing originals instead of presenting another revision as the cited evidence.
-Current delivery evidence is in the
-[BC acceptance record](../../../../../docs/reviews/bot-computer-use.md).
+Current cross-domain behavior is summarized in [context and knowledge](../../../../../docs/retrieval.md).
 
 ### Runtime build
 
@@ -194,3 +202,69 @@ and failure-state transitions. `store-process.test.ts` exercises the production
 facade/child path, error identity, batching, Set/Date transport, cancellation,
 close ordering and recovery of acknowledged data after a real process kill.
 Process-kill recovery is not equivalent to a power-loss guarantee.
+
+## Native Thread plans
+
+Native Agent and Bot main and admitted child Thread plans use this same private KnowledgeStore writer, in the existing
+user store as a physical home. `plan-store.ts` records explicit Thread/branch identities;
+it does not invent session IDs or duplicate plans by Bot. Version bodies, branch
+current references, fork captures and reference-only mutation receipts live here. Native records
+have their own types and no legacy session identity, so block queries, user knowledge lists,
+recall and semantic knowledge indexing exclude them through their existing type filters.
+
+A native update uses exact `expectedRef` CAS. One `commitTransaction` writes the immutable
+version, branch pointer and original receipt together; notifications follow commit. Tool receipt
+lookup uses the real persistent Operation ID, then checks its complete frozen origin and intent.
+Tool origins carry the existing tagged `ToolOrigin`: either the actual model request/call or policy
+action/node, plus its Run and original effect epoch. There is no fabricated request ID or legacy
+flat-origin fallback. The Kernel captures the original invocation's history range and schemas before
+the private bridge query. A reopened receipt lookup does not resolve today's plan ancestry or reapply
+the update; a later user edit stays current.
+User command keys are scoped to the authenticated Thread and branch. Replaying a lost response
+returns the original version, even after a later user edit, without another mutation. Storage
+failure remains unknown until the original receipt can be queried.
+
+The Host verifies native Catalog identity and captures a fork at the chosen real history cut
+before creating the Catalog branch. Catalog stores only the immutable capture reference/basis.
+Knowledge verifies a new fork's complete captured identity, including captured absence; an
+orphan capture never grants a branch or poisons an existing root. Historical selection follows one immutable candidate at a time through `previousRef`, including
+nested earlier-head forks. Catalog membership uses authenticated, epoch-bound parent cursors
+with at most 256 metadata steps per call; neither IPC nor a lock holds the complete ancestry.
+The owner rechecks the current pointer against temporary selection evidence in its transaction.
+Selection never enters semantic receipt identity. Explicit precommit stale-selection errors may
+restart pure resolution; unknown mutations never automatically retry. Same-head siblings edit
+separate branch owners. This captures a visible version, not an arbitrary earlier wall-clock
+instant within one history head.
+
+`expectedHeadId` is a Catalog admission check for HTTP edits, not a cross-store transaction.
+A later history-only advance can leave the admitted edit valid; a later plan change fails the
+KnowledgeStore latest-reference CAS. Native tool reads, user edits and the native plan card
+consume the same body and reference. The card refreshes from the owner after a mutation and on
+matching plan-change/reconnect events; it preserves a conflicting draft for explicit resolution.
+
+Native HTTP reads/edits and tool admission check the real persisted context, Catalog Bot binding,
+and child relationship. A Bot keeps mode `bot` and its original Thread owner. Child tools retain
+their actual frozen selection and Operation contract. A `read_only` file source does not forbid
+updates to the child's selected plan capability; authenticated user edits retain their existing
+authority. An uninitialized context is not-ready and a fabricated mode/role is unsupported,
+never a successful empty plan. Existing conversation forks for unsupported scopes retain their
+previous no-plan path; a storage or Catalog failure cannot silently downgrade a supported plan-aware
+fork. The card separates these states and refreshes after context admission.
+
+Cancellation ends the caller's observer before the original Knowledge transaction may settle.
+Bot drain waits for that original owner promise. A same-kernel-epoch receipt lookup first reads the
+durable mutation receipt; only when it is absent can the bridge return the exact original owner’s
+stopping fact. An original mutation that never entered the writer, or was explicitly rejected before
+commit by the existing stale-selection check, is Failed/None. A settled writer with no confirmed
+result remains Indeterminate/Unknown with its executor stopped. Restart loses transient
+stopping evidence, so absence alone never proves None. Receipt lookup never repeats a mutation.
+
+Bot deletion removes its Catalog relations and separately owned knowledge stores. The shared user
+store currently retains native plan versions, pointers, fork captures and receipts, as it does for
+other deleted Thread owners; there is no plan-history purge API. Deleted Catalog identity cannot
+expose those records through the public plan service. This is a retention boundary, not a claim
+that deleting a Bot erases all historical plan bytes.
+
+Focused plan tests exercise the real KnowledgeStore/worker, original receipts, fork identity and stale
+selection, with separate Catalog ancestry fixtures and UI consumers. They do not establish power-loss
+or packaged cross-platform behavior. See [development](../../../../../docs/development.md) for check selection.

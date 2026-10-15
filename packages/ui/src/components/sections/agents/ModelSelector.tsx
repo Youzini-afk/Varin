@@ -12,11 +12,11 @@ import { useDeviceInfo } from '@/lib/device';
 import { useI18n } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
 import { dropdownTriggerVariants } from '@/components/ui/dropdown-trigger';
-import { useDirectoryStore } from '@/stores/useDirectoryStore';
-import { usePiProviderStore } from '@/stores/usePiProviderStore';
+import { subscribeVarinEvents } from '@/lib/varinEvents';
+import { useModelCatalogStore } from '@/stores/useModelCatalogStore';
 import { useUIStore } from '@/stores/useUIStore';
 import { ModelPickerList, type ModelPickerEntry, type ModelPickerProvider } from '@/components/model-picker/ModelPickerList';
-import { toModelPickerProvider } from '@/lib/piModelPicker';
+import { toModelPickerProvider } from '@/lib/modelPicker';
 import type { ModelMetadata } from '@/types';
 
 interface ModelSelectorProps {
@@ -28,7 +28,7 @@ interface ModelSelectorProps {
     placeholder?: string;
     tooltipsEnabled?: boolean;
     dropdownPortalToBody?: boolean;
-    /** Runtime directory whose provider catalog should be shown. */
+    /** Workspace hint; configured native channels are Host-global. */
     cwd?: string;
     /** Whether the picker exposes an inherited/not-selected choice. */
     allowNone?: boolean;
@@ -52,7 +52,7 @@ export const ModelSelector: React.FC<ModelSelectorProps> = ({
     placeholder,
     tooltipsEnabled = true,
     dropdownPortalToBody = false,
-    cwd,
+    cwd: _cwd,
     allowNone = true,
     displayProviderId,
     displayModelId,
@@ -64,20 +64,17 @@ export const ModelSelector: React.FC<ModelSelectorProps> = ({
     variant = 'field',
 }) => {
     const { t } = useI18n();
-    const currentDirectory = useDirectoryStore((state) => state.currentDirectory);
-    const piProviders = usePiProviderStore((state) => state.providers);
+    const channels = useModelCatalogStore((state) => state.channels);
     const providers = React.useMemo<ModelPickerProvider[]>(
-        () => piProviders.map(toModelPickerProvider),
-        [piProviders],
+        () => channels.map(toModelPickerProvider),
+        [channels],
     );
-    const providersLoaded = usePiProviderStore((state) => state.loaded);
-    const providersLoading = usePiProviderStore((state) => state.isLoading);
-    const providersCwd = usePiProviderStore((state) => state.cwd);
-    const providerError = usePiProviderStore((state) => state.error);
-    const loadProviders = usePiProviderStore((state) => state.load);
-    const targetDirectory = (cwd ?? currentDirectory)?.trim();
-    const isReady = providersLoaded && !providersLoading && providersCwd === targetDirectory;
-    const isUnavailable = providersCwd === targetDirectory && Boolean(providerError) && !providersLoading;
+    const providersLoaded = useModelCatalogStore((state) => state.loaded);
+    const providersLoading = useModelCatalogStore((state) => state.loading);
+    const providerError = useModelCatalogStore((state) => state.error);
+    const loadProviders = useModelCatalogStore((state) => state.load);
+    const isReady = providersLoaded && !providersLoading;
+    const isUnavailable = Boolean(providerError) && !providersLoading;
     const triggerDisabled = disabled || (!isReady && !isUnavailable);
     const modelsMetadata = React.useMemo(() => new Map<string, ModelMetadata>(), []);
     const isMobile = useUIStore((state) => state.isMobile);
@@ -104,13 +101,15 @@ export const ModelSelector: React.FC<ModelSelectorProps> = ({
     }, [isActuallyMobile, onOpenChange, open]);
 
     React.useEffect(() => {
-        if (!targetDirectory) return;
-        void loadProviders(targetDirectory).catch(() => undefined);
-    }, [loadProviders, targetDirectory]);
+        if (!providersLoaded && !providersLoading && !providerError) void loadProviders().catch(() => undefined);
+    }, [loadProviders, providersLoaded, providersLoading, providerError]);
+    React.useEffect(() => subscribeVarinEvents(event => {
+        if (event.type === 'settings-changed' && event.owner === 'agent-settings') void loadProviders().catch(() => undefined);
+    }), [loadProviders]);
 
     const retryProviders = () => {
-        if (!targetDirectory || disabled) return;
-        void loadProviders(targetDirectory, { force: true }).catch(() => undefined);
+        if (disabled) return;
+        void loadProviders().catch(() => undefined);
     };
 
     const catalogStatus = !isReady ? (

@@ -6,22 +6,128 @@ lane. It does not create another scheduler or another desktop backend.
 
 ## Thread identity and desktop assignments
 
-`computer-actor.ts` resolves the broker's session through the actual Registry Thread/Run and its durable
-ancestors. Attached Agent, research and Bot roots retain their main-agent role even though their Thread
-kind is `discussion`. Retrieval presets and ordinary discussion children receive observation only.
+The protocol's `ComputerWorkRef` identifies a native Thread/branch; `ComputerExecutionRef` adds its
+actual Run. Idle work has no execution. Rust `runtime.computer.scope` resolves lineage from Catalog
+and the branch's active Run, including source-less work; context or auxiliary Runs do not become the
+branch owner. Tool calls additionally validate their real ModelStep or PolicyAction Operation.
 The caller cannot supply a parent, Run or role to the model-facing API.
 
-Workers and retrieval threads have the `computer` tool when Computer Use is enabled. A child calls
-`computer` with `action:"request"`, desktopId, access (`observe` or `control`) and reason. The Host wakes
-the main conversation with the request identity. The main agent coordinates the work segment with
-`grant`/`deny`. A grant fixes the child's desktop environment without replacing its shell target.
-`wait:true` releases its execution slot and awaits a decision event without polling or a reply timer;
-the default returns immediately so the child can do other work. Abort, denial and Run termination
-settle that wait. `access` returns assignments and requests; `releaseAssignment` ends a work segment.
+Native calls use the shipped `varin.builtin.computer` ordinary extension. Its single declaration
+owns `computer_list/apps/observe/act/cancel/release/request/access/grant/deny/wait`,
+`computer_control/open/put/install`, `computer_browser_read/browser`, `computer_office_read/office`,
+`computer_evidence`, `computer_environment`, `computer_prepare`, `computer_desktop_lifecycle` and
+`computer_artifact`,
+their schemas, completion modes and read/effect classification.
+The original extension capability review, immutable binding and ToolInvocationAuthority remain in
+force. `computer.use` dispatches through this service, not a separate desktop backend. Actual global
+and trusted-project Computer settings can disable dispatch. The original tool binding freezes the
+default desktop once per execution; replay restores that configuration rather than reading a new
+sidebar selection or default. Explicit desktop selection and actual assignments still take precedence.
+An invalid captured Computer default makes that service candidate unavailable through the existing
+tool-preparation projection. Unrelated tools can still prepare, even when the Computer provider was
+already active. Required saved Computer bindings remain exact; errors do not become a null default.
+
+Application adaptation uses the original ComputerService, driver and remote assignment token.
+Browser status/tabs/snapshot/screenshot and Office status/docs/read have read-only schemas;
+launch/navigation/evaluate/click/type and Office open/write/insert/save/export have effect schemas.
+Even an expression described as read-only requires the browser effect tool. Child labels, script
+nesting and a read assignment cannot upgrade these permissions. Target resolution and actual
+assignment admission precede the existing physical lane. The returned application automation epoch
+can be supplied on later input; a changed epoch or a handback requiring a fresh scene rejects old work.
+For input-ready observations, `computer_control` first awaits the existing control reservation,
+including its owning remote peer, then returns the original assignment/control state without sending
+application input. A child still needs its root's control grant. The first effect can also upgrade a
+root's observation assignment; that new peer assignment invalidates the old read epoch. Its rejection
+has a no-input receipt and directs the caller to read a fresh scene. No old observation is relabelled.
+Only a successful fresh scene read by the current controller can clear its handback fence; another
+observer cannot satisfy that requirement. The owner compares the original actor identity, including
+peer origin and assignment, rather than a tool label or an observer lease ID. A lost control-reservation
+ACK with an unconfirmed drop retains the original assignment cleanup and an unknown result.
+
+`computer_put` returns the stored managed-home file revision. `computer_install` preserves each
+package result, including failure. A non-managed desktop reports its actual unavailable capability.
+The original application driver receipt separates effect and input-writer completion; loss of a
+response remains unknown. Aborting open/browser/office input joins the original lane's physical
+release and callback drain rather than treating the observer promise as a stopped writer. A normal
+driver response ends that call, not the assignment or the application's own asynchronous work.
+Remote application receipts must contain the owning Host's execution evidence; missing evidence
+does not become success. File-write/install failures after entering the external writer retain
+unknown effects and unconfirmed writer status when the original backend supplies no stronger proof.
+The target's own pre-dispatch failure type carries no-input/stopped evidence through the existing
+authenticated route; the source preserves it instead of guessing from an HTTP status or turning a
+safe stale-epoch rejection into an unresolved writer. The same proof covers a revoked peer token
+rejected before entering the endpoint. Managed installer and file helpers retain their exact completion
+phase: validation before spawn proves no dispatch; a helper that exited proves stopped even when its
+response is malformed or rejected. Exit status alone does not prove that no file/package effects occurred.
+
+Browser screenshot data URLs are decoded by their producer adapter into typed media parts with the
+reported image MIME type. JSON keeps only its part index and other result metadata. The original
+evidence journal retains the admitted work/Run; it never
+substitutes a role label or records expressions, typed text, URLs with credentials or file bytes.
+An authenticated remote observer can read this same journal without requesting control.
+
+`computer_environment` inspects the accepted Run's frozen source and original desktop assignments.
+It reports that this Run's file/process placement stays frozen; choosing a source for a later
+execution does not migrate accepted work. Service forwarding has its own ordinary
+`environment_forward` tools and original Host listener owner, described in
+[Harness ownership](../harness/DOCUMENTATION.md#service-forward-ownership). Computer assignment
+does not select or redirect their target, and this view does not duplicate their availability state.
+
+Managed desktop preparation and start/stop use this same service and assignment. Discovery may
+register the real configured Linux session as unprepared/unavailable, but does not install or start
+it. An automatic transition first acquires its real control assignment and checks its epoch. The
+original lane invalidates old observations and pending input before calling the lifecycle helper.
+Human product and native tool consumers use that same lifecycle owner. A setup helper without a
+cooperative cancellation protocol remains pending until its actual exit; cancelling an observer does
+not prove apt/bootstrap or its descendants stopped. The independent physical input stop stays separate.
+The target's completed stop reports the assignment IDs its original reset actually ended, restricted
+to the calling peer origin. The source releases only those exact original claims. This includes an
+observer admitted during setup, while leaving a new claim admitted after the reset intact. Assignment
+release ACK failures remain separately visible; they do not erase the confirmed desktop-stop receipt.
+
+Artifact registration accepts the actual `ComputerWorkRef`, resolves the original Thread/branch and
+Bot or Thread scope, and stores the existing `computer.artifact` record. Bot work views use the native work
+identity. Peer operations do not register a foreign
+Thread as local work on the resource Host; the coordinating Host's mirror retains its own association,
+while the resource Host keeps the original peer control and evidence. A missing local Thread is an
+explicit absence; storage/transport failures are not swallowed. Artifact downloads retain the source
+Host and registered revision and the original UI checks the received byte length and SHA-256 before
+delivery. A file changing during transfer is rejected rather than accepted as the registered revision.
+
+Native child tasks, with or without a file source, request a desktop through their real ModelStep or PolicyAction
+Operation. Catalog owns the request, original decision and durable Wait; reasons and notification
+bodies use ContentStore. Acceptance queues one typed Environment input for the root in the same
+commit. A root parked on the requesting child's actual dependency chain can end that observation
+without cancelling or reporting the child complete; unrelated observations remain intact. An idle
+root resumes through the normal launch capture, Goal, pause and question admission boundaries.
+A terminal requester invalidates an undelivered notification instead of waking an obsolete task.
+
+Root tool decisions and authenticated user decisions share that request owner. The user can decide
+from an idle root without inventing a Run. A stable command key binds the original choice/reason;
+changing either is a conflict. Grant reserves the original physical assignment before publishing
+`granted`. Cancellation that wins publication releases that exact reservation. Lost publication
+reconciles the same claim; Host restart or an absent original reservation never silently reissues it.
+Short claim reconciliation and original terminal cleanup do not load request reasons. Public detail
+reads still report missing/corrupt content instead of silently replacing it.
+
+`computer_wait` is a distinct Job observation: acceptance releases its slot, and an original decision
+adds one Environment fact after recovery. Cancelling this Wait leaves the request and assignment
+alone. `granted` records the earlier ready assignment; `released`/`unavailable` reflect the current
+physical projection, not a rewrite of the decision. Each Native child assignment belongs to its own
+Run, so a root's natural completion does not terminate independent child work. Native actors carry
+per-tool invocation policy without a second grant list.
+
+Source-less pure-capability children use the original ChildTask admission with explicit absent file
+authority and no applicable file result. They retain their own Run, selected capabilities and original
+Computer permissions. Trusted handback uses the original execution/input path described below;
+persistent scripts invoke these same ordinary Computer tools through the original tools.invoke permission
+and dispatch scope. Closing their original script call triggers the same physical stop and drain path.
+Selected tools alone never grant a desktop assignment. Request, grant/deny, wait and release use the
+same Catalog request and physical assignment owners described above.
 
 There is one controller per physical desktop, including the main agent. Observers coexist with it.
 Separate windows on one desktop share control; separate desktops/VMs can run in parallel. Observation
-IDs are owned by session and Run, so another observer does not replace a controller's current tree.
+IDs are owned by Thread/branch and Run, so another observer does not replace a controller's current tree.
 Control epochs include the execution identity, invalidating cached application objects across rounds.
 
 Remote assignments are reserved at the owning Host before a source Host confirms a grant. Automatic
@@ -34,24 +140,71 @@ reservation requires explicit human takeover on the target; there is no speculat
 
 ## Cancel work and transfer control
 
-The overview cancels the current task family's computer work through `automation/stop`. A desktop
-control bar scopes cancellation to that desktop. The Host invalidates old admission tickets, denies
+The conversation overview captures an exact execution: explicit root Stop captures its current Computer
+family, while child Stop targets that child. An idle root can stop a displayed live child assignment. The UI
+uses `ThreadsAPI.computer` through the authenticated `/api/threads/computer/state`, `/decide` and `/stop` routes. Cleanup is addressed by
+its own work and Run, including when shown under an idle root. Known accepted cleanup starts before
+waiting for a new identity projection; stale work cannot stop a replacement execution.
+
+The full desktop viewer instead calls `/api/computers/desktops/:id/stop` with the displayed
+`automationEpoch`. Its real target owner validates the generation; a remote actor is never sent to
+the viewing Host's local Thread owner. The Electron control bar calls the original desktop owner
+directly. The Host invalidates old admission tickets, denies
 matching pending requests, cancels exact-Run Computer REPL evaluations, drains native/external work,
 releases held input and ends those assignments. Other desktop assignments remain independent.
 Permissions are unchanged: fresh work in the same Run can acquire an assignment after release.
 Old scripts and observation bindings cannot resume through that new assignment.
 
-The Agent receives a passive user-cancellation notification. The operation reports any known partial
-effects. `cancelling` lasts through release; success returns to `enabled` and removes the work banner.
+Native terminal cleanup is also a product consumer, not a requirement for the model to call release.
+Original runtime/owner notifications wake reconciliation of Computer's already accepted executions;
+the original Catalog must confirm completed/failed/cancelled before `finishExecution` runs. A tool
+binding update or kernel channel reset alone is not terminal evidence. Reconciliation has no timer or
+second execution ledger; original physical release rules still apply.
+
+Native cancellation and takeover
+are typed Environment facts, transferred from the original desktop outbox to Catalog. They retain
+original actor/desktop/control identity and distinguish confirmed release from unknown cleanup.
+The operation reports any known partial effects. `cancelling` lasts through release; success returns to `enabled` and removes the work banner.
 `cancel-unconfirmed` preserves a real release failure for recovery. There is no stopped-round state.
 
-Human takeover requires an explicit action. It suspends the assignment, interrupts its active script,
+Human takeover requires an explicit action. It suspends the assignment, interrupts its active automation,
 invalidates queued input and releases managed keys/buttons; physical mouse motion does not transfer
 ownership. Target/focus changes interrupt the affected action and retain Agent ownership. Handback
-keeps the assignment, invalidates old observations and delivers a durable continuation to the actor
-captured at takeover, with its root informed. Ended or replaced Runs do not receive that continuation.
+keeps an otherwise live assignment, invalidates old observations and retains a durable continuation for the actor
+captured at takeover, with its root informed. Native
+handback enters an eligible active Run at its legal input boundary, or uses the original root/child
+continuation owner after natural completion. The successor is a real Run with the original frozen
+launch and typed Environment history, including source-free children. Catalog derives root lineage;
+root fanout is passive, and a notice grants no assignment or permission. Natural completion still
+releases the old assignment: retaining the original handoff fact does not authorize the ended Run. A replaced execution is
+passive; explicit Run/tree Stop and ended Goal cannot be revived. Existing Goal/pause/question holds
+and unrelated observation Waits remain authoritative.
+
+The original interrupted-control record survives Native natural completion as provenance only.
+After return it is marked returned, is not presented as a human operator and cannot restore an ended
+Run or lease. It retains the exact actor/event for Stop even after the input-acceptance ACK. A new
+actual control assignment or takeover replaces it; an observer does not. On restart it is read from
+the original desktop record, separately from physical-release markers.
+
+The desktop outbox keeps each immutable kind/ID until a definite Catalog input-acceptance receipt.
+A lost response retries that identity without creating a second input or execution. Computer Stop
+captures exact pending handback IDs and persists its original short cancellation command until ACK,
+including when body transfer is slow or has not committed. These revocations bypass failed fact
+bodies. Replaying an old Stop does not cancel a later handback in the same Run, erase already-delivered
+history or stop a whole successor Run. Physical release starts independently of these metadata
+transfers. A new action still requires fresh observation and the current per-call binding; old queued
+actions cannot resume. No polling scheduler or second desktop/execution ledger is introduced.
 The latest observer/usage record never selects the recipient. Remote control assignments subscribe
 to the owning Host's control stream without frames, even when no viewer is open.
+
+For an already resolved local desktop, explicit cancel/takeover and the control bar's original
+`automation.cancelDesktop` route fence the existing lane and start its physical interrupt before
+waiting for catalog reads, script revocation, control persistence or diagnostic writes. Placement is
+remembered only after the original desktop record is loaded; an unknown or remote target still uses
+its owning resolver. An observer releasing its assignment does not stop another controller.
+The release acknowledgement and the old lane callback must both finish before cleanup is confirmed.
+A persistence/revocation failure after input release remains an actionable partial failure; it does
+not pretend that human-control persistence succeeded or restart the old queued input.
 
 Windows owns synthetic input in `input-controller.cs` on a thread separate from PowerShell's UIA
 calls. A release side channel fences the native owner and acknowledges key/button release before
@@ -65,7 +218,29 @@ readback confirms `set_value`. Tool text contains the short result and relevant 
 internal trace. Explicit `app_post` text requires a native Edit/RichEdit handle in the selected window;
 it cannot silently route browser input through unsupported Win32 edit messages.
 
+The original desktop record's `runtimeVersion:4` stores discriminated work/usage and a short
+`physicalControl` marker before input. It identifies the Host control generation, original input
+helper and actual assignment or human holder. Malformed or obsolete nonempty runtime metadata remains
+an actionable fenced state; desktop configuration and external assets are not migrated or erased.
+An empty reservation map, replacement Host/helper, readiness probe or new control epoch cannot prove
+old held input released. Confirmation requires the original helper's release acknowledgement plus
+callback/process drainage, or the original managed desktop session's actual stop. A failed durable
+clear retains the barrier and may retry using that same retained proof. A local-console helper lost
+with its Host has no durable cross-restart release acknowledgement, so it remains unconfirmed.
+
+`ComputerActionResult.inputWriterStopped` is separate from both action effect and assignment release.
+A lost action response stays unknown even if explicit cancellation later proves its writer drained.
+Ordinary tool settlement consumes that original result. The Host does not manufacture success from
+an ended callback or repeat unknown input. An input supervisor never respawns a new helper under the
+same physical-owner identity; capture helpers may still restart independently.
+
 ## Feedback and presentation
+
+Native request decisions and physical changes emit the original family's short projection invalidation. The shared event parser routes it to the
+current work's existing state reader; request-detail errors appear in the overview. In-flight reads
+finish and coalesce a trailing refresh, while original Host/selection/control fences reject late
+replies. This presentation work never blocks request acceptance or physical Stop.
+
 
 Observations keep the native tree on the owning Host and return a display page (100 lines by default,
 `textLimit:"max"` to expand). `observationId` plus `offset` reads the same retained tree without capturing
@@ -98,6 +273,11 @@ The overview and small desktop launcher share `useComputerAutomation`: one snaps
 UI stream per viewed conversation, no capture or polling. Full/compact overview show the desktop,
 operator, current app/operation and pending requests; both offer Cancel computer work. The compact action
 does not open the full panel. This state is a Host projection, not a renderer authority.
+Native conversations use the same projection and show current work separately from unresolved old
+cleanup. Snapshot reads do not probe or capture desktops. Shared protocol parsers serve HTTP and SSE;
+late Host/work/Run and control-generation replies cannot erase newer cleanup, including delayed
+takeover and handback replies. Errors expose bounded owner/stale/format/release diagnoses and refresh
+or recovery actions. Unknown cleanup does not invent a new ban on the original recovery controls.
 
 The Windows native shell adds a nonfocusable bottom control bar with Take control / Return to Varin
 and Cancel computer work. Its fixed commands call this same Host. Varin windows are excluded from
@@ -111,6 +291,27 @@ an app. Other desktops prepare when selected or used.
 Focused tests exercise actual Registry identities, local/peer exclusivity, observer isolation, event
 waits, cancellation and epoch fences, real HTTP routing between simulated Hosts, sleeping native Node
 REPL revocation, progress correlation, negative-origin feedback mapping and compact overview stopping.
+The ordinary-application Node tests drive the original authenticated Router directly (without a
+listener), the shipped extension broker over child IPC, and controlled driver/VmExec responses. They
+cover peer reservation/re-observation, pre-dispatch rejection, original cancellation/drain, typed media
+and unknown effects independently of stopped input.
 The Windows targeting fixture invokes production functions with fake controls/input and checks visual
 events without desktop access. Those results do not establish real Windows overlay placement or
 Linux/macOS desktop input, VM installation, or an installed release's visual acceptance.
+
+## Native capture session ownership
+
+macOS and Wayland drivers advertise `sharedDesktopSession` to the existing driver
+pool. Controller observations and input retain one ordered request lane, while
+viewer `capture_frame` requests have a separate correlated read-only lane on that
+same process. The pool coalesces startup and capture without inventing a second
+physical input owner. Job cancellation signals only the current input request;
+its actual response and `release_input` still drain through the original lane.
+Closing a viewer never closes the shared platform authorization. Desktop reset
+or Host disposal closes the helper only after the existing owner cleanup path.
+
+Platform receipts preserve `session-closed`, geometry/focus changes, cancellation
+and uncertain effects separately. Native capture timestamps survive observation
+projection. macOS permission checks and Wayland authorization/transport facts are
+reported separately from current input/capture capability flags. Platform source,
+signing and native-verification boundaries are in the driver README.

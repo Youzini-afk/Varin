@@ -33,7 +33,7 @@ import {
 } from '@/lib/desktopWorkspaceView';
 import type { RecoveryVariant } from '@/components/onboarding/DesktopConnectionRecovery';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
-import { usePiSessionStore } from '@/stores/usePiSessionStore';
+import { useThreadStore } from '@/stores/useThreadStore';
 import { subscribeRuntimeEndpointChanged } from '@varin/application-client';
 import { WorkbenchTransitionOverlay } from '@/components/ui/WorkbenchTransitionOverlay';
 import { dismissInitialSplash, setInitialSplashStatus } from '@/lib/splash';
@@ -53,20 +53,20 @@ import { lazyWithChunkRecovery } from '@/lib/chunkLoadRecovery';
 import { useI18n } from '@/lib/i18n';
 import { applyMobileKeyboardMode } from '@/lib/mobileKeyboardMode';
 import { isMobileAppRuntime, useMobileAppViewport } from '@/lib/mobileAppRuntime';
-import { PiAppEffects } from '@/apps/PiAppEffects';
-import { PiInteractionHost } from '@/components/pi-session/PiInteractionHost';
+import { ThreadAppEffects } from '@/apps/ThreadAppEffects';
 import { resetAppForRuntimeEndpointChange } from '@/apps/runtimeEndpointReset';
 import { subscribeVarinEvents } from '@/lib/varinEvents';
 import { invalidateSettingsCache, syncDesktopSettings } from '@/lib/persistence';
 import { useAppFontEffects } from '@/apps/useAppFontEffects';
 import { markStartupTrace, startupTraceEnabled } from '@/lib/startupTrace';
 import { useChatContentWidth } from '@/hooks/useChatContentWidth';
-import { usePiCatalogBootstrap } from '@/hooks/usePiCatalogBootstrap';
+import { useThreadCatalogBootstrap } from '@/hooks/useThreadCatalogBootstrap';
 import {
-  openPiSessionFromNavigation,
-  startPiSessionDraftFromNavigation,
-} from '@/lib/pi-runtime/sessionNavigation';
+  openThreadFromNavigation,
+  startThreadFromNavigation,
+} from '@/lib/agent-runtime/threadNavigation';
 import { toast } from '@/components/ui';
+import { isDesktopThreadNavigationTarget } from '@/lib/agent-runtime/desktopThreadNavigation';
 import {
   WorkbenchProfileBridge,
 } from '@/lib/extensions/workbench-registry';
@@ -124,7 +124,9 @@ const EmbeddedSessionChatContent: React.FC<{
   embeddedBackgroundWorkEnabled: boolean;
 }> = ({ embeddedSessionChat, embeddedBackgroundWorkEnabled }) => {
   const currentDirectory = useDirectoryStore((state) => state.currentDirectory);
-  const currentSessionId = usePiSessionStore((state) => state.currentSessionId);
+  const currentIdentity = useThreadStore((state) => state.selectedIdentity);
+  const catalogLoaded = useThreadStore(state => state.catalogLoaded);
+  const currentSessionId = currentIdentity?.threadId ?? null;
   const bootstrapKeyRef = React.useRef<string | null>(null);
   const [loadError, setLoadError] = React.useState<string | null>(null);
   const [retryGeneration, retry] = React.useReducer((value: number) => value + 1, 0);
@@ -132,7 +134,8 @@ const EmbeddedSessionChatContent: React.FC<{
   const expectedDirectory = normalizeEmbeddedSessionDirectory(embeddedSessionChat.directory);
 
   React.useEffect(() => {
-    const bootstrapKey = `${expectedDirectory}\n${embeddedSessionChat.sessionId}`;
+    if (!catalogLoaded) return;
+    const bootstrapKey = `${expectedDirectory}\n${embeddedSessionChat.threadId}\n${embeddedSessionChat.branchId}`;
     // Skip if this session was already bootstrapped and a session is still
     // active — allows in-place navigation (e.g. "Open subtask") to change
     // currentSessionId without this effect forcing it back. Only re-bootstrap
@@ -144,9 +147,10 @@ const EmbeddedSessionChatContent: React.FC<{
 
     let cancelled = false;
     setLoadError(null);
-    void openPiSessionFromNavigation({
+    void openThreadFromNavigation({
       directory: embeddedSessionChat.directory,
-      sessionId: embeddedSessionChat.sessionId,
+      threadId: embeddedSessionChat.threadId,
+      branchId: embeddedSessionChat.branchId,
     }).then(() => {
       if (!cancelled) bootstrapKeyRef.current = bootstrapKey;
     }).catch((error) => {
@@ -157,15 +161,17 @@ const EmbeddedSessionChatContent: React.FC<{
     };
   }, [
     currentSessionId,
+    catalogLoaded,
     embeddedSessionChat.directory,
-    embeddedSessionChat.sessionId,
+    embeddedSessionChat.threadId,
+    embeddedSessionChat.branchId,
     expectedDirectory,
     retryGeneration,
   ]);
 
   const isSessionReady = isEmbeddedSessionChatReady({
     embeddedSessionChat,
-    currentSessionId,
+    currentIdentity,
     currentDirectory,
   });
 
@@ -185,9 +191,8 @@ const EmbeddedSessionChatContent: React.FC<{
 
   return (
     <>
-      <PiAppEffects backgroundWorkEnabled={embeddedBackgroundWorkEnabled} />
-      <PiInteractionHost />
-      <ChatView readOnly={embeddedSessionChat.readOnly} autoOpenDraft={false} />
+      <ThreadAppEffects />
+      <ChatView active={embeddedBackgroundWorkEnabled} readOnly={embeddedSessionChat.readOnly} autoOpenDraft={false} />
       <Toaster />
     </>
   );
@@ -203,15 +208,14 @@ function App({ apis }: AppProps) {
     }
   }, []);
 
-  const piCatalogLoaded = usePiSessionStore((state) => state.catalogLoaded);
-  const piCatalogLoading = usePiSessionStore((state) => state.catalogLoading);
-  const piRuntimeError = usePiSessionStore((state) => state.lastError);
+  const catalogLoaded = useThreadStore((state) => state.catalogLoaded);
+  const catalogLoading = useThreadStore((state) => state.catalogLoading);
+  const catalogError = useThreadStore((state) => state.catalogError);
   const currentDirectory = useDirectoryStore((state) => state.currentDirectory);
   const setDirectory = useDirectoryStore((state) => state.setDirectory);
   const isSwitchingDirectory = useDirectoryStore((state) => state.isSwitchingDirectory);
   const refreshGitHubAuthStatus = useGitHubAuthStore((state) => state.refreshStatus);
   const [isEmbeddedVisible, setIsEmbeddedVisible] = React.useState(true);
-  const [runtimeEndpointEpoch, setRuntimeEndpointEpoch] = React.useState(0);
   const chatContentWidth = useUIStore((state) => state.chatContentWidth);
   const mobileKeyboardMode = useUIStore((state) => state.mobileKeyboardMode);
   const isDesktopRuntime = React.useMemo(() => isDesktopShell(), []);
@@ -239,7 +243,6 @@ function App({ apis }: AppProps) {
     return subscribeRuntimeEndpointChanged((detail) => {
       resetAppForRuntimeEndpointChange(detail);
       appReadyDispatchedRef.current = false;
-      setRuntimeEndpointEpoch((epoch) => epoch + 1);
     });
   }, []);
 
@@ -254,11 +257,7 @@ function App({ apis }: AppProps) {
     });
   }, []);
 
-  const runtimeSnapshot = usePiCatalogBootstrap({
-    isDesktopRuntime,
-    piRuntime: apis.piRuntime,
-    runtimeEndpointEpoch,
-  });
+  useThreadCatalogBootstrap(apis.threads);
 
   useChatContentWidth(chatContentWidth);
 
@@ -285,17 +284,16 @@ function App({ apis }: AppProps) {
     () =>
       isDesktopRuntime
         ? resolveDesktopWorkspaceView({
-            catalogError: piRuntimeError,
-            catalogLoaded: piCatalogLoaded,
-            catalogLoading: piCatalogLoading,
-            runtimeStatus: runtimeSnapshot?.status ?? null,
+            catalogError: catalogError,
+            catalogLoaded: catalogLoaded,
+            catalogLoading: catalogLoading,
           })
         : null,
-    [isDesktopRuntime, piCatalogLoaded, piCatalogLoading, piRuntimeError, runtimeSnapshot?.status],
+    [isDesktopRuntime, catalogLoaded, catalogLoading, catalogError],
   );
   const runtimeReady = isDesktopRuntime
     ? desktopWorkspaceIsOperable(desktopWorkspaceView ?? 'loading', isSwitchingDirectory)
-    : piCatalogLoaded;
+    : catalogLoaded;
 
   // Splash dismissal: use the authoritative loading gate from desktopBoot.
   // Desktop shells strictly require a valid boot outcome before dismissing.
@@ -349,9 +347,9 @@ function App({ apis }: AppProps) {
       return;
     }
     setInitialSplashStatus(
-      piCatalogLoaded ? t('splash.status.preparingWorkspace') : t('splash.status.connectingRuntime'),
+      catalogLoaded ? t('splash.status.preparingWorkspace') : t('splash.status.connectingRuntime'),
     );
-  }, [bootOutcomeKnown, isDesktopRuntime, piCatalogLoaded, runtimeReady, t]);
+  }, [bootOutcomeKnown, isDesktopRuntime, catalogLoaded, runtimeReady, t]);
 
   React.useEffect(() => {
     if (!embeddedSessionChat || typeof window === 'undefined') {
@@ -430,25 +428,24 @@ function App({ apis }: AppProps) {
     if (embeddedSessionChat || typeof window === 'undefined') return;
 
     const handler = (event: Event) => {
-      const detail = (event as CustomEvent<{ sessionId?: string; directory?: string }>).detail;
-      const sessionId = typeof detail?.sessionId === 'string' ? detail.sessionId.trim() : '';
-      if (!sessionId) return;
+      const detail = (event as CustomEvent<{ threadId?: string; branchId?: string; directory?: string; apiBaseUrl?: string; relayHostId?: string }>).detail;
+      const threadId = typeof detail?.threadId === 'string' ? detail.threadId.trim() : '';
+      if (!threadId || !detail.branchId || !isDesktopThreadNavigationTarget(detail)) return;
       const directory = typeof detail?.directory === 'string' && detail.directory.trim().length > 0
         ? detail.directory.trim()
         : null;
-      void openPiSessionFromNavigation({ directory, sessionId }).catch((openError) => {
-        toast.error('Failed to open Pi session', {
+      void openThreadFromNavigation({ directory, threadId, branchId: detail.branchId }).catch((openError) => {
+        toast.error('Failed to open conversation', {
           description: openError instanceof Error ? openError.message : String(openError),
         });
       });
     };
 
-    window.addEventListener('varin:open-session', handler as EventListener);
-    return () => window.removeEventListener('varin:open-session', handler as EventListener);
+    window.addEventListener('varin:open-thread', handler as EventListener);
+    return () => window.removeEventListener('varin:open-thread', handler as EventListener);
   }, [embeddedSessionChat]);
 
-  // Native tray/menu "new session" requests carry optional project and cwd
-  // hints and open the Pi pending draft. Creation is deferred until first send.
+  // Native tray/menu requests create a real Thread; workspace selection remains explicit.
   React.useEffect(() => {
     if (embeddedSessionChat || typeof window === 'undefined') return;
 
@@ -457,39 +454,34 @@ function App({ apis }: AppProps) {
       const directory = typeof detail?.directory === 'string' && detail.directory.trim().length > 0
         ? detail.directory.trim()
         : null;
-      const projectId = typeof detail?.projectId === 'string' && detail.projectId.trim().length > 0
-        ? detail.projectId.trim()
-        : null;
-      void startPiSessionDraftFromNavigation({ directory, projectId }).catch((createError) => {
-        toast.error('Failed to create Pi session', {
+      void startThreadFromNavigation({ directory }).catch((createError) => {
+        toast.error('Failed to create conversation', {
           description: createError instanceof Error ? createError.message : String(createError),
         });
       });
     };
 
-    window.addEventListener('varin:open-draft-session', handler as EventListener);
-    return () => window.removeEventListener('varin:open-draft-session', handler as EventListener);
+    window.addEventListener('varin:open-draft-thread', handler as EventListener);
+    return () => window.removeEventListener('varin:open-draft-thread', handler as EventListener);
   }, [embeddedSessionChat]);
 
   React.useEffect(() => {
     if (typeof window === 'undefined') return;
     (window as unknown as { __varinStartupDiagnostics?: unknown }).__varinStartupDiagnostics = {
       bootView,
-      catalogError: piRuntimeError,
-      catalogLoaded: piCatalogLoaded,
+      catalogError: catalogError,
+      catalogLoaded: catalogLoaded,
       isSwitchingDirectory,
       runtimeReady,
-      runtimeSnapshot,
       workspaceView: desktopWorkspaceView,
     };
   }, [
     bootView,
     desktopWorkspaceView,
     isSwitchingDirectory,
-    piCatalogLoaded,
-    piRuntimeError,
+    catalogLoaded,
+    catalogError,
     runtimeReady,
-    runtimeSnapshot,
   ]);
 
   React.useEffect(() => {
@@ -498,7 +490,7 @@ function App({ apis }: AppProps) {
     const bootSurfaceReady =
       bootView?.screen === 'chooser' || bootView?.screen === 'recovery';
     if (!runtimeReady && !bootSurfaceReady) return;
-    if (isSwitchingDirectory && desktopWorkspaceView !== 'runtime-setup') return;
+    if (isSwitchingDirectory) return;
     if (appReadyDispatchedRef.current) return;
     appReadyDispatchedRef.current = true;
     (window as unknown as { __varinAppReady?: boolean }).__varinAppReady = true;
@@ -513,11 +505,11 @@ function App({ apis }: AppProps) {
 
   useWindowTitle();
 
-  useRouter({ enabled: !embeddedSessionChat && piCatalogLoaded });
+  useRouter({ enabled: !embeddedSessionChat && catalogLoaded });
 
   useMenuActions({ enabled: !embeddedSessionChat });
 
-  useTraySync({ enabled: !embeddedSessionChat && piCatalogLoaded });
+  useTraySync({ enabled: !embeddedSessionChat && catalogLoaded });
 
   // Poll for the injected boot outcome until it becomes available (desktop only).
   // The Rust backend sets window.__VARIN_DESKTOP_BOOT_OUTCOME__ once the
@@ -587,11 +579,11 @@ function App({ apis }: AppProps) {
     window.location.reload();
   }, []);
 
-  const handlePiRuntimeAvailable = React.useCallback(async () => {
+  const handleRuntimeAvailable = React.useCallback(async () => {
     try {
-      await usePiSessionStore.getState().loadCatalog();
+      await useThreadStore.getState().loadCatalog();
     } catch (catalogError) {
-      console.warn('[Varin] failed to load the Pi session catalog after selecting a runtime:', catalogError);
+      console.warn('[Varin] failed to load the Thread catalog after connecting to a Host:', catalogError);
     }
     setBootView((current) => current?.screen === 'main' ? current : { screen: 'main' });
   }, []);
@@ -626,7 +618,7 @@ function App({ apis }: AppProps) {
         <OnboardingScreen
           mode="first-launch"
           localAvailable={bootView.localAvailable !== false}
-          onRuntimeAvailable={handlePiRuntimeAvailable}
+          onRuntimeAvailable={handleRuntimeAvailable}
         />,
       );
     }
@@ -664,30 +656,22 @@ function App({ apis }: AppProps) {
     );
   }
 
-  if (isDesktopRuntime && (!bootView || bootView.screen === 'main') && desktopWorkspaceView === 'runtime-setup') {
-    return renderDesktopOnboarding(
-      <OnboardingScreen
-        mode="local-setup"
-        onRuntimeAvailable={handlePiRuntimeAvailable}
-      />,
-    );
-  }
 
   if (
-    (!embeddedSessionChat && !isDesktopRuntime && !piCatalogLoaded && piRuntimeError)
+    (!embeddedSessionChat && !isDesktopRuntime && !catalogLoaded && catalogError)
     || desktopWorkspaceView === 'catalog-recovery'
   ) {
     return (
       <ErrorBoundary>
         <RuntimeInitializationRecovery
-          onRetry={() => { void usePiSessionStore.getState().loadCatalog(); }}
-          isRetrying={piCatalogLoading}
+          onRetry={() => { void useThreadStore.getState().loadCatalog(); }}
+          isRetrying={catalogLoading}
         />
       </ErrorBoundary>
     );
   }
 
-  const isBootShell = !piCatalogLoaded && !isDesktopRuntime;
+  const isBootShell = !catalogLoaded && !isDesktopRuntime;
 
   return (
     <ErrorBoundary>
@@ -695,7 +679,7 @@ function App({ apis }: AppProps) {
         <FireworksProvider>
           <TooltipProvider delayDuration={300} skipDelayDuration={150}>
             <div className={isDesktopRuntime ? 'h-full text-foreground bg-transparent' : 'h-full text-foreground bg-background'}>
-              {piCatalogLoaded && <PiAppEffects backgroundWorkEnabled={embeddedBackgroundWorkEnabled} />}
+              {catalogLoaded && <ThreadAppEffects />}
               <AgentEditorCoordinator />
               <RunDebugCoordinator />
               <WorkbenchProfileBridge />

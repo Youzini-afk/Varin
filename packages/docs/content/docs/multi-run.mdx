@@ -5,30 +5,11 @@ description: Run the same prompt across several models or sessions at once.
 
 # Multi-run
 
-Multi-run launches several sessions from one form — handy for trying the same task with different models and comparing the results. Open it from the button at the top of the session sidebar.
+Multi-run creates a native Thread for each selected model. Choose a project, name the batch, add prompt/model groups, and launch. There is no fixed five-model limit.
 
-## Start a multi-run
+Enable isolation for a Git worktree and branch per run. Without isolation, runs share the project’s live folder and may change the same files. Review setup commands before starting.
 
-1. Open the multi-run launcher.
-2. Pick the project and name the run group.
-3. Write the prompt and pick the models to run it with (up to five per group).
-4. Choose whether to **isolate runs**.
-5. Launch.
+Review each attempt’s status. A failed or unconfirmed launch retains any created Thread and worktree. Retry unchanged selections to reconcile the original request. If worktree creation is unconfirmed, inspect Git on the original Host before trying again. **Stop launching** stops further launches; already accepted work continues.
 
-Each model gets its own session, and they all start with your prompt.
-
-## Isolated runs
-
-Turn on **isolate runs** to give every run its own [worktree](/worktrees/) and branch, so they never touch the same files. This needs a git repo — it's turned off automatically for folders that aren't one. Pick the branch the runs start from.
-
-With isolation off, every run is a plain session in the project folder.
-
-## Comparing results
-
-Each run is a normal session you can open, read, and keep or discard. If you started runs to compare approaches, review them side by side and carry the best one forward.
-
-If a single run fails to start, the others still launch — you'll just see fewer sessions than you asked for.
-
-## Related
-
-- [Worktree Sessions](/worktrees/) — how isolation works under the hood
+- [Worktree Sessions](/worktrees/)
+- [Projects](/projects/)

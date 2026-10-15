@@ -71,7 +71,7 @@ const main = async (): Promise<void> => {
       workspaceId: harness.identity.workspaceId,
       resourceId: "explore.ts",
       languageId: "typescript",
-      text: "input-context",
+      text: "disk",
     });
     const boundAt = performance.now();
     if (bound.status !== "bound") {
@@ -93,7 +93,7 @@ const main = async (): Promise<void> => {
       documentSymbolMs: Math.round(readyAt - boundAt),
       coldStartToDocumentSymbolMs: Math.round(readyAt - started),
       method: {
-        description: "Agent-view cold start: first bind (input-context/disk) plus first documentSymbols on a copy of packages/web/application-host/lib/harness/explore.ts in a one-file temp workspace with a minimal tsconfig. The language server process is not started until bind. Times are performance.now() in this process.",
+        description: "Agent-view cold start: first bind (saved disk) plus first documentSymbols on a copy of packages/web/application-host/lib/harness/explore.ts in a one-file temp workspace with a minimal tsconfig. The language server process is not started until bind. Times are performance.now() in this process.",
         subjectFile: "explore.ts (copy of application-host/lib/harness/explore.ts)",
         subjectBytes: Buffer.byteLength(subject, "utf8"),
         languageId: "typescript",

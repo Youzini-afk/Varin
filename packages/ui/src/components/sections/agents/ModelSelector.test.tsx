@@ -3,12 +3,11 @@ import { createRoot, type Root } from 'react-dom/client';
 import { parseHTML } from 'linkedom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ModelSelector } from './ModelSelector';
-import { usePiProviderStore } from '@/stores/usePiProviderStore';
+import { useModelCatalogStore } from '@/stores/useModelCatalogStore';
 
-const runtime = vi.hoisted(() => ({ providers: vi.fn(), models: vi.fn(), config: vi.fn(), mobile: false }));
-vi.mock('@/lib/pi-runtime/providers', () => ({
-  listPiProviders: runtime.providers, listPiModels: runtime.models, getPiProviderConfig: runtime.config,
-}));
+const runtime = vi.hoisted(() => ({ read: vi.fn(), mobile: false }));
+vi.mock('@varin/application-client', async original => ({ ...await original<typeof import('@varin/application-client')>(), createModelConnectionsHttpAPI: () => ({ read: runtime.read }) }));
+vi.mock('@/lib/varinEvents', () => ({ subscribeVarinEvents: () => () => {} }));
 vi.mock('@/lib/i18n', () => ({ useI18n: () => ({ t: (key: string) => key }) }));
 vi.mock('@/lib/device', () => ({ useDeviceInfo: () => ({ isMobile: false }) }));
 vi.mock('@/stores/useDirectoryStore', () => ({
@@ -35,15 +34,13 @@ vi.mock('@/components/model-picker/ModelPickerList', () => ({ ModelPickerList: (
 
 let root: Root | undefined;
 beforeEach(() => {
-  usePiProviderStore.getState().reset();
-  runtime.providers.mockReset();
-  runtime.models.mockReset().mockResolvedValue([]);
-  runtime.config.mockReset();
+  useModelCatalogStore.setState({ channels: [], loaded: false, loading: false, error: null });
+  runtime.read.mockReset();
 });
 afterEach(async () => {
   if (root) await act(async () => root!.unmount());
   root = undefined;
-  usePiProviderStore.getState().reset();
+  useModelCatalogStore.setState({ channels: [], loaded: false, loading: false, error: null });
   vi.unstubAllGlobals();
 });
 
@@ -51,9 +48,9 @@ describe('model catalog failures', () => {
   for (const mobile of [false, true]) {
     it(`stops loading on failure and retries from the ${mobile ? 'mobile' : 'desktop'} trigger`, async () => {
       runtime.mobile = mobile;
-      let finish!: (value: []) => void;
-      runtime.providers.mockRejectedValueOnce(new Error('Invalid model role: unknownRole'))
-        .mockImplementationOnce(() => new Promise<[]>((resolve) => { finish = resolve; }));
+      let finish!: (value: { channels: [] }) => void;
+      runtime.read.mockRejectedValueOnce(new Error('Invalid model role: unknownRole'))
+        .mockImplementationOnce(() => new Promise<{ channels: [] }>((resolve) => { finish = resolve; }));
       const { window } = parseHTML('<html><body><div id="app"></div></body></html>');
       vi.stubGlobal('window', window);
       vi.stubGlobal('document', window.document);
@@ -68,27 +65,14 @@ describe('model catalog failures', () => {
       expect(window.document.querySelector('[data-icon="loader-4"]')).toBeNull();
       expect(window.document.querySelector('[data-icon="error-warning"]')).not.toBeNull();
       await act(async () => trigger.click());
-      expect(runtime.providers).toHaveBeenCalledTimes(2);
+      expect(runtime.read).toHaveBeenCalledTimes(2);
       expect(trigger.disabled).toBeTruthy();
       expect(trigger.textContent).toContain('common.loading');
-      await act(async () => finish([]));
+      await act(async () => finish({ channels: [] }));
       expect(trigger.disabled).toBeFalsy();
       expect(trigger.textContent).toContain('settings.agents.modelSelector.notSelected');
       expect(window.document.querySelector('[data-icon="loader-4"]')).toBeNull();
     });
   }
 
-  it('shares a pending catalog load instead of treating the previous directory as loaded', async () => {
-    runtime.providers.mockResolvedValueOnce([]);
-    await usePiProviderStore.getState().load('/first');
-    let finish!: (value: []) => void;
-    runtime.providers.mockImplementationOnce(() => new Promise<[]>((resolve) => { finish = resolve; }));
-    const first = usePiProviderStore.getState().load('/second');
-    const repeated = usePiProviderStore.getState().load('/second');
-    expect(usePiProviderStore.getState()).toMatchObject({ cwd: '/second', loaded: false, isLoading: true });
-    finish([]);
-    await Promise.all([first, repeated]);
-    expect(runtime.providers).toHaveBeenCalledTimes(2);
-    expect(usePiProviderStore.getState()).toMatchObject({ cwd: '/second', loaded: true, isLoading: false });
-  });
 });

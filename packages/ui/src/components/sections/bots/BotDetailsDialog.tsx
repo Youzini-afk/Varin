@@ -1,4 +1,5 @@
 import React from 'react';
+import { getRuntimeEndpointGeneration, subscribeRuntimeEndpointChanged } from '@varin/application-client';
 import type { BotMemoryItem } from '@varin/application-client';
 import type { MemorySourceExcerpt } from '@varin/protocol';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
@@ -26,8 +27,9 @@ export function BotDetailsDialog({ bot, onClose }: {
   </Dialog>;
 }
 
-function BotMemoryPanel({ botId }: { botId: string }) {
+export function BotMemoryPanel({ botId }: { botId: string }) {
   const { t } = useI18n();
+  const host = React.useSyncExternalStore(subscribeRuntimeEndpointChanged, getRuntimeEndpointGeneration, getRuntimeEndpointGeneration);
   const [items, setItems] = React.useState<BotMemoryItem[] | null>(null);
   const [error, setError] = React.useState<string | null>(null);
   const [search, setSearch] = React.useState('');
@@ -40,11 +42,12 @@ function BotMemoryPanel({ botId }: { botId: string }) {
   React.useEffect(() => { alive.current = true; return () => { alive.current = false; }; }, []);
   React.useEffect(() => {
     const controller = new AbortController();
+    setItems(null); setSources({}); setEditing(null);
     void listBotMemory(botId, controller.signal).then((list) => {
       if (!controller.signal.aborted) { setItems(list); setError(null); }
     }).catch((cause) => { if (!controller.signal.aborted) setError(String(cause)); });
     return () => controller.abort();
-  }, [botId, revision]);
+  }, [botId, revision, host]);
   const run = async (operation: () => Promise<void>) => {
     setBusy(true);
     setError(null);
@@ -79,7 +82,7 @@ function BotMemoryPanel({ botId }: { botId: string }) {
       </div>
       {sources[item.id]?.length === 0 ? <p className="typography-meta text-muted-foreground">{t('settings.bots.memory.noSource')}</p> : null}
       {sources[item.id]?.map((source, index) => <blockquote key={index} className="whitespace-pre-wrap border-l-2 border-border pl-3 typography-meta text-muted-foreground">
-        {source.status === 'available' ? source.text : t('settings.bots.memory.sourceUnavailable')}
+        {source.status === 'available' ? source.text : source.status === 'changed' ? 'The original source has changed.' : t('settings.bots.memory.sourceUnavailable')}
       </blockquote>)}
     </article>)}
   </div>;

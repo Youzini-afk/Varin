@@ -7,13 +7,11 @@ import { GitPage } from '@/components/sections/git-identities/GitPage';
 import { LanguageSupportPage } from '@/components/sections/language-support/LanguageSupportPage';
 import { VarinSettingsPage } from '@/components/sections/varin/VarinSettingsPage';
 import type { VarinSettingsSection } from '@/components/sections/varin/types';
-import { PluginsPage } from '@/components/sections/plugins';
 import { ProjectsPage } from '@/components/sections/projects/ProjectsPage';
 import { ProjectsSidebar } from '@/components/sections/projects/ProjectsSidebar';
-import { ProvidersPage } from '@/components/sections/providers/ProvidersPage';
-import { ProvidersSidebar } from '@/components/sections/providers/ProvidersSidebar';
+import { ModelConnectionsPage } from '@/components/sections/providers/ModelConnectionsPage';
+import { McpConnectionsPage } from '@/components/sections/mcp/McpConnectionsPage';
 import { RemoteInstancesPage } from '@/components/sections/remote-instances/RemoteInstancesPage';
-import { PiRuntimeSettingsPage } from '@/components/sections/runtime/PiRuntimeSettingsPage';
 import { SkillsPage } from '@/components/sections/skills/SkillsPage';
 import { SkillsSidebar } from '@/components/sections/skills/SkillsSidebar';
 import {
@@ -43,11 +41,10 @@ const implementationFor = (spec: BuiltinSettingsPageSpec): SettingsPageImplement
       case 'extensions': implementation = { renderContent: () => <ExtensionsPage /> }; break;
       case 'git': implementation = { renderContent: () => <GitPage /> }; break;
       case 'language-support': implementation = { renderContent: () => <LanguageSupportPage /> }; break;
-      case 'plugins': implementation = { renderContent: () => <PluginsPage /> }; break;
       case 'projects': implementation = { renderContent: () => <ProjectsPage />, renderSidebar: (options) => <ProjectsSidebar onItemSelect={options.onItemSelect} /> }; break;
-      case 'providers': implementation = { renderContent: () => <ProvidersPage />, renderSidebar: (options) => <ProvidersSidebar onItemSelect={options.onItemSelect} /> }; break;
+      case 'model-connections': implementation = { renderContent: () => <ModelConnectionsPage /> }; break;
+      case 'mcp-connections': implementation = { renderContent: () => <McpConnectionsPage /> }; break;
       case 'remote-instances': implementation = { renderContent: () => <RemoteInstancesPage /> }; break;
-      case 'runtime': implementation = { renderContent: () => <PiRuntimeSettingsPage /> }; break;
       case 'skills': implementation = { renderContent: () => <SkillsPage />, renderSidebar: (options) => <SkillsSidebar onItemSelect={options.onItemSelect} /> }; break;
     }
   }

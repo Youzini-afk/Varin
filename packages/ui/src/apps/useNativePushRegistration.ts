@@ -2,6 +2,7 @@ import React from 'react';
 
 import { getRegisteredRuntimeAPIs } from '@/lib/runtime-api/registry';
 import { getClientPlatform } from '@/lib/platform';
+import { useThreadStore } from '@/stores/useThreadStore';
 import { useUIStore } from '@/stores/useUIStore';
 
 /**
@@ -43,6 +44,7 @@ const isNativePushPlatform = (): boolean => {
 
 export const useNativePushRegistration = (options: { enabled: boolean }): void => {
   const { enabled } = options;
+  const hostKey = useThreadStore(state => state.hostKey);
   const nativeNotificationsEnabled = useUIStore((state) => state.nativeNotificationsEnabled);
   const lastTokenRef = React.useRef<string | null>(null);
 
@@ -67,10 +69,12 @@ export const useNativePushRegistration = (options: { enabled: boolean }): void =
         }
 
         const registrationHandle = await PushNotifications.addListener('registration', (token) => {
+          if (disposed || hostKey !== useThreadStore.getState().hostKey) return;
           lastTokenRef.current = token.value;
           const apis = getRegisteredRuntimeAPIs();
           void apis?.push?.registerApnsToken?.({
             token: token.value,
+            hostKey,
             platform: getClientPlatform(),
             environment: getApnsEnvironment(),
           });
@@ -102,7 +106,7 @@ export const useNativePushRegistration = (options: { enabled: boolean }): void =
       disposed = true;
       cleanup.forEach((remove) => remove());
     };
-  }, [enabled, nativeNotificationsEnabled]);
+  }, [enabled, nativeNotificationsEnabled, hostKey]);
 
   // When notifications are turned off, drop the token from the server so it stops
   // pushing to this device. (Separate from the register effect so a transient

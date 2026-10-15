@@ -187,7 +187,7 @@ jobs:
           done
           curl --fail --silent --show-error http://127.0.0.1:3000/health \
             | node -e "let body='';process.stdin.on('data',(chunk)=>body+=chunk);process.stdin.on('end',()=>{const health=JSON.parse(body);if(health.releaseId!==process.env.EXPECTED_RELEASE_ID)throw new Error(JSON.stringify(health));});"
-          docker exec varin-pr-smoke node --input-type=module -e "import { statSync } from 'node:fs'; import { pathToFileURL } from 'node:url'; const broker = await import('./packages/web/node_modules/@varin/runtime-broker/dist/index.js'); const entry = broker.resolveBundledPiHostEntry(); if (!statSync(entry).isFile()) throw new Error('Pi host entry missing'); const host = await import(new URL('./index.js', pathToFileURL(entry)).href); if (typeof host.HostController !== 'function') throw new Error('Pi host module failed to load');"
+          docker exec varin-pr-smoke node verify-kernel.mjs packages/web
 
   build-runtime-slim:
     name: Build runtime slim candidate
@@ -465,7 +465,7 @@ jobs:
       - name: Pull immutable candidate
         run: docker pull --platform linux/amd64 "$IMAGE_REF"
 
-      - name: Verify health and bundled Pi runtime
+      - name: Verify health and native kernel runtime
         shell: bash
         run: |
           cleanup() {
@@ -499,7 +499,7 @@ jobs:
           curl --fail --silent --show-error http://127.0.0.1:3000/health \
             | node -e "let body='';process.stdin.on('data',(chunk)=>body+=chunk);process.stdin.on('end',()=>{const health=JSON.parse(body);if(health.releaseId!==process.env.EXPECTED_RELEASE_ID)throw new Error(JSON.stringify(health));});"
 
-          docker exec varin-smoke node --input-type=module -e "import { statSync } from 'node:fs'; import { pathToFileURL } from 'node:url'; const broker = await import('./packages/web/node_modules/@varin/runtime-broker/dist/index.js'); if (typeof broker.resolveBundledPiHostEntry !== 'function') throw new Error('runtime broker export missing'); const entry = broker.resolveBundledPiHostEntry(); if (!statSync(entry).isFile()) throw new Error('Pi host entry missing'); const host = await import(new URL('./index.js', pathToFileURL(entry)).href); if (typeof host.HostController !== 'function') throw new Error('Pi host module failed to load'); console.log(entry);"
+          docker exec varin-smoke node verify-kernel.mjs packages/web
 
   smoke-amd64-slim:
     name: Smoke immutable amd64 slim candidate
@@ -521,7 +521,7 @@ jobs:
       - name: Pull immutable slim candidate
         run: docker pull --platform linux/amd64 "$IMAGE_REF"
 
-      - name: Verify health and bundled Pi runtime
+      - name: Verify health and native kernel runtime
         shell: bash
         run: |
           cleanup() {
@@ -555,7 +555,7 @@ jobs:
           curl --fail --silent --show-error http://127.0.0.1:3000/health \
             | node -e "let body='';process.stdin.on('data',(chunk)=>body+=chunk);process.stdin.on('end',()=>{const health=JSON.parse(body);if(health.releaseId!==process.env.EXPECTED_RELEASE_ID)throw new Error(JSON.stringify(health));});"
 
-          docker exec varin-slim-smoke node --input-type=module -e "import { statSync } from 'node:fs'; import { pathToFileURL } from 'node:url'; const broker = await import('./packages/web/node_modules/@varin/runtime-broker/dist/index.js'); if (typeof broker.resolveBundledPiHostEntry !== 'function') throw new Error('runtime broker export missing'); const entry = broker.resolveBundledPiHostEntry(); if (!statSync(entry).isFile()) throw new Error('Pi host entry missing'); const host = await import(new URL('./index.js', pathToFileURL(entry)).href); if (typeof host.HostController !== 'function') throw new Error('Pi host module failed to load'); console.log(entry);"
+          docker exec varin-slim-smoke node verify-kernel.mjs packages/web
 
   promote:
     name: Promote verified image tags

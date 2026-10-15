@@ -4,7 +4,7 @@ import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { ProjectFoldersEditor } from './ProjectFoldersEditor';
 import { useProjectsStore } from '@/stores/useProjectsStore';
-import { startPiSessionDraftFromNavigation } from '@/lib/pi-runtime/sessionNavigation';
+import { startThreadFromNavigation } from '@/lib/agent-runtime/threadNavigation';
 import { useI18n } from '@/lib/i18n';
 
 export function ProjectCreateDialog({ open, onOpenChange, initialPath }: {
@@ -25,7 +25,8 @@ export function ProjectCreateDialog({ open, onOpenChange, initialPath }: {
       const project = await addProject(folders[0], { label: name, additionalPaths: folders.slice(1) });
       if (!project) throw new Error(t('directoryExplorerDialog.toast.failedToAddProject'));
       onOpenChange(false);
-      await startPiSessionDraftFromNavigation({ projectId: project.id });
+      useProjectsStore.getState().setActiveProjectIdOnly(project.id);
+      await startThreadFromNavigation({ directory: project.path });
     } catch (failure) { setError(failure instanceof Error ? failure.message : String(failure)); }
     finally { setBusy(false); }
   };

@@ -1,217 +1,118 @@
-import fs from "node:fs";
-import os from "node:os";
-import path from "node:path";
-import { describe, expect, it, beforeEach, afterEach } from "vitest";
-import { overlayDraftsOnBaseline, createBranchWithDraftBaseline } from "./draft-baseline.js";
-import { WorkingStateStore } from "./working-state-store.js";
-import { asTestWorkingStateRootStore } from "./working-state-root-adapter.test-helper.js";
-import type { RecoveryState, RegularFileState, WorkingStateRootStore } from "./types.js";
-import { openRecoveryJournalCatalog, type SqliteDatabase } from "../../recovery/journal-catalog.js";
-import { createRecoveryFileStore } from "../../recovery/file-store.test-helper.js";
+import fs from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
+import { describe, expect, it, vi } from 'vitest';
+import { overlayDraftsOnBaseline, createBranchWithDraftBaseline } from './draft-baseline.js';
+import { materializeWorkingState } from './materializer.js';
+import type { RecoveryState, RegularFileState, WorkingBranchRoot, WorkingStateRootStore } from './types.js';
 
-describe("draft-baseline", () => {
-  let tempDir: string;
-  let store: WorkingStateStore;
-  let rootStore: WorkingStateRootStore;
-  let database: SqliteDatabase;
-
-  beforeEach(async () => {
-    tempDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), "varin-draft-test-"));
-    const workspace = path.join(tempDir, "workspace");
-    const root = path.join(tempDir, "recovery");
-    await fs.promises.mkdir(workspace, { recursive: true });
-    database = (await openRecoveryJournalCatalog(root, { create: true }))!;
-    store = await WorkingStateStore.open({
-      database,
-      fileStore: createRecoveryFileStore(),
-      identity: { authorityId: "test", canonicalRoot: workspace, filesystemProfile: "test", workspaceId: "ws-test" },
-      resourceOperationGate: { run: async (_resources, operation) => operation() },
-      root,
-    });
-    rootStore = asTestWorkingStateRootStore(store);
+// This suite owns draft overlay and its consumers, not durable storage. Return
+// opaque object receipts without booting the retired TS catalog/state machine.
+const objectReceipts = () => {
+  const bodies = new Map<string, Buffer>();
+  const putObject = vi.fn(async (bytes: Buffer) => {
+    const hash = `draft-${bodies.size}`;
+    bodies.set(hash, Buffer.from(bytes));
+    return { hash, byteLength: bytes.length };
   });
+  const readContent = async (state: RecoveryState) => state.kind === 'regular-file'
+    ? bodies.get(state.objectHash) ?? null : null;
+  return { putObject, readContent };
+};
+const file = (hash: string): RegularFileState => ({ kind: 'regular-file', objectHash: hash, byteLength: 5 });
 
-  afterEach(async () => {
-    database.close();
-    await fs.promises.rm(tempDir, { recursive: true, force: true }).catch(() => {});
-  });
-
-  it("overlays modified, added, and deleted drafts onto baseline", async () => {
+describe('draft baseline consumers', () => {
+  it('overlays modified, added, and deleted drafts while retaining untouched state and executable mode', async () => {
+    const objects = objectReceipts();
     const baseState: Record<string, RecoveryState> = {
-      "file1.txt": {
-        kind: "regular-file",
-        objectHash: "hash-old-1",
-        byteLength: 5,
-      },
-      "file2.txt": {
-        kind: "regular-file",
-        objectHash: "hash-old-2",
-        byteLength: 5,
-      },
-      "untouched.txt": {
-        kind: "regular-file",
-        objectHash: "hash-untouched",
-        byteLength: 9,
-      },
+      'main.ts': { ...file('old-main'), mode: 0o755 },
+      'deleted.txt': file('old-deleted'),
+      'untouched.txt': file('untouched'),
     };
-
-    const drafts = [
-      { path: "file1.txt", content: "modified content" },
-      { path: "file2.txt", content: null }, // deleted
-      { path: "brand-new.txt", content: "new file content" },
-    ];
-
     const result = await overlayDraftsOnBaseline({
       baseState,
-      drafts,
-      putObject: (b) => store.putObject(b),
-    });
-
-    expect(result.modifiedPaths).toEqual(["file1.txt"]);
-    expect(result.deletedPaths).toEqual(["file2.txt"]);
-    expect(result.addedPaths).toEqual(["brand-new.txt"]);
-    expect(result.changedPaths).toEqual(["brand-new.txt", "file1.txt", "file2.txt"]);
-
-    expect(result.effectiveState["untouched.txt"]).toEqual(baseState["untouched.txt"]);
-    expect(result.effectiveState["file2.txt"]).toEqual({ kind: "missing" });
-
-    const f1State = result.effectiveState["file1.txt"] as RegularFileState;
-    expect(f1State.kind).toBe("regular-file");
-    const f1Bytes = await store.getObject(f1State.objectHash);
-    expect(f1Bytes?.toString("utf8")).toBe("modified content");
-
-    const newFileState = result.effectiveState["brand-new.txt"] as RegularFileState;
-    expect(newFileState.kind).toBe("regular-file");
-    const newFileBytes = await store.getObject(newFileState.objectHash);
-    expect(newFileBytes?.toString("utf8")).toBe("new file content");
-  });
-
-  it("creates a WorkingBranch with draft baseline paths and no result deltas", async () => {
-    const baseState: Record<string, RecoveryState> = {
-      "main.ts": {
-        kind: "regular-file",
-        objectHash: "hash-main",
-        byteLength: 10,
-        mode: 0o755,
-      },
-    };
-
-    const drafts = {
-      "main.ts": "const x = 42;",
-      "helper.ts": "export const y = 100;",
-    };
-
-    await createBranchWithDraftBaseline(
-      rootStore,
-      "ws-test",
-      "branch-feature",
-      baseState,
-      drafts,
-      "main",
-    );
-
-    const branch = store.getBranch("branch-feature")!;
-    expect(branch.branchId).toBe("branch-feature");
-    expect(branch.headRevision).toBe(0);
-    expect(branch.deltas).toEqual({});
-    expect(branch.draftBasePaths).toEqual(["helper.ts", "main.ts"]);
-    expect(branch.baseState["main.ts"]).toMatchObject({ kind: "regular-file", mode: 0o755 });
-    expect(branch.baseState["helper.ts"]?.kind).toBe("regular-file");
-
-    const mainBase = branch.baseState["main.ts"] as RegularFileState;
-    const content = await store.getObject(mainBase.objectHash);
-    expect(content?.toString("utf8")).toBe("const x = 42;");
-  });
-
-  it("keeps nested draft baselines structurally materializable", async () => {
-    const workspace = path.join(tempDir, "workspace");
-    await fs.promises.mkdir(path.join(workspace, "dir"), { recursive: true });
-    await fs.promises.mkdir(path.join(workspace, "stable"), { recursive: true });
-    await fs.promises.writeFile(path.join(workspace, "dir", "old.txt"), "old\n");
-    await fs.promises.writeFile(path.join(workspace, "file-base"), "file\n");
-    const baseState = await store.captureDirectory(workspace);
-    const drafts = [
-      { path: "newdir/new.ts", content: "new nested draft\n" },
-      { path: "dir", content: "directory replaced by file\n" },
-      { path: "file-base/child.ts", content: "file replaced by directory\n" },
-      { path: "stable/new.ts", content: "existing directory remains baseline\n" },
-    ];
-
-    const result = await overlayDraftsOnBaseline({
-      baseState,
-      drafts,
-      putObject: (bytes) => store.putObject(bytes),
-    });
-    expect(result.modifiedPaths).toEqual(["dir"]);
-    expect(result.deletedPaths).toEqual([]);
-    expect(result.addedPaths).toEqual(["newdir/new.ts", "file-base/child.ts", "stable/new.ts"]);
-    expect(result.changedPaths).toEqual([
-      "dir",
-      "dir/old.txt",
-      "file-base",
-      "file-base/child.ts",
-      "newdir",
-      "newdir/new.ts",
-      "stable/new.ts",
-    ]);
-    expect(result.effectiveState["newdir"]).toEqual({
-      kind: "directory",
-      mode: (process.platform === "win32" ? 0o666 : 0o777) & ~process.umask(),
-    });
-    expect(result.effectiveState["dir/old.txt"]).toEqual({ kind: "missing" });
-    expect(result.effectiveState["file-base"]).toMatchObject({ kind: "directory" });
-
-    await createBranchWithDraftBaseline(
-      rootStore,
-      "ws-test",
-      "branch-structure",
-      baseState,
-      drafts,
-      "main",
-    );
-    const branch = store.getBranch("branch-structure")!;
-    expect(branch.draftBasePaths).toEqual(result.changedPaths);
-    const child = path.join(tempDir, "materialized-child");
-    await store.materializeStates(
-      Object.fromEntries(branch.draftBasePaths.map((file) => [file, branch.baseState[file]!])),
-      child,
-    );
-    expect((await fs.promises.lstat(path.join(child, "newdir"))).isDirectory()).toBe(true);
-    expect(await fs.promises.readFile(path.join(child, "newdir", "new.ts"), "utf8")).toBe("new nested draft\n");
-    expect((await fs.promises.lstat(path.join(child, "dir"))).isFile()).toBe(true);
-    await expect(fs.promises.lstat(path.join(child, "dir", "old.txt"))).rejects.toMatchObject({
-      code: expect.stringMatching(/ENOENT|ENOTDIR/),
-    });
-    expect((await fs.promises.lstat(path.join(child, "file-base"))).isDirectory()).toBe(true);
-    expect(await fs.promises.readFile(path.join(child, "file-base", "child.ts"), "utf8")).toBe("file replaced by directory\n");
-    expect(await fs.promises.readFile(path.join(child, "stable", "new.ts"), "utf8")).toBe("existing directory remains baseline\n");
-
-    const published = await store.publishDirectoryResult("branch-structure", child, branch.draftBasePaths);
-    expect(published.changedPaths).toEqual([]);
-    await expect(store.directoryMatchesResult("branch-structure", published.resultRevision, child)).resolves.toBe(true);
-  });
-
-  it("rejects conflicting draft paths before creating an impossible state", async () => {
-    await expect(overlayDraftsOnBaseline({
-      baseState: {},
       drafts: [
-        { path: "a", content: "file\n" },
-        { path: "a/b.ts", content: "nested\n" },
+        { path: 'main.ts', content: 'modified content' },
+        { path: 'deleted.txt', content: null },
+        { path: 'brand-new.txt', content: 'new file content' },
       ],
-      putObject: (bytes) => store.putObject(bytes),
-    })).rejects.toThrow(/ancestor\/descendant conflict/);
+      putObject: objects.putObject,
+    });
 
-    await expect(store.createDraftBaseline("ws-test", [
-      {
-        path: "a",
-        content: "file\n",
-        provenance: { baseRevision: null, encoding: "utf-8", bom: false, localEditRevision: 1, revision: "a" },
+    expect(result.modifiedPaths).toEqual(['main.ts']);
+    expect(result.deletedPaths).toEqual(['deleted.txt']);
+    expect(result.addedPaths).toEqual(['brand-new.txt']);
+    expect(result.changedPaths).toEqual(['brand-new.txt', 'deleted.txt', 'main.ts']);
+    expect(result.effectiveState['untouched.txt']).toEqual(baseState['untouched.txt']);
+    expect(result.effectiveState['deleted.txt']).toEqual({ kind: 'missing' });
+    expect(result.effectiveState['main.ts']).toMatchObject({ kind: 'regular-file', mode: 0o755 });
+    expect((await objects.readContent(result.effectiveState['main.ts']!))?.toString()).toBe('modified content');
+    expect((await objects.readContent(result.effectiveState['brand-new.txt']!))?.toString()).toBe('new file content');
+    expect(baseState['deleted.txt']).toEqual(file('old-deleted'));
+  });
+
+  it('passes the overlaid bytes and original source identity to the branch authority', async () => {
+    const objects = objectReceipts();
+    const accepted = { branchId: 'branch-feature' } as WorkingBranchRoot;
+    const createBranch = vi.fn<WorkingStateRootStore['createBranch']>().mockResolvedValue(accepted);
+    const owner = { putObject: objects.putObject, createBranch } as unknown as WorkingStateRootStore;
+    const result = await createBranchWithDraftBaseline(owner, 'workspace', 'branch-feature', {
+      'main.ts': { ...file('old-main'), mode: 0o755 },
+    }, { 'main.ts': 'const x = 42;', 'helper.ts': 'export const y = 100;' }, 'fixed-base', ['src']);
+
+    expect(result).toBe(accepted);
+    expect(createBranch).toHaveBeenCalledOnce();
+    const [workspace, branch, states, base, draftPaths, scopes] = createBranch.mock.calls[0]!;
+    expect({ workspace, branch, base, draftPaths, scopes }).toEqual({
+      workspace: 'workspace', branch: 'branch-feature', base: 'fixed-base',
+      draftPaths: ['helper.ts', 'main.ts'], scopes: ['src'],
+    });
+    expect(states['main.ts']).toMatchObject({ kind: 'regular-file', mode: 0o755 });
+    expect((await objects.readContent(states['main.ts']!))?.toString()).toBe('const x = 42;');
+    expect((await objects.readContent(states['helper.ts']!))?.toString()).toBe('export const y = 100;');
+  });
+
+  it('produces nested/type-changing drafts that the materializer can consume', async () => {
+    const objects = objectReceipts();
+    const result = await overlayDraftsOnBaseline({
+      baseState: {
+        dir: { kind: 'directory' }, 'dir/old.txt': file('old-child'),
+        'file-base': file('old-file'), stable: { kind: 'directory' },
       },
-      {
-        path: "a/b.ts",
-        content: "nested\n",
-        provenance: { baseRevision: null, encoding: "utf-8", bom: false, localEditRevision: 1, revision: "a/b" },
-      },
-    ])).rejects.toThrow(/ancestor\/descendant conflict/);
+      drafts: [
+        { path: 'newdir/new.ts', content: 'new nested draft\n' },
+        { path: 'dir', content: 'directory replaced by file\n' },
+        { path: 'file-base/child.ts', content: 'file replaced by directory\n' },
+        { path: 'stable/new.ts', content: 'existing directory remains baseline\n' },
+      ],
+      putObject: objects.putObject,
+    });
+    expect(result.changedPaths).toEqual([
+      'dir', 'dir/old.txt', 'file-base', 'file-base/child.ts', 'newdir', 'newdir/new.ts', 'stable/new.ts',
+    ]);
+    expect(result.effectiveState['dir/old.txt']).toEqual({ kind: 'missing' });
+    expect(result.effectiveState['file-base']).toMatchObject({ kind: 'directory' });
+    const targetDir = await fs.mkdtemp(path.join(os.tmpdir(), 'varin-draft-materialize-'));
+    try {
+      await materializeWorkingState({ targetDir, states: result.effectiveState, readContent: objects.readContent });
+      expect(await fs.readFile(path.join(targetDir, 'newdir/new.ts'), 'utf8')).toBe('new nested draft\n');
+      expect(await fs.readFile(path.join(targetDir, 'dir'), 'utf8')).toBe('directory replaced by file\n');
+      await expect(fs.lstat(path.join(targetDir, 'dir/old.txt'))).rejects.toMatchObject({
+        code: expect.stringMatching(/ENOENT|ENOTDIR/),
+      });
+      expect(await fs.readFile(path.join(targetDir, 'file-base/child.ts'), 'utf8')).toBe('file replaced by directory\n');
+      expect(await fs.readFile(path.join(targetDir, 'stable/new.ts'), 'utf8')).toBe('existing directory remains baseline\n');
+    } finally {
+      await fs.rm(targetDir, { recursive: true, force: true });
+    }
+  });
+
+  it('rejects conflicting draft paths before writing any objects', async () => {
+    const objects = objectReceipts();
+    await expect(overlayDraftsOnBaseline({
+      baseState: {}, drafts: [{ path: 'a', content: 'file\n' }, { path: 'a/b.ts', content: 'nested\n' }],
+      putObject: objects.putObject,
+    })).rejects.toThrow(/ancestor\/descendant conflict/);
+    expect(objects.putObject).not.toHaveBeenCalled();
   });
 });

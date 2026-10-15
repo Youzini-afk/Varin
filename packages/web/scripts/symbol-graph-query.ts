@@ -110,7 +110,6 @@ const main = async (): Promise<void> => {
           return { status: "missing", resource: { workspaceId: "measurement", resourceId } };
         }
       },
-      readAgentInputSnapshot: () => ({ status: "disk" }),
     } as never,
     supervisor: {
       syncDocument: async () => ({ status: "synced", documentVersion: 1 }),

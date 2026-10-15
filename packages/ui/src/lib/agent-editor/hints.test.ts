@@ -1,6 +1,6 @@
 import { expect, test } from 'vitest';
 
-import { getRuntimeKey } from '@varin/application-client';
+import { threadHostKey as getRuntimeKey } from '@/stores/useThreadStore';
 import {
   listAgentFileChangeHints,
   recordHintsFromToolCall,
@@ -15,7 +15,7 @@ test('keeps external-store snapshots stable until the hint state changes', () =>
   recordHintsFromToolCall({
     args: { path: 'src/example.ts' },
     runtimeKey: getRuntimeKey(),
-    sessionId: 'session-a',
+    threadKey: 'session-a',
     toolCallId: 'tool-a',
     toolName: 'write',
     workspaceId: 'workspace-a',

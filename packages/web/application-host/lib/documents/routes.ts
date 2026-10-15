@@ -3,16 +3,23 @@ import type { Express, Request, RequestHandler, Response } from 'express';
 
 interface DocumentAuthority {
   resolveWorkspace(input: unknown): Promise<unknown>;
-  resolveResourceIdentity(resource: unknown): Promise<unknown>;
+  resolveResourceIdentity(resource: unknown, options?: unknown): Promise<unknown>;
   read(resource: unknown): Promise<unknown>;
   write(request: unknown): Promise<unknown>;
+  prepareWorkspaceEdit(request: unknown): Promise<unknown>;
+  discardWorkspaceEdit(request: unknown): Promise<unknown>;
+  applyWorkspaceEdit(request: unknown): Promise<unknown>;
+  readWorkspaceEdit(request: unknown): Promise<unknown>;
+  readWorkspaceEditRecovery(request: unknown): Promise<unknown>;
+  undoWorkspaceEdit(request: unknown): Promise<unknown>;
+  listWorkspaceEdits(workspaceId: string): Promise<unknown>;
   move(request: unknown): Promise<unknown>;
   delete(request: unknown): Promise<unknown>;
   publishDirtyBuffers(request: unknown): Promise<unknown>;
   clearDirtyBuffers(request: unknown): Promise<unknown>;
   acknowledgeDirtyStateBarrier(request: unknown): Promise<unknown>;
   captureAgentInputSnapshot(request: unknown): Promise<unknown>;
-  releaseAgentInputSnapshot(sessionId: unknown, context: unknown): unknown;
+  releaseAgentInputSnapshot(consumer: unknown, context: unknown): unknown;
   readSurfaceOperation(request: unknown): Promise<unknown>;
   completeSurfaceOperation(request: unknown): Promise<unknown>;
   inspectWorkspace(workspaceId: string): Promise<unknown>;
@@ -78,6 +85,16 @@ export const registerDocumentRoutes = (app: Express, {
     }
   });
 
+  for (const [route, method] of [
+    ['prepare', 'prepareWorkspaceEdit'], ['apply', 'applyWorkspaceEdit'], ['discard', 'discardWorkspaceEdit'],
+    ['read', 'readWorkspaceEdit'], ['undo', 'undoWorkspaceEdit'], ['recovery', 'readWorkspaceEditRecovery'],
+  ] as const) app.post(`/api/documents/workspace-edit/${route}`, requireAuth, async (req: Request, res: Response) => {
+    try { return res.json(await documents[method](readBody(req))); } catch (error) { return sendError(res, error); }
+  });
+  app.post('/api/documents/workspace-edit/list', requireAuth, async (req: Request, res: Response) => {
+    try { return res.json(await documents.listWorkspaceEdits(String(readBody(req).workspaceId ?? ''))); } catch (error) { return sendError(res, error); }
+  });
+
   app.post('/api/documents/write', requireAuth, async (req: Request, res: Response) => {
     try {
       return res.json(await documents.write(readBody(req)));
@@ -128,9 +145,9 @@ export const registerDocumentRoutes = (app: Express, {
 
   app.post('/api/documents/resource/identity', requireAuth, async (req: Request, res: Response) => {
     try {
-      const resource = readBody(req).resource;
+      const { resource, options } = readBody(req);
       if (!resource) return res.status(400).json({ error: 'Resource is required', reason: 'failed' });
-      return res.json(await documents.resolveResourceIdentity(resource));
+      return res.json(await documents.resolveResourceIdentity(resource, options));
     } catch (error) {
       return sendError(res, error);
     }
@@ -147,7 +164,7 @@ export const registerDocumentRoutes = (app: Express, {
   app.post('/api/documents/agent-input/release', requireAuth, async (req: Request, res: Response) => {
     try {
       const body = readBody(req);
-      return res.json(await documents.releaseAgentInputSnapshot(body.sessionId, body.context));
+      return res.json(await documents.releaseAgentInputSnapshot(body.consumer, body.context));
     } catch (error) {
       return sendError(res, error);
     }

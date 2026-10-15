@@ -173,9 +173,8 @@ describe("createLspStructureProvider", () => {
       resource: { workspaceId: "ws-1", resourceId: "a.ts" },
       encoding: "utf8", bom: false, byteLength: 22, modifiedAt: "2026-01-01T00:00:00Z",
     }));
-    const readAgentInputSnapshot = vi.fn();
     const provider = createLspStructureProvider({
-      documents: { readSnapshot: read, readAgentInputSnapshot },
+      documents: { readSnapshot: read },
       supervisor: { documentSymbols, syncDocument },
     });
     const result = await provider.outline({

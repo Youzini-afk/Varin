@@ -111,12 +111,12 @@ describe('realtime proxy URL builders', () => {
   });
 
   it('builds local WebSocket proxy URLs with ws protocol', () => {
-    const url = new URL(buildRealtimeProxyWsUrl('https://127.0.0.1:57123', 'wss://remote.example/api/varin/runtime/ws'));
+    const url = new URL(buildRealtimeProxyWsUrl('https://127.0.0.1:57123', 'wss://remote.example/api/terminal/ws'));
 
     expect(url.protocol).toBe('wss:');
     expect(url.host).toBe('127.0.0.1:57123');
     expect(url.pathname).toBe('/api/varin/realtime-proxy/ws');
-    expect(url.searchParams.get('url')).toBe('wss://remote.example/api/varin/runtime/ws');
+    expect(url.searchParams.get('url')).toBe('wss://remote.example/api/terminal/ws');
   });
 });
 
@@ -193,12 +193,12 @@ describe('realtime proxy', () => {
     }
   });
 
-  it('streams runtime-manager SSE through the same allowlist as other runtime events', async () => {
-    const upstream = await startSseUpstream({ path: '/api/varin/runtime-manager/events' });
+  it('streams native Thread observation through the realtime allowlist', async () => {
+    const upstream = await startSseUpstream({ path: '/api/threads/observe' });
     const { origin, runtime } = await startProxyServer({ apiBaseUrl: upstream.origin });
 
     try {
-      const response = await fetch(buildRealtimeProxySseUrl(origin, `${upstream.origin}/api/varin/runtime-manager/events`), {
+      const response = await fetch(buildRealtimeProxySseUrl(origin, `${upstream.origin}/api/threads/observe`), {
         headers: {
           Accept: 'text/event-stream',
           Origin: 'varin-ui://app',
@@ -213,18 +213,40 @@ describe('realtime proxy', () => {
     }
   });
 
-  it('rejects targets outside the realtime path allowlist', async () => {
-    const upstream = await startSseUpstream({ path: '/api/config/settings' });
+  it.each(['/api/config/settings', '/api/varin/runtime-manager/events'])('rejects SSE target outside the realtime path allowlist: %s', async (path) => {
+    const upstream = await startSseUpstream({ path });
     const { origin, runtime } = await startProxyServer({ apiBaseUrl: upstream.origin });
 
     try {
-      const response = await fetch(buildRealtimeProxySseUrl(origin, `${upstream.origin}/api/config/settings`), {
+      const response = await fetch(buildRealtimeProxySseUrl(origin, `${upstream.origin}${path}`), {
         headers: { Origin: 'varin-ui://app' },
       });
 
       expect(response.status).toBe(404);
       expect(upstream.requests).toHaveLength(0);
     } finally {
+      runtime.stop();
+    }
+  });
+
+  it('rejects the retired Pi runtime WebSocket before forwarding credentials', async () => {
+    const upstream = await startSseUpstream();
+    const { origin, runtime } = await startProxyServer({ apiBaseUrl: upstream.origin });
+    const target = `${upstream.origin.replace(/^http:/, 'ws:')}/api/varin/runtime/ws`;
+    const client = new WebSocket(buildRealtimeProxyWsUrl(origin, target), {
+      headers: { Origin: 'varin-ui://app' },
+    });
+    client.on('error', () => {});
+    try {
+      const status = await new Promise<number | undefined>((resolve, reject) => {
+        client.once('unexpected-response', (_request, response) => { response.resume(); resolve(response.statusCode); });
+        client.once('open', () => reject(new Error('Retired runtime WebSocket was accepted')));
+        client.once('error', reject);
+      });
+      expect(status).toBe(404);
+      expect(upstream.requests).toHaveLength(0);
+    } finally {
+      client.terminate();
       runtime.stop();
     }
   });
@@ -243,7 +265,7 @@ describe('realtime proxy', () => {
     const { origin, runtime } = await startProxyServer({ apiBaseUrl: upstreamOrigin });
 
     try {
-      const target = `${upstreamOrigin.replace(/^http:/, 'ws:')}/api/varin/runtime/ws?lastEventId=evt-1`;
+      const target = `${upstreamOrigin.replace(/^http:/, 'ws:')}/api/terminal/ws?lastEventId=evt-1`;
       const client = new WebSocket(buildRealtimeProxyWsUrl(origin, target), {
         headers: { Origin: 'varin-ui://app' },
       });
@@ -258,7 +280,7 @@ describe('realtime proxy', () => {
       });
 
       expect(message).toBe('echo:ping');
-      expect(upstreamRequest.current?.url).toBe('/api/varin/runtime/ws?lastEventId=evt-1');
+      expect(upstreamRequest.current?.url).toBe('/api/terminal/ws?lastEventId=evt-1');
       expect(upstreamRequest.current?.headers['x-proxy-auth']).toBe('secret');
       client.close();
       upstreamWs.close();
@@ -278,7 +300,7 @@ describe('realtime proxy', () => {
     const { origin, runtime } = await startProxyServerWithAuthController({ apiBaseUrl: upstreamOrigin, uiAuthController });
 
     try {
-      const target = `${upstreamOrigin.replace(/^http:/, 'ws:')}/api/varin/runtime/ws`;
+      const target = `${upstreamOrigin.replace(/^http:/, 'ws:')}/api/terminal/ws`;
       const client = new WebSocket(buildRealtimeProxyWsUrl(origin, target), {
         headers: { Origin: 'varin-ui://app' },
       });

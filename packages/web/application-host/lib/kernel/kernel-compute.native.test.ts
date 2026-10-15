@@ -358,3 +358,24 @@ it('uses captured byte identities for live, pinned and opaque-revision structure
   assert.ok(result.records.some(record => record.kind === 'structure-part'
     && data(record).category === 'symbols' && JSON.stringify(data(record).items).includes('changed')));
 }, 60000);
+
+it('fixed branch revision discovery enforces the scoped grant and retains cancellable native readers', async () => {
+  const f = await fixture();
+  await f.branch({ 'allowed/a.txt': 'needle fixed', 'secret/a.txt': 'needle hidden', 'allowed/large.txt': ('needle ' + 'x'.repeat(1000) + '\n').repeat(4000) });
+  await fs.mkdir(path.join(f.workspace, 'allowed'));
+  await fs.writeFile(path.join(f.workspace, 'allowed/a.txt'), 'needle drifting disk');
+  const narrow = await f.scoped('direct-branch-reader', ['allowed']);
+  const result = await runKernelCompute(narrow, { workspaceId: 'ws', branchId: 'branch', revision: 0, operation: 'search', query: 'needle', paths: ['allowed/a.txt'], lane: 'foreground' });
+  assert.equal(result.status, 'ready');
+  assert.deepEqual(result.records.map(record => [record.path, data(record).preview]), [['allowed/a.txt', 'needle fixed']]);
+  const listed = await runKernelCompute(narrow, { workspaceId: 'ws', branchId: 'branch', revision: 0, operation: 'list', lane: 'foreground', paths: [''] });
+  assert.ok(listed.records.every(record => record.path.startsWith('allowed')));
+  assert.ok(listed.records.some(record => record.path === 'allowed/a.txt'));
+  await assert.rejects(runKernelCompute(narrow, { workspaceId: 'ws', branchId: 'branch', revision: 0, operation: 'read', files: [{ path: 'secret/a.txt' }], lane: 'foreground' }), /scope|grant/i);
+  const other = f.host.scoped(await f.host.issueGrant({ grantId: 'wrong-branch-workspace', owningWorkspace: 'other-ws', executionWorkspace: 'other-ws', capabilities: ['storage.read'], pathScopes: [''] }));
+  await assert.rejects(runKernelCompute(other, { workspaceId: 'other-ws', branchId: 'branch', revision: 0, operation: 'list', lane: 'foreground' }), /workspace/i);
+  await narrow.computeStart({ workspaceId: 'ws', jobId: 'direct-cancel', branchId: 'branch', revision: 0, operation: 'search', query: 'needle', paths: ['allowed/large.txt'], lane: 'background' });
+  await narrow.computeCancel({ workspaceId: 'ws', jobId: 'direct-cancel' });
+  for (let attempt = 0;; attempt++) { const state = await narrow.computeRead({ workspaceId: 'ws', jobId: 'direct-cancel', cursor: 0 }); if (state.status === 'cancelled') break; assert.ok(attempt < 300, 'native cancellation must reach a terminal record'); await sleep(); }
+  await narrow.computeRelease({ workspaceId: 'ws', jobId: 'direct-cancel' });
+}, 30_000);

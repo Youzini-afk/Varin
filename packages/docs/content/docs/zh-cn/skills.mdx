@@ -1,30 +1,16 @@
 ---
-title: Skills
-description: 创建可复用的指令，让智能体按需加载。
+title: "技能"
+description: "创建并使用带版本的指令资源。"
 ---
 
-# Skills
+# 技能
 
-Skill 是一组可复用的指令，智能体可以在相关时引入它 — 例如“我们如何编写提交信息”或“我们的 API 规范”。你在 **Settings → Skills** 中管理它们。
+技能是包含名称、说明和指令的 `SKILL.md` 资源，也可以附带支持文件。说明帮助 Agent 判断适用场景。
 
-如果想安装现成的 skill 而不是自己编写，请参阅 [Skills 目录](/zh-cn/skills-catalog/)。
+在 **设置 → 技能** 中创建、查看、编辑、复制或删除技能，选择用户范围或已信任的项目。编辑器显示路径、来源、有效性及是否可写。只读资源可以复制到可写范围。使用项目资源前，请处理项目信任提示和诊断。
 
-## 创建 skill
+在消息开头使用 `/skill:name`，或在对话的 **Instructions and skills** 面板选择技能。Agent 也可以通过 `resource_read` 读取已准入技能及其支持文件。技能内容不会授予额外工具或文件权限。
 
-1. 打开 **Settings → Skills**。
-2. 创建一个 skill，并给它一个名称和一段简短的描述。智能体正是根据描述来判断该 skill 何时适用，因此请写得具体。
-3. 编写指令。如果该 skill 需要支持文件，可以添加它们。
-4. 选择它所在的位置：
-   - **personal** — 在每个项目中都可用
-   - **project** — 仅在当前项目中可用
+保存资源库不会替换对话已捕获的材料。点击 **Refresh instructions and skills** 后，后续请求使用新快照，已受理请求保留原版本。
 
-## 在聊天中使用 skill
-
-在消息中间输入 `/` 可调出 skill 选择器，然后选择一个。智能体会为该次回复加载该 skill 的指令。
-
-位于消息最开头的 `/` 会改为打开 [命令](/zh-cn/commands/)。
-
-## 相关内容
-
-- [Skills 目录](/zh-cn/skills-catalog/) — 安装他人发布的 skill
-- [命令](/zh-cn/commands/) — 当前运行时可用的命令
+参阅 [命令](/zh-cn/commands/) 和 [技能资源库](/zh-cn/skills-catalog/)。

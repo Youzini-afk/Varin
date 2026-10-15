@@ -24,3 +24,33 @@ same controller. It does not create a second tab or file-content store.
 
 The coordinated public version for this workbench SDK is 0.2.0. Do not npm tag or publish until that
 release is explicitly approved.
+
+## Native Agent policy examples
+
+- [Evidence policy](evidence-policy/README.md): inspect committed file evidence and choose a read.
+- [Planning policy](planning-policy/README.md): explicitly configure a tool-free planning model,
+  inspect its committed bounded plan, then choose an evidence graph and main-model answer.
+
+- [Plan, question and process policy](domain-policy/README.md): use original plan receipts, authenticated answers and process observations without provider inference.
+
+These use the ordinary installed brokered Host extension and project service-routing paths.
+
+
+## Ordinary Agent tool examples
+
+- [Stored material snapshot reader](material-snapshot-tool/README.md): bounded reads through the original material owner.
+- [Fixed child result integration](child-integration-tool/README.md): explicitly apply a published child result through the original Integration journal.
+- [Research experiment tools](research-tools/README.md): accept independent experiments, observe their original terminal facts and read/control the original research domain.
+
+These use ordinary installed services and their reviewed Host capabilities. Their manifests supply the
+same tool declarations used by model/policy admission and inspection.
+
+## Context algorithm examples
+
+- [Independent Source Compaction](context-compaction/README.md): a pure `varin.context.compaction@1` Provider producing independent source summaries and a merge tree, or a small direct extractive candidate. Core executes and commits the frozen plan.
+
+## Model protocol example
+
+- [Custom text/SSE model protocol](model-protocol/README.md): contributes a channel and model candidates,
+  implements a distinct wire codec, and leaves HTTP, credentials, cancellation and usage with their
+  original owners. It uses the ordinary extension service/composition path.

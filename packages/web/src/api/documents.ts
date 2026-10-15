@@ -14,6 +14,7 @@ import type {
   VarinDocumentWriteRequest,
   VarinDocumentWriteResult,
   VarinResourceReference,
+  VarinResourceIdentity,
   VarinWorkspaceFileEvent,
   VarinWorkspaceIdentity,
   Subscription,
@@ -54,6 +55,12 @@ const postJson = async (path: string, body: unknown): Promise<unknown> => {
   return response.json();
 };
 
+function resolveResourceIdentity(resource: VarinResourceReference): Promise<VarinResourceIdentity>;
+function resolveResourceIdentity(resource: VarinResourceReference, options: { withinWorkspaceId: string }): Promise<VarinResourceIdentity | null>;
+function resolveResourceIdentity(resource: VarinResourceReference, options?: { withinWorkspaceId: string }): Promise<VarinResourceIdentity | null> {
+  return postJson('/api/documents/resource/identity', { resource, options }) as Promise<VarinResourceIdentity | null>;
+}
+
 const isResource = (value: unknown): value is VarinResourceReference => {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
   const candidate = value as Record<string, unknown>;
@@ -86,7 +93,7 @@ const parseWorkspaceFileEvent = (value: unknown): VarinWorkspaceFileEvent => {
   if (!isResource(event.resource)) {
     throw new DocumentsError('Document watch returned an invalid resource event', { reason: 'failed' });
   }
-  if (event.revision !== undefined && typeof event.revision !== 'string') {
+  if ((event.operationId !== undefined && (typeof event.operationId !== 'string' || !event.operationId)) || (event.revision !== undefined && typeof event.revision !== 'string')) {
     throw new DocumentsError('Document watch returned an invalid revision', { reason: 'failed' });
   }
   if (event.kind === 'moved') {
@@ -105,7 +112,7 @@ export const parseDocumentWatchEvent = (value: unknown): VarinDocumentWatchEvent
   if (value && typeof value === 'object' && !Array.isArray(value)) {
     const event = value as Record<string, unknown>;
     if (event.kind === 'surface-operation') {
-      if (!['capture', 'apply', 'undo'].includes(String(event.action))
+      if (!['capture', 'apply', 'undo', 'restore', 'workspace-edit'].includes(String(event.action))
         || typeof event.requestId !== 'string' || !event.requestId
         || typeof event.operationId !== 'string' || !event.operationId
         || typeof event.workspaceId !== 'string' || !event.workspaceId
@@ -169,6 +176,13 @@ const readSseEvents = async (
  * Application Host. This module never uses a Capacitor filesystem plugin.
  */
 export const createWebDocumentsAPI = (): DocumentsAPI => ({
+  discardWorkspaceEdit: request => postJson('/api/documents/workspace-edit/discard', request) as ReturnType<DocumentsAPI['discardWorkspaceEdit']>,
+  readWorkspaceEditRecovery: request => postJson('/api/documents/workspace-edit/recovery', request) as ReturnType<DocumentsAPI['readWorkspaceEditRecovery']>,
+  prepareWorkspaceEdit: request => postJson('/api/documents/workspace-edit/prepare', request) as ReturnType<DocumentsAPI['prepareWorkspaceEdit']>,
+  applyWorkspaceEdit: request => postJson('/api/documents/workspace-edit/apply', request) as ReturnType<DocumentsAPI['applyWorkspaceEdit']>,
+  readWorkspaceEdit: request => postJson('/api/documents/workspace-edit/read', request) as ReturnType<DocumentsAPI['readWorkspaceEdit']>,
+  undoWorkspaceEdit: request => postJson('/api/documents/workspace-edit/undo', request) as ReturnType<DocumentsAPI['undoWorkspaceEdit']>,
+  listWorkspaceEdits: request => postJson('/api/documents/workspace-edit/list', request) as ReturnType<DocumentsAPI['listWorkspaceEdits']>,
   ackDirtyStateBarrier: (request) => postJson('/api/documents/dirty/barrier/ack', request) as Promise<{ acknowledged: boolean }>,
   clearDirtyBuffers: (request) => postJson('/api/documents/dirty/clear', request) as Promise<{ cleared: boolean }>,
   captureAgentInputSnapshot: (request) => postJson('/api/documents/agent-input/capture', request) as Promise<AgentInputContext>,
@@ -176,7 +190,7 @@ export const createWebDocumentsAPI = (): DocumentsAPI => ({
   readSurfaceOperation: (request) => postJson('/api/documents/surface-operation/read', request) as ReturnType<NonNullable<DocumentsAPI['readSurfaceOperation']>>,
   completeSurfaceOperation: (request) => postJson('/api/documents/surface-operation/complete', request) as ReturnType<NonNullable<DocumentsAPI['completeSurfaceOperation']>>,
   resolveWorkspace: (input) => postJson('/api/documents/workspace/resolve', input) as Promise<VarinWorkspaceIdentity>,
-  resolveResourceIdentity: (resource) => postJson('/api/documents/resource/identity', { resource }) as ReturnType<DocumentsAPI['resolveResourceIdentity']>,
+  resolveResourceIdentity,
   read: (resource: VarinResourceReference) => postJson('/api/documents/read', { resource }) as Promise<VarinDocumentReadResult>,
   write: (request: VarinDocumentWriteRequest) => postJson('/api/documents/write', request) as Promise<VarinDocumentWriteResult>,
   move: (request: VarinDocumentMoveRequest) => postJson('/api/documents/move', request) as Promise<VarinDocumentMoveResult>,

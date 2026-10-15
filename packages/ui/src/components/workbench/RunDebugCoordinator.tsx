@@ -15,7 +15,7 @@ import { registerWorkbenchCommand } from '@/lib/workbench/editors/commands';
 import { activeEditorTab } from '@/lib/workbench/editors/groups';
 import { peekEditorWorkbench, subscribeEditorWorkbench } from '@/lib/workbench/editors/session';
 import { textEditorSummaryFromViewState } from '@/lib/workbench/editors/view-state-core';
-import { usePiSessionStore } from '@/stores/usePiSessionStore';
+import { useThreadStore, threadIdentityKey } from '@/stores/useThreadStore';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { revealResourceInEditor } from '@/lib/agent-editor/navigation';
 import { languageIdFromResourceId } from '@/lib/language-services/language-id';
@@ -35,7 +35,7 @@ export const RunDebugCoordinator: React.FC = () => {
   const apis = useRuntimeAPIs();
   const workspaceId = useWorkbenchWorkspaceId();
   const directory = useDirectoryStore((state) => state.currentDirectory);
-  const sessionId = usePiSessionStore((state) => state.currentSessionId);
+  const sessionId = useThreadStore(state => state.selectedIdentity ? threadIdentityKey(state.hostKey, state.selectedIdentity) : null);
   const workbench = React.useSyncExternalStore(
     subscribeEditorWorkbench,
     () => (workspaceId ? peekEditorWorkbench(workspaceId) : undefined),
@@ -145,7 +145,7 @@ export const RunDebugCoordinator: React.FC = () => {
           return;
         }
         const result = attachEditorContext({
-          sessionId,
+          threadKey: sessionId,
           workspaceId,
           resourceId: failure.resourceId ?? failure.id,
           kind: 'test-failure',
@@ -178,7 +178,7 @@ export const RunDebugCoordinator: React.FC = () => {
           return;
         }
         const result = attachEditorContext({
-          sessionId,
+          threadKey: sessionId,
           workspaceId,
           resourceId: frame.resourceId ?? tabRef.current?.resourceId ?? 'stack',
           kind: 'stack',

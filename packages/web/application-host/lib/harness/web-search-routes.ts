@@ -1,6 +1,6 @@
 import type { Express, RequestHandler } from "express";
 import type { HarnessWebSearchProvider } from "@varin/protocol";
-import { readPiAuthFile, removePiProviderAuth, savePiProviderAuth } from "../pi-config/storage.js";
+import type { ServiceCredentialStore } from "../service-credentials/store.js";
 import { resolveSearchCredential } from "./web-search.js";
 
 const PROVIDERS = new Set<HarnessWebSearchProvider>(["brave", "exa", "tavily", "jina", "searxng"]);
@@ -15,20 +15,20 @@ const providerOf = (value: unknown): HarnessWebSearchProvider | null => (
 );
 
 export interface WebSearchCredentialRoutesOptions {
-  readAuth?: typeof readPiAuthFile;
-  removeAuth?: typeof removePiProviderAuth;
+  readAuth: ServiceCredentialStore['read'];
+  removeAuth: ServiceCredentialStore['remove'];
   requireAuth?: RequestHandler;
-  saveAuth?: typeof savePiProviderAuth;
+  saveAuth: ServiceCredentialStore['save'];
 }
 
 export const registerWebSearchCredentialRoutes = (
   app: Express,
-  options: WebSearchCredentialRoutesOptions = {},
+  options: WebSearchCredentialRoutesOptions,
 ): void => {
   const requireAuth = options.requireAuth ?? noAuth;
-  const readAuth = options.readAuth ?? readPiAuthFile;
-  const saveAuth = options.saveAuth ?? savePiProviderAuth;
-  const removeAuth = options.removeAuth ?? removePiProviderAuth;
+  const readAuth = options.readAuth;
+  const saveAuth = options.saveAuth;
+  const removeAuth = options.removeAuth;
 
   app.get("/api/harness/web-search/credentials/:provider", requireAuth, (request, response) => {
     response.setHeader("Cache-Control", "no-store");
@@ -49,7 +49,7 @@ export const registerWebSearchCredentialRoutes = (
     }
   });
 
-  app.put("/api/harness/web-search/credentials/:provider", requireAuth, (request, response) => {
+  app.put("/api/harness/web-search/credentials/:provider", requireAuth, async (request, response) => {
     response.setHeader("Cache-Control", "no-store");
     const provider = providerOf(request.params.provider);
     const apiKey = typeof request.body?.apiKey === "string" ? request.body.apiKey.trim() : "";
@@ -59,14 +59,14 @@ export const registerWebSearchCredentialRoutes = (
     }
     const credentialRef = webSearchCredentialRef(provider);
     try {
-      saveAuth(credentialRef, { type: "api_key", key: apiKey });
+      await saveAuth(credentialRef, { type: "api_key", key: apiKey });
       response.json({ provider, credentialRef, configured: true });
     } catch {
       response.status(500).json({ error: "Unable to save web search credential" });
     }
   });
 
-  app.delete("/api/harness/web-search/credentials/:provider", requireAuth, (request, response) => {
+  app.delete("/api/harness/web-search/credentials/:provider", requireAuth, async (request, response) => {
     response.setHeader("Cache-Control", "no-store");
     const provider = providerOf(request.params.provider);
     if (!provider) {
@@ -75,7 +75,7 @@ export const registerWebSearchCredentialRoutes = (
     }
     const credentialRef = webSearchCredentialRef(provider);
     try {
-      const removed = removeAuth(credentialRef);
+      const removed = await removeAuth(credentialRef);
       response.json({ provider, credentialRef, configured: false, removed });
     } catch {
       response.status(500).json({ error: "Unable to remove web search credential" });

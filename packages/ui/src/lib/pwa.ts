@@ -8,7 +8,7 @@ export type PWADisplayMode =
 
 const DISPLAY_MODES: Array<Exclude<PWADisplayMode, 'browser' | 'twa'>> = ['standalone', 'minimal-ui', 'fullscreen', 'window-controls-overlay'];
 
-export const PWA_RECENT_SESSIONS_STORAGE_KEY = 'varin.pwaRecentSessions';
+export const PWA_RECENT_THREADS_STORAGE_KEY = 'varin.pwaRecentThreads';
 
 const matchesDisplayMode = (mode: Exclude<PWADisplayMode, 'browser' | 'twa'>): boolean => {
   if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') {

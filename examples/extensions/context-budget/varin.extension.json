@@ -1,0 +1,268 @@
+{
+  "schemaVersion": 1,
+  "id": "example.context-budget",
+  "version": "1.0.0",
+  "engines": {
+    "varin": "*"
+  },
+  "displayName": "Evidence-preserving Context Budget",
+  "entrypoints": {
+    "host": {
+      "file": "host.cjs",
+      "mode": "brokered",
+      "activation": [
+        "service-request"
+      ]
+    }
+  },
+  "provides": {
+    "services": [
+      {
+        "id": "varin.context.budget",
+        "version": 1,
+        "contract": {
+          "methods": {
+            "describe": {
+              "inputSchema": {
+                "type": "array",
+                "maxItems": 0
+              },
+              "outputSchema": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "identity": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                      "name": {
+                        "type": "string",
+                        "minLength": 1,
+                        "pattern": "\\S"
+                      },
+                      "version": {
+                        "type": "string",
+                        "minLength": 1,
+                        "pattern": "\\S"
+                      }
+                    },
+                    "required": [
+                      "name",
+                      "version"
+                    ]
+                  },
+                  "configuration": {}
+                },
+                "required": [
+                  "identity",
+                  "configuration"
+                ]
+              }
+            },
+            "decide": {
+              "inputSchema": {
+                "type": "array",
+                "minItems": 1,
+                "maxItems": 1,
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "boundary": {
+                      "const": "before_model_dispatch"
+                    },
+                    "requestId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "pattern": "\\S"
+                    },
+                    "estimate": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "properties": {
+                        "estimatedTokens": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 9007199254740991
+                        },
+                        "unmeasuredMedia": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 9007199254740991
+                        },
+                        "unmeasuredProviderItems": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 9007199254740991
+                        },
+                        "method": {
+                          "type": "string",
+                          "minLength": 1,
+                          "pattern": "\\S"
+                        }
+                      },
+                      "required": [
+                        "estimatedTokens",
+                        "unmeasuredMedia",
+                        "unmeasuredProviderItems",
+                        "method"
+                      ]
+                    },
+                    "capacityTokens": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 9007199254740991
+                    },
+                    "inputBudgetTokens": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 9007199254740991
+                    },
+                    "settings": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "properties": {
+                        "reserveTokens": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 9007199254740991
+                        },
+                        "keepRecentTokens": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 9007199254740991
+                        },
+                        "backgroundPreparation": {
+                          "type": "boolean"
+                        },
+                        "preparationWaterline": {
+                          "type": "number",
+                          "exclusiveMinimum": 0,
+                          "exclusiveMaximum": 1
+                        }
+                      },
+                      "required": [
+                        "reserveTokens",
+                        "keepRecentTokens",
+                        "backgroundPreparation",
+                        "preparationWaterline"
+                      ]
+                    },
+                    "candidates": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "properties": {
+                          "throughId": {
+                            "type": "string",
+                            "minLength": 1,
+                            "pattern": "\\S"
+                          },
+                          "prefixEstimatedTokens": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 9007199254740991
+                          },
+                          "retainedEstimatedTokens": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 9007199254740991
+                          }
+                        },
+                        "required": [
+                          "throughId",
+                          "prefixEstimatedTokens",
+                          "retainedEstimatedTokens"
+                        ]
+                      }
+                    },
+                    "acceptedCandidate": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "properties": {
+                        "throughId": {
+                          "type": "string",
+                          "minLength": 1,
+                          "pattern": "\\S"
+                        },
+                        "mode": {
+                          "enum": [
+                            "background",
+                            "blocking"
+                          ]
+                        },
+                        "summaryInstructions": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "throughId",
+                        "mode"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "boundary",
+                    "requestId",
+                    "estimate",
+                    "capacityTokens",
+                    "inputBudgetTokens",
+                    "settings",
+                    "candidates"
+                  ]
+                }
+              },
+              "outputSchema": {
+                "oneOf": [
+                  {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                      "kind": {
+                        "const": "continue"
+                      }
+                    },
+                    "required": [
+                      "kind"
+                    ]
+                  },
+                  {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                      "kind": {
+                        "const": "compact"
+                      },
+                      "throughId": {
+                        "type": "string",
+                        "minLength": 1,
+                        "pattern": "\\S"
+                      },
+                      "mode": {
+                        "enum": [
+                          "background",
+                          "blocking"
+                        ]
+                      },
+                      "summaryInstructions": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "kind",
+                      "throughId",
+                      "mode"
+                    ]
+                  }
+                ]
+              }
+            }
+          },
+          "participation": "decision"
+        },
+        "multiple": true
+      }
+    ]
+  }
+}

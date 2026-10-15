@@ -1,8 +1,9 @@
 import React from 'react';
 import { Button } from '@/components/ui/button';
-import { isDesktopShell, startDesktopWindowDrag } from '@/lib/desktop';
+import { isDesktopShell, restartDesktopApp, startDesktopWindowDrag } from '@/lib/desktop';
 import { useI18n } from '@/lib/i18n';
-import { LocalPiRuntimeCard } from './LocalPiRuntimeCard';
+import { desktopHostsGet, desktopHostsSet } from '@/lib/desktopHosts';
+import { LocalRuntimeCard } from './LocalRuntimeCard';
 
 interface LocalSetupScreenProps {
   isFromRecovery?: boolean;
@@ -33,7 +34,7 @@ export function LocalSetupScreen({
   return (
     <div
       className="relative flex h-full cursor-default select-none items-center justify-center bg-transparent p-8"
-      data-pi-runtime-setup="true"
+      data-native-runtime-setup="true"
       onMouseDown={handleDragStart}
     >
       <div className="w-full max-w-lg space-y-6">
@@ -52,11 +53,19 @@ export function LocalSetupScreen({
             {t('onboarding.localSetup.title')}
           </h1>
           <p className="text-muted-foreground">
-            {t('onboarding.localSetup.description')}
+            {t('onboarding.native.description')}
           </p>
         </header>
 
-        <LocalPiRuntimeCard onContinue={() => onRuntimeAvailable?.()} />
+        <LocalRuntimeCard onContinue={async () => {
+          if (isDesktopShell()) {
+            const config = await desktopHostsGet();
+            await desktopHostsSet({ ...config, defaultHostId: 'local', initialHostChoiceCompleted: true });
+            await restartDesktopApp();
+          } else {
+            await onRuntimeAvailable?.();
+          }
+        }} />
 
         {isFromRecovery && onSwitchToRemote ? (
           <div className="pt-2 text-center">

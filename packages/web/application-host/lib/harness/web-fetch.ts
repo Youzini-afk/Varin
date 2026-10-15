@@ -1,8 +1,8 @@
-import type { FetchResult, HarnessWebDomainPolicy, RetrievalReceiptAuthority, RetrievalUrlReceipt, WebFetchRequest, WebReadPosition, WebSnapshotStructure } from "@varin/protocol";
+import { selectWebPageText } from "@varin/protocol";
+import type { FetchResult, HarnessWebDomainPolicy, WebFetchRequest, WebReadPosition, WebSnapshotStructure } from "@varin/protocol";
 import { isSameHost } from "./ssrf-policy.js";
 import { EGRESS_TIMEOUT, EgressError, type EgressRuntime } from "./egress.js";
-import { mintWebFetchReceipt, type WebFetchReceiptDraft } from "./web-fetch-receipt.js";
-import type { WebMaterialStore } from "./web-materials.js";
+import type { WebMaterialStore, WebMaterialAuthority } from "./web-materials.js";
 import { createDocumentReader, type DocumentReader, type DocumentReaderContext } from "./document-reading.js";
 
 export interface SsrfPolicy {
@@ -20,7 +20,6 @@ export interface WebFetchDeps {
   renderer?: (url: string, signal?: AbortSignal) => Promise<string>;
   cacheTtlMs?: number;
   maxBytes?: number;
-  persistReceipt?: (workspaceId: string, receipt: WebFetchReceiptDraft, markdown: string) => Promise<RetrievalUrlReceipt>;
   /** Durable snapshot store; when absent fetches still deliver content but mint no snapshotId. */
   materials?: Pick<WebMaterialStore, "put" | "read"> & Partial<Pick<WebMaterialStore, "findAnalysis">>;
   /** Shared with the independent document-reading Host service. */
@@ -34,13 +33,12 @@ interface CacheEntry {
   sourceBytes?: Buffer;
 }
 
-interface FetchContext {
+export interface FetchContext {
   workspaceId: string;
-  authority: RetrievalReceiptAuthority;
+  authority: WebMaterialAuthority;
   render?: boolean;
   domainPolicy?: DomainPolicy;
   signal?: AbortSignal;
-  issueReceipt?: boolean;
   /** A caller-requested refresh must create a new snapshot record even when
    * the fetched bytes are unchanged. */
   forceNewSnapshot?: boolean;
@@ -75,24 +73,6 @@ export function createWebFetch(deps: WebFetchDeps) {
       ...(ctx.engineOptions ? { engineOptions: ctx.engineOptions } : {}),
     };
   };
-  const withReceipt = async (
-    result: Extract<FetchResult, { status: "ok" }>,
-    workspaceId: string,
-    authority: RetrievalReceiptAuthority,
-    issueReceipt: boolean,
-  ): Promise<Extract<FetchResult, { status: "ok" }>> => {
-    if (!issueReceipt || !deps.persistReceipt || !result.markdown) return result;
-    const draft = mintWebFetchReceipt(result.finalUrl, result.markdown, authority);
-    try {
-      const receipt = await deps.persistReceipt(workspaceId, draft, result.markdown);
-      return { ...result, receipt };
-    } catch {
-      // Fetching content succeeded, but an unpersisted token must never become
-      // source-check authority.
-      return result;
-    }
-  };
-
   const checkDomainPolicy = (
     url: string,
     workspaceId: string,
@@ -169,13 +149,12 @@ export function createWebFetch(deps: WebFetchDeps) {
     }
   };
 
+  // Cancellation asks the original producer to stop. Its actual return is the
+  // drain evidence; a rejected observer race cannot release its last holder.
   const awaitAbortable = async <T>(promise: Promise<T>, signal: AbortSignal): Promise<T> => {
+    const value = await promise;
     signal.throwIfAborted();
-    return new Promise<T>((resolve, reject) => {
-      const abort = (): void => reject(signal.reason ?? new DOMException("Web fetch aborted", "AbortError"));
-      signal.addEventListener("abort", abort, { once: true });
-      promise.then(resolve, reject).finally(() => signal.removeEventListener("abort", abort));
-    });
+    return value;
   };
 
   // Markdown structure belongs to this HTML/text path. PDF structure is produced only by the document engine.
@@ -271,6 +250,17 @@ export function createWebFetch(deps: WebFetchDeps) {
     }
   };
 
+  const selectText = (markdown: string, structure: WebSnapshotStructure | undefined, request: WebFetchRequest, snapshotId: string):
+    { body: string; range?: { startLine: number; endLine: number; totalLines: number } } | FetchResult => {
+    const selected = request.position ? resolvePosition(markdown, structure, request.position, snapshotId) : { body: markdown };
+    if (!("body" in selected) || request.find === undefined) return selected;
+    const range = "range" in selected ? selected.range : undefined;
+    // Find reads the fixed whole body and restricts its search to the selected
+    // range. Numbered matches remain positions in that body, never in a slice.
+    return { ...selected, body: selectWebPageText(markdown, { find: request.find,
+      ...(range ? { start_line: range.startLine, end_line: range.endLine } : {}) }) };
+  };
+
   const detectEmptyShell = (html: string, markdown: string, render: boolean): boolean => {
     if (render) return false;
     // Length cannot tell an app shell from a legitimate short page. Only
@@ -287,6 +277,7 @@ export function createWebFetch(deps: WebFetchDeps) {
     content: Extract<FetchResult, { status: "ok" }>,
     ctx: FetchContext,
   ): Promise<Extract<FetchResult, { status: "ok" }>> => {
+    ctx.signal?.throwIfAborted();
     const representation = representationFor(content.contentType, content.rendered);
     const structure = content.structure ?? detectStructure(content.markdown);
     const withStructure = { ...content, structure };
@@ -308,10 +299,13 @@ export function createWebFetch(deps: WebFetchDeps) {
         { ...(ctx.forceNewSnapshot ? { forceNew: true } : {}) },
       );
       return { ...withStructure, snapshot };
-    } catch {
-      // Snapshot persistence must never fail a body that was fetched
-      // successfully; the result is delivered without a snapshotId.
-      return withStructure;
+    } catch (error) {
+      // Keep fetched bytes, but never present a persistence failure as a pinned
+      // snapshot. The caller's real commit promise has already settled here.
+      return { ...withStructure, snapshotError: {
+        message: error instanceof Error ? error.message : "Snapshot persistence failed",
+        ...(error && typeof error === "object" && "code" in error && typeof error.code === "string" ? { code: error.code } : {}),
+      } };
     }
   };
 
@@ -327,23 +321,24 @@ export function createWebFetch(deps: WebFetchDeps) {
       if (left) return;
       left = true;
       shared.waiters -= 1;
-      if (shared.waiters <= 0 && !shared.done) shared.controller.abort();
+      if (shared.waiters === 0 && !shared.done) shared.controller.abort();
     };
     if (!signal) return shared.promise.finally(leave);
-    if (signal.aborted) {
-      leave();
-      return Promise.reject(signal.reason ?? new DOMException("Web fetch aborted", "AbortError"));
-    }
     return new Promise<FetchResult>((resolve, reject) => {
       const onAbort = (): void => {
         leave();
-        reject(signal.reason ?? new DOMException("Web fetch aborted", "AbortError"));
+        const finish = () => reject(signal.reason ?? new DOMException("Web fetch aborted", "AbortError"));
+        // Other live callers retain a shared producer. The last caller retains
+        // its drain; no cancelled caller ever enters its own material commit.
+        if (shared.waiters === 0 && !shared.done) void shared.promise.then(finish, finish);
+        else finish();
       };
       signal.addEventListener("abort", onAbort, { once: true });
       shared.promise.then(
-        (value) => { leave(); resolve(value); },
-        (error) => { leave(); reject(error); },
+        value => { leave(); if (signal.aborted) onAbort(); else resolve(value); },
+        error => { leave(); reject(signal.aborted ? signal.reason ?? error : error); },
       ).finally(() => signal.removeEventListener("abort", onAbort));
+      if (signal.aborted) onAbort();
     });
   };
 
@@ -352,9 +347,11 @@ export function createWebFetch(deps: WebFetchDeps) {
     outbound?: Awaited<ReturnType<EgressRuntime['prepare']>>,
   ): Promise<FetchResult> => {
     const finishOk = async (content: Extract<FetchResult, { status: "ok" }>): Promise<FetchResult> => {
-      const result = await attachSnapshot(content, ctx);
-      cache.set(cacheKey, { result, expiresAt: Date.now() + cacheTtlMs });
-      return result;
+      // Shared producers cache content only. Material ownership belongs to each
+      // live caller's delivery, never to the first caller captured by this job.
+      ctx.signal?.throwIfAborted();
+      cache.set(cacheKey, { result: content, expiresAt: Date.now() + cacheTtlMs });
+      return content;
     };
 
     // Fetch with redirect handling
@@ -548,7 +545,7 @@ export function createWebFetch(deps: WebFetchDeps) {
             totalSize += value.length;
           }
         }
-        reader.cancel();
+        await reader.cancel();
         const buffer = Buffer.concat(chunks.map((c) => Buffer.from(c)));
         text = buffer.toString("utf-8");
       } else {
@@ -601,7 +598,7 @@ export function createWebFetch(deps: WebFetchDeps) {
 
   const readSnapshot = async (snapshotId: string, request: WebFetchRequest, ctx: FetchContext): Promise<FetchResult> => {
     const found = deps.materials
-      ? await deps.materials.read(ctx.workspaceId, snapshotId, ctx.authority)
+      ? await deps.materials.read(ctx.workspaceId, snapshotId, ctx.authority, ctx.signal ? { signal: ctx.signal } : {})
       : null;
     if (!found) return { status: "snapshot-missing", snapshotId };
     const policyCheck = checkDomainPolicy(found.ref.finalUrl, ctx.workspaceId, ctx.domainPolicy);
@@ -609,30 +606,28 @@ export function createWebFetch(deps: WebFetchDeps) {
     if (found.ref.document?.kind === "pdf") {
       if (!documentReader) return { status: "failed", url: found.ref.finalUrl, reason: "PDF reader is unavailable" };
       const result = await documentReader.read({ ...request, snapshotId }, documentContext(ctx));
-      return result.status === "ok" ? withReceipt(result, ctx.workspaceId, ctx.authority, ctx.issueReceipt === true) : result;
+      return result;
     }
     if (request.view === "page-image") return { status: "page-image-unavailable", snapshotId,
       ...(request.page !== undefined ? { page: request.page } : {}), reason: "snapshot is not a PDF" };
-    let markdown = found.body.toString("utf8");
-    let range: { startLine: number; endLine: number; totalLines: number } | undefined;
-    if (request.position) {
-      const sliced = resolvePosition(markdown, found.ref.structure, request.position, snapshotId);
-      if (!("body" in sliced)) return sliced;
-      markdown = sliced.body;
-      range = sliced.range;
-    }
-    return withReceipt({
+    const selected = selectText(found.body.toString("utf8"), found.ref.structure, request, snapshotId);
+    if (!("body" in selected)) return selected;
+    return {
       status: "ok", url: found.ref.sourceUrl, finalUrl: found.ref.finalUrl,
       contentType: found.ref.contentType ?? "text/markdown",
       ...(found.ref.title ? { title: found.ref.title } : {}),
-      markdown, bytes: found.body.byteLength, fromCache: false, rendered: found.ref.rendered === true,
+      markdown: selected.body, bytes: found.body.byteLength, fromCache: false, rendered: found.ref.rendered === true,
       snapshot: found.ref, ...(found.ref.structure ? { structure: found.ref.structure } : {}),
-      ...(range ? { range } : {}),
-    }, ctx.workspaceId, ctx.authority, ctx.issueReceipt === true);
+      ...(selected.range ? { range: selected.range } : {}),
+    };
   };
 
   const fetchUrl = async (input: WebFetchRequest | string, ctx: FetchContext): Promise<FetchResult> => {
     const request: WebFetchRequest = typeof input === "string" ? { url: input } : input;
+    if (request.position?.kind === "lines" && request.position.endLine !== undefined
+      && request.position.endLine < request.position.startLine) {
+      return { status: "failed", url: request.url ?? "", reason: "endLine must be greater than or equal to startLine" };
+    }
     const snapshotId = request.snapshotId?.trim();
     if (snapshotId) return readSnapshot(snapshotId, request, ctx);
     const url = request.url?.trim() ?? "";
@@ -651,16 +646,17 @@ export function createWebFetch(deps: WebFetchDeps) {
     }
 
     const positionSlice = (result: FetchResult): FetchResult => {
-      if (!request.position || result.status !== "ok") return result;
-      const sliced = resolvePosition(
+      if (result.status !== "ok") return result;
+      const sliced = selectText(
         result.markdown,
         result.structure ?? result.snapshot?.structure,
-        request.position,
+        request,
         result.snapshot?.snapshotId ?? "",
       );
       if (!("body" in sliced)) return sliced;
       const { range: _replacedRange, ...rest } = result;
-      return { ...rest, markdown: sliced.body, bytes: sliced.body.length, range: sliced.range };
+      return { ...rest, markdown: sliced.body, bytes: request.position ? sliced.body.length : result.bytes,
+        ...(sliced.range ? { range: sliced.range } : {}) };
     };
 
     const applyView = (result: FetchResult): FetchResult => request.view === "page-image" && result.status === "ok"
@@ -674,7 +670,7 @@ export function createWebFetch(deps: WebFetchDeps) {
       const resolved = await documentReader.ingest({ source: sourceBytes, sourceUrl: url, finalUrl: result.finalUrl,
         contentType: result.contentType, ...(forceNew ? { forceNew: true } : {}) }, documentContext(ctx), pdfRequest);
       return resolved.status === "ok"
-        ? withReceipt({ ...resolved, fromCache }, ctx.workspaceId, ctx.authority, ctx.issueReceipt === true)
+        ? { ...resolved, fromCache }
         : resolved;
     };
 
@@ -693,29 +689,29 @@ export function createWebFetch(deps: WebFetchDeps) {
             return { status: "blocked", url: cached.result.finalUrl, reason: "domain-blocked" };
           }
           if (cached.sourceBytes) return deliverPdf(cached.result, cached.sourceBytes, false, true);
-          const { receipt: _oldReceipt, ...content } = cached.result;
-          const rebound = await attachSnapshot({ ...content, fromCache: true }, { ...ctx, forceNewSnapshot: false });
-          return applyView(positionSlice(await withReceipt(rebound, ctx.workspaceId, ctx.authority, ctx.issueReceipt === true)));
+          const rebound = await attachSnapshot({ ...cached.result, fromCache: true }, { ...ctx, forceNewSnapshot: false });
+          return applyView(positionSlice(rebound));
         }
         return cached.result;
       }
     }
 
-    const deliver = async (result: FetchResult, rebindSnapshot = true): Promise<FetchResult> => {
+    const deliver = async (result: FetchResult, forceNewSnapshot = false): Promise<FetchResult> => {
+      ctx.signal?.throwIfAborted();
       if (result.status !== "ok") return result;
       // The in-flight/cache result may have been produced under another
-      // session or thread. Rebind the content snapshot to this caller's
+      // Thread. Rebind the content snapshot to this caller's
       // authority while reusing the content-addressed body.
       const sourceBytes = sourceBytesForResult.get(result);
-      if (sourceBytes) return deliverPdf(result, sourceBytes, !rebindSnapshot, false);
-      const rebound = rebindSnapshot ? await attachSnapshot(result, { ...ctx, forceNewSnapshot: false }) : result;
-      return applyView(positionSlice(await withReceipt(rebound, ctx.workspaceId, ctx.authority, ctx.issueReceipt === true)));
+      if (sourceBytes) return deliverPdf(result, sourceBytes, forceNewSnapshot, false);
+      const rebound = await attachSnapshot(result, { ...ctx, forceNewSnapshot });
+      return applyView(positionSlice(rebound));
     };
 
     // A refresh is intentionally a fresh request: it bypasses both the
     // response cache and in-flight sharing so it can mint a new snapshot.
     if (request.refresh) {
-      return deliver(await performFetch(url, { ...ctx, forceNewSnapshot: true }, cacheKey, outbound), false);
+      return deliver(await performFetch(url, ctx, cacheKey, outbound), true);
     }
 
     const sharedKey = `${cacheKey}|${policyKeyFor(ctx.workspaceId, ctx.domainPolicy)}`;

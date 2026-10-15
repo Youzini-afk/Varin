@@ -1,10 +1,16 @@
+import type {} from '../client-auth/request-context.js';
+import type { ThreadSelection } from '../harness/client-surfaces.js';
 import type { Express, Request, RequestHandler, Response } from 'express';
 import { createHash } from 'node:crypto';
-import { createScheduledTaskService } from './service.js';
+import { createScheduledTaskService, ScheduledTaskError } from './service.js';
+import { sourceFailureCode } from '../kernel/source-admission-error.js';
+import { threadSourceFailureMessage } from '@varin/application-client';
+import { KernelClientError } from '../kernel/kernel-error.js';
 
 type ServiceDependencies = Parameters<typeof createScheduledTaskService>[0];
 
 interface ScheduledTaskRouteDependencies extends ServiceDependencies {
+  requireAuth: RequestHandler;
   scheduledTaskService?: ReturnType<typeof createScheduledTaskService>;
 }
 
@@ -18,15 +24,14 @@ export interface VarinEventRouteDependencies {
    * ack route resolves pending client-settings requests.
    */
   surfaceBridge?: {
-    attach(res: Response, surfaceId: string, kind: string, authKey: string, sessionId: string): void;
-    bindSession?(authKey: string, sessionId: string, surfaceId: string): void;
-    consumeSessionBinding?(authKey: string, sessionId: string, surfaceId: string): boolean;
-    isSessionBound?(authKey: string, sessionId: string, surfaceId: string): boolean;
+    attach(res: Response, surfaceId: string, kind: string, authKey: string, identity: ThreadSelection): void;
+    bindThread(authKey: string, identity: ThreadSelection, surfaceId: string): void;
+    consumeThreadBinding(authKey: string, identity: ThreadSelection, surfaceId: string): boolean;
     dropConnection(res: Response): void;
     ack(requestId: string, surfaceId: string, connectionId: string, authKey: string, results: unknown): boolean;
   };
-  /** Resolves a UI supplied selection against the Host's live session registry. */
-  resolveSurfaceSession?: (sessionId: string, authKey: string) => boolean | Promise<boolean>;
+  /** Resolves a UI supplied selection against the Host's authenticated native Catalog. */
+  resolveSurfaceThread?: (identity: ThreadSelection, authKey: string) => boolean | Promise<boolean>;
   resolveAuthContext?: (
     req: Request,
     res: Response,
@@ -48,6 +53,12 @@ const asNonEmptyString = (value: unknown): string | null => {
   return trimmed.length > 0 ? trimmed : null;
 };
 
+const calendarErrorStatus = (error: unknown): number => {
+  if (error instanceof KernelClientError && error.code === 'operation-error' && error.message.startsWith('operation error: conflict:')) return 409;
+  const failure = errorRecord(error);
+  return typeof failure.statusCode === 'number' ? failure.statusCode : 500;
+};
+
 const parseProjectID = (req: Request) => asNonEmptyString(req.params.projectId);
 const parseTaskID = (req: Request) => asNonEmptyString(req.params.taskId);
 
@@ -58,7 +69,7 @@ export const registerVarinEventRoutes = (
     writeSseEvent,
     surfaceBridge,
     requireAuth,
-    resolveSurfaceSession,
+    resolveSurfaceThread,
     resolveAuthContext,
   }: VarinEventRouteDependencies,
 ): void => {
@@ -73,6 +84,7 @@ export const registerVarinEventRoutes = (
     if (context.type === 'session' && typeof context.token === 'string' && context.token) return hash('session', context.token);
     return null;
   };
+  const bindingAttempts = new Map<string, object>();
   app.get('/api/varin/events', requireAuth, async (req, res) => {
     // The auth middleware establishes access, while this context gives the
     // bridge one stable principal. Resolve it before flushing SSE headers so a
@@ -95,7 +107,9 @@ export const registerVarinEventRoutes = (
     // broadcast-only — the host never invents a client identity.
     const surfaceId = asNonEmptyString(req.query?.surface);
     const surfaceKind = asNonEmptyString(req.query?.kind);
-    const selectedSessionId = asNonEmptyString(req.query?.session);
+    const threadId = asNonEmptyString(req.query?.threadId);
+    const branchId = asNonEmptyString(req.query?.branchId);
+    const selection = threadId && branchId ? { threadId, branchId } : null;
     let closed = false;
     try {
       writeSseEvent(res, {
@@ -106,16 +120,14 @@ export const registerVarinEventRoutes = (
       // The client can reconnect and receive the next heartbeat.
     }
     const principal = authKey(req, resolvedAuth);
-    if (surfaceId && surfaceBridge && principal && selectedSessionId && resolveSurfaceSession) {
-      const valid = await resolveSurfaceSession(selectedSessionId, principal)
-        && (surfaceBridge.consumeSessionBinding?.(principal, selectedSessionId, surfaceId)
-          ?? surfaceBridge.isSessionBound?.(principal, selectedSessionId, surfaceId)
-          ?? false);
-      if (!closed && valid) {
-        surfaceBridge.attach(res, surfaceId, surfaceKind ?? 'web', principal, selectedSessionId);
-      }
+    req.once('close', () => { closed = true; clients.delete(res); surfaceBridge?.dropConnection(res); });
+    if (surfaceId && surfaceBridge && principal && selection && resolveSurfaceThread) {
+      const valid = await Promise.resolve(resolveSurfaceThread(selection, principal)).catch(() => false)
+        && surfaceBridge.consumeThreadBinding(principal, selection, surfaceId);
+      if (!closed && valid) surfaceBridge.attach(res, surfaceId, surfaceKind ?? 'web', principal, selection);
     }
 
+    if (closed) return;
     const heartbeat = setInterval(() => {
       try {
         writeSseEvent(res, {
@@ -143,16 +155,25 @@ export const registerVarinEventRoutes = (
         : Promise.resolve(null));
       const principal = authKey(req, resolvedAuth);
       const body = asRecord(req.body) ?? {};
-      const sessionId = asNonEmptyString(body.sessionId);
+      const threadId = asNonEmptyString(body.threadId);
+      const branchId = asNonEmptyString(body.branchId);
+      const selection = threadId && branchId ? { threadId, branchId } : null;
       const surfaceId = asNonEmptyString(body.surfaceId);
-      if (!principal || !sessionId || !surfaceId || !resolveSurfaceSession || !surfaceBridge.bindSession) {
-        return res.status(503).json({ error: 'authenticated surface session binding is unavailable' });
+      if (!selection || !surfaceId || Object.keys(body).some(key => !['threadId', 'branchId', 'surfaceId'].includes(key))) {
+        return res.status(400).json({ error: 'Only a concrete Thread, branch and Surface selection is accepted' });
       }
-      if (!await resolveSurfaceSession(sessionId, principal)) {
-        return res.status(404).json({ error: 'session is not live on this Host' });
+      if (!principal || !selection || !surfaceId || !resolveSurfaceThread || !surfaceBridge.bindThread) {
+        return res.status(503).json({ error: 'authenticated surface Thread binding is unavailable' });
       }
-      surfaceBridge.bindSession(principal, sessionId, surfaceId);
-      return res.json({ ok: true, sessionId, surfaceId });
+      const bindingKey = JSON.stringify([principal, surfaceId]);
+      const attempt = {};
+      bindingAttempts.set(bindingKey, attempt);
+      const valid = await Promise.resolve(resolveSurfaceThread(selection, principal)).catch(() => false);
+      if (bindingAttempts.get(bindingKey) !== attempt) return res.status(409).json({ error: 'Surface selection was superseded' });
+      bindingAttempts.delete(bindingKey);
+      if (!valid) return res.status(404).json({ error: 'Thread branch is unavailable on this Host' });
+      surfaceBridge.bindThread(principal, selection, surfaceId);
+      return res.json({ ok: true, ...selection, surfaceId });
     });
     app.post('/api/varin/client-settings/ack', requireAuth, async (req, res) => {
       const resolvedAuth = req.varinAuth ?? await (resolveAuthContext
@@ -179,9 +200,36 @@ export const registerVarinEventRoutes = (
 export const registerScheduledTaskRoutes = (app: Express, dependencies: ScheduledTaskRouteDependencies): void => {
   const {
     scheduledTaskService = createScheduledTaskService(dependencies),
+    requireAuth,
   } = dependencies;
 
-  app.get('/api/projects/:projectId/scheduled-tasks', async (req, res) => {
+  // Authenticated project scope uses the same source directory as ordinary work, without a temporary Thread.
+  const sourceRequest = (action: (req: Request, projectId: string, signal: AbortSignal) => Promise<unknown>): RequestHandler => async (req, res) => {
+    const projectId = parseProjectID(req);
+    if (!projectId) { res.status(400).json({ error: 'projectId is required' }); return; }
+    const controller = new AbortController();
+    const closed = () => { if (!res.writableEnded) controller.abort(new DOMException('Request closed', 'AbortError')); };
+    res.once('close', closed);
+    try {
+      const result = await action(req, projectId, controller.signal);
+      controller.signal.throwIfAborted();
+      res.json(result);
+    }
+    catch (error) {
+      if (controller.signal.aborted) return;
+      const sourceCode = sourceFailureCode(error);
+      if (sourceCode) res.status(sourceCode === 'source_authority_denied' ? 403 : sourceCode === 'source_registration_missing' ? 404 : 409)
+        .json({ code: sourceCode, error: threadSourceFailureMessage(sourceCode) });
+      else if (error instanceof ScheduledTaskError) res.status(error.statusCode).json({ error: error.message });
+      else res.status(500).json({ error: 'Scheduled task source request failed' });
+    } finally { res.off('close', closed); }
+  };
+  app.get('/api/projects/:projectId/scheduled-tasks/sources', requireAuth,
+    sourceRequest((_req, projectId, signal) => scheduledTaskService.listSources(projectId, signal)));
+  app.post('/api/projects/:projectId/scheduled-tasks/sources/resolve', requireAuth,
+    sourceRequest((req, projectId, signal) => scheduledTaskService.resolveSource(projectId, req.body, signal)));
+
+  app.get('/api/projects/:projectId/scheduled-tasks', requireAuth, async (req, res) => {
     const projectID = parseProjectID(req);
     if (!projectID) {
       return res.status(400).json({ error: 'projectId is required' });
@@ -198,7 +246,7 @@ export const registerScheduledTaskRoutes = (app: Express, dependencies: Schedule
     }
   });
 
-  app.put('/api/projects/:projectId/scheduled-tasks', async (req, res) => {
+  app.put('/api/projects/:projectId/scheduled-tasks', requireAuth, async (req, res) => {
     const projectID = parseProjectID(req);
     if (!projectID) {
       return res.status(400).json({ error: 'projectId is required' });
@@ -225,7 +273,7 @@ export const registerScheduledTaskRoutes = (app: Express, dependencies: Schedule
     }
   });
 
-  app.delete('/api/projects/:projectId/scheduled-tasks/:taskId', async (req, res) => {
+  app.delete('/api/projects/:projectId/scheduled-tasks/:taskId', requireAuth, async (req, res) => {
     const projectID = parseProjectID(req);
     const taskID = parseTaskID(req);
     if (!projectID) {
@@ -245,7 +293,7 @@ export const registerScheduledTaskRoutes = (app: Express, dependencies: Schedule
     }
   });
 
-  app.get('/api/projects/:projectId/scheduled-tasks/:taskId/loop-file', async (req, res) => {
+  app.get('/api/projects/:projectId/scheduled-tasks/:taskId/loop-file', requireAuth, async (req, res) => {
     const projectID = parseProjectID(req);
     const taskID = parseTaskID(req);
     if (!projectID) return res.status(400).json({ error: 'projectId is required' });
@@ -260,7 +308,7 @@ export const registerScheduledTaskRoutes = (app: Express, dependencies: Schedule
     }
   });
 
-  app.put('/api/projects/:projectId/scheduled-tasks/:taskId/loop-file', async (req, res) => {
+  app.put('/api/projects/:projectId/scheduled-tasks/:taskId/loop-file', requireAuth, async (req, res) => {
     const projectID = parseProjectID(req);
     const taskID = parseTaskID(req);
     if (!projectID) return res.status(400).json({ error: 'projectId is required' });
@@ -275,7 +323,7 @@ export const registerScheduledTaskRoutes = (app: Express, dependencies: Schedule
     }
   });
 
-  app.patch('/api/projects/:projectId/scheduled-tasks/:taskId/loop-file', async (req, res) => {
+  app.patch('/api/projects/:projectId/scheduled-tasks/:taskId/loop-file', requireAuth, async (req, res) => {
     const projectID = parseProjectID(req);
     const taskID = parseTaskID(req);
     if (!projectID) return res.status(400).json({ error: 'projectId is required' });
@@ -296,7 +344,7 @@ export const registerScheduledTaskRoutes = (app: Express, dependencies: Schedule
     }
   });
 
-  app.delete('/api/projects/:projectId/scheduled-tasks/:taskId/loop-file', async (req, res) => {
+  app.delete('/api/projects/:projectId/scheduled-tasks/:taskId/loop-file', requireAuth, async (req, res) => {
     const projectID = parseProjectID(req);
     const taskID = parseTaskID(req);
     if (!projectID) return res.status(400).json({ error: 'projectId is required' });
@@ -313,7 +361,7 @@ export const registerScheduledTaskRoutes = (app: Express, dependencies: Schedule
     }
   });
 
-  app.post('/api/projects/:projectId/scheduled-tasks/:taskId/run', async (req, res) => {
+  app.post('/api/projects/:projectId/scheduled-tasks/:taskId/run', requireAuth, async (req, res) => {
     const projectID = parseProjectID(req);
     const taskID = parseTaskID(req);
     if (!projectID) {
@@ -324,16 +372,25 @@ export const registerScheduledTaskRoutes = (app: Express, dependencies: Schedule
     }
 
     try {
-      return res.json({ ok: true, ...await scheduledTaskService.run(projectID, taskID) });
+      return res.json({ ok: true, ...await scheduledTaskService.run(projectID, taskID, req.body?.key) });
     } catch (error) {
       const failure = errorRecord(error);
       if (typeof failure.statusCode === 'number') return res.status(failure.statusCode).json({ error: failure.message, ...(failure.task ? { task: failure.task } : {}) });
       console.error('[ScheduledTasks] failed to run task:', error);
-      return res.status(500).json({ error: 'Failed to run scheduled task' });
+      return res.status(calendarErrorStatus(error)).json({ error: 'Failed to run scheduled task' });
     }
   });
 
-  app.get('/api/varin/scheduled-tasks/status', async (_req, res) => {
+  app.post('/api/projects/:projectId/scheduled-tasks/:taskId/occurrences/:occurrenceId/control', requireAuth, async (req, res) => {
+    try { return res.json(await scheduledTaskService.controlOccurrence(req.params.projectId, req.params.taskId, req.params.occurrenceId, req.body?.expectedRevision, req.body?.action)); }
+    catch (error) { return res.status(calendarErrorStatus(error)).json({ error: error instanceof Error ? error.message : 'Calendar occurrence control failed' }); }
+  });
+  app.post('/api/projects/:projectId/scheduled-tasks/:taskId/calculation/retry', requireAuth, async (req, res) => {
+    try { return res.json(await scheduledTaskService.retryCalculation(req.params.projectId, req.params.taskId, req.body?.expectedRevision)); }
+    catch (error) { return res.status(calendarErrorStatus(error)).json({ error: error instanceof Error ? error.message : 'Calendar calculation retry failed' }); }
+  });
+
+  app.get('/api/varin/scheduled-tasks/status', requireAuth, async (_req, res) => {
     try {
       return res.json(await scheduledTaskService.globalStatus());
     } catch (error) {

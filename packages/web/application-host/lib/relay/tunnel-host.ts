@@ -84,7 +84,6 @@ const isAllowedHttpPath = (pathname: string): boolean =>
   || pathname.startsWith('/auth/');
 
 const ALLOWED_WS_PATHS = new Set([
-  '/api/varin/runtime/ws',
   '/api/terminal/ws',
   '/api/dictation/ws',
 ]);

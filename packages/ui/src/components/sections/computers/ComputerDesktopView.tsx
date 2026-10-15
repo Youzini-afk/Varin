@@ -1,3 +1,5 @@
+import { getRuntimeEndpointGeneration, subscribeRuntimeEndpointChanged } from '@varin/application-client';
+import { computerErrorText } from '@/lib/computerErrors';
 import React from 'react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
@@ -7,7 +9,7 @@ import {
   sendDesktopInput,
   subscribeDesktopStream,
   takeoverDesktop,
-  stopComputerAutomation,
+  stopDesktopComputerWork,
   type DesktopStreamEvent,
 } from '@/lib/computers';
 import type { ComputerControlState, ComputerDesktop, ComputerDesktopFrame } from '@varin/protocol';
@@ -24,11 +26,18 @@ const newViewerId = () => `viewer-${Math.random().toString(36).slice(2)}-${Date.
  * dialog. Unmounting closes only this subscription — never the task.
  */
 export function ComputerDesktopPane({ desktop }: { desktop: ComputerDesktop }) {
+  const host = React.useSyncExternalStore(subscribeRuntimeEndpointChanged, getRuntimeEndpointGeneration, getRuntimeEndpointGeneration);
+  return <ComputerDesktopPaneView key={JSON.stringify([host, desktop.id])} desktop={desktop} />;
+}
+
+function ComputerDesktopPaneView({ desktop }: { desktop: ComputerDesktop }) {
   const { t } = useI18n();
   const [viewerId] = React.useState(newViewerId);
   const [frameUrl, setFrameUrl] = React.useState<string | null>(null);
   const [frame, setFrame] = React.useState<ComputerDesktopFrame | null>(null);
   const [control, setControl] = React.useState<ComputerControlState | null>(null);
+  const controlRevision = React.useRef(0);
+  const connected = React.useRef(false);
   const [streamError, setStreamError] = React.useState<string | null>(null);
   const [inputError, setInputError] = React.useState<string | null>(null);
   const [busy, setBusy] = React.useState(false);
@@ -48,6 +57,7 @@ export function ComputerDesktopPane({ desktop }: { desktop: ComputerDesktop }) {
   const pointers = React.useRef(new Map<number, { x: number; y: number; button: 'left' | 'right' | 'middle' }>());
 
   React.useEffect(() => {
+    connected.current = true;
     setFrameUrl(null);
     setFrame(null);
     setControl(null);
@@ -66,6 +76,7 @@ export function ComputerDesktopPane({ desktop }: { desktop: ComputerDesktop }) {
           // The next gesture may arrive in this same SSE batch, before React
           // commits the new control owner. Update the imperative fence now.
           feedback.current?.setEnabled(event.control.owner === 'agent');
+          controlRevision.current += 1;
           setControl(event.control);
         } else if (event.type === 'gesture') {
           feedback.current?.show(event.gesture);
@@ -78,6 +89,7 @@ export function ComputerDesktopPane({ desktop }: { desktop: ComputerDesktop }) {
     };
     source.onerror = () => setStreamError(t('settings.computers.view.streamLost'));
     return () => {
+      connected.current = false;
       inputGeneration.current += 1;
       // Closing the page closes only this subscription — never the task.
       source.close();
@@ -91,41 +103,24 @@ export function ComputerDesktopPane({ desktop }: { desktop: ComputerDesktop }) {
   React.useEffect(() => { pointers.current.clear(); }, [control?.automationEpoch]);
   const controlPending = control?.owner === 'human' && control.holderId !== viewerId;
 
-  const takeover = async () => {
-    setBusy(true);
-    setInputError(null);
-    try {
-      const result = await takeoverDesktop(desktop.id, viewerId);
-      setControl(result.control);
-      setStreamError(null);
-    } catch (cause) {
-      setInputError(cause instanceof Error ? cause.message : String(cause));
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const handback = async () => {
-    setBusy(true);
-    setInputError(null);
-    try {
-      const result = await handbackDesktop(desktop.id, viewerId);
-      setControl(result.control);
-    } catch (cause) {
-      setInputError(cause instanceof Error ? cause.message : String(cause));
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const cancelWork = async () => {
-    const sessionId = control?.operator?.rootSessionId;
-    if (!sessionId) return;
+  const changeControl = async (request: () => Promise<{ control: ComputerControlState }>, clearStreamError = false) => {
+    const revision = controlRevision.current;
+    const host = getRuntimeEndpointGeneration();
+    const current = () => connected.current && host === getRuntimeEndpointGeneration() && revision === controlRevision.current;
     setBusy(true); setInputError(null);
-    try { await stopComputerAutomation(sessionId, desktop.id); }
-    catch (cause) { setInputError(cause instanceof Error ? cause.message : String(cause)); }
-    finally { setBusy(false); }
+    try {
+      const result = await request();
+      if (current()) {
+        controlRevision.current += 1;
+        setControl(result.control);
+        if (clearStreamError) setStreamError(null);
+      }
+    } catch (cause) { if (current()) setInputError(computerErrorText(cause, t)); }
+    finally { if (connected.current && host === getRuntimeEndpointGeneration()) setBusy(false); }
   };
+  const takeover = () => changeControl(() => takeoverDesktop(desktop.id, viewerId), true);
+  const handback = () => changeControl(() => handbackDesktop(desktop.id, viewerId));
+  const cancelWork = () => control ? changeControl(() => stopDesktopComputerWork(desktop.id, control.automationEpoch)) : Promise.resolve();
 
   /** Translate a pointer event on the image into absolute desktop pixels. */
   const pointFor = (event: React.MouseEvent): { x: number; y: number } | null => {
@@ -144,12 +139,12 @@ export function ComputerDesktopPane({ desktop }: { desktop: ComputerDesktop }) {
       if (!result.accepted) throw new Error(result.detail ?? 'Desktop input was not accepted');
       return true;
     }).catch((cause) => {
-      setInputError(cause instanceof Error ? cause.message : String(cause));
+      setInputError(computerErrorText(cause, t));
       return false;
     });
     inputTail.current = pending;
     return pending;
-  }, [canInput, mayRelease, desktop.id, viewerId, control?.automationEpoch]);
+  }, [canInput, mayRelease, desktop.id, viewerId, control?.automationEpoch, t]);
 
   React.useEffect(() => {
     if (!useVnc || vncStatus === 'connected' || !mayRelease) return;
@@ -216,7 +211,7 @@ export function ComputerDesktopPane({ desktop }: { desktop: ComputerDesktop }) {
 
   return (
     <div className="flex flex-col gap-3 min-h-0">
-      {control && (control.operator || control.owner === 'human' || control.transitioning) ? <div className="order-2 flex items-center justify-center gap-3 rounded-xl bg-muted/30 px-3 py-2">
+      {control && (control.operator || control.owner === 'human' || control.transitioning || control.workStatus === 'cancel-unconfirmed' || control.workStatus === 'cancelling') ? <div className="order-2 flex items-center justify-center gap-3 rounded-xl bg-muted/30 px-3 py-2">
         <span className="typography-meta text-muted-foreground" data-control={control?.owner ?? 'unknown'}>
           {control?.workStatus === 'cancelling' ? t('computer.automation.cancelling') : control?.workStatus === 'cancel-unconfirmed' ? t('computer.automation.cancel-unconfirmed') : controlLabel}
           {control?.operator && control.activity?.app ? ` · ${control.activity.app}` : ''}
@@ -224,7 +219,7 @@ export function ComputerDesktopPane({ desktop }: { desktop: ComputerDesktop }) {
           {control && control.owner === 'human' && !control.reachable ? ` — ${t('settings.computers.view.control.reconnecting')}` : ''}
         </span>
         <div className="flex items-center gap-2">
-          {control?.operator ? <Button size="sm" variant="ghost" disabled={busy || control.workStatus === 'cancelling'} onClick={() => void cancelWork()}>{t('computer.automation.stop')}</Button> : null}
+          {control?.operator || control?.workStatus === 'cancel-unconfirmed' || control?.workStatus === 'cancelling' ? <Button size="sm" variant="ghost" disabled={busy || control.workStatus === 'cancelling'} onClick={() => void cancelWork()}>{t('computer.automation.stop')}</Button> : null}
           {control?.owner === 'agent' ? (
             <Button size="sm" disabled={busy || control.transitioning} onClick={() => { void takeover(); }}>
               {t('settings.computers.view.takeover')}
@@ -244,6 +239,7 @@ export function ComputerDesktopPane({ desktop }: { desktop: ComputerDesktop }) {
       </div> : null}
       {streamError ? <p role="alert" className="typography-meta text-destructive">{streamError}</p> : null}
       {useVnc && vncStatus === 'disconnected' ? <p role="alert" className="typography-meta text-destructive">{t('settings.computers.view.streamLost')}</p> : null}
+      {control?.workStatus === 'cancel-unconfirmed' ? <p role="status" className="typography-micro text-muted-foreground">{t('computer.automation.error.releaseUnconfirmed')}</p> : null}
       {inputError ? <p role="alert" className="typography-meta text-destructive">{inputError}</p> : null}
       <div className="relative rounded-lg border border-border/60 bg-black/80 overflow-hidden flex items-center justify-center min-h-[240px]">
         {useVnc ? <div {...inputHandlers} className="h-[60vh] w-full select-none touch-none" aria-label={desktop.label}>
@@ -261,7 +257,7 @@ export function ComputerDesktopPane({ desktop }: { desktop: ComputerDesktop }) {
           <p role="status" className="typography-meta text-muted-foreground p-8">{t('settings.computers.view.waiting')}</p>
         )}
         <ComputerFeedback ref={feedback} bounds={frame?.bounds} upscale={useVnc} disabled={control?.owner !== 'agent' || Boolean(streamError)} />
-        {control?.owner === 'agent' && !control.operator && !control.transitioning ? <Button className="absolute right-2 top-2" size="sm" variant="secondary" disabled={busy} onClick={() => void takeover()}>{t('settings.computers.view.takeover')}</Button> : null}
+        {control?.owner === 'agent' && !control.operator && !control.transitioning && control.workStatus !== 'cancelling' && control.workStatus !== 'cancel-unconfirmed' ? <Button className="absolute right-2 top-2" size="sm" variant="secondary" disabled={busy} onClick={() => void takeover()}>{t('settings.computers.view.takeover')}</Button> : null}
       </div>
       {weHoldControl ? (
         <form className="order-3 flex gap-2" onSubmit={(event) => {

@@ -1,4 +1,3 @@
-import type { AgentInputContext } from "@varin/protocol";
 import type { KernelComputeInput, KernelComputeOptions, KernelComputeResult } from "../kernel/compute-runner.js";
 
 export type StructureProviderId = "lsp" | "tree-sitter";
@@ -42,8 +41,6 @@ export interface StructureOutlineRequest {
   text: string;
   revision: string;
   workspaceId?: string;
-  sessionId?: string;
-  inputContext?: AgentInputContext;
   signal?: AbortSignal;
   /** Hit lines used to detect an uncovered gap before consulting a later provider. */
   hitLines?: number[];
@@ -145,6 +142,7 @@ export interface StructureImportsResult {
 }
 
 export interface StructureProvider {
+  unitsRecipe?(request: Pick<StructureOutlineRequest, "languageId" | "path" | "workspaceId">): Promise<string | undefined>;
   analyze?(request: StructureClassifyRequest): Promise<StructureAnalysis>;
   analyzeFile?(request: StructureFileRequest): Promise<StructureAnalysis>;
   units?(request: StructureOutlineRequest): Promise<StructureUnitsResult>;
@@ -159,6 +157,7 @@ export interface StructureProvider {
 }
 
 export interface StructureSource {
+  unitsRecipe?(request: Pick<StructureOutlineRequest, "languageId" | "path" | "workspaceId">): Promise<string | undefined>;
   analyze?(request: StructureClassifyRequest): Promise<StructureAnalysis>;
   analyzeFile?(request: StructureFileRequest): Promise<StructureAnalysis>;
   units?(request: StructureOutlineRequest): Promise<StructureUnitsResult>;

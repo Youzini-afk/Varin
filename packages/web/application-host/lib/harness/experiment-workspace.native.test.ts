@@ -48,9 +48,7 @@ async function fixture() {
   const caller: ExperimentWorkspaceCaller = {
     workspaceId: "experiment-workspace",
     executionWorkspaceId: "experiment-workspace-execution",
-    sessionId: "experiment-session",
-    threadId: "experiment-thread",
-    runId: "experiment-run",
+    owner: { runtime: "agent", threadId: "experiment-thread", runId: "experiment-run", operationId: "experiment-operation" },
   };
   return { root, source, storageRoot, client, caller };
 }
@@ -61,9 +59,9 @@ it("freezes the source before queue time and records the actual capture semantic
   await fs.writeFile(path.join(f.source, ".gitignore"), "ignored.txt\n");
   await fs.writeFile(path.join(f.source, "ignored.txt"), "still captured\n");
   const input = await prepareExperimentInput(f.client, f.caller, f.source, { captureScopes: [], cwd: "nested" });
-  assert.equal(input.captureSemantics.gitignore, "not-applied");
-  assert.equal(input.captureSemantics.ignoredFilesIncluded, true);
-  assert.deepEqual(input.captureSemantics.excludedDirectories, [".git", ".varin"]);
+  assert.equal(input.captureSemantics!.gitignore, "not-applied");
+  assert.equal(input.captureSemantics!.ignoredFilesIncluded, true);
+  assert.deepEqual(input.captureSemantics!.excludedDirectories, [".git", ".varin"]);
 
   // This is the live source changing while a queued attempt waits. The
   // materializer must use input.root, never the source path again.

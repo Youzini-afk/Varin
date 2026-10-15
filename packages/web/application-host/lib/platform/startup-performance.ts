@@ -2,12 +2,9 @@ const ENABLED_VALUES = new Set(['1', 'true']);
 const ALLOWED_PHASES = new Set([
   'web.pipeline.start',
   'web.listener.ready',
-  'pi-runtime.warmup.start',
-  'pi-runtime.warmup.ready',
-  'pi-runtime.warmup.error',
 ]);
 const ALLOWED_OUTCOMES = new Set(['ready', 'timeout', 'aborted', 'error']);
-const ALLOWED_ROUTE_CLASSES = new Set(['session-messages', 'session', 'events', 'other']);
+const ALLOWED_ROUTE_CLASSES = new Set(['thread-messages', 'thread', 'events', 'other']);
 
 const finiteNonNegative = (value: unknown): number | undefined => (
   typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : undefined

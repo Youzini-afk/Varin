@@ -14,7 +14,9 @@ export interface DesktopNotificationDetail {
   directory: string | null;
   kind: string;
   requireHidden: boolean;
-  sessionId: string | null;
+  threadId: string | null;
+  branchId: string | null;
+  sourceUrl: string;
   tag: string;
   title: string;
 }
@@ -297,7 +299,9 @@ export class NotificationListener {
       this.#onNotification({
         title: typeof props.title === 'string' && props.title ? props.title : 'Varin',
         body: typeof props.body === 'string' ? props.body : '',
-        sessionId: typeof props.sessionId === 'string' ? props.sessionId : null,
+        threadId: typeof props.threadId === 'string' ? props.threadId : null,
+        branchId: typeof props.branchId === 'string' ? props.branchId : null,
+        sourceUrl: this.#serverUrl,
         directory: typeof props.directory === 'string' ? props.directory : null,
         tag: typeof props.tag === 'string' ? props.tag : '',
         requireHidden: Boolean(props.requireHidden ?? props.require_hidden),

@@ -1,16 +1,12 @@
+import { useThreadStore } from '@/stores/useThreadStore';
 import React from 'react';
 import { agentScopeKey, personalizeAgentSystemPrompt, renderAgentSystemPrompt, splitAgentSystemPrompt,
-  type AgentMemoryScope, type AgentSystemPromptSnapshot, type RuntimeContextTarget } from '@varin/protocol';
-import { getRuntimeKey, projectContainsPath } from '@varin/application-client';
+  type AgentMemoryScope, type AgentMemoryNote, type AgentSystemPromptSnapshot } from '@varin/protocol';
+import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import { SettingsPageLayout } from '@/components/sections/shared/SettingsPageLayout';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { useI18n } from '@/lib/i18n';
-import { getPiRuntimeConnection } from '@/lib/pi-runtime/client';
-import { usePiSessionStore } from '@/stores/usePiSessionStore';
-import { useProjectsStore } from '@/stores/useProjectsStore';
-import { useDirectoryStore } from '@/stores/useDirectoryStore';
-import { useBotSessionIndex, regularPiSessions } from '@/stores/useBotSessionIndex';
 import { AgentScopePicker } from './AgentScopePicker';
 import { useAgentSettings } from './agentSettings';
 
@@ -19,7 +15,7 @@ const presetText = {
   style: ['', 'Use direct, plain language and concrete wording.', 'Write naturally and conversationally.', 'Use a precise, professional tone.'],
   autonomy: ['', 'For open-ended work, discuss the approach before beginning implementation.', 'Complete clearly authorized tasks autonomously; ask when a consequential decision needs the user.', 'Proactively advance authorized work, make reasonable implementation decisions and continue through verification.'],
 } as const;
-const generated = (name: string) => name === 'cwd' || name === 'skills' || name === 'project_context' || name.startsWith('agent_memory_');
+const generated = (name: string) => ['runtime_identity', 'child_profile', 'cwd', 'skills', 'project_context', 'workspace_instructions', 'append_system'].includes(name) || name.startsWith('agent_memory_');
 const editable = (sections: Record<string, string>) => Object.fromEntries(Object.entries(sections).filter(([name]) => !generated(name)));
 
 export function AgentPromptPage() {
@@ -33,39 +29,38 @@ export function AgentPromptPage() {
   const revision = React.useRef(0);
   const editOriginal = React.useRef<Record<string, string>>({});
   const [saved, setSaved] = React.useState(false);
-  const currentSessionId = usePiSessionStore(state => state.currentSessionId);
-  const summaries = usePiSessionStore(state => state.summaries);
-  const botIndex = useBotSessionIndex();
-  const regularSessions = regularPiSessions(summaries, botIndex, getRuntimeKey());
-  const projects = useProjectsStore(state => state.projects);
-  const directory = useDirectoryStore(state => state.currentDirectory);
-  const sessionId = scope.kind === 'session' ? scope.id : regularSessions.find(session => session.id === currentSessionId)?.id;
-  const open = usePiSessionStore(state => !!sessionId && !!state.records[sessionId]?.open);
-  const cwd = scope.kind === 'project' ? projects.find(project => project.id === scope.id)?.path ?? directory
-    : summaries.find(session => session.id === sessionId)?.cwd ?? directory;
-  const projectId = scope.kind === 'project' ? scope.id : projects.find(project => projectContainsPath(project, cwd))?.id;
-  const target = React.useMemo<RuntimeContextTarget>(() => scope.kind !== 'project' && sessionId && open ? { sessionId } : { cwd }, [scope.kind, sessionId, open, cwd]);
-  const targetKey = JSON.stringify([settings.runtime, target]);
-  const reload = React.useCallback(async () => {
-    const { client } = await getPiRuntimeConnection();
-    return client.request('session.systemPrompt', target);
-  }, [target]);
+  const { threads: runtime } = useRuntimeAPIs();
+  const selected = useThreadStore(state => state.selectedIdentity);
+  const summaries = useThreadStore(state => state.threads);
+  const regularThreads = summaries.filter(thread => !thread.bot_id);
+  const thread = scope.kind === 'thread' ? regularThreads.find(thread => thread.thread_id === scope.id)
+    : scope.kind === 'project' ? regularThreads.find(thread => thread.observer_project_ids.includes(scope.id))
+    : regularThreads.find(thread => thread.thread_id === selected?.threadId) ?? regularThreads[0];
+  const threadId = thread?.thread_id;
+  const branchId = thread?.branches.find(branch => branch.branch_id === selected?.branchId)?.branch_id ?? thread?.branches[0]?.branch_id;
+  const projectId = scope.kind === 'project' ? scope.id : snapshot?.personalization.projectId;
+  const targetKey = JSON.stringify([settings.runtime, threadId, branchId]);
+  const reload = React.useCallback(async (): Promise<AgentSystemPromptSnapshot | null> => {
+    if (!runtime || !threadId || !branchId) return null;
+    const view = await runtime.snapshot({ runtime: 'agent', threadId: threadId, branchId });
+    const checkpoint = view.context.checkpoint;
+    const basis = checkpoint?.personalization;
+    if (!checkpoint || !basis) return null;
+    if (basis.threadId !== threadId || basis.mode !== 'agent') throw new Error('This Thread does not own ordinary assistant instructions');
+    const original = Object.fromEntries(basis.originalSections.map(section => [section.name, section.content]));
+    return { threadId, mode: 'agent', original, sections: splitAgentSystemPrompt(checkpoint.proposal.effective_system_prompt),
+      content: checkpoint.proposal.effective_system_prompt,
+      personalization: { mode: 'agent', revision: basis.revision, threadId, threadRole: basis.threadRole as 'main' | 'worker' | 'read-only',
+        ...(basis.projectId ? { projectId: basis.projectId } : {}), profiles: [], memories: basis.memorySnapshot.memories as AgentMemoryNote[] },
+      memorySnapshot: { revision: basis.memorySnapshot.revision, threadId, ...(basis.projectId ? { projectId: basis.projectId } : {}), memories: basis.memorySnapshot.memories as AgentMemoryNote[] } };
+  }, [runtime, threadId, branchId]);
   React.useEffect(() => {
     let active = true;
-    let unsubscribe: (() => void) | undefined;
     setSnapshot(null); setDirty(false); setError(null);
-    const refresh = () => void reload().then(value => { if (active) { setSnapshot(value); setError(null); } })
+    void reload().then(value => { if (active) { setSnapshot(value); setError(null); } })
       .catch(failure => { if (active) setError(failure instanceof Error ? failure.message : String(failure)); });
-    refresh();
-    void getPiRuntimeConnection().then(({ client }) => {
-      if (!active) return;
-      unsubscribe = client.subscribe(event => {
-        if (event.event === 'agent.event' && event.data.sessionId === sessionId
-          && (event.data.event.type === 'message_start' || event.data.event.type === 'agent_end')) refresh();
-      });
-    }).catch(() => undefined);
-    return () => { active = false; unsubscribe?.(); };
-  }, [reload, targetKey, sessionId]);
+    return () => { active = false; };
+  }, [reload, targetKey]);
   const profile = settings.catalog?.prompts[agentScopeKey(scope)];
   const original = React.useMemo(() => editable(snapshot?.original ?? {}), [snapshot]);
   const stored = React.useMemo(() => {
@@ -80,11 +75,11 @@ export function AgentPromptPage() {
     if (draftSections[name] !== editOriginal.current[name]) overrides[name] = draftSections[name] ?? null;
   }
   const scopes: AgentMemoryScope[] = [{ kind: 'global' }, ...(projectId ? [{ kind: 'project' as const, id: projectId }] : []),
-    ...(sessionId ? [{ kind: 'session' as const, id: sessionId }] : [])];
+    ...(threadId ? [{ kind: 'thread' as const, id: threadId }] : [])];
   const activeKeys = new Set(scopes.map(agentScopeKey));
   const preview = snapshot ? renderAgentSystemPrompt(personalizeAgentSystemPrompt(snapshot.original, {
     mode: snapshot.mode, revision: snapshot.memorySnapshot?.revision ?? settings.catalog?.revision ?? 0,
-    threadRole: snapshot.personalization.threadRole, sessionId: sessionId ?? snapshot.sessionId,
+    threadRole: snapshot.personalization.threadRole, threadId: threadId ?? snapshot.threadId,
     profiles: scopes.map(owner => ({ scope: owner, profile: agentScopeKey(owner) === agentScopeKey(scope)
       ? { sections: overrides } : settings.catalog?.prompts[agentScopeKey(owner)] ?? { sections: {} } })),
     memories: snapshot.memorySnapshot?.memories ?? settings.catalog?.memories.filter(note => activeKeys.has(agentScopeKey(note.scope))) ?? [],
@@ -104,18 +99,18 @@ export function AgentPromptPage() {
       }} />
       <div className="min-w-0 space-y-4">
         {error || settings.error ? <div role="alert" className="text-destructive typography-meta">{error || settings.error}</div> : null}
-        {!snapshot ? <p role="status">{error ? t('assistant.prompt.unavailable') : t('common.loading')}</p> : null}
+        {!snapshot ? <p role="status">{t('assistant.prompt.unavailable')}</p> : null}
         <Textarea value={draft} onChange={event => { setDraft(event.target.value); setDirty(true); setSaved(false); }}
-          aria-label={t('assistant.prompt.editor')} rows={16} disabled={!snapshot || settings.busy || snapshot.mode === 'bot'}
+          aria-label={t('assistant.prompt.editor')} rows={16} disabled={settings.busy || scope.kind === 'thread' && !snapshot}
           className="min-h-80 resize-y font-mono text-sm leading-6" />
         <div className="flex flex-wrap items-center justify-between gap-2">
           <span role="status" className="typography-meta text-muted-foreground">{dirty ? t('assistant.unsaved') : saved ? t('assistant.saved') : t('assistant.prompt.nextRequest')}</span>
           <div className="flex gap-2"><Button variant="ghost" disabled={!profile || settings.busy} onClick={() => void save(true)}>{t('assistant.prompt.reset')}</Button>
-            <Button disabled={!dirty || !snapshot || settings.busy || snapshot.mode === 'bot'} onClick={() => void save()}>{t('assistant.save')}</Button></div>
+            <Button disabled={!dirty || settings.busy || scope.kind === 'thread' && !snapshot} onClick={() => void save()}>{t('assistant.save')}</Button></div>
         </div>
         <div className="grid gap-3 border-t pt-4 sm:grid-cols-3">{(['density', 'style', 'autonomy'] as const).map(key => <label key={key} className="space-y-1.5 typography-meta">
           <span>{t(`assistant.preset.${key}`)}</span>
-          <select className="w-full rounded-md border bg-background p-2" disabled={!snapshot || settings.busy || snapshot.mode === 'bot'}
+          <select className="w-full rounded-md border bg-background p-2" disabled={settings.busy || scope.kind === 'thread' && !snapshot}
             value={presetText[key].findIndex(value => value === (draftSections[`preference_${key}`] ?? ''))}
             onChange={event => {
               const next = { ...draftSections }; const value = presetText[key][Number(event.target.value)];

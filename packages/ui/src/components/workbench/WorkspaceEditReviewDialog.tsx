@@ -113,7 +113,7 @@ export const WorkspaceEditReviewDialog: React.FC = () => {
           <nav className="w-56 shrink-0 overflow-y-auto rounded-md border border-border/70 p-1" aria-label={t('filesView.workspaceEdit.files')}>
             {request.preview.files.map((file, index) => (
               <button
-                key={`${file.identity.workspaceId}:${file.identity.resourceId}`}
+                key={`${index}:${file.identity.workspaceId}:${file.identity.resourceId}`}
                 type="button"
                 className={cn(
                   'flex w-full flex-col rounded px-2 py-1.5 text-left hover:bg-interactive-hover',
@@ -121,7 +121,9 @@ export const WorkspaceEditReviewDialog: React.FC = () => {
                 )}
                 onClick={() => setSelectedIndex(index)}
               >
-                <span className="truncate typography-ui-label text-foreground">{file.identity.resourceId}</span>
+                <span className="truncate typography-ui-label text-foreground">{file.from ? `${file.from.resourceId} → ` : ''}{file.identity.resourceId}</span>
+                {file.kind && file.kind !== 'text' ? <span className="typography-meta text-muted-foreground">{t(`filesView.workspaceEdit.operation.${file.kind}`)}</span> : null}
+                {file.affectsDraft && file.kind !== 'text' ? <span className="typography-meta text-warning">{t('filesView.workspaceEdit.draftAffected')}</span> : null}
                 <span className="typography-meta text-muted-foreground">
                   {file.editCount === 1
                     ? t('filesView.workspaceEdit.editCountSingle', { count: file.editCount })
@@ -138,6 +140,10 @@ export const WorkspaceEditReviewDialog: React.FC = () => {
                   {full ? t('filesView.workspaceEdit.showFocused') : t('filesView.workspaceEdit.showFull')}
                 </Button>
               </div>
+              {selected.annotationIds?.map(id => {
+                const annotation = request.preview.changeAnnotations?.[id];
+                return annotation ? <p key={id} className="typography-meta text-muted-foreground">{annotation.label}{annotation.description ? `: ${annotation.description}` : ''}</p> : null;
+              })}
               <div className="flex min-h-0 flex-1 gap-2 max-lg:flex-col">
                 <CodePreview content={selected.beforeContent} other={selected.afterContent} full={full} label={t('filesView.workspaceEdit.before')} />
                 <CodePreview content={selected.afterContent} other={selected.beforeContent} full={full} label={t('filesView.workspaceEdit.after')} />

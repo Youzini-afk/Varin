@@ -5,62 +5,17 @@ import type fsPromisesModule from 'node:fs/promises';
 import type pathModule from 'node:path';
 
 const PROJECT_CONFIG_VERSION = 1;
-const MAX_LAST_ERROR_LENGTH = 2_000;
-const PI_THINKING_LEVELS = new Set(['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max']);
+const THINKING_LEVELS = new Set(['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max']);
 
-export type ScheduledTaskStatus = 'error' | 'idle' | 'running' | 'success';
-
-export interface ScheduledTaskSchedule {
-  cron?: string;
-  date?: string;
-  kind: 'cron' | 'daily' | 'once' | 'weekly';
-  time?: string;
-  times?: string[];
-  timezone: string;
-  weekdays?: number[];
-}
-
-export interface ScheduledTaskExecution {
-  agent?: string;
-  goalTokenBudget?: number;
-  modelID: string;
-  prompt: string;
-  providerID: string;
-  runAsGoal?: true;
-  thinkingLevel?: string;
-}
-
-export interface ScheduledTaskState {
-  createdAt: number;
-  lastDurationMs?: number;
-  lastError?: string;
-  lastRunAt?: number;
-  lastSessionId?: string;
-  lastStatus: ScheduledTaskStatus;
-  nextRunAt?: number;
-  updatedAt: number;
-}
-
-export interface ScheduledTask {
-  enabled: boolean;
-  execution: ScheduledTaskExecution;
-  id: string;
-  loopError?: string;
-  loopFile?: string;
-  loopRevision?: string;
-  loopScope?: 'project' | 'user';
-  loopShadowed?: true;
-  name: string;
-  schedule: ScheduledTaskSchedule;
-  state: ScheduledTaskState;
-}
+import type { ScheduledTask, ScheduledTaskExecution, ScheduledTaskSchedule, ScheduledTaskState } from '@varin/application-client';
+import type { CalendarSource, CalendarTarget, SourceResourceOwner } from '@varin/protocol';
+export type { ScheduledTask, ScheduledTaskExecution, ScheduledTaskSchedule, ScheduledTaskState } from '@varin/application-client';
 
 interface NormalizedLoopInput {
   definition: Record<string, unknown> | null;
   effectiveName: string | null;
   error: string | null;
   filePath: string;
-  name: string | null;
   revision: string | null;
   scope: 'project' | 'user' | undefined;
 }
@@ -83,6 +38,7 @@ interface NormalizeTaskOptions {
   existingTask: ScheduledTask | null;
   now: number;
   refreshUpdatedAt?: boolean;
+  persisted?: boolean;
 }
 
 const asRecord = (value: unknown): Record<string, unknown> | null => (
@@ -119,20 +75,6 @@ const asNonEmptyString = (value: unknown): string | null => {
   }
   const trimmed = value.trim();
   return trimmed.length > 0 ? trimmed : null;
-};
-
-const clampLength = (value: unknown, maxLength: number): string => {
-  if (typeof value !== 'string') {
-    return '';
-  }
-  return value.length > maxLength ? value.slice(0, maxLength) : value;
-};
-
-const normalizeStatus = (value: unknown): ScheduledTaskStatus => {
-  if (value === 'running' || value === 'success' || value === 'error' || value === 'idle') {
-    return value;
-  }
-  return 'idle';
 };
 
 const normalizeTimeValue = (value: unknown): string | null => {
@@ -197,9 +139,9 @@ const resolveScheduleTimes = (value: Record<string, unknown>, existingSchedule?:
     }
   }
 
-  const legacySingleTime = normalizeTimeValue(value?.time);
-  if (legacySingleTime) {
-    times.push(legacySingleTime);
+  const singleTime = normalizeTimeValue(value?.time);
+  if (singleTime) {
+    times.push(singleTime);
   }
 
   if (times.length === 0 && Array.isArray(existingSchedule?.times)) {
@@ -310,84 +252,76 @@ const normalizeSchedule = (value: unknown, existingSchedule?: ScheduledTaskSched
   return { kind, cron, timezone };
 };
 
-const normalizeExecution = (value: unknown): ScheduledTaskExecution => {
+/** External assets without an explicit source retain their project-owned source intent. */
+const normalizeCalendarSource = (value: unknown): CalendarSource => {
+  if (value === undefined) return { kind: 'project' };
   const source = asRecord(value);
-  if (!source) {
-    throw new Error('execution is required');
-  }
-
-  const prompt = asNonEmptyString(source.prompt) || '';
-  const providerID = asNonEmptyString(source.providerID);
-  const modelID = asNonEmptyString(source.modelID);
-  const requestedThinkingLevel = asNonEmptyString(source.thinkingLevel);
-  const thinkingLevel = requestedThinkingLevel && PI_THINKING_LEVELS.has(requestedThinkingLevel)
-    ? requestedThinkingLevel
-    : undefined;
-  const runAsGoal = source.runAsGoal === true;
-  const agent = asNonEmptyString(source.agent);
-  const rawGoalTokenBudget = source.goalTokenBudget;
-  if (rawGoalTokenBudget !== undefined && !runAsGoal) {
-    throw new Error('execution.goalTokenBudget requires execution.runAsGoal');
-  }
-  if (rawGoalTokenBudget !== undefined && (
-    typeof rawGoalTokenBudget !== 'number'
-    || !Number.isSafeInteger(rawGoalTokenBudget)
-    || rawGoalTokenBudget <= 0
-  )) {
-    throw new Error('execution.goalTokenBudget must be a positive integer');
-  }
-  const goalTokenBudget = typeof rawGoalTokenBudget === 'number' ? rawGoalTokenBudget : undefined;
-
-  if (!prompt) {
-    throw new Error('execution.prompt is required');
-  }
-  if (!providerID) {
-    throw new Error('execution.providerID is required');
-  }
-  if (!modelID) {
-    throw new Error('execution.modelID is required');
-  }
-
-  return {
-    prompt,
-    providerID,
-    modelID,
-    ...(thinkingLevel ? { thinkingLevel } : {}),
-    ...(agent ? { agent } : {}),
-    ...(runAsGoal ? { runAsGoal: true } : {}),
-    ...(goalTokenBudget !== undefined ? { goalTokenBudget } : {}),
-  };
+  if (source?.kind === 'project' && Object.keys(source).length === 1) return { kind: 'project' };
+  if (source?.kind !== 'workspace' || Object.keys(source).some(key => !['kind', 'resourceOwner', 'workspaceId'].includes(key))
+    || !asNonEmptyString(source.workspaceId)) throw new Error('task.target.source is invalid');
+  const owner = asRecord(source.resourceOwner);
+  let resourceOwner: SourceResourceOwner;
+  if (owner?.kind === 'local' && Object.keys(owner).length === 1) resourceOwner = { kind: 'local' };
+  else if (owner?.kind === 'managed_host' && Object.keys(owner).length === 4
+    && ['hostId', 'connectionId', 'endpointIdentity'].every(key => asNonEmptyString(owner[key]))) {
+    resourceOwner = { kind: 'managed_host', hostId: owner.hostId as string,
+      connectionId: owner.connectionId as string, endpointIdentity: owner.endpointIdentity as string };
+  } else throw new Error('task.target.source.resourceOwner is invalid');
+  // Identity is opaque. Never replace a missing registration with a local path or normalize owner IDs.
+  return { kind: 'workspace', resourceOwner, workspaceId: source.workspaceId as string };
 };
 
-const normalizeState = (value: unknown, fallback?: ScheduledTaskState): ScheduledTaskState => {
-  const source = asRecord(value) ?? fallback ?? {};
-  const lastRunAt = typeof source.lastRunAt === 'number' && Number.isFinite(source.lastRunAt)
-    ? Math.max(0, Math.round(source.lastRunAt))
-    : undefined;
-  const lastDurationMs = typeof source.lastDurationMs === 'number' && Number.isFinite(source.lastDurationMs)
-    ? Math.max(0, Math.round(source.lastDurationMs))
-    : undefined;
-  const nextRunAt = typeof source.nextRunAt === 'number' && Number.isFinite(source.nextRunAt)
-    ? Math.max(0, Math.round(source.nextRunAt))
-    : undefined;
-  const lastSessionId = asNonEmptyString(source.lastSessionId);
-  const lastErrorRaw = asNonEmptyString(source.lastError);
-  const lastError = lastErrorRaw ? clampLength(lastErrorRaw, MAX_LAST_ERROR_LENGTH) : undefined;
+/** Validate only declared selections. Host admission resolves real models, source and credentials. */
+export const normalizeCalendarTarget = (value: unknown): CalendarTarget => {
+  const target = asRecord(value);
+  if (!target) throw new Error('task.target is required for runtime agent');
+  if (target.kind === 'existing_work') {
+    if (Object.keys(target).some(key => !['kind', 'threadId', 'branchId'].includes(key))) throw new Error('Existing work inherits its current model, source and Goal');
+    const threadId = asNonEmptyString(target.threadId), branchId = asNonEmptyString(target.branchId);
+    if (!threadId || !branchId) throw new Error('Existing work requires threadId and branchId');
+    return { kind: 'existing_work', threadId, branchId };
+  }
+  if (target.kind !== 'new_work' || Object.keys(target).some(key => !['kind', 'model', 'source', 'sourceMode', 'goal'].includes(key))) throw new Error('task.target is invalid');
+  if (!['fixed_branch', 'materialized', 'live_root'].includes(String(target.sourceMode))) throw new Error('task.target.sourceMode is required');
+  const model = asRecord(target.model);
+  const providerId = asNonEmptyString(model?.providerId), modelId = asNonEmptyString(model?.modelId);
+  if (!model || !providerId || !modelId || Object.keys(model).some(key => !['providerId', 'modelId', 'thinkingLevel', 'temperature'].includes(key))) throw new Error('task.target.model requires a registered providerId and modelId');
+  if (model.thinkingLevel !== undefined && !THINKING_LEVELS.has(String(model.thinkingLevel))) throw new Error('task.target.model.thinkingLevel is invalid');
+  if (model.temperature !== undefined && (typeof model.temperature !== 'number' || !Number.isFinite(model.temperature) || model.temperature < 0)) throw new Error('task.target.model.temperature is invalid');
+  let goal: Extract<CalendarTarget, { kind: 'new_work' }>['goal'] = null;
+  if (target.goal !== null) {
+    const requested = asRecord(target.goal);
+    if (!requested || Object.keys(requested).some(key => key !== 'budget')) throw new Error('task.target.goal must be null or an explicit budget selection');
+    if (requested.budget === null) goal = { budget: null };
+    else {
+      const budget = asRecord(requested.budget);
+      if (!budget || Object.keys(budget).some(key => key !== 'maxOutputTokens') || typeof budget.maxOutputTokens !== 'number' || !Number.isSafeInteger(budget.maxOutputTokens) || budget.maxOutputTokens < 0) throw new Error('task.target.goal budget must be a non-negative token count');
+      goal = { budget: { maxOutputTokens: budget.maxOutputTokens } };
+    }
+  }
+  return { kind: 'new_work', source: normalizeCalendarSource(target.source), sourceMode: target.sourceMode as Extract<CalendarTarget, { kind: 'new_work' }>['sourceMode'], goal,
+    model: { providerId, modelId, ...(typeof model.thinkingLevel === 'string' ? { thinkingLevel: model.thinkingLevel } : {}), ...(typeof model.temperature === 'number' ? { temperature: model.temperature } : {}) } };
+};
 
-  return {
-    createdAt: typeof source.createdAt === 'number' && Number.isFinite(source.createdAt)
-      ? Math.max(0, Math.round(source.createdAt))
-      : Date.now(),
-    updatedAt: typeof source.updatedAt === 'number' && Number.isFinite(source.updatedAt)
-      ? Math.max(0, Math.round(source.updatedAt))
-      : Date.now(),
-    lastStatus: normalizeStatus(source.lastStatus),
-    ...(typeof lastRunAt === 'number' ? { lastRunAt } : {}),
-    ...(typeof lastDurationMs === 'number' ? { lastDurationMs } : {}),
-    ...(typeof nextRunAt === 'number' ? { nextRunAt } : {}),
-    ...(lastSessionId ? { lastSessionId } : {}),
-    ...(lastError ? { lastError } : {}),
-  };
+const normalizeExecution = (value: unknown): ScheduledTaskExecution => {
+  const source = asRecord(value);
+  if (!source || !asNonEmptyString(source.prompt)) throw new Error('execution.prompt is required');
+  if (Object.keys(source).some(key => key !== 'prompt')) {
+    throw new Error('Unsupported execution fields; select model, source and Goal in target');
+  }
+  return { prompt: source.prompt as string };
+};
+
+const readTaskState = (value: unknown): ScheduledTaskState => {
+  const source = asRecord(value);
+  if (!source || !Number.isSafeInteger(source.createdAt) || Number(source.createdAt) < 0
+    || !Number.isSafeInteger(source.updatedAt) || Number(source.updatedAt) < 0) {
+    throw new Error('task.state requires createdAt and updatedAt timestamps');
+  }
+  if (Object.keys(source).some(key => key !== 'createdAt' && key !== 'updatedAt')) {
+    throw new Error('Unsupported scheduled task state; execution facts belong to Calendar');
+  }
+  return { createdAt: Number(source.createdAt), updatedAt: Number(source.updatedAt) };
 };
 
 const normalizeTaskForStorage = (value: unknown, options: NormalizeTaskOptions): ScheduledTask => {
@@ -397,6 +331,7 @@ const normalizeTaskForStorage = (value: unknown, options: NormalizeTaskOptions):
     existingTask,
     allowCreate,
     refreshUpdatedAt = true,
+    persisted = false,
   } = options;
 
   const source = asRecord(value);
@@ -404,7 +339,15 @@ const normalizeTaskForStorage = (value: unknown, options: NormalizeTaskOptions):
     throw new Error('task is required');
   }
 
+  // Missing runtime was the Pi format. Only a fresh GUI request may select the
+  // native default; disk assets are never imported or reinterpreted implicitly.
+  const runtime = source.runtime === undefined && !persisted && !existingTask ? 'agent' : source.runtime;
+  if (runtime !== 'agent') throw new Error('Unsupported scheduled task runtime; expected runtime "agent"');
+  if ('onceAcceptance' in source || 'pendingCalendarHandoff' in source) {
+    throw new Error('Unsupported scheduled task owner-handoff fields');
+  }
   const incomingId = asNonEmptyString(source.id);
+  if (persisted && !incomingId) throw new Error('task.id is required');
   const existingId = asNonEmptyString(existingTask?.id);
 
   if (existingTask) {
@@ -423,20 +366,25 @@ const normalizeTaskForStorage = (value: unknown, options: NormalizeTaskOptions):
     throw new Error('task.name is required');
   }
 
+  if (source.enabled !== undefined && typeof source.enabled !== 'boolean'
+    || persisted && source.enabled === undefined) throw new Error('task.enabled must be a boolean');
   const enabled = typeof source.enabled === 'boolean'
     ? source.enabled
     : (existingTask?.enabled ?? true);
 
+  if (persisted && !asNonEmptyString(asRecord(source.schedule)?.timezone)) {
+    throw new Error('schedule.timezone is required');
+  }
   const schedule = normalizeSchedule(source.schedule, existingTask?.schedule);
+  const target = normalizeCalendarTarget(source.target);
+  if (source.missedPolicy !== undefined && source.missedPolicy !== 'skip' && source.missedPolicy !== 'coalesce_once') {
+    throw new Error('task.missedPolicy is invalid');
+  }
   const execution = normalizeExecution(source.execution);
 
   const nowMs = Math.max(0, Math.round(now));
-  const baseState = normalizeState(source.state, existingTask?.state);
-  const state = {
-    ...baseState,
-    createdAt: existingTask?.state?.createdAt ?? baseState.createdAt ?? nowMs,
-    updatedAt: refreshUpdatedAt ? nowMs : baseState.updatedAt ?? nowMs,
-  };
+  const baseState = existingTask?.state ?? (persisted ? readTaskState(source.state) : { createdAt: nowMs, updatedAt: nowMs });
+  const state = { ...baseState, updatedAt: refreshUpdatedAt ? nowMs : baseState.updatedAt };
 
   const loopFile = asNonEmptyString(source.loopFile) ?? asNonEmptyString(existingTask?.loopFile);
   const loopScope = source.loopScope === 'project' || source.loopScope === 'user'
@@ -453,6 +401,9 @@ const normalizeTaskForStorage = (value: unknown, options: NormalizeTaskOptions):
     schedule,
     execution,
     state,
+    runtime,
+    target,
+    missedPolicy: source.missedPolicy === 'skip' ? 'skip' : source.missedPolicy === 'coalesce_once' ? 'coalesce_once' : schedule.kind === 'once' ? 'coalesce_once' : 'skip',
     ...(loopFile ? { loopFile } : {}),
     ...(loopScope ? { loopScope } : {}),
     ...(loopRevision ? { loopRevision } : {}),
@@ -500,7 +451,9 @@ export const createProjectConfigRuntime = (deps: ProjectConfigRuntimeOptions) =>
     const filePath = resolveProjectConfigPath(projectID);
     try {
       const raw = await fsPromises.readFile(filePath, 'utf8');
-      return asRecord(JSON.parse(raw) as unknown) ?? {};
+      const config = asRecord(JSON.parse(raw) as unknown);
+      if (!config) throw new Error('Project configuration must be an object');
+      return config;
     } catch (error) {
       if (errorCode(error) === 'ENOENT') {
         return {};
@@ -511,22 +464,21 @@ export const createProjectConfigRuntime = (deps: ProjectConfigRuntimeOptions) =>
 
   const readProjectConfigFromDisk = async (projectID: unknown): Promise<ProjectConfig> => {
     const parsed = await readRawProjectConfigFromDisk(projectID);
+    if (parsed.version !== undefined && parsed.version !== PROJECT_CONFIG_VERSION) throw new Error('Unsupported project configuration version');
+    if (parsed.scheduledTasks !== undefined && !Array.isArray(parsed.scheduledTasks)) throw new Error('Project scheduledTasks must be an array');
     const tasksRaw = Array.isArray(parsed.scheduledTasks) ? parsed.scheduledTasks : [];
     const now = Date.now();
     const scheduledTasks: ScheduledTask[] = [];
     for (const task of tasksRaw) {
-      try {
-        const normalized = normalizeTaskForStorage(task, {
-          now,
-          createId: taskIDFactory,
-          existingTask: null,
-          allowCreate: true,
-          refreshUpdatedAt: false,
-        });
-        scheduledTasks.push(normalized);
-      } catch {
-        // Preserve the rest of the project config while ignoring a malformed task record.
-      }
+      const normalized = normalizeTaskForStorage(task, {
+        now,
+        createId: taskIDFactory,
+        existingTask: null,
+        allowCreate: true,
+        refreshUpdatedAt: false,
+        persisted: true,
+      });
+      scheduledTasks.push(normalized);
     }
     return {
       version: PROJECT_CONFIG_VERSION,
@@ -543,7 +495,7 @@ export const createProjectConfigRuntime = (deps: ProjectConfigRuntimeOptions) =>
     const merged = {
       ...existing,
       version: PROJECT_CONFIG_VERSION,
-      scheduledTasks: Array.isArray(config?.scheduledTasks) ? config.scheduledTasks : [],
+      scheduledTasks: config.scheduledTasks,
     };
 
     await fsPromises.mkdir(parentDirectory, { recursive: true });
@@ -611,7 +563,7 @@ export const createProjectConfigRuntime = (deps: ProjectConfigRuntimeOptions) =>
 
       // The public upsert contract is a partial patch for an existing JSON-owned
       // task. Merge only defined fields before normalization so validation sees
-      // the complete candidate, while runtime state remains scheduler-owned.
+      // the complete candidate, while creation metadata remains Host-owned.
       const candidate = existingTask
         ? {
             ...mergeDefinedRecord(existingTask as unknown as Record<string, unknown>, input),
@@ -685,58 +637,17 @@ export const createProjectConfigRuntime = (deps: ProjectConfigRuntimeOptions) =>
     });
   };
 
-  const updateScheduledTaskState = async (projectID: unknown, taskID: unknown, statePatch: unknown) => {
-    return withProjectWriteLock(projectID, async () => {
-      const normalizedTaskID = asNonEmptyString(taskID);
-      if (!normalizedTaskID) {
-        throw new Error('taskId is required');
-      }
-
-      const current = await readProjectConfigFromDisk(projectID);
-      const taskIndex = current.scheduledTasks.findIndex((task) => task.id === normalizedTaskID);
-      if (taskIndex === -1) {
-        return { task: null, tasks: current.scheduledTasks };
-      }
-
-      const currentTask = current.scheduledTasks[taskIndex];
-      if (!currentTask) return { task: null, tasks: current.scheduledTasks };
-      const patchObject = asRecord(statePatch) ?? {};
-      const nextTask = {
-        ...currentTask,
-        state: normalizeState(
-          {
-            ...currentTask.state,
-            ...patchObject,
-            updatedAt: Date.now(),
-          },
-          currentTask.state,
-        ),
-      };
-
-      const nextTasks = current.scheduledTasks.slice();
-      nextTasks[taskIndex] = nextTask;
-
-      await writeProjectConfigToDisk(projectID, {
-        version: PROJECT_CONFIG_VERSION,
-        scheduledTasks: nextTasks,
-      });
-
-      return {
-        task: nextTask,
-        tasks: nextTasks,
-      };
-    });
-  };
-
   const reconcileLoopTasks = async (projectID: unknown, loopsInput: unknown): Promise<ScheduledTask[]> => {
     return withProjectWriteLock(projectID, async () => {
       const current = await readProjectConfigFromDisk(projectID);
-      const loops = Array.isArray(loopsInput) ? loopsInput : [];
+      if (!Array.isArray(loopsInput)) throw new Error('Loop discovery must be an array');
+      const loops = loopsInput;
       const existingLoopTaskByPath = new Map(
         current.scheduledTasks
           .filter((task) => task.loopFile)
           .map((task) => [task.loopFile, task]),
       );
+      const now = Date.now();
       const discoveredByPath = new Map<string, NormalizedLoopInput>();
       const selectedPathByName = new Map<string, string>();
 
@@ -745,21 +656,39 @@ export const createProjectConfigRuntime = (deps: ProjectConfigRuntimeOptions) =>
       // A malformed higher-precedence file still shadows a lower one by using
       // its last-good persisted name, so an edit error cannot start two loops.
       for (const rawLoop of loops) {
-        const loop = asRecord(rawLoop) ?? {};
-        const definition = asRecord(loop.definition);
+        const loop = asRecord(rawLoop);
+        if (!loop) throw new Error('Loop discovery entry must be an object');
+        let definition = asRecord(loop.definition);
+        let error = asNonEmptyString(loop.error);
         const filePath = asNonEmptyString(loop.filePath);
-        if (!filePath || discoveredByPath.has(filePath)) continue;
+        if (!filePath) throw new Error('Loop discovery entry requires filePath');
+        if (discoveredByPath.has(filePath)) continue;
         const existing = existingLoopTaskByPath.get(filePath);
-        const effectiveName = asNonEmptyString(definition?.name)
+        const declaredName = asNonEmptyString(definition?.name);
+        if (definition && !error) {
+          try {
+            if (definition.runtime !== 'agent') throw new Error('Unsupported loop runtime; expected explicit runtime "agent"');
+            normalizeTaskForStorage({ ...definition, id: existing?.id ?? 'loop-validation' }, {
+              now, createId: taskIDFactory, existingTask: existing ?? null, allowCreate: true, refreshUpdatedAt: false,
+            });
+          } catch (failure) {
+            error = failure instanceof Error ? failure.message : 'Invalid loop definition';
+          }
+        }
+        if (error || !definition) {
+          definition = null;
+          error ||= 'Invalid loop definition';
+          if (!existing) throw new Error(`Invalid loop ${filePath}: ${error}`);
+        }
+        const effectiveName = declaredName
           || asNonEmptyString(loop.name)
           || asNonEmptyString(existing?.name);
         const scope = loop.scope === 'project' || loop.scope === 'user' ? loop.scope : undefined;
         const normalized: NormalizedLoopInput = {
           definition,
           effectiveName,
-          error: asNonEmptyString(loop.error),
+          error,
           filePath,
-          name: asNonEmptyString(loop.name),
           revision: asNonEmptyString(loop.revision),
           ...(scope ? { scope } : { scope: undefined }),
         };
@@ -769,7 +698,6 @@ export const createProjectConfigRuntime = (deps: ProjectConfigRuntimeOptions) =>
         }
       }
 
-      const now = Date.now();
       const nextTasks: ScheduledTask[] = [];
       const consumedPaths = new Set<string>();
       const existingIDs = new Set(current.scheduledTasks.map((task) => task.id));
@@ -819,6 +747,9 @@ export const createProjectConfigRuntime = (deps: ProjectConfigRuntimeOptions) =>
         nextTasks.push(normalizeTaskForStorage({
           ...task,
           ...loop.definition,
+          runtime: loop.definition.runtime,
+          target: loop.definition.target,
+          missedPolicy: loop.definition.missedPolicy,
           execution: loop.definition.execution,
           loopError: undefined,
           loopFile: task.loopFile,
@@ -860,23 +791,19 @@ export const createProjectConfigRuntime = (deps: ProjectConfigRuntimeOptions) =>
         let id = `loop:${crypto.createHash('sha256').update(path.resolve(loop.filePath), 'utf8').digest('hex')}`;
         if (existingIDs.has(id)) id = taskIDFactory();
         existingIDs.add(id);
-        try {
-          nextTasks.push(normalizeTaskForStorage({
-            ...loop.definition,
-            id,
-            loopFile: loop.filePath,
-            loopRevision: loop.revision,
-            loopScope: loop.scope,
-          }, {
-            now,
-            createId: taskIDFactory,
-            existingTask: null,
-            allowCreate: true,
-            refreshUpdatedAt: false,
-          }));
-        } catch (error) {
-          console.warn(`[ScheduledTasks] ignored loop ${loop.filePath}:`, error instanceof Error ? error.message : error);
-        }
+        nextTasks.push(normalizeTaskForStorage({
+          ...loop.definition,
+          id,
+          loopFile: loop.filePath,
+          loopRevision: loop.revision,
+          loopScope: loop.scope,
+        }, {
+          now,
+          createId: taskIDFactory,
+          existingTask: null,
+          allowCreate: true,
+          refreshUpdatedAt: false,
+        }));
       }
 
       if (JSON.stringify(nextTasks) !== JSON.stringify(current.scheduledTasks)) {
@@ -903,7 +830,6 @@ export const createProjectConfigRuntime = (deps: ProjectConfigRuntimeOptions) =>
     listScheduledTasks,
     upsertScheduledTask,
     deleteScheduledTask,
-    updateScheduledTaskState,
     reconcileLoopTasks,
     resolveProjectConfigPath,
   };

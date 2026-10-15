@@ -481,8 +481,8 @@ describe('workspace run capabilities', () => {
       await expect(taskCall('spawn', {})).rejects.toThrow(/does not implement spawn/);
       await expect(testCall('spawn', {})).rejects.toThrow(/does not implement spawn/);
 
-      const ownerA = { extensionId: 'dev.example.a', extensionVersion: '1.0.0', entrypointId: 'host', generation: 1 };
-      const ownerB = { extensionId: 'dev.example.b', extensionVersion: '1.0.0', entrypointId: 'host', generation: 1 };
+      const ownerA = { extensionId: 'dev.example.a', extensionVersion: '1.0.0', entrypointId: 'host', instanceKey: 'run-provider-a-fixture', generation: 1 };
+      const ownerB = { extensionId: 'dev.example.b', extensionVersion: '1.0.0', entrypointId: 'host', instanceKey: 'run-provider-b-fixture', generation: 1 };
       await debugCall('registerAdapter', { adapterId: 'shared', command: 'adapter-a', source: 'builtin' }, { owner: ownerA });
       await expect(debugCall('registerAdapter', { adapterId: 'shared', command: 'adapter-b' }, { owner: ownerB }))
         .rejects.toThrow(/already owned/);

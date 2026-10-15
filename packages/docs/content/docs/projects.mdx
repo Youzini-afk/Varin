@@ -5,28 +5,15 @@ description: Organize your work into projects and switch between them.
 
 # Projects
 
-A project is a folder on your computer that Varin keeps track of — usually one codebase. Switching projects switches the folder the agent works in, along with that project's sessions and settings.
+A project is a folder on the connected Host. Use the project picker or folder browser to open it; Settings → Projects controls its name, color, icon and project actions. The project you browse and a conversation’s execution source are separate: changing projects does not retarget a running Thread.
 
-## Add a project
+In a conversation, expand **Workspace**, select the source Host and folder, then choose:
+- **Read-only file snapshot**: fixed files for reading, listing and searching
+- **Isolated editable copy**: a captured working copy for edits and commands; changes are not copied back automatically
+- **Live workspace**: saved files and commands in the actual folder; edits affect it immediately
 
-You can add a project from a few places:
+Press **Prepare workspace** and inspect the result before sending. Snapshot modes can include this window’s editor drafts on the same Host. Live workspaces use saved files only. Remote paths belong to the selected source Host. Editable copies and live commands are not security sandboxes.
 
-- the **Add project** entry in the command palette
-- the **+** button at the top of the session sidebar
-- the folder browser when you pick a directory
-
-Point it at a folder and Varin remembers it. The name comes from the folder; you can change it later.
-
-## Switch projects
-
-Pick a project from the sidebar to make it active. Everything — sessions, git, notes — follows the project you have open.
-
-## Make a project recognizable
-
-Open **Settings → Projects** to give a project a custom name, color, or icon. Varin tries to find an icon automatically — see [Project icons](/project-icons/).
-
-## Related
-
-- [Project Notes, Todos & Plans](/notes-todos-plans/) — keep working notes per project
-- [Project Actions](/project-actions/) — save commands you run often
-- [Context](/context/) — see how much of the model's memory a session is using
+- [Worktree Sessions](/worktrees/)
+- [Project Notes, Todos & Plans](/notes-todos-plans/)
+- [Project Actions](/project-actions/)

@@ -1,0 +1,34 @@
+{
+  "schemaVersion": 1,
+  "id": "example.agent-authored-panel",
+  "displayName": "Agent-authored Text Counter",
+  "version": "1.0.0",
+  "engines": { "varin": "*" },
+  "entrypoints": {
+    "host": { "file": "host.js", "mode": "brokered", "activation": ["service-request"] },
+    "surfaces": [{ "id": "panel", "file": "surface.cjs", "mode": "managed", "supports": ["web", "desktop"], "activation": ["application-startup"] }]
+  },
+  "provides": { "services": [{
+    "id": "example.agent-authored-panel.count",
+    "version": 1,
+    "tool": {
+      "name": "authored_text_count",
+      "description": "Count words and Unicode code points in supplied text. This local calculation does not read files or change state.",
+      "completion": "result",
+      "operation": "read",
+      "inputSchema": { "type": "object", "properties": { "text": { "type": "string" } }, "required": ["text"], "additionalProperties": false },
+      "outputSchema": { "type": "object", "properties": { "words": { "type": "integer", "minimum": 0 }, "characters": { "type": "integer", "minimum": 0 } }, "required": ["words", "characters"], "additionalProperties": false },
+      "examples": [{ "text": "An ordinary authored extension" }],
+      "source": { "path": "host.js", "line": 3 }
+    }
+  }] },
+  "contributions": [{
+    "id": "example.agent-authored-panel.summary",
+    "entrypoint": "panel",
+    "kind": "panel",
+    "contractVersion": 1,
+    "supports": ["web", "desktop"],
+    "placement": { "slot": "workbench.secondary.after", "order": 20 },
+    "data": { "title": "Text counter" }
+  }]
+}

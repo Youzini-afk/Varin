@@ -1,6 +1,6 @@
 import React from 'react';
 import { useProjectsStore } from '@/stores/useProjectsStore';
-import { usePiSessionStore } from '@/stores/usePiSessionStore';
+import { useEffectiveDirectory } from './useEffectiveDirectory';
 import type { VarinProjectRef as ProjectRef } from '@/lib/project-config';
 
 export interface ProjectActionsContext {
@@ -17,7 +17,7 @@ const normalize = (value: string): string => {
 /**
  * Resolves the active project ref + working directory used by
  * {@link ProjectActionsButton}. Directory priority mirrors the header:
- * current Pi session → project path. A sticky ref keeps the last
+ * navigation workspace → project path. A sticky ref keeps the last
  * good context so the actions button doesn't flicker during session switches.
  */
 export function useProjectActionsContext(): ProjectActionsContext | null {
@@ -28,15 +28,7 @@ export function useProjectActionsContext(): ProjectActionsContext | null {
     return state.projects.find((project) => project.id === state.activeProjectId) ?? null;
   });
 
-  const sessionDirectory = usePiSessionStore((state) => {
-    const sessionId = state.currentSessionId;
-    if (!sessionId) return '';
-    return normalize(
-      state.records[sessionId]?.snapshot?.cwd
-      ?? state.summaries.find((summary) => summary.id === sessionId)?.cwd
-      ?? '',
-    );
-  });
+  const sessionDirectory = useEffectiveDirectory();
   const actionDirectory = React.useMemo(
     () => normalize(sessionDirectory || activeProject?.path || ''),
     [activeProject?.path, sessionDirectory],

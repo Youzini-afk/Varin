@@ -22,13 +22,16 @@
   },
   "scripts": {
     "build:dependencies": "bun run --cwd ../extension-contract build && bun run --cwd ../extension-sdk build",
-    "build": "bun run build:dependencies && tsc -p tsconfig.build.json && node scripts/build-host-builtins.mjs",
+    "build": "bun run build:dependencies && bun run build:raw",
+    "build:raw": "tsc -p tsconfig.build.json && node scripts/build-host-builtins.mjs",
     "lint": "eslint \"./src/**/*.ts\" --config ../../eslint.config.js",
     "test:packaging": "node --test test/packaging-smoke.test.mjs",
     "typecheck": "tsc --noEmit -p tsconfig.json",
-    "type-check": "tsc --noEmit -p tsconfig.json"
+    "type-check": "tsc --noEmit -p tsconfig.json",
+    "test:dist": "bun run test:packaging"
   },
   "dependencies": {
+    "@varin/protocol": "workspace:*",
     "@varin/extension-contract": "workspace:*"
   },
   "devDependencies": {

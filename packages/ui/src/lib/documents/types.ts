@@ -95,23 +95,25 @@ export type DocumentWorkspaceTextEdit = {
 };
 
 export type DocumentWorkspaceTextDocumentEdit = {
+  kind: 'text';
   identity: DocumentIdentity;
   version: number | null;
   edits: DocumentWorkspaceTextEdit[];
 };
 
 export type DocumentWorkspaceResourceOperation =
-  | { kind: 'create'; identity: DocumentIdentity }
-  | { kind: 'rename'; from: DocumentIdentity; to: DocumentIdentity }
-  | { kind: 'delete'; identity: DocumentIdentity };
+  | { kind: 'create'; identity: DocumentIdentity; annotationId?: string; overwrite?: boolean; ignoreIfExists?: boolean }
+  | { kind: 'rename'; from: DocumentIdentity; to: DocumentIdentity; annotationId?: string; overwrite?: boolean; ignoreIfExists?: boolean }
+  | { kind: 'delete'; identity: DocumentIdentity; annotationId?: string; recursive?: boolean; ignoreIfNotExists?: boolean };
+
+export type DocumentWorkspaceChange = DocumentWorkspaceTextDocumentEdit | DocumentWorkspaceResourceOperation;
 
 export type DocumentWorkspaceEditInput = {
   workspaceId: string;
   origin: string;
   /** When set, apply/undo use this group id (thread integration operationId). */
   groupId?: string;
-  textEdits: DocumentWorkspaceTextDocumentEdit[];
-  resourceOperations?: DocumentWorkspaceResourceOperation[];
+  changes: DocumentWorkspaceChange[];
   changeAnnotations?: Record<string, {
     label: string;
     description?: string;
@@ -122,6 +124,8 @@ export type DocumentWorkspaceEditInput = {
 export type DocumentWorkspaceEditFailureReason =
   | 'workspace-mismatch'
   | 'resource-operation-unsupported'
+  | 'operation-pending'
+  | 'needs-attention'
   | 'missing'
   | 'binary'
   | 'unsupported-encoding'
@@ -144,6 +148,10 @@ export type DocumentWorkspaceEditPreviewFile = {
   beforeContent: string;
   afterContent: string;
   editCount: number;
+  kind?: 'text' | 'create' | 'rename' | 'delete';
+  from?: DocumentIdentity;
+  affectsDraft?: boolean;
+  annotationIds?: string[];
 };
 
 export type DocumentWorkspaceEditPreview = {
@@ -153,6 +161,7 @@ export type DocumentWorkspaceEditPreview = {
   origin: string;
   files: DocumentWorkspaceEditPreviewFile[];
   requiresConfirmation: boolean;
+  changeAnnotations?: DocumentWorkspaceEditInput['changeAnnotations'];
 };
 
 export type DocumentWorkspaceEditPrepareResult =

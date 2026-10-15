@@ -1,40 +1,49 @@
 # Recovery and rollback
 
-Status: user operation guide — recovery choices and coverage.
+Varin exposes conversation-only recovery and, where affected-file coverage is available, combined
+conversation/file recovery. Native Threads navigate their original HistoryBranch; file recovery
+retains the original resource owner and conditional mutation receipts. Historical stores are not imported.
 
-Varin provides two related actions from every recoverable message:
+## Choose the scope
 
-- **conversation only** moves Pi's native session branch and restores editable prompt text/images;
-- **conversation and files** also applies the recorded file-recovery plan for the turns that leave
-  the active branch, subject to its coverage and conflict checks.
+- **Conversation only** changes the selected history branch and restores the relevant editable input.
+- **Conversation and files** also prepares the recorded path changes for entries leaving that branch.
+  The preview shows real conflicts, incomplete coverage and unavailable owners.
 
-The default can be set to conversation only, conversation and files, or always ask.
+The default can be conversation only, conversation and files, or always ask. A new turn creates only
+an affected-file checkpoint; it does not scan, copy, reset or clean the whole workspace.
 
-Combined rollback uses affected-file checkpoints. It does not scan, copy, reset, or clean the complete
-workspace when a session opens or a message is sent. If the recorded files have not changed again,
-rollback runs directly from the message action. A chooser appears only for a real conflict, incomplete
-external/shell coverage, or the always-ask preference.
+Controlled file tools retain before/after evidence. Arbitrary commands, Git or external applications
+can change unjournalled files, so their file coverage can be incomplete. Conversation-only recovery
+remains available; a broad workspace scan cannot manufacture missing before-images.
 
-Varin saves the current versions of affected paths before applying a rollback, so a completed recovery
-can be undone. Recovery storage can use the application data directory, a workspace-local directory, a
-sibling directory, or a custom root. Project selection overrides the global default; Settings also owns
-verified migration, unreachable-object cleanup, and explicit workspace-history deletion.
+## Conflicts, drafts and undo
 
-Settings can also configure independent limits for automatic checkpoints, completed recovery operations,
-logical history size, and age. Empty fields mean no limit; Varin does not impose a guessed default.
-Named checkpoints and unfinished or attention-required recovery evidence are never removed by retention.
-Pruning an automatic checkpoint removes that older file-rollback point; pruning a completed recovery
-operation removes its undo evidence. Neither action removes Pi conversation history.
-Connected editors publish and fence their latest unsaved state before affected files are inspected or
-restored.
+Recovery compares each affected path with the output it recorded. Later user edits are conflicts,
+not permission to overwrite. Connected editors publish/fence their actual dirty revision. Confirmed
+buffer recovery retains its text and disk base through the original Surface transaction. A disconnected
+or unknown dirty state remains unavailable even if the user is willing to proceed.
 
-Pi remains the conversation authority. `pi-workspace-history` and `pi-wtf` are optional Pi packages and
-are not installed or invoked by native Varin recovery.
+Before applying, the owner saves safety/redo objects for affected paths. A completed operation can be
+undone when its retained evidence and current path conditions allow. Interrupted or unknown operations
+reuse their original IDs and receipts after reconnect; do not start a second attempt merely because the
+first response was lost. Compensation changes only the operation's own still-unchanged outputs.
 
-Arbitrary native commands do not expose a portable pre-write file list. A turn whose `bash`, terminal,
-Git, extension, or unrelated process changed unjournalled paths is marked incomplete for file rollback;
-Varin does not hide that gap behind a slow full-workspace fallback. Conversation-only rollback remains
-available.
+Managed multi-Host recovery displays the actual target Hosts. Each keeps its own file journal and
+permissions; the conversation Host coordinates their receipts before navigating. This is recoverable
+coordination, not an atomic rollback across machines. An offline owner or unconfirmed stop can leave an
+operation pending or needing attention.
 
-The complete mechanism and provider contract are documented in
-[Varin native recovery journal](../design/native-workspace-recovery-design.md).
+## Storage capabilities
+
+The built-in provider shares the Host kernel data root with WorkingState. It reports application-data
+storage and does not currently provide relocation, retention settings or delete-history controls.
+Shared catalog/WAL totals are not per-workspace reclaimable history. GC respects other retained result,
+branch and operation owners and reports actual cleanup failures.
+
+Replacement recovery providers can advertise other storage modes and management capabilities; the UI
+shows controls only when the selected provider supports them. The original journal and resource owners
+remain authoritative; a replacement provider does not authorize access to unrelated data.
+
+The [resource contract](../resources.md#受影响文件恢复) explains the mechanism; the
+[Recovery module](../../packages/web/application-host/lib/recovery/DOCUMENTATION.md) maps it to code.

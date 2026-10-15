@@ -1,9 +1,13 @@
+import { createHostServiceDependencyClients } from '@varin/extension-contract';
+import { AsyncLocalStorage } from 'node:async_hooks';
 import { createRequire } from 'node:module';
 import { isAbsolute, relative, resolve } from 'node:path';
 
 const require = createRequire(import.meta.url);
 const pending = new Map();
 const serviceHandlers = new Map();
+const activeCalls = new Map();
+const invocationContext = new AsyncLocalStorage();
 const disposers = [];
 let modulePath = '';
 let loadedModule = null;
@@ -64,6 +68,17 @@ const requestParent = (method, params) => new Promise((resolve, reject) => {
   send({ kind: 'request', id, method, params });
 });
 
+const callCapability = (scope, capability, method, params) => {
+  if (scope) {
+    if (!scope.active) return Promise.reject(new Error('Host capability invocation has expired'));
+    if (scope.signal.aborted) return Promise.reject(scope.signal.reason);
+  }
+  return requestParent('capability.call', {
+    capability, method, params,
+    ...(scope?.invocationId !== undefined ? { invocationId: scope.invocationId } : {}),
+  });
+};
+
 const loadExtensionModule = (nextModulePath) => {
   if (loadedModule && modulePath === nextModulePath) return loadedModule;
   modulePath = nextModulePath;
@@ -83,6 +98,7 @@ const resolveExtension = (module) => {
 };
 
 const deactivate = async () => {
+  for (const controller of activeCalls.values()) controller.abort(new Error('Brokered Host extension deactivated'));
   activationController?.abort('Brokered Host extension deactivated');
   activationController = null;
   serviceHandlers.clear();
@@ -95,7 +111,7 @@ const deactivate = async () => {
   if (errors.length > 0) throw new Error(`Brokered Host cleanup failed: ${errors.join('; ')}`);
 };
 
-const handleParentRequest = async (message) => {
+const handleParentRequest = async (message, signal) => {
   switch (message.method) {
     case 'migrate': {
       const extension = resolveExtension(loadExtensionModule(String(message.params?.modulePath || '')));
@@ -124,7 +140,7 @@ const handleParentRequest = async (message) => {
           path: (logicalPath) => packageAssetPath(packageRoot, logicalPath),
         },
         capabilities: {
-          call: (capability, method, params) => requestParent('capability.call', { capability, method, params }),
+          call: (capability, method, params) => callCapability(invocationContext.getStore(), capability, method, params),
         },
         effect: (disposer) => {
           if (typeof disposer !== 'function') throw new Error('Host effect disposer must be a function');
@@ -137,23 +153,21 @@ const handleParentRequest = async (message) => {
               throw new Error('Host service descriptor is invalid');
             }
             if (!handler || typeof handler !== 'object') throw new Error(`Host service handler is invalid: ${key}`);
+            for (const method of Object.keys(descriptor.contract?.methods ?? {})) {
+              if (typeof handler[method] !== 'function') throw new Error(`Host service declared method is unavailable: ${key}.${method}`);
+            }
             if (stagedHandlers.has(key)) throw new Error(`Host service provided more than once: ${key}`);
             stagedHandlers.set(key, handler);
             stagedProvisions.push(descriptor);
           },
-          use: (id, version, provider) => {
-            const options = typeof provider === 'string' ? { providerId: provider } : (provider ?? {});
-            return {
-              call: (method, ...args) => requestParent('service.invoke', {
-                args,
-                method,
-                ...(options.providerId ? { providerId: options.providerId } : {}),
-                ...(options.routing ? { routing: options.routing } : {}),
-                serviceId: id,
-                version,
-              }),
-            };
-          },
+          ...createHostServiceDependencyClients(message.params.dependencies, (request) => {
+            const scope = invocationContext.getStore();
+            if (scope && !scope.active) return Promise.reject(new Error('Host dependency invocation has expired'));
+            if (scope?.signal.aborted) return Promise.reject(scope.signal.reason);
+            return requestParent('service.invoke', { ...request,
+              ...(scope?.invocationId ? { invocationId: scope.invocationId } : {}),
+            });
+          }),
         },
         signal: activationController.signal,
         storage: {
@@ -177,7 +191,16 @@ const handleParentRequest = async (message) => {
       const method = String(message.params?.method || '');
       const implementation = handler?.[method];
       if (typeof implementation !== 'function') throw new Error(`Brokered Host service method is unavailable: ${key}.${method}`);
-      return implementation(...(Array.isArray(message.params?.args) ? message.params.args : []));
+      signal.throwIfAborted();
+      const scope = { signal, active: true, invocationId: message.params?.invocationId };
+      try {
+        return await invocationContext.run(scope, () => implementation(
+          Array.isArray(message.params?.args) ? message.params.args : [], {
+            signal, callId: message.id,
+            capabilities: { call: (capability, method, params) => callCapability(scope, capability, method, params) },
+          },
+        ));
+      } finally { scope.active = false; }
     }
     case 'storage.sync':
       for (const snapshot of Array.isArray(message.params?.storages)
@@ -204,10 +227,17 @@ process.on('message', (message) => {
     else entry.reject(new Error(String(message.error || 'Broker request failed')));
     return;
   }
+  if (message.kind === 'cancel' && typeof message.id === 'string') {
+    activeCalls.get(message.id)?.abort(new Error('Brokered Host call cancelled'));
+    return;
+  }
   if (message.kind !== 'request' || typeof message.id !== 'string') return;
-  void handleParentRequest(message)
+  const controller = new AbortController();
+  activeCalls.set(message.id, controller);
+  void handleParentRequest(message, controller.signal)
     .then((result) => send({ kind: 'response', id: message.id, success: true, result }))
-    .catch((error) => send({ kind: 'response', id: message.id, success: false, error: errorMessage(error) }));
+    .catch((error) => send({ kind: 'response', id: message.id, success: false, error: errorMessage(error) }))
+    .finally(() => activeCalls.delete(message.id));
 });
 
 process.on('disconnect', () => {

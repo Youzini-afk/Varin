@@ -1,18 +1,19 @@
 import {
-  KnowledgeBlockConflictError, KnowledgeMutationError,
-  type Block, type BlockChange, type KnowledgeStore, type OpenWorkspaceKnowledgeDeps,
+  KnowledgeMutationError,
+  type KnowledgeStore, type OpenWorkspaceKnowledgeDeps,
 } from "./store-contract.js";
+import type { PlanChanged } from "@varin/protocol";
 import type { AssociationRefreshPort } from "./association-refresh.js";
 
 export type DirectStoreMethod = Exclude<keyof KnowledgeStore, "dim" | "knowledgeRevision" | "resolveAssociationCandidates">;
 export type StoreMethod = DirectStoreMethod | keyof AssociationRefreshPort;
 // Exhaustive at compile time, and a runtime allowlist on the private child pipe.
 export const STORE_METHODS: Record<DirectStoreMethod, true> = {
-  putEvent: true, listEvents: true, listEventSessionIds: true, putSession: true,
+  putEvent: true, listEvents: true,
   getOrganizerProgress: true, putOrganizerProgress: true,
-  listOrganizerProgress: true, getBlocks: true,
-  upsertBlock: true, deleteBlock: true, putKnowledge: true,
-  createKnowledgeIfAbsent: true, updateSuggestedKnowledge: true,
+  listOrganizerProgress: true, putKnowledge: true,
+  readPlanCandidate: true, readPlan: true, mutatePlan: true, readPlanMutation: true, capturePlanFork: true,
+  readKnowledgeMutation: true, createKnowledgeIfAbsent: true, updateSuggestedKnowledge: true,
   updateAcceptedKnowledge: true, supersedeKnowledge: true,
   retireKnowledge: true, getKnowledge: true,
   listKnowledge: true, getSupersedeChain: true, acceptKnowledge: true,
@@ -23,7 +24,7 @@ export const STORE_METHODS: Record<DirectStoreMethod, true> = {
   getDefinedSymbols: true, getFileRelations: true, findLinks: true,
   listFileIndexStates: true, recordFileSourceMetadata: true,
   findReferences: true, findCallers: true, findCalls: true, catalogStats: true,
-  findImporters: true, connectionLiterals: true, deleteSession: true,
+  findImporters: true, connectionLiterals: true,
   runRetention: true, compact: true, close: true,
 };
 const ASSOCIATION_METHODS: Record<keyof AssociationRefreshPort, true> = {
@@ -42,13 +43,13 @@ export type StoreRequest = {
   method: StoreMethod | "open" | "semantic";
   args: unknown[];
 };
-export type StoreFailure = { name: string; message: string; code?: string; current?: Block | null };
+export type StoreFailure = { name: string; message: string; code?: string };
 export type StoreResponse = { id: number; revision?: string } & (
   | { ok: true; value: unknown }
   | { ok: false; error: StoreFailure }
 );
 export type StoreNotification =
-  | { type: "blocks"; storeId: number; sessionId: string; change: BlockChange }
+  | { type: "plan-changed"; storeId: number; change: PlanChanged }
   | { type: "knowledge"; storeId: number; ids: readonly number[]; revision: string }
   | { type: "persistence-error"; storeId: number; error: StoreFailure };
 export type StoreChildMessage =
@@ -56,19 +57,11 @@ export type StoreChildMessage =
   | { type: "results"; responses: StoreResponse[] }
   | StoreNotification;
 
-const isBlock = (value: unknown): value is Block => {
-  if (!value || typeof value !== "object") return false;
-  const block = value as Block;
-  return typeof block.sessionId === "string" && typeof block.label === "string"
-    && typeof block.content === "string" && typeof block.updatedAt === "number"
-    && ["agent", "memory-agent", "user"].includes(block.updatedBy);
-};
 const isFailure = (value: unknown): value is StoreFailure => {
   if (!value || typeof value !== "object") return false;
   const error = value as StoreFailure;
   return typeof error.name === "string" && typeof error.message === "string"
-    && (error.code === undefined || typeof error.code === "string")
-    && (error.current === undefined || error.current === null || isBlock(error.current));
+    && (error.code === undefined || typeof error.code === "string");
 };
 export const isStoreResponse = (value: unknown): value is StoreResponse => {
   if (!value || typeof value !== "object") return false;
@@ -80,11 +73,11 @@ export const isStoreNotification = (value: unknown): value is StoreNotification 
   if (!value || typeof value !== "object") return false;
   const r = value as StoreNotification;
   if (!Number.isSafeInteger(r.storeId)) return false;
+  if (r.type === "plan-changed") return Boolean(r.change && typeof r.change === "object"
+    && typeof r.change.threadId === "string" && typeof r.change.branchId === "string" && typeof r.change.ref === "string");
   if (r.type === "knowledge") return typeof r.revision === "string" && Array.isArray(r.ids) && r.ids.every(Number.isSafeInteger);
   if (r.type === "persistence-error") return isFailure(r.error);
-  if (r.type !== "blocks" || typeof r.sessionId !== "string" || !r.change || typeof r.change !== "object") return false;
-  return (r.change.previous === null || isBlock(r.change.previous))
-    && (r.change.current === null || isBlock(r.change.current));
+  return false;
 };
 
 export function storeFailure(error: unknown): StoreFailure {
@@ -93,13 +86,9 @@ export function storeFailure(error: unknown): StoreFailure {
   return {
     name: value.name, message: value.message,
     ...(typeof code === "string" ? { code } : {}),
-    ...(value instanceof KnowledgeBlockConflictError ? { current: value.current } : {}),
   };
 }
 export function restoreStoreError(error: StoreFailure): Error {
-  if (error.name === "KnowledgeBlockConflictError") {
-    return new KnowledgeBlockConflictError(error.current ?? null);
-  }
   if (error.name === "KnowledgeMutationError"
     && (error.code === "conflict" || error.code === "not-found" || error.code === "invalid")) {
     return new KnowledgeMutationError(error.code, error.message);

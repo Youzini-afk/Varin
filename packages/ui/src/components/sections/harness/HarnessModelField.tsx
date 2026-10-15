@@ -5,11 +5,14 @@ import { Switch } from '@/components/ui/switch';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { useI18n } from '@/lib/i18n';
 import type { HarnessSettingsPageProps } from './harness-settings-state';
+import { useConfigurationModels } from './ConfigurationModels';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 
 export function HarnessModelField({ harness, update, slot, enableControl = true }: HarnessSettingsPageProps & { slot: HarnessModelRole; enableControl?: boolean }) {
   const { t } = useI18n();
   const cwd = useDirectoryStore((state) => state.currentDirectory);
   const selected = harness.models[slot];
+  const catalog = useConfigurationModels();
   const inherited = slot === 'worker';
   const label = t(slot === 'explore' ? 'settings.page.harness.codeRetrieval.mode.llm' : `settings.harness.role.${slot}`);
   const emptyLabel = t(inherited ? 'settings.page.harness.models.mainModel' : 'settings.harness.models.noModel');
@@ -21,9 +24,14 @@ export function HarnessModelField({ harness, update, slot, enableControl = true 
       {slot !== 'explore' ? <p className="mt-1 typography-meta text-muted-foreground">{t(`settings.harness.role.${slot}.description`)}</p> : null}
     </div>
     <div className="w-full min-w-0 @xl:w-72 @xl:shrink-0">
-      <ModelSelector cwd={cwd} providerId={selected?.providerId ?? ''} modelId={selected?.modelId ?? ''}
+      {catalog.runtime === 'agent' ? <Select value={selected?.modelId ? JSON.stringify([selected.providerId, selected.modelId]) : '__none'} onValueChange={key => {
+        const [providerId, modelId] = key === '__none' ? [] : JSON.parse(key) as string[];
+        update({ models: { [slot]: { providerId, modelId } } });
+      }}><SelectTrigger size="settings" className="w-full" aria-label={label}><SelectValue>{selected?.modelId ? `${selected.providerId}/${selected.modelId}` : emptyLabel}</SelectValue></SelectTrigger><SelectContent>
+        <SelectItem value="__none">{emptyLabel}</SelectItem>{catalog.providers.flatMap(provider => catalog.modelsFor(provider.id, 'chat').map(model => <SelectItem key={JSON.stringify([provider.id, model.id])} value={JSON.stringify([provider.id, model.id])}>{model.name ?? model.id} · {provider.name}</SelectItem>))}
+      </SelectContent></Select> : <ModelSelector cwd={cwd} providerId={selected?.providerId ?? ''} modelId={selected?.modelId ?? ''}
         className="w-full max-w-none" allowNone placeholder={emptyLabel} defaultSelectionLabel={emptyLabel}
-        onChange={(providerId, modelId) => update({ models: { [slot]: { providerId: providerId || undefined, modelId: modelId || undefined } } })} />
+        onChange={(providerId, modelId) => update({ models: { [slot]: { providerId: providerId || undefined, modelId: modelId || undefined } } })} />}
       {slot !== 'explore' && !selected?.modelId ? <p className="mt-1 typography-meta text-muted-foreground">{t(inherited
         ? 'settings.page.harness.models.slot.mainFallback' : 'settings.page.harness.models.slot.optional')}</p> : null}
     </div>

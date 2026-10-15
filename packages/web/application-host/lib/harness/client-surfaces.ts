@@ -3,9 +3,9 @@
  * device-local settings on connected UI surfaces.
  *
  * A surface identifies itself when it opens `/api/varin/events` with
- * `?surface=<id>&kind=<kind>&session=<live-session>`, after an authenticated
+ * `?surface=<id>&kind=<kind>&threadId=<thread>&branchId=<branch>`, after an authenticated
  * bind operation. Host-side writes never guess the client identity — the
- * session binding selects the connection, and applies land only on
+ * Thread/branch binding selects the connection, and applies land only on
  * connections that declared that identity. The surface acknowledges over
  * `POST /api/varin/client-settings/ack`; the request resolves with the
  * surface-reported facts (saved/applied/failed), never an assumed success.
@@ -18,6 +18,7 @@ import type {
   ClientSurfaceBridge,
   ClientSurfaceFieldResult,
   ClientSurfaceInfo,
+  SettingsServiceCaller,
 } from './settings-service.js';
 
 /**
@@ -34,8 +35,8 @@ interface SurfaceConnection {
   res: Response;
   surfaceId: string;
   kind: string;
-  /** Host-validated selected Pi session. */
-  sessionId: string;
+  /** Host-validated native Catalog selection. */
+  identity: ThreadSelection;
 }
 
 interface PendingRequest {
@@ -47,13 +48,17 @@ interface PendingRequest {
   surface: ClientSurfaceInfo;
 }
 
+export type ThreadSelection = Pick<SettingsServiceCaller, 'threadId' | 'branchId'>;
+const selectionKey = (identity: ThreadSelection): string => JSON.stringify([identity.threadId, identity.branchId]);
+const sameSelection = (a: ThreadSelection, b: ThreadSelection): boolean => selectionKey(a) === selectionKey(b);
+
 export interface SurfaceBridgeDeps {
   writeSseEvent(res: Response, event: { type: string; properties: Record<string, unknown> }): void;
-  /** Live session registry check; stale connections are evicted before a request. */
-  isSessionLive?(sessionId: string): boolean | Promise<boolean>;
+  /** Native Catalog identity check; stale connections are evicted before a request. */
+  isThreadLive?(identity: ThreadSelection): boolean | Promise<boolean>;
 }
 
-export function createClientSurfaceBridge({ writeSseEvent, isSessionLive }: SurfaceBridgeDeps) {
+export function createClientSurfaceBridge({ writeSseEvent, isThreadLive }: SurfaceBridgeDeps) {
   const connections = new Map<Response, SurfaceConnection>();
   const pending = new Map<string, PendingRequest>();
 
@@ -62,7 +67,7 @@ export function createClientSurfaceBridge({ writeSseEvent, isSessionLive }: Surf
     surfaceId: string,
     kind: string,
     authKey: string,
-    sessionId: string,
+    identity: ThreadSelection,
   ) => {
     connections.set(res, {
       authKey,
@@ -70,41 +75,34 @@ export function createClientSurfaceBridge({ writeSseEvent, isSessionLive }: Surf
       res,
       surfaceId,
       kind,
-      sessionId,
+      identity: { ...identity },
     });
   };
 
-  // A bind authorizes one subsequent SSE connection for one concrete Surface.
-  // Repeating the POST replaces the same permit instead of accumulating stale
-  // reconnect credits; separate windows have separate surface ids.
-  const boundSessions = new Map<string, Map<string, Set<string>>>();
-  const bindSession = (authKey: string, sessionId: string, surfaceId: string): void => {
-    const sessions = boundSessions.get(authKey) ?? new Map<string, Set<string>>();
-    const surfaces = sessions.get(sessionId) ?? new Set<string>();
-    surfaces.add(surfaceId);
-    sessions.set(sessionId, surfaces);
-    boundSessions.set(authKey, sessions);
+  // A successful authenticated bind replaces this Surface's previous selection.
+  // The opaque principal and one-use permit are Host state, never renderer authority.
+  const bindings = new Map<string, Map<string, string>>();
+  const bindThread = (authKey: string, identity: ThreadSelection, surfaceId: string): void => {
+    const surfaces = bindings.get(authKey) ?? new Map<string, string>();
+    surfaces.set(surfaceId, selectionKey(identity));
+    bindings.set(authKey, surfaces);
+    for (const [res, connection] of connections) {
+      if (connection.authKey === authKey && connection.surfaceId === surfaceId) dropConnection(res);
+    }
   };
-  const isSessionBound = (authKey: string, sessionId: string, surfaceId: string): boolean => (
-    boundSessions.get(authKey)?.get(sessionId)?.has(surfaceId) === true
-  );
-  const consumeSessionBinding = (authKey: string, sessionId: string, surfaceId: string): boolean => {
-    const sessions = boundSessions.get(authKey);
-    const surfaces = sessions?.get(sessionId);
-    if (!sessions || !surfaces?.delete(surfaceId)) return false;
-    if (surfaces.size === 0) sessions.delete(sessionId);
-    if (sessions.size === 0) boundSessions.delete(authKey);
+  const consumeThreadBinding = (authKey: string, identity: ThreadSelection, surfaceId: string): boolean => {
+    const surfaces = bindings.get(authKey);
+    if (surfaces?.get(surfaceId) !== selectionKey(identity)) return false;
+    surfaces.delete(surfaceId);
+    if (surfaces.size === 0) bindings.delete(authKey);
     return true;
   };
-
-  const dropSession = (sessionId: string): void => {
-    for (const [authKey, sessions] of boundSessions) {
-      sessions.delete(sessionId);
-      if (sessions.size === 0) boundSessions.delete(authKey);
+  const dropThread = (identity: ThreadSelection): void => {
+    for (const [authKey, surfaces] of bindings) {
+      for (const [surfaceId, key] of surfaces) if (key === selectionKey(identity)) surfaces.delete(surfaceId);
+      if (surfaces.size === 0) bindings.delete(authKey);
     }
-    for (const [res, connection] of connections) {
-      if (connection.sessionId === sessionId) dropConnection(res);
-    }
+    for (const [res, connection] of connections) if (sameSelection(connection.identity, identity)) dropConnection(res);
   };
 
   const detach = (res: Response) => {
@@ -121,10 +119,10 @@ export function createClientSurfaceBridge({ writeSseEvent, isSessionLive }: Surf
     return [...seen.values()];
   };
 
-  const listForSession = (sessionId: string): ClientSurfaceInfo[] => {
+  const listForThread = (selection: ThreadSelection): ClientSurfaceInfo[] => {
     const seen = new Map<string, ClientSurfaceInfo>();
     for (const conn of connections.values()) {
-      if (conn.sessionId !== sessionId) continue;
+      if (!sameSelection(conn.identity, selection)) continue;
       const identity = `${conn.authKey}\0${conn.surfaceId}`;
       if (!seen.has(identity)) seen.set(identity, { id: conn.surfaceId, kind: conn.kind });
     }
@@ -143,17 +141,17 @@ export function createClientSurfaceBridge({ writeSseEvent, isSessionLive }: Surf
   };
 
   const request: ClientSurfaceBridge['request'] = async (op, target) => {
-    if (isSessionLive && !(await isSessionLive(target.sessionId))) {
-      dropSession(target.sessionId);
+    if (isThreadLive && !(await isThreadLive(target))) {
+      dropThread(target);
       throw new HarnessServiceError(
         'unavailable',
-        `session ${target.sessionId} is no longer live on this Host`,
+        `Thread ${target.threadId}/${target.branchId} is unavailable on this Host`,
       );
     }
     const targets = [...connections.values()];
-    const sessionTargets = targets.filter((conn) => conn.sessionId === target.sessionId);
+    const threadTargets = targets.filter((conn) => sameSelection(conn.identity, target));
     const targetSurfaces = new Map<string, ClientSurfaceInfo>();
-    for (const conn of sessionTargets) {
+    for (const conn of threadTargets) {
       const identity = `${conn.authKey}\0${conn.surfaceId}`;
       if (!targetSurfaces.has(identity)) targetSurfaces.set(identity, { id: conn.surfaceId, kind: conn.kind });
     }
@@ -161,7 +159,7 @@ export function createClientSurfaceBridge({ writeSseEvent, isSessionLive }: Surf
     if (surfaces.length === 0) {
       throw new HarnessServiceError(
         'unavailable',
-        `no authenticated surface is bound to session ${target.sessionId}`,
+        `no authenticated surface is bound to Thread ${target.threadId}/${target.branchId}`,
       );
     }
     if (surfaces.length > 1) {
@@ -171,11 +169,11 @@ export function createClientSurfaceBridge({ writeSseEvent, isSessionLive }: Surf
       );
     }
     const surface = surfaces[0]!;
-    const targetIdentity = sessionTargets.find((conn) => conn.surfaceId === surface.id)!;
+    const targetIdentity = threadTargets.find((conn) => conn.surfaceId === surface.id)!;
     const selectedTargets = targets.filter((conn) => (
       conn.surfaceId === surface.id
       && conn.authKey === targetIdentity.authKey
-      && conn.sessionId === targetIdentity.sessionId
+      && sameSelection(conn.identity, targetIdentity.identity)
     ));
     const requestId = `surface-${randomUUID()}`;
     const results = new Promise<{ surface: ClientSurfaceInfo; results: ClientSurfaceFieldResult[] }>((resolve, reject) => {
@@ -261,14 +259,13 @@ export function createClientSurfaceBridge({ writeSseEvent, isSessionLive }: Surf
 
   return {
     attach,
-    bindSession,
-    consumeSessionBinding,
-    isSessionBound,
-    dropSession,
+    bindThread,
+    consumeThreadBinding,
+    dropThread,
     detach,
     dropConnection,
     list,
-    listForSession,
+    listForThread,
     request,
     ack,
     /** Testing/inspection: number of in-flight requests. */

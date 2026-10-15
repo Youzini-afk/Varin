@@ -1,0 +1,65 @@
+import { getRuntimeEndpointGeneration, type ThreadIdentity } from '@varin/application-client';
+import { useThreadStore, threadIdentityKey } from '@/stores/useThreadStore';
+import { useThreadDraftStore } from '@/stores/useThreadDraftStore';
+import { useDirectoryStore } from '@/stores/useDirectoryStore';
+import { useUIStore } from '@/stores/useUIStore';
+import { resolveVarinWorkbenchLayout, VARIN_WORKBENCH_BOT_PROFILE_ID, VARIN_WORKBENCH_DEFAULT_PROFILE_ID } from '@varin/extension-contract';
+import { getVarinExtensionCatalogState } from '@/lib/extensions/catalog-store';
+import { selectActiveWorkbenchProfile } from '@/lib/extensions/workbench-shell-transition';
+import { varinSurfaceRuntime } from '@/lib/extensions/surface-runtime';
+import { getBot, openBotConversation } from '@/lib/bots';
+
+let navigation = 0;
+async function selectConversationShell(bot: boolean, assertCurrent: () => void): Promise<void> {
+  const workbench = getVarinExtensionCatalogState().snapshot?.workbench;
+  const current = workbench?.authoritative ? resolveVarinWorkbenchLayout(workbench.document, { surface: varinSurfaceRuntime.surface, userId: 'default' }).profileId : null;
+  if (bot && current !== VARIN_WORKBENCH_BOT_PROFILE_ID) await selectActiveWorkbenchProfile(VARIN_WORKBENCH_BOT_PROFILE_ID, undefined, { enableShell: true, beforeCommit: async () => assertCurrent() });
+  else if (!bot && current === VARIN_WORKBENCH_BOT_PROFILE_ID) await selectActiveWorkbenchProfile(VARIN_WORKBENCH_DEFAULT_PROFILE_ID, undefined, { beforeCommit: async () => assertCurrent() });
+}
+export async function openThreadFromNavigation(target: { threadId: string; branchId?: string; directory?: string | null }): Promise<ThreadIdentity> {
+  const host = getRuntimeEndpointGeneration(); const request = ++navigation;
+  const current = () => {
+    if (host !== getRuntimeEndpointGeneration() || request !== navigation) throw new Error('Conversation navigation was superseded');
+  };
+  const { identity, botId } = await useThreadStore.getState().resolveThread(target);
+  current();
+  const bot = botId ? await getBot(botId) : null;
+  current();
+  if (botId && (!bot || bot.id !== botId)) throw new Error('Conversation Bot is unavailable on this Host');
+  await selectConversationShell(Boolean(bot), current);
+  current();
+  if (bot) await openBotConversation(bot.id, identity, target.directory ?? bot.homeDir, null, bot.archived);
+  else {
+    await useThreadStore.getState().selectThread(identity);
+    current();
+    if (target.directory) useDirectoryStore.getState().setDirectory(target.directory);
+  }
+  useUIStore.getState().setSettingsDialogOpen(false);
+  useUIStore.getState().setActiveMainTab('chat');
+  useUIStore.getState().closeMainSurfaces();
+  return identity;
+}
+export async function startThreadFromNavigation(target: { directory?: string | null } = {}): Promise<ThreadIdentity> {
+  const host = getRuntimeEndpointGeneration(); const request = ++navigation;
+  const current = () => { if (host !== getRuntimeEndpointGeneration() || request !== navigation) throw new Error('Conversation navigation was superseded'); };
+  await selectConversationShell(false, current);
+  current();
+  const identity = await useThreadStore.getState().createThread({ workspacePath: target.directory ?? useDirectoryStore.getState().currentDirectory });
+  if (host !== getRuntimeEndpointGeneration() || request !== navigation) throw new Error('Application Host changed during conversation creation');
+  useUIStore.getState().setActiveMainTab('chat');
+  useUIStore.getState().closeMainSurfaces();
+  return identity;
+}
+export async function switchRelativeThread(offset: number): Promise<void> {
+  const { threads, selectedIdentity } = useThreadStore.getState();
+  const visible = threads.filter(thread => !thread.bot_id && !thread.archived && thread.deleted_at_ms === null)
+    .sort((a, b) => Number(b.pinned) - Number(a.pinned) || b.updated_at_ms - a.updated_at_ms);
+  if (!visible.length || !Number.isFinite(offset)) return;
+  const index = visible.findIndex(thread => thread.thread_id === selectedIdentity?.threadId);
+  const target = visible[((index + Math.trunc(offset)) % visible.length + visible.length) % visible.length];
+  await openThreadFromNavigation({ threadId: target.thread_id });
+}
+export function appendThreadDraftText(identity: ThreadIdentity, text: string): void {
+  const key = threadIdentityKey(useThreadStore.getState().hostKey, identity);
+  useThreadDraftStore.getState().patch(key, draft => ({ text: [draft.text.trimEnd(), text].filter(Boolean).join('\n\n') }));
+}

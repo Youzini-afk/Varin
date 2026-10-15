@@ -1,3 +1,5 @@
+import type { ThreadSummary } from '@varin/protocol';
+
 const DEFAULT_PWA_APP_NAME = 'Varin - Agent Workspace';
 
 export interface PwaManifestRequest {
@@ -25,23 +27,6 @@ const mapPwaOrientationToManifest = (value: unknown): string | undefined => {
   return undefined;
 };
 
-const finiteTimestamp = (...values: unknown[]): number => {
-  for (const value of values) {
-    const number = typeof value === 'string' && value.trim() ? Number(value) : value;
-    if (typeof number === 'number' && Number.isFinite(number)) return number;
-  }
-  return 0;
-};
-
-interface RecentSession {
-  createdAt?: number | string | undefined;
-  id?: string | undefined;
-  lastActiveAt?: number | string | undefined;
-  name?: string | undefined;
-  title?: string | undefined;
-  updatedAt?: number | string | undefined;
-}
-
 interface RecentShortcut {
   description: string;
   icons: Array<{ sizes: string; src: string; type: string }>;
@@ -51,7 +36,7 @@ interface RecentShortcut {
 }
 
 export interface PwaManifestRouteDependencies {
-  listRecentSessions?: (() => Promise<RecentSession[]> | RecentSession[]) | undefined;
+  listRecentThreads(): Promise<ThreadSummary[]> | ThreadSummary[];
   normalizePwaAppName(value: unknown, fallback: string): string | undefined;
   normalizePwaOrientation(value: unknown, fallback: string): string | undefined;
   readSettingsFromDisk(): Promise<Record<string, unknown>>;
@@ -62,45 +47,33 @@ export const registerPwaManifestRoute = (
   dependencies: PwaManifestRouteDependencies,
 ): void => {
   const {
-    listRecentSessions = async () => [],
+    listRecentThreads,
     readSettingsFromDisk,
     normalizePwaAppName,
     normalizePwaOrientation,
   } = dependencies;
-  let recentSessionCache: { at: number; data: RecentShortcut[] } | null = null;
+  let recentThreadCache: { at: number; data: RecentShortcut[] } | null = null;
 
-  const getRecentSessionShortcuts = async (): Promise<RecentShortcut[]> => {
+  const getRecentThreadShortcuts = async (): Promise<RecentShortcut[]> => {
     const now = Date.now();
-    if (recentSessionCache && now - recentSessionCache.at < 5000) return recentSessionCache.data;
+    if (recentThreadCache && now - recentThreadCache.at < 5000) return recentThreadCache.data;
     try {
-      const sessions = await listRecentSessions();
-      const rows = (Array.isArray(sessions) ? sessions : [])
-        .map((session, index) => {
-          const id = typeof session?.id === 'string' ? session.id.trim().slice(0, 160) : '';
-          if (!id) return null;
-          const title = (normalizePwaAppName(session.name || session.title, `Session ${index + 1}`)
-            ?? `Session ${index + 1}`).slice(0, 48);
-          return {
-            id,
-            title,
-            updatedAt: finiteTimestamp(session.lastActiveAt, session.updatedAt, session.createdAt),
-          };
-        })
-        .filter((session): session is { id: string; title: string; updatedAt: number } => Boolean(session))
-        .sort((left, right) => right.updatedAt - left.updatedAt)
+      const threads = await listRecentThreads();
+      const rows: RecentShortcut[] = threads
+        .filter(thread => !thread.bot_id && !thread.archived && thread.deleted_at_ms === null)
+        .sort((left, right) => right.updated_at_ms - left.updated_at_ms)
         .slice(0, 3)
-        .map((session) => ({
-          name: session.title,
-          short_name: session.title.slice(0, 32),
-          description: 'Open recent Pi session',
-          url: `/?session=${encodeURIComponent(session.id)}`,
-          icons: [{ src: '/pwa-192.png', sizes: '192x192', type: 'image/png' }],
-        }));
-      recentSessionCache = { at: now, data: rows };
+        .map((thread, index) => {
+          const title = (normalizePwaAppName(thread.title, `Conversation ${index + 1}`) ?? `Conversation ${index + 1}`).slice(0, 48);
+          const query = new URLSearchParams({ thread: thread.thread_id, branch: thread.main_branch_id });
+          return { name: title, short_name: title.slice(0, 32), description: 'Open recent conversation',
+            url: `/?${query}`, icons: [{ src: '/pwa-192.png', sizes: '192x192', type: 'image/png' }] };
+        });
+      recentThreadCache = { at: now, data: rows };
       return rows;
     } catch {
-      recentSessionCache = { at: now, data: [] };
-      return [];
+      // A transient catalog failure must not replace the last valid shortcut projection.
+      return recentThreadCache?.data ?? [];
     }
   };
 
@@ -131,7 +104,7 @@ export const registerPwaManifestRoute = (
         ? storedOrientation
         : normalizePwaOrientation(queryOrientation, 'system') ?? 'system',
     );
-    const shortcuts = await getRecentSessionShortcuts();
+    const shortcuts = await getRecentThreadShortcuts();
     const manifest = {
       name: appName,
       short_name: appName.slice(0, 30),

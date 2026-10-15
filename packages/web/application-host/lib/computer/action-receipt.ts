@@ -13,6 +13,7 @@ export function actionResult(response: DriverResponse): ComputerActionResult {
   };
   return {
     accepted: response.ok,
+    inputWriterStopped: true,
     receipt,
     ...(response.cancelled ? { cancelled: true } : {}),
     ...(receipt.effect === 'unknown' ? { outcome: 'unknown' as const } : receipt.effect === 'partial' ? { outcome: 'partial' as const } : {}),
@@ -22,7 +23,7 @@ export function actionResult(response: DriverResponse): ComputerActionResult {
 
 export function interruptedAction(message: string, submitted: boolean, cancelled = false): ComputerActionResult {
   return {
-    accepted: false, ...(cancelled ? { cancelled: true } : {}), ...(submitted ? { outcome: 'unknown' as const } : {}),
+    accepted: false, inputWriterStopped: !submitted, ...(cancelled ? { cancelled: true } : {}), ...(submitted ? { outcome: 'unknown' as const } : {}),
     detail: message,
     receipt: { effect: submitted ? 'unknown' : 'none',
       reason: { code: cancelled ? 'cancelled' : 'connection-lost', message },

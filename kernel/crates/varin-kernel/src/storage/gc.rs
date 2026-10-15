@@ -12,6 +12,9 @@ impl Storage {
         let mut reclaimed_bytes = 0_u64;
         let mut failures = Vec::new();
         for (hash, raw_path) in rows {
+            if self.blob_read_roots.contains(&hash) {
+                continue;
+            }
             // An object may have been installed again after an earlier cleanup
             // failure. A stale delete intent cannot revoke a newer catalog fact.
             let installed: bool = self.conn.query_row(
@@ -150,12 +153,12 @@ impl Storage {
     }
 
     pub(super) fn cleanup_status(&self) -> Result<(i64, Vec<String>), KernelError> {
-        let pending: i64 =
+        let mut pending: i64 =
             self.conn
                 .query_row("SELECT COUNT(*) FROM pending_gc_files", [], |row| {
                     row.get(0)
                 })?;
-        let failures = self
+        let mut failures: Vec<String> = self
             .conn
             .prepare(
                 "SELECT last_error FROM pending_gc_files WHERE state = 'failed' ORDER BY queued_at",
@@ -165,6 +168,18 @@ impl Storage {
             .into_iter()
             .flatten()
             .collect();
+        let views=self.conn.prepare("SELECT payload_json FROM domain_records WHERE record_type='file.materialized-view' AND json_extract(payload_json,'$.cleanupRequested')=1")?
+            .query_map([],|row|row.get::<_,String>(0))?.collect::<Result<Vec<_>,_>>()?;
+        pending += views.len() as i64;
+        for raw in views {
+            let view: Value = serde_json::from_str(&raw)?;
+            if let Some(error) = view["cleanupError"].as_str() {
+                failures.push(format!(
+                    "derived view {}: {error}",
+                    view["viewId"].as_str().unwrap_or("unknown")
+                ));
+            }
+        }
         Ok((pending, failures))
     }
 
@@ -183,7 +198,7 @@ impl Storage {
         }
         for row in self
             .conn
-            .prepare("SELECT root_hash FROM revisions UNION SELECT root_hash FROM pins")?
+            .prepare("SELECT root_hash FROM revisions UNION SELECT root_hash FROM pins UNION SELECT json_extract(payload_json,'$.root') FROM domain_records WHERE record_type='working.result' UNION SELECT json_extract(payload_json,'$.baseRoot') FROM domain_records WHERE record_type='working.result' UNION SELECT json_extract(payload_json,'$.sourceRoot') FROM domain_records WHERE record_type='file.materialized-view'")?
             .query_map([], |row| row.get::<_, String>(0))?
         {
             roots.insert(row?);
@@ -199,7 +214,7 @@ impl Storage {
             roots.insert(root.to_string());
         }
         let mut nodes = BTreeSet::new();
-        let mut blobs = BTreeSet::new();
+        let mut blobs = self.blob_read_roots.active_hashes();
         for root in roots {
             self.check_cancelled()?;
             self.collect_reachable(&root, &mut nodes, &mut blobs)?;
@@ -210,6 +225,41 @@ impl Storage {
             .query_map([], |row| row.get::<_, String>(0))?
         {
             blobs.insert(row?);
+        }
+        for row in self.conn.prepare("SELECT json_extract(result_json,'$.objectHash') FROM operations WHERE kind IN ('source.read','source.schedule') AND state='committed' AND json_extract(result_json,'$.released') IS NOT 1")?.query_map([], |row| row.get::<_,String>(0))? {
+            blobs.insert(row?);
+        }
+        // Original MCP holders own creation bodies until their exact release,
+        // including while their Source is revoked or a Host has reopened.
+        for row in self.conn.prepare(
+            "SELECT json_extract(holder.value,'$.creationReceipt.outcomeRef.objectHash')
+             FROM domain_records AS source, json_each(source.payload_json,'$.result.mcpHolders') AS holder
+             WHERE source.record_type='source.authority'
+               AND json_extract(holder.value,'$.released')=0
+               AND json_extract(holder.value,'$.creationReceipt.outcomeRef.objectHash') IS NOT NULL"
+        )?.query_map([], |row| row.get::<_, String>(0))? {
+            blobs.insert(row?);
+        }
+        // Exact parent definition references own their existing Storage bodies.
+        // A release tombstone never remains a GC root, even after late retain.
+        for row in self.conn.prepare(
+            "SELECT json_extract(child.value,'$.selectionRef.objectHash')
+             FROM domain_records AS source, json_each(source.payload_json,'$.result.mcpChildren') AS child
+             WHERE source.record_type='source.authority'
+               AND json_extract(child.value,'$.released')=0
+               AND json_extract(child.value,'$.selectionRef.objectHash') IS NOT NULL"
+        )?.query_map([], |row| row.get::<_, String>(0))? {
+            blobs.insert(row?);
+        }
+        // Proof publication survives physical Source retirement until the original
+        // delegated launch or its terminal cleanup acknowledges it. It retains only bytes.
+        for field in ["requestRef", "outcomeRef"] {
+            for row in self.conn.prepare(&format!(
+                "SELECT json_extract(payload_json,'$.result.mcpDerivation.{field}.objectHash')
+                 FROM domain_records WHERE record_type='source.authority'
+                 AND json_extract(payload_json,'$.result.mcpDerivation.released')=0
+                 AND json_extract(payload_json,'$.result.mcpDerivation.{field}.objectHash') IS NOT NULL"
+            ))?.query_map([], |row| row.get::<_, String>(0))? { blobs.insert(row?); }
         }
         for row in self
             .conn

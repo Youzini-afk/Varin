@@ -1,0 +1,344 @@
+import { expect, it } from 'vitest';
+import fs from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
+import { McpAuthority } from '../mcp/authority.js';
+import { fixtureMcpStdio } from './mcp-stdio.test-helper.js';
+import { createMcpLease } from './mcp-owner.js';
+import { createChildMcpPreparer } from './mcp-child-preparation.js';
+import type { KernelClient } from './kernel-client.js';
+import { MCP_CAPABILITIES, toolOperationId, type HostToolCall, type McpBinding } from './protocol.generated.js';
+import type { McpToolLease } from './tool-bridge.js';
+
+it('rebinds original MCP definitions to child stdio cwd across retirement, restores exact bindings and rejects unavailable dependencies', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'varin-child-mcp-'));
+  const parentCwd = path.join(root, 'parent'),
+    childCwd = path.join(root, 'child');
+  await fs.mkdir(parentCwd);
+  await fs.mkdir(childCwd);
+  await fs.writeFile(path.join(parentCwd, 'marker'), 'parent');
+  await fs.writeFile(path.join(childCwd, 'marker'), 'child');
+  await fs.writeFile(path.join(root, 'marker'), 'neutral');
+  const script = path.join(root, 'server.mjs'),
+    calls = path.join(root, 'calls.jsonl');
+  await fs.writeFile(
+    script,
+    `import fs from 'node:fs'; import readline from 'node:readline';
+readline.createInterface({input:process.stdin}).on('line',line=>{const request=JSON.parse(line);if(request.id===undefined)return;let result;
+if(request.method==='initialize')result={protocolVersion:request.params.protocolVersion,capabilities:{tools:{},resources:{}},serverInfo:{name:'fixture',version:'1'}};
+else if(request.method==='resources/list')result={resources:[]};
+else if(request.method==='resources/templates/list')result={resourceTemplates:[]};
+else if(request.method==='resources/read')result={contents:[{uri:request.params.uri,text:JSON.stringify({cwd:process.cwd(),marker:fs.readFileSync('marker','utf8')})},{uri:request.params.uri,blob:Buffer.from('resource-bytes').toString('base64'),mimeType:'application/octet-stream'}]};
+else if(request.method==='tools/list')result={tools:[{name:'read',description:'Read the actual working view',inputSchema:{type:'object',additionalProperties:false},execution:{taskSupport:'required'}}]};
+else if(request.method==='tools/call'){const value={cwd:process.cwd(),marker:fs.readFileSync('marker','utf8')};fs.appendFileSync(${JSON.stringify(calls)},JSON.stringify(value)+'\\n');result={content:[{type:'text',text:JSON.stringify(value)}]};}
+else {process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:request.id,error:{code:-32601,message:'Unsupported fixture method'}})+'\\n');return;}process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:request.id,result})+'\\n');});`,
+  );
+  const config = {
+    mcpServers: {
+      fixture: {
+        command: process.execPath,
+        args: [script],
+        exposure: 'direct',
+      },
+    },
+  };
+  await fs.writeFile(path.join(root, 'mcp.json'), JSON.stringify(config));
+  const authority = new McpAuthority({ adaptTransport: fixtureMcpStdio });
+  const leases: McpToolLease[] = [];
+  const kernel = {} as KernelClient; // Permission fixture explicitly allows this tool; no kernel RPC occurs.
+  let allowedTool = '';
+  const policy = async () => ({
+    mode: 'normal' as const,
+    rules: [{ tool: allowedTool, decision: 'allow' as const }, { tool: MCP_CAPABILITIES.find(value => value.operation === 'read_resource')!.name, decision: 'allow' as const }],
+  });
+  const signal = new AbortController().signal;
+  try {
+    const parent = createMcpLease({
+      kernel,
+      currentPolicy: policy,
+      lease: await authority.acquire(
+        {
+          resourceOwner: { kind: 'local' },
+          agentDir: root,
+          configCwd: root,
+          executionCwd: parentCwd,
+          environmentId: 'host:parent',
+          executionScope: 'workspace',
+          projectTrusted: false,
+          sessionId: 'parent',
+        },
+        { servers: ['fixture'] },
+      ),
+    });
+    leases.push(parent);
+    const tool = parent.binding.tools.find(
+      (value) => value.name !== 'mcp_call' && value.name !== 'mcp_discover',
+    )!;
+    allowedTool = tool.name;
+    // A tool hint alone cannot turn a server without negotiated Tasks into a Job route.
+    expect(parent.binding.routes[tool.name]).toEqual({kind:'direct'});
+    const selected: McpBinding = {
+      ...structuredClone(parent.binding),
+      tools: [tool],
+      routes: { [tool.name]: parent.binding.routes[tool.name]! },
+      resources: {
+        [tool.name]: parent.binding.resources[tool.name]!,
+        'server:fixture': parent.binding.resources['server:fixture']!,
+      },
+    };
+    const prepare = createChildMcpPreparer({
+      authority,
+      kernel,
+      agentDir: root,
+      hostId: 'host',
+      admitWorkspaceRegistration: async () => ({ canonicalPath: parentCwd }),
+      projectTrusted: () => false,
+      currentPolicy: policy,
+    });
+    const input = {
+      runId: 'child-run',
+      threadId: 'child-thread',
+      fixed: true,
+      source: {
+        resourceOwner: { kind: 'local' as const },
+        runId: 'child-run',
+        mode: 'materialized' as const,
+        workspaceId: 'workspace',
+        executionWorkspaceId: 'child-execution',
+        branchId: 'child-source',
+        revision: 1,
+        tools: [],
+      },
+      executionCwd: childCwd,
+    };
+    const child = await prepare(
+      { ...input, delegatedBinding: selected },
+      signal,
+    );
+    leases.push(child);
+    expect(child.binding.reference).not.toBe(parent.binding.reference);
+    expect(child.binding.resources[tool.name]).not.toBe(
+      parent.binding.resources[tool.name],
+    );
+    expect(child.binding.tools).toEqual([tool]);
+    expect(child.binding.provenance.servers.fixture!.definition_version).toBe(
+      parent.binding.provenance.servers.fixture!.definition_version,
+    );
+    const call: HostToolCall = {
+      runId: input.runId,
+      origin: { kind: 'policy_action', action_id: 'action', node_id: 'node' },
+      operationId: 'child-operation',
+      callId: 'child-call',
+      name: tool.name,
+      schemaVersion: tool.version,
+      arguments: {},
+    };
+    await child.authorize(call, signal);
+    const result = await child.execute(call, signal, {
+      kind: 'external',
+      identity: 'child-effect',
+      epoch: 'child-epoch',
+    });
+    expect(result).toMatchObject({
+      completion: { kind: 'result', outcome: 'succeeded', effect: 'confirmed' },
+      executor_stopped: true,
+    });
+    expect(
+      (await fs.readFile(calls, 'utf8'))
+        .trim()
+        .split('\n')
+        .map((line) => JSON.parse(line)),
+    ).toEqual([{ cwd: childCwd, marker: 'child' }]);
+    const saved = structuredClone(child.binding);
+    child.release();
+    const restored = await prepare(
+      { ...input, requiredBinding: saved },
+      signal,
+    );
+    leases.push(restored);
+    expect(restored.binding).toEqual(saved);
+    // A subsequent delegated Run starts from the saved definitions under its own cwd.
+    // Neither the old child transport nor the parent's handoff is reused as authority.
+    const nextCwd = path.join(root, 'continued-child');
+    await fs.mkdir(nextCwd); await fs.writeFile(path.join(nextCwd, 'marker'), 'continued');
+    const nextInput = { ...input, runId: 'continued-run', executionCwd: nextCwd,
+      source: { ...input.source, runId: 'continued-run', branchId: 'continued-source' } };
+    const next = await prepare({ ...nextInput, delegatedBinding: saved }, signal);
+    leases.push(next);
+    expect(next.binding.tools).toEqual(saved.tools);
+    expect(next.binding.provenance.servers.fixture!.definition_version).toBe(saved.provenance.servers.fixture!.definition_version);
+    expect(next.binding.reference).not.toBe(saved.reference);
+    const nextCall = { ...call, runId: nextInput.runId, operationId: 'continued-effect', callId: 'continued-call' };
+    await next.authorize(nextCall, signal);
+    await next.execute(nextCall, signal, { kind: 'external', identity: 'continued-effect', epoch: 'continued-epoch' });
+    expect(JSON.parse((await fs.readFile(calls, 'utf8')).trim().split('\n').at(-1)!)).toEqual({ cwd: nextCwd, marker: 'continued' });
+    const nextSaved = structuredClone(next.binding); next.release();
+    const nextRestored = await prepare({ ...nextInput, requiredBinding: nextSaved }, signal);
+    leases.push(nextRestored); expect(nextRestored.binding).toEqual(nextSaved);
+    await expect(
+      restored.authorize(
+        {
+          ...call,
+          name: 'mcp_discover',
+          schemaVersion: '1',
+          arguments: { server: 'unselected' },
+        },
+        signal,
+      ),
+    ).rejects.toThrow('mcp_schema_changed');
+    const { executionCwd: _cwd, ...readOnly } = input;
+    // A global config file can still describe a workspace-scoped execution dependency.
+    await expect(
+      prepare(
+        {
+          ...readOnly,
+          source: { ...input.source, mode: 'fixed_branch' },
+          delegatedBinding: selected,
+        },
+        signal,
+      ),
+    ).rejects.toThrow('execution view matching its fixed source');
+    const global = createMcpLease({
+      kernel,
+      currentPolicy: policy,
+      lease: await authority.acquire(
+        {
+          resourceOwner: { kind: 'local' },
+          agentDir: root,
+          configCwd: root,
+          executionCwd: root,
+          environmentId: 'host:global',
+          executionScope: 'global',
+          projectTrusted: false,
+          sessionId: 'global-parent',
+        },
+        { servers: ['fixture'] },
+      ),
+    });
+    leases.push(global);
+    const neutral = await prepare(
+      { ...input, delegatedBinding: global.binding },
+      signal,
+    );
+    leases.push(neutral);
+    expect(neutral.binding.provenance.servers.fixture!.owner.execution_scope).toBe('global');
+    const neutralCall = {
+      ...call,
+      operationId: 'neutral-operation',
+      callId: 'neutral-call',
+    };
+    await neutral.authorize(neutralCall, signal);
+    await neutral.execute(neutralCall, signal, {
+      kind: 'external',
+      identity: 'neutral-effect',
+      epoch: 'child-epoch',
+    });
+    expect(
+      (await fs.readFile(calls, 'utf8'))
+        .trim()
+        .split('\n')
+        .map((line) => JSON.parse(line)),
+    ).toEqual([
+      { cwd: childCwd, marker: 'child' },
+      { cwd: nextCwd, marker: 'continued' },
+      { cwd: root, marker: 'neutral' },
+    ]);
+    // The child preparation owner also derives a service-only selection, including a
+    // source-less neutral dependency. This is real stdio/Host admission, not a script engine test.
+    const serviceNames = new Set(MCP_CAPABILITIES.filter(value => value.operation === 'discover' || value.operation === 'read_resource').map(value => value.name));
+    for (const [original, source, expectedCwd, expectedMarker] of [
+      [parent, input.source, childCwd, 'child'],
+      [global, null, root, 'neutral'],
+    ] as const) {
+      const selection: McpBinding = {
+        ...structuredClone(original.binding),
+        tools: original.binding.tools.filter(tool => serviceNames.has(tool.name)),
+        routes: Object.fromEntries(Object.entries(original.binding.routes).filter(([name]) => serviceNames.has(name))),
+        resources: Object.fromEntries(Object.entries(original.binding.resources).filter(([name]) => name.startsWith('server:'))),
+      };
+      const servicesChild = await prepare({ ...input, source, delegatedBinding: selection }, signal);
+      leases.push(servicesChild);
+      expect(servicesChild.binding.tools.map(tool => tool.name)).toEqual(selection.tools.map(tool => tool.name));
+      const origin = { kind: 'nested_call' as const, parent_operation_id: `script:${expectedMarker}` };
+      const invoke = async (operation: 'discover' | 'read_resource', arguments_: Record<string, unknown>) => {
+        const schema = MCP_CAPABILITIES.find(value => value.operation === operation)!;
+        const callId = `${operation}:${expectedMarker}`;
+        const invocation: HostToolCall = { runId: input.runId, origin, callId, operationId: toolOperationId(origin, callId),
+          name: schema.name, schemaVersion: schema.version, arguments: arguments_ };
+        await servicesChild.authorize(invocation, signal);
+        return servicesChild.execute(invocation, signal, { kind: 'external', identity: 'service-child', epoch: 'service-child-epoch' });
+      };
+      const discovered = await invoke('discover', {server:'fixture'});
+      expect(discovered.completion.kind).toBe('result');
+      if (discovered.completion.kind !== 'result') throw new Error('expected discovery result');
+      const service = (discovered.completion.content.data as {services:{kind:string;schemaVersion:string}[]}).services.find(value => value.kind === 'resources')!;
+      const received = await invoke('read_resource', {server:'fixture',schemaVersion:service.schemaVersion,uri:'fixture:///not-listed'});
+      expect(received.completion).toMatchObject({kind:'result',outcome:'succeeded',effect:'confirmed',content:{parts:[
+        {kind:'text',text:JSON.stringify({cwd:expectedCwd,marker:expectedMarker})},
+        {kind:'media',media:{media_type:'application/octet-stream',data_base64:Buffer.from('resource-bytes').toString('base64')}},
+      ]}});
+      const savedServices = structuredClone(servicesChild.binding);
+      servicesChild.release();
+      const reopenedServices = await prepare({ ...input, source, requiredBinding: savedServices }, signal);
+      leases.push(reopenedServices);
+      expect(reopenedServices.binding).toEqual(savedServices);
+    }
+    config.mcpServers.fixture.args = [script, 'new-configuration'];
+    await fs.writeFile(path.join(root, 'mcp.json'), JSON.stringify(config));
+    const afterUpdate = await prepare(
+      { ...input, delegatedBinding: selected },
+      signal,
+    );
+    leases.push(afterUpdate);
+    expect(afterUpdate.binding).toEqual(saved);
+    await afterUpdate.authorize(
+      { ...call, operationId: 'after-update', callId: 'after-update' },
+      signal,
+    );
+    await afterUpdate.execute(
+      { ...call, operationId: 'after-update', callId: 'after-update' },
+      signal,
+      { kind: 'external', identity: 'after-update', epoch: 'child-epoch' },
+    );
+    expect(
+      (await fs.readFile(calls, 'utf8'))
+        .trim()
+        .split('\n')
+        .map((line) => JSON.parse(line)),
+    ).toEqual([
+      { cwd: childCwd, marker: 'child' },
+      { cwd: nextCwd, marker: 'continued' },
+      { cwd: root, marker: 'neutral' },
+      { cwd: childCwd, marker: 'child' },
+    ]);
+    // Host restart or final original-owner release cannot synthesize the old definition.
+    for (const lease of leases) lease.release();
+    await expect(
+      prepare({ ...input, requiredBinding: saved }, signal),
+    ).rejects.toThrow('mcp_saved_definition_unavailable');
+  } finally {
+    for (const lease of leases) lease.release();
+    await authority.close();
+    await fs.rm(root, { recursive: true, force: true });
+  }
+}, 20_000);
+
+it('keeps Catalog Task controls after server removal and still requires original family access', async () => {
+  const root=await fs.mkdtemp(path.join(os.tmpdir(),'varin-task-controls-'));
+  const authority=new McpAuthority();
+  const reads:Array<{method:string;params:unknown}>=[];
+  const kernel={agentRuntimeRequest:async(method:string,params:unknown)=>{reads.push({method,params});throw new Error('original_job_family_required');}} as unknown as KernelClient;
+  const {createMcpTaskRuntime}=await import('./mcp-task-runtime.js');
+  const tasks=createMcpTaskRuntime({kernel,runtime:{onReady:()=>()=>{},onEvent:()=>()=>{},reconcileObservations:async()=>[]},recover:async()=>{throw new Error('no endpoint may be invented');}});
+  const owner=await authority.acquire({resourceOwner:{kind:'local'},agentDir:root,configCwd:root,executionCwd:root,environmentId:'host:global',executionScope:'global',projectTrusted:false,sessionId:'agent:reader'},{servers:[]});
+  const lease=createMcpLease({lease:owner,kernel,tasks,currentPolicy:async()=>({mode:'normal',rules:[]})});
+  try{
+    expect(owner.inspect().connectedServerCount).toBe(0);
+    const controls=MCP_CAPABILITIES.filter(entry=>entry.route.kind==='task_control');
+    expect(lease.binding.tools.map(tool=>tool.name)).toEqual(controls.map(tool=>tool.name));
+    const selected=controls.find(entry=>entry.route.kind==='task_control'&&entry.route.action==='get')!;
+    await expect(lease.authorize({runId:'reader-run',operationId:'reader-call',origin:{kind:'policy_action',action_id:'read',node_id:'task'},callId:'task',name:selected.name,schemaVersion:selected.version,arguments:{operationId:'arbitrary-remote-id'}},new AbortController().signal)).rejects.toThrow('original_job_family_required');
+    expect(reads).toEqual([{method:'runtime.host_job.access',params:{runId:'reader-run',targetOperationId:'arbitrary-remote-id',control:false}}]);
+    expect(owner.inspect().connectedServerCount).toBe(0);
+  }finally{lease.release();await tasks.dispose();await authority.close();await fs.rm(root,{recursive:true,force:true});}
+});

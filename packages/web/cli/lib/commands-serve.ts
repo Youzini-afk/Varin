@@ -1,3 +1,4 @@
+import { createProcessRestart } from '#application-host/lib/platform/process-restart.js';
 import fs from 'fs';
 import { pathToFileURL } from 'url';
 import { spawn } from 'child_process';
@@ -213,6 +214,12 @@ async function serveCommand(options: CliOptions): Promise<number | void> {
         apiOnly: options.apiOnly === true,
         attachSignals: false,
         exitOnShutdown: false,
+        restartApplicationHost: createProcessRestart({ stop: async () => {
+          await controller.stop({ exitProcess: false });
+          cleanupFiles();
+          setForegroundServerActive(false);
+          setForegroundShutdown(null);
+        } }),
       });
 
       const resolvedPort = controller.getPort();

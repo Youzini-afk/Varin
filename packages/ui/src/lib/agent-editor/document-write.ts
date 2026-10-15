@@ -37,8 +37,9 @@ export const applyPatchDecisionsToDocument = async (input: {
   const prepared = await registry.prepareWorkspaceEdit({
     workspaceId: input.identity.workspaceId,
     origin: 'agent-patch-review',
-    textEdits: [{
-      identity: input.identity,
+    changes: [{
+        kind: 'text',
+        identity: input.identity,
       version: open.localEditRevision,
       edits: [{
         range: { start: { line: 0, character: 0 }, end: endPosition(open.buffer) },

@@ -1,189 +1,78 @@
 # @varin/protocol
 
-Varin protocol types, schemas, and event/method definitions.
+Shared native runtime, application, and resource contracts for Varin. The browser-safe root exports
+DTOs and pure helpers; it does not own conversation state, execution, credentials, or transport lifetimes.
 
-## Envelope decoding
+## Native runtime contracts
 
-Text transports use `decodeEnvelope` (or `JsonLineDecoder` for stdio). Node IPC uses
-JSON serialization at the process boundary, so its receiver passes the decoded value directly to
-`validateEnvelope`. Both entry points share the same envelope validation and protocol errors;
-IPC must not serialize and parse a second copy of each streaming event. Method and event payload
-validation remains with the owning dispatcher or consumer.
+`src/agent-runtime.generated.ts` is generated from `kernel/protocol/schema.json`. The Rust Agent Catalog
+owns Thread/branch identity, Runs, Operations, input admission, history, queues, Goals, followups and
+execution receipts. Consumers retain those original identities and revisions rather than reconstructing
+state from renderer timing or a generic busy flag. The Application Host exposes the authenticated
+product boundary through `ThreadsAPI` in `@varin/application-client`.
 
-## Harness events and methods
+Change the schema and owning Rust implementation together, then regenerate from the repository root:
 
-### Broker events
-
-| Event | Direction | Description |
-|-------|-----------|-------------|
-| `harness.request` | pi-host → host | Request a harness service; session identity comes from the broker actor, never this payload |
-| `harness.cancel` | pi-host → host | Abort an in-flight request and/or the explore query it belongs to |
-| `harness.respond` | host → pi-host | Response to a harness request |
-| `workspace.mutation.request` | pi-host → host | Request a file mutation (before/after) |
-| `workspace.mutation.respond` | host → pi-host | Accept/reject a mutation request |
-
-### Harness service methods
-
-| Method | Params | Result | Description |
-|--------|--------|--------|-------------|
-| `shell.exec` | `{ command, cwd?, waitMs?, toolCallId? }` | `ShellExecResult` | Start/idempotently recover a shell command; the wait window only decides foreground vs background |
-| `shell.read` | `{ id, offset?, length?, waitMs? }` | `OutputSlice & { running, exitCode? }` | Read immediately, page history, or wait for new background output/exit without stopping the process |
-| `shell.write` | `{ id, text }` | `{ accepted }` | Write to background shell stdin |
-| `shell.kill` | `{ id }` | `{ killed }` | Kill a background shell |
-| `output.store` | `{ text, label? }` | `{ ref: OutputRef, total }` | Store large output for the current Host generation |
-| `output.read` | `{ handle, offset?, length? }` | `OutputSlice` | Read stored output |
-| `search.content` | `{ pattern, limit?, contextLines? }` | `SearchContentResult` (`filesDropped?` / `fileCoverage?` only in explore candidate mode) | Content search |
-| `document.readSource` | `{ path }` | disk sentinel or fixed draft bytes | Select the authenticated source for native `read` without changing its schema |
-| `document.surfaceWrite` | `{ path, action, content?, edits? }` or `{ changes[] }` | disk sentinel, or per-path applied/conflict/unavailable/compensated/needs-attention | Shared surface-aware plan for native `write` / `edit` / `apply_patch` |
-| `document.pathOverlay` | `{ path, pattern? }` | disk sentinel or fixed relative path entries | Content-free fixed dirty paths and virtual directory ancestors for native `find` / `ls` |
-| `document.branchWrite` | `{ path, action, content?, edits?, expectedRevision? }` or `{ changes[], expectedRevision? }` | disk sentinel, committed revision, conflict, or rejection | Commit text mutations to an unpublished WorkingState delta |
-| `workingBranch.ensureMaterialized` | `{}` | virtual / materialized path / failed | Freeze the current branch revision and switch the Run to a real directory |
-| `fs.lock` | acquire `{ paths[], timeoutMs? }`; release `{ leaseId }` | `{ held, leaseIds[] }` / `{ held: false, released }` | Acquire an ordered canonical path batch or release one owner-bound lease |
-| `lsp.diagnostics` | `{ path, waitMs? }` | `DiagnosticsResult` | Bind the path's current disk revision and wait for the publication computed from it |
-| `lsp.diagnosticsSnapshot` | `{ path }` | `DiagnosticsResult` | Get diagnostics snapshot |
-| `lsp.symbols` | `{ path, query }` | `LspNavigationResult` | Find workspace symbols using the path's language provider |
-| `lsp.definition` | `{ path, line, character? }` | `LspNavigationResult` | Find a definition at a one-based position |
-| `lsp.references` | `{ path, line, character? }` | `LspNavigationResult` | Find references at a one-based position |
-| `lsp.hover` | `{ path, line, character? }` | `LspNavigationResult` | Read type/signature documentation at a one-based position |
-
-`LspNavigationResult` and `DiagnosticsResult` carry the `revision` and `source` (`disk | surface-draft`)
-their answer was computed from. Navigation also lists `unpinnedPaths`: files whose positions the
-language server read itself, which LSP cannot attribute to a version.
-| `web.fetch` | `{ url, render? }` | `WebFetchResult` | Fetch a URL (SSRF-guarded) |
-| `web.search` | `{ query }` | `WebSearchResult` | Web search |
-| `zone2.assemble` | `{ sinceTurn, branchEntryIds, memoryMode, afterEventId?, query?, contextUsage? }` | `{ content, eventCursor }` | Assemble branch-aware, cursor-based Zone 2 context |
-| `compaction.before` | `{ firstKeptEntryId, tokensBefore, branchEntryIds, removedEntryIds, mode }` | `CompactionBeforeResult` | Verify keeper coverage before optional takeover |
-| `compaction.after` | `{ summary, firstKeptEntryId, tokensBefore }` | `{ acknowledged }` | Post-compaction hook |
-| `todo.upsert` | `{ items: [{ text, status }], branchEntryIds }` | `{ text, materialRevisions? }` | Replace the active branch plan with pending/in_progress/completed/blocked items; an empty list clears it |
-| `recall.search` | `{ query, k? }` | `{ text, results[] }` | Recall search |
-| `memory.blocks.get` | `{ branchEntryIds }` | `{ blocks[] }` | Resolve the closest visible block revision on the active branch |
-| `memory.blocks.apply` | `{ cursorTurn, branchEntryIds, coveredEntryIds, ops[] }` | `MemoryApplyResult` | Atomically validate branch-local keeper operations and update coverage after full acceptance |
-| `explore.search` | `{ question, anchors?, paths?, limit? }` | versioned snippets (optional `unit` / `structure`) + source issues + not-requested candidates + OutputRef | Algorithm-only facade over the same query engine: start original sources, freeze views, finish |
-| `explore.query.start` | `{ question, anchors?, paths?, limit?, budgetMs?, reserveForJudge? }` | `{ queryId, vocab, deadlineAt, sources }` | Pin actor/scope/input source and start original lexical, graph, and semantic work |
-| `explore.query.plan` | `{ queryId, plan }` | `{ launched, reused, sources }` | Submit grouped search expressions; they launch real searches on this query |
-| `explore.query.views` | `{ queryId }` | candidate views before pack | First-wave wait, then freeze pre-present units for the candidate model |
-| `explore.query.select` | `{ queryId, groups }` | accepted/rejected/gaps | Validate view/range identity and extract current source |
-| `explore.query.followup` | `{ queryId, searches?, locates?, gaps? }` | new views + reused queries | Optional gap searches and mechanical locates; dedupes launched queries and reads |
-| `explore.query.finish` | `{ queryId }` | same as `explore.search` | One presentation of already-decided excerpts |
-| `explore.query.cancel` | `{ queryId }` | `{ cancelled }` | Abort query work; late results cannot revive it |
-| `explore.query.release` | `{ queryId }` | `{ released }` | Drop the short-lived query after the public explore tool ends |
-| `related.query` | `{ anchor }` | file-level defines / imports / importers / connection endpoints + query-time `roles` + source status | Symbol-graph topology for a path or name; not `lsp.references`. File roles are a query decoration, not graph facts |
-| `surface.snapshot.commit/release` | content-free `AgentInputContext` | lifecycle acknowledgement | Bind or release an opaque Documents snapshot after input delivery |
-| `thread.dispatch` | `{ task, preset?, input?, scope?, worktree? }` | `ThreadDispatchResult` | Dispatch a sub-agent thread; `input: "inherit"` fixes the parent's committed input at dispatch |
-| `thread.list` | `{ ids?, full? }` | `ThreadListResult` | List threads (incremental) |
-| `thread.wait` | `{ ids?, timeoutMs? }` | `ThreadWaitResult` | Event-driven dependency wait; no duration means indefinite. Targets, receipt positions and optional deadline survive Host restart; routine progress does not wake a model |
-| `thread.send` | `{ threadId?, to?, message, from, kind?, context?, requestId?, replyTo? }` | `ThreadSendResult` | `inform` (default) delivers only — held durably for non-running targets, never starts a Run; `request` wakes a waiting target and on a settled thread starts a new Run (`context`: `continue` resumes the retained session, `fresh` rebuilds the input) or parks behind the shared root budget (`delivery: "scheduled"`). `to: "parent"` targets the caller's own parent; `requestId` is the idempotency key; `replyTo` answers a request and completes the requester's wait |
-| `thread.read` | `{ threadId, what?, start?, end?, tail?, afterEntry?, entry?, query?, path?, limit? }` | `ThreadReadResult` | Same-task read-only conversation access, including ancestors, siblings and descendants; record ranges, stable entry continuation, search and tool results |
-| `thread.merge` | `{ threadId, resultRevision? }` | `ThreadMergeResult` | Integrate a fixed native result and identify disk, marker, or editor-surface conflicts |
-| `thread.submitCode` | `{ threadId, submissionId?, files: [{ path, edits?: [{ before, after }] }] }` | `ThreadSubmitCodeResult` | Capture and automatically apply selected file changes/snippets to a writable task peer or parent. Durable fixed source, queued/application/conflict receipts, idempotent retries and acknowledged source baselines |
-| `thread.update` | `{ threadId, resultRevision? }` | `ThreadUpdateResult` | Rebase the calling thread's working baseline onto a selected parent result revision; keeps the thread's own deltas, merges clean text edits, and reports divergent paths as conflicts |
-| `thread.kill` | `{ threadId, keepWorktree? }` | `ThreadKillResult` | Kill a thread |
-
-`agent.prompt`, `agent.steer`, and `agent.followUp` accept an optional
-content-free `inputContext`. UI surfaces capture dirty document bodies through
-the authenticated Documents API first; the runtime method carries only the
-opaque Host reference or an unavailable dirty-path set. Omission means disk.
-
-### Thread events
-
-Two host events, both carrying state only — never message bodies.
-
-| Event | Direction | Description |
-|-------|-----------|-------------|
-| `harness.thread.changed` | host → clients | Thread projection changed (`Thread` plus its current `ThreadRun`) |
-| `harness.thread.done` | host → clients | Thread completed; carries the `ThreadReport` |
-
-The registry raises them through its `onThreadChanged` / `onThreadDone`
-callbacks. `onThreadDequeued` is a registry callback only, not a protocol
-event: it asks the host to spawn a child session for a thread that was
-waiting on a concurrency slot.
-
-### Thread lifecycle
-
-```
-Thread.lifecycle: preparing → queued/active → settled → archived
-Thread.attention: none | user | permission | stalled | looping
-Thread.integration: none | dirty | merge-ready | conflict | merged
-ThreadRun.workerState: starting → running → exited | lost
-ThreadRun.outcome: success | failure | cancelled | lost
+```sh
+bun run kernel:protocol
 ```
 
-These axes are intentionally independent: a successful Run may leave its
-Thread `merge-ready` or `conflict`, while a lost Run leaves durable work and
-attention intact. `ThreadLaunchManifest` freezes the preset's tool allowlist,
-worktree mode, scope, prompt fragment, parent-block snapshot choice, parent
-concurrency, and the Host-owned persistent editor-draft baseline identity.
-The baseline body remains in WorkingState rather than the catalog or model
-arguments, so queued and restarted Runs do not depend on the ephemeral surface
-snapshot. Reaching a terminal Run frees a concurrency slot and may promote the
-oldest queued Thread.
+Do not edit generated DTOs by hand or add a second TypeScript execution authority. The kernel wire
+protocol is version 46. This is independent of kernel resource storage format 22 (SQLite
+`user_version` 16) and Agent Catalog format 77. A wire version is not a database migration version;
+unsupported stores are rejected without rewriting existing assets.
 
-### ShellExecResult variants
+## Domain contracts
 
-| Kind | Fields | Description |
-|------|--------|-------------|
-| `completed` | `exitCode, durationMs, cwd, stdout, stderr, handle?, shown?` | Command finished |
-| `background` | `id, waitedMs, cwd, outputSoFar` | Command backgrounded after waitMs |
-| `spawn-failed` | `reason, interpreter, hint` | Shell could not start |
+| Source | Responsibility |
+| --- | --- |
+| `harness.ts` | Shared shell/output, document/material, search, source and memory DTOs |
+| `harness-settings.ts`, `harness-settings-service.ts` | User settings and validated configuration shapes |
+| `harness-agents.ts`, `harness-presets.ts` | Native Agent profiles, exact tool names, preset observation and model inheritance |
+| `harness-inference.ts`, `harness-model-slots.ts` | Inference receipts and configured model roles |
+| `harness-mcp.ts` | MCP connection and interaction contracts |
+| `harness-computer.ts`, `harness-experiments.ts` | Computer and research domain projections |
+| `harness-web.ts`, `harness-images.ts`, `web-page-text.ts` | Web/material requests, explicit image data and page-text helpers |
+| `explore-model.ts`, `explore-model-loop.ts`, `research-search.ts` | Retrieval planning and research search contracts |
+| `plan.ts`, `harness-todo.ts`, `agent-personalization.ts` | Plan and personalization structures |
+| `source-integration.ts`, `environment-access.ts` | Source integration and environment access identities |
+| `language-id.ts`, `utf8.ts`, `permission-gate.ts`, `work-focus.ts` | Shared language identity, byte slicing, permission evaluation and work focus |
+| `types.ts` | Basic JSON/image/thinking types and content-free editor-input references |
 
-### HarnessSettings
+`AgentRuntime` is `agent`. Missing profile tool selection inherits defaults, an explicit empty array
+disables tools, and an unavailable capability directory is not an observed empty directory. Accepted
+execution retains its frozen profile; editing defaults does not rewrite a running task.
 
-Most fields are resolved while the session runtime is assembled. Context
-preparation is the intentional live exception: the user-owned global default
-is read on each request boundary so toggles apply without a worker restart.
+`ShellExecResult` distinguishes `preparing`, `background`, `completed`, and `spawn-failed`. Admission,
+foreground observation, effect outcome and physical process stop are separate facts. Cancellation of
+an observer is not proof that its original process stopped.
 
-```typescript
-interface HarnessSettings {
-  tools: Partial<Record<string, boolean>>;   // per-tool switch, default true
-  shell: "auto" | "git-bash" | "powershell" | "wsl";
-  output: { visibleBytes: number };          // default 32768
-  bash: { waitMs: number };                  // configurable foreground wait; default 10000
-  models: Partial<Record<HarnessModelRole, ModelSelection>>;
-  dispatch: { concurrency: number; askBefore: Partial<Record<string, boolean>> };
-  knowledge: {
-    eventRetentionDays: number;
-    autoOrganize: { workspace: boolean; user: boolean; bot: boolean };
-  };
-  context: { backgroundPreparation: boolean; preparationWaterline: number }; // user-only
-  review: { enabled: boolean; gate: boolean }; // automatic review, default off (D-285)
-  web?: {
-    render?: boolean;
-    search?: { provider: "brave" | "exa" | "tavily" | "jina" | "searxng"; endpoint?: string; credentialRef?: string };
-    domains?: { allow?: string[]; block: string[] };
-  };
-  permissions?: { mode?: PermissionMode };   // default "normal"
-}
+`FetchResult` preserves material, parser and image failures. PDF uploads enter through the
+Thread-scoped Application Host material API, which retains original bytes and issues a fixed snapshot.
+The public material reference is not a filesystem or content-hash grant, and PDF upload does not add a
+Rust ingestion wire or browser-side parser authority.
+
+`AgentInputContext` carries disk selection or an opaque Documents snapshot reference with dirty-path
+metadata. Draft text stays on the authenticated Documents channel. `AgentInputSnapshotConsumer` binds
+that snapshot to its actual Thread and branch; neither a renderer path nor a snapshot hash authorizes
+another consumer.
+
+## Node-only inference transport
+
+`@varin/protocol/node/embeddings` is the credential-free, stateless OpenAI-compatible embedding wire
+implementation used by the Application Host. It is not exported from the browser-safe root. Callers
+own provider selection, credentials, authorization, lifetime and retry policy. Native inference uses
+one dispatch, no adaptive resubmission, and exposes actual dispatch/response/usage observations.
+
+## Verification
+
+Use the scripts declared by this package:
+
+```sh
+bun run --cwd packages/protocol test
+bun run --cwd packages/protocol type-check
+bun run --cwd packages/protocol lint
 ```
 
-Legacy persisted `memory` settings remain readable as a migration input only
-(`memory.mode: "off"` maps to `context.backgroundPreparation: false`); new
-writes use `context`. `SessionSnapshot.harness.context` reports the resolved
-preparation state and the latest prepare/commit phase or failure when the
-runtime supports the Harness.
-
-Thread-runtime availability is not a user setting. The Application Host
-advertises `capabilities.harnessThreads` in the private Host handshake; only
-then does pi-host register the seven thread tools. Child sessions receive their
-frozen preset or inherited model and active tool list in `session.create/open`.
-The same handshake owns `harnessLspNavigation`, `harnessWebRead`, and
-`harnessWebSearch`. `harnessWebRead` means the Host permits a configured
-session-local reader model to consume its guarded `web.fetch` result; model and
-credential execution remains in pi-host. `harnessWebSearch` advertises the
-structural Host service. The provider identity, render permission, and domain
-policy are frozen from Pi settings for one worker generation; `websearch` is
-registered only when that session has a configured provider. Search credentials
-stay in Pi auth and are resolved per request, so revocation does not require a
-worker restart and never reuses a cached key.
-
-## Exports
-
-- `harness.ts` — `HarnessServiceMap`, `HarnessMethod`, `HarnessError`, `HarnessRequestData` (no session identity; carries only the optional per-request `timeoutMs`), `HarnessActorIdentity`, `HarnessActorContext`, `HarnessCapability`, `HARNESS_METHOD_CAPABILITY`, `HARNESS_MAX_REQUEST_TIMEOUT_MS`, `OutputRef`, `OutputSlice`, `ShellExecResult`, `DiagnosticsResult`
-- `language-id.ts` — `languageIdForPath`, `editorLanguageIdForLanguage`. Single language identity for the Host language views, provider matching, and the editor; a second table split one file across two sessions and hid extensions from one side
-- `harness-settings.ts` — `HarnessSettings`, `HarnessModelRole`, `ModelSelection`, `mergeHarnessSettings`
-- `harness-presets.ts` — Execution preset catalog: `PresetId`, `ExecutionPreset`, `EXECUTION_PRESETS`, `resolvePresets`, `buildTeamPrompt`. Shared because pi-host builds the `dispatch` team prompt from the resolved presets while the host builds threads from the same definitions
-- `harness-threads.ts` — orthogonal `Thread` / `ThreadRun` types, immutable `ThreadLaunchManifest` (with `inputOrigin`/`inheritedContext`), `ThreadRunFrozenConfig` (`inputOrigin: task|inherit|continue|fresh`), observer cursor, seven thread service DTOs, and `DEFAULT_TTL_TABLE` telemetry for the opt-in keepalive experiment (not a default wait schedule)
-- `harness-fresh-input.ts` — shared `assembleFreshInput`/`minePiBranchEntries` for a `fresh` Run's seed input (task, still-valid requirements, selected results, open items, history anchors); used by pi-host for in-session rebuilds and by the Application Host for settled-Thread continuation
-- `harness-tools.ts` — Tool-specific protocol types, `HARNESS_TOOL_META`
-- `utf8.ts` — browser-safe UTF-8 byte slicing used by Host output stores and pi-host truncation; returns `nextOffset` / `eof`
-- `permission-gate.ts` — `PermissionPolicy`, `PermissionRule`, `evaluateGate`, `isHighRisk`, `HIGH_RISK_PATTERNS`, `defaultRules`, `mergePolicies`
-- `types.ts` — `AgentInputContext` (disk or content-free surface snapshot reference), `SessionStats` (includes `toolErrors`, `toolRetries`, `outputBytes`, `cacheHitRatio`)
+Protocol changes also require checks in the actual Rust, Host and UI consumers. Type declarations alone
+do not establish admission, authorization, recovery or external-effect behavior.

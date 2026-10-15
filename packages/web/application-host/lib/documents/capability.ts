@@ -6,6 +6,7 @@ import {
 
 const METHODS = new Set<string>([
   'resolveWorkspace',
+  'prepareWorkspaceEdit', 'discardWorkspaceEdit', 'applyWorkspaceEdit', 'readWorkspaceEdit', 'readWorkspaceEditRecovery', 'undoWorkspaceEdit', 'listWorkspaceEdits',
   'read',
   'write',
   'move',
@@ -79,6 +80,8 @@ export const createDocumentsCapabilityHandler =
     }
     const record = asRecord(params);
     if (!record) throw new Error('workspace.documents expects an object');
+    if (['prepareWorkspaceEdit', 'discardWorkspaceEdit', 'applyWorkspaceEdit', 'readWorkspaceEdit', 'readWorkspaceEditRecovery', 'undoWorkspaceEdit'].includes(method)) return (authority[method] as (request: unknown) => Promise<unknown>)(record);
+    if (method === 'listWorkspaceEdits') return (authority.listWorkspaceEdits as (workspaceId: string) => Promise<unknown>)(String(record.workspaceId ?? ''));
     if (method === 'write') return (authority.write as (request: unknown) => Promise<unknown>)(bindCapabilityOwner(record, context));
     if (method === 'move') return (authority.move as (request: unknown) => Promise<unknown>)(bindCapabilityOwner(record, context));
     if (method === 'delete') return (authority.delete as (request: unknown) => Promise<unknown>)(bindCapabilityOwner(record, context));

@@ -1,6 +1,6 @@
 /**
  * BC4 Computer Use: machine/desktop catalog, observation, action, and
- * cancellation contracts shared by the Host computer service, the Pi
+ * cancellation contracts shared by the Host computer service, the native
  * `computer` tool, and the settings surfaces.
  *
  * Ownership: a machine is a real computer (local host, remote machine, or a
@@ -65,7 +65,7 @@ export interface ComputerDesktop {
    * stays authoritative on Thread/Run records; remote mirrors keep their own
    * Host's record.
    */
-  usage?: { sessionId: string; at: string };
+  usage?: { execution: ComputerExecutionRef; at: string };
   /** Durable links to works that used this desktop; Thread/Run remain the work authority. */
   work?: ComputerWorkAssociation[];
   /** A Host-managed persistent Linux graphical session, independent of a VM. */
@@ -84,14 +84,12 @@ export interface ComputerDesktop {
 }
 
 export interface ComputerWorkAssociation {
-  scopeId: string;
-  threadId: string;
-  sessionId: string;
+  work: ComputerWorkRef;
   at: string;
 }
 
 export interface ComputerActivity {
-  sessionId?: string;
+  execution?: ComputerExecutionRef;
   app: string;
   operation: "observe" | ComputerAction["kind"];
   status: "running" | "idle" | "error";
@@ -100,16 +98,63 @@ export interface ComputerActivity {
 
 export interface ComputerActivityEntry { desktopId: string; activity: ComputerActivity }
 
+/** Runtime identity is part of the reference; matching strings never alias work. */
+export type ComputerWorkRef = { runtime: "agent"; threadId: string; branchId: string };
+
+export interface ComputerExecutionRef {
+  work: ComputerWorkRef;
+  runId: string;
+}
+
 /** Host-resolved execution identity; worker parameters never supply this authority. */
 export interface ComputerActor {
-  sessionId: string;
-  runId: string;
-  threadId: string;
-  scopeId: string;
-  rootSessionId: string;
-  rootRunId: string;
+  execution: ComputerExecutionRef;
+  rootWork: ComputerWorkRef;
+  /** A recipient can exist without a live root Run. Never synthesize an idle Run. */
+  rootExecution: ComputerExecutionRef | null;
   label: string;
-  readOnly: boolean;
+  /** Native tools retain their original per-invocation permission checks; this is not an assignment grant. */
+
+}
+
+export const computerWorkKey = (work: ComputerWorkRef): string => JSON.stringify([work.runtime, work.threadId, work.branchId]);
+export const computerExecutionKey = (execution: ComputerExecutionRef): string =>
+  JSON.stringify([computerWorkKey(execution.work), execution.runId]);
+export const sameComputerWork = (left: ComputerWorkRef, right: ComputerWorkRef): boolean =>
+  computerWorkKey(left) === computerWorkKey(right);
+export const sameComputerExecution = (left: ComputerExecutionRef, right: ComputerExecutionRef): boolean =>
+  computerExecutionKey(left) === computerExecutionKey(right);
+
+const computerObject = (value: unknown): value is Record<string, unknown> =>
+  value !== null && typeof value === "object" && !Array.isArray(value);
+const computerId = (value: unknown): value is string => typeof value === "string" && value.trim().length > 0;
+
+/** Shared wire/storage decoder. Old session-shaped actors are not compatible records. */
+export function parseComputerWorkRef(value: unknown): ComputerWorkRef {
+  if (computerObject(value)) {
+    if (value.runtime === "agent" && computerId(value.threadId) && computerId(value.branchId)) {
+      return { runtime: "agent", threadId: value.threadId, branchId: value.branchId };
+    }
+  }
+  throw new Error("computer_work_identity_invalid");
+}
+
+export function parseComputerExecutionRef(value: unknown): ComputerExecutionRef {
+  if (!computerObject(value) || !computerId(value.runId)) throw new Error("computer_execution_identity_invalid");
+  return { work: parseComputerWorkRef(value.work), runId: value.runId };
+}
+
+export function parseComputerActor(value: unknown): ComputerActor {
+  if (!computerObject(value) || !computerId(value.label)) throw new Error("computer_actor_invalid");
+  const execution = parseComputerExecutionRef(value.execution);
+  const rootWork = parseComputerWorkRef(value.rootWork);
+  const rootExecution = value.rootExecution === null ? null : parseComputerExecutionRef(value.rootExecution);
+  if (execution.work.runtime !== rootWork.runtime || rootExecution && !sameComputerWork(rootExecution.work, rootWork)
+    || sameComputerWork(execution.work, rootWork) && (!rootExecution || !sameComputerExecution(execution, rootExecution))) {
+    throw new Error("computer_actor_family_invalid");
+  }
+  if ('registry' in value || 'roleAccess' in value || 'readOnly' in value) throw new Error('computer_actor_identity_invalid');
+  return { execution, rootWork, rootExecution, label: value.label };
 }
 
 export type ComputerAccess = "observe" | "control";
@@ -129,17 +174,104 @@ export interface ComputerAccessRequest {
   actor: ComputerActor;
   access: ComputerAccess;
   reason: string;
-  status: "pending" | "granted" | "denied" | "released";
+  revision: number;
+  status: "pending" | "granting" | "granted" | "denied" | "cancelled" | "indeterminate" | "released" | "unavailable";
+  /** Original physical assignment identity. Its presence alone never authorizes input. */
+  assignmentId?: string;
   createdAt: string;
   detail?: string;
 }
-export interface ComputerAutomationState {
-  rootSessionId: string;
-  runId: string;
+export interface ComputerWorkScope {
+  work: ComputerWorkRef;
+  rootWork: ComputerWorkRef;
+  currentExecution: ComputerExecutionRef | null;
+  currentRootExecution: ComputerExecutionRef | null;
+}
+export interface ComputerAutomationState extends ComputerWorkScope {
   active: boolean;
   status: "enabled" | "cancelling" | "cancel-unconfirmed";
   leases: ComputerLease[];
   requests: ComputerAccessRequest[];
+  /** Projection of the original controller/release facts, never an independent task table. */
+  cleanups: ComputerCleanup[];
+}
+export interface ComputerCleanup {
+  execution: ComputerExecutionRef;
+  desktopId?: string;
+  status: "cancelling" | "cancel-unconfirmed";
+}
+export interface ComputerAutomationProjection {
+  state: ComputerAutomationState;
+  activities: ComputerActivityEntry[];
+}
+
+export function parseComputerActivity(value: unknown): ComputerActivity {
+  if (!computerObject(value) || !computerId(value.app) || !computerId(value.updatedAt)
+    || !["observe", "click", "type", "key", "scroll", "drag", "set_value", "secondary"].includes(String(value.operation))
+    || !["running", "idle", "error"].includes(String(value.status))
+    || 'sessionId' in value) throw new Error("computer_activity_invalid");
+  const execution = value.execution === undefined ? undefined : parseComputerExecutionRef(value.execution);
+  return { app: value.app, updatedAt: value.updatedAt, operation: value.operation as ComputerActivity["operation"], status: value.status as ComputerActivity["status"],
+    ...(execution ? { execution } : {}) };
+}
+
+/** A projection wake-up, not an assignment or a complete state replacement. */
+export interface ComputerAutomationInvalidation { work: ComputerWorkRef }
+export function parseComputerAutomationInvalidation(value: unknown): ComputerAutomationInvalidation {
+  if (!computerObject(value) || Object.keys(value).some(key => key !== "work")) throw new Error("computer_automation_invalidation_invalid");
+  return { work: parseComputerWorkRef(value.work) };
+}
+
+export function parseComputerAutomationProjection(value: unknown): ComputerAutomationProjection {
+  if (!computerObject(value) || !Array.isArray(value.activities)) throw new Error("computer_automation_projection_invalid");
+  return { state: parseComputerAutomationState(value.state), activities: value.activities.map((entry: unknown) => {
+    if (!computerObject(entry) || !computerId(entry.desktopId)) throw new Error("computer_activity_entry_invalid");
+    return { desktopId: entry.desktopId, activity: parseComputerActivity(entry.activity) };
+  }) };
+}
+
+/** One shared public decoder for HTTP and event consumers. Malformed state is not idle. */
+export function parseComputerAutomationState(value: unknown): ComputerAutomationState {
+  if (!computerObject(value) || typeof value.active !== "boolean"
+    || !["enabled", "cancelling", "cancel-unconfirmed"].includes(String(value.status))
+    || !Array.isArray(value.leases) || !Array.isArray(value.requests) || !Array.isArray(value.cleanups)) {
+    throw new Error("computer_automation_state_invalid");
+  }
+  const work = parseComputerWorkRef(value.work), rootWork = parseComputerWorkRef(value.rootWork);
+  const currentExecution = value.currentExecution === null ? null : parseComputerExecutionRef(value.currentExecution);
+  const currentRootExecution = value.currentRootExecution === null ? null : parseComputerExecutionRef(value.currentRootExecution);
+  if (work.runtime !== rootWork.runtime || currentExecution && !sameComputerWork(currentExecution.work, work)
+    || currentRootExecution && !sameComputerWork(currentRootExecution.work, rootWork)) throw new Error("computer_automation_scope_invalid");
+  const assignment = (entry: unknown) => {
+    if (!computerObject(entry) || !computerId(entry.id) || !computerId(entry.desktopId)
+      || entry.access !== "observe" && entry.access !== "control"
+      || entry.desktopLabel !== undefined && !computerId(entry.desktopLabel)) throw new Error("computer_assignment_invalid");
+    return { id: entry.id, desktopId: entry.desktopId, actor: parseComputerActor(entry.actor), access: entry.access,
+      ...(entry.desktopLabel === undefined ? {} : { desktopLabel: entry.desktopLabel }) };
+  };
+  const leases: ComputerLease[] = value.leases.map((entry: unknown) => {
+    const base = assignment(entry);
+    if (!computerObject(entry) || !computerId(entry.grantedAt) || entry.suspended !== undefined && typeof entry.suspended !== "boolean") throw new Error("computer_lease_invalid");
+    return { ...base, access: base.access as ComputerAccess, grantedAt: entry.grantedAt, ...(entry.suspended === undefined ? {} : { suspended: entry.suspended }) };
+  });
+  const requests: ComputerAccessRequest[] = value.requests.map((entry: unknown) => {
+    const base = assignment(entry);
+    if (!computerObject(entry) || !computerId(entry.createdAt) || !computerId(entry.reason)
+      || !["pending", "granting", "granted", "denied", "cancelled", "indeterminate", "released", "unavailable"].includes(String(entry.status))
+      || !Number.isSafeInteger(entry.revision) || Number(entry.revision) < 1
+      || entry.assignmentId !== undefined && !computerId(entry.assignmentId)
+      || entry.detail !== undefined && typeof entry.detail !== "string") throw new Error("computer_request_invalid");
+    return { ...base, access: base.access as ComputerAccess, reason: entry.reason, createdAt: entry.createdAt,
+      revision: Number(entry.revision), status: entry.status as ComputerAccessRequest["status"], ...(entry.assignmentId === undefined ? {} : { assignmentId: entry.assignmentId }), ...(entry.detail === undefined ? {} : { detail: entry.detail }) };
+  });
+  const cleanups: ComputerCleanup[] = value.cleanups.map((entry: unknown) => {
+    if (!computerObject(entry) || entry.status !== "cancelling" && entry.status !== "cancel-unconfirmed"
+      || entry.desktopId !== undefined && !computerId(entry.desktopId)) throw new Error("computer_cleanup_invalid");
+    return { execution: parseComputerExecutionRef(entry.execution), status: entry.status,
+      ...(entry.desktopId === undefined ? {} : { desktopId: entry.desktopId }) };
+  });
+  return { work, rootWork, currentExecution, currentRootExecution, active: value.active,
+    status: value.status as ComputerAutomationState["status"], leases, requests, cleanups };
 }
 export interface ComputerAccessParams {
   desktopId?: string;
@@ -153,7 +285,7 @@ export interface ComputerAccessParams {
 export interface ComputerGesture {
   id: string;
   desktopId: string;
-  sessionId?: string;
+  execution?: ComputerExecutionRef;
   actorLabel?: string;
   kind: ComputerAction["kind"] | "move";
   mechanism?: "pointer" | "keyboard" | "semantic";
@@ -186,6 +318,19 @@ export interface ComputerDesktopPrepareParams {
   connectionId?: string;
   width?: number;
   height?: number;
+  automationEpoch?: string;
+}
+
+/** Original desktop lifecycle result; helper completion is distinct from desktop readiness. */
+export interface ComputerDesktopChangeResult {
+  desktop: ComputerDesktop;
+  inputWriterStopped: boolean;
+  receipt: ComputerActionReceipt;
+  cancelled?: boolean;
+  /** Original assignment cleanup is distinct from a confirmed backend transition. */
+  assignmentReleases?: Array<{ assignmentId: string; confirmed: boolean; detail?: string }>;
+  /** Target-owned exact assignments ended by this stop, restricted to the calling peer origin. */
+  endedAssignments?: { origin: string; assignmentIds: string[] };
 }
 
 /** What the resident platform driver can actually do right now. */
@@ -217,6 +362,12 @@ export interface ComputerCapabilities {
   interruptibleInput?: boolean;
   /** Occluded/offscreen window content capture (not just the screen grid). */
   occludedCapture?: boolean;
+  /** Independent macOS permission checks; probing never requests authorization. */
+  permissions?: { accessibility?: "granted" | "not-granted"; screenCapture?: "granted" | "not-granted" };
+  /** Lifecycle and negotiated input transport of the original portal session. */
+  authorization?: "idle" | "starting" | "active" | "closed";
+  inputTransport?: "dbus" | "eis" | null;
+  availableDevices?: number;
   status: "ready" | "unavailable" | "unprobed";
   /** Honest reason when a capability is missing or the driver failed. */
   detail?: string;
@@ -280,6 +431,8 @@ export interface ComputerObservation {
   windowTitle?: string;
   /** The window this observation bound to, when the driver resolved one. */
   windowHandle?: number;
+  /** Opaque native capture generation; the Host returns it only to the original driver. */
+  nativeTarget?: string;
   /** Window DPI scale (physical px per logical px) at capture time. */
   dpiScale?: number;
   /** All top-level windows the observed process owned at capture time. */
@@ -334,6 +487,8 @@ export interface ComputerAction {
 }
 
 export interface ComputerActionResult {
+  /** Original executor evidence for this call, independent of application effect and assignment lifetime. */
+  inputWriterStopped: boolean;
   /** The driver accepted and dispatched the input — NOT a claim of app effect. */
   accepted: boolean;
   /**
@@ -354,7 +509,7 @@ export interface ComputerActionResult {
 
 export interface ComputerActionReceipt {
   effect: "none" | "dispatched" | "partial" | "verified" | "unknown";
-  reason?: { code: "target-changed" | "focus-changed" | "target-unavailable" | "unsupported" | "input-rejected" | "cancelled" | "control-changed" | "connection-lost" | "verification-failed" | "driver-error"; message: string };
+  reason?: { code: "target-changed" | "focus-changed" | "target-unavailable" | "unsupported" | "input-rejected" | "cancelled" | "control-changed" | "connection-lost" | "session-closed" | "verification-failed" | "driver-error"; message: string };
   recovery?: "observe" | "reconnect" | "wait-for-control";
   /** Counts accepted input events, not characters visible in an app. */
   dispatchedEvents?: number;
@@ -614,8 +769,8 @@ export interface ComputerEvidenceEntry {
   /** Per-desktop sequence; `since` resumes after a previously seen seq. */
   seq: number;
   at: string;
-  /** Session that issued the step, when known. */
-  sessionId?: string;
+  /** Original admitted work and Run; labels and caller-provided session IDs never replace it. */
+  execution?: ComputerExecutionRef;
   lane: "observe" | "action";
   /** Service funnel: observe | act | open | fileWrite | browser | office | control. */
   tool: string;
@@ -630,8 +785,8 @@ export interface ComputerEvidenceEntry {
 
 export interface ComputerEvidenceParams {
   desktopId?: string;
-  /** Restrict to steps issued by one session. */
-  sessionId?: string;
+  /** Restrict to one original admitted execution. */
+  execution?: ComputerExecutionRef;
   /** Return only entries with seq > since. */
   since?: number;
   /** Page size (default 50); with since, read oldest unseen steps first. */
@@ -716,6 +871,9 @@ export interface ComputerControlParams {
 export interface ComputerControlResult {
   control: ComputerControlState;
 }
+
+export interface ComputerDesktopStopParams { desktopId: string; automationEpoch: string }
+export interface ComputerDesktopStopResult { control: ComputerControlState; released: boolean }
 
 export interface ComputerTakeoverParams {
   desktopId?: string;

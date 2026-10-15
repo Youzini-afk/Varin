@@ -1,6 +1,7 @@
 import { getActiveRelayTunnel } from './relay-provider.js';
 import { buildRuntimeAuthHeaders } from './runtime-auth.js';
 import { getRuntimeUrlResolver, type RuntimeUrlQuery } from './runtime-url.js';
+import { getRuntimeEndpointGeneration } from './runtime-switch.js';
 
 /**
  * Base URL used for parsing tunnel paths. The relay tunnel client
@@ -16,7 +17,7 @@ export interface RuntimeFetchOptions extends RequestInit {
 type FetchDelegate = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
 let nativeFetchDelegate: FetchDelegate | null = null;
 
-// Application-host APIs must not follow the active Pi Runtime resolver. The
+// Host-local APIs must not follow the selected remote Host resolver. The
 // runtime bridge retains the browser's original fetch here before patching
 // window.fetch, giving those APIs one explicit, testable transport boundary.
 export const fetchWithoutRuntimeRouting: FetchDelegate = (input, init) => (
@@ -264,6 +265,7 @@ const coalesceReadKey = (method: string, url: string, hasSignal: boolean): strin
 };
 
 export const runtimeFetch = async (input: string | URL | Request, init: RuntimeFetchOptions = {}): Promise<Response> => {
+  const generation = getRuntimeEndpointGeneration();
   const { query, ...requestInit } = init;
 
   // Resolve the transport once — relay tunnel or network — then apply the SAME
@@ -288,8 +290,8 @@ export const runtimeFetch = async (input: string | URL | Request, init: RuntimeF
     const inputHeaders = resolvedInput instanceof Request ? resolvedInput.headers : undefined;
     const headers = await mergeHeaders(inputHeaders, requestInit.headers, shouldAttachRuntimeAuth(resolvedInput));
     doFetch = resolvedInput instanceof Request
-      ? () => fetch(new Request(resolvedInput, { ...requestInit, headers }))
-      : () => fetch(resolvedInput, { ...requestInit, headers });
+      ? () => fetchWithoutRuntimeRouting(new Request(resolvedInput, { ...requestInit, headers }))
+      : () => fetchWithoutRuntimeRouting(resolvedInput, { ...requestInit, headers });
     url =
       resolvedInput instanceof Request ? resolvedInput.url
       : resolvedInput instanceof URL ? resolvedInput.toString()
@@ -298,6 +300,9 @@ export const runtimeFetch = async (input: string | URL | Request, init: RuntimeF
       requestInit.method ?? (resolvedInput instanceof Request ? resolvedInput.method : 'GET'),
     ).toUpperCase();
   }
+
+  // Authentication may await a platform provider. Do not dispatch old work with another Host's auth.
+  if (generation !== getRuntimeEndpointGeneration()) throw new Error('Application Host changed before request dispatch');
 
   // A Request always carries a (possibly default) signal; treat any Request, or
   // an explicit init.signal, as "has signal" and skip coalescing for safety.

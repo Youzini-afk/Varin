@@ -249,6 +249,9 @@ export function createTreeSitterStructureProvider(options: TreeSitterStructurePr
       operation,
       includeHidden: true,
       paths: [request.path],
+      // Visibility was decided by the source inventory; this is an exact,
+      // already admitted file, including explicitly enabled ignored roots.
+      respectGitignore: false,
       parseBudgetMs: options.parseBudgetMs ?? STRUCTURE_PARSE_BUDGET_MS,
       files: [{ path: request.path, lines: request.lines ?? [], ...(recipeId ? { recipeId } : {}) }],
     }, { signal: request.signal });
@@ -419,6 +422,7 @@ export function createTreeSitterStructureProvider(options: TreeSitterStructurePr
 
   return {
     id: "tree-sitter",
+    unitsRecipe: recipeFor,
     capabilities: (id) => capabilitiesFromSpec(id ? specFor(id) : undefined),
     analyze,
     analyzeFile,

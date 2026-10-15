@@ -2,6 +2,7 @@ import {
   isVarinExtensionId,
   type JsonValue,
   type VarinApplicationSurface,
+  type VarinExtensionServiceRoutingContext,
 } from "@varin/extension-contract";
 import type { SurfaceOwnerIdentity } from "./types.js";
 
@@ -9,6 +10,7 @@ export interface SurfaceCapabilityAccessContext {
   access: "local" | "remote";
   projectTrusted: boolean;
   surface: VarinApplicationSurface;
+  routing?: VarinExtensionServiceRoutingContext;
 }
 
 export interface SurfaceCapabilityDescriptor {

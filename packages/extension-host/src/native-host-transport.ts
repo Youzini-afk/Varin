@@ -1,3 +1,4 @@
+import { AsyncLocalStorage } from "node:async_hooks";
 import { createRequire } from "node:module";
 import { isAbsolute, relative, resolve } from "node:path";
 import type {
@@ -5,8 +6,15 @@ import type {
   JsonValue,
   VarinExtensionStorageOpenRequest,
   VarinExtensionStorageSnapshot,
+  VarinHostServiceConsumers,
+  VarinHostServiceDependencyBinding,
 } from "@varin/extension-contract";
+import { createHostServiceDependencyClients } from '@varin/extension-contract';
 import type { BrokeredHostTransport } from "./broker-supervisor.js";
+
+interface NativeInvocationContext { signal: AbortSignal; invocationId?: string; active: boolean }
+type NativeCapabilityClient = { call(capability: string, method: string, params: JsonValue): Promise<JsonValue> };
+type NativeServiceHandler = Record<string, (args: JsonValue[], call: { signal: AbortSignal; callId: string; capabilities: NativeCapabilityClient }) => unknown>;
 
 interface NativeHostExtension {
   activate(context: NativeHostContext): unknown | Promise<unknown>;
@@ -17,9 +25,8 @@ interface NativeHostContext {
   assets: { path(logicalPath: string): string };
   capabilities: { call(capability: string, method: string, params: JsonValue): Promise<JsonValue> };
   effect(disposer: () => void | Promise<void>): void;
-  services: {
-    provide(descriptor: unknown, handler: Record<string, (...args: JsonValue[]) => unknown>): void;
-    use(id: string, version: number, providerId?: string): { call(method: string, ...args: JsonValue[]): Promise<JsonValue> };
+  services: VarinHostServiceConsumers & {
+    provide(descriptor: unknown, handler: NativeServiceHandler): void;
   };
   signal: AbortSignal;
   storage: {
@@ -87,20 +94,23 @@ const resolveExtension = (moduleValue: unknown): NativeHostExtension => {
 };
 
 export class NativeHostTransport implements BrokeredHostTransport {
+  readonly #invocationContext = new AsyncLocalStorage<NativeInvocationContext>();
   readonly #disposers: Array<() => void | Promise<void>> = [];
   readonly #requestFromExtension: NativeHostTransportOptions["requestFromExtension"];
-  readonly #serviceHandlers = new Map<string, Record<string, (...args: JsonValue[]) => unknown>>();
+  readonly #serviceHandlers = new Map<string, NativeServiceHandler>();
   #controller: AbortController | null = null;
   #modulePath = "";
   #moduleValue: unknown;
   readonly #storages = new Map<string, Set<NativeStorageClientState>>();
   #terminated = false;
+  #callId = 0;
 
   constructor(options: NativeHostTransportOptions) {
     this.#requestFromExtension = options.requestFromExtension;
   }
 
-  async request(method: string, paramsValue?: unknown): Promise<unknown> {
+  async request(method: string, paramsValue?: unknown, signal?: AbortSignal): Promise<unknown> {
+    signal?.throwIfAborted();
     if (this.#terminated && method !== "deactivate") throw new Error("Trusted-native Host entrypoint is inactive");
     const params = paramsValue && typeof paramsValue === "object" && !Array.isArray(paramsValue)
       ? paramsValue as Record<string, unknown>
@@ -123,7 +133,7 @@ export class NativeHostTransport implements BrokeredHostTransport {
         const extension = this.#load(String(params.modulePath ?? ""));
         this.#controller = new AbortController();
         this.#storages.clear();
-        const stagedHandlers = new Map<string, Record<string, (...args: JsonValue[]) => unknown>>();
+        const stagedHandlers = new Map<string, NativeServiceHandler>();
         const provisions: unknown[] = [];
         const createStorageClient = (
           request: VarinExtensionStorageOpenRequest,
@@ -164,11 +174,7 @@ export class NativeHostTransport implements BrokeredHostTransport {
             path: (logicalPath) => packageAssetPath(packageRoot, logicalPath),
           },
           capabilities: {
-            call: (capability, capabilityMethod, capabilityParams) => this.#requestFromExtension(
-              "capability.call",
-              { capability, method: capabilityMethod, params: capabilityParams },
-              this.#controller?.signal ?? new AbortController().signal,
-            ),
+            call: (capability, method, params) => this.#callCapability(this.#invocationContext.getStore(), capability, method, params),
           },
           effect: (disposer) => {
             if (typeof disposer !== "function") throw new Error("Trusted-native Host effect disposer must be a function");
@@ -176,22 +182,27 @@ export class NativeHostTransport implements BrokeredHostTransport {
           },
           services: {
             provide: (descriptorValue, handler) => {
-              const descriptor = descriptorValue as { id?: unknown; version?: unknown };
+              const descriptor = descriptorValue as { id?: unknown; version?: unknown; contract?: { methods?: Record<string, unknown> } };
               const key = `${String(descriptor.id ?? "")}@${Number(descriptor.version)}`;
               if (!descriptor.id || !Number.isSafeInteger(descriptor.version) || Number(descriptor.version) <= 0) {
                 throw new Error("Trusted-native Host service descriptor is invalid");
               }
               if (!handler || typeof handler !== "object") throw new Error(`Trusted-native Host service handler is invalid: ${key}`);
+              for (const method of Object.keys(descriptor.contract?.methods ?? {})) {
+                if (typeof handler[method] !== 'function') throw new Error(`Host service declared method is unavailable: ${key}.${method}`);
+              }
               if (stagedHandlers.has(key)) throw new Error(`Trusted-native Host service provided more than once: ${key}`);
               stagedHandlers.set(key, handler);
               provisions.push(descriptorValue);
             },
-            use: (id, version, providerId) => ({
-              call: (serviceMethod, ...args) => this.#requestFromExtension(
-                "service.invoke",
-                { args, method: serviceMethod, providerId, serviceId: id, version },
-                this.#controller?.signal ?? new AbortController().signal,
-              ),
+            ...createHostServiceDependencyClients(params.dependencies as VarinHostServiceDependencyBinding[], request => {
+              const scope = this.#invocationContext.getStore();
+              if (scope && !scope.active) return Promise.reject(new Error('Host dependency invocation has expired'));
+              const signal = scope?.signal ?? this.#controller?.signal ?? AbortSignal.abort(new Error('Host owner is inactive'));
+              if (signal.aborted) return Promise.reject(signal.reason);
+              return this.#requestFromExtension('service.invoke', { ...request,
+                ...(scope?.invocationId ? { invocationId: scope.invocationId } : {}),
+              }, signal);
             }),
           },
           signal: this.#controller.signal,
@@ -225,7 +236,20 @@ export class NativeHostTransport implements BrokeredHostTransport {
         const key = `${String(params.serviceId ?? "")}@${Number(params.version)}`;
         const methodHandler = this.#serviceHandlers.get(key)?.[String(params.method ?? "")];
         if (typeof methodHandler !== "function") throw new Error(`Trusted-native Host service method is unavailable: ${key}.${String(params.method ?? "")}`);
-        return methodHandler(...(Array.isArray(params.args) ? params.args as JsonValue[] : []));
+        const callSignal = signal && this.#controller
+          ? AbortSignal.any([signal, this.#controller.signal])
+          : signal ?? this.#controller?.signal ?? new AbortController().signal;
+        callSignal.throwIfAborted();
+        const scope: NativeInvocationContext = {
+          signal: callSignal, active: true,
+          ...(typeof params.invocationId === "string" ? { invocationId: params.invocationId } : {}),
+        };
+        try {
+          return await this.#invocationContext.run(scope, () => methodHandler(Array.isArray(params.args) ? params.args as JsonValue[] : [], {
+            signal: callSignal, callId: `native-${++this.#callId}`,
+            capabilities: { call: (capability, method, params) => this.#callCapability(scope, capability, method, params) },
+          }));
+        } finally { scope.active = false; }
       }
       case "storage.sync":
         for (const snapshot of Array.isArray(params.storages)
@@ -250,6 +274,16 @@ export class NativeHostTransport implements BrokeredHostTransport {
   forceTerminate(): void {
     this.#controller?.abort("Trusted-native Host entrypoint force-disabled");
     this.#terminated = true;
+  }
+
+  #callCapability(scope: NativeInvocationContext | undefined, capability: string, method: string, params: JsonValue): Promise<JsonValue> {
+    if (scope && !scope.active) return Promise.reject(new Error("Host capability invocation has expired"));
+    const signal = scope?.signal ?? this.#controller?.signal ?? AbortSignal.abort(new Error("Host extension is inactive"));
+    if (signal.aborted) return Promise.reject(signal.reason);
+    return this.#requestFromExtension("capability.call", {
+      capability, method, params,
+      ...(scope?.invocationId !== undefined ? { invocationId: scope.invocationId } : {}),
+    }, signal);
   }
 
   #load(modulePath: string): NativeHostExtension {

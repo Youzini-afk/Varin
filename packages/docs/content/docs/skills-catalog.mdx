@@ -1,10 +1,14 @@
 ---
-title: Skills Catalog
-description: Install skills through Pi Packages and manage loaded skills.
+title: "Skills library"
+description: "Manage native skill files and already installed resources."
 ---
 
-# Skills Catalog
+# Skills library
 
-The former standalone Skills Catalog is no longer available. To install skills distributed as a Pi package, open **Settings → Pi Packages**, enter a source supported by Pi PackageManager (an npm source, Git URL or local path), and choose user or project scope. Install only packages you trust: they can include executable extensions.
+Use **Settings → Skills** to browse the native resource library and create or copy skills into user or trusted-project scope. There is no separate online skill marketplace on this page.
 
-Use [Skills](/skills/) to create, edit and invoke the skills loaded by the active runtime.
+Native resource configuration can reference already installed skill directories. Reading a skill package does not download it or execute its code. Executable Varin extensions have their own **Settings → Varin Extensions** lifecycle.
+
+Inspect the source, validity and read-only status before using a resource. After changing the library, refresh **Instructions and skills** in the conversation. Existing accepted inputs keep the skill version they captured.
+
+See [Skills](/skills/) and [Commands](/commands/).

@@ -2,6 +2,8 @@ import type { Express, NextFunction, Request, RequestHandler, Response } from "e
 import type { VarinAuthenticatedClient } from "../client-auth/request-context.js";
 import type { ManagedRemoteExecutionService } from "./managed-remote-service.js";
 import { requestBodyChunks } from "./managed-remote-service.js";
+import type { ManagedSourcePrincipal, ManagedSourceService } from './managed-remote-types.js';
+import { sourceFailureCode } from '../kernel/source-admission-error.js';
 
 export interface ManagedRemoteRoutesOptions {
   service: ManagedRemoteExecutionService;
@@ -31,6 +33,11 @@ const asNonNegativeInteger = (input: unknown, label: string): number => {
 
 const sendError = (response: Response, error: unknown): void => {
   const message = error instanceof Error ? error.message : String(error);
+  const code = sourceFailureCode(error);
+  if (code) {
+    response.status(code === 'source_authority_denied' ? 403 : code === 'source_changed' ? 409 : 503).json({ error: message, code });
+    return;
+  }
   const status = /required|invalid|must |cannot contain|repeats path|outside|conflict|bound to another/i.test(message) ? 400
     : /unknown|unavailable|not ready|missing|unconfirmed|still active/i.test(message) ? 503
       : 500;
@@ -61,9 +68,9 @@ export function registerManagedRemoteRoutes(
   { service, requireAuth = noAuth, resolveAuthContext }: ManagedRemoteRoutesOptions,
 ): void {
   const base = "/api/harness/managed-execution/v1";
-  const principals = new WeakMap<Request, string>();
+  const principals = new WeakMap<Request, ManagedSourcePrincipal>();
   const requiredCapabilities = ["filesystem:read", "filesystem:write", "logs:read", "terminal:use", "process:control"];
-  const requireManagedAuth: RequestHandler = async (request, response, next) => {
+  const clientAuth = (required: readonly string[]): RequestHandler => async (request, response, next) => {
     try {
       const auth = await resolveAuthContext?.(request, response, { allowClientAuth: true, allowUrlToken: false });
       if (auth?.type !== "client" || !auth.clientId || !auth.client) {
@@ -71,29 +78,97 @@ export function registerManagedRemoteRoutes(
         return;
       }
       const capabilities = new Set(Array.isArray(auth.client.capabilities) ? auth.client.capabilities : []);
-      const missing = requiredCapabilities.filter((capability) => !capabilities.has(capability));
+      const missing = required.filter((capability) => !capabilities.has(capability));
       if (missing.length > 0) {
         response.status(403).json({ error: `Managed execution capability is unavailable: ${missing.join(", ")}` });
         return;
       }
-      principals.set(request, auth.clientId);
+      principals.set(request, { principalId: auth.clientId, capabilities: [...capabilities] });
       next();
     } catch (error) { next(error); }
   };
+  const requireManagedAuth = clientAuth(requiredCapabilities);
+  // Source reads do not acquire process or file-mutation authority. The native
+  // capability declaration checks each later operation's actual requirements.
+  const requireSourceAuth = clientAuth(['filesystem:read']);
+  const requireReceiptAuth = clientAuth([]);
   const authorize = (request: Request, coordinatorHostId: unknown): { coordinatorHostId: string; principalId: string } => {
     const coordinator = asString(coordinatorHostId, "Coordinator identity");
     const principal = principals.get(request);
     if (!principal) throw new Error("Managed execution has no authenticated principal");
-    return { coordinatorHostId: coordinator, principalId: principal };
+    return { coordinatorHostId: coordinator, principalId: principal.principalId };
   };
   app.use(base, (_request, response, next) => {
     response.setHeader("X-Varin-Managed-Host", service.hostId);
     next();
   });
 
-  app.get(`${base}/identity`, requireAuth, requireManagedAuth, route(async (_request, response) => {
+  app.get(`${base}/identity`, requireAuth, requireReceiptAuth, route(async (_request, response) => {
     response.setHeader("Cache-Control", "no-store");
     response.json(await service.identity());
+  }));
+
+  const sourceMethods = ['recovery', 'scriptBinding', 'scriptSpawn', 'scriptControl', 'processAccess', 'processControl', 'processWrite', 'processResize', 'capabilities', 'handoff', 'integrationReceipt', 'resolve', 'prepare', 'bind', 'authorize', 'execute', 'service', 'cancelService', 'observe', 'releaseReceipt', 'cancel', 'release', 'inspectScope', 'releaseScope','inspectReadScope','closeReadScope','fileObservation'] as const;
+  const receiptMethods: ReadonlySet<string> = new Set(['scriptControl', 'processControl', 'handoff', 'integrationReceipt', 'cancelService', 'observe', 'releaseReceipt', 'cancel', 'release', 'inspectScope', 'releaseScope','inspectReadScope','closeReadScope','fileObservation']);
+  for (const method of sourceMethods) {
+    const methodAuth: RequestHandler = (request, response, next) => {
+      const operation = value(value(request.body).operation);
+      const cleanup = method === 'service' && operation.kind === 'mcp' && ['release', 'derivation_inspect', 'derivation_release', 'child_inspect', 'child_release', 'task_inspect', 'task_cancel', 'task_release', 'resource_inspect', 'resource_release', 'interaction_inspect', 'interaction_ack', 'interaction_release', 'interaction_close'].includes(String(value(operation.action).kind));
+      return (receiptMethods.has(method) || cleanup ? requireReceiptAuth : requireSourceAuth)(request, response, next);
+    };
+    app.post(`${base}/sources/${method}`, requireAuth, methodAuth, route(async (request, response) => {
+      const body = value(request.body);
+      authorize(request, body.coordinatorHostId);
+      const principal = principals.get(request)!;
+      const sources = service.sources();
+      // The closed Source owner validates the shared DTO. No request field can
+      // supply the principal, native grant, or an arbitrary kernel method.
+      const invoke = (signal?: AbortSignal) => (sources[method] as (
+        principal: ManagedSourcePrincipal, input: Parameters<ManagedSourceService[typeof method]>[1], signal?: AbortSignal,
+      ) => Promise<unknown>)(principal, body as unknown as Parameters<ManagedSourceService[typeof method]>[1], signal);
+      // A disconnected observer is not a cancelled or drained accepted effect.
+      // Cancellation and retirement have their own original-owner receipts.
+      const sourceOperation = value(body.operation);
+      const mcpObserver = method === 'service' && sourceOperation.kind === 'mcp' && ['changed', 'resource_watch', 'interaction_watch'].includes(String(value(sourceOperation.action).kind));
+      const result = !mcpObserver && (method === 'recovery' || method === 'scriptSpawn' || method === 'scriptControl' || method === 'processWrite' || method === 'processResize' || method === 'processControl' || method === 'execute' || method === 'service' || method === 'cancelService' || method === 'cancel' || method === 'releaseReceipt' || method === 'release' || method === 'releaseScope')
+        ? await invoke() : await whileResponseOpen(response, invoke);
+      if (!response.destroyed) {
+        response.setHeader('Cache-Control', 'no-store');
+        response.json(result === undefined ? null : result);
+      }
+    }));
+  }
+
+  app.post(`${base}/sources/processSubscribe`, requireAuth, requireSourceAuth, route(async (request, response) => {
+    const body = value(request.body);
+    authorize(request, body.coordinatorHostId);
+    const input = body as unknown as Parameters<ManagedSourceService['processSubscribe']>[1];
+    const controller = new AbortController();
+    let subscription: Awaited<ReturnType<ManagedSourceService['processSubscribe']>> | undefined;
+    let opened = false;
+    const early: import('../kernel/protocol.generated.js').KernelProcessStreamEvent[] = [];
+    const send = (frame: unknown) => { if (!response.destroyed && !response.writableEnded) response.write(`${JSON.stringify(frame)}\n`); };
+    const close = () => { controller.abort(); void subscription?.close().catch(() => undefined); };
+    response.once('close', close);
+    if (response.destroyed) close();
+    try {
+      subscription = await service.sources().processSubscribe(principals.get(request)!, input, event => {
+        if (opened) send({ kind: 'event', event }); else early.push(event);
+      }, controller.signal);
+      controller.signal.throwIfAborted();
+      response.setHeader('Content-Type', 'application/x-ndjson');
+      response.setHeader('Cache-Control', 'no-store');
+      send({ kind: 'ready', subscriptionId: input.subscriptionId, resourceEpoch: input.resourceEpoch });
+      opened = true;
+      for (const event of early) send({ kind: 'event', event });
+      early.length = 0;
+      try { await subscription.closed; }
+      catch (error) { send({ kind: 'error', message: error instanceof Error ? error.message : String(error) }); }
+      if (!response.destroyed) response.end();
+    } finally {
+      response.off('close', close);
+      await subscription?.close().catch(() => undefined);
+    }
   }));
 
   app.get(`${base}/lifecycle`, requireAuth, requireManagedAuth, route(async (_request, response) => {
@@ -129,6 +204,11 @@ export function registerManagedRemoteRoutes(
   app.post(`${base}/resources/admit`, requireAuth, requireManagedAuth, route(async (request, response) => {
     const owner = authorize(request, value(request.body).coordinatorHostId);
     response.json(await service.admit(request.body, owner.principalId));
+  }));
+
+  app.post(`${base}/resources/observe`, requireAuth, requireManagedAuth, route(async (request, response) => {
+    const owner = authorize(request, value(request.body).coordinatorHostId);
+    response.json(await service.observeAdmission(request.body, owner.principalId));
   }));
 
   app.post(`${base}/resources/release`, requireAuth, requireManagedAuth, route(async (request, response) => {
@@ -191,7 +271,7 @@ export function registerManagedRemoteRoutes(
     const length = request.query.length === undefined ? 256 * 1024 : asNonNegativeInteger(request.query.length, "Output length");
     const outputId = asString(request.params.outputId, "Output identity");
     const retainedOwner = await service.ownerForOutput(outputId);
-    const principalId = principals.get(request);
+    const principalId = principals.get(request)?.principalId;
     if (!principalId || principalId !== retainedOwner.principalId) throw new Error("Managed remote output belongs to another authenticated connection");
     const page = await service.readOutput(outputId, offset, length);
     response.json(page);

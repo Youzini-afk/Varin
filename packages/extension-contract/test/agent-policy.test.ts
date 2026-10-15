@@ -1,0 +1,119 @@
+import assert from 'node:assert/strict';
+import test from 'node:test';
+import Ajv from 'ajv';
+import { parseVarinAgentPolicyDecision, parseVarinAgentPolicyInput, VARIN_AGENT_POLICY_CONTRACT } from '../src/index.js';
+
+// Compile the actual discoverable service schemas, then exercise the same public parser used
+// at the private Host bridge. This guards the wire boundary, not merely TypeScript literals.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const ajv = new (Ajv as any)({ strict: false });
+const validateInput = ajv.compile(VARIN_AGENT_POLICY_CONTRACT.decide.inputSchema);
+const validateDecision = ajv.compile(VARIN_AGENT_POLICY_CONTRACT.decide.outputSchema);
+const reference = { action_id: 'graph-a', node_id: 'save', content_ref: 'sha256-result' };
+const input = (completion: unknown) => ({
+  view: { run_id: 'run-a', state: 'runnable', history_count: 1, history_head_id: 'input-a', pending_tool_calls: 0, model_capabilities: [] },
+  event: { kind: 'tool_graph_completed', action_id: 'graph-a', receipts: [{ node_id: 'save', completion }] }, state: null,
+});
+
+test('policy graph boundary distinguishes non-dispatch, committed results and accepted jobs', () => {
+  for (const completion of [
+    { kind: 'not_dispatched', reason: 'Permission denied' },
+    { kind: 'result', outcome: 'succeeded', effect: 'confirmed', output: reference },
+    { kind: 'result', outcome: 'cancelled', effect: 'partial', output: reference },
+    { kind: 'result', outcome: 'indeterminate', effect: 'unknown', output: reference },
+    { kind: 'job_accepted', operation_id: 'graph-a:node:save', phase: 'running', effect: 'dispatched', lifetime: 'environment' },
+    { kind: 'job_accepted', operation_id: 'graph-a:node:save', phase: 'accepted', effect: 'confirmed', lifetime: 'thread', output: reference },
+  ]) {
+    const raw = input(completion);
+    assert.equal(validateInput([raw]), true, JSON.stringify(validateInput.errors));
+    const parsed = parseVarinAgentPolicyInput(raw);
+    assert.notEqual(parsed, raw);
+    assert.notEqual(parsed.event, raw.event);
+    assert.deepEqual(parsed, raw);
+  }
+  for (const completion of [
+    { kind: 'not_dispatched', reason: 'Denied', output: reference },
+    { kind: 'result', outcome: 'succeeded', effect: 'confirmed', output: null },
+    { kind: 'result', outcome: 'succeeded', effect: 'confirmed' },
+    { kind: 'result', outcome: 'succeeded', output: reference },
+    { kind: 'job_accepted', operation_id: 'operation', phase: 'running', effect: 'dispatched', lifetime: 'run', outcome: 'succeeded' },
+    { kind: 'job_accepted', operation_id: 'operation', phase: 'running', effect: 'dispatched', lifetime: 'run', output: null },
+    { kind: 'job_accepted', operation_id: 'operation', phase: 'running', effect: 'dispatched', lifetime: 'extension' },
+  ]) {
+    assert.equal(validateInput([input(completion)]), false);
+    assert.throws(() => parseVarinAgentPolicyInput(input(completion)), /Invalid policy graph receipts/);
+  }
+});
+
+test('policy v4 rejects obsolete graphs and receipts without losing JSON-null tool arguments', () => {
+  const decision = { action: { kind: 'tool_graph', nodes: [{ id: 'save', depends_on: [], call: { call_id: 'save', name: 'memory', schema_version: '1', arguments: null } }] }, state: null };
+  assert.equal(validateDecision(decision), true, JSON.stringify(validateDecision.errors));
+  assert.deepEqual(parseVarinAgentPolicyDecision(decision), decision);
+  const oldDecision = { ...decision, action: { ...decision.action, kind: 'read_graph' } };
+  assert.equal(validateDecision(oldDecision), false);
+  assert.throws(() => parseVarinAgentPolicyDecision(oldDecision), /Unknown agent policy action/);
+  const oldInput = input({ kind: 'result', outcome: 'succeeded', effect: 'none', output: reference });
+  for (const event of [
+    { ...oldInput.event, kind: 'read_graph_completed' },
+    { ...oldInput.event, receipts: [{ node_id: 'save', outcome: 'succeeded', output: reference, non_execution: null }] },
+  ]) {
+    assert.equal(validateInput([{ ...oldInput, event }]), false);
+    assert.throws(() => parseVarinAgentPolicyInput({ ...oldInput, event }));
+  }
+});
+
+test('policy delivery and pause preserve text while validating their distinct receipts', () => {
+  for (const value of ['', '  ', '正文\n\u0000🙂']) {
+    for (const action of [{ kind: 'deliver', output: { data: null, parts: [{ kind: 'text', text: value }] } }, { kind: 'pause', reason: value }]) {
+      const raw = { action, state: null };
+      assert.equal(validateDecision(raw), true, JSON.stringify(validateDecision.errors));
+      assert.deepEqual(parseVarinAgentPolicyDecision(raw), raw);
+    }
+  }
+  for (const action of [{ kind: 'deliver' }, { kind: 'deliver', text: null }, { kind: 'pause', reason: 0 }, { kind: 'pause', reason: 'Review', wait_id: 'private-wait' }]) {
+    assert.equal(validateDecision({ action, state: null }), false);
+    assert.throws(() => parseVarinAgentPolicyDecision({ action, state: null }));
+  }
+  for (const event of [{ kind: 'delivered', action_id: 'delivery', item_id: 'history' }, { kind: 'resumed', action_id: 'pause', wait_id: 'pause-wait' }]) {
+    const raw = { ...input({}), event };
+    assert.equal(validateInput([raw]), true, JSON.stringify(validateInput.errors));
+    assert.deepEqual(parseVarinAgentPolicyInput(raw), raw);
+    for (const malformed of [{ ...event, action_id: '' }, { ...event, cursor: 1 }, { kind: event.kind, action_id: event.action_id }]) {
+      assert.equal(validateInput([{ ...raw, event: malformed }]), false);
+      assert.throws(() => parseVarinAgentPolicyInput({ ...raw, event: malformed }));
+    }
+  }
+});
+
+test('v4 transition schemas carry only private state and reject actions or inferred compatibility', async () => {
+  const { parseVarinAgentPolicyTransitionInput, parseVarinAgentPolicyTransition, parseVarinAgentPolicyDescription } = await import('../src/index.js');
+  const raw = { ...input({ kind: 'not_dispatched', reason: 'Denied' }), from: { identity: { name: 'old', version: '1' }, declaredIdentity: null } };
+  const validateTransitionInput = ajv.compile(VARIN_AGENT_POLICY_CONTRACT.transitionState.inputSchema);
+  const validateTransition = ajv.compile(VARIN_AGENT_POLICY_CONTRACT.transitionState.outputSchema);
+  assert.equal(validateTransitionInput([raw]), true);
+  assert.deepEqual(parseVarinAgentPolicyTransitionInput(raw), raw);
+  for (const result of [{ kind: 'compatible', state: null }, { kind: 'compatible', state: { stage: 2 } }, { kind: 'incompatible', reason: 'Unknown source format' }]) {
+    assert.equal(validateTransition(result), true);
+    assert.deepEqual(parseVarinAgentPolicyTransition(result), result);
+  }
+  for (const result of [{ state: null }, { kind: 'compatible', state: null, action: { kind: 'complete' } }, { kind: 'incompatible', reason: '' }]) {
+    assert.equal(validateTransition(result), false);
+    assert.throws(() => parseVarinAgentPolicyTransition(result));
+  }
+  assert.throws(() => parseVarinAgentPolicyDescription({ identity: { name: 'v2', version: '1' }, configuration: null }));
+  assert.throws(() => parseVarinAgentPolicyTransitionInput({ ...raw, from: { ...raw.from, checkpoint: 'plugin-claim' } }));
+});
+
+test('typed media admission validates canonical bytes before accepting policy or SDK output', async () => {
+  const { parseIncomingOutputPart } = await import('../src/index.js');
+  for (const data_base64 of ['aW1hZ2U=', 'AA==', 'AAA=', 'AAAA']) {
+    const part = { kind: 'media', media: { media_type: 'image/png', data_base64 } };
+    assert.deepEqual(parseIncomingOutputPart(part), part);
+    assert.deepEqual(parseVarinAgentPolicyDecision({ action: { kind: 'deliver', output: { data: null, parts: [part] } }, state: null }).action, { kind: 'deliver', output: { data: null, parts: [part] } });
+  }
+  for (const data_base64 of ['', 'not base64!', 'AB==', 'AAB=', 'aW1hZ2U', 'aW1hZ2U=\n', '====']) {
+    const part = { kind: 'media', media: { media_type: 'image/png', data_base64 } };
+    assert.throws(() => parseIncomingOutputPart(part), /Invalid output part/);
+    assert.throws(() => parseVarinAgentPolicyDecision({ action: { kind: 'deliver', output: { data: { unchanged: true }, parts: [part] } }, state: null }), /Invalid output part/);
+  }
+});

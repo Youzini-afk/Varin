@@ -322,12 +322,12 @@ describe('terminal runtime', () => {
       expect(requiredProcess(harness.processes, 0).writes.at(-1)).toBe('\u001b[?997;1n');
 
       const resize = createResponse();
-      requiredRoute(harness.routes.post, '/api/terminal/:sessionId/resize')({ params: { sessionId: 'term-1' }, body: { cols: 200, rows: 60 } }, resize);
+      await requiredRoute(harness.routes.post, '/api/terminal/:sessionId/resize')({ params: { sessionId: 'term-1' }, body: { cols: 200, rows: 60 } }, resize);
       expect(resize.statusCode).toBe(200);
       expect(requiredProcess(harness.processes, 0).resizes).toEqual([[200, 60]]);
 
       const invalid = createResponse();
-      requiredRoute(harness.routes.post, '/api/terminal/:sessionId/resize')({ params: { sessionId: 'term-1' }, body: { cols: 1001, rows: 60 } }, invalid);
+      await requiredRoute(harness.routes.post, '/api/terminal/:sessionId/resize')({ params: { sessionId: 'term-1' }, body: { cols: 1001, rows: 60 } }, invalid);
       expect(invalid.statusCode).toBe(400);
     } finally { await harness.runtime.shutdown(); }
   });
@@ -619,7 +619,7 @@ describe('terminal runtime', () => {
       requiredProcess(harness.processes, 0).emitData('last output');
       requiredProcess(harness.processes, 0).emitExit(7, 0);
       const resize = createResponse();
-      requiredRoute(harness.routes.post, '/api/terminal/:sessionId/resize')({ params: { sessionId: 'term-1' }, body: { cols: 80, rows: 24 } }, resize);
+      await requiredRoute(harness.routes.post, '/api/terminal/:sessionId/resize')({ params: { sessionId: 'term-1' }, body: { cols: 80, rows: 24 } }, resize);
       expect(resize.statusCode).toBe(200);
       const closed = createResponse();
       await requiredRoute(harness.routes.delete, '/api/terminal/:sessionId')({ params: { sessionId: 'term-1' } }, closed);
@@ -752,20 +752,20 @@ describe('terminal runtime', () => {
       expect(secondCreated.status).toBe(200);
 
       const first = await open();
-      first.socket.send(createTerminalWsControlFrame({ t: 'attach', v: 3, s: 'term-live' }));
-      first.socket.send(createTerminalWsControlFrame({ t: 'attach', v: 3, s: 'term-second' }));
+      first.socket.send(createTerminalWsControlFrame({ t: 'attach', v: 4, s: 'term-live' }));
+      first.socket.send(createTerminalWsControlFrame({ t: 'attach', v: 4, s: 'term-second' }));
       expect(await first.next('snapshot', 'term-live')).toMatchObject({ s: 'term-live', q: 0, history: '', status: 'running' });
       expect(await first.next('snapshot', 'term-second')).toMatchObject({ s: 'term-second', q: 0, history: '', status: 'running' });
-      first.socket.send(createTerminalWsControlFrame({ t: 'write', v: 3, s: 'term-live', d: 'echo ok\r' }));
-      first.socket.send(createTerminalWsControlFrame({ t: 'write', v: 3, s: 'term-second', d: 'pwd\r' }));
-      first.socket.send(createTerminalWsControlFrame({ t: 'write', v: 3, s: 'term-live', d: 'echo next\r' }));
+      first.socket.send(createTerminalWsControlFrame({ t: 'write', v: 4, s: 'term-live', i: 'first-input', d: 'echo ok\r' }));
+      first.socket.send(createTerminalWsControlFrame({ t: 'write', v: 4, s: 'term-second', i: 'second-input', d: 'pwd\r' }));
+      first.socket.send(createTerminalWsControlFrame({ t: 'write', v: 4, s: 'term-live', i: 'third-input', d: 'echo next\r' }));
       await new Promise((resolve) => setTimeout(resolve, 5));
       expect(requiredProcess(processes, 0).writes).toEqual(['echo ok\r', 'echo next\r']);
       expect(requiredProcess(processes, 1).writes).toEqual(['pwd\r']);
 
       requiredProcess(processes, 1).emitData('/other\r\n');
       expect(await first.next('output', 'term-second')).toMatchObject({ s: 'term-second', q: 1, d: '/other\r\n' });
-      first.socket.send(createTerminalWsControlFrame({ t: 'detach', v: 3, s: 'term-second' }));
+      first.socket.send(createTerminalWsControlFrame({ t: 'detach', v: 4, s: 'term-second' }));
       await new Promise((resolve) => setTimeout(resolve, 5));
       requiredProcess(processes, 1).emitData('detached\r\n');
       await new Promise((resolve) => setTimeout(resolve, 5));
@@ -780,7 +780,7 @@ describe('terminal runtime', () => {
       first.socket.close();
 
       const second = await open();
-      second.socket.send(createTerminalWsControlFrame({ t: 'attach', v: 3, s: 'term-live' }));
+      second.socket.send(createTerminalWsControlFrame({ t: 'attach', v: 4, s: 'term-live' }));
       expect(await second.next('snapshot')).toMatchObject({ s: 'term-live', q: 2, history: 'ok\r\n', status: 'running' });
       requiredProcess(processes, 0).emitExit(7);
       expect(await second.next('exit')).toMatchObject({ s: 'term-live', q: 3, exitCode: 7 });
@@ -793,7 +793,7 @@ describe('terminal runtime', () => {
         method: 'POST', headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ sessionId: 'term-kill', cwd: '/repo' }),
       });
-      second.socket.send(createTerminalWsControlFrame({ t: 'attach', v: 3, s: 'term-kill' }));
+      second.socket.send(createTerminalWsControlFrame({ t: 'attach', v: 4, s: 'term-kill' }));
       await second.next('snapshot');
       const killed = await fetch(`${base}/api/terminal/force-kill`, {
         method: 'POST', headers: { 'content-type': 'application/json' },

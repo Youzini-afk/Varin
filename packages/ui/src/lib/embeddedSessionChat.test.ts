@@ -1,83 +1,23 @@
 import { describe, expect, test } from 'vitest';
-
-import {
-  buildEmbeddedSessionChatURL,
-  isEmbeddedSessionChatReady,
-  readEmbeddedSessionChatConfigFromSearch,
-  shouldConsumeSessionUrlParams,
-} from './embeddedSessionChat';
-
-describe('embedded session chat URL helpers', () => {
-  test('builds embedded session chat URLs with namespaced params', () => {
-    const url = buildEmbeddedSessionChatURL({
-      sessionId: 'child-123',
-      directory: '/tmp/project',
-      readOnly: true,
-      basePath: '/app',
-      origin: 'https://varin.test',
-    });
-
-    expect(url).toBe('https://varin.test/app?surface=desktop&piPanel=session-chat&piSessionId=child-123&piReadOnly=1&piDirectory=%2Ftmp%2Fproject');
-    expect(url).not.toContain('sessionId=');
-    expect(url).not.toContain('directory=');
-    expect(url).not.toContain('readOnly=');
+import { buildEmbeddedSessionChatURL, isEmbeddedSessionChatReady, readEmbeddedSessionChatConfigFromSearch, shouldConsumeSessionUrlParams } from './embeddedSessionChat';
+const config = { threadId: 'thread:child', branchId: 'branch:review', directory: '/repo', readOnly: true };
+describe('native embedded conversation identity', () => {
+  test('round-trips exact branch and keeps credentials out of the URL', () => {
+    const url = new URL(buildEmbeddedSessionChatURL({ ...config, basePath: '/app', origin: 'https://varin.test' }));
+    expect(readEmbeddedSessionChatConfigFromSearch(url.search)).toEqual(config);
+    expect(shouldConsumeSessionUrlParams(url.searchParams)).toBe(false);
+    expect(url.searchParams.get('threadId')).toBe(config.threadId);
+    expect(url.searchParams.get('branchId')).toBe(config.branchId);
   });
-
-  test('parses Varin-owned embedded session chat params', () => {
-    const config = readEmbeddedSessionChatConfigFromSearch('?piPanel=session-chat&piSessionId=child-123&piDirectory=%2Ftmp%2Fproject&piReadOnly=1');
-
-    expect(config).toEqual({
-      sessionId: 'child-123',
-      directory: '/tmp/project',
-      readOnly: true,
-    });
+  test('rejects retired Pi links and incomplete native links', () => {
+    expect(readEmbeddedSessionChatConfigFromSearch('?piPanel=session-chat&piSessionId=child')).toBeNull();
+    expect(readEmbeddedSessionChatConfigFromSearch('?panel=session-chat&threadId=child')).toBeNull();
+    expect(shouldConsumeSessionUrlParams(new URLSearchParams('?thread=thread%3Aa&branch=branch%3Ab'))).toBe(true);
   });
-
-  test('does not retain an OpenCode-shaped compatibility route', () => {
-    const config = readEmbeddedSessionChatConfigFromSearch('?ocPanel=session-chat&sessionId=child-123&directory=%2Ftmp%2Fproject&readOnly=1');
-    expect(config).toBeNull();
-  });
-
-  test('does not let generic session URL cleanup consume embedded session chat params', () => {
-    const params = new URLSearchParams('?piPanel=session-chat&piSessionId=child-123&piDirectory=%2Ftmp%2Fproject&piReadOnly=1');
-
-    expect(shouldConsumeSessionUrlParams(params)).toBe(false);
-  });
-
-  test('still consumes normal session deep-link params', () => {
-    expect(shouldConsumeSessionUrlParams(new URLSearchParams('?sessionId=session-123&directory=%2Ftmp%2Fproject'))).toBe(true);
-    expect(shouldConsumeSessionUrlParams(new URLSearchParams('?session=session-123'))).toBe(true);
-  });
-
-  test('does not allow embedded ChatView to render before target session is active', () => {
-    const embeddedSessionChat = {
-      sessionId: 'child-123',
-      directory: '/tmp/project/',
-      readOnly: true,
-    };
-
-    expect(isEmbeddedSessionChatReady({
-      embeddedSessionChat,
-      currentSessionId: null,
-      currentDirectory: '/tmp/project',
-    })).toBe(false);
-
-    expect(isEmbeddedSessionChatReady({
-      embeddedSessionChat,
-      currentSessionId: 'parent-123',
-      currentDirectory: '/tmp/project',
-    })).toBe(false);
-
-    expect(isEmbeddedSessionChatReady({
-      embeddedSessionChat,
-      currentSessionId: 'child-123',
-      currentDirectory: '/tmp/other',
-    })).toBe(false);
-
-    expect(isEmbeddedSessionChatReady({
-      embeddedSessionChat,
-      currentSessionId: 'child-123',
-      currentDirectory: '/tmp/project',
-    })).toBe(true);
+  test('requires the selected branch and navigation directory before rendering', () => {
+    const currentIdentity = { runtime: 'agent' as const, threadId: config.threadId, branchId: config.branchId };
+    expect(isEmbeddedSessionChatReady({ embeddedSessionChat: config, currentIdentity, currentDirectory: '/repo/' })).toBe(true);
+    expect(isEmbeddedSessionChatReady({ embeddedSessionChat: config, currentIdentity: { ...currentIdentity, branchId: 'other' }, currentDirectory: '/repo' })).toBe(false);
+    expect(isEmbeddedSessionChatReady({ embeddedSessionChat: config, currentIdentity, currentDirectory: '/other' })).toBe(false);
   });
 });

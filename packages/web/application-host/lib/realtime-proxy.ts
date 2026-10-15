@@ -40,13 +40,12 @@ interface ResolvedProxyTarget {
 
 const isAllowedSsePath = (pathname: string): boolean => {
   return pathname === '/api/varin/events'
-    || pathname === '/api/varin/runtime-manager/events'
+    || pathname === '/api/threads/observe'
     || pathname === '/api/notifications/stream';
 };
 
 const isAllowedWebSocketPath = (pathname: string): boolean => {
-  return pathname === '/api/varin/runtime/ws'
-    || pathname === '/api/terminal/ws'
+  return pathname === '/api/terminal/ws'
     || pathname === '/api/dictation/ws';
 };
 
@@ -304,6 +303,10 @@ export const attachRealtimeProxy = ({
       void originAllowed(req).then((allowed) => {
         if (!allowed) {
           rejectWebSocketUpgrade(socket, 403, 'Forbidden');
+          return;
+        }
+        if (!resolveProxyTarget(req, getDesktopRuntimeConfig, 'ws')) {
+          rejectWebSocketUpgrade(socket, 404, 'Not Found');
           return;
         }
         wsServer.handleUpgrade(req, socket, head, (ws) => {

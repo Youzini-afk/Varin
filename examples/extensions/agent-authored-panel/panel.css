@@ -1,0 +1,2 @@
+.agent-authored-panel { display: flex; gap: .5rem; align-items: center; padding: .75rem; border: 1px solid currentColor; border-radius: .5rem; }
+.agent-authored-panel img { width: 1.25rem; height: 1.25rem; }

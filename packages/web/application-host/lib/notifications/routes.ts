@@ -1,6 +1,5 @@
 import type { Express, Request, Response } from 'express';
 import type { createApnsRuntime } from './apns-runtime.js';
-import type { createPiSessionRuntime } from './pi-session-runtime.js';
 import type { createPushRuntime } from './push-runtime.js';
 
 interface PushSubscribeBody {
@@ -17,16 +16,7 @@ interface NotificationRouteDependencies
     | 'removePushSubscription'
     | 'setPushInitialized'
     | 'updateUiVisibility'>,
-  Pick<ReturnType<typeof createApnsRuntime>, 'addOrUpdateApnsToken' | 'removeApnsToken'>,
-  Pick<ReturnType<typeof createPiSessionRuntime>,
-    | 'getSessionActivitySnapshot'
-    | 'getSessionAttentionSnapshot'
-    | 'getSessionAttentionState'
-    | 'getSessionState'
-    | 'getSessionStateSnapshot'
-    | 'markSessionUnviewed'
-    | 'markSessionViewed'
-    | 'markUserMessageSent'> {
+  Pick<ReturnType<typeof createApnsRuntime>, 'addOrUpdateApnsToken' | 'removeApnsToken'> {
   clearPendingPushBadge?: () => void;
   getUiNotificationClients: () => Set<Response>;
   getUiSessionTokenFromRequest: (req: Request) => string | null;
@@ -42,14 +32,6 @@ interface NotificationRouteDependencies
 
 const asRecord = (value: unknown): Record<string, unknown> | null => (
   value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : null
-);
-
-const routeParam = (value: string | string[] | undefined): string => (
-  typeof value === 'string' ? value : Array.isArray(value) ? value[0] ?? '' : ''
-);
-
-const headerValue = (value: string | string[] | undefined): string | null => (
-  typeof value === 'string' ? value : Array.isArray(value) ? value[0] ?? null : null
 );
 
 const parsePushSubscribeBody = (body: unknown): PushSubscribeBody | null => {
@@ -165,14 +147,6 @@ export const registerNotificationRoutes = (app: Express, dependencies: Notificat
     isUiVisible,
     getUiNotificationClients,
     writeSseEvent,
-    getSessionActivitySnapshot,
-    getSessionStateSnapshot,
-    getSessionAttentionSnapshot,
-    getSessionState,
-    getSessionAttentionState,
-    markSessionViewed,
-    markSessionUnviewed,
-    markUserMessageSent,
     setPushInitialized,
   } = dependencies;
 
@@ -277,7 +251,7 @@ export const registerNotificationRoutes = (app: Express, dependencies: Notificat
     // TestFlight/App Store report 'production'. Absent (older clients, Android) → production.
     const environment = req.body?.environment === 'sandbox' ? 'sandbox' : 'production';
     if (typeof addOrUpdateApnsToken === 'function') {
-      await addOrUpdateApnsToken(uiToken, deviceToken, req.headers['user-agent'], platform, environment);
+      await addOrUpdateApnsToken(uiToken, deviceToken, req.headers['user-agent'], platform, environment, typeof req.body?.hostKey === 'string' ? req.body.hostKey : undefined);
     }
     return res.json({ ok: true });
   });
@@ -332,113 +306,6 @@ export const registerNotificationRoutes = (app: Express, dependencies: Notificat
     getUiSessionTokenFromRequest,
     writeSseEvent,
     ...(uiAuthController ? { uiAuthController } : {}),
-  });
-
-  app.get('/api/session-activity', (_req, res) => {
-    res.json(getSessionActivitySnapshot());
-  });
-
-  app.get('/api/sessions/snapshot', async (_req, res) => {
-    res.json({
-      statusSessions: getSessionStateSnapshot(),
-      attentionSessions: getSessionAttentionSnapshot(),
-      serverTime: Date.now(),
-    });
-  });
-
-  app.get('/api/sessions/status', async (_req, res) => {
-    const snapshot = getSessionStateSnapshot();
-    res.json({
-      sessions: snapshot,
-      serverTime: Date.now(),
-    });
-  });
-
-  app.get('/api/sessions/:id/status', async (req, res) => {
-    const sessionId = routeParam(req.params.id);
-    const state = getSessionState(sessionId);
-
-    if (!state) {
-      return res.status(404).json({
-        error: 'Session not found or no state available',
-        sessionId,
-      });
-    }
-
-    return res.json({
-      sessionId,
-      ...state,
-    });
-  });
-
-  app.get('/api/sessions/attention', async (_req, res) => {
-    const snapshot = getSessionAttentionSnapshot();
-    res.json({
-      sessions: snapshot,
-      serverTime: Date.now(),
-    });
-  });
-
-  app.get('/api/sessions/:id/attention', async (req, res) => {
-    const sessionId = routeParam(req.params.id);
-    const state = getSessionAttentionState(sessionId);
-
-    if (!state) {
-      return res.status(404).json({
-        error: 'Session not found or no attention state available',
-        sessionId,
-      });
-    }
-
-    return res.json({
-      sessionId,
-      ...state,
-    });
-  });
-
-  app.post('/api/sessions/:id/view', (req, res) => {
-    const sessionId = routeParam(req.params.id);
-    const clientId = headerValue(req.headers['x-client-id']) || req.ip || 'anonymous';
-
-    markSessionViewed(sessionId, clientId);
-    // The user is engaging with the app, so the native push badge no longer
-    // applies — reset it here too (not only on the visibility beacon), since
-    // opening the app reliably marks the opened session viewed.
-    if (typeof clearPendingPushBadge === 'function') clearPendingPushBadge();
-
-    return res.json({
-      success: true,
-      sessionId,
-      viewed: true,
-    });
-  });
-
-  app.post('/api/sessions/:id/unview', (req, res) => {
-    const sessionId = routeParam(req.params.id);
-    const clientId = headerValue(req.headers['x-client-id']) || req.ip || 'anonymous';
-
-    markSessionUnviewed(sessionId, clientId);
-
-    return res.json({
-      success: true,
-      sessionId,
-      viewed: false,
-    });
-  });
-
-  app.post('/api/sessions/:id/message-sent', (req, res) => {
-    const sessionId = routeParam(req.params.id);
-
-    markUserMessageSent(sessionId);
-    // Sending a message means the user is active in the app; reset the native
-    // push badge so it counts only notifications since this engagement.
-    if (typeof clearPendingPushBadge === 'function') clearPendingPushBadge();
-
-    return res.json({
-      success: true,
-      sessionId,
-      messageSent: true,
-    });
   });
 
 };

@@ -1,5 +1,6 @@
 export type EmbeddedSessionChatConfig = {
-  sessionId: string;
+  threadId: string;
+  branchId: string;
   directory: string | null;
   readOnly: boolean;
 };
@@ -12,7 +13,8 @@ export const normalizeEmbeddedSessionDirectory = (value: string | null | undefin
 };
 
 export const buildEmbeddedSessionChatURL = ({
-  sessionId,
+  threadId,
+  branchId,
   directory,
   readOnly,
   basePath,
@@ -25,38 +27,40 @@ export const buildEmbeddedSessionChatURL = ({
   const resolvedPath = basePath ?? (typeof window === 'undefined' ? '/' : window.location.pathname);
   const url = new URL(resolvedPath, resolvedOrigin);
   url.searchParams.set('surface', 'desktop');
-  url.searchParams.set('piPanel', VARIN_EMBEDDED_SESSION_CHAT_PANEL);
-  url.searchParams.set('piSessionId', sessionId);
+  url.searchParams.set('panel', VARIN_EMBEDDED_SESSION_CHAT_PANEL);
+  url.searchParams.set('threadId', threadId);
+  url.searchParams.set('branchId', branchId);
   if (readOnly) {
-    url.searchParams.set('piReadOnly', '1');
+    url.searchParams.set('readOnly', '1');
   }
   if (directory && directory.trim().length > 0) {
-    url.searchParams.set('piDirectory', directory.trim());
+    url.searchParams.set('directory', directory.trim());
   }
   url.hash = '';
   return url.toString();
 };
 
 export const readEmbeddedSessionChatConfigFromParams = (params: URLSearchParams): EmbeddedSessionChatConfig | null => {
-  if (params.get('piPanel') !== VARIN_EMBEDDED_SESSION_CHAT_PANEL) {
+  if (params.get('panel') !== VARIN_EMBEDDED_SESSION_CHAT_PANEL) {
     return null;
   }
 
-  const sessionIdRaw = params.get('piSessionId');
-  const sessionId = typeof sessionIdRaw === 'string' ? sessionIdRaw.trim() : '';
-  if (!sessionId) {
+  const threadId = params.get('threadId')?.trim() || '';
+  const branchId = params.get('branchId')?.trim() || '';
+  if (!threadId || !branchId) {
     return null;
   }
 
-  const directoryRaw = params.get('piDirectory');
+  const directoryRaw = params.get('directory');
   const directory = typeof directoryRaw === 'string' && directoryRaw.trim().length > 0
     ? directoryRaw.trim()
     : null;
 
   return {
-    sessionId,
+    threadId,
+    branchId,
     directory,
-    readOnly: params.get('piReadOnly') === '1' || params.get('piReadOnly') === 'true',
+    readOnly: params.get('readOnly') === '1' || params.get('readOnly') === 'true',
   };
 };
 
@@ -73,21 +77,20 @@ export const readEmbeddedSessionChatConfig = (): EmbeddedSessionChatConfig | nul
 };
 
 export const shouldConsumeSessionUrlParams = (params: URLSearchParams): boolean => {
-  if (params.get('piPanel') === VARIN_EMBEDDED_SESSION_CHAT_PANEL) {
+  if (params.get('panel') === VARIN_EMBEDDED_SESSION_CHAT_PANEL) {
     return false;
   }
 
-  const sessionId = (params.get('session') ?? params.get('sessionId') ?? '').trim();
-  return sessionId.length > 0;
+  return Boolean(params.get('thread')?.trim() && params.get('branch')?.trim());
 };
 
 export const isEmbeddedSessionChatReady = ({
   embeddedSessionChat,
-  currentSessionId,
+  currentIdentity,
   currentDirectory,
 }: {
   embeddedSessionChat: EmbeddedSessionChatConfig;
-  currentSessionId: string | null | undefined;
+  currentIdentity: import('@varin/application-client').ThreadIdentity | null | undefined;
   currentDirectory: string | null | undefined;
 }): boolean => {
   const expectedDirectory = normalizeEmbeddedSessionDirectory(embeddedSessionChat.directory);
@@ -95,5 +98,5 @@ export const isEmbeddedSessionChatReady = ({
   if (expectedDirectory && activeDirectory !== expectedDirectory) {
     return false;
   }
-  return currentSessionId === embeddedSessionChat.sessionId;
+  return currentIdentity?.threadId === embeddedSessionChat.threadId && currentIdentity?.branchId === embeddedSessionChat.branchId;
 };

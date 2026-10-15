@@ -1,15 +1,19 @@
 import type {
-  HarnessServiceMap,
+  ScholarlySearchParams,
   ScholarlyAuthor,
   ScholarlyPaper,
   ScholarlyProvider,
   ScholarlyRelationKind,
   ScholarlySearchResult,
 } from "@varin/protocol";
-import type { HarnessService, HarnessServiceContext } from "./router.js";
 import { HarnessServiceError } from "./service-error.js";
 
-type SearchParams = HarnessServiceMap["research.search"]["params"];
+type SearchParams = ScholarlySearchParams;
+
+export interface ScholarlySearchContext { signal: AbortSignal }
+export interface ScholarlySearchService {
+  handle(params: ScholarlySearchParams, context: ScholarlySearchContext): Promise<ScholarlySearchResult>;
+}
 
 interface ScholarlySearchDeps {
   fetch?: typeof globalThis.fetch;
@@ -167,12 +171,25 @@ const requestJson = async (
   url: URL,
   signal: AbortSignal,
 ): Promise<Record<string, unknown>> => {
+  signal.throwIfAborted();
   const response = await fetcher(url, {
     signal,
     headers: { Accept: "application/json", "User-Agent": "Varin scholarly search" },
   });
-  if (!response.ok) throw new Error(`scholarly provider returned HTTP ${response.status}`);
-  const value = await response.json() as unknown;
+  // Error bodies have no metadata to consume. Await their actual cancellation,
+  // including underlying transport cleanup, before reporting that this read stopped.
+  if (!response.ok) {
+    await response.body?.cancel();
+    signal.throwIfAborted();
+    throw new Error(`scholarly provider returned HTTP ${response.status}`);
+  }
+  // The original body must finish (or reject after transport cancellation) before
+  // this read can report stopped. Never race an abort.
+  const body = await response.text();
+  signal.throwIfAborted();
+  let value: unknown;
+  try { value = JSON.parse(body); }
+  catch { throw new Error("scholarly provider returned malformed JSON"); }
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("scholarly provider returned malformed JSON");
   return value as Record<string, unknown>;
 };
@@ -205,18 +222,48 @@ const openAlexWorkId = (value: string): string => {
   return value;
 };
 
+const paperList = (value: unknown, parse: (value: unknown) => ScholarlyPaper | null): ScholarlyPaper[] => {
+  if (!Array.isArray(value)) throw new Error("scholarly provider returned a malformed paper list");
+  return value.map((item) => {
+    const paper = parse(item);
+    if (!paper) throw new Error("scholarly provider returned a paper without its identity or title");
+    return paper;
+  });
+};
+const singlePaper = (value: unknown, parse: (value: unknown) => ScholarlyPaper | null): ScholarlyPaper[] => paperList([value], parse);
+const openAlexCursor = (body: Record<string, unknown>): string | undefined => {
+  if (body.meta === undefined) return undefined;
+  if (!body.meta || typeof body.meta !== "object" || Array.isArray(body.meta)) throw new Error("OpenAlex returned malformed page metadata");
+  const next = record(body.meta).next_cursor;
+  if (next === undefined || next === null) return undefined;
+  if (typeof next !== "string" || !next.trim()) throw new Error("OpenAlex returned a malformed next cursor");
+  return next;
+};
+const semanticScholarCursor = (body: Record<string, unknown>): string | undefined => {
+  if (body.next === undefined || body.next === null) return undefined;
+  if (!Number.isSafeInteger(body.next) || Number(body.next) < 0) throw new Error("Semantic Scholar returned a malformed next offset");
+  return String(body.next);
+};
+const semanticScholarOffset = (cursor: string | undefined): number => {
+  if (cursor === undefined) return 0;
+  if (!/^\d+$/u.test(cursor) || !Number.isSafeInteger(Number(cursor))) {
+    throw new HarnessServiceError("invalid-params", "semantic-scholar cursor must be a non-negative safe-integer offset");
+  }
+  return Number(cursor);
+};
+
 const OPENALEX_LIST_CURSOR = /^oa-list:(references|related):([^:]+):(\d+)$/u;
 
-const openAlexIdList = (value: unknown): string[] => (
-  Array.isArray(value)
-    ? value.flatMap((entry) => {
-      const id = text(entry);
-      return id ? [openAlexWorkId(id)] : [];
-    })
-    : []
-);
+const openAlexIdList = (value: unknown): string[] => {
+  if (!Array.isArray(value)) throw new Error("OpenAlex returned a malformed relation list");
+  return value.map((entry) => {
+    const id = text(entry);
+    if (!id) throw new Error("OpenAlex returned a relation without a work identity");
+    return openAlexWorkId(id);
+  });
+};
 
-export function createResearchSearchService(deps: ScholarlySearchDeps = {}): HarnessService<"research.search"> {
+export function createResearchSearchService(deps: ScholarlySearchDeps = {}): ScholarlySearchService {
   const fetcher = deps.fetch ?? globalThis.fetch;
   const capabilitiesOf = (provider: ScholarlyProvider) => PROVIDER_CAPABILITIES[provider];
   const base = (
@@ -238,7 +285,7 @@ export function createResearchSearchService(deps: ScholarlySearchDeps = {}): Har
     relation: ScholarlyRelationKind,
     sourceId: string,
     limit: number,
-    ctx: HarnessServiceContext,
+    ctx: ScholarlySearchContext,
   ): Promise<ScholarlySearchResult> => {
     if (relation === "citations") {
       // Server-paginated edge: the provider cursor carries continuation.
@@ -247,11 +294,8 @@ export function createResearchSearchService(deps: ScholarlySearchDeps = {}): Har
       url.searchParams.set("per-page", String(limit));
       url.searchParams.set("cursor", params.cursor ?? "*");
       const body = await requestJson(fetcher, url, ctx.signal);
-      const papers = Array.isArray(body.results)
-        ? body.results.flatMap((item) => { const paper = openAlexPaper(item); return paper ? [paper] : []; })
-        : [];
-      const meta = record(body.meta);
-      const nextCursor = text(meta.next_cursor) || undefined;
+      const papers = paperList(body.results, openAlexPaper);
+      const nextCursor = openAlexCursor(body);
       return base("openalex", "relations", {
         status: papers.length ? "ok" : "empty",
         papers,
@@ -262,22 +306,24 @@ export function createResearchSearchService(deps: ScholarlySearchDeps = {}): Har
     // references / related: the edge list lives on the work record; resolve one
     // page of ids per request. The minted cursor carries the remaining offset.
     let offset = 0;
-    if (params.cursor) {
+    if (params.cursor !== undefined) {
       const parsed = OPENALEX_LIST_CURSOR.exec(params.cursor);
-      if (!parsed || parsed[1] !== relation || parsed[2] !== sourceId) {
+      if (!parsed || parsed[1] !== relation || parsed[2] !== encodeURIComponent(sourceId)) {
         throw new HarnessServiceError("invalid-params", "research relations cursor does not match this paper and relation");
       }
       offset = Number(parsed[3]);
+      if (!Number.isSafeInteger(offset)) throw new HarnessServiceError("invalid-params", "research relations cursor offset must be a safe integer");
     }
     const work = await requestJson(fetcher, new URL(`${OPENALEX}/works/${encodeURIComponent(sourceId)}`), ctx.signal);
+    const sourcePaper = singlePaper(work, openAlexPaper)[0]!;
     const key = relation === "references" ? "referenced_works" : "related_works";
     const ids = openAlexIdList(work[key]);
     const pageIds = ids.slice(offset, offset + limit);
     const source = {
       provider: "openalex" as const,
       id: sourceId,
-      ...(text(work.doi).replace(/^https?:\/\/doi\.org\//iu, "") ? { doi: text(work.doi).replace(/^https?:\/\/doi\.org\//iu, "") } : {}),
-      ...(text(work.title) || text(work.display_name) ? { title: text(work.title) || text(work.display_name) } : {}),
+      ...(sourcePaper.doi ? { doi: sourcePaper.doi } : {}),
+      title: sourcePaper.title,
     };
     if (pageIds.length === 0) {
       return base("openalex", "relations", { papers: [], relation: { kind: relation, source } });
@@ -286,11 +332,9 @@ export function createResearchSearchService(deps: ScholarlySearchDeps = {}): Har
     url.searchParams.set("filter", `ids.openalex:${pageIds.join("|")}`);
     url.searchParams.set("per-page", String(pageIds.length));
     const body = await requestJson(fetcher, url, ctx.signal);
-    const papers = Array.isArray(body.results)
-      ? body.results.flatMap((item) => { const paper = openAlexPaper(item); return paper ? [paper] : []; })
-      : [];
+    const papers = paperList(body.results, openAlexPaper);
     const nextOffset = offset + pageIds.length;
-    const nextCursor = nextOffset < ids.length ? `oa-list:${relation}:${sourceId}:${nextOffset}` : undefined;
+    const nextCursor = nextOffset < ids.length ? `oa-list:${relation}:${encodeURIComponent(sourceId)}:${nextOffset}` : undefined;
     return base("openalex", "relations", {
       status: papers.length ? "ok" : "empty",
       papers,
@@ -304,7 +348,7 @@ export function createResearchSearchService(deps: ScholarlySearchDeps = {}): Har
     relation: ScholarlyRelationKind,
     sourceId: string,
     limit: number,
-    ctx: HarnessServiceContext,
+    ctx: ScholarlySearchContext,
   ): Promise<ScholarlySearchResult> => {
     if (relation === "related") {
       // The graph API has no related endpoint; recommendations are a different
@@ -315,23 +359,20 @@ export function createResearchSearchService(deps: ScholarlySearchDeps = {}): Har
         relation: { kind: relation, source: { provider: "semantic-scholar", id: sourceId } },
       });
     }
-    const offset = params.cursor ? Number(params.cursor) : 0;
-    if (params.cursor !== undefined && (!/^\d+$/u.test(params.cursor))) {
-      throw new HarnessServiceError("invalid-params", "semantic-scholar relations cursor must be an offset");
-    }
+    const offset = semanticScholarOffset(params.cursor);
     const url = new URL(`${SEMANTIC_SCHOLAR}/paper/${encodeURIComponent(sourceId)}/${relation}`);
     url.searchParams.set("fields", S2_PAPER_FIELDS);
     url.searchParams.set("limit", String(limit));
     if (offset > 0) url.searchParams.set("offset", String(offset));
     const body = await requestJson(fetcher, url, ctx.signal);
     const paperKey = relation === "references" ? "citedPaper" : "citingPaper";
-    const papers = Array.isArray(body.data)
-      ? body.data.flatMap((item) => {
-        const paper = semanticScholarPaper(record(item)[paperKey]);
-        return paper ? [paper] : [];
-      })
-      : [];
-    const nextOffset = typeof body.next === "number" ? String(body.next) : undefined;
+    if (!Array.isArray(body.data)) throw new Error("Semantic Scholar returned a malformed relation list");
+    // An unresolved edge is explicitly null in the graph API, not a malformed paper.
+    const papers = body.data.flatMap((item) => {
+      const value = record(item)[paperKey];
+      return value === null ? [] : singlePaper(value, semanticScholarPaper);
+    });
+    const nextOffset = semanticScholarCursor(body);
     return base("semantic-scholar", "relations", {
       status: papers.length ? "ok" : "empty",
       papers,
@@ -341,8 +382,12 @@ export function createResearchSearchService(deps: ScholarlySearchDeps = {}): Har
   };
 
   return {
-    handle: async (params: SearchParams, ctx: HarnessServiceContext): Promise<ScholarlySearchResult> => {
+    handle: async (params: SearchParams, ctx: ScholarlySearchContext): Promise<ScholarlySearchResult> => {
+      ctx.signal.throwIfAborted();
       const provider = params.provider ?? "openalex";
+      if (provider !== "openalex" && provider !== "semantic-scholar") throw new HarnessServiceError("invalid-params", "research search provider must be openalex or semantic-scholar");
+      if (!["search", "paper", "relations"].includes(params.action)) throw new HarnessServiceError("invalid-params", "research search action must be search, paper or relations");
+      if (params.relation !== undefined && !["references", "citations", "related"].includes(params.relation)) throw new HarnessServiceError("invalid-params", "research relation must be references, citations or related");
       const limit = params.limit ?? DEFAULT_LIMIT;
       if (!positiveInteger(limit)) throw new HarnessServiceError("invalid-params", "research search limit must be a positive integer");
       const action = params.action;
@@ -371,17 +416,14 @@ export function createResearchSearchService(deps: ScholarlySearchDeps = {}): Har
             url = new URL(`${OPENALEX}/works`);
             url.searchParams.set("search", text(params.query));
             url.searchParams.set("per-page", String(limit));
-            if (params.cursor) url.searchParams.set("cursor", params.cursor);
+            url.searchParams.set("cursor", params.cursor ?? "*");
           } else {
             const paperId = openAlexWorkId(text(params.paperId));
             url = new URL(`${OPENALEX}/works/${encodeURIComponent(paperId)}`);
           }
           const body = await requestJson(fetcher, url, ctx.signal);
-          const papers = action === "search"
-            ? (Array.isArray(body.results) ? body.results.flatMap((item) => { const paper = openAlexPaper(item); return paper ? [paper] : []; }) : [])
-            : (openAlexPaper(body) ? [openAlexPaper(body)!] : []);
-          const meta = record(body.meta);
-          const nextCursor = action === "search" ? text(meta.next_cursor) || undefined : undefined;
+          const papers = action === "search" ? paperList(body.results, openAlexPaper) : singlePaper(body, openAlexPaper);
+          const nextCursor = action === "search" ? openAlexCursor(body) : undefined;
           return base(provider, action, {
             status: papers.length ? "ok" : "empty",
             papers,
@@ -397,16 +439,15 @@ export function createResearchSearchService(deps: ScholarlySearchDeps = {}): Har
           url.searchParams.set("query", text(params.query));
           url.searchParams.set("limit", String(limit));
           url.searchParams.set("fields", S2_PAPER_FIELDS);
-          if (params.cursor && /^\d+$/u.test(params.cursor)) url.searchParams.set("offset", params.cursor);
+          const offset = semanticScholarOffset(params.cursor);
+          if (offset > 0) url.searchParams.set("offset", String(offset));
         } else {
           url = new URL(`${SEMANTIC_SCHOLAR}/paper/${encodeURIComponent(text(params.paperId))}`);
           url.searchParams.set("fields", S2_PAPER_FIELDS);
         }
         const body = await requestJson(fetcher, url, ctx.signal);
-        const papers = action === "search"
-          ? (Array.isArray(body.data) ? body.data.flatMap((item) => { const paper = semanticScholarPaper(item); return paper ? [paper] : []; }) : [])
-          : (semanticScholarPaper(body) ? [semanticScholarPaper(body)!] : []);
-        const nextOffset = action === "search" && typeof body.next === "number" ? String(body.next) : undefined;
+        const papers = action === "search" ? paperList(body.data, semanticScholarPaper) : singlePaper(body, semanticScholarPaper);
+        const nextOffset = action === "search" ? semanticScholarCursor(body) : undefined;
         return base(provider, action, {
           status: papers.length ? "ok" : "empty",
           papers,
@@ -419,6 +460,7 @@ export function createResearchSearchService(deps: ScholarlySearchDeps = {}): Har
         if (error instanceof HarnessServiceError) throw error;
         return base(provider, action, {
           status: "failed",
+          ...(action === "relations" ? { relation: { kind: params.relation!, source: { provider, id: provider === "openalex" ? openAlexWorkId(text(params.paperId)) : text(params.paperId) } } } : {}),
           message: error instanceof Error ? error.message : String(error),
         });
       }

@@ -25,7 +25,20 @@ impl Storage {
                     return Ok(None);
                 }
                 match result {
-                    Some(text) => Ok(Some(serde_json::from_str(&text)?)),
+                    Some(text) => {
+                        let result: Value = serde_json::from_str(&text)?;
+                        // Receipt replay is authority-bearing, unlike operation.get's history view.
+                        // Do not let a completed old write bypass native ownership admission.
+                        if kind.starts_with("storage.record.") || kind.starts_with("working.") || kind.starts_with("recovery.") {
+                            if ["sessionId", "ownerSessionId"].iter().any(|key| result.get(*key).is_some_and(|value| !value.is_null())) {
+                                return Err(KernelError::Authorization("legacy session receipt cannot be replayed; stored assets were not changed".into()));
+                            }
+                            if kind.starts_with("recovery.") && result.get("conversation").is_some_and(|value| !value.is_null()) {
+                                Self::recovery_conversation(&result)?;
+                            }
+                        }
+                        Ok(Some(result))
+                    },
                     None => Err(KernelError::Operation(format!(
                         "operationId {id} is still in progress"
                     ))),
@@ -124,7 +137,7 @@ impl Storage {
         let blocked: Option<String> = self
             .conn
             .query_row(
-                "SELECT 'pending-operation' FROM operations WHERE operation_id = ?1 AND state = 'started' UNION SELECT 'temporary-object' FROM object_owners WHERE operation_id = ?1 UNION SELECT 'revision' FROM revisions WHERE operation_id = ?1 LIMIT 1",
+                "SELECT 'source-schedule-receipt' FROM operations WHERE operation_id = ?1 AND kind='source.schedule' UNION SELECT 'file-observation-receipt' FROM operations WHERE operation_id = ?1 AND kind='file.observation.accept' UNION SELECT 'pending-operation' FROM operations WHERE operation_id = ?1 AND state = 'started' UNION SELECT 'temporary-object' FROM object_owners WHERE operation_id = ?1 UNION SELECT 'revision' FROM revisions WHERE operation_id = ?1 LIMIT 1",
                 params![operation_id],
                 |row| row.get(0),
             )
@@ -258,6 +271,13 @@ pub(super) fn idempotent(
             let _ = storage.conn.execute_batch("ROLLBACK");
             storage.conn.execute_batch("BEGIN IMMEDIATE")?;
             storage.operation_begin(operation_id, kind, &params_hash)?;
+            // The failed transaction is still an original workspace-owned fact.
+            // Rollback removed its first owner row; retain the same admitted
+            // scope so a read can distinguish rejection from an unknown effect.
+            storage.record_operation_workspace(
+                operation_id,
+                params_value.get("workspaceId").and_then(Value::as_str),
+            )?;
             storage.operation_failed(operation_id, &error)?;
             storage.conn.execute_batch("COMMIT")?;
             Err(error)

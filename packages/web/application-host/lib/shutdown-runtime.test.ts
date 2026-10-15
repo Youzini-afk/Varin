@@ -14,7 +14,6 @@ const createRuntime = (
   getExitOnShutdown: () => false,
   getIsShuttingDown: () => false,
   setIsShuttingDown: vi.fn(),
-  sessionRuntime: { dispose: vi.fn() },
   scheduledTasksRuntime: { stop: vi.fn() },
   getTerminalRuntime: () => null,
   setTerminalRuntime: vi.fn(),

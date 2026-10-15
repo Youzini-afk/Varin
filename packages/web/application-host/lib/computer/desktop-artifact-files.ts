@@ -10,6 +10,13 @@ export interface DesktopArtifactVersion {
   modifiedAt: string;
 }
 
+/** Evidence from this exact one-shot file writer, including validation before spawn. */
+export class DesktopFileWriteError extends HarnessServiceError {
+  constructor(error: unknown, readonly phase: 'before-dispatch' | 'unknown' | 'stopped') {
+    super(error instanceof HarnessServiceError ? error.harnessCode : 'unavailable', error instanceof Error ? error.message : String(error));
+  }
+}
+
 const commandFor = (desktop: LinuxDesktopState, operation: 'info' | 'read' | 'write', relativePath: string, sha256?: string) => {
   if (desktop.state !== 'running' || !desktop.artifact || !desktop.home || !desktop.user || !Number.isSafeInteger(desktop.uid)) {
     throw new HarnessServiceError('unavailable', 'Managed desktop file access is unavailable');
@@ -53,28 +60,32 @@ export const writeDesktopFile = async (
   content: Buffer,
   signal?: AbortSignal,
 ): Promise<DesktopArtifactVersion> => {
-  signal?.throwIfAborted();
-  const { command, args } = commandFor(desktop, 'write', relativePath);
-  const result = await new Promise<{ code: number; stdout: string; stderr: string }>((resolve, reject) => {
-    const child = spawn(command, args, { stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true, ...(signal ? { signal } : {}) });
-    let stdout = ''; let stderr = '';
-    let abortError: Error | undefined;
-    child.stdout.on('data', (data) => { stdout += data; });
-    child.stderr.on('data', (data) => { stderr += data; });
-    child.once('error', (error) => { if (error.name === 'AbortError') abortError = error; else reject(error); });
-    child.once('close', (code) => { if (abortError) reject(abortError); else resolve({ code: code ?? 1, stdout, stderr }); });
-    child.stdin.on('error', () => { /* Exit/error receipt owns a closed stdin. */ });
-    child.stdin.end(content);
-  });
-  if (result.code !== 0) throw new HarnessServiceError('unavailable', result.stderr.trim() || 'Desktop file write failed');
-  let version: DesktopArtifactVersion;
-  try { version = JSON.parse(result.stdout) as DesktopArtifactVersion; }
-  catch { throw new HarnessServiceError('unavailable', 'Desktop file write returned malformed metadata'); }
-  if (!/^[0-9a-f]{64}$/u.test(version.sha256) || !Number.isSafeInteger(version.byteLength)
-    || version.byteLength < 0 || !/^[0-9]+$/u.test(version.modifiedAt)) {
-    throw new HarnessServiceError('unavailable', 'Desktop file write returned invalid metadata');
-  }
-  return version;
+  let phase: 'before-dispatch' | 'unknown' | 'stopped' = 'before-dispatch';
+  try {
+    signal?.throwIfAborted();
+    const { command, args } = commandFor(desktop, 'write', relativePath);
+    const result = await new Promise<{ code: number; stdout: string; stderr: string }>((resolve, reject) => {
+      const child = spawn(command, args, { stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true, ...(signal ? { signal } : {}) });
+      phase = 'unknown';
+      let stdout = ''; let stderr = '';
+      let executionError: Error | undefined;
+      child.stdout.on('data', (data) => { stdout += data; });
+      child.stderr.on('data', (data) => { stderr += data; });
+      child.once('error', (error) => { executionError = error; });
+      child.once('close', (code) => { phase = 'stopped'; if (executionError) reject(executionError); else resolve({ code: code ?? 1, stdout, stderr }); });
+      child.stdin.on('error', () => { /* Exit/error receipt owns a closed stdin. */ });
+      child.stdin.end(content);
+    });
+    if (result.code !== 0) throw new HarnessServiceError('unavailable', result.stderr.trim() || 'Desktop file write failed');
+    let version: DesktopArtifactVersion;
+    try { version = JSON.parse(result.stdout) as DesktopArtifactVersion; }
+    catch { throw new HarnessServiceError('unavailable', 'Desktop file write returned malformed metadata'); }
+    if (!/^[0-9a-f]{64}$/u.test(version.sha256) || !Number.isSafeInteger(version.byteLength)
+      || version.byteLength < 0 || !/^[0-9]+$/u.test(version.modifiedAt)) {
+      throw new HarnessServiceError('unavailable', 'Desktop file write returned invalid metadata');
+    }
+    return version;
+  } catch (error) { throw new DesktopFileWriteError(error, phase); }
 };
 
 export const openDesktopFile = (desktop: LinuxDesktopState, relativePath: string, sha256: string): Promise<{ stream: Readable; cancel(): void }> => {

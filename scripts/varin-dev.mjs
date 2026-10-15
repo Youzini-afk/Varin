@@ -314,7 +314,7 @@ function waitForInstalledInstance(directory, port, expectedVersion) {
         try {
           const response = await fetch(process.env.VARIN_LOCAL_HEALTH_URL, { signal: AbortSignal.timeout(2_000) });
           const body = await response.json();
-          if (response.ok && body.status === 'ok' && body.varinVersion === process.env.VARIN_EXPECTED_VERSION && body.piRuntime?.ready === true && body.piRuntime?.source === 'bundled') process.exit(0);
+          if (response.ok && body.status === 'ok' && body.varinVersion === process.env.VARIN_EXPECTED_VERSION && body.kernel?.ready === true) process.exit(0);
           lastError = \`status=\${response.status} body=\${JSON.stringify(body)}\`;
         } catch (error) {
           lastError = error instanceof Error ? error.message : String(error);

@@ -9,6 +9,7 @@ import {
 } from '../workspace/path-safety.js';
 
 export interface RecoveryIdentity {
+  fileTarget?: import("@varin/extension-contract").RecoveryFileTarget;
   authorityId: string;
   canonicalRoot: string;
   filesystemProfile: string;
@@ -87,11 +88,17 @@ export interface RecoveryFileStoreOptions {
 }
 
 export interface RecoveryFileStore {
+  /** The original file owner checks effect-specific permission before plan/apply. */
+  assertApplyState?(identity: RecoveryIdentity, relativePath: string, state: RecoveryState): Promise<void>;
+  /** Editor safety content uses the same owned objects as disk recovery. */
+  storeContent?(identity: RecoveryIdentity, bytes: Buffer): Promise<{ state: RegularFileState; release(): Promise<void> }>;
+  readContent?(identity: RecoveryIdentity, state: RegularFileState): Promise<Buffer>;
   applyState: (
     identity: RecoveryIdentity,
     root: string,
     relativePath: string,
     state: RecoveryState,
+    options?: {reservationOperationId?:string},
   ) => Promise<void>;
   captureState: (
     identity: RecoveryIdentity,
@@ -105,7 +112,7 @@ export interface RecoveryFileStore {
 }
 
 const parseOptionalMode = (value: unknown): number | undefined => {
-  if (value === undefined) return undefined;
+  if (value === undefined || value === null) return undefined;
   if (!Number.isSafeInteger(value) || (value as number) < 0) {
     throw new RecoveryPrimitiveError('storage-malformed', 'Recovery file mode is malformed', { origin: 'storage' });
   }

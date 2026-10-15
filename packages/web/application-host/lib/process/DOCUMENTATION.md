@@ -18,7 +18,7 @@ rejects and preserves the owner; a rejected launch is not proof that no child ex
 
 | Product owner | Native backend | TypeScript responsibility |
 | --- | --- | --- |
-| Terminal runtime, HTTP/WebSocket and Harness shell | Kernel PTY | Same terminal handle, attachments, UTF-8 display, bounded replay, OSC 633 and command presentation |
+| Terminal runtime, original Agent process views and HTTP/WebSocket | Kernel PTY | Same terminal handle, attachments, UTF-8 display, bounded replay, OSC 633 and command presentation |
 | Thread worktree setup | Kernel pipe process | Setup policy, timeout request and preparation stages |
 | Language supervisor | Kernel pipe process | LSP framing, versions, language views, diagnostics and provider activation |
 | Debug supervisor | Kernel pipe process | DAP framing, breakpoints, generation and adapter selection |
@@ -36,9 +36,14 @@ without a retained record is not admitted by proximity. The service is private t
 retained state for an admitted root. Kernel loss becomes terminal status `error` and rejects shell
 and adapter work without inventing an exit code or rerunning the command.
 
+Agent terminal adoption uses the original Catalog process Operation and a fresh same-Run source grant.
+The view cannot launch a replacement shell or release the native spool. User stdin, automatic theme
+responses and resizing all await original interaction receipts; closing a view does not stop the job.
+See [the shared interaction contract](../../../../../docs/resources.md#进程与-operation-寿命).
+
 ## Scope
 
-Pi session/catalog/inference worker creation stays with runtime-broker. Short Git semantic commands
+Native Agent execution stays with the Rust Catalog and supervisor. Short Git semantic commands
 under the file gate and shell-discovery/bootstrap probes remain domain adapters: this is not a
 replacement of every child_process import. Debuggee children spawned inside a native DAP adapter
 belong to that native process tree, not another Host backend. Node/Bun PTY providers are not selected

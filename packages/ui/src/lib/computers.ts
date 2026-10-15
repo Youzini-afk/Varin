@@ -1,9 +1,7 @@
-import { getRuntimeUrlResolver, runtimeFetch } from '@varin/application-client';
+import { ThreadRequestError, getRuntimeEndpointGeneration, getRuntimeUrlResolver, runtimeFetch } from '@varin/application-client';
 import { sha256 } from '@noble/hashes/sha2.js';
 import type {
   ComputerControlState,
-  ComputerActivityEntry,
-  ComputerAutomationState,
   ComputerGesture,
   ComputerArtifact,
   ComputerDesktop,
@@ -24,6 +22,7 @@ export interface ComputerCatalog {
 const readJson = async <T>(response: Response, fallback: string): Promise<T> => {
   if (!response.ok) {
     const body = await response.json().catch(() => null);
+    if (typeof body?.code === 'string' && body.code.startsWith('computer-')) throw new ThreadRequestError(response.status, body.code);
     const message = typeof body?.error === 'string' ? body.error : fallback;
     throw new Error(message);
   }
@@ -33,18 +32,6 @@ const readJson = async <T>(response: Response, fallback: string): Promise<T> => 
 export const listComputers = async (): Promise<ComputerCatalog> => (
   readJson<ComputerCatalog>(await runtimeFetch('/api/computers'), 'Unable to list computers')
 );
-
-/** No probing, screenshot capture or persistent desktop subscription. */
-export const readComputerActivity = async (sessionId: string): Promise<ComputerActivityEntry[]> => (
-  await readJson<{ activities: ComputerActivityEntry[] }>(
-    await runtimeFetch(`/api/computers/activity?sessionId=${encodeURIComponent(sessionId)}`), 'Unable to read computer activity',
-  )
-).activities;
-export interface ComputerAutomationProjection { state: ComputerAutomationState; activities: ComputerActivityEntry[] }
-export const readComputerAutomation = async (sessionId: string): Promise<ComputerAutomationProjection> => readJson(
-  await runtimeFetch(`/api/computers/automation?sessionId=${encodeURIComponent(sessionId)}`, { cache: 'no-store' }), 'Unable to read Computer Use state');
-export const stopComputerAutomation = async (sessionId: string, desktopId?: string): Promise<{ state: ComputerAutomationState }> => readJson(
-  await runtimeFetch('/api/computers/automation/stop', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ sessionId, desktopId }) }), 'Unable to confirm computer work cancellation');
 
 /** Re-probe a desktop's driver; the response carries the real capability table. */
 export const probeComputerDesktop = async (desktopId: string): Promise<ComputerDesktop> => {
@@ -68,16 +55,28 @@ export const setDefaultComputerTarget = async (desktopId: string | null): Promis
 
 // --- BC5: shared desktop view + control -------------------------------------
 
-const desktopPost = async <T>(desktopId: string, action: string, body: unknown, fallback: string): Promise<T> => (
+const desktopPost = async <T>(desktopId: string, action: string, body: unknown, fallback: string, signal?: AbortSignal): Promise<T> => (
   readJson<T>(
     await runtimeFetch(`/api/computers/desktops/${encodeURIComponent(desktopId)}/${action}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
+      signal,
     }),
     fallback,
   )
 );
+
+/** Stop the displayed physical owner, including a pinned remote target. Never resolve its actor locally. */
+export const stopDesktopComputerWork = async (desktopId: string, automationEpoch: string, signal?: AbortSignal): Promise<{ control: ComputerControlState; released: boolean }> => {
+  const generation = getRuntimeEndpointGeneration();
+  signal?.throwIfAborted();
+  const result = await desktopPost<{ control: ComputerControlState; released: boolean }>(
+    desktopId, 'stop', { automationEpoch }, 'Unable to confirm desktop input release', signal);
+  signal?.throwIfAborted();
+  if (generation !== getRuntimeEndpointGeneration()) throw new Error('Application Host changed during computer request');
+  return result;
+};
 
 export const takeoverDesktop = (desktopId: string, holderId: string) => (
   desktopPost<{ control: ComputerControlState; cancelled: number; released: boolean }>(

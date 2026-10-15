@@ -1,10 +1,10 @@
 import React from 'react';
 
 import { EMPTY_TERMINAL_BUFFER, useTerminalStore } from '@/stores/useTerminalStore';
-import { usePiSessionStore } from '@/stores/usePiSessionStore';
+import { useThreadStore } from '@/stores/useThreadStore';
 import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
-import { ensurePiSessionDraftTarget } from '@/lib/pi-runtime/sessionDrafts';
-import { type TerminalStreamEvent } from '@varin/application-client';
+import { appendThreadDraftText, startThreadFromNavigation } from '@/lib/agent-runtime/threadNavigation';
+import { getRuntimeEndpointGeneration, type TerminalStreamEvent } from '@varin/application-client';
 import { useThemeSystem } from '@/contexts/useThemeSystem';
 import { useFontPreferences } from '@/hooks/useFontPreferences';
 import { CODE_FONT_OPTION_MAP, DEFAULT_MONO_FONT } from '@/lib/fontOptions';
@@ -21,18 +21,20 @@ import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import { extractTerminalPreviewUrl, isTerminalPreviewUrlAvailable } from '@/lib/terminalPreview';
 import { useI18n } from '@/lib/i18n';
 import { PROJECT_ACTION_ICON_MAP, type ProjectActionIconKey } from '@/lib/projectActions';
-import { useInlineCommentDraftStore } from '@/stores/useInlineCommentDraftStore';
 import { applyTerminalModifier, terminalControlCharacter, terminalSequenceForKey, type TerminalModifier as Modifier, type TerminalQuickKey as MobileKey } from '@/lib/terminalInput';
 
 type TerminalViewProps = {
     visible?: boolean;
+    directoryOverride?: string;
+    attachedOnly?: boolean;
+    onClose?: () => void;
 };
 
 const FALLBACK_TERMINAL_SIZE = { cols: 80, rows: 24 } as const;
 
-export const TerminalView: React.FC<TerminalViewProps> = ({ visible }) => {
+export const TerminalView: React.FC<TerminalViewProps> = ({ visible, directoryOverride, attachedOnly = false, onClose }) => {
     const { t } = useI18n();
-    const { terminal, runtime } = useRuntimeAPIs();
+    const { terminal, runtime, threads } = useRuntimeAPIs();
     const { currentTheme } = useThemeSystem();
     const terminalAppearanceRef = React.useRef<{ themeMode: 'light' | 'dark'; terminalBackground: string; terminalForeground: string }>({ themeMode: 'dark', terminalBackground: '', terminalForeground: '' });
     terminalAppearanceRef.current = { themeMode: currentTheme.metadata.variant === 'light' ? 'light' : 'dark', terminalBackground: currentTheme.colors.surface.background, terminalForeground: currentTheme.colors.syntax.base.foreground };
@@ -47,8 +49,9 @@ export const TerminalView: React.FC<TerminalViewProps> = ({ visible }) => {
     const showTerminalQuickKeysOnDesktop = useUIStore((state) => state.showTerminalQuickKeysOnDesktop);
     const showQuickKeys = isTouchTerminal || showTerminalQuickKeysOnDesktop;
 
-    const currentSessionId = usePiSessionStore((s) => s.currentSessionId);
-    const effectiveDirectory = useEffectiveDirectory() ?? null;
+    const currentSessionId = useThreadStore(state => state.selectedIdentity?.threadId ?? null);
+    const contextDirectory = useEffectiveDirectory() ?? null;
+    const effectiveDirectory = directoryOverride ?? contextDirectory;
     const hasActiveContext = currentSessionId !== null || effectiveDirectory !== null;
     const directoryTerminalState = useTerminalStore((s) => effectiveDirectory ? s.sessions.get(effectiveDirectory) : undefined);
     const terminalHydrated = useTerminalStore((s) => s.hasHydrated);
@@ -62,7 +65,6 @@ export const TerminalView: React.FC<TerminalViewProps> = ({ visible }) => {
     const appendToBuffer = useTerminalStore((s) => s.appendToBuffer);
     const replaceBuffer = useTerminalStore((s) => s.replaceBuffer);
     const setTabPreviewUrl = useTerminalStore((s) => s.setTabPreviewUrl);
-    const addContextDraft = useInlineCommentDraftStore((s) => s.addDraft);
 
     const openContextPreview = useUIStore((state) => state.openContextPreview);
 
@@ -91,7 +93,9 @@ export const TerminalView: React.FC<TerminalViewProps> = ({ visible }) => {
             })(),
             id: tab.id,
             label: tab.label,
-            title: tab.label,
+            title: tab.source?.resourceOwner.kind === 'managed_host'
+                ? `${tab.label} · ${tab.source.resourceOwner.hostId} · ${tab.source.cwd}`
+                : tab.label,
             closeLabel: t('terminalView.tabs.closeTabTitle'),
         }));
     }, [directoryTerminalState?.tabs, t]);
@@ -103,7 +107,7 @@ export const TerminalView: React.FC<TerminalViewProps> = ({ visible }) => {
         effectiveDirectory && activeTabId ? s.getBuffer(effectiveDirectory, activeTabId).chunks : EMPTY_TERMINAL_BUFFER.chunks
     ));
     const isConnecting = activeTab?.isConnecting ?? false;
-    const previewUrl = activeTab?.previewUrl ?? null;
+    const previewUrl = attachedOnly || activeTab?.source?.resourceOwner.kind === 'managed_host' ? null : activeTab?.previewUrl ?? null;
 
     const [connectionError, setConnectionError] = React.useState<string | null>(null);
     const [isFatalError, setIsFatalError] = React.useState(false);
@@ -123,6 +127,13 @@ export const TerminalView: React.FC<TerminalViewProps> = ({ visible }) => {
     const previewScanTailRef = React.useRef('');
     const pendingPreviewProbeUrlsRef = React.useRef<Set<string>>(new Set());
     const previewProbeGenerationRef = React.useRef(0);
+    const processReconnectRef = React.useRef<object | null>(null);
+
+    React.useEffect(() => {
+        processReconnectRef.current = null;
+        setIsRestarting(false);
+        return () => { processReconnectRef.current = null; };
+    }, [activeTabId, effectiveDirectory]);
 
     const resetTerminalPreviewScan = React.useCallback(() => {
         previewScanTailRef.current = '';
@@ -160,6 +171,10 @@ export const TerminalView: React.FC<TerminalViewProps> = ({ visible }) => {
 
     React.useEffect(() => {
         isTerminalVisibleRef.current = isTerminalVisible;
+        if (!isTerminalVisible) {
+            processReconnectRef.current = null;
+            setIsRestarting(false);
+        }
     }, [isTerminalVisible]);
 
     React.useEffect(() => {
@@ -212,6 +227,10 @@ export const TerminalView: React.FC<TerminalViewProps> = ({ visible }) => {
             if (!data) {
                 return;
             }
+            const source = useTerminalStore.getState().getDirectoryState(directory)?.tabs.find(tab => tab.id === tabId)?.source;
+            // The probe and preview services belong to the coordinating Host.
+            // A loopback URL emitted by B cannot be resolved as an A service.
+            if (attachedOnly || source?.resourceOwner.kind === 'managed_host') return;
 
             const combined = `${previewScanTailRef.current}${data}`.replace(/\r\n|\r/g, '\n');
             const lines = combined.split('\n');
@@ -238,14 +257,14 @@ export const TerminalView: React.FC<TerminalViewProps> = ({ visible }) => {
                 }
 
                 const currentTab = useTerminalStore.getState().getDirectoryState(directory)?.tabs.find((tab) => tab.id === tabId);
-                if (!currentTab || currentTab.previewUrlLocked || currentTab.previewUrl === candidate) {
+                if (!currentTab || currentTab.source?.resourceOwner.kind === 'managed_host' || currentTab.previewUrlLocked || currentTab.previewUrl === candidate) {
                     return;
                 }
 
                 setTabPreviewUrl(directory, tabId, candidate, { locked: false, autoOpened: false });
             });
         },
-        [setTabPreviewUrl]
+        [attachedOnly, setTabPreviewUrl]
     );
 
     const startStream = React.useCallback(
@@ -274,8 +293,10 @@ export const TerminalView: React.FC<TerminalViewProps> = ({ visible }) => {
                         switch (event.type) {
                             case 'snapshot': {
                                 setConnecting(directory, tabId, false);
-                                setConnectionError(null);
-                                setIsFatalError(false);
+                                setConnectionError(event.status === 'error'
+                                    ? t('terminalView.error.connectionFailed', { message: 'PROCESS_UNAVAILABLE' })
+                                    : null);
+                                setIsFatalError(event.status === 'error');
                                 setIsReconnectPending(false);
                                 focusTerminalWhenWindowActive();
 
@@ -335,15 +356,24 @@ export const TerminalView: React.FC<TerminalViewProps> = ({ visible }) => {
                             return;
                         }
 
-                        if (!fatal) {
+                        const currentTab = useTerminalStore.getState().getDirectoryState(directory)?.tabs.find((tab) => tab.id === tabId);
+                        if (!fatal && !(currentTab?.closePolicy === 'detach' && error.code === 'PROCESS_UNAVAILABLE')) {
                             setConnectionError(null);
                             setIsFatalError(false);
                             return;
                         }
 
                         setIsReconnectPending(false);
+                        if (currentTab?.closePolicy === 'detach') {
+                            // A failed observation is not a process exit. Keep the
+                            // accepted session and reconnect only to that owner.
+                            setConnectionError(t('terminalView.error.connectionFailed', { message: error.message }));
+                            setIsFatalError(true);
+                            setConnecting(directory, tabId, false);
+                            disconnectStream();
+                            return;
+                        }
                         if (error.code === 'SESSION_NOT_FOUND') {
-                            const currentTab = useTerminalStore.getState().getDirectoryState(directory)?.tabs.find((tab) => tab.id === tabId);
                             if (!currentTab?.label?.startsWith('Action:')) {
                                 setConnectionError(null);
                                 setIsFatalError(false);
@@ -408,7 +438,7 @@ export const TerminalView: React.FC<TerminalViewProps> = ({ visible }) => {
 
             const existingState = useTerminalStore.getState().getDirectoryState(directory);
             if (!existingState) {
-                ensureDirectory(directory);
+                if (!attachedOnly) ensureDirectory(directory);
                 return;
             }
 
@@ -432,6 +462,10 @@ export const TerminalView: React.FC<TerminalViewProps> = ({ visible }) => {
             const hasBufferedOutput = buffer.byteLength > 0 || buffer.chunks.length > 0;
 
             if (!terminalId) {
+                if (attachedOnly || tab?.closePolicy === 'detach') {
+                    setConnecting(directory, tabId, false);
+                    return;
+                }
                 if (terminalLifecycle === 'exited') {
                     setConnecting(directory, tabId, false);
                     return;
@@ -526,6 +560,7 @@ export const TerminalView: React.FC<TerminalViewProps> = ({ visible }) => {
         };
     }, [
         hasActiveContext,
+        attachedOnly,
         effectiveDirectory,
         terminalSessionId,
         terminalLifecycle,
@@ -573,8 +608,64 @@ export const TerminalView: React.FC<TerminalViewProps> = ({ visible }) => {
             ? (activeTabId ?? state?.activeTabId ?? state?.tabs[0]?.id ?? null)
             : (state?.tabs[0]?.id ?? null);
         if (!tabId) return;
-        const originalSessionId = state?.tabs.find((tab) => tab.id === tabId)?.terminalSessionId ?? null;
-        if (!originalSessionId || !terminal.restartSession) return;
+        const originalTab = state?.tabs.find((tab) => tab.id === tabId);
+        const originalSessionId = originalTab?.terminalSessionId ?? null;
+        if (originalSessionId && originalTab?.closePolicy === 'detach') {
+            if (processReconnectRef.current) return;
+            const source = originalTab.source;
+            const process = source?.process;
+            if (process && (process.endpointGeneration !== getRuntimeEndpointGeneration() || !threads?.processes)) {
+                setConnectionError(t('terminalView.error.connectionFailed', { message: 'PROCESS_UNAVAILABLE' }));
+                setIsFatalError(true);
+                return;
+            }
+            const request = {};
+            processReconnectRef.current = request;
+            const current = () => {
+                const currentState = useTerminalStore.getState().getDirectoryState(effectiveDirectory);
+                const owningTab = currentState?.tabs.find(tab => tab.id === tabId);
+                return processReconnectRef.current === request
+                    && (!process || process.endpointGeneration === getRuntimeEndpointGeneration())
+                    && owningTab?.terminalSessionId === originalSessionId && owningTab.source === source
+                    && (currentState?.activeTabId ?? currentState?.tabs[0]?.id) === tabId
+                    && directoryRef.current === effectiveDirectory && activeTabIdRef.current === tabId
+                    && isTerminalVisibleRef.current;
+            };
+            setIsRestarting(true);
+            setConnectionError(null);
+            setIsFatalError(false);
+            setIsReconnectPending(false);
+            disconnectStream();
+            try {
+                if (process) {
+                    // A browser reattach alone cannot restore the failed A-to-B
+                    // projection. Readmit a view of the original accepted job.
+                    const reopened = await threads!.processes!.openTerminal({ ...process.identity, operationId: process.operationId });
+                    if (!current()) return;
+                    const owner = source!.resourceOwner;
+                    const reopenedOwner = reopened.resourceOwner;
+                    const sameOwner = owner.kind === 'local' ? reopenedOwner.kind === 'local'
+                        : reopenedOwner.kind === 'managed_host' && reopenedOwner.hostId === owner.hostId
+                            && reopenedOwner.connectionId === owner.connectionId && reopenedOwner.endpointIdentity === owner.endpointIdentity;
+                    if (!sameOwner || reopened.sessionId !== originalSessionId || reopened.processId !== process.processId
+                        || reopened.operationId !== process.operationId || reopened.cwd !== source!.cwd) {
+                        throw new Error('PROCESS_IDENTITY_MISMATCH');
+                    }
+                }
+                if (current()) startStream(effectiveDirectory, tabId, originalSessionId);
+            } catch (error) {
+                if (!current()) return;
+                setConnectionError(t('terminalView.error.connectionFailed', { message: error instanceof Error ? error.message : 'PROCESS_UNAVAILABLE' }));
+                setIsFatalError(true);
+            } finally {
+                if (processReconnectRef.current === request) {
+                    processReconnectRef.current = null;
+                    setIsRestarting(false);
+                }
+            }
+            return;
+        }
+        if (attachedOnly || !originalSessionId || !terminal.restartSession) return;
 
         setIsRestarting(true);
         setConnectionError(null);
@@ -611,7 +702,7 @@ export const TerminalView: React.FC<TerminalViewProps> = ({ visible }) => {
         } finally {
             setIsRestarting(false);
         }
-    }, [activeTabId, disconnectStream, effectiveDirectory, enableTabs, isRestarting, resetTerminalPreviewScan, setTabLifecycle, setTabSessionId, startStream, t, terminal, terminalLoginShell, terminalShell]);
+    }, [activeTabId, attachedOnly, disconnectStream, effectiveDirectory, enableTabs, isRestarting, resetTerminalPreviewScan, setTabLifecycle, setTabSessionId, startStream, t, terminal, terminalLoginShell, terminalShell, threads]);
 
     const handleHardRestart = React.useCallback(async () => {
         // Keep semantics: “close tab -> new clean tab”.
@@ -619,33 +710,27 @@ export const TerminalView: React.FC<TerminalViewProps> = ({ visible }) => {
     }, [handleRestart]);
 
     const handleCreateTab = React.useCallback(() => {
-        if (!effectiveDirectory) return;
+        if (!effectiveDirectory || attachedOnly) return;
         const tabId = createTab(effectiveDirectory);
         setActiveTab(effectiveDirectory, tabId);
         setConnectionError(null);
         setIsFatalError(false);
         setIsReconnectPending(false);
         disconnectStream();
-    }, [createTab, disconnectStream, effectiveDirectory, setActiveTab]);
+    }, [attachedOnly, createTab, disconnectStream, effectiveDirectory, setActiveTab]);
 
     const handleAttachSelection = React.useCallback(async () => {
+        if (attachedOnly) return;
         const selection = terminalControllerRef.current?.getSelection();
         if (!selection || !activeTab || !effectiveDirectory) return;
         try {
-            const target = await ensurePiSessionDraftTarget(effectiveDirectory);
-            addContextDraft(target, {
-                source: 'terminal',
-                fileLabel: activeTab.label,
-                startLine: selection.startLine,
-                endLine: selection.endLine,
-                code: selection.text,
-                language: activeTab.terminalSessionId ?? activeTab.id,
-                text: '',
-            });
+            const identity = useThreadStore.getState().selectedIdentity ?? await startThreadFromNavigation({ directory: effectiveDirectory });
+            appendThreadDraftText(identity, `Terminal ${activeTab.label}, lines ${selection.startLine}-${selection.endLine}:\n\n\`\`\`text\n${selection.text}\n\`\`\``);
+
         } catch (error) {
             toast.error(error instanceof Error ? error.message : String(error));
         }
-    }, [activeTab, addContextDraft, effectiveDirectory]);
+    }, [activeTab, attachedOnly, effectiveDirectory]);
 
     const handleSelectTab = React.useCallback(
         (tabId: string) => {
@@ -675,9 +760,10 @@ export const TerminalView: React.FC<TerminalViewProps> = ({ visible }) => {
             void (async () => {
                 if (sessionId && tab?.closePolicy !== 'detach') await terminal.close(sessionId);
                 closeTab(effectiveDirectory, tabId);
+                if (attachedOnly) onClose?.();
             })().catch((error) => setConnectionError(error instanceof Error ? error.message : t('terminalView.error.sessionEnded')));
         },
-        [activeTabId, closeTab, disconnectStream, effectiveDirectory, t, terminal]
+        [activeTabId, attachedOnly, closeTab, disconnectStream, effectiveDirectory, onClose, t, terminal]
     );
 
     const handleViewportInput = React.useCallback(
@@ -1027,7 +1113,7 @@ export const TerminalView: React.FC<TerminalViewProps> = ({ visible }) => {
                             />
                         </div>
 
-                        <Button
+                        {!attachedOnly ? <Button
                             type="button"
                             size="xs"
                             variant="ghost"
@@ -1036,13 +1122,13 @@ export const TerminalView: React.FC<TerminalViewProps> = ({ visible }) => {
                             title={t('terminalView.tabs.newTabTitle')}
                         >
                             <Icon name="add" className={`${isTouchTerminal ? 'h-[18px] w-[18px]' : 'h-4 w-4'}`}/>
-                        </Button>
+                        </Button> : null}
 
                         <div className="flex shrink-0 items-center gap-1 overflow-visible">
-                            <Button type="button" size="xs" variant="ghost" className="h-7 w-7 p-0" onClick={() => void handleRestart()} disabled={isRestarting} title={t('terminalView.actions.restart')} aria-label={t('terminalView.actions.restart')}>
+                            <Button type="button" size="xs" variant="ghost" className="h-7 w-7 p-0" onClick={() => void handleRestart()} disabled={isRestarting} title={t(activeTab?.closePolicy === 'detach' ? 'terminalView.actions.retry' : 'terminalView.actions.restart')} aria-label={t(activeTab?.closePolicy === 'detach' ? 'terminalView.actions.retry' : 'terminalView.actions.restart')}>
                                 <Icon name="restart" className="h-4 w-4" />
                             </Button>
-                            <Button
+                            {!attachedOnly ? <Button
                                 type="button"
                                 size="xs"
                                 variant="ghost"
@@ -1052,7 +1138,7 @@ export const TerminalView: React.FC<TerminalViewProps> = ({ visible }) => {
                                 aria-label={t('terminalView.actions.attachSelection')}
                             >
                                 <Icon name="attachment-2" className="h-4 w-4" />
-                            </Button>
+                            </Button> : null}
                             {previewUrl ? (
                                 <Button
                                     type="button"
@@ -1120,10 +1206,10 @@ export const TerminalView: React.FC<TerminalViewProps> = ({ visible }) => {
                                 className="h-6 px-2 py-0 text-xs"
                                 onClick={handleHardRestart}
                                 disabled={isRestarting}
-                                title={t('terminalView.actions.hardRestartTitle')}
+                                title={t(activeTab?.closePolicy === 'detach' ? 'terminalView.actions.retry' : 'terminalView.actions.hardRestartTitle')}
                                 type="button"
                             >
-                                {t('terminalView.actions.hardRestart')}
+                                {t(activeTab?.closePolicy === 'detach' ? 'terminalView.actions.retry' : 'terminalView.actions.hardRestart')}
                             </Button>
                         )}
                     </div>

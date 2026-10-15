@@ -1,3 +1,4 @@
+import type { VarinExtensionRestartCommit } from "@varin/extension-contract";
 import {
   VARIN_EXTENSION_CATALOG_SCHEMA_VERSION,
   type VarinExtensionActualState,
@@ -139,10 +140,12 @@ export class ApplicationExtensionCatalog {
     extensionId: string,
     candidateIntegrity: string,
     expectedRevision: number,
+    validateBeforeCommit?: () => void,
+    restartCommit?: VarinExtensionRestartCommit,
   ): Promise<VarinExtensionCatalogSnapshot> {
     const [identity, read] = await Promise.all([
       this.store.getHostIdentity(),
-      this.store.selectCandidate(extensionId, candidateIntegrity, expectedRevision),
+      this.store.selectCandidate(extensionId, candidateIntegrity, expectedRevision, validateBeforeCommit, restartCommit),
     ]);
     return this.#publicSnapshot(identity.hostId, read);
   }
@@ -169,6 +172,23 @@ export class ApplicationExtensionCatalog {
       this.store.discardCandidate(extensionId, candidateIntegrity, expectedRevision),
     ]);
     return this.#publicSnapshot(identity.hostId, read);
+  }
+
+  /** Append a cleanup outcome to the existing actual-owner diagnostics without replacing a newer generation. */
+  async recordHostCleanupUnconfirmed(extensionId: string, ownerGeneration: number): Promise<void> {
+    const snapshot = await this.snapshot();
+    const entry = snapshot.extensions.find(item => item.manifest.id === extensionId);
+    if (!entry) return;
+    const current = [...this.#actual.values()].find(value => value.extensionId === extensionId && value.state.realmKind === "host");
+    const state: VarinExtensionActualState = current?.state ?? {
+      desiredRevision: entry.desired.revision, diagnostics: [], entrypointId: "host", generation: ownerGeneration,
+      hostId: snapshot.hostId, realmId: "application-host", realmKind: "host", status: "inactive", updatedAt: new Date().toISOString(),
+    };
+    const updated = { ...state, diagnostics: [...state.diagnostics, {
+      code: "broker_cleanup_unconfirmed", message: `Broker generation ${ownerGeneration} exited; extension cleanup was not confirmed`,
+      severity: "error" as const, timestamp: new Date().toISOString(),
+    }] };
+    this.#actual.set(actualKey(extensionId, updated), { extensionId, state: updated });
   }
 
   async reportActualState(extensionId: string, state: VarinExtensionActualState): Promise<void> {
@@ -200,6 +220,7 @@ export class ApplicationExtensionCatalog {
           .map((value) => structuredClone(value.state))
           .sort((left, right) => left.realmId.localeCompare(right.realmId) || left.entrypointId.localeCompare(right.entrypointId));
         return {
+          ...(record.restartHandoffs ? { restartHandoffs: structuredClone(record.restartHandoffs) } : {}),
           actual,
           ...(record.candidate ? {
             candidate: {
@@ -213,6 +234,7 @@ export class ApplicationExtensionCatalog {
               resolvedVersion: record.candidate.resolvedVersion,
               source: {
                 display: record.candidate.source.display,
+                ...(record.candidate.source.provenance ? { provenance: structuredClone(record.candidate.source.provenance) } : {}),
                 kind: record.candidate.source.kind,
               },
             },
@@ -223,7 +245,7 @@ export class ApplicationExtensionCatalog {
           manifest: structuredClone(record.manifest),
           resolvedVersion: record.resolvedVersion,
           selectedVersion: record.selectedVersion,
-          source: { display: record.source.display, kind: record.source.kind },
+          source: { display: record.source.display, kind: record.source.kind, ...(record.source.provenance ? { provenance: structuredClone(record.source.provenance) } : {}) },
           updatedAt: record.updatedAt,
           ...(record.integrity ? { integrity: record.integrity } : {}),
         };

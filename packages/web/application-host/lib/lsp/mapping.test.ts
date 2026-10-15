@@ -7,6 +7,7 @@ import {
   mapCompletionItem,
   mapWorkspaceEdit,
   resourceFromUri,
+  strictLocationRejection,
 } from './mapping.js';
 
 const workspaceId = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
@@ -21,6 +22,16 @@ describe('LSP mapping boundary', () => {
     });
     expect(resourceFromUri(pathToFileURL(path.resolve(root, '..', 'outside.ts')).href, workspaceId, root, path)).toBeNull();
     expect(resourceFromUri('https://example.com/file.ts', workspaceId, root, path)).toBeNull();
+  });
+
+  it.each([
+    [String.raw`\\?\C:\Workspace`, 'file:///C:/Workspace/src/File.ts'],
+    [String.raw`\\?\UNC\server\share\Workspace`, 'file://server/share/Workspace/src/File.ts'],
+  ])('maps a Win32 source namespace and its ordinary file URI: %s', (root, uri) => {
+    expect(resourceFromUri(uri, workspaceId, root, path.win32)).toEqual({ workspaceId, resourceId: 'src/File.ts' });
+    const range = { start: { line: 0, character: 0 }, end: { line: 0, character: 1 } };
+    expect(strictLocationRejection({ uri, range }, root, path.win32)).toBeUndefined();
+    expect(resourceFromUri(uri.replace('/Workspace/', '/Other/'), workspaceId, root, path.win32)).toBeNull();
   });
 
   it('preserves completion edits and normalized workspace operations', () => {

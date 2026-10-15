@@ -14,6 +14,7 @@
  * is left untouched. On success, the old server/ is replaced.
  */
 
+import { buildMacComputerHelper } from '../../computer-driver/macos/build-helper.mjs';
 import { pruneLegacyHostArtifacts } from '../../../scripts/host-production-boundary.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -150,7 +151,7 @@ try {
   const driverDest = path.join(buildDir, 'computer-driver');
   const copyDriverAssets = (srcDir, destDir) => {
     for (const entry of fs.readdirSync(srcDir, { withFileTypes: true })) {
-      if (entry.name === '__pycache__' || entry.name === 'node_modules') continue;
+      if (entry.name === '__pycache__' || entry.name === 'node_modules' || entry.name === 'Varin Computer.app' || entry.name.startsWith('.VarinComputer-build-')) continue;
       // Development-only helpers never ship to a runtime/driver install.
       if (entry.name === 'check-syntax.ps1' || entry.name === 'smoke.ps1' || entry.name.startsWith('test_')) continue;
       const srcPath = path.join(srcDir, entry.name);
@@ -166,6 +167,7 @@ try {
   if (fs.existsSync(driverSource)) {
     fs.mkdirSync(driverDest, { recursive: true });
     copyDriverAssets(driverSource, driverDest);
+    if (process.platform === 'darwin') buildMacComputerHelper({ destination: path.join(driverDest, 'macos') });
     log('Staged computer-driver assets.');
   }
 

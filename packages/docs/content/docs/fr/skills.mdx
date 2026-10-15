@@ -1,30 +1,16 @@
 ---
-title: Skills
-description: Créez des instructions réutilisables que les agents chargent à la demande.
+title: "Skills"
+description: "Créez et utilisez des ressources d’instructions versionnées."
 ---
 
 # Skills
 
-Un skill est un ensemble réutilisable d’instructions qu’un agent peut charger quand c’est pertinent — par exemple « comment nous écrivons les messages de commit » ou « nos conventions d’API ». Gérez-les dans **Paramètres → Skills**.
+Un skill est une ressource `SKILL.md` contenant nom, description et instructions, avec d’éventuels fichiers complémentaires. La description aide l’agent à déterminer quand l’utiliser.
 
-Pour installer des skills prêts à l’emploi au lieu d’écrire les vôtres, voir [Catalogue de skills](/fr/skills-catalog/).
+Dans **Paramètres → Skills**, créez, consultez, modifiez, copiez ou supprimez des skills personnels ou propres à un projet approuvé. L’éditeur indique chemin, origine, validité et accès en écriture. Un élément en lecture seule peut être copié vers un périmètre modifiable. Examinez les demandes de confiance et diagnostics.
 
-## Créer un skill
+Utilisez `/skill:name` au début d’un message ou **Instructions and skills**. L’agent peut aussi lire les ressources admises avec `resource_read`. Le texte n’accorde aucun droit supplémentaire sur les outils ou fichiers.
 
-1. Ouvrez **Paramètres → Skills**.
-2. Créez un skill et donnez-lui un nom et une courte description. La description est ce qui permet à l’agent de décider quand le skill s’applique, donc soyez précis.
-3. Écrivez les instructions. Ajoutez des fichiers de support si le skill en a besoin.
-4. Choisissez où il vit :
-   - **personal** — disponible dans tous les projets
-   - **project** — disponible uniquement dans le projet actuel
+L’enregistrement ne remplace pas les ressources déjà capturées. **Refresh instructions and skills** prépare celles des prochaines requêtes ; les requêtes acceptées conservent leur version.
 
-## Utiliser un skill dans le chat
-
-Tapez `/` au milieu d’un message pour afficher le sélecteur de skills, puis choisissez-en un. L’agent charge les instructions de ce skill pour la réponse.
-
-Un `/` au tout début du message ouvre plutôt les [commandes](/fr/commands/).
-
-## Pages liées
-
-- [Catalogue de skills](/fr/skills-catalog/) — installer des skills publiés par d’autres
-- [Commandes](/fr/commands/) — commandes disponibles dans le runtime actif
+Voir [Commandes](/fr/commands/) et [Bibliothèque de skills](/fr/skills-catalog/).

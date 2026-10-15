@@ -1,0 +1,25 @@
+{
+  "name": "varin-example-nested-tools",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "description": "Compose selected memory and optional file_read tools through invocation-scoped runtime.tools.",
+  "files": ["dist", "host.ts", "varin.extension.json", "README.md"],
+  "scripts": {
+    "build": "varin-extension build",
+    "check": "varin-extension check",
+    "test": "node --import tsx --test host.test.ts"
+  },
+  "dependencies": {
+    "@varin/extension-contract": "0.2.0",
+    "@varin/extension-sdk": "0.2.0"
+  },
+  "devDependencies": {
+    "@varin/extension-cli": "0.2.0",
+    "tsx": "^4.23.15"
+  },
+  "varin": {
+    "build": { "entrypoints": { "host": { "source": "host.ts" } } }
+  },
+  "engines": { "node": ">=22.19.0" }
+}

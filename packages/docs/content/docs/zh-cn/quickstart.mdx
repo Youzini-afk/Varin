@@ -5,22 +5,16 @@ description: 快速启动 Varin，并为任务选择合适的应用。
 
 # 快速开始
 
-## 最快路径
+1. 按安装指南准备 Node.js、Bun 与 Rust，在源码目录运行 `bun install --frozen-lockfile` 和 `bun run dev`。
+2. 打开终端输出的 Vite URL；桌面端使用 `bun run electron:dev`。
+3. 在“设置 → 模型渠道”连接模型渠道并选择模型。
+4. 创建对话。每个对话都是拥有独立分支和历史的原生 Thread。
+5. 需要文件操作时，展开 Workspace，选择来源 Host、文件夹和访问模式并准备来源；纯聊天无需来源。
+6. 输入消息并发送，可附加图片或 PDF，在对话内查看工具活动。
 
-1. 克隆 [Varin](https://github.com/Youzini-afk/Varin)，并用 Bun 安装依赖（见[安装](/zh-cn/install/)）。
-2. 运行 `bun run dev`。
-3. 打开终端中打印的 Vite URL。
-4. 想在手机上使用，启动一个[隧道](/zh-cn/tunnels/)并扫描二维码。
+手机可与运行中的 Host 配对。跨网络连接需要配置且可用的中继，或你自己的安全远程访问通道。对外可访问的 Host 应设置强 UI 密码。
 
-你应该会在浏览器中看到 Varin 会话列表。如果它能加载出来，说明你已经成功运行起来了。
-
-如果更喜欢容器，请使用[安装](/zh-cn/install/)中的 Docker 路径，并用生成的 `VARIN_UI_PASSWORD` 打开 `http://127.0.0.1:3000`。
-
-请使用强 UI 密码，尤其是当你打算将实例开放到互联网时。
-
-如果页面无法加载，请查看[问题排查](/zh-cn/troubleshooting/)。
-
-## 我应该使用哪个应用？
-
-- 日常本地工作使用 **桌面**（`bun run electron:dev`）
-- 远程访问和在手机上审查时使用 **Web**
+- [安装](/zh-cn/install/)
+- [模型渠道](/zh-cn/providers/)
+- [项目](/zh-cn/projects/)
+- [连接设备](/zh-cn/connect-devices/)

@@ -1,31 +1,31 @@
 import assert from "node:assert/strict";
 import { describe, it } from "vitest";
 import type { VarinSettingsDocument } from "@varin/settings-store";
-import type { PiSettingsSnapshot } from "@varin/protocol";
+import type { AgentSettingsSnapshot } from "@varin/application-client";
 import { createSettingsService, settingsDocumentRevision, type ClientSurfaceBridge, type SettingsActionOperationStore, type SettingsServiceDeps } from "./settings-service.js";
 import type { SettingsActionRegistry } from "./settings-actions.js";
 import { HarnessServiceError } from "./service-error.js";
 
 /**
  * Focused contract tests for the shared-catalog settings service (D-306).
- * The point under test is authority routing: app-document CAS, pi-settings
+ * The point under test is authority routing: app-document CAS, agent-settings
  * scope rules, honest read-only/action surfaces — not the catalog text.
  */
 
-const caller = { workspaceId: "ws-1", sessionId: "session-1" };
+const caller = { workspaceId: "ws-1", threadId: "thread-1", branchId: "branch-1" };
 
-interface PiFixture {
+interface AgentFixture {
   global: Record<string, unknown>;
   project: Record<string, unknown>;
   projectTrusted: boolean;
   updates: { scope: string; expectedRevision: string; set: Record<string, unknown>; remove: string[] }[];
 }
 
-function makePiSnapshot(fixture: PiFixture): PiSettingsSnapshot {
+function makeAgentSnapshot(fixture: AgentFixture): AgentSettingsSnapshot {
   return {
-    global: fixture.global as PiSettingsSnapshot["global"],
+    global: fixture.global as AgentSettingsSnapshot["global"],
     globalRevision: settingsDocumentRevision(fixture.global as VarinSettingsDocument),
-    project: fixture.project as PiSettingsSnapshot["project"],
+    project: fixture.project as AgentSettingsSnapshot["project"],
     projectRevision: settingsDocumentRevision(fixture.project as VarinSettingsDocument),
     projectTrusted: fixture.projectTrusted,
   };
@@ -52,19 +52,17 @@ function basePersistFactory(getApp: () => VarinSettingsDocument, setApp: (doc: V
 
 function baseDeps() {
   let appDocument: VarinSettingsDocument = {};
-  const pi: PiFixture = { global: {}, project: {}, projectTrusted: true, updates: [] };
+  const pi: AgentFixture = { global: {}, project: {}, projectTrusted: true, updates: [] };
   const deps: SettingsServiceDeps = {
     readAppSettings: async () => structuredClone(appDocument),
     persistAppSettings: basePersistFactory(() => appDocument, (doc) => { appDocument = doc; }),
-    requestPi: async (_cwd, method, params) => {
-      if (method === "settings.get") return makePiSnapshot(pi);
-      const update = params as PiFixture["updates"][number];
-      pi.updates.push(update);
+    agentSettings: () => ({ snapshot: async () => makeAgentSnapshot(pi), update: async update => {
+      pi.updates.push({ ...update, remove: [...update.remove] });
       const layer = update.scope === "project" ? pi.project : pi.global;
       for (const [key, value] of Object.entries(update.set)) layer[key] = value;
       for (const key of update.remove) delete layer[key];
-      return makePiSnapshot(pi);
-    },
+      return makeAgentSnapshot(pi);
+    } }),
     resolveWorkspaceRoot: async () => "/repo/workspace",
   };
   return { deps, pi, getApp: () => appDocument };
@@ -72,7 +70,7 @@ function baseDeps() {
 
 function fixture(overrides: {
   app?: VarinSettingsDocument;
-  pi?: Partial<PiFixture>;
+  pi?: Partial<AgentFixture>;
   onChanged?: SettingsServiceDeps["onChanged"];
   clientSurfaces?: ClientSurfaceBridge;
   actions?: SettingsActionRegistry;
@@ -80,7 +78,7 @@ function fixture(overrides: {
 } = {}) {
   const base = baseDeps();
   let appDocument: VarinSettingsDocument = overrides.app ?? base.getApp();
-  const pi: PiFixture = {
+  const pi: AgentFixture = {
     global: overrides.pi?.global ?? base.pi.global,
     project: overrides.pi?.project ?? base.pi.project,
     projectTrusted: overrides.pi?.projectTrusted ?? true,
@@ -90,12 +88,8 @@ function fixture(overrides: {
     ...base.deps,
     readAppSettings: async () => structuredClone(appDocument),
     persistAppSettings: basePersistFactory(() => appDocument, (doc) => { appDocument = doc; }),
-    requestPi: async (_cwd, method, params) => {
-      if (method === "settings.get") {
-        return makePiSnapshot(pi);
-      }
-      const update = params as PiFixture["updates"][number];
-      pi.updates.push(update);
+    agentSettings: () => ({ snapshot: async () => makeAgentSnapshot(pi), update: async update => {
+      pi.updates.push({ ...update, remove: [...update.remove] });
       const layer = update.scope === "project" ? pi.project : pi.global;
       for (const [key, value] of Object.entries(update.set)) {
         layer[key] = value;
@@ -103,8 +97,8 @@ function fixture(overrides: {
       for (const key of update.remove) {
         delete layer[key];
       }
-      return makePiSnapshot(pi);
-    },
+      return makeAgentSnapshot(pi);
+    } }),
     ...(overrides.onChanged ? { onChanged: overrides.onChanged } : {}),
     ...(overrides.clientSurfaces ? { clientSurfaces: overrides.clientSurfaces } : {}),
     ...(overrides.actions ? { actions: overrides.actions } : {}),
@@ -113,7 +107,7 @@ function fixture(overrides: {
   return { service: createSettingsService(deps), pi, getApp: () => appDocument };
 }
 
-/** Minimal real-adapter registry wired to the same fake Pi channel. */
+/** Minimal real-adapter registry wired to the same native action owner. */
 function depsWithActions(
   calls: { method: string; params: unknown }[],
   opts: { fail?: boolean } = {},
@@ -122,9 +116,9 @@ function depsWithActions(
   return {
     ...base.deps,
     actions: {
-      adapterFor: (domain) => domain === "runtime:extensions" ? {
-        verbs: ["list", "install", "remove"],
-        describe: async () => ({ summary: "packages", verbs: ["list", "install", "remove"] }),
+      adapterFor: (domain) => domain === "service:extension-packages" ? {
+        verbs: ["list", "remove"],
+        describe: async () => ({ summary: "packages", verbs: ["list", "remove"] }),
         invoke: async (_ctx, _entry, verb, _args) => {
           if (opts.fail) return { status: "unavailable", detail: "owner offline" };
           if (verb === "list") {
@@ -144,7 +138,7 @@ function fakeBridge(
   surfaces: { id: string; kind: string }[],
 ): ClientSurfaceBridge {
   return {
-    listForSession: () => surfaces,
+    listForThread: () => surfaces,
     request: async (op) => {
       if (surfaces.length === 0) {
         throw new HarnessServiceError("unavailable", "no client surface is connected to this host");
@@ -187,7 +181,7 @@ describe("settings service catalog search", () => {
     const { service } = fixture();
     const result = await service.search(caller, { id: "harness.shell" });
     assert.equal(result.total, 1);
-    assert.equal(result.items[0]?.owner, "pi-settings");
+    assert.equal(result.items[0]?.owner, "agent-settings");
   });
 
   it("discovers document-reading settings and reports their resolved user defaults", async () => {
@@ -235,7 +229,7 @@ describe("settings service catalog search", () => {
     assert.equal(summary?.fieldKind, "enum");
     assert.ok(summary?.options?.some((option) => option.value === "12h"));
 
-    const actions = await service.search(caller, { id: "plugins.packages" });
+    const actions = await service.search(caller, { id: "extensions.packages" });
     assert.deepEqual(actions.items[0]?.summary?.verbs, []);
 
     const client = await service.search(caller, { id: "chat.persist-drafts" });
@@ -268,7 +262,7 @@ describe("settings read", () => {
     assert.equal(field?.saved, undefined);
   });
 
-  it("resolves pi-settings effective value through project-over-global merge", async () => {
+  it("resolves agent-settings effective value through project-over-global merge", async () => {
     const { service } = fixture({
       pi: {
         global: { harness: { shell: "powershell" } },
@@ -376,7 +370,7 @@ describe("settings update", () => {
     assert.equal(getApp().uiFont, "Inter");
   });
 
-  it("rejects pi scopes for app-owned entries and rejects secret resets", async () => {
+  it("rejects native scopes for app-owned entries and rejects secret resets", async () => {
     const { service, getApp } = fixture({ app: { desktopUiPassword: "stored" } });
     await assert.rejects(
       service.update(caller, {
@@ -406,7 +400,7 @@ describe("settings update", () => {
     assert.equal(result.fields.find((f) => f.path === "timeFormatPreference")?.status, "applied");
   });
 
-  it("enforces pi-settings scope ownership", async () => {
+  it("enforces agent-settings scope ownership", async () => {
     const { service } = fixture();
     const result = await service.update(caller, {
       id: "harness.models.explore",
@@ -441,7 +435,7 @@ describe("settings update", () => {
     assert.equal(pi.updates.length, 1);
   });
 
-  it("writes pi-settings through the owner protocol with CAS", async () => {
+  it("writes agent-settings through the owner protocol with CAS", async () => {
     const { service, pi } = fixture({ pi: { global: { harness: { shell: "auto" } } } });
     const result = await service.update(caller, {
       id: "harness.shell",
@@ -462,7 +456,7 @@ describe("settings update", () => {
       /device-local.*surface channel|surface channel/,
     );
     await assert.rejects(
-      service.update(caller, { id: "plugins.packages", set: { anything: true } }),
+      service.update(caller, { id: "extensions.packages", set: { anything: true } }),
       /settings\.action/,
     );
   });
@@ -473,7 +467,7 @@ describe("settings actions (D-309)", () => {
     const calls: { method: string; params: unknown }[] = [];
     const withActions = createSettingsService(depsWithActions(calls));
     const result = await withActions.action(caller, {
-      id: "plugins.packages",
+      id: "extensions.packages",
       verb: "list",
     });
     assert.equal(result.status, "applied");
@@ -484,7 +478,7 @@ describe("settings actions (D-309)", () => {
     const calls: { method: string; params: unknown }[] = [];
     const withActions = createSettingsService(depsWithActions(calls));
     const result = await withActions.action(caller, {
-      id: "plugins.packages",
+      id: "extensions.packages",
       verb: "obliterate",
     });
     assert.equal(result.status, "denied");
@@ -494,7 +488,7 @@ describe("settings actions (D-309)", () => {
   it("reports unavailable when the owner adapter cannot reach its service", async () => {
     const withActions = createSettingsService(depsWithActions([], { fail: true }));
     const result = await withActions.action(caller, {
-      id: "plugins.packages",
+      id: "extensions.packages",
       verb: "list",
     });
     assert.equal(result.status, "unavailable");
@@ -502,7 +496,7 @@ describe("settings actions (D-309)", () => {
 
   it("read surfaces the live verb list and owner summary", async () => {
     const withActions = createSettingsService(depsWithActions([]));
-    const result = await withActions.read(caller, { id: "plugins.packages", detail: true });
+    const result = await withActions.read(caller, { id: "extensions.packages", detail: true });
     assert.equal(result.state, "action");
     assert.ok(result.action?.verbs?.includes("list"));
   });
@@ -515,9 +509,9 @@ describe("settings actions (D-309)", () => {
       put: async (_caller, operation) => { records.set(operation.id, { ...operation }); },
     };
     const actions: SettingsActionRegistry = {
-      adapterFor: (domain) => domain === "runtime:extensions" ? {
-        verbs: ["install", "status"],
-        describe: async () => ({ verbs: ["install", "status"] }),
+      adapterFor: (domain) => domain === "service:extension-packages" ? {
+        verbs: ["remove", "status"],
+        describe: async () => ({ verbs: ["remove", "status"] }),
         invoke: async () => ({
           status: "pending" as const,
           operation: { id: "owner-op-1", state: "running" as const },
@@ -531,11 +525,11 @@ describe("settings actions (D-309)", () => {
       } : null,
     };
     const { service } = fixture({ actions, actionOperations });
-    const started = await service.action(caller, { id: "plugins.packages", verb: "install" });
+    const started = await service.action(caller, { id: "extensions.packages", verb: "remove" });
     assert.equal(started.status, "pending");
     assert.equal(started.operation?.id, "owner-op-1");
     const finished = await service.action(caller, {
-      id: "plugins.packages",
+      id: "extensions.packages",
       verb: "status",
       operationId: "owner-op-1",
     });

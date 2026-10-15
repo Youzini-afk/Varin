@@ -1,12 +1,14 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import assert from 'node:assert/strict';
 import { afterEach, describe, expect, it } from 'vitest';
 import { DocumentRegistry } from '@varin/ui/lib/documents/registry';
 import type { DocumentsAPI } from '@varin/application-client';
-import { createDocumentAuthority, type DocumentAuthority } from '../application-host/lib/documents/authority.js';
-import { createNativeAuthorityTestRuntime } from '../application-host/lib/kernel/native-authority.test-helper.js';
-import { IntegrationCoordinator } from '../application-host/lib/harness/working-state/integration-coordinator.js';
+// Type-check the Host through its emitted declarations; Vitest loads its source.
+import { createDocumentAuthority, type DocumentAuthority } from '#application-host/lib/documents/authority.js';
+import { createAuthorityTestRuntime } from '#application-host/lib/kernel/authority.test-helper.js';
+import { IntegrationCoordinator } from '#application-host/lib/harness/working-state/integration-coordinator.js';
 
 import { parseDocumentWatchEvent } from '../src/api/documents';
 
@@ -23,6 +25,13 @@ async function publicEpoch<T extends { status: string }>(work: Promise<T>): Prom
 }
 
 const documentsClient = (authority: DocumentAuthority): DocumentsAPI => ({
+  prepareWorkspaceEdit: request => authority.prepareWorkspaceEdit(request),
+  discardWorkspaceEdit: request => authority.discardWorkspaceEdit(request),
+  applyWorkspaceEdit: request => authority.applyWorkspaceEdit(request),
+  readWorkspaceEdit: request => authority.readWorkspaceEdit(request),
+  readWorkspaceEditRecovery: request => authority.readWorkspaceEditRecovery(request),
+  undoWorkspaceEdit: request => authority.undoWorkspaceEdit(request),
+  listWorkspaceEdits: request => authority.listWorkspaceEdits(request.workspaceId),
   resolveWorkspace: authority.resolveWorkspace,
   resolveResourceIdentity: authority.resolveResourceIdentity,
   read: authority.read,
@@ -33,7 +42,7 @@ const documentsClient = (authority: DocumentAuthority): DocumentsAPI => ({
   clearDirtyBuffers: authority.clearDirtyBuffers,
   ackDirtyStateBarrier: authority.acknowledgeDirtyStateBarrier,
   captureAgentInputSnapshot: authority.captureAgentInputSnapshot,
-  releaseAgentInputSnapshot: async ({ sessionId, context }) => authority.releaseAgentInputSnapshot(sessionId, context),
+  releaseAgentInputSnapshot: async ({ consumer, context }) => authority.releaseAgentInputSnapshot(consumer, context),
   listRecoveryJournals: authority.listRecoveryJournals,
   readRecoveryJournal: authority.readRecoveryJournal,
   writeRecoveryJournal: (request) => publicEpoch(authority.writeRecoveryJournal(request)),
@@ -56,6 +65,55 @@ const documentsClient = (authority: DocumentAuthority): DocumentsAPI => ({
 
 afterEach(async () => {
   for (const root of roots.splice(0)) await fs.promises.rm(root, { recursive: true, force: true });
+});
+
+it('captures a selected nested root through Documents while an unrelated dirty root is offline', async () => {
+  const root = await fs.promises.realpath(await fs.promises.mkdtemp(path.join(os.tmpdir(), 'varin-scoped-source-')));
+  roots.push(root);
+  const workspace = path.join(root, 'workspace');
+  const nested = path.join(workspace, 'nested');
+  const other = path.join(root, 'other');
+  await fs.promises.mkdir(nested, { recursive: true });
+  await fs.promises.mkdir(other);
+  await fs.promises.writeFile(path.join(nested, 'draft.txt'), 'selected saved');
+  await fs.promises.writeFile(path.join(other, 'private.txt'), 'private saved');
+  let trusted = true;
+  const authority = createDocumentAuthority({
+    hostId: 'scoped-source-host', dataDir: path.join(root, 'data'),
+    isAllowedRoot: async () => true, isTrusted: async () => trusted,
+  });
+  const parent = await authority.resolveWorkspace({ path: workspace });
+  const unrelated = await authority.resolveWorkspace({ path: other });
+  const parentRef = { workspaceId: parent.workspaceId, resourceId: 'nested/draft.txt' };
+  const unrelatedRef = { workspaceId: unrelated.workspaceId, resourceId: 'private.txt' };
+  const registry = new DocumentRegistry({ documents: documentsClient(authority), getGeneration: () => 1 });
+  const consumer = { kind: 'thread' as const, threadId: 'selected-thread', branchId: 'selected-branch' };
+  try {
+    await registry.open(parentRef); await registry.open(unrelatedRef);
+    registry.applyTransaction(parentRef, 'selected draft', { origin: 'editor' });
+    registry.applyTransaction(unrelatedRef, 'private draft', { origin: 'editor' });
+    const selected = await authority.resolveWorkspace({ path: nested });
+    await fs.promises.rename(other, `${other}-offline`);
+    const context = await registry.captureAgentInputContext(consumer, selected.workspaceId);
+    assert.equal(context.source, 'surface');
+    assert.equal(context.snapshot.status, 'ready');
+    assert.deepEqual(context.roots, [{ workspaceId: selected.workspaceId, dirtyPaths: ['draft.txt'] }]);
+    const frozen = authority.cloneInputSnapshot(consumer, context);
+    if (frozen.status !== 'ready') throw new Error('Selected draft snapshot was unavailable');
+    assert.deepEqual(frozen.resources.map((entry) => [entry.resource.workspaceId, entry.resource.resourceId, entry.content]),
+      [[selected.workspaceId, 'draft.txt', 'selected draft']]);
+    assert.equal(registry.get(unrelatedRef)?.buffer, 'private draft');
+    await registry.releaseAgentInputContext(consumer, context);
+    await fs.promises.rename(nested, `${nested}-offline`);
+    const unavailable = await registry.captureAgentInputContext(consumer, selected.workspaceId);
+    assert.equal(unavailable.source, 'surface');
+    assert.equal(unavailable.snapshot.status, 'unavailable');
+    trusted = false;
+    await assert.rejects(authority.resolveResourceIdentity(unrelatedRef, { withinWorkspaceId: selected.workspaceId }), { code: 'untrusted' });
+  } finally {
+    await registry.dispose();
+    await authority.dispose();
+  }
 });
 
 describe('surface Integration vertical path', () => {
@@ -85,7 +143,7 @@ describe('surface Integration vertical path', () => {
       recoverySessionId: 'surface-vertical-editor',
       journalDebounceMs: 0,
     });
-    const native = await createNativeAuthorityTestRuntime({ documents: authority, hostId: 'surface-vertical-host', dataDir });
+    const native = await createAuthorityTestRuntime({ documents: authority, hostId: 'surface-vertical-host', dataDir });
     const { workingStates } = native;
     try {
       const resource = { workspaceId: identity.workspaceId, resourceId: 'draft.txt' };

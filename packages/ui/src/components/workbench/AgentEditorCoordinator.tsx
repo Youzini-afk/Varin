@@ -17,10 +17,13 @@ import {
 import { getWorkbenchProblems, showWorkbenchPanel } from '@/lib/workbench/editors/panels';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import {
-  activatePiEditorContextOwner,
-  usePiEditorContextStore,
-} from '@/stores/usePiEditorContextStore';
-import { usePiSessionStore } from '@/stores/usePiSessionStore';
+  activateEditorContextOwner,
+  useEditorContextStore,
+} from '@/stores/useEditorContextStore';
+import { useThreadStore, threadIdentityKey } from '@/stores/useThreadStore';
+import { openThreadFromNavigation } from '@/lib/agent-runtime/threadNavigation';
+import { useSelectedThreadSnapshot } from '@/hooks/useSelectedThreadSnapshot';
+import { threadHostKey as getRuntimeKey } from '@/stores/useThreadStore';
 
 const ATTACH_ERROR_KEYS = {
   'missing-editor': 'workbench.attachment.missing-editor',
@@ -36,11 +39,10 @@ export const AgentEditorCoordinator: React.FC = () => {
   const { t } = useI18n();
   const workspaceId = useWorkbenchWorkspaceId();
   const directory = useDirectoryStore((state) => state.currentDirectory);
-  const sessionId = usePiSessionStore((state) => state.currentSessionId);
-  const runtimeKey = usePiSessionStore((state) => state.runtimeKey);
-  const toolExecutions = usePiSessionStore((state) => (
-    sessionId ? state.records[sessionId]?.toolExecutions : undefined
-  ));
+  const sessionId = useThreadStore(state => state.selectedIdentity ? threadIdentityKey(state.hostKey, state.selectedIdentity) : null);
+  const runtimeKey = getRuntimeKey();
+  const { snapshot } = useSelectedThreadSnapshot();
+  const toolExecutions = snapshot?.operations;
   const workbench = React.useSyncExternalStore(
     subscribeEditorWorkbench,
     () => (workspaceId ? peekEditorWorkbench(workspaceId) : undefined),
@@ -49,12 +51,12 @@ export const AgentEditorCoordinator: React.FC = () => {
   const tab = workbench ? activeEditorTab(workbench) : undefined;
   const tabRef = React.useRef(tab);
   tabRef.current = tab;
-  const activeEditorFile = usePiEditorContextStore((state) => state.activeEditorFile);
+  const activeEditorFile = useEditorContextStore((state) => state.activeEditorFile);
   const activeOwnerId = tab ? `view:${tab.viewId}` : null;
 
   React.useEffect(() => {
-    activatePiEditorContextOwner(activeOwnerId);
-    return () => activatePiEditorContextOwner(null);
+    activateEditorContextOwner(activeOwnerId);
+    return () => activateEditorContextOwner(null);
   }, [activeOwnerId]);
 
   React.useEffect(() => {
@@ -72,18 +74,15 @@ export const AgentEditorCoordinator: React.FC = () => {
 
   React.useEffect(() => {
     if (!sessionId || !workspaceId || !directory || !toolExecutions) return;
-    for (const execution of Object.values(toolExecutions)) {
-      recordHintsFromToolCall({
-        runtimeKey,
-        sessionId,
-        toolCallId: execution.toolCallId,
-        toolName: execution.name,
-        args: execution.args,
-        workspaceId,
-        workspaceRoot: directory,
-      });
+    const source = snapshot?.launch?.selection.source;
+    if (!source || source.mode !== 'live_root' || source.workspace_id !== workspaceId || source.live_root?.canonicalRoot !== directory) return;
+    for (const execution of toolExecutions) {
+      if (execution.run_id !== snapshot?.activeRun?.id) continue;
+      const intent = execution.intent as { call?: { name?: string; arguments?: unknown } } | null;
+      if (!intent?.call?.name || execution.outcome !== 'succeeded') continue;
+      recordHintsFromToolCall({ runtimeKey, threadKey: sessionId, toolCallId: execution.id, toolName: intent.call.name, args: intent.call.arguments, workspaceId, workspaceRoot: directory });
     }
-  }, [directory, runtimeKey, sessionId, toolExecutions, workspaceId]);
+  }, [directory, runtimeKey, sessionId, snapshot?.activeRun?.id, snapshot?.launch?.selection.source, toolExecutions, workspaceId]);
 
   React.useEffect(() => {
     const notify = (status: 'missing-editor' | 'missing-selection' | 'missing-document' | 'wrong-runtime' | 'no-session') => {
@@ -95,7 +94,7 @@ export const AgentEditorCoordinator: React.FC = () => {
         return;
       }
       const result = attachActiveEditorContext({
-        sessionId,
+        threadKey: sessionId,
         workspaceId,
         workspaceRoot: directory,
         kind,
@@ -117,7 +116,7 @@ export const AgentEditorCoordinator: React.FC = () => {
           return;
         }
         const result = attachEditorContext({
-          sessionId,
+          threadKey: sessionId,
           workspaceId,
           resourceId: item.resourceId,
           kind: 'diagnostic',
@@ -140,7 +139,7 @@ export const AgentEditorCoordinator: React.FC = () => {
         if (!workspaceId || !currentTab) return;
         const link = peekEditorSessionLink({ workspaceId, resourceId: currentTab.resourceId });
         if (!link?.entryId) return;
-        void usePiSessionStore.getState().navigateSession(link.sessionId, link.entryId);
+        void openThreadFromNavigation(link.thread);
       }),
       registerWorkbenchCommand('varin.editor.showChanges', OWNER, () => {
         if (workspaceId) showWorkbenchPanel(workspaceId, 'changes');

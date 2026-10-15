@@ -157,7 +157,7 @@ main() {
   echo "  ╭───────────────────────────────────╮"
   echo "  │                                   │"
   echo "  │   Varin Installer              │"
-  echo "  │   Pi-native coding workspace     │"
+  echo "  │   Native coding workspace        │"
   echo "  │                                   │"
   echo "  ╰───────────────────────────────────╯"
   echo ""

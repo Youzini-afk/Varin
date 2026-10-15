@@ -1,84 +1,10 @@
-import { createHash } from "node:crypto";
 import { describe, expect, it } from "vitest";
-import type { RetrievalArtifactRef, RetrievalEvidence, RetrievalReceiptAuthority, Thread } from "@varin/protocol";
-import type { WorkingStateRootContext, WorkingStateRootStore, WorkspaceWorkingStateRootAccess } from "./working-state/types.js";
-import { createRetrievalArtifactAccess } from "./retrieval-artifacts.js";
-import { createWebMaterialStore } from "./web-materials.js";
+import type { ThreadMaterialAuthority } from "./web-materials.js";
+import { createMaterialCollections } from "./material-collections.js";
+import { createMaterialStoreFixture as openStore } from "./web-materials.test-helper.js";
 
-type TestRecord = {
-  recordId: string;
-  workspaceId: string;
-  recordType: string;
-  state: string;
-  sessionId?: string;
-  threadId?: string;
-  runId?: string;
-  recordRevision: number;
-  payloadJson: string;
-  references: Array<{ slot: string; objectHash: string }>;
-};
-
-const openStore = () => {
-  const objects = new Map<string, Buffer>();
-  const records = new Map<string, TestRecord>();
-  const store = {
-    async putObject(bytes: Buffer): Promise<{ hash: string; byteLength: number }> {
-      const hash = `sha256-${createHash("sha256").update(bytes).digest("hex")}`;
-      objects.set(hash, Buffer.from(bytes));
-      return { hash, byteLength: bytes.byteLength };
-    },
-    async getObject(hash: string): Promise<Buffer | null> {
-      const bytes = objects.get(hash);
-      return bytes ? Buffer.from(bytes) : null;
-    },
-    async getObjectSlice(hash: string, _byteLength: number, offset: number, length: number): Promise<Buffer | null> {
-      const bytes = objects.get(hash);
-      return bytes ? Buffer.from(bytes.subarray(offset, offset + length)) : null;
-    },
-  };
-  const context = {
-    records: {
-      async get(recordId: string): Promise<TestRecord | null> {
-        return records.get(recordId) ?? null;
-      },
-      async list(input: { recordType?: string }): Promise<TestRecord[]> {
-        return [...records.values()].filter((record) => !input.recordType || record.recordType === input.recordType);
-      },
-      async put(input: Omit<TestRecord, "recordRevision" | "workspaceId"> & { workspaceId?: string; operationId: string; expectedRecordRevision?: number }): Promise<TestRecord> {
-        const existing = records.get(input.recordId);
-        if (existing && input.expectedRecordRevision !== existing.recordRevision) throw new Error("record revision conflict");
-        const record = { ...input, workspaceId: input.workspaceId ?? "ws", recordRevision: (existing?.recordRevision ?? 0) + 1, references: [...(input.references ?? [])] };
-        records.set(record.recordId, record);
-        return record;
-      },
-      async release(_operationId: string, recordId: string): Promise<Record<string, unknown>> {
-        const released = records.delete(recordId);
-        return { recordId, released };
-      },
-    },
-  };
-  const workingStates: WorkspaceWorkingStateRootAccess = {
-    withBranchStore: async (_workspaceId, _purpose, operation) => operation(
-      store as unknown as WorkingStateRootStore,
-      context as unknown as WorkingStateRootContext,
-    ),
-  };
-  return {
-    records,
-    objects,
-    // A fresh store over the same maps simulates a Host restart: durable
-    // records remain resolvable while nothing about the process survived.
-    reopen: () => createWebMaterialStore(workingStates),
-    materials: createWebMaterialStore(workingStates),
-    retrieval: createRetrievalArtifactAccess(workingStates),
-  };
-};
-
-const authority = (sessionId: string, threadId?: string, runId?: string): RetrievalReceiptAuthority => ({
-  owningWorkspaceId: "ws",
-  sessionId,
-  ...(threadId ? { threadId } : {}),
-  ...(runId ? { runId } : {}),
+const authority = (threadId: string): ThreadMaterialAuthority => ({
+  kind: "thread", owningWorkspaceId: "ws", threadId,
 });
 
 const draft = (finalUrl: string) => ({
@@ -88,41 +14,32 @@ const draft = (finalUrl: string) => ({
   representation: "raw-text",
 });
 
-const retrievalThread = (id: string, lifecycle: "active" | "settled", activeRunId: string | null): Thread => ({
-  id,
-  workspaceId: "ws",
-  lifecycle,
-  activeRunId,
-  report: null,
-} as never);
-
-const evidenceFor = (artifact: RetrievalArtifactRef): RetrievalEvidence => ({
-  question: "fact",
-  scope: [],
-  facts: [{
-    claim: "cited body",
-    status: "source-checked",
-    sources: [{ kind: "output" as const, check: "source-valid" as const, artifact }],
-  }],
-  unknowns: [],
-  attempted: [],
-  completion: "delivered",
-});
-
 describe("web material snapshots", () => {
+  it("rejects unbound or session-only access before reading or storing material", async () => {
+    const opened = openStore();
+    const ref = await opened.materials.put("ws", draft("https://example.com/private"), Buffer.from("private"), authority("owner"));
+    for (const invalid of [undefined, { owningWorkspaceId: "ws", sessionId: "owner" },
+      { kind: "thread", owningWorkspaceId: "ws", threadId: "" }]) {
+      await expect(opened.materials.read("ws", ref.snapshotId, invalid as never)).rejects.toThrow("admitted Thread");
+      await expect(opened.materials.put("ws", draft("https://example.com/new"), Buffer.from("new"), invalid as never)).rejects.toThrow("admitted Thread");
+    }
+    expect(opened.records.size).toBe(1);
+    expect(opened.objects.size).toBe(1);
+  });
+
   it("pins fetched content and reads it back by snapshotId across reopen", async () => {
     const opened = openStore();
     const ref = await opened.materials.put("ws", draft("https://example.com/a"), Buffer.from("page body"), authority("s1"));
 
-    const found = await opened.materials.read("ws", ref.snapshotId);
+    const found = await opened.materials.read("ws", ref.snapshotId, authority("s1"));
     expect(found?.ref).toEqual(ref);
     expect(found?.body.toString()).toBe("page body");
 
     // Durable records resolve again after a restart-equivalent reopen.
-    const reopened = await opened.reopen().read("ws", ref.snapshotId);
+    const reopened = await opened.reopen().read("ws", ref.snapshotId, authority("s1"));
     expect(reopened?.body.toString()).toBe("page body");
-    expect(await opened.materials.read("ws", "snap-missing")).toBeNull();
-    expect(await opened.materials.read("other-ws", ref.snapshotId)).toBeNull();
+    expect(await opened.materials.read("ws", "snap-missing", authority("s1"))).toBeNull();
+    expect(await opened.materials.read("other-ws", ref.snapshotId, { ...authority("s1"), owningWorkspaceId: "other-ws" })).toBeNull();
   });
 
   it("keeps original PDF bytes beside the readable text and loads them on demand", async () => {
@@ -148,8 +65,8 @@ describe("web material snapshots", () => {
 
   it("uses original PDF bytes as the retention key, not every source snapshot's empty text body", async () => {
     const opened = openStore();
-    const firstOwner = authority("session-a", "thread-a", "run-a");
-    const otherOwner = authority("session-b", "thread-b", "run-b");
+    const firstOwner = authority("thread-a");
+    const otherOwner = authority("thread-b");
     const firstBytes = Buffer.from("%PDF-first");
     const otherBytes = Buffer.from("%PDF-other");
     const first = await opened.materials.put("ws", {
@@ -161,8 +78,8 @@ describe("web material snapshots", () => {
       contentType: "application/pdf", representation: "pdf-source-v1", document: { kind: "pdf", parser: "source" },
     }, Buffer.alloc(0), otherOwner, { source: { bytes: otherBytes, contentType: "application/pdf" } });
 
-    await opened.retrieval.releaseTemporaryArtifacts("ws", firstOwner);
-    expect(await opened.materials.read("ws", first.snapshotId)).toBeNull();
+    await opened.lifecycle.releaseThreadMaterials("ws", firstOwner.threadId);
+    expect(await opened.materials.read("ws", first.snapshotId, firstOwner)).toBeNull();
     expect(await opened.materials.read("ws", other.snapshotId, otherOwner)).not.toBeNull();
 
     const retained = await opened.materials.put("ws", {
@@ -172,9 +89,12 @@ describe("web material snapshots", () => {
         analysis: { id: "analysis", parser: "native", version: "v1", configHash: "config",
           toolVersions: { pdfjs: "4.10.38" }, sourceHash: other.document!.source!.contentHash,
           pages: [1], ocr: false, status: "ok" } },
-    }, Buffer.from("parsed text"), authority("session-b", "thread-b", "run-next"),
+    }, Buffer.from("parsed text"), authority("thread-b"),
     { source: { bytes: otherBytes, contentType: "application/pdf" } });
-    await opened.retrieval.releaseTemporaryArtifacts("ws", otherOwner);
+    const collections = createMaterialCollections(opened.workingStates, { materials: opened.materials });
+    const collectionId = (await collections.execute({ action: "create", persist: true }, { authority: otherOwner })).result.collection!.collectionId;
+    await collections.execute({ action: "add", collectionId, member: { kind: "snapshot", snapshotId: retained.snapshotId } }, { authority: otherOwner });
+    await opened.lifecycle.releaseThreadMaterials("ws", otherOwner.threadId);
     expect(await opened.materials.read("ws", other.snapshotId, otherOwner)).not.toBeNull();
     expect(await opened.materials.read("ws", retained.snapshotId, otherOwner)).not.toBeNull();
     expect((await opened.materials.findAnalysisConfig("ws", other.document!.source!.contentHash, "config",
@@ -187,12 +107,12 @@ describe("web material snapshots", () => {
 
   it("dedupes identical content within one authority and keeps snapshots separate across threads", async () => {
     const opened = openStore();
-    const owner = authority("s1", "thread-a", "run-a");
+    const owner = authority("thread-a");
     const first = await opened.materials.put("ws", draft("https://example.com/a"), Buffer.from("v1"), owner);
     const same = await opened.materials.put("ws", draft("https://example.com/a"), Buffer.from("v1"), owner);
     expect(same.snapshotId).toBe(first.snapshotId);
 
-    const other = authority("s2", "thread-b", "run-b");
+    const other = authority("thread-b");
     const separate = await opened.materials.put("ws", draft("https://example.com/a"), Buffer.from("v1"), other);
     expect(separate.snapshotId).not.toBe(first.snapshotId);
     expect(await opened.materials.read("ws", separate.snapshotId, owner)).toBeNull();
@@ -200,86 +120,127 @@ describe("web material snapshots", () => {
 
     const refreshed = await opened.materials.put("ws", draft("https://example.com/a"), Buffer.from("v2 changed"), owner, { forceNew: true });
     expect(refreshed.snapshotId).not.toBe(first.snapshotId);
-    expect((await opened.materials.read("ws", first.snapshotId))?.body.toString()).toBe("v1");
-    expect((await opened.materials.read("ws", refreshed.snapshotId))?.body.toString()).toBe("v2 changed");
+    expect((await opened.materials.read("ws", first.snapshotId, owner))?.body.toString()).toBe("v1");
+    expect((await opened.materials.read("ws", refreshed.snapshotId, owner))?.body.toString()).toBe("v2 changed");
   });
 
-  it("keeps a snapshot whose body is cited by another run while releasing unreferenced ones", async () => {
+  it("keeps native Thread reads scoped and checks fixed revisions before reading bytes", async () => {
+    let reads = 0;
+    const opened = openStore({ beforeObjectRead: async () => { reads++; } });
+    const ref = await opened.materials.put("ws", draft("https://example.com/thread"), Buffer.from("fixed body"), authority("thread-a"));
+    const native = { kind: "thread" as const, owningWorkspaceId: "ws", threadId: "thread-a" };
+    expect((await opened.materials.read("ws", ref.snapshotId, native, {
+      byteRange: { offset: 6, length: 4 }, expectedContentHash: ref.contentHash,
+    }))?.body.toString()).toBe("body");
+    expect(await opened.materials.read("ws", ref.snapshotId, { ...native, threadId: "foreign" })).toBeNull();
+    await expect(opened.materials.read("ws", ref.snapshotId, { ...native, owningWorkspaceId: "other" })).rejects.toThrow("authority");
+    await expect(opened.materials.read("ws", ref.snapshotId, native, {
+      expectedContentHash: `sha256-${"0".repeat(64)}`,
+    })).rejects.toMatchObject({ code: "conflict" });
+    await expect(opened.materials.read("ws", ref.snapshotId, native, {
+      byteRange: { offset: 11, length: 1 },
+    })).rejects.toMatchObject({ code: "invalid-range" });
+    expect(reads).toBe(1);
+
+    // Same length is insufficient evidence of the fixed content revision.
+    opened.objects.set(ref.contentHash, Buffer.from("other body"));
+    await expect(opened.materials.read("ws", ref.snapshotId, native)).rejects.toMatchObject({ code: "corrupt" });
+  });
+
+  it("passes exact ranges and cancellation to the existing kernel blob owner", async () => {
+    const controller = new AbortController();
+    const calls: Array<{ hash: string; source: { recordId: string; slot: string }; options: unknown }> = [];
+    const body = Buffer.from("a large fixed body");
+    const opened = openStore({ client: { getBlob: async (hash, source, options) => {
+      calls.push({ hash, source, options });
+      return { byteLength: body.length, bytesBase64: body.subarray(options!.offset!, options!.offset! + options!.length!).toString("base64") };
+    } } });
+    const ref = await opened.materials.put("ws", draft("https://example.com/range"), body, authority("thread"));
+    const found = await opened.materials.read("ws", ref.snapshotId, {
+      kind: "thread", owningWorkspaceId: "ws", threadId: "thread",
+    }, { byteRange: { offset: 8, length: 5 }, signal: controller.signal });
+    expect(found?.body.toString()).toBe("fixed");
+    expect(calls).toEqual([{ hash: ref.contentHash, source: { recordId: `web.snapshot:${ref.snapshotId}`, slot: "body" },
+      options: { offset: 8, length: 5, signal: controller.signal } }]);
+  });
+
+  it("pages retained source and body bytes under the same record proof and rejects incomplete pages", async () => {
+    const body = Buffer.alloc(512 * 1024 + 19, "body");
+    const source = Buffer.concat([Buffer.from("%PDF-1.7\n"), Buffer.alloc(512 * 1024, 23)]);
+    const reads: Array<{ slot: string; recordId: string; offset: number; length: number }> = [];
+    let truncate = false;
+    const opened = openStore({ client: { getBlob: async (hash, proof, range) => {
+      const bytes = opened.objects.get(hash)!;
+      const offset = range!.offset!, length = range!.length!;
+      expect(length).toBeLessThanOrEqual(256 * 1024);
+      reads.push({ ...proof, offset, length });
+      return { byteLength: bytes.length, bytesBase64: bytes.subarray(offset, offset + length - (truncate ? 1 : 0)).toString("base64") };
+    } } });
+    const ref = await opened.materials.put("ws", { ...draft("file:///paper.pdf"), document: { kind: "pdf", parser: "source" } }, body,
+      authority("thread"), { source: { bytes: source, contentType: "application/pdf" } });
+    const found = await opened.materials.read("ws", ref.snapshotId, authority("thread"), { includeSource: true });
+    expect(found?.body).toEqual(body);
+    expect(found?.source?.bytes).toEqual(source);
+    expect(reads.map(read => [read.slot, read.offset])).toEqual([
+      ["body", 0], ["body", 256 * 1024], ["body", 512 * 1024],
+      ["source", 0], ["source", 256 * 1024], ["source", 512 * 1024],
+    ]);
+    expect(reads.every(read => read.recordId === `web.snapshot:${ref.snapshotId}`)).toBe(true);
+    truncate = true;
+    await expect(opened.materials.read("ws", ref.snapshotId, authority("thread"))).rejects.toMatchObject({ code: "corrupt" });
+  });
+
+  it("waits for an in-flight retained source page on cancellation and reads no later page", async () => {
+    const controller = new AbortController();
+    let enter!: () => void, finish!: () => void, settled = false;
+    const entered = new Promise<void>(resolve => { enter = resolve; });
+    const held = new Promise<void>(resolve => { finish = resolve; });
+    const source = Buffer.alloc(768 * 1024, 29);
+    const sourceOffsets: number[] = [];
+    const opened = openStore({ client: { getBlob: async (hash, proof, range) => {
+      const bytes = opened.objects.get(hash)!;
+      if (proof.slot === "source") {
+        sourceOffsets.push(range!.offset!);
+        expect(range!.signal).toBe(controller.signal);
+        if (range!.offset === 256 * 1024) { enter(); await held; }
+      }
+      return { byteLength: bytes.length, bytesBase64: bytes.subarray(range!.offset!, range!.offset! + range!.length!).toString("base64") };
+    } } });
+    const ref = await opened.materials.put("ws", { ...draft("file:///paper.pdf"), document: { kind: "pdf", parser: "source" } }, Buffer.alloc(0),
+      authority("thread"), { source: { bytes: source, contentType: "application/pdf" } });
+    const reading = opened.materials.read("ws", ref.snapshotId, authority("thread"), { includeSource: true, signal: controller.signal })
+      .catch(error => { settled = true; return error; });
+    await entered;
+    controller.abort(); await new Promise<void>(resolve => setImmediate(resolve));
+    expect(settled).toBe(false);
+    finish();
+    expect(await reading).toBe(controller.signal.reason);
+    expect(sourceOffsets).toEqual([0, 256 * 1024]);
+  });
+
+  it("retains explicitly pinned material while releasing an owner's unreferenced snapshots", async () => {
     const opened = openStore();
-    const owner = authority("session-a", "thread-a", "run-a");
-    const sharedBody = Buffer.from("shared body");
-    const cited = await opened.materials.put("ws", draft("https://example.com/cited"), sharedBody, owner);
+    const owner = authority("thread-a"), receiver = authority("thread-b");
+    const cited = await opened.materials.put("ws", draft("https://example.com/cited"), Buffer.from("cited body"), owner);
     const uncited = await opened.materials.put("ws", draft("https://example.com/uncited"), Buffer.from("dropped"), owner);
-
-    // A different run mints its own receipt over the same body bytes.
-    const other = authority("session-b", "thread-b", "run-b");
-    const otherArtifact = await opened.retrieval.storeArtifact("ws", sharedBody, other);
-    expect(otherArtifact.hash).toBe(cited.contentHash);
-
-    await opened.retrieval.releaseTemporaryArtifacts("ws", owner);
-
-    expect(await opened.materials.read("ws", cited.snapshotId)).not.toBeNull();
-    expect(await opened.materials.read("ws", uncited.snapshotId)).toBeNull();
+    const collections = createMaterialCollections(opened.workingStates, { materials: opened.materials });
+    await collections.execute({ action: "share", snapshotId: cited.snapshotId, targetThreadId: receiver.threadId },
+      { authority: owner, threadsRelated: async () => true });
+    const collectionId = (await collections.execute({ action: "create", persist: true }, { authority: receiver })).result.collection!.collectionId;
+    await collections.execute({ action: "add", collectionId, member: { kind: "snapshot", snapshotId: cited.snapshotId } }, { authority: receiver });
+    await opened.lifecycle.releaseThreadMaterials("ws", owner.threadId);
+    expect((await opened.reopen().read("ws", cited.snapshotId, authority("thread-c")))?.body.toString()).toBe("cited body");
+    expect(await opened.materials.read("ws", uncited.snapshotId, owner)).toBeNull();
   });
 
-  it("keeps a snapshot cited by promoted evidence when its run settles", async () => {
+  it("keeps snapshots across reopened Thread callers until their exact original owner releases them", async () => {
     const opened = openStore();
-    const owner = authority("session-a", "thread-a", "run-a");
-    const ref = await opened.materials.put("ws", draft("https://example.com/cited"), Buffer.from("cited body"), owner);
-    const artifactRef: RetrievalArtifactRef = {
-      durability: "durable",
-      hash: ref.contentHash,
-      byteLength: ref.byteLength,
-      recordId: `web.snapshot:${ref.snapshotId}`,
-      recordType: "web.snapshot" as never,
-      workspaceId: "ws",
-      sessionId: owner.sessionId,
-      ...(owner.threadId ? { threadId: owner.threadId } : {}),
-      ...(owner.runId ? { runId: owner.runId } : {}),
-    };
-    await opened.retrieval.promotePendingEvidence({
-      workspaceId: "ws",
-      threadId: "thread-a",
-      runId: "run-a",
-      evidence: evidenceFor(artifactRef),
-      receiptAuthority: owner,
-    });
-
-    expect(await opened.materials.read("ws", ref.snapshotId)).not.toBeNull();
-    expect(opened.records.get(`retrieval-evidence:pending:thread-a:run-a`)?.references.map((r) => r.objectHash)).toEqual([ref.contentHash]);
-  });
-
-  it("releases session-scoped snapshots on authority release and orphans on reconcile", async () => {
-    const opened = openStore();
-    const sessionRef = await opened.materials.put("ws", draft("https://example.com/session"), Buffer.from("session body"), authority("s1"));
-    const runRef = await opened.materials.put("ws", draft("https://example.com/run"), Buffer.from("run body"), authority("s2", "thread-gone", "run-gone"));
-    const liveRef = await opened.materials.put("ws", draft("https://example.com/live"), Buffer.from("live body"), authority("s3", "thread-live", "run-live"));
-
-    await opened.retrieval.releaseReceiptAuthority("ws", authority("s1"));
-    expect(await opened.materials.read("ws", sessionRef.snapshotId)).toBeNull();
-
-    await opened.retrieval.reconcileWorkspaceEvidence("ws", [retrievalThread("thread-live", "active", "run-live")]);
-    expect(await opened.materials.read("ws", runRef.snapshotId)).toBeNull();
-    expect((await opened.materials.read("ws", liveRef.snapshotId))?.body.toString()).toBe("live body");
-  });
-
-  it("keeps a thread snapshot across Run reconciliation and releases it when the thread disappears", async () => {
-    const opened = openStore();
-    const ref = await opened.materials.put(
-      "ws",
-      draft("https://example.com/thread-retained"),
-      Buffer.from("retained body"),
-      authority("session-a", "thread-a", "run-a"),
-    );
-
-    await opened.retrieval.syncThreadEvidence("ws", retrievalThread("thread-a", "active", "run-b"));
-    expect((await opened.materials.read("ws", ref.snapshotId, authority("session-new", "thread-a", "run-b")))?.body.toString())
-      .toBe("retained body");
-
-    await opened.retrieval.reconcileWorkspaceEvidence("ws", [retrievalThread("thread-a", "active", "run-b")]);
-    expect(await opened.materials.read("ws", ref.snapshotId, authority("session-new", "thread-a", "run-b"))).not.toBeNull();
-
-    await opened.retrieval.reconcileWorkspaceEvidence("ws", []);
-    expect(await opened.materials.read("ws", ref.snapshotId)).toBeNull();
+    const owner = authority("thread-a"), sibling = authority("thread-ab");
+    const ref = await opened.materials.put("ws", draft("https://example.com/retained"), Buffer.from("retained body"), owner);
+    const other = await opened.materials.put("ws", draft("https://example.com/sibling"), Buffer.from("sibling body"), sibling);
+    expect((await opened.reopen().read("ws", ref.snapshotId, authority("thread-a")))?.body.toString()).toBe("retained body");
+    await opened.lifecycle.releaseThreadMaterials("ws", owner.threadId);
+    expect(await opened.materials.read("ws", ref.snapshotId, owner)).toBeNull();
+    expect((await opened.materials.read("ws", other.snapshotId, sibling))?.body.toString()).toBe("sibling body");
   });
 });

@@ -1,18 +1,19 @@
 import React from 'react';
-import { usePiProviderStore, type PiProviderView } from '@/stores/usePiProviderStore';
+import { useModelCatalogStore } from '@/stores/useModelCatalogStore';
+import type { ModelChannel } from '@varin/application-client';
 import { useUIStore } from '@/stores/useUIStore';
-import { toModelPickerModel } from '@/lib/piModelPicker';
+import { toModelPickerModel } from '@/lib/modelPicker';
 import type { ModelPickerEntry } from '@/components/model-picker/ModelPickerList';
 
 export interface ModelListItem {
-  provider: PiProviderView;
+  provider: ModelChannel;
   model: ModelPickerEntry['model'];
   providerID: string;
   modelID: string;
 }
 
 export const useModelLists = () => {
-  const providers = usePiProviderStore((state) => state.providers);
+  const providers = useModelCatalogStore((state) => state.channels);
   const favoriteModels = useUIStore((state) => state.favoriteModels);
   const recentModels = useUIStore((state) => state.recentModels);
   const hiddenModels = useUIStore((state) => state.hiddenModels);
@@ -25,10 +26,10 @@ export const useModelLists = () => {
     return favoriteModels
       .map(({ providerID, modelID }) => {
         const provider = providers.find((p) => p.id === providerID);
-        if (!provider) return null;
+        if (!provider?.enabled) return null;
         const providerModels = Array.isArray(provider.models) ? provider.models : [];
         const model = providerModels.find((candidate) => candidate.id === modelID);
-        if (!model) return null;
+        if (!model?.enabled || !model.operations.includes('chat')) return null;
         if (isHidden(providerID, modelID)) return null;
         return { provider, model: toModelPickerModel(model), providerID, modelID };
       })
@@ -39,10 +40,10 @@ export const useModelLists = () => {
     return recentModels
       .map(({ providerID, modelID }) => {
         const provider = providers.find((p) => p.id === providerID);
-        if (!provider) return null;
+        if (!provider?.enabled) return null;
         const providerModels = Array.isArray(provider.models) ? provider.models : [];
         const model = providerModels.find((candidate) => candidate.id === modelID);
-        if (!model) return null;
+        if (!model?.enabled || !model.operations.includes('chat')) return null;
         if (isHidden(providerID, modelID)) return null;
         return { provider, model: toModelPickerModel(model), providerID, modelID };
       })

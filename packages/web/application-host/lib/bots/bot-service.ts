@@ -2,12 +2,14 @@ import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 import type { KernelClient, KernelScopedClient } from "../kernel/kernel-client.js";
-import type { KernelRecordResult } from "../kernel/protocol.generated.js";
+import type { BotExecutionGate, KernelRecordResult } from "../kernel/protocol.generated.js";
 import { HarnessServiceError } from "../harness/service-error.js";
-import { botScopeId } from "../harness/owner-scope.js";
-import type { ThreadRegistry } from "../harness/thread-registry.js";
 import type {
   BotActivity,
+  BotCreateInput,
+  BotUpdateInput,
+  BotEntryResult,
+  ThreadIdentity,
   BotSleepWork,
   BotSleepMachine,
   BotModelSelection,
@@ -20,7 +22,7 @@ export interface BotLifecycleRuntime {
   planWork(bot: BotSummary): Promise<BotSleepWork[]>;
   planMachines(bot: BotSummary): Promise<BotSleepMachine[]>;
   stop(bot: BotSummary, work: BotSleepWork): Promise<void>;
-  stopScope(bot: BotSummary): Promise<void>;
+  stopScope(bot: BotSummary): Promise<BotActivity["execution"] | void>;
   machine(bot: BotSummary, machine: BotSleepMachine, waking: boolean): Promise<BotSleepMachine>;
   prepareWake(bot: BotSummary): Promise<void>;
   resume(bot: BotSummary, work: BotSleepWork): Promise<void>;
@@ -37,27 +39,17 @@ export interface BotServiceOptions {
   hostId: string;
   /** Directory containing Host-owned data; Bot home directories live below it. */
   dataDir: string;
-  registry: Pick<ThreadRegistry, "listRuns" | "listWorkspaceThreadSnapshots" | "listWorkspaceRunSessionIds">;
-  /** Create a fresh Pi session bound to the Bot's home directory. */
-  createSession(input: {
-    cwd: string;
-    name?: string;
-    model?: BotModelSelection;
-  }): Promise<{ sessionId: string }>;
-  /** Reopen a persisted Pi session (or return the live one). */
-  openSession(input: { sessionId: string; cwd?: string; model?: BotModelSelection }): Promise<{
-    sessionId: string;
-    model?: { provider: string; id: string };
-  }>;
-  /**
-   * Apply a profile model change to an already-running entry worker. Absent
-   * or failing workers keep the durable write; the next open re-applies.
-   */
-  applyModel?: (input: { sessionId: string; model: BotModelSelection | null }) => Promise<void>;
-  applyInstructions?: (input: { sessionId: string; instructions: string | null }) => Promise<void>;
+  agent: {
+    ensureEntry(bot: BotSummary): Promise<ThreadIdentity>;
+    model(bot: BotSummary): Promise<BotModelSelection | null>;
+    listWork(bot: BotSummary, includeEntry: boolean): Promise<BotWorkItem[]>;
+    applyProfile?(bot: BotSummary): Promise<void>;
+  };
   onError?(error: unknown): void;
   lifecycle?(): BotLifecycleRuntime;
   removeData?(bot: BotSummary): Promise<void>;
+  /** Private execution projection of this service's exact authoritative record. */
+  publishExecutionGate?(gate: BotExecutionGate): Promise<void>;
   onChange?(bot: BotSummary): void;
   onDeleted?(botId: string): void;
 }
@@ -77,7 +69,14 @@ const parseProfile = (record: KernelRecordResult): BotProfile | null => {
     const raw = JSON.parse(record.payloadJson) as unknown;
     if (!isObject(raw)) return null;
     if (typeof raw.id !== "string" || typeof raw.name !== "string") return null;
-    if (typeof raw.coordinatorHostId !== "string") return null;
+    if (typeof raw.coordinatorHostId !== "string" || !raw.coordinatorHostId
+      || typeof raw.homeDir !== "string" || !raw.homeDir
+      || (raw.instructions !== null && typeof raw.instructions !== 'string')
+      || (raw.model !== null && !parseModel(raw.model))) return null;
+    // Unsupported formats remain untouched; no legacy asset conversion is performed.
+    if ('entrySessionId' in raw || !isObject(raw.entry) || raw.entry.runtime !== 'agent'
+      || typeof raw.entry.threadId !== 'string' || !raw.entry.threadId
+      || typeof raw.entry.branchId !== 'string' || !raw.entry.branchId) return null;
     const id = record.recordId.split(":")[1];
     if (!id || raw.id !== id) return null;
     if (raw.deletion !== undefined && (!isObject(raw.deletion) || typeof raw.deletion.operationId !== 'string'
@@ -89,7 +88,7 @@ const parseProfile = (record: KernelRecordResult): BotProfile | null => {
       model: parseModel(raw.model),
       coordinatorHostId: raw.coordinatorHostId,
       homeDir: typeof raw.homeDir === "string" ? raw.homeDir : "",
-      entrySessionId: typeof raw.entrySessionId === "string" ? raw.entrySessionId : null,
+      entry: { runtime: 'agent', threadId: raw.entry.threadId, branchId: raw.entry.branchId },
       pinnedAt: typeof raw.pinnedAt === "string" ? raw.pinnedAt : null,
       archiveRequested: raw.archiveRequested === true,
       ...(raw.deletion === undefined ? {} : { deletion: raw.deletion as NonNullable<BotProfile['deletion']> }),
@@ -111,8 +110,7 @@ const parseActivity = (value: unknown): BotActivity => {
     || !Array.isArray(value.work) || !Array.isArray(value.machines)
     || (value.error !== null && typeof value.error !== "string")
     || !value.work.every((item) => isObject(item) && typeof item.threadId === "string"
-      && (item.sessionId === null || typeof item.sessionId === "string")
-      && (item.runId === null || typeof item.runId === "string")
+      && item.runtime === "agent" && typeof item.branchId === "string" && typeof item.runId === "string"
       && [item.resume, item.stopped, item.resumed].every((flag) => typeof flag === "boolean"))
     || !value.machines.every((item) => isObject(item) && typeof item.machineId === "string" && typeof item.label === "string"
       && ["pending", "stopping", "stopped", "starting", "ready", "kept-running"].includes(String(item.state)))) {
@@ -124,13 +122,8 @@ const parseActivity = (value: unknown): BotActivity => {
 export interface BotService {
   list(): Promise<BotSummary[]>;
   get(botId: string): Promise<BotSummary | null>;
-  create(input?: { name?: string; instructions?: string; model?: BotModelSelection }): Promise<BotSummary>;
-  update(botId: string, patch: {
-    name?: string;
-    instructions?: string | null;
-    model?: BotModelSelection | null;
-    pinned?: boolean;
-  }): Promise<BotSummary | null>;
+  create(input?: BotCreateInput): Promise<BotSummary>;
+  update(botId: string, patch: BotUpdateInput): Promise<BotSummary | null>;
   archive(botId: string): Promise<BotSummary | null>;
   remove(botId: string): Promise<BotSummary | null>;
   restore(botId: string): Promise<BotSummary | null>;
@@ -138,27 +131,14 @@ export interface BotService {
   wake(botId: string): Promise<BotSummary>;
   retry(botId: string): Promise<BotSummary>;
   canExecute(botId: string): Promise<boolean>;
+  publishExecutionGates(): Promise<void>;
+  executionGate(botId: string): Promise<BotExecutionGate>;
   reconcile(): Promise<void>;
   dispose(): Promise<void>;
-  /**
-   * Resolve (creating if necessary) the Bot's long-lived entry session. A
-   * persisted session that no longer exists is cleared and a fresh entry is
-   * created — the Bot's work association lives on the Thread scope, so losing
-   * one entry session never loses the work.
-   */
-  ensureEntry(botId: string): Promise<{ bot: BotSummary; sessionId: string }>;
-  /** Which Bot (if any) owns this session as its entry conversation. */
-  botForSession(sessionId: string): Promise<BotSummary | null>;
-  /** Threads owned by the Bot's owner scope — its real associated work. */
+  /** Materialize and resolve the allocated native entry without changing its identity. */
+  ensureEntry(botId: string): Promise<BotEntryResult>;
+  /** Threads owned by the Bot's owner scope, including original executor references. */
   listWork(botId: string, includeEntry?: boolean): Promise<BotWorkItem[]>;
-  /** Every Pi conversation owned by a Bot, including older Runs and archived Bots. */
-  listSessionIds(): Promise<string[]>;
-  /**
-   * Called when a session is deleted: clears a stale entry binding so the next
-   * entry resolution creates a fresh conversation instead of re-anchoring a
-   * dead session.
-   */
-  releaseEntry(sessionId: string): Promise<void>;
 }
 
 export function createBotService(options: BotServiceOptions): BotService {
@@ -170,6 +150,7 @@ export function createBotService(options: BotServiceOptions): BotService {
     return task.finally(() => { if (mutations.get(botId) === task) mutations.delete(botId); });
   };
   let scopedClient: Promise<KernelScopedClient> | null = null;
+  const detachKernelExit = options.client.subscribeExit(() => { scopedClient = null; });
   const scoped = (): Promise<KernelScopedClient> => {
     if (scopedClient) return scopedClient;
     const creating = (async () => {
@@ -191,20 +172,26 @@ export function createBotService(options: BotServiceOptions): BotService {
     return profile ? { ...profile, archived: record.state === "archived" } : null;
   };
 
-  /**
-   * session→bot index consulted on every `agent_start` through the bot-root
-   * runtime; populated on the first lookup and invalidated on each write.
-   */
-  let sessionIndex: Map<string, string> | null = null;
-  let catalogGeneration = 0;
-
   const recordFor = async (botId: string): Promise<KernelRecordResult | null> => {
     const client = await scoped();
     const record = await client.getRecord(BOT_CATALOG_WORKSPACE_ID, `bot.profile:${botId}`);
     if (record && (record.recordType !== "bot.profile" || !parseProfile(record))) {
-      throw new HarnessServiceError("failed", `Bot profile is malformed: ${botId}`);
+      throw new HarnessServiceError("failed", `Bot profile format is unsupported or malformed; its data has been preserved: ${botId}`);
     }
     return record;
+  };
+
+  const permitted = (bot: BotSummary): boolean => !bot.archived && !bot.deletion && (!bot.activity || bot.activity.state === "awake"
+    || (bot.activity.state === "waking" && bot.activity.readyToResume === true && operations.has(bot.id)));
+  const publishExecutionGate = async (record: KernelRecordResult): Promise<void> => {
+    if (!options.publishExecutionGate) return;
+    const bot = toSummary(record);
+    if (!bot) throw new HarnessServiceError("failed", `Bot profile format is unsupported or malformed; its data has been preserved: ${record.recordId}`);
+    // A saved waking receipt cannot reopen this executor epoch. Reconciliation
+    // checkpoints readiness=false before the new lifecycle owner resumes its work.
+    if (bot.activity?.state === "waking" && bot.activity.readyToResume && !operations.has(bot.id)) return;
+    await options.publishExecutionGate({ botId:bot.id, profileRevision:record.recordRevision,
+      activityOperationId:bot.activity?.operationId ?? null, permitted:permitted(bot) });
   };
 
   const write = async (
@@ -222,7 +209,7 @@ export function createBotService(options: BotServiceOptions): BotService {
       model: null,
       coordinatorHostId: options.hostId,
       homeDir: join(options.dataDir, "bots", botId),
-      entrySessionId: null,
+      entry: { runtime: "agent", threadId: `thread:bot:${botId}`, branchId: `branch:bot:${botId}` },
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     };
@@ -247,15 +234,12 @@ export function createBotService(options: BotServiceOptions): BotService {
       ...(typeof revision === "number" ? { expectedRecordRevision: revision } : {}),
     });
     const summary = toSummary(result) ?? { ...next, archived: state === "archived" };
-    // Rebuild the session index from the authoritative write so a moved or
-    // cleared entry binding cannot keep an old sessionId mapped.
-    catalogGeneration += 1;
-    sessionIndex = null;
+    await publishExecutionGate(result);
     options.onChange?.(summary);
     return summary;
   };
 
-  const list: BotService["list"] = async () => {
+  const listRecords = async (): Promise<KernelRecordResult[]> => {
     const client = await scoped();
     const records: KernelRecordResult[] = [];
     let cursor: number | undefined;
@@ -269,10 +253,13 @@ export function createBotService(options: BotServiceOptions): BotService {
       records.push(...page.records);
       cursor = page.nextCursor === null ? undefined : page.nextCursor;
     } while (cursor !== undefined);
-    return records
+    return records;
+  };
+  const list: BotService["list"] = async () => {
+    return (await listRecords())
       .map((record) => {
         const bot = toSummary(record);
-        if (!bot) throw new HarnessServiceError("failed", `Bot profile is malformed: ${record.recordId}`);
+        if (!bot) throw new HarnessServiceError("failed", `Bot profile format is unsupported or malformed; its data has been preserved: ${record.recordId}`);
         return bot;
       })
       .sort((a, b) => a.pinnedAt && b.pinnedAt ? a.pinnedAt.localeCompare(b.pinnedAt)
@@ -285,18 +272,21 @@ export function createBotService(options: BotServiceOptions): BotService {
   };
 
   const create: BotService["create"] = async (input = {}) => {
+    if ("runtime" in input) throw new HarnessServiceError("invalid-params", "Bot runtime selection is unsupported");
     const botId = randomUUID();
     const homeDir = join(options.dataDir, "bots", botId);
     await mkdir(homeDir, { recursive: true });
     const now = new Date().toISOString();
-    return write(botId, "active", {
+    const bot = await write(botId, "active", {
       name: input.name?.trim() || "Varin Bot",
       instructions: input.instructions?.trim() || null,
       model: input.model ?? null,
       homeDir,
       createdAt: now,
-      entrySessionId: null,
+      entry: { runtime: "agent", threadId: `thread:bot:${botId}`, branchId: `branch:bot:${botId}` },
     });
+    await options.agent.ensureEntry(bot);
+    return bot;
   };
 
   const update: BotService["update"] = (botId, patch) => serialize(botId, async () => {
@@ -317,22 +307,7 @@ export function createBotService(options: BotServiceOptions): BotService {
     if (patch.model !== undefined) updates.model = patch.model;
     if (patch.pinned !== undefined) updates.pinnedAt = patch.pinned ? (toSummary(existing)?.pinnedAt ?? new Date().toISOString()) : null;
     const summary = await write(botId, "active", updates, existing.recordRevision);
-    // Keep a live entry worker on the profile's current model. A closed or
-    // unreachable worker is retried by the model passed on the next open;
-    // clearing the preference likewise applies from the next open.
-    if (summary.entrySessionId && await canExecute(botId) && (patch.model !== undefined || patch.instructions !== undefined)) {
-      try {
-        if (patch.model !== undefined) await options.applyModel?.({ sessionId: summary.entrySessionId, model: patch.model });
-        if (patch.instructions !== undefined) await options.applyInstructions?.({
-          sessionId: summary.entrySessionId, instructions: summary.instructions,
-        });
-      } catch (error) {
-        options.onError?.(error);
-        if (!isObject(error) || error.code !== "session_not_found") {
-          throw new HarnessServiceError("unavailable", "Bot profile was saved, but the live entry could not apply it. Reopen the entry conversation.");
-        }
-      }
-    }
+    if (patch.instructions !== undefined || patch.model !== undefined) await options.agent.applyProfile?.(summary);
     return summary;
   });
 
@@ -358,8 +333,7 @@ export function createBotService(options: BotServiceOptions): BotService {
   const timers = new Map<string, ReturnType<typeof setTimeout>>();
   const canExecute = async (botId: string): Promise<boolean> => {
     const bot = await get(botId);
-    return Boolean(bot && !bot.archived && !bot.deletion && (!bot.activity || bot.activity.state === "awake"
-      || (bot.activity.state === "waking" && bot.activity.readyToResume === true && operations.has(botId))));
+    return Boolean(bot && permitted(bot));
   };
   const checkpoint = (botId: string, activity: BotActivity) => serialize(botId, async () => {
     const current = await get(botId);
@@ -394,11 +368,11 @@ export function createBotService(options: BotServiceOptions): BotService {
           if (disposed) return;
           if (work.stopped) continue;
           try { await runtime.stop(bot, work); work.stopped = true; }
-          catch (error) { failures.push(`${work.threadId || work.sessionId}: ${error instanceof Error ? error.message : String(error)}`); }
+          catch (error) { failures.push(`${work.threadId || work.runId}: ${error instanceof Error ? error.message : String(error)}`); }
           bot = await checkpoint(botId, activity);
         }
-        try { await runtime.stopScope(bot); }
-        catch (error) { failures.push(error instanceof Error ? error.message : String(error)); }
+        try { const execution = await runtime.stopScope(bot); if (execution) activity.execution = execution; }
+        catch (error) { if (isObject(error) && error.execution) activity.execution = error.execution as NonNullable<BotActivity['execution']>; failures.push(error instanceof Error ? error.message : String(error)); }
         if (failures.length) throw new Error(failures.join("\n"));
         if (!activity.machinesPlanned) {
           activity.machines = await runtime.planMachines(bot);
@@ -517,8 +491,6 @@ export function createBotService(options: BotServiceOptions): BotService {
         if (!current) return;
         if (current.deletion?.operationId !== deletion.operationId) throw new Error('Bot deletion was superseded');
         await (await scoped()).releaseRecord(`bot.delete:${deletion.operationId}`, BOT_CATALOG_WORKSPACE_ID, `bot.profile:${bot.id}`);
-        catalogGeneration++;
-        sessionIndex = null;
         options.onDeleted?.(bot.id);
       });
     } catch (error) {
@@ -557,97 +529,14 @@ export function createBotService(options: BotServiceOptions): BotService {
     if (!bot) throw new HarnessServiceError("not-found", `Unknown Bot "${botId}"`);
     if (bot.deletion) throw new HarnessServiceError('unavailable', 'This Bot is being deleted');
     if (bot.archived) throw new HarnessServiceError("invalid-params", `Bot "${botId}" is archived`);
-    if (bot.activity && bot.activity.state !== "awake") {
-      if (!bot.entrySessionId) throw new HarnessServiceError("unavailable", "Wake this Bot to start its first conversation");
-      return { bot, sessionId: bot.entrySessionId };
-    }
-    if (bot.entrySessionId) {
-      try {
-        const session = await options.openSession({
-          sessionId: bot.entrySessionId,
-          cwd: bot.homeDir,
-          ...(bot.model ? { model: bot.model } : {}),
-        });
-        // The broker returns an existing live worker without applying the
-        // `openSession` model argument. Reconcile that worker before exposing
-        // the entry as ready; a closed worker already opened on the preference.
-        if (bot.model && options.applyModel && (session.model?.provider !== bot.model.providerId
-          || session.model.id !== bot.model.modelId)) {
-          await options.applyModel({ sessionId: session.sessionId, model: bot.model });
-        }
-        if (!bot.model) await options.applyModel?.({ sessionId: session.sessionId, model: null });
-        await options.applyInstructions?.({ sessionId: session.sessionId, instructions: bot.instructions });
-        return { bot, sessionId: session.sessionId };
-      } catch (error) {
-        if (!isObject(error) || error.code !== "session_not_found") throw error;
-        // The persisted entry session is gone (deleted or never materialized
-        // on this Host). Clear it and create a fresh entry below — the Bot's
-        // work lives on its Thread scope, not on this one conversation.
-      }
-    }
-    await mkdir(bot.homeDir, { recursive: true });
-    const session = await options.createSession({
-      cwd: bot.homeDir,
-      name: bot.name,
-      ...(bot.model ? { model: bot.model } : {}),
-    });
-    // Return the session only once the durable owner binding was committed.
-    // An IPC/storage failure is not a successful entry without Bot identity.
-    const updated = await write(botId, "active", { entrySessionId: session.sessionId });
-    await options.applyInstructions?.({ sessionId: session.sessionId, instructions: updated.instructions });
-    return { bot: updated, sessionId: session.sessionId };
+    const entry = await options.agent.ensureEntry(bot);
+    return { bot, entry, model: await options.agent.model(bot) };
   });
 
-  const botForSession: BotService["botForSession"] = async (sessionId) => {
-    if (!sessionId) return null;
-    while (!sessionIndex) {
-      const generation = catalogGeneration;
-      const bots = await list();
-      if (generation !== catalogGeneration) continue;
-      sessionIndex = new Map(bots.flatMap((bot) => (
-        bot.entrySessionId ? [[bot.entrySessionId, bot.id] as const] : []
-      )));
-    }
-    const botId = sessionIndex.get(sessionId);
-    return botId ? get(botId) : null;
-  };
-
   const listWork: BotService["listWork"] = async (botId, includeEntry = false) => {
-    const snapshots = await options.registry.listWorkspaceThreadSnapshots(botScopeId(botId));
-    const items: BotWorkItem[] = [];
-    for (const { thread, activeRun } of snapshots) {
-      if (thread.purpose === "bot-root" && !includeEntry) continue;
-      // The latest Run's session is the reopenable surface for this work.
-      const runs = await options.registry.listRuns(botScopeId(botId), thread.id);
-      const sessionId = activeRun?.sessionId ?? runs.at(-1)?.sessionId ?? null;
-      items.push({ thread, activeRun, sessionId });
-    }
-    return items;
-  };
-
-  const listSessionIds: BotService["listSessionIds"] = async () => {
-    const bots = await list();
-    const runIds = await Promise.all(bots.map((bot) => options.registry.listWorkspaceRunSessionIds(botScopeId(bot.id))));
-    const ids = new Set<string>();
-    for (const [index, bot] of bots.entries()) {
-      if (bot.entrySessionId) ids.add(bot.entrySessionId);
-      for (const sessionId of runIds[index] ?? []) ids.add(sessionId);
-    }
-    return [...ids];
-  };
-
-  const releaseEntry: BotService["releaseEntry"] = async (sessionId) => {
-    const bots = await list();
-    for (const bot of bots) {
-      if (bot.entrySessionId !== sessionId || bot.archived || bot.deletion) continue;
-      await serialize(bot.id, async () => {
-        const existing = await recordFor(bot.id);
-        if (!existing) return;
-        const profile = parseProfile(existing);
-        if (profile?.entrySessionId !== sessionId || profile.deletion) return;
-        await write(bot.id, "active", { entrySessionId: null }, existing.recordRevision);
-      });
-    }
+    const bot = await get(botId);
+    if (!bot) throw new HarnessServiceError('not-found', 'Unknown Bot');
+    return options.agent.listWork(bot, includeEntry);
   };
 
   return {
@@ -662,6 +551,22 @@ export function createBotService(options: BotServiceOptions): BotService {
     wake: (botId) => transition(botId, true),
     retry,
     canExecute,
+    executionGate: async (botId) => {
+      const record = await recordFor(botId);
+      const bot = record && toSummary(record);
+      if (!record || !bot) throw new HarnessServiceError('not-found', 'Unknown Bot');
+      return { botId, profileRevision: record.recordRevision, activityOperationId: bot.activity?.operationId ?? null, permitted: permitted(bot) };
+    },
+    publishExecutionGates: async () => {
+      for (const listed of await listRecords()) {
+        const bot = toSummary(listed);
+        if (!bot) throw new HarnessServiceError("failed", `Bot profile format is unsupported or malformed; its data has been preserved: ${listed.recordId}`);
+        await serialize(bot.id, async () => {
+          const current = await recordFor(bot.id);
+          if (current) await publishExecutionGate(current);
+        });
+      }
+    },
     reconcile: async () => {
       for (const bot of await list()) {
         if (bot.activity?.state === 'waking' && !operations.has(bot.id)) {
@@ -679,14 +584,12 @@ export function createBotService(options: BotServiceOptions): BotService {
     },
     dispose: async () => {
       disposed = true;
+      detachKernelExit();
       for (const timer of timers.values()) clearTimeout(timer);
       timers.clear();
       await Promise.allSettled(operations.values());
     },
     ensureEntry,
-    botForSession,
     listWork,
-    listSessionIds,
-    releaseEntry,
   };
 }

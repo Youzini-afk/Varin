@@ -1,76 +1,32 @@
-import React, { memo } from 'react';
-
-import { Icon } from '@/components/icon/Icon';
-import { BusyDots } from '@/components/chat/message/parts/BusyDots';
+import React from 'react';
+import type { ThreadIdentity } from '@varin/application-client';
 import { Button } from '@/components/ui/button';
-import { useI18n } from '@/lib/i18n';
-import { getRuntimeKey } from '@varin/application-client';
+import { openReviewThread, resumeAutoReviewRun, stopAutoReviewRun } from '@/lib/reviewFlow';
 import { useAutoReviewStore } from '@/stores/useAutoReviewStore';
-import { usePiSessionStore } from '@/stores/usePiSessionStore';
-import { useUIStore } from '@/stores/useUIStore';
+import { reviewLinkKey } from '@/stores/useReviewFlowStore';
+import { useThreadStore } from '@/stores/useThreadStore';
 
-export const AutoReviewBanner = memo(() => {
-  const { t } = useI18n();
-  const currentSessionId = usePiSessionStore((state) => state.currentSessionId);
-  const run = useAutoReviewStore(React.useCallback((state) => {
-    if (!currentSessionId) return null;
-    const run = state.runsByOriginalSessionID[currentSessionId] ?? null;
-    return run?.runtimeKey === getRuntimeKey() ? run : null;
-  }, [currentSessionId]));
-  const stopRun = useAutoReviewStore((state) => state.stopRun);
-  const openContextPanelTab = useUIStore((state) => state.openContextPanelTab);
-
-  if (!currentSessionId || !run || run.status !== 'running') {
-    return null;
-  }
-
-  const statusLabel = run.phase === 'waiting_for_reviewer'
-    ? t('chat.autoReview.status.waitingForReviewer')
-    : t('chat.autoReview.status.waitingForImplementer');
-
-  const handleOpenReviewSession = () => {
-    openContextPanelTab(run.directory, {
-      mode: 'chat',
-      dedupeKey: `session:${run.reviewSessionID}`,
-      label: t('chat.autoReview.reviewSessionLabel'),
-      readOnly: true,
-    });
-  };
-
-  return (
-    <div className="pb-2 w-full px-1">
-      <div className="rounded-xl border border-border/60 bg-[var(--surface-elevated)] text-[var(--surface-elevated-foreground)] shadow-sm overflow-hidden">
-        <div className="flex w-full items-center gap-2 px-3 py-2 text-left">
-          <Icon name="loader-4" className="h-4 w-4 animate-spin text-muted-foreground" aria-hidden="true" />
-          <div className="min-w-0 flex-1">
-            <span className="typography-ui-label font-medium text-foreground">
-              {t('chat.autoReview.title')}
-              <BusyDots />
-            </span>
-            <div className="typography-meta text-muted-foreground">
-              {statusLabel}
-            </div>
-          </div>
-          <Button
-            type="button"
-            variant="secondary"
-            size="xs"
-            onClick={handleOpenReviewSession}
-          >
-            {t('chat.autoReview.actions.open')}
-          </Button>
-          <Button
-            type="button"
-            variant="secondary"
-            size="xs"
-            onClick={() => stopRun(currentSessionId)}
-          >
-            {t('chat.autoReview.actions.stop')}
-          </Button>
-        </div>
-      </div>
+export function AutoReviewBanner({ identity }: { identity: ThreadIdentity }) {
+  const host = useThreadStore(state => state.hostKey);
+  const run = useAutoReviewStore(state => state.runs[reviewLinkKey(host, identity)]);
+  const [error, setError] = React.useState<string>();
+  if (!run) return null;
+  const running = run.status === 'running';
+  const status = run.status === 'completed' ? 'Review completed' : running
+    ? run.phase === 'handoff' ? 'Preparing review handoff' : run.phase === 'implementation' ? 'Waiting for implementation' : 'Waiting for review'
+    : run.status === 'stopped' ? 'Review forwarding stopped' : 'Review needs attention';
+  return <section aria-label="Review workflow" className="space-y-2 rounded border p-3 text-sm">
+    <p role="status">{status}</p>
+    {(error || run.error) && <p role="alert">{error ?? run.error}</p>}
+    {run.command?.status === 'unknown' && <p>Delivery is unconfirmed. Retry keeps the original command; do not start another request.</p>}
+    {run.command?.receipt && <p className="text-xs text-muted-foreground">Accepted run: {run.command.receipt.run_id}</p>}
+    <div className="flex gap-2">
+      {run.review && <Button type="button" variant="secondary" size="sm" onClick={() => openReviewThread({ hostKey: run.hostKey, original: run.original, review: run.review!, directory: run.directory })}>Open review</Button>}
+      {running && <Button type="button" variant="secondary" size="sm" onClick={() => stopAutoReviewRun(run.key)}>Stop forwarding</Button>}
+      {(run.status === 'paused' || run.status === 'stopped' && (run.command?.status === 'unknown' || !run.review)) && <>
+        <Button type="button" variant="secondary" size="sm" onClick={() => { setError(undefined); void resumeAutoReviewRun(run.key).catch(error => setError(error instanceof Error ? error.message : 'Review unavailable')); }}>Retry original step</Button>
+        <Button type="button" variant="ghost" size="sm" onClick={() => stopAutoReviewRun(run.key)}>Stop forwarding</Button>
+      </>}
     </div>
-  );
-});
-
-AutoReviewBanner.displayName = 'AutoReviewBanner';
+  </section>;
+}

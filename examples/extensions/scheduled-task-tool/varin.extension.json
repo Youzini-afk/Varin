@@ -1,0 +1,97 @@
+{
+  "schemaVersion": 1,
+  "id": "example.scheduled-task-tool",
+  "displayName": "Project Calendar Tasks",
+  "version": "1.0.0",
+  "engines": {
+    "varin": "*"
+  },
+  "entrypoints": {
+    "host": {
+      "file": "host.cjs",
+      "mode": "brokered",
+      "activation": [
+        "service-request"
+      ]
+    }
+  },
+  "capabilities": {
+    "host": [
+      "tasks.schedules"
+    ]
+  },
+  "provides": {
+    "services": [
+      {
+        "id": "example.scheduled-task.manage",
+        "version": 1,
+        "tool": {
+          "name": "scheduled_task",
+          "description": "Manage the caller’s configured project calendar definitions and exact occurrences through their original GUI/Markdown owner. Native definitions use runtime agent, execution {prompt}, timezone, missedPolicy, and target new_work with registered model/sourceMode/optional Goal or existing_work with exact threadId/branchId. Run now returns an accepted occurrence, not execution success. Read actual Run/Goal outcomes via the returned work identity. Disabling holds unconsumed scheduled fires; stopping a Run does not disable future calendar slots. Loop edits require the original content revision. No arbitrary project path or credential is accepted.",
+          "completion": "result",
+          "operation": "effect",
+          "inputSchema": {
+            "type": "object",
+            "properties": {
+              "action": {
+                "enum": [
+                  "list",
+                  "get",
+                  "status",
+                  "upsert",
+                  "remove",
+                  "run",
+                  "set_enabled",
+                  "read_loop",
+                  "write_loop",
+                  "remove_loop",
+                  "cancel_occurrence",
+                  "retry_occurrence",
+                  "retry_calculation"
+                ]
+              },
+              "taskId": {
+                "type": "string"
+              },
+              "task": {
+                "type": "object"
+              },
+              "enabled": {
+                "type": "boolean"
+              },
+              "content": {
+                "type": "string"
+              },
+              "expectedRevision": {
+                "type": "string"
+              },
+              "occurrenceId": {
+                "type": "string"
+              },
+              "occurrenceRevision": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "definitionRevision": {
+                "type": "integer",
+                "minimum": 0
+              }
+            },
+            "required": [
+              "action"
+            ],
+            "additionalProperties": false
+          },
+          "outputSchema": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "source": {
+            "path": "host.ts",
+            "line": 5
+          }
+        }
+      }
+    ]
+  }
+}

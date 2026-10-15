@@ -1,13 +1,13 @@
 // APNs (Apple Push Notification service) runtime for the native iOS mobile app.
 //
-// Device tokens are persisted per UI session (mirrors push-runtime.js). Delivery has two
+// Device tokens are persisted per UI session (mirrors push-runtime.ts). Delivery has two
 // modes, chosen at send time:
-//   - Relay (explicit): POST tokens + generic text to VARIN_PUSH_RELAY_URL, whose service
+//   - Relay (explicit): POST tokens + notification payload to VARIN_PUSH_RELAY_URL, whose service
 //     holds the selected project APNs key and signs+sends.
 //   - Direct: sign an ES256 JWT with Node crypto and send over HTTP/2 ourselves for
 //     self-hosters who configure VARIN_APNS_*.
-// Wired into the same trigger fanout as web push (see runtime.js); the relay carries only
-// generic, model-based text (no session content) — see APNS.md.
+// Native Thread notifications use the Thread title and fixed status text from thread-runtime.ts.
+// This transport forwards that payload through the configured channel; see APNS.md.
 
 import {
   getOrCreateRelaySigningKeypair,
@@ -35,6 +35,7 @@ type PushEnvironment = 'production' | 'sandbox';
 type PushPlatform = 'android' | 'ios';
 
 interface ApnsTokenRecord {
+  hostKey?: string | undefined;
   createdAt: number | null;
   deviceToken: string;
   environment: PushEnvironment;
@@ -235,6 +236,7 @@ export const createApnsRuntime = (deps: ApnsRuntimeDependencies) => {
         if (typeof deviceToken !== 'string' || deviceToken.trim().length === 0) return null;
         return {
           deviceToken: deviceToken.trim(),
+          hostKey: typeof entry.hostKey === 'string' && entry.hostKey.trim() ? entry.hostKey : undefined,
           createdAt: typeof entry.createdAt === 'number' ? entry.createdAt : null,
           lastSeenAt: typeof entry.lastSeenAt === 'number' ? entry.lastSeenAt : null,
           userAgent: typeof entry.userAgent === 'string' ? entry.userAgent : undefined,
@@ -262,6 +264,7 @@ export const createApnsRuntime = (deps: ApnsRuntimeDependencies) => {
     userAgent?: string,
     platform?: string,
     environment?: string,
+    hostKey?: string,
   ): Promise<void> => {
     if (!uiSessionToken || typeof deviceToken !== 'string' || deviceToken.trim().length === 0) return;
     const token = deviceToken.trim();
@@ -271,10 +274,15 @@ export const createApnsRuntime = (deps: ApnsRuntimeDependencies) => {
 
     await persistTokenUpdate((current) => {
       const tokensBySession = { ...(current.tokensBySession || {}) };
+      // A refreshed registration supersedes this device token's older authenticated binding.
+      for (const [sessionToken, entries] of Object.entries(tokensBySession)) {
+        tokensBySession[sessionToken] = normalizeTokens(entries).filter(entry => entry.deviceToken !== token);
+      }
       const existing = normalizeTokens(tokensBySession[uiSessionToken]);
       const filtered = existing.filter((entry) => entry.deviceToken !== token);
       filtered.unshift({
         deviceToken: token,
+        hostKey: typeof hostKey === 'string' && hostKey.trim() ? hostKey : undefined,
         createdAt: now,
         lastSeenAt: now,
         userAgent: typeof userAgent === 'string' && userAgent.length > 0 ? userAgent : undefined,
@@ -479,7 +487,7 @@ export const createApnsRuntime = (deps: ApnsRuntimeDependencies) => {
     });
 
   // Relay mode is explicit: the selected service owns the APNs key, while this server POSTs
-  // device tokens + generic text and receives token-drop results. Without a relay URL, direct
+  // device tokens and the notification payload, then receives token-drop results. Without a relay URL, direct
   // mode below uses the deployment's VARIN_APNS_* configuration when available.
   const resolveRelayConfig = (): RelayConfig | null => {
     if (trimmedEnv('VARIN_PUSH_RELAY_DISABLED') === 'true') return null;
@@ -617,27 +625,35 @@ export const createApnsRuntime = (deps: ApnsRuntimeDependencies) => {
     // Tokens are grouped by their registered APNs environment so each batch goes to the
     // endpoint that actually knows the token (Xcode builds → sandbox, TestFlight/App Store
     // → production). Mixing them gets BadDeviceToken and the token wrongly dropped as dead.
-    const tokensByEnvironment = new Map<PushEnvironment, string[]>();
+    const groups = new Map<string, { hostKey?: string | undefined; environments: Map<PushEnvironment, string[]> }>();
     const seen = new Set<string>();
     for (const record of Object.values(store.tokensBySession || {})) {
       for (const entry of normalizeTokens(record)) {
         if (seen.has(entry.deviceToken)) continue;
         seen.add(entry.deviceToken);
-        const group = tokensByEnvironment.get(entry.environment) || [];
-        group.push(entry.deviceToken);
-        tokensByEnvironment.set(entry.environment, group);
+        const key = entry.hostKey ?? '';
+        const group = groups.get(key) ?? { hostKey: entry.hostKey, environments: new Map<PushEnvironment, string[]>() };
+        const tokens = group.environments.get(entry.environment) ?? [];
+        tokens.push(entry.deviceToken); group.environments.set(entry.environment, tokens); groups.set(key, group);
       }
     }
-    if (seen.size === 0) return;
-
     const relay = resolveRelayConfig();
-    if (relay) {
-      for (const [environment, deviceTokens] of tokensByEnvironment) {
-        await sendViaRelay(deviceTokens, payload, relay, relay.environment ?? environment);
+    for (const group of groups.values()) {
+      const data = { ...(isRecord(payload.data) ? payload.data : {}) };
+      // Routing is bound to the original authenticated token registration, never a producer's claim.
+      delete data.hostKey; delete data.url;
+      if (group.hostKey) {
+        data.hostKey = group.hostKey;
+        if (typeof data.threadId === 'string' && typeof data.branchId === 'string') {
+          const params = new URLSearchParams({ branch: data.branchId, host: group.hostKey });
+          data.url = `varin://thread/${encodeURIComponent(data.threadId)}?${params}`;
+        }
       }
-      return;
+      const targeted = { ...payload, data };
+      if (relay) {
+        for (const [environment, tokens] of group.environments) await sendViaRelay(tokens, targeted, relay, relay.environment ?? environment);
+      } else await sendViaDirectApns(group.environments, targeted);
     }
-    await sendViaDirectApns(tokensByEnvironment, payload);
   };
 
   return {

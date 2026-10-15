@@ -26,8 +26,9 @@ import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import { EMPTY_TERMINAL_BUFFER, useTerminalStore } from '@/stores/useTerminalStore';
 import { useUIStore } from '@/stores/useUIStore';
 import { useWorkspaceStore } from '@/stores/useWorkspaceStore';
+import { TerminalView } from '@/components/views/TerminalView';
 
-export const WorkspaceTerminalDialog: React.FC = () => {
+const WorkspaceShellTerminalDialog: React.FC = () => {
   const { t } = useI18n();
   const { terminal } = useRuntimeAPIs();
   const { currentTheme } = useThemeSystem();
@@ -97,7 +98,7 @@ export const WorkspaceTerminalDialog: React.FC = () => {
   }, [dialog.directoryKey, dialog.open, ensureDirectory]);
 
   React.useEffect(() => {
-    if (!dialog.open || !activeTabId) {
+    if (!dialog.open || !activeTabId || dialog.workspacePath === null) {
       return;
     }
 
@@ -297,7 +298,7 @@ export const WorkspaceTerminalDialog: React.FC = () => {
   }, [activeTabId, dialog.directoryKey, replaceBuffer, setTabLifecycle, setTabSessionId]);
 
   return (
-    <Dialog open={dialog.open} onOpenChange={(open) => {
+    <Dialog open={dialog.open} onOpenChange={(open: boolean) => {
       if (!open) {
         closeTerminalDialog();
       }
@@ -384,4 +385,20 @@ export const WorkspaceTerminalDialog: React.FC = () => {
       </DialogContent>
     </Dialog>
   );
+};
+
+export const WorkspaceTerminalDialog: React.FC = () => {
+  const dialog = useWorkspaceStore(state => state.terminalDialog);
+  const close = useWorkspaceStore(state => state.closeTerminal);
+  if (dialog.workspacePath !== null) return <WorkspaceShellTerminalDialog />;
+  return <Dialog open={dialog.open} onOpenChange={(open: boolean) => { if (!open) close(); }}>
+    <DialogContent className="flex h-[72vh] max-w-5xl flex-col gap-0 overflow-hidden p-0">
+      <DialogHeader className="shrink-0 border-b border-border/60 px-3 py-2 text-left">
+        <DialogTitle className="truncate pr-8 typography-ui-label">{dialog.title}</DialogTitle>
+      </DialogHeader>
+      <div className="min-h-0 flex-1 overflow-hidden">
+        <TerminalView visible={dialog.open} directoryOverride={dialog.directoryKey} attachedOnly onClose={close} />
+      </div>
+    </DialogContent>
+  </Dialog>;
 };

@@ -10,8 +10,8 @@ export function registerEgressRoutes(app: Express, options: {
   requireAuth: RequestHandler;
   readSettings(): Promise<Record<string, unknown>>;
   readAuth(): Record<string, unknown>;
-  saveAuth(ref: string, entry: { key: string }): unknown;
-  removeAuth(ref: string): boolean;
+  saveAuth(ref: string, entry: { key: string }): unknown | Promise<unknown>;
+  removeAuth(ref: string): boolean | Promise<boolean>;
   egress: EgressRuntime;
 }): void {
   const { requireAuth, readSettings, readAuth, saveAuth, removeAuth, egress } = options;
@@ -33,7 +33,7 @@ export function registerEgressRoutes(app: Express, options: {
       if (!binding || binding.credentialRef !== credentialRef) {
         return res.status(409).json({ error: 'Proxy settings changed; reload before saving credentials' });
       }
-      saveAuth(OUTBOUND_PROXY_CREDENTIAL_REF, { key: encodeOutboundProxyAuth(binding.credentialRef, binding.proxyOrigin, username, password) });
+      await saveAuth(OUTBOUND_PROXY_CREDENTIAL_REF, { key: encodeOutboundProxyAuth(binding.credentialRef, binding.proxyOrigin, username, password) });
       return res.json({ configured: true });
     } catch { return res.status(500).json({ error: 'Unable to save proxy credential' }); }
   });
@@ -44,7 +44,7 @@ export function registerEgressRoutes(app: Express, options: {
       if (!binding || binding.credentialRef !== req.body?.credentialRef) {
         return res.status(409).json({ error: 'Proxy settings changed; reload before removing credentials' });
       }
-      removeAuth(OUTBOUND_PROXY_CREDENTIAL_REF);
+      await removeAuth(OUTBOUND_PROXY_CREDENTIAL_REF);
       return res.json({ configured: false });
     }
     catch { return res.status(500).json({ error: 'Unable to remove proxy credential' }); }

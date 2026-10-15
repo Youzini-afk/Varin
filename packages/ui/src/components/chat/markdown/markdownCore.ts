@@ -3,7 +3,7 @@ import remend from 'remend';
 import katex from 'katex';
 import DOMPurify from 'dompurify';
 import { buildAgentMentionUrl, parseAgentHref, parseSkillHref } from '@/lib/messages/inlineMessageLinks';
-import { pdfMaterialMarkdownHref } from '@/lib/pi-runtime/pdfMaterialCitation';
+import { pdfMaterialMarkdownHref } from '@/lib/materials/pdfMaterialCitation';
 import { highlightCodeInWorker } from './markdown-worker';
 import { escapeRawMarkdownHtml, MARKDOWN_FORBIDDEN_TAGS } from './markdownSecurity';
 
@@ -172,22 +172,25 @@ const parser = marked.use({
     html({ text }) {
       return escapeRawMarkdownHtml(text);
     },
-    link({ href, title, text }) {
+    link({ href, title, text, tokens, autolink }) {
+      // Link text is raw Markdown, not rendered HTML. Parse its inline tokens
+      // so nested HTML uses the same escaping boundary as the rest of a message.
+      const label = autolink ? escapeRawMarkdownHtml(text) : this.parser.parseInline(tokens);
       const target = href ?? '';
       if (target.startsWith('varin-material://')) {
         const titleAttr = title ? ` title="${escapeAttr(title)}"` : '';
-        return `<a href="${escapeAttr(pdfMaterialMarkdownHref(target))}" data-varin-material-link="true"${titleAttr} class="text-primary hover:underline">${text}</a>`;
+        return `<a href="${escapeAttr(pdfMaterialMarkdownHref(target))}" data-varin-material-link="true"${titleAttr} class="text-primary hover:underline">${label}</a>`;
       }
       const agentName = parseAgentHref(target);
       if (agentName) {
-        return `<a href="${escapeAttr(buildAgentMentionUrl(agentName))}" data-varin-agent-mention="true" class="text-primary hover:underline" target="_blank" rel="noopener noreferrer">${text}</a>`;
+        return `<a href="${escapeAttr(buildAgentMentionUrl(agentName))}" data-varin-agent-mention="true" class="text-primary hover:underline" target="_blank" rel="noopener noreferrer">${label}</a>`;
       }
       const skillName = parseSkillHref(target);
       if (skillName) {
-        return `<a href="${escapeAttr(target)}" data-skill-name="${escapeAttr(skillName)}" class="text-primary hover:underline">${text}</a>`;
+        return `<a href="${escapeAttr(target)}" data-skill-name="${escapeAttr(skillName)}" class="text-primary hover:underline">${label}</a>`;
       }
       const titleAttr = title ? ` title="${escapeAttr(title)}"` : '';
-      return `<a href="${escapeAttr(target)}"${titleAttr} class="external-link" target="_blank" rel="noopener noreferrer">${text}</a>`;
+      return `<a href="${escapeAttr(target)}"${titleAttr} class="external-link" target="_blank" rel="noopener noreferrer">${label}</a>`;
     },
   },
 });

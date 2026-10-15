@@ -9,12 +9,10 @@ before the task and the known delivered change. The reference commit is evidence
 for reviewers, not an exact-patch oracle: a different implementation can pass if
 it meets the acceptance criteria.
 
-Run both variants with the same provider, model, starting commit, prompt, and
-machine:
-
-- `native`: set memory to `off` and disable delegation to compare the ordinary Pi path.
-- `harness-shadow`: legacy comparison name for `assist` plus the Harness team,
-  without compaction takeover. The shipped default is `takeover` (D-081).
+The recorder preserves historical variant labels `native` and `harness-shadow`; they are result
+labels, not runtime selectors or current settings. When comparing configurations, record the actual
+native model, policy, memory and delegation choices and hold the prompt, starting commit and machine
+constant. The pinned historical tasks may refer to APIs no longer present in the current product.
 
 Record only three aggregate metrics: success, total tokens, and human
 interventions. A failed run also receives one diagnostic category. Deterministic
@@ -29,8 +27,7 @@ node scripts/harness-replay.mjs record --run D:\replays\context-native\run.json 
 node scripts/harness-replay.mjs summary --results D:\replays
 ```
 
-`new-run` only writes a run record and prints the base commit, prompt, and
-acceptance criteria. Preparing a checkout and starting a paid model remain
-explicit operator actions. Varin now has a session memory-mode override, so an
-operator can select `off`, `assist`, or `takeover` for a run without changing the
-global default; this recorder still does not mutate it automatically.
+`new-run` only writes a run record and prints the base commit, prompt and acceptance criteria.
+Preparing a checkout and starting a paid model remain explicit operator actions. The recorder does
+not change runtime, memory, delegation or compaction settings. Use the configuration APIs available
+at the selected source revision rather than treating old replay labels as current product controls.

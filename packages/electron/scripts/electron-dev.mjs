@@ -212,9 +212,9 @@ async function stopChildTree(child) {
 
 async function main() {
   const electronExecutable = ensureElectronInstalled();
-  console.log('[electron:dev] building Rust kernel, Pi runtime worker, and broker...');
+  console.log('[electron:dev] building native kernel and runtime dependencies...');
   await runProcess('bun', ['run', 'kernel:build']);
-  await runProcess('bun', ['run', '--cwd', 'packages/runtime-broker', 'build']);
+  await runProcess('bun', ['run', 'build:runtime-dependencies']);
   await runProcess('bun', ['run', '--cwd', 'packages/electron', 'bundle:main']);
 
   const useBundledUi = process.env.VARIN_ELECTRON_USE_BUNDLED_UI === '1';

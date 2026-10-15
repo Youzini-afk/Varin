@@ -1,0 +1,1020 @@
+import { toolOperationId, validToolOrigin } from './protocol.generated.js';
+/** The single private Host tool rendezvous for retained MCP and ordinary service endpoints.
+ * Calls remain owned by their original lease across Run release and kernel channel replacement.
+ */
+import { isDeepStrictEqual } from 'node:util';
+import { HostToolAdmissionError } from './tool-admission.js';
+import { randomUUID } from 'node:crypto';
+import type {
+  HostToolCall,
+  LaunchTool,
+  ExecutorOwner,
+  ExtensionToolBinding,
+  McpBinding,
+  HostToolErrorMarker,
+  SourceMcpChildBinding,
+  ChildModelBinding,
+} from './protocol.generated.js';
+export type HostToolSchema = LaunchTool;
+export interface HostToolBinding {
+  reference: string;
+  generation: number;
+  resources: Record<string, string>;
+  tools: HostToolSchema[];
+}
+export interface LiveHostToolBinding {
+  ownerId: string;
+  binding: HostToolBinding;
+}
+export type { HostToolCall } from './protocol.generated.js';
+export type HostToolCompletion = import('./protocol.generated.js').OperationCallCompletion<import('./protocol.generated.js').IncomingMedia>;
+/** Trusted adapter evidence; never accepted from the extension's ToolCompletion JSON. */
+export interface ToolExecutionReceipt {
+  completion: HostToolCompletion;
+  executor_stopped: boolean;
+}
+/** Trusted domain recovery supplies a receipt from its original durable owner.
+ * Catalog still validates the complete original invocation and executor identity. */
+export interface RecoveredToolReceipt {
+  call: HostToolCall;
+  executionOwner: ExecutorOwner;
+  receipt: ToolExecutionReceipt;
+}
+export interface HostToolLease {
+  readonly binding: HostToolBinding;
+  readonly implementationIdentity: string;
+  /** Different services occupy independent selected slots in one composition owner. */
+  readonly slot?: string;
+  readonly extensionBinding?: ExtensionToolBinding;
+  available(schema: HostToolSchema): boolean;
+  authorize(call: HostToolCall, signal: AbortSignal): Promise<void>;
+  revocationSignal(call: HostToolCall): AbortSignal;
+  execute(
+    call: HostToolCall,
+    signal: AbortSignal,
+    owner: ExecutorOwner,
+  ): Promise<ToolExecutionReceipt>;
+  /** Retain the exact original dispatch's selected MCP definitions before native admission. */
+  retainChild?(
+    binding: SourceMcpChildBinding,
+    selection: McpBinding,
+  ): Promise<{ release(): Promise<void> }>;
+  release(): void;
+  /** End a current Run/candidate selection context while accepted exchanges retain this exact lease. */
+  releaseSelection?(): void;
+}
+/** MCP configuration provenance is required only for MCP, never synthesized for a service. */
+export interface McpToolLease extends HostToolLease {
+  readonly binding: import('./protocol.generated.js').McpBinding;
+  readonly derivations?: import('./protocol.generated.js').McpChildDerivationReceipt[];
+  releaseDerivations?(): Promise<void>;
+}
+interface Request {
+  v: 1;
+  kind: 'host-tool-request';
+  id: string;
+  kernelEpoch: string;
+  phase: 'authorize' | 'execute';
+  binding: {
+    ownerId: string;
+    reference: string;
+    generation: number;
+    holderId: string;
+  };
+  call: HostToolCall;
+}
+export interface PrivateToolResponse {
+  v: 1;
+  kind: 'host-tool-response';
+  id: string;
+  kernelEpoch: string;
+  ok: boolean;
+  completion?: HostToolCompletion;
+  executor_stopped?: boolean;
+  error?: HostToolErrorMarker;
+}
+interface PrivateToolReceipt {
+  v: 1;
+  kind: 'host-tool-receipt';
+  id: string;
+  kernelEpoch: string;
+  executionOwner: ExecutorOwner;
+  call: HostToolCall;
+  receipt: ToolExecutionReceipt;
+}
+interface Revoked {
+  v: 1;
+  kind: 'host-tool-revoked';
+  kernelEpoch: string;
+  ownerId: string;
+  operationId: string;
+}
+export type PrivateToolFrame =
+  PrivateToolResponse | PrivateToolReceipt | Revoked;
+interface CallEntry {
+  identity: string;
+  call: HostToolCall;
+  authorized: boolean;
+  started: boolean;
+  result?: Promise<ToolExecutionReceipt>;
+  receipt?: ToolExecutionReceipt;
+  receiptId: string;
+  acknowledged: boolean;
+  receiptAccepted: Promise<boolean>;
+  acknowledgeReceipt(accepted: boolean): void;
+  actualPending: boolean;
+  stopWatch?: () => void;
+}
+interface OwnerEntry {
+  lease: HostToolLease;
+  binding: HostToolBinding;
+  epoch: string;
+  closing: boolean;
+  selected: boolean;
+  // The Host composition owns a candidate across kernel select/ready holder changes.
+  retained: boolean;
+  holders: Set<string>;
+  childHolders: Map<string, ChildHolder>;
+  active: Map<string, AbortController>;
+  calls: Map<string, CallEntry>;
+}
+/** Live acquisition/release duties only. Catalog owns durable child dependency facts. */
+interface ChildHolder {
+  epoch: string;
+  binding: SourceMcpChildBinding;
+  mcp: McpBinding | null;
+  extensions: ExtensionToolBinding[];
+  model: ChildModelBinding | null;
+  modelRetained: boolean;
+  owners: { key: string; entry: OwnerEntry }[];
+  requests: Set<string>;
+  accepted: boolean;
+  releaseRequested: boolean;
+  handles: Set<{ release(): Promise<void> }>;
+  acquiring?: Promise<void>;
+  retained?: Promise<boolean>;
+  releasing?: Promise<void>;
+}
+const record = (v: unknown): v is Record<string, unknown> =>
+  v !== null && typeof v === 'object' && !Array.isArray(v);
+const exact = (v: Record<string, unknown>, keys: readonly string[]) =>
+  Object.keys(v).every((key) => keys.includes(key));
+const text = (v: unknown): v is string => typeof v === 'string' && v.length > 0;
+const generation = (v: unknown): v is number =>
+  Number.isSafeInteger(v) && Number(v) >= 0;
+export const unknownToolReceipt = (): ToolExecutionReceipt => ({
+  completion: {
+    kind: 'result',
+    outcome: 'indeterminate',
+    effect: 'unknown',
+    content: { data: { error: 'host_tool_effect_unknown' }, parts: [] },
+  },
+  executor_stopped: false,
+});
+export const undispatchedToolReceipt = (
+  reason: string,
+): ToolExecutionReceipt => ({
+  completion: { kind: 'not_dispatched', reason },
+  executor_stopped: true,
+});
+function callValid(v: unknown): v is HostToolCall {
+  if (
+    !record(v) ||
+    !exact(v, [
+      'runId',
+      'origin',
+      'operationId',
+      'callId',
+      'name',
+      'schemaVersion',
+      'arguments',
+    ]) ||
+    !['runId', 'operationId', 'callId', 'name', 'schemaVersion'].every((key) =>
+      text(v[key]),
+    ) ||
+    !('arguments' in v) ||
+    !record(v.origin)
+  )
+    return false;
+  const origin = v.origin;
+  return validToolOrigin(origin) && v.operationId === toolOperationId(origin, v.callId as string)
+    && (origin.kind !== 'policy_action' || origin.node_id === v.callId);
+}
+function waitForOwner<T>(
+  work: Promise<T>,
+  signal: AbortSignal,
+  aborted: () => T,
+): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const onAbort = () => resolve(aborted());
+    signal.addEventListener('abort', onAbort, { once: true });
+    if (signal.aborted) onAbort();
+    void work
+      .then(resolve, reject)
+      .finally(() => signal.removeEventListener('abort', onAbort));
+  });
+}
+export class ToolBridge {
+  readonly #owners = new Map<string, Map<string, OwnerEntry>>();
+  readonly #selected = new Map<string, Map<string, string>>();
+  // Pending delivery only: effect facts live in the domain's durable operation,
+  // and no broker callback, lease or new execution is manufactured here.
+  readonly #recovered = new Map<string, RecoveredToolReceipt & { id: string; rejected?: boolean }>();
+  constructor(
+    private readonly currentEpoch: () => string | null,
+    private readonly send: (response: PrivateToolFrame) => Promise<void>,
+    private readonly transportFailed: () => void,
+    private readonly released: (runId: string, terminal: boolean) => void = () => {},
+    private readonly childReleaseFailed: (error: unknown) => void = () => {
+      console.error('host_tool_child_release_failed');
+    },
+    private readonly childModels?: {
+      retain(binding: SourceMcpChildBinding, model: ChildModelBinding,
+        selection: { mcp: McpBinding | null; extensions: ExtensionToolBinding[] }): Promise<boolean>;
+      release(parentRunId: string, operationId: string): void;
+      reconcile(children: readonly { operation_id: string; report: unknown }[]): void;
+    },
+  ) {}
+  register(
+    runId: string,
+    lease: HostToolLease,
+    selected = true,
+  ): LiveHostToolBinding {
+    const epoch = this.currentEpoch(),
+      binding = structuredClone(lease.binding);
+    if (
+      !epoch ||
+      !text(runId) ||
+      !text(lease.implementationIdentity) ||
+      !text(binding.reference) ||
+      !generation(binding.generation) ||
+      !record(binding.resources) ||
+      Object.values(binding.resources).some((v) => !text(v)) ||
+      !Array.isArray(binding.tools) ||
+      binding.tools.some(
+        (t) =>
+          !text(t.name) ||
+          !text(t.version) ||
+          typeof t.description !== 'string',
+      ) ||
+      new Set(binding.tools.map((t) => t.name)).size !== binding.tools.length
+    )
+      throw new Error('host_tool_owner_registration_invalid');
+    const entries = this.#owners.get(runId) ?? new Map<string, OwnerEntry>();
+    const retained = [...entries].find(
+      ([, e]) =>
+        e.lease.implementationIdentity === lease.implementationIdentity &&
+        !e.closing &&
+        e.epoch === epoch &&
+        isDeepStrictEqual(e.binding, binding),
+    );
+    const key = retained?.[0] ?? randomUUID();
+    if (retained) {
+      if (!selected) retained[1].retained = true;
+      if (retained[1].lease !== lease) lease.release();
+    } else {
+      entries.set(key, {
+        lease,
+        binding,
+        epoch,
+        closing: false,
+        selected: false,
+        retained: !selected,
+        holders: new Set(),
+        childHolders: new Map(),
+        active: new Map(),
+        calls: new Map(),
+      });
+      this.#owners.set(runId, entries);
+    }
+    if (selected) this.#activate(runId, key);
+    return { ownerId: key, binding: structuredClone(binding) };
+  }
+  #activate(runId: string, key: string): void {
+    const entries = this.#owners.get(runId),
+      entry = entries?.get(key);
+    if (!entry || entry.closing || entry.epoch !== this.currentEpoch()) return;
+    const slots = this.#selected.get(runId) ?? new Map<string, string>(),
+      slot = entry.lease.slot ?? 'mcp';
+    const previousKey = slots.get(slot);
+    slots.set(slot, key);
+    this.#selected.set(runId, slots);
+    entry.selected = true;
+    if (previousKey && previousKey !== key) {
+      const previous = entries!.get(previousKey);
+      if (previous) {
+        previous.selected = false;
+        if (!previous.retained) previous.lease.releaseSelection?.();
+        this.#collect(runId, previousKey, previous);
+      }
+    }
+  }
+  #collect(runId: string, key: string, entry: OwnerEntry): void {
+    if (
+      entry.selected ||
+      entry.retained ||
+      entry.holders.size ||
+      entry.childHolders.size ||
+      entry.active.size ||
+      [...entry.calls.values()].some(
+        (c) => c.started && (c.actualPending || !c.acknowledged),
+      )
+    )
+      return;
+    const entries = this.#owners.get(runId);
+    if (entries?.get(key) !== entry) return;
+    entries.delete(key);
+    if (!entries.size) this.#owners.delete(runId);
+    entry.closing = true;
+    for (const call of entry.calls.values()) call.stopWatch?.();
+    entry.lease.release();
+  }
+  discard(runId: string, binding: LiveHostToolBinding): void {
+    const e = this.#owners.get(runId)?.get(binding.ownerId);
+    if (e) {
+      e.retained = false;
+      if (!e.selected) e.lease.releaseSelection?.();
+      this.#collect(runId, binding.ownerId, e);
+    }
+  }
+  binding(runId: string): HostToolBinding | undefined {
+    return this.liveBinding(runId)?.binding;
+  }
+  liveBinding(runId: string, slot = 'mcp'): LiveHostToolBinding | undefined {
+    const key = this.#selected.get(runId)?.get(slot),
+      owner = key ? this.#owners.get(runId)?.get(key) : undefined;
+    return owner && !owner.closing && owner.epoch === this.currentEpoch()
+      ? { ownerId: key!, binding: structuredClone(owner.binding) }
+      : undefined;
+  }
+  /** Actual retained callback completion, not physical stop or a new-epoch inference. */
+  callbackEnded(runId: string, owner: ExecutorOwner, operationId: string): boolean | undefined {
+    if (owner.kind !== 'external') return undefined;
+    const entry = this.#owners.get(runId)?.get(owner.epoch);
+    if (!entry || entry.binding.reference !== owner.identity) return undefined;
+    const call = entry.calls.get(operationId);
+    return call?.started ? !call.actualPending : undefined;
+  }
+  async publishRecoveredReceipt(input: RecoveredToolReceipt): Promise<void> {
+    if (!callValid(input.call) || input.executionOwner.kind !== 'external'
+      || !input.receipt.executor_stopped || input.receipt.completion.kind !== 'result'
+      || input.receipt.completion.effect === 'unknown') throw new Error('host_tool_recovery_receipt_invalid');
+    if (this.callbackEnded(input.call.runId, input.executionOwner, input.call.operationId) === false) {
+      throw new Error('host_tool_original_callback_pending');
+    }
+    const previous = this.#recovered.get(input.call.operationId);
+    if (previous && !isDeepStrictEqual({ call: previous.call, executionOwner: previous.executionOwner, receipt: previous.receipt }, input)) {
+      throw new Error('host_tool_recovery_receipt_changed');
+    }
+    if (previous?.rejected) throw new Error('host_tool_recovery_receipt_rejected');
+    const pending = previous ?? { ...structuredClone(input), id: randomUUID() };
+    this.#recovered.set(input.call.operationId, pending);
+    await this.#publishRecovered(pending);
+  }
+  async #publishRecovered(pending: RecoveredToolReceipt & { id: string; rejected?: boolean }): Promise<void> {
+    const epoch = this.currentEpoch();
+    if (!epoch || pending.rejected) return;
+    try {
+      await this.send({ v: 1, kind: 'host-tool-receipt', id: pending.id, kernelEpoch: epoch,
+        executionOwner: pending.executionOwner, call: pending.call, receipt: pending.receipt });
+    } catch { if (epoch === this.currentEpoch()) this.transportFailed(); }
+  }
+  availability(
+    runId: string,
+    name: string,
+    version: string,
+  ): boolean | undefined {
+    for (const key of this.#selected.get(runId)?.values() ?? []) {
+      const entry = this.#owners.get(runId)?.get(key);
+      const schema = entry?.binding.tools.find(
+        (tool) => tool.name === name && tool.version === version,
+      );
+      if (entry && schema)
+        return (
+          !entry.closing &&
+          entry.epoch === this.currentEpoch() &&
+          entry.lease.available(schema)
+        );
+    }
+    return undefined;
+  }
+  implementationIdentity(runId: string): string | undefined {
+    const key = this.#selected.get(runId)?.get('mcp');
+    return key
+      ? this.#owners.get(runId)?.get(key)?.lease.implementationIdentity
+      : undefined;
+  }
+  /** Run termination withdraws admission. Original callbacks and unacknowledged facts retain leases. */
+  unregister(runId: string, terminal = false): void {
+    this.released(runId, terminal);
+    this.#selected.delete(runId);
+    for (const [key, entry] of this.#owners.get(runId) ?? []) {
+      entry.closing = true;
+      entry.selected = false;
+      entry.retained = false;
+      entry.lease.releaseSelection?.();
+      entry.holders.clear();
+      for (const holder of entry.childHolders.values())
+        if (!holder.accepted && !holder.releaseRequested)
+          this.#observeChildRelease(this.#releaseChildHolder(holder));
+      for (const c of entry.active.values()) c.abort();
+      this.#collect(runId, key, entry);
+    }
+  }
+  /** Channel reset is not Host/broker death. No callback or receipt is deleted here. */
+  reset(): void {
+    for (const run of this.#owners.keys()) this.unregister(run);
+  }
+  close(): void {
+    const holders = new Set<ChildHolder>();
+    for (const entries of this.#owners.values())
+      for (const entry of entries.values())
+        for (const holder of entry.childHolders.values()) holders.add(holder);
+    for (const holder of holders)
+      this.#observeChildRelease(this.#releaseChildHolder(holder));
+    this.reset();
+  }
+  reconnect(): void {
+    for (const pending of this.#recovered.values()) void this.#publishRecovered(pending);
+    for (const [run, entries] of this.#owners)
+      for (const [key, owner] of entries)
+        for (const call of owner.calls.values())
+          void this.#publishReceipt(run, key, owner, call);
+  }
+  #observeChildRelease(pending: Promise<void>): Promise<void> {
+    // Existing control-frame callers cannot await. Report failure without replacing
+    // the shared channel, and leave the original live handle available for retry.
+    void pending.catch(error => this.childReleaseFailed(error));
+    return pending;
+  }
+  #releaseChildHolder(holder: ChildHolder): Promise<void> {
+    holder.releaseRequested = true;
+    if (holder.releasing) return holder.releasing;
+    const detach = () => {
+      if (holder.modelRetained) {
+        holder.modelRetained = false;
+        this.childModels?.release(holder.binding.parentRunId, holder.binding.operationId);
+      }
+      for (const { key, entry } of holder.owners) {
+        if (entry.childHolders.get(holder.binding.operationId) === holder)
+          entry.childHolders.delete(holder.binding.operationId);
+        this.#collect(holder.binding.parentRunId, key, entry);
+      }
+    };
+    // Preserve the synchronous fast path for purely local, already acquired owners.
+    if (!holder.acquiring && !holder.handles.size) {
+      detach();
+      return Promise.resolve();
+    }
+    const release = async () => {
+      // Cancellation/channel change is not completion of an outstanding retain.
+      // A late original handle still owes its own release.
+      await holder.acquiring?.catch(() => {});
+      const failures: unknown[] = [];
+      await Promise.all([...holder.handles].map(async handle => {
+        try {
+          await handle.release();
+          holder.handles.delete(handle);
+        } catch (error) { failures.push(error); }
+      }));
+      if (failures.length) throw new AggregateError(failures, 'host_tool_child_release_failed');
+      detach();
+    };
+    const pending = release();
+    holder.releasing = pending;
+    void pending.then(
+      () => { if (holder.releasing === pending) delete holder.releasing; },
+      () => { if (holder.releasing === pending) delete holder.releasing; },
+    );
+    return pending;
+  }
+  releaseChild(parentRunId: string, childOperationId: string): Promise<void> {
+    this.childModels?.release(parentRunId, childOperationId);
+    const holders = new Set<ChildHolder>();
+    for (const entry of this.#owners.get(parentRunId)?.values() ?? []) {
+      const holder = entry.childHolders.get(childOperationId);
+      if (holder) holders.add(holder);
+    }
+    return this.#observeChildRelease(Promise.all(
+      [...holders].map(holder => this.#releaseChildHolder(holder)),
+    ).then(() => {}));
+  }
+  reconcileChildren(
+    children: readonly { operation_id: string; report: unknown }[],
+  ): void {
+    this.childModels?.reconcile(children);
+    const facts = new Map(children.map((child) => [child.operation_id, child]));
+    const releasing = new Set<ChildHolder>();
+    for (const entries of this.#owners.values())
+      for (const entry of entries.values())
+        for (const [operation, holder] of entry.childHolders) {
+          const child = facts.get(operation);
+          // An uncommitted current-epoch handoff may be between ACK and Catalog accept.
+          if (child?.report || (!child && holder.epoch !== this.currentEpoch()))
+            releasing.add(holder);
+        }
+    for (const holder of releasing)
+      this.#observeChildRelease(this.#releaseChildHolder(holder));
+  }
+  async #retainChild(
+    requestId: string,
+    binding: SourceMcpChildBinding,
+    mcp: McpBinding | null,
+    extensions: ExtensionToolBinding[],
+    model: ChildModelBinding | null,
+  ): Promise<boolean> {
+    const epoch = this.currentEpoch();
+    if (!epoch) return false;
+    const entries = [...(this.#owners.get(binding.parentRunId)?.entries() ?? [])]
+      .map(([key, entry]) => ({ key, entry }))
+      .filter(({ entry }) => !entry.closing && entry.epoch === epoch);
+    const selected: ChildHolder['owners'] = [];
+    let mcpOwner: OwnerEntry | undefined;
+    if (mcp) {
+      const owner = entries.find(({ entry: candidate }) => {
+        const original = candidate.binding as McpBinding;
+        return (
+          (candidate.lease.slot ?? 'mcp') === 'mcp' &&
+          original.reference === mcp.reference &&
+          original.generation === mcp.generation &&
+          Object.entries(mcp.provenance.servers).every(([name, server]) =>
+            isDeepStrictEqual(original.provenance.servers[name], server),
+          ) &&
+          Object.entries(mcp.resources).every(
+            ([name, resource]) => original.resources[name] === resource,
+          ) &&
+          record(mcp.routes) && record(original.routes) &&
+          Object.keys(mcp.routes).length === mcp.tools.length &&
+          mcp.tools.every(tool => isDeepStrictEqual(original.routes[tool.name], mcp.routes[tool.name])) &&
+          mcp.tools.every(
+            (tool) =>
+              original.tools.some((value) => isDeepStrictEqual(value, tool)) &&
+              candidate.lease.available(tool),
+          )
+        );
+      });
+      if (!owner) return false;
+      mcpOwner = owner.entry;
+      const managed = Object.values(mcp.provenance.servers).some(
+        server => server.owner.resource_owner.kind === 'managed_host',
+      );
+      if (managed && !mcpOwner.lease.retainChild) return false;
+      selected.push(owner);
+    }
+    for (const extension of extensions) {
+      const owner = entries.find(
+        ({ entry }) =>
+          isDeepStrictEqual(entry.lease.extensionBinding, extension) &&
+          entry.lease.available(extension.tool),
+      );
+      if (!owner) return false;
+      if (!selected.some(value => value.entry === owner.entry)) selected.push(owner);
+    }
+    const previous = selected.map(({ entry }) => entry.childHolders.get(binding.operationId));
+    const live = new Set([...this.#owners.get(binding.parentRunId)?.values() ?? []]
+      .map(entry => entry.childHolders.get(binding.operationId)).filter(value => value !== undefined));
+    const existing = [...live][0];
+    if (existing) {
+      if (live.size !== 1 || existing.epoch !== epoch
+        || previous.some(value => value !== existing) || existing.releaseRequested
+        || !isDeepStrictEqual(existing.binding, binding)
+        || !isDeepStrictEqual(existing.model, model)
+        || !isDeepStrictEqual(existing.mcp, mcp)
+        || !isDeepStrictEqual(existing.extensions, extensions)) return false;
+      existing.requests.add(requestId);
+      return existing.retained ?? existing.accepted;
+    }
+    // A model-only child has no tool holder. Its operation-lifetime registration lives
+    // in the existing credential bridge and uses the same release/reconcile controls.
+    if (!selected.length) return model ? await this.childModels?.retain(binding, model, { mcp, extensions }) ?? false : true;
+    const holder: ChildHolder = {
+      epoch, binding: structuredClone(binding), mcp: structuredClone(mcp),
+      extensions: structuredClone(extensions), model: structuredClone(model), modelRetained: false,
+      owners: selected, requests: new Set([requestId]),
+      accepted: false, releaseRequested: false, handles: new Set(),
+    };
+    // Pin every exact selected lease before any asynchronous definition retention.
+    for (const { entry } of selected) entry.childHolders.set(binding.operationId, holder);
+    if ((!mcpOwner?.lease.retainChild || !mcp) && !model) {
+      holder.accepted = true;
+      return true;
+    }
+    const lease = mcpOwner?.lease;
+    holder.acquiring = Promise.resolve().then(async () => {
+      if (model) {
+        if (!(await this.childModels?.retain(binding, model, { mcp, extensions }))) throw new Error('child_model_original_owner_unavailable');
+        holder.modelRetained = true;
+      }
+      if (lease?.retainChild && mcp) {
+        const handle = await lease.retainChild(structuredClone(binding), structuredClone(mcp));
+        if (!handle || typeof handle.release !== 'function') throw new Error('host_tool_child_retention_invalid');
+        holder.handles.add(handle);
+      }
+    });
+    holder.retained = (async () => {
+      let failure: unknown, valid = false;
+      try {
+        await holder.acquiring;
+        valid = !holder.releaseRequested && epoch === this.currentEpoch()
+          && selected.every(({ entry }) => !entry.closing)
+          && (!mcp || mcp.tools.every(tool => mcpOwner!.lease.available(tool)))
+          && extensions.every(extension => selected.some(({ entry }) =>
+            isDeepStrictEqual(entry.lease.extensionBinding, extension) && entry.lease.available(extension.tool)));
+      } catch (error) { failure = error; }
+      if (!valid) {
+        try { await this.#releaseChildHolder(holder); }
+        catch (cleanup) {
+          this.childReleaseFailed(cleanup);
+          throw new AggregateError(failure ? [failure, cleanup] : [cleanup], 'host_tool_child_release_failed');
+        }
+        if (failure) throw failure;
+        return false;
+      }
+      holder.accepted = true;
+      return true;
+    })();
+    return holder.retained;
+  }
+  consume(v: unknown): boolean {
+    if (
+      !record(v) ||
+      ![
+        'host-tool-child-retain',
+        'host-tool-child-release',
+        'host-tool-request',
+        'host-tool-cancel',
+        'host-tool-owner-release',
+        'host-tool-binding-retain',
+        'host-tool-binding-release',
+        'host-tool-binding-activate',
+        'host-tool-binding-deactivate',
+        'host-tool-receipt-ack',
+      ].includes(String(v.kind))
+    )
+      return false;
+    if (v.v !== 1 || v.kernelEpoch !== this.currentEpoch()) return true;
+    if (v.kind === 'host-tool-child-release') {
+      if (
+        text(v.parentRunId) &&
+        text(v.childOperationId) &&
+        exact(v, [
+          'v',
+          'kind',
+          'kernelEpoch',
+          'parentRunId',
+          'childOperationId',
+        ])
+      )
+        this.releaseChild(v.parentRunId, v.childOperationId);
+      return true;
+    }
+    if (v.kind === 'host-tool-child-retain') {
+      if (
+        !text(v.id) ||
+        !text(v.parentRunId) ||
+        !text(v.childOperationId) ||
+        !generation(v.executionEpoch) ||
+        !record(v.executionOwner) ||
+        !(v.executionOwner.kind === 'kernel'
+          ? exact(v.executionOwner, ['kind'])
+          : v.executionOwner.kind === 'external'
+            && exact(v.executionOwner, ['kind', 'identity', 'epoch'])
+            && text(v.executionOwner.identity) && text(v.executionOwner.epoch)) ||
+        !Array.isArray(v.extensionBindings) ||
+        !v.extensionBindings.every(record) ||
+        (v.mcpBinding !== null && !record(v.mcpBinding)) ||
+        (v.modelBinding !== null && (!record(v.modelBinding) || !record(v.modelBinding.configuration)
+          || (v.modelBinding.credential_scope !== null && !record(v.modelBinding.credential_scope)))) ||
+        !exact(v, [
+          'v',
+          'kind',
+          'id',
+          'kernelEpoch',
+          'parentRunId',
+          'childOperationId',
+          'executionOwner',
+          'executionEpoch',
+          'mcpBinding',
+          'extensionBindings',
+          'modelBinding',
+        ])
+      )
+        return true;
+      const request = { id: v.id, kernelEpoch: String(v.kernelEpoch) };
+      void this.#retainChild(
+        v.id,
+        { parentRunId: v.parentRunId, operationId: v.childOperationId,
+          executionOwner: structuredClone(v.executionOwner) as ExecutorOwner,
+          executionEpoch: v.executionEpoch as number },
+        structuredClone(v.mcpBinding) as McpBinding | null,
+        structuredClone(v.extensionBindings) as unknown as ExtensionToolBinding[],
+        structuredClone(v.modelBinding) as ChildModelBinding | null,
+      ).then(
+        ok => this.#reply(request, ok
+          ? { ok }
+          : { ok, error: { code: 'child_tool_original_owner_unavailable' } }),
+        error => this.#reply(request, { ok: false,
+          error: { code: error instanceof AggregateError && error.message === 'host_tool_child_release_failed'
+            ? 'host_tool_child_release_failed' : 'child_tool_original_owner_unavailable' } }),
+      );
+      return true;
+    }
+    if (v.kind === 'host-tool-receipt-ack') {
+      if (
+        !exact(v, ['v', 'kind', 'kernelEpoch', 'id', 'accepted']) ||
+        !text(v.id) ||
+        typeof v.accepted !== 'boolean'
+      )
+        return true;
+      for (const [operationId, pending] of this.#recovered) {
+        if (pending.id === v.id) {
+          if (v.accepted) this.#recovered.delete(operationId);
+          else pending.rejected = true;
+          return true;
+        }
+      }
+      for (const [run, entries] of this.#owners)
+        for (const [key, owner] of entries)
+          for (const call of owner.calls.values())
+            if (call.receiptId === v.id) {
+              // Accepted or definitive identity rejection ends retransmission, never changes the fact.
+              call.acknowledged = true;
+              call.acknowledgeReceipt(v.accepted);
+              this.#collect(run, key, owner);
+              return true;
+            }
+      return true;
+    }
+    if (v.kind === 'host-tool-owner-release') {
+      if (text(v.runId) && exact(v, ['v', 'kind', 'kernelEpoch', 'runId']))
+        this.unregister(v.runId, true);
+      return true;
+    }
+    if (v.kind === 'host-tool-binding-deactivate') {
+      if (
+        !text(v.runId) ||
+        !exact(v, ['v', 'kind', 'kernelEpoch', 'runId', 'slot'])
+      )
+        return true;
+      const slots = this.#selected.get(v.runId),
+        slot = typeof v.slot === 'string' ? v.slot : 'mcp',
+        key = slots?.get(slot);
+      slots?.delete(slot);
+      const e = key ? this.#owners.get(v.runId)?.get(key) : undefined;
+      if (e) {
+        e.selected = false;
+        if (!e.retained) e.lease.releaseSelection?.();
+        this.#collect(v.runId, key!, e);
+      }
+      return true;
+    }
+    if (
+      [
+        'host-tool-binding-retain',
+        'host-tool-binding-release',
+        'host-tool-binding-activate',
+      ].includes(String(v.kind))
+    ) {
+      if (
+        !text(v.runId) ||
+        !text(v.ownerId) ||
+        !text(v.holderId) ||
+        !exact(v, ['v', 'kind', 'kernelEpoch', 'runId', 'ownerId', 'holderId'])
+      )
+        return true;
+      const e = this.#owners.get(v.runId)?.get(v.ownerId);
+      if (!e || e.epoch !== v.kernelEpoch) return true;
+      if (v.kind === 'host-tool-binding-release') {
+        e.holders.delete(v.holderId);
+        this.#collect(v.runId, v.ownerId, e);
+      } else if (!e.closing) {
+        if (v.kind === 'host-tool-binding-retain') e.holders.add(v.holderId);
+        else if (e.holders.has(v.holderId)) this.#activate(v.runId, v.ownerId);
+      }
+      return true;
+    }
+    if (!text(v.id)) return true;
+    if (v.kind === 'host-tool-cancel') {
+      if (
+        text(v.runId) &&
+        exact(v, ['v', 'kind', 'id', 'kernelEpoch', 'runId'])
+      )
+        for (const e of this.#owners.get(v.runId)?.values() ?? []) {
+          e.active.get(v.id)?.abort();
+          for (const holder of e.childHolders.values())
+            if (!holder.accepted && holder.requests.has(v.id) && !holder.releaseRequested)
+              this.#observeChildRelease(this.#releaseChildHolder(holder));
+        }
+      return true;
+    }
+    if (
+      !exact(v, [
+        'v',
+        'kind',
+        'id',
+        'kernelEpoch',
+        'phase',
+        'binding',
+        'call',
+      ]) ||
+      !['authorize', 'execute'].includes(String(v.phase)) ||
+      !record(v.binding) ||
+      !exact(v.binding, ['ownerId', 'reference', 'generation', 'holderId']) ||
+      !text(v.binding.ownerId) ||
+      !text(v.binding.reference) ||
+      !generation(v.binding.generation) ||
+      !text(v.binding.holderId) ||
+      !callValid(v.call)
+    )
+      return true;
+    const request = v as unknown as Request,
+      key = request.binding.ownerId,
+      owner = this.#owners.get(request.call.runId)?.get(key);
+    if (
+      !owner ||
+      owner.closing ||
+      owner.epoch !== request.kernelEpoch ||
+      owner.binding.reference !== request.binding.reference ||
+      owner.binding.generation !== request.binding.generation ||
+      !owner.holders.has(request.binding.holderId)
+    ) {
+      void this.#reply(request, {
+        ok: request.phase === 'execute',
+        ...(request.phase === 'execute'
+          ? undispatchedToolReceipt('host_tool_owner_unavailable')
+          : { error: { code: 'host_tool_owner_unavailable' } }),
+      });
+      return true;
+    }
+    if (owner.active.has(request.id)) return true;
+    const controller = new AbortController();
+    owner.active.set(request.id, controller);
+    void this.#invoke(request, owner, controller.signal).finally(() => {
+      owner.active.delete(request.id);
+      this.#collect(request.call.runId, key, owner);
+    });
+    return true;
+  }
+  async #reply(
+    request: Pick<Request, 'id' | 'kernelEpoch'>,
+    response: Pick<
+      PrivateToolResponse,
+      'ok' | 'completion' | 'executor_stopped' | 'error'
+    >,
+  ): Promise<void> {
+    if (request.kernelEpoch !== this.currentEpoch()) return;
+    try {
+      await this.send({
+        v: 1,
+        kind: 'host-tool-response',
+        id: request.id,
+        kernelEpoch: request.kernelEpoch,
+        ...response,
+      });
+    } catch {
+      if (request.kernelEpoch === this.currentEpoch()) this.transportFailed();
+    }
+  }
+  async #publishReceipt(
+    run: string,
+    key: string,
+    owner: OwnerEntry,
+    call: CallEntry,
+  ): Promise<void> {
+    const epoch = this.currentEpoch();
+    if (!epoch || !call.receipt || call.acknowledged) return;
+    try {
+      await this.send({
+        v: 1,
+        kind: 'host-tool-receipt',
+        id: call.receiptId,
+        kernelEpoch: epoch,
+        executionOwner: {
+          kind: 'external',
+          identity: owner.binding.reference,
+          epoch: key,
+        },
+        call: call.call,
+        receipt: call.receipt,
+      });
+    } catch {
+      if (epoch === this.currentEpoch()) this.transportFailed();
+    }
+    this.#collect(run, key, owner);
+  }
+  async #invoke(
+    request: Request,
+    owner: OwnerEntry,
+    signal: AbortSignal,
+  ): Promise<void> {
+    const call = request.call,
+      identity = JSON.stringify(call),
+      previous = owner.calls.get(call.operationId);
+    if (previous && previous.identity !== identity) {
+      await this.#reply(request, {
+        ok: false,
+        error: { code: 'host_tool_call_identity_changed' },
+      });
+      return;
+    }
+    let acknowledgeReceipt!: (accepted: boolean) => void;
+    const receiptAccepted = new Promise<boolean>(resolve => { acknowledgeReceipt = resolve; });
+    const entry = previous ?? {
+      identity,
+      call: structuredClone(call),
+      authorized: false,
+      started: false,
+      receiptId: randomUUID(),
+      acknowledged: false,
+      receiptAccepted,
+      acknowledgeReceipt,
+      actualPending: false,
+    };
+    owner.calls.set(call.operationId, entry);
+    if (request.phase === 'authorize') {
+      try {
+        if (entry.started || signal.aborted || owner.closing)
+          throw new Error('closed');
+        const ok = await waitForOwner(
+          owner.lease.authorize(structuredClone(call), signal).then(() => true),
+          signal,
+          () => false,
+        );
+        if (!ok || signal.aborted || owner.closing) throw new Error('closed');
+        const revoked = owner.lease.revocationSignal(call);
+        const notify = () => {
+          const epoch = this.currentEpoch();
+          if (epoch === request.kernelEpoch)
+            void this.send({
+              v: 1,
+              kind: 'host-tool-revoked',
+              kernelEpoch: epoch,
+              ownerId: request.binding.ownerId,
+              operationId: call.operationId,
+            }).catch(() => this.transportFailed());
+        };
+        entry.stopWatch?.();
+        revoked.addEventListener('abort', notify, { once: true });
+        entry.stopWatch = () => revoked.removeEventListener('abort', notify);
+        if (revoked.aborted) notify();
+        entry.authorized = true;
+        await this.#reply(request, { ok: true });
+      } catch (error) {
+        await this.#reply(request, {
+          ok: false,
+          error: error instanceof HostToolAdmissionError
+            ? { code: error.code, admission: true }
+            : { code: 'host_tool_authorization_failed' },
+        });
+      }
+      return;
+    }
+    if (!entry.authorized) {
+      await this.#reply(request, {
+        ok: true,
+        ...undispatchedToolReceipt('host_tool_authorization_required'),
+      });
+      return;
+    }
+    if (!entry.result) {
+      entry.started = true;
+      entry.actualPending = true;
+      // This Promise follows the actual retained callback. Only the kernel observer is raced.
+      entry.result = Promise.resolve()
+        .then(async () =>
+          signal.aborted || owner.closing
+            ? undispatchedToolReceipt('host_tool_cancelled_before_dispatch')
+            : owner.lease.execute(structuredClone(call), signal, {
+                kind: 'external',
+                identity: owner.binding.reference,
+                epoch: request.binding.ownerId,
+              }),
+        )
+        .catch(unknownToolReceipt)
+        .then((receipt) => {
+          entry.actualPending = false;
+          entry.receipt = receipt;
+          void this.#publishReceipt(
+            call.runId,
+            request.binding.ownerId,
+            owner,
+            entry,
+          );
+          return receipt;
+        });
+    }
+    let receipt = await waitForOwner(
+      entry.result,
+      signal,
+      unknownToolReceipt,
+    );
+    if (receipt === entry.receipt) {
+      // Sending the receipt frame first does not order its asynchronous Catalog
+      // write before the response. The engine needs this invocation's durable
+      // receipt, including successful domain reads with effect:none.
+      const accepted = await waitForOwner(entry.receiptAccepted, signal, () => false);
+      if (!accepted) receipt = unknownToolReceipt();
+    }
+    await this.#reply(request, { ok: true, ...receipt });
+  }
+}

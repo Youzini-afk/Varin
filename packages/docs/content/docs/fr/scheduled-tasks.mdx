@@ -1,35 +1,43 @@
 ---
-title: Tâches planifiées
-description: Lancez automatiquement un prompt selon un planning.
+title: "Tâches planifiées et suivis"
+description: "Planifiez du travail natif ou poursuivez une conversation sous condition."
 ---
 
-# Tâches planifiées
+# Tâches planifiées et suivis
 
-Une tâche planifiée lance un prompt pour vous selon un planning — par exemple un « résume les changements d’hier » quotidien ou un nettoyage hebdomadaire. Quand elle s’exécute, Varin démarre une nouvelle session et envoie le prompt tout seul. Ouvrez le planificateur depuis le bouton en haut de la barre latérale des sessions.
+## Tâches de calendrier
 
-## Créer une tâche
+Ouvrez le planificateur et choisissez un projet. Définissez les instructions, une programmation unique, quotidienne, hebdomadaire ou cron, un fuseau IANA et le traitement des créneaux manqués : ignorer ou exécuter une fois le dernier.
 
-1. Ouvrez la boîte de dialogue des tâches planifiées depuis la barre latérale des sessions.
-2. Ajoutez une tâche et donnez-lui un nom.
-3. Choisissez quand elle s’exécute :
-   - **daily** — à une ou plusieurs heures chaque jour
-   - **weekly** — certains jours de la semaine et à certaines heures
-   - **once** — une seule date et heure
-4. Définissez ce qu’elle fait : le prompt à envoyer, ainsi que le fournisseur, le modèle et l’agent à utiliser. Le prompt peut être une commande slash, comme `/review`.
-5. Enregistrez, puis vérifiez que la tâche est activée.
+**New work** crée un Thread par occurrence. Choisissez modèle enregistré, source et accès : instantané en lecture seule, copie modifiable isolée ou répertoire actif. Un **Continuing Goal** et son budget de sortie sont facultatifs. **Existing work** cible un Thread et une branche précis, avec leur modèle, source, permissions et objectif.
 
-Vous pouvez lancer n’importe quelle tâche immédiatement avec **run now** pour vérifier qu’elle fait ce que vous attendez.
+Activez la programmation quand elle est prête. **Run now** accepte une occurrence ; ouvrez sa conversation pour les résultats. Désactiver la définition retient les travaux planifiés non livrés. Arrêter une exécution ne désactive pas les prochains créneaux. L’Application Host doit rester actif.
 
-Cochez **Exécuter comme objectif** pour que l'exécution poursuive son prompt jusqu'au bout au lieu de s'arrêter après une réponse — voir [Objectifs de session](/fr/session-goals/).
+## Boucles Markdown
 
-## À quoi ressemble une réussite
+Utilisez `.agents/loops/` dans le projet ou `~/.agents/loops/` pour l’utilisateur. Remplacez les ID par ceux du canal enregistré :
 
-Après une exécution, la tâche indique quand elle a tourné pour la dernière fois, si elle a réussi et un lien vers la session créée. Si une exécution échoue, l’erreur s’affiche aussi à cet endroit.
+```markdown
+---
+name: daily-review
+runtime: agent
+schedule: "0 9 * * *"
+timezone: UTC
+enabled: false
+target:
+  kind: new_work
+  model: { providerId: my-channel, modelId: my-model }
+  source: { kind: project }
+  sourceMode: fixed_branch
+  goal: null
+---
+Résume les changements du dépôt depuis hier.
+```
 
-## À garder en tête
+Nom, cron, fuseau explicite, corps, `runtime: agent` et `target` natif sont requis. Le fichier fait autorité ; les modifications vérifient sa révision. La découverte ne réécrit pas les fichiers et n’importe pas les anciens formats incompatibles. Un remplacement invalide suspend la dernière tâche native valide jusqu’à réparation.
 
-Les tâches ne se déclenchent que lorsque le serveur Varin tourne. Si vous le fermez, les exécutions planifiées sont en pause jusqu’à son retour.
+## Suivis de conversation
 
-## Pages liées
+Utilisez **Follow-ups** ou **Schedule a follow-up** dans la conversation. Le suivi reprend cette conversation après une date, un arrêt de processus ou de tâche, une condition de fichier, un artefact ou une collecte de recherche, un événement de journal ou un seuil machine. Combinez les conditions avec « une quelconque » ou « toutes ».
 
-- [Commandes](/fr/commands/) — réutiliser une commande slash comme prompt
+Choisissez une fois ou chaque changement observé pour les conditions répétables. Pauses, questions sans réponse et limites d’objectifs restent applicables ; une interruption d’observation peut manquer des changements. Consultez l’historique, suspendez, reprenez ou annulez le suivi. L’annulation empêche les livraisons futures et en attente, sans supprimer résultats et travaux observés.

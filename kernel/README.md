@@ -1,96 +1,122 @@
-# Varin Rust system kernel
+# Private Rust kernel
 
-This workspace contains the private kernel executable used by each Application Host. It is not a
-public server and it does not expose a TCP port. The Host starts `varin-kernel` with stdin/stdout
-framed JSON (`u32` big-endian length followed by one UTF-8 JSON envelope); stderr is diagnostics only.
+Each Application Host owns one packaged `varin-kernel` executable. It combines the resource kernel
+with the native Agent runtime, using separate domain authorities inside the same private component.
+It has no public TCP server and is shared by Web, Electron and remote Hosts.
 
-The wire source is [`protocol/schema.json`](protocol/schema.json). TypeScript DTOs used by the Host
-client are generated at `packages/web/application-host/lib/kernel/protocol.generated.ts` and checked by
-`bun run kernel:protocol`.
+- [System architecture](../docs/architecture.md): product processes and state ownership
+- [Resources and recovery](../docs/resources.md): source selection, files, processes and journals
+- [Agent runtime](crates/varin-runtime/README.md): Catalog, execution, context and provider contracts
+- [Host adapters](../packages/web/application-host/lib/kernel/DOCUMENTATION.md): actual consumers
 
-Build locally with:
+## Build and protocol
 
-```text
-cargo check --manifest-path kernel/Cargo.toml
+The toolchain is pinned by [rust-toolchain.toml](rust-toolchain.toml); dependencies are in Cargo.lock.
+From the repository root:
+
+```sh
+bun run kernel:check
 bun run kernel:build
+node scripts/generate-kernel-protocol.mjs --check
 ```
 
-The native parser uses tree-sitter 0.27 and Wasmtime 48; grammar admission checks the
-grammar ABI independently of the JavaScript tooling version. `cargo audit --file kernel/Cargo.lock`
-checks the Rust dependency graph in CI alongside the JavaScript audit. Dependabot tracks `/kernel`
-so runtime security upgrades also reach the lockfile. Native compute tests accept
-`VARIN_TEST_KERNEL_PATH` for a separately built release executable when a running development
-Host has locked the default executable on Windows.
+`kernel:build` stages a release executable with Application Host identity and architecture metadata.
+A plain Cargo build uses the crate defaults and is not interchangeable with a verified release artifact.
+Packaged Hosts check the adjacent manifest, executable hash and actual PE/ELF/Mach-O architecture.
+Electron stages it outside `app.asar`; Web/cloud use their package kernel layout.
 
-Release packaging must copy the resulting executable outside an Electron `app.asar` archive and set
-`VARIN_KERNEL_PATH` (or use the release layout resolver). The kernel acquires an owner file in its
-storage root, rejects a second writer, recreates obsolete internal catalog formats, and leaves a
-corrupt/future catalog as an error rather than an empty store. Recreation never touches workspace files,
-Git, native Pi data, or external configuration.
+[protocol/schema.json](protocol/schema.json) is the private wire source. The generator emits Rust and
+TypeScript DTOs. Receiving owners reject malformed/unknown shapes and check domain identity rather
+than trusting supplied workspace, Run or operation IDs.
 
-R1 storage commands are domain operations: durable content-object installation, immutable trie roots,
-write-revision CAS, published revisions, pins, idempotent operation IDs, recovery records, and GC.
+## Transport lifetime
 
-R2 adds a scoped file-resource domain rather than a generic filesystem escape hatch. The Host registers a
-Documents-authorized canonical root; the kernel owns exact/subtree overlap leases, typed file capture,
-conditional apply, mkdir/remove/rename, and restart reconciliation for started filesystem operations. Regular-file
-capture/apply reuses the kernel content-object store. Production Documents/Files/Recovery/Integration and Harness
-`fs.lock` share this authority. Registry buffers remain outside Rust.
+The Host provides private local control/content endpoints and a fresh bearer via stdin bootstrap.
+Unix uses local sockets; Windows uses overlapped named pipes. Stderr is diagnostic only. Both channels
+authenticate the same epoch, and loss of either invalidates it.
 
-R3 extends that domain with `file.scan`, `file.measure`, and `file.materialize`. Production WorkingState baseline
-capture uses Host-admitted roots and same-grant content owners; immutable roots materialize through verified
-staging/backup/promotion with restart reconciliation. Linux/macOS attempt real clone backends and unsupported
-filesystems fall back to byte copy; Windows currently reports copy only and leaves physical allocation unknown.
-Managed directory reclaim/delete also runs through the kernel. Git remains a semantic adapter for inventory,
-index/filter behavior, and linked-worktree metadata; it does not become another workspace-body writer.
-There is no arbitrary SQL or arbitrary filesystem-write method on the wire.
+Control uses framed JSON. Content uses separately acknowledged stream/sequence chunks, credit and fair
+rotation. Frame bounds limit packets, not total content. Body encoding/decoding runs outside the control
+reader and domain owner sections. A request is registered before its body arrives, so cancellation can
+stop/discard incomplete admission without executing it.
 
-R5 adds read-only `compute.start/read/cancel/release` and grammar-recipe registration over those admitted
-resources. A job reads exactly one source class: an immutable WorkingState pin, a registered live root, or
-explicit fixed objects. Pinned jobs clone a short-lived reader pin; live records carry the revision actually
-read; fixed Registry drafts arrive as content objects/tombstones. Scope and requested roots are applied before
-candidate selection. Native operations cover list/read/bytes/search and tree-sitter structure/chunks.
+Queued cancellation, observer cancellation and domain completion differ. Returning transport credit
+cannot prove an accepted executor stopped. Client/worker shutdown retains original requests, owner locks
+and physical resources until their actual work drains. A lost response remains an explicit failure or
+unknown outcome, never permission to start a fallback writer.
 
-Compute output uses bounded cursor records with backpressure. Two foreground workers are isolated from one
-background indexing worker, and cancellation reaches traversal/parser work before the reader reference is
-released. The Host still owns request policy, DTO projection, grammar installation admission, tokenizer-aware
-packing, embeddings/vector stores, TriviumDB, LSP protocol, and Pi/model orchestration. The kernel does not
-become another public search service or model runtime.
+On Windows/Linux, `--watch-directories` is a separate helper mode of the same executable. It owns only
+OS notification handles and private metadata pipes, not Catalog, Storage or tool execution. Its coverage
+and reuse limits are in [Documents observation](../packages/web/application-host/lib/documents/DOCUMENTATION.md#filesystem-observation).
 
-## Authority regression acceptance
+## Storage and file authority
 
-`bun run test:kernel` requires the built release executable and executes the Node transport suite plus the Vitest
-authority, storage adapter, and combined Recovery suites. `node scripts/test-kernel-authority.mjs --build` builds
-with the toolchain pinned in this workspace before acceptance; existing Linux/Windows CI jobs run it.
+Storage has one OS-held owner lock and the current typed catalog/object schema. It validates supported
+format and structural identity before normal writable recovery. Unsupported/future/malformed/corrupt
+stores are errors and their assets are preserved. No second TS writer or internal-format upgrade/import
+backend is selected. Workspace files, Git, native Pi data and external configuration are separate assets.
 
-The D-278 [audit](../docs/archive/rust-kernel-audit.md) repairs retain independent native regression cases.
-D-279 subsequently closes its specific R2 pending-operation and R3 kernel/Git/Registry handoff gaps.
-D-280 closes native process authority, and D-281 closes fixed/live file and structure computation through the
-production search, Harness, symbol, and semantic consumers.
-Current milestone evidence is in [harness status](../docs/status.md).
+Native grants bind current Thread/Run authority. The four retired session identity fields remain
+null in new serialized grant records for historical decoding; non-null values cannot authorize access
+or grant reissue. Legacy session-owned records and candidate owners fail closed for overwrite,
+release, preparation replay and publication, including cached receipts. There is no user-asset rewrite.
 
-## R4 native process resources
+Storage owns immutable tree roots, revisions, SHA-256 objects, pins, references, typed domain records,
+Recovery/Integration phases and idempotent original-operation receipts. Bytes are verified/flushed before
+references publish. Logical release and physical cleanup have distinct results; failed deletion remains
+retryable and cannot be reported as successful zero-byte cleanup.
 
-The format-v10 catalog adds process identities and outcomes to the same Storage. Scoped
-`process.spawn/inspect/list/read/write/resize/kill/release` operate on admitted roots/grants.
-A guardian is another invocation of this packaged executable, not another kernel/database or Node
-PTY shim. It owns a pipe or real PTY and reports a durable native tree-exit receipt.
+Host Documents admits a canonical root; scoped Rust file resources own exact/subtree leases, capture,
+conditional apply, mkdir/remove/rename, scan/measure/materialize and restart reconciliation. Waiting
+plans acquire their whole resource set, not partial leases. Read/read overlaps and disjoint work can
+proceed. Original grant/root identity is rechecked at effect/completion boundaries.
 
-Raw channel-tagged output has a bounded 1 MiB per-process queue and at most 64 KiB read chunks.
-Slow readers apply backpressure. Input has sequence/content identity and acknowledgements;
-termination does not wait for output drainage. Release discards output but retains an identity
-tombstone to prevent replay. Listing is paged. Command/env plaintext is not in the process catalog.
+Finite file workers perform hashing, cold blob verification, range reading, inventory and materialization
+outside Storage's short authority sections. Transient exact-hash references and physical leases remain
+until real worker exit. Cancellation/revocation closes access without deleting a reader's in-flight bytes.
+These references are retention, not a new authorization grant.
 
-Windows uses named kill-on-close Jobs; Unix uses managed-session guardians, with Linux subreaper
-tracking for adopted descendants. Unproven epoch-loss exits remain unknown and protect directory
-reclamation. Storage retains its lock through process drainage. Guardian receipts precede terminal
-responses. No hostile OS-sandbox or physical power-cut claim follows from this implementation.
+Materialization uses verified staging/backup/promotion and factual restart observations. Linux/macOS can
+try clone backends with byte-copy fallback; Windows currently reports copy and unknown allocation.
+Interrupted paths are not destructively cleaned up when their identity cannot be proved. Git stays a
+semantic inventory/filter/worktree adapter and never becomes a parallel body writer.
 
-Pipe launches normally escape each argument. The private `windowsRawArguments` field appends an
-explicit Windows command-line fragment for shells such as CMD, whose `/c` input must retain its own
-quotes and operators. The shell owner supplies this fragment; it participates in the process identity
-hash. It is rejected on Unix and PTY launches, which use their normal argument transport.
+## Process authority
 
-Use `bun run kernel:build` to supply Application Host build identity and architecture. A plain
-Cargo build defaults to the crate identity and is not a production acceptance artifact. See
-[the Host consumer map](../packages/web/application-host/lib/process/DOCUMENTATION.md).
+`process/` and `storage/process_resources.rs` own admitted pipes/PTYs, raw channel output, sequence-bound
+input, resize, kill, release and durable process outcomes. A guardian is the same executable in another
+mode and has no SQLite connection. Windows uses named kill-on-close Jobs; Linux uses managed sessions
+with subreaper tracking; other Unix platforms retain their supported session observation.
+
+Input and resize have independent ordered queues. Output applies bounded backpressure and termination
+does not wait for the observer to consume all bytes. Releasing output retains an identity tombstone.
+Active or unknown processes continue protecting their physical execution directory.
+
+Grant retirement closes the old caller while retaining valid stopped-process provenance. Explicit
+revocation remains denied; operation-owned grants can outlive their creating Run until actual resource
+and receipt drain. Unproven old-epoch exits remain unknown, including after a Host transport failure.
+This is lifecycle management, not a hostile-code sandbox or a physical power-loss guarantee.
+
+## Compute and runtime
+
+Native compute reads one admitted source class: immutable pin, live root or fixed objects. It provides
+inventory, bytes, search and tree-sitter structure/chunks through bounded cursors with backpressure.
+Cancellation reaches traversal/parser work and reader references release only on actual completion.
+Live hits carry the observed revision; a scan fingerprint identifies sorted paths, not atomic file bytes.
+
+The Host retains request policy, tokenizer-aware packing, LSP protocol, embeddings, vector/knowledge
+stores and product coordination. The separate `varin-runtime` crate implements the Agent Catalog/engine and provider contracts.
+Compute and conversation execution retain distinct domain owners inside the packaged kernel; a
+compute job does not become a model runtime.
+
+## Verification entry points
+
+`bun run test:rust` runs the Rust workspace suites under the pinned toolchain. Tests involving Host or
+guardian consumers need the built dependencies and a matching absolute `VARIN_TEST_KERNEL_EXECUTABLE`.
+`bun run test:kernel` runs the existing Node/Vitest native authority consumers against a staged release
+binary; `node scripts/test-kernel-authority.mjs --build` also builds that binary.
+
+Choose the focused cases for the changed owner. Native component tests, controlled providers, Host IPC,
+real OS processes, installed products and physical remote machines establish different facts. A passing
+suite in one category is not evidence that the others ran. Commands and CI selection are described in
+[development](../docs/development.md).

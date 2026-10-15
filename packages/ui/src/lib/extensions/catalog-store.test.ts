@@ -1,5 +1,9 @@
 import { beforeEach, expect, test } from 'vitest';
-import type { VarinExtensionHostStateSnapshot } from '@varin/extension-contract';
+import type {
+  VarinExtensionHostStateSnapshot,
+  VarinExtensionServiceRoutingRuleRemoveRequest,
+  VarinExtensionServiceRoutingRuleUpdateRequest,
+} from '@varin/extension-contract';
 
 let refreshCount = 0;
 const catalogSurfaceRuntime = {
@@ -43,7 +47,7 @@ const snapshot = (): VarinExtensionHostStateSnapshot => ({
     hostId,
     storageState: 'missing',
   },
-  services: { hostId, providers: [], revision: 0, selections: {} },
+  services: { hostId, providers: [], revision: 0 },
   workbench: {
     authoritative: true,
     diagnostics: [],
@@ -296,4 +300,86 @@ test('exposes catalog watch generation so in-flight shell candidates can abort',
   const before = getVarinExtensionCatalogWatchGeneration();
   resetVarinExtensionCatalogForTests();
   expect(getVarinExtensionCatalogWatchGeneration()).toBeGreaterThan(before);
+});
+
+test('routing mutations preserve ordered and unavailable members through refresh and reload, separating empty from automatic', async () => {
+  let current = snapshot();
+  const updates: VarinExtensionServiceRoutingRuleUpdateRequest[] = [];
+  const removals: VarinExtensionServiceRoutingRuleRemoveRequest[] = [];
+  Object.defineProperty(globalThis, 'window', {
+    configurable: true,
+    value: {
+      __VARIN_RUNTIME_APIS__: {
+        extensions: {
+          hostState: async () => structuredClone(current),
+          waitForHostState: () => new Promise(() => undefined),
+          upsertServiceRoutingRule: async (request: VarinExtensionServiceRoutingRuleUpdateRequest) => {
+            expect(request.expectedRevision).toBe(current.routing.document.revision);
+            updates.push(request);
+            current = { ...current, revision: current.revision + 1, routing: {
+              ...current.routing, storageState: 'ready', document: {
+                ...current.routing.document, revision: current.routing.document.revision + 1, rules: [request.rule],
+              },
+            } };
+            return current.routing;
+          },
+          removeServiceRoutingRule: async (request: VarinExtensionServiceRoutingRuleRemoveRequest) => {
+            expect(request.expectedRevision).toBe(current.routing.document.revision);
+            removals.push(request);
+            current = { ...current, revision: current.revision + 1, routing: {
+              ...current.routing, document: { ...current.routing.document, revision: current.routing.document.revision + 1, rules: [] },
+            } };
+            return current.routing;
+          },
+        },
+      },
+    },
+  });
+  const {
+    getVarinExtensionCatalogState, resetVarinExtensionCatalogForTests,
+    setVarinExtensionServiceRoute, startVarinExtensionCatalog, stopVarinExtensionCatalog,
+  } = await import('./catalog-store');
+  const serviceId = 'review.context';
+  const scope = { workspaceId: '/workspace' };
+  const a = `a:host:${serviceId}@1`;
+  const missing = `not-installed:host:${serviceId}@1`;
+  const choice = [missing, a];
+  const saving = setVarinExtensionServiceRoute(serviceId, 1, scope, choice);
+  choice.push('unselected:host:review.context@1');
+  await saving;
+  expect(updates[0].rule).toEqual({ allowFallback: false, providerKeys: [missing, a], scope, serviceId, version: 1 });
+  resetVarinExtensionCatalogForTests(catalogSurfaceRuntime);
+  await startVarinExtensionCatalog();
+  expect(getVarinExtensionCatalogState().snapshot?.routing.document.rules[0].providerKeys).toEqual([missing, a]);
+  await expect(setVarinExtensionServiceRoute(serviceId, 1, scope, [a, a])).rejects.toThrow('must not repeat');
+  expect(updates).toHaveLength(1);
+  await setVarinExtensionServiceRoute(serviceId, 1, scope, []);
+  expect(updates[1]).toMatchObject({ expectedRevision: 1, rule: { providerKeys: [] } });
+  expect(getVarinExtensionCatalogState().snapshot?.routing.document.rules[0].providerKeys).toEqual([]);
+  expect(removals).toEqual([]);
+  await setVarinExtensionServiceRoute(serviceId, 1, scope, null);
+  expect(removals).toEqual([{ expectedRevision: 2, scope, serviceId, version: 1 }]);
+  expect(getVarinExtensionCatalogState().snapshot?.routing.document.rules).toEqual([]);
+  await setVarinExtensionServiceRoute(serviceId, 1, scope, [a]);
+  expect(updates[2]).toMatchObject({ expectedRevision: 3, rule: { providerKeys: [a] } });
+  expect(updates[2].rule).not.toHaveProperty('providerKey');
+  stopVarinExtensionCatalog();
+});
+
+test('accepted restart intent is not reported as failed because the Host disconnects before a refresh', async () => {
+  const current = snapshot();
+  let reads = 0;
+  const requests: Array<{ handoffId: string }> = [];
+  Object.defineProperty(globalThis, 'window', { configurable: true, value: { __VARIN_RUNTIME_APIS__: { extensions: {
+    hostState: async () => { reads += 1; if (reads > 1) throw new Error('Host is restarting'); return current; },
+    waitForHostState: () => new Promise(() => undefined),
+    requestRestartHandoff: async (request: { handoffId: string }) => { requests.push(request); return { ...current.catalog, revision: 2 }; },
+  } } } });
+  const { restartVarinExtensionCandidate, getVarinExtensionCatalogState, stopVarinExtensionCatalog } = await import('./catalog-store');
+  await restartVarinExtensionCandidate('dev.example.removable', `sha256-${'a'.repeat(64)}`);
+  expect(requests).toHaveLength(1);
+  expect(requests[0].handoffId).toBeTruthy();
+  expect(reads).toBe(1);
+  expect(getVarinExtensionCatalogState().error).toBeNull();
+  stopVarinExtensionCatalog();
 });

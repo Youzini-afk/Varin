@@ -185,7 +185,7 @@ const SHORTCUT_ACTIONS: ReadonlyArray<ShortcutAction> = [
     id: 'open_diagnostics',
     defaultCombo: 'mod+shift+o',
     label: 'Show Varin diagnostics',
-    description: 'Inspect the active Pi runtime, packages, resources, and project context',
+    description: 'Inspect the active runtime, resources, and project context',
   },
   {
     id: 'open_settings',
@@ -268,7 +268,7 @@ const SHORTCUT_ACTIONS: ReadonlyArray<ShortcutAction> = [
     id: 'new_chat_worktree',
     defaultCombo: 'mod+shift+n',
     label: 'New worktree session',
-    description: 'Create a new worktree and open a Pi session in it',
+    description: 'Create a new worktree and open a Thread in it',
     customizable: true,
   },
   {
@@ -353,8 +353,8 @@ const SHORTCUT_ACTIONS: ReadonlyArray<ShortcutAction> = [
   {
     id: 'cycle_thinking_variant',
     defaultCombo: 'mod+shift+t',
-    label: 'Cycle Pi thinking level',
-    description: 'Cycle the thinking levels supported by the active Pi model',
+    label: 'Cycle thinking level',
+    description: 'Cycle the thinking levels supported by the active model',
   },
   {
     id: 'cycle_agent',

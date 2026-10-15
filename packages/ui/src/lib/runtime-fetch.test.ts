@@ -2,6 +2,7 @@ import { describe, expect, test } from 'vitest';
 import { buildRuntimeFetchUrl, isLatin1Safe, runtimeFetch, sanitizeHeadersForBrowser } from '@varin/application-client';
 import { clearRuntimeAuthCredentialProvider, setRuntimeBearerToken } from '@varin/application-client';
 import { configureRuntimeUrlResolver, getRuntimeUrlResolver, setRuntimeUrlResolver } from '@varin/application-client';
+import { getRuntimeApiBaseUrl, getRuntimeKey, setRuntimeAuthCredentialProvider, switchRuntimeEndpoint } from '@varin/application-client';
 
 const originalFetch = globalThis.fetch;
 
@@ -48,6 +49,24 @@ describe('buildRuntimeFetchUrl', () => {
 });
 
 describe('runtimeFetch transport contract', () => {
+  test('does not dispatch a mutation after the Host changes during credential preparation', async () => {
+    const previous = { apiBaseUrl: getRuntimeApiBaseUrl(), runtimeKey: getRuntimeKey() };
+    let started!: () => void, release!: () => void;
+    const waiting = new Promise<void>(resolve => { release = resolve; });
+    const entered = new Promise<void>(resolve => { started = resolve; });
+    const requests: string[] = [];
+    try {
+      switchRuntimeEndpoint({ apiBaseUrl: 'https://first.example', runtimeKey: 'first' });
+      setRuntimeAuthCredentialProvider(async () => { started(); await waiting; return { type: 'bearer', token: 'first-token' }; });
+      globalThis.fetch = async input => { requests.push(String(input)); return new Response(null, { status: 204 }); };
+      const pending = runtimeFetch('/api/models/credentials/store', { method: 'POST', body: '{}' });
+      const rejected = expect(pending).rejects.toThrow('Host changed');
+      await entered;
+      switchRuntimeEndpoint({ apiBaseUrl: 'https://second.example', runtimeKey: 'second', clientToken: 'second-token' });
+      release(); await rejected;
+      expect(requests.filter(url => url.includes('/api/models/credentials/store'))).toHaveLength(0);
+    } finally { release(); switchRuntimeEndpoint(previous); globalThis.fetch = originalFetch; clearRuntimeAuthCredentialProvider(); }
+  });
   test('preserves Request method, JSON body, signal, path, query, and merges auth headers', async () => {
     const previous = getRuntimeUrlResolver();
     const originalWindow = globalThis.window;

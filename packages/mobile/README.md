@@ -17,14 +17,19 @@ compatibility alias.
 
 ## Runtime model
 
-- The native app bundles the mobile UI only; it does not embed the Varin web server or Pi runtime.
+- The native app bundles the mobile UI only; the Application Host and native Agent runtime stay on the connected server.
 - On first launch in Capacitor, the app shows a connection screen for an existing Varin server.
 - Connections are saved locally in the app and can be managed from the mobile overflow menu under `Instances`.
 - The connection screen and `Instances` menu item are Capacitor-only. Hosted `mobile.html` in a normal browser keeps the regular web behavior.
 - Password-protected Varin servers can be unlocked from the mobile app. The app stores the issued client token with the saved connection.
-- `varin://` connection/session links open the native app on Android and iOS. Android declares a
+- `varin://` connection and Thread/branch links open the native app on Android and iOS. Android declares a
   browsable intent filter; iOS declares the same scheme for the app and bundled widgets.
 - The Terminal workspace surface runs its PTY on the active Varin server over the shared authenticated runtime transport; it never opens a local shell on the phone or tablet. Closing the surface detaches the renderer while the server session remains available for reattachment. On touch devices, dragging scrolls the buffer while long-pressing and dragging selects terminal text.
+
+The shared native Thread Catalog owns conversation identity. Mobile uses `ThreadsAPI` for history,
+input, queues and control; the shell does not create a separate conversation runtime. Host switching
+fences old reads and drafts. PDF attachments use the same Thread-scoped material upload and fixed
+snapshot references as desktop/Web, while file editing retains the mobile CodeMirror adapter.
 
 ## Commands
 

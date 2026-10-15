@@ -60,11 +60,11 @@ describe('Host connection gateway', () => {
     expect(await response.json()).toEqual({ body: { text: '你好' }, authorization: 'Bearer peer-token', cookie: null, url: '/api/echo' });
     expect((await fetch(`${base}/api/echo`, { method: 'POST' })).status).toBe(401);
     expect(await (await fetch(`${base}/auth/url-token`, { method: 'POST', headers: { authorization: 'Bearer local-token' } })).json()).toEqual({ token: 'local-url-token' });
-    const socket = new WebSocket(`${resolver.websocket('/api/varin/runtime/ws')}?varin_url_token=local-url-token`, { headers: { cookie: 'local=private' } });
+    const socket = new WebSocket(`${resolver.websocket('/api/terminal/ws')}?varin_url_token=local-url-token`, { headers: { cookie: 'local=private' } });
     cleanup.push(() => socket.terminate());
     await once(socket, 'open');
-    socket.send('native session');
+    socket.send('terminal input');
     const [data] = await once(socket, 'message');
-    expect(JSON.parse(String(data))).toEqual({ data: 'native session', authorization: 'Bearer peer-token', cookie: null, url: '/api/varin/runtime/ws' });
+    expect(JSON.parse(String(data))).toEqual({ data: 'terminal input', authorization: 'Bearer peer-token', cookie: null, url: '/api/terminal/ws' });
   });
 });

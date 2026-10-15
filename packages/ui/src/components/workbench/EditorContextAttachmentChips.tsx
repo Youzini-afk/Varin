@@ -1,7 +1,7 @@
 import React from 'react';
 import { Icon } from '@/components/icon/Icon';
 import { useI18n, type I18nKey } from '@/lib/i18n';
-import { getRuntimeKey } from '@varin/application-client';
+import { threadHostKey as getRuntimeKey } from '@/stores/useThreadStore';
 import {
   getEditorContextAttachmentsRevision,
   listEditorContextAttachments,
@@ -9,10 +9,9 @@ import {
   subscribeEditorContextAttachments,
 } from '@/lib/agent-editor/attachments';
 import type { EditorContextAttachment } from '@/lib/agent-editor/types';
-import { useWorkbenchWorkspaceId } from '@/lib/extensions/workbench-workspace';
 
 type EditorContextAttachmentChipsProps = {
-  sessionId: string | null | undefined;
+  threadKey: string | null | undefined;
 };
 
 const labelFor = (attachment: EditorContextAttachment): I18nKey => {
@@ -24,17 +23,16 @@ const labelFor = (attachment: EditorContextAttachment): I18nKey => {
   return attachment.source === 'unsaved-buffer' ? 'workbench.attachment.chipUnsaved' : 'workbench.attachment.chipSaved';
 };
 
-export const EditorContextAttachmentChips: React.FC<EditorContextAttachmentChipsProps> = ({ sessionId }) => {
+export const EditorContextAttachmentChips: React.FC<EditorContextAttachmentChipsProps> = ({ threadKey }) => {
   const { t } = useI18n();
   const runtimeKey = getRuntimeKey();
-  const workspaceId = useWorkbenchWorkspaceId();
   React.useSyncExternalStore(
     subscribeEditorContextAttachments,
     getEditorContextAttachmentsRevision,
     () => 0,
   );
-  const items = sessionId ? listEditorContextAttachments(runtimeKey, sessionId, workspaceId) : [];
-  if (!sessionId || items.length === 0) return null;
+  const items = threadKey ? listEditorContextAttachments(runtimeKey, threadKey) : [];
+  if (!threadKey || items.length === 0) return null;
   return (
     <div className="mb-2 flex flex-wrap gap-1.5">
       {items.map((item) => (
@@ -50,7 +48,7 @@ export const EditorContextAttachmentChips: React.FC<EditorContextAttachmentChips
             type="button"
             className="text-muted-foreground hover:text-foreground"
             aria-label={t('workbench.attachment.removeAria', { name: item.label })}
-            onClick={() => removeEditorContextAttachment(item.id, runtimeKey, sessionId)}
+            onClick={() => removeEditorContextAttachment(item.id, runtimeKey, threadKey)}
           >
             <Icon name="close" className="size-3.5" />
           </button>

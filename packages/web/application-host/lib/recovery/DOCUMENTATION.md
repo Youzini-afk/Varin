@@ -2,40 +2,81 @@
 
 Varin message recovery is an operation journal, not a workspace archive.
 
+## Ordinary workspace edits
+
+Documents refactors use the same Rust operation/file journal as `workspace-edit`, without a conversation
+checkpoint or Agent Run. Their first durable row retains the ordered plan, original disk states and
+surface draft baselines before any effect. Each dispatch and observed result is recorded on that row.
+Undo and startup reconciliation remain conditional on original root/epoch, writer admission and the
+last confirmed path or buffer state. Unknown surface outcomes and later edits are needs-attention,
+not guessed successes. The existing Recovery panel lists each unresolved resource and exposes its
+original draft; it does not replay a batch to recover a lost HTTP response.
+
 ## Normal turn path
 
 1. A bound user turn creates one lightweight checkpoint row. No workspace path is read.
-2. Host-backed Pi `write`/`edit` first resolve an isolated branch or the admitted
+2. Native `write`/`edit` first resolve an isolated branch or the admitted
    `document.surfaceWrite` path; `apply_patch` shares that authority.
 3. The Host records intent and before-state, then applies through Rust disk operations or the fixed
    Registry owner/revision. It records the actual final state before returning the mutation result.
-4. An unavailable mutation backend fails instead of allowing a parallel Pi-worker disk writer.
+4. An unavailable mutation backend fails instead of allowing a parallel Host disk writer.
    The generic journal-only native-tool wrapper is not this production disk path.
 5. Repeated writes preserve the first before-image and last after-image. Settlement compares actual
    watcher observations with the journal; uncontrolled shell/Git/external writes remain uncovered.
+
+Thread tools use the same Storage checkpoint/change tables. The original invocation's frozen history
+range binds a write to its latest real input; Environment/Agent input is not relabelled as a user or
+model request. `file.apply` commits its before-image intent and eventual receipt references with the
+same file-operation transaction. Current-format restart reconciliation completes that original record.
+Physical targets retain their original workspace, root, Run and execution workspace. The public
+conversation identity retains its native Thread and HistoryBranch. Unsupported persisted conversation
+identities are rejected without rewriting or deleting their assets.
 
 New sessions, ordinary prompts, and unchanged turns therefore perform no recursive scan. Work scales
 with the files actually written by the journalled tools.
 
 ## Restore path
 
-Conversation navigation reports the entry IDs that will leave the active Pi branch. Varin loads the
+Conversation navigation reports the entry IDs that will leave the selected branch. Varin loads the
 turn checkpoints bound to those entries and folds their path operations into:
 
 - the expected current state for each affected path;
 - the state to restore before the selected message.
 
 Preparation hashes only those paths. Matching paths restore immediately. A later user edit or dirty
-buffer becomes a path conflict. Current combined restore requires an affected dirty buffer to be saved
-or discarded first; a failed dirty-state synchronization returns retryable `dirty-state-unavailable`.
-The proposed confirmable dirty-buffer/per-surface fallback is not implemented. Before any
+buffer becomes a path conflict. A confirmed dirty buffer retains its actual text and disk base in the
+original operation's safety objects; the registered surface applies and compensates under its exact
+owner, instance and revision. Unknown or disconnected editor state remains retryable
+`dirty-state-unavailable`; confirmation does not bypass the missing observation. Before any
 write, Varin stores the current version of the affected paths as the redo/compensation state. It does
 not create a whole-workspace safety checkpoint or enter global maintenance mode.
 
-The durable operation/file record is owned by the Rust kernel. If file application or Pi navigation
-fails, Varin compensates only paths already changed by that operation. Startup resolves an interrupted
-operation from those recorded paths; it never leaves the workspace locked while waiting for a conversation
-step. The former local SQLite recovery engine is test-fixture code only and is not a production fallback.
+The durable operation/file record is owned by the Rust kernel. If file application or a definite
+navigation rejection occurs, Varin compensates only paths already changed by that operation. A lost
+Thread navigation response is resolved using the original Catalog command receipt, not current-head
+equality and not automatic compensation. Startup discovery is separate from owner-ready resumption:
+planned operations remain inert, while interrupted operations continue or compensate from their exact
+stored phases. Reopened UI reads the original operation and revision. It never creates a new attempt
+merely because an earlier response was lost. The former local SQLite recovery engine is test-fixture
+code only and is not a production fallback.
+
+For a Thread range spanning managed Hosts, the conversation Host retains one coordinator operation in
+its original recovery catalog. Its metadata-only workspace has no default file authority. Before
+contacting file owners, it stores the frozen preparation and deterministic participant identities;
+an interrupted preparation resumes the same plans and cannot be applied until complete. Local physical
+targets keep their original file owners. Managed targets carry their Host identity for display and are
+never resolved against an equal path on the coordinator.
+
+Each managed Host verifies the authenticated coordinator's original Source records and reacquires
+current maintenance permission. Its existing journal retains its file plans, objects, safety, dirty
+surface phases and compensation. The coordinator retains references and receipts only, not remote
+content-object ownership. All participants must confirm the file stage before the original HistoryBranch
+head command commits. An unknown response remains pending until the original operation or Catalog
+receipt answers; transport closure does not prove stopped work or authorize compensation. A definite
+navigation rejection compensates each original owner's unchanged outputs. Cancellation and undo use
+those same records. Participant startup waits for authenticated source re-admission and never navigates
+a second Thread. This is recoverable coordination across individual file transactions, not cross-Host
+atomicity.
 
 Thread result integration uses the same selected storage, content objects, exact path-state capture,
 conditional apply/compensation phases, and workspace lease through a trusted Host-only adapter. Its
@@ -46,17 +87,12 @@ For an agent-triggered merge, the final integration state and its safety-to-targ
 the active parent turn checkpoint in the same SQLite transaction. Normal conversation undo therefore uses
 the existing checkpoint path; a missing parent binding prevents any integration write.
 
-Root-session batches that mix Document Registry buffers and disk paths use a separate `agent-mutation`
-operation in this catalog. It validates every disk member under the Documents resource gate before any
-surface dispatch, records external dispatch/receipt/compensation stages, and restores only paths still equal
-to this operation's output. Durable `needs-attention` rows are included in recovery status and the Recovery
-panel. The current file store captures target-after following the disk write; a crash between those two
-steps remains needs-attention rather than being guessed or silently rolled back (D-232).
+Native Integration and ordinary workspace edits retain their own durable operation kinds, before/target identities, Surface dispatch receipts and conditional compensation. Retired `agent-mutation` operations have no native execution owner. Recovery reports unresolved records as `storage-schema-retired` and leaves their records and resources unchanged; it never replays them or fabricates Thread ownership.
 
 ## Coverage boundary
 
 Kernel-backed Application Host production contexts expose a Rust `RecoveryDurableOperationPort`. Combined
-Recovery, Integration, and agent surface/disk mutation intent and file phases use that port before the first
+Recovery, Integration, and ordinary workspace-edit intent and file phases use that port before the first
 side effect; local SQLite operation rows remain only in isolated fixtures. The port uses one operation
 revision for file CAS and terminal completion, so a lost response is reconciled by operation identity rather
 than replaying a mutation.
@@ -88,7 +124,7 @@ retention controls. A zero-reclaim result is distinct from cleanup failure. GC r
 deleted object-file lengths from both prior/orphan cleanup and the committed release pass; the
 Host propagates physical deletion failures instead of reporting successful zero-byte cleanup.
 
-The public recovery v5 contract still permits replacement providers to implement application-data,
+The public recovery v7 contract still permits replacement providers to implement application-data,
 workspace-local, workspace-adjacent, or custom locations. For those providers, transfer and cleanup semantics
 remain provider-owned. They do not grant direct access to the built-in kernel catalog.
 

@@ -15,15 +15,14 @@ Utilisez cette page si vous exécutez Varin derrière Nginx, Nginx Proxy Manager
 
 ## Ce que le proxy doit prendre en charge
 
-- WebSockets pour le transport des messages en direct :
-  - `/api/varin/runtime/ws`
+- WebSocket:
   - `/api/dictation/ws`
   - `/api/terminal/ws`
   - `/api/varin/realtime-proxy/ws`
 - SSE sans buffering :
   - `/api/notifications/stream`
   - `/api/varin/events`
-  - `/api/varin/runtime-manager/events`
+  - `/api/threads/observe`
   - `/api/varin/realtime-proxy/sse`
 - corps de requête volumineux pour les pièces jointes et les opérations de fichiers
 - timeouts de lecture longs pour les flux en direct et les sessions de terminal
@@ -66,7 +65,7 @@ proxy_set_header X-Forwarded-Host $host;
 
 gzip off;
 
-location ~ ^/api/(varin/runtime|varin/realtime-proxy|terminal|dictation)/ws$ {
+location ~ ^/api/(varin/realtime-proxy|terminal|dictation)/ws$ {
     proxy_pass http://127.0.0.1:3000;
     proxy_set_header Upgrade $http_upgrade;
     proxy_set_header Connection "upgrade";
@@ -80,7 +79,7 @@ location ~ ^/api/(varin/runtime|varin/realtime-proxy|terminal|dictation)/ws$ {
     proxy_send_timeout 3600s;
 }
 
-location ~ ^/api/(notifications/stream|varin/(events|runtime-manager/events|realtime-proxy/sse))$ {
+location ~ ^/api/(threads/observe|notifications/stream|varin/(events|realtime-proxy/sse))$ {
     proxy_pass http://127.0.0.1:3000;
     proxy_set_header Host $host;
     proxy_set_header X-Real-IP $remote_addr;
@@ -118,8 +117,8 @@ Activez **Websockets Support** dans Nginx Proxy Manager. Dans la configuration A
 
 ### La page se charge, mais l’envoi de messages échoue
 
-- les WebSockets ne sont pas activés dans le proxy
-- `/api/varin/runtime/ws` ne passe pas correctement
+- Vérifiez l’authentification et le transfert des requêtes `POST /api/threads/*`.
+- `GET /api/threads/observe` doit diffuser les SSE sans tampon ni cache.
 
 ### Les notifications ou le statut en direct ne se mettent pas à jour
 

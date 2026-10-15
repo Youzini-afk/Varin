@@ -7,11 +7,11 @@ import { useUpdateStore } from '@/stores/useUpdateStore';
 import { useThemeSystem } from '@/contexts/useThemeSystem';
 import { workspaceEvents } from '@/lib/workspaceEvents';
 import {
-  navigateRelativePiSession,
-  startPiSessionDraftFromNavigation,
-} from '@/lib/pi-runtime/sessionNavigation';
-import { createPiWorktreeSession } from '@/lib/pi-runtime/worktreeSession';
-import { addPiSelectionToChat } from '@/lib/pi-runtime/addSelectionToChat';
+  switchRelativeThread,
+  startThreadFromNavigation,
+} from '@/lib/agent-runtime/threadNavigation';
+import { createWorktreeThread } from '@/lib/agent-runtime/worktreeThread';
+import { addSelectionToChat } from '@/lib/agent-runtime/addSelectionToChat';
 import { requestIdeSearch } from '@/lib/workbench/ide-search-events';
 
 const getActiveElementSelectedText = (): string => {
@@ -138,8 +138,8 @@ export const useMenuActions = (options: { enabled?: boolean } = {}) => {
   }, []);
 
   const navigateSession = React.useCallback((direction: -1 | 1) => {
-    void navigateRelativePiSession(direction).catch((error) => {
-      toast.error('Failed to open Pi session', {
+    void switchRelativeThread(direction).catch((error) => {
+      toast.error('Failed to open Thread', {
         description: error instanceof Error ? error.message : String(error),
       });
     });
@@ -180,16 +180,16 @@ export const useMenuActions = (options: { enabled?: boolean } = {}) => {
           break;
 
         case 'new-session':
-          void startPiSessionDraftFromNavigation().catch((error) => {
-            toast.error('Failed to create Pi session', {
+          void startThreadFromNavigation().catch((error) => {
+            toast.error('Failed to create Thread', {
               description: error instanceof Error ? error.message : String(error),
             });
           });
           break;
 
         case 'new-worktree-session':
-          void createPiWorktreeSession().catch((error) => {
-            toast.error('Failed to create Pi worktree session', {
+          void createWorktreeThread().catch((error) => {
+            toast.error('Failed to create worktree Thread', {
               description: error instanceof Error ? error.message : String(error),
             });
           });
@@ -271,7 +271,7 @@ export const useMenuActions = (options: { enabled?: boolean } = {}) => {
         }
 
         case 'add-selection-to-chat':
-          void addPiSelectionToChat();
+          void addSelectionToChat();
           break;
 
         case 'theme-light':

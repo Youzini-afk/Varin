@@ -1,4 +1,4 @@
-import type { GitWorktreeBootstrapStatus } from '@varin/application-client';
+import { getRuntimeEndpointGeneration, subscribeRuntimeEndpointWillChange, type GitWorktreeBootstrapStatus } from '@varin/application-client';
 import { getRegisteredRuntimeAPIs } from '@/lib/runtime-api/registry';
 import { toast } from '@/components/ui';
 import { formatMessage, useI18nStore, type I18nKey, type I18nParams } from '@/lib/i18n';
@@ -74,16 +74,18 @@ const storePolledState = (
   return next;
 };
 
-const getGitWorktreeBootstrapStatus = async (directory: string): Promise<GitWorktreeBootstrapStatus> => {
-  const runtimeGit = getRegisteredRuntimeAPIs()?.git;
-  if (runtimeGit?.worktree?.bootstrapStatus) {
-    return runtimeGit.worktree.bootstrapStatus(directory);
-  }
-  if (runtimeGit?.getGitWorktreeBootstrapStatus) {
-    return runtimeGit.getGitWorktreeBootstrapStatus(directory);
-  }
+const bootstrapReader = (): ((directory: string) => Promise<GitWorktreeBootstrapStatus>) => {
+  const git = getRegisteredRuntimeAPIs()?.git;
+  const worktree = git?.worktree; const bootstrapStatus = worktree?.bootstrapStatus;
+  if (bootstrapStatus) return directory => bootstrapStatus.call(worktree, directory);
+  if (git?.getGitWorktreeBootstrapStatus) return directory => git.getGitWorktreeBootstrapStatus!(directory);
   throw new Error('Worktree bootstrap status is unavailable in this Varin runtime');
 };
+const observationRetired = () => new Error('Application Host changed or worktree observation retired; original work continues');
+subscribeRuntimeEndpointWillChange(() => {
+  for (const watcher of watchers.values()) watcher.cancelled = true;
+  watchers.clear(); waiters.clear(); lifecycleVersions.clear(); state.clear();
+});
 
 export const markWorktreeBootstrapPending = (directory: string): void => {
   const key = getKey(directory);
@@ -162,12 +164,16 @@ const pollWorktreeBootstrapUntilSettled = async (
   target: WorktreeBootstrapTarget,
 ): Promise<void> => {
   const startedAt = Date.now();
-
+  const host = getRuntimeEndpointGeneration();
+  const read = bootstrapReader();
+  const currentOwner = () => host === getRuntimeEndpointGeneration() && isCurrentLifecycle(key, lifecycleVersion);
   while (Date.now() - startedAt < timeoutMs) {
-    const result = await getGitWorktreeBootstrapStatus(directory);
+    if (!currentOwner()) throw observationRetired();
+    const result = await read(directory);
+    if (!currentOwner()) throw observationRetired();
     const current = storePolledState(key, result, lifecycleVersion);
     if (!current) {
-      throw new Error('Worktree bootstrap wait was cancelled');
+      throw observationRetired();
     }
 
     if (hasReachedTarget(current, target)) {
@@ -181,6 +187,7 @@ const pollWorktreeBootstrapUntilSettled = async (
     await new Promise((resolve) => setTimeout(resolve, POLL_INTERVAL_MS));
   }
 
+  if (!currentOwner()) throw observationRetired();
   const failed = markBootstrapFailed(directory, t('worktree.bootstrap.toast.timeoutDescription'));
   throw new Error(failed.error || 'Timed out waiting for worktree bootstrap');
 };
@@ -195,9 +202,12 @@ const pollWorktreeBootstrapInBackground = async (
   onReady?: WorktreeBootstrapReadyHandler,
 ): Promise<void> => {
   const startedAt = Date.now();
-
-  while (!watcher.cancelled && Date.now() - startedAt < timeoutMs) {
-    const result = await getGitWorktreeBootstrapStatus(directory);
+  const host = getRuntimeEndpointGeneration();
+  const read = bootstrapReader();
+  const currentOwner = () => !watcher.cancelled && host === getRuntimeEndpointGeneration() && isCurrentLifecycle(key, watcher.lifecycleVersion);
+  while (currentOwner() && Date.now() - startedAt < timeoutMs) {
+    const result = await read(directory);
+    if (!currentOwner()) return;
     if (watcher.cancelled) {
       return;
     }
@@ -222,7 +232,7 @@ const pollWorktreeBootstrapInBackground = async (
     await new Promise((resolve) => setTimeout(resolve, pollIntervalMs));
   }
 
-  if (!watcher.cancelled) {
+  if (currentOwner()) {
     const failed = markBootstrapFailed(directory, t('worktree.bootstrap.toast.timeoutDescription'), onFailed);
     toast.error(t('worktree.bootstrap.toast.failed'), {
       description: failed.error || t('worktree.bootstrap.toast.failedDescription'),

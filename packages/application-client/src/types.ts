@@ -1,12 +1,18 @@
-import type { AgentInputContext, PiRuntimeSnapshot, WorkFocusId } from '@varin/protocol';
+import type { VarinExtensionRestartHandoffRequest, VarinExtensionRestartRecoveryRequest } from "@varin/extension-contract";
+import type { DocumentsWorkspaceEditAPI, VarinWorkspaceEditSurfaceChange, VarinWorkspaceEditSurfaceReceipt } from './documents-workspace-edit.js';
+import type { AgentInputContext, AgentInputSnapshotConsumer, WorkFocusId } from '@varin/protocol';
 import type { WorktreeMetadata, DraftStarterRef, FileEditorSettingsPatch } from './ui-dto.js';
 import type {
+  VarinApplicationSurface,
+  VarinRuntimeContractRequest,
+  VarinRuntimeContractResult,
   VarinExtensionActualState,
   VarinExtensionAssetPayload,
   VarinExtensionAssetRequest,
   VarinExtensionCandidateCapabilityReviewRequest,
   VarinExtensionCapabilityReviewRequest,
   VarinExtensionCandidateSelectionRequest,
+  VarinExtensionCandidatePublicationRequest,
   VarinExtensionCandidatePreparationResult,
   VarinExtensionCatalogAvailability,
   VarinExtensionCatalogSnapshot,
@@ -22,7 +28,8 @@ import type {
   VarinExtensionServiceRoutingRuleRemoveRequest,
   VarinExtensionServiceRoutingRuleUpdateRequest,
   VarinExtensionServiceRoutingSnapshot,
-  VarinExtensionServiceSelectionRequest,
+  VarinSurfaceServiceLeaseRequest,
+  VarinSurfaceServiceLeaseEvent,
   VarinWorkbenchLayoutUpdateRequest,
   VarinWorkbenchProfileRemoveRequest,
   VarinWorkbenchProfileApplyRequest,
@@ -114,6 +121,7 @@ export interface TerminalAPI {
   listShells?(): Promise<TerminalShellOption[]>;
   createSession(options: CreateTerminalOptions): Promise<TerminalSession>;
   connect(sessionId: string, handlers: TerminalHandlers): Subscription;
+  /** Resolves after the original writer acknowledgement; disconnect/partial/unknown rejects without replay. */
   sendInput(sessionId: string, input: string): Promise<void>;
   resize(payload: ResizeTerminalPayload): Promise<void>;
   updateAppearance?(sessionId: string, appearance: Pick<CreateTerminalOptions, 'themeMode' | 'terminalBackground' | 'terminalForeground'>): Promise<void>;
@@ -800,6 +808,8 @@ export interface PushUnsubscribePayload {
 
 export interface ApnsTokenPayload {
   token: string;
+  /** Client-side Host target bound to this authenticated registration, echoed only to this token. */
+  hostKey?: string;
   /** 'ios' (APNs) or 'android' (FCM) — lets the relay route the token to the right service. */
   platform?: string;
   /**
@@ -1513,25 +1523,36 @@ export interface SmartSearchAPI {
   doctor(): Promise<SmartSearchDoctorResponse>;
 }
 
+/** User-selected presentation context. The Host resolves directory identity and trust.
+ * Run identity and service-routing overrides are deliberately not client inputs. */
+export interface RuntimeContractContext {
+  directory?: string;
+  surface?: VarinApplicationSurface;
+}
+
 export interface ExtensionsAPI {
+  queryContracts(request: VarinRuntimeContractRequest, context?: RuntimeContractContext, signal?: AbortSignal): Promise<VarinRuntimeContractResult>;
   activateExtension(extensionId: string): Promise<void>;
   catalog(): Promise<VarinExtensionCatalogAvailability>;
   discardPreparedCandidate(extensionId: string, candidateIntegrity: string): Promise<void>;
   discardCandidate(request: VarinExtensionCandidateSelectionRequest): Promise<VarinExtensionCatalogSnapshot>;
   hostState(): Promise<VarinExtensionHostStateSnapshot>;
   install(request: VarinExtensionPackageInstallRequest): Promise<VarinExtensionCatalogSnapshot>;
-  invokeService(request: VarinExtensionServiceInvocationRequest): Promise<JsonValue>;
-  prepareCandidate(extensionId: string, candidateIntegrity: string): Promise<VarinExtensionCandidatePreparationResult>;
+  invokeService(request: VarinExtensionServiceInvocationRequest, signal?: AbortSignal): Promise<JsonValue>;
+  /** One authenticated stream owns one exact composition until abort/disconnect/revocation. */
+  watchServiceLease(request: VarinSurfaceServiceLeaseRequest, onEvent: (event: VarinSurfaceServiceLeaseEvent) => void, signal: AbortSignal): Promise<void>;
+  prepareCandidate(extensionId: string, candidateIntegrity: string, signal?: AbortSignal): Promise<VarinExtensionCandidatePreparationResult>;
   requestCandidateApplication(request: VarinExtensionCandidateSelectionRequest): Promise<VarinExtensionCatalogSnapshot>;
+  requestRestartHandoff(request: VarinExtensionRestartHandoffRequest): Promise<VarinExtensionCatalogSnapshot>;
+  recoverRestartHandoff(request: VarinExtensionRestartRecoveryRequest): Promise<VarinExtensionCatalogSnapshot>;
   readAsset(request: VarinExtensionAssetRequest): Promise<VarinExtensionAssetPayload>;
   readManagedEntrypoint(request: VarinExtensionManagedEntrypointRequest): Promise<VarinExtensionManagedEntrypointPayload>;
   reloadLocalSource(request: VarinExtensionLocalSourceReloadRequest): Promise<VarinExtensionLocalSourceReloadResult>;
   reportActualState(extensionId: string, state: VarinExtensionActualState): Promise<void>;
   reviewCapabilities(request: VarinExtensionCapabilityReviewRequest): Promise<VarinExtensionCatalogSnapshot>;
   reviewCandidateCapabilities(request: VarinExtensionCandidateCapabilityReviewRequest): Promise<VarinExtensionCatalogSnapshot>;
-  selectCandidate(request: VarinExtensionCandidateSelectionRequest): Promise<VarinExtensionCatalogSnapshot>;
+  selectCandidate(request: VarinExtensionCandidatePublicationRequest, signal?: AbortSignal): Promise<VarinExtensionCatalogSnapshot>;
   setEnabled(extensionId: string, enabled: boolean, expectedRevision: number): Promise<VarinExtensionCatalogSnapshot>;
-  setServiceSelection(request: VarinExtensionServiceSelectionRequest): Promise<VarinExtensionHostStateSnapshot>;
   upsertServiceRoutingRule(request: VarinExtensionServiceRoutingRuleUpdateRequest): Promise<VarinExtensionServiceRoutingSnapshot>;
   removeServiceRoutingRule(request: VarinExtensionServiceRoutingRuleRemoveRequest): Promise<VarinExtensionServiceRoutingSnapshot>;
   removeExtension(request: VarinExtensionRemoveRequest): Promise<VarinExtensionCatalogSnapshot>;
@@ -1543,25 +1564,6 @@ export interface ExtensionsAPI {
   waitForHostState(request: VarinExtensionHostStateWaitRequest, signal?: AbortSignal): Promise<VarinExtensionHostStateSnapshot>;
 }
 
-export interface PiRuntimeManagementCapabilities {
-  install: boolean;
-  openLocation: boolean;
-  pickPackageRoot: boolean;
-}
-
-export interface PiRuntimeManagementAPI {
-  activate(id: string): Promise<PiRuntimeSnapshot>;
-  activateCustom(packageRoot: string, nodePath?: string): Promise<PiRuntimeSnapshot>;
-  capabilities: PiRuntimeManagementCapabilities;
-  getSnapshot(): Promise<PiRuntimeSnapshot>;
-  install(): Promise<PiRuntimeSnapshot>;
-  openLocation(targetPath: string): Promise<void>;
-  pickPackageRoot(): Promise<string | null>;
-  refresh(): Promise<PiRuntimeSnapshot>;
-  subscribe(listener: (snapshot: PiRuntimeSnapshot) => void): () => void;
-  upgrade(): Promise<PiRuntimeSnapshot>;
-}
-
 export interface VarinWorkspaceIdentity {
   workspaceId: string;
   hostId: string;
@@ -1571,6 +1573,12 @@ export interface VarinWorkspaceIdentity {
 export interface VarinResourceReference {
   workspaceId: string;
   resourceId: string;
+}
+
+export interface VarinResourceIdentity {
+  coordinationId: string;
+  /** Registered references to this same target, including the requested reference. */
+  aliases: VarinResourceReference[];
 }
 
 export interface WorkspaceMutationOwner {
@@ -1663,6 +1671,8 @@ export type VarinDocumentDeleteResult =
   | { status: 'stale-epoch'; currentEpoch: number };
 
 type VarinWorkspaceFileEventPosition = {
+  /** Present for an observed Documents operation, never inferred from an OS notification. */
+  operationId?: string;
   sourceId: string;
   generation: number;
   sequence: number;
@@ -1670,6 +1680,7 @@ type VarinWorkspaceFileEventPosition = {
 
 export type VarinWorkspaceFileEvent = VarinWorkspaceFileEventPosition & (
   | { kind: 'created' | 'changed' | 'deleted'; resource: VarinResourceReference; revision?: string }
+  | { kind: 'invalidated'; resource: VarinResourceReference; reason: 'entry-changed' }
   | { kind: 'moved'; from: VarinResourceReference; resource: VarinResourceReference; revision?: string }
   | { kind: 'reset'; reason: 'overflow' | 'reconnected' | 'authority-changed' | 'gap' }
 );
@@ -1684,7 +1695,7 @@ export type VarinDirtyStateBarrierEvent = {
 };
 
 export type VarinDocumentSurfaceOperationEvent = {
-  action: 'capture' | 'apply' | 'undo';
+  action: 'capture' | 'apply' | 'undo' | 'restore' | 'workspace-edit';
   kind: 'surface-operation';
   operationId: string;
   requestId: string;
@@ -1733,10 +1744,19 @@ export interface VarinDocumentSurfaceOperationTarget extends VarinDocumentSurfac
   newText?: string;
   expectedAppliedRevision?: number;
   expectedAppliedHash?: string;
+  restoreState?: {
+    baseContent: string;
+    baseRevision: string | null;
+    encoding: string;
+    bom: boolean;
+    lineEnding: 'lf' | 'crlf' | 'cr';
+  };
 }
 
 export interface VarinDocumentSurfaceOperationPayload {
-  action: 'capture' | 'apply' | 'undo';
+  workspaceEdit?: VarinWorkspaceEditSurfaceChange;
+  action: 'capture' | 'apply' | 'undo' | 'restore' | 'workspace-edit';
+  barrierId?: string;
   operationId: string;
   requestId: string;
   targets: VarinDocumentSurfaceOperationTarget[];
@@ -1745,17 +1765,19 @@ export interface VarinDocumentSurfaceOperationPayload {
 
 export interface VarinDocumentSurfaceOperationResourceResult {
   resource: VarinResourceReference;
-  status: 'captured' | 'applied' | 'undone' | 'failed';
+  status: 'captured' | 'applied' | 'undone' | 'restored' | 'failed';
   documentInstanceId?: string;
   beforeLocalEditRevision?: number;
   beforeHash?: string;
   afterLocalEditRevision?: number;
   afterHash?: string;
   content?: string;
+  baseContent?: string;
   message?: string;
 }
 
 export interface VarinDocumentSurfaceOperationCompletion {
+  workspaceEdit?: VarinWorkspaceEditSurfaceReceipt;
   generation: number;
   ownerId: string;
   operationId: string;
@@ -1774,7 +1796,7 @@ export interface VarinAgentInputSnapshotCaptureRequest {
   generation: number;
   ownerId: string;
   resources: VarinAgentInputSnapshotResource[];
-  sessionId: string;
+  consumer: AgentInputSnapshotConsumer;
 }
 
 export interface VarinDirtyBufferPublication {
@@ -1814,7 +1836,7 @@ export type VarinDocumentRecoveryWriteResult =
   | { status: 'missing'; journalId: string }
   | { status: 'stale-epoch'; currentEpoch: number };
 
-export interface DocumentsAPI {
+export interface DocumentsAPI extends DocumentsWorkspaceEditAPI {
   ackDirtyStateBarrier?(request: {
     barrierId: string;
     generation: number;
@@ -1827,7 +1849,7 @@ export interface DocumentsAPI {
     workspaceId: string;
   }): Promise<{ cleared: boolean }>;
   captureAgentInputSnapshot?(request: VarinAgentInputSnapshotCaptureRequest): Promise<AgentInputContext>;
-  releaseAgentInputSnapshot?(request: { context: AgentInputContext; sessionId: string }): Promise<{ released: boolean }>;
+  releaseAgentInputSnapshot?(request: { context: AgentInputContext; consumer: AgentInputSnapshotConsumer }): Promise<{ released: boolean }>;
   readSurfaceOperation?(request: {
     generation: number;
     ownerId: string;
@@ -1837,11 +1859,9 @@ export interface DocumentsAPI {
   completeSurfaceOperation?(request: VarinDocumentSurfaceOperationCompletion): Promise<{ accepted: boolean }>;
   resolveWorkspace(input: { path?: string; workspaceId?: string }): Promise<VarinWorkspaceIdentity>;
   /** Opaque Host and canonical-target identity for coordinating aliases of one file. Never use it as an open path. */
-  resolveResourceIdentity(resource: VarinResourceReference): Promise<{
-    coordinationId: string;
-    /** Registered references to this same target, including the requested reference. */
-    aliases: VarinResourceReference[];
-  }>;
+  resolveResourceIdentity(resource: VarinResourceReference): Promise<VarinResourceIdentity>;
+  /** Null proves the registered roots cannot intersect; candidate admission failures still reject. */
+  resolveResourceIdentity(resource: VarinResourceReference, options: { withinWorkspaceId: string }): Promise<VarinResourceIdentity | null>;
   read(resource: VarinResourceReference): Promise<VarinDocumentReadResult>;
   write(request: VarinDocumentWriteRequest): Promise<VarinDocumentWriteResult>;
   move(request: VarinDocumentMoveRequest): Promise<VarinDocumentMoveResult>;
@@ -2133,7 +2153,8 @@ export type VarinLanguageFeatureResult<T> =
 export interface VarinLanguageCommandRequest {
   resource: VarinResourceReference;
   languageId: string;
-  documentVersion: number;
+  /** Omit after a code action removed its document; workspace commands still bind provider/generation. */
+  documentVersion?: number;
   providerId: string;
   generation: number;
   command: string;
@@ -2498,8 +2519,11 @@ export interface WorkspaceTestAPI {
 }
 
 export interface RuntimeAPIs {
+  bots?: import('./bots.js').BotsAPI;
+  agentProfiles?: import("./agent-profiles.js").AgentProfilesAPI;
+  schedules?: import("./schedules.js").ScheduledTasksAPI;
+  threads?: import("./threads.js").ThreadsAPI;
   runtime: RuntimeDescriptor;
-  piRuntime?: PiRuntimeManagementAPI;
   terminal: TerminalAPI;
   git: GitAPI;
   workspace?: WorkspaceAPI;

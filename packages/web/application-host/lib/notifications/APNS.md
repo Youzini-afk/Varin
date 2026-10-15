@@ -1,137 +1,79 @@
-# APNs remote push — signed relay or direct mode
+# APNs remote push
 
-Native iOS background push (notifications even when the app is **suspended or killed**) is delivered
-through APNs. A deployment can select a signed Varin-compatible relay or configure direct APNs
-credentials. Source builds do not silently reuse another product's relay. In relay mode each server
-signs requests with an auto-generated keypair, and tokens are bound to the server that registered
-them, so a leaked device token alone cannot be used to push.
+`apns-runtime.ts` delivers native iOS push through an explicitly configured compatible relay or direct
+Apple APNs credentials. This document describes the Host implementation; the deployment's relay owns
+its own authentication enforcement, APNs key, storage, logging and operational security.
 
-## How it works
+## Registration and routing
 
-1. The app registers its APNs device token with **its own server** (`POST /api/push/apns-token`,
-   `useNativePushRegistration`). PWA/desktop never register — only the native Capacitor app.
-2. In relay mode, the server **binds the token on the configured relay**: it POSTs `{ token, publicKeyJwk, ts, sig }` to
-   `POST /v1/push/register-token`, signed with its auto-generated ECDSA P-256 key
-   (`getOrCreateRelayKeypair`, persisted in settings like the VAPID keys). The relay records
-   `token → serverId` where `serverId = SHA-256(publicKey)`.
-3. On a trigger (ready/error/question/permission), the server composes **generic, content-free**
-   text — a fixed scenario title ("Agent response is ready" / "Agent needs your input" / "Agent
-   needs permission" / "Agent hit an error") + the **session name** as the body, no model/project/
-   message content — plus a **`badge`** count (see below) — and POSTs `{ tokens, title, body,
-   badge, env, data:{sessionId}, publicKeyJwk, ts, sig }` to `POST /v1/push/send`
-   (`apns-runtime.ts` → `sendViaRelay`). Direct mode builds the equivalent APNs payload locally. It
-   does **not** gate on UI visibility (see below).
-4. A configured **push relay** verifies the signature +
-   `ts` freshness, derives `serverId`, and only delivers to tokens bound to that server. It holds
-   the single project APNs `.p8` key, signs an ES256 JWT with `crypto.subtle`, and sends each
-   token to APNs over HTTP/2, returning per-token results; the server drops tokens flagged `drop`
-   (410 / BadDeviceToken). The relay stores no secret — only `token → serverId` hashes.
-5. Tapping a push deep-links to its session via the forwarded `sessionId`.
+The native app registers its device token through authenticated `POST /api/push/apns-token`. The
+record belongs to that UI session and retains platform, APNs environment and optional Host key.
+Xcode/development tokens normally use `sandbox`; TestFlight/App Store tokens use `production`.
+`VARIN_APNS_ENVIRONMENT` can explicitly override the registered environment for delivery.
 
-## Foreground suppression
+Before sending, the Host deduplicates tokens and groups them by their registered Host key and
+environment. It removes producer-supplied Host routing fields and constructs the native Thread/branch
+deep link from the registered Host key. This prevents the notification producer from substituting a
+navigation Host. Revoking registration uses authenticated `DELETE /api/push/apns-token`.
 
-APNs is **not** gated on UI visibility. A backgrounded WKWebView can't reliably report "hidden"
-before iOS suspends it, so a server-side visibility gate dropped background push for short
-responses. Instead the server always sends, and **iOS** suppresses the foreground banner
-(`PushNotifications.presentationOptions: []` in `capacitor.config`) — so there is no notification
-while the app is active, with no race. APNs is the native app's **only** channel; local
-notifications were removed (a WKWebView can't tell foreground from background — `document.hasFocus()`
-is unreliable — so they leaked while the app was open). Cloudflare is touched only when a native
-app with notifications on has a registered token and a trigger fires.
+## Notification content and visibility
 
-## App-icon badge
+`thread-runtime.ts` projects native completion, failure, permission and question facts. The title is
+the actual Thread title, falling back to `Varin` when empty. The body is fixed status text, for example
+`Response finished.` or `Your approval is needed.` The Application Host forwards this payload directly;
+it does not replace the title with a generic scenario name or include response text.
 
-Each push carries an **absolute** `aps.badge` = the number of **distinct collapse-ids (`tag`)
-pushed since the app was last foregrounded**. It mirrors the lock-screen banner stack.
+APNs delivery is not gated on UI visibility, because a suspended WebView cannot reliably update it.
+The native shell controls foreground presentation. A successful Host send does not prove that Apple
+delivered the alert or that the user saw it.
 
-The count is a `Set<tag>` (`pendingPushTags`) in the trigger runtime (`runtime.js`):
-`toApnsGenericPayload` adds the push `tag` and returns the set size as the badge. We key by **`tag`,
-not sessionId**, because the tag *is* the banner identity — iOS uses it as `apns-collapse-id`, so
-same-tag pushes replace one banner while different tags are distinct banners. One session can raise
-several banners (`ready-<id>`, `question-<id>`, `permission-<requestKey>` are different tags), so
-counting sessionIds both over- and under-counts the stack; counting tags matches it.
+The transport supports an optional badge value, but the native Thread caller does not compute or
+supply one. Catalog read cursors own native unread state. The retained legacy badge entry point is a
+no-op; there is no server badge-stack synchronization guarantee.
 
-It is deliberately **not** derived from the live attention snapshot (`needsAttention`/`isViewed`):
-that machinery drives in-app indicators on *connected* clients, where a backgrounded client stays
-"viewing" and `needsAttention` is set by a separate `session.status` event that races the push
-trigger. The set self-clears via `clearPendingPushBadge` on any signal that the user is engaging
-with the app: the visibility beacon (`updateUiVisibility` wrapper, `visible:true`), **plus** opening
-a session (`POST /api/sessions/:id/view`) and sending a message (`POST /api/sessions/:id/
-message-sent`). The latter two need no auth and fire reliably on the native app when it foregrounds,
-so they are the dependable reset — the visibility beacon alone proved unreliable in WKWebView. This
-mirrors the device zeroing its icon badge on `sceneDidBecomeActive` (`AppDelegate.swift`), keeping
-server and device in sync.
+## Relay mode
 
-The value flows `runtime.js` (`toApnsGenericPayload`) → `apns-runtime.ts` (`sendViaRelay` body /
-direct-mode `aps.badge`) → relay (`pushSendSchema.badge` → `aps.badge`). It is **not** signed (like
-`body`/`data`); the relay still only delivers to bound tokens. The set is server-global, so every
-device token of a server sees the same badge.
+Set `VARIN_PUSH_RELAY_URL` to the compatible relay's send endpoint. The registration endpoint is
+derived by replacing a trailing `/send` with `/register-token`. Source builds do not inherit another
+product's central relay. `VARIN_PUSH_RELAY_DISABLED=true` disables relay selection.
 
-## Modes
+The Host generates and persists its own ECDSA P-256 signing keypair. Registration sends the device
+token, public key, timestamp and signature. Sending includes tokens, title, body, collapse tag,
+environment and navigation data. The send signature covers the timestamp, sorted token list and
+title; it is not encryption and does not cover every payload field. Relay results can identify invalid
+tokens to remove. Transport or relay failure is logged without claiming delivery.
 
-- **Relay:** set `VARIN_PUSH_RELAY_URL` to a Varin-compatible relay endpoint (the register URL is
-  derived as `…/register-token`). Source builds intentionally have no inherited central relay.
-- **Direct:** set `VARIN_PUSH_RELAY_DISABLED=true` + `VARIN_APNS_KEY_ID/
-  TEAM_ID/P8` to sign+send from the server itself (HTTP/2 + ES256 JWT); no relay binding needed.
+Deploy only a relay whose registration binding, signature verification, replay handling, TLS,
+APNs credentials and data retention you have reviewed. This repository's client implementation does
+not prove a particular external relay's database schema, logging policy or security guarantees.
 
-## Config
+## Direct mode
 
-Server (`apns-runtime.ts`):
-- `VARIN_PUSH_RELAY_URL` (optional explicit relay), `VARIN_APNS_ENVIRONMENT`
-  (optional override forcing every send to `sandbox` or `production`; normally unset — each
-  token is delivered to the environment it registered with: the iOS shell reads the
-  `aps-environment` entitlement from the embedded provisioning profile and reports it at
-  registration, so Xcode dev builds go to sandbox and TestFlight/App Store to production).
-  The signing keypair is auto-generated — nothing to set.
-- Direct fallback: `VARIN_APNS_KEY_ID`, `VARIN_APNS_TEAM_ID`, `VARIN_APNS_P8`
-  (or `_P8_PATH`), `VARIN_APNS_BUNDLE_ID`, `VARIN_PUSH_RELAY_DISABLED=true`.
+Configure `VARIN_APNS_KEY_ID`, `VARIN_APNS_TEAM_ID` and `VARIN_APNS_P8` or `VARIN_APNS_P8_PATH`.
+`VARIN_APNS_BUNDLE_ID` overrides the default `dev.varin.mobile`. The existing settings owner can also
+supply direct APNs configuration. Environment values take precedence. Use
+`VARIN_PUSH_RELAY_DISABLED=true` when a configured relay must not be selected.
 
-Relay (Cloudflare Worker secrets via `wrangler secret put` / GitHub Actions): `APNS_P8`,
-`APNS_KEY_ID`, `APNS_TEAM_ID`, optional `APNS_BUNDLE_ID` / `APNS_DEFAULT_ENV`. The `push_tokens`
-binding table is created by `migrations/0002_push_tokens.sql` (applied on deploy).
+The Host signs ES256 APNs authentication tokens and sends over HTTP/2 to Apple's sandbox or production
+endpoint. Permanent invalid-token responses remove that registration. Other failures do not establish
+successful delivery. Protect the `.p8` key and Host data directory; do not package credentials in a
+release archive or image.
 
-## Apple setup (one-time)
+The iOS App ID must have Push Notifications enabled and the installed app must have the matching
+entitlement, bundle ID and environment. Use the deployment's own Apple configuration and device tokens.
 
-1. Apple **Keys** (not Certificates) → create an **APNs Auth Key** (`.p8`) → Key ID + Team ID;
-   enable **Push Notifications** on App ID `dev.varin.mobile`.
-2. Configure the selected Varin push relay with that key, or configure the self-hosted server's
-   direct APNs environment variables. Do not reuse an OpenChamber App ID, token database, or key.
-3. Xcode: confirm the Push Notifications capability; Clean Build Folder; run on device.
+## Confidentiality
 
-## Security posture
+The payload is not application-encrypted. Use HTTPS for the relay endpoint; TLS protects transport
+but the configured relay and Apple can read the Thread title, fixed status text, device token and navigation metadata they receive. A
+Thread title can itself contain private information, so these notifications are not content-free.
+Signature verification authenticates selected request fields; it does not hide their content.
 
-- The device token is a per-install secret, but no longer the *only* defence: every relay request
-  is signed by the server's private key, and the relay only delivers to a token from its bound
-  `serverId`. A leaked token alone is useless — an attacker has neither the private key nor a
-  matching binding.
-- `serverId` self-certifies (`SHA-256(publicKey)`), so the relay holds no secret; a D1 leak
-  exposes only `token → serverId` hashes. The signed `ts` (±5 min window) blocks replay.
-- Residual: trust-on-first-bind (whoever registers a token first owns it) — acceptable, since
-  registering already requires possessing the token. Cloudflare rate limiting is defence-in-depth.
+End-to-end notification payload encryption and an Android FCM delivery implementation are not provided
+by this APNs module. Expo mobile push has its own owner in `../mobile/`.
 
-## Data confidentiality (what the relay / Apple can see)
+## Verification
 
-The push payload is **not** application-encrypted, so there is no decryption step. The text is
-sent in plaintext, protected only by **TLS in transit** (HTTPS to the relay, TLS from the relay
-to APNs). The request **signature is authentication, not encryption** — the relay *verifies* it
-(valid / invalid), it does not hide anything.
-
-Who can read the alert text:
-
-- **Network hops:** nothing (TLS).
-- **The relay (Cloudflare):** the generic title + body (session name), the device token, and
-  `sessionId`. It stores only `token → serverId` hashes (no text, no payload).
-- **Apple APNs:** the alert text too — APNs always reads the alert payload of an `alert` push.
-- **The device:** displays it.
-
-This is acceptable **because the text is deliberately content-free**: a fixed scenario title +
-the session name only — no model, project, or message content (`runtime.js` →
-`toApnsGenericPayload`). The session name is the single semi-personal field that crosses the
-relay/Apple. To hide even that from Apple would require an end-to-end **encrypted payload**
-(`mutable-content` + a Notification Service Extension that decrypts on-device with a key never
-sent to the relay) — not implemented, and unnecessary for generic text.
-
-## Android (FCM) note
-
-The Android equivalent is **FCM** (not implemented): the same relay would forward to FCM with a
-server key, and the client would register an FCM token (same store/routes + signing).
+`apns-runtime.test.ts` covers token registration, environment/Host routing and payload construction with
+controlled transport. Actual Apple entitlements, installed-device delivery and an external relay's
+security and availability require deployment-specific verification.

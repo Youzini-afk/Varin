@@ -1,7 +1,6 @@
 import React from 'react';
 import { cn, getModifierLabel } from '@/lib/utils';
 import { useUIStore } from '@/stores/useUIStore';
-import { usePiProviderStore } from '@/stores/usePiProviderStore';
 import { Tooltip, TooltipTrigger } from '@/components/ui/tooltip';
 import { ErrorBoundary } from '@/components/ui/ErrorBoundary';
 import {
@@ -23,12 +22,6 @@ import {
 import { useSettingsPageRegistrations } from '@/lib/settings/surface-registry';
 import { buildSettingsSearchResults, type SettingsSearchResult } from '@/lib/settings/search';
 import { SettingsSearchTargetContext } from '@/lib/settings/search-target';
-import { useResourceRuntimeTarget } from '@/components/sections/resources/useResourceRuntimeTarget';
-import {
-  refreshMcpSettingsAvailability,
-  useMcpSettingsAvailabilityState,
-} from '@/lib/settings/mcp-availability';
-
 // UI Kit: fixed settings navigation width
 const SETTINGS_NAV_WIDTH = 256;
 const SETTINGS_SPLIT_SIDEBAR_WIDTH = 280;
@@ -46,9 +39,8 @@ interface SettingsViewProps {
   initialMobileStage?: MobileStage;
 }
 
-const NAV_GROUP_ORDER = ['general', 'projects', 'harness', 'pi'] as const;
+const NAV_GROUP_ORDER = ['general', 'projects', 'harness'] as const;
 
-const ADD_PROVIDER_SETTINGS_ID = '__add_provider__';
 
 function buildRuntimeContext(
   isDesktop: boolean,
@@ -70,15 +62,8 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
   const { t } = useI18n();
   const deviceInfo = useDeviceInfo();
   const isMobile = forceMobile ?? deviceInfo.isMobile;
-  const { runtimeTarget, targetKey: mcpTargetKey } = useResourceRuntimeTarget();
-  const mcpAvailability = useMcpSettingsAvailabilityState();
-  const mcpInstalled = mcpAvailability.targetKey === mcpTargetKey
-    && mcpAvailability.installed === true;
+  const mcpInstalled = true;
   const settingsPageRegistrations = useSettingsPageRegistrations();
-
-  React.useEffect(() => {
-    void refreshMcpSettingsAvailability(runtimeTarget, mcpTargetKey);
-  }, [mcpTargetKey, runtimeTarget]);
 
   const settingsPageRaw = useUIStore((state) => state.settingsPage);
   const setSettingsPage = useUIStore((state) => state.setSettingsPage);
@@ -127,16 +112,6 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
     [isDesktopApp, isMobile, mcpInstalled],
   );
 
-  React.useEffect(() => {
-    if (
-      settingsSlug === 'mcp'
-      && mcpAvailability.targetKey === mcpTargetKey
-      && mcpAvailability.installed === false
-    ) {
-      setSettingsPage('plugins');
-    }
-  }, [mcpAvailability.installed, mcpAvailability.targetKey, mcpTargetKey, setSettingsPage, settingsSlug]);
-
   const visiblePages = React.useMemo(() => {
     const allowedPages = visiblePageSlugs ? new Set<SettingsPageSlug>(visiblePageSlugs) : null;
     return settingsPageRegistrations
@@ -182,10 +157,6 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
   }, [getPageTitle, isDesktopLocalOrigin, isMac, isWindows, isLinux, runtimeCtx, settingsSearchQuery, t, visiblePageSlugs]);
 
   const prepareSettingsSearchTarget = React.useCallback((result: SettingsSearchResult): string => {
-    if (result.id === 'providers.connect') {
-      usePiProviderStore.getState().setSelectedProvider(ADD_PROVIDER_SETTINGS_ID);
-    }
-
     return result.id;
   }, []);
 

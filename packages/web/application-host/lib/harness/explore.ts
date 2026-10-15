@@ -1,5 +1,5 @@
-import { languageIdForPath, type ExploreArrival, type ExploreAssessment, type ExploreDistinctivenessDetails, type ExploreFastDecisionDetails, type ExploreGraphDetails, type ExploreGraphStatus, type ExploreGroupedSearchPlan, type ExploreIndexLifecycle, type ExploreModelParticipation, type ExplorePurpose, type ExploreQueryAction, type ExploreQueryFollowupParams, type ExploreQuerySelectResult, type ExploreQuerySelectionGroup, type ExploreQuerySourceState, type ExploreQueryView, type ExploreQueryVocab, type ExploreRerankDetails, type ExploreRerankScore, type ExploreSemanticCoverage, type ExploreSemanticDetails, type ExploreSemanticGap, type ExploreSemanticStatus, type ExploreTermCoverage, type ExploreWindowTrace, type HarnessServiceMap } from "@varin/protocol";
-import type { ExploreFileSnapshot } from "./explore-file-reader.js";
+import { languageIdForPath, type ExploreArrival, type ExploreAssessment, type ExploreDistinctivenessDetails, type ExploreFastDecisionDetails, type ExploreGraphDetails, type ExploreGraphStatus, type ExploreGroupedSearchPlan, type ExploreIndexLifecycle, type ExploreModelParticipation, type ExplorePurpose, type ExploreQueryAction, type ExploreQueryFollowupParams, type ExploreQuerySelectResult, type ExploreQuerySelectionGroup, type ExploreQuerySourceState, type ExploreQueryView, type ExploreQueryVocab, type ExploreRerankDetails, type ExploreRerankScore, type ExploreSemanticCoverage, type ExploreSemanticDetails, type ExploreSemanticGap, type ExploreSemanticStatus, type ExploreTermCoverage, type ExploreWindowTrace, type ExploreSearchResult } from "@varin/protocol";
+import type { ExploreFileSnapshot } from "./file-snapshot.js";
 import { waitWithSignal } from "../cancellation.js";
 import { SMALL_STRUCTURE_SPAN_LINES } from "../structure/constants.js";
 import { classifyLiteralCall } from "../structure/connections.js";
@@ -57,7 +57,7 @@ export {
 };
 export type { TermGroup, TermGroupKind };
 
-type WireResult = HarnessServiceMap["explore.search"]["result"];
+type WireResult = ExploreSearchResult;
 export type ExploreSnippet = WireResult["snippets"][number];
 export type ExploreIssue = WireResult["issues"][number];
 export type ExploreProvenance = WireResult["details"]["provenance"][number];
@@ -92,6 +92,8 @@ export interface ExploreRgSearchOptions {
 
 export type ExploreSemanticHit = {
   documentId: string;
+  /** Indexed source revision; native retrieval requires equality with the admitted Documents snapshot. */
+  revision?: string;
   blockId: string;
   parentUnitId: string;
   parentName: string;
@@ -3400,6 +3402,29 @@ function relationLines(relations: NonNullable<WireResult["details"]["relations"]
   return lines;
 }
 
+/** Required groups sharing a range are one atomic delivery component. */
+export function requiredExploreComponents<T extends { requiredGroups?: readonly string[] }>(snippets: readonly T[]): T[][] {
+  const pending = new Set(snippets);
+  const components: T[][] = [];
+  for (const snippet of snippets) {
+    if (!pending.has(snippet)) continue;
+    const group = [snippet];
+    const ids = new Set(snippet.requiredGroups);
+    for (let changed = true; changed;) {
+      changed = false;
+      for (const candidate of pending) {
+        if (group.includes(candidate) || !candidate.requiredGroups?.some(id => ids.has(id))) continue;
+        group.push(candidate);
+        for (const id of candidate.requiredGroups) ids.add(id);
+        changed = true;
+      }
+    }
+    for (const item of group) pending.delete(item);
+    components.push(group);
+  }
+  return components;
+}
+
 /** A delivery plan owns both selected ranges and their exact rendering. */
 function planExploreDelivery(
   result: ExploreFormatInput,
@@ -3487,22 +3512,8 @@ function planExploreDelivery(
       reason: `already shown in ${covering.path}:${covering.startLine}-${covering.endLine}` });
   };
 
-  const pendingDelivery = new Set(result.snippets);
-  for (const snippet of result.snippets) {
-    if (!pendingDelivery.has(snippet)) continue;
-    const group = [snippet];
-    const requiredGroups = new Set(snippet.requiredGroups);
-    // Overlapping required groups form one atomic delivery component.
-    for (let changed = true; changed;) {
-      changed = false;
-      for (const candidate of pendingDelivery) {
-        if (group.includes(candidate) || !candidate.requiredGroups?.some(id => requiredGroups.has(id))) continue;
-        group.push(candidate);
-        for (const id of candidate.requiredGroups) requiredGroups.add(id);
-        changed = true;
-      }
-    }
-    for (const member of group) pendingDelivery.delete(member);
+  for (const group of requiredExploreComponents(result.snippets)) {
+    const requiredGroups = new Set(group.flatMap(member => member.requiredGroups ?? []));
     const block = group.map(member => snippetBlocks[result.snippets.indexOf(member)]!).join('\n');
     if (!pushIfFits(block)) {
       for (const member of group) {

@@ -1,12 +1,6 @@
 import type { Express } from 'express';
 import type { Server } from 'node:http';
 import type {
-  PiRuntimeBroker,
-  PiRuntimeBrokerFactoryOptions,
-  PiRuntimeBrokerOptions,
-  PiRuntimeLifecycle,
-} from '@varin/runtime-broker';
-import type {
   ApplicationExtensionCatalog,
   ApplicationExtensionRuntime,
   ExtensionPackageManager,
@@ -26,13 +20,9 @@ export interface DesktopRuntimeConfig {
   requestHeaders: Record<string, string>;
 }
 
-export type HostPiRuntimeBrokerFactoryOptions = PiRuntimeBrokerFactoryOptions
-  & Pick<PiRuntimeBrokerOptions, 'admitSessionExecution'>;
-
 export interface StartWebUiServerOptions {
   apiOnly?: boolean | undefined;
   attachSignals?: boolean | undefined;
-  createPiRuntimeBroker?: ((options: HostPiRuntimeBrokerFactoryOptions) => PiRuntimeBroker) | undefined;
   /** Electron system-network transport for desktop outbound HTTP(S). */
   desktopNetworkFetch?: ((url: string, init: RequestInit) => Promise<Response>) | undefined;
   exitOnShutdown?: boolean | undefined;
@@ -42,7 +32,6 @@ export interface StartWebUiServerOptions {
   getDesktopRuntimeConfig?: (() => DesktopRuntimeConfig | null) | undefined;
   getIsWindowFocused?: (() => boolean) | undefined;
   host?: string | undefined;
-  hostEntry?: string | undefined;
   onDesktopNotification?: ((payload: DesktopNotificationPayload) => void) | undefined;
   onConnectionStatus?: ((status: import('@varin/application-client').DesktopSshInstanceStatus) => void) | undefined;
   onComputerGesture?: ((gesture: import('@varin/protocol').ComputerGesture) => void) | undefined;
@@ -51,14 +40,11 @@ export interface StartWebUiServerOptions {
   computerControlWindows?: (() => number[]) | undefined;
   onTunnelReady?: ((publicUrl: string, connectUrl: string | null) => void) | undefined;
   openFilesystemPath?: ((targetPath: string) => void | Promise<void>) | undefined;
-  piRuntimeBroker?: PiRuntimeBroker | undefined;
-  piRuntimeLifecycle?: PiRuntimeLifecycle | undefined;
-  pickPiPackageRoot?: (() => Promise<string | null>) | undefined;
   port?: number | undefined;
-  requirePiRuntime?: boolean | undefined;
+  /** The embedding process owns a real stop and clean-process relaunch. */
+  restartApplicationHost?: (() => Promise<void>) | undefined;
   /** Trusted desktop-only offscreen renderer used by harness.web.render. */
   renderWebPage?: ((url: string, signal?: AbortSignal) => Promise<string>) | undefined;
-  standalonePayloadDir?: string | undefined;
   tryCfTunnel?: boolean | undefined;
   tunnelConfigPath?: string | null | undefined;
   tunnelHostname?: string | undefined;
@@ -77,7 +63,7 @@ export interface WebUiServerController {
   connections: import('./lib/connections/ssh-manager.js').HostSshManager;
   expressApp: Express;
   getPort(): number;
-  getQuitRiskStatus(): QuitRiskStatus;
+  getQuitRiskStatus(): Promise<QuitRiskStatus>;
   getTunnelUrl(): string | null;
   httpServer: Server;
   isReady(): boolean;

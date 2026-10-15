@@ -9,15 +9,9 @@ import { pathToFileURL } from 'url';
 
 import { isModuleCliExecution, normalizeCliEntryPath } from './cli-entry.js';
 import { requestJson } from './lib/cli-http.js';
-import { requestRuntimeMethod } from './lib/cli-runtime.js';
+import { requestThreadApi } from './lib/cli-runtime.js';
 import { inspectTunnelAttachability } from './lib/cli-lifecycle.js';
 import { formatGoal } from './lib/commands-schedule.js';
-import {
-  buildSessionCreatePayload,
-  buildSessionPromptPayload,
-  formatSessionLine,
-  sessionCommand,
-} from './lib/commands-session.js';
 import { formatModelsOutput } from './lib/commands-models.js';
 import { formatProjectLine } from './lib/commands-projects.js';
 import { resolveTargetPort } from './lib/cli-api-target.js';
@@ -326,236 +320,8 @@ describe('cli args', () => {
 
   it('formats scheduled goal state compactly', () => {
     expect(formatGoal({})).toBe('goal:no');
-    expect(formatGoal({ runAsGoal: true })).toBe('goal:yes');
-    expect(formatGoal({ runAsGoal: true, goalTokenBudget: 200000 })).toBe('goal:yes budget:200000');
-  });
-
-  it('parses session create options', () => {
-    const parsed = parseArgs([
-      'session',
-      'create',
-      '--dir',
-      '.',
-      '--name',
-      'Side task',
-      '--prompt',
-      'Investigate cache invalidation',
-      '--model',
-      'openai/gpt-5.5',
-      '--worktree',
-      'side-task',
-      '--branch',
-      'varin/side-task',
-      '--base',
-      'main',
-      '--no-upstream',
-    ]);
-
-    expect(parsed.command).toBe('session');
-    expect(parsed.sessionAction).toBe('create');
-    expect(parsed.options.directory).toBe('.');
-    expect(parsed.options.name).toBe('Side task');
-    expect(parsed.options.prompt).toBe('Investigate cache invalidation');
-    expect(parsed.options.model).toBe('openai/gpt-5.5');
-    expect(parsed.options.worktree).toBe('side-task');
-    expect(parsed.options.branch).toBe('varin/side-task');
-    expect(parsed.options.startRef).toBe('main');
-    expect(parsed.options.setUpstream).toBe(false);
-  });
-
-  it('builds session create payloads from CLI options', () => {
-    expect(buildSessionCreatePayload({
-      directory: '.',
-      name: 'Side task',
-      prompt: 'Investigate cache invalidation',
-      model: 'openai/gpt-5.5',
-      agent: 'build',
-      worktree: 'side-task',
-      branch: 'varin/side-task',
-      startRef: 'main',
-      setUpstream: true,
-    })).toEqual({
-      directory: '.',
-      title: 'Side task',
-      worktree: {
-        name: 'side-task',
-        branchName: 'varin/side-task',
-        startRef: 'main',
-      },
-      prompt: 'Investigate cache invalidation',
-      model: 'openai/gpt-5.5',
-      agent: 'build',
-      setUpstream: true,
-    });
-  });
-
-  it('allows session create prompts without an explicit model', () => {
-    expect(buildSessionCreatePayload({
-      directory: '.',
-      prompt: 'Investigate cache invalidation',
-    })).toEqual({
-      directory: '.',
-      prompt: 'Investigate cache invalidation',
-    });
-  });
-
-  it('builds goal-enabled session create payloads', () => {
-    const parsed = parseArgs([
-      'session',
-      'create',
-      '--dir',
-      '/repo',
-      '--prompt',
-      'Finish and verify the migration',
-      '--goal',
-      '--goal-token-budget',
-      '200000',
-    ]);
-
-    expect(buildSessionCreatePayload(parsed.options)).toEqual({
-      directory: '/repo',
-      prompt: 'Finish and verify the migration',
-      goal: true,
-      goalTokenBudget: 200000,
-    });
-  });
-
-  it('validates session goal options before HTTP', () => {
-    expect(() => buildSessionCreatePayload({ directory: '/repo', goal: true })).toThrow('--goal requires --prompt.');
-    expect(() => buildSessionCreatePayload({
-      directory: '/repo',
-      prompt: 'Run',
-      goalTokenBudget: '200000',
-    })).toThrow('--goal-token-budget requires --goal.');
-    for (const value of ['999', '1.5', '100000001', 'nope']) {
-      expect(() => buildSessionCreatePayload({
-        directory: '/repo',
-        prompt: 'Run',
-        goal: true,
-        goalTokenBudget: value,
-      })).toThrow('--goal-token-budget must be an integer from 1000 to 100000000.');
-    }
-  });
-
-  it('parses session list filters', () => {
-    const parsed = parseArgs(['session', 'list', '--dir', '/repo', '--limit', '5']);
-
-    expect(parsed.command).toBe('session');
-    expect(parsed.sessionAction).toBe('list');
-    expect(parsed.options.directory).toBe('/repo');
-    expect(parsed.options.limit).toBe(5);
-  });
-
-  it('parses session status and message options', () => {
-    const status = parseArgs(['session', 'status', '--session', 'ses_123', '--dir', '/repo']);
-    expect(status.sessionAction).toBe('status');
-    expect(status.options.session).toBe('ses_123');
-    expect(status.options.directory).toBe('/repo');
-
-    const messages = parseArgs([
-      'session',
-      'messages',
-      '--session',
-      'ses_123',
-      '--dir',
-      '/repo',
-      '--last',
-      '--role',
-      'assistant',
-    ]);
-    expect(messages.sessionAction).toBe('messages');
-    expect(messages.options.last).toBe(true);
-    expect(messages.options.role).toBe('assistant');
-
-    const waiting = parseArgs([
-      'session',
-      'messages',
-      '--session',
-      'ses_123',
-      '--dir',
-      '/repo',
-      '--wait',
-      '--timeout',
-      '30',
-      '--last-assistant',
-    ]);
-    expect(waiting.options.wait).toBe(true);
-    expect(waiting.options.timeout).toBe('30');
-    expect(waiting.options.lastAssistant).toBe(true);
-
-    const list = parseArgs(['session', 'list', '--dir', '/repo', '--with-status']);
-    expect(list.options.withStatus).toBe(true);
-  });
-
-  it('parses session send and fork actions', () => {
-    const send = parseArgs([
-      'session', 'send', '--session', 'ses_123', '--dir', '/repo', '--prompt', 'Continue',
-      '--goal', '--wait', '--last-assistant',
-    ]);
-    expect(send.sessionAction).toBe('send');
-    expect(send.options).toMatchObject({
-      session: 'ses_123',
-      directory: '/repo',
-      prompt: 'Continue',
-      goal: true,
-      wait: true,
-      lastAssistant: true,
-    });
-
-    const fork = parseArgs([
-      'session', 'fork', '--session', 'ses_123', '--dir', '/repo', '--message', 'msg_123',
-      '--prompt', 'Try another approach',
-    ]);
-    expect(fork.sessionAction).toBe('fork');
-    expect(fork.options.message).toBe('msg_123');
-  });
-
-  it('builds session send and fork prompt payloads', () => {
-    expect(buildSessionPromptPayload({
-      session: 'ses_123',
-      directory: '/repo',
-      prompt: 'Continue',
-      model: 'openai/gpt-5.5',
-      agent: 'build',
-      goal: true,
-      goalTokenBudget: '200000',
-    }, 'send')).toEqual({
-      prompt: 'Continue',
-      model: 'openai/gpt-5.5',
-      agent: 'build',
-      goal: true,
-      goalTokenBudget: 200000,
-    });
-    expect(buildSessionPromptPayload({
-      session: 'ses_123',
-      directory: '/repo',
-      message: 'msg_123',
-      prompt: 'Try another approach',
-    }, 'fork')).toEqual({
-      messageId: 'msg_123',
-      prompt: 'Try another approach',
-    });
-  });
-
-  it('validates session message selectors before HTTP', async () => {
-    await expect(sessionCommand({ session: 'ses_123', directory: '/repo', all: true, last: true }, 'messages'))
-      .rejects.toThrow('--all cannot be combined with --last or --limit.');
-    await expect(sessionCommand({ session: 'ses_123', directory: '/repo', role: 'tool' }, 'messages'))
-      .rejects.toThrow('--role must be one of: all, user, assistant.');
-    await expect(sessionCommand({}, 'status'))
-      .rejects.toThrow('Missing required --session.');
-    await expect(sessionCommand({ session: 'ses_123', directory: '/repo', timeout: '30' }, 'messages'))
-      .rejects.toThrow('--timeout requires --wait.');
-    await expect(sessionCommand({ directory: '/repo', lastAssistant: true }, 'create'))
-      .rejects.toThrow('--last-assistant requires --wait for session create.');
-    await expect(sessionCommand({ directory: '/repo', timeout: '30' }, 'create'))
-      .rejects.toThrow('--timeout requires --wait.');
-    await expect(sessionCommand({ session: 'ses_123', directory: '/repo' }, 'send'))
-      .rejects.toThrow('Missing required --prompt.');
-    await expect(sessionCommand({ session: 'ses_123', directory: '/repo', prompt: 'Run', message: 'msg_1' }, 'send'))
-      .rejects.toThrow('--message is only valid for session fork.');
-    await expect(sessionCommand({ session: 'ses_123', directory: '/repo', prompt: 'Run', lastAssistant: true }, 'fork'))
-      .rejects.toThrow('--last-assistant requires --wait for session fork.');
+    expect(formatGoal({ goal: { budget: null } })).toBe('goal:yes');
+    expect(formatGoal({ goal: { budget: { maxOutputTokens: 200000 } } })).toBe('goal:yes budget:200000');
   });
 
   it('parses models command', () => {
@@ -580,33 +346,9 @@ describe('cli args', () => {
     })).toBe('- `Varin` — `path_repo` — `/repo/varin`');
   });
 
-  it('formats model defaults and favorites compactly', () => {
-    expect(formatModelsOutput({
-      defaultModel: 'opencode-go/deepseek-v4-flash',
-      defaultAgent: 'build',
-      favoriteModels: [
-        { providerID: 'openai', modelID: 'gpt-5.5' },
-        { providerID: 'opencode-go', modelID: 'deepseek-v4-pro' },
-      ],
-      recentModels: [
-        { providerID: 'zai-coding-plan', modelID: 'glm-5.2' },
-      ],
-    })).toBe('Default: `opencode-go/deepseek-v4-flash` / `build`\n\nFavorites:\n- `openai/gpt-5.5`\n- `opencode-go/deepseek-v4-pro`\n\nRecent:\n- `zai-coding-plan/glm-5.2`\n');
-  });
-
-  it('formats compact session list lines', () => {
-    expect(formatSessionLine({
-      title: 'Default model smoke test',
-      directory: '/repo',
-      model: { providerID: 'opencode-go', id: 'deepseek-v4-flash', variant: 'default' },
-    })).toBe('- `Default model smoke test` — `opencode-go/deepseek-v4-flash` — `/repo`');
-    expect(formatSessionLine({
-      title: 'Working session',
-      agent: 'build',
-      directory: '/repo',
-      model: { providerID: 'openai', id: 'gpt-5.4-mini' },
-      status: { type: 'busy' },
-    })).toContain('status:busy');
+  it('formats the actual native model catalog', () => {
+    expect(formatModelsOutput([{ providerId: 'openai', modelId: 'model', thinkingLevels: ['off', 'high'] }]))
+      .toBe('Available models:\n- openai/model; thinking: off, high\n');
   });
 
   it('parses tunnel auto-start server options', () => {
@@ -812,27 +554,6 @@ describe('CLI exports', () => {
 });
 
 describe('CLI HTTP helpers', () => {
-  it('sends one typed request to the Pi runtime endpoint', async () => {
-    const originalFetch = globalThis.fetch;
-    setFetchForTest(async (url, options = {}) => {
-      expect(new URL(String(url)).pathname).toBe('/api/varin/runtime/request');
-      expect(options.method).toBe('POST');
-      expect(JSON.parse(requestBodyText(options))).toEqual({
-        method: 'session.snapshot',
-        params: { sessionId: 'ses_1' },
-        trustProject: true,
-      });
-      return createMockJsonResponse({ result: { sessionId: 'ses_1', busy: false } });
-    });
-    try {
-      await expect(requestRuntimeMethod(45677, 'session.snapshot', {
-        sessionId: 'ses_1',
-      })).resolves.toEqual({ sessionId: 'ses_1', busy: false });
-    } finally {
-      Reflect.set(globalThis, 'fetch', originalFetch);
-    }
-  });
-
   it('retries UI-authenticated API requests with the stored instance password', async () => {
     await withTempVarinDataDir(async () => {
       const port = 45678;

@@ -101,12 +101,12 @@ describe('Web Application Host workspace recovery service', () => {
         workspaceLease: false,
       },
     });
-    const turn = await api.recordTurnStart({
-      activeWriterScopes: ['pi-worker:worker-1'],
+    const turn = await engine.recordTurnStart({
+      activeWriterScopes: ['native-runtime:worker-1'],
       executionId: 'service-execution-1',
       provenance: 'caused-by',
       runtimeGeneration: 1,
-      sessionId: 'service-session-1',
+      conversation: { kind: 'thread', threadId: 'service-session-1', branchId: 'branch-1' },
       userEntryId: 'service-user-1',
       workerId: 'worker-1',
       workspaceId: activeHarness.identity.workspaceId,
@@ -120,12 +120,12 @@ describe('Web Application Host workspace recovery service', () => {
       toolName: 'write' as const,
       workspaceId: activeHarness.identity.workspaceId,
     };
-    expect(await api.recordMutationBefore(mutation)).toMatchObject({ recorded: true, status: 'ready' });
+    expect(await engine.recordMutationBefore(mutation)).toMatchObject({ recorded: true, status: 'ready' });
     await fs.promises.writeFile(notePath, 'after service');
-    expect(await api.recordMutationAfter({ ...mutation, succeeded: true }))
+    expect(await engine.recordMutationAfter({ ...mutation, succeeded: true }))
       .toMatchObject({ recorded: true, status: 'ready' });
-    const settled = await api.recordTurnSettled({
-      activeWriterScopes: ['pi-worker:worker-1'],
+    const settled = await engine.recordTurnSettled({
+      activeWriterScopes: ['native-runtime:worker-1'],
       assistantEntryId: 'service-assistant-1',
       executionId: 'service-execution-1',
       mutationObserved: true,
@@ -137,7 +137,7 @@ describe('Web Application Host workspace recovery service', () => {
     expect(settled).toMatchObject({ status: 'ready', binding: { status: 'ready' } });
     expect(await api.resolveEntry({
       entryId: 'service-assistant-1',
-      sessionId: 'service-session-1',
+      conversation: { kind: 'thread', threadId: 'service-session-1', branchId: 'branch-1' },
       workspaceId: activeHarness.identity.workspaceId,
     })).toMatchObject({ position: 'after', status: 'ready' });
     const checkpoint = await api.createCheckpoint({
@@ -163,7 +163,7 @@ describe('Web Application Host workspace recovery service', () => {
       .toMatchObject({ status: 'ready', retention: { workspaceId: activeHarness.identity.workspaceId } });
     const combined = await api.prepareCombinedRecovery({
       entryId: 'service-user-1',
-      sessionId: 'service-session-1',
+      conversation: { kind: 'thread', threadId: 'service-session-1', branchId: 'branch-1' },
       workspaceId: activeHarness.identity.workspaceId,
     });
     expect(combined).toMatchObject({

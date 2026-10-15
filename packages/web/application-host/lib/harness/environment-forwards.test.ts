@@ -28,14 +28,14 @@ const targetFor = (port: number, hostId = "target-h"): ManagedTarget => ({
 });
 
 describe("environment service forwards (real TCP over the Host↔Host channel)", () => {
-  it("isolates sessions and closes only the sleeping session's listeners", async () => {
+  it("isolates original operations and closes only the selected owner's listeners", async () => {
     const runtime = createEnvironmentForwardRuntime();
     try {
-      const first = await runtime.open({ target: targetFor(1), host: "127.0.0.1", port: 3000, threadId: "t1", sessionId: "one" });
-      const second = await runtime.open({ target: targetFor(1), host: "127.0.0.1", port: 3000, threadId: "t2", sessionId: "two" });
-      expect(runtime.list("one").map((entry) => entry.id)).toEqual([first.id]);
-      expect(await runtime.close(second.id, "one")).toBe(false);
-      await runtime.closeSession("one");
+      const first = await runtime.open({ target: targetFor(1), host: "127.0.0.1", port: 3000, threadId: "t1", owner: { runtime: "agent", operationId: "one", hostEpoch: runtime.epoch } });
+      const second = await runtime.open({ target: targetFor(1), host: "127.0.0.1", port: 3000, threadId: "t2", owner: { runtime: "agent", operationId: "two", hostEpoch: runtime.epoch } });
+      expect(runtime.list({ runtime: "agent", operationId: "one", hostEpoch: runtime.epoch }).map((entry) => entry.id)).toEqual([first.id]);
+      expect(await runtime.close(second.id, { runtime: "agent", operationId: "one", hostEpoch: runtime.epoch })).toBe(false);
+      await runtime.closeOwner({ runtime: "agent", operationId: "one", hostEpoch: runtime.epoch });
       expect(runtime.list().map((entry) => entry.id)).toEqual([second.id]);
       const dead = new Socket();
       const failed = new Promise<string>((resolve) => dead.once("error", (error: NodeJS.ErrnoException) => resolve(error.code!)));
@@ -58,7 +58,7 @@ describe("environment service forwards (real TCP over the Host↔Host channel)",
 
     const runtime = createEnvironmentForwardRuntime();
     stops.push(() => void runtime.dispose());
-    const access = await runtime.open({ target: targetFor(httpPort), host: "127.0.0.1", port: servicePort, threadId: "t1" });
+    const access = await runtime.open({ target: targetFor(httpPort), host: "127.0.0.1", port: servicePort, threadId: "t1", owner: { runtime: "agent", operationId: "one", hostEpoch: runtime.epoch } });
     expect(access.access.kind).toBe("forward");
     expect(access.service).toEqual({ machineId: "managed:target-h", host: "127.0.0.1", port: servicePort });
 
@@ -92,7 +92,7 @@ describe("environment service forwards (real TCP over the Host↔Host channel)",
 
     const runtime = createEnvironmentForwardRuntime();
     stops.push(() => void runtime.dispose());
-    const access = await runtime.open({ target: targetFor(httpPort, "target-h"), host: "127.0.0.1", port: servicePort, threadId: null });
+    const access = await runtime.open({ target: targetFor(httpPort, "target-h"), host: "127.0.0.1", port: servicePort, threadId: null, owner: { runtime: "agent", operationId: "one", hostEpoch: runtime.epoch } });
     const socket = await new Promise<Socket>((resolve, reject) => {
       const s = new Socket();
       s.once("error", reject);
@@ -118,7 +118,7 @@ describe("environment service forwards (real TCP over the Host↔Host channel)",
 
     const runtime = createEnvironmentForwardRuntime();
     stops.push(() => void runtime.dispose());
-    const access = await runtime.open({ target: targetFor(httpPort), host: "127.0.0.1", port: servicePort, threadId: null });
+    const access = await runtime.open({ target: targetFor(httpPort), host: "127.0.0.1", port: servicePort, threadId: null, owner: { runtime: "agent", operationId: "one", hostEpoch: runtime.epoch } });
     const socket = await new Promise<Socket>((resolve, reject) => {
       const s = new Socket();
       s.once("error", reject);

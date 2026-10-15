@@ -5,9 +5,9 @@ import type {
 import type { SurfaceOwnerIdentity } from '@varin/extension-surface';
 import { getRegisteredRuntimeAPIs } from '@/lib/runtime-api/registry';
 import {
-  BUILTIN_PI_INTEGRATION_DEFINITIONS,
-  activateBuiltinPiIntegration,
-} from './builtin-pi-integrations';
+  BUILTIN_SURFACE_EXTENSION_DEFINITIONS,
+  activateBuiltinSurfaceExtension,
+} from './builtin-surface-extensions';
 import {
   getVarinExtensionCatalogState,
   startVarinExtensionCatalog,
@@ -76,7 +76,7 @@ const reportActual = async (entry: VarinExtensionCatalogEntry): Promise<void> =>
 };
 
 const reconcileEntry = async (entry: VarinExtensionCatalogEntry): Promise<void> => {
-  const definition = BUILTIN_PI_INTEGRATION_DEFINITIONS.find((candidate) => (
+  const definition = BUILTIN_SURFACE_EXTENSION_DEFINITIONS.find((candidate) => (
     candidate.manifest.id === entry.manifest.id
   ));
   if (!definition) return;
@@ -118,7 +118,7 @@ const reconcileEntry = async (entry: VarinExtensionCatalogEntry): Promise<void> 
     if (entry.desired.enabled) {
       await varinSurfaceRuntime.activate(
         { owner },
-        activateBuiltinPiIntegration(definition, varinSurfaceRuntime.surface),
+        activateBuiltinSurfaceExtension(definition, varinSurfaceRuntime.surface),
       );
       controller.active = true;
     } else {
@@ -134,7 +134,7 @@ const reconcile = (): Promise<void> => {
   const operation = async () => {
     const snapshot = getVarinExtensionCatalogState().snapshot?.catalog;
     if (!snapshot?.authoritative) return;
-    for (const definition of BUILTIN_PI_INTEGRATION_DEFINITIONS) {
+    for (const definition of BUILTIN_SURFACE_EXTENSION_DEFINITIONS) {
       const entry = snapshot.extensions.find((candidate) => candidate.manifest.id === definition.manifest.id);
       if (entry) await reconcileEntry(entry);
     }

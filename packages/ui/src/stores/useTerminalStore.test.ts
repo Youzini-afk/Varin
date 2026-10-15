@@ -147,4 +147,19 @@ describe('terminal state reconciliation', () => {
     expect(tab?.lifecycle).toBe('running');
     expect(state?.activeTabId).toBe(first);
   });
+
+  test('restores local terminal layout without turning attached jobs into replacement shells', () => {
+    const local = setup();
+    useTerminalStore.getState().attachExistingSession('/repo', 'managed-session', 'Agent process', {
+      cwd: '/remote-only', resourceOwner: { kind: 'managed_host', hostId: 'host-b', connectionId: 'b', endpointIdentity: 'sha256-b' },
+    });
+    useTerminalStore.getState().attachExistingSession('/attached-only', 'sh_1');
+    const options = useTerminalStore.persist.getOptions();
+    const saved = options.partialize!(useTerminalStore.getState());
+    const restored = options.merge!(saved, useTerminalStore.getState());
+    expect(restored.sessions.get('/repo')?.tabs.map(tab => tab.id)).toEqual([local]);
+    expect(restored.sessions.get('/repo')?.activeTabId).toBe(local);
+    expect(restored.sessions.get('/repo')?.tabs[0]).toMatchObject({ closePolicy: 'destroy', terminalSessionId: null, source: null });
+    expect(restored.sessions.has('/attached-only')).toBe(false);
+  });
 });

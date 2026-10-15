@@ -28,26 +28,57 @@ afterEach(async () => {
   await Promise.all(roots.splice(0).map((root) => rm(root, { force: true, recursive: true })));
 });
 
-const validLoop = ({ name = 'digest', enabled = true } = {}) => `---\nname: ${name}\nschedule: "0 9 * * *"\nenabled: ${enabled}\nmodel: openai-codex/gpt-5.3-codex\nthinking: high\nrun_as_goal: true\ngoal_token_budget: 25000\n---\nReview the repository.\n`;
+const validLoop = ({ name = 'digest', enabled = true } = {}) => `---\nname: ${name}\nruntime: agent\nschedule: "0 9 * * *"\ntimezone: UTC\nenabled: ${enabled}\ntarget:\n  kind: new_work\n  model: { providerId: provider, modelId: model }\n  source: { kind: project }\n  sourceMode: fixed_branch\n  goal: null\n---\nReview the repository.\n`;
 
 describe('Markdown scheduled task loops', () => {
-  it('maps Pi-native fields without OpenCode permission or variant fields', () => {
+  it('reads an explicit registered source and normalizes omitted source only at the Markdown asset boundary', () => {
+    const target = { kind: 'new_work', model: { providerId: 'provider', modelId: 'model' }, sourceMode: 'materialized', goal: null };
+    const markdown = (selection: unknown) => `---\nname: source-review\nruntime: agent\nschedule: "0 9 * * *"\ntimezone: UTC\ntarget: ${JSON.stringify(selection)}\n---\nReview the source.\n`;
+    expect(requireDefinition(parseLoopContent(markdown(target)).definition).target).toEqual({ ...target, source: { kind: 'project' } });
+    const source = { kind: 'workspace', workspaceId: 'registered:remote', resourceOwner: { kind: 'managed_host', hostId: 'host', connectionId: 'connection', endpointIdentity: 'endpoint' } };
+    expect(requireDefinition(parseLoopContent(markdown({ ...target, source })).definition).target).toEqual({ ...target, source });
+    const invalid = parseLoopContent(markdown({ ...target, source: { ...source, path: '/must-not-fallback' } }));
+    expect(invalid.definition).toBeNull(); expect(invalid.error).toContain('source');
+    const inherited = parseLoopContent(markdown({ kind: 'existing_work', threadId: 'thread', branchId: 'branch', source }));
+    expect(inherited.definition).toBeNull(); expect(inherited.error).toContain('inherits');
+  });
+
+  it('parses only explicit native authority and keeps prompt bytes intact', () => {
     const parsed = parseLoopContent(validLoop());
     expect(parsed.error).toBeNull();
-    expect(parsed.definition).toMatchObject({
+    expect(parsed.definition).toEqual({
+      runtime: 'agent',
       enabled: true,
-      execution: {
-        goalTokenBudget: 25_000,
-        modelID: 'gpt-5.3-codex',
-        providerID: 'openai-codex',
-        runAsGoal: true,
-        thinkingLevel: 'high',
-      },
+      execution: { prompt: 'Review the repository.\n' },
+      target: { kind: 'new_work', model: { providerId: 'provider', modelId: 'model' }, source: { kind: 'project' }, sourceMode: 'fixed_branch', goal: null },
+      missedPolicy: 'skip',
       name: 'digest',
-      schedule: { cron: '0 9 * * *', kind: 'cron' },
+      schedule: { cron: '0 9 * * *', kind: 'cron', timezone: 'UTC' },
     });
-    expect('permissionAutoAccept' in requireDefinition(parsed.definition).execution).toBe(false);
-    expect('variant' in requireDefinition(parsed.definition).execution).toBe(false);
+    expect(requireDefinition(parseLoopContent(validLoop().replace('enabled: true\n', '')).definition).enabled).toBe(false);
+  });
+
+  it.each([undefined, 'pi', 'other'])('rejects unsupported loop runtime %s', runtime => {
+    const content = runtime === undefined ? validLoop().replace('runtime: agent\n', '') : validLoop().replace('runtime: agent', `runtime: ${runtime}`);
+    expect(parseLoopContent(content)).toMatchObject({ definition: null, name: 'digest', error: expect.stringContaining('Unsupported loop runtime') });
+  });
+
+  it.each(['model: provider/model', 'thinking: high', 'agent: reviewer', 'run_as_goal: true', 'goal_token_budget: 100'])('rejects obsolete execution field %s', field => {
+    expect(parseLoopContent(validLoop().replace('enabled: true', `enabled: true\n${field}`))).toMatchObject({ definition: null, error: expect.stringContaining('Unsupported execution fields') });
+  });
+
+  it('requires an explicit timezone and target', () => {
+    expect(parseLoopContent(validLoop().replace('timezone: UTC\n', '')).error).toContain('explicit IANA timezone');
+    expect(parseLoopContent(validLoop().replace('target:\n', 'other:\n')).error).toContain('target is required');
+  });
+
+  it('does not rewrite an unsupported file when asked to enable it', async () => {
+    const root = await tempRoot();
+    const filePath = path.join(root, 'unsupported.md');
+    const content = validLoop().replace('runtime: agent\n', 'runtime: pi\n');
+    await writeFile(filePath, content);
+    await expect(setLoopFileEnabled(filePath, true)).rejects.toThrow('Unsupported loop runtime');
+    expect(await readFile(filePath, 'utf8')).toBe(content);
   });
 
   it('does not impose small presentation caps on names or prompts', () => {
@@ -55,7 +86,7 @@ describe('Markdown scheduled task loops', () => {
     const prompt = 'p'.repeat(25_000);
     const parsed = parseLoopContent(validLoop({ name }).replace('Review the repository.', prompt));
     expect(requireDefinition(parsed.definition).name).toBe(name);
-    expect(requireDefinition(parsed.definition).execution.prompt).toBe(prompt);
+    expect(requireDefinition(parsed.definition).execution.prompt).toBe(`${prompt}\n`);
   });
 
   it('recovers the name from malformed YAML for precedence safety', () => {

@@ -27,6 +27,8 @@ import {
 import { createVectorCache, type SemanticVectorCache } from "./vector-cache.js";
 import type { SemanticDocumentState, SemanticSourceMetadata, SemanticSourceMetadataUpdate } from "./store-contract.js";
 import { isAbortError, waitWithSignal } from "../../cancellation.js";
+import type { SemanticSourceView } from "./query-view.js";
+import { acquireSourceQuery } from "./source-query.js";
 
 const STRUCTURAL_LANGUAGES: ReadonlySet<string> = new Set(Object.keys(TREE_SITTER_LANGUAGE_SPECS));
 const semanticLanguage = (file: string): string | null => languageIdForPath(file);
@@ -87,6 +89,8 @@ type SemanticScanFile = FileSearchItem & { metadata?: SemanticSourceMetadata };
 type SemanticScanFiles = SemanticScanFile[] & { enumerationStatus?: FileSearchEnumerationStatus; enumerationInfo?: FileSearchEnumerationInfo };
 
 export type SemanticSearchRequest = {
+  /** Legacy Pi callers bind their own query transport; native uses acquirePublishedQuery. */
+  embedder?: SemanticEmbedder;
   threadQuery?: import("../../harness/working-state/working-branch-query.js").WorkingBranchQuerySnapshot;
   signal?: AbortSignal;
   roots?: readonly string[];
@@ -160,7 +164,7 @@ export function createSemanticIndexRuntime(options: SemanticIndexRuntimeOptions)
     if (!bootstrap) {
       bootstrap = (async () => {
         await embedder.prepare();
-        const vectors = await scheduler.enqueue("foreground", async () => (
+        const vectors = await scheduler.enqueue(bootstrapPurpose === "query" ? "foreground" : "background", async () => (
           embedder.embed([bootstrapText], { purpose: bootstrapPurpose, ...(signal ? { signal } : {}) })
         ));
         const vector = vectors[0];
@@ -201,13 +205,13 @@ export function createSemanticIndexRuntime(options: SemanticIndexRuntimeOptions)
     return created;
   };
 
-  const storeFor = (scope: SemanticScopeKey, embedder: SemanticEmbedder = embedderOf()): SemanticGenerationStore => {
+  const storeFor = (scope: SemanticScopeKey, embedder: SemanticEmbedder = embedderOf(), publication = true): SemanticGenerationStore => {
     if (embedder.space.dim <= 0) {
       throw new Error("Semantic store requires a known vector dimension.");
     }
     const key = scopeKey(scope, spaceIdOf(embedder.space));
     const existing = stores.get(key);
-    if (existing) return existing;
+    if (existing) { if (publication) existing.setEmbedder(embedder); return existing; }
     const created = createSemanticGenerationStore({
       dataDir: options.dataDir,
       hostId: options.hostId,
@@ -334,6 +338,8 @@ export function createSemanticIndexRuntime(options: SemanticIndexRuntimeOptions)
     const signal = AbortSignal.any([lifecycleController.signal, changeSignal, ...(scopeSnapshot ? [scopeSnapshot.signal] : [])]);
     signal.throwIfAborted();
     const embedder = embedderOf();
+    const releaseEmbedder = embedder.retain?.();
+    try {
     const root = (await options.documents.inspectWorkspace(scope.scopeId)).root;
     if (root && scopeSnapshot && !indexPathAllowed(scopeSnapshot, path.resolve(root, documentId))
       && indexPathAllowed(scopeSnapshot, path.resolve(root, documentId), true)) return;
@@ -382,6 +388,7 @@ export function createSemanticIndexRuntime(options: SemanticIndexRuntimeOptions)
       failures.add(documentId);
       indexReadFailures.set(resolvedKey, failures);
     }
+    } finally { releaseEmbedder?.(); }
   };
 
   const observeDocumentMutation = (event: Omit<DocumentMutationObservation, 'owner'> & Partial<Pick<DocumentMutationObservation, 'owner'>>): void => {
@@ -460,6 +467,7 @@ export function createSemanticIndexRuntime(options: SemanticIndexRuntimeOptions)
     activeScanGates.set(scopeScanKey, gate);
     let resolvedKey = key;
     const runHolder: { promise?: Promise<void> } = {};
+    const releaseEmbedder = initialEmbedder.retain?.();
     const run = (async () => {
       let store: SemanticGenerationStore | undefined;
       let scanComplete = true;
@@ -512,10 +520,26 @@ export function createSemanticIndexRuntime(options: SemanticIndexRuntimeOptions)
           updateProgress({ phase: "ready" });
           return;
         }
-        // The model dimension can be resolved with a path probe. Resolving it
-        // must not force a body read for a file that metadata may later skip.
-        const bootstrapText = catalog[0]?.relativePath ?? ".";
-        const embedder = await ensureEmbedderSpace(initialEmbedder, signal, bootstrapText);
+        // Unknown dimensions are learned only from a real admitted document
+        // chunk in this explicitly enrolled background build. Its vector is
+        // cached for publication; a path-only paid readiness probe is not work.
+        let bootstrapText: string | undefined;
+        if (initialEmbedder.space.dim <= 0) {
+          for (const file of catalog) {
+            signal.throwIfAborted();
+            try {
+              const prepared = await diskChunksFor(scope.scopeId, root, file.relativePath, initialEmbedder, signal);
+              bootstrapText = prepared.chunks[0]?.embedText;
+              if (bootstrapText !== undefined) break;
+            } catch { signal.throwIfAborted(); scanComplete = false; }
+          }
+          if (bootstrapText === undefined) {
+            scanFailures.delete(scopeScanKey);
+            updateProgress({ phase: 'ready' });
+            return;
+          }
+        }
+        const embedder = await ensureEmbedderSpace(initialEmbedder, signal, bootstrapText ?? '');
         signal.throwIfAborted();
         resolvedKey = scopeKey(scope, spaceIdOf(embedder.space));
         if (resolvedKey !== key) {
@@ -689,6 +713,7 @@ export function createSemanticIndexRuntime(options: SemanticIndexRuntimeOptions)
           try { options.onError?.(error); } catch { /* observational */ }
         }
       } finally {
+        releaseEmbedder?.();
         gate.resolve();
         if (activeScanGates.get(scopeScanKey) === gate) activeScanGates.delete(scopeScanKey);
         if (scanControllers.get(key) === controller) scanControllers.delete(key);
@@ -864,10 +889,11 @@ export function createSemanticIndexRuntime(options: SemanticIndexRuntimeOptions)
       searchOptions = { ...searchOptions, roots };
     }
     signal?.throwIfAborted();
-    const embedder = embedderOf();
+    const embedder = searchOptions?.embedder ?? embedderOf();
     let status = statusForEmbedder(scope, embedder);
     if (status.status === "unavailable") return { status, hits: [], gaps: [] };
     const scopeId = scopeIdentity(scope);
+    const releaseEmbedder = embedder.retain?.();
     try {
       await ensureEmbedderSpace(embedder, signal, question, "query");
       if (deferredDimensionScans.get(embedder)?.has(scopeId)) {
@@ -949,7 +975,7 @@ export function createSemanticIndexRuntime(options: SemanticIndexRuntimeOptions)
       if (diskIndexEnabled && (scanProgress.get(`${scope.scopeKind}\0${scope.scopeId}`)?.coverageStats?.unsupportedFiles ?? 0) > 0) {
         indexGaps.push({ path: '.', reason: 'unsupported-files' });
       }
-      const store = storeFor(scope, embedder);
+      const store = storeFor(scope, embedder, false);
       const maskPaths = [
         ...overlays.map((overlay) => overlay.path),
         ...(unverifiedPaths.get(key) ?? []),
@@ -1035,7 +1061,131 @@ export function createSemanticIndexRuntime(options: SemanticIndexRuntimeOptions)
       if (error instanceof Error && error.name === "AbortError") throw error;
       try { options.onError?.(error); } catch { /* query failure is a status */ }
       return { status: { ...status, status: "failed" }, hits: [], gaps: [] };
+    } finally { releaseEmbedder?.(); }
+  };
+
+
+  /** Native local live-root queries retain only an already-published immutable reader.
+   * This path never opens a cold store, scans, probes a model, or reads Documents.
+   * Its caller owns authorized current-source verification of every returned row. */
+  const acquirePublishedQuery = async (scope: SemanticScopeKey, request: {
+    embedder: SemanticEmbedder;
+    roots: readonly string[];
+    signal?: AbortSignal;
+    assertAvailable(): void;
+    authorize(signal: AbortSignal): Promise<void>;
+    /** Credential-scoped cache reuse does not change the actual vector-space identity. */
+    cacheAuthority: string;
+    /** Original query session checks recovery before any vector cache can be consumed. */
+    queryVector(question: string, cached: number[] | undefined, signal: AbortSignal): Promise<number[]>;
+    sourceView?: SemanticSourceView;
+    documentVectors?(texts: readonly string[], documents: readonly { path: string; revision: string }[], signal: AbortSignal): Promise<number[][]>;
+  }) => {
+    const managedSource = request.sourceView?.resourceOwner.kind === 'managed_host';
+    const scopeSnapshot = managedSource ? undefined : options.getIndexScope?.();
+    const signal = AbortSignal.any([lifecycleController.signal,
+      ...(request.signal ? [request.signal] : []), ...(scopeSnapshot ? [scopeSnapshot.signal] : [])]);
+    const assertAvailable = (): void => {
+      signal.throwIfAborted();
+      if (disposed) throw new Error("Semantic runtime is closed");
+      request.assertAvailable();
+    };
+    assertAvailable();
+    const embedder = request.embedder;
+    if (request.sourceView) {
+      if (!request.documentVectors) throw new Error('Source document inference session is unavailable');
+      return acquireSourceQuery({ scope, source: request.sourceView, embedder, roots: request.roots,
+        ...(scopeSnapshot ? { indexScope: scopeSnapshot } : {}),
+        ...(managedSource || options.indexDirectories === undefined ? {} : { indexDirectories: options.indexDirectories }),
+        ...(!managedSource && options.includeIgnoredDirectories ? { includeIgnoredDirectories: options.includeIgnoredDirectories } : {}),
+        structure: options.structureSource, cache: queryCache, scheduler, signal,
+        store: () => storeFor(scope, embedder, false), assertAvailable, authorize: request.authorize,
+        cacheAuthority: request.cacheAuthority, queryVector: request.queryVector, documentVectors: request.documentVectors });
     }
+    const status = statusForEmbedder(scope, embedder);
+    const resourceRoot = (await options.documents.inspectWorkspace(scope.scopeId)).root;
+    const requested = request.roots.map(root => path.resolve(resourceRoot, root));
+    const selected = await (scopeSnapshot
+      ? resolveScopedIndexRoots(resourceRoot, scopeSnapshot, true)
+      : resolveSemanticScanRoots(resourceRoot, options.indexDirectories));
+    const roots = selected.flatMap(directory => requested.flatMap(root => {
+      if (insideDirectory(directory, root)) return [root];
+      return insideDirectory(root, directory) ? [directory] : [];
+    })).map(root => path.relative(resourceRoot, root).split(path.sep).join('/') || '.');
+    assertAvailable();
+    const store = embedder.status === 'ready' && embedder.space.dim > 0 && roots.length > 0
+      ? stores.get(scopeKey(scope, spaceIdOf(embedder.space))) : undefined;
+    const reader = store ? await store.retainPublished(signal) : null;
+    let released = false;
+    const assertReader = (): void => {
+      assertAvailable();
+      if (released) throw new Error('Semantic query reader is released');
+      if (reader && store) store.assertPublishedReaderAvailable(reader.token);
+    };
+    const release = async (): Promise<void> => {
+      if (released) return;
+      released = true;
+      if (reader && store) await store.releasePinned(reader.token);
+    };
+    try { assertReader(); } catch (error) { await release(); throw error; }
+    const queryGaps: SemanticSearchResult['gaps'] = [
+      ...(store ? [...(indexReadFailures.get(scopeKey(scope, store.spaceId)) ?? [])]
+        .filter(documentId => pathInRoots(documentId, roots)).map(documentId => ({ path: documentId, reason: 'index-read-failed' as const })) : []),
+      ...(scanFailures.has(scopeIdentity(scope)) ? [{ path: '.', reason: 'index-read-failed' as const }] : []),
+    ];
+    const pinnedStatus: SemanticIndexStatus = reader ? {
+      ...status, ...reader.checkpoint, scope, generation: reader.publicationId,
+      status: reader.checkpoint.coverage === 'complete' ? 'ready' : 'incomplete',
+    } : { ...status, status: roots.length === 0 || embedder.status !== 'ready' ? 'unavailable'
+      : status.lifecycle === 'building' || status.lifecycle === 'rebuilding' ? 'incomplete'
+        : (status.publishedDocuments ?? 0) > 0 ? 'unavailable' : 'empty', coverage: 'empty' };
+    return {
+      reader,
+      status: Object.freeze(pinnedStatus),
+      assertAvailable: assertReader,
+      release,
+      async search(question: string, limit: number, searchSignal?: AbortSignal): Promise<SemanticSearchResult> {
+        const active = AbortSignal.any([signal, ...(searchSignal ? [searchSignal] : [])]);
+        active.throwIfAborted();
+        assertReader();
+        await request.authorize(active);
+        assertReader();
+        if (!reader || !store || reader.checkpoint.publishedDocuments === 0) {
+          return { status: pinnedStatus, hits: [], gaps: [] };
+        }
+        const spaceId = reader.checkpoint.spaceId;
+        const cached = queryCache.get({ spaceId, purpose: 'query', embedText: question, authority: request.cacheAuthority });
+        const queryWork = async () => {
+          active.throwIfAborted(); assertReader();
+          await request.authorize(active);
+          assertReader();
+          return request.queryVector(question, cached, active);
+        };
+        const vector = await waitWithSignal(embedder.ownsScheduling ? queryWork() : scheduler.enqueue('foreground', queryWork), active);
+        active.throwIfAborted(); assertReader();
+        await request.authorize(active);
+        assertReader();
+        if (!vector || vector.length !== embedder.space.dim || vector.some(value => !Number.isFinite(value))) {
+          throw new Error('Semantic query vector is invalid');
+        }
+        queryCache.set({ spaceId, purpose: 'query', embedText: question, authority: request.cacheAuthority }, vector);
+        await request.authorize(active);
+        active.throwIfAborted(); assertReader();
+        const hits = await store.searchPinned(reader.token, vector, limit, {
+          roots,
+          ...(scopeSnapshot ? { indexScope: { resourceRoot, directories: scopeSnapshot.directories,
+            pausedDirectories: scopeSnapshot.pausedDirectories, removedDirectories: scopeSnapshot.removedDirectories,
+            excludedDirectories: scopeSnapshot.excludedDirectories } } : {}),
+        }, active);
+        active.throwIfAborted(); assertReader();
+        await request.authorize(active);
+        assertReader();
+        return { status: { ...pinnedStatus,
+          coverage: queryGaps.length && pinnedStatus.coverage === 'complete' ? 'partial' : pinnedStatus.coverage,
+          status: pinnedStatus.coverage === 'complete' && queryGaps.length === 0
+            ? hits.length ? 'ready' : 'empty' : 'incomplete' }, hits, gaps: [...queryGaps] };
+      },
+    };
   };
 
   const drain = async (): Promise<void> => {
@@ -1050,8 +1200,11 @@ export function createSemanticIndexRuntime(options: SemanticIndexRuntimeOptions)
     for (const controller of scanControllers.values()) controller.abort();
     scanControllers.clear();
     await drain();
-    await Promise.allSettled([...stores.values()].map((store) => store.close()));
-    stores.clear();
+    const closing = await Promise.allSettled([...stores].map(async ([key, store]) => {
+      await store.close(); stores.delete(key);
+    }));
+    const failures = closing.filter((result): result is PromiseRejectedResult => result.status === 'rejected');
+    if (failures.length) throw new AggregateError(failures.map(result => result.reason), 'Semantic store shutdown failed');
   };
 
   return {
@@ -1068,6 +1221,13 @@ export function createSemanticIndexRuntime(options: SemanticIndexRuntimeOptions)
       scanProgress.get(`${scope.scopeKind}\0${scope.scopeId}`) ?? null
     ),
     search,
+    acquirePublishedQuery,
+    publishedReaderStats: async () => {
+      const values = await Promise.all([...stores.values()].map(store => store.publishedReaderStats()));
+      return values.reduce((total, value) => ({ activeReaders: total.activeReaders + value.activeReaders,
+        retainedPublications: total.retainedPublications + value.retainedPublications }),
+      { activeReaders: 0, retainedPublications: 0 });
+    },
     drain,
     dispose,
     scheduler,

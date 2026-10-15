@@ -5,7 +5,7 @@
  * line-delimited JSON protocol on stdin/stdout — the managed connection the
  * product plan requires in place of per-action interpreter restarts. This
  * module owns spawn, request/response correlation, stderr capture, and the
- * restart-on-unexpected-exit boundary; higher layers own catalogs,
+ * single input-helper lifetime (capture may restart); higher layers own catalogs,
  * observations, and cancellation semantics.
  */
 
@@ -94,6 +94,8 @@ export interface DriverResponse {
 
 export interface DriverSpawnSpec {
   independentInputRelease?: boolean;
+  /** One platform authorization/capture owner, with a separate read-only wire lane. */
+  sharedDesktopSession?: boolean;
   command: string;
   args: string[];
   cwd?: string;
@@ -133,20 +135,15 @@ export function localDriverSpawnSpec(platform: ComputerPlatform, driverDir = com
     if (!existsSync(script)) return null;
     return {
       command: "python3",
+      sharedDesktopSession: process.env.XDG_SESSION_TYPE === "wayland" || Boolean(process.env.WAYLAND_DISPLAY),
       args: [script],
       cwd: path.dirname(script),
     };
   }
   if (platform === "macos") {
-    const script = path.join(driverDir, "macos", "driver-host.js");
-    if (!existsSync(script)) return null;
-    // JXA driver: CGWindowList + System Events + CGEvent via osascript.
-    // Unverified platform — the driver reports conservative capabilities.
-    return {
-      command: "osascript",
-      args: ["-l", "JavaScript", script],
-      cwd: path.dirname(script),
-    };
+    const executable = path.join(driverDir, "macos", "Varin Computer.app", "Contents", "MacOS", "VarinComputer");
+    if (!existsSync(executable)) return null;
+    return { command: executable, args: [], sharedDesktopSession: true, cwd: path.dirname(executable) };
   }
   return null;
 }
@@ -171,6 +168,8 @@ export interface ComputerDriverSession {
    * file the long operations poll; returns false when nothing is in flight.
    */
   cancel(): boolean;
+  /** Read-only capture on the same native session, independent of ordered input. */
+  capture?(options?: { timeoutMs?: number }): Promise<DriverResponse>;
   /** Stops the input owner through a channel independent of UIA/stdin. */
   interrupt?(options?: { restoreFocus?: boolean }): Promise<{ released: boolean }>;
   /** The last successful capabilities probe, if any. */
@@ -184,6 +183,8 @@ export function createDriverSession(spec: DriverSpawnSpec): ComputerDriverSessio
   let buffer = "";
   let active: PendingDriverRequest | null = null;
   const queue: PendingDriverRequest[] = [];
+  let captureActive: PendingDriverRequest | null = null;
+  let capturePending: Promise<DriverResponse> | null = null;
   let stderrTail = "";
   let caps: ComputerCapabilities | null = null;
   let disposed = false;
@@ -201,6 +202,7 @@ export function createDriverSession(spec: DriverSpawnSpec): ComputerDriverSessio
 
   const failAll = (error: Error) => {
     if (active) { clearTimeout(active.timeout); active.reject(error); active = null; }
+    if (captureActive) { clearTimeout(captureActive.timeout); captureActive.reject(error); captureActive = null; }
     for (const queued of queue.splice(0)) queued.reject(error);
     caps = null;
   };
@@ -213,10 +215,12 @@ export function createDriverSession(spec: DriverSpawnSpec): ComputerDriverSessio
       return;
     }
     if (typeof message.id !== "string" || message.id === null) return;
-    const p = active;
+    const capture = captureActive?.id === message.id;
+    const p = capture ? captureActive : active;
     if (!p || message.id !== p.id) return;
     const progress = message as unknown as Record<string, unknown>;
     if (progress.type === 'gesture') {
+      if (capture) return;
       if (!['target', 'dispatched'].includes(String(progress.phase))) return;
       const point = (value: unknown) => {
         if (!value || typeof value !== 'object') return undefined;
@@ -235,7 +239,7 @@ export function createDriverSession(spec: DriverSpawnSpec): ComputerDriverSessio
       stop(new Error("Computer driver returned a malformed response"));
       return;
     }
-    active = null;
+    if (capture) captureActive = null; else active = null;
     clearTimeout(p.timeout);
     p.resolve(message);
     pump();
@@ -279,6 +283,7 @@ export function createDriverSession(spec: DriverSpawnSpec): ComputerDriverSessio
 
   const ensureChild = (): ChildProcess => {
     if (isAlive() && child) return child;
+    if (started && spec.env?.VARIN_DRIVER_ROLE !== 'capture') throw new Error('The original Computer input helper exited; acquire a new session without reusing its physical release identity');
     buffer = "";
     stderrTail = "";
     mkdirSync(cancelDir, { recursive: true });
@@ -350,6 +355,26 @@ export function createDriverSession(spec: DriverSpawnSpec): ComputerDriverSessio
     }
   };
 
+  // Coalesce concurrent viewers, but never queue their frame behind a long input.
+  // Only capture_frame may use this lane; it cannot replace an Agent observation.
+  const capture: NonNullable<ComputerDriverSession["capture"]> = (options = {}) => {
+    if (capturePending) return capturePending;
+    const pending = new Promise<DriverResponse>((resolve, reject) => {
+      if (disposed) { reject(new Error("Computer driver session is disposed")); return; }
+      const next: PendingDriverRequest = { id: randomUUID(), op: { tool: 'capture_frame' },
+        timeoutMs: options.timeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS, resolve, reject };
+      captureActive = next;
+      try {
+        const target = ensureChild();
+        next.timeout = setTimeout(() => stop(new Error('Computer capture stopped responding; the native session is unavailable')), next.timeoutMs);
+        target.stdin!.write(JSON.stringify({ ...next.op, id: next.id }) + "\n", error => { if (error && child === target) stop(error); });
+      } catch (error) { stop(error instanceof Error ? error : new Error(String(error))); }
+    });
+    capturePending = pending;
+    void pending.finally(() => { if (capturePending === pending) capturePending = null; }).catch(() => {});
+    return pending;
+  };
+
   // Wrap: cache the capabilities probe per session lifetime.
   const wrapped: ComputerDriverSession = {
     request: async (op, options) => {
@@ -360,6 +385,7 @@ export function createDriverSession(spec: DriverSpawnSpec): ComputerDriverSessio
       return response;
     },
     cancel,
+    ...(spec.sharedDesktopSession ? { capture } : {}),
     ...(spec.independentInputRelease ? { interrupt: (options?: { restoreFocus?: boolean }) => {
       if (interruption) return interruption;
       interruption = (async () => {

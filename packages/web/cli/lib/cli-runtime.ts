@@ -1,67 +1,38 @@
-import type {
-  RuntimeMethod,
-  RuntimeMethodParams,
-  RuntimeMethodResult,
-} from '@varin/protocol';
+import type { Run } from '@varin/protocol';
+import { randomUUID } from 'node:crypto';
 import { TunnelCliError, EXIT_CODE } from './cli-errors.js';
 import { requestJson } from './cli-http.js';
 import type { CliOptions } from './cli-types.js';
 
-const asNonEmptyString = (value: unknown): string | null => {
-  if (typeof value !== 'string') return null;
-  const trimmed = value.trim();
-  return trimmed.length > 0 ? trimmed : null;
+export const requestVarinApi = async <T = Record<string, unknown>>(
+  port: number, endpoint: string, options: CliOptions = {},
+): Promise<T> => {
+  const { response, body, value } = await requestJson(port, endpoint, options);
+  if (response.ok) return value as T;
+  const message = typeof body?.error === 'string' ? body.error
+    : typeof body?.code === 'string' ? body.code : `Varin API request failed: ${endpoint}`;
+  throw new TunnelCliError(message, response.status === 400 || response.status === 404 ? EXIT_CODE.USAGE_ERROR : EXIT_CODE.GENERAL_ERROR);
 };
 
-export const requestRuntimeMethod = async <Method extends RuntimeMethod>(
-  port: number,
-  method: Method,
-  params: RuntimeMethodParams<Method>,
-  options: CliOptions = {},
-): Promise<RuntimeMethodResult<Method>> => {
-  const { response, body } = await requestJson(port, '/api/varin/runtime/request', {
-    ...options,
-    timeoutMs: typeof options.timeoutMs === 'number' && Number.isFinite(options.timeoutMs) && options.timeoutMs > 0
-      ? options.timeoutMs
-      : 60_000,
-    method: 'POST',
-    body: JSON.stringify({ method, params, trustProject: options.trustProject !== false }),
-  });
-  if (response.ok) return body?.result as RuntimeMethodResult<Method>;
-  const message = asNonEmptyString(body?.error) || `Pi runtime method ${method} failed`;
-  const status = Number(response?.status);
-  throw new TunnelCliError(
-    message,
-    status === 400 || status === 404 ? EXIT_CODE.USAGE_ERROR : EXIT_CODE.GENERAL_ERROR,
-  );
+export const requestThreadApi = <T>(port: number, method: string, body: unknown, options: CliOptions = {}): Promise<T> =>
+  requestVarinApi<T>(port, `/api/threads/${method}`, { ...options, timeoutMs: options.timeoutMs ?? 60_000,
+    method: 'POST', body: JSON.stringify(body) });
+
+/** Allocate once per command and expose it even when acceptance is uncertain. */
+export const commandKey = (options: CliOptions): string => {
+  const key = typeof options.key === 'string' && options.key.trim() ? options.key.trim() : randomUUID();
+  process.stderr.write(`Request key: ${key} (reuse with --key to retry)\n`);
+  return key;
 };
 
-export const requestVarinApi = async (
-  port: number,
-  endpoint: string,
-  options: CliOptions = {},
-): Promise<Record<string, unknown>> => {
-  const { response, body } = await requestJson(port, endpoint, options);
-  if (response.ok) return body ?? {};
-  const message = asNonEmptyString(body?.error) || `Varin API request failed: ${endpoint}`;
-  const status = Number(response?.status);
-  throw new TunnelCliError(
-    message,
-    status === 400 || status === 404 ? EXIT_CODE.USAGE_ERROR : EXIT_CODE.GENERAL_ERROR,
-  );
-};
-
-export const waitForSessionIdle = async (
-  port: number,
-  sessionId: string,
-  options: CliOptions = {},
-): Promise<RuntimeMethodResult<'session.snapshot'>> => {
+/** Wait for this original receipt's Run, never a later branch's idle state. */
+export const waitForRun = async (port: number, runId: string, options: CliOptions = {}): Promise<Run> => {
   const timeoutSeconds = Number(options.timeout) > 0 ? Number(options.timeout) : 600;
-  const deadline = Date.now() + (timeoutSeconds * 1000);
+  const deadline = Date.now() + timeoutSeconds * 1000;
   while (Date.now() < deadline) {
-    const snapshot = await requestRuntimeMethod(port, 'session.snapshot', { sessionId }, options);
-    if (!snapshot.busy && !snapshot.isStreaming && !snapshot.isCompacting) return snapshot;
-    await new Promise((resolve) => setTimeout(resolve, 250));
+    const run = await requestThreadApi<Run>(port, 'run', { runId }, options);
+    if (['completed', 'failed', 'cancelled'].includes(run.state)) return run;
+    await new Promise(resolve => setTimeout(resolve, 250));
   }
-  throw new TunnelCliError(`Session ${sessionId} did not become idle within ${timeoutSeconds}s.`, EXIT_CODE.GENERAL_ERROR);
+  throw new TunnelCliError(`Run ${runId} has not reached a terminal state within ${timeoutSeconds}s.`, EXIT_CODE.GENERAL_ERROR);
 };

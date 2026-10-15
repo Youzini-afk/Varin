@@ -31,6 +31,8 @@ The mobile module owns the server-side contract for a single-server Varin mobile
 
 ## Notification integration
 
-`packages/web/application-host/index.ts` consumes Pi runtime broker events and fans session
-completion notifications out through `sendMobilePushToAllDevices` together with
-desktop, UI SSE, Web Push, and APNs channels.
+`packages/web/application-host/index.ts` connects `createThreadNotificationRuntime` to committed
+native Run, permission and question events. It fans the resulting Thread notifications out to
+desktop, UI SSE, Web Push, Expo mobile push and APNs. Expo delivery is suppressed while an
+interactive client is visible. The payload uses the actual Thread title (or `Varin` when empty),
+a fixed status body, and the Thread/branch navigation target; it does not include response text.

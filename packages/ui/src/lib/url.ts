@@ -84,7 +84,8 @@ export const extractLoopbackUrls = (text: string): string[] => {
  * Falls back to window.open() for web runtime.
  *
  * @param url - The URL to open
- * @returns Promise<boolean> - true if the URL was opened successfully
+ * @returns Promise<boolean> - true when the shell or browser acknowledges the open request.
+ * False also covers an unconfirmed popup; this never proves page load or external completion.
  */
 export const openExternalUrl = async (url: string): Promise<boolean> => {
   if (typeof window === 'undefined') {
@@ -118,8 +119,7 @@ export const openExternalUrl = async (url: string): Promise<boolean> => {
   }
 
   try {
-    window.open(normalizedTarget, '_blank', 'noopener,noreferrer');
-    return true;
+    return window.open(normalizedTarget, '_blank', 'noopener,noreferrer') !== null;
   } catch {
     return false;
   }

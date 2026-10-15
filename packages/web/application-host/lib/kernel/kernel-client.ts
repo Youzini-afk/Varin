@@ -1,17 +1,45 @@
+import { modelCredentialBindingIdentity } from './model-binding-lifetime.js';
+import { ModelProtocolBridge, type ModelProtocolOwner, type PrivateModelProtocolResponse } from './model-protocol-bridge.js';
+import { ManagedSourceBridge, type ManagedSourceOwner, type PrivateManagedSourceFrame } from './managed-source-bridge.js';
+import { FileObservationBridge, type PrivateFileObservationResponse } from './file-observation-bridge.js';
+import type { FileObservationOwner } from './file-observation-owner.js';
+import type { KernelRecoveryOperationConflictsResult, McpBinding, LiveMcpBinding } from './protocol.generated.js';
+import { PlanBridge, type PrivatePlanResponse } from './plan-bridge.js';
+import type { PlanOwner } from './plan-owner.js';
+import { MemoryBridge, type PrivateMemoryResponse } from './memory-bridge.js';
+import type { MemoryToolOwner } from './memory-owner.js';
+import { ContextBridge, type ContextOwner, type PrivateContextResponse } from './context-bridge.js';
+import { ResourceBridge, type PrivateResourceResponse } from './resource-bridge.js';
+import type { ResourceOwner } from './resource-owner.js';
+import { RetrievalBridge, type PrivateRetrievalResponse } from './retrieval-bridge.js';
+import type { RetrievalOwner } from './retrieval-owner.js';
+import { LanguageBridge, type PrivateLanguageResponse } from './language-bridge.js';
+import type { LanguageToolOwner } from './language-owner.js';
+import { AgentPolicyBridge, type AgentPolicyLease, type AgentPolicyBinding, type PrivatePolicyResponse } from './agent-policy.js';
+import { ToolBridge, type McpToolLease, type PrivateToolFrame } from './tool-bridge.js';
+import { CredentialBridge, type PrivateCredentialResponse } from "./credential-bridge.js";
+import type { ExistingHostCredentialOwner, CredentialScope } from "./credential-owner.js";
 import { createHash, randomUUID } from "node:crypto";
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { KernelRequestWindow } from "./request-window.js";
 import fs from "node:fs";
 import path from "node:path";
-import type { Writable } from "node:stream";
-import { fileURLToPath } from "node:url";
+import { KernelTransport, CONTROL_METHODS, CONTROL_RESPONSE_METHODS, controlFrame } from "./kernel-transport.js";
+import { prepareKernelCommand } from './kernel-launch.js';
+import { KernelClientError, KernelRequestError } from './kernel-error.js';
+export { KernelClientError } from './kernel-error.js';
 import {
   KERNEL_PROTOCOL_VERSION,
   KERNEL_REQUEST_WINDOW,
+  KERNEL_DEFERRED_RESPONSE_METHODS,
+  type KernelRequestCreditReleased,
+  type KernelMaterializedView,
   type KernelBranchReadResult,
   type KernelBranchChange,
+  type KernelWorkingResultCandidate,
+  type KernelWorkingResultPublication,
+  type KernelWorkingResultCandidateReleased,
   type KernelCreateEntry,
-  type KernelError,
   type KernelHandshakeResult,
   type KernelGrantIssueParams,
   type KernelHealthResult,
@@ -29,7 +57,10 @@ import {
   type KernelComputeReadResult,
   type KernelProcessListResult,
   type KernelProcessReadResult,
-  type KernelProcessWriteResult,
+  type KernelProcessInteractionReceipt,
+  type KernelProcessStreamEvent,
+  type AgentRuntimeStreamEvent,
+  type KernelProcessSubscribeResult,
 } from "./protocol.generated.js";
 
 export interface KernelClientOptions {
@@ -41,6 +72,7 @@ export interface KernelClientOptions {
   env?: NodeJS.ProcessEnv;
   /** Used by focused tests; production always uses a real child process. */
   spawnProcess?: typeof spawn;
+  transportFactory?: typeof KernelTransport.prepare;
   allowCargoDevRunner?: boolean;
   hostGeneration?: string;
   kernelBuildIdentity?: string;
@@ -61,6 +93,7 @@ export type KernelBlobReadSource =
   | { ownerId: string };
 
 export interface KernelCreateBranchInput {
+  sourceProvenance?: { objectHash: string; ownerId: string };
   operationId: string;
   branchId: string;
   workspaceId: string;
@@ -82,6 +115,7 @@ export interface KernelGrantHandle {
   readonly sessionId: string | null;
   readonly threadId: string | null;
   readonly runId: string | null;
+  readonly operationId: string | null;
   readonly owningWorkspace: string | null;
   readonly executionWorkspace: string | null;
   readonly capabilities: readonly string[];
@@ -89,20 +123,20 @@ export interface KernelGrantHandle {
   readonly storageIdentity: string;
 }
 
-interface InternalGrantHandle extends KernelGrantHandle {
-  readonly clientToken: symbol;
+export interface KernelProcessSubscription {
+  readonly closed: Promise<void>;
+  acknowledge(stream: "data" | "control", sequence: number): Promise<void>;
+  close(): Promise<void>;
+}
+export type KernelProcessObserver = (event: KernelProcessStreamEvent, acknowledge: () => Promise<void>) => void;
+interface ProcessSubscriptionEntry {
+  id: string; processId: string; grant: KernelGrantHandle; listener(event: KernelProcessStreamEvent): void;
+  dataSequence: number; controlSequence: number; closed: boolean;
+  resolve(): void; reject(error: Error): void;
 }
 
-export class KernelClientError extends Error {
-  readonly code: string;
-  readonly retryable: boolean;
-
-  constructor(error: KernelError | { code: string; message: string; retryable?: boolean }) {
-    super(error.message);
-    this.name = "KernelClientError";
-    this.code = error.code;
-    this.retryable = error.retryable ?? false;
-  }
+interface InternalGrantHandle extends KernelGrantHandle {
+  readonly clientToken: symbol;
 }
 
 export class KernelScopedClient {
@@ -110,6 +144,10 @@ export class KernelScopedClient {
 
   constructor(private readonly owner: KernelClient, grant: KernelGrantHandle) {
     this.grant = owner.assertGrantForScope(grant);
+  }
+
+  fileReadCheck(params: KernelMethodParams["file.read.check"], signal?: AbortSignal): Promise<{ resourceKey: string }> {
+    return this.owner.fileReadCheck(params, this.grant, signal);
   }
 
   computeStart(params: KernelMethodParams["compute.start"], signal?: AbortSignal): Promise<KernelComputeReadResult> {
@@ -140,12 +178,20 @@ export class KernelScopedClient {
     return this.owner.processRead(params, this.grant, signal);
   }
 
-  processWrite(params: KernelMethodParams["process.write"], signal?: AbortSignal): Promise<KernelProcessWriteResult> {
+  processSubscribe(params: Omit<KernelMethodParams["process.subscribe"], "subscriptionId">, observer: KernelProcessObserver): Promise<KernelProcessSubscription> {
+    return this.owner.processSubscribe(params, this.grant, observer);
+  }
+
+  processWrite(params: KernelMethodParams["process.write"], signal?: AbortSignal): Promise<KernelProcessInteractionReceipt> {
     return this.owner.processWrite(params, this.grant, signal);
   }
 
-  processResize(params: KernelMethodParams["process.resize"], signal?: AbortSignal): Promise<Record<string, unknown>> {
+  processResize(params: KernelMethodParams["process.resize"], signal?: AbortSignal): Promise<KernelProcessInteractionReceipt> {
     return this.owner.processResize(params, this.grant, signal);
+  }
+
+  processInteractionInspect(params: KernelMethodParams["process.interaction.inspect"], signal?: AbortSignal): Promise<KernelProcessInteractionReceipt | null> {
+    return this.owner.processInteractionInspect(params, this.grant, signal);
   }
 
   processKill(params: KernelMethodParams["process.kill"], signal?: AbortSignal): Promise<Record<string, unknown>> {
@@ -188,7 +234,7 @@ export class KernelScopedClient {
     return this.owner.getBlob(hash, source, this.grant, options);
   }
 
-  fileRootRegister(params: KernelMethodParams["file.root.register"], signal?: AbortSignal): Promise<Record<string, unknown>> {
+  fileRootRegister(params: KernelMethodParams["file.root.register"], signal?: AbortSignal): Promise<import('./protocol.generated.js').KernelFileRootRegisterResult> {
     return this.owner.fileRootRegister(params, this.grant, signal);
   }
 
@@ -204,6 +250,10 @@ export class KernelScopedClient {
     return this.owner.fileLeaseAcquire(params, this.grant, signal);
   }
 
+  fileLeaseWait(params: KernelMethodParams["file.lease.wait"], signal?: AbortSignal): Promise<Record<string, unknown>> {
+    return this.owner.fileLeaseWait(params, this.grant, signal);
+  }
+
   fileLeaseCheck(params: KernelMethodParams["file.lease.check"], signal?: AbortSignal): Promise<Record<string, unknown>> {
     return this.owner.fileLeaseCheck(params, this.grant, signal);
   }
@@ -214,6 +264,10 @@ export class KernelScopedClient {
 
   fileCapture(params: KernelMethodParams["file.capture"], signal?: AbortSignal): Promise<Record<string, unknown>> {
     return this.owner.fileCapture(params, this.grant, signal);
+  }
+
+  fileCaptureBatch(params: KernelMethodParams["file.captureBatch"], signal?: AbortSignal): Promise<Record<string, unknown>> {
+    return this.owner.fileCaptureBatch(params, this.grant, signal);
   }
 
   fileApply(params: KernelMethodParams["file.apply"], signal?: AbortSignal): Promise<Record<string, unknown>> {
@@ -240,6 +294,16 @@ export class KernelScopedClient {
     return this.owner.fileMeasure(params, this.grant, signal);
   }
 
+  materializedViewPrepare(params: KernelMethodParams["file.materializedView.prepare"], signal?: AbortSignal): Promise<KernelMaterializedView> {
+    return this.owner.materializedViewPrepare(params, this.grant, signal);
+  }
+  materializedViewCheck(params: KernelMethodParams["file.materializedView.check"], signal?: AbortSignal): Promise<KernelMaterializedView> {
+    return this.owner.materializedViewCheck(params, this.grant, signal);
+  }
+  materializedViewRelease(params: KernelMethodParams["file.materializedView.release"], signal?: AbortSignal): Promise<{ released: boolean }> {
+    return this.owner.materializedViewRelease(params, this.grant, signal);
+  }
+
   fileMaterialize(params: KernelMethodParams["file.materialize"], signal?: AbortSignal): Promise<Record<string, unknown>> {
     return this.owner.fileMaterialize(params, this.grant, signal);
   }
@@ -254,6 +318,18 @@ export class KernelScopedClient {
 
   writeBranch(params: { operationId: string; branchId: string; expectedWriteRevision: number; changes: KernelBranchChange[]; baseRef?: string; parentRef?: string }, signal?: AbortSignal): Promise<KernelWriteResult> {
     return this.owner.writeBranch(params, this.grant, signal);
+  }
+
+  prepareResultCandidate(params: { publicationId: string; branchId: string; expectedWriteRevision: number; expectedRoot: string; changes: KernelBranchChange[] }, signal?: AbortSignal): Promise<KernelWorkingResultCandidate> {
+    return this.owner.prepareResultCandidate(params, this.grant, signal);
+  }
+
+  publishResultCandidate(params: KernelMethodParams["working.result.publish"], signal?: AbortSignal): Promise<KernelWorkingResultPublication> {
+    return this.owner.publishResultCandidate(params, this.grant, signal);
+  }
+
+  releaseResultCandidate(params: KernelMethodParams["working.result.candidate.release"], signal?: AbortSignal): Promise<KernelWorkingResultCandidateReleased> {
+    return this.owner.releaseResultCandidate(params, this.grant, signal);
   }
 
   publishBranch(params: { operationId: string; branchId: string; expectedWriteRevision: number; expectedRoot: string }, signal?: AbortSignal): Promise<Record<string, unknown>> {
@@ -348,6 +424,9 @@ export class KernelScopedClient {
     return this.owner.recoveryOperationComplete(params, this.grant, signal);
   }
 
+  recoveryOperationConflicts(params: KernelMethodParams["recovery.operation.conflicts"], signal?: AbortSignal): Promise<KernelRecoveryOperationConflictsResult> {
+    return this.owner.recoveryOperationConflicts(params, this.grant, signal);
+  }
   recoveryOperationList(params: KernelMethodParams["recovery.operation.list"], signal?: AbortSignal): Promise<Record<string, unknown>> {
     return this.owner.recoveryOperationList(params, this.grant, signal);
   }
@@ -380,15 +459,16 @@ export class KernelScopedClient {
   workingDraftGet(params: KernelMethodParams["working.draft.get"], signal?: AbortSignal): Promise<Record<string, unknown> | null> { return this.owner.workingDraftGet(params, this.grant, signal); }
   workingDraftList(params: KernelMethodParams["working.draft.list"], signal?: AbortSignal): Promise<Record<string, unknown>> { return this.owner.workingDraftList(params, this.grant, signal); }
   workingDraftRelease(params: KernelMethodParams["working.draft.release"], signal?: AbortSignal): Promise<Record<string, unknown>> { return this.owner.workingDraftRelease(params, this.grant, signal); }
-  workingVerificationPut(params: KernelMethodParams["working.verification.put"], signal?: AbortSignal): Promise<Record<string, unknown>> { return this.owner.workingVerificationPut(params, this.grant, signal); }
-  workingVerificationList(params: KernelMethodParams["working.verification.list"], signal?: AbortSignal): Promise<Record<string, unknown>> { return this.owner.workingVerificationList(params, this.grant, signal); }
-  workingVerificationRelease(params: KernelMethodParams["working.verification.release"], signal?: AbortSignal): Promise<Record<string, unknown>> { return this.owner.workingVerificationRelease(params, this.grant, signal); }
-  workingReviewPut(params: KernelMethodParams["working.review.put"], signal?: AbortSignal): Promise<Record<string, unknown>> { return this.owner.workingReviewPut(params, this.grant, signal); }
-  workingReviewList(params: KernelMethodParams["working.review.list"], signal?: AbortSignal): Promise<Record<string, unknown>> { return this.owner.workingReviewList(params, this.grant, signal); }
-  workingReviewRelease(params: KernelMethodParams["working.review.release"], signal?: AbortSignal): Promise<Record<string, unknown>> { return this.owner.workingReviewRelease(params, this.grant, signal); }
 
   getRecord(workspaceId: string, recordId: string, signal?: AbortSignal): Promise<KernelRecordResult | null> {
     return this.owner.getRecord({ workspaceId, recordId }, this.grant, signal);
+  }
+
+  experimentLogChunks(params: KernelMethodParams["storage.experiment.logChunks"], signal?: AbortSignal): Promise<import("./protocol.generated.js").KernelExperimentLogChunksResult> {
+    return this.owner.experimentLogChunks(params, this.grant, signal);
+  }
+  experimentArtifacts(params: KernelMethodParams["storage.experiment.artifacts"], signal?: AbortSignal): Promise<import("./protocol.generated.js").KernelExperimentArtifactsResult> {
+    return this.owner.experimentArtifacts(params, this.grant, signal);
   }
 
   listRecords(params: KernelMethodParams["storage.record.list"], signal?: AbortSignal): Promise<KernelRecordListResult> {
@@ -403,20 +483,13 @@ export class KernelScopedClient {
 }
 
 interface PendingRequest {
+  method: KernelMethod;
   release(): void;
   cancel(): void;
   resolve: (value: unknown) => void;
   reject: (error: unknown) => void;
   grantId?: string | undefined;
 }
-
-const frame = (payload: string): Buffer => {
-  const body = Buffer.from(payload, "utf8");
-  if (body.byteLength > 16 * 1024 * 1024) throw new KernelClientError({ code: "kernel-frame-too-large", message: "Rust kernel frame exceeds transport limit", retryable: false });
-  const header = Buffer.allocUnsafe(4);
-  header.writeUInt32BE(body.byteLength, 0);
-  return Buffer.concat([header, body]);
-};
 
 const KERNEL_BATCH_TARGET_BYTES = 512 * 1024;
 
@@ -453,70 +526,56 @@ const canonicalStoragePath = (value: string): string => {
   }
 };
 
-interface KernelManifest {
-  schema: number;
-  executable: string;
-  targetTriple: string;
-  platform: string;
-  arch: string;
-  binaryFormat: "pe" | "elf" | "macho";
-  buildIdentity: string;
-  protocolVersion: number;
-  kernelVersion: string;
-  sha256: string;
-}
-
-const defaultKernelCandidates = (): string[] => {
-  const extension = process.platform === "win32" ? ".exe" : "";
-  const moduleDirectory = path.dirname(fileURLToPath(import.meta.url));
-  return [
-    process.env.VARIN_KERNEL_PATH?.trim() || "",
-    path.resolve(moduleDirectory, "../../../../../kernel", `varin-kernel${extension}`),
-    path.resolve(moduleDirectory, "../../../../../../kernel", `varin-kernel${extension}`),
-    path.resolve(moduleDirectory, "../../../../../kernel", "target", "release", `varin-kernel${extension}`),
-    path.resolve(moduleDirectory, "../../../../../kernel", "target", "debug", `varin-kernel${extension}`),
-    path.resolve(moduleDirectory, "../../../../kernel", `varin-kernel${extension}`),
-    path.resolve(moduleDirectory, "../../../kernel", `varin-kernel${extension}`),
-    path.resolve(process.cwd(), "kernel", `varin-kernel${extension}`),
-    path.resolve(process.cwd(), "kernel", "target", "release", `varin-kernel${extension}`),
-    path.resolve(process.cwd(), "kernel", "target", "debug", `varin-kernel${extension}`),
-  ].filter(Boolean);
-};
-
-const resolveKernelCommand = (options: KernelClientOptions): { command: string; args: string[]; manifestPath?: string } => {
-  const explicit = options.kernelPath?.trim() || defaultKernelCandidates().find((candidate) => fs.existsSync(candidate));
-  if (explicit) {
-    const manifestPath = path.join(path.dirname(explicit), "manifest.json");
-    return { command: explicit, args: [], ...(fs.existsSync(manifestPath) ? { manifestPath } : {}) };
-  }
-  const moduleDirectory = path.dirname(fileURLToPath(import.meta.url));
-  const manifest = [
-    path.resolve(moduleDirectory, "../../../../../kernel/Cargo.toml"),
-    path.resolve(process.cwd(), "kernel", "Cargo.toml"),
-  ].find((candidate) => fs.existsSync(candidate));
-  const allowCargo = options.allowCargoDevRunner ?? process.env.NODE_ENV !== "production";
-  if (allowCargo && manifest) {
-    return { command: process.platform === "win32" ? "cargo.exe" : "cargo", args: ["run", "--quiet", "--manifest-path", manifest, "--bin", "varin-kernel"] };
-  }
-  throw new KernelClientError({
-    code: "kernel-entry-unavailable",
-    message: "Varin Rust kernel executable is unavailable; build the kernel or set VARIN_KERNEL_PATH",
-    retryable: false,
-  });
-};
-
 export class KernelClient {
   private readonly options: KernelClientOptions;
   private readonly spawnProcess: typeof spawn;
   private child: ChildProcessWithoutNullStreams | null = null;
-  private buffer = Buffer.alloc(0);
+  private transport: KernelTransport | undefined;
   private readonly pending = new Map<string, PendingRequest>();
+  private readonly pendingIdle: Array<() => void> = [];
+  private takePending(id: string): PendingRequest | undefined {
+    const pending = this.pending.get(id);
+    if (pending) this.pending.delete(id);
+    if (!this.pending.size) for (const done of this.pendingIdle.splice(0)) done();
+    return pending;
+  }
+  private whenRequestsIdle(): Promise<void> {
+    return this.pending.size ? new Promise(resolve => this.pendingIdle.push(resolve)) : Promise.resolve();
+  }
+  private readonly processSubscriptions = new Map<string, ProcessSubscriptionEntry>();
+  private readonly agentRuntimeListeners = new Set<(event: AgentRuntimeStreamEvent) => void>();
+  onAgentRuntimeEvent(listener: (event: AgentRuntimeStreamEvent) => void): () => void {
+    this.agentRuntimeListeners.add(listener);
+    return () => this.agentRuntimeListeners.delete(listener);
+  }
+  private readonly credentialBridge: CredentialBridge;
+  private readonly modelProtocolBridge: ModelProtocolBridge;
+  private readonly toolBridge: ToolBridge;
+  private readonly mcpReleaseListeners = new Set<(runId: string) => void>();
+  private readonly languageBridge: LanguageBridge;
+  private readonly managedSourceBridge: ManagedSourceBridge;
+  private readonly memoryBridge: MemoryBridge;
+  private readonly contextBridge: ContextBridge;
+  private readonly resourceBridge: ResourceBridge;
+  private readonly fileObservationBridge: FileObservationBridge;
+  private readonly planBridge: PlanBridge;
+  private readonly retrievalBridge: RetrievalBridge;
+  private readonly issuedGrants = new Map<string, KernelGrantHandle>();
+  private readonly policyBridge: AgentPolicyBridge;
+  private readonly runPreparations = new Map<string, Set<{ controller: AbortController; settled: Promise<void> }>>();
   private window = new KernelRequestWindow(KERNEL_REQUEST_WINDOW);
+  private controlWindow = new KernelRequestWindow(KERNEL_REQUEST_WINDOW);
   private closePromise: Promise<void> | undefined;
-  private readonly revokedGrants = new Set<string>();
+  private readonly inactiveGrants = new Set<string>();
   private started = false;
   private transportFailed = false;
   private readonly exitListeners = new Set<(error: Error) => void>();
+  private readonly readyListeners = new Set<() => void>();
+  /** Observe future successful handshakes. Subscribing never starts the kernel. */
+  subscribeReady(listener: () => void): () => void {
+    this.readyListeners.add(listener);
+    return () => { this.readyListeners.delete(listener); };
+  }
   private closed = false;
   private epoch: string | null = null;
   private readonly clientToken = Symbol("varin-kernel-client");
@@ -525,8 +584,35 @@ export class KernelClient {
   private startPromise: Promise<KernelHandshakeResult> | null = null;
 
   constructor(options: KernelClientOptions) {
+    this.managedSourceBridge = new ManagedSourceBridge(() => this.epoch, frame => this.write(frame), () => this.failAll(new KernelClientError({ code: 'source-channel-failed', message: 'Managed source channel failed', retryable: false }), true));
+    this.modelProtocolBridge = new ModelProtocolBridge(() => this.epoch, frame => this.write(frame), () => this.failAll(new KernelClientError({ code: 'model-protocol-channel-failed', message: 'Model protocol channel failed', retryable: false }), true));
     this.options = options;
     this.spawnProcess = options.spawnProcess ?? spawn;
+    this.policyBridge = new AgentPolicyBridge(() => this.epoch, response => this.write(response),
+      () => this.failAll(new KernelClientError({ code: "policy-channel-failed", message: "Private policy channel failed", retryable: false }), true));
+    this.retrievalBridge = new RetrievalBridge(() => this.epoch, response => this.write(response),
+      () => this.failAll(new KernelClientError({ code: "retrieval-channel-failed", message: "Private retrieval channel failed", retryable: false }), true));
+    this.memoryBridge = new MemoryBridge(() => this.epoch, response => this.write(response),
+      () => this.failAll(new KernelClientError({ code: "memory-channel-failed", message: "Private memory channel failed", retryable: false }), true));
+    this.fileObservationBridge = new FileObservationBridge(() => this.epoch, response => this.write(response),
+      () => this.failAll(new KernelClientError({ code: 'file-observation-channel-failed', message: 'Private file observation channel failed', retryable: false }), true));
+    this.resourceBridge = new ResourceBridge(() => this.epoch, response => this.write(response),
+      () => this.failAll(new KernelClientError({ code: "resource-channel-failed", message: "Private resource channel failed", retryable: false }), true));
+    this.contextBridge = new ContextBridge(() => this.epoch, response => this.write(response),
+      () => this.failAll(new KernelClientError({ code: "context-channel-failed", message: "Private context channel failed", retryable: false }), true));
+    this.planBridge = new PlanBridge(() => this.epoch, response => this.write(response),
+      () => this.failAll(new KernelClientError({ code: "plan-channel-failed", message: "Private plan channel failed", retryable: false }), true));
+    this.languageBridge = new LanguageBridge(() => this.epoch, response => this.write(response),
+      () => this.failAll(new KernelClientError({ code: "language-channel-failed", message: "Private language channel failed", retryable: false }), true));
+    this.toolBridge = new ToolBridge(() => this.epoch, response => this.write(response),
+      () => this.failAll(new KernelClientError({ code: "mcp-channel-failed", message: "Private MCP channel failed", retryable: false }), true),
+      (runId, terminal) => { if (terminal) this.credentialBridge.unregister(runId); void this.languageBridge.releaseSource({ runId }).catch(() => undefined); for (const listener of this.mcpReleaseListeners) { try { listener(runId); } catch { this.mcpReleaseListeners.delete(listener); } } }, undefined,
+      { retain: (binding, model, selection) => this.credentialBridge.retainChildModel(binding, model, selection),
+        release: (runId, operationId) => this.credentialBridge.releaseChildModel(runId, operationId),
+        reconcile: children => this.credentialBridge.reconcileChildModels(children) });
+    this.credentialBridge = new CredentialBridge(() => this.epoch,
+      response => this.write(response),
+      () => this.failAll(new KernelClientError({ code: "credential-channel-failed", message: "Private credential channel failed", retryable: false }), true));
   }
 
   get isReady(): boolean { return this.started && !this.closed; }
@@ -534,6 +620,159 @@ export class KernelClient {
     this.exitListeners.add(listener);
     return () => { this.exitListeners.delete(listener); };
   }
+
+
+  setModelProtocolOwner(owner: ModelProtocolOwner): void { this.modelProtocolBridge.setOwner(owner); }
+  modelProtocolDisconnected(): Promise<void> { return this.modelProtocolBridge.disconnected(); }
+  async publishModelAdapters(params: KernelMethodParams['model.adapters.publish']): Promise<{ revision: number }> {
+    await this.start();
+    return this.requestRaw('model.adapters.publish', params, { allowBootstrap: true });
+  }
+  async retainModelAdapter(bindingId: string, leaseId: string): Promise<void> {
+    await this.start();
+    await this.requestRaw('model.adapters.retain', { bindingId, leaseId }, { allowBootstrap: true });
+  }
+  async releaseModelAdapter(leaseId: string): Promise<void> {
+    if (!this.isReady) return;
+    await this.requestRaw('model.adapters.release', { leaseId }, { allowBootstrap: true });
+  }
+  async revokeModelAdapter(bindingId: string): Promise<void> {
+    if (!this.isReady) return;
+    await this.requestRaw('model.adapters.revoke', { bindingId }, { allowBootstrap: true });
+  }
+  /** Host-only owner registration. This is not exposed through tool grants or renderer APIs. */
+  async registerCredentialOwner(runId: string, owner: ExistingHostCredentialOwner, signal?: AbortSignal, bindingId?: string, lifetime?: import('./credential-bridge.js').CredentialLifetime): Promise<CredentialScope> {
+    if (!this.handshakeResult) await this.start();
+    signal?.throwIfAborted();
+    return this.credentialBridge.register(runId, owner, signal, bindingId, lifetime);
+  }
+  findModelCredentialOwner(configuration: import('./protocol.generated.js').ModelSessionConfiguration, scope: CredentialScope): ExistingHostCredentialOwner | undefined {
+    return this.credentialBridge.findOwner(modelCredentialBindingIdentity(configuration), scope);
+  }
+  async retainQueuedModelCredentialOwner(runId: string, owner: ExistingHostCredentialOwner): Promise<void> {
+    if (!this.handshakeResult) await this.start();
+    await this.credentialBridge.retainQueuedModel(runId, owner);
+  }
+  releaseQueuedModelCredentialOwner(runId: string, owner: ExistingHostCredentialOwner): void { this.credentialBridge.releaseQueuedModel(runId, owner); }
+  unregisterCredentialOwner(runId: string, bindingId?: string | null): void { this.credentialBridge.unregister(runId, bindingId); }
+  async registerMcpOwner(runId: string, lease: McpToolLease): Promise<McpBinding> {
+    if (!this.handshakeResult) await this.start();
+    this.toolBridge.register(runId, lease);
+    return lease.binding;
+  }
+  async registerMcpCandidate(runId: string, lease: McpToolLease): Promise<LiveMcpBinding> {
+    if (!this.handshakeResult) await this.start();
+    const live = this.toolBridge.register(runId, lease, false);
+    return { ownerId: live.ownerId, binding: lease.binding };
+  }
+  discardMcpCandidate(runId: string, binding: LiveMcpBinding): void { this.toolBridge.discard(runId, binding); }
+  async registerExtensionTool(runId:string, retained:import('./extension-tool-owner.js').ExtensionToolLease):Promise<import('./protocol.generated.js').LiveExtensionToolBinding> {
+    if(!this.handshakeResult)await this.start();
+    const live=this.toolBridge.register(runId,retained.lease,false);
+    return {ownerId:live.ownerId,generation:retained.generation,binding:retained.binding};
+  }
+  releaseChildToolHandoff(parentRunId: string, childOperationId: string): Promise<void> { return this.toolBridge.releaseChild(parentRunId, childOperationId); }
+  reconcileChildToolHandoffs(children: readonly { operation_id: string; report: unknown }[]): void { this.toolBridge.reconcileChildren(children); }
+  discardExtensionTool(runId:string,live:import('./protocol.generated.js').LiveExtensionToolBinding):void {
+    this.toolBridge.discard(runId,{ownerId:live.ownerId,binding:{reference:live.binding.providerKey,generation:live.generation,resources:{},tools:[live.binding.tool]}});
+  }
+  onToolReleased(listener: (runId: string) => void): () => void {
+    this.mcpReleaseListeners.add(listener); return () => { this.mcpReleaseListeners.delete(listener); };
+  }
+  setRetrievalOwner(owner: RetrievalOwner): void { this.retrievalBridge.setOwner(owner); }
+  /** Resolve only an actual Host-issued native Run grant, never caller-created scope metadata. */
+  sourceGrant(query: { grantId: string; runId: string; threadId: string; source: import('./protocol.generated.js').LaunchSource }): KernelGrantHandle {
+    const grant = this.issuedGrants.get(query.grantId);
+    if (!grant || this.inactiveGrants.has(query.grantId) || grant.runId !== query.runId || grant.threadId !== query.threadId
+      || grant.owningWorkspace !== query.source.workspace_id || grant.executionWorkspace !== query.source.execution_workspace_id
+      || grant.sessionId !== null || grant.workerId !== null) {
+      throw new KernelClientError({ code: 'forbidden', message: 'Native source Run grant is unavailable or mismatched' });
+    }
+    return this.assertGrant(grant);
+  }
+  /** Original target-issued permit for a source service; a pre-Run read has no invented Run. */
+  sourceAuthorityGrant(query: Pick<import('./protocol.generated.js').SourceAuthorityResult, 'grantId' | 'source' | 'scope' | 'resourceEpoch'>): KernelGrantHandle {
+    const grant = this.issuedGrants.get(query.grantId);
+    const runId = query.scope.kind === 'run' ? query.scope.runId : null;
+    if (!grant || this.inactiveGrants.has(query.grantId) || grant.kernelEpoch !== query.resourceEpoch
+      || grant.runId !== runId || grant.threadId !== query.scope.threadId
+      || grant.owningWorkspace !== query.source.workspace_id || grant.executionWorkspace !== query.source.execution_workspace_id
+      || grant.sessionId !== null || grant.workerId !== null) {
+      throw new KernelClientError({ code: 'forbidden', message: 'Original source authority permit is unavailable or mismatched' });
+    }
+    return this.assertGrant(grant);
+  }
+  sourceRequest<T = unknown, M extends Extract<KernelMethod, `source.${string}`> = Extract<KernelMethod, `source.${string}`>>(
+    method: M, params: KernelMethodParams[M], signal?: AbortSignal,
+  ): Promise<T> {
+    return this.requestRaw<T>(method, params, { signal, allowBootstrap: true, settleCancellation: method === 'source.service.call' || method === 'source.resource.execute' });
+  }
+  async fileReadCheck(params: KernelMethodParams["file.read.check"], grant: KernelGrantHandle, signal?: AbortSignal): Promise<{ resourceKey: string }> {
+    return this.requestRaw<{ resourceKey: string }>("file.read.check", params, { signal, grant });
+  }
+  setMemoryOwner(owner: MemoryToolOwner): void { this.memoryBridge.setOwner(owner); }
+  /** Original domain promises may outlive their cancellation responses and kernel epoch. */
+  async drainRunDomains(runIds: readonly string[]): Promise<void> {
+    const runs = new Set(runIds);
+    await Promise.all([this.memoryBridge.drainRuns(runs), this.planBridge.drainRuns(runs),
+      ...runIds.map(runId => this.drainRunPreparations(runId))]);
+  }
+  setContextOwner(owner: ContextOwner): void { this.contextBridge.setOwner(owner); }
+  setResourceOwner(owner: ResourceOwner): void { this.resourceBridge.setOwner(owner); }
+  setFileObservationOwner(owner: FileObservationOwner): void { this.fileObservationBridge.setOwner(owner); }
+  setPlanOwner(owner: PlanOwner): void { this.planBridge.setOwner(owner); }
+  setManagedSourceOwner(owner: ManagedSourceOwner, coordinatorHostId: () => string): void { this.managedSourceBridge.setOwner(owner, coordinatorHostId); }
+  setLanguageOwner(owner: LanguageToolOwner): void { this.languageBridge.setOwner(owner); }
+  /** Await the actual shared language view retirement before capturing a stopped source. */
+  releaseLanguageSource(runId: string): Promise<void> { return this.languageBridge.releaseSource({ runId }); }
+  toolCallbackEnded(runId: string, owner: import('./protocol.generated.js').ExecutorOwner, operationId: string): boolean | undefined {
+    return this.toolBridge.callbackEnded(runId, owner, operationId);
+  }
+  /** Host-only recovery delivery; never exposed as an extension capability. */
+  publishRecoveredToolReceipt(input: import('./tool-bridge.js').RecoveredToolReceipt): Promise<void> {
+    return this.toolBridge.publishRecoveredReceipt(input);
+  }
+  toolAvailability(runId:string,name:string,version:string):boolean|undefined{return this.toolBridge.availability(runId,name,version);}
+  mcpBinding(runId: string): McpBinding | undefined { return this.toolBridge.binding(runId) as McpBinding | undefined; }
+  mcpLiveBinding(runId:string):LiveMcpBinding|undefined {return this.toolBridge.liveBinding(runId) as LiveMcpBinding | undefined;}
+  mcpImplementationIdentity(runId:string):string|undefined {return this.toolBridge.implementationIdentity(runId);}
+  unregisterToolOwners(runId: string): void { this.toolBridge.unregister(runId); }
+
+  /** Ephemeral launch waits share the existing Run cancellation and kernel lifetime. */
+  beginRunPreparation(runId: string): { signal: AbortSignal; release(): void } {
+    const controller = new AbortController();
+    const registrations = this.runPreparations.get(runId) ?? new Set<{ controller: AbortController; settled: Promise<void> }>();
+    let settle!: () => void;
+    const registration = { controller, settled: new Promise<void>(resolve => { settle = resolve; }) };
+    registrations.add(registration);
+    this.runPreparations.set(runId, registrations);
+    return { signal: controller.signal, release: () => {
+      registrations.delete(registration);
+      settle();
+      if (this.runPreparations.get(runId) === registrations && registrations.size === 0) this.runPreparations.delete(runId);
+    } };
+  }
+  cancelRunPreparation(runId: string): void {
+    const registrations = this.runPreparations.get(runId);
+    if (!registrations) return;
+    for (const { controller } of registrations) controller.abort(new DOMException('Run preparation cancelled', 'AbortError'));
+  }
+  /** The existing preparation owner settles only when its underlying work exits. */
+  async drainRunPreparations(runId: string): Promise<void> {
+    for (;;) {
+      const registrations = this.runPreparations.get(runId);
+      if (!registrations?.size) return;
+      this.cancelRunPreparation(runId);
+      await Promise.all([...registrations].map(registration => registration.settled));
+    }
+  }
+  async registerPolicyOwner(runId: string, generation: number, lease: AgentPolicyLease): Promise<AgentPolicyBinding> {
+    if (!this.handshakeResult) await this.start();
+    return this.policyBridge.register(runId, generation, lease);
+  }
+  policyBinding(runId: string, generation: number): AgentPolicyBinding | undefined { return this.policyBridge.binding(runId, generation); }
+  unregisterPolicyOwner(runId: string, generation: number): void { this.policyBridge.unregister(runId, generation); }
+  releaseRunPolicyOwners(runId: string): void { this.policyBridge.releaseRun(runId); }
 
   get kernelEpoch(): string | null { return this.epoch; }
   get handshake(): KernelHandshakeResult | null { return this.handshakeResult; }
@@ -563,17 +802,21 @@ export class KernelClient {
     const grantId = typeof value.grant_id === "string" ? value.grant_id : "";
     const epoch = typeof value.kernel_epoch === "string" ? value.kernel_epoch : "";
     if (!grantId || !epoch) throw new KernelClientError({ code: "kernel-grant-invalid", message: "Rust kernel returned an incomplete grant handle", retryable: false });
+    if (["authority_instance_id", "worker_id", "worker_generation", "session_id"].some(key => value[key] !== null && value[key] !== undefined)) {
+      throw new KernelClientError({ code: "kernel-grant-invalid", message: "Rust kernel returned a retired session or worker grant", retryable: false });
+    }
     return Object.freeze({
       clientToken: this.clientToken,
       grantId,
       kernelEpoch: epoch,
       hostGeneration: String(value.host_generation ?? ""),
-      authorityInstanceId: typeof value.authority_instance_id === "string" ? value.authority_instance_id : null,
-      workerId: typeof value.worker_id === "string" ? value.worker_id : null,
-      workerGeneration: typeof value.worker_generation === "number" ? value.worker_generation : null,
-      sessionId: typeof value.session_id === "string" ? value.session_id : null,
+      authorityInstanceId: null,
+      workerId: null,
+      workerGeneration: null,
+      sessionId: null,
       threadId: typeof value.thread_id === "string" ? value.thread_id : null,
       runId: typeof value.run_id === "string" ? value.run_id : null,
+      operationId: typeof value.operation_id === "string" ? value.operation_id : null,
       owningWorkspace: typeof value.owning_workspace === "string" ? value.owning_workspace : null,
       executionWorkspace: typeof value.execution_workspace === "string" ? value.execution_workspace : null,
       capabilities: Object.freeze(Array.isArray(value.capabilities) ? value.capabilities.filter((entry): entry is string => typeof entry === "string") : []),
@@ -595,30 +838,21 @@ export class KernelClient {
 
   private async startInternal(): Promise<KernelHandshakeResult> {
     if (this.closed) throw new KernelClientError({ code: "kernel-client-closed", message: "Kernel client is closed" });
-    const command = resolveKernelCommand(this.options);
-    let manifest: KernelManifest | null = null;
-    if (command.manifestPath) {
-      try {
-        manifest = JSON.parse(await fs.promises.readFile(command.manifestPath, "utf8")) as KernelManifest;
-        const bytes = await fs.promises.readFile(command.command);
-        const digest = createHash("sha256").update(bytes).digest("hex");
-        if (manifest.schema !== 3 || manifest.sha256 !== digest || manifest.protocolVersion !== KERNEL_PROTOCOL_VERSION
-          || manifest.platform !== process.platform || manifest.arch !== (this.options.targetArch ?? process.arch)
-          || (this.options.targetTriple !== undefined && manifest.targetTriple !== this.options.targetTriple)
-          || (this.options.kernelBuildIdentity !== undefined && manifest.buildIdentity !== this.options.kernelBuildIdentity)) {
-          throw new KernelClientError({ code: "kernel-manifest-mismatch", message: "Rust kernel manifest does not match this Host", retryable: false });
-        }
-      } catch (error) {
-        if (error instanceof KernelClientError) throw error;
-        throw new KernelClientError({ code: "kernel-manifest-invalid", message: `Rust kernel manifest is invalid: ${String(error)}`, retryable: false });
-      }
-    } else if (this.options.requireKernelManifest ?? process.env.NODE_ENV === "production") {
-      throw new KernelClientError({ code: "kernel-manifest-missing", message: "Rust kernel manifest is required for this Host", retryable: false });
-    }
+    const command = await prepareKernelCommand(this.options);
+    const { manifest } = command;
     this.window = new KernelRequestWindow(KERNEL_REQUEST_WINDOW);
+    this.controlWindow = new KernelRequestWindow(KERNEL_REQUEST_WINDOW);
     this.transportFailed = false;
-    this.revokedGrants.clear();
-    const child = this.spawnProcess(command.command, [...command.args, "--stdio"], {
+    this.inactiveGrants.clear();
+    const transport = await (this.options.transportFactory ?? KernelTransport.prepare)(value => this.consumeFrame(value), error => this.failAll(error, true), id => {
+      // Only a cancelled observer discards a response body. Domain effect receipts remain in
+      // their durable owner; this releases transport credit after the peer settles that body.
+      const pending = this.takePending(id);
+      if (pending) { pending.release(); pending.reject(new KernelClientError({code:'kernel-response-discarded', message:'Kernel response body transfer stopped', retryable:false})); }
+    });
+    this.transport = transport;
+    let child: ChildProcessWithoutNullStreams;
+    try { child = this.spawnProcess(command.command, [...command.args, "--stdio"], {
       cwd: this.options.cwd ?? process.cwd(),
       env: {
         ...process.env,
@@ -627,7 +861,11 @@ export class KernelClient {
       },
       stdio: ["pipe", "pipe", "pipe"],
       windowsHide: true,
-    });
+    }); } catch (error) {
+      await transport.close();
+      if (this.transport === transport) this.transport = undefined;
+      throw new KernelClientError({code:'kernel-spawn-failed', message:error instanceof Error ? error.message : 'Kernel process could not start', retryable:true});
+    }
     this.child = child;
     child.stdin.on("error", (error) => {
       if (this.child !== child) return;
@@ -637,7 +875,7 @@ export class KernelClient {
         retryable: true,
       }));
     });
-    child.stdout.on("data", (chunk: Buffer | string) => { if (this.child === child) this.consume(chunk); });
+    child.stdout.resume();
     child.stderr.on("data", (chunk: Buffer | string) => {
       // stderr is intentionally separate from the protocol. Keep it out of
       // request responses; the Host can attach a logger at the process layer.
@@ -656,6 +894,9 @@ export class KernelClient {
     });
     let result: KernelHandshakeResult;
     try {
+    await new Promise<void>((resolve, reject) => child.stdin.write(controlFrame(transport.bootstrap()), error => error ? reject(error) : resolve()));
+    child.stdin.end();
+    await transport.bound;
     result = await this.requestRaw<KernelHandshakeResult>("kernel.handshake", {
         protocolVersion: KERNEL_PROTOCOL_VERSION,
         buildVersion: this.options.buildVersion,
@@ -670,7 +911,7 @@ export class KernelClient {
     }
     const requiredCapabilities = ["storage", "workingState", "recovery", "branchCas", "pins", "gc"];
     const expectedHostGeneration = this.options.hostGeneration ?? `${this.options.hostId}:${process.pid}`;
-    if (result.protocolVersion !== KERNEL_PROTOCOL_VERSION || result.requestWindow !== KERNEL_REQUEST_WINDOW || !result.kernelEpoch || result.applicationBuildVersion !== this.options.buildVersion
+    if (result.protocolVersion !== KERNEL_PROTOCOL_VERSION || result.requestWindow !== KERNEL_REQUEST_WINDOW || !result.kernelEpoch || result.kernelEpoch !== transport.kernelEpoch || result.applicationBuildVersion !== this.options.buildVersion
       || result.buildVersion !== result.kernelBuildIdentity
       || (manifest && (result.kernelBuildIdentity !== manifest.buildIdentity || result.targetTriple !== manifest.targetTriple || result.arch !== manifest.arch))
       || (this.options.kernelBuildIdentity !== undefined && result.kernelBuildIdentity !== this.options.kernelBuildIdentity)
@@ -684,7 +925,7 @@ export class KernelClient {
     this.handshakeResult = result;
     this.started = true;
     const managementGrant = await this.requestRaw<Record<string, unknown>>("authority.grant.issue", {
-      grantId: `host-management:${this.options.hostId}:${process.pid}`,
+      grantId: `host-management:${this.options.hostId}:${expectedHostGeneration}`,
       hostGeneration: expectedHostGeneration,
       sessionId: null,
       threadId: null,
@@ -696,35 +937,90 @@ export class KernelClient {
       pathScopes: [""],
     }, { allowBootstrap: true });
     this.managementGrant = this.grantFromResponse(managementGrant);
+    this.toolBridge.reconnect();
+    for (const listener of this.readyListeners) {
+      try { listener(); } catch { this.readyListeners.delete(listener); }
+    }
     return result;
   }
 
-  private consume(chunk: Buffer | string): void {
-    this.buffer = Buffer.concat([this.buffer, Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)]);
-    while (this.buffer.byteLength >= 4) {
-      const length = this.buffer.readUInt32BE(0);
-      if (length > 16 * 1024 * 1024) {
-        this.failAll(new KernelClientError({ code: "kernel-frame-too-large", message: "Rust kernel response exceeds transport limit", retryable: false }), true);
+  private consumeFrame(value: unknown): void {
+    if (!value || typeof value !== "object") {
+      this.failAll(new KernelClientError({ code: "kernel-protocol-error", message: "Invalid Rust kernel envelope" }), true);
+      return;
+    }
+    const response = value as KernelResponse | KernelProcessStreamEvent | AgentRuntimeStreamEvent | KernelRequestCreditReleased;
+      if (response.kind === "request-credit-released") {
+        const pending = typeof response.id === 'string' ? this.pending.get(response.id) : undefined;
+        if (response.v !== KERNEL_PROTOCOL_VERSION || response.kernelEpoch !== this.epoch
+          || !(KERNEL_DEFERRED_RESPONSE_METHODS as readonly string[]).includes(response.method)
+          || (pending && pending.method !== response.method)) {
+          this.failAll(new KernelClientError({ code: 'kernel-protocol-error', message: 'Invalid deferred request credit receipt' }), true);
+          return;
+        }
+        // Body admission is not effect completion. Cancellation and close still own this
+        // same pending invocation until its original final response or disconnect.
+        pending?.release();
         return;
       }
-      if (this.buffer.byteLength < length + 4) return;
-      const body = this.buffer.subarray(4, length + 4);
-      this.buffer = this.buffer.subarray(length + 4);
-      let response: KernelResponse;
-      try { response = JSON.parse(body.toString("utf8")) as KernelResponse; }
-      catch (error) { this.failAll(new KernelClientError({ code: "kernel-protocol-error", message: `Invalid Rust kernel response: ${String(error)}`, retryable: false }), true); return; }
+      if (this.modelProtocolBridge.consume(response) || this.managedSourceBridge.consume(response) || this.credentialBridge.consume(response) || this.fileObservationBridge.consume(response) || this.resourceBridge.consume(response) || this.contextBridge.consume(response) || this.memoryBridge.consume(response) || this.planBridge.consume(response) || this.languageBridge.consume(response) || this.retrievalBridge.consume(response) || this.toolBridge.consume(response) || this.policyBridge.consume(response)) return;
+      if (response.kind === "runtime-event") {
+        if (response.v !== KERNEL_PROTOCOL_VERSION || response.kernelEpoch !== this.epoch
+          || !["durable", "progress"].includes(response.stream)
+          || (response.stream === "durable" && (!Number.isSafeInteger(response.cursor) || response.cursor < 0))
+          || (response.stream === "progress" && (typeof response.runId !== "string" || typeof response.streamId !== "string"
+            || !Number.isSafeInteger(response.sequence) || response.sequence < 0))) {
+          this.failAll(new KernelClientError({ code: "kernel-protocol-error", message: "Malformed native runtime event", retryable: false }), true);
+          return;
+        }
+        for (const listener of this.agentRuntimeListeners) {
+          // Presentation consumers cannot take down the authority transport.
+          try { listener(response); } catch { this.agentRuntimeListeners.delete(listener); }
+        }
+        return;
+      }
+      if (response.kind === "process-event") {
+        this.consumeProcessEvent(response);
+        if (this.transportFailed) return;
+        return;
+      }
       if (response.v !== KERNEL_PROTOCOL_VERSION || response.kind !== "response" || typeof response.id !== "string" || typeof response.ok !== "boolean") {
         this.failAll(new KernelClientError({ code: "kernel-protocol-error", message: "Rust kernel response envelope is malformed", retryable: false }), true);
         return;
       }
-      const pending = this.pending.get(response.id);
-      if (!pending) continue;
-      this.pending.delete(response.id);
+      const pending = this.takePending(response.id);
+      if (!pending) return;
       pending.release();
       if (response.ok) pending.resolve(response.result);
       else {
-        pending.reject(new KernelClientError(response.error ?? { code: "kernel-error", message: "Rust kernel request failed" }));
+        pending.reject(new KernelRequestError(response.error ?? { code: "kernel-error", message: "Rust kernel request failed" }, pending.method, "response"));
       }
+  }
+
+  private consumeProcessEvent(event: KernelProcessStreamEvent): void {
+    const invalid = (message: string) => this.failAll(new KernelClientError({ code: "kernel-protocol-error", message, retryable: false }), true);
+    if (event.v !== KERNEL_PROTOCOL_VERSION || typeof event.subscriptionId !== "string" || typeof event.kernelEpoch !== "string"
+      || typeof event.grantId !== "string" || typeof event.processId !== "string" || !Number.isSafeInteger(event.sequence)
+      || !["control", "data", "closed"].includes(event.stream)) { invalid("Malformed process stream envelope"); return; }
+    const entry = this.processSubscriptions.get(event.subscriptionId);
+    if (!entry || entry.closed || this.inactiveGrants.has(entry.grant.grantId)) return;
+    if (event.kernelEpoch !== this.epoch || event.kernelEpoch !== entry.grant.kernelEpoch || event.grantId !== entry.grant.grantId || event.processId !== entry.processId) {
+      invalid("Process stream actor or epoch mismatch"); return;
+    }
+    if (event.stream === "closed") {
+      if (typeof event.error !== "string") { invalid("Closed process stream omitted its reason"); return; }
+      entry.closed = true; this.processSubscriptions.delete(entry.id); entry.reject(new Error(event.error));
+    } else {
+      if (event.result === null || typeof event.result !== "object" || event.error !== null) { invalid("Process stream omitted its typed result"); return; }
+      const key = event.stream === "data" ? "dataSequence" : "controlSequence";
+      if (event.sequence !== entry[key] + 1) { invalid("Process stream sequence is not contiguous"); return; }
+      entry[key] = event.sequence;
+    }
+    try { entry.listener(event); }
+    catch (error) {
+      entry.closed = true; this.processSubscriptions.delete(entry.id);
+      entry.reject(error instanceof Error ? error : new Error(String(error)));
+      void this.requestRaw("process.subscription.unsubscribe", { subscriptionId: entry.id }, { grant: entry.grant }).catch(() => undefined);
     }
   }
 
@@ -734,9 +1030,27 @@ export class KernelClient {
       return;
     }
     this.transportFailed = true;
+    this.credentialBridge.close();
+    this.modelProtocolBridge.close();
+    this.toolBridge.reset();
+    this.languageBridge.close();
+    this.managedSourceBridge.close();
+    this.memoryBridge.close();
+    this.contextBridge.close();
+    this.resourceBridge.close();
+    this.fileObservationBridge.close();
+    this.planBridge.close();
+    this.retrievalBridge.close();
+    this.issuedGrants.clear();
+    this.policyBridge.close();
+    for (const runId of this.runPreparations.keys()) this.cancelRunPreparation(runId);
     this.window.close(error);
+    this.controlWindow.close(error);
     for (const pending of this.pending.values()) { pending.reject(error); pending.release(); }
     this.pending.clear();
+    for (const done of this.pendingIdle.splice(0)) done();
+    for (const entry of this.processSubscriptions.values()) { entry.closed = true; entry.reject(error); }
+    this.processSubscriptions.clear();
     for (const listener of this.exitListeners) {
       try { listener(error); } catch { /* A projection cannot prevent other handle invalidations. */ }
     }
@@ -744,30 +1058,31 @@ export class KernelClient {
     this.epoch = null;
     this.managementGrant = null;
     this.handshakeResult = null;
-    this.buffer = Buffer.alloc(0);
+    void this.transport?.close();
+    this.transport = undefined;
     if (terminate && this.child && !this.child.killed) this.child.kill();
   }
 
-  private async write(request: KernelRequest): Promise<void> {
-    const stdin = this.child?.stdin;
-    if (!stdin || stdin.destroyed) throw new KernelClientError({ code: "kernel-disconnected", message: "Rust kernel stdin is unavailable", retryable: true });
-    const writable = stdin as Writable;
-    // The callback settles on delivery or stream failure, including destruction
-    // while backpressured. Waiting only for 'drain' can hang after disconnect.
-    await new Promise<void>((resolve, reject) => writable.write(frame(JSON.stringify(request)), error => error ? reject(error) : resolve()));
+  private async write(request: PrivateModelProtocolResponse | PrivateManagedSourceFrame | KernelRequest | PrivateCredentialResponse | PrivateToolFrame | PrivatePolicyResponse | PrivateMemoryResponse | PrivateContextResponse | PrivateResourceResponse | PrivateFileObservationResponse | PrivatePlanResponse | PrivateLanguageResponse | PrivateRetrievalResponse): Promise<void> {
+    const transport = this.transport;
+    if (!transport) throw new KernelClientError({ code: "kernel-disconnected", message: "Rust kernel transport is unavailable", retryable: true });
+    const control = request.kind === "cancel" || request.kind === "credential-response" || request.kind === "host-tool-revoked" || request.kind === "file-observation-response"
+      || (request.kind === "request" && CONTROL_METHODS.has(request.method));
+    await transport.send(request as unknown as Record<string, unknown>, control ? "control" : "data");
   }
 
-  private async requestRaw<T, M extends KernelMethod = KernelMethod>(method: M, params: KernelMethodParams[M], options: { signal?: AbortSignal | undefined; grant?: KernelGrantHandle | undefined; allowBootstrap?: boolean | undefined } = {}): Promise<T> {
+  private async requestRaw<T, M extends KernelMethod = KernelMethod>(method: M, params: KernelMethodParams[M], options: { signal?: AbortSignal | undefined; grant?: KernelGrantHandle | undefined; allowBootstrap?: boolean | undefined; settleCancellation?: boolean | undefined } = {}): Promise<T> {
     const cancelled = () => new KernelClientError({ code: "cancelled", message: "Kernel request cancelled", retryable: true });
-    const release = this.closed && method === "kernel.shutdown" ? () => undefined : await this.window.acquire(options.signal, cancelled);
+    const release = this.closed && method === "kernel.shutdown" ? () => undefined : await (CONTROL_RESPONSE_METHODS.has(method) ? this.controlWindow : this.window).acquire(options.signal, cancelled)
+      .catch(error => { throw new KernelRequestError(error instanceof Error ? error : new Error(String(error)), method, 'not_dispatched'); });
     let admitted = false;
     try {
       if (this.closed && method !== "kernel.shutdown") throw new KernelClientError({ code: "kernel-client-closed", message: "Kernel client is closed" });
       if (options.signal?.aborted) throw cancelled();
       const id = randomUUID();
       const grant = options.grant ? this.assertGrant(options.grant) : this.isManagementMethod(method) ? this.managementGrant : null;
-      if (grant && this.revokedGrants.has(grant.grantId)) throw new KernelClientError({ code: "forbidden", message: "Kernel grant was revoked" });
-      if (this.epoch && !grant && !options.allowBootstrap && method !== "kernel.handshake" && method !== "authority.grant.issue" && method !== "authority.grant.revoke") {
+      if (grant && this.inactiveGrants.has(grant.grantId)) throw new KernelClientError({ code: "forbidden", message: "Kernel grant is no longer active" });
+      if (this.epoch && !grant && !options.allowBootstrap && method !== "kernel.handshake" && method !== "authority.grant.issue" && method !== "authority.grant.revoke" && method !== "authority.grant.retire") {
         throw new KernelClientError({ code: "kernel-grant-required", message: "A scoped grant is required for " + method, retryable: false });
       }
       const identity = { ...(this.epoch ? { epoch: this.epoch } : {}), ...(grant ? { grantId: grant.grantId } : {}) };
@@ -777,20 +1092,24 @@ export class KernelClient {
       const abort = () => {
         if (!this.pending.has(id) || cancelSent) return;
         cancelSent = true;
-        rejectPending(cancelled());
-        // Keep the ledger entry/credit until Rust acknowledges the actual stop.
+        if (!options.settleCancellation) rejectPending(cancelled());
+        // Keep the invocation until Rust acknowledges its actual stop; body-admitted
+        // process interactions may already have released their separate transfer credit.
         // Control frames bypass the ordinary request window.
         void this.write({ v: KERNEL_PROTOCOL_VERSION, kind: "cancel", id, ...identity }).catch(error => this.failAll(error instanceof Error ? error : new Error(String(error)), true));
+        this.transport?.cancelRequest(id, !options.settleCancellation);
       };
       const promise = new Promise<T>((resolve, reject) => {
         rejectPending = reject;
-        this.pending.set(id, { resolve: resolve as (value: unknown) => void, reject, release, cancel: abort, grantId: grant?.grantId });
+        this.pending.set(id, { method, resolve: resolve as (value: unknown) => void, reject, release, cancel: abort, grantId: grant?.grantId });
       });
       admitted = true;
       void promise.catch(() => undefined);
       options.signal?.addEventListener("abort", abort, { once: true });
       try {
-        await this.write(request);
+        void this.write(request).catch(error => {
+          if (!cancelSent && this.pending.has(id)) this.failAll(error instanceof Error ? error : new Error(String(error)), true);
+        });
         return await promise;
       } catch (error) {
         if (!cancelSent && this.pending.has(id)) this.failAll(error instanceof Error ? error : new Error(String(error)), true);
@@ -798,9 +1117,19 @@ export class KernelClient {
       } finally {
         options.signal?.removeEventListener("abort", abort);
       }
+    } catch (error) {
+      if (!admitted)
+        throw new KernelRequestError(error instanceof Error ? error : new Error(String(error)), method, 'not_dispatched');
+      throw error;
     } finally {
       if (!admitted) release();
     }
+  }
+
+  /** Native authority management. Never expose this Host-owned channel to tool grants. */
+  async agentRuntimeRequest<T, M extends Extract<KernelMethod, `runtime.${string}`>>(method: M, params: KernelMethodParams[M], signal?: AbortSignal, options: { settleCancellation?: boolean } = {}): Promise<T> {
+    if (!this.handshakeResult) await this.start();
+    return this.requestRaw<T, M>(method, params, { signal, allowBootstrap: true, ...options });
   }
 
   async health(options: { deep?: boolean; signal?: AbortSignal | undefined } = {}): Promise<KernelHealthResult> {
@@ -928,11 +1257,11 @@ export class KernelClient {
 
   async getBlob(hash: string, source: KernelBlobReadSource, grant: KernelGrantHandle, options: { offset?: number; length?: number; signal?: AbortSignal | undefined } = {}): Promise<KernelObjectSlice> {
     const params: KernelGetBlobParams = { hash, ...source, ...(options.offset === undefined ? {} : { offset: options.offset }), ...(options.length === undefined ? {} : { length: options.length }) };
-    return this.requestRaw<KernelObjectSlice>("storage.getBlob", params, { signal: options.signal, grant });
+    return this.requestRaw<KernelObjectSlice>("storage.getBlob", params, { signal: options.signal, grant, settleCancellation: true });
   }
 
-  async fileRootRegister(params: KernelMethodParams["file.root.register"], grant: KernelGrantHandle, signal?: AbortSignal): Promise<Record<string, unknown>> {
-    return this.requestRaw<Record<string, unknown>>("file.root.register", params, { signal, grant });
+  async fileRootRegister(params: KernelMethodParams["file.root.register"], grant: KernelGrantHandle, signal?: AbortSignal): Promise<import('./protocol.generated.js').KernelFileRootRegisterResult> {
+    return this.requestRaw<import('./protocol.generated.js').KernelFileRootRegisterResult>("file.root.register", params, { signal, grant });
   }
 
   async fileOperationList(params: KernelMethodParams["file.operation.list"], grant: KernelGrantHandle, signal?: AbortSignal): Promise<Record<string, unknown>> {
@@ -947,6 +1276,10 @@ export class KernelClient {
     return this.requestRaw<Record<string, unknown>>("file.lease.acquire", params, { signal, grant });
   }
 
+  async fileLeaseWait(params: KernelMethodParams["file.lease.wait"], grant: KernelGrantHandle, signal?: AbortSignal): Promise<Record<string, unknown>> {
+    return this.requestRaw<Record<string, unknown>>("file.lease.wait", params, { signal, grant, settleCancellation: true });
+  }
+
   async fileLeaseCheck(params: KernelMethodParams["file.lease.check"], grant: KernelGrantHandle, signal?: AbortSignal): Promise<Record<string, unknown>> {
     return this.requestRaw<Record<string, unknown>>("file.lease.check", params, { signal, grant });
   }
@@ -956,7 +1289,11 @@ export class KernelClient {
   }
 
   async fileCapture(params: KernelMethodParams["file.capture"], grant: KernelGrantHandle, signal?: AbortSignal): Promise<Record<string, unknown>> {
-    return this.requestRaw<Record<string, unknown>>("file.capture", params, { signal, grant });
+    return this.requestRaw<Record<string, unknown>>("file.capture", params, { signal, grant, settleCancellation: true });
+  }
+
+  async fileCaptureBatch(params: KernelMethodParams["file.captureBatch"], grant: KernelGrantHandle, signal?: AbortSignal): Promise<Record<string, unknown>> {
+    return this.requestRaw<Record<string, unknown>>("file.captureBatch", params, { signal, grant, settleCancellation: true });
   }
 
   async fileApply(params: KernelMethodParams["file.apply"], grant: KernelGrantHandle, signal?: AbortSignal): Promise<Record<string, unknown>> {
@@ -976,11 +1313,11 @@ export class KernelClient {
   }
 
   async fileScan(params: KernelMethodParams["file.scan"], grant: KernelGrantHandle, signal?: AbortSignal): Promise<Record<string, unknown>> {
-    return this.requestRaw<Record<string, unknown>>("file.scan", params, { signal, grant });
+    return this.requestRaw<Record<string, unknown>>("file.scan", params, { signal, grant, settleCancellation: true });
   }
 
   async fileMeasure(params: KernelMethodParams["file.measure"], grant: KernelGrantHandle, signal?: AbortSignal): Promise<Record<string, unknown>> {
-    return this.requestRaw<Record<string, unknown>>("file.measure", params, { signal, grant });
+    return this.requestRaw<Record<string, unknown>>("file.measure", params, { signal, grant, settleCancellation: true });
   }
 
   computeStart(params: KernelMethodParams["compute.start"], grant: KernelGrantHandle, signal?: AbortSignal): Promise<KernelComputeReadResult> {
@@ -1003,6 +1340,47 @@ export class KernelClient {
     return this.requestRaw<Record<string, unknown>>("compute.grammar.register", params, { signal, grant });
   }
 
+  async processSubscribe(params: Omit<KernelMethodParams["process.subscribe"], "subscriptionId">, grantValue: KernelGrantHandle,
+    observer: KernelProcessObserver): Promise<KernelProcessSubscription> {
+    const grant = this.assertGrant(grantValue);
+    const subscriptionId = randomUUID();
+    let resolve!: () => void; let reject!: (error: Error) => void;
+    const closed = new Promise<void>((yes, no) => { resolve = yes; reject = no; });
+    void closed.catch(() => undefined);
+    const entry: ProcessSubscriptionEntry = { id: subscriptionId, processId: params.processId, grant, listener: () => undefined,
+      dataSequence: 0, controlSequence: 0, closed: false, resolve, reject };
+    let closing: Promise<void> | undefined;
+    const handle: KernelProcessSubscription = {
+      closed,
+      acknowledge: async (stream, sequence) => {
+        if (entry.closed) return;
+        await this.requestRaw("process.subscription.ack", { subscriptionId, stream, sequence }, { grant });
+      },
+      close: () => {
+        if (closing) return closing;
+        if (entry.closed) return Promise.resolve();
+        entry.closed = true; this.processSubscriptions.delete(subscriptionId);
+        closing = this.requestRaw("process.subscription.unsubscribe", { subscriptionId }, { grant }).then(() => { resolve(); }, (error: unknown) => {
+          const failure = error instanceof Error ? error : new Error(String(error)); reject(failure); throw failure;
+        });
+        return closing;
+      },
+    };
+    entry.listener = event => observer(event, () => event.stream === "closed" ? Promise.resolve() : handle.acknowledge(event.stream, event.sequence));
+    // Register before sending: the initial control/data frame may precede the subscribe reply.
+    this.processSubscriptions.set(subscriptionId, entry);
+    try {
+      const result = await this.requestRaw<KernelProcessSubscribeResult>("process.subscribe", { ...params, subscriptionId }, { grant });
+      if (result.subscriptionId !== subscriptionId || result.processId !== params.processId || result.kernelEpoch !== grant.kernelEpoch) {
+        throw new KernelClientError({ code: "kernel-protocol-error", message: "Process subscription identity mismatch" });
+      }
+      return handle;
+    } catch (error) {
+      entry.closed = true; this.processSubscriptions.delete(subscriptionId);
+      reject(error instanceof Error ? error : new Error(String(error))); throw error;
+    }
+  }
+
   async processSpawn(params: KernelMethodParams["process.spawn"], grant: KernelGrantHandle, signal?: AbortSignal): Promise<KernelProcessSnapshot> {
     return this.requestRaw<KernelProcessSnapshot>("process.spawn", params, { signal, grant });
   }
@@ -1011,12 +1389,16 @@ export class KernelClient {
     return this.requestRaw<KernelProcessReadResult>("process.read", params, { signal, grant });
   }
 
-  async processWrite(params: KernelMethodParams["process.write"], grant: KernelGrantHandle, signal?: AbortSignal): Promise<KernelProcessWriteResult> {
-    return this.requestRaw<KernelProcessWriteResult>("process.write", params, { signal, grant });
+  async processWrite(params: KernelMethodParams["process.write"], grant: KernelGrantHandle, signal?: AbortSignal): Promise<KernelProcessInteractionReceipt> {
+    return this.requestRaw<KernelProcessInteractionReceipt>("process.write", params, { signal, grant });
   }
 
-  async processResize(params: KernelMethodParams["process.resize"], grant: KernelGrantHandle, signal?: AbortSignal): Promise<Record<string, unknown>> {
-    return this.requestRaw<Record<string, unknown>>("process.resize", params, { signal, grant });
+  async processResize(params: KernelMethodParams["process.resize"], grant: KernelGrantHandle, signal?: AbortSignal): Promise<KernelProcessInteractionReceipt> {
+    return this.requestRaw<KernelProcessInteractionReceipt>("process.resize", params, { signal, grant });
+  }
+
+  async processInteractionInspect(params: KernelMethodParams["process.interaction.inspect"], grant: KernelGrantHandle, signal?: AbortSignal): Promise<KernelProcessInteractionReceipt | null> {
+    return this.requestRaw<KernelProcessInteractionReceipt | null>("process.interaction.inspect", params, { signal, grant });
   }
 
   async processKill(params: KernelMethodParams["process.kill"], grant: KernelGrantHandle, signal?: AbortSignal): Promise<Record<string, unknown>> {
@@ -1035,8 +1417,18 @@ export class KernelClient {
     return this.requestRaw<KernelProcessSnapshot>("process.release", params, { signal, grant });
   }
 
+  async materializedViewPrepare(params: KernelMethodParams["file.materializedView.prepare"], grant: KernelGrantHandle, signal?: AbortSignal): Promise<KernelMaterializedView> {
+    return this.requestRaw<KernelMaterializedView>("file.materializedView.prepare", params, { signal, grant, settleCancellation: true });
+  }
+  async materializedViewCheck(params: KernelMethodParams["file.materializedView.check"], grant: KernelGrantHandle, signal?: AbortSignal): Promise<KernelMaterializedView> {
+    return this.requestRaw<KernelMaterializedView>("file.materializedView.check", params, { signal, grant });
+  }
+  async materializedViewRelease(params: KernelMethodParams["file.materializedView.release"], grant: KernelGrantHandle, signal?: AbortSignal): Promise<{ released: boolean }> {
+    return this.requestRaw<{ released: boolean }>("file.materializedView.release", params, { signal, grant, settleCancellation: true });
+  }
+
   async fileMaterialize(params: KernelMethodParams["file.materialize"], grant: KernelGrantHandle, signal?: AbortSignal): Promise<Record<string, unknown>> {
-    return this.requestRaw<Record<string, unknown>>("file.materialize", params, { signal, grant });
+    return this.requestRaw<Record<string, unknown>>("file.materialize", params, { signal, grant, settleCancellation: true });
   }
 
   async createBranch(params: KernelCreateBranchInput, grant: KernelGrantHandle, signal?: AbortSignal): Promise<Record<string, unknown>> {
@@ -1052,6 +1444,7 @@ export class KernelClient {
         ...(params.parentRef === undefined ? {} : { parentRef: params.parentRef }),
         draftBasePaths: params.draftBasePaths,
         captureScopes: params.captureScopes,
+        ...(params.sourceProvenance === undefined ? {} : { sourceProvenance: params.sourceProvenance }),
       }, { signal, grant: scoped });
       let sequence = 0;
       for (const batch of batchForKernelTransport(params.entries)) {
@@ -1094,6 +1487,36 @@ export class KernelClient {
       await this.requestRaw<Record<string, unknown>>("branch.write.abort", { builderId }, { grant: scoped }).catch(() => undefined);
       throw error;
     }
+  }
+
+  async prepareResultCandidate(params: { publicationId: string; branchId: string; expectedWriteRevision: number; expectedRoot: string; changes: KernelBranchChange[] }, grant: KernelGrantHandle, signal?: AbortSignal): Promise<KernelWorkingResultCandidate> {
+    const scoped = this.assertGrant(grant);
+    const operationId = `result-prepare:${params.publicationId}`;
+    const builderId = `result-candidate-${randomUUID()}`;
+    try {
+      await this.requestRaw<Record<string, unknown>>("branch.write.begin", {
+        operationId, builderId, branchId: params.branchId, expectedWriteRevision: params.expectedWriteRevision,
+      }, { signal, grant: scoped });
+      let sequence = 0;
+      for (const changes of batchForKernelTransport(params.changes)) {
+        await this.requestRaw<Record<string, unknown>>("branch.write.append", { builderId, sequence, changes }, { signal, grant: scoped });
+        sequence += 1;
+      }
+      return await this.requestRaw<KernelWorkingResultCandidate>("working.result.prepare", {
+        operationId, publicationId: params.publicationId, builderId, expectedRoot: params.expectedRoot,
+      }, { signal, grant: scoped });
+    } catch (error) {
+      await this.requestRaw<Record<string, unknown>>("branch.write.abort", { builderId }, { grant: scoped }).catch(() => undefined);
+      throw error;
+    }
+  }
+
+  async publishResultCandidate(params: KernelMethodParams["working.result.publish"], grant: KernelGrantHandle, signal?: AbortSignal): Promise<KernelWorkingResultPublication> {
+    return this.requestRaw<KernelWorkingResultPublication>("working.result.publish", params, { signal, grant });
+  }
+
+  async releaseResultCandidate(params: KernelMethodParams["working.result.candidate.release"], grant: KernelGrantHandle, signal?: AbortSignal): Promise<KernelWorkingResultCandidateReleased> {
+    return this.requestRaw<KernelWorkingResultCandidateReleased>("working.result.candidate.release", params, { signal, grant });
   }
 
   async publishBranch(params: { operationId: string; branchId: string; expectedWriteRevision: number; expectedRoot: string }, grant: KernelGrantHandle, signal?: AbortSignal): Promise<Record<string, unknown>> {
@@ -1188,6 +1611,9 @@ export class KernelClient {
     return this.requestRaw<Record<string, unknown>>("recovery.operation.complete", params, { signal, grant });
   }
 
+  async recoveryOperationConflicts(params: KernelMethodParams["recovery.operation.conflicts"], grant: KernelGrantHandle, signal?: AbortSignal): Promise<KernelRecoveryOperationConflictsResult> {
+    return this.requestRaw<KernelRecoveryOperationConflictsResult>("recovery.operation.conflicts", params, { signal, grant });
+  }
   async recoveryOperationList(params: KernelMethodParams["recovery.operation.list"], grant: KernelGrantHandle, signal?: AbortSignal): Promise<Record<string, unknown>> {
     return this.requestRaw<Record<string, unknown>>("recovery.operation.list", params, { signal, grant });
   }
@@ -1196,32 +1622,87 @@ export class KernelClient {
     return this.requestRaw<Record<string, unknown>>("recovery.operation.release", params, { signal, grant });
   }
 
+  async claimManagedChildSource(params: KernelMethodParams['source.authority.claim_handoff'], signal?: AbortSignal): Promise<KernelGrantHandle> {
+    if (!this.handshakeResult) await this.start();
+    const result = await this.sourceRequest<Record<string, unknown>>('source.authority.claim_handoff', params, signal);
+    const handle = this.grantFromResponse(result); this.inactiveGrants.delete(handle.grantId); this.issuedGrants.set(handle.grantId, handle); return handle;
+  }
+  async claimChildSource(params: KernelMethodParams["source.handoff.claim"], signal?: AbortSignal): Promise<KernelGrantHandle> {
+    if (!this.handshakeResult) await this.start();
+    // This Host-only command obtains the child grant from an already accepted handoff.
+    // Rust validates that handoff and rejects requests carrying a tool grant.
+    const result = await this.requestRaw<Record<string, unknown>>("source.handoff.claim", params, { signal, allowBootstrap: true });
+    const handle = this.grantFromResponse(result);
+    this.inactiveGrants.delete(handle.grantId); this.issuedGrants.set(handle.grantId, handle);
+    return handle;
+  }
+
   async issueGrant(params: KernelGrantIssueInput, signal?: AbortSignal): Promise<KernelGrantHandle> {
+    if ([params.authorityInstanceId, params.workerId, params.workerGeneration, params.sessionId].some(value => value !== undefined && value !== null)) {
+      throw new KernelClientError({ code: "kernel-grant-invalid", message: "Session and worker grant authority is retired", retryable: false });
+    }
     if (!this.handshakeResult) await this.start();
     const grant = await this.requestRaw<Record<string, unknown>>("authority.grant.issue", {
       grantId: params.grantId,
       capabilities: params.capabilities,
       pathScopes: params.pathScopes,
-      sessionId: params.sessionId ?? null,
+      authorityInstanceId: null,
+      workerId: null,
+      workerGeneration: null,
+      sessionId: null,
       threadId: params.threadId ?? null,
       runId: params.runId ?? null,
+      operationId: params.operationId ?? null,
       owningWorkspace: params.owningWorkspace ?? null,
       executionWorkspace: params.executionWorkspace ?? null,
       storageIdentity: params.storageIdentity ?? this.handshakeResult!.storageRoot,
       hostGeneration: params.hostGeneration ?? this.options.hostGeneration ?? `${this.options.hostId}:${process.pid}`,
-      ...(params.authorityInstanceId === undefined ? {} : { authorityInstanceId: params.authorityInstanceId }),
-      ...(params.workerId === undefined ? {} : { workerId: params.workerId }),
-      ...(params.workerGeneration === undefined ? {} : { workerGeneration: params.workerGeneration }),
     }, { signal });
-    this.revokedGrants.delete(String(grant.grant_id));
-    return this.grantFromResponse(grant);
+    this.inactiveGrants.delete(String(grant.grant_id));
+    const handle = this.grantFromResponse(grant);
+    this.issuedGrants.set(handle.grantId, handle);
+    return handle;
+  }
+
+  private closeGrantCaller(grantId: string): void {
+    this.inactiveGrants.add(grantId);
+    void this.languageBridge.releaseSource({ grantId }).catch(() => undefined);
+    this.issuedGrants.delete(grantId);
+    for (const [id, entry] of this.processSubscriptions) {
+      if (entry.grant.grantId !== grantId) continue;
+      entry.closed = true; this.processSubscriptions.delete(id);
+      entry.reject(new KernelClientError({ code: "forbidden", message: "Process subscription authority is no longer active" }));
+    }
+    for (const pending of this.pending.values()) if (pending.grantId === grantId) pending.cancel();
   }
 
   async revokeGrant(grantId: string, signal?: AbortSignal): Promise<Record<string, unknown>> {
     if (!this.handshakeResult) await this.start();
-    this.revokedGrants.add(grantId);
-    for (const pending of this.pending.values()) if (pending.grantId === grantId) pending.cancel();
+    this.closeGrantCaller(grantId);
     return this.requestRaw<Record<string, unknown>>("authority.grant.revoke", { grantId }, { signal });
+  }
+
+  /** Normal source retirement is distinct from revoking the original result's authority. */
+  async retireGrant(grantId: string, signal?: AbortSignal): Promise<Record<string, unknown>> {
+    if (!this.handshakeResult) await this.start();
+    this.closeGrantCaller(grantId);
+    return this.requestRaw<Record<string, unknown>>("authority.grant.retire", { target: { kind: "grant", grantId } }, { signal });
+  }
+
+  /** Durable Storage ownership also retires grants issued by an earlier Host generation. */
+  async retireRunGrants(runId: string, signal?: AbortSignal): Promise<Record<string, unknown>> {
+    if (!this.handshakeResult) await this.start();
+    for (const grant of this.issuedGrants.values()) if (grant.runId === runId && grant.operationId === null) this.closeGrantCaller(grant.grantId);
+    return this.requestRaw<Record<string, unknown>>("authority.grant.retire", { target: { kind: "run", runId } }, { signal });
+  }
+
+  /** Trusted domain cleanup after the entire original operation has actually drained. */
+  async retireOperationGrants(operationId: string, signal?: AbortSignal): Promise<Record<string, unknown>> {
+    if (!this.handshakeResult) await this.start();
+    // Rust first verifies retained process owners. A refusal must not close a live caller.
+    const result = await this.requestRaw<Record<string, unknown>>("authority.grant.retire", { target: { kind: "operation", operationId } }, { signal });
+    for (const grant of this.issuedGrants.values()) if (grant.operationId === operationId) this.closeGrantCaller(grant.grantId);
+    return result;
   }
 
   async releaseBlob(ownerId: string, grant: KernelGrantHandle, signal?: AbortSignal): Promise<Record<string, unknown>> {
@@ -1252,15 +1733,16 @@ export class KernelClient {
   async workingDraftGet(params: KernelMethodParams["working.draft.get"], grant: KernelGrantHandle, signal?: AbortSignal): Promise<Record<string, unknown> | null> { return this.requestRaw("working.draft.get", params, { signal, grant }); }
   async workingDraftList(params: KernelMethodParams["working.draft.list"], grant: KernelGrantHandle, signal?: AbortSignal): Promise<Record<string, unknown>> { return this.requestRaw("working.draft.list", params, { signal, grant }); }
   async workingDraftRelease(params: KernelMethodParams["working.draft.release"], grant: KernelGrantHandle, signal?: AbortSignal): Promise<Record<string, unknown>> { return this.requestRaw("working.draft.release", params, { signal, grant }); }
-  async workingVerificationPut(params: KernelMethodParams["working.verification.put"], grant: KernelGrantHandle, signal?: AbortSignal): Promise<Record<string, unknown>> { return this.requestRaw("working.verification.put", params, { signal, grant }); }
-  async workingVerificationList(params: KernelMethodParams["working.verification.list"], grant: KernelGrantHandle, signal?: AbortSignal): Promise<Record<string, unknown>> { return this.requestRaw("working.verification.list", params, { signal, grant }); }
-  async workingVerificationRelease(params: KernelMethodParams["working.verification.release"], grant: KernelGrantHandle, signal?: AbortSignal): Promise<Record<string, unknown>> { return this.requestRaw("working.verification.release", params, { signal, grant }); }
-  async workingReviewPut(params: KernelMethodParams["working.review.put"], grant: KernelGrantHandle, signal?: AbortSignal): Promise<Record<string, unknown>> { return this.requestRaw("working.review.put", params, { signal, grant }); }
-  async workingReviewList(params: KernelMethodParams["working.review.list"], grant: KernelGrantHandle, signal?: AbortSignal): Promise<Record<string, unknown>> { return this.requestRaw("working.review.list", params, { signal, grant }); }
-  async workingReviewRelease(params: KernelMethodParams["working.review.release"], grant: KernelGrantHandle, signal?: AbortSignal): Promise<Record<string, unknown>> { return this.requestRaw("working.review.release", params, { signal, grant }); }
 
   async getRecord(params: KernelMethodParams["storage.record.get"], grant: KernelGrantHandle, signal?: AbortSignal): Promise<KernelRecordResult | null> {
     return this.requestRaw<KernelRecordResult | null>("storage.record.get", params, { signal, grant });
+  }
+
+  async experimentLogChunks(params: KernelMethodParams["storage.experiment.logChunks"], grant: KernelGrantHandle, signal?: AbortSignal): Promise<import("./protocol.generated.js").KernelExperimentLogChunksResult> {
+    return this.requestRaw("storage.experiment.logChunks", params, { signal, grant });
+  }
+  async experimentArtifacts(params: KernelMethodParams["storage.experiment.artifacts"], grant: KernelGrantHandle, signal?: AbortSignal): Promise<import("./protocol.generated.js").KernelExperimentArtifactsResult> {
+    return this.requestRaw("storage.experiment.artifacts", params, { signal, grant });
   }
 
   async listRecords(params: KernelMethodParams["storage.record.list"], grant: KernelGrantHandle, signal?: AbortSignal): Promise<KernelRecordListResult> {
@@ -1291,19 +1773,36 @@ export class KernelClient {
 
   private async closeInternal(): Promise<void> {
     this.closed = true;
+    this.credentialBridge.close();
+    this.modelProtocolBridge.close();
+    this.toolBridge.reset();
+    this.languageBridge.close();
+    this.managedSourceBridge.close();
+    this.memoryBridge.close();
+    this.contextBridge.close();
+    this.resourceBridge.close();
+    this.fileObservationBridge.close();
+    this.planBridge.close();
+    this.retrievalBridge.close();
+    this.issuedGrants.clear();
+    this.policyBridge.close();
+    for (const runId of this.runPreparations.keys()) this.cancelRunPreparation(runId);
     this.window.close(new KernelClientError({ code: "kernel-client-closed", message: "Kernel client is closing" }));
+    this.controlWindow.close(new KernelClientError({ code: "kernel-client-closed", message: "Kernel client is closing" }));
     for (const pending of this.pending.values()) pending.cancel();
     const child = this.child;
-    if (!child) return;
+    if (!child) { await this.transport?.close(); this.transport = undefined; return; }
     const bounded = async (work: Promise<unknown>): Promise<boolean> => {
       let timer: ReturnType<typeof setTimeout> | undefined;
       try {
         return await Promise.race([work.then(() => true, () => false), new Promise<boolean>(resolve => { timer = setTimeout(() => resolve(false), 5_000); })]);
       } finally { if (timer) clearTimeout(timer); }
     };
-    if (await bounded(this.window.whenIdle()) && this.handshakeResult && !child.killed) {
+    if (await bounded(Promise.all([this.window.whenIdle(), this.controlWindow.whenIdle(), this.whenRequestsIdle()])) && this.handshakeResult && !child.killed) {
       await bounded(this.requestRaw("kernel.shutdown", {}, { grant: this.managementGrant ?? undefined }));
     }
+    await this.transport?.close();
+    this.transport = undefined;
     const waitForExit = (): Promise<boolean> => new Promise(resolve => {
       if (child.exitCode !== null || child.signalCode !== null) { resolve(true); return; }
       const onExit = () => { clearTimeout(timer); resolve(true); };

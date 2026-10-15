@@ -113,7 +113,7 @@ export interface WalkthroughReadiness {
     inputCharBudget?: number;
     contextTokens?: number;
     structuredOutput?: boolean | null;
-    /** False when the resolved provider has no usable Pi login. */
+    /** False when the resolved provider has no usable account credential. */
     hasLogin?: boolean;
   };
   requiredChars?: number;

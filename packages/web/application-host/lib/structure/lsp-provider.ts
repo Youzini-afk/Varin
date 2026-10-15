@@ -1,8 +1,7 @@
 import { languageIdForPath } from "@varin/protocol";
 import type { DocumentAuthority } from "../documents/authority.js";
 import type { createLanguageSupervisor } from "../lsp/supervisor.js";
-import { createLanguageViewBinder, type ResolveLanguageTarget } from "../lsp/language-view.js";
-import type { HarnessDocumentReadSource } from "../harness/service-host.js";
+import { createLanguageViewBinder } from "../lsp/language-view.js";
 import { structureKindFromLsp } from "./kinds.js";
 import { lspRangeToLines, type LspLikeRange } from "./ranges.js";
 import {
@@ -22,10 +21,8 @@ import {
 type LanguageSupervisor = Pick<ReturnType<typeof createLanguageSupervisor>, "documentSymbols" | "syncDocument">;
 
 export interface LspStructureProviderOptions {
-  documents: Pick<DocumentAuthority, "readSnapshot" | "readAgentInputSnapshot">;
+  documents: Pick<DocumentAuthority, "readSnapshot">;
   supervisor: LanguageSupervisor;
-  readSource?: HarnessDocumentReadSource;
-  resolveTarget?: ResolveLanguageTarget;
 }
 
 const recordOf = (value: unknown): Record<string, unknown> => (
@@ -96,7 +93,7 @@ const unusedCapability = (
 
 /**
  * Structure outline from the Host-owned agent language view.
- * Bind follows the caller's named text identity; explore uses input-context.
+ * Bind follows the explicitly saved file identity; native source queries use their admitted source view.
  * Cold, missing-capability, and revision mismatch stay distinct statuses.
  */
 export function createLspStructureProvider(options: LspStructureProviderOptions): StructureProvider {
@@ -122,10 +119,8 @@ export function createLspStructureProvider(options: LspStructureProviderOptions)
         workspaceId: request.workspaceId,
         resourceId: request.path,
         languageId,
-        text: "input-context",
+        text: "disk",
         ...(request.warmOnly ? { warmOnly: true } : {}),
-        ...(request.sessionId ? { sessionId: request.sessionId } : {}),
-        ...(request.inputContext ? { inputContext: request.inputContext } : {}),
         ...(request.signal ? { signal: request.signal } : {}),
       });
       if (bound.status !== "bound") {

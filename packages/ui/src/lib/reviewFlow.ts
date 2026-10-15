@@ -1,677 +1,301 @@
-import type {
-  PiAssistantMessage,
-  PiSessionEntry,
-  PiSessionMessageEntry,
-  SessionEntriesResult,
-  SessionSnapshot,
-  SessionSummary,
-  ThinkingLevel,
-} from '@varin/protocol';
+import {
+  getRuntimeEndpointGeneration, subscribeRuntimeEndpointWillChange, ThreadRequestError,
+  type ThreadIdentity, type ThreadModel, type ThreadSnapshot, type ThreadSource, type ThreadsAPI,
+} from '@varin/application-client';
+import type { HistoryItem } from '@varin/protocol';
 import { actionInstruction } from '@/lib/actionInstructions';
-import { renderPiAgentInvocation } from '@/lib/piAgentInvocation';
-import { getPiRuntimeConnection } from '@/lib/pi-runtime/client';
-import {
-  captureSurfaceAgentInputContext,
-  releaseSurfaceAgentInputContext,
-} from '@/lib/pi-runtime/agent-input-context';
-import { getRuntimeKey } from '@varin/application-client';
-import { useAutoReviewStore, type AutoReviewRun } from '@/stores/useAutoReviewStore';
-import { usePiSessionStore } from '@/stores/usePiSessionStore';
-import {
-  reviewLinkKey,
-  useReviewFlowStore,
-  type ReviewSessionLink,
-} from '@/stores/useReviewFlowStore';
+import { getRegisteredRuntimeAPIs } from '@/lib/runtime-api/registry';
+import { useAutoReviewStore, type AutoReviewRun, type ReviewCommand } from '@/stores/useAutoReviewStore';
+import { reviewLinkKey, useReviewFlowStore, type ReviewThreadLink } from '@/stores/useReviewFlowStore';
+import { threadHostKey, useThreadStore } from '@/stores/useThreadStore';
 import { useUIStore } from '@/stores/useUIStore';
-import type { MultiRunAgentSelection } from '@/types/multirun';
 
-const HANDOFF_TIMEOUT_MS = 180_000;
-const HANDOFF_POLL_MS = 400;
-const SENT_ENTRY_TIMEOUT_MS = 15_000;
-const AUTO_REVIEW_POLL_MS = 300;
-const AUTO_REVIEW_MAX_ITERATIONS = 15;
-const AUTO_REVIEW_FINAL_MARKER = 'FINAL_REVIEW_STATUS: no_remaining_findings';
-const AUTO_REVIEW_FINAL_MARKER_NORMALIZED = AUTO_REVIEW_FINAL_MARKER.toLowerCase();
-const REVIEW_SESSION_PREFIX = 'Review: ';
-const activeAutoReviewLoops = new Set<string>();
-const activeAutoReviewForwardKeys = new Set<string>();
-
-type SessionModelContext = {
-  agent?: MultiRunAgentSelection | null;
-  modelId: string;
-  providerId: string;
-  thinkingLevel?: ThinkingLevel;
+const FINAL_MARKER = 'FINAL_REVIEW_STATUS: no_remaining_findings';
+const POLL_MS = 1000;
+const activeLoops = new Set<string>();
+const activeCommands = new Map<string, Promise<void>>();
+const owners = new Map<string, ThreadsAPI>();
+const sleep = () => new Promise<void>(resolve => setTimeout(resolve, POLL_MS));
+const sameIdentity = (left: ThreadIdentity, right: ThreadIdentity) => left.threadId === right.threadId && left.branchId === right.branchId;
+const message = (error: unknown) => error instanceof Error ? error.message : String(error);
+const current = (run: AutoReviewRun) => run.hostGeneration === getRuntimeEndpointGeneration() && run.hostKey === threadHostKey();
+const assertOwner = (run: AutoReviewRun) => { if (!current(run)) throw new Error('Application Host changed. Return to the original Host to inspect accepted work.'); };
+const getRun = (key: string) => useAutoReviewStore.getState().runs[key];
+const patch = (key: string, value: Partial<AutoReviewRun>) => useAutoReviewStore.getState().update(key, value);
+const assertRunning = (run: AutoReviewRun) => {
+  assertOwner(run);
+  if (getRun(run.key)?.status !== 'running' || getRun(run.key)?.createKey !== run.createKey) throw new Error('Review forwarding stopped. Accepted work is still owned by its original run.');
 };
-
-type StartReviewFlowInput = SessionModelContext & {
-  originalSessionId: string;
-  directory: string;
-  generateHandoff?: boolean;
-  returnAfterHandoffRequest?: boolean;
-  autoReview?: boolean;
+const requireAPI = () => {
+  const api = getRegisteredRuntimeAPIs()?.threads;
+  if (!api) throw new Error('Thread execution is unavailable');
+  return api;
 };
+subscribeRuntimeEndpointWillChange(() => useAutoReviewStore.getState().stopAll());
 
-type AssistantTextEntry = {
-  id: string;
-  parentId: string | null;
-  text: string;
-  timestamp: number;
-};
+export const hasFinalReviewMarker = (text: string): boolean => text.trim().split('\n').at(-1)?.trim().toLowerCase() === FINAL_MARKER.toLowerCase();
+export const stripFinalReviewMarker = (text: string): string => hasFinalReviewMarker(text) ? text.trimEnd().split('\n').slice(0, -1).join('\n').trim() : text;
+const reviewerInstructions = (text: string) => `${text}\n\nThis is an automatic review. If there are no remaining findings, end with this exact final line:\n${FINAL_MARKER}\nOtherwise explain the findings and omit that line.`;
 
-const sleep = (milliseconds: number): Promise<void> => new Promise((resolve) => {
-  setTimeout(resolve, milliseconds);
-});
-
-const entryTimestamp = (entry: PiSessionEntry): number => {
-  const parsed = Date.parse(entry.timestamp);
-  if (Number.isFinite(parsed)) return parsed;
-  if (entry.type === 'message' && typeof entry.message.timestamp === 'number') {
-    return entry.message.timestamp;
+/** Preserve the admitted source, including its remote authority and actual materialized environment.
+ * A navigation directory is never substituted for this execution identity. */
+export function reviewSource(snapshot: ThreadSnapshot): ThreadSource {
+  const source = snapshot.launch?.selection.source;
+  if (!source) throw new Error('Select a workspace source in the implementation conversation before reviewing it.');
+  const base = { resourceOwner: source.resource_owner, workspaceId: source.workspace_id,
+    executionWorkspaceId: source.execution_workspace_id,
+    tools: snapshot.launch!.selection.tools.filter(tool => tool.requirements).map(tool => tool.name) };
+  if (source.mode === 'live_root') {
+    if (!source.live_root) throw new Error('The original live workspace identity is unavailable.');
+    return { ...base, mode: 'live_root', liveRoot: source.live_root };
   }
-  return 0;
-};
-
-const userMessageText = (entry: PiSessionMessageEntry): string => {
-  if (entry.message.role !== 'user') return '';
-  if (typeof entry.message.content === 'string') return entry.message.content.trim();
-  return entry.message.content
-    .filter((content) => content.type === 'text')
-    .map((content) => content.text)
-    .join('\n')
-    .trim();
-};
-
-const assistantMessageText = (message: PiAssistantMessage): string => message.content
-  .filter((content) => content.type === 'text')
-  .map((content) => content.text)
-  .join('\n')
-  .trim();
-
-const completedAssistantText = (entry: PiSessionEntry): string => {
-  if (entry.type !== 'message' || entry.message.role !== 'assistant') return '';
-  if (entry.message.stopReason === 'pending') return '';
-  return assistantMessageText(entry.message);
-};
-
-const latestAssistantTextEntry = (
-  entries: readonly PiSessionEntry[],
-  lastForwardedEntryId?: string,
-  afterCreatedAt = 0,
-  expectedParentId?: string,
-): AssistantTextEntry | null => {
-  for (let index = entries.length - 1; index >= 0; index -= 1) {
-    const entry = entries[index];
-    if (entry.id === lastForwardedEntryId) return null;
-    const timestamp = entryTimestamp(entry);
-    if (timestamp < afterCreatedAt - 1000) continue;
-    if (!isExpectedAutoReviewAssistantParent(entry, expectedParentId)) continue;
-    const text = completedAssistantText(entry);
-    if (!text) continue;
-    return { id: entry.id, parentId: entry.parentId, text, timestamp };
+  if (!source.branch_id || source.revision === null) throw new Error('The original source revision is unavailable.');
+  return { ...base, mode: source.mode, branchId: source.branch_id, revision: source.revision,
+    ...(source.environment_run_id ? { environmentRunId: source.environment_run_id } : {}) };
+}
+export function reviewModel(snapshot: ThreadSnapshot): ThreadModel {
+  const branch = snapshot.thread.branches.find(value => value.branch_id === snapshot.identity.branchId);
+  const config = (snapshot.modelSelection.active?.configuration ?? branch?.latest_run?.configuration) as {
+    providerId?: string; model?: string; thinkingLevel?: ThreadModel['thinkingLevel']; modelOptions?: { catalogModelId?: string; temperature?: number };
+  } | undefined;
+  if (!config?.providerId || !config.model) throw new Error('The implementation conversation has no selected model.');
+  return { providerId: config.providerId, modelId: config.modelOptions?.catalogModelId ?? config.model,
+    ...(config.thinkingLevel === undefined ? {} : { thinkingLevel: config.thinkingLevel }),
+    ...(config.modelOptions?.temperature === undefined ? {} : { temperature: config.modelOptions.temperature }) };
+}
+export function reviewableAssistantText(item: HistoryItem): string {
+  if (item.source !== 'assistant') return '';
+  const content = (item.content as { content?: { kind?: string; text?: string; output?: { parts?: Array<{ kind: string; text?: string }> } } } | null)?.content;
+  if (content?.kind === 'text') return content.text?.trim() ?? '';
+  if (content?.kind === 'output') return content.output?.parts?.filter(part => part.kind === 'text').map(part => part.text ?? '').join('\n').trim() ?? '';
+  return '';
+}
+export function openReviewThread(link: ReviewThreadLink): void {
+  if (link.hostKey !== threadHostKey()) throw new Error('Review belongs to another Application Host.');
+  useUIStore.getState().openContextPanelTab(link.directory, { mode: 'chat', thread: link.review,
+    dedupeKey: JSON.stringify([link.review.threadId, link.review.branchId]), label: 'Review', readOnly: false });
+}
+function remember(run: AutoReviewRun): void {
+  if (!run.review) return;
+  useReviewFlowStore.getState().upsertLink({ hostKey: run.hostKey, original: run.original, review: run.review, directory: run.directory });
+}
+function fail(key: string, error: unknown): void {
+  const run = getRun(key);
+  if (!run || run.status === 'stopped') return;
+  patch(key, { status: current(run) ? 'paused' : 'stopped', error: message(error) });
+}
+function idle(snapshot: ThreadSnapshot): void {
+  const branch = snapshot.thread.branches.find(value => value.branch_id === snapshot.identity.branchId);
+  if (branch?.active_run_id || snapshot.activeRun && !['completed', 'failed', 'cancelled'].includes(snapshot.activeRun.state)) {
+    throw new Error('This conversation has active work. Wait for it to finish before forwarding review input.');
   }
-  return null;
-};
-
-export const isAutoReviewRuntimeCurrent = (runtimeKey: string): boolean => runtimeKey === getRuntimeKey();
-
-const stopRunForRuntimeMismatch = (run: AutoReviewRun): void => {
-  useAutoReviewStore.getState().updateRun(run.originalSessionID, (current) => ({
-    ...current,
-    status: 'stopped',
-    error: 'Auto-review stopped because the runtime changed.',
-  }));
-};
-
-export const assertAutoReviewRuntimeStillCurrent = (expectedRuntimeKey?: string): void => {
-  if (expectedRuntimeKey && !isAutoReviewRuntimeCurrent(expectedRuntimeKey)) {
-    throw new Error('Auto-review stopped because the runtime changed.');
-  }
-};
-
-const isRuntimeChangeError = (error: unknown): boolean => {
-  const message = error instanceof Error ? error.message : String(error);
-  return message.includes('runtime changed');
-};
-
-export const hasFinalReviewMarker = (text: string): boolean => {
-  const lines = text.trim().split('\n').map((line) => line.trim()).filter(Boolean);
-  return lines.at(-1)?.toLowerCase() === AUTO_REVIEW_FINAL_MARKER_NORMALIZED;
-};
-
-export const stripFinalReviewMarker = (text: string): string => {
-  const lines = text.trimEnd().split('\n');
-  while (lines.length > 0 && lines[lines.length - 1].trim() === '') lines.pop();
-  if (lines.at(-1)?.trim().toLowerCase() === AUTO_REVIEW_FINAL_MARKER_NORMALIZED) {
-    lines.pop();
-  }
-  return lines.join('\n').trim();
-};
-
-export const isExpectedAutoReviewAssistantParent = (
-  entry: Pick<PiSessionEntry, 'parentId'>,
-  expectedParentId?: string,
-): boolean => !expectedParentId || entry.parentId === expectedParentId;
-
-const getAutoReviewForwardKey = (run: AutoReviewRun, entryId: string): string => [
-  run.runtimeKey,
-  run.originalSessionID,
-  run.phase,
-  run.expectedAssistantParentID ?? '',
-  entryId,
-].join(':');
-
-export const claimAutoReviewForward = (run: AutoReviewRun, entryId: string): string | null => {
-  const key = getAutoReviewForwardKey(run, entryId);
-  if (activeAutoReviewForwardKeys.has(key)) return null;
-  activeAutoReviewForwardKeys.add(key);
-  return key;
-};
-
-export const releaseAutoReviewForward = (key: string): void => {
-  activeAutoReviewForwardKeys.delete(key);
-};
-
-const autoReviewReviewerInstructions = (): string => (
-  `This review is part of an automatic review loop. If there are no remaining issues, end your response with this exact final line:\n${AUTO_REVIEW_FINAL_MARKER}\nIf you found issues that require changes, do not include that final status line.`
-);
-
-const ensureSessionOpen = async (sessionId: string, directory: string): Promise<SessionSnapshot> => {
-  const { client } = await getPiRuntimeConnection();
-  return client.request('session.open', { cwd: directory, sessionId });
-};
-
-const readSessionState = async (
-  sessionId: string,
-): Promise<{ entries: SessionEntriesResult; snapshot: SessionSnapshot }> => {
-  const { client } = await getPiRuntimeConnection();
-  const [snapshot, entries] = await Promise.all([
-    client.request('session.snapshot', { sessionId }),
-    client.request('session.entries', { scope: 'branch', sessionId }),
-  ]);
-  return { entries, snapshot };
-};
-
-const waitForSentUserEntry = async (
-  sessionId: string,
-  previousEntryIds: ReadonlySet<string>,
-  afterCreatedAt: number,
-): Promise<string> => {
-  const deadline = Date.now() + SENT_ENTRY_TIMEOUT_MS;
-  while (Date.now() < deadline) {
-    const { entries } = await readSessionState(sessionId);
-    for (let index = entries.entries.length - 1; index >= 0; index -= 1) {
-      const entry = entries.entries[index];
-      if (previousEntryIds.has(entry.id) || entryTimestamp(entry) < afterCreatedAt - 1000) continue;
-      if (entry.type === 'message' && userMessageText(entry)) return entry.id;
+}
+async function dispatch(key: string): Promise<void> {
+  const existing = activeCommands.get(key);
+  if (existing) return existing;
+  const work = (async () => {
+    let run = getRun(key); assertRunning(run);
+    const api = owners.get(key)!;
+    if (!run.review) {
+      // An uncertain create retains the same native key; there is no replacement conversation.
+      const review = await api.create(run.createKey);
+      patch(key, { review, phase: run.generateHandoff ? 'handoff' : 'review' });
+      assertRunning(run);
+      run = getRun(key); remember(run);
+      void useThreadStore.getState().loadCatalog().catch(() => {});
+      openReviewThread({ hostKey: run.hostKey, original: run.original, review, directory: run.directory });
     }
-    await sleep(HANDOFF_POLL_MS);
-  }
-  throw new Error('Timed out waiting for the Pi runtime to persist the review prompt');
-};
-
-const requestChatForceScrollBottom = (sessionId: string): void => {
-  if (typeof window === 'undefined') return;
-  window.dispatchEvent(new CustomEvent('varin:chat-force-scroll-bottom', {
-    detail: { sessionId },
-  }));
-};
-
-const sendPiMessage = async (
-  sessionId: string,
-  directory: string,
-  text: string,
-  modelContext?: SessionModelContext,
-  instructions?: string,
-  expectedRuntimeKey?: string,
-): Promise<string> => {
-  assertAutoReviewRuntimeStillCurrent(expectedRuntimeKey);
-  await ensureSessionOpen(sessionId, directory);
-  const { client } = await getPiRuntimeConnection();
-  if (modelContext) {
-    await client.request('model.select', {
-      modelId: modelContext.modelId,
-      provider: modelContext.providerId,
-      sessionId,
-    });
-    if (modelContext.thinkingLevel) {
-      await client.request('thinking.select', {
-        level: modelContext.thinkingLevel,
-        sessionId,
-      });
-    }
-  }
-  assertAutoReviewRuntimeStillCurrent(expectedRuntimeKey);
-  const before = await client.request('session.entries', { scope: 'branch', sessionId });
-  const previousEntryIds = new Set(before.entries.map((entry) => entry.id));
-  const startedAt = Date.now();
-  const task = modelContext?.agent && instructions
-    ? `${text}\n\n<varin-review-instructions>\n${instructions}\n</varin-review-instructions>`
-    : text;
-  const promptText = modelContext?.agent
-    ? renderPiAgentInvocation(modelContext.agent, task)
-    : task;
-  const inputContext = await captureSurfaceAgentInputContext(sessionId);
-  let result;
-  try {
-    result = await client.request('agent.prompt', {
-      ...(modelContext?.agent || !instructions ? {} : { instructions }),
-      inputContext,
-      sessionId,
-      text: promptText,
-    });
-  } catch (error) {
-    await releaseSurfaceAgentInputContext(sessionId, inputContext);
-    throw error;
-  }
-  if (!result.accepted) await releaseSurfaceAgentInputContext(sessionId, inputContext);
-  if (!result.accepted) throw new Error('The Pi runtime did not accept the review prompt');
-  requestChatForceScrollBottom(sessionId);
-  return waitForSentUserEntry(sessionId, previousEntryIds, startedAt);
-};
-
-const waitForAssistantText = async (
-  sessionId: string,
-  directory: string,
-  afterCreatedAt: number,
-  expectedParentId?: string,
-): Promise<string> => {
-  await ensureSessionOpen(sessionId, directory);
-  const deadline = Date.now() + HANDOFF_TIMEOUT_MS;
-  while (Date.now() < deadline) {
-    const { entries } = await readSessionState(sessionId);
-    const latest = latestAssistantTextEntry(
-      entries.entries,
-      undefined,
-      afterCreatedAt,
-      expectedParentId,
-    );
-    if (latest) return latest.text;
-    await sleep(HANDOFF_POLL_MS);
-  }
-  throw new Error('Timed out waiting for the handoff response');
-};
-
-const getReviewSessionTitle = (original: SessionSummary | undefined, originalSessionId: string): string => {
-  const implementationTitle = original?.name?.trim() || original?.firstMessage.trim() || originalSessionId;
-  return `${REVIEW_SESSION_PREFIX}${implementationTitle}`;
-};
-
-const findStoredLink = (originalSessionId: string): ReviewSessionLink | undefined => (
-  useReviewFlowStore.getState().linksByOriginal[reviewLinkKey(getRuntimeKey(), originalSessionId)]
-);
-
-const listDirectorySessions = async (directory: string): Promise<SessionSummary[]> => {
-  const { client } = await getPiRuntimeConnection();
-  return client.request('session.list', { cwd: directory });
-};
-
-const resolveReviewSummary = (
-  originalSessionId: string,
-  summaries: readonly SessionSummary[],
-): SessionSummary | undefined => {
-  const stored = findStoredLink(originalSessionId);
-  if (stored) {
-    const linked = summaries.find((summary) => summary.id === stored.reviewSessionId);
-    if (linked) return linked;
-  }
-  return summaries.find((summary) => (
-    summary.parentId === originalSessionId && summary.name?.startsWith(REVIEW_SESSION_PREFIX)
-  ));
-};
-
-const rememberReviewLink = (
-  originalSessionId: string,
-  reviewSessionId: string,
-  directory: string,
-): void => {
-  useReviewFlowStore.getState().upsertLink({
-    directory,
-    originalSessionId,
-    reviewSessionId,
-    runtimeKey: getRuntimeKey(),
-  });
-};
-
-const createOrReuseReviewSession = async (
-  originalSessionId: string,
-  directory: string,
-  expectedRuntimeKey?: string,
-): Promise<SessionSnapshot> => {
-  assertAutoReviewRuntimeStillCurrent(expectedRuntimeKey);
-  await ensureSessionOpen(originalSessionId, directory);
-  let summaries = await listDirectorySessions(directory);
-  const existing = resolveReviewSummary(originalSessionId, summaries);
-  if (existing) {
-    try {
-      const snapshot = await ensureSessionOpen(existing.id, directory);
-      rememberReviewLink(originalSessionId, existing.id, directory);
-      return snapshot;
-    } catch {
-      useReviewFlowStore.getState().removeLink(getRuntimeKey(), originalSessionId);
-    }
-  }
-
-  summaries = await listDirectorySessions(directory);
-  const original = summaries.find((summary) => summary.id === originalSessionId);
-  const originalSnapshot = await ensureSessionOpen(originalSessionId, directory);
-  const parentSession = original?.sessionFile || originalSnapshot.sessionFile;
-  const { client } = await getPiRuntimeConnection();
-  const review = await client.request('session.create', {
-    cwd: directory,
-    name: getReviewSessionTitle(original, originalSessionId),
-    ...(parentSession ? { parentSession } : {}),
-    ...(original?.workspace ? { workspace: original.workspace } : {}),
-  });
-  assertAutoReviewRuntimeStillCurrent(expectedRuntimeKey);
-  rememberReviewLink(originalSessionId, review.sessionId, directory);
-  void usePiSessionStore.getState().loadCatalog(directory).catch(() => undefined);
-  return review;
-};
-
-const openReviewSessionPanel = (
-  directory: string,
-  reviewSessionId: string,
-  label?: string,
-  readOnly = false,
-): void => {
-  useUIStore.getState().openContextPanelTab(directory, {
-    mode: 'chat',
-    dedupeKey: `session:${reviewSessionId}`,
-    label: label ?? null,
-    sessionTitleFallback: label ?? null,
-    readOnly,
-  });
-};
-
-const findLinkByReviewSession = (
-  reviewSessionId: string,
-  directory: string,
-  summaries: readonly SessionSummary[],
-): ReviewSessionLink | undefined => {
-  const runtimeKey = getRuntimeKey();
-  const stored = Object.values(useReviewFlowStore.getState().linksByOriginal).find((link) => (
-    link.runtimeKey === runtimeKey && link.reviewSessionId === reviewSessionId
-  ));
-  if (stored) return stored;
-  const review = summaries.find((summary) => summary.id === reviewSessionId);
-  if (!review?.parentId) return undefined;
-  return {
-    directory,
-    originalSessionId: review.parentId,
-    reviewSessionId,
-    runtimeKey,
-  };
-};
-
-const runAutoReviewLoop = async (originalSessionId: string): Promise<void> => {
-  const initial = useAutoReviewStore.getState().runsByOriginalSessionID[originalSessionId];
-  if (!initial) return;
-  await Promise.all([
-    ensureSessionOpen(initial.originalSessionID, initial.directory),
-    ensureSessionOpen(initial.reviewSessionID, initial.directory),
-  ]);
-
-  while (true) {
-    const run = useAutoReviewStore.getState().runsByOriginalSessionID[originalSessionId];
-    if (!run || run.status !== 'running') return;
-    if (!isAutoReviewRuntimeCurrent(run.runtimeKey)) {
-      stopRunForRuntimeMismatch(run);
-      return;
-    }
-
-    const sourceSessionId = run.phase === 'waiting_for_reviewer'
-      ? run.reviewSessionID
-      : run.originalSessionID;
-    const { entries, snapshot } = await readSessionState(sourceSessionId);
-    if (snapshot.busy) {
-      await sleep(AUTO_REVIEW_POLL_MS);
-      continue;
-    }
-    const latest = latestAssistantTextEntry(
-      entries.entries,
-      run.lastForwardedMessageID,
-      run.waitAfterCreatedAt,
-      run.expectedAssistantParentID,
-    );
-    if (!latest) {
-      await sleep(AUTO_REVIEW_POLL_MS);
-      continue;
-    }
-
-    const forwardKey = claimAutoReviewForward(run, latest.id);
-    if (!forwardKey) {
-      await sleep(AUTO_REVIEW_POLL_MS);
-      continue;
-    }
-    try {
-      assertAutoReviewRuntimeStillCurrent(run.runtimeKey);
-      const waitAfterCreatedAt = Date.now();
-      if (run.phase === 'waiting_for_reviewer') {
-        const finalReview = hasFinalReviewMarker(latest.text);
-        const reviewFeedback = finalReview ? stripFinalReviewMarker(latest.text) : latest.text;
-        const sentEntryId = await sendReviewFeedbackToOriginal(
-          run.reviewSessionID,
-          run.directory,
-          reviewFeedback,
-          run.runtimeKey,
-        );
-        if (finalReview) {
-          useAutoReviewStore.getState().completeRun(run.originalSessionID);
-          return;
-        }
-        useAutoReviewStore.getState().updateRun(run.originalSessionID, (current) => ({
-          ...current,
-          phase: 'waiting_for_implementer',
-          lastForwardedMessageID: latest.id,
-          expectedAssistantParentID: sentEntryId,
-          waitAfterCreatedAt,
-        }));
-      } else {
-        if (run.iteration >= run.maxIterations) {
-          useAutoReviewStore.getState().stopRun(run.originalSessionID);
-          return;
-        }
-        const sentEntryId = await sendImplementationResponseToReviewer(
-          run.originalSessionID,
-          run.directory,
-          latest.text,
-          true,
-          run.runtimeKey,
-        );
-        useAutoReviewStore.getState().updateRun(run.originalSessionID, (current) => ({
-          ...current,
-          phase: 'waiting_for_reviewer',
-          iteration: current.iteration + 1,
-          lastForwardedMessageID: latest.id,
-          expectedAssistantParentID: sentEntryId,
-          waitAfterCreatedAt,
-        }));
+    if (!run.reviewTitled) {
+      if (!run.titleCommand) {
+        assertRunning(run); const snapshot = await api.snapshot(run.review!); assertRunning(run);
+        patch(key, { titleCommand: { runtime: 'agent', threadId: run.review!.threadId, key: `${run.createKey}:title`,
+          expectedRevision: snapshot.thread.revision, title: run.reviewTitle } });
+        run = getRun(key);
       }
-    } finally {
-      releaseAutoReviewForward(forwardKey);
+      assertRunning(run); await api.update(run.titleCommand!); patch(key, { reviewTitled: true }); assertRunning(run);
+      run = getRun(key);
+      void useThreadStore.getState().loadCatalog().catch(() => {});
     }
+    if (!run.command) {
+      const target = run.phase === 'review' ? run.review! : run.original;
+      assertRunning(run); const snapshot = await api.snapshot(target); assertRunning(run); idle(snapshot);
+      const expectedHead = run.phase === 'review' ? run.reviewHead : run.originalHead;
+      if (snapshot.historyPage.head !== expectedHead) throw new Error('The conversation changed outside this review. Stop forwarding and inspect the current branch before starting another review.');
+      const input = { ...target, key: crypto.randomUUID(), expectedHead, text: run.prompt,
+        model: run.phase === 'review' ? run.reviewModel : run.originalModel, source: run.source };
+      patch(key, { command: { input, status: 'sending' } });
+      run = getRun(key);
+    }
+    if (run.command!.receipt) return;
+    const command = run.command!;
+    patch(key, { command: { ...command, status: 'sending' }, error: undefined });
+    assertRunning(run);
+    try {
+      const receipt = await api.submit(command.input);
+      // Keep the original receipt even if Stop/Host switch happened while admission was in flight.
+      patch(key, { command: { ...command, receipt, status: 'accepted' } });
+      assertRunning(run);
+    } catch (error) {
+      if (!getRun(key).command?.receipt) patch(key, { command: { ...command,
+        status: error instanceof ThreadRequestError && error.admission === 'not_started' ? 'rejected' : 'unknown' } });
+      throw error;
+    }
+  })();
+  activeCommands.set(key, work);
+  try { await work; } finally { if (activeCommands.get(key) === work) activeCommands.delete(key); }
+}
+async function completedReply(run: AutoReviewRun, api: ThreadsAPI): Promise<{ text: string; head: string | null } | null> {
+  const receipt = run.command?.receipt;
+  if (!receipt) throw new Error('Review input acceptance is unknown. Retry the original delivery to reconcile its receipt.');
+  assertRunning(run); const execution = await api.run(receipt.run_id); assertRunning(run);
+  if (execution.thread_id !== receipt.thread_id || execution.branch_id !== receipt.branch_id) throw new Error('The original review run identity changed.');
+  if (execution.state === 'failed' || execution.state === 'cancelled') throw new Error(`The original review run ${execution.state}. Inspect its result before starting another review.`);
+  if (execution.state !== 'completed') return null;
+  const identity = run.command!.input;
+  const snapshot = await api.snapshot(identity); assertRunning(run);
+  const branch = snapshot.thread.branches.find(value => value.branch_id === identity.branchId);
+  if (branch?.latest_run?.id !== receipt.run_id) throw new Error('A newer run changed this conversation. Automatic forwarding is paused.');
+  const items = [...snapshot.history]; let previous = snapshot.historyPage.previous;
+  const seen = new Set<string>();
+  while (previous && snapshot.historyPage.head && !items.some(item => item.id === receipt.input_id)) {
+    if (seen.has(previous)) throw new Error('Review history pagination did not advance.');
+    seen.add(previous); assertRunning(run);
+    const page = await api.historyPage(identity, { headId: snapshot.historyPage.head, beforeId: previous });
+    assertRunning(run); items.unshift(...page.items); previous = page.previous;
   }
-};
-
-const startAutoReviewRun = (run: AutoReviewRun): void => {
-  useAutoReviewStore.getState().upsertRun(run);
-  resumeAutoReviewRun(run.originalSessionID);
-};
-
-export const resumeAutoReviewRun = (originalSessionId: string): void => {
-  const run = useAutoReviewStore.getState().runsByOriginalSessionID[originalSessionId];
-  if (
-    !run
-    || run.status !== 'running'
-    || !isAutoReviewRuntimeCurrent(run.runtimeKey)
-    || activeAutoReviewLoops.has(originalSessionId)
-  ) return;
-  activeAutoReviewLoops.add(originalSessionId);
-  void runAutoReviewLoop(originalSessionId).catch((error) => {
-    console.error('[review-flow] auto-review loop failed', error);
-    useAutoReviewStore.getState().updateRun(originalSessionId, (current) => ({
-      ...current,
-      status: isRuntimeChangeError(error) ? 'stopped' : 'error',
-      error: error instanceof Error ? error.message : String(error),
-    }));
-  }).finally(() => {
-    activeAutoReviewLoops.delete(originalSessionId);
-  });
-};
-
-export const startReviewFlow = async (input: StartReviewFlowInput): Promise<void> => {
-  const expectedRuntimeKey = input.autoReview ? getRuntimeKey() : undefined;
-  const modelContext: SessionModelContext = {
-    agent: input.agent,
-    modelId: input.modelId,
-    providerId: input.providerId,
-    thinkingLevel: input.thinkingLevel,
-  };
-
-  const startReviewSession = async (reviewPrompt: string): Promise<void> => {
-    const review = await createOrReuseReviewSession(
-      input.originalSessionId,
-      input.directory,
-      expectedRuntimeKey,
-    );
-    const runtimeKey = expectedRuntimeKey ?? getRuntimeKey();
-    const waitAfterCreatedAt = Date.now();
-    const sentEntryId = await sendPiMessage(
-      review.sessionId,
-      input.directory,
-      reviewPrompt,
-      modelContext,
-      input.autoReview ? autoReviewReviewerInstructions() : undefined,
-      input.autoReview ? runtimeKey : undefined,
-    );
-    if (input.autoReview) {
-      startAutoReviewRun({
-        originalSessionID: input.originalSessionId,
-        reviewSessionID: review.sessionId,
-        directory: input.directory,
-        runtimeKey,
-        status: 'running',
-        phase: 'waiting_for_reviewer',
-        iteration: 0,
-        maxIterations: AUTO_REVIEW_MAX_ITERATIONS,
-        expectedAssistantParentID: sentEntryId,
-        waitAfterCreatedAt,
-      });
-    } else {
-      openReviewSessionPanel(input.directory, review.sessionId, review.name);
+  const text = items.filter(item => item.run_id === receipt.run_id).map(reviewableAssistantText).filter(Boolean).join('\n\n');
+  if (!text) throw new Error('The accepted run completed without a review response. Inspect its history before continuing.');
+  return { text, head: snapshot.historyPage.head };
+}
+function monitor(key: string): void {
+  const token = getRun(key).createKey;
+  if (activeLoops.has(token)) return;
+  activeLoops.add(token);
+  void (async () => {
+    while (getRun(key)?.status === 'running' && getRun(key)?.createKey === token) {
+      const run = getRun(key); assertRunning(run);
+      const reply = await completedReply(run, owners.get(key)!);
+      if (!reply) { await sleep(); continue; }
+      assertRunning(run);
+      if (run.phase === 'handoff') {
+        let prompt = actionInstruction('session.reviewSession.visible', { handoff: reply.text });
+        if (run.autoReview) prompt = reviewerInstructions(prompt);
+        patch(key, { originalHead: reply.head, phase: 'review', prompt, command: undefined });
+      } else if (run.phase === 'review') {
+        if (!run.autoReview || hasFinalReviewMarker(reply.text)) {
+          patch(key, { reviewHead: reply.head, status: 'completed' }); return;
+        }
+        if (run.iteration >= run.maxIterations) {
+          patch(key, { status: 'paused', error: 'The selected review-round limit was reached. Inspect the remaining findings before continuing.' }); return;
+        }
+        patch(key, { reviewHead: reply.head, phase: 'implementation', command: undefined,
+          prompt: actionInstruction('session.reviewFeedbackToImplementer.visible', { review_feedback: reply.text }) });
+      } else {
+        patch(key, { originalHead: reply.head, phase: 'review', command: undefined, iteration: run.iteration + 1,
+          prompt: reviewerInstructions(actionInstruction('session.implementationResponseToReviewer.visible', { implementation_response: reply.text })) });
+      }
+      await dispatch(key);
     }
-  };
-
-  if (input.generateHandoff ?? true) {
-    const visibleText = await actionInstruction('session.reviewHandoff.visible');
-    const instructionsText = await actionInstruction('session.reviewHandoff.instructions');
-    const startedAt = Date.now();
-    const sentEntryId = await sendPiMessage(
-      input.originalSessionId,
-      input.directory,
-      visibleText,
-      undefined,
-      instructionsText,
-      expectedRuntimeKey,
-    );
-    const continueFromHandoff = async (): Promise<void> => {
-      const handoff = await waitForAssistantText(
-        input.originalSessionId,
-        input.directory,
-        startedAt,
-        sentEntryId,
-      );
-      assertAutoReviewRuntimeStillCurrent(expectedRuntimeKey);
-      const prompt = await actionInstruction('session.reviewSession.visible', { handoff });
-      await startReviewSession(prompt);
-    };
-    if (input.returnAfterHandoffRequest) {
-      void continueFromHandoff().catch((error) => {
-        console.error('[review-flow] failed to finish background review flow', error);
-      });
-      return;
-    }
-    await continueFromHandoff();
-    return;
+  })().catch(error => fail(key, error)).finally(() => activeLoops.delete(token));
+}
+export interface StartReviewFlowInput {
+  original: ThreadIdentity;
+  directory: string;
+  model: ThreadModel;
+  generateHandoff?: boolean;
+  autoReview?: boolean;
+  /** An explicit user budget, not a protocol limit. */
+  maxIterations?: number;
+}
+async function prepareReviewFlow(input: StartReviewFlowInput): Promise<void> {
+  const api = requireAPI(); const generation = getRuntimeEndpointGeneration(); const hostKey = threadHostKey();
+  const key = reviewLinkKey(hostKey, input.original);
+  if (getRun(key)?.status === 'running' || getRun(key)?.status === 'paused' || getRun(key)?.command?.status === 'unknown' || getRun(key)?.phase === 'creating_review') {
+    throw new Error('Resolve the existing review before starting another one. Its original delivery and result remain available.');
   }
-
-  await startReviewSession(await actionInstruction('session.reviewSessionWithoutHandoff.visible'));
-};
-
-export const sendReviewFeedbackToOriginal = async (
-  reviewSessionId: string,
-  directory: string,
-  reviewFeedback: string,
-  expectedRuntimeKey?: string,
-): Promise<string> => {
-  assertAutoReviewRuntimeStillCurrent(expectedRuntimeKey);
-  const summaries = await listDirectorySessions(directory);
-  const link = findLinkByReviewSession(reviewSessionId, directory, summaries);
-  if (!link) throw new Error('Original session is missing');
-  rememberReviewLink(link.originalSessionId, reviewSessionId, directory);
-  const prompt = await actionInstruction('session.reviewFeedbackToImplementer.visible', {
-    review_feedback: reviewFeedback,
-  });
-  return sendPiMessage(
-    link.originalSessionId,
-    directory,
-    prompt,
-    undefined,
-    undefined,
-    expectedRuntimeKey,
-  );
-};
-
-export const sendImplementationResponseToReviewer = async (
-  originalSessionId: string,
-  directory: string,
-  implementationResponse: string,
-  autoReview = false,
-  expectedRuntimeKey?: string,
-): Promise<string> => {
-  assertAutoReviewRuntimeStillCurrent(expectedRuntimeKey);
-  const summaries = await listDirectorySessions(directory);
-  const review = resolveReviewSummary(originalSessionId, summaries);
-  if (!review) throw new Error('Review session is missing');
-  rememberReviewLink(originalSessionId, review.id, directory);
-  const prompt = await actionInstruction('session.implementationResponseToReviewer.visible', {
-    implementation_response: implementationResponse,
-  });
-  const sentEntryId = await sendPiMessage(
-    review.id,
-    directory,
-    prompt,
-    undefined,
-    autoReview ? autoReviewReviewerInstructions() : undefined,
-    expectedRuntimeKey,
-  );
-  if (!autoReview) openReviewSessionPanel(directory, review.id, review.name);
-  return sentEntryId;
-};
+  const snapshot = await api.snapshot(input.original);
+  if (generation !== getRuntimeEndpointGeneration()) throw new Error('Application Host changed.');
+  idle(snapshot);
+  const autoReview = input.autoReview ?? false; const generateHandoff = input.generateHandoff ?? true;
+  const maxIterations = input.maxIterations ?? 15;
+  if (!Number.isSafeInteger(maxIterations) || maxIterations < 1) throw new Error('Choose a positive number of review rounds.');
+  let prompt = generateHandoff ? `${actionInstruction('session.reviewHandoff.visible')}\n\n${actionInstruction('session.reviewHandoff.instructions')}`
+    : actionInstruction('session.reviewSessionWithoutHandoff.visible');
+  if (autoReview && !generateHandoff) prompt = reviewerInstructions(prompt);
+  const run: AutoReviewRun = { key, hostKey, hostGeneration: generation, original: input.original, directory: input.directory,
+    source: reviewSource(snapshot), originalModel: reviewModel(snapshot), reviewModel: input.model,
+    originalHead: snapshot.historyPage.head, reviewHead: null, createKey: crypto.randomUUID(), reviewTitle: `Review: ${snapshot.thread.title.trim() || input.original.threadId}`,
+    autoReview, generateHandoff, maxIterations, status: 'running', phase: 'creating_review', iteration: 0, prompt };
+  owners.set(key, api); useAutoReviewStore.getState().put(run);
+  try { await dispatch(key); monitor(key); } catch (error) { fail(key, error); throw error; }
+}
+const starting = new Map<string, { fingerprint: string; work: Promise<void> }>();
+export function startReviewFlow(input: StartReviewFlowInput): Promise<void> {
+  const key = reviewLinkKey(threadHostKey(), input.original);
+  const fingerprint = JSON.stringify(input); const existing = starting.get(key);
+  if (existing) return existing.fingerprint === fingerprint ? existing.work : Promise.reject(new Error('Another review is already being prepared for this branch.'));
+  const work = prepareReviewFlow(input); starting.set(key, { fingerprint, work });
+  const clear = () => { if (starting.get(key)?.work === work) starting.delete(key); };
+  void work.then(clear, clear); return work;
+}
+export async function resumeAutoReviewRun(key: string): Promise<void> {
+  const run = getRun(key); if (!run) return;
+  assertOwner(run);
+  if (run.status === 'running') return;
+  if (run.status === 'completed') return;
+  if (run.phase === 'review' && run.iteration >= run.maxIterations && run.command?.receipt) {
+    throw new Error('Start another review explicitly if more review rounds are needed.');
+  }
+  patch(key, { status: 'running', error: undefined });
+  try { await dispatch(key); monitor(key); } catch (error) { fail(key, error); throw error; }
+}
+/** Stops future forwarding only; never reports that accepted work or its executors stopped. */
+export function stopAutoReviewRun(key: string): void { patch(key, { status: 'stopped', error: 'Forwarding stopped. Accepted runs continue; use Stop run in their conversation to request cancellation.' }); }
 
 export type ReviewTransferDirection = 'review-to-original' | 'original-to-review';
-
-type SessionReference = string | { id: string } | null | undefined;
-
-export const getReviewTransferDirection = (
-  session: SessionReference,
-): ReviewTransferDirection | null => {
-  const sessionId = typeof session === 'string' ? session : session?.id;
-  if (!sessionId) return null;
-  const runtimeKey = getRuntimeKey();
-  const links = Object.values(useReviewFlowStore.getState().linksByOriginal).filter((link) => (
-    link.runtimeKey === runtimeKey
-  ));
-  if (links.some((link) => link.reviewSessionId === sessionId)) return 'review-to-original';
-  if (links.some((link) => link.originalSessionId === sessionId)) return 'original-to-review';
-
-  const summaries = usePiSessionStore.getState().summaries;
-  const summary = summaries.find((candidate) => candidate.id === sessionId);
-  if (summary?.parentId && summary.name?.startsWith(REVIEW_SESSION_PREFIX)) {
-    return 'review-to-original';
+export function getReviewLink(identity: ThreadIdentity): ReviewThreadLink | undefined {
+  return Object.values(useReviewFlowStore.getState().linksByOriginal).find(link => link.hostKey === threadHostKey()
+    && (sameIdentity(link.original, identity) || sameIdentity(link.review, identity)));
+}
+export function getReviewTransferDirection(identity: ThreadIdentity): ReviewTransferDirection | null {
+  const link = getReviewLink(identity);
+  return link ? sameIdentity(link.review, identity) ? 'review-to-original' : 'original-to-review' : null;
+}
+const transfers = new Map<string, { generation: number; command?: ReviewCommand; pending?: Promise<void> }>();
+/** Explicit transfer is keyed by the original message, including after a lost acknowledgement. */
+export async function transferReviewMessage(identity: ThreadIdentity, item: HistoryItem): Promise<void> {
+  const host = threadHostKey(); const generation = getRuntimeEndpointGeneration(); const api = requireAPI();
+  const link = getReviewLink(identity); if (!link) throw new Error('The linked review conversation is unavailable.');
+  const loop = getRun(reviewLinkKey(host, link.original));
+  if (loop?.status === 'running' || loop?.status === 'paused') throw new Error('Stop automatic forwarding before sending a review message manually.');
+  const text = reviewableAssistantText(item); if (!text) throw new Error('This message has no review text to transfer.');
+  const key = JSON.stringify([host, identity.threadId, identity.branchId, item.id]);
+  let transfer = transfers.get(key);
+  if (transfer) {
+    if (transfer.generation !== generation) throw new Error('This delivery belongs to an earlier Host connection. Inspect its original conversation before sending again.');
+    if (transfer.command?.receipt) return;
+    if (transfer.pending) return transfer.pending;
+  } else {
+    transfer = { generation }; transfers.set(key, transfer);
   }
-  if (summaries.some((candidate) => (
-    candidate.parentId === sessionId && candidate.name?.startsWith(REVIEW_SESSION_PREFIX)
-  ))) return 'original-to-review';
-  return null;
-};
+  const original = transfer;
+  const assertCurrent = () => { if (generation !== getRuntimeEndpointGeneration()) throw new Error('Application Host changed.'); };
+  const work = (async () => {
+    try {
+      if (!original.command) {
+        const toOriginal = sameIdentity(identity, link.review); const target = toOriginal ? link.original : link.review;
+        assertCurrent(); const snapshot = await api.snapshot(target); assertCurrent(); idle(snapshot);
+        const prompt = toOriginal ? actionInstruction('session.reviewFeedbackToImplementer.visible', { review_feedback: text })
+          : actionInstruction('session.implementationResponseToReviewer.visible', { implementation_response: text });
+        original.command = { status: 'sending', input: { ...target, key: crypto.randomUUID(), expectedHead: snapshot.historyPage.head,
+          text: prompt, model: reviewModel(snapshot), source: reviewSource(snapshot) } };
+      }
+      assertCurrent(); original.command.status = 'sending';
+      original.command.receipt = await api.submit(original.command.input); original.command.status = 'accepted';
+      if (generation === getRuntimeEndpointGeneration() && sameIdentity(identity, link.original)) openReviewThread(link);
+    } catch (error) {
+      if (original.command && !original.command.receipt) original.command.status = error instanceof ThreadRequestError && error.admission === 'not_started' ? 'rejected' : 'unknown';
+      throw error;
+    } finally { original.pending = undefined; }
+  })(); original.pending = work; return work;
+}

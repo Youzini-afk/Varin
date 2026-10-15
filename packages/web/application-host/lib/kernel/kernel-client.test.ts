@@ -6,8 +6,8 @@ import path from "node:path";
 import { createHash } from "node:crypto";
 import { createKernelClient, KernelClient } from "./kernel-client.js";
 import type { KernelGrantHandle } from "./kernel-client.js";
+import { KERNEL_PROTOCOL_VERSION, type ThreadSummary } from "./protocol.generated.js";
 import { KernelStorageAdapter } from "./storage-adapter.js";
-import { KernelPathLockService } from "./file-resource-lock-service.js";
 import { KernelRecoveryContentStore, KernelRecoveryStore, createKernelRecoveryDirectFacade } from "./kernel-recovery-store.js";
 import { createWorkspaceRecoveryEngine } from "../recovery/journal-engine.js";
 
@@ -30,17 +30,27 @@ const issueActor = async (client: KernelClient, grantId: string, workspaceId: st
   pathScopes,
 });
 
-const issueSessionActor = async (client: KernelClient, grantId: string, workspaceId: string, sessionId: string): Promise<KernelGrantHandle> => client.issueGrant({
+const issueThreadActor = async (client: KernelClient, grantId: string, workspaceId: string, threadId: string): Promise<KernelGrantHandle> => client.issueGrant({
   grantId,
   hostGeneration: client.handshake?.hostGeneration,
-  sessionId,
-  threadId: null,
+  threadId,
   runId: null,
   owningWorkspace: workspaceId,
   executionWorkspace: workspaceId,
   storageIdentity: client.handshake?.storageRoot,
   capabilities: ["storage.read", "storage.write", "recovery", "storage.gc"],
   pathScopes: [""],
+});
+
+test("Kernel client rejects retired grant authority before starting native resources", async () => {
+  const client = createKernelClient({ hostId: "native-only", storageRoot: path.join(os.tmpdir(), "unopened-native-only"),
+    buildVersion, kernelPath: path.join(os.tmpdir(), "not-a-kernel-executable"), allowCargoDevRunner: false });
+  for (const legacy of [{ sessionId: "old-session" }, { authorityInstanceId: "old-authority" }, { workerId: "old-worker" }, { workerGeneration: 0 }]) {
+    await assert.rejects(client.issueGrant({ grantId: "rejected", capabilities: ["storage.read"], pathScopes: [""], ...legacy }),
+      /Session and worker grant authority is retired/);
+  }
+  assert.equal(client.handshake, null);
+  await client.close();
 });
 
 afterEach(async () => {
@@ -65,7 +75,7 @@ test("real Rust kernel persists roots, CAS revisions, pins, and objects", { time
   clients.push(host);
   const handshake = await host.start();
   const client = host.scoped(await issueActor(host, "kernel-test-actor", "workspace-test"));
-  assert.equal(handshake.protocolVersion, 1);
+  assert.equal(handshake.protocolVersion, KERNEL_PROTOCOL_VERSION);
   const first = await client.putBlob(Buffer.from("one\n"), "op-blob-one");
   const large = await client.putBlob(Buffer.alloc(200_000, 7), "op-blob-large");
   assert.equal(large.byteLength, 200_000);
@@ -302,13 +312,13 @@ test("operation finish failure rolls back the durable mutation and permits retry
   });
   clients.push(faultedHost);
   await faultedHost.start();
-  const faulted = faultedHost.scoped(await issueSessionActor(faultedHost, "operation-fault-actor", "recovery-workspace", "recovery-session"));
+  const faulted = faultedHost.scoped(await issueThreadActor(faultedHost, "operation-fault-actor", "recovery-workspace", "recovery-session"));
   await assert.rejects(faulted.putBlob(Buffer.from("retry-me"), "retry-operation"), /injected operation finish failure|storage error/i);
   await faulted.close();
   const retriedHost = createKernelClient({ hostId: "operation-fault-host", storageRoot: root, buildVersion, kernelPath, allowCargoDevRunner: false });
   clients.push(retriedHost);
   await retriedHost.start();
-  const retried = retriedHost.scoped(await issueSessionActor(retriedHost, "operation-fault-actor", "recovery-workspace", "recovery-session"));
+  const retried = retriedHost.scoped(await issueThreadActor(retriedHost, "operation-fault-actor", "recovery-workspace", "recovery-session"));
   const result = await retried.putBlob(Buffer.from("retry-me"), "retry-operation");
   assert.equal(result.byteLength, 8);
   assert.equal((await retried.getOperation("retry-operation"))?.state, "committed");
@@ -317,7 +327,7 @@ test("operation finish failure rolls back the durable mutation and permits retry
     workspaceId: "recovery-workspace",
     kind: "combined",
     state: "planned",
-    sessionId: "recovery-session",
+    threadId: "recovery-session",
     dataJson: JSON.stringify({ before: "before-state" }),
     files: [],
   });
@@ -724,59 +734,6 @@ test("typed working result boundary stores root identity with frozen state maps"
   // Frozen per-path states travel with the record so a later branch baseline
   // rebase cannot rewrite an older revision's provenance (3.18D).
   assert.equal(JSON.stringify(value.record).includes("pathStates"), true);
-  const verificationClient = host.scoped(await host.issueGrant({
-    grantId: "working-record-verification-actor",
-    hostGeneration: host.handshake?.hostGeneration,
-    sessionId: "working-record-session",
-    threadId: "thread-1",
-    runId: null,
-    owningWorkspace: "working-record-workspace",
-    executionWorkspace: "working-record-workspace",
-    storageIdentity: host.handshake?.storageRoot,
-    capabilities: ["storage.read", "storage.write"],
-    pathScopes: [""],
-  }));
-  await assert.rejects(
-    verificationClient.workingVerificationPut({
-      operationId: "working-verification-malformed",
-      recordId: "working-verification:child:thread-1:1",
-      workspaceId: "working-record-workspace",
-      kind: "child",
-      threadId: "thread-1",
-      branchId: "branch-1",
-      resultRevision: 1,
-      root: publishedRoot,
-      document: { recordedAt: Date.now(), binding: "bound", checks: [] },
-      ownerIds: [],
-      references: [],
-    }),
-    /child verification|result identity/i,
-  );
-  await verificationClient.workingVerificationPut({
-    operationId: "working-verification-valid",
-    recordId: "working-verification:child:thread-1:1",
-    workspaceId: "working-record-workspace",
-    kind: "child",
-    threadId: "thread-1",
-    branchId: "branch-1",
-    resultRevision: 1,
-    root: publishedRoot,
-    document: { resultRevision: 1, branchId: "branch-1", resultTreeHash: publishedRoot, recordedAt: Date.now(), binding: "bound", checks: [] },
-    ownerIds: [],
-    references: [],
-  });
-  await verificationClient.workingReviewPut({
-    operationId: "working-review-valid",
-    recordId: "working-review:thread-1:1",
-    workspaceId: "working-record-workspace",
-    threadId: "thread-1",
-    branchId: "branch-1",
-    resultRevision: 1,
-    root: publishedRoot,
-    document: { resultRevision: 1, status: "completed", recordedAt: Date.now() },
-    ownerIds: [],
-    references: [],
-  });
   const listed = await client.workingResultList({ workspaceId: "working-record-workspace", branchId: "branch-1" });
   assert.equal((listed.records as unknown[]).length, 1);
   await assert.rejects(
@@ -791,8 +748,6 @@ test("typed working result boundary stores root identity with frozen state maps"
   const released = await client.workingResultRelease({ operationId: "working-result-release", workspaceId: "working-record-workspace", recordId: "working-result:branch-1@1" });
   assert.equal(released.released, true);
   assert.equal(await client.workingResultGet({ workspaceId: "working-record-workspace", recordId: "working-result:branch-1@1" }), null);
-  assert.equal(((await verificationClient.workingVerificationList({ workspaceId: "working-record-workspace", threadId: "thread-1", kind: "child" })).records as unknown[]).length, 0);
-  assert.equal(((await verificationClient.workingReviewList({ workspaceId: "working-record-workspace", threadId: "thread-1" })).records as unknown[]).length, 0);
   const gc = await client.gc("working-result-gc");
   assert.ok(Number(gc.deletedBlobs ?? 0) >= 0);
 });
@@ -1119,10 +1074,10 @@ test("domain record identity is workspace- and actor-scoped", { timeout: 30_000 
   clients.push(host);
   await host.start();
   const storageIdentity = host.handshake?.storageRoot;
-  const actor = async (grantId: string, workspaceId: string, sessionId: string) => host.scoped(await host.issueGrant({ grantId, hostGeneration: "record-scope-generation", authorityInstanceId: "authority", workerId: `${sessionId}-worker`, workerGeneration: 3, sessionId, threadId: `${sessionId}-thread`, runId: `${sessionId}-run`, owningWorkspace: workspaceId, executionWorkspace: workspaceId, storageIdentity, capabilities: ["storage.read", "storage.write", "recovery"], pathScopes: [""] }));
+  const actor = async (grantId: string, workspaceId: string, sessionId: string) => host.scoped(await host.issueGrant({ grantId, hostGeneration: "record-scope-generation", threadId: `${sessionId}-thread`, runId: `${sessionId}-run`, owningWorkspace: workspaceId, executionWorkspace: workspaceId, storageIdentity, capabilities: ["storage.read", "storage.write", "recovery"], pathScopes: [""] }));
   const first = await actor("record-scope-a", "workspace-a", "session-a");
   const second = await actor("record-scope-b", "workspace-b", "session-b");
-  const put = (client: ReturnType<typeof host.scoped>, operationId: string, workspaceId: string, sessionId: string) => client.putRecord({ operationId, recordId: "same-record", workspaceId, recordType: "recovery.checkpoint", state: "ready", sessionId, threadId: `${sessionId}-thread`, runId: `${sessionId}-run`, payloadJson: JSON.stringify({ id: "same-record", workspaceId, sessionId }), ownerIds: [], references: [] });
+  const put = (client: ReturnType<typeof host.scoped>, operationId: string, workspaceId: string, sessionId: string) => client.putRecord({ operationId, recordId: "same-record", workspaceId, recordType: "recovery.checkpoint", state: "ready", threadId: `${sessionId}-thread`, runId: `${sessionId}-run`, payloadJson: JSON.stringify({ id: "same-record", workspaceId, conversation: { kind: "thread", threadId: `${sessionId}-thread`, branchId: "main" } }), ownerIds: [], references: [] });
   await put(first, "scope-put-a", "workspace-a", "session-a");
   await put(second, "scope-put-b", "workspace-b", "session-b");
   assert.equal((await first.getRecord("workspace-a", "same-record"))?.workspaceId, "workspace-a");
@@ -1132,11 +1087,11 @@ test("domain record identity is workspace- and actor-scoped", { timeout: 30_000 
   const unbound = host.scoped(await issueActor(host, "record-scope-unbound", "workspace-a"));
   await assert.rejects(
     unbound.putRecord({ operationId: "scope-put-impersonated", recordId: "impersonated", workspaceId: "workspace-a", recordType: "working.result", state: "published", sessionId: "session-a", payloadJson: JSON.stringify({}), ownerIds: [], references: [] }),
-    /actor-bound|actor|authorization/i,
+    /actor-bound|actor|authorization|legacy session/i,
   );
 });
 
-test("typed recovery turn reads honor actor session identity", { timeout: 30_000 }, async (t) => {
+test("typed recovery turn reads honor the original native Thread actor identity", { timeout: 30_000 }, async (t) => {
   if (!(await fs.stat(kernelPath).then(() => true).catch(() => false))) {
     t.skip("release kernel has not been built in this checkout");
     return;
@@ -1146,12 +1101,20 @@ test("typed recovery turn reads honor actor session identity", { timeout: 30_000
   const host = createKernelClient({ hostId: "recovery-actor-host", hostGeneration: "recovery-actor-generation", storageRoot: root, buildVersion, kernelPath, allowCargoDevRunner: false });
   clients.push(host);
   await host.start();
-  const makeActor = async (grantId: string, sessionId: string) => host.scoped(await host.issueGrant({ grantId, hostGeneration: "recovery-actor-generation", sessionId, threadId: `${sessionId}-thread`, runId: `${sessionId}-run`, owningWorkspace: "recovery-actor-workspace", executionWorkspace: "recovery-actor-workspace", storageIdentity: host.handshake?.storageRoot, capabilities: ["storage.read", "storage.write", "recovery"], pathScopes: [""] }));
-  const owner = await makeActor("recovery-owner", "session-owner");
-  const other = await makeActor("recovery-other", "session-other");
-  await owner.recoveryTurnStart({ operationId: "recovery-actor-turn", workspaceId: "recovery-actor-workspace", executionId: "recovery-actor-execution", sessionId: "session-owner", userEntryId: "entry-owner", workerId: "worker", runtimeGeneration: 1, activeWriterScopes: [], provenance: "caused-by" });
-  await assert.rejects(other.recoveryTurnGet({ workspaceId: "recovery-actor-workspace", executionId: "recovery-actor-execution", sessionId: "session-owner" }), /actor|authorization|session/i);
-  assert.equal((await owner.recoveryTurnGet({ workspaceId: "recovery-actor-workspace", executionId: "recovery-actor-execution", sessionId: "session-owner" }))?.sessionId, "session-owner");
+  const makeActor = async (grantId: string, threadId: string) => {
+    const identity = await host.agentRuntimeRequest<{ threadId: string; branchId: string }, 'runtime.thread.create'>(
+      'runtime.thread.create', { threadId, branchId: `${threadId}:main` });
+    const scoped = host.scoped(await host.issueGrant({ grantId, hostGeneration: "recovery-actor-generation",
+      threadId: identity.threadId, owningWorkspace: "recovery-actor-workspace", executionWorkspace: "recovery-actor-workspace",
+      storageIdentity: host.handshake?.storageRoot, capabilities: ["storage.read", "storage.write", "recovery"], pathScopes: [""] }));
+    return { scoped, conversation: { kind: "thread" as const, ...identity } };
+  };
+  const owner = await makeActor("recovery-owner", "recovery-owner-thread");
+  const other = await makeActor("recovery-other", "recovery-other-thread");
+  await owner.scoped.recoveryTurnStart({ operationId: "recovery-actor-turn", workspaceId: "recovery-actor-workspace", executionId: "recovery-actor-execution", conversation: owner.conversation, userEntryId: "entry-owner", workerId: "kernel", runtimeGeneration: 1, activeWriterScopes: [], provenance: "caused-by" });
+  const lookup = { workspaceId: "recovery-actor-workspace", executionId: "recovery-actor-execution", conversation: owner.conversation };
+  await assert.rejects(other.scoped.recoveryTurnGet(lookup), /actor|authorization|thread/i);
+  assert.deepEqual((await owner.scoped.recoveryTurnGet(lookup))?.conversation, owner.conversation);
 });
 
 test("branch creation streams a normal input larger than one control frame", { timeout: 60_000 }, async (t) => {
@@ -1257,10 +1220,20 @@ test("real kernel typed recovery storage persists checkpoints, operation files, 
   const workspace = await fs.mkdtemp(path.join(os.tmpdir(), "varin-recovery-workspace-"));
   roots.push(root, workspace);
   await fs.writeFile(path.join(workspace, "a.txt"), "before");
+  const conversation = { kind: "thread" as const, threadId: "thread:recovery", branchId: "branch:recovery" };
+  let threadCreated = false;
   const makeEngine = async () => {
     const client = createKernelClient({ hostId: "kernel-recovery-host", storageRoot: root, buildVersion, kernelPath, allowCargoDevRunner: false });
     clients.push(client);
     await client.start();
+    if (!threadCreated) {
+      await client.agentRuntimeRequest('runtime.thread.create', { threadId: conversation.threadId, branchId: conversation.branchId });
+      threadCreated = true;
+    }
+    const thread = await client.agentRuntimeRequest<ThreadSummary, 'runtime.thread.inspect'>(
+      'runtime.thread.inspect', { threadId: conversation.threadId });
+    assert.equal(thread.main_branch_id, conversation.branchId);
+    assert.ok(thread.branches.some(branch => branch.branch_id === conversation.branchId));
     const adapter = new KernelStorageAdapter({ hostId: "kernel-recovery-host", storageRoot: root, client, resolveWorkspaceRoot: async () => workspace });
     const content = new KernelRecoveryContentStore(adapter, path.join(root, "recovery-cache"));
     const documents = {
@@ -1289,7 +1262,7 @@ test("real kernel typed recovery storage persists checkpoints, operation files, 
   };
 
   const first = await makeEngine();
-  await first.engine.recordTurnStart({ executionId: "execution-1", workspaceId: "workspace-test", sessionId: "session-1", userEntryId: "user-1", workerId: "worker-1", runtimeGeneration: 1, activeWriterScopes: [], provenance: "caused-by" });
+  await first.engine.recordTurnStart({ executionId: "execution-1", workspaceId: "workspace-test", conversation, userEntryId: "user-1", workerId: "worker-1", runtimeGeneration: 1, activeWriterScopes: [], provenance: "caused-by" });
   await first.engine.recordMutationBefore({ executionId: "execution-1", workspaceId: "workspace-test", path: "a.txt", toolName: "edit", mutationId: "mutation-1", toolCallId: "tool-call-1" });
   await fs.writeFile(path.join(workspace, "a.txt"), "after");
   await first.engine.recordMutationAfter({ executionId: "execution-1", workspaceId: "workspace-test", path: "a.txt", toolName: "edit", mutationId: "mutation-1", toolCallId: "tool-call-1", succeeded: true });
@@ -1302,7 +1275,7 @@ test("real kernel typed recovery storage persists checkpoints, operation files, 
   const checkpoints = await second.engine.listCheckpoints({ workspaceId: "workspace-test" });
   assert.equal(checkpoints.status, "ready");
   assert.equal(checkpoints.page.checkpoints.length, 1);
-  const resolved = await second.engine.resolveEntry({ workspaceId: "workspace-test", sessionId: "session-1", entryId: "user-1" });
+  const resolved = await second.engine.resolveEntry({ workspaceId: "workspace-test", conversation, entryId: "user-1" });
   assert.equal(resolved.status, "ready");
   assert.equal(resolved.binding?.checkpointId, checkpoints.page.checkpoints[0]?.id);
   await second.engine.dispose();
@@ -1320,14 +1293,14 @@ test("typed recovery operation publishes files atomically and rejects stale phas
   const host = createKernelClient({ hostId: "typed-recovery-host", storageRoot: root, buildVersion, kernelPath, allowCargoDevRunner: false });
   clients.push(host);
   await host.start();
-  const client = host.scoped(await issueSessionActor(host, "typed-recovery-actor", "typed-recovery-workspace", "typed-recovery-session"));
+  const client = host.scoped(await issueThreadActor(host, "typed-recovery-actor", "typed-recovery-workspace", "typed-recovery-session"));
   const body = await client.putBlob(Buffer.from("typed recovery"), "typed-recovery-body");
   const created = await client.recoveryOperationCreate({
     operationId: "typed-recovery-operation",
     workspaceId: "typed-recovery-workspace",
     kind: "combined",
     state: "planned",
-    sessionId: "typed-recovery-session",
+    threadId: "typed-recovery-session",
     dataJson: JSON.stringify({ workspaceId: "typed-recovery-workspace", affectedPaths: ["file.txt"] }),
     files: [{
       path: "file.txt",
@@ -1362,14 +1335,14 @@ test("typed recovery create fault injection rolls back operation intent and perm
   const faultedHost = createKernelClient({ hostId: "typed-recovery-fault-host", storageRoot: root, buildVersion, kernelPath, allowCargoDevRunner: false, env: { VARIN_KERNEL_FAIL_RECOVERY_PHASE: "operation-before-files" } });
   clients.push(faultedHost);
   await faultedHost.start();
-  const faulted = faultedHost.scoped(await issueSessionActor(faultedHost, "typed-recovery-fault-actor", "typed-recovery-fault-workspace", "typed-recovery-fault-session"));
-  await assert.rejects(faulted.recoveryOperationCreate({ operationId: "typed-recovery-fault-operation", workspaceId: "typed-recovery-fault-workspace", sessionId: "typed-recovery-fault-session", kind: "combined", state: "planned", dataJson: JSON.stringify({}), files: [] }), /injected recovery failure/i);
+  const faulted = faultedHost.scoped(await issueThreadActor(faultedHost, "typed-recovery-fault-actor", "typed-recovery-fault-workspace", "typed-recovery-fault-session"));
+  await assert.rejects(faulted.recoveryOperationCreate({ operationId: "typed-recovery-fault-operation", workspaceId: "typed-recovery-fault-workspace", threadId: "typed-recovery-fault-session", kind: "combined", state: "planned", dataJson: JSON.stringify({}), files: [] }), /injected recovery failure/i);
   await faultedHost.close();
   const retryHost = createKernelClient({ hostId: "typed-recovery-fault-host", storageRoot: root, buildVersion, kernelPath, allowCargoDevRunner: false });
   clients.push(retryHost);
   await retryHost.start();
-  const retry = retryHost.scoped(await issueSessionActor(retryHost, "typed-recovery-fault-retry", "typed-recovery-fault-workspace", "typed-recovery-fault-session"));
-  const result = await retry.recoveryOperationCreate({ operationId: "typed-recovery-fault-operation", workspaceId: "typed-recovery-fault-workspace", sessionId: "typed-recovery-fault-session", kind: "combined", state: "planned", dataJson: JSON.stringify({}), files: [] });
+  const retry = retryHost.scoped(await issueThreadActor(retryHost, "typed-recovery-fault-retry", "typed-recovery-fault-workspace", "typed-recovery-fault-session"));
+  const result = await retry.recoveryOperationCreate({ operationId: "typed-recovery-fault-operation", workspaceId: "typed-recovery-fault-workspace", threadId: "typed-recovery-fault-session", kind: "combined", state: "planned", dataJson: JSON.stringify({}), files: [] });
   assert.equal(result.operationId, "typed-recovery-fault-operation");
 });
 
@@ -1573,52 +1546,6 @@ test("R2 file apply reconciles a committed disk side effect after kernel restart
   });
   assert.equal(retried.status, "applied");
   assert.equal(retried.reconciled, true);
-});
-
-test("R2 production fs.lock delegates overlap admission to the Rust file lease authority", { timeout: 30_000 }, async (t) => {
-  if (!(await fs.stat(kernelPath).then(() => true).catch(() => false))) {
-    t.skip("release kernel has not been built in this checkout");
-    return;
-  }
-  const storageRoot = await fs.mkdtemp(path.join(os.tmpdir(), "varin-kernel-path-lock-"));
-  const workspace = await fs.mkdtemp(path.join(os.tmpdir(), "varin-kernel-path-lock-workspace-"));
-  roots.push(storageRoot, workspace);
-  const host = createKernelClient({
-    hostId: "path-lock-host",
-    storageRoot,
-    buildVersion,
-    kernelPath,
-    allowCargoDevRunner: false,
-  });
-  clients.push(host);
-  await host.start();
-  const adapter = new KernelStorageAdapter({
-    client: host,
-    hostId: "path-lock-host",
-    storageRoot,
-    resolveWorkspaceRoot: async () => workspace,
-  });
-  const locks = new KernelPathLockService(adapter, {
-    resolveOwningWorkspaceId: async (_sessionId, executionWorkspaceId) => executionWorkspaceId,
-    resolveWorkspaceRoot: async () => workspace,
-    retryDelayMs: 1,
-  });
-  const resource = {
-    authorityId: "path-lock-host",
-    workspaceId: "path-lock-workspace",
-    canonicalResourceId: path.join(workspace, "file.txt"),
-    resourceId: "file.txt",
-  };
-  const first = await locks.acquire("session-one", resource, 1_000);
-  await assert.rejects(
-    locks.acquire("session-two", resource, 25),
-    /Lock timeout/i,
-  );
-  assert.equal(await locks.release("session-one", first), true);
-  const second = await locks.acquire("session-two", resource, 1_000);
-  assert.equal(await locks.release("session-two", second), true);
-  await locks.dispose();
-  await adapter.dispose();
 });
 
 test("R3 kernel scans a fixed workspace view and materializes an immutable root without Host body copies", { timeout: 30_000 }, async (t) => {

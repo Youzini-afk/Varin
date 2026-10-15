@@ -317,6 +317,28 @@ describe('FileEditorModelRegistry', () => {
     registry.dispose();
   });
 
+  test('preserves the source model across overwrite and restores the separate target instance on undo', async () => {
+    const a = { ...record(identity('a.ts'), 'source'), documentInstanceId: 'source-instance' };
+    const b = { ...record(identity('b.ts'), 'target'), documentInstanceId: 'target-instance' };
+    const records = new Map([[a.identity.resourceId, a], [b.identity.resourceId, b]]);
+    const listeners = new Map<string, (value: DocumentRecord) => void>();
+    const documents = { keyFor: documentKey, get: (resource: DocumentIdentity) => records.get(resource.resourceId),
+      open: async (resource: DocumentIdentity) => records.get(resource.resourceId)!,
+      subscribe: (resource: DocumentIdentity, listener: (value: DocumentRecord) => void) => { listeners.set(resource.resourceId, listener); return () => listeners.delete(resource.resourceId); } } as unknown as DocumentRegistry;
+    const models: FakeModel[] = [];
+    const registry = new FileEditorModelRegistry({ documents, loadRuntime: async () => fakeRuntime(models), runtimeKey: 'local' });
+    registry.acquire(a.identity, 'source-tab'); registry.acquire(b.identity, 'target-tab'); await settle();
+    const sourceModel = models[0]; const targetModel = models[1];
+    const moved = { ...a, identity: b.identity }; records.delete('a.ts'); records.set('b.ts', moved); listeners.get('a.ts')!(moved);
+    expect(sourceModel.disposed).toBe(false); expect(targetModel.disposed).toBe(true);
+    expect(registry.getSnapshot(b.identity)).toMatchObject({ status: 'ready', model: sourceModel });
+    records.set('a.ts', a); records.set('b.ts', b); listeners.get('a.ts')!(a); listeners.get('b.ts')!(b); await settle();
+    expect(registry.getSnapshot(a.identity)).toMatchObject({ status: 'ready', model: sourceModel });
+    expect(registry.getSnapshot(b.identity)).toMatchObject({ status: 'ready' });
+    expect(models.at(-1)!.uri).toMatchObject({ path: '/target-instance' });
+    registry.dispose(); expect(models.every(model => model.disposed)).toBe(true);
+  });
+
   test('keeps a runtime failure local and retries without replacing the document record', async () => {
     const resource = identity();
     const initial = record(resource);

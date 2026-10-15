@@ -1,114 +1,85 @@
-# Varin development guide
+# Varin 开发
 
-Start here when changing the repository. [Architecture](architecture.md) explains the system;
-[the documentation index](README.md) routes domain questions; [AGENTS.md](../AGENTS.md) keeps the
-cross-project contribution and trust boundaries.
+先读[架构](architecture.md)及最近的模块 README / DOCUMENTATION；[文档索引](README.md)负责领域导航。
+代码、类型、schema、测试和 package.json 定义可执行行为，文档解释职责与非显然约束，Git 保存历史设计与交付过程。
+当前对话执行只有原生 Rust Agent runtime。
 
-## Sources of truth
+## 启动
 
-Code, types, schemas, tests and package scripts define executable behavior. The nearest module
-`README.md` or `DOCUMENTATION.md` explains its owner and non-obvious invariants. Cross-cutting contracts
-live in [design](design/README.md), implementation work in [plans](plan/README.md), and recorded
-verification in [reviews](reviews/README.md). Historical plans and decisions explain earlier choices,
-not a second current implementation.
+源码开发使用 Node.js 24、根 package.json 固定的 Bun，以及 [rust-toolchain.toml](../kernel/rust-toolchain.toml)
+选择的 Rust 工具链。包自身的 engine 声明决定安装产物最低版本。Rust 的 tree-sitter/Wasmtime 原生依赖还需要 C/C++
+工具链与 CMake；平台 shell 和打包要求见对应包文档。
 
-When these disagree, inspect the callers and relevant commits, then update the responsible document or
-implementation. Use [status](status.md) for delivery boundaries rather than inferring them from an old
-phase heading. The repository uses ordinary documentation, not project-local workflow Skills.
-
-## Start a development environment
-
-The source-development baseline is Node.js 24, Bun as pinned by the root `packageManager`, Git, and
-the Rust toolchain selected by [kernel/rust-toolchain.toml](../kernel/rust-toolchain.toml).
-The Pi Host and packaged runtime have their own minimum engine declarations. Windows shell use also
-needs the supported shell installation described in the [project README](../README.md#get-started-from-source).
-
-```bash
+```sh
 bun install --frozen-lockfile
 bun run dev
 ```
 
-`dev` starts the Web UI and trusted API/runtime service, printing the selected local URLs.
-For Electron use `bun run electron:dev`; `bun run electron:dev:bundled` exercises bundled UI assets.
-See [Web](../packages/web/README.md), [Electron](../packages/electron/README.md), and
-[mobile](../packages/mobile/README.md) for platform-specific setup. This guide does not duplicate their
-packaging, signing or device instructions.
+`dev` 启动 Web UI 和可信 API 服务，并输出本地 URL。Electron 使用 `bun run electron:dev`，
+已打包 UI 路径使用 `bun run electron:dev:bundled`。平台细节见 [Web](../packages/web/README.md)、
+[Electron](../packages/electron/README.md)、[Mobile](../packages/mobile/README.md)。
 
-## Knowledge map
+## 修改与验证
 
-The [domain-to-owner map](README.md#按领域找实现) is the shared navigation table. A typical change starts
-at the owning module and follows its actual consumers, not by reading every design or historical stage.
-[Protocol](../packages/protocol/README.md) and [application-client](../packages/application-client/README.md)
-are the cross-package contract entry points; [Host harness](../packages/web/application-host/lib/harness/DOCUMENTATION.md)
-and [Pi harness](../packages/pi-host/src/harness/README.md) explain the runtime split.
+先确定实际 owner、输入路径和消费者。Renderer 状态、Host 服务、Catalog、Storage、扩展配置及 Knowledge 各自有职责。
+保留已有工作、有意义的失败状态和原始执行寿命，避免建立并行 writer。
 
-## Working on a change
-
-Identify the authoritative state and the request path that changes it. Renderer state, Host services,
-Pi history, extension configuration and Rust-owned resources are distinct owners. Preserve unrelated
-work, meaningful failure states and the existing resource/lifecycle boundaries.
-
-Choose verification by the failure a change could introduce:
-
-| Change | Useful evidence |
+| 改动 | 对应证据 |
 | --- | --- |
-| Documentation or navigation | Local-path and public-route checks; review changed facts and section links |
-| Local implementation | Focused behavior tests; type/lint checks when the static shape changes |
-| Shared contract or persistence | Actual consumers and changed data behavior, not literal DTO snapshots |
-| Processes, native code, packaging or platform behavior | Relevant native suite, installed-runtime check or platform smoke |
-| Performance | Representative reproduction and measurement, plus correctness coverage for the changed path |
+| 文档和导航 | 本地链接与 public route 检查，并核对描述对应的代码 |
+| 局部行为 | 相关行为测试；静态形状变化时补类型/lint 检查 |
+| 共享协议、权限和持久化 | 真实消费者、实际读写、失败与幂等重放 |
+| 进程、平台或打包 | 对应 native suite、目标产物和实机操作 |
+| 性能 | 同来源/构建的代表性 workload、结果正确性和测量条件 |
 
-Broaden a check when it can expose a different failure class. Do not add a test automatically for every
-wording, presentation or type edit, or repeat an expensive successful build after an unrelated change.
-A simulated provider can establish request wiring; it does not establish model quality or latency.
-[Test design](design/testing-ci-design.md) explains the repository's evidence model; historical cleanup
-results live in the [testing audit](archive/testing-ci-audit.md).
+围绕新增的失败类型扩展验证，不重复不能改变结论的大检查。测试应观察行为，不复制 DTO、枚举或源码字符串充当证明。
+模拟 provider 只能证明请求接线；UI 测试、Host fixture、真实 Rust、安装包与物理多机分别证明不同层次。
+通过、失败、跳过、未执行和环境阻塞应分别说明。真实环境场景见[运行时验收](runtime-acceptance.md)。
 
-## Repository and build facts
+## 命令入口
 
-The nearest `package.json` is the command authority. The following root entries are navigation, not a
-requirement to run every command on every change.
+最近的 package.json 是命令权威。以下是入口，不是每次改动必须全跑的清单。
 
-| Purpose | Root command |
+| 用途 | 根命令 |
 | --- | --- |
-| Prepare shared type dependencies | `bun run build:type-dependencies` |
-| Cross-package type checking | `bun run type-check` |
-| Source test suites | `bun run test:pi` |
-| Existing compiled-runtime tests | `bun run test:pi:dist` |
-| Rust compile check / release binary | `bun run kernel:check` / `bun run kernel:build` |
-| Native authority suite | `bun run test:kernel` |
-| Engineering docs / public docs plus engineering checks | `bun run docs:check` / `bun run docs:validate` |
-| Documentation checker behavior tests | `bun run test:docs` |
+| 准备共享输出与 Host 声明 | `bun run build:type-dependencies` |
+| 正式跨包类型检查 | `bun run type-check` |
+| 已准备输出后的类型检查 | `bun run type-check:prepared` |
+| 源码测试 / 已构建产物测试 | `bun run test:packages` / `bun run test:packages:dist` |
+| Rust 编译检查 / release binary | `bun run kernel:check` / `bun run kernel:build` |
+| Rust workspace 测试 | `bun run test:rust` |
+| 已核验 release kernel 的 Host 验收 | `bun run test:kernel` |
+| Host 生产边界及 cloud layout helper | `bun run test:cloud` |
+| 文档链接 / public route 与工程文档 | `bun run docs:check` / `bun run docs:validate` |
+| 文档检查器本身 | `bun run test:docs` |
 
-`docs:validate` includes the engineering link scan. CI runs `test:docs` and then `docs:validate`, so
-the repository is scanned once. Documentation checks do not prescribe status headers, index layout,
-wording or translation coverage. Review those against the intended reader and current implementation;
-do not encode an editorial preference as another build gate.
+定向例子：在 `packages/web` 或 `packages/ui` 中运行 `bun run test 路径`；Rust 使用
+`cargo test --manifest-path kernel/Cargo.toml -p varin-kernel --lib FILTER --locked`。
+新环境资源不足时可加 `-j1`，不能把编译被终止记成测试通过。
 
-**Build output and running code.** `test:dist` consumes already built output. Build the owning package
-first; do not silently test an earlier build. Electron type checking uses generated Host declarations
-and need not overwrite a running `server/` generation. A source-development Host may use the permitted
-Cargo runner; packaged layouts need the manifest-verified staged Rust executable.
+## 输出和 native 边界
 
-**Test ownership.** UI and Web use Vitest. Native Web tests follow the `*.native.test.ts` convention and
-run through the dedicated kernel entry rather than the portable Web suite. Electron separates runtime,
-updater, Linux desktop and packaging-helper coverage. Python driver tests use
-`python3 -m unittest discover -s packages/computer-driver/linux -p 'test_*.py'`; their simulated app
-protocols do not replace an actual desktop run. Consult the package scripts before selecting files.
+`build:runtime-dependencies` 按依赖图准备一次共享输出；`build:type-dependencies` 再生成 Host 声明。
+根 build、Web build 和 type-check 复用这些有序输出。包级 `build` 保持独立可用；`build:raw` 仅供已经准备依赖的
+有序聚合使用。`type-check:prepared` 不重新构建。发布前仍使用相应目标的正式命令。
 
-**Dependencies.** `bun.lock` owns the development graph; `scripts/cloud-runtime.bun.lock` owns the staged
-production graph. Changes reaching the cloud runtime use `bun run update:cloud-runtime-lock` after the
-relevant build outputs are prepared. Diagnostic dead-code output is reviewed for change relevance,
-not treated as authorization to remove unrelated code.
+Host 类型由独立 Node 工程检查，Web/CLI/跨层测试通过 `#application-host` 读取新生成声明；Vitest 使用真实 Host 源码。
+不要用旧 server/ 或旧声明验证新源码。Electron 的类型准备不需要覆盖正在运行的 server generation。
 
-## Dependency update review
+私有 wire 改动后运行 `bun run kernel:protocol`，生成检查使用同一脚本的 `--check`。正常 kernel build 生成与当前
+schema 匹配的 executable 和 manifest。手工改生成文件、运行旧 binary 或只通过 TypeScript 都不能证明 native 接线。
 
-[Dependency maintenance](ops/dependency-updates.md) owns Dependabot scheduling and reports, advisory
-repairs, the Pi SDK adaptation seams and upgrade validation. Keep that operational detail there rather
-than appending another SDK-upgrade history to this entry page.
+`*.native.test.ts` 由专用 kernel 入口运行，portable Web suite 不运行它们。`test:kernel` 消费已核验的 release binary；
+需要重建时显式传 `--build`。`test:rust` 本身不构建这份 release binary；涉及 Host/guardian 的测试还需要 Node/tsx、
+相应 Host/builtin 输出和指向匹配 executable 的 `VARIN_TEST_KERNEL_EXECUTABLE`。
 
-## Git discipline
+`test:dist` 消费已构建产物，应先构建所属包。完整打包、签名、实际桌面/移动端操作和真实 provider 账号验证各有入口，
+不从 helper 或源码测试推导已通过发行验收。
 
-Inspect status before editing. Do not reset, clean or overwrite unrelated changes. Keep coherent phases
-reviewable, commit and push completed repository work, and report what was actually verified. Releases,
-publishing, deployment and credential changes still need the authority of the current task.
+## 依赖与提交
+
+`bun.lock` 管开发依赖图，`scripts/cloud-runtime.bun.lock` 管 staged production 图。影响生产依赖时，在对应输出准备后
+运行 `bun run update:cloud-runtime-lock` 并核对真实差异。具体维护见[依赖说明](ops/dependency-updates.md)。
+
+修改前检查 Git 状态，保留无关用户改动。将有完整证据的阶段提交并在获准后推送，确认远端实际 SHA；没有运行的验证不作
+成功声明。发行、部署和凭据变更继续遵守该操作的授权边界。

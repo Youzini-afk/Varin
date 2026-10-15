@@ -52,14 +52,14 @@ describe('terminal transport', () => {
     expect(socket.sent.some((message) => message.t === 'attach' && message.s === 'term-1')).toBe(true);
     expect(socket.sent.filter((message) => message.t === 'attach')).toHaveLength(1);
 
-    socket.emit({ t: 'snapshot', v: 3, s: 'term-1', q: 1, history: 'prompt', status: 'running' });
+    socket.emit({ t: 'snapshot', v: 4, s: 'term-1', q: 1, history: 'prompt', status: 'running' });
     await tick();
     const secondEvents: string[] = [];
     transport.subscribe('term-1', { onEvent: (event) => secondEvents.push(`${event.type}:${event.data ?? ''}`) });
     expect(secondEvents).toEqual(['snapshot:prompt']);
 
-    socket.emit({ t: 'output', v: 3, s: 'term-1', q: 2, d: ' next' });
-    socket.emit({ t: 'output', v: 3, s: 'term-1', q: 2, d: ' duplicate' });
+    socket.emit({ t: 'output', v: 4, s: 'term-1', q: 2, d: ' next' });
+    socket.emit({ t: 'output', v: 4, s: 'term-1', q: 2, d: ' duplicate' });
     await tick();
     expect(firstEvents).toEqual(['snapshot:prompt', 'data: next']);
     expect(secondEvents).toEqual(['snapshot:prompt', 'data: next']);
@@ -100,7 +100,7 @@ describe('terminal transport', () => {
     await tick();
     socket.open();
     await tick();
-    socket.emit({ t: 'snapshot', v: 3, s: 'term-1', q: 1, history: 'large replay', status: 'running' });
+    socket.emit({ t: 'snapshot', v: 4, s: 'term-1', q: 1, history: 'large replay', status: 'running' });
     await tick();
     unsubscribe();
 
@@ -118,15 +118,15 @@ describe('terminal transport', () => {
     await tick();
     socket.open();
     await tick();
-    socket.emit({ t: 'snapshot', v: 3, s: 'term-1', q: 0, history: '', status: 'running' });
-    socket.emit({ t: 'output', v: 3, s: 'term-1', q: 1, d: 'prompt\u001b[6n', r: 'prompt' });
+    socket.emit({ t: 'snapshot', v: 4, s: 'term-1', q: 0, history: '', status: 'running' });
+    socket.emit({ t: 'output', v: 4, s: 'term-1', q: 1, d: 'prompt\u001b[6n', r: 'prompt' });
     await tick();
 
     const replay: string[] = [];
     transport.subscribe('term-1', { onEvent: (event) => { if (event.type === 'snapshot') replay.push(event.data ?? ''); } });
     expect(replay).toEqual(['prompt']);
 
-    socket.emit({ t: 'error', v: 3, s: 'term-1', code: 'SESSION_NOT_FOUND', message: 'missing', fatal: true });
+    socket.emit({ t: 'error', v: 4, s: 'term-1', code: 'SESSION_NOT_FOUND', message: 'missing', fatal: true });
     await tick();
     expect(errorCode).toBe('SESSION_NOT_FOUND');
     transport.dispose();
@@ -206,12 +206,17 @@ describe('terminal transport', () => {
       },
     });
     transport.subscribe('term-1', { onEvent: () => {} });
-    await transport.write('term-1', 'bun run dev\r');
+    let confirmed = false;
+    const writing = transport.write('term-1', 'bun run dev\r').then(() => { confirmed = true; });
+    await tick(); await tick();
     expect(authCalls).toBe(1);
     expect(sockets).toHaveLength(1);
     expect(sockets[0].sent.filter((message) => message.t === 'write')).toEqual([
-      { t: 'write', v: 3, s: 'term-1', d: 'bun run dev\r' },
+      { t: 'write', v: 4, s: 'term-1', i: expect.any(String), d: 'bun run dev\r' },
     ]);
+    expect(confirmed).toBe(false);
+    sockets[0].emit({ t: 'written', v: 4, s: 'term-1', i: sockets[0].sent.find(message => message.t === 'write')!.i });
+    await writing; expect(confirmed).toBe(true);
     transport.dispose();
   });
 });

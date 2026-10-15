@@ -18,7 +18,7 @@ export type KnowledgeVectorStore = SemanticGenerationStore;
 
 export const knowledgeVectorScopeKey = (scope: KnowledgeScope, scopeId: string) => ({
   scopeKind: `knowledge-${scope}`,
-  scopeId: scope === 'bot' ? knowledgeStoreKeyForScope(scopeId) : scopeId,
+  scopeId: scope === 'bot' || scope === 'session' ? knowledgeStoreKeyForScope(scopeId) : scopeId,
 });
 
 /** A vector hit after the semantic block result is aggregated by knowledge id. */

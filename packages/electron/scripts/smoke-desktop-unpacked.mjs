@@ -9,10 +9,6 @@ const appPath = path.resolve(process.argv[2] ?? '');
 const appArguments = process.argv.slice(3);
 const smokeEnvironment = { ...process.env };
 for (const variable of [
-  'VARIN_PI_SOURCE',
-  'VARIN_PI_CUSTOM_ROOT',
-  'VARIN_PI_CUSTOM_NODE',
-  'VARIN_PI_PACKAGE_ROOT',
   'VARIN_AGENT_DIR',
   'VARIN_RUNTIME_SOURCE',
   'VARIN_SKIP_LOCAL_SERVER',
@@ -162,7 +158,7 @@ const waitForRenderer = async (userDataDir) => {
   const devTools = await connectDevTools(target.webSocketDebuggerUrl);
   try {
     let lastState;
-    let continuedFromBundledWelcome = false;
+    let continuedFromLocalWelcome = false;
     for (let attempt = 0; attempt < 120; attempt += 1) {
       const evaluation = await devTools.evaluate(`(() => ({
         apiBaseUrl: typeof window.__VARIN_API_BASE_URL__ === 'string' ? window.__VARIN_API_BASE_URL__ : '',
@@ -170,8 +166,8 @@ const waitForRenderer = async (userDataDir) => {
         diagnostics: window.__varinStartupDiagnostics ?? null,
         href: window.location.href,
         localOrigin: typeof window.__VARIN_LOCAL_ORIGIN__ === 'string' ? window.__VARIN_LOCAL_ORIGIN__ : '',
-        localRuntimeContinueReady: document.querySelector('[data-pi-local-runtime-continue="true"]:not(:disabled)') !== null,
-        mainWorkspace: document.querySelector('[data-pi-composer-shell="true"]') !== null,
+        localRuntimeContinueReady: document.querySelector('[data-native-local-runtime-continue="true"]:not(:disabled)') !== null,
+        mainWorkspace: window.__varinStartupDiagnostics?.bootView?.screen === 'main' && window.__varinStartupDiagnostics?.runtimeReady === true && window.__varinStartupDiagnostics?.catalogLoaded === true && !window.__varinStartupDiagnostics?.catalogError,
         ready: window.__varinAppReady === true,
       }))()`);
       if (evaluation?.exceptionDetails) {
@@ -189,21 +185,17 @@ const waitForRenderer = async (userDataDir) => {
           state: lastState,
         };
       }
-      const runtimeSnapshot = lastState?.diagnostics?.runtimeSnapshot;
-      const bundledRuntimeReady = runtimeSnapshot?.status === 'ready'
-        && runtimeSnapshot.active?.id === 'bundled'
-        && runtimeSnapshot.active?.source === 'bundled';
-      if (!continuedFromBundledWelcome && bundledRuntimeReady && lastState?.localRuntimeContinueReady === true) {
+      if (!continuedFromLocalWelcome && lastState?.localRuntimeContinueReady === true) {
         const continuation = await devTools.evaluate(`(() => {
-          const action = document.querySelector('[data-pi-local-runtime-continue="true"]:not(:disabled)');
+          const action = document.querySelector('[data-native-local-runtime-continue="true"]:not(:disabled)');
           if (!(action instanceof HTMLButtonElement)) return false;
           action.click();
           return true;
         })()`);
         if (continuation?.exceptionDetails) {
-          throw new Error(`Packaged bundled-runtime welcome continuation failed: ${continuation.exceptionDetails.text}`);
+          throw new Error(`Packaged local-runtime welcome continuation failed: ${continuation.exceptionDetails.text}`);
         }
-        continuedFromBundledWelcome = continuation?.result?.value === true;
+        continuedFromLocalWelcome = continuation?.result?.value === true;
       }
       await delay(250);
     }
@@ -233,10 +225,8 @@ const waitForExit = (child, milliseconds) => new Promise((resolve) => {
 
 const smokeRoot = await fsp.mkdtemp(path.join(os.tmpdir(), 'varin-desktop-smoke-'));
 const userDataDir = path.join(smokeRoot, 'user-data');
-const agentDir = path.join(smokeRoot, 'pi-agent');
 const workspaceRoot = path.join(smokeRoot, 'workspace');
 await fsp.mkdir(workspaceRoot);
-await fsp.mkdir(agentDir);
 const logPaths = [
   path.join(userDataDir, 'logs', 'main.log'),
   ...(process.platform === 'darwin' ? [path.join(os.homedir(), 'Library', 'Logs', 'Varin', 'main.log')] : []),
@@ -255,7 +245,6 @@ const child = spawn(appPath, [
   cwd: path.dirname(appPath),
   env: {
     ...smokeEnvironment,
-    PI_CODING_AGENT_DIR: agentDir,
     VARIN_STARTUP_PERF: '1',
     VARIN_DATA_DIR: userDataDir,
     VARIN_WORKSPACE_ROOT: workspaceRoot,
@@ -303,13 +292,8 @@ try {
   if (!healthResponse.ok || health?.status !== 'ok') {
     throw new Error(`Packaged health check returned HTTP ${healthResponse.status}: ${JSON.stringify(health)}`);
   }
-  const runtimeSnapshot = renderer.state?.diagnostics?.runtimeSnapshot;
-  if (
-    runtimeSnapshot?.status !== 'ready'
-    || runtimeSnapshot.active?.id !== 'bundled'
-    || runtimeSnapshot.active?.source !== 'bundled'
-  ) {
-    throw new Error(`Packaged renderer did not start the bundled Pi runtime: ${JSON.stringify(runtimeSnapshot)}`);
+  if (health.kernel?.ready !== true || !health.kernel?.epoch) {
+    throw new Error(`Packaged native kernel is unavailable: ${JSON.stringify(health.kernel)}`);
   }
 
   const recoveryResponse = await fetch(`${baseUrl}/api/varin/extensions/v1/services/invoke`, {
@@ -368,7 +352,7 @@ try {
     platform: process.platform,
     renderer: renderer.mode,
     recovery: 'inventory-ok',
-    runtimeDiscovery: runtimeSnapshot,
+    nativeKernel: health.kernel,
     terminal: 'create-close-ok',
   }, null, 2));
 } catch (error) {

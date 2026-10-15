@@ -1,4 +1,5 @@
-import type { ComputerArtifact, ComputerDesktop, Thread, ThreadRun } from "@varin/protocol";
+import type { ComputerArtifact, ComputerDesktop, MemorySourceExcerpt, Run, ThreadSummary } from "@varin/protocol";
+import type { ThreadIdentity } from './threads.js';
 
 /** Durable Bot catalog contracts shared by the Application Host, routes, and UI (BC0). */
 
@@ -7,14 +8,24 @@ export interface BotModelSelection {
   modelId: string;
 }
 
-export interface BotSleepWork {
-  threadId: string;
-  sessionId: string | null;
-  runId: string | null;
+interface BotSleepProgress {
   resume: boolean;
   stopped: boolean;
   resumed: boolean;
 }
+export interface BotSleepWork extends BotSleepProgress {
+  runtime: 'agent';
+  threadId: string;
+  branchId: string;
+  runId: string;
+}
+
+/** A Bot entry is a stable native Thread and branch allocated with its profile. */
+export type BotEntry = ThreadIdentity;
+export type BotReadyEntry = ThreadIdentity;
+export interface BotEntryResult { bot: BotSummary; entry: BotReadyEntry; model: BotModelSelection | null }
+export interface BotCreateInput { name?: string; instructions?: string; model?: BotModelSelection }
+export interface BotUpdateInput { name?: string; instructions?: string | null; model?: BotModelSelection | null; pinned?: boolean }
 
 export interface BotSleepMachine {
   machineId: string;
@@ -34,6 +45,12 @@ export interface BotActivity {
   work: BotSleepWork[];
   machines: BotSleepMachine[];
   error: string | null;
+  execution?: {
+    currentKernelWorkersDrained: boolean;
+    unprovenOperationStopIds: string[];
+    unknownEffectOperationIds: string[];
+    unresolvedModelRequestIds: string[];
+  };
 }
 
 export interface BotProfile {
@@ -41,14 +58,14 @@ export interface BotProfile {
   name: string;
   /** Persona/collaboration guidance owned by the user-facing Bot record. */
   instructions: string | null;
-  /** Preferred model for the Bot's entry; null follows Pi's fresh-session model selection. */
+  /** Preferred model; null follows the configured default. */
   model: BotModelSelection | null;
   /** The Application Host that coordinates this Bot's lifecycle. */
   coordinatorHostId: string;
-  /** Durable per-Bot working directory for the entry session's cwd. */
+  /** Durable per-Bot working directory for the entry work's cwd. */
   homeDir: string;
-  /** The Bot's long-lived conversation session; survives entry reopen. */
-  entrySessionId: string | null;
+  /** Stable entry identities are allocated with this record; ensureEntry materializes them. */
+  entry: BotEntry;
   pinnedAt?: string | null;
   activity?: BotActivity;
   archiveRequested?: boolean;
@@ -62,16 +79,15 @@ export interface BotSummary extends BotProfile {
   archived: boolean;
 }
 
-/**
- * One work item in a Bot's owner scope. `sessionId` is the session of the
- * latest recorded Run, when one exists — the navigation target for the work.
- */
+/** One native Thread branch in the Bot's owner scope. */
 export interface BotWorkItem {
-  thread: Thread;
-  activeRun: ThreadRun | null;
-  sessionId: string | null;
   desktops?: ComputerDesktop[];
   artifacts?: ComputerArtifact[];
+  runtime: 'agent';
+  identity: ThreadIdentity;
+  thread: ThreadSummary;
+  activeRun: Run | null;
+  purpose: 'bot-root' | 'work';
 }
 
 export interface BotMemoryItem {
@@ -81,4 +97,23 @@ export interface BotMemoryItem {
   createdAt: number;
   revision: string;
   sourceKind: string | null;
+}
+
+/** Framework-neutral product boundary. All navigation uses the returned tagged identity. */
+export interface BotsAPI {
+  selection: import("./chat-memory.js").ThreadMemoryAPI;
+  list(signal?: AbortSignal): Promise<BotSummary[]>;
+  get(botId: string, signal?: AbortSignal): Promise<BotSummary | null>;
+  create(input?: BotCreateInput): Promise<BotSummary>;
+  update(botId: string, patch: BotUpdateInput): Promise<BotSummary>;
+  archive(botId: string): Promise<BotSummary>;
+  remove(botId: string): Promise<BotSummary | null>;
+  changeState(botId: string, action: 'sleep' | 'wake' | 'restore' | 'retry'): Promise<BotSummary>;
+  entry(botId: string, signal?: AbortSignal): Promise<BotEntryResult>;
+  work(botId: string, signal?: AbortSignal): Promise<BotWorkItem[]>;
+  memory: {
+    list(botId: string, signal?: AbortSignal): Promise<BotMemoryItem[]>;
+    source(botId: string, id: number, signal?: AbortSignal): Promise<MemorySourceExcerpt[]>;
+    update(botId: string, item: BotMemoryItem, action: 'correct' | 'forget', content?: string): Promise<void>;
+  };
 }

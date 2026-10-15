@@ -5,30 +5,11 @@ description: Recibe avisos cuando una sesión te necesita o termina.
 
 # Notificaciones
 
-Las notificaciones te avisan cuando algo necesita tu atención para que no tengas que vigilar la pantalla: una sesión terminó, encontró un error, hizo una pregunta o necesita permiso para hacer algo. Configúralas en **Settings → Varin → Notifications**.
+Abre **Ajustes → Varin → Notificaciones** y permite notificaciones en cada dispositivo. Los eventos nativos avisan de respuesta terminada, fallo o necesidad de aprobación o respuesta. Las notificaciones de finalización respetan su ajuste; las solicitudes de atención se gestionan aparte.
 
-## Actívalas
+La entrega depende del escritorio, push web o móvil y permisos del sistema. El Host debe seguir funcionando. Los canales compatibles abren el Thread y la rama originales.
 
-1. Abre **Settings → Varin → Notifications**.
-2. Permite las notificaciones cuando tu navegador o sistema lo pida.
-3. Elige sobre qué quieres recibir avisos:
-   - una sesión **termina**
-   - una sesión encuentra un **error**
-   - una sesión **hace una pregunta**
-   - una sesión necesita **permiso**
-   - se completan **subtareas**
+El título es el del Thread, o «Varin» si falta. El cuerpo es un estado fijo, no la respuesta del agente. También en APNs, por lo que el título puede aparecer en la pantalla bloqueada del iPhone. No se usan las antiguas plantillas editables ni está implementada la sincronización de insignias del icono.
 
-## Cómo te llegan
-
-- en el **escritorio**, recibes notificaciones nativas del sistema
-- en un **navegador o app instalada**, recibes notificaciones web push, así que llegan incluso cuando la pestaña está en segundo plano
-
-Las sesiones configuradas para aceptar automáticamente no te molestarán con notificaciones de permiso.
-
-## Personaliza el texto
-
-Cada tipo de notificación tiene una plantilla de título y mensaje que puedes editar, usando campos como el nombre del agente y el modelo. También hay un límite de cuánto del último mensaje se incluye, para que las notificaciones queden cortas.
-
-## Relacionado
-
-- [Modo de voz](/es/voice/) — escucha las respuestas leídas en voz alta
+- [Apps móviles y PWA](/es/mobile/)
+- [Seguridad](/es/security/)

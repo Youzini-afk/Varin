@@ -1,3 +1,21 @@
+import { SETTINGS_CAPABILITY, SETTINGS_TOOL_DECLARATIONS } from './settings-tools.js';
+export { SETTINGS_CAPABILITY, SETTINGS_TOOL_DECLARATIONS } from './settings-tools.js';
+import { ENVIRONMENT_FORWARD_CAPABILITY, ENVIRONMENT_FORWARD_TOOL_DECLARATIONS, VARIN_BUILTIN_ENVIRONMENT_FORWARD_EXTENSION_ID } from './environment-forward-tools.js';
+import { IMAGES_CAPABILITY, IMAGE_TOOL_DECLARATIONS, VARIN_BUILTIN_IMAGES_EXTENSION_ID } from './image-tools.js';
+export { IMAGES_CAPABILITY, IMAGE_TOOL_DECLARATIONS, VARIN_BUILTIN_IMAGES_EXTENSION_ID, imageToolDeclaration } from './image-tools.js';
+export { ENVIRONMENT_FORWARD_CAPABILITY, ENVIRONMENT_FORWARD_TOOL_DECLARATIONS, VARIN_BUILTIN_ENVIRONMENT_FORWARD_EXTENSION_ID } from './environment-forward-tools.js';
+import { EXTENSION_PACKAGE_TOOL_DECLARATION, RUNTIME_CONTRACT_TOOL_DECLARATIONS, VARIN_BUILTIN_RUNTIME_CONTRACTS_EXTENSION_ID } from './runtime-contract-tools.js';
+export { EXTENSION_PACKAGE_TOOL_DECLARATION, RUNTIME_CONTRACT_TOOL_DECLARATIONS, VARIN_BUILTIN_RUNTIME_CONTRACTS_EXTENSION_ID } from './runtime-contract-tools.js';
+import { RESEARCH_DECISION_CAPABILITY, RESEARCH_DECISION_TOOL_DECLARATIONS, VARIN_BUILTIN_RESEARCH_DECISION_EXTENSION_ID } from './research-decision-tools.js';
+export { RESEARCH_DECISION_CAPABILITY, RESEARCH_DECISION_TOOL_DECLARATIONS, VARIN_BUILTIN_RESEARCH_DECISION_EXTENSION_ID } from './research-decision-tools.js';
+import { RESEARCH_DISCOVERY_CAPABILITY, RESEARCH_DISCOVERY_TOOL_DECLARATIONS, VARIN_BUILTIN_RESEARCH_DISCOVERY_EXTENSION_ID } from './research-discovery-tools.js';
+export { RESEARCH_DISCOVERY_CAPABILITY, RESEARCH_DISCOVERY_TOOL_DECLARATIONS, VARIN_BUILTIN_RESEARCH_DISCOVERY_EXTENSION_ID } from './research-discovery-tools.js';
+import { WEB_CAPABILITY, WEB_TOOL_DECLARATIONS, VARIN_BUILTIN_WEB_EXTENSION_ID } from './web-tools.js';
+export { WEB_CAPABILITY, WEB_TOOL_DECLARATIONS, VARIN_BUILTIN_WEB_EXTENSION_ID } from './web-tools.js';
+import { SCRIPT_CAPABILITY, SCRIPT_TOOL_DECLARATIONS, VARIN_BUILTIN_SCRIPT_EXTENSION_ID } from './script-tools.js';
+export { SCRIPT_CAPABILITY, SCRIPT_TOOL_DECLARATIONS, VARIN_BUILTIN_SCRIPT_EXTENSION_ID } from './script-tools.js';
+import { COMPUTER_CAPABILITY, COMPUTER_TOOL_DECLARATIONS, VARIN_BUILTIN_COMPUTER_EXTENSION_ID } from './computer-tools.js';
+export { COMPUTER_CAPABILITY, COMPUTER_TOOL_DECLARATIONS, VARIN_BUILTIN_COMPUTER_EXTENSION_ID } from './computer-tools.js';
 import type {
   JsonObject,
   VarinApplicationSurface,
@@ -22,24 +40,25 @@ import {
   VARIN_TRANSITION_SCENE_DATA_CONTRACT,
   VARIN_WORKBENCH_PROFILE_TRANSITION_SCENE,
   VARIN_CORE_SERVICE_VERSION,
+  VARIN_EXTENSION_PACKAGES_CAPABILITY,
+  VARIN_RUNTIME_CONTRACTS_CAPABILITY,
+  VARIN_RUNTIME_TOOLS_CAPABILITY,
+  VARIN_CONTEXT_FRAGMENTS_SERVICE,
+  parseVarinExtensionServiceProvision,
   VARIN_WORKSPACE_RECOVERY_SERVICE_ID,
   VARIN_WORKSPACE_RECOVERY_SERVICE_VERSION,
   VARIN_WORKBENCH_LAYOUT_SERVICE_ID,
   VARIN_WORKBENCH_REPLACEMENT_TARGETS,
   VARIN_WORKBENCH_SHELL_DATA_CONTRACT,
   VARIN_WORKBENCH_SLOTS,
+  VARIN_RETRIEVAL_PLAN_SERVICE_ID,
+  VARIN_RETRIEVAL_PLAN_VERSION,
+  VARIN_RETRIEVAL_PLAN_SERVICE,
 } from "@varin/extension-contract";
 
 export interface VarinBuiltinExtensionDefinition {
   enabledByDefault: boolean;
   manifest: VarinExtensionManifest;
-}
-
-export interface VarinBuiltinPluginAdapterData {
-  adapterId: string;
-  contract: "pi-plugin-settings-adapter/v1";
-  icon: string;
-  packageNames: string[];
 }
 
 export const VARIN_BUILTIN_EXTENSION_VERSION = "0.1.0";
@@ -50,6 +69,11 @@ export const VARIN_BUILTIN_TYPESCRIPT_LANGUAGE_EXTENSION_ID = "varin.builtin.typ
 export const VARIN_BUILTIN_TYPESCRIPT_LANGUAGE_EXTENSION_VERSION = "5.3.0+typescript.5.9.3.varin.1";
 export const VARIN_BUILTIN_LANGUAGE_SERVERS_EXTENSION_ID = "varin.builtin.language-servers";
 export const VARIN_BUILTIN_LANGUAGE_SERVERS_EXTENSION_VERSION = "0.1.0";
+export const VARIN_BUILTIN_CONTEXT_FRAGMENTS_EXTENSION_ID = "varin.builtin.context-fragments";
+export const VARIN_BUILTIN_RETRIEVAL_STRUCTURED_EXTENSION_ID = "varin.builtin.retrieval-structured";
+export const VARIN_BUILTIN_RETRIEVAL_SEMANTIC_EXTENSION_ID = "varin.builtin.retrieval-semantic";
+export const VARIN_BUILTIN_RETRIEVAL_KEYWORD_EXTENSION_ID = "varin.builtin.retrieval-keyword";
+export const VARIN_BUILTIN_RETRIEVAL_DEFAULT_PROVIDER_KEY = `${VARIN_BUILTIN_RETRIEVAL_STRUCTURED_EXTENSION_ID}:host:${VARIN_RETRIEVAL_PLAN_SERVICE_ID}@${VARIN_RETRIEVAL_PLAN_VERSION}`;
 export const VARIN_BUILTIN_WORKSPACE_RECOVERY_EXTENSION_ID = "varin.builtin.recovery";
 export const VARIN_BUILTIN_WORKSPACE_RECOVERY_EXTENSION_VERSION = "0.4.0";
 
@@ -142,31 +166,10 @@ const pageContribution = (input: {
   supports: VARIN_INTEGRATION_SURFACES,
 });
 
-const pluginAdapterContribution = (
-  extensionId: string,
-  adapterId: string,
-  icon: string,
-  packageNames: string[],
-): VarinExtensionStaticContribution => ({
-  contractVersion: 1,
-  data: {
-    adapterId,
-    contract: "pi-plugin-settings-adapter/v1",
-    icon,
-    packageNames,
-      } satisfies VarinBuiltinPluginAdapterData & JsonObject,
-  entrypoint: VARIN_INTEGRATION_ENTRYPOINT_ID,
-  id: `${extensionId}.adapter`,
-  kind: "panel",
-  placement: { slot: "pi.plugin-settings.adapters" },
-  supports: VARIN_INTEGRATION_SURFACES,
-});
-
 const definition = (input: {
   contributions: VarinExtensionStaticContribution[];
   displayName: string;
   id: string;
-  piPackages?: string[];
   provides?: VarinExtensionManifest['provides'];
   supports?: VarinApplicationSurface[];
 }): VarinBuiltinExtensionDefinition => {
@@ -185,7 +188,6 @@ const definition = (input: {
         }],
       },
       id: input.id,
-      ...(input.piPackages ? { integrates: { piPackages: input.piPackages } } : {}),
       ...(input.provides ? { provides: input.provides } : {}),
       schemaVersion: 1,
       version: VARIN_BUILTIN_EXTENSION_VERSION,
@@ -194,13 +196,12 @@ const definition = (input: {
 };
 
 export const VARIN_BUILTIN_AGENTS_EXTENSION = definition({
-  id: "varin.builtin.pi-agents",
-  displayName: "Pi Agents Workbench",
-  piPackages: ["pi-subagents", "@cortexkit/pi-magic-context"],
+  id: "varin.builtin.agents",
+  displayName: "Agents Workbench",
   contributions: [pageContribution({
     group: "harness",
     icon: "robot-2",
-    id: "varin.builtin.pi-agents.page.agents",
+    id: "varin.builtin.agents.page.agents",
     keywords: ["agent", "agents", "subagent", "subagents", "roles", "workflow"],
     kind: "split",
     order: 2,
@@ -210,61 +211,14 @@ export const VARIN_BUILTIN_AGENTS_EXTENSION = definition({
   })],
 });
 
-export const VARIN_BUILTIN_MCP_EXTENSION = definition({
-  id: "varin.builtin.pi-mcp",
-  displayName: "Pi MCP Workbench",
-  contributions: [pageContribution({
-    group: "pi",
-    icon: "mcp",
-    id: "varin.builtin.pi-mcp.page.mcp",
-    keywords: ["mcp", "model context protocol", "servers", "tools", "oauth"],
-    kind: "split",
-    order: 46,
-    slug: "mcp",
-    title: "MCP",
-    titleKey: "settings.page.mcp.title",
-  })],
-});
-
-export const VARIN_BUILTIN_PLUGIN_SETTINGS_EXTENSION = definition({
-  id: "varin.builtin.pi-plugin-settings",
-  displayName: "Pi Plugin Settings",
-  contributions: [pageContribution({
-    group: "pi",
-    icon: "settings-3",
-    id: "varin.builtin.pi-plugin-settings.page.plugin-settings",
-    keywords: ["pi", "plugin", "settings", "configuration", "json", "jsonc"],
-    kind: "split",
-    order: 48,
-    slug: "plugin-settings",
-    title: "Plugin Settings",
-    titleKey: "settings.page.pluginSettings.title",
-  })],
-});
-
-export const VARIN_BUILTIN_RECOVERY_EXTENSION = definition({
-  id: "varin.builtin.pi-recovery",
-  displayName: "Varin Recovery",
-  piPackages: [],
-  contributions: [{
-    contractVersion: 1,
-    data: { contract: "pi-settings-panel/v1", panelId: "recovery" },
-    entrypoint: VARIN_INTEGRATION_ENTRYPOINT_ID,
-    id: "varin.builtin.pi-recovery.panel.recovery",
-    kind: "panel",
-    placement: { order: 40, slot: "settings.sessions.panels" },
-    supports: VARIN_INTEGRATION_SURFACES,
-  }],
-});
-
 export const VARIN_BUILTIN_HARNESS_EXTENSION = definition({
-  id: "varin.builtin.pi-harness",
+  id: "varin.builtin.harness",
   displayName: "Agent Harness",
   contributions: [
     pageContribution({
       group: "harness",
       icon: "terminal",
-      id: "varin.builtin.pi-harness.page.tools",
+      id: "varin.builtin.harness.page.tools",
       keywords: ["harness", "agent", "tools", "shell", "bash", "output", "process"],
       kind: "single",
       order: 1,
@@ -275,7 +229,7 @@ export const VARIN_BUILTIN_HARNESS_EXTENSION = definition({
     pageContribution({
       group: "harness",
       icon: "shield-check",
-      id: "varin.builtin.pi-harness.page.permissions",
+      id: "varin.builtin.harness.page.permissions",
       keywords: ["harness", "permissions", "approval", "rules", "policy"],
       kind: "single",
       order: 0,
@@ -286,7 +240,7 @@ export const VARIN_BUILTIN_HARNESS_EXTENSION = definition({
     pageContribution({
       group: "harness",
       icon: "chat-history",
-      id: "varin.builtin.pi-harness.page.context",
+      id: "varin.builtin.harness.page.context",
       keywords: ["harness", "context", "compaction", "preparation", "long session", "recovery", "next step"],
       kind: "single",
       order: 4,
@@ -297,7 +251,7 @@ export const VARIN_BUILTIN_HARNESS_EXTENSION = definition({
     pageContribution({
       group: "harness",
       icon: "search-eye",
-      id: "varin.builtin.pi-harness.page.retrieval",
+      id: "varin.builtin.harness.page.retrieval",
       keywords: ["harness", "retrieval", "embedding", "rerank", "code", "search"],
       kind: "single",
       order: 7,
@@ -308,7 +262,7 @@ export const VARIN_BUILTIN_HARNESS_EXTENSION = definition({
     pageContribution({
       group: "harness",
       icon: "database-2",
-      id: "varin.builtin.pi-harness.page.index",
+      id: "varin.builtin.harness.page.index",
       keywords: ["index", "embedding", "storage", "progress", "semantic"],
       kind: "single",
       order: 8,
@@ -319,7 +273,7 @@ export const VARIN_BUILTIN_HARNESS_EXTENSION = definition({
     pageContribution({
       group: "harness",
       icon: "global",
-      id: "varin.builtin.pi-harness.page.web",
+      id: "varin.builtin.harness.page.web",
       keywords: ["harness", "web", "search", "brave", "exa", "tavily", "jina", "searxng", "domains", "browser"],
       kind: "single",
       order: 6,
@@ -330,7 +284,7 @@ export const VARIN_BUILTIN_HARNESS_EXTENSION = definition({
     pageContribution({
       group: "harness",
       icon: "computer",
-      id: "varin.builtin.pi-harness.page.computers",
+      id: "varin.builtin.harness.page.computers",
       keywords: ["computer", "desktop", "computer use", "gui", "automation", "screen"],
       kind: "single",
       order: 10,
@@ -341,7 +295,7 @@ export const VARIN_BUILTIN_HARNESS_EXTENSION = definition({
     pageContribution({
       group: "harness",
       icon: "robot",
-      id: "varin.builtin.pi-harness.page.bots",
+      id: "varin.builtin.harness.page.bots",
       keywords: ["bot", "bots", "assistant", "persona", "durable agent"],
       kind: "single",
       order: 9,
@@ -577,6 +531,91 @@ export const VARIN_BUILTIN_LANGUAGE_SERVERS_EXTENSION: VarinBuiltinExtensionDefi
   },
 };
 
+export const VARIN_BUILTIN_RUNTIME_CONTRACTS_EXTENSION: VarinBuiltinExtensionDefinition = {
+  enabledByDefault: true,
+  manifest: { id: VARIN_BUILTIN_RUNTIME_CONTRACTS_EXTENSION_ID, displayName: 'Runtime contracts', version: '1.0.0', schemaVersion: 1, engines: { varin: '*' },
+    entrypoints: { host: { activation: ['service-request'], file: 'host.cjs', mode: 'brokered' } },
+    capabilities: { host: [VARIN_RUNTIME_CONTRACTS_CAPABILITY, VARIN_RUNTIME_TOOLS_CAPABILITY, VARIN_EXTENSION_PACKAGES_CAPABILITY, SETTINGS_CAPABILITY] }, provides: { services: [...RUNTIME_CONTRACT_TOOL_DECLARATIONS, EXTENSION_PACKAGE_TOOL_DECLARATION, ...SETTINGS_TOOL_DECLARATIONS] } },
+};
+
+export const VARIN_BUILTIN_SCRIPT_EXTENSION: VarinBuiltinExtensionDefinition = {
+  enabledByDefault: true,
+  manifest: { id: VARIN_BUILTIN_SCRIPT_EXTENSION_ID, displayName: 'Managed JavaScript', version: '1.0.0', schemaVersion: 1, engines: { varin: '*' },
+    entrypoints: { host: { activation: ['service-request'], file: 'host.cjs', mode: 'brokered' } },
+    capabilities: { host: [SCRIPT_CAPABILITY] }, provides: { services: [...SCRIPT_TOOL_DECLARATIONS] } },
+};
+
+export const VARIN_BUILTIN_RESEARCH_DECISION_EXTENSION: VarinBuiltinExtensionDefinition = {
+  enabledByDefault: true,
+  manifest: { id: VARIN_BUILTIN_RESEARCH_DECISION_EXTENSION_ID, displayName: 'Research decisions', version: '1.0.0', schemaVersion: 1, engines: { varin: '*' },
+    entrypoints: { host: { activation: ['service-request'], file: 'host.cjs', mode: 'brokered' } },
+    capabilities: { host: [RESEARCH_DECISION_CAPABILITY] }, provides: { services: [...RESEARCH_DECISION_TOOL_DECLARATIONS] } },
+};
+
+export const VARIN_BUILTIN_IMAGES_EXTENSION: VarinBuiltinExtensionDefinition = {
+  enabledByDefault: true,
+  manifest: { id: VARIN_BUILTIN_IMAGES_EXTENSION_ID, displayName: 'Image generation and editing', version: '1.0.0', schemaVersion: 1, engines: { varin: '*' },
+    entrypoints: { host: { activation: ['service-request'], file: 'host.cjs', mode: 'brokered' } },
+    capabilities: { host: [IMAGES_CAPABILITY] }, provides: { services: [...IMAGE_TOOL_DECLARATIONS] } },
+};
+
+export const VARIN_BUILTIN_RESEARCH_DISCOVERY_EXTENSION: VarinBuiltinExtensionDefinition = {
+  enabledByDefault: true,
+  manifest: { id: VARIN_BUILTIN_RESEARCH_DISCOVERY_EXTENSION_ID, displayName: 'Scholarly discovery', version: '1.0.0', schemaVersion: 1, engines: { varin: '*' },
+    entrypoints: { host: { activation: ['service-request'], file: 'host.cjs', mode: 'brokered' } },
+    capabilities: { host: [RESEARCH_DISCOVERY_CAPABILITY] }, provides: { services: [...RESEARCH_DISCOVERY_TOOL_DECLARATIONS] } },
+};
+
+export const VARIN_BUILTIN_WEB_EXTENSION: VarinBuiltinExtensionDefinition = {
+  enabledByDefault: true,
+  manifest: { id: VARIN_BUILTIN_WEB_EXTENSION_ID, displayName: 'Web and materials', version: '1.0.0', schemaVersion: 1, engines: { varin: '*' },
+    entrypoints: { host: { activation: ['service-request'], file: 'host.cjs', mode: 'brokered' } },
+    capabilities: { host: [WEB_CAPABILITY] }, provides: { services: [...WEB_TOOL_DECLARATIONS] } },
+};
+
+export const VARIN_BUILTIN_ENVIRONMENT_FORWARD_EXTENSION: VarinBuiltinExtensionDefinition = {
+  enabledByDefault: true,
+  manifest: { id: VARIN_BUILTIN_ENVIRONMENT_FORWARD_EXTENSION_ID, displayName: 'Environment service forwards', version: '1.0.0', schemaVersion: 1, engines: { varin: '*' },
+    entrypoints: { host: { activation: ['service-request'], file: 'host.cjs', mode: 'brokered' } },
+    capabilities: { host: [ENVIRONMENT_FORWARD_CAPABILITY] }, provides: { services: [...ENVIRONMENT_FORWARD_TOOL_DECLARATIONS] } },
+};
+
+export const VARIN_BUILTIN_COMPUTER_EXTENSION: VarinBuiltinExtensionDefinition = {
+  enabledByDefault: true,
+  manifest: { id: VARIN_BUILTIN_COMPUTER_EXTENSION_ID, displayName: 'Computer Use', version: '1.0.0', schemaVersion: 1, engines: { varin: '*' },
+    entrypoints: { host: { activation: ['service-request'], file: 'host.cjs', mode: 'brokered' } },
+    capabilities: { host: [COMPUTER_CAPABILITY] }, provides: { services: [...COMPUTER_TOOL_DECLARATIONS] } },
+};
+
+export const VARIN_BUILTIN_CONTEXT_FRAGMENTS_EXTENSION: VarinBuiltinExtensionDefinition = {
+  enabledByDefault: true,
+  manifest: {
+    id: VARIN_BUILTIN_CONTEXT_FRAGMENTS_EXTENSION_ID, displayName: "Varin Context Guidance",
+    version: "1.0.0", schemaVersion: 1, engines: { varin: "*" },
+    entrypoints: { host: { activation: ["service-request"], file: "host.cjs", mode: "brokered" } },
+    provides: { services: [parseVarinExtensionServiceProvision(VARIN_CONTEXT_FRAGMENTS_SERVICE)] },
+  },
+};
+
+const retrievalPlanDefinition = (id: string, displayName: string): VarinBuiltinExtensionDefinition => ({
+  enabledByDefault: true,
+  manifest: {
+    id, displayName, version: "1.0.0", schemaVersion: 1, engines: { varin: "*" },
+    entrypoints: { host: { activation: ["service-request"], file: "host.cjs", mode: "brokered" } },
+    provides: { services: [parseVarinExtensionServiceProvision(VARIN_RETRIEVAL_PLAN_SERVICE)] },
+  },
+});
+
+export const VARIN_BUILTIN_RETRIEVAL_STRUCTURED_EXTENSION = retrievalPlanDefinition(
+  VARIN_BUILTIN_RETRIEVAL_STRUCTURED_EXTENSION_ID, "Native Retrieval: Keyword and Structure",
+);
+export const VARIN_BUILTIN_RETRIEVAL_SEMANTIC_EXTENSION = retrievalPlanDefinition(
+  VARIN_BUILTIN_RETRIEVAL_SEMANTIC_EXTENSION_ID, "Native Retrieval: Keyword, Structure and Semantic",
+);
+export const VARIN_BUILTIN_RETRIEVAL_KEYWORD_EXTENSION = retrievalPlanDefinition(
+  VARIN_BUILTIN_RETRIEVAL_KEYWORD_EXTENSION_ID, "Native Retrieval: Keyword Only",
+);
+
 export const VARIN_BUILTIN_WORKSPACE_RECOVERY_EXTENSION: VarinBuiltinExtensionDefinition = {
   enabledByDefault: true,
   manifest: {
@@ -604,51 +643,29 @@ export const VARIN_BUILTIN_WORKSPACE_RECOVERY_EXTENSION: VarinBuiltinExtensionDe
   },
 };
 
-const pluginAdapter = (
-  suffix: string,
-  displayName: string,
-  adapterId: string,
-  icon: string,
-  packageNames: string[],
-): VarinBuiltinExtensionDefinition => {
-  const id = `varin.builtin.plugin-adapter.${suffix}`;
-  return definition({
-    id,
-    displayName,
-    piPackages: packageNames,
-    contributions: [pluginAdapterContribution(id, adapterId, icon, packageNames)],
-  });
-};
-
-export const VARIN_BUILTIN_PLUGIN_ADAPTER_EXTENSIONS = [
-  pluginAdapter("mcp", "MCP Settings Adapter", "mcp", "server", ["@varin/pi-mcp-adapter", "pi-mcp-adapter"]),
-  pluginAdapter("subagents", "pi-subagents Settings Adapter", "subagents", "robot-2", ["pi-subagents"]),
-  pluginAdapter("magic-context", "Magic Context Settings Adapter", "magic-context", "brain", ["@cortexkit/pi-magic-context"]),
-  pluginAdapter("web-access", "Web Access Settings Adapter", "web-access", "global", ["pi-web-access"]),
-  pluginAdapter("openai-codex-compat", "OpenAI Codex Compatibility Settings Adapter", "openai-codex-compat", "code-box", ["pi-openai-codex-compat"]),
-  pluginAdapter("observational-memory", "Observational Memory Settings Adapter", "observational-memory", "brain", ["pi-observational-memory"]),
-  pluginAdapter("context-mode", "Context Mode Integration Adapter", "context-mode", "database-2", ["context-mode"]),
-  pluginAdapter("aft", "AFT Settings Adapter", "aft", "tools", ["@cortexkit/aft-pi"]),
-  pluginAdapter("pi-lens", "pi-lens Settings Adapter", "pi-lens", "pulse", ["pi-lens"]),
-  pluginAdapter("hermes-memory", "Hermes Memory Settings Adapter", "hermes-memory", "brain", ["pi-hermes-memory"]),
-  pluginAdapter("rtk", "RTK Optimizer Settings Adapter", "rtk", "terminal-box", ["pi-rtk-optimizer"]),
-] as const;
-
 export const VARIN_BUILTIN_EXTENSION_DEFINITIONS: readonly VarinBuiltinExtensionDefinition[] = [
   VARIN_BUILTIN_TRANSITION_SCENE_EXTENSION,
   VARIN_BUILTIN_TYPESCRIPT_LANGUAGE_EXTENSION,
   VARIN_BUILTIN_LANGUAGE_SERVERS_EXTENSION,
   VARIN_BUILTIN_WORKSPACE_RECOVERY_EXTENSION,
+  VARIN_BUILTIN_CONTEXT_FRAGMENTS_EXTENSION,
+  VARIN_BUILTIN_COMPUTER_EXTENSION,
+  VARIN_BUILTIN_ENVIRONMENT_FORWARD_EXTENSION,
+  VARIN_BUILTIN_WEB_EXTENSION,
+  VARIN_BUILTIN_RESEARCH_DISCOVERY_EXTENSION,
+  VARIN_BUILTIN_RESEARCH_DECISION_EXTENSION,
+  VARIN_BUILTIN_IMAGES_EXTENSION,
+  VARIN_BUILTIN_SCRIPT_EXTENSION,
+  VARIN_BUILTIN_RUNTIME_CONTRACTS_EXTENSION,
+  VARIN_BUILTIN_RETRIEVAL_STRUCTURED_EXTENSION,
+  VARIN_BUILTIN_RETRIEVAL_KEYWORD_EXTENSION,
+  VARIN_BUILTIN_RETRIEVAL_SEMANTIC_EXTENSION,
   VARIN_BUILTIN_AGENT_WORKSPACE_EXTENSION,
   VARIN_BUILTIN_IDE_WORKBENCH_EXTENSION,
   VARIN_BUILTIN_RESEARCH_WORKBENCH_EXTENSION,
   VARIN_BUILTIN_BOT_WORKSPACE_EXTENSION,
   VARIN_BUILTIN_AGENTS_EXTENSION,
-  VARIN_BUILTIN_MCP_EXTENSION,
-  VARIN_BUILTIN_PLUGIN_SETTINGS_EXTENSION,
-  VARIN_BUILTIN_RECOVERY_EXTENSION,
   VARIN_BUILTIN_HARNESS_EXTENSION,
-  ...VARIN_BUILTIN_PLUGIN_ADAPTER_EXTENSIONS,
 ];
 
 export const varinBuiltinDefinition = (extensionId: string): VarinBuiltinExtensionDefinition | undefined => (

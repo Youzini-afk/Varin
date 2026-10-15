@@ -4,7 +4,6 @@ import type {
   VarinExtensionCatalogEntry,
   VarinExtensionCapabilityReference,
   VarinExtensionHostStateSnapshot,
-  VarinExtensionServiceProviderSnapshot,
 } from '@varin/extension-contract';
 import { Icon } from '@/components/icon/Icon';
 import { Button } from '@/components/ui/button';
@@ -29,6 +28,8 @@ import {
 } from '@/components/sections/shared/SettingsSection';
 import {
   refreshVarinExtensionCatalog,
+  restartVarinExtensionCandidate,
+  recoverVarinExtensionRestart,
   discardVarinExtensionCandidate,
   installVarinExtension,
   reloadVarinExtensionLocalSource,
@@ -46,11 +47,16 @@ import { useWorkbenchWorkspaceId } from '@/lib/extensions/workbench-workspace';
 import {
   VARIN_EDITOR_MONACO_SERVICE_ID,
   VARIN_EDITOR_MONACO_SERVICE_VERSION,
+  VARIN_RETRIEVAL_PLAN_SERVICE_ID,
+  VARIN_RETRIEVAL_PLAN_VERSION,
   resolveVarinExtensionServiceRouting,
   resolveVarinWorkbenchLayout,
   resolveVarinWorkbenchProfile,
   serviceRoutingScopeKey,
 } from '@varin/extension-contract';
+import { VARIN_BUILTIN_RETRIEVAL_DEFAULT_PROVIDER_KEY } from '@varin/extension-builtins';
+import { serviceRoutingComposition, serviceRoutingOptions } from '@/lib/extensions/service-routing-options';
+import { ServiceRoutingControl } from './ServiceRoutingControl';
 import {
   selectActiveWorkbenchProfile,
   applyWorkbenchProfile,
@@ -61,6 +67,7 @@ import {
   WORKBENCH_REPLACEMENT_TARGETS,
 } from '@/lib/extensions/workbench-registry';
 import { varinSurfaceRuntime } from '@/lib/extensions/surface-runtime';
+import { surfaceExtensionLoader } from '@/lib/extensions/managed-runtime';
 import { workbenchExtensionDisplayName, workbenchProfileLabel } from '@/lib/extensions/workbench-profile-label';
 import {
   describeWorkbenchContributionPlacement,
@@ -543,6 +550,7 @@ const serviceName = (serviceId: string): string => {
 
 const ServiceRoutingSection: React.FC = () => {
   const { t } = useI18n();
+  const surfaceRegistry = useSurfaceRegistrySnapshot();
   const catalog = useVarinExtensionCatalog();
   const currentDirectory = useDirectoryStore((state) => state.currentDirectory);
   const [scopeKind, setScopeKind] = React.useState<'user' | 'workspace'>(currentDirectory ? 'workspace' : 'user');
@@ -553,14 +561,13 @@ const ServiceRoutingSection: React.FC = () => {
   const snapshot = catalog.snapshot;
   if (!snapshot?.routing.authoritative) return null;
 
-  const activeProviders = snapshot.services.providers.filter((provider) => provider.status === 'active');
-  const providerGroups = new Map<string, VarinExtensionServiceProviderSnapshot[]>();
-  for (const provider of activeProviders) {
-    const key = `${provider.descriptor.id}@${provider.descriptor.version}`;
-    providerGroups.set(key, [...(providerGroups.get(key) ?? []), provider]);
-  }
+  const providerGroups = serviceRoutingOptions(snapshot, {
+    factories: surfaceExtensionLoader.getLocalServiceDeclarations(), services: surfaceRegistry.services,
+  });
   const serviceKeys = new Set([
-    ...[...providerGroups].filter(([, providers]) => providers.length > 1).map(([key]) => key),
+    ...[...providerGroups].filter(([, providers]) => (
+      providers.length > 1 || providers.some((provider) => provider.descriptor.contract?.composition === 'ordered')
+    )).map(([key]) => key),
     ...snapshot.routing.document.rules.map((rule) => `${rule.serviceId}@${rule.version}`),
   ]);
   if (serviceKeys.size === 0) return null;
@@ -580,12 +587,12 @@ const ServiceRoutingSection: React.FC = () => {
   const selectProvider = async (
     serviceId: string,
     version: number,
-    providerKey: string | null,
+    selection: readonly string[] | null,
   ): Promise<void> => {
     const key = `${serviceId}@${version}`;
     setBusyKey(key);
     try {
-      await setVarinExtensionServiceRoute(serviceId, version, editableScope, providerKey);
+      await setVarinExtensionServiceRoute(serviceId, version, editableScope, selection);
     } catch (error) {
       toast.error(error instanceof Error ? error.message : String(error));
     } finally {
@@ -620,48 +627,58 @@ const ServiceRoutingSection: React.FC = () => {
             && rule.version === version
             && serviceRoutingScopeKey(rule.scope) === editableScopeKey
           ));
-          const selected = exactRule?.providerKey ?? '__automatic__';
-          const selectedMissing = selected !== '__automatic__'
-            && !providers.some((provider) => provider.providerKey === selected);
+          const selection = exactRule?.providerKeys ?? null;
+          const composition = serviceRoutingComposition(snapshot, id, version);
           const resolution = resolveVarinExtensionServiceRouting({
-            candidates: providers.map((provider) => ({ providerId: provider.providerId, providerKey: provider.providerKey })),
+            // The pure resolver uses an opaque candidate identity. A declared option has no
+            // executable generation yet; selecting its stable key asks the Host to prepare it.
+            candidates: providers.map((provider) => ({
+              composition: provider.descriptor.contract?.composition,
+              providerId: provider.providerId ?? provider.providerKey,
+              providerKey: provider.providerKey,
+            })),
+            composition,
             context: routingContext,
             document: snapshot.routing.document,
             serviceId: id,
             version,
+            ...(id === VARIN_RETRIEVAL_PLAN_SERVICE_ID && version === VARIN_RETRIEVAL_PLAN_VERSION
+              ? { defaultProviderKey: VARIN_BUILTIN_RETRIEVAL_DEFAULT_PROVIDER_KEY } : {}),
           });
+          const resolvedKeys = resolution.providerKeys ?? [];
+          const allReady = resolvedKeys.length > 0 && resolvedKeys.every((providerKey) => (
+            providers.find((provider) => provider.providerKey === providerKey)?.status === 'active'
+          ));
           return (
             <div key={key} className="grid gap-2 rounded-lg border border-border/60 px-3 py-3 @xl:grid-cols-[minmax(0,1fr)_minmax(14rem,0.8fr)] @xl:items-center">
               <div className="min-w-0">
-                <div className="typography-ui-label text-foreground">{serviceName(id)}</div>
+                <div className="typography-ui-label text-foreground">{id === VARIN_RETRIEVAL_PLAN_SERVICE_ID
+                  ? t('settings.varin.extensions.routing.retrieval') : serviceName(id)}</div>
                 <div className={resolution.status === 'resolved'
                   ? 'typography-micro text-muted-foreground'
                   : 'typography-micro text-[var(--status-warning)]'}>
                   {resolution.status === 'resolved'
-                    ? t('settings.varin.extensions.routing.status.ready')
+                    ? t(resolution.providerKeys?.length === 0 ? 'settings.varin.extensions.routing.empty'
+                      : allReady ? 'settings.varin.extensions.routing.status.ready' : 'settings.varin.extensions.routing.status.declared')
                     : resolution.status === 'ambiguous'
                       ? t('settings.varin.extensions.routing.status.choose')
                       : t('settings.varin.extensions.routing.status.unavailable')}
                 </div>
+                {resolution.diagnostics.map((diagnostic, index) => (
+                  <p key={`${diagnostic.code}:${index}`} className="break-words typography-micro text-[var(--status-warning)]">
+                    {diagnostic.message}
+                  </p>
+                ))}
               </div>
-              <Select
-                value={selected}
-                disabled={busyKey === key}
-                onValueChange={(value) => { void selectProvider(id, version, value === '__automatic__' ? null : value); }}
-              >
-                <SelectTrigger><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="__automatic__">{t('settings.varin.extensions.routing.automatic')}</SelectItem>
-                  {selectedMissing ? (
-                    <SelectItem value={selected}>{t('settings.varin.extensions.routing.missing')}</SelectItem>
-                  ) : null}
-                  {providers.map((provider) => (
-                    <SelectItem key={provider.providerKey} value={provider.providerKey}>
-                      {extensionNames.get(provider.extensionId) ?? provider.extensionId}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              <ServiceRoutingControl
+                busy={busyKey === key}
+                composition={composition}
+                extensionNames={extensionNames}
+                inheritedSelection={!exactRule ? resolution.matchedRule?.providerKeys : undefined}
+                onSelect={(next) => { void selectProvider(id, version, next); }}
+                providers={providers}
+                selection={selection}
+              />
             </div>
           );
         })}
@@ -683,6 +700,10 @@ const ExtensionCard: React.FC<{
   const [deleteData, setDeleteData] = React.useState(false);
   const status = actualStatus(entry);
   const candidate = entry.candidate;
+  const handoff = entry.restartHandoffs?.at(-1);
+  const nativeUpdate = entry.desired.enabled && candidate?.manifest.entrypoints?.host && (candidate?.manifest.entrypoints?.host?.mode === 'native' || entry.manifest.entrypoints?.host?.mode === 'native');
+  const handoffPending = handoff && !['applied', 'failed', 'restored'].includes(handoff.status);
+  const [restartConfirmation, setRestartConfirmation] = React.useState<'update' | 'recover' | null>(null);
   const selectedCapabilities: VarinExtensionCapabilityReference[] = (["host", "surface"] as const).flatMap((realm) => (
     (entry.manifest.capabilities?.[realm] ?? []).map((capability) => ({ capability, realm }))
   ));
@@ -791,6 +812,25 @@ const ExtensionCard: React.FC<{
         />
       </div>
 
+      {handoff ? <div className="mt-3 space-y-1 typography-meta" role="status">
+        <p>{t(`settings.varin.extensions.restart.${handoff.status}`)}</p>
+        {handoff.status === 'waiting-surface' ? <p>{handoff.surfaceEntrypoints.join(', ')}</p> : null}
+        {handoff.status === 'failed' && handoff.failure ? <p className="text-[var(--status-error)]">{handoff.failure.message}</p> : null}
+        {handoff.status === 'failed' ? <Button size="xs" variant="outline" disabled={busy}
+          onClick={() => setRestartConfirmation('recover')}>{t('settings.varin.extensions.restart.recover')}</Button> : null}
+      </div> : null}
+      <Dialog open={restartConfirmation !== null} onOpenChange={open => { if (!open) setRestartConfirmation(null); }}>
+        <DialogContent>
+          <DialogHeader><DialogTitle>{t('settings.varin.extensions.restart.confirmTitle')}</DialogTitle>
+            <DialogDescription>{t('settings.varin.extensions.restart.confirmDescription')}</DialogDescription></DialogHeader>
+          <DialogFooter><Button disabled={busy} onClick={() => {
+            const action = restartConfirmation;
+            setRestartConfirmation(null);
+            if (action === 'update' && candidate) void restartVarinExtensionCandidate(entry.manifest.id, candidate.integrity).catch(() => undefined);
+            else if (action === 'recover' && handoff) void recoverVarinExtensionRestart(entry.manifest.id, handoff.id).catch(() => undefined);
+          }}>{t('settings.varin.extensions.restart.confirm')}</Button></DialogFooter>
+        </DialogContent>
+      </Dialog>
       {entry.source.kind !== 'builtin' && !entry.desired.enabled && selectedCapabilities.length > 0 ? (
         <div className="mt-3 border-t border-border/50 pt-3">
           <div className="mb-2 typography-ui-label text-foreground">
@@ -887,10 +927,14 @@ const ExtensionCard: React.FC<{
             >
               {t('settings.varin.extensions.candidate.discard')}
             </Button>
+            {nativeUpdate ? <Button type="button" size="xs" disabled={busy || !candidate.capabilitiesReviewed || Boolean(handoffPending)}
+              onClick={() => setRestartConfirmation('update')}>
+              {t(handoff?.status === 'failed' ? 'settings.varin.extensions.restart.retry' : 'settings.varin.extensions.restart.apply')}
+            </Button> : null}
             <Button
               type="button"
               size="xs"
-              disabled={busy || !candidate.capabilitiesReviewed || candidate.applyRequested}
+              disabled={busy || !candidate.capabilitiesReviewed || candidate.applyRequested || Boolean(handoffPending)}
               onClick={() => {
                 void selectVarinExtensionCandidate(entry.manifest.id, candidate.integrity).catch(() => undefined);
               }}
@@ -1094,10 +1138,7 @@ const ExtensionCard: React.FC<{
                       {service.id}@{service.version}{service.optional ? ` · ${t('settings.varin.extensions.inspector.optional')}` : ''}
                     </div>
                   ))}
-                  {(entry.manifest.integrates?.piPackages ?? []).map((packageName) => (
-                    <div key={packageName} className="break-all typography-micro text-muted-foreground">Pi · {packageName}</div>
-                  ))}
-                  {(entry.manifest.requires?.services ?? []).length === 0 && (entry.manifest.integrates?.piPackages ?? []).length === 0
+                  {(entry.manifest.requires?.services ?? []).length === 0
                     ? <span className="typography-micro text-muted-foreground">—</span>
                     : null}
                 </div>

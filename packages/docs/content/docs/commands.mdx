@@ -1,14 +1,14 @@
 ---
-title: Commands
-description: Inspect commands available in the active Pi runtime.
+title: "Commands"
+description: "Invoke skills captured in the conversation context."
 ---
 
 # Commands
 
-Open **Settings → Commands** to see commands registered by extensions and skills. The catalog shows each command’s description, source, scope and invocation, and lets you copy its invocation.
+**Settings → Commands** lists active, valid skills in the selected resource library, with their descriptions and file paths. Invoke one by starting a message with `/skill:name`, followed by a space and any instructions.
 
-Type `/` at the start of a chat message and select a command. Add arguments after its name when the command requires them. Extension commands are handled by their owning plugin; `/skill:name` loads that skill’s instructions.
+In a conversation, open **Instructions and skills** and use **Add /skill:name to draft**. This inserts text without sending the message. Names containing spaces cannot use this command syntax.
 
-Available commands follow the selected runtime, workspace and loaded resources. Manage their sources in **Settings → Skills** and **Settings → Pi Packages**.
+The conversation uses its captured skill version. After editing the library, choose **Refresh instructions and skills** to prepare a new context snapshot. In-flight requests and previously accepted skill inputs keep their original material. The settings list is a view of the library, not a guarantee that an older conversation has already refreshed it.
 
-- [Skills](/skills/)
+See [Skills](/skills/) for resource editing. Workbench keyboard shortcuts are configured separately.

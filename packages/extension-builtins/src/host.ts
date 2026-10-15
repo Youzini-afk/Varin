@@ -2,6 +2,18 @@ import { existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import {
   VARIN_BUILTIN_LANGUAGE_SERVERS_EXTENSION_ID,
+  VARIN_BUILTIN_CONTEXT_FRAGMENTS_EXTENSION_ID,
+  VARIN_BUILTIN_COMPUTER_EXTENSION_ID,
+  VARIN_BUILTIN_ENVIRONMENT_FORWARD_EXTENSION_ID,
+  VARIN_BUILTIN_WEB_EXTENSION_ID,
+  VARIN_BUILTIN_RESEARCH_DISCOVERY_EXTENSION_ID,
+  VARIN_BUILTIN_RESEARCH_DECISION_EXTENSION_ID,
+  VARIN_BUILTIN_IMAGES_EXTENSION_ID,
+  VARIN_BUILTIN_SCRIPT_EXTENSION_ID,
+  VARIN_BUILTIN_RUNTIME_CONTRACTS_EXTENSION_ID,
+  VARIN_BUILTIN_RETRIEVAL_STRUCTURED_EXTENSION_ID,
+  VARIN_BUILTIN_RETRIEVAL_KEYWORD_EXTENSION_ID,
+  VARIN_BUILTIN_RETRIEVAL_SEMANTIC_EXTENSION_ID,
   VARIN_BUILTIN_TYPESCRIPT_LANGUAGE_EXTENSION_ID,
   VARIN_BUILTIN_WORKSPACE_RECOVERY_EXTENSION_ID,
 } from "./index.js";
@@ -31,6 +43,18 @@ export const resolveVarinBuiltinPackageRoot = (
 };
 
 export const VARIN_BUILTIN_EXTENSION_PACKAGE_ROOTS: ReadonlyMap<string, string> = new Map([
+  [VARIN_BUILTIN_IMAGES_EXTENSION_ID, resolveVarinBuiltinPackageRoot(fileURLToPath(new URL('./builtin-packages/images/', import.meta.url)))],
+  [VARIN_BUILTIN_ENVIRONMENT_FORWARD_EXTENSION_ID, resolveVarinBuiltinPackageRoot(fileURLToPath(new URL("./builtin-packages/environment-forward/", import.meta.url)))],
+  [VARIN_BUILTIN_RESEARCH_DECISION_EXTENSION_ID, resolveVarinBuiltinPackageRoot(fileURLToPath(new URL("./builtin-packages/research-decision/", import.meta.url)))],
+  [VARIN_BUILTIN_RESEARCH_DISCOVERY_EXTENSION_ID, resolveVarinBuiltinPackageRoot(fileURLToPath(new URL("./builtin-packages/research-discovery/", import.meta.url)))],
+  [VARIN_BUILTIN_WEB_EXTENSION_ID, resolveVarinBuiltinPackageRoot(fileURLToPath(new URL("./builtin-packages/web/", import.meta.url)))],
+  [VARIN_BUILTIN_RUNTIME_CONTRACTS_EXTENSION_ID, resolveVarinBuiltinPackageRoot(fileURLToPath(new URL("./builtin-packages/runtime-contracts/", import.meta.url)))],
+  [VARIN_BUILTIN_SCRIPT_EXTENSION_ID, resolveVarinBuiltinPackageRoot(fileURLToPath(new URL("./builtin-packages/scripts/", import.meta.url)))],
+  [VARIN_BUILTIN_COMPUTER_EXTENSION_ID, resolveVarinBuiltinPackageRoot(fileURLToPath(new URL("./builtin-packages/computer/", import.meta.url)))],
+  [VARIN_BUILTIN_CONTEXT_FRAGMENTS_EXTENSION_ID, resolveVarinBuiltinPackageRoot(fileURLToPath(new URL("./builtin-packages/context-fragments/", import.meta.url)))],
+  [VARIN_BUILTIN_RETRIEVAL_STRUCTURED_EXTENSION_ID, resolveVarinBuiltinPackageRoot(fileURLToPath(new URL("./builtin-packages/retrieval-structured/", import.meta.url)))],
+  [VARIN_BUILTIN_RETRIEVAL_SEMANTIC_EXTENSION_ID, resolveVarinBuiltinPackageRoot(fileURLToPath(new URL("./builtin-packages/retrieval-semantic/", import.meta.url)))],
+  [VARIN_BUILTIN_RETRIEVAL_KEYWORD_EXTENSION_ID, resolveVarinBuiltinPackageRoot(fileURLToPath(new URL("./builtin-packages/retrieval-keyword/", import.meta.url)))],
   [
     VARIN_BUILTIN_LANGUAGE_SERVERS_EXTENSION_ID,
     resolveVarinBuiltinPackageRoot(

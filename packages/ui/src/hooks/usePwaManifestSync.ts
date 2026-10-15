@@ -1,11 +1,12 @@
 import React from 'react';
-import type { SessionSummary } from '@varin/protocol';
+import type { ThreadSummary } from '@varin/protocol';
 import { isWebRuntime } from '@/lib/desktop';
-import { PWA_RECENT_SESSIONS_STORAGE_KEY } from '@/lib/pwa';
-import { usePiSessionStore } from '@/stores/usePiSessionStore';
+import { PWA_RECENT_THREADS_STORAGE_KEY } from '@/lib/pwa';
+import { useThreadStore } from '@/stores/useThreadStore';
 
 type RecentSessionShortcut = {
-  sessionId: string;
+  threadId: string;
+  branchId: string;
   title: string;
 };
 
@@ -26,15 +27,15 @@ const normalizeRecentTitle = (value: string | undefined, fallback: string): stri
   return normalized.slice(0, 48);
 };
 
-export const buildPiRecentShortcuts = (
-  sessions: SessionSummary[],
+export const buildThreadRecentShortcuts = (
+  sessions: ThreadSummary[],
   currentSessionId: string | null,
 ): RecentSessionShortcut[] => {
-  const activeSessions = sessions.filter((session) => session.archivedAt === undefined);
+  const activeSessions = sessions.filter((session) => !session.archived && !session.bot_id && session.deleted_at_ms === null);
   const ordered = currentSessionId
     ? [
-        ...activeSessions.filter((session) => session.id === currentSessionId),
-        ...activeSessions.filter((session) => session.id !== currentSessionId),
+        ...activeSessions.filter((session) => session.thread_id === currentSessionId),
+        ...activeSessions.filter((session) => session.thread_id !== currentSessionId),
       ]
     : activeSessions;
 
@@ -42,17 +43,18 @@ export const buildPiRecentShortcuts = (
   const seen = new Set<string>();
 
   for (const session of ordered) {
-    const sessionId = typeof session.id === 'string' ? session.id.trim() : '';
+    const sessionId = typeof session.thread_id === 'string' ? session.thread_id.trim() : '';
     if (!sessionId || seen.has(sessionId)) {
       continue;
     }
 
     seen.add(sessionId);
     shortcuts.push({
-      sessionId,
+      threadId: sessionId,
+      branchId: session.main_branch_id,
       title: normalizeRecentTitle(
-        session.name || session.firstMessage,
-        `Session ${shortcuts.length + 1}`,
+        session.title,
+        `Conversation ${shortcuts.length + 1}`,
       ),
     });
 
@@ -65,11 +67,11 @@ export const buildPiRecentShortcuts = (
 };
 
 export const usePwaManifestSync = () => {
-  const sessions = usePiSessionStore((state) => state.summaries);
-  const currentSessionId = usePiSessionStore((state) => state.currentSessionId);
+  const sessions = useThreadStore((state) => state.threads);
+  const currentSessionId = useThreadStore((state) => state.selectedIdentity?.threadId ?? null);
 
   const recentShortcuts = React.useMemo(() => {
-    return buildPiRecentShortcuts(sessions, currentSessionId);
+    return buildThreadRecentShortcuts(sessions, currentSessionId);
   }, [currentSessionId, sessions]);
 
   const signature = React.useMemo(() => JSON.stringify(recentShortcuts), [recentShortcuts]);
@@ -82,9 +84,9 @@ export const usePwaManifestSync = () => {
 
     try {
       if (!hasRecentShortcuts) {
-        localStorage.removeItem(PWA_RECENT_SESSIONS_STORAGE_KEY);
+        localStorage.removeItem(PWA_RECENT_THREADS_STORAGE_KEY);
       } else {
-        localStorage.setItem(PWA_RECENT_SESSIONS_STORAGE_KEY, signature);
+        localStorage.setItem(PWA_RECENT_THREADS_STORAGE_KEY, signature);
       }
     } catch {
       return;

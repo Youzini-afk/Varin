@@ -1,5 +1,7 @@
+import { createHash } from 'node:crypto';
 import {
   ExtensionCatalogRevisionConflictError,
+  ExtensionUpdateReadinessError,
   ExtensionCatalogStorageError,
   ExtensionStorageRevisionConflictError,
   ExtensionStorageError,
@@ -10,9 +12,16 @@ import type {
   ExtensionPackageManager,
 } from '@varin/extension-host';
 import type { Express, Request, RequestHandler, Response } from 'express';
+import { projectContainsPath, type RuntimeContractContext, type ProjectFolders } from '@varin/application-client';
+import type { DocumentAuthority } from '../documents/authority.js';
+import { isDocumentAuthorityError } from '../documents/errors.js';
 import {
   VarinExtensionContractError,
+  parseVarinRuntimeContractRequest,
+  type VarinRuntimeContractScope,
   parseVarinExtensionActualState,
+  parseVarinExtensionRestartHandoffRequest,
+  parseVarinExtensionRestartRecoveryRequest,
   parseVarinExtensionCandidateCapabilityReviewRequest,
   parseVarinExtensionCapabilityReviewRequest,
   parseVarinExtensionHostStateWaitRequest,
@@ -26,9 +35,13 @@ interface ExtensionRouteDependencies {
   extensionCatalog: ApplicationExtensionCatalog;
   extensionPackages: ExtensionPackageManager;
   extensionRuntime?: ApplicationExtensionRuntime | null;
+  restartApplicationHost?: () => Promise<void>;
+  documents?: Pick<DocumentAuthority, 'lookupWorkspacePath'>;
+  readProjects?: () => Promise<Array<ProjectFolders & { id: string }>>;
   uiAuthController: {
     requireAuth: RequestHandler;
     requireSessionAuth: RequestHandler;
+    resolveAuthContext?(req: Request, res: Response, options?: { allowClientAuth?: boolean; allowUrlToken?: boolean }): Promise<unknown>;
   };
 }
 
@@ -57,6 +70,8 @@ const routeParam = (value: string | string[] | undefined): string => (
   typeof value === 'string' ? value : Array.isArray(value) ? value[0] ?? '' : ''
 );
 
+class ExtensionRequestDisconnectedError extends Error {}
+
 const withRequestSignal = async <Result>(
   req: Request,
   res: Response,
@@ -65,13 +80,17 @@ const withRequestSignal = async <Result>(
   const controller = new AbortController();
   const abort = () => {
     if (!res.writableEnded && !controller.signal.aborted) {
-      controller.abort(new Error('Extension request disconnected'));
+      controller.abort(new ExtensionRequestDisconnectedError('Extension request disconnected'));
     }
   };
   req.once('aborted', abort);
   res.once('close', abort);
+  if (req.aborted || res.destroyed || res.writableEnded) controller.abort(new ExtensionRequestDisconnectedError('Extension request disconnected'));
   try {
     return await operation(controller.signal);
+  } catch (error) {
+    controller.signal.throwIfAborted();
+    throw error;
   } finally {
     req.off('aborted', abort);
     res.off('close', abort);
@@ -79,6 +98,9 @@ const withRequestSignal = async <Result>(
 };
 
 const sendMutationError = (res: Response, error: unknown) => {
+  if (error instanceof ExtensionUpdateReadinessError) {
+    return res.status(409).json({ error: { code: error.code, message: error.message, retryable: true } });
+  }
   if (error instanceof ExtensionCatalogRevisionConflictError || error instanceof ExtensionStorageRevisionConflictError) {
     return res.status(409).json({
       error: {
@@ -136,8 +158,82 @@ export const registerExtensionRoutes = (app: Express, {
   extensionCatalog,
   extensionPackages,
   extensionRuntime,
+  restartApplicationHost,
+  documents,
+  readProjects,
   uiAuthController,
 }: ExtensionRouteDependencies): void => {
+  const servicePrincipal = async (req: Request, res: Response): Promise<string | undefined> => {
+    const value = req.varinAuth ?? await uiAuthController.resolveAuthContext?.(req, res, { allowClientAuth: true });
+    const auth = asRecord(value);
+    const identity = auth?.type === 'client' && typeof auth.clientId === 'string' ? auth.clientId
+      : auth?.type === 'session' && typeof auth.token === 'string' ? auth.token : undefined;
+    return identity ? `${auth!.type}:${createHash('sha256').update(identity).digest('hex')}` : undefined;
+  };
+  app.post(
+    '/api/varin/extensions/v1/contracts/query',
+    uiAuthController.requireAuth,
+    async (req, res) => {
+      res.setHeader('Cache-Control', 'no-store');
+      if (!extensionRuntime) return res.status(501).json({ error: { code: 'host_runtime_unavailable', retryable: true } });
+      let request;
+      let context: RuntimeContractContext;
+      try {
+        const body = asRecord(req.body);
+        if (!body || Object.keys(body).some((key) => key !== 'request' && key !== 'context')) {
+          throw new Error('Contract query requires a request and optional presentation context');
+        }
+        request = parseVarinRuntimeContractRequest(body.request);
+        const raw = body.context === undefined ? {} : asRecord(body.context);
+        if (!raw || Object.keys(raw).some((key) => key !== 'directory' && key !== 'surface')) {
+          throw new Error('Contract context accepts only directory and surface');
+        }
+        if (raw.directory !== undefined && (typeof raw.directory !== 'string' || !raw.directory.trim())) {
+          throw new Error('Contract directory must be nonempty');
+        }
+        if (raw.surface !== undefined && raw.surface !== 'web' && raw.surface !== 'desktop' && raw.surface !== 'mobile') {
+          throw new Error('Contract surface is invalid');
+        }
+        context = raw as RuntimeContractContext;
+      } catch (error) {
+        return res.status(400).json({ error: { code: 'invalid_request', message: error instanceof Error ? error.message : 'Invalid contract query', retryable: false } });
+      }
+      try {
+        const query = async (signal?: AbortSignal) => {
+          signal?.throwIfAborted();
+          // This is the authenticated User's current-catalog view, not a Run view.
+          // Existing workbench and service-routing settings both use the default User.
+          const scope: VarinRuntimeContractScope = {
+            routing: { userId: 'default' },
+            workbench: { surface: context.surface ?? 'web', userId: 'default' },
+          };
+          if (context.directory !== undefined) {
+            if (!documents) return res.status(501).json({ error: { code: 'workspace_authority_unavailable', retryable: true } });
+            const workspace = await documents.lookupWorkspacePath(context.directory);
+            signal?.throwIfAborted();
+            const project = (await readProjects?.())?.find((entry) => projectContainsPath(entry, workspace.canonicalPath));
+            signal?.throwIfAborted();
+            // Service routing retains its existing canonical-directory namespace;
+            // workbench layout uses only an existing Documents ID. A query never creates one.
+            // Neither namespace grants source access.
+            scope.routing = { userId: 'default', workspaceId: workspace.canonicalPath, ...(project ? { projectId: project.id } : {}) };
+            if (workspace.workspaceId) scope.workbench = { ...scope.workbench!, workspaceId: workspace.workspaceId };
+          }
+          const result = await extensionRuntime.queryContracts(request, scope, signal);
+          signal?.throwIfAborted();
+          return res.json(result);
+        };
+        return request.kind === 'source' ? await withRequestSignal(req, res, query) : await query();
+      } catch (error) {
+        if (error instanceof ExtensionRequestDisconnectedError) return;
+        if (isDocumentAuthorityError(error)) {
+          return res.status(error.statusCode).json({ error: { code: error.code, message: error.message, retryable: false } });
+        }
+        return res.status(500).json({ error: { code: 'contract_query_failed', message: 'Failed to read runtime contracts', retryable: true } });
+      }
+    },
+  );
+
   app.get('/extensions/recovery', uiAuthController.requireSessionAuth, (_req, res) => {
     res.setHeader('Cache-Control', 'no-store');
     res.type('html').send(renderExtensionRecoveryPage());
@@ -233,7 +329,7 @@ export const registerExtensionRoutes = (app: Express, {
         const extensionId = typeof req.body?.extensionId === 'string' ? req.body.extensionId : '';
         const integrity = typeof req.body?.candidateIntegrity === 'string' ? req.body.candidateIntegrity : '';
         if (!extensionId || !integrity) throw new Error('extensionId and candidateIntegrity are required');
-        return res.json(await extensionRuntime.prepareCandidate(extensionId, integrity));
+        return res.json(await withRequestSignal(req, res, signal => extensionRuntime.prepareCandidate(extensionId, integrity, signal)));
       } catch (error) {
         return sendMutationError(res, error);
       }
@@ -300,6 +396,36 @@ export const registerExtensionRoutes = (app: Express, {
     },
   );
 
+  const restartDispatches = new Set<string>();
+  for (const recovery of [false, true]) {
+    app.post(`/api/varin/extensions/v1/candidates/${recovery ? 'recover-restart-handoff' : 'restart-handoff'}`,
+      uiAuthController.requireAuth, async (req, res) => {
+        if (!extensionRuntime || !restartApplicationHost) return res.status(501).json({ error: {
+          code: 'host_restart_unavailable', message: 'This Application Host launch owner does not provide restart', retryable: false,
+        } });
+        try {
+          const request = recovery ? parseVarinExtensionRestartRecoveryRequest(req.body) : parseVarinExtensionRestartHandoffRequest(req.body);
+          const snapshot = recovery ? await extensionRuntime.recoverRestartHandoff(request) : await extensionRuntime.requestRestartHandoff(request);
+          const handoff = snapshot.extensions.find(value => value.manifest.id === request.extensionId)?.restartHandoffs?.find(value => value.id === request.handoffId);
+          // Retrying a lost response reads the original result. Never restart an applied or failed attempt.
+          if (handoff && handoff.status === (recovery ? 'restore-pending-restart' : 'pending-restart')) {
+            const dispatch = () => {
+              const dispatchKey = `${request.extensionId}\0${request.handoffId}\0${handoff.status}`;
+              if (restartDispatches.has(dispatchKey)) return;
+              restartDispatches.add(dispatchKey);
+              void restartApplicationHost().catch(error => extensionRuntime.reportRestartFailure(request.extensionId, request.handoffId, error))
+                .catch(error => console.error('[VarinExtensions] Restart failure could not be recorded:', error instanceof Error ? error.message : 'Unknown failure'));
+            };
+            res.once('finish', dispatch); res.once('close', dispatch);
+            // Durable acceptance belongs to the Host even if the observer disconnected
+            // while Catalog committed. Both terminal events share the same exact intent.
+            if (res.destroyed || res.writableFinished) dispatch();
+          }
+          return res.json({ snapshot });
+        } catch (error) { return sendMutationError(res, error); }
+      });
+  }
+
   app.post(
     '/api/varin/extensions/v1/candidates/request-application',
     uiAuthController.requireAuth,
@@ -318,9 +444,16 @@ export const registerExtensionRoutes = (app: Express, {
     uiAuthController.requireAuth,
     async (req, res) => {
       try {
-        return res.json({ snapshot: await (extensionRuntime
-          ? extensionRuntime.selectCandidate(req.body)
-          : extensionPackages.selectCandidate(req.body)) });
+        if (!extensionRuntime) {
+          // A catalog-only recovery route cannot attest a prepared Host/Surface group.
+          const snapshot = await extensionCatalog.snapshot();
+          const entry = snapshot.extensions.find(value => value.manifest.id === req.body?.extensionId);
+          if (entry?.desired.enabled && entry.candidate?.manifest.updateReadiness) {
+            throw new ExtensionUpdateReadinessError('required_surface_readiness', 'A running application Host and compatible Surface must prepare this update group');
+          }
+          return res.json({ snapshot: await extensionPackages.selectCandidate(req.body) });
+        }
+        return res.json({ snapshot: await withRequestSignal(req, res, signal => extensionRuntime.selectCandidate(req.body, signal)) });
       } catch (error) {
         return sendMutationError(res, error);
       }
@@ -398,7 +531,8 @@ export const registerExtensionRoutes = (app: Express, {
       const abort = () => { if (!res.writableEnded) controller.abort(new Error('Host service client disconnected')); };
       res.once('close', abort);
       try {
-        return res.json({ result: await extensionRuntime.invokeService(req.body, controller.signal) });
+        const principal = asRecord(req.body)?.lease ? await servicePrincipal(req, res) : undefined;
+        return res.json({ result: await extensionRuntime.invokeService(req.body, controller.signal, principal) });
       } catch (error) {
         return res.status(400).json({
           error: {
@@ -414,15 +548,28 @@ export const registerExtensionRoutes = (app: Express, {
   );
 
   app.post(
-    '/api/varin/extensions/v1/services/select',
+    '/api/varin/extensions/v1/services/lease',
     uiAuthController.requireAuth,
     async (req, res) => {
       if (!extensionRuntime) return res.status(501).json({ error: { code: 'host_runtime_unavailable', retryable: true } });
-      try {
-        return res.json(await extensionRuntime.setServiceSelection(req.body));
-      } catch (error) {
-        return res.status(400).json({ error: { code: 'service_selection_failed', message: error instanceof Error ? error.message : String(error), retryable: false } });
-      }
+      const principal = await servicePrincipal(req, res);
+      if (!principal) return res.status(401).json({ error: { code: 'surface_owner_unavailable', retryable: false } });
+      const controller = new AbortController();
+      const abort = () => controller.abort(new ExtensionRequestDisconnectedError('Surface service lease disconnected'));
+      req.once('aborted', abort); res.once('close', abort);
+      if (req.aborted || res.destroyed || res.writableEnded) abort();
+      const emit = (event: import('@varin/extension-contract').VarinSurfaceServiceLeaseEvent) => {
+        if (controller.signal.aborted || res.destroyed || res.writableEnded) throw new ExtensionRequestDisconnectedError('Surface service lease disconnected');
+        if (!res.headersSent) {
+          res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
+          res.setHeader('Cache-Control', 'no-cache, no-transform');
+          res.setHeader('Connection', 'keep-alive'); res.setHeader('X-Accel-Buffering', 'no'); res.flushHeaders?.();
+        }
+        res.write(`data: ${JSON.stringify(event)}\n\n`);
+      };
+      try { await extensionRuntime.watchServiceLease(req.body, principal, emit, controller.signal); }
+      catch (error) { if (!controller.signal.aborted && !res.destroyed && !res.writableEnded) emit({ kind: 'error', message: error instanceof Error ? error.message : String(error) }); }
+      finally { req.off('aborted', abort); res.off('close', abort); if (!res.destroyed && !res.writableEnded) res.end(); }
     },
   );
 

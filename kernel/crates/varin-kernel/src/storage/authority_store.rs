@@ -1,5 +1,6 @@
 //! Persisted grants and resource-derived authorization.
 use super::*;
+use crate::model::GrantState;
 
 impl Storage {
     pub(super) fn load_grant(&self, grant_id: &str) -> Result<Grant, KernelError> {
@@ -16,8 +17,23 @@ impl Storage {
                 }
                 other => other.into(),
             })?;
-        serde_json::from_str(&json)
-            .map_err(|error| KernelError::Storage(format!("grant is corrupt: {error}")))
+        let grant: Grant = serde_json::from_str(&json)
+            .map_err(|error| KernelError::Storage(format!("grant is corrupt: {error}")))?;
+        Self::require_native_grant(&grant)?;
+        Ok(grant)
+    }
+
+    fn require_native_grant(grant: &Grant) -> Result<(), KernelError> {
+        if grant.authority_instance_id.is_some()
+            || grant.worker_id.is_some()
+            || grant.worker_generation.is_some()
+            || grant.session_id.is_some()
+        {
+            return Err(KernelError::Authorization(
+                "legacy session or worker grant cannot authorize native resources; stored assets were not changed".into(),
+            ));
+        }
+        Ok(())
     }
 
     pub(crate) fn issue_grant(
@@ -97,30 +113,38 @@ impl Storage {
             .collect::<Result<Vec<_>, KernelError>>()?;
         let owning_workspace = parse_optional("owningWorkspace")?;
         let execution_workspace = parse_optional("executionWorkspace")?;
-        let worker_generation = match params.get("workerGeneration") {
-            None | Some(Value::Null) => None,
-            Some(value) => Some(value.as_u64().ok_or_else(|| {
-                KernelError::Authorization("grant workerGeneration is malformed".to_string())
-            })?),
-        };
+        for key in ["authorityInstanceId", "workerId", "workerGeneration", "sessionId"] {
+            if params.get(key).is_some_and(|value| !value.is_null()) {
+                return Err(KernelError::Authorization(format!(
+                    "grant {key} is a retired authority field"
+                )));
+            }
+        }
         let grant = Grant {
             grant_id: grant_id.to_string(),
             host_id: host_id.to_string(),
             host_generation: supplied_host_generation.to_string(),
-            authority_instance_id: parse_optional("authorityInstanceId")?,
-            worker_id: parse_optional("workerId")?,
-            worker_generation,
-            session_id: parse_optional("sessionId")?,
+            authority_instance_id: None,
+            worker_id: None,
+            worker_generation: None,
+            session_id: None,
             thread_id: parse_optional("threadId")?,
             run_id: parse_optional("runId")?,
+            operation_id: parse_optional("operationId")?,
             owning_workspace,
             execution_workspace,
             storage_identity: storage_identity.to_string(),
             capabilities,
             path_scopes,
             kernel_epoch: epoch.to_string(),
-            revoked: false,
+            state: GrantState::Active,
+            handoff_operation_id: None,
         };
+        if grant.operation_id.is_some() && (grant.thread_id.is_none() || grant.run_id.is_none()) {
+            return Err(KernelError::Authorization(
+                "operation-owned grant requires its actual Thread and source Run".into(),
+            ));
+        }
         let params_hash = hash_json(params)?;
         if let Some((stored_hash, stored_json)) = self
             .conn
@@ -137,17 +161,22 @@ impl Storage {
                 ));
             }
             let mut stored_grant: Grant = serde_json::from_str(&stored_json)?;
-            if stored_grant.kernel_epoch != epoch || stored_grant.revoked {
+            Self::require_native_grant(&stored_grant)?;
+            if stored_grant.state != GrantState::Active {
+                return Err(KernelError::Authorization(
+                    "grant is retired or revoked; issue a new grant identity".into(),
+                ));
+            }
+            if stored_grant.kernel_epoch != epoch {
                 stored_grant.kernel_epoch = epoch.to_string();
-                stored_grant.revoked = false;
                 self.conn.execute(
-                    "UPDATE grants SET revoked = 0, updated_at = ?2, grant_json = ?3 WHERE grant_id = ?1",
+                    "UPDATE grants SET state = 'active', updated_at = ?2, grant_json = ?3 WHERE grant_id = ?1",
                     params![grant_id, now_ms(), serde_json::to_string(&stored_grant)?],
                 )?;
             }
             return Ok(serde_json::to_value(stored_grant)?);
         }
-        self.conn.execute("INSERT INTO grants(grant_id, host_id, grant_json, params_hash, revoked, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, 0, ?5, ?5)", params![grant_id, host_id, serde_json::to_string(&grant)?, params_hash, now_ms()])?;
+        self.conn.execute("INSERT INTO grants(grant_id, host_id, grant_json, params_hash, state, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, 'active', ?5, ?5)", params![grant_id, host_id, serde_json::to_string(&grant)?, params_hash, now_ms()])?;
         Ok(serde_json::to_value(grant)?)
     }
 
@@ -168,11 +197,11 @@ impl Storage {
         }
         self.computations.revoke(grant_id);
         let mut revoked = grant;
-        revoked.revoked = true;
+        revoked.state = GrantState::Revoked;
         self.conn.execute_batch("BEGIN IMMEDIATE")?;
         let outcome = (|| {
             self.conn.execute(
-                "UPDATE grants SET revoked = 1, updated_at = ?2, grant_json = ?3 WHERE grant_id = ?1",
+                "UPDATE grants SET state = 'revoked', updated_at = ?2, grant_json = ?3 WHERE grant_id = ?1",
                 params![grant_id, now_ms(), serde_json::to_string(&revoked)?],
             )?;
             self.abort_streams_for_grant(grant_id)?;
@@ -185,11 +214,26 @@ impl Storage {
         match outcome {
             Ok(()) => {
                 self.conn.execute_batch("COMMIT")?;
-                self.file_leases
-                    .retain(|_, lease| lease.grant_id != grant_id);
+                self.processes.revoke_subscriptions(grant_id);
+                self.file_leases.retain(|id, lease| {
+                    if lease.grant_id != grant_id {
+                        return true;
+                    }
+                    if let Some(retained) = self.retained_file_leases.get_mut(id) {
+                        retained.release_requested = true;
+                        return true;
+                    }
+                    false
+                });
+                self.notify_file_lease_waiters();
                 let process_stop = self.revoke_processes_for_grant(grant_id).unwrap_or_else(|error| {
                     json!({"pendingProcesses": [], "processStopFailures": [{"reason": error.to_string()}]})
                 });
+                // Revocation is already committed. A notification failure cannot undo it
+                // or turn a successful authority transition into an RPC failure.
+                if let Err(error) = self.cancel_file_observation_grant(grant_id) {
+                    eprintln!("file observation revocation hint failed: {error}");
+                }
                 Ok(json!({"grantId": grant_id, "revoked": true,
                     "pendingProcesses": process_stop["pendingProcesses"],
                     "processStopFailures": process_stop["processStopFailures"]}))
@@ -199,6 +243,132 @@ impl Storage {
                 Err(error)
             }
         }
+    }
+
+    /// Retiring closes the original caller lifetime without discarding creation provenance.
+    /// A missing/unknown process status is not a stop receipt and cannot authorize retirement.
+    pub(crate) fn retire_grants(
+        &mut self,
+        params: &Value,
+        host_id: &str,
+    ) -> Result<Value, KernelError> {
+        use crate::model::GrantRetireTarget;
+        let target: GrantRetireTarget = serde_json::from_value(
+            params
+                .get("target")
+                .cloned()
+                .ok_or_else(|| KernelError::Protocol("retire target is required".into()))?,
+        )?;
+        let ids = match target {
+            GrantRetireTarget::Operation { operation_id } => {
+                if operation_id.is_empty() {
+                    return Err(KernelError::Protocol("operationId is required".into()));
+                }
+                let mut q=self.conn.prepare("SELECT grant_id FROM grants WHERE state='active' AND host_id=?1 AND json_extract(grant_json,'$.operation_id')=?2 ORDER BY grant_id")?;
+                let rows =
+                    q.query_map(params![host_id, operation_id], |r| r.get::<_, String>(0))?;
+                rows.collect::<Result<Vec<_>, _>>()?
+            }
+            GrantRetireTarget::Grant { grant_id } => {
+                if grant_id.is_empty() {
+                    return Err(KernelError::Protocol("grantId is required".into()));
+                }
+                vec![grant_id]
+            }
+            GrantRetireTarget::Run { run_id } => {
+                if run_id.is_empty() {
+                    return Err(KernelError::Protocol("runId is required".into()));
+                }
+                let mut q=self.conn.prepare("SELECT grant_id FROM grants WHERE host_id=?1 AND json_extract(grant_json,'$.run_id')=?2 AND json_extract(grant_json,'$.operation_id') IS NULL ORDER BY grant_id")?;
+                let rows = q.query_map(params![host_id, run_id], |r| r.get::<_, String>(0))?;
+                rows.collect::<Result<Vec<_>, _>>()?
+            }
+        };
+        // Validate all targets before closing any caller. Each transition is durable below.
+        for id in &ids {
+            self.require_retirable_grant(id, host_id)?;
+        }
+        for id in &ids {
+            self.retire_grant_id(id, host_id)?;
+        }
+        Ok(json!({"grantIds":ids}))
+    }
+    fn require_retirable_grant(&mut self, id: &str, host_id: &str) -> Result<(), KernelError> {
+        let grant = self.load_grant(id)?;
+        if grant.host_id != host_id {
+            return Err(KernelError::Authorization(
+                "grant belongs to another Host".into(),
+            ));
+        }
+        if grant.state == GrantState::Revoked {
+            return Ok(());
+        }
+        let ids = {
+            let mut q = self
+                .conn
+                .prepare("SELECT process_id FROM process_records WHERE grant_id=?1")?;
+            let rows = q.query_map([id], |r| r.get::<_, String>(0))?;
+            rows.collect::<Result<Vec<_>, _>>()?
+        };
+        for process_id in ids {
+            let record = self.refresh_process_record(&process_id)?.ok_or_else(|| {
+                KernelError::Storage("process receipt disappeared during grant retirement".into())
+            })?;
+            if record["writerActive"] != false
+                || !matches!(
+                    record["status"].as_str(),
+                    Some("exited" | "failed" | "released")
+                )
+            {
+                return Err(KernelError::Operation(
+                    "source grant still has an unstopped or unknown process".into(),
+                ));
+            }
+        }
+        Ok(())
+    }
+    fn retire_grant_id(&mut self, id: &str, host_id: &str) -> Result<Value, KernelError> {
+        let mut grant = self.load_grant(id)?;
+        if grant.host_id != host_id {
+            return Err(KernelError::Authorization(
+                "grant belongs to another Host".into(),
+            ));
+        }
+        if grant.state == GrantState::Revoked {
+            return Ok(json!({"grantId":id,"state":"revoked"}));
+        }
+        grant.state = GrantState::Retired;
+        self.conn.execute_batch("BEGIN IMMEDIATE")?;
+        let result = (|| {
+            self.conn.execute(
+                "UPDATE grants SET state='retired',updated_at=?2,grant_json=?3 WHERE grant_id=?1",
+                params![id, now_ms(), serde_json::to_string(&grant)?],
+            )?;
+            self.abort_streams_for_grant(id)?;
+            self.conn
+                .execute("DELETE FROM pins WHERE grant_id=?1 AND ephemeral=1", [id])?;
+            Ok::<_, KernelError>(())
+        })();
+        if let Err(error) = result {
+            let _ = self.conn.execute_batch("ROLLBACK");
+            return Err(error);
+        }
+        self.conn.execute_batch("COMMIT")?;
+        self.computations.revoke(id);
+        self.processes.revoke_subscriptions(id);
+        self.file_leases.retain(|key, lease| {
+            if lease.grant_id != id {
+                return true;
+            }
+            if let Some(retained) = self.retained_file_leases.get_mut(key) {
+                retained.release_requested = true;
+                true
+            } else {
+                false
+            }
+        });
+        self.notify_file_lease_waiters();
+        Ok(json!({"grantId":id,"state":"retired"}))
     }
 
     pub(super) fn blob_reachable(
@@ -263,8 +433,10 @@ impl Storage {
         let grant_id = grant_id
             .ok_or_else(|| KernelError::Authorization("grantId is required".to_string()))?;
         let grant = self.load_grant(grant_id)?;
-        if grant.revoked {
-            return Err(KernelError::Authorization("grant is revoked".to_string()));
+        if grant.state != GrantState::Active {
+            return Err(KernelError::Authorization(
+                "grant is retired or revoked".to_string(),
+            ));
         }
         if grant.host_id != host_id
             || grant.host_generation != host_generation
@@ -276,6 +448,7 @@ impl Storage {
             ));
         }
         require_capability(&grant, method)?;
+        self.authorize_child_handoff(&grant, method, params)?;
         let mut authorized = params.clone();
         let workspace = if let Some(workspace) = params.get("workspaceId").and_then(Value::as_str) {
             Some(workspace.to_string())
@@ -411,9 +584,29 @@ impl Storage {
             None
         };
         if method == "operation.get" && workspace.is_none() {
-            return Err(KernelError::Authorization(
-                "operation is not owned by this storage authority".to_string(),
-            ));
+            let operation_id = params
+                .get("operationId")
+                .and_then(Value::as_str)
+                .ok_or_else(|| {
+                    KernelError::Authorization("operation identity is required".to_string())
+                })?;
+            let exists: bool = self.conn.query_row(
+                "SELECT EXISTS(SELECT 1 FROM operations WHERE operation_id = ?1)",
+                params![operation_id],
+                |row| row.get(0),
+            )?;
+            if exists {
+                // An entity without ownership is not proof of absence. In particular,
+                // orphaned/uncertain operations must never permit a fresh mutation.
+                return Err(KernelError::Authorization(
+                    "operation is not owned by this storage authority".to_string(),
+                ));
+            }
+            // A genuinely missing operation may be read as null. authorize and dispatch
+            // run synchronously on the same sole Storage worker while its lifetime
+            // exclusive kernel.lock excludes other owners; no creation can interleave
+            // this check and operation_get. Foreign owned operations were resolved above
+            // and still undergo the workspace check below.
         }
         let workspace = workspace;
         if let Some(owning) = &grant.owning_workspace {
@@ -463,7 +656,9 @@ impl Storage {
         ] {
             // Compute traversal intersects requested roots with the grant before
             // candidate selection; a broad root is not itself a file read.
-            if method == "compute.start" && field == "paths" { continue; }
+            if method == "compute.start" && field == "paths" {
+                continue;
+            }
             if let Some(values) = params.get(field).and_then(Value::as_array) {
                 for value in values {
                     let path = value
@@ -475,8 +670,17 @@ impl Storage {
                                 "grant path subject is malformed".to_string(),
                             )
                         })?;
-                    let canonical = Self::validate_path(path)?.join("/");
-                    if !path_allowed(&grant, &canonical) {
+                    let metadata = field == "paths" && matches!(method, "branch.read" | "pin.read");
+                    let canonical = if metadata && path.is_empty() {
+                        String::new()
+                    } else {
+                        Self::validate_path(path)?.join("/")
+                    };
+                    if !(if metadata {
+                        path_metadata_allowed_scopes(&grant.path_scopes, &canonical)
+                    } else {
+                        path_allowed(&grant, &canonical)
+                    }) {
                         return Err(KernelError::Authorization(format!(
                             "path is outside grant scope: {canonical}"
                         )));
@@ -520,5 +724,52 @@ impl Storage {
             }
         }
         Ok((grant, authorized))
+    }
+}
+
+#[cfg(test)]
+mod operation_lifetime_tests {
+    use super::*;
+    #[test]
+    fn source_run_retirement_preserves_only_explicit_operation_owned_grants() {
+        let root = std::env::temp_dir().join(format!("operation-grant-{}", Uuid::new_v4()));
+        let mut storage = Storage::open(&root, "host").unwrap();
+        for (id, operation) in [
+            ("run-grant", None),
+            ("domain-grant", Some("original-operation")),
+            ("other-grant", Some("other-operation")),
+        ] {
+            storage.issue_grant(&json!({"grantId":id,"hostGeneration":"generation","threadId":"child-thread","runId":"source-run","operationId":operation,"owningWorkspace":"workspace","executionWorkspace":"execution","capabilities":["storage.read"],"pathScopes":[""]}),"host","generation",&storage.root.to_string_lossy().into_owned(),"epoch").unwrap();
+        }
+        let retired = storage
+            .retire_grants(
+                &json!({"target":{"kind":"run","runId":"source-run"}}),
+                "host",
+            )
+            .unwrap();
+        assert_eq!(retired["grantIds"], json!(["run-grant"]));
+        let owned = storage.load_grant("domain-grant").unwrap();
+        assert_eq!(owned.state, GrantState::Active);
+        assert_eq!(owned.run_id.as_deref(), Some("source-run"));
+        assert_eq!(owned.operation_id.as_deref(), Some("original-operation"));
+        drop(storage);
+        let mut storage = Storage::open(&root, "host").unwrap();
+        let retired = storage
+            .retire_grants(
+                &json!({"target":{"kind":"operation","operationId":"original-operation"}}),
+                "host",
+            )
+            .unwrap();
+        assert_eq!(retired["grantIds"], json!(["domain-grant"]));
+        assert_eq!(
+            storage.load_grant("other-grant").unwrap().state,
+            GrantState::Active
+        );
+        assert_eq!(
+            storage.load_grant("domain-grant").unwrap().state,
+            GrantState::Retired
+        );
+        drop(storage);
+        std::fs::remove_dir_all(root).unwrap();
     }
 }

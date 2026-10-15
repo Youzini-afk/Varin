@@ -1,7 +1,9 @@
+import { createProcessRestart } from './process-restart.js';
 import type {
   ParsedServeCliArgs,
   ParseServeCliOptionsInput,
   StartWebUiServerOptions,
+  WebUiServerController,
 } from '../../public-contract.js';
 
 export interface CliEntryDependencies {
@@ -41,7 +43,13 @@ export const runCliEntryIfMain = (dependencies: CliEntryDependencies): void => {
   });
 
   setExitOnShutdown(true);
+  let controller: WebUiServerController | undefined;
+  const restartApplicationHost = createProcessRestart({ stop: async () => {
+    if (!controller) throw new Error('Application Host is still starting');
+    await controller.stop({ exitProcess: false });
+  }, exit: code => process.exit(code) });
   startServer({
+    restartApplicationHost,
     port: cliOptions.port,
     host: cliOptions.host,
     tryCfTunnel: cliOptions.tryCfTunnel,
@@ -54,7 +62,7 @@ export const runCliEntryIfMain = (dependencies: CliEntryDependencies): void => {
     exitOnShutdown: true,
     uiPassword: cliOptions.uiPassword,
     apiOnly: cliOptions.apiOnly,
-  }).catch((error: unknown) => {
+  }).then(value => { controller = value as WebUiServerController; }).catch((error: unknown) => {
     console.error('Failed to start server:', error);
     process.exit(1);
   });

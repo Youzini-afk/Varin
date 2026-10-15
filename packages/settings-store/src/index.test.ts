@@ -102,4 +102,16 @@ describe('settings file store', () => {
     assert.equal((await fsPromises.stat(path.dirname(filePath))).mode & 0o777, 0o700);
     assert.equal((await fsPromises.stat(filePath)).mode & 0o777, 0o600);
   });
+
+  it('preserves existing directory and file permissions', { skip: process.platform === 'win32' }, async () => {
+    const { filePath, store } = await createStore();
+    await fsPromises.chmod(path.dirname(filePath), 0o750);
+    await fsPromises.writeFile(filePath, '{}', { mode: 0o660 });
+    await fsPromises.chmod(filePath, 0o660);
+
+    await store.replace({ saved: true });
+
+    assert.equal((await fsPromises.stat(path.dirname(filePath))).mode & 0o777, 0o750);
+    assert.equal((await fsPromises.stat(filePath)).mode & 0o777, 0o660);
+  });
 });

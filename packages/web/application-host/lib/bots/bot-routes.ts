@@ -59,18 +59,10 @@ export function registerBotRoutes(app: Express, { bots, computers, memory, requi
     }
   });
 
-  app.get("/api/harness/bots/session-ids", requireAuth, async (_request: Request, response: Response) => {
-    response.setHeader("Cache-Control", "no-store");
-    try {
-      response.json({ sessionIds: await bots.listSessionIds() });
-    } catch (error) {
-      sendError(response, error, "Unable to list Bot conversations");
-    }
-  });
-
   app.post("/api/harness/bots", requireAuth, async (request: Request, response: Response) => {
     response.setHeader("Cache-Control", "no-store");
     try {
+      if (request.body?.runtime !== undefined) throw new HarnessServiceError("invalid-params", "Bot runtime selection is unsupported");
       const name = request.body?.name;
       if (name !== undefined && typeof name !== "string") {
         throw new HarnessServiceError("invalid-params", "name must be a string");
@@ -105,6 +97,7 @@ export function registerBotRoutes(app: Express, { bots, computers, memory, requi
     response.setHeader("Cache-Control", "no-store");
     try {
       const body = request.body ?? {};
+      if (body.runtime !== undefined || body.entry !== undefined) throw new HarnessServiceError("invalid-params", "A Bot runtime and entry cannot be changed");
       if (body.name !== undefined && typeof body.name !== "string") throw new HarnessServiceError("invalid-params", "name must be a string");
       if (body.instructions !== undefined && body.instructions !== null && typeof body.instructions !== "string") throw new HarnessServiceError("invalid-params", "instructions must be a string or null");
       if (body.pinned !== undefined && typeof body.pinned !== "boolean") throw new HarnessServiceError("invalid-params", "pinned must be a boolean");
@@ -228,22 +221,13 @@ export function registerBotRoutes(app: Express, { bots, computers, memory, requi
         computers.workDesktops(scopeId), computers.listArtifacts(scopeId),
       ]) : [[], []];
       response.json({ threads: work.map((item) => ({ ...item,
-        desktops: desktops.filter((desktop) => desktop.work?.some((association) => association.threadId === item.thread.id)),
-        artifacts: artifacts.filter((artifact) => artifact.threadId === item.thread.id) }))
-        .filter((item) => item.thread.purpose !== 'bot-root' || item.desktops.length > 0 || item.artifacts.length > 0) });
+        desktops: desktops.filter((desktop) => desktop.work?.some((association) =>
+          association.work.runtime === 'agent' && association.work.threadId === item.identity.threadId)),
+        artifacts: artifacts.filter((artifact) => artifact.threadId === item.identity.threadId) }))
+        .filter((item) => item.purpose !== 'bot-root' || item.desktops.length > 0 || item.artifacts.length > 0) });
     } catch (error) {
       sendError(response, error, "Unable to list bot work");
     }
   });
 
-  /** Which Bot (if any) owns this session as its entry conversation. */
-  app.get("/api/harness/sessions/:sessionId/bot", requireAuth, async (request: Request, response: Response) => {
-    response.setHeader("Cache-Control", "no-store");
-    try {
-      const bot = await bots.botForSession(String(request.params.sessionId ?? ""));
-      response.json({ bot });
-    } catch (error) {
-      sendError(response, error, "Unable to resolve session bot");
-    }
-  });
 }

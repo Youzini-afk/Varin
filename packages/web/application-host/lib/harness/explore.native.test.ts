@@ -15,7 +15,7 @@ import {
   formatExploreOutput,
   type ExploreDeps,
 } from "./explore.js";
-import type { ExploreFileSnapshot } from "./explore-file-reader.js";
+import type { ExploreFileSnapshot } from "./file-snapshot.js";
 import { createStructureSource } from "../structure/source.js";
 import { createTreeSitterStructureProvider } from "../structure/native-provider.test-helper.js";
 import type { StructureOutlineResult, StructureProvider, StructureSource } from "../structure/types.js";

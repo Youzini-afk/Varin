@@ -15,21 +15,19 @@ vi.mock('../git/service.js', () => ({
   getUntrackedDiffs: vi.fn(async () => []),
   listUntrackedPaths: vi.fn(async () => []),
 }));
-vi.mock('../small-model/index.js', () => ({
-  describeSmallModel: vi.fn(),
-  generateSmallModelText: vi.fn(),
-}));
+
 const {
-  generateWalkthrough,
+  generateWalkthrough: nativeGenerateWalkthrough,
   cancelWalkthroughGeneration,
   isGenerating,
   getGenerationStage,
   __testing: walkthroughTesting,
 } = await import('./index.js');
-const smallModelModule = await import('../small-model/index.js');
+const describeModel = vi.fn<import('../model-text/service.js').ModelTextService['describe']>();
+const generateText = vi.fn<import('../model-text/service.js').ModelTextService['generate']>();
+const modelText = {describe:describeModel,generate:generateText};
+const generateWalkthrough = (input: Parameters<typeof nativeGenerateWalkthrough>[0]) => nativeGenerateWalkthrough(input, {modelText});
 const gitService = await import('../git/service.js');
-const describeSmallModel = vi.mocked(smallModelModule.describeSmallModel);
-const generateSmallModelText = vi.mocked(smallModelModule.generateSmallModelText);
 const getDiff = vi.mocked(gitService.getDiff);
 
 // bun's vitest shim has no `vi.waitFor`.
@@ -68,7 +66,7 @@ const RESPONSE = JSON.stringify({
 const MODEL_DESCRIPTION = {
   providerID: 'anthropic',
   modelID: 'claude-haiku-4-5',
-  source: 'config',
+  source: 'default' as const,
   hasLogin: true,
   inputCharBudget: 1_000_000,
   contextTokens: 250_000,
@@ -79,21 +77,22 @@ const MODEL_DESCRIPTION = {
 };
 
 const modelResponse = () => ({
+  requestId: 'model-text:test',
   text: RESPONSE,
-  providerID: 'anthropic',
-  modelID: 'claude-haiku-4-5',
-  source: 'config',
+  providerId: 'anthropic',
+  modelId: 'claude-haiku-4-5',
+  source: 'default' as const,
 });
 
 describe('generation jobs', () => {
   beforeEach(() => {
     fs.rmSync(path.join(TEMP_DATA_DIR, 'walkthroughs'), { recursive: true, force: true });
-    describeSmallModel.mockResolvedValue(MODEL_DESCRIPTION);
+    describeModel.mockResolvedValue(MODEL_DESCRIPTION);
     getDiff.mockImplementation(async (directory: unknown = undefined, options: { contextLines?: number | undefined; staged?: boolean | undefined } = {}) => {
       void directory;
       return options.staged ? '' : PATCH;
     });
-    generateSmallModelText.mockReset();
+    generateText.mockReset();
   });
 
   afterEach(async () => {
@@ -108,27 +107,27 @@ describe('generation jobs', () => {
 
   it('runs a second request against the same job instead of paying twice', async () => {
     let release: (() => void) | undefined;
-    generateSmallModelText.mockImplementation(() => new Promise((resolve) => {
+    generateText.mockImplementation(() => new Promise((resolve) => {
       release = () => resolve(modelResponse());
     }));
 
     const first = generateWalkthrough({ directory: '/repo', source: SOURCE });
     // Let the first call reach the model before the second arrives, which is
     // what a refresh-then-press-again actually looks like.
-    await waitFor(() => generateSmallModelText.mock.calls.length === 1);
+    await waitFor(() => generateText.mock.calls.length === 1);
     const second = generateWalkthrough({ directory: '/repo', source: SOURCE });
 
     release?.();
     const [a, b] = await Promise.all([first, second]);
 
-    expect(generateSmallModelText).toHaveBeenCalledTimes(1);
+    expect(generateText).toHaveBeenCalledTimes(1);
     expect(a.walkthrough.title).toBe('Change');
     expect(b).toBe(a);
   });
 
   it('reports a running job so a returning client can show progress', async () => {
     let release: (() => void) | undefined;
-    generateSmallModelText.mockImplementation(() => new Promise((resolve) => {
+    generateText.mockImplementation(() => new Promise((resolve) => {
       release = () => resolve(modelResponse());
     }));
 
@@ -142,7 +141,7 @@ describe('generation jobs', () => {
   });
 
   it('stops only on an explicit cancel', async () => {
-    generateSmallModelText.mockImplementation(({ signal }) => new Promise((_resolve, reject) => {
+    generateText.mockImplementation(({ signal }) => new Promise((_resolve, reject) => {
       signal?.addEventListener('abort', () => reject(Object.assign(new Error('aborted'), { name: 'AbortError' })));
     }));
 
@@ -163,10 +162,10 @@ describe('generation jobs', () => {
   // The reserve and the request must be the same number: asking for more than
   // was subtracted from the input allowance overruns the context mid-answer.
   it('requests exactly the budget the model resolution reserved', async () => {
-    describeSmallModel.mockResolvedValue({
+    describeModel.mockResolvedValue({
       providerID: 'varin-test',
       modelID: 'deepseek-v4-flash',
-      source: 'config',
+      source: 'default' as const,
       hasLogin: true,
       inputCharBudget: 1_000_000,
       contextTokens: 1_000_000,
@@ -175,23 +174,23 @@ describe('generation jobs', () => {
       outputTokens: 32_000,
       outputTokenLimit: 384_000,
     });
-    generateSmallModelText.mockResolvedValue(modelResponse());
+    generateText.mockResolvedValue(modelResponse());
 
     await generateWalkthrough({ directory: '/repo', source: SOURCE });
 
-    expect(generateSmallModelText.mock.calls.at(-1)?.[0].maxOutputTokens).toBe(32_000);
+    expect(generateText.mock.calls.at(-1)?.[0].maxOutputTokens).toBe(32_000);
   });
 
   it('serves the cache once the job has finished, without calling the model again', async () => {
-    generateSmallModelText.mockResolvedValue(modelResponse());
+    generateText.mockResolvedValue(modelResponse());
 
     await generateWalkthrough({ directory: '/repo', source: SOURCE });
-    generateSmallModelText.mockClear();
+    generateText.mockClear();
 
     const second = await generateWalkthrough({ directory: '/repo', source: SOURCE });
 
     expect(second.fromCache).toBe(true);
-    expect(generateSmallModelText).not.toHaveBeenCalled();
+    expect(generateText).not.toHaveBeenCalled();
   });
 });
 
@@ -248,17 +247,17 @@ describe('generation stages', () => {
     // Without this the previous suite's cache entry is a hit for the same
     // content and the model is never called.
     fs.rmSync(path.join(TEMP_DATA_DIR, 'walkthroughs'), { recursive: true, force: true });
-    describeSmallModel.mockResolvedValue(MODEL_DESCRIPTION);
+    describeModel.mockResolvedValue(MODEL_DESCRIPTION);
     getDiff.mockImplementation(async (directory: unknown = undefined, options: { contextLines?: number | undefined; staged?: boolean | undefined } = {}) => {
       void directory;
       return options.staged ? '' : PATCH;
     });
-    generateSmallModelText.mockReset();
+    generateText.mockReset();
   });
 
   it('reports asking while the model runs and clears when the job ends', async () => {
     let release: (() => void) | undefined;
-    generateSmallModelText.mockImplementation(() => new Promise((resolve) => {
+    generateText.mockImplementation(() => new Promise((resolve) => {
       release = () => resolve(modelResponse());
     }));
 
@@ -271,64 +270,10 @@ describe('generation stages', () => {
     expect(getGenerationStage('/repo', 'working-tree:all')).toBeNull();
   });
 
-  it('reports retrying only when a provider rejects the schema', async () => {
-    const seen: Array<string | null> = [];
-    let attempt = 0;
-    generateSmallModelText.mockImplementation(async () => {
-      attempt += 1;
-      seen.push(getGenerationStage('/repo', 'working-tree:all'));
-      if (attempt === 1) throw Object.assign(new Error('bad request'), { status: 400 });
-      return modelResponse();
-    });
-
-    await generateWalkthrough({ directory: '/repo', source: SOURCE });
-
-    expect(seen).toEqual(['asking', 'retrying']);
-  });
-});
-
-// Retrying the schema on every generation means paying for a call already known
-// to fail; the refusal has to be remembered.
-describe('schema refusal memory', () => {
-  beforeEach(() => {
-    fs.rmSync(path.join(TEMP_DATA_DIR, 'walkthroughs'), { recursive: true, force: true });
-    describeSmallModel.mockResolvedValue({
-      providerID: 'varin-test',
-      modelID: 'deepseek-v4-flash',
-      source: 'config',
-      hasLogin: true,
-      inputCharBudget: 1_000_000,
-      contextTokens: 250_000,
-      contextKnown: true,
-      structuredOutput: null,
-      outputTokens: null,
-      outputTokenLimit: null,
-    });
-    getDiff.mockImplementation(async (directory: unknown = undefined, options: { contextLines?: number | undefined; staged?: boolean | undefined } = {}) => {
-      void directory;
-      return options.staged ? '' : PATCH;
-    });
-    generateSmallModelText.mockReset();
-  });
-
-  it('stops sending a schema to a model that already rejected one', async () => {
-    const sentSchema: boolean[] = [];
-    generateSmallModelText.mockImplementation(async ({ responseSchema }) => {
-      sentSchema.push(Boolean(responseSchema));
-      if (responseSchema) throw Object.assign(new Error('bad request'), { status: 400 });
-      return modelResponse();
-    });
-
-    await generateWalkthrough({ directory: '/repo', source: SOURCE });
-    expect(sentSchema).toEqual([true, false]);
-
-    // A different diff, so the cache cannot answer instead.
-    getDiff.mockImplementation(async (directory: unknown = undefined, options: { contextLines?: number | undefined; staged?: boolean | undefined } = {}) => {
-      void directory;
-      return options.staged ? '' : PATCH.replace('const added = true;', 'const added = false;');
-    });
-    await generateWalkthrough({ directory: '/repo', source: SOURCE });
-
-    expect(sentSchema).toEqual([true, false, false]);
+  it('does not retry an original provider failure with a new request', async () => {
+    generateText.mockRejectedValue(Object.assign(new Error('Original request failed'), { code:'model-text-indeterminate',requestId:'model-text:original' }));
+    await expect(generateWalkthrough({directory:'/repo',source:SOURCE})).rejects.toMatchObject({requestId:'model-text:original'});
+    expect(generateText).toHaveBeenCalledTimes(1);
+    expect(getGenerationStage('/repo','working-tree:all')).toBeNull();
   });
 });

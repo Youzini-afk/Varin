@@ -21,7 +21,9 @@ and persisted multi-scope service routing.
 Distribution-owned Host extensions use the same immutable artifact and broker lifecycle as installed
 extensions. Their requested Host capabilities are granted only while reconciling the distribution
 definition; executable artifacts are materialized lazily when their activation event is first requested,
-so declarative built-ins do not add startup I/O.
+so declarative built-ins do not add startup I/O. Distribution reconciliation reads only the current
+valid catalog format, preserves desired enablement, and updates valid built-in declarations and grants.
+Malformed records are reported without historical raw-record repair or catalog writeback.
 
 Language activation carries the requested language ID. The distribution's provider catalog identifies
 which built-in extension owns it, so opening a TypeScript document does not first prepare the unrelated
@@ -35,3 +37,258 @@ Registered built-in package roots must identify physical directories that the Ho
 copy. Archive-backed distributions resolve their logical module address to the corresponding unpacked
 directory before constructing the package manager; brokered processes are launched only from the
 resulting immutable artifact, never from an application archive.
+
+Host activation resolves the complete dependency graph before starting workers. Requirements declare
+their `realms` explicitly; Surface-only dependencies do not block a headless Host. The existing
+ServiceRoutingStore chooses implementations for the actual scope. There is no registry selection map.
+Concurrent preparation of one effective graph is shared; canceling one waiter does not cancel another.
+Instance identity includes the immutable artifact, reviewed grants and exact prepared dependency
+generations, not Thread IDs or unrelated routing revisions. Independent startup and retirement proceed
+in parallel. A canceled or stale preparation cannot publish, and shutdown closes admission before
+aborting unpublished broker owners.
+Service publication reserves only conflicting declared single-provider services during storage/catalog
+commit; registry publication itself is synchronous. Retired generations still drain their pinned calls
+before transport disposal. Candidate failure preserves the previous selected combination.
+
+Capability decisions are part of activation identity. A changed selected grant advances the desired
+revision; candidate grant reviews are checked independently before publication. Revocations update
+the Host-owned grant arrays used by live and draining transport callbacks before replacement awaits,
+so retaining an old implementation after a failed update cannot retain revoked privileges.
+
+`ApplicationExtensionRuntime.prepareService` resolves the existing scoped routing configuration once
+and returns an exact-generation strong service lease. Every consumer releases it; an independent
+`pin()` retains an accepted exchange without retaining its former selection context. Pure validation
+uses `assertBinding`, not a leaked temporary bind. Production service invocation uses this same binding
+path. Registry invocation indexes only the requested service (or directly looks up an explicit
+provider); it does not scan all installed providers. Only the original routing rule can explicitly
+permit fallback; invocation through a frozen handle never reselects. Non-authoritative routing cannot
+create a new binding. Each instance retains its exact dependency pins through real callbacks and
+transport/disposer completion. Explicit revocation follows those exact owner edges, not service names.
+
+Brokered and trusted-native `services.use`/`useAll` capture declared dependencies before activation.
+Nested calls propagate the current opaque invocation and cancellation; shared instances never retain
+a particular Run's authority. The original tool scope temporarily recognizes the actual dependency
+owner only while that call is alive, preserving the root tool's permissions, effect and receipt identity.
+
+Managed Surface consumers use an authenticated `watchServiceLease` response stream. It retains the
+actual scoped Host roots and exact service members, including candidate roots for grouped updates.
+The original principal and Surface owner identify later invocations. Response closure releases those
+references; a completed POST body or long-poll timeout does not. An already admitted callback owns its
+own reference through physical completion. The directly registered WorkbenchLayout native service
+keeps its existing native owner and has no fabricated package graph.
+
+`ApplicationExtensionRuntime.queryContracts` lists/describes current service and UI-slot contracts from the
+same manifest, routing, registry and workbench owners. Those metadata operations never activate a provider or invoke its
+`inspect` callback. Read-only workbench snapshots do not migrate profiles or resolve/create workspace
+identities. Revisions and original lifecycle codes distinguish declared/cold, active, draining,
+disabled, failed and unresolved selections. Missing method metadata is `undeclared`, not an empty
+schema. Tool and method source metadata share strict package-relative declaration validation;
+invalid declarations fail at admission rather than losing their source silently. A normal preparation
+failure is recorded by its original extension owner, without replacing an older still-active generation.
+Unsupported shell contract versions remain unresolved rather than being parsed as the current format.
+Host slot metadata cannot prove a Surface is actually mounted.
+
+Optional `ServiceProvision.contract` carries method/event schemas, author examples and package-relative
+source locations through the same manifest and activation descriptor. A declared method must be
+callable through the original handler lookup at activation. Tool execute schemas derive from the
+existing `tool` declaration; no second tool schema is maintained. This is a finite author contract,
+not automatic reflection over every Application API or every provider implementation.
+
+The explicit `read/source` query reads package-relative UTF-8 source through the existing package
+manager and immutable artifact verifier. Metadata supplies the exact selected/candidate artifact
+integrity; a same-version replacement cannot redirect an old request to new bytes. Candidate references
+identify the candidate package, not the selected service descriptor. No query materializes a missing
+built-in artifact, activates a provider, or reads the mutable installation checkout. Missing source,
+unmaterialized/unavailable artifacts, stale slots, invalid text/ranges and verified corruption remain
+distinct. A retained old directory alone does not authorize reading it as the current selected slot.
+
+Source pages use UTF-8 byte offsets, defaulting to offset 0 and a 16 KiB budget. The final code point
+may extend the page by at most three bytes; `nextOffset` is the exact continuation. Empty files and
+EOF return a found empty page. Each read verifies the original full-file hash in asynchronous 64 KiB
+chunks, retaining only the requested page; consequently reading many small pages re-reads the file.
+There is no second source cache or hash authority. Cancellation closes the actual file stream, and
+the package manager rechecks only the requested slot before publishing. Source bodies in an Agent
+call remain ordinary tool results in the original ContentStore/history, including after GC/reopen.
+
+A bound handle admits ordinary calls while its generation is active. A caller freezing an exchange
+can explicitly pin that generation, including its real broker drain lifetime, and must release the
+pin after settling the exchange. An accepted child can derive an independent pin through `bindPinned`
+from that exact still-retained generation; it cannot revive an unpinned retired provider. The original
+supervisor keeps its artifact identity through actual owner retirement. Normal replacement preserves
+pinned calls; disable/crash drainage
+revokes both the active generation and older retained generations without waiting for abandoned pins.
+The first production native consumer is `varin.context.fragments@1`: existing scoped routing selects
+one brokered package or an explicitly ordered collection. `prepareServiceCollection` returns exact
+selected handles without changing the ordinary `prepareService`/`invokeService` result. Only the selected
+roots and their original dependencies prepare. Frozen declarations cross the private context boundary,
+and Rust's existing composition resolver/registry binds the typed immutable ordered transform. The SDK's `provideContextFragments`
+helper and `inspect` metadata share the contract; the packaged default and installable project example
+use the ordinary lifecycle. `varin.retrieval.plan@1` also uses this binding path: its declarative
+stage choices are frozen with the executing artifact and a separate pin for every native query.
+It supplies no filesystem or model capability to the extension. See `examples/extensions/project-context` for the actual author
+and project-selection path.
+
+Brokered process shutdown has a configurable `brokerShutdownGraceMs` (default 5000 ms).
+This is a cleanup grace addressing an observed indefinitely hanging disposer, not a model/tool
+execution deadline. Normal replacement first drains valid old-generation exchange pins; only
+entry into final process disposal starts the grace. At expiry the Host kills that broker and waits
+for its actual exit. The existing owner diagnostics record `broker_cleanup_unconfirmed`: process
+exit does not mean the extension's cleanup or any external effect was completed or undone.
+Independent owners still finish shutdown even if another owner reports a failure. Trusted-native
+extensions retain their distinct in-process cleanup/restart contract.
+
+Tool services add `tool` metadata to their existing service provision. The standalone manifest,
+activation declaration, registry snapshot and SDK `inspect` response preserve that same descriptor;
+a mismatched or missing tool activation is rejected before publication. The executing tool Host compiles the declared
+input/output schemas. `operation: read` does not grant permissions or certify side-effect-free code.
+
+Trusted callers attach a Host-only `HostInvocationScope` to an exact service pin. The broker sends
+only a fresh opaque invocation token, resolves it against its exact extension owner/generation, and
+injects the original scope object into nested capability calls. `value` never crosses the worker wire.
+Call-scoped capability clients and async invocation context cannot retain authority after the real
+service callback finishes. Cancellation aborts nested work while retaining callback/drain ownership
+until the real response or process exit. Request-delivery/process/IPC failures revoke and terminate the
+unreliable broker; sending a kill signal alone does not settle pending callbacks. Ordinary unscoped
+capability calls retain owner-grant semantics.
+A pin's `revocationSignal` wakes waiting preparation on explicit disable/crash/revocation; ordinary
+replacement leaves it live, including a frozen pin that has not yet made its first call.
+
+Agent-authored packages use the same artifact and catalog owners. The trusted
+`stageCapturedPackage` seam accepts only a tree already captured from the original Run's SourceView;
+public installation source specifiers cannot create a `source_view`. Its first installation retains a
+real selected artifact but is always disabled, even when it requests no capabilities. Further edits
+stage the existing candidate slot and preserve enablement and capability decisions. The ordinary
+`extension_package` effect tool never enables a package or creates capability decisions.
+Source provenance includes its local or managed Host resource owner as well as the original Run,
+Operation and revision/root. Remote captures use the same compiler seam after source-owned byte
+transfer; their paths and object hashes do not grant coordinator-local filesystem access.
+Withdrawing a candidate cancels its exact pending preparation even before a ready group exists.
+Generic reconciliation signals cancellation; explicit discard also joins that original preparation.
+Selected versions and other consumers of shared dependencies retain their owners.
+
+`applyPackageCandidate` consumes the exact authorized tool request, existing enablement and reviewed
+candidate, then records the ordinary `applyRequested` intent before preparing/publishing. Results
+separate `application_requested` from `selected`; neither asserts an actual Surface mount. Cancelling
+after that commit leaves the application intent durable and may resume it on restart. A started
+preparation is retained until its actual broker/build work drains. The original ToolBridge resends a
+lost receipt while the Host survives. After full Host loss, unconfirmed Operations remain Unknown;
+the catalog restores committed lifecycle state without replaying the Agent tool or recapturing a
+mutable source. Cleanup diagnostics cannot erase an already obtained mutation result.
+
+Captured package compilation uses the original esbuild context with cancellation/disposal and permits
+resolution only inside the captured dependency closure (plus Node builtins for Host code). It installs
+no dependencies. Captured compilation uses only the package-root `tsconfig.json`, when present;
+otherwise it disables ambient configuration lookup. JSONC, relative config inheritance and captured
+configuration dependencies are preserved. Every `extends` target must remain in the captured tree.
+The artifact owner derives a disposable compiler copy including dependencies and same-directory
+normalized config shadows, leaving the captured source and artifact text unchanged. Missing or external
+configuration dependencies require inclusion in the package or a prebuilt entrypoint. Copying/hashing,
+config normalization and builds happen outside catalog locks and drain before cleanup. Source provenance records
+the original view and captured-content identity; it grants no filesystem access. An exact candidate
+asset or managed-entrypoint request may finish after that same artifact has been selected; explicit
+`read/source` queries still require their current selected/candidate slot.
+Runtime notification errors are reported through `onObserverError` (the Host error log by default);
+each remaining subscriber is still notified, and observer failures cannot change a committed result.
+
+After Host publication commits, selection returns without waiting for older model/child pins to be
+released. The same supervisor retains each exact previous instance and its retirement promise:
+registry finalization waits for both those pins and real callbacks before disposing that transport.
+Each replacement takes over only its active predecessor; an older draining generation stays with
+its own retirement, so a long-lived A pin does not also retain an unused B after B→C publication.
+Candidate selection and selected-owner replacement use the same path. Normal replacement does not
+revoke an old pin. Explicit disable, force termination and shutdown cover retiring generations too;
+teardown still waits for actual callbacks and transport cleanup. Retirement failures preserve the new
+active owner and are reported through its existing diagnostics and teardown error aggregation.
+
+Prepared-candidate cleanup from an optional consumer is queued and cannot invalidate an independent
+selection of the same artifact. A caller cancellation stops that caller before publication begins,
+after the shared preparation has actually ended; it does not revoke shared preparation or another
+caller's selection. Once the publication transaction starts, its actual result wins over caller
+cancellation. Explicit candidate rejection first commits the original catalog CAS, then reconciles
+and drains the now-invalid preparation. Disable and shutdown retain global lifecycle revocation.
+
+## Explicit Host/Surface update groups
+
+`manifest.updateReadiness.surfaceEntrypoints` opts the candidate's Host and named local Surface
+entrypoints into one update publication dependency. An ordinary Agent apply first persists the
+original `applyRequested` fact. Without a participating prepared Surface it returns
+`application_requested` and records `required_surface_readiness`; a valid selected Host remains
+active. The supervisor never waits for all windows, does not infer membership from packaged UI,
+and never makes selected startup/recovery depend on an open window.
+
+The original prepared Host instance supplies its preparation ID, application Host identity, desired
+revision, and generation. The trusted Surface host submits its matching local preparation members
+through the existing selection route after actual connected-consumer mount preparation. Publication
+checks the exact artifact, review, request intent and revision in the original Catalog lock, then
+runs a synchronous Host-only owner/readiness/request-cancellation check immediately before the
+Catalog write. Preparation, mounts and retirement stay outside that lock. Aborting one HTTP request
+before this boundary prevents its commit; after it, the actual committed selection wins. A lost
+response requires reading the selected artifact, not claiming rollback or inferring a dead window
+from a long-poll timeout. No persistent membership or second selection authority is introduced.
+
+For an explicitly requested group, one Surface's failed mount/cleanup does not revoke the shared
+prepared Host. That unpublished owner belongs to the original pending application request until
+retry or an authoritative candidate replacement, discard, capability/desired change, or shutdown.
+Staging a replacement withdraws only obsolete preparation and does not cold-activate another
+provider. Ordinary replacement preserves frozen exchange/child pins and their original retirement;
+explicit disable/revocation retains its existing stronger cancellation semantics.
+
+Trusted-native Host modules cannot safely prepare beside a loaded predecessor. Ordinary application
+reports `trusted_native_group_update_requires_restart_handoff`; it never restarts the Host implicitly.
+`requestRestartHandoff` verifies the exact candidate, reviewed grants, immutable artifacts and fixed
+dependency composition, then persists the caller's stable attempt ID with the original selected identity
+in the Catalog. The Application Host launch owner performs the explicit normal shutdown/relaunch.
+A launch without a restart owner reports unavailability before recording an intent.
+
+`start()` claims pending handoffs before ordinary reconciliation. Preparation runs independently of
+startup, never loading that extension's old selection in the new process. Process identity is shared
+by every Runtime instance in the same actual process. Required Surface members use the existing real
+consumer mount transaction; the original preparation, member generations and validated consumer lease
+count are retained with the atomic Catalog selection/result. Zero consumers means module readiness,
+not a mounted or painted screen. There is no global window registry.
+
+Failed or interrupted attempts become durable failures and are not retried by another boot. Explicit
+retry gets a new attempt ID while preserving previous results. Explicit recovery records a clean restart
+before restoring the previous selected artifact. Replacing/discarding a candidate or changing desired
+state/review invalidates its pending intent. Once publication commits, response loss and cleanup failure
+cannot replace the applied result. The management UI reads the same Catalog history and exposes pending,
+preparing, waiting-Surface, applied, failed and recovery states. Cross-process tests evaluate actual native
+modules and use the real Surface loader and Workbench mount consumer; they do not certify packaged app
+relaunch or platform behavior.
+
+An unpublished broker crash invalidates only its own preparation, never a still-valid selected
+predecessor. If the Catalog has already selected the candidate, subsequent stop/crash does not roll
+back its committed storage migration. The original registry closes old new-call admission while
+retained old exchange pins drain; recovery prepares the committed selected artifact. Controlled
+transport tests exercise these interruption windows against the real artifact, Catalog and storage
+owners; they do not claim a whole-process or cross-process atomic transaction.
+
+
+Pure context/retrieval declarations cache values against their resolved immutable composition, without
+keeping an unused worker alive. Pure graph resolution does not activate or materialize a cold package;
+ordinary preparation handles a declared package that still needs materialization. Budget descriptions
+also include the actual provider generation in their cache identity: a new activation can capture new
+configuration from the original storage owner. New candidates check current bindings and propagate
+caller cancellation. Ending a caller's wait does not claim its actual callback drained; registry
+in-flight accounting remains authoritative. Disable/revocation blocks fresh preparation and cached
+admission. Already admitted checkpoint/request bytes remain historical facts and recover unchanged.
+Context routing uses the existing default-user namespace, admitted project/Thread and the resource
+snapshot's original configuration `projectRoot` as workspace namespace, never its execution cwd.
+
+Model contributions use the same `varin.models@1` service collection and reviewed capability owners.
+The product `ModelsExtensionOwner` prepares the complete channel/catalog/authentication candidate,
+then publishes actual brokered adapters to Rust's original `ModelAdapterRegistry`. Invalid candidates
+leave the previous model catalog authoritative. Native and brokered adapters share the runtime binding
+contract; ordinary compatible channels can reuse a native protocol without creating another codec.
+The fixed private adapter binding ID includes the actual service generation, even when the author
+keeps the same declared adapter version. Durable configuration separately uses the content hash of
+the artifact/composition and adapter metadata; a process-local pin UUID never makes identical verified
+content unrecoverable after restart. Captured selections retain a Rust composition lease before
+model admission, and release it with the existing credential/request owner.
+
+Protocol callbacks are ordinary broker requests. Abort requests cooperation; pending callback and
+service-pin accounting survive until the original response or actual process exit. HTTP and SSE remain
+Rust-owned, and the original request owns usage and continuation evidence. Kernel disconnection aborts
+and drains actual Host callbacks, removes stale product contributions and resets the registry epoch;
+a new ready epoch prepares fresh candidates. Shutdown does not depend on static Rust destructors
+sending release notifications after the control channel has closed.

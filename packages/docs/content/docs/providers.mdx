@@ -1,51 +1,14 @@
 ---
-title: Providers, Models & Agents
-description: Connect AI providers, pick models, and set up agents.
+title: "Model channels"
+description: "Connect model accounts and choose models for native conversations."
 ---
 
-# Providers, Models & Agents
+# Model channels
 
-Before Varin can do anything, it needs at least one AI provider connected. This page covers connecting a provider, choosing a model, and tailoring agents.
+Open **Settings → Model channels**. Add a channel, choose its type and endpoint, then configure an authentication method offered by that type. Depending on the channel, this can be a saved API key, sign-in, an explicit environment variable, a supported cloud identity, or anonymous access.
 
-## Connect a provider
+Add models by their IDs, or discover candidates on a saved channel that supports discovery. Review and save the models you want to use; discovery alone does not change the saved catalog. Enable the channel, model and required operation, such as chat. Choose the channel and model in the conversation composer.
 
-1. Open **Settings → Providers**.
-2. Open the **Add provider** menu and pick a provider that isn't connected yet.
-3. Sign in one of two ways, depending on the provider:
-   - **API key** — paste your key and save.
-   - **Sign-in (device flow)** — Varin shows a link and a short code. Open the link, enter the code, and approve. Varin finishes connecting on its own.
+The Application Host owns channel configuration and model accounts. Credentials are kept separately from model metadata and are not included in conversation history. Missing or withdrawn credentials do not silently select another account. Editing a channel affects later preparation; accepted work retains its original selection.
 
-When a provider shows as connected, its models become available in chat.
-
-To disconnect, open the provider and choose to remove its sign-in.
-
-## Pick a model
-
-You pick the model where you're working:
-
-- in chat, use the model picker in the message bar to set the provider and model for that session
-- per agent, set a default model (below)
-
-## Set up agents
-
-An agent is a named setup — a model, a personality, and what it's allowed to do.
-
-1. Open **Settings → Agents**.
-2. Pick an agent, or create a new one.
-3. Edit any of:
-   - **description** — what the agent is for
-   - **model** — its default model
-   - **temperature** — how creative its answers are
-   - **prompt** — standing instructions it always follows
-   - **tool rules** — which tools it may use
-
-## Where your sign-ins live
-
-Provider sign-ins are stored by Pi's `AuthStorage`, not in the renderer. API keys and OAuth tokens never appear in provider metadata sent to the UI. User, project, and operator `models.json` layers stay in their native files.
-
-If you set the same provider in more than one place, the most specific setting wins: a trusted project layer overrides your personal one.
-
-## Related
-
-- [MCP Servers](/mcp/) — add extra tools for agents
-- [Session token usage](/usage/)
+Use [Agent memory and instructions](/agent-personalization/) for standing instructions and [MCP](/mcp/) for additional tools. Model access does not itself grant file or tool permissions.

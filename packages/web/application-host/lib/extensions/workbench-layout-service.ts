@@ -8,6 +8,7 @@ import type { HostServiceHandler, HostServiceOwnerIdentity, HostServiceProvision
 
 const OWNER = {
   entrypointId: 'workbench-layout',
+  instanceKey: 'application-workbench-layout',
   extensionId: VARIN_BUILTIN_IDE_WORKBENCH_EXTENSION_ID,
   generation: 1,
 };
