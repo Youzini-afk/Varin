@@ -63,6 +63,10 @@ A channel type declares its protocol, operation support, authentication options,
 display metadata and optional discovery/catalog candidates. A channel is one stable user-selected
 connection. Multiple channels may use the same type. Each channel model has a stable catalog ID;
 `requestModelId` supplies the actual model/deployment identifier. Display names are not routing keys.
+Protocol-specific thinking options follow that upstream identifier, so a local catalog alias does
+not change the selected model's wire dialect or token budget.
+Opaque Bedrock resource/profile IDs retain the configured model-name hint; a recognizable upstream
+model ID always takes precedence over that hint.
 
 UI and execution consume the same type definitions. `channel-types.ts` is the current built-in
 support list; a provider name does not imply every protocol option is supported. Unknown model

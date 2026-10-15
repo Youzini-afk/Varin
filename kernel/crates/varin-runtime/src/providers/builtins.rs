@@ -324,6 +324,16 @@ fn bind(
             ));
         }
         for (key, value) in parameters {
+            if c.provider_family == chat::FAMILY
+                && key == "n"
+                && !value.is_null()
+                && value.as_u64() != Some(1)
+            {
+                return Err(ExecutionError::new(
+                    "sampling_parameters",
+                    "Chat accepts exactly one completion choice",
+                ));
+            }
             if matches!(
                 key.as_str(),
                 "model"
