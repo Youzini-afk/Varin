@@ -1,23 +1,7 @@
-import type { PiRuntimeManagerStatus } from '@varin/protocol';
-
-type DesktopWorkspaceView = 'loading' | 'main' | 'runtime-setup' | 'catalog-recovery';
-
-export const resolveDesktopWorkspaceView = (input: {
-  catalogError: unknown;
-  catalogLoaded: boolean;
-  catalogLoading?: boolean;
-  runtimeStatus: PiRuntimeManagerStatus | null;
-}): DesktopWorkspaceView => {
+type DesktopWorkspaceView = 'loading' | 'main' | 'catalog-recovery';
+export const resolveDesktopWorkspaceView = (input: { catalogError: unknown; catalogLoaded: boolean; catalogLoading?: boolean }): DesktopWorkspaceView => {
   if (input.catalogLoaded) return 'main';
-  if (input.runtimeStatus === null || input.runtimeStatus === 'discovering' || input.runtimeStatus === 'probing') return 'loading';
-  if (input.runtimeStatus === 'ready') {
-    if (input.catalogLoading) return 'loading';
-    return input.catalogError ? 'catalog-recovery' : 'loading';
-  }
-  return 'runtime-setup';
+  if (input.catalogLoading) return 'loading';
+  return input.catalogError ? 'catalog-recovery' : 'loading';
 };
-
-export const desktopWorkspaceIsOperable = (
-  view: DesktopWorkspaceView,
-  isSwitchingDirectory: boolean,
-): boolean => view === 'runtime-setup' || (view === 'main' && !isSwitchingDirectory);
+export const desktopWorkspaceIsOperable = (view: DesktopWorkspaceView, isSwitchingDirectory: boolean): boolean => view === 'main' && !isSwitchingDirectory;

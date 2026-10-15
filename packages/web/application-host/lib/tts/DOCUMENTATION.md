@@ -43,12 +43,12 @@ This module provides server-side Text-to-Speech services using OpenAI's TTS API.
 ## TTSService methods
 
 ### `isAvailable()`
-Returns whether an OpenAI API key is configured through `OPENAI_API_KEY` or Pi's canonical auth file.
+Returns whether the Host environment supplies `OPENAI_API_KEY`. Per-request custom credentials/endpoints are checked when generating.
 
 ### `generateSpeechStream(options)`
-Generates speech and returns as a web stream for direct streaming to clients.
+Generates speech and buffers the provider response before returning it.
 - Options: `text` (required), `voice`, `model`, `speed`, `instructions`, `apiKey`.
-- Returns: `{ stream: ReadableStream, contentType: 'audio/mpeg' }`.
+- Returns: `{ buffer: Buffer, contentType: 'audio/mpeg' }`.
 - Throws: Error if API key not configured or text is empty.
 
 ### `generateSpeechBuffer(options)`
@@ -74,17 +74,18 @@ Returns sanitized string with markdown, URLs, file paths, and special characters
 
 ### `generateSpeechStream`
 Returns object with:
-- `stream`: ReadableStream of MP3 audio data.
+- `buffer`: Buffer of the returned audio data.
 - `contentType`: Always 'audio/mpeg'.
 
 ### `generateSpeechBuffer`
 Returns Buffer containing MP3 audio data.
 
 ## API key resolution
-OpenAI API keys are resolved in order:
-1. Environment variable `OPENAI_API_KEY`.
-2. Pi auth file (`auth.openai`, `auth.codex`, or `auth.chatgpt`).
-3. Supports both string format (just token) and object format (with `access` or `token` fields).
+
+An explicit speech API key or custom OpenAI-compatible `baseURL` selects that request's client.
+Otherwise the service uses the Host's `OPENAI_API_KEY`. A custom endpoint can be used without a key;
+its URL is validated by `base-url.ts`. Conversation accounts are separate and are never discovered
+or imported from a historical Pi auth file.
 
 ## Usage in web server
 The TTS module is used by `packages/web/application-host/index.ts` for:

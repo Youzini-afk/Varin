@@ -49,7 +49,7 @@ Relay is not a separate link format: it is one transport candidate inside the un
 Everything a client normally sends to the single Varin origin:
 - **HTTP** — Varin APIs under `/api/*`, plus `/auth/*` and `/health`.
 - **SSE** — long-lived streamed responses (the event stream and notifications). These are just HTTP responses whose body streams; the tunnel needs no special SSE handling.
-- **WebSocket** — the Pi runtime, terminal I/O, and dictation endpoints that use a real socket.
+- **WebSocket** — terminal I/O and dictation endpoints that use a real socket. Native Thread events use authenticated HTTP/SSE.
 
 The host dispatcher restricts tunneled traffic to explicit path allowlists (one for HTTP, one for WS).
 

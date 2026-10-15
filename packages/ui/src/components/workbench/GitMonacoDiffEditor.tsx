@@ -7,7 +7,7 @@ import type { DocumentIdentity } from '@/lib/documents/types';
 import { useI18n } from '@/lib/i18n';
 import { monacoDiffContentRevision } from '@/lib/monaco/diff-model-registry';
 import { repositoryPathForGitDiff } from '@/lib/monaco/git-diff-resource';
-import { getRuntimeKey } from '@varin/application-client';
+import { threadHostKey as getRuntimeKey } from '@/stores/useThreadStore';
 import type { EditorViewState } from '@/lib/workbench/editors/types';
 import { MonacoFileDiffEditor } from './MonacoFileDiffEditor';
 

@@ -1,11 +1,14 @@
 import assert from "node:assert/strict";
-import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
+import { copyFile, mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
-import { ApplicationExtensionRuntime } from "../src/index.js";
+import { build } from "esbuild";
+import { parseVarinContextFragments, parseVarinExtensionServiceProvision,
+  VARIN_CONTEXT_FRAGMENTS_CONTRACT, VARIN_CONTEXT_FRAGMENTS_SERVICE, type VarinExtensionStorageSnapshot } from "@varin/extension-contract";
+import { ApplicationExtensionRuntime, ChildBrokeredHostTransport } from "../src/index.js";
 
 const directories: string[] = [];
 const temporaryDirectory = async (prefix: string): Promise<string> => {
@@ -25,6 +28,7 @@ const writeHostExtension = async (
   schemaVersion: number,
   migration: "ok" | "throw",
   mode: "brokered" | "native" = "brokered",
+  grouped = false,
 ): Promise<void> => {
   await mkdir(directory, { recursive: true });
   await writeFile(join(directory, "varin.extension.json"), JSON.stringify({
@@ -33,7 +37,9 @@ const writeHostExtension = async (
     version,
     engines: { varin: "*" },
     storage: { schemaVersion },
-    entrypoints: { host: { activation: ["service-request"], file: "host.cjs", mode } },
+    entrypoints: { host: { activation: ["service-request"], file: "host.cjs", mode },
+      ...(grouped ? { surfaces: [{ id: "panel", mode: "declarative", supports: ["web"] }] } : {}) },
+    ...(grouped ? { updateReadiness: { surfaceEntrypoints: ["panel"] } } : {}),
     provides: { services: [{ id: serviceId, version: 1 }] },
   }), "utf8");
   await writeFile(join(directory, "package.json"), JSON.stringify({ name: extensionId, version }), "utf8");
@@ -49,7 +55,7 @@ module.exports = {
       read() { return context.storage.snapshot.document.data.value || '${version}'; },
       generation() { return '${version}'; },
       assetPath() { return context.assets.path('runtime/tool.mjs'); },
-      async write(value) { await context.storage.update({ value }); return value; },
+      async write([value]) { await context.storage.update({ value }); return value; },
       crash() { setTimeout(() => process.exit(17), 100); return 'crashing'; }
     });
   }
@@ -71,8 +77,12 @@ const writeRoutingProvider = async (directory: string, providerExtensionId: stri
   await writeFile(join(directory, "host.cjs"), `
 module.exports = {
   activate(context) {
-    context.services.provide({ id: '${serviceId}', multiple: true, version: 1 }, {
-      read() { return '${value}'; }
+    // Ordinary service activation identifies its implementation; multiplicity belongs to the manifest.
+    context.services.provide({ id: '${serviceId}', version: 1 }, {
+      read() { return '${value}'; },
+      async readRouted([routing]) {
+        return context.services.use('${serviceId}', 1, { routing }).call('read');
+      }
     });
   }
 };
@@ -347,7 +357,7 @@ test("candidate Host generations stage every opened storage document and commit 
   }
 });
 
-test("candidate Host storage rolls back every committed document when storage sync fails", { timeout: 30_000 }, async () => {
+test("candidate Host storage rolls back every committed document when storage sync fails", { timeout: 30_000 }, async (t) => {
   const dataDir = await temporaryDirectory("varin-storage-sync-rollback-runtime-");
   const v1 = await temporaryDirectory("varin-storage-sync-rollback-v1-");
   const v2 = await temporaryDirectory("varin-storage-sync-rollback-v2-");
@@ -386,16 +396,25 @@ test("candidate Host storage rolls back every committed document when storage sy
       extensionId,
     });
     const prepared = await runtime.prepareCandidate(extensionId, integrity);
-    const candidateProvider = prepared.providers[0];
-    assert.ok(candidateProvider);
-    assert.equal(await runtime.invokeService({
-      args: [],
-      method: "crash",
-      providerId: candidateProvider.providerId,
-      serviceId,
-      version: 1,
-    }), "crashing");
-    await delay(200);
+    assert.ok(prepared.providers[0]);
+    const originalRequest = ChildBrokeredHostTransport.prototype.request;
+    let faults = 0;
+    t.mock.method(ChildBrokeredHostTransport.prototype, "request", async function (
+      this: ChildBrokeredHostTransport, method: string, params?: unknown, signal?: AbortSignal,
+    ) {
+      if (method === "storage.sync" && faults === 0) {
+        const snapshots = (params as { storages: VarinExtensionStorageSnapshot[] }).storages;
+        if (snapshots.every(snapshot => snapshot.address.extensionId === extensionId && snapshot.document.schemaVersion === 2)) {
+          assert.equal(snapshots.length, 3);
+          assert.deepEqual(snapshots.map(snapshot => snapshot.address), addresses);
+          assert.deepEqual(snapshots.map(snapshot => snapshot.document.data.value),
+            ["2.0.0-application", "2.0.0-profile", "2.0.0-workspace"]);
+          faults++;
+          throw new Error("injected v2 storage.sync failure");
+        }
+      }
+      return originalRequest.call(this, method, params, signal);
+    });
 
     const beforeFailure = await runtime.state();
     const selectedProvider = beforeFailure.services.providers.find((provider) => provider.extensionId === extensionId);
@@ -404,7 +423,8 @@ test("candidate Host storage rolls back every committed document when storage sy
       candidateIntegrity: integrity,
       expectedRevision: requested.revision,
       extensionId,
-    }), /Brokered Host process (?:exited|is disconnected)/);
+    }), /injected v2 storage\.sync failure/);
+    assert.equal(faults, 1, "the fault must reach the actual candidate storage-sync boundary");
 
     const afterFailure = await runtime.state();
     assert.equal(afterFailure.catalog.revision, requested.revision);
@@ -482,7 +502,7 @@ test("remove retains storage by default and deletes only when explicitly request
   }
 });
 
-test("trusted-native Host updates remain on the prior generation until application restart", async () => {
+test("recreating a Runtime in the same process cannot satisfy a trusted-native restart handoff", async () => {
   const dataDir = await temporaryDirectory("varin-native-runtime-");
   const v1 = await temporaryDirectory("varin-native-v1-");
   const v2 = await temporaryDirectory("varin-native-v2-");
@@ -490,44 +510,31 @@ test("trusted-native Host updates remain on the prior generation until applicati
   await writeHostExtension(v2, "2.0.0", 1, "ok", "native");
   const brokerScript = fileURLToPath(new URL("../broker/broker-child.mjs", import.meta.url));
   const first = await ApplicationExtensionRuntime.create({ brokerScript, dataDir, varinVersion });
-  const started = await first.start();
-  const installed = await first.installOrStage({
-    expectedRevision: started.catalog.revision,
-    source: { display: "Native v1", kind: "local", specifier: v1 },
-  });
-  assert.equal(await first.invokeService({ args: [], method: "generation", serviceId, version: 1 }), "1.0.0");
-  const staged = await first.installOrStage({
-    expectedRevision: installed.revision,
-    source: { display: "Native v2", kind: "local", specifier: v2 },
-  });
-  assert.equal(staged.extensions[0]?.selectedVersion, "1.0.0");
-  assert.equal((await first.state()).catalog.extensions[0]?.actual.find((state) => state.realmKind === "host")?.status, "active");
-  assert.equal(await first.invokeService({ args: [], method: "generation", serviceId, version: 1 }), "1.0.0");
-  const requested = await first.requestCandidateApplication({
-    candidateIntegrity: staged.extensions[0]?.candidate?.integrity,
-    expectedRevision: staged.revision,
-    extensionId,
-  });
-  assert.equal(requested.extensions[0]?.candidate?.applyRequested, true);
-  await assert.rejects(
-    () => first.prepareCandidate(extensionId, staged.extensions[0]?.candidate?.integrity ?? ""),
-    /requires an application-host restart/,
-  );
-  assert.equal((await first.state()).catalog.extensions[0]?.actual.find((state) => state.realmKind === "host")?.status, "restart-required");
-  await first.stop();
-
-  const restarted = await ApplicationExtensionRuntime.create({ brokerScript, dataDir, varinVersion });
+  let integrity = '';
   try {
-    await restarted.start();
-    const state = await restarted.state();
-    assert.equal(state.catalog.extensions[0]?.selectedVersion, "2.0.0");
-    assert.equal(await restarted.invokeService({ args: [], method: "generation", serviceId, version: 1 }), "2.0.0");
-  } finally {
-    await restarted.stop();
-  }
+    const started = await first.start();
+    const installed = await first.installOrStage({ expectedRevision: started.catalog.revision,
+      source: { display: "Native v1", kind: "local", specifier: v1 } });
+    await first.activateExtension(extensionId);
+    const staged = await first.installOrStage({ expectedRevision: installed.revision,
+      source: { display: "Native v2", kind: "local", specifier: v2 } });
+    integrity = staged.extensions[0]!.candidate!.integrity;
+    const requested = await first.requestCandidateApplication({ candidateIntegrity: integrity, expectedRevision: staged.revision, extensionId });
+    await assert.rejects(first.prepareCandidate(extensionId, integrity), /restart handoff/);
+    assert.equal((await first.state()).catalog.extensions[0]!.selectedVersion, "1.0.0");
+    await first.requestRestartHandoff({ extensionId, candidateIntegrity: integrity, expectedRevision: requested.revision, handoffId: "same-process-test" });
+    assert.equal(await first.invokeService({ args: [], method: "generation", serviceId, version: 1 }), "1.0.0");
+  } finally { await first.stop(); }
+  const recreated = await ApplicationExtensionRuntime.create({ brokerScript, dataDir, varinVersion });
+  try {
+    const state = await recreated.start();
+    assert.equal(state.catalog.extensions[0]!.selectedVersion, "1.0.0");
+    assert.equal(state.catalog.extensions[0]!.restartHandoffs!.at(-1)!.status, "pending-restart");
+    await assert.rejects(recreated.prepareCandidate(extensionId, integrity), /restart|recovery/i);
+  } finally { await recreated.stop(); }
 });
 
-test("persistent routes select different real providers by session and isolate provider withdrawal", { timeout: 30_000 }, async () => {
+test("persistent routes select different real providers by Thread and isolate provider withdrawal", { timeout: 30_000 }, async () => {
   const dataDir = await temporaryDirectory("varin-routing-runtime-");
   const alpha = await temporaryDirectory("varin-routing-alpha-");
   const beta = await temporaryDirectory("varin-routing-beta-");
@@ -552,17 +559,23 @@ test("persistent routes select different real providers by session and isolate p
       runtime.invokeService({ args: [], method: "read", serviceId, version: 1 }),
       /explicit routing rule is required/,
     );
+    assert.equal((await runtime.state()).services.providers.length, 0, "ambiguous preparation must not launch either provider");
+    // Ambiguous preparation must not activate unrelated roots. Activate the fixtures
+    // explicitly to obtain their stable routing keys for the scoped-selection checks.
+    await Promise.all([runtime.activateExtension("dev.example.alpha"), runtime.activateExtension("dev.example.beta")]);
     const providers = (await runtime.state()).services.providers;
     const alphaProvider = providers.find((provider) => provider.extensionId === "dev.example.alpha");
     const betaProvider = providers.find((provider) => provider.extensionId === "dev.example.beta");
     assert.ok(alphaProvider);
     assert.ok(betaProvider);
+    assert.equal(alphaProvider.descriptor.multiple, true);
+    assert.equal(betaProvider.descriptor.multiple, true);
     const alphaRoute = await runtime.upsertServiceRoutingRule({
       expectedRevision: 0,
       rule: {
         allowFallback: false,
-        providerKey: alphaProvider.providerKey,
-        scope: { sessionId: "session-alpha" },
+        providerKeys: [alphaProvider.providerKey],
+        scope: { threadId: "thread-alpha" },
         serviceId,
         version: 1,
       },
@@ -571,26 +584,63 @@ test("persistent routes select different real providers by session and isolate p
       expectedRevision: alphaRoute.document.revision,
       rule: {
         allowFallback: false,
-        providerKey: betaProvider.providerKey,
-        scope: { sessionId: "session-beta" },
+        providerKeys: [betaProvider.providerKey],
+        scope: { threadId: "thread-beta" },
         serviceId,
         version: 1,
       },
     });
     assert.equal(await runtime.invokeService({
-      args: [], method: "read", routing: { sessionId: "session-alpha" }, serviceId, version: 1,
+      args: [], method: "read", routing: { threadId: "thread-alpha" }, serviceId, version: 1,
     }), "alpha");
     assert.equal(await runtime.invokeService({
-      args: [], method: "read", routing: { sessionId: "session-beta" }, serviceId, version: 1,
+      args: [], method: "read", routing: { threadId: "thread-beta" }, serviceId, version: 1,
     }), "beta");
+    await assert.rejects(runtime.invokeService({ args: [{ threadId: "thread-beta" }], method: "readRouted",
+      providerId: alphaProvider.providerId, serviceId, version: 1 }), /Host dependency options are invalid/,
+      "A broker cannot replace its prepared dependency identity with caller-supplied routing");
+
+    const branchScope = { threadId: "thread-alpha", branchId: "branch-beta" };
+    const runScope = { ...branchScope, sourceRunId: "run-alpha" };
+    for (const [scope, providerKey] of [[branchScope, betaProvider.providerKey], [runScope, alphaProvider.providerKey]] as const) {
+      await runtime.upsertServiceRoutingRule({ expectedRevision: (await runtime.routing.read()).document.revision,
+        rule: { allowFallback: false, providerKeys: [providerKey], scope, serviceId, version: 1 } });
+    }
+    const read = (routing: typeof branchScope & { sourceRunId?: string }) => runtime.invokeService({
+      args: [], method: "read", routing, serviceId, version: 1,
+    });
+    assert.equal(await read(branchScope), "beta");
+    assert.equal(await read(runScope), "alpha");
+    assert.equal(await read({ ...runScope, sourceRunId: "run-beta" }), "beta");
+    assert.equal(await read({ ...runScope, branchId: "branch-other" }), "alpha");
+    const accepted = await runtime.prepareService({ args: [], method: "read", routing: runScope, serviceId, version: 1 });
+    const pin = accepted.pin();
+    accepted.release();
+    try {
+      await runtime.upsertServiceRoutingRule({ expectedRevision: (await runtime.routing.read()).document.revision,
+        rule: { allowFallback: false, providerKeys: [betaProvider.providerKey], scope: runScope, serviceId, version: 1 } });
+      assert.equal(await read(runScope), "beta");
+      assert.equal(await pin.invoke("read", []), "alpha", "accepted work keeps its exact provider when current Run routing changes");
+    } finally { pin.release(); }
+
+    for (const providerKeys of [[], [alphaProvider.providerKey, betaProvider.providerKey]]) {
+      await runtime.upsertServiceRoutingRule({ expectedRevision: (await runtime.routing.read()).document.revision,
+        rule: { allowFallback: true, providerKeys, scope: { threadId: "invalid-single" }, serviceId, version: 1 } });
+      await assert.rejects(runtime.prepareService({ args: [], method: "read", routing: { threadId: "invalid-single" }, serviceId, version: 1 }),
+        /requires exactly one provider/);
+      await assert.rejects(runtime.invokeService({ args: [{ threadId: "invalid-single" }], method: "readRouted",
+        providerId: alphaProvider.providerId, serviceId, version: 1 }), /Host dependency options are invalid/);
+    }
+    await assert.rejects(runtime.prepareServiceCollection({ args: [], method: "read", routing: { threadId: "thread-beta" }, serviceId, version: 1 }),
+      /declare ordered composition/);
 
     await runtime.setEnabled("dev.example.alpha", false, (await runtime.state()).catalog.revision);
     await assert.rejects(
-      runtime.invokeService({ args: [], method: "read", routing: { sessionId: "session-alpha" }, serviceId, version: 1 }),
-      /Selected provider .* is unavailable/,
+      runtime.invokeService({ args: [], method: "read", routing: { threadId: "thread-alpha" }, serviceId, version: 1 }),
+      /Selected providers .* are unavailable/,
     );
     assert.equal(await runtime.invokeService({
-      args: [], method: "read", routing: { sessionId: "session-beta" }, serviceId, version: 1,
+      args: [], method: "read", routing: { threadId: "thread-beta" }, serviceId, version: 1,
     }), "beta");
 
     const beforeProfile = await runtime.state();
@@ -619,4 +669,109 @@ test("persistent routes select different real providers by session and isolate p
   } finally {
     await runtime.stop();
   }
+});
+
+for (const mode of ["brokered", "native"] as const) {
+  test(`${mode} service cancellation reaches the call context without inventing completion`, { timeout: 30_000 }, async () => {
+    const dataDir = await temporaryDirectory(`varin-cancel-${mode}-`);
+    const source = await temporaryDirectory(`varin-cancel-source-${mode}-`);
+    await writeHostExtension(source, "1.0.0", 1, "ok", mode);
+    await writeFile(join(source, "host.cjs"), `
+module.exports = {
+  migrate({ data }) { return data; },
+  activate(context) {
+    let pending = null;
+    let started = false;
+    let observedAbort = false;
+    let callId = null;
+    context.services.provide({ id: '${serviceId}', version: 1 }, {
+      state() { return { started, observedAbort, callId }; },
+      wait([cooperative], call) {
+        started = true;
+        callId = call.callId;
+        return new Promise((resolve, reject) => {
+          pending = resolve;
+          const abort = () => {
+            observedAbort = true;
+            if (cooperative) { pending = null; reject(new Error('handler confirmed cancellation')); }
+          };
+          if (call.signal.aborted) abort();
+          else call.signal.addEventListener('abort', abort, { once: true });
+        });
+      },
+      release() { pending?.('actual completion'); pending = null; return null; }
+    });
+  }
+};`, "utf8");
+    const runtime = await ApplicationExtensionRuntime.create({
+      brokerScript: fileURLToPath(new URL("../broker/broker-child.mjs", import.meta.url)), dataDir, varinVersion,
+    });
+    try {
+      const started = await runtime.start();
+      await runtime.installOrStage({ expectedRevision: started.catalog.revision,
+        source: { display: "Cancellation fixture", kind: "local", specifier: source } });
+      const invoke = (method: string, args: boolean[] = [], signal?: AbortSignal) => (
+        runtime.invokeService({ args, method, serviceId, version: 1 }, signal)
+      );
+      const readState = async () => await invoke("state") as { started: boolean; observedAbort: boolean; callId: string };
+      const controller = new AbortController();
+      let settled = false;
+      const waiting = invoke("wait", [false], controller.signal).finally(() => { settled = true; });
+      while (!(await readState()).started) await delay(5);
+      controller.abort();
+      while (!(await readState()).observedAbort) await delay(5);
+      assert.equal(settled, false, "request remains owned while the handler still runs");
+      assert.equal(typeof (await readState()).callId, "string");
+      await invoke("release");
+      assert.equal(await waiting, "actual completion");
+
+      const cooperative = new AbortController();
+      const cooperativelyWaiting = invoke("wait", [true], cooperative.signal);
+      const rejected = assert.rejects(cooperativelyWaiting, /handler confirmed cancellation/);
+      // A separate state request ensures the worker has accepted the preceding invocation.
+      await invoke("state");
+      cooperative.abort();
+      await rejected;
+      await assert.rejects(invoke("wait", [true], AbortSignal.abort(new Error("not dispatched"))), /not dispatched/);
+    } finally { await runtime.stop(); }
+  });
+}
+
+test("packaged and authored ContextFragments use the full SDK descriptor through real broker preparation", { timeout: 30_000 }, async () => {
+  const root = await temporaryDirectory("varin-context-author-");
+  const runtime = await ApplicationExtensionRuntime.create({ dataDir: join(root, "data"), varinVersion,
+    brokerScript: fileURLToPath(new URL("../broker/broker-child.mjs", import.meta.url)) });
+  try {
+    await runtime.start();
+    const example = join(root, "project-context"); await mkdir(example);
+    for (const name of ["package.json", "varin.extension.json"]) {
+      await copyFile(fileURLToPath(new URL(`../../../examples/extensions/project-context/${name}`, import.meta.url)), join(example, name));
+    }
+    await build({ entryPoints: [fileURLToPath(new URL("../../../examples/extensions/project-context/host.ts", import.meta.url))],
+      outfile: join(example, "host.cjs"), bundle: true, platform: "node", format: "cjs",
+      alias: { "@varin/extension-sdk": fileURLToPath(new URL("../../extension-sdk/dist/index.js", import.meta.url)) } });
+    await runtime.installOrStage({ expectedRevision: (await runtime.catalog.snapshot()).revision,
+      source: { kind: "local", display: "Project context", specifier: example } });
+    const providerKeys = ["varin.builtin.context-fragments", "example.project-context"].map(id => `${id}:host:varin.context.fragments@1`);
+    await runtime.upsertServiceRoutingRule({ expectedRevision: (await runtime.routing.read()).document.revision,
+      rule: { allowFallback: false, providerKeys, scope: { projectId: "evidence-project" }, serviceId: "varin.context.fragments", version: 1 } });
+    const prepared = await runtime.prepareServiceCollection({ serviceId: "varin.context.fragments", version: 1,
+      method: "describe", args: [], routing: { projectId: "evidence-project" } });
+    assert.deepEqual(prepared.bindings.map(binding => binding.providerKey), providerKeys);
+    const sections = [];
+    for (const binding of prepared.bindings) {
+      assert.deepEqual(binding.descriptor, parseVarinExtensionServiceProvision(VARIN_CONTEXT_FRAGMENTS_SERVICE));
+      const pin = binding.pin();
+      try {
+        assert.deepEqual(await pin.invoke("inspect", []), VARIN_CONTEXT_FRAGMENTS_CONTRACT);
+        sections.push(...parseVarinContextFragments(await pin.invoke("describe", [])).sections);
+      } finally { pin.release(); }
+    }
+    assert.deepEqual(sections.map(section => section.name), ["execution-reporting", "research-evidence"]);
+    assert.ok(sections.every(section => section.kind === "instruction" && section.content.length > 0));
+    const described = await runtime.queryContracts({ action: "describe", kind: "service", serviceId: "varin.context.fragments", version: 1,
+      extensionId: "example.project-context", member: { kind: "method", name: "describe" } });
+    assert.ok(described.kind === "service" && described.action === "describe");
+    assert.deepEqual(described.member?.contract, VARIN_CONTEXT_FRAGMENTS_SERVICE.contract.methods.describe);
+  } finally { await runtime.stop(); }
 });

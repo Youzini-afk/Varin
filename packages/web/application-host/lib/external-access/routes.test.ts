@@ -43,7 +43,6 @@ const createApp = ({ auth, documents, activeWorkspace }: {
   registerExternalAccessRoutes(app, {
     fsPromises: fs.promises,
     path,
-    os,
     process,
     spawn,
     buildAugmentedPath: () => process.env.PATH || '',

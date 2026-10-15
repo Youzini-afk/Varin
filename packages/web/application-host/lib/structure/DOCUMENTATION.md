@@ -239,12 +239,10 @@ windows. Tests that assert a real parse pin their own budget rather than
 inheriting the production value (D-102). An abort also reaches the native parse
 callback rather than merely discarding a late Host result.
 
-Hit classification (D-095) runs only after a file is materialized. Candidate
-ranking before `readFile` is unchanged. `windowScore` then adds
-`STRUCTURE_HIT_CLASS_SCORE` so a declaration name outranks the same token in a
-comment or string.
+Hit classification runs only after a file is materialized. Explore consumes the
+actual classification when ranking unit-local evidence; unread candidates are not parsed.
 
 A repeatable agent-view cold-start measurement lives in
 `packages/web/scripts/structure-cold-start.ts` (`bun run --cwd packages/web structure:cold-start`).
-It is not in the default test suite. Numbers go in `docs/status.md`;
-do not turn them into speedup claims.
+It is not in the default test suite. Record workload, revision and platform with any result;
+see [measurement boundaries](../../../../../docs/performance.md).

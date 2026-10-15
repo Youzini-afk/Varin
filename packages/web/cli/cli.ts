@@ -35,7 +35,7 @@ import { startupCommand } from './lib/commands-startup.js';
 import { logsCommand } from './lib/commands-logs.js';
 import { statusCommand } from './lib/commands-status.js';
 import { scheduleCommand } from './lib/commands-schedule.js';
-import { sessionCommand } from './lib/commands-session.js';
+import { threadCommand } from './lib/commands-thread.js';
 import { modelsCommand } from './lib/commands-models.js';
 import { projectsCommand } from './lib/commands-projects.js';
 import { createUpdateCommand } from './lib/commands-update.js';
@@ -180,7 +180,7 @@ interface CliCommands extends Record<string, StandardCommand | ActionCommand | T
   restart: StandardCommand;
   schedule: ActionCommand;
   serve: ServeCommand;
-  session: ActionCommand;
+  thread: ActionCommand;
   startup: ActionCommand;
   status: StandardCommand;
   stop: StopCommand;
@@ -195,7 +195,7 @@ const commands: CliCommands = {
   restart: lifecycleCommands.restart,
   status: statusCommand,
   schedule: scheduleCommand,
-  session: sessionCommand,
+  thread: threadCommand,
   models: modelsCommand,
   projects: projectsCommand,
   logs: logsCommand,
@@ -206,7 +206,7 @@ const commands: CliCommands = {
 
 async function main(): Promise<void> {
   const parsed = parseArgs();
-  const { command, subcommand, tunnelAction, startupAction, scheduleAction, sessionAction, options, removedFlagErrors, helpRequested, versionRequested } = parsed;
+  const { command, subcommand, tunnelAction, startupAction, scheduleAction, threadAction, options, removedFlagErrors, helpRequested, versionRequested } = parsed;
   activeCommandOptions = options;
 
   if (versionRequested) {
@@ -244,8 +244,8 @@ async function main(): Promise<void> {
       showConnectUrlHelp();
     } else if (command === 'schedule') {
       await commands.schedule(options, 'help');
-    } else if (command === 'session') {
-      await commands.session(options, 'help');
+    } else if (command === 'thread') {
+      await commands.thread(options, 'help');
     } else if (command === 'models') {
       await commands.models(options, 'help');
     } else if (command === 'projects') {
@@ -271,8 +271,8 @@ async function main(): Promise<void> {
     return;
   }
 
-  if (command === 'session') {
-    await commands.session(options, sessionAction ?? undefined);
+  if (command === 'thread') {
+    await commands.thread(options, threadAction ?? undefined);
     return;
   }
 
@@ -287,7 +287,7 @@ async function main(): Promise<void> {
   }
 
   if (!commands[command]) {
-    const knownCommands = ['serve', 'stop', 'restart', 'status', 'schedule', 'session', 'models', 'projects', 'tunnel', 'startup', 'logs', 'connect-url', 'update'];
+    const knownCommands = ['serve', 'stop', 'restart', 'status', 'schedule', 'thread', 'models', 'projects', 'tunnel', 'startup', 'logs', 'connect-url', 'update'];
     const suggestion = findClosestMatch(command, knownCommands);
     const hint = suggestion ? ` Did you mean '${suggestion}'?` : '';
     if (isJsonMode(options)) {

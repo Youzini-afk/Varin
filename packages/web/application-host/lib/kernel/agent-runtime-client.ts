@@ -1,0 +1,2083 @@
+import { commitPreparedMcpBinding } from './mcp-preparation-commit.js';
+import { SourceAdmissionError } from './source-admission-error.js';
+import type { SourceFailureCode } from './protocol.generated.js';
+import type { OperationCallCompletion, IncomingMedia, OutputPart } from './protocol.generated.js';
+import type { MediaReadParams, MediaReadChunk } from './protocol.generated.js';
+import type * as CalendarProtocol from './protocol.generated.js';
+import type { ChildContinuationAcceptParams, DelegatedExecution } from './protocol.generated.js';
+import type { MessageSendParams, MessageListParams, MessageGetParams, MessageReceipt, MessagePage, MessageView } from './protocol.generated.js';
+import type { FamilyListParams, FamilyRunsParams, FamilyReadParams, FamilyItemParams, FamilyList, FamilyRuns, FamilyRead, FamilyItem } from './protocol.generated.js';
+import type { ChildCapabilityDescriptor, ChildDispatchCatalog, TreeCancelTarget, TreeCancellationReceipt, McpBinding, LiveMcpBinding } from './protocol.generated.js';
+import { savedSourceLaunch } from './source-launch.js';
+import type { PlanView, PlanForkCapture } from '@varin/protocol';
+import { randomUUID } from 'node:crypto';
+import { isDeepStrictEqual } from 'node:util';
+import type { LiveSourceResolver } from './live-source.js';
+import type { PolicyModelPreparer } from './policy-models.js';
+import { waitWithSignal } from '../cancellation.js';
+import { waitForModelBinding } from './model-binding-lifetime.js';
+import type { AgentPolicyLease, AgentPolicyBinding, AgentPolicyArtifactBinding } from './agent-policy.js';
+import type {
+  McpToolLease,
+} from './tool-bridge.js';
+import type {
+  ExtensionToolPreparer,
+  ExtensionToolScope,
+  ExtensionToolLease,
+} from './extension-tool-owner.js';
+import type { LiveExtensionToolBinding } from './protocol.generated.js';
+import { permissionService } from './permission-service.js';
+import { registerUserFollowup } from './followup-source.js';
+import type {
+  ContextJob,
+  ContextCheckpoint,
+  ThreadToolInspection, ThreadPolicyPreparation, ThreadPolicyInspection,
+} from '@varin/application-client';
+import {
+  startRunFromSource,
+  sourceToolSchemas,
+  type SourceLaunch,
+} from './source-launch.js';
+import type { ExistingHostCredentialOwner } from './credential-owner.js';
+import type { KernelClient } from './kernel-client.js';
+import type { ManagedSourceClient, ManagedRemoteTargetRegistry } from '../harness/managed-remote-client.js';
+import type { ManagedHostSourceOwner, ManagedSourceBinding } from '../harness/managed-remote-types.js';
+import type {
+  RunModelSelection,
+  RunModelSelections,
+  ModelSessionConfiguration,
+} from './protocol.generated.js';
+import type {
+  AdmissionInspectParams,
+  AdmissionInspection,
+  ChildReportPage,
+  UnacceptedChildDependencies,
+  ChildTask,
+  ChildPrepareParams,
+  ChildSourceReadyParams, ChildSettleParams, ChildResultCandidateParams, ChildResultPublishedParams, HostToolReconcileParams,
+  ChildWait,
+  Followup, FollowupView, FollowupOccurrenceView, FollowupOccurrencesResult,
+  Goal, GoalControlReceipt, GoalStartParams, GoalUpdateParams, GoalControlParams,
+  FollowupRegisterParams,
+  FollowupControlParams,
+  ContextRefreshParams,
+  ResourceRefreshParams, ResourceSnapshotParams, ContextResources,
+  ContextJobCreateParams, ContextJobPreviewParams, ContextCompactionPreview,
+  HistoryPage,
+  HistoryPageParams,
+  HistoryReference,
+  HistoryBodyChunk,
+  RunReconcileResult,
+  ThreadSummary,
+  LaunchIntent,
+  LaunchSelectParams,
+  InputSubmitParams,
+  InputEditParams,
+  InputSubmitReceipt,
+  Run,
+  RunContextScope,
+  Operation,
+  HistoryItem,
+  RuntimeEvent,
+  RuntimeStatus,
+  ContentCollectionReport,
+  RunStartReceipt,
+  PolicyResumeReceipt,
+  PolicyModelCapability, PolicySelections, PolicySelection, PolicyTarget, PolicyStateMode,
+  InputEnqueueParams,
+  InputReceipt,
+  QueuedInput,
+  RunCancellationReceipt,
+  OperationCancellationReceipt,
+} from './protocol.generated.js';
+
+export interface McpPreparation {
+  runId: string;
+  threadId: string;
+  source: SourceLaunch | null;
+  executionCwd?: string;
+  requiredBinding?: McpBinding;
+  delegatedBinding?: McpBinding;
+  fixed?: boolean;
+  child?: import('./protocol.generated.js').DelegatedExecution;
+}
+export interface RunPolicyScope { runId: string; threadId: string; projectId?: string }
+export interface RunPolicyPreparer {
+  prepare(input: RunPolicyScope & { requiredBinding?: AgentPolicyArtifactBinding }, signal?: AbortSignal): Promise<AgentPolicyLease | undefined>;
+  observe(input: RunPolicyScope, changed: () => void, signal: AbortSignal): () => void;
+}
+interface PolicyPreparationAttempt { controller: AbortController; selectionId: string | null }
+interface PolicyObservation { scope: RunPolicyScope; controller: AbortController; revision: number; pending?: PolicyPreparationAttempt | undefined; unobserve?: () => void; preparation: ThreadPolicyPreparation | null }
+export type McpPreparer = (
+  input: McpPreparation,
+  signal?: AbortSignal,
+) => Promise<McpToolLease | undefined>;
+
+interface ToolCompositionState {
+  mcp: LiveMcpBinding | undefined;
+  extensions: Map<string, LiveExtensionToolBinding>;
+  scope?: ExtensionToolScope;
+  controller: AbortController;
+  revision: number;
+  published: number;
+  started: boolean;
+  startReady: Promise<void>;
+  wakeStart: () => void;
+  closed: boolean;
+  publishing?: Promise<void> | undefined;
+}
+/** Explicit authority client. Existing Pi thread routes are not silently redirected. */
+export class AgentRuntimeClient {
+  private managedSources?: Pick<ManagedRemoteTargetRegistry, 'source'>;
+  private readonly managedSourceBindings = new Map<string, { client: ManagedSourceClient; binding: ManagedSourceBinding }>();
+  bindManagedSources(registry: Pick<ManagedRemoteTargetRegistry, 'source'>): void {
+    if (this.managedSources && this.managedSources !== registry) throw new Error('Managed source owner is already bound');
+    this.managedSources = registry;
+  }
+  get coordinatorHostId(): string {
+    const hostId = this.kernel.handshake?.hostId;
+    if (!hostId) throw new Error('The coordinating Host identity is unavailable');
+    return hostId;
+  }
+  managedSource(owner: ManagedHostSourceOwner, signal?: AbortSignal): Promise<ManagedSourceClient> {
+    if (!this.managedSources) throw new Error('Managed source owner is unavailable');
+    return this.managedSources.source(owner, signal);
+  }
+  retainManagedSourceBinding(runId: string, binding: ManagedSourceBinding, client: ManagedSourceClient): void {
+    this.managedSourceBindings.set(runId, { binding, client });
+  }
+  async withManagedSourceAuthority<T>(runId: string, source: import('@varin/application-client').ThreadSource,
+    consume: (access: { client: ManagedSourceClient; binding: ManagedSourceBinding }) => Promise<T>, signal?: AbortSignal,
+    options: { purpose?: 'source' | 'mcp_owner'; original?: import('./protocol.generated.js').McpSourceAuthority } = {}): Promise<T> {
+    if (source.resourceOwner.kind !== 'managed_host') throw new SourceAdmissionError('source_changed');
+    const [run, launch] = await Promise.all([this.run(runId, signal), this.launch(runId, signal)]);
+    const original = launch?.selection.source;
+    if (!original || !isDeepStrictEqual(original.resource_owner, source.resourceOwner)
+      || original.workspace_id !== source.workspaceId || original.execution_workspace_id !== source.executionWorkspaceId
+      || original.mode !== source.mode || original.branch_id !== (source.branchId ?? null) || original.revision !== (source.revision ?? null)
+      || !isDeepStrictEqual(original.live_root, source.liveRoot ?? null)
+      || (original.environment_run_id ?? undefined) !== source.environmentRunId) throw new SourceAdmissionError('source_changed');
+    const purpose = options.purpose ?? 'source';
+    const key = purpose === 'source' ? runId : `mcp:${runId}`;
+    if (options.original && options.original.coordinator_host_id !== this.coordinatorHostId) throw new SourceAdmissionError('source_changed');
+    let access = this.managedSourceBindings.get(key);
+    if (!access) {
+      const client = await this.managedSource(source.resourceOwner, signal);
+      const candidates = await client.inspectScope({ coordinatorHostId: this.coordinatorHostId,
+        threadId: run.thread_id, runId }, signal);
+      const originalBinding = candidates.find(candidate => candidate.phase === 'ready' && candidate.purpose === purpose
+        && (!options.original || candidate.binding.authorityId === options.original.authority_id && candidate.binding.resourceEpoch === options.original.resource_epoch)
+        && candidate.scope.kind === 'run' && candidate.scope.epoch === run.epoch
+        && isDeepStrictEqual(candidate.binding.source, original));
+      if (originalBinding) access = { client, binding: originalBinding.binding };
+      else if (purpose === 'mcp_owner' && !options.original) {
+        if (run.cancel_requested || ['completed', 'cancelled', 'failed'].includes(run.state)) throw new SourceAdmissionError('source_authority_denied');
+        // Initial MCP admission owns a separate grant within the same Source authority.
+        // Retaining its daemon must never retain ordinary Run shell/file permissions.
+        const binding = await client.bind({ coordinatorHostId: this.coordinatorHostId,
+          scope: { kind: 'run', threadId: run.thread_id, runId, epoch: run.epoch }, source,
+          purpose: 'mcp_owner', retention: 'run' }, signal);
+        access = { client, binding };
+      } else throw new SourceAdmissionError('source_authority_denied');
+      this.managedSourceBindings.set(key, access);
+    }
+    if (options.original && (access.binding.authorityId !== options.original.authority_id
+      || access.binding.resourceEpoch !== options.original.resource_epoch)) throw new SourceAdmissionError('source_changed');
+    if (!isDeepStrictEqual(access.binding.source, original)) throw new SourceAdmissionError('source_changed');
+    signal?.throwIfAborted();
+    return consume(access);
+  }
+  constructor(
+    private readonly kernel: KernelClient,
+    private readonly prepareMcpOwner?: McpPreparer,
+    private readonly preparePolicyOwner?: RunPolicyPreparer,
+    private readonly preparePolicyModels?: PolicyModelPreparer,
+    private readonly resolveLiveSource?: LiveSourceResolver,
+    private readonly prepareExtensionOwner?: ExtensionToolPreparer,
+    private readonly sourceRegistration?: (workspaceId: string, signal?: AbortSignal) => Promise<unknown>,
+  ) {
+    kernel.subscribeExit(() => {
+      for (const runId of this.policyObservations.keys()) this.closePolicyObservation(runId);
+      for (const run of this.toolCompositions.keys())
+        this.releaseToolComposition(run);
+      this.sourceGrants.clear();
+      this.managedSourceBindings.clear();
+      this.mcpPreparations.clear();
+      for (const controller of this.mcpUpdates.values()) controller.abort();
+      this.mcpUpdates.clear();
+    });
+    kernel.onToolReleased((runId) => {
+      this.closePolicyObservation(runId);
+      this.releaseToolComposition(runId);
+      this.mcpPreparations.delete(runId);
+      this.mcpUpdates.get(runId)?.abort();
+      this.mcpUpdates.delete(runId);
+    });
+  }
+
+  private readonly policyObservations = new Map<string, PolicyObservation>();
+  private readonly toolCompositions = new Map<string, ToolCompositionState>();
+  private toolComposition(runId: string): ToolCompositionState {
+    let state = this.toolCompositions.get(runId);
+    if (!state) {
+      let wakeStart!: () => void;
+      const startReady = new Promise<void>((resolve) => {
+        wakeStart = resolve;
+      });
+      state = {
+        mcp: this.kernel.mcpLiveBinding(runId),
+        extensions: new Map(),
+        controller: new AbortController(),
+        revision: 0,
+        published: 0,
+        started: false,
+        startReady,
+        wakeStart,
+        closed: false,
+      };
+      this.toolCompositions.set(runId, state);
+    }
+    return state;
+  }
+  private releaseToolComposition(runId: string): void {
+    const state = this.toolCompositions.get(runId);
+    if (!state) return;
+    state.closed = true;
+    state.controller.abort();
+    state.scope?.close();
+    this.toolCompositions.delete(runId);
+    for (const live of state.extensions.values())
+      this.kernel.discardExtensionTool(runId, live);
+    if (state.mcp) this.kernel.discardMcpCandidate(runId, state.mcp);
+  }
+  /** Preparation is independent; only the short full-snapshot select/ready transaction is serialized. */
+  private async publishToolComposition(
+    runId: string,
+    state: ToolCompositionState,
+  ): Promise<void> {
+    if (state.closed) return;
+    // Only background contributions wait here. The initial Run starts with its already-ready
+    // directory and wakes this same owner once its actual start RPC has been acknowledged.
+    if (!state.started)
+      await waitWithSignal(state.startReady, state.controller.signal);
+    if (state.closed) return;
+    if (state.publishing) return state.publishing;
+    const work = (async () => {
+      while (!state.closed && state.published !== state.revision) {
+        const revision = state.revision,
+          selectionId = randomUUID(),
+          mcp = state.mcp,
+          extensions = [...state.extensions.values()].sort((a, b) =>
+            a.binding.providerKey.localeCompare(b.binding.providerKey),
+          );
+        await this.kernel.agentRuntimeRequest(
+          'runtime.tools.select',
+          { runId, selectionId },
+          state.controller.signal,
+        );
+        const result = await this.kernel.agentRuntimeRequest<
+          { ready: boolean },
+          'runtime.tools.ready'
+        >(
+          'runtime.tools.ready',
+          {
+            runId,
+            selectionId,
+            ...(mcp ? { binding: mcp } : {}),
+            extensionBindings: extensions,
+          },
+          state.controller.signal,
+        );
+        if (!result.ready) throw new Error('tool_composition_superseded');
+        state.published = revision;
+      }
+    })();
+    state.publishing = work;
+    void work
+      .finally(() => {
+        if (state.publishing === work) state.publishing = undefined;
+      })
+      .catch(() => undefined);
+    return work;
+  }
+  private async prepareExtensions(
+    runId: string,
+    signal: AbortSignal,
+  ): Promise<LiveExtensionToolBinding[]> {
+    const state = this.toolComposition(runId);
+    state.mcp = this.kernel.mcpLiveBinding(runId) ?? state.mcp;
+    if (state.scope) return [...state.extensions.values()];
+    const [run, launch] = await Promise.all([
+      this.run(runId, signal),
+      this.launch(runId, signal),
+    ]);
+    // ContextJobs own a frozen tool-free plan, including pure text runs. Current
+    // extension routing cannot add capabilities or block their original recovery.
+    if (launch?.selection.policy.name === 'context_compaction') return [];
+    const required = launch?.selection.extension_bindings ?? [];
+    if (!this.prepareExtensionOwner) {
+      if (required.length)
+        throw new Error(
+          'Saved extension tools require their original Host owner',
+        );
+      return [];
+    }
+    const child = await this.childExecutionForRun(runId, signal);
+    if (child && !required.length) return [];
+    const admittedScope = await this.kernel.agentRuntimeRequest<
+      RunContextScope | null,
+      'runtime.run.scope'
+    >('runtime.run.scope', { runId }, signal);
+    const projectId = admittedScope?.projectId;
+    const scope = await this.prepareExtensionOwner(
+      { runId, threadId: run.thread_id, branchId: run.branch_id, source: launch?.selection.source ?? null, ...(projectId ? { projectId } : {}), ...(child ? { fixed: true } : {}) },
+      required,
+      AbortSignal.any([signal, state.controller.signal]),
+    );
+    if (state.closed) {
+      scope.close();
+      for (const e of scope.initial) e.lease.release();
+      throw new Error('tool_composition_closed');
+    }
+    state.scope = scope;
+    const initial: LiveExtensionToolBinding[] = [];
+    const transferred = new Set<ExtensionToolLease>();
+    try {
+      for (const retained of scope.initial) {
+        const live = await this.kernel.registerExtensionTool(runId, retained);
+        transferred.add(retained);
+        initial.push(live);
+        state.extensions.set(
+          `${live.binding.serviceId}@${live.binding.serviceVersion}`,
+          live,
+        );
+      }
+      if (initial.length)
+        await this.kernel.agentRuntimeRequest(
+          'runtime.launch.extensions.prepare',
+          { runId, bindings: initial.map((e) => e.binding) },
+          signal,
+        );
+      if (child) {
+        // Original leases still enforce revocation. A frozen child does not subscribe to
+        // later routing candidates or turn them into additional admitted capabilities.
+        scope.start(async (_key, retained) => { retained?.lease.release(); });
+        return initial;
+      }
+      scope.start(async (key, retained, revoked) => {
+        if (state.closed) {
+          retained?.lease.release();
+          return;
+        }
+        const selected = state.extensions.get(key);
+        if (
+          revoked &&
+          (selected?.generation !== revoked.generation ||
+            !isDeepStrictEqual(selected.binding, revoked.binding))
+        )
+          return;
+        let live: LiveExtensionToolBinding | undefined;
+        try {
+          if (retained)
+            live = await this.kernel.registerExtensionTool(runId, retained);
+        } catch (error) {
+          retained?.lease.release();
+          throw error;
+        }
+        if (state.closed) {
+          if (live) this.kernel.discardExtensionTool(runId, live);
+          return;
+        }
+        const old = state.extensions.get(key);
+        if (live) state.extensions.set(key, live);
+        else state.extensions.delete(key);
+        const revision = ++state.revision;
+        try {
+          await this.publishToolComposition(runId, state);
+          if (old && old.ownerId !== live?.ownerId)
+            this.kernel.discardExtensionTool(runId, old);
+        } catch (error) {
+          // A later snapshot may fail after this exact contribution was already accepted.
+          if (state.published >= revision) {
+            if (old && old.ownerId !== live?.ownerId)
+              this.kernel.discardExtensionTool(runId, old);
+            return;
+          }
+          if (state.extensions.get(key) === live) {
+            if (old) state.extensions.set(key, old);
+            else state.extensions.delete(key);
+            state.revision++;
+          }
+          if (live && live.ownerId !== old?.ownerId)
+            this.kernel.discardExtensionTool(runId, live);
+          // tools.select withdrew the prior unactivated candidate. Restore the merged
+          // valid snapshot now, without waiting for an unrelated provider notification.
+          await this.publishToolComposition(runId, state).catch(
+            () => undefined,
+          );
+          throw error;
+        }
+      });
+      return initial;
+    } catch (error) {
+      this.releaseToolComposition(runId);
+      throw error;
+    } finally {
+      for (const retained of scope.initial)
+        if (!transferred.has(retained)) retained.lease.release();
+    }
+  }
+  async inspectTools(
+    runId: string,
+    signal?: AbortSignal,
+  ): Promise<ThreadToolInspection> {
+    const [launch, run] = await Promise.all([
+      this.launch(runId, signal),
+      this.run(runId, signal),
+    ]);
+    const active =
+      this.kernel.isReady &&
+      !!this.toolCompositions.get(runId) &&
+      !['completed', 'failed', 'cancelled'].includes(run.state) &&
+      !launch?.requires_rebind;
+    const external = new Set([
+      ...(launch?.selection.mcp_binding?.tools.map((t) => t.name) ?? []),
+      ...(launch?.selection.extension_bindings.map((b) => b.tool.name) ?? []),
+    ]);
+    const callable = active
+      ? (launch?.selection.tools ?? []).filter(
+          (t) =>
+            !external.has(t.name) ||
+            this.kernel.toolAvailability(runId, t.name, t.version) === true,
+        )
+      : [];
+    return {
+      runId,
+      generation: launch?.selection.tool_schema_generation ?? null,
+      permission: 'checked_on_invocation' as const,
+      callable,
+      bindings: {
+        mcp: launch?.selection.mcp_binding ?? null,
+        extensions: launch?.selection.extension_bindings ?? [],
+      },
+      preparations: this.toolCompositions.get(runId)?.scope?.inspect() ?? [],
+    };
+  }
+  private startedTools(runId: string): void {
+    const state = this.toolCompositions.get(runId);
+    if (!state) return;
+    state.started = true;
+    state.wakeStart();
+  }
+
+  private readonly sourceGrants = new Map<string, Set<string>>();
+  private readonly mcpPreparations = new Map<string, McpPreparation>();
+  private readonly mcpUpdates = new Map<string, AbortController>();
+  retainSourceGrant(runId: string, grantId: string): void {
+    const grants = this.sourceGrants.get(runId) ?? new Set<string>();
+    grants.add(grantId);
+    this.sourceGrants.set(runId, grants);
+  }
+  async releaseSourceGrant(runId: string, grantId: string): Promise<void> {
+    await this.kernel.revokeGrant(grantId);
+    const grants = this.sourceGrants.get(runId);
+    grants?.delete(grantId);
+    if (!grants?.size) this.sourceGrants.delete(runId);
+  }
+  private mcpResourceOwner?: Pick<import('./mcp-resource-runtime.js').McpResourceRuntime, 'releaseSource'>;
+  setMcpResourceOwner(owner:Pick<import('./mcp-resource-runtime.js').McpResourceRuntime, 'releaseSource'>):void { this.mcpResourceOwner=owner; }
+  private managedMcpInteractions?: Pick<import('./managed-mcp-interactions.js').ManagedMcpInteractions, 'releaseSource'>;
+  setManagedMcpInteractions(owner: Pick<import('./managed-mcp-interactions.js').ManagedMcpInteractions, 'releaseSource'>): void { this.managedMcpInteractions = owner; }
+  async releaseMcpResourceSource(runId:string):Promise<void> {
+    await Promise.all([this.mcpResourceOwner?.releaseSource(runId), this.mcpInteractionOwner?.releaseSource(runId)]);
+    await this.managedMcpInteractions?.releaseSource(runId);
+  }
+  async retireSourceGrants(runId: string): Promise<void> {
+    await this.releaseMcpResourceSource(runId);
+    const [run, launch] = await Promise.all([this.run(runId), this.launch(runId)]);
+    if (launch?.selection.source?.resource_owner.kind === 'managed_host') {
+      const service = await this.managedSource(launch.selection.source.resource_owner);
+      const result = await service.releaseScope({ coordinatorHostId: this.coordinatorHostId, threadId: run.thread_id, runId, mode: 'retire' });
+      if (!result || typeof result !== 'object' || !('pendingAuthorities' in result) || !Array.isArray(result.pendingAuthorities)
+        || result.pendingAuthorities.length) throw new Error('The original managed source still requires cleanup');
+      this.managedSourceBindings.delete(runId);
+      this.managedSourceBindings.delete(`mcp:${runId}`);
+      return;
+    }
+    await this.kernel.releaseLanguageSource(runId);
+    // The durable Storage grant owner resolves this Run, including grants from a previous Host.
+    await this.kernel.retireRunGrants(runId);
+    this.sourceGrants.delete(runId);
+  }
+  /** Host admission and nested resource assembly share the same Run/epoch cancellation owner. */
+  async withRunPreparation<T>(
+    runId: string,
+    callerSignal: AbortSignal | undefined,
+    work: (signal: AbortSignal) => Promise<T>,
+  ): Promise<T> {
+    const registration = this.kernel.beginRunPreparation(runId);
+    const signal = callerSignal
+      ? AbortSignal.any([callerSignal, registration.signal])
+      : registration.signal;
+    let pending: Promise<T>;
+    try {
+      signal.throwIfAborted();
+      pending = work(signal);
+    } catch (error) {
+      registration.release();
+      throw error;
+    }
+    // Caller cancellation stays prompt, but the original preparation registration
+    // remains drainable until its actual source/resource work has settled.
+    void pending.then(() => registration.release(), () => registration.release());
+    return waitWithSignal(pending, signal);
+  }
+
+  onExit(listener: (error: Error) => void): () => void {
+    return this.kernel.subscribeExit(listener);
+  }
+  onReady(listener: () => void): () => void {
+    return this.kernel.subscribeReady(listener);
+  }
+
+  onEvent(
+    listener: Parameters<KernelClient['onAgentRuntimeEvent']>[0],
+  ): () => void {
+    return this.kernel.onAgentRuntimeEvent(listener);
+  }
+
+  private mcpInteractionOwner?: import('./mcp-interaction-runtime.js').McpInteractionRuntime;
+  setMcpInteractionOwner(owner: import('./mcp-interaction-runtime.js').McpInteractionRuntime): void { this.mcpInteractionOwner = owner; }
+  reviewMcpSamplingRequest(input: import('./protocol.generated.js').McpSamplingRequestReviewParams, model?: import('./mcp-interaction-runtime.js').SamplingModelSelection, signal?: AbortSignal): Promise<import('./protocol.generated.js').McpInteractionView> {
+    if (!this.mcpInteractionOwner) return Promise.reject(new Error('MCP interaction owner is unavailable'));
+    return this.mcpInteractionOwner.reviewRequest(input, model, signal);
+  }
+  reviewMcpSamplingOutput(input: import('./protocol.generated.js').McpSamplingOutputReviewParams, signal?: AbortSignal): Promise<import('./protocol.generated.js').McpInteractionView> {
+    if (!this.mcpInteractionOwner) return Promise.reject(new Error('MCP interaction owner is unavailable'));
+    return this.mcpInteractionOwner.reviewOutput(input, signal);
+  }
+  listMcpInteractions(input: import('./protocol.generated.js').McpInteractionListParams, signal?: AbortSignal): Promise<import('./protocol.generated.js').McpInteractionPage> {
+    return this.kernel.agentRuntimeRequest('runtime.mcp.interaction.list', input, signal);
+  }
+  readMcpInteraction(operationId: string, interactionId: string, signal?: AbortSignal): Promise<import('./protocol.generated.js').McpInteractionView> {
+    return this.kernel.agentRuntimeRequest('runtime.mcp.interaction.read', {operationId, interactionId}, signal);
+  }
+  respondMcpInteraction(input: import('./protocol.generated.js').McpInteractionRespondParams, signal?: AbortSignal): Promise<import('./protocol.generated.js').McpInteractionView> {
+    if (!this.mcpInteractionOwner) return Promise.reject(Object.assign(new Error('mcp_interaction_owner_unavailable'), {code:'mcp_interaction_owner_unavailable'}));
+    return this.mcpInteractionOwner.respond(input, signal);
+  }
+
+  decidePermission(
+    operationId: string,
+    permissionId: string,
+    decision: 'allow_once' | 'deny',
+  ): Promise<Operation> {
+    return permissionService(this.kernel).decide(
+      operationId,
+      permissionId,
+      decision,
+    );
+  }
+  answerQuestion(
+    operationId: string,
+    answer: string,
+    signal?: AbortSignal,
+  ): Promise<Operation> {
+    return this.kernel.agentRuntimeRequest(
+      'runtime.question.answer',
+      { operationId, answer },
+      signal,
+    );
+  }
+  unacceptedChildDependencies(
+    signal?: AbortSignal,
+  ): Promise<UnacceptedChildDependencies[]> {
+    return this.kernel.agentRuntimeRequest(
+      'runtime.child.dependencies.pending',
+      {},
+      signal,
+    );
+  }
+  releaseUnacceptedChildDependencies(
+    operationId: string,
+    signal?: AbortSignal,
+  ): Promise<Record<string, never>> {
+    return this.kernel.agentRuntimeRequest(
+      'runtime.child.dependencies.release',
+      { operationId },
+      signal,
+    );
+  }
+  sendMessage(input: MessageSendParams, signal?: AbortSignal): Promise<MessageReceipt> {
+    return this.kernel.agentRuntimeRequest('runtime.messages.send', input, signal);
+  }
+  listMessages(input: MessageListParams, signal?: AbortSignal): Promise<MessagePage> {
+    return this.kernel.agentRuntimeRequest('runtime.messages.list', input, signal);
+  }
+  getMessage(input: MessageGetParams, signal?: AbortSignal): Promise<MessageView> {
+    return this.kernel.agentRuntimeRequest('runtime.messages.get', input, signal);
+  }
+  familyList(input: FamilyListParams, signal?: AbortSignal): Promise<FamilyList> {
+    return this.kernel.agentRuntimeRequest('runtime.family.list', input, signal);
+  }
+  familyRuns(input: FamilyRunsParams, signal?: AbortSignal): Promise<FamilyRuns> {
+    return this.kernel.agentRuntimeRequest('runtime.family.runs', input, signal);
+  }
+  familyRead(input: FamilyReadParams, signal?: AbortSignal): Promise<FamilyRead> {
+    return this.kernel.agentRuntimeRequest('runtime.family.read', input, signal);
+  }
+  familyItem(input: FamilyItemParams, signal?: AbortSignal): Promise<FamilyItem> {
+    return this.kernel.agentRuntimeRequest('runtime.family.item', input, signal);
+  }
+  readChildReport(
+    operationId: string,
+    itemId: string,
+    offset = 0,
+    maxBytes = 65536,
+    signal?: AbortSignal,
+  ): Promise<ChildReportPage> {
+    return this.kernel.agentRuntimeRequest(
+      'runtime.child.report.read',
+      { operationId, itemId, offset, maxBytes },
+      signal,
+    );
+  }
+  children(signal?: AbortSignal): Promise<ChildTask[]> {
+    return this.kernel.agentRuntimeRequest('runtime.child.list', {}, signal);
+  }
+  child(operationId: string, signal?: AbortSignal): Promise<ChildTask> {
+    return this.kernel.agentRuntimeRequest(
+      'runtime.child.inspect',
+      { operationId },
+      signal,
+    );
+  }
+  childForThread(
+    threadId: string,
+    signal?: AbortSignal,
+  ): Promise<ChildTask | null> {
+    return this.kernel.agentRuntimeRequest(
+      'runtime.child.for_thread',
+      { threadId },
+      signal,
+    );
+  }
+  reconcileHostTool(input: HostToolReconcileParams, signal?: AbortSignal): Promise<RunReconcileResult> {
+    return this.kernel.agentRuntimeRequest('runtime.host_tool.reconcile', input, signal);
+  }
+  acceptChildContinuation(input: ChildContinuationAcceptParams, signal?: AbortSignal): Promise<DelegatedExecution> {
+    return this.kernel.agentRuntimeRequest('runtime.child.continuation.accept', input, signal);
+  }
+  childExecution(executionId: string, signal?: AbortSignal): Promise<DelegatedExecution> {
+    return this.kernel.agentRuntimeRequest('runtime.child.execution.inspect', { executionId }, signal);
+  }
+  childExecutionForRun(runId: string, signal?: AbortSignal): Promise<DelegatedExecution | null> {
+    return this.kernel.agentRuntimeRequest('runtime.child.execution.for_run', { runId }, signal);
+  }
+  childExecutions(childOperationId?: string, signal?: AbortSignal): Promise<DelegatedExecution[]> {
+    return this.kernel.agentRuntimeRequest('runtime.child.execution.list', { ...(childOperationId ? { childOperationId } : {}) }, signal);
+  }
+  readChildExecutionReport(executionId: string, itemId: string, offset = 0, maxBytes = 65536, signal?: AbortSignal): Promise<ChildReportPage> {
+    return this.kernel.agentRuntimeRequest('runtime.child.execution.report.read', { executionId, itemId, offset, maxBytes }, signal);
+  }
+  readyChildSource(input: ChildSourceReadyParams, signal?: AbortSignal): Promise<DelegatedExecution> {
+    return this.kernel.agentRuntimeRequest('runtime.child.source.ready', input, signal);
+  }
+  settleChild(input: ChildSettleParams, signal?: AbortSignal): Promise<DelegatedExecution> {
+    return this.kernel.agentRuntimeRequest('runtime.child.settle', input, signal);
+  }
+  attachChildCandidate(input: ChildResultCandidateParams, signal?: AbortSignal): Promise<DelegatedExecution> {
+    return this.kernel.agentRuntimeRequest('runtime.child.result.candidate', input, signal);
+  }
+  attachChildResult(input: ChildResultPublishedParams, signal?: AbortSignal): Promise<DelegatedExecution> {
+    return this.kernel.agentRuntimeRequest('runtime.child.result.published', input, signal);
+  }
+  prepareChild(
+    input: ChildPrepareParams,
+    signal?: AbortSignal,
+  ): Promise<DelegatedExecution> {
+    return this.kernel.agentRuntimeRequest(
+      'runtime.child.prepare',
+      input,
+      signal,
+    );
+  }
+  failChild(
+    executionId: string,
+    code:
+      | 'preparation_failed'
+      | SourceFailureCode
+      | 'credentials_unavailable'
+      | 'binding_changed',
+    signal?: AbortSignal,
+  ): Promise<DelegatedExecution> {
+    return this.kernel.agentRuntimeRequest(
+      'runtime.child.fail',
+      { executionId, code },
+      signal,
+    );
+  }
+  async cancelChild(
+    operationId: string,
+    signal?: AbortSignal,
+  ): Promise<TreeCancellationReceipt> {
+    return this.kernel.agentRuntimeRequest(
+      'runtime.child.cancel',
+      { operationId },
+      signal,
+    );
+  }
+  releaseChildResources(
+    executionId: string,
+    signal?: AbortSignal,
+  ): Promise<DelegatedExecution> {
+    return this.kernel.agentRuntimeRequest(
+      'runtime.child.release',
+      { executionId },
+      signal,
+    );
+  }
+  /** The native observation owner retains child/process/reply conditions and deadlines. */
+  async pendingFollowupRegistrations(threadId: string, branchId: string, signal?: AbortSignal): Promise<CalendarProtocol.FollowupPendingRegistration[]> {
+    const registrations = new Map<string, CalendarProtocol.FollowupPendingRegistration>();
+    let after: string | undefined;
+    do {
+      const page = await this.kernel.agentRuntimeRequest<CalendarProtocol.FollowupPendingResult, 'runtime.followup.registrations.pending'>(
+        'runtime.followup.registrations.pending', { threadId, branchId, ...(after ? { after } : {}) }, signal);
+      for (const item of page.registrations) {
+        const prior = registrations.get(item.id);
+        registrations.set(item.id, prior ? { ...item, paths: [...new Set([...prior.paths, ...item.paths])] } : item);
+      }
+      after = page.nextCursor ?? undefined;
+    } while (after !== undefined);
+    return [...registrations.values()];
+  }
+  cancelFollowupRegistration(input: CalendarProtocol.FollowupRegistrationCancelParams, signal?: AbortSignal): Promise<CalendarProtocol.FollowupRegistrationCancelResult> {
+    return this.kernel.agentRuntimeRequest('runtime.followup.registration.cancel', input, signal);
+  }
+  reconcileObservations(signal?: AbortSignal): Promise<string[]> {
+    return this.kernel.agentRuntimeRequest('runtime.observations.reconcile', {}, signal);
+  }
+  reconcileSourceCleanup(signal?: AbortSignal): Promise<Record<string, never>> {
+    return this.kernel.agentRuntimeRequest('runtime.source.cleanup', {}, signal);
+  }
+  syncCalendar(input: CalendarProtocol.CalendarSyncParams, signal?: AbortSignal): Promise<CalendarProtocol.CalendarProject> {
+    return this.kernel.agentRuntimeRequest('runtime.calendar.sync', input, signal);
+  }
+  calendar(input: CalendarProtocol.CalendarProjectParams, signal?: AbortSignal): Promise<CalendarProtocol.CalendarProject> {
+    return this.kernel.agentRuntimeRequest('runtime.calendar.list', input, signal);
+  }
+  calendarOccurrences(input: CalendarProtocol.CalendarDefinitionParams, signal?: AbortSignal): Promise<CalendarProtocol.CalendarOccurrence[]> {
+    return this.kernel.agentRuntimeRequest('runtime.calendar.occurrences', input, signal);
+  }
+  runCalendar(input: CalendarProtocol.CalendarRunParams, signal?: AbortSignal): Promise<CalendarProtocol.CalendarOccurrence> {
+    return this.kernel.agentRuntimeRequest('runtime.calendar.run', input, signal);
+  }
+  prepareCalendar(input: CalendarProtocol.CalendarOccurrenceParams, signal?: AbortSignal): Promise<CalendarProtocol.CalendarPreparation> {
+    return this.kernel.agentRuntimeRequest('runtime.calendar.prepare', input, signal);
+  }
+  controlCalendarOccurrence(input: CalendarProtocol.CalendarOccurrenceControlParams, signal?: AbortSignal): Promise<CalendarProtocol.CalendarOccurrence> {
+    return this.kernel.agentRuntimeRequest('runtime.calendar.occurrence.control', input, signal);
+  }
+  calculatedCalendar(input: CalendarProtocol.CalendarCalculatedParams, signal?: AbortSignal): Promise<CalendarProtocol.CalendarDefinition> {
+    return this.kernel.agentRuntimeRequest('runtime.calendar.calculated', input, signal);
+  }
+  admitCalendar(input: CalendarProtocol.CalendarAdmitParams, signal?: AbortSignal): Promise<CalendarProtocol.CalendarOccurrence> {
+    return this.kernel.agentRuntimeRequest('runtime.calendar.admit', input, signal);
+  }
+  failCalendarPreparation(input: CalendarProtocol.CalendarPreparationFailedParams, signal?: AbortSignal): Promise<CalendarProtocol.CalendarOccurrence> {
+    return this.kernel.agentRuntimeRequest('runtime.calendar.preparation.failed', input, signal);
+  }
+  retryCalendarCalculation(input: CalendarProtocol.CalendarCalculationRetryParams, signal?: AbortSignal): Promise<CalendarProtocol.CalendarDefinition> {
+    return this.kernel.agentRuntimeRequest('runtime.calendar.calculation.retry', input, signal);
+  }
+  calendarProjects(signal?: AbortSignal): Promise<string[]> { return this.kernel.agentRuntimeRequest('runtime.calendar.projects', {}, signal); }
+  calendarPending(signal?: AbortSignal): Promise<CalendarProtocol.CalendarPending> { return this.kernel.agentRuntimeRequest('runtime.calendar.pending', {}, signal); }
+
+  fileFollowups(after?: string, signal?: AbortSignal): Promise<CalendarProtocol.FollowupFilesResult> {
+    return this.kernel.agentRuntimeRequest('runtime.followup.files', after === undefined ? {} : { after }, signal);
+  }
+  observeFileFollowup(input: CalendarProtocol.FollowupFileObserveParams, signal?: AbortSignal): Promise<CalendarProtocol.FollowupFileObserveResult> {
+    return this.kernel.agentRuntimeRequest('runtime.followup.file.observe', input, signal);
+  }
+  releaseFileFollowup(input: CalendarProtocol.FollowupFileReleaseParams, signal?: AbortSignal): Promise<CalendarProtocol.FollowupFileReleaseResult> {
+    return this.kernel.agentRuntimeRequest('runtime.followup.file.release', input, signal);
+  }
+  registerFollowup(input: FollowupRegisterParams, signal?: AbortSignal): Promise<Followup> {
+    return registerUserFollowup(this.kernel, this, input, this.resolveLiveSource, signal);
+  }
+  startGoal(input: GoalStartParams, signal?: AbortSignal): Promise<GoalControlReceipt> {
+    return this.kernel.agentRuntimeRequest('runtime.goal.start', input, signal);
+  }
+  updateGoal(input: GoalUpdateParams, signal?: AbortSignal): Promise<GoalControlReceipt> {
+    return this.kernel.agentRuntimeRequest('runtime.goal.update', input, signal);
+  }
+  controlGoal(input: GoalControlParams, signal?: AbortSignal): Promise<GoalControlReceipt> {
+    return this.kernel.agentRuntimeRequest('runtime.goal.control', input, signal);
+  }
+  goals(threadId: string, signal?: AbortSignal): Promise<Goal[]> {
+    return this.kernel.agentRuntimeRequest('runtime.goal.list', { threadId }, signal);
+  }
+  hostJobSources(runId: string, signal?: AbortSignal): Promise<CalendarProtocol.HostJobSource[]> {
+    return this.kernel.agentRuntimeRequest('runtime.host_job.sources', { runId }, signal);
+  }
+  followups(threadId: string, signal?: AbortSignal): Promise<Followup[]> {
+    return this.kernel.agentRuntimeRequest('runtime.followup.list', { threadId }, signal);
+  }
+  followup(followupId: string, signal?: AbortSignal): Promise<FollowupView> {
+    return this.kernel.agentRuntimeRequest('runtime.followup.get', { followupId }, signal);
+  }
+  followupOccurrences(followupId: string, after?: number, signal?: AbortSignal): Promise<FollowupOccurrencesResult> {
+    return this.kernel.agentRuntimeRequest('runtime.followup.occurrences', { followupId, ...(after === undefined ? {} : { after }) }, signal);
+  }
+  followupOccurrence(followupId: string, occurrenceId: string, signal?: AbortSignal): Promise<FollowupOccurrenceView> {
+    return this.kernel.agentRuntimeRequest('runtime.followup.occurrence', { followupId, occurrenceId }, signal);
+  }
+  controlFollowup(input: FollowupControlParams, signal?: AbortSignal): Promise<Followup> {
+    return this.kernel.agentRuntimeRequest('runtime.followup.control', input, signal);
+  }
+
+  cancelChildWait(waitId: string, signal?: AbortSignal): Promise<ChildWait> {
+    return this.kernel.agentRuntimeRequest(
+      'runtime.child.wait.cancel',
+      { waitId },
+      signal,
+    );
+  }
+  status(signal?: AbortSignal): Promise<RuntimeStatus> {
+    return this.kernel.agentRuntimeRequest('runtime.status', {}, signal);
+  }
+  /** Explicit Host maintenance, independent of Run/input admission and Storage's own GC. */
+  collectContent(signal?: AbortSignal): Promise<ContentCollectionReport> {
+    return this.kernel.agentRuntimeRequest('runtime.content.collect', {}, signal);
+  }
+  /** Use the Run epoch and actual ModelStep/tool-call or policy-action/node identity. */
+  admission(
+    input: AdmissionInspectParams,
+    signal?: AbortSignal,
+  ): Promise<AdmissionInspection> {
+    return this.kernel.agentRuntimeRequest(
+      'runtime.admission.inspect',
+      input,
+      signal,
+    );
+  }
+  thread(threadId: string, signal?: AbortSignal): Promise<ThreadSummary> {
+    return this.kernel.agentRuntimeRequest(
+      'runtime.thread.inspect',
+      { threadId },
+      signal,
+    );
+  }
+  threads(signal?: AbortSignal): Promise<ThreadSummary[]> {
+    return this.kernel.agentRuntimeRequest('runtime.thread.list', {}, signal);
+  }
+  threadCatalog(query: import('./protocol.generated.js').ThreadCatalogQuery = {}, signal?: AbortSignal): Promise<ThreadSummary[]> {
+    return this.kernel.agentRuntimeRequest('runtime.thread.catalog.list', query, signal);
+  }
+  updateThread(input: import('./protocol.generated.js').ThreadMetadataUpdateParams, signal?: AbortSignal): Promise<ThreadSummary> {
+    return this.kernel.agentRuntimeRequest('runtime.thread.update', input, signal);
+  }
+  deleteThread(input: import('./protocol.generated.js').ThreadDeleteParams, signal?: AbortSignal): Promise<ThreadSummary> {
+    return this.kernel.agentRuntimeRequest('runtime.thread.delete', input, signal);
+  }
+  markThreadRead(input: import('./protocol.generated.js').ThreadReadPositionParams, signal?: AbortSignal): Promise<ThreadSummary> {
+    return this.kernel.agentRuntimeRequest('runtime.thread.read', input, signal);
+  }
+  botScope(botId: string, signal?: AbortSignal): Promise<import('./protocol.generated.js').BotScopeView> {
+    return this.kernel.agentRuntimeRequest('runtime.bot.scope.inspect', { botId }, signal);
+  }
+  createBotThread(botId: string, threadId: string, branchId: string, signal?: AbortSignal): Promise<{threadId:string;branchId:string}> {
+    return this.kernel.agentRuntimeRequest('runtime.bot.thread.create', {botId,threadId,branchId}, signal);
+  }
+  botHistory(input: import('./protocol.generated.js').BotHistoryReadParams, signal?: AbortSignal): Promise<HistoryItem> {
+    return this.kernel.agentRuntimeRequest('runtime.bot.history.read', input, signal);
+  }
+  createThread(
+    threadId: string,
+    branchId: string,
+    signal?: AbortSignal,
+  ): Promise<{ threadId: string; branchId: string }> {
+    return this.kernel.agentRuntimeRequest(
+      'runtime.thread.create',
+      { threadId, branchId },
+      signal,
+    );
+  }
+  journalAnchor(operationId: string, signal?: AbortSignal): Promise<import('./protocol.generated.js').RecoveryAnchor> {
+    return this.kernel.agentRuntimeRequest('runtime.operation.recovery.anchor', { operationId }, signal);
+  }
+  recoveryWorkspaces(input: { threadId: string; branchId: string }, signal?: AbortSignal): Promise<import('./protocol.generated.js').LaunchSource[]> {
+    return this.kernel.agentRuntimeRequest('runtime.branch.recovery.workspaces', input, signal);
+  }
+  recoveryRange(input: import('./protocol.generated.js').NavigationSelectParams, signal?: AbortSignal): Promise<import('./protocol.generated.js').RecoveryRangeTurn[]> {
+    return this.kernel.agentRuntimeRequest('runtime.branch.recovery.range', input, signal);
+  }
+  prepareNavigation(input: import('./protocol.generated.js').NavigationSelectParams, signal?: AbortSignal): Promise<import('./protocol.generated.js').NavigationSelection> {
+    return this.kernel.agentRuntimeRequest('runtime.branch.navigation.prepare', input, signal);
+  }
+  navigate(input: import('./protocol.generated.js').NavigationParams, signal?: AbortSignal): Promise<import('./protocol.generated.js').NavigationReceipt> {
+    return this.kernel.agentRuntimeRequest('runtime.branch.navigate', input, signal);
+  }
+  navigationReceipt(input: import('./protocol.generated.js').NavigationReceiptParams, signal?: AbortSignal): Promise<import('./protocol.generated.js').NavigationReceipt | null> {
+    return this.kernel.agentRuntimeRequest('runtime.branch.navigation.receipt', input, signal);
+  }
+  forkBranch(
+    sourceBranchId: string,
+    branchId: string,
+    headId: string | null,
+    signal?: AbortSignal,
+    planCapture?: PlanForkCapture,
+  ): Promise<{ threadId: string; branchId: string }> {
+    return this.kernel.agentRuntimeRequest(
+      'runtime.branch.fork',
+      {
+        sourceBranchId,
+        branchId,
+        headId,
+        ...(planCapture === undefined ? {} : { planCapture }),
+      },
+      signal,
+    );
+  }
+  planContains(
+    branchId: string,
+    headId: string | null,
+    candidateHeadId: string | null,
+    cursor?: string,
+    signal?: AbortSignal,
+  ): Promise<
+    | { status: 'pending'; cursor: string }
+    | { status: 'ready'; visible: boolean }
+  > {
+    return this.kernel.agentRuntimeRequest(
+      'runtime.plan.contains',
+      {
+        branchId,
+        headId,
+        candidateHeadId,
+        ...(cursor === undefined ? {} : { cursor }),
+      },
+      signal,
+    );
+  }
+  planView(
+    branchId: string,
+    headId?: string | null,
+    signal?: AbortSignal,
+  ): Promise<PlanView> {
+    return this.kernel.agentRuntimeRequest(
+      'runtime.plan.view',
+      { branchId, headId: headId ?? null, current: headId === undefined },
+      signal,
+    );
+  }
+  refreshResources(input: ResourceRefreshParams, signal?: AbortSignal): Promise<ContextCheckpoint> {
+    return this.kernel.agentRuntimeRequest('runtime.resources.refresh', input, signal);
+  }
+  resourceSnapshot(input: ResourceSnapshotParams, signal?: AbortSignal): Promise<ContextResources> {
+    return this.kernel.agentRuntimeRequest('runtime.resources.snapshot', input, signal);
+  }
+  refreshContext(
+    input: ContextRefreshParams,
+    signal?: AbortSignal,
+  ): Promise<ContextCheckpoint> {
+    return this.kernel.agentRuntimeRequest(
+      'runtime.context.refresh',
+      input,
+      signal,
+    );
+  }
+  contextScope(runId: string, signal?: AbortSignal): Promise<RunContextScope | null> {
+    return this.kernel.agentRuntimeRequest('runtime.run.scope', { runId }, signal);
+  }
+  context(
+    branchId: string,
+    signal?: AbortSignal,
+  ): Promise<ContextCheckpoint | null> {
+    return this.kernel.agentRuntimeRequest(
+      'runtime.context.inspect',
+      { branchId },
+      signal,
+    );
+  }
+  contextJobs(branchId: string, signal?: AbortSignal): Promise<ContextJob[]> {
+    return this.kernel.agentRuntimeRequest(
+      'runtime.context_job.list',
+      { branchId },
+      signal,
+    );
+  }
+  contextJob(runId: string, signal?: AbortSignal): Promise<ContextJob> {
+    return this.kernel.agentRuntimeRequest(
+      'runtime.context_job.inspect',
+      { runId },
+      signal,
+    );
+  }
+  previewContextJob(input: ContextJobPreviewParams, signal?: AbortSignal): Promise<ContextCompactionPreview> {
+    return this.kernel.agentRuntimeRequest('runtime.context_job.preview', input, signal);
+  }
+  createContextJob(
+    input: ContextJobCreateParams,
+    signal?: AbortSignal,
+  ): Promise<ContextJob> {
+    return this.kernel.agentRuntimeRequest(
+      'runtime.context_job.create',
+      input,
+      signal,
+    );
+  }
+  publishContextJob(
+    runId: string,
+    signal?: AbortSignal,
+  ): Promise<ContextCheckpoint> {
+    return this.kernel.agentRuntimeRequest(
+      'runtime.context_job.publish',
+      { runId },
+      signal,
+    );
+  }
+  resumeContextJob(runId: string, signal?: AbortSignal): Promise<Run | null> {
+    return this.kernel.agentRuntimeRequest(
+      'runtime.context_job.resume',
+      { runId },
+      signal,
+    );
+  }
+  inputReceipt(input: InputSubmitParams, signal?: AbortSignal): Promise<InputSubmitReceipt | null> {
+    return this.kernel.agentRuntimeRequest('runtime.input.receipt', input, signal);
+  }
+  submit(
+    input: InputSubmitParams,
+    signal?: AbortSignal,
+  ): Promise<InputSubmitReceipt> {
+    return this.kernel.agentRuntimeRequest(
+      'runtime.input.submit',
+      input,
+      signal,
+    );
+  }
+  enqueueReceipt(input: InputEnqueueParams, signal?: AbortSignal): Promise<InputReceipt | null> {
+    return this.kernel.agentRuntimeRequest('runtime.input.enqueueReceipt', input, signal);
+  }
+  enqueue(
+    input: InputEnqueueParams,
+    signal?: AbortSignal,
+  ): Promise<InputReceipt> {
+    return this.kernel.agentRuntimeRequest(
+      'runtime.input.enqueue',
+      input,
+      signal,
+    );
+  }
+  editInput(input: InputEditParams, signal?: AbortSignal): Promise<QueuedInput> {
+    return this.kernel.agentRuntimeRequest('runtime.input.edit', input, signal);
+  }
+  cancelInput(
+    inputId: string,
+    expectedRevision: number,
+    signal?: AbortSignal,
+  ): Promise<QueuedInput> {
+    return this.kernel.agentRuntimeRequest(
+      'runtime.input.cancel',
+      { inputId, expectedRevision },
+      signal,
+    );
+  }
+  input(inputId: string, signal?: AbortSignal): Promise<QueuedInput> {
+    return this.kernel.agentRuntimeRequest(
+      'runtime.input.inspect',
+      { inputId },
+      signal,
+    );
+  }
+  inputs(branchId: string, signal?: AbortSignal): Promise<QueuedInput[]> {
+    return this.kernel.agentRuntimeRequest(
+      'runtime.input.list',
+      { branchId },
+      signal,
+    );
+  }
+  reconcilePlan(
+    runId: string,
+    signal?: AbortSignal,
+  ): Promise<RunReconcileResult> {
+    return this.kernel.agentRuntimeRequest(
+      'runtime.plan.reconcile',
+      { runId },
+      signal,
+    );
+  }
+  reconcileMemory(
+    runId: string,
+    signal?: AbortSignal,
+  ): Promise<RunReconcileResult> {
+    return this.kernel.agentRuntimeRequest(
+      'runtime.memory.reconcile',
+      { runId },
+      signal,
+    );
+  }
+  reconcileRun(
+    runId: string,
+    toolBinding: CalendarProtocol.SourceToolBinding,
+    signal?: AbortSignal,
+  ): Promise<RunReconcileResult> {
+    return this.kernel.agentRuntimeRequest(
+      'runtime.run.reconcile',
+      { runId, toolBinding },
+      signal,
+    );
+  }
+  failLaunch(
+    runId: string,
+    code:
+      | 'preparation_failed'
+      | SourceFailureCode
+      | 'credentials_unavailable'
+      | 'binding_changed',
+    signal?: AbortSignal,
+  ): Promise<LaunchIntent> {
+    return this.kernel.agentRuntimeRequest(
+      'runtime.launch.fail',
+      { runId, code },
+      signal,
+    );
+  }
+  threadUsage(threadId: string, branchId: string, signal?: AbortSignal): Promise<import('./protocol.generated.js').ThreadUsage> {
+    return this.kernel.agentRuntimeRequest('runtime.thread.usage', { threadId, branchId }, signal);
+  }
+  sourceTools(mode: import('./protocol.generated.js').SourceMode, signal?: AbortSignal): Promise<string[]> {
+    return this.kernel.agentRuntimeRequest('runtime.source.tools', { mode }, signal);
+  }
+  childCapabilities(signal?: AbortSignal): Promise<ChildCapabilityDescriptor[]> {
+    return this.kernel.agentRuntimeRequest('runtime.child.capabilities', {}, signal);
+  }
+  cancelTree(target: TreeCancelTarget, signal?: AbortSignal, expectedParentThreadId?: string): Promise<TreeCancellationReceipt> {
+    return this.kernel.agentRuntimeRequest('runtime.tree.cancel', { target, ...(expectedParentThreadId ? { expectedParentThreadId } : {}) }, signal);
+  }
+  selectLaunch(
+    params: LaunchSelectParams,
+    signal?: AbortSignal,
+  ): Promise<LaunchIntent> {
+    return this.kernel.agentRuntimeRequest(
+      'runtime.launch.select',
+      params,
+      signal,
+    );
+  }
+  /** Recheck the original Documents owner; a namespace is never a physical execution root. */
+  async admitSourceRegistration(source: { resourceOwner: CalendarProtocol.SourceResourceOwner; workspaceId: string; executionWorkspaceId: string }, signal?: AbortSignal): Promise<void> {
+    signal?.throwIfAborted();
+    if (source.resourceOwner.kind === 'managed_host') {
+      // Documents admission belongs to the target's source binding. Here only the
+      // frozen connection is checked; never register its names on this Host.
+      await this.managedSource(source.resourceOwner, signal);
+      return;
+    }
+    if (!this.sourceRegistration) throw new SourceAdmissionError('source_unavailable');
+    await this.sourceRegistration(source.workspaceId, signal);
+    if (source.executionWorkspaceId !== source.workspaceId) await this.sourceRegistration(source.executionWorkspaceId, signal);
+    signal?.throwIfAborted();
+  }
+
+  /** Slow connection/schema preparation happens after input admission, before the first model request. */
+  async prepareMcp(
+    runId: string,
+    source: SourceLaunch | null,
+    executionCwd?: string,
+    signal?: AbortSignal,
+  ): Promise<McpBinding | undefined> {
+    return this.withRunPreparation(runId, signal, async (signal) => {
+      const existing = this.kernel.mcpBinding(runId);
+      if (existing) return existing;
+      const saved = await this.launch(runId, signal);
+      const run = await this.run(runId, signal);
+      const child = await this.childExecutionForRun(runId, signal);
+      if (child && !saved?.selection.mcp_binding) return undefined;
+      if (!this.prepareMcpOwner) {
+        if (saved?.selection.mcp_binding)
+          throw new Error(
+            'Saved MCP capabilities require their original Host owner',
+          );
+        return undefined;
+      }
+
+      const input = {
+        runId,
+        threadId: run.thread_id,
+        source,
+        ...(executionCwd ? { executionCwd } : {}),
+        ...(child ? { fixed: true, child } : {}),
+      };
+      if (!child) this.mcpPreparations.set(runId, input);
+      const preparation = this.prepareMcpOwner(
+        {
+          ...input,
+          ...(saved?.selection.mcp_binding
+            ? child && isDeepStrictEqual(saved.selection.mcp_binding, child.launch.mcp_binding)
+              ? { delegatedBinding: saved.selection.mcp_binding }
+              : { requiredBinding: saved.selection.mcp_binding }
+            : {}),
+        },
+        signal,
+      );
+      void preparation.then(
+        (lease) => {
+          if (signal.aborted) lease?.release();
+        },
+        () => undefined,
+      );
+      const lease = await waitWithSignal(preparation, signal);
+      if (!lease || lease.binding.tools.length === 0) {
+        lease?.release();
+        if (saved?.selection.mcp_binding)
+          throw new Error('Saved MCP capabilities are unavailable');
+        return undefined;
+      }
+      try {
+        signal?.throwIfAborted();
+        return await commitPreparedMcpBinding(this.kernel, runId, lease, () => this.launch(runId), signal);
+      } catch (error) {
+        lease.release();
+        throw error;
+      }
+    });
+  }
+  /** Called by the actual MCP scope's configuration/tool events, never by each model request. */
+  async refreshMcp(runId: string): Promise<void> {
+    const input = this.mcpPreparations.get(runId);
+    if (!input || !this.prepareMcpOwner) return;
+    const controller = new AbortController();
+    this.mcpUpdates.get(runId)?.abort();
+    this.mcpUpdates.set(runId, controller);
+    try {
+      await this.withRunPreparation(
+        runId,
+        controller.signal,
+        async (signal) => {
+          const work = this.prepareMcpOwner!(input, signal);
+          void work.then(
+            (lease) => {
+              if (signal.aborted) lease?.release();
+            },
+            () => undefined,
+          );
+          const lease = await waitWithSignal(work, signal),
+            state = this.toolComposition(runId);
+          if (state.closed) {
+            lease?.release();
+            return;
+          }
+          if (
+            isDeepStrictEqual(lease?.binding, state.mcp?.binding) &&
+            lease?.implementationIdentity ===
+              this.kernel.mcpImplementationIdentity(runId)
+          ) {
+            lease?.release();
+            return;
+          }
+          let retained: LiveMcpBinding | undefined;
+          try {
+            if (lease && lease.binding.tools.length)
+              retained = await this.kernel.registerMcpCandidate(runId, lease);
+            else lease?.release();
+          } catch (error) {
+            lease?.release();
+            throw error;
+          }
+          if (signal.aborted || state.closed) {
+            if (retained) this.kernel.discardMcpCandidate(runId, retained);
+            return;
+          }
+          const old = state.mcp;
+          state.mcp = retained;
+          const revision = ++state.revision;
+          try {
+            await this.publishToolComposition(runId, state);
+            if (old && old.ownerId !== retained?.ownerId)
+              this.kernel.discardMcpCandidate(runId, old);
+          } catch (error) {
+            if (state.published >= revision) {
+              if (old && old.ownerId !== retained?.ownerId)
+                this.kernel.discardMcpCandidate(runId, old);
+              return;
+            }
+            if (state.mcp === retained) {
+              state.mcp = old;
+              state.revision++;
+            }
+            if (retained && retained.ownerId !== old?.ownerId)
+              this.kernel.discardMcpCandidate(runId, retained);
+            await this.publishToolComposition(runId, state).catch(
+              () => undefined,
+            );
+            throw error;
+          }
+        },
+      );
+    } catch (error) {
+      if (!controller.signal.aborted) throw error;
+    } finally {
+      if (this.mcpUpdates.get(runId) === controller)
+        this.mcpUpdates.delete(runId);
+    }
+  }
+  startFromSource(
+    selection: SourceLaunch,
+    options: {
+      credentialOwner?: ExistingHostCredentialOwner;
+      signal?: AbortSignal;
+    } = {},
+  ): Promise<RunStartReceipt> {
+    return this.withRunPreparation(selection.runId, options.signal, (signal) =>
+      startRunFromSource(this.kernel, this, selection, {
+        ...options,
+        signal,
+        ...(this.resolveLiveSource
+          ? { resolveLiveSource: this.resolveLiveSource }
+          : {}),
+      }),
+    );
+  }
+  /** Reacquire fresh authority from a saved selection; unresolved model/effect waits still reject start. */
+  async rebindLaunch(
+    runId: string,
+    options: {
+      credentialOwner?: ExistingHostCredentialOwner;
+      signal?: AbortSignal;
+    } = {},
+  ): Promise<RunStartReceipt> {
+    return this.withRunPreparation(runId, options.signal, async (signal) => {
+      options = { ...options, signal };
+      const launch = await this.launch(runId, options.signal);
+      if (!launch) throw new Error('Run has no durable launch selection');
+      const source = launch.selection.source;
+      if (!source) {
+        if (sourceToolSchemas(launch.selection).length)
+          throw new Error(
+            'Saved tools require an explicit Host resource rebind',
+          );
+        await this.prepareMcp(runId, null, undefined, options.signal);
+        return options.credentialOwner
+          ? this.startRunWithCredentialOwner(
+              runId,
+              options.credentialOwner,
+              options.signal,
+            )
+          : this.startRun(runId, options.signal);
+      }
+
+      const tools = sourceToolSchemas(launch.selection).map(tool => tool.name);
+      return this.startFromSource(
+        savedSourceLaunch(runId, source, tools),
+        options,
+      );
+    });
+  }
+  /** Carry a thread's actual materialized environment into an admitted successor Run. */
+  async continueFromLaunch(
+    previousRunId: string,
+    runId: string,
+    options: {
+      credentialOwner?: ExistingHostCredentialOwner;
+      signal?: AbortSignal;
+    } = {},
+  ): Promise<RunStartReceipt> {
+    return this.withRunPreparation(runId, options.signal, async (signal) => {
+      options = { ...options, signal };
+      const previous = await this.launch(previousRunId, options.signal);
+      if (!previous)
+        throw new Error('Previous Run has no source launch selection');
+      if (previous.selection.credential_scope) {
+        if (!options.credentialOwner)
+          throw new Error(
+            'Continuation requires the selected credential owner',
+          );
+        const actual = await options.credentialOwner.scope();
+        const expected = previous.selection.credential_scope;
+        if (
+          actual.reference !== expected.reference ||
+          actual.authority !== expected.authority ||
+          actual.account !== expected.account ||
+          actual.generation !== expected.generation
+        )
+          throw new Error('Continuation credential selection changed');
+      }
+      const source = previous.selection.source;
+      if (!source) {
+        const credentialScope = options.credentialOwner
+          ? await options.credentialOwner.scope()
+          : undefined;
+        await this.selectLaunch(
+          {
+            runId,
+            source: null,
+            enabledTools: [],
+            ...(credentialScope ? { credentialScope } : {}),
+          },
+          options.signal,
+        );
+        await this.prepareMcp(runId, null, undefined, options.signal);
+        return options.credentialOwner
+          ? this.startRunWithCredentialOwner(
+              runId,
+              options.credentialOwner,
+              options.signal,
+            )
+          : this.startRun(runId, options.signal);
+      }
+
+      const tools = sourceToolSchemas(previous.selection).map(tool => tool.name);
+      return this.startFromSource(
+        savedSourceLaunch(runId, source, tools, previousRunId),
+        options,
+      );
+    });
+  }
+  launch(runId: string, signal?: AbortSignal): Promise<LaunchIntent | null> {
+    return this.kernel.agentRuntimeRequest(
+      'runtime.launch.inspect',
+      { runId },
+      signal,
+    );
+  }
+  pendingLaunches(signal?: AbortSignal): Promise<LaunchIntent[]> {
+    return this.kernel.agentRuntimeRequest('runtime.launch.list', {}, signal);
+  }
+  async inspectPolicy(runId: string, signal?: AbortSignal): Promise<ThreadPolicyInspection> {
+    return { ...await this.policySelections(runId, signal), preparation: structuredClone(this.policyObservations.get(runId)?.preparation ?? null) };
+  }
+  policySelections(runId: string, signal?: AbortSignal): Promise<PolicySelections> {
+    return this.kernel.agentRuntimeRequest('runtime.policy.inspect', { runId }, signal);
+  }
+  private closePolicyObservation(runId: string): void {
+    const state = this.policyObservations.get(runId);
+    if (!state) return;
+    this.policyObservations.delete(runId);
+    state.controller.abort(); state.pending?.controller.abort(); state.unobserve?.();
+  }
+  private async policyScope(runId: string, threadId: string, signal?: AbortSignal): Promise<RunPolicyScope> {
+    const admitted = await this.contextScope(runId, signal);
+    return { runId, threadId, ...(admitted?.projectId ? { projectId: admitted.projectId } : {}) };
+  }
+  private observePolicy(scope: RunPolicyScope): void {
+    if (!this.preparePolicyOwner) return;
+    const state = this.policyObservations.get(scope.runId) ?? { controller: new AbortController(), scope, revision: 0, preparation: null };
+    if (state.unobserve) return;
+    this.policyObservations.set(scope.runId, state);
+    let initial = true;
+    state.unobserve = this.preparePolicyOwner.observe(scope, () => {
+      const first = initial; initial = false;
+      void this.refreshPolicy(scope.runId, first).catch(() => undefined);
+    }, state.controller.signal);
+  }
+  private async preparePolicyCredentials(runId: string, threadId: string, generation: number, lease: AgentPolicyLease,
+    signal: AbortSignal, savedCapabilities?: readonly PolicyModelCapability[]): Promise<{ lease: AgentPolicyLease; models: PolicyModelCapability[] }> {
+    const roles = lease.binding.artifact.modelRoles;
+    if (roles.length && !this.preparePolicyModels) throw new Error('Planning model preparation is unavailable');
+    const releasePrepared = (models: Awaited<ReturnType<PolicyModelPreparer>>) => {
+      for (const entry of models) entry.credentialOwner?.release();
+    };
+    const prepared = this.preparePolicyModels ? await waitForModelBinding(this.preparePolicyModels({ threadId, generation,
+      requestedModelRoles: roles, ...(savedCapabilities === undefined ? {} : { savedCapabilities }) }, signal), releasePrepared, signal) : [];
+    const registered: Array<{ bindingId: string; epoch: string | null }> = [];
+    const releaseCredentials = () => {
+      for (const entry of registered) if (this.kernel.kernelEpoch === entry.epoch) this.kernel.unregisterCredentialOwner(runId, entry.bindingId);
+    };
+    try {
+      for (const entry of prepared) {
+        if (entry.capability.status !== 'available') continue;
+        const bindingId = entry.capability.binding_id;
+        if (!entry.credentialOwner || !bindingId) throw new Error('Planning credential owner is missing');
+        const scope = await this.kernel.registerCredentialOwner(runId, entry.credentialOwner, signal, bindingId);
+        registered.push({ bindingId, epoch: this.kernel.kernelEpoch });
+        if (!isDeepStrictEqual(scope, entry.capability.credential_scope)) throw new Error('Planning credential scope changed');
+      }
+      let released = false;
+      return { models: prepared.map(entry => ({ ...entry.capability, binding: null })), lease: { ...lease,
+        release: () => {
+          if (released) return;
+          released = true;
+          releaseCredentials();
+          lease.release();
+        } } };
+    } catch (error) {
+      releaseCredentials();
+      throw error;
+    } finally { releasePrepared(prepared); }
+  }
+  /** Routing updates prepare independently. Only Catalog's closed-boundary commit activates them. */
+  async refreshPolicy(runId: string, initialObservation = false): Promise<PolicySelections> {
+    const state = this.policyObservations.get(runId);
+    if (!state || !this.preparePolicyOwner) return this.policySelections(runId);
+    const revision = ++state.revision;
+    state.pending?.controller.abort();
+    const controller = new AbortController(), attempt: PolicyPreparationAttempt = { controller, selectionId: null }; state.pending = attempt;
+    const signal = AbortSignal.any([state.controller.signal, controller.signal]);
+    let lease: AgentPolicyLease | undefined;
+    state.preparation = { status: 'preparing', code: null };
+    try {
+      lease = await this.preparePolicyLease(state.scope, signal);
+      const target: PolicyTarget = lease ? { kind: 'extension', artifact: lease.binding.artifact } : { kind: 'default' };
+      const selected = await this.policySelections(runId, signal);
+      if (isDeepStrictEqual(target, selected.active.target)) {
+        // A route returning to the active owner withdraws the older unactivated candidate.
+        if (selected.desired && ['preparing', 'ready'].includes(selected.desired.status)
+          && !isDeepStrictEqual(selected.desired.target, target)) {
+          const cancelled = await this.kernel.agentRuntimeRequest<PolicySelection, 'runtime.policy.cancel'>('runtime.policy.cancel',
+            { runId, selectionId: selected.desired.selection_id }, signal, { settleCancellation: true });
+          if (cancelled.status === 'cancelled') this.kernel.unregisterPolicyOwner(runId, cancelled.generation);
+          return this.policySelections(runId, signal);
+        }
+        return selected;
+      }
+      const desired = selected.desired;
+      if (desired && isDeepStrictEqual(target, desired.target)) {
+        if (['preparing', 'ready'].includes(desired.status)) return selected;
+        if (initialObservation && (desired.status === 'cancelled' || desired.failure === 'policy_state_incompatible')) return selected;
+      }
+      if (state.revision !== revision) throw new Error('policy_preparation_superseded');
+      const transferred = lease; lease = undefined;
+      await this.publishPolicyCandidate(state.scope, selected.active.generation, selected.desired?.selection_id ?? null, target, 'preserve', transferred, signal, attempt);
+      return this.policySelections(runId, signal);
+    } catch (error) {
+      if (state.revision === revision && !state.controller.signal.aborted && !controller.signal.aborted) {
+        const code = error && typeof error === 'object' && 'code' in error && error.code === 'selected_unavailable' ? 'policy_route_unavailable' : 'policy_preparation_failed';
+        state.preparation = { status: 'failed', code };
+      }
+      throw error;
+    } finally {
+      lease?.release();
+      if (state.pending === attempt) {
+        state.pending = undefined;
+        if (state.preparation?.status === 'preparing') state.preparation = null;
+      }
+    }
+  }
+  private async preparePolicyLease(scope: RunPolicyScope & { requiredBinding?: AgentPolicyArtifactBinding }, signal: AbortSignal): Promise<AgentPolicyLease | undefined> {
+    if (!this.preparePolicyOwner) {
+      if (scope.requiredBinding) throw new Error('Saved policy requires its exact original artifact and configuration');
+      return undefined;
+    }
+    const pending = this.preparePolicyOwner.prepare(scope, signal);
+    void pending.then(lease => { if (signal.aborted) lease?.release(); }, () => undefined);
+    return waitWithSignal(pending, signal);
+  }
+  private async publishPolicyCandidate(scope: RunPolicyScope, expectedGeneration: number, expectedSelectionId: string | null, target: PolicyTarget,
+    stateMode: PolicyStateMode, preparedLease: AgentPolicyLease | undefined, signal: AbortSignal, attempt: PolicyPreparationAttempt): Promise<PolicySelection> {
+    const runId = scope.runId, selectionId = randomUUID();
+    let lease = preparedLease, registered = false, selected: PolicySelection | undefined;
+    try {
+      selected = await this.kernel.agentRuntimeRequest<PolicySelection, 'runtime.policy.select'>('runtime.policy.select',
+        { runId, selectionId, expectedGeneration, expectedSelectionId, target, stateMode }, signal, { settleCancellation: true });
+      attempt.selectionId = selected.selection_id;
+      signal.throwIfAborted();
+      if (target.kind === 'extension' && !lease) lease = await this.preparePolicyLease({ ...scope, requiredBinding: target.artifact }, signal);
+      if (target.kind === 'extension' && (!lease || !isDeepStrictEqual(lease.binding.artifact, target.artifact))) throw new Error('policy_exact_binding_unavailable');
+      let binding: AgentPolicyBinding | null = null, models: PolicyModelCapability[] = [];
+      if (lease) {
+        const prepared = await this.preparePolicyCredentials(runId, scope.threadId, selected.generation, lease, signal);
+        lease = prepared.lease; models = prepared.models;
+        signal.throwIfAborted();
+        const retained = lease;
+        const revoked = () => {
+          // The bridge first rejects this generation's pending callbacks and drops its holder.
+          // Notify Catalog afterward; a synchronous control reply must not suppress that rejection.
+          void Promise.resolve().then(() => this.kernel.agentRuntimeRequest('runtime.policy.fail',
+            { runId, selectionId, code: 'policy_binding_revoked' })).catch(() => undefined);
+        };
+        lease = { ...retained, release: () => { retained.revocationSignal.removeEventListener('abort', revoked); retained.release(); } };
+        retained.revocationSignal.addEventListener('abort', revoked, { once: true });
+        if (retained.revocationSignal.aborted) throw new Error('policy_binding_revoked');
+        binding = await this.kernel.registerPolicyOwner(runId, selected.generation, lease);
+        registered = true; lease = undefined;
+      }
+      signal.throwIfAborted();
+      return await this.kernel.agentRuntimeRequest<PolicySelection, 'runtime.policy.ready'>('runtime.policy.ready',
+        { runId, selectionId, generation: selected.generation, binding, policyModels: models }, signal, { settleCancellation: true });
+    } catch (error) {
+      if (selected) {
+        // A lost ready reply may follow committed activation. Inspect before disposing its live owner.
+        const current = await this.policySelections(runId).catch(() => undefined);
+        const retained = current?.active.generation === selected.generation
+          || current?.desired?.selection_id === selectionId && current.desired.status === 'ready';
+        if (retained && current) {
+          if (current.desired?.selection_id === selectionId) return current.desired;
+          // An even newer desired selection does not erase this command's committed receipt.
+          return await this.kernel.agentRuntimeRequest<PolicySelection, 'runtime.policy.select'>('runtime.policy.select',
+            { runId, selectionId, expectedGeneration, expectedSelectionId, target, stateMode });
+        }
+        if (current) {
+          await this.kernel.agentRuntimeRequest('runtime.policy.fail', { runId, selectionId,
+            code: signal.aborted ? 'policy_preparation_cancelled' : 'policy_preparation_failed' }).catch(() => undefined);
+          if (registered) this.kernel.unregisterPolicyOwner(runId, selected.generation);
+        }
+      }
+      throw error;
+    } finally { lease?.release(); }
+  }
+  async restartPolicy(runId: string, selectionId: string, signal?: AbortSignal): Promise<PolicySelection> {
+    const run = await this.run(runId, signal), selected = await this.policySelections(runId, signal);
+    if (!selected.desired || selected.desired.selection_id !== selectionId || selected.desired.status === 'active'
+      || selected.desired.status === 'cancelled' || selected.desired.status === 'superseded') throw new Error('policy_selection_changed');
+    const scope = await this.policyScope(runId, run.thread_id, signal);
+    const state: PolicyObservation = this.policyObservations.get(runId) ?? { controller: new AbortController(), scope, revision: 0, preparation: null };
+    this.policyObservations.set(runId, state);
+    state.pending?.controller.abort();
+    const controller = new AbortController(), attempt: PolicyPreparationAttempt = { controller, selectionId: null }; state.pending = attempt;
+    const revision = ++state.revision;
+    state.preparation = { status: 'preparing', code: null };
+    const preparation = this.kernel.beginRunPreparation(runId);
+    const combined = AbortSignal.any([preparation.signal, controller.signal, state.controller.signal, ...(signal ? [signal] : [])]);
+    try {
+      // The displayed exact target is retained even if current routing changed in the meantime.
+      const check = await this.policySelections(runId, combined);
+      if (check.desired?.selection_id !== selectionId || check.active.generation !== selected.active.generation) throw new Error('policy_selection_changed');
+      return await this.publishPolicyCandidate(scope, selected.active.generation, selectionId, selected.desired.target, 'restart_state', undefined, combined, attempt);
+    } catch (error) {
+      if (state.revision === revision && !combined.aborted) state.preparation = { status: 'failed', code: 'policy_preparation_failed' };
+      throw error;
+    } finally {
+      preparation.release();
+      if (state.pending === attempt) { state.pending = undefined; if (state.preparation?.status === 'preparing') state.preparation = null; }
+    }
+  }
+  async cancelPolicyUpdate(runId: string, selectionId: string, signal?: AbortSignal): Promise<PolicySelection> {
+    const pending = this.policyObservations.get(runId)?.pending;
+    const original = pending?.selectionId === selectionId ? pending : undefined;
+    const current = await this.policySelections(runId, signal);
+    if (current.desired?.selection_id !== selectionId) throw new Error('policy_selection_changed');
+    const selection = await this.kernel.agentRuntimeRequest<PolicySelection, 'runtime.policy.cancel'>('runtime.policy.cancel', { runId, selectionId }, signal, { settleCancellation: true });
+    if (selection.status === 'cancelled') {
+      original?.controller.abort();
+      this.kernel.unregisterPolicyOwner(runId, selection.generation);
+    }
+    return selection;
+  }
+  /** Restore committed identity first; current routing only prepares a later candidate. */
+  async preparePolicy(runId: string, signal?: AbortSignal,
+    credentialScope?: Awaited<ReturnType<ExistingHostCredentialOwner['scope']>>): Promise<AgentPolicyBinding | undefined> {
+    const preparation = this.kernel.beginRunPreparation(runId);
+    signal = signal ? AbortSignal.any([signal, preparation.signal]) : preparation.signal;
+    let lease: AgentPolicyLease | undefined;
+    try {
+      const run = await this.run(runId, signal);
+      if (run.cancel_requested || ['completed', 'failed', 'cancelled'].includes(run.state)) throw new Error('Run is no longer eligible for policy preparation');
+      let saved = await this.launch(runId, signal);
+      if (saved?.selection.policy.name === 'context_compaction') return undefined;
+      const generation = saved?.policy_generation ?? 0;
+      const existing = this.kernel.policyBinding(runId, generation);
+      if (existing) return existing;
+      const required = saved?.policy_target.kind === 'extension' ? saved.policy_target.artifact : undefined;
+      if (!this.preparePolicyOwner) {
+        if (required) throw new Error('Saved policy requires its exact original artifact and configuration');
+        return undefined;
+      }
+      const scope = await this.policyScope(runId, run.thread_id, signal);
+      // Catalog projects the exact first-preparation admission predicate. Used defaults stay
+      // defaults until the same replacement protocol commits a new generation.
+      const first = !saved || saved.policy_preparable;
+      if (!required && !first) { this.observePolicy(scope); return undefined; }
+      lease = await this.preparePolicyLease({ ...scope, ...(required ? { requiredBinding: required } : {}) }, signal);
+      if (!lease) {
+        if (required) throw new Error('Saved policy is unavailable');
+        this.observePolicy(scope); return undefined;
+      }
+      if (!saved) saved = await this.selectLaunch({ runId, source: null, enabledTools: [], ...(credentialScope ? { credentialScope } : {}) }, signal);
+      const prepared = await this.preparePolicyCredentials(runId, run.thread_id, generation, lease, signal,
+        required ? saved.selection.policy_models : undefined);
+      lease = prepared.lease;
+      await this.kernel.agentRuntimeRequest('runtime.launch.policy.prepare', { runId, identity: lease.binding.artifact.identity,
+        target: { kind: 'extension', artifact: lease.binding.artifact }, policyModels: prepared.models }, signal);
+      signal.throwIfAborted();
+      const binding = await this.kernel.registerPolicyOwner(runId, generation, lease);
+      lease = undefined;
+      this.observePolicy(scope);
+      return binding;
+    } finally { lease?.release(); preparation.release(); }
+  }
+
+  private async admitStartingSource(runId: string, signal: AbortSignal): Promise<void> {
+    const source = (await this.launch(runId, signal))?.selection.source;
+    if (source && source.mode !== 'live_root') await this.admitSourceRegistration({
+      resourceOwner: source.resource_owner,
+      workspaceId: source.workspace_id, executionWorkspaceId: source.execution_workspace_id,
+    }, signal);
+  }
+
+  async startRun(
+    runId: string,
+    signal?: AbortSignal,
+    toolBinding?: CalendarProtocol.SourceToolBinding,
+  ): Promise<RunStartReceipt> {
+    return this.withRunPreparation(runId, signal, async (signal) => {
+      const delegatedChild = await this.childExecutionForRun(runId, signal);
+      const policyBinding = await this.preparePolicy(runId, signal);
+      const mcpBinding = this.kernel.mcpLiveBinding(runId);
+      const extensionBindings = await this.prepareExtensions(runId, signal);
+      try {
+        await this.reconcileMemory(runId, signal);
+        await this.reconcilePlan(runId, signal);
+        await this.admitStartingSource(runId, signal);
+        const receipt = await this.kernel.agentRuntimeRequest<
+          RunStartReceipt,
+          'runtime.run.start'
+        >(
+          'runtime.run.start',
+          {
+            runId,
+            ...(extensionBindings.length ? { extensionBindings } : {}),
+            ...(policyBinding ? { policyBinding } : {}),
+            ...(mcpBinding ? { mcpBinding } : {}),
+            ...(toolBinding === undefined ? {} : { toolBinding }),
+          },
+          signal,
+        );
+        this.startedTools(runId);
+        if (delegatedChild?.trigger.kind === 'dispatch') this.kernel.releaseChildToolHandoff(delegatedChild.parent_run_id, delegatedChild.child_operation_id);
+        return receipt;
+      } catch (error) {
+        this.releaseToolComposition(runId);
+        throw error;
+      }
+    });
+  }
+  /** Private Host path: only nonsecret pinned scope crosses admission; credentials resolve later. */
+  async startRunWithCredentialOwner(
+    runId: string,
+    owner: ExistingHostCredentialOwner,
+    signal?: AbortSignal,
+    toolBinding?: CalendarProtocol.SourceToolBinding,
+  ): Promise<RunStartReceipt> {
+    return this.withRunPreparation(runId, signal, async (signal) => {
+      const delegatedChild = await this.childExecutionForRun(runId, signal);
+      const selected = await this.modelSelections(runId, signal);
+      const credentialScope = await this.kernel.registerCredentialOwner(
+        runId,
+        owner,
+        signal,
+        selected.active?.binding_id,
+      );
+      const credentialEpoch = this.kernel.kernelEpoch;
+      try {
+        const policyBinding = await this.preparePolicy(
+          runId,
+          signal,
+          credentialScope,
+        );
+        const mcpBinding = this.kernel.mcpLiveBinding(runId);
+        const extensionBindings = await this.prepareExtensions(runId, signal);
+        await this.reconcileMemory(runId, signal);
+        await this.reconcilePlan(runId, signal);
+        await this.admitStartingSource(runId, signal);
+        const receipt = await this.kernel.agentRuntimeRequest<
+          RunStartReceipt,
+          'runtime.run.start'
+        >(
+          'runtime.run.start',
+          {
+            runId,
+            ...(extensionBindings.length ? { extensionBindings } : {}),
+            credentialScope,
+            ...(policyBinding ? { policyBinding } : {}),
+            ...(mcpBinding ? { mcpBinding } : {}),
+            ...(toolBinding === undefined ? {} : { toolBinding }),
+          },
+          signal,
+        );
+        this.startedTools(runId);
+        if (delegatedChild?.trigger.kind === 'dispatch') this.kernel.releaseChildToolHandoff(delegatedChild.parent_run_id, delegatedChild.child_operation_id);
+        return receipt;
+      } catch (error) {
+        this.releaseToolComposition(runId);
+        if (this.kernel.kernelEpoch === credentialEpoch) this.kernel.unregisterCredentialOwner(runId, selected.active?.binding_id ?? null);
+        throw error;
+      }
+    });
+  }
+  /** Borrow a fresh base lease from the exact live model binding, including its child dependencies. */
+  retainedModelOwner(configuration: ModelSessionConfiguration, scope: import('./protocol.generated.js').CredentialScope): ExistingHostCredentialOwner | undefined {
+    return this.kernel.findModelCredentialOwner(configuration, scope);
+  }
+  retainQueuedModel(runId: string, owner: ExistingHostCredentialOwner): Promise<void> { return this.kernel.retainQueuedModelCredentialOwner(runId, owner); }
+  releaseQueuedModel(runId: string, owner: ExistingHostCredentialOwner): void { this.kernel.releaseQueuedModelCredentialOwner(runId, owner); }
+  releaseMainModelCredentials(runId: string, selected: RunModelSelections): void {
+    // Main model rebind must not discard a retired-but-pinned policy or its planning credentials.
+    this.kernel.unregisterCredentialOwner(runId, null);
+    for (const binding of [selected.active, selected.desired]) if (binding) this.kernel.unregisterCredentialOwner(runId, binding.binding_id);
+  }
+  modelSelections(
+    runId: string,
+    signal?: AbortSignal,
+  ): Promise<RunModelSelections> {
+    return this.kernel.agentRuntimeRequest(
+      'runtime.model.inspect',
+      { runId },
+      signal,
+    );
+  }
+  async selectModel(
+    runId: string,
+    key: string,
+    configuration: ModelSessionConfiguration,
+    owner: ExistingHostCredentialOwner,
+    signal?: AbortSignal,
+    childDispatch?: ChildDispatchCatalog,
+  ): Promise<RunModelSelection> {
+    const bindingId = `model:${key}`;
+    const credentialScope = await this.kernel.registerCredentialOwner(
+      runId,
+      owner,
+      signal,
+      bindingId,
+    );
+    try {
+      return await this.kernel.agentRuntimeRequest(
+        'runtime.model.select',
+        { runId, key, configuration, credentialScope, ...(childDispatch ? { childDispatch } : {}) },
+        signal,
+        { settleCancellation: true },
+      );
+    } catch (error) {
+      this.kernel.unregisterCredentialOwner(runId, bindingId);
+      throw error;
+    }
+  }
+  async run(runId: string, signal?: AbortSignal): Promise<Run> {
+    const run = await this.kernel.agentRuntimeRequest<
+      Run,
+      'runtime.run.inspect'
+    >('runtime.run.inspect', { runId }, signal);
+    if (['completed', 'failed', 'cancelled'].includes(run.state)) {
+      this.closePolicyObservation(runId);
+      this.kernel.cancelRunPreparation(runId);
+      this.kernel.unregisterCredentialOwner(runId);
+      this.kernel.unregisterToolOwners(runId);
+      this.kernel.releaseRunPolicyOwners(runId);
+    }
+    return run;
+  }
+  resumeRun(
+    runId: string,
+    waitId: string,
+    signal?: AbortSignal,
+  ): Promise<PolicyResumeReceipt> {
+    return this.kernel.agentRuntimeRequest(
+      'runtime.run.resume',
+      { runId, waitId },
+      signal,
+    );
+  }
+  async cancelRun(
+    runId: string,
+    signal?: AbortSignal,
+  ): Promise<RunCancellationReceipt> {
+    this.kernel.cancelRunPreparation(runId);
+    this.closePolicyObservation(runId);
+    const run = await this.kernel.agentRuntimeRequest<
+      RunCancellationReceipt,
+      'runtime.run.cancel'
+    >('runtime.run.cancel', { runId }, signal);
+    if (['completed', 'failed', 'cancelled'].includes(run.state)) {
+      this.closePolicyObservation(runId);
+      this.kernel.cancelRunPreparation(runId);
+      this.kernel.unregisterCredentialOwner(runId);
+      this.kernel.unregisterToolOwners(runId);
+      this.kernel.releaseRunPolicyOwners(runId);
+    }
+    return run;
+  }
+  processAccess(params: import('./protocol.generated.js').RuntimeProcessAccessParams, signal?: AbortSignal): Promise<import('./protocol.generated.js').RuntimeProcessAccess> {
+    return this.kernel.agentRuntimeRequest('runtime.process.access', params, signal);
+  }
+  operation(operationId: string, signal?: AbortSignal): Promise<Operation> {
+    return this.kernel.agentRuntimeRequest(
+      'runtime.operation.inspect',
+      { operationId },
+      signal,
+    );
+  }
+  findOperation(operationId: string, signal?: AbortSignal): Promise<Operation | null> {
+    return this.kernel.agentRuntimeRequest('runtime.operation.inspect', { operationId, allowMissing: true }, signal);
+  }
+  operationStatus(operationId: string, signal?: AbortSignal): Promise<OperationCancellationReceipt> {
+    return this.kernel.agentRuntimeRequest('runtime.operation.status', { operationId }, signal);
+  }
+  cancelOperation(
+    operationId: string,
+    signal?: AbortSignal,
+  ): Promise<OperationCancellationReceipt> {
+    return this.kernel.agentRuntimeRequest(
+      'runtime.operation.cancel',
+      { operationId },
+      signal,
+    );
+  }
+  historyPage(
+    params: HistoryPageParams,
+    signal?: AbortSignal,
+  ): Promise<HistoryPage> {
+    return this.kernel.agentRuntimeRequest(
+      'runtime.history.page',
+      params,
+      signal,
+    );
+  }
+  /** Rehydrate only a body already held by the original Operation. The hash remains an equality check. */
+  async inlineCompletion(operation: Operation, signal?: AbortSignal): Promise<OperationCallCompletion<IncomingMedia>> {
+    const completion = operation.call_completion;
+    if (!completion) throw new Error('Original invocation completion is unavailable');
+    if (completion.kind === 'not_dispatched') return completion;
+    if (completion.kind === 'job_accepted' && completion.content === undefined) { const { content: _content, ...acceptance } = completion; return acceptance; }
+    const body = completion.content!;
+    const run = await this.run(operation.run_id, signal);
+    const parts: OutputPart<IncomingMedia>[] = [];
+    for (const [partIndex, part] of body.parts.entries()) {
+      if (part.kind === 'text') { parts.push(part); continue; }
+      const chunks: Buffer[] = []; let count = 1; let total = 0;
+      for (let chunkIndex = 0; chunkIndex < count; chunkIndex += 1) {
+        const chunk = await this.mediaRead({ threadId: run.thread_id, branchId: run.branch_id,
+          holder: { kind: 'operation', operationId: operation.id, output: 'completion' }, partIndex, chunkIndex,
+          expectedContentRef: part.media.content_ref.content_object }, signal);
+        if (chunk.partIndex !== partIndex || chunk.chunkIndex !== chunkIndex || chunk.media.media_type !== part.media.media_type
+          || chunk.media.content_ref.content_object !== part.media.content_ref.content_object || chunk.chunkCount < 1
+          || chunkIndex > 0 && (chunk.chunkCount !== count || chunk.totalBytes !== total)) throw new Error('Original completion media changed');
+        count = chunk.chunkCount; total = chunk.totalBytes;
+        chunks.push(Buffer.from(chunk.bytesBase64, 'base64'));
+      }
+      const bytes = Buffer.concat(chunks);
+      if (bytes.length !== total) throw new Error('Original completion media is incomplete');
+      parts.push({ kind: 'media', media: { media_type: part.media.media_type, data_base64: bytes.toString('base64') } });
+    }
+    return { ...completion, content: { data: body.data, parts } };
+  }
+  mediaRead(params: MediaReadParams, signal?: AbortSignal): Promise<MediaReadChunk> {
+    return this.kernel.agentRuntimeRequest('runtime.output.media.read', params, signal);
+  }
+  async historyItem(
+    reference: HistoryReference,
+    signal?: AbortSignal,
+  ): Promise<HistoryItem> {
+    const chunks: Buffer[] = [];
+    let count = 1;
+    let total = 0;
+    for (let index = 0; index < count; index += 1) {
+      const chunk = await this.kernel.agentRuntimeRequest<
+        HistoryBodyChunk,
+        'runtime.history.body'
+      >(
+        'runtime.history.body',
+        { itemId: reference.id, chunkIndex: index },
+        signal,
+      );
+      if (
+        chunk.itemId !== reference.id ||
+        chunk.contentRef !== reference.content_ref ||
+        chunk.chunkIndex !== index
+      )
+        throw new Error('History content identity changed');
+      if (index === 0) {
+        count = chunk.chunkCount;
+        total = chunk.totalBytes;
+      } else if (chunk.chunkCount !== count || chunk.totalBytes !== total)
+        throw new Error('History content manifest changed');
+      chunks.push(Buffer.from(chunk.bytesBase64, 'base64'));
+    }
+    const bytes = Buffer.concat(chunks);
+    if (bytes.length !== total)
+      throw new Error('History content length does not match its manifest');
+    const body = JSON.parse(bytes.toString('utf8')) as Pick<
+      HistoryItem,
+      'content' | 'provider'
+    >;
+    return {
+      id: reference.id,
+      thread_id: reference.thread_id,
+      run_id: reference.run_id,
+      parent: reference.parent,
+      source: reference.source,
+      content: body.content,
+      provider: body.provider,
+    };
+  }
+  activeOperations(
+    threadId: string,
+    branchId?: string,
+    signal?: AbortSignal,
+  ): Promise<Operation[]> {
+    return this.kernel.agentRuntimeRequest(
+      'runtime.thread.operations.active',
+      { threadId, ...(branchId ? { branchId } : {}) },
+      signal,
+    );
+  }
+  async history(
+    branchId: string,
+    signal?: AbortSignal,
+  ): Promise<HistoryItem[]> {
+    const pages: HistoryItem[][] = [];
+    let head: string | undefined;
+    let before: string | undefined;
+    do {
+      const page = await this.historyPage(
+        {
+          branchId,
+          limit: 20,
+          ...(head ? { headId: head } : {}),
+          ...(before ? { beforeId: before } : {}),
+        },
+        signal,
+      );
+      head = page.head ?? undefined;
+      pages.push(
+        await Promise.all(
+          page.items.map((item) => this.historyItem(item, signal)),
+        ),
+      );
+      before = page.previous ?? undefined;
+    } while (before);
+    return pages.reverse().flat();
+  }
+  async observerEvents(
+    observerId: string,
+    threadId: string,
+    limit: number,
+    signal?: AbortSignal,
+    throughCursor?: number,
+  ): Promise<RuntimeEvent[]> {
+    // Manual inspection can request the current head. The background observer always supplies
+    // its already-processed source cursor so scope changes cannot be bypassed by prefetch.
+    const head = throughCursor ?? (await this.status(signal)).eventCursor;
+    return this.kernel.agentRuntimeRequest(
+      'runtime.observer.read',
+      { observerId, threadId, limit, throughCursor: head },
+      signal,
+    );
+  }
+  observerDelivery(
+    observerId: string,
+    threadId: string,
+    cursor: number,
+    state: 'selected' | 'sent' | 'committed',
+    signal?: AbortSignal,
+  ): Promise<Record<string, never>> {
+    return this.kernel.agentRuntimeRequest(
+      'runtime.observer.delivery',
+      { observerId, threadId, cursor, state },
+      signal,
+    );
+  }
+  events(
+    cursor: number,
+    limit: number,
+    signal?: AbortSignal,
+  ): Promise<RuntimeEvent[]> {
+    return this.kernel.agentRuntimeRequest(
+      'runtime.events.read',
+      { cursor, limit },
+      signal,
+    );
+  }
+}

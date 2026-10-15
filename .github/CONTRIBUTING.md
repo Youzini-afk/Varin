@@ -2,235 +2,81 @@ English | [简体中文](https://github.com/Youzini-afk/Varin/blob/main/.github/
 
 # Contributing to Varin
 
-Thank you for helping improve Varin. Contributions are welcome across the Pi runtime boundary,
-desktop and remote surfaces, extension integrations, documentation, testing, accessibility, and
-platform support.
-
-This guide describes the public contribution workflow. [AGENTS.md](../AGENTS.md), the nearest package
-README, and owning architecture documents contain the detailed repository rules for implementation
-work.
-
-## Documentation languages
-
-User-facing documentation defaults to English. The root README, contribution guide, security policy,
-and the root of the `packages/docs` content tree are the English source. Simplified Chinese and the
-other locales are translations.
-
-Keep factual behavior, commands, security guidance, and links synchronized across applicable
-languages in the same change. Write new docs pages in English first, then add `zh-cn/` and the other
-locale mirrors. Every localized root document must begin with a language switcher so readers never
-need to return to the repository index to change language.
+Contributions to the runtime, desktop and remote surfaces, extensions, documentation, accessibility
+and platform support are welcome. This guide covers the public contribution workflow.
+[AGENTS.md](../AGENTS.md) contains repository rules; the [development guide](../docs/development.md)
+covers setup, commands and verification, and [architecture](../docs/architecture.md) explains module ownership.
 
 ## Before you begin
 
 - Read the [Code of Conduct](CODE_OF_CONDUCT.md).
-- Use [GitHub Issues](https://github.com/Youzini-afk/Varin/issues) for reproducible bugs, feature
-  proposals, and focused technical discussions.
-- Send vulnerabilities through the private process in [SECURITY.md](SECURITY.md). Do not publish
-  exploit details in an issue, discussion, pull request, log, or screenshot.
-- Search existing issues and pull requests before starting a duplicate change.
-- For a large product or architecture change, describe the user outcome and affected boundaries
-  before investing in a full implementation. A prototype is welcome when it makes the trade-offs
-  easier to evaluate.
+- Search existing issues and pull requests before starting duplicate work. Use
+  [GitHub Issues](https://github.com/Youzini-afk/Varin/issues) for reproducible bugs, feature proposals
+  and focused technical discussions.
+- Report vulnerabilities privately through [Security](SECURITY.md). Keep exploit details out of
+  public issues, pull requests, logs and screenshots.
+- For substantial product or architecture changes, discuss the intended user outcome and affected
+  boundaries early. A prototype can help resolve a concrete design question.
 
-## Project principles that affect contributions
+## Working on a change
 
-Varin is not a generic wrapper around several coding-agent CLIs. It has one Pi-native domain and
-one current pre-release runtime contract.
+Read the owning implementation, its consumers and the nearest README or DOCUMENTATION before editing.
+Keep the change focused and preserve unrelated work. Follow existing code style and shared UI components.
 
-1. **Keep Pi authoritative.** Pi owns sessions, models, authentication, settings, packages, and the
-   extension runtime. Project a JSON-safe Varin contract; do not clone Pi state into a parallel
-   application schema.
-2. **Preserve plugin ownership.** Integrate extensions through public commands, events, settings,
-   and capability bridges. Do not parse private databases or duplicate plugin migrations merely to
-   build a GUI.
-3. **Avoid compatibility sediment.** During pre-1.0 development, all product surfaces move together.
-   Remove obsolete OpenCode and superseded Varin paths once the replacement is accepted; do not
-   accumulate protocol v13/v14-style shims without a real persisted-data or external-client need.
-4. **Enforce privilege at the trusted boundary.** Renderers and remote clients cannot authorize
-   themselves. Validate filesystem, process, network, project-trust, and credential operations in
-   the host that owns the capability.
-5. **Do not add arbitrary product limits.** Avoid silent truncation, model-count caps, short timeouts,
-   or hidden concurrency ceilings. Operational budgets should be explicit deployment opt-ins with
-   visible failure semantics.
-6. **Keep failures truthful.** An authoritative failure is not a successful empty response. Make
-   cancellation, partial failure, cleanup, retry, rollback, and unavailable capabilities visible.
+The native Rust Agent runtime is the product's conversation and execution owner. Thread/branch history,
+queues, Runs and Operations belong to its Catalog; trusted Application Host services supply models,
+credentials and domain capabilities. Follow those owners rather than copying state into another layer.
+Historical Pi assets are preserved without importing them or restoring a fallback runtime.
 
-Read [Architecture](../docs/architecture.md), [Plugin GUI design](../docs/design/plugin-gui-design.md),
-[Recovery](../docs/ops/recovery.md), and [Security model](../docs/design/security.md) when those boundaries apply.
+Use public extension interfaces and preserve plugin-owned configuration and data. Privileged operations
+belong in the trusted Host, never in a renderer. Check the applicable [security](../docs/security.md)
+and [extension](../docs/extensions.md) boundaries, and never log credentials or private user content.
 
-## Development setup
+Obsolete internal formats do not require compatibility readers or automatic migration machinery.
+Unsupported stores must leave existing assets intact. Workspace files, Git history, native Pi data and
+external configuration remain user assets; current-format durability and recovery still apply.
 
-### Requirements
+## Documentation
 
-- Node.js 22.19 or newer; Node.js 24 is the CI and supported development baseline
-- Bun 1.3.14
-- Git
-- Git for Windows and Git Bash for Pi shell tools on Windows
+Code, types, schemas, tests and package scripts establish current behavior. Documentation explains
+responsibilities, mechanisms, constraints and useful design reasons; Git preserves history. Update the
+relevant current explanation when behavior changes. The [documentation index](../docs/README.md)
+locates the owning document; [AGENTS.md](../AGENTS.md) describes how to handle active designs and plans.
 
-### Clone and install
+Public user documentation, the root README, this guide and the security policy use English as their
+source language. Keep applicable existing translations synchronized when changing facts, commands,
+security guidance or links. Localized root documents retain their language navigation.
 
-```bash
-git clone https://github.com/Youzini-afk/Varin.git
-cd Varin
-bun install --frozen-lockfile
-bun run check:pi
-```
+Main engineering documents use Chinese. Source-adjacent and package documents keep their established
+language; they do not need parallel translations. The public documentation language convention does
+not change this engineering convention.
 
-`bun.lock` is authoritative. Do not switch package managers or regenerate the lockfile unless the
-dependency change requires it. Review lifecycle-script changes carefully; Varin intentionally
-allowlists only required install scripts.
+## Verification
 
-## Common development surfaces
+Choose checks for the behavior and consumers affected by the change. Use the nearest `package.json`
+and the [development guide](../docs/development.md) to find the appropriate commands.
 
-Run commands from the repository root unless noted otherwise.
+Reuse meaningful existing checks. Add a regression test when it protects important behavior or a
+reproduced failure; a new test is not required for every change. Remove obsolete or redundant checks.
+Shared contracts need evidence from their consumers, and packaging or platform claims need the relevant
+runtime. Type checking alone does not prove those behaviors.
 
-| Goal | Command |
-| --- | --- |
-| Web UI with HMR and trusted API | `bun run dev` |
-| Web build watcher plus server | `bun run dev:web:full` |
-| Desktop with Web HMR | `bun run electron:dev` |
-| Desktop using built assets | `bun run electron:dev:bundled` |
-| Package desktop for the current OS | `bun run electron:build` |
-| Package Windows x64 NSIS installer | `bun run electron:build:win` |
-| Smoke an unpacked Windows build | `bun run electron:smoke:win` |
-| Build mobile assets | `bun run mobile:build` |
-| Build canonical cloud runtime | `bun run build:cloud-runtime` |
-| Validate documentation site | `bun run docs:validate` |
-
-The shared UI is a source library rather than a standalone app. Exercise UI behavior through Web or
-Desktop so the runtime context is real.
-
-## Choosing the owning package
-
-| Area | Primary owner |
-| --- | --- |
-| Shared components, stores, settings, chat, and plugin GUI | `packages/ui` |
-| Browser/remote server, HTTP APIs, WebSocket transport, cloud CLI | `packages/web` |
-| Windows/macOS/Linux shell, preload/IPC, SSH, updater, packaging | `packages/electron` |
-| Capacitor native shell | `packages/mobile` |
-| JSON-safe wire contract and validation | `packages/protocol` |
-| Browser/editor runtime client | `packages/runtime-client` |
-| Worker ownership, routing, lifecycle, and shutdown | `packages/runtime-broker` |
-| Pi SDK, sessions, packages, extensions, and trusted host operations | `packages/pi-host` |
-
-Shared API changes often cross several packages, but one layer must remain authoritative. Do not
-work around a missing contract with an unrelated local store or a renderer-only privilege check.
-
-## Implementing a change
-
-1. Identify the authoritative data source, trusted execution boundary, affected product surfaces,
-   and failure behavior.
-2. Read `AGENTS.md`, the nearest package README or `DOCUMENTATION.md`, and every matching project
-   skill before editing imported product code.
-3. Keep the change focused. Include directly required cleanup and tests, but separate unrelated
-   refactors that make review harder.
-4. Add or update the narrowest regression test that proves the behavior at its owning boundary.
-5. Exercise every runtime surface whose contract changed. Type-checking a shared type is not proof
-   that Desktop, Web, relay, or mobile behavior works.
-6. Update user, contributor, architecture, security, or operational documentation in the same
-   change when its contract changed.
-
-When changing a versioned or persisted shape, prefer one clear migration into the current shape.
-Retain old readers only when real user data or independently deployed clients require them, and
-document the removal condition.
-
-## Validation
-
-### Broad baseline
-
-Run the broad checks for code, dependency, export, or build changes:
-
-```bash
-bun run type-check
-bun run lint
-bun run check:pi
-bun run build
-```
-
-Run these when the affected boundary applies:
-
-| Change | Additional evidence |
-| --- | --- |
-| Pi host, protocol, broker, or runtime client | `bun run test:pi:dist` |
-| Web server or transport | `bun run --cwd packages/web test` |
-| Cloud runtime, Docker, or SSH deployment | `bun run test:cloud` and a canonical runtime build |
-| Electron lifecycle, architecture, or updater | `bun run --cwd packages/electron test:architecture` and/or `test:updater` |
-| Windows packaging or native modules | `bun run electron:build:win` followed by `bun run electron:smoke:win` |
-| Imports, exports, or deletion | `bun run dead-code` and a production build of each affected surface |
-| Documentation site | `bun run docs:validate` and manual checking of changed local links |
-| Workspace `package.json` or root lockfile | `bun run update:cloud-runtime-lock` so `scripts/cloud-runtime.bun.lock` stays frozen |
-
-CI repeats the main quality gates on Windows and Ubuntu. Cloud/runtime changes also build and smoke
-candidate containers before any installable tags are promoted.
-
-If a required check cannot run on your host, say exactly what was not tested and why. Do not turn an
-untested platform assumption into a claim of support.
-
-### User-visible changes
-
-Provide evidence at the current pull request HEAD:
-
-- screenshots for meaningful static before/after states;
-- a short recording for motion, focus, drag-and-drop, gestures, or multi-step interactions;
-- narrow and wide layouts for responsive shared UI;
-- light and dark themes when colors or surfaces changed;
-- relevant loading, empty, disabled, error, long-content, and high-contrast states;
-- before/after measurements for performance, memory, CPU, startup, or rendering claims.
-
-If there is no user-visible change, state why.
-
-## Code and security style
-
-- Use strict TypeScript and avoid `any` unless the boundary is genuinely dynamic and validated.
-- Prefer small discriminated contracts, early returns, and explicit state transitions over nested
-  conditionals or implicit fallbacks.
-- Keep React components functional and use the established theme and typography tokens in
-  `packages/ui` for both light and dark modes.
-- Keep Electron preload APIs explicit and typed. Do not add a generic channel escape hatch or import
-  Electron into shared renderer code.
-- Never execute Pi extensions in a renderer.
-- Never log credentials, authorization or pairing data, prompt bodies, file contents, provider
-  responses containing user data, or complete environment values.
-- Use path containment based on canonical filesystem boundaries, not string prefixes alone.
-- Use locks and atomic replace for shared configuration or metadata writes; make concurrent edits
-  and crash recovery testable.
-- Preserve user changes and unrelated work in a dirty tree. Do not use destructive Git cleanup as a
-  convenience.
+For UI changes, use screenshots or recordings when they help verify the result, covering the layouts,
+themes and states affected. Support performance claims with representative measurements. Report what
+ran and what remains unverified. Broaden verification when a new failure or unresolved risk warrants it.
 
 ## Commits and pull requests
 
-Use short, imperative commit subjects with a conventional type prefix when it helps, for example:
+Use concise commit subjects describing the change. A pull request should explain the problem, resulting
+behavior, relevant checks and any material limitations. Include affected ownership or external contracts
+when they help the reviewer understand the change. Scale the detail to the work.
 
-```text
-feat: add Pi package capability diagnostics
-fix: preserve session cwd across worktrees
-docs: explain cloud rollback guarantees
-```
+Keep the branch current without rewriting other contributors' work. Resolve conflicts by checking the
+intended behavior and state owner, rather than mechanically choosing one side. Preserve unrelated user
+edits and avoid destructive Git cleanup.
 
-A pull request should let a reviewer verify the result without reconstructing your investigation.
-Include:
-
-- the user or maintainer problem and resulting behavior;
-- non-goals when nearby scope could be ambiguous;
-- affected packages, runtimes, persisted formats, external contracts, and trust boundaries;
-- exact automated and manual checks, including their results;
-- meaningful risk, failure, cleanup, rollback, compatibility, and security considerations;
-- current visual or empirical evidence when applicable;
-- anything you could not verify.
-
-Keep the branch up to date without rewriting other contributors' work. Resolve conflicts by
-re-evaluating behavior and ownership, not by mechanically choosing one side of the diff.
-
-## Non-code contributions
-
-You can also help by:
-
-- reporting a reproducible bug or confusing workflow;
-- testing on another operating system, browser, architecture, or display size;
-- improving setup, deployment, accessibility, localization, or troubleshooting documentation;
-- verifying a maintained Pi extension update and recording compatibility evidence;
-- proposing a clearer Pi-native interaction or plugin configuration surface.
+Bug reports, documentation improvements, translation updates and platform observations are also useful
+contributions; include the environment and reproduction steps relevant to your report.
 
 ## License
 

@@ -15,7 +15,7 @@ The git view splits your changes into **staged** and **unstaged**:
 - stage or unstage everything in a group at once
 - click a file to see its diff
 
-Then write a commit message and commit. You can have Varin **generate a commit message** from your staged changes — it uses the current session's model, so you need a session open.
+Write your own commit message or generate one from the selected staged changes. Generation uses the Host’s configured utility model, falling back to its configured default model. A conversation does not need to be open. Review the generated text before committing.
 
 ## Branches and history
 
@@ -36,6 +36,6 @@ If a merge, rebase, or integrate hits a conflict, Varin shows what's stuck and l
 
 ## Related
 
-- [GitHub Issues & PRs](/github/) — connect GitHub and start work from issues
-- [Worktree Sessions](/worktrees/) — isolate a branch in its own folder
-- [Git Identities](/git-identities/) — commit as the right person per repo
+- [GitHub Issues & PRs](/github/)
+- [Worktree Sessions](/worktrees/)
+- [Git Identities](/git-identities/)

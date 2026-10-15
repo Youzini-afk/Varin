@@ -1,51 +1,14 @@
 ---
-title: Proveedores, modelos y agentes
-description: Conecta proveedores de IA, elige modelos y configura agentes.
+title: "Canales de modelos"
+description: "Conecta cuentas y elige modelos para conversaciones nativas."
 ---
 
-# Proveedores, modelos y agentes
+# Canales de modelos
 
-Antes de que Varin pueda hacer nada, necesita al menos un proveedor de IA conectado. Esta página cubre cómo conectar un proveedor, elegir un modelo y adaptar los agentes.
+Abre **Settings → Model channels**, añade un canal y elige su tipo, endpoint y un método de autenticación compatible. Según el canal, puedes guardar una clave API, iniciar sesión, indicar una variable de entorno o usar una identidad de nube compatible o acceso anónimo.
 
-## Conectar un proveedor
+Añade modelos por ID o descubre candidatos en un canal guardado que lo permita. Revisa y guarda tu selección: descubrir modelos no modifica el catálogo. Activa el canal, el modelo y la operación necesaria, como chat; después elige el modelo en el compositor.
 
-1. Abre **Settings → Providers**.
-2. Abre el menú **Add provider** y elige un proveedor que aún no esté conectado.
-3. Inicia sesión de una de estas dos formas, según el proveedor:
-   - **API key** — pega tu clave y guarda.
-   - **Sign-in (device flow)** — Varin muestra un enlace y un código corto. Abre el enlace, introduce el código y aprueba. Varin termina la conexión por su cuenta.
+El Application Host gestiona la configuración y las cuentas. Las credenciales se guardan separadas de los metadatos y no entran en el historial. Una credencial ausente o retirada no selecciona otra cuenta. Los cambios afectan a preparaciones posteriores; el trabajo aceptado conserva su selección.
 
-Cuando un proveedor aparece como conectado, sus modelos quedan disponibles en el chat.
-
-Para desconectar, abre el proveedor y elige quitar su inicio de sesión.
-
-## Elegir un modelo
-
-Eliges el modelo donde estás trabajando:
-
-- en el chat, usa el selector de modelo de la barra de mensajes para fijar el proveedor y el modelo de esa sesión
-- por agente, define un modelo predeterminado (abajo)
-
-## Configurar agentes
-
-Un agente es una configuración con nombre: un modelo, una personalidad y lo que se le permite hacer.
-
-1. Abre **Settings → Agents**.
-2. Elige un agente o crea uno nuevo.
-3. Edita cualquiera de:
-   - **description** — para qué sirve el agente
-   - **model** — su modelo predeterminado
-   - **temperature** — cuán creativas son sus respuestas
-   - **prompt** — instrucciones permanentes que siempre sigue
-   - **tool rules** — qué herramientas puede usar
-
-## Dónde viven tus inicios de sesión
-
-Los inicios de sesión de los proveedores los guarda el `AuthStorage` de Pi, no el renderer. Las claves de API y los tokens OAuth nunca aparecen en los metadatos de proveedor enviados a la UI. Las capas `models.json` de usuario, proyecto y operator se quedan en sus archivos nativos.
-
-Si configuras el mismo proveedor en más de un sitio, gana el ajuste más específico: una capa de proyecto de confianza anula la personal.
-
-## Relacionado
-
-- [Servidores MCP](/es/mcp/) — añade herramientas extra a los agentes
-- [Tokens de esta conversación](/es/usage/)
+Consulta [Memoria e instrucciones](/es/agent-personalization/) y [MCP](/es/mcp/). Acceder a un modelo no concede permisos de archivos ni herramientas.

@@ -1,7 +1,7 @@
 import pathModule from "node:path";
 import type { KernelComputeService } from "../kernel/compute-service.js";
 import type { FileSearchItem, FileSearchItems, FileSearchEnumerationInfo, PathModule } from "./types.js";
-const EXCLUDED = ["node_modules", ".git", "dist", "build", ".next", ".turbo", ".cache", "coverage", "tmp", "logs"];
+export const FILE_SEARCH_EXCLUDED_DIRECTORIES = ["node_modules", ".git", "dist", "build", ".next", ".turbo", ".cache", "coverage", "tmp", "logs"];
 type FileMetadata = { byteLength: string; modifiedTimeNs: string };
 const fuzzyMatchScoreNormalized = (normalizedQuery: string, candidate: string): number | null => {
   if (!normalizedQuery) return 0;
@@ -82,7 +82,7 @@ export const createFsSearchRuntime = ({ compute, path = pathModule }: {
     let enumerationInfo: FileSearchEnumerationInfo | undefined;
     const query=options.query.trim().toLowerCase();
     const result=await compute.directory(rootPath,{operation:"list",lane:query?"foreground":"background",
-      includeTracked:true,respectGitignore:options.respectGitignore!==false,includeHidden:options.includeHidden??false,excludeDirectories:EXCLUDED,
+      includeTracked:true,respectGitignore:options.respectGitignore!==false,includeHidden:options.includeHidden??false,excludeDirectories:FILE_SEARCH_EXCLUDED_DIRECTORIES,
       ...(options.includeRevisions?{includeRevisions:true}:{}),
     },{signal:options.signal,collect:false,onRecords:records=>{
       for(const record of records){
@@ -119,10 +119,10 @@ export const createFsSearchRuntime = ({ compute, path = pathModule }: {
     if(path.isAbsolute(resourceId)||normalized.split("/").includes(".."))return false;
     // Match the inventory's existing exclusions before starting native/Git work
     // for build and dependency watch events.
-    if (normalized.split("/").some(part => part.startsWith(".") || EXCLUDED.includes(part))) return false;
+    if (normalized.split("/").some(part => part.startsWith(".") || FILE_SEARCH_EXCLUDED_DIRECTORIES.includes(part))) return false;
     const result=await compute.directory(root,{lane:"background",operation:"list",includeTracked:true,
       respectGitignore: options?.respectGitignore ?? true,
-      excludeDirectories:EXCLUDED,includeHidden:false,files:[{path:normalized}],paths:[normalized]}, {signal});
+      excludeDirectories:FILE_SEARCH_EXCLUDED_DIRECTORIES,includeHidden:false,files:[{path:normalized}],paths:[normalized]}, {signal});
     signal?.throwIfAborted();
     if(result.status==="failed"||result.status==="partial"||result.status==="cancelled")throw new Error(result.message??"Native file eligibility is unavailable");
     return result.records.some(r=>r.kind==="entry"&&(r.data as {kind?:unknown}).kind==="file"&&r.path===normalized);

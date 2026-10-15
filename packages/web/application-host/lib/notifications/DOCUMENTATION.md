@@ -1,30 +1,36 @@
 # Notifications module
 
-Varin notifications are driven by the Pi runtime broker. The web server does not
-subscribe to OpenCode session or event endpoints.
+Notifications project committed native Catalog facts. They do not admit, resume or cancel work,
+and OS delivery is separate from Catalog read cursors and unread state.
 
 ## Runtime flow
 
-1. `pi-session-runtime.ts` consumes `session.snapshot` and `agent.event` envelopes
-   from the in-process Pi runtime broker.
-2. `emitter-runtime.ts` projects notification payloads to the desktop callback and
-   the authenticated UI SSE stream.
-3. `routes.ts` owns `GET /api/notifications/stream` plus push-registration,
-   visibility, session activity, and attention endpoints.
-4. `push-runtime.ts` handles Web Push; `apns-runtime.ts` handles native iOS push.
+1. `thread-runtime.ts` observes native durable events. Completed/failed root Runs and open
+   permission/question Operations produce notifications; child completion, deleted/archived Threads
+   and terminal permission/question Operations are excluded.
+2. Startup and kernel reconnection begin at the current durable cursor. The live observer reads later
+   facts rather than replaying all historical notifications.
+3. `application-host/index.ts` applies notification settings and fans the payload out to desktop,
+   authenticated UI SSE, Web Push, Expo mobile push and APNs through their existing owners.
+4. `routes.ts` owns `GET /api/notifications/stream`, push registrations and UI visibility endpoints.
+   The old session-attention and badge-projection owner is gone.
 
-`createGlobalUiEventBroadcaster()` is deliberately SSE-only. Pi runtime WebSocket
-traffic uses `/api/varin/runtime/ws` and must not be mixed with notification
-delivery.
+The title is the actual Thread title, falling back to `Varin` when empty. Bodies are fixed status text
+for completion, failure, permission or a question; response bodies are not copied into notifications.
+Payloads retain Thread, branch and Run identity and a navigation target. Thread titles can themselves
+contain private information; push transports can read them.
 
-APNs operational setup is documented in [APNS.md](APNS.md).
+`createGlobalUiEventBroadcaster()` is SSE-only. Native Thread observation uses its authenticated
+HTTP/SSE routes; terminal and dictation WebSockets retain their own transport owners. Closing a
+notification stream does not stop native work.
 
-## Tests
+APNs always uses its own delivery path rather than the UI visibility gate. Web Push can require no
+active SSE client; Expo push is suppressed while an interactive client is visible. These delivery
+policies do not establish successful notification display or read acknowledgement. APNs deployment
+and confidentiality details are in [APNS.md](APNS.md).
 
-Run the focused notification and SSE tests with:
+## Verification
 
-```sh
-bun run --cwd packages/web test application-host/lib/notifications application-host/sse-routes.test.ts
-```
-
-Before release, also run the full Web tests, typecheck, lint, and production build.
+Focused `thread-runtime`, emitter, push, APNs and SSE route tests cover their own adapters. Actual
+browser subscriptions, iOS delivery and desktop presentation require their target environment.
+Use the Web package scripts and [development guide](../../../../../docs/development.md) for commands.

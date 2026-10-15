@@ -23,6 +23,7 @@ type ModelEntry = {
   applyingRegistryUpdate: boolean;
   key: string;
   retired: boolean;
+  suspended: boolean;
   identity: DocumentIdentity;
   documentInstanceId: string | null;
   documentSubscription: (() => void) | null;
@@ -76,6 +77,7 @@ export class FileEditorModelRegistry {
   private readonly documents: DocumentRegistry;
   private readonly loadRuntime: () => Promise<MonacoRuntime>;
   private readonly runtimeKey: string;
+  private readonly allEntries = new Set<ModelEntry>();
   private readonly entriesByIdentity = new Map<string, ModelEntry>();
   private readonly owners = new Map<string, ModelEntry>();
   private readonly pendingListeners = new Map<string, Set<() => void>>();
@@ -94,7 +96,7 @@ export class FileEditorModelRegistry {
   acquire(identity: DocumentIdentity, ownerId: string): void {
     this.assertActive();
     const previous = this.owners.get(ownerId);
-    if (previous && this.keyFor(previous.identity) === this.keyFor(identity)) return;
+    if (previous && !previous.suspended && this.keyFor(previous.identity) === this.keyFor(identity)) return;
     if (previous) this.release(ownerId);
     const entry = this.ensureEntry(identity);
     entry.owners.add(ownerId);
@@ -116,7 +118,7 @@ export class FileEditorModelRegistry {
     if (!entry) return;
     this.owners.delete(ownerId);
     entry.owners.delete(ownerId);
-    if (entry.owners.size === 0 && entry.record?.dirty !== true) this.disposeEntry(entry);
+    if (entry.owners.size === 0 && (entry.suspended || entry.record?.dirty !== true)) this.disposeEntry(entry);
   }
 
   subscribe(identity: DocumentIdentity, listener: () => void): () => void {
@@ -153,7 +155,7 @@ export class FileEditorModelRegistry {
   dispose(): void {
     if (this.disposed) return;
     this.disposed = true;
-    const entries = new Set(this.entriesByIdentity.values());
+    const entries = [...this.allEntries];
     this.entriesByIdentity.clear();
     this.owners.clear();
     this.pendingListeners.clear();
@@ -168,6 +170,7 @@ export class FileEditorModelRegistry {
       applyingRegistryUpdate: false,
       key,
       retired: false,
+      suspended: false,
       identity,
       documentInstanceId: null,
       documentSubscription: null,
@@ -180,6 +183,7 @@ export class FileEditorModelRegistry {
       snapshot: LOADING_SNAPSHOT,
     };
     this.pendingListeners.delete(key);
+    this.allEntries.add(entry);
     entry.documentSubscription = this.documents.subscribe(identity, (record) => this.handleRecord(entry, record));
     this.entriesByIdentity.set(key, entry);
     const record = this.documents.get(identity);
@@ -193,7 +197,13 @@ export class FileEditorModelRegistry {
     const nextKey = this.keyFor(record.identity);
     if (previousKey !== nextKey) {
       const shared = this.entriesByIdentity.get(nextKey);
-      if (shared && shared !== entry) {
+      if (shared && shared !== entry && shared.documentInstanceId !== record.documentInstanceId) {
+        // An overwritten target is a different document, not another alias of
+        // this one. Keep its subscription for undo, but retire its editable model.
+        shared.suspended = true;
+        this.disposeModel(shared);
+        this.publish(shared, LOADING_SNAPSHOT);
+      } else if (shared && shared !== entry) {
         for (const owner of entry.owners) {
           shared.owners.add(owner);
           this.owners.set(owner, shared);
@@ -212,6 +222,8 @@ export class FileEditorModelRegistry {
       entry.key = nextKey;
       entry.identity = record.identity;
     }
+    entry.suspended = false;
+    this.entriesByIdentity.set(nextKey, entry);
     entry.record = record;
     entry.documentInstanceId = record.documentInstanceId;
 
@@ -261,12 +273,13 @@ export class FileEditorModelRegistry {
   }
 
   private ensureModel(entry: ModelEntry): void {
-    if (entry.loading || entry.model || !entry.record) return;
+    if (entry.suspended || entry.loading || entry.model || !entry.record) return;
     const expectedInstanceId = entry.record.documentInstanceId;
     entry.loading = this.loadRuntime().then((monaco) => {
       if (
         this.disposed
         || entry.retired
+        || entry.suspended
         || entry.documentInstanceId !== expectedInstanceId
         || (!entry.record?.dirty && entry.owners.size === 0)
       ) return;
@@ -299,7 +312,7 @@ export class FileEditorModelRegistry {
     entry: ModelEntry,
     event: editor.IModelContentChangedEvent,
   ): void {
-    if (this.disposed || entry.applyingRegistryUpdate || !entry.model || !entry.record) return;
+    if (this.disposed || entry.suspended || entry.applyingRegistryUpdate || !entry.model || !entry.record) return;
     const expectedLocalEditRevision = entry.record.localEditRevision;
     const changes = event.changes.map((change) => ({
       from: change.rangeOffset,
@@ -353,6 +366,7 @@ export class FileEditorModelRegistry {
 
   private disposeEntry(entry: ModelEntry, removeFromIndex = true): void {
     entry.retired = true;
+    this.allEntries.delete(entry);
     for (const owner of entry.owners) this.owners.delete(owner);
     entry.owners.clear();
     entry.documentSubscription?.();

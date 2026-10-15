@@ -6,7 +6,7 @@ import { useI18n } from '@/lib/i18n';
 import { useUIStore } from '@/stores/useUIStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { WorktreeSectionContent } from '@/components/sections/varin/WorktreeSectionContent';
-import { createPiWorktreeSession } from '@/lib/pi-runtime/worktreeSession';
+import { createWorktreeThread } from '@/lib/agent-runtime/worktreeThread';
 
 // Full-page worktree management surface for a single project, opened from the
 // project menu in the sidebar. Renders only the worktree list (setup commands
@@ -24,7 +24,7 @@ export function WorktreesView(): React.ReactNode {
     setActiveProjectIdOnly(project.id);
     setCreating(true);
     try {
-      await createPiWorktreeSession();
+      await createWorktreeThread();
       setRefreshKey((value) => value + 1);
     } catch (error) {
       toast.error(error instanceof Error ? error.message : String(error));

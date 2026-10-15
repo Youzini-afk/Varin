@@ -1,6 +1,6 @@
 # Walkthrough
 
-Generates a guided, ordered reading path through a diff: the small model groups
+Generates a guided, ordered reading path through a diff: the selected utility model groups
 related hunks into stops and chapters and explains each group, and the UI
 renders those stops interleaved with the code they describe.
 
@@ -21,7 +21,7 @@ has to ask for it.
 - `schema.ts` — response schema, response normalization, tolerant JSON parsing.
 - `store.ts` — content-addressed cache entries plus mutable pointers.
 - `pull-request.ts` — PR diffs via the shared GitHub octokit helper.
-- `model-settings.ts` — the feature's own model override.
+- `../model-text/service.ts` — native model selection, inference admission and original receipts.
 - `languages.ts` — the languages the prose may be written in.
 - `index.ts` — orchestration.
 - `routes.ts` — `/api/walkthrough*`.
@@ -100,45 +100,15 @@ When a change consists only of generated files, generation is refused with
 
 ## Model selection
 
-The walkthrough has its own model setting (Settings → Sessions → Changes
-Walkthrough Model), read by `model-settings.ts`:
+The native `model-text` service resolves an explicit `provider/model` request first, then the
+`walkthroughModel` selection, `utilityModel`, and the configured default provider/model from native
+Agent settings. Missing or invalid selections are actionable errors, not permission to discover a
+historical account or silently pick another provider. The Host model authority supplies credentials.
 
-`walkthroughModelOverride` (`provider/model`) is the whole contract: set, that
-model is used for this feature and nothing else; unset or empty, generation
-falls back to whatever the small-model chain resolves to. Choosing a model *is*
-the opt-out, so there is no separate toggle to disagree with the picker — the
-settings picker simply shows "Small model will be used" until a choice is made,
-and clearing it restores the fallback.
-
-The separation exists because the two roles pull in opposite directions: the
-small model is chosen to be cheap and fast for recaps and commit messages, while
-this one needs schema-shaped output and enough context for a whole diff. Forcing
-one setting to serve both means degrading one feature to fix the other.
-
-A review can also override the model for itself: `GET`/`POST` accept a `model`
-(`provider/model`) that outranks both the setting and the small-model chain.
-That choice is panel state, not a settings edit — picking a roomier model for
-one risky change should not silently redefine the default for every future one.
-It needs no storage: the model that produced a walkthrough is already recorded
-in its cache entry, so reopening a panel resolves the picker as *explicit choice
-→ model that generated what is on screen → settings*. Because the model is part
-of the cache key, switching models and back returns the earlier review for free.
-
-The server blocks models the catalog reports as `structured_output: false`
-before spending tokens. Varin's Pi-native model catalog does not yet expose
-that metadata to the shared picker, so an explicitly chosen unsupported model
-may still be visible there and receives the same actionable refusal. Like the
-small-model picker, it only shows providers with a usable login. The picker on a blocked
-walkthrough changes only that review, just like the header picker; recovering
-from a refusal does not silently redefine later reviews or commit messages.
-
-A Pi `settings.json`/`models.json` `smallModel` (or legacy `small_model`) override can still name a provider
-with no usable login (neither `auth.json` nor `provider.<id>.options.apiKey`).
-`describeSmallModel` reports that as `hasLogin: false`, readiness refuses with
-`reason: 'no-provider-login'` and omits the unusable model so the panel cannot
-present it as selected, and generation maps the same code to HTTP 401. The UI
-disables Generate and keeps the picker on authenticated providers only — it does
-not surface a raw auth error or a special login blocker for this case.
+A per-review choice is request state, not a settings write. The model is retained in the cache key
+and result; reopening can show the model that produced the displayed walkthrough. A selected model
+with `structuredOutput: false` is refused before generation. Unknown capability remains distinct from
+explicitly unsupported. Readiness also checks usable authentication and the full diff input budget.
 
 ## Output language
 
@@ -192,31 +162,16 @@ re-author from a walkthrough the reader is not looking at.
 Attaching to a running job still ignores the language of the second request,
 because the job already has one. That matches how the model behaves.
 
-## Structured output, and what happens when it is refused
+## Structured output and original request ownership
 
-`structured_output: false` in the catalog blocks generation up front. A
-**missing** capability field does not block — the catalog omits it for roughly
-half of all models, and treating unknown as unsupported would hide models that
-work.
+The schema and JSON instruction enter one frozen native request. `model-text` uses the original Catalog
+inference executor, retained model binding and durable receipt. Provider failure does not trigger a
+schema-free fallback, another transport or a fresh paid request behind the user's back. Invalid output
+reports `invalid-walkthrough` with its original request identity.
 
-Providers that do not declare the capability sometimes reject the schema at
-request time (a plain `400`, or Alibaba/Qwen's "'messages' must contain the word
-'json'"). A rejected request shape is not a dead end, so a `4xx` on a schema
-request triggers exactly one retry with the schema moved into the prompt and the
-tolerant parser handling the result. Only if *that* fails to yield usable JSON is
-`structured-output-unsupported` reported — at which point it is a real capability
-problem the user can fix by switching model.
-
-The refusal is then remembered per `provider/model` and the fallback goes first
-from then on. Without that, every generation on such a provider pays for a call
-whose failure is already known. The memory is process-lifetime only on purpose:
-a provider that gains structured-output support should not need a settings
-change to be tried again, and one wasted first attempt after a restart is cheap.
-
-The system prompt states "respond with a single JSON object" explicitly, which
-also satisfies the providers that scan the request for the word `json` before
-honouring `response_format`. That keeps them on the fast path instead of paying
-for a wasted first call.
+An unchanged request key resolves the original request or completed output. Changed input with that
+key conflicts. An explicit retry can create a linked request only when the original owner permits it;
+unknown provider completion/billing and actual local executor stop remain different facts.
 
 ## Output budget
 
@@ -226,20 +181,19 @@ return nothing when it runs out, which is a bill for no answer.
 
 The ask is therefore derived from the resolved model rather than fixed:
 `min(32k, max(4k, one eighth of the context))`, then capped by the catalog's
-`limit.output`. Four thousand tokens is Varin's existing small-model reserve;
+`limit.output`. Four thousand tokens is the utility output reserve;
 the context share grows room for reasoning without taking most of a smaller
 model's usable diff input, and 32k is already far above the expected JSON answer.
 
 The **same number is reserved from the input allowance**, so the ceiling and the
 context share are what stop a generous answer budget from eating the diff it is
-supposed to describe; the 4k floor preserves Varin's existing small-model
+supposed to describe; the 4k floor preserves the utility output
 budget. A
 model whose own `limit.output` is below the floor gets its limit, because asking
 for more than a provider allows is rejected by some and ignored by others.
 
-`describeSmallModel` decides this once — the walkthrough hands it the rule as a
-function and reads back `outputTokens` — so the reserve and the request cannot
-drift apart.
+The native model-text description accepts the walkthrough output-budget function and returns
+`outputTokens`; the same value reduces input capacity and is passed to generation.
 
 When a model exhausts even that, `code: 'output-exhausted'` reports it as what
 it is: this model cannot finish this job, so pick another or review a narrower
@@ -342,22 +296,18 @@ That timeout is a hang guard, not a pace-setter, and it scales with the diff:
 edit and a 500-hunk pull request wait the same, which guarded nothing in the
 small case and risked killing the big one just short of the finish line. It errs
 long on purpose — losing a nearly-complete generation costs real money, while an
-over-long deadline only holds a job slot. Note that the schema fallback can use
-the deadline twice, once per attempt.
+over-long deadline only holds a job slot. The native request retains the original cancellation/effect receipt when the guard expires.
 
 ## Progress
 
-A running job records a coarse stage: `collecting` (reading the diff, which for
-a pull request is seconds of network), `asking`, `retrying` when a provider
-rejects the schema and the prompt-side fallback runs, and `assembling`.
+A running job records a coarse stage: `collecting` (reading the diff), `asking`, and `assembling`. Native generation does not retry a
+rejected schema automatically.
 
 Only phases a person can wait on are named. Building the digest and reading the
 cache take single-digit milliseconds; giving them rows would imply progress that
 is not happening.
 
-`retrying` exists for diagnostics but is **not shown**: from outside it is the
-same wait on the same model, and naming our fallback only raises the question of
-what it is. The client folds it into `asking`.
+The retained `retrying` presentation value is folded into `asking`; it is not an automatic retry policy.
 
 The client also paces the display, holding each step for a floor before
 revealing the next and keeping the list on screen briefly after the work ends.
@@ -376,9 +326,9 @@ be used for this: it re-runs the whole git pipeline.
   current hunk index, staleness, and `readiness`. Never generates. `language`
   matters here because readiness is measured against the prompt that would be
   sent, and the language instruction is part of it.
-- `POST /api/walkthrough/generate` — `{ directory, source, force, model, language }`. Survives
+- `POST /api/walkthrough/generate` — `{ directory, source, force, model, language, requestKey?, retryOf? }`. Survives
   client disconnects; a concurrent call for the same source joins the running
-  job.
+  job. Durable request identity and paid-effect receipts remain in Catalog, not that transient map.
 - `GET /api/walkthrough/progress?directory&source` — the current stage, or
   `null`. Memory-only and safe to poll.
 - `POST /api/walkthrough/cancel` — `{ directory, source }`; aborts a running

@@ -1,0 +1,310 @@
+import { VARIN_CONTEXT_FRAGMENTS_SERVICE } from '@varin/extension-contract';
+import { createScheduledTasksHttpAPI } from '@varin/application-client';
+import { createProjectConfigRuntime } from '../projects/project-config.js';
+import { createScheduledTasksRuntime } from '../scheduled-tasks/runtime.js';
+import { createScheduledTaskService } from '../scheduled-tasks/service.js';
+import { CalendarOwner } from '../scheduled-tasks/calendar-owner.js';
+import { registerScheduledTaskRoutes } from '../scheduled-tasks/routes.js';
+import { resourceScopeFixture } from './resource-scope.test-helper.js';
+import { createMemoryOwner } from './memory-owner.js';
+import { ApplicationExtensionRuntime, type HostServiceBinding } from '@varin/extension-host';
+import { createContextComposition } from './context-composition.js';
+import { createRequire } from 'node:module';
+import { createThreadContext } from './thread-context.js';
+import { createAgentPersonalization } from '../memory/agent-personalization.js';
+import { createThreadSourcePreparer, createThreadSourceDirectory } from './thread-sources.js';
+import { createDocumentAuthority } from '../documents/authority.js';
+import { KernelStorageAdapter, createKernelWorkspaceWorkingStateAccess } from './storage-adapter.js';
+import express from 'express';
+import { createServer, type Server, type ServerResponse } from 'node:http';
+import { once } from 'node:events';
+import fs from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { afterEach, expect, it } from 'vitest';
+import { createThreadsHttpAPI, configureRuntimeUrlResolver, setRuntimeExtraHeaders } from '@varin/application-client';
+import { createKernelClient } from './kernel-client.js';
+import { AgentRuntimeClient } from './agent-runtime-client.js';
+import { ExistingHostCredentialOwner } from './credential-owner.js';
+import { ThreadAdapter } from './thread-adapter.js';
+import { registerThreadRoutes } from './thread-routes.js';
+import { registerCommonRequestMiddleware } from '../platform/core-routes.js';
+
+const repository = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../../../..');
+const { build } = createRequire(path.join(repository, 'packages/extension-builtins/package.json'))('esbuild');
+const kernelPath = process.env.VARIN_TEST_KERNEL_PATH ?? path.join(repository, 'kernel/target/release', process.platform === 'win32' ? 'varin-kernel.exe' : 'varin-kernel');
+const buildVersion = (JSON.parse(await fs.readFile(path.join(repository, 'package.json'), 'utf8')) as { version: string }).version;
+const cleanups: Array<() => Promise<void>> = [];
+afterEach(async () => { setRuntimeExtraHeaders(null); configureRuntimeUrlResolver({ apiBaseUrl: '', realtimeBaseUrl: '' }); for (const cleanup of cleanups.splice(0).reverse()) await cleanup(); });
+async function listen(server: Server) {
+  server.listen(0, '127.0.0.1');
+  await once(server, 'listening');
+  const address = server.address();
+  if (!address || typeof address === 'string') throw new Error('fixture needs a TCP listener');
+  cleanups.push(async () => { server.closeAllConnections(); await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve())); });
+  return `http://127.0.0.1:${address.port}`;
+}
+async function fixture(reply: (body: Record<string, unknown>, response: ServerResponse) => void, existingRoot?: string, existingEndpoint?: string) {
+  await fs.access(kernelPath);
+  const root = existingRoot ?? await fs.mkdtemp(path.join(os.tmpdir(), 'varin-http-review-'));
+  const kernel = createKernelClient({ hostId: 'http-review', storageRoot: root, buildVersion, kernelPath, allowCargoDevRunner: false });
+  cleanups.push(async () => { await kernel.close(); if (!existingRoot) await fs.rm(root, { recursive: true, force: true }); });
+  const secret = 'fake-http-provider-key-not-a-real-secret';
+  const requests: Array<{ body: Record<string, unknown>; authorization?: string }> = [];
+  const provider = createServer((request, response) => {
+    const chunks: Buffer[] = [];
+    request.on('data', (bytes: Buffer) => chunks.push(bytes));
+    request.on('end', () => {
+      requests.push({ body: JSON.parse(Buffer.concat(chunks).toString()) as Record<string, unknown>, ...(request.headers.authorization ? { authorization: request.headers.authorization } : {}) });
+      reply(requests.at(-1)!.body, response);
+    });
+  });
+  const endpoint = existingEndpoint ?? `${await listen(provider)}/responses`;
+  const owner = new ExistingHostCredentialOwner({ providerId: 'fixture-provider', providerFamily: 'openai-responses', endpoint,
+    currentScope: async () => ({ reference: 'fixture-reference', authority: 'fixture-existing-owner', account: 'fixture-local-handle', generation: 1 }),
+    runtime: { getAuth: async () => ({ auth: { apiKey: secret } }) },
+  });
+  const configuration = { providerId: 'fixture-provider', providerFamily: 'openai-responses', model: 'fixture-model', endpoint, credentialEnvironment: null, allowAnonymous: false, configurationGeneration: 1, maxOutputTokens: 64 };
+  const launchErrors: unknown[] = [];
+  const workspace = path.join(root, 'workspace'); await fs.mkdir(workspace, { recursive: true });
+  const documents = createDocumentAuthority({ hostId: 'http-review', dataDir: path.join(root, 'documents'), isAllowedRoot: async () => true, isTrusted: async () => true });
+  const storage = new KernelStorageAdapter({ client: kernel, hostId: 'http-review', storageRoot: root, resolveWorkspaceRoot: async id => (await documents.inspectWorkspace(id)).root });
+  const workingStates = createKernelWorkspaceWorkingStateAccess(storage);
+  const resources = resourceScopeFixture(root, workingStates, documents, undefined, (input, consume) => storage.withResourceRead(input, consume));
+  const prepare = createThreadSourcePreparer({ inspectInventory: async () => ({ kind: 'directory' }), sourceTools: mode => kernel.agentRuntimeRequest('runtime.source.tools', { mode }),  documents, workingStates, prepareResources: resources.prepareSourceCapture });
+  let refresh = () => Promise.resolve();
+  const refreshTasks: Promise<void>[] = [];
+  const personalization = createAgentPersonalization({ client: kernel, context: async () => ({ bot: false, projectId: 'selected-project' }), onChanged: () => { const task = refresh(); void task.catch(() => undefined); refreshTasks.push(task); } });
+  const extensions = await ApplicationExtensionRuntime.create({ dataDir: path.join(root, 'extensions'), varinVersion: buildVersion,
+    brokerScript: path.join(repository, 'packages/extension-host/broker/broker-child.mjs') });
+  await extensions.start(); cleanups.push(() => extensions.stop());
+  const composition = createContextComposition(extensions);
+  const prepareContext = createThreadContext({ composition, personalization, resources, projectForWorkspace: async () => 'selected-project' });
+  kernel.setMemoryOwner(createMemoryOwner({ personalization, prepareContext }));
+  let closed = false;
+  const close = async () => { if (closed) return; closed = true; await storage.dispose(); await documents.dispose(); await kernel.close(); };
+  cleanups.push(close);
+
+  const adapter = new ThreadAdapter(new AgentRuntimeClient(kernel, undefined, undefined, undefined, undefined, undefined, (id, signal) => documents.admitWorkspaceRegistration(id, signal)), {
+    resolveModel: async selection => {
+      if (selection.providerId !== 'fixture-provider' || selection.modelId !== 'fixture-model') throw new Error('unselected model');
+      return { configuration, credentialOwner: owner };
+    },
+    rebindModel: async () => owner,
+  }, async source => { await documents.inspectWorkspace(source.workspaceId); await documents.inspectWorkspace(source.executionWorkspaceId); }, (_runId, error) => { launchErrors.push(error); }, prepare, prepareContext);
+  refresh = () => adapter.refreshPersonalization();
+  const flushRefreshes = async () => { while (refreshTasks.length) await Promise.all(refreshTasks.splice(0)); };
+  const app = express();
+  registerCommonRequestMiddleware(app, { express });
+  registerThreadRoutes(app, adapter, (request, response, next) => {
+    if (request.headers['x-fixture-auth'] !== 'fixture-client') { response.status(401).json({ error: 'authentication required' }); return; }
+    next();
+  });
+  const hostUrl = await listen(createServer(app));
+  configureRuntimeUrlResolver({ apiBaseUrl: hostUrl, realtimeBaseUrl: hostUrl });
+  setRuntimeExtraHeaders({ 'x-fixture-auth': 'fixture-client' });
+  return { app, extensions, composition, adapter, flushRefreshes, endpoint, personalization, workspace, documents, workingStates, close, kernel, api: createThreadsHttpAPI(), runtime: adapter.runtime, hostUrl, secret, requests, launchErrors, root, closeKernel: () => kernel.close() };
+}
+
+const model = { providerId: 'fixture-provider', modelId: 'fixture-model' };
+const system = (body: Record<string, unknown>) => JSON.stringify((body.input as Array<{ role?: string }>).filter(item => item.role === 'system'));
+function complete(response: ServerResponse, id: string, text: string) {
+  response.writeHead(200, { 'content-type': 'text/event-stream' });
+  response.end(`data: ${JSON.stringify({ type: 'response.completed', response: { output: [{ id, type: 'message', content: [{ type: 'output_text', text }] }] } })}\n\n`);
+}
+async function installExample(f: Awaited<ReturnType<typeof fixture>>) {
+  const example = path.join(f.root, 'project-context'); await fs.mkdir(example);
+  for (const file of ['package.json', 'varin.extension.json']) await fs.copyFile(path.join(repository, 'examples/extensions/project-context', file), path.join(example, file));
+  await build({ entryPoints: [path.join(repository, 'examples/extensions/project-context/host.ts')], bundle: true, platform: 'node', format: 'cjs', outfile: path.join(example, 'host.cjs'), alias: { '@varin/extension-sdk': path.join(repository, 'packages/extension-sdk/dist/index.js') } });
+  await f.extensions.installOrStage({ expectedRevision: (await f.extensions.state()).catalog.revision, source: { kind: 'local', display: 'Real example', specifier: example } });
+}
+async function route(f: Awaited<ReturnType<typeof fixture>>, providerKey: string, scope: {projectId?: string; threadId?: string}) {
+  return f.extensions.upsertServiceRoutingRule({ expectedRevision: (await f.extensions.routing.read()).document.revision,
+    rule: { allowFallback: false, providerKeys: [providerKey], scope, serviceId: 'varin.context.fragments', version: 1 } });
+}
+it('packaged default and installable scoped example reach captured model requests and refresh without changing frozen bytes', async () => {
+  let held!: ServerResponse; let count = 0;
+  const f = await fixture((_body, response) => { if (++count === 1) held = response; else complete(response, `composition-${count}`, 'done'); });
+  const identity = await f.api.create('composition-review');
+  await fs.writeFile(path.join(f.workspace, 'AGENTS.md'), 'FROZEN WORKSPACE');
+  const source = await f.api.prepareSource({ ...identity, key: 'source', resourceOwner: { kind: 'local' as const }, workspaceId: (await f.documents.resolveWorkspace({ path: f.workspace })).workspaceId, content: { mode: 'saved-files' }, captureScopes: [], mode: 'fixed_branch' });
+  const first = await f.api.submit({ ...identity, key: 'first', expectedHead: null, text: 'first', model, source: source.source });
+  await expect.poll(() => f.requests.length).toBe(1);
+  const oldBytes = structuredClone(f.requests[0]!.body);
+  expect(system(oldBytes)).toContain('Distinguish completed work, attempted work');
+  const old = (await f.api.snapshot(identity)).context.checkpoint!;
+  expect(old.personalization!.contextComposition!.transforms[0]!.sections[0]!.name).toBe('execution-reporting');
+  await installExample(f);
+  await route(f, 'example.project-context:host:varin.context.fragments@1', { projectId: 'selected-project' });
+  const other = await f.composition({ threadId: 'other-session', projectId: 'different-project' });
+  expect(other!.transforms[0]!.sections[0]!.name).toBe('execution-reporting');
+  await f.adapter.refreshPersonalization();
+  const refreshed = (await f.api.snapshot(identity)).context.checkpoint!;
+  expect(refreshed.personalization!.revision).toBe(old.personalization!.revision);
+  expect(refreshed.personalization!.contextComposition!.transforms[0]!.sections[0]!.name).toBe('research-evidence');
+  expect(refreshed.proposal).toMatchObject({ effective_system_prompt: old.proposal.effective_system_prompt, memory_checkpoint: old.proposal.memory_checkpoint });
+  expect(f.requests[0]!.body).toEqual(oldBytes);
+  complete(held, 'old-completed', 'done');
+  await expect.poll(async () => (await f.api.run(first.run_id)).state).toBe('completed');
+  const head = (await f.api.snapshot(identity)).historyPage.head;
+  const second = await f.api.submit({ ...identity, key: 'second', expectedHead: head, text: 'second', model });
+  await expect.poll(async () => (await f.api.run(second.run_id)).state).toBe('completed');
+  expect(system(f.requests.at(-1)!.body)).toContain('distinguish evidence from hypotheses');
+  expect(system(f.requests.at(-1)!.body)).not.toContain('Distinguish completed work, attempted work');
+  const beforeRestart = (await f.api.snapshot(identity)).context.checkpoint!;
+  await f.extensions.setEnabled('example.project-context', false, (await f.extensions.state()).catalog.revision);
+  await expect(f.adapter.refreshPersonalization()).rejects.toThrow();
+  expect((await f.api.snapshot(identity)).context.checkpoint).toEqual(beforeRestart);
+  await f.extensions.setEnabled('example.project-context', true, (await f.extensions.state()).catalog.revision);
+  await f.adapter.refreshPersonalization();
+  const prior = (await f.api.snapshot(identity)).context.checkpoint!;
+  expect(prior.personalization!.revision).toBe(beforeRestart.personalization!.revision);
+  expect(prior.personalization!.contextComposition!.transforms[0]!.providerId).not.toBe(beforeRestart.personalization!.contextComposition!.transforms[0]!.providerId);
+  const { contextComposition, ...basis } = prior.personalization!;
+  await expect(f.runtime.refreshContext({ branchId: identity.branchId, expectedRevision: prior.revision, context: {
+    ...(prior.resources ? { resources: prior.resources } : {}),
+    effectiveSystemPrompt: prior.proposal.effective_system_prompt + ' UNAUTHORIZED SAME REVISION',
+    instructionSources: prior.proposal.instruction_sources, memoryCheckpoint: prior.proposal.memory_checkpoint,
+    personalization: { ...basis, contextComposition: { ...contextComposition!, transforms: [{ ...contextComposition!.transforms[0]!, contentVersion: 'changed', sections: [] }] } },
+  } })).rejects.toThrow();
+  await route(f, 'missing.context:host:varin.context.fragments@1', { projectId: 'selected-project' });
+  await expect(f.adapter.refreshPersonalization()).rejects.toThrow();
+  expect((await f.api.snapshot(identity)).context.checkpoint).toEqual(prior);
+});
+it('a cache hit cannot return an old selection revision if routing changes before actual binding', async () => {
+  const f = await fixture((_body, response) => complete(response, 'unused', 'unused'));
+  const scope = { threadId: 'race-session', projectId: 'race-project' };
+  const first = await f.composition(scope);
+  const originalRead = f.extensions.routing.read.bind(f.extensions.routing);
+  let changed = false;
+  f.extensions.routing.read = async () => {
+    const snapshot = await originalRead();
+    if (!changed) { changed = true; await route(f, 'varin.builtin.context-fragments:host:varin.context.fragments@1', { projectId: 'race-project' }); }
+    return snapshot;
+  };
+  const result = await f.composition(scope).catch(() => undefined);
+  expect(result?.selectionRevision).not.toBe(first!.selectionRevision);
+});
+
+it('optional unavailable default is empty, but explicit missing and failing providers cannot silently erase context', async () => {
+  const f = await fixture((_body, response) => complete(response, 'unused', 'unused'));
+  const scope = { threadId: 'optional-session' };
+  expect((await f.composition(scope))!.transforms[0]!.sections[0]!.name).toBe('execution-reporting');
+  await f.extensions.setEnabled('varin.builtin.context-fragments', false, (await f.extensions.state()).catalog.revision);
+  expect(await f.composition(scope)).toBeUndefined();
+  await route(f, 'varin.builtin.context-fragments:host:varin.context.fragments@1', scope);
+  await expect(f.composition(scope)).rejects.toThrow();
+  await f.extensions.setEnabled('varin.builtin.context-fragments', true, (await f.extensions.state()).catalog.revision);
+  const bad = path.join(f.root, 'bad-context'); await fs.mkdir(bad);
+  await fs.writeFile(path.join(bad, 'package.json'), JSON.stringify({ name: 'bad-context', version: '1.0.0' }));
+  await fs.writeFile(path.join(bad, 'varin.extension.json'), JSON.stringify({ schemaVersion: 1, id: 'review.bad-context', version: '1.0.0', engines: { varin: '*' }, entrypoints: { host: { file: 'host.cjs', mode: 'brokered', activation: ['service-request'] } }, provides: { services: [VARIN_CONTEXT_FRAGMENTS_SERVICE] } }));
+  await fs.writeFile(path.join(bad, 'host.cjs'), `module.exports={activate(context){context.services.provide(${JSON.stringify(VARIN_CONTEXT_FRAGMENTS_SERVICE)},{describe(){throw new Error('deliberate describe failure')}})}}`);
+  await f.extensions.installOrStage({ expectedRevision: (await f.extensions.state()).catalog.revision, source: { kind: 'local', display: 'Bad context', specifier: bad } });
+  await f.composition(scope);
+  expect((await f.extensions.state()).services.providers.some(provider => provider.extensionId === 'review.bad-context')).toBe(false);
+  await route(f, 'review.bad-context:host:varin.context.fragments@1', scope);
+  await expect(f.composition(scope)).rejects.toThrow(/deliberate describe failure/);
+});
+it('unchanged context preparation invokes describe once and reuses the real worker generation', async () => {
+  const f = await fixture((_body, response) => complete(response, 'unused', 'unused'));
+  let describes = 0;
+  const originalPrepare = f.extensions.prepareServiceCollection.bind(f.extensions);
+  f.extensions.prepareServiceCollection = async (...args) => {
+    const collection = await originalPrepare(...args);
+    return { ...collection, bindings: collection.bindings.map<HostServiceBinding>(binding => ({ ...binding,
+      pin: () => {
+        const pin = binding.pin();
+        return { ...pin, invoke: (method, input, signal, invocation) => {
+          if (method === 'describe') describes++;
+          return pin.invoke(method, input, signal, invocation);
+        } };
+      },
+    })) };
+  };
+  const generations = new Set<string>();
+  for (let index = 0; index < 5; index++) {
+    const result = await f.composition({ threadId: 'reuse-session' });
+    generations.add(result!.transforms[0]!.providerId);
+    expect(result!.transforms[0]!.sections[0]!.name).toBe('execution-reporting');
+  }
+  const beforeRouting = await f.composition({ threadId: 'reuse-session' });
+  await route(f, 'unrelated.missing:host:varin.context.fragments@1', { projectId: 'unrelated-project' });
+  const afterRouting = await f.composition({ threadId: 'reuse-session' });
+  expect(afterRouting).toEqual(beforeRouting);
+  expect(describes).toBe(1);
+  expect(generations.size).toBe(1);
+  expect((await f.extensions.state()).services.providers.filter(provider => provider.extensionId === 'varin.builtin.context-fragments')).toHaveLength(1);
+});
+it('selected describe failure preserves the checkpoint and data fragments stay outside model system instructions', async () => {
+  const f = await fixture((_body, response) => complete(response, `data-${Date.now()}`, 'done'));
+  const identity = await f.api.create('data-review');
+  const first = await f.api.submit({ ...identity, key: 'first', expectedHead: null, text: 'first', model });
+  await expect.poll(async () => (await f.api.run(first.run_id)).state).toBe('completed');
+  const before = (await f.api.snapshot(identity)).context.checkpoint!;
+  for (const [id, implementation] of [
+    ['review.fail-fragments', "throw new Error('failed fragment preparation')"],
+    ['review.data-fragments', "return {sections:[{name:'quoted-evidence',kind:'data',content:'EXTERNAL QUOTED EVIDENCE'}]}"],
+  ]) {
+    const folder = path.join(f.root, id!); await fs.mkdir(folder);
+    await fs.writeFile(path.join(folder, 'package.json'), JSON.stringify({ name: id, version: '1.0.0' }));
+    await fs.writeFile(path.join(folder, 'varin.extension.json'), JSON.stringify({ schemaVersion: 1, id, version: '1.0.0', engines: { varin: '*' }, entrypoints: { host: { file: 'host.cjs', mode: 'brokered', activation: ['service-request'] } }, provides: { services: [VARIN_CONTEXT_FRAGMENTS_SERVICE] } }));
+    await fs.writeFile(path.join(folder, 'host.cjs'), `module.exports={activate(context){context.services.provide(${JSON.stringify(VARIN_CONTEXT_FRAGMENTS_SERVICE)},{describe(){${implementation}}})}}`);
+    await f.extensions.installOrStage({ expectedRevision: (await f.extensions.state()).catalog.revision, source: { kind: 'local', display: id!, specifier: folder } });
+  }
+  await route(f, 'review.fail-fragments:host:varin.context.fragments@1', { threadId: identity.threadId });
+  await expect(f.adapter.refreshPersonalization()).rejects.toThrow();
+  expect((await f.api.snapshot(identity)).context.checkpoint).toEqual(before);
+  await route(f, 'review.data-fragments:host:varin.context.fragments@1', { threadId: identity.threadId });
+  const second = await f.api.submit({ ...identity, key: 'second', expectedHead: (await f.api.snapshot(identity)).historyPage.head, text: 'second', model });
+  await expect.poll(async () => (await f.api.run(second.run_id)).state).toBe('completed');
+  const wire = f.requests.at(-1)!.body;
+  expect(JSON.stringify(wire)).toContain('EXTERNAL QUOTED EVIDENCE');
+  expect(system(wire)).not.toContain('EXTERNAL QUOTED EVIDENCE');
+});
+
+
+it('calendar GUI assets reach original source/model/context owners, consume a genuine cold Environment input and survive same-key restart', async () => {
+  let completedRequests = 0;
+  const reply = (_body: Record<string, unknown>, response: ServerResponse) => {
+    completedRequests++;
+    response.writeHead(200, { 'content-type': 'text/event-stream' });
+    response.end(`data: ${JSON.stringify({ type: 'response.completed', response: { output: [{ id: `calendar-answer-${completedRequests}`, type: 'message', content: [{ type: 'output_text', text: 'Original calendar result' }] }] } })}\n\n`);
+  };
+  const install = async (f: Awaited<ReturnType<typeof fixture>>) => {
+    const projects = async () => [{ id: 'selected-project', path: f.workspace }];
+    f.adapter.bindSourceDirectory(createThreadSourceDirectory({ documents: f.documents }));
+    const config = createProjectConfigRuntime({ fsPromises: fs, path, projectsDirPath: path.join(f.root, 'project-config') });
+    const scheduler = createScheduledTasksRuntime({ projectConfigRuntime: config, listProjects: projects });
+    const errors: unknown[] = [];
+    scheduler.setCalendarOwner(new CalendarOwner({ runtime: f.runtime, projects,
+      prepare: (work, project, signal) => f.adapter.prepareCalendarWork(work, project, signal), onChanged() {}, onError: error => errors.push(error) }));
+    const service = createScheduledTaskService({ projectConfigRuntime: config, scheduledTasksRuntime: scheduler, readSettingsFromDisk: async () => ({ projects: await projects() }), sanitizeProjects: value => value as Awaited<ReturnType<typeof projects>> });
+    registerScheduledTaskRoutes(f.app, { scheduledTaskService: service, projectConfigRuntime: config, scheduledTasksRuntime: scheduler,
+      readSettingsFromDisk: async () => ({ projects: await projects() }), sanitizeProjects: value => value as Awaited<ReturnType<typeof projects>>,
+      requireAuth: (req, res, next) => { if (req.headers['x-fixture-auth'] !== 'fixture-client') { res.status(401).json({ error: 'Sign in required' }); return; } next(); } });
+    cleanups.push(async () => scheduler.stop()); await scheduler.start();
+    return { scheduler, errors, api: createScheduledTasksHttpAPI() };
+  };
+  const f = await fixture(reply), host = await install(f);
+  const instruction = '  Original calendar Environment input\nwith preserved whitespace  ';
+  await host.api.upsert('selected-project', { id: 'calendar-task', runtime: 'agent', name: 'Cold project work', enabled: false,
+    schedule: { kind: 'once', date: '2020-01-01', time: '09:00', timezone: 'UTC' }, execution: { prompt: instruction },
+    missedPolicy: 'coalesce_once', target: { kind: 'new_work', source: { kind: 'project' }, model: { providerId: 'fixture-provider', modelId: 'fixture-model' }, sourceMode: 'fixed_branch', goal: null } });
+  const accepted = await host.api.run('selected-project', 'calendar-task', 'original-manual-key');
+  if (accepted.runtime !== 'agent') throw new Error('Native calendar returned a Pi receipt');
+  expect(accepted).not.toHaveProperty('threadId');
+  await expect.poll(async () => (await host.api.list('selected-project'))[0]?.calendar?.occurrences[0]?.state, { timeout: 15_000 }).toBe('completed');
+  const occurrence = (await host.api.list('selected-project'))[0]!.calendar!.occurrences[0]!;
+  expect(occurrence.id).toBe(accepted.occurrence.id); expect(occurrence.run_id).toBeTruthy();
+  expect((await f.runtime.launch(occurrence.run_id!))?.selection.source?.mode).toBe('fixed_branch');
+  expect(JSON.stringify(await f.runtime.history(occurrence.branch_id))).toContain('Original calendar Environment input');
+  expect(f.requests).toHaveLength(1); expect(JSON.stringify(f.requests[0]!.body)).toContain(instruction.replaceAll('\n', '\\n'));
+  expect(host.errors).toEqual([]); expect(f.launchErrors).toEqual([]);
+  host.scheduler.stop(); await f.close();
+  const reopened = await fixture(reply, f.root, f.endpoint), resumed = await install(reopened);
+  const same = await resumed.api.run('selected-project', 'calendar-task', 'original-manual-key');
+  if (same.runtime !== 'agent') throw new Error('Native calendar returned a Pi receipt');
+  expect(same.occurrence.id).toBe(occurrence.id); expect(same.occurrence.run_id).toBe(occurrence.run_id);
+  expect(completedRequests).toBe(1); expect(resumed.errors).toEqual([]);
+}, 45_000);

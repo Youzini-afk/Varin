@@ -1,6 +1,7 @@
 {
   "extends": "./tsconfig.application-host.json",
   "compilerOptions": {
+    "rootDir": "../..",
     "noEmit": true
   },
   "include": ["application-host/**/*.ts"],

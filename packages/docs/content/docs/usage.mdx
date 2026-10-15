@@ -1,15 +1,14 @@
 ---
-title: Session token usage
-description: Open Usage in the header services menu to see the current conversation’s token consumption, grouped by provider and model.
+title: "Branch token usage"
+description: "Inspect original model receipts for the selected branch."
 ---
 
-# Session token usage
+# Branch token usage
 
-Open **Usage** in the header services menu to see the current conversation’s token consumption, grouped by provider and model.
+Open **Usage** in the header services menu. It reports work executed on the selected Thread branch, grouped by model, provider, work kind and measurement status. This includes conversation, context work, planning, MCP sampling and recorded tool inference.
 
-- **Input**: uncached input tokens.
-- **Output**: generated output tokens.
-- **Cache read**: input tokens reused from the provider cache.
-- **Cache write**: input tokens written to that cache.
+Rows show input, output, cache-read, cache-write and reasoning tokens when reported. Provider definitions can overlap, so do not add every field into a total or assume input always excludes cached tokens.
 
-Totals come from the native Pi session journal, including messages before compaction, inactive branches and recorded auxiliary calls. Usage without model information has its own row. Each child conversation has its own statistics.
+Actual, estimated, missing and pending usage remain distinct. An unknown count is not zero. Requests with no recorded dispatch are identified separately. Child Threads and standalone utility work have their own usage; this is not an all-branches total or a context-capacity gauge. No price estimate is made.
+
+If updates disconnect, the panel labels the last recorded snapshot. Use **Refresh** to reconnect. See [Context](/context/) and [Continuing goals](/session-goals/) for their separate controls.

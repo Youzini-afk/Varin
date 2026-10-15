@@ -63,8 +63,9 @@ afterAll(() => {
   });
 });
 
-const sessionState = (sessionId: string): AppRouteState => ({
-  sessionId,
+const sessionState = (threadId: string): AppRouteState => ({
+  threadId,
+  branchId: 'branch:review',
   tab: 'chat',
   isSettingsOpen: false,
   settingsPath: '',
@@ -75,11 +76,11 @@ describe('updateBrowserURL embedded-session-chat guard', () => {
   test('is a no-op in the embedded session-chat iframe', () => {
     // The embedded iframe's Varin URL identity must never be rewritten.
     // updateBrowserURL rebuilds the
-    // query string from scratch, which would strip piPanel and break
+    // query string from scratch, which would strip panel and break
     // isEmbeddedSessionChat().
     // The guard preserves the fixed embedded identity.
     const history = installWindow(
-      'http://127.0.0.1:5173/app?piPanel=session-chat&piSessionId=ses_child&piDirectory=%2Frepo&piReadOnly=1',
+      'http://127.0.0.1:5173/app?panel=session-chat&threadId=ses_child&branchId=branch%3Areview&directory=%2Frepo&readOnly=1',
     );
 
     updateBrowserURL(sessionState('ses_grandchild'), { replace: true, force: true });
@@ -94,7 +95,7 @@ describe('updateBrowserURL embedded-session-chat guard', () => {
     updateBrowserURL(sessionState('ses_main'), { replace: true, force: true });
 
     const writtenURL = historyOf().lastURL ?? '';
-    expect(writtenURL).toContain('session=ses_main');
+    expect(writtenURL).toContain('thread=ses_main');
   });
 });
 
@@ -106,7 +107,7 @@ describe('isEmbeddedSessionChat caching', () => {
     // We need a fresh module cache for this test. Since the cache is
     // module-level, we test the invariant: once true, always true.
     installWindow(
-      'http://127.0.0.1:5173/app?piPanel=session-chat&piSessionId=ses_child&piDirectory=%2Frepo&piReadOnly=1',
+      'http://127.0.0.1:5173/app?panel=session-chat&threadId=ses_child&branchId=branch%3Areview&directory=%2Frepo&readOnly=1',
     );
 
     // First read: caches true.

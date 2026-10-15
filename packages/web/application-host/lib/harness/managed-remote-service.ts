@@ -6,8 +6,9 @@ import { sliceUtf8ByBytes, type ShellExecResult, type ShellReadResult } from "@v
 import os from "node:os";
 import type { KernelClient, KernelScopedClient } from "../kernel/kernel-client.js";
 import type { KernelBranchState, KernelRecordResult } from "../kernel/protocol.generated.js";
+import { requireAppliedProcessInteraction } from "../kernel/process-interaction.js";
 import { canonicalizePathIdentity } from "../workspace/path-safety.js";
-import type { ResourceService } from "./resources.js";
+import type { ResourceAdmissionReconciliation, ResourceService } from "./resources.js";
 import {
   MANAGED_REMOTE_PROTOCOL_VERSION,
   type ManagedRemoteAdmissionReceipt,
@@ -22,6 +23,7 @@ import {
   type ManagedRemoteMaterialReceipt,
   type ManagedRemoteOutputReceipt,
   type ManagedRemoteReadReceipt,
+  type ManagedSourceService,
 } from "./managed-remote-types.js";
 
 const WORKSPACE_ID = "__varin_managed_remote__";
@@ -123,9 +125,19 @@ export interface ManagedRemoteExecutionServiceOptions {
   resources: ResourceService;
   now?: () => number;
   onError?: (error: Error) => void;
+  sourceOwner?: ManagedSourceService;
 }
 
 export function createManagedRemoteExecutionService(options: ManagedRemoteExecutionServiceOptions) {
+  let sourceOwner = options.sourceOwner;
+  const setSourceOwner = (owner: ManagedSourceService): void => {
+    if (sourceOwner && sourceOwner !== owner) throw new Error('Managed source owner is already installed');
+    sourceOwner = owner;
+  };
+  const sources = (): ManagedSourceService => {
+    if (!sourceOwner) throw new Error('Managed source owner is unavailable');
+    return sourceOwner;
+  };
   const now = options.now ?? (() => Date.now());
   const report = (error: unknown) => options.onError?.(error instanceof Error ? error : new Error(String(error)));
   let contextPromise: Promise<KernelScopedClient> | null = null;
@@ -184,7 +196,7 @@ export function createManagedRemoteExecutionService(options: ManagedRemoteExecut
     return {
       protocolVersion: MANAGED_REMOTE_PROTOCOL_VERSION,
       hostId: options.hostId,
-      capabilities: ["materials", "process", "attach", "cancel", "logs", "outputs", "resource-admission", "remote-shell"],
+      capabilities: ["materials", "process", "attach", "cancel", "logs", "outputs", "resource-admission", "remote-shell", ...(sourceOwner ? ['sources'] : [])],
       machine,
     };
   };
@@ -340,32 +352,47 @@ export function createManagedRemoteExecutionService(options: ManagedRemoteExecut
     return { materialId: manifest.materialId, root: manifest.materialId, rootId, canonicalRoot: materialRoot, cwd: manifest.cwd ?? "", reused: false };
   };
 
-  const admit = async (input: ManagedRemoteAdmissionRequest, principalId: string): Promise<ManagedRemoteAdmissionReceipt> => {
-    if (!input.coordinatorHostId?.trim() || !input.workspaceId?.trim() || !input.attemptId?.trim()) throw new Error("Remote admission identity is required");
-    const actualMachineId = `managed:${options.hostId}`;
-    const receipt = await options.resources.admit(WORKSPACE_ID, "local", input.resources ?? {}, commitmentAttemptId(principalId, input));
-    if (receipt.status === "confirmed" && receipt.commitmentId) {
-      const scoped = await context();
-      const recordId = admissionRecordId(principalId, input);
-      const prior = await scoped.getRecord(WORKSPACE_ID, recordId);
-      if (prior) {
-        const payload = recordPayload(prior);
-        if (text(payload.commitmentId) !== receipt.commitmentId || text(payload.machineId) !== actualMachineId) {
-          throw new Error("Remote admission identity conflicts with its retained receipt");
-        }
-      } else {
-        await putRecord({
-          recordId,
-          recordType: "managed.remote.admission",
-          state: "confirmed",
-          payload: {
-            id: recordId.slice(ADMISSION_PREFIX.length), principalId, coordinatorHostId: input.coordinatorHostId,
-            sourceWorkspaceId: input.workspaceId, machineId: actualMachineId, attemptId: input.attemptId,
-            commitmentId: receipt.commitmentId, resources: input.resources ?? {}, confirmedAt: now(),
-          },
-        });
+  const retainAdmission = async (input: ManagedRemoteAdmissionRequest, principalId: string, commitmentId: string): Promise<void> => {
+    const scoped = await context();
+    const recordId = admissionRecordId(principalId, input);
+    const matches = (record: KernelRecordResult) => {
+      const payload = recordPayload(record);
+      if (text(payload.commitmentId) !== commitmentId || text(payload.machineId) !== `managed:${options.hostId}`
+        || text(payload.principalId) !== principalId || text(payload.coordinatorHostId) !== input.coordinatorHostId
+        || text(payload.sourceWorkspaceId) !== input.workspaceId || text(payload.attemptId) !== input.attemptId) {
+        throw new Error("Remote admission identity conflicts with its retained receipt");
       }
+    };
+    const prior = await scoped.getRecord(WORKSPACE_ID, recordId);
+    if (prior) { matches(prior); return; }
+    try {
+      await putRecord({ recordId, recordType: "managed.remote.admission", state: "confirmed",
+        payload: { id: recordId.slice(ADMISSION_PREFIX.length), principalId, coordinatorHostId: input.coordinatorHostId,
+          sourceWorkspaceId: input.workspaceId, machineId: `managed:${options.hostId}`, attemptId: input.attemptId,
+          commitmentId, resources: input.resources ?? {}, confirmedAt: now() } });
+    } catch (error) {
+      const raced = await scoped.getRecord(WORKSPACE_ID, recordId);
+      if (!raced) throw error;
+      matches(raced);
     }
+  };
+
+  const validateAdmissionIdentity = (input: ManagedRemoteAdmissionRequest): void => {
+    if (!input.coordinatorHostId?.trim() || !input.workspaceId?.trim() || !input.attemptId?.trim()
+      || input.machineId !== `managed:${options.hostId}`) throw new Error("Remote admission identity is invalid");
+  };
+
+  const admit = async (input: ManagedRemoteAdmissionRequest, principalId: string): Promise<ManagedRemoteAdmissionReceipt> => {
+    validateAdmissionIdentity(input);
+    const receipt = await options.resources.admit(WORKSPACE_ID, "local", input.resources ?? {}, commitmentAttemptId(principalId, input));
+    if (receipt.status === "confirmed" && receipt.commitmentId) await retainAdmission(input, principalId, receipt.commitmentId);
+    return receipt;
+  };
+
+  const observeAdmission = async (input: ManagedRemoteAdmissionRequest, principalId: string): Promise<ResourceAdmissionReconciliation> => {
+    validateAdmissionIdentity(input);
+    const receipt = await options.resources.reconcileAdmission(WORKSPACE_ID, "local", input.resources ?? {}, commitmentAttemptId(principalId, input));
+    if (receipt.status === "confirmed") await retainAdmission(input, principalId, receipt.commitmentId);
     return receipt;
   };
 
@@ -527,7 +554,7 @@ export function createManagedRemoteExecutionService(options: ManagedRemoteExecut
     let commitmentId: string | undefined = record ? text(recordPayload(record).commitmentId) : undefined;
     if (!commitmentId && resourcesRequired(requestedResources)) {
       const admission = await admit({
-        coordinatorHostId, workspaceId: input.sourceWorkspaceId, machineId: "local", attemptId: input.attemptId,
+        coordinatorHostId, workspaceId: input.sourceWorkspaceId, machineId: `managed:${options.hostId}`, attemptId: input.attemptId,
         resources: requestedResources,
       }, principalId);
       if (admission.status !== "confirmed" || !admission.commitmentId) throw new Error(admission.reason ?? "Managed remote resources are unavailable");
@@ -893,9 +920,11 @@ export function createManagedRemoteExecutionService(options: ManagedRemoteExecut
 
   const shellWrite = async (principalId: string, coordinatorHostId: string, processId: string, inputText: string) => {
     const { scoped } = await shellRecord(principalId, coordinatorHostId, processId);
-    const current = await scoped.processRead({ workspaceId: WORKSPACE_ID, processId, cursor: 0, maxBytes: 0 });
-    const result = await scoped.processWrite({ workspaceId: WORKSPACE_ID, processId, sequence: current.inputSequence, bytesBase64: Buffer.from(inputText).toString("base64") });
-    return { accepted: result.queued === true };
+    const operationId = `remote-shell-input:${randomUUID()}`;
+    const bytes = Buffer.from(inputText);
+    const result = await scoped.processWrite({ workspaceId: WORKSPACE_ID, processId, operationId, bytesBase64: bytes.toString("base64") });
+    requireAppliedProcessInteraction(result, { processId, operationId, kind: 'write', requestedBytes: bytes.length, eofRequested: false });
+    return { accepted: true };
   };
 
   const shellKill = async (principalId: string, coordinatorHostId: string, processId: string) => {
@@ -918,8 +947,9 @@ export function createManagedRemoteExecutionService(options: ManagedRemoteExecut
 
   return {
     hostId: options.hostId,
+    sources, setSourceOwner,
     identity, lifecycle, ownerForOutput, probeMaterial, putObject, commitMaterial,
-    admit, releaseAdmission,
+    admit, observeAdmission, releaseAdmission,
     submitJob, inspectJob, readJob, killJob, releaseJob,
     collectOutput, readOutput,
     shellExec, shellRead, shellWrite, shellKill, setShellScopeSleeping,

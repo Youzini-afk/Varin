@@ -1,15 +1,14 @@
 ---
-title: Tokens desta conversa
-description: Abra Uso no menu de serviços do cabeçalho para ver os tokens da conversa atual, agrupados por provedor e modelo.
+title: "Uso de tokens da branch"
+description: "Confira os registros originais de uso da branch selecionada."
 ---
 
-# Tokens desta conversa
+# Uso de tokens da branch
 
-Abra **Uso** no menu de serviços do cabeçalho para ver os tokens da conversa atual, agrupados por provedor e modelo.
+Abra **Usage** no menu de serviços do cabeçalho. Ele mostra trabalho executado na branch selecionada, agrupado por modelo, provedor, tipo e estado de medição: conversa, contexto, planejamento, amostragem MCP e inferências de ferramentas registradas.
 
-- **Entrada**: tokens de entrada sem cache.
-- **Saída**: tokens gerados.
-- **Leitura de cache**: entrada reutilizada do cache do provedor.
-- **Gravação de cache**: entrada gravada no cache.
+Quando reportados, aparecem tokens de entrada, saída, leitura e escrita de cache e raciocínio. As definições dos provedores podem se sobrepor. Não some todos os campos nem presuma que entrada exclui cache.
 
-Os totais vêm do registro de sessão do Pi, incluindo mensagens anteriores à compactação, ramificações inativas e chamadas auxiliares registradas. O uso sem identificação do modelo aparece separadamente. Cada conversa filha tem suas próprias estatísticas.
+Uso real, estimado, ausente e pendente permanece distinto. Desconhecido não é zero. Solicitações sem envio registrado também são indicadas. Threads filhos e trabalho auxiliar independente têm uso próprio. Não é o total de todas as branches nem um indicador de capacidade de contexto. Não há estimativa de preço.
+
+Se as atualizações desconectarem, o painel identifica o último snapshot registrado. Use **Refresh** para reconectar. Veja [Contexto](/pt-br/context/) e [Objetivos](/pt-br/session-goals/).

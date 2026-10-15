@@ -1,7 +1,51 @@
+import { nativeResearchCaller } from './native-research.fixture.js';
 import { describe, expect, it, vi } from "vitest";
 import { createManagedRemoteTargetRegistry } from "./managed-remote-client.js";
+import { ExperimentPreparationError } from "./experiment-backend.js";
+import type { ExperimentInputSnapshot } from "./experiment-workspace.js";
 
 describe("managed remote target recovery", () => {
+  it('retains a dispatched materialization through cancellation and reconciles only its original ready receipt', async () => {
+    let ready = false;
+    let enter!: () => void;
+    let release!: () => void;
+    const entered = new Promise<void>(resolve => { enter = resolve; });
+    const held = new Promise<void>(resolve => { release = resolve; });
+    const reply = (value: unknown) => new Response(JSON.stringify(value), { headers: { 'x-varin-managed-host': 'remote-host' } });
+    const fetchMock = vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
+      if (String(url).endsWith('/identity')) return reply({ protocolVersion: 1, hostId: 'remote-host',
+        capabilities: ['managed-execution'], machine: { machineId: 'managed:remote-host', kind: 'managed-remote', state: 'available' } });
+      if (String(url).endsWith('/materials/probe')) return reply({ ready, missingObjects: [],
+        ...(ready ? { rootId: 'root', canonicalRoot: '/original/material' } : {}) });
+      expect(String(url)).toContain('/materials/commit');
+      expect(init?.signal).toBeUndefined();
+      enter(); await held; ready = true;
+      return reply({ materialId: 'original-root', root: 'original-root', rootId: 'root', canonicalRoot: '/original/material', cwd: '', reused: false });
+    });
+    const registry = createManagedRemoteTargetRegistry({ coordinatorHostId: 'host',
+      kernel: { start: async () => ({}), issueGrant: async (grant: object) => grant, retireGrant: async () => ({}),
+        scoped: () => ({ readBranch: async () => ({ workspaceId: 'workspace', root: 'original-root', currentRoot: 'original-root', entries: [], nextCursor: null }) }) } as never,
+      resources: { listMachines: async () => [], registerMachine: async () => ({}) } as never,
+      readSettings: async () => ({ desktopHosts: [{ id: 'remote', apiUrl: 'https://remote.example' }] }), fetch: fetchMock as typeof fetch,
+    });
+    const input: ExperimentInputSnapshot = { schemaVersion: 2, source: {kind:"physical-capture"}, branchId: 'input', root: 'original-root', sourceRoot: '/source',
+      workspaceId: 'workspace', executionWorkspaceId: 'workspace', captureScopes: [], capturedPathCount: 0, inventoryFingerprint: 'inventory',
+      captureSemantics: { excludedDirectories: ['.git', '.varin'], gitignore: 'not-applied', ignoredFilesIncluded: true } };
+    const resolved = await registry.resolveBackend({} as never, 'managed:remote-host',
+      { payloadJson: JSON.stringify({ backend: 'managed-remote' }) } as never,
+      nativeResearchCaller({ workspaceId: 'workspace', executionWorkspaceId: 'workspace', readThreadIds: [] }));
+    expect(resolved).not.toBeNull();
+    expect(await resolved!.reconcilePreparation!({ attemptId: 'attempt', input })).toBe('unknown');
+    const controller = new AbortController(); let settled = false;
+    const pending = resolved!.prepare({ attemptId: 'attempt', input, signal: controller.signal }).finally(() => { settled = true; });
+    await entered; controller.abort(); await new Promise<void>(resolve => setImmediate(resolve));
+    expect(settled).toBe(false);
+    release(); expect((await pending).inputRoot).toBe('original-root');
+    expect(await resolved!.reconcilePreparation!({ attemptId: 'attempt', input })).toBe('drained');
+    await expect(resolved!.prepare({ attemptId: 'not-dispatched', input, signal: controller.signal }))
+      .rejects.toMatchObject({ name: ExperimentPreparationError.name, drained: true });
+    expect(fetchMock.mock.calls.filter(([url]) => String(url).includes('/materials/commit'))).toHaveLength(1);
+  });
   it('releases only the removed owner receipts while retaining shared machine ownership', async () => {
     const targets = new Set(['bot:a', 'bot:b']);
     const releaseRecord = vi.fn(async (_operation: string, workspaceId: string, recordId: string) => {
@@ -57,13 +101,12 @@ describe("managed remote target recovery", () => {
     const machine = {
       payloadJson: JSON.stringify({ backend: "managed-remote" }),
     } as never;
-    const caller = {
+    const caller = nativeResearchCaller({
       workspaceId: "workspace-a",
       executionWorkspaceId: "workspace-a",
-      sessionId: "session-a",
-      rootSessionId: "session-a",
-      allowedThreadIds: [],
-    };
+      rootThreadId: "session-a",
+      readThreadIds: [],
+    });
 
     await expect(registry.resolveBackend({} as never, "managed:remote-host", machine, caller)).resolves.toBeNull();
     reachable = true;

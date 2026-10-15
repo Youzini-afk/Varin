@@ -1,8 +1,7 @@
 import React from 'react';
 import type { ExperimentArtifactView, ExperimentAttemptView, ResourceGpuView, ResourceMachineView } from '@varin/protocol';
 import { Icon } from '@/components/icon/Icon';
-import { useHarnessThreadState } from '@/components/pi-session/HarnessThreadStateContext';
-import { PdfMaterialReader } from '@/components/pi-session/PdfMaterialReader';
+import { ThreadArtifactPdfReader } from '@/components/thread/ThreadArtifactPdfReader';
 import { subscribeVarinEvents } from '@/lib/varinEvents';
 import { useI18n } from '@/lib/i18n';
 import {
@@ -17,11 +16,14 @@ import {
   rerunResearchAttempts,
   type ResearchAttemptDetails,
   type ResearchFactsSnapshot,
+  type ResearchFactsOwner,
 } from './researchFacts';
 
 const ACTIVE_STATES = new Set(['submitted', 'queued', 'running', 'stopping']);
 const COLLECTABLE = new Set(['completed', 'failed', 'cancelled']);
 const RERUNNABLE = new Set(['failed', 'cancelled', 'lost']);
+type RerunIntent = { attemptId: string; specId: string; machineId?: string; requestId: string };
+let rerunSequence = 0;
 
 const formatResources = (resources: { cpuCores?: number; memoryMb?: number; gpus?: ResourceGpuView[] } | undefined): string => {
   if (!resources) return '';
@@ -111,14 +113,16 @@ const AttemptRow: React.FC<{
   busy: boolean;
   selected: boolean;
   checked: boolean;
+  canSubmit: boolean;
   onAction: (attemptId: string, action: 'cancel' | 'collect' | 'rerun') => void;
   onSelect: (attemptId: string) => void;
   onToggleSelect: (attemptId: string) => void;
-}> = ({ attempt, machine, busy, selected, checked, onAction, onSelect, onToggleSelect }) => {
+}> = ({ attempt, machine, busy, selected, checked, canSubmit, onAction, onSelect, onToggleSelect }) => {
   const { t } = useI18n();
   const attemptState = attempt.state as string;
+  const canControl = attempt.permissions?.control !== false;
   const active = ACTIVE_STATES.has(attemptState);
-  const collectable = COLLECTABLE.has(attemptState) && (attempt.collection === 'none' || attempt.collection === 'failed');
+  const collectable = attempt.specId !== null && COLLECTABLE.has(attemptState) && (attempt.collection === 'none' || attempt.collection === 'failed');
   const target = machine?.target;
   const waitingForDispatch = target?.unassignedWorkRequiresCoordinator === true
     && (attemptState === 'submitted' || attemptState === 'queued');
@@ -147,21 +151,21 @@ const AttemptRow: React.FC<{
           {attempt.attemptId}
         </span>
         <span className="shrink-0 text-muted-foreground">{attemptLabel}</span>
-        {active ? (
+        {active && canControl ? (
           <button type="button" disabled={busy}
             className="shrink-0 text-primary hover:underline disabled:opacity-50"
             onClick={() => onAction(attempt.attemptId, 'cancel')}>
             {t('research-facts.cancel')}
           </button>
         ) : null}
-        {collectable ? (
+        {collectable && canControl ? (
           <button type="button" disabled={busy}
             className="shrink-0 text-primary hover:underline disabled:opacity-50"
             onClick={() => onAction(attempt.attemptId, 'collect')}>
             {t('research-facts.collect')}
           </button>
         ) : null}
-        {RERUNNABLE.has(attemptState) ? (
+        {canSubmit && canControl && attempt.specId !== null && RERUNNABLE.has(attemptState) ? (
           <button type="button" disabled={busy}
             className="shrink-0 text-primary hover:underline disabled:opacity-50"
             onClick={() => onAction(attempt.attemptId, 'rerun')}>
@@ -213,14 +217,17 @@ type LogState = {
 const emptyLog = (): LogState => ({ text: '', nextOffset: 0, eof: false, loaded: false, loading: false, error: null });
 
 const ArtifactRow: React.FC<{
-  sessionId: string;
+  owner: ResearchFactsOwner;
   attemptId: string;
   artifact: ExperimentArtifactView;
-}> = ({ sessionId, attemptId, artifact }) => {
+}> = ({ owner, attemptId, artifact }) => {
   const { t } = useI18n();
   const [busy, setBusy] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
-  const [readerOpen, setReaderOpen] = React.useState(false);
+  const [readerSelection, setReaderSelection] = React.useState<{ owner: ResearchFactsOwner; attemptId: string; artifactId: string } | null>(null);
+  const readerOpen = readerSelection?.owner === owner && readerSelection.attemptId === attemptId && readerSelection.artifactId === artifact.artifactId;
+  const downloadRequest = React.useRef<AbortController | null>(null);
+  React.useEffect(() => () => { downloadRequest.current?.abort(); }, [owner, attemptId, artifact.artifactId]);
   const remote = artifact.remote;
   const remoteAccessible = remote?.accessible;
   const downloadable = artifact.state === 'available'
@@ -229,10 +236,13 @@ const ArtifactRow: React.FC<{
   const isPdf = artifact.kind === 'file' && /\.pdf$/i.test(artifact.name);
 
   const download = async () => {
+    downloadRequest.current?.abort();
+    const controller = new AbortController(); downloadRequest.current = controller;
     setBusy(true);
     setError(null);
     try {
-      const blob = await loadResearchArtifact(sessionId, attemptId, artifact.artifactId);
+      const blob = await loadResearchArtifact(owner, attemptId, artifact.artifactId, controller.signal);
+      controller.signal.throwIfAborted();
       const url = URL.createObjectURL(blob);
       const anchor = document.createElement('a');
       anchor.href = url;
@@ -240,9 +250,9 @@ const ArtifactRow: React.FC<{
       anchor.click();
       window.setTimeout(() => URL.revokeObjectURL(url), 0);
     } catch (downloadError) {
-      setError(downloadError instanceof Error ? downloadError.message : String(downloadError));
+      if (!controller.signal.aborted) setError(downloadError instanceof Error ? downloadError.message : String(downloadError));
     } finally {
-      setBusy(false);
+      if (downloadRequest.current === controller && !controller.signal.aborted) setBusy(false);
     }
   };
 
@@ -258,7 +268,7 @@ const ArtifactRow: React.FC<{
           </span>
         ) : null}
         {isPdf && downloadable ? (
-          <button type="button" className="shrink-0 text-primary hover:underline" onClick={() => setReaderOpen(true)}>
+          <button type="button" className="shrink-0 text-primary hover:underline" onClick={() => setReaderSelection({ owner, attemptId, artifactId: artifact.artifactId })}>
             {t('harness.pdf.openReader')}
           </button>
         ) : null}
@@ -278,11 +288,10 @@ const ArtifactRow: React.FC<{
         {artifact.error ? <span className="text-muted-foreground">{artifact.error}</span> : null}
         {error ? <span role="alert" className="text-muted-foreground">{error}</span> : null}
       </li>
-      {isPdf ? (
-        <PdfMaterialReader
-          open={readerOpen}
-          onOpenChange={setReaderOpen}
-          sessionId={sessionId}
+      {isPdf && downloadable && readerOpen ? (
+        <ThreadArtifactPdfReader
+          onOpenChange={open => { if (!open) setReaderSelection(null); }}
+          owner={owner}
           title={artifact.name}
           artifact={{ attemptId, artifactId: artifact.artifactId }}
         />
@@ -292,12 +301,12 @@ const ArtifactRow: React.FC<{
 };
 
 const AttemptDetails: React.FC<{
-  sessionId: string;
+  owner: ResearchFactsOwner;
   attemptId: string;
   attemptState: string;
   collection: string;
   initialArtifacts?: ExperimentArtifactView[];
-}> = ({ sessionId, attemptId, attemptState, collection, initialArtifacts = [] }) => {
+}> = ({ owner, attemptId, attemptState, collection, initialArtifacts = [] }) => {
   const { t } = useI18n();
   const [details, setDetails] = React.useState<ResearchAttemptDetails | null>(null);
   const [error, setError] = React.useState<string | null>(null);
@@ -311,7 +320,7 @@ const AttemptDetails: React.FC<{
     setDetails(null);
     setError(null);
     setLogs({ stdout: emptyLog(), stderr: emptyLog() });
-    void loadResearchAttemptDetails(sessionId, attemptId, controller.signal)
+    void loadResearchAttemptDetails(owner, attemptId, controller.signal)
       .then((next) => {
         if (controller.signal.aborted) return;
         if (next) setDetails(next);
@@ -321,7 +330,7 @@ const AttemptDetails: React.FC<{
         if (!controller.signal.aborted) setError(loadError instanceof Error ? loadError.message : String(loadError));
       });
     return () => controller.abort();
-  }, [attemptId, attemptState, collection, sessionId]);
+  }, [attemptId, attemptState, collection, owner]);
 
   const loadLog = React.useCallback(async (stream: LogStream, append: boolean) => {
     const current = logs[stream];
@@ -330,7 +339,7 @@ const AttemptDetails: React.FC<{
     if (!controller || controller.signal.aborted) return;
     setLogs((previous) => ({ ...previous, [stream]: { ...previous[stream], loading: true, error: null } }));
     try {
-      const result = await loadResearchAttemptLogs(sessionId, attemptId, {
+      const result = await loadResearchAttemptLogs(owner, attemptId, {
         stream,
         offset: append ? current.nextOffset : 0,
         maxBytes: 4096,
@@ -355,7 +364,7 @@ const AttemptDetails: React.FC<{
         [stream]: { ...previous[stream], loading: false, error: loadError instanceof Error ? loadError.message : String(loadError) },
       }));
     }
-  }, [attemptId, logs, sessionId, t]);
+  }, [attemptId, logs, owner, t]);
 
   const renderLog = (stream: LogStream) => {
     const log = logs[stream];
@@ -417,7 +426,7 @@ const AttemptDetails: React.FC<{
             <h5 className="typography-ui-label text-foreground">{t('research-facts.artifacts')}</h5>
             {artifacts.length > 0 ? (
               <ul className="mt-1 divide-y divide-border/40">
-                {artifacts.map((artifact) => <ArtifactRow key={artifact.artifactId} sessionId={sessionId} attemptId={attemptId} artifact={artifact} />)}
+                {artifacts.map((artifact) => <ArtifactRow key={artifact.artifactId} owner={owner} attemptId={attemptId} artifact={artifact} />)}
               </ul>
             ) : <p className="mt-1 text-muted-foreground">{t('research-facts.noArtifacts')}</p>}
           </section>
@@ -427,24 +436,37 @@ const AttemptDetails: React.FC<{
   );
 };
 
-/**
- * Experiment/resource/source facts for the session's owning workspace (7F).
- * Facts come from the harness services through session-scoped routes; a
- * `harness-experiment-changed` event or stream reconnect triggers a reload.
- */
-export const ResearchFactsPanel: React.FC = () => {
+/** Native experiment/resource/source facts for the explicitly selected source Run. */
+export const ResearchFactsView: React.FC<{ owner: ResearchFactsOwner | null; workspaceId: string | null }> = ({ owner, workspaceId }) => {
   const { t } = useI18n();
-  const { parent, workspaceId } = useHarnessThreadState();
-  const sessionId = parent.kind === 'session' ? parent.id : null;
   const [facts, setFacts] = React.useState<ResearchFactsSnapshot | null>(null);
   const [loadError, setLoadError] = React.useState<{ message: string; refresh: boolean } | null>(null);
   const [busy, setBusy] = React.useState(false);
   const [selectedAttemptId, setSelectedAttemptId] = React.useState<string | null>(null);
   const [selectedAttemptIds, setSelectedAttemptIds] = React.useState<Set<string>>(() => new Set());
   const [collectedArtifacts, setCollectedArtifacts] = React.useState<Record<string, ExperimentArtifactView[]>>({});
-  const activeSessionRef = React.useRef<string | null>(sessionId);
+  const activeOwnerRef = React.useRef<ResearchFactsOwner | null>(owner);
   const reloadRef = React.useRef<{ epoch: number; controller: AbortController | null }>({ epoch: 0, controller: null });
-  activeSessionRef.current = sessionId;
+  // Only unresolved HTTP intents live here. Durable attempt state remains with the service.
+  const rerunIntents = React.useRef(new Map<string, RerunIntent>());
+  activeOwnerRef.current = owner;
+
+  const rerunIntent = React.useCallback((attempt: ExperimentAttemptView): RerunIntent => {
+    const existing = rerunIntents.current.get(attempt.attemptId);
+    if (existing) return existing;
+    if (attempt.specId === null) throw new Error('This attempt has no prepared immutable spec to rerun');
+    const intent = { attemptId: attempt.attemptId, specId: attempt.specId,
+      ...(attempt.machineId ? { machineId: attempt.machineId } : {}),
+      requestId: globalThis.crypto?.randomUUID?.() ?? `ui-rerun-${Date.now()}-${++rerunSequence}-${attempt.attemptId}` };
+    rerunIntents.current.set(attempt.attemptId, intent);
+    return intent;
+  }, []);
+  const acceptRerun = React.useCallback((intent: RerunIntent, attempt: ExperimentAttemptView) => {
+    if (rerunIntents.current.get(intent.attemptId) === intent) rerunIntents.current.delete(intent.attemptId);
+    setFacts(current => current ? { ...current,
+      attempts: [...current.attempts.filter(item => item.attemptId !== attempt.attemptId), attempt] } : current);
+    setSelectedAttemptIds(current => { const next = new Set(current); next.delete(intent.attemptId); return next; });
+  }, []);
 
   const invalidateReload = React.useCallback(() => {
     reloadRef.current.epoch += 1;
@@ -453,14 +475,14 @@ export const ResearchFactsPanel: React.FC = () => {
   }, []);
 
   const reload = React.useCallback(async () => {
-    if (!sessionId) return;
+    if (!owner) return;
     reloadRef.current.controller?.abort();
     const controller = new AbortController();
     const epoch = ++reloadRef.current.epoch;
     reloadRef.current.controller = controller;
     try {
-      const snapshot = await loadResearchFacts(sessionId, controller.signal);
-      if (controller.signal.aborted || reloadRef.current.epoch !== epoch || activeSessionRef.current !== sessionId) return;
+      const snapshot = await loadResearchFacts(owner, controller.signal);
+      if (controller.signal.aborted || reloadRef.current.epoch !== epoch || activeOwnerRef.current !== owner) return;
       if (snapshot) {
         setFacts(snapshot);
         setLoadError(null);
@@ -469,12 +491,12 @@ export const ResearchFactsPanel: React.FC = () => {
         setLoadError(null);
       }
     } catch (error) {
-      if (controller.signal.aborted || reloadRef.current.epoch !== epoch || activeSessionRef.current !== sessionId) return;
+      if (controller.signal.aborted || reloadRef.current.epoch !== epoch || activeOwnerRef.current !== owner) return;
       setLoadError({ message: error instanceof Error ? error.message : String(error), refresh: true });
     } finally {
       if (reloadRef.current.epoch === epoch) reloadRef.current.controller = null;
     }
-  }, [sessionId]);
+  }, [owner]);
 
   React.useEffect(() => {
     invalidateReload();
@@ -484,7 +506,8 @@ export const ResearchFactsPanel: React.FC = () => {
     setSelectedAttemptId(null);
     setSelectedAttemptIds(new Set());
     setCollectedArtifacts({});
-    if (!sessionId || !workspaceId) return () => invalidateReload();
+    rerunIntents.current.clear();
+    if (!owner || !workspaceId) return () => invalidateReload();
     void reload();
     const unsubscribe = subscribeVarinEvents((event) => {
       if (event.type === 'stream-ready') {
@@ -499,33 +522,40 @@ export const ResearchFactsPanel: React.FC = () => {
       invalidateReload();
       unsubscribe();
     };
-  }, [invalidateReload, reload, sessionId, workspaceId]);
+  }, [invalidateReload, reload, owner, workspaceId]);
 
   const onAction = React.useCallback((attemptId: string, action: 'cancel' | 'collect' | 'rerun') => {
-    if (!sessionId) return;
-    const actionSessionId = sessionId;
+    if (!owner) return;
+    const actionOwner = owner;
     setBusy(true);
     void (async () => {
       try {
         const result = action === 'collect'
-          ? await collectResearchAttempt(actionSessionId, attemptId)
+          ? await collectResearchAttempt(actionOwner, attemptId)
           : null;
-        if (action === 'cancel') await cancelResearchAttempt(actionSessionId, attemptId);
-        if (action === 'rerun') await rerunResearchAttempt(actionSessionId, attemptId);
-        if (activeSessionRef.current !== actionSessionId) return;
+        if (action === 'cancel') await cancelResearchAttempt(actionOwner, attemptId);
+        if (action === 'rerun') {
+          const original = facts?.attempts.find(item => item.attemptId === attemptId);
+          if (!original) throw new Error('Original experiment attempt is unavailable');
+          const intent = rerunIntent(original);
+          const accepted = await rerunResearchAttempt(actionOwner, attemptId, intent);
+          if (activeOwnerRef.current !== actionOwner) return;
+          acceptRerun(intent, accepted.attempt);
+        }
+        if (activeOwnerRef.current !== actionOwner) return;
         if (result && result.artifacts.length > 0) {
           setCollectedArtifacts((previous) => ({ ...previous, [attemptId]: result.artifacts }));
         }
         await reload();
       } catch (error) {
-        if (activeSessionRef.current === actionSessionId) {
+        if (activeOwnerRef.current === actionOwner) {
           setLoadError({ message: error instanceof Error ? error.message : String(error), refresh: false });
         }
       } finally {
-        if (activeSessionRef.current === actionSessionId) setBusy(false);
+        if (activeOwnerRef.current === actionOwner) setBusy(false);
       }
     })();
-  }, [reload, sessionId]);
+  }, [acceptRerun, facts, reload, rerunIntent, owner]);
 
   const toggleAttemptSelection = React.useCallback((attemptId: string) => {
     setSelectedAttemptIds((current) => {
@@ -536,7 +566,7 @@ export const ResearchFactsPanel: React.FC = () => {
     });
   }, []);
 
-  if (!sessionId || !workspaceId) return null;
+  if (!owner || !workspaceId) return null;
   if (!facts && !loadError) return null;
 
   const attempts = facts?.attempts ?? [];
@@ -544,32 +574,41 @@ export const ResearchFactsPanel: React.FC = () => {
   const sources = facts?.sources ?? [];
   const machinesById = new Map(machines.map((machine) => [machine.machineId, machine]));
   const selectedAttempts = attempts.filter((attempt) => selectedAttemptIds.has(attempt.attemptId));
-  const cancellableSelected = selectedAttempts.filter((attempt) => ACTIVE_STATES.has(attempt.state));
-  const rerunnableSelected = selectedAttempts.filter((attempt) => RERUNNABLE.has(attempt.state));
+  const canSubmit = owner.canSubmit;
+  const cancellableSelected = selectedAttempts.filter((attempt) => attempt.permissions?.control !== false && ACTIVE_STATES.has(attempt.state));
+  const rerunnableSelected = selectedAttempts.filter((attempt) => canSubmit && attempt.permissions?.control !== false && attempt.specId !== null && RERUNNABLE.has(attempt.state));
 
   const onBulkAction = (action: 'cancel' | 'rerun') => {
-    if (!sessionId || busy) return;
-    const actionSessionId = sessionId;
+    if (!owner || busy) return;
+    const actionOwner = owner;
     const targets = action === 'cancel' ? cancellableSelected : rerunnableSelected;
     if (targets.length === 0) return;
     setBusy(true);
     void (async () => {
       try {
         if (action === 'cancel') {
-          const results = await cancelResearchAttempts(actionSessionId, targets.map((attempt) => attempt.attemptId));
+          const results = await cancelResearchAttempts(actionOwner, targets.map((attempt) => attempt.attemptId));
           const failed = results.filter((result) => !result.ok);
           if (failed.length > 0) throw new Error(failed.map((result) => `${result.attemptId}: ${result.error ?? t('research-facts.actionFailed')}`).join('; '));
         } else {
-          const results = await rerunResearchAttempts(actionSessionId, targets);
+          const intents = targets.map(rerunIntent);
+          const results = await rerunResearchAttempts(actionOwner, intents);
+          if (activeOwnerRef.current !== actionOwner) return;
+          for (const result of results) {
+            const intent = intents.find(item => item.requestId === result.requestId);
+            if (!intent) throw new Error('Rerun response belongs to another request');
+            if (result.accepted && result.attempt) acceptRerun(intent, result.attempt);
+          }
+          if (results.length !== intents.length) throw new Error('Batch rerun response is incomplete');
           const failed = results.filter((result) => !result.accepted);
           if (failed.length > 0) throw new Error(failed.map((result) => result.error ?? t('research-facts.actionFailed')).join('; '));
         }
-        if (activeSessionRef.current === actionSessionId) setSelectedAttemptIds(new Set());
+        if (activeOwnerRef.current === actionOwner) setSelectedAttemptIds(new Set());
         await reload();
       } catch (error) {
-        if (activeSessionRef.current === actionSessionId) setLoadError({ message: error instanceof Error ? error.message : String(error), refresh: false });
+        if (activeOwnerRef.current === actionOwner) setLoadError({ message: error instanceof Error ? error.message : String(error), refresh: false });
       } finally {
-        if (activeSessionRef.current === actionSessionId) setBusy(false);
+        if (activeOwnerRef.current === actionOwner) setBusy(false);
       }
     })();
   };
@@ -624,13 +663,14 @@ export const ResearchFactsPanel: React.FC = () => {
                     busy={busy}
                     selected={selectedAttemptId === attempt.attemptId}
                     checked={selectedAttemptIds.has(attempt.attemptId)}
+                    canSubmit={canSubmit}
                     onAction={onAction}
                     onSelect={(attemptId) => setSelectedAttemptId((current) => current === attemptId ? null : attemptId)}
                     onToggleSelect={toggleAttemptSelection}
                   />
                   {selectedAttemptId === attempt.attemptId ? (
                     <AttemptDetails
-                      sessionId={sessionId}
+                      owner={owner}
                       attemptId={attempt.attemptId}
                       attemptState={attempt.state}
                       collection={attempt.collection}

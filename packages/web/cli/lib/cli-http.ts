@@ -116,6 +116,7 @@ async function requestServerShutdown(port: number, hostOverride?: string): Promi
 
 export interface JsonRequestResult {
   body: Record<string, unknown> | null;
+  value: unknown;
   response: Response;
 }
 
@@ -164,10 +165,10 @@ async function requestJson(port: number, endpoint: string, options: CliOptions =
         const retryBody = rawRetryBody && typeof rawRetryBody === 'object' && !Array.isArray(rawRetryBody)
           ? recordOf(rawRetryBody)
           : null;
-        return { response: retryResponse, body: retryBody };
+        return { response: retryResponse, body: retryBody, value: rawRetryBody };
       }
     }
-    return { response, body };
+    return { response, body, value: rawBody };
   } catch (error) {
     const failure = recordOf(error);
     if (failure.name === 'AbortError' || failure.code === 'ABORT_ERR') {

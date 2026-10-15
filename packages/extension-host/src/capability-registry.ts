@@ -3,11 +3,12 @@ import {
   type JsonValue,
   type VarinExtensionCapabilityGrant,
 } from "@varin/extension-contract";
-import type { HostServiceOwnerIdentity } from "./service-registry.js";
+import type { HostInvocationScope, HostServiceOwnerIdentity } from "./service-registry.js";
 
 export interface HostCapabilityCallContext {
   owner: HostServiceOwnerIdentity;
   signal: AbortSignal;
+  readonly invocation?: HostInvocationScope;
 }
 
 export type HostCapabilityHandler = (
@@ -33,7 +34,9 @@ export class HostCapabilityRegistry {
     method: string,
     params: JsonValue,
     signal: AbortSignal,
+    invocation?: HostInvocationScope,
   ): Promise<JsonValue> {
+    signal.throwIfAborted();
     const granted = grants.some((grant) => (
       grant.realm === "host"
       && grant.granted
@@ -43,6 +46,6 @@ export class HostCapabilityRegistry {
     if (!granted) throw new Error(`Host capability is not granted: ${capability}`);
     const handler = this.#handlers.get(capability);
     if (!handler) throw new Error(`Host capability is unavailable: ${capability}`);
-    return Promise.resolve(handler(method, params, { owner, signal }));
+    return Promise.resolve(handler(method, params, { owner, signal, ...(invocation ? { invocation } : {}) }));
   }
 }

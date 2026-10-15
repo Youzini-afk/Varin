@@ -1,4 +1,4 @@
-import type { describeSmallModel } from '../small-model/index.js';
+import type { ModelTextDescription, ModelTextService } from '../model-text/service.js';
 
 export type WalkthroughLanguage = 'en' | 'fr' | 'zh-CN' | 'zh-TW' | 'uk' | 'es' | 'pt-BR' | 'ko' | 'pl' | 'ja';
 export type WalkthroughSource =
@@ -111,7 +111,7 @@ export interface Walkthrough {
   title: string;
 }
 
-export type WalkthroughModel = NonNullable<Awaited<ReturnType<typeof describeSmallModel>>>;
+export type WalkthroughModel = ModelTextDescription;
 
 export interface PullRequestDiff {
   meta: Record<string, unknown>;
@@ -119,10 +119,12 @@ export interface PullRequestDiff {
 }
 
 export interface WalkthroughDependencies {
+  modelText?: Pick<ModelTextService, 'describe' | 'generate'>;
   getPullRequestDiff?: (directory: string, number: number) => Promise<PullRequestDiff>;
 }
 
 export interface WalkthroughCacheEntry {
+  requestId?: string;
   cacheKey: string;
   generatedAt: string;
   language?: WalkthroughLanguage | null;
@@ -169,6 +171,7 @@ export type WalkthroughReadiness =
   | { availableChars: number; fileCount: number; hunkCount: number; model: WalkthroughModel; ready: true; requiredChars: number };
 
 interface WalkthroughResultBase {
+  requestId?: string;
   hunkCount: number;
   hunks: SerializedHunk[];
   language?: WalkthroughLanguage | null;

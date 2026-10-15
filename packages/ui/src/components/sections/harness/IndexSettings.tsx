@@ -7,8 +7,6 @@ import { SettingsFieldRow, SettingsSection } from '@/components/sections/shared/
 import { DirectoryExplorerDialog } from '@/components/session/DirectoryExplorerDialog';
 import { canRequestNativeDirectoryAccess, requestDirectoryAccess } from '@/lib/desktop';
 import { useI18n } from '@/lib/i18n';
-import { useDirectoryStore } from '@/stores/useDirectoryStore';
-import { usePiProviderStore } from '@/stores/usePiProviderStore';
 import type { HarnessSettingsPageProps } from './harness-settings-state';
 import { InferenceSettings, LocalSemanticSettings } from './RetrievalSettings';
 import { useLocalSemantic } from './useLocalSemantic';
@@ -24,8 +22,6 @@ const bytesLabel = (bytes: number): string => {
 
 export function IndexSettings(props: Partial<HarnessSettingsPageProps>) {
   const { t } = useI18n();
-  const cwd = useDirectoryStore((state) => state.currentDirectory);
-  const loadProviders = usePiProviderStore((state) => state.load);
   const localSemantic = useLocalSemantic();
   const [status, setStatus] = React.useState<SemanticIndexStatus | null>(null);
   const [draft, setDraft] = React.useState<SemanticIndexConfig | null>(null);
@@ -36,7 +32,6 @@ export function IndexSettings(props: Partial<HarnessSettingsPageProps>) {
   const mounted = React.useRef(false);
   const statusRequest = React.useRef<AbortController | null>(null);
 
-  React.useEffect(() => { void loadProviders(cwd).catch(() => undefined); }, [cwd, loadProviders]);
   const refresh = React.useCallback(async () => {
     statusRequest.current?.abort();
     const controller = new AbortController();

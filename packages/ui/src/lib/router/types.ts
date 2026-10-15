@@ -7,7 +7,8 @@ import type { MainTab } from '@/stores/useUIStore';
  */
 export interface RouteState {
   /** Session ID to navigate to */
-  sessionId: string | null;
+  threadId: string | null;
+  branchId: string | null;
   /** One-time working-directory hint for opening a session */
   directory: string | null;
   /** Main tab to display (chat, git, diff, terminal, files) */
@@ -40,7 +41,8 @@ export const VALID_SETTINGS_SECTIONS: readonly SidebarSection[] = [
  * URL parameter names used for routing.
  */
 export const ROUTE_PARAMS = {
-  SESSION: 'session',
+  THREAD: 'thread',
+  BRANCH: 'branch',
   DIRECTORY: 'directory',
   TAB: 'tab',
   SETTINGS: 'settings',

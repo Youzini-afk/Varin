@@ -75,23 +75,54 @@ pub(crate) struct BranchRow {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub enum GrantRetireTarget {
+    Operation {
+        #[serde(rename = "operationId")]
+        operation_id: String,
+    },
+    Grant {
+        #[serde(rename = "grantId")]
+        grant_id: String,
+    },
+    Run {
+        #[serde(rename = "runId")]
+        run_id: String,
+    },
+}
+
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum GrantState {
+    Active,
+    Retired,
+    Revoked,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub(crate) struct Grant {
     pub(crate) grant_id: String,
     pub(crate) host_id: String,
     pub(crate) host_generation: String,
+    // Historical format-22 fields. New grants store null; non-null is never authority.
     pub(crate) authority_instance_id: Option<String>,
     pub(crate) worker_id: Option<String>,
     pub(crate) worker_generation: Option<u64>,
     pub(crate) session_id: Option<String>,
     pub(crate) thread_id: Option<String>,
     pub(crate) run_id: Option<String>,
+    /// Independent operation lifetime; run_id remains original attribution.
+    pub(crate) operation_id: Option<String>,
     pub(crate) owning_workspace: Option<String>,
     pub(crate) execution_workspace: Option<String>,
     pub(crate) storage_identity: String,
     pub(crate) capabilities: BTreeSet<String>,
     pub(crate) path_scopes: Vec<String>,
     pub(crate) kernel_epoch: String,
-    pub(crate) revoked: bool,
+    pub(crate) state: GrantState,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) handoff_operation_id: Option<String>,
 }
 
 pub(crate) struct BlobStream {
@@ -106,6 +137,7 @@ pub(crate) struct BlobStream {
 }
 
 pub(crate) struct BranchBuilder {
+    pub(crate) source_provenance: Option<Value>,
     pub(crate) operation_id: String,
     pub(crate) branch_id: String,
     pub(crate) workspace_id: String,

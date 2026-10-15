@@ -5,7 +5,6 @@ export interface CliNotice {
 }
 
 export interface CliOptions extends Record<string, unknown> {
-  agent?: string | undefined;
   all?: boolean | undefined;
   apiOnly?: boolean | undefined;
   branch?: string | undefined;
@@ -51,7 +50,9 @@ export interface CliOptions extends Record<string, unknown> {
   relay?: boolean | undefined;
   role?: string | undefined;
   server?: string | undefined;
-  session?: string | undefined;
+  thread?: string | undefined;
+  key?: string | undefined;
+  sourceMode?: string | undefined;
   sessionTtl?: string | undefined;
   setUpstream?: boolean | undefined;
   showSecrets?: boolean | undefined;
@@ -72,11 +73,9 @@ export interface CliOptions extends Record<string, unknown> {
   tokenStdin?: boolean | undefined;
   trustProject?: boolean | undefined;
   uiPassword?: string | null | undefined;
-  variant?: string | undefined;
   wait?: boolean | undefined;
   weekly?: string | undefined;
   withStatus?: boolean | undefined;
-  worktree?: string | undefined;
   body?: BodyInit | null | undefined;
 }
 

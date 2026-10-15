@@ -1,77 +1,42 @@
 import React from 'react';
-import type { JsonValue, PiAgentDescriptor } from '@varin/protocol';
 import { SettingsPageLayout } from '@/components/sections/shared/SettingsPageLayout';
 import { Button } from '@/components/ui/button';
+import { Dialog, DialogContent, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import { Icon } from '@/components/icon/Icon';
 import { useI18n } from '@/lib/i18n';
-import { runPiAgentProviderAction } from '@/lib/pi-runtime/agent-providers';
-import { NativeAgentEditor, type NativeAgentDraftCache } from './NativeAgentEditor';
-import { AgentProviderActionDialog } from './AgentProviderActionDialog';
-import { PluginAgentDetails } from './PluginAgentDetails';
-import { nativeAgentDescription, nativeAgentLabel } from './agents-catalog-model';
-import { requestAgentsCatalogDefinition, selectAgentsCatalogAgent, setAgentsCatalogProviderFilter, setAgentsCatalogShowAllFocuses } from './agents-catalog-store';
-import { useAgentsPageCatalog } from './useAgentsPageCatalog';
+import { useDirectoryStore } from '@/stores/useDirectoryStore';
+import { agentProfileLabels } from './agent-profile-presentation';
+import { AgentProfileEditor } from './AgentProfileEditor';
+import { useAgentProfiles } from './useAgentProfiles';
+import { cancelAgentProfileCreation, removeAgentProfile, saveAgentProfile } from './agent-profiles-store';
 
-export const AgentsPage: React.FC = () => {
-  const catalog = useAgentsPageCatalog();
-  return <AgentsDetails key={catalog.targetKey} {...catalog} />;
-};
-
-function AgentsDetails({ cwd, runtimeKey, target, refresh, state, catalog, selected, focus }: ReturnType<typeof useAgentsPageCatalog>) {
+export function AgentsPage() {
+  const profiles = useAgentProfiles();
+  return <AgentProfilesDetails key={profiles.host} {...profiles} />;
+}
+function AgentProfilesDetails({ api, host, state, snapshot, refresh }: ReturnType<typeof useAgentProfiles>) {
   const { t } = useI18n();
-  const [deleting, setDeleting] = React.useState<PiAgentDescriptor | null>(null);
-  const [pending, setPending] = React.useState(false);
-  const [error, setError] = React.useState<{ agentId: string | null; message: string } | null>(null);
-  const drafts = React.useMemo<NativeAgentDraftCache>(() => new Map(), []);
-  const inFlight = React.useRef(false);
-  const alive = React.useRef(true);
-  React.useEffect(() => { alive.current = true; return () => { alive.current = false; }; }, []);
-  const act = async (action: string, agent?: PiAgentDescriptor, input?: JsonValue): Promise<boolean> => {
-    if (!alive.current || inFlight.current) return false;
-    inFlight.current = true; setPending(true); setError(null);
-    try {
-      const result = await runPiAgentProviderAction(target, 'varin', action, agent?.id, input, runtimeKey);
-      if (!alive.current) return false;
-      if (!result.success) { setError({ agentId: agent?.id ?? null, message: result.message }); return false; }
-      await refresh(true);
-      if (!alive.current) return false;
-      if (result.agentId && action === 'create-agent') {
-        setAgentsCatalogProviderFilter('all');
-        const config = input && typeof input === 'object' && !Array.isArray(input) ? input.config : undefined;
-        const workFocus = config && typeof config === 'object' && !Array.isArray(config) ? config.workFocus : undefined;
-        if (Array.isArray(workFocus) && workFocus.length && !workFocus.includes(focus)) setAgentsCatalogShowAllFocuses(true);
-        selectAgentsCatalogAgent(result.agentId);
-        requestAgentsCatalogDefinition(null);
-      }
-      return true;
-    } catch (cause) {
-      if (alive.current) setError({ agentId: agent?.id ?? null, message: cause instanceof Error ? cause.message : String(cause) });
-      return false;
-    } finally {
-      inFlight.current = false;
-      if (alive.current) setPending(false);
-    }
-  };
-  const creating = state.definitionRequest === 'create-native';
-  const agent = creating ? undefined : selected ?? undefined;
-  const revision = catalog.agents.find(entry => entry.providerId === 'varin')?.definition?.revision;
-  if (state.definitionRequest === 'create-agent' || (agent && agent.providerId !== 'varin')) {
-    return <PluginAgentDetails key={state.definitionRequest ?? agent?.id} agent={state.definitionRequest === 'create-agent' ? null : agent!} />;
-  }
+  const cwd = useDirectoryStore(value => value.currentDirectory);
+  const [deleting, setDeleting] = React.useState<{ id: string; name: string; revision: string } | null>(null);
+  const profile = state.creating ? undefined : snapshot?.profiles.find(entry => entry.id === state.selectedId);
   return <>
-    <SettingsPageLayout title={agent ? nativeAgentLabel(agent, t) : t(creating ? 'settings.varin.agents.definition.createAgent' : 'settings.page.agents.title')}
-      description={agent ? nativeAgentDescription(agent, t) : undefined} showSaveStatus
-      titleAccessory={agent ? <span className="typography-micro text-muted-foreground">{t(agent.source.scope === 'builtin' ? 'settings.agents.builtin' : 'settings.agents.custom')}</span> : undefined}
-      headerEnd={agent?.source.scope === 'user' ? <Button variant="ghost" size="icon" disabled={pending} aria-label={t('settings.common.actions.delete')} onClick={() => { setError(null); setDeleting(agent); }}><Icon name="delete-bin" className="size-4" /></Button> : undefined}>
+    <SettingsPageLayout title={profile ? agentProfileLabels(profile, t).name : t(state.creating ? 'settings.varin.agents.definition.createAgent' : 'settings.page.agents.title')}
+      description={profile ? agentProfileLabels(profile, t).description : undefined} showSaveStatus
+      titleAccessory={profile ? <span className="typography-micro text-muted-foreground">{t(profile.kind === 'builtin' ? 'settings.agents.builtin' : 'settings.agents.custom')}</span> : undefined}
+      headerEnd={<div className="flex gap-2"><Button type="button" variant="ghost" size="sm" disabled={state.loading || state.saving} onClick={() => { void refresh(true); }}>{t('settings.varin.agents.actions.refresh')}</Button>
+        {profile?.kind === 'custom' && snapshot && <Button variant="ghost" size="icon" disabled={state.saving} aria-label={t('settings.common.actions.delete')} onClick={() => setDeleting({ id: profile.id, name: profile.effective.name, revision: snapshot.revision })}><Icon name="delete-bin" className="size-4" /></Button>}</div>}>
+      {!api && <p role="alert" className="mb-4 typography-meta text-destructive">{t('settings.agents.apiUnavailable')}</p>}
       {state.error && <p role="alert" className="mb-4 typography-meta text-destructive">{state.error}</p>}
-      {catalog.diagnostics.map((item, index) => <p key={`${item.providerId}:${index}`} role="alert" className="mb-3 typography-meta text-destructive">{item.providerId}: {item.message}</p>)}
-      {agent || (creating && revision) ? <NativeAgentEditor key={agent?.id ?? 'new'} agent={agent} cwd={cwd} drafts={drafts} busy={pending} error={error?.agentId === (agent?.id ?? null) ? error.message : undefined}
-        onCancel={creating ? () => requestAgentsCatalogDefinition(null) : undefined}
-        onSave={(config, expectedRevision) => act(agent ? 'update' : 'create-agent', agent, { expectedRevision: expectedRevision ?? revision ?? '', config })} />
+      {api && snapshot && (profile || state.creating) ? <AgentProfileEditor key={profile?.id ?? 'new'} profile={profile} snapshot={snapshot} host={host} cwd={cwd} busy={state.saving}
+        onCancel={state.creating ? cancelAgentProfileCreation : undefined} onSave={input => saveAgentProfile(api, input)} />
         : <p role="status" className="typography-meta text-muted-foreground">{state.loading ? t('common.loading') : t('settings.agents.page.empty.title')}</p>}
     </SettingsPageLayout>
-    <AgentProviderActionDialog open={Boolean(deleting)} action={deleting ? { id: 'delete', label: t('settings.common.actions.delete'), destructive: true } : null}
-      agent={deleting} projectTrusted={catalog.projectTrusted} submitting={pending} error={error?.agentId === deleting?.id ? error?.message : undefined} onOpenChange={open => { if (!open) setDeleting(null); }}
-      onSubmit={async () => deleting ? act('delete', deleting, { expectedRevision: deleting.definition?.revision ?? '' }) : false} />
+    <Dialog open={Boolean(deleting)} onOpenChange={open => { if (!open && !state.saving) setDeleting(null); }}>
+      <DialogContent><DialogTitle>{t('settings.common.actions.delete')}</DialogTitle><DialogDescription>{t('settings.agents.deleteShared', { name: deleting?.name ?? '' })}</DialogDescription>
+        {state.error && <p role="alert" className="typography-meta text-destructive">{state.error}</p>}
+        <div className="flex justify-end gap-2"><Button type="button" variant="outline" disabled={state.saving} onClick={() => setDeleting(null)}>{t('settings.common.actions.cancel')}</Button>
+          <Button type="button" variant="destructive" disabled={state.saving || !api} onClick={() => { if (api && deleting) void removeAgentProfile(api, deleting.id, deleting.revision).then(saved => { if (saved) setDeleting(null); }); }}>{t('settings.common.actions.delete')}</Button></div>
+      </DialogContent>
+    </Dialog>
   </>;
 }

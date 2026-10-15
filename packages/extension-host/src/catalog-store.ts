@@ -8,6 +8,8 @@ import {
   parseVarinExtensionCatalogDocument,
   parseVarinExtensionHostIdentityDocument,
   parseVarinExtensionInstallationRecord,
+  type VarinExtensionRestartHandoff,
+  type VarinExtensionRestartCommit,
   type VarinExtensionCatalogDocument,
   type VarinExtensionCapabilityDecision,
   type VarinExtensionCapabilityGrant,
@@ -36,12 +38,6 @@ interface CatalogReadState {
 interface LastValidCatalog {
   document: VarinExtensionCatalogDocument;
   fingerprint: string;
-  storageState: "missing" | "ready";
-}
-
-interface CatalogMutationRead {
-  document: VarinExtensionCatalogDocument;
-  repaired?: boolean;
   storageState: "missing" | "ready";
 }
 
@@ -192,94 +188,6 @@ function sameCapabilityGrants(
   return JSON.stringify(project(left)) === JSON.stringify(project(right));
 }
 
-function rawCapabilityGrantsMatch(
-  value: unknown,
-  expected: readonly VarinExtensionCapabilityGrant[],
-): boolean {
-  if (!Array.isArray(value)) return false;
-  const parsed: VarinExtensionCapabilityGrant[] = [];
-  for (const item of value) {
-    if (
-      !isRecord(item)
-      || typeof item.capability !== "string"
-      || typeof item.granted !== "boolean"
-      || typeof item.manifestVersion !== "string"
-      || (item.realm !== "host" && item.realm !== "surface")
-      || typeof item.updatedAt !== "string"
-    ) return false;
-    parsed.push({
-      capability: item.capability,
-      granted: item.granted,
-      manifestVersion: item.manifestVersion,
-      realm: item.realm,
-      updatedAt: item.updatedAt,
-    });
-  }
-  return sameCapabilityGrants(parsed, expected);
-}
-
-function repairKnownBuiltinRecords(
-  value: unknown,
-  manifests: readonly ParsedBuiltinDefinition[],
-  ownedPrefix: string,
-  now: string,
-): { changed: boolean; value: unknown } {
-  if (!isRecord(value) || !isRecord(value.extensions)) return { changed: false, value };
-
-  const extensions = { ...value.extensions };
-  const desiredIds = new Set(manifests.map(({ manifest }) => manifest.id));
-  let changed = false;
-
-  for (const [extensionId, rawRecord] of Object.entries(extensions)) {
-    if (!isRecord(rawRecord) || !isRecord(rawRecord.source)) continue;
-    if (
-      rawRecord.source.kind === "builtin"
-      && typeof rawRecord.source.specifier === "string"
-      && rawRecord.source.specifier.startsWith(ownedPrefix)
-      && !desiredIds.has(extensionId)
-    ) {
-      delete extensions[extensionId];
-      changed = true;
-    }
-  }
-
-  for (const { manifest } of manifests) {
-    const rawRecord = extensions[manifest.id];
-    if (!isRecord(rawRecord) || !isRecord(rawRecord.source)) continue;
-    if (rawRecord.source.kind !== "builtin" || rawRecord.source.specifier !== manifest.id) continue;
-
-    const nextRecord = structuredClone(rawRecord);
-    const manifestChanged = rawRecord.manifest === undefined
-      || canonicalJson(rawRecord.manifest) !== canonicalJson(manifest);
-    const artifactVersionChanged = rawRecord.resolvedVersion !== manifest.version
-      || rawRecord.selectedVersion !== manifest.version;
-    nextRecord.manifest = structuredClone(manifest);
-    nextRecord.resolvedVersion = manifest.version;
-    nextRecord.selectedVersion = manifest.version;
-    nextRecord.source = { display: "Varin", kind: "builtin", specifier: manifest.id };
-    const desiredGrants = builtinCapabilityGrants(
-      manifest,
-      typeof rawRecord.updatedAt === "string" ? rawRecord.updatedAt : now,
-    );
-    if (!rawCapabilityGrantsMatch(rawRecord.capabilityGrants, desiredGrants)) {
-      nextRecord.capabilityGrants = desiredGrants;
-    }
-    delete nextRecord.candidate;
-    if (manifestChanged || artifactVersionChanged) {
-      delete nextRecord.integrity;
-      delete nextRecord.resolvedPath;
-    }
-    if (canonicalJson(rawRecord) === canonicalJson(nextRecord)) continue;
-    nextRecord.updatedAt = now;
-    extensions[manifest.id] = nextRecord;
-    changed = true;
-  }
-
-  return changed
-    ? { changed, value: { ...value, extensions } }
-    : { changed, value };
-}
-
 function capabilitiesReviewed(record: VarinExtensionInstallationRecord): boolean {
   if (record.source.kind === "builtin") return true;
   const decided = new Set(record.capabilityGrants
@@ -291,6 +199,24 @@ function capabilitiesReviewed(record: VarinExtensionInstallationRecord): boolean
 function assertCanEnable(record: VarinExtensionInstallationRecord): void {
   if (!capabilitiesReviewed(record)) {
     throw new Error(`Varin extension capabilities require review before activation: ${record.manifest.id}`);
+  }
+}
+
+function assertRestartCandidate(record: VarinExtensionInstallationRecord, handoff: VarinExtensionRestartHandoff): void {
+  const candidate = record.candidate;
+  if (!record.desired.enabled || record.desired.revision !== handoff.desiredRevision
+    || record.integrity !== handoff.selectedIntegrity || record.selectedVersion !== handoff.selectedVersion
+    || !candidate?.capabilitiesReviewed || candidate.integrity !== handoff.candidateIntegrity
+    || !sameCapabilityGrants(candidate.capabilityGrants, handoff.capabilityGrants)
+    || JSON.stringify(candidate.manifest.updateReadiness?.surfaceEntrypoints ?? []) !== JSON.stringify(handoff.surfaceEntrypoints)) {
+    throw new Error('Restart handoff candidate, selection, review, or desired state changed');
+  }
+}
+
+function failPendingRestart(record: VarinExtensionInstallationRecord, now: string, code: string, message: string): void {
+  const handoff = record.restartHandoffs?.at(-1);
+  if (handoff && ['pending-restart', 'preparing', 'waiting-surface'].includes(handoff.status)) {
+    Object.assign(handoff, { status: 'failed', updatedAt: now, failure: { code, message } });
   }
 }
 
@@ -466,7 +392,7 @@ export class ExtensionCatalogStore {
         changed = true;
       }
       return changed;
-    }, (now) => this.#readForBuiltinReconciliation(manifests, ownedPrefix, now));
+    });
   }
 
   selectBuiltinArtifact(candidate: VarinExtensionPreparedArtifact): Promise<CatalogReadState> {
@@ -518,8 +444,11 @@ export class ExtensionCatalogStore {
       const index = record.capabilityGrants.findIndex((item) => (
         item.capability === grant.capability && item.realm === grant.realm
       ));
+      const previous = index >= 0 ? record.capabilityGrants[index] : undefined;
+      if (previous?.granted === grant.granted && previous.manifestVersion === grant.manifestVersion) return false;
       if (index >= 0) record.capabilityGrants[index] = next;
       else record.capabilityGrants.push(next);
+      record.desired = { ...record.desired, revision: record.desired.revision + 1, updatedAt: now };
       record.updatedAt = now;
       return true;
     });
@@ -537,6 +466,7 @@ export class ExtensionCatalogStore {
         throw new Error(`Built-in Varin extensions are managed by the distribution: ${extensionId}`);
       }
       const requested = new Set(manifestCapabilities(record.manifest).map(capabilityKey));
+      let changed = false;
       for (const decision of decisions) {
         const key = capabilityKey(decision);
         if (!requested.has(key)) throw new Error(`Capability was not requested by ${extensionId}: ${key}`);
@@ -546,11 +476,17 @@ export class ExtensionCatalogStore {
           updatedAt: now,
         };
         const index = record.capabilityGrants.findIndex((grant) => capabilityKey(grant) === key);
+        const previous = index >= 0 ? record.capabilityGrants[index] : undefined;
+        if (previous?.granted === next.granted && previous.manifestVersion === next.manifestVersion) continue;
+        changed = true;
         if (index >= 0) record.capabilityGrants[index] = next;
         else record.capabilityGrants.push(next);
       }
-      if (decisions.length > 0) record.updatedAt = now;
-      return decisions.length > 0;
+      if (changed) {
+        record.desired = { ...record.desired, revision: record.desired.revision + 1, updatedAt: now };
+        record.updatedAt = now;
+      }
+      return changed;
     });
   }
 
@@ -567,6 +503,7 @@ export class ExtensionCatalogStore {
       const capabilityGrants = record.capabilityGrants
         .filter((grant) => candidateKeys.has(capabilityKey(grant)))
         .map((grant) => ({ ...grant, manifestVersion: candidate.manifest.version, updatedAt: now }));
+      failPendingRestart(record, now, 'candidate_replaced', 'The restart candidate was replaced');
       record.candidate = {
         ...structuredClone(candidate),
         applyRequested: false,
@@ -618,6 +555,8 @@ export class ExtensionCatalogStore {
     extensionId: string,
     candidateIntegrity: string,
     expectedRevision: number,
+    validateBeforeCommit?: () => void,
+    restartCommit?: VarinExtensionRestartCommit,
   ): Promise<CatalogReadState> {
     return this.#mutate(expectedRevision, (document, now) => {
       const record = document.extensions[extensionId];
@@ -632,6 +571,18 @@ export class ExtensionCatalogStore {
       if (!candidate.applyRequested) {
         throw new Error(`Varin extension candidate application was not requested: ${extensionId}`);
       }
+      const handoff = record.restartHandoffs?.at(-1);
+      if (handoff && !['applied', 'restored'].includes(handoff.status)) {
+        if (!restartCommit || handoff.id !== restartCommit.id || handoff.executionProcessId !== restartCommit.processId
+          || !['preparing', 'waiting-surface'].includes(handoff.status)) throw new Error('Restart handoff is not prepared in this process');
+        assertRestartCandidate(record, handoff);
+        if (handoff.surfaceEntrypoints.length && restartCommit.surfaceReadiness?.preparedConsumerCount === undefined) throw new Error('Restart handoff requires the original Surface consumer preparation receipt');
+        handoff.status = 'applied';
+        handoff.updatedAt = now;
+        if (restartCommit.surfaceReadiness) handoff.surfaceReadiness = structuredClone(restartCommit.surfaceReadiness);
+      }
+      // Pure Host-owned readiness/owner check after the real catalog lock and CAS checks.
+      validateBeforeCommit?.();
       record.manifest = structuredClone(candidate.manifest);
       record.source = structuredClone(candidate.source);
       record.integrity = candidate.integrity;
@@ -676,10 +627,55 @@ export class ExtensionCatalogStore {
       const record = document.extensions[extensionId];
       if (!record) throw new Error(`Varin extension is not installed: ${extensionId}`);
       if (!record.candidate || record.candidate.integrity !== candidateIntegrity) return false;
+      failPendingRestart(record, now, 'candidate_discarded', 'The restart candidate was discarded');
       delete record.candidate;
       record.updatedAt = now;
       return true;
     });
+  }
+
+  requestRestartHandoff(extensionId: string, handoff: VarinExtensionRestartHandoff, expectedRevision: number): Promise<CatalogReadState> {
+    return this.#mutate(expectedRevision, (document, now) => {
+      const record = document.extensions[extensionId];
+      if (!record) throw new Error(`Varin extension is not installed: ${extensionId}`);
+      if (record.restartHandoffs?.some(value => value.id === handoff.id)) throw new Error('Restart handoff identity already exists');
+      if (record.restartHandoffs?.some(value => !['applied', 'failed', 'restored'].includes(value.status))) throw new Error('A restart handoff is already pending');
+      assertRestartCandidate(record, handoff);
+      if (record.candidate?.manifest.entrypoints?.host?.mode !== 'native' && record.manifest.entrypoints?.host?.mode !== 'native') throw new Error('Restart handoff requires a trusted-native Host entrypoint');
+      record.candidate!.applyRequested = true;
+      (record.restartHandoffs ??= []).push(structuredClone(handoff));
+      record.updatedAt = now;
+      return true;
+    });
+  }
+
+  /** CAS retries only on unrelated Catalog writers; terminal original results always win. */
+  async transitionRestartHandoff(extensionId: string, id: string, from: VarinExtensionRestartHandoff['status'][],
+    update: Partial<Pick<VarinExtensionRestartHandoff, 'status' | 'executionProcessId' | 'restoreRequestedProcessId' | 'failure'>>,
+    expectedRevision?: number): Promise<CatalogReadState> {
+    for (;;) {
+      const revision = expectedRevision ?? (await this.read()).document.revision;
+      try {
+        return await this.#mutate(revision, (document, now) => {
+          const record = document.extensions[extensionId];
+          const handoff = record?.restartHandoffs?.find(value => value.id === id);
+          if (!record || !handoff) throw new Error('Restart handoff is no longer available');
+          if (!from.includes(handoff.status)) return false;
+          if (update.status === 'preparing') assertRestartCandidate(record, handoff);
+          if (['preparing', 'restore-pending-restart', 'restored'].includes(update.status ?? '') && record.restartHandoffs?.at(-1)?.id !== id) throw new Error('A newer restart handoff owns this extension');
+          if (update.status === 'restore-pending-restart' || update.status === 'restored') {
+            if (record.integrity !== handoff.selectedIntegrity) throw new Error('The original selected artifact changed');
+            if (record.candidate?.integrity === handoff.candidateIntegrity) record.candidate.applyRequested = false;
+          }
+          Object.assign(handoff, structuredClone(update), { updatedAt: now });
+          record.updatedAt = now;
+          return true;
+        });
+      } catch (error) {
+        if (expectedRevision === undefined && error instanceof ExtensionCatalogRevisionConflictError) continue;
+        throw error;
+      }
+    }
   }
 
   async #mutate(
@@ -717,7 +713,6 @@ export class ExtensionCatalogStore {
 
   async #mutateCurrent(
     mutator: (document: VarinExtensionCatalogDocument, now: string) => boolean,
-    reader: (now: string) => Promise<CatalogMutationRead> = () => this.#readStrictForMutation(),
   ): Promise<CatalogReadState> {
     return this.#serialize(async () => {
       await mkdir(this.directory, { mode: 0o700, recursive: true });
@@ -725,10 +720,9 @@ export class ExtensionCatalogStore {
       const release = await acquireLock(this.#lockPath);
       try {
         const now = new Date().toISOString();
-        const strictRead = await reader(now);
+        const strictRead = await this.#readStrictForMutation();
         const document = strictRead.document;
-        const mutated = mutator(document, now);
-        const changed = strictRead.repaired === true || mutated;
+        const changed = mutator(document, now);
         if (changed) {
           document.revision += 1;
           document.updatedAt = now;
@@ -798,31 +792,6 @@ export class ExtensionCatalogStore {
           ? "catalog_invalid"
           : "catalog_read_failed",
         "Cannot mutate an unreadable Varin extension catalog",
-        { cause: error },
-      );
-    }
-  }
-
-  async #readForBuiltinReconciliation(
-    manifests: readonly ParsedBuiltinDefinition[],
-    ownedPrefix: string,
-    now: string,
-  ): Promise<CatalogMutationRead> {
-    try {
-      const raw = JSON.parse(await readFile(this.catalogPath, "utf8")) as unknown;
-      const repaired = repairKnownBuiltinRecords(raw, manifests, ownedPrefix, now);
-      return {
-        document: parseVarinExtensionCatalogDocument(repaired.value),
-        repaired: repaired.changed,
-        storageState: "ready",
-      };
-    } catch (error) {
-      if (errorCode(error) === "ENOENT") return { document: emptyDocument(), storageState: "missing" };
-      throw new ExtensionCatalogStorageError(
-        error instanceof SyntaxError || error instanceof VarinExtensionContractError
-          ? "catalog_invalid"
-          : "catalog_read_failed",
-        "Cannot reconcile built-ins in an unreadable Varin extension catalog",
         { cause: error },
       );
     }

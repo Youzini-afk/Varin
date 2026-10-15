@@ -1,3 +1,5 @@
+import { createScheduledTasksHttpAPI } from '@varin/application-client';
+import { createAgentProfilesHttpAPI, createThreadsHttpAPI, createBotsHttpAPI } from '@varin/application-client';
 import type { RuntimeAPIs } from '@varin/application-client';
 import {
   createRuntimeUrlResolver,
@@ -20,7 +22,6 @@ import { createWebMobileAPI } from './mobile';
 import { createWebSmartSearchAPI } from './smart-search';
 import { createWebClientAuthAPI } from './clientAuth';
 import { createWebExtensionsAPI } from './extensions';
-import { createWebPiRuntimeAPI } from './piRuntime';
 import { createWebDocumentsAPI } from './documents';
 import { createWebWorkspaceSearchAPI } from './workspace-search';
 import { createWebLanguageServicesAPI } from './language';
@@ -50,7 +51,10 @@ export const createWebAPIs = (options: WebAPIsOptions = {}): RuntimeAPIs => {
 
   return {
     runtime: { platform: 'web', isDesktop: false, label: 'web' },
-    piRuntime: createWebPiRuntimeAPI(),
+    threads: createThreadsHttpAPI(),
+    bots: createBotsHttpAPI(),
+    agentProfiles: createAgentProfilesHttpAPI(),
+    schedules: createScheduledTasksHttpAPI(),
     terminal: createWebTerminalAPI(),
     git: createWebGitAPI(),
     workspace: createWebWorkspaceAPI(),

@@ -5,29 +5,15 @@ description: Organiza tu trabajo en proyectos y cambia entre ellos.
 
 # Proyectos
 
-Un proyecto es una carpeta de tu computadora que Varin rastrea, normalmente un único código base. Cambiar de proyecto cambia la carpeta en la que trabaja el agente, junto con las sesiones y los ajustes de ese proyecto.
+Un proyecto es una carpeta del Host conectado. Ábrela con el selector de proyectos o el explorador; Ajustes → Proyectos controla su nombre, color, icono y acciones. El proyecto que exploras y el origen de ejecución de una conversación son independientes: cambiar de proyecto no cambia el origen de un Thread en ejecución.
 
-## Añade un proyecto
+En la conversación, abre **Workspace**, selecciona el Host y la carpeta de origen, y elige:
+- **Read-only file snapshot**: archivos fijos para leer, listar y buscar
+- **Isolated editable copy**: copia capturada para editar y ejecutar comandos; los cambios no se copian de vuelta automáticamente
+- **Live workspace**: archivos guardados de la carpeta real; los cambios son inmediatos
 
-Puedes añadir un proyecto desde varios lugares:
+Pulsa **Prepare workspace** y revisa el resultado antes de enviar. Las instantáneas pueden incluir borradores de editores de esta ventana en el mismo Host; el modo live usa solo archivos guardados. Las rutas remotas pertenecen al Host seleccionado. Las copias editables y los comandos no son entornos aislados de seguridad.
 
-- la entrada **Add project** en la paleta de comandos
-- el botón **+** en la parte superior de la barra lateral de sesiones
-- el explorador de carpetas cuando eliges un directorio
-
-Apúntalo a una carpeta y Varin la recuerda. El nombre viene de la carpeta; puedes cambiarlo más tarde.
-
-## Cambia de proyecto
-
-Elige un proyecto de la barra lateral para activarlo. Todo —sesiones, git, notas— sigue al proyecto que tengas abierto.
-
-## Haz reconocible un proyecto
-
-Abre **Settings → Projects** para darle a un proyecto un nombre, color o icono personalizado. Varin intenta encontrar un icono automáticamente; consulta [Iconos de proyecto](/es/project-icons/).
-
-
-## Relacionado
-
-- [Notas, tareas y planes de proyecto](/es/notes-todos-plans/) — mantén notas de trabajo por proyecto
-- [Acciones de proyecto](/es/project-actions/) — guarda comandos que ejecutas a menudo
-- [Contexto](/es/context/) — mira cuánta memoria del modelo usa una sesión
+- [Sesiones de worktree](/es/worktrees/)
+- [Notas, tareas y planes de proyecto](/es/notes-todos-plans/)
+- [Acciones de proyecto](/es/project-actions/)

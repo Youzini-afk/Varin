@@ -5,6 +5,7 @@ import { HostServiceRegistry, type HostServiceOwnerIdentity } from "../src/index
 const hostId = "2d7b1dc1-7ccd-4be7-9fd1-23f31dc8cf1a";
 const owner = (extensionId: string, generation: number): HostServiceOwnerIdentity => ({
   entrypointId: "host",
+  instanceKey: "registry-fixture",
   extensionId,
   extensionVersion: `${generation}.0.0`,
   generation,
@@ -38,7 +39,7 @@ test("service replacement exposes the new generation while the old invocation dr
   assert.equal(services.getSnapshot().providers.length, 1);
 });
 
-test("multi-provider services require an explicit selection and clear stale selections", async () => {
+test("multi-provider services require an exact identity and reject a removed provider", async () => {
   const services = new HostServiceRegistry(hostId);
   for (const [extensionId, value] of [["dev.example.one", "one"], ["dev.example.two", "two"]] as const) {
     await services.replaceOwner(owner(extensionId, 1), [{
@@ -52,8 +53,7 @@ test("multi-provider services require an explicit selection and clear stale sele
   );
   const selected = services.getSnapshot().providers.find((provider) => provider.extensionId === "dev.example.two");
   assert.ok(selected);
-  services.setSelection("dev.example.multi", 1, selected.providerId);
-  assert.equal(await services.invoke({ args: [], method: "read", serviceId: "dev.example.multi", version: 1 }), "two");
+  assert.equal(await services.invoke({ providerId: selected.providerId, args: [], method: "read", serviceId: "dev.example.multi", version: 1 }), "two");
   services.removeOwner(owner("dev.example.two", 1));
-  assert.deepEqual(services.getSnapshot().selections, {});
+  await assert.rejects(services.invoke({ providerId: selected.providerId, args: [], method: "read", serviceId: "dev.example.multi", version: 1 }), /unavailable/);
 });

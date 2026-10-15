@@ -1,3 +1,4 @@
+import { WorkspaceEditRecovery } from './WorkspaceEditRecovery';
 import React from 'react';
 import type {
   RecoveryStorageLocation,
@@ -27,7 +28,7 @@ import {
 } from '@/lib/recovery/workspaceRecovery';
 import { cn } from '@/lib/utils';
 import { formatWorkspaceArchiveBytes } from '@/lib/workspaceArchive';
-import { usePiSessionStore } from '@/stores/usePiSessionStore';
+import { useWorkbenchWorkspaceId } from '@/lib/extensions/workbench-workspace';
 import { useUIStore } from '@/stores/useUIStore';
 
 const RECOVERY_PREFERENCES: Array<{
@@ -112,11 +113,7 @@ export const RecoverySettings: React.FC = () => {
   const { t } = useI18n();
   const preference = useUIStore((state) => state.recoveryPreference);
   const setPreference = useUIStore((state) => state.setRecoveryPreference);
-  const workspaceId = usePiSessionStore((state) => {
-    const sessionId = state.currentSessionId;
-    const workspace = sessionId ? state.records[sessionId]?.snapshot?.workspace : undefined;
-    return workspace?.kind === 'workspace' ? workspace.authorityId ?? workspace.id : null;
-  });
+  const workspaceId = useWorkbenchWorkspaceId();
   const [globalStatus, setGlobalStatus] = React.useState<RecoveryStorageStatus | null>(null);
   const [storageWorkspaces, setStorageWorkspaces] = React.useState<RecoveryStorageWorkspaceSummary[]>([]);
   const [status, setStatus] = React.useState<WorkspaceRecoveryStatus | null>(null);
@@ -450,6 +447,7 @@ export const RecoverySettings: React.FC = () => {
         title={t('settings.varin.recovery.title')}
         description={t('settings.varin.recovery.description')}
       >
+      <WorkspaceEditRecovery workspaceIds={[...storageWorkspaces.map(workspace => workspace.workspaceId), ...(workspaceId ? [workspaceId] : [])]} />
       <SettingsRadioGroup aria-label={t('settings.varin.recovery.preference.aria')}>
         {RECOVERY_PREFERENCES.map((option) => (
           <SettingsRadioOption

@@ -1,9 +1,9 @@
 import React from 'react';
-import { isDesktopShell, startDesktopWindowDrag } from '@/lib/desktop';
+import { isDesktopShell, restartDesktopApp, startDesktopWindowDrag } from '@/lib/desktop';
 import { cn } from '@/lib/utils';
 import { desktopHostsGet, desktopHostsSet } from '@/lib/desktopHosts';
 import { useI18n } from '@/lib/i18n';
-import { LocalPiRuntimeCard } from './LocalPiRuntimeCard';
+import { LocalRuntimeCard } from './LocalRuntimeCard';
 import { RemoteConnectionForm } from './RemoteConnectionForm';
 
 interface ChooserScreenProps {
@@ -42,6 +42,8 @@ export function ChooserScreen({ onRuntimeAvailable, localAvailable = true }: Cho
         defaultHostId: 'local',
         initialHostChoiceCompleted: true,
       });
+      await restartDesktopApp();
+      return;
     }
     onRuntimeAvailable?.();
   }, [isDesktopApp, onRuntimeAvailable]);
@@ -50,7 +52,7 @@ export function ChooserScreen({ onRuntimeAvailable, localAvailable = true }: Cho
   return (
     <div
       className="app-region-drag flex h-full cursor-default select-none items-center justify-center overflow-y-auto bg-transparent p-8"
-      data-pi-runtime-setup="true"
+      data-native-runtime-setup="true"
       onMouseDown={handleDragStart}
     >
       <div className="w-full max-w-md space-y-7">
@@ -59,7 +61,7 @@ export function ChooserScreen({ onRuntimeAvailable, localAvailable = true }: Cho
             {t('onboarding.chooser.title')}
           </h1>
           <p className="text-sm text-muted-foreground">
-            {t('onboarding.chooser.description')}
+            {t('onboarding.native.chooseDescription')}
           </p>
         </header>
 
@@ -108,9 +110,9 @@ export function ChooserScreen({ onRuntimeAvailable, localAvailable = true }: Cho
         {showLocal ? (
           <div className="space-y-4">
             <p className="text-center text-sm leading-relaxed text-muted-foreground">
-              {t('onboarding.localSetup.description')}
+              {t('onboarding.native.description')}
             </p>
-            <LocalPiRuntimeCard onContinue={useLocalRuntime} />
+            <LocalRuntimeCard onContinue={useLocalRuntime} />
           </div>
         ) : null}
       </div>

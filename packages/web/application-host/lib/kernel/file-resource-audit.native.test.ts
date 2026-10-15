@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -7,8 +8,6 @@ import { afterEach, it as vitestIt } from "vitest";
 import { createDocumentAuthorityHarness } from "../documents/contract-fixtures.js";
 import { KernelRecoveryContentStore, KernelRecoveryStore } from "./kernel-recovery-store.js";
 import { createDocumentAuthority } from "../documents/authority.js";
-import { assertManagedWorktreeOwnership } from "../harness/worktree-ownership.js";
-import { createManagedRootAdmission } from "./managed-root-admission.js";
 import { KernelFileResourceBackend } from "./file-resource-backend.js";
 import { createKernelClient, type KernelClient } from "./kernel-client.js";
 import { createKernelWorkspaceWorkingStateAccess, KernelStorageAdapter } from "./storage-adapter.js";
@@ -226,6 +225,60 @@ it("audit: a restricted path grant cannot materialize the entire workspace root"
   assert.deepEqual(await fs.readdir(path.join(f.workspace, "nested")), []);
 });
 
+it("audit: committed materialization retries return the original receipt after source release and GC", async () => {
+  const f = await fixture();
+  const source = await branch(f);
+  const request = { ...f.address, operationId: "committed-materialize", path: "nested", sourceRoot: String(source.root) };
+  const receipt = await f.client.fileMaterialize(request);
+  assert.equal(receipt.status, "materialized");
+  await f.client.deleteBranch({ operationId: "drop-committed-source", branchId: "source" });
+  await f.client.gc("gc-after-committed-materialize");
+  assert.deepEqual(await f.client.fileMaterialize(request), receipt);
+  await assert.rejects(f.client.fileMaterialize({ ...request, path: "different-target" }), /reused with different parameters/i);
+  assert.equal(await fs.readFile(path.join(f.workspace, "nested", "note.txt"), "utf8"), "immutable body");
+  await assert.rejects(fs.stat(path.join(f.workspace, "different-target")), { code: "ENOENT" });
+});
+
+it("audit: recovery preserves a replacement backup instead of moving it into the target", async () => {
+  const f = await fixture({ VARIN_KERNEL_FAIL_MATERIALIZE_AFTER_BACKUP: "1" });
+  const source = await branch(f);
+  const operationId = "replaced-backup-materialize";
+  await assert.rejects(f.client.fileMaterialize({ ...f.address, operationId, path: "nested", sourceRoot: String(source.root) }), /after backup/i);
+  await f.host.close();
+  const suffix = createHash("sha256").update(operationId).digest("hex").slice(0, 16);
+  const backup = path.join(f.workspace, `nested.varin-backup-${suffix}`);
+  await fs.rename(backup, `${backup}-original`);
+  await fs.mkdir(backup);
+  const asset = path.join(backup, "user-owned.txt");
+  await fs.writeFile(asset, "replacement backup asset");
+  await fs.rm(path.join(f.workspace, `nested.varin-staging-${suffix}`), { recursive: true });
+  const resumed = await restart(f);
+  const registered = await resumed.fileRootRegister({ workspaceId: "ws", executionWorkspaceId: "ws", canonicalRoot: f.workspace });
+  assert.equal(registered.pendingOperations, 0);
+  assert.equal(await fs.readFile(asset, "utf8"), "replacement backup asset");
+  await assert.rejects(fs.stat(path.join(f.workspace, "nested")), { code: "ENOENT" });
+  const reconciled = await resumed.fileOperationReconcile({ ...f.address, operationId });
+  assert.equal((reconciled.result as Record<string, unknown>).status, "conflict");
+});
+
+it("audit: recovery does not promote a replacement stage with identical source bytes", async () => {
+  const f = await fixture({ VARIN_KERNEL_FAIL_MATERIALIZE_AFTER_BACKUP: "1" });
+  const source = await branch(f);
+  const operationId = "replaced-stage-materialize";
+  await assert.rejects(f.client.fileMaterialize({ ...f.address, operationId, path: "nested", sourceRoot: String(source.root) }), /after backup/i);
+  await f.host.close();
+  const suffix = createHash("sha256").update(operationId).digest("hex").slice(0, 16);
+  const stage = path.join(f.workspace, `nested.varin-staging-${suffix}`);
+  await fs.rename(stage, `${stage}-original`);
+  await fs.cp(`${stage}-original`, stage, { recursive: true });
+  const resumed = await restart(f);
+  await resumed.fileRootRegister({ workspaceId: "ws", executionWorkspaceId: "ws", canonicalRoot: f.workspace });
+  assert.equal(await fs.readFile(path.join(stage, "note.txt"), "utf8"), "immutable body");
+  assert.deepEqual(await fs.readdir(path.join(f.workspace, "nested")), []);
+  const reconciled = await resumed.fileOperationReconcile({ ...f.address, operationId });
+  assert.equal((reconciled.result as Record<string, unknown>).status, "conflict");
+});
+
 it("audit: scan continuation rejects changed inventories instead of silently shifting offsets", async () => {
   const f = await fixture();
   await fs.writeFile(path.join(f.workspace, "a"), "a");
@@ -269,60 +322,6 @@ it("audit: an in-root alias cannot expand a restricted actor's canonical scope",
   const actor = await f.scoped("narrow-scope", "ws", ["allowed"]);
   await assert.rejects(actor.fileCapture({ ...f.address, operationId: "alias-scope", path: "allowed/secret.txt", store: false }), /scope/i);
 });
-
-it("audit: real Documents execution identity stays separate from managed-root materialization admission", async () => {
-  const f = await fixture();
-  const managedRoot = path.join(f.root, "managed");
-  const live = path.join(managedRoot, "thread-one");
-  await fs.mkdir(live, { recursive: true });
-  await fs.writeFile(path.join(f.workspace, "note.txt"), "baseline body");
-  const documents = createDocumentAuthority({ hostId: "audit", dataDir: path.join(f.root, "documents"), isAllowedRoot: async () => true, isTrusted: async () => true });
-  const owning = (await documents.resolveWorkspace({ path: f.workspace })).workspaceId;
-  const execution = (await documents.resolveWorkspace({ path: live })).workspaceId;
-  assert.notEqual(owning, execution);
-  const adapter = new KernelStorageAdapter({ client: f.host, hostId: "audit", storageRoot: f.storageRoot,
-    resolveWorkspaceRoot: async (workspaceId) => (await documents.inspectWorkspace(workspaceId)).root,
-    resolveActor: async (_workspaceId, _purpose, hint) => {
-      assert.ok(hint, "Host lifecycle must provide an explicit identity");
-      assert.ok(hint.capabilities?.includes("storage.maintenance"));
-      return hint;
-    },
-  });
-  adapter.bindFileRootResolver(async (directory) => {
-    const { workspaceId } = await documents.resolveWorkspace({ path: directory });
-    return { workspaceId, canonicalRoot: (await documents.inspectWorkspace(workspaceId)).root };
-  });
-  const admission = createManagedRootAdmission({
-    listWorktrees: async (workspaceId) => workspaceId === owning ? [{ path: live, managedRoot, base: "zero-commit", materialized: false }] : [],
-    assertOwnership: (worktree, operation, paths) => assertManagedWorktreeOwnership(worktree, operation, paths, {
-      authorizeManagedRoot: async (candidate) => candidate === managedRoot,
-    }),
-  });
-  adapter.bindManagedRootResolver(admission.materialization);
-  const access = createKernelWorkspaceWorkingStateAccess(adapter);
-  try {
-    await assert.rejects(admission.materialization(path.join(managedRoot, "unrecorded"), owning), /ownership/i);
-    await assert.rejects(admission.materialization(live, "another-owning-workspace"), /ownership/i);
-    await access.withBranchStore(owning, "thread-baseline-capture", async (store) => {
-      const states = await store.captureDirectory(f.workspace);
-      await store.createBranch(owning, "recorded-thread", states, "zero-commit");
-      const pin = await store.pinBranch("recorded-thread");
-      try { await store.materializePinManaged!(pin, live, "recorded-materialize"); }
-      finally { await pin.release(); }
-    }, "exclusive", { executionWorkspace: owning });
-    assert.equal(await fs.readFile(path.join(live, "note.txt"), "utf8"), "baseline body");
-    await fs.writeFile(path.join(live, "note.txt"), "shell result");
-    const result = await access.withBranchStore(owning, "thread-result-publish", (store) => store.publishDirectoryResult("recorded-thread", live), "exclusive", { executionWorkspace: execution });
-    assert.ok(result.changedPaths.includes("note.txt"));
-    assert.equal(await access.withBranchStore(owning, "thread-result-reclaim-check", (store) => store.directoryMatchesResult("recorded-thread", result.resultRevision, live), "shared", { executionWorkspace: execution }), true);
-    await fs.rm(live, { recursive: true });
-    await access.withBranchStore(owning, "thread-recorded-materialize", (store) => store.materializeResult("recorded-thread", result.resultRevision, live));
-    assert.equal(await fs.readFile(path.join(live, "note.txt"), "utf8"), "shell result");
-  } finally {
-    await adapter.dispose();
-    await documents.dispose();
-  }
-}, 30_000);
 
 it("audit: RecoveryFileStore applyState does not turn a conditional conflict into success", async () => {
   const f = await fixture();

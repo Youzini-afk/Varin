@@ -15,15 +15,14 @@ description: 在 Nginx、Nginx Proxy Manager 或其他反向代理后正确配�
 
 ## 代理必须支持的内容
 
-- 用于实时消息传输的 WebSocket：
-  - `/api/varin/runtime/ws`
+- WebSocket:
   - `/api/dictation/ws`
   - `/api/terminal/ws`
   - `/api/varin/realtime-proxy/ws`
 - 不带缓冲的 SSE：
   - `/api/notifications/stream`
   - `/api/varin/events`
-  - `/api/varin/runtime-manager/events`
+  - `/api/threads/observe`
   - `/api/varin/realtime-proxy/sse`
 - 用于附件和文件操作的大请求体
 - 用于实时流和终端会话的长读取超时
@@ -66,7 +65,7 @@ proxy_set_header X-Forwarded-Host $host;
 
 gzip off;
 
-location ~ ^/api/(varin/runtime|varin/realtime-proxy|terminal|dictation)/ws$ {
+location ~ ^/api/(varin/realtime-proxy|terminal|dictation)/ws$ {
     proxy_pass http://127.0.0.1:3000;
     proxy_set_header Upgrade $http_upgrade;
     proxy_set_header Connection "upgrade";
@@ -80,7 +79,7 @@ location ~ ^/api/(varin/runtime|varin/realtime-proxy|terminal|dictation)/ws$ {
     proxy_send_timeout 3600s;
 }
 
-location ~ ^/api/(notifications/stream|varin/(events|runtime-manager/events|realtime-proxy/sse))$ {
+location ~ ^/api/(threads/observe|notifications/stream|varin/(events|realtime-proxy/sse))$ {
     proxy_pass http://127.0.0.1:3000;
     proxy_set_header Host $host;
     proxy_set_header X-Real-IP $remote_addr;
@@ -118,8 +117,8 @@ location / {
 
 ### 页面能加载，但发送消息失败
 
-- 代理中未启用 WebSocket
-- `/api/varin/runtime/ws` 未正确传递
+- 检查 `POST /api/threads/*` 的认证与转发。
+- 确认 `GET /api/threads/observe` 以 SSE 流式传输，没有缓冲或缓存。
 
 ### 通知或实时状态不更新
 

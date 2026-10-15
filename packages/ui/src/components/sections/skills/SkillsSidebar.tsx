@@ -1,6 +1,6 @@
 import React from 'react';
-import { PiResourceSidebar } from '@/components/sections/resources/PiResourceSidebar';
+import { NativeResourceSidebar } from '@/components/sections/resources/NativeResourceSidebar';
 
 export const SkillsSidebar: React.FC<{ onItemSelect?: () => void }> = ({ onItemSelect }) => (
-  <PiResourceSidebar kind="skill" onItemSelect={onItemSelect} />
+  <NativeResourceSidebar kind="skill" onItemSelect={onItemSelect} />
 );

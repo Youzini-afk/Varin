@@ -8,7 +8,7 @@ mod query;
 use crate::protocol_generated::{KernelComputeGrammarParams, KernelComputeStartParams};
 use serde_json::{json, Value};
 use std::{collections::{HashMap, VecDeque}, fs::File, path::PathBuf,
-    sync::{Arc, Condvar, Mutex, atomic::{AtomicBool, Ordering}}, thread::{self, JoinHandle}, time::Duration};
+    sync::{mpsc, Arc, Condvar, Mutex, Weak, atomic::{AtomicBool, Ordering}}, thread::{self, JoinHandle}};
 
 pub(crate) type Result<T> = std::result::Result<T, String>;
 const BUFFER_BYTES: usize = 1024 * 1024;
@@ -48,11 +48,17 @@ pub(crate) struct Shared {
     space: Condvar,
     pub cancelled: AtomicBool,
     done: AtomicBool,
+    watchers: Mutex<Vec<Weak<mpsc::SyncSender<()>>>>,
 }
 impl Shared {
     fn new() -> Self { Self { state: Mutex::new(State { status: "queued", records: VecDeque::new(),
         bytes: 0, base: 0, end: 0, scanned: 0, message: None, discard: false }),
-        space: Condvar::new(), cancelled: AtomicBool::new(false), done: AtomicBool::new(false) } }
+        space: Condvar::new(), cancelled: AtomicBool::new(false), done: AtomicBool::new(false), watchers: Mutex::new(Vec::new()) } }
+    fn notify_watchers(&self) {
+        self.watchers.lock().unwrap_or_else(|p| p.into_inner()).retain(|watcher| {
+            if let Some(wake) = watcher.upgrade() { let _ = wake.try_send(()); true } else { false }
+        });
+    }
     pub fn check(&self) -> Result<()> {
         if self.cancelled.load(Ordering::Acquire) { Err("cancelled".into()) } else { Ok(()) }
     }
@@ -64,12 +70,13 @@ impl Shared {
         let mut state = self.state.lock().unwrap_or_else(|e|e.into_inner());
         while state.bytes > 0 && state.bytes + bytes > BUFFER_BYTES && !state.discard {
             self.check()?;
-            state = self.space.wait_timeout(state, Duration::from_millis(50)).unwrap_or_else(|e|e.into_inner()).0;
+            state = self.space.wait(state).unwrap_or_else(|e|e.into_inner());
         }
         self.check()?;
         if !state.discard {
             let cursor = state.end; state.end += 1; state.bytes += bytes;
             state.records.push_back(Buffered {cursor,bytes,record});
+            self.notify_watchers();
         }
         Ok(())
     }
@@ -83,6 +90,7 @@ impl Shared {
             Err(message) => { state.status=if state.end==0 {"failed"} else {"partial"}; state.message=Some(message); }
         } }
         self.done.store(true,Ordering::Release); self.space.notify_all();
+        self.notify_watchers();
     }
     fn cancel(&self) {
         self.cancelled.store(true,Ordering::Release);
@@ -102,6 +110,12 @@ impl Queue {
             let work=queue.remove(index).unwrap(); work.shared.finish(Err("cancelled".into()));
         }
     }
+    fn close(&self) {
+        // Publish closure under the wait predicate's mutex, so rollback/shutdown cannot lose a wake.
+        let _queue = self.work.lock().unwrap_or_else(|e| e.into_inner());
+        self.closed.store(true, Ordering::Release);
+        self.available.notify_all();
+    }
     fn take(&self)->Option<Work> {
         let mut queue=self.work.lock().unwrap_or_else(|e|e.into_inner());
         loop { if let Some(work)=queue.pop_front(){return Some(work);}
@@ -120,7 +134,38 @@ pub(crate) struct Job {
     pub revoked:bool,
     shared:Arc<Shared>,
 }
-impl Job { pub fn done(&self)->bool {self.shared.done.load(Ordering::Acquire)} }
+impl Job {
+    pub fn done(&self)->bool {self.shared.done.load(Ordering::Acquire)}
+    pub fn watch(&self) -> ComputeWatch { ComputeWatch(self.shared.clone()) }
+}
+/// A read-only notification handle to the admitted job, not another job registry.
+/// It remains valid through revocation/removal and identifies this exact execution.
+pub(crate) struct ComputeWatch(Arc<Shared>);
+impl ComputeWatch {
+    pub fn wait(&self, cursor: u64, terminal_only: bool, cancel: &varin_runtime::execution::CancellationToken) -> bool {
+        let (wake, events) = mpsc::sync_channel(1);
+        let wake = Arc::new(wake);
+        let _cancellation = cancel.wake_on_cancel((*wake).clone());
+        {
+            let mut watchers = self.0.watchers.lock().unwrap_or_else(|p| p.into_inner());
+            watchers.retain(|watcher| watcher.strong_count() > 0);
+            watchers.push(Arc::downgrade(&wake));
+        }
+        loop {
+            // Register before checking the authoritative predicate; notifications
+            // coalesce but neither completion nor cancellation can be missed.
+            if cancel.is_cancelled() { return false; }
+            {
+                let state = self.0.state.lock().unwrap_or_else(|p| p.into_inner());
+                if self.0.done.load(Ordering::Acquire) || (!terminal_only && state.end > cursor) {
+                    return true;
+                }
+            }
+            // No Storage, catalog, queue or job-state lock is held while waiting.
+            if events.recv().is_err() { return false; }
+        }
+    }
+}
 #[derive(Default)]
 pub(crate) struct ComputeManager {
     pub jobs:HashMap<String,Job>,
@@ -131,9 +176,13 @@ pub(crate) struct ComputeManager {
 impl ComputeManager {
     fn ensure_workers(&mut self) -> Result<()> {
         if !self.workers.is_empty(){return Ok(());}
-        // Two foreground slots prevent one backpressured query from blocking a
-        // small read. A dedicated background lane cannot occupy either slot.
-        for (name,queue) in [("compute-read-1",self.foreground.clone()),("compute-read-2",self.foreground.clone()),("compute-index",self.background.clone())] {
+        // The actual workers and native admission use the same deployment budget. Background
+        // work keeps its independent lane; model/service waits never consume these workers.
+        let capacity = varin_runtime::execution_capacity::configured_compute_capacity()?;
+        let foreground = self.foreground.clone();
+        let queues = (0..capacity.get()).map(move |index| (format!("compute-read-{index}"), foreground.clone()))
+            .chain(std::iter::once(("compute-index".into(), self.background.clone())));
+        for (name, queue) in queues {
             let worker=thread::Builder::new().name(name.into()).spawn(move||{
                 let mut syntax=structure::SyntaxRuntime::default();
                 while let Some(work)=queue.take() {
@@ -142,8 +191,18 @@ impl ComputeManager {
                         .unwrap_or_else(|_|Err("Native computation failed unexpectedly".into()));
                     work.shared.finish(result);
                 }
-            }).map_err(|e|e.to_string())?;
-            self.workers.push(worker);
+            });
+            match worker {
+                Ok(worker) => self.workers.push(worker),
+                Err(error) => {
+                    // No task has been queued yet. A partial pool must not masquerade as the
+                    // configured capacity on the next start after an OS thread-creation failure.
+                    self.foreground.close(); self.background.close();
+                    for worker in self.workers.drain(..) { let _ = worker.join(); }
+                    self.foreground = Arc::default(); self.background = Arc::default();
+                    return Err(error.to_string());
+                }
+            }
         }
         Ok(())
     }
@@ -160,7 +219,7 @@ impl ComputeManager {
         let job=self.jobs.get(id).ok_or("Computation handle is unavailable")?;
         let mut state=job.shared.state.lock().unwrap_or_else(|e|e.into_inner());
         // Cancellation deliberately discards buffered output; a caller still
-        // polls the task's real terminal state before releasing reader pins.
+        // observes the task's real terminal state before releasing reader pins.
         let cursor=if state.discard{state.end}else{cursor};
         if cursor<state.base||cursor>state.end{return Err("Computation cursor is expired or beyond produced output".into());}
         while state.records.front().is_some_and(|r|r.cursor<cursor) {
@@ -184,8 +243,7 @@ impl ComputeManager {
     }
     pub fn shutdown(&mut self) {
         let ids=self.jobs.keys().cloned().collect::<Vec<_>>();for id in ids{self.cancel(&id);}
-        self.foreground.closed.store(true,Ordering::Release);self.foreground.available.notify_all();
-        self.background.closed.store(true,Ordering::Release);self.background.available.notify_all();
+        self.foreground.close(); self.background.close();
         for worker in self.workers.drain(..){let _=worker.join();}
     }
 }

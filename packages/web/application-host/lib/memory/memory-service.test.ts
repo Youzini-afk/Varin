@@ -28,7 +28,7 @@ const openStore = async (scope: KnowledgeScope = "workspace"): Promise<Knowledge
 };
 
 const scopeOfStoreId = (scopeId: string): KnowledgeScope => (
-  scopeId.startsWith("bot:") ? "bot" : scopeId.startsWith("session:") ? "session" : "workspace"
+  scopeId.startsWith("bot:") ? "bot" : scopeId.startsWith("thread:") ? "session" : "workspace"
 );
 
 describe("memory service (BC1)", () => {
@@ -43,8 +43,8 @@ describe("memory service (BC1)", () => {
       return opened;
     },
     userStore: async () => userStore,
-    sessionStoreIfPresent: async (sessionId) => stores.get(`session:${sessionId}`) ?? null,
-    ownerForSession: async (sessionId) => ({ scope: "workspace", ownerId: sessionId }),
+    threadStoreIfPresent: async (sessionId) => stores.get(`thread:${sessionId}`) ?? null,
+    ownerForThread: async (sessionId) => ({ scope: "workspace", ownerId: sessionId }),
   });
   const workspaceOwner: MemoryOwner = { scope: "workspace", ownerId: "ws-test" };
   const botOwner: MemoryOwner = { scope: "bot", ownerId: "bot-1" };
@@ -64,12 +64,12 @@ describe("memory service (BC1)", () => {
       content: "Release builds ship from the tagged commit only",
       trigger: "release",
       nature: "decision",
-      source: { kind: "user-mark", sessionId: "s-1" },
+      source: { kind: "user-mark", threadId: "thread:s-1" },
     });
     expect(result.created).toBe(true);
     expect(result.item.status).toBe("accepted");
     expect(result.item.nature).toBe("decision");
-    expect(result.item.source?.sessionId).toBe("s-1");
+    expect(result.item.source?.threadId).toBe("thread:s-1");
     const hits = await service().search(workspaceOwner, "tagged commit");
     expect(hits.some((hit) => hit.node.id === result.item.id)).toBe(true);
   });
@@ -148,10 +148,10 @@ describe("memory service (BC1)", () => {
     const svc = service();
     await svc.remember(botOwner, { content: "Handoff decision from the Bot" });
     await svc.remember({ scope: "user", ownerId: null }, { content: "Handoff preference from the user" });
-    await svc.remember({ scope: "session", ownerId: "s-1" }, { content: "Handoff note from this session" });
-    const hits = await svc.search(botOwner, "Handoff", 8, { sessionId: "s-1", includeShared: true });
+    await svc.remember({ scope: "session", ownerId: "thread:s-1" }, { content: "Handoff note from this session" });
+    const hits = await svc.search(botOwner, "Handoff", 8, { threadId: "thread:s-1", includeShared: true });
     expect(hits.map((hit) => hit.node.payload.scope)).toEqual(expect.arrayContaining(["bot", "user", "session"]));
-    const narrow = await svc.search(botOwner, "Handoff", 8, { sessionId: "s-1" });
+    const narrow = await svc.search(botOwner, "Handoff", 8, { threadId: "thread:s-1" });
     expect(narrow.map((hit) => hit.node.payload.scope)).toEqual(["bot"]);
   });
 
@@ -165,4 +165,20 @@ describe("memory service (BC1)", () => {
     expect(result.item.status).toBe("suggested");
     expect(result.item.nature).toBe("judgment");
   });
+  it('replays each exact Knowledge mutation receipt after later correction or forgetting without new rows', async () => {
+    const svc = service();
+    const origin = { id: 'run:r:operation:remember', intent: 'remember exact statement' };
+    const original = await svc.remember(botOwner, { content: 'Deploy Thursday' }, origin);
+    const expected = { content: original.item.content, trigger: original.item.trigger, status: original.item.status, invalidAt: null };
+    const correctionOrigin = { id: 'run:r:operation:correct', intent: 'replace original Thursday row with Friday' };
+    const correction = await svc.correct(botOwner, original.item.id, { content: 'Deploy Friday', expected }, correctionOrigin);
+    await svc.forget(botOwner, correction.id, undefined, { id: 'run:r:operation:forget', intent: 'forget Friday' });
+    expect(await svc.remember(botOwner, { content: 'Deploy Thursday' }, origin)).toEqual(original);
+    expect(await svc.correct(botOwner, original.item.id, { content: 'Deploy Friday', expected }, correctionOrigin)).toEqual(correction);
+    expect((await svc.list(botOwner)).map(item => item.id).sort()).toEqual([original.item.id, correction.id].sort());
+    expect(await svc.list(botOwner, { activeOnly: true })).toEqual([]);
+    await expect(svc.remember(botOwner, { content: 'Another statement' }, { ...origin, intent: 'different intent' })).rejects.toMatchObject({ code: 'conflict' });
+    expect((await svc.mutationReceipt(botOwner, origin))?.result).toMatchObject({ knowledge: { id: original.item.id } });
+  });
+
 });

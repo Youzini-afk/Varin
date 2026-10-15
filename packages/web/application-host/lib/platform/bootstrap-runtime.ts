@@ -19,28 +19,17 @@ type MobileDependencies = Parameters<typeof registerMobileRoutes>[1];
 type TtsDependencies = Parameters<typeof registerTtsRoutes>[1];
 type VarinDependencies = Parameters<typeof registerVarinRoutes>[1];
 
-type SessionNotificationMethod =
-  | 'getSessionActivitySnapshot'
-  | 'getSessionAttentionSnapshot'
-  | 'getSessionAttentionState'
-  | 'getSessionState'
-  | 'getSessionStateSnapshot'
-  | 'markSessionUnviewed'
-  | 'markSessionViewed'
-  | 'markUserMessageSent';
-
 export type ServerBootstrapOptions =
   Omit<ServerStatusDependencies, 'express' | 'uiAuthController'>
   & Omit<AuthAccessDependencies, 'express' | 'uiAuthController'>
   & TtsDependencies
-  & Omit<NotificationDependencies, 'uiAuthController' | SessionNotificationMethod>
+  & Omit<NotificationDependencies, 'uiAuthController'>
   & VarinDependencies
   & {
     clientPairingRuntime: AuthAccessDependencies['clientPairingRuntime'];
     mobileDeviceStore: MobileDependencies['deviceStore'];
     mobilePairingRuntime: MobileDependencies['pairingRuntime'];
     mobilePushRuntime: MobileDependencies['mobilePushRuntime'];
-    sessionRuntime: Pick<NotificationDependencies, SessionNotificationMethod>;
     uiPassword: UiAuthOptions['password'];
     verboseRequestLogs?: CommonRequestMiddlewareDependencies['verboseRequestLogs'];
   };
@@ -109,7 +98,6 @@ export const createServerBootstrapRuntime = (dependencies: ServerBootstrapDepend
       isUiVisible,
       getUiNotificationClients,
       writeSseEvent,
-      sessionRuntime,
       setPushInitialized,
       fs,
       path,
@@ -186,14 +174,6 @@ export const createServerBootstrapRuntime = (dependencies: ServerBootstrapDepend
       isUiVisible,
       getUiNotificationClients,
       writeSseEvent,
-      getSessionActivitySnapshot: sessionRuntime.getSessionActivitySnapshot,
-      getSessionStateSnapshot: sessionRuntime.getSessionStateSnapshot,
-      getSessionAttentionSnapshot: sessionRuntime.getSessionAttentionSnapshot,
-      getSessionState: sessionRuntime.getSessionState,
-      getSessionAttentionState: sessionRuntime.getSessionAttentionState,
-      markSessionViewed: sessionRuntime.markSessionViewed,
-      markSessionUnviewed: sessionRuntime.markSessionUnviewed,
-      markUserMessageSent: sessionRuntime.markUserMessageSent,
       setPushInitialized,
     });
 

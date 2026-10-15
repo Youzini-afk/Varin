@@ -1,7 +1,7 @@
 /**
- * Harness settings live under `harness` in Pi's agent-directory settings.json.
- * Trusted project overrides come from <workspace>/.pi/settings.json.
- * Pi owns source loading and project trust; tool assembly resolves them at session creation.
+ * Harness settings live under `harness` in the native Agent settings documents.
+ * Trusted project overrides come from the native project settings document.
+ * The Host model/settings owner loads them and enforces project trust at admission.
  */
 
 import {
@@ -15,8 +15,9 @@ import {
   type HarnessFastDecisionSettings,
 } from "./harness-fast-decision.js";
 import { mergePolicies, type PermissionMode, type PermissionRule } from "./permission-gate.js";
-import { type HarnessCustomAgent } from "./harness-agents.js";
-import { normalizeHarnessAgentConfiguration, type HarnessModelBinding } from "./harness-model-slots.js";
+import { parseHarnessAgents, type HarnessCustomAgent } from "./harness-agents.js";
+import { parseHarnessModelSlots, type HarnessModelBinding } from "./harness-model-slots.js";
+import { parseHarnessImageSettings, type HarnessImageSettings } from './harness-images.js';
 
 /** A provider + model pair, as stored in a model slot. */
 export interface ModelSelection {
@@ -50,7 +51,7 @@ export interface HarnessWebSearchSettings {
   provider: HarnessWebSearchProvider;
   /** Required for SearXNG; optional override for hosted providers. */
   endpoint?: string;
-  /** Pi auth.json entry name. SearXNG may omit it for an unauthenticated instance. */
+  /** Host credential reference. SearXNG may omit it for an unauthenticated instance. */
   credentialRef?: string;
 }
 
@@ -155,20 +156,11 @@ export function resolveHarnessNextStepSettings(value: unknown): HarnessNextStepS
   return { enabled: input.enabled ?? DEFAULT_HARNESS_NEXT_STEP_SETTINGS.enabled };
 }
 
-/**
- * Raw persisted shape accepted while reading Pi settings. `context` is the
- * current object; `memory` is the retired keeper setting, still read so an
- * explicit user `mode: "off"` keeps background preparation disabled.
- */
+/** Raw context settings accepted by the native Agent settings owner. */
 export interface HarnessContextSettingsInput {
   backgroundPreparation?: unknown;
   preparationWaterline?: unknown;
   compactionRecovery?: unknown;
-}
-
-export interface HarnessMemorySettingsInput {
-  mode?: unknown;
-  shadowMode?: unknown;
 }
 
 export class HarnessSettingsValidationError extends Error {
@@ -211,13 +203,15 @@ export function resolveCompactionRecoverySettings(value: unknown): CompactionRec
 
 export function resolveHarnessContextSettings(
   context: unknown,
-  legacyMemory: unknown,
 ): HarnessContextSettings {
   if (context !== undefined
     && (typeof context !== "object" || context === null || Array.isArray(context))) {
     throw new HarnessSettingsValidationError("harness.context must be an object");
   }
   const input = (context ?? {}) as HarnessContextSettingsInput;
+  if (Object.keys(input).some(key => !["backgroundPreparation", "preparationWaterline", "compactionRecovery"].includes(key))) {
+    throw new HarnessSettingsValidationError("Unsupported harness.context setting");
+  }
   if (input.backgroundPreparation !== undefined && typeof input.backgroundPreparation !== "boolean") {
     throw new HarnessSettingsValidationError("harness.context.backgroundPreparation must be a boolean");
   }
@@ -229,15 +223,8 @@ export function resolveHarnessContextSettings(
       "harness.context.preparationWaterline must be a number between 0 and 1",
     );
   }
-  // A retired harness.memory.mode: "off" or shadowMode: false was the user's
-  // explicit opt-out of background maintenance; it maps to disabling
-  // background preparation only, never to disabling automatic compaction.
-  const memory = (typeof legacyMemory === "object" && legacyMemory !== null && !Array.isArray(legacyMemory)
-    ? legacyMemory
-    : {}) as HarnessMemorySettingsInput;
-  const legacyOff = memory.mode === "off" || memory.shadowMode === false;
   return {
-    backgroundPreparation: input.backgroundPreparation ?? !legacyOff,
+    backgroundPreparation: input.backgroundPreparation ?? DEFAULT_HARNESS_CONTEXT_SETTINGS.backgroundPreparation,
     preparationWaterline: input.preparationWaterline ?? DEFAULT_HARNESS_CONTEXT_SETTINGS.preparationWaterline,
     compactionRecovery: resolveCompactionRecoverySettings(input.compactionRecovery),
   };
@@ -245,13 +232,13 @@ export function resolveHarnessContextSettings(
 
 export type HarnessSettingsInput = Omit<Partial<HarnessSettings>, "context" | "nextStep" | "documentReading" | "codeRetrieval"> & {
   context?: HarnessContextSettingsInput;
-  memory?: HarnessMemorySettingsInput;
   nextStep?: Partial<HarnessNextStepSettings>;
   documentReading?: HarnessDocumentReadingSettingsInput;
   codeRetrieval?: Partial<HarnessCodeRetrievalSettings>;
 };
 
 export interface HarnessSettings {
+  images?: HarnessImageSettings;
   tools: Partial<Record<string, boolean>>;
   shell: "auto" | "git-bash" | "powershell" | "wsl";
   output: { visibleBytes: number };
@@ -305,6 +292,7 @@ export interface HarnessSettings {
 }
 
 export type HarnessModelRole =
+  | "agentPlanning"
   | "explore"
   | "retrievalAgent"
   | "worker"
@@ -392,16 +380,19 @@ export function mergeHarnessSettings(
   user: HarnessSettingsInput,
   workspace: HarnessSettingsInput,
 ): HarnessSettings {
+  if ("memory" in user || "memory" in workspace) {
+    throw new HarnessSettingsValidationError("Unsupported harness.memory settings; configure harness.context explicitly");
+  }
   const {
     context: _userContext,
     documentReading: userDocumentReading,
     embedding: userEmbedding,
     fastDecision: userFastDecision,
-    memory: _userMemory,
     rerank: userRerank,
     nextStep: userNextStep,
     codeRetrieval: userCodeRetrieval,
     computer: userComputer,
+    images: userImages,
     ...userRest
   } = user;
   const {
@@ -409,11 +400,11 @@ export function mergeHarnessSettings(
     documentReading: _workspaceDocumentReading,
     embedding: _workspaceEmbedding,
     fastDecision: _workspaceFastDecision,
-    memory: _workspaceMemory,
     rerank: _workspaceRerank,
     nextStep: _workspaceNextStep,
     codeRetrieval: _workspaceCodeRetrieval,
     computer: _workspaceComputer,
+    images: _workspaceImages,
     ...workspaceRest
   } = workspace;
   const askBeforeKeys = new Set([
@@ -424,11 +415,6 @@ export function mergeHarnessSettings(
     key,
     user.dispatch?.askBefore?.[key] === true || workspace.dispatch?.askBefore?.[key] === true,
   ]));
-  for (const [id, role] of [["quick-implement", "quickImplement"], ["hard-implement", "hardImplement"], ["frontend", "frontend"], ["review", "review"], ["check", "check"]] as const) {
-    if (askBefore[id]) askBefore.worker = true;
-    if (askBefore[id]) askBefore[`custom:saved-${role}`] = true;
-    delete askBefore[id];
-  }
   const permissions = mergePolicies(
     {
       mode: user.permissions?.mode ?? DEFAULT_HARNESS_SETTINGS.permissions?.mode ?? "normal",
@@ -448,7 +434,6 @@ export function mergeHarnessSettings(
     // setting before attempting to launch an optional process.
     documentReading = { ...DEFAULT_HARNESS_DOCUMENT_READING_SETTINGS };
   }
-  const agentConfiguration = normalizeHarnessAgentConfiguration(user.models, user.agents);
   const merged: HarnessSettings = {
     ...DEFAULT_HARNESS_SETTINGS,
     ...userRest,
@@ -459,8 +444,9 @@ export function mergeHarnessSettings(
     bash: { ...DEFAULT_HARNESS_SETTINGS.bash, ...user.bash, ...workspace.bash },
     // Model/provider selection is user-owned. A repository cannot redirect
     // auxiliary requests to another provider.
-    models: agentConfiguration.models,
-    agents: agentConfiguration.agents,
+    models: parseHarnessModelSlots(user.models),
+    agents: parseHarnessAgents(user.agents),
+    images: (() => { try { return parseHarnessImageSettings(userImages); } catch { return {}; } })(),
     // An optional, externally edited judgment choice must not prevent chat
     // creation. Its direct consumer reports the invalid choice and keeps source
     // ranking; settings.update validates new writes separately.
@@ -487,9 +473,8 @@ export function mergeHarnessSettings(
       },
     },
     // Background preparation is user-owned. A repository cannot enable
-    // background model calls the user turned off; a legacy memory.mode "off"
-    // keeps preparation disabled, and project settings cannot re-enable it.
-    context: resolveHarnessContextSettings(user.context, user.memory),
+    // background model calls the user turned off.
+    context: resolveHarnessContextSettings(user.context),
     // Local document parser executables are user-owned. Project settings can
     // never select a process for the Host to launch.
     documentReading,

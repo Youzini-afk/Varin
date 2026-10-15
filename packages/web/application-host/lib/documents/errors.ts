@@ -21,6 +21,13 @@ export class DocumentAuthorityError extends Error {
   }
 }
 
+export class DocumentWorkspaceUnregisteredError extends DocumentAuthorityError {
+  constructor() {
+    super('Workspace is not registered on this application host; select its original source again', { code: 'workspace-unregistered', statusCode: 404 });
+    this.name = 'DocumentWorkspaceUnregisteredError';
+  }
+}
+
 export class DocumentUntrustedError extends DocumentAuthorityError {
   constructor(message: string = 'Workspace is not trusted') {
     super(message, { code: 'untrusted', statusCode: 403 });

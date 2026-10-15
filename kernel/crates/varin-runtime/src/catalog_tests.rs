@@ -1,0 +1,4094 @@
+#[path = "../tests/fixtures/content_collection.rs"]
+mod content_collection;
+use super::*;
+use crate::test_submission::InputAdmission;
+use std::path::PathBuf;
+struct Fixture(PathBuf);
+impl Fixture {
+    fn new() -> Self {
+        Self(std::env::temp_dir().join(format!("varin-runtime-test-{}", id())))
+    }
+    fn open(&self) -> Catalog {
+        Catalog::open(&self.0).unwrap()
+    }
+}
+impl Drop for Fixture {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.0);
+    }
+}
+fn submit(db: &mut Catalog) -> Receipt {
+    db.create_thread("thread", "main").unwrap();
+    db.submit(&command()).unwrap()
+}
+fn command() -> SubmitInput {
+    SubmitInput {
+        key: "input-1".into(),
+        thread_id: "thread".into(),
+        branch_id: "main".into(),
+        expected_head: None,
+        input: json!({"text":"hello"}),
+        configuration: json!({"provider":"test"}),
+    }
+}
+#[test]
+fn admission_is_durable_and_idempotent() {
+    let f = Fixture::new();
+    let mut db = f.open();
+    let receipt = submit(&mut db);
+    assert_eq!(receipt, db.submit(&command()).unwrap());
+    let mut changed = command();
+    changed.input = json!("different");
+    assert!(matches!(
+        db.submit(&changed),
+        Err(RuntimeError::Conflict(_))
+    ));
+    assert_eq!(db.run(&receipt.run_id).unwrap().state, RunState::Accepted);
+    assert!(
+        db.events_after(0, 100)
+            .unwrap()
+            .iter()
+            .any(|e| e.kind == "run.accepted" && e.cursor == receipt.cursor)
+    );
+    drop(db);
+    let mut db = f.open();
+    assert_eq!(receipt, db.submit(&command()).unwrap());
+    assert_eq!(db.history("main").unwrap().len(), 1);
+}
+#[test]
+fn branch_cas_and_opaque_history_survive_restart() {
+    let f = Fixture::new();
+    let mut db = f.open();
+    let receipt = submit(&mut db);
+    let epoch = db.epoch();
+    let original = ProviderOriginal {
+        connection_identity: "fixture-connection".into(),
+        adapter: "responses".into(),
+        version: "1".into(),
+        item: json!({"type":"reasoning","encrypted_content":"opaque","signature":{"nested":[null,42]}}),
+    };
+    let item = db
+        .append_history(
+            &receipt.run_id,
+            epoch,
+            Some(&receipt.input_id),
+            HistorySource::Assistant,
+            json!({"text":"shown"}),
+            Some(original.clone()),
+        )
+        .unwrap();
+    assert!(
+        db.append_history(
+            &receipt.run_id,
+            epoch,
+            Some(&receipt.input_id),
+            HistorySource::Assistant,
+            Value::Null,
+            None
+        )
+        .is_err()
+    );
+    db.fork_branch("main", "fork", Some(&receipt.input_id))
+        .unwrap();
+    assert_eq!(db.history("fork").unwrap().len(), 1);
+    drop(db);
+    let db = f.open();
+    assert_eq!(db.history("main").unwrap().last(), Some(&item));
+    assert_eq!(
+        db.history("main").unwrap()[1].provider.as_ref(),
+        Some(&original)
+    );
+}
+#[test]
+fn failed_initial_install_leaves_no_partial_catalog_and_can_reopen() {
+    let f = Fixture::new();
+    std::fs::create_dir_all(&f.0).unwrap();
+    let mut raw = Connection::open(f.0.join("conversation.sqlite")).unwrap();
+    let content = crate::content::ContentStore::open(f.0.join("content")).unwrap();
+    // Actual SQLite capacity failure, not a mocked installation path.
+    raw.pragma_update(None, "max_page_count", 2).unwrap();
+    assert!(initialize_metadata(&mut raw, 0, &content).is_err());
+    assert_eq!(inspect_catalog_format(&raw).unwrap(), 0);
+    let tables: i64 = raw
+        .query_row(
+            "SELECT count(*) FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(tables, 0);
+    raw.pragma_update(None, "max_page_count", 1_000_000)
+        .unwrap();
+    drop(raw);
+    let mut db = f.open();
+    let receipt = submit(&mut db);
+    drop(db);
+    let db = f.open();
+    assert_eq!(db.run(&receipt.run_id).unwrap().state, RunState::Accepted);
+    assert_eq!(db.history("main").unwrap().len(), 1);
+}
+#[test]
+fn pre_default_membership_catalog_is_rejected_before_recovery() {
+    let f = Fixture::new();
+    drop(f.open());
+    let raw = Connection::open(f.0.join("conversation.sqlite")).unwrap();
+    let epoch: i64 = raw
+        .query_row("SELECT epoch FROM runtime_meta WHERE id=1", [], |row| {
+            row.get(0)
+        })
+        .unwrap();
+    raw.pragma_update(None, "user_version", 39).unwrap();
+    assert!(matches!(Catalog::open(&f.0), Err(RuntimeError::Format(39))));
+    assert_eq!(
+        raw.pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))
+            .unwrap(),
+        39
+    );
+    assert_eq!(
+        raw.query_row("SELECT epoch FROM runtime_meta WHERE id=1", [], |row| row
+            .get::<_, i64>(
+            0
+        ))
+        .unwrap(),
+        epoch
+    );
+}
+
+#[test]
+fn single_writer_and_unknown_formats_preserve_assets() {
+    let f = Fixture::new();
+    let db = f.open();
+    assert!(matches!(
+        Catalog::open(&f.0),
+        Err(RuntimeError::Conflict(_))
+    ));
+    drop(db);
+    let raw = Connection::open(f.0.join("conversation.sqlite")).unwrap();
+    raw.pragma_update(None, "user_version", 999).unwrap();
+    drop(raw);
+    assert!(matches!(
+        Catalog::open(&f.0),
+        Err(RuntimeError::Format(999))
+    ));
+    let raw = Connection::open(f.0.join("conversation.sqlite")).unwrap();
+    assert_eq!(
+        raw.pragma_query_value(None, "user_version", |r| r.get::<_, i64>(0))
+            .unwrap(),
+        999
+    );
+    raw.pragma_update(None, "user_version", FORMAT).unwrap();
+    raw.execute(
+        "UPDATE runtime_domains SET version=999 WHERE name='input_queue'",
+        [],
+    )
+    .unwrap();
+    let epoch: i64 = raw
+        .query_row("SELECT epoch FROM runtime_meta WHERE id=1", [], |row| {
+            row.get(0)
+        })
+        .unwrap();
+    assert!(matches!(Catalog::open(&f.0), Err(RuntimeError::Invalid(_))));
+    assert_eq!(
+        raw.query_row("SELECT epoch FROM runtime_meta WHERE id=1", [], |row| row
+            .get::<_, i64>(
+            0
+        ))
+        .unwrap(),
+        epoch
+    );
+}
+#[test]
+fn cancellation_is_a_request_and_dispatched_unknown_is_not_replayed() {
+    let f = Fixture::new();
+    let mut db = f.open();
+    let r = submit(&mut db);
+    let epoch = db.epoch();
+    db.admit_operation(
+        "op",
+        &r.run_id,
+        epoch,
+        Lifetime::Run,
+        json!({"click":"button"}),
+    )
+    .unwrap();
+    db.dispatch_operation("op", epoch, "desktop-1", true)
+        .unwrap();
+    let cancelled = db.request_cancel_operation("op").unwrap();
+    assert!(cancelled.cancel_requested);
+    assert_eq!(cancelled.outcome, None);
+    assert_eq!(cancelled.effect, Effect::Dispatched);
+    assert!(
+        db.settle_operation("op", epoch, Outcome::Cancelled, Effect::None, Value::Null)
+            .is_err()
+    );
+    drop(db);
+    let mut db = f.open();
+    let recovered = db.operation("op").unwrap();
+    assert_eq!(recovered.outcome, Some(Outcome::Indeterminate));
+    assert_eq!(recovered.effect, Effect::Unknown);
+    assert!(
+        db.dispatch_operation("op", db.epoch(), "desktop-1", true)
+            .is_err()
+    );
+    assert!(
+        db.settle_operation(
+            "op",
+            epoch,
+            Outcome::Succeeded,
+            Effect::Confirmed,
+            Value::Null
+        )
+        .is_err()
+    );
+}
+#[test]
+fn accepted_operations_can_resume_but_old_epoch_cannot_dispatch() {
+    let f = Fixture::new();
+    let mut db = f.open();
+    let r = submit(&mut db);
+    let old = db.epoch();
+    db.admit_operation("op", &r.run_id, old, Lifetime::Run, Value::Null)
+        .unwrap();
+    drop(db);
+    let mut db = f.open();
+    assert!(db.dispatch_operation("op", old, "local", false).is_err());
+    db.dispatch_operation("op", db.epoch(), "local", false)
+        .unwrap();
+    db.settle_operation(
+        "op",
+        db.epoch(),
+        Outcome::Succeeded,
+        Effect::None,
+        json!("done"),
+    )
+    .unwrap();
+}
+#[test]
+fn foreground_must_settle_but_explicit_thread_job_can_outlive_run() {
+    let f = Fixture::new();
+    let mut db = f.open();
+    let r = submit(&mut db);
+    let epoch = db.epoch();
+    let run = db
+        .transition_run(&r.run_id, epoch, 1, RunState::Runnable)
+        .unwrap();
+    db.admit_operation("op", &r.run_id, epoch, Lifetime::Thread, Value::Null)
+        .unwrap();
+    assert!(
+        db.transition_run(&r.run_id, epoch, run.revision, RunState::Completed)
+            .is_err()
+    );
+    db.handoff_operation("op", epoch).unwrap();
+    db.transition_run(&r.run_id, epoch, run.revision, RunState::Completed)
+        .unwrap();
+    db.dispatch_operation("op", epoch, "background", false)
+        .unwrap();
+    db.settle_operation(
+        "op",
+        epoch,
+        Outcome::Succeeded,
+        Effect::None,
+        json!("background result"),
+    )
+    .unwrap();
+}
+#[test]
+fn wait_registration_checks_past_events_and_claims_once() {
+    let f = Fixture::new();
+    let mut db = f.open();
+    let r = submit(&mut db);
+    let epoch = db.epoch();
+    db.admit_operation("op", &r.run_id, epoch, Lifetime::Run, Value::Null)
+        .unwrap();
+    db.settle_operation("op", epoch, Outcome::Succeeded, Effect::None, json!("done"))
+        .unwrap();
+    let wait = db
+        .register_wait("wait", &r.run_id, "op", "operation.settled", r.cursor)
+        .unwrap();
+    assert!(wait.trigger_cursor.is_some());
+    db.commit_execution(
+        &r.run_id,
+        epoch,
+        &crate::execution::ExecutionRecord::StateChanged {
+            state: RunState::Runnable,
+            waiting_on: None,
+        },
+    )
+    .unwrap();
+    db.commit_execution(
+        &r.run_id,
+        epoch,
+        &crate::execution::ExecutionRecord::StateChanged {
+            state: RunState::Waiting,
+            waiting_on: Some("wait".into()),
+        },
+    )
+    .unwrap();
+    assert!(db.claim_resumption("wait", epoch).unwrap());
+    assert!(!db.claim_resumption("wait", epoch).unwrap());
+    drop(db);
+    let mut db = f.open();
+    assert!(db.claim_resumption("wait", db.epoch()).unwrap());
+    db.complete_resumption("wait", db.epoch()).unwrap();
+    drop(db);
+    let mut db = f.open();
+    assert!(!db.claim_resumption("wait", db.epoch()).unwrap());
+}
+#[test]
+fn cancelling_observation_does_not_cancel_observed_job() {
+    let f = Fixture::new();
+    let mut db = f.open();
+    let r = submit(&mut db);
+    let epoch = db.epoch();
+    db.admit_operation("op", &r.run_id, epoch, Lifetime::Thread, Value::Null)
+        .unwrap();
+    db.register_wait("wait", &r.run_id, "op", "operation.settled", r.cursor)
+        .unwrap();
+    db.cancel_wait("wait").unwrap();
+    assert!(!db.operation("op").unwrap().cancel_requested);
+    db.settle_operation("op", epoch, Outcome::Succeeded, Effect::None, Value::Null)
+        .unwrap();
+    assert_eq!(db.reconcile_waits().unwrap(), 0);
+    assert!(!db.claim_resumption("wait", epoch).unwrap());
+}
+#[test]
+fn dispatched_model_is_interrupted_and_not_sent_again() {
+    let f = Fixture::new();
+    let mut db = f.open();
+    let r = submit(&mut db);
+    let epoch = db.epoch();
+    db.prepare_model_step(
+        "step",
+        &r.run_id,
+        epoch,
+        json!({"model":"test","history":["hello"]}),
+    )
+    .unwrap();
+    db.dispatch_model_step("step", epoch).unwrap();
+    drop(db);
+    let mut db = f.open();
+    assert_eq!(
+        db.model_step("step").unwrap().state,
+        ModelStepState::Interrupted
+    );
+    assert!(db.dispatch_model_step("step", db.epoch()).is_err());
+    let reopened = db.model_step("step").unwrap();
+    assert_eq!(
+        reopened.request,
+        json!({"model":"test","history":["hello"]})
+    );
+    let usage: crate::execution::UsageReceipt = serde_json::from_value(
+        reopened
+            .usage
+            .expect("interrupted usage is explicitly missing"),
+    )
+    .unwrap();
+    assert_eq!(
+        usage.measurement,
+        crate::execution::UsageMeasurement::Missing
+    );
+    assert_eq!(
+        [
+            usage.input_tokens,
+            usage.output_tokens,
+            usage.cached_input_tokens,
+            usage.cache_write_tokens,
+            usage.reasoning_tokens
+        ],
+        [None; 5],
+    );
+}
+#[test]
+fn delivery_cannot_commit_a_fact_before_send() {
+    let f = Fixture::new();
+    let mut db = f.open();
+    let r = submit(&mut db);
+    assert!(
+        db.set_delivery("model", r.cursor, "request", DeliveryState::Committed)
+            .is_err()
+    );
+    db.set_delivery("model", r.cursor, "request", DeliveryState::Selected)
+        .unwrap();
+    db.set_delivery("model", r.cursor, "request", DeliveryState::Sent)
+        .unwrap();
+    db.set_delivery("model", r.cursor, "request", DeliveryState::Committed)
+        .unwrap();
+    db.set_delivery("model", r.cursor, "request", DeliveryState::Committed)
+        .unwrap();
+    assert!(
+        db.set_delivery("model", r.cursor, "request", DeliveryState::Selected)
+            .is_err()
+    );
+}
+
+fn request_snapshot(receipt: &Receipt) -> crate::execution::RequestSnapshot {
+    use crate::execution::*;
+    RequestSnapshot {
+        view: RequestView {
+            request_id: "model-1".into(),
+            run_id: receipt.run_id.clone(),
+            origin: RequestOrigin::Conversation {
+                compaction: None, step: 1,
+                history_range: HistoryRange {
+                    branch_id: receipt.branch_id.clone(),
+                    ancestor_id: None,
+                    leaf_id: Some(receipt.input_id.clone()),
+                },
+            },
+            binding: RequestBinding {
+                child_dispatch: None,
+                goal: None,
+                resource_activations: Vec::new(),
+                resource_checkpoint_id: None,
+                connection_identity: "fixture-connection".into(),
+                provider_family: "test".into(),
+                model: "mock".into(),
+                credential_ref: None,
+                configuration_generation: 1,
+                tool_schema_generation: 1,
+                tools: vec![],
+                instruction_sources: vec![],
+                memory_checkpoint: None,
+                attachment_refs: vec![],
+                environment_cursor: 0,
+                history_range: HistoryRange {
+                    branch_id: receipt.branch_id.clone(),
+                    ancestor_id: None,
+                    leaf_id: Some(receipt.input_id.clone()),
+                },
+            },
+            history: vec![],
+        },
+        serialized: json!({"model":"mock"}).into(),
+    }
+}
+#[test]
+fn model_output_and_history_are_one_commit_and_reject_stale_heads() {
+    use crate::execution::*;
+    let f = Fixture::new();
+    let mut db = f.open();
+    let r = submit(&mut db);
+    let epoch = db.epoch();
+    let snapshot = request_snapshot(&r);
+    db.commit_execution(
+        &r.run_id,
+        epoch,
+        &ExecutionRecord::RequestPrepared {
+            snapshot: snapshot.clone().into(),
+        },
+    )
+    .unwrap();
+    db.commit_execution(
+        &r.run_id,
+        epoch,
+        &ExecutionRecord::ModelDispatched {
+            request_id: "model-1".into(),
+        },
+    )
+    .unwrap();
+    let item = ProviderItem {
+        id: "answer".into(),
+        content: Content::Text {
+            text: "hello back".into(),
+        },
+        opaque: Some(OpaqueProviderItem {
+            connection_identity: "fixture-connection".into(),
+            family: "test".into(),
+            adapter_version: "1".into(),
+            value: json!({"signature":"original"}),
+        }),
+    };
+    db.append_history(
+        &r.run_id,
+        epoch,
+        Some(&r.input_id),
+        HistorySource::Environment,
+        json!({"changed":true}),
+        None,
+    )
+    .unwrap();
+    let finish = ExecutionRecord::ModelFinished {
+        request_id: "model-1".into(),
+        outcome: ModelOutcome::Completed,
+        finish_reason: Some(FinishReason::Stop),
+        items: vec![item],
+        interrupted_deltas: vec![],
+        usage: UsageReceipt::default(),
+        failure: None,
+    };
+    assert!(matches!(
+        db.commit_execution(&r.run_id, epoch, &finish),
+        Err(RuntimeError::Conflict(_))
+    ));
+    assert_eq!(
+        db.model_step("model-1").unwrap().state,
+        ModelStepState::Dispatched
+    );
+    assert!(!db.history("main").unwrap().iter().any(|i| i.id == "answer"));
+}
+#[test]
+fn completed_model_history_is_durable_without_a_second_append() {
+    use crate::execution::*;
+    let f = Fixture::new();
+    let mut db = f.open();
+    let r = submit(&mut db);
+    let epoch = db.epoch();
+    db.commit_execution(
+        &r.run_id,
+        epoch,
+        &ExecutionRecord::RequestPrepared {
+            snapshot: request_snapshot(&r).into(),
+        },
+    )
+    .unwrap();
+    db.commit_execution(
+        &r.run_id,
+        epoch,
+        &ExecutionRecord::ModelDispatched {
+            request_id: "model-1".into(),
+        },
+    )
+    .unwrap();
+    let original = json!({"opaque":{"nested":[false,"original"]}});
+    let item = ProviderItem {
+        id: "answer".into(),
+        content: Content::Text {
+            text: "hello back".into(),
+        },
+        opaque: Some(OpaqueProviderItem {
+            connection_identity: "fixture-connection".into(),
+            family: "test".into(),
+            adapter_version: "1".into(),
+            value: original.clone(),
+        }),
+    };
+    db.commit_execution(
+        &r.run_id,
+        epoch,
+        &ExecutionRecord::ModelFinished {
+            request_id: "model-1".into(),
+            outcome: ModelOutcome::Completed,
+            finish_reason: Some(FinishReason::Stop),
+            items: vec![item],
+            interrupted_deltas: vec![],
+            usage: UsageReceipt::default(),
+            failure: None,
+        },
+    )
+    .unwrap();
+    drop(db);
+    let db = f.open();
+    assert_eq!(
+        db.model_step("model-1").unwrap().state,
+        ModelStepState::Completed
+    );
+    assert_eq!(
+        db.execution_history("main")
+            .unwrap()
+            .last()
+            .unwrap()
+            .opaque
+            .as_ref()
+            .unwrap()
+            .value,
+        original
+    );
+}
+
+#[test]
+fn structured_user_attachment_cannot_silently_disappear_from_execution_history() {
+    let f = Fixture::new();
+    let mut db = f.open();
+    db.create_thread("thread", "main").unwrap();
+    let mut input = command();
+    input.input = json!({"text":"inspect this image","attachments":[{"media_type":"image/png","data_base64":"Y29udGVudDpleGFtcGxl"}]});
+    let receipt = db.submit(&input).unwrap();
+    let items = db.execution_history("main").unwrap();
+    let media = items
+        .iter()
+        .find_map(|item| match &item.content {
+            crate::execution::Content::Media { media } => Some(media),
+            _ => None,
+        })
+        .expect("accepted attachment remains typed before request compilation");
+    assert_eq!(media.data_base64, "Y29udGVudDpleGFtcGxl");
+    assert_eq!(
+        media.source,
+        crate::output::OutputSource::Conversation {
+            provenance: crate::execution::Provenance::UserInstruction {
+                input_id: receipt.input_id
+            }
+        }
+    );
+}
+
+#[test]
+fn tool_batch_receipt_cannot_cross_between_two_active_runs() {
+    use crate::execution::*;
+    let f = Fixture::new();
+    let mut db = f.open();
+    let original = submit(&mut db);
+    let epoch = db.epoch();
+    let mut snapshot = request_snapshot(&original);
+    snapshot.view.binding.tools = vec![ToolSchema {
+        requirements: None,
+        description: String::new(),
+        output_schema: None,
+        metadata: None,
+        name: "read".into(),
+        version: "1".into(),
+        schema: json!({"type":"object"}),
+    }];
+    db.commit_execution(
+        &original.run_id,
+        epoch,
+        &ExecutionRecord::RequestPrepared { snapshot: snapshot.into() },
+    )
+    .unwrap();
+    db.commit_execution(
+        &original.run_id,
+        epoch,
+        &ExecutionRecord::ModelDispatched {
+            request_id: "model-1".into(),
+        },
+    )
+    .unwrap();
+    let call = ToolCall {
+        call_id: "call-1".into(),
+        name: "read".into(),
+        schema_version: "1".into(),
+        arguments: json!({}),
+    };
+    db.commit_execution(
+        &original.run_id,
+        epoch,
+        &ExecutionRecord::ModelFinished {
+            request_id: "model-1".into(),
+            outcome: ModelOutcome::Completed,
+            finish_reason: Some(FinishReason::ToolCalls),
+            items: vec![ProviderItem {
+                id: "call-item".into(),
+                content: Content::ToolCall { call },
+                opaque: None,
+            }],
+            interrupted_deltas: vec![],
+            usage: UsageReceipt::default(),
+            failure: None,
+        },
+    )
+    .unwrap();
+    db.create_thread("other-thread", "other-branch").unwrap();
+    let mut other = command();
+    other.key = "other-input".into();
+    other.thread_id = "other-thread".into();
+    other.branch_id = "other-branch".into();
+    let other = db.submit(&other).unwrap();
+    let receipt = ExecutionRecord::ToolBatchCommitted {
+        request_id: "model-1".into(),
+        results: vec![ToolResult {
+            request_id: "model-1".into(),
+            call_id: "call-1".into(),
+            completion: ToolCompletion::Result {
+                outcome: Outcome::Succeeded,
+                effect: Effect::None,
+                content: json!("belongs to first run").into(),
+            },
+        }],
+    };
+    assert!(
+        db.commit_execution(&other.run_id, epoch, &receipt).is_err(),
+        "another active run accepted and consumed this run's tool receipt"
+    );
+    assert_eq!(db.history("other-branch").unwrap().len(), 1);
+}
+
+#[test]
+fn unfinished_model_tool_exchange_cannot_complete_a_run() {
+    use crate::execution::*;
+    let f = Fixture::new();
+    let mut db = f.open();
+    let r = submit(&mut db);
+    let epoch = db.epoch();
+    let run = db
+        .transition_run(&r.run_id, epoch, 1, RunState::Runnable)
+        .unwrap();
+    let mut snapshot = request_snapshot(&r);
+    snapshot.view.binding.tools = vec![ToolSchema {
+        requirements: None,
+        description: String::new(),
+        output_schema: None,
+        metadata: None,
+        name: "read".into(),
+        version: "1".into(),
+        schema: json!({"type":"object"}),
+    }];
+    db.commit_execution(
+        &r.run_id,
+        epoch,
+        &ExecutionRecord::RequestPrepared { snapshot: snapshot.into() },
+    )
+    .unwrap();
+    db.commit_execution(
+        &r.run_id,
+        epoch,
+        &ExecutionRecord::ModelDispatched {
+            request_id: "model-1".into(),
+        },
+    )
+    .unwrap();
+    let call = ToolCall {
+        call_id: "call-1".into(),
+        name: "read".into(),
+        schema_version: "1".into(),
+        arguments: json!({}),
+    };
+    db.commit_execution(
+        &r.run_id,
+        epoch,
+        &ExecutionRecord::ModelFinished {
+            request_id: "model-1".into(),
+            outcome: ModelOutcome::Completed,
+            finish_reason: Some(FinishReason::ToolCalls),
+            items: vec![ProviderItem {
+                id: "call-item".into(),
+                content: Content::ToolCall { call },
+                opaque: None,
+            }],
+            interrupted_deltas: vec![],
+            usage: UsageReceipt::default(),
+            failure: None,
+        },
+    )
+    .unwrap();
+    assert!(
+        db.transition_run(&r.run_id, epoch, run.revision, RunState::Completed)
+            .is_err()
+    );
+    assert!(
+        db.commit_execution(
+            &r.run_id,
+            epoch,
+            &ExecutionRecord::StateChanged {
+                state: RunState::Completed,
+                waiting_on: None
+            }
+        )
+        .is_err()
+    );
+    assert_eq!(db.run(&r.run_id).unwrap().state, RunState::Runnable);
+}
+
+fn external(op: &str, outcome: Outcome, effect: Effect) -> ExternalReceipt {
+    ExternalReceipt {
+        executor: "process-executor".into(),
+        identity: op.into(),
+        epoch: "resource-epoch".into(),
+        outcome,
+        effect,
+        result: json!({"exitCode":0}).into(),
+    }
+}
+#[test]
+fn external_terminal_before_explicit_handoff_is_not_lost() {
+    let f = Fixture::new();
+    let mut db = f.open();
+    let r = submit(&mut db);
+    let epoch = db.epoch();
+    db.admit_operation(
+        "job",
+        &r.run_id,
+        epoch,
+        Lifetime::Thread,
+        json!({"command":"true"}),
+    )
+    .unwrap();
+    db.dispatch_operation("job", epoch, "process-executor", true)
+        .unwrap();
+    let receipt = external("job", Outcome::Succeeded, Effect::Confirmed);
+    let early = db.record_external_receipt("job", receipt.clone()).unwrap();
+    assert_eq!(early.phase, OperationPhase::Running);
+    db.handoff_operation("job", epoch).unwrap();
+    let settled = db.operation("job").unwrap();
+    assert_eq!(
+        settled.phase,
+        OperationPhase::Terminal,
+        "early terminal was buffered but never applied at explicit handoff"
+    );
+    assert_eq!(settled.outcome, Some(Outcome::Succeeded));
+    assert_eq!(db.record_external_receipt("job", receipt).unwrap(), settled);
+}
+#[test]
+fn external_receipts_are_idempotent_and_only_same_epoch_unknown_can_refine() {
+    let f = Fixture::new();
+    let mut db = f.open();
+    let r = submit(&mut db);
+    let epoch = db.epoch();
+    db.admit_operation("job", &r.run_id, epoch, Lifetime::Thread, Value::Null)
+        .unwrap();
+    db.dispatch_operation("job", epoch, "process-executor", true)
+        .unwrap();
+    db.handoff_operation("job", epoch).unwrap();
+    let mut unknown = external("job", Outcome::Indeterminate, Effect::Unknown);
+    let unknown_body =
+        json!({"permission":{"opaque":true},"unknown":"lost-reply-original".repeat(20000)});
+    unknown.result = unknown_body.clone().into();
+    let observed = db.record_external_receipt("job", unknown.clone()).unwrap();
+    assert_eq!(
+        db.record_external_receipt("job", unknown).unwrap(),
+        observed
+    );
+    let mut foreign = external("job", Outcome::Succeeded, Effect::Confirmed);
+    foreign.epoch = "wrong-generation".into();
+    assert!(db.record_external_receipt("job", foreign).is_err());
+    let mut confirmed = external("job", Outcome::Succeeded, Effect::Confirmed);
+    let confirmed_body = json!({"exitCode":0,"opaque":"confirmed-original".repeat(20000)});
+    confirmed.result = confirmed_body.clone().into();
+    let settled = db
+        .record_external_receipt("job", confirmed.clone())
+        .unwrap();
+    assert_eq!(settled.outcome, Some(Outcome::Succeeded));
+    assert_eq!(
+        db.record_external_receipt("job", confirmed.clone())
+            .unwrap(),
+        settled
+    );
+    let mut conflicting = confirmed;
+    conflicting.result = json!({"exitCode":7}).into();
+    assert!(db.record_external_receipt("job", conflicting).is_err());
+    let mut wrong = external("other-job", Outcome::Succeeded, Effect::Confirmed);
+    assert!(db.record_external_receipt("job", wrong.clone()).is_err());
+    wrong.identity = "job".into();
+    wrong.executor = "other-executor".into();
+    assert!(db.record_external_receipt("job", wrong).is_err());
+    content_collection::collect(|| db.prepare_content_collection(Default::default())).unwrap();
+    let metadata = db.operation("job").unwrap();
+    assert!(serde_json::to_vec(&metadata).unwrap().len() < 2048);
+    assert_eq!(
+        db.capture_operation_read(metadata).load().unwrap().result,
+        Some(crate::output::OperationResult::Output {
+            output: confirmed_body.clone().into()
+        })
+    );
+    let events = db.capture_events_read(0, 1000).unwrap().load().unwrap();
+    assert!(
+        events
+            .iter()
+            .any(|event| event.data["external_receipt"]["result"]["data"] == unknown_body),
+        "refinement must retain the original uncertain executor evidence"
+    );
+    drop(db);
+    let db = f.open();
+    content_collection::collect(|| db.prepare_content_collection(Default::default())).unwrap();
+    assert_eq!(
+        db.capture_operation_read(db.operation("job").unwrap())
+            .load()
+            .unwrap()
+            .result,
+        Some(crate::output::OperationResult::Output {
+            output: confirmed_body.into()
+        })
+    );
+    let events = db.capture_events_read(0, 1000).unwrap().load().unwrap();
+    assert!(
+        events
+            .iter()
+            .any(|event| event.data["external_receipt"]["result"]["data"] == unknown_body)
+    );
+}
+#[test]
+fn early_external_terminal_and_model_job_acceptance_converge() {
+    use crate::execution::*;
+    let f = Fixture::new();
+    let mut db = f.open();
+    let r = submit(&mut db);
+    let epoch = db.epoch();
+    let mut snapshot = request_snapshot(&r);
+    snapshot.view.binding.tools = vec![ToolSchema {
+        requirements: None,
+        description: String::new(),
+        output_schema: None,
+        metadata: None,
+        name: "process-executor".into(),
+        version: "1".into(),
+        schema: json!({"type":"object"}),
+    }];
+    db.commit_execution(
+        &r.run_id,
+        epoch,
+        &ExecutionRecord::RequestPrepared { snapshot: snapshot.into() },
+    )
+    .unwrap();
+    db.commit_execution(
+        &r.run_id,
+        epoch,
+        &ExecutionRecord::ModelDispatched {
+            request_id: "model-1".into(),
+        },
+    )
+    .unwrap();
+    let call = ToolCall {
+        call_id: "job".into(),
+        name: "process-executor".into(),
+        schema_version: "1".into(),
+        arguments: json!({}),
+    };
+    db.commit_execution(
+        &r.run_id,
+        epoch,
+        &ExecutionRecord::ModelFinished {
+            request_id: "model-1".into(),
+            outcome: ModelOutcome::Completed,
+            finish_reason: Some(FinishReason::ToolCalls),
+            items: vec![ProviderItem {
+                id: "job-call".into(),
+                content: Content::ToolCall { call: call.clone() },
+                opaque: None,
+            }],
+            interrupted_deltas: vec![],
+            usage: UsageReceipt::default(),
+            failure: None,
+        },
+    )
+    .unwrap();
+    db.commit_execution(&r.run_id, epoch, &{
+        let tool = AdmittedTool {
+            call,
+            contract: ToolContract {
+                name: "process-executor".into(),
+                schema_version: "1".into(),
+                read_only: false,
+                completion: CompletionKind::Job,
+                lifetime: Lifetime::Thread,
+                resources: vec![],
+            },
+        };
+        ExecutionRecord::ToolAdmitted {
+            context: {
+                let request_id: String = "model-1".into();
+                let call_id: String = tool.call.call_id.clone();
+                varin_runtime::execution::ToolExecutionContext {
+                    run_id: (&r.run_id).to_string(),
+                    operation_id: format!("{request_id}:tool:{call_id}"),
+                    origin: varin_runtime::execution::ToolOrigin::ModelStep { request_id },
+                }
+            },
+            tool,
+        }
+    })
+    .unwrap();
+    db.commit_execution(
+        &r.run_id,
+        epoch,
+        &ExecutionRecord::ToolDispatched {
+            executor_owner: varin_runtime::ExecutorOwner::Kernel,
+            context: {
+                let request_id: String = "model-1".into();
+                let call_id: String = "job".into();
+                varin_runtime::execution::ToolExecutionContext {
+                    run_id: (&r.run_id).to_string(),
+                    operation_id: format!("{request_id}:tool:{call_id}"),
+                    origin: varin_runtime::execution::ToolOrigin::ModelStep { request_id },
+                }
+            },
+        },
+    )
+    .unwrap();
+    let operation_id = "model-1:tool:job";
+    db.register_wait(
+        "job-wait",
+        &r.run_id,
+        operation_id,
+        "operation.settled",
+        r.cursor,
+    )
+    .unwrap();
+    let receipt = external(operation_id, Outcome::Succeeded, Effect::Confirmed);
+    db.record_external_receipt(operation_id, receipt.clone())
+        .unwrap();
+    let result = ToolResult {
+        request_id: "model-1".into(),
+        call_id: "job".into(),
+        completion: ToolCompletion::JobAccepted {
+            operation_id: operation_id.into(),
+            phase: "accepted".into(),
+            effect: Effect::Dispatched,
+            lifetime: Lifetime::Thread,
+            content: None,
+        },
+    };
+    db.commit_execution(&r.run_id, epoch, &{
+        let result = result.clone();
+        ExecutionRecord::ToolSettled {
+            executor_stopped: false,
+            context: {
+                let request_id: String = result.request_id.clone();
+                let call_id: String = result.call_id.clone();
+                varin_runtime::execution::ToolExecutionContext {
+                    run_id: (&r.run_id).to_string(),
+                    operation_id: format!("{request_id}:tool:{call_id}"),
+                    origin: varin_runtime::execution::ToolOrigin::ModelStep { request_id },
+                }
+            },
+            completion: result.completion,
+        }
+    })
+    .unwrap();
+    db.commit_execution(
+        &r.run_id,
+        epoch,
+        &ExecutionRecord::ToolBatchCommitted {
+            request_id: "model-1".into(),
+            results: vec![result],
+        },
+    )
+    .unwrap();
+    assert!(
+        db.pending_resumptions()
+            .unwrap()
+            .iter()
+            .any(|id| id == "job-wait"),
+        "early receipt followed by model handoff never woke the durable waiter"
+    );
+    let settled = db.operation(operation_id).unwrap();
+    assert_eq!(settled.phase, OperationPhase::Terminal);
+    assert_eq!(settled.effect, Effect::Confirmed);
+    assert_eq!(
+        db.record_external_receipt(operation_id, receipt).unwrap(),
+        settled
+    );
+}
+
+#[test]
+fn later_external_confirmation_resolves_lost_acceptance_receipt_without_handoff() {
+    for (outcome, effect) in [
+        (Outcome::Succeeded, Effect::Confirmed),
+        (Outcome::Failed, Effect::None),
+    ] {
+        for persisted_before_crash in [false, true] {
+            let f = Fixture::new();
+            let mut db = f.open();
+            let r = submit(&mut db);
+            let epoch = db.epoch();
+            db.admit_operation("job", &r.run_id, epoch, Lifetime::Thread, Value::Null)
+                .unwrap();
+            db.dispatch_operation("job", epoch, "process-executor", true)
+                .unwrap();
+            db.register_wait(
+                "receipt-wait",
+                &r.run_id,
+                "job",
+                "operation.settled",
+                r.cursor,
+            )
+            .unwrap();
+            let mut receipt = external("job", outcome, effect);
+            receipt.result = json!({"original":"executor evidence", "outcome":outcome,"opaque":[null,"原始",17]}).into();
+            if persisted_before_crash {
+                // The executor fact committed, but the model's ToolSettled/handoff did not.
+                let early = db.record_external_receipt("job", receipt.clone()).unwrap();
+                assert_eq!(
+                    (early.phase, early.effect),
+                    (OperationPhase::Running, Effect::Dispatched)
+                );
+                assert!(db.pending_resumptions().unwrap().is_empty());
+                drop(db);
+                db = f.open();
+            } else {
+                db.settle_operation(
+                    "job",
+                    epoch,
+                    Outcome::Indeterminate,
+                    Effect::Unknown,
+                    json!({"reason":"acceptance response lost"}),
+                )
+                .unwrap();
+            }
+            let interrupted = db.operation("job").unwrap();
+            assert!(!interrupted.handed_off);
+            assert_eq!(
+                (interrupted.outcome, interrupted.effect),
+                (Some(Outcome::Indeterminate), Effect::Unknown)
+            );
+            let confirmed = db.record_external_receipt("job", receipt.clone()).unwrap();
+            assert_eq!(
+                (confirmed.phase, confirmed.outcome, confirmed.effect),
+                (OperationPhase::Terminal, Some(outcome), effect)
+            );
+            assert_eq!(confirmed.revision, interrupted.revision + 1);
+            assert_eq!(
+                db.capture_operation_read(confirmed.clone())
+                    .load()
+                    .unwrap()
+                    .result,
+                Some(crate::output::OperationResult::Output {
+                    output: receipt.result.data.clone().into()
+                })
+            );
+            assert!(
+                db.pending_resumptions()
+                    .unwrap()
+                    .iter()
+                    .any(|wait| wait == "receipt-wait")
+            );
+            // Replaying an applied fact is genuinely idempotent, including its event cursor.
+            let cursor = db.event_cursor().unwrap();
+            assert_eq!(
+                db.record_external_receipt("job", receipt).unwrap(),
+                confirmed
+            );
+            assert_eq!(db.event_cursor().unwrap(), cursor);
+        }
+    }
+}
+
+#[test]
+fn prepared_inputs_preserve_original_intents_and_only_retry_changed_queue_material() {
+    use crate::catalog::inputs::EnqueueInput;
+    let f = Fixture::new();
+    let mut db = f.open();
+    let receipt = submit(&mut db);
+    let epoch = db.epoch();
+    let command = EnqueueInput {
+        key: "body-input".into(),
+        thread_id: "thread".into(),
+        branch_id: "main".into(),
+        mode: InputMode::Boundary,
+        input: json!({"text":"original 中文🎉".repeat(10000)}),
+        configuration: None,
+    };
+    let prepared = db.prepare_enqueue(command.clone()).unwrap().load().unwrap();
+    let queued = db.admit_queued_input(prepared).unwrap().receipt;
+    let stored: String = db
+        .db
+        .query_row(
+            "SELECT body FROM input_queue WHERE id=?1",
+            [&queued.input_id],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert!(stored.len() < 1024);
+    assert!(!stored.contains("original"));
+    let intent: String = db
+        .db
+        .query_row(
+            "SELECT intent FROM commands WHERE id=?1",
+            [&command.key],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert!(intent.len() < 256);
+    let first = db
+        .prepare_input_delivery(&receipt.run_id, epoch, Some(&receipt.input_id))
+        .unwrap()
+        .load()
+        .unwrap();
+    let stale_edit = db
+        .prepare_input_edit(&queued.input_id, 1, json!({"text":"stale edit"}))
+        .unwrap()
+        .load()
+        .unwrap();
+    let edit = db
+        .prepare_input_edit(&queued.input_id, 1, json!({"text":"corrected"}))
+        .unwrap()
+        .load()
+        .unwrap();
+    db.admit_input_edit(edit).unwrap().load().unwrap();
+    assert!(db.admit_input_delivery(first).unwrap().is_none());
+    assert_eq!(
+        db.head("main").unwrap().as_deref(),
+        Some(receipt.input_id.as_str())
+    );
+    assert!(db.admit_input_edit(stale_edit).is_err());
+    let corrected = db
+        .prepare_input_delivery(&receipt.run_id, epoch, Some(&receipt.input_id))
+        .unwrap()
+        .load()
+        .unwrap();
+    let later = db
+        .enqueue_input(&EnqueueInput {
+            key: "later".into(),
+            input: json!({"text":"later"}),
+            ..command.clone()
+        })
+        .unwrap();
+    let delivered = db.admit_input_delivery(corrected).unwrap().unwrap();
+    assert!(
+        matches!(&delivered.items[0].content,crate::execution::Content::Text {text} if text=="corrected")
+    );
+    assert_eq!(
+        db.queued_input_metadata(&later.input_id).unwrap().state,
+        InputState::Queued
+    );
+    let edit = db
+        .prepare_input_edit(&later.input_id, 1, json!({"text":"cancelled edit"}))
+        .unwrap()
+        .load()
+        .unwrap();
+    db.cancel_input(&later.input_id, 1).unwrap();
+    assert!(db.admit_input_edit(edit).is_err());
+    content_collection::collect(|| db.prepare_content_collection(Default::default())).unwrap();
+    assert_eq!(
+        db.content
+            .load(&serde_json::from_str(&intent).unwrap())
+            .unwrap()["input"],
+        command.input
+    );
+    drop(db);
+    let mut db = f.open();
+    // Editing changes the delivered body, never the original idempotency intent.
+    assert_eq!(db.enqueue_input(&command).unwrap(), queued);
+    assert_eq!(
+        db.queued_input(&queued.input_id).unwrap().content,
+        json!({"text":"corrected"})
+    );
+    assert_eq!(
+        db.history("main").unwrap().last().unwrap().content,
+        json!({"text":"corrected"})
+    );
+}
+#[test]
+fn staged_first_input_rechecks_checkpoint_and_owner_without_holding_catalog() {
+    use crate::catalog::context::ContextProposal;
+    let f = Fixture::new();
+    let mut db = f.open();
+    db.create_thread("thread", "main").unwrap();
+    let proposal = ContextProposal {
+        key: "initial".into(),
+        branch_id: "main".into(),
+        through_id: None,
+        expected_revision: 0,
+        summary: String::new(),
+        effective_system_prompt: "system 中文🎉".repeat(10000),
+        instruction_sources: vec![],
+        memory_checkpoint: None,
+    };
+    let preparation = db
+        .prepare_submission(command(), Some(proposal.clone()), None)
+        .unwrap();
+    let competing = db
+        .prepare_submission(
+            SubmitInput {
+                key: "competing".into(),
+                ..command()
+            },
+            Some(proposal.clone()),
+            None,
+        )
+        .unwrap()
+        .load(None, false)
+        .unwrap();
+    let (release, wait) = std::sync::mpsc::channel();
+    let worker = std::thread::spawn(move || {
+        wait.recv().unwrap();
+        preparation.load(None, false).unwrap()
+    });
+    // While the real candidate is held by its body worker, unrelated control and input continue.
+    db.create_thread("other", "other-branch").unwrap();
+    let other = db
+        .submit(&SubmitInput {
+            key: "other".into(),
+            thread_id: "other".into(),
+            branch_id: "other-branch".into(),
+            ..command()
+        })
+        .unwrap();
+    db.request_cancel_run(&other.run_id).unwrap();
+    let prepared = db
+        .prepare_submission(command(), Some(proposal), None)
+        .unwrap()
+        .load(None, false)
+        .unwrap();
+    let accepted = db.admit_submission(prepared).unwrap();
+    assert!(
+        matches!(db.admit_submission(competing),Err(RuntimeError::Conflict(message)) if message=="input context changed during preparation")
+    );
+    release.send(()).unwrap();
+    assert_eq!(
+        db.admit_submission(worker.join().unwrap()).unwrap(),
+        accepted
+    );
+    let next = db
+        .prepare_submission(
+            SubmitInput {
+                key: "next-owner".into(),
+                expected_head: Some(accepted.input_id.clone()),
+                ..command()
+            },
+            None,
+            None,
+        )
+        .unwrap()
+        .load(None, false)
+        .unwrap();
+    drop(db);
+    let mut db = f.open();
+    assert!(db.admit_submission(next).is_err());
+    assert_eq!(db.history("main").unwrap().len(), 1);
+}
+#[test]
+fn queued_input_is_durable_editable_and_only_enters_a_closed_model_boundary() {
+    use crate::catalog::inputs::EnqueueInput;
+    let f = Fixture::new();
+    let mut db = f.open();
+    let r = submit(&mut db);
+    let epoch = db.epoch();
+    db.prepare_model_step("active-step", &r.run_id, epoch, json!({"input":"original"}))
+        .unwrap();
+    db.dispatch_model_step("active-step", epoch).unwrap();
+    let command = EnqueueInput {
+        key: "queued".into(),
+        thread_id: "thread".into(),
+        branch_id: "main".into(),
+        mode: InputMode::Boundary,
+        input: json!({"text":"first draft"}),
+        configuration: None,
+    };
+    let queued = db.enqueue_input(&command).unwrap();
+    assert_eq!(db.enqueue_input(&command).unwrap(), queued);
+    assert_eq!(
+        db.head("main").unwrap().as_deref(),
+        Some(r.input_id.as_str())
+    );
+    let edited = db
+        .edit_queued_input(&queued.input_id, 1, json!({"text":"actual correction"}))
+        .unwrap();
+    assert_eq!(edited.revision, 2);
+    assert!(
+        db.edit_queued_input(&queued.input_id, 1, json!({"text":"stale"}))
+            .is_err()
+    );
+    assert!(
+        db.consume_inputs(&r.run_id, epoch, Some(&r.input_id))
+            .is_err()
+    );
+    db.settle_model_step(
+        "active-step",
+        epoch,
+        ModelStepState::Interrupted,
+        vec![],
+        None,
+    )
+    .unwrap();
+    drop(db);
+    let mut db = f.open();
+    let epoch = db.epoch();
+    assert_eq!(
+        db.queued_input(&queued.input_id).unwrap().content,
+        json!({"text":"actual correction"})
+    );
+    content_collection::collect(|| db.prepare_content_collection(Default::default())).unwrap();
+    let delivered = db
+        .consume_inputs(&r.run_id, epoch, Some(&r.input_id))
+        .unwrap();
+    assert_eq!(delivered.len(), 1);
+    content_collection::collect(|| db.prepare_content_collection(Default::default())).unwrap();
+    assert_eq!(
+        db.history("main").unwrap().last().unwrap().content,
+        json!({"text":"actual correction"})
+    );
+    assert!(
+        matches!(&delivered[0].content,crate::execution::Content::Text{text} if text=="actual correction")
+    );
+    assert_eq!(
+        db.queued_input(&queued.input_id).unwrap().state,
+        InputState::Delivered
+    );
+    assert!(
+        db.edit_queued_input(&queued.input_id, 2, json!({"text":"too late"}))
+            .is_err()
+    );
+    assert!(
+        db.consume_inputs(&r.run_id, epoch, Some(&queued.input_id))
+            .unwrap()
+            .is_empty()
+    );
+    assert_eq!(
+        db.model_step("active-step")
+            .unwrap()
+            .superseded_by_input
+            .as_deref(),
+        Some(queued.input_id.as_str())
+    );
+}
+#[test]
+fn boundary_input_cannot_be_lost_to_run_completion_and_next_run_skips_cancelled_entry() {
+    use crate::catalog::inputs::EnqueueInput;
+    let f = Fixture::new();
+    let mut db = f.open();
+    let r = submit(&mut db);
+    let epoch = db.epoch();
+    let run = db
+        .transition_run(&r.run_id, epoch, 1, RunState::Runnable)
+        .unwrap();
+    let boundary = db
+        .enqueue_input(&EnqueueInput {
+            key: "boundary".into(),
+            thread_id: "thread".into(),
+            branch_id: "main".into(),
+            mode: InputMode::Boundary,
+            input: json!({"text":"do this too"}),
+            configuration: None,
+        })
+        .unwrap();
+    assert!(
+        db.transition_run(&r.run_id, epoch, run.revision, RunState::Completed)
+            .is_err()
+    );
+    db.consume_inputs(&r.run_id, epoch, Some(&r.input_id))
+        .unwrap();
+    let queued = |key: &str| EnqueueInput {
+        key: key.into(),
+        thread_id: "thread".into(),
+        branch_id: "main".into(),
+        mode: InputMode::NextRun,
+        input: json!({"text":key}),
+        configuration: None,
+    };
+    let removed = db.enqueue_input(&queued("removed")).unwrap();
+    let next = db.enqueue_input(&queued("next")).unwrap();
+    db.cancel_queued_input(&removed.input_id, 1).unwrap();
+    let run = db.run(&r.run_id).unwrap();
+    db.transition_run(&r.run_id, epoch, run.revision, RunState::Completed)
+        .unwrap();
+    assert_eq!(
+        db.queued_input(&next.input_id).unwrap().state,
+        InputState::Delivered
+    );
+    assert_eq!(db.run(&removed.run_id).unwrap().state, RunState::Cancelled);
+    assert_eq!(
+        db.head("main").unwrap().as_deref(),
+        Some(next.input_id.as_str())
+    );
+    let history = db.history("main").unwrap();
+    assert!(history.iter().any(|i| i.id == boundary.input_id));
+    assert!(!history.iter().any(|i| i.id == removed.input_id));
+    assert!(
+        db.prepare_execution(
+            &next.run_id,
+            request_snapshot(&r).view.binding,
+            crate::execution::PolicyIdentity {
+                name: "default".into(),
+                version: "1".into()
+            },
+            Value::Null
+        )
+        .is_ok()
+    );
+}
+
+#[test]
+fn content_backed_request_stays_compact_across_phases_and_reopens_exactly() {
+    let f = Fixture::new();
+    let mut db = f.open();
+    let receipt = submit(&mut db);
+    let epoch = db.epoch();
+    let request = json!({"request_id":"content-step","history":[{"type":"reasoning","encrypted_content":"opaque-汉字".repeat(60000),"unknown":[null,true,42]}]});
+    let prepared = db
+        .prepare_model_step("content-step", &receipt.run_id, epoch, request.clone())
+        .unwrap();
+    assert_eq!(prepared.request, request);
+    assert_eq!(
+        db.prepare_model_step("content-step", &receipt.run_id, epoch, request.clone())
+            .unwrap(),
+        prepared
+    );
+    let compact_body = |db: &Catalog| -> Value {
+        let raw: String = db
+            .db
+            .query_row(
+                "SELECT body FROM model_steps WHERE id='content-step'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        let body: Value = serde_json::from_str(&raw).unwrap();
+        assert!(
+            raw.len() < 1024,
+            "phase persistence must retain request reference"
+        );
+        assert!(body["request"]["content_object"].is_string());
+        body
+    };
+    let original_ref = compact_body(&db)["request"].clone();
+    assert_eq!(
+        db.dispatch_model_step("content-step", epoch)
+            .unwrap()
+            .request,
+        request
+    );
+    assert_eq!(compact_body(&db)["request"], original_ref);
+    let step = db
+        .settle_model_step(
+            "content-step",
+            epoch,
+            ModelStepState::Interrupted,
+            vec![],
+            None,
+        )
+        .unwrap();
+    assert_eq!(step.request, request);
+    assert_eq!(compact_body(&db)["request"], original_ref);
+    assert_eq!(
+        content_collection::collect(|| db.prepare_content_collection(Default::default())).unwrap(),
+        0
+    );
+    drop(db);
+    let db = f.open();
+    assert_eq!(db.model_step("content-step").unwrap().request, request);
+    assert_eq!(compact_body(&db)["request"], original_ref);
+    assert_eq!(
+        content_collection::collect(|| db.prepare_content_collection(Default::default())).unwrap(),
+        0
+    );
+}
+
+#[test]
+fn prepared_snapshot_preserves_typed_media_and_opaque_provider_body_through_gc_and_reopen() {
+    use crate::execution::*;
+    use base64::Engine;
+    let f = Fixture::new();
+    let mut db = f.open();
+    let receipt = submit(&mut db);
+    let mut snapshot = request_snapshot(&receipt);
+    let encoded = base64::engine::general_purpose::STANDARD.encode(vec![17u8; 700_000]);
+    snapshot.view.history.push(ConversationItem {
+        id: "typed-history".into(),
+        resource_activation: None,
+        provenance: Provenance::Assistant,
+        content: Content::Output {
+            output: OutputBody {
+                data: json!({"signed":[null,"原样",17]}),
+                parts: vec![
+                    OutputPart::Text { text: "before media".into() },
+                    OutputPart::Media { media: IncomingMedia { media_type: "image/png".into(), data_base64: encoded.clone() }
+                        .admit(OutputSource::Operation { operation_id: "original-output".into() }).unwrap() },
+                    OutputPart::Text { text: "after media".into() },
+                ],
+            },
+        },
+        opaque: Some(OpaqueProviderItem { connection_identity: "fixture-connection".into(), family: "test".into(), adapter_version: "1".into(),
+            value: json!({"signature":[null,42,"unaltered"]}) }),
+    }.into());
+    // Image-shaped provider JSON is opaque material, independent of the typed
+    // media dependency retained in the same immutable RequestSnapshot.
+    snapshot.serialized = json!({"provider":"mock","unknown":[null,true,17],"image":{"media_type":"image/png","data":encoded}}).into();
+    let expected = serde_json::to_value(&snapshot).unwrap();
+    let request_id = snapshot.view.request_id.clone();
+    db.commit_execution(&receipt.run_id, db.epoch(), &ExecutionRecord::RequestPrepared { snapshot: snapshot.into() }).unwrap();
+    let body: String = db.db.query_row("SELECT body FROM model_steps WHERE id=?1", [&request_id], |row| row.get(0)).unwrap();
+    let reference = serde_json::from_str::<Value>(&body).unwrap()["request"].clone();
+    let load = |catalog: &Catalog| serde_json::to_value(catalog.content.load_snapshot(&reference).unwrap()).unwrap();
+    assert_eq!(db.model_step(&request_id).unwrap().request["serialized"], expected["serialized"]);
+    assert_eq!(load(&db), expected);
+    db.content.save(&json!({"orphan":"collect this without dropping prepared media"})).unwrap();
+    assert!(content_collection::collect(|| db.prepare_content_collection(Default::default())).unwrap() > 0);
+    assert_eq!(load(&db), expected);
+    drop(db);
+    let reopened = f.open();
+    assert_eq!(load(&reopened), expected);
+}
+
+#[test]
+fn missing_request_content_does_not_mark_unsent_public_dispatch_as_dispatched() {
+    let f = Fixture::new();
+    let mut db = f.open();
+    let receipt = submit(&mut db);
+    let epoch = db.epoch();
+    db.prepare_model_step(
+        "missing-content",
+        &receipt.run_id,
+        epoch,
+        json!({"opaque":"must exist before dispatch"}),
+    )
+    .unwrap();
+    let step: ModelStep = record(&db.db, "model_steps", "missing-content").unwrap();
+    let path = crate::content::object_path(
+        &f.0.join("content"),
+        step.request["content_object"].as_str().unwrap(),
+    )
+    .unwrap();
+    std::fs::remove_file(path).unwrap();
+    assert!(db.dispatch_model_step("missing-content", epoch).is_err());
+    let after: ModelStep = record(&db.db, "model_steps", "missing-content").unwrap();
+    assert_eq!(after.state, ModelStepState::Prepared);
+    assert!(
+        db.settle_model_step(
+            "missing-content",
+            epoch,
+            ModelStepState::Interrupted,
+            vec![],
+            None
+        )
+        .is_err()
+    );
+    let after_settle: ModelStep = record(&db.db, "model_steps", "missing-content").unwrap();
+    assert_eq!(after_settle.state, ModelStepState::Prepared);
+}
+
+#[test]
+fn durable_launch_rebind_is_exact_idempotent_and_carries_no_live_credentials() {
+    use super::launches::LaunchSelection;
+    let f = Fixture::new();
+    let mut db = f.open();
+    let receipt = submit(&mut db);
+    let selection: LaunchSelection = serde_json::from_value(json!({"extension_bindings":[],"connection_identity":"pinned-public-digest","provider_family":"fixture","model":"test-model","configuration_generation":1,"tool_schema_generation":1,"tools":[{"name":"read","version":"1","description":"Fixture tool","output_schema":null,"metadata":null,"schema":{"type":"object"}}],"policy":{"name":"agent","version":"1"},"source":{"resource_owner":{"kind":"local"},"workspace_id":"workspace","execution_workspace_id":"execution","branch_id":"branch","revision":5,"mode":"fixed_branch","live_root":null}})).unwrap();
+    let first = db.bind_launch(&receipt.run_id, selection.clone()).unwrap();
+    assert_eq!(
+        first,
+        db.bind_launch(&receipt.run_id, selection.clone()).unwrap()
+    );
+    for field in [
+        "connection_identity",
+        "model",
+        "configuration_generation",
+        "tool_schema_generation",
+        "tools",
+        "source",
+    ] {
+        let mut changed = serde_json::to_value(&selection).unwrap();
+        match field {
+            "connection_identity" | "model" => changed[field] = json!("changed"),
+            "configuration_generation" | "tool_schema_generation" => changed[field] = json!(2),
+            "tools" => changed[field][0]["schema"] = json!({"type":"string"}),
+            "source" => changed[field]["revision"] = json!(6),
+            _ => unreachable!(),
+        }
+        assert!(
+            db.bind_launch(&receipt.run_id, serde_json::from_value(changed).unwrap())
+                .is_err(),
+            "changed {field} must reject"
+        );
+    }
+    let raw: String = db
+        .db
+        .query_row(
+            "SELECT body FROM run_launches WHERE id=?1",
+            [&receipt.run_id],
+            |r| r.get(0),
+        )
+        .unwrap();
+    for forbidden in ["credential_ref", "grant_id", "root_id", "access_token"] {
+        assert!(!raw.contains(forbidden));
+    }
+    drop(db);
+    let mut db = f.open();
+    let reopened = db.launch_intent(&receipt.run_id).unwrap().unwrap();
+    assert!(reopened.requires_rebind);
+    assert_eq!(reopened.selection, selection);
+    assert_eq!(db.pending_launches().unwrap().len(), 1);
+    let rebound = db.bind_launch(&receipt.run_id, selection).unwrap();
+    assert!(!rebound.requires_rebind);
+    assert_eq!(rebound.revision, first.revision + 1);
+    assert_eq!(rebound.bound_epoch, Some(db.epoch()));
+    let epoch = db.epoch();
+    db.prepare_model_step(
+        "ambiguous-model",
+        &receipt.run_id,
+        epoch,
+        json!({"request":"already sent"}),
+    )
+    .unwrap();
+    db.dispatch_model_step("ambiguous-model", epoch).unwrap();
+    drop(db);
+    let mut db = f.open();
+    db.bind_launch(&receipt.run_id, rebound.selection.clone())
+        .unwrap();
+    assert!(
+        db.prepare_execution(
+            &receipt.run_id,
+            request_snapshot(&receipt).view.binding,
+            rebound.selection.policy,
+            Value::Null
+        )
+        .is_err(),
+        "trusted rebind cannot authorize re-sending an ambiguous model request"
+    );
+    assert_eq!(
+        db.model_step("ambiguous-model").unwrap().state,
+        ModelStepState::Interrupted
+    );
+}
+
+#[test]
+fn launch_selection_survives_restart_before_materialization_and_binding() {
+    use super::launches::LaunchSelection;
+    let f = Fixture::new();
+    let mut db = f.open();
+    let receipt = submit(&mut db);
+    let selection = LaunchSelection::from_binding(
+        &request_snapshot(&receipt).view.binding,
+        crate::execution::PolicyIdentity {
+            name: "agent".into(),
+            version: "1".into(),
+        },
+        None,
+    );
+    let selected = db
+        .select_launch(&receipt.run_id, selection.clone())
+        .unwrap();
+    assert!(selected.requires_rebind);
+    assert_eq!(selected.bound_epoch, None);
+    assert_eq!(
+        db.select_launch(&receipt.run_id, selection.clone())
+            .unwrap(),
+        selected
+    );
+    drop(db);
+    let mut db = f.open();
+    let pending = db.pending_launches().unwrap();
+    assert_eq!(pending.len(), 1);
+    assert_eq!(pending[0].selection, selection);
+    assert_eq!(pending[0].bound_epoch, None);
+    let bound = db.bind_launch(&receipt.run_id, selection).unwrap();
+    assert_eq!(bound.bound_epoch, Some(db.epoch()));
+    assert!(!bound.requires_rebind);
+}
+
+#[test]
+fn missing_launch_tool_content_does_not_break_source_or_cancellation_control() {
+    let f = Fixture::new();
+    let mut db = f.open();
+    let receipt = submit(&mut db);
+    let selection: launches::LaunchSelection = serde_json::from_value(json!({
+        "extension_bindings":[],"connection_identity":"selected", "provider_family":"fixture", "model":"model",
+        "configuration_generation":1, "tool_schema_generation":1,
+        "tools":[{"name":"read", "version":"1", "description":"Fixture tool","output_schema":null,"metadata":null,"schema":{"type":"object", "description":"large tool material".repeat(65536)}}],
+        "policy":{"name":"default", "version":"1"},
+        "source":{"resource_owner":{"kind":"local"},"mode":"fixed_branch", "live_root":null, "workspace_id":"workspace", "execution_workspace_id":"workspace", "branch_id":"fixed", "revision":1}
+    })).unwrap();
+    db.select_launch(&receipt.run_id, selection.clone())
+        .unwrap();
+    content_collection::collect(|| db.prepare_content_collection(Default::default())).unwrap();
+    assert_eq!(
+        db.launch_intent(&receipt.run_id)
+            .unwrap()
+            .unwrap()
+            .selection,
+        selection
+    );
+    let metadata = db.launch_metadata(&receipt.run_id).unwrap().unwrap();
+    let path = crate::content::object_path(
+        &f.0.join("content"),
+        metadata.selection.tools_ref["content_object"]
+            .as_str()
+            .unwrap(),
+    )
+    .unwrap();
+    std::fs::remove_file(path).unwrap();
+    assert!(
+        db.capture_launch(&receipt.run_id)
+            .unwrap()
+            .unwrap()
+            .load()
+            .is_err()
+    );
+    assert_eq!(
+        db.launch_metadata(&receipt.run_id)
+            .unwrap()
+            .unwrap()
+            .selection
+            .source,
+        selection.source
+    );
+    assert!(
+        db.request_cancel_run(&receipt.run_id)
+            .unwrap()
+            .cancel_requested
+    );
+    assert!(
+        db.events_after(0, 64)
+            .unwrap()
+            .iter()
+            .any(|event| event.kind == "run.cancel_requested")
+    );
+}
+
+#[test]
+fn successor_environment_selection_reuses_only_its_original_thread_source() {
+    use super::launches::{LaunchSelection, SourceSelection};
+    let f = Fixture::new();
+    let mut db = f.open();
+    let origin = submit(&mut db);
+    let original_selection = LaunchSelection::from_binding(
+        &request_snapshot(&origin).view.binding,
+        crate::execution::PolicyIdentity {
+            name: "agent".into(),
+            version: "1".into(),
+        },
+        Some(SourceSelection {
+            resource_owner: crate::catalog::launches::SourceResourceOwner::Local,
+            environment_run_id: None,
+            mode: crate::SourceMode::Materialized,
+            live_root: None,
+            workspace_id: "workspace".into(),
+            execution_workspace_id: "execution".into(),
+            branch_id: Some("source".into()),
+            revision: Some(7),
+        }),
+    );
+    db.bind_launch(&origin.run_id, original_selection.clone())
+        .unwrap();
+    let queued = db
+        .enqueue_input(&crate::catalog::inputs::EnqueueInput {
+            key: "atomic-successor".into(),
+            thread_id: "thread".into(),
+            branch_id: "main".into(),
+            mode: InputMode::NextRun,
+            input: json!({"text":"next turn"}),
+            configuration: None,
+        })
+        .unwrap();
+    let saved_successor = db
+        .launch_intent(&queued.run_id)
+        .unwrap()
+        .expect("enqueue must atomically preserve the launch selection");
+    assert_eq!(saved_successor.bound_epoch, None);
+    assert!(saved_successor.requires_rebind);
+    assert_eq!(
+        saved_successor
+            .selection
+            .source
+            .as_ref()
+            .unwrap()
+            .environment_run_id,
+        Some(origin.run_id.clone())
+    );
+
+    db.fork_branch("main", "successor", Some(&origin.input_id))
+        .unwrap();
+    let mut next = command();
+    next.key = "next".into();
+    next.branch_id = "successor".into();
+    next.expected_head = Some(origin.input_id.clone());
+    let successor = db.submit(&next).unwrap();
+    let mut inherited = original_selection.clone();
+    inherited.source.as_mut().unwrap().environment_run_id = Some(origin.run_id.clone());
+    let mut wrong = inherited.clone();
+    wrong.source.as_mut().unwrap().revision = Some(8);
+    assert!(db.select_launch(&successor.run_id, wrong).is_err());
+    db.select_launch(&successor.run_id, inherited.clone())
+        .unwrap();
+    db.create_thread("other-thread", "other-branch").unwrap();
+    next.key = "other".into();
+    next.thread_id = "other-thread".into();
+    next.branch_id = "other-branch".into();
+    next.expected_head = None;
+    let other = db.submit(&next).unwrap();
+    assert!(db.select_launch(&other.run_id, inherited.clone()).is_err());
+    drop(db);
+    let db = f.open();
+    assert_eq!(
+        db.launch_intent(&queued.run_id).unwrap().unwrap().selection,
+        saved_successor.selection
+    );
+    assert_eq!(
+        db.launch_intent(&successor.run_id)
+            .unwrap()
+            .unwrap()
+            .selection,
+        inherited
+    );
+}
+
+#[test]
+fn initial_input_and_launch_are_one_durable_idempotent_admission() {
+    let f = Fixture::new();
+    let mut db = f.open();
+    db.create_thread("thread", "main").unwrap();
+    let selection:super::launches::LaunchSelection=serde_json::from_value(json!({"extension_bindings":[],"connection_identity":"pinned","provider_family":"fixture","model":"model","configuration_generation":1,"tool_schema_generation":1,"tools":[],"policy":{"name":"agent","version":"1"},"source":null})).unwrap();
+    let admitted = db
+        .submit_with_launch(&command(), Some(selection.clone()))
+        .unwrap();
+    assert_eq!(
+        db.submit_with_launch(&command(), Some(selection.clone()))
+            .unwrap(),
+        admitted
+    );
+    let mut changed = selection.clone();
+    changed.model = "another".into();
+    assert!(db.submit_with_launch(&command(), Some(changed)).is_err());
+    drop(db);
+    let mut db = f.open();
+    let launch = db.launch_intent(&admitted.run_id).unwrap().unwrap();
+    assert_eq!(launch.selection, selection);
+    assert!(launch.requires_rebind);
+    assert_eq!(db.history("main").unwrap().len(), 1);
+    assert_eq!(
+        db.submit_with_launch(&command(), Some(selection)).unwrap(),
+        admitted
+    );
+}
+
+// Independent regression evidence from retrieval concurrency acceptance. Provider item
+// identity is local to the model exchange; the conversation graph has its own durable identity.
+fn independent_finished_item(text: &str) -> crate::execution::ProviderItem {
+    crate::execution::ProviderItem {
+        id: "provider-reused-id".into(),
+        content: crate::execution::Content::Text { text: text.into() },
+        opaque: Some(crate::execution::OpaqueProviderItem {
+            connection_identity: "fixture-connection".into(),
+            family: "test".into(),
+            adapter_version: "1".into(),
+            value: json!({"id":"provider-reused-id","opaque":{"signature":"untouched","values":[null,7]}}),
+        }),
+    }
+}
+fn independent_finish(request_id: &str, text: &str) -> crate::execution::ExecutionRecord {
+    crate::execution::ExecutionRecord::ModelFinished {
+        request_id: request_id.into(),
+        outcome: crate::execution::ModelOutcome::Completed,
+        finish_reason: Some(crate::execution::FinishReason::Stop),
+        items: vec![independent_finished_item(text)],
+        interrupted_deltas: vec![],
+        usage: crate::execution::UsageReceipt::default(),
+        failure: None,
+    }
+}
+fn independent_prepare(
+    db: &mut Catalog,
+    receipt: &Receipt,
+    snapshot: crate::execution::RequestSnapshot,
+) {
+    use crate::execution::ExecutionRecord;
+    let epoch = db.epoch();
+    let request_id = snapshot.view.request_id.clone();
+    db.commit_execution(
+        &receipt.run_id,
+        epoch,
+        &ExecutionRecord::RequestPrepared { snapshot: snapshot.into() },
+    )
+    .unwrap();
+    db.commit_execution(
+        &receipt.run_id,
+        epoch,
+        &ExecutionRecord::ModelDispatched { request_id },
+    )
+    .unwrap();
+}
+
+#[test]
+fn model_activation_after_a_closed_exchange_survives_reopen_without_rewriting_its_snapshot() {
+    use crate::execution::*;
+    let f = Fixture::new();
+    let mut db = f.open();
+    db.create_thread("thread", "main").unwrap();
+    let configuration:ModelSessionConfiguration = serde_json::from_value(json!({"providerFamily":"openai-responses","model":"old","endpoint":"http://localhost/responses","credentialEnvironment":null,"allowAnonymous":true,"configurationGeneration":1,"maxOutputTokens":32})).unwrap();
+    let old = crate::model_session::bind(configuration.clone()).unwrap();
+    let receipt = db
+        .submit(&SubmitInput {
+            configuration: serde_json::to_value(&configuration).unwrap(),
+            ..command()
+        })
+        .unwrap();
+    let policy = old.policy.identity();
+    db.bind_launch(
+        &receipt.run_id,
+        launches::LaunchSelection::from_binding(&old.binding, policy.clone(), None),
+    )
+    .unwrap();
+    let mut snapshot = request_snapshot(&receipt);
+    let range = snapshot.view.binding.history_range.clone();
+    snapshot.view.binding = old.binding.clone();
+    snapshot.view.binding.history_range = range;
+    independent_prepare(&mut db, &receipt, snapshot.clone());
+    let next = ModelSessionConfiguration {
+        model: "new".into(),
+        configuration_generation: 2,
+        ..configuration
+    };
+    let bound = crate::model_session::bind(next.clone()).unwrap();
+    let selection = db
+        .select_model(&receipt.run_id, "next-choice", next, None)
+        .unwrap();
+    db.prepare_model_selection(&selection, db.epoch(), None)
+        .unwrap();
+    let queued = db
+        .enqueue_input(&inputs::EnqueueInput {
+            key: "next-run-choice".into(),
+            thread_id: "thread".into(),
+            branch_id: "main".into(),
+            mode: InputMode::NextRun,
+            input: json!({"text":"follow up"}),
+            configuration: None,
+        })
+        .unwrap();
+    assert_eq!(
+        db.run(&queued.run_id).unwrap().configuration["model"],
+        "new"
+    );
+    assert_eq!(
+        db.launch_intent(&queued.run_id)
+            .unwrap()
+            .unwrap()
+            .selection
+            .model,
+        "new"
+    );
+    assert!(
+        db.activate_model_selection(&selection, db.epoch(), &bound.binding)
+            .is_err(),
+        "an active request cannot be switched"
+    );
+    db.commit_execution(
+        &receipt.run_id,
+        db.epoch(),
+        &ExecutionRecord::ModelFinished {
+            request_id: "model-1".into(),
+            outcome: ModelOutcome::Completed,
+            finish_reason: Some(FinishReason::Stop),
+            items: vec![ProviderItem {
+                id: "old-output".into(),
+                content: Content::Text {
+                    text: "completed old output".into(),
+                },
+                opaque: None,
+            }],
+            interrupted_deltas: vec![],
+            usage: UsageReceipt::default(),
+            failure: None,
+        },
+    )
+    .unwrap();
+    assert!(
+        db.prepare_recovered_execution(
+            &receipt.run_id,
+            bound.binding.clone(),
+            policy.clone(),
+            Value::Null
+        )
+        .is_err(),
+        "a changed binding requires a committed activation"
+    );
+    assert!(
+        db.activate_model_selection(&selection, db.epoch(), &bound.binding)
+            .unwrap()
+    );
+    let step = db.model_step("model-1").unwrap();
+    assert_eq!(step.request["view"]["binding"]["model"], "old");
+    let launch = db
+        .launch_intent(&receipt.run_id)
+        .unwrap()
+        .unwrap()
+        .selection;
+    drop(db);
+    let mut db = f.open();
+    db.bind_launch(&receipt.run_id, launch).unwrap();
+    let (input, recovery) = db
+        .prepare_recovered_execution(&receipt.run_id, bound.binding, policy, Value::Null)
+        .unwrap();
+    assert_eq!(input.binding.model, "new");
+    assert!(recovery.is_some());
+    assert_eq!(
+        db.model_selections(&receipt.run_id)
+            .unwrap()
+            .active
+            .unwrap()
+            .id,
+        "next-choice"
+    );
+    assert!(
+        input.history.iter().any(
+            |item| matches!(&item.content,Content::Text{text} if text=="completed old output")
+        )
+    );
+}
+
+#[test]
+fn independent_model_finished_retry_is_exactly_idempotent_and_conflicting_retry_preserves_history()
+{
+    let f = Fixture::new();
+    let mut db = f.open();
+    let receipt = submit(&mut db);
+    let epoch = db.epoch();
+    independent_prepare(&mut db, &receipt, request_snapshot(&receipt));
+    let finish = independent_finish("model-1", "accepted output");
+    db.commit_execution(&receipt.run_id, epoch, &finish)
+        .unwrap();
+    let history = db.history("main").unwrap();
+    let output = db.model_output("model-1").unwrap();
+    let events = db.events_after(0, 1000).unwrap();
+    db.commit_execution(&receipt.run_id, epoch, &finish)
+        .unwrap();
+    assert_eq!(db.history("main").unwrap(), history);
+    assert_eq!(db.model_output("model-1").unwrap(), output);
+    assert_eq!(db.events_after(0, 1000).unwrap(), events);
+    assert!(
+        db.commit_execution(
+            &receipt.run_id,
+            epoch,
+            &independent_finish("model-1", "conflicting replacement")
+        )
+        .is_err()
+    );
+    assert_eq!(db.history("main").unwrap(), history);
+    assert_eq!(db.model_output("model-1").unwrap(), output);
+    assert_eq!(
+        history.last().unwrap().provider.as_ref().unwrap().item,
+        independent_finished_item("accepted output")
+            .opaque
+            .unwrap()
+            .value
+    );
+}
+
+#[test]
+fn tool_activation_retains_its_exact_composition_through_collection_and_reopen() {
+    use crate::execution::*;
+    let f = Fixture::new();
+    let mut db = f.open();
+    db.create_thread("thread", "main").unwrap();
+    let configuration:ModelSessionConfiguration=serde_json::from_value(json!({"providerFamily":"openai-responses","model":"same","endpoint":"http://localhost/responses","credentialEnvironment":null,"allowAnonymous":true,"configurationGeneration":1,"maxOutputTokens":32})).unwrap();
+    let initial = crate::model_session::bind(configuration.clone()).unwrap();
+    let receipt = db
+        .submit(&SubmitInput {
+            configuration: serde_json::to_value(configuration).unwrap(),
+            ..command()
+        })
+        .unwrap();
+    let policy = initial.policy.identity();
+    db.bind_launch(
+        &receipt.run_id,
+        launches::LaunchSelection::from_binding(&initial.binding, policy.clone(), None),
+    )
+    .unwrap();
+    let mut snapshot = request_snapshot(&receipt);
+    let range = snapshot.view.binding.history_range.clone();
+    snapshot.view.binding = initial.binding.clone();
+    snapshot.view.binding.history_range = range;
+    let schema = ToolSchema {
+        requirements: None,
+        description: String::new(),
+        output_schema: None,
+        metadata: None,
+        name: "query".into(),
+        version: "new".into(),
+        schema: json!({"type":"object"}),
+    };
+    let mcp = launches::HostToolBinding {
+        routes: [("query".into(), crate::McpRoute::Direct)].into(),
+        reference: "exact-owner".into(),
+        generation: 42,
+        tools: vec![schema.clone()],
+        resources: [
+            ("query".into(), "server-resource".into()),
+            ("server:fixture".into(), "server-resource".into()),
+        ]
+        .into(),
+        provenance: launches::McpProvenance {
+            servers: [(
+                "fixture".into(),
+                launches::McpServerSelection {
+                    owner: launches::McpServerOwner {
+                        source_authority: None,
+                        resource_owner: launches::SourceResourceOwner::Local,
+                        configuration: launches::McpConfiguration {
+                            agent_dir: "/fixture/agent".into(),
+                            config_cwd: "/fixture/project".into(),
+                            project_trusted: true,
+                        },
+                        execution_scope: launches::McpExecutionScope::Global,
+                    },
+                    definition_version: "definition".into(),
+                    resource_key: "server-resource".into(),
+                },
+            )]
+            .into(),
+        },
+    };
+    let preparation = db
+        .capture_tool_update(&receipt.run_id, db.epoch())
+        .unwrap()
+        .load_base()
+        .unwrap();
+    let mut next_tools = preparation.base().to_vec();
+    next_tools.push(schema);
+    let prepared = preparation
+        .load(next_tools.clone(), Some(mcp.clone()), vec![])
+        .unwrap();
+    independent_prepare(&mut db, &receipt, snapshot.clone());
+    assert!(
+        db.activate_tool_update(&prepared).is_err(),
+        "a dispatched request still owns its directory"
+    );
+    db.commit_execution(
+        &receipt.run_id,
+        db.epoch(),
+        &independent_finish("model-1", "old request output"),
+    )
+    .unwrap();
+    let mut next_binding = initial.binding.clone();
+    next_binding.tools = next_tools;
+    next_binding.tool_schema_generation = prepared.composition().generation;
+    assert!(
+        db.prepare_recovered_execution(
+            &receipt.run_id,
+            next_binding.clone(),
+            policy.clone(),
+            Value::Null
+        )
+        .is_err(),
+        "schemas alone are not an activation fact"
+    );
+    assert!(db.activate_tool_update(&prepared).unwrap());
+    drop(prepared);
+    content_collection::collect(|| db.prepare_content_collection(Default::default())).unwrap();
+    let launch = db
+        .launch_intent(&receipt.run_id)
+        .unwrap()
+        .unwrap()
+        .selection;
+    assert_eq!(launch.mcp_binding, Some(mcp));
+    assert_eq!(
+        db.model_step("model-1").unwrap().request["view"]["binding"]["tools"],
+        serde_json::to_value(&snapshot.view.binding.tools).unwrap()
+    );
+    drop(db);
+    let mut db = f.open();
+    db.bind_launch(&receipt.run_id, launch).unwrap();
+    let (input, recovery) = db
+        .prepare_recovered_execution(&receipt.run_id, next_binding, policy, Value::Null)
+        .unwrap();
+    assert!(recovery.is_some());
+    assert!(
+        input
+            .history
+            .iter()
+            .any(|item| matches!(&item.content,Content::Text{text} if text=="old request output"))
+    );
+    let stale = db
+        .capture_tool_update(&receipt.run_id, db.epoch())
+        .unwrap()
+        .load_base()
+        .unwrap()
+        .load(input.binding.tools.clone(), None, vec![]);
+    assert!(
+        stale.is_err(),
+        "MCP schemas cannot be moved into base authority"
+    );
+    let preparation = db
+        .capture_tool_update(&receipt.run_id, db.epoch())
+        .unwrap()
+        .load_base()
+        .unwrap();
+    let base = preparation.base().to_vec();
+    let prepared = preparation.load(base, None, vec![]).unwrap();
+    drop(db);
+    let mut db = f.open();
+    assert!(
+        db.activate_tool_update(&prepared).is_err(),
+        "an old owner cannot publish its ready candidate after reopen"
+    );
+}
+
+#[test]
+fn independent_reused_provider_id_across_model_steps_preserves_each_original_and_branch_chain() {
+    let f = Fixture::new();
+    let mut db = f.open();
+    let receipt = submit(&mut db);
+    let epoch = db.epoch();
+    independent_prepare(&mut db, &receipt, request_snapshot(&receipt));
+    db.commit_execution(
+        &receipt.run_id,
+        epoch,
+        &independent_finish("model-1", "first answer"),
+    )
+    .unwrap();
+    let first = db.history("main").unwrap().last().unwrap().clone();
+    let mut second_snapshot = request_snapshot(&receipt);
+    second_snapshot.view.request_id = "model-2".into();
+    second_snapshot.view.binding.history_range.leaf_id = Some(first.id.clone());
+    second_snapshot.view.history = db.execution_history("main").unwrap();
+    second_snapshot.view.origin = crate::execution::RequestOrigin::Conversation {
+        compaction: None, step: 2,
+        history_range: second_snapshot.view.binding.history_range.clone(),
+    };
+    independent_prepare(&mut db, &receipt, second_snapshot);
+    db.commit_execution(
+        &receipt.run_id,
+        epoch,
+        &independent_finish("model-2", "second answer"),
+    )
+    .unwrap();
+    let history = db.history("main").unwrap();
+    let second = history.last().unwrap();
+    assert_ne!(first.id, second.id);
+    assert_eq!(second.parent.as_deref(), Some(first.id.as_str()));
+    assert_eq!(first.provider, second.provider);
+    assert_eq!(
+        db.model_output("model-1").unwrap().unwrap()["record"]["items"][0]["id"],
+        "provider-reused-id"
+    );
+    assert_eq!(
+        db.model_output("model-2").unwrap().unwrap()["record"]["items"][0]["id"],
+        "provider-reused-id"
+    );
+    db.fork_branch("main", "reused-provider-fork", Some(&second.id))
+        .unwrap();
+    assert_eq!(db.history("reused-provider-fork").unwrap(), history);
+}
+
+#[test]
+fn independent_recovery_uses_the_saved_contiguous_row_identity_and_rejects_changed_content() {
+    use crate::execution::PolicyIdentity;
+    let f = Fixture::new();
+    let mut db = f.open();
+    let receipt = submit(&mut db);
+    let epoch = db.epoch();
+    let snapshot = request_snapshot(&receipt);
+    independent_prepare(&mut db, &receipt, snapshot.clone());
+    db.commit_execution(
+        &receipt.run_id,
+        epoch,
+        &independent_finish("model-1", "durable older output"),
+    )
+    .unwrap();
+    let mut saved = db.history("main").unwrap().last().unwrap().clone();
+    let generated_id = saved.id.clone();
+    // Construct already-committed data whose graph row uses the provider's original ID,
+    // as the prior runtime did. The product recovery path must read actual row authority,
+    // not guess a migration branch or recompute a replacement graph ID.
+    saved.id = "provider-reused-id".into();
+    saved.content["id"] = json!(saved.id);
+    saved.content = db
+        .content
+        .save_history(&saved.content, &saved.provider)
+        .unwrap();
+    saved.provider = None;
+    {
+        let tx = db.db.transaction().unwrap();
+        tx.execute_batch("PRAGMA defer_foreign_keys=ON").unwrap();
+        tx.execute(
+            "UPDATE history SET id=?1,body=?2 WHERE id=?3",
+            params![saved.id, encode(&saved).unwrap(), generated_id],
+        )
+        .unwrap();
+        tx.execute(
+            "UPDATE branches SET head=?1 WHERE head=?2",
+            params![saved.id, generated_id],
+        )
+        .unwrap();
+        tx.commit().unwrap();
+    }
+    let policy = PolicyIdentity {
+        name: "default".into(),
+        version: "1".into(),
+    };
+    let (input, recovery) = db
+        .prepare_recovered_execution(
+            &receipt.run_id,
+            snapshot.view.binding.clone(),
+            policy.clone(),
+            Value::Null,
+        )
+        .unwrap();
+    assert!(recovery.is_some());
+    assert_eq!(
+        input.binding.history_range.leaf_id.as_deref(),
+        Some("provider-reused-id")
+    );
+    assert_eq!(input.history.last().unwrap().id, "provider-reused-id");
+    assert_eq!(
+        db.head("main").unwrap().as_deref(),
+        Some("provider-reused-id")
+    );
+    let mut damaged = db.history("main").unwrap().last().unwrap().clone();
+    damaged.content["content"]["text"] = json!("unrelated replacement");
+    damaged.content = db
+        .content
+        .save_history(&damaged.content, &damaged.provider)
+        .unwrap();
+    damaged.provider = None;
+    db.db
+        .execute(
+            "UPDATE history SET body=?1 WHERE id=?2",
+            params![encode(&damaged).unwrap(), damaged.id],
+        )
+        .unwrap();
+    assert!(
+        db.prepare_recovered_execution(&receipt.run_id, snapshot.view.binding, policy, Value::Null)
+            .is_err()
+    );
+}
+
+#[test]
+fn independent_recovery_rejects_corrupted_branch_anchor_and_foreign_suffix_ownership() {
+    use crate::execution::{Content, ConversationItem, PolicyIdentity, Provenance};
+    for corruption in [
+        "branch-owner",
+        "anchor-header",
+        "anchor-owner",
+        "suffix-owner",
+    ] {
+        let f = Fixture::new();
+        let mut db = f.open();
+        let receipt = submit(&mut db);
+        let epoch = db.epoch();
+        let snapshot = request_snapshot(&receipt);
+        independent_prepare(&mut db, &receipt, snapshot.clone());
+        db.commit_execution(
+            &receipt.run_id,
+            epoch,
+            &independent_finish("model-1", "owned output"),
+        )
+        .unwrap();
+        db.create_thread("foreign-thread", "foreign-branch")
+            .unwrap();
+        if corruption == "branch-owner" {
+            db.db
+                .execute(
+                    "UPDATE branches SET thread_id='foreign-thread' WHERE id='main'",
+                    [],
+                )
+                .unwrap();
+        } else {
+            let target = if corruption == "suffix-owner" {
+                let suffix = db
+                    .append_history(
+                        &receipt.run_id,
+                        epoch,
+                        db.head("main").unwrap().as_deref(),
+                        HistorySource::Environment,
+                        serde_json::to_value(ConversationItem::<crate::output::ResolvedMedia> {
+                            resource_activation: None,
+                            id: "later-environment".into(),
+                            provenance: Provenance::EnvironmentFact {
+                                event_id: "later-event".into(),
+                            },
+                            content: Content::Text {
+                                text: "later source observation".into(),
+                            },
+                            opaque: None,
+                        })
+                        .unwrap(),
+                        None,
+                    )
+                    .unwrap();
+                suffix.id
+            } else {
+                receipt.input_id.clone()
+            };
+            let body: String = db
+                .db
+                .query_row("SELECT body FROM history WHERE id=?1", [&target], |row| {
+                    row.get(0)
+                })
+                .unwrap();
+            let mut metadata: HistoryItem = serde_json::from_str(&body).unwrap();
+            if corruption == "anchor-header" {
+                metadata.id = "wrong-anchor-header".into();
+                db.db
+                    .execute(
+                        "UPDATE history SET body=?1 WHERE id=?2",
+                        params![encode(&metadata).unwrap(), target],
+                    )
+                    .unwrap();
+            } else {
+                metadata.thread_id = "foreign-thread".into();
+                db.db
+                    .execute(
+                        "UPDATE history SET thread_id=?1,body=?2 WHERE id=?3",
+                        params![metadata.thread_id, encode(&metadata).unwrap(), target],
+                    )
+                    .unwrap();
+            }
+        }
+        let result = db.prepare_recovered_execution(
+            &receipt.run_id,
+            snapshot.view.binding,
+            PolicyIdentity {
+                name: "default".into(),
+                version: "1".into(),
+            },
+            Value::Null,
+        );
+        assert!(result.is_err(), "recovery accepted {corruption}");
+    }
+}
+
+#[test]
+fn dispatched_no_effect_requires_exact_durable_executor_evidence() {
+    use crate::execution::*;
+    let f = Fixture::new();
+    let mut db = f.open();
+    let run = submit(&mut db);
+    let epoch = db.epoch();
+    let mut snapshot = request_snapshot(&run);
+    snapshot.view.binding.tools = vec![ToolSchema {
+        requirements: None,
+        description: String::new(),
+        output_schema: None,
+        metadata: None,
+        name: "cas-owner".into(),
+        version: "1".into(),
+        schema: json!({"type":"object"}),
+    }];
+    independent_prepare(&mut db, &run, snapshot);
+    let calls: Vec<_> = ["conflict", "other"]
+        .into_iter()
+        .map(|call_id| ToolCall {
+            call_id: call_id.into(),
+            name: "cas-owner".into(),
+            schema_version: "1".into(),
+            arguments: json!({"expectedRef":null}),
+        })
+        .collect();
+    db.commit_execution(
+        &run.run_id,
+        epoch,
+        &ExecutionRecord::ModelFinished {
+            request_id: "model-1".into(),
+            outcome: ModelOutcome::Completed,
+            finish_reason: Some(FinishReason::ToolCalls),
+            items: calls
+                .iter()
+                .map(|call| ProviderItem {
+                    id: format!("item-{}", call.call_id),
+                    content: Content::ToolCall { call: call.clone() },
+                    opaque: None,
+                })
+                .collect(),
+            interrupted_deltas: vec![],
+            usage: UsageReceipt::default(),
+            failure: None,
+        },
+    )
+    .unwrap();
+    for call in calls {
+        let context = crate::execution::ToolExecutionContext {
+            run_id: run.run_id.clone(),
+            origin: crate::execution::ToolOrigin::ModelStep {
+                request_id: "model-1".into(),
+            },
+            operation_id: format!("model-1:tool:{}", call.call_id),
+        };
+        db.commit_execution(
+            &run.run_id,
+            epoch,
+            &ExecutionRecord::ToolAdmitted {
+                context,
+                tool: AdmittedTool {
+                    call,
+                    contract: ToolContract {
+                        name: "cas-owner".into(),
+                        schema_version: "1".into(),
+                        read_only: false,
+                        completion: CompletionKind::Result,
+                        lifetime: Lifetime::Run,
+                        resources: vec![],
+                    },
+                },
+            },
+        )
+        .unwrap();
+    }
+    for call_id in ["conflict", "other"] {
+        db.commit_execution(
+            &run.run_id,
+            epoch,
+            &ExecutionRecord::ToolDispatched {
+                executor_owner: varin_runtime::ExecutorOwner::Kernel,
+                context: {
+                    let request_id: String = "model-1".into();
+                    let call_id: String = call_id.into();
+                    varin_runtime::execution::ToolExecutionContext {
+                        run_id: (&run.run_id).to_string(),
+                        operation_id: format!("{request_id}:tool:{call_id}"),
+                        origin: varin_runtime::execution::ToolOrigin::ModelStep { request_id },
+                    }
+                },
+            },
+        )
+        .unwrap();
+    }
+    let owner = std::sync::Mutex::new(db);
+    let context = ToolExecutionContext {
+        run_id: run.run_id.clone(),
+        operation_id: "model-1:tool:conflict".into(),
+        origin: ToolOrigin::ModelStep {
+            request_id: "model-1".into(),
+        },
+    };
+    let content = json!({"status":"conflict","currentRef":"user-version","permission":{"ordinary":"opaque tool field"},"data":"result-body-漢字".repeat(20000)});
+    let completion = ToolCompletion::Result {
+        outcome: Outcome::Failed,
+        effect: Effect::None,
+        content: content.clone().into(),
+    };
+    let settlement = |completion| {
+        let result = ToolResult {
+            request_id: "model-1".into(),
+            call_id: "conflict".into(),
+            completion,
+        };
+        ExecutionRecord::ToolSettled {
+            executor_stopped: true,
+            context: {
+                let request_id: String = result.request_id.clone();
+                let call_id: String = result.call_id.clone();
+                varin_runtime::execution::ToolExecutionContext {
+                    run_id: (&run.run_id).to_string(),
+                    operation_id: format!("{request_id}:tool:{call_id}"),
+                    origin: varin_runtime::execution::ToolOrigin::ModelStep { request_id },
+                }
+            },
+            completion: result.completion,
+        }
+    };
+    // A tool's no-effect claim alone must neither bypass normalization nor settle a dispatch.
+    assert!(
+        !owner
+            .confirms_no_effect(&context, epoch, &completion)
+            .unwrap()
+    );
+    assert!(
+        owner
+            .commit(&run.run_id, epoch, &settlement(completion.clone()))
+            .is_err()
+    );
+    let op = owner
+        .lock()
+        .unwrap()
+        .operation(&context.operation_id)
+        .unwrap();
+    assert_eq!(
+        (op.phase, op.effect),
+        (OperationPhase::Running, Effect::Dispatched)
+    );
+    super::result_content::record_external_receipt(
+        &owner,
+        &context.operation_id,
+        ExternalReceipt {
+            identity: context.operation_id.clone(),
+            executor: "cas-owner".into(),
+            epoch: "opaque-owner-epoch".into(),
+            outcome: Outcome::Failed,
+            effect: Effect::None,
+            result: content.clone().into(),
+        },
+        true,
+    )
+    .unwrap();
+    // Even authentic evidence cannot approve changed content or another Operation/generation.
+    let changed = ToolCompletion::Result {
+        outcome: Outcome::Failed,
+        effect: Effect::None,
+        content: json!({"status":"conflict","currentRef":"forged"}).into(),
+    };
+    assert!(!owner.confirms_no_effect(&context, epoch, &changed).unwrap());
+    assert!(
+        owner
+            .commit(&run.run_id, epoch, &settlement(changed))
+            .is_err()
+    );
+    let mut foreign = context.clone();
+    foreign.operation_id = "model-1:tool:other".into();
+    assert!(
+        !owner
+            .confirms_no_effect(&foreign, epoch, &completion)
+            .unwrap()
+    );
+    foreign = context.clone();
+    foreign.origin = ToolOrigin::ModelStep {
+        request_id: "other-request".into(),
+    };
+    assert!(
+        !owner
+            .confirms_no_effect(&foreign, epoch, &completion)
+            .unwrap()
+    );
+    assert!(
+        owner
+            .confirms_no_effect(&context, epoch + 1, &completion)
+            .is_err()
+    );
+    assert!(
+        owner
+            .confirms_no_effect(&context, epoch, &completion)
+            .unwrap()
+    );
+    owner
+        .commit(&run.run_id, epoch, &settlement(completion))
+        .unwrap();
+    let op = owner
+        .lock()
+        .unwrap()
+        .operation(&context.operation_id)
+        .unwrap();
+    assert_eq!(
+        (op.phase, op.outcome, op.effect),
+        (
+            OperationPhase::Terminal,
+            Some(Outcome::Failed),
+            Effect::None
+        )
+    );
+    let read = owner.lock().unwrap().capture_operation_read(op);
+    assert_eq!(
+        read.load().unwrap().result,
+        Some(crate::output::OperationResult::Output {
+            output: content.clone().into()
+        })
+    );
+    let events = owner.lock().unwrap().capture_events_read(0, 1000).unwrap();
+    assert!(
+        events
+            .load()
+            .unwrap()
+            .iter()
+            .any(|event| event.kind == "operation.settled"
+                && event.data["result"]
+                    == json!({"kind":"output","output":{"data":content,"parts":[]}}))
+    );
+    let db = owner.lock().unwrap();
+    let receipt: String = db
+        .db
+        .query_row(
+            "SELECT receipt FROM tool_calls WHERE request_id='model-1' AND call_id='conflict'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert!(
+        receipt.len() < 1024,
+        "tool receipt must carry metadata, not output bytes"
+    );
+    drop(db);
+    assert_eq!(
+        owner
+            .lock()
+            .unwrap()
+            .operation("model-1:tool:other")
+            .unwrap()
+            .effect,
+        Effect::Dispatched
+    );
+}
+
+#[test]
+fn recovery_preparation_hydrates_without_catalog_and_rechecks_its_actual_boundary() {
+    use crate::execution::{CancellationToken, PolicyIdentity};
+    use std::sync::{Arc, Mutex, mpsc};
+    for change in ["unrelated", "head", "cancel"] {
+        let f = Fixture::new();
+        let mut catalog = f.open();
+        let receipt = submit(&mut catalog);
+        let epoch = catalog.epoch();
+        let row = catalog
+            .append_history(
+                &receipt.run_id,
+                epoch,
+                Some(&receipt.input_id),
+                HistorySource::User,
+                json!({"text":"retained-history-".repeat(500000)}),
+                None,
+            )
+            .unwrap();
+        let owner = Arc::new(Mutex::new(catalog));
+        let mut catalog = owner.lock().unwrap();
+        let preparation = catalog
+            .capture_recovered_execution(
+                &receipt.run_id,
+                request_snapshot(&receipt).view.binding,
+                PolicyIdentity {
+                    name: "default".into(),
+                    version: "1".into(),
+                },
+                Value::Null,
+                true,
+            )
+            .unwrap();
+        catalog
+            .content
+            .save(&json!({"orphan":"protected until preparation ends"}))
+            .unwrap();
+        assert_eq!(
+            content_collection::collect(|| catalog.prepare_content_collection(Default::default()))
+                .unwrap(),
+            0
+        );
+        let (send, receive) = mpsc::channel();
+        let worker = std::thread::spawn(move || {
+            send.send(preparation.load(&CancellationToken::default()))
+                .unwrap()
+        });
+        // Hold the actual Catalog mutex throughout history traversal, object reads and decode.
+        let prepared = receive
+            .recv_timeout(std::time::Duration::from_secs(20))
+            .unwrap()
+            .unwrap()
+            .unwrap();
+        worker.join().unwrap();
+        match change {
+            "unrelated" => {
+                catalog.create_thread("other-thread", "other-main").unwrap();
+            }
+            "head" => {
+                catalog
+                    .append_history(
+                        &receipt.run_id,
+                        epoch,
+                        Some(&row.id),
+                        HistorySource::User,
+                        json!("late correction"),
+                        None,
+                    )
+                    .unwrap();
+            }
+            "cancel" => {
+                catalog.request_cancel_run(&receipt.run_id).unwrap();
+            }
+            _ => unreachable!(),
+        }
+        let launch = catalog.publish_recovered_execution(prepared).unwrap();
+        if change == "unrelated" {
+            let launch = launch.expect("unrelated Catalog writes cannot invalidate this Run");
+            assert_eq!(
+                launch.input.binding.history_range.leaf_id.as_deref(),
+                Some(row.id.as_str())
+            );
+            assert_eq!(launch.input.history.len(), 2);
+        } else {
+            assert!(
+                launch.is_none(),
+                "a stale {change} boundary must be recaptured"
+            );
+        }
+        let collection = catalog.prepare_content_collection(Default::default());
+        drop(catalog);
+        assert!(
+            content_collection::collect(|| collection).unwrap() > 0,
+            "publication pin must release"
+        );
+        let mut catalog = owner.lock().unwrap();
+        if change == "cancel" {
+            assert_eq!(
+                catalog
+                    .cancel_preparing_execution(&receipt.run_id, epoch)
+                    .unwrap()
+                    .unwrap()
+                    .state,
+                RunState::Cancelled
+            );
+        }
+    }
+}
+
+#[test]
+fn recovery_preparation_discards_stale_failure_after_a_real_tool_receipt_arrives() {
+    use crate::execution::*;
+    let f = Fixture::new();
+    let mut catalog = f.open();
+    let receipt = submit(&mut catalog);
+    let epoch = catalog.epoch();
+    let mut snapshot = request_snapshot(&receipt);
+    snapshot.view.binding.tools = vec![ToolSchema {
+        requirements: None,
+        description: String::new(),
+        output_schema: None,
+        metadata: None,
+        name: "read".into(),
+        version: "1".into(),
+        schema: json!({"type":"object"}),
+    }];
+    let binding = snapshot.view.binding.clone();
+    independent_prepare(&mut catalog, &receipt, snapshot);
+    let call = ToolCall {
+        call_id: "receipt-race".into(),
+        name: "read".into(),
+        schema_version: "1".into(),
+        arguments: json!({}),
+    };
+    catalog
+        .commit_execution(
+            &receipt.run_id,
+            epoch,
+            &ExecutionRecord::ModelFinished {
+                request_id: "model-1".into(),
+                outcome: ModelOutcome::Completed,
+                finish_reason: Some(FinishReason::ToolCalls),
+                items: vec![ProviderItem {
+                    id: "call-item".into(),
+                    content: Content::ToolCall { call: call.clone() },
+                    opaque: None,
+                }],
+                interrupted_deltas: vec![],
+                usage: UsageReceipt::default(),
+                failure: None,
+            },
+        )
+        .unwrap();
+    catalog
+        .commit_execution(&receipt.run_id, epoch, &{
+            let tool = AdmittedTool {
+                call,
+                contract: ToolContract {
+                    name: "read".into(),
+                    schema_version: "1".into(),
+                    read_only: false,
+                    completion: CompletionKind::Result,
+                    lifetime: Lifetime::Run,
+                    resources: vec![],
+                },
+            };
+            ExecutionRecord::ToolAdmitted {
+                context: {
+                    let request_id: String = "model-1".into();
+                    let call_id: String = tool.call.call_id.clone();
+                    varin_runtime::execution::ToolExecutionContext {
+                        run_id: (&receipt.run_id).to_string(),
+                        operation_id: format!("{request_id}:tool:{call_id}"),
+                        origin: varin_runtime::execution::ToolOrigin::ModelStep { request_id },
+                    }
+                },
+                tool,
+            }
+        })
+        .unwrap();
+    catalog
+        .commit_execution(
+            &receipt.run_id,
+            epoch,
+            &ExecutionRecord::ToolDispatched {
+                executor_owner: varin_runtime::ExecutorOwner::Kernel,
+                context: {
+                    let request_id: String = "model-1".into();
+                    let call_id: String = "receipt-race".into();
+                    varin_runtime::execution::ToolExecutionContext {
+                        run_id: (&receipt.run_id).to_string(),
+                        operation_id: format!("{request_id}:tool:{call_id}"),
+                        origin: varin_runtime::execution::ToolOrigin::ModelStep { request_id },
+                    }
+                },
+            },
+        )
+        .unwrap();
+    let policy = PolicyIdentity {
+        name: "default".into(),
+        version: "1".into(),
+    };
+    let preparation = catalog
+        .capture_recovered_execution(
+            &receipt.run_id,
+            binding.clone(),
+            policy.clone(),
+            Value::Null,
+            true,
+        )
+        .unwrap();
+    let identity = preparation.identity();
+    assert!(
+        preparation.load(&CancellationToken::default()).is_err(),
+        "unconfirmed dispatch cannot replay"
+    );
+    catalog
+        .commit_execution(&receipt.run_id, epoch, &{
+            let result = ToolResult {
+                request_id: "model-1".into(),
+                call_id: "receipt-race".into(),
+                completion: ToolCompletion::Result {
+                    outcome: Outcome::Succeeded,
+                    effect: Effect::Confirmed,
+                    content: json!("actual receipt").into(),
+                },
+            };
+            ExecutionRecord::ToolSettled {
+                executor_stopped: true,
+                context: {
+                    let request_id: String = result.request_id.clone();
+                    let call_id: String = result.call_id.clone();
+                    varin_runtime::execution::ToolExecutionContext {
+                        run_id: (&receipt.run_id).to_string(),
+                        operation_id: format!("{request_id}:tool:{call_id}"),
+                        origin: varin_runtime::execution::ToolOrigin::ModelStep { request_id },
+                    }
+                },
+                completion: result.completion,
+            }
+        })
+        .unwrap();
+    assert!(
+        !catalog.preparation_is_current(&identity).unwrap(),
+        "a late real receipt supersedes the earlier recovery failure"
+    );
+    let preparation = catalog
+        .capture_recovered_execution(&receipt.run_id, binding, policy, Value::Null, true)
+        .unwrap();
+    let prepared = preparation
+        .load(&CancellationToken::default())
+        .unwrap()
+        .unwrap();
+    let launch = catalog
+        .publish_recovered_execution(prepared)
+        .unwrap()
+        .unwrap();
+    let recovery = launch.recovery.unwrap();
+    assert!(recovery.pending.is_some());
+    assert_eq!(
+        recovery.receipts["receipt-race"].completion,
+        ToolCompletion::Result {
+            outcome: Outcome::Succeeded,
+            effect: Effect::Confirmed,
+            content: json!("actual receipt").into(),
+        }
+    );
+}
+
+#[test]
+fn result_publication_stages_without_catalog_and_gc_protects_until_commit() {
+    use std::sync::{Mutex, mpsc};
+    let f = Fixture::new();
+    let mut db = f.open();
+    let run = submit(&mut db);
+    let epoch = db.epoch();
+    db.admit_operation(
+        "result-publication",
+        &run.run_id,
+        epoch,
+        Lifetime::Run,
+        Value::Null,
+    )
+    .unwrap();
+    db.dispatch_operation("result-publication", epoch, "read", false)
+        .unwrap();
+    let owner = Mutex::new(db);
+    let preparation = owner.lock().unwrap().prepare_result_content();
+    let body = json!({"body":"immutable-result".repeat(40000),"opaque":[true,null,17]});
+    let expected = body.clone();
+    let (send, receive) = mpsc::channel();
+    let catalog = owner.lock().unwrap();
+    let worker = std::thread::spawn(move || send.send(preparation.write_result(&body)).unwrap());
+    // Holding Catalog cannot prevent body staging; the publication stays alive in the prepared value.
+    let prepared = receive
+        .recv_timeout(std::time::Duration::from_secs(10))
+        .unwrap()
+        .unwrap();
+    assert!(
+        catalog
+            .operation("result-publication")
+            .unwrap()
+            .result
+            .is_none()
+    );
+    drop(catalog);
+    worker.join().unwrap();
+    assert_eq!(
+        content_collection::collect(|| owner
+            .lock()
+            .unwrap()
+            .prepare_content_collection(Default::default()))
+        .unwrap(),
+        0
+    );
+    let operation = owner
+        .lock()
+        .unwrap()
+        .settle_operation_prepared(
+            "result-publication",
+            epoch,
+            Outcome::Succeeded,
+            Effect::None,
+            prepared,
+        )
+        .unwrap();
+    content_collection::collect(|| {
+        owner
+            .lock()
+            .unwrap()
+            .prepare_content_collection(Default::default())
+    })
+    .unwrap();
+    let read = owner.lock().unwrap().capture_operation_read(operation);
+    assert_eq!(
+        read.load().unwrap().result,
+        Some(crate::output::OperationResult::Output {
+            output: expected.into()
+        })
+    );
+}
+
+#[test]
+fn external_result_outlives_kernel_until_original_stop_receipt() {
+    use crate::execution::*;
+    for settled in [false, true] {
+        let f = Fixture::new();
+        let mut db = f.open();
+        let run = submit(&mut db);
+        let epoch = db.epoch();
+        let mut snapshot = request_snapshot(&run);
+        snapshot.view.binding.tools = vec![ToolSchema {
+            requirements: None,
+            name: "broker_read".into(),
+            version: "1".into(),
+            description: "Read through an external worker".into(),
+            schema: json!({"type":"object"}),
+            output_schema: None,
+            metadata: None,
+        }];
+        independent_prepare(&mut db, &run, snapshot);
+        let call = ToolCall {
+            call_id: "external".into(),
+            name: "broker_read".into(),
+            schema_version: "1".into(),
+            arguments: json!({}),
+        };
+        db.commit_execution(
+            &run.run_id,
+            epoch,
+            &ExecutionRecord::ModelFinished {
+                request_id: "model-1".into(),
+                outcome: ModelOutcome::Completed,
+                finish_reason: Some(FinishReason::ToolCalls),
+                items: vec![ProviderItem {
+                    id: "call-item".into(),
+                    content: Content::ToolCall { call: call.clone() },
+                    opaque: None,
+                }],
+                interrupted_deltas: vec![],
+                usage: UsageReceipt::default(),
+                failure: None,
+            },
+        )
+        .unwrap();
+        let context = ToolExecutionContext {
+            run_id: run.run_id.clone(),
+            origin: ToolOrigin::ModelStep {
+                request_id: "model-1".into(),
+            },
+            operation_id: "model-1:tool:external".into(),
+        };
+        let owner = ExecutorOwner::External {
+            identity: "broker:exact-instance".into(),
+            epoch: "original-owner-epoch".into(),
+        };
+        db.commit_execution(
+            &run.run_id,
+            epoch,
+            &ExecutionRecord::ToolAdmitted {
+                context: context.clone(),
+                tool: AdmittedTool {
+                    call,
+                    contract: ToolContract {
+                        name: "broker_read".into(),
+                        schema_version: "1".into(),
+                        read_only: false,
+                        completion: CompletionKind::Result,
+                        lifetime: Lifetime::Run,
+                        resources: vec![ResourceClaim {
+                            key: "original-resource".into(),
+                            access: Access::Write,
+                        }],
+                    },
+                },
+            },
+        )
+        .unwrap();
+        db.commit_execution(
+            &run.run_id,
+            epoch,
+            &ExecutionRecord::ToolDispatched {
+                context: context.clone(),
+                executor_owner: owner.clone(),
+            },
+        )
+        .unwrap();
+        let unknown = ToolCompletion::Result {
+            outcome: Outcome::Indeterminate,
+            effect: Effect::Unknown,
+            content: json!({"error":"observer_cancelled"}).into(),
+        };
+        if settled {
+            db.commit_execution(
+                &run.run_id,
+                epoch,
+                &ExecutionRecord::ToolSettled {
+                    context: context.clone(),
+                    completion: unknown.clone(),
+                    executor_stopped: false,
+                },
+            )
+            .unwrap();
+        }
+        drop(db);
+        let mut db = f.open();
+        assert_eq!(
+            db.operation(&context.operation_id).unwrap().execution_owner,
+            Some(owner.clone())
+        );
+        assert_eq!(
+            db.resource_admission
+                .inspect(&context.operation_id)
+                .map(|s| s.state),
+            Some("active"),
+            "kernel restart is not broker stop evidence"
+        );
+        assert_eq!(
+            db.operation(&context.operation_id).unwrap().effect,
+            Effect::Unknown
+        );
+        let receipt = ExternalReceipt {
+            executor: "broker_read".into(),
+            identity: context.operation_id.clone(),
+            epoch: "original-owner-epoch".into(),
+            outcome: Outcome::Succeeded,
+            effect: Effect::Confirmed,
+            result: json!({"actual":"original worker result"}).into(),
+        };
+        let mut forged = receipt.clone();
+        forged.epoch = "replacement-owner-epoch".into();
+        let prepared = db
+            .prepare_result_content()
+            .write_external_receipt(forged)
+            .unwrap();
+        assert!(
+            db.record_external_receipt_prepared(&context.operation_id, prepared, true)
+                .is_err()
+        );
+        assert_eq!(
+            db.resource_admission
+                .inspect(&context.operation_id)
+                .map(|s| s.state),
+            Some("active")
+        );
+        let prepared = db
+            .prepare_result_content()
+            .write_external_receipt(receipt.clone())
+            .unwrap();
+        let result = db
+            .record_external_tool_receipt_prepared(&context.operation_id, &owner, prepared, true)
+            .unwrap();
+        assert_eq!(
+            (result.outcome, result.effect),
+            (Some(Outcome::Succeeded), Effect::Confirmed)
+        );
+        assert!(
+            db.resource_admission
+                .inspect(&context.operation_id)
+                .is_none()
+        );
+        let hydrated = db.capture_operation_read(result).load().unwrap();
+        assert_eq!(
+            hydrated.call_completion,
+            settled
+                .then(|| serde_json::from_value(serde_json::to_value(unknown).unwrap()).unwrap()),
+            "late evidence must not rewrite the original invocation completion"
+        );
+        let prepared = db
+            .prepare_result_content()
+            .write_external_receipt(receipt)
+            .unwrap();
+        assert!(
+            db.record_external_tool_receipt_prepared(&context.operation_id, &owner, prepared, true)
+                .is_ok(),
+            "lost durable acknowledgement may retry the same receipt"
+        );
+    }
+}
+
+#[test]
+fn original_mcp_resource_holder_cleanup_and_late_ack_preserve_invocation() {
+    use crate::execution::*;
+    use super::mcp_resources::{McpResourceBinding, McpResourceSubscription};
+    use super::mcp_interactions::{McpInteractionBinding, McpInteractionRecord};
+    for (managed, failure, early_ack) in [(false, None, true), (true, None, false),
+        (true, Some(false), false), (true, Some(true), false)] {
+        let f = Fixture::new();
+        let mut db = f.open();
+        let run = submit(&mut db);
+        let epoch = db.epoch();
+        let mut request = request_snapshot(&run);
+        request.view.binding.tools = vec![ToolSchema {
+            name: "mcp_subscribe_resource".into(), version: "1".into(),
+            description: "Observe original resource".into(), schema: json!({"type":"object","properties":{"server":{"type":"string"},"schemaVersion":{"type":"string"},"uri":{"type":"string"}},"required":["server","schemaVersion","uri"],"additionalProperties":false}),
+            requirements: None, output_schema: None, metadata: None,
+        }];
+        let resource_owner = if managed {
+            json!({"kind":"managed_host","hostId":"original-host","connectionId":"original-connection","endpointIdentity":"original-endpoint"})
+        } else { json!({"kind":"local"}) };
+        let source = serde_json::from_value(json!({"resource_owner":resource_owner,
+            "workspace_id":"workspace","execution_workspace_id":"workspace","mode":"live_root",
+            "live_root":{"hostId":"original-host","canonicalRoot":"/original","rootId":"original-root"},
+            "branch_id":null,"revision":null})).unwrap();
+        let mcp: launches::HostToolBinding = serde_json::from_value(json!({
+            "reference":"original-mcp","generation":1,"tools":request.view.binding.tools,
+            "routes":{"mcp_subscribe_resource":{"kind":"resource_subscribe","argument":"server"}},
+            "resources":{"server:original":"original-resource"},"provenance":{"servers":{"original":{
+                "owner":{"resource_owner":resource_owner,"source_authority":if managed {
+                    json!({"coordinator_host_id":"coordinator","authority_id":"original-authority","resource_epoch":"source-epoch"})
+                } else { Value::Null },"configuration":{"agent_dir":"/original","config_cwd":"/original","project_trusted":false},
+                    "execution_scope":"workspace"},"definition_version":"configuration","resource_key":"original-resource"}}}
+        })).unwrap();
+        let model: dispatch::ChildModelBinding = serde_json::from_value(json!({
+            "configuration":{"providerFamily":"openai-responses","endpoint":"https://fixture.invalid",
+                "allowAnonymous":true,"model":"fixture","configurationGeneration":1},"credential_scope":null})).unwrap();
+        request.view.binding.connection_identity = model.connection_identity().unwrap();
+        request.view.binding.provider_family = "openai-responses".into();
+        request.view.binding.model = "fixture".into();
+        let mut launch = launches::LaunchSelection::from_binding(&request.view.binding,
+            PolicyIdentity { name: "fixture".into(), version: "1".into() }, Some(source));
+        launch.mcp_binding = Some(mcp);
+        db.bind_launch(&run.run_id, launch).unwrap();
+        let prepared = db.prepare_child_dispatch_binding(&run.run_id, model, 1,
+            request.view.binding.tools.clone()).unwrap().load().unwrap();
+        request.view.binding.child_dispatch = db.bind_child_dispatch(&run.run_id, prepared).unwrap();
+        independent_prepare(&mut db, &run, request);
+        let call = ToolCall { call_id: "subscribe".into(), name: "mcp_subscribe_resource".into(),
+            schema_version: "1".into(), arguments: json!({"server":"original","schemaVersion":"resources-v1","uri":"original:resource"}) };
+        db.commit_execution(&run.run_id, epoch, &ExecutionRecord::ModelFinished {
+            request_id: "model-1".into(), outcome: ModelOutcome::Completed,
+            finish_reason: Some(FinishReason::ToolCalls), items: vec![ProviderItem {
+                id: "subscribe-call".into(), content: Content::ToolCall { call: call.clone() }, opaque: None,
+            }], interrupted_deltas: vec![], usage: UsageReceipt::default(), failure: None,
+        }).unwrap();
+        let context = ToolExecutionContext { run_id: run.run_id.clone(), operation_id: "model-1:tool:subscribe".into(),
+            origin: ToolOrigin::ModelStep { request_id: "model-1".into() } };
+        let owner = ExecutorOwner::External { identity: "original-host-owner".into(), epoch: "original-owner-epoch".into() };
+        db.commit_execution(&run.run_id, epoch, &ExecutionRecord::ToolAdmitted { context: context.clone(),
+            tool: AdmittedTool { call, contract: ToolContract { name: "mcp_subscribe_resource".into(),
+                schema_version: "1".into(), read_only: false, completion: CompletionKind::Result,
+                lifetime: Lifetime::Thread, resources: vec![ResourceClaim { key: "original-resource".into(), access: Access::Write }] } },
+        }).unwrap();
+        db.commit_execution(&run.run_id, epoch, &ExecutionRecord::ToolDispatched {
+            context: context.clone(), executor_owner: owner.clone(),
+        }).unwrap();
+        assert!(db.mcp_resource_context_operation(&context.operation_id).is_err());
+        let (snapshot, frozen) = db.capture_tool_invocation(&context, "subscribe").unwrap().load_mcp().unwrap();
+        let binding: McpResourceBinding = serde_json::from_value(json!({"operationId":context.operation_id,
+            "executionOwner":owner,"endpoint":{"server":"original","resourceKey":"original-resource",
+                "configurationVersion":"configuration","credentialVersion":"credential"},
+            "schemaVersion":"resources-v1","uri":"original:resource"})).unwrap();
+        let interaction_binding: McpInteractionBinding = serde_json::from_value(json!({
+            "operationId":context.operation_id,"executionOwner":owner,"endpoint":binding.endpoint,
+            "connectionId":"original-client","source":{"kind":"server_request","requestId":"original-question",
+                "relation":{"kind":"rpc_response_stream","outgoingRequestId":7}}
+        })).unwrap();
+        let request = db.prepare_result_content().write_data(&json!({
+            "request":{"message":"Original question"},"presentation":{"mode":"form","message":"Original question"}
+        })).unwrap();
+        let opened = db.open_mcp_interaction("original-question".into(), interaction_binding.clone(),
+            crate::McpInteractionMode::Form, &request, &snapshot, &frozen, None).unwrap();
+        assert_eq!(opened.delivery_released, !managed);
+        let mut missing_release = serde_json::to_value(&opened).unwrap();
+        missing_release.as_object_mut().unwrap().remove("deliveryReleased");
+        assert!(serde_json::from_value::<McpInteractionRecord>(missing_release).is_err());
+        let mut error_binding = interaction_binding.clone();
+        error_binding.source = serde_json::from_value(json!({"kind":"rpc_error","outgoingRequestId":8,
+            "method":"resources/subscribe","elicitationId":"original-url"})).unwrap();
+        let error = db.prepare_result_content().write_data(&json!({
+            "request":{"code":-32042,"data":{"original":"URL requirement"}},
+            "presentations":[{"mode":"url","url":"https://fixture.invalid/review"}]
+        })).unwrap();
+        let error_opened = db.open_mcp_error_interactions(vec![("original-url".into(), error_binding.clone())],
+            &error, &snapshot, &frozen, None).unwrap();
+        assert_eq!(error_opened[0].delivery_released, !managed);
+        assert_eq!(error_opened[0].delivery, None);
+        let interactions = [("original-question", interaction_binding), ("original-url", error_binding)];
+        let begun = db.begin_mcp_resource(binding.clone(), &snapshot, &frozen).unwrap();
+        assert_eq!(begun.mcp_resource_subscription.as_ref().unwrap().mcp_holder_released, !managed);
+        let mut missing = serde_json::to_value(begun.mcp_resource_subscription.unwrap()).unwrap();
+        missing.as_object_mut().unwrap().remove("mcpHolderReleased");
+        assert!(serde_json::from_value::<McpResourceSubscription>(missing).is_err());
+        if early_ack {
+            let ack = json!({"_meta":{"original":"subscribe ACK"}});
+            let data = db.prepare_result_content().write_data(&ack).unwrap();
+            let receipt = db.prepare_result_content().write_external_receipt(ExternalReceipt {
+                executor: "mcp_subscribe_resource".into(), identity: context.operation_id.clone(), epoch: "original-owner-epoch".into(),
+                outcome: Outcome::Succeeded, effect: Effect::Confirmed,
+                result: json!({"operationId":context.operation_id,"server":"original","uri":"original:resource","acknowledgement":ack}).into(),
+            }).unwrap();
+            let accepted = db.accept_mcp_resource(&binding, "original-listener", data, receipt).unwrap();
+            assert_eq!(accepted.phase, OperationPhase::Running);
+            assert!(accepted.external_receipt.unwrap().executor_stopped);
+        }
+        let unknown = ToolCompletion::Result { outcome: Outcome::Indeterminate, effect: Effect::Unknown,
+            content: json!({"error":"original subscribe response lost"}).into() };
+        db.commit_execution(&run.run_id, epoch, &ExecutionRecord::ToolSettled {
+            context: context.clone(), completion: unknown.clone(), executor_stopped: false,
+        }).unwrap();
+        let before = db.operation(&context.operation_id).unwrap();
+        let history = db.history("main").unwrap();
+        db.release_mcp_resource_source(&run.run_id).unwrap();
+        db.release_mcp_interaction_source(&run.run_id).unwrap();
+        // A Source request can already exist before A sees its body, while the
+        // original invocation/source closes. Keep only the managed historical
+        // fact so its ACK debt can drain; never restore review or model admission.
+        let mut late_binding = interactions[0].1.clone();
+        late_binding.source = serde_json::from_value(json!({"kind":"server_request","requestId":"late-question",
+            "relation":{"kind":"rpc_response_stream","outgoingRequestId":7}})).unwrap();
+        let late = db.open_mcp_interaction("late-question".into(), late_binding.clone(),
+            crate::McpInteractionMode::Form, &request, &snapshot, &frozen, None);
+        if managed {
+            let late = late.unwrap();
+            assert_eq!(late.availability, crate::McpInteractionAvailability::OwnerUnavailable);
+            assert_eq!(late.choice, None);
+            assert!(!late.delivery_released);
+            let response = db.prepare_result_content().write_data(&json!({"action":"accept","content":{}})).unwrap();
+            assert!(db.respond_mcp_interaction(&context.operation_id, "late-question", late.revision,
+                crate::McpInteractionChoice::Accept, response).is_err());
+            assert!(db.begin_mcp_interaction_response(&late_binding, "late-question").is_err());
+            db.settle_mcp_interaction_response(&late_binding, "late-question", crate::McpInteractionDelivery::NotSent).unwrap();
+            db.acknowledge_mcp_interaction_delivery_released(&late_binding, "late-question").unwrap();
+            let mut sampling_binding = late_binding.clone();
+            sampling_binding.source = serde_json::from_value(json!({"kind":"server_request","requestId":"late-sampling",
+                "relation":{"kind":"rpc_response_stream","outgoingRequestId":7}})).unwrap();
+            let sampling = db.open_mcp_interaction("late-sampling".into(), sampling_binding.clone(),
+                crate::McpInteractionMode::Sampling, &request, &snapshot, &frozen, None).unwrap();
+            assert_eq!(sampling.sampling.unwrap().review, "closed");
+            assert!(db.begin_mcp_interaction_response(&sampling_binding, "late-sampling").is_err());
+            db.settle_mcp_interaction_response(&sampling_binding, "late-sampling", crate::McpInteractionDelivery::NotSent).unwrap();
+            db.acknowledge_mcp_interaction_delivery_released(&sampling_binding, "late-sampling").unwrap();
+        } else { assert!(late.is_err()); }
+        assert_eq!(db.pending_mcp_interactions().unwrap().len(), if managed { 2 } else { 0 },
+            "closed managed interactions retain their original delivery cleanup obligation");
+        if early_ack {
+            assert!(super::mcp_resources::require_source_released(&db.db, &run.run_id).is_err(),
+                "local observers must actually detach even when their finite RPC stopped");
+            db.update_mcp_resource_listener(&binding, Some("original-listener"), None,
+                crate::McpResourceAvailability::Closed, true, crate::McpResourceCleanup::Acknowledged, None).unwrap();
+        }
+        assert_eq!(db.pending_mcp_resources().unwrap().iter().any(|v| v.operation_id == context.operation_id), managed,
+            "cancelled locally released managed facets still owe original holder cleanup");
+        assert_eq!(super::mcp_resources::require_source_released(&db.db, &run.run_id).is_ok(), !managed);
+        drop(db);
+        let mut db = f.open();
+        let (snapshot, frozen) = db.capture_tool_invocation(&context, "subscribe").unwrap().load_mcp().unwrap();
+        db.validate_mcp_resource_context(&context.operation_id, &snapshot, &frozen).unwrap();
+        assert_eq!(db.pending_mcp_interactions().unwrap().len(), if managed { 2 } else { 0 },
+            "closed original cleanup survives reopening the Catalog");
+        let original_operation = db.operation(&context.operation_id).unwrap();
+        for (interaction_id, original_binding) in &interactions {
+            let original = db.mcp_interaction_context(&context.operation_id, interaction_id,
+                &snapshot, &frozen, None).unwrap();
+            assert_eq!(original.owner, frozen.provenance.servers["original"].owner);
+            assert_eq!(original.record.availability, crate::McpInteractionAvailability::Cancelled);
+            assert_eq!(original.record.delivery_released, !managed);
+            assert!(db.mcp_interaction_context("another-operation", interaction_id,
+                &snapshot, &frozen, None).is_err());
+            let mut replacement = frozen.clone();
+            replacement.provenance.servers.get_mut("original").unwrap().definition_version = "replacement".into();
+            assert!(db.mcp_interaction_context(&context.operation_id, interaction_id,
+                &snapshot, &replacement, None).is_err());
+            let mut replacement_owner = frozen.clone();
+            let selected = replacement_owner.provenance.servers.get_mut("original").unwrap();
+            selected.owner.resource_owner = launches::SourceResourceOwner::ManagedHost {
+                host_id: "replacement-host".into(), connection_id: "replacement-connection".into(),
+                endpoint_identity: "replacement-endpoint".into(),
+            };
+            assert!(db.mcp_interaction_context(&context.operation_id, interaction_id,
+                &snapshot, &replacement_owner, None).is_err());
+            for field in ["credential", "connection", "owner"] {
+                let mut forged = original_binding.clone();
+                match field {
+                    "credential" => forged.endpoint.credential_version = "replacement".into(),
+                    "connection" => forged.connection_id = "replacement".into(),
+                    _ => forged.execution_owner = ExecutorOwner::Kernel,
+                }
+                assert!(db.acknowledge_mcp_interaction_delivery_released(&forged, interaction_id).is_err());
+            }
+            let released = db.acknowledge_mcp_interaction_delivery_released(original_binding, interaction_id).unwrap();
+            let mut expected = original.record;
+            expected.delivery_released = true;
+            expected.revision += u64::from(managed);
+            assert_eq!(released, expected, "delivery cleanup cannot change send or completion facts");
+            let cursor = db.event_cursor().unwrap();
+            assert_eq!(db.acknowledge_mcp_interaction_delivery_released(original_binding, interaction_id).unwrap(), released);
+            assert_eq!(db.event_cursor().unwrap(), cursor, "equal cleanup ACK creates no second event");
+        }
+        assert_eq!(db.operation(&context.operation_id).unwrap(), original_operation,
+            "interaction release cannot rewrite the original Operation's receipts or effects");
+        assert!(db.pending_mcp_interactions().unwrap().is_empty());
+        let mut wrong_frozen = frozen.clone();
+        wrong_frozen.provenance.servers.get_mut("original").unwrap().definition_version = "replacement".into();
+        assert!(db.validate_mcp_resource_context(&context.operation_id, &snapshot, &wrong_frozen).is_err());
+        let ack = json!({"_meta":{"original":"subscribe ACK"}});
+        let weaker = ExternalReceipt { executor: "mcp_subscribe_resource".into(), identity: context.operation_id.clone(),
+            epoch: "original-owner-epoch".into(), outcome: Outcome::Indeterminate, effect: Effect::Unknown,
+            result: json!({"error":"original caller transport uncertainty"}).into() };
+        let prepared = db.prepare_result_content().write_external_receipt(weaker).unwrap();
+        db.record_external_tool_receipt_prepared(&context.operation_id, &owner, prepared, false).unwrap();
+        let receipt = ExternalReceipt { executor: "mcp_subscribe_resource".into(), identity: context.operation_id.clone(),
+            epoch: "original-owner-epoch".into(),
+            outcome: if failure.is_none() { Outcome::Succeeded } else if failure == Some(false) { Outcome::Failed } else { Outcome::Indeterminate },
+            effect: if failure.is_none() { Effect::Confirmed } else if failure == Some(false) { Effect::None } else { Effect::Unknown },
+            result: if let Some(dispatched) = failure {
+                json!({"operationId":context.operation_id,"server":"original","uri":"original:resource",
+                    "error":{"code":"original-rejection","dispatched":dispatched,"settlement":"rpc_response","protocolError":{"data":"preserved detail"}}}).into()
+            } else {
+                json!({"operationId":context.operation_id,"server":"original","uri":"original:resource","acknowledgement":ack}).into()
+            } };
+        let expected_effect = receipt.effect;
+        let confirmed = if failure.is_some() {
+            let prepared = db.prepare_result_content().write_external_receipt(receipt.clone()).unwrap();
+            let failed = db.fail_mcp_resource_creation(&binding, prepared).unwrap();
+            let prepared = db.prepare_result_content().write_external_receipt(receipt.clone()).unwrap();
+            assert_eq!(db.fail_mcp_resource_creation(&binding, prepared).unwrap(), failed);
+            let mut different = receipt.clone();
+            different.result = json!({"error":"recalled no-send diagnostic"}).into();
+            let prepared = db.prepare_result_content().write_external_receipt(different).unwrap();
+            let recalled = db.fail_mcp_resource_creation(&binding, prepared);
+            assert_eq!(recalled.unwrap(), failed, "already-stopped original failure preserves its body when diagnostic wrappers differ");
+            failed
+        } else {
+            let mut wrong = receipt.clone();
+            wrong.epoch = "replacement-epoch".into();
+            let data = db.prepare_result_content().write_data(&ack).unwrap();
+            let prepared = db.prepare_result_content().write_external_receipt(wrong).unwrap();
+            assert!(db.accept_mcp_resource(&binding, "original-listener", data, prepared).is_err());
+            assert_eq!(db.operation(&context.operation_id).unwrap().mcp_resource_subscription.unwrap().acceptance_ref.is_some(), early_ack,
+                "ACK and stop evidence roll back together when original receipt validation fails");
+            let data = db.prepare_result_content().write_data(&ack).unwrap();
+            let prepared = db.prepare_result_content().write_external_receipt(receipt).unwrap();
+            let accepted = db.accept_mcp_resource(&binding, "original-listener", data, prepared).unwrap();
+            let failure = ExternalReceipt { executor: "mcp_subscribe_resource".into(), identity: context.operation_id.clone(),
+                epoch: "original-owner-epoch".into(), outcome: Outcome::Failed, effect: Effect::None, result: json!({"failure":true}).into() };
+            let prepared = db.prepare_result_content().write_external_receipt(failure.clone()).unwrap();
+            assert!(db.fail_mcp_resource_creation(&binding, prepared).is_err(), "failure cannot overwrite an accepted facet");
+            accepted
+        };
+        let sub = confirmed.mcp_resource_subscription.as_ref().unwrap();
+        assert!(confirmed.cancel_requested && sub.local_released && sub.listener_id.is_none());
+        assert!(db.update_mcp_resource_listener(&binding, None, Some("replacement-listener".into()),
+            crate::McpResourceAvailability::Active, false, crate::McpResourceCleanup::NotRequested, None).is_err());
+        assert!(confirmed.external_receipt.as_ref().unwrap().executor_stopped);
+        assert_eq!(confirmed.effect, expected_effect);
+        assert_eq!(confirmed.call_completion, before.call_completion);
+        assert_eq!(db.history("main").unwrap(), history);
+        assert!(db.resource_admission.inspect(&context.operation_id).is_none());
+        let weaker = ExternalReceipt { executor: "mcp_subscribe_resource".into(), identity: context.operation_id.clone(),
+            epoch: "original-owner-epoch".into(), outcome: Outcome::Indeterminate, effect: Effect::Unknown,
+            result: json!({"error":"late caller transport uncertainty"}).into() };
+        let prepared = db.prepare_result_content().write_external_receipt(weaker.clone()).unwrap();
+        assert_eq!(db.record_external_tool_receipt_prepared(&context.operation_id, &owner, prepared, false).unwrap(), confirmed);
+        let mut forged = weaker;
+        forged.epoch = "other-owner-epoch".into();
+        let prepared = db.prepare_result_content().write_external_receipt(forged).unwrap();
+        assert!(db.record_external_tool_receipt_prepared(&context.operation_id, &owner, prepared, false).is_err());
+        let mut wrong = binding.clone();
+        wrong.endpoint.credential_version = "replacement".into();
+        assert!(db.acknowledge_mcp_resource_holder_released(&wrong).is_err());
+        let released = db.acknowledge_mcp_resource_holder_released(&binding).unwrap();
+        assert_eq!(released.effect, confirmed.effect);
+        assert_eq!(released.outcome, confirmed.outcome);
+        assert_eq!(released.external_receipt, confirmed.external_receipt);
+        assert_eq!(released.call_completion, confirmed.call_completion);
+        assert_eq!(released.mcp_resource_subscription.as_ref().unwrap().availability, sub.availability);
+        assert_eq!(db.acknowledge_mcp_resource_holder_released(&binding).unwrap(), released);
+        assert!(db.pending_mcp_resources().unwrap().is_empty());
+        super::mcp_resources::require_source_released(&db.db, &run.run_id).unwrap();
+        drop(db);
+        let mut reopened = f.open();
+        assert!(reopened.pending_mcp_interactions().unwrap().is_empty());
+        for (interaction_id, original_binding) in &interactions {
+            let item = reopened.capture_mcp_interaction(&context.operation_id, interaction_id).unwrap().load().unwrap();
+            assert!(item.item.record.delivery_released);
+            assert_eq!(&item.item.record.binding, original_binding);
+        }
+    }
+}
+
+#[test]
+fn reply_deadline_short_facts_recheck_clock_and_catch_up_without_replacing_a_winner() {
+    use messages::reply_wait::{REPLY_EVENT, resolve};
+    let fixture = Fixture::new();
+    let mut db = fixture.open();
+    let receipt = submit(&mut db);
+    for (case, accepted_at, deadline) in [
+        ("early-before-registration", Some(999), Some(1000)),
+        ("at-deadline", Some(1000), Some(1000)),
+        ("wall-forward-backward", None, Some(1000)),
+        ("unbounded", None, None),
+    ] {
+        let after = db.event_cursor().unwrap();
+        let tx = db.db.transaction().unwrap();
+        // This is the same short event produced by accepted_reply, before observation
+        // registration. The body remains outside these Wait/Event records.
+        let reply_cursor = accepted_at.map(|accepted_at_ms| {
+            event(
+                &tx,
+                case,
+                1,
+                REPLY_EVENT,
+                json!({"reply_message_id":format!("reply:{case}"),"accepted_at_ms":accepted_at_ms}),
+            )
+            .unwrap()
+        });
+        let mut wait = Wait {
+            id: format!("reply-wait:{case}"),
+            run_id: receipt.run_id.clone(),
+            subject: case.into(),
+            kind: REPLY_EVENT.into(),
+            after_cursor: after,
+            deadline_at_ms: deadline,
+            trigger_cursor: None,
+            cancelled: false,
+        };
+        tx.execute(
+            "INSERT INTO waits(id,run_id,body) VALUES(?1,?2,?3)",
+            params![wait.id, wait.run_id, encode(&wait).unwrap()],
+        )
+        .unwrap();
+        if accepted_at.is_none() {
+            assert!(!resolve(&tx, &mut wait, 900).unwrap());
+            assert!(
+                !resolve(&tx, &mut wait, 800).unwrap(),
+                "backward wall adjustment cannot expire early"
+            );
+        }
+        assert_eq!(resolve(&tx, &mut wait, 2000).unwrap(), deadline.is_some());
+        let winner = wait.trigger_cursor;
+        if case == "early-before-registration" {
+            assert_eq!(
+                winner, reply_cursor,
+                "an already accepted on-time reply wins after delayed reconciliation"
+            );
+        } else if deadline.is_some() {
+            let kind: String = tx
+                .query_row(
+                    "SELECT kind FROM events WHERE cursor=?1",
+                    [sql_number(winner.unwrap()).unwrap()],
+                    |r| r.get(0),
+                )
+                .unwrap();
+            assert_eq!(kind, "wait.expired");
+        } else {
+            assert_eq!(winner, None);
+        }
+        assert!(!resolve(&tx, &mut wait, 700).unwrap());
+        assert_eq!(
+            wait.trigger_cursor, winner,
+            "backward clock adjustment cannot replace the persisted winner"
+        );
+        let persisted: Wait = record(&tx, "waits", &wait.id).unwrap();
+        assert_eq!(persisted.deadline_at_ms, deadline);
+        assert_eq!(persisted.trigger_cursor, winner);
+        tx.commit().unwrap();
+    }
+}
+
+#[path = "catalog_computer_tests.rs"]
+mod computer;
+
+#[test]
+fn queued_typed_media_text_edit_preserves_exact_owner_bytes_and_ref_ingress_is_rejected() {
+    use crate::output::*;
+    let f = Fixture::new();
+    let mut db = f.open();
+    submit(&mut db);
+    let queued=db.enqueue_input(&inputs::EnqueueInput{key:"queued-media".into(),thread_id:"thread".into(),branch_id:"main".into(),mode:InputMode::Boundary,input:json!({"text":"first","attachments":[{"media_type":"image/png","data_base64":"b3JpZ2luYWw="}]}),configuration:None}).unwrap();
+    let before = db.queued_input(&queued.input_id).unwrap();
+    let media: StoredMedia =
+        serde_json::from_value(before.content["attachments"][0].clone()).unwrap();
+    assert_eq!(
+        media.source,
+        OutputSource::Conversation {
+            provenance: crate::execution::Provenance::UserInstruction {
+                input_id: queued.input_id.clone()
+            }
+        }
+    );
+    let request = MediaReadParams {
+        thread_id: "thread".into(),
+        branch_id: "main".into(),
+        holder: OutputMediaHolder::Input {
+            input_id: queued.input_id.clone(),
+            expected_revision: before.revision,
+        },
+        part_index: 0,
+        chunk_index: 0,
+        expected_content_ref: media.content_ref.content_object.clone(),
+    };
+    assert_eq!(
+        db.capture_media_read(&request)
+            .unwrap()
+            .chunk(&|| false)
+            .unwrap()
+            .bytes_base64,
+        "b3JpZ2luYWw="
+    );
+    let edited = db
+        .edit_queued_input(
+            &queued.input_id,
+            before.revision,
+            json!({"text":"corrected"}),
+        )
+        .unwrap();
+    assert_eq!(
+        db.queued_input(&queued.input_id).unwrap().content["attachments"],
+        before.content["attachments"]
+    );
+    assert!(
+        db.capture_media_read(&request).is_err(),
+        "stale revision cannot authorize media access"
+    );
+    let current = MediaReadParams {
+        holder: OutputMediaHolder::Input {
+            input_id: queued.input_id.clone(),
+            expected_revision: edited.revision,
+        },
+        ..request
+    };
+    assert!(matches!(
+        db.capture_media_read(&current).unwrap().chunk(&|| true),
+        Err(RuntimeError::DispatchCancelled)
+    ));
+    assert!(
+        db.edit_queued_input(
+            &queued.input_id,
+            edited.revision,
+            json!({"text":"forged","attachments":[media]})
+        )
+        .is_err(),
+        "a public stored descriptor does not grant ingress by hash"
+    );
+    db.create_thread("foreign", "foreign-branch").unwrap();
+    assert!(
+        db.capture_media_read(&MediaReadParams {
+            thread_id: "foreign".into(),
+            branch_id: "foreign-branch".into(),
+            ..current.clone()
+        })
+        .is_err()
+    );
+    assert!(
+        db.capture_media_read(&MediaReadParams {
+            expected_content_ref: "sha256-unrelated".into(),
+            ..current.clone()
+        })
+        .unwrap()
+        .chunk(&|| false)
+        .is_err()
+    );
+    content_collection::collect(|| db.prepare_content_collection(Default::default())).unwrap();
+    drop(db);
+    let mut db = f.open();
+    assert_eq!(
+        db.capture_media_read(&current)
+            .unwrap()
+            .chunk(&|| false)
+            .unwrap()
+            .bytes_base64,
+        "b3JpZ2luYWw="
+    );
+    let cleared = db
+        .edit_queued_input(
+            &queued.input_id,
+            edited.revision,
+            json!({"text":"removed","attachments":[]}),
+        )
+        .unwrap();
+    assert_eq!(
+        db.queued_input(&queued.input_id).unwrap().content["attachments"],
+        json!([])
+    );
+    assert!(
+        db.capture_media_read(&MediaReadParams {
+            holder: OutputMediaHolder::Input {
+                input_id: queued.input_id,
+                expected_revision: cleared.revision
+            },
+            ..current
+        })
+        .unwrap()
+        .chunk(&|| false)
+        .is_err()
+    );
+}
+
+fn admitted_native_query(
+    db: &mut Catalog,
+) -> (
+    crate::nested_tools::NestedScopeGuard,
+    crate::nested_tools::InferenceScopeGuard,
+    inference::generation::InferenceGenerateParams,
+    String,
+) {
+    use crate::execution::*;
+    use std::sync::Arc;
+    let r = submit(db);
+    let epoch = db.epoch();
+    db.transition_run(&r.run_id, epoch, 1, RunState::Runnable)
+        .unwrap();
+    let goal = db
+        .prepare_goal_start(
+            "native-inference-goal",
+            &r.run_id,
+            goals::GoalScope {
+                thread_id: r.thread_id.clone(),
+                branch_id: r.branch_id.clone(),
+            },
+            "Keep original inference facts".into(),
+            Some(goals::GoalBudget {
+                max_output_tokens: 1000,
+            }),
+        )
+        .unwrap()
+        .load()
+        .unwrap();
+    db.admit_goal_mutation(goal).unwrap();
+    let mut snapshot = request_snapshot(&r);
+    snapshot.view.binding.goal = db.goal_binding(&r.run_id).unwrap();
+    let schema = ToolSchema {
+        name: "code_retrieval".into(),
+        version: "1".into(),
+        description: String::new(),
+        schema: json!({"type":"object"}),
+        requirements: None,
+        output_schema: None,
+        metadata: None,
+    };
+    snapshot.view.binding.tools.push(schema.clone());
+    db.commit_execution(
+        &r.run_id,
+        epoch,
+        &ExecutionRecord::RequestPrepared { snapshot: snapshot.into() },
+    )
+    .unwrap();
+    db.commit_execution(
+        &r.run_id,
+        epoch,
+        &ExecutionRecord::ModelDispatched {
+            request_id: "model-1".into(),
+        },
+    )
+    .unwrap();
+    let call = ToolCall {
+        call_id: "retrieve".into(),
+        name: "code_retrieval".into(),
+        schema_version: "1".into(),
+        arguments: json!({"question":"query"}),
+    };
+    db.commit_execution(
+        &r.run_id,
+        epoch,
+        &ExecutionRecord::ModelFinished {
+            request_id: "model-1".into(),
+            outcome: ModelOutcome::Completed,
+            finish_reason: Some(FinishReason::ToolCalls),
+            items: vec![ProviderItem {
+                id: "retrieve-call".into(),
+                content: Content::ToolCall { call },
+                opaque: None,
+            }],
+            interrupted_deltas: vec![],
+            failure: None,
+            usage: UsageReceipt {
+                measurement: UsageMeasurement::Actual,
+                input_tokens: Some(0),
+                output_tokens: Some(0),
+                cached_input_tokens: Some(0),
+                cache_write_tokens: Some(0),
+                reasoning_tokens: Some(0),
+                ..Default::default()
+            },
+        },
+    )
+    .unwrap();
+    let context = ToolExecutionContext {
+        run_id: r.run_id.clone(),
+        operation_id: "model-1:tool:retrieve".into(),
+        origin: ToolOrigin::ModelStep {
+            request_id: "model-1".into(),
+        },
+    };
+    let registry = db.nested_tools();
+    let scope = registry
+        .register(
+            context.clone(),
+            ExecutorOwner::Kernel,
+            Arc::new(FrozenToolContext {
+                run_id: r.run_id,
+                origin: context.origin.clone(),
+                child_dispatch: None,
+                resource_activations: vec![],
+                resource_checkpoint_id: None,
+                tool_schema_generation: 1,
+                tools: Arc::new(vec![schema]),
+                source: None,
+            }),
+            CancellationToken::default(),
+            Arc::new(|_, _| unreachable!("this query makes no nested tool call")),
+        )
+        .unwrap();
+    let delegation = registry.delegate_inference(&context).unwrap();
+    let params: inference::generation::InferenceGenerateParams = serde_json::from_value(json!({
+        "parentOperationId": context.operation_id, "callerOwner": delegation.owner(), "ordinal": 1,
+        "configuration": { "providerId":"fixture", "providerFamily":"openai-responses", "model":"fixture", "endpoint":"https://fixture.invalid/responses", "allowAnonymous":false, "configurationGeneration":1, "maxOutputTokens":100 },
+        "credentialScope": { "reference":"fixture", "authority":"fixture", "account":"fixture", "generation":1 },
+        "purpose":"explore", "systemPrompt":"Select original views", "user":"Original material",
+    })).unwrap();
+    let body = db
+        .prepare_inference_content()
+        .write(&serde_json::to_value(&params).unwrap())
+        .unwrap();
+    let id = db
+        .admit_inference_generation(&params, body)
+        .unwrap()
+        .operation_id;
+    assert!(
+        db.operation(&context.operation_id).is_err(),
+        "the cheap query has no synthetic parent Operation"
+    );
+    (scope, delegation, params, id)
+}
+
+#[test]
+fn native_inference_rejects_external_and_forged_kernel_dispatch_and_receipts() {
+    use inference::*;
+    let f = Fixture::new();
+    let mut db = f.open();
+    let (_scope, _delegation, params, id) = admitted_native_query(&mut db);
+    assert_eq!(
+        db.operation(&id).unwrap().execution_owner,
+        Some(ExecutorOwner::Kernel)
+    );
+    let before = db.operation(&id).unwrap();
+    for execution_owner in [params.caller_owner.clone(), ExecutorOwner::Kernel] {
+        let p = InferenceOwnerParams {
+            operation_id: id.clone(),
+            execution_owner: execution_owner.clone(),
+        };
+        assert!(db.dispatch_inference(&p).is_err());
+        assert!(
+            db.inference_receipt_pending(&InferenceReceiptPendingParams {
+                operation_id: id.clone(),
+                execution_owner: execution_owner.clone(),
+                request_started: Some(false)
+            })
+            .is_err()
+        );
+        let p = InferenceSettleParams {
+            operation_id: id.clone(),
+            execution_owner,
+            receipt: InferenceReceipt {
+                request_started: Some(false),
+                provider_completed: false,
+                local_executor_stopped: true,
+                usage: InferenceUsage::default(),
+                http_status: None,
+                problem: Some(InferenceProblem::NotDispatched),
+            },
+            response: json!({"forged":true}),
+        };
+        let body = db.prepare_inference_content().write(&p.response).unwrap();
+        assert!(db.settle_inference(&p, body).is_err());
+    }
+    assert_eq!(db.operation(&id).unwrap(), before);
+    let dispatched = db.dispatch_inference_generation(&id).unwrap();
+    assert!(dispatched.dispatched);
+    assert_eq!(
+        db.capture_goal("native-inference-goal")
+            .unwrap()
+            .load()
+            .unwrap()
+            .usage
+            .pending_inferences,
+        1
+    );
+}
+
+#[test]
+fn native_inference_checkpoint_reopens_original_usage_and_opaque_without_replay() {
+    use crate::execution::*;
+    use inference::generation::*;
+    let f = Fixture::new();
+    let mut db = f.open();
+    let (scope, delegation, params, id) = admitted_native_query(&mut db);
+    db.dispatch_inference_generation(&id).unwrap();
+    let item = ProviderItem {
+        id: "provider-item".into(),
+        content: Content::Text {
+            text: "partial original".into(),
+        },
+        opaque: Some(OpaqueProviderItem {
+            connection_identity: "fixture".into(),
+            family: "openai-responses".into(),
+            adapter_version: "1".into(),
+            value: json!({"signature":["original",null,42]}),
+        }),
+    };
+    let usage = UsageReceipt {
+        measurement: UsageMeasurement::Actual,
+        input_tokens: Some(19),
+        output_tokens: None,
+        cached_input_tokens: Some(4),
+        cache_write_tokens: Some(0),
+        reasoning_tokens: None,
+        raw: Some(json!({"provider_original":"retained"})),
+        pricing_version: Some("original-price".into()),
+    };
+    let output = GenerationOutput {
+        finish_reason: None,
+        events: vec![
+            ProviderEvent::ItemCompleted { item: item.clone() },
+            ProviderEvent::Usage {
+                receipt: usage.clone(),
+            },
+        ],
+        items: vec![item],
+        usage,
+    };
+    let original = generation_body(None, &output, None, None, None);
+    let body = db.prepare_inference_content().write(&original).unwrap();
+    db.checkpoint_inference_generation(&id, body, &output)
+        .unwrap();
+    drop(delegation);
+    drop(scope);
+    drop(db);
+    let mut db = f.open();
+    let status = db.inference_status(&id, &params.caller_owner).unwrap();
+    assert!(status.recovered);
+    assert_eq!(status.outcome, Some(Outcome::Indeterminate));
+    let receipt = status.receipt.unwrap();
+    assert!(!receipt.local_executor_stopped);
+    assert_eq!(receipt.request_started, None);
+    assert_eq!(receipt.usage.input_tokens, Some(19));
+    assert_eq!(receipt.usage.output_tokens, None);
+    assert_eq!(receipt.usage.cached_input_tokens, Some(4));
+    assert_eq!(receipt.usage.cache_write_tokens, Some(0));
+    assert_eq!(receipt.usage.reasoning_tokens, None);
+    let usage = db
+        .capture_goal("native-inference-goal")
+        .unwrap()
+        .load()
+        .unwrap()
+        .usage;
+    assert_eq!(usage.pending_inferences, 0);
+    assert_eq!(usage.actual.input_tokens.known, 19);
+    assert_eq!(usage.actual.output_tokens.unknown_receipts, 1);
+    assert_eq!(usage.actual.cached_input_tokens.known, 4);
+    assert!(db.dispatch_inference_generation(&id).is_err());
+    let body = db
+        .prepare_inference_content()
+        .write(&serde_json::to_value(&params).unwrap())
+        .unwrap();
+    assert!(db.admit_inference_generation(&params, body).is_err());
+    let body = db.prepare_inference_content().write(&original).unwrap();
+    assert!(
+        db.checkpoint_inference_generation(&id, body, &output)
+            .is_err()
+    );
+    assert_eq!(
+        db.prepare_content_collection(Default::default())
+            .run()
+            .status,
+        ContentCollectionStatus::Completed
+    );
+    let loaded = db
+        .capture_operation_read(db.operation(&id).unwrap())
+        .load()
+        .unwrap();
+    assert_eq!(
+        serde_json::to_value(loaded.result).unwrap()["value"]["response"],
+        original
+    );
+    assert_eq!(
+        db.capture_goal("native-inference-goal")
+            .unwrap()
+            .load()
+            .unwrap()
+            .usage,
+        usage
+    );
+}
+
+#[path = "catalog_bot_tests.rs"]
+mod bot_scope;

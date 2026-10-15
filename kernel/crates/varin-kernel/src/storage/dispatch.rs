@@ -39,9 +39,28 @@ impl Storage {
         authorized_grant: &Grant,
     ) -> Result<Value, KernelError> {
         self.sweep_compute_readers()?;
+        // Ownership is rechecked before idempotent dispatch can return a stored receipt.
+        if matches!(method, "storage.record.put" | "storage.record.release" | "working.result.put" | "working.result.release" | "working.draft.put" | "working.draft.release") {
+            self.validate_domain_record_identity(authorized_params, grant_id.unwrap_or(""))?;
+            if let (Some(workspace), Some(record)) = (
+                authorized_params.get("workspaceId").and_then(Value::as_str),
+                authorized_params.get("recordId").and_then(Value::as_str),
+            ) {
+                if let Some(value) = self.domain_record_value(workspace, record)? {
+                    if !self.grant_can_access_domain_record(&value, grant_id.unwrap_or(""))? {
+                        return Err(KernelError::Authorization("record belongs to another actor".into()));
+                    }
+                }
+            }
+        }
+        if method.starts_with("recovery.") {
+            self.recovery_workspace(authorized_params, grant_id.unwrap_or(""))?;
+        }
         let storage = self;
         match method {
-            method if method.starts_with("compute.") => storage.dispatch_compute(method, authorized_params, authorized_grant),
+            method if method.starts_with("compute.") => {
+                storage.dispatch_compute(method, authorized_params, authorized_grant)
+            }
             method if method.starts_with("process.") => {
                 storage.dispatch_process(method, authorized_params, authorized_grant)
             }
@@ -70,11 +89,11 @@ impl Storage {
                 authorized_params.get("workspaceId").and_then(Value::as_str),
                 grant_id.unwrap_or(""),
             ),
-            "storage.getBlob" => storage.get_blob(
-                authorized_params,
-                grant_id.unwrap_or(""),
-                authorized_grant.capabilities.contains("storage.admin"),
-            ),
+            // Real wire and native Tool readers are admitted by Kernel's shared worker path.
+            #[cfg(test)]
+            "storage.getBlob" => storage.read_blob_fixture(authorized_params, authorized_grant),
+            "file.materializedView.check" => storage.check_materialized_view(authorized_params, authorized_grant),
+            "file.read.check" => storage.file_read_check(authorized_params, authorized_grant),
             "file.root.register" => storage.file_root_register(authorized_params, authorized_grant),
             "file.operation.list" => {
                 storage.file_operation_list(authorized_params, authorized_grant)
@@ -85,19 +104,21 @@ impl Storage {
             "file.lease.acquire" => storage.file_lease_acquire(authorized_params, authorized_grant),
             "file.lease.check" => storage.file_lease_check(authorized_params, authorized_grant),
             "file.lease.release" => storage.file_lease_release(authorized_params, authorized_grant),
-            "file.capture" => storage.file_capture(authorized_params, authorized_grant),
             "file.apply" => storage.file_apply(authorized_params, authorized_grant),
             "file.mkdir" => storage.file_mkdir(authorized_params, authorized_grant),
             "file.remove" => storage.file_remove(authorized_params, authorized_grant),
             "file.rename" => storage.file_rename(authorized_params, authorized_grant),
-            "file.scan" => storage.file_scan(authorized_params, authorized_grant),
-            "file.measure" => storage.file_measure(authorized_params, authorized_grant),
-            "file.materialize" => storage.file_materialize(authorized_params, authorized_grant),
             "storage.record.put" => idempotent(storage, method, authorized_params, |storage| {
                 storage.domain_record_put(authorized_params, grant_id.unwrap_or(""))
             }),
             "storage.record.get" => {
                 storage.domain_record_get(authorized_params, grant_id.unwrap_or(""))
+            }
+            "storage.experiment.logChunks" => {
+                storage.experiment_log_chunk_page(authorized_params, grant_id.unwrap_or(""))
+            }
+            "storage.experiment.artifacts" => {
+                storage.experiment_artifact_page(authorized_params, grant_id.unwrap_or(""))
             }
             "storage.record.list" => {
                 storage.domain_record_list(authorized_params, grant_id.unwrap_or(""))
@@ -108,6 +129,18 @@ impl Storage {
             "storage.record.release" => idempotent(storage, method, authorized_params, |storage| {
                 storage.domain_record_release(authorized_params, grant_id.unwrap_or(""))
             }),
+            "working.result.prepare" => storage
+                .prepare_working_result(authorized_params, grant_id.unwrap_or(""))
+                .and_then(|receipt| {
+                    serde_json::to_value(super::result_publication::candidate_view(&receipt)?)
+                        .map_err(Into::into)
+                }),
+            "working.result.publish" => {
+                storage.publish_working_result(authorized_params, grant_id.unwrap_or(""))
+            }
+            "working.result.candidate.release" => {
+                storage.release_working_result_candidate(authorized_params, grant_id.unwrap_or(""))
+            }
             "working.result.put" => idempotent(storage, method, authorized_params, |storage| {
                 storage.working_record_put(
                     method,
@@ -162,82 +195,6 @@ impl Storage {
                     "working.draft",
                 )
             }),
-            "working.verification.put" => {
-                idempotent(storage, method, authorized_params, |storage| {
-                    let kind = authorized_params
-                        .get("kind")
-                        .and_then(Value::as_str)
-                        .ok_or_else(|| {
-                            KernelError::Operation("verification kind is required".to_string())
-                        })?;
-                    let record_type = match kind {
-                        "child" => "working.verification.child",
-                        "parent" => "working.verification.parent",
-                        _ => {
-                            return Err(KernelError::Operation(
-                                "verification kind is invalid".to_string(),
-                            ))
-                        }
-                    };
-                    storage.working_record_put(
-                        method,
-                        record_type,
-                        "recorded",
-                        "document",
-                        authorized_params,
-                        grant_id.unwrap_or(""),
-                    )
-                })
-            }
-            "working.verification.list" => {
-                let kind = authorized_params
-                    .get("kind")
-                    .and_then(Value::as_str)
-                    .ok_or_else(|| {
-                        KernelError::Operation("verification kind is required".to_string())
-                    })?;
-                let record_type = match kind {
-                    "child" => "working.verification.child",
-                    "parent" => "working.verification.parent",
-                    _ => {
-                        return Err(KernelError::Operation(
-                            "verification kind is invalid".to_string(),
-                        ))
-                    }
-                };
-                storage.working_record_list(authorized_params, grant_id.unwrap_or(""), record_type)
-            }
-            "working.verification.release" => {
-                idempotent(storage, method, authorized_params, |storage| {
-                    storage.working_record_release(
-                        authorized_params,
-                        grant_id.unwrap_or(""),
-                        "working.verification",
-                    )
-                })
-            }
-            "working.review.put" => idempotent(storage, method, authorized_params, |storage| {
-                storage.working_record_put(
-                    method,
-                    "working.review",
-                    "recorded",
-                    "document",
-                    authorized_params,
-                    grant_id.unwrap_or(""),
-                )
-            }),
-            "working.review.list" => storage.working_record_list(
-                authorized_params,
-                grant_id.unwrap_or(""),
-                "working.review",
-            ),
-            "working.review.release" => idempotent(storage, method, authorized_params, |storage| {
-                storage.working_record_release(
-                    authorized_params,
-                    grant_id.unwrap_or(""),
-                    "working.review",
-                )
-            }),
             "branch.create.begin" => {
                 storage.begin_branch_builder(authorized_params, grant_id.unwrap_or(""))
             }
@@ -279,6 +236,9 @@ impl Storage {
             }),
             "pin.read" => storage.pin_read(authorized_params, grant_id.unwrap_or("")),
             "storage.gc" => idempotent(storage, method, authorized_params, |storage| storage.gc()),
+            "recovery.operation.conflicts" => {
+                storage.recovery_operation_conflicts(authorized_params, authorized_grant)
+            }
             "recovery.operation.get" => {
                 storage.recovery_operation_get(authorized_params, grant_id.unwrap_or(""))
             }

@@ -1,3 +1,5 @@
+import { openThreadFromNavigation } from '@/lib/agent-runtime/threadNavigation';
+import { useThreadStore } from '@/stores/useThreadStore';
 import React from 'react';
 import { toast } from '@/components/ui';
 import { Button } from '@/components/ui/button';
@@ -15,14 +17,10 @@ import { useProjectsStore } from '@/stores/useProjectsStore';
 import { getWorktreeSetupCommands, type VarinProjectRef } from '@/lib/project-config';
 import type {
   CreateMultiRunParams,
-  MultiRunAgentSelection,
   MultiRunGroup,
 } from '@/types/multirun';
 import { ModelMultiSelect, generateInstanceId, type ModelSelectionWithId } from './ModelMultiSelect';
 import { BranchSelector, useBranchOptions } from './BranchSelector';
-import { PiAgentSelector } from './PiAgentSelector';
-import { CommandAutocomplete, type CommandAutocompleteHandle, type CommandInfo } from '@/components/chat/CommandAutocomplete';
-import { FileMentionAutocomplete, type FileMentionHandle } from '@/components/chat/FileMentionAutocomplete';
 import { Icon } from "@/components/icon/Icon";
 import { isDesktopShell } from '@/lib/desktop';
 import { useTabletStandalonePwaRuntime } from '@/lib/device';
@@ -92,7 +90,6 @@ export const MultiRunLauncher: React.FC<MultiRunLauncherProps> = ({
   const [runGroups, setRunGroups] = React.useState<RunGroupState[]>(() => [
     { id: generateInstanceId(), prompt: '', models: [] },
   ]);
-  const [selectedAgent, setSelectedAgent] = React.useState<MultiRunAgentSelection | null>(null);
   const [attachedFiles, setAttachedFiles] = React.useState<MultiRunAttachedFile[]>([]);
   const [isSubmitting, setIsSubmitting] = React.useState(false);
   const [setupCommands, setSetupCommands] = React.useState<string[]>([]);
@@ -254,6 +251,11 @@ export const MultiRunLauncher: React.FC<MultiRunLauncherProps> = ({
   const createMultiRun = useMultiRunStore((state) => state.createMultiRun);
   const error = useMultiRunStore((state) => state.error);
   const clearError = useMultiRunStore((state) => state.clearError);
+  const attempts = useMultiRunStore(state => state.attempts);
+  const ownerHostKey = useMultiRunStore(state => state.ownerHostKey);
+  const activeHostKey = useThreadStore(state => state.hostKey);
+  const stopLaunching = useMultiRunStore(state => state.stopLaunching);
+  const keepResultsAndReset = useMultiRunStore(state => state.keepResultsAndReset);
 
   React.useEffect(() => {
     if (typeof initialPrompt === 'string' && initialPrompt.trim().length > 0) {
@@ -372,7 +374,6 @@ export const MultiRunLauncher: React.FC<MultiRunLauncherProps> = ({
       const params: CreateMultiRunParams = {
         name: name.trim(),
         groups,
-        agent: selectedAgent ?? undefined,
         worktreeBaseBranch: effectiveIsolateRuns ? worktreeBaseBranch : undefined,
         isolateRuns: effectiveIsolateRuns,
         files: filesForStore.length > 0 ? filesForStore : undefined,
@@ -382,9 +383,8 @@ export const MultiRunLauncher: React.FC<MultiRunLauncherProps> = ({
       const result = await createMultiRun(params);
       if (result) {
         if (result.failures.length > 0) {
-          toast.warning(`${result.failures.length} run(s) failed to create or start`);
-        }
-        onCreated?.();
+          toast.warning(`${result.failures.length} run(s) need attention. Review their original outcomes below.`);
+        } else onCreated?.();
       }
     } finally {
       setIsSubmitting(false);
@@ -500,17 +500,6 @@ export const MultiRunLauncher: React.FC<MultiRunLauncherProps> = ({
                 </label>
               </div>
 
-              <div className="flex flex-col gap-1">
-                <FieldLabel htmlFor="multirun-agent" info={<InfoTip>{t('multirun.launcher.agent.info')}</InfoTip>}>
-                  {t('multirun.launcher.agent.label')}
-                </FieldLabel>
-                <PiAgentSelector
-                  cwd={selectedProjectDirectory}
-                  value={selectedAgent}
-                  onChange={setSelectedAgent}
-                  id="multirun-agent"
-                />
-              </div>
             </div>
 
             <Collapsible open={isSetupCommandsOpen} onOpenChange={setIsSetupCommandsOpen}>
@@ -643,6 +632,20 @@ export const MultiRunLauncher: React.FC<MultiRunLauncherProps> = ({
               {t('multirun.launcher.groups.addGroup')}
             </button>
 
+            {attempts.length > 0 && <section aria-label="Multi-run outcomes" className="space-y-2 text-sm">
+              {ownerHostKey !== activeHostKey && <p>These outcomes belong to the previous Host. Return there to inspect them.</p>}
+              {attempts.map(attempt => <div key={attempt.id} className="rounded border p-2">
+                <p>{attempt.title} · {attempt.status === 'accepted' ? 'Input accepted' : attempt.status}</p>
+                {attempt.identity && <p>Thread: {attempt.identity.threadId} · branch: {attempt.identity.branchId}</p>}
+                {attempt.receipt && <p>Run: {attempt.receipt.run_id}</p>}
+                {attempt.identity && ownerHostKey === activeHostKey && <Button type="button" variant="ghost" size="sm"
+                  onClick={() => { void openThreadFromNavigation(attempt.identity!).catch(error => toast.error(error instanceof Error ? error.message : 'Conversation unavailable')); }}>Open conversation</Button>}
+                {attempt.worktreePath && <p>Working copy: {attempt.worktreePath}</p>}
+                {attempt.error && <p role="alert">{attempt.error}</p>}
+              </div>)}
+              <p>Created threads and worktrees stay available after errors. An unconfirmed delivery retries its original command.</p>
+              {!isSubmitting && error && <Button type="button" variant="outline" size="sm" onClick={keepResultsAndReset}>Keep existing work and start a new batch</Button>}
+            </section>}
             {error && (
               <div
                 className="px-3 py-2 rounded-lg typography-meta"
@@ -680,6 +683,7 @@ export const MultiRunLauncher: React.FC<MultiRunLauncherProps> = ({
               {t('multirun.launcher.actions.cancel')}
             </Button>
           ) : null}
+          {isSubmitting && <Button type="button" variant="outline" size="sm" onClick={stopLaunching}>Stop launching</Button>}
           <Button type="submit" size="sm" disabled={!isValid || isSubmitting}>
             {isSubmitting ? (
               t('multirun.launcher.actions.creating')
@@ -711,14 +715,6 @@ const RunGroupCard: React.FC<RunGroupCardProps> = ({
   onRemove,
 }) => {
   const { t } = useI18n();
-  const [showFileMention, setShowFileMention] = React.useState(false);
-  const [mentionQuery, setMentionQuery] = React.useState('');
-  const [showCommandAutocomplete, setShowCommandAutocomplete] = React.useState(false);
-  const [commandQuery, setCommandQuery] = React.useState('');
-  const promptTextareaRef = React.useRef<HTMLTextAreaElement>(null);
-  const mentionRef = React.useRef<FileMentionHandle>(null);
-  const commandRef = React.useRef<CommandAutocompleteHandle>(null);
-
   const handleAddModel = React.useCallback((model: ModelSelectionWithId) => {
     onUpdate(group.id, { models: [...group.models, model] });
   }, [group.id, group.models, onUpdate]);
@@ -731,134 +727,6 @@ const RunGroupCard: React.FC<RunGroupCardProps> = ({
     onUpdate(group.id, { models: group.models.map((item, i) => (i === index ? model : item)) });
   }, [group.id, group.models, onUpdate]);
 
-  const updateAutocompleteState = React.useCallback((value: string, cursorPosition: number) => {
-    if (value.startsWith('/')) {
-      const firstSpace = value.indexOf(' ');
-      const firstNewline = value.indexOf('\n');
-      const commandEnd = Math.min(
-        firstSpace === -1 ? value.length : firstSpace,
-        firstNewline === -1 ? value.length : firstNewline,
-      );
-
-      if (cursorPosition <= commandEnd && firstSpace === -1) {
-        setCommandQuery(value.substring(1, commandEnd));
-        setShowCommandAutocomplete(true);
-        setShowFileMention(false);
-        return;
-      }
-    }
-
-    setShowCommandAutocomplete(false);
-
-    const textBeforeCursor = value.substring(0, cursorPosition);
-    const lastAtSymbol = textBeforeCursor.lastIndexOf('@');
-    if (lastAtSymbol !== -1) {
-      const charBefore = lastAtSymbol > 0 ? textBeforeCursor[lastAtSymbol - 1] : null;
-      const textAfterAt = textBeforeCursor.substring(lastAtSymbol + 1);
-      const isWordBoundary = !charBefore || /\s/.test(charBefore);
-      if (isWordBoundary && !textAfterAt.includes(' ') && !textAfterAt.includes('\n')) {
-        setMentionQuery(textAfterAt);
-        setShowFileMention(true);
-      } else {
-        setShowFileMention(false);
-      }
-      return;
-    }
-
-    setShowFileMention(false);
-  }, []);
-
-  const setPrompt = React.useCallback((value: string) => {
-    onUpdate(group.id, { prompt: value });
-  }, [group.id, onUpdate]);
-
-  const handleFileSelect = React.useCallback((file: { name: string; path: string; relativePath?: string }) => {
-    const prompt = group.prompt;
-    const textarea = promptTextareaRef.current;
-    const cursorPosition = textarea?.selectionStart ?? prompt.length;
-    const textBeforeCursor = prompt.substring(0, cursorPosition);
-    const lastAtSymbol = textBeforeCursor.lastIndexOf('@');
-    const mentionPath = (file.relativePath && file.relativePath.trim().length > 0)
-      ? file.relativePath.trim()
-      : (file.path || file.name);
-
-    const startIndex = lastAtSymbol !== -1 ? lastAtSymbol : cursorPosition;
-    const nextPrompt = `${prompt.substring(0, startIndex)}@${mentionPath} ${prompt.substring(cursorPosition)}`;
-    const nextCursor = startIndex + mentionPath.length + 2;
-
-    setPrompt(nextPrompt);
-    setShowFileMention(false);
-    setMentionQuery('');
-
-    requestAnimationFrame(() => {
-      const currentTextarea = promptTextareaRef.current;
-      if (currentTextarea) {
-        currentTextarea.selectionStart = nextCursor;
-        currentTextarea.selectionEnd = nextCursor;
-        currentTextarea.focus();
-      }
-      updateAutocompleteState(nextPrompt, nextCursor);
-    });
-  }, [group.prompt, setPrompt, updateAutocompleteState]);
-
-  const handleAgentSelect = React.useCallback((agentName: string) => {
-    const prompt = group.prompt;
-    const textarea = promptTextareaRef.current;
-    const cursorPosition = textarea?.selectionStart ?? prompt.length;
-    const textBeforeCursor = prompt.substring(0, cursorPosition);
-    const lastAtSymbol = textBeforeCursor.lastIndexOf('@');
-    const startIndex = lastAtSymbol !== -1 ? lastAtSymbol : cursorPosition;
-    const nextPrompt = `${prompt.substring(0, startIndex)}@${agentName} ${prompt.substring(cursorPosition)}`;
-    const nextCursor = startIndex + agentName.length + 2;
-
-    setPrompt(nextPrompt);
-    setShowFileMention(false);
-    setMentionQuery('');
-
-    requestAnimationFrame(() => {
-      const currentTextarea = promptTextareaRef.current;
-      if (currentTextarea) {
-        currentTextarea.selectionStart = nextCursor;
-        currentTextarea.selectionEnd = nextCursor;
-        currentTextarea.focus();
-      }
-      updateAutocompleteState(nextPrompt, nextCursor);
-    });
-  }, [group.prompt, setPrompt, updateAutocompleteState]);
-
-  const handleCommandSelect = React.useCallback((command: CommandInfo) => {
-    const nextPrompt = `/${command.name} `;
-    setPrompt(nextPrompt);
-    setShowCommandAutocomplete(false);
-    setCommandQuery('');
-
-    requestAnimationFrame(() => {
-      const currentTextarea = promptTextareaRef.current;
-      if (currentTextarea) {
-        currentTextarea.focus();
-        currentTextarea.selectionStart = currentTextarea.value.length;
-        currentTextarea.selectionEnd = currentTextarea.value.length;
-      }
-      updateAutocompleteState(nextPrompt, nextPrompt.length);
-    });
-  }, [setPrompt, updateAutocompleteState]);
-
-  const handlePromptKeyDown = React.useCallback((event: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    if (showCommandAutocomplete && commandRef.current) {
-      if (event.key === 'Enter' || event.key === 'ArrowUp' || event.key === 'ArrowDown' || event.key === 'Escape' || event.key === 'Tab') {
-        event.preventDefault();
-        commandRef.current.handleKeyDown(event.key);
-        return;
-      }
-    }
-
-    if (showFileMention && mentionRef.current) {
-      if (event.key === 'Enter' || event.key === 'ArrowUp' || event.key === 'ArrowDown' || event.key === 'Escape' || event.key === 'Tab') {
-        event.preventDefault();
-        mentionRef.current.handleKeyDown(event.key);
-      }
-    }
-  }, [showCommandAutocomplete, showFileMention]);
 
   return (
     <div className="rounded-lg border border-border p-3 space-y-3">
@@ -881,42 +749,10 @@ const RunGroupCard: React.FC<RunGroupCardProps> = ({
       <div className="flex flex-col gap-1.5">
         <FieldLabel required>{t('multirun.launcher.groups.prompt.label')}</FieldLabel>
         <div className="relative">
-          <Textarea
-            ref={promptTextareaRef}
-            value={group.prompt}
-            onChange={(event) => {
-              const nextPrompt = event.target.value;
-              setPrompt(nextPrompt);
-              const cursorPosition = event.target.selectionStart ?? nextPrompt.length;
-              updateAutocompleteState(nextPrompt, cursorPosition);
-            }}
-            onKeyDown={handlePromptKeyDown}
+          <Textarea value={group.prompt}
+            onChange={event => onUpdate(group.id, { prompt: event.target.value })}
             placeholder={t('multirun.launcher.groups.prompt.placeholder')}
-            className="typography-meta min-h-[80px] max-h-[200px] resize-none overflow-y-auto field-sizing-content"
-            required
-          />
-
-          {showCommandAutocomplete ? (
-            <CommandAutocomplete
-              ref={commandRef}
-              cwd={projectDirectory}
-              searchQuery={commandQuery}
-              onCommandSelect={handleCommandSelect}
-              onClose={() => setShowCommandAutocomplete(false)}
-              style={{ left: 0, top: 'auto', bottom: 'calc(100% + 6px)', marginBottom: 0, maxWidth: '100%' }}
-            />
-          ) : null}
-
-          {showFileMention ? (
-            <FileMentionAutocomplete
-              ref={mentionRef}
-              searchQuery={mentionQuery}
-              onFileSelect={handleFileSelect}
-              onAgentSelect={handleAgentSelect}
-              onClose={() => setShowFileMention(false)}
-              style={{ left: 0, top: 'auto', bottom: 'calc(100% + 6px)', marginBottom: 0, maxWidth: '100%' }}
-            />
-          ) : null}
+            className="typography-meta min-h-[80px] max-h-[200px] resize-none overflow-y-auto field-sizing-content" required />
         </div>
       </div>
 

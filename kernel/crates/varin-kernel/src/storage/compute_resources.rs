@@ -11,6 +11,13 @@ fn relative(value:&str)->Result<String,KernelError>{
     Ok(path.split('/').filter(|s|!s.is_empty()&&*s!=".").collect::<Vec<_>>().join("/"))
 }
 impl Storage {
+    pub(crate) fn watch_compute(&self, id: &str, workspace_id: &str, grant: &Grant) -> Result<crate::compute::ComputeWatch, KernelError> {
+        let job = self.computations.jobs.get(id).ok_or_else(|| failure("Computation handle is not available in this epoch"))?;
+        if job.grant_id != grant.grant_id || job.workspace_id != workspace_id || job.epoch != grant.kernel_epoch {
+            return Err(KernelError::Authorization("Computation handle belongs to another actor/workspace/epoch".into()));
+        }
+        Ok(job.watch())
+    }
     pub(crate) fn sweep_compute_readers(&mut self)->Result<(),KernelError>{
         let done=self.computations.jobs.iter().filter(|(_,job)|job.done()).map(|(id,job)|(id.clone(),job.pin_id.clone(),job.revoked)).collect::<Vec<_>>();
         for(id,pin,revoked)in done{
@@ -60,9 +67,25 @@ impl Storage {
             let file=File::open(object_path(&self.root,object_hash)?)?;
             overlays.push(ObjectSource{path,revision:object.revision.clone(),hash:Some(object_hash.into()),file:Some(file)});
         }
-        if params.pin_id.is_some()&&params.root_id.is_some(){return Err(failure("A query cannot merge live disk with a pinned branch"));}
+        if [params.pin_id.is_some(), params.root_id.is_some(), params.branch_id.is_some()].into_iter().filter(|present| *present).count() > 1 {
+            return Err(failure("A query cannot merge multiple source authorities"));
+        }
+        if params.branch_id.is_some() != params.revision.is_some() || params.revision.is_some_and(|revision| revision < 0) {
+            return Err(failure("A branch computation requires a fixed non-negative revision"));
+        }
         let mut pin_id=None;let mut root=None;
-        let source=if let Some(pin)=&params.pin_id{
+        let source=if let Some(branch)=&params.branch_id {
+            let observed=self.branch_read(&json!({"branchId":branch,"revision":params.revision,"includeEntries":false}))?;
+            if observed["workspaceId"].as_str()!=Some(params.workspace_id.as_str()) {
+                return Err(KernelError::Authorization("Branch workspace does not match computation".into()));
+            }
+            let hash=observed["root"].as_str().ok_or_else(||failure("Branch root identity is unavailable"))?.to_string();
+            let reader_pin=format!("compute-reader:{}",Uuid::new_v4());
+            self.conn.execute("INSERT INTO pins(pin_id,branch_id,workspace_id,revision,write_revision,root_hash,grant_id,ephemeral,created_at) VALUES(?1,?2,?3,?4,?4,?5,?6,1,?7)",
+                params![reader_pin,branch,params.workspace_id,params.revision,hash,format!("native-reader:{}",grant.kernel_epoch),now_ms()])?;
+            pin_id=Some(reader_pin);root=Some(hash.clone());
+            Source::Tree{catalog:self.root.join("catalog.sqlite"),objects:self.root.clone(),root:hash}
+        }else if let Some(pin)=&params.pin_id{
             let observed=self.pin_read(&json!({"pinId":pin,"includeEntries":false,"__pathScopes":scopes}),&grant.grant_id)?;
             if observed["workspaceId"].as_str()!=Some(params.workspace_id.as_str()){return Err(KernelError::Authorization("Pin workspace does not match computation".into()));}
             let hash=observed["root"].as_str().ok_or_else(||failure("Pin root identity is unavailable"))?.to_string();

@@ -6,7 +6,8 @@ import { ROUTE_PARAMS } from './types';
  * Application state relevant for URL serialization.
  */
 export interface AppRouteState {
-  sessionId: string | null;
+  threadId: string | null;
+  branchId: string | null;
   tab: MainTab;
   isSettingsOpen: boolean;
   settingsPath: string;
@@ -26,8 +27,9 @@ function serializeRoute(state: AppRouteState): URLSearchParams {
   const params = new URLSearchParams();
 
   // Session ID - always include if present
-  if (state.sessionId && state.sessionId.trim().length > 0) {
-    params.set(ROUTE_PARAMS.SESSION, state.sessionId);
+  if (state.threadId && state.threadId.trim().length > 0) {
+    params.set(ROUTE_PARAMS.THREAD, state.threadId);
+    if (state.branchId) params.set(ROUTE_PARAMS.BRANCH, state.branchId);
   }
 
   // Settings takes precedence - if open, include settings section

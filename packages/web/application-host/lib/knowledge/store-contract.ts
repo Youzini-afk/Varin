@@ -1,3 +1,4 @@
+import type { PlanView, PlanSelection, PlanCandidate, PlanSnapshot, PlanMutationInput, PlanMutationResult, PlanForkInput, PlanForkCapture, PlanChanged } from "@varin/protocol";
 /** Shared private KnowledgeStore contract. No native module is loaded here. */
 
 // ── Types ──────────────────────────────────────────────────────────
@@ -29,63 +30,6 @@ export interface EventInput {
 
 export interface StoredEvent extends EventInput {
   id: NodeId;
-}
-
-export interface SessionInput {
-  sessionId: string;
-  profile: string;
-  workspaceId: string;
-  startedAt: number;
-  harness: unknown;
-}
-
-export type BlockUpdatedBy = "agent" | "memory-agent" | "user";
-
-export interface Block {
-  sessionId: string;
-  label: string;
-  content: string;
-  updatedBy: BlockUpdatedBy;
-  cursorTurn?: number;
-  updatedAt: number;
-  /**
-   * The Pi session leaf entry ID at the time this block was written.
-   * Used for branch-aware visibility: a block is visible on the current
-   * branch if its sourceLeafId is in the current branch's ancestor path
-   * (i.e. in `sessionManager.getBranch().map(e => e.id)`).
-   * null/undefined = legacy block written before branch tracking.
-   */
-  sourceLeafId?: string | null;
-}
-
-export interface BlockInput {
-  sessionId: string;
-  label: string;
-  content: string;
-  updatedBy: BlockUpdatedBy;
-  cursorTurn?: number;
-  expectedUpdatedAt?: number | null;
-  /**
-   * The Pi session leaf entry ID at write time. See Block.sourceLeafId.
-   */
-  sourceLeafId?: string | null;
-  /** Active branch ancestor path used to resolve the visible prior revision. */
-  branchEntryIds?: readonly string[];
-}
-
-export interface BlockChange {
-  previous: Block | null;
-  current: Block | null;
-}
-
-export class KnowledgeBlockConflictError extends Error {
-  readonly current: Block | null;
-
-  constructor(current: Block | null) {
-    super("Session block changed after it was opened");
-    this.name = "KnowledgeBlockConflictError";
-    this.current = current;
-  }
 }
 
 export type KnowledgeScope = "workspace" | "user" | "session" | "bot";
@@ -190,9 +134,8 @@ export interface KnowledgeOrEvent {
 }
 
 /**
- * Durable background-organizer coverage (BC2). One row per source key inside
- * the store it covers — `session:<id>` for session sources (event + entry
- * cursors), `run:<runId>` for thread-run reports. `pending`/`processing`/
+ * Durable background-organizer coverage. Each source key identifies original
+ * Bot history material in its owning store. `pending`/`processing`/
  * `prepared` rows are unfinished work a restarted Host must resume; `failed`
  * keeps the cursor where the failure left it so the range retries instead of
  * silently passing.
@@ -224,6 +167,8 @@ export interface OrganizerPreparedProposal {
 
 export interface OrganizerProgress {
   key: string;
+  /** Original Catalog execution; immutable batch body lives only in ContentStore. */
+  workId?: string;
   status: OrganizerProgressStatus;
   /**
    * Content fingerprint of the covered source range. Coverage only counts
@@ -231,18 +176,8 @@ export interface OrganizerProgress {
    * matches the range's current content — a changed source reopens coverage.
    */
   sourceKey?: string;
-  /** Reviewed source ranges across every native Pi branch. Cursors are projections only. */
+  /** Reviewed ranges from original native Thread history. */
   coveredSources?: import("@varin/protocol").MemorySourceSpan[];
-  /** Last processed store event id for session sources. */
-  eventCursor?: number;
-  /** A prefix of the next event was covered; its id stays fixed across retries. */
-  eventPartial?: { id: number; offset: number };
-  /** Last processed Pi entry id for session sources. */
-  entryCursor?: string;
-  /** A prefix of the next Pi message was covered. */
-  entryPartial?: { id: string; offset: number };
-  /** End offset of this Run-report part; fixes its boundary across retries. */
-  runEndOffset?: number;
   /** Knowledge ids this source produced, for audit and late-result checks. */
   produced?: number[];
   /**
@@ -253,14 +188,6 @@ export interface OrganizerProgress {
   proposals?: OrganizerPreparedProposal[];
   /** Source identity frozen alongside proposals for crash reconciliation. */
   preparedSource?: KnowledgeSource;
-  /** Frozen end cursors for a prepared session range. Appended turns cannot
-   * change the proposal set that must be replayed before new material. */
-  preparedRange?: {
-    eventCursor?: number;
-    eventPartial?: { id: number; offset: number };
-    entryCursor?: string;
-    entryPartial?: { id: string; offset: number };
-  };
   updatedAt: number;
   lastError?: string;
 }
@@ -458,13 +385,22 @@ export interface PutEventResult {
 }
 
 /**
- * Terminal command observations are projected once per Pi session. JSON
- * encoding keeps session/command boundaries unambiguous when either contains
+ * Terminal command observations are projected once per admitted native Run. JSON
+ * encoding keeps owner/command boundaries unambiguous when either contains
  * punctuation used by a human-readable key.
  */
 export const terminalCommandDedupeKey = (sessionId: string, commandId: string): string => (
   `terminal-command:${JSON.stringify([sessionId, commandId])}`
 );
+
+/** Domain idempotency only: the original Operation owns execution and cancellation. */
+export interface KnowledgeMutationOrigin { id: string; intent: string }
+export interface KnowledgeMutationReceipt {
+  origin: KnowledgeMutationOrigin;
+  action: 'remember' | 'correct' | 'forget';
+  result: KnowledgeCreateIfAbsentResult | { id: NodeId; previous: Knowledge } | null;
+  changes: Knowledge[];
+}
 
 export interface KnowledgeStore {
   readonly dim: number;
@@ -472,46 +408,25 @@ export interface KnowledgeStore {
   knowledgeRevision(): string;
   putEvent(e: EventInput): Promise<PutEventResult>;
   listEvents(filter: { sessionId: string; afterId?: NodeId; minTurnIndex?: number }): Promise<StoredEvent[]>;
-  /** Distinct session ids that have written events into this store. */
-  listEventSessionIds(): Promise<string[]>;
   /** Read one organizer coverage row, or null when the source is untouched. */
   getOrganizerProgress(key: string): Promise<OrganizerProgress | null>;
   /** Upsert one organizer coverage row by key. */
   putOrganizerProgress(progress: OrganizerProgress): Promise<void>;
   /** All organizer coverage rows in this store (reconcile/status surface). */
   listOrganizerProgress(): Promise<OrganizerProgress[]>;
-  putSession(s: SessionInput): Promise<NodeId>;
-  /**
-   * Read blocks for a session. If `branchEntryIds` is provided, only blocks
-   * whose `sourceLeafId` is in that array (or null/undefined for legacy
-   * blocks) are returned — this is the ancestor-resolution view. If omitted,
-   * all blocks for the session are returned (legacy/debug behavior).
-   */
-  getBlocks(sessionId: string, branchEntryIds?: readonly string[]): Promise<Block[]>;
-  upsertBlock(b: BlockInput): Promise<Block>;
-  /**
-   * Delete a block. A branch-scoped delete writes a tombstone at the active
-   * leaf so sibling branches retain their inherited revision. If
-   * `expectedUpdatedAt` is provided, deletion is conditional on the visible
-   * block revision matching.
-   */
-  deleteBlock(
-    sessionId: string,
-    label: string,
-    options?: {
-      branchEntryIds?: readonly string[];
-      expectedUpdatedAt?: number | null;
-      sourceLeafId?: string | null;
-      updatedBy?: BlockUpdatedBy;
-      cursorTurn?: number;
-    },
-  ): Promise<void>;
+  /** Native plans have real Thread/branch keys, never Pi session aliases. */
+  readPlanCandidate(view: PlanView, ref?: string | null): Promise<PlanCandidate>;
+  readPlan(view: PlanView, selection: PlanSelection): Promise<PlanSnapshot | null>;
+  mutatePlan(input: PlanMutationInput): Promise<PlanMutationResult>;
+  readPlanMutation(input: PlanMutationInput): Promise<PlanMutationResult | null>;
+  capturePlanFork(input: PlanForkInput): Promise<PlanForkCapture>;
   putKnowledge(k: KnowledgeInput): Promise<NodeId>;
   /**
    * Atomically create one knowledge row unless the same normalized content
    * already exists in this scope, including dismissed and retired history.
    */
-  createKnowledgeIfAbsent(k: KnowledgeInput, options?: { expectedRevision?: string; explicit?: boolean }): Promise<KnowledgeCreateIfAbsentResult>;
+  readKnowledgeMutation(origin: KnowledgeMutationOrigin): Promise<KnowledgeMutationReceipt | null>;
+  createKnowledgeIfAbsent(k: KnowledgeInput, options?: { expectedRevision?: string; explicit?: boolean; origin?: KnowledgeMutationOrigin }): Promise<KnowledgeCreateIfAbsentResult>;
   updateSuggestedKnowledge(
     id: NodeId,
     patch: { content: string; trigger: string },
@@ -535,6 +450,7 @@ export interface KnowledgeStore {
     input: KnowledgeInput,
     expectedScope?: KnowledgeScope,
     expected?: KnowledgeExpectedRevision,
+    origin?: KnowledgeMutationOrigin,
   ): Promise<{ id: NodeId; previous: Knowledge }>;
   /**
    * Hide one knowledge row from current-effective queries by setting `invalidAt`.
@@ -544,6 +460,7 @@ export interface KnowledgeStore {
     id: NodeId,
     expectedScope?: KnowledgeScope,
     expected?: KnowledgeExpectedRevision,
+    origin?: KnowledgeMutationOrigin,
   ): Promise<void>;
   getKnowledge(id: NodeId): Promise<Knowledge | null>;
   listKnowledge(filter: { scope?: KnowledgeScope; status?: KnowledgeStatus; activeOnly?: boolean }): Promise<Knowledge[]>;
@@ -642,7 +559,6 @@ export interface KnowledgeStore {
    * candidate, not every string-literal call (D-109).
    */
   connectionLiterals(values: readonly string[]): Promise<Set<string>>;
-  deleteSession(sessionId: string): Promise<void>;
   runRetention(now: Date, policy: { eventRetentionDays: number }): Promise<{ removed: number }>;
   close(): Promise<void>;
 }
@@ -651,14 +567,14 @@ export interface OpenWorkspaceKnowledgeDeps {
   dataDir: string;
   hostId: string;
   /**
-   * Storage shard key. Workspace/user stores keep their existing key; HR0
-   * session-owned stores use `session-*` keys derived from the session scope.
+   * Storage shard key. Workspace/user stores keep their existing key; native
+   * Thread knowledge uses an owner-qualified key derived from its Thread scope.
    */
   workspaceId: string;
   /** Owner scope classification for records written into this store. */
   scope?: KnowledgeScope;
   embedding: EmbeddingProvider | null;
-  onBlocksChanged?: (sessionId: string, change: BlockChange) => void;
   onKnowledgeChanged?: (ids: readonly NodeId[]) => void;
+  onPlanChanged?: (change: PlanChanged) => void;
   onPersistenceError?: (error: unknown) => void;
 }

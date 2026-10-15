@@ -1,3 +1,4 @@
+import type { ThreadObservationIdentity } from './context-runtime.js';
 import type { TerminalCommandRecord } from "../terminal/session-api.js";
 import type { TerminalCommandEvent } from "./observers.js";
 
@@ -6,22 +7,22 @@ export type TerminalCommandProjectionResult = Readonly<Record<string, boolean>>;
 export interface TerminalCommandProjectorDeps {
   drain(): Promise<void>;
   inspectCwd?(terminalId: string): string | undefined;
-  listBoundSessions(workspaceId: string): string[];
-  /** Persist the observation for one target Pi session. */
-  observe(event: TerminalCommandEvent, targetSessionId?: string): boolean | Promise<boolean>;
+  listBoundOwners(workspaceId: string): Promise<ThreadObservationIdentity[]>;
+  /** Persist the observation for one target native Thread. */
+  observe(event: TerminalCommandEvent, target?: ThreadObservationIdentity): boolean | Promise<boolean>;
   onError?(error: unknown): void;
   resolveWorkspaceId(scope: string): Promise<string | null>;
 }
 
 export type TerminalCommandObservationRuntime = {
-  observeTerminalCommand(event: TerminalCommandEvent, targetSessionId?: string): Promise<boolean>;
+  observeTerminalCommand(event: TerminalCommandEvent, target?: ThreadObservationIdentity): Promise<boolean>;
 };
 
-/** The application-host adapter preserves the projector's target session. */
+/** The application-host adapter preserves the projector's target Thread. */
 export const createTerminalCommandObserveAdapter = (
   runtime: TerminalCommandObservationRuntime,
 ): TerminalCommandProjectorDeps["observe"] => (
-  (event, targetSessionId) => runtime.observeTerminalCommand(event, targetSessionId)
+  (event, target) => runtime.observeTerminalCommand(event, target)
 );
 
 export function createTerminalCommandProjector(deps: TerminalCommandProjectorDeps) {
@@ -49,26 +50,26 @@ export function createTerminalCommandProjector(deps: TerminalCommandProjectorDep
       ...(record.startedAt === undefined ? {} : { startedAt: record.startedAt }),
       cwd,
     };
-    const targetSessionIds = [...new Set(deps.listBoundSessions(workspaceId))];
-    if (targetSessionIds.length === 0) return {};
-    const inserted = await Promise.all(targetSessionIds.map(async (targetSessionId) => {
+    const targets = [...new Map((await deps.listBoundOwners(workspaceId)).map(owner => [owner.runId, owner])).values()];
+    if (targets.length === 0) return {};
+    const inserted = await Promise.all(targets.map(async (target) => {
       try {
         return {
-          sessionId: targetSessionId,
-          inserted: await deps.observe(event, targetSessionId),
+          runId: target.runId,
+          inserted: await deps.observe(event, target),
         };
       } catch (error) {
         deps.onError?.(error);
-        return { sessionId: targetSessionId, inserted: false };
+        return { runId: target.runId, inserted: false };
       }
     }));
     try {
       await deps.drain();
     } catch (error) {
       deps.onError?.(error);
-      return Object.fromEntries(inserted.map(({ sessionId, inserted: wasInserted }) => [sessionId, wasInserted]));
+      return Object.fromEntries(inserted.map(({ runId, inserted: wasInserted }) => [runId, wasInserted]));
     }
-    return Object.fromEntries(inserted.map(({ sessionId, inserted: wasInserted }) => [sessionId, wasInserted]));
+    return Object.fromEntries(inserted.map(({ runId, inserted: wasInserted }) => [runId, wasInserted]));
   };
 
   return { project };

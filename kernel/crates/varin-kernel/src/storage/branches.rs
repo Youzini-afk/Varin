@@ -14,6 +14,9 @@ impl Storage {
                 let path = value.as_str().ok_or_else(|| {
                     KernelError::Operation(format!("{field} contains a non-string path"))
                 })?;
+                if field == "captureScopes" && path == "." {
+                    return Ok(".".to_string());
+                }
                 Self::validate_path(path).map(|segments| segments.join("/"))
             })
             .collect::<Result<Vec<_>, _>>()?;
@@ -97,6 +100,13 @@ impl Storage {
                     "parentRef".to_string(),
                     Value::String(parent_ref.to_string()),
                 );
+        }
+        if let Some(provenance)=params.get("sourceProvenance") {
+            let object=provenance.as_object().ok_or_else(||KernelError::Operation("invalid source provenance reference".into()))?;
+            if object.len()!=2 || object.get("objectHash").and_then(Value::as_str).is_none() || object.get("ownerId").and_then(Value::as_str).is_none() {
+                return Err(KernelError::Operation("invalid source provenance reference".into()));
+            }
+            identity["sourceProvenance"]=provenance.clone();
         }
         Ok(identity)
     }
@@ -301,6 +311,7 @@ impl Storage {
                 || existing.branch_id != branch_id
                 || existing.workspace_id != workspace_id
                 || existing.base_ref != base_ref
+                || existing.source_provenance != params.get("sourceProvenance").cloned()
                 || existing.parent_ref != parent_ref
                 || existing.draft_base_paths != draft_base_paths
                 || existing.capture_scopes != capture_scopes
@@ -320,6 +331,7 @@ impl Storage {
         self.branch_builders.insert(
             builder_id.to_string(),
             BranchBuilder {
+                source_provenance:params.get("sourceProvenance").cloned(),
                 operation_id: operation_id.to_string(),
                 branch_id: branch_id.to_string(),
                 workspace_id: workspace_id.to_string(),
@@ -426,6 +438,7 @@ impl Storage {
             "workspaceId": builder.workspace_id,
             "entries": builder.entries,
         });
+        if let Some(provenance)=builder.source_provenance {creation["sourceProvenance"]=provenance;}
         if let Some(base_ref) = &builder.base_ref {
             creation
                 .as_object_mut()
@@ -609,6 +622,11 @@ impl Storage {
             entries_to_write.push((segments, parsed));
         }
         Self::validate_batch_paths(&entries_to_write)?;
+        if let Some(provenance)=params.get("sourceProvenance") {
+            let hash=provenance["objectHash"].as_str().ok_or_else(||KernelError::Operation("source provenance hash missing".into()))?;
+            let owner=provenance["ownerId"].as_str().ok_or_else(||KernelError::Operation("source provenance owner missing".into()))?;
+            if owners_to_consume.insert(owner.into(),hash.into()).is_some_and(|old|old!=hash){return Err(KernelError::Operation("source provenance owner reused".into()));}
+        }
         self.validate_object_owners(workspace_id, grant_id, &owners_to_consume)?;
         let base_root = if let Some(base_ref) = params.get("baseRef").and_then(Value::as_str) {
             self.resolve_base_ref(base_ref, workspace_id)?
@@ -650,9 +668,12 @@ impl Storage {
         let now = now_ms();
         self.conn.execute("INSERT INTO branches(branch_id, workspace_id, create_params_hash, base_root, head_root, head_revision, write_revision, parent_ref, draft_base_paths_json, capture_scopes_json, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?4, 0, 0, ?5, ?6, ?7, ?8, ?8)", params![branch_id, workspace_id, create_params_hash, root, parent_ref, serde_json::to_string(&draft_base_paths)?, serde_json::to_string(&capture_scopes)?, now])?;
         self.conn.execute("INSERT OR IGNORE INTO revisions(branch_id, revision, root_hash, created_at) VALUES (?1, 0, ?2, ?3)", params![branch_id, root, now])?;
-        Ok(
-            json!({"branchId": branch_id, "root": root, "writeRevision": 0, "headRevision": 0, "created": true}),
-        )
+        let mut receipt=json!({"branchId": branch_id,"workspaceId":workspace_id, "root": root, "writeRevision": 0, "headRevision": 0, "created": true});
+        if let Some(provenance)=params.get("sourceProvenance") {
+            let reference=self.insert_source_provenance(workspace_id,branch_id,&root,provenance)?;
+            receipt["sourceProvenance"]=reference;
+        }
+        Ok(receipt)
     }
 
     pub(super) fn branch_read(&self, params: &Value) -> Result<Value, KernelError> {
@@ -700,15 +721,15 @@ impl Storage {
         let entries = if let Some(paths) = requested {
             let mut selected = Vec::new();
             for path in paths.iter().filter_map(Value::as_str) {
-                let canonical = Self::validate_path(path)?.join("/");
+                let canonical = if path.is_empty() { String::new() } else { Self::validate_path(path)?.join("/") };
                 if let Some(scopes) = scopes.as_ref() {
-                    if !path_allowed_scopes(scopes, &canonical) {
+                    if !path_metadata_allowed_scopes(scopes, &canonical) {
                         return Err(KernelError::Authorization(format!(
                             "path is outside grant scope: {canonical}"
                         )));
                     }
                 }
-                if let Some(state) = self.root_get(&root, &canonical)? {
+                if let Some(state) = self.root_get(&root, &canonical)?.or_else(|| canonical.is_empty().then_some(PathState::Directory{mode:None})) {
                     selected.push(json!({"path": canonical, "state": state}));
                 }
             }
@@ -1186,7 +1207,9 @@ impl Storage {
                 .optional()?;
             if let Some(owner) = owner.as_deref() {
                 let grant = self.load_grant(grant_id)?;
-                if owner != grant_id
+                let handoff_release = grant.handoff_operation_id.is_some()
+                    && self.authorize_child_handoff(&grant,"branch.unpin",params).is_ok();
+                if owner != grant_id && !handoff_release
                     && !grant.capabilities.contains("storage.maintenance")
                     && !grant.capabilities.contains("storage.admin")
                 {
@@ -1415,16 +1438,16 @@ impl Storage {
         let entries = if let Some(paths) = params.get("paths").and_then(Value::as_array) {
             let mut selected = Vec::new();
             for path in paths.iter().filter_map(Value::as_str) {
-                let canonical = Self::validate_path(path)?.join("/");
+                let canonical = if path.is_empty() { String::new() } else { Self::validate_path(path)?.join("/") };
                 if scopes
                     .as_ref()
-                    .is_some_and(|scopes| !path_allowed_scopes(scopes, &canonical))
+                    .is_some_and(|scopes| !path_metadata_allowed_scopes(scopes, &canonical))
                 {
                     return Err(KernelError::Authorization(format!(
                         "path is outside grant scope: {canonical}"
                     )));
                 }
-                if let Some(state) = self.root_get(&root, &canonical)? {
+                if let Some(state) = self.root_get(&root, &canonical)?.or_else(|| canonical.is_empty().then_some(PathState::Directory{mode:None})) {
                     selected.push(json!({"path": canonical, "state": state}));
                 }
             }

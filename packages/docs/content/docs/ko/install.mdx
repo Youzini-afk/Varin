@@ -5,7 +5,7 @@ description: 소스 또는 Docker로 데스크톱과 웹용 Varin를 설치하�
 
 # 설치
 
-Varin는 pre-1.0입니다. 오늘 지원되는 실행 방법은 **소스에서**와 **Docker로**뿐입니다. 패키지된 npm과 GitHub Release 다운로드는 아직 게시되지 않았습니다.
+아래 단계에 따라 Varin을 소스에서 빌드하거나 Docker로 실행하세요. 패키지와 지원 플랫폼은 [GitHub Releases](https://github.com/Youzini-afk/Varin/releases)에서 확인하세요.
 
 주요 제품 화면은 두 가지입니다:
 
@@ -18,9 +18,8 @@ Varin는 pre-1.0입니다. 오늘 지원되는 실행 방법은 **소스에서**
 - [Bun](https://bun.sh) 1.3.14
 - `kernel/rust-toolchain.toml`이 선택하는 Rust 도구 체인(rustup을 설치하면 저장소가 필요한 버전을 선택합니다)
 - Git
-- Windows에서 Pi 셸 도구를 실행할 때는 Git for Windows와 Git Bash
 
-별도의 OpenCode 또는 Pi CLI 설치는 **필요 없습니다**. 패키지된 데스크톱 및 컨테이너 빌드에는 고정된 Pi 런타임이 포함됩니다.
+Varin은 Application Host와 함께 네이티브 Rust Agent 런타임을 빌드하고 시작합니다. 별도의 에이전트 CLI는 필요하지 않습니다. 기존 작업 공간 파일과 과거 대화 데이터는 자동으로 이전하거나 덮어쓰지 않습니다.
 
 ## 소스에서 (웹)
 
@@ -67,7 +66,3 @@ Compose는 기본적으로 슬림 이미지 `ghcr.io/youzini-afk/varin-slim:late
 ```bash
 docker compose -f docker-compose.yml -f docker-compose.toolbelt.yml up -d
 ```
-
-## CLI 한 줄 설치 (미게시)
-
-`scripts/install.sh`와 `npx @varin/web`은 `@varin/web` npm 패키지를 대상으로 합니다. 그 패키지는 아직 공개 레지스트리에 없으므로, 릴리스가 게시되기 전까지 curl 설치 프로그램은 실패합니다. 그때까지는 소스 또는 Docker를 사용하세요.

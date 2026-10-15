@@ -15,14 +15,14 @@ struct OverviewWidgetView: View {
 
     private var sessionsColumn: some View {
         VStack(alignment: .leading, spacing: 0) {
-            if entry.snapshot.recentSessions.isEmpty {
+            if entry.snapshot.recentThreads.isEmpty {
                 Text("No sessions yet")
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
             } else {
-                ForEach(entry.snapshot.recentSessions.prefix(4)) { session in
-                    Link(destination: WidgetDeepLink.session(session.id)) {
+                ForEach(entry.snapshot.recentThreads.prefix(4)) { session in
+                    Link(destination: WidgetDeepLink.thread(session)) {
                         HStack(spacing: 8) {
                             // Every row shows a same-size dot so titles align: a filled orange
                             // dot for unread, a hollow grey ring for read.
@@ -152,7 +152,7 @@ struct QuickActionsWidget: Widget {
     }
 }
 
-// MARK: - Large home-screen widget: full session list with project labels
+// MARK: - Large home-screen widget: recent native Threads
 
 struct SessionsWidgetView: View {
     let entry: OverviewEntry
@@ -160,14 +160,14 @@ struct SessionsWidgetView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             header
-            if entry.snapshot.recentSessions.isEmpty {
+            if entry.snapshot.recentThreads.isEmpty {
                 Text("No sessions yet")
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             } else {
                 VStack(spacing: 0) {
-                    ForEach(entry.snapshot.recentSessions.prefix(6)) { session in
+                    ForEach(entry.snapshot.recentThreads.prefix(6)) { session in
                         row(session)
                     }
                 }
@@ -198,8 +198,8 @@ struct SessionsWidgetView: View {
         }
     }
 
-    private func row(_ session: WidgetSession) -> some View {
-        Link(destination: WidgetDeepLink.session(session.id)) {
+    private func row(_ session: WidgetThread) -> some View {
+        Link(destination: WidgetDeepLink.thread(session)) {
             HStack(spacing: 10) {
                 Group {
                     if session.unread {
@@ -214,12 +214,7 @@ struct SessionsWidgetView: View {
                         .font(.subheadline)
                         .fontWeight(session.unread ? .semibold : .regular)
                         .lineLimit(1)
-                    if let project = session.project, !project.isEmpty {
-                        Text(project)
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-                            .lineLimit(1)
-                    }
+
                 }
                 Spacer(minLength: 0)
             }
@@ -239,7 +234,7 @@ struct SessionsWidget: Widget {
                 .containerBackground(.fill.tertiary, for: .widget)
         }
         .configurationDisplayName("Sessions")
-        .description("Recent sessions with their project.")
+        .description("Recent conversations.")
         .supportedFamilies([.systemLarge])
     }
 }

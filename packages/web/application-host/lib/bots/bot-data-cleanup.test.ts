@@ -15,25 +15,16 @@ async function fixture() {
   const scope = botScopeId(id);
   const key = knowledgeStoreKeyForScope(scope);
   const bot: BotSummary = { id, name: 'Bot', homeDir: join(dataDir, 'bots', id), coordinatorHostId: 'host',
-    archived: true, instructions: null, model: null, entrySessionId: 'entry', createdAt: '', updatedAt: '',
+    archived: true, instructions: null, model: null, entry: { runtime: 'agent', threadId: 'entry', branchId: 'main' }, createdAt: '', updatedAt: '',
     deletion: { operationId: 'delete', error: null },
     activity: { state: 'asleep', operationId: 'sleep', planned: true, error: null, machines: [],
-      work: [{ threadId: 'child', sessionId: 'old-worker', runId: null, resume: false, stopped: true, resumed: false }] } };
+      work: [{ runtime: 'agent' as const, threadId: 'child', branchId: 'main', runId: 'old-run', resume: false, stopped: true, resumed: false }] } };
   await mkdir(join(dataDir, 'knowledge', 'host'), { recursive: true });
   await mkdir(bot.homeDir, { recursive: true });
   for (const name of [`${key}.tdb`, `${key}.tdb.wal`, `${key}.vec`, `${key}.pld.4`, 'other.tdb', 'user.tdb']) {
     await writeFile(join(dataDir, 'knowledge', 'host', name), 'fixture');
   }
-  let threads = ['root', 'child'];
-  const registry = {
-    listWorkspaceThreadSnapshots: vi.fn(async (scopeId: string) => {
-      expect(scopeId).toBe(scope);
-      return threads.map((id) => ({ thread: { id, parent: id === 'root' ? { kind: 'session', id: 'entry' } : { kind: 'thread', id: 'root' } }, activeRun: null }));
-    }),
-    listWorkspaceRunSessionIds: vi.fn(async () => ['worker']),
-  };
-  const deleteThread = vi.fn(async () => { threads = []; return { status: 'complete', nodeResults: [] }; });
-  const deleteSession = vi.fn(async (_sessionId: string) => {});
+  const deleteAgentScope = vi.fn(async () => {});
   const closeMemory = vi.fn(async () => {});
   const releaseRemoteScope = vi.fn(async () => {});
   const remove = vi.fn(async (identity: { canonicalRoot: string }, relative: string, opts: object) => {
@@ -41,17 +32,14 @@ async function fixture() {
     expect(closeMemory).toHaveBeenCalledWith(scope, key);
     await rm(join(dataDir, relative), opts);
   });
-  const clean = createBotDataCleanup({ dataDir, hostId: 'host', registry: registry as never,
-    deleteThread: deleteThread as never, deleteSession, closeMemory, releaseRemoteScope, files: { remove } });
-  return { clean, bot, dataDir, scope, key, deleteThread, deleteSession, closeMemory, releaseRemoteScope, remove };
+  const clean = createBotDataCleanup({ dataDir, hostId: 'host', deleteAgentScope, closeMemory, releaseRemoteScope, files: { remove } });
+  return { clean, bot, dataDir, scope, key, deleteAgentScope, closeMemory, releaseRemoteScope, remove };
 }
 
-it('deletes owned cascades, all historical sessions, memory sidecars and home while preserving other owners', async () => {
-  const { clean, bot, dataDir, scope, deleteThread, deleteSession, releaseRemoteScope } = await fixture();
+it('deletes the native scope, memory sidecars and home while preserving other owners', async () => {
+  const { clean, bot, dataDir, scope, deleteAgentScope, releaseRemoteScope } = await fixture();
   await clean(bot);
-  expect(deleteThread).toHaveBeenCalledTimes(1);
-  expect(deleteThread).toHaveBeenCalledWith(scope, { kind: 'session', id: 'entry' }, 'root');
-  expect(new Set(deleteSession.mock.calls.map(([session]) => session))).toEqual(new Set(['entry', 'old-worker', 'worker']));
+  expect(deleteAgentScope).toHaveBeenCalledExactlyOnceWith(bot);
   expect(releaseRemoteScope).toHaveBeenCalledWith(scope);
   expect(await readdir(join(dataDir, 'knowledge', 'host'))).toEqual(['other.tdb', 'user.tdb']);
   await expect(readdir(bot.homeDir)).rejects.toMatchObject({ code: 'ENOENT' });
@@ -59,15 +47,15 @@ it('deletes owned cascades, all historical sessions, memory sidecars and home wh
 });
 
 it('retains memory and files if the Thread cascade has unfinished cleanup', async () => {
-  const { clean, bot, deleteThread, remove, closeMemory } = await fixture();
-  deleteThread.mockResolvedValueOnce({ status: 'retryable', nodeResults: [{ threadId: 'child', status: 'retryable', error: 'Directory in use' }] } as never);
+  const { clean, bot, deleteAgentScope, remove, closeMemory } = await fixture();
+  deleteAgentScope.mockRejectedValueOnce(new Error('Directory in use'));
   await expect(clean(bot)).rejects.toThrow('Directory in use');
   expect(remove).not.toHaveBeenCalled();
   expect(closeMemory).not.toHaveBeenCalled();
 });
 
 it('rejects a home outside the exact Bot directory before any destructive call', async () => {
-  const { clean, bot, dataDir, deleteThread, deleteSession, remove } = await fixture();
+  const { clean, bot, dataDir, deleteAgentScope, remove } = await fixture();
   await expect(clean({ ...bot, homeDir: dataDir })).rejects.toThrow('Invalid Bot data directory');
-  expect(deleteThread).not.toHaveBeenCalled(); expect(deleteSession).not.toHaveBeenCalled(); expect(remove).not.toHaveBeenCalled();
+  expect(deleteAgentScope).not.toHaveBeenCalled(); expect(remove).not.toHaveBeenCalled();
 });

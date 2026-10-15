@@ -9,19 +9,23 @@ pub(crate) fn required_capability(method: &str) -> &'static str {
         "storage.health"
         | "storage.snapshot"
         | "storage.getBlob"
+        | "branch.pin"
+        | "branch.unpin"
         | "branch.read"
         | "branch.diff"
         | "pin.read"
         | "operation.get"
         | "storage.record.get"
         | "storage.record.list"
+        | "storage.experiment.artifacts"
+        | "storage.experiment.logChunks"
         | "working.result.get"
         | "working.result.list"
         | "working.draft.get"
         | "working.draft.list"
-        | "working.verification.list"
-        | "working.review.list"
         | "file.scan"
+        | "file.read"
+        | "file.read.check"
         | "file.measure"
         | "file.operation.list" => "storage.read",
         "storage.putBlob.begin"
@@ -38,16 +42,16 @@ pub(crate) fn required_capability(method: &str) -> &'static str {
         | "branch.write.finish"
         | "branch.write.abort"
         | "branch.publish"
-        | "branch.pin"
-        | "branch.unpin"
         | "branch.delete"
         | "operation.release"
         | "file.root.register"
         | "file.operation.reconcile"
         | "file.lease.acquire"
+        | "file.lease.wait"
         | "file.lease.check"
         | "file.lease.release"
         | "file.capture"
+        | "file.captureBatch"
         | "file.apply"
         | "file.mkdir"
         | "file.remove"
@@ -55,18 +59,18 @@ pub(crate) fn required_capability(method: &str) -> &'static str {
         | "file.materialize"
         | "storage.record.put"
         | "storage.record.release"
+        | "working.result.prepare"
+        | "working.result.publish"
+        | "working.result.candidate.release"
         | "working.result.put"
         | "working.result.release"
         | "working.draft.put"
-        | "working.draft.release"
-        | "working.verification.put"
-        | "working.verification.release"
-        | "working.review.put"
-        | "working.review.release" => "storage.write",
-        "storage.record.workspaces"
-        | "branch.objects" => "storage.maintenance",
+        | "working.draft.release" => "storage.write",
+        "storage.record.workspaces" | "branch.objects"
+        | "file.materializedView.prepare" | "file.materializedView.release" => "storage.maintenance",
         "storage.gc" => "storage.gc",
         "storage.object.rebindOwner"
+        | "recovery.operation.conflicts"
         | "recovery.operation.get"
         | "recovery.turn.start"
         | "recovery.turn.get"
@@ -105,4 +109,13 @@ pub(crate) fn path_allowed_scopes(scopes: &[String], path: &str) -> bool {
     scopes
         .iter()
         .any(|scope| scope.is_empty() || path == scope || path.starts_with(&format!("{scope}/")))
+}
+
+/// Exact branch/pin path metadata may expose the ancestors needed to traverse an admitted
+/// subtree. This never grants ancestor bytes, tree enumeration, or mutation authority.
+pub(crate) fn path_metadata_allowed_scopes(scopes: &[String], path: &str) -> bool {
+    path_allowed_scopes(scopes, path)
+        || scopes.iter().any(|scope| {
+            !scope.is_empty() && (path.is_empty() || scope.starts_with(&format!("{path}/")))
+        })
 }

@@ -8,7 +8,7 @@ import type { OpenWorkspaceKnowledgeDeps } from "./store-contract.js";
 const { TriviumDB } = createRequire(import.meta.url)("triviumdb") as typeof import("triviumdb");
 const roots: string[] = [];
 const stores: KnowledgeStoreEngine[] = [];
-async function fixture(callbacks: Pick<OpenWorkspaceKnowledgeDeps, "onBlocksChanged" | "onKnowledgeChanged" | "onPersistenceError"> = {}) {
+async function fixture(callbacks: Pick<OpenWorkspaceKnowledgeDeps, "onKnowledgeChanged" | "onPersistenceError"> = {}) {
   const root = await mkdtemp(join(tmpdir(), "varin-store-persistence-"));
   roots.push(root);
   const store = await openKnowledgeStoreEngine({ dataDir: root, hostId: "h", workspaceId: "w", embedding: null, ...callbacks });
@@ -40,34 +40,32 @@ describe("native store persistence", () => {
     expect(flush).toHaveBeenCalledTimes(1);
   });
 
-  it("no-op recall, delete and retention do not checkpoint a large unrelated store", async () => {
+  it("no-op recall and retention do not checkpoint a large unrelated store", async () => {
     const store = await fixture();
     await store.putEvent({ kind: "turn", at: Date.now(), sessionId: "live", text: "synthetic", source: "agent" });
     const flush = vi.spyOn(TriviumDB.prototype, "flush");
     await store.recordRecall([]);
     await store.recordRecall([999999]);
-    await store.deleteBlock("missing", "goal");
-    await store.deleteSession("missing");
     expect(await store.runRetention(new Date(), { eventRetentionDays: 1 })).toEqual({ removed: 0 });
     expect(flush).not.toHaveBeenCalled();
   });
 
-  it("retains acknowledged WAL-backed blocks when background checkpointing fails and recovers before new work", async () => {
-    const blocks = vi.fn();
+  it("retains acknowledged WAL-backed knowledge when background checkpointing fails and recovers before new work", async () => {
+    const changed = vi.fn();
     const failure = vi.fn();
-    const store = await fixture({ onBlocksChanged: blocks, onPersistenceError: failure });
+    const store = await fixture({ onKnowledgeChanged: changed, onPersistenceError: failure });
     vi.useFakeTimers();
     const flush = vi.spyOn(TriviumDB.prototype, "flush");
     flush.mockImplementationOnce(() => { throw new Error("injected native flush failure"); });
-    await store.runBatch(() => store.upsertBlock({
-      sessionId: "s", label: "goal", content: "synthetic", updatedBy: "user",
+    const id = await store.runBatch(() => store.putKnowledge({
+      scope: "workspace", status: "accepted", content: "synthetic", trigger: "fixture",
     }));
-    expect(blocks).toHaveBeenCalledTimes(1);
+    expect(changed).toHaveBeenCalledTimes(1);
     await vi.advanceTimersByTimeAsync(30_000);
     expect(failure).toHaveBeenCalledWith(expect.objectContaining({ message: "injected native flush failure" }));
-    const values = await store.runBatch(() => store.getBlocks("s"));
-    expect(values).toHaveLength(1);
-    expect(blocks).toHaveBeenCalledTimes(1);
+    const value = await store.runBatch(() => store.getKnowledge(id));
+    expect(value?.content).toBe("synthetic");
+    expect(changed).toHaveBeenCalledTimes(1);
     expect(flush).toHaveBeenCalledTimes(2);
   });
 

@@ -21,7 +21,7 @@ import type {
   VarinExtensionAssetPayload,
   VarinExtensionContributionKind,
   VarinExtensionServiceProvision,
-  VarinExtensionServiceRoutingContext,
+  VarinHostServiceConsumers,
   VarinExtensionStaticContribution,
   VarinExtensionStorageOpenRequest,
   VarinExtensionStorageSnapshot,
@@ -290,16 +290,19 @@ export interface VarinHostCapabilityClient {
   call(capability: string, method: string, params: JsonValue): Promise<JsonValue>;
 }
 
-export interface VarinHostServiceClient {
-  call(method: string, ...args: JsonValue[]): Promise<JsonValue>;
+export type { VarinHostServiceClient, VarinHostServiceUseOptions } from '@varin/extension-contract';
+
+export interface VarinHostServiceInvocationContext {
+  /** Cooperative cancellation; an aborted signal does not prove an external effect was undone. */
+  readonly signal: AbortSignal;
+  readonly callId: string;
+  /** Bound to this call; retaining it after completion cannot retain invocation authority. */
+  readonly capabilities: VarinHostCapabilityClient;
 }
 
-export interface VarinHostServiceUseOptions {
-  providerId?: string;
-  routing?: VarinExtensionServiceRoutingContext;
-}
-
-export type VarinHostServiceHandler = Record<string, (...args: JsonValue[]) => JsonValue | Promise<JsonValue>>;
+export type VarinHostServiceHandler = Record<string, (
+  args: JsonValue[], call: VarinHostServiceInvocationContext,
+) => JsonValue | Promise<JsonValue>>;
 
 export interface VarinHostStorageDocumentClient {
   readonly snapshot: VarinExtensionStorageSnapshot;
@@ -320,9 +323,8 @@ export interface VarinBrokeredHostContext {
   readonly assets: VarinHostAssets;
   readonly capabilities: VarinHostCapabilityClient;
   effect(disposer: () => void | Promise<void>): void;
-  readonly services: {
+  readonly services: VarinHostServiceConsumers & {
     provide(descriptor: VarinExtensionServiceProvision, handler: VarinHostServiceHandler): void;
-    use(id: string, version: number, provider?: string | VarinHostServiceUseOptions): VarinHostServiceClient;
   };
   readonly signal: AbortSignal;
   readonly storage: VarinHostStorageClient;
@@ -511,6 +513,13 @@ export const callWorkspaceRecoveryPrimitives = (
 ): Promise<JsonValue> => capabilities.call(VARIN_WORKSPACE_RECOVERY_PRIMITIVES_CAPABILITY, method, params);
 
 export interface VarinWorkspaceDocumentsClient {
+  discardWorkspaceEdit(request: JsonObject): Promise<JsonValue>;
+  prepareWorkspaceEdit(request: JsonObject): Promise<JsonValue>;
+  applyWorkspaceEdit(request: JsonObject): Promise<JsonValue>;
+  readWorkspaceEdit(request: JsonObject): Promise<JsonValue>;
+  readWorkspaceEditRecovery(request: JsonObject): Promise<JsonValue>;
+  undoWorkspaceEdit(request: JsonObject): Promise<JsonValue>;
+  listWorkspaceEdits(request: JsonObject): Promise<JsonValue>;
   delete(request: JsonObject): Promise<JsonValue>;
   move(request: JsonObject): Promise<JsonValue>;
   read(resource: JsonObject): Promise<JsonValue>;
@@ -521,6 +530,13 @@ export interface VarinWorkspaceDocumentsClient {
 export const createWorkspaceDocumentsClient = (
   capabilities: VarinIsolatedCapabilityClient | VarinHostCapabilityClient,
 ): VarinWorkspaceDocumentsClient => ({
+  discardWorkspaceEdit: request => callWorkspaceDocuments(capabilities, "discardWorkspaceEdit", request),
+  prepareWorkspaceEdit: request => callWorkspaceDocuments(capabilities, "prepareWorkspaceEdit", request),
+  applyWorkspaceEdit: request => callWorkspaceDocuments(capabilities, "applyWorkspaceEdit", request),
+  readWorkspaceEdit: request => callWorkspaceDocuments(capabilities, "readWorkspaceEdit", request),
+  readWorkspaceEditRecovery: request => callWorkspaceDocuments(capabilities, "readWorkspaceEditRecovery", request),
+  undoWorkspaceEdit: request => callWorkspaceDocuments(capabilities, "undoWorkspaceEdit", request),
+  listWorkspaceEdits: request => callWorkspaceDocuments(capabilities, "listWorkspaceEdits", request),
   resolveWorkspace: (input) => callWorkspaceDocuments(capabilities, "resolveWorkspace", input),
   read: (resource) => callWorkspaceDocuments(capabilities, "read", resource),
   write: (request) => callWorkspaceDocuments(capabilities, "write", request),
@@ -695,3 +711,17 @@ export const defineTestProvider = (
   });
   context.effect(async () => { await client.unregisterProvider(descriptor.providerId); });
 });
+
+export * from "./context-fragments.js";
+export * from "./context-budget.js";
+export * from "./context-compaction.js";
+
+export * from "./agent-policy.js";
+
+export * from "./run-activity.js";
+
+export * from "./retrieval-plan.js";
+
+export * from "./tools.js";
+
+export * from "./models.js";

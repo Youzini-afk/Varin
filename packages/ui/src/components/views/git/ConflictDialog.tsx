@@ -10,15 +10,15 @@ import { Button } from '@/components/ui/button';
 
 import { RiAlertLine, RiLoader4Line, RiChat1Line, RiAddLine } from '@remixicon/react';
 import { useUIStore } from '@/stores/useUIStore';
-import { usePiSessionStore } from '@/stores/usePiSessionStore';
+import { useThreadStore } from '@/stores/useThreadStore';
 import { toast } from '@/components/ui';
 import { getConflictDetails, type MergeConflictDetails } from '@/lib/gitApi';
 import { actionInstruction } from '@/lib/actionInstructions';
 import {
-  createPiSessionWithDraft,
-  joinPiDraftInstructions,
-  stagePiSessionDraft,
-} from '@/lib/pi-runtime/sessionDrafts';
+  createThreadWithDraft,
+  joinDraftInstructions,
+  stageThreadDraft,
+} from '@/lib/agent-runtime/threadDraftActions';
 import { useI18n } from '@/lib/i18n';
 
 interface ConflictDialogProps {
@@ -41,7 +41,7 @@ export const ConflictDialog: React.FC<ConflictDialogProps> = ({
   onClearState,
 }) => {
   const { t } = useI18n();
-  const currentSessionId = usePiSessionStore((state) => state.currentSessionId);
+  const currentSessionId = useThreadStore(state => state.selectedIdentity);
   const setActiveMainTab = useUIStore((state) => state.setActiveMainTab);
 
   const [isLoading, setIsLoading] = React.useState(false);
@@ -131,9 +131,9 @@ export const ConflictDialog: React.FC<ConflictDialogProps> = ({
       return;
     }
 
-    stagePiSessionDraft(currentSessionId, {
+    stageThreadDraft(currentSessionId, {
       text: context.visibleText,
-      instructions: joinPiDraftInstructions(context.instructionsText, context.payloadText),
+      instructions: joinDraftInstructions(context.instructionsText, context.payloadText),
     });
 
     setActiveMainTab('chat');
@@ -149,11 +149,11 @@ export const ConflictDialog: React.FC<ConflictDialogProps> = ({
     }
 
     try {
-      await createPiSessionWithDraft(
+      await createThreadWithDraft(
         { directory },
         {
           text: context.visibleText,
-          instructions: joinPiDraftInstructions(context.instructionsText, context.payloadText),
+          instructions: joinDraftInstructions(context.instructionsText, context.payloadText),
         },
       );
       onClearState?.();

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { createExploreQueryRun, vocabFromCatalog } from "./explore.js";
-import type { ExploreFileSnapshot } from "./explore-file-reader.js";
+import type { ExploreFileSnapshot } from "./file-snapshot.js";
 
 const ready = (content: string, revision = "rev-1"): ExploreFileSnapshot => ({
   status: "ready",

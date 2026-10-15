@@ -1,3 +1,4 @@
+import { renameWorkbenchResourcePrefix } from '@/lib/workbench/editors/session';
 import type { DocumentsAPI } from '@varin/application-client';
 import { registerRuntimeEndpointSwitchBlocker } from '@varin/application-client';
 import { DocumentRegistry } from './registry';
@@ -28,6 +29,9 @@ export const bindDocumentRegistry = (documents: DocumentsAPI): DocumentRegistry 
   if (active && bound === documents) return active;
   active?.dispose();
   active = new DocumentRegistry({ documents });
+  active.subscribeResourceMoves((from, to) => {
+    if (from.workspaceId === to.workspaceId) renameWorkbenchResourcePrefix(from.workspaceId, from.resourceId, to.resourceId);
+  });
   bound = documents;
   bindRecoveryLifecycle();
   return active;

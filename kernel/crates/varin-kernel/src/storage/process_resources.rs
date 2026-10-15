@@ -1,6 +1,7 @@
 //! Durable process admission and writer receipts, sharing the kernel catalog.
 //! Command arguments and environment are hashed, never persisted or logged.
 use super::*;
+use crate::model::GrantState;
 use crate::process::{self, CHUNK_BYTES};
 fn string<'a>(value: &'a Value, key: &str) -> Result<&'a str, KernelError> {
     value
@@ -40,7 +41,46 @@ fn contains(parent: &Path, child: &Path) -> bool {
     }
 }
 impl Storage {
-    fn process_record(&self, id: &str) -> Result<Option<Value>, KernelError> {
+    #[cfg(test)]
+    pub(crate) fn set_test_process_worker_executable(&mut self, executable: PathBuf) {
+        self.processes.set_test_worker_executable(executable);
+    }
+    pub(crate) fn set_process_subscriptions(
+        &mut self,
+        subscriptions: process::subscriptions::ProcessSubscriptions,
+    ) {
+        self.processes.set_subscriptions(subscriptions);
+    }
+
+    pub(crate) fn set_process_controls(&mut self, controls: process::ProcessControlRegistry) {
+        self.processes.set_controls(controls);
+    }
+
+    pub(crate) fn set_process_terminal_sender(
+        &mut self,
+        sender: std::sync::mpsc::Sender<process::ProcessTerminal>,
+    ) {
+        self.processes.set_terminal_sender(sender);
+    }
+    /// Replay only the native Catalog's unresolved process IDs. Completed Storage rows can
+    /// precede Catalog receipt delivery, so this must not filter solely on writerActive.
+    pub(crate) fn replay_process_terminals(
+        &self,
+        process_ids: &[String],
+    ) -> Result<(), KernelError> {
+        for id in process_ids {
+            let Some(record) = self.process_record(id)? else {
+                continue;
+            };
+            let epoch = string(&record, "kernelEpoch")?;
+            if let Some(receipt) = process::read_receipt(&self.root, id, epoch)? {
+                self.processes.replay_terminal(id, epoch, receipt);
+            }
+        }
+        Ok(())
+    }
+
+    pub(super) fn process_record(&self, id: &str) -> Result<Option<Value>, KernelError> {
         let raw: Option<String> = self
             .conn
             .query_row(
@@ -53,14 +93,27 @@ impl Storage {
             .transpose()
     }
     fn persist_process_record(&self, id: &str, value: &Value) -> Result<(), KernelError> {
+        let previous = self.process_record(id)?;
+        let stopped = previous
+            .as_ref()
+            .is_some_and(|p| p["writerActive"] != false)
+            && value["writerActive"] == false;
         let raw = serde_json::to_string(value)?;
         self.conn.execute(
             "UPDATE process_records SET status_json=?2 WHERE process_id=?1 AND status_json<>?2",
             params![id, raw],
         )?;
+        if stopped {
+            if let Some(cwd) = value["sourceRoot"].as_str().or(value["cwd"].as_str()) {
+                self.hint_file_path(Path::new(cwd));
+            }
+        }
         Ok(())
     }
-    fn refresh_process_record(&mut self, id: &str) -> Result<Option<Value>, KernelError> {
+    pub(super) fn refresh_process_record(
+        &mut self,
+        id: &str,
+    ) -> Result<Option<Value>, KernelError> {
         let Some(mut record) = self.process_record(id)? else {
             return Ok(None);
         };
@@ -72,35 +125,188 @@ impl Storage {
                 record[key] = value.clone();
             }
         } else {
-            // Process output lives in the owning kernel process. Once a new
-            // kernel opens this record there is no readable buffer, even if
-            // the previous kernel persisted the exit before it shut down.
-            record["outputAvailable"] = json!(false);
-            if record["writerActive"].as_bool() != Some(false) {
-                let epoch = string(&record, "kernelEpoch")?;
-                let receipt = process::read_receipt(&self.root, id, epoch)?;
-                #[cfg(windows)]
-                let gone = process::platform::prior_tree_gone(&process::job_name(&self.root, id))?;
-                #[cfg(unix)]
-                let gone = receipt.is_some();
-                if gone {
-                    if let Some(receipt) = receipt {
-                        for key in ["status", "pid", "exitCode", "signal", "reason"] {
-                            record[key] = receipt[key].clone();
-                        }
-                    } else {
-                        record["status"] = json!("exited");
-                        record["reason"]=json!("prior native Job is gone; command is not replayed and exit code is unknown");
-                    }
-                    record["writerActive"] = json!(false);
-                } else {
-                    record["status"] = json!("unknown");
-                    record["reason"]=json!("prior process tree has no confirmed exit receipt; execution directory is retained");
+            // Retained output has its own durability evidence. Reopening bytes never proves
+            // that an old process tree stopped; reconcile writer state independently below.
+            let output = match self.processes.restore_output(
+                &self.root,
+                id,
+                string(&record, "kernelEpoch")?,
+            ) {
+                Ok(output) => output,
+                Err(error) => {
+                    json!({"outputAvailable":false,"outputComplete":false,"outputError":format!("retained output cannot be reopened: {error}")})
                 }
+            };
+            for (key, value) in output.as_object().into_iter().flatten() {
+                record[key] = value.clone();
             }
+            self.reconcile_recovered_process_receipt(id, &mut record)?;
         }
         self.persist_process_record(id, &record)?;
         Ok(Some(record))
+    }
+    /// Stop-receipt reconciliation only: never restores or scans retained output.
+    fn reconcile_recovered_process_receipt(
+        &self,
+        id: &str,
+        record: &mut Value,
+    ) -> Result<(), KernelError> {
+        if record["writerActive"] == false {
+            return Ok(());
+        }
+        let epoch = string(&record, "kernelEpoch")?;
+        let receipt = process::read_receipt(&self.root, id, epoch)?;
+        #[cfg(windows)]
+        let gone = process::platform::prior_tree_gone(&process::job_name(&self.root, id))?;
+        #[cfg(unix)]
+        let gone = receipt.is_some();
+        if gone {
+            if let Some(receipt) = receipt {
+                self.processes.replay_terminal(id, epoch, receipt.clone());
+                for key in [
+                    "status",
+                    "pid",
+                    "exitCode",
+                    "signal",
+                    "reason",
+                    "stopApplied",
+                ] {
+                    record[key] = receipt[key].clone();
+                }
+            } else {
+                record["status"] = json!("exited");
+                record["reason"] = json!(
+                    "prior native Job is gone; command is not replayed and exit code is unknown"
+                );
+            }
+            record["writerActive"] = json!(false);
+        } else {
+            record["status"] = json!("unknown");
+            record["reason"] = json!(
+                "prior process tree has no confirmed exit receipt; execution directory is retained"
+            );
+        }
+        record
+            .as_object_mut()
+            .expect("process record")
+            .remove("receiptRecoveryError");
+        Ok(())
+    }
+    pub(super) fn refresh_process_writer_record(
+        &mut self,
+        id: &str,
+    ) -> Result<Option<Value>, KernelError> {
+        let Some(mut record) = self.process_record(id)? else {
+            return Ok(None);
+        };
+        if record["status"] == "released" || record["writerActive"] == false {
+            return Ok(Some(record));
+        }
+        if let Some(observed) = self.processes.observation(id)? {
+            for (key, value) in observed.as_object().into_iter().flatten() {
+                record[key] = value.clone();
+            }
+        } else {
+            self.reconcile_recovered_process_receipt(id, &mut record)?;
+        }
+        self.persist_process_record(id, &record)?;
+        Ok(Some(record))
+    }
+    fn recovered_process_ids(&self) -> Result<Vec<String>, KernelError> {
+        let mut query=self.conn.prepare("SELECT process_id FROM process_records WHERE json_extract(status_json,'$.writerActive') = 1")?;
+        let ids = query
+            .query_map([], |row| row.get::<_, String>(0))?
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(ids
+            .into_iter()
+            .filter(|id| !self.processes.is_live(id))
+            .collect())
+    }
+    pub(crate) fn set_recovered_process_receipt_wake(
+        &mut self,
+        notify: impl Fn() + Send + Sync + 'static,
+    ) {
+        self.process_receipt_notify = Some(Arc::new(notify));
+        self.ensure_recovered_process_receipt_wake();
+    }
+    pub(super) fn ensure_recovered_process_receipt_wake(&mut self) {
+        if self.process_receipt_wake.is_some() || self.process_receipt_notify.is_none() {
+            return;
+        }
+        let needed = match self.recovered_process_ids() {
+            Ok(ids) => !ids.is_empty(),
+            Err(e) => {
+                self.process_receipt_wake_failure = Some(e.to_string());
+                return;
+            }
+        };
+        if !needed {
+            self.process_receipt_wake_failure = None;
+            return;
+        }
+        let directory = self.root.join("process-receipts");
+        let result = fs::create_dir_all(&directory).and_then(|_| {
+            process::receipt_wake::Watch::open(
+                &directory,
+                self.process_receipt_notify.as_ref().unwrap().clone(),
+            )
+        });
+        match result {
+            Ok(watch) => {
+                self.process_receipt_wake = Some(watch);
+                self.process_receipt_wake_failure = None;
+            }
+            Err(error) => {
+                self.process_receipt_wake_failure = Some(error.to_string());
+            }
+        }
+        // Watch registration is complete before this mandatory receipt recheck.
+        self.recheck_recovered_process_receipts();
+    }
+    pub(crate) fn recheck_recovered_process_receipts(&mut self) {
+        if let Some(error) = self
+            .process_receipt_wake
+            .as_ref()
+            .and_then(|watch| watch.acknowledge())
+        {
+            self.process_receipt_wake_failure = Some(error);
+            self.process_receipt_wake.take();
+        }
+        let ids = match self.recovered_process_ids() {
+            Ok(ids) => ids,
+            Err(error) => {
+                self.process_receipt_wake_failure = Some(error.to_string());
+                return;
+            }
+        };
+        for id in ids {
+            let error = self
+                .refresh_process_writer_record(&id)
+                .err()
+                .map(|e| e.to_string())
+                .or_else(|| self.process_receipt_wake_failure.clone());
+            if let Some(error) = error {
+                if let Ok(Some(mut record)) = self.process_record(&id) {
+                    if record["writerActive"] == false {
+                        continue;
+                    }
+                    let changed = record["receiptRecoveryError"].as_str() != Some(error.as_str());
+                    record["receiptRecoveryError"] = json!(error);
+                    record["status"] = json!("unknown");
+                    let _ = self.persist_process_record(&id, &record);
+                    if changed {
+                        if let Some(root) = record["sourceRoot"].as_str().or(record["cwd"].as_str())
+                        {
+                            self.hint_file_path(Path::new(root));
+                        }
+                    }
+                }
+            }
+        }
+        if self.recovered_process_ids().is_ok_and(|ids| ids.is_empty()) {
+            self.process_receipt_wake.take();
+            self.process_receipt_wake_failure = None;
+        }
     }
     pub(crate) fn refresh_process_records(&mut self) -> Result<(), KernelError> {
         let ids = self
@@ -163,6 +369,70 @@ impl Storage {
         self.process_record(id)?
             .ok_or_else(|| KernelError::Operation("process receipt disappeared".into()))
     }
+    /// Native controls use the original and the current exact Run/source grants.
+    /// A Host maintenance grant cannot adopt a native Agent process.
+    pub(super) fn authorize_process_access(
+        &self,
+        id: &str,
+        workspace: &str,
+        grant: &Grant,
+        root_id: Option<&str>,
+        control: bool,
+    ) -> Result<(Value, String), KernelError> {
+        let actor: String = self.conn.query_row(
+            "SELECT grant_id FROM process_records WHERE process_id=?1",
+            [id],
+            |row| row.get(0),
+        )?;
+        let original = self.load_grant(&actor)?;
+        let record = self
+            .process_record(id)?
+            .ok_or_else(|| KernelError::Operation("process not found".into()))?;
+        if original.run_id.is_some() {
+            if original.state != GrantState::Active
+                || grant.state != GrantState::Active
+                || original.run_id != grant.run_id
+                || original.thread_id.is_none()
+                || original.thread_id != grant.thread_id
+                || original.owning_workspace.as_deref() != Some(workspace)
+                || original.owning_workspace != grant.owning_workspace
+                || original.execution_workspace != grant.execution_workspace
+                || original.storage_identity != grant.storage_identity
+                || original.host_id != grant.host_id
+                || original.path_scopes != grant.path_scopes
+                || !original.capabilities.contains("process")
+            {
+                return Err(KernelError::Authorization(
+                    "original process authority was revoked or does not match this Run/source"
+                        .into(),
+                ));
+            }
+            let root = self.registered_file_root(
+                root_id.ok_or_else(|| {
+                    KernelError::Authorization(
+                        "native process access requires its physical source root".into(),
+                    )
+                })?,
+                grant,
+            )?;
+            let cwd = string(&record, "cwd")?;
+            if root.owning_workspace_id != workspace
+                || !contains(&root.canonical_root, Path::new(cwd))
+            {
+                return Err(KernelError::Authorization(
+                    "native process source root changed".into(),
+                ));
+            }
+        } else {
+            self.authorize_process(id, workspace, grant)?;
+        }
+        if control && record["kernelEpoch"].as_str() != Some(grant.kernel_epoch.as_str()) {
+            return Err(KernelError::Authorization(
+                "process handle belongs to a stale kernel epoch".into(),
+            ));
+        }
+        Ok((record, actor))
+    }
     fn spawn_process(&mut self, params_value: &Value, grant: &Grant) -> Result<Value, KernelError> {
         self.check_cancelled()?;
         let id = string(params_value, "processId")?;
@@ -223,7 +493,7 @@ impl Storage {
         }
         let cols = unsigned(params_value, "cols", 80)?;
         let rows = unsigned(params_value, "rows", 24)?;
-        if !(1..=1000).contains(&cols) || !(1..=500).contains(&rows) {
+        if !(1..=u16::MAX as u64).contains(&cols) || !(1..=u16::MAX as u64).contains(&rows) {
             return Err(KernelError::Operation("invalid PTY dimensions".into()));
         }
         let mut identity = params_value.clone();
@@ -250,41 +520,180 @@ impl Storage {
             grant,
             root_id,
             &[FileLeaseResource {
-                path: canonical_relative,
+                path: canonical_relative.clone(),
                 subtree: true,
             }],
             None,
         )?;
         let record = json!({"processId":id,"kernelEpoch":grant.kernel_epoch,"workspaceId":workspace,
-            "cwd":cwd,"mode":mode,"status":"starting","pid":null,"exitCode":null,"signal":null,
+            "cwd":cwd,"sourceRoot":root.canonical_root,"sourceRelativeCwd":canonical_relative,"mode":mode,"status":"starting","pid":null,"exitCode":null,"signal":null,
             "reason":null,"writerActive":true,"outputAvailable":false});
         let job_name = process::job_name(&self.root, id);
         self.conn.execute("INSERT INTO process_records(process_id,workspace_id,execution_workspace_id,grant_id,kernel_epoch,cwd,job_name,params_hash,status_json) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9)",
             params![id,workspace,root.execution_workspace_id,grant.grant_id,grant.kernel_epoch,cwd.to_string_lossy(),job_name,hash,serde_json::to_string(&record)?])?;
         let receipt_path = process::receipt_path(&self.root, id);
-        fs::create_dir_all(receipt_path.parent().ok_or_else(|| {
-            KernelError::Storage("process receipt directory is unavailable".into())
-        })?)?;
-        sync_directory(&self.root)?;
-        if let Err(error) = self.check_cancelled() {
-            let mut cancelled = record;
-            cancelled["status"] = json!("failed");
-            cancelled["writerActive"] = json!(false);
-            cancelled["reason"] = json!("process launch cancelled before native spawn");
-            self.persist_process_record(id, &cancelled)?;
-            return Err(error);
-        }
-        if let Err(error)=self.processes.spawn(id,json!({"processId":id,"kernelEpoch":grant.kernel_epoch,
-            "receiptPath":receipt_path,"jobName":job_name,"cwd":cwd,"command":command,"args":params_value["args"],
-            "windowsRawArguments":params_value["windowsRawArguments"],
-            "env":params_value["env"],"mode":mode,"cols":cols,"rows":rows})){
-            let mut failed=record;
-            failed["status"]=json!("failed");failed["writerActive"]=json!(false);failed["reason"]=json!(error.to_string());
-            self.persist_process_record(id,&failed)?;
+        let spawned = (|| {
+            fs::create_dir_all(receipt_path.parent().ok_or_else(|| {
+                KernelError::Storage("process receipt directory is unavailable".into())
+            })?)?;
+            sync_directory(&self.root)?;
+            self.check_cancelled()?;
+            self.processes.spawn(id, json!({"processId":id,"kernelEpoch":grant.kernel_epoch,
+                "receiptPath":receipt_path,"jobName":job_name,"cwd":cwd,"command":command,"args":params_value["args"],
+                "windowsRawArguments":params_value["windowsRawArguments"],
+                "env":params_value["env"],"mode":mode,"cols":cols,"rows":rows,"runId":grant.run_id}))
+        })();
+        if let Err(error) = spawned {
+            let mut failed = record;
+            failed["reason"] = json!(error.to_string());
+            if self.processes.is_live(id) {
+                // A duplicate live identity can already own a target. Rejection is not its
+                // stop receipt; retain writer activity until the original tree is observed.
+                failed["status"] = json!("unknown");
+            } else {
+                // ProcessManager sends the first guardian config only after every fallible
+                // admission step. These errors prove no target was admitted, even if a
+                // guardian was created. Keep that proof in the original durable intent.
+                failed["status"] = json!("failed");
+                failed["writerActive"] = json!(false);
+                failed["treeConfirmed"] = json!(true);
+                failed["spawned"] = json!(false);
+            }
+            self.persist_process_record(id, &failed)?;
             return Err(error);
         }
         self.refresh_process_record(id)?
             .ok_or_else(|| KernelError::Storage("process intent disappeared".into()))
+    }
+    /// Read-only access to a Catalog-validated original Thread/Environment process Job.
+    /// Catalog checks the exact requested process, branch, lifetime and source_run_id.
+    /// The current grant was authorized by the Storage actor; the original grant is never
+    /// revived or substituted as the caller. No persisted observer or control authority exists.
+    pub(crate) fn observe_run_process(
+        &mut self,
+        method: &str,
+        params_value: &Value,
+        grant: &Grant,
+        root_id: Option<&str>,
+        source_run_id: &str,
+        lineage: Option<&varin_runtime::catalog::process_wait::ProcessResultLineage>,
+        authorize_only: bool,
+    ) -> Result<Value, KernelError> {
+        if !matches!(method, "process.inspect" | "process.read") {
+            return Err(KernelError::Authorization(
+                "process delegation is observation-only".into(),
+            ));
+        }
+        let id = string(params_value, "processId")?;
+        let workspace = string(params_value, "workspaceId")?;
+        let actor: String = self.conn.query_row(
+            "SELECT grant_id FROM process_records WHERE process_id=?1",
+            [id],
+            |row| row.get(0),
+        )?;
+        let original = self.load_grant(&actor)?;
+        if original.state == GrantState::Revoked
+            || grant.state != GrantState::Active
+            || original.run_id.is_none()
+            || original.thread_id.is_none()
+            || original.run_id.as_deref() != Some(source_run_id)
+            || original.thread_id != grant.thread_id
+            || original.owning_workspace.as_deref() != Some(workspace)
+            || original.owning_workspace != grant.owning_workspace
+            || original.execution_workspace != grant.execution_workspace
+            || original.storage_identity != grant.storage_identity
+            || original.host_id != grant.host_id
+            || original.path_scopes != grant.path_scopes
+            || !original.capabilities.contains("process")
+        {
+            return Err(KernelError::Authorization(
+                "original process authority was revoked or does not match this Run/source".into(),
+            ));
+        }
+        let root = self.registered_file_root(
+            root_id.ok_or_else(|| {
+                KernelError::Authorization(
+                    "process observation requires its physical source root".into(),
+                )
+            })?,
+            grant,
+        )?;
+        let record = self
+            .refresh_process_record(id)?
+            .ok_or_else(|| KernelError::Operation("process disappeared".into()))?;
+        let cwd = string(&record, "cwd")?;
+        let relative = string(&record, "sourceRelativeCwd")?;
+        let original_root = Path::new(string(&record, "sourceRoot")?);
+        if root.owning_workspace_id != workspace
+            || !contains(original_root, Path::new(cwd))
+            || original_root.join(relative) != Path::new(cwd)
+            || !path_allowed(&original, relative)
+            || !path_allowed(grant, relative)
+        {
+            return Err(KernelError::Authorization(
+                "process output path is outside original or current source scope".into(),
+            ));
+        }
+        if let Some(proof) = lineage {
+            if proof.process_id() != id
+                || proof.source_run_id() != source_run_id
+                || Some(proof.target_run_id()) != grant.run_id.as_deref()
+                || proof.executions().is_empty()
+                || proof.source().workspace_id != workspace
+                || proof.target().workspace_id != workspace
+                || Some(proof.source().execution_workspace_id.as_str())
+                    != original.execution_workspace.as_deref()
+                || Some(proof.target().execution_workspace_id.as_str())
+                    != grant.execution_workspace.as_deref()
+                || record["writerActive"] != false
+                || !matches!(record["status"].as_str(), Some("exited" | "failed"))
+            {
+                return Err(KernelError::Authorization(
+                    "delegated process result is not a stopped source ancestor".into(),
+                ));
+            }
+        } else if !contains(&root.canonical_root, Path::new(cwd))
+            || original.path_scopes != grant.path_scopes
+        {
+            return Err(KernelError::Authorization(
+                "process observation physical source changed".into(),
+            ));
+        }
+        if authorize_only {
+            return Ok(Value::Null);
+        }
+        let record = self
+            .refresh_process_record(id)?
+            .ok_or_else(|| KernelError::Operation("process disappeared".into()))?;
+        if method == "process.inspect" {
+            return Ok(record);
+        }
+        self.read_process_output(id, params_value, record)
+    }
+    fn read_process_output(
+        &mut self,
+        id: &str,
+        params_value: &Value,
+        record: Value,
+    ) -> Result<Value, KernelError> {
+        if record["outputAvailable"].as_bool() != Some(true) {
+            return Err(KernelError::Storage(
+                record["outputError"]
+                    .as_str()
+                    .unwrap_or("process output is unavailable")
+                    .into(),
+            ));
+        }
+        let cursor = unsigned(params_value, "cursor", 0)?;
+        let limit = unsigned(params_value, "maxBytes", CHUNK_BYTES as u64)?;
+        if limit == 0 || limit > CHUNK_BYTES as u64 {
+            return Err(KernelError::Operation(
+                "invalid process read chunk size".into(),
+            ));
+        }
+        let mut result = self.processes.read(id, cursor, limit as usize)?;
+        result["process"] = record;
+        Ok(result)
     }
     pub(super) fn dispatch_process(
         &mut self,
@@ -338,10 +747,37 @@ impl Storage {
             return Ok(json!({"processes":visible,"nextCursor":more.then_some(last)}));
         }
         let id = string(params_value, "processId")?;
-        let authorized = self.authorize_process(id, workspace, grant)?;
+        let (authorized, original_actor) = self.authorize_process_access(
+            id,
+            workspace,
+            grant,
+            params_value["rootId"].as_str(),
+            matches!(method, "process.write" | "process.resize" | "process.kill"),
+        )?;
         let record = self.refresh_process_record(id)?.unwrap_or(authorized);
         if method == "process.inspect" {
             return Ok(record);
+        }
+        if matches!(method, "process.subscribe" | "process.read")
+            && record["outputAvailable"].as_bool() != Some(true)
+        {
+            return Err(KernelError::Storage(
+                record["outputError"]
+                    .as_str()
+                    .unwrap_or("process output is unavailable")
+                    .into(),
+            ));
+        }
+        if method == "process.subscribe" {
+            return self.processes.subscribe(
+                string(params_value, "subscriptionId")?,
+                id,
+                &grant.grant_id,
+                &grant.kernel_epoch,
+                unsigned(params_value, "cursor", 0)?,
+                record,
+                original_actor,
+            );
         }
         if method == "process.release" {
             if record["writerActive"].as_bool() != Some(false) {
@@ -349,50 +785,40 @@ impl Storage {
                     "process is in use or exit is unconfirmed".into(),
                 ));
             }
-            self.processes.release(id);
+            let output_path = process::output_path(&self.root, id);
+            let marker_path = process::output_marker_path(&self.root, id);
+            self.processes.release(id, || {
+                for path in [
+                    output_path,
+                    marker_path.clone(),
+                    marker_path.with_extension("complete.tmp"),
+                ] {
+                    match fs::remove_file(path) {
+                        Ok(()) => {}
+                        Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+                        Err(error) => return Err(error.into()),
+                    }
+                }
+                Ok(())
+            })?;
             let mut record = record;
             record["status"] = json!("released");
             record["outputAvailable"] = json!(false);
             self.persist_process_record(id, &record)?;
             return Ok(record);
         }
-        if record["kernelEpoch"].as_str() != Some(grant.kernel_epoch.as_str()) {
+        if record["kernelEpoch"].as_str() != Some(grant.kernel_epoch.as_str())
+            && method != "process.read"
+        {
             return Err(KernelError::Authorization(
                 "process handle belongs to a stale kernel epoch".into(),
             ));
         }
         match method {
-            "process.read" => {
-                let cursor = unsigned(params_value, "cursor", 0)?;
-                let limit = unsigned(params_value, "maxBytes", CHUNK_BYTES as u64)?;
-                if limit == 0 || limit > CHUNK_BYTES as u64 {
-                    return Err(KernelError::Operation(
-                        "invalid process read chunk size".into(),
-                    ));
-                }
-                let mut result = self.processes.read(id, cursor, limit as usize)?;
-                result["process"] = record;
-                Ok(result)
-            }
-            "process.write" => self.processes.write(
-                id,
-                unsigned(params_value, "sequence", 0)? as i64,
-                string(params_value, "bytesBase64")?,
-                params_value["eof"].as_bool().unwrap_or(false),
+            "process.read" => self.read_process_output(id, params_value, record),
+            "process.write" | "process.resize" | "process.interaction.inspect" => Err(
+                KernelError::Operation("process interaction requires its owned worker".into()),
             ),
-            "process.resize" => {
-                if record["mode"] != "pty" {
-                    return Err(KernelError::Operation(
-                        "cannot resize a piped process".into(),
-                    ));
-                }
-                let cols = unsigned(params_value, "cols", 0)?;
-                let rows = unsigned(params_value, "rows", 0)?;
-                if !(1..=1000).contains(&cols) || !(1..=500).contains(&rows) {
-                    return Err(KernelError::Operation("invalid PTY dimensions".into()));
-                }
-                self.processes.resize(id, cols as u16, rows as u16)
-            }
             "process.kill" => {
                 if std::env::var("VARIN_KERNEL_FAIL_PROCESS_PHASE")
                     .ok()
@@ -421,6 +847,17 @@ impl Storage {
         &mut self,
         target: &Path,
     ) -> Result<(), KernelError> {
+        if let Some(process) = self.process_directory_writer(target)? {
+            return Err(KernelError::Operation(format!(
+                "process writer {process} has not confirmed exit; directory is retained"
+            )));
+        }
+        Ok(())
+    }
+    pub(super) fn process_directory_writer(
+        &mut self,
+        target: &Path,
+    ) -> Result<Option<String>, KernelError> {
         self.refresh_process_records()?;
         let records = self
             .conn
@@ -432,12 +869,9 @@ impl Storage {
             if record["writerActive"].as_bool() != Some(false)
                 && contains(target, Path::new(string(&record, "cwd")?))
             {
-                return Err(KernelError::Operation(format!(
-                    "process writer {} has not confirmed exit; directory is retained",
-                    string(&record, "processId")?
-                )));
+                return Ok(Some(string(&record, "processId")?.into()));
             }
         }
-        Ok(())
+        Ok(None)
     }
 }

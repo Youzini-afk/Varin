@@ -1,3 +1,4 @@
+import type { ThreadIdentity } from '@varin/application-client';
 import { DEFAULT_CHAT_CONTENT_WIDTH, isChatContentWidth } from '@varin/application-client';
 import { create } from 'zustand';
 import { devtools, persist } from 'zustand/middleware';
@@ -38,6 +39,7 @@ function normalizeFileEditorKeymap(value: unknown): FileEditorKeymap {
 }
 
 type ContextPanelTab = {
+  thread?: ThreadIdentity;
   id: string;
   editorViewId?: string;
   mode: ContextPanelMode;
@@ -53,6 +55,7 @@ type ContextPanelTab = {
 };
 
 type ContextPanelTabDescriptor = {
+  thread?: ThreadIdentity;
   mode: ContextPanelMode;
   editorViewId?: string;
   targetPath?: string | null;
@@ -219,6 +222,7 @@ const createContextPanelTab = (descriptor: ContextPanelTabDescriptor): ContextPa
   return {
     id: buildContextPanelTabID(descriptor.mode, dedupeKey),
     mode: descriptor.mode,
+    ...(descriptor.thread ? { thread: descriptor.thread } : {}),
     ...(descriptor.editorViewId ? { editorViewId: descriptor.editorViewId } : {}),
     targetPath: normalizedTargetPath,
     targetDirectory: normalizeDirectoryPath(descriptor.targetDirectory?.trim() ?? '') || null,
@@ -263,6 +267,7 @@ const sanitizeContextPanelTabs = (tabs: unknown): ContextPanelTab[] => {
 
     const candidate = entry as {
       mode?: unknown;
+      thread?: ThreadIdentity;
       editorViewId?: unknown;
       targetPath?: unknown;
       targetDirectory?: unknown;
@@ -279,6 +284,7 @@ const sanitizeContextPanelTabs = (tabs: unknown): ContextPanelTab[] => {
       continue;
     }
 
+    if (candidate.mode === 'chat' && (!candidate.thread || candidate.thread.runtime !== 'agent' || !candidate.thread.threadId || !candidate.thread.branchId)) continue;
     const targetPath = normalizeContextTargetPath(typeof candidate.targetPath === 'string' ? candidate.targetPath : null);
     const dedupeKey = normalizeContextPanelTabDedupeKey(
       candidate.mode,
@@ -294,6 +300,7 @@ const sanitizeContextPanelTabs = (tabs: unknown): ContextPanelTab[] => {
     result.push({
       id,
       mode: candidate.mode,
+      ...(candidate.thread ? { thread: candidate.thread } : {}),
       ...(typeof candidate.editorViewId === 'string' && candidate.editorViewId ? { editorViewId: candidate.editorViewId } : {}),
       targetPath,
       dedupeKey,
@@ -367,6 +374,7 @@ const upsertContextPanelTab = (
           targetDirectory: nextTab.targetDirectory,
           dedupeKey: nextTab.dedupeKey,
           label: nextTab.label,
+          ...(nextTab.thread ? { thread: nextTab.thread } : {}),
           sessionTitleFallback: nextTab.sessionTitleFallback || tab.sessionTitleFallback,
           stagedDiff: nextTab.stagedDiff,
           diffScope: nextTab.diffScope,

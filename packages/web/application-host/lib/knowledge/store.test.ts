@@ -3,7 +3,7 @@ import { rmSync, mkdirSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { createRequire } from "node:module";
-import { terminalCommandDedupeKey, type BlockChange, type KnowledgeStore } from "./store-contract.js";
+import { terminalCommandDedupeKey, type KnowledgeStore } from "./store-contract.js";
 import { openKnowledgeStoreEngine as openWorkspaceKnowledge } from "./store-engine.js";
 
 const require = createRequire(import.meta.url);
@@ -19,7 +19,7 @@ function cleanup() {
 let store: KnowledgeStore;
 let storeCounter = 0;
 
-async function openStore(onBlocksChanged?: (sessionId: string, change: BlockChange) => void) {
+async function openStore() {
   storeCounter++;
   const dir = join(TEST_DIR, `store-${storeCounter}`);
   mkdirSync(dir, { recursive: true });
@@ -28,7 +28,6 @@ async function openStore(onBlocksChanged?: (sessionId: string, change: BlockChan
     hostId: "test-host",
     workspaceId: "ws-test",
     embedding: null,
-    ...(onBlocksChanged ? { onBlocksChanged } : {}),
   });
 }
 
@@ -51,10 +50,6 @@ describe("KnowledgeStore", () => {
     })), "disk-catalog");
     for (const sessionId of ["active", "other"]) {
       await store.putEvent({ kind: "edit", at: 1, sessionId, text: sessionId, source: "user" });
-      await store.upsertBlock({
-        sessionId, label: "goal", content: sessionId, updatedBy: "user",
-        sourceLeafId: "leaf", branchEntryIds: ["leaf"],
-      });
     }
     const knowledgeId = await store.putKnowledge({
       scope: "workspace", status: "accepted", content: "Fixture knowledge", trigger: "fixture",
@@ -64,11 +59,7 @@ describe("KnowledgeStore", () => {
     // a catalog-wide scan must fail this budget even on a fast CI machine.
     const payloadReads = vi.spyOn(TriviumDB.prototype, "getPayload");
     try {
-      expect(await store.getBlocks("missing", [])).toEqual([]);
       expect(await store.listEvents({ sessionId: "missing" })).toEqual([]);
-      expect(await store.getBlocks("active", ["leaf"])).toEqual([
-        expect.objectContaining({ sessionId: "active", label: "goal", content: "active" }),
-      ]);
       expect(await store.listEvents({ sessionId: "active" })).toEqual([
         expect.objectContaining({ sessionId: "active", text: "active" }),
       ]);
@@ -83,6 +74,29 @@ describe("KnowledgeStore", () => {
     } finally {
       payloadReads.mockRestore();
     }
+  });
+
+  it("leaves retired Pi records unchanged when native knowledge opens and commits", async () => {
+    const dir = join(TEST_DIR, "retired-records");
+    const dbDir = join(dir, "knowledge", "test-host");
+    mkdirSync(dbDir, { recursive: true });
+    const dbPath = join(dbDir, "ws-retired.tdb");
+    const old = new TriviumDB(dbPath, { dim: 8, syncMode: "full" });
+    const records = [
+      { type: "session", sessionId: "pi-session", profile: "code", startedAt: 1 },
+      { type: "block", sessionId: "pi-session", label: "plan", content: "Original Pi plan", sourceLeafId: "pi-leaf", updatedAt: 1 },
+      { type: "event", kind: "command", sessionId: "pi-session", at: 1, text: "Original command", source: "user", data: { commandId: "old-command" } },
+      { type: "organizer", key: "session:pi-session", status: "formed", entryCursor: "pi-leaf", eventCursor: 1, updatedAt: 1 },
+    ];
+    const ids = records.map(payload => old.insert(new Array(8).fill(0), payload));
+    old.close();
+    const native = await openWorkspaceKnowledge({ dataDir: dir, hostId: "test-host", workspaceId: "ws-retired", embedding: null });
+    await native.putKnowledge({ scope: "workspace", status: "accepted", content: "Native knowledge", trigger: "native" });
+    await native.close();
+    const reopened = new TriviumDB(dbPath, { dim: 8, syncMode: "full" });
+    try {
+      expect(ids.map(id => reopened.getPayload(id))).toEqual(records);
+    } finally { reopened.close(); }
   });
 
   describe("putEvent", () => {
@@ -181,144 +195,6 @@ describe("KnowledgeStore", () => {
       expect(otherSession.id).not.toBe(first.id);
     });
 
-    it("backfills legacy command identities and keeps them idempotent after reopen", async () => {
-      const dir = join(TEST_DIR, "legacy-event-reopen");
-      const dbDir = join(dir, "knowledge", "test-host");
-      mkdirSync(dbDir, { recursive: true });
-      const db = new TriviumDB(join(dbDir, "ws-legacy.tdb"), { dim: 8, syncMode: "normal" });
-      db.insert(new Array(8).fill(0), {
-        type: "event",
-        kind: "command",
-        at: 1,
-        sessionId: "s1",
-        text: "exit 0 · echo legacy",
-        data: { command: "echo legacy", commandId: "term-legacy:0:1", exitCode: 0 },
-        source: "user",
-      });
-      db.flush();
-      db.close();
-
-      await store.close();
-      store = await openWorkspaceKnowledge({ dataDir: dir, hostId: "test-host", workspaceId: "ws-legacy", embedding: null });
-      await expect(store.listEvents({ sessionId: "s1" })).resolves.toMatchObject([{
-        dedupeKey: terminalCommandDedupeKey("s1", "term-legacy:0:1"),
-      }]);
-      await expect(store.putEvent({
-        kind: "command",
-        at: 2,
-        sessionId: "s1",
-        text: "exit 0 · echo legacy again",
-        data: { command: "echo legacy again", commandId: "term-legacy:0:1", exitCode: 0 },
-        source: "user",
-      })).resolves.toEqual({ id: 1, inserted: false });
-      await store.close();
-
-      store = await openWorkspaceKnowledge({ dataDir: dir, hostId: "test-host", workspaceId: "ws-legacy", embedding: null });
-      await expect(store.putEvent({
-        kind: "command",
-        at: 3,
-        sessionId: "s1",
-        text: "exit 0 · echo legacy after reopen",
-        data: { command: "echo legacy after reopen", commandId: "term-legacy:0:1", exitCode: 0 },
-        source: "user",
-      })).resolves.toEqual({ id: 1, inserted: false });
-    });
-  });
-
-  describe("putSession", () => {
-    it("stores a session node", async () => {
-      const id = await store.putSession({
-        sessionId: "s1",
-        profile: "code",
-        workspaceId: "ws-test",
-        startedAt: Date.now(),
-        harness: { version: 1 },
-      });
-      expect(id).toBeGreaterThan(0);
-    });
-  });
-
-  describe("blocks", () => {
-    it("publishes block changes only after committed writes", async () => {
-      await store.close();
-      const changed: string[] = [];
-      const changes: BlockChange[] = [];
-      store = await openStore((sessionId, change) => { changed.push(sessionId); changes.push(change); });
-      await store.upsertBlock({ sessionId: "s1", label: "progress", content: "one", updatedBy: "agent" });
-      await store.deleteBlock("s1", "progress");
-      expect(changed).toEqual(["s1", "s1"]);
-      expect(changes).toMatchObject([
-        { previous: null, current: { content: "one" } },
-        { previous: { content: "one" }, current: null },
-      ]);
-    });
-
-    it("upserts and retrieves blocks", async () => {
-      await store.upsertBlock({
-        sessionId: "s1",
-        label: "progress",
-        content: "Working on store tests",
-        updatedBy: "agent",
-      });
-
-      const blocks = await store.getBlocks("s1");
-      expect(blocks).toHaveLength(1);
-      expect(blocks[0]?.label).toBe("progress");
-      expect(blocks[0]?.content).toBe("Working on store tests");
-      expect(blocks[0]?.updatedBy).toBe("agent");
-    });
-
-    it("upserts updates existing block", async () => {
-      await store.upsertBlock({
-        sessionId: "s1",
-        label: "progress",
-        content: "v1",
-        updatedBy: "agent",
-      });
-      await store.upsertBlock({
-        sessionId: "s1",
-        label: "progress",
-        content: "v2",
-        updatedBy: "agent",
-        cursorTurn: 5,
-      });
-
-      const blocks = await store.getBlocks("s1");
-      expect(blocks).toHaveLength(1);
-      expect(blocks[0]?.content).toBe("v2");
-      expect(blocks[0]?.updatedBy).toBe("agent");
-      expect(blocks[0]?.cursorTurn).toBe(5);
-    });
-
-    it("rejects invalid block names", async () => {
-      await expect(store.upsertBlock({
-        sessionId: "s1",
-        label: "Invalid Name!",
-        content: "x",
-        updatedBy: "agent",
-      })).rejects.toThrow();
-    });
-
-    it("deletes blocks", async () => {
-      await store.upsertBlock({
-        sessionId: "s1",
-        label: "temp",
-        content: "x",
-        updatedBy: "agent",
-      });
-      await store.deleteBlock("s1", "temp");
-      const blocks = await store.getBlocks("s1");
-      expect(blocks).toHaveLength(0);
-    });
-
-    it("sorts blocks by label", async () => {
-      await store.upsertBlock({ sessionId: "s1", label: "zeta", content: "z", updatedBy: "agent" });
-      await store.upsertBlock({ sessionId: "s1", label: "alpha", content: "a", updatedBy: "agent" });
-      await store.upsertBlock({ sessionId: "s1", label: "mid", content: "m", updatedBy: "agent" });
-
-      const blocks = await store.getBlocks("s1");
-      expect(blocks.map((b) => b.label)).toEqual(["alpha", "mid", "zeta"]);
-    });
   });
 
   describe("knowledge", () => {
@@ -554,15 +430,15 @@ describe("KnowledgeStore", () => {
         workspaceId: "ws-progress",
         embedding: null,
       });
+      const span = { kind: "history-item" as const, threadId: "thread", branchId: "branch", headId: "head", id: "item", revision: "source-revision", start: 0, end: 120 };
       await first.putOrganizerProgress({
-        key: "session:s1",
+        key: "history:thread:branch:item",
+        workId: "memory-work",
+        coveredSources: [span],
+        preparedSource: { kind: "memory-organizer", threadId: "thread", spans: [span] },
         status: "prepared",
         sourceKey: "fp-1",
-        eventCursor: 7,
-        eventPartial: { id: 8, offset: 1024 },
-        runEndOffset: 4096,
         produced: [3],
-        preparedRange: { eventCursor: 7, eventPartial: { id: 8, offset: 2048 } },
         proposals: [{
           action: "supplement", scope: "bot", nature: "decision",
           content: "Thursday releases this quarter.", trigger: "release", target: 42,
@@ -577,14 +453,13 @@ describe("KnowledgeStore", () => {
         workspaceId: "ws-progress",
         embedding: null,
       });
-      const reopened = await second.getOrganizerProgress("session:s1");
+      const reopened = await second.getOrganizerProgress("history:thread:branch:item");
       expect(reopened).toMatchObject({
         status: "prepared",
+        workId: "memory-work",
+        coveredSources: [span],
+        preparedSource: { kind: "memory-organizer", threadId: "thread", spans: [span] },
         sourceKey: "fp-1",
-        eventCursor: 7,
-        eventPartial: { id: 8, offset: 1024 },
-        runEndOffset: 4096,
-        preparedRange: { eventCursor: 7, eventPartial: { id: 8, offset: 2048 } },
         produced: [3],
         lastError: "commit boom",
       });
@@ -594,19 +469,16 @@ describe("KnowledgeStore", () => {
       // The terminal write drops prepared-only fields rather than leaving a
       // stale proposal attached to a finished row.
       await second.putOrganizerProgress({
-        key: "session:s1",
+        key: "history:thread:branch:item",
         status: "formed",
         sourceKey: "fp-1",
-        eventCursor: 7,
-        eventPartial: { id: 8, offset: 2048 },
         produced: [9],
         updatedAt: 200,
       });
-      const terminal = await second.getOrganizerProgress("session:s1");
+      const terminal = await second.getOrganizerProgress("history:thread:branch:item");
       expect(terminal?.status).toBe("formed");
       expect(terminal?.proposals).toBeUndefined();
-      expect(terminal?.preparedRange).toBeUndefined();
-      expect(terminal?.eventPartial).toEqual({ id: 8, offset: 2048 });
+      expect(terminal?.preparedSource).toBeUndefined();
       expect(terminal?.lastError).toBeUndefined();
       expect(terminal?.produced).toEqual([9]);
       await second.close();
@@ -1186,29 +1058,6 @@ describe("KnowledgeStore", () => {
       const k = list.find((item) => item.id === id);
       expect(k?.recallCount).toBeGreaterThan(0);
       expect(k?.recalledAt).toBeDefined();
-    });
-  });
-
-  describe("deleteSession", () => {
-    it("cascades delete events and blocks", async () => {
-      await store.putEvent({
-        kind: "edit", at: Date.now(), sessionId: "s1",
-        text: "edit event", source: "user",
-      });
-      await store.upsertBlock({
-        sessionId: "s1", label: "progress",
-        content: "x", updatedBy: "agent",
-      });
-      await store.putSession({
-        sessionId: "s1", profile: "code",
-        workspaceId: "ws-test", startedAt: Date.now(),
-        harness: {},
-      });
-
-      await store.deleteSession("s1");
-
-      const blocks = await store.getBlocks("s1");
-      expect(blocks).toHaveLength(0);
     });
   });
 

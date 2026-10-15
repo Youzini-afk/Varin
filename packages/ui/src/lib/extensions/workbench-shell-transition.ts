@@ -37,12 +37,11 @@ import {
 } from './workbench-shell-staging-store';
 import { varinSurfaceRuntime } from './surface-runtime';
 import { prepareWorkbenchTransitionScene } from './workbench-transition-scene';
-import { usePiSessionStore } from '@/stores/usePiSessionStore';
+import { useThreadStore } from '@/stores/useThreadStore';
 import {
   rememberOrdinarySession,
   restoreOrdinarySession,
 } from '@/lib/workbench/bot-session-location';
-import { refreshBotSessionIndex } from '@/stores/useBotSessionIndex';
 
 export type WorkbenchShellUnavailableStatus = Extract<VarinWorkbenchShellStatus, 'disabled' | 'failed' | 'missing'>;
 
@@ -477,9 +476,9 @@ export const selectActiveWorkbenchProfile = async (
     && profileId === VARIN_WORKBENCH_BOT_PROFILE_ID;
   const leavingBot = fromProfileId === VARIN_WORKBENCH_BOT_PROFILE_ID
     && profileId !== VARIN_WORKBENCH_BOT_PROFILE_ID;
-  const runtimeKey = usePiSessionStore.getState().runtimeKey;
+  const runtimeKey = useThreadStore.getState().hostKey;
   if (enteringBot) rememberOrdinarySession();
-  if (leavingBot) void refreshBotSessionIndex(runtimeKey, true);
+  if (leavingBot) void useThreadStore.getState().loadCatalog().catch(() => {});
 
   const targetLayout = workbench?.authoritative
     ? resolveVarinWorkbenchLayoutForProfile(workbench.document, transitionContext, profileId)
@@ -533,7 +532,7 @@ export const selectActiveWorkbenchProfile = async (
     // A newer selection can supersede this transaction after its persistence completed. Its Shell
     // owns the next reveal, so this stale caller must not expose or complete that newer scene.
     if (!targetPainted) return;
-    if (leavingBot && usePiSessionStore.getState().runtimeKey === runtimeKey) restoreOrdinarySession();
+    if (leavingBot && useThreadStore.getState().hostKey === runtimeKey) restoreOrdinarySession();
   }
 
   const covered = await waitForWorkbenchProfileTransitionCovered(transitionId);

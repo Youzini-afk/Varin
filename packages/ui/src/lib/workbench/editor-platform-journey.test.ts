@@ -1,3 +1,4 @@
+import { unconfiguredWorkspaceEdits } from '../documents/workspace-edit.test-helper';
 import { afterEach, describe, expect, test } from 'vitest';
 import type { editor } from 'monaco-editor/editor';
 
@@ -131,6 +132,7 @@ const createMemoryDocuments = () => {
       : { status: 'missing', epoch: 1, resource };
   };
   const api: DocumentsAPI = {
+    ...unconfiguredWorkspaceEdits,
     clearDirtyBuffers: async () => ({ cleared: true }),
     publishDirtyBuffers: async (request) => ({ ...request, updatedAt: '2026-08-28T00:00:00.000Z' }),
     resolveWorkspace: async (input) => ({ workspaceId: input.workspaceId ?? workspaceId, hostId: 'host-1', epoch: 1 }),
@@ -293,7 +295,8 @@ describe('unified editor cross-surface journey', () => {
     const prepared = await documents.prepareWorkspaceEdit({
       workspaceId,
       origin: 'language:rename',
-      textEdits: [{
+      changes: [{
+        kind: 'text',
         identity,
         version: currentVersion ?? null,
         edits: [{
@@ -311,7 +314,7 @@ describe('unified editor cross-surface journey', () => {
     expect(model.getValue()).toBe('const result = 2;\n');
 
     const attached = attachEditorContext({
-      sessionId: 'session-main',
+      threadKey: 'thread-main',
       workspaceId,
       resourceId: identity.resourceId,
       kind: 'editor',

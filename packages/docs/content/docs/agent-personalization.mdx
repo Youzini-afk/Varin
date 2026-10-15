@@ -1,30 +1,16 @@
 ---
-title: Agent memory and instructions
-description: Manage scoped notes and edit the system instructions used by ordinary Agents.
+title: "Agent memory and instructions"
+description: "Manage scoped notes and system instructions for ordinary Agents."
 ---
 
 # Agent memory and instructions
 
-Open **Settings → Memory** to add, edit, delete or move a note between global,
-project and conversation scopes. Changes save immediately. New conversations load matching
-notes; active conversations receive changes in tool results or appended messages. Their system
-memory snapshot updates when context compaction commits, reducing prefix changes during execution.
-The Agent's `memory` tool uses the same notes; ordinary Agents do not use `recall`.
+Open **Settings → Memory** to create, edit, delete or move notes between global, project and conversation scopes. The conversation's Memory panel uses the same editor. The agent's `memory` tool uses the same scoped notes; a child does not automatically inherit its parent's conversation notes.
 
-Open **Settings → System prompt** to edit the built-in instructions in the main text box.
-The density, style and autonomy selectors below it insert editable instructions. Manual text
-is preserved. Global edits apply across ordinary Agent chats, with project and conversation
-edits taking precedence for sections they change. **Restore defaults** removes the selected
-scope's edits. Changes apply on the next model request, including within an ongoing chat.
+Saved notes become available immediately. An active conversation receives newer note facts without rewriting its frozen system-memory prefix. A successfully applied context summary advances that memory snapshot.
 
-The complete preview includes project instructions, skills and the conversation's memory snapshot.
-Newly saved notes arrive at the conversation tail and join that snapshot when compaction commits.
-Restart and branch navigation restore the corresponding checkpoint.
-The last-request panel shows the system text observed at the last actual model request in
-the active runtime; it does not persist after the worker stops. Generated context continues
-to follow its source files and memory entries. Native instruction files keep their normal
-Pi behavior and can still be edited as files.
+Open **Settings → System prompt** to edit instruction sections. Density, style and autonomy controls insert editable text. Global, project and conversation overrides apply in that order; **Restore defaults** removes only the selected scope's edits. Saved profile changes apply at a safe request boundary, while already prepared requests stay unchanged.
 
-Bot instructions and long-term memory are managed separately in **Varin Bot**. Agent
-preferences and notes are not injected into Bots. Magic Prompts and command templates have
-been retired; Git, review and plan actions remain available.
+The preview shows assembled instructions and the captured memory snapshot. When available, the last-request view records prepared system text; it is not proof of provider delivery. File-based instructions and skills retain their own captured resources: use **Refresh instructions and skills** after changing them.
+
+Bot instructions and memory remain separate in **Varin Bot**. Ordinary Agent notes and prompt overrides are not injected into Bots.

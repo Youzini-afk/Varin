@@ -15,10 +15,10 @@ const {
   varinSurfaceRuntime,
   setBuiltinSettingsContributionsEnabled,
 } = await import('./surface-registry');
-const { BUILTIN_PI_INTEGRATION_DEFINITIONS, activateBuiltinPiIntegration } = await import('@/lib/extensions/builtin-pi-integrations');
+const { BUILTIN_SURFACE_EXTENSION_DEFINITIONS, activateBuiltinSurfaceExtension } = await import('@/lib/extensions/builtin-surface-extensions');
 
 await ensureBuiltinSettingsContributions();
-for (const [index, definition] of BUILTIN_PI_INTEGRATION_DEFINITIONS.entries()) {
+for (const [index, definition] of BUILTIN_SURFACE_EXTENSION_DEFINITIONS.entries()) {
   if (!definition.manifest.contributions?.some((contribution) => contribution.kind === 'settings-page')) continue;
   await varinSurfaceRuntime.activate({
     owner: {
@@ -30,7 +30,7 @@ for (const [index, definition] of BUILTIN_PI_INTEGRATION_DEFINITIONS.entries()) 
       hostId: '72694a4f-093a-4f79-8763-3ca9f06b7078',
       realmId: `builtins-test-${index}`,
     },
-  }, activateBuiltinPiIntegration(definition));
+  }, activateBuiltinSurfaceExtension(definition));
 }
 
 const runtimeContext = (mcpInstalled: boolean): SettingsRuntimeContext => ({
@@ -43,12 +43,12 @@ const runtimeContext = (mcpInstalled: boolean): SettingsRuntimeContext => ({
 describe('settings metadata', () => {
 
 
-  test('exposes the split MCP page only for an installed adapter', async () => {
+  test('exposes native MCP independently of plugin installation', async () => {
     await ensureBuiltinSettingsContributions();
-    const mcp = getSettingsPageMetadata().find((page) => page.slug === 'mcp');
-    expect(mcp?.kind).toBe('split');
-    expect(mcp?.isAvailable?.(runtimeContext(false))).toBe(false);
-    expect(mcp?.isAvailable?.(runtimeContext(true))).toBe(true);
+    const mcp = getSettingsPageMetadata().find((page) => page.slug === 'mcp-connections');
+    expect(mcp?.kind).toBe('single');
+    expect(mcp?.isAvailable?.(runtimeContext(false)) ?? true).toBe(true);
+    expect(mcp?.isAvailable?.(runtimeContext(true)) ?? true).toBe(true);
   });
 
 

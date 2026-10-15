@@ -5,22 +5,16 @@ description: Arranca Varin rápido y elige la app adecuada para la tarea.
 
 # Inicio rápido
 
-## El camino más rápido
+1. Prepara Node.js, Bun y Rust siguiendo Instalación; ejecuta `bun install --frozen-lockfile` y `bun run dev` en el repositorio.
+2. Abre la URL Vite indicada. Para escritorio, usa `bun run electron:dev`.
+3. En Ajustes → Canales de modelos, conecta un canal y selecciona un modelo.
+4. Crea una conversación: es un Thread nativo con ramas e historial propios.
+5. Para trabajar con archivos, abre Workspace, selecciona Host, carpeta y modo de acceso, y prepara el origen. Un chat sin archivos no lo necesita.
+6. Escribe y envía. Puedes adjuntar imágenes o PDF y revisar la actividad de herramientas.
 
-1. Clona [Varin](https://github.com/Youzini-afk/Varin) e instala las dependencias con Bun (consulta [Instalación](/es/install/)).
-2. Ejecuta `bun run dev`.
-3. Abre la URL de Vite que imprime el terminal.
-4. Para usarlo desde el teléfono, inicia un [túnel](/es/tunnels/) y escanea el código QR.
+Empareja el teléfono con el Host activo. El acceso por internet requiere un relay configurado y disponible o una ruta remota segura propia. Protege los Hosts expuestos a la red con una contraseña UI fuerte.
 
-Deberías ver la lista de sesiones de Varin en el navegador. Si carga, ya está en marcha.
-
-Si prefieres un contenedor, usa la ruta Docker de [Instalación](/es/install/) y abre `http://127.0.0.1:3000` con el `VARIN_UI_PASSWORD` generado.
-
-Usa una contraseña de UI fuerte, sobre todo si piensas abrir la instancia a Internet.
-
-Si la página no carga, consulta [Resolución de problemas](/es/troubleshooting/).
-
-## ¿Qué app debo usar?
-
-- usa **escritorio** para el trabajo local del día a día (`bun run electron:dev`)
-- usa **web** para acceso remoto y revisión desde el teléfono
+- [Instalación](/es/install/)
+- [Canales de modelos](/es/providers/)
+- [Proyectos](/es/projects/)
+- [Conectar un dispositivo](/es/connect-devices/)

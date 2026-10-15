@@ -1,3 +1,4 @@
+import type { VarinExtensionRestartHandoff } from "./restart-handoff.js";
 export const VARIN_EXTENSION_MANIFEST_SCHEMA_VERSION = 1 as const;
 export const VARIN_EXTENSION_CATALOG_SCHEMA_VERSION = 1 as const;
 export const VARIN_EXTENSION_MANIFEST_FILE = "varin.extension.json" as const;
@@ -44,16 +45,35 @@ export interface VarinExtensionSurfaceEntrypoint extends VarinExtensionEntrypoin
 }
 
 export interface VarinExtensionServiceRequirement {
+  realms: Array<"host" | "surface">;
   binding?: "all" | "selected" | "single";
   id: string;
   optional?: boolean;
   version: number;
 }
 
+/** One service declaration also supplies its tool projection; read is a claim, never a grant. */
+export interface VarinExtensionToolDeclaration {
+  /** Execution dependency declaration; actual source and process grants remain Host-owned. */
+  requirements?: { source: 'source' | 'physical' | 'live'; process: boolean };
+  name: string;
+  description: string;
+  inputSchema: JsonObject | boolean;
+  outputSchema: JsonObject | boolean;
+  completion: "result" | "job";
+  /** Independent jobs explicitly bind their accepted lifetime. */
+  lifetime?: "thread" | "environment";
+  operation: "read" | "effect";
+  examples?: JsonValue[];
+  source?: import("./runtime-source.js").VarinContractSource;
+}
+
 export interface VarinExtensionServiceProvision {
   id: string;
   multiple?: boolean;
   version: number;
+  tool?: VarinExtensionToolDeclaration;
+  contract?: import('./runtime-contracts.js').VarinExtensionServiceContract;
 }
 
 export type VarinExtensionContributionKind =
@@ -115,9 +135,6 @@ export interface VarinExtensionManifest {
     surfaces?: VarinExtensionSurfaceEntrypoint[];
   };
   id: string;
-  integrates?: {
-    piPackages?: string[];
-  };
   metadata?: {
     description?: string;
     homepage?: string;
@@ -131,6 +148,8 @@ export interface VarinExtensionManifest {
   requires?: {
     services?: VarinExtensionServiceRequirement[];
   };
+  /** Explicit candidate-update group. Selected startup/recovery remains independent of windows. */
+  updateReadiness?: { surfaceEntrypoints: string[] };
   schemaVersion: typeof VARIN_EXTENSION_MANIFEST_SCHEMA_VERSION;
   storage?: {
     schemaVersion: number;
@@ -138,15 +157,17 @@ export interface VarinExtensionManifest {
   version: string;
 }
 
-export type VarinExtensionPackageSourceKind = "builtin" | "git" | "local" | "npm";
+export type VarinExtensionPackageSourceKind = "builtin" | "git" | "local" | "npm" | "source_view";
 
 export interface VarinExtensionPackageSource {
+  provenance?: import("./package-authoring.js").VarinExtensionSourceViewProvenance;
   display: string;
   kind: VarinExtensionPackageSourceKind;
   specifier: string;
 }
 
 export interface VarinExtensionPublicPackageSource {
+  provenance?: import("./package-authoring.js").VarinExtensionSourceViewProvenance;
   display: string;
   kind: VarinExtensionPackageSourceKind;
 }
@@ -216,6 +237,7 @@ export interface VarinExtensionActualState {
 }
 
 export interface VarinExtensionInstallationRecord {
+  restartHandoffs?: VarinExtensionRestartHandoff[];
   candidate?: VarinExtensionCandidateRecord;
   capabilityGrants: VarinExtensionCapabilityGrant[];
   desired: VarinExtensionDesiredState;
@@ -264,6 +286,7 @@ export interface VarinExtensionPublicCandidate {
 }
 
 export interface VarinExtensionCatalogEntry {
+  restartHandoffs?: VarinExtensionRestartHandoff[];
   actual: VarinExtensionActualState[];
   candidate?: VarinExtensionPublicCandidate;
   capabilityGrants: VarinExtensionCapabilityGrant[];
@@ -312,6 +335,28 @@ export interface VarinExtensionCandidateSelectionRequest {
   candidateIntegrity: string;
   expectedRevision: number;
   extensionId: string;
+}
+
+/** A preparation identity from the original Host instance; never a window liveness claim. */
+export interface VarinExtensionHostPreparationIdentity {
+  id: string;
+  hostId: string;
+  desiredRevision: number;
+  generation: number;
+}
+
+/** Trusted Surface-host evidence scoped to its live local preparation transaction. */
+export interface VarinExtensionSurfaceReadiness {
+  /** Validated connected-consumer preparation leases; zero proves module readiness only. */
+  preparedConsumerCount?: number;
+  hostPreparation: VarinExtensionHostPreparationIdentity;
+  realmId: string;
+  surface: VarinApplicationSurface;
+  members: Array<{ entrypointId: string; generation: number }>;
+}
+
+export interface VarinExtensionCandidatePublicationRequest extends VarinExtensionCandidateSelectionRequest {
+  surfaceReadiness?: VarinExtensionSurfaceReadiness;
 }
 
 export interface VarinExtensionCandidateCapabilityReviewRequest {
@@ -365,31 +410,27 @@ export interface VarinExtensionServiceProviderSnapshot {
   providerId: string;
   providerKey: string;
   status: VarinExtensionServiceProviderStatus;
+  instanceKey: string;
 }
 
 export interface VarinExtensionServiceCatalogSnapshot {
   hostId: string;
   providers: VarinExtensionServiceProviderSnapshot[];
   revision: number;
-  selections: Record<string, string>;
 }
 
 export interface VarinExtensionServiceInvocationRequest {
   args: JsonValue[];
   method: string;
   providerId?: string;
+  lease?: import('./surface-service-lease.js').VarinSurfaceServiceInvocationLease;
   routing?: import("./service-routing.js").VarinExtensionServiceRoutingContext;
   serviceId: string;
   version: number;
 }
 
-export interface VarinExtensionServiceSelectionRequest {
-  providerId: string | null;
-  serviceId: string;
-  version: number;
-}
-
 export interface VarinExtensionCandidatePreparationResult {
+  hostPreparation?: VarinExtensionHostPreparationIdentity;
   extensionId: string;
   integrity: string;
   providers: VarinExtensionServiceProviderSnapshot[];

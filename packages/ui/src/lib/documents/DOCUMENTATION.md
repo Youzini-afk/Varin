@@ -9,16 +9,23 @@ external registry, not in Zustand or Local Storage.
   use it for stable model identity without publishing workspace paths
 - `applyEdits` accepts one captured local revision plus non-overlapping offset edits, advances the local
   revision once, and returns typed stale/invalid/unsupported results
-- `prepareWorkspaceEdit` loads every target without committing, validates document versions/ranges and
-  produces a reviewable before/after plan. `applyWorkspaceEdit` revalidates that plan and publishes all
-  buffers before notifying any listener; disk writes remain explicit saves. Multi-file changes have one
-  lifecycle-bound undo group. Callers may supply `groupId` so a Host Integration `operationId` becomes
-  that undo group. The Host-directed surface operation handler uses this path and does not save. It
-  only captures existing records, binds the owner/registration, document instance, base/local revisions,
-  content hash and format, and rechecks them after asynchronous preparation. Closed or reopened records
-  cannot receive an old request. Undo uses the same Host operation and retains later user edits. Resource
-  create/rename/delete remains explicitly unsupported until the Host owns an atomic batch-mutation
-  contract.
+- `prepareWorkspaceEdit` preserves the ordered text/create/rename/delete sequence. Pure text plans
+  validate every range and intermediate document version without publishing buffers. Mixed plans
+  are simulated by Host Documents; preparation neither changes files nor saves drafts. Review shows
+  destructive draft effects and change annotations.
+- Pure text apply revalidates and installs every buffer before notifications. Mixed apply uses the
+  original Host operation, affected-path barrier, file leases and durable recovery record. Text stays
+  in Registry buffers, including text after create; it is not an implicit save. Resource moves keep
+  document instances, subscriptions, tabs, Monaco models and language identities aligned.
+- Connected affected surfaces contribute read-only preview snapshots. Execution binds each actual
+  registration, instance, base and local version. Divergent drafts at one path have no shared text
+  version and are reported as conflicts; unrelated windows/resources are not part of the edit.
+- One async undo restores the original batch conditionally. Later edits are retained and uncertain
+  steps appear in Recovery with per-resource state and original draft content. A lost response reads
+  the original operation, never repeats its effects. Reopened records cannot receive old dispatches.
+- A code action retains its original language-document owner through its edit and accompanying
+  workspace command. Renamed documents use their stable instance's current path; deleted documents
+  do not pretend to have a live language version. Original provider/generation checks remain intact.
 - Agent patch review uses that same transaction path. A clean accepted patch becomes a dirty editor
   buffer for review and explicit save; dirty, conflicted, saving, missing, or stale documents are
   rejected rather than written directly to disk.

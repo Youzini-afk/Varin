@@ -1,23 +1,23 @@
-import { getRuntimeKey } from '@varin/application-client';
+import { threadHostKey as getRuntimeKey } from '@/stores/useThreadStore';
 import { attachEditorContext } from '@/lib/agent-editor/attach';
 import { addEditorContextAttachment } from '@/lib/agent-editor/attachments';
 import type { EditorContextAttachment } from '@/lib/agent-editor/types';
 import { resourceIdFromWorkspacePath } from '@/lib/documents/path';
 import { getDocumentRegistry } from '@/lib/documents/session';
 import { languageIdFromResourceId } from '@/lib/language-services/language-id';
-import { usePiEditorContextStore } from '@/stores/usePiEditorContextStore';
+import { useEditorContextStore } from '@/stores/useEditorContextStore';
 
 const resourceIdFor = (workspaceRoot: string, filePath: string, relativePath: string): string => (
   resourceIdFromWorkspacePath(workspaceRoot, filePath) ?? relativePath.replace(/\\/g, '/')
 );
 
 export const attachActiveEditorContext = (input: {
-  sessionId: string;
+  threadKey: string;
   workspaceId: string;
   workspaceRoot: string;
   kind: 'editor' | 'selection';
 }): EditorContextAttachment | { status: 'wrong-runtime' | 'missing-editor' | 'missing-selection' | 'missing-document' } => {
-  const file = usePiEditorContextStore.getState().activeEditorFile;
+  const file = useEditorContextStore.getState().activeEditorFile;
   if (
     !file
     || file.runtimeKey !== getRuntimeKey()
@@ -33,7 +33,7 @@ export const attachActiveEditorContext = (input: {
   if (input.kind === 'selection') {
     if (!file.selection) return { status: 'missing-selection' };
     const fromRegistry = attachEditorContext({
-      sessionId: input.sessionId,
+      threadKey: input.threadKey,
       workspaceId: input.workspaceId,
       resourceId,
       kind: 'selection',
@@ -50,7 +50,7 @@ export const attachActiveEditorContext = (input: {
     return addEditorContextAttachment({
       id: crypto.randomUUID(),
       runtimeKey: getRuntimeKey(),
-      sessionId: input.sessionId,
+      threadKey: input.threadKey,
       workspaceId: input.workspaceId,
       resourceId,
       label: file.relativePath,
@@ -70,7 +70,7 @@ export const attachActiveEditorContext = (input: {
     });
   }
   const fromRegistry = attachEditorContext({
-    sessionId: input.sessionId,
+    threadKey: input.threadKey,
     workspaceId: input.workspaceId,
     resourceId,
     kind: 'editor',
@@ -80,7 +80,7 @@ export const attachActiveEditorContext = (input: {
   return addEditorContextAttachment({
     id: crypto.randomUUID(),
     runtimeKey: getRuntimeKey(),
-    sessionId: input.sessionId,
+    threadKey: input.threadKey,
     workspaceId: input.workspaceId,
     resourceId,
     label: file.relativePath,

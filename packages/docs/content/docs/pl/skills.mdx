@@ -1,30 +1,16 @@
 ---
-title: Skille
-description: Twórz wielokrotnego użytku instrukcje, które agenci wczytują na żądanie.
+title: "Skille"
+description: "Twórz i wykorzystuj wersjonowane zasoby instrukcji."
 ---
 
 # Skille
 
-Skill to wielokrotnego użytku zestaw instrukcji, który agent może wczytać, gdy jest istotny — na przykład „jak piszemy komunikaty commitów” albo „nasze konwencje API”. Zarządzasz nimi w **Settings → Skills**.
+Skill to zasób `SKILL.md` z nazwą, opisem i instrukcjami; może zawierać pliki pomocnicze. Opis pomaga Agentowi wybrać właściwy moment użycia.
 
-Aby zainstalować gotowe skille zamiast pisać własne, zobacz [Katalog skilli](/pl/skills-catalog/).
+W **Ustawienia → Skille** możesz tworzyć, przeglądać, edytować, kopiować i usuwać zasoby użytkownika lub zaufanego projektu. Edytor pokazuje ścieżkę, źródło, poprawność i możliwość zapisu. Zasób tylko do odczytu można skopiować do edytowalnego zakresu. Sprawdź monity zaufania i diagnostykę.
 
-## Utwórz skill
+Użyj `/skill:name` na początku wiadomości albo panelu **Instructions and skills**. Agent może też czytać dopuszczone skille i pliki pomocnicze przez `resource_read`. Ich treść nie przyznaje dodatkowych uprawnień.
 
-1. Otwórz **Settings → Skills**.
-2. Utwórz skill i nadaj mu nazwę oraz krótki opis. Na podstawie opisu agent decyduje, kiedy skill ma zastosowanie, więc niech będzie konkretny.
-3. Napisz instrukcje. Dodaj pliki pomocnicze, jeśli skill ich potrzebuje.
-4. Wybierz, gdzie ma się znajdować:
-   - **personal** — dostępny w każdym projekcie
-   - **project** — dostępny tylko w bieżącym projekcie
+Zapis nie zastępuje materiału już przechwyconego przez rozmowę. **Refresh instructions and skills** przygotowuje nową wersję dla przyszłych żądań; przyjęte żądania zachowują poprzednią.
 
-## Użyj skilla w czacie
-
-Wpisz `/` w środku wiadomości, aby otworzyć selektor skilli, a następnie wybierz jeden. Agent wczyta instrukcje tego skilla na potrzeby odpowiedzi.
-
-`/` na samym początku wiadomości otwiera natomiast [polecenia](/pl/commands/).
-
-## Powiązane
-
-- [Katalog skilli](/pl/skills-catalog/) — zainstaluj skille opublikowane przez innych
-- [Polecenia](/pl/commands/) — polecenia dostępne w aktywnym środowisku
+Zobacz [Polecenia](/pl/commands/) i [Bibliotekę skilli](/pl/skills-catalog/).

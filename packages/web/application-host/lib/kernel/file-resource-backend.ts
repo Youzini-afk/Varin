@@ -1,7 +1,6 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import { randomUUID } from "node:crypto";
 import path from "node:path";
-import { setTimeout as delay } from "node:timers/promises";
 import { waitWithSignal } from "../cancellation.js";
 import type {
   CapturedState,
@@ -13,6 +12,7 @@ import type {
 } from "../recovery/journal-files.js";
 import { createRecoveryFileReader, normalizeResourceId, parseRecoveryState } from "../recovery/journal-files.js";
 import type { HostResourceOperation, HostResourceOperationGate } from "../recovery/durable-file-operation.js";
+import type { RecoveryOperationConflict } from "../recovery/journal-engine.js";
 import { canonicalizePathIdentity } from "../workspace/path-safety.js";
 import type { KernelFileAuthorityContext, KernelStorageAdapter } from "./storage-adapter.js";
 
@@ -22,10 +22,13 @@ export interface KernelExecutionRoot {
 }
 
 export interface KernelFileResourceBackendOptions {
+  /** Already admitted authority. This backend never mints or widens its grant. */
+  authority?: KernelFileAuthorityContext;
   resolveExecutionRoot?: (canonicalRoot: string, owningWorkspaceId: string) => Promise<KernelExecutionRoot>;
   authorityPurpose?: string;
   authorityCapabilities?: string[];
-  busyRetryMs?: number;
+  /** A narrower current caller permission, in addition to the native resource grant. */
+  authorizeApplyState?(identity: RecoveryIdentity, relativePath: string, state: RecoveryState): Promise<void> | void;
 }
 
 interface BoundFileContext extends KernelFileAuthorityContext {
@@ -35,6 +38,7 @@ interface BoundFileContext extends KernelFileAuthorityContext {
 interface LeaseContext {
   key: string;
   leaseId: string;
+  signal?: AbortSignal;
   observed: Map<string, RecoveryState>;
 }
 
@@ -73,16 +77,30 @@ const parseCaptured = (value: Record<string, unknown>): CapturedState => {
 export class KernelFileResourceBackend implements RecoveryFileStore {
   private readonly helper = createRecoveryFileReader();
   private readonly leaseContext = new AsyncLocalStorage<LeaseContext>();
-  private readonly busyRetryMs: number;
 
   constructor(
     private readonly adapter: KernelStorageAdapter,
     private readonly options: KernelFileResourceBackendOptions = {},
   ) {
-    this.busyRetryMs = options.busyRetryMs ?? 5;
+    if (options.authority && (options.resolveExecutionRoot || options.authorityPurpose || options.authorityCapabilities)) {
+      throw new Error("A scoped file backend cannot also resolve a different authority");
+    }
   }
 
   private async bind(identity: RecoveryIdentity): Promise<BoundFileContext> {
+    if (this.options.authority) {
+      const authority = this.options.authority;
+      if (identity.workspaceId !== authority.owningWorkspaceId) {
+        throw new Error("File operation belongs to a different admitted workspace");
+      }
+      const canonicalRoot = await canonicalizePathIdentity(authority.canonicalRoot);
+      if (!sameFsPath(canonicalRoot, authority.canonicalRoot)) {
+        throw new Error("Admitted file root changed");
+      }
+      const requestedRoot = await canonicalizePathIdentity(identity.canonicalRoot, { allowMissing: true });
+      const basePath = sameFsPath(canonicalRoot, requestedRoot) ? "" : relativeInside(canonicalRoot, requestedRoot);
+      return { ...authority, basePath };
+    }
     const execution = this.options.resolveExecutionRoot
       ? await this.options.resolveExecutionRoot(identity.canonicalRoot, identity.workspaceId)
       : { workspaceId: identity.workspaceId, canonicalRoot: identity.canonicalRoot };
@@ -123,20 +141,14 @@ export class KernelFileResourceBackend implements RecoveryFileStore {
       path: this.translated(context, resource.resourceId),
       scope: resource.scope,
     }));
-    for (;;) {
-      signal?.throwIfAborted();
-      // Receive the acquire result even if cancellation races it. Otherwise
-      // an acquired native lease could outlive its caller without a receipt.
-      const result = await context.client.fileLeaseAcquire({
+    const result = await context.client.fileLeaseWait({
         workspaceId: context.owningWorkspaceId,
         rootId: context.rootId,
         leaseId,
         resources: translated,
-      });
-      if (result.status === "acquired") return leaseId;
-      if (result.status !== "busy") throw new Error("Kernel returned an invalid file lease result");
-      await delay(this.busyRetryMs, undefined, { signal });
-    }
+    }, signal);
+    if (result.status !== "acquired") throw new Error("Kernel returned an invalid file lease result");
+    return leaseId;
   }
 
   gateFor(identity: RecoveryIdentity): HostResourceOperationGate {
@@ -156,6 +168,11 @@ export class KernelFileResourceBackend implements RecoveryFileStore {
             })),
           });
           options.signal?.throwIfAborted();
+          existing.signal?.throwIfAborted();
+          if (options.signal && options.signal !== existing.signal) {
+            const signal = existing.signal ? AbortSignal.any([existing.signal, options.signal]) : options.signal;
+            return this.leaseContext.run({ ...existing, signal }, operation);
+          }
           return operation();
         }
         if (this.leaseContext.getStore()) {
@@ -165,6 +182,7 @@ export class KernelFileResourceBackend implements RecoveryFileStore {
         const lease: LeaseContext = {
           key: `${context.owningWorkspaceId}\0${context.rootId}`,
           leaseId,
+          ...(options.signal ? { signal: options.signal } : {}),
           observed: new Map(),
         };
         try {
@@ -202,7 +220,7 @@ export class KernelFileResourceBackend implements RecoveryFileStore {
       path: relative,
       store: options.store !== false,
       leaseId: lease.leaseId,
-    });
+    }, lease.signal);
     const captured = parseCaptured(value);
     const result: CapturedState & { ownerId?: string } = {
       path: resolved.relative,
@@ -211,6 +229,14 @@ export class KernelFileResourceBackend implements RecoveryFileStore {
     };
     lease.observed.set(relative, result.state);
     return result;
+  }
+
+  async integrationConflicts(identity: RecoveryIdentity, paths: string[], exceptOperationId?: string): Promise<RecoveryOperationConflict[]> {
+    const context = await this.bind(identity);
+    const result = await context.client.recoveryOperationConflicts({ workspaceId: context.owningWorkspaceId,
+      rootId: context.rootId, paths: paths.map(file => this.translated(context, file)),
+      ...(exceptOperationId ? { exceptOperationId } : {}) });
+    return result.operations;
   }
 
   async captureState(
@@ -238,8 +264,9 @@ export class KernelFileResourceBackend implements RecoveryFileStore {
     identity: RecoveryIdentity,
     relativePath: string,
     state: RecoveryState,
-    options: { expected?: RecoveryState; ownerId?: string; operationId?: string } = {},
+    options: { expected?: RecoveryState; ownerId?: string; operationId?: string; reservationOperationId?: string } = {},
   ): Promise<{ status: "applied" | "conflict"; state: RecoveryState }> {
+    await this.assertApplyState(identity, relativePath, state);
     const resolved = await this.relativePathFor(identity, relativePath);
     const context = await this.bind(identity);
     const pathId = this.translated(context, resolved.relative);
@@ -251,6 +278,7 @@ export class KernelFileResourceBackend implements RecoveryFileStore {
       rootId: context.rootId,
       path: pathId,
       targetJson: JSON.stringify(state),
+      ...(options.reservationOperationId ? {reservationOperationId:options.reservationOperationId} : {}),
       ...(expected ? { expectedJson: JSON.stringify(expected) } : {}),
       ...(options.ownerId ? { ownerId: options.ownerId } : {}),
       ...(lease ? { leaseId: lease.leaseId } : {}),
@@ -261,6 +289,10 @@ export class KernelFileResourceBackend implements RecoveryFileStore {
     const observed = parseRecoveryState(JSON.parse(value.stateJson));
     lease?.observed.set(pathId, observed);
     return { status: value.status, state: observed };
+  }
+
+  async assertApplyState(identity: RecoveryIdentity, relativePath: string, state: RecoveryState): Promise<void> {
+    await this.options.authorizeApplyState?.(identity, relativePath, state);
   }
 
   async writeBytes(
@@ -349,7 +381,7 @@ export class KernelFileResourceBackend implements RecoveryFileStore {
     identity: RecoveryIdentity,
     relativePath = "",
     scopes?: readonly string[],
-    options: { signal?: AbortSignal } = {},
+    options: { signal?: AbortSignal; includeInternalEntries?: boolean } = {},
   ): Promise<string[]> {
     const context = await this.bind(identity);
     const output: string[] = [];
@@ -363,6 +395,7 @@ export class KernelFileResourceBackend implements RecoveryFileStore {
         ...(scopes && scopes.length > 0 ? { scopes: scopes.map(normalizeRelative) } : {}),
         ...(cursor === undefined ? {} : { cursor }),
         pageSize: 1024,
+        ...(options.includeInternalEntries === undefined ? {} : { includeInternalEntries: options.includeInternalEntries }),
         ...(expectedFingerprint === undefined ? {} : { expectedFingerprint }),
       }, options.signal);
       const page = Array.isArray(value.paths) && value.paths.every((entry) => typeof entry === "string")

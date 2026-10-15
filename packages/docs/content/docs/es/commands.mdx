@@ -1,14 +1,14 @@
 ---
-title: Comandos
-description: Consulta los comandos disponibles en el runtime Pi activo.
+title: "Comandos"
+description: "Invoca habilidades capturadas en el contexto de la conversación."
 ---
 
 # Comandos
 
-Abre **Settings → Commands** para ver los comandos registrados por extensiones y habilidades. El catálogo muestra la descripción, el origen, el ámbito y la invocación de cada comando, y permite copiarla.
+**Settings → Commands** muestra las habilidades activas y válidas de la biblioteca seleccionada, con descripción y ruta. Inicia un mensaje con `/skill:name`, seguido de un espacio y tus instrucciones.
 
-Escribe `/` al principio de un mensaje y selecciona un comando. Añade argumentos después del nombre si los requiere. Los comandos de extensiones los gestiona su propio plugin; `/skill:name` carga las instrucciones de esa habilidad.
+En **Instructions and skills**, **Add /skill:name to draft** inserta el comando sin enviar el mensaje. Los nombres con espacios no pueden usar esta sintaxis.
 
-Los comandos disponibles dependen del runtime, del espacio de trabajo y de los recursos cargados. Gestiona sus fuentes en **Settings → Skills** y **Settings → Pi Packages**.
+La conversación usa una versión capturada. Después de editar la biblioteca, pulsa **Refresh instructions and skills** para preparar una nueva instantánea. Las solicitudes en curso y las entradas ya aceptadas conservan su material original. La lista de ajustes no implica que una conversación anterior ya esté actualizada.
 
-- [Skills](/es/skills/)
+Consulta [Habilidades](/es/skills/). Los atajos del área de trabajo se configuran por separado.

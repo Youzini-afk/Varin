@@ -1,5 +1,5 @@
 import { getRegisteredRuntimeAPIs } from '@/lib/runtime-api/registry';
-import type { CreateGitWorktreePayload, GitAPI, GitWorktreeCreateResult } from '@varin/application-client';
+import { getRuntimeEndpointGeneration, type CreateGitWorktreePayload, type GitAPI, type GitWorktreeCreateResult } from '@varin/application-client';
 import {
   clearWorktreeBootstrapState,
   markWorktreeBootstrapPending,
@@ -95,6 +95,7 @@ export const createVarinWorktree = async (
   project: VarinProjectRef,
   options: VarinWorktreeCreateOptions,
 ): Promise<WorktreeMetadata> => {
+  const host = getRuntimeEndpointGeneration();
   const git = requireGit();
   const mode = options.mode === 'existing' ? 'existing' : 'new';
   const branchName = normalizeBranchName(
@@ -125,7 +126,9 @@ export const createVarinWorktree = async (
     ...(options.returnAfterDirectoryCreated ? { returnAfterDirectoryCreated: true } : {}),
   };
 
+  if (host !== getRuntimeEndpointGeneration()) throw new Error('Application Host changed before worktree creation');
   const created = await createWithRuntime(git, project.path, payload);
+  if (host !== getRuntimeEndpointGeneration()) throw new Error(`Application Host changed; the original worktree remains on its original Host${created.path ? ` at ${created.path}` : ''}`);
   if (!created.path || !created.name) throw new Error('Worktree creation returned no name or path');
 
   if (created.bootstrapStatus) {

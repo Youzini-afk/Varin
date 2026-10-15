@@ -135,9 +135,11 @@ impl Storage {
             ))
         })?;
         let source_grant = self.load_grant(&source_grant_id)?;
-        if !source_grant.capabilities.contains("recovery.maintenance") {
+        if !source_grant.capabilities.contains("recovery.maintenance")
+            && !source_grant.capabilities.contains("storage.maintenance")
+        {
             return Err(KernelError::Authorization(
-                "temporary object owner was not created by recovery maintenance".to_string(),
+                "temporary object owner was not created by Host storage or recovery maintenance".to_string(),
             ));
         }
         self.conn.execute(
@@ -279,7 +281,22 @@ impl Storage {
         let decoded = BASE64
             .decode(bytes)
             .map_err(|error| KernelError::Operation(format!("invalid bytesBase64: {error}")))?;
-        if decoded.len() > 65536 { return Err(KernelError::Protocol("Upload chunk exceeds transport bound".into())); }
+        if decoded.len() > 65536 {
+            return Err(KernelError::Protocol(
+                "Upload chunk exceeds transport bound".into(),
+            ));
+        }
+        self.stream_blob_bytes(stream_id, sequence, &decoded, grant_id)
+    }
+
+    pub(super) fn stream_blob_bytes(
+        &mut self,
+        stream_id: &str,
+        sequence: u64,
+        bytes: &[u8],
+        grant_id: &str,
+    ) -> Result<(), KernelError> {
+        self.check_cancelled()?;
         let stream = self
             .streams
             .get_mut(stream_id)
@@ -291,7 +308,7 @@ impl Storage {
         }
         let next = stream
             .received
-            .checked_add(decoded.len() as u64)
+            .checked_add(bytes.len() as u64)
             .ok_or_else(|| KernelError::Operation("content stream length overflow".to_string()))?;
         if next > stream.expected_length {
             return Err(KernelError::Operation(
@@ -299,7 +316,7 @@ impl Storage {
             ));
         }
         let mut file = OpenOptions::new().append(true).open(&stream.staging)?;
-        file.write_all(&decoded)?;
+        file.write_all(bytes)?;
         stream.received = next;
         stream.next_sequence += 1;
         Ok(())
@@ -463,17 +480,7 @@ impl Storage {
     }
 
     pub(super) fn grant_workspace(&self, grant_id: &str) -> Option<String> {
-        self.conn
-            .query_row(
-                "SELECT grant_json FROM grants WHERE grant_id = ?1",
-                params![grant_id],
-                |row| row.get::<_, String>(0),
-            )
-            .optional()
-            .ok()
-            .flatten()
-            .and_then(|value| serde_json::from_str::<Grant>(&value).ok())
-            .and_then(|grant| grant.owning_workspace)
+        self.load_grant(grant_id).ok().and_then(|grant| grant.owning_workspace)
     }
 
     pub(super) fn validate_blob_read_source(
@@ -626,82 +633,5 @@ impl Storage {
             ));
         }
         Ok(())
-    }
-
-    pub(super) fn get_blob(
-        &mut self,
-        params: &Value,
-        grant_id: &str,
-        storage_admin: bool,
-    ) -> Result<Value, KernelError> {
-        let hash = params
-            .get("hash")
-            .and_then(Value::as_str)
-            .ok_or_else(|| KernelError::Operation("hash is required".to_string()))?;
-        self.validate_blob_read_source(params, hash, grant_id, storage_admin)?;
-        let path = object_path(&self.root, hash)?;
-        let byte_length = fs::metadata(&path)?.len();
-        if !self.verified_objects.contains(hash) {
-            let (actual, hashed_length) = hash_file(&path)?;
-            if actual != hash || hashed_length != byte_length {
-                return Err(KernelError::Storage(format!(
-                    "content object is corrupt: {hash}"
-                )));
-            }
-            self.verified_objects.insert(hash.to_string());
-        }
-        let recorded: Option<i64> = self
-            .conn
-            .query_row(
-                "SELECT byte_length FROM blobs WHERE hash = ?1",
-                params![hash],
-                |row| row.get(0),
-            )
-            .optional()?;
-        if recorded
-            != Some(
-                i64::try_from(byte_length)
-                    .map_err(|_| KernelError::Storage("content object is too large".to_string()))?,
-            )
-        {
-            return Err(KernelError::Storage(format!(
-                "content object metadata is missing or corrupt: {hash}"
-            )));
-        }
-        let offset = match params.get("offset") {
-            Some(value) => value.as_u64().ok_or_else(|| {
-                KernelError::Operation("offset must be a non-negative integer".to_string())
-            })?,
-            None => 0,
-        };
-        let length = match params.get("length") {
-            Some(value) => value.as_u64().ok_or_else(|| {
-                KernelError::Operation("length must be a non-negative integer".to_string())
-            })?,
-            None => byte_length.saturating_sub(offset),
-        };
-        if byte_length > MAX_BLOB_RESPONSE_BYTES as u64 && params.get("length").is_none() {
-            return Err(KernelError::Operation(
-                "content object is larger than one response frame; request a byte range"
-                    .to_string(),
-            ));
-        }
-        if length > MAX_BLOB_RESPONSE_BYTES as u64 {
-            return Err(KernelError::Operation(
-                "requested byte range is larger than one response frame".to_string(),
-            ));
-        }
-        let start = offset.min(byte_length);
-        let end = start.saturating_add(length).min(byte_length);
-        let slice_length = usize::try_from(end - start).map_err(|_| {
-            KernelError::Operation("requested object range is too large".to_string())
-        })?;
-        let mut file = File::open(&path)?;
-        file.seek(SeekFrom::Start(start))?;
-        let mut bytes = vec![0u8; slice_length];
-        file.read_exact(&mut bytes)?;
-        Ok(
-            json!({"hash": hash, "byteLength": byte_length, "offset": start, "nextOffset": end, "eof": end >= byte_length, "bytesBase64": BASE64.encode(bytes)}),
-        )
     }
 }

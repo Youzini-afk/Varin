@@ -1,7 +1,8 @@
 import type { Express, Request, RequestHandler, Response } from "express";
 import { HarnessServiceError } from "../harness/service-error.js";
-import type { ComputerService } from "./computer-service.js";
-import type { ComputerActor, ComputerAccess } from '@varin/protocol';
+import { ComputerBeforeDispatchError, ComputerEffectError, type ComputerService } from "./computer-service.js";
+import { computerWorkKey, parseComputerActor, type ComputerAccess } from '@varin/protocol';
+import { ComputerError } from './computer-error.js';
 
 /**
  * Computer catalog routes (BC4): environment selection surfaces read machines
@@ -16,12 +17,15 @@ export interface ComputerRoutesOptions {
 const noAuth: RequestHandler = (_request, _response, next) => next();
 
 const sendError = (response: Response, error: unknown, fallback: string): void => {
+  if (error instanceof ComputerError) { response.status(error.computerCode === 'computer-work-not-found' ? 404 : error.computerCode === 'computer-request-invalid' ? 400 : error.computerCode === 'computer-execution-stale' ? 409 : 503).json({ code: error.computerCode, error: error.message }); return; }
   if (error instanceof HarnessServiceError) {
     const status = error.harnessCode === "invalid-params" ? 400
       : error.harnessCode === "not-found" ? 404
         : error.harnessCode === "forbidden" || error.harnessCode === "denied" ? 409
           : 500;
-    response.status(status).json({ code: error.harnessCode, error: error.message });
+    response.status(status).json({ code: error.harnessCode, error: error.message,
+      ...(error instanceof ComputerBeforeDispatchError ? { computerExecution: { inputWriterStopped: true, receipt: { effect: 'none' } } }
+        : error instanceof ComputerEffectError ? { computerExecution: { inputWriterStopped: error.inputWriterStopped, receipt: { effect: 'unknown' } } } : {}) });
     return;
   }
   response.status(500).json({ error: error instanceof Error ? error.message : fallback });
@@ -50,38 +54,23 @@ export function registerComputerRoutes(app: Express, { computers, requireAuth = 
     }
   });
 
-  // Pure in-memory projection: opening a chat must not probe or capture a desktop.
-  app.get("/api/computers/activity", requireAuth, (request: Request, response: Response) => {
-    response.setHeader("Cache-Control", "no-store");
-    response.json({ activities: computers.activities(typeof request.query.sessionId === "string" ? request.query.sessionId : undefined) });
-  });
-
-  app.get('/api/computers/automation', requireAuth, async (request, response) => {
-    response.setHeader('Cache-Control', 'no-store');
+  app.post('/api/computers/desktops/:desktopId/stop', requireAuth, async (request, response) => {
     try {
-      const sessionId = String(request.query.sessionId ?? '');
-      const state = await computers.automation.snapshot(sessionId);
-      const sessions = new Set([sessionId, state.rootSessionId, ...state.leases.map(lease => lease.actor.sessionId), ...state.requests.map(item => item.actor.sessionId)]);
-      response.json({ state, activities: computers.activities().filter(entry => entry.activity.sessionId && sessions.has(entry.activity.sessionId)) });
-    }
-    catch (error) { sendError(response, error, 'Unable to read Computer Use state'); }
-  });
-  app.post('/api/computers/automation/stop', requireAuth, async (request, response) => {
-    try { response.json({ state: await computers.automation.stop(String(request.body?.sessionId ?? ''), typeof request.body?.desktopId === 'string' ? request.body.desktopId : undefined) }); }
-    catch (error) { sendError(response, error, 'Unable to confirm Computer Use stop'); }
+      if (!request.body || typeof request.body.automationEpoch !== 'string' || Object.keys(request.body).some(key => key !== 'automationEpoch')) throw new ComputerError('computer-request-invalid', 'Stop requires only the control generation shown by this desktop view');
+      response.json(await computers.stopDesktop({ desktopId: String(request.params.desktopId), automationEpoch: request.body.automationEpoch }));
+    } catch (error) { sendError(response, error, 'Unable to confirm desktop input stop'); }
   });
   app.post('/api/computers/desktops/:desktopId/assignment', requireAuth, async (request, response) => {
     try {
       const body = request.body;
-      const actor = body?.actor;
-      if (typeof body?.origin !== 'string' || !body.origin.trim() || typeof body.assignmentId !== 'string' || !body.assignmentId.trim() || !actor || typeof actor.readOnly !== 'boolean'
-        || ['sessionId', 'runId', 'threadId', 'scopeId', 'rootSessionId', 'rootRunId', 'label'].some(field => typeof actor[field] !== 'string' || !actor[field].trim())) {
+      const actor = parseComputerActor(body?.actor);
+      if (typeof body?.origin !== 'string' || !body.origin.trim() || typeof body.assignmentId !== 'string' || !body.assignmentId.trim()) {
         throw new HarnessServiceError('invalid-params', 'A trusted Host execution identity is required');
       }
       const desktopId = String(request.params.desktopId);
-      if (body.op === 'drop' && ['observe', 'control'].includes(body.access)) { await computers.dropDesktopClaim(body.origin, body.assignmentId, actor as ComputerActor, desktopId, body.access as ComputerAccess); response.json({ released: true }); }
+      if (body.op === 'drop' && ['observe', 'control'].includes(body.access)) { await computers.dropDesktopClaim(body.origin, body.assignmentId, actor, desktopId, body.access as ComputerAccess); response.json({ released: true }); }
       else if (body.op === 'claim' && ['observe', 'control'].includes(body.access)) {
-        response.json({ token: await computers.claimDesktop(body.origin, body.assignmentId, actor as ComputerActor, desktopId, body.access as ComputerAccess) });
+        response.json({ token: await computers.claimDesktop(body.origin, body.assignmentId, actor, desktopId, body.access as ComputerAccess) });
       } else throw new HarnessServiceError('invalid-params', 'Unknown desktop assignment operation');
     } catch (error) { sendError(response, error, 'Unable to coordinate desktop assignment'); }
   });
@@ -89,17 +78,20 @@ export function registerComputerRoutes(app: Express, { computers, requireAuth = 
   // takeover identity; a raw automatic endpoint is never a second bypass around Thread admission.
   app.use('/api/computers/desktops/:desktopId', requireAuth, (request, response, next) => {
     const operation = request.path.slice(1);
-    const automatic = request.method === 'POST' && ['observe', 'act', 'open', 'cancel', 'release', 'browser', 'office', 'software', 'artifacts/write'].includes(operation);
+    const automatic = request.method === 'POST' && ['observe', 'act', 'open', 'cancel', 'release', 'browser', 'office', 'software', 'artifacts/write'].includes(operation)
+      || request.method === 'POST' && ['prepare', 'lifecycle'].includes(operation) && request.body?.automation === true;
     const token = request.get('X-Varin-Computer-Lease');
     if (!automatic && !token) { next(); return; }
-    if (!token) { sendError(response, new HarnessServiceError('forbidden', 'Automatic input requires a Host desktop assignment'), 'Assignment required'); return; }
+    if (!token) { sendError(response, new ComputerBeforeDispatchError(new HarnessServiceError('forbidden', 'Automatic input requires a Host desktop assignment')), 'Assignment required'); return; }
     const body = request.body;
-    const read = request.method === 'GET' || operation === 'observe'
+    const read = request.method === 'GET' || operation === 'observe' || operation === 'evidence' || operation === 'artifacts/inspect'
       || operation === 'browser' && (['status', 'tabs', 'snapshot'].includes(body?.op) || body?.op === 'act' && body?.act?.kind === 'screenshot')
       || operation === 'office' && (['status', 'docs'].includes(body?.op) || body?.op === 'act' && body?.act?.kind === 'read');
+    let entered = false;
     void computers.automation.delegated(token, String(request.params.desktopId), read ? 'observe' : 'control', () => new Promise<void>(resolve => {
+      entered = true;
       response.once('finish', resolve); response.once('close', resolve); next();
-    })).catch(error => { if (!response.headersSent) sendError(response, error, 'Desktop assignment ended'); });
+    })).catch(error => { if (!response.headersSent) sendError(response, entered ? error : new ComputerBeforeDispatchError(error), 'Desktop assignment ended'); });
   });
 
   const sendArtifact = (response: Response, source: Awaited<ReturnType<ComputerService["openDesktopArtifact"]>>) => {
@@ -140,14 +132,30 @@ export function registerComputerRoutes(app: Express, { computers, requireAuth = 
     } catch (error) { sendError(response, error, "Unable to download computer artifact"); }
   });
 
-  /** Re-probe a desktop's driver and persist the real capability table. */
-  app.post("/api/computers/desktops/prepare", requireAuth, async (request, response) => {
-    try { response.json({ desktop: await computers.prepareDesktop(request.body ?? {}, request.body?.automation === true) }); }
-    catch (error) { sendError(response, error, "Unable to prepare desktop"); }
+  /** Discover the existing managed backend without starting its setup helper. */
+  app.post('/api/computers/desktops/prepare-target', requireAuth, async (_request, response) => {
+    try { response.json({ desktop: await computers.preparationTarget(), hostId }); }
+    catch (error) { sendError(response, error, 'Unable to resolve managed desktop target'); }
   });
-  app.post("/api/computers/desktops/:desktopId/lifecycle", requireAuth, async (request, response) => {
-    try { response.json({ desktop: await computers.desktopLifecycle(String(request.params.desktopId), request.body?.action, request.body?.automation === true) }); }
-    catch (error) { sendError(response, error, "Unable to change desktop lifecycle"); }
+  const changeSignal = (response: Response) => {
+    const controller = new AbortController();
+    response.once('close', () => { if (!response.writableEnded) controller.abort(); });
+    return controller.signal;
+  };
+  app.post('/api/computers/desktops/prepare', requireAuth, async (request, response) => {
+    try {
+      if (request.body?.automation === true) throw new ComputerBeforeDispatchError(new HarnessServiceError('forbidden', 'Automated preparation requires the managed target and its original assignment'));
+      response.json(await computers.prepareDesktop(request.body ?? {}, { signal: changeSignal(response) }));
+    } catch (error) { sendError(response, error, 'Unable to prepare desktop'); }
+  });
+  app.post('/api/computers/desktops/:desktopId/prepare', requireAuth, async (request, response) => {
+    try { response.json(await computers.prepareDesktop(request.body ?? {}, { desktopId: String(request.params.desktopId), automated: request.body?.automation === true, signal: changeSignal(response) })); }
+    catch (error) { sendError(response, error instanceof ComputerEffectError ? error : new ComputerBeforeDispatchError(error), 'Unable to prepare desktop'); }
+  });
+  app.post('/api/computers/desktops/:desktopId/lifecycle', requireAuth, async (request, response) => {
+    try { response.json(await computers.desktopLifecycle(String(request.params.desktopId), request.body?.action, {
+      automated: request.body?.automation === true, ...(typeof request.body?.automationEpoch === 'string' ? { automationEpoch: request.body.automationEpoch } : {}), signal: changeSignal(response) })); }
+    catch (error) { sendError(response, error instanceof ComputerEffectError ? error : new ComputerBeforeDispatchError(error), 'Unable to change desktop lifecycle'); }
   });
 
   app.post("/api/computers/desktops/:desktopId/probe", requireAuth, async (request: Request, response: Response) => {
@@ -195,7 +203,6 @@ export function registerComputerRoutes(app: Express, { computers, requireAuth = 
         desktopId: String(request.params.desktopId ?? ""),
         app: typeof body.app === "string" ? body.app : "",
         signal: controller.signal,
-        ...(typeof body.sessionId === "string" ? { sessionId: body.sessionId } : {}),
         ...(body.window !== undefined && (typeof body.window === "number" || typeof body.window === "string")
           ? { window: body.window } : {}),
         ...(typeof body.includeScreenshot === "boolean" ? { includeScreenshot: body.includeScreenshot } : {}),
@@ -221,7 +228,6 @@ export function registerComputerRoutes(app: Express, { computers, requireAuth = 
         desktopId: String(request.params.desktopId ?? ""),
         action: request.body?.action,
         signal: controller.signal,
-        ...(typeof request.body?.sessionId === "string" ? { sessionId: request.body.sessionId } : {}),
         ...(typeof request.body?.automationEpoch === "string" ? { automationEpoch: request.body.automationEpoch } : {}),
       });
       response.json({ result });
@@ -276,7 +282,6 @@ export function registerComputerRoutes(app: Express, { computers, requireAuth = 
         ...(typeof body.command === "string" ? { command: body.command } : {}),
         ...(body.args !== undefined ? { args: body.args } : {}),
         ...(typeof body.automationEpoch === "string" ? { automationEpoch: body.automationEpoch } : {}),
-        ...(typeof body.sessionId === "string" ? { sessionId: body.sessionId } : {}),
       });
       response.json({ result });
     } catch (error) {
@@ -296,7 +301,6 @@ export function registerComputerRoutes(app: Express, { computers, requireAuth = 
         relativePath: typeof body.relativePath === "string" ? body.relativePath : "",
         contentBase64: body.contentBase64,
         signal: controller.signal,
-        ...(typeof body.sessionId === "string" ? { sessionId: body.sessionId } : {}),
       });
       response.json(result);
     } catch (error) {
@@ -317,7 +321,6 @@ export function registerComputerRoutes(app: Express, { computers, requireAuth = 
         ...(body.groups !== undefined ? { groups: body.groups } : {}),
         ...(body.packages !== undefined ? { packages: body.packages } : {}),
         signal: controller.signal,
-        ...(typeof body.sessionId === "string" ? { sessionId: body.sessionId } : {}),
       });
       response.json(result);
     } catch (error) {
@@ -337,7 +340,6 @@ export function registerComputerRoutes(app: Express, { computers, requireAuth = 
         op: body.op,
         signal: controller.signal,
         ...(typeof body.automationEpoch === "string" ? { automationEpoch: body.automationEpoch } : {}),
-        ...(typeof body.sessionId === "string" ? { sessionId: body.sessionId } : {}),
         ...(typeof body.tabId === "string" ? { tabId: body.tabId } : {}),
         ...(typeof body.binary === "string" ? { binary: body.binary } : {}),
         ...(typeof body.profile === "string" ? { profile: body.profile } : {}),
@@ -362,7 +364,6 @@ export function registerComputerRoutes(app: Express, { computers, requireAuth = 
         op: body.op,
         signal: controller.signal,
         ...(typeof body.automationEpoch === "string" ? { automationEpoch: body.automationEpoch } : {}),
-        ...(typeof body.sessionId === "string" ? { sessionId: body.sessionId } : {}),
         ...(typeof body.path === "string" ? { path: body.path } : {}),
         ...(typeof body.url === "string" ? { url: body.url } : {}),
         ...(body.act !== null && typeof body.act === "object" ? { act: body.act } : {}),
@@ -382,7 +383,6 @@ export function registerComputerRoutes(app: Express, { computers, requireAuth = 
       const result = await computers.evidence({
         desktopId: String(request.params.desktopId ?? ""),
         signal: controller.signal,
-        ...(typeof body.sessionId === "string" ? { sessionId: body.sessionId } : {}),
         ...(typeof body.since === "number" ? { since: body.since } : {}),
         ...(typeof body.limit === "number" ? { limit: body.limit } : {}),
       });

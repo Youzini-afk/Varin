@@ -87,6 +87,8 @@ export interface HarnessFastDecisionResultWire {
   answers: FastDecisionAnswer[];
   missing: string[];
   servedModelId?: string;
+  /** An accounted failed batch is evidence, not permission to use its judgments. */
+  failure?: { status: 'failed' | 'cancelled'; note?: string };
   usage?: { inputTokens?: number; outputTokens?: number };
 }
 
@@ -121,7 +123,8 @@ export async function runExploreFastDecisionLoop(
   const acceptedActions = new Set<string>();
   const judged = new Set<string>();
   const judgedActions = new Set<string>();
-  let usage: { inputTokens?: number; outputTokens?: number } | undefined;
+  const usage = { inputTokens: 0, outputTokens: 0 };
+  const knownUsage = { inputTokens: true, outputTokens: true };
 
   try {
     while (input.run.terminal() === "active") {
@@ -202,11 +205,15 @@ export async function runExploreFastDecisionLoop(
       details.actionsOffered += pending.length;
       details.missing += result.missing.length;
       if (result.servedModelId) details.servedModelId = result.servedModelId;
-      if (result.usage) {
-        usage = {
-          inputTokens: (usage?.inputTokens ?? 0) + (result.usage.inputTokens ?? 0),
-          outputTokens: (usage?.outputTokens ?? 0) + (result.usage.outputTokens ?? 0),
-        };
+      for (const field of ['inputTokens', 'outputTokens'] as const) {
+        const value = result.usage?.[field];
+        if (value === undefined) knownUsage[field] = false;
+        else usage[field] += value;
+      }
+      if (result.failure) {
+        details.status = result.failure.status;
+        if (result.failure.note) details.note = result.failure.note;
+        break;
       }
       for (const view of fresh) judged.add(view.viewId);
       for (const action of pending) judgedActions.add(`${action.actionId}@${contextKey}`);
@@ -246,7 +253,10 @@ export async function runExploreFastDecisionLoop(
   } finally { input.run.setJudgmentPending(false); }
   details.executed = input.run.completedActionIds().filter(id => acceptedActions.has(id));
   details.actionsExecuted = details.executed.length;
-  if (usage) details.usage = usage;
+  if (details.batches && (knownUsage.inputTokens || knownUsage.outputTokens)) {
+    details.usage = { ...(knownUsage.inputTokens ? { inputTokens: usage.inputTokens } : {}),
+      ...(knownUsage.outputTokens ? { outputTokens: usage.outputTokens } : {}) };
+  }
   if (details.batches === 0 && details.status === "used") {
     details.status = 'skipped';
     details.note = "No evaluable material arrived before the loop settled.";

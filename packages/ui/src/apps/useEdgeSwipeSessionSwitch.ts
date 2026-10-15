@@ -1,11 +1,6 @@
 import React from 'react';
-import type { SessionSummary } from '@varin/protocol';
-
-import { comparePiSessions } from '@/components/pi-session/sessionPresentation';
-import { openPiSessionFromNavigation } from '@/lib/pi-runtime/sessionNavigation';
-import { selectActivePiSessions, usePiSessionStore } from '@/stores/usePiSessionStore';
-import { regularPiSessions, useBotSessionIndex } from '@/stores/useBotSessionIndex';
-import { isSessionPinned, useSessionPinnedStore } from '@/stores/useSessionPinnedStore';
+import { switchRelativeThread } from '@/lib/agent-runtime/threadNavigation';
+import { useThreadStore } from '@/stores/useThreadStore';
 
 /**
  * Native-feeling edge swipe to switch sessions in the mobile chat: start a horizontal swipe
@@ -29,38 +24,11 @@ const ANDROID_EDGE_ZONE = 80; // stay outside Android's system Back gesture stri
 const MIN_DISTANCE = 64; // px of horizontal travel required to commit a switch
 const MAX_OFF_AXIS_RATIO = 0.7; // |dy| must stay below |dx| * this (keep it horizontal)
 
-/** Top-level sessions across all projects in shared display order. */
-const orderedTopLevelSessions = (): SessionSummary[] => {
-  const pinnedSessionIds = useSessionPinnedStore.getState().ids;
-  const sessionState = usePiSessionStore.getState();
-  return regularPiSessions(selectActivePiSessions(sessionState), useBotSessionIndex.getState(), sessionState.runtimeKey)
-    .filter((session) => session.parentId === undefined)
-    .slice()
-    .sort((left, right) => comparePiSessions(
-      left,
-      right,
-      (session) => isSessionPinned(pinnedSessionIds, session.cwd, session.id),
-    ));
-};
-
-/**
- * Switch to the session `step` positions away from the current one (clamped — no wrap).
- * Returns true if a switch actually happened.
- */
 const switchByStep = async (step: number): Promise<boolean> => {
-  const ordered = orderedTopLevelSessions();
-  if (ordered.length < 2) return false;
-
-  const currentId = usePiSessionStore.getState().currentSessionId;
-  const index = ordered.findIndex((session) => session.id === currentId);
-  if (index < 0) return false;
-
-  const targetIndex = index + step;
-  if (targetIndex < 0 || targetIndex >= ordered.length) return false;
-
-  const target = ordered[targetIndex];
-  await openPiSessionFromNavigation({ directory: target.cwd, sessionId: target.id });
-  return true;
+  const before = useThreadStore.getState().selectedIdentity;
+  await switchRelativeThread(step);
+  const after = useThreadStore.getState().selectedIdentity;
+  return before?.threadId !== after?.threadId || before?.branchId !== after?.branchId;
 };
 
 export interface EdgeSwipeSessionSwitchOptions {

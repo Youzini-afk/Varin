@@ -1,14 +1,95 @@
 # Semantic index
 
-Code-semantic index for explore’s third recall path (design 6.1 / 3.16, D-166–D-193).
+Code-semantic index for Explore’s semantic recall path.
 Host-only writer. Not the authoritative workspace `.tdb`. Knowledge-base vectors are a sibling
-derived store (`../vectors/`); they reuse `harness.embed` but never this local-model fallback.
+derived store (`../vectors/`); they reuse retained native inference but never this local-model fallback.
+
+## Purpose-specific Host inference
+
+`runtime-inference.ts` owns retained embedding leases and assembles purpose-specific Host inference.
+Native retrieval's query/document embedding, decision, rerank and Explore generation consume one original
+query session in `inference-requests.ts`, with one ordinal allocator for actual requests. The
+`HostCredentialAuthority`, global purpose settings, egress and original protocol adapters remain
+their owners. Catalog owns native request admission,
+dispatch, original receipt, Goal usage and recovery. Background document indexing retains its
+separate existing index owner below. Request/response/raw-usage bodies live in ContentStore. Private retained
+credentials/headers never enter those records.
+
+Ordinary configuration edits do not redirect an accepted request. Explicit disable/revocation and
+original Goal/parent control fence dispatch. Runtime events reconcile the exact active Operation;
+kernel exit aborts local transports immediately. Stop acknowledgement does not prove remote work
+stopped: the Host waits for its actual fetch/body reader and records known/unknown effects separately.
+The session closes new scheduler admission when its query callback finishes, retaining already-owned
+HTTP/body or local worker work until its receipt or existing unknown-usage barrier is acknowledged. Kernel generation
+keeps its original execution owner. An unpublished observed receipt remains with its owner for same-identity publication, and prevents
+the SDK from interpreting the persistence failure as permission to send another paid request.
+
+`local-inference.ts` adapts the existing installed encoder for native query and foreground fixed-view
+vectors. An unconfigured embedding selection uses the installed component; explicit remote, disabled,
+invalid or unavailable selections never fall back. The HTTP settings DTO remains unconfigured for index-status consumers when local inference is selected.
+Knowledge-vector recall keeps its separate enrollment and embedding policy.
+Workspace native selection is one tagged HTTP/local lease. Local Catalog bindings carry the component
+ID/version, canonical verified-manifest digest, model revision and worker protocol, with no endpoint or
+credential. The digest includes the manifest's model/tokenizer/recipe/runtime hashes and enters the
+vector-space/cache identity; it does not reread model weights per query.
+
+Each actual local grain uses the original InferenceCall session/ordinal and Catalog Operation/Goal.
+The shared worker selects a queued grain, requests dispatch permission, then enters the encoder only
+after original Catalog, settings, source/grant and document-revision fences. Native gated grains are
+not coalesced across callers, so an already-authorized grain cannot wait behind another caller's source
+check. Existing ungated CPU batches keep their coalescing. A queued cancel is settled by the worker's
+never-started acknowledgement; aborting an observer does not settle active forward. Active completion,
+error or worker exit supplies the physical-stop evidence. Worker exit after execute but without a
+started acknowledgement leaves execution entry unknown, never false. Original results/errors/usage
+remain in ContentStore even when their observer has left; current-format recovery never reruns them.
+
+The worker reports untruncated tokenizer counts as estimated input, not actual pipeline tokenization.
+Encoder output tokens are known zero after encoder entry; unavailable input evidence remains missing.
+There is no invented price. Each completed/failed grain retains its own receipt, including partial
+multi-grain requests. Verified query-cache hits make no worker request or Catalog inference receipt.
+Component replacement retains accepted query/scan generations until their pins and actual worker work
+drain; reimporting identical bytes reuses the active generation. Shutdown closes admission, releases
+selection pins and starts real worker termination before waiting for cancelled scans/callbacks.
+
+Raw provider usage, including missing dimensions, is recorded before answer validation. The SDK's
+normalized zero defaults are not accounting evidence. Legitimate SDK retries each re-enter original
+Goal/config/permission admission as another HTTP Operation; recovery never restarts the paid batch.
+Original owner evidence can refine a recovered unknown receipt once without charging twice.
+`research_decide` is the first native consumer; it uses the original Thread material reader, including
+PDF extraction, and rechecks retained material authority before each dispatch. llama.cpp uses the
+original SDK server-root semantics and three exact frozen routes. Tokenization and template HTTPs
+are controlled `preparation`; only `/completion` is `model_compute` charged to Goal. Raw
+`tokens_evaluated`/`tokens_predicted` supply usage, with native timing/cache evidence retained;
+`n_predict` and timing estimates never fill missing dimensions. Retry and probability-depth expansion
+are distinct actual computations. The adapter drains every fetch/body even if the SDK fails early
+while a sibling preparation is active. Label promises are request-local, so one caller cancellation
+cannot poison another. Ordinary partial failures retain completed scores/choices and original order;
+explicit cancellation/revocation still suppresses answers.
+
+Native embedding uses the shared OpenAI-compatible wire with zero automatic retries. Raw
+`prompt_tokens` supplies input usage; `total_tokens` alone is not relabeled as input, and an absent
+output dimension remains missing. An output-budgeted Goal therefore retains its existing unknown-use
+barrier when this provider supplies no output dimension. Query vector cache hits require the current
+source, binding and captured credential-scope fingerprint; they create no HTTP Operation or usage.
+For native fixed/materialized queries and every managed-Host source mode, foreground document misses use the same session with a distinct
+document-embedding purpose. `beforeDispatch` runs the full source-version fence after acknowledged
+dispatch intent and before the request-started flag/transport. Short authorization guards can repeat
+without repeatedly hashing the same file. A failed fence records the original admitted no-send fact;
+a later candidate rejection does not undo already observed HTTP usage.
+Managed sources use the original target SourceView for inventory, structure and document-version
+checks, including live roots. `resourceRoot` is a target coordinate only; `configurationRoot` selects
+the coordinator's global inference settings. Workspace/cache identities include the frozen target
+Host, connection, endpoint identity and workspace. Coordinator index selection, ignored-directory
+settings and same-named local publications cannot redirect that source. Target authorization and
+bytes remain at the source owner; model credentials, requests and usage remain with the Agent owner.
+
+## Index and embedding owners
 
 - Identities: `identity.ts` — vector space, index recipe, `{ scopeKind, scopeId }`. Remote spaces use
   `remoteEmbeddingSpaceId` from protocol parts (no credentials).
 - Embedder: `backend.ts` — unconfigured → the installed local encoder only when the optional component is installed;
-  otherwise the semantic source is unavailable. `harness.embedding` set → `remote-embedder.ts`
-  via workspace `harness.embed`. Configured remote never falls back to the local model in the same query.
+  otherwise the semantic source is unavailable. Configured remote inference uses `remote-embedder.ts`
+  through the retained native lease. Configured remote never falls back to the local model in the same query.
 - Chunking: `chunker.ts` — tree-sitter containers, backend input length, continue-split of long lines.
   Semantic eligibility follows recognized text language identities, independently of the tree-sitter
   grammar list. Languages such as Scala use native text units with path, line range and content
@@ -32,15 +113,16 @@ derived store (`../vectors/`); they reuse `harness.embed` but never this local-m
   forward passes and inference tokenization off the Application Host event loop.
   The Host retains the synchronous tokenizer used for source packing. The worker
   admits query batches ahead of queued background calls; an active forward runs
-  to completion. Idle workers do not keep a process alive. Retained model
-  bindings close with the semantic Host owner after pending work shuts down.
+  to completion. Idle workers do not keep a process alive. Accepted query/scan pins retain
+  their generation across preparation and batch gaps; unused retired generations close after drain.
   The default Bekko export enables adaptive batching (its FP32 transformer was
   verified across batch compositions). Batch size follows padded token work and
   observed inference duration, within the measured 32-input working grain; every
   input is processed. Host token-length preparation yields between short work
   intervals. Already queued foreground requests can share an immediate inference
-  batch without waiting to fill it. Cancellation removes queued calls and rejects
-  the caller immediately; a native forward already in progress completes.
+  batch without waiting to fill it, except native grains awaiting per-call dispatch authorization.
+  Cancellation removes queued calls with a worker acknowledgement; a native forward already in
+  progress completes. Observer cancellation and owning physical settlement remain distinct.
   `local-cpu-policy.ts` owns auto/efficient/performance preferences and an optional
   user thread ceiling. The model's four-thread hint is a measured starting point,
   not a reserved core count or a universal ceiling. Auto starts within half of
@@ -53,6 +135,20 @@ derived store (`../vectors/`); they reuse `harness.embed` but never this local-m
   optimal hardware profile. CPU settings apply after Host restart. Length grouping
   restores caller order. Quantized custom exports without `adaptiveBatching` keep
   fixed grains because their vectors may depend on batch composition.
+- Native non-live view: `source-query.ts` uses the original admitted Source owner, `unitsFixed` and
+  packing. Configuration/collection paths remain metadata; the old live directory need not exist.
+  Capture retains an available original publication without inventory or model work. First semantic
+  search lazily enumerates the source, retaining exact revision/recipe/space matches, masking every
+  other base row and preparing only missing source material. A cold view retains an empty backing
+  through the same owner, without copying an index or changing the writer's latest publication.
+  `listDocumentStatesPinned` and `lookupVectorsPinned` read that captured token, never newer writer
+  facts. Completed chunks and vectors share the original cache's byte soft budget. Changing API keys
+  alone does not invalidate compatible document assets; current source/binding/credential checks
+  still apply and query vectors retain their account partition. Concurrent cold invocations remain
+  separate inference owners; cross-query in-flight paid deduplication is not claimed. Release aborts
+  preparation and waits for its actual work before releasing the retained reader. Live background
+  indexing retains its own owner. Transient source coverage, captured publication coverage
+  and binding readiness are separate; materialized reads are versioned per file, not an atomic project.
 - Overlay: `query-view.ts` pins surface/thread drafts at query start; masked disk paths cannot leak
   old vectors. Thread view is fixed baseline + this branch’s delta.
   An empty index with no searchable fixed-view content returns before query embedding. Remote dimension
@@ -69,6 +165,48 @@ derived store (`../vectors/`); they reuse `harness.embed` but never this local-m
   It sends only document IDs, revisions and scores; code-semantic `search` still returns source hits.
   This generation disables automatic QuIVer construction: checkpoints must not build an ANN graph
   that neither query path consumes. Stores outside this shared generation retain their own search policies.
+  Native retrieval leases retain an immutable publication, with an owner epoch and publication
+  identity separate from the durable generation directory. At the existing checkpoint boundary,
+  TriviumDB's `publishGenerationManifest` performs the flush; the owner copies every manifest-declared
+  member and the manifest into a unique private directory, then opens it in native `immutable` mode.
+  These copies never use hardlinks, WAL files or writer locks. Acquisition and pinned searches never
+  flush or copy the writer. Recovery creates the first publication during store initialization;
+  a cold live query has no reader until a checkpoint exists. A non-live transient view may retain an
+  empty original-owner backing without publishing a writer generation. Each lease freezes coverage/lifecycle metadata
+  and uses the immutable handle's own scoped block-ID cache. New publications preserve retained old
+  readers; final release closes retired handles and removes their files. Store close or owner loss
+  invalidates all tokens, and startup under the exclusive writer lock removes abandoned copies.
+  Same-space embedder replacement affects future document admissions while an admitted batch keeps
+  its original binding through preparation and embedding.
+- Background index inference facts: `inference-ledger.ts` uses the same private semantic storage process.
+  Its sole durable ledger is `VARIN_DATA_DIR/knowledge/<hostId>/semantic-inference/ledger.tdb`, alongside
+  the derived `semantic/` subtree rather than inside it. Storage relocation and index-cache purge
+  cannot erase admitted external work. This dimension-independent, one-dimensional Trivium store
+  uses full-sync WAL transactions: dispatch intent is acknowledged only after persistence, before
+  the inference owner may send HTTP. It records whitelisted operation/identity metadata, input
+  hashes, attempt/usage receipts and validated completed vectors; it never stores input text,
+  credentials, authentication headers or endpoint URLs. There is no second configuration authority
+  or writable mirror of native Run state.
+  Index-build keys include workspace/recipe, input hashes and vector binding so a new model can build
+  a distinct index. Native query requests use the original Catalog and never also write this ledger.
+  Obsolete internal query records are rejected, not imported, silently erased or used as a fallback.
+  An indexed unresolved-state scan also fences overlapping index inputs under the same workspace,
+  recipe and vector binding, independent of batch grouping/order after restart. Settlement removes
+  terminal operations from that scan; no second claim authority or background cleanup is introduced.
+  Transport batch IDs and credential epochs are excluded from deduplication. Completed-result reuse
+  additionally requires the original credential-scope fingerprint and the inference caller's current
+  authorization; a different account cannot inherit that result. Recovered unresolved dispatches remain unknown and
+  are never automatically resent. Successful settled vectors can be reused after interruption before
+  publication. Known zero-attempt cache hits remain distinguishable from paid dispatches, and
+  unknown attempts remain explicitly unknown. Known settled failures/no-send outcomes are terminal,
+  not indeterminate. Only an index build with unchanged intent, zero known attempts and finalized
+  proof that its transport can never dispatch may be admitted again. That full-sync transaction
+  archives the old no-send fact as `semantic-inference-attempt` and creates a new admission number
+  and token under the same operation key. History lists both admissions. A pending pre-dispatch
+  chain remains unknown until finalized; any started/unknown request never acquires this retry path.
+  Facts are retained across restarts without automatic
+  pruning; future deletion/retention must preserve unresolved-outcome fences. Read-only workspace-scope
+  history projections omit vector payloads and dispatch tokens.
 - Runtime: `runtime.ts` — native directory inventory first returns path and stat metadata without
   reading every file body. New, changed, invalidated and failed paths then enter Documents reads,
   parsing and embedding. Successful document publications retain the metadata from the native byte capture
@@ -77,7 +215,7 @@ derived store (`../vectors/`); they reuse `harness.embed` but never this local-m
   batch retains its hints even when a later batch is interrupted; startup reuses those hints and
   prepares only the remaining/changed paths. Metadata equality remains an unverified hint, and
   explicit verification still reads content. Watcher reset/recovery uses metadata reconciliation,
-  preserving stable publications. A normal query never traverses the root; returned old hits are checked
+  preserving stable publications. A normal live query never traverses the root; returned old hits are checked
   against current Documents revision. Query-time dimension discovery resumes a deferred scan in the
   existing background owner rather than awaiting the entire inventory. Queries consume published
   generations by default; first-publication waiting is an explicit internal option. Coverage records
@@ -161,12 +299,11 @@ derived store (`../vectors/`); they reuse `harness.embed` but never this local-m
   new derived index; the previous cache is preserved until explicitly cleaned up. This storage
   choice affects the code-semantic index, not the authoritative knowledge database, symbol graph,
   or installed local encoder component.
-- Remote embedding: Pi sends OpenAI-compatible requests. A provider's 400/413 response to a batch
-  causes that rejected batch to split recursively; results retain input order and vector-space
-  identity. A single rejected input remains an error and the scan reports partial/failed coverage.
-  Temporary HTTP 429/5xx failures retry the same batch with cancellable backoff and Retry-After;
-  the adapter defaults to two additional attempts and accepts a configurable retry count. Permanent
-  errors remain errors. HTTP rerank sends text strings and maps returned indexes to local material IDs.
+- Remote embedding: `runtime-inference.ts` sends OpenAI-compatible requests through the original
+  retained binding and Catalog receipt. The native path uses zero automatic HTTP retries; a failed or
+  unknown dispatched request is not replayed to repair observation. Results retain input order and
+  vector-space identity, and incomplete batches remain partial/failed rather than successful empty
+  coverage. Rerank returns scores against the caller's original material IDs.
 - Optional component (D-288): `local-component.ts` owns explicit download/import, manifest and file
   verification, a short native inference check process, and atomic activation under
   `dataDir/optional-components/local-semantic`. `local-component-routes.ts` exposes authenticated
@@ -176,7 +313,7 @@ derived store (`../vectors/`); they reuse `harness.embed` but never this local-m
   retaining the model identity held by an in-flight query. Remote bindings are not replaced.
   The encoder loads the exact ONNX graph named by the recipe, with the recipe's
   pooling and dimensions; an installed multilingual graph is not routed to a
-  hardcoded MiniLM Q8 filename. Graph filenames distinguish local vector spaces.
+  hardcoded MiniLM Q8 filename. The verified manifest digest binds graph, tokenizer, recipe and worker bytes in local vector-space identity.
 - `scripts/build-local-semantic-component.mjs` builds and verifies the separate target-specific archive.
   Its Node inference dependencies and model weights never enter the normal Host or desktop build.
   `--model-source <directory>` builds from a prepared `recipe.json`, tokenizer,
@@ -184,7 +321,12 @@ derived store (`../vectors/`); they reuse `harness.embed` but never this local-m
   the staged Electron runtime before writing the archive. The release's default
   build fetches pinned Bekko a8m source with per-file SHA256 checks; other model packs are explicit
   imports until their release model choice is updated.
-  Component manifest v2 includes the worker entry and its file hash. Activation
+  Component manifest v3 requires worker protocol 1. One shared manifest parser is used by
+  installation and active selection. Existing v2 component assets remain on disk, but the current Host
+  will not start their old worker. Rebuild with the current builder and import its v3 archive;
+  there is no old reader or automatic migration. Format/protocol errors report this required action.
+  This native-wiring slice does not publish a component release or download real model weights.
+  The builder and activation validator both execute the packaged worker protocol. Activation
   checks the real worker transport and inference in a child before committing
   the pointer; it retains the previous package if that check fails.
 

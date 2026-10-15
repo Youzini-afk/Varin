@@ -1,8 +1,8 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import type { RuntimeUrlQuery, RuntimeUrlResolver } from '@varin/application-client';
+import { isFilesystemError, type RuntimeUrlQuery, type RuntimeUrlResolver } from '@varin/application-client';
 
-const runtimeFetchMock = vi.fn();
+const { runtimeFetchMock } = vi.hoisted(() => ({ runtimeFetchMock: vi.fn() }));
 
 vi.mock('@varin/application-client', async (importOriginal) => ({
   ...await importOriginal<typeof import('@varin/application-client')>(),
@@ -63,20 +63,20 @@ describe('createWebFilesAPI', () => {
     });
   });
 
-  it('preserves directory permission failures for native recovery', async () => {
+  it.each([
+    { reason: 'os-permission', status: 403, expected: 'os-permission' },
+    { reason: 'not-directory', status: 400, expected: 'not-directory' },
+    { reason: 'future-host-reason', status: 503, expected: 'unknown' },
+  ])('preserves $reason failures through the actual files client', async ({ reason, status, expected }) => {
     const { createWebFilesAPI } = await import('./files');
     const api = createWebFilesAPI({ urls, getDirectory: () => '/current-workspace' });
-
     runtimeFetchMock.mockResolvedValueOnce(Response.json(
-      { error: 'Access to directory denied', reason: 'os-permission' },
-      { status: 403 },
+      { error: 'Directory is unavailable', reason }, { status },
     ));
 
-    await expect(api.listDirectory('/restricted')).rejects.toMatchObject({
-      name: 'FilesystemError',
-      reason: 'os-permission',
-      status: 403,
-    });
+    const pending = api.listDirectory('/restricted');
+    await expect(pending).rejects.toSatisfy(isFilesystemError);
+    await expect(pending).rejects.toMatchObject({ reason: expected, status });
   });
 
   it('opts into outside-workspace directory creation for project onboarding', async () => {

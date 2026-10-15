@@ -111,8 +111,8 @@ describe("computer driver host (BC4)", () => {
     }
   });
 
-  it("an unexpected driver exit rejects the in-flight request and the next request respawns", async () => {
-    const driver = createDriverSession(echoSpec());
+  it("capture may respawn after an unexpected exit", async () => {
+    const driver = createDriverSession({ ...echoSpec(), env: { ...process.env, VARIN_DRIVER_ROLE: 'capture' } });
     try {
       const exitResult = await driver.request({ tool: "exit" }).catch((error: unknown) => error);
       expect(exitResult).toBeInstanceOf(Error);
@@ -125,16 +125,29 @@ describe("computer driver host (BC4)", () => {
     }
   });
 
-  it("a wedged request times out, kills the driver, and frees the queue", async () => {
+  it("a wedged input helper ends its session instead of forging a replacement release identity", async () => {
     const driver = createDriverSession(echoSpec());
     try {
       await expect(driver.request({ tool: "hang" }, { timeoutMs: 300 }))
         .rejects.toThrow(/timed out/);
-      const recovered = await driver.request({ tool: "ping" });
-      expect(recovered.ok).toBe(true);
+      await expect(driver.request({ tool: "ping" })).rejects.toThrow(/original Computer input helper exited/);
     } finally {
-      driver.dispose();
+      await driver.dispose();
     }
+  });
+
+  it('an exited input helper cannot respawn inside its old pool identity', async () => {
+    const { createDesktopDriverPool } = await import('./desktop-drivers.js');
+    const pool = createDesktopDriverPool({ resolve: async id => ({ spec: echoSpec(), desktop: { id } as never }), onInputReset: () => {} });
+    try {
+      const first = (await pool.acquire('desktop')).driver;
+      const firstId = pool.inputOwnerId(first);
+      await expect(first.request({ tool: 'exit' })).rejects.toThrow(/exited/);
+      await expect(first.request({ tool: 'release_input' })).rejects.toThrow(/original Computer input helper exited/);
+      const next = (await pool.acquire('desktop')).driver;
+      expect(next).not.toBe(first); expect(pool.inputOwnerId(next)).not.toBe(firstId);
+      expect((await next.request({ tool: 'ping' })).ok).toBe(true);
+    } finally { await pool.dispose(); }
   });
 
   it("cancel() writes the in-flight request's flag file on the side-channel", async () => {
@@ -292,5 +305,87 @@ $request = [Console]::In.ReadLine() | ConvertFrom-Json
       driver = createDriverSession(localDriverSpawnSpec('windows', logical)!);
       await expect(driver.request({ tool: 'ping' })).rejects.toThrow('启动失败：缺少组件，日本語，한국어');
     } finally { await driver?.dispose(); rmSync(root, { recursive: true, force: true }); }
+  });
+});
+
+describe('shared native desktop session', () => {
+  it('captures and coalesces viewers while ordered input waits for its real cancel receipt', async () => {
+    const driver = createDriverSession({ ...echoSpec(), sharedDesktopSession: true });
+    try {
+      const input = driver.request({ tool: 'awaitflag' });
+      const frames = [driver.capture!(), driver.capture!()];
+      expect(frames[0]).toBe(frames[1]);
+      expect((await frames[0]!).text).toBe('did:capture_frame');
+      let drained = false;
+      void input.then(() => { drained = true; });
+      await Promise.resolve();
+      expect(drained).toBe(false);
+      expect(driver.cancel()).toBe(true);
+      expect((await input).cancelled).toBe(true);
+      expect((await driver.request({ tool: 'release_input' })).ok).toBe(true);
+      expect((await driver.capture!()).ok).toBe(true);
+    } finally { await driver.dispose(); }
+  });
+
+  it('uses one platform owner for controller and observers and keeps capture alive after job drain', async () => {
+    const { createDesktopDriverPool } = await import('./desktop-drivers.js');
+    let starts = 0;
+    const pool = createDesktopDriverPool({
+      resolve: async id => ({ spec: { ...echoSpec(), sharedDesktopSession: true }, desktop: { id } as never }),
+      createDriver: spec => { starts += 1; return createDriverSession(spec); }, onInputReset: () => {},
+    });
+    try {
+      const [input, observer, otherObserver] = await Promise.all([pool.acquire('desktop'), pool.acquire('desktop', 'capture'), pool.acquire('desktop', 'capture')]);
+      expect(starts).toBe(1);
+      expect(pool.inputOwnerId(input.driver)).toBeTruthy();
+      await expect(observer.driver.request({ tool: 'click' })).rejects.toThrow('read-only');
+      const work = input.driver.request({ tool: 'awaitflag' });
+      expect((await otherObserver.driver.request({ tool: 'capture_frame' })).ok).toBe(true);
+      input.driver.cancel();
+      await work;
+      await input.driver.request({ tool: 'release_input' });
+      await observer.driver.dispose();
+      expect((await otherObserver.driver.request({ tool: 'capture_frame' })).ok).toBe(true);
+      expect(starts).toBe(1);
+      await pool.reset('desktop');
+      expect(otherObserver.driver.alive()).toBe(false);
+    } finally { await pool.dispose(); }
+  });
+
+  it('drains a capture startup that was already admitted when a desktop reset began', async () => {
+    const { createDesktopDriverPool } = await import('./desktop-drivers.js');
+    let allowResolve!: () => void;
+    let entered!: () => void;
+    const started = new Promise<void>(resolve => { entered = resolve; });
+    const gate = new Promise<void>(resolve => { allowResolve = resolve; });
+    let resolves = 0;
+    const pool = createDesktopDriverPool({ resolve: async id => {
+      if (resolves++ === 0) { entered(); await gate; }
+      return { spec: { ...echoSpec(), sharedDesktopSession: true }, desktop: { id } as never };
+    }, onInputReset: () => {} });
+    try {
+      const capture = pool.acquire('desktop', 'capture');
+      await started;
+      const reset = pool.reset('desktop');
+      allowResolve();
+      const observer = (await capture).driver;
+      await reset;
+      expect(observer.alive()).toBe(false);
+      expect((await pool.acquire('desktop')).driver.alive()).toBe(true);
+    } finally { await pool.dispose(); }
+  });
+
+  it('launches the packaged native macOS bundle without an interpreter fallback', () => {
+    const root = mkdtempSync(join(tmpdir(), 'varin-macos-helper-'));
+    const executable = join(root, 'macos', 'Varin Computer.app', 'Contents', 'MacOS', 'VarinComputer');
+    try {
+      expect(localDriverSpawnSpec('macos', root)).toBeNull();
+      mkdirSync(join(executable, '..'), { recursive: true });
+      writeFileSync(executable, 'native helper fixture');
+      const spec = localDriverSpawnSpec('macos', root);
+      expect(spec?.command).toBe(executable);
+      expect(spec?.args).toEqual([]);
+      expect(spec?.sharedDesktopSession).toBe(true);
+    } finally { rmSync(root, { recursive: true, force: true }); }
   });
 });

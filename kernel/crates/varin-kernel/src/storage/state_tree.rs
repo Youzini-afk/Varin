@@ -801,3 +801,63 @@ impl Storage {
         Ok(())
     }
 }
+
+/// Read and validate an immutable tree on a service worker; retained roots own its lifetime.
+pub(super) fn read_immutable_tree_entries(database: &Path, root: &str, cancellation: &AtomicBool) -> Result<Vec<(String,PathState)>,KernelError> {
+        let conn = Connection::open_with_flags(
+            database,
+            OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
+        )?;
+        let mut pending = vec![(root.to_string(), String::new(), true)];
+        let mut entries = Vec::new();
+        while let Some((hash, prefix, path_node)) = pending.pop() {
+            if cancellation.load(Ordering::Acquire) { return Err(KernelError::Cancelled); }
+            let encoded: String = conn.query_row(
+                "SELECT children_json FROM trie_nodes WHERE hash=?1",
+                [&hash],
+                |row| row.get(0),
+            )?;
+            let node: TrieNode = serde_json::from_str(&encoded)?;
+            if node_hash(&node) != hash {
+                return Err(KernelError::Storage(format!("corrupt trie node {hash}")));
+            }
+            match node {
+                TrieNode::Path { state, children } if path_node => {
+                    if let Some(state) = state {
+                        entries.push((prefix.clone(), state));
+                    }
+                    if let Some(children) = children {
+                        pending.push((children, prefix, false));
+                    }
+                }
+                TrieNode::Index {
+                    key,
+                    child,
+                    left,
+                    right,
+                    ..
+                } if !path_node => {
+                    if let Some(right) = right {
+                        pending.push((right, prefix.clone(), false));
+                    }
+                    let path = if prefix.is_empty() {
+                        key
+                    } else {
+                        format!("{prefix}/{key}")
+                    };
+                    Storage::validate_path(&path)?;
+                    pending.push((child, path, true));
+                    if let Some(left) = left {
+                        pending.push((left, prefix, false));
+                    }
+                }
+                _ => {
+                    return Err(KernelError::Storage(
+                        "materialization source tree has an invalid node type".into(),
+                    ))
+                }
+            }
+        }
+        entries.sort_by(|left, right| left.0.cmp(&right.0));
+        Ok(entries)
+}

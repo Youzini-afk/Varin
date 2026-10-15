@@ -17,14 +17,14 @@ import {
 import { toast } from '@/components/ui';
 import { Icon } from "@/components/icon/Icon";
 import { useUIStore } from '@/stores/useUIStore';
-import { usePiSessionStore } from '@/stores/usePiSessionStore';
+import { useThreadStore } from '@/stores/useThreadStore';
 import { getGitCommitSummaries } from '@/lib/gitApi';
 import { actionInstruction } from '@/lib/actionInstructions';
 import {
-  createPiSessionWithDraft,
-  joinPiDraftInstructions,
-  stagePiSessionDraft,
-} from '@/lib/pi-runtime/sessionDrafts';
+  createThreadWithDraft,
+  joinDraftInstructions,
+  stageThreadDraft,
+} from '@/lib/agent-runtime/threadDraftActions';
 import {
   abortIntegrate,
   computeIntegratePlan,
@@ -64,7 +64,7 @@ export const IntegrateCommitsSection: React.FC<{
   showHeader = true,
 }) => {
   const { t } = useI18n();
-  const currentSessionId = usePiSessionStore((s) => s.currentSessionId);
+  const currentSessionId = useThreadStore(state => state.selectedIdentity);
   const setActiveMainTab = useUIStore((s) => s.setActiveMainTab);
   const [branchDropdownOpen, setBranchDropdownOpen] = React.useState(false);
   const searchInputRef = React.useRef<HTMLInputElement>(null);
@@ -220,12 +220,12 @@ export const IntegrateCommitsSection: React.FC<{
     const context = await buildConflictContext(payload);
     const seed = {
       text: context.visibleText,
-      instructions: joinPiDraftInstructions(context.instructionsText, context.payloadText),
+      instructions: joinDraftInstructions(context.instructionsText, context.payloadText),
     };
 
     if (useNewSession) {
       try {
-        await createPiSessionWithDraft(
+        await createThreadWithDraft(
           { directory: payload.state.tempWorktreePath },
           seed,
         );
@@ -241,7 +241,7 @@ export const IntegrateCommitsSection: React.FC<{
       return;
     }
 
-    stagePiSessionDraft(currentSessionId, seed);
+    stageThreadDraft(currentSessionId, seed);
     setActiveMainTab('chat');
   }, [buildConflictContext, currentSessionId, setActiveMainTab, t]);
 

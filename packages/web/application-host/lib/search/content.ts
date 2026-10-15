@@ -44,7 +44,7 @@ export interface WorkspaceContentSearchDependencies {
   compute: Pick<KernelComputeService, "directory">;
   pathModule?: typeof path;
 }
-export function decodeNativeSearchHit(record: KernelComputeRecord, workspaceId: string): WorkspaceSearchHit | null {
+export function decodeSearchHit(record: KernelComputeRecord, workspaceId: string): WorkspaceSearchHit | null {
   if (record.kind !== "hit") return null;
   const d = record.data as Record<string, unknown>;
   const strings = (value: unknown): value is string[] => Array.isArray(value) && value.every(v=>typeof v==="string");
@@ -82,7 +82,7 @@ export function createWorkspaceContentSearch({ documents, compute, pathModule = 
         const hits:WorkspaceSearchHit[]=[];let count=0;
         const excludes=(request.excludeResourceIds??[]).map(relative);
         const requestedPaths=request.paths?.map(relative);
-        const nativeOverlays=options.overlays?.map((overlay)=>{
+        const sourceOverlays=options.overlays?.map((overlay)=>{
           const resourceId=relative(overlay.path);
           return {...overlay,path:fileRoot?fileName!:resourceId};
         });
@@ -97,7 +97,7 @@ export function createWorkspaceContentSearch({ documents, compute, pathModule = 
           ...(request.before===undefined?{}:{before:request.before}),...(request.after===undefined?{}:{after:request.after}),
         },{signal:options.signal,collect:false,onRecords:async records=>{
           const batch=records.map(record=>{
-            const hit=decodeNativeSearchHit(record,workspaceId);
+            const hit=decodeSearchHit(record,workspaceId);
             if(!hit)return null;
             if(fileRoot){
               if(hit.resource.resourceId!==fileName)throw new Error("Search escaped the file resource root");
@@ -108,7 +108,7 @@ export function createWorkspaceContentSearch({ documents, compute, pathModule = 
           if(!batch.length)return;
           count+=batch.length;if(options.collect!==false)hits.push(...batch);
           if(options.onBatch?.(batch)===false&&options.onDrain)await options.onDrain();
-        }},nativeOverlays);
+        }},sourceOverlays);
         if(result.status==="cancelled")return {status:"cancelled",generation};
         if(result.status==="failed"||(result.status==="partial"&&count===0))return {status:"failure",generation,message:result.message??"Content search coverage is incomplete"};
         if(count===0)return {status:"empty",generation,scannedFiles:result.scannedFiles};

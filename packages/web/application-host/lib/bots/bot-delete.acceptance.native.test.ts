@@ -18,13 +18,10 @@ it('deletes Bot catalog and private resources through the release kernel without
     kernelPath: process.env.VARIN_TEST_KERNEL_PATH!, allowCargoDevRunner: false });
   const adapter = new KernelStorageAdapter({ client, hostId: 'bot-delete', storageRoot: path.join(root, 'kernel'), resolveWorkspaceRoot: async () => dataDir });
   await mkdir(dataDir);
-  const registry = { listWorkspaceThreadSnapshots: async () => [], listWorkspaceRunSessionIds: async () => [], listRuns: async () => [] };
   const lifecycle: BotLifecycleRuntime = { planWork: async () => [], planMachines: async () => [], stop: async () => {},
     stopScope: async () => {}, machine: async (_bot, machine) => machine, prepareWake: async () => {}, resume: async () => {}, awakened: async () => {} };
-  const service = createBotService({ client, hostId: 'bot-delete', dataDir, registry,
-    createSession: async () => ({ sessionId: 'entry' }), openSession: async ({ sessionId }) => ({ sessionId }), lifecycle: () => lifecycle,
-    removeData: createBotDataCleanup({ dataDir, hostId: 'bot-delete', registry, deleteThread: vi.fn() as never,
-      deleteSession: async () => {}, closeMemory: async () => {}, releaseRemoteScope: async () => {},
+  const service = createBotService({ client, hostId: 'bot-delete', dataDir, agent: { ensureEntry: async bot => bot.entry, model: async bot => bot.model, listWork: async () => [] }, lifecycle: () => lifecycle,
+    removeData: createBotDataCleanup({ dataDir, hostId: 'bot-delete', deleteAgentScope: async () => {}, closeMemory: async () => {}, releaseRemoteScope: async () => {},
       files: new KernelFileResourceBackend(adapter) }) });
   try {
     await client.start();

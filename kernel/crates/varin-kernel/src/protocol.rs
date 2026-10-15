@@ -6,7 +6,7 @@ use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-pub(crate) const PROTOCOL_VERSION: u64 = 1;
+pub(crate) const PROTOCOL_VERSION: u64 = crate::protocol_generated::KERNEL_PROTOCOL_VERSION;
 pub(crate) const KERNEL_VERSION: &str = "0.1.0";
 pub(crate) const KERNEL_BUILD_IDENTITY: &str = match option_env!("VARIN_KERNEL_BUILD_IDENTITY") {
     Some(value) => value,
@@ -20,10 +20,10 @@ pub(crate) const KERNEL_ARCH: &str = match option_env!("VARIN_KERNEL_ARCH") {
     Some(value) => value,
     None => "unknown-arch",
 };
-pub(crate) const STORAGE_FORMAT_VERSION: &str = "10";
+pub(crate) const STORAGE_FORMAT_VERSION: &str = "22";
 // Control frames are deliberately bounded. Content bytes travel through the
 // begin/data/finish stream and therefore do not need a giant JSON envelope.
-pub(crate) const MAX_FRAME_BYTES: usize = 16 * 1024 * 1024;
+pub(crate) const MAX_FRAME_BYTES: usize = crate::protocol_generated::KERNEL_MAX_FRAME_BYTES;
 pub(crate) const MAX_BLOB_RESPONSE_BYTES: usize = (MAX_FRAME_BYTES * 3 / 4).saturating_sub(1024);
 pub(crate) const KERNEL_CAPABILITIES: [&str; 9] = [
     "storage",
@@ -55,14 +55,16 @@ pub(crate) fn node_hash(node: &TrieNode) -> String {
     format!("sha256-{}", hex::encode(Sha256::digest(bytes)))
 }
 pub(crate) fn object_path(root: &Path, hash: &str) -> Result<PathBuf, KernelError> {
-    let hex = hash
-        .strip_prefix("sha256-")
-        .filter(|value| value.len() == 64 && value.chars().all(|c| c.is_ascii_hexdigit()))
-        .ok_or_else(|| KernelError::Operation(format!("malformed content hash: {hash}")))?;
-    Ok(root.join("objects").join(&hex[..2]).join(&hex[2..]))
+    varin_runtime::content::object_path(root, hash)
+        .map_err(|_| KernelError::Operation(format!("malformed content hash: {hash}")))
 }
 pub(crate) fn response_ok(id: &str, result: Value) -> Value {
-    json!({"v": PROTOCOL_VERSION, "kind": "response", "id": id, "ok": true, "result": result})
+    let mut response = json!({"v": PROTOCOL_VERSION, "kind": "response", "id": id, "ok": true});
+    response
+        .as_object_mut()
+        .expect("response envelope")
+        .insert("result".into(), result);
+    response
 }
 
 pub(crate) fn reject_unknown_fields(
@@ -154,6 +156,9 @@ mod tests {
 pub(crate) fn write_frame(output: &mut impl Write, value: &Value) -> io::Result<()> {
     let payload = serde_json::to_vec(value)
         .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
+    write_encoded_frame(output, &payload)
+}
+pub(crate) fn write_encoded_frame(output: &mut impl Write, payload: &[u8]) -> io::Result<()> {
     if payload.len() > MAX_FRAME_BYTES {
         return Err(io::Error::new(
             io::ErrorKind::InvalidData,
@@ -163,6 +168,6 @@ pub(crate) fn write_frame(output: &mut impl Write, value: &Value) -> io::Result<
     let length = u32::try_from(payload.len())
         .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "kernel frame is too large"))?;
     output.write_all(&length.to_be_bytes())?;
-    output.write_all(&payload)?;
+    output.write_all(payload)?;
     output.flush()
 }

@@ -102,8 +102,12 @@ const errorText = (error: unknown): string => {
  * Probe the host using one fixed, non-shell nvidia-smi invocation. No command
  * is accepted from callers and no sampling daemon is created.
  */
-export const probeNvidiaSmi = (): Promise<GpuProbeResult> => new Promise((resolve) => {
-  execFile(
+export const probeNvidiaSmi = (signal?: AbortSignal): Promise<GpuProbeResult> => new Promise((resolve) => {
+  if (signal?.aborted) { resolve({ status: 'unavailable', reason: 'error', detail: 'GPU probe cancelled' }); return; }
+  let closed = false;
+  let result: GpuProbeResult | undefined;
+  const finish = (value: GpuProbeResult) => { result = value; if (closed) resolve(value); };
+  const child = execFile(
     NVIDIA_SMI,
     [...NVIDIA_SMI_ARGS],
     { windowsHide: true, encoding: "utf8" },
@@ -112,34 +116,42 @@ export const probeNvidiaSmi = (): Promise<GpuProbeResult> => new Promise((resolv
       const detail = typeof stderr === "string" && stderr.trim() ? stderr.trim() : undefined;
       const devices = parseNvidiaSmiCsv(output);
       if (!error && devices.length > 0) {
-        resolve({ status: "available", devices });
+        finish({ status: "available", devices });
         return;
       }
       if (!error && !output.trim()) {
-        resolve({ status: "unavailable", reason: "no-device", ...(detail ? { detail } : {}) });
+        finish({ status: "unavailable", reason: "no-device", ...(detail ? { detail } : {}) });
         return;
       }
       const outputDetail = `${output}${detail ? ` ${detail}` : ""}`;
       if (/no devices? (?:were )?found|no cuda-capable device/i.test(outputDetail)) {
-        resolve({ status: "unavailable", reason: "no-device", detail: outputDetail.trim() });
+        finish({ status: "unavailable", reason: "no-device", detail: outputDetail.trim() });
         return;
       }
       if (!error && output.trim() && devices.length === 0) {
-        resolve({ status: "unavailable", reason: "error", detail: detail ?? "nvidia-smi returned no parseable GPU rows" });
+        finish({ status: "unavailable", reason: "error", detail: detail ?? "nvidia-smi returned no parseable GPU rows" });
         return;
       }
       const message = `${errorText(error)}${detail ? `: ${detail}` : ""}`;
       if ((error as NodeJS.ErrnoException | null)?.code === "ENOENT") {
-        resolve({ status: "unavailable", reason: "tool-missing", detail: message });
+        finish({ status: "unavailable", reason: "tool-missing", detail: message });
         return;
       }
       if (/no devices? (were )?found|no cuda-capable device|not found/i.test(message)) {
-        resolve({ status: "unavailable", reason: "no-device", detail: message });
+        finish({ status: "unavailable", reason: "no-device", detail: message });
         return;
       }
-      resolve({ status: "unavailable", reason: "error", detail: message });
+      finish({ status: "unavailable", reason: "error", detail: message });
     },
   );
+  const abort = () => { child.kill('SIGKILL'); };
+  signal?.addEventListener('abort', abort, { once: true });
+  if (signal?.aborted) abort();
+  child.once('close', () => {
+    closed = true; signal?.removeEventListener('abort', abort);
+    if (signal?.aborted) resolve({ status: 'unavailable', reason: 'error', detail: signal.reason instanceof Error ? signal.reason.message : 'GPU probe cancelled' });
+    else if (result) resolve(result);
+  });
 });
 
 const allocationDevices = (reservation: GpuReservation): GpuAllocationDevice[] => (

@@ -1,11 +1,15 @@
 import path from 'node:path';
+import { randomUUID } from 'node:crypto';
+import type { PreparedLanguageSource } from '../kernel/source-query.js';
+import fs from 'node:fs';
+import { createWorkspaceWatcher, type WorkspaceWatcher } from '../documents/watch.js';
 import { languageIdForPath } from '@varin/protocol';
 import { waitWithSignal } from '../cancellation.js';
 import type {
   SpawnOptionsWithStdioTuple,
   StdioPipe,
 } from 'node:child_process';
-import { launchOwnedProcess, terminateOwnedProcess, type ManagedProcessOwner, type ManagedPipedProcessHandle } from "../process/types.js";
+import { launchOwnedProcess, terminateOwnedProcess, type ManagedProcessOwner, type ManagedPipedProcessHandle, type ManagedProcessAdmission, type ManagedProcessIdentity } from "../process/types.js";
 import { pathToFileURL } from 'node:url';
 import { createJsonRpcClient } from './jsonrpc.js';
 import {
@@ -30,6 +34,9 @@ import {
   mapTextEdits,
   mapWorkspaceEdit,
   resourceFromUri,
+  rejectedLocationReason,
+  strictLocationRejection,
+  validLanguageRange,
 } from './mapping.js';
 import type { LanguageResource } from './mapping.js';
 import type { DocumentAuthority, DocumentMutationObservation } from '../documents/authority.js';
@@ -100,6 +107,7 @@ type ResolveCollectionName =
 interface LanguageSessionRecord extends ManagedProcessOwner<ManagedPipedProcessHandle> {
   activeRequests: number;
   documentEpoch: number;
+  diagnosticSnapshots: Map<string, { contentRevision: string; documentVersion: number | null; viewRevision: number; items: ReturnType<typeof mapDiagnostic>[]; omissions: { outOfScope: number; unmappable: number } }>;
   nextDocumentVersion: number;
   pendingTermination?: Promise<void>;
   callHierarchyItems: Map<string, unknown>;
@@ -184,6 +192,33 @@ interface LanguageProviderDescriptor extends Record<string, unknown> {
   workspaceId?: unknown;
 }
 
+/** One reference to an already admitted source. Configuration still routes by workspaceId.
+ * The supervisor owns sharing, watcher, startup, generations and physical process lifetime. */
+export interface LanguageSourceView {
+  view: LanguageViewId;
+  workspaceId: string;
+  root: string;
+  executionWorkspaceId?: string;
+  runId: string;
+  grantId: string;
+  prepare?(viewId: string, signal: AbortSignal): Promise<PreparedLanguageSource>;
+  admitProcess(signal: AbortSignal, environment?: PreparedLanguageSource): ReturnType<ManagedProcessAdmission>;
+  read(resourceId: string, signal: AbortSignal): Promise<{ status: string; content?: string; revision?: string }>;
+}
+interface RetainedSourceView {
+  workspaceId: string;
+  executionWorkspaceId?: string;
+  view: LanguageViewId;
+  root: string;
+  owners: Map<string, LanguageSourceView>;
+  watch: WorkspaceWatcher | null;
+  environment?: PreparedLanguageSource;
+  preparation?: { controller: AbortController; promise: Promise<PreparedLanguageSource> };
+  invalidated?: boolean;
+  closing?: Promise<void>;
+  retiringOwners?: Array<Pick<LanguageSourceView, 'runId' | 'grantId'>>;
+}
+
 interface LanguageSupervisorOptions {
   activateProviders?: (request: { languageId: string; workspaceId: string }) => Promise<void>;
   prepareProvider?: (providerId: string, root: string, signal: AbortSignal) => Promise<{ command: string; args: readonly string[]; initializationOptions?: Readonly<Record<string, unknown>> } | null>;
@@ -196,7 +231,11 @@ interface LanguageSupervisorOptions {
     args: readonly string[],
     options: SpawnOptionsWithStdioTuple<StdioPipe, StdioPipe, StdioPipe>,
   ) => ManagedPipedProcessHandle | Promise<ManagedPipedProcessHandle>;
-  /** Host-owned views release their server after this much inactivity. */
+  /** Internal source-owner route; never selected through LanguageRequest JSON. */
+  spawnAdmitted?: (admission: ManagedProcessAdmission, command: string, args: readonly string[],
+    options: SpawnOptionsWithStdioTuple<StdioPipe, StdioPipe, StdioPipe>) => ManagedPipedProcessHandle | Promise<ManagedPipedProcessHandle>;
+  releaseAdmittedContext?: (identity: ManagedProcessIdentity) => Promise<void>;
+  /** Legacy Pi/editor views release their server after this much inactivity. */
   hostViewIdleMs?: number;
   /** Documents a Host-owned view keeps open before closing the least recently used. */
   hostViewDocumentLimit?: number;
@@ -336,6 +375,8 @@ export const createLanguageSupervisor = ({
   prepareProvider,
   documents,
   spawn,
+  spawnAdmitted,
+  releaseAdmittedContext,
   pathModule = path,
   env = process.env,
   isTrusted = async () => false,
@@ -385,6 +426,24 @@ export const createLanguageSupervisor = ({
 
   const inflight = new Map<string, { promise: Promise<LanguageSessionRecord | null>; controller: AbortController; users: number; workspaceId: string; view: LanguageViewId }>();
   const retainedWorkspaces = new Map<string, number>();
+  const sourceViews = new Map<string, RetainedSourceView>();
+  const sourceViewKey = (workspaceId: string, view: LanguageViewId) => `${workspaceId}\0${view}`;
+  const sourceView = (workspaceId: string, view: LanguageViewId) => sourceViews.get(sourceViewKey(workspaceId, view));
+  const withSourceOwner = async <T>(entry: RetainedSourceView, signal: AbortSignal,
+    consume: (owner: LanguageSourceView) => Promise<T>): Promise<T> => {
+    signal.throwIfAborted();
+    if (entry.closing || sourceView(entry.workspaceId, entry.view) !== entry) throw new Error('Language source view is retiring');
+    let failure: unknown = new Error('Language source authority is no longer retained');
+    for (const [key, owner] of entry.owners) {
+      try {
+        const result = await consume(owner);
+        signal.throwIfAborted();
+        if (entry.owners.get(key) !== owner || entry.closing) continue;
+        return result;
+      } catch (error) { signal.throwIfAborted(); failure = error; }
+    }
+    throw failure;
+  };
   const fileWatches = new Map<string, ReturnType<DocumentAuthority['watch']>>();
   let disposed = false;
 
@@ -432,6 +491,7 @@ export const createLanguageSupervisor = ({
   const pendingExits = new Set<Promise<void>>();
 
   const clearRecordDiagnostics = (record: LanguageSessionRecord): void => {
+    record.diagnosticSnapshots.clear();
     for (const [resourceId] of record.documents) {
       emit(record.workspaceId, {
         kind: 'diagnostics',
@@ -472,6 +532,7 @@ export const createLanguageSupervisor = ({
     record.pendingTermination = exited;
     pendingExits.add(exited);
     record.documents.clear();
+    record.diagnosticSnapshots.clear();
     record.callHierarchyItems?.clear();
     record.completionResolveItems?.clear();
     record.codeActionResolveItems?.clear();
@@ -519,6 +580,7 @@ export const createLanguageSupervisor = ({
     documents: new Map<string, OpenLanguageDocument>(),
     activeRequests: 0,
     documentEpoch: 0,
+    diagnosticSnapshots: new Map(),
     nextDocumentVersion: 0,
     child: null,
     rpc: null,
@@ -593,7 +655,8 @@ export const createLanguageSupervisor = ({
       return await waitWithSignal(pending.promise, signal);
     } finally {
       pending.users -= 1;
-      if (pending.users === 0 && signal?.aborted && inflight.get(key) === pending) pending.controller.abort();
+      if (pending.users === 0 && signal?.aborted && inflight.get(key) === pending
+        && !sourceView(workspaceId, view)?.owners.size) pending.controller.abort();
     }
   };
 
@@ -626,9 +689,23 @@ export const createLanguageSupervisor = ({
 
     let workspace;
     try {
-      workspace = await documents.getWorkspace(workspaceId, controller.signal);
+      const source = sourceView(workspaceId, view);
+      if (source) {
+        await withSourceOwner(source, controller.signal, owner => owner.admitProcess(controller.signal, source.environment));
+        workspace = { root: source.root };
+      } else {
+        if (view.startsWith('agent:source:')) throw new Error('Language source view is no longer retained');
+        workspace = await documents.getWorkspace(workspaceId, controller.signal);
+      }
     } catch (error) {
+      // Cancelling one provider's startup does not withdraw the shared source watch.
       controller.signal.throwIfAborted();
+      // fs.watch may return a handle for a temporarily unavailable recursive root.
+      // Failed source admission cannot certify that handle; retry from this same
+      // view on the next admitted query rather than retaining a silent watcher.
+      const source = sourceView(workspaceId, view);
+      source?.watch?.close();
+      if (source) source.watch = null;
       const failed = createRecord({
         workspaceId,
         languageId,
@@ -646,7 +723,10 @@ export const createLanguageSupervisor = ({
       return failed;
     }
 
-    if (provider.source === 'workspace' && !await isTrusted(workspace.root)) {
+    const trusted = provider.source !== 'workspace' || Boolean(sourceView(workspaceId, view)) || await isTrusted(workspace.root);
+    controller.signal.throwIfAborted();
+    if (!providers.includes(provider)) throw new Error('Language provider changed during source admission');
+    if (!trusted) {
       const failed = createRecord({
         workspaceId,
         languageId,
@@ -687,7 +767,13 @@ export const createLanguageSupervisor = ({
         const prepared = await prepareProvider?.(provider.providerId, workspace.root, signal);
         if (prepared?.initializationOptions) initializationOptions = { ...prepared.initializationOptions, ...initializationOptions };
         signal.throwIfAborted();
-        return spawn(prepared?.command ?? provider.command, prepared?.args ?? provider.args, {
+        const source = sourceView(workspaceId, view);
+        if (view.startsWith('agent:source:') && (!source || !spawnAdmitted)) throw new Error('The admitted source process owner is unavailable');
+        const launch = source && spawnAdmitted
+          ? (command: string, args: readonly string[], options: SpawnOptionsWithStdioTuple<StdioPipe, StdioPipe, StdioPipe>) =>
+            spawnAdmitted(active => withSourceOwner(source, active, owner => owner.admitProcess(active, source.environment)), command, args, options)
+          : spawn;
+        return launch(prepared?.command ?? provider.command, prepared?.args ?? provider.args, {
         cwd: workspace.root,
         env: {
           ...env,
@@ -738,16 +824,23 @@ export const createLanguageSupervisor = ({
         ? notification.version
         : undefined;
       if (open && Number.isFinite(documentVersion) && documentVersion !== open.documentVersion) return;
+      const omissions = { outOfScope: 0, unmappable: 0 };
       const items = Array.isArray(notification.diagnostics) ? notification.diagnostics.map((diagnostic) => mapDiagnostic(diagnostic, {
         workspaceId,
         root: record.root,
         pathModule,
         resource,
         documentVersion: typeof documentVersion === 'number' && Number.isFinite(documentVersion) ? documentVersion : null,
+        onRejectedLocation: reason => { omissions[reason] += 1; },
         severity: lspSeverity,
         providerId: record.providerId,
         generation: record.generation,
       })) : [];
+      if (open?.contentRevision && Array.isArray(notification.diagnostics) && (documentVersion === undefined || documentVersion === open.documentVersion)) {
+        const rawItems = Array.isArray(notification.diagnostics) ? notification.diagnostics : [];
+        const nativeItems = items.filter((_item, index) => { if (validLanguageRange(asRecord(rawItems[index])?.range) && typeof asRecord(rawItems[index])?.message === 'string') return true; omissions.unmappable += 1; return false; });
+        record.diagnosticSnapshots.set(resourceId, { contentRevision: open.contentRevision, documentVersion: documentVersion ?? null, viewRevision: record.documentEpoch, items: nativeItems, omissions });
+      } else record.diagnosticSnapshots.delete(resourceId);
       emit(workspaceId, {
         kind: 'diagnostics',
         workspaceId,
@@ -778,9 +871,16 @@ export const createLanguageSupervisor = ({
     });
 
     try {
-      if (!fileWatches.has(workspaceId)) {
+      if (!sourceView(workspaceId, view) && !fileWatches.has(workspaceId)) {
         fileWatches.set(workspaceId, documents.watch(workspaceId, event => {
-          if (event.resource) observeDocumentMutation({ ...event.resource, kind: event.kind === 'deleted' ? 'deleted' : event.kind === 'created' ? 'created' : 'modified' });
+          if (event.kind === 'invalidated' && event.resource) {
+            const resources = new Set<string>();
+            for (const current of sessions.values()) if (current.workspaceId === workspaceId) {
+              for (const resourceId of current.documents.keys()) if (resourceId === event.resource.resourceId
+                || resourceId.startsWith(`${event.resource.resourceId}/`)) resources.add(resourceId);
+            }
+            for (const resourceId of resources) observeDocumentMutation({ workspaceId, resourceId, kind: 'modified' });
+          } else if (event.resource) observeDocumentMutation({ ...event.resource, kind: event.kind === 'deleted' ? 'deleted' : event.kind === 'created' ? 'created' : 'modified' });
           else if (event.kind === 'reset') {
             const resources = new Set<string>();
             for (const current of sessions.values()) {
@@ -823,6 +923,7 @@ export const createLanguageSupervisor = ({
             },
             definition: {},
             references: {},
+            callHierarchy: { dynamicRegistration: false },
             rename: {},
             codeAction: {
               codeActionLiteralSupport: {
@@ -858,7 +959,7 @@ export const createLanguageSupervisor = ({
             configuration: true,
             workspaceFolders: true,
             symbol: { resolveSupport: { properties: ['location.range'] }, tagSupport: { valueSet: [1] } },
-            workspaceEdit: { documentChanges: true, changeAnnotationSupport: { groupsOnLabel: true } },
+            workspaceEdit: { documentChanges: true, resourceOperations: ['create', 'rename', 'delete'], failureHandling: 'undo', changeAnnotationSupport: { groupsOnLabel: true } },
             executeCommand: { dynamicRegistration: false },
           },
         },
@@ -925,6 +1026,7 @@ export const createLanguageSupervisor = ({
       }
       if (!oldestId) return;
       record.documents.delete(oldestId);
+      record.diagnosticSnapshots.delete(oldestId);
       desired.delete(oldestId);
       try {
         record.rpc?.notify('textDocument/didClose', {
@@ -942,7 +1044,7 @@ export const createLanguageSupervisor = ({
     const deadline = now() - hostViewIdleMs;
     for (const [key, record] of [...sessions]) {
       const idleEligible = isHostOwnedView(record.view) || !desiredDocuments.get(key)?.size;
-      if (!idleEligible || record.usedAt > deadline || record.activeRequests > 0
+      if (sourceView(record.workspaceId, record.view) || !idleEligible || record.usedAt > deadline || record.activeRequests > 0
         || ((record.view === AGENT_LANGUAGE_VIEW || record.view === SURFACE_LANGUAGE_VIEW) && retainedWorkspaces.has(record.workspaceId))
         || inflight.has(key)) continue;
       await disposeRecord(record, 'Host language view released after idle');
@@ -989,7 +1091,7 @@ export const createLanguageSupervisor = ({
     if (record.status === 'failed' || !record.rpc) return { status: 'failed', message: record.message || 'Language server is unavailable' };
     const absolutePath = pathModule.resolve(record.root, resourceId);
     const relativePath = pathModule.relative(record.root, absolutePath);
-    if (!relativePath || relativePath.startsWith('..') || pathModule.isAbsolute(relativePath)) return { status: 'failed', message: 'Path is outside workspace' };
+    if (!relativePath || (relativePath === '..' || relativePath.startsWith(`..${pathModule.sep}`)) || pathModule.isAbsolute(relativePath)) return { status: 'failed', message: 'Path is outside workspace' };
     const hostOwned = isHostOwnedView(view);
     const desired = desiredDocuments.get(key) ?? new Map<string, OpenLanguageDocument>();
     desiredDocuments.set(key, desired);
@@ -1012,6 +1114,7 @@ export const createLanguageSupervisor = ({
         return { status: 'absent' };
       }
       record.documents.delete(resourceId);
+      record.diagnosticSnapshots.delete(resourceId);
       if (!hostOwned || open.fixed) record.documentEpoch += 1;
       record.rpc.notify('textDocument/didClose', { textDocument: { uri: toFileUri(absolutePath) } });
       const result = {
@@ -1198,7 +1301,7 @@ export const createLanguageSupervisor = ({
   };
 
   const featureFailure = (record: LanguageSessionRecord | null | undefined, message: string, reason = 'request-failed') => ({
-    status: 'failed',
+    status: 'failed' as const,
     message,
     reason,
     ...(record?.providerId ? { providerId: record.providerId } : {}),
@@ -1209,28 +1312,31 @@ export const createLanguageSupervisor = ({
     method: string,
     request: LanguageRequest,
     mapResult: FeatureMapper,
-    options: { params?: unknown; signal?: AbortSignal } = {},
+    options: { params?: unknown; signal?: AbortSignal;
+      /** Native source queries re-admit their own Run after shared session preparation. */
+      admitSource?: () => Promise<void>;
+    } = {},
   ) => {
     options.signal?.throwIfAborted();
     const languageId = request.languageId;
     const workspaceId = request.resource?.workspaceId;
     const resourceId = request.resource?.resourceId;
     const view = asView(request.view);
-    if (!workspaceId || !languageId) return { status: 'absent', ...(workspaceId ? { workspaceId } : {}), ...(languageId ? { languageId } : {}) };
+    if (!workspaceId || !languageId) return { status: 'absent' as const, ...(workspaceId ? { workspaceId } : {}), ...(languageId ? { languageId } : {}) };
     const record = request.warmOnly ? sessions.get(sessionKey(workspaceId, languageId, view))
       : await ensureSession(workspaceId, languageId, view, options.signal);
     options.signal?.throwIfAborted();
-    if (!record) return { status: 'absent', workspaceId, languageId };
-    if (request.warmOnly && record.status !== 'ready' && record.status !== 'degraded') return { status: 'absent', workspaceId, languageId };
+    if (!record) return { status: 'absent' as const, workspaceId, languageId };
+    if (request.warmOnly && record.status !== 'ready' && record.status !== 'degraded') return { status: 'absent' as const, workspaceId, languageId };
     if (!findProvider(workspaceId, languageId) && record.status !== 'failed') {
-      return { status: 'absent', workspaceId, languageId };
+      return { status: 'absent' as const, workspaceId, languageId };
     }
     if (!record || record.status === 'failed' || !record.rpc) {
       return featureFailure(record, record?.message || 'Language server is unavailable', record?.failureReason ?? 'provider-failed');
     }
     const open = resourceId ? record.documents.get(resourceId) : null;
     const staleResult = (reason: 'generation' | 'revision' | 'version') => ({
-      status: 'stale',
+      status: 'stale' as const,
       documentVersion: open?.documentVersion ?? request.documentVersion ?? 0,
       ...(open?.contentRevision ? { contentRevision: open.contentRevision } : {}),
       reason,
@@ -1261,7 +1367,7 @@ export const createLanguageSupervisor = ({
     if (resourceId) {
       const resolved = pathModule.resolve(record.root, resourceId);
       const relative = pathModule.relative(record.root, resolved);
-      if (!relative || relative.startsWith('..') || pathModule.isAbsolute(relative)) {
+      if (!relative || (relative === '..' || relative.startsWith(`..${pathModule.sep}`)) || pathModule.isAbsolute(relative)) {
         return featureFailure(record, 'Path is outside workspace', 'unsupported');
       }
       uri = toFileUri(resolved);
@@ -1270,46 +1376,55 @@ export const createLanguageSupervisor = ({
     record.activeRequests += 1;
     if (open) open.readers = (open.readers ?? 0) + 1;
     try {
-      const queryDeadline = AbortSignal.timeout(requestTimeoutMs);
-      const raw = await record.rpc.request(method, params, options.signal ? AbortSignal.any([options.signal, queryDeadline]) : queryDeadline);
-      if (sessions.get(sessionKey(workspaceId, languageId, view)) !== record) {
-        return staleResult('generation');
+      if (options.admitSource) {
+        await options.admitSource();
+        options.signal?.throwIfAborted();
+        if (sessions.get(sessionKey(workspaceId, languageId, view)) !== record) return staleResult('generation');
+        if (request.expectedViewRevision !== undefined && request.expectedViewRevision !== record.documentEpoch
+          || request.expectedRevision !== undefined && record.documents.get(resourceId!)?.contentRevision !== request.expectedRevision) return staleResult('revision');
       }
-      const current = resourceId ? record.documents.get(resourceId) : null;
-      if (request.expectedViewRevision !== undefined && request.expectedViewRevision !== record.documentEpoch) return staleResult('revision');
-      if (typeof request.expectedRevision === 'string' && current?.contentRevision !== request.expectedRevision) {
+      try {
+        const queryDeadline = AbortSignal.timeout(requestTimeoutMs);
+        const raw = await record.rpc.request(method, params, options.signal ? AbortSignal.any([options.signal, queryDeadline]) : queryDeadline);
+        if (sessions.get(sessionKey(workspaceId, languageId, view)) !== record) {
+          return staleResult('generation');
+        }
+        const current = resourceId ? record.documents.get(resourceId) : null;
+        if (request.expectedViewRevision !== undefined && request.expectedViewRevision !== record.documentEpoch) return staleResult('revision');
+        if (typeof request.expectedRevision === 'string' && current?.contentRevision !== request.expectedRevision) {
+          return {
+            status: 'stale' as const,
+            documentVersion: current?.documentVersion ?? 0,
+            ...(current?.contentRevision ? { contentRevision: current.contentRevision } : {}),
+            reason: 'revision',
+            providerId: record.providerId,
+            generation: record.generation,
+          };
+        }
+        if (request.documentVersion !== undefined && request.documentVersion !== current?.documentVersion) {
+          return staleResult('version');
+        }
         return {
-          status: 'stale',
-          documentVersion: current?.documentVersion ?? 0,
-          ...(current?.contentRevision ? { contentRevision: current.contentRevision } : {}),
-          reason: 'revision',
+          status: 'ready' as const,
+          documentVersion: request.documentVersion ?? open?.documentVersion ?? 0,
+          ...(open?.contentRevision ? { contentRevision: open.contentRevision } : {}),
           providerId: record.providerId,
           generation: record.generation,
+          value: mapResult(raw, record),
         };
+      } catch (error) {
+        options.signal?.throwIfAborted();
+        if (error instanceof Error && error.name === 'TimeoutError') return featureFailure(record, 'Language request timed out', 'timeout');
+        if (error instanceof LanguageMappingError) {
+          return featureFailure(record, error.message, error.reason);
+        }
+        if (record.rpc && (record.status === 'ready' || record.status === 'degraded')) {
+          record.status = 'degraded';
+          record.message = error instanceof Error ? error.message : 'Language request failed';
+          emit(record.workspaceId, { kind: 'status', snapshot: snapshotFor(record) });
+        }
+        return featureFailure(record, error instanceof Error ? error.message : 'Language request failed');
       }
-      if (request.documentVersion !== undefined && request.documentVersion !== current?.documentVersion) {
-        return staleResult('version');
-      }
-      return {
-        status: 'ready',
-        documentVersion: request.documentVersion ?? open?.documentVersion ?? 0,
-        ...(open?.contentRevision ? { contentRevision: open.contentRevision } : {}),
-        providerId: record.providerId,
-        generation: record.generation,
-        value: mapResult(raw, record),
-      };
-    } catch (error) {
-      options.signal?.throwIfAborted();
-      if (error instanceof Error && error.name === 'TimeoutError') return featureFailure(record, 'Language request timed out', 'timeout');
-      if (error instanceof LanguageMappingError) {
-        return featureFailure(record, error.message, error.reason);
-      }
-      if (record.rpc && (record.status === 'ready' || record.status === 'degraded')) {
-        record.status = 'degraded';
-        record.message = error instanceof Error ? error.message : 'Language request failed';
-        emit(record.workspaceId, { kind: 'status', snapshot: snapshotFor(record) });
-      }
-      return featureFailure(record, error instanceof Error ? error.message : 'Language request failed');
     } finally {
       record.activeRequests -= 1;
       if (open) open.readers = Math.max(0, (open.readers ?? 1) - 1);
@@ -1360,48 +1475,212 @@ export const createLanguageSupervisor = ({
     },
   });
 
-  const observeDocumentMutation = (event: Pick<DocumentMutationObservation, 'workspaceId' | 'resourceId' | 'kind'>): void => {
+  const observeDocumentMutation = (event: Pick<DocumentMutationObservation, 'workspaceId' | 'resourceId' | 'kind'>, targetView?: LanguageViewId): void => {
     for (const [key, record] of sessions) {
-      if (record.workspaceId !== event.workspaceId || !record.rpc || (record.status !== 'ready' && record.status !== 'degraded')) continue;
+      if (record.workspaceId !== event.workspaceId || (targetView ? record.view !== targetView : Boolean(sourceView(record.workspaceId, record.view))) || !record.rpc || (record.status !== 'ready' && record.status !== 'degraded')) continue;
       const resourceId = event.resourceId.replaceAll('\\', '/');
       const absolute = pathModule.resolve(record.root, resourceId);
       const relative = pathModule.relative(record.root, absolute);
-      if (!relative || relative.startsWith('..') || pathModule.isAbsolute(relative)) continue;
-      const invalidate = (): void => {
+      if (!relative || (relative === '..' || relative.startsWith(`..${pathModule.sep}`)) || pathModule.isAbsolute(relative)) continue;
+      const open = record.documents.get(resourceId);
+      const invalidate = (snapshot?: { content: string }): void => {
         if (sessions.get(key) !== record || !record.rpc) return;
-        const open = record.documents.get(resourceId);
+        // A later bind owns its own observation, including after a failed read.
+        if (record.documents.get(resourceId) !== open) return;
         if (open?.fixed) return;
         const language = languageIdForPath(resourceId);
         if (open || (language && record.languageIds.includes(language)) || /\.(?:json|toml|yaml|yml|xml)$/.test(resourceId)) {
           record.documentEpoch += 1;
+          record.diagnosticSnapshots.clear();
           emit(record.workspaceId, { kind: 'diagnostics-invalidated', view: record.view });
         }
         // A closed disk document is once again read by the server from disk.
         // Fixed drafts and editor buffers keep their own content ownership.
         try {
           if (isHostOwnedView(record.view) && open) {
+            if (snapshot && snapshot.content !== open.content) {
+              // Closing an unchanged overlay need not reload a provider's cached
+              // disk text. Apply the original reader's observed change before
+              // returning this document to filesystem ownership.
+              record.nextDocumentVersion += 1;
+              record.rpc.notify('textDocument/didChange', {
+                textDocument: { uri: toFileUri(absolute), version: record.nextDocumentVersion },
+                contentChanges: [{ text: snapshot.content }],
+              });
+            }
             record.rpc.notify('textDocument/didClose', { textDocument: { uri: toFileUri(absolute) } });
             record.documents.delete(resourceId);
+            record.diagnosticSnapshots.delete(resourceId);
             desiredDocuments.get(key)?.delete(resourceId);
           }
           record.rpc.notify('workspace/didChangeWatchedFiles', { changes: [{ uri: toFileUri(absolute), type: event.kind === 'created' ? 1 : event.kind === 'deleted' ? 3 : 2 }] });
         } catch (error) { setFailed(record, error instanceof Error ? error.message : 'Language connection failed'); }
       };
-      const open = record.documents.get(resourceId);
       if (open?.fixed) continue;
       if (isHostOwnedView(record.view) && open) {
         // Watch delivery can follow a bind that already read the new disk bytes.
         // Invalidate only when the current binding differs from disk.
-        void documents.readSnapshot({ workspaceId: record.workspaceId, resourceId }).then(snapshot => {
+        const source = sourceView(record.workspaceId, record.view);
+        const read = source
+          ? withSourceOwner(source, new AbortController().signal, owner => owner.read(resourceId, new AbortController().signal))
+          : documents.readSnapshot({ workspaceId: record.workspaceId, resourceId });
+        void read.then(snapshot => {
           const current = record.documents.get(resourceId);
           if (snapshot.status === 'ready' && current?.contentRevision === snapshot.revision) return;
-          invalidate();
-        }, invalidate);
+          invalidate(snapshot.status === 'ready' && typeof snapshot.content === 'string' ? { content: snapshot.content } : undefined);
+        }, () => invalidate());
       } else invalidate();
     }
   };
 
+  const closeSourceView = (key: string, source: RetainedSourceView): Promise<void> => {
+    if (!source.closing) {
+      source.preparation?.controller.abort();
+      const starts = [...inflight.values()].filter(start => start.workspaceId === source.workspaceId && start.view === source.view);
+      for (const start of starts) start.controller.abort();
+      source.closing = (async () => {
+        await Promise.allSettled([source.preparation?.promise, ...starts.map(start => start.promise)]);
+        for (const [sessionId, record] of sessions) {
+          if (record.workspaceId !== source.workspaceId || record.view !== source.view) continue;
+          await disposeRecord(record, 'Source language view released');
+          if (sessions.get(sessionId) === record) sessions.delete(sessionId);
+          desiredDocuments.delete(sessionId);
+        }
+        source.watch?.close();
+        source.watch = null;
+        if (source.environment?.derivedView && releaseAdmittedContext) {
+          // The original admitted workspace identities are captured with the
+          // source, independent of a now-retired Run credential.
+          await releaseAdmittedContext({ workspaceId: source.workspaceId,
+            executionWorkspaceId: source.executionWorkspaceId ?? source.workspaceId, canonicalRoot: source.environment.root });
+        }
+        await source.environment?.release();
+        if (sourceViews.get(key) === source) sourceViews.delete(key);
+      })();
+      void source.closing.catch(() => { delete source.closing; });
+    }
+    return source.closing;
+  };
+  const invalidateSourceView = (source: RetainedSourceView): void => {
+    source.invalidated = true;
+    for (const record of sessions.values()) if (record.workspaceId === source.workspaceId && record.view === source.view) {
+      record.documentEpoch += 1;
+      record.diagnosticSnapshots.clear();
+    }
+    void closeSourceView(sourceViewKey(source.workspaceId, source.view), source).catch(() => undefined);
+  };
+  const checkSourceView = async (workspaceId: string, view: LanguageViewId, environment: PreparedLanguageSource, signal: AbortSignal): Promise<void> => {
+    signal.throwIfAborted();
+    const source = sourceView(workspaceId, view);
+    if (!source || source.environment !== environment || source.invalidated || source.closing) throw new Error('Source language view changed; retry the query after its process stops');
+    try {
+      await source.watch?.settle();
+      if (source.invalidated || source.closing) throw new Error('Derived source view changed');
+      await environment.check(signal);
+      await withSourceOwner(source, signal, owner => owner.admitProcess(signal, environment));
+    } catch (error) {
+      signal.throwIfAborted();
+      if (environment.derivedView) invalidateSourceView(source);
+      throw error;
+    }
+  };
+  const releaseSourceViews = async (match: { runId?: string; grantId?: string }): Promise<void> => {
+    const retirements: Promise<void>[] = [];
+    const matches = (owner: Pick<LanguageSourceView, 'runId' | 'grantId'>) =>
+      (match.runId === undefined || owner.runId === match.runId)
+      && (match.grantId === undefined || owner.grantId === match.grantId);
+    for (const [key, source] of sourceViews) {
+      const withdrawn: Array<Pick<LanguageSourceView, 'runId' | 'grantId'>> = [];
+      for (const [ownerKey, owner] of source.owners) if (matches(owner)) {
+        withdrawn.push({ runId: owner.runId, grantId: owner.grantId });
+        source.owners.delete(ownerKey);
+      }
+      if (withdrawn.length) {
+        source.retiringOwners ??= [];
+        for (const owner of withdrawn) if (!source.retiringOwners.some(previous =>
+          previous.runId === owner.runId && previous.grantId === owner.grantId)) source.retiringOwners.push(owner);
+      }
+      if (source.owners.size && !source.invalidated) continue;
+      if (!withdrawn.length && !source.retiringOwners?.some(matches)
+        && (match.runId !== undefined || match.grantId !== undefined)) continue;
+      retirements.push(closeSourceView(key, source));
+    }
+    await Promise.all(retirements);
+  };
+  const retainSourceView = async (binding: LanguageSourceView, signal: AbortSignal): Promise<PreparedLanguageSource> => {
+    signal.throwIfAborted();
+    if (disposed || !binding.view.startsWith('agent:source:')) throw new Error('Invalid or disposed language source view');
+    const key = sourceViewKey(binding.workspaceId, binding.view);
+    let source = sourceViews.get(key);
+    if (source?.invalidated && !source.closing) void closeSourceView(key, source).catch(() => undefined);
+    if (source?.closing) { await waitWithSignal(source.closing, signal); source = sourceViews.get(key); }
+    signal.throwIfAborted();
+    if (source && !binding.prepare && source.root !== binding.root) throw new Error('Language view root changed');
+    if (!source) {
+      source = { workspaceId: binding.workspaceId, executionWorkspaceId: binding.executionWorkspaceId ?? binding.workspaceId, view: binding.view, root: binding.root, owners: new Map(), watch: null };
+      sourceViews.set(key, source);
+    }
+    // Record the original reference before watch preparation, which may throw
+    // synchronously. Targeted Run/grant retirement must still own that attempt.
+    const ownerKey = `${binding.runId}\0${binding.grantId}`;
+    if (!source.owners.has(ownerKey)) source.owners.set(ownerKey, binding);
+    if (!source.preparation) {
+      const held = source;
+      const controller = new AbortController();
+      const promise = (async () => {
+        return withSourceOwner(held, controller.signal, async owner => {
+          if (!held.environment) {
+            held.environment = owner.prepare
+              ? await owner.prepare(randomUUID(), controller.signal)
+              : { root: owner.root, check: async () => {}, release: async () => {} };
+            held.root = held.environment.root;
+          }
+          controller.signal.throwIfAborted();
+          await owner.admitProcess(controller.signal, held.environment);
+          return held.environment;
+        });
+      })();
+      source.preparation = { controller, promise };
+      void promise.catch(() => {
+        if (!held.closing) invalidateSourceView(held);
+      });
+    }
+    const environment = await waitWithSignal(source.preparation.promise, signal);
+    signal.throwIfAborted();
+    await binding.admitProcess(signal, environment);
+    if (source.invalidated || source.closing) throw new Error('Source language view is retiring');
+    if (!source.watch) {
+      const held = source;
+      source.watch = createWorkspaceWatcher({ workspaceId: binding.workspaceId, rootPath: environment.root,
+        fsModule: fs, fsPromises: fs.promises, pathModule,
+        onEvent(event) {
+          if (sourceViews.get(key) !== held || held.closing) return;
+          if (environment.derivedView) { invalidateSourceView(held); return; }
+          if (event.kind === 'invalidated' && event.resource) {
+            const resources = new Set<string>();
+            for (const record of sessions.values()) if (record.workspaceId === binding.workspaceId && record.view === binding.view) {
+              for (const resourceId of record.documents.keys()) if (resourceId === event.resource.resourceId
+                || resourceId.startsWith(`${event.resource.resourceId}/`)) resources.add(resourceId);
+            }
+            for (const resourceId of resources) observeDocumentMutation({ workspaceId: binding.workspaceId, resourceId, kind: 'modified' }, binding.view);
+          } else if (event.resource) observeDocumentMutation({ ...event.resource,
+            kind: event.kind === 'deleted' ? 'deleted' : event.kind === 'created' ? 'created' : 'modified' }, binding.view);
+          else if (event.kind === 'reset') {
+            for (const record of sessions.values()) {
+              if (record.workspaceId !== binding.workspaceId || record.view !== binding.view) continue;
+              record.documentEpoch += 1;
+              record.diagnosticSnapshots.clear();
+              for (const resourceId of record.documents.keys()) observeDocumentMutation({ workspaceId: binding.workspaceId, resourceId, kind: 'modified' }, binding.view);
+            }
+          }
+        } });
+    } else if (!source.watch.connected) source.watch.reconnect();
+    await waitWithSignal(source.watch.ready, signal);
+    return environment;
+  };
+
   return {
+    retainSourceView, releaseSourceViews, checkSourceView,
     registerProvider(descriptor: LanguageProviderDescriptor, owner?: LanguageOwner) {
       const languageIds = Array.isArray(descriptor?.languageIds)
         ? descriptor.languageIds.filter((id) => typeof id === 'string' && id)
@@ -1437,10 +1716,12 @@ export const createLanguageSupervisor = ({
       if (existingIndex >= 0) providers.splice(existingIndex, 1, next);
       else providers.push(next);
       if (existing) {
+        // Keep the shared startup entry until its actual launch/stop settles. A replacement
+        // cannot race a provider that is still awaiting source admission or initialization.
+        for (const [key, pending] of inflight) if (key.split('\0')[1] === existing.providerId) pending.controller.abort();
         for (const [key, record] of sessions) {
           if (record.providerId !== existing.providerId) continue;
           retireRecord(key, record, 'Language provider updated');
-          inflight.delete(key);
         }
       }
       return next;
@@ -1453,6 +1734,9 @@ export const createLanguageSupervisor = ({
       if (index < 0) return { status: 'not-owned', providerId };
       const [removed] = providers.splice(index, 1);
       if (!removed) return { status: 'not-owned', providerId };
+      const starts = [...inflight].filter(([key]) => key.split('\0')[1] === removed.providerId).map(([, start]) => start);
+      for (const start of starts) start.controller.abort();
+      await Promise.allSettled(starts.map(start => start.promise));
       for (const [key, record] of sessions) {
         if (record.providerId !== removed.providerId) continue;
         await disposeRecord(record, 'Language provider disabled');
@@ -1528,13 +1812,29 @@ export const createLanguageSupervisor = ({
     },
     releaseIdleHostViews,
     syncDocument,
-    pullDiagnostics: (request: LanguageRequest, options: { signal?: AbortSignal } = {}) => requestFeature('textDocument/diagnostic', request, (raw, record) => {
+    /** Retain actual publications; unversioned evidence stays pending, never a clean document. */
+    diagnosticsSnapshot: (request: LanguageRequest) => {
+      const record = request.resource && request.languageId ? sessions.get(sessionKey(request.resource.workspaceId, request.languageId, asView(request.view))) : undefined;
+      const snapshot = request.resource && record?.diagnosticSnapshots.get(request.resource.resourceId);
+      if (!record || !snapshot) return { status: 'pending' as const };
+      if (record.generation !== request.generation || snapshot.contentRevision !== request.expectedRevision
+        || (snapshot.documentVersion !== null && snapshot.documentVersion !== request.documentVersion) || snapshot.viewRevision !== record.documentEpoch
+        || request.expectedViewRevision !== record.documentEpoch) return { status: 'stale' as const };
+      return { status: snapshot.documentVersion === null ? 'pending' as const : 'ready' as const,
+        ...(snapshot.documentVersion === null ? { diagnosticVerification: 'unversioned' as const } : {}),
+        value: snapshot.items, omissions: snapshot.omissions, providerId: record.providerId, generation: record.generation };
+    },
+    pullDiagnostics: (request: LanguageRequest, options: { signal?: AbortSignal; onRejectedLocation?: (reason: 'outOfScope' | 'unmappable') => void } = {}) => requestFeature('textDocument/diagnostic', request, (raw, record) => {
       const report = asRecord(raw);
       if (report?.kind !== 'full' || !Array.isArray(report.items)) return null;
-      return report.items.map(item => mapDiagnostic(item, {
+      return report.items.filter(item => {
+        if (options.onRejectedLocation && (!validLanguageRange(asRecord(item)?.range) || typeof asRecord(item)?.message !== 'string')) { options.onRejectedLocation('unmappable'); return false; }
+        return true;
+      }).map(item => mapDiagnostic(item, {
         workspaceId: record.workspaceId, root: record.root, pathModule, resource: request.resource!,
         documentVersion: request.documentVersion ?? null, severity: lspSeverity,
         providerId: record.providerId, generation: record.generation,
+        ...(options.onRejectedLocation ? { onRejectedLocation: options.onRejectedLocation } : {}),
       }));
     }, options),
     completion: (request: LanguageRequest) => requestFeature('textDocument/completion', request, (raw, record) => {
@@ -1553,16 +1853,93 @@ export const createLanguageSupervisor = ({
       'completionResolveItems',
       (raw) => mapCompletionItem(raw, request.resolveToken),
     ),
-    hover: (request: LanguageRequest, options: { signal?: AbortSignal } = {}) => requestFeature('textDocument/hover', request, mapHover, options),
+    hover: (request: LanguageRequest, options: { signal?: AbortSignal; onRejectedLocation?: (reason: 'outOfScope' | 'unmappable') => void } = {}) => requestFeature('textDocument/hover', request, raw => mapHover(raw, !!options.onRejectedLocation), options),
     signatureHelp: (request: LanguageRequest) => requestFeature('textDocument/signatureHelp', request, mapSignatureHelp),
-    definition: (request: LanguageRequest, options: { signal?: AbortSignal } = {}) => requestFeature('textDocument/definition', request, (raw, record) => {
-      const values = Array.isArray(raw) ? raw : raw ? [raw] : [];
-      return values.map((value) => mapLocationLink(value, record.workspaceId, record.root, pathModule)).filter(Boolean);
+    definition: (request: LanguageRequest, options: { signal?: AbortSignal; onRejectedLocation?: (reason: 'outOfScope' | 'unmappable') => void } = {}) => requestFeature('textDocument/definition', request, (raw, record) => {
+      if (raw === undefined) options.onRejectedLocation?.('unmappable');
+      const values = Array.isArray(raw) ? raw : raw !== null && raw !== undefined ? [raw] : [];
+      return values.map((value) => {
+        if (options.onRejectedLocation) {
+          const rejection = strictLocationRejection(value, record.root, pathModule, true);
+          if (rejection) { options.onRejectedLocation(rejection); return null; }
+        }
+        const mapped = mapLocationLink(value, record.workspaceId, record.root, pathModule);
+        if (!mapped) options.onRejectedLocation?.(rejectedLocationReason(value, record.root, pathModule));
+        return mapped;
+      }).filter(Boolean);
     }, options),
-    references: (request: LanguageRequest, options: { signal?: AbortSignal } = {}) => requestFeature('textDocument/references', request, (raw, record) => {
+    references: (request: LanguageRequest, options: { signal?: AbortSignal; onRejectedLocation?: (reason: 'outOfScope' | 'unmappable') => void } = {}) => requestFeature('textDocument/references', request, (raw, record) => {
+      if (raw === undefined) options.onRejectedLocation?.('unmappable');
       const values = Array.isArray(raw) ? raw : [];
-      return values.map((value) => mapLocation(value, record.workspaceId, record.root, pathModule)).filter(Boolean);
+      if (raw !== null && raw !== undefined && !Array.isArray(raw)) options.onRejectedLocation?.('unmappable');
+      return values.map((value) => {
+        if (options.onRejectedLocation) {
+          const rejection = strictLocationRejection(value, record.root, pathModule, false);
+          if (rejection) { options.onRejectedLocation(rejection); return null; }
+        }
+        const mapped = mapLocation(value, record.workspaceId, record.root, pathModule);
+        if (!mapped) options.onRejectedLocation?.(rejectedLocationReason(value, record.root, pathModule));
+        return mapped;
+      }).filter(Boolean);
     }, options),
+    /** One source-bound query owns the opaque items only until its relations finish.
+     * Never uses the editor/knowledge token map or another retained Run's grant. */
+    sourceCallHierarchy: async (request: LanguageRequest, options: {
+      direction: 'incoming' | 'outgoing'; signal: AbortSignal;
+      admitSource(): Promise<void>;
+      onRejectedLocation(reason: 'outOfScope' | 'unmappable'): void;
+    }) => {
+      const candidates: Array<{ raw: unknown; item: NonNullable<ReturnType<typeof mapCallHierarchyItem>> }> = [];
+      const mappedItem = (raw: unknown, record: LanguageSessionRecord) => {
+        const rejection = strictLocationRejection(raw, record.root, pathModule);
+        const value = asRecord(raw);
+        if (rejection || !validLanguageRange(value?.selectionRange) || typeof value?.name !== 'string'
+          || !Number.isSafeInteger(value.kind) || Number(value.kind) < 0) {
+          options.onRejectedLocation(rejection ?? 'unmappable'); return null;
+        }
+        const mapped = mapCallHierarchyItem(raw, record.workspaceId, record.root, pathModule);
+        if (!mapped) { options.onRejectedLocation('unmappable'); return null; }
+        // Opaque provider data must round-trip privately, never enter tool/history data.
+        const { data: _opaque, ...item } = mapped;
+        return item;
+      };
+      const values = (raw: unknown): unknown[] => {
+        if (raw === null) return [];
+        if (!Array.isArray(raw)) throw new LanguageMappingError('Language provider returned malformed call hierarchy');
+        return raw;
+      };
+      options.signal.throwIfAborted();
+      const prepared = await requestFeature('textDocument/prepareCallHierarchy', request, (raw, record) => {
+        for (const value of values(raw)) {
+          const item = mappedItem(value, record);
+          if (item) candidates.push({ raw: value, item });
+        }
+        return null;
+      }, options);
+      if (prepared.status !== 'ready') return prepared;
+      const edges: Array<Record<string, unknown>> = [];
+      const preparedRequest = { ...request, providerId: prepared.providerId, generation: prepared.generation };
+      for (const candidate of candidates) {
+        options.signal.throwIfAborted();
+        const response = await requestFeature(options.direction === 'incoming' ? 'callHierarchy/incomingCalls' : 'callHierarchy/outgoingCalls', preparedRequest, (raw, record) => {
+          for (const value of values(raw)) {
+            const call = asRecord(value);
+            const other = mappedItem(call?.[options.direction === 'incoming' ? 'from' : 'to'], record);
+            if (!other) continue;
+            if (!Array.isArray(call?.fromRanges) || !call.fromRanges.every(validLanguageRange)) {
+              options.onRejectedLocation('unmappable'); continue;
+            }
+            edges.push({ from: options.direction === 'incoming' ? other : candidate.item,
+              to: options.direction === 'incoming' ? candidate.item : other,
+              fromRanges: call.fromRanges.map(mapRange) });
+          }
+          return null;
+        }, { signal: options.signal, admitSource: options.admitSource, params: { item: candidate.raw } });
+        // A failed/stale step is never an apparently successful empty relation set.
+        if (response.status !== 'ready') return response;
+      }
+      return { ...prepared, value: edges };
+    },
     prepareCallHierarchy: (request: LanguageRequest) => requestFeature('textDocument/prepareCallHierarchy', request, (raw, record) => {
       const values = Array.isArray(raw) ? raw : [];
       record.callHierarchyItems.clear();
@@ -1617,11 +1994,11 @@ export const createLanguageSupervisor = ({
         }).filter(Boolean);
       }, { params: { item: raw } });
     },
-    documentSymbols: (request: LanguageRequest, options: { signal?: AbortSignal } = {}) => requestFeature('textDocument/documentSymbol', request, (raw, record) => (
-      mapSymbols(raw, mappingContext(record))
+    documentSymbols: (request: LanguageRequest, options: { signal?: AbortSignal; onRejectedLocation?: (reason: 'outOfScope' | 'unmappable') => void } = {}) => requestFeature('textDocument/documentSymbol', request, (raw, record) => (
+      mapSymbols(raw, mappingContext(record), options.onRejectedLocation ? { kind: 'document', resource: request.resource!, onRejectedLocation: options.onRejectedLocation } : undefined)
     ), options),
-    workspaceSymbols: (request: LanguageRequest, options: { signal?: AbortSignal } = {}) => requestFeature('workspace/symbol', request, (raw, record) => (
-      mapSymbols(raw, mappingContext(record))
+    workspaceSymbols: (request: LanguageRequest, options: { signal?: AbortSignal; onRejectedLocation?: (reason: 'outOfScope' | 'unmappable') => void } = {}) => requestFeature('workspace/symbol', request, (raw, record) => (
+      mapSymbols(raw, mappingContext(record), options.onRejectedLocation ? { kind: 'workspace', resource: request.resource!, onRejectedLocation: options.onRejectedLocation } : undefined)
     ), options),
     rename: (request: LanguageRequest) => requestFeature('textDocument/rename', request, (raw, record) => (
       mapWorkspaceEdit(raw, mappingContext(record))
@@ -1747,6 +2124,7 @@ export const createLanguageSupervisor = ({
             record.rpc?.notify('textDocument/didClose', { textDocument: { uri: toFileUri(pathModule.resolve(record.root, resourceId)) } });
           }
           record.documents.clear();
+          record.diagnosticSnapshots.clear();
           record.documentEpoch += 1;
           record.usedAt = now();
           desiredDocuments.delete(key);
@@ -1768,10 +2146,13 @@ export const createLanguageSupervisor = ({
       disposed = true;
       for (const watch of fileWatches.values()) watch.close();
       fileWatches.clear();
+      await releaseSourceViews({});
       for (const start of inflight.values()) start.controller.abort();
       await Promise.allSettled([...inflight.values()].map(start => start.promise));
       await Promise.all([...sessions.values()].map((record) => disposeRecord(record, 'Language supervisor disposed')));
       sessions.clear();
+      for (const source of sourceViews.values()) source.watch?.close();
+      sourceViews.clear();
       desiredDocuments.clear();
       inflight.clear();
       workspaceListeners.clear();

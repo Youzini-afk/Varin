@@ -1,3 +1,4 @@
+import type { AgentSettingsSnapshot } from '@varin/application-client';
 /**
  * Chooses the live embedding backend from user-owned harness.embedding.
  * A configured remote binding is used for both index and query. There is no
@@ -9,8 +10,7 @@ import {
   parseHarnessEmbeddingSettings,
   type HarnessEmbeddingSettings,
   type HarnessResolvedEmbeddingBinding,
-  type PiSettingsSnapshot,
-} from "@varin/protocol";
+  } from "@varin/protocol";
 import type { SemanticEmbedder } from "./embedder.js";
 import { createRemoteEmbedder, type RemoteEmbedClient } from "./remote-embedder.js";
 
@@ -20,7 +20,7 @@ const bindingKey = (binding: HarnessResolvedEmbeddingBinding): string => (
   `${binding.protocol}:${binding.providerId}:${binding.modelId}:${binding.configurationId}:${binding.dimensions ?? ""}:${binding.maxTokens ?? ""}`
 );
 
-export function embeddingSettingsFromSnapshot(snapshot: PiSettingsSnapshot | null | undefined): HarnessEmbeddingSettings | undefined {
+export function embeddingSettingsFromSnapshot(snapshot: AgentSettingsSnapshot | null | undefined): HarnessEmbeddingSettings | undefined {
   const harness = snapshot?.global?.harness;
   if (harness === undefined) return undefined;
   if (!harness || typeof harness !== "object" || Array.isArray(harness)) {
@@ -48,7 +48,7 @@ export function createSemanticBackend(options: {
       return current;
     }
     if (!options.embedClient) {
-      lastError = new Error("Remote embedding is configured but the Pi workspace binding is unavailable.");
+      lastError = new Error("Remote embedding is configured but the native inference binding is unavailable.");
       kind = "remote";
       current = {
         ...local,
@@ -78,6 +78,9 @@ export function createSemanticBackend(options: {
     get embedder() { return current; },
     get lastError() { return lastError; },
     bind,
+    bindRetained: (embedder: SemanticEmbedder): void => {
+      lastError = undefined; kind = "remote"; current = embedder; currentKey = "retained";
+    },
     unavailable,
     get local() { return local; },
     replaceLocal: (next: SemanticEmbedder): void => {

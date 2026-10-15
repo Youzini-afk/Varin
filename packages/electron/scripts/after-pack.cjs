@@ -2,6 +2,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const crypto = require('node:crypto');
 const { execFileSync } = require('node:child_process');
+const { protocolVersion } = require('../../../kernel/protocol/schema.json');
 const {
   defaultKernelTargetTriple,
   detectKernelBinaryIdentity,
@@ -31,13 +32,23 @@ module.exports = (context) => {
   const targetArchitecture = normalizeKernelArchitecture(process.env.VARIN_TARGET_ARCH || process.arch);
   const expectedTargetTriple = process.env.VARIN_TARGET_TRIPLE || defaultKernelTargetTriple(context.electronPlatformName, targetArchitecture);
   if (kernelManifest.schema !== 3 || kernelManifest.executable !== kernelExecutable || kernelManifest.sha256 !== kernelDigest
-    || kernelManifest.protocolVersion !== 1 || kernelManifest.platform !== context.electronPlatformName
+    || kernelManifest.protocolVersion !== protocolVersion || kernelManifest.platform !== context.electronPlatformName
     || kernelManifest.arch !== targetArchitecture || kernelManifest.targetTriple !== expectedTargetTriple
     || kernelManifest.binaryFormat !== binaryIdentity.format
     || binaryIdentity.platform !== context.electronPlatformName || binaryIdentity.arch !== targetArchitecture
     || typeof kernelManifest.buildIdentity !== 'string' || !kernelManifest.buildIdentity
     || kernelManifest.kernelVersion !== '0.1.0') {
     throw new Error(`Packaged Rust kernel manifest does not match ${packagedKernelPath}`);
+  }
+  if (context.electronPlatformName === 'darwin') {
+    const helper = path.join(unpackedNodeModulesPath, '@varin', 'web', 'server', 'computer-driver', 'macos',
+      'Varin Computer.app', 'Contents', 'MacOS', 'VarinComputer');
+    if (!fs.existsSync(helper)) throw new Error('Missing native macOS Computer helper: ' + helper);
+    execFileSync('lipo', ['-verify_arch', targetArchitecture === 'x64' ? 'x86_64' : 'arm64', helper], { stdio: 'inherit' });
+    execFileSync('codesign', ['--verify', '--strict', path.dirname(path.dirname(path.dirname(helper)))], { stdio: 'inherit' });
+    // The normal electron-builder signing phase runs after this hook and signs
+    // nested app bundles with the enclosing app's identity. Unsigned packaging
+    // retains the explicit ad-hoc development signature.
   }
   const trivium = path.join(unpackedNodeModulesPath, 'triviumdb');
   const suffix = context.electronPlatformName === 'win32' ? '-msvc' : context.electronPlatformName === 'linux' ? '-gnu' : '';
@@ -84,8 +95,9 @@ module.exports = (context) => {
   );
 
   const requiredApplicationHostFiles = [
-    path.join('node_modules', '@varin', 'pi-host', 'dist', 'host-bootstrap.js'),
-    path.join('node_modules', '@varin', 'runtime-broker', 'dist', 'index.js'),
+    path.join('node_modules', '@varin', 'script-runtime', 'dist', 'index.js'),
+    path.join('node_modules', '@varin', 'script-runtime', 'dist', 'worker.js'),
+    path.join('node_modules', '@varin', 'extension-builtins', 'dist', 'builtin-packages', 'scripts', 'host.cjs'),
     path.join('node_modules', '@varin', 'extension-host', 'dist', 'index.js'),
     path.join('node_modules', '@varin', 'extension-builtins', 'dist', 'builtin-packages', 'recovery', 'varin-builtin-fingerprint.txt'),
     path.join('node_modules', '@varin', 'extension-builtins', 'dist', 'builtin-packages', 'recovery', 'varin.extension.json'),
@@ -114,29 +126,15 @@ module.exports = (context) => {
   const bundledModelDirectory = path.join(unpackedNodeModulesPath, '@varin', 'web', 'server', 'lib', 'knowledge', 'semantic', 'runtime');
   if (fs.existsSync(bundledModelDirectory)) throw new Error('Local model weights entered the base installer');
 
-  const packagedHostEntry = path.join(
-    unpackedNodeModulesPath,
-    '@varin',
-    'pi-host',
-    'dist',
-    'host-bootstrap.js',
-  );
-  const packagedBrokerEntry = path.join(
-    unpackedNodeModulesPath,
-    '@varin',
-    'runtime-broker',
-    'dist',
-    'index.js',
-  );
   const packagedExecutable = context.electronPlatformName === 'darwin'
     ? path.join(context.appOutDir, `${context.packager.appInfo.productFilename}.app`, 'Contents', 'MacOS', context.packager.appInfo.productFilename)
     : path.join(context.appOutDir, context.electronPlatformName === 'win32'
       ? `${context.packager.appInfo.productFilename}.exe`
       : context.packager.appInfo.productFilename.toLowerCase());
   execFileSync(packagedExecutable, [
-    path.join(__dirname, 'verify-packaged-pi-host.mjs'),
-    packagedBrokerEntry,
-    packagedHostEntry,
+    path.resolve(__dirname, '../../../scripts/smoke-kernel-release.mjs'),
+    path.join(unpackedNodeModulesPath, '@varin', 'web'),
+    path.join(resourcesPath, 'kernel'),
   ], {
     cwd: path.resolve(__dirname, '..', '..', '..'),
     env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' },

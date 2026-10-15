@@ -10,6 +10,8 @@ export type GitBaselineInventory = {
   unborn: boolean;
   paths: string[];
   gitlinks: string[];
+  /** Complete index stage/OID/mode identity, independent of unchanged worktree bytes. */
+  indexFingerprint?: string;
   /** Index modes for tracked regular files ("100644" | "100755"); restores exec intent where fs cannot (D-243). */
   indexModes?: Record<string, string>;
   /** Workdir identity of dirty/untracked paths; detects content replacement with an unchanged path set. */
@@ -76,6 +78,7 @@ export const gitBaselineFingerprint = (inventory: GitBaselineInventory): string 
   unborn: inventory.unborn,
   paths: [...inventory.paths].sort(),
   gitlinks: [...inventory.gitlinks].sort(),
+  ...(inventory.indexFingerprint ? { indexFingerprint: inventory.indexFingerprint } : {}),
   indexModes: Object.fromEntries(
     Object.entries(inventory.indexModes ?? {}).sort(([left], [right]) => left.localeCompare(right)),
   ),

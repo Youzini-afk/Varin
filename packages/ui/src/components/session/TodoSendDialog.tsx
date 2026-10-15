@@ -1,5 +1,5 @@
 import React from 'react';
-import type { ModelDescriptor, ThinkingLevel } from '@varin/protocol';
+import type { ThinkingLevel } from '@varin/protocol';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import {
@@ -9,8 +9,9 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { useI18n } from '@/lib/i18n';
-import { usePiProviderStore } from '@/stores/usePiProviderStore';
-import { usePiSessionStore } from '@/stores/usePiSessionStore';
+import { useModelCatalogStore } from '@/stores/useModelCatalogStore';
+import { useThreadStore, threadIdentityKey } from '@/stores/useThreadStore';
+import { useThreadDraftStore } from '@/stores/useThreadDraftStore';
 
 type TodoSendTarget = 'session' | 'worktree';
 
@@ -31,7 +32,7 @@ interface TodoSendDialogProps {
   target: TodoSendTarget;
 }
 
-const modelKey = (model: Pick<ModelDescriptor, 'id' | 'provider'>): string => (
+const modelKey = (model: {id: string; provider: string}): string => (
   JSON.stringify([model.provider, model.id])
 );
 
@@ -56,13 +57,13 @@ export function TodoSendDialog({
   target,
 }: TodoSendDialogProps) {
   const { t } = useI18n();
-  const currentSnapshot = usePiSessionStore((state) => (
-    state.currentSessionId === null ? undefined : state.records[state.currentSessionId]?.snapshot
-  ));
-  const providers = usePiProviderStore((state) => state.allProviders);
-  const loading = usePiProviderStore((state) => state.isLoading);
-  const error = usePiProviderStore((state) => state.error);
-  const load = usePiProviderStore((state) => state.load);
+  const identity = useThreadStore(state => state.selectedIdentity);
+  const host = useThreadStore(state => state.hostKey);
+  const currentModel = useThreadDraftStore(state => identity ? state.drafts[threadIdentityKey(host, identity)]?.model : undefined);
+  const providers = useModelCatalogStore(state => state.channels);
+  const loading = useModelCatalogStore(state => state.loading);
+  const error = useModelCatalogStore(state => state.error);
+  const load = useModelCatalogStore(state => state.load);
   const [execution, setExecution] = React.useState<TodoSendExecution>({
     modelID: '',
     providerID: '',
@@ -71,25 +72,25 @@ export function TodoSendDialog({
 
   React.useEffect(() => {
     if (!open || !projectDirectory) return;
-    void load(projectDirectory).catch(() => undefined);
+    void load().catch(() => undefined);
   }, [load, open, projectDirectory]);
 
   const models = React.useMemo(() => providers
-    .flatMap((provider) => provider.models)
-    .filter((model) => model.available)
+    .filter(provider => provider.enabled)
+    .flatMap(provider => provider.models.filter(model => model.enabled && model.operations.includes('chat')).map(model => ({ ...model, provider: provider.id, supportedThinkingLevels: (Object.keys(model.thinkingLevelMap ?? {}).length ? Object.keys(model.thinkingLevelMap!) : ['off']) as ThinkingLevel[] })))
     .sort((left, right) => `${left.provider}/${left.name}`.localeCompare(`${right.provider}/${right.name}`)), [providers]);
 
   React.useEffect(() => {
     if (!open || models.length === 0) return;
     const current = models.find((model) => (
-      model.provider === currentSnapshot?.model?.provider && model.id === currentSnapshot.model.id
+      model.provider === currentModel?.providerId && model.id === currentModel?.modelId
     ));
     const selected = models.find((model) => (
       model.provider === execution.providerID && model.id === execution.modelID
     ));
     const model = selected ?? current ?? models[0];
     if (!model) return;
-    const currentThinking = currentSnapshot?.thinkingLevel;
+    const currentThinking = currentModel?.thinkingLevel;
     const thinkingLevel = model.supportedThinkingLevels.includes(execution.thinkingLevel)
       ? execution.thinkingLevel
       : currentThinking && model.supportedThinkingLevels.includes(currentThinking)
@@ -106,7 +107,7 @@ export function TodoSendDialog({
       providerID: model.provider,
       thinkingLevel,
     }));
-  }, [currentSnapshot?.model, currentSnapshot?.thinkingLevel, execution.modelID, execution.providerID, execution.thinkingLevel, models, open]);
+  }, [currentModel, currentModel?.thinkingLevel, execution.modelID, execution.providerID, execution.thinkingLevel, models, open]);
 
   const selectedModel = models.find((model) => (
     model.provider === execution.providerID && model.id === execution.modelID
@@ -186,7 +187,7 @@ export function TodoSendDialog({
             </select>
           </label>
 
-          {loading && <p className="typography-meta text-muted-foreground">Loading Pi models...</p>}
+          {loading && <p className="typography-meta text-muted-foreground">Loading models...</p>}
           {error && !loading && <p className="typography-meta text-[var(--status-error)]">{error}</p>}
         </div>
 

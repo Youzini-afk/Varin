@@ -118,20 +118,34 @@ try {
   const transformersEntry = 'runtime/node_modules/@huggingface/transformers/dist/transformers.node.mjs';
   const check = `
     import assert from 'node:assert/strict';
-    const { pipeline, env } = await import(${JSON.stringify(pathToFileURL(path.join(staging, transformersEntry)).href)});
-    env.allowRemoteModels = false;
-    env.localModelPath = ${JSON.stringify(staging)};
-    const extract = await pipeline('feature-extraction', 'model', {
-      local_files_only: true, dtype: 'fp32', model_file_name: ${JSON.stringify(path.basename(recipe.onnxFile, '.onnx'))},
-      session_options: { intraOpNumThreads: 1, interOpNumThreads: 1, intra_op_num_threads: 1, inter_op_num_threads: 1 },
+    import { Worker } from 'node:worker_threads';
+    const worker = new Worker(new URL(${JSON.stringify(pathToFileURL(path.join(staging, 'runtime/local-embedding-worker.mjs')).href)}), {
+      execArgv: [], workerData: { protocol: 1, entry: ${JSON.stringify(path.join(staging, transformersEntry))},
+        modelRoot: ${JSON.stringify(path.join(staging, 'model'))}, modelFileName: ${JSON.stringify(path.basename(recipe.onnxFile, '.onnx'))},
+        dim: ${JSON.stringify(recipe.dim)}, pooling: ${JSON.stringify(recipe.pooling)}, normalize: ${JSON.stringify(recipe.normalize)}, threads: 1 },
     });
-    const result = await extract(['Varin optional local inference'], { pooling: ${JSON.stringify(recipe.pooling)}, normalize: ${JSON.stringify(recipe.normalize)} });
-    const vectors = result.tolist();
-    assert.equal(vectors[0].length, ${JSON.stringify(recipe.dim)});
-    assert.ok(vectors[0].every(Number.isFinite));
-    assert.ok(vectors[0].some(value => value !== 0));
-    await extract.dispose();
-    console.log('[local-semantic] staged component produced a real ${recipe.dim}-dimensional vector');
+    try {
+      await new Promise((resolve, reject) => {
+        worker.on('error', reject);
+        worker.on('exit', code => reject(new Error('Component worker exited: ' + code)));
+        worker.on('message', message => {
+          try {
+            if (message.type === 'ready') {
+              assert.equal(message.protocol, 1);
+              worker.postMessage({ type: 'enqueue', id: 1, texts: ['Varin optional local inference'], priority: 'foreground' });
+            } else if (message.type === 'settled') {
+              assert.equal(message.requestStarted, true); assert.equal(message.completed, true);
+              assert.equal(message.error, undefined);
+              assert.equal(message.vectors[0].length, ${JSON.stringify(recipe.dim)});
+              assert.ok(message.vectors[0].every(Number.isFinite));
+              assert.ok(message.vectors[0].some(value => value !== 0));
+              resolve();
+            }
+          } catch (error) { reject(error); }
+        });
+      });
+    } finally { await worker.terminate(); }
+    console.log('[local-semantic] staged worker produced a real ${recipe.dim}-dimensional vector');
   `;
   execFileSync(electronRequire('electron'), ['--input-type=module', '-e', check], {
     cwd: staging, env: { ...process.env, ELECTRON_RUN_AS_NODE: '1', NODE_PATH: '' }, stdio: 'inherit', windowsHide: true,
@@ -149,7 +163,7 @@ try {
   }
   await recordFiles(staging);
   await fsp.writeFile(path.join(staging, 'manifest.json'), JSON.stringify({
-    schemaVersion: 2, id: 'local-semantic', version, platform: process.platform, arch: architecture,
+    schemaVersion: 3, workerProtocol: 1, id: 'local-semantic', version, platform: process.platform, arch: architecture,
     modelPath: 'model', transformersEntry, workerEntry: 'runtime/local-embedding-worker.mjs', files,
   }, null, 2) + '\n');
   await tar.c({ cwd: staging, file: `${artifact}.tmp`, gzip: true, portable: true }, ['manifest.json', 'model', 'runtime']);

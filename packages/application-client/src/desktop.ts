@@ -316,8 +316,8 @@ export type DesktopTrayAction = { type: string } & Record<string, unknown>;
 
 export type VarinDesktopEventMap = {
   'varin:update-progress': DesktopUpdateProgressEvent;
-  'varin:open-session': { directory: string | null; sessionId: string };
-  'varin:open-draft-session': { directory: string; projectId: string };
+  'varin:open-thread': { directory: string | null; threadId: string; branchId: string; apiBaseUrl?: string | undefined; relayHostId?: string | undefined };
+  'varin:open-draft-thread': { directory: string; projectId: string };
   'varin:window-resized': void;
   'varin:window-maximized-changed': { maximized: boolean };
   'varin:installed-apps-updated': DesktopInstalledApp[];
@@ -361,7 +361,7 @@ export interface VarinDesktopCommandMap {
   desktop_set_window_pinned: { args: { pinned: boolean }; result: DesktopWindowPinnedState };
   desktop_show_app_menu: { args: { x?: number; y?: number }; result: null };
   desktop_focus_main_window: {
-    args: { sessionId?: string; directory?: string; mode?: string; projectId?: string };
+    args: { threadId?: string; branchId?: string; directory?: string; mode?: string; projectId?: string };
     result: DesktopFocusResult;
   };
   desktop_new_window: { args: void; result: null };
@@ -371,11 +371,11 @@ export interface VarinDesktopCommandMap {
   };
   desktop_new_window_for_host: { args: { hostId: string }; result: null };
   desktop_open_draft_mini_chat_window: {
-    args: { directory?: string; projectId?: string; apiBaseUrl?: string; clientToken?: string; requestHeaders?: Record<string, unknown> };
+    args: { directory?: string; projectId?: string };
     result: null;
   };
-  desktop_open_session_mini_chat_window: {
-    args: { sessionId: string; directory?: string; apiBaseUrl?: string; clientToken?: string; requestHeaders?: Record<string, unknown> };
+  desktop_open_thread_mini_chat_window: {
+    args: { threadId: string; branchId: string; directory?: string };
     result: null;
   };
 
@@ -438,7 +438,7 @@ export interface VarinDesktopCommandMap {
     args: {
       title?: string;
       body?: string;
-      sessionId?: string;
+      threadId?: string; branchId?: string;
       directory?: string;
       requireHidden?: boolean;
       tag?: string;
@@ -519,7 +519,7 @@ export const VARIN_DESKTOP_COMMAND_CATALOG = {
   desktop_new_window_at_url: true,
   desktop_new_window_for_host: true,
   desktop_open_draft_mini_chat_window: true,
-  desktop_open_session_mini_chat_window: true,
+  desktop_open_thread_mini_chat_window: true,
   desktop_get_launch_at_login: true,
   desktop_set_launch_at_login: true,
   desktop_get_minimize_to_tray: true,
@@ -574,8 +574,8 @@ export const isVarinDesktopCommand = (value: unknown): value is VarinDesktopComm
 
 export const VARIN_DESKTOP_EVENT_CATALOG = {
   'varin:update-progress': true,
-  'varin:open-session': true,
-  'varin:open-draft-session': true,
+  'varin:open-thread': true,
+  'varin:open-draft-thread': true,
   'varin:window-resized': true,
   'varin:window-maximized-changed': true,
   'varin:installed-apps-updated': true,

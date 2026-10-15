@@ -2,22 +2,20 @@
  * Domain-action adapters for `owner: "action"` settings catalog entries
  * (Stage S / D-309).
  *
- * Every adapter talks to the real owning authority — a Pi worker RPC, an
+ * Every adapter talks to the real owning authority — a native settings owner, an
  * in-process Host service, or the owning module — never a config field that
  * merely looks like state. Entries whose owner API does not exist stay
  * `unavailable`; nothing here fakes an install, login, or connection.
  */
 
-import { RECOMMENDED_PACKAGES, type SettingsCatalogEntry } from '@varin/application-client';
+import { type SettingsCatalogEntry } from '@varin/application-client';
 import type { SettingsActionResult } from '@varin/protocol';
-import { randomUUID } from 'node:crypto';
 import { HarnessServiceError } from './service-error.js';
 import type { AppPersistOutcome, SettingsServiceCaller } from './settings-service.js';
-import { parseAgentScope, type AgentPersonalization } from '../memory/agent-personalization.js';
 
 export interface SettingsActionContext {
   caller: SettingsServiceCaller;
-  /** Resolved workspace root; null when the session is workspace-less. */
+  /** Resolved workspace root; null when the Thread has no project. */
   workspaceRoot: string | null;
 }
 
@@ -88,6 +86,7 @@ export interface SettingsActionAdapter {
 
 export interface ExtensionRuntimeHandle {
   state(): Promise<unknown>;
+  removeExtension?(request: Record<string, unknown>): Promise<unknown>;
   setEnabled(extensionId: string, enabled: boolean, expectedRevision: number): Promise<unknown>;
   selectWorkbenchProfile?(request: Record<string, unknown>): Promise<unknown>;
   updateWorkbenchLayout?(request: Record<string, unknown>): Promise<unknown>;
@@ -115,17 +114,6 @@ export interface LanguageSupportHandle {
   cancelServerPreparation(request: { workspaceId: string; languageId: string }): Promise<unknown>;
 }
 
-export interface RuntimeLifecycleHandle {
-  readonly snapshot: unknown;
-  refresh(): Promise<unknown>;
-  install(): Promise<unknown>;
-  upgrade(): Promise<unknown>;
-  activate(id: string): Promise<unknown>;
-  activateCustom(packageRoot: string, nodePath?: string): Promise<unknown>;
-}
-
-
-
 /** Profiles carry sshKey/signingKey secrets — never hand raw rows to callers. */
 export interface GitIdentityStore {
   getProfiles(): import('../git/identity-storage.js').GitIdentityProfile[];
@@ -143,11 +131,11 @@ export interface GitIdentityStore {
 
 export interface SettingsActionDeps {
   semanticIndex?(): Pick<ReturnType<typeof import('../knowledge/semantic/index-management.js').createSemanticIndexManagement>, 'read' | 'save' | 'active' | 'activeDirectory' | 'configuredDirectory'>;
-  agentPersonalization?(): AgentPersonalization;
-  /** Worker-scoped Pi RPC on the caller's workspace. */
-  requestWorkspace(cwd: string, method: string, params: Record<string, unknown>): Promise<unknown>;
-  /** Session-scoped Pi RPC (slash commands, provider auth). */
-  requestSession(sessionId: string, method: string, params: Record<string, unknown>): Promise<unknown>;
+  models?(): import('../models/service.js').ModelsService | null;
+  modelFetch?: import('./egress.js').EgressFetch;
+  mcpSettings?(): Pick<ReturnType<typeof import('../mcp/settings.js').createMcpSettings>, 'invoke'> | null;
+  agentProfiles?(): import('@varin/application-client').AgentProfilesAPI | null;
+  extensionPackages?(): Pick<import('@varin/extension-host').ExtensionPackageManager, 'catalog'> | null;
   resolveWorkspaceRoot(workspaceId: string): Promise<string | null>;
   /** In-process host services; lazy getters because the service is created
    *  before several of them exist. Missing handle = domain unavailable. */
@@ -155,7 +143,6 @@ export interface SettingsActionDeps {
   tunnel?(): TunnelHandle | null;
   remoteClients?(): RemoteClientsHandle | null;
   languageSupport?(): LanguageSupportHandle | null;
-  runtimeLifecycle?(): RuntimeLifecycleHandle | null;
   gitIdentities?: GitIdentityStore;
   gitHubAuthStatus?(): Promise<Record<string, unknown>>;
   /** Single connected surface kind when unambiguous (web/desktop/mobile). */
@@ -188,7 +175,7 @@ const needWorkspace = async (
   deps: SettingsActionDeps,
 ): Promise<string> => {
   if (!ctx.caller.workspaceId) {
-    throw new HarnessServiceError('unavailable', 'this action requires a workspace-bound session');
+    throw new HarnessServiceError('unavailable', 'this action requires a admitted project source');
   }
   const root = ctx.workspaceRoot ?? await deps.resolveWorkspaceRoot(ctx.caller.workspaceId);
   if (!root) throw new HarnessServiceError('unavailable', `cannot resolve workspace root for ${ctx.caller.workspaceId}`);
@@ -217,123 +204,6 @@ const sanitizeUrl = (value: unknown): unknown => {
   }
 };
 
-const sanitizeProviderDescriptor = (value: unknown): unknown => {
-  if (!isRecord(value)) return value;
-  return {
-    id: value.id,
-    name: value.name,
-    dynamicModels: value.dynamicModels,
-    modelCount: value.modelCount,
-    ...(value.baseUrl !== undefined ? { baseUrl: sanitizeUrl(value.baseUrl) } : {}),
-    ...(isRecord(value.auth) ? {
-      auth: {
-        configured: value.auth.configured === true,
-        ...(typeof value.auth.label === 'string' ? { label: value.auth.label } : {}),
-        ...(typeof value.auth.source === 'string' ? { source: value.auth.source } : {}),
-        ...(Array.isArray(value.auth.methods) ? {
-          methods: value.auth.methods.map((method) => isRecord(method)
-            ? { label: method.label, type: method.type }
-            : method),
-        } : {}),
-      },
-    } : {}),
-  };
-};
-
-const sanitizeProviderConfig = (value: unknown): unknown => {
-  if (!isRecord(value)) return value;
-  const config = isRecord(value.config) ? value.config : null;
-  return {
-    providerId: value.providerId,
-    effectiveScope: value.effectiveScope,
-    locations: value.locations,
-    ...(isRecord(value.auth) ? {
-      auth: {
-        configured: value.auth.configured === true,
-        ...(typeof value.auth.label === 'string' ? { label: value.auth.label } : {}),
-        ...(typeof value.auth.source === 'string' ? { source: value.auth.source } : {}),
-      },
-    } : {}),
-    ...(config ? {
-      config: {
-        id: config.id,
-        name: config.name,
-        api: config.api,
-        authHeader: config.authHeader,
-        ...(config.baseUrl !== undefined ? { baseUrl: sanitizeUrl(config.baseUrl) } : {}),
-        ...(Array.isArray(config.models) ? { models: config.models.map(sanitizeProviderModel) } : {}),
-      },
-    } : {}),
-  };
-};
-
-function sanitizeProviderModel(value: unknown): unknown {
-  if (!isRecord(value)) return value;
-  return {
-    id: value.id,
-    ...(value.name !== undefined ? { name: value.name } : {}),
-    ...(value.api !== undefined ? { api: value.api } : {}),
-    ...(value.baseUrl !== undefined ? { baseUrl: sanitizeUrl(value.baseUrl) } : {}),
-    ...(value.contextWindow !== undefined ? { contextWindow: value.contextWindow } : {}),
-    ...(value.cost !== undefined ? { cost: value.cost } : {}),
-    ...(value.input !== undefined ? { input: value.input } : {}),
-    ...(value.maxTokens !== undefined ? { maxTokens: value.maxTokens } : {}),
-    ...(value.reasoning !== undefined ? { reasoning: value.reasoning } : {}),
-    ...(value.thinkingLevelMap !== undefined ? { thinkingLevelMap: value.thinkingLevelMap } : {}),
-  };
-}
-
-const sanitizeProviderModelDiscovery = (value: unknown): unknown => {
-  if (!isRecord(value)) return value;
-  return {
-    providerId: value.providerId,
-    api: value.api,
-    ...(value.baseUrl !== undefined ? { baseUrl: sanitizeUrl(value.baseUrl) } : {}),
-    models: Array.isArray(value.models) ? value.models.map(sanitizeProviderModel) : [],
-  };
-};
-
-const sanitizeMcpSnapshot = (value: unknown): unknown => {
-  if (!isRecord(value)) return value;
-  const catalog = isRecord(value.catalog) ? value.catalog : null;
-  return {
-    provider: isRecord(value.provider) ? {
-      state: value.provider.state,
-      ...(value.provider.bridgeVersion !== undefined ? { bridgeVersion: value.provider.bridgeVersion } : {}),
-      ...(value.provider.issue !== undefined ? { issue: value.provider.issue } : {}),
-    } : value.provider,
-    ...(catalog ? {
-      catalog: {
-        version: catalog.version,
-        sources: Array.isArray(catalog.sources) ? catalog.sources.map((source) => isRecord(source) ? {
-          id: source.id,
-          displayPath: source.displayPath,
-          order: source.order,
-          scope: source.scope,
-          serverNames: source.serverNames,
-          ...(isRecord(source.target) ? {
-            target: { format: source.target.format, path: source.target.path, root: source.target.root },
-          } : {}),
-        } : source) : [],
-        servers: Array.isArray(catalog.servers) ? catalog.servers.map((server) => {
-          if (!isRecord(server) || !isRecord(server.transport)) return server;
-          return {
-            name: server.name,
-            disabled: server.disabled,
-            sourceIds: server.sourceIds,
-            transport: {
-              kind: server.transport.kind,
-              ...(server.transport.command !== undefined ? { command: server.transport.command } : {}),
-              ...(server.transport.socket !== undefined ? { socket: server.transport.socket } : {}),
-              ...(server.transport.url !== undefined ? { url: sanitizeUrl(server.transport.url) } : {}),
-            },
-          };
-        }) : [],
-      },
-    } : {}),
-  };
-};
-
 const sanitizeTextDocument = (value: unknown): unknown => {
   if (!isRecord(value)) return value;
   const content = typeof value.content === 'string' ? value.content : undefined;
@@ -345,398 +215,183 @@ const sanitizeTextDocument = (value: unknown): unknown => {
   };
 };
 
-const sanitizePackageDescriptor = (entry: unknown): unknown => isRecord(entry) ? {
-  name: entry.name,
-  enabled: entry.enabled,
-  installed: entry.installed,
-  scope: entry.scope,
-  structured: entry.structured,
-  ...(entry.source !== undefined ? { source: sanitizeUrl(entry.source) } : {}),
-  ...(entry.version !== undefined ? { version: entry.version } : {}),
-  ...(entry.resolvedPath !== undefined ? { resolvedPath: entry.resolvedPath } : {}),
-} : entry;
+const authorizationResult = (state: import('@varin/application-client').AuthorizationState, operationId = state.id): ActionInvocation => ({
+  status: state.status === 'pending' ? 'pending' : state.status === 'completed' ? 'applied' : 'failed',
+  data: state,
+  operation: { id: operationId, state: state.status === 'pending' ? 'running' : state.status === 'completed' ? 'succeeded' : state.status,
+    ...(state.status === 'pending' ? { cancelVerb: 'cancel' } : {}) },
+});
 
-const sanitizePackageResult = (value: unknown): unknown => Array.isArray(value)
-  ? value.map(sanitizePackageDescriptor)
-  : sanitizePackageDescriptor(value);
-
-/* ── adapters ───────────────────────────────────────────────────────────── */
-
+/** Connection headers and account secrets never enter agent-visible settings results. */
+const safeModels = (snapshot: import('@varin/application-client').ModelConnectionsSnapshot) => ({
+  revision: snapshot.revision, types: snapshot.types, issues: snapshot.issues,
+  channels: snapshot.channels.map(({ connection, baseUrl, ...channel }) => ({ ...channel, baseUrl: sanitizeUrl(baseUrl),
+    ...(connection ? { connection: { paths: connection.paths, headersConfigured: Boolean(connection.headers && Object.keys(connection.headers).length),
+      ...(connection.proxy ? { proxy: { ...connection.proxy, ...('url' in connection.proxy ? { url: sanitizeUrl(connection.proxy.url) } : {}) } } : {}) } } : {}) })),
+});
 const providersAdapter = (deps: SettingsActionDeps): SettingsActionAdapter => ({
-  verbs: ['list', 'status', 'read', 'connect', 'login', 'disconnect', 'discover-models', 'models'],
-  async describe(ctx) {
-    const root = await needWorkspace(ctx, deps).catch(() => null);
-    if (!root) return { unavailable: 'requires a workspace-bound session' };
-    const list = await deps.requestWorkspace(root, 'provider.list', {}).catch(() => null);
-    if (!Array.isArray(list)) return { unavailable: 'provider list unavailable' };
-    const connected = list.filter((p) => isRecord(p) && (p.connected === true || p.authenticated === true));
-    return {
-      summary: `${list.length} providers, ${connected.length} connected`,
-      data: list.map(sanitizeProviderDescriptor),
-    };
+  verbs: ['list', 'status', 'read', 'save', 'remove', 'connect', 'login', 'disconnect', 'discover-models', 'models', 'reply'],
+  async describe() {
+    const owner = deps.models?.();
+    if (!owner) return { unavailable: 'Native model settings are unavailable' };
+    const snapshot = await owner.read();
+    return { summary: `${snapshot.channels.length} native model channels`, data: safeModels(snapshot) };
+  },
+  capabilities(_ctx, _entry, verb) {
+    return ['connect', 'login'].includes(verb)
+      ? { execution: 'async', operation: { query: true, cancel: true } } : { execution: 'sync' };
+  },
+  async getOperation(_ctx, _entry, id) {
+    const owner = deps.models?.();
+    return owner ? authorizationResult(owner.authorizations.read(id)) : unavailable('Native model authorization owner is unavailable');
+  },
+  async cancelOperation(_ctx, _entry, id) {
+    const owner = deps.models?.();
+    if (!owner) return unavailable('Native model authorization owner is unavailable');
+    owner.authorizations.cancel(id);
+    return authorizationResult(owner.authorizations.read(id));
   },
   async invoke(ctx, _entry, verb, args) {
-    const root = await needWorkspace(ctx, deps);
+    const owner = deps.models?.();
+    if (!owner) return unavailable('Native model settings are unavailable');
     try {
       switch (verb) {
-        case 'list':
-          return { status: 'applied', data: (await deps.requestWorkspace(root, 'provider.list', {}) as unknown[]).map(sanitizeProviderDescriptor) };
-        case 'status': {
-          const providerId = needString(args, 'providerId');
-          const config = await deps.requestWorkspace(root, 'provider.config.get', { providerId });
-          return { status: 'applied', data: sanitizeProviderConfig(config) };
+        case 'list': case 'status': case 'read': return { status: 'applied', data: safeModels(await owner.read()) };
+        case 'save': return { status: 'applied', data: safeModels(await owner.save(args.channel as import('@varin/application-client').ModelChannel, needString(args, 'expectedRevision'))) };
+        case 'remove': return { status: 'applied', data: safeModels(await owner.remove(needString(args, 'id'), needString(args, 'expectedRevision'))) };
+        case 'connect': case 'login': return authorizationResult(owner.signIn(needString(args, 'provider'), needString(args, 'reference')));
+        case 'reply': {
+          const id = needString(args, 'operationId');
+          owner.authorizations.reply(id, needString(args, 'redirect'));
+          return authorizationResult(owner.authorizations.read(id));
         }
-        case 'read':
-          return {
-            status: 'applied',
-            data: sanitizeProviderConfig(await deps.requestWorkspace(root, 'provider.config.get', { providerId: needString(args, 'providerId') })),
-          };
-        case 'connect':
-        case 'login': {
-          const providerId = needString(args, 'providerId');
-          const type = str(args, 'type') === 'api_key' ? 'api_key' : 'oauth';
-          await deps.requestWorkspace(root, 'provider.login', {
-            interactionId: randomUUID(),
-            providerId,
-            type,
-          });
-          return {
-            status: 'applied',
-            detail: 'Sign-in started; authentication is not complete yet.',
-            data: { providerId, started: true },
-          };
+        case 'disconnect': await owner.removeCredential(needString(args, 'reference')); return { status: 'applied' };
+        case 'models': return { status: 'applied', data: await owner.listModels() };
+        case 'discover-models': {
+          if (!deps.modelFetch) return unavailable('Model discovery egress is unavailable');
+          return { status: 'applied', data: await owner.discover(needString(args, 'id'), deps.modelFetch, ctx.caller.signal) };
         }
-        case 'disconnect': {
-          const providerId = needString(args, 'providerId');
-          const scope = str(args, 'scope') === 'project' ? 'project' : 'global';
-          if (str(args, 'config') !== undefined || args.deleteConfig === true) {
-            return {
-              status: 'applied',
-              data: sanitizeProviderConfig(await deps.requestWorkspace(root, 'provider.config.delete', { providerId, scope })),
-            };
-          }
-          await deps.requestWorkspace(root, 'provider.logout', { providerId });
-          return { status: 'applied', data: { providerId, disconnected: true } };
-        }
-        case 'discover-models':
-        case 'models':
-          return {
-            status: 'applied',
-            data: sanitizeProviderModelDiscovery(await deps.requestWorkspace(root, 'provider.models.discover', {
-              interactionId: randomUUID(),
-              providerId: needString(args, 'providerId'),
-              ...(isRecord(args.config) ? { config: args.config } : {}),
-              ...(args.capability === undefined ? {} : { capability: args.capability }),
-            })),
-          };
-        default:
-          return unavailable(`verb "${verb}" is not supported by the provider owner`);
+        default: return unavailable(`Unsupported model action: ${verb}`);
       }
-    } catch (error) {
-      return wrapError(error);
-    }
+    } catch (error) { return wrapError(error); }
   },
 });
 
-const mcpAdapter = (deps: SettingsActionDeps): SettingsActionAdapter => ({
-  verbs: ['status', 'reconnect', 'enable', 'disable', 'read', 'write'],
-  async describe(ctx) {
-    const snapshot = await deps.requestSession(ctx.caller.sessionId, 'mcp.config.snapshot', {}).catch(() => null);
-    if (!isRecord(snapshot)) return { unavailable: 'mcp provider unavailable' };
-    const provider = isRecord(snapshot.provider) ? snapshot.provider.state : undefined;
-    const catalog = isRecord(snapshot.catalog) ? snapshot.catalog : null;
-    const servers = Array.isArray(catalog?.servers) ? catalog.servers.length : 0;
-    return {
-      summary: `provider ${provider ?? 'unknown'}, ${servers} configured servers`,
-      data: sanitizeMcpSnapshot(snapshot),
-      verbs: ['status', 'reconnect', 'read', 'write'],
-    };
-  },
-  async invoke(ctx, _entry, verb, args) {
-    const request = (method: string, params: Record<string, unknown>) => deps.requestSession(ctx.caller.sessionId, method, params);
-    try {
-      switch (verb) {
-        case 'status':
-          return { status: 'applied', data: sanitizeMcpSnapshot(await request('mcp.config.snapshot', {})) };
-        case 'reconnect': {
-          const name = str(args, 'name');
-          const command = name ? `/mcp reconnect ${name}` : '/mcp reconnect';
-          const result = await deps.requestSession(ctx.caller.sessionId, 'command.execute', { command });
-          return { status: 'applied', detail: `executed "${command}" in the owning session`, data: result };
-        }
-        case 'enable':
-        case 'disable': {
-          const name = needString(args, 'name');
-          const command = `/mcp ${verb} ${name.replace(/\s+/g, '-')}`;
-          const result = await deps.requestSession(ctx.caller.sessionId, 'command.execute', { command });
-          return { status: 'applied', detail: `executed "${command}" in the owning session`, data: result };
-        }
-        case 'read': {
-          const snapshot = await request('mcp.config.snapshot', {});
-          const catalog = isRecord(snapshot) && isRecord(snapshot.catalog) ? snapshot.catalog : null;
-          const sourceId = str(args, 'sourceId');
-          if (!sourceId) return { status: 'applied', data: sanitizeMcpSnapshot(snapshot) };
-          const sources = Array.isArray(catalog?.sources) ? catalog.sources : [];
-          const source = sources.find((s: unknown) => isRecord(s) && s.id === sourceId);
-          if (!source || !isRecord(source.target)) {
-            return { status: 'failed', detail: `unknown mcp config source "${sourceId}"` };
+const mcpAdapter = (deps: SettingsActionDeps): SettingsActionAdapter => {
+  const views = new Map<string, string>();
+  const key = (ctx: SettingsActionContext) => JSON.stringify([ctx.caller.threadId, ctx.caller.branchId, ctx.workspaceRoot]);
+  const call = (action: string, args: Record<string, unknown>, signal?: AbortSignal) => {
+    const owner = deps.mcpSettings?.();
+    if (!owner) throw new Error('Native MCP settings are unavailable');
+    return owner.invoke(action, args, signal);
+  };
+  const view = async (ctx: SettingsActionContext): Promise<string> => {
+    const known = views.get(key(ctx));
+    if (known) return known;
+    const opened = await call('open', { ...(ctx.workspaceRoot ? { cwd: ctx.workspaceRoot } : {}) }, ctx.caller.signal) as import('@varin/application-client').McpConfigurationSnapshot;
+    views.set(key(ctx), opened.view); return opened.view;
+  };
+  const operation = (id: string): { view: string; id: string } => {
+    const parsed: unknown = JSON.parse(id);
+    if (!Array.isArray(parsed) || parsed.length !== 2 || parsed.some(value => typeof value !== 'string' || !value)) throw new Error('Invalid MCP authorization identity');
+    return { view: parsed[0] as string, id: parsed[1] as string };
+  };
+  return {
+    verbs: ['status', 'read', 'write', 'reconnect', 'connect', 'disconnect', 'login', 'reply'],
+    async describe(ctx) {
+      if (!deps.mcpSettings?.()) return { unavailable: 'Native MCP settings are unavailable' };
+      const snapshot = await call('read', { view: await view(ctx) }, ctx.caller.signal) as import('@varin/application-client').McpConfigurationSnapshot;
+      return { summary: `${snapshot.servers.length} native MCP servers`, data: snapshot };
+    },
+    capabilities(_ctx, _entry, verb) {
+      return verb === 'login' ? { execution: 'async', operation: { query: true, cancel: true } } : { execution: 'sync' };
+    },
+    async getOperation(ctx, _entry, id) {
+      return authorizationResult(await call('authorization/read', operation(id), ctx.caller.signal) as import('@varin/application-client').AuthorizationState, id);
+    },
+    async cancelOperation(ctx, _entry, id) {
+      const target = operation(id);
+      await call('authorization/cancel', target, ctx.caller.signal);
+      return authorizationResult(await call('authorization/read', target, ctx.caller.signal) as import('@varin/application-client').AuthorizationState, id);
+    },
+    async invoke(ctx, _entry, verb, args) {
+      try {
+        const selected = await view(ctx);
+        switch (verb) {
+          case 'status': return { status: 'applied', data: await call('read', { view: selected }, ctx.caller.signal) };
+          case 'read': return { status: 'applied', data: str(args, 'path')
+            ? sanitizeTextDocument(await call('document/read', { view: selected, path: needString(args, 'path') }, ctx.caller.signal))
+            : await call('read', { view: selected }, ctx.caller.signal) };
+          case 'write': {
+            if (typeof args.content !== 'string') throw new Error('content is required');
+            return { status: 'applied', data: sanitizeTextDocument(await call('document/save', { view: selected, path: needString(args, 'path'), content: args.content, expectedRevision: needString(args, 'expectedRevision') }, ctx.caller.signal)) };
           }
-          return {
-            status: 'applied',
-            data: sanitizeTextDocument(await request('config.text.get', source.target as Record<string, unknown>)),
-          };
+          case 'connect': case 'reconnect': case 'disconnect': return { status: 'applied', data: await call('command', { view: selected, name: needString(args, 'name'), command: verb }, ctx.caller.signal) };
+          case 'login': {
+            const state = await call('authorization/start', { view: selected, name: needString(args, 'name') }, ctx.caller.signal) as import('@varin/application-client').AuthorizationState;
+            return authorizationResult(state, JSON.stringify([selected, state.id]));
+          }
+          case 'reply': {
+            const id = needString(args, 'operationId'), target = operation(id);
+            await call('authorization/reply', { ...target, redirect: needString(args, 'redirect') }, ctx.caller.signal);
+            return authorizationResult(await call('authorization/read', target, ctx.caller.signal) as import('@varin/application-client').AuthorizationState, id);
+          }
+          default: return unavailable(`Unsupported MCP action: ${verb}`);
         }
-        case 'write': {
-          const sourceId = str(args, 'sourceId');
-          const content = typeof args.content === 'string' ? args.content : undefined;
-          if (!sourceId || content === undefined) {
-            return { status: 'failed', detail: 'write requires args {sourceId, content, expectedRevision?}' };
-          }
-          const snapshot = await request('mcp.config.snapshot', {});
-          const catalog = isRecord(snapshot) && isRecord(snapshot.catalog) ? snapshot.catalog : null;
-          const sources = Array.isArray(catalog?.sources) ? catalog.sources : [];
-          const source = sources.find((s: unknown) => isRecord(s) && s.id === sourceId);
-          if (!source || !isRecord(source.target)) {
-            return { status: 'failed', detail: `unknown mcp config source "${sourceId}" — read the catalog first` };
-          }
-          const target = source.target as Record<string, unknown>;
-          let expectedRevision = str(args, 'expectedRevision');
-          if (!expectedRevision) {
-            const current = await request('config.text.get', target) as Record<string, unknown>;
-            expectedRevision = typeof current?.revision === 'string' ? current.revision : '';
-          }
-          return {
-            status: 'applied',
-            data: sanitizeTextDocument(await request('config.text.update', {
-              ...target,
-              content,
-              expectedRevision,
-            })),
-          };
-        }
-        default:
-          return unavailable(`verb "${verb}" is not supported by the mcp owner`);
-      }
-    } catch (error) {
-      return wrapError(error);
-    }
-  },
-});
+      } catch (error) { return wrapError(error); }
+    },
+  };
+};
 
-const resourcesAdapter = (deps: SettingsActionDeps): SettingsActionAdapter => ({
-  verbs: ['list', 'read', 'write', 'create', 'delete'],
-  async describe(ctx) {
-    const root = await needWorkspace(ctx, deps).catch(() => null);
-    if (!root) return { unavailable: 'requires a workspace-bound session' };
-    return { summary: 'Pi skill resources' };
+const extensionPackagesAdapter = (deps: SettingsActionDeps): SettingsActionAdapter => ({
+  verbs: ['list', 'remove'],
+  async describe() {
+    const owner = deps.extensionPackages?.();
+    if (!owner) return { unavailable: 'Native extension packages are unavailable' };
+    return { summary: 'Native extension package catalog; stage/apply uses extension_package with admitted source capture', data: await owner.catalog.snapshot() };
   },
-  async invoke(ctx, entry, verb, args) {
-    const root = await needWorkspace(ctx, deps);
-    const kind = entry.id.startsWith('skills.') ? 'skill' : null;
-    if (!kind) return unavailable('this entry has no Pi resource kind (snippets are UI-owned, not a runtime resource)');
+  async invoke(_ctx, _entry, verb, args) {
+    const owner = deps.extensionPackages?.();
+    if (!owner) return unavailable('Native extension packages are unavailable');
     try {
-      switch (verb) {
-        case 'list':
-          return { status: 'applied', data: await deps.requestWorkspace(root, 'resource.list', { kind }) };
-        case 'read':
-          return {
-            status: 'applied',
-            data: await deps.requestWorkspace(root, 'resource.get', { kind, id: needString(args, 'id') }),
-          };
-        case 'write':
-        case 'create': {
-          const content = typeof args.content === 'string' ? args.content : undefined;
-          if (content === undefined) return { status: 'failed', detail: 'verb requires args.content' };
-          const id = str(args, 'id');
-          const scope = str(args, 'scope') === 'project' ? 'project' : 'user';
-          if (id) {
-            let expectedRevision = str(args, 'expectedRevision');
-            if (!expectedRevision) {
-              const current = await deps.requestWorkspace(root, 'resource.get', { kind, id }) as Record<string, unknown>;
-              expectedRevision = typeof current?.revision === 'string' ? current.revision : undefined;
-            }
-            if (!expectedRevision) return { status: 'failed', detail: 'resource has no readable revision — cannot update safely' };
-            return {
-              status: 'applied',
-              data: await deps.requestWorkspace(root, 'resource.update', { kind, id, content, expectedRevision }),
-            };
-          }
-          return {
-            status: 'applied',
-            data: await deps.requestWorkspace(root, 'resource.create', {
-              kind,
-              name: str(args, 'name') ?? `resource-${Date.now()}`,
-              content,
-              scope,
-            }),
-          };
-        }
-        case 'delete': {
-          const id = needString(args, 'id');
-          let expectedRevision = str(args, 'expectedRevision');
-          if (!expectedRevision) {
-            const current = await deps.requestWorkspace(root, 'resource.get', { kind, id }) as Record<string, unknown>;
-            expectedRevision = typeof current?.revision === 'string' ? current.revision : undefined;
-          }
-          if (!expectedRevision) return { status: 'failed', detail: 'resource has no readable revision — cannot delete safely' };
-          return {
-            status: 'applied',
-            data: await deps.requestWorkspace(root, 'resource.delete', { kind, id, expectedRevision }),
-          };
-        }
-        default:
-          return unavailable(`verb "${verb}" is not supported by the resource owner`);
-      }
-    } catch (error) {
-      return wrapError(error);
-    }
-  },
-});
-
-const piPackagesAdapter = (deps: SettingsActionDeps): SettingsActionAdapter => ({
-  verbs: ['list', 'install', 'remove', 'update', 'read', 'write'],
-  async describe(ctx, entry) {
-    if (entry.id === 'plugins.recommended') {
-      return { summary: `${RECOMMENDED_PACKAGES.length} recommended packages`,
-        data: RECOMMENDED_PACKAGES.map(({ name, source }) => ({ name, source })) };
-    }
-    const root = await needWorkspace(ctx, deps).catch(() => null);
-    if (!root) return { unavailable: 'requires a workspace-bound session' };
-    const list = await deps.requestWorkspace(root, 'package.list', {}).catch(() => null);
-    return Array.isArray(list)
-      ? { summary: `${list.length} packages`, data: sanitizePackageResult(list) }
-      : { unavailable: 'package list unavailable' };
-  },
-  async invoke(ctx, entry, verb, args) {
-    const root = await needWorkspace(ctx, deps);
-    try {
-      switch (verb) {
-        case 'list': {
-          if (entry.id === 'plugins.recommended') {
-            return { status: 'applied', data: RECOMMENDED_PACKAGES.map(({ name, source }) => ({ name, source })) };
-          }
-          return { status: 'applied', data: sanitizePackageResult(await deps.requestWorkspace(root, 'package.list', {})) };
-        }
-        case 'install': {
-          const source = needString(args, 'source');
-          const scope = str(args, 'scope') === 'project' ? 'project' : 'global';
-          const result = await deps.requestWorkspace(root, 'package.install', { source, scope });
-          return {
-            status: 'applied',
-            data: sanitizePackageResult(result),
-          };
-        }
-        case 'remove': {
-          const source = needString(args, 'source');
-          const scope = str(args, 'scope') === 'project' ? 'project' : 'global';
-          return {
-            status: 'applied',
-            data: sanitizePackageResult(await deps.requestWorkspace(root, 'package.remove', { source, scope })),
-          };
-        }
-        case 'update':
-          return {
-            status: 'applied',
-            data: sanitizePackageResult(await deps.requestWorkspace(root, 'package.update', {
-              ...(str(args, 'source') ? { source: str(args, 'source')! } : {}),
-            })),
-          };
-        case 'read':
-        case 'write': {
-          // plugin-settings.configuration — per-plugin config documents.
-          const path = str(args, 'path');
-          const rootKind = str(args, 'root');
-          if (!path || !rootKind) {
-            return { status: 'failed', detail: 'requires args {path, root: agent|home|project|user-config, format?}' };
-          }
-          if (verb === 'read') {
-            return {
-              status: 'applied',
-              data: sanitizeTextDocument(await deps.requestWorkspace(root, 'config.text.get', {
-                path, root: rootKind, format: str(args, 'format') ?? 'jsonc',
-              })),
-            };
-          }
-          const content = typeof args.content === 'string' ? args.content : undefined;
-          if (content === undefined) return { status: 'failed', detail: 'write requires args.content' };
-          let expectedRevision = str(args, 'expectedRevision');
-          if (!expectedRevision) {
-            const current = await deps.requestWorkspace(root, 'config.text.get', {
-              path, root: rootKind, format: str(args, 'format') ?? 'jsonc',
-            }) as Record<string, unknown>;
-            expectedRevision = typeof current?.revision === 'string' ? current.revision : '';
-          }
-          return {
-            status: 'applied',
-            data: sanitizeTextDocument(await deps.requestWorkspace(root, 'config.text.update', {
-              path, root: rootKind, format: str(args, 'format') ?? 'jsonc', content, expectedRevision,
-            })),
-          };
-        }
-        default:
-          return unavailable(`verb "${verb}" is not supported by the package owner`);
-      }
-    } catch (error) {
-      return wrapError(error);
-    }
+      if (verb === 'list') return { status: 'applied', data: await owner.catalog.snapshot() };
+      if (verb !== 'remove') return unavailable('Stage and apply packages through extension_package');
+      const runtime = deps.extensionRuntime?.();
+      if (!runtime?.removeExtension) return unavailable('Native extension removal owner is unavailable');
+      if (!Number.isSafeInteger(args.expectedRevision)) throw new Error('expectedRevision is required');
+      return { status: 'applied', data: await runtime.removeExtension({ extensionId: needString(args, 'id'), expectedRevision: args.expectedRevision, deleteData: false }) };
+    } catch (error) { return wrapError(error); }
   },
 });
 
 const agentsAdapter = (deps: SettingsActionDeps): SettingsActionAdapter => ({
   verbs: ['list', 'status', 'read', 'create', 'update', 'enable', 'disable', 'delete'],
   async describe(ctx) {
-    const snapshot = await deps.requestSession(ctx.caller.sessionId, 'agentProvider.list', {}).catch(() => null);
-    if (!isRecord(snapshot)) return { unavailable: 'agent provider catalog unavailable' };
-    const providers = Array.isArray(snapshot.providers) ? snapshot.providers.length : 0;
-    return { summary: `${providers} agent providers`, data: snapshot };
+    const owner = deps.agentProfiles?.();
+    if (!owner) return { unavailable: 'Native Agent profiles are unavailable' };
+    const snapshot = await owner.read({ runtime: 'agent' }, ctx.caller.signal);
+    return { summary: `${snapshot.profiles.length} native Agent profiles`, data: snapshot };
   },
-  async invoke(ctx, entry, verb, args) {
-    const request = (method: string, params: Record<string, unknown>) => deps.requestSession(ctx.caller.sessionId, method, params);
+  async invoke(ctx, _entry, verb, args) {
+    const owner = deps.agentProfiles?.();
+    if (!owner) return unavailable('Native Agent profiles are unavailable');
     try {
-      switch (verb) {
-        case 'list':
-          return { status: 'applied', data: await request('agentProvider.list', {}) };
-        case 'status':
-        case 'read': {
-          const snapshot = await request('agentProvider.list', {});
-          if (verb === 'read' || str(args, 'agentId')) {
-            const providerId = str(args, 'providerId');
-            const agentId = str(args, 'agentId');
-            if (providerId) {
-              return {
-                status: 'applied',
-                data: await request('agentProvider.action', {
-                  providerId, action: 'inspect', ...(agentId ? { agentId } : {}),
-                }),
-              };
-            }
-          }
-          return { status: 'applied', data: snapshot };
-        }
-        case 'create':
-        case 'update':
-        case 'enable':
-        case 'disable':
-        case 'delete': {
-          const providerId = str(args, 'providerId');
-          const agentId = str(args, 'agentId');
-          const action = verb === 'create' ? 'create-agent' : verb;
-          if (!providerId || (verb !== 'create' && !agentId)) return unavailable('providerId and an existing agentId are required (create only needs providerId)');
-          const catalog = await request('agentProvider.list', {});
-          const owners = isRecord(catalog) ? (verb === 'create' ? catalog.providers : catalog.agents) : undefined;
-          const owner = Array.isArray(owners) ? owners.find(item => isRecord(item)
-            && (verb === 'create' ? item.id === providerId : item.id === agentId && item.providerId === providerId)) : undefined;
-          if (!isRecord(owner) || !Array.isArray(owner.actions) || !owner.actions.some(item => isRecord(item) && item.id === action)) return unavailable('The selected agent provider does not expose this action');
-          const result = await request('agentProvider.action', { providerId, ...(agentId ? { agentId } : {}), action, input: args.input });
-          return isRecord(result) && result.success === true ? { status: 'applied', data: result }
-            : { status: 'failed', detail: isRecord(result) && typeof result.message === 'string' ? result.message : 'Agent action failed', data: result };
-        }
-        default:
-          return unavailable(`verb "${verb}" is not supported by the agent provider owner`);
+      if (['list', 'status', 'read'].includes(verb)) return { status: 'applied', data: await owner.read({ runtime: 'agent' }, ctx.caller.signal) };
+      const expectedRevision = needString(args, 'expectedRevision');
+      if (verb === 'delete') return { status: 'applied', data: await owner.remove({ runtime: 'agent', expectedRevision, id: needString(args, 'id') }, ctx.caller.signal) };
+      let config = args.config as import('@varin/application-client').AgentProfileConfig;
+      if (verb === 'enable' || verb === 'disable') {
+        const current = await owner.read({ runtime: 'agent' }, ctx.caller.signal);
+        const profile = current.profiles.find(value => value.id === needString(args, 'id'));
+        if (!profile) throw new Error('Agent profile is unavailable');
+        config = profile.config.kind === 'builtin'
+          ? { ...profile.config, binding: { ...profile.config.binding, enabled: verb === 'enable' } }
+          : { ...profile.config, agent: { ...profile.config.agent, enabled: verb === 'enable' } };
       }
-    } catch (error) {
-      return wrapError(error);
-    }
+      return { status: 'applied', data: await owner.save({ runtime: 'agent', expectedRevision,
+        ...(verb !== 'create' ? { id: needString(args, 'id') } : {}), config,
+        ...(args.tools !== undefined ? { tools: args.tools as string[] | null } : {}) }, ctx.caller.signal) };
+    } catch (error) { return wrapError(error); }
   },
 });
 
@@ -1103,7 +758,7 @@ const languageSupportAdapter = (deps: SettingsActionDeps): SettingsActionAdapter
   async invoke(ctx, _entry, verb, args) {
     const support = deps.languageSupport?.();
     if (!support) return unavailable('language support service unavailable');
-    if (!ctx.caller.workspaceId) return unavailable('language support requires a workspace-bound session');
+    if (!ctx.caller.workspaceId) return unavailable('language support requires a admitted project source');
     const workspaceId = ctx.caller.workspaceId;
     try {
       switch (verb) {
@@ -1129,53 +784,6 @@ const languageSupportAdapter = (deps: SettingsActionDeps): SettingsActionAdapter
           };
         default:
           return unavailable(`verb "${verb}" is not supported by the language-support owner`);
-      }
-    } catch (error) {
-      return wrapError(error);
-    }
-  },
-});
-
-const runtimeUpdateAdapter = (deps: SettingsActionDeps): SettingsActionAdapter => ({
-  verbs: ['status', 'install', 'upgrade', 'rediscover', 'activate', 'choose'],
-  async describe() {
-    const lifecycle = deps.runtimeLifecycle?.();
-    if (!lifecycle) return { unavailable: 'runtime lifecycle manager unavailable' };
-    const snapshot = lifecycle.snapshot as { status?: string; active?: { version?: string } } | undefined;
-    return {
-      summary: snapshot ? `runtime ${snapshot.active?.version ?? '?'} (${snapshot.status ?? 'unknown'})` : 'runtime snapshot unavailable',
-      data: snapshot,
-    };
-  },
-  async invoke(_ctx, _entry, verb, args) {
-    const lifecycle = deps.runtimeLifecycle?.();
-    if (!lifecycle) return unavailable('runtime lifecycle manager unavailable');
-    try {
-      switch (verb) {
-        case 'status':
-          return { status: 'applied', data: lifecycle.snapshot };
-        case 'install':
-          return {
-            status: 'applied',
-            data: await lifecycle.install(),
-          };
-        case 'upgrade':
-          return {
-            status: 'applied',
-            data: await lifecycle.upgrade(),
-          };
-        case 'rediscover':
-          return { status: 'applied', data: await lifecycle.refresh() };
-        case 'activate': {
-          const id = needString(args, 'id');
-          return { status: 'applied', data: await lifecycle.activate(id) };
-        }
-        case 'choose': {
-          const packageRoot = needString(args, 'packageRoot');
-          return { status: 'applied', data: await lifecycle.activateCustom(packageRoot, str(args, 'nodePath')) };
-        }
-        default:
-          return unavailable(`verb "${verb}" is not supported by the runtime owner`);
       }
     } catch (error) {
       return wrapError(error);
@@ -1243,35 +851,6 @@ const notificationsAdapter = (): SettingsActionAdapter => ({
   },
 });
 
-const agentPersonalizationAdapter = (deps: SettingsActionDeps): SettingsActionAdapter => ({
-  verbs: ['read', 'write', 'delete', 'reset'],
-  async describe() {
-    const service = deps.agentPersonalization?.();
-    return service ? { summary: 'Ordinary assistant notes and system prompt sections', data: await service.catalog() }
-      : { unavailable: 'Assistant preferences are unavailable' };
-  },
-  async invoke(ctx, entry, verb, args) {
-    const service = deps.agentPersonalization?.();
-    if (!service) return unavailable('Assistant preferences are unavailable');
-    try {
-      if (verb === 'read') return { status: 'applied', data: await service.catalog() };
-      const revision = args.revision;
-      if (typeof revision !== 'number' || !Number.isSafeInteger(revision)) return { status: 'failed', detail: 'Read the current revision before editing' };
-      if (entry.id === 'agent.memory') {
-        if (verb === 'delete') return { status: 'applied', data: await service.removeNote(Number(args.id), revision) };
-        if (verb !== 'write') return unavailable(`Unsupported memory action: ${verb}`);
-        return { status: 'applied', data: await service.saveNote({
-          scope: parseAgentScope(args.scope), content: needString(args, 'content'), revision,
-          ...(typeof args.id === 'number' ? { id: args.id } : {}), source: { label: 'agent', sessionId: ctx.caller.sessionId },
-        }) };
-      }
-      if (verb !== 'write' && verb !== 'reset') return unavailable(`Unsupported prompt action: ${verb}`);
-      return { status: 'applied', data: await service.savePrompt(parseAgentScope(args.scope), verb === 'reset'
-        ? null : args.profile as unknown as import('@varin/protocol').AgentPromptProfile, revision) };
-    } catch (error) { return wrapError(error); }
-  },
-});
-
 /* ── registry ───────────────────────────────────────────────────────────── */
 
 export function createSettingsActionRegistry(deps: SettingsActionDeps) {
@@ -1300,18 +879,15 @@ export function createSettingsActionRegistry(deps: SettingsActionDeps) {
         } catch (error) { return wrapError(error); }
       },
     }],
-    ['service:agent-personalization', agentPersonalizationAdapter(deps)],
     ['runtime:providers', providersAdapter(deps)],
     ['runtime:mcp', mcpAdapter(deps)],
-    ['runtime:resources', resourcesAdapter(deps)],
-    ['runtime:extensions', piPackagesAdapter(deps)],
+    ['service:extension-packages', extensionPackagesAdapter(deps)],
     ['service:agents', agentsAdapter(deps)],
     ['service:git', gitAdapter(deps)],
     ['service:projects', projectsAdapter(deps)],
     ['service:remote-instances', remoteInstancesAdapter(deps)],
     ['service:extensions', workbenchExtensionsAdapter(deps)],
     ['runtime:language-support', languageSupportAdapter(deps)],
-    ['runtime:runtime-update', runtimeUpdateAdapter(deps)],
     ['service:tunnel', tunnelAdapter(deps)],
     ['service:notifications', notificationsAdapter()],
   ]);

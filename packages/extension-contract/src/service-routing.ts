@@ -1,6 +1,8 @@
+import { VarinExtensionContractError } from "./contract-error.js";
 import type {
   VarinExtensionDiagnostic,
   VarinExtensionStorageSnapshot,
+  VarinExtensionHostStateSnapshot,
 } from "./types.js";
 
 export const VARIN_SERVICE_ROUTING_SCHEMA_VERSION = 1 as const;
@@ -14,14 +16,18 @@ export interface VarinExtensionServiceRoutingContext {
   profileId?: string;
   projectId?: string;
   runtimeId?: string;
-  sessionId?: string;
+  threadId?: string;
+  branchId?: string;
+  sourceRunId?: string;
+  configurationDirectory?: string;
   userId?: string;
   workspaceId?: string;
 }
 
+/** Choice shape is uniform; cardinality and composition belong to the service consumer. */
 export interface VarinExtensionServiceRoutingRule {
   allowFallback: boolean;
-  providerKey: string;
+  providerKeys: string[];
   scope: VarinExtensionServiceRoutingContext;
   serviceId: string;
   version: number;
@@ -55,16 +61,33 @@ export interface VarinExtensionServiceRoutingRuleRemoveRequest {
 }
 
 export interface VarinExtensionServiceRoutingCandidate {
+  composition?: "ordered";
   providerId: string;
   providerKey: string;
 }
 
-export interface VarinExtensionServiceRoutingResolution {
+export type VarinExtensionServiceRoutingResolution = {
+  composition?: "ordered";
   diagnostics: VarinExtensionDiagnostic[];
   matchedRule?: VarinExtensionServiceRoutingRule;
-  providerId?: string;
-  providerKey?: string;
-  status: "ambiguous" | "resolved" | "unavailable";
+} & (
+  | { status: "resolved"; providerIds: string[]; providerKeys: string[] }
+  | { status: "ambiguous" | "unavailable"; providerIds?: never; providerKeys?: string[] }
+);
+
+/** Read-only capability projection from original declarations, shared by discovery and Settings.
+ * Multiplicity is not composition. Actual invocation uses its concrete consumer contract. */
+export function serviceRoutingComposition(
+  snapshot: Pick<VarinExtensionHostStateSnapshot, "catalog" | "services">,
+  serviceId: string,
+  version: number,
+): "ordered" | undefined {
+  const descriptors = [
+    ...snapshot.services.providers.filter(provider => provider.status === "active").map(provider => provider.descriptor),
+    ...(snapshot.catalog.authoritative ? snapshot.catalog.extensions.flatMap(entry => entry.manifest.provides?.services ?? []) : []),
+  ];
+  return descriptors.some(descriptor => descriptor.id === serviceId && descriptor.version === version
+    && descriptor.contract?.composition === "ordered") ? "ordered" : undefined;
 }
 
 const ID_PATTERN = /^[a-z0-9]+(?:[._-][a-z0-9]+)*$/;
@@ -75,7 +98,10 @@ const SCOPE_FIELDS = [
   "workspaceId",
   "projectId",
   "runtimeId",
-  "sessionId",
+  "threadId",
+  "branchId",
+  "sourceRunId",
+  "configurationDirectory",
   "agentId",
   "modelProviderId",
   "modelId",
@@ -88,20 +114,22 @@ const record = (value: unknown): Record<string, unknown> | null => (
     : null
 );
 
+const invalidRouting = (message: string): VarinExtensionContractError => new VarinExtensionContractError(message, [message]);
+
 const text = (value: unknown, label: string): string => {
-  if (typeof value !== "string" || value.trim().length === 0) throw new Error(`${label} must be a non-empty string`);
+  if (typeof value !== "string" || value.trim().length === 0) throw invalidRouting(`${label} must be a non-empty string`);
   return value.trim();
 };
 
 const serviceId = (value: unknown, label: string): string => {
   const parsed = text(value, label);
-  if (!ID_PATTERN.test(parsed)) throw new Error(`${label} is invalid`);
+  if (!ID_PATTERN.test(parsed)) throw invalidRouting(`${label} is invalid`);
   return parsed;
 };
 
 const revision = (value: unknown, label: string, allowZero = true): number => {
   if (!Number.isSafeInteger(value) || Number(value) < (allowZero ? 0 : 1)) {
-    throw new Error(`${label} must be a ${allowZero ? "non-negative" : "positive"} safe integer`);
+    throw invalidRouting(`${label} must be a ${allowZero ? "non-negative" : "positive"} safe integer`);
   }
   return Number(value);
 };
@@ -111,22 +139,31 @@ export const parseVarinExtensionServiceRoutingContext = (
   options: { allowEmpty?: boolean } = {},
 ): VarinExtensionServiceRoutingContext => {
   const raw = record(value);
-  if (!raw) throw new Error("Service routing context must be an object");
+  if (!raw) throw invalidRouting("Service routing context must be an object");
+  for (const field of Object.keys(raw)) {
+    if (!(SCOPE_FIELDS as readonly string[]).includes(field)) throw invalidRouting(`Unknown service routing context field: ${field}`);
+  }
   const context: VarinExtensionServiceRoutingContext = {};
   for (const field of SCOPE_FIELDS) {
     if (raw[field] !== undefined) context[field] = text(raw[field], `scope.${field}`);
   }
-  if (!options.allowEmpty && Object.keys(context).length === 0) throw new Error("Service routing scope must select at least one context dimension");
+  if (!options.allowEmpty && Object.keys(context).length === 0) throw invalidRouting("Service routing scope must select at least one context dimension");
   return context;
 };
 
 export const parseVarinExtensionServiceRoutingRule = (value: unknown): VarinExtensionServiceRoutingRule => {
   const raw = record(value);
-  if (!raw) throw new Error("Service routing rule must be an object");
-  if (typeof raw.allowFallback !== "boolean") throw new Error("Service routing rule allowFallback must be boolean");
+  if (!raw) throw invalidRouting("Service routing rule must be an object");
+  if (typeof raw.allowFallback !== "boolean") throw invalidRouting("Service routing rule allowFallback must be boolean");
+  for (const key of Object.keys(raw)) {
+    if (!["allowFallback", "providerKeys", "scope", "serviceId", "version"].includes(key)) throw invalidRouting(`Unknown service routing rule field: ${key}`);
+  }
+  if (!Array.isArray(raw.providerKeys)) throw invalidRouting("providerKeys must be an ordered array");
+  const providerKeys = raw.providerKeys.map(key => text(key, "providerKeys member"));
+  if (new Set(providerKeys).size !== providerKeys.length) throw invalidRouting("providerKeys must not repeat a provider");
   return {
     allowFallback: raw.allowFallback,
-    providerKey: text(raw.providerKey, "providerKey"),
+    providerKeys,
     scope: parseVarinExtensionServiceRoutingContext(raw.scope),
     serviceId: serviceId(raw.serviceId, "serviceId"),
     version: revision(raw.version, "version", false),
@@ -146,14 +183,14 @@ export const parseVarinExtensionServiceRoutingDocument = (
   value: unknown,
 ): VarinExtensionServiceRoutingDocument => {
   const raw = record(value);
-  if (!raw) throw new Error("Service routing document must be an object");
-  if (raw.schemaVersion !== VARIN_SERVICE_ROUTING_SCHEMA_VERSION) throw new Error("Service routing schemaVersion is unsupported");
-  if (!Array.isArray(raw.rules)) throw new Error("Service routing rules must be an array");
+  if (!raw) throw invalidRouting("Service routing document must be an object");
+  if (raw.schemaVersion !== VARIN_SERVICE_ROUTING_SCHEMA_VERSION) throw invalidRouting("Service routing schemaVersion is unsupported");
+  if (!Array.isArray(raw.rules)) throw invalidRouting("Service routing rules must be an array");
   const rules = raw.rules.map(parseVarinExtensionServiceRoutingRule);
   const keys = rules.map(serviceRoutingRuleKey);
-  if (new Set(keys).size !== keys.length) throw new Error("Service routing rule identities must be unique");
+  if (new Set(keys).size !== keys.length) throw invalidRouting("Service routing rule identities must be unique");
   const updatedAt = text(raw.updatedAt, "updatedAt");
-  if (!Number.isFinite(Date.parse(updatedAt))) throw new Error("updatedAt must be an ISO timestamp");
+  if (!Number.isFinite(Date.parse(updatedAt))) throw invalidRouting("updatedAt must be an ISO timestamp");
   return {
     revision: revision(raw.revision, "revision"),
     rules,
@@ -166,13 +203,13 @@ export const parseVarinExtensionServiceRoutingSnapshot = (
   value: unknown,
 ): VarinExtensionServiceRoutingSnapshot => {
   const raw = record(value);
-  if (!raw) throw new Error("Service routing snapshot must be an object");
+  if (!raw) throw invalidRouting("Service routing snapshot must be an object");
   const storageState = raw.storageState;
   if (storageState !== "missing" && storageState !== "ready" && storageState !== "stale") {
-    throw new Error("Service routing storageState is unsupported");
+    throw invalidRouting("Service routing storageState is unsupported");
   }
-  if (typeof raw.authoritative !== "boolean") throw new Error("Service routing authoritative must be boolean");
-  if (!Array.isArray(raw.diagnostics)) throw new Error("Service routing diagnostics must be an array");
+  if (typeof raw.authoritative !== "boolean") throw invalidRouting("Service routing authoritative must be boolean");
+  if (!Array.isArray(raw.diagnostics)) throw invalidRouting("Service routing diagnostics must be an array");
   return {
     authoritative: raw.authoritative,
     diagnostics: raw.diagnostics as VarinExtensionDiagnostic[],
@@ -186,7 +223,7 @@ export const parseVarinExtensionServiceRoutingRuleUpdateRequest = (
   value: unknown,
 ): VarinExtensionServiceRoutingRuleUpdateRequest => {
   const raw = record(value);
-  if (!raw) throw new Error("Service routing update request must be an object");
+  if (!raw) throw invalidRouting("Service routing update request must be an object");
   return { expectedRevision: revision(raw.expectedRevision, "expectedRevision"), rule: parseVarinExtensionServiceRoutingRule(raw.rule) };
 };
 
@@ -194,7 +231,7 @@ export const parseVarinExtensionServiceRoutingRuleRemoveRequest = (
   value: unknown,
 ): VarinExtensionServiceRoutingRuleRemoveRequest => {
   const raw = record(value);
-  if (!raw) throw new Error("Service routing remove request must be an object");
+  if (!raw) throw invalidRouting("Service routing remove request must be an object");
   return {
     expectedRevision: revision(raw.expectedRevision, "expectedRevision"),
     scope: parseVarinExtensionServiceRoutingContext(raw.scope),
@@ -215,7 +252,7 @@ export const serviceRoutingDocumentFromStorage = (
 ): VarinExtensionServiceRoutingDocument => parseVarinExtensionServiceRoutingDocument({
   ...(snapshot.exists ? snapshot.document.data : defaultVarinExtensionServiceRoutingDocument()),
   revision: snapshot.document.revision,
-  schemaVersion: VARIN_SERVICE_ROUTING_SCHEMA_VERSION,
+  schemaVersion: snapshot.exists ? snapshot.document.schemaVersion : VARIN_SERVICE_ROUTING_SCHEMA_VERSION,
   updatedAt: snapshot.document.updatedAt,
 });
 
@@ -244,6 +281,10 @@ const routingDiagnostic = (code: string, message: string): VarinExtensionDiagnos
 
 export const resolveVarinExtensionServiceRouting = (options: {
   candidates: readonly VarinExtensionServiceRoutingCandidate[];
+  /** Only a concrete ordered-contract consumer may opt into collection resolution. */
+  composition?: "ordered";
+  /** Distribution default, considered only after all applicable explicit routing rules. */
+  defaultProviderKey?: string;
   context?: VarinExtensionServiceRoutingContext;
   document: VarinExtensionServiceRoutingDocument | unknown;
   serviceId: string;
@@ -272,8 +313,8 @@ export const resolveVarinExtensionServiceRouting = (options: {
       peers.push(current);
       index += 1;
     }
-    const providerKeys = new Set(peers.map((rule) => rule.providerKey));
-    if (providerKeys.size > 1) {
+    const selections = new Set(peers.map(rule => JSON.stringify([rule.providerKeys, rule.allowFallback])));
+    if (selections.size > 1) {
       return {
         diagnostics: [routingDiagnostic(
           "service_selection_scope_conflict",
@@ -283,30 +324,34 @@ export const resolveVarinExtensionServiceRouting = (options: {
       };
     }
     const rule = peers[0] as VarinExtensionServiceRoutingRule;
-    const provider = candidates.find((candidate) => candidate.providerKey === rule.providerKey);
-    if (provider) {
-      return {
-        diagnostics,
-        matchedRule: rule,
-        providerId: provider.providerId,
-        providerKey: provider.providerKey,
-        status: "resolved",
-      };
-    }
-    diagnostics.push(routingDiagnostic(
-      rule.allowFallback ? "service_selection_fallback" : "service_selection_provider_unavailable",
-      `Selected provider ${rule.providerKey} is unavailable for ${id}@${version}`,
-    ));
-    if (!rule.allowFallback) return { diagnostics, matchedRule: rule, providerKey: rule.providerKey, status: "unavailable" };
-  }
-  if (candidates.length === 1) {
-    const candidate = candidates[0] as VarinExtensionServiceRoutingCandidate;
-    return {
-      diagnostics,
-      providerId: candidate.providerId,
-      providerKey: candidate.providerKey,
-      status: "resolved",
+    const basis = { matchedRule: rule, providerKeys: rule.providerKeys,
+      ...(options.composition ? { composition: options.composition } : {}) };
+    if (options.composition !== "ordered" && rule.providerKeys.length !== 1) return {
+      ...basis, diagnostics: [...diagnostics, routingDiagnostic("service_selection_single_required",
+        `Single-service invocation requires exactly one provider for ${id}@${version}`)], status: "unavailable",
     };
+    const selected = rule.providerKeys.map(key => candidates.find(candidate => candidate.providerKey === key));
+    if (options.composition === "ordered" && selected.some(candidate => candidate && candidate.composition !== "ordered")) return {
+      ...basis, diagnostics: [...diagnostics, routingDiagnostic("service_selection_composition_unsupported",
+        `Every selected provider must declare ordered composition for ${id}@${version}`)], status: "unavailable",
+    };
+    if (selected.every(candidate => candidate !== undefined)) return {
+      ...basis, diagnostics, providerIds: selected.map(candidate => candidate!.providerId), status: "resolved",
+    };
+    diagnostics.push(routingDiagnostic(rule.allowFallback ? "service_selection_fallback" : "service_selection_provider_unavailable",
+      `Selected providers ${rule.providerKeys.filter((_, index) => !selected[index]).join(", ")} are unavailable for ${id}@${version}`));
+    if (!rule.allowFallback) return { ...basis, diagnostics, status: "unavailable" };
+  }
+  const defaultProvider = options.defaultProviderKey
+    ? candidates.find(candidate => candidate.providerKey === options.defaultProviderKey) : undefined;
+  const candidate = defaultProvider ?? (candidates.length === 1 ? candidates[0] : undefined);
+  if (candidate) {
+    const basis = { providerKeys: [candidate.providerKey], ...(options.composition ? { composition: options.composition } : {}) };
+    if (options.composition === "ordered" && candidate.composition !== "ordered") return {
+      ...basis, diagnostics: [...diagnostics, routingDiagnostic("service_selection_composition_unsupported",
+        `Selected provider must declare ordered composition for ${id}@${version}`)], status: "unavailable",
+    };
+    return { ...basis, diagnostics, providerIds: [candidate.providerId], status: "resolved" };
   }
   if (candidates.length > 1) {
     return {

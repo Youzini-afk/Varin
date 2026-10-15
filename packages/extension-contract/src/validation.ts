@@ -1,3 +1,9 @@
+import { parseVarinExtensionRestartHandoffs } from "./restart-handoff.js";
+import { parseVarinSurfaceServiceInvocationLease } from './surface-service-lease.js';
+import { VarinExtensionContractError } from "./contract-error.js";
+export { VarinExtensionContractError } from "./contract-error.js";
+import { parseVarinExtensionSourceViewProvenance } from "./package-authoring.js";
+import { parseVarinExtensionServiceContract } from './runtime-contracts.js';
 import {
   VARIN_EXTENSION_CATALOG_SCHEMA_VERSION,
   VARIN_EXTENSION_MANIFEST_SCHEMA_VERSION,
@@ -13,6 +19,9 @@ import {
   type VarinExtensionCandidateCapabilityReviewRequest,
   type VarinExtensionCandidatePreparationResult,
   type VarinExtensionCandidateSelectionRequest,
+  type VarinExtensionCandidatePublicationRequest,
+  type VarinExtensionHostPreparationIdentity,
+  type VarinExtensionSurfaceReadiness,
   type VarinExtensionCatalogAvailability,
   type VarinExtensionCatalogDocument,
   type VarinExtensionCatalogEntry,
@@ -42,7 +51,6 @@ import {
   type VarinExtensionServiceCatalogSnapshot,
   type VarinExtensionServiceInvocationRequest,
   type VarinExtensionServiceProviderSnapshot,
-  type VarinExtensionServiceSelectionRequest,
   type VarinExtensionServiceRequirement,
   type VarinExtensionStaticContribution,
   type VarinExtensionStorageAddress,
@@ -73,6 +81,7 @@ import {
   VarinContextExpressionError,
 } from "./context-expression.js";
 import semver from "semver";
+import { parseVarinExtensionToolDeclaration } from "./tools.js";
 
 const ID_PATTERN = /^[a-z0-9]+(?:[._-][a-z0-9]+)*$/;
 const SEMVER_PATTERN = /^(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/;
@@ -108,7 +117,7 @@ const CONTRIBUTION_KINDS = new Set<VarinExtensionContributionKind>([
   "tool-renderer",
   "view",
 ]);
-const SOURCE_KINDS = new Set(["builtin", "git", "local", "npm"]);
+const SOURCE_KINDS = new Set(["builtin", "git", "local", "npm", "source_view"]);
 const ACTUAL_STATUSES = new Set<VarinExtensionActualStatus>([
   "active",
   "activating",
@@ -123,16 +132,6 @@ const ACTUAL_STATUSES = new Set<VarinExtensionActualStatus>([
   "waiting",
 ]);
 const STORAGE_STATES = new Set(["missing", "ready", "stale"]);
-
-export class VarinExtensionContractError extends Error {
-  readonly issues: string[];
-
-  constructor(message: string, issues: string[]) {
-    super(message);
-    this.name = "VarinExtensionContractError";
-    this.issues = issues;
-  }
-}
 
 export function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -339,14 +338,38 @@ function parseServices<T extends VarinExtensionServiceRequirement | VarinExtensi
       ? raw.binding
       : undefined;
     if (kind === "require" && raw.binding !== undefined && !binding) issues.push(`${itemPath}.binding must be all, selected, or single`);
+    const realms = kind === 'require' ? uniqueStrings(raw.realms, `${itemPath}.realms`, issues) : undefined;
+    if (realms && (!realms.length || realms.some(realm => realm !== 'host' && realm !== 'surface'))) issues.push(`${itemPath}.realms must contain host and/or surface`);
+    let tool: VarinExtensionServiceProvision["tool"];
+    if (kind === "provide" && raw.tool !== undefined) {
+      try { tool = parseVarinExtensionToolDeclaration(raw.tool); }
+      catch (error) { issues.push(`${itemPath}: ${error instanceof Error ? error.message : String(error)}`); }
+    }
+    let contract: VarinExtensionServiceProvision['contract'];
+    if (kind === 'provide' && raw.contract !== undefined) {
+      try { contract = parseVarinExtensionServiceContract(raw.contract); }
+      catch (error) { issues.push(`${itemPath}: ${error instanceof Error ? error.message : String(error)}`); }
+      if (tool && contract?.methods.execute) issues.push(`${itemPath}.contract must not duplicate the tool execute contract`);
+    }
     result.push({
       id,
       version,
+      ...(tool ? { tool } : {}),
+      ...(contract ? { contract } : {}),
       ...(typeof flag === "boolean" ? { [flagKey]: flag } : {}),
       ...(binding ? { binding } : {}),
+      ...(realms ? { realms } : {}),
     } as T);
   });
   return result;
+}
+
+/** Parse the same declaration used by manifest discovery, activation, inspection and execution. */
+export function parseVarinExtensionServiceProvision(value: unknown): VarinExtensionServiceProvision {
+  const issues: string[] = [];
+  const descriptor = parseServices<VarinExtensionServiceProvision>([value], "service", issues, "provide")?.[0];
+  if (issues.length > 0 || !descriptor) throw new VarinExtensionContractError("Invalid service provision", issues);
+  return descriptor;
 }
 
 function parseContributions(value: unknown, path: string, issues: string[]): VarinExtensionStaticContribution[] | undefined {
@@ -533,9 +556,7 @@ export function parseVarinExtensionManifest(value: unknown): VarinExtensionManif
   if (value.capabilities !== undefined && !isRecord(value.capabilities)) issues.push("capabilities must be an object");
   const hostCapabilities = uniqueStrings(rawCapabilities.host, "capabilities.host", issues, true);
   const surfaceCapabilities = uniqueStrings(rawCapabilities.surface, "capabilities.surface", issues, true);
-  const rawIntegrates = isRecord(value.integrates) ? value.integrates : {};
-  if (value.integrates !== undefined && !isRecord(value.integrates)) issues.push("integrates must be an object");
-  const piPackages = uniqueStrings(rawIntegrates.piPackages, "integrates.piPackages", issues);
+  if (value.integrates !== undefined) issues.push("integrates is unsupported; declare native service dependencies in requires.services");
   const contributions = parseContributions(value.contributions, "contributions", issues);
   const rawMetadata = isRecord(value.metadata) ? value.metadata : {};
   if (value.metadata !== undefined && !isRecord(value.metadata)) issues.push("metadata must be an object");
@@ -553,6 +574,20 @@ export function parseVarinExtensionManifest(value: unknown): VarinExtensionManif
     else storageSchemaVersion = positiveRevision(value.storage.schemaVersion, "storage.schemaVersion", issues);
   }
   const surfaceById = new Map((surfaces ?? []).map((surface) => [surface.id, surface]));
+  let updateReadiness: VarinExtensionManifest["updateReadiness"];
+  if (value.updateReadiness !== undefined) {
+    const raw = isRecord(value.updateReadiness) ? value.updateReadiness : {};
+    if (!isRecord(value.updateReadiness)) issues.push("updateReadiness must be an object");
+    for (const key of Object.keys(raw)) if (key !== "surfaceEntrypoints") issues.push(`updateReadiness.${key} is unsupported`);
+    const members = uniqueStrings(raw.surfaceEntrypoints, "updateReadiness.surfaceEntrypoints", issues, true);
+    if (members.length === 0) issues.push("updateReadiness.surfaceEntrypoints must not be empty");
+    if (!host) issues.push("updateReadiness requires a Host entrypoint");
+    for (const member of members) if (!surfaceById.has(member)) issues.push(`updateReadiness references unknown Surface entrypoint ${member}`);
+    if (members.length > 0 && !["desktop", "mobile", "web"].some(surface => members.every(member => surfaceById.get(member)?.supports.includes(surface as VarinApplicationSurface)))) {
+      issues.push("updateReadiness members must support a common Surface");
+    }
+    updateReadiness = { surfaceEntrypoints: members };
+  }
   for (const contribution of contributions ?? []) {
     if (!contribution.id.startsWith(`${id}.`)) issues.push(`contribution ${contribution.id} must be qualified by extension ID ${id}`);
     if (contribution.entrypoint) {
@@ -577,6 +612,7 @@ export function parseVarinExtensionManifest(value: unknown): VarinExtensionManif
     engines: { varin: varinEngine },
     ...(text(value.displayName) ? { displayName: text(value.displayName) as string } : {}),
     ...(host || surfaces ? { entrypoints: { ...(host ? { host } : {}), ...(surfaces ? { surfaces } : {}) } } : {}),
+    ...(updateReadiness ? { updateReadiness } : {}),
     ...(requiredServices ? { requires: { services: requiredServices } } : {}),
     ...(providedServices ? { provides: { services: providedServices } } : {}),
     ...(hostCapabilities.length > 0 || surfaceCapabilities.length > 0 ? {
@@ -585,7 +621,6 @@ export function parseVarinExtensionManifest(value: unknown): VarinExtensionManif
         ...(surfaceCapabilities.length > 0 ? { surface: surfaceCapabilities } : {}),
       },
     } : {}),
-    ...(piPackages.length > 0 ? { integrates: { piPackages } } : {}),
     ...(metadataDescription || metadataHomepage || metadataIcon || metadataKeywords.length > 0 || metadataRepository ? {
       metadata: {
         ...(metadataDescription ? { description: metadataDescription } : {}),
@@ -618,6 +653,15 @@ export function assertVarinExtensionManifestCompatibility(
   }
 }
 
+function sourceProvenance(value: Record<string, unknown>, path: string, issues: string[]) {
+  if (value.kind !== "source_view") {
+    if (value.provenance !== undefined) issues.push(`${path}.provenance requires a source_view`);
+    return {};
+  }
+  try { return { provenance: parseVarinExtensionSourceViewProvenance(value.provenance) }; }
+  catch (error) { issues.push(`${path}.provenance: ${error instanceof Error ? error.message : String(error)}`); return {}; }
+}
+
 function parseSource(value: unknown, path: string, issues: string[]): VarinExtensionPackageSource {
   if (!isRecord(value)) {
     issues.push(`${path} must be an object`);
@@ -630,6 +674,7 @@ function parseSource(value: unknown, path: string, issues: string[]): VarinExten
   if (!display) issues.push(`${path}.display must be a non-empty string`);
   if (!specifier) issues.push(`${path}.specifier must be a non-empty string`);
   return {
+    ...sourceProvenance(value, path, issues),
     kind: SOURCE_KINDS.has(kind ?? "") ? kind as VarinExtensionPackageSource["kind"] : "local",
     display: display ?? "Invalid source",
     specifier: specifier ?? "invalid",
@@ -830,6 +875,7 @@ export function parseVarinExtensionInstallationRecord(value: unknown, path = "in
   }
   throwIssues("Varin extension installation", issues);
   return {
+    ...(value.restartHandoffs === undefined ? {} : { restartHandoffs: parseVarinExtensionRestartHandoffs(value.restartHandoffs) }),
     manifest,
     source,
     desired,
@@ -1046,6 +1092,7 @@ function parsePublicCatalogEntry(value: unknown, path: string, issues: string[])
         preparedAt: timestamp(value.candidate.preparedAt, `${path}.candidate.preparedAt`, issues),
         resolvedVersion: candidateVersion,
         source: {
+          ...sourceProvenance(candidateSource, `${path}.candidate.source`, issues),
           kind: SOURCE_KINDS.has(candidateKind ?? "")
             ? candidateKind as VarinExtensionCatalogEntry["source"]["kind"]
             : "local",
@@ -1055,8 +1102,10 @@ function parsePublicCatalogEntry(value: unknown, path: string, issues: string[])
     }
   }
   return {
+    ...(value.restartHandoffs === undefined ? {} : { restartHandoffs: parseVarinExtensionRestartHandoffs(value.restartHandoffs) }),
     manifest,
     source: {
+      ...sourceProvenance(source, `${path}.source`, issues),
       kind: SOURCE_KINDS.has(sourceKind ?? "") ? sourceKind as VarinExtensionCatalogEntry["source"]["kind"] : "local",
       display: sourceDisplay ?? "Invalid source",
     },
@@ -1257,8 +1306,53 @@ export function parseVarinExtensionCandidateSelectionRequest(value: unknown): Va
     expectedRevision: positiveRevision(value.expectedRevision, "expectedRevision", issues, true),
     extensionId: identifier(value.extensionId, "extensionId", issues),
   };
+  if (value.surfaceReadiness !== undefined) issues.push("surfaceReadiness is only supported by candidate publication");
   throwIssues("Varin extension candidate selection request", issues);
   return result;
+}
+
+function parseHostPreparation(value: unknown, path: string, issues: string[]): VarinExtensionHostPreparationIdentity {
+  const raw = isRecord(value) ? value : {};
+  if (!isRecord(value)) issues.push(`${path} must be an object`);
+  return {
+    id: hostId(raw.id, `${path}.id`, issues),
+    hostId: hostId(raw.hostId, `${path}.hostId`, issues),
+    desiredRevision: positiveRevision(raw.desiredRevision, `${path}.desiredRevision`, issues),
+    generation: positiveRevision(raw.generation, `${path}.generation`, issues),
+  };
+}
+
+export function parseVarinExtensionCandidatePublicationRequest(value: unknown): VarinExtensionCandidatePublicationRequest {
+  if (!isRecord(value)) throw new VarinExtensionContractError("Varin extension candidate publication is invalid", ["request must be an object"]);
+  const { surfaceReadiness: evidence, ...base } = value;
+  const request = parseVarinExtensionCandidateSelectionRequest(base);
+  if (evidence === undefined) return request;
+  const issues: string[] = [];
+  const raw = isRecord(evidence) ? evidence : {};
+  if (!isRecord(evidence)) issues.push("surfaceReadiness must be an object");
+  const realmId = text(raw.realmId);
+  if (!realmId) issues.push("surfaceReadiness.realmId must be non-empty");
+  const surface = raw.surface;
+  if (surface !== "desktop" && surface !== "web" && surface !== "mobile") issues.push("surfaceReadiness.surface is unsupported");
+  const memberIds = new Set<string>();
+  const members = Array.isArray(raw.members) ? raw.members.map((value, index) => {
+    const member = isRecord(value) ? value : {};
+    const path = `surfaceReadiness.members[${index}]`;
+    if (!isRecord(value)) issues.push(`${path} must be an object`);
+    const entrypointId = identifier(member.entrypointId, `${path}.entrypointId`, issues);
+    if (memberIds.has(entrypointId)) issues.push(`${path}.entrypointId is duplicated`);
+    memberIds.add(entrypointId);
+    return { entrypointId, generation: positiveRevision(member.generation, `${path}.generation`, issues) };
+  }) : (issues.push("surfaceReadiness.members must be an array"), []);
+  if (!members.length) issues.push("surfaceReadiness.members must not be empty");
+  const preparedConsumerCount = raw.preparedConsumerCount === undefined ? undefined : positiveRevision(raw.preparedConsumerCount, "surfaceReadiness.preparedConsumerCount", issues, true);
+  const readiness: VarinExtensionSurfaceReadiness = {
+    ...(preparedConsumerCount === undefined ? {} : { preparedConsumerCount }),
+    hostPreparation: parseHostPreparation(raw.hostPreparation, "surfaceReadiness.hostPreparation", issues),
+    realmId: realmId ?? "invalid", surface: surface as VarinApplicationSurface, members,
+  };
+  throwIssues("Varin extension candidate publication", issues);
+  return { ...request, surfaceReadiness: readiness };
 }
 
 export function parseVarinExtensionCandidateCapabilityReviewRequest(
@@ -1328,6 +1422,7 @@ export function parseVarinExtensionPackageInstallRequest(value: unknown): VarinE
     expectedRevision: positiveRevision(value.expectedRevision, "expectedRevision", issues, true),
     source: parseSource(value.source, "source", issues),
   };
+  if (result.source.kind === "source_view") issues.push("source_view is captured by the admitted Source owner and cannot be installed from a specifier");
   throwIssues("Varin extension install request", issues);
   return result;
 }
@@ -1412,6 +1507,7 @@ function parseServiceProvider(value: unknown, path: string, issues: string[]): V
     entrypointId: identifier(value.entrypointId, `${path}.entrypointId`, issues),
     extensionId: identifier(value.extensionId, `${path}.extensionId`, issues),
     extensionVersion,
+    instanceKey: text(value.instanceKey) ?? (issues.push(`${path}.instanceKey must be non-empty`), 'invalid'),
     generation: positiveRevision(value.generation, `${path}.generation`, issues, true),
     providerId: providerId ?? "invalid",
     providerKey: providerKey ?? "invalid",
@@ -1425,13 +1521,14 @@ export function parseVarinExtensionCandidatePreparationResult(value: unknown): V
   const providers = Array.isArray(value.providers)
     ? value.providers.flatMap((provider, index) => {
       const parsed = parseServiceProvider(provider, `providers[${index}]`, issues);
-      if (parsed && parsed.status !== "candidate") issues.push(`providers[${index}].status must be candidate`);
+      if (parsed && parsed.status === "draining") issues.push(`providers[${index}].status must be candidate or active`);
       return parsed ? [parsed] : [];
     })
     : (issues.push("providers must be an array"), []);
   const integrity = text(value.integrity);
   if (!integrity) issues.push("integrity must be a non-empty string");
   const result: VarinExtensionCandidatePreparationResult = {
+    ...(value.hostPreparation === undefined ? {} : { hostPreparation: parseHostPreparation(value.hostPreparation, "hostPreparation", issues) }),
     extensionId: identifier(value.extensionId, "extensionId", issues),
     integrity: integrity ?? "invalid",
     providers,
@@ -1454,20 +1551,10 @@ export function parseVarinExtensionServiceCatalogSnapshot(value: unknown): Varin
     if (providerIds.has(provider.providerId)) issues.push(`providers contains duplicate provider ${provider.providerId}`);
     providerIds.add(provider.providerId);
   }
-  const selections: Record<string, string> = {};
-  if (!isRecord(value.selections)) issues.push("selections must be an object");
-  else {
-    for (const [service, provider] of Object.entries(value.selections)) {
-      const selected = text(provider);
-      if (!selected) issues.push(`selections.${service} must be a non-empty provider ID`);
-      else selections[service] = selected;
-    }
-  }
   const result = {
     hostId: hostId(value.hostId, "hostId", issues),
     providers,
     revision: positiveRevision(value.revision, "revision", issues, true),
-    selections,
   };
   throwIssues("Varin extension service catalog", issues);
   return result;
@@ -1488,29 +1575,21 @@ export function parseVarinExtensionServiceInvocationRequest(value: unknown): Var
     try { routing = parseVarinExtensionServiceRoutingContext(value.routing, { allowEmpty: true }); }
     catch (error) { issues.push(`routing.${error instanceof Error ? error.message : String(error)}`); }
   }
+  let lease: VarinExtensionServiceInvocationRequest['lease'];
+  if (value.lease !== undefined) {
+    try { lease = parseVarinSurfaceServiceInvocationLease(value.lease); } catch (error) { issues.push(String(error)); }
+    if (!providerId) issues.push('Surface lease invocation requires an exact providerId');
+  }
   const result: VarinExtensionServiceInvocationRequest = {
     args,
     method: method ?? "invalid",
     serviceId: identifier(value.serviceId, "serviceId", issues),
     version: positiveRevision(value.version, "version", issues),
     ...(providerId ? { providerId } : {}),
+    ...(lease ? { lease } : {}),
     ...(routing ? { routing } : {}),
   };
   throwIssues("Varin extension service invocation", issues);
-  return result;
-}
-
-export function parseVarinExtensionServiceSelectionRequest(value: unknown): VarinExtensionServiceSelectionRequest {
-  const issues: string[] = [];
-  if (!isRecord(value)) throw new VarinExtensionContractError("Varin extension service selection is invalid", ["request must be an object"]);
-  const providerId = value.providerId === null ? null : text(value.providerId);
-  if (value.providerId !== null && !providerId) issues.push("providerId must be a non-empty string or null");
-  const result: VarinExtensionServiceSelectionRequest = {
-    providerId: providerId ?? null,
-    serviceId: identifier(value.serviceId, "serviceId", issues),
-    version: positiveRevision(value.version, "version", issues),
-  };
-  throwIssues("Varin extension service selection", issues);
   return result;
 }
 

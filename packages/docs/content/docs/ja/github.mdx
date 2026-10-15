@@ -1,11 +1,11 @@
 ---
 title: GitHub Issues と PR
-description: GitHub を接続し、Issue やプルリクエストからセッションを開始します。
+description: "GitHub を接続すると Varin で PR を管理できます。イシューや PR をエージェントに依頼するには、関連する情報をネイティブ会話に追加し、ワークスペースのソースを明示的に選んでください。."
 ---
 
 # GitHub Issues と PR
 
-GitHub アカウントを接続すると、Varin は Issue とプルリクエストを取り込み、そこから直接セッションを開始したり、PR を開いたり更新したりできます。
+GitHub を接続すると Varin で PR を管理できます。イシューや PR をエージェントに依頼するには、関連する情報をネイティブ会話に追加し、ワークスペースのソースを明示的に選んでください。
 
 ## GitHub を接続する
 
@@ -15,20 +15,11 @@ GitHub アカウントを接続すると、Varin は Issue とプルリクエス
 
 接続されると、GitHub セクションにアカウントが表示されます。複数のアカウントを接続して切り替えたり、いつでも切断したりできます。
 
-## Issue または PR から作業を始める
-
-GitHub 接続済みで [worktree セッション](/ja/worktrees/) を作成すると、**Start from GitHub issue/PR** を選べます。
-
-- **issue** を選ぶと、Varin はその Issue に基づいてブランチ名を付け、Issue とコメントを最初のメッセージとしてセッションを開きます
-- **pull request** を選ぶと、その PR のブランチをチェックアウトします。PR の差分を含めて、エージェントに変更全体を渡すこともできます
-
-これにより、必要なコンテキストが読み込まれた状態でそのままセッションに入れます。
-
 ## プルリクエストを開いて管理する
 
 [Git ビュー](/ja/git/) の **PR** タブから、プルリクエストの作成、更新、draft から ready への変更、マージができます。Varin は変更内容から PR のタイトルと説明を生成できます。
 
 ## 関連
 
-- [Git と GitHub ワークフロー](/ja/git/) — コミットとブランチ管理
-- [Worktree セッション](/ja/worktrees/) — Issue と PR のセッションが始まる場所
+- [Git と GitHub ワークフロー](/ja/git/)
+- [Worktree セッション](/ja/worktrees/)

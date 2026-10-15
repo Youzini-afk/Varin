@@ -27,7 +27,9 @@ import { useFeatureFlagsStore } from '@/stores/useFeatureFlagsStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { usePreferencesStore } from '@/stores/usePreferencesStore';
 import { useUIStore } from '@/stores/useUIStore';
-import { usePiSessionStore } from '@/stores/usePiSessionStore';
+import { useThreadStore } from '@/stores/useThreadStore';
+import type { ThreadIdentity } from '@varin/application-client';
+import { submitThreadPrompt } from '@/lib/agent-runtime/submitThreadPrompt';
 import { useGitStore } from '@/stores/useGitStore';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import { pickWorkspaceRoot } from '@/lib/documents/path';
@@ -39,8 +41,8 @@ import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
 import { EditorView } from '@codemirror/view';
 import { copyTextToClipboard } from '@/lib/clipboard';
 import { parseProjectPlanMarkdown } from '@/lib/project-config';
-import { createPiSessionFromNavigation } from '@/lib/pi-runtime/sessionNavigation';
-import { createPiWorktreeSession } from '@/lib/pi-runtime/worktreeSession';
+import { startThreadFromNavigation } from '@/lib/agent-runtime/threadNavigation';
+import { createWorktreeThread } from '@/lib/agent-runtime/worktreeThread';
 import { TodoSendDialog, type TodoSendExecution } from '@/components/session/TodoSendDialog';
 import { Icon } from "@/components/icon/Icon";
 import { toast } from '@/components/ui';
@@ -151,15 +153,8 @@ type SelectedLineRange = {
 
 export const PlanView: React.FC<PlanViewProps> = ({ targetPath = null }) => {
   const { t } = useI18n();
-  const currentSessionId = usePiSessionStore((state) => state.currentSessionId);
-  const sessionSummary = usePiSessionStore((state) => (
-    state.currentSessionId === null
-      ? undefined
-      : state.summaries.find((summary) => summary.id === state.currentSessionId)
-  ));
-  const sessionSnapshot = usePiSessionStore((state) => (
-    state.currentSessionId === null ? undefined : state.records[state.currentSessionId]?.snapshot
-  ));
+  const currentSessionId = useThreadStore(state => state.selectedIdentity?.threadId ?? null);
+  const sessionSummary = useThreadStore(state => state.threads.find(thread => thread.thread_id === state.selectedIdentity?.threadId));
   const homeDirectory = useDirectoryStore((state) => state.homeDirectory);
   const planModeEnabled = useFeatureFlagsStore((state) => state.planModeEnabled);
   const projects = useProjectsStore((state) => state.projects);
@@ -172,14 +167,9 @@ export const PlanView: React.FC<PlanViewProps> = ({ targetPath = null }) => {
   const { isMobile } = useDeviceInfo();
   const { currentTheme } = useThemeSystem();
 
-  const sessionDirectory = React.useMemo(() => {
-    return normalize(sessionSnapshot?.cwd || sessionSummary?.cwd || '');
-  }, [sessionSnapshot?.cwd, sessionSummary?.cwd]);
-  const projectDirectory = React.useMemo(
-    () => normalize(effectiveDirectory || sessionDirectory),
-    [effectiveDirectory, sessionDirectory],
-  );
-  const sessionCreatedAt = sessionSummary ? Date.parse(sessionSummary.createdAt) : Number.NaN;
+  const sessionDirectory = normalize(effectiveDirectory);
+  const projectDirectory = sessionDirectory;
+  const sessionCreatedAt = sessionSummary?.created_at_ms ?? Number.NaN;
   const sessionPlanSlug = currentSessionId?.replace(/[^a-zA-Z0-9._-]+/g, '-') ?? '';
   const currentProjectRef = React.useMemo(
     () => resolveProjectRefForDirectory(projectDirectory, projects, activeProjectId),
@@ -536,22 +526,21 @@ export const PlanView: React.FC<PlanViewProps> = ({ targetPath = null }) => {
 
       try {
         routeToChat();
-        let sessionId: string;
+        let identity: ThreadIdentity;
+        let directory = currentProjectRef.path;
         if (pendingPlanSend.target === 'worktree') {
           if (!canCreateWorktree) return;
           const projectsState = useProjectsStore.getState();
           if (projectsState.activeProjectId !== currentProjectRef.id) {
             projectsState.setActiveProjectIdOnly(currentProjectRef.id);
           }
-          sessionId = (await createPiWorktreeSession()).sessionId;
+          const created = await createWorktreeThread();
+          identity = created.identity; directory = created.path;
         } else {
-          sessionId = (await createPiSessionFromNavigation({
+          identity = await startThreadFromNavigation({
             directory: currentProjectRef.path,
-            projectId: currentProjectRef.id,
-          })).sessionId;
+          });
         }
-        // Pi receives the full plan directly. Goal mode adds explicit completion
-        // criteria without routing the request through the legacy goal runtime.
         const goalObjective = execution.runAsGoal === true
           ? [
               `Implement the plan "${sendPromptTitle}" end-to-end${resolvedPath ? ` (plan file: ${resolvedPath})` : ''}.`,
@@ -563,19 +552,12 @@ export const PlanView: React.FC<PlanViewProps> = ({ targetPath = null }) => {
         const promptText = [visiblePrompt, instructionsText, goalObjective]
           .filter((value): value is string => Boolean(value?.trim()))
           .join('\n\n');
-        const sessionState = usePiSessionStore.getState();
-        await sessionState.selectModel(sessionId, {
-          id: execution.modelID,
-          provider: execution.providerID,
-        });
-        await sessionState.selectThinking(sessionId, execution.thinkingLevel);
-        if (!await sessionState.prompt(sessionId, promptText)) {
-          throw new Error('The Pi runtime did not accept the plan prompt');
-        }
+        setPendingPlanSend(null);
+        await submitThreadPrompt(identity, promptText, { providerId: execution.providerID, modelId: execution.modelID, thinkingLevel: execution.thinkingLevel }, directory, goalObjective ?? undefined);
 
         setPendingPlanSend(null);
       } catch (error) {
-        toast.error('Failed to start Pi plan session', {
+        toast.error('Failed to start plan conversation', {
           description: error instanceof Error ? error.message : String(error),
         });
       } finally {

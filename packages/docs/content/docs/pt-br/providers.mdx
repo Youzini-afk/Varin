@@ -1,51 +1,14 @@
 ---
-title: Provedores, Modelos e Agentes
-description: Conecte provedores de IA, escolha modelos e configure agentes.
+title: "Canais de modelos"
+description: "Conecte contas e escolha modelos para conversas nativas."
 ---
 
-# Provedores, Modelos e Agentes
+# Canais de modelos
 
-Antes de o Varin poder fazer qualquer coisa, ele precisa de pelo menos um provedor de IA conectado. Esta página cobre como conectar um provedor, escolher um modelo e ajustar os agentes.
+Abra **Configurações → Canais de modelos**, adicione um canal e escolha o tipo, endpoint e uma forma de autenticação compatível. Conforme o canal, use chave de API salva, login, variável de ambiente explícita, identidade de nuvem compatível ou acesso anônimo.
 
-## Conectar um provedor
+Adicione modelos por ID ou descubra candidatos em um canal salvo que ofereça esse recurso. Confira e salve a seleção: a descoberta sozinha não altera o catálogo. Ative canal, modelo e operação necessária, como chat, e escolha o modelo no campo de mensagem.
 
-1. Abra **Settings → Providers**.
-2. Abra o menu **Add provider** e escolha um provedor que ainda não esteja conectado.
-3. Entre de uma destas duas formas, conforme o provedor:
-   - **API key** — cole sua chave e salve.
-   - **Sign-in (device flow)** — o Varin mostra um link e um código curto. Abra o link, digite o código e aprove. O Varin conclui a conexão sozinho.
+O Application Host gerencia configurações e contas. As credenciais ficam separadas dos metadados e não entram no histórico. Credenciais ausentes ou revogadas não selecionam outra conta automaticamente. Edições afetam preparações posteriores; o trabalho aceito mantém sua seleção original.
 
-Quando um provedor aparece como conectado, os modelos dele ficam disponíveis no chat.
-
-Para desconectar, abra o provedor e escolha remover o login.
-
-## Escolher um modelo
-
-Você escolhe o modelo onde está trabalhando:
-
-- no chat, use o seletor de modelo na barra de mensagem para definir o provedor e o modelo daquela sessão
-- por agente, defina um modelo padrão (abaixo)
-
-## Configurar agentes
-
-Um agente é uma configuração com nome — um modelo, uma personalidade e o que ele pode fazer.
-
-1. Abra **Settings → Agents**.
-2. Escolha um agente ou crie um novo.
-3. Edite qualquer um de:
-   - **description** — para que o agente serve
-   - **model** — o modelo padrão dele
-   - **temperature** — o quão criativas são as respostas
-   - **prompt** — instruções permanentes que ele sempre segue
-   - **tool rules** — quais ferramentas ele pode usar
-
-## Onde seus logins ficam
-
-Os logins de provedor são armazenados pelo `AuthStorage` do Pi, não no renderer. Chaves de API e tokens OAuth nunca aparecem nos metadados de provedor enviados à UI. As camadas `models.json` de usuário, projeto e operator permanecem nos arquivos nativos delas.
-
-Se você definir o mesmo provedor em mais de um lugar, a configuração mais específica vence: uma camada de projeto confiável substitui a pessoal.
-
-## Relacionado
-
-- [Servidores MCP](/pt-br/mcp/) — adicione ferramentas extras para os agentes
-- [Tokens desta conversa](/pt-br/usage/)
+Veja [Memória e instruções](/pt-br/agent-personalization/) e [MCP](/pt-br/mcp/). Acesso ao modelo não concede permissões de arquivos ou ferramentas.

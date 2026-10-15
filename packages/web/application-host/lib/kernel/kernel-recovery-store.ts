@@ -1,5 +1,8 @@
+import { AsyncLocalStorage } from "node:async_hooks";
+import { isDeepStrictEqual } from "node:util";
 import { randomUUID } from "node:crypto";
 import type {
+  RecoveryConversation,
   WorkspaceRecoveryCheckpointSummary,
   WorkspaceRecoveryEntryBindingResult,
   WorkspaceRecoveryEntryTarget,
@@ -15,16 +18,29 @@ import type {
   RecoveryFileStore,
   RecoveryIdentity,
   RecoveryState,
+  RegularFileState,
 } from "../recovery/journal-files.js";
+import { parseRecoveryConversation, parseRecoveryFileTarget } from "@varin/extension-contract";
 import { normalizeResourceId, parseRecoveryState, sameState } from "../recovery/journal-files.js";
 import type {
   DurableRecoveryChangeSelection,
   WorkspaceRecoveryEngine,
   WorkspaceRecoveryStorageContext,
+  RecoveryDurableOperationPort,
 } from "../recovery/journal-engine.js";
 import type { HostResourceOperationGate, ResolveDirectoryApplyContext } from "../recovery/durable-file-operation.js";
 import { KernelFileResourceBackend } from "./file-resource-backend.js";
-import type { KernelStorageAdapter, KernelStorageReference } from "./storage-adapter.js";
+import type { KernelFileAuthorityContext, KernelStorageAdapter, KernelStorageContext, KernelStorageReference } from "./storage-adapter.js";
+import type { KernelScopedClient } from "./kernel-client.js";
+
+interface ScopedRecoveryActor {
+  client: KernelScopedClient;
+  identity: RecoveryIdentity;
+  root: string;
+  threadId: string;
+  runId?: string;
+  metadataReader?: Pick<RecoveryDurableOperationPort, "listOperations">;
+}
 
 const asObject = (value: unknown): Record<string, unknown> => (
   value && typeof value === "object" && !Array.isArray(value)
@@ -40,6 +56,10 @@ const recoveryIdentity = (workspaceId: string, canonicalRoot: string): RecoveryI
 });
 
 export class KernelRecoveryContentStore implements RecoveryFileStore {
+  private targetResources?: (identity: RecoveryIdentity) => Promise<KernelFileResourceBackend>;
+  bindTargetResources(resolve: (identity: RecoveryIdentity) => Promise<KernelFileResourceBackend>): void { this.targetResources = resolve; }
+  private readonly resourceScope = new AsyncLocalStorage<{ key: string; backend: KernelFileResourceBackend }>();
+  private async resources(identity: RecoveryIdentity): Promise<KernelFileResourceBackend> { const active = this.resourceScope.getStore(); if (active?.key === JSON.stringify(identity)) return active.backend; return identity.fileTarget ? (this.targetResources ? this.targetResources(identity) : Promise.reject(new Error("Recovery source owner is unavailable"))) : this.fileResources; }
   private readonly owners = new Map<string, Set<string>>();
   private readonly sources = new Map<string, Array<{ workspaceId: string; recordId: string; slot: string }>>();
   readonly fileResources: KernelFileResourceBackend;
@@ -47,6 +67,7 @@ export class KernelRecoveryContentStore implements RecoveryFileStore {
   constructor(
     private readonly adapter: KernelStorageAdapter,
     fileResourcesOrLegacyCacheRoot?: KernelFileResourceBackend | string,
+    private readonly scopedActor?: ScopedRecoveryActor,
   ) {
     this.fileResources = fileResourcesOrLegacyCacheRoot instanceof KernelFileResourceBackend
       ? fileResourcesOrLegacyCacheRoot
@@ -73,6 +94,16 @@ export class KernelRecoveryContentStore implements RecoveryFileStore {
     return this.owners.get(this.key(workspaceId, hash))?.values().next().value;
   }
 
+  registerObjectOwner(workspaceId: string, hash: string, ownerId: string): void {
+    if (this.scopedActor && workspaceId !== this.scopedActor.identity.workspaceId) {
+      throw new Error("Recovery object owner belongs to another admitted workspace");
+    }
+    const key = this.key(workspaceId, hash);
+    const owners = this.owners.get(key) ?? new Set<string>();
+    owners.add(ownerId);
+    this.owners.set(key, owners);
+  }
+
   consumeOwner(ownerId: string): void {
     for (const [key, owners] of this.owners) {
       if (!owners.delete(ownerId)) continue;
@@ -81,13 +112,14 @@ export class KernelRecoveryContentStore implements RecoveryFileStore {
     }
   }
 
-  private async objectBytes(workspaceId: string, hash: string, sessionId?: string): Promise<Buffer> {
-    const context = await this.adapter.context(
+  private async objectBytes(workspaceId: string, hash: string): Promise<Buffer> {
+    if (this.scopedActor && workspaceId !== this.scopedActor.identity.workspaceId) {
+      throw new Error("Recovery object access does not match its admitted actor");
+    }
+    const context = this.scopedActor ?? await this.adapter.context(
       workspaceId,
-      sessionId ? "recovery-actor" : "recovery-maintenance",
-      sessionId
-        ? { owningWorkspace: workspaceId, executionWorkspace: workspaceId, sessionId, pathScopes: [""] }
-        : { owningWorkspace: workspaceId, executionWorkspace: workspaceId, pathScopes: [""], capabilities: ["recovery.maintenance"] },
+      "recovery-maintenance",
+      { owningWorkspace: workspaceId, executionWorkspace: workspaceId, pathScopes: [""], capabilities: ["recovery.maintenance"] },
     );
     const candidates: Array<{ ownerId: string } | { recordId: string; slot: string }> = [
       ...[...(this.owners.get(this.key(workspaceId, hash)) ?? [])].map((ownerId) => ({ ownerId })),
@@ -117,9 +149,11 @@ export class KernelRecoveryContentStore implements RecoveryFileStore {
     _root: string,
     inputPath: string,
     options: CaptureStateOptions = {},
-    _sessionId?: string,
   ): Promise<CapturedState> {
-    const captured = await this.fileResources.captureDetailed(
+    if (this.scopedActor && identity.workspaceId !== this.scopedActor.identity.workspaceId) {
+      throw new Error("Recovery capture does not match its admitted actor");
+    }
+    const captured = await (await this.resources(identity)).captureDetailed(
       identity,
       inputPath,
       options,
@@ -129,14 +163,14 @@ export class KernelRecoveryContentStore implements RecoveryFileStore {
       // File capture can belong to a nested execution-directory grant. Recovery
       // metadata still belongs to the owning workspace's record writer: transfer
       // the transient owner to that exact grant, also for maintenance operations.
-      const recordWriter = await this.adapter.context(identity.workspaceId,
-        _sessionId ? "recovery-actor" : "recovery-maintenance", {
+      const recordWriter = this.scopedActor ?? await this.adapter.context(identity.workspaceId,
+        "recovery-maintenance", {
           owningWorkspace: identity.workspaceId,
           executionWorkspace: identity.workspaceId,
-          ...(_sessionId ? { sessionId: _sessionId } : { capabilities: ["recovery.maintenance"] }),
+          capabilities: ["recovery.maintenance"],
           pathScopes: [""],
         });
-      await recordWriter.client.rebindObjectOwner(identity.workspaceId, captured.ownerId);
+      if (!this.scopedActor) await recordWriter.client.rebindObjectOwner(identity.workspaceId, captured.ownerId);
       const key = this.key(identity.workspaceId, captured.state.objectHash);
       const owners = this.owners.get(key) ?? new Set<string>();
       owners.add(captured.ownerId);
@@ -145,11 +179,38 @@ export class KernelRecoveryContentStore implements RecoveryFileStore {
     return { path: captured.path, state: captured.state };
   }
 
-  async applyState(identity: RecoveryIdentity, _root: string, relativePath: string, state: RecoveryState): Promise<void> {
-    const result = await this.fileResources.applyStateDetailed(identity, relativePath, state);
+  async applyState(identity: RecoveryIdentity, _root: string, relativePath: string, state: RecoveryState, options: {reservationOperationId?:string} = {}): Promise<void> {
+    const result = await (await this.resources(identity)).applyStateDetailed(identity, relativePath, state, options);
     if (result.status === "conflict") {
       throw new Error(`Kernel file apply conflicted after resource admission: ${relativePath}`);
     }
+  }
+
+  async assertApplyState(identity: RecoveryIdentity, relativePath: string, state: RecoveryState): Promise<void> {
+    await (await this.resources(identity)).assertApplyState(identity, relativePath, state);
+  }
+
+  async storeContent(identity: RecoveryIdentity, bytes: Buffer): Promise<{ state: RegularFileState; release(): Promise<void> }> {
+    if (this.scopedActor && identity.workspaceId !== this.scopedActor.identity.workspaceId) {
+      throw new Error('Recovery content does not match its admitted actor');
+    }
+    const context = this.scopedActor ?? await this.adapter.context(identity.workspaceId, 'recovery-maintenance', {
+      owningWorkspace: identity.workspaceId, executionWorkspace: identity.workspaceId,
+      pathScopes: [''], capabilities: ['recovery.maintenance'],
+    });
+    const stored = await context.client.putBlob(bytes, `recovery-content:${randomUUID()}`);
+    this.registerObjectOwner(identity.workspaceId, stored.hash, stored.ownerId);
+    return { state: { kind: 'regular-file', objectHash: stored.hash, byteLength: stored.byteLength }, release: async () => {
+      if (!this.owners.get(this.key(identity.workspaceId, stored.hash))?.has(stored.ownerId)) return;
+      await context.client.releaseBlob(stored.ownerId);
+      this.consumeOwner(stored.ownerId);
+    } };
+  }
+
+  async readContent(identity: RecoveryIdentity, state: RegularFileState): Promise<Buffer> {
+    const bytes = await this.objectBytes(identity.workspaceId, state.objectHash);
+    if (bytes.byteLength !== state.byteLength) throw new Error('Recovery content length changed');
+    return bytes;
   }
 
   hashFile(filePath: string) {
@@ -160,8 +221,20 @@ export class KernelRecoveryContentStore implements RecoveryFileStore {
     return this.fileResources.relativePathFor(identity, inputPath);
   }
 
+  integrationConflicts: RecoveryDurableOperationPort["listOperationConflicts"] = input => this.fileResources.integrationConflicts(
+    recoveryIdentity(input.workspaceId, input.canonicalRoot), input.paths, input.exceptOperationId);
+
   resourceOperationGate(identity: RecoveryIdentity): HostResourceOperationGate {
-    return this.fileResources.gateFor(identity);
+    return { run: (resources, callback, options) => this.resources(identity).then(backend => backend.gateFor(identity).run(resources, () => this.resourceScope.run({ key: JSON.stringify(identity), backend }, callback), options)) };
+  }
+
+  async adoptState(sourceWorkspace: string, destinationWorkspace: string, state: RecoveryState): Promise<void> {
+    if (sourceWorkspace === destinationWorkspace || state.kind !== "regular-file") return;
+    const bytes = await this.objectBytes(sourceWorkspace, state.objectHash);
+    const destination = await this.adapter.context(destinationWorkspace, "recovery-maintenance", { owningWorkspace: destinationWorkspace, executionWorkspace: destinationWorkspace, pathScopes: [""], capabilities: ["recovery.maintenance"] });
+    const stored = await destination.client.putBlob(bytes, `recovery-transfer:${randomUUID()}`);
+    if (stored.hash !== state.objectHash || stored.byteLength !== state.byteLength) throw new Error("Recovery content transfer changed its identity");
+    this.registerObjectOwner(destinationWorkspace, stored.hash, stored.ownerId);
   }
 
   async verifyObject(_root: string, state: RecoveryState): Promise<void> {
@@ -191,33 +264,40 @@ export class KernelRecoveryContentStore implements RecoveryFileStore {
 }
 
 export interface KernelRecoveryContentStoreLike {
+  registerObjectOwner?(workspaceId: string, hash: string, ownerId: string): void;
   captureState(
     identity: RecoveryIdentity,
     root: string,
     inputPath: string,
     options?: CaptureStateOptions,
-    sessionId?: string,
   ): Promise<CapturedState>;
   registerRecord(workspaceId: string, recordId: string, reference: KernelStorageReference): void;
   ownerIdForHash(workspaceId: string, hash: string): string | undefined;
   consumeOwner(ownerId: string): void;
   resourceOperationGate?(identity: RecoveryIdentity): HostResourceOperationGate;
+  integrationConflicts?: RecoveryDurableOperationPort["listOperationConflicts"];
 }
 
 export class KernelRecoveryStore {
   constructor(
     private readonly adapter: KernelStorageAdapter,
     readonly content: KernelRecoveryContentStoreLike,
+    private readonly scopedActor?: ScopedRecoveryActor,
   ) {}
 
-  private context(workspaceId: string, sessionId?: string, maintenance = false) {
-    return this.adapter.context(
-      workspaceId,
-      maintenance ? "recovery-maintenance" : "recovery-actor",
-      maintenance
-        ? { owningWorkspace: workspaceId, executionWorkspace: workspaceId, pathScopes: [""], capabilities: ["recovery.maintenance"] }
-        : { owningWorkspace: workspaceId, executionWorkspace: workspaceId, ...(sessionId ? { sessionId } : {}), pathScopes: [""] },
-    );
+  registerObjectOwner(workspaceId: string, hash: string, ownerId: string): void {
+    if (!this.content.registerObjectOwner) throw new Error("Recovery candidate object registration is unavailable");
+    this.content.registerObjectOwner(workspaceId, hash, ownerId);
+  }
+
+  private context(workspaceId: string): Promise<Pick<KernelStorageContext, "client" | "identity" | "root">> {
+    if (this.scopedActor) {
+      if (workspaceId !== this.scopedActor.identity.workspaceId) throw new Error("Recovery operation does not match its admitted actor");
+      return Promise.resolve(this.scopedActor);
+    }
+    return this.adapter.context(workspaceId, "recovery-maintenance", {
+      owningWorkspace: workspaceId, executionWorkspace: workspaceId, pathScopes: [""], capabilities: ["recovery.maintenance"],
+    });
   }
 
   private summary(value: Record<string, unknown>): WorkspaceRecoveryCheckpointSummary {
@@ -229,7 +309,7 @@ export class KernelRecoveryStore {
       state: value.state as WorkspaceRecoveryCheckpointSummary["state"],
       createdAt: String(value.createdAt),
       ...(typeof value.label === "string" ? { label: value.label } : {}),
-      ...(typeof value.sessionId === "string" ? { sessionId: value.sessionId } : {}),
+      ...(value.conversation ? { conversation: parseRecoveryConversation(value.conversation) } : {}),
       ...(typeof value.entryId === "string" ? { entryId: value.entryId } : {}),
       ...(typeof value.executionId === "string" ? { executionId: value.executionId } : {}),
       changedPathCount: Number(value.changedPathCount ?? 0),
@@ -245,7 +325,9 @@ export class KernelRecoveryStore {
       provenance: payload.provenance as WorkspaceRecoveryTurnBinding["provenance"],
       runtimeGeneration: Number(payload.runtimeGeneration),
       runtimeKey: String(payload.runtimeKey),
-      sessionId: String(payload.sessionId),
+      conversation: parseRecoveryConversation(payload.conversation),
+      ...(payload.fileTarget ? { fileTarget: parseRecoveryFileTarget(payload.fileTarget) } : {}),
+      ...(typeof payload.runId === "string" ? { runId: payload.runId } : {}),
       startedAt: String(payload.startedAt),
       status: payload.status as WorkspaceRecoveryTurnBinding["status"],
       unrecordedResourceIds: Array.isArray(payload.unrecordedResourceIds) ? payload.unrecordedResourceIds as string[] : [],
@@ -259,12 +341,21 @@ export class KernelRecoveryStore {
   }
 
   async recordTurnStart(input: WorkspaceRecoveryTurnStartInput): Promise<WorkspaceRecoveryTurnBinding> {
-    const context = await this.context(input.workspaceId, input.sessionId);
+    const context = await this.context(input.workspaceId);
+    const existing = await context.client.recoveryTurnGet({ workspaceId: input.workspaceId, executionId: input.executionId });
+    if (existing) {
+      if (!isDeepStrictEqual(existing.conversation, input.conversation) || existing.userEntryId !== input.userEntryId
+        || existing.runId !== input.runId || (input.fileTarget && !isDeepStrictEqual(existing.fileTarget, input.fileTarget)))
+        throw new Error("Original recovery checkpoint identity changed");
+      return this.turn(existing);
+    }
     const value = await context.client.recoveryTurnStart({
       operationId: `recovery-turn-start:${input.workspaceId}:${input.executionId}`,
       workspaceId: input.workspaceId,
       executionId: input.executionId,
-      sessionId: input.sessionId,
+      conversation: input.conversation,
+      ...(input.fileTarget ? { fileTarget: input.fileTarget } : {}),
+      ...(input.runId ? { runId: input.runId } : {}),
       userEntryId: input.userEntryId,
       workerId: input.workerId,
       runtimeGeneration: input.runtimeGeneration,
@@ -276,7 +367,7 @@ export class KernelRecoveryStore {
   }
 
   async listCheckpoints(workspaceId: string): Promise<WorkspaceRecoveryCheckpointSummary[]> {
-    const context = await this.context(workspaceId, undefined, true);
+    const context = await this.context(workspaceId);
     const result: WorkspaceRecoveryCheckpointSummary[] = [];
     let cursor: number | undefined;
     do {
@@ -294,7 +385,7 @@ export class KernelRecoveryStore {
   }
 
   async createNamedCheckpoint(workspaceId: string, name: string): Promise<WorkspaceRecoveryCheckpointSummary> {
-    const context = await this.context(workspaceId, undefined, true);
+    const context = await this.context(workspaceId);
     return this.summary(await context.client.recoveryCheckpointCreate({
       operationId: `recovery-checkpoint:${workspaceId}:${randomUUID()}`,
       workspaceId,
@@ -303,17 +394,17 @@ export class KernelRecoveryStore {
   }
 
   async resolveEntry(input: WorkspaceRecoveryEntryTarget): Promise<WorkspaceRecoveryEntryBindingResult> {
-    const context = await this.context(input.workspaceId, input.sessionId);
+    const context = await this.context(input.workspaceId);
     const value = await context.client.recoveryEntryResolve({
       workspaceId: input.workspaceId,
-      sessionId: input.sessionId,
+      conversation: input.conversation,
       entryId: input.entryId,
     });
     if (typeof value.executionId !== "string") return value as unknown as WorkspaceRecoveryEntryBindingResult;
     const turn = await context.client.recoveryTurnGet({
       workspaceId: input.workspaceId,
       executionId: value.executionId,
-      sessionId: input.sessionId,
+      conversation: input.conversation,
     });
     const binding = turn ? this.turn(turn) : undefined;
     const checkpointValue = value.checkpoint;
@@ -324,16 +415,16 @@ export class KernelRecoveryStore {
   }
 
   async recordMutationBefore(input: WorkspaceRecoveryMutationBeforeInput): Promise<boolean> {
-    const lookup = await this.context(input.workspaceId, undefined, true);
+    const lookup = await this.context(input.workspaceId);
     const turn = await lookup.client.recoveryTurnGet({ workspaceId: input.workspaceId, executionId: input.executionId });
-    if (!turn || typeof turn.sessionId !== "string") return false;
-    const context = await this.context(input.workspaceId, turn.sessionId);
+    if (!turn) return false;
+    const conversation = parseRecoveryConversation(turn.conversation);
+    const context = await this.context(input.workspaceId);
     const captured = await this.content.captureState(
       recoveryIdentity(input.workspaceId, context.identity.canonicalRoot),
       context.root,
       input.path,
       { store: true },
-      turn.sessionId,
     );
     const ownerId = captured.state.kind === "regular-file"
       ? this.content.ownerIdForHash(input.workspaceId, captured.state.objectHash)
@@ -345,7 +436,7 @@ export class KernelRecoveryStore {
       const result = await context.client.recoveryChangeBefore({
         operationId: `recovery-before:${input.executionId}:${input.mutationId}:${captured.path}`,
         workspaceId: input.workspaceId,
-        sessionId: turn.sessionId,
+        conversation,
         executionId: input.executionId,
         checkpointId: String(turn.checkpointId),
         path: captured.path,
@@ -368,17 +459,17 @@ export class KernelRecoveryStore {
   }
 
   async recordMutationAfter(input: WorkspaceRecoveryMutationAfterInput): Promise<boolean> {
-    const lookup = await this.context(input.workspaceId, undefined, true);
+    const lookup = await this.context(input.workspaceId);
     const turn = await lookup.client.recoveryTurnGet({ workspaceId: input.workspaceId, executionId: input.executionId });
-    if (!turn || typeof turn.sessionId !== "string") return false;
-    const context = await this.context(input.workspaceId, turn.sessionId);
+    if (!turn) return false;
+    const conversation = parseRecoveryConversation(turn.conversation);
+    const context = await this.context(input.workspaceId);
     const checkpointId = String(turn.checkpointId);
     const captured = await this.content.captureState(
       recoveryIdentity(input.workspaceId, context.identity.canonicalRoot),
       context.root,
       input.path,
       { store: true },
-      turn.sessionId,
     );
     const capturedOwner = captured.state.kind === "regular-file"
       ? this.content.ownerIdForHash(input.workspaceId, captured.state.objectHash)
@@ -399,7 +490,7 @@ export class KernelRecoveryStore {
       await context.client.recoveryChangeAfter({
         operationId,
         workspaceId: input.workspaceId,
-        sessionId: turn.sessionId,
+        conversation,
         executionId: input.executionId,
         checkpointId,
         path: captured.path,
@@ -422,7 +513,7 @@ export class KernelRecoveryStore {
       await context.client.recoveryChangeAfter({
         operationId,
         workspaceId: input.workspaceId,
-        sessionId: turn.sessionId,
+        conversation,
         executionId: input.executionId,
         checkpointId,
         path: captured.path,
@@ -449,10 +540,11 @@ export class KernelRecoveryStore {
     operationId: string;
     changes: Record<string, { before: RecoveryState; after: RecoveryState }>;
   }): Promise<boolean> {
-    const lookup = await this.context(input.workspaceId, undefined, true);
+    const lookup = await this.context(input.workspaceId);
     const turn = await lookup.client.recoveryTurnGet({ workspaceId: input.workspaceId, executionId: input.executionId });
-    if (!turn || (turn.status !== "pending" && turn.status !== "ready") || typeof turn.sessionId !== "string" || typeof turn.checkpointId !== "string") return false;
-    const context = await this.context(input.workspaceId, turn.sessionId);
+    if (!turn || (turn.status !== "pending" && turn.status !== "ready" && turn.status !== "incomplete") || !turn.conversation || typeof turn.checkpointId !== "string") return false;
+    const conversation = parseRecoveryConversation(turn.conversation);
+    const context = await this.context(input.workspaceId);
     const checkpointId = turn.checkpointId;
     if (turn.status === "ready") {
       for (const [rawPath, states] of Object.entries(input.changes)) {
@@ -472,7 +564,7 @@ export class KernelRecoveryStore {
       const beforeResult = await context.client.recoveryChangeBefore({
         operationId: `integration-before:${input.operationId}:${path}`,
         workspaceId: input.workspaceId,
-        sessionId: turn.sessionId,
+        conversation,
         executionId: input.executionId,
         checkpointId,
         path,
@@ -487,10 +579,15 @@ export class KernelRecoveryStore {
         ? parseRecoveryState(prior.after)
         : undefined;
       if (priorAfter && sameState(priorAfter, states.after)) continue;
+      if (priorAfter && !sameState(priorAfter,states.before)) {
+        const current = await context.client.recoveryTurnGet({workspaceId:input.workspaceId,executionId:input.executionId});
+        if (!current) throw new Error("Integration input checkpoint disappeared");
+        await context.client.recoveryTurnSettle({operationId:`integration-gap:${input.operationId}:${path}`,workspaceId:input.workspaceId,executionId:input.executionId,expectedRevision:Number(current.revision),status:"incomplete",observedResourceIds:[],unrecordedResourceIds:[...new Set([...(Array.isArray(current.unrecordedResourceIds) ? current.unrecordedResourceIds as string[] : []),path])],observationComplete:false,activeWriterScopes:[],provenance:"caused-by",failureJson:JSON.stringify({code:"checkpoint-incomplete",message:"Integration observed an external change inside the input checkpoint",retryable:false})});
+      }
       await context.client.recoveryChangeAfter({
         operationId: `integration-after:${input.operationId}:${path}`,
         workspaceId: input.workspaceId,
-        sessionId: turn.sessionId,
+        conversation,
         executionId: input.executionId,
         checkpointId,
         path,
@@ -507,14 +604,15 @@ export class KernelRecoveryStore {
   }
 
   async recordTurnSettled(input: WorkspaceRecoveryTurnSettledInput): Promise<WorkspaceRecoveryTurnBinding> {
-    const lookup = await this.context(input.workspaceId, undefined, true);
+    const lookup = await this.context(input.workspaceId);
     const row = await lookup.client.recoveryTurnGet({ workspaceId: input.workspaceId, executionId: input.executionId });
-    if (!row || typeof row.sessionId !== "string") throw new Error("checkpoint-missing");
-    const context = await this.context(input.workspaceId, row.sessionId);
+    if (!row) throw new Error("checkpoint-missing");
+    const conversation = parseRecoveryConversation(row.conversation);
+    const context = await this.context(input.workspaceId);
     const listed = await context.client.recoveryChangeList({
       workspaceId: input.workspaceId,
       executionId: input.executionId,
-      sessionId: row.sessionId,
+      conversation,
     });
     const changes = Array.isArray(listed.changes) ? listed.changes : [];
     const recorded = changes.flatMap((value) => {
@@ -526,7 +624,7 @@ export class KernelRecoveryStore {
     const observed = [...new Set(input.observedResourceIds
       .map(normalizeResourceId)
       .filter((value): value is string => Boolean(value) && !/\.varin-(?:tmp|restore|recovery)-/u.test(value)))].sort();
-    const unrecorded = observed.filter((value) => !recordedKeys.has(comparison(value)));
+    const unrecorded = [...new Set([...observed.filter((value) => !recordedKeys.has(comparison(value))), ...(Array.isArray(row.unrecordedResourceIds) ? row.unrecordedResourceIds as string[] : [])])];
     const retainedFailure = row.status === "incomplete" && row.failure && typeof row.failure === "object"
       ? row.failure as Record<string, unknown>
       : undefined;
@@ -544,12 +642,23 @@ export class KernelRecoveryStore {
       retryable: false,
       ...(unrecorded.length > 0 ? { details: { paths: unrecorded } } : {}),
     });
+    const status = exact ? "ready" : "incomplete";
+    // Reopened preparation may revisit an already settled input checkpoint.
+    // Recall identical facts without creating a second transition; changed
+    // coverage still enters the original revision CAS under a distinct identity.
+    if (row.settledAt && row.status === status
+      && (row.assistantEntryId ?? null) === (input.assistantEntryId ?? null)
+      && row.provenance === input.provenance
+      && isDeepStrictEqual(row.observedResourceIds, observed)
+      && isDeepStrictEqual(row.unrecordedResourceIds, unrecorded)
+      && isDeepStrictEqual(row.activeWriterScopes, input.activeWriterScopes)
+      && isDeepStrictEqual(row.failure ?? null, failure ?? null)) return this.turn(row);
     const settled = await context.client.recoveryTurnSettle({
-      operationId: `recovery-settle:${input.executionId}`,
+      operationId: `recovery-settle:${input.workspaceId}:${input.executionId}:${Number(row.revision)}`,
       workspaceId: input.workspaceId,
       executionId: input.executionId,
       expectedRevision: Number(row.revision),
-      status: exact ? "ready" : "incomplete",
+      status,
       observedResourceIds: observed,
       unrecordedResourceIds: unrecorded,
       observationComplete: input.observationComplete,
@@ -563,11 +672,11 @@ export class KernelRecoveryStore {
 
   async listChanges(input: {
     workspaceId: string;
-    sessionId?: string;
+    conversation?: RecoveryConversation;
     executionId?: string;
     entryIds?: string[];
   }): Promise<DurableRecoveryChangeSelection> {
-    const context = await this.context(input.workspaceId, undefined, true);
+    const context = await this.context(input.workspaceId);
     const raw = await context.client.recoveryChangeList(input);
     const changes = (Array.isArray(raw.changes) ? raw.changes : []).map((value) => {
       const item = asObject(value);
@@ -585,6 +694,7 @@ export class KernelRecoveryStore {
         path: String(item.path),
         sequence: Number(item.sequence),
         toolName: String(item.toolName),
+        ...(item.fileTarget ? { fileTarget: parseRecoveryFileTarget(item.fileTarget) } : {}),
       };
     });
     const turns = (Array.isArray(raw.turns) ? raw.turns : []).map((value) => {
@@ -595,6 +705,7 @@ export class KernelRecoveryStore {
         executionId: String(item.executionId),
         sequence: Number(item.sequence),
         status: String(item.status),
+        ...(item.fileTarget ? { fileTarget: parseRecoveryFileTarget(item.fileTarget) } : {}),
         unrecordedResourceIds: Array.isArray(item.unrecordedResourceIds) ? item.unrecordedResourceIds as string[] : [],
         ...(item.failure && typeof item.failure === "object" ? { failure: item.failure as Record<string, unknown> } : {}),
       };
@@ -627,6 +738,15 @@ export class KernelRecoveryStore {
     return output;
   }
 
+  private async adoptOperationObjects(context: Pick<KernelStorageContext, "client">, workspaceId: string,
+    references: readonly { ownerId?: string }[]): Promise<void> {
+    // Scoped runtime integrations already share their exact execution grant.
+    // Host working-state candidates transfer to the recovery record writer before CAS.
+    if (this.scopedActor) return;
+    const owners = new Set(references.flatMap(reference => reference.ownerId ? [reference.ownerId] : []));
+    await Promise.all([...owners].map(ownerId => context.client.rebindObjectOwner(workspaceId, ownerId)));
+  }
+
   async createOperation(input: {
     operationId: string;
     workspaceId: string;
@@ -634,12 +754,19 @@ export class KernelRecoveryStore {
     state: string;
     data: Record<string, unknown>;
     targets: Record<string, { expected?: RecoveryState; target?: RecoveryState; safety?: RecoveryState }>;
-    sessionId?: string;
     threadId?: string;
     runId?: string;
     surfacePaths?: readonly string[];
   }): Promise<Record<string, unknown>> {
-    const context = await this.context(input.workspaceId, undefined, true);
+    if (this.scopedActor) {
+      if ((input.threadId && input.threadId !== this.scopedActor.threadId)
+        || (input.runId && input.runId !== this.scopedActor.runId)) {
+        throw new Error("Recovery operation owner does not match its admitted actor");
+      }
+      input = { ...input, threadId: this.scopedActor.threadId,
+        ...(this.scopedActor.runId ? { runId: this.scopedActor.runId } : {}) };
+    }
+    const context = await this.context(input.workspaceId);
     const surfacePaths = new Set(input.surfacePaths ?? []);
     const files = Object.entries(input.targets).map(([filePath, states]) => ({
       path: filePath,
@@ -649,6 +776,7 @@ export class KernelRecoveryStore {
       phase: "pending",
       references: surfacePaths.has(filePath) ? [] : this.stateReferences(input.workspaceId, states, filePath),
     }));
+    await this.adoptOperationObjects(context, input.workspaceId, files.flatMap(file => file.references));
     const result = await context.client.recoveryOperationCreate({
       operationId: input.operationId,
       workspaceId: input.workspaceId,
@@ -656,7 +784,6 @@ export class KernelRecoveryStore {
       state: input.state,
       dataJson: JSON.stringify(input.data),
       files,
-      ...(input.sessionId ? { sessionId: input.sessionId } : {}),
       ...(input.threadId ? { threadId: input.threadId } : {}),
       ...(input.runId ? { runId: input.runId } : {}),
     });
@@ -680,9 +807,8 @@ export class KernelRecoveryStore {
     expected?: RecoveryState;
     target?: RecoveryState;
     safety?: RecoveryState;
-    sessionId?: string;
   }): Promise<Record<string, unknown>> {
-    const context = await this.context(input.workspaceId, undefined, true);
+    const context = await this.context(input.workspaceId);
     const current = await context.client.recoveryOperationGet({
       workspaceId: input.workspaceId,
       operationId: input.operationId,
@@ -702,6 +828,7 @@ export class KernelRecoveryStore {
       safety: input.safety ?? parseState("safetyJson"),
     };
     const references = this.stateReferences(input.workspaceId, states, input.path);
+    await this.adoptOperationObjects(context, input.workspaceId, references);
     const result = await context.client.recoveryOperationFileCas({
       transitionId: `recovery-file:${input.operationId}:${input.path}:${input.expectedRevision}:${input.expectedPhase}:${input.phase}`,
       operationId: input.operationId,
@@ -730,9 +857,8 @@ export class KernelRecoveryStore {
     state: string;
     result?: Record<string, unknown>;
     failure?: Record<string, unknown>;
-    sessionId?: string;
   }): Promise<Record<string, unknown>> {
-    const context = await this.context(input.workspaceId, undefined, true);
+    const context = await this.context(input.workspaceId);
     return context.client.recoveryOperationComplete({
       transitionId: `recovery-complete:${input.operationId}:${input.expectedRevision}:${input.state}`,
       operationId: input.operationId,
@@ -753,27 +879,34 @@ export class KernelRecoveryStore {
       const recordId = `operation-file:${operationId}:${file.path}`;
       for (const [field, name] of [["expectedJson", "expected"], ["targetJson", "target"], ["safetyJson", "safety"]] as const) {
         if (typeof file[field] !== "string") continue;
-        const state = parseRecoveryState(JSON.parse(file[field] as string) as unknown);
-        if (state.kind === "regular-file") {
-          this.content.registerRecord(workspaceId, recordId, { slot: `${file.path}.${name}`, objectHash: state.objectHash });
+        const states = JSON.parse(file[field] as string) as unknown;
+        parseRecoveryState(states);
+        for (const reference of this.stateReferences(workspaceId, states, `${file.path}.${name}`)) {
+          this.content.registerRecord(workspaceId, recordId, reference);
         }
       }
     }
   }
 
-  async getOperation(workspaceId: string, operationId: string, _sessionId?: string): Promise<Record<string, unknown> | null> {
-    const context = await this.context(workspaceId, undefined, true);
-    const operation = await context.client.recoveryOperationGet({ workspaceId, operationId });
+  async getOperation(workspaceId: string, operationId: string): Promise<Record<string, unknown> | null> {
+    const client = this.scopedActor?.client ?? await this.adapter.recoveryMetadataClient(workspaceId);
+    const operation = await client.recoveryOperationGet({ workspaceId, operationId });
     if (operation) this.registerOperationSources(workspaceId, operation);
     return operation;
   }
 
   async listOperations(workspaceId: string, kind?: string): Promise<Record<string, unknown>[]> {
-    const context = await this.context(workspaceId, undefined, true);
+    if (this.scopedActor) {
+      if (workspaceId !== this.scopedActor.identity.workspaceId || !this.scopedActor.metadataReader) {
+        throw new Error("Workspace operation inspection requires its explicit metadata reader");
+      }
+      return this.scopedActor.metadataReader.listOperations(workspaceId, kind);
+    }
+    const client = await this.adapter.recoveryMetadataClient(workspaceId);
     const output: Record<string, unknown>[] = [];
     let cursor: number | undefined;
     do {
-      const value = await context.client.recoveryOperationList({
+      const value = await client.recoveryOperationList({
         workspaceId,
         ...(kind ? { kind } : {}),
         pageSize: 512,
@@ -787,8 +920,13 @@ export class KernelRecoveryStore {
     return output;
   }
 
+  listOperationConflicts: RecoveryDurableOperationPort["listOperationConflicts"] = input => {
+    if (!this.content.integrationConflicts) throw new Error("Recovery physical reservation inspection is unavailable");
+    return this.content.integrationConflicts(input);
+  };
+
   async releaseOperation(workspaceId: string, operationId: string): Promise<Record<string, unknown>> {
-    const context = await this.context(workspaceId, undefined, true);
+    const context = await this.context(workspaceId);
     return context.client.recoveryOperationRelease({
       transitionId: `recovery-release:${workspaceId}:${operationId}`,
       operationId,
@@ -803,6 +941,16 @@ export class KernelRecoveryStore {
       resolveDirectoryApplyContext?: ResolveDirectoryApplyContext;
     } = {},
   ): Promise<WorkspaceRecoveryStorageContext> {
+    if (this.scopedActor) {
+      if (workspaceId !== this.scopedActor.identity.workspaceId || options.resolveDirectoryApplyContext) {
+        throw new Error("Scoped recovery cannot resolve another execution directory");
+      }
+      const content = this.content;
+      if (!(content instanceof KernelRecoveryContentStore)) throw new Error("Scoped recovery content store is unavailable");
+      return { ...this.scopedActor, fileStore: content, fileResources: content.fileResources,
+        resourceOperationGate: options.resourceOperationGate ?? content.resourceOperationGate(this.scopedActor.identity),
+        durableRecoveryStore: this };
+    }
     const context = await this.adapter.context(workspaceId, "recovery-maintenance", {
       owningWorkspace: workspaceId,
       executionWorkspace: workspaceId,
@@ -831,6 +979,35 @@ export class KernelRecoveryStore {
   }
 }
 
+/** Reuses the original file/journal implementations with one admitted source authority. */
+export const createScopedKernelRecoveryBindings = (
+  adapter: KernelStorageAdapter,
+  input: {
+    authority: KernelFileAuthorityContext;
+    threadId: string;
+    runId?: string;
+    storageRoot: string;
+    /** Only an independent Host coordinator; never pass a second kernel gate for these same paths. */
+    resourceOperationGate?: HostResourceOperationGate;
+    metadataReader?: Pick<RecoveryDurableOperationPort, "listOperations">;
+  },
+) => {
+  if (!input.threadId) throw new Error("Scoped recovery requires its real Thread owner");
+  const identity = recoveryIdentity(input.authority.owningWorkspaceId, input.authority.canonicalRoot);
+  const actor: ScopedRecoveryActor = { client: input.authority.client, identity, root: input.storageRoot,
+    threadId: input.threadId, ...(input.runId ? { runId: input.runId } : {}),
+    ...(input.metadataReader ? { metadataReader: input.metadataReader } : {}) };
+  const fileResources = new KernelFileResourceBackend(adapter, { authority: input.authority });
+  const fileStore = new KernelRecoveryContentStore(adapter, fileResources, actor);
+  const durableRecoveryStore = new KernelRecoveryStore(adapter, fileStore, actor);
+  const kernelGate = fileResources.gateFor(identity);
+  const resourceOperationGate: HostResourceOperationGate = input.resourceOperationGate
+    ? { run: (resources, operation, options) => input.resourceOperationGate!.run(resources,
+      () => kernelGate.run(resources, operation, options), options) }
+    : kernelGate;
+  return { fileStore, fileResources, resourceOperationGate, durableRecoveryStore };
+};
+
 export const createKernelRecoveryDirectFacade = (
   base: WorkspaceRecoveryEngine,
   store: KernelRecoveryStore,
@@ -842,12 +1019,12 @@ export const createKernelRecoveryDirectFacade = (
   } = {},
 ): WorkspaceRecoveryEngine => {
   const facade = { ...base } as WorkspaceRecoveryEngine;
-  facade.withWorkspaceStorage = async (workspaceId, _accessOptions, operation) => operation(
+  facade.withWorkspaceStorage = (workspaceId, accessOptions, operation) => base.coordinateWorkspaceStorage(workspaceId, accessOptions, async () => operation(
     await store.workspaceStorageContext(workspaceId, {
       ...(options.resourceOperationGateFor ? { resourceOperationGate: options.resourceOperationGateFor(workspaceId) } : {}),
       ...(options.resolveDirectoryApplyContext ? { resolveDirectoryApplyContext: options.resolveDirectoryApplyContext } : {}),
     }),
-  );
+  ));
   facade.recordTurnStart = async (input) => ({ binding: await store.recordTurnStart(input), status: "ready" });
   facade.recordMutationBefore = async (input) => ({ recorded: await store.recordMutationBefore(input), status: "ready" });
   facade.recordMutationAfter = async (input) => ({ recorded: await store.recordMutationAfter(input), status: "ready" });
@@ -968,7 +1145,7 @@ export const createKernelRecoveryDirectFacade = (
   facade.status = async (workspaceId) => {
     const context = await store.workspaceStorageContext(workspaceId);
     const attention = (await store.listOperations(workspaceId, "agent-mutation"))
-      .filter((operation) => operation.state === "needs-attention");
+      .filter((operation) => !["complete", "aborted", "compensated", "conflict"].includes(String(operation.state)));
     const retention = await facade.retentionStatus(workspaceId);
     if (retention.status !== "ready") return retention;
     return {
@@ -987,8 +1164,8 @@ export const createKernelRecoveryDirectFacade = (
         workspaceLease: false,
       },
       failures: attention.map((operation) => ({
-        code: "needs-attention" as const,
-        message: `Agent surface mutation ${String(operation.operationId)} requires attention`,
+        code: "storage-schema-retired" as const,
+        message: `Retired agent mutation ${String(operation.operationId)} is unsupported; its original record and resources were preserved without replay or migration`,
         operationId: String(operation.operationId),
         origin: "storage" as const,
         retryable: false,

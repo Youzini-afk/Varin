@@ -1,3 +1,4 @@
+import { unconfiguredWorkspaceEdits } from '../documents/workspace-edit.test-helper';
 import { afterEach, describe, expect, test } from 'vitest';
 import type {
   DocumentsAPI,
@@ -28,6 +29,7 @@ const waitUntil = async (predicate: () => boolean): Promise<void> => {
 };
 
 const createDocuments = (): DocumentsAPI => ({
+    ...unconfiguredWorkspaceEdits,
   clearDirtyBuffers: async () => ({ cleared: true }),
   publishDirtyBuffers: async (request) => ({ ...request, updatedAt: '2026-08-28T00:00:00.000Z' }),
   resolveWorkspace: async () => ({ workspaceId: identity.workspaceId, hostId: 'host', epoch: 1 }),

@@ -11,6 +11,7 @@ import {
   batchWorkbenchContextKeyUpdates,
   createOwnerScopedContextWriter,
   getWorkbenchContextKeyStore,
+  previewWorkbenchContextKeyUpdates,
   subscribeWorkbenchContextKey,
 } from '@/lib/workbench/editors/context-keys';
 
@@ -46,6 +47,7 @@ const workbenchContextProvider: SurfaceContextProvider = {
     const unsubscribers = keys.map((key) => subscribeWorkbenchContextKey(key, listener));
     return () => { for (const unsubscribe of unsubscribers) unsubscribe(); };
   },
+  previewContext: previewWorkbenchContextKeyUpdates,
   createWriter(owner: SurfaceOwnerIdentity) {
     return createOwnerScopedContextWriter(owner);
   },

@@ -1,7 +1,7 @@
 import type { SurfaceActivationContext } from '@varin/extension-surface';
 import { toast } from '@/components/ui';
-import { startPiSessionDraftFromNavigation } from '@/lib/pi-runtime/sessionNavigation';
-import { createPiWorktreeSession } from '@/lib/pi-runtime/worktreeSession';
+import { startThreadFromNavigation } from '@/lib/agent-runtime/threadNavigation';
+import { createWorktreeThread } from '@/lib/agent-runtime/worktreeThread';
 import { workspaceEvents } from '@/lib/workspaceEvents';
 import { useUIStore } from '@/stores/useUIStore';
 import { getDocumentRegistry } from '@/lib/documents/session';
@@ -54,16 +54,16 @@ const reportFailure = (title: string, error: unknown): void => {
 const BUILTIN_WORKBENCH_COMMANDS: readonly BuiltinCommandDefinition[] = [
   command({ commandId: 'new-session', titleKey: 'commandPalette.item.newSession', icon: 'add', shortcutId: 'new_chat', keywords: ['new', 'session'], order: 0 }, async () => {
     try {
-      await startPiSessionDraftFromNavigation();
+      await startThreadFromNavigation();
     } catch (error) {
-      reportFailure('Failed to create Pi session', error);
+      reportFailure('Failed to create conversation', error);
     }
   }),
   command({ commandId: 'new-worktree', titleKey: 'commandPalette.item.newWorktreeDraft', icon: 'git-branch', shortcutId: 'new_chat_worktree', keywords: ['new', 'worktree', 'session'], order: 1 }, async () => {
     try {
-      await createPiWorktreeSession();
+      await createWorktreeThread();
     } catch (error) {
-      reportFailure('Failed to create Pi worktree session', error);
+      reportFailure('Failed to create worktree conversation', error);
     }
   }),
   command({ commandId: 'add-project', titleKey: 'commandPalette.item.addProject', icon: 'folder-add', keywords: ['add', 'project', 'workspace'], order: 2 }, () => {

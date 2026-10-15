@@ -5,22 +5,16 @@ description: Démarrez Varin rapidement et choisissez l’application adaptée �
 
 # Démarrage rapide
 
-## Chemin le plus rapide
+1. Préparez Node.js, Bun et Rust avec le guide d’installation, puis lancez `bun install --frozen-lockfile` et `bun run dev` dans le dépôt.
+2. Ouvrez l’URL Vite affichée. Pour le desktop, utilisez `bun run electron:dev`.
+3. Dans Paramètres → Canaux de modèles, connectez un canal et choisissez un modèle.
+4. Créez une conversation : un Thread natif avec ses branches et son historique.
+5. Pour les fichiers, développez Workspace, choisissez le Host, le dossier et le mode d’accès, puis préparez la source. Un simple chat n’en a pas besoin.
+6. Écrivez et envoyez. Vous pouvez joindre des images ou PDF et consulter l’activité des outils.
 
-1. Clonez [Varin](https://github.com/Youzini-afk/Varin) et installez les dépendances avec Bun (voir [Installation](/fr/install/)).
-2. Exécutez `bun run dev`.
-3. Ouvrez l’URL Vite affichée dans le terminal.
-4. Pour l’utiliser depuis votre téléphone, démarrez un [tunnel](/fr/tunnels/) et scannez le QR code.
+Appairez le téléphone au Host actif. L’accès par internet exige un relay configuré et disponible ou votre propre route distante sécurisée. Protégez tout Host accessible sur le réseau avec un mot de passe UI fort.
 
-Vous devriez voir la liste des sessions Varin dans votre navigateur. Si elle se charge, vous êtes opérationnel.
-
-Si vous préférez un conteneur, utilisez le chemin Docker de [Installation](/fr/install/) et ouvrez `http://127.0.0.1:3000` avec le `VARIN_UI_PASSWORD` généré.
-
-Utilisez un mot de passe UI fort, surtout si vous prévoyez d’ouvrir l’instance à Internet.
-
-Si la page ne se charge pas, consultez le [dépannage](/fr/troubleshooting/).
-
-## Quelle application utiliser ?
-
-- utilisez le **desktop** pour le travail local au quotidien (`bun run electron:dev`)
-- utilisez le **web** pour l’accès distant et la relecture depuis votre téléphone
+- [Installation](/fr/install/)
+- [Canaux de modèles](/fr/providers/)
+- [Projets](/fr/projects/)
+- [Connecter un appareil](/fr/connect-devices/)

@@ -8,10 +8,6 @@ import {
   parseWorkspaceRecoveryCheckpointInput,
   parseWorkspaceRecoveryCheckpointQuery,
   parseWorkspaceRecoveryEntryTarget,
-  parseWorkspaceRecoveryMutationAfterInput,
-  parseWorkspaceRecoveryMutationBeforeInput,
-  parseWorkspaceRecoveryTurnSettledInput,
-  parseWorkspaceRecoveryTurnStartInput,
   type JsonValue,
 } from '@varin/extension-contract';
 import type { HostCapabilityCallContext, HostCapabilityHandler } from '@varin/extension-host';
@@ -49,14 +45,9 @@ export const createWorkspaceRecoveryCapabilityHandler =
       return engine.status(requiredText(input.workspaceId, 'workspaceId'));
     }
     if (method === 'createCheckpoint') return engine.createCheckpoint(parseWorkspaceRecoveryCheckpointInput(params));
-    if (method === 'recordMutationBefore') {
-      return engine.recordMutationBefore(parseWorkspaceRecoveryMutationBeforeInput(params));
+    if (['recordTurnStart', 'recordMutationBefore', 'recordMutationAfter', 'recordTurnSettled'].includes(method)) {
+      throw new Error('Native recovery anchors and mutations are supplied only by the original runtime owner');
     }
-    if (method === 'recordMutationAfter') {
-      return engine.recordMutationAfter(parseWorkspaceRecoveryMutationAfterInput(params));
-    }
-    if (method === 'recordTurnStart') return engine.recordTurnStart(parseWorkspaceRecoveryTurnStartInput(params));
-    if (method === 'recordTurnSettled') return engine.recordTurnSettled(parseWorkspaceRecoveryTurnSettledInput(params));
     if (method === 'resolveEntry') return engine.resolveEntry(parseWorkspaceRecoveryEntryTarget(params));
     if (method === 'prepareCombinedRecovery') {
       return engine.prepareCombinedRecovery(parseWorkspaceCombinedRecoveryPrepareInput(params));

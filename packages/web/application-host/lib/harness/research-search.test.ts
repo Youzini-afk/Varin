@@ -1,21 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
-import type { HarnessServiceContext } from "./router.js";
 import { createResearchSearchService } from "./research-search.js";
 
-const context: HarnessServiceContext = {
-  actor: {
-    authorityInstanceId: "host",
-    sessionId: "session",
-    workerId: "worker",
-    workerGeneration: 1,
-    workspaceId: "workspace",
-    grantedCapabilities: ["read.web"],
-  },
-  authorizedPaths: [],
-  sessionId: "session",
-  workspaceId: "workspace",
-  signal: new AbortController().signal,
-};
+const context = { signal: new AbortController().signal };
 
 const json = (value: unknown): Response => new Response(JSON.stringify(value), {
   status: 200,
@@ -27,6 +13,7 @@ describe("scholarly search service", () => {
     const fetch = vi.fn(async (input: Parameters<typeof globalThis.fetch>[0]) => {
       expect(String(input)).toContain("api.openalex.org/works");
       expect(new URL(String(input)).searchParams.get("search")).toBe("agent retrieval");
+      expect(new URL(String(input)).searchParams.get("cursor")).toBe("*");
       return json({
         meta: { next_cursor: "next-page" },
         results: [{
@@ -190,5 +177,101 @@ describe("scholarly search service", () => {
     const service = createResearchSearchService({ fetch });
     const page = await service.handle({ action: "relations", paperId: "W9", relation: "references" }, context);
     expect(page).toMatchObject({ status: "empty", papers: [], relation: { kind: "references" } });
+  });
+
+  it("continues the original OpenAlex search cursor and preserves the requested page size", async () => {
+    const fetch = vi.fn(async (input: Parameters<typeof globalThis.fetch>[0]) => {
+      const url = new URL(String(input));
+      expect(url.searchParams.get("cursor")).toBe("original-page");
+      expect(url.searchParams.get("per-page")).toBe("250");
+      return new Response("provider limit exceeded", { status: 400 });
+    });
+    await expect(createResearchSearchService({ fetch }).handle({ action: "search", query: "large page", cursor: "original-page", limit: 250 }, context))
+      .resolves.toMatchObject({ status: "failed", message: expect.stringContaining("HTTP 400") });
+    expect(fetch).toHaveBeenCalledTimes(1);
+  });
+
+  it.each(["wrong-cursor", "-1", "1.5", "9007199254740992", ""])("rejects invalid Semantic Scholar offsets before sending: %s", async cursor => {
+    const fetch = vi.fn();
+    const service = createResearchSearchService({ fetch });
+    for (const params of [
+      { action: "search" as const, query: "query" },
+      { action: "relations" as const, paperId: "P1", relation: "citations" as const },
+    ]) await expect(service.handle({ ...params, provider: "semantic-scholar", cursor }, context)).rejects.toMatchObject({ harnessCode: "invalid-params" });
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it("rejects unsafe OpenAlex relation offsets before sending", async () => {
+    const fetch = vi.fn();
+    await expect(createResearchSearchService({ fetch }).handle({ action: "relations", paperId: "W1", relation: "references",
+      cursor: "oa-list:references:W1:9007199254740992" }, context)).rejects.toMatchObject({ harnessCode: "invalid-params" });
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it("preserves valid missing optional metadata but rejects malformed envelopes and identities", async () => {
+    for (const [provider, bodies] of [
+      ["openalex", [{}, { results: {} }, { results: [{ title: "No ID" }] }, { results: [null] }]],
+      ["semantic-scholar", [{}, { data: {} }, { data: [{ paperId: "P1" }] }, { data: [null] }]],
+    ] as const) {
+      for (const body of bodies) {
+        const service = createResearchSearchService({ fetch: vi.fn(async () => json(body)) });
+        await expect(service.handle({ action: "search", provider, query: "query" }, context)).resolves.toMatchObject({ status: "failed", papers: [] });
+      }
+      const body = provider === "openalex" ? { id: "https://openalex.org/W1", title: "Only required fields" } : { paperId: "P1", title: "Only required fields" };
+      const service = createResearchSearchService({ fetch: vi.fn(async () => json(body)) });
+      await expect(service.handle({ action: "paper", provider, paperId: "P1" }, context)).resolves.toMatchObject({ status: "ok", papers: [{ authors: [], content: "metadata-only", availableFields: [] }] });
+    }
+  });
+
+  it("does not interpret a malformed relation source or edge as an empty page", async () => {
+    const source = createResearchSearchService({ fetch: vi.fn(async () => json({ referenced_works: [] })) });
+    await expect(source.handle({ action: "relations", paperId: "W1", relation: "references" }, context)).resolves.toMatchObject({ status: "failed", relation: { source: { id: "W1" } } });
+    const edge = createResearchSearchService({ fetch: vi.fn(async () => json({ data: [{}] })) });
+    await expect(edge.handle({ action: "relations", provider: "semantic-scholar", paperId: "P1", relation: "citations" }, context)).resolves.toMatchObject({ status: "failed" });
+  });
+
+  it("awaits the actual success body before cancellation settles and issues no dependent request", async () => {
+    const controller = new AbortController();
+    let body!: ReadableStreamDefaultController<Uint8Array>;
+    let started!: () => void;
+    const reading = new Promise<void>(resolve => { started = resolve; });
+    const fetch = vi.fn(async () => new Response(new ReadableStream<Uint8Array>({
+      start(value) { body = value; },
+      pull() { started(); },
+    })));
+    const service = createResearchSearchService({ fetch });
+    let settled = false;
+    const request = service.handle({ action: "relations", paperId: "W1", relation: "references" }, { signal: controller.signal });
+    const observed = request.then(() => { settled = true; }, () => { settled = true; });
+    await reading;
+    controller.abort();
+    await new Promise(resolve => setImmediate(resolve));
+    expect(settled).toBe(false);
+    body.enqueue(new TextEncoder().encode(JSON.stringify({ id: "https://openalex.org/W1", title: "Source", referenced_works: ["https://openalex.org/W2"] })));
+    body.close();
+    await expect(request).rejects.toMatchObject({ name: "AbortError" });
+    await observed;
+    expect(fetch).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([false, true])("awaits original HTTP failure body cancellation (caller cancelled: %s)", async cancelCaller => {
+    const controller = new AbortController();
+    let drained!: () => void;
+    const drain = new Promise<void>(resolve => { drained = resolve; });
+    let bodyCancelled = false;
+    let settled = false;
+    const service = createResearchSearchService({ fetch: async () => new Response(new ReadableStream<Uint8Array>({
+      cancel() { bodyCancelled = true; return drain; },
+    }), { status: 429 }) });
+    const request = service.handle({ action: "search", query: "query" }, { signal: controller.signal });
+    const observed = request.then(() => { settled = true; }, () => { settled = true; });
+    await new Promise(resolve => setImmediate(resolve));
+    if (cancelCaller) controller.abort();
+    expect(bodyCancelled).toBe(true);
+    expect(settled).toBe(false);
+    drained();
+    if (cancelCaller) await expect(request).rejects.toMatchObject({ name: "AbortError" });
+    else await expect(request).resolves.toMatchObject({ status: "failed", message: expect.stringContaining("HTTP 429") });
+    await observed;
   });
 });

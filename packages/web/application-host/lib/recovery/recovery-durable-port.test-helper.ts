@@ -1,4 +1,5 @@
-import type { WorkspaceRecoveryTurnProvenance } from "@varin/extension-contract";
+import path from "node:path";
+import type { RecoveryConversation, WorkspaceRecoveryTurnProvenance } from "@varin/extension-contract";
 import type { DurableRecoveryChangeSelection, RecoveryDurableMetadataPort } from "./journal-engine.js";
 import { sameState } from "./journal-files.js";
 import type { RecoveryState } from "./journal-files.js";
@@ -22,7 +23,7 @@ type MemoryTurn = DurableRecoveryChangeSelection["turns"][number] & {
   provenance?: WorkspaceRecoveryTurnProvenance;
   runtimeGeneration?: number;
   runtimeKey?: string;
-  sessionId?: string;
+  conversation?: RecoveryConversation;
   settledAt?: string;
   startedAt?: string;
   userEntryId?: string;
@@ -31,7 +32,7 @@ type MemoryTurn = DurableRecoveryChangeSelection["turns"][number] & {
 
 type MemoryChange = DurableRecoveryChangeSelection["changes"][number] & {
   workspaceId: string;
-  sessionId?: string;
+  conversation?: RecoveryConversation;
 };
 
 export interface InMemoryRecoveryDurablePort extends RecoveryDurableMetadataPort {
@@ -103,13 +104,14 @@ export const createInMemoryRecoveryDurablePort = (
     provenance: turn.provenance ?? "observed-during",
     runtimeGeneration: turn.runtimeGeneration ?? 0,
     runtimeKey: turn.runtimeKey ?? "",
-    sessionId: turn.sessionId ?? "",
+    conversation: turn.conversation,
     startedAt: turn.startedAt ?? "",
     status: turn.status,
     unrecordedResourceIds: [...turn.unrecordedResourceIds],
     userEntryId: turn.userEntryId ?? "",
     workerId: turn.workerId ?? "",
     workspaceId: turn.workspaceId,
+    ...(turn.fileTarget ? { fileTarget: clone(turn.fileTarget) } : {}),
     ...(turn.assistantEntryId ? { assistantEntryId: turn.assistantEntryId } : {}),
     ...(turn.failure ? { failure: clone(turn.failure) } : {}),
     ...(turn.settledAt ? { settledAt: turn.settledAt } : {}),
@@ -144,7 +146,6 @@ export const createInMemoryRecoveryDurablePort = (
         createdAt,
         updatedAt: createdAt,
         data: structuredClone(input.data),
-        ...(input.sessionId ? { sessionId: input.sessionId } : {}),
         ...(input.threadId ? { threadId: input.threadId } : {}),
         ...(input.runId ? { runId: input.runId } : {}),
         files: Object.entries(input.targets).sort(([left], [right]) => left.localeCompare(right)).map(([path, states]) => ({
@@ -188,6 +189,24 @@ export const createInMemoryRecoveryDurablePort = (
     async listOperations(workspaceId, kind) {
       return [...operations.values()].filter((operation) => operation.workspaceId === workspaceId && (!kind || operation.kind === kind)).map(clone);
     },
+    async listOperationConflicts(input) {
+      const requested = input.paths.map(file => path.resolve(input.canonicalRoot, file));
+      const overlap = (a: string, b: string) => a === b || a.startsWith(`${b}${path.sep}`) || b.startsWith(`${a}${path.sep}`);
+      return [...operations.values()].flatMap(operation => {
+        if (operation.kind !== "integration" || ["complete", "conflict", "compensated", "aborted", "undone"].includes(operation.state)
+          || (operation.workspaceId === input.workspaceId && operation.operationId === input.exceptOperationId)) return [];
+        const data = { ...operation.data, ...operation.result };
+        if (data.parentBranchId) return [];
+        const reservation = data.reservedResources as { canonicalRoot: string; paths: string[] } | undefined;
+        const canonicalRoot = reservation?.canonicalRoot ?? (typeof data.applyCanonicalRoot === "string" ? data.applyCanonicalRoot
+          : operation.workspaceId === input.workspaceId ? input.canonicalRoot : undefined);
+        if (!canonicalRoot) throw new Error("Unresolved integration resource metadata is unavailable");
+        const paths = reservation?.paths ?? Object.keys((data.targets ?? {}) as Record<string, unknown>);
+        if (!paths.some(file => requested.some(resource => overlap(resource, path.resolve(canonicalRoot, file))))) return [];
+        return [{ operationId: operation.operationId, workspaceId: operation.workspaceId, state: operation.state,
+          revision: operation.revision, canonicalRoot, paths }];
+      });
+    },
     async releaseOperation(workspaceId, operationId) {
       const id = key(workspaceId, operationId);
       const operation = operations.get(id);
@@ -201,7 +220,7 @@ export const createInMemoryRecoveryDurablePort = (
     async listChanges(input): Promise<DurableRecoveryChangeSelection> {
       const selectedTurns = [...turns.values()].filter((turn) => {
         if (turn.workspaceId !== input.workspaceId) return false;
-        if (input.sessionId && turn.sessionId !== input.sessionId) return false;
+        if (input.conversation && JSON.stringify(turn.conversation) !== JSON.stringify(input.conversation)) return false;
         if (input.executionId && turn.executionId !== input.executionId) return false;
         if (input.entryIds && input.entryIds.length > 0) {
           const entries = new Set(input.entryIds);
@@ -215,12 +234,12 @@ export const createInMemoryRecoveryDurablePort = (
           .filter((change) => {
             if (change.workspaceId !== input.workspaceId) return false;
             if (input.executionId) return change.executionId === input.executionId;
-            if (input.sessionId && change.sessionId !== input.sessionId) return false;
+            if (input.conversation && !executionIds.has(change.executionId)) return false;
             if (input.entryIds && input.entryIds.length > 0) return executionIds.has(change.executionId);
             return true;
           })
-          .map(({ workspaceId: _workspaceId, sessionId: _sessionId, ...change }) => clone(change)),
-        turns: selectedTurns.map(({ workspaceId: _workspaceId, sessionId: _sessionId, userEntryId: _userEntryId, assistantEntryId: _assistantEntryId, provenance: _provenance, ...turn }) => clone(turn)),
+          .map(({ workspaceId: _workspaceId, ...change }) => clone(change)),
+        turns: selectedTurns.map(({ workspaceId: _workspaceId, userEntryId: _userEntryId, assistantEntryId: _assistantEntryId, provenance: _provenance, ...turn }) => clone(turn)),
       };
     },
     async recordIntegrationChanges(input) {
@@ -245,7 +264,6 @@ export const createInMemoryRecoveryDurablePort = (
           toolName: prior?.toolName ?? "thread.merge",
           before: prior?.before ?? clone(states.before),
           after: clone(states.after),
-          ...(turn.sessionId ? { sessionId: turn.sessionId } : {}),
         });
       }
       return true;
@@ -272,7 +290,7 @@ export const createInMemoryRecoveryDurablePort = (
     },
     async recordMutationBefore(input) {
       const turn = turnFor(input.workspaceId, input.executionId);
-      if (!turn || !turn.sessionId) return false;
+      if (!turn) return false;
       const relative = await relativize(input.workspaceId, input.path);
       const state = await capture(input.workspaceId, input.path);
       const id = `${input.workspaceId}\0${turn.checkpointId}\0${relative}`;
@@ -284,7 +302,7 @@ export const createInMemoryRecoveryDurablePort = (
           mutationId: input.mutationId,
           path: relative,
           sequence: changes.size + 1,
-          sessionId: turn.sessionId,
+          ...(turn.fileTarget ? { fileTarget: clone(turn.fileTarget) } : {}),
           toolName: input.toolName,
           before: clone(state),
           after: clone(state),
@@ -294,7 +312,7 @@ export const createInMemoryRecoveryDurablePort = (
     },
     async recordMutationAfter(input) {
       const turn = turnFor(input.workspaceId, input.executionId);
-      if (!turn || !turn.sessionId) return false;
+      if (!turn) return false;
       const relative = await relativize(input.workspaceId, input.path);
       const id = `${input.workspaceId}\0${turn.checkpointId}\0${relative}`;
       const prior = changes.get(id);
@@ -367,7 +385,8 @@ export const createInMemoryRecoveryDurablePort = (
         executionId: input.executionId,
         checkpointId: `turn-${input.executionId}`,
         sequence: ++turnSequence,
-        sessionId: input.sessionId,
+        conversation: input.conversation,
+        ...(input.fileTarget ? { fileTarget: clone(input.fileTarget) } : {}),
         userEntryId: input.userEntryId,
         workerId: input.workerId,
         runtimeGeneration: input.runtimeGeneration,
@@ -399,7 +418,7 @@ export const createInMemoryRecoveryDurablePort = (
     },
     async resolveEntry(input) {
       const turn = [...turns.values()]
-        .filter((candidate) => candidate.workspaceId === input.workspaceId && candidate.sessionId === input.sessionId)
+        .filter((candidate) => candidate.workspaceId === input.workspaceId && JSON.stringify(candidate.conversation) === JSON.stringify(input.conversation))
         .find((candidate) => candidate.userEntryId === input.entryId || candidate.assistantEntryId === input.entryId);
       if (!turn) {
         return { status: "unbound", reason: "entry-unbound" } as never;

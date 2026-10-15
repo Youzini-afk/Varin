@@ -60,7 +60,7 @@ export interface ParsedCliArgs {
   options: CliOptions;
   removedFlagErrors: string[];
   scheduleAction: string | null;
-  sessionAction: string | null;
+  threadAction: string | null;
   startupAction: string | null;
   subcommand: string | null;
   tunnelAction: string | null;
@@ -83,7 +83,6 @@ function parseArgs(argv: readonly string[] = process.argv.slice(2)): ParsedCliAr
     profile: undefined,
     name: undefined,
     title: undefined,
-    worktree: undefined,
     branch: undefined,
     startRef: undefined,
     setUpstream: undefined,
@@ -112,7 +111,7 @@ function parseArgs(argv: readonly string[] = process.argv.slice(2)): ParsedCliAr
     apiOnly: false,
     project: undefined,
     task: undefined,
-    session: undefined,
+    thread: undefined,
     message: undefined,
     prompt: undefined,
     model: undefined,
@@ -122,9 +121,7 @@ function parseArgs(argv: readonly string[] = process.argv.slice(2)): ParsedCliAr
     time: undefined,
     cron: undefined,
     timezone: undefined,
-    agent: undefined,
     thinking: undefined,
-    variant: undefined,
     disabled: false,
     goal: false,
     goalTokenBudget: undefined,
@@ -251,12 +248,6 @@ function parseArgs(argv: readonly string[] = process.argv.slice(2)): ParsedCliAr
         options.title = typeof value === 'string' ? value : options.title;
         break;
       }
-      case 'worktree': {
-        const { value, nextIndex } = consumeValue(i, inlineValue);
-        i = nextIndex;
-        options.worktree = typeof value === 'string' ? value : options.worktree;
-        break;
-      }
       case 'branch': {
         const { value, nextIndex } = consumeValue(i, inlineValue);
         i = nextIndex;
@@ -295,10 +286,22 @@ function parseArgs(argv: readonly string[] = process.argv.slice(2)): ParsedCliAr
         options.task = typeof value === 'string' ? value : options.task;
         break;
       }
-      case 'session': {
+      case 'expected-head': {
+        const { value, nextIndex } = consumeValue(i, inlineValue); i = nextIndex;
+        if (typeof value === 'string') options.expectedHead = value;
+        break;
+      }
+      case 'key':
+      case 'source-mode': {
         const { value, nextIndex } = consumeValue(i, inlineValue);
         i = nextIndex;
-        options.session = typeof value === 'string' ? value : options.session;
+        if (typeof value === 'string') options[name === 'key' ? 'key' : 'sourceMode'] = value;
+        break;
+      }
+      case 'thread': {
+        const { value, nextIndex } = consumeValue(i, inlineValue);
+        i = nextIndex;
+        options.thread = typeof value === 'string' ? value : options.thread;
         break;
       }
       case 'message': {
@@ -355,22 +358,10 @@ function parseArgs(argv: readonly string[] = process.argv.slice(2)): ParsedCliAr
         options.timezone = typeof value === 'string' ? value : options.timezone;
         break;
       }
-      case 'agent': {
-        const { value, nextIndex } = consumeValue(i, inlineValue);
-        i = nextIndex;
-        options.agent = typeof value === 'string' ? value : options.agent;
-        break;
-      }
       case 'thinking': {
         const { value, nextIndex } = consumeValue(i, inlineValue);
         i = nextIndex;
         options.thinking = typeof value === 'string' ? value : options.thinking;
-        break;
-      }
-      case 'variant': {
-        const { value, nextIndex } = consumeValue(i, inlineValue);
-        i = nextIndex;
-        options.variant = typeof value === 'string' ? value : options.variant;
         break;
       }
       case 'disabled':
@@ -552,7 +543,7 @@ function parseArgs(argv: readonly string[] = process.argv.slice(2)): ParsedCliAr
   const tunnelAction = command === 'tunnel' ? (positional[2] || null) : null;
   const startupAction = command === 'startup' ? (positional[1] || 'status') : null;
   const scheduleAction = command === 'schedule' ? (positional[1] || 'help') : null;
-  const sessionAction = command === 'session' ? (positional[1] || 'help') : null;
+  const threadAction = command === 'thread' ? (positional[1] || 'help') : null;
 
   if (options.lan && typeof options.host !== 'string') {
     options.host = '0.0.0.0';
@@ -568,7 +559,7 @@ function parseArgs(argv: readonly string[] = process.argv.slice(2)): ParsedCliAr
     tunnelAction,
     startupAction,
     scheduleAction,
-    sessionAction,
+    threadAction,
     options,
     removedFlagErrors,
     helpRequested,
@@ -578,7 +569,7 @@ function parseArgs(argv: readonly string[] = process.argv.slice(2)): ParsedCliAr
 
 function showHelp(): void {
   console.log(`
- Varin - A native desktop and web workspace for the Pi coding agent
+ Varin - A native desktop and web agent workspace
 
 USAGE:
   varin [COMMAND] [OPTIONS]
@@ -589,7 +580,7 @@ COMMANDS:
   restart        Stop and start the server
   status         Show server status
   schedule       Manage scheduled tasks
-  session        Create, inspect, and read Varin sessions
+  thread         Create, inspect, and read native Threads
   models         Show default and favorite models
   projects       Show configured projects and IDs
   tunnel         Tunnel lifecycle commands
@@ -617,8 +608,6 @@ ENVIRONMENT:
   VARIN_UI_PASSWORD      Alternative to --ui-password flag
   VARIN_API_ONLY         Set to true/1 to start API routes only
   VARIN_DATA_DIR         Override Varin data directory
-  VARIN_AGENT_DIR        Override the Pi agent configuration directory
-  PI_CODING_AGENT_DIR     Native Pi agent configuration directory
 
 EXAMPLES:
   varin                    # Start in daemon mode on default port 3000 (or free port)
@@ -794,7 +783,7 @@ _varin_tunnel() {
   cur="\${COMP_WORDS[COMP_CWORD]}"
   prev="\${COMP_WORDS[COMP_CWORD-1]}"
 
-    commands="serve stop restart status schedule session models projects tunnel startup logs connect-url update"
+    commands="serve stop restart status schedule thread models projects tunnel startup logs connect-url update"
   tunnel_commands="help providers ready doctor status start stop profile completion"
   profile_commands="list show add remove"
   common_flags="--port --foreground --no-daemon --json --all --help --version --plain --quiet"
@@ -847,7 +836,7 @@ _varin() {
     'restart:Stop and start the server'
     'status:Show server status'
     'schedule:Manage scheduled tasks'
-    'session:Create sessions'
+    'thread:Create native Threads'
     'models:Show default and favorite models'
     'projects:Show configured projects and IDs'
     'tunnel:Tunnel lifecycle commands'

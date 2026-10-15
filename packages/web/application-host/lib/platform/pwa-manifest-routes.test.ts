@@ -1,3 +1,4 @@
+import type { ThreadSummary } from '@varin/protocol';
 import { describe, expect, it, vi } from 'vitest';
 import {
   registerPwaManifestRoute,
@@ -29,19 +30,25 @@ const createResponse = (): TestResponse => ({
   },
 });
 
+const thread = (id: string, title: string, updated: number): ThreadSummary => ({
+  thread_id: id, main_branch_id: `${id}:main`, title, updated_at_ms: updated,
+  revision: 1, created_at_ms: 1, pinned: false, archived: false, deleted_at_ms: null,
+  activity_cursor: 1, read_cursor: 0, unread: true, bot_id: null, branches: [], observer_project_ids: [],
+});
+
 describe('PWA manifest route', () => {
-  it('builds recent shortcuts from Pi sessions without an HTTP lifecycle dependency', async () => {
+  it('builds recent shortcuts from native Threads without an HTTP lifecycle dependency', async () => {
     const routes = new Map<string, PwaManifestHandler>();
-    const listRecentSessions = vi.fn(async () => [
-      { id: 'ses_old', name: 'Older task', lastActiveAt: 10 },
-      { id: 'ses_new', name: 'Latest task', lastActiveAt: 20 },
+    const listRecentThreads = vi.fn(async () => [
+      thread('thread:old', 'Older task', 10),
+      thread('thread:new', 'Latest task', 20),
     ]);
     registerPwaManifestRoute({
       get(route: string, handler: PwaManifestHandler) {
         routes.set(route, handler);
       },
     }, {
-      listRecentSessions,
+      listRecentThreads,
       readSettingsFromDisk: async () => ({}),
       normalizePwaAppName: (value, fallback) => typeof value === 'string' && value.trim() ? value.trim() : fallback,
       normalizePwaOrientation: (value, fallback) => typeof value === 'string' && value.trim() ? value.trim() : fallback,
@@ -52,7 +59,7 @@ describe('PWA manifest route', () => {
     if (!handler) throw new Error('Expected PWA manifest handler');
     await handler({ query: {} }, res);
 
-    expect(listRecentSessions).toHaveBeenCalledOnce();
+    expect(listRecentThreads).toHaveBeenCalledOnce();
     expect(JSON.parse(res.body).shortcuts).toEqual([
       {
         name: 'Appearance Settings',
@@ -64,15 +71,15 @@ describe('PWA manifest route', () => {
       {
         name: 'Latest task',
         short_name: 'Latest task',
-        description: 'Open recent Pi session',
-        url: '/?session=ses_new',
+        description: 'Open recent conversation',
+        url: '/?thread=thread%3Anew&branch=thread%3Anew%3Amain',
         icons: [{ src: '/pwa-192.png', sizes: '192x192', type: 'image/png' }],
       },
       {
         name: 'Older task',
         short_name: 'Older task',
-        description: 'Open recent Pi session',
-        url: '/?session=ses_old',
+        description: 'Open recent conversation',
+        url: '/?thread=thread%3Aold&branch=thread%3Aold%3Amain',
         icons: [{ src: '/pwa-192.png', sizes: '192x192', type: 'image/png' }],
       },
     ]);

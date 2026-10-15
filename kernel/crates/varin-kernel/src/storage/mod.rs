@@ -16,7 +16,9 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use uuid::Uuid;
 
-use crate::authority::{path_allowed, path_allowed_scopes, require_capability};
+use crate::authority::{
+    path_allowed, path_allowed_scopes, path_metadata_allowed_scopes, require_capability,
+};
 use crate::error::KernelError;
 use crate::model::{
     BlobStream, BranchBuilder, BranchRow, BranchWriteBuilder, BuildTree, FileLease,
@@ -28,20 +30,41 @@ use crate::storage_schema::{
 };
 
 mod authority_store;
+pub(crate) mod blob_reads;
 mod branches;
-mod core;
+pub(crate) mod capture_resources;
+mod child_sources;
 mod compute_resources;
+mod core;
 mod dispatch;
+pub(crate) mod file_inventory;
+pub(crate) mod file_mutations;
+pub(crate) mod file_observations;
+mod file_reconciliation;
 mod file_resource_leases;
 mod file_resources;
 mod gc;
 mod maintenance;
+pub(crate) mod materialization;
+pub(crate) mod materialized_views;
 mod objects;
 mod operations;
+#[cfg(test)]
+mod native_authority_tests;
+pub(crate) mod process_interactions;
 mod process_resources;
 mod records;
 mod recovery;
+mod recovery_journal;
+pub(crate) mod result_publication;
 mod state_tree;
+mod source_authorities;
+mod source_mcp_deliveries;
+pub(crate) mod source_mcp_children;
+pub(crate) mod source_mcp_derivation;
+pub(crate) mod source_read_receipts;
+pub(crate) mod source_schedule_receipts;
+pub(crate) mod source_mcp_receipts;
 
 pub(crate) fn sync_directory(path: &Path) -> io::Result<()> {
     #[cfg(unix)]
@@ -69,16 +92,24 @@ pub(crate) fn durable_rename(source: &Path, target: &Path) -> io::Result<()> {
         unsafe extern "system" {
             fn MoveFileExW(existing: *const u16, replacement: *const u16, flags: u32) -> i32;
         }
-        let existing = source
-            .as_os_str()
-            .encode_wide()
-            .chain(std::iter::once(0))
-            .collect::<Vec<_>>();
-        let replacement = target
-            .as_os_str()
-            .encode_wide()
-            .chain(std::iter::once(0))
-            .collect::<Vec<_>>();
+        fn wide_path(path: &Path) -> io::Result<Vec<u16>> {
+            // Unlike Rust's filesystem APIs, a direct Win32 call does not expand
+            // long paths for us. Resolve syntax without following the final link.
+            let absolute = std::path::absolute(path)?;
+            let (prefix, skip) = match absolute.components().next() {
+                Some(std::path::Component::Prefix(prefix)) => match prefix.kind() {
+                    std::path::Prefix::Disk(_) => (r"\\?\", 0),
+                    std::path::Prefix::UNC(_, _) => (r"\\?\UNC\", 2),
+                    _ => ("", 0),
+                },
+                _ => ("", 0),
+            };
+            Ok(std::ffi::OsStr::new(prefix).encode_wide()
+                .chain(absolute.as_os_str().encode_wide().skip(skip))
+                .chain(std::iter::once(0)).collect())
+        }
+        let existing = wide_path(source)?;
+        let replacement = wide_path(target)?;
         let moved = unsafe {
             MoveFileExW(
                 existing.as_ptr(),
@@ -176,9 +207,20 @@ pub(crate) struct Storage {
     branch_builders: HashMap<String, BranchBuilder>,
     branch_write_builders: HashMap<String, BranchWriteBuilder>,
     verified_objects: BTreeSet<String>,
+    blob_read_roots: blob_reads::BlobReadRoots,
     file_roots: HashMap<String, FileRoot>,
+    observation_reads: HashMap<String, file_observations::ActiveRead>,
+    observation_hints: Option<Arc<dyn Fn(file_observations::Hint) + Send + Sync>>,
     file_leases: HashMap<String, FileLease>,
+    file_lease_waiters: std::collections::VecDeque<file_resource_leases::FileLeaseWaiter>,
+    file_lease_notify: Option<Arc<dyn Fn() + Send + Sync>>,
+    retained_file_leases: HashMap<String, file_resource_leases::RetainedFileLease>,
+    materializations: HashMap<String, materialization::ActiveMaterialization>,
+    result_publications: BTreeSet<String>,
     processes: crate::process::ProcessManager,
+    process_receipt_wake: Option<crate::process::receipt_wake::Watch>,
+    process_receipt_notify: Option<Arc<dyn Fn() + Send + Sync>>,
+    process_receipt_wake_failure: Option<String>,
     computations: crate::compute::ComputeManager,
 }
 
@@ -186,6 +228,8 @@ impl Drop for Storage {
     fn drop(&mut self) {
         // Keep the catalog and storage lock alive through process drainage.
         // Field drop order alone would unlock before native children stop.
+        self.process_receipt_wake.take();
+        self.cancel_file_observation_reads();
         self.computations.shutdown();
         let _ = self.shutdown_processes();
     }

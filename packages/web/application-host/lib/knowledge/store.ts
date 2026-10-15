@@ -15,7 +15,7 @@ export async function openWorkspaceKnowledge(deps: OpenWorkspaceKnowledgeDeps): 
   const storeId = owner.register({
     revision: (value) => { revision = value; },
     notify: (message) => {
-      if (message.type === "blocks") deps.onBlocksChanged?.(message.sessionId, message.change);
+      if (message.type === "plan-changed") deps.onPlanChanged?.(message.change);
       else if (message.type === "knowledge") deps.onKnowledgeChanged?.(message.ids);
       else if (deps.onPersistenceError) deps.onPersistenceError(restoreStoreError(message.error));
       else console.error("[KnowledgeStore] Deferred checkpoint failed; storage retains pending data for retry");

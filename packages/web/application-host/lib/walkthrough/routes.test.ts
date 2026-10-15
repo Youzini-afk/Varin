@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { registerWalkthroughRoutes } from './routes.js';
 import type { Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
+import type { ModelTextService } from '../model-text/service.js';
 
 // These run over real HTTP on purpose. The bug this file exists for was
 // invisible to unit tests: the service and the store were both correct, and the
@@ -19,7 +20,11 @@ describe('walkthrough routes', () => {
 
   let lastArgs: Record<string, unknown> | undefined;
 
+  const unusedModelText = async (): Promise<never> => { throw new Error('Route fixture must not invoke model inference'); };
+  const modelText = { describe: unusedModelText, inspect: unusedModelText, cancel: unusedModelText,
+    generate: unusedModelText, close: async () => {} } satisfies ModelTextService;
   const service = {
+    modelText,
     async getWalkthrough(args: Record<string, unknown>) {
       lastArgs = args;
       return { walkthrough: null, hunks: [], hunkCount: 0, generating: Boolean(job) };

@@ -1,6 +1,8 @@
 import { create } from 'zustand';
 import { devtools, persist, createJSONStorage } from 'zustand/middleware';
 import type { PersistStorage } from 'zustand/middleware';
+import type { SourceResourceOwner } from '@varin/protocol';
+import type { ThreadIdentity } from '@varin/application-client';
 
 import { getSafeSessionStorage } from '@/stores/utils/safeStorage';
 
@@ -30,12 +32,20 @@ export const EMPTY_TERMINAL_BUFFER: TerminalBuffer = Object.freeze({
 
 export type TerminalTabLifecycle = 'idle' | 'running' | 'exited';
 export type TerminalTabClosePolicy = 'destroy' | 'detach';
+export type TerminalProcessReference = {
+  identity: ThreadIdentity;
+  operationId: string;
+  processId: string;
+  endpointGeneration: number;
+};
+export type TerminalSource = { cwd: string; resourceOwner: SourceResourceOwner; process?: TerminalProcessReference };
 
 export type TerminalTab = {
   id: string;
   terminalSessionId: string | null;
   lifecycle: TerminalTabLifecycle;
   closePolicy: TerminalTabClosePolicy;
+  source: TerminalSource | null;
   label: string;
   iconKey: string | null;
   isConnecting: boolean;
@@ -73,7 +83,7 @@ interface TerminalStore {
   getBuffer: (directory: string, tabId: string) => TerminalBuffer;
 
   createTab: (directory: string) => string;
-  attachExistingSession: (directory: string, sessionId: string, label?: string) => string;
+  attachExistingSession: (directory: string, sessionId: string, label?: string, source?: TerminalSource) => string;
   setActiveTab: (directory: string, tabId: string) => void;
   setTabLabel: (directory: string, tabId: string, label: string) => void;
   setTabIconKey: (directory: string, tabId: string, iconKey: string | null) => void;
@@ -178,6 +188,7 @@ const createEmptyTab = (id: string, label: string): TerminalTab => ({
   terminalSessionId: null,
   lifecycle: 'idle',
   closePolicy: 'destroy',
+  source: null,
   label,
   iconKey: null,
   isConnecting: false,
@@ -214,18 +225,23 @@ const partializeTerminalStore = (state: TerminalStore): PersistedTerminalStoreSt
   }
 
   const result: PersistedTerminalStoreState = {
-    sessions: Array.from(state.sessions.entries()).map(([directory, dirState]) => [
-      directory,
-      {
-        activeTabId: dirState.activeTabId,
-        tabs: dirState.tabs.map((tab) => ({
-          id: tab.id,
-          label: tab.label,
-          iconKey: tab.iconKey,
-          createdAt: tab.createdAt,
-        })),
-      },
-    ]),
+    // Attached jobs retain their identity at the Host. Persisting only their
+    // layout would turn them into new local shells after hydration.
+    sessions: Array.from(state.sessions.entries()).flatMap(([directory, dirState]) => {
+      const tabs = dirState.tabs.filter(tab => tab.closePolicy === 'destroy');
+      return tabs.length === 0 ? [] : [[
+        directory,
+        {
+          activeTabId: tabs.some(tab => tab.id === dirState.activeTabId) ? dirState.activeTabId : tabs[0].id,
+          tabs: tabs.map((tab) => ({
+            id: tab.id,
+            label: tab.label,
+            iconKey: tab.iconKey,
+            createdAt: tab.createdAt,
+          })),
+        },
+      ] as [string, PersistedDirectoryTerminalState]];
+    }),
     nextTabId: state.nextTabId,
   };
 
@@ -330,7 +346,7 @@ export const useTerminalStore = create<TerminalStore>()(
           return tabId;
         },
 
-        attachExistingSession: (directory: string, sessionId: string, label) => {
+        attachExistingSession: (directory: string, sessionId: string, label, source) => {
           const key = normalizeDirectory(directory);
           if (!key || !sessionId.trim()) return 'tab-invalid';
           const existingState = get().getDirectoryState(key);
@@ -354,6 +370,7 @@ export const useTerminalStore = create<TerminalStore>()(
               terminalSessionId: sessionId,
               lifecycle: 'running',
               closePolicy: 'detach',
+              source: source ?? null,
               ...(label?.trim() ? { label: label.trim() } : {}),
             };
             newSessions.set(key, { ...existing, tabs: nextTabs, activeTabId: tabId });
@@ -842,6 +859,7 @@ export const useTerminalStore = create<TerminalStore>()(
                 terminalSessionId: null,
                 lifecycle: 'idle',
                 closePolicy: 'destroy',
+                source: null,
                 createdAt: typeof rawTab.createdAt === 'number' ? rawTab.createdAt : Date.now(),
                 isConnecting: false,
                 previewUrl: null,

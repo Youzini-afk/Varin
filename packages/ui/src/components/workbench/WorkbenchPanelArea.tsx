@@ -18,7 +18,7 @@ import { listAgentFileChangeHints, subscribeAgentFileChangeHints } from '@/lib/a
 import { getDocumentRegistry } from '@/lib/documents/session';
 import { useDirtyResourceIds } from '@/lib/documents/hooks';
 import { peekEditorSessionLink, revealResourceInEditor } from '@/lib/agent-editor/navigation';
-import { usePiSessionStore } from '@/stores/usePiSessionStore';
+import { openThreadFromNavigation } from '@/lib/agent-runtime/threadNavigation';
 import {
   VARIN_WORKBENCH_REPLACEMENT_TARGETS,
   VARIN_WORKBENCH_SLOTS,
@@ -193,12 +193,12 @@ export const WorkbenchPanelArea: React.FC<WorkbenchPanelAreaProps> = ({
                                 workspaceId,
                                 resourceId,
                                 workspaceRoot: directory,
-                                ...(link?.sessionId ? { sessionId: link.sessionId } : {}),
+                                ...(link?.thread ? { thread: link.thread } : {}),
                                 ...(link?.entryId ? { entryId: link.entryId } : {}),
                                 ...(hint?.toolCallId ? { toolCallId: hint.toolCallId } : {}),
                               });
                               if (link?.entryId) {
-                                void usePiSessionStore.getState().navigateSession(link.sessionId, link.entryId);
+                                void openThreadFromNavigation(link.thread);
                               }
                             }}
                           >

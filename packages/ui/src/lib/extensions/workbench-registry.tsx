@@ -184,6 +184,8 @@ const WorkbenchMountHost = <TProps extends object>({
   props: TProps;
 }): React.ReactNode => {
   const containerRef = React.useRef<HTMLDivElement>(null);
+  const mountInputs = React.useRef({ contribution, implementation, onMountReady, props });
+  mountInputs.current = { contribution, implementation, onMountReady, props };
   const [failure, setFailure] = React.useState<MountFailure | null>(null);
   const contributionKey = workbenchContributionInstanceKey(contribution);
   const failed = failure?.contributionKey === contributionKey
@@ -204,6 +206,41 @@ const WorkbenchMountHost = <TProps extends object>({
       mountFailed = true;
       setFailure({ contributionKey, error, implementation, props });
     };
+    // Non-shell mount points stay attached across owner generations. Their actual mounted child
+    // participates in the Surface candidate transaction before React observes the new registry.
+    if (contribution.descriptor.kind !== 'shell') {
+      const point = createWorkbenchCompositionHost({
+        shellContributionId: `workbench.mount.${contribution.descriptor.id}`,
+        owner: contribution.owner,
+        allowedReplacementTargets: new Set(),
+        allowedSlots: new Set(['workbench.mount']),
+        activate: async () => undefined,
+        resolveReplacement: () => undefined,
+        resolveSlotCandidates: (_slot, _kind, preview) => {
+          const candidate = preview
+            ? preview.visibleContributions.find((item) => item.descriptor.id === contribution.descriptor.id)
+            : varinSurfaceRuntime.getSnapshot().visibleContributions.find((item) => item.descriptor.id === contribution.descriptor.id);
+          if (!candidate || !isMountImplementation<TProps>(candidate.implementation)) return [];
+          const mountable = candidate.implementation;
+          return [{ ...candidate, implementation: {
+            mount: async (target: HTMLElement, context: Parameters<MountImplementation<TProps>['mount']>[1]) => {
+              const dispose = await mountable.mount(target, { ...context, props: mountInputs.current.props });
+              return dispose;
+            },
+          } }];
+        },
+        registerContributionConsumer: varinSurfaceRuntime.registerContributionConsumer,
+        subscribe: varinSurfaceRuntime.subscribe,
+        onError: reportMountError,
+      });
+      void point.mountSlot({ container, slot: 'workbench.mount' }).then(() => {
+        if (active && !mountFailed) mountInputs.current.onMountReady?.();
+      }).catch((error) => reportMountError(error, 'mount'));
+      return () => {
+        active = false;
+        void point.dispose(`Surface contribution ${contribution.descriptor.id} was unmounted`);
+      };
+    }
     let composition: ReturnType<typeof createWorkbenchCompositionHost> | null = null;
     if (contribution.descriptor.kind === 'shell') {
       try {
@@ -218,14 +255,17 @@ const WorkbenchMountHost = <TProps extends object>({
           allowedReplacementTargets: new Set(seams.replacementTargets),
           allowedSlots: new Set(seams.slots),
           activate: triggerVisibleSurfaceContributions,
-          resolveReplacement: (target) => {
+          registerContributionConsumer: varinSurfaceRuntime.registerContributionConsumer,
+          resolveReplacement: (target, preview) => {
             if (target === VARIN_WORKBENCH_REPLACEMENT_TARGETS.shell
               || target === VARIN_WORKBENCH_REPLACEMENT_TARGETS.transition) return undefined;
-            const selected = selectedReplacement(varinSurfaceRuntime.getSnapshot(), target);
+            const selected = preview
+              ? preview.visibleContributions.find((candidate) => candidate.descriptor.replacement?.target === target)
+              : selectedReplacement(varinSurfaceRuntime.getSnapshot(), target);
             if (!selected || workbenchContributionInstanceKey(selected) === contributionKey) return undefined;
             return { contribution: selected, props: { target } };
           },
-          resolveSlotCandidates: (slot, kind) => varinSurfaceRuntime.getSnapshot().visibleContributions.filter((candidate) => (
+          resolveSlotCandidates: (slot, kind, preview) => (preview?.visibleContributions ?? varinSurfaceRuntime.getSnapshot().visibleContributions).filter((candidate) => (
             candidate.descriptor.placement?.slot === slot
             && candidate.descriptor.replacement === undefined
             && (kind === undefined || candidate.descriptor.kind === kind)
@@ -267,7 +307,9 @@ const WorkbenchMountHost = <TProps extends object>({
         await session.dispose(reason);
       })();
     };
-  }, [contribution, contributionKey, implementation, onMountReady, props]);
+  // Registry generations are committed by the connected consumer; prop changes remount this host point.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [contribution.descriptor.id, contribution.descriptor.kind === 'shell' ? contributionKey : null, props]);
 
   if (failed && failure) {
     return typeof fallback === 'function'
@@ -326,7 +368,7 @@ export function WorkbenchSurfaceContributionHost<TProps extends object>({
   if (isMountImplementation<TProps>(contribution.implementation)) {
     return (
       <WorkbenchMountHost
-        key={contributionKey}
+        key={contribution.descriptor.id}
         className={className}
         contribution={contribution}
         fallback={fallback}
@@ -465,7 +507,7 @@ export const WorkbenchReplacement: React.FC<{
   if (isMountImplementation<MountReplacementProps>(contribution.implementation)) {
     return (
       <WorkbenchMountHost
-        key={contributionKey}
+        key={contribution.descriptor.id}
         className="h-full min-h-0 w-full min-w-0"
         contribution={contribution}
         fallback={renderFailureFallback}
@@ -511,7 +553,7 @@ export const WorkbenchOwnedView: React.FC<{
   if (isMountImplementation<MountOwnedViewProps>(contribution.implementation)) {
     return (
       <WorkbenchMountHost
-        key={contributionKey}
+        key={contribution.descriptor.id}
         className="h-full min-h-0 w-full min-w-0"
         contribution={contribution}
         fallback={fallback}
@@ -565,7 +607,7 @@ export const WorkbenchContributionSlot: React.FC<{
     if (isMountImplementation<Record<string, unknown>>(contribution.implementation)) {
       return (
         <WorkbenchMountHost
-          key={contributionKey}
+          key={contribution.descriptor.id}
           contribution={contribution}
           fallback={null}
           implementation={contribution.implementation}

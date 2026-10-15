@@ -1,0 +1,36 @@
+{
+  "name": "@varin/script-runtime",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "license": "AGPL-3.0-only",
+  "description": "Shared persistent Node REPL evaluator and private managed-process transport.",
+  "files": [
+    "dist"
+  ],
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./worker": {
+      "types": "./dist/worker.d.ts",
+      "import": "./dist/worker.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "type-check": "tsc --noEmit -p tsconfig.json",
+    "lint": "eslint \"./src/**/*.ts\" \"./test/**/*.ts\" --config ../../eslint.config.js",
+    "test": "node --experimental-repl-await --import tsx --test \"test/**/*.test.ts\"",
+    "test:dist": "node --experimental-repl-await --test test/worker.dist.test.mjs"
+  },
+  "dependencies": {
+    "@varin/protocol": "workspace:*"
+  },
+  "engines": {
+    "node": ">=22.19.0"
+  }
+}

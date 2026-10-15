@@ -5,7 +5,7 @@ description: Zainstaluj Varin na komputerze lub w przeglądarce ze źródeł alb
 
 # Instalacja
 
-Varin jest w wersji pre-1.0. Obsługiwane sposoby uruchomienia to dziś **ze źródeł** i **z Dockerem**. Spakowane pobrania npm i GitHub Release nie są jeszcze opublikowane.
+Zbuduj Varin ze źródeł lub użyj Dockera według poniższych kroków. Pakiety i platformy sprawdź w [GitHub Releases](https://github.com/Youzini-afk/Varin/releases).
 
 Są dwie główne powierzchnie produktu:
 
@@ -18,9 +18,8 @@ Są dwie główne powierzchnie produktu:
 - [Bun](https://bun.sh) 1.3.14
 - Zestaw narzędzi Rust wybrany przez `kernel/rust-toolchain.toml` (zainstaluj rustup; repozytorium wybiera wymaganą wersję)
 - Git
-- Git for Windows i Git Bash przy uruchamianiu narzędzi powłoki Pi w Windows
 
-**Nie** potrzebujesz osobnej instalacji OpenCode ani CLI Pi. Spakowane buildy desktopowe i kontenerowe zawierają przypięte środowisko uruchomieniowe Pi.
+Varin buduje i uruchamia natywny runtime Rust Agent wraz z Application Host. Nie wymaga osobnego CLI agenta. Istniejące pliki i historyczne dane rozmów nie są automatycznie migrowane ani przepisywane.
 
 ## Ze źródeł (web)
 
@@ -67,7 +66,3 @@ Compose domyślnie pobiera szczupły obraz `ghcr.io/youzini-afk/varin-slim:lates
 ```bash
 docker compose -f docker-compose.yml -f docker-compose.toolbelt.yml up -d
 ```
-
-## Jednolinijkowiec CLI (nieopublikowany)
-
-`scripts/install.sh` i `npx @varin/web` celują w pakiet npm `@varin/web`. Ten pakiet nie jest jeszcze w publicznym rejestrze, więc instalator curl będzie kończył się niepowodzeniem do czasu publikacji wydania. Do tego czasu używaj źródeł albo Dockera.

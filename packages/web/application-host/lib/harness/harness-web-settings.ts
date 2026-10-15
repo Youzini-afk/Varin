@@ -1,9 +1,9 @@
+import type { AgentSettingsSnapshot } from '@varin/application-client';
 import {
   mergeHarnessWebDomainPolicy,
   type HarnessSettings,
   type HarnessWebDomainPolicy,
-  type PiSettingsSnapshot,
-} from "@varin/protocol";
+  } from "@varin/protocol";
 import { parseSearchProviderSettings } from "./web-search.js";
 
 export interface HarnessWebBinding {
@@ -45,13 +45,17 @@ const domainsFrom = (value: unknown): Partial<HarnessWebDomainPolicy> | undefine
       };
 };
 
+/** Material reads consume only the original domain policy, independent of search/render configuration. */
+export const resolveHarnessMaterialWebPolicy = (snapshot: AgentSettingsSnapshot): HarnessWebDomainPolicy =>
+  mergeHarnessWebDomainPolicy(domainsFrom(webFrom(snapshot.global).domains),
+    domainsFrom(snapshot.projectTrusted ? webFrom(snapshot.project).domains : undefined));
+
 /** Freeze credential-free web policy/provider identity for one worker generation. */
-export const resolveHarnessWebBinding = (snapshot: PiSettingsSnapshot): HarnessWebBinding => {
+export const resolveHarnessWebBinding = (snapshot: AgentSettingsSnapshot): HarnessWebBinding => {
   const user = webFrom(snapshot.global);
-  const workspace = snapshot.projectTrusted ? webFrom(snapshot.project) : {};
   const render = typeof user.render === "boolean" ? user.render : undefined;
   const search = parseSearchProviderSettings(user.search);
-  const domains = mergeHarnessWebDomainPolicy(domainsFrom(user.domains), domainsFrom(workspace.domains));
+  const domains = resolveHarnessMaterialWebPolicy(snapshot);
   const settings: HarnessSettings["web"] = {
     ...(render === undefined ? {} : { render }),
     ...(search ? { search } : {}),

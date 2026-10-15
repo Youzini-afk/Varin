@@ -7,12 +7,20 @@ import { useI18n } from '@/lib/i18n';
 export function BotActivityBanner({ bot, busy, onAction }: { bot: BotSummary; busy: boolean; onAction(action: 'sleep' | 'wake' | 'restore' | 'retry'): void }) {
   const { t } = useI18n();
   const state = bot.activity?.state ?? 'awake';
+  const executionStatus = bot.activity?.execution ? <div className="space-y-1 text-muted-foreground" aria-label="Bot execution settlement">
+      <p>{bot.activity.execution.currentKernelWorkersDrained ? 'Current local workers drained.' : 'Local worker stop is not yet confirmed.'}</p>
+      {bot.activity.execution.unprovenOperationStopIds.length > 0 && <p>Stop remains unconfirmed for {bot.activity.execution.unprovenOperationStopIds.length} operations. They may still be running.</p>}
+      {bot.activity.execution.unknownEffectOperationIds.length > 0 && <p>External effects remain unknown for {bot.activity.execution.unknownEffectOperationIds.length} operations. Check the original service before repeating them.</p>}
+      {bot.activity.execution.unresolvedModelRequestIds.length > 0 && <p>{bot.activity.execution.unresolvedModelRequestIds.length} model requests still need their original receipt. Usage may be unknown.</p>}
+    </div> : null;
   if (bot.deletion) return <div className="space-y-2 border-b border-border px-4 py-3 typography-meta" role="status">
     <div className="flex items-center gap-2"><Icon name="delete-bin" className="size-4" />
       <span className="flex-1">{t(bot.deletion.error ? 'settings.bots.deleteFailed' : 'settings.bots.deleting')}</span>
       {bot.deletion.error ? <Button size="sm" variant="outline" disabled={busy} onClick={() => onAction('retry')}>{t('settings.bots.deleteRetry')}</Button> : null}
     </div>
     {bot.deletion.error ? <p role="alert" className="whitespace-pre-wrap text-destructive">{bot.deletion.error}</p> : null}
+    {executionStatus}
+    {bot.activity?.machines.filter(machine => machine.state === 'kept-running').map(machine => <p key={machine.machineId} className="text-muted-foreground">{machine.label} · {t('settings.bots.machine.kept-running')}</p>)}
   </div>;
   if (state === 'awake' && !bot.archived) return null;
   const label = bot.archived ? 'settings.bots.archived' : state === 'sleeping' ? 'settings.bots.sleeping'
@@ -24,7 +32,8 @@ export function BotActivityBanner({ bot, busy, onAction }: { bot: BotSummary; bu
         {t(bot.archived ? 'settings.bots.restore' : state === 'sleep-failed' ? 'settings.bots.sleepRetry' : 'settings.bots.wakeContinue')}
       </Button>}
     </div>
-    {state === 'asleep' ? <p className="text-muted-foreground">{t('settings.bots.sleepDescription')}</p> : null}
+    {state === 'asleep' ? <p className="text-muted-foreground">New Bot execution is paused. Opening history does not wake it.</p> : null}
+    {executionStatus}
     {bot.activity?.error ? <p role="alert" className="whitespace-pre-wrap text-destructive">{bot.activity.error}</p> : null}
     {bot.activity?.machines.length ? <details><summary className="cursor-pointer text-muted-foreground">{t('settings.bots.remoteComputers')}</summary>
       <ul className="mt-2 space-y-1">{bot.activity.machines.map((machine) => <li key={machine.machineId}>

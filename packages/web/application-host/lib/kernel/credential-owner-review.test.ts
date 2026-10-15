@@ -1,0 +1,317 @@
+import { ToolBridge } from './tool-bridge.js';
+import { expect, it, vi } from 'vitest';
+import { createModelAuthority } from './model-authority.js';
+import { CredentialBridge, type PrivateCredentialResponse } from './credential-bridge.js';
+import { ExistingHostCredentialOwner, type CredentialOwnerOptions, type CredentialScope } from './credential-owner.js';
+
+const scope: CredentialScope = { reference: 'fake-ref', authority: 'fake-authority', account: 'fake-local-binding-handle', generation: 7 };
+it('model selection preserves capacity, thinking mapping and sampling through credential rebinding', async () => {
+  let topP = 0.8;
+  const model = () => ({ providerId: 'fixture-provider', modelId: 'deepseek-fixture', name: 'Fixture',
+    api: 'openai-completions', baseUrl: 'https://model.example.test/v1', maxTokens: 32768, contextWindow: 131072, reasoning: true,
+    thinkingLevelMap: { xhigh: null }, samplingParams: { top_p: topP }, samplingParamsByThinkingLevel: { high: { temperature: 0.5 } },
+    compat: { thinkingFormat: 'deepseek', supportsReasoningEffort: true } });
+  const authority = createModelAuthority({ selectedModel: async () => model(), listModels: async () => [model()],
+    currentScope: async () => scope, currentProviderAccount: async () => undefined, routingEnvironment: async () => ({}),
+    getAuth: async () => ({ auth: { apiKey: 'fake-test-key' } }) });
+  expect((await authority.listModels())[0]).toMatchObject({ contextWindowTokens: 131072, thinkingLevels: ['off', 'minimal', 'low', 'medium', 'high'] });
+  const { configuration } = await authority.resolveModel({ providerId: 'fixture-provider', modelId: 'deepseek-fixture', thinkingLevel: 'high' });
+  expect(configuration).toMatchObject({ adapterId: 'openai-completions', adapterVersion: '1', thinkingLevel: 'high', reasoningEffort: 'high', contextWindowTokens: 131072,
+    modelOptions: { samplingParams: { thinking: { type: 'enabled' }, top_p: 0.8, temperature: 0.5 } } });
+  await authority.rebindModel(configuration, scope);
+  await expect(authority.resolveModel({ providerId: 'fixture-provider', modelId: 'deepseek-fixture', thinkingLevel: 'xhigh' })).rejects.toMatchObject({ code: 'model-thinking-level-unavailable' });
+  const explicit = await authority.resolveModel({ providerId: 'fixture-provider', modelId: 'deepseek-fixture', thinkingLevel: 'high', temperature: 0 });
+  expect(explicit.configuration.modelOptions).toEqual({ temperature: 0, samplingParams: { thinking: { type: 'enabled' }, top_p: 0.8 } });
+  expect(explicit.configuration.configurationGeneration).not.toBe(configuration.configurationGeneration);
+  await authority.rebindModel(explicit.configuration, scope);
+  await expect(authority.resolveModel({ providerId: 'fixture-provider', modelId: 'deepseek-fixture', temperature: Number.NaN })).rejects.toMatchObject({ code: 'model-temperature-invalid' });
+  topP = 0.9;
+  const recovered = await authority.rebindModel(configuration, scope);
+  const recoveredExplicit = await authority.rebindModel(explicit.configuration, scope);
+  expect(configuration.modelOptions).toMatchObject({ samplingParams: { top_p: 0.8 } });
+  expect((await recovered.resolve(scope)).headers.authorization).toBe('Bearer fake-test-key');
+  recovered.release(); recoveredExplicit.release();
+});
+function owner(overrides: Partial<CredentialOwnerOptions> = {}) {
+  return new ExistingHostCredentialOwner({ providerId: 'fixture-provider', providerFamily: 'openai-responses', endpoint: 'https://model.example.test/v1/responses', currentScope: async () => ({ ...scope }), runtime: { getAuth: async () => ({ auth: { apiKey: 'fake-test-key' } }) }, ...overrides });
+}
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (error: unknown) => void;
+  const promise = new Promise<T>((yes, no) => { resolve = yes; reject = no; });
+  return { promise, resolve, reject };
+}
+
+it('credential adapter resolves exclusively through the injected existing owner and preserves explicit headers', async () => {
+  const calls: string[] = [];
+  const credential = owner({ runtime: { getAuth: async providerId => { calls.push(providerId); return { auth: { apiKey: 'fake-unused-key', baseUrl: 'https://model.example.test/v1', headers: { authorization: 'Bearer fake-owner-value', 'x-fixture': 'retained', 'x-removed': null } } }; } } });
+  const resolved = await credential.resolve(scope);
+  expect(calls).toEqual(['fixture-provider']);
+  expect(resolved.scope).toEqual(scope);
+  expect(resolved.headers).toMatchObject({ authorization: 'Bearer fake-owner-value', 'x-fixture': 'retained' });
+  expect(resolved.headers).not.toHaveProperty('x-removed');
+});
+
+it('scope change before lookup rejects without reading credentials', async () => {
+  let called = false;
+  const credential = owner({ currentScope: async () => ({ ...scope, generation: 8 }), runtime: { getAuth: async () => { called = true; return { auth: { apiKey: 'fake-key' } }; } } });
+  await expect(credential.resolve(scope)).rejects.toMatchObject({ code: 'credential-scope-changed' });
+  expect(called).toBe(false);
+});
+
+it('scope change during refresh rejects the stale result', async () => {
+  let generation = scope.generation;
+  const credential = owner({ currentScope: async () => ({ ...scope, generation }), runtime: { getAuth: async () => { generation++; return { auth: { apiKey: 'fake-stale-key' } }; } } });
+  await expect(credential.resolve(scope)).rejects.toMatchObject({ code: 'credential-scope-changed' });
+});
+
+it.each([
+  'https://another.example.test/v1',
+  'https://model.example.test/unrelated',
+  'https://model.example.test/v1?tenant=different',
+])('credential refresh cannot reroute the frozen endpoint to %s', async baseUrl => {
+  const credential = owner({ runtime: { getAuth: async () => ({ auth: { apiKey: 'fake-key', baseUrl } }) } });
+  await expect(credential.resolve(scope)).rejects.toMatchObject({ code: 'credential-endpoint-changed' });
+});
+
+it('caller cancellation leaves the existing owner refresh and persistence alive', async () => {
+  const refresh = deferred<{ auth: { apiKey: string } }>();
+  const entered = deferred<void>();
+  const persisted = deferred<void>();
+  let calls = 0;
+  const credential = owner({ runtime: { getAuth: async () => { calls++; entered.resolve(); const result = await refresh.promise; persisted.resolve(); return result; } } });
+  const controller = new AbortController();
+  const result = credential.resolve(scope, controller.signal);
+  const rejected = expect(result).rejects.toMatchObject({ code: 'credential-cancelled' });
+  await entered.promise;
+  controller.abort();
+  await rejected;
+  refresh.resolve({ auth: { apiKey: 'fake-refreshed-key' } });
+  await persisted.promise;
+  expect(calls).toBe(1);
+  expect((await credential.resolve(scope)).headers.authorization).toBe('Bearer fake-refreshed-key');
+  expect(calls).toBe(2);
+});
+
+it('pre-cancelled lookup never enters the credential owner', async () => {
+  let calls = 0;
+  const credential = owner({ runtime: { getAuth: async () => { calls++; return undefined; } } });
+  const controller = new AbortController();
+  controller.abort();
+  await expect(credential.resolve(scope, controller.signal)).rejects.toMatchObject({ code: 'credential-cancelled' });
+  expect(calls).toBe(0);
+});
+
+it('credential failures expose a code without leaking owner messages or causes', async () => {
+  const credential = owner({ runtime: { getAuth: async () => { throw new Error('fake-private-credential-and-response'); } } });
+  const error = await credential.resolve(scope).catch(value => value as Error);
+  expect(error).toMatchObject({ code: 'credential-resolution-failed', message: 'credential-resolution-failed' });
+  expect(String(error)).not.toContain('fake-private-credential-and-response');
+  expect(error).not.toHaveProperty('cause');
+});
+
+it('Codex credentials remain bound to the selected account and bearer authority', async () => {
+  const valid = owner({ providerFamily: 'openai-codex-responses', currentProviderAccount: async () => 'fake-provider-account' });
+  expect((await valid.resolve(scope)).headers).toMatchObject({ authorization: 'Bearer fake-test-key', 'chatgpt-account-id': 'fake-provider-account' });
+  const crossed = owner({ providerFamily: 'openai-codex-responses', currentProviderAccount: async () => 'fake-provider-account', runtime: { getAuth: async () => ({ auth: { apiKey: 'fake-key', headers: { 'chatgpt-account-id': 'another-fake-account' } } }) } });
+  await expect(crossed.resolve(scope)).rejects.toMatchObject({ code: 'credential-scope-changed' });
+  const missing = owner({ providerFamily: 'openai-codex-responses', currentProviderAccount: async () => 'fake-provider-account', allowAnonymous: true, runtime: { getAuth: async () => ({ auth: {} }) } });
+  await expect(missing.resolve(scope)).rejects.toMatchObject({ code: 'codex-credential-binding-required' });
+  await expect(owner({ providerFamily: 'openai-codex-responses' }).resolve(scope)).rejects.toMatchObject({ code: 'codex-provider-account-required' });
+});
+
+it('anonymous mode requires explicit permission and cannot disguise a missing owner result', async () => {
+  await expect(owner({ runtime: { getAuth: async () => ({ auth: {} }) } }).resolve(scope)).rejects.toMatchObject({ code: 'credential-missing' });
+  expect((await owner({ allowAnonymous: true, runtime: { getAuth: async () => ({ auth: {} }) } }).resolve(scope)).headers).toEqual({});
+  await expect(owner({ allowAnonymous: true, runtime: { getAuth: async () => undefined } }).resolve(scope)).rejects.toMatchObject({ code: 'credential-missing' });
+});
+
+it('Vertex explicit Cloud API keys and bearer headers retain their distinct modes', async () => {
+  expect((await owner({ providerFamily: 'google-vertex' }).resolve(scope)).headers['x-goog-api-key']).toBe('fake-test-key');
+  const bearer = owner({ providerFamily: 'google-vertex', runtime: { getAuth: async () => ({ auth: { apiKey: 'fake-unused', headers: { authorization: 'Bearer fake-vertex-value' } } }) } });
+  expect((await bearer.resolve(scope)).headers.authorization).toBe('Bearer fake-vertex-value');
+  const key = owner({ providerFamily: 'google-vertex', runtime: { getAuth: async () => ({ auth: { headers: { 'x-goog-api-key': 'fake-explicit-key' } } }) } });
+  expect((await key.resolve(scope)).headers['x-goog-api-key']).toBe('fake-explicit-key');
+});
+
+it('Codex rejects empty bearer material while accepting a case-insensitive scheme', async () => {
+  const empty = owner({ providerFamily: 'openai-codex-responses', currentProviderAccount: async () => 'fake-provider-account', runtime: { getAuth: async () => ({ auth: { headers: { authorization: 'Bearer   ' } } }) } });
+  await expect(empty.resolve(scope)).rejects.toMatchObject({ code: 'codex-credential-binding-required' });
+  const lower = owner({ providerFamily: 'openai-codex-responses', currentProviderAccount: async () => 'fake-provider-account', runtime: { getAuth: async () => ({ auth: { headers: { authorization: 'bearer fake-codex-token' } } }) } });
+  expect((await lower.resolve(scope)).headers['chatgpt-account-id']).toBe('fake-provider-account');
+});
+
+
+it('private credential bridge ignores stale epochs and rejects mismatched registered scopes', async () => {
+  let lookups = 0;
+  const replies: PrivateCredentialResponse[] = [];
+  const bridge = new CredentialBridge(() => 'current-epoch', async response => { replies.push(response); }, () => { throw new Error('unexpected transport failure'); });
+  await bridge.register('run', owner({ runtime: { getAuth: async () => { lookups++; return { auth: { apiKey: 'fake-bridge-key' } }; } } }));
+  const request = { v: 1, kind: 'credential-request', id: 'request', kernelEpoch: 'current-epoch', runId: 'run', scope };
+  expect(bridge.consume({ ...request, kernelEpoch: 'old-epoch' })).toBe(true);
+  await Promise.resolve();
+  expect(lookups).toBe(0);
+  expect(replies).toHaveLength(0);
+  bridge.consume({ ...request, scope: { ...scope, account: 'different-account' } });
+  await expect.poll(() => replies.length).toBe(1);
+  expect(replies[0]).toMatchObject({ ok: false, error: { code: 'credential-owner-unavailable' } });
+  expect(lookups).toBe(0);
+  bridge.close();
+});
+
+it('private bridge drops a late credential result after its Run registration is released', async () => {
+  const refresh = deferred<{ auth: { apiKey: string } }>();
+  const entered = deferred<void>();
+  const persisted = deferred<void>();
+  const replies: PrivateCredentialResponse[] = [];
+  const bridge = new CredentialBridge(() => 'epoch', async response => { replies.push(response); }, () => { throw new Error('unexpected transport failure'); });
+  await bridge.register('run', owner({ runtime: { getAuth: async () => { entered.resolve(); const result = await refresh.promise; persisted.resolve(); return result; } } }));
+  bridge.consume({ v: 1, kind: 'credential-request', id: 'request', kernelEpoch: 'epoch', runId: 'run', scope });
+  await entered.promise;
+  bridge.unregister('run');
+  refresh.resolve({ auth: { apiKey: 'fake-late-bridge-key' } });
+  await persisted.promise;
+  await new Promise(resolve => setTimeout(resolve, 0));
+  expect(replies).toHaveLength(0);
+});
+
+
+it('trusted Bedrock model selection binds its ARN region and fake bearer through the existing owner', async () => {
+  const model = { providerId: 'bedrock-fixture', modelId: 'arn:aws:bedrock:us-west-2:123456789012:inference-profile/fixture', name: 'Fixture model', api: 'bedrock-converse-stream', baseUrl: 'https://bedrock-runtime.us-east-1.amazonaws.com', maxTokens: 128, input: ['text', 'image'] };
+  const authority = createModelAuthority({
+    selectedModel: async (providerId, modelId) => { expect([providerId, modelId]).toEqual([model.providerId, model.modelId]); return model; },
+    listModels: async () => [model], currentScope: async () => scope, currentProviderAccount: async () => undefined,
+    routingEnvironment: async () => ({ AWS_REGION: 'eu-west-1' }),
+    getAuth: async () => ({ auth: { apiKey: 'fake-bedrock-bearer' } }),
+  });
+    expect(await authority.listModels()).toContainEqual(expect.objectContaining({ providerId: model.providerId, modelId: model.modelId, name: model.name, acceptsImages: true }));
+  const selected = await authority.resolveModel({ providerId: model.providerId, modelId: model.modelId });
+  expect(selected.configuration.endpoint).toBe(`https://bedrock-runtime.us-west-2.amazonaws.com/model/${encodeURIComponent(model.modelId)}/converse-stream`);
+  expect((await selected.credentialOwner.resolve(scope)).headers.authorization).toBe('Bearer fake-bedrock-bearer');
+});
+
+
+it.each([
+  ['https://aiplatform.googleapis.com', 'https://aiplatform.googleapis.com/v1/publishers/google/models/gemini-fixture:streamGenerateContent'],
+  ['https://vertex.example.test/proxy/v1', 'https://vertex.example.test/proxy/v1/publishers/google/models/gemini-fixture:streamGenerateContent'],
+])('Vertex Cloud API key uses the registered collection base %s', async (baseUrl, endpoint) => {
+  const model = { providerId: 'vertex-fixture', modelId: 'gemini-fixture', name: 'Vertex fixture', api: 'google-vertex', baseUrl, maxTokens: 128 };
+  const authority = createModelAuthority({ selectedModel: async () => model, listModels: async () => [model],
+    currentScope: async () => scope, currentProviderAccount: async () => undefined, routingEnvironment: async () => ({}),
+    getAuth: async () => ({ auth: { apiKey: 'fake-cloud-api-key', baseUrl } }),
+  });
+  const selected = await authority.resolveModel({ providerId: model.providerId, modelId: model.modelId });
+  expect(selected.configuration.endpoint).toBe(endpoint);
+  expect((await selected.credentialOwner.resolve(scope)).headers['x-goog-api-key']).toBe('fake-cloud-api-key');
+});
+
+it('trusted header-only connection supports provider-specific authentication headers without ambient keys', async () => {
+  const credential = owner({ runtime: { getAuth: async () => ({ auth: { headers: { 'x-custom-token': 'fake-custom-token' } }, source: 'configured headers' }) } });
+  expect((await credential.resolve(scope)).headers).toEqual({ 'x-custom-token': 'fake-custom-token' });
+  await expect(owner({ runtime: { getAuth: async () => ({ auth: { headers: {} }, source: 'configured headers' }) } }).resolve(scope)).rejects.toMatchObject({ code: 'credential-missing' });
+});
+
+it.each([
+  ['https://aiplatform.googleapis.com/v1', 'us-central1', 'https://us-central1-aiplatform.googleapis.com/v1/projects/fixture-project/locations/us-central1/publishers/google/models/gemini-fixture:streamGenerateContent'],
+  ['', 'us-central1', 'https://us-central1-aiplatform.googleapis.com/v1/projects/fixture-project/locations/us-central1/publishers/google/models/gemini-fixture:streamGenerateContent'],
+  ['https://{location}-aiplatform.googleapis.com', 'global', 'https://aiplatform.googleapis.com/v1/projects/fixture-project/locations/global/publishers/google/models/gemini-fixture:streamGenerateContent'],
+  ['https://vertex.example.test/custom/v1', 'us-central1', 'https://vertex.example.test/custom/v1/publishers/google/models/gemini-fixture:streamGenerateContent'],
+])('Vertex ADC preserves its project/location routing and custom collection %s %s', async (baseUrl, location, endpoint) => {
+  const model = { providerId: 'google-vertex', modelId: 'gemini-fixture', name: 'Vertex ADC fixture', api: 'google-vertex', baseUrl, maxTokens: 128 };
+  const authority = createModelAuthority({ selectedModel: async () => model, listModels: async () => [model],
+    currentScope: async () => scope, currentProviderAccount: async () => undefined,
+    routingEnvironment: async () => ({ GOOGLE_CLOUD_PROJECT: 'fixture-project', GOOGLE_CLOUD_LOCATION: location }), vertexAuthentication: async () => 'adc',
+    getAuth: async () => ({ auth: { headers: { authorization: 'Bearer fake-adc-bearer' } }, source: 'Google ADC' }),
+  });
+  const selected = await authority.resolveModel({ providerId: model.providerId, modelId: model.modelId });
+  expect(selected.configuration.endpoint).toBe(endpoint);
+  expect((await selected.credentialOwner.resolve(scope)).headers.authorization).toBe('Bearer fake-adc-bearer');
+});
+
+it('private dispatch accepts only the digest contract and preserves request identity', async () => {
+  const replies: PrivateCredentialResponse[] = [];
+  const dispatches: unknown[] = [];
+  const credential = owner({ runtime: {
+    getAuth: async () => { throw new Error('dispatch must use request resolver'); },
+    resolveRequest: async (_provider, dispatch) => { dispatches.push(dispatch); return { auth: { apiKey: 'fake-dispatch-key' } }; },
+  } });
+  const bridge = new CredentialBridge(() => 'digest-epoch', async reply => { replies.push(reply); }, () => { throw new Error('unexpected transport failure'); });
+  await bridge.register('digest-run', credential);
+  const request = { v: 1, kind: 'credential-request', id: 'same-request', kernelEpoch: 'digest-epoch', runId: 'digest-run', scope };
+  const valid = { method: 'POST', endpoint: 'https://model.example.test/v1/responses', payloadSha256: 'a'.repeat(64) };
+  for (const dispatch of [
+    { method: valid.method, endpoint: valid.endpoint, body: '{}' },
+    { ...valid, body: '{}' },
+    ...['', 'a'.repeat(63), 'a'.repeat(65), 'A'.repeat(64), 'g'.repeat(64)].map(payloadSha256 => ({ ...valid, payloadSha256 })),
+  ]) expect(bridge.consume({ ...request, dispatch })).toBe(true);
+  await Promise.resolve();
+  expect(dispatches).toEqual([]);
+  expect(replies).toEqual([]);
+  bridge.consume({ ...request, dispatch: valid });
+  await expect.poll(() => replies.length).toBe(1);
+  expect(dispatches).toEqual([valid]);
+  expect(replies[0]).toMatchObject({ id: request.id, kernelEpoch: request.kernelEpoch, ok: true, result: { scope } });
+  for (const payloadSha256 of ['', 'A'.repeat(64)]) {
+    await expect(credential.resolve(scope, undefined, { ...valid, payloadSha256 })).rejects.toMatchObject({ code: 'credential-request-payload-invalid' });
+  }
+  expect(dispatches).toHaveLength(1);
+  bridge.close();
+});
+
+it('releases captured authentication only after retained owners and cancelled refresh actually drain', async () => {
+  let complete!: (value: { auth: { apiKey: string } }) => void;
+  const release = vi.fn();
+  const scope = { reference: 'captured', authority: 'host', account: 'account', generation: 1 };
+  const owner = new ExistingHostCredentialOwner({ runtime: { getAuth: async () => new Promise(resolve => { complete = resolve; }) },
+    providerId: 'channel', providerFamily: 'openai-responses', endpoint: 'https://example.test/v1/responses',
+    currentScope: async () => scope, release });
+  const retained = owner.retain(); owner.release();
+  const abort = new AbortController(); const result = owner.resolve(scope, abort.signal);
+  await Promise.resolve(); await Promise.resolve();
+  abort.abort(); await expect(result).rejects.toMatchObject({ code: 'credential-cancelled' });
+  retained(); expect(release).not.toHaveBeenCalled();
+  complete({ auth: { apiKey: 'test' } });
+  await vi.waitFor(() => expect(release).toHaveBeenCalledTimes(1));
+  owner.release(); retained(); expect(release).toHaveBeenCalledTimes(1);
+  await expect(owner.scope()).rejects.toMatchObject({ code: 'credential-owner-released' });
+});
+
+
+it('finds the original separately scoped child binding through a retained parent fork', async () => {
+  const mainReleased = vi.fn(), childReleased = vi.fn();
+  const childScope = { ...scope, account: 'child-account' };
+  const main = owner({ bindingIdentity: 'main', release: mainReleased });
+  const child = owner({ bindingIdentity: 'child-original', currentScope: async () => childScope, release: childReleased });
+  await child.scope(); main.retainDependency(child); child.release();
+  const bridge = new CredentialBridge(() => 'epoch', async () => {}, () => {});
+  await bridge.register('parent', main); main.release();
+  const successor = bridge.findOwner('main', scope)!;
+  await bridge.retainQueuedModel('successor', successor); successor.release(); bridge.unregister('parent');
+  expect(bridge.findOwner('child-original', scope)).toBeUndefined();
+  const dispatch = bridge.findOwner('child-original', childScope)!;
+  expect(dispatch).toBeInstanceOf(ExistingHostCredentialOwner);
+  bridge.close(); expect(childReleased).not.toHaveBeenCalled();
+  expect((await dispatch.resolve(childScope)).headers.authorization).toBe('Bearer fake-test-key');
+  dispatch.release(); expect(childReleased).toHaveBeenCalledOnce(); expect(mainReleased).toHaveBeenCalledOnce();
+});
+
+
+it('the original terminal release retires run admissions without an observer and preserves independent operations', async () => {
+  const released = vi.fn(), operationReleased = vi.fn();
+  const refresh = deferred<{ auth: { apiKey: string } }>(); const entered = deferred<void>();
+  const main = owner({ bindingIdentity: 'main', release: released, runtime: { getAuth: async () => { entered.resolve(); return refresh.promise; } } });
+  const operation = owner({ bindingIdentity: 'operation', release: operationReleased });
+  const credentials = new CredentialBridge(() => 'epoch', async () => {}, () => {});
+  await credentials.register('run', main); await credentials.retainQueuedModel('run', main); main.release();
+  await credentials.register('run', operation, undefined, 'operation-binding', { kind: 'operation', operationId: 'operation' }); operation.release();
+  const tools = new ToolBridge(() => 'epoch', async () => {}, () => {}, (runId, terminal) => { if (terminal) credentials.unregister(runId); });
+  tools.unregister('run'); // Failed preparation can retry from its original admission.
+  const retry = credentials.findOwner('main', scope)!; expect(retry).toBeInstanceOf(ExistingHostCredentialOwner); retry.release();
+  const resolution = main.resolve(scope); await entered.promise;
+  tools.consume({ v: 1, kind: 'host-tool-owner-release', kernelEpoch: 'epoch', runId: 'run' });
+  expect(credentials.findOwner('main', scope)).toBeUndefined(); expect(released).not.toHaveBeenCalled();
+  refresh.resolve({ auth: { apiKey: 'original-key' } }); await resolution; expect(released).toHaveBeenCalledOnce();
+  const surviving = credentials.findOwner('operation', scope)!; expect(surviving).toBeInstanceOf(ExistingHostCredentialOwner); surviving.release();
+  expect(operationReleased).not.toHaveBeenCalled(); credentials.unregister('run', 'operation-binding'); expect(operationReleased).toHaveBeenCalledOnce();
+  credentials.close();
+});

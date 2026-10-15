@@ -53,58 +53,38 @@ export const VARIN_WORKBENCH_REPLACEMENT_TARGETS = {
   transition: "workbench.transition",
 } as const;
 
-export const VARIN_WORKBENCH_SLOTS = {
-  activityItems: "workbench.activity.items",
-  primarySidebarViews: "workbench.primary-sidebar.views",
-  editorActions: "workbench.editor.actions",
-  secondarySidebarViews: "workbench.secondary-sidebar.views",
-  panelViews: "workbench.panel.views",
-  statusItems: "workbench.status.items",
+/** One field declaration supplies runtime discovery and the actual mount props types. */
+const workbenchSlot = <const TId extends string, const TFields extends Record<string, 'required' | 'optional'>>(
+  id: TId, fields: TFields,
+) => ({
+  id, version: 1 as const, fields,
+  propsSchema: {
+    type: 'object', additionalProperties: false,
+    properties: Object.fromEntries(Object.keys(fields).map(key => [key, { type: 'string' }])),
+    required: Object.keys(fields).filter(key => fields[key] === 'required'),
+  },
+});
+export const VARIN_WORKBENCH_SLOT_CONTRACTS = {
+  activityItems: workbenchSlot('workbench.activity.items', { workspaceId: 'required' }),
+  primarySidebarViews: workbenchSlot('workbench.primary-sidebar.views', { workspaceId: 'required', activeActivityId: 'required' }),
+  editorActions: workbenchSlot('workbench.editor.actions', { workspaceId: 'required', groupId: 'required', resourceId: 'optional', viewId: 'optional' }),
+  secondarySidebarViews: workbenchSlot('workbench.secondary-sidebar.views', { workspaceId: 'required' }),
+  panelViews: workbenchSlot('workbench.panel.views', { workspaceId: 'required', activePanelId: 'required' }),
+  statusItems: workbenchSlot('workbench.status.items', { workspaceId: 'required' }),
 } as const;
+export const VARIN_WORKBENCH_SLOTS = Object.fromEntries(
+  Object.entries(VARIN_WORKBENCH_SLOT_CONTRACTS).map(([key, contract]) => [key, contract.id]),
+) as { readonly [K in keyof typeof VARIN_WORKBENCH_SLOT_CONTRACTS]: typeof VARIN_WORKBENCH_SLOT_CONTRACTS[K]['id'] };
 
-// ---------------------------------------------------------------------------
-// Public slot props types
-//
-// These are the JSON-safe props passed to contributions mounted in each
-// standard slot. They contain only serializable identifiers — no React
-// callbacks, stores, or Host paths. Extensions use command/document services
-// to perform actions.
-// ---------------------------------------------------------------------------
-
-/** Props for `workbench.editor.actions` — rendered in the active editor group's action strip. */
-export interface VarinWorkbenchEditorActionsSlotProps {
-  workspaceId: string;
-  groupId: string;
-  resourceId?: string;
-  viewId?: string;
-}
-
-/** Props for `workbench.panel.views` — rendered in the panel content area. */
-export interface VarinWorkbenchPanelViewsSlotProps {
-  workspaceId: string;
-  activePanelId: string;
-}
-
-/** Props for `workbench.activity.items` — rendered in the activity bar. */
-export interface VarinWorkbenchActivityItemsSlotProps {
-  workspaceId: string;
-}
-
-/** Props for `workbench.primary-sidebar.views` — rendered in the primary sidebar. */
-export interface VarinWorkbenchPrimarySidebarViewsSlotProps {
-  workspaceId: string;
-  activeActivityId: string;
-}
-
-/** Props for `workbench.secondary-sidebar.views` — rendered in the secondary sidebar. */
-export interface VarinWorkbenchSecondarySidebarViewsSlotProps {
-  workspaceId: string;
-}
-
-/** Props for `workbench.status.items` — rendered in the status bar. */
-export interface VarinWorkbenchStatusItemsSlotProps {
-  workspaceId: string;
-}
+type WorkbenchSlotProps<T extends { fields: Record<string, 'required' | 'optional'> }> =
+  { [K in keyof T['fields'] as T['fields'][K] extends 'required' ? K : never]: string }
+  & { [K in keyof T['fields'] as T['fields'][K] extends 'optional' ? K : never]?: string };
+export type VarinWorkbenchEditorActionsSlotProps = WorkbenchSlotProps<typeof VARIN_WORKBENCH_SLOT_CONTRACTS.editorActions>;
+export type VarinWorkbenchPanelViewsSlotProps = WorkbenchSlotProps<typeof VARIN_WORKBENCH_SLOT_CONTRACTS.panelViews>;
+export type VarinWorkbenchActivityItemsSlotProps = WorkbenchSlotProps<typeof VARIN_WORKBENCH_SLOT_CONTRACTS.activityItems>;
+export type VarinWorkbenchPrimarySidebarViewsSlotProps = WorkbenchSlotProps<typeof VARIN_WORKBENCH_SLOT_CONTRACTS.primarySidebarViews>;
+export type VarinWorkbenchSecondarySidebarViewsSlotProps = WorkbenchSlotProps<typeof VARIN_WORKBENCH_SLOT_CONTRACTS.secondarySidebarViews>;
+export type VarinWorkbenchStatusItemsSlotProps = WorkbenchSlotProps<typeof VARIN_WORKBENCH_SLOT_CONTRACTS.statusItems>;
 
 export const VARIN_WORKBENCH_CONTEXT_KEYS = {
   editorHasSelection: "editorHasSelection",

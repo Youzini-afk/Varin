@@ -1,6 +1,7 @@
+import { unconfiguredWorkspaceEdits } from '../documents/workspace-edit.test-helper';
 import { afterEach, describe, expect, test } from 'vitest';
 import type { DocumentsAPI, VarinDocumentReadResult, VarinResourceReference } from '@varin/application-client';
-import { getRuntimeKey } from '@varin/application-client';
+import { threadHostKey as getRuntimeKey } from '@/stores/useThreadStore';
 import { bindDocumentRegistry, resetDocumentRegistry } from '@/lib/documents/session';
 import { applyPatchDecisionsToDocument } from './document-write';
 import { recordHintsFromToolCall, resetAgentFileChangeHints } from './hints';
@@ -15,6 +16,7 @@ const createMemoryDocuments = () => {
   const keyOf = (ref: VarinResourceReference) => `${ref.workspaceId}\0${ref.resourceId}`;
   let revisionSeq = 1;
   const api: DocumentsAPI = {
+    ...unconfiguredWorkspaceEdits,
     clearDirtyBuffers: async () => ({ cleared: true }),
     publishDirtyBuffers: async (request) => ({ ...request, updatedAt: '2026-08-28T00:00:00.000Z' }),
     resolveWorkspace: async () => ({ workspaceId: resource().workspaceId, hostId: 'host-1', epoch: 1 }),
@@ -122,7 +124,7 @@ describe('hinted agent reloads', () => {
     await registry.open(identity);
     recordHintsFromToolCall({
       runtimeKey: getRuntimeKey(),
-      sessionId: 'session-a',
+      threadKey: 'session-a',
       toolCallId: 'tool-1',
       toolName: 'write',
       args: { path: 'note.txt' },

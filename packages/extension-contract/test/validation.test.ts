@@ -6,6 +6,8 @@ import {
   parseVarinExtensionCatalogAvailability,
   parseVarinExtensionCatalogDocument,
   parseVarinExtensionCandidateCapabilityReviewRequest,
+  parseVarinExtensionCandidatePublicationRequest,
+  parseVarinExtensionCandidateSelectionRequest,
   parseVarinExtensionCapabilityReviewRequest,
   parseVarinExtensionAssetPayload,
   parseVarinExtensionManagedEntrypointRequest,
@@ -25,7 +27,7 @@ const manifest = () => ({
     host: { file: "dist/host.mjs", mode: "brokered" },
     surfaces: [{ id: "main", file: "dist/surface.mjs", mode: "managed", supports: ["web", "desktop"] }],
   },
-  requires: { services: [{ id: "varin.sessions", version: 1 }] },
+  requires: { services: [{ realms: ["host", "surface"], id: "varin.sessions", version: 1 }] },
   provides: { services: [{ id: "dev.example.memory", version: 1, multiple: true }] },
   capabilities: { host: ["extension-storage"], surface: ["commands"] },
   contributions: [{
@@ -37,7 +39,6 @@ const manifest = () => ({
     requiresCapabilities: ["commands"],
     data: { route: "memory" },
   }],
-  integrates: { piPackages: ["pi-observational-memory"] },
 });
 
 test("validates content-addressed managed entrypoint requests and asset bytes", () => {
@@ -329,4 +330,35 @@ test("rejects editor contributions without a resource selector", () => {
     error instanceof VarinExtensionContractError
     && error.issues.some((issue) => issue.includes("languageIds or filenames"))
   ));
+});
+
+
+test("explicit update group validates members and publication evidence is not application/discard intent", () => {
+  const grouped = { ...manifest(), updateReadiness: { surfaceEntrypoints: ["main"] } };
+  assert.deepEqual(parseVarinExtensionManifest(grouped).updateReadiness, { surfaceEntrypoints: ["main"] });
+  for (const surfaceEntrypoints of [[], ["main", "main"], ["missing"]]) {
+    assert.throws(() => parseVarinExtensionManifest({ ...grouped, updateReadiness: { surfaceEntrypoints } }), VarinExtensionContractError);
+  }
+  assert.throws(() => parseVarinExtensionManifest({ ...grouped, entrypoints: { surfaces: grouped.entrypoints.surfaces } }), VarinExtensionContractError);
+  const request = { extensionId: grouped.id, candidateIntegrity: `sha256-${"a".repeat(64)}`, expectedRevision: 1,
+    surfaceReadiness: { hostPreparation: { id: "11111111-1111-4111-8111-111111111111", hostId: "22222222-2222-4222-8222-222222222222", desiredRevision: 1, generation: 2 },
+      realmId: "real-window", surface: "web", members: [{ entrypointId: "main", generation: 2 }] } };
+  assert.deepEqual(parseVarinExtensionCandidatePublicationRequest(request), request);
+  assert.throws(() => parseVarinExtensionCandidateSelectionRequest(request), /invalid/);
+  assert.throws(() => parseVarinExtensionCandidatePublicationRequest({ ...request, surfaceReadiness: { ...request.surfaceReadiness, members: [...request.surfaceReadiness.members, ...request.surfaceReadiness.members] } }), VarinExtensionContractError);
+});
+
+
+test("dependency realms are explicit, nonempty and unique", () => {
+  for (const realms of [undefined, [], ['host', 'host'], ['worker']]) {
+    const input = manifest();
+    Object.assign(input.requires.services[0]!, { realms });
+    assert.throws(() => parseVarinExtensionManifest(input), error => error instanceof VarinExtensionContractError && error.issues.some(issue => issue.includes('realms')));
+  }
+  const input = manifest(); input.requires.services[0]!.realms = ['surface'];
+  assert.deepEqual(parseVarinExtensionManifest(input).requires!.services![0]!.realms, ['surface']);
+});
+
+test("rejects retired runtime package integration manifests", () => {
+  assert.throws(() => parseVarinExtensionManifest({ ...manifest(), integrates: { piPackages: ["legacy-package"] } }), /integrates is unsupported/);
 });

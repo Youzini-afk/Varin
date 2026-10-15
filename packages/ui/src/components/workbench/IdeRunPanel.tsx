@@ -26,7 +26,7 @@ import type {
 import { RunServicesError } from '@varin/application-client';
 import { ideDebugControlAvailability } from '@/lib/workbench/ide-debug-controls';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
-import { usePiEditorContextStore } from '@/stores/usePiEditorContextStore';
+import { useEditorContextStore } from '@/stores/useEditorContextStore';
 import { languageIdFromResourceId } from '@/lib/language-services/language-id';
 
 type TasksState =
@@ -51,7 +51,7 @@ export const IdeRunPanel: React.FC = () => {
   const { t } = useI18n();
   const workspaceId = useWorkbenchWorkspaceId();
   const directory = useDirectoryStore((state) => state.currentDirectory);
-  const activeEditorFile = usePiEditorContextStore((state) => state.activeEditorFile);
+  const activeEditorFile = useEditorContextStore((state) => state.activeEditorFile);
   const apis = useRuntimeAPIs();
   const [tasks, setTasks] = React.useState<TasksState>({ status: 'idle' });
   const [tests, setTests] = React.useState<TestsState>({ status: 'idle' });

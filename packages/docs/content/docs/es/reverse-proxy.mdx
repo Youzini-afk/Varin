@@ -15,15 +15,14 @@ Usa esta página si ejecutas Varin detrás de Nginx, Nginx Proxy Manager, Caddy,
 
 ## Qué debe admitir el proxy
 
-- WebSockets para el transporte de mensajes en vivo:
-  - `/api/varin/runtime/ws`
+- WebSocket:
   - `/api/dictation/ws`
   - `/api/terminal/ws`
   - `/api/varin/realtime-proxy/ws`
 - SSE sin búfer:
   - `/api/notifications/stream`
   - `/api/varin/events`
-  - `/api/varin/runtime-manager/events`
+  - `/api/threads/observe`
   - `/api/varin/realtime-proxy/sse`
 - Cuerpos de solicitud grandes para adjuntos y operaciones de archivos
 - Tiempos de espera de lectura prolongados para streams en vivo y sesiones de terminal
@@ -66,7 +65,7 @@ proxy_set_header X-Forwarded-Host $host;
 
 gzip off;
 
-location ~ ^/api/(varin/runtime|varin/realtime-proxy|terminal|dictation)/ws$ {
+location ~ ^/api/(varin/realtime-proxy|terminal|dictation)/ws$ {
     proxy_pass http://127.0.0.1:3000;
     proxy_set_header Upgrade $http_upgrade;
     proxy_set_header Connection "upgrade";
@@ -80,7 +79,7 @@ location ~ ^/api/(varin/runtime|varin/realtime-proxy|terminal|dictation)/ws$ {
     proxy_send_timeout 3600s;
 }
 
-location ~ ^/api/(notifications/stream|varin/(events|runtime-manager/events|realtime-proxy/sse))$ {
+location ~ ^/api/(threads/observe|notifications/stream|varin/(events|realtime-proxy/sse))$ {
     proxy_pass http://127.0.0.1:3000;
     proxy_set_header Host $host;
     proxy_set_header X-Real-IP $remote_addr;
@@ -118,8 +117,8 @@ Activa **Websockets Support** en Nginx Proxy Manager. En la configuración Advan
 
 ### La página carga, pero el envío de mensajes falla
 
-- los WebSockets no están habilitados en el proxy
-- `/api/varin/runtime/ws` no pasa correctamente
+- Comprueba autenticación y reenvío de `POST /api/threads/*`.
+- `GET /api/threads/observe` debe transmitir SSE sin búfer ni caché.
 
 ### Las notificaciones o el estado en vivo no se actualizan
 

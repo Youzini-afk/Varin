@@ -5,7 +5,10 @@ use super::*;
 use crate::model::CanonicalFileLeaseResource;
 use crate::protocol_generated::{KernelFileLeaseAcquireParams, KernelFileLeaseReleaseParams};
 
-fn covers(held: &CanonicalFileLeaseResource, requested: &CanonicalFileLeaseResource) -> bool {
+pub(super) fn covers(
+    held: &CanonicalFileLeaseResource,
+    requested: &CanonicalFileLeaseResource,
+) -> bool {
     if held.absolute == requested.absolute {
         return held.subtree || !requested.subtree;
     }
@@ -18,8 +21,182 @@ fn overlaps(left: &CanonicalFileLeaseResource, right: &CanonicalFileLeaseResourc
         || (right.subtree && left.absolute.starts_with(&right.absolute))
 }
 
+/// Parent components have already passed the shared path resolver. Preserve a symlink leaf:
+/// file replacement changes the link itself, rather than its target.
+pub(super) fn canonical_lease_path(resolved: PathBuf) -> Result<PathBuf, KernelError> {
+    // Parent components are canonicalized by resolve_file_resource.
+    // Preserve a symlink leaf: mutations replace the link, not its target.
+    let absolute = match fs::symlink_metadata(&resolved) {
+        Ok(metadata) if !metadata.file_type().is_symlink() => fs::canonicalize(&resolved)?,
+        Ok(_) => resolved,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => resolved,
+        Err(error) => return Err(error.into()),
+    };
+    #[cfg(windows)]
+    let absolute = PathBuf::from(
+        absolute
+            .to_str()
+            .ok_or_else(|| KernelError::Authorization("file lease path is not UTF-8".to_string()))?
+            .to_lowercase(),
+    );
+    Ok(absolute)
+}
+
+pub(super) struct RetainedFileLease {
+    pub release_requested: bool,
+}
+
+pub(super) struct FileLeaseWaiter {
+    request_id: String,
+    params: Value,
+    grant_id: String,
+    lease_id: String,
+    canonical_resources: Vec<CanonicalFileLeaseResource>,
+    cancellation: Arc<AtomicBool>,
+}
+
+struct FileLeaseRequest {
+    params: KernelFileLeaseAcquireParams,
+    resources: Vec<FileLeaseResource>,
+    canonical_resources: Vec<CanonicalFileLeaseResource>,
+}
+
 impl Storage {
-    fn canonical_lease_resources(
+    pub(crate) fn set_file_lease_notify(&mut self, notify: impl Fn() + Send + Sync + 'static) {
+        self.file_lease_notify = Some(Arc::new(notify));
+    }
+
+    pub(super) fn notify_file_lease_waiters(&self) {
+        if !self.file_lease_waiters.is_empty() {
+            if let Some(notify) = &self.file_lease_notify {
+                notify();
+            }
+        }
+    }
+
+    pub(crate) fn wait_file_lease(
+        &mut self,
+        request_id: &str,
+        params: &Value,
+        grant: &Grant,
+        cancellation: Arc<AtomicBool>,
+    ) -> Result<Option<Value>, KernelError> {
+        if cancellation.load(Ordering::Acquire) {
+            return Err(KernelError::Cancelled);
+        }
+        let prepared = self.prepare_file_lease(params, grant)?;
+        let canonical_resources = prepared.canonical_resources.clone();
+        let lease_id = prepared.params.lease_id.clone();
+        let result = self.acquire_file_lease(prepared, grant)?;
+        if result["status"] == "acquired" {
+            return Ok(Some(result));
+        }
+        if self.file_lease_waiters.iter().any(|waiter| {
+            waiter.lease_id == lease_id
+                && (waiter.grant_id != grant.grant_id || waiter.params != *params)
+        }) {
+            return Err(KernelError::Authorization(
+                "queued file lease belongs to a different request".into(),
+            ));
+        }
+        self.file_lease_waiters.push_back(FileLeaseWaiter {
+            request_id: request_id.into(),
+            params: params.clone(),
+            grant_id: grant.grant_id.clone(),
+            lease_id,
+            canonical_resources,
+            cancellation,
+        });
+        Ok(None)
+    }
+
+    /// Only earlier blocked waiters remain in the queue during this pass. They reserve
+    /// ordering, not resources: disjoint work proceeds and a multi-path waiter holds no partial lease.
+    pub(crate) fn settle_file_lease_waiters(
+        &mut self,
+        epoch: &str,
+        host_id: &str,
+        host_generation: &str,
+    ) -> Vec<(String, Result<Value, KernelError>)> {
+        let pending = std::mem::take(&mut self.file_lease_waiters);
+        let mut completed = Vec::new();
+        for waiter in pending {
+            let result = if waiter.cancellation.load(Ordering::Acquire) {
+                Err(KernelError::Cancelled)
+            } else {
+                self.authorize(
+                    Some(&waiter.grant_id),
+                    epoch,
+                    host_id,
+                    host_generation,
+                    "file.lease.wait",
+                    &waiter.params,
+                )
+                .and_then(|(grant, params)| {
+                    let prepared = self.prepare_file_lease(&params, &grant)?;
+                    if prepared.canonical_resources != waiter.canonical_resources {
+                        return Err(KernelError::Authorization(
+                            "queued file resource identity changed".into(),
+                        ));
+                    }
+                    self.acquire_file_lease(prepared, &grant)
+                })
+            };
+            if result.as_ref().is_ok_and(|value| value["status"] == "busy") {
+                self.file_lease_waiters.push_back(waiter);
+            } else {
+                completed.push((waiter.request_id, result));
+            }
+        }
+        completed
+    }
+
+    pub(crate) fn cancel_file_lease_waiters(&mut self) -> Vec<String> {
+        self.file_lease_waiters
+            .drain(..)
+            .map(|waiter| waiter.request_id)
+            .collect()
+    }
+
+    pub(crate) fn finish_retained_file_lease(&mut self, lease_id: &str) {
+        if self
+            .retained_file_leases
+            .remove(lease_id)
+            .is_some_and(|lease| lease.release_requested)
+        {
+            if let Some(lease) = self.file_leases.remove(lease_id) {
+                self.hint_file_root(&lease.root_id);
+                self.notify_file_lease_waiters();
+            }
+        }
+    }
+
+    /// Same canonical file identity as actual leases, independent of alias roots and Run IDs.
+    pub(crate) fn file_resource_key(
+        &self,
+        root_id: &str,
+        path: &str,
+        grant: &Grant,
+    ) -> Result<String, KernelError> {
+        let resolved = self.canonical_lease_resources(
+            root_id,
+            &[FileLeaseResource {
+                path: path.into(),
+                subtree: false,
+            }],
+            grant,
+        )?;
+        let absolute = resolved[0]
+            .absolute
+            .to_str()
+            .ok_or_else(|| KernelError::Authorization("file resource path is not UTF-8".into()))?;
+        Ok(serde_json::to_string(&[
+            "file",
+            grant.host_id.as_str(),
+            absolute,
+        ])?)
+    }
+    pub(super) fn canonical_lease_resources(
         &self,
         root_id: &str,
         resources: &[FileLeaseResource],
@@ -29,31 +206,60 @@ impl Storage {
             .iter()
             .map(|resource| {
                 let resolved = self.resolve_file_resource(root_id, &resource.path, grant, true)?;
-                // Parent components are canonicalized by resolve_file_resource.
-                // Preserve a symlink leaf: mutations replace the link, not its target.
-                let absolute = match fs::symlink_metadata(&resolved.absolute) {
-                    Ok(metadata) if !metadata.file_type().is_symlink() => {
-                        fs::canonicalize(&resolved.absolute)?
-                    }
-                    Ok(_) => resolved.absolute,
-                    Err(error) if error.kind() == io::ErrorKind::NotFound => resolved.absolute,
-                    Err(error) => return Err(error.into()),
-                };
-                #[cfg(windows)]
-                let absolute = PathBuf::from(
-                    absolute
-                        .to_str()
-                        .ok_or_else(|| {
-                            KernelError::Authorization("file lease path is not UTF-8".to_string())
-                        })?
-                        .to_lowercase(),
-                );
+                let absolute = canonical_lease_path(resolved.absolute)?;
                 Ok(CanonicalFileLeaseResource {
                     absolute,
                     subtree: resource.subtree,
                 })
             })
             .collect()
+    }
+
+    /// Observer reads share the original physical lease namespace. Only another
+    /// known read worker is compatible; ordinary mutations still see every lease.
+    pub(super) fn assert_file_observation_lease(
+        &self,
+        grant: &Grant,
+        root_id: &str,
+        paths: &[FileLeaseResource],
+    ) -> Result<(), KernelError> {
+        let requested = self.canonical_lease_resources(root_id, paths, grant)?;
+        for lease in self.file_leases.values() {
+            if self.is_file_observation_read_lease(&lease.lease_id) {
+                continue;
+            }
+            if requested.iter().any(|resource| {
+                lease
+                    .canonical_resources
+                    .iter()
+                    .any(|held| overlaps(held, resource))
+            }) {
+                return Err(KernelError::FileObservationBusy);
+            }
+        }
+        Ok(())
+    }
+    /// Original caller/root identity and sole active-worker check, without filesystem work.
+    pub(super) fn active_file_worker_lease(
+        &self,
+        grant: &Grant,
+        root_id: &str,
+        lease_id: &str,
+    ) -> Result<&FileLease, KernelError> {
+        if self.retained_file_leases.contains_key(lease_id) {
+            return Err(KernelError::Operation(
+                "file lease is retained by an active file worker".into(),
+            ));
+        }
+        let lease = self.file_leases.get(lease_id).ok_or_else(|| {
+            KernelError::Operation("file resource lease is no longer active".to_string())
+        })?;
+        if lease.grant_id != grant.grant_id || lease.root_id != root_id {
+            return Err(KernelError::Authorization(
+                "file resource lease belongs to another grant or root".to_string(),
+            ));
+        }
+        Ok(lease)
     }
 
     pub(super) fn assert_file_lease(
@@ -64,15 +270,20 @@ impl Storage {
         lease_id: Option<&str>,
     ) -> Result<(), KernelError> {
         let requested = self.canonical_lease_resources(root_id, paths, grant)?;
+        self.assert_canonical_file_lease(grant, root_id, &requested, lease_id)
+    }
+
+    /// Admission and retention use one resolved physical identity. A second path
+    /// resolution between overlap checking and insertion could switch aliases.
+    pub(super) fn assert_canonical_file_lease(
+        &self,
+        grant: &Grant,
+        root_id: &str,
+        requested: &[CanonicalFileLeaseResource],
+        lease_id: Option<&str>,
+    ) -> Result<(), KernelError> {
         if let Some(lease_id) = lease_id {
-            let lease = self.file_leases.get(lease_id).ok_or_else(|| {
-                KernelError::Operation("file resource lease is no longer active".to_string())
-            })?;
-            if lease.grant_id != grant.grant_id || lease.root_id != root_id {
-                return Err(KernelError::Authorization(
-                    "file resource lease belongs to another grant or root".to_string(),
-                ));
-            }
+            let lease = self.active_file_worker_lease(grant, root_id, lease_id)?;
             if requested.iter().any(|resource| {
                 !lease
                     .canonical_resources
@@ -149,11 +360,37 @@ impl Storage {
         value: &Value,
         grant: &Grant,
     ) -> Result<Value, KernelError> {
+        let prepared = self.prepare_file_lease(value, grant)?;
+        self.acquire_file_lease(prepared, grant)
+    }
+
+    fn prepare_file_lease(
+        &self,
+        value: &Value,
+        grant: &Grant,
+    ) -> Result<FileLeaseRequest, KernelError> {
         let params: KernelFileLeaseAcquireParams = parse_file_params(value)?;
         self.registered_file_root(&params.root_id, grant)?;
         let resources = Self::parse_lease_resources(&params)?;
         let canonical_resources =
             self.canonical_lease_resources(&params.root_id, &resources, grant)?;
+        Ok(FileLeaseRequest {
+            params,
+            resources,
+            canonical_resources,
+        })
+    }
+
+    fn acquire_file_lease(
+        &mut self,
+        prepared: FileLeaseRequest,
+        grant: &Grant,
+    ) -> Result<Value, KernelError> {
+        let FileLeaseRequest {
+            params,
+            resources,
+            canonical_resources,
+        } = prepared;
         if let Some(existing) = self.file_leases.get(&params.lease_id) {
             if existing.grant_id != grant.grant_id
                 || existing.root_id != params.root_id
@@ -182,6 +419,18 @@ impl Storage {
             }) {
                 return Ok(
                     json!({"leaseId": params.lease_id, "status": "busy", "blockingLeaseId": existing.lease_id}),
+                );
+            }
+        }
+        for earlier in &self.file_lease_waiters {
+            if canonical_resources.iter().any(|resource| {
+                earlier
+                    .canonical_resources
+                    .iter()
+                    .any(|held| overlaps(resource, held))
+            }) {
+                return Ok(
+                    json!({"leaseId":params.lease_id,"status":"busy","blockingLeaseId":earlier.lease_id}),
                 );
             }
         }
@@ -216,7 +465,13 @@ impl Storage {
                 "file lease belongs to another resource owner".to_string(),
             ));
         }
+        if let Some(retained) = self.retained_file_leases.get_mut(&params.lease_id) {
+            retained.release_requested = true;
+            return Ok(json!({"leaseId": params.lease_id, "released": true, "deferred": true}));
+        }
         self.file_leases.remove(&params.lease_id);
+        self.hint_file_root(&params.root_id);
+        self.notify_file_lease_waiters();
         Ok(json!({"leaseId": params.lease_id, "released": true}))
     }
 }

@@ -1,0 +1,100 @@
+/** Public model configuration. Credentials are references, never resolved secrets. */
+import type { JsonValue } from '@varin/protocol';
+import { runtimeFetch } from './transport/runtime-fetch.js';
+import { getRuntimeEndpointGeneration } from './transport/runtime-switch.js';
+import type { AuthorizationState } from './mcp-connections.js';
+
+export type ModelOperation = 'chat' | 'embedding' | 'rerank' | 'decision' | 'image-generation' | 'image-editing';
+/** Non-secret connection settings. Omitted proxy inherits the executing Host's policy. */
+export interface ModelConnectionOptions {
+  headers?: Record<string, string>;
+  /** Paths append to baseUrl's existing path; they cannot change origin or query. */
+  paths?: Partial<Record<ModelOperation, string>>;
+  proxy?: { mode: 'direct' } | { mode: 'proxy'; url: string };
+}
+export type ConnectionAuthentication =
+  | { kind: 'none' }
+  | { kind: 'credential'; reference: string }
+  | { kind: 'environment'; variable: string }
+  | { kind: 'google-adc'; file?: string }
+  | { kind: 'aws-chain'; profile?: string }
+  | { kind: 'anthropic-federation'; identityTokenFile: string; organizationId: string; federationRuleId: string; serviceAccountId?: string; workspaceId?: string };
+export interface ChannelModel {
+  id: string;
+  requestModelId?: string;
+  name: string;
+  enabled: boolean;
+  operations: ModelOperation[];
+  input?: ('text' | 'image')[];
+  contextWindow?: number;
+  maxOutputTokens?: number;
+  reasoning?: boolean;
+  thinkingLevelMap?: Partial<Record<'off' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max', string | null>>;
+  parameters?: Record<string, JsonValue>;
+  compat?: Record<string, JsonValue>;
+  image?: { mask?: boolean; parameters?: Record<string, JsonValue> };
+}
+export interface ModelChannel {
+  id: string;
+  name: string;
+  type: string;
+  enabled: boolean;
+  baseUrl: string;
+  connection?: ModelConnectionOptions;
+  authentication: ConnectionAuthentication;
+  parameters: Record<string, JsonValue>;
+  models: ChannelModel[];
+}
+export interface ChannelTypeInfo {
+  id: string;
+  name: string;
+  protocol: string;
+  defaultBaseUrl?: string;
+  authentication: ConnectionAuthentication['kind'][];
+  operations: ModelOperation[];
+  discovery: boolean;
+  parametersSchema: Record<string, JsonValue>;
+  oauthProviders?: { id: string; name: string }[];
+  /** Read-only contributed candidates; saved channel models remain user-owned. */
+  catalog?: ChannelModel[];
+}
+export interface ModelConnectionsSnapshot { revision: string; channels: ModelChannel[]; types: ChannelTypeInfo[]; issues?: { channelId?: string; code: string; message: string }[] }
+export interface DiscoveredModel { id: string; name: string; operations?: ModelOperation[] }
+export interface AgentSettingsSnapshot {
+  global: Record<string, JsonValue>; globalRevision: string;
+  project: Record<string, JsonValue>; projectRevision: string; projectTrusted: boolean;
+}
+export class ModelConnectionsError extends Error {
+  constructor(readonly status: number, readonly code: string, message: string) { super(message); }
+}
+
+/** Captures the selected Host when constructed, including delayed saves. */
+export function createModelConnectionsHttpAPI(generation = getRuntimeEndpointGeneration()) {
+  const post = async <T>(path: string, body: unknown, signal?: AbortSignal): Promise<T> => {
+    const check = () => {
+      signal?.throwIfAborted();
+      if (generation !== getRuntimeEndpointGeneration()) throw new ModelConnectionsError(409, 'host-changed', 'Application Host changed. Reload settings.');
+    };
+    check();
+    const response = await runtimeFetch(`/api/models/${path}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body), ...(signal ? { signal } : {}) });
+    check();
+    const result = await response.json();
+    check();
+    if (!response.ok) throw new ModelConnectionsError(response.status, result.code ?? 'model-request-failed', result.message ?? 'Model settings request failed.');
+    return result as T;
+  };
+  return {
+    read: (signal?: AbortSignal) => post<ModelConnectionsSnapshot>('read', {}, signal),
+    save: (channel: ModelChannel, expectedRevision: string, signal?: AbortSignal) => post<ModelConnectionsSnapshot>('save', { channel, expectedRevision }, signal),
+    remove: (id: string, expectedRevision: string, signal?: AbortSignal) => post<ModelConnectionsSnapshot>('remove', { id, expectedRevision }, signal),
+    discover: (id: string, signal?: AbortSignal) => post<{ models: DiscoveredModel[] }>('discover', { id }, signal),
+    storeCredential: (secret: string, reference?: string, signal?: AbortSignal) => post<{ reference: string }>('credentials/store', { secret, reference }, signal),
+    removeCredential: (reference: string, signal?: AbortSignal) => post<void>('credentials/remove', { reference }, signal),
+    signIn: (provider: string, reference: string, signal?: AbortSignal) => post<AuthorizationState>('authorization/start', { provider, reference }, signal),
+    authorization: (id: string, signal?: AbortSignal) => post<AuthorizationState>('authorization/read', { id }, signal),
+    replyAuthorization: (id: string, redirect: string) => post<void>('authorization/reply', { id, redirect }),
+    cancelAuthorization: (id: string) => post<void>('authorization/cancel', { id }),
+    readSettings: (cwd?: string, signal?: AbortSignal) => post<AgentSettingsSnapshot>('settings/read', { cwd }, signal),
+    updateSettings: (input: { cwd?: string; scope: 'global' | 'project'; expectedRevision: string; set: Record<string, JsonValue>; remove: string[] }, signal?: AbortSignal) => post<AgentSettingsSnapshot>('settings/update', input, signal),
+  };
+}

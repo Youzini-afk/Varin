@@ -8,27 +8,23 @@ import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { focusChatInput } from '@/components/chat/composer/editor/dom';
 import { hasOpenDropdown } from './keyboard-shortcut-dom';
 import { toast } from '@/components/ui';
-import { startPiSessionDraftFromNavigation } from '@/lib/pi-runtime/sessionNavigation';
-import { createPiWorktreeSession } from '@/lib/pi-runtime/worktreeSession';
-import { usePiSessionStore } from '@/stores/usePiSessionStore';
-import { projectPiSessionActivity } from '@/lib/pi-runtime/sessionActivity';
-import { nextPiFavoriteModel, nextPiThinkingLevel } from '@/lib/pi-runtime/keyboardActions';
-import { listPiModels } from '@/lib/pi-runtime/providers';
-import { addPiSelectionToChat } from '@/lib/pi-runtime/addSelectionToChat';
+import { startThreadFromNavigation } from '@/lib/agent-runtime/threadNavigation';
+import { createWorktreeThread } from '@/lib/agent-runtime/worktreeThread';
+import { useThreadStore } from '@/stores/useThreadStore';
+import { cancelSelectedThreadRun, cycleThreadModel } from '@/lib/agent-runtime/keyboardActions';
+import { addSelectionToChat } from '@/lib/agent-runtime/addSelectionToChat';
 import { requestIdeSearch } from '@/lib/workbench/ide-search-events';
 
-const focusPiTimeline = (): void => {
-  const timeline = document.querySelector<HTMLElement>('[data-pi-timeline="true"]');
+const focusThreadTimeline = (): void => {
+  const timeline = document.querySelector<HTMLElement>('[data-thread-conversation="true"]');
   timeline?.focus({ preventScroll: true });
   timeline?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
 };
 
 export const useKeyboardShortcuts = () => {
-  const currentSessionId = usePiSessionStore((state) => state.currentSessionId);
-  const currentSnapshot = usePiSessionStore((state) => (
-    state.currentSessionId === null ? undefined : state.records[state.currentSessionId]?.snapshot
-  ));
-  const abortCurrentOperation = usePiSessionStore((state) => state.abort);
+  const currentSessionId = useThreadStore(state => state.selectedIdentity?.threadId ?? null);
+  const isWorking = useThreadStore(state => Boolean(state.threads.find(thread => thread.thread_id === state.selectedIdentity?.threadId)?.branches.find(branch => branch.branch_id === state.selectedIdentity?.branchId)?.active_run_id));
+  const abortCurrentOperation = cancelSelectedThreadRun;
   const toggleCommandPalette = useUIStore((s) => s.toggleCommandPalette);
   const toggleHelpDialog = useUIStore((s) => s.toggleHelpDialog);
   const toggleSidebar = useUIStore((s) => s.toggleSidebar);
@@ -60,7 +56,6 @@ export const useKeyboardShortcuts = () => {
   const shortcutOverrides = useUIStore((s) => s.shortcutOverrides);
   const currentDirectory = useDirectoryStore((s) => s.currentDirectory);
   const { themeMode, setThemeMode } = useThemeSystem();
-  const sessionActivity = projectPiSessionActivity(currentSnapshot);
   const abortPrimedRef = React.useRef<{ expiresAt: number; sessionId: string } | null>(null);
   const abortPrimedTimeoutRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
   const themeModeRef = React.useRef(themeMode);
@@ -176,7 +171,7 @@ export const useKeyboardShortcuts = () => {
       }
 
       const sessionId = currentSessionId;
-      if (!sessionActivity.isWorking || !sessionId) {
+      if (!isWorking || !sessionId) {
         resetAbortPriming();
         return;
       }
@@ -187,8 +182,8 @@ export const useKeyboardShortcuts = () => {
       if (primed?.sessionId === sessionId && now < primed.expiresAt) {
         e.preventDefault();
         resetAbortPriming();
-        void abortCurrentOperation(sessionId).catch((error) => {
-          toast.error('Failed to stop Pi run', {
+        void abortCurrentOperation().catch((error) => {
+          toast.error('Failed to stop run', {
             description: error instanceof Error ? error.message : String(error),
           });
         });
@@ -198,7 +193,7 @@ export const useKeyboardShortcuts = () => {
       e.preventDefault();
       const expiresAt = now + 3000;
       abortPrimedRef.current = { expiresAt, sessionId };
-      toast.message('Press Escape again to stop the current Pi run');
+      toast.message('Press Escape again to stop the current run');
 
       if (abortPrimedTimeoutRef.current) {
         clearTimeout(abortPrimedTimeoutRef.current);
@@ -262,7 +257,7 @@ export const useKeyboardShortcuts = () => {
         }
 
         e.preventDefault();
-        focusPiTimeline();
+        focusThreadTimeline();
         return;
       }
 
@@ -284,14 +279,12 @@ export const useKeyboardShortcuts = () => {
       if (matchedNewSessionShortcut || matchedWorktreeShortcut) {
         if (e.repeat) return;
         e.preventDefault();
-        const creation = matchedWorktreeShortcut
-          ? createPiWorktreeSession()
-          : startPiSessionDraftFromNavigation();
+        const creation = matchedWorktreeShortcut ? createWorktreeThread() : startThreadFromNavigation({ directory: currentDirectory });
         void creation.catch((error) => {
           toast.error(
             matchedWorktreeShortcut
-              ? 'Failed to create Pi worktree session'
-              : 'Failed to create Pi session',
+              ? 'Failed to create conversation'
+              : 'Failed to create conversation',
             { description: error instanceof Error ? error.message : String(error) },
           );
         });
@@ -332,7 +325,7 @@ export const useKeyboardShortcuts = () => {
 
       if (eventMatchesShortcut(e, combo('add_selection_to_chat'))) {
         e.preventDefault();
-        void addPiSelectionToChat();
+        void addSelectionToChat();
         return;
       }
 
@@ -458,7 +451,7 @@ export const useKeyboardShortcuts = () => {
         return;
       }
 
-      // Cmd/Ctrl+Shift+T: cycle the thinking levels supported by the active Pi model.
+      // Cmd/Ctrl+Shift+T: cycle the thinking levels supported by the active model.
       if (eventMatchesShortcut(e, combo('cycle_thinking_variant'))) {
         const {
           isSettingsDialogOpen,
@@ -480,17 +473,8 @@ export const useKeyboardShortcuts = () => {
           return;
         }
 
-        const state = usePiSessionStore.getState();
-        const sessionId = state.currentSessionId;
-        const snapshot = sessionId ? state.records[sessionId]?.snapshot : undefined;
-        const nextLevel = nextPiThinkingLevel(snapshot);
-        if (!sessionId || !nextLevel) return;
         e.preventDefault();
-        void state.selectThinking(sessionId, nextLevel).catch((error) => {
-          toast.error('Failed to change Pi thinking level', {
-            description: error instanceof Error ? error.message : String(error),
-          });
-        });
+        void cycleThreadModel().catch(error => toast.error(String(error)));
         return;
       }
 
@@ -507,7 +491,6 @@ export const useKeyboardShortcuts = () => {
           isAboutDialogOpen,
           activeMainTab,
           favoriteModels,
-          addRecentModel,
         } = useUIStore.getState();
 
         if (isSettingsDialogOpen) {
@@ -523,29 +506,7 @@ export const useKeyboardShortcuts = () => {
 
         e.preventDefault();
 
-        const state = usePiSessionStore.getState();
-        const sessionId = state.currentSessionId;
-        const snapshot = sessionId ? state.records[sessionId]?.snapshot : undefined;
-        if (!sessionId || !snapshot) return;
-        const direction = eventMatchesShortcut(e, combo('cycle_favorite_model_forward')) ? 1 : -1;
-        const capturedSessionId = sessionId;
-        void listPiModels(snapshot.cwd)
-          .then((models) => {
-            if (usePiSessionStore.getState().currentSessionId !== capturedSessionId) return;
-            const next = nextPiFavoriteModel(favoriteModels, models, snapshot.model, direction);
-            if (!next) {
-              toast.message('No available Pi models match your favorites');
-              return;
-            }
-            return usePiSessionStore.getState().selectModel(capturedSessionId, next).then(() => {
-              addRecentModel(next.provider, next.id);
-            });
-          })
-          .catch((error) => {
-            toast.error('Failed to change Pi model', {
-              description: error instanceof Error ? error.message : String(error),
-            });
-          });
+        void cycleThreadModel(eventMatchesShortcut(e, combo('cycle_favorite_model_forward')) ? 1 : -1).catch(error => toast.error(String(error)));
         return;
       }
 
@@ -595,7 +556,7 @@ export const useKeyboardShortcuts = () => {
     setPromptNavigatorPanelOpen,
     toggleExpandedInput,
     setThemeMode,
-    sessionActivity.isWorking,
+    isWorking,
     resetAbortPriming,
     currentSessionId,
     currentDirectory,

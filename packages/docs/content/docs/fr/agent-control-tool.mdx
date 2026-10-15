@@ -1,38 +1,18 @@
 ---
-title: Outil de contrôle d’agent
-description: Laissez un agent gérer les sessions Varin, les worktrees et les tâches planifiées depuis le chat.
+title: "Outils de l’agent"
+description: "Comprenez les outils natifs de coordination du travail."
 ---
 
-# Outil de contrôle d’agent
+# Outils de l’agent
 
-Utilisez l’outil de contrôle d’agent Varin pour gérer le travail dans l’application directement depuis le chat. Il est disponible sur desktop et web quand Varin exécute son runtime Pi local. Il n’y a pas d’outil séparé à installer ni de commande shell à exécuter.
+Les outils disponibles dépendent du modèle, de la source, du rôle et des permissions acceptés. Décrivez le résultat souhaité ; chaque action reste soumise à ses contrôles d’autorisation.
 
-## Ce que vous pouvez demander
+- `dispatch`, `child_status`, `child_report` et `wait_child` coordonnent les tâches déléguées.
+- `threads` et `read_thread` inspectent les conversations de la même famille de tâches, sans accès général aux conversations ou fichiers.
+- `follow_up` gère les instructions déclenchées par une date ou une condition.
+- `goal_report` déclare un objectif explicite terminé ou bloqué.
+- `resource_read` lit les ressources admises ; `memory` gère les notes dans les périmètres autorisés.
 
-Demandez à l’agent en langage courant. Par exemple :
+Un outil visible n’accorde aucun droit d’écriture, d’exécution ou d’accès externe. Lire une conversation ne lance pas son modèle et ne donne pas le contrôle de son exécution. Vérifiez les résultats originaux : l’acceptation n’est pas la fin du travail.
 
-- « Crée une nouvelle session Varin dans ce projet, utilise le modèle `openai/gpt-5.6-sol`, et envoie-lui ce prompt : revoir le flux d’authentification. »
-- « Crée une nouvelle session Varin pour cette tâche dans un worktree séparé, et demande-lui d’ajouter des tests pour le flux de connexion. »
-- « Utilise Varin pour lister mes 10 sessions les plus récentes et inclure leur état actuel. »
-- « Crée une tâche planifiée Varin nommée Weekday review qui envoie ce prompt à 09:00 chaque jour de semaine : revoir les changements depuis la dernière exécution. »
-- « Exécute maintenant la tâche planifiée Varin nommée Weekday review. »
-- « Vérifie la session Varin nommée Authentication review et montre-moi sa dernière réponse d’assistant. »
-
-L’outil peut lister les projets et les préférences de modèle, créer des sessions et les relancer, forker une session, créer des sessions worktree isolées, et gérer les tâches planifiées. Les sessions démarrées ainsi apparaissent dans Varin comme n’importe quelle autre session, donc vous pouvez les ouvrir et continuer le travail vous-même.
-
-## À garder en tête
-
-- Les prompts de nouvelle session reviennent immédiatement par défaut. Suivez la session dans Varin, ou demandez à l’agent de la vérifier plus tard.
-- Un worktree séparé n’est créé que si vous le demandez. Les changements non commités de votre worktree actuel n’y sont pas copiés.
-- L’outil ne peut pas supprimer des sessions ou des worktrees, enregistrer des chemins de projet, exécuter des commandes shell arbitraires, ni appeler des URL arbitraires.
-
-## Activer ou désactiver l’outil
-
-Ouvrez **Settings**, changez **Agent control tool**, puis enregistrez. Le réglage s’applique au runtime Varin actuel.
-
-
-## Pages liées
-
-- [Tâches planifiées](/fr/scheduled-tasks/)
-- [Sessions worktree](/fr/worktrees/)
-- [Objectifs de session](/fr/session-goals/)
+Voir [Objectifs](/fr/session-goals/), [Tâches planifiées](/fr/scheduled-tasks/) et [Skills](/fr/skills/).

@@ -1,4 +1,4 @@
-import { getRuntimeKey } from '@varin/application-client';
+import { threadHostKey as getRuntimeKey } from '@/stores/useThreadStore';
 import type { EditorContextAttachment } from './types';
 
 const listeners = new Set<() => void>();
@@ -21,12 +21,12 @@ export const subscribeEditorContextAttachments = (listener: () => void): (() => 
 
 export const listEditorContextAttachments = (
   runtimeKey: string,
-  sessionId: string,
+  threadKey: string,
   workspaceId?: string,
 ): EditorContextAttachment[] => (
   attachments.filter((item) => (
     item.runtimeKey === runtimeKey
-    && item.sessionId === sessionId
+    && item.threadKey === threadKey
     && (!workspaceId || item.workspaceId === workspaceId)
   ))
 );
@@ -37,7 +37,7 @@ export const addEditorContextAttachment = (
   if (attachment.runtimeKey !== getRuntimeKey()) return { status: 'wrong-runtime' };
   const logicalIndex = attachments.findIndex((item) => (
     item.runtimeKey === attachment.runtimeKey
-    && item.sessionId === attachment.sessionId
+    && item.threadKey === attachment.threadKey
     && item.kind === attachment.kind
     && item.resourceId === attachment.resourceId
     && item.documentInstanceId === attachment.documentInstanceId
@@ -67,9 +67,9 @@ export const addEditorContextAttachment = (
   return attachment;
 };
 
-export const removeEditorContextAttachment = (id: string, runtimeKey: string, sessionId: string): void => {
+export const removeEditorContextAttachment = (id: string, runtimeKey: string, threadKey: string): void => {
   const next = attachments.filter((item) => (
-    item.id !== id || item.runtimeKey !== runtimeKey || item.sessionId !== sessionId
+    item.id !== id || item.runtimeKey !== runtimeKey || item.threadKey !== threadKey
   ));
   if (next.length === attachments.length) return;
   attachments = next;
@@ -78,10 +78,10 @@ export const removeEditorContextAttachment = (id: string, runtimeKey: string, se
 
 export const consumeEditorContextAttachments = (
   runtimeKey: string,
-  sessionId: string,
+  threadKey: string,
   workspaceId?: string,
 ): EditorContextAttachment[] => {
-  const taken = listEditorContextAttachments(runtimeKey, sessionId, workspaceId);
+  const taken = listEditorContextAttachments(runtimeKey, threadKey, workspaceId);
   if (taken.length === 0) return [];
   const takenIds = new Set(taken.map((item) => item.id));
   attachments = attachments.filter((item) => !takenIds.has(item.id));
@@ -103,4 +103,12 @@ export const resetEditorContextAttachments = (): void => {
   if (attachments.length === 0) return;
   attachments = [];
   emit();
+};
+
+/** A receipt acknowledges only captured revisions; later edits remain attached. */
+export const acknowledgeEditorContextAttachments = (captured: readonly EditorContextAttachment[]): void => {
+  const received = new Set(captured);
+  const remaining = attachments.filter(item => !received.has(item));
+  if (remaining.length === attachments.length) return;
+  attachments = remaining; emit();
 };

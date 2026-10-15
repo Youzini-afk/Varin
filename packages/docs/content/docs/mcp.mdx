@@ -5,26 +5,11 @@ description: Add MCP servers to give agents extra tools.
 
 # MCP Servers
 
-An MCP server gives your agents extra tools — things like searching a database, calling an API, or reading a service you use. Add them in **Settings → MCP**.
+Open **Settings → MCP** on the Host that should own the connection. Choose the configuration source, add a server, and enter its command/arguments/environment for a local process or URL/headers for a remote service. Only trust servers whose code and data access you understand.
 
-## Add a server
+Save the document, then use Connect or Reconnect and inspect the status and tool counts. Sign in when the server supports authorization. Global and project sources are shown by their actual paths; project configuration requires project trust. You can edit structured fields or the raw configuration.
 
-1. Open **Settings → MCP**.
-2. Add a server and choose its type:
-   - **local** — Varin runs a command on your machine. You give it the command to run and, if needed, environment variables.
-   - **remote** — Varin connects to a URL someone else hosts. You give it the URL and any headers it needs (for example an auth token).
-3. Save. The server is on by default; you can turn it off without deleting it.
+Saving configuration is separate from the resources already captured by an active Thread. Inspect the conversation’s resources and explicitly refresh its snapshot when you need updated tools. Permission, question and sampling requests appear in the native conversation.
 
-## Where it applies
-
-Pick the scope when you add a server:
-
-- **personal** — available in every project
-- **project** — available only in the current project, and saved alongside the project's other settings
-
-Server names use lowercase letters, numbers, hyphens, and underscores.
-
-## Related
-
-- [Providers, Models & Agents](/providers/) — connect a model first
-- [Skills](/skills/) — another way to extend what agents can do
+- [Model channels](/providers/)
+- [Skills](/skills/)

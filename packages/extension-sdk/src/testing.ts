@@ -16,6 +16,7 @@ import type {
   VarinExtensionStaticContribution,
   VarinExtensionStorageOpenRequest,
   VarinExtensionStorageSnapshot,
+  VarinHostServiceDependencyBinding,
 } from "@varin/extension-contract";
 import {
   defaultVarinWorkbenchProfileDocument,
@@ -23,6 +24,7 @@ import {
   VARIN_WORKBENCH_REPLACEMENT_TARGETS,
   VARIN_WORKBENCH_SHELL_DATA_CONTRACT,
   resolveVarinWorkbenchProfile,
+  createHostServiceDependencyClients,
 } from "@varin/extension-contract";
 import type {
   VarinBrokeredHostContext,
@@ -277,6 +279,8 @@ export const runHostExtensionConformance = async (options: {
   initialData?: JsonObject;
   packageRoot?: string;
   storageSchemaVersion?: number;
+  dependencies: readonly VarinHostServiceDependencyBinding[];
+  invokeDependency?: (request: import('@varin/extension-contract').VarinExtensionServiceInvocationRequest) => Promise<JsonValue>;
 }): Promise<HostConformanceResult> => {
   const controller = new AbortController();
   const disposers: Array<() => void | Promise<void>> = [];
@@ -358,16 +362,15 @@ export const runHostExtensionConformance = async (options: {
     },
     effect: (disposer) => { disposers.push(disposer); },
     services: {
+      ...createHostServiceDependencyClients(options.dependencies, request => {
+        if (!options.invokeDependency) throw new Error(`Conformance dependency is not provided: ${request.serviceId}@${request.version}.${request.method}`);
+        return options.invokeDependency(request);
+      }),
       provide: (descriptor: VarinExtensionServiceProvision, handler: VarinHostServiceHandler) => {
         const key = `${descriptor.id}@${descriptor.version}`;
         if (services.has(key)) throw new Error(`Host service provided more than once: ${key}`);
         services.set(key, handler);
       },
-      use: (id, version) => ({
-        call: async (method: string) => {
-          throw new Error(`Conformance dependency is not provided: ${id}@${version}.${method}`);
-        },
-      }),
     },
     signal: controller.signal,
     storage: {

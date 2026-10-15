@@ -8,8 +8,7 @@ import { ContextPanelRail } from './ContextPanelRail';
 import { ErrorBoundary } from '../ui/ErrorBoundary';
 import { CommandPalette } from '../ui/CommandPalette';
 import { HelpDialog } from '../ui/HelpDialog';
-import { PiSessionSidebar } from '@/components/pi-session/PiSessionSidebar';
-import { PiInteractionHost } from '@/components/pi-session/PiInteractionHost';
+import { ThreadSidebar } from '@/components/thread/ThreadSidebar';
 import { ScheduledTasksDialog } from '@/components/session/ScheduledTasksDialog';
 import { DirectoryExplorerDialog } from '@/components/session/DirectoryExplorerDialog';
 import { ArchiveView } from '@/components/views/ArchiveView';
@@ -26,7 +25,7 @@ import {
 } from '@/lib/extensions/workbench-registry';
 
 import { useUIStore } from '@/stores/useUIStore';
-import { usePiSessionStore } from '@/stores/usePiSessionStore';
+import { useThreadStore } from '@/stores/useThreadStore';
 import { useUpdatePolling } from '@/hooks/useUpdatePolling';
 import { useDeviceInfo } from '@/lib/device';
 import { cn } from '@/lib/utils';
@@ -82,8 +81,8 @@ export const MainLayout: React.FC<MainLayoutProps> = ({ renderConversation, rend
 
     React.useEffect(() => {
         const closeSurfacePages = () => useUIStore.getState().closeMainSurfaces();
-        const unsubscribeSession = usePiSessionStore.subscribe((state, prev) => {
-            const sessionSelected = Boolean(state.currentSessionId) && state.currentSessionId !== prev.currentSessionId;
+        const unsubscribeSession = useThreadStore.subscribe((state, prev) => {
+            const sessionSelected = Boolean(state.selectedIdentity) && state.selectedIdentity !== prev.selectedIdentity;
             if (sessionSelected) closeSurfacePages();
         });
         const unsubscribeTab = useUIStore.subscribe((state, prev) => {
@@ -274,7 +273,6 @@ export const MainLayout: React.FC<MainLayoutProps> = ({ renderConversation, rend
                 )}
             >
                 <CommandPalette />
-                <PiInteractionHost />
                 <HelpDialog />
                 <WorkspaceOverlays />
                 <WorkbenchContributionSlot kind="panel" slot="workbench.overlay" />
@@ -373,7 +371,7 @@ export const MainLayout: React.FC<MainLayoutProps> = ({ renderConversation, rend
                                 <ErrorBoundary>
                                     <WorkbenchReplacement
                                         target={WORKBENCH_REPLACEMENT_TARGETS.sessionNavigator}
-                                        fallback={renderNavigator ? renderNavigator(mobileLeftDrawerVisible) : <PiSessionSidebar mobileVariant isVisible={mobileLeftDrawerVisible} />}
+                                        fallback={renderNavigator ? renderNavigator(mobileLeftDrawerVisible) : <ThreadSidebar mobileVariant isVisible={mobileLeftDrawerVisible} />}
                                     />
                                 </ErrorBoundary>
                             </motion.div>
@@ -418,7 +416,7 @@ export const MainLayout: React.FC<MainLayoutProps> = ({ renderConversation, rend
                         >
                             <WorkbenchReplacement
                                 target={WORKBENCH_REPLACEMENT_TARGETS.sessionNavigator}
-                                fallback={renderNavigator ? renderNavigator(isSidebarOpen) : <PiSessionSidebar isVisible={isSidebarOpen} />}
+                                fallback={renderNavigator ? renderNavigator(isSidebarOpen) : <ThreadSidebar isVisible={isSidebarOpen} />}
                             />
                         </Sidebar>
                         <div className="agent-workspace-area relative flex flex-1 min-w-0 flex-col overflow-hidden" data-page-scroll-lock="true">

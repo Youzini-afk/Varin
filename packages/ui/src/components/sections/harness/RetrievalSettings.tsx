@@ -3,8 +3,7 @@ import type { HarnessExploreDecisionMode, LocalSemanticStatus } from '@varin/pro
 import { Button } from '@/components/ui/button';
 import { SettingsSection, SettingsFieldRow } from '@/components/sections/shared/SettingsSection';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { useDirectoryStore } from '@/stores/useDirectoryStore';
-import { usePiProviderStore } from '@/stores/usePiProviderStore';
+import { useConfigurationModels } from './ConfigurationModels';
 import { useI18n } from '@/lib/i18n';
 import { AutoSaveInput } from './AutoSaveInput';
 import { HarnessModelField } from './HarnessModelField';
@@ -92,7 +91,7 @@ export function LocalSemanticSettings({ state }: { state: LocalSemanticState }) 
 
 export function InferenceSettings({ harness, update, kind, localSemanticStatus }: HarnessSettingsPageProps & { kind: 'embedding' | 'rerank'; localSemanticStatus: LocalSemanticStatus | null }) {
   const { t } = useI18n();
-  const providers = usePiProviderStore((state) => state.providers);
+  const { providers, modelsFor } = useConfigurationModels();
   const binding = harness[kind];
   const [remote, setRemote] = React.useState(Boolean(binding));
   const remoteRef = React.useRef(remote);
@@ -129,16 +128,16 @@ export function InferenceSettings({ harness, update, kind, localSemanticStatus }
           current.current = next; setFields(next);
         }}>
           <SelectTrigger size="settings" className="w-64" aria-label={t(`settings.page.harness.${kind}.provider`)}><SelectValue>{fields.providerId || t('settings.page.harness.models.notConfigured')}</SelectValue></SelectTrigger>
-          <SelectContent><SelectItem value="__none" disabled>{t('settings.page.harness.models.notConfigured')}</SelectItem>{[...providers].sort((a, b) => Number(Boolean(b.details?.capabilities?.[kind])) - Number(Boolean(a.details?.capabilities?.[kind]))).map((provider) => <SelectItem key={provider.id} value={provider.id} disabled={provider.details?.capabilities?.[kind]?.enabled === false}>{provider.name || provider.id}</SelectItem>)}</SelectContent>
+          <SelectContent><SelectItem value="__none" disabled>{t('settings.page.harness.models.notConfigured')}</SelectItem>{providers.filter(provider => modelsFor(provider.id, kind).length).map((provider) => <SelectItem key={provider.id} value={provider.id}>{provider.name || provider.id}</SelectItem>)}</SelectContent>
         </Select>
       </SettingsFieldRow>
       <SettingsFieldRow label={t(`settings.page.harness.${kind}.model`)} controlClassName="@xl:flex-1 @xl:max-w-80">
         <InferenceModelField key={fields.providerId} value={fields.modelId} onCommit={(modelId) => { if (current.current.providerId === fields.providerId) commit({ modelId }); }}
-          models={providers.find(provider => provider.id === fields.providerId)?.details?.capabilities?.[kind]?.models ?? []}
+          models={modelsFor(fields.providerId, kind)}
           label={t(`settings.page.harness.${kind}.model`)} placeholder={kind === 'embedding' ? 'text-embedding-3-small' : 'rerank-v3.5'} />
       </SettingsFieldRow>
       {kind === 'rerank' ? <SettingsFieldRow label={t('settings.page.harness.rerank.endpoint')} controlClassName="@xl:flex-1 @xl:max-w-80">
-        <AutoSaveInput value={fields.endpoint} onCommit={(endpoint) => commit({ endpoint })} placeholder={providers.find(provider => provider.id === fields.providerId)?.details?.capabilities?.rerank?.endpoint ?? '/rerank'} aria-label={t('settings.page.harness.rerank.endpoint')}
+        <AutoSaveInput value={fields.endpoint} onCommit={(endpoint) => commit({ endpoint })} placeholder="/rerank" aria-label={t('settings.page.harness.rerank.endpoint')}
           validate={(value) => !value || value.startsWith('/') ? null : t('settings.page.harness.rerank.endpoint.description')} />
       </SettingsFieldRow> : null}
       <p className="typography-meta text-muted-foreground">{t(!fields.providerId || !fields.modelId ? 'settings.harness.completeFields' : `settings.page.harness.${kind}.provider.description`)}</p>
@@ -148,7 +147,7 @@ export function InferenceSettings({ harness, update, kind, localSemanticStatus }
 
 function FastDecisionSettings({ harness, update }: HarnessSettingsPageProps) {
   const { t } = useI18n();
-  const providers = usePiProviderStore((state) => state.providers);
+  const { providers, modelsFor } = useConfigurationModels();
   const settings = harness.fastDecision;
   const binding = settings?.default;
   const purposes = settings?.purposes;
@@ -167,7 +166,7 @@ function FastDecisionSettings({ harness, update }: HarnessSettingsPageProps) {
     setFields(next);
     if (!next.providerId.trim() || !next.modelId.trim()) return;
     update({ fastDecision: { default: {
-      protocol: 'pi-classifier',
+      protocol: 'typed-classifier',
       providerId: next.providerId.trim(),
       modelId: next.modelId.trim(),
       ...(next.endpoint.trim() ? { endpoint: next.endpoint.trim() } : {}),
@@ -202,16 +201,16 @@ function FastDecisionSettings({ harness, update }: HarnessSettingsPageProps) {
           current.current = next; setFields(next);
         }}>
           <SelectTrigger size="settings" className="w-64" aria-label={t('settings.page.harness.fastDecision.provider')}><SelectValue>{fields.providerId || t('settings.page.harness.models.notConfigured')}</SelectValue></SelectTrigger>
-          <SelectContent><SelectItem value="__none" disabled>{t('settings.page.harness.models.notConfigured')}</SelectItem>{[...providers].sort((a, b) => Number(Boolean(b.details?.capabilities?.decision)) - Number(Boolean(a.details?.capabilities?.decision))).map((provider) => <SelectItem key={provider.id} value={provider.id} disabled={provider.details?.capabilities?.decision?.enabled === false}>{provider.name || provider.id}</SelectItem>)}</SelectContent>
+          <SelectContent><SelectItem value="__none" disabled>{t('settings.page.harness.models.notConfigured')}</SelectItem>{providers.filter(provider => modelsFor(provider.id, 'decision').length).map((provider) => <SelectItem key={provider.id} value={provider.id}>{provider.name || provider.id}</SelectItem>)}</SelectContent>
         </Select>
       </SettingsFieldRow>
       <SettingsFieldRow label={t('settings.page.harness.fastDecision.model')} controlClassName="@xl:flex-1 @xl:max-w-80">
         <InferenceModelField key={fields.providerId} value={fields.modelId} onCommit={(modelId) => { if (current.current.providerId === fields.providerId) commit({ modelId }); }}
-          models={providers.find(provider => provider.id === fields.providerId)?.details?.capabilities?.decision?.models ?? []}
+          models={modelsFor(fields.providerId, 'decision')}
           label={t('settings.page.harness.fastDecision.model')} placeholder="jev-1.13" />
       </SettingsFieldRow>
       <SettingsFieldRow label={t('settings.page.harness.fastDecision.endpoint')} controlClassName="@xl:flex-1 @xl:max-w-80">
-        <AutoSaveInput value={fields.endpoint} onCommit={(endpoint) => commit({ endpoint })} placeholder={providers.find(provider => provider.id === fields.providerId)?.details?.capabilities?.decision?.endpoint ?? t('settings.page.harness.fastDecision.endpoint.description')} aria-label={t('settings.page.harness.fastDecision.endpoint')}
+        <AutoSaveInput value={fields.endpoint} onCommit={(endpoint) => commit({ endpoint })} placeholder={t('settings.page.harness.fastDecision.endpoint.description')} aria-label={t('settings.page.harness.fastDecision.endpoint')}
           validate={(value) => !value || value.startsWith('/') ? null : t('settings.page.harness.fastDecision.endpoint.description')} />
       </SettingsFieldRow>
       {(['explore', 'web', 'scholarly', 'memory-organization', 'memory-recall'] as const).map((purpose) => {
@@ -237,10 +236,7 @@ function FastDecisionSettings({ harness, update }: HarnessSettingsPageProps) {
 
 export function RetrievalSettings(props: HarnessSettingsPageProps) {
   const { t } = useI18n();
-  const cwd = useDirectoryStore((state) => state.currentDirectory);
-  const load = usePiProviderStore((state) => state.load);
-  const error = usePiProviderStore((state) => state.error);
-  React.useEffect(() => { void load(cwd).catch(() => undefined); }, [cwd, load]);
+  const { error } = useConfigurationModels();
   return <>
     {error ? <p role="alert" className="typography-meta text-destructive">{String(error)}</p> : null}
     <SettingsSection title={t('settings.page.harness.codeRetrieval.title')}

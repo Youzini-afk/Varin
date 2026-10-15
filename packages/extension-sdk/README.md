@@ -5,6 +5,15 @@ Extensions export an `activate` function or use `defineSurfaceExtension`, `defin
 or `defineHostExtension`. Activation contexts own contributions, services, disposers, authenticated
 assets, styles, revisioned storage, and capability clients without importing Varin's product UI.
 
+Every service requirement declares `realms: ['host']`, `['surface']`, or both. Required dependencies
+are resolved before that realm activates. Host `context.services.use(id, version)` captures one exact
+client; `useAll(id, version)` captures a declared collection. Surface `useService`/`useServices` use the
+same frozen-choice rule. Selection comes from the original scoped routing configuration, never a
+second global selector. An exact provider option can choose a member of the already bound collection;
+it cannot introduce another implementation. Captured handles keep their original generation while
+calls drain. Call-specific authority and cancellation still come from the current invocation, not
+from the shared activation context.
+
 Managed Surface extensions write custom context keys with `context.context.set(localKey, value)` and
 `delete(localKey)`. Varin prefixes the extension ID, stages candidate values until activation commits,
 and returns `false` to a disposed or superseded writer. Isolated extensions receive the same owner-scoped
@@ -73,3 +82,148 @@ managed Surface does not inject the optional service. It does not invent managed
 callback, or DOM access. `@varin/extension-sdk/testing` also exports
 `runEditorExtensionConformance` and a real mock document controller covering incremental failures and
 mount abort/disposal.
+
+`provideAgentPolicy` implements `varin.agent.policy@4` at committed execution boundaries. Its
+immutable declared configuration and versioned private JSON state are distinct from core history;
+the Host pins exact package/configuration identity for each committed policy generation. Declare auxiliary
+model duties with `modelRoles`. Optional `transitionState` returns only compatible private state or an
+incompatibility reason; omitting it rejects cross-implementation preservation, including null state.
+The SDK freezes inputs and checks the result shape, but compatibility semantics belong to the author.
+Core captures the original checkpoint, waits for a real closed boundary and commits activation. An
+explicit restart clears only policy state and never resumes a Pause. Return a permitted action rather
+than calling models or tools in the decision handler. Core validates exchanges, permissions,
+registered waits and cancellation. [The bounded evidence example](../../examples/extensions/evidence-policy/README.md)
+shows bounded evidence, [the collaboration example](../../examples/extensions/collaboration-policy/README.md)
+shows direct child dispatch and observation, and [delivery with explicit pause](../../examples/extensions/delivery-pause-policy/README.md)
+shows independent output and the original Run/Wait resume boundary. Installing these examples does
+not select their policy or give it ownership of core history.
+
+`provideRetrievalPlan(context, { configurationId, structure })` registers an immutable
+`varin.retrieval.plan@1` declaration with matching `inspect` schemas. Select `structure: 'builtin'`
+for the existing native structure stage or `'disabled'` for keyword-only retrieval. Do not perform
+filesystem, model, index or other external work during declaration. The Host supplies stages and
+keeps a generation pin for each native query; ordinary extension replacement preserves existing
+queries, while explicit disable/crash revokes their bindings. See the
+[authoring guide](../../docs/ops/varin-extension-authoring.md#native-retrieval-plans) for routing.
+
+`provideTool(context, declaration, execute)` registers an ordinary Host service with `inspect` and
+`execute` methods. Import the service descriptor directly from the package's `varin.extension.json`
+so cold discovery and activation use one declaration. `execute(input, call)` receives normal JSON,
+cooperative cancellation and `call.capabilities`, a client bound to that invocation. Schema compilation
+and admission remain with the executing Host; the SDK never owns history, Operations or resource facts.
+Return the tool's JSON data directly. Null and empty results are valid; missing/non-JSON results fail.
+For Result callbacks, use `await call.output({ kind: 'text', text })` or
+`await call.output({ kind: 'media', media: { media_type, data_base64 } })` for explicit ordered
+presentation parts. The original completion retains one `{ data, parts }` body; a returned
+JSON object that resembles a media descriptor remains ordinary data. Accepted parts survive
+callback or output-schema failure with the actual failure receipt. Producers cannot author
+storage references, source identity, outcome, effect or stop evidence through this callback.
+Declarations support `completion: result` and independent `completion: job` with an explicit
+`lifetime: thread | environment`. A Job needs a trusted domain adapter that durably accepts the original
+invocation and owns its cancellation/recovery; returned extension JSON cannot create an execution owner
+or assert physical stop. A Job callback cannot append parts through `call.output`: its
+owning domain must include them in the original durable acceptance or terminal body. Changing an
+already accepted Job's content would break its canonical receipt identity. The ordinary [research example](../../examples/extensions/research-tools/README.md)
+uses that boundary for accepted experiments and observation waits. This is not a generic extension-owned
+durable job store. A declared read operation
+still needs its ordinary capability grants and the Host's current invocation authority.
+
+Tool callbacks can inspect their exact accepted directory with `await call.tools.list()` and
+`await call.tools.describe(name)`. Both require the existing `runtime.tools` capability and a live
+invocation. Results identify `origin: 'accepted_run'`, the original Run ID and tool-schema generation;
+listing returns short names/versions/descriptions, while describe returns the original complete
+`ToolSchema` or null for an unselected name. These reads do not select or enable anything. The
+original parent-operation/executor identity and cancellation fence remain authoritative.
+
+The ordinary `runtime_contract` tool exposes those same reads with `{ action: 'list', kind: 'tool' }`
+and `{ action: 'describe', kind: 'tool', name }`. Its service/UI queries instead identify
+`origin: 'current_catalog'`: installed declarations, original scoped routing and observed owner
+lifecycle. Current metadata is not a promise that a tool is in this Run or that invocation is permitted.
+See [runtime contract discovery](../../docs/ops/varin-extension-authoring.md#runtime-contract-discovery)
+for method/event schemas and UI author seams.
+
+Tool callbacks can compose other selected tools with
+`await call.tools.invoke({ callId: 'memory', name: 'memory', arguments: { action: 'read' } })`.
+Declare `runtime.tools` in the Host entrypoint's capabilities. The returned `NestedToolReceipt`
+contains `operationId` and the original `completion` (`not_dispatched`, `result`, or `job_accepted`).
+Result and optional accepted-Job content use `{ data, parts }`; nested media is resolved for
+this original caller. It is not automatically copied to the outer completion. Forward a
+selected part through `call.output`, passing only its incoming byte fields; the runtime
+assigns the outer source and preserves the inner operation's separate receipt.
+The native owner derives the schema version and binds the call to the original invocation's frozen
+selected directory, source, context and generation. Every inner tool performs its own ordinary
+permission and resource admission; the composition does not enable an unselected tool.
+
+Choose a stable `callId` within this callback. Repeating it with identical input shares the actual
+in-flight call or receipt; changed input is rejected. Returned callbacks close new calls and drain
+already accepted calls even if their JavaScript promises were abandoned. Foreground cancellation
+reaches the original inner executor. An accepted independent Job keeps its original lifetime.
+Callback success describes the callback itself: an inner error caught or omitted from output still
+has its own native Operation and receipt. Closed or restarted invocation scopes cannot issue calls
+or replay unknown effects. See the [nested-tools example](../../examples/extensions/nested-tools/README.md).
+
+To stage an authored package through an ordinary tool invocation, use
+`call.tools.invoke({ callId: 'stage-package', name: 'extension_package', arguments: {
+  action: 'stage', packagePath: 'my-extension', expectedRevision: catalogRevision
+} })`. The original invocation source supplies the files; no Host path or grant can be passed.
+First installation is disabled until the user enables it in Extensions and reviews any requested
+capabilities. `apply` takes the exact candidate identity and current catalog revision, retains the
+existing capability decisions, and never enables a new package. Its committed application request
+can survive cancellation and resume on restart. A selected artifact is distinct from actual Host or
+Surface activation. The [authored panel example](../../examples/extensions/agent-authored-panel/README.md)
+uses the same package, build, tool, view and disposal contracts as other extensions.
+
+
+`provideContextFragments(context, { sections })` supplies a frozen
+`varin.context.fragments@1` declaration. Its manifest uses `VARIN_CONTEXT_FRAGMENTS_SERVICE`, including
+`contract.composition: "ordered"`, to allow explicit ordered routing. The body/method stays v1.
+Each provider owns its section names; identical names in different providers remain distinct.
+Instruction/data roles are preserved and the helper accepts no callback, model, network or mutable
+history input. The helper always registers the complete shared descriptor; its manifest and
+registration must match. Other heterogeneous service contracts may still omit optional metadata.
+
+
+`provideContextBudget(context, { identity, configuration, decide })` registers the metadata-only
+`varin.context.budget@1` Decision. Declare `VARIN_CONTEXT_BUDGET_SERVICE` in the package manifest. Inputs
+and configuration are detached and recursively frozen; cancellation discards unfinished output. Choose
+only a supplied `throughId` and return explicit background/blocking mode, optionally adding summary
+instructions. Core rejects a new background Decision when `settings.backgroundPreparation` is false.
+Do not perform retrieval, model requests or tools inside this callback. The native default
+remains selected until the user explicitly routes this service; summary generation and recovery remain
+owned by the original runtime.
+
+`provideContextCompaction(context, { identity, configuration, prepare })` registers the pure
+`varin.context.compaction@1` Provider with `VARIN_CONTEXT_COMPACTION_SERVICE`. It receives detached,
+recursively frozen source quotations and returns direct text or a complete model plan. The SDK checks
+the exact cut and references before returning. Preparation must not call models, tools or external
+services; model nodes request normal core-owned execution. A single actual pin covers describe,
+prepare and native admission. Accepted plans belong to the original ContextJob and survive provider
+replacement/unload without calling it again on recovery. See the [independent source merge-tree
+example](../../examples/extensions/context-compaction/README.md).
+The preparation input contains only frozen quotations, their cut hash and `modelBudget`, alongside
+this Provider's own frozen algorithm configuration. The cut binds those source/budget facts.
+A model plan's full model configuration and credential scope are frozen separately by native
+create/Launch. Direct text does not resolve model credentials or model-configuration routing, including
+its first admission; compaction service selection remains on the original scoped service router.
+
+`provideModels(context, { description, protocol?, authenticate? })` registers `varin.models@1` using
+`VARIN_MODELS_SERVICE`. The description contributes typed channels, read-only model candidates,
+OAuth methods and actual protocol implementations. Model candidates do not silently become saved
+channels or enabled selections. One selected provider is unambiguous; multiple providers use the
+existing explicit ordered service routing.
+
+A protocol callback receives generated `ModelProtocolCall` values and returns `ModelProtocolResult`.
+These types come from the private Rust protocol schema, including original request/run identity,
+semantic history, complete items and usage. The SDK freezes detached inputs. Rust owns HTTP, SSE
+framing, original Operations, durable request bytes, cancellation and recovery. No codec callback may
+start a second model request or retry an uncertain dispatch. The current brokered protocol contract
+supports chat over SSE; other operations require their actual existing native implementations.
+Custom API keys require an explicit channel `credentialHeader`; credentials never enter codec input.
+
+OAuth callbacks require the reviewed `varin.models.authentication` capability before the Host sends
+any account token. `begin` returns an authorization URL plus transient state; `complete` consumes the
+workbench reply; `refresh` preserves the same account. Its call-scoped client can POST form/JSON fields
+only to the provider's declared exact HTTPS token endpoints. The existing credential store owns
+persistence and single-flight refresh. Ordinary replacement preserves captured refresh implementations;
+canceling a waiter does not release their real callback. See the [custom text/SSE codec
+example](../../examples/extensions/model-protocol/README.md).

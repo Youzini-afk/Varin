@@ -1,412 +1,139 @@
-# Shared UI architecture and conventions
+# Shared UI
 
-`@varin/ui` is the React surface shared by Web, Electron, and mobile. It owns
-presentation and client-side kernels, not privileged filesystem, credential, shell, or process work.
-Surface-specific packages provide `RuntimeAPIs` and host bridges; shared components consume those
-contracts without hardcoding an origin, port, desktop IPC channel, or local path.
+`@varin/ui` is the React presentation shared by Web, Electron, and mobile. It owns client-side
+projections and workbench kernels, not privileged filesystem, credential, shell, or process work.
+Surface packages provide `RuntimeAPIs`; shared code imports the contracts and transport primitives
+from `@varin/application-client` without hardcoding origins, IPC channels, credentials, or local paths.
 
-Pi thinking disclosures render received visible text or an explicit redacted block. Empty/whitespace
-thinking stays out of both live disclosures and sorted activity counts. Opaque replay signatures remain
-owned by the native session and are never rendered as reasoning text.
+[Workbench and presentation](../../docs/workbench.md) explains the cross-feature invariants.
+[Extensions](../../docs/extensions.md) explains contribution and service ownership.
+[Runtime](../../docs/runtime.md) explains the native Thread/branch, Catalog and Application Host boundary.
+Use these for architecture, then the local owner below for implementation changes.
 
-## Agent / IDE presentation
+## Module navigation
 
-`PiComputerActivity` projects the Host's current application operation above the
-shared Composer. It reads `/api/computers/activity` once and on stream reconnect,
-then follows `varin:computer-activity` on the existing global SSE. No native
-probe, frame capture, polling timer or control acquisition occurs for the
-launcher. Clicking it opens the existing Computer context-panel tab for that
-desktop, sharing the normal viewer and human takeover/handback authority.
-Activity is ephemeral and session-scoped; a newer event cannot be overwritten
-by an older delayed initial read. Agent and IDE use the same component.
+| Area | Owner and local reference |
+| --- | --- |
+| Official shells | `src/workbenches`: Agent, IDE, Research, Bot, and Settings composition |
+| Extension integration | `src/lib/extensions`: catalog, loader, mounts, replacement/slot consumers, and owner-bound services |
+| Profile handoff | `src/lib/workbench/profile-transition.ts` and `src/lib/extensions/workbench-shell-transition.ts` |
+| Text state | [Document Registry](src/lib/documents/DOCUMENTATION.md) |
+| Groups, tabs, providers, restore | [Editor Workbench Kernel](src/lib/workbench/editors/DOCUMENTATION.md) |
+| Desktop/Web file editor | [Monaco](src/lib/monaco/DOCUMENTATION.md) |
+| Mobile and embedded editors | [CodeMirror](src/lib/codemirror/DOCUMENTATION.md) |
+| Agent/editor attachments and patch review | [Agent/editor bridge](src/lib/agent-editor/DOCUMENTATION.md) |
+| HTTP, browser URLs, switching | [Application client](../application-client/README.md) |
+| Shared projections and preferences | [Store ownership](src/stores/DOCUMENTATION.md) |
+| Agent resource-panel navigation | [Context surfaces](src/lib/surfaces/DOCUMENTATION.md) |
+| Settings primitives and save feedback | [Settings components](src/components/sections/shared/DOCUMENTATION.md) |
+| Native conversation | `src/components/thread`, `src/lib/agent-runtime`, and `ThreadsAPI` |
+| Theme and shared chrome | `src/lib/theme`, `src/styles`, and `src/components/ui` |
+| Icons | [Sprite-backed Icon contract](src/components/icon/README.md) |
 
-The 2026-10-06 handoff is implemented through the existing shells and theme system, not through the
-standalone prototype state. The built-in Varin themes supply warm-light and neutral-dark surfaces;
-`styles/workbench.css` gives the frame, conversation canvas, editor and resource rail their shared
-spacing and transitions. Custom theme selection and the native window-control boundary are unchanged.
+Lower framework-neutral `lib` owners do not import official `workbenches`. Narrow `features`
+adapters connect React/stores to those kernels. Extension code must not import product UI internals
+when the SDK's framework-neutral mount/controller contract provides the seam.
 
-`components/layout/WorkbenchServices` owns the shared Local/usage/MCP popover and GitHub actions. Both
-shells use that component and the existing `OpenInAppButton`. Agent's header controls panel and rail
-visibility independently through `useUIStore`; the work overview retains only its own lightweight
-icon and disclosure. Its lower hover/focus handle opens a narrow monitor of the same plan, task,
-change and source projections. On desktop, the compact view reserves its narrow width beside the
-chat; the full view keeps its existing wide-canvas reservation. Both remain mutually exclusive
-session choices; selecting a compact row opens its full section. IDE's quick-open/settings controls
-live in the activity footer, while the session picker and current context usage live inside the
-Agent pane's `IdeSessionHeader`.
+## State and lifecycle
 
-The lower overview handle remains visible only while the compact monitor is open. A full overview
-removes it; when both panels are closed, hover or keyboard focus reveals it temporarily. Pointer clicks
-do not pin the handle through lingering button focus.
+Shells own presentation. Documents, open groups, terminals, runtime identity, and domain facts remain
+with their existing shared or Host owner. Same-Host directory resolution can retain the rendered shell,
+but must not supply the previous workspace ID as the new target. Failed resolution, Host replacement,
+or a revoked contribution is a different state and cannot keep a stale authority alive.
 
-The conversation rail separates each user's prompt from the Agent's complete response round. Thinking,
-tool calls, progress messages and final prose share one Agent pointer, in both live and sorted modes.
-The two pointers share a round number. Agent previews prefer final prose and use the latest progress
-while no final answer exists; a jump targets the start of that Agent round in the existing virtual row.
-Current-reading highlight stays on the Agent pointer throughout its response. Stream deltas keep
-marker identities and virtual-list data stable.
+Async work captures Host/API epoch and its actual Thread, branch, resource, or contribution
+identity. Changing targets invalidates both the request and its intended mutation target. A cached view
+can preserve continuity but cannot turn missing, loading, failed, or inaccessible data into success.
+Complete authoritative snapshots and partial save responses have different merge semantics.
 
-`IdeSidebar` animates the actual persisted layout weight and retains exiting content until the
-transition finishes. Relative grow factors fill the row when a sidebar closes; outgoing content keeps
-its width instead of reflowing into a collapsing column. Reversing a toggle continues from the current
-position; resizing updates directly.
-Hidden/exiting controls are inert. Resource-panel default widths adapt to remaining space without
-replacing an explicit user resize. Native Monaco diff views use inline layout in a narrow editor
-unless their caller explicitly selects a presentation.
+High-frequency document text, cursor motion, streaming output, and transition frames stay close to
+owners with narrow subscriptions. Zustand holds appropriate navigation, preference, and keyed query
+state; it is not a universal storage layer. Dirty text never belongs in Local Storage. Profile changes
+must not recreate text models, accepted execution, or terminal processes.
 
-The composer adapts to its own width, keeping primary actions at the lower-right edge. Pending drafts,
-history hydration and live conversations share one mounted composer scoped to their `PiChatView`,
-while draft/session state remains in its existing stores. Queue rows animate native identities; an
-exiting row stops rendering its edit form before a consumed message's retained draft is shown. Working marks, input-frame sweeps, attachment
-arrival and panel movement honor reduced-motion preferences. These presentation changes do not add
-model calls, task states, prompt settings or a second document/queue authority.
+Connected workbench mounts participate in the existing Surface preparation lease. Their real hidden
+mounts validate before publication; closure, replacement, and render failure fence that lease. Once the
+Host confirms durable selection, local mount cleanup cannot claim the catalog or an external effect
+rolled back. Detailed lifecycle mechanics belong to the extension packages.
 
-`WorkbenchShellHost` keeps an already rendered shell mounted while a different directory resolves
-within the same Host and contribution generation. This includes the sidebar's general new draft,
-returning to a project conversation, and navigation between projects. The workspace resolver still
-reports the target as loading; the previous workspace ID is never supplied as that target's identity.
-Resolution errors, Host changes, and revoked/replaced contributions do not retain the old shell.
-Once resolution is ready the selected layout updates, and the chat/composer can finish their own
-continuous transition without being recreated by a temporary blank outer shell.
+## Conversation and resource projections
 
-## Module map
+The native Catalog owns accepted input, history, queues and execution receipts. `useThreadStore`
+projects navigation and summary clocks; `ThreadProjection` observes the selected branch. Progress
+streams are transient and sequence-scoped. A lost connection rebuilds from durable history rather than
+inventing completion or automatically resending input. Drafts retain exact uncertain command intent.
 
-`components/sections/assistant` owns the ordinary Agent memory and system-prompt settings pages.
-Memory CRUD and scope changes use the Host personalization authority; the editor stores only changed
-native prompt sections. Full previews include current project files, skills and memories, while the
-last-request disclosure comes from the live Pi worker. Bot settings retain their separate memory
-controls. Magic Prompts and prompt-template resource pages/expansion have been removed; skill resources
-and product action requests remain. See [Memory ownership](../web/application-host/lib/memory/DOCUMENTATION.md).
+`ThreadConversation` projects native Agent facts through `ThreadsAPI`. Its child, family, follow-up,
+plan, Goal, permission, question and recovery components keep their original owner and revision.
+Showing a resource or history view does not launch work. A follow-up registration observes its original
+Job/source and cursor; it never stops the observed Job or uses a renderer timer as a scheduler.
 
-Projects have a stable identity and an editable collection of folders. `ProjectEntry.path` is
-the default execution folder; `additionalPaths` contains the other folders. `projectFolders()`
-is the shared collection helper. Membership and default retrieval use the collection; commands,
-Git and project actions use the selected execution directory. These folders never act as file
-access permissions. Bot entry sessions are explicitly projectless.
+`ThreadContent`/`ThreadMedia` consume declared typed text/media holders, not arbitrary JSON that looks
+like an image descriptor. On-demand reads retain the original holder, part ordinal and execution
+identity. Object URLs belong to the mounted view and are revoked on cancellation or target change.
+Incomplete output-body pages must not be rendered as a complete report or reinterpreted as Markdown.
 
-Session navigation groups each conversation tree by its root. Child sessions remain nested below
-their parent across isolated directories and workspace bindings; selecting a child still opens its
-own execution directory. The sidebar expands children initially, retains explicit collapse choices
-while mounted, and reveals matching descendants during search. Native parent links remain the
-authority; sessions whose parent is unavailable remain accessible as roots.
+`components/materials/PdfMaterialReader` is the shared reader core. Thread adapters provide the
+authenticated material transport and guarded draft destination. PDF upload retains original bytes in
+the Host material owner; submit, queues and child continuation carry a fixed snapshot reference.
+Research artifacts first resolve through the original artifact owner and then use the returned snapshot. Selected regions go to the enclosing conversation's
+guarded composer; there is no global material event that can target a different Thread.
 
-The session sidebar binds right-click to the row, project header or background under the pointer;
-opening a menu does not navigate. Session right-click and `…` share their actions. In selection mode,
-right-click on a selected row retains the batch, while an unselected row becomes the sole selection.
-The menu states the selected count and uses the existing archive/delete confirmation. Search and
-rename inputs retain native text editing menus. Context-menu keys use the focused row, and delayed
-rename/search focus runs after the menu closes. Shared context menus mount inside their containing
-dialog so the IDE session picker and mobile overlays keep their existing focus boundary.
+`lib/attachProcessTerminal` attaches an accepted process. Remote cwd and resource identity are metadata,
+not permission to resolve that path on the coordinating Host or create a replacement local shell.
+Closing an attached tab detaches; it does not stop its Job. Thread retry first reopens the original
+owner/branch/operation through the Host. Attached Jobs are not persisted as restartable local shells.
 
-`HarnessThreadConversation` keeps the existing task-overview popup and offers
-conversation and exchange views. `HarnessThreadMessages` groups original messages
-with replies, shows actual peer names and native-session links, and exposes the
-user's send/reply composer. `PiThreadMessageCard` and `PiReceivedThreadMessage`
-present sent and received messages in the native timeline and open that exchange.
-The authenticated Host retains user identity and task-family authorization;
-client state only projects its ledgers, wait receipts and deduplicated peer roster.
-Each timeline supplies its own session identity, including a child conversation
-preview. Pending requests, explicit reply waits and failures appear in the work
-overview. Technical identities and timestamps remain in expandable details.
+Computer activity is an event projection of the Host operation. Its launcher does not probe/capture
+screens or acquire control. Bot sleep/archive/delete progress is also Host-owned; opening history
+never wakes a Bot. Ordinary navigation filters the native Catalog’s `bot_id` ownership before
+displaying conversations.
 
-The header services menu and mobile conversation metadata show the current session's token usage
-by provider and model from `SessionStats.usageByModel`. Pi Host reads the complete native journal,
-including inactive branches, messages before compaction and auxiliary usage. Calls lacking model
-metadata get a separate row. Input, output, cache reads and cache writes are shown as exact counts;
-each child conversation has its own statistics. Provider quota settings, credential adapters,
-network polling and tray quota summaries have been removed.
+Source files, Git snapshots, material pages, and editor drafts retain their own identities. Explicit
+resource roots resolve through Documents instead of borrowing a conversation's workspace. A file-change
+preview only describes received arguments until a real result supplies its mutation outcome.
 
-`ProjectCreateDialog` collects a name and folders, reusing `DirectoryPickerDialog` for browsing,
-native directory access, directory creation and Git cloning. `ProjectFoldersSettings` is shared
-by desktop settings and the mobile project editor. Folder edits preserve project/session IDs and
-project configuration; changing the default affects new conversations, not running sessions.
+## Settings and authoring conventions
 
-Index settings use `IndexDirectories` for directory-level add, pause/resume, explicit update checks
-and deletion. Project membership and index maintenance are independent: deleting an index leaves
-the project folder and its files intact. Paused indexes remain usable, and a manual check can run
-once without resuming background work. Cleanup progress/errors stay on the directory row; old cached
-roots are manageable without automatically enrolling them in indexing.
+Settings UI consumes shared catalog identities and the original domain APIs. Device-local entries use
+`client-settings-bridge.ts` and acknowledge what the target Surface actually applied. Forms preserve
+unsaved field drafts and their opened revisions across refresh; conflict is not an instruction to
+resubmit an entire old document. Same-owner and cross-owner results retain their real atomicity.
 
-Agents settings use the same split layout as Projects: `AgentsSidebar` holds the unified native,
-custom and plugin catalog, search and work-focus filtering; `AgentsPage` holds the selected editor.
-`NativeAgentEditor` edits built-in and user profiles inline, including name, responsibility, model,
-temperature, thinking level, instructions, tools and workspace isolation. Built-in resets restore
-the shipped profile fields while keeping the chosen model and enable switch. Unsaved drafts survive
-selection changes inside the current catalog. Draft saves retain
-their opened settings revision across external refreshes; conflicts stay visible instead of
-overwriting another edit. Plugin agents keep their provider-owned management and definition format.
+`components/sections/agents` uses `AgentProfilesAPI` for native profiles and exact registered tool names.
+Host changes retire old reads and drafts; omitted tools, empty selection, and reset are distinct.
+Accepted Runs are not rewritten by editing a default. Functional models stay with their owning settings domains.
 
-- `src/lib/documents/DOCUMENTATION.md`: revisioned client buffers and conflict behavior.
-- `src/lib/workbench/editors/DOCUMENTATION.md`: editor groups, providers, panels, and layout state.
-- `src/lib/monaco/DOCUMENTATION.md`: desktop/Web editor projection and language integration.
-- `src/lib/codemirror/DOCUMENTATION.md`: mobile and embedded document adapters.
-- `src/lib/api/DOCUMENTATION.md`: shared runtime capability and browser-URL boundaries.
-- `src/stores/DOCUMENTATION.md`: store ownership, synchronization, cache identity, and visible-demand
-  refresh behavior.
-- `src/components/sections/shared/DOCUMENTATION.md`: Settings layout, controls, save feedback, and
-  search integration.
-- `src/workbenches`: official Workbench/IDE/Research/Bot shells and Settings React composition. Lower `lib` modules do
-  not import this layer.
-- `src/features`: narrow React/store integrations, such as adapting the active-editor Store to the
-  framework-neutral Agent/editor kernel.
+Provider editing separates connection configuration, model discovery, and authentication. Discovery
+and login have different interaction identities and cancellation. Saving a configuration is not
+successful login. Credentials stay in their native owner, never renderer settings. See
+[provider authority](../web/application-host/lib/models/DOCUMENTATION.md) and
+[memory/personalization authority](../web/application-host/lib/memory/DOCUMENTATION.md).
 
-Runtime API types and auth/fetch/URL/switch primitives are imported directly from
-`@varin/application-client`; UI-owned forwarding modules are not part of the boundary.
+Use semantic theme tokens for surfaces, actions, selection, feedback, and syntax. Theme changes update
+projections rather than rebuilding models. Shared primitives own shared focus and interaction chrome;
+a single layout exception does not justify another wrapper or a public contribution type.
+The fold logo's source is `src/components/ui/varin-mark.ts`; generated assets must not develop independent shapes.
+Custom theme format lives in [the theme guide](../../docs/ops/CUSTOM_THEMES.md).
 
-The provider picker reads the active Pi runtime catalog; it does not maintain a second built-in
-provider list. A failed catalog load stops the loading indicator and exposes an explicit retry;
-directory changes invalidate the loaded state before accepting a new catalog. Invalid Harness
-settings remain an error in the settings surface rather than escaping its error handler.
-Desktop `App` has one catalog bootstrap effect (`usePiCatalogBootstrap`), admitted only after the
-runtime manager reports readiness from the catalog worker handshake. HTTP availability alone does
-not admit a Pi socket: the gateway rejects connections while its broker is starting. Tray catalog
-refresh and Pi app effects start after the initial catalog loads, so they cannot create an early
-competing request. Real catalog failures after readiness retain the existing manual recovery action;
-endpoint changes re-enter the readiness gate.
-Readiness snapshots belong to their API/endpoint epoch. A new epoch becomes unready during render,
-before effect cleanup; old status requests and notifications cannot admit the new catalog connection.
-Login and model discovery use separate interaction identities even for the same
-provider. The shared authentication UI renders Pi's secret/text/select/manual-code questions and
-events for both API keys and OAuth. Prompt withdrawal clears the corresponding input, and closing
-or changing the target cancels the native operation. Custom model configuration stays in `models.json`;
-credentials stay in Pi auth storage and are never persisted in renderer settings. Configuration save
-and subsequent authentication are separate outcomes, so cancelled login must not be reported as
-successful credential setup.
+Visible text and accessibility labels resolve through `@/lib/i18n` during render or hook execution.
+Every shipped message catalog receives real translations for new semantic keys; parity tests check key
+shape. Keep parameters as values rather than fragments of grammar. Product names, paths, commands,
+provider/model names and user content stay literal. Locale changes should not remount the application.
 
-Custom providers configure their common connection first, then independently enable generation,
-embedding, reranking and fast decisions. Generation exposes Chat Completions, Responses, Anthropic
-Messages, Gemini and an editable extension API identifier. Inference connections expose their actual
-adapter protocols and allow address/path/credential-owner overrides. Credentials stay in Pi auth;
-pure inference providers do not need a chat API or fabricated chat model.
-All four capability sections offer model discovery and a shared selection/import dialog. Inference
-discovery uses its own connection overrides, imports only into that section, and leaves selection
-explicit for mixed catalogs. Changing the connection or leaving the editor cancels pending discovery.
+## Verification and performance
 
-Capability model suggestions appear in their corresponding Harness pickers, alongside manual ID entry.
-Provider counts include those declarations, while the ordinary chat picker still uses only native Pi
-chat models. Disabling retains configuration and model definitions. A declared-model selection retires
-the old manual input generation so its unmount auto-save cannot overwrite the new selection.
-See [provider ownership and format](../pi-host/src/PROVIDERS.md).
+Use the scripts in `package.json` and tests beside the changed owner. Behavior evidence should exercise
+real transitions: interrupted/repeated actions, stale target completions, drafts, connected mounts,
+queue identity, cleanup, and provider failure. Layout constants or a copied literal enum are not useful
+behavior tests. Scope shared-contract checks to actual consuming surfaces.
 
-## Theme and component system
+Visible demand owns refresh and subscriptions. Hidden views release DOM observers, language requests,
+Git/PR refresh work and presentation timers; hiding a view does not cancel independently owned backend
+work. Preserve unrelated object identities instead of rebuilding full histories/catalogs on each delta.
+Measure cold load, warm switches, paint, and cleanup on the relevant platform before adding budgets.
+A virtualized viewport size is not a stored-history/content limit.
 
-`varin-mark.ts` owns the approved fold logo as two centered polygons, including the extended tips and
-small diagonal separation. `VarinLogo` uses that flat mark in the surrounding foreground color, with
-two-tone shading at larger sizes and solid ink for small controls. The splash keeps its existing cube
-and camera; `varin-splash-cube.ts` places the same polygons on its top face. `branding:generate` emits
-desktop/Web/mobile/Widget assets, and `splash:emit` updates the pre-paint HTML. Keep shape edits at this
-shared source rather than drawing independent versions for individual surfaces.
-
-At boot exit, the splash wrapper stays transparent through a paint before its Canvas is detached. The
-handoff canvas uses the live application background. WebGL retirement deletes owned resources without
-forcing context loss during the compositor handoff; generated pre-paint hosts use the same renderer.
-
-Research uses `MainLayout` for shared window controls, navigation, permissions, settings and resource
-panels. Its conversation composition shows the real research-root Thread/Run and an expandable branch
-and materials area. `HarnessThreadStateProvider` owns this read-only projection; branches remain
-available from the ordinary Agent/IDE thread panel too. Rendering a shell never creates a Run.
-
-`PiWorkFocusControl` selects execution focus independently of the shell. New drafts can use a project
-default or an explicit override; the broker captures the choice when creating the session. Existing
-sessions show selected and applied focus separately. A change applies before the next new Run, while
-the current Run and its follow-up queue retain their configuration. Session metadata, not the active
-project or UI profile, owns the durable choice. Project defaults use the existing settings/autosave path.
-
-The session sidebar places “Scheduled & follow-ups” directly below New session. Its existing page slot
-(`ScheduledTasksDialog`) contains separate schedule and follow-up sections on desktop and mobile.
-Schedules keep project selection and their existing editors. `FollowUpTasksPanel` reads an authenticated
-Host-wide overview, separates active waits from history, and exposes source checks, explicit invocation,
-cancellation and navigation back to the target conversation. Mutations reuse the original session-scoped
-routes and revisions. Overview reads do not invoke models or install another scheduler. The panel loads
-only while visible, follows existing follow-up events, and aborts stale reads on unmount/runtime changes;
-load failures stay distinguishable from an empty list. `followUpsApi` is shared with the conversation strip.
-Both sections use a centered page heading, rounded search field, status filters and compact expandable
-`TaskListRow` entries; full instructions and actions are disclosed on expansion. There is no suggestions
-section. The Create menu offers either task kind. `FollowUpEditorDialog` creates a continuation on an
-existing project-bound conversation through the same Host service as the Agent tool; common conditions
-are time, workspace file state, a listed experiment's completion, GitHub PR state and manual invocation.
-Creation does not pause the current conversation. Conditions already met may invoke it immediately.
-Editing only the instruction retains advanced sources, and editing a supported source retains its
-unexposed options (such as fallback deadlines). Calendar task creation keeps its existing editor.
-
-`WorkbenchProfileSwitcher` exposes one icon-labelled mode menu: Workbench, IDE and Varin bot.
-General/Research (plus installed custom profiles) remain a separate workspace menu visible only in
-Workbench mode. `useUIStore.agentWorkbenchProfileByHost` remembers the Workbench return destination
-per Host across shell remounts and app restarts. The Host profile document remains the sole active-shell
-authority; committed Workbench profiles refresh the return preference, while failed switches preserve
-it. Both controls leave work focus alone and shell changes use the existing staged transition.
-
-`varin.bot` selects the built-in Bot shell. It uses shared window/settings/resource chrome with its own
-Bot identity and work navigator, rather than a shortcut in the ordinary session sidebar. The shell
-opens the selected Bot's durable entry through the existing Host API and shows only that Bot's entry
-or work conversations. An empty catalog offers explicit creation; failed reads stay errors. Candidate
-shell staging never creates Bots or navigates sessions. Unmount/runtime changes cancel stale reads and
-entry resolution. Ordinary Workbench and IDE navigation exclude sessions owned by Bot entry or Run
-records, and returning from Bot restores the prior ordinary session and location. Mobile exposes the
-same mode control in its navigation drawer (IDE remains desktop/Web).
-
-Bot rows expose the same actions through right-click and their visible-on-hover `…` button:
-pin/unpin, rename, the targeted Bot profile, scoped memory, sleep/wake, archive and delete.
-Settings catalog rows use the same menu, and the profile includes a delete button. Deletion has an
-explicit confirmation and first closes Bot admission and stops its work through the existing sleep
-lifecycle. The Host then cascades owned Threads, deletes all owned Pi conversations, closes and
-removes Bot memory/vector stores and private home files, and releases the profile last. Original
-project folders, shared environments and VM definitions/disks remain. Interrupted cleanup is durable;
-failed deletion keeps a blocked row with its error and a retry action. Session ownership stays in the
-catalog until cleanup succeeds, so its conversations cannot leak into ordinary Workbench/IDE lists.
-Opening another Bot's profile or memory never selects its conversation. The memory panel uses the
-Host's existing MemoryService to show source excerpts, supersede a corrected memory, or forget it;
-revision checks prevent overwriting concurrent organizer/user edits. Archived Bots have a separate
-list with restore; restoration keeps them asleep until explicitly woken.
-
-The Host owns durable Bot sleep progress. The shell subscribes to `varin:bot-changed` and refreshes
-on event-stream reconnection; it does not drive background lifecycle work. Sleeping and archived
-conversations are read-only. Their banner distinguishes stopping, asleep, waking and partial failures,
-exposes explicit retry, and displays the observed remote computer states. Opening history never wakes
-a Bot. Archive requests first finish the same sleep operation, so unfinished work remains visible if
-stopping or remote shutdown fails.
-
-Varin themes expose semantic surface, interactive, status, primary, syntax, and feature tokens.
-Components use those roles rather than embedding palette colors: selection describes current state,
-primary describes an action, status colors describe feedback, and syntax colors remain code-specific.
-When a third-party renderer needs resolved colors, `useThemeSystem()` is the adapter; ordinary React
-chrome uses CSS variables and semantic utility classes.
-
-Built-in themes share neutral work surfaces and plain text; their identity appears in primary actions,
-localized selection fills, links, focus and code/status colors. Do not tint an entire panel or change
-the interface font when choosing a built-in palette. Custom themes may still supply explicit surface
-and font overrides. Default buttons are solid actions; secondary/outline/ghost variants stay quiet,
-and selected chips use the theme's selection color. Menus use one border
-and a restrained shadow, inputs keep a visible border on hover, and keyboard focus must remain visible.
-UI labels use 14px, metadata 13px and small badges 12px at the default scale; Markdown body text uses 16px.
-
-`ChatSettings` owns the Chat page, separate from the application appearance form. It groups reading,
-execution display, input behavior and code/files. `chatContentWidth` sets the shared message/composer
-maximum width (960px by default; 0 fills the pane) through `useChatContentWidth`; presets and direct
-adjustments share the same persisted value. Existing conversations respond immediately. Controls use
-the settings catalog's search identities and the normal save feedback, with explanatory copy limited
-to ambiguous choices and contextual help. Pi rendering consumes the visibility/disclosure preferences;
-obsolete per-fragment actions and the unconsumed subagent display-message preference have been retired.
-
-The desktop work overview reserves space on the shared conversation column, so
-messages and the composer remain aligned as it opens or closes. It stays open
-while users interact with chat; its toolbar toggle or explicit workspace panel
-switch closes it. The 320px-wide floating panel starts directly with its content
-sections, without a duplicated overview heading or summary-badge row.
-Sections default to expanded except Sources. Explicit section choices and panel visibility are
-persisted per runtime and conversation, including the narrow-screen overlay. Closing/reopening,
-session navigation and data refreshes retain those choices; plan/task completion does not change them.
-
-The desktop Agent shell has independent panel and icon-rail controls in `ContextPanelControls`.
-The rail-only icon identifies the strip without implying another navigation action; the work overview
-controls only its own disclosure. Rail visibility is a persisted UI preference and never changes panel visibility. The existing per-workspace
-panel state retains tabs, widths, expanded layout and the active tab across close/reopen; only a workspace
-without retained tabs starts with the file view. The rail switches surfaces and displays Git change
-counts. Explicit file/terminal/review actions still open the panel directly. Extension slots remain available.
-Git has one rail entry. Its panel header switches between Changes and Pull requests; full file diffs
-remain a child of Changes. Both child pages keep Git selected in the rail, and the Git entry closes or
-restores the current child page. The shared repository selector applies to all three pages. Tabs retain
-their repository directory independently of the session's panel location, including editor and walkthrough
-navigation from a diff or pull request.
-`ContextResourceEditor` resolves the explicit resource root through `DocumentsAPI` and uses that
-Host-owned workspace identity; it never borrows the session workspace identity for another repository.
-Closing the PR panel stops its refresh watchers and timers while retaining its page state and drafts.
-
-Default desktop navigation is 256px wide (manual widths are retained). New session and search stay
-visible; project/session management and display choices share one labeled menu. The titlebar is 44px except
-where native macOS or window-control-overlay insets require more. Composer attachment/fullscreen
-actions share a menu; model, permission and send controls stay directly available. Activity traces
-are expandable rows rather than another enclosing card. Keep readable content spacious while making
-tool chrome compact. Narrow composers move configuration controls to their own row while keeping
-send/stop at the lower-right edge.
-
-`PiFileChangePreview` renders live `write`, native multi-`edit`, and Codex `apply_patch` arguments as
-compact file cards. Its virtualized inner viewport follows actual deltas and preserves user pause and
-expansion within the mounted turn. Shared worker highlighting coalesces updates; it never schedules a
-typing replay. Mutation outcome/destination comes from native tool result details, and whole-file writes
-without a before-image are labeled as content previews. Raw details and extension renderers remain available.
-
-`PiExploreCard` is one compact card with a binoculars/query header, four-row body and quiet footer. Actual
-receipts flow through the running body; completion replaces those activities with final file/line results.
-The header and footer expand the full current list, with the choice preserved within the mounted turn.
-Candidate and returned counts remain distinct. File navigation uses the existing context-file path;
-excerpt previews retain the retrieval revision instead of rereading the current file. Original output
-stays under an expanded raw-details disclosure. Only new receipts animate, respecting reduced motion;
-the elapsed clock runs only while mounted and running. No renderer retrieval polling or inference occurs.
-
-`PiQuestionPopup` presents native Agent questions in a compact bottom card without a blocking backdrop.
-Nonwaiting cards stay for 60 seconds; an explicit Agent wait uses its remaining deadline. Answers can
-be submitted later from the work overview's Unanswered questions section. Closing the popup hides it
-and retains drafts; closing a question in the overview cancels it. Selecting another question brings
-that card forward. Pending question records survive worker shutdown in the interaction projection;
-Pi snapshots and native responses remain authoritative. Permission/plugin dialogs keep their modal UI.
-
-The chat timeline provides object-sensitive context menus through `ChatContextMenu`: selection actions,
-whole-turn/message operations, code, file/link actions and image viewing/copy/save. Selection identity is
-captured before popup focus changes; `chatSelection` maps rendered Markdown to native source offsets.
-`ChatMemoryDialog` previews extraction with the existing organizer model and commits only on Save through
-the Host memory service. The old direct remember buttons are removed. Quoting appends to the existing
-draft and links to its native entry. These controls never send the draft or create another session state
-owner. See [conversation behavior](../../docs/design/chat-experience.md#chat-context-menu-and-selected-memory).
-
-Agent/Research use a full-width desktop header above the sidebar and work area. `TitlebarLeftControls`
-and the project/session title are ordinary flex siblings; opening or resizing the sidebar does not
-reposition them. There is no floating titlebar overlay, measured-width spacer, or sidebar title strip.
-Project runs live in each project's context menu and the header's project-name menu; IDE uses the same
-workspace-name menu. Header actions retain the active conversation's working directory, while the sidebar
-project menu targets that project's root.
-“Start preview” identifies the former “Auto discover” action. The preview surface can open empty with
-a launch button, then replaces its placeholder with the detected URL. Project action controllers stay
-mounted when their menus close and load configuration on first open. Output observation is directory
-scoped and claims automatic URL opening on the shared terminal tab so multiple controls do not open it twice.
-
-Common controls live under `src/components/ui`. `Button`, `dropdownTriggerVariants`, and the Settings
-primitives carry shared interaction chrome, sizes, focus behavior, and theme semantics. Extending a
-shared primitive is preferable when several callers genuinely need the same missing shape; a local
-layout exception does not automatically justify another wrapper component.
-
-Icons use the sprite-backed `Icon`/`IconName` contract documented in
-[src/components/icon/README.md](src/components/icon/README.md). The generator is
-`bun run scripts/generate-icon-sprite.mjs`; `sprite.ts` is generated output. User theme format and
-authoritative data locations are documented in [docs/ops/CUSTOM_THEMES.md](../../docs/ops/CUSTOM_THEMES.md).
-
-## User-facing text
-
-Visible text and accessibility labels are resolved through `@/lib/i18n` inside React render or hook
-scope. The message catalogs under `src/lib/i18n/messages` ship together, and
-`i18nParity.test.ts` checks their key shape. New semantic keys therefore need real translations in
-every shipped catalog rather than an English placeholder. Product names, protocol acronyms, paths,
-commands, environment variables, model/provider names, and user-generated content remain literal.
-
-Message parameters carry values, not pieces of grammar. Count-dependent or optional clauses use
-complete messages where languages cannot share one sentence. Locale state stays inside the i18n
-module so changing language re-renders the surface without remounting the application.
-
-## Interaction and performance precedents
-
-Interaction choices follow the layout and input model rather than one global recipe. Existing sortable
-precedents are `DraftPresetChips.tsx` for wrapping variable-width chips and
-`components/ui/sortable-tabs-strip.tsx` for a single horizontal row. They use stable item identities;
-wrapping and single-row layouts intentionally choose different sorting strategies. Sensor distances,
-long-press timing, virtualization thresholds, and cache bounds are implementation decisions to verify
-against the actual interaction and scale, not repository-wide magic numbers.
-
-High-frequency state should remain close to its owner and preserve unrelated references. Visible
-surfaces drive refresh and subscriptions; hidden surfaces should not keep language, Git, PR, terminal,
-or extension work alive. The concrete store and editor lifetimes are documented by their owning
-modules rather than repeated here.
-
-Agent Harness has a dedicated Settings navigation group: tools/execution, permissions, model roles,
-context, code retrieval, Web access, and the existing knowledge catalog. Its pages share the native Pi
-settings authority through a serial, revision-bound autosave controller. UI changes are optimistic;
-later edits remain queued while an earlier write completes. Failed writes retain the edits and retry
-against a refreshed snapshot. Text commits on a typing pause, blur, or Enter; related inference fields
-are submitted together once complete. A successful write never resets another field's in-progress text.
-Web credentials use their existing authenticated credential endpoint, outside the settings payload.
-
-`HarnessThreadResultHistory` opens on demand inside a Thread card and uses the application-client
-history DTOs. It shows retained versions and Host-provided protection reasons, freezes branch/revision
-selection before confirmation, and refreshes the existing Thread/space projection after release.
-Version sizes include shared objects; only the Host cleanup response reports removed bytes. Interrupted
-cleanup keeps the same retry request across panel refreshes. Target changes discard old responses and
-selection; this feature adds no polling or persistent browser-side history authority.
+Reduced motion, keyboard navigation, focus return, narrow layouts and touch must be checked through their
+real interaction paths. Unit/contract tests and source inspection do not establish browser timing,
+real-device usability, authenticated provider success, or packaged Electron/mobile acceptance.

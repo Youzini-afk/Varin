@@ -14,17 +14,17 @@
       },
       "items": [
         {
-          "label": "Overview",
+          "label": "Varin Docs",
           "link": "/",
           "translations": {
-            "zh-CN": "概览",
-            "uk": "Огляд",
-            "es": "Visión general",
-            "pt-BR": "Visão geral",
-            "ko": "개요",
-            "pl": "Przegląd",
-            "fr": "Vue d’ensemble",
-            "ja": "概要"
+            "zh-CN": "Varin 文档",
+            "uk": "Документація Varin",
+            "es": "Documentación de Varin",
+            "pt-BR": "Documentação do Varin",
+            "ko": "Varin 문서",
+            "pl": "Dokumentacja Varin",
+            "fr": "Documentation Varin",
+            "ja": "Varin ドキュメント"
           }
         },
         {
@@ -113,59 +113,73 @@
           }
         },
         {
-          "label": "Notes, Todos & Plans",
+          "label": "Images and PDFs",
+          "link": "/attachments/",
+          "translations": {
+            "zh-CN": "图片与 PDF",
+            "uk": "Зображення та PDF",
+            "es": "Imágenes y PDF",
+            "pt-BR": "Imagens e PDFs",
+            "ko": "이미지와 PDF",
+            "pl": "Obrazy i PDF",
+            "fr": "Images et PDF",
+            "ja": "画像と PDF"
+          }
+        },
+        {
+          "label": "Project Notes, Todos & Plans",
           "link": "/notes-todos-plans/",
           "translations": {
-            "zh-CN": "笔记、待办与计划",
-            "uk": "Нотатки, справи та плани",
-            "es": "Notas, tareas y planes",
-            "pt-BR": "Notas, tarefas e planos",
-            "ko": "메모, 할 일, 계획",
-            "pl": "Notatki, zadania i plany",
-            "fr": "Notes, todos et plans",
-            "ja": "メモ、Todo、計画"
+            "zh-CN": "项目笔记、待办与计划",
+            "uk": "Нотатки, завдання та плани проєкту",
+            "es": "Notas, tareas y planes de proyecto",
+            "pt-BR": "Notas, Tarefas e Planos do Projeto",
+            "ko": "프로젝트 메모, 할 일, 계획",
+            "pl": "Notatki, listy zadań i plany projektu",
+            "fr": "Notes, todos et plans de projet",
+            "ja": "プロジェクトのメモ、Todo、計画"
           }
         },
         {
-          "label": "Scheduled Tasks",
+          "label": "Scheduled tasks and follow-ups",
           "link": "/scheduled-tasks/",
           "translations": {
-            "zh-CN": "计划任务",
-            "uk": "Заплановані задачі",
-            "es": "Tareas programadas",
-            "pt-BR": "Tarefas agendadas",
-            "ko": "예약 작업",
-            "pl": "Zaplanowane zadania",
-            "fr": "Tâches planifiées",
-            "ja": "スケジュールタスク"
+            "zh-CN": "计划任务与后续任务",
+            "uk": "Заплановані й подальші завдання",
+            "es": "Tareas programadas y seguimientos",
+            "pt-BR": "Tarefas agendadas e acompanhamentos",
+            "ko": "예약 작업과 후속 작업",
+            "pl": "Zadania zaplanowane i kontynuacje",
+            "fr": "Tâches planifiées et suivis",
+            "ja": "予定タスクとフォローアップ"
           }
         },
         {
-          "label": "Agent Control Tool",
+          "label": "Agent tools",
           "link": "/agent-control-tool/",
           "translations": {
-            "zh-CN": "智能体控制工具",
-            "uk": "Інструмент керування для агентів",
-            "es": "Herramienta de control para agentes",
-            "pt-BR": "Ferramenta de controle para agentes",
-            "ko": "에이전트 제어 도구",
-            "pl": "Narzędzie sterowania dla agentów",
-            "fr": "Outil de contrôle pour les agents",
-            "ja": "エージェント制御ツール"
+            "zh-CN": "Agent 工具",
+            "uk": "Інструменти Agent",
+            "es": "Herramientas del agente",
+            "pt-BR": "Ferramentas do Agent",
+            "ko": "Agent 도구",
+            "pl": "Narzędzia Agenta",
+            "fr": "Outils de l’agent",
+            "ja": "Agent ツール"
           }
         },
         {
-          "label": "Session Goals",
+          "label": "Continuing goals",
           "link": "/session-goals/",
           "translations": {
-            "zh-CN": "会话目标",
-            "uk": "Цілі сесії",
-            "es": "Objetivos de sesión",
-            "pt-BR": "Objetivos de sessão",
-            "ko": "세션 목표",
-            "pl": "Cele sesji",
-            "fr": "Objectifs de session",
-            "ja": "セッションゴール"
+            "zh-CN": "持续目标",
+            "uk": "Тривалі цілі",
+            "es": "Objetivos continuos",
+            "pt-BR": "Objetivos contínuos",
+            "ko": "지속 목표",
+            "pl": "Cele ciągłe",
+            "fr": "Objectifs continus",
+            "ja": "継続目標"
           }
         },
         {
@@ -174,8 +188,8 @@
           "translations": {
             "zh-CN": "项目操作",
             "uk": "Дії проєкту",
-            "es": "Acciones del proyecto",
-            "pt-BR": "Ações do projeto",
+            "es": "Acciones de proyecto",
+            "pt-BR": "Ações de Projeto",
             "ko": "프로젝트 작업",
             "pl": "Akcje projektu",
             "fr": "Actions de projet",
@@ -189,7 +203,7 @@
             "zh-CN": "预览与开发服务器",
             "uk": "Перегляд і dev-сервери",
             "es": "Vista previa y servidores de desarrollo",
-            "pt-BR": "Pré-visualização e servidores de desenvolvimento",
+            "pt-BR": "Preview e Servidores de Desenvolvimento",
             "ko": "미리보기 및 개발 서버",
             "pl": "Podgląd i serwery deweloperskie",
             "fr": "Aperçu et serveurs de dev",
@@ -203,7 +217,7 @@
             "zh-CN": "Worktree 会话",
             "uk": "Сесії worktree",
             "es": "Sesiones de worktree",
-            "pt-BR": "Sessões de worktree",
+            "pt-BR": "Sessões de Worktree",
             "ko": "Worktree 세션",
             "pl": "Sesje worktree",
             "fr": "Sessions worktree",
@@ -214,39 +228,56 @@
           "label": "Multi-run",
           "link": "/multi-run/",
           "translations": {
-            "zh-CN": "多路运行",
+            "zh-CN": "Multi-run",
+            "uk": "Multi-run",
+            "es": "Multi-run",
+            "pt-BR": "Multi-run",
+            "ko": "Multi-run",
+            "pl": "Multi-run",
             "fr": "Multi-run",
             "ja": "Multi-run"
           }
         },
         {
-          "label": "Git & GitHub",
+          "label": "Git & GitHub Workflows",
           "link": "/git/",
           "translations": {
-            "zh-CN": "Git 与 GitHub",
-            "fr": "Git et GitHub",
-            "ja": "Git と GitHub"
+            "zh-CN": "Git 与 GitHub 工作流",
+            "uk": "Робочі процеси Git і GitHub",
+            "es": "Flujos de trabajo de Git y GitHub",
+            "pt-BR": "Fluxos de Git e GitHub",
+            "ko": "Git 및 GitHub 워크플로",
+            "pl": "Przepływy Git i GitHub",
+            "fr": "Workflows Git et GitHub",
+            "ja": "Git と GitHub ワークフロー"
           }
         },
         {
           "label": "GitHub Issues & PRs",
           "link": "/github/",
           "translations": {
-            "zh-CN": "GitHub 工单与 PR",
-            "uk": "Завдання та PR GitHub",
+            "zh-CN": "GitHub Issue 与 PR",
+            "uk": "GitHub Issues та PR",
             "es": "Issues y PRs de GitHub",
             "pt-BR": "Issues e PRs do GitHub",
             "ko": "GitHub 이슈 및 PR",
-            "pl": "Zgłoszenia i PR-y GitHub",
+            "pl": "Issues i PR na GitHub",
             "fr": "Issues et PR GitHub",
             "ja": "GitHub Issues と PR"
           }
         },
         {
-          "label": "Agent memory & instructions",
+          "label": "Agent memory and instructions",
           "link": "/agent-personalization/",
           "translations": {
-            "zh-CN": "Agent 记忆与系统提示词"
+            "zh-CN": "Agent 记忆与系统提示词",
+            "uk": "Пам’ять та інструкції Agent",
+            "es": "Memoria e instrucciones del agente",
+            "pt-BR": "Memória e instruções do Agent",
+            "ko": "Agent 메모리와 지침",
+            "pl": "Pamięć i instrukcje Agenta",
+            "fr": "Mémoire et instructions de l’agent",
+            "ja": "Agent のメモリと指示"
           }
         },
         {
@@ -256,7 +287,7 @@
             "zh-CN": "Git 身份",
             "uk": "Git-ідентичності",
             "es": "Identidades de Git",
-            "pt-BR": "Identidades do Git",
+            "pt-BR": "Identidades Git",
             "ko": "Git 아이덴티티",
             "pl": "Tożsamości Git",
             "fr": "Identités Git",
@@ -266,38 +297,38 @@
       ]
     },
     {
-      "label": "Pi setup",
+      "label": "Agent setup",
       "translations": {
-        "zh-CN": "Pi 设置",
-        "uk": "Налаштування Pi",
-        "es": "Configuración de Pi",
-        "pt-BR": "Configuração do Pi",
-        "ko": "Pi 설정",
-        "pl": "Konfiguracja Pi",
-        "fr": "Configuration Pi",
-        "ja": "Pi 設定"
+        "zh-CN": "Agent 设置",
+        "uk": "Налаштування агента",
+        "es": "Configuración del agente",
+        "pt-BR": "Configuração do agente",
+        "ko": "에이전트 설정",
+        "pl": "Konfiguracja agenta",
+        "fr": "Configuration de l’agent",
+        "ja": "エージェント設定"
       },
       "items": [
         {
-          "label": "Providers, Models & Agents",
+          "label": "Model channels",
           "link": "/providers/",
           "translations": {
-            "zh-CN": "提供商、模型与智能体",
-            "uk": "Провайдери, моделі та агенти",
-            "es": "Proveedores, modelos y agentes",
-            "pt-BR": "Provedores, modelos e agentes",
-            "ko": "공급자, 모델, 에이전트",
-            "pl": "Dostawcy, modele i agenci",
-            "fr": "Fournisseurs, modèles et agents",
-            "ja": "プロバイダー、モデル、エージェント"
+            "zh-CN": "模型渠道",
+            "uk": "Канали моделей",
+            "es": "Canales de modelos",
+            "pt-BR": "Canais de modelos",
+            "ko": "모델 채널",
+            "pl": "Kanały modeli",
+            "fr": "Canaux de modèles",
+            "ja": "モデルチャネル"
           }
         },
         {
           "label": "MCP Servers",
           "link": "/mcp/",
           "translations": {
-            "zh-CN": "MCP 服务器",
-            "uk": "Сервери MCP",
+            "zh-CN": "MCP Servers",
+            "uk": "MCP-сервери",
             "es": "Servidores MCP",
             "pt-BR": "Servidores MCP",
             "ko": "MCP 서버",
@@ -313,25 +344,25 @@
             "zh-CN": "技能",
             "uk": "Навички",
             "es": "Habilidades",
-            "pt-BR": "Habilidades",
+            "pt-BR": "Skills",
             "ko": "스킬",
-            "pl": "Umiejętności",
+            "pl": "Skille",
             "fr": "Skills",
             "ja": "スキル"
           }
         },
         {
-          "label": "Skills Catalog",
+          "label": "Skills library",
           "link": "/skills-catalog/",
           "translations": {
-            "zh-CN": "技能目录",
-            "uk": "Каталог навичок",
-            "es": "Catálogo de habilidades",
-            "pt-BR": "Catálogo de habilidades",
-            "ko": "스킬 카탈로그",
-            "pl": "Katalog umiejętności",
-            "fr": "Catalogue de skills",
-            "ja": "スキルカタログ"
+            "zh-CN": "技能资源库",
+            "uk": "Бібліотека навичок",
+            "es": "Biblioteca de habilidades",
+            "pt-BR": "Biblioteca de skills",
+            "ko": "스킬 라이브러리",
+            "pl": "Biblioteka skilli",
+            "fr": "Bibliothèque de skills",
+            "ja": "スキルライブラリ"
           }
         },
         {
@@ -349,17 +380,17 @@
           }
         },
         {
-          "label": "Session token usage",
+          "label": "Branch token usage",
           "link": "/usage/",
           "translations": {
-            "zh-CN": "本会话 Token 用量",
-            "uk": "Токени цієї розмови",
-            "es": "Tokens de esta conversación",
-            "pt-BR": "Tokens desta conversa",
-            "ko": "이 대화의 토큰 사용량",
-            "pl": "Tokeny tej rozmowy",
-            "fr": "Tokens de cette conversation",
-            "ja": "この会話のトークン使用量"
+            "zh-CN": "分支 token 用量",
+            "uk": "Використання токенів гілки",
+            "es": "Uso de tokens por rama",
+            "pt-BR": "Uso de tokens da branch",
+            "ko": "브랜치 토큰 사용량",
+            "pl": "Zużycie tokenów gałęzi",
+            "fr": "Tokens utilisés par branche",
+            "ja": "ブランチのトークン使用量"
           }
         }
       ]
@@ -384,25 +415,25 @@
             "zh-CN": "连接设备",
             "uk": "Підключення пристрою",
             "es": "Conectar un dispositivo",
-            "pt-BR": "Conectar um dispositivo",
+            "pt-BR": "Conectar um Dispositivo",
             "ko": "기기 연결",
-            "pl": "Podłączanie urządzenia",
+            "pl": "Połącz urządzenie",
             "fr": "Connecter un appareil",
-            "ja": "デバイスを接続"
+            "ja": "デバイスを接続する"
           }
         },
         {
           "label": "Private Relay",
           "link": "/private-relay/",
           "translations": {
-            "zh-CN": "私密中继",
-            "uk": "Приватний Relay",
-            "es": "Relay privado",
-            "pt-BR": "Relay privado",
-            "ko": "프라이빗 릴레이",
-            "pl": "Prywatny relay",
-            "fr": "Relay privé",
-            "ja": "プライベートリレー"
+            "zh-CN": "Private Relay",
+            "uk": "Private Relay",
+            "es": "Private Relay",
+            "pt-BR": "Private Relay",
+            "ko": "Private Relay",
+            "pl": "Private Relay",
+            "fr": "Relais privé",
+            "ja": "Private Relay"
           }
         },
         {
@@ -440,10 +471,10 @@
             "zh-CN": "移动应用与 PWA",
             "uk": "Мобільні застосунки та PWA",
             "es": "Apps móviles y PWA",
-            "pt-BR": "Apps móveis e PWA",
-            "ko": "모바일 앱 및 PWA",
+            "pt-BR": "Apps Móveis e PWA",
+            "ko": "모바일 앱 & PWA",
             "pl": "Aplikacje mobilne i PWA",
-            "fr": "Apps mobiles et PWA",
+            "fr": "Applications mobiles et PWA",
             "ja": "モバイルアプリと PWA"
           }
         },
@@ -511,7 +542,7 @@
             "zh-CN": "语音模式",
             "uk": "Голосовий режим",
             "es": "Modo de voz",
-            "pt-BR": "Modo de voz",
+            "pt-BR": "Modo de Voz",
             "ko": "음성 모드",
             "pl": "Tryb głosowy",
             "fr": "Mode vocal",
@@ -525,7 +556,7 @@
             "zh-CN": "项目图标",
             "uk": "Іконки проєктів",
             "es": "Iconos de proyecto",
-            "pt-BR": "Ícones de projeto",
+            "pt-BR": "Ícones de Projeto",
             "ko": "프로젝트 아이콘",
             "pl": "Ikony projektów",
             "fr": "Icônes de projet",
@@ -554,7 +585,7 @@
             "zh-CN": "远程实例",
             "uk": "Віддалені інстанси",
             "es": "Instancias remotas",
-            "pt-BR": "Instâncias remotas",
+            "pt-BR": "Instâncias Remotas",
             "ko": "원격 인스턴스",
             "pl": "Zdalne instancje",
             "fr": "Instances distantes",
@@ -568,9 +599,9 @@
             "zh-CN": "桌面浏览器",
             "uk": "Десктопний браузер",
             "es": "Navegador de escritorio",
-            "pt-BR": "Navegador desktop",
+            "pt-BR": "Navegador no Desktop",
             "ko": "데스크톱 브라우저",
-            "pl": "Przeglądarka na pulpicie",
+            "pl": "Przeglądarka na komputerze",
             "fr": "Navigateur desktop",
             "ja": "デスクトップブラウザ"
           }
@@ -667,7 +698,7 @@
             "zh-CN": "远程访问",
             "uk": "Віддалений доступ",
             "es": "Acceso remoto",
-            "pt-BR": "Acesso remoto",
+            "pt-BR": "Acesso Remoto",
             "ko": "원격 접속",
             "pl": "Dostęp zdalny",
             "fr": "Accès distant",

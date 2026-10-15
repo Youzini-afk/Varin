@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/varin-kernel"]
+members = ["crates/varin-kernel", "crates/varin-runtime"]
 resolver = "2"
 
 [workspace.package]
@@ -12,15 +12,15 @@ base64 = "0.23.1"
 hex = "0.4.3"
 fs2 = "0.4.3"
 rusqlite = { version = "0.40.2", features = ["bundled"] }
-serde = { version = "1.0.217", features = ["derive"] }
-serde_json = "1.0.135"
+serde = { version = "1.0.217", features = ["derive", "rc"] }
+serde_json = { version = "1.0.135", features = ["raw_value"] }
 sha2 = "0.11.0"
 thiserror = "2.0.11"
 uuid = { version = "1.11.0", features = ["v4", "serde"] }
 
 portable-pty = "=0.9.0"
 libc = "0.2"
-windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_System_JobObjects", "Win32_System_Threading", "Win32_Security"] }
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_System_JobObjects", "Win32_System_Threading", "Win32_System_IO", "Win32_Storage_FileSystem", "Win32_Security"] }
 
 # R5: the same search engine and grammar ABI used by the Host, inside native workers.
 grep-regex = "0.1.14"

@@ -1,21 +1,21 @@
 import { createHash } from "node:crypto";
 import { describe, expect, it, vi } from "vitest";
-import type { RetrievalReceiptAuthority, WebSnapshotRef } from "@varin/protocol";
+import type { WebSnapshotRef } from "@varin/protocol";
 import { createDocumentReader } from "./document-reading.js";
-import type { WebSnapshotDraft, WebMaterialStore } from "./web-materials.js";
+import type { ThreadMaterialAuthority, WebSnapshotDraft, WebMaterialStore } from "./web-materials.js";
 import type { createPdfEngine } from "./pdf-engine.js";
 
 const hash = (bytes: Buffer): string => `sha256-${createHash("sha256").update(bytes).digest("hex")}`;
-const authority = (sessionId: string): RetrievalReceiptAuthority => ({ owningWorkspaceId: "ws", sessionId });
+const authority = (threadId: string): ThreadMaterialAuthority => ({ kind: "thread", owningWorkspaceId: "ws", threadId });
 
 const fixture = (failText = false) => {
-  const entries = new Map<string, { ref: WebSnapshotRef; body: Buffer; source?: Buffer; sessionId: string }>();
+  const entries = new Map<string, { ref: WebSnapshotRef; body: Buffer; source?: Buffer; threadId: string }>();
   let serial = 0;
   const materials = {
-    put: vi.fn(async (_workspaceId: string, draft: WebSnapshotDraft, body: Buffer, owner: RetrievalReceiptAuthority,
+    put: vi.fn(async (_workspaceId: string, draft: WebSnapshotDraft, body: Buffer, owner: ThreadMaterialAuthority,
       options: { forceNew?: boolean; source?: { bytes: Buffer; contentType: string } } = {}) => {
       const sourceHash = options.source && hash(options.source.bytes);
-      const prior = !options.forceNew && [...entries.values()].find((entry) => entry.sessionId === owner.sessionId
+      const prior = !options.forceNew && [...entries.values()].find((entry) => entry.threadId === owner.threadId
         && entry.ref.sourceUrl === draft.sourceUrl && entry.ref.representation === draft.representation
         && entry.ref.contentHash === hash(body) && entry.ref.document?.source?.contentHash === sourceHash
         && entry.ref.document?.analysis?.id === draft.document?.analysis?.id);
@@ -29,27 +29,27 @@ const fixture = (failText = false) => {
           ...(options.source ? { source: { contentHash: sourceHash!, byteLength: options.source.bytes.byteLength,
             contentType: options.source.contentType } } : {}) } } : {}),
       };
-      entries.set(ref.snapshotId, { ref, body: Buffer.from(body), ...(options.source ? { source: Buffer.from(options.source.bytes) } : {}), sessionId: owner.sessionId });
+      entries.set(ref.snapshotId, { ref, body: Buffer.from(body), ...(options.source ? { source: Buffer.from(options.source.bytes) } : {}), threadId: owner.threadId });
       return ref;
     }),
-    read: vi.fn(async (_workspaceId: string, snapshotId: string, owner: RetrievalReceiptAuthority, options?: { includeSource?: boolean }) => {
+    read: vi.fn(async (_workspaceId: string, snapshotId: string, owner: ThreadMaterialAuthority, options?: { includeSource?: boolean }) => {
       const entry = entries.get(snapshotId);
-      return entry && entry.sessionId === owner.sessionId
+      return entry && entry.threadId === owner.threadId
         ? { ref: entry.ref, body: Buffer.from(entry.body), ...(options?.includeSource && entry.source
           ? { source: { bytes: Buffer.from(entry.source), contentType: "application/pdf" } } : {}) }
         : null;
     }),
     findAnalysis: vi.fn(async (_workspaceId: string, sourceHash: string, analysisId: string,
-      owner: RetrievalReceiptAuthority, sourceSnapshotId?: string) => {
-      const entry = [...entries.values()].find((item) => item.sessionId === owner.sessionId
+      owner: ThreadMaterialAuthority, sourceSnapshotId?: string) => {
+      const entry = [...entries.values()].find((item) => item.threadId === owner.threadId
         && item.ref.document?.source?.contentHash === sourceHash
         && item.ref.document.analysis?.id === analysisId
         && item.ref.document.sourceSnapshotId === sourceSnapshotId);
       return entry ? { ref: entry.ref, body: Buffer.from(entry.body) } : null;
     }),
     findAnalysisConfig: vi.fn(async (_workspaceId: string, sourceHash: string, configHash: string,
-      toolVersions: unknown, owner: RetrievalReceiptAuthority, sourceSnapshotId: string) => {
-      const entry = [...entries.values()].find((item) => item.sessionId === owner.sessionId
+      toolVersions: unknown, owner: ThreadMaterialAuthority, sourceSnapshotId: string) => {
+      const entry = [...entries.values()].find((item) => item.threadId === owner.threadId
         && item.ref.document?.source?.contentHash === sourceHash
         && item.ref.document.analysis?.configHash === configHash
         && JSON.stringify(item.ref.document.analysis.toolVersions) === JSON.stringify(toolVersions)
@@ -81,7 +81,7 @@ const fixture = (failText = false) => {
   const reader = createDocumentReader({ materials: materials as unknown as WebMaterialStore,
     engineFactory: (() => engine) as unknown as typeof createPdfEngine });
   const source = Buffer.from("%PDF-fixed-original");
-  const ctx = (sessionId = "owner", signal?: AbortSignal) => ({ workspaceId: "ws", authority: authority(sessionId), ...(signal ? { signal } : {}) });
+  const ctx = (threadId = "owner", signal?: AbortSignal) => ({ workspaceId: "ws", authority: authority(threadId), ...(signal ? { signal } : {}) });
   return { reader, materials, engine, source, ctx, entries };
 };
 

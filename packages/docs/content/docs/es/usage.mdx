@@ -1,15 +1,14 @@
 ---
-title: Tokens de esta conversación
-description: Abre Uso en el menú de servicios del encabezado para ver los tokens de la conversación actual, agrupados por proveedor y modelo.
+title: "Uso de tokens por rama"
+description: "Consulta los registros originales de uso de la rama seleccionada."
 ---
 
-# Tokens de esta conversación
+# Uso de tokens por rama
 
-Abre **Uso** en el menú de servicios del encabezado para ver los tokens de la conversación actual, agrupados por proveedor y modelo.
+Abre **Usage** en el menú de servicios de la cabecera. Muestra el trabajo ejecutado en la rama seleccionada, agrupado por modelo, proveedor, tipo de trabajo y estado de medición: conversación, contexto, planificación, muestreo MCP e inferencias de herramientas registradas.
 
-- **Entrada**: tokens de entrada sin caché.
-- **Salida**: tokens generados.
-- **Lectura de caché**: entrada reutilizada de la caché del proveedor.
-- **Escritura de caché**: entrada guardada en la caché.
+Aparecen tokens de entrada, salida, lectura y escritura de caché y razonamiento cuando se reportan. Las definiciones varían y pueden solaparse; no sumes todos los campos ni supongas que la entrada excluye la caché.
 
-Los totales proceden del registro de sesión de Pi e incluyen mensajes anteriores a la compactación, ramas inactivas y llamadas auxiliares registradas. El uso sin información del modelo aparece por separado. Cada conversación secundaria tiene sus propias estadísticas.
+Se distinguen datos reales, estimados, ausentes y pendientes. Desconocido no significa cero. También se indican solicitudes sin envío registrado. Los Threads hijos y trabajos auxiliares independientes tienen su propio uso. No es un total de todas las ramas ni un indicador de capacidad; no estima precios.
+
+Si se desconectan las actualizaciones, se identifica la última instantánea. Pulsa **Refresh** para reconectar. Consulta [Contexto](/es/context/) y [Objetivos](/es/session-goals/).

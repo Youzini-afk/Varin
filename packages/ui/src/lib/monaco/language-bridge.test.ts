@@ -283,4 +283,51 @@ describe('MonacoLanguageBridge', () => {
     expect(providerDispose).toHaveBeenCalled();
     bridge.dispose();
   });
+  test.each(['rename', 'delete'] as const)('runs the original code-action command after its %s edit', async kind => {
+    let current = record();
+    let listener: ((record: DocumentRecord) => void) | undefined;
+    let codeActions: languages.CodeActionProvider | undefined;
+    let runCommand: ((_accessor: unknown, id: unknown) => void) | undefined;
+    const moved = { ...identity, resourceId: 'src/moved.ts' };
+    const model = {} as editor.ITextModel;
+    const acquireDocument = vi.fn(); const releaseDocument = vi.fn();
+    const monaco = {
+      editor: { registerCommand: (_id: string, handler: typeof runCommand) => { runCommand = handler; return { dispose() {} }; },
+        registerEditorOpener: () => ({ dispose() {} }), registerLinkOpener: () => ({ dispose() {} }),
+        setModelLanguage: vi.fn(), setModelMarkers: vi.fn() },
+      languages: new Proxy({ getLanguages: () => [], registerCodeActionProvider: (_id: string, provider: languages.CodeActionProvider) => {
+        codeActions = provider; return { dispose() {} };
+      } }, { get: (target, key) => Reflect.get(target, key) ?? (() => ({ dispose() {} })) }),
+    } as unknown as MonacoRuntime;
+    const executeCommand = vi.fn(async (_request: Parameters<LanguageServicesAPI['executeCommand']>[0]) => ({ status: 'ready', providerId: 'fixture', generation: 2, documentVersion: 3, value: null }));
+    const language = { executeCommand, codeActions: async () => ({ status: 'ready', providerId: 'fixture', generation: 2, documentVersion: 3,
+      value: [{ title: 'Refactor file', edit: { documentChanges: [kind === 'rename'
+        ? { kind, from: identity, to: moved } : { kind, resource: identity }] }, command: { title: 'Finish', command: 'fixture.finish', arguments: ['done'] } }] }) } as unknown as LanguageServicesAPI;
+    const applyWorkspaceEdit = vi.fn(async () => {
+      current = kind === 'rename' ? { ...current, identity: moved } : { ...current, status: 'deleted', baseRevision: null, localEditRevision: 4 };
+      listener?.(current); return { status: 'applied', groupId: 'refactor', records: [current] };
+    });
+    const registry = { getByDocumentInstance: (id: string) => current.documentInstanceId === id ? current : undefined,
+      prepareWorkspaceEdit: async () => ({ status: 'ready', groupId: 'refactor', workspaceId: identity.workspaceId, origin: 'test', requiresConfirmation: false,
+        files: [{ identity, beforeContent: 'doc', afterContent: 'doc', editCount: 0, kind }] }), applyWorkspaceEdit,
+      discardWorkspaceEdit: vi.fn(), undoWorkspaceEdit: vi.fn() } as unknown as DocumentRegistry;
+    const bridge = new MonacoLanguageBridge({ monaco, modelRegistry: { getRecordForModel: () => current } as unknown as FileEditorModelRegistry,
+      acquireDocument, releaseDocument, notifyDocumentChange: vi.fn(), notifyDocumentSave: vi.fn(), getLanguage: () => language,
+      getDocumentRegistry: () => registry, diagnosticsFor: () => [], subscribeDiagnostics: () => () => undefined,
+      subscribeProviderStatus: () => () => undefined, subscribeDocument: (_resource, callback) => { listener = callback; return () => undefined; } });
+    bridge.acquire(model, identity, 'view');
+    const actions = await codeActions!.provideCodeActions(model, { startLineNumber: 1, endLineNumber: 1, startColumn: 1, endColumn: 2 } as never,
+      { markers: [] } as never, { isCancellationRequested: false } as never);
+    const invocation = actions!.actions[0]!.command!.arguments![0]; runCommand!(null, invocation);
+    await vi.waitFor(() => expect(executeCommand).toHaveBeenCalledTimes(1));
+    expect(executeCommand).toHaveBeenCalledWith(expect.objectContaining({ resource: kind === 'rename' ? moved : identity,
+      providerId: 'fixture', generation: 2, languageId: 'typescript', command: 'fixture.finish', arguments: ['done'] }));
+    if (kind === 'delete') {
+      expect(executeCommand.mock.calls[0]![0]).not.toHaveProperty('documentVersion');
+      expect(releaseDocument).toHaveBeenCalledWith(identity);
+    }
+    runCommand!(null, invocation); await Promise.resolve(); expect(applyWorkspaceEdit).toHaveBeenCalledTimes(1);
+    expect(executeCommand).toHaveBeenCalledTimes(1); bridge.dispose();
+  });
+
 });

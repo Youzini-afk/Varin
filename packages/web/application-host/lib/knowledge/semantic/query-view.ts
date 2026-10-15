@@ -4,8 +4,29 @@
  * immediately.
  */
 
-import type { AgentInputContext } from "@varin/protocol";
+import type { AgentInputContext, SourceResourceOwner } from "@varin/protocol";
 import type { SemanticQueryOverlay } from "./runtime.js";
+import type { StructureFixedCompute, StructureSource } from "../../structure/types.js";
+
+/** Original Run-bound source access, not a workspace registration or a corpus. */
+export interface SemanticSourceView {
+  mode: "fixed_branch" | "materialized" | "live_root";
+  resourceOwner: SourceResourceOwner;
+  /** Resource coordinates only, including paths on another Host; never opened on this Host. */
+  resourceRoot: string;
+  /** Coordinator configuration namespace; managed sources use the Agent's global settings. */
+  configurationRoot: string;
+  /** Owner-qualified cache namespace, distinct from a same-named local workspace. */
+  cacheWorkspaceId: string;
+  listFiles(roots: readonly string[], signal: AbortSignal, options?: { respectGitignore: boolean }): Promise<{
+    files: Array<{ path: string; revision: string }>;
+    complete: boolean;
+  }>;
+  compute: StructureFixedCompute;
+  /** Managed sources generate and consume grammar recipes at their original target. */
+  structure?: Pick<StructureSource, 'unitsFixed' | 'unitsRecipe'>;
+  validateDocuments(documents: readonly { path: string; revision: string }[], signal: AbortSignal): Promise<void>;
+}
 
 export type SemanticQueryView = {
   overlays: SemanticQueryOverlay[];

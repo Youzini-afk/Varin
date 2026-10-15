@@ -27,7 +27,8 @@ import { useProjectsStore } from '@/stores/useProjectsStore';
 
 export type WorkspaceTerminalDialogState = {
   open: boolean;
-  workspacePath: string;
+  /** null is an attached process view with no local workspace root. */
+  workspacePath: string | null;
   title: string;
   directoryKey: string;
 };
@@ -85,6 +86,7 @@ type WorkspaceStore = {
   loadGitLog: (path: string, options?: GitLogOptions) => Promise<GitLogResponse | null>;
   loadGitRemotes: (path: string) => Promise<GitRemote[]>;
   openTerminal: (path?: string) => void;
+  openAttachedTerminal: (directoryKey: string, title: string) => void;
   closeTerminal: () => void;
   openGitPanel: (path: string) => void;
   closeGitPanel: () => void;
@@ -520,6 +522,10 @@ export const useWorkspaceStore = create<WorkspaceStore>()(
           directoryKey: directoryKeyForTerminal(workspacePath),
         },
       });
+    },
+
+    openAttachedTerminal: (directoryKey, title) => {
+      set({ terminalDialog: { open: true, workspacePath: null, directoryKey, title } });
     },
 
     closeTerminal: () => {
