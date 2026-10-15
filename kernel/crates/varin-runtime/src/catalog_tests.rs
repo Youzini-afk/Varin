@@ -2874,6 +2874,134 @@ fn recovery_preparation_hydrates_without_catalog_and_rechecks_its_actual_boundar
 }
 
 #[test]
+fn cancelling_reopened_summary_closes_all_prepared_nodes_without_touching_other_runs() {
+    use crate::context_job::*;
+    use crate::execution::*;
+    use crate::catalog::service_composition::{HostCompositionNode, HostServiceComposition};
+
+    let f = Fixture::new();
+    let mut db = f.open();
+    let source = submit(&mut db);
+    let binding = request_snapshot(&source).view.binding;
+    let launch = launches::LaunchSelection::from_binding(&binding, policy_identity(), None);
+    let mut request = ContextJobRequest {
+        compaction: None,
+        summary_recipe: ContextSummaryRecipe::manual(),
+        owner_run_id: None,
+        personalization: None,
+        key: "parallel-preparation".into(),
+        branch_id: source.branch_id.clone(),
+        through_id: source.input_id.clone(),
+        expected_revision: 0,
+        effective_system_prompt: "Continue".into(),
+        instruction_sources: vec![],
+        memory_checkpoint: None,
+    };
+    let preview = db
+        .prepare_context_job(request.clone(), launch.clone(), json!({}))
+        .unwrap()
+        .preview()
+        .unwrap();
+    let mut artifact = HostCompositionNode {
+        id: String::new(),
+        extension_id: "review.compaction".into(),
+        entrypoint_id: "host".into(),
+        extension_version: "1.0.0".into(),
+        artifact_integrity: "sha256-review-artifact".into(),
+        activation_configuration: Value::Null,
+        grants: vec![],
+        dependencies: vec![],
+    };
+    artifact.id = artifact.content_identity().unwrap();
+    let leaves = ["a", "b", "c"];
+    let mut nodes: Vec<_> = leaves.iter().map(|node| ContextCompactionNode {
+        id: (*node).into(),
+        instructions: None,
+        inputs: vec![ContextCompactionInput::Source {
+            source_id: preview.sources[0].source_id.clone(),
+            range: None,
+        }],
+    }).collect();
+    nodes.push(ContextCompactionNode {
+        id: "root".into(),
+        instructions: None,
+        inputs: leaves.iter().map(|node| ContextCompactionInput::NodeOutput {
+            node_id: (*node).into(),
+        }).collect(),
+    });
+    request.compaction = Some(ContextCompactionCandidate {
+        producer: ContextCompactionProducer::Extension {
+            provider_key: "review.compaction:host:varin.context.compaction@1".into(),
+            provider_id: "review.parallel".into(),
+            extension_id: artifact.extension_id.clone(),
+            extension_version: artifact.extension_version.clone(),
+            service_id: "varin.context.compaction".into(),
+            service_version: 1,
+            artifact_integrity: artifact.artifact_integrity.clone(),
+            composition: HostServiceComposition {
+                schema_version: 1,
+                root: artifact.id.clone(),
+                nodes: vec![artifact],
+            },
+            configuration_identity: "review-config".into(),
+            declared_identity: PolicyIdentity { name: "review.parallel".into(), version: "1".into() },
+        },
+        plan: ContextCompactionPlan::ModelPlan {
+            source_cut_hash: preview.source_cut_hash,
+            nodes,
+            final_node_id: "root".into(),
+        },
+    });
+    let job = db.create_context_job(request, launch, json!({})).unwrap();
+    let compiler = db.capture_context_job(&job.receipt.run_id).unwrap().compiler().unwrap();
+    let epoch = db.epoch();
+    let run = db.run(&job.receipt.run_id).unwrap();
+    let run = db.transition_run(&run.id, epoch, run.revision, RunState::Runnable).unwrap();
+    db.transition_run(&run.id, epoch, run.revision, RunState::Generating).unwrap();
+    for (index, node) in leaves.iter().enumerate() {
+        // Use the same frozen-plan compiler and durable preparation seam as the DAG worker.
+        // The process can exit after these commits and before any provider dispatch.
+        let context = compiler.compile_node(node, &[]).unwrap();
+        let mut snapshot = request_snapshot(&job.receipt);
+        snapshot.view.request_id = format!("prepared-{node}");
+        snapshot.view.origin = RequestOrigin::Conversation {
+            compaction: context.compaction,
+            step: index as u64 + 1,
+            history_range: snapshot.view.binding.history_range.clone(),
+        };
+        snapshot.view.binding.tool_schema_generation = 0;
+        snapshot.view.binding.instruction_sources = context.instruction_sources;
+        snapshot.view.binding.memory_checkpoint = context.memory_checkpoint;
+        snapshot.view.binding.resource_checkpoint_id = context.resource_checkpoint_id;
+        snapshot.view.history = context.history;
+        snapshot.serialized = serde_json::to_value(&snapshot.view).unwrap().into();
+        db.commit_execution(&job.receipt.run_id, epoch, &ExecutionRecord::RequestPrepared {
+            snapshot: snapshot.into(),
+        }).unwrap();
+    }
+    db.commit_execution(&source.run_id, epoch, &ExecutionRecord::RequestPrepared {
+        snapshot: request_snapshot(&source).into(),
+    }).unwrap();
+    drop(compiler);
+    drop(db);
+
+    let supervisor = crate::supervisor::RunSupervisor::new(f.open());
+    let cancelled = supervisor.cancel(&job.receipt.run_id).unwrap();
+    assert_eq!(cancelled.state, RunState::Cancelled,
+        "one cancellation must settle every undispatched summary node without a replacement worker");
+    let owner = supervisor.catalog();
+    let mut db = owner.lock().unwrap();
+    for node in leaves {
+        let step = db.model_step(&format!("prepared-{node}")).unwrap();
+        assert_eq!(step.state, ModelStepState::NotDispatched);
+        assert!(step.usage.is_none(), "an unsent request has no model usage receipt");
+    }
+    assert_eq!(db.model_step("model-1").unwrap().state, ModelStepState::Prepared);
+    assert!(!db.run(&source.run_id).unwrap().cancel_requested);
+    assert!(db.publish_context_job(&job.receipt.run_id).is_err());
+}
+
+#[test]
 fn recovery_preparation_discards_stale_failure_after_a_real_tool_receipt_arrives() {
     use crate::execution::*;
     let f = Fixture::new();

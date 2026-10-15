@@ -1180,7 +1180,15 @@ fn input_arriving_between_completion_decision_and_commit_is_not_lost() {
 
 #[test]
 fn interrupt_during_request_serialization_prevents_stale_generation() {
+    interrupt_during_request_serialization(false);
+}
+#[test]
+fn serialization_cancellation_error_preserves_interrupt_boundary() {
+    interrupt_during_request_serialization(true);
+}
+fn interrupt_during_request_serialization(cooperative: bool) {
     struct GatedSerializer {
+        cooperative: bool,
         first: AtomicBool,
         entered: std::sync::mpsc::Sender<()>,
         release: Mutex<std::sync::mpsc::Receiver<()>>,
@@ -1188,6 +1196,13 @@ fn interrupt_during_request_serialization_prevents_stale_generation() {
         stale: AtomicUsize,
     }
     impl ModelProvider for GatedSerializer {
+        fn serialize_cancellable(&self, view: &RequestView, reuse: Option<&mut RequestCompileReuse>, cancel: &CancellationToken) -> Result<RequestBody, ExecutionError> {
+            let body = self.serialize(view, reuse)?;
+            if self.cooperative && cancel.is_cancelled() {
+                return Err(ExecutionError::new("cancelled", "original encoder drained"));
+            }
+            Ok(body)
+        }
         fn serialize(&self, view: &RequestView, _reuse: Option<&mut crate::execution::RequestCompileReuse>) -> Result<crate::execution::RequestBody, ExecutionError> {
             if !self.first.swap(true, Ordering::SeqCst) {
                 self.entered.send(()).unwrap();
@@ -1232,6 +1247,7 @@ fn interrupt_during_request_serialization_prevents_stale_generation() {
     let (entered_tx, entered_rx) = std::sync::mpsc::channel();
     let (release_tx, release_rx) = std::sync::mpsc::channel();
     let provider = Arc::new(GatedSerializer {
+        cooperative,
         first: AtomicBool::new(false),
         entered: entered_tx,
         release: Mutex::new(release_rx),
@@ -1272,13 +1288,90 @@ fn interrupt_during_request_serialization_prevents_stale_generation() {
     release_tx.send(()).unwrap();
     let report = handle.wait();
     supervisor.shutdown().unwrap();
-    assert_eq!(report.unwrap().state, RunState::Completed);
+    let report = report.unwrap();
+    assert_eq!(report.state, RunState::Completed);
+    assert_eq!(report.model_steps, 1, "unprepared cancelled encoding is not a model exchange");
     assert_eq!(
         provider.stale.load(Ordering::SeqCst),
         0,
         "accepted interrupt missed the candidate being serialized and sent stale user instructions"
     );
     assert_eq!(provider.calls.load(Ordering::SeqCst), 1);
+}
+
+#[test]
+fn serialization_cancellation_error_preserves_cancel_and_bot_sleep() {
+    use crate::catalog::bot::{BotGate, BotSuspension};
+    struct StopEncoding {
+        catalog: Arc<Mutex<Catalog>>,
+        root: CancellationToken,
+        sleeping: bool,
+    }
+    impl ModelProvider for StopEncoding {
+        fn serialize(&self, _: &RequestView, _: Option<&mut RequestCompileReuse>) -> Result<RequestBody, ExecutionError> {
+            panic!("the original cancellable encoder must be used")
+        }
+        fn serialize_cancellable(&self, view: &RequestView, _: Option<&mut RequestCompileReuse>, cancel: &CancellationToken) -> Result<RequestBody, ExecutionError> {
+            let mut owner = self.catalog.lock().unwrap();
+            if self.sleeping {
+                owner.publish_bot_gate(BotGate {
+                    bot_id: "bot".into(), profile_revision: 2,
+                    activity_operation_id: Some("encoding-sleep".into()), permitted: false,
+                }).unwrap();
+                owner.suspend_bot_scope(BotSuspension {
+                    bot_id: "bot".into(), profile_revision: 2,
+                    activity_operation_id: "encoding-sleep".into(),
+                }).unwrap();
+            } else {
+                owner.request_cancel_run(&view.run_id).unwrap();
+            }
+            self.root.cancel();
+            assert!(cancel.is_cancelled());
+            Err(ExecutionError::new("cancelled", "original encoder drained"))
+        }
+        fn generate(&self, _: &RequestSnapshot, _: &CancellationToken, _: &mut dyn FnMut(ProviderEvent) -> Result<(), ExecutionError>) -> Result<FinishReason, ModelFailure> {
+            panic!("cancelled encoding must not dispatch")
+        }
+    }
+    struct CandidatePolicy;
+    impl AgentPolicy for CandidatePolicy {
+        fn identity(&self) -> PolicyIdentity { DefaultAgentPolicy.identity() }
+        fn decide(&self, _: &PolicyView<'_>, _: &PolicyEvent, _: &Value, _: &CancellationToken) -> Result<PolicyDecision, ExecutionError> {
+            Ok(PolicyDecision { action: PolicyAction::RequestModel, state: json!({"uncommitted":true}) })
+        }
+    }
+    for sleeping in [false, true] {
+        let fixture = Fixture::new();
+        let catalog = fixture.catalog();
+        if sleeping {
+            catalog.lock().unwrap().publish_bot_gate(BotGate {
+                bot_id: "bot".into(), profile_revision: 1,
+                activity_operation_id: Some("encoding-sleep".into()), permitted: true,
+            }).unwrap();
+        }
+        let input = input_with_bot(&catalog, sleeping.then_some("bot"));
+        let run_id = input.run_id.clone();
+        let cancel = CancellationToken::default();
+        let engine = ExecutionEngine {
+            persistence: catalog.clone(),
+            context_preparation: Arc::new(NoopContextPreparation),
+            provider: Arc::new(StopEncoding { catalog: catalog.clone(), root: cancel.clone(), sleeping }),
+            tools: Arc::new(Tools::default()),
+            policy: Arc::new(CandidatePolicy),
+            progress: ProgressSink::default(),
+        };
+        let report = engine.run(input, cancel).unwrap();
+        let expected = if sleeping { RunState::Waiting } else { RunState::Cancelled };
+        assert_eq!(report.state, expected);
+        assert_eq!(report.policy_state, Value::Null);
+        assert_eq!(report.model_steps, 0);
+        assert!(report.failure.is_none());
+        let owner = catalog.lock().unwrap();
+        let run = owner.run(&run_id).unwrap();
+        assert_eq!(run.state, expected);
+        assert_eq!(run.cancel_requested, !sleeping);
+        assert_eq!(owner.history("main").unwrap().len(), 1);
+    }
 }
 
 #[test]

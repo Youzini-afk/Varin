@@ -1257,14 +1257,17 @@ impl Catalog {
         let run = self.request_cancel_run(run_id)?;
         {
             let tx = self.db.transaction()?;
-            let prepared: Option<String> = tx
-                .query_row(
+            // A conversation has one prepared exchange, but a summary DAG can own several
+            // independent prepared nodes. Close every proven-undispatched request before
+            // testing the cancellation barrier; no worker may resume this cancelled Run.
+            let prepared = {
+                let mut statement = tx.prepare(
                     "SELECT id FROM model_steps WHERE run_id=?1 AND state='prepared'",
-                    [run_id],
-                    |row| row.get(0),
-                )
-                .optional()?;
-            if let Some(request) = prepared {
+                )?;
+                let rows = statement.query_map([run_id], |row| row.get::<_, String>(0))?;
+                rows.collect::<std::result::Result<Vec<_>, _>>()?
+            };
+            for request in prepared {
                 super::execution_persistence::close_prepared_request(
                     &tx,
                     &run,

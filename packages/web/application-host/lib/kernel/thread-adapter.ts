@@ -352,8 +352,11 @@ export class ThreadAdapter {
   }
   async cancelChild(identity: ThreadIdentity, operationId: string) {
     await this.requireIdentity(identity);
-    const child = await this.runtime.child(operationId);
-    if (child.parent_thread_id !== identity.threadId || child.parent_branch_id !== identity.branchId) throw new Error('Child belongs to another Thread branch');
+    // Cancellation only needs the dispatch's durable ownership metadata. Hydrating its
+    // instruction/report body can fail independently and must not block stopping work.
+    const operation = await this.runtime.operationStatus(operationId);
+    const run = await this.requireRun(operation.run_id);
+    if (run.thread_id !== identity.threadId || run.branch_id !== identity.branchId) throw new Error('Child belongs to another Thread branch');
     return this.runtime.cancelTree({ kind: 'child', operation_id: operationId }, undefined, identity.threadId);
   }
   async cancelChildWait(identity: ThreadIdentity, waitId: string) {

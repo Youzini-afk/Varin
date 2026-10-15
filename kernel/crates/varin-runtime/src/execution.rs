@@ -2532,6 +2532,15 @@ impl<
                             None => self.provider.serialize_cancellable(&view, Some(&mut request_compile_reuse), &model_cancel),
                         }) {
                             Ok(serialized) => serialized,
+                            Err(_) if model_cancel.is_cancelled() => {
+                                // A brokered encoder can return its cancellation only after
+                                // draining. No request was prepared, so restore this candidate
+                                // and let the original interrupt/Cancel/Bot Sleep boundary decide.
+                                steps -= 1;
+                                policy_state = previous_policy_state;
+                                interrupted_generation = !cancel.is_cancelled();
+                                continue 'agent;
+                            }
                             Err(error) => finish!('agent, RunState::Failed, None, Some(error)),
                         };
                     let preview = |context: ContextProjection| {
@@ -2571,9 +2580,10 @@ impl<
                             finish!('agent,RunState::Waiting,Some(wait_id),None);
                         }
                         Err(error) => {
-                            if cancel.is_cancelled() {
+                            if model_cancel.is_cancelled() {
                                 steps -= 1;
                                 policy_state = previous_policy_state;
+                                interrupted_generation = !cancel.is_cancelled();
                                 continue 'agent;
                             }
                             finish!('agent, RunState::Failed, None, Some(error));
