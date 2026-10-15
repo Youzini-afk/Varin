@@ -15,7 +15,7 @@ it('accepts a JSON Surface binding through the production request middleware', a
   const bridge = createClientSurfaceBridge({ writeSseEvent() {} });
   const selections: ThreadSelection[] = [];
   registerVarinEventRoutes(app, { getVarinEventClients: () => new Set(), writeSseEvent() {}, surfaceBridge: bridge,
-    requireAuth: (request, _response, next) => { request.varinAuth = { type: 'client', clientId: 'principal' } as Request['varinAuth']; next(); },
+    requireAuth: (request, _response, next) => { request.varinAuth = { type: 'client', clientId: 'principal', client: { id: 'principal' } }; next(); },
     resolveSurfaceThread: async selection => { selections.push(selection); return true; } });
   const server = createServer(app); server.listen(0, '127.0.0.1'); await once(server, 'listening');
   try {

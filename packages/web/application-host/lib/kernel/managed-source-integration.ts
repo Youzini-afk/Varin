@@ -16,14 +16,12 @@ export function createManagedIntegrationOwner(options: Pick<IntegrationTargetOwn
     const selected = savedSourceLaunch(invocation.runId, launch.selection.source, sourceToolSchemas(launch.selection).map(tool => tool.name));
     const authority = await admitRunSourceAuthority(options.kernel, options.runtime, selected,
       { signal, resolveLiveSource: options.resolveLiveSource, purpose: 'integration', operationId: invocation.operationId, retention: 'caller' });
-    let entered = false;
     try {
       if (authority.kind !== 'managed') throw new Error('Integration is not on a managed resource Host');
       const journal = await options.runtime.journalAnchor(invocation.operationId, signal);
       const address = { coordinatorHostId: options.runtime.coordinatorHostId,
         authorityId: authority.binding.authorityId, resourceEpoch: authority.binding.resourceEpoch };
       signal.throwIfAborted();
-      entered = true;
       try {
         const result = await authority.service.service({ ...address, requestId: randomUUID(),
           operation: { kind: 'integration', invocation, child, journal } }, signal) as IntegrationOperationReceipt;
@@ -39,7 +37,6 @@ export function createManagedIntegrationOwner(options: Pick<IntegrationTargetOwn
       try { await authority.release(); }
       catch (error) {
         options.onCleanupError(invocation.operationId, error);
-        if (!entered) throw error;
       }
     }
   };
@@ -67,7 +64,7 @@ export function createManagedIntegrationService(options: Pick<IntegrationTargetO
     const selected = savedSourceLaunch(invocation.runId, scope.source, []);
     const target = await openScopedIntegrationTarget(options, invocation, selected, {
       grant: scope.grant, rootId: scope.physicalRoot.rootId, canonicalRoot: scope.physicalRoot.canonicalRoot,
-    }, journal, async () => {}, signal);
+    }, async () => {}, signal);
     const result = child.code_result.result;
     const input: IntegrationPlanInput & { operationId: string } = {
       operationId: `integration:${invocation.operationId}`, workspaceId: result.workspace_id,
@@ -78,7 +75,7 @@ export function createManagedIntegrationService(options: Pick<IntegrationTargetO
         childExecutionId: child.execution_id, childThreadId: child.child_thread_id,
         result: { workspaceId: result.workspace_id, branchId: result.branch_id,
           resultRevision: result.result_revision, root: result.root, publicationId: result.publication_id }, target: scope.source },
-      executionId: target.executionId, requireTurnBinding: true, scopedWorkingStates: target.workingStates,
+      scopedWorkingStates: target.workingStates,
       signal, parentAuthority: { kind: 'directory', directory: target.directory, workspaceId: target.documentWorkspaceId },
     };
     try { return await options.coordinator.mergeResult(input); }

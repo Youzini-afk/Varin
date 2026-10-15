@@ -37,7 +37,7 @@ export const ChatView: React.FC<ChatViewProps> = ({ active = true, readOnly = fa
   </div>;
   return <ChatErrorBoundary sessionId={identity.threadId}>
     {conversationHeader}
-    <ThreadConversation key={`${hostKey}:${identity.threadId}:${identity.branchId}`} api={api} identity={identity} readOnly={readOnly}
+    <ThreadConversation key={hostKey} api={api} identity={identity} readOnly={readOnly}
       initialWorkspacePath={directory} onBranchCreated={created => { void useThreadStore.getState().loadCatalog().then(() => useThreadStore.getState().selectThread(created)); }} />
   </ChatErrorBoundary>;
 };

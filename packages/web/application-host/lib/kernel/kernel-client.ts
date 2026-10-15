@@ -676,6 +676,9 @@ export class KernelClient {
   discardExtensionTool(runId:string,live:import('./protocol.generated.js').LiveExtensionToolBinding):void {
     this.toolBridge.discard(runId,{ownerId:live.ownerId,binding:{reference:live.binding.providerKey,generation:live.generation,resources:{},tools:[live.binding.tool]}});
   }
+  retainedExtensionBinding(runId: string, binding: import('./protocol.generated.js').ExtensionToolBinding): import('./protocol.generated.js').LiveExtensionToolBinding | undefined {
+    return this.toolBridge.retainedExtensionBinding(runId, binding);
+  }
   onToolReleased(listener: (runId: string) => void): () => void {
     this.mcpReleaseListeners.add(listener); return () => { this.mcpReleaseListeners.delete(listener); };
   }

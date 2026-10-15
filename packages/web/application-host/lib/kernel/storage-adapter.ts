@@ -1776,12 +1776,12 @@ export class KernelStorageAdapter {
     const { grant } = input;
     this.assertAdmittedWorkspace(input);
     const canonicalRoot = await canonicalizePathIdentity(input.canonicalRoot);
-    if (canonicalRoot !== input.canonicalRoot) throw new Error("Admitted file root is no longer canonical");
+    if (normalizePathIdentity(canonicalRoot) !== normalizePathIdentity(input.canonicalRoot)) throw new Error("Admitted file root is no longer canonical");
     const client = this.client.scoped(grant);
     const registered = await client.fileRootRegister({
       workspaceId: input.owningWorkspaceId,
       executionWorkspaceId: input.executionWorkspaceId,
-      canonicalRoot,
+      canonicalRoot: input.canonicalRoot,
     });
     if (typeof registered.rootId !== "string" || typeof registered.canonicalRoot !== "string"
       || normalizePathIdentity(registered.canonicalRoot) !== normalizePathIdentity(canonicalRoot)) {
@@ -1871,15 +1871,17 @@ export class KernelStorageAdapter {
     const { grant } = input;
     this.assertAdmittedWorkspace(input);
     const canonicalRoot = await canonicalizePathIdentity(input.canonicalRoot);
-    if (canonicalRoot !== input.canonicalRoot) throw new Error("Admitted storage root is no longer canonical");
+    if (normalizePathIdentity(canonicalRoot) !== normalizePathIdentity(input.canonicalRoot)) throw new Error("Admitted storage root is no longer canonical");
     const registered = await this.client.scoped(grant).fileRootRegister({ workspaceId: input.owningWorkspaceId,
-      executionWorkspaceId: input.executionWorkspaceId, canonicalRoot });
+      executionWorkspaceId: input.executionWorkspaceId, canonicalRoot: input.canonicalRoot });
     if (registered.rootId !== input.rootId || typeof registered.canonicalRoot !== "string"
       || normalizePathIdentity(registered.canonicalRoot) !== normalizePathIdentity(canonicalRoot)) {
       throw new Error("Admitted storage resource root changed");
     }
+    // Preserve the original spelling at the grant boundary. Node's canonical spelling is
+    // used only for local path arithmetic (Rust uses the Windows namespace prefix).
     return this.contextUsingGrant(grant, { authorityId: this.options.hostId, canonicalRoot,
-      filesystemProfile: process.platform === "win32" ? "windows-local" : `${process.platform}-local`, workspaceId: input.owningWorkspaceId }, input);
+      filesystemProfile: process.platform === "win32" ? "windows-local" : `${process.platform}-local`, workspaceId: input.owningWorkspaceId }, { ...input, canonicalRoot });
   }
 
   /** Capture uses the original Kernel file owner; Host apply/recovery is not admitted. */

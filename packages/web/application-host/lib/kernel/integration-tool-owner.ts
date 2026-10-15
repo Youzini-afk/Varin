@@ -12,10 +12,10 @@ import { admitRunSourceAuthority, sourceToolSchemas, type SourceLaunch } from '.
 import { KernelWorkingStateRootStore } from './storage-adapter.js';
 import { createScopedKernelRecoveryBindings } from './kernel-recovery-store.js';
 import { UnconfirmedIntegrationCommitError } from '../recovery/durable-file-operation.js';
+import { normalizePathIdentity } from '../workspace/path-safety.js';
 
 export const CHILD_INTEGRATION_CAPABILITY = 'collaboration.integrations';
 export interface IntegrationTargetScope {
-  executionId: string;
   directory: string;
   documentWorkspaceId: string;
   workingStates: WorkspaceWorkingStateRootAccess;
@@ -85,7 +85,7 @@ export function createIntegrationToolOwner(options: IntegrationToolOwnerOptions)
             root: result.root, publicationId: result.publication_id }, target: authority.source as LaunchSource };
         admitted = { operationId: `integration:${authority.operationId}`, workspaceId: result.workspace_id,
           threadId: child.child_thread_id, branchId: result.branch_id, resultRevision: result.result_revision,
-          operationBinding, executionId: target.executionId, requireTurnBinding: true, scopedWorkingStates: target.workingStates, signal: context.signal,
+          operationBinding, scopedWorkingStates: target.workingStates, signal: context.signal,
           parentAuthority: { kind: 'directory', directory: target.directory, workspaceId: target.documentWorkspaceId } };
         context.signal.throwIfAborted();
         enteredCoordinator = true;
@@ -136,8 +136,7 @@ export function createIntegrationTargetOpener(options: IntegrationTargetOwners):
       { signal, resolveLiveSource: options.resolveLiveSource, purpose: 'integration', operationId: invocation.operationId });
     try {
       if (admitted.kind !== 'local') throw new Error('Managed Integration requires its target owner');
-      const anchor = await options.runtime.journalAnchor(invocation.operationId, signal);
-      return await openScopedIntegrationTarget(options, invocation, selected, admitted, anchor, admitted.release, signal);
+      return await openScopedIntegrationTarget(options, invocation, selected, admitted, admitted.release, signal);
     } catch (error) { await admitted.release(); throw error; }
   };
 }
@@ -145,31 +144,28 @@ export function createIntegrationTargetOpener(options: IntegrationTargetOwners):
 /** Compose the same physical/journal ports on the actual resource Host. */
 export async function openScopedIntegrationTarget(
   options: Pick<IntegrationTargetOwners, 'kernel' | 'storage' | 'documents' | 'recovery' | 'metadataReader'>,
-  invocation: ToolInvocationAuthority,
+  invocation: { runId: string; threadId: string },
   selected: SourceLaunch,
   admitted: { grant: import('./kernel-client.js').KernelGrantHandle; rootId: string | undefined; canonicalRoot: string | undefined },
-  anchor: import('./protocol.generated.js').RecoveryAnchor,
   release: () => Promise<void>,
   signal: AbortSignal,
 ): Promise<IntegrationTargetScope> {
       if (selected.mode === 'fixed_branch') throw new Error('Integration requires its original physical source');
       if (!admitted.rootId || !admitted.canonicalRoot) throw new Error('Physical source was not admitted');
       const documentWorkspace = await options.documents.resolveWorkspace({ path: admitted.canonicalRoot });
-      if ((await options.documents.inspectWorkspace(documentWorkspace.workspaceId)).root !== admitted.canonicalRoot) {
+      const canonicalRoot = (await options.documents.inspectWorkspace(documentWorkspace.workspaceId)).root;
+      if (normalizePathIdentity(canonicalRoot) !== normalizePathIdentity(admitted.canonicalRoot)) {
         throw new Error('Integration Documents root changed');
       }
       const authority = await options.storage.fileAuthorityContextFromGrant({ grant: admitted.grant,
         owningWorkspaceId: selected.workspaceId, executionWorkspaceId: selected.executionWorkspaceId,
-        canonicalRoot: admitted.canonicalRoot });
+        canonicalRoot });
       if (authority.rootId !== admitted.rootId) throw new Error('Integration file root changed');
       const bindings = createScopedKernelRecoveryBindings(options.storage, { authority, threadId: invocation.threadId,
         runId: invocation.runId, storageRoot: options.kernel.handshake!.storageRoot, metadataReader: options.metadataReader });
-      if (anchor.runId !== invocation.runId || anchor.threadId !== invocation.threadId) throw new Error('Integration checkpoint belongs to another Run');
-      await bindings.durableRecoveryStore.recordTurnStart({ workspaceId:selected.workspaceId, conversation:{kind:'thread',threadId:anchor.threadId,branchId:anchor.branchId}, executionId:anchor.executionId, runId:anchor.runId, userEntryId:anchor.entryId, workerId:'kernel',runtimeGeneration:anchor.epoch,activeWriterScopes:[],provenance:'caused-by',
-        fileTarget:{kind:'physical',workspaceId:selected.workspaceId,threadId:anchor.threadId,runId:anchor.runId,rootId:authority.rootId,canonicalRoot:authority.canonicalRoot,executionWorkspaceId:selected.executionWorkspaceId,sourceMode:selected.mode} });
       const context = await options.storage.contextFromGrant({ grant: admitted.grant,
         owningWorkspaceId: selected.workspaceId, executionWorkspaceId: selected.executionWorkspaceId,
-        rootId: admitted.rootId, canonicalRoot: admitted.canonicalRoot, ...bindings });
+        rootId: admitted.rootId, canonicalRoot, ...bindings });
       const store = new KernelWorkingStateRootStore(context);
       const workingStates: WorkspaceWorkingStateRootAccess = {
         withBranchStore: (workspaceId, purpose, operation, mode = 'shared', actor) => {
@@ -180,7 +176,7 @@ export async function openScopedIntegrationTarget(
         },
       };
       signal.throwIfAborted();
-      return { executionId: anchor.executionId, directory: admitted.canonicalRoot, documentWorkspaceId: documentWorkspace.workspaceId,
+      return { directory: canonicalRoot, documentWorkspaceId: documentWorkspace.workspaceId,
         workingStates, release: release };
 }
 

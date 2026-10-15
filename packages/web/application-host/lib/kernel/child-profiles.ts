@@ -48,7 +48,7 @@ export function createChildProfilePreparer(owners: {
     }
     const descriptors = await waitWithSignal(owners.capabilities(signal), signal);
     const parent = input.parent;
-    const catalogModelId = (parent.configuration.modelOptions as { catalogModelId?: string } | undefined)?.catalogModelId ?? parent.configuration.model;
+    const catalogModelId = parent.configuration.catalogModelId ?? parent.configuration.model;
     const main = parent.configuration.providerId ? { providerId: parent.configuration.providerId, modelId: catalogModelId } : null;
     const focus = input.workFocus ?? (input.projectId ? await owners.projectWorkFocus?.(input.projectId) : undefined);
     signal?.throwIfAborted();

@@ -63,6 +63,7 @@ import { createManagedMcpPreparer, selectMcpServers } from './lib/kernel/managed
 import { createManagedSourceService } from './lib/harness/managed-source-service.js';
 import { createManagedChildSourceService } from './lib/kernel/managed-source-collaboration.js';
 import { createManagedIntegrationService, createManagedIntegrationOwner } from './lib/kernel/managed-source-integration.js';
+import { createThreadIntegrations, createUserIntegrationService } from './lib/kernel/thread-integrations.js';
 import { createThreadContext } from './lib/kernel/thread-context.js';
 import { createThreadResourceScope } from './lib/kernel/thread-resource-scope.js';
 import { createThreadSkillInputPreparer } from './lib/kernel/thread-skill-input.js';
@@ -200,6 +201,7 @@ import { createWebMaterialStore, type WebMaterialStore } from './lib/harness/web
 import { createMaterialCollections as createMaterialCollectionsService } from './lib/harness/material-collections.js';
 
 import { IntegrationCoordinator } from './lib/harness/working-state/integration-coordinator.js';
+import { createThreadFileTargetResolver } from './lib/kernel/thread-file-target.js';
 
 import { THINKING_LEVELS } from '@varin/protocol';
 import { createSettingsService, settingsDocumentRevision } from './lib/harness/settings-service.js';
@@ -214,7 +216,6 @@ import { resolvePrimaryWorktreeRoot } from './lib/git/service.js';
 
 import { createKernelClient, KernelClientError, type KernelClient } from './lib/kernel/kernel-client.js';
 
-import { createRelationCollector } from './lib/knowledge/relations.js';
 import { createLspStructureProvider } from './lib/structure/lsp-provider.js';
 import { createStructureSource } from './lib/structure/source.js';
 import { createTreeSitterStructureProvider } from './lib/structure/tree-sitter-provider.js';
@@ -682,29 +683,6 @@ const requestReachedLanAddress = (req: Request): string | null => {
   return /^\d+\.\d+\.\d+\.\d+$/.test(address) && !address.startsWith('127.') ? address : null;
 };
 
-const extractAssistantText = (messages: unknown): string => {
-  if (!Array.isArray(messages)) return '';
-  for (let index = messages.length - 1; index >= 0; index -= 1) {
-    const message = messages[index];
-    if (!message || typeof message !== 'object' || Array.isArray(message)) continue;
-    const candidate = message as Record<string, unknown>;
-    if (candidate.role !== 'assistant' || !Array.isArray(candidate.content)) continue;
-    const text = candidate.content
-      .filter((part: unknown): part is { text: string; type: 'text' } => (
-        Boolean(part)
-        && typeof part === 'object'
-        && !Array.isArray(part)
-        && (part as Record<string, unknown>).type === 'text'
-        && typeof (part as Record<string, unknown>).text === 'string'
-      ))
-      .map((part) => part.text.trim())
-      .filter(Boolean)
-      .join('\n');
-    if (text) return text.slice(0, 240);
-  }
-  return '';
-};
-
 async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerController> {
   if (server?.listening) throw new Error('Varin server is already running');
   isShuttingDown = false;
@@ -998,7 +976,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   activeDocumentsAuthority = documentsAuthority;
   const workspaceRecoveryEngines = new Map<string, WorkspaceRecoveryEngine>();
   let threadRecoveryReady = false;
-  let managedRecoveryCoordinator: ManagedRecoveryPort | undefined;
+  const managedRecoveryOwner: { current?: ManagedRecoveryPort } = {};
   const recoverySessionNavigation: RecoverySessionNavigation = { ready: () => threadRecoveryReady, commit: input => threadRecoveryNavigation.commit(input), commitLeaf: input => threadRecoveryNavigation.commitLeaf(input), prepare: input => threadRecoveryNavigation.prepare(input), prepareLeaf: input => threadRecoveryNavigation.prepareLeaf(input) };
   const resolveDirectoryApplyContext = async (directory: string, owningWorkspaceId?: string) => {
     const resolved = await documentsAuthority.resolveWorkspace({ path: directory });
@@ -1033,7 +1011,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
         resolveCoordinatorIdentity: async workspaceId => workspaceId === recoveryCoordinatorWorkspace
           ? { authorityId: extensionRuntime.services.hostId, workspaceId, canonicalRoot: '', filesystemProfile: 'metadata' } : null,
         listCoordinatorWorkspaces: async () => [{ workspaceId: recoveryCoordinatorWorkspace }],
-        get managedRecovery() { return managedRecoveryCoordinator; },
+        get managedRecovery() { return managedRecoveryOwner.current; },
       });
       engine = createKernelRecoveryDirectFacade(engine, kernelRecoveryStore, {
         authorityId: extensionRuntime.services.hostId,
@@ -1054,9 +1032,8 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       (context) => operation(context),
     )
   ));
-  let fencedRecoveryOperations: import("@varin/extension-contract").WorkspaceCombinedRecoveryOperation[] = [];
   try {
-    fencedRecoveryOperations = await foundationalRecoveryEngine.fenceUnfinishedOperations();
+    await foundationalRecoveryEngine.fenceUnfinishedOperations();
     await foundationalRecoveryEngine.resumeWorkspaceOperations();
   } catch (error) {
     console.error('[WorkspaceRecovery] Startup workspace recovery requires attention:', errorMessage(error));
@@ -1238,7 +1215,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     actions: settingsActionRegistry,
     actionOperations: settingsActionOperations,
     clientSurfaces: clientSurfaceBridge,
-    resolveOptions: async (source, caller) => {
+    resolveOptions: async (source) => {
       if (source === 'thinking-levels') {
         return THINKING_LEVELS.map((level) => ({ value: level }));
       }
@@ -1584,7 +1561,10 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   webMaterialAccess.findAnalysis = webMaterials.findAnalysis;
   webMaterialAccess.findAnalysisConfig = webMaterials.findAnalysisConfig;
   const materialCollectionsService = createMaterialCollectionsService(materialStorage, { materials: webMaterials });
-  const threadIntegrationCoordinator = new IntegrationCoordinator({ resolveDocumentWorkspaceId: scopeDocumentWorkspace, workingStates: harnessWorkingStates, inspectDirtyBuffers: workspaceId => documentsAuthority.inspectDirtyBuffers(workspaceId), beginDirtyStateBarrier: (workspaceId, paths) => documentsAuthority.beginDirtyStateBarrier(workspaceId, paths), requestSurfaceOperation: (request, options) => documentsAuthority.requestSurfaceOperation(request, options), resolveDirectoryApplyContext });
+  const threadIntegrationCoordinator = new IntegrationCoordinator({ readIntegrationOperation: (workspaceId, operationId) => kernelRecoveryStore.getOperation(workspaceId, operationId), resolveDocumentWorkspaceId: scopeDocumentWorkspace, workingStates: harnessWorkingStates, inspectDirtyBuffers: workspaceId => documentsAuthority.inspectDirtyBuffers(workspaceId), beginDirtyStateBarrier: (workspaceId, paths) => documentsAuthority.beginDirtyStateBarrier(workspaceId, paths), requestSurfaceOperation: (request, options) => documentsAuthority.requestSurfaceOperation(request, options), resolveDirectoryApplyContext });
+  observeThreadIntegrationParentChange = (workspaceId, resourceIds) => {
+    threadIntegrationCoordinator.invalidateWorkspace(workspaceId, resourceIds);
+  };
   void computerService.reconcileControlEvents().catch((error) => {
     console.error('[Computer] Handback delivery will retry:', errorMessage(error));
   });
@@ -1829,7 +1809,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     return agentMcpPolicy(cwd,Boolean(workspace) && await projectTrust.trusted(cwd));
   }}), documentsAuthority.admitWorkspaceRegistration);
   agentRuntime.bindManagedSources(managedRemoteTargets);
-  managedRecoveryCoordinator = createManagedRecoveryCoordinator({ coordinatorHostId: agentRuntime.coordinatorHostId,
+  managedRecoveryOwner.current = createManagedRecoveryCoordinator({ coordinatorHostId: agentRuntime.coordinatorHostId,
     registry: managedRemoteTargets });
   kernelClient.setManagedSourceOwner(owner => agentRuntime.managedSource(owner), () => agentRuntime.coordinatorHostId);
   const managedSourceConsumers = createManagedSourceConsumers({ coordinatorHostId: () => agentRuntime.coordinatorHostId,
@@ -1971,6 +1951,8 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     }));
   const sourceDirectory = createThreadSourceDirectory({ documents: documentsAuthority, remote: managedSourceConsumers.threads });
   threads.bindSourceDirectory(sourceDirectory);
+  threads.bindFileResolver(createThreadFileTargetResolver({ storageRoot: kernelClient.handshake!.storageRoot,
+    documents: documentsAuthority, validateLiveSource: liveSources.validate }));
   threads.bindMaterials(webRuntimeOwner.current.inputMaterials);
   threads.bindCompaction(contextCompaction);
   scheduledTaskService.bindSourceDirectory(sourceDirectory);
@@ -1983,6 +1965,12 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   const targetIntegrations = createManagedIntegrationService({ kernel: kernelClient, storage: kernelStorageAdapter,
     documents: documentsAuthority, recovery: foundationalRecoveryEngine, metadataReader: kernelRecoveryStore,
     coordinator: threadIntegrationCoordinator });
+  const userIntegrationOwners = { kernel: kernelClient, runtime: agentRuntime, storage: kernelStorageAdapter,
+    documents: documentsAuthority, recovery: foundationalRecoveryEngine, metadataReader: kernelRecoveryStore,
+    coordinator: threadIntegrationCoordinator, resolveLiveSource: liveSources.validate };
+  const targetUserIntegrations = createUserIntegrationService(userIntegrationOwners);
+  const userIntegrations = createThreadIntegrations({ ...userIntegrationOwners, requireIdentity: identity => threads.requireIdentity(identity),
+    onError: () => console.error('[Integration] Original source cleanup requires attention') });
   const targetRecovery = createManagedRecoveryService({ kernel: kernelClient, hostId, documents: documentsAuthority,
     storage: kernelStorageAdapter, store: kernelRecoveryStore, recovery: foundationalRecoveryEngine,
     validateLiveSource: liveSources.validate });
@@ -2023,6 +2011,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
         case 'child_prepare': case 'child_result_prepare': case 'child_result_publish': case 'child_result_read': case 'child_release': case 'child_unaccepted_release':
           return targetChildSources(scope, operation, signal);
         case 'integration': return targetIntegrations(scope, operation, signal);
+        case 'user_integration': return targetUserIntegrations(scope, operation, signal);
         case 'schedule': return targetSchedules(scope, operation, signal);
         default: return targetSourceQuery(scope, operation, signal);
       }
@@ -2122,7 +2111,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     onError: (_error: Error) => console.error('[Research] Original job reconciliation requires attention'),
   });
   computerRuntimeOwner.current.start(error => console.error('[Computer] Native execution cleanup is unconfirmed:', error instanceof Error ? error.message : String(error)));
-  registerThreadRoutes(app, threads, uiAuthController?.requireAuth ?? ((_request, _response, next) => next()), researchRuntime.user, computerRuntimeOwner.current.user, webRuntimeOwner.current.user);
+  registerThreadRoutes(app, threads, uiAuthController?.requireAuth ?? ((_request, _response, next) => next()), researchRuntime.user, computerRuntimeOwner.current.user, webRuntimeOwner.current.user, userIntegrations);
   const agentProfiles = createAgentProfilesAPI({ settings: modelsService.settings,
     capabilities: signal => agentRuntime.childCapabilities(signal),
     onChanged: () => {
@@ -2613,14 +2602,6 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     },
   });
 
-  // D-240: one collector serves both entry points — lsp.* navigation writes its
-  // already-obtained resolutions back, and related.query deliberately resolves
-  // around its anchor. Both persist only against already-open stores.
-  const relationCollector = createRelationCollector({
-    documents: documentsAuthority,
-    supervisor: languageSupervisor,
-    getStore: (workspaceId) => knowledgeStores.get(knowledgeStoreKeyForScope(workspaceId)) ?? null,
-  });
   const unregisterMaterialToolCapability = extensionRuntime.capabilities.register(MATERIAL_SNAPSHOT_CAPABILITY, webRuntimeOwner.current.snapshotCapability);
   const unregisterResearchDecisionCapability = extensionRuntime.capabilities.register(RESEARCH_DECISION_CAPABILITY, researchDecisionOwner.current.capability);
   const unregisterImagesCapability = extensionRuntime.capabilities.register(IMAGES_CAPABILITY, imageRuntimeOwner.current.capability);
@@ -2906,6 +2887,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       unregisterScriptCapability();
       unregisterResearchCapability();
       await researchRuntime.dispose();
+      await userIntegrations.dispose();
       await managedMcpInteractions.dispose();
       await mcpInteractionRuntime.dispose();
       await mcpResourceRuntime.dispose();

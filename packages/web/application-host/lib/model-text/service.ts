@@ -98,8 +98,7 @@ export function createModelTextService(options: {
     drains.set(requestId, task);
   }
   const identity = (work: ModelTextView) => ({ requestId: work.requestId, providerId: work.generation.configuration.providerId!,
-    modelId: typeof record(work.generation.configuration.modelOptions).catalogModelId === 'string'
-      ? record(work.generation.configuration.modelOptions).catalogModelId as string : work.generation.configuration.model });
+    modelId: work.generation.configuration.catalogModelId ?? work.generation.configuration.model });
   function result(work: ModelTextView): ModelTextResult {
     const op = work.inference;
     if (op?.phase !== 'terminal') return fail('model-text-pending', 'The original text request is still running.', 409, work.requestId);

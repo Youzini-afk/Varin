@@ -19,7 +19,7 @@ export function ThreadMemorySelection({ api, identity, itemId, text }: { api: Th
   </details>;
 }
 
-function MemoryDraftDialog({ api, selection, sources, onClose }: { api: ThreadMemoryAPI; selection: Selection; sources: ThreadMemoryPassage[]; onClose(): void }) {
+export function MemoryDraftDialog({ api, selection, sources, onClose }: { api: ThreadMemoryAPI; selection: Selection; sources: ThreadMemoryPassage[]; onClose(): void }) {
   const [host] = React.useState(getRuntimeEndpointGeneration);
   const [request, setRequest] = React.useState<{ requestKey: string; retryOf?: string }>(() => ({ requestKey: crypto.randomUUID() }));
   const [attempt, setAttempt] = React.useState(0);

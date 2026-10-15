@@ -94,7 +94,7 @@ export const truncatePathMiddle = (
 const normalizePath = (value: string) => {
   if (!value) return "";
   if (value === "/") return "/";
-  return value.replace(/\/+$/, "");
+  return value.replace(/\\/g, "/").replace(/\/+$/, "");
 };
 
 export function formatPathForDisplay(path: string | null | undefined, homeDirectory?: string | null): string {

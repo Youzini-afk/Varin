@@ -15,7 +15,6 @@ import {
   rm,
   writeFile,
 } from "node:fs/promises";
-import { tmpdir } from "node:os";
 import { dirname, extname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import type { BuildOptions, Metafile } from "esbuild";
 import { parse as parseJsonc, type ParseError } from "jsonc-parser";
@@ -532,7 +531,10 @@ export class ExtensionArtifactStore {
 
   async #prepare(source: VarinExtensionPackageSource, signal?: AbortSignal, capturedRoot?: string): Promise<VarinExtensionPreparedArtifact> {
     signal?.throwIfAborted();
-    const temporaryRoot = await mkdtemp(join(tmpdir(), "varin-extension-"));
+    // Stage beside the destination so publishing remains one atomic rename,
+    // including when the application's data directory is on another volume.
+    await mkdir(this.directory, { recursive: true });
+    const temporaryRoot = await mkdtemp(join(this.directory, ".prepare-"));
     const materializedSourceRoot = join(temporaryRoot, "source");
     const artifactRoot = join(temporaryRoot, "artifact");
     try {

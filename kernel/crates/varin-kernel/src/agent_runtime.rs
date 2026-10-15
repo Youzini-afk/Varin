@@ -968,6 +968,7 @@ pub(crate) fn spawn(
                             method,
                             "runtime.events.read"
                                 | "runtime.thread.usage"
+                                | "runtime.model.presentations"
                                 | "runtime.operation.inspect"
                                 | "runtime.thread.operations.active"
                                 | "runtime.permission.open"

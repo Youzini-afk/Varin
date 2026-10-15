@@ -62,7 +62,8 @@ export const normalizePathIdentity = (
   value: string,
   { pathModule = path, platform = process.platform }: NormalizePathIdentityOptions = {},
 ): string => {
-  const resolved = pathModule.resolve(value);
+  // Resolve after removing the namespace prefix: Node otherwise turns \\?\D:\ into \\?\D:.
+  const resolved = pathModule.resolve(platform === 'win32' ? stripWindowsNamespacePrefix(value) : value);
   if (platform !== 'win32') return resolved;
   return pathModule.normalize(stripWindowsNamespacePrefix(resolved)).toLowerCase();
 };
@@ -76,12 +77,13 @@ export const canonicalizePathIdentity = async (
   }: CanonicalizePathIdentityOptions = {},
 ): Promise<string> => {
   const suffix: string[] = [];
-  let current = pathModule.resolve(value);
+  const localPath = (value: string) => pathModule.sep === '\\' ? stripWindowsNamespacePrefix(value) : value;
+  let current = pathModule.resolve(localPath(value));
 
   for (;;) {
     try {
       const canonicalParent = await fsPromises.realpath(current);
-      return pathModule.resolve(canonicalParent, ...suffix.reverse());
+      return pathModule.resolve(localPath(canonicalParent), ...suffix.reverse());
     } catch (error) {
       if (!allowMissing || (error as NodeJS.ErrnoException)?.code !== 'ENOENT') throw error;
       const parent = pathModule.dirname(current);

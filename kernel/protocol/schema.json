@@ -338,7 +338,9 @@
     }
   }
 ],
-  "runtimeExports": ["ThreadUsageParams","UsageTokenCount","ThreadUsageRow","ThreadUsage","ModelHttpConfiguration",
+  "runtimeExports": ["ThreadUsageParams",
+  "ModelPresentationParams",
+  "ModelPresentation","UsageTokenCount","ThreadUsageRow","ThreadUsage","ModelHttpConfiguration",
  "FileObservationAuthority",
   "InferenceReceiptPendingParams",
   "InferenceSessionParams",
@@ -836,7 +838,7 @@
   "ChildSourceAuthority"
 ],
   "protocolVersion": 46,
-  "runtimeStructs": {"ContentCollectionReport":{"fields":{"status":{"type":"ContentCollectionStatus"},"phase":{"type":"ContentCollectionPhase"},"removedObjects":{"type":"number"},"removedBytes":{"type":"number"},"removedStagingFiles":{"type":"number"},"reason":{"type":"string | null"}}},"ModelSessionConfiguration":{"fields":{"providerId":{"type":"string","optional":true},"providerFamily":{"type":"string"},"model":{"type":"string"},"endpoint":{"type":"string"},"credentialEnvironment":{"type":"string | null"},"allowAnonymous":{"type":"boolean"},"acceptsImages":{"type":"boolean","optional":true},"configurationGeneration":{"type":"number"},"maxOutputTokens":{"type":"number | null"},"azureDeployment":{"type":"string | null","optional":true},"azureApiVersion":{"type":"string | null","optional":true},"legacyMaxTokens":{"type":"boolean","optional":true},"includeStreamUsage":{"type":"boolean","optional":true},"reasoningEffort":{"type":"string | null","optional":true},"anthropicOauth":{"type":"boolean","optional":true},"adapterId":{"type":"string","optional":true},"adapterVersion":{"type":"string","optional":true},"awsRegion":{"type":"string","optional":true},"adapterIdentity":{"type":"string","optional":true},"adapterBindingId":{"type":"string","optional":true},"connection":{"type":"ModelHttpConfiguration","optional":true},"contextWindowTokens":{"type":"number","optional":true},"thinkingLevel":{"type":"string","optional":true},"modelOptions":{"type":"unknown","optional":true}}},"KernelWorkingResultCandidate":{"fields":{"publicationId":{"type":"string"},"candidateOperationId":{"type":"string"},"workspaceId":{"type":"string"},"branchId":{"type":"string"},"root":{"type":"string"},"baseRoot":{"type":"string"},"writeRevision":{"type":"number"},"pinId":{"type":"string"},"basePinId":{"type":"string"}}}},
+  "runtimeStructs": {"ContentCollectionReport":{"fields":{"status":{"type":"ContentCollectionStatus"},"phase":{"type":"ContentCollectionPhase"},"removedObjects":{"type":"number"},"removedBytes":{"type":"number"},"removedStagingFiles":{"type":"number"},"reason":{"type":"string | null"}}},"ModelSessionConfiguration":{"fields":{"catalogModelId":{"type":"string","optional":true},"providerId":{"type":"string","optional":true},"providerFamily":{"type":"string"},"model":{"type":"string"},"endpoint":{"type":"string"},"credentialEnvironment":{"type":"string | null"},"allowAnonymous":{"type":"boolean"},"acceptsImages":{"type":"boolean","optional":true},"configurationGeneration":{"type":"number"},"maxOutputTokens":{"type":"number | null"},"azureDeployment":{"type":"string | null","optional":true},"azureApiVersion":{"type":"string | null","optional":true},"legacyMaxTokens":{"type":"boolean","optional":true},"includeStreamUsage":{"type":"boolean","optional":true},"reasoningEffort":{"type":"string | null","optional":true},"anthropicOauth":{"type":"boolean","optional":true},"adapterId":{"type":"string","optional":true},"adapterVersion":{"type":"string","optional":true},"awsRegion":{"type":"string","optional":true},"adapterIdentity":{"type":"string","optional":true},"adapterBindingId":{"type":"string","optional":true},"connection":{"type":"ModelHttpConfiguration","optional":true},"contextWindowTokens":{"type":"number","optional":true},"thinkingLevel":{"type":"string","optional":true},"modelOptions":{"type":"unknown","optional":true}}},"KernelWorkingResultCandidate":{"fields":{"publicationId":{"type":"string"},"candidateOperationId":{"type":"string"},"workspaceId":{"type":"string"},"branchId":{"type":"string"},"root":{"type":"string"},"baseRoot":{"type":"string"},"writeRevision":{"type":"number"},"pinId":{"type":"string"},"basePinId":{"type":"string"}}}},
   "runtimeEnums": {
     "McpInteractionMode": ["Form", "Url", "Sampling"],
     "McpInteractionChoice": ["Accept", "Decline", "Cancel"],
@@ -981,6 +983,7 @@
   "requestWindow": 2,
   "controlMethods": ["runtime.context.observations.sources",
     "runtime.thread.usage",
+  "runtime.model.presentations",
     "runtime.knowledge_inference.finish",
     "runtime.knowledge_inference.cancel",
     "runtime.knowledge_inference.status",
@@ -1058,6 +1061,7 @@
   ],
   "controlResponseMethods": ["runtime.context.observations.sources","runtime.context.observations.admit",
     "runtime.thread.usage",
+  "runtime.model.presentations",
     "source.authority.seal",
     "source.mcp.holder",
     "source.mcp.delivery",
@@ -1286,6 +1290,7 @@
     "runtime.thread.inspect": "ThreadParams",
     "runtime.thread.list": "KernelEmptyParams",
     "runtime.thread.usage": "ThreadUsageParams",
+    "runtime.model.presentations": "ModelPresentationParams",
     "runtime.thread.catalog.list": "ThreadCatalogQuery",
     "runtime.thread.update": "ThreadMetadataUpdateParams",
     "runtime.thread.delete": "ThreadDeleteParams",
@@ -1568,7 +1573,9 @@
 "KnowledgeInferenceFinish":{"fields":{"operationId":{"type":"string"},"executionOwner":{"type":"ExecutorOwner"},"succeeded":{"type":"boolean"}},"rustType":"varin_runtime::catalog::knowledge_inference::KnowledgeInferenceFinish"},
 "KnowledgeInferenceStatus":{"fields":{"operationId":{"type":"string"},"runId":{"type":"string"},"executionOwner":{"type":"ExecutorOwner"},"inference":{"type":"InferenceStatus[]"},"cancelled":{"type":"boolean"},"finished":{"type":"boolean"}},"rustType":"varin_runtime::catalog::knowledge_inference::KnowledgeInferenceStatus"},
 "KnowledgeInferenceView":{"fields":{"operationId":{"type":"string"},"runId":{"type":"string"},"executionOwner":{"type":"ExecutorOwner"},"recipe":{"type":"unknown"},"inference":{"type":"Operation[]"},"cancelled":{"type":"boolean"},"finished":{"type":"boolean"}},"rustType":"varin_runtime::catalog::knowledge_inference::KnowledgeInferenceView"},
-"ThreadUsageParams":{"fields":{"threadId":{"type":"string"},"branchId":{"type":"string"}},"rustType":"varin_runtime::catalog::usage::ThreadUsageParams"},
+"ModelPresentationParams": {"fields":{"requestIds":{"type":"string[]"}},"rustType":"varin_runtime::catalog::usage::ModelPresentationParams"},
+    "ModelPresentation": {"raw":"export interface ModelPresentation { requestId: string; providerFamily: string; modelId: string; usage: InferenceUsage; }"},
+    "ThreadUsageParams":{"fields":{"threadId":{"type":"string"},"branchId":{"type":"string"}},"rustType":"varin_runtime::catalog::usage::ThreadUsageParams"},
 "UsageTokenCount":{"raw":"export interface UsageTokenCount { known: string | null; missing: number; }"},
 "ThreadUsageRow":{"raw":"export interface ThreadUsageRow { kind: 'conversation' | 'context' | 'planning' | 'mcp_sampling' | 'auxiliary'; providerId: string | null; providerFamily: string | null; modelId: string; measurement: 'missing' | 'estimated' | 'actual'; requests: number; pendingRequests: number; inputTokens: UsageTokenCount; outputTokens: UsageTokenCount; cachedInputTokens: UsageTokenCount; cacheWriteTokens: UsageTokenCount; reasoningTokens: UsageTokenCount; }"},
 "ThreadUsage":{"raw":"export interface ThreadUsage { threadId: string; branchId: string; throughCursor: number; notDispatchedRequests: number; rows: ThreadUsageRow[]; }"},
@@ -2104,7 +2111,7 @@
     "CredentialScope": {"fields":{"reference":{"type":"string"},"authority":{"type":"string"},"account":{"type":"string"},"generation":{"type":"number"}}},
     "RunCancellationReceipt": {"raw":"export type RunCancellationReceipt = Omit<Run, 'configuration'>;"},
     "OperationCancellationReceipt": {"raw":"export type OperationCancellationReceipt = Omit<Operation, 'intent' | 'result' | 'external_receipt'>;"},
-    "ModelSessionConfiguration": {"fields": {"providerId": {"type": "string", "optional": true}, "providerFamily": {"type": "string"}, "model": {"type": "string"}, "endpoint": {"type": "string"}, "credentialEnvironment": {"type": "string | null"}, "allowAnonymous": {"type": "boolean"}, "acceptsImages": {"type": "boolean", "optional": true}, "configurationGeneration": {"type": "number"}, "maxOutputTokens": {"type": "number | null"}, "azureDeployment": {"type": "string | null", "optional": true}, "azureApiVersion": {"type": "string | null", "optional": true}, "legacyMaxTokens": {"type": "boolean", "optional": true}, "includeStreamUsage": {"type": "boolean", "optional": true}, "reasoningEffort": {"type": "string | null", "optional": true}, "anthropicOauth": {"type": "boolean", "optional": true}, "adapterId": {"type": "string", "optional": true}, "adapterVersion": {"type": "string", "optional": true}, "awsRegion": {"type": "string", "optional": true}, "adapterIdentity": {"type": "string", "optional": true}, "adapterBindingId": {"type": "string", "optional": true}, "connection": {"type": "ModelHttpConfiguration", "optional": true}, "contextWindowTokens": {"type": "number", "optional": true}, "thinkingLevel": {"type": "string", "optional": true}, "modelOptions": {"type": "unknown", "optional": true}}},
+    "ModelSessionConfiguration": {"fields": {"catalogModelId": {"type": "string", "optional": true}, "providerId": {"type": "string", "optional": true}, "providerFamily": {"type": "string"}, "model": {"type": "string"}, "endpoint": {"type": "string"}, "credentialEnvironment": {"type": "string | null"}, "allowAnonymous": {"type": "boolean"}, "acceptsImages": {"type": "boolean", "optional": true}, "configurationGeneration": {"type": "number"}, "maxOutputTokens": {"type": "number | null"}, "azureDeployment": {"type": "string | null", "optional": true}, "azureApiVersion": {"type": "string | null", "optional": true}, "legacyMaxTokens": {"type": "boolean", "optional": true}, "includeStreamUsage": {"type": "boolean", "optional": true}, "reasoningEffort": {"type": "string | null", "optional": true}, "anthropicOauth": {"type": "boolean", "optional": true}, "adapterId": {"type": "string", "optional": true}, "adapterVersion": {"type": "string", "optional": true}, "awsRegion": {"type": "string", "optional": true}, "adapterIdentity": {"type": "string", "optional": true}, "adapterBindingId": {"type": "string", "optional": true}, "connection": {"type": "ModelHttpConfiguration", "optional": true}, "contextWindowTokens": {"type": "number", "optional": true}, "thinkingLevel": {"type": "string", "optional": true}, "modelOptions": {"type": "unknown", "optional": true}}},
     "RunStartReceipt": {"fields": {"runId": {"type": "string"}, "epoch": {"type": "number"}}},
     "RunState": {"raw": "export type RunState = \"accepted\" | \"preparing\" | \"runnable\" | \"generating\" | \"executing\" | \"waiting\" | \"completed\" | \"failed\" | \"cancelled\";"},
     "OperationPhase": {"raw": "export type OperationPhase = \"accepted\" | \"preparing\" | \"queued\" | \"running\" | \"waiting\" | \"settling\" | \"terminal\";"},
@@ -2172,7 +2179,7 @@
     "HistoryItem": {"fields": {"id": {"type": "string"}, "thread_id": {"type": "string"}, "parent": {"type": "string | null"}, "source": {"type": "HistorySource"}, "content": {"type": "unknown"}, "provider": {"type": "ProviderOriginal | null"}, "run_id": {"type": "string"}}},
     "RuntimeEvent": {"fields": {"cursor": {"type": "number"}, "subject": {"type": "string"}, "revision": {"type": "number"}, "kind": {"type": "string"}, "data": {"type": "unknown"}}},
     "KernelProcessEnvironmentEntry": {"fields":{"name":{"type":"string"},"value":{"type":"string"}}},
-    "KernelProcessSpawnParams": {"fields":{"workspaceId":{"type":"string"},"processId":{"type":"string"},"rootId":{"type":"string"},"cwd":{"type":"string"},"command":{"type":"string"},"args":{"type":"string[]"},"windowsRawArguments":{"type":"string","optional":true},"env":{"type":"KernelProcessEnvironmentEntry[]"},"mode":{"type":"string"},"cols":{"type":"number","optional":true},"rows":{"type":"number","optional":true}}},
+    "KernelProcessSpawnParams": {"fields":{"workspaceId":{"type":"string"},"processId":{"type":"string"},"rootId":{"type":"string"},"cwd":{"type":"string"},"command":{"type":"string"},"args":{"type":"string[]"},"windowsRawArguments":{"type":"string","optional":true},"env":{"type":"KernelProcessEnvironmentEntry[]"},"mode":{"type":"string"},"stdinMode":{"type":"string","optional":true},"cols":{"type":"number","optional":true},"rows":{"type":"number","optional":true}}},
     "KernelProcessReadParams": {"fields":{"workspaceId":{"type":"string"},"processId":{"type":"string"},"rootId":{"type":"string","optional":true},"cursor":{"type":"number"},"maxBytes":{"type":"number","optional":true}}},
     "KernelProcessWriteParams": {"fields":{"workspaceId":{"type":"string"},"processId":{"type":"string"},"rootId":{"type":"string","optional":true},"operationId":{"type":"string"},"bytesBase64":{"type":"string"},"eof":{"type":"boolean","optional":true}}},
     "KernelProcessResizeParams": {"fields":{"workspaceId":{"type":"string"},"processId":{"type":"string"},"rootId":{"type":"string","optional":true},"operationId":{"type":"string"},"cols":{"type":"number"},"rows":{"type":"number"}}},
@@ -2269,7 +2276,7 @@
       "operationId": {"type": "string"}, "workspaceId": {"type": "string"}, "rootId": {"type": "string"}, "paths": {"type": "string[]"}, "store": {"type": "boolean"}, "leaseId": {"type": "string"}, "expectedStatesJson": {"type": "string", "optional": true}
     }},
     "KernelFileApplyParams": {"fields": {
-      "operationId": {"type": "string"}, "workspaceId": {"type": "string"}, "reservationOperationId": {"type":"string","optional":true}, "rootId": {"type": "string"}, "path": {"type": "string"}, "targetJson": {"type": "string"}, "expectedJson": {"type": "string", "optional": true}, "ownerId": {"type": "string", "optional": true}, "leaseId": {"type": "string", "optional": true}
+      "operationId": {"type": "string"}, "workspaceId": {"type": "string"}, "reservationOperationId": {"type":"string","optional":true}, "rootId": {"type": "string"}, "path": {"type": "string"}, "targetJson": {"type": "string"}, "expectedJson": {"type": "string", "optional": true}, "ownerId": {"type": "string", "optional": true}, "recordId": {"type": "string", "optional": true}, "slot": {"type": "string", "optional": true}, "leaseId": {"type": "string", "optional": true}
     }},
     "KernelFileMkdirParams": {"fields": {
       "operationId": {"type": "string"}, "workspaceId": {"type": "string"}, "rootId": {"type": "string"}, "path": {"type": "string"}, "recursive": {"type": "boolean"}, "leaseId": {"type": "string", "optional": true}
@@ -3013,6 +3020,7 @@
     "runtime.thread.inspect": "Inspect native thread branches and durable runs",
     "runtime.thread.list": "Discover original Thread owners, including archived and deleted work",
     "runtime.thread.usage": "Read original branch model usage without prompts or credentials",
+    "runtime.model.presentations": "Read frozen model attribution and usage for admitted history items",
     "runtime.thread.catalog.list": "Search visible native conversation metadata",
     "runtime.thread.update": "Revision-checked Thread title, pin and archive command",
     "runtime.thread.delete": "Tombstone product visibility without cancelling original execution",

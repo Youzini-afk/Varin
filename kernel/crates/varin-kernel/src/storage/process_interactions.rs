@@ -559,6 +559,7 @@ impl Storage {
             return Err(KernelError::Operation("process has already stopped".into()));
         }
         match &input {
+            Input::Write{..} if record["stdinMode"]=="null"=>return Err(KernelError::Operation("process stdin is disabled".into())),
             Input::Write{eof:true,..} if record["mode"]=="pty"=>return Err(KernelError::Operation("PTY input does not support pipe EOF; write the intended control character explicitly".into())),
             Input::Resize{cols,rows} if record["mode"]!="pty"||*cols==0||*rows==0=>return Err(KernelError::Operation("resize requires a PTY and valid dimensions".into())),_=>()
         }

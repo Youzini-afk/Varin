@@ -305,12 +305,20 @@ export class AgentRuntimeClient {
     signal: AbortSignal,
   ): Promise<LiveExtensionToolBinding[]> {
     const state = this.toolComposition(runId);
-    state.mcp = this.kernel.mcpLiveBinding(runId) ?? state.mcp;
-    if (state.scope) return [...state.extensions.values()];
     const [run, launch] = await Promise.all([
       this.run(runId, signal),
       this.launch(runId, signal),
     ]);
+    if (state.scope) {
+      // Ready contributions are candidates until a closed model boundary activates them.
+      // Resume the committed directory; RunTools retains the candidate for the next boundary.
+      return (launch?.selection.extension_bindings ?? []).map(binding => {
+        const retained = this.kernel.retainedExtensionBinding(runId, binding);
+        if (!retained) throw new Error('The admitted extension tool owner is unavailable');
+        return retained;
+      });
+    }
+    state.mcp = this.kernel.mcpLiveBinding(runId) ?? state.mcp;
     // ContextJobs own a frozen tool-free plan, including pure text runs. Current
     // extension routing cannot add capabilities or block their original recovery.
     if (launch?.selection.policy.name === 'context_compaction') return [];
@@ -1914,6 +1922,9 @@ export class AgentRuntimeClient {
       { operationId },
       signal,
     );
+  }
+  modelPresentations(requestIds: string[], signal?: AbortSignal): Promise<import('./protocol.generated.js').ModelPresentation[]> {
+    return this.kernel.agentRuntimeRequest('runtime.model.presentations', { requestIds }, signal);
   }
   historyPage(
     params: HistoryPageParams,

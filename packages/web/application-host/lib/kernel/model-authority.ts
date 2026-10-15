@@ -140,7 +140,7 @@ export function createModelAuthority(authority: ModelAuthority) {
       ...(model.connection ? { connection: { ...(model.connection.headers ? { headers: model.connection.headers } : {}), ...(model.connection.proxy ? { proxy: model.connection.proxy } : {}) } } : {}),
       credentialEnvironment: null, allowAnonymous: model.allowAnonymous ?? false, acceptsImages, configurationGeneration: generation, maxOutputTokens: max,
       adapterId: model.adapterId ?? model.api, adapterVersion: model.adapterVersion ?? '1', ...(model.adapterIdentity ? { adapterIdentity: model.adapterIdentity, adapterBindingId: model.adapterBindingId } : {}), ...resolved,
-      ...(model.requestModelId ? { modelOptions: { ...(resolved.modelOptions as Record<string, unknown>), catalogModelId: model.modelId } } : {}),
+      catalogModelId: model.modelId,
       ...(model.contextWindow === undefined ? {} : { contextWindowTokens: model.contextWindow }),
       ...(model.api === 'anthropic-messages' ? { anthropicOauth } : {}),
       ...(deployment ? { azureDeployment: deployment } : {}), ...(apiVersion ? { azureApiVersion: apiVersion } : {}),
@@ -205,14 +205,14 @@ export function createModelAuthority(authority: ModelAuthority) {
     async rebindModel(configuration: ModelSessionConfiguration, expectedScope: CredentialScope) {
       if (!expectedScope) return failed('credential-selection-missing');
       const providerId = configuration.providerId || failed('provider-identity-required');
-      const catalogModelId = (configuration.modelOptions as { catalogModelId?: string } | undefined)?.catalogModelId ?? configuration.model;
+      const catalogModelId = configuration.catalogModelId ?? configuration.model;
       const captured = authority.captureModel ? await authority.captureModel(providerId, catalogModelId, configuration)
         : { model: await authority.selectedModel(providerId, catalogModelId), authority };
       try {
       if (captured.model.api !== configuration.providerFamily
         || (captured.model.adapterId ?? captured.model.api) !== configuration.adapterId
         || (captured.model.adapterVersion ?? '1') !== configuration.adapterVersion
-        || captured.model.adapterIdentity !== configuration.adapterIdentity) return failed('model-configuration-changed');
+        || (captured.model.adapterIdentity ?? null) !== (configuration.adapterIdentity ?? null)) return failed('model-configuration-changed');
       const owner = ownerFor(configuration, captured.authority, captured.release);
       if (!sameScope(await owner.scope(), expectedScope)) return failed('credential-scope-changed');
       return owner;

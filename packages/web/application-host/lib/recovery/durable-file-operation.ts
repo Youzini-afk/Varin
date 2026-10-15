@@ -6,20 +6,21 @@ import { isDeepStrictEqual } from "node:util";
 import { createHash } from "node:crypto";
 import type { LaunchSource, ToolOrigin } from "../kernel/protocol.generated.js";
 
-export interface IntegrationOperationBinding {
-  kind: "runtime_operation";
+interface IntegrationBinding {
   operationId: string;
   parentRunId: string;
   parentThreadId: string;
   parentBranchId: string;
-  origin: ToolOrigin;
-  callId: string;
   childOperationId: string;
   childExecutionId: string;
   childThreadId: string;
   result: { workspaceId: string; branchId: string; resultRevision: number; root: string; publicationId: string };
   target: LaunchSource;
 }
+export type IntegrationOperationBinding = IntegrationBinding & (
+  | { kind: "runtime_operation"; origin: ToolOrigin; callId: string }
+  | { kind: "user_operation"; key: string }
+);
 
 /** A failed response is not proof that the durable transition failed. */
 export class UnconfirmedIntegrationCommitError extends Error {
@@ -35,7 +36,7 @@ const completeDurableOperation = async (
     const compensated = Array.isArray(input.result.compensatedPaths) ? input.result.compensatedPaths as string[] : [];
     const remaining = applied.filter(file => !compensated.includes(file));
     const terminal = ["complete", "conflict", "compensated", "undone", "aborted"].includes(input.state);
-    const effect = !terminal ? "unknown" : remaining.length === 0
+    const effect = !terminal || input.result.executorStopped === false ? "unknown" : remaining.length === 0
       ? compensated.length > 0 ? "confirmed" : "none" : input.state === "complete" ? "confirmed" : "partial";
     input = { ...input, result: { ...input.result, effect } };
   }
@@ -143,7 +144,7 @@ export interface HostFileResourceBackend {
     identity: RecoveryIdentity,
     relativePath: string,
     state: RecoveryState,
-    options?: { expected?: RecoveryState; ownerId?: string; operationId?: string; reservationOperationId?: string },
+    options?: { expected?: RecoveryState; ownerId?: string; recordId?: string; slot?: string; operationId?: string; reservationOperationId?: string },
   ): Promise<{ status: "applied" | "conflict"; state: RecoveryState }>;
   writeBytes(
     identity: RecoveryIdentity,
@@ -406,6 +407,8 @@ const applyFile = async (context: DurableFileOperationContext, operationId: stri
   const identity = createHash("sha256").update(JSON.stringify([operationId, file, phase])).digest("hex");
   const applied = await context.fileResources.applyStateDetailed(context.identity, file, target, {
     expected, operationId: `integration-file:${identity}`, reservationOperationId:operationId,
+    ...(target.kind === "regular-file" ? { recordId: `operation-file:${operationId}:${file}`,
+      slot: `${file}.${phase === "apply" ? "target" : "safety"}` } : {}),
   });
   if (applied.status === "conflict" || (applied.status === "applied" && !sameState(applied.state, target))) {
     throw new AcknowledgedIntegrationFileFailure(`Integration ${phase} conflicted: ${file}`, applied.status === "conflict" ? "none" : "unknown");
@@ -660,6 +663,7 @@ export const applyDurableFileOperation = async (
 ): Promise<DurableFileOperationResult> => applyKernelDurableFileOperation(context, spec);
 
 export interface DurableIntegrationInspection {
+  failure?: string;
   operationId: string;
   state: string;
   revision: number;
@@ -691,12 +695,17 @@ export const inspectDurableIntegrationOperation = async (
 ): Promise<DurableIntegrationInspection> => {
     const operation = await context.durableRecoveryStore.getOperation(context.identity.workspaceId, operationId);
     if (!operation) throw new Error(`Integration operation not found: ${operationId}`);
+    return projectIntegrationOperation(operationId, operation);
+};
+
+export const projectIntegrationOperation = (operationId: string, operation: Record<string, unknown>): DurableIntegrationInspection => {
     const data = kernelOperationData(operation);
     return {
       operationId,
       state: String(operation.state ?? "unknown"),
       revision: Number(operation.revision ?? 0),
       executorStopped: data.executorStopped === true,
+      ...(typeof data.failure === 'string' ? { failure: data.failure } : {}),
       ...(data.operationBinding ? { operationBinding: structuredClone(data.operationBinding) } : {}),
       ...(data.reservedResources ? { reservedResources: structuredClone(data.reservedResources) } : {}),
       threadId: String(data.threadId ?? operation.threadId ?? ""),

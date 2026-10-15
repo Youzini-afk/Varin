@@ -18,6 +18,7 @@ pub struct ChildAdmissionPreparation {
 pub struct PreparedChildAdmission {
     pub(super) context: ToolExecutionContext,
     pub(super) input_ref: Value,
+    pub(super) title: Option<String>,
     pub(super) configuration_ref: Value,
     pub(super) launch: launch_content::LaunchSelectionMetadata,
     pub(super) handoff: Option<ChildSourceHandoff>,
@@ -100,6 +101,7 @@ impl ChildAdmissionPreparation {
         Ok(PreparedChildAdmission {
             context: self.context,
             input_ref,
+            title: self.input.task.lines().map(str::trim).find(|line| !line.is_empty()).map(str::to_owned),
             operation_revision: operation.revision,
             call_id: admitted.call.call_id,
             configuration_ref: self.content.save(&self.launch.configuration)?,

@@ -56,10 +56,10 @@ export function reviewSource(snapshot: ThreadSnapshot): ThreadSource {
 export function reviewModel(snapshot: ThreadSnapshot): ThreadModel {
   const branch = snapshot.thread.branches.find(value => value.branch_id === snapshot.identity.branchId);
   const config = (snapshot.modelSelection.active?.configuration ?? branch?.latest_run?.configuration) as {
-    providerId?: string; model?: string; thinkingLevel?: ThreadModel['thinkingLevel']; modelOptions?: { catalogModelId?: string; temperature?: number };
+    providerId?: string; model?: string; thinkingLevel?: ThreadModel['thinkingLevel']; catalogModelId?: string; modelOptions?: { temperature?: number };
   } | undefined;
   if (!config?.providerId || !config.model) throw new Error('The implementation conversation has no selected model.');
-  return { providerId: config.providerId, modelId: config.modelOptions?.catalogModelId ?? config.model,
+  return { providerId: config.providerId, modelId: config.catalogModelId ?? config.model,
     ...(config.thinkingLevel === undefined ? {} : { thinkingLevel: config.thinkingLevel }),
     ...(config.modelOptions?.temperature === undefined ? {} : { temperature: config.modelOptions.temperature }) };
 }

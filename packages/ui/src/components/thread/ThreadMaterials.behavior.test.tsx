@@ -349,7 +349,7 @@ function artifactConversationFixture() {
     launch: null, modelSelection: { desired: null, active: null }, policySelection: null, context: { checkpoint: null, jobs: [] } });
   const submit = vi.fn(async (input: ThreadSubmit) => ({ thread_id: input.threadId, branch_id: input.branchId,
     run_id: 'run:submitted', input_id: 'input:submitted', cursor: 1 }));
-  const api: ThreadsAPI = { usage: unused,
+  const api: ThreadsAPI = { contextHistory: unused, fileTarget: unused, usage: unused,
     materials: f.materials, research: f.api,
     computer: { state: async work => ({ state: { work, rootWork: work, currentExecution: null, currentRootExecution: null,
       active: false, status: 'enabled', leases: [], requests: [], cleanups: [] }, activities: [] }), stop: unused, decide: unused },

@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/button';
 import { MarkdownRenderer } from '@/components/chat/MarkdownRenderer';
 import { parseThreadOutput } from '@/lib/agent-runtime/thread-content';
 import { ThreadOutput } from './ThreadMedia';
+import { useI18n } from '@/lib/i18n';
 
 type Props = { api: ThreadsAPI; identity: ThreadIdentity; operationId: string; executionId?: string; itemId: string };
 
@@ -15,6 +16,7 @@ export function ThreadChildReport(props: Props) {
   return <ReportView key={JSON.stringify([host, props.identity, props.operationId, props.executionId, props.itemId])} {...props} host={host} />;
 }
 function ReportView({ api, identity, operationId, executionId, itemId, host }: Props & { host: number }) {
+  const { t } = useI18n();
   const [page, setPage] = React.useState<ChildReportPage>();
   const [output, setOutput] = React.useState<OutputBody>();
   const [progress, setProgress] = React.useState<{ bytes: number; total: number }>();
@@ -50,7 +52,12 @@ function ReportView({ api, identity, operationId, executionId, itemId, host }: P
           throw new Error('The original report byte range is inconsistent. Retry the original report.');
         }
         accepted ??= result;
-        if (result.format === 'text') { setOutput(undefined); setPage(result); return; }
+        if (result.format === 'text') {
+          setOutput(undefined);
+          setPage(previous => previous?.format === 'text' && result.offset > 0
+            ? { ...result, offset: previous.offset, text: previous.text + result.text } : result);
+          return;
+        }
         fragments.push(result.text);
         setProgress({ bytes: next, total: result.total_bytes });
         if (result.next_offset === null) {
@@ -67,17 +74,15 @@ function ReportView({ api, identity, operationId, executionId, itemId, host }: P
       if (current()) setError(value instanceof Error ? value.message : 'Report unavailable. Retry the original report.');
     } finally { if (current()) { request.current = null; setLoading(false); setProgress(undefined); } }
   };
-  return <div aria-label="Child report" className="space-y-1">
-    <div className="text-xs">Other-agent report data · {itemId}</div>
+  return <div aria-label={t('chat.children.report')} className="space-y-1 typography-meta">
     {error && <p role="alert">{error}</p>}
-    {page?.format === 'text' && <><MarkdownRenderer messageId={`${page.execution_id}:${itemId}:${page.offset}`} content={page.text} />
-      <p className="text-xs">Bytes {page.offset}–{page.offset + new TextEncoder().encode(page.text).length} of {page.total_bytes}</p></>}
+    {page?.format === 'text' && <MarkdownRenderer messageId={`${page.execution_id}:${itemId}`} content={page.text} />}
     {page?.format === 'output_body' && output && <ThreadOutput api={api} identity={identity}
       holder={{ kind: 'child_report', operationId, executionId: page.execution_id, itemId }} output={output} messageId={`${page.execution_id}:${itemId}`} />}
-    {loading && <><p role="status">Reading report{progress ? ` · ${progress.bytes} of ${progress.total} bytes` : ''}…</p>
-      <Button variant="ghost" size="sm" onClick={() => { request.current?.abort(); request.current = null; setLoading(false); setProgress(undefined); }}>Cancel report read</Button></>}
+    {loading && <><p role="status">{t('common.loading')}{progress ? ` · ${Math.round(progress.bytes / progress.total * 100)}%` : ''}</p>
+      <Button variant="ghost" size="sm" onClick={() => { request.current?.abort(); request.current = null; setLoading(false); setProgress(undefined); }}>{t('chat.plan.cancel')}</Button></>}
     {(!page || page.next_offset !== null) && <Button variant="ghost" size="sm" disabled={loading || !api.collaboration} onClick={() => void read()}>
-      {error ? 'Retry report read' : page ? executionId ? 'Read next report page' : 'Read next page' : executionId ? 'Read execution report' : 'Read report'}
+      {error ? t('chat.timeline.retry') : page ? t('chat.children.readMore') : t('chat.children.report')}
     </Button>}
   </div>;
 }

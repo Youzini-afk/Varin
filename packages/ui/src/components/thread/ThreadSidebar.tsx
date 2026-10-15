@@ -1,3 +1,4 @@
+import { ConversationSidebar } from '../conversation/ConversationSidebar';
 import React from 'react';
 import { useThreadStore } from '@/stores/useThreadStore';
 import { openThreadFromNavigation, startThreadFromNavigation } from '@/lib/agent-runtime/threadNavigation';
@@ -16,7 +17,7 @@ import type { ThreadSummary } from '@varin/protocol';
 import { ThreadSidebarList } from './ThreadSidebarList';
 import { threadSubtreeIds } from '@/lib/agent-runtime/thread-tree';
 
-export function ThreadSidebar({ isVisible = true, archived = false, mobileVariant = false, onNavigate }: { isVisible?: boolean; mobileVariant?: boolean; archived?: boolean; onNavigate?(): void }) {
+function ArchiveThreadSidebar({ isVisible = true, archived = false, mobileVariant = false, onNavigate }: { isVisible?: boolean; mobileVariant?: boolean; archived?: boolean; onNavigate?(): void }) {
   const { t } = useI18n();
   const threads = useThreadStore(state => state.threads);
   const selected = useThreadStore(state => state.selectedIdentity);
@@ -94,4 +95,8 @@ export function ThreadSidebar({ isVisible = true, archived = false, mobileVarian
       <DialogFooter><Button variant="destructive" disabled={pending} onClick={() => { if (deleting) void act(async () => { await retainTree(deleting.thread_id, 'delete'); setDeleting(null); }); }}>{t('sessions.sidebar.bulkActions.delete')}</Button></DialogFooter>
     </DialogContent></Dialog>
   </nav>;
+}
+
+export function ThreadSidebar(props: { isVisible?: boolean; mobileVariant?: boolean; archived?: boolean; onNavigate?(): void }) {
+  return props.archived ? <ArchiveThreadSidebar {...props} /> : <ConversationSidebar isVisible={props.isVisible} mobileVariant={props.mobileVariant} onRequestClose={props.onNavigate} />;
 }

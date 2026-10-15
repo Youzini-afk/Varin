@@ -1,3 +1,4 @@
+import { useI18n } from '@/lib/i18n';
 import React from 'react';
 import type { LaunchSelection } from '@varin/protocol';
 import { useUIStore } from '@/stores/useUIStore';
@@ -19,19 +20,19 @@ const reasons: Record<string, string> = {
 
 /** Displays the same frozen selection that execution owns, never a live settings preview. */
 export function ThreadChildProfiles({ launch }: { launch: LaunchSelection }) {
+  const { t } = useI18n();
   const catalog = launch.child_dispatch;
   if (!catalog) return null;
   const hostNames = new Set([...launch.extension_bindings.map(binding => binding.tool.name), ...(launch.mcp_binding?.tools.map(tool => tool.name) ?? [])]);
   const names = new Set([...catalog.native_capabilities.map(tool => tool.name), ...hostNames]);
-  return <details className="mx-auto max-w-3xl rounded border p-3 text-sm">
-    <summary className="cursor-pointer">Child execution choices</summary>
-    <p className="mt-2 text-xs text-muted-foreground">Accepted tasks keep these choices. Changes apply to future tasks.</p>
+  return <details className="rounded-lg px-2 py-2 typography-meta text-muted-foreground">
+    <summary className="cursor-pointer">{t('chat.children.profiles')}</summary>
     <button type="button" className="mt-1 text-xs underline" onClick={() => {
       selectAgentProfilesRuntime('agent');
       const settings = useUIStore.getState();
       settings.setSettingsPage('agents');
       settings.setSettingsDialogOpen(true);
-    }}>Configure Agent profiles</button>
+    }}>{t('chat.children.configureProfiles')}</button>
     {catalog.normal_unavailable && <p>{reasons[catalog.normal_unavailable.code] ?? catalog.normal_unavailable.code}</p>}
     {catalog.presets.map(preset => {
       const unsupported = preset.tools.filter(name => !names.has(name));
@@ -40,8 +41,8 @@ export function ThreadChildProfiles({ launch }: { launch: LaunchSelection }) {
       const unavailable = preset.unavailable ?? (unsupported.length ? { code: 'child-capability-unsupported', capabilities: unsupported }
         : physical.length ? { code: 'child-physical-source-required', capabilities: physical } : null);
       return <div key={preset.id} className="mt-2">
-      <div>{preset.name} · {preset.id} · {preset.work_mode === 'read_only' ? 'Read-only source' : 'Private working copy'}</div>
-      <div className="text-xs text-muted-foreground">{preset.model_source === 'inherit' ? 'Inherits the request model' : preset.model?.configuration.model ?? 'Configured model unavailable'}</div>
+      <div>{preset.name} · {t(preset.work_mode === 'read_only' ? 'chat.children.readOnly' : 'chat.children.workingCopy')}</div>
+      <div className="text-xs text-muted-foreground">{preset.model_source === 'inherit' ? t('chat.children.inheritModel') : preset.model?.configuration.model ?? t('chat.children.noModel')}</div>
       <div className="text-xs text-muted-foreground">{preset.tools.join(', ') || 'No tools'}</div>
       {unavailable && <p>{reasons[unavailable.code] ?? unavailable.code}{unavailable.capabilities.length ? `: ${unavailable.capabilities.join(', ')}` : ''}</p>}
     </div>; })}

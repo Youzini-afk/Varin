@@ -1,3 +1,6 @@
+import { useI18n } from '@/lib/i18n';
+import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
+import { Icon } from '@/components/icon/Icon';
 import React from 'react';
 import { RuntimeAPIContext } from '@/contexts/runtimeAPIContext';
 import { Input } from '@/components/ui/input';
@@ -18,6 +21,9 @@ export function ThreadMedia(props: Scope & { media: StoredMedia; partIndex: numb
   return <MediaView key={key} {...props} host={host} />;
 }
 function MediaView({ api, identity, holder, media, partIndex, host }: Scope & { media: StoredMedia; partIndex: number; host: number }) {
+  const { t } = useI18n();
+  const figure = React.useRef<HTMLElement | null>(null);
+  const [expanded, setExpanded] = React.useState(false);
   const runtime = React.useContext(RuntimeAPIContext);
   const [saveDirectory, setSaveDirectory] = React.useState('');
   const [saveName, setSaveName] = React.useState(`image-${partIndex}.${media.media_type === 'image/jpeg' ? 'jpg' : media.media_type.split('/')[1] || 'bin'}`);
@@ -39,7 +45,7 @@ function MediaView({ api, identity, holder, media, partIndex, host }: Scope & { 
   }, []);
   React.useEffect(() => clear, [clear]);
   const image = media.media_type.startsWith('image/');
-  const load = async () => {
+  const load = React.useCallback(async () => {
     clear();
     const controller = new AbortController(); pending.current = controller;
     setUrl(undefined); setError(undefined); setDisplayFailed(false); setLoading(true);
@@ -60,7 +66,18 @@ function MediaView({ api, identity, holder, media, partIndex, host }: Scope & { 
     } finally {
       if (!controller.signal.aborted && pending.current === controller) { pending.current = null; setLoading(false); }
     }
-  };
+  }, [api, identity, holder, partIndex, media, host, clear]);
+  const loadRef = React.useRef(load);
+  loadRef.current = load;
+  React.useEffect(() => {
+    const element = figure.current;
+    if (!image || !element || typeof IntersectionObserver === 'undefined') return;
+    const observer = new IntersectionObserver(entries => {
+      if (entries.some(entry => entry.isIntersecting)) { observer.disconnect(); void loadRef.current(); }
+    });
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [image]);
   const save = async () => {
     if (!runtime?.workspace || !loaded.current || savingRef.current || host !== getRuntimeEndpointGeneration()) return;
     if (!saveName.trim() || /[/\\]/.test(saveName) || saveName === '.' || saveName === '..') { setSaveError('Enter a file name without a directory.'); return; }
@@ -79,27 +96,30 @@ function MediaView({ api, identity, holder, media, partIndex, host }: Scope & { 
       if (host === getRuntimeEndpointGeneration()) setSaveError(error instanceof Error ? error.message : 'Image save failed. The original image is still available.');
     } finally { savingRef.current = false; setSaving(false); }
   };
-  return <figure className="my-2 space-y-1 rounded border p-2" aria-label="Stored media">
-    <figcaption className="text-xs text-muted-foreground">{media.media_type}</figcaption>
-    {!image && <p>This view cannot display {media.media_type}. You can download the original file.</p>}
-    {error && <p role="alert">Media unavailable. {error} Refresh the conversation if it changed, or retry this read.</p>}
-    {url && image && !displayFailed && <img src={url} alt="Conversation image" className="max-h-96 max-w-full rounded" onError={() => {
-      setDisplayFailed(true); setError('The browser could not display these image bytes. Download the original file to inspect it.');
-    }} />}
-    {url && <a href={url} download={saveName}>Download original</a>}
-    {url && image && runtime?.workspace && <details><summary>Save image to project</summary>
+  return <figure ref={figure} className="my-2 max-w-full space-y-2" aria-label="Stored media">
+    {!image && <figcaption className="typography-meta text-muted-foreground">{media.media_type}</figcaption>}
+    {error && <p role="alert" className="typography-meta text-destructive">{error}</p>}
+    {url && image && !displayFailed && <button type="button" className="block max-w-full overflow-hidden rounded-lg border border-border/70 bg-background" onClick={() => setExpanded(true)} aria-label={t('chat.media.view')}>
+      <img src={url} alt={t('chat.media.image')} className="max-h-[32rem] max-w-full object-contain" onError={() => {
+        setDisplayFailed(true); setError('The browser could not display this image.');
+      }} />
+    </button>}
+    {url && <div className="flex items-center gap-3 typography-micro text-muted-foreground">
+      <a href={url} download={saveName} className="inline-flex items-center gap-1 hover:text-foreground"><Icon name="download" className="size-3.5" />{t('chat.media.download')}</a>
+      <button type="button" className="hover:text-foreground" onClick={() => { clear(); setUrl(undefined); }}>{t('chat.media.close')}</button>
+    </div>}
+    {url && image && runtime?.workspace && <details className="typography-meta text-muted-foreground"><summary className="cursor-pointer">{t('chat.media.saveToProject')}</summary>
       <div className="my-2 flex flex-wrap gap-2">
-        <Input aria-label="Destination folder relative to workspace" placeholder="Project folder relative to workspace" value={saveDirectory} disabled={saving} onChange={event => setSaveDirectory(event.target.value)} />
-        <Input aria-label="Image file name" value={saveName} disabled={saving} onChange={event => setSaveName(event.target.value)} />
-        <Button type="button" variant="outline" size="sm" disabled={saving} onClick={() => void save()}>{saving ? 'Saving image…' : 'Save image'}</Button>
+        <Input aria-label={t('chat.media.folder')} placeholder={t('chat.media.folder')} value={saveDirectory} disabled={saving} onChange={event => setSaveDirectory(event.target.value)} />
+        <Input aria-label={t('chat.media.filename')} value={saveName} disabled={saving} onChange={event => setSaveName(event.target.value)} />
+        <Button type="button" variant="outline" size="sm" disabled={saving} onClick={() => void save()}>{t(saving ? 'chat.media.saving' : 'chat.media.save')}</Button>
       </div>
-      {savedPath && <p role="status">Image saved to {savedPath}</p>}
-      {saveError && <p role="alert">{saveError} The original image is still available.</p>}
+      {savedPath && <p role="status">{t('chat.media.saved', { path: savedPath })}</p>}
+      {saveError && <p role="alert">{saveError}</p>}
     </details>}
-    {!url && !loading && <Button type="button" variant="outline" size="sm" onClick={() => void load()}>{error ? 'Retry media' : image ? 'View image' : 'Read original media'}</Button>}
-    {loading && <><span role="status">Reading media…</span><Button type="button" variant="ghost" size="sm" onClick={() => { clear(); setLoading(false); }}>Cancel media read</Button></>}
-    {url && <Button type="button" variant="ghost" size="sm" onClick={() => { clear(); setUrl(undefined); }}>Close media</Button>}
-    <details className="text-xs text-muted-foreground"><summary>Media source</summary><pre className="whitespace-pre-wrap break-all">{JSON.stringify(media.source, null, 2)}</pre></details>
+    {!url && !loading && <Button type="button" variant="ghost" size="sm" onClick={() => void load()}>{t(error ? 'chat.media.retry' : image ? 'chat.media.view' : 'chat.media.read')}</Button>}
+    {loading && <span role="status" className="inline-flex items-center gap-2 typography-meta text-muted-foreground"><Icon name="loader-4" className="size-3.5 animate-spin" />{t('chat.media.loading')}</span>}
+    {url && image && <Dialog open={expanded} onOpenChange={setExpanded}><DialogContent className="max-w-[90vw] p-2"><DialogTitle className="sr-only">{t('chat.media.image')}</DialogTitle><img src={url} alt={t('chat.media.image')} className="max-h-[85vh] w-full object-contain" /></DialogContent></Dialog>}
   </figure>;
 }
 

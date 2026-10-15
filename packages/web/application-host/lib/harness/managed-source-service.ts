@@ -124,6 +124,7 @@ export function createManagedSourceService(options: ManagedSourceServiceOptions)
     return kernel.sourceRequest<SourceAuthorityResult>('source.authority.inspect', address(principal, input), signal);
   };
   const localScope = (principal: ManagedSourcePrincipal, coordinatorHostId: string, authority: SourceAuthorityResult): ManagedSourceLocalScope => ({
+    operationId: authority.operationId,
     principal, coordinatorHostId, authorityId: authority.authorityId, resourceEpoch: authority.resourceEpoch,
     scope: authority.scope, source: authority.source, grant: kernel.sourceAuthorityGrant(authority), physicalRoot: authority.physicalRoot,
   });

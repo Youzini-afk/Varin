@@ -26,7 +26,8 @@ Use these for architecture, then the local owner below for implementation change
 | Shared projections and preferences | [Store ownership](src/stores/DOCUMENTATION.md) |
 | Agent resource-panel navigation | [Context surfaces](src/lib/surfaces/DOCUMENTATION.md) |
 | Settings primitives and save feedback | [Settings components](src/components/sections/shared/DOCUMENTATION.md) |
-| Native conversation | `src/components/thread`, `src/lib/agent-runtime`, and `ThreadsAPI` |
+| Conversation controls | `src/components/thread`, `src/lib/agent-runtime`, and `ThreadsAPI` |
+| Conversation presentation | `src/components/conversation`: virtual timeline, message/tool cards, selection menus, sidebar and transitions |
 | Theme and shared chrome | `src/lib/theme`, `src/styles`, and `src/components/ui` |
 | Icons | [Sprite-backed Icon contract](src/components/icon/README.md) |
 
@@ -45,6 +46,15 @@ Async work captures Host/API epoch and its actual Thread, branch, resource, or c
 identity. Changing targets invalidates both the request and its intended mutation target. A cached view
 can preserve continuity but cannot turn missing, loading, failed, or inaccessible data into success.
 Complete authoritative snapshots and partial save responses have different merge semantics.
+
+Conversation cards project native history IDs and original request metadata. File navigation resolves the
+history item's original source through the Host before opening Documents; the selected navigation project
+does not identify a task's working copy. Child rows follow Catalog execution admission order, while reports
+remain attached to their original execution. Context summary history is read through its parent-owned job.
+
+Child file review binds an immutable publication to its original parent source. Explicit User apply/undo
+commands use native user Operations and the existing Integration journal. Preview refresh reads those
+records; it does not repeat writes. Dirty editor buffers keep their Documents revision checks.
 
 High-frequency document text, cursor motion, streaming output, and transition frames stay close to
 owners with narrow subscriptions. Zustand holds appropriate navigation, preference, and keyed query
@@ -68,8 +78,15 @@ plan, Goal, permission, question and recovery components keep their original own
 Showing a resource or history view does not launch work. A follow-up registration observes its original
 Job/source and cursor; it never stops the observed Job or uses a renderer timer as a scheduler.
 
+`HistoryPresentation` projects semantic history into the timeline without replacing its IDs. Model
+labels and token receipts come from the original frozen request, not today's selected model; usage is
+counted once per request even when it produced several visible items. Tool-call identity includes its
+Run and request. Cancelled, indeterminate, accepted background work and success have distinct states.
+`timelineViewStore` owns scroll positions only. Message handoff animation targets the history ID from
+the accepted input receipt. A retained outgoing scene is inert during conversation switching.
+
 `ThreadContent`/`ThreadMedia` consume declared typed text/media holders, not arbitrary JSON that looks
-like an image descriptor. On-demand reads retain the original holder, part ordinal and execution
+like an image descriptor. Visible image previews and explicit attachment reads retain the original holder, part ordinal and execution
 identity. Object URLs belong to the mounted view and are revoked on cancellation or target change.
 Incomplete output-body pages must not be rendered as a complete report or reinterpreted as Markdown.
 

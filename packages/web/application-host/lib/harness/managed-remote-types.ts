@@ -88,6 +88,7 @@ export interface ManagedSourceInspection { scope: SourceAuthorityScope; phase: '
 /** Closed, non-model source services. A command cannot name an arbitrary kernel method,
  * mint a grant, change a source, or select a different physical root. */
 export type SourceServiceOperation =
+  | { kind: 'user_integration'; request: import('../kernel/thread-integrations.js').UserIntegrationRequest }
   | { kind: 'schedule'; invocation: import('../kernel/tool-invocation.js').ToolInvocationAuthority }
   | { kind: 'mcp'; action: import('./managed-mcp-contract.js').ManagedMcpAction }
   | {kind:'native_resource';context:{run_id:string;origin:import('../kernel/protocol.generated.js').ToolOrigin;operation_id:string};action:import('../kernel/protocol.generated.js').SourceResourceAction;authorizeOnly:boolean}
@@ -135,6 +136,7 @@ export interface ManagedChildSourceReceipt {
   provenance: ChildSourceProvenance;
 }
 export interface ManagedSourceLocalScope {
+  operationId?: string | null;
   principal: ManagedSourcePrincipal;
   coordinatorHostId: string;
   authorityId: string;
@@ -182,6 +184,7 @@ export interface ManagedSourceService {
 }
 
 export interface SourceServiceResults {
+  user_integration: import('../kernel/thread-integrations.js').UserIntegrationResult;
   schedule: import('../kernel/tool-bridge.js').ToolExecutionReceipt;
   mcp: import('./managed-mcp-contract.js').ManagedMcpReply;
   native_resource: unknown;

@@ -73,6 +73,15 @@ export function decodeManagedSourceResponse<Operation extends SourceServiceOpera
     case 'child_result_publish': valid = record(value) && text(value.branchId) && typeof value.resultRevision === 'number'
       && strings(value.changedPaths) && record(value.pathStates) && record(value.baseStates); break;
     case 'integration': valid = record(value) && text(value.status) && strings(value.changedFiles); break;
+    case 'user_integration': valid = record(value) && ['none', 'confirmed', 'partial', 'unknown'].includes(String(value.effect))
+      && typeof value.executorStopped === 'boolean' && record(value.state) && Array.isArray(value.state.operations)
+      && value.state.operations.every(row => record(row) && text(row.operationId) && text(row.sourceRunId) && text(row.state)
+        && strings(row.appliedPaths) && strings(row.conflictPaths) && strings(row.needsAttentionPaths)
+        && ['none', 'confirmed', 'partial', 'unknown'].includes(String(row.effect)) && typeof row.executorStopped === 'boolean')
+      && (value.state.problem === undefined || text(value.state.problem))
+      && (operation.request.command.action !== 'preview' || value.state.problem !== undefined || record(value.state.preview)
+        && value.state.preview.threadId === operation.request.binding.childThreadId
+        && value.state.preview.resultRevision === operation.request.binding.result.resultRevision); break;
     case 'check_path': case 'language_release': case 'child_release': case 'child_unaccepted_release':
       if (value === null || value === undefined || record(value)) return undefined as SourceServiceResponse<Operation>;
       break;

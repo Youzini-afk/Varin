@@ -19,7 +19,7 @@ interface Options {
 }
 export interface ProcessAddress { workspaceId: string; processId: string; rootId?: string }
 type Address = ProcessAddress;
-interface ProjectionOptions { retainOutput?: boolean; terminate?: (force: boolean) => Promise<void> }
+interface ProjectionOptions { retainOutput?: boolean; stdinIgnored?: boolean; terminate?: (force: boolean) => Promise<void> }
 export type ProcessProjectionClient = Pick<KernelScopedClient, 'processSubscribe' | 'processWrite' | 'processResize' | 'processKill' | 'processRelease'>;
 const asError = (value: unknown): Error => value instanceof Error ? value : new Error(String(value));
 const nativeSignal = (value: string | null): NodeJS.Signals | null => {
@@ -79,7 +79,7 @@ export class KernelManagedProcess extends EventEmitter implements ManagedPipedPr
     this.stderr = new Readable({ read: () => { queueMicrotask(() => this.maybeAcknowledgeData()); }, highWaterMark: 64 * 1024 });
     this.stdin = new Writable({
       write: (chunk: Buffer, _encoding, done) => { void this.writeBytes(Buffer.from(chunk), false).then(() => done(), (error: unknown) => done(asError(error))); },
-      final: (done) => { void this.writeBytes(Buffer.alloc(0), true).then(() => done(), (error: unknown) => done(asError(error))); },
+      final: (done) => { if (this.options.stdinIgnored) done(); else void this.writeBytes(Buffer.alloc(0), true).then(() => done(), (error: unknown) => done(asError(error))); },
       highWaterMark: 64 * 1024,
     });
     // Consumers can observe errors, but a broken pipe must not crash the Host.
@@ -205,7 +205,7 @@ export class KernelManagedProcess extends EventEmitter implements ManagedPipedPr
   private async writeBytes(bytes: Buffer, eof: boolean, identity?: string): Promise<void> {
     await this.readyPromise;
     if (this.lost) throw this.lost;
-    if (this.finishing || this.stopRequested || !this.current.writerActive) throw new Error("Native process input is closed");
+    if (this.options.stdinIgnored || this.finishing || this.stopRequested || !this.current.writerActive) throw new Error("Native process input is closed");
     const operationId = identity ?? `process-input:${randomUUID()}`;
     const receipt = await this.scoped.processWrite({ ...this.address, operationId,
       bytesBase64: bytes.toString("base64"), ...(eof ? { eof: true } : {}) });
@@ -372,9 +372,10 @@ export function createKernelProcessService(options: Options) {
     const cwd = path.relative(resolved.identity.canonicalRoot, canonicalCwd).replaceAll("\\", "/");
     if (cwd === ".." || cwd.startsWith("../") || path.isAbsolute(cwd)) throw new Error("Native process cwd is outside its admitted root");
     input.signal?.throwIfAborted();
+    const stdinIgnored = mode === 'pipe' && (input.stdio === 'ignore' || Array.isArray(input.stdio) && input.stdio[0] === 'ignore');
     const params: KernelMethodParams["process.spawn"] = {
       processId: "process:" + randomUUID(), workspaceId: resolved.identity.workspaceId, rootId: resolved.rootId,
-      cwd, command, args: [...args], mode, cols, rows,
+      cwd, command, args: [...args], mode, cols, rows, stdinMode: stdinIgnored ? 'null' : 'pipe',
       env: Object.entries(input.env ?? process.env).flatMap(([name, value]) => value === undefined || name === "NODE_CHANNEL_FD" ? [] : [{ name, value }]),
     };
     // The trusted source callback belongs to the original source owner, not the JSON
@@ -389,7 +390,7 @@ export function createKernelProcessService(options: Options) {
     const epoch = options.client.kernelEpoch;
     if (!epoch) throw new Error("Native process epoch was lost during startup");
     validateSnapshot(initial, params, epoch);
-    const handle = new KernelManagedProcess(resolved.client, { workspaceId: params.workspaceId, processId: params.processId }, initial, report, () => { handles.delete(handle); });
+    const handle = new KernelManagedProcess(resolved.client, { workspaceId: params.workspaceId, processId: params.processId }, initial, report, () => { handles.delete(handle); }, { stdinIgnored });
     handles.add(handle);
     try {
       await handle.start();
@@ -405,7 +406,7 @@ export function createKernelProcessService(options: Options) {
     }
     const stdio = input.stdio;
     if (stdio === "ignore") handle.discardOutput();
-    if (Array.isArray(stdio) && stdio[0] === "ignore") handle.stdin.end();
+    if (stdinIgnored) handle.stdin.end();
     const onAbort = () => { handle.kill(); };
     input.signal?.addEventListener("abort", onAbort, { once: true });
     void handle.completion.finally(() => input.signal?.removeEventListener("abort", onAbort)).catch(() => undefined);
