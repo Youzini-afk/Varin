@@ -126,6 +126,9 @@ export interface McpAuthorityServerReadiness {
   status: 'disabled' | 'unprepared' | 'connecting' | 'connected' | 'disconnected' | 'needs-auth' | 'failed' | 'closed' | 'stale';
   cachedToolCount: number;
   connectedToolCount: number;
+  /** Presence only, read from the original store; does not imply a valid token. */
+  hasStoredOAuthGrant: boolean | undefined;
+  credentialError?: string;
   selected: boolean;
   directories?: Readonly<Record<McpDirectoryKind, McpDirectoryState>>;
 }
@@ -425,7 +428,9 @@ export class McpAuthority {
       const entry = current.servers.find(entry => entry.name === record.entry.name);
       if (record.entry.scope !== 'extension' && (!entry || entry.config.enabled === false)) this.#revoke(record);
       if (entry && record.entry.scope !== 'extension' && !isDeepStrictEqual(entry, record.entry)) { record.retired = true; this.#collect(record); }
-      if (record.oauthGrant !== this.#oauthGrant(record.scope, record.connection)) this.#revoke(record, 'mcp-credential-revoked');
+      try {
+        if (record.oauthGrant !== this.#oauthGrant(record.scope, record.connection)) this.#revoke(record, 'mcp-credential-revoked');
+      } catch { /* Unreadable credentials are unknown, not withdrawal. Inspection reports the error; dispatch still checks the original store. */ }
     }
     this.#observeDefinitionWithdrawal(scope, current.servers);
     if (kind === 'credentials' || !isDeepStrictEqual(previous, current)) this.#changed(scopeKey(scope), { kind });
@@ -1687,11 +1692,17 @@ export class McpAuthority {
       const connection = current ?? previous;
       const status = entry.config.enabled === false ? 'disabled' : current?.revoked ? 'closed'
         : current ? current.connection.state : previous ? 'stale' : observation?.status ?? 'unprepared';
+      const oauthUrl = runtime.mcpOAuthUrl(entry);
+      let hasStoredOAuthGrant: boolean | undefined = false;
+      let credentialError: string | undefined;
+      try { hasStoredOAuthGrant = oauthUrl !== undefined && this.#store(scope.scope.agentDir).tokens(entry.name, oauthUrl) !== undefined; }
+      catch { hasStoredOAuthGrant = undefined; credentialError = 'MCP credentials are unavailable. Check the MCP credential store.'; }
       return { name: entry.name, description: entry.config.description ?? '', resourceKey: this.#resourceKey(scope, entry),
         hasDirectTools: entry.config.exposure === 'direct' || Object.values(entry.config.toolExposure ?? {}).includes('direct'), exposure: entry.config.exposure ?? 'codemode',
         configurationScope: entry.scope ?? 'global', executionScope: scope.scope.executionScope, status,
         cachedToolCount: connection?.connection.tools.length ?? this.#cachedCounts.get(this.#connectionKey(scope, entry)) ?? observation?.toolCount ?? 0,
         connectedToolCount: status === 'connected' && current?.connection.directoriesReady.has('tools') ? current.connection.tools.length : 0,
+        hasStoredOAuthGrant, ...(credentialError ? { credentialError } : {}),
         ...(current ? { directories: { ...current.connection.directoryStates } } : {}), selected: selected.has(entry.name) };
     });
     return freeze({ configErrorCount: scope.config.errors.length, configuredServerCount: servers.length,

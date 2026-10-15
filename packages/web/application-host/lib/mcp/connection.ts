@@ -17,6 +17,16 @@ export const mcpOAuthUrl = (entry: McpServerEntry): string | undefined => {
   const config = entry.config;
   return 'url' in config && !config.auth && !Object.keys(config.headers ?? {}).some(name => name.toLowerCase() === 'authorization') ? config.url : undefined;
 };
+function authenticationFailure(error: unknown): { wwwAuthenticate?: unknown } | undefined {
+  // SDK version negotiation wraps transport failures in Error.cause.
+  const seen = new Set<object>();
+  while (error && typeof error === 'object' && !seen.has(error)) {
+    seen.add(error);
+    if ('status' in error && (error.status === 401 || error.status === 403)) return 'wwwAuthenticate' in error ? { wwwAuthenticate: error.wwwAuthenticate } : {};
+    error = 'cause' in error ? error.cause : undefined;
+  }
+  return undefined;
+}
 export function createDefaultTransport(entry: McpServerEntry, cwd: string, authProvider?: AuthProvider, fetchImpl?: typeof fetch): McpTransport {
   const config = entry.config;
   const resolveEnvironment = (value: string) => resolveValue(value, environments.get(entry) ?? process.env);
@@ -126,9 +136,10 @@ export class McpServerConnection {
     } catch (error) {
       await client?.close();
       if (this.#client === client) this.#client = undefined;
-      this.state = this.#shutdown.signal.aborted ? 'closed' : error && typeof error === 'object' && 'status' in error && (error.status === 401 || error.status === 403) ? 'needs-auth' : 'failed';
+      const authentication = authenticationFailure(error);
+      this.state = this.#shutdown.signal.aborted ? 'closed' : authentication ? 'needs-auth' : 'failed';
       this.error = this.state === 'needs-auth' ? 'MCP sign-in required' : 'MCP connection unavailable';
-      this.challenge = error && typeof error === 'object' && 'wwwAuthenticate' in error ? error.wwwAuthenticate : undefined;
+      this.challenge = authentication?.wwwAuthenticate;
       this.options.onChange?.(this); throw error;
     }
   }
@@ -182,9 +193,9 @@ export class McpServerConnection {
     }).catch(error => {
       if (this.#client === client) {
         this.directoriesReady.delete(kind);
-        const needsAuth = !!error && typeof error === 'object' && 'status' in error && (error.status === 401 || error.status === 403);
-        this.directoryStates[kind] = needsAuth ? 'needs-auth' : 'failed';
-        if (needsAuth && 'wwwAuthenticate' in error) this.challenge = error.wwwAuthenticate;
+        const authentication = authenticationFailure(error);
+        this.directoryStates[kind] = authentication ? 'needs-auth' : 'failed';
+        if (authentication) this.challenge = authentication.wwwAuthenticate;
         this.options.onChange?.(this);
       }
       throw error;

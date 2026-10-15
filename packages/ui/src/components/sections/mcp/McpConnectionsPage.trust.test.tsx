@@ -2,8 +2,8 @@ import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { parseHTML } from 'linkedom';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
-import type { McpConfigurationSnapshot } from '@varin/application-client';
-const fixture = vi.hoisted(() => ({ version: 0, trust: true, listeners: new Set<() => void>(), blockers: new Set<() => Promise<void>>(), api: { open: vi.fn(), close: vi.fn(), read: vi.fn(), readDocument: vi.fn(), saveDocument: vi.fn() } }));
+import type { McpConfigurationSnapshot, McpConfigurationServer } from '@varin/application-client';
+const fixture = vi.hoisted(() => ({ version: 0, trust: true, listeners: new Set<() => void>(), blockers: new Set<() => Promise<void>>(), api: { open: vi.fn(), close: vi.fn(), read: vi.fn(), readDocument: vi.fn(), saveDocument: vi.fn(), command: vi.fn(), signIn: vi.fn(), authorization: vi.fn() } }));
 vi.mock('@varin/application-client', () => ({ createMcpConnectionsHttpAPI: () => fixture.api, registerRuntimeEndpointSwitchBlocker: (listener: () => Promise<void>) => { fixture.blockers.add(listener); return () => fixture.blockers.delete(listener); }, getRuntimeEndpointGeneration: () => 1, subscribeRuntimeEndpointChanged: () => () => {} }));
 vi.mock('@/lib/projectTrust', () => ({ getProjectTrustGeneration: () => fixture.version,
   subscribeProjectTrustChanges: (listener: () => void) => { fixture.listeners.add(listener); return () => fixture.listeners.delete(listener); } }));
@@ -20,9 +20,10 @@ vi.mock('@/components/ui/CodeMirrorEditor', () => ({ CodeMirrorEditor: () => nul
 vi.mock('@/components/ui/select', () => ({ Select: ({ children }: React.PropsWithChildren) => <div>{children}</div>, SelectContent: ({ children }: React.PropsWithChildren) => <div>{children}</div>, SelectTrigger: ({ children }: React.PropsWithChildren) => <div>{children}</div>, SelectValue: () => null, SelectItem: ({ children }: React.PropsWithChildren) => <span>{children}</span> }));
 import { McpConnectionsPage } from './McpConnectionsPage';
 let root: Root, container: HTMLDivElement, viewNumber: number;
-const snapshot = (view = `view:${viewNumber}`): McpConfigurationSnapshot => ({ view, sources: fixture.trust ? [{ path: '/project/.mcp.json', scope: 'project' }] : [{ path: '/user/mcp.json', scope: 'global' }], servers: [], issues: [] });
+let servers: McpConfigurationServer[];
+const snapshot = (view = `view:${viewNumber}`): McpConfigurationSnapshot => ({ view, sources: fixture.trust ? [{ path: '/project/.mcp.json', scope: 'project' }] : [{ path: '/user/mcp.json', scope: 'global' }], servers, issues: [] });
 beforeEach(() => {
-  fixture.trust = true; fixture.version += 1; viewNumber = 0; vi.clearAllMocks();
+  servers = []; fixture.trust = true; fixture.version += 1; viewNumber = 0; vi.clearAllMocks();
   fixture.api.open.mockImplementation(async () => snapshot(`view:${++viewNumber}`)); fixture.api.close.mockResolvedValue(undefined);
   fixture.api.read.mockImplementation(async (view: string) => snapshot(view));
   fixture.api.readDocument.mockImplementation(async (_view: string, path: string) => ({ path, content: '{}', revision: 'original', exists: true }));
@@ -64,4 +65,60 @@ it('releases the original settings view before switching Hosts', async () => {
   await act(async () => root.render(<McpConnectionsPage />));
   await act(async () => { await Promise.all([...fixture.blockers].map(blocker => blocker())); });
   expect(fixture.api.close).toHaveBeenCalledWith('view:1');
+});
+
+
+const server = (patch: Partial<McpConfigurationServer> = {}): McpConfigurationServer => ({ name: 'test', source: '/user/mcp.json', enabled: true, exposure: 'codemode', status: 'connected', cachedToolCount: 0, connectedToolCount: 0, holdsConnection: false, canConnect: true, canSignIn: true, signInRequired: false, canSignOut: false, ...patch });
+it('acquires a shared connection before exposing reconnect and release-this-view actions', async () => {
+  servers = [server()];
+  fixture.api.command.mockImplementation(async (view: string, _name: string, command: string) => { servers = [server({ holdsConnection: command !== 'disconnect' })]; return snapshot(view); });
+  await act(async () => root.render(<McpConnectionsPage />));
+  expect(button('settings.mcp.reconnect')).toBeUndefined(); expect(button('settings.mcp.disconnect')).toBeUndefined();
+  expect(button('settings.mcp.signOut')).toBeUndefined(); expect(button('settings.mcp.trySignIn')).toBeDefined();
+  expect(container.textContent).toContain('settings.mcp.signInDiscoveryHint');
+  await act(async () => button('settings.mcp.useConnection').click());
+  expect(fixture.api.command).toHaveBeenLastCalledWith('view:1', 'test', 'connect', expect.any(AbortSignal));
+  expect(button('settings.mcp.useConnection')).toBeUndefined(); expect(button('settings.mcp.connect')).toBeUndefined();
+  expect(container.textContent).toContain('settings.mcp.disconnectHint');
+  await act(async () => button('settings.mcp.reconnect').click());
+  expect(fixture.api.command).toHaveBeenLastCalledWith('view:1', 'test', 'reconnect', expect.any(AbortSignal));
+  await act(async () => button('settings.mcp.disconnect').click());
+  expect(fixture.api.command).toHaveBeenLastCalledWith('view:1', 'test', 'disconnect', expect.any(AbortSignal));
+  expect(button('settings.mcp.useConnection')).toBeDefined(); expect(button('settings.mcp.disconnect')).toBeUndefined();
+});
+
+it.each(['connecting', 'failed', 'disconnected'])('adapts owned connection actions to %s state', async status => {
+  servers = [server({ status, holdsConnection: true })];
+  await act(async () => root.render(<McpConnectionsPage />));
+  expect(button('settings.mcp.connect')).toBeUndefined();
+  expect(button('settings.mcp.disconnect').disabled).toBe(false);
+  if (status === 'connecting') {
+    expect(button('settings.mcp.status.connecting').disabled).toBe(true);
+    expect(button('settings.mcp.trySignIn').disabled).toBe(true);
+    expect(button('settings.mcp.reconnect')).toBeUndefined();
+  } else expect(button('settings.mcp.reconnect').disabled).toBe(false);
+});
+
+it('only exposes sign-out for an existing grant and preserves challenged sign-in recovery', async () => {
+  servers = [server({ canSignIn: false, canSignOut: true })];
+  fixture.api.command.mockImplementation(async (view: string) => { servers = [server()]; return snapshot(view); });
+  await act(async () => root.render(<McpConnectionsPage />));
+  expect(button('settings.mcp.trySignIn')).toBeUndefined(); expect(button('settings.mcp.signIn')).toBeUndefined();
+  await act(async () => button('settings.mcp.signOut').click());
+  expect(fixture.api.command).toHaveBeenLastCalledWith('view:1', 'test', 'sign-out', expect.any(AbortSignal));
+  expect(button('settings.mcp.signOut')).toBeUndefined(); expect(button('settings.mcp.trySignIn')).toBeDefined();
+  servers = [server({ status: 'needs-auth', signInRequired: true, canSignOut: true })];
+  await changeTrust(false);
+  expect(button('settings.mcp.signIn')).toBeDefined(); expect(button('settings.mcp.signOut')).toBeDefined();
+  expect(button('settings.mcp.trySignIn')).toBeUndefined();
+});
+
+
+it('blocks credential-dependent actions when credentials are unknown but can still release this view', async () => {
+  servers = [server({ holdsConnection: true, canConnect: false, canSignIn: false, canSignOut: false, error: 'MCP credentials are unavailable.' })];
+  await act(async () => root.render(<McpConnectionsPage />));
+  expect(button('settings.mcp.reconnect').disabled).toBe(true);
+  expect(button('settings.mcp.disconnect').disabled).toBe(false);
+  expect(button('settings.mcp.signIn')).toBeUndefined(); expect(button('settings.mcp.signOut')).toBeUndefined();
+  expect(container.textContent).toContain('MCP credentials are unavailable.');
 });

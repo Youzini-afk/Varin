@@ -32,11 +32,16 @@ export function createMcpSettings(options: {
       servers: loaded.servers.map(entry => {
         const state = readiness.servers.find(server => server.name === entry.name)!;
         const retained = view.connections.get(entry.name);
-        const current = retained ? options.authority.snapshot(retained.scope, retained.handle) : undefined;
+        const current = retained && !state.credentialError ? options.authority.snapshot(retained.scope, retained.handle) : undefined;
+        const signInRequired = state.status === 'needs-auth' || Object.values(state.directories ?? {}).includes('needs-auth');
+        const oauthEligible = mcpOAuthUrl(entry) !== undefined;
         return { name: entry.name, source: entry.source, ...(entry.override ? { override: entry.override } : {}), enabled: entry.config.enabled !== false,
           exposure: entry.config.exposure ?? 'codemode', status: state.status, cachedToolCount: state.cachedToolCount, connectedToolCount: state.connectedToolCount,
-          canSignIn: mcpOAuthUrl(entry) !== undefined,
-          ...(current?.error ? { error: current.error } : Object.values(state.directories ?? {}).includes('needs-auth')
+          holdsConnection: retained !== undefined, signInRequired,
+          canConnect: entry.config.enabled !== false && !state.credentialError,
+          canSignIn: oauthEligible && state.hasStoredOAuthGrant !== undefined && (!state.hasStoredOAuthGrant || signInRequired),
+          canSignOut: oauthEligible && state.hasStoredOAuthGrant === true,
+          ...(state.credentialError ? { error: state.credentialError } : current?.error ? { error: current.error } : Object.values(state.directories ?? {}).includes('needs-auth')
             ? { error: `MCP sign-in required for: ${Object.entries(state.directories ?? {}).filter(([, status]) => status === 'needs-auth').map(([kind]) => kind).join(', ')}` } : Object.values(state.directories ?? {}).includes('failed')
             ? { error: `MCP directory unavailable: ${Object.entries(state.directories ?? {}).filter(([, status]) => status === 'failed').map(([kind]) => kind).join(', ')}` } : {}) };
       }) };
@@ -109,9 +114,10 @@ export function createMcpSettings(options: {
       switch (input.command) {
         case 'connect': await waitWithSignal(connect(view, input.name), signal); break;
         case 'reconnect': {
-          const state = retained ? options.authority.snapshot(retained.scope, retained.handle) : undefined;
-          if (!retained || state?.error?.includes('revoked')) await waitWithSignal(connect(view, input.name), signal);
-          else await waitWithSignal(options.authority.reconnect(retained.scope, retained.handle), signal);
+          // Settings acts on today's definition. Existing Runs retain their original immutable lease.
+          const wasConnected = retained && options.authority.snapshot(retained.scope, retained.handle).state === 'connected';
+          const current = await waitWithSignal(connect(view, input.name), signal);
+          if (wasConnected && current.handle === retained.handle) await waitWithSignal(options.authority.reconnect(current.scope, current.handle), signal);
           break;
         }
         case 'disconnect': if (retained) { view.connections.delete(input.name); view.scopes.delete(retained.scope); options.authority.closeScope(retained.scope); } break;
@@ -123,7 +129,7 @@ export function createMcpSettings(options: {
     'authorization/start': async (input, signal) => {
       const view = requireView(input.view);
       if (typeof input.name !== 'string') throw new ModelConfigurationError('invalid-params', 'Select an MCP server');
-      const retained = view.connections.get(input.name) ?? await waitWithSignal(connect(view, input.name), signal);
+      const retained = await waitWithSignal(connect(view, input.name), signal);
       return view.flows.start(prompt => options.authority.signIn(retained.scope, retained.handle, prompt));
     },
     'authorization/read': input => requireView(input.view).flows.read(input.id as string),

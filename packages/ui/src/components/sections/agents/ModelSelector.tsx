@@ -1,4 +1,5 @@
 import React from 'react';
+import { getRuntimeEndpointGeneration, subscribeRuntimeEndpointChanged } from '@varin/application-client';
 import {
     DropdownMenu,
     DropdownMenuContent,
@@ -64,6 +65,7 @@ export const ModelSelector: React.FC<ModelSelectorProps> = ({
     variant = 'field',
 }) => {
     const { t } = useI18n();
+    const host = React.useSyncExternalStore(subscribeRuntimeEndpointChanged, getRuntimeEndpointGeneration, getRuntimeEndpointGeneration);
     const channels = useModelCatalogStore((state) => state.channels);
     const providers = React.useMemo<ModelPickerProvider[]>(
         () => channels.map(toModelPickerProvider),
@@ -101,12 +103,14 @@ export const ModelSelector: React.FC<ModelSelectorProps> = ({
     }, [isActuallyMobile, onOpenChange, open]);
 
     React.useEffect(() => {
-        if (!providersLoaded && !providersLoading && !providerError) void loadProviders().catch(() => undefined);
-    }, [loadProviders, providersLoaded, providersLoading, providerError]);
-    React.useEffect(() => subscribeVarinEvents(event => {
-        if (event.type === 'stream-ready' || event.type === 'settings-changed' && event.owner === 'agent-settings'
-            && event.ids.some(id => id === 'model-channels' || id === 'model-credentials')) void loadProviders().catch(() => undefined);
-    }), [loadProviders]);
+        // Settings hides the composer and its subscription. Revalidate retained channels
+        // whenever the picker returns, including changes missed while it was unmounted.
+        void loadProviders().catch(() => undefined);
+        return subscribeVarinEvents(event => {
+            if (event.type === 'stream-ready' || event.type === 'settings-changed' && event.owner === 'agent-settings'
+                && event.ids.some(id => id === 'model-channels' || id === 'model-credentials')) void loadProviders().catch(() => undefined);
+        });
+    }, [host, loadProviders]);
 
     const retryProviders = () => {
         if (disabled) return;

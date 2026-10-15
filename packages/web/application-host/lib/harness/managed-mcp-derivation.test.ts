@@ -120,7 +120,7 @@ function fixture() {
       const servers = names.map(name => ({ name, description: '', resourceKey: provenance.servers[name]!.resource_key,
         hasDirectTools: name === 'project', exposure: name === 'project' ? 'direct' as const : 'deferred' as const,
         configurationScope: 'project' as const, executionScope: 'workspace' as const, status: 'connected' as const,
-        cachedToolCount: 1, connectedToolCount: 1, selected: options.servers.includes(name) }));
+        cachedToolCount: 1, connectedToolCount: 1, hasStoredOAuthGrant: false, selected: options.servers.includes(name) }));
       const readiness = { configErrorCount: 0, configuredServerCount: names.length, connectedServerCount: options.servers.length,
         cachedToolCount: 1, servers };
       const revoked = new AbortController(); let released = false;

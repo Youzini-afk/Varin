@@ -34,7 +34,9 @@ enablement/exposure overrides separately. Project configuration cannot select a 
 Settings show actual source and state, save the selected original file and check its revision.
 The structured editor creates complete HTTP or stdio definitions; independent inherited overrides belong
 in `mcpPolicies` through the raw configuration editor. Closing a settings view releases only its own
-connection holders and sign-in flows. Failed or cancelled initial preparation releases the undisclosed view.
+connection holders and sign-in flows. A connected server can belong to other consumers; settings first
+acquires its own holder before offering view-local disconnect. Reconnect uses the current definition
+without retargeting other consumers' retained leases. Failed or cancelled initial preparation releases the undisclosed view.
 Malformed sources keep their last valid snapshot and report an error; invalid individual entries
 do not disable independent valid servers. Actual source removal and explicit disablement have their
 own withdrawal semantics. Reads never clear or rewrite a bad file. The common project-trust reader
@@ -101,6 +103,9 @@ describe tools; they cannot grant permission or prove that an effect is harmless
 ## Authentication, disconnect and recovery
 
 `mcp-auth.json` stores MCP OAuth separately from model accounts using the shared atomic file store.
+Settings distinguishes an observed authentication challenge from an optional OAuth discovery attempt.
+Sign-out is offered only for tokens present in the original store, including expired grants; discovery
+metadata alone is not a signed-in account. A bad credential record reports a per-server error.
 The generic OAuth flow retains issuer/resource, scopes and client identity. Normal token refresh and
 scope reordering preserve account continuity; an actual scope/account change invalidates the binding.
 Cancelling a sign-in wait closes its temporary callback listener. Model-account references resolve
