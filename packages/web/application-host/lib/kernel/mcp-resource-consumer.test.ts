@@ -52,7 +52,7 @@ function routeFixture() {
         Object.assign(facts.operation.mcp_resource_subscription!, { availability: 'closed', localReleased: true, remoteCleanup: 'unknown' });
         return structuredClone(facts.operation);
       case 'runtime.run.inspect': return facts.run;
-      case 'runtime.thread.inspect': return { thread_id: identity.threadId, observer_project_ids: [],
+      case 'runtime.thread.inspect': return { thread_id: identity.threadId, parent_thread_id: null, observer_project_ids: [],
         branches: [{ branch_id: identity.branchId, active_run_id: null, head: facts.history.at(-1)?.id ?? null, latest_run: null }] };
       case 'runtime.thread.operations.active': return facts.active ? [structuredClone(facts.operation)] : [];
       case 'runtime.status': return { eventCursor: 11 };

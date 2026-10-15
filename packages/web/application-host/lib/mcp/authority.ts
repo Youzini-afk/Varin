@@ -307,7 +307,7 @@ function freeze<T>(value: T): T {
   return value;
 }
 function publicEntry(entry: McpServerEntry): McpOwnerEntry {
-  // Transport configuration/credentials stay with their owner. Pi only needs presentation/exposure.
+  // Transport credentials stay with their owner; consumers receive presentation and exposure settings.
   const config = entry.config;
   const common = { enabled: config.enabled, exposure: config.exposure, toolExposure: config.toolExposure,
     description: config.description, timeout: config.timeout,

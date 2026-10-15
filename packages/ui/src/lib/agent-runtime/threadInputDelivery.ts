@@ -29,7 +29,8 @@ async function deliver(api: ThreadsAPI, original: ThreadPendingInput, update: (p
         update(pending);
       }
       if (pending.goalObjective) await api.goals.start({ runtime: pending.input.runtime, threadId: pending.input.threadId,
-        branchId: pending.input.branchId, runId: pending.acceptedRunId!, key: `${pending.input.key}:goal`, objective: pending.goalObjective, budget: null });
+        branchId: pending.input.branchId, runId: pending.acceptedRunId!, key: `${pending.input.key}:goal`, objective: pending.goalObjective,
+        budget: pending.goalBudget === undefined ? null : { maxOutputTokens: pending.goalBudget } });
     }
   } catch (error) {
     const rejected = original.status !== 'unknown' && !(pending.kind === 'submit' && pending.acceptedRunId)

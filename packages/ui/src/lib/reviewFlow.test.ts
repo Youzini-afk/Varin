@@ -25,7 +25,7 @@ function snapshot(identity: ThreadIdentity): ThreadSnapshot {
   const run = ownerRun(identity, 'run:previous');
   return { identity, eventCursor: 0, thread: { thread_id: identity.threadId, main_branch_id: identity.branchId,
     title: '', revision: 1, created_at_ms: 0, updated_at_ms: 0, pinned: false, archived: false, deleted_at_ms: null,
-    activity_cursor: 0, read_cursor: 0, unread: false, bot_id: null, observer_project_ids: [],
+    activity_cursor: 0, read_cursor: 0, unread: false, bot_id: null, parent_thread_id: null, observer_project_ids: [],
     branches: [{ branch_id: identity.branchId, head: null, active_run_id: null, latest_run: run }] },
     activeRun: null, history: [], historyPage: { head: null, previous: null }, inputs: [], operations: [], followups: [], goals: [],
     launch: { run_id: run.id, selection: { source, tools: [{ name: 'file_read', requirements: { source: 'source', process: false } }] } } as ThreadSnapshot['launch'],

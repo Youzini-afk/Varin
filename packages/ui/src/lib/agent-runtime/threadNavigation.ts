@@ -46,6 +46,7 @@ export async function startThreadFromNavigation(target: { directory?: string | n
   current();
   const identity = await useThreadStore.getState().createThread({ workspacePath: target.directory ?? useDirectoryStore.getState().currentDirectory });
   if (host !== getRuntimeEndpointGeneration() || request !== navigation) throw new Error('Application Host changed during conversation creation');
+  if (target.directory) useDirectoryStore.getState().setDirectory(target.directory);
   useUIStore.getState().setActiveMainTab('chat');
   useUIStore.getState().closeMainSurfaces();
   return identity;

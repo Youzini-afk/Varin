@@ -43,7 +43,7 @@ import { truncatePathMiddle } from '@/lib/utils';
 import { useI18n } from '@/lib/i18n';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { buildCommandPaletteFileSearchKey, scoreCommandPaletteFiles } from './commandPaletteFilesState';
-import { sortThreads } from '@/components/thread/ThreadSidebar';
+import { sortThreads } from '@/lib/agent-runtime/thread-tree';
 import {
   openThreadFromNavigation,
   startThreadFromNavigation,

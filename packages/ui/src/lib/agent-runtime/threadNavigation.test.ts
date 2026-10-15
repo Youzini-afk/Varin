@@ -15,7 +15,7 @@ vi.mock('@/lib/extensions/workbench-shell-transition', () => ({ selectActiveWork
 vi.mock('@/lib/extensions/surface-runtime', () => ({ varinSurfaceRuntime: { surface: 'web' } }));
 vi.mock('@/stores/useDirectoryStore', () => ({ useDirectoryStore: { getState: () => ({ setDirectory: state.directory }) } }));
 const summary = (id: string, botId: string | null): ThreadSummary => ({ thread_id: id, main_branch_id: `${id}:main`, title: id, revision: 1, created_at_ms: 0, updated_at_ms: 0,
-  pinned: false, archived: false, deleted_at_ms: null, activity_cursor: 0, read_cursor: 0, unread: false, bot_id: botId, observer_project_ids: [],
+  pinned: false, archived: false, deleted_at_ms: null, activity_cursor: 0, read_cursor: 0, unread: false, bot_id: botId, parent_thread_id: null, observer_project_ids: [],
   branches: ['main', 'review'].map(branch => ({ branch_id: `${id}:${branch}`, head: null, active_run_id: null, latest_run: null })) });
 const bot: BotSummary = { id: 'bot-owner', name: 'Bot', entry: { runtime: 'agent', threadId: 'root', branchId: 'root:main' }, archived: false, homeDir: '/bots/owner', coordinatorHostId: 'host', instructions: null, model: null, createdAt: '', updatedAt: '' };
 let unbind: (() => void) | undefined;

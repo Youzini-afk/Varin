@@ -36,7 +36,7 @@ function fixture() {
   const validateLive = vi.fn(async () => { if (facts.liveInvalid) throw new Error('Original live root changed'); });
   const requests = vi.fn(async (method: string, params: Record<string, unknown>, _signal?: AbortSignal): Promise<unknown> => {
     switch (method) {
-      case 'runtime.thread.inspect': return { thread_id: params.threadId, observer_project_ids: [], branches: [
+      case 'runtime.thread.inspect': return { thread_id: params.threadId, parent_thread_id: null, observer_project_ids: [], branches: [
         { branch_id: identity.branchId, active_run_id: null, head: null, latest_run: null },
         { branch_id: 'branch:other', active_run_id: null, head: null, latest_run: null },
       ] };

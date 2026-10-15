@@ -4,6 +4,29 @@ import type { Express, Request, RequestHandler, Response } from 'express';
 import { expect, it } from 'vitest';
 import { registerVarinEventRoutes } from '../scheduled-tasks/routes.js';
 import { createClientSurfaceBridge, type ThreadSelection } from './client-surfaces.js';
+import express from 'express';
+import { createServer } from 'node:http';
+import { once } from 'node:events';
+import { registerCommonRequestMiddleware } from '../platform/core-routes.js';
+
+it('accepts a JSON Surface binding through the production request middleware', async () => {
+  const app = express();
+  registerCommonRequestMiddleware(app, { express });
+  const bridge = createClientSurfaceBridge({ writeSseEvent() {} });
+  const selections: ThreadSelection[] = [];
+  registerVarinEventRoutes(app, { getVarinEventClients: () => new Set(), writeSseEvent() {}, surfaceBridge: bridge,
+    requireAuth: (request, _response, next) => { request.varinAuth = { type: 'client', clientId: 'principal' } as Request['varinAuth']; next(); },
+    resolveSurfaceThread: async selection => { selections.push(selection); return true; } });
+  const server = createServer(app); server.listen(0, '127.0.0.1'); await once(server, 'listening');
+  try {
+    const response = await fetch(`http://127.0.0.1:${(server.address() as { port: number }).port}/api/varin/client-settings/bind`, {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ threadId: 'thread', branchId: 'branch', surfaceId: 'surface' }),
+    });
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ ok: true, threadId: 'thread', branchId: 'branch' });
+    expect(selections).toEqual([{ threadId: 'thread', branchId: 'branch' }]);
+  } finally { server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve())); }
+});
 
 function fixture(resolveSurfaceThread: (identity: ThreadSelection) => Promise<boolean>) {
   const clients = new Set<Response>();

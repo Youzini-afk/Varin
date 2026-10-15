@@ -170,7 +170,7 @@ export const getActiveEmbeddedSessionChatTab = <T extends { id: string }>(
 
 /**
  * True when the current document is the embedded session-chat iframe
- * (`?piPanel=session-chat`). Used to distinguish the embedded iframe from
+ * (`?panel=session-chat`). Used to distinguish the embedded iframe from
  * the main app so callers can route behavior accordingly (e.g. in-place
  * subtask navigation instead of opening a new side-panel tab, or skipping
  * URL rewrites that would strip the iframe's identity params).
@@ -209,7 +209,7 @@ export const resetEmbeddedSessionChatCache = (): void => {
 
 /**
  * The session ID recorded in the embedded iframe's URL
- * (`?piPanel=session-chat&piSessionId=…`), i.e. the session the panel was
+ * (`?panel=session-chat&threadId=…`), i.e. the session the panel was
  * opened to show. Returns `null` outside the embedded iframe or when the
  * URL is malformed.
  */

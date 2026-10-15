@@ -1,4 +1,5 @@
 import React from 'react';
+import { RiLoader4Line } from '@remixicon/react';
 import { Button } from '@/components/ui/button';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import { isDesktopShell, restartDesktopApp } from '@/lib/desktop';
@@ -34,21 +35,27 @@ export function LocalRuntimeCard({ onContinue }: { onContinue: () => Promise<voi
   }, [attempt, threads]);
   const proceed = async () => {
     setContinuing(true);
+    setError(null);
     try { await onContinue(); }
     catch (reason) { setError(reason instanceof Error ? reason.message : String(reason)); }
     finally { setContinuing(false); }
   };
   return <div className="app-region-no-drag space-y-4">
-    <div role="status" aria-live="polite" className="rounded-xl border border-border bg-background/50 p-4">
-      <p className="typography-ui-label font-medium">{t(`onboarding.native.${status}`)}</p>
-      {error ? <p className="mt-2 break-words typography-meta text-destructive">{error}</p> : null}
-    </div>
-    <div className="flex gap-2">
-      {status === 'ready' ? <Button data-native-local-runtime-continue="true" disabled={continuing} onClick={() => void proceed()}>{t('onboarding.native.continue')}</Button> : null}
-      {status === 'failed' ? <>
-        <Button variant="outline" onClick={() => setAttempt((value) => value + 1)}>{t('onboarding.native.retry')}</Button>
-        {isDesktopShell() ? <Button onClick={() => void restartDesktopApp().catch((reason) => setError(String(reason)))}>{t('onboarding.native.restart')}</Button> : null}
-      </> : null}
-    </div>
+    <Button
+      className="w-full"
+      size="lg"
+      data-native-local-runtime-continue="true"
+      disabled={status !== 'ready' || continuing}
+      aria-busy={status === 'checking' || continuing}
+      onClick={() => void proceed()}
+    >
+      {status === 'checking' || continuing ? <RiLoader4Line className="animate-spin" aria-hidden="true" /> : null}
+      {t('onboarding.local.continue')}
+    </Button>
+    {error ? <p role="alert" className="break-words typography-meta text-destructive">{error}</p> : null}
+    {status === 'failed' ? <div className="flex gap-2">
+      <Button variant="outline" onClick={() => setAttempt((value) => value + 1)}>{t('onboarding.local.retry')}</Button>
+      {isDesktopShell() ? <Button onClick={() => void restartDesktopApp().catch((reason) => setError(String(reason)))}>{t('onboarding.local.restart')}</Button> : null}
+    </div> : null}
   </div>;
 }

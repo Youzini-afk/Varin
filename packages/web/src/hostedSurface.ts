@@ -22,7 +22,7 @@ export const detectHostedSurface = ({
 }: HostedSurfaceDetectionInput): HostedSurface => {
   const params = new URLSearchParams(search);
 
-  if (params.get('piPanel') === EMBEDDED_SESSION_CHAT_PANEL) {
+  if (params.get('panel') === EMBEDDED_SESSION_CHAT_PANEL) {
     return 'desktop';
   }
 

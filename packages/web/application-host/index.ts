@@ -1963,6 +1963,10 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       onError: () => console.error('[Thread] Original process terminal requires attention'),
     }), createChildProfilePreparer({ models: modelAuthority,
       settings: () => modelsService.readGlobalInferenceSettings(),
+      projectWorkFocus: async projectId => {
+        const focus = (sanitizeProjects((await readSettingsFromDisk()).projects) ?? []).find(project => project.id === projectId)?.defaultWorkFocus;
+        return focus === 'code' || focus === 'research' ? focus : undefined;
+      },
       capabilities: signal => agentRuntime.childCapabilities(signal),
     }));
   const sourceDirectory = createThreadSourceDirectory({ documents: documentsAuthority, remote: managedSourceConsumers.threads });
@@ -2031,8 +2035,9 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     await targetRecovery.resolveFileResources(identity) ?? localRecoveryFileResolver(identity));
   threads.bindRecoveryReader(async identity => {
     try {
-    const sources = await agentRuntime.recoveryWorkspaces(identity);
-    const receipt = await agentRuntime.navigationReceipt(identity);
+    const branch = { threadId: identity.threadId, branchId: identity.branchId };
+    const sources = await agentRuntime.recoveryWorkspaces(branch);
+    const receipt = await agentRuntime.navigationReceipt(branch);
     const workspaces = [...new Set([recoveryCoordinatorWorkspace,
       ...sources.filter(source => source.resource_owner.kind === 'local').map(source => source.workspace_id)])];
     const operations = (await Promise.all(workspaces.map(async workspaceId => {

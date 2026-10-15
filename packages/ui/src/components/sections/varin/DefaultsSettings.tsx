@@ -9,6 +9,7 @@ import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { useUIStore } from '@/stores/useUIStore';
 import { useI18n } from '@/lib/i18n';
 import { Button } from '@/components/ui/button';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 
 export const DefaultsSettings: React.FC = () => {
   const { t } = useI18n();
@@ -48,18 +49,22 @@ export const DefaultsSettings: React.FC = () => {
   return <SettingsSection title={t('settings.varin.defaults.title')} divider={false}>
     <ProjectTrustSettings />
     {error && <p role="alert" className="text-destructive text-sm">{error} <Button variant="ghost" onClick={() => void reload()}>{t('assistant.reload')}</Button></p>}
-    <SettingsFieldRow label="Settings scope"><select value={scope} disabled={saving} onChange={event => setScope(event.target.value as 'global' | 'project')}>
-      <option value="global">Global</option><option value="project" disabled={!snapshot?.projectTrusted}>Project</option>
-    </select></SettingsFieldRow>
-    <SettingsFieldRow label="Conversation model"><ModelSelector providerId={string(settings.defaultProvider)} modelId={string(settings.defaultModel)} disabled={!snapshot || saving}
+    <SettingsFieldRow label={t('assistant.scope')}><Select value={scope} disabled={saving} onValueChange={value => setScope(value as 'global' | 'project')}>
+      <SelectTrigger className="w-48"><SelectValue /></SelectTrigger><SelectContent>
+        <SelectItem value="global">{t('assistant.scope.global')}</SelectItem><SelectItem value="project" disabled={!snapshot?.projectTrusted}>{t('assistant.scope.project')}</SelectItem>
+      </SelectContent>
+    </Select></SettingsFieldRow>
+    <SettingsFieldRow label={t('settings.varin.agents.detail.model')}><ModelSelector providerId={string(settings.defaultProvider)} modelId={string(settings.defaultModel)} disabled={!snapshot || saving}
       onChange={(providerId, modelId) => save(providerId && modelId ? { defaultProvider: providerId, defaultModel: modelId } : {}, providerId && modelId ? [] : ['defaultProvider', 'defaultModel'])} /></SettingsFieldRow>
-    <SettingsFieldRow label="Thinking level"><select value={string(settings.defaultThinkingLevel)} disabled={!snapshot || saving} onChange={event => void save(event.target.value ? { defaultThinkingLevel: event.target.value } : {}, event.target.value ? [] : ['defaultThinkingLevel'])}>
-      <option value="">Inherit</option>{['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'].map(level => <option key={level}>{level}</option>)}
-    </select></SettingsFieldRow>
-    {scope === 'global' && (['utilityModel', 'walkthroughModel'] as const).map(key => <SettingsFieldRow key={key} label={key === 'utilityModel' ? 'Utility model' : 'Walkthrough model'}>
-      <ModelSelector {...model(settings[key])} disabled={!snapshot || saving} placeholder="Use configured conversation model"
+    <SettingsFieldRow label={t('settings.varin.agents.detail.thinking')}><Select value={string(settings.defaultThinkingLevel) || 'inherit'} disabled={!snapshot || saving} onValueChange={value => void save(value !== 'inherit' ? { defaultThinkingLevel: value } : {}, value !== 'inherit' ? [] : ['defaultThinkingLevel'])}>
+      <SelectTrigger className="w-48"><SelectValue /></SelectTrigger><SelectContent>
+        <SelectItem value="inherit">{t('chat.modelControls.default')}</SelectItem>{(['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'] as const).map(level => <SelectItem key={level} value={level}>{t(`settings.agents.thinking.${level}`)}</SelectItem>)}
+      </SelectContent>
+    </Select></SettingsFieldRow>
+    {scope === 'global' && (['utilityModel', 'walkthroughModel'] as const).map(key => <SettingsFieldRow key={key} label={t(`thread.settings.${key}`)}>
+      <ModelSelector {...model(settings[key])} disabled={!snapshot || saving} placeholder={t('settings.bots.model.inherit')}
         onChange={(providerId, modelId) => save(providerId && modelId ? { [key]: { providerId, modelId } } : {}, providerId && modelId ? [] : [key])} />
     </SettingsFieldRow>)}
-    <SettingsCheckboxRow checked={showDeletionDialog} onChange={setShowDeletionDialog} label="Confirm conversation deletion" />
+    <SettingsCheckboxRow checked={showDeletionDialog} onChange={setShowDeletionDialog} label={t('thread.settings.confirmDelete')} />
   </SettingsSection>;
 };

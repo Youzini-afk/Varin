@@ -5,6 +5,7 @@ import fsp from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { spawn, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import { VARIN_WORKSPACE_RECOVERY_SERVICE_ID, VARIN_WORKSPACE_RECOVERY_SERVICE_VERSION } from '../../extension-contract/dist/index.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -263,8 +264,8 @@ const runPackagedRecoverySmoke = async (baseUrl) => {
   const payload = await postJson(baseUrl, '/api/varin/extensions/v1/services/invoke', {
     args: [],
     method: 'listStorageWorkspaces',
-    serviceId: 'varin.workspace-recovery',
-    version: 5,
+    serviceId: VARIN_WORKSPACE_RECOVERY_SERVICE_ID,
+    version: VARIN_WORKSPACE_RECOVERY_SERVICE_VERSION,
   }, 'Packaged built-in recovery inventory');
   const result = payload?.result;
   if (result?.status !== 'ready' || !Array.isArray(result.workspaces)) {

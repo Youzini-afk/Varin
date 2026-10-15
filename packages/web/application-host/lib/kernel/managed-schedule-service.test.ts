@@ -260,7 +260,7 @@ it('reconciles only original unknown unstopped schedule calls with their saved e
   const signal = new AbortController().signal;
   const request = vi.fn(async (method: string, params: unknown, observedSignal: AbortSignal) => {
     expect(observedSignal).toBe(signal);
-    if (method === 'runtime.thread.list') return [{ thread_id: 'original-thread', branches: [], observer_project_ids: [] }];
+    if (method === 'runtime.thread.list') return [{ thread_id: 'original-thread', branches: [], parent_thread_id: null, observer_project_ids: [] }];
     if (method === 'runtime.thread.operations.active') {
       expect(params).toEqual({ threadId: 'original-thread' });
       return [original,

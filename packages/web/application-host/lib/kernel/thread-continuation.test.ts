@@ -36,8 +36,8 @@ function fixture(prepareContext?: ContextPreparer) {
     run: vi.fn(async () => structuredClone(run)), launch: vi.fn(async () => structuredClone(launch)),
     childExecutions: vi.fn(async () => [] as import('./protocol.generated.js').DelegatedExecution[]),
     pendingLaunches: vi.fn(async () => [structuredClone(launch)]), childForThread: vi.fn(async () => null),
-    threads: vi.fn(async () => [{ thread_id: identity.threadId, observer_project_ids: [], branches: [{ branch_id: identity.branchId, active_run_id: run.id, head: null, latest_run: run }] }]),
-    thread: vi.fn(async () => ({ thread_id: identity.threadId, observer_project_ids: [], branches: [{ branch_id: identity.branchId, active_run_id: run.id, head: null, latest_run: run }] })),
+    threads: vi.fn(async () => [{ thread_id: identity.threadId, parent_thread_id: null, observer_project_ids: [], branches: [{ branch_id: identity.branchId, active_run_id: run.id, head: null, latest_run: run }] }]),
+    thread: vi.fn(async () => ({ thread_id: identity.threadId, parent_thread_id: null, observer_project_ids: [], branches: [{ branch_id: identity.branchId, active_run_id: run.id, head: null, latest_run: run }] })),
     modelSelections: vi.fn(async () => ({ desired: null, active: null })),
     resumeRun: vi.fn(async (runId: string, waitId: string) => {
       if (runId !== run.id || waitId !== receipt.wait_id) throw new Error('Not the recorded pause command');

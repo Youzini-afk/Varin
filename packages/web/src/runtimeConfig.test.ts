@@ -77,7 +77,7 @@ describe('readRuntimeBootstrapConfig', () => {
     const parent = makeWindow();
     parent.__VARIN_API_BASE_URL__ = 'https://remote.example.com';
     parent.__VARIN_CLIENT_TOKEN__ = 'remote-token';
-    const child = makeWindow('?piPanel=session-chat&piSessionId=ses_child');
+    const child = makeWindow('?panel=session-chat&threadId=ses_child');
     child.parent = parent;
     installWindow(child);
 

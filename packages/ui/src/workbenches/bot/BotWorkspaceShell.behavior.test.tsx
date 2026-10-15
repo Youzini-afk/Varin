@@ -195,7 +195,7 @@ describe('Bot mode navigation', () => {
     const child = { runtime: 'agent' as const, threadId: 'child-work', branchId: 'child-branch' };
     state.list.mockResolvedValue([native]); state.ensure.mockResolvedValue({ bot: native, entry, model: null });
     state.work.mockResolvedValue([{ runtime: 'agent', identity: child, purpose: 'work', activeRun: null,
-      thread: { thread_id: child.threadId, main_branch_id: child.branchId, title: child.threadId, revision: 1, created_at_ms: 0, updated_at_ms: 0, pinned: false, archived: false, deleted_at_ms: null, activity_cursor: 0, read_cursor: 0, unread: false, bot_id: native.id, observer_project_ids: [null], branches: [{ branch_id: child.branchId, head: null, active_run_id: null, latest_run: null }] } }]);
+      thread: { thread_id: child.threadId, main_branch_id: child.branchId, title: child.threadId, revision: 1, created_at_ms: 0, updated_at_ms: 0, pinned: false, archived: false, deleted_at_ms: null, activity_cursor: 0, read_cursor: 0, unread: false, bot_id: native.id, parent_thread_id: null, observer_project_ids: [null], branches: [{ branch_id: child.branchId, head: null, active_run_id: null, latest_run: null }] } }]);
     await render();
     expect(container.querySelector('[data-agent]')?.getAttribute('data-agent')).toBe('root-work');
     const updated = { ...native, model: { providerId: 'changed-provider', modelId: 'changed-model' } };
@@ -222,7 +222,7 @@ describe('Bot mode navigation', () => {
     await render();
     expect(container.querySelector('[data-agent]')?.getAttribute('data-agent')).toBe('entry-a');
     state.ensure.mockClear();
-    useThreadStore.setState({ threads: [{ thread_id: 'archived-work', main_branch_id: 'main', title: 'Work', revision: 1, created_at_ms: 0, updated_at_ms: 0, pinned: false, archived: false, deleted_at_ms: null, activity_cursor: 0, read_cursor: 0, unread: false, bot_id: 'b', observer_project_ids: [], branches: [{ branch_id: 'review-branch', head: null, active_run_id: null, latest_run: null }] }] });
+    useThreadStore.setState({ threads: [{ thread_id: 'archived-work', main_branch_id: 'main', title: 'Work', revision: 1, created_at_ms: 0, updated_at_ms: 0, pinned: false, archived: false, deleted_at_ms: null, activity_cursor: 0, read_cursor: 0, unread: false, bot_id: 'b', parent_thread_id: null, observer_project_ids: [], branches: [{ branch_id: 'review-branch', head: null, active_run_id: null, latest_run: null }] }] });
     await act(async () => useBotNavigation.setState({ botId: 'b', entry: { runtime: 'agent', threadId: 'archived-work', branchId: 'review-branch' }, archived: true, model: null }));
     expect(container.querySelector('[data-agent]')?.getAttribute('data-agent')).toBe('archived-work');
     expect(container.querySelector('[data-agent]')?.getAttribute('data-branch')).toBe('review-branch');

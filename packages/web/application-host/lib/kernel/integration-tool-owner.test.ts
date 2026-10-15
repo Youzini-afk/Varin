@@ -260,7 +260,7 @@ it('receipt discovery reconciles only the original unknown external Integration 
   // A launch/source admission query would encounter the actual absent directory and fail.
   const request = vi.fn(async (method: string, params: unknown, observedSignal: AbortSignal) => {
     expect(observedSignal).toBe(signal);
-    if (method === 'runtime.thread.list') return [{ thread_id: 'original-parent-thread', branches: [], observer_project_ids: [] }];
+    if (method === 'runtime.thread.list') return [{ thread_id: 'original-parent-thread', branches: [], parent_thread_id: null, observer_project_ids: [] }];
     if (method === 'runtime.thread.operations.active') {
       expect(params).toEqual({ threadId: 'original-parent-thread' });
       return [original,

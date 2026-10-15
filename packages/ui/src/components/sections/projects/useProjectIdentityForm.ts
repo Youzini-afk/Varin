@@ -1,6 +1,5 @@
 import React from 'react';
 import { toast } from '@/components/ui';
-import { parseModelIdentifier } from '@/lib/modelIdentifier';
 import { useI18n } from '@/lib/i18n';
 import type { ProjectEntry } from '@varin/application-client';
 import type { WorkFocusId } from '@varin/protocol';
@@ -24,13 +23,12 @@ export type ProjectIdentitySaveData = {
   icon: string | null;
   color: string | null;
   iconBackground: string | null;
-  defaultModel: string | null;
   defaultWorkFocus: WorkFocusId;
 };
 
 type EditableProject = Pick<
   ProjectEntry,
-  'id' | 'label' | 'icon' | 'color' | 'iconBackground' | 'defaultModel' | 'defaultWorkFocus' | 'iconImage' | 'path'
+  'id' | 'label' | 'icon' | 'color' | 'iconBackground' | 'defaultWorkFocus' | 'iconImage' | 'path'
 >;
 
 export const useProjectIdentityForm = (project: EditableProject | null) => {
@@ -46,7 +44,6 @@ export const useProjectIdentityForm = (project: EditableProject | null) => {
   const [icon, setIcon] = React.useState<string | null>(null);
   const [color, setColor] = React.useState<string | null>(null);
   const [iconBackground, setIconBackground] = React.useState<string | null>(null);
-  const [defaultModel, setDefaultModel] = React.useState<string | undefined>(undefined);
   const [defaultWorkFocus, setDefaultWorkFocus] = React.useState<WorkFocusId>('code');
   const [isUploadingIcon, setIsUploadingIcon] = React.useState(false);
   const [isRemovingCustomIcon, setIsRemovingCustomIcon] = React.useState(false);
@@ -72,7 +69,6 @@ export const useProjectIdentityForm = (project: EditableProject | null) => {
   const savedIcon = project?.icon ?? null;
   const savedColor = project?.color ?? null;
   const savedBackground = project?.iconBackground ?? null;
-  const savedModel = project?.defaultModel;
   const savedFocus = project?.defaultWorkFocus ?? 'code';
 
   React.useEffect(() => {
@@ -80,23 +76,17 @@ export const useProjectIdentityForm = (project: EditableProject | null) => {
     setIcon(savedIcon);
     setColor(savedColor);
     setIconBackground(savedBackground);
-    setDefaultModel(savedModel);
     setDefaultWorkFocus(savedFocus);
     setPendingRemoveImageIcon(false);
     clearPendingUploadIcon();
     setPreviewImageFailed(false);
-  }, [projectId, savedName, savedIcon, savedColor, savedBackground, savedModel, savedFocus, clearPendingUploadIcon]);
+  }, [projectId, savedName, savedIcon, savedColor, savedBackground, savedFocus, clearPendingUploadIcon]);
 
   React.useEffect(() => {
     return () => {
       clearPendingUploadIcon();
     };
   }, [clearPendingUploadIcon]);
-
-  const parsedDefaultModel = React.useMemo(() => {
-    const parsed = parseModelIdentifier(defaultModel);
-    return parsed ?? { providerId: '', modelId: '' };
-  }, [defaultModel]);
 
   const hasStoredImageIcon = Boolean(project?.iconImage);
   const hasPendingUploadImageIcon = Boolean(pendingUploadIconFile && pendingUploadIconPreviewUrl);
@@ -111,15 +101,10 @@ export const useProjectIdentityForm = (project: EditableProject | null) => {
     || icon !== (project?.icon ?? null)
     || color !== (project?.color ?? null)
     || iconBackground !== (project?.iconBackground ?? null)
-    || (defaultModel ?? undefined) !== (project?.defaultModel ?? undefined)
     || defaultWorkFocus !== (project?.defaultWorkFocus ?? 'code')
     || pendingRemoveImageIcon
     || Boolean(pendingUploadIconFile)
   );
-
-  const handleDefaultModelChange = React.useCallback((providerId: string, modelId: string) => {
-    setDefaultModel(providerId && modelId ? `${providerId}/${modelId}` : undefined);
-  }, []);
 
   const handleUploadIcon = React.useCallback((file: File | null) => {
     if (!project || !file || isUploadingIcon) {
@@ -234,13 +219,11 @@ export const useProjectIdentityForm = (project: EditableProject | null) => {
       icon,
       color,
       iconBackground: normalizeProjectIconBackground(willRemoveImageIcon ? null : iconBackground),
-      defaultModel: defaultModel ?? null,
       defaultWorkFocus,
     };
   }, [
     clearPendingUploadIcon,
     color,
-    defaultModel,
     defaultWorkFocus,
     icon,
     iconBackground,
@@ -266,11 +249,8 @@ export const useProjectIdentityForm = (project: EditableProject | null) => {
     setColor,
     iconBackground,
     setIconBackground,
-    defaultModel,
-    parsedDefaultModel,
     defaultWorkFocus,
     setDefaultWorkFocus,
-    handleDefaultModelChange,
     isUploadingIcon,
     isRemovingCustomIcon,
     isDiscoveringIcon,

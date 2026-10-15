@@ -12,6 +12,8 @@ import { waitForModelBinding } from './model-binding-lifetime.js';
 export interface ChildProfileInput {
   parent: ChildModelBinding;
   workFocus?: WorkFocusId;
+  /** Project already admitted by the Thread context owner. */
+  projectId?: string | null;
   /** The original parent selection retains implementations referenced by its frozen child catalog. */
   modelOwner?: ExistingHostCredentialOwner;
 }
@@ -27,6 +29,7 @@ const unavailable = (code: string, capabilities: string[] = []): ChildCapability
 export function createChildProfilePreparer(owners: {
   /** The existing global SettingsManager snapshot, never project overrides or a Pi Session. */
   settings(): Promise<unknown>;
+  projectWorkFocus?(projectId: string): Promise<WorkFocusId | undefined>;
   capabilities(signal?: AbortSignal): Promise<ChildCapabilityDescriptor[]>;
   models: ThreadModelAuthority;
 }): ChildProfilePreparer {
@@ -47,7 +50,9 @@ export function createChildProfilePreparer(owners: {
     const parent = input.parent;
     const catalogModelId = (parent.configuration.modelOptions as { catalogModelId?: string } | undefined)?.catalogModelId ?? parent.configuration.model;
     const main = parent.configuration.providerId ? { providerId: parent.configuration.providerId, modelId: catalogModelId } : null;
-    const observations = observePresets(settings.models, main, settings.agents, input.workFocus, 'agent', agentPresetTools(descriptors));
+    const focus = input.workFocus ?? (input.projectId ? await owners.projectWorkFocus?.(input.projectId) : undefined);
+    signal?.throwIfAborted();
+    const observations = observePresets(settings.models, main, settings.agents, focus, 'agent', agentPresetTools(descriptors));
     const presets = await Promise.all(observations.map(async (entry): Promise<ChildPreset> => {
       const definition = entry.definition;
       const toolsSource = definition.slot
@@ -56,7 +61,6 @@ export function createChildProfilePreparer(owners: {
       const profile: ChildPreset = { id: entry.id, name: definition.name ?? entry.id, instructions: definition.systemPromptFragment,
         tools: [...definition.tools], tools_source: toolsSource === 'default' ? 'default' : 'explicit', work_mode: definition.worktree === 'isolated' ? 'isolated_write' : 'read_only',
         model_source: entry.modelSource, model: null, inherit_base: null, unavailable: null };
-      if (!input.workFocus && definition.workFocus?.length) { profile.unavailable = unavailable('child-profile-scope_unavailable'); return profile; }
       if (entry.availability !== 'available') { profile.unavailable = unavailable(`child-profile-${entry.availability}`); return profile; }
       // Host service capabilities are resolved only against the actual frozen Run directory.
       const overrides = definition.modelSettings;

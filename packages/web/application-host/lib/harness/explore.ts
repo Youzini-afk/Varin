@@ -1305,7 +1305,7 @@ export interface ExploreQueryRun {
 }
 
 /**
- * Deterministic retrieval only. Models and credentials belong to the pi-host coordinator.
+ * Deterministic retrieval only. Models and credentials belong to the Run's retrieval owner.
  * Every emitted excerpt comes from a successfully read, versioned Document snapshot.
  */
 export function createExploreQueryRun(

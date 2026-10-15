@@ -85,7 +85,7 @@ function fixture(selected: LaunchSource) {
     return { main_branch_id: identity.branchId, title: 'Original thread', revision: 1, created_at_ms: 0, updated_at_ms: 0,
       pinned: false, archived: false, deleted_at_ms: null, activity_cursor: 0, read_cursor: 0, unread: false,
       bot_id: null, thread_id: identity.threadId, branches: [{ branch_id: identity.branchId, head: null, active_run_id: null, latest_run: null }],
-      observer_project_ids: [] } satisfies ThreadSummary;
+      parent_thread_id: null, observer_project_ids: [] } satisfies ThreadSummary;
   } };
   return { kernel, runtime, binds, releases, registered, identities, preparations, prepared, inspected, inspection,
     register: (signal?: AbortSignal) => registerThreadFollowup(publicOwner, input, signal),

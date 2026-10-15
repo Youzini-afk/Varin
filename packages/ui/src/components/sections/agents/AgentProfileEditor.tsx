@@ -10,7 +10,6 @@ import { SettingsSection, SettingsStackedField, SettingsTwoColumn } from '@/comp
 import { useI18n } from '@/lib/i18n';
 import { reportSettingsSaveState } from '@/lib/persistence';
 import { ModelSelector } from './ModelSelector';
-import { AgentRuntimeModelSelector } from './AgentRuntimeModelSelector';
 import { agentProfileLabels, agentProfileDefaultLabels } from './agent-profile-presentation';
 import { agentProfileDrafts, agentProfileSaveRequest, makeAgentProfileDraft, type AgentProfileDraft } from './agent-profile-draft';
 
@@ -89,8 +88,7 @@ export function AgentProfileEditor({ profile, snapshot, host, cwd, onSave, onCan
     </SettingsSection>
     <SettingsSection title={t('settings.agents.page.section.modelParameters')} contentClassName="space-y-5">
       <SettingsStackedField label={t('settings.varin.agents.detail.model')}>
-        {snapshot.runtime === 'agent' ? <AgentRuntimeModelSelector host={host} providerId={draft.providerId} modelId={draft.modelId} disabled={busy} placeholder={emptyModelLabel} onChange={(providerId, modelId) => update({ providerId, modelId })} />
-          : <ModelSelector cwd={cwd} providerId={draft.providerId} modelId={draft.modelId} allowNone disabled={busy} placeholder={emptyModelLabel} defaultSelectionLabel={emptyModelLabel} className="w-full max-w-none" onChange={(providerId, modelId) => update({ providerId, modelId })} />}
+        <ModelSelector cwd={cwd} providerId={draft.providerId} modelId={draft.modelId} allowNone disabled={busy} placeholder={emptyModelLabel} defaultSelectionLabel={emptyModelLabel} className="w-full max-w-none" onChange={(providerId, modelId) => update({ providerId, modelId })} />
       </SettingsStackedField>
       <SettingsTwoColumn>
         <SettingsStackedField label={t('settings.agents.page.field.temperature')} info={t('settings.agents.page.field.temperatureTooltip')}>

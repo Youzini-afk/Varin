@@ -19,7 +19,6 @@ export const useProjectIdentityAutoSave = (
     icon,
     color,
     iconBackground,
-    defaultModel,
     defaultWorkFocus,
     pendingRemoveImageIcon,
     pendingUploadIconFile,
@@ -61,7 +60,6 @@ export const useProjectIdentityAutoSave = (
     };
   }, [
     color,
-    defaultModel,
     defaultWorkFocus,
     hasChanges,
     icon,

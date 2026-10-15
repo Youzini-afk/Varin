@@ -9,7 +9,7 @@ const bot: BotSummary = { id: 'bot', name: 'Bot', instructions: null, model: nul
 function fixture() {
   const create = vi.fn(async () => bot); const update = vi.fn(async () => bot);
   const ensureEntry = vi.fn(async () => ({ bot, entry, model: null }));
-  const listWork = vi.fn(async () => [{ runtime: 'agent', identity: entry, thread: { thread_id: entry.threadId, bot_id: bot.id, branches: [], observer_project_ids: [null] }, activeRun: null, purpose: 'work' }]);
+  const listWork = vi.fn(async () => [{ runtime: 'agent', identity: entry, thread: { thread_id: entry.threadId, bot_id: bot.id, branches: [], parent_thread_id: null, observer_project_ids: [null] }, activeRun: null, purpose: 'work' }]);
   const router = Router();
   const directRouter = router as unknown as { handle(request: Request, response: Response, next: NextFunction): void };
   registerBotRoutes(router as unknown as Express, { bots: { create, update, ensureEntry, get: async () => bot, listWork } as unknown as BotService });

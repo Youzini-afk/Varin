@@ -22,7 +22,7 @@ vi.mock('@/hooks/useRuntimeAPIs', () => { const apis = { threads: { snapshot: as
 } } }) } }; return { useRuntimeAPIs: () => apis }; });
 vi.mock('@/stores/useThreadStore', () => ({ useThreadStore: (select: (value: unknown) => unknown) => select({
   selectedIdentity: { runtime: 'agent', threadId: 'thread:chat', branchId: 'branch:chat' },
-  threads: [{ thread_id: 'thread:chat', title: 'Current task', bot_id: null, observer_project_ids: ['project-a'], branches: [{ branch_id: 'branch:chat' }] }],
+  threads: [{ thread_id: 'thread:chat', title: 'Current task', bot_id: null, parent_thread_id: null, observer_project_ids: ['project-a'], branches: [{ branch_id: 'branch:chat' }] }],
 }) }));
 vi.mock('@/stores/useProjectsStore', () => ({ useProjectsStore: (select: (value: unknown) => unknown) => select({ projects: [fixture.project], activeProjectId: 'project-a' }) }));
 vi.mock('@/stores/useDirectoryStore', () => ({ useDirectoryStore: (select: (value: unknown) => unknown) => select({ currentDirectory: '/repo' }) }));

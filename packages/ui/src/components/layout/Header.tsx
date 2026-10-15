@@ -18,6 +18,8 @@ import { DiffIcon } from '@/components/icons/DiffIcon';
 import { useUIStore, type ContextPanelMode, type MainTab } from '@/stores/useUIStore';
 import { ContextPanelControls } from './ContextPanelControls';
 import { useThreadStore } from '@/stores/useThreadStore';
+import { ThreadTokenUsage } from '@/components/thread/ThreadTokenUsage';
+import { threadSubtreeIds } from '@/lib/agent-runtime/thread-tree';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import { useProjectsStore } from '@/stores/useProjectsStore';
@@ -101,7 +103,6 @@ export const Header: React.FC<HeaderProps> = ({
   const setSessionSwitcherOpen = useUIStore((state) => state.setSessionSwitcherOpen);
   const toggleSidebar = useUIStore((state) => state.toggleSidebar);
   const isSidebarOpen = useUIStore((state) => state.isSidebarOpen);
-  const openContextOverview = useUIStore((state) => state.openContextOverview);
   const openContextPlan = useUIStore((state) => state.openContextPlan);
   const closeContextPanel = useUIStore((state) => state.closeContextPanel);
   const activeMainTab = useUIStore((state) => state.activeMainTab);
@@ -113,6 +114,7 @@ export const Header: React.FC<HeaderProps> = ({
   const identity = useThreadStore(state => state.selectedIdentity);
   const currentSessionId = identity?.threadId ?? null;
   const currentSessionSummary = useThreadStore(state => state.threads.find(thread => thread.thread_id === state.selectedIdentity?.threadId));
+  const threadCatalog = useThreadStore(state => state.threads);
   const archiveSession = React.useCallback((threadId: string) => useThreadStore.getState().updateThread(threadId, { archived: true }), []);
   const deleteSession = useThreadStore(state => state.deleteThread);
   const renameSession = React.useCallback((threadId: string, title: string) => useThreadStore.getState().updateThread(threadId, { title }), []);
@@ -278,7 +280,7 @@ export const Header: React.FC<HeaderProps> = ({
     }
   }, [identity, threadAPI, currentSessionId, currentSessionTitle, t]);
 
-  const currentSessionSubtreeIds = React.useMemo(() => currentSessionId ? [currentSessionId] : [], [currentSessionId]);
+  const currentSessionSubtreeIds = React.useMemo(() => currentSessionId ? threadSubtreeIds(threadCatalog, currentSessionId) : [], [threadCatalog, currentSessionId]);
 
   const headerRetentionDescription = React.useMemo(() => {
     const childCount = Math.max(0, currentSessionSubtreeIds.length - 1);
@@ -428,23 +430,6 @@ export const Header: React.FC<HeaderProps> = ({
     }
     toggleSidebar();
   }, [blurActiveElement, isMobile, isSessionSwitcherOpen, setSessionSwitcherOpen, toggleSidebar]);
-
-  const handleOpenContextPanel = React.useCallback(() => {
-    const directory = normalize(openDirectory || '');
-    if (!directory) {
-      return;
-    }
-
-    const panelState = useUIStore.getState().contextPanelByDirectory[directory];
-    if (getActiveContextMode(panelState) === 'context') {
-      closeContextPanel(directory);
-      return;
-    }
-
-    openContextOverview(directory);
-  }, [closeContextPanel, openContextOverview, openDirectory]);
-
-  const isContextPanelActive = activeContextMode === 'context';
 
 
   const handleOpenContextPlan = React.useCallback(() => {
@@ -1127,7 +1112,7 @@ export const Header: React.FC<HeaderProps> = ({
                     <McpDropdownContent active={isMobileServicesOpen && mobileServicesTab === 'mcp'} />
                   )}
 
-                  {mobileServicesTab === 'usage' && <p className="p-4 text-sm text-muted-foreground">Usage is shown with each inference and the conversation Goal.</p>}
+                  {mobileServicesTab === 'usage' && <ThreadTokenUsage />}
                 </div>
               </DropdownMenuContent>
             </DropdownMenu>
