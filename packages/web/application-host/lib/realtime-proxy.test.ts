@@ -317,4 +317,66 @@ describe('realtime proxy', () => {
       uiAuthController.dispose?.();
     }
   });
+
+  it.each(['', '/base'])('proxies only the exact observation endpoint at mount %s with the fixed remote Origin and configured credentials', async (mount) => {
+    const requests: IncomingMessage[] = [];
+    const upstreamServer = http.createServer();
+    const upstreamWs = new WebSocketServer({ server: upstreamServer });
+    upstreamWs.on('connection', (socket, request) => { requests.push(request); socket.send('ready'); });
+    const upstreamOrigin = await listen(upstreamServer);
+    const { origin, runtime } = await startProxyServer({ apiBaseUrl: `${upstreamOrigin}${mount}` });
+    const client = new WebSocket(buildRealtimeProxyWsUrl(origin, `${upstreamOrigin}${mount}/api/varin/observations/ws`.replace('http:', 'ws:')), {
+      headers: { Origin: 'varin-ui://app', Cookie: 'local-session=private' },
+    });
+    try {
+      await new Promise<void>((resolve, reject) => {
+        client.once('message', () => resolve()); client.once('error', reject);
+      });
+      expect(requests).toHaveLength(1);
+      expect(requests[0]?.headers.origin).toBe(upstreamOrigin);
+      expect(requests[0]?.url).toBe(`${mount}/api/varin/observations/ws`);
+      expect(requests[0]?.headers['x-proxy-auth']).toBe('secret');
+      expect(requests[0]?.headers.cookie).toBeUndefined();
+    } finally {
+      client.close(); runtime.stop(); upstreamWs.close();
+    }
+  });
+
+  it('does not forward observation credentials outside the configured runtime mount', async () => {
+    const upstream = await startSseUpstream();
+    const { origin, runtime } = await startProxyServer({ apiBaseUrl: `${upstream.origin}/base` });
+    const client = new WebSocket(buildRealtimeProxyWsUrl(origin, `${upstream.origin.replace('http:', 'ws:')}/api/varin/observations/ws`), {
+      headers: { Origin: 'varin-ui://app' },
+    });
+    client.on('error', () => {});
+    try {
+      expect(await new Promise<number | undefined>((resolve) => {
+        client.once('unexpected-response', (_request, response) => { response.resume(); resolve(response.statusCode); });
+      })).toBe(404);
+      expect(upstream.requests).toHaveLength(0);
+    } finally { client.terminate(); runtime.stop(); }
+  });
+
+  it.each([
+    { authToken: null, originAllowed: true, path: '/api/varin/observations/ws', status: 401 },
+    { authToken: 'ui-token', originAllowed: false, path: '/api/varin/observations/ws', status: 403 },
+    { authToken: 'ui-token', originAllowed: true, path: '/api/varin/observations/ws/extra', status: 404 },
+  ])('rejects an observation proxy without its exact target, original UI auth or Origin: $status', async (options) => {
+    const upstream = await startSseUpstream();
+    const { origin, runtime } = await startProxyServer({ apiBaseUrl: upstream.origin, ...options });
+    const client = new WebSocket(buildRealtimeProxyWsUrl(origin, `${upstream.origin.replace('http:', 'ws:')}${options.path}`), {
+      headers: { Origin: 'https://untrusted.example' },
+    });
+    client.on('error', () => {});
+    try {
+      const status = await new Promise<number | undefined>((resolve, reject) => {
+        client.once('unexpected-response', (_request, response) => { response.resume(); resolve(response.statusCode); });
+        client.once('open', () => reject(new Error('Unexpected accepted proxy')));
+      });
+      expect(status).toBe(options.status);
+      expect(upstream.requests).toHaveLength(0);
+    } finally {
+      client.terminate(); runtime.stop();
+    }
+  });
 });

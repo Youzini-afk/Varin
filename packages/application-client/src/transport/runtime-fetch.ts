@@ -1,3 +1,4 @@
+import { tryObservationFetch } from './observation-transport.js';
 import { getActiveRelayTunnel } from './relay-provider.js';
 import { buildRuntimeAuthHeaders } from './runtime-auth.js';
 import { getRuntimeUrlResolver, type RuntimeUrlQuery } from './runtime-url.js';
@@ -21,8 +22,9 @@ let nativeFetchDelegate: FetchDelegate | null = null;
 // runtime bridge retains the browser's original fetch here before patching
 // window.fetch, giving those APIs one explicit, testable transport boundary.
 export const fetchWithoutRuntimeRouting: FetchDelegate = (input, init) => (
-  nativeFetchDelegate ?? globalThis.fetch.bind(globalThis)
-)(input, init);
+  tryObservationFetch(input, init)
+  ?? (nativeFetchDelegate ?? globalThis.fetch.bind(globalThis))(input, init)
+);
 
 const shouldResolveApiPath = (input: string): boolean => {
   return input.startsWith('/api/') || input === '/api' || input.startsWith('/auth/') || input === '/auth' || input === '/health';
@@ -340,15 +342,15 @@ export const installRuntimeFetchBridge = (): void => {
           const url = new URL(input);
           if (isActiveRuntimeServiceUrl(url)) {
             const headers = await mergeHeaders(undefined, init?.headers);
-            return nativeFetch(input, { ...init, headers });
+            return fetchWithoutRuntimeRouting(input, { ...init, headers });
           }
         } catch {
           // Non-URL fetch inputs should fall through unchanged.
         }
-        return nativeFetch(input, init);
+        return fetchWithoutRuntimeRouting(input, init);
       }
       const headers = await mergeHeaders(undefined, init?.headers);
-      return nativeFetch(buildRuntimeFetchUrl(input), { ...init, headers });
+      return fetchWithoutRuntimeRouting(buildRuntimeFetchUrl(input), { ...init, headers });
     }
 
     if (input instanceof URL) {
@@ -356,12 +358,12 @@ export const installRuntimeFetchBridge = (): void => {
       if (!shouldResolveFetchInput(raw)) {
         if (isActiveRuntimeServiceUrl(input)) {
           const headers = await mergeHeaders(undefined, init?.headers);
-          return nativeFetch(input, { ...init, headers });
+          return fetchWithoutRuntimeRouting(input, { ...init, headers });
         }
-        return nativeFetch(input, init);
+        return fetchWithoutRuntimeRouting(input, init);
       }
       const headers = await mergeHeaders(undefined, init?.headers);
-      return nativeFetch(buildRuntimeFetchUrl(raw), { ...init, headers });
+      return fetchWithoutRuntimeRouting(buildRuntimeFetchUrl(raw), { ...init, headers });
     }
 
     if (input instanceof Request) {
@@ -370,19 +372,19 @@ export const installRuntimeFetchBridge = (): void => {
           const url = new URL(input.url);
           if (isActiveRuntimeServiceUrl(url)) {
             const headers = await mergeHeaders(input.headers, init?.headers);
-            return nativeFetch(new Request(input, { ...init, headers }));
+            return fetchWithoutRuntimeRouting(new Request(input, { ...init, headers }));
           }
         } catch {
           // Non-URL request inputs should fall through unchanged.
         }
-        return nativeFetch(input, init);
+        return fetchWithoutRuntimeRouting(input, init);
       }
       const headers = await mergeHeaders(input.headers, init?.headers);
       const target = buildRuntimeFetchUrl(input.url);
       const request = target === input.url ? input : new Request(target, input);
-      return nativeFetch(new Request(request, { ...init, headers }));
+      return fetchWithoutRuntimeRouting(new Request(request, { ...init, headers }));
     }
 
-    return nativeFetch(input, init);
+    return fetchWithoutRuntimeRouting(input, init);
   };
 };

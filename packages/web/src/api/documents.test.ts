@@ -236,3 +236,41 @@ describe('createWebDocumentsAPI', () => {
     })).rejects.toBeInstanceOf(DocumentsError);
   });
 });
+
+describe('document observation response cleanup', () => {
+  it('releases a rejected response before stopping or reconnecting', async () => {
+    const { createWebDocumentsAPI } = await import('./documents');
+    for (const status of [401, 503]) {
+      runtimeFetchMock.mockReset();
+      const cancelled = vi.fn();
+      runtimeFetchMock.mockResolvedValueOnce(new Response(new ReadableStream({ cancel: cancelled }), { status }));
+      const subscription = createWebDocumentsAPI().watch('workspace', () => undefined);
+      await vi.waitFor(() => expect(cancelled).toHaveBeenCalledTimes(1));
+      expect(runtimeFetchMock).toHaveBeenCalledTimes(1);
+      subscription.close();
+    }
+  });
+
+  it('cancels the original reader on parse failure and on disposal while blocked', async () => {
+    const { createWebDocumentsAPI } = await import('./documents');
+    for (const malformed of [true, false]) {
+      runtimeFetchMock.mockReset();
+      const cancelled = vi.fn();
+      const response = new Response(new ReadableStream<Uint8Array>({
+        start(controller) { if (malformed) controller.enqueue(new TextEncoder().encode('data: {bad-json}\n\n')); },
+        cancel: cancelled,
+      }), { headers: { 'Content-Type': 'text/event-stream' } });
+      runtimeFetchMock.mockResolvedValueOnce(response);
+      const subscription = createWebDocumentsAPI().watch('workspace', () => undefined);
+      if (!malformed) {
+        await vi.waitFor(() => expect(response.body!.locked).toBe(true));
+        expect(cancelled).not.toHaveBeenCalled();
+        subscription.close();
+      }
+      await vi.waitFor(() => expect(cancelled).toHaveBeenCalledTimes(1));
+      await vi.waitFor(() => expect(response.body!.locked).toBe(false));
+      expect(runtimeFetchMock).toHaveBeenCalledTimes(1);
+      subscription.close();
+    }
+  });
+});

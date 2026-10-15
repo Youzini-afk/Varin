@@ -1,4 +1,4 @@
-import { getRuntimeUrlResolver } from '@varin/application-client';
+import { RuntimeEventSource } from '@varin/application-client';
 import { subscribeRuntimeEndpointChanged } from '@varin/application-client';
 import { parseComputerAutomationInvalidation, parseComputerAutomationState, parseComputerActivity } from '@varin/protocol';
 import type { ComputerActivityEntry, ComputerAutomationInvalidation, ComputerAutomationState } from '@varin/protocol';
@@ -52,7 +52,7 @@ export type VarinEvent = StreamReadyEvent | ScheduledTaskRanEvent | HarnessKnowl
   | { type: 'computer-automation'; state: ComputerAutomationState };
 type Listener = (event: VarinEvent) => void;
 
-let eventSource: EventSource | null = null;
+let eventSource: RuntimeEventSource | null = null;
 let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 let heartbeatTimer: ReturnType<typeof setTimeout> | null = null;
 let reconnectAttempt = 0;
@@ -281,9 +281,6 @@ const connect = () => {
   if (typeof window === 'undefined' || listeners.size === 0) {
     return;
   }
-  if (typeof EventSource !== 'function') {
-    return;
-  }
 
   const identity = selectedClientThread();
   const identityKey = identity ? JSON.stringify([identity.threadId, identity.branchId]) : null;
@@ -310,7 +307,7 @@ const connect = () => {
     }
   }
 
-  if (eventSource && eventSource.readyState !== EventSource.CLOSED) return;
+  if (eventSource && eventSource.readyState !== RuntimeEventSource.CLOSED) return;
 
   cleanupSource();
 
@@ -319,7 +316,7 @@ const connect = () => {
   // Shared settings and activity do not depend on a conversation's client-control permit.
   // Until binding succeeds, subscribe to broadcasts without claiming a Thread identity.
   const boundIdentity = boundThreadKey === identityKey ? identity : null;
-  const source = new EventSource(getRuntimeUrlResolver().sse('/api/varin/events', clientSurfaceQuery(boundIdentity)));
+  const source = new RuntimeEventSource('/api/varin/events', { query: clientSurfaceQuery(boundIdentity), reconnect: false });
   source.onopen = () => {
     if (eventSource !== source) return;
     resetHeartbeatTimer();

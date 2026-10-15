@@ -36,6 +36,7 @@ interface RealtimeProxyOptions {
 interface ResolvedProxyTarget {
   requestHeaders: Record<string, string>;
   target: URL;
+  observation: boolean;
 }
 
 const isAllowedSsePath = (pathname: string): boolean => {
@@ -105,8 +106,13 @@ const protocolMatchesProxyType = (target: URL, type: ProxyType): boolean => {
   return target.protocol === 'http:' || target.protocol === 'https:';
 };
 
-const pathMatchesProxyType = (target: URL, type: ProxyType): boolean => {
-  return type === 'ws' ? isAllowedWebSocketPath(target.pathname) : isAllowedSsePath(target.pathname);
+const isObservationTarget = (target: URL, apiBaseUrl: string): boolean => {
+  const mount = new URL(apiBaseUrl).pathname.replace(/\/+$/u, '');
+  return target.pathname === `${mount}/api/varin/observations/ws`;
+};
+
+const pathMatchesProxyType = (target: URL, type: ProxyType, observation: boolean): boolean => {
+  return type === 'ws' ? observation || isAllowedWebSocketPath(target.pathname) : isAllowedSsePath(target.pathname);
 };
 
 const resolveProxyTarget = (
@@ -120,9 +126,10 @@ const resolveProxyTarget = (
   const target = getTargetParam(req);
   if (!target || !apiBaseUrl || !hasHeaders(requestHeaders)) return null;
   if (!protocolMatchesProxyType(target, type)) return null;
-  if (!pathMatchesProxyType(target, type)) return null;
   if (!urlsMatchRuntime(target, apiBaseUrl)) return null;
-  return { target, requestHeaders };
+  const observation = type === 'ws' && isObservationTarget(target, apiBaseUrl);
+  if (!pathMatchesProxyType(target, type, observation)) return null;
+  return { target, requestHeaders, observation };
 };
 
 const safeHeader = (headers: IncomingHttpHeaders, name: string): string => {
@@ -244,9 +251,17 @@ export const attachRealtimeProxy = ({
       return;
     }
 
-    const upstream = new WebSocket(resolved.target.toString(), {
-      headers: resolved.requestHeaders,
-    });
+    const headers = { ...resolved.requestHeaders };
+    if (resolved.observation) {
+      // The local UI identity and Origin were checked before upgrading, and the
+      // target is fixed to the active runtime. Preserve the remote Host's own
+      // Origin gate for this transport, as the connection proxy does.
+      const origin = new URL(resolved.target);
+      origin.protocol = origin.protocol === 'wss:' ? 'https:' : 'http:';
+      for (const name of Object.keys(headers)) if (name.toLowerCase() === 'origin') delete headers[name];
+      headers.Origin = origin.origin;
+    }
+    const upstream = new WebSocket(resolved.target.toString(), { headers });
     const pending: Array<[RawData, boolean]> = [];
 
     const flush = () => {

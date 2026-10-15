@@ -207,6 +207,20 @@ describe('Surface composition lease stream', () => {
     expect(JSON.parse(String(init.body))).toEqual(invocation);
   });
 
+  it('releases a non-SSE lease response before rejecting it', async () => {
+    setup();
+    refreshLocalRuntimeUrlAuthToken.mockResolvedValue('application-token');
+    const cancelled = vi.fn();
+    fetchWithoutRuntimeRouting.mockResolvedValueOnce(new Response(new ReadableStream({ cancel: cancelled }), {
+      headers: { 'Content-Type': 'text/html' },
+    }));
+    const { createWebExtensionsAPI } = await import('./extensions');
+    await expect(createWebExtensionsAPI().watchServiceLease(request, () => undefined, new AbortController().signal))
+      .rejects.toThrow('not an event stream');
+    expect(cancelled).toHaveBeenCalledTimes(1);
+    expect(fetchWithoutRuntimeRouting).toHaveBeenCalledTimes(1);
+  });
+
   it('rejects malformed lease events and cancels the stream', async () => {
     setup();
     refreshLocalRuntimeUrlAuthToken.mockResolvedValue('application-token');

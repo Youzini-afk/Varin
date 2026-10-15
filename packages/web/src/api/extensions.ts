@@ -161,6 +161,7 @@ export const createWebExtensionsAPI = (): ExtensionsAPI => ({
     const response = await applicationHostRequest('/api/varin/extensions/v1/services/lease', request, signal, 'POST', 'text/event-stream');
     if (!response.ok) await readJsonOrThrow(response);
     if (!response.headers.get('content-type')?.toLowerCase().startsWith('text/event-stream') || !response.body) {
+      await response.body?.cancel().catch(() => undefined);
       throw new Error('Varin Surface service lease response is not an event stream');
     }
     const reader = response.body.getReader();

@@ -70,19 +70,24 @@ const readSseEvents = async (
   if (!reader) throw new LanguageServicesError('Language event stream is unavailable', { reason: 'failed' });
   const decoder = new TextDecoder();
   let buffer = '';
-  while (!signal.aborted) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    buffer += decoder.decode(value, { stream: true });
-    const chunks = buffer.split('\n\n');
-    buffer = chunks.pop() ?? '';
-    for (const chunk of chunks) {
-      const line = chunk.split('\n').find((entry) => entry.startsWith('data: '));
-      if (!line) continue;
-      const event = JSON.parse(line.slice(6)) as VarinLanguageServiceEvent;
-      if (event && typeof event === 'object' && 'content' in event) continue;
-      listener(event);
+  try {
+    while (!signal.aborted) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const chunks = buffer.split('\n\n');
+      buffer = chunks.pop() ?? '';
+      for (const chunk of chunks) {
+        const line = chunk.split('\n').find((entry) => entry.startsWith('data: '));
+        if (!line) continue;
+        const event = JSON.parse(line.slice(6)) as VarinLanguageServiceEvent;
+        if (event && typeof event === 'object' && 'content' in event) continue;
+        listener(event);
+      }
     }
+  } finally {
+    await reader.cancel().catch(() => {});
+    reader.releaseLock();
   }
 };
 
@@ -101,15 +106,17 @@ export const createWebLanguageServicesAPI = (): LanguageServicesAPI => ({
   subscribe(workspaceId, listener, options): Subscription {
     const generation = getRuntimeEndpointGeneration();
     const controller = new AbortController();
+    const abort = () => controller.abort();
     if (options?.signal) {
-      if (options.signal.aborted) controller.abort();
-      else options.signal.addEventListener('abort', () => controller.abort(), { once: true });
+      if (options.signal.aborted) abort();
+      else options.signal.addEventListener('abort', abort, { once: true });
     }
     const unsubscribe = subscribeRuntimeEndpointWillChange(() => controller.abort());
     void (async () => {
+      let response: Response | undefined;
       try {
         assertGeneration(generation);
-        const response = await runtimeFetch('/api/language/events', {
+        response = await runtimeFetch('/api/language/events', {
           headers: { Accept: 'text/event-stream' },
           query: { workspaceId },
           signal: controller.signal,
@@ -125,12 +132,16 @@ export const createWebLanguageServicesAPI = (): LanguageServicesAPI => ({
       } catch {
         if (controller.signal.aborted) return;
       } finally {
+        controller.abort();
         unsubscribe();
+        options?.signal?.removeEventListener('abort', abort);
+        await response?.body?.cancel().catch(() => {});
       }
     })();
     return {
       close() {
         unsubscribe();
+        options?.signal?.removeEventListener('abort', abort);
         controller.abort();
       },
     };
