@@ -93,6 +93,8 @@ Operation 分开记录阶段、业务结果、效果和取消。效果可以是 
 confirmed 或 unknown。外部回执另带原执行者 identity/epoch 和真实 `executor_stopped`。
 成功文案、空占用表、HTTP abort、丢失的进程响应和取消意图都不能替代停止证据。
 原生进程与 managed Source 所有者遵守同一条规则。
+原执行者已确认停止但业务效果仍 unknown 时，恢复可以按该原回执闭合工具配对，
+不能因此把效果改为成功；没有停止证据的 unknown 仍保留原占用和待结算责任。
 
 取消先留下事实，再推进依赖清理；控制唤醒不依赖正文读取完成。绑定准备保留原 Cancel 或
 Bot Sleep 路径，不能把已知取消改写成无关失败。已发出的副作用仍由原执行者结算。
@@ -139,6 +141,8 @@ child 受理固定真实父调用、模型/凭据、profile、工具子集和 So
 
 child report、固定 WorkingResult 和 executor-stop 分别记录。相关 writer 真正停止后，
 原 Storage 才能按结果合同捕获/pin。父 Wait 观察该记录；取消观察不会取消独立受理的 child。
+报告固定在原终态 Run 的不可变历史链，不以用户后来导航到的 branch head 取代结果，
+报告发布也不修改当前导航。多层 child 的直接父调用与报告访问权限逐层保留。
 任务家族消息和历史读取保留真实发送方、祖先和权限；其他 Agent 内容标为数据，不冒充 system 指令。
 
 应用 child 结果需要显式 Integration，复用原 journal、条件文件写入和 Documents buffer CAS。

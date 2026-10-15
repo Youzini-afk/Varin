@@ -792,7 +792,7 @@ it('a dispatched child model request is not replayed after Host/kernel loss', as
   expect(events.some(event => event.kind === 'model.interrupted')).toBe(true);
 }, 20_000);
 
-it('committed child output survives a lost report delivery and resumes the original parent Wait once', async () => {
+it.each([false, true])('committed child output survives lost delivery and resumes its original Wait after reopen (navigated=%s)', async navigated => {
   const childRequested = gate(); let childResponse: ServerResponse | undefined;
   let parentSteps = 0; let childSteps = 0; let operationId = '';
   const f = await fixture(({ body, response }) => {
@@ -815,10 +815,16 @@ it('committed child output survives a lost report delivery and resumes the origi
   complete(childResponse!, [answer('REPORT_COMMITTED_BEFORE_HOST_LOSS', 'child-final')]);
   await expect.poll(async () => (await h.runtime.run(child.receipt!.run_id)).state).toBe('completed');
   expect(parentSteps).toBe(2);
+  const childIdentity: ThreadIdentity = { runtime: 'agent', threadId: child.child_thread_id, branchId: child.child_branch_id };
+  const terminal = await h.api.snapshot(childIdentity);
+  const terminalHead = terminal.thread.branches.find(branch => branch.branch_id === childIdentity.branchId)!.head;
+  if (navigated) await h.api.navigate({ ...childIdentity, key: 'navigate-before-report', expectedHeadId: terminalHead, targetHeadId: null });
   await h.close();
   const reopened = await f.openHost();
   await reopened.collaboration!.recover(); await reopened.adapter.recover();
   await expect.poll(async () => (await reopened.runtime.run(receipt.run_id)).state, { timeout: 10_000 }).toBe('completed');
+  expect((await reopened.runtime.childExecution(operationId)).terminal_head).toBe(terminalHead);
+  expect((await reopened.api.snapshot(childIdentity)).thread.branches.find(branch => branch.branch_id === childIdentity.branchId)!.head).toBe(navigated ? null : terminalHead);
   const reports = (await reopened.api.snapshot(identity)).history.filter(item => item.source === 'agent');
   expect(reports).toHaveLength(1);
   expect(JSON.stringify(reports[0])).toContain('REPORT_COMMITTED_BEFORE_HOST_LOSS');
