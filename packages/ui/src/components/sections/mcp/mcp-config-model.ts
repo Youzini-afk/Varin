@@ -18,10 +18,10 @@ export const removeMcpConfigValue = (content: string, path: readonly string[]): 
 export const switchMcpServerTransport = (content: string, serverName: string, transport: Exclude<McpServerTransportMode, 'unconfigured'>): string => {
   const path = ['mcpServers', serverName];
   const server = asJsonObject(readJsonPath(parseMcpConfigObject(content), path));
-  let next = content;
+  // A transport switch retains the server, even when its old definition is empty or minimal.
+  let next = updateJsoncPath(content, [...path, 'type'], transport);
   const removed = transport === 'stdio' ? HTTP_FIELDS : STDIO_FIELDS;
   for (const field of removed) next = removeJsoncPath(next, [...path, field]);
   const field = transport === 'stdio' ? 'command' : 'url';
-  next = updateJsoncPath(next, [...path, field], typeof server[field] === 'string' ? server[field] : '');
-  return updateJsoncPath(next, [...path, 'type'], transport);
+  return updateJsoncPath(next, [...path, field], typeof server[field] === 'string' ? server[field] : '');
 };

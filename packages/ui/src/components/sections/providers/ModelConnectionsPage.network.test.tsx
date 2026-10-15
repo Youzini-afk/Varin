@@ -15,7 +15,7 @@ vi.mock('@varin/application-client', () => ({
 vi.mock('@/lib/i18n', () => ({ useI18n: () => ({ t: (key: string) => key }) }));
 vi.mock('@/lib/varinEvents', () => ({ subscribeVarinEvents: () => () => {} }));
 vi.mock('../shared/SettingsPageLayout', () => ({ SettingsPageLayout: ({ children }: React.PropsWithChildren) => <div>{children}</div> }));
-vi.mock('../shared/SettingsSection', () => ({ SettingsSection: ({ children }: React.PropsWithChildren) => <section>{children}</section>, SettingsFieldRow: ({ label, children }: React.PropsWithChildren<{ label: string }>) => <label>{label}{children}</label> }));
+vi.mock('../shared/SettingsSection', () => ({ SettingsSection: ({ children }: React.PropsWithChildren) => <section>{children}</section>, SettingsFieldRow: ({ label, children }: React.PropsWithChildren<{ label: string }>) => <label>{label}{children}</label>, SettingsStackedField: ({ label, children }: React.PropsWithChildren<{ label: string }>) => <label>{label}{children}</label> }));
 vi.mock('../shared/AuthorizationPanel', () => ({ AuthorizationPanel: () => null }));
 vi.mock('@/components/ui/button', () => ({ Button: ({ children, disabled, onClick }: React.ComponentProps<'button'>) => <button disabled={disabled} onClick={onClick}>{children}</button> }));
 vi.mock('@/components/ui/input', () => ({ Input: ({ onChange, ...props }: React.ComponentProps<'input'>) => <input {...props} onInput={onChange as React.FormEventHandler<HTMLInputElement>} /> }));

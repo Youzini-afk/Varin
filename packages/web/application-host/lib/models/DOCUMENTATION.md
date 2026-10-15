@@ -90,6 +90,9 @@ Connection options are explicit and credential-free:
 The same captured options reach chat, discovery and supported auxiliary consumers. Normal edits
 affect later preparation; they cannot retarget an accepted Run, queued input or active request.
 Explicit disable/removal or account withdrawal is checked separately and can reject further access.
+Settings HTTP failures retain Host egress classifications with fixed, non-secret messages; a network
+policy denial is not reported as malformed model configuration. Non-desktop Hosts retain private-address
+checks; local model access is supplied by the real Electron network integration, not a model-setting bypass.
 
 ## Authentication and retained bindings
 
