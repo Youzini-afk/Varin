@@ -26,6 +26,7 @@ import { PlanService } from './plan-service.js';
 import { registerCommonRequestMiddleware } from '../platform/core-routes.js';
 import { createKernelClient } from './kernel-client.js';
 import { ExistingHostCredentialOwner } from './credential-owner.js';
+import { modelCredentialBindingIdentity } from './model-binding-lifetime.js';
 import { AgentRuntimeClient } from './agent-runtime-client.js';
 import { ThreadCollaboration } from './thread-collaboration.js';
 import { createChildProfilePreparer } from './child-profiles.js';
@@ -158,7 +159,7 @@ async function fixture(reply: (request: RecordedRequest, index: number) => void,
       return result;
     });
     const credentialOwner = new ExistingHostCredentialOwner({ providerId: model.providerId,
-      providerFamily: configuration.providerFamily, endpoint,
+      providerFamily: configuration.providerFamily, endpoint, bindingIdentity: modelCredentialBindingIdentity(configuration),
       currentScope: async () => ({ reference: 'child-review-reference', authority: 'child-review-authority',
         account: 'child-review-account', generation: 1 }),
       runtime: { getAuth: async () => ({ auth: { apiKey: 'fake-child-review-key-not-a-real-secret' } }) } });
@@ -244,7 +245,7 @@ const dispatch = { task: 'CHILD_TASK: inspect source.txt and send a report', wor
 const isParent = (body: Record<string, unknown>) => !JSON.stringify(body.input ?? body.system).includes('Your admitted role is worker');
 const job = (body: Record<string, unknown>) => {
   const receipt = result(body, 'dispatch');
-  expect(receipt?.kind).toBe('job_accepted');
+  expect(receipt?.kind, JSON.stringify(receipt)).toBe('job_accepted');
   expect(typeof receipt?.operation_id).toBe('string');
   return String(receipt!.operation_id);
 };
@@ -1677,4 +1678,102 @@ it.each(['user_continuation', 'message_request'] as const)('%s continues a compl
   }
   expect((await reopened.api.snapshot(childIdentity)).history.filter(item => item.run_id === finished.receipt!.run_id && item.source === 'user').map(item => JSON.stringify(item.content)).join('\n')).toContain('SECOND_RUN_REQUEST');
   expect(parentSteps).toBe(3); expect(childSteps).toBe(6); expect(reopened.errors.map(String)).toEqual([]);
+}, 45_000);
+
+it.each(['report', 'cancel'] as const)('a three-level child tree preserves original owners through %s and leaves its sibling independent', async mode => {
+  let parentSteps = 0; let middleSteps = 0; let leafSteps = 0; let siblingSteps = 0;
+  let middleOperation = ''; let leafOperation = ''; let siblingOperation = '';
+  const leafEntered = gate(); const leafClosed = gate();
+  const f = await fixture(({ body, response }) => {
+    assertPairing(body);
+    if (isParent(body)) {
+      if (++parentSteps === 1) complete(response, [tool('dispatch', { task: 'MIDDLE_LEVEL: delegate one nested task and await its report',
+        workMode: 'read_only', tools: ['dispatch', 'wait_child', 'file_read'] }, 'middle-dispatch')]);
+      else if (parentSteps === 2) { middleOperation = job(body); complete(response, [tool('dispatch', {
+        task: 'SIBLING_LEVEL: report independently', workMode: 'read_only', tools: ['file_read'] }, 'sibling-dispatch')]); }
+      else { siblingOperation = job(body); complete(response, [answer('Parent finished independently of accepted children', 'root-report')]); }
+      return;
+    }
+    const firstInput = (body.input as Array<Record<string, unknown>>).find(item => item.role === 'user');
+    const task = JSON.stringify(firstInput);
+    if (task.includes('SIBLING_LEVEL')) {
+      siblingSteps++; complete(response, [answer('Independent sibling report', 'sibling-report')]); return;
+    }
+    if (task.includes('MIDDLE_LEVEL')) {
+      if (++middleSteps === 1) complete(response, [tool('dispatch', { task: 'LEAF_LEVEL: read the fixed source and report',
+        workMode: mode === 'report' ? 'isolated_write' : 'read_only' }, 'leaf-dispatch')]);
+      else if (middleSteps === 2) { leafOperation = job(body); complete(response, [tool('wait_child', { operationId: leafOperation }, 'leaf-wait')]); }
+      else {
+        expect(mode).toBe('report');
+        expect(JSON.stringify(body.input)).toContain('LEAF_REPORT');
+        expect(JSON.stringify(body.input)).toContain('published');
+        complete(response, [answer('MIDDLE_REPORT: nested result was reported without automatic integration', 'middle-report')]);
+      }
+      return;
+    }
+    expect(task).toContain('LEAF_LEVEL');
+    leafSteps++;
+    if (leafSteps === 1) complete(response, [tool('file_read', { path: 'source.txt' }, 'leaf-read')]);
+    else if (leafSteps === 2) {
+      const read = result(body) as { content: { readVersion: string; content: { text: string } } };
+      expect(read.content.content.text).toBe('fixed child source before parent changes');
+      if (mode === 'cancel') {
+        response.on('close', leafClosed.release); leafEntered.release();
+      } else complete(response, [tool('file_write', { path: 'source.txt', readVersion: read.content.readVersion,
+        content: 'Grandchild private result' }, 'leaf-write')]);
+    } else {
+      expect(result(body)).toMatchObject({ outcome: 'succeeded', effect: 'confirmed' });
+      complete(response, [answer('LEAF_REPORT: private file result', 'leaf-report')]);
+    }
+  });
+  const h = await f.openHost();
+  const identity = await h.api.create(`three-level-${mode}`);
+  const workspaceId = (await h.documents.resolveWorkspace({ path: f.workspace })).workspaceId;
+  const prepared = await h.api.prepareSource({ ...identity, key: 'fixed', resourceOwner: { kind: 'local' }, workspaceId,
+    content: { mode: 'saved-files' }, captureScopes: [], mode: 'fixed_branch' });
+  prepared.source.tools = ['file_read'];
+  const parent = await h.api.submit({ ...identity, key: 'root', expectedHead: null, text: 'Delegate a nested task and an independent sibling', model, source: prepared.source });
+  await expect.poll(async () => (await h.runtime.run(parent.run_id)).state, { timeout: 15_000 }).toBe('completed');
+  await expect.poll(async () => siblingOperation && (await h.runtime.child(siblingOperation)).report?.outcome, { timeout: 15_000 }).toBe('succeeded');
+  if (mode === 'cancel') {
+    await leafEntered.promise;
+    await expect.poll(() => leafOperation).toBeTruthy();
+    const cancelled = await h.api.collaboration!.cancelChild(identity, middleOperation);
+    expect(cancelled.child_count).toBe(2);
+    await leafClosed.promise;
+    await expect.poll(async () => (await h.runtime.child(middleOperation)).report?.outcome, { timeout: 15_000 }).toBe('cancelled');
+    await expect.poll(async () => (await h.runtime.child(leafOperation)).report?.outcome, { timeout: 15_000 }).toBe('cancelled');
+  } else {
+    await expect.poll(async () => (await h.runtime.child(middleOperation)).report?.outcome, { timeout: 15_000 }).toBe('succeeded');
+  }
+  const middle = await h.runtime.child(middleOperation);
+  const leaf = await h.runtime.child(leafOperation);
+  const sibling = await h.runtime.child(siblingOperation);
+  expect(middle.parent_thread_id).toBe(identity.threadId);
+  expect(leaf.parent_thread_id).toBe(middle.child_thread_id);
+  expect(leaf.parent_run_id).toBe(middle.receipt!.run_id);
+  expect(sibling.parent_thread_id).toBe(identity.threadId);
+  expect(sibling.report?.outcome).toBe('succeeded');
+  expect((await h.runtime.run(parent.run_id)).state).toBe('completed');
+  expect(middle.code_result.kind).toBe('no_changes');
+  if (mode === 'report') {
+    expect(leaf.code_result.kind).toBe('published');
+    if (leaf.code_result.kind !== 'published') throw new Error('Leaf has no original result');
+    expect(leaf.code_result.result.workspace_id).toBe(workspaceId);
+    const middleIdentity: ThreadIdentity = { runtime: 'agent', threadId: middle.child_thread_id, branchId: middle.child_branch_id };
+    const itemId = leaf.report!.history_ids.at(-1)!;
+    expect((await h.api.collaboration!.readReport(middleIdentity, leafOperation, itemId)).text).toBe('LEAF_REPORT: private file result');
+    await expect(h.api.collaboration!.readReport(identity, leafOperation, itemId)).rejects.toThrow();
+    expect(leaf.code_result.result.branch_id).not.toBe(middle.source.kind === 'ready' ? middle.source.selection.branch_id : null);
+  }
+  expect(await fs.readFile(path.join(f.workspace, 'source.txt'), 'utf8')).toBe('fixed child source before parent changes');
+  const counts = [parentSteps, middleSteps, leafSteps, siblingSteps];
+  await h.close();
+  const reopened = await f.openHost();
+  await reopened.collaboration!.recover(); await reopened.adapter.recover();
+  expect((await reopened.runtime.child(middleOperation)).report).toEqual(middle.report);
+  expect((await reopened.runtime.child(leafOperation)).code_result).toEqual(leaf.code_result);
+  expect((await reopened.runtime.child(siblingOperation)).report).toEqual(sibling.report);
+  expect([parentSteps, middleSteps, leafSteps, siblingSteps]).toEqual(counts);
+  expect(reopened.errors.map(String)).toEqual([]);
 }, 45_000);
