@@ -16,6 +16,29 @@ pub struct PreparedChildReport {
     report: ChildReport,
     epoch: u64,
 }
+
+/// A terminal Run's own immutable chain is authoritative even if the user has since
+/// navigated its branch. Selection happens on the reader snapshot, outside Catalog.
+fn terminal_history_head(database: &Connection, run: &Run) -> Result<Option<String>> {
+    let mut statement = database.prepare("SELECT id,parent FROM history WHERE run_id=?1")?;
+    let mut ids = std::collections::BTreeSet::new();
+    let mut parents = std::collections::BTreeSet::new();
+    for row in statement.query_map([&run.id], |row| {
+        Ok((row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?))
+    })? {
+        let (id, parent) = row?;
+        ids.insert(id);
+        parents.extend(parent);
+    }
+    let mut leaves = ids.difference(&parents);
+    let head = leaves.next().cloned();
+    if leaves.next().is_some() {
+        return Err(RuntimeError::Invalid(
+            "child Run history has multiple terminal heads".into(),
+        ));
+    }
+    Ok(head)
+}
 impl ChildReportPreparation {
     pub fn load(self) -> Result<Vec<PreparedChildReport>> {
         let mut reports = Vec::new();
@@ -44,12 +67,8 @@ impl ChildReportPreparation {
                 "runs",
                 &child.receipt.as_ref().expect("selected receipt").run_id,
             )?;
-            let head: Option<String> = snapshot.query_row(
-                "SELECT head FROM branches WHERE id=?1",
-                [&run.branch_id],
-                |row| row.get(0),
-            )?;
             let prepared = (|| {
+                let head = terminal_history_head(&snapshot, &run)?;
                 let mut ancestor = head.clone();
                 let mut history_ids = Vec::new();
                 while let Some(id) = ancestor {
@@ -143,10 +162,7 @@ impl Catalog {
             return Ok(false);
         }
         let run = self.run(&prepared.run.id)?;
-        if child.receipt != prepared.child.receipt
-            || run != prepared.run
-            || self.head(&run.branch_id)? != prepared.head
-        {
+        if child.receipt != prepared.child.receipt || run != prepared.run {
             return Ok(false);
         }
         child.state = if !child.code_result.settled() {
@@ -160,7 +176,7 @@ impl Catalog {
         }
         .into();
         child.report = Some(prepared.report);
-        self.publish_child_report(child)?;
+        self.publish_child_report(child, prepared.head)?;
         Ok(true)
     }
 }
