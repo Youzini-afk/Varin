@@ -1,6 +1,24 @@
 import { expect, it, vi } from 'vitest';
 import { createManagedRemoteTargetRegistry, managedEndpointIdentity } from './managed-remote-client.js';
 
+it('normalizes trailing mount separators while preserving encoded paths and ignoring page query/fragment', async () => {
+  const base = 'https://source-b.example/team%20space/nested';
+  const identity = managedEndpointIdentity({ apiUrl: base });
+  expect(managedEndpointIdentity({ apiUrl: `${base}///` })).toBe(identity);
+  expect(managedEndpointIdentity({ apiUrl: `${base}/?view=fixture#panel` })).toBe(identity);
+  expect(managedEndpointIdentity({ apiUrl: 'https://source-b.example/team%20space/other' })).not.toBe(identity);
+  expect(managedEndpointIdentity({ apiUrl: 'https://source-b.example/team/space/nested' })).not.toBe(identity);
+  const urls: string[] = [];
+  const registry = createManagedRemoteTargetRegistry({ coordinatorHostId: 'source-a', kernel: {} as never, resources: {} as never,
+    readSettings: async () => ({ desktopHosts: [{ id: 'original', apiUrl: `${base}/?view=fixture#panel` }] }),
+    fetch: async (input) => { urls.push(String(input)); return Response.json({ protocolVersion: 1, hostId: 'source-b',
+      capabilities: ['sources'], machine: { machineId: 'managed:source-b', kind: 'managed-remote', state: 'available' } },
+      { headers: { 'x-varin-managed-host': 'source-b' } }); },
+  });
+  expect((await registry.sourceTargets()).targets).toHaveLength(1);
+  expect(urls).toEqual([`${base}/api/harness/managed-execution/v1/identity`]);
+});
+
 it('wakes source-only recovery after failed release and on a new Host lifetime without Experiment registration', async () => {
   const owner = { kind: 'managed_host' as const, hostId: 'source-b', connectionId: 'connection-b',
     endpointIdentity: managedEndpointIdentity({ apiUrl: 'https://source-b.example' }) };

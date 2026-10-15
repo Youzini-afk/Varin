@@ -35,14 +35,24 @@ import { consumeManagedProcessStream } from './managed-process-stream.js';
 const BASE_PATH = "/api/harness/managed-execution/v1";
 const TARGET_REFRESH_WORKSPACE = "__varin_managed_remote__";
 const digest = (...values: string[]): string => createHash("sha256").update(values.join("\0")).digest("hex");
-/** Identity of the actual managed endpoint. Credentials stay in the configured Host owner. */
-export const managedEndpointIdentity = (connection: Pick<ConfiguredHost, "apiUrl">): string => {
-  const endpoint = new URL(BASE_PATH, `${connection.apiUrl.replace(/\/$/, "")}/`);
-  if (!['https:', 'http:'].includes(endpoint.protocol) || endpoint.username || endpoint.password) {
+const managedEndpointUrl = (connection: Pick<ConfiguredHost, "apiUrl">, relativePath = ''): URL => {
+  const base = new URL(connection.apiUrl);
+  if (!['https:', 'http:'].includes(base.protocol) || base.username || base.password) {
     throw new Error('Managed source endpoint must use a configured HTTP Host without URL credentials');
   }
-  return `sha256-${digest(endpoint.href)}`;
+  // A configured page's query/fragment never supplied managed-route authority.
+  // Keep ignoring them instead of embedding them in durable Source identity.
+  base.search = '';
+  base.hash = '';
+  base.pathname = `${base.pathname.replace(/\/+$/u, '')}/`;
+  return new URL(`${BASE_PATH.slice(1)}${relativePath}`, base);
 };
+/** Identity of the actual managed endpoint, including its configured mount.
+ * Credentials stay in the configured Host owner.
+ */
+export const managedEndpointIdentity = (connection: Pick<ConfiguredHost, "apiUrl">): string => (
+  `sha256-${digest(managedEndpointUrl(connection).href)}`
+);
 const payloadOf = (record: KernelRecordResult): Record<string, unknown> => {
   try {
     const payload = JSON.parse(record.payloadJson) as unknown;
@@ -110,11 +120,12 @@ class ManagedTargetClient {
   }
 
   async response(relativePath: string, init: Omit<RequestInit, "body"> & { body?: RequestInit["body"] | AsyncIterable<Uint8Array> } = {}): Promise<Response> {
-    const url = new URL(`${BASE_PATH}${relativePath}`, `${this.target.connection.apiUrl.replace(/\/$/, "")}/`).toString();
+    const url = managedEndpointUrl(this.target.connection, relativePath).toString();
     const { body, ...rest } = init;
     const asyncBody = body !== undefined && typeof (body as AsyncIterable<Uint8Array>)[Symbol.asyncIterator] === "function";
     const response = await this.fetchImpl(url, {
       ...rest,
+      redirect: 'error',
       headers: this.headers(Object.fromEntries(new Headers(init.headers).entries())),
       ...(body === undefined ? {} : { body: body as never }),
       ...(asyncBody ? { duplex: "half" as never } : {}),
@@ -190,13 +201,13 @@ export function createManagedRemoteTargetRegistry(options: ManagedRemoteTargetRe
   };
   const report = (error: unknown) => options.onError?.(error instanceof Error ? error : new Error(String(error)));
 
-  const probe = async (connection: ConfiguredHost, signal?: AbortSignal, fixedEndpoint = false): Promise<ManagedTarget> => {
+  const probe = async (connection: ConfiguredHost, signal?: AbortSignal): Promise<ManagedTarget> => {
     const headers = new Headers(connection.requestHeaders);
     headers.set("Accept", "application/json");
     if (connection.clientToken) headers.set("Authorization", `Bearer ${connection.clientToken}`);
-    const response = await fetchImpl(new URL(`${BASE_PATH}/identity`, `${connection.apiUrl.replace(/\/$/, "")}/`), {
+    const response = await fetchImpl(managedEndpointUrl(connection, '/identity'), {
       headers,
-      ...(fixedEndpoint ? { redirect: 'error' as const } : {}),
+      redirect: 'error',
       signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(10_000)]) : AbortSignal.timeout(10_000),
     });
     const identity = await response.json().catch(() => null) as ManagedRemoteIdentity | { error?: string } | null;
@@ -308,7 +319,7 @@ export function createManagedRemoteTargetRegistry(options: ManagedRemoteTargetRe
     const connections = configuredHosts(await options.readSettings());
     const results = await Promise.allSettled(connections.map(async connection => {
       const endpointIdentity = managedEndpointIdentity(connection);
-      const target = await probe(connection, signal, true).catch(error => {
+      const target = await probe(connection, signal).catch(error => {
         if (!signal?.aborted) for (const [key, owner] of reachableSources) {
           if (owner.connectionId === connection.id && owner.endpointIdentity === endpointIdentity) reachableSources.delete(key);
         }
@@ -335,7 +346,7 @@ export function createManagedRemoteTargetRegistry(options: ManagedRemoteTargetRe
     }
     // A machine may have multiple configured connections. Never substitute the
     // registry's preferred machine connection for this Source's actual endpoint.
-    const target = await probe(connection, signal, true);
+    const target = await probe(connection, signal);
     if (target.hostId !== owner.hostId) throw new Error('The original managed source Host identity changed');
     return target;
   };
@@ -345,8 +356,8 @@ export function createManagedRemoteTargetRegistry(options: ManagedRemoteTargetRe
     signal?.throwIfAborted();
     const configured = configuredHosts(await options.readSettings());
     const direct = configured.find(connection => connection.id === targetId);
-    if (direct) { managedEndpointIdentity(direct); return probe(direct, signal, true); }
-    const results = await Promise.allSettled(configured.map(async connection => { managedEndpointIdentity(connection); return probe(connection, signal, true); }));
+    if (direct) { managedEndpointIdentity(direct); return probe(direct, signal); }
+    const results = await Promise.allSettled(configured.map(async connection => { managedEndpointIdentity(connection); return probe(connection, signal); }));
     signal?.throwIfAborted();
     const selected = results.find((result): result is PromiseFulfilledResult<ManagedTarget> =>
       result.status === 'fulfilled' && result.value.machineId === targetId);

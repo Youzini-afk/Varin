@@ -211,12 +211,14 @@ const tryRelayFetch = async (
   requestInit: RequestInit,
   query?: RuntimeUrlQuery,
 ): Promise<Response | null> => {
+  const generation = getRuntimeEndpointGeneration();
   const relay = getActiveRelayTunnel();
   if (!relay) return null;
   const path = extractRelayPath(input, query);
   if (path === null) return null;
   const inputHeaders = input instanceof Request ? input.headers : undefined;
   const headers = await mergeHeaders(inputHeaders, requestInit.headers, true);
+  if (generation !== getRuntimeEndpointGeneration()) throw new Error('Application Host changed before request dispatch');
   if (input instanceof Request) {
     // Forward the Request itself — the tunnel reads its method/body/signal
     // natively (incl. stream bodies). Re-wrapping as `new Request(path, input)`
@@ -334,57 +336,26 @@ export const installRuntimeFetchBridge = (): void => {
   const nativeFetch = window.fetch.bind(window);
   nativeFetchDelegate = nativeFetch;
   window.fetch = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+    const generation = getRuntimeEndpointGeneration();
+    const raw = input instanceof Request ? input.url : String(input);
+    const resolve = shouldResolveFetchInput(raw);
+    let active = false;
+    if (!resolve) {
+      try { active = isActiveRuntimeServiceUrl(new URL(raw)); } catch { /* Not an absolute runtime URL. */ }
+    }
     const relayResponse = await tryRelayFetch(input, init ?? {});
     if (relayResponse) return relayResponse;
-    if (typeof input === 'string') {
-      if (!shouldResolveFetchInput(input)) {
-        try {
-          const url = new URL(input);
-          if (isActiveRuntimeServiceUrl(url)) {
-            const headers = await mergeHeaders(undefined, init?.headers);
-            return fetchWithoutRuntimeRouting(input, { ...init, headers });
-          }
-        } catch {
-          // Non-URL fetch inputs should fall through unchanged.
-        }
-        return fetchWithoutRuntimeRouting(input, init);
-      }
-      const headers = await mergeHeaders(undefined, init?.headers);
-      return fetchWithoutRuntimeRouting(buildRuntimeFetchUrl(input), { ...init, headers });
-    }
+    if (!resolve && !active) return fetchWithoutRuntimeRouting(input, init);
 
-    if (input instanceof URL) {
-      const raw = input.toString();
-      if (!shouldResolveFetchInput(raw)) {
-        if (isActiveRuntimeServiceUrl(input)) {
-          const headers = await mergeHeaders(undefined, init?.headers);
-          return fetchWithoutRuntimeRouting(input, { ...init, headers });
-        }
-        return fetchWithoutRuntimeRouting(input, init);
-      }
-      const headers = await mergeHeaders(undefined, init?.headers);
-      return fetchWithoutRuntimeRouting(buildRuntimeFetchUrl(raw), { ...init, headers });
-    }
-
+    const headers = await mergeHeaders(input instanceof Request ? input.headers : undefined, init?.headers);
+    // The global bridge has the same dispatch boundary as runtimeFetch. Do not
+    // resolve the old caller's mutation with a newer Host or its credentials.
+    if (generation !== getRuntimeEndpointGeneration()) throw new Error('Application Host changed before request dispatch');
+    const target = resolve ? buildRuntimeFetchUrl(raw) : raw;
     if (input instanceof Request) {
-      if (!shouldResolveFetchInput(input.url)) {
-        try {
-          const url = new URL(input.url);
-          if (isActiveRuntimeServiceUrl(url)) {
-            const headers = await mergeHeaders(input.headers, init?.headers);
-            return fetchWithoutRuntimeRouting(new Request(input, { ...init, headers }));
-          }
-        } catch {
-          // Non-URL request inputs should fall through unchanged.
-        }
-        return fetchWithoutRuntimeRouting(input, init);
-      }
-      const headers = await mergeHeaders(input.headers, init?.headers);
-      const target = buildRuntimeFetchUrl(input.url);
       const request = target === input.url ? input : new Request(target, input);
       return fetchWithoutRuntimeRouting(new Request(request, { ...init, headers }));
     }
-
-    return fetchWithoutRuntimeRouting(input, init);
+    return fetchWithoutRuntimeRouting(resolve ? target : input, { ...init, headers });
   };
 };

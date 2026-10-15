@@ -87,17 +87,21 @@ const getTargetParam = (req: ProxyRequest): URL | null => {
   }
 };
 
-const urlsMatchRuntime = (target: URL, apiBaseUrl: unknown): boolean => {
+const runtimeTargetPath = (target: URL, apiBaseUrl: unknown): string | null => {
   const base = normalizeBaseUrl(apiBaseUrl);
-  if (!base) return false;
+  if (!base || target.username || target.password || target.hash) return null;
   try {
     const baseUrl = new URL(base);
+    if (!['http:', 'https:'].includes(baseUrl.protocol) || baseUrl.username || baseUrl.password) return null;
     const targetForCompare = new URL(target.toString());
     if (targetForCompare.protocol === 'ws:') targetForCompare.protocol = 'http:';
     if (targetForCompare.protocol === 'wss:') targetForCompare.protocol = 'https:';
-    return targetForCompare.origin === baseUrl.origin;
+    if (targetForCompare.origin !== baseUrl.origin) return null;
+    const mount = baseUrl.pathname.replace(/\/+$/u, '');
+    if (!target.pathname.startsWith(`${mount}/`)) return null;
+    return target.pathname.slice(mount.length);
   } catch {
-    return false;
+    return null;
   }
 };
 
@@ -106,13 +110,8 @@ const protocolMatchesProxyType = (target: URL, type: ProxyType): boolean => {
   return target.protocol === 'http:' || target.protocol === 'https:';
 };
 
-const isObservationTarget = (target: URL, apiBaseUrl: string): boolean => {
-  const mount = new URL(apiBaseUrl).pathname.replace(/\/+$/u, '');
-  return target.pathname === `${mount}/api/varin/observations/ws`;
-};
-
-const pathMatchesProxyType = (target: URL, type: ProxyType, observation: boolean): boolean => {
-  return type === 'ws' ? observation || isAllowedWebSocketPath(target.pathname) : isAllowedSsePath(target.pathname);
+const pathMatchesProxyType = (path: string, type: ProxyType, observation: boolean): boolean => {
+  return type === 'ws' ? observation || isAllowedWebSocketPath(path) : isAllowedSsePath(path);
 };
 
 const resolveProxyTarget = (
@@ -126,9 +125,10 @@ const resolveProxyTarget = (
   const target = getTargetParam(req);
   if (!target || !apiBaseUrl || !hasHeaders(requestHeaders)) return null;
   if (!protocolMatchesProxyType(target, type)) return null;
-  if (!urlsMatchRuntime(target, apiBaseUrl)) return null;
-  const observation = type === 'ws' && isObservationTarget(target, apiBaseUrl);
-  if (!pathMatchesProxyType(target, type, observation)) return null;
+  const path = runtimeTargetPath(target, apiBaseUrl);
+  if (path === null) return null;
+  const observation = type === 'ws' && path === '/api/varin/observations/ws';
+  if (!pathMatchesProxyType(path, type, observation)) return null;
   return { target, requestHeaders, observation };
 };
 
@@ -217,6 +217,7 @@ export const attachRealtimeProxy = ({
       const response = await fetch(resolved.target.toString(), {
         headers: buildSseRequestHeaders(req, resolved.requestHeaders),
         signal: abort.signal,
+        redirect: 'error',
       });
       if (!response.ok || !response.body) {
         res.status(response.status || 502).end();
@@ -261,7 +262,7 @@ export const attachRealtimeProxy = ({
       for (const name of Object.keys(headers)) if (name.toLowerCase() === 'origin') delete headers[name];
       headers.Origin = origin.origin;
     }
-    const upstream = new WebSocket(resolved.target.toString(), { headers });
+    const upstream = new WebSocket(resolved.target.toString(), { headers, followRedirects: false });
     const pending: Array<[RawData, boolean]> = [];
 
     const flush = () => {
