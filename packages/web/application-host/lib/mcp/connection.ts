@@ -6,7 +6,7 @@ import { StdioTransport, StreamableHttpTransport, McpSessionExpiredError, type M
 import { mcpEnvironmentBindings, mcpEnvironmentCurrent, type McpServerEntry } from './configuration.js';
 import { randomUUID } from 'node:crypto';
 import { resolve } from 'node:path';
-import { McpOAuthCredentialStore, mcpAuthProvider, type McpOAuthSettings } from './auth.js';
+import { McpOAuthCredentialStore, mcpAuthProvider, mcpOAuthFetch, type McpOAuthSettings } from './auth.js';
 export { signInMcpServer, type McpSignInPrompt } from './auth.js';
 export type McpTransportFactory = (entry: McpServerEntry, cwd: string, authProvider: AuthProvider | undefined) => McpTransport;
 const environments = new WeakMap<McpServerEntry, Readonly<Record<string, string | undefined>>>();
@@ -83,6 +83,12 @@ export class McpServerConnection {
     if (settings.clientSecret !== undefined) settings.clientSecret = resolveValue(settings.clientSecret, this.environmentBindings);
     return settings;
   }
+  oauthFetch(): typeof globalThis.fetch {
+    const config = this.entry.config;
+    if (!('url' in config)) throw new Error('MCP OAuth requires an HTTP server');
+    const headers = Object.fromEntries(Object.entries(config.headers ?? {}).map(([key, value]) => [key, resolveValue(value, this.environmentBindings)]));
+    return mcpOAuthFetch(config.url, headers, this.options.fetch);
+  }
   async getClient(): Promise<McpClient> {
     this.#shutdown.signal.throwIfAborted();
     if (this.#client?.connectionState === 'connected') return this.#client;
@@ -99,7 +105,7 @@ export class McpServerConnection {
       const config = this.entry.config;
       const provider = 'url' in config ? config.auth?.provider : undefined;
       const authorization: AuthProvider | undefined = provider ? { token: () => this.options.providerToken?.(provider) ?? Promise.resolve(undefined) }
-        : this.oauthUrl ? mcpAuthProvider(this.name, this.oauthUrl, this.options.credentials, this.oauthSettings(), this.options.fetch) : undefined;
+        : this.oauthUrl ? mcpAuthProvider(this.name, this.oauthUrl, this.options.credentials, this.oauthSettings(), this.oauthFetch()) : undefined;
       const transport = this.options.createTransport(this.entry, this.options.cwd, authorization);
       const opened = new McpClient({ name: 'Varin', version: '1', ...(this.options.clientCapabilities ? { capabilities: this.options.clientCapabilities } : {}) });
       client = opened;

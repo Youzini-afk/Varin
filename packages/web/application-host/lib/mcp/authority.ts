@@ -1474,7 +1474,7 @@ export class McpAuthority {
         assertCurrent(); await store.save(state); expectedGrant = this.#oauthGrant(scope.scope, connection);
       } },
       settings: connection.oauthSettings(), ...(connection.challenge ? { challenge: connection.challenge } : {}), prompt,
-      ...(this.#options.fetch ? { fetch: this.#options.fetch } : {}) });
+      fetch: connection.oauthFetch() });
     this.#revokeDefinitionCredentials(scope.scope.agentDir, record.entry.name, connection.oauthUrl);
     for (const candidate of this.#pool.values()) if (candidate.scope.agentDir === scope.scope.agentDir
       && candidate.entry.name === record.entry.name && candidate.connection.oauthUrl === connection.oauthUrl) this.#revoke(candidate);

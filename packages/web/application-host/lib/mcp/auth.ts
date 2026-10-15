@@ -50,6 +50,9 @@ export class McpOAuthCredentialStore {
   #key(name: string, url: string) { return `mcp:${createHash('sha256').update(JSON.stringify([name, url])).digest('hex')}`; }
   #record(name: string, url: string): { account: string; state: McpOAuthState } | undefined {
     const key = this.#key(name, url), document = this.#document;
+    // Keep the last valid bytes for recovery, but an unsuccessful reload cannot prove
+    // that their grant is still current. Do not dispatch with a stale credential.
+    if (this.#error !== undefined) throw new Error('MCP credential store is unavailable');
     if (!document) throw this.#error ?? new Error('MCP credentials have not been prepared');
     if (!Object.hasOwn(document, key)) return undefined;
     const value = document[key];
@@ -96,13 +99,47 @@ export class McpOAuthCredentialStore {
     };
   }
 }
+/** Service headers belong only to the configured resource origin. SDK OAuth headers
+ * take precedence, and credential-bearing requests cannot acquire a redirect target. */
+export function mcpOAuthFetch(serverUrl: string, serviceHeaders: Record<string, string>, fetchImpl: typeof globalThis.fetch = globalThis.fetch): typeof globalThis.fetch {
+  const origin = new URL(serverUrl).origin;
+  let configured: Headers;
+  try { configured = new Headers(serviceHeaders); }
+  catch { throw new TypeError('MCP OAuth headers are invalid'); }
+  return async (input, init) => {
+    const request = input instanceof Request ? input : undefined;
+    const sameOrigin = new URL(request?.url ?? String(input)).origin === origin;
+    const headers = new Headers(sameOrigin ? configured : undefined);
+    const protectedRequest = sameOrigin && [...configured].length > 0;
+    new Headers(init?.headers ?? request?.headers).forEach((value, key) => headers.set(key, value));
+    try {
+      const response = await fetchImpl(input, { ...init, headers, ...(protectedRequest ? { redirect: 'error' } : {}) });
+      // A custom fetch port may expose a redirect response instead of enforcing error.
+      // Reject it here too, before the SDK's same-origin redirect loop can follow it.
+      if (protectedRequest && (response.type === 'opaqueredirect' || [301, 302, 303, 307, 308].includes(response.status))) {
+        await response.body?.cancel(); throw new TypeError('MCP OAuth HTTP request failed');
+      }
+      return response;
+    } catch (error) {
+      if (protectedRequest) throw new TypeError('MCP OAuth HTTP request failed');
+      throw error;
+    }
+  };
+}
 export function oauthProvider(options: { store: Pick<McpOAuthServerStore, 'load' | 'save'>; settings: McpOAuthSettings; redirectUrl: string; redirect?(url: URL): void; replace?: boolean }): OAuthClientProvider {
   const update = async (patch: Partial<McpOAuthState>) => options.store.save({ ...options.store.load(), ...patch });
   return {
     redirectUrl: options.redirectUrl,
     clientMetadata: { client_name: options.settings.clientName ?? 'Varin', redirect_uris: [options.redirectUrl], grant_types: ['authorization_code', 'refresh_token'], response_types: ['code'], token_endpoint_auth_method: options.settings.clientSecret ? 'client_secret_post' : 'none', ...(options.settings.scope ? { scope: options.settings.scope } : {}) } as OAuthClientMetadata,
     state: () => options.store.load()?.state ?? '',
-    clientInformation: () => options.settings.clientId ? { client_id: options.settings.clientId, ...(options.settings.clientSecret ? { client_secret: options.settings.clientSecret } : {}) } : options.store.load()?.client,
+    clientInformation: () => {
+      const saved = options.store.load()?.client;
+      if (!options.settings.clientId) return saved;
+      // The SDK stamps configured clients too. Preserve that original issuer evidence
+      // instead of presenting the same secret as a fresh, unbound client every time.
+      const configured = { client_id: options.settings.clientId, ...(options.settings.clientSecret ? { client_secret: options.settings.clientSecret } : {}) };
+      return saved?.client_id === configured.client_id && saved.client_secret === configured.client_secret ? saved : configured;
+    },
     saveClientInformation: client => update({ client }),
     tokens: () => options.store.load()?.tokens,
     saveTokens: tokens => {
@@ -149,8 +186,9 @@ export async function signInMcpServer(options: { serverUrl: string; store: Pick<
   const arrived = new Promise<URL>(resolve => { callback = resolve; });
   const server = createServer((request, response) => {
     const url = new URL(request.url ?? '/', 'http://127.0.0.1');
-    if (url.searchParams.get('state') !== state || !url.searchParams.get('code')) { response.writeHead(400).end('Invalid sign-in callback'); return; }
-    response.writeHead(200, { 'content-type': 'text/plain; charset=utf-8' }).end('Signed in. You can return to Varin.'); callback(url);
+    if (url.searchParams.get('state') !== state || !url.searchParams.get('code') && !url.searchParams.get('error')) { response.writeHead(400).end('Invalid sign-in callback'); return; }
+    response.writeHead(200, { 'content-type': 'text/plain; charset=utf-8' }).end(url.searchParams.get('error')
+      ? 'Sign-in was not authorized. You can return to Varin.' : 'Signed in. You can return to Varin.'); callback(url);
   });
   const configured = options.settings.callbackUrl ? new URL(options.settings.callbackUrl) : undefined;
   if (configured && (configured.protocol !== 'http:' || !['localhost', '127.0.0.1', '[::1]'].includes(configured.hostname))) throw new Error('OAuth callback must use a local HTTP address');
@@ -171,7 +209,9 @@ export async function signInMcpServer(options: { serverUrl: string; store: Pick<
     const manual = options.prompt.promptForRedirectUrl(signal).then(value => value ? new URL(value) : Promise.reject(new Error('MCP sign-in cancelled')));
     const url = await waitWithSignal(Promise.race([arrived, manual]), signal);
     controller.abort();
-    if (url.searchParams.get('state') !== state || !url.searchParams.get('code')) throw new Error('Invalid sign-in callback');
+    if (url.searchParams.get('state') !== state) throw new Error('Invalid sign-in callback');
+    if (url.searchParams.get('error')) throw new Error('MCP sign-in was not authorized');
+    if (!url.searchParams.get('code')) throw new Error('Invalid sign-in callback');
     const authorizationCode = url.searchParams.get('code')!;
     if (await auth(provider, { ...authOptions, authorizationCode, ...(url.searchParams.get('iss') ? { iss: url.searchParams.get('iss')! } : {}) }) !== 'AUTHORIZED') throw new Error('MCP sign-in did not complete');
   } finally { controller.abort(); await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve())); }
