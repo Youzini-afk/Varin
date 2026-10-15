@@ -43,7 +43,7 @@ import type { ImageAttachment, InferenceBinding, InferenceReceipt } from '@varin
 import { ImageAttachmentStrip } from '@/components/chat/composer/ImageAttachmentStrip';
 import { fileToImageAttachment } from '@/components/chat/composer/imageAttachments';
 import { fileToBase64 } from '@/components/chat/composer/fileAttachments';
-import { useI18n } from '@/lib/i18n';
+import { useI18n, type I18nKey } from '@/lib/i18n';
 import { subscribeVarinEvents } from '@/lib/varinEvents';
 import React from 'react';
 import { createModelConnectionsHttpAPI, threadSourceFailureMessage, ThreadRequestError, getRuntimeEndpointGeneration, subscribeRuntimeEndpointChanged } from '@varin/application-client';
@@ -63,6 +63,17 @@ import { ThreadProjection } from '@/lib/agent-runtime/thread-projection';
 import { ThreadOutput } from './ThreadMedia';
 import { ThreadInputQueue } from './ThreadQueuedInput';
 import { ChildTasks } from '../conversation/ChildTasks';
+
+// Presentation of owner-defined failure codes; unknown codes keep the owner's safe message.
+const runFailureKeys = new Map<string, I18nKey>([
+  ['context_candidate_capacity', 'harness.threads.failure.context_candidate_capacity'],
+  ['context_capacity', 'harness.threads.failure.context_capacity'],
+  ['context_background_disabled', 'harness.threads.failure.context_background_disabled'],
+  ['context_compaction_failed', 'harness.threads.failure.context_compaction_failed'],
+  ['context_policy_unavailable', 'harness.threads.failure.context_policy_unavailable'],
+  ['context_preparation_failed', 'harness.threads.failure.context_preparation_failed'],
+  ['execution_failed', 'harness.threads.failure.execution_failed'],
+]);
 
 const operationCancelLabel = (operation: ThreadSnapshot['operations'][number]): string => {
   if ((operation.intent as { kind?: string } | null)?.kind === 'inference_request_v1') return 'Stop inference request';
@@ -285,6 +296,8 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
   React.useEffect(() => { if (workRevision) onWorkChanged?.(); }, [workRevision, onWorkChanged]);
   const branch = snapshot?.thread.branches.find(value => value.branch_id === identity.branchId);
   const run = snapshot?.activeRun ?? branch?.latest_run;
+  const runFailure = snapshot?.runFailure?.runId === run?.id ? snapshot?.runFailure : null;
+  const runFailureKey = runFailure && runFailureKeys.get(runFailure.code);
   const samplingConfiguration = (snapshot?.modelSelection.active?.configuration ?? run?.configuration) as
     { providerId?: string; model?: string; thinkingLevel?: ThreadThinkingLevel; catalogModelId?: string; modelOptions?: { temperature?: number } } | undefined;
   const samplingModel: ThreadModel | undefined = samplingConfiguration?.providerId && samplingConfiguration.model ? {
@@ -566,7 +579,7 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
     {overview}
     {!historyView && run?.state === 'failed' && <div role="alert" aria-label="Run failed" className="mx-auto w-full max-w-3xl px-4 py-2 text-sm text-destructive">
       <p>{t('harness.threads.state.failed')}</p>
-      {snapshot?.runFailure?.runId === run.id && <p>{snapshot.runFailure.message}</p>}
+      {runFailure && <p>{runFailureKey ? t(runFailureKey) : runFailure.message}</p>}
     </div>}
     {!historyView && run?.state === 'cancelled' && <p role="status" aria-label="Run cancelled" className="mx-auto w-full max-w-3xl px-4 py-2 text-sm text-muted-foreground">{t('harness.threads.state.cancelled')}</p>}
     {contextRunId && <ContextHistoryDialog key={`${draftKey}:${contextRunId}`} api={api} identity={identity} runId={contextRunId} onClose={() => setContextRunId(undefined)} />}
