@@ -497,7 +497,7 @@ export const VARIN_BUILTIN_TYPESCRIPT_LANGUAGE_EXTENSION: VarinBuiltinExtensionD
   enabledByDefault: true,
   manifest: {
     capabilities: { host: ["workspace.language"] },
-    displayName: "TypeScript and JavaScript Language Service",
+    displayName: "Language Service",
     engines: { varin: "*" },
     entrypoints: {
       host: {
