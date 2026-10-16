@@ -36,6 +36,11 @@ export interface AgentMemoryChange {
   id: number;
   note: AgentMemoryNote | null;
 }
+/** Current settings resources, independent of any execution checkpoint. */
+export interface AgentSystemPromptPreview {
+  original: Record<string, string>;
+  projectId?: string;
+}
 export interface AgentSystemPromptSnapshot {
   threadId: string;
   mode: "agent" | "bot";
@@ -71,7 +76,7 @@ export function renderAgentSystemPrompt(sections: Record<string, string>): strin
     .map(([key, value]) => key === "preamble" ? value : `<${key}>\n${value}\n</${key}>`).join("\n\n");
 }
 
-export function personalizeAgentSystemPrompt(original: Record<string, string>, context: AgentPersonalizationContext): Record<string, string> {
+export function personalizeAgentSystemPrompt(original: Record<string, string>, context: Pick<AgentPersonalizationContext, 'mode' | 'revision' | 'profiles' | 'memories'> & Partial<AgentPersonalizationContext>): Record<string, string> {
   const sections = { ...original };
   if (context.mode === "bot") return sections;
   for (const { profile } of context.profiles) for (const [key, value] of Object.entries(profile.sections)) {

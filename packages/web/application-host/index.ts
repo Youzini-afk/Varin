@@ -1583,13 +1583,14 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   const projectTrust = new ProjectTrustService(VARIN_DATA_DIR, (id, signal) => documentsAuthority.admitWorkspaceRegistration(id, signal));
   registerProjectTrustRoutes(app, projectTrust, uiAuthController.requireAuth);
   const modelsService = new ModelsService(VARIN_DATA_DIR, { projectTrusted: cwd => projectTrust.trusted(cwd), fetch: egressRuntime.fetch as typeof globalThis.fetch });
-  registerResourceManagementRoutes(app, createResourceManagement({ dataDirectory: VARIN_DATA_DIR, documents: documentsAuthority, settings: modelsService.settings,
+  const resourceManagement = createResourceManagement({ dataDirectory: VARIN_DATA_DIR, documents: documentsAuthority, settings: modelsService.settings,
     resolveProjectRoot: async projectId => {
       const projects = sanitizeProjects((await readSettingsFromDisk()).projects) ?? [];
       const project = projects.find(entry => entry.id === projectId);
       return project?.path ?? null;
     },
-  }), uiAuthController.requireAuth);
+  });
+  registerResourceManagementRoutes(app, resourceManagement, uiAuthController.requireAuth);
   const modelExtensions = new ModelsExtensionOwner(extensionRuntime, modelsService, {
     publish: input => kernelClient.publishModelAdapters(input), revoke: bindingId => kernelClient.revokeModelAdapter(bindingId),
     retain: (bindingId, leaseId) => kernelClient.retainModelAdapter(bindingId, leaseId), release: leaseId => kernelClient.releaseModelAdapter(leaseId),
@@ -2173,7 +2174,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     ...(uiAuthController ? { requireAuth: uiAuthController.requireAuth } : {}),
     ...(uiAuthController?.resolveAuthContext ? { resolveAuthContext: uiAuthController.resolveAuthContext } : {}),
   });
-  registerAgentPersonalizationRoutes(app, agentPersonalization, uiAuthController?.requireAuth ?? ((_req, _res, next) => next()));
+  registerAgentPersonalizationRoutes(app, agentPersonalization, uiAuthController?.requireAuth ?? ((_req, _res, next) => next()), resourceManagement.prompt);
   registerThreadMemoryRoutes(app, createThreadMemory({ history: botHistory, memory: memoryService,
     narrate: (scopeId, system, prompt, signal, selection) => memoryOrganizer.extractSelection(scopeId, system, prompt, signal, selection) }),
     uiAuthController?.requireAuth ?? ((_request, _response, next) => next()));

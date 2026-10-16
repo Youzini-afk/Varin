@@ -45,7 +45,7 @@ it('production scope resolution and HTTP notes share persisted identity, exact C
   const resolve = createPersonalizationContextResolver({ runtime: () => runtime });
   const service = createAgentPersonalization({ client: f.client, context: resolve });
   const app = express(); registerCommonRequestMiddleware(app, { express });
-  registerAgentPersonalizationRoutes(app, service, (_req, _res, next) => next());
+  registerAgentPersonalizationRoutes(app, service, (_req, _res, next) => next(), async () => { throw new Error('Prompt preview is outside this memory fixture'); });
   const put = (scope: unknown, content: string, revision: number) => request(app).put('/api/agent-personalization/memory').send({ scope, content, revision });
   const global = await put({ kind: 'global' }, 'HTTP_GLOBAL', 0).expect(200);
   await put({ kind: 'project', id: 'project-a' }, 'HTTP_PROJECT_A', global.body.revision).expect(200);

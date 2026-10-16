@@ -23,6 +23,26 @@ async function fixture() {
 }
 
 describe('native resource management', () => {
+  it('previews current system resources before a conversation exists', async () => {
+    const { owner, data, project, setTrusted } = await fixture();
+    expect((await owner.prompt({})).original.preamble).toContain('You are Varin');
+    await fs.mkdir(path.join(data, 'resources'), { recursive: true });
+    await fs.writeFile(path.join(data, 'resources', 'SYSTEM.md'), 'Current global identity');
+    await fs.writeFile(path.join(data, 'resources', 'APPEND_SYSTEM.md'), 'Appended instructions');
+    await owner.create({}, { scope: 'user', name: 'review', content: skill('review'), key: 'preview-skill' });
+    const global = await owner.prompt({});
+    expect(global.original).toMatchObject({ preamble: 'Current global identity', append_system: 'Appended instructions' });
+    expect(global.original.skills).toContain('review');
+    await fs.mkdir(path.join(project, '.varin', 'resources'), { recursive: true });
+    await fs.writeFile(path.join(project, '.varin', 'resources', 'SYSTEM.md'), 'Project identity');
+    await fs.writeFile(path.join(project, 'AGENTS.md'), 'Project rules');
+    const scoped = await owner.prompt({ projectId: 'project-1' });
+    expect(scoped.original.preamble).toBe('Project identity');
+    expect(scoped.original.workspace_instructions).toContain('Project rules');
+    expect((await owner.prompt({})).original.workspace_instructions).toBeUndefined();
+    setTrusted(false);
+    expect((await owner.prompt({ projectId: 'project-1' })).original.preamble).toBe('Current global identity');
+  });
   it('creates, reads, updates and removes global skills without any Thread or project', async () => {
     const { owner, data } = await fixture();
     expect((await owner.list({})).resources).toEqual([]);

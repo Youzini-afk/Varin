@@ -22,24 +22,17 @@ export function AppearanceThemePreview({ lightTheme, darkTheme }: { lightTheme?:
   const dark = darkTheme ?? getDefaultTheme(true);
   const modes: ThemeMode[] = ['light', 'dark', 'system'];
   return <div className="mb-8 grid min-w-0 gap-7 @3xl:grid-cols-2 @3xl:items-center">
-    <div className="min-w-0 space-y-5">
-      <div>
-        <p className="mb-2 typography-micro tracking-widest text-muted-foreground">VARIN · WORKSPACE</p>
-        <h2 className="text-xl font-medium tracking-tight">{t('settings.appearance.preview.title')}</h2>
-        <p className="mt-2 typography-meta text-muted-foreground">{t('settings.appearance.preview.description')}</p>
-      </div>
-      <div className="grid grid-cols-3 gap-3" role="group" aria-label={t('settings.varin.visual.section.colorMode')}>
-        {modes.map(mode => <button key={mode} type="button" aria-pressed={themeMode === mode} onClick={() => setThemeMode(mode)}
-          className="group min-w-0 rounded-lg text-center focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
-          <span className={cn('relative block h-16 overflow-hidden rounded-lg border transition-shadow', themeMode === mode ? 'border-foreground ring-2 ring-foreground ring-offset-2 ring-offset-background' : 'border-border group-hover:border-foreground/40')}>
-            <ThemeMiniature theme={mode === 'dark' ? dark : light} />
-            {mode === 'system' && <span className="absolute inset-0" style={{ clipPath: 'polygon(60% 0, 100% 0, 100% 100%, 40% 100%)' }}><ThemeMiniature theme={dark} /></span>}
-          </span>
-          <span className="mt-2 flex items-center justify-center gap-1 typography-meta text-muted-foreground">
-            {t(`settings.varin.visual.option.themeMode.${mode}`)}{themeMode === mode && <Icon name="check" className="size-3" />}
-          </span>
-        </button>)}
-      </div>
+    <div className="grid min-w-0 grid-cols-3 gap-3" role="group" aria-label={t('settings.varin.visual.section.colorMode')}>
+      {modes.map(mode => <button key={mode} type="button" aria-pressed={themeMode === mode} onClick={() => setThemeMode(mode)}
+        className="group min-w-0 rounded-lg text-center focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+        <span className={cn('relative block h-16 overflow-hidden rounded-lg border transition-shadow', themeMode === mode ? 'border-foreground ring-2 ring-foreground ring-offset-2 ring-offset-background' : 'border-border group-hover:border-foreground/40')}>
+          <ThemeMiniature theme={mode === 'dark' ? dark : light} />
+          {mode === 'system' && <span className="absolute inset-0" style={{ clipPath: 'polygon(60% 0, 100% 0, 100% 100%, 40% 100%)' }}><ThemeMiniature theme={dark} /></span>}
+        </span>
+        <span className="mt-2 flex items-center justify-center gap-1 typography-meta text-muted-foreground">
+          {t(`settings.varin.visual.option.themeMode.${mode}`)}{themeMode === mode && <Icon name="check" className="size-3" />}
+        </span>
+      </button>)}
     </div>
     <div className="overflow-hidden rounded-xl border border-border/60 shadow-sm" aria-label={t('settings.appearance.preview.workspace')}
       style={{ background: currentTheme.colors.surface.background, color: currentTheme.colors.surface.foreground }}>

@@ -14,6 +14,8 @@ import { isLocalPattern, readResourceSettings } from './configuration.js';
 import { parseSkill } from './formats.js';
 import { readAgentResourceConfiguration, resourceDirectory } from './packages.js';
 import { contentVersion, createAdmittedDirectoryReader } from './source-reader.js';
+import { agentSystemSections } from './render.js';
+import type { AgentSystemPromptPreview } from '@varin/protocol';
 
 export class ResourceManagementFailure extends Error {
   constructor(readonly status: number, readonly code: string, message: string) { super(message); }
@@ -61,7 +63,8 @@ export function createResourceManagement(deps: ResourceManagementDependencies) {
     await deps.documents.ensureResourceRoot(admitted, 'directory');
     return { reader: await createAdmittedDirectoryReader({ root: admitted, domainId: `resource-management:${name}`, viewId: `current:${contentVersion(admitted)}` }), displayRoot: admitted, ...(directory ? { directory } : {}) };
   }
-  async function catalog(target: ResourceManagementTarget, signal?: AbortSignal) {
+  async function withCurrentScope<T>(target: ResourceManagementTarget,
+    consume: (scope: ResourceCatalogScope, context: Awaited<ReturnType<typeof targetScope>>) => Promise<T>, signal?: AbortSignal): Promise<T> {
     signal?.throwIfAborted();
     const context = await targetScope(target);
     const { dataRoot, projectRoot, projectTrusted, assertTrust } = context;
@@ -103,46 +106,53 @@ export function createResourceManagement(deps: ResourceManagementDependencies) {
       }
     }
     assertTrust();
-    const result = await authority.inspect(scope, signal);
-    if (result.status !== 'ready') throw new ResourceManagementFailure(result.status === 'invalid' ? 422 : result.status === 'denied' ? 403 : 503, `resource-${result.status}`, result.reason);
+    const result = await consume(scope, context);
     const after = await deps.settings.snapshot(projectRoot);
     assertTrust();
     if (snapshot.globalRevision !== after.globalRevision || snapshot.projectRevision !== after.projectRevision) conflict('Resource configuration changed. Reload resources.');
-    const active = new Set(result.skills.map(skill => skill.reference.canonicalId));
-    const candidates = new Map<string, ResourceCatalogCandidate>();
-    const descriptors = new Map<string, NativeResourceDescriptor>();
-    const writableRoots = new Map<string, string>();
-    for (const candidate of result.candidates) {
-      const id = resourceId(candidate.file.reference.canonicalId);
-      if (candidates.has(id)) continue;
-      candidates.set(id, candidate);
-      const filePath = candidate.file.reference.canonicalId.slice(5);
-      let metadata: ReturnType<typeof parseSkill>['metadata'] = null;
-      try { metadata = parseSkill(candidate.file.content, filePath).metadata; } catch { /* Invalid assets stay editable. */ }
-      const sourceScope = nativeScope(candidate);
-      const conventionalRoots = sourceScope === 'user'
-        ? [path.join(resourceDirectory(dataRoot), 'skills'), path.join(deps.userAgentsDirectory ?? path.join(homedir(), '.agents'), 'skills')]
-        : [path.join(resourceDirectory(dataRoot, projectRoot), 'skills'), path.join(projectRoot!, '.agents', 'skills')];
-      const declaredPath = path.resolve(candidate.domain.displayRoot!, candidate.file.reference.path);
-      // Configured external and package roots are read-only. Native convention roots are editable;
-      // even an internal symlink does not become a write selector.
-      const writableRoot = candidate.origin !== 'package' && declaredPath === filePath ? conventionalRoots.find(root => isPathWithinRoot(filePath, root)) : undefined;
-      const writable = writableRoot !== undefined;
-      if (writableRoot) writableRoots.set(id, writableRoot);
-      descriptors.set(id, { id, kind: 'skill', filePath, name: metadata?.name ?? path.basename(path.dirname(filePath)), description: metadata?.description ?? '',
-        valid: !!metadata, active: active.has(candidate.file.reference.canonicalId), writable,
-        ...(metadata ? { disableModelInvocation: metadata.disableModelInvocation } : {}),
-        sourceInfo: { origin: candidate.origin === 'package' ? 'package' : 'top-level', scope: sourceScope, path: candidate.domain.displayRoot!,
-          source: candidate.packageIdentity ?? (sourceScope === 'user' ? 'Native user resources' : 'Native project resources'), baseDir: path.dirname(filePath) } });
-    }
-    const diagnostics = result.diagnostics.map(diagnostic => {
-      const candidate = result.candidates.find(item => item.file.reference.domainId === diagnostic.location?.domainId && item.file.reference.viewId === diagnostic.location?.viewId && item.file.reference.path === diagnostic.location?.path);
-      const descriptor = candidate && descriptors.get(resourceId(candidate.file.reference.canonicalId));
-      return { kind: diagnostic.kind, message: diagnostic.message, ...(diagnostic.location ? { path: descriptor?.filePath ?? diagnostic.location.path } : {}),
-        ...(descriptor ? { resourceId: descriptor.id } : {}),
-        ...(diagnostic.kind === 'collision' && diagnostic.winner && descriptor ? { collision: { winnerPath: diagnostic.winner.canonicalId.slice(5), loserPath: descriptor.filePath, name: descriptor.name, resourceType: 'skill' as const } } : {}) };
-    });
-    return { ...context, candidates, descriptors, writableRoots, snapshot: { resources: [...descriptors.values()], projectTrusted, diagnostics } satisfies NativeResourceCatalogSnapshot };
+    return result;
+  }
+  async function catalog(target: ResourceManagementTarget, signal?: AbortSignal) {
+    return withCurrentScope(target, async (scope, context) => {
+      const { dataRoot, projectRoot, projectTrusted } = context;
+      const result = await authority.inspect(scope, signal);
+      if (result.status !== 'ready') throw new ResourceManagementFailure(result.status === 'invalid' ? 422 : result.status === 'denied' ? 403 : 503, `resource-${result.status}`, result.reason);
+      const active = new Set(result.skills.map(skill => skill.reference.canonicalId));
+      const candidates = new Map<string, ResourceCatalogCandidate>();
+      const descriptors = new Map<string, NativeResourceDescriptor>();
+      const writableRoots = new Map<string, string>();
+      for (const candidate of result.candidates) {
+        const id = resourceId(candidate.file.reference.canonicalId);
+        if (candidates.has(id)) continue;
+        candidates.set(id, candidate);
+        const filePath = candidate.file.reference.canonicalId.slice(5);
+        let metadata: ReturnType<typeof parseSkill>['metadata'] = null;
+        try { metadata = parseSkill(candidate.file.content, filePath).metadata; } catch { /* Invalid assets stay editable. */ }
+        const sourceScope = nativeScope(candidate);
+        const conventionalRoots = sourceScope === 'user'
+          ? [path.join(resourceDirectory(dataRoot), 'skills'), path.join(deps.userAgentsDirectory ?? path.join(homedir(), '.agents'), 'skills')]
+          : [path.join(resourceDirectory(dataRoot, projectRoot), 'skills'), path.join(projectRoot!, '.agents', 'skills')];
+        const declaredPath = path.resolve(candidate.domain.displayRoot!, candidate.file.reference.path);
+        // Configured external and package roots are read-only. Native convention roots are editable;
+        // even an internal symlink does not become a write selector.
+        const writableRoot = candidate.origin !== 'package' && declaredPath === filePath ? conventionalRoots.find(root => isPathWithinRoot(filePath, root)) : undefined;
+        const writable = writableRoot !== undefined;
+        if (writableRoot) writableRoots.set(id, writableRoot);
+        descriptors.set(id, { id, kind: 'skill', filePath, name: metadata?.name ?? path.basename(path.dirname(filePath)), description: metadata?.description ?? '',
+          valid: !!metadata, active: active.has(candidate.file.reference.canonicalId), writable,
+          ...(metadata ? { disableModelInvocation: metadata.disableModelInvocation } : {}),
+          sourceInfo: { origin: candidate.origin === 'package' ? 'package' : 'top-level', scope: sourceScope, path: candidate.domain.displayRoot!,
+            source: candidate.packageIdentity ?? (sourceScope === 'user' ? 'Native user resources' : 'Native project resources'), baseDir: path.dirname(filePath) } });
+      }
+      const diagnostics = result.diagnostics.map(diagnostic => {
+        const candidate = result.candidates.find(item => item.file.reference.domainId === diagnostic.location?.domainId && item.file.reference.viewId === diagnostic.location?.viewId && item.file.reference.path === diagnostic.location?.path);
+        const descriptor = candidate && descriptors.get(resourceId(candidate.file.reference.canonicalId));
+        return { kind: diagnostic.kind, message: diagnostic.message, ...(diagnostic.location ? { path: descriptor?.filePath ?? diagnostic.location.path } : {}),
+          ...(descriptor ? { resourceId: descriptor.id } : {}),
+          ...(diagnostic.kind === 'collision' && diagnostic.winner && descriptor ? { collision: { winnerPath: diagnostic.winner.canonicalId.slice(5), loserPath: descriptor.filePath, name: descriptor.name, resourceType: 'skill' as const } } : {}) };
+      });
+      return { ...context, candidates, descriptors, writableRoots, snapshot: { resources: [...descriptors.values()], projectTrusted, diagnostics } satisfies NativeResourceCatalogSnapshot };
+    }, signal);
   }
   async function selected(target: ResourceManagementTarget, id: string, signal?: AbortSignal) {
     required(id, 'id');
@@ -211,6 +221,13 @@ export function createResourceManagement(deps: ResourceManagementDependencies) {
     return { descriptor, content: input.content, revision: result.revision, projectTrusted: context.projectTrusted };
   }
   return {
+    async prompt(target: ResourceManagementTarget, signal?: AbortSignal): Promise<AgentSystemPromptPreview> {
+      return withCurrentScope(target, async scope => {
+        const result = await authority.preview(scope, signal);
+        if (result.status !== 'ready') throw new ResourceManagementFailure(result.status === 'invalid' ? 422 : result.status === 'denied' ? 403 : 503, `resource-${result.status}`, result.reason);
+        return { original: agentSystemSections(result.resources, 'main'), ...(target.projectId ? { projectId: target.projectId } : {}) };
+      }, signal);
+    },
     list: async (target: ResourceManagementTarget, signal?: AbortSignal) => (await catalog(target, signal)).snapshot,
     read: async (target: ResourceManagementTarget, id: string, signal?: AbortSignal) => readSelection(await selected(target, id, signal), signal),
     create: (target: ResourceManagementTarget, input: NativeResourceCreate, signal?: AbortSignal) => write(target, input, signal),

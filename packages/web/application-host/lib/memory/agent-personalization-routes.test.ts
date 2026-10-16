@@ -12,15 +12,24 @@ function fixture() {
   });
   const saveNote = vi.fn(async () => ({ revision: 6 }));
   const savePrompt = vi.fn(async () => ({ revision: 6 }));
+  const preview = vi.fn(async () => ({ original: { preamble: 'Varin instructions' } }));
   const app = express();
   // Use the production parser registration. A global express.json() would hide the packaged bug.
   registerCommonRequestMiddleware(app, { express });
   registerAgentPersonalizationRoutes(app, { removeNote, saveNote, savePrompt } as unknown as AgentPersonalization,
-    (_req, _res, next) => next());
-  return { app, removeNote, saveNote, savePrompt };
+    (_req, _res, next) => next(), preview);
+  return { app, removeNote, saveNote, savePrompt, preview };
 }
 
 describe('Agent personalization HTTP mutations', () => {
+  it('reads the current prompt without a Thread and resolves only a selected project', async () => {
+    const { app, preview } = fixture();
+    const response = await request(app).get('/api/agent-personalization/prompt').expect(200);
+    expect(response.body.original.preamble).toBe('Varin instructions');
+    expect(preview).toHaveBeenLastCalledWith({}, expect.any(AbortSignal));
+    await request(app).get('/api/agent-personalization/prompt').query({ projectId: 'project-a' }).expect(200);
+    expect(preview).toHaveBeenLastCalledWith({ projectId: 'project-a' }, expect.any(AbortSignal));
+  });
   it('deletes with the catalog revision and preserves stale-revision rejection', async () => {
     const { app, removeNote } = fixture();
     await request(app).delete('/api/agent-personalization/memory/2').send({ revision: 4 }).expect(409);

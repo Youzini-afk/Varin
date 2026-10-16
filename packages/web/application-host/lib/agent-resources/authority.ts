@@ -56,6 +56,7 @@ export type SkillDescriptor = AgentResourceSkill;
 export type ResourceObservation = AgentResourceObservation;
 /** Serializable generated candidate. The existing checkpoint owns publication and durability. */
 export type PreparedAgentResources = AgentResourceSnapshot;
+export type PromptResources = Pick<PreparedAgentResources, 'system' | 'appendSystem' | 'instructions' | 'skills' | 'capturedFiles'>;
 export interface AgentResourceBinding {
   snapshot: PreparedAgentResources;
   /** Temporary current-authorized handles for exact saved views. They are not persisted in the snapshot. */
@@ -424,6 +425,60 @@ async function boundFile(binding: AgentResourceBinding, reference: ResourceLocat
   return result;
 }
 
+type ResourceContentScope = ResourceCatalogScope & Partial<Pick<AdmittedAgentResourceScope,
+  'instructionDirectories' | 'supportingFiles' | 'skillsEnabled' | 'shadowedContextCanonicalIds'>>;
+async function prepareResourceContent(scope: ResourceContentScope, signal?: AbortSignal) {
+  const preparation = new Preparation(signal);
+  signal?.throwIfAborted();
+  const cwd = scope.project ? relativeResourcePath(scope.project.cwd) : '';
+  const projectConfig = scope.project && scope.projectTrusted ? { ...scope.project, directory: join(cwd, '.varin', 'resources') } : undefined;
+  const userSettings = await settings(preparation, scope.userSettings, 'agent-settings.json');
+  const projectSettings = await settings(preparation, scope.project && scope.projectTrusted ? { ...scope.project, directory: join(cwd, '.varin') } : undefined);
+  const system = await systemSelection(preparation, 'SYSTEM.md', scope.user, projectConfig, cwd);
+  const appendSystem = await systemSelection(preparation, 'APPEND_SYSTEM.md', scope.user, projectConfig, cwd);
+  const baseInstructions: InstructionEntry[] = [];
+  if (scope.user) {
+    const entry = await preparation.context(scope.user, 'user', null);
+    if (entry) baseInstructions.push(entry);
+  }
+  for (const ancestor of scope.ancestors ?? []) {
+    if (ancestor.reader.consistency !== 'immutable') throw new PreparationFailure(resourceFailure(ancestor.reader, domainDirectory(ancestor), 'unavailable', 'Ancestor dependency must be a captured immutable view'));
+    const entry = await preparation.context(ancestor, 'ancestor', ancestor.appliesTo);
+    if (entry) baseInstructions.push(entry);
+  }
+  for (const diagnostic of scope.dependencyDiagnostics ?? []) preparation.diagnostic(diagnostic);
+  const initialProject = scope.project ? await projectInstructions(preparation, scope.project.reader, cwd) : [];
+  const instructions = uniqueInstructions([...baseInstructions, ...initialProject], scope.shadowedContextCanonicalIds);
+  const instructionScopes = [{ directory: cwd, instructions }];
+  for (const rawDirectory of scope.instructionDirectories ?? []) {
+    const directory = relativeResourcePath(rawDirectory);
+    if (!scope.project || instructionScopes.some(item => item.directory === directory)) continue;
+    instructionScopes.push({ directory, instructions: uniqueInstructions([...baseInstructions,
+      ...await projectInstructions(preparation, scope.project.reader, directory)], scope.shadowedContextCanonicalIds) });
+  }
+  const skills = scope.skillsEnabled === false ? [] : await collectSkills(preparation, scope, userSettings, projectSettings, projectConfig);
+  for (const request of scope.supportingFiles ?? []) {
+    const skill = skills.find(skill => skill.name === request.skillName);
+    if (!skill) throw new PreparationFailure({ status: 'missing', domainId: 'agent-resources', viewId: 'candidate', path: request.skillName, reason: 'Requested skill is not in this catalog' });
+    const relative = relativeResourcePath(request.relativePath);
+    const reader = [...preparation.readers.values()].find(reader => reader.domainId === skill.reference.domainId && reader.viewId === skill.reference.viewId)!;
+    const file = requireFile(await preparation.read(reader, join(skill.basePath, relative)));
+    if (!canonicalBundleContains(skill, file.reference)) throw new PreparationFailure(resourceFailure(reader, file.reference.path, 'denied', 'Resource link leaves its admitted skill bundle'));
+  }
+  const observations = [...preparation.observations.values()];
+  const configurationDigest = contentVersion(JSON.stringify({ userSettings, projectSettings, projectTrusted: scope.projectTrusted,
+    installed: scope.installedPackages?.map(pkg => [pkg.identity, pkg.source, pkg.scope, pkg.reader.domainId, pkg.reader.viewId]) ?? [],
+    configurationSources: observations.filter(entry => /(?:^|\/)(agent-settings|settings|package)\.json$/.test(entry.path)),
+    skillsEnabled: scope.skillsEnabled !== false }));
+  signal?.throwIfAborted();
+  return {
+    cwd, readers: [...preparation.readers.values()].map(reader => ({ domainId: reader.domainId, viewId: reader.viewId, consistency: reader.consistency })),
+    project: scope.project ? { domainId: scope.project.reader.domainId, viewId: scope.project.reader.viewId, cwd } : null,
+    configurationDigest, shadowedContextCanonicalIds: [...scope.shadowedContextCanonicalIds ?? []], system, appendSystem, instructions, instructionScopes, skills,
+    diagnostics: preparation.diagnostics, capturedFiles: [...preparation.captures.values()], observations,
+  };
+}
+
 /** Read-only prepare/read owner. It never publishes a generation, refreshes settings, or retains a pin. */
 export function createAgentResourceAuthority() {
   return {
@@ -443,59 +498,23 @@ export function createAgentResourceAuthority() {
         return { status: signal?.aborted ? 'cancelled' : 'unavailable', domainId: 'resource-management', viewId: 'current', path: '', reason: signal?.aborted ? 'Resource discovery was cancelled' : 'Resource discovery failed' };
       }
     },
-    async prepare(scope: AdmittedAgentResourceScope, signal?: AbortSignal): Promise<ResourceResult<{ snapshot: PreparedAgentResources }>> {
-      const preparation = new Preparation(signal);
+    async preview(scope: ResourceCatalogScope, signal?: AbortSignal): Promise<ResourceResult<{ resources: PromptResources }>> {
       try {
-        signal?.throwIfAborted();
-        const cwd = scope.project ? relativeResourcePath(scope.project.cwd) : '';
-        const projectConfig = scope.project && scope.projectTrusted ? { ...scope.project, directory: join(cwd, '.varin', 'resources') } : undefined;
-        const userSettings = await settings(preparation, scope.userSettings, 'agent-settings.json');
-        const projectSettings = await settings(preparation, scope.project && scope.projectTrusted ? { ...scope.project, directory: join(cwd, '.varin') } : undefined);
-        const system = await systemSelection(preparation, 'SYSTEM.md', scope.user, projectConfig, cwd);
-        const appendSystem = await systemSelection(preparation, 'APPEND_SYSTEM.md', scope.user, projectConfig, cwd);
-        const baseInstructions: InstructionEntry[] = [];
-        if (scope.user) {
-          const entry = await preparation.context(scope.user, 'user', null);
-          if (entry) baseInstructions.push(entry);
-        }
-        for (const ancestor of scope.ancestors ?? []) {
-          if (ancestor.reader.consistency !== 'immutable') throw new PreparationFailure(resourceFailure(ancestor.reader, domainDirectory(ancestor), 'unavailable', 'Ancestor dependency must be a captured immutable view'));
-          const entry = await preparation.context(ancestor, 'ancestor', ancestor.appliesTo);
-          if (entry) baseInstructions.push(entry);
-        }
-        for (const diagnostic of scope.dependencyDiagnostics ?? []) preparation.diagnostic(diagnostic);
-        const initialProject = scope.project ? await projectInstructions(preparation, scope.project.reader, cwd) : [];
-        const instructions = uniqueInstructions([...baseInstructions, ...initialProject], scope.shadowedContextCanonicalIds);
-        const instructionScopes = [{ directory: cwd, instructions }];
-        for (const rawDirectory of scope.instructionDirectories ?? []) {
-          const directory = relativeResourcePath(rawDirectory);
-          if (!scope.project || instructionScopes.some(item => item.directory === directory)) continue;
-          instructionScopes.push({ directory, instructions: uniqueInstructions([...baseInstructions,
-            ...await projectInstructions(preparation, scope.project.reader, directory)], scope.shadowedContextCanonicalIds) });
-        }
-        const skills = scope.skillsEnabled === false ? [] : await collectSkills(preparation, scope, userSettings, projectSettings, projectConfig);
-        for (const request of scope.supportingFiles ?? []) {
-          const skill = skills.find(skill => skill.name === request.skillName);
-          if (!skill) throw new PreparationFailure({ status: 'missing', domainId: 'agent-resources', viewId: 'candidate', path: request.skillName, reason: 'Requested skill is not in this catalog' });
-          const relative = relativeResourcePath(request.relativePath);
-          const reader = [...preparation.readers.values()].find(reader => reader.domainId === skill.reference.domainId && reader.viewId === skill.reference.viewId)!;
-          const file = requireFile(await preparation.read(reader, join(skill.basePath, relative)));
-          if (!canonicalBundleContains(skill, file.reference)) throw new PreparationFailure(resourceFailure(reader, file.reference.path, 'denied', 'Resource link leaves its admitted skill bundle'));
-        }
-        const observations = [...preparation.observations.values()];
-        const configurationDigest = contentVersion(JSON.stringify({ userSettings, projectSettings, projectTrusted: scope.projectTrusted,
-          installed: scope.installedPackages?.map(pkg => [pkg.identity, pkg.source, pkg.scope, pkg.reader.domainId, pkg.reader.viewId]) ?? [],
-          configurationSources: observations.filter(entry => /(?:^|\/)(agent-settings|settings|package)\.json$/.test(entry.path)),
-          skillsEnabled: scope.skillsEnabled !== false }));
+        return { status: 'ready', resources: await prepareResourceContent(scope, signal) };
+      } catch (error) {
+        if (signal?.aborted) return { status: 'cancelled', domainId: 'resource-management', viewId: 'current', path: '', reason: 'Prompt preview was cancelled' };
+        if (error instanceof PreparationFailure) return error.failure;
+        throw error;
+      }
+    },
+    async prepare(scope: AdmittedAgentResourceScope, signal?: AbortSignal): Promise<ResourceResult<{ snapshot: PreparedAgentResources }>> {
+      try {
+        const { cwd, ...content } = await prepareResourceContent(scope, signal);
         const data: Omit<PreparedAgentResources, 'id'> = {
           scope: { threadId: scope.threadId, branchId: scope.branchId, mode: scope.mode, threadRole: scope.threadRole,
             projectId: scope.projectId, sourceIdentity: scope.sourceIdentity, cwd, projectRoot: scope.project?.displayRoot ?? null, projectTrusted: scope.projectTrusted },
-          readers: [...preparation.readers.values()].map(reader => ({ domainId: reader.domainId, viewId: reader.viewId, consistency: reader.consistency })),
-          project: scope.project ? { domainId: scope.project.reader.domainId, viewId: scope.project.reader.viewId, cwd } : null,
-          configurationDigest, shadowedContextCanonicalIds: [...scope.shadowedContextCanonicalIds ?? []], system, appendSystem, instructions, instructionScopes, skills, diagnostics: preparation.diagnostics,
-          capturedFiles: [...preparation.captures.values()], observations,
+          ...content,
         };
-        signal?.throwIfAborted();
         const id = `agent-resources:${contentVersion(JSON.stringify({ ...data, capturedFiles: data.capturedFiles.map(file => file.reference) }))}`;
         return { status: 'ready', snapshot: freezeData({ id, ...data }) };
       } catch (error) {

@@ -9,9 +9,13 @@ import { ThreadMemory } from '../../thread/ThreadMemory';
 import type { ContextPersonalization } from '@varin/protocol';
 
 const fixture = vi.hoisted(() => ({ catalog: {} as AgentPersonalizationCatalog, snapshot: {} as AgentSystemPromptSnapshot,
-  update: vi.fn(async (..._args: unknown[]) => true), load: vi.fn(), project: { id: 'project-a', path: '/repo', label: 'Project A' } }));
+  update: vi.fn(async (..._args: unknown[]) => true), load: vi.fn(), fetch: vi.fn(), hasThreads: true, activityCursor: 0,
+  project: { id: 'project-a', path: '/repo', label: 'Project A' } }));
+vi.mock('@varin/application-client', async importOriginal => ({ ...await importOriginal<typeof import('@varin/application-client')>(),
+  runtimeFetch: fixture.fetch, getRuntimeEndpointGeneration: () => 1 }));
 vi.mock('./agentSettings', () => ({ useAgentSettings: () => ({ catalog: fixture.catalog, error: null, busy: false,
-  runtime: 'local', load: fixture.load, update: fixture.update }) }));
+  runtime: 1, load: fixture.load, update: fixture.update }) }));
+vi.mock('@/lib/varinEvents', () => ({ subscribeVarinEvents: () => () => {} }));
 vi.mock('@/lib/i18n', () => ({ useI18n: () => ({ t: (key: string) => key }) }));
 vi.mock('@/hooks/useRuntimeAPIs', () => { const apis = { threads: { snapshot: async () => ({ context: { checkpoint: {
   proposal: { effective_system_prompt: fixture.snapshot.content }, personalization: {
@@ -21,8 +25,8 @@ vi.mock('@/hooks/useRuntimeAPIs', () => { const apis = { threads: { snapshot: as
   },
 } } }) } }; return { useRuntimeAPIs: () => apis }; });
 vi.mock('@/stores/useThreadStore', () => ({ useThreadStore: (select: (value: unknown) => unknown) => select({
-  selectedIdentity: { runtime: 'agent', threadId: 'thread:chat', branchId: 'branch:chat' },
-  threads: [{ thread_id: 'thread:chat', title: 'Current task', bot_id: null, parent_thread_id: null, observer_project_ids: ['project-a'], branches: [{ branch_id: 'branch:chat' }] }],
+  selectedIdentity: fixture.hasThreads ? { runtime: 'agent', threadId: 'thread:chat', branchId: 'branch:chat' } : null,
+  threads: fixture.hasThreads ? [{ thread_id: 'thread:chat', title: 'Current task', bot_id: null, parent_thread_id: null, activity_cursor: fixture.activityCursor, observer_project_ids: ['project-a'], branches: [{ branch_id: 'branch:chat' }] }] : [],
 }) }));
 vi.mock('@/stores/useProjectsStore', () => ({ useProjectsStore: (select: (value: unknown) => unknown) => select({ projects: [fixture.project], activeProjectId: 'project-a' }) }));
 vi.mock('@/stores/useDirectoryStore', () => ({ useDirectoryStore: (select: (value: unknown) => unknown) => select({ currentDirectory: '/repo' }) }));
@@ -43,6 +47,9 @@ beforeEach(() => {
   fixture.snapshot = { mode: 'agent', threadId: 'thread:chat', original: { preamble: 'Official identity', rules: 'Official rules', project_context: 'Project instructions', cwd: '/repo' },
     sections: {}, content: '', personalization: { mode: 'agent', revision: 0, threadRole: 'main', threadId: 'thread:chat', profiles: [], memories: [] } };
   fixture.update.mockReset().mockResolvedValue(true);
+  fixture.hasThreads = true; fixture.activityCursor = 0;
+  fixture.fetch.mockReset().mockImplementation(async (url: string) => Response.json({ original: fixture.snapshot.original,
+    ...(url.includes('projectId=') ? { projectId: 'project-a' } : {}) }));
   container = document.createElement('div'); document.body.append(container); root = createRoot(container);
 });
 afterEach(async () => { await act(async () => root.unmount()); vi.unstubAllGlobals(); });
@@ -53,6 +60,7 @@ const type = (text: string) => act(async () => {
 });
 
 test('edits official prompt text, previews generated context and saves only edits against the revision opened', async () => {
+  fixture.hasThreads = false;
   await act(async () => root.render(<AgentPromptPage />));
   expect(container.querySelector('textarea')?.value).toContain('Official rules');
   expect(container.querySelector('pre')?.textContent).toContain('Project instructions');
@@ -64,6 +72,19 @@ test('edits official prompt text, previews generated context and saves only edit
   await act(async () => root.render(<AgentPromptPage />));
   await click('assistant.save');
   expect(fixture.update).toHaveBeenCalledWith('prompt', { scope: { kind: 'global' }, revision: 4, profile: { sections: { preamble: 'My identity' } } });
+});
+
+test('inherits global instructions in a project and saves only its own changes', async () => {
+  fixture.hasThreads = false;
+  fixture.catalog.prompts.global = { sections: { rules: 'Shared user rules' } };
+  await act(async () => root.render(<AgentPromptPage />));
+  await click('assistant.scope.project');
+  expect(fixture.fetch).toHaveBeenLastCalledWith('/api/agent-personalization/prompt?projectId=project-a', expect.anything());
+  expect(container.querySelector('textarea')?.value).toContain('Shared user rules');
+  await type('Project identity\n\n<rules>\nShared user rules\n</rules>');
+  await click('assistant.save');
+  expect(fixture.update).toHaveBeenLastCalledWith('prompt', { scope: { kind: 'project', id: 'project-a' }, revision: 4,
+    profile: { sections: { preamble: 'Project identity' } } });
 });
 
 test('shows scope-specific notes and keeps an edit on its selected project', async () => {
@@ -81,12 +102,17 @@ test('shows scope-specific notes and keeps an edit on its selected project', asy
 test('previews the conversation memory checkpoint while newly saved notes remain in the catalog', async () => {
   fixture.snapshot.memorySnapshot = { revision: 2, threadId: 'thread:chat', memories: [{ id: 1, scope: { kind: 'global' }, content: 'Checkpoint note', updatedAt: '' }] };
   await act(async () => root.render(<AgentPromptPage />));
+  await click('assistant.scope.thread');
   expect(container.querySelector('pre')?.textContent).toContain('Checkpoint note');
   expect(container.querySelector('pre')?.textContent).not.toContain('Global note');
   fixture.catalog = { ...fixture.catalog, revision: 5, memories: [{ ...fixture.catalog.memories[0]!, content: 'Newly saved note' }] };
   await act(async () => root.render(<AgentPromptPage />));
   expect(container.querySelector('pre')?.textContent).toContain('Checkpoint note');
   expect(container.querySelector('pre')?.textContent).not.toContain('Newly saved note');
+  fixture.snapshot.memorySnapshot = { ...fixture.snapshot.memorySnapshot, memories: [{ id: 1, scope: { kind: 'global' }, content: 'Compacted checkpoint', updatedAt: '' }] };
+  fixture.activityCursor += 1;
+  await act(async () => root.render(<AgentPromptPage />));
+  expect(container.querySelector('pre')?.textContent).toContain('Compacted checkpoint');
 });
 
 const threadIdentity = { runtime: 'agent' as const, threadId: 'thread:child', branchId: 'branch:child' };
