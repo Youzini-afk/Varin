@@ -15,6 +15,8 @@ type SessionDisplayStore = {
   stickyZoneHeaders: boolean;
   toggleStickyZoneHeaders: () => void;
   showRecentSection: boolean;
+  projectsSectionCollapsed: boolean;
+  setProjectsSectionCollapsed: (collapsed: boolean) => void;
   projectSortOrder: ProjectSortOrder;
   setShowRecentSection: (show: boolean) => void;
   toggleRecentSection: () => void;
@@ -29,6 +31,8 @@ export const useSessionDisplayStore = create<SessionDisplayStore>()(
       stickyZoneHeaders: true,
       toggleStickyZoneHeaders: () => set((state) => ({ stickyZoneHeaders: !state.stickyZoneHeaders })),
       showRecentSection: true,
+      projectsSectionCollapsed: false,
+      setProjectsSectionCollapsed: (collapsed) => set({ projectsSectionCollapsed: collapsed }),
       projectSortOrder: 'manual',
       setShowRecentSection: (show) => set({ showRecentSection: show }),
       toggleRecentSection: () => set((state) => ({ showRecentSection: !state.showRecentSection })),

@@ -454,7 +454,12 @@ export const ConversationSidebar: React.FC<ConversationSessionSidebarProps> = ({
   const toggleRecentSection = useSessionDisplayStore((state) => state.toggleRecentSection);
   const projectSortOrder = useSessionDisplayStore((state) => state.projectSortOrder);
   const setProjectSortOrder = useSessionDisplayStore((state) => state.setProjectSortOrder);
+  const projectsSectionCollapsed = useSessionDisplayStore((state) => state.projectsSectionCollapsed);
+  const setProjectsSectionCollapsed = useSessionDisplayStore((state) => state.setProjectsSectionCollapsed);
+  const projectsSectionId = React.useId();
   const [query, setQuery] = React.useState('');
+  const projectsExpanded = Boolean(query.trim()) || !projectsSectionCollapsed;
+  const projectsLabel = t('mobile.sessions.section.projects');
   const [searchOpen, setSearchOpen] = React.useState(false);
   const [selectionMode, setSelectionMode] = React.useState(false);
   const [selectedSessionIds, setSelectedSessionIds] = React.useState<Set<string>>(() => new Set());
@@ -585,10 +590,12 @@ export const ConversationSidebar: React.FC<ConversationSessionSidebarProps> = ({
   }, [selectionMode, selectedSessionIds]);
 
   const collapseAll = () => {
+    setProjectsSectionCollapsed(true);
     setCollapsedGroupIds(new Set(workspaceGroups.map(group => group.id)));
     setCollapsedSessionIds(new Set(collectConversationSessionForestIds(workspaceGroups.flatMap(group => group.forest))));
   };
   const expandAll = () => {
+    setProjectsSectionCollapsed(false);
     setCollapsedGroupIds(new Set());
     setCollapsedSessionIds(new Set());
   };
@@ -849,6 +856,253 @@ export const ConversationSidebar: React.FC<ConversationSessionSidebarProps> = ({
         };
   })();
 
+  const renderGroup = (group: (typeof groups)[number]) => {
+    const expanded = query.trim().length > 0 || !collapsedGroupIds.has(group.id);
+    const sourceGroup = workspaceGroups.find((candidate) => candidate.id === group.id);
+    const projectSessionIds = sourceGroup ? collectConversationSessionForestIds(sourceGroup.forest) : [];
+    const project = group.project;
+    const projectIndex = project
+      ? projects.findIndex((candidate) => candidate.id === project.id)
+      : -1;
+    const canManageProject = project !== null;
+    const toggleGroup = () => setCollapsedGroupIds((current) => {
+      const next = new Set(current);
+      if (next.has(group.id)) next.delete(group.id);
+      else next.add(group.id);
+      return next;
+    });
+    const groupHeaderContent = (
+      <>
+        <button
+          type="button"
+          onClick={toggleGroup}
+          className="flex min-h-8 min-w-0 flex-1 items-center gap-1.5 px-1.5 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
+          aria-expanded={expanded}
+          aria-label={t(expanded
+            ? 'sessions.sidebar.group.collapseAria'
+            : 'sessions.sidebar.group.expandAria', { label: group.label })}
+        >
+          <Icon name={expanded ? 'arrow-down-s' : 'arrow-right-s'} className="size-3.5 shrink-0 opacity-70" />
+          <Icon
+            name={group.id === 'recent' ? 'history' : 'folder'}
+            className="size-3.5 shrink-0"
+          />
+          <span className="min-w-0 flex-1 truncate typography-ui-label font-medium">
+            {group.label}
+          </span>
+        </button>
+        <span className="shrink-0 typography-micro opacity-70">{group.forest.length}</span>
+        <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                type="button"
+                onClick={() => void handleCreate(group.project?.id ?? null)}
+                className="mr-1 flex size-6 shrink-0 items-center justify-center rounded text-muted-foreground opacity-70 hover:bg-interactive-hover hover:text-foreground focus-visible:opacity-100 group-hover/workspace:opacity-100"
+                aria-label={t('sessions.sidebar.group.actions.newDraftInGroupAria', { label: group.label })}
+              >
+                <Icon name="add" className="size-3.5" />
+              </button>
+            </TooltipTrigger>
+            <TooltipContent side="right">
+              {t('sessions.sidebar.group.actions.newDraftInGroupAria', { label: group.label })}
+            </TooltipContent>
+        </Tooltip>
+      </>
+    );
+    return (
+      <section key={group.id} className="group/workspace mb-2">
+      {project ? (
+        <ProjectActionsButton
+          projectRef={{ id: project.id, path: project.path }}
+          directory={project.path}
+          allowMobile
+          contextMenu={{
+            trigger: (
+              <div
+                className={cn(
+                  'flex min-w-0 select-none items-center rounded-md text-muted-foreground hover:bg-interactive-hover/50 hover:text-foreground',
+                  'data-[popup-open]:bg-interactive-hover data-[popup-open]:text-foreground',
+                  stickyZoneHeaders && 'sticky top-0 z-10 bg-sidebar/95 backdrop-blur-sm',
+                )}
+                aria-label={t('sessions.sidebar.project.actions.projectMenu')}
+                onKeyDown={openSidebarMenuWithKeyboard}
+              >{groupHeaderContent}</div>
+            ),
+            leading: <>
+              <ContextMenuItem onClick={() => void handleCreate(project.id)}>
+                <Icon name="chat-new" className="size-4" />
+                {t('sessions.sidebar.header.actions.newSession')}
+              </ContextMenuItem>
+              <ContextMenuItem onClick={toggleGroup} disabled={Boolean(query.trim())}>
+                <Icon name={expanded ? 'arrow-right-s' : 'arrow-down-s'} className="size-4" />
+                {t(expanded ? 'sessions.sidebar.group.collapseAria' : 'sessions.sidebar.group.expandAria', { label: group.label })}
+              </ContextMenuItem>
+            </>,
+            children: <>
+            {canManageProject ? (
+              <>
+                <ContextMenuItem
+                  disabled={projectIndex <= 0}
+                  onClick={() => {
+                    if (projectIndex > 0) {
+                      reorderProjects(projectIndex, 0);
+                      setProjectSortOrder('manual');
+                    }
+                  }}
+                >
+                  <Icon name="pushpin" className="mr-2 size-4" />
+                  {t('sessions.sidebar.project.actions.pin')}
+                </ContextMenuItem>
+                <ContextMenuItem onClick={() => handleOpenProjectSettings(project.id)}>
+                  <Icon name="pencil-ai" className="mr-2 size-4" />
+                  {t('sessions.sidebar.project.actions.edit')}
+                </ContextMenuItem>
+              </>
+            ) : null}
+            <ContextMenuItem onClick={() => {
+              void copyTextToClipboard(project.path).then(result => {
+                if (result.ok) toast.success(t('sessions.sidebar.session.menu.copied'));
+                else toast.error(result.error);
+              });
+            }}>
+              <Icon name="file-copy" className="size-4" />
+              {t('sidebarFilesTree.menu.copyPath')}
+            </ContextMenuItem>
+            {canRevealProject ? (
+              <>
+                {canManageProject ? <ContextMenuSeparator /> : null}
+                <ContextMenuItem onClick={() => void handleRevealProject(project.path)}>
+                  <Icon name="folder-open" className="mr-2 size-4" />
+                  {t(getRevealLabelKey())}
+                </ContextMenuItem>
+              </>
+            ) : null}
+            <>
+                {(canManageProject || canRevealProject) ? <ContextMenuSeparator /> : null}
+                <ContextMenuItem
+                  disabled={projectSessionIds.length === 0}
+                  onClick={() => setConfirmation({
+                    scope: 'project',
+                    action: 'archive',
+                    ids: projectSessionIds,
+                    title: group.label,
+                  })}
+                >
+                  <Icon name="inbox-archive" className="mr-2 size-4" />
+                  {t('sessions.sidebar.project.actions.archiveChats')}
+                </ContextMenuItem>
+            </>
+            {canManageProject ? (
+              <>
+                <ContextMenuSeparator />
+                <ContextMenuItem
+                  onClick={() => setConfirmation({
+                    scope: 'project',
+                    action: 'remove',
+                    projectId: project.id,
+                    title: group.label,
+                  })}
+                  className="text-destructive focus:text-destructive"
+                >
+                  <Icon name="close" className="mr-2 size-4" />
+                  {t('sessions.sidebar.project.actions.remove')}
+                </ContextMenuItem>
+              </>
+            ) : null}
+            </>,
+          }}
+        />
+      ) : (
+        <ContextMenu>
+        <ContextMenuTrigger asChild onKeyDown={openSidebarMenuWithKeyboard}>
+        <div className={cn(
+          'flex min-w-0 items-center rounded-md text-muted-foreground hover:bg-interactive-hover/50 hover:text-foreground',
+          'data-[popup-open]:bg-interactive-hover data-[popup-open]:text-foreground',
+          stickyZoneHeaders && 'sticky top-0 z-10 bg-sidebar/95 backdrop-blur-sm',
+        )}>
+          {groupHeaderContent}
+        </div>
+        </ContextMenuTrigger>
+        <ContextMenuContent className="min-w-48">
+          <ContextMenuItem onClick={() => void handleCreate(null)}>
+            <Icon name="chat-new" className="size-4" />
+            {t('sessions.sidebar.header.actions.newSession')}
+          </ContextMenuItem>
+          <ContextMenuItem onClick={toggleGroup} disabled={Boolean(query.trim())}>
+            <Icon name={expanded ? 'arrow-right-s' : 'arrow-down-s'} className="size-4" />
+            {t(expanded ? 'sessions.sidebar.group.collapseAria' : 'sessions.sidebar.group.expandAria', { label: group.label })}
+          </ContextMenuItem>
+        </ContextMenuContent>
+        </ContextMenu>
+      )}
+      {expanded ? <div className="space-y-0.5 pl-2">
+        {group.forest.map((node) => (
+          <ConversationSessionRow
+            key={node.session.id}
+            node={node}
+            attentionBySession={attentionBySession}
+            currentSessionId={currentSessionId}
+            editingId={editingId}
+            editingName={editingName}
+            collapsedIds={collapsedSessionIds}
+            revealChildren={query.trim().length > 0}
+            pendingDialogCountBySession={pendingDialogCountBySession}
+            pinnedIds={pinnedIds}
+            selectedIds={selectedSessionIds}
+            selectionMode={selectionMode}
+            untitled={untitled}
+            onToggleSelection={toggleSelection}
+            onBeginSelection={beginSelectionAt}
+            onContextTarget={prepareContextTarget}
+            onBulkAction={requestBulkAction}
+            onExitSelection={exitSelectionMode}
+            onSelect={(session) => {
+              if (selectionMode) toggleSelection(session);
+              else void handleSelect(session);
+            }}
+            onToggleExpanded={(sessionId) => setCollapsedSessionIds((current) => {
+              const next = new Set(current);
+              if (next.has(sessionId)) next.delete(sessionId);
+              else next.add(sessionId);
+              return next;
+            })}
+            onBeginRename={(session) => {
+              setEditingId(session.id);
+              setEditingName(conversationSessionTitle(session, untitled));
+            }}
+            onCancelRename={() => setEditingId(null)}
+            onChangeEditingName={setEditingName}
+            onCommitRename={(session) => void commitRename(session)}
+            onCopyId={(session) => {
+              void copyTextToClipboard(session.id).then((result) => {
+                if (result.ok) toast.success(t('sessions.sidebar.session.menu.copied'));
+                else toast.error(result.error);
+              });
+            }}
+            onTogglePinned={(session) => togglePinned({
+              directory: session.cwd,
+              sessionId: session.id,
+            })}
+            onArchive={(selected) => setConfirmation({
+              scope: 'session',
+              action: 'archive',
+              ids: collectConversationSessionSubtreeIds(summaries, selected.session.id),
+              title: conversationSessionTitle(selected.session, untitled),
+            })}
+            onDelete={(selected) => setConfirmation({
+              scope: 'session',
+              action: 'delete',
+              ids: collectConversationSessionSubtreeIds(summaries, selected.session.id),
+              title: conversationSessionTitle(selected.session, untitled),
+            })}
+            onOpenMiniChat={handleOpenMiniChat}
+          />
+        ))}
+      </div> : null}
+      </section>
+    );
+  };
+
   return (
     <TooltipProvider delayDuration={400} skipDelayDuration={150}>
       <ContextMenu onOpenChangeComplete={(open) => {
@@ -1029,6 +1283,31 @@ export const ConversationSidebar: React.FC<ConversationSessionSidebarProps> = ({
         ) : null}
 
         <div className="min-h-0 flex-1 overflow-y-auto px-2 pb-3">
+          <div className="mb-1 flex min-h-8 items-center gap-1 rounded-md text-muted-foreground">
+            <button
+              type="button"
+              onClick={() => setProjectsSectionCollapsed(!projectsSectionCollapsed)}
+              disabled={Boolean(query.trim())}
+              aria-expanded={projectsExpanded}
+              aria-controls={projectsSectionId}
+              aria-label={t(projectsExpanded ? 'sessions.sidebar.group.collapseAria' : 'sessions.sidebar.group.expandAria', { label: projectsLabel })}
+              className="flex min-h-8 min-w-0 flex-1 items-center gap-1 rounded-md px-1.5 text-left typography-ui-label font-medium hover:bg-interactive-hover/50 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
+            >
+              <span className="truncate">{projectsLabel}</span>
+              <Icon name={projectsExpanded ? 'arrow-down-s' : 'arrow-right-s'} className="size-3.5 shrink-0 opacity-70" />
+            </button>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button
+                  type="button"
+                  onClick={() => { setProjectsSectionCollapsed(false); workspaceEvents.requestDirectoryDialog(); }}
+                  aria-label={t('sessions.sidebar.header.actions.addProject')}
+                  className="mr-1 flex size-7 shrink-0 items-center justify-center rounded-md hover:bg-interactive-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
+                ><Icon name="add" className="size-4" /></button>
+              </TooltipTrigger>
+              <TooltipContent side="right">{t('sessions.sidebar.header.actions.addProject')}</TooltipContent>
+            </Tooltip>
+          </div>
           {(catalogLoading && allSummaries.length === 0) ? (
             <div className="flex items-center gap-2 px-2 py-6 typography-ui-label text-muted-foreground">
               <Icon name="loader-4" className="size-4 animate-spin" />
@@ -1043,266 +1322,24 @@ export const ConversationSidebar: React.FC<ConversationSessionSidebarProps> = ({
               <span className="block">{t('sessions.sidebar.group.empty.loadFailed')}</span>
               <span className="mt-1 block typography-micro opacity-80">{lastError}</span>
             </button>
-          ) : groups.length === 0 ? (
+          ) : groups.length === 0 && query.trim().length > 0 ? (
             <div className="px-2 py-6 text-center">
               <p className="typography-ui-label text-foreground">
-                {query
-                  ? t('sessions.sidebar.empty.noMatches.title')
-                  : t('sessions.sidebar.empty.noSessions.title')}
+                {t('sessions.sidebar.empty.noMatches.title')}
               </p>
               <p className="mt-1 typography-meta text-muted-foreground">
-                {query
-                  ? t('sessions.sidebar.empty.noMatches.description')
-                  : t('sessions.sidebar.empty.noSessions.description')}
+                {t('sessions.sidebar.empty.noMatches.description')}
               </p>
             </div>
           ) : (
-            groups.map((group) => {
-              const expanded = query.trim().length > 0 || !collapsedGroupIds.has(group.id);
-              const sourceGroup = workspaceGroups.find((candidate) => candidate.id === group.id);
-              const projectSessionIds = sourceGroup ? collectConversationSessionForestIds(sourceGroup.forest) : [];
-              const project = group.project;
-              const projectIndex = project
-                ? projects.findIndex((candidate) => candidate.id === project.id)
-                : -1;
-              const canManageProject = project !== null;
-              const toggleGroup = () => setCollapsedGroupIds((current) => {
-                const next = new Set(current);
-                if (next.has(group.id)) next.delete(group.id);
-                else next.add(group.id);
-                return next;
-              });
-              const groupHeaderContent = (
-                <>
-                  <button
-                    type="button"
-                    onClick={toggleGroup}
-                    className="flex min-h-8 min-w-0 flex-1 items-center gap-1.5 px-1.5 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
-                    aria-expanded={expanded}
-                    aria-label={t(expanded
-                      ? 'sessions.sidebar.group.collapseAria'
-                      : 'sessions.sidebar.group.expandAria', { label: group.label })}
-                  >
-                    <Icon name={expanded ? 'arrow-down-s' : 'arrow-right-s'} className="size-3.5 shrink-0 opacity-70" />
-                    <Icon
-                      name={group.id === 'recent' ? 'history' : 'folder'}
-                      className="size-3.5 shrink-0"
-                    />
-                    <span className="min-w-0 flex-1 truncate typography-ui-label font-medium">
-                      {group.label}
-                    </span>
-                  </button>
-                  <span className="shrink-0 typography-micro opacity-70">{group.forest.length}</span>
-                  <Tooltip>
-                      <TooltipTrigger asChild>
-                        <button
-                          type="button"
-                          onClick={() => void handleCreate(group.project?.id ?? null)}
-                          className="mr-1 flex size-6 shrink-0 items-center justify-center rounded text-muted-foreground opacity-70 hover:bg-interactive-hover hover:text-foreground focus-visible:opacity-100 group-hover/workspace:opacity-100"
-                          aria-label={t('sessions.sidebar.group.actions.newDraftInGroupAria', { label: group.label })}
-                        >
-                          <Icon name="add" className="size-3.5" />
-                        </button>
-                      </TooltipTrigger>
-                      <TooltipContent side="right">
-                        {t('sessions.sidebar.group.actions.newDraftInGroupAria', { label: group.label })}
-                      </TooltipContent>
-                  </Tooltip>
-                </>
-              );
-              return (
-                <section key={group.id} className="group/workspace mb-2">
-                {project ? (
-                  <ProjectActionsButton
-                    projectRef={{ id: project.id, path: project.path }}
-                    directory={project.path}
-                    allowMobile
-                    contextMenu={{
-                      trigger: (
-                        <div
-                          className={cn(
-                            'flex min-w-0 select-none items-center rounded-md text-muted-foreground hover:bg-interactive-hover/50 hover:text-foreground',
-                            'data-[popup-open]:bg-interactive-hover data-[popup-open]:text-foreground',
-                            stickyZoneHeaders && 'sticky top-0 z-10 bg-sidebar/95 backdrop-blur-sm',
-                          )}
-                          aria-label={t('sessions.sidebar.project.actions.projectMenu')}
-                          onKeyDown={openSidebarMenuWithKeyboard}
-                        >{groupHeaderContent}</div>
-                      ),
-                      leading: <>
-                        <ContextMenuItem onClick={() => void handleCreate(project.id)}>
-                          <Icon name="chat-new" className="size-4" />
-                          {t('sessions.sidebar.header.actions.newSession')}
-                        </ContextMenuItem>
-                        <ContextMenuItem onClick={toggleGroup} disabled={Boolean(query.trim())}>
-                          <Icon name={expanded ? 'arrow-right-s' : 'arrow-down-s'} className="size-4" />
-                          {t(expanded ? 'sessions.sidebar.group.collapseAria' : 'sessions.sidebar.group.expandAria', { label: group.label })}
-                        </ContextMenuItem>
-                      </>,
-                      children: <>
-                      {canManageProject ? (
-                        <>
-                          <ContextMenuItem
-                            disabled={projectIndex <= 0}
-                            onClick={() => {
-                              if (projectIndex > 0) {
-                                reorderProjects(projectIndex, 0);
-                                setProjectSortOrder('manual');
-                              }
-                            }}
-                          >
-                            <Icon name="pushpin" className="mr-2 size-4" />
-                            {t('sessions.sidebar.project.actions.pin')}
-                          </ContextMenuItem>
-                          <ContextMenuItem onClick={() => handleOpenProjectSettings(project.id)}>
-                            <Icon name="pencil-ai" className="mr-2 size-4" />
-                            {t('sessions.sidebar.project.actions.edit')}
-                          </ContextMenuItem>
-                        </>
-                      ) : null}
-                      <ContextMenuItem onClick={() => {
-                        void copyTextToClipboard(project.path).then(result => {
-                          if (result.ok) toast.success(t('sessions.sidebar.session.menu.copied'));
-                          else toast.error(result.error);
-                        });
-                      }}>
-                        <Icon name="file-copy" className="size-4" />
-                        {t('sidebarFilesTree.menu.copyPath')}
-                      </ContextMenuItem>
-                      {canRevealProject ? (
-                        <>
-                          {canManageProject ? <ContextMenuSeparator /> : null}
-                          <ContextMenuItem onClick={() => void handleRevealProject(project.path)}>
-                            <Icon name="folder-open" className="mr-2 size-4" />
-                            {t(getRevealLabelKey())}
-                          </ContextMenuItem>
-                        </>
-                      ) : null}
-                      <>
-                          {(canManageProject || canRevealProject) ? <ContextMenuSeparator /> : null}
-                          <ContextMenuItem
-                            disabled={projectSessionIds.length === 0}
-                            onClick={() => setConfirmation({
-                              scope: 'project',
-                              action: 'archive',
-                              ids: projectSessionIds,
-                              title: group.label,
-                            })}
-                          >
-                            <Icon name="inbox-archive" className="mr-2 size-4" />
-                            {t('sessions.sidebar.project.actions.archiveChats')}
-                          </ContextMenuItem>
-                      </>
-                      {canManageProject ? (
-                        <>
-                          <ContextMenuSeparator />
-                          <ContextMenuItem
-                            onClick={() => setConfirmation({
-                              scope: 'project',
-                              action: 'remove',
-                              projectId: project.id,
-                              title: group.label,
-                            })}
-                            className="text-destructive focus:text-destructive"
-                          >
-                            <Icon name="close" className="mr-2 size-4" />
-                            {t('sessions.sidebar.project.actions.remove')}
-                          </ContextMenuItem>
-                        </>
-                      ) : null}
-                      </>,
-                    }}
-                  />
-                ) : (
-                  <ContextMenu>
-                  <ContextMenuTrigger asChild onKeyDown={openSidebarMenuWithKeyboard}>
-                  <div className={cn(
-                    'flex min-w-0 items-center rounded-md text-muted-foreground hover:bg-interactive-hover/50 hover:text-foreground',
-                    'data-[popup-open]:bg-interactive-hover data-[popup-open]:text-foreground',
-                    stickyZoneHeaders && 'sticky top-0 z-10 bg-sidebar/95 backdrop-blur-sm',
-                  )}>
-                    {groupHeaderContent}
-                  </div>
-                  </ContextMenuTrigger>
-                  <ContextMenuContent className="min-w-48">
-                    <ContextMenuItem onClick={() => void handleCreate(null)}>
-                      <Icon name="chat-new" className="size-4" />
-                      {t('sessions.sidebar.header.actions.newSession')}
-                    </ContextMenuItem>
-                    <ContextMenuItem onClick={toggleGroup} disabled={Boolean(query.trim())}>
-                      <Icon name={expanded ? 'arrow-right-s' : 'arrow-down-s'} className="size-4" />
-                      {t(expanded ? 'sessions.sidebar.group.collapseAria' : 'sessions.sidebar.group.expandAria', { label: group.label })}
-                    </ContextMenuItem>
-                  </ContextMenuContent>
-                  </ContextMenu>
-                )}
-                {expanded ? <div className="space-y-0.5 pl-2">
-                  {group.forest.map((node) => (
-                    <ConversationSessionRow
-                      key={node.session.id}
-                      node={node}
-                      attentionBySession={attentionBySession}
-                      currentSessionId={currentSessionId}
-                      editingId={editingId}
-                      editingName={editingName}
-                      collapsedIds={collapsedSessionIds}
-                      revealChildren={query.trim().length > 0}
-                      pendingDialogCountBySession={pendingDialogCountBySession}
-                      pinnedIds={pinnedIds}
-                      selectedIds={selectedSessionIds}
-                      selectionMode={selectionMode}
-                      untitled={untitled}
-                      onToggleSelection={toggleSelection}
-                      onBeginSelection={beginSelectionAt}
-                      onContextTarget={prepareContextTarget}
-                      onBulkAction={requestBulkAction}
-                      onExitSelection={exitSelectionMode}
-                      onSelect={(session) => {
-                        if (selectionMode) toggleSelection(session);
-                        else void handleSelect(session);
-                      }}
-                      onToggleExpanded={(sessionId) => setCollapsedSessionIds((current) => {
-                        const next = new Set(current);
-                        if (next.has(sessionId)) next.delete(sessionId);
-                        else next.add(sessionId);
-                        return next;
-                      })}
-                      onBeginRename={(session) => {
-                        setEditingId(session.id);
-                        setEditingName(conversationSessionTitle(session, untitled));
-                      }}
-                      onCancelRename={() => setEditingId(null)}
-                      onChangeEditingName={setEditingName}
-                      onCommitRename={(session) => void commitRename(session)}
-                      onCopyId={(session) => {
-                        void copyTextToClipboard(session.id).then((result) => {
-                          if (result.ok) toast.success(t('sessions.sidebar.session.menu.copied'));
-                          else toast.error(result.error);
-                        });
-                      }}
-                      onTogglePinned={(session) => togglePinned({
-                        directory: session.cwd,
-                        sessionId: session.id,
-                      })}
-                      onArchive={(selected) => setConfirmation({
-                        scope: 'session',
-                        action: 'archive',
-                        ids: collectConversationSessionSubtreeIds(summaries, selected.session.id),
-                        title: conversationSessionTitle(selected.session, untitled),
-                      })}
-                      onDelete={(selected) => setConfirmation({
-                        scope: 'session',
-                        action: 'delete',
-                        ids: collectConversationSessionSubtreeIds(summaries, selected.session.id),
-                        title: conversationSessionTitle(selected.session, untitled),
-                      })}
-                      onOpenMiniChat={handleOpenMiniChat}
-                    />
-                  ))}
-                </div> : null}
-                </section>
-              );
-            })
+            <>
+              <div id={projectsSectionId} hidden={!projectsExpanded} className="space-y-1">
+                {groups.some(group => group.project) ? groups.filter(group => group.project).map(renderGroup) : !query.trim() ? (
+                  <p className="px-2 py-3 typography-meta text-muted-foreground">{t('mobile.sessions.empty.noProjectsTitle')}</p>
+                ) : null}
+              </div>
+              {groups.filter(group => !group.project).map(renderGroup)}
+            </>
           )}
         </div>
 
