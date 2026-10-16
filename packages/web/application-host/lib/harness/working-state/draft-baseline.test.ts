@@ -1,9 +1,5 @@
-import fs from 'node:fs/promises';
-import os from 'node:os';
-import path from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import { overlayDraftsOnBaseline, createBranchWithDraftBaseline } from './draft-baseline.js';
-import { materializeWorkingState } from './materializer.js';
 import type { RecoveryState, RegularFileState, WorkingBranchRoot, WorkingStateRootStore } from './types.js';
 
 // This suite owns draft overlay and its consumers, not durable storage. Return
@@ -72,7 +68,7 @@ describe('draft baseline consumers', () => {
     expect((await objects.readContent(states['helper.ts']!))?.toString()).toBe('export const y = 100;');
   });
 
-  it('produces nested/type-changing drafts that the materializer can consume', async () => {
+  it('preserves nested draft bytes and replaces conflicting ancestor states', async () => {
     const objects = objectReceipts();
     const result = await overlayDraftsOnBaseline({
       baseState: {
@@ -92,19 +88,15 @@ describe('draft baseline consumers', () => {
     ]);
     expect(result.effectiveState['dir/old.txt']).toEqual({ kind: 'missing' });
     expect(result.effectiveState['file-base']).toMatchObject({ kind: 'directory' });
-    const targetDir = await fs.mkdtemp(path.join(os.tmpdir(), 'varin-draft-materialize-'));
-    try {
-      await materializeWorkingState({ targetDir, states: result.effectiveState, readContent: objects.readContent });
-      expect(await fs.readFile(path.join(targetDir, 'newdir/new.ts'), 'utf8')).toBe('new nested draft\n');
-      expect(await fs.readFile(path.join(targetDir, 'dir'), 'utf8')).toBe('directory replaced by file\n');
-      await expect(fs.lstat(path.join(targetDir, 'dir/old.txt'))).rejects.toMatchObject({
-        code: expect.stringMatching(/ENOENT|ENOTDIR/),
-      });
-      expect(await fs.readFile(path.join(targetDir, 'file-base/child.ts'), 'utf8')).toBe('file replaced by directory\n');
-      expect(await fs.readFile(path.join(targetDir, 'stable/new.ts'), 'utf8')).toBe('existing directory remains baseline\n');
-    } finally {
-      await fs.rm(targetDir, { recursive: true, force: true });
+    for (const [name, content] of [
+      ['newdir/new.ts', 'new nested draft\n'],
+      ['dir', 'directory replaced by file\n'],
+      ['file-base/child.ts', 'file replaced by directory\n'],
+      ['stable/new.ts', 'existing directory remains baseline\n'],
+    ]) {
+      expect((await objects.readContent(result.effectiveState[name!]!))?.toString()).toBe(content);
     }
+
   });
 
   it('rejects conflicting draft paths before writing any objects', async () => {

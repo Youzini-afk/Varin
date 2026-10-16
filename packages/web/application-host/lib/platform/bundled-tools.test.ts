@@ -1,12 +1,18 @@
-import { describe, expect, test } from 'vitest';
+import { afterEach, describe, expect, test } from 'vitest';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
 import { augmentPathWithBundledRipgrep, resolveBundledRipgrepBinDir } from './bundled-tools.js';
 
+const roots: string[] = [];
+afterEach(() => {
+  for (const root of roots.splice(0)) fs.rmSync(root, { recursive: true, force: true });
+});
+
 const makeTempRipgrepPackage = () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'openchamber-rg-test-'));
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'varin-rg-test-'));
+  roots.push(root);
   const packageJsonPath = path.join(root, 'node_modules', '@vscode', 'ripgrep', 'package.json');
   const binDir = path.join(path.dirname(packageJsonPath), 'bin');
   fs.mkdirSync(binDir, { recursive: true });
@@ -20,7 +26,8 @@ const makeTempRipgrepPackage = () => {
 };
 
 const makeTempRipgrepBinPackage = () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'openchamber-rg-test-'));
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'varin-rg-test-'));
+  roots.push(root);
   const packageJsonPath = path.join(root, 'node_modules', 'ripgrep', 'package.json');
   const packageRoot = path.dirname(packageJsonPath);
   const binDir = path.join(root, 'node_modules', '.bin');

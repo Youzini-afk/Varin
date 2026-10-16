@@ -1,3 +1,4 @@
+import { guardProviderReply } from './provider-response.test-helper.js';
 import { responsesMetadataText } from './responses-wire.test-helper.js';
 import { spawn, type ChildProcess } from 'node:child_process';
 import { DatabaseSync } from 'node:sqlite';
@@ -41,7 +42,7 @@ it('real file journal settles a lost receipt after kernel restart without repeat
   const server = createServer((request, response) => {
     const chunks: Buffer[] = [];
     request.on('data', chunk => chunks.push(Buffer.from(chunk)));
-    request.on('end', () => {
+    request.on('end', guardProviderReply(response, () => {
       const body = JSON.parse(Buffer.concat(chunks).toString()) as { input: Array<Record<string, unknown>> };
       const last = body.input.findLast(item => item.type === 'function_call_output');
       if (last) observed.push(JSON.parse(responsesMetadataText(last.output)));
@@ -55,7 +56,7 @@ it('real file journal settles a lost receipt after kernel restart without repeat
         response.writeHead(200, { 'content-type': 'text/event-stream' });
         response.end(`data: ${JSON.stringify({ type: 'response.completed', response: { output: [{ id: 'final-answer', type: 'message', content: [{ type: 'output_text', text: 'recovered' }] }] } })}\n\n`);
       }
-    });
+    }));
   });
   try {
     server.listen(0, '127.0.0.1'); await once(server, 'listening');

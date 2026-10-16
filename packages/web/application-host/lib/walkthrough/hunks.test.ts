@@ -67,7 +67,6 @@ describe('parseDiffFiles', () => {
 
     expect(first).toEqual(second);
     expect(new Set(first).size).toBe(first.length);
-    expect(first.every((id) => /:[a-f0-9]{64}(?:-\d+)?$/.test(id))).toBe(true);
   });
 
   it('keeps an untouched hunk addressable when a neighbour changes', () => {

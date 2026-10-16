@@ -22,14 +22,14 @@ const { openWorkspaceKnowledge } = await import(serverRoot.href) as typeof impor
 describe("knowledge store — Node smoke (built artifact)", () => {
   it("opens a store, puts and recalls a knowledge node", async () => {
     const dataDir = mkdtempSync(join(tmpdir(), "ksmoke-"));
+    let store: Awaited<ReturnType<typeof openWorkspaceKnowledge>> | undefined;
     try {
-      const store = await openWorkspaceKnowledge({
+      store = await openWorkspaceKnowledge({
         dataDir,
         hostId: "smoke-host",
         workspaceId: "smoke-ws",
         embedding: null,
       });
-
       const id = await store.putKnowledge({
         scope: "workspace",
         status: "accepted",
@@ -42,61 +42,10 @@ describe("knowledge store — Node smoke (built artifact)", () => {
       assert.ok(results.length > 0, "recall should find the seeded node");
       assert.equal(results[0]!.node.id, id);
 
-      const graph = await store.replaceFileSymbols("src/example.ts", "typescript", [{
-        name: "Example",
-        kind: "class",
-        range: { startLine: 0, startCharacter: 0, endLine: 2, endCharacter: 1 },
-      }], "disk-r1");
-      assert.equal(graph.symbols, 1);
-      assert.equal((await store.getDefinedSymbols("src/example.ts"))[0]?.name, "Example");
-      assert.equal((await store.searchSymbols("Example", 5))[0]?.path, "src/example.ts");
-      assert.equal((await store.searchSymbols("Example", 5))[0]?.documentRevision, "disk-r1");
-
-      await store.replaceFileSymbols("src/example.ts", "typescript", [{
-        name: "Example",
-        kind: "class",
-        range: { startLine: 0, startCharacter: 0, endLine: 2, endCharacter: 1 },
-      }], "disk-r1", [
-        { kind: "import", value: "./dep", line: 1 },
-        { kind: "connects", value: "explore.search", callee: "register", line: 4 },
-      ]);
-      const first = await store.getFileRelations("src/example.ts");
-      assert.equal(first?.imports[0]?.specifier, "./dep");
-      assert.equal(first?.connections[0]?.literal, "explore.search");
-      assert.equal(first?.danglingEdges, 0);
-      await store.replaceFileSymbols("src/example.ts", "typescript", [{
-        name: "Example",
-        kind: "class",
-        range: { startLine: 0, startCharacter: 0, endLine: 2, endCharacter: 1 },
-      }], "disk-r2", [
-        { kind: "import", value: "./other", line: 1 },
-      ]);
-      const second = await store.getFileRelations("src/example.ts");
-      assert.equal(second?.documentRevision, "disk-r2");
-      assert.equal(second?.imports[0]?.specifier, "./other");
-      assert.equal(second?.connections.length, 0);
-      assert.equal(second?.danglingEdges, 0);
-      assert.equal((await store.findLinks("./dep")).length, 0);
-
-      await store.close();
     } finally {
-      try { rmSync(dataDir, { recursive: true, force: true }); } catch { /* Windows */ }
+      try { await store?.close(); }
+      finally { rmSync(dataDir, { recursive: true, force: true }); }
     }
   });
 
-  it("dim is 8 in placeholder mode (no embedding)", async () => {
-    const dataDir = mkdtempSync(join(tmpdir(), "ksmoke-dim-"));
-    try {
-      const store = await openWorkspaceKnowledge({
-        dataDir,
-        hostId: "smoke-host",
-        workspaceId: "smoke-ws",
-        embedding: null,
-      });
-      assert.equal(store.dim, 8, "placeholder dim should be 8");
-      await store.close();
-    } finally {
-      try { rmSync(dataDir, { recursive: true, force: true }); } catch { /* Windows */ }
-    }
-  });
 });

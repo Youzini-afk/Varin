@@ -8,7 +8,8 @@ import type { JsonValue, VarinAgentPolicyInput } from '@varin/extension-contract
 import { afterEach, expect, it } from 'vitest';
 import { resolveVarinExtensionServiceRouting, canonicalServiceComposition } from '@varin/extension-contract';
 import { ApplicationExtensionRuntime, HostServiceRegistry } from '@varin/extension-host';
-import { createAgentPolicy } from './agent-policy.js';
+import { AgentPolicyBridge, createAgentPolicy } from './agent-policy.js';
+import { leafHostComposition } from './host-composition.test-helper.js';
 
 const repository = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../../../..');
 const cleanups: Array<() => Promise<void>> = [];
@@ -290,4 +291,44 @@ it('exact policy recovery selects the complete configuration among retained gene
     await expect(prepare({ projectId: 'config', threadId: 'thread:restored-child', requiredBinding: { ...current.binding.artifact, configurationIdentity: 'unavailable' } })).rejects.toThrow('policy_exact_binding_unavailable');
   } finally { current.release(); old.release(); await replacement.finalize(); }
   await expect(prepare({ projectId: 'config', threadId: 'thread:old-child', requiredBinding: old.binding.artifact })).rejects.toThrow('policy_exact_binding_unavailable');
+});
+
+
+it('late old-epoch response send failure cannot close replacement kernel', async () => {
+  let epoch = 'one';
+  let rejectOld!: (error: Error) => void;
+  let failures = 0;
+  let sent = 0;
+  const bridge = new AgentPolicyBridge(() => epoch, async () => {
+    sent++;
+    await new Promise<void>((_resolve, reject) => { rejectOld = reject; });
+  }, () => { failures++; });
+  cleanups.push(async () => bridge.close());
+  const artifact = {
+    providerKey: 'fixture:host:varin.agent.policy@4', extensionId: 'fixture', extensionVersion: '1',
+    serviceId: 'varin.agent.policy' as const, serviceVersion: 4 as const,
+    composition: leafHostComposition({ extensionId: 'fixture', extensionVersion: '1', artifactIntegrity: 'artifact' }),
+    artifactIntegrity: 'artifact', configurationIdentity: 'config', declaredIdentity: { name: 'policy', version: '1' },
+    identity: { name: 'policy', version: 'hash' }, modelRoles: [], stateTransition: 'unsupported' as const,
+  };
+  const binding = bridge.register('r', 0, {
+    binding: { reference: 'p', artifact }, revocationSignal: new AbortController().signal,
+    release() {},
+    async transitionState() { return { kind: 'incompatible', reason: 'Unsupported' }; },
+    async decide() { return { action: { kind: 'complete' }, state: null }; },
+  });
+  bridge.consume({
+    v: 1, kind: 'agent-policy-request', id: 'decision1', kernelEpoch: 'one', runId: 'r', generation: 0, binding,
+    input: {
+      view: { run_id: 'r', state: 'runnable', history_count: 0, history_head_id: null, pending_tool_calls: 0, model_capabilities: [] },
+      event: { kind: 'started' }, state: null,
+    },
+  });
+  await expect.poll(() => sent).toBe(1);
+  epoch = 'two';
+  bridge.close();
+  rejectOld(new Error('old pipe closed'));
+  // Let the rejected send and its catch handler settle before checking the new epoch.
+  await new Promise(resolve => setImmediate(resolve));
+  expect(failures).toBe(0);
 });

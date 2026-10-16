@@ -1,5 +1,5 @@
 import { ToolBridge } from './tool-bridge.js';
-import { expect, it, vi } from 'vitest';
+import { expect, it, onTestFinished, vi } from 'vitest';
 import { createModelAuthority } from './model-authority.js';
 import { CredentialBridge, type PrivateCredentialResponse } from './credential-bridge.js';
 import { ExistingHostCredentialOwner, type CredentialOwnerOptions, type CredentialScope } from './credential-owner.js';
@@ -315,4 +315,32 @@ it('the original terminal release retires run admissions without an observer and
   const surviving = credentials.findOwner('operation', scope)!; expect(surviving).toBeInstanceOf(ExistingHostCredentialOwner); surviving.release();
   expect(operationReleased).not.toHaveBeenCalled(); credentials.unregister('run', 'operation-binding'); expect(operationReleased).toHaveBeenCalledOnce();
   credentials.close();
+});
+
+it('requires the exact auxiliary binding ID and scope in the Host credential bridge', async () => {
+  const responses: PrivateCredentialResponse[] = [];
+  let mainReads = 0; let planningReads = 0;
+  const scope = { reference: 'ref', authority: 'owner', account: 'account', generation: 1 };
+  const owner = (secret: string, read: () => void) => new ExistingHostCredentialOwner({ providerId: 'fixture', providerFamily: 'openai-responses',
+    endpoint: 'http://127.0.0.1:1/responses', currentScope: async () => scope,
+    runtime: { getAuth: async () => { read(); return { auth: { apiKey: secret } }; } } });
+  const bridge = new CredentialBridge(() => 'epoch', async response => { responses.push(response); }, () => { throw new Error('Unexpected transport failure'); });
+  onTestFinished(() => bridge.close());
+  await bridge.register('run', owner('fake-main', () => { mainReads++; }));
+  await bridge.register('run', owner('fake-planner', () => { planningReads++; }), undefined, 'planning-binding');
+  for (const [id, bindingId, requestScope] of [
+    ['forged', 'forged-binding', scope], ['wrong-account', 'planning-binding', { ...scope, account: 'other' }],
+    ['correct', 'planning-binding', scope],
+  ] as const) bridge.consume({ v: 1, kind: 'credential-request', id, kernelEpoch: 'epoch', runId: 'run', bindingId, scope: requestScope });
+  await expect.poll(() => responses.length).toBe(3);
+  expect(responses.find(response => response.id === 'forged')!.ok).toBe(false);
+  expect(responses.find(response => response.id === 'wrong-account')!.ok).toBe(false);
+  expect(responses.find(response => response.id === 'correct')!.result!.headers).toContainEqual({ name: 'authorization', value: 'Bearer fake-planner' });
+  expect(mainReads).toBe(0); expect(planningReads).toBe(1);
+  bridge.unregister('run', 'planning-binding');
+  bridge.consume({ v: 1, kind: 'credential-request', id: 'after-release', kernelEpoch: 'epoch', runId: 'run', bindingId: 'planning-binding', scope });
+  bridge.consume({ v: 1, kind: 'credential-request', id: 'main-still-valid', kernelEpoch: 'epoch', runId: 'run', scope });
+  await expect.poll(() => responses.length).toBe(5);
+  expect(responses.find(response => response.id === 'after-release')!.ok).toBe(false);
+  expect(responses.find(response => response.id === 'main-still-valid')!.result!.headers).toContainEqual({ name: 'authorization', value: 'Bearer fake-main' });
 });

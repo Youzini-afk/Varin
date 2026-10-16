@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { loadCommittedGrammarPackManifest, parseGrammarPackManifest } from "./grammar-manifest.js";
+import { parseGrammarPackManifest } from "./grammar-manifest.js";
 
 const entry = (overrides: Record<string, unknown> = {}) => ({
   languageId: "python",
@@ -15,46 +15,7 @@ const entry = (overrides: Record<string, unknown> = {}) => ({
   ...overrides,
 });
 
-describe("loadCommittedGrammarPackManifest", () => {
-  it("loads the publish-time digest list with ABI bounds", () => {
-    const manifest = loadCommittedGrammarPackManifest();
-    expect(manifest.minCompatibleAbi).toBe(13);
-    expect(manifest.maxCompatibleAbi).toBe(15);
-    expect(manifest.packs.python?.integrity).toMatch(/^sha256-[0-9a-f]{64}$/);
-    expect(manifest.skipped.swift).toContain("no .wasm");
-    expect(manifest.skipped.markdown).toContain("no .wasm");
-    expect(manifest.skipped.xml).toContain("no .wasm");
-    expect(Object.keys(manifest.packs).sort()).toEqual([
-      "c",
-      "cpp",
-      "csharp",
-      "css",
-      "go",
-      "html",
-      "java",
-      "kotlin",
-      "php",
-      "python",
-      "ruby",
-      "rust",
-      "shellscript",
-      "toml",
-      "yaml",
-    ]);
-  });
-
-  it("records which packs carry a verified structure query", () => {
-    const manifest = loadCommittedGrammarPackManifest();
-    const withOutline = Object.entries(manifest.packs)
-      .filter(([, pack]) => pack.tagsPath !== null)
-      .map(([languageId]) => languageId)
-      .sort();
-    expect(withOutline).toEqual(["c", "cpp", "csharp", "go", "java", "php", "python", "ruby", "rust"]);
-    expect(manifest.packs.python?.tagsIntegrity).toMatch(/^sha256-[0-9a-f]{64}$/);
-    // A pack without a query still installs a parser, so it stays listed.
-    expect(manifest.packs.toml?.tagsPath).toBeNull();
-  });
-
+describe("parseGrammarPackManifest", () => {
   it("does not offer a pack whose ABI is outside the window the manifest declares", () => {
     const manifest = parseGrammarPackManifest({
       generatedAt: "2026-09-07",

@@ -3,7 +3,6 @@ import type { FastDecisionAnswer } from "@varin/protocol";
 import { createExploreQueryRun } from "./explore.js";
 import type { ExploreFileSnapshot } from "./file-snapshot.js";
 import {
-  resolveExploreFastDecision,
   runExploreFastDecisionLoop,
   type HarnessFastDecisionResultWire,
 } from "./explore-fast-decision.js";
@@ -23,17 +22,6 @@ const binding = {
 };
 
 const neverSettle = { promise: new Promise<void>(() => {}), requested: () => false };
-
-describe("resolveExploreFastDecision", () => {
-  it("maps the described purpose status onto the frozen query state", () => {
-    expect(resolveExploreFastDecision(undefined)).toEqual({ status: "unavailable" });
-    expect(resolveExploreFastDecision({ status: "disabled" })).toEqual({ status: "disabled" });
-    expect(resolveExploreFastDecision({ status: "unconfigured" })).toEqual({ status: "unconfigured" });
-    expect(resolveExploreFastDecision({ status: "invalid", message: "bad" })).toEqual({ status: "invalid", message: "bad" });
-    const readyStatus = resolveExploreFastDecision({ status: "ready", binding });
-    expect(readyStatus).toEqual({ status: "ready", binding });
-  });
-});
 
 describe("runExploreFastDecisionLoop", () => {
   // a.ts → b.ts is expanded by the ordinary seed pass; b.ts → c.ts only

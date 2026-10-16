@@ -1,4 +1,6 @@
 import React, { act } from 'react';
+import { I18nProvider } from '@/lib/i18n';
+import { dict } from '@/lib/i18n/messages/en';
 import { createRoot, type Root } from 'react-dom/client';
 import { parseHTML } from 'linkedom';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
@@ -14,6 +16,7 @@ vi.mock('@/components/chat/MarkdownRenderer', () => ({ MarkdownRenderer: ({ cont
 const identity: ThreadIdentity = { runtime: 'agent', threadId: 'thread:caller', branchId: 'branch:caller' };
 const family: FamilyList = { rootThreadId: 'thread:root', members: ['first', 'second'].map(name => ({ threadId: `thread:${name}`, parentThreadId: 'thread:root', task: `${name} task`, state: 'reported',
   branches: [{ branchId: `branch:${name}`, headId: 'head', activeRunId: null, latestRun: { runId: 'run:original', state: 'completed' } }] })) };
+const originalRecord = JSON.stringify({ runId: 'run:original', tool: { callId: 'call:original' } });
 const page = (text = 'original answer'): FamilyRead => ({ threadId: 'thread:first', branchId: 'branch:first', runId: null, headId: 'fixed-head', anchor: 'signed-fixed-anchor', nextCursor: null, scanned: 1, scanComplete: true, hasEarlier: false, hasLater: false,
   items: [{ id: 'original-record', parentId: null, sequence: 8, runId: 'run:original', source: 'assistant', kind: 'text', body: { id: 'original-record', provenance: { kind: 'assistant' }, content: { kind: 'text', text }, opaque: null }, preview: '', bodyBytes: 100, bodyTruncated: false, tool: null }] });
 function fixture() {
@@ -21,11 +24,12 @@ function fixture() {
     list: vi.fn<ThreadFamilyAPI['list']>(async () => family),
     runs: vi.fn<ThreadFamilyAPI['runs']>(async (_caller, target) => ({ ...target, runs: [{ runId: 'run:original', branchId: target.branchId, state: 'completed' }], nextCursor: null })),
     read: vi.fn<ThreadFamilyAPI['read']>(async () => page()),
-    item: vi.fn<ThreadFamilyAPI['item']>(async (_caller, request) => ({ ...request, runId: null, headId: 'fixed-head', format: 'conversation_json', text: request.offset ? 'tail' : 'prefix', offset: request.offset ?? 0, nextOffset: request.offset ? null : 6, totalBytes: 10 })),
+    item: vi.fn<ThreadFamilyAPI['item']>(async (_caller, request) => ({ ...request, runId: null, headId: 'fixed-head', format: 'conversation_json', text: request.offset ? originalRecord.slice(6) : originalRecord.slice(0, 6), offset: request.offset ?? 0, nextOffset: request.offset ? null : 6, totalBytes: originalRecord.length })),
   };
 }
 function deferred<T>() { let resolve!: (value: T) => void; const promise = new Promise<T>(done => { resolve = done; }); return { promise, resolve }; }
 let root: Root; let container: HTMLDivElement;
+const renderContent = (children: React.ReactNode) => root.render(<I18nProvider>{children}</I18nProvider>);
 beforeEach(() => {
   endpoint.generation = 1;
   const { document, window } = parseHTML('<!doctype html><html><body></body></html>');
@@ -34,7 +38,7 @@ beforeEach(() => {
 });
 afterEach(() => { act(() => root.unmount()); container.remove(); vi.unstubAllGlobals(); });
 const mediaRead = vi.fn<ThreadsAPI['mediaRead']>(async () => { throw new Error('unexpected media read'); });
-const render = async (api: ThreadFamilyAPI, selected = identity) => { await act(async () => root.render(<ThreadFamily api={api} mediaRead={mediaRead} identity={selected} />)); };
+const render = async (api: ThreadFamilyAPI, selected = identity) => { await act(async () => renderContent(<ThreadFamily api={api} mediaRead={mediaRead} identity={selected} />)); };
 const button = (label: string) => [...container.querySelectorAll<HTMLButtonElement>('button')].find(value => value.textContent === label)!;
 const click = async (label: string) => { await act(async () => button(label).click()); };
 
@@ -44,56 +48,57 @@ it('reads on demand, keeps saved Run/tool identities, and pages original partial
   partial.nextCursor = 'next-old-records'; partial.scanComplete = false;
   api.read.mockResolvedValueOnce(partial);
   await render(api); expect(api.list).not.toHaveBeenCalled();
-  await click('Browse task family'); expect(api.list).toHaveBeenCalledWith(identity, false, expect.any(AbortSignal));
+  await click(dict['harness.threads.viewAll']); expect(api.list).toHaveBeenCalledWith(identity, false, expect.any(AbortSignal));
   await click('first task');
   expect(api.read.mock.calls[0]!.slice(0, 2)).toEqual([identity, { threadId: 'thread:first', branchId: 'branch:first', query: { kind: 'recent' }, anchor: undefined, cursor: undefined }]);
-  expect(container.textContent).toContain('run:original'); expect(container.textContent).toContain('call:original');
-  expect(container.textContent).toContain('Partial preview'); expect(container.textContent).not.toContain('original answer');
-  await click('Read original record'); expect(container.textContent).toContain('partial JSON page');
-  await click('Next original page');
+  expect(api.runs).toHaveBeenCalledWith(identity, { threadId: 'thread:first', branchId: 'branch:first', cursor: undefined }, expect.any(AbortSignal));
+  expect(container.textContent).toContain(dict['chat.family.partial']); expect(container.textContent).not.toContain('original answer');
+  await click(dict['chat.family.original']); expect(container.querySelector('[aria-label="Original family record"] pre')?.textContent).toBe(originalRecord.slice(0, 6));
+  await click(dict['chat.family.next']);
   expect(api.item.mock.calls[1]![1]).toMatchObject({ anchor: 'signed-fixed-anchor', itemId: 'original-record', offset: 6 });
-  expect(container.querySelector('[aria-label="Original family record"]')!.textContent).toContain('tail');
-  await click('Continue history');
+  expect(container.querySelector('[aria-label="Original family record"] pre')?.textContent).toBe(originalRecord.slice(6));
+  expect(container.textContent).toContain('run:original'); expect(container.textContent).toContain('call:original');
+  await click(dict['chat.family.more']);
   expect(api.read.mock.calls[1]![1]).toMatchObject({ anchor: 'signed-fixed-anchor', cursor: 'next-old-records', query: { kind: 'recent' } });
   expect(container.querySelector('[aria-label="Original family record"]')).toBeNull();
 });
 
 it('aborts superseded targets and closed views and discards late results even when a transport ignores cancellation', async () => {
   const api = fixture(); const old = deferred<FamilyRead>(); api.read.mockReturnValueOnce(old.promise);
-  await render(api); await click('Browse task family'); await click('first task');
+  await render(api); await click(dict['harness.threads.viewAll']); await click('first task');
   const signal = api.read.mock.calls[0]![2]!;
   await click('second task'); expect(signal.aborted).toBe(true);
   await act(async () => old.resolve(page('late first task data')));
   expect(container.textContent).not.toContain('late first task data');
   expect(api.read.mock.calls[1]![1]).toMatchObject({ threadId: 'thread:second', branchId: 'branch:second' });
   const active = api.read.mock.calls[1]![2]!;
-  await click('Hide task family'); expect(active.aborted).toBe(true);
+  await click(dict['harness.threads.viewAll']); expect(active.aborted).toBe(true);
   expect(container.querySelector('[aria-label="Family conversation history"]')).toBeNull();
 });
 
 it('drops previous Host and caller views, and distinguishes empty pages from read failure', async () => {
   const api = fixture(); const old = deferred<FamilyList>(); api.list.mockReturnValueOnce(old.promise);
-  await render(api); await click('Browse task family'); const oldSignal = api.list.mock.calls[0]![2]!;
+  await render(api); await click(dict['harness.threads.viewAll']); const oldSignal = api.list.mock.calls[0]![2]!;
   await act(async () => { endpoint.generation++; for (const listener of endpoint.listeners) listener(); });
   expect(oldSignal.aborted).toBe(true);
   await act(async () => old.resolve(family)); expect(container.textContent).not.toContain('first task');
-  await click('Browse task family'); api.read.mockRejectedValueOnce(new Error('stale epoch'));
-  await click('first task'); expect(container.textContent).toContain('Could not read this view'); expect(container.textContent).not.toContain('No matching');
-  api.read.mockResolvedValueOnce({ ...page(), items: [] }); await click('Read latest saved view');
-  expect(container.textContent).toContain('No matching conversation records');
+  await click(dict['harness.threads.viewAll']); api.read.mockRejectedValueOnce(new Error('stale epoch'));
+  await click('first task'); expect(container.textContent).toContain(dict['chat.family.failed']); expect(container.textContent).not.toContain(dict['chat.family.noMatches']);
+  api.read.mockResolvedValueOnce({ ...page(), items: [] }); await click(dict['chat.family.latest']);
+  expect(container.textContent).toContain(dict['chat.family.noMatches']);
   await render(api, { ...identity, branchId: 'branch:new' }); expect(container.textContent).not.toContain('first task');
   expect(container.querySelector('[aria-label="Family conversation history"]')).toBeNull();
 });
 
 it('uses the selected historical Run and fixed range boundaries without starting the other conversation', async () => {
   const api = fixture(); api.read.mockResolvedValue({ ...page(), hasEarlier: true, hasLater: true });
-  await render(api); await click('Browse task family'); await click('first task');
-  const select = container.querySelector<HTMLSelectElement>('[aria-label="Family Run"]')!;
+  await render(api); await click(dict['harness.threads.viewAll']); await click('first task');
+  const select = container.querySelector<HTMLSelectElement>(`[aria-label="${dict['chat.family.execution']}"]`)!;
   await act(async () => { Object.defineProperty(select, 'value', { configurable: true, writable: true, value: 'run:original' }); select.dispatchEvent(new window.Event('change', { bubbles: true })); });
   expect(api.read.mock.calls.at(-1)![1]).toMatchObject({ runId: 'run:original', query: { kind: 'recent' } });
-  await click('Earlier records');
+  await click(dict['chat.family.earlier']);
   expect(api.read.mock.calls.at(-1)![1]).toMatchObject({ runId: 'run:original', anchor: 'signed-fixed-anchor', query: { kind: 'range', beforeId: 'original-record', direction: 'older' } });
-  await click('Later records');
+  await click(dict['chat.family.later']);
   expect(api.read.mock.calls.at(-1)![1]).toMatchObject({ query: { kind: 'range', afterId: 'original-record', direction: 'newer' } });
 });
 
@@ -109,9 +114,9 @@ it('reads family media with the caller separate from the exact anchored target',
   vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:family');
   vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => {});
   try {
-    await render(api); await click('Browse task family'); await click('first task');
+    await render(api); await click(dict['harness.threads.viewAll']); await click('first task');
     expect(mediaRead).not.toHaveBeenCalled();
-    await click('View image');
+    await click(dict['chat.media.view']);
     expect(mediaRead).toHaveBeenCalledExactlyOnceWith({ ...identity, holder: { kind: 'family', threadId: 'thread:first', branchId: 'branch:first', anchor: 'signed-fixed-anchor', itemId: 'original-record' }, partIndex: 1, chunkIndex: 0, expectedContentRef: 'sha256-family-image' }, expect.any(AbortSignal));
     expect(container.querySelector('img')?.getAttribute('src')).toBe('blob:family');
     await click('second task');

@@ -1,3 +1,4 @@
+import { guardProviderReply } from './provider-response.test-helper.js';
 import { responsesMetadataText } from './responses-wire.test-helper.js';
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import fs from 'node:fs/promises';
@@ -132,16 +133,16 @@ it('abort retains wire credit until receipt and cancels queued admission without
 }, 30_000);
 
 
-async function localProvider(reply: (body: Record<string, unknown>, response: ServerResponse, request: IncomingMessage) => void) {
+async function localProvider(reply: (body: Record<string, unknown>, response: ServerResponse, request: IncomingMessage) => void | Promise<void>) {
   const requests: Record<string, unknown>[] = [];
   const server = createServer((request: IncomingMessage, response: ServerResponse) => {
     const chunks: Buffer[] = [];
     request.on('data', (chunk: Buffer) => chunks.push(chunk));
-    request.on('end', () => {
+    request.on('end', guardProviderReply(response, () => {
       const body = JSON.parse(Buffer.concat(chunks).toString()) as Record<string, unknown>;
       requests.push(body);
-      reply(body, response, request);
-    });
+      return reply(body, response, request);
+    }));
   });
   server.listen(0, '127.0.0.1');
   await once(server, 'listening');
@@ -305,7 +306,7 @@ it.each([false, true])('tool process settles OS and durable operation evidence (
   const result = continuation.find(item => item.type === 'function_call_output');
   const accepted = JSON.parse(responsesMetadataText(result?.output)) as { operation_id: string };
   expect(typeof accepted.operation_id).toBe('string');
-  const processIdentity = { workspaceId: 'process-workspace', processId: accepted.operation_id };
+  const processIdentity = { workspaceId: 'process-workspace', rootId: registered.rootId, processId: accepted.operation_id };
   try {
     await expect.poll(async () => fs.readFile(path.join(workspace, 'test-marker.txt'), 'utf8').catch(() => ''), { timeout: 8_000 }).toBe('real process');
     await expect(actor.processList({ workspaceId: 'process-workspace', rootId: String(registered.rootId) })).rejects.toThrow(/process maintenance/i);
@@ -506,7 +507,7 @@ it('model interrupt preserves an accepted background process job until explicit 
   await expect.poll(() => provider.requests.length).toBe(2);
   const secondInput = provider.requests[1]!.input as Array<Record<string, unknown>>;
   const receipt = JSON.parse(responsesMetadataText(secondInput.find(item => item.type === 'function_call_output')?.output)) as { operation_id: string };
-  const identity = { workspaceId: 'interrupt-job-workspace', processId: receipt.operation_id };
+  const identity = { workspaceId: 'interrupt-job-workspace', rootId: root.rootId, processId: receipt.operation_id };
   try {
     expect((await actor.processInspect(identity)).writerActive).toBe(true);
     await f.runtimeClient.enqueue({ key: 'interrupt-job-new-input', threadId: 'interrupt-job-thread', branchId: 'interrupt-job-branch', mode: 'interrupt', input: { text: 'change foreground response' } });

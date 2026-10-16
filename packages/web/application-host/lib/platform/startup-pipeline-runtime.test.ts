@@ -20,7 +20,7 @@ describe('startup pipeline runtime', () => {
           order.push('listen');
           return { activePort: 3901 };
         },
-        attachProcessHandlers: vi.fn(),
+        attachProcessHandlers: () => { order.push('handlers'); },
       }),
     });
 
@@ -38,6 +38,6 @@ describe('startup pipeline runtime', () => {
     } as unknown as Parameters<typeof runtime.run>[0];
     await runtime.run(options);
 
-    expect(order).toEqual(['listen', 'port:3901']);
+    expect(order).toEqual(['listen', 'port:3901', 'handlers']);
   });
 });

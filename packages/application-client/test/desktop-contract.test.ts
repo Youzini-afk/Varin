@@ -12,6 +12,7 @@ test('desktop command guard accepts known commands and rejects unknown commands'
 });
 
 test('desktop event guard accepts known events and rejects unknown events', () => {
-  assert.equal(isVarinDesktopEvent('varin:open-session'), true);
+  assert.equal(isVarinDesktopEvent('varin:open-thread'), true);
+  assert.equal(isVarinDesktopEvent('varin:open-session'), false);
   assert.equal(isVarinDesktopEvent('varin:unknown'), false);
 });

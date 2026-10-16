@@ -97,12 +97,15 @@ jobs:
       - if: needs.changes.outputs.code == 'true'
         run: bun run test:packages
       - if: needs.changes.outputs.code == 'true'
-        name: Test desktop driver protocols
-        run: python3 -m unittest discover -s packages/computer-driver/linux -p 'test_*.py'
+        name: Test desktop driver protocols on a private D-Bus
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends python3-gi dbus
+          dbus-run-session -- env VARIN_TEST_PRIVATE_BUS=1 /usr/bin/python3 -m unittest discover -s packages/computer-driver/linux -p 'test_*.py'
       - if: needs.changes.outputs.code == 'true'
         run: bun run --cwd packages/electron test:linux-desktop
       - if: needs.changes.outputs.code == 'true'
-        run: bun run test:cloud
+        run: bun run test:tooling
 
   windows-runtime:
     name: Windows runtime
@@ -131,6 +134,9 @@ jobs:
       - run: bun run --cwd packages/electron test:runtime
       - run: bun run --cwd packages/electron test:packaging-tools
       - run: bun run --cwd packages/electron test:updater
+      - name: Test Windows input targeting without desktop access
+        shell: pwsh
+        run: ./packages/computer-driver/windows/test-targeting.ps1
 
   production-build:
     name: Production build

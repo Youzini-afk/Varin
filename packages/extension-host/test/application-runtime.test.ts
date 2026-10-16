@@ -8,7 +8,7 @@ import test from "node:test";
 import { build } from "esbuild";
 import { parseVarinContextFragments, parseVarinExtensionServiceProvision,
   VARIN_CONTEXT_FRAGMENTS_CONTRACT, VARIN_CONTEXT_FRAGMENTS_SERVICE, type VarinExtensionStorageSnapshot } from "@varin/extension-contract";
-import { ApplicationExtensionRuntime, ChildBrokeredHostTransport } from "../src/index.js";
+import { ApplicationExtensionRuntime, ChildBrokeredHostTransport, type HostServiceBinding } from "../src/index.js";
 
 const directories: string[] = [];
 const temporaryDirectory = async (prefix: string): Promise<string> => {
@@ -152,12 +152,15 @@ test("brokered Host storage, migration rollback, services, and crash isolation p
     dataDir,
     varinVersion,
   });
+  let consumer: HostServiceBinding | undefined;
   try {
     const started = await runtime.start();
     const installed = await runtime.installOrStage({
       expectedRevision: started.catalog.revision,
       source: { display: "Broker v1", kind: "local", specifier: v1 },
     });
+    // The application consumer, rather than a completed one-shot call, owns this live generation.
+    consumer = await runtime.prepareService({ args: [], method: "read", serviceId, version: 1 });
     assert.equal(installed.extensions[0]?.selectedVersion, "1.0.0");
     assert.equal(await runtime.invokeService({ args: [], method: "read", serviceId, version: 1 }), "1.0.0");
     const assetPath = await runtime.invokeService({ args: [], method: "assetPath", serviceId, version: 1 });
@@ -206,6 +209,7 @@ test("brokered Host storage, migration rollback, services, and crash isolation p
     assert.equal(afterCrash.catalog.extensions[0]?.actual.find((actual) => actual.realmKind === "host")?.status, "failed");
     assert.equal(afterCrash.services.providers.length, 0);
   } finally {
+    consumer?.release();
     await runtime.stop();
   }
 });
@@ -219,22 +223,24 @@ test("local reload is a no-op for identical content and transactionally applies 
     dataDir,
     varinVersion,
   });
+  let consumer: HostServiceBinding | undefined;
   try {
     const started = await runtime.start();
     const installed = await runtime.installOrStage({
       expectedRevision: started.catalog.revision,
       source: { display: "Reload fixture", kind: "local", specifier: source },
     });
+    // The application consumer, rather than a completed one-shot call, owns this live generation.
+    consumer = await runtime.prepareService({ args: [], method: "generation", serviceId, version: 1 });
     assert.equal(await runtime.invokeService({ args: [], method: "generation", serviceId, version: 1 }), "1.0.0");
 
-    const beforeUnchanged = await runtime.state();
     const unchanged = await runtime.reloadLocalSource({
       expectedRevision: installed.revision,
       extensionId,
     });
     assert.equal(unchanged.outcome, "unchanged");
     assert.equal(unchanged.snapshot.revision, installed.revision);
-    assert.equal((await runtime.state()).revision, beforeUnchanged.revision);
+    assert.equal(await consumer.invoke("generation", []), "1.0.0");
 
     await writeHostExtension(source, "2.0.0", 2, "ok");
     const changed = await runtime.reloadLocalSource({
@@ -280,6 +286,7 @@ test("local reload is a no-op for identical content and transactionally applies 
     assert.equal(afterFailure.catalog.extensions[0]?.candidate?.integrity, v3Integrity);
     assert.equal(await runtime.invokeService({ args: [], method: "generation", serviceId, version: 1 }), "2.0.0");
   } finally {
+    consumer?.release();
     await runtime.stop();
   }
 });
@@ -298,12 +305,15 @@ test("candidate Host generations stage every opened storage document and commit 
   const applicationAddress = { extensionId, key: "state", scope: "application" as const };
   const profileAddress = { extensionId, key: "preferences", scope: "profile" as const };
   const workspaceAddress = { extensionId, key: "preferences", scope: "workspace" as const };
+  let consumer: HostServiceBinding | undefined;
   try {
     const started = await runtime.start();
     const installed = await runtime.installOrStage({
       expectedRevision: started.catalog.revision,
       source: { display: "Storage v1", kind: "local", specifier: v1 },
     });
+    // The application consumer, rather than a completed one-shot call, owns this live generation.
+    consumer = await runtime.prepareService({ args: [], method: "readAll", serviceId, version: 1 });
     assert.deepEqual(await runtime.invokeService({ args: [], method: "readAll", serviceId, version: 1 }), {
       application: "1.0.0-application",
       profile: "1.0.0-profile",
@@ -353,6 +363,7 @@ test("candidate Host generations stage every opened storage document and commit 
     assert.equal((await runtime.storage.read(profileAddress)).document.revision, 2);
     assert.equal((await runtime.storage.read(workspaceAddress)).document.revision, 3);
   } finally {
+    consumer?.release();
     await runtime.stop();
   }
 });
@@ -373,12 +384,15 @@ test("candidate Host storage rolls back every committed document when storage sy
     { extensionId, key: "preferences", scope: "profile" as const },
     { extensionId, key: "preferences", scope: "workspace" as const },
   ];
+  let consumer: HostServiceBinding | undefined;
   try {
     const started = await runtime.start();
     const installed = await runtime.installOrStage({
       expectedRevision: started.catalog.revision,
       source: { display: "Storage rollback v1", kind: "local", specifier: v1 },
     });
+    // The application consumer, rather than a completed one-shot call, owns this live generation.
+    consumer = await runtime.prepareService({ args: [], method: "readAll", serviceId, version: 1 });
     assert.deepEqual(await runtime.invokeService({ args: [], method: "readAll", serviceId, version: 1 }), {
       application: "1.0.0-application",
       profile: "1.0.0-profile",
@@ -455,6 +469,7 @@ test("candidate Host storage rolls back every committed document when storage sy
       assert.equal(snapshot.document.schemaVersion, 2);
     }
   } finally {
+    consumer?.release();
     await runtime.stop();
   }
 });

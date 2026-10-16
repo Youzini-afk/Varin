@@ -1,3 +1,4 @@
+import { guardProviderReply } from './provider-response.test-helper.js';
 import { responsesMetadataText } from './responses-wire.test-helper.js';
 import { resourceScopeFixture } from './resource-scope.test-helper.js';
 import { createAgentPersonalization } from '../memory/agent-personalization.js';
@@ -18,6 +19,7 @@ import { createThreadsHttpAPI, configureRuntimeUrlResolver, setRuntimeExtraHeade
 import { createKernelClient } from './kernel-client.js';
 import { ThreadCollaboration } from './thread-collaboration.js';
 import { AgentRuntimeClient } from './agent-runtime-client.js';
+import { admitMaterializedRoot, originalMaterializationLocation } from './source-launch.js';
 import { ExistingHostCredentialOwner } from './credential-owner.js';
 import { ThreadAdapter } from './thread-adapter.js';
 import { registerThreadRoutes } from './thread-routes.js';
@@ -48,7 +50,7 @@ async function listen(server: Server) {
   cleanups.push(async () => { server.closeAllConnections(); await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve())); });
   return `http://127.0.0.1:${address.port}`;
 }
-async function fixture(reply: (body: Record<string, unknown>, response: ServerResponse) => void, existingRoot?: string, withResearch = false,
+async function fixture(reply: (body: Record<string, unknown>, response: ServerResponse) => void | Promise<void>, existingRoot?: string, withResearch = false,
   resourceOptions: { probeLocal?: () => LocalMachineProbe; sampleIntervalMs?: number } = {}) {
   await fs.access(kernelPath);
   const root = existingRoot ?? await fs.mkdtemp(path.join(os.tmpdir(), 'varin-http-review-'));
@@ -62,10 +64,10 @@ async function fixture(reply: (body: Record<string, unknown>, response: ServerRe
   const provider = createServer((request, response) => {
     const chunks: Buffer[] = [];
     request.on('data', (bytes: Buffer) => chunks.push(bytes));
-    request.on('end', () => {
+    request.on('end', guardProviderReply(response, () => {
       requests.push({ body: JSON.parse(Buffer.concat(chunks).toString()) as Record<string, unknown>, ...(request.headers.authorization ? { authorization: request.headers.authorization } : {}) });
-      reply(requests.at(-1)!.body, response);
-    });
+      return reply(requests.at(-1)!.body, response);
+    }));
   });
   const endpoint = `${await listen(provider)}/responses`;
   const owner = new ExistingHostCredentialOwner({ providerId: 'fixture-provider', providerFamily: 'openai-responses', endpoint,
@@ -136,6 +138,20 @@ function done(response: ServerResponse) {
   response.writeHead(200, { 'content-type': 'text/event-stream' });
   response.end(`data: ${JSON.stringify({ type: 'response.completed', response: { output: [{ id: 'answer', type: 'message', content: [{ type: 'output_text', text: 'source check completed' }] }] } })}\n\n`);
 }
+// Resolve the original materialized root using its existing admitted source actor.
+// Do not invent a rootId or issue a new permit while testing original/rebound ownership.
+async function originalProcessRoot(f: Awaited<ReturnType<typeof fixture>>, runId: string) {
+  const source = (await f.runtime.launch(runId))?.selection.source;
+  if (!source || source.mode !== 'materialized') throw new Error('Fixture needs its original materialized source');
+  const location = await originalMaterializationLocation(f.root, source.workspace_id, source.environment_run_id ?? runId);
+  const canonicalRoot = await admitMaterializedRoot(location.targetPath);
+  const grant = f.grants.findLast(grant => grant.runId === runId && grant.grantId.startsWith('source:'));
+  if (!grant) throw new Error('Fixture has no original source actor');
+  const root = await f.kernel.scoped(grant).fileRootRegister({ workspaceId: source.workspace_id,
+    executionWorkspaceId: source.execution_workspace_id, canonicalRoot });
+  return root.rootId;
+}
+
 const model = { providerId: 'fixture-provider', modelId: 'fixture-model' };
 function batch(response: ServerResponse, calls: Array<{ name: string; args: Record<string, unknown>; id: string }>) {
   response.writeHead(200, { 'content-type': 'text/event-stream' });
@@ -144,15 +160,26 @@ function batch(response: ServerResponse, calls: Array<{ name: string; args: Reco
   })) } })}\n\n`);
 }
 
-it.each(['none', 'original', 'current'] as const)('durable wait resumes with exact readonly observation; revoked grant: %s', async revoked => {
+it.each(['none', 'original', 'current'] as const)('durable wait resumes with exact Run/source authority; revoked grant: %s', async revoked => {
   let serial = 0; let processId = ''; let readResult = ''; let foreign = false; let foreignResult = '';
-  const failures: unknown[] = [];
-  const f = await fixture((body, response) => { void (async () => {
+  const f = await fixture(async (body, response) => {
     const outputs = (body.input as Array<Record<string, unknown>>).filter(item => item.type === 'function_call_output');
     const output = outputs.at(-1);
     if (foreign) {
       if (!output) tool(response, 'wait_process', { processId }, 90);
-      else { foreignResult = responsesMetadataText(output.output); done(response); }
+      else {
+        foreignResult = responsesMetadataText(output.output);
+        const grant = f.grants.findLast(grant => grant.grantId.startsWith('source:'))!;
+        const launch = (await f.runtime.launch(grant.runId!))!;
+        expect(grant.runId).not.toBe((await f.runtime.operation(processId)).run_id);
+        const identity = { workspaceId: launch.selection.source!.workspace_id,
+          rootId: await originalProcessRoot(f, grant.runId!), processId };
+        // Even a stopped process cannot be adopted by a different Run/Thread.
+        const foreignActor = f.kernel.scoped(grant);
+        await expect(foreignActor.processKill({ ...identity, force: true })).rejects.toThrow(/original process authority/);
+        await expect(foreignActor.processWrite({ ...identity, operationId: 'foreign-input', bytesBase64: '', eof: true })).rejects.toThrow(/original process authority/);
+        done(response);
+      }
       return;
     }
     serial++;
@@ -171,11 +198,12 @@ it.each(['none', 'original', 'current'] as const)('durable wait resumes with exa
       expect(processGrants).toHaveLength(2);
       expect(processGrants[0]!.grantId).not.toBe(processGrants[1]!.grantId);
       const launch = await f.runtime.launch((await f.runtime.operation(processId)).run_id);
-      const identity = { workspaceId: launch!.selection.source!.workspace_id, processId };
+      const identity = { workspaceId: launch!.selection.source!.workspace_id,
+        rootId: await originalProcessRoot(f, (await f.runtime.operation(processId)).run_id), processId };
       const current = f.kernel.scoped(processGrants[1]!);
-      // A legal observation rebind does not convey process control or direct actor ownership.
-      await expect(current.processKill({ ...identity, force: true })).rejects.toThrow(/another workspace or actor/);
-      await expect(current.processWrite({ ...identity, operationId: 'foreign-input', bytesBase64: '', eof: true })).rejects.toThrow(/another workspace or actor/);
+      // Rebinding the same exact Run/source retains control authority. Killing an
+      // already stopped process acknowledges no new effect; foreign Runs stay fenced.
+      expect(await current.processKill({ ...identity, force: true })).toEqual({ requested: false, exited: true });
       if (revoked === 'none') {
         const originalRead = await f.kernel.scoped(processGrants[0]!).processRead({ ...identity, cursor: 0 });
         expect(JSON.stringify(originalRead)).toContain(Buffer.from('process-wait-real-output').toString('base64'));
@@ -187,11 +215,13 @@ it.each(['none', 'original', 'current'] as const)('durable wait resumes with exa
       if (revoked !== 'none') tool(response, 'wait_process', { processId }, 4);
       else done(response);
     } else {
-      expect(responsesMetadataText(output?.output)).toContain('failed');
-      expect(responsesMetadataText(output?.output)).toMatch(/revoked|authority/);
+      expect(JSON.parse(responsesMetadataText(output?.output))).toEqual({ kind: 'not_dispatched',
+        reason: revoked === 'original'
+          ? expect.stringContaining('original process authority was revoked')
+          : expect.stringContaining('process observation cancelled') });
       done(response);
     }
-  })().catch(error => { failures.push(error); response.writeHead(500); response.end('fixture assertion failed'); }); });
+  });
   await fs.writeFile(path.join(f.workspace, 'source.txt'), 'parallel read completed');
   const identity = await f.api.create(`process-wait-${revoked}`);
   const prepared = await f.api.prepareSource({ ...identity, key: 'capture', resourceOwner: { kind: 'local' as const }, workspaceId: (await f.documents.resolveWorkspace({ path: f.workspace })).workspaceId, content: { mode: 'saved-files' }, captureScopes: [], mode: 'materialized' });
@@ -205,12 +235,15 @@ it.each(['none', 'original', 'current'] as const)('durable wait resumes with exa
     await expect(f.runtime.startFromSource({ mode: 'materialized', runId: receipt.run_id,
       resourceOwner: prepared.source.resourceOwner,
       workspaceId: prepared.source.workspaceId, executionWorkspaceId: prepared.source.executionWorkspaceId, tools: prepared.source.tools,
-      branchId: 'invented-different-source', revision: 0 })).rejects.toThrow(/durable source selection/);
+      branchId: 'invented-different-source', revision: 0 })).rejects.toMatchObject({ code: 'source_changed' });
     await fs.writeFile(path.join(f.root, 'release-process'), 'release');
-    await expect.poll(async () => (await f.runtime.run(receipt.run_id)).state, { timeout: 15_000 }).toBe('completed');
-    expect(failures).toEqual([]); expect(f.launchErrors).toEqual([]);
+    await expect.poll(async () => (await f.runtime.run(receipt.run_id)).state, { timeout: 15_000 }).toMatch(/^(completed|failed|cancelled)$/);
+    // Provider callback failures are rethrown by the shared fixture hook. Stop
+    // polling on terminal failure so it cannot be hidden behind a 15-second wait.
+    expect(f.launchErrors).toEqual([]);
+    expect(await f.runtime.run(receipt.run_id)).toMatchObject({ state: 'completed' });
     if (revoked === 'none') {
-      expect(readResult).toContain('succeeded');
+      expect(JSON.parse(readResult)).toMatchObject({ kind: 'result', outcome: 'succeeded', effect: 'none' });
       expect(readResult).toContain(Buffer.from('process-wait-real-output').toString('base64'));
       const history = await f.runtime.history(identity.branchId);
       expect(history.filter(item => JSON.stringify(item.content).includes('Job lifecycle data'))).toHaveLength(1);
@@ -218,9 +251,16 @@ it.each(['none', 'original', 'current'] as const)('durable wait resumes with exa
       const other = await f.api.create('foreign-process-observer');
       const foreignRun = await f.api.submit({ ...other, key: 'foreign', expectedHead: null, text: 'observe foreign process', model, source: prepared.source });
       await expect.poll(async () => (await f.runtime.run(foreignRun.run_id)).state, { timeout: 10_000 }).toBe('completed');
-      expect(foreignResult).toContain('failed'); expect(foreignResult).toContain('not owned by this Run');
+      expect(JSON.parse(foreignResult)).toEqual({ kind: 'not_dispatched',
+        reason: expect.stringContaining('not an accepted native Job of this Thread and branch') });
       expect((await f.runtime.operation(processId)).outcome).toBe('succeeded');
-    } else { expect(readResult).toContain('failed'); expect(readResult).toMatch(/revoked|authority/); }
+    } else {
+      expect(JSON.parse(readResult)).toEqual({ kind: 'not_dispatched',
+        reason: revoked === 'original'
+          ? expect.stringContaining('original process authority was revoked')
+          : expect.stringContaining('operation cancelled') });
+      expect(readResult).not.toContain(Buffer.from('process-wait-real-output').toString('base64'));
+    }
   } finally {
     await fs.writeFile(path.join(f.root, 'release-process'), 'release');
     if (processId) await f.runtime.cancelOperation(processId).catch(() => undefined);
@@ -459,7 +499,8 @@ it('rebuilds only Host continuation service while its kernel keeps the original 
     await replacement.recover();
     expect((await f.runtime.run(receipt.run_id)).waiting_on).toBe(waitId); expect(turn).toBe(2);
     const actor = f.kernel.scoped(f.grants.find(grant => grant.grantId.startsWith('source:'))!);
-    expect((await actor.processInspect({ workspaceId: prepared.source.workspaceId, processId })).writerActive).toBe(true);
+    const rootId = await originalProcessRoot(f, receipt.run_id);
+    expect((await actor.processInspect({ workspaceId: prepared.source.workspaceId, rootId, processId })).writerActive).toBe(true);
     await fs.writeFile(path.join(f.root, 'release-process'), 'release');
     await expect.poll(async () => (await f.runtime.run(receipt.run_id)).state, { timeout: 15_000 }).toBe('completed');
     expect(errors).toEqual([]); expect(turn).toBe(4);

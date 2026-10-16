@@ -12,7 +12,7 @@ const roots: string[] = [];
 afterEach(async () => { await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true }))); });
 async function fixture(connection?: ModelConnectionOptions) {
   const directory = await mkdtemp(join(tmpdir(), 'varin-model-network-')); roots.push(directory);
-  const models = new ModelsService(directory, { projectTrusted: () => false });
+  const models = new ModelsService(directory, { projectTrusted: () => false, fetch: async () => { throw new Error("Unexpected model fixture network request"); } });
   const channel: ModelChannel = { id: 'connection', name: 'Connection', type: 'openai-compatible', enabled: true,
     baseUrl: 'https://models.example/gateway/v1', authentication: { kind: 'none' }, parameters: {},
     ...(connection === undefined ? {} : { connection }),

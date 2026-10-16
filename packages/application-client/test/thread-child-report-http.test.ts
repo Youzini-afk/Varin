@@ -1,3 +1,4 @@
+import "./network-fixture.js";
 import assert from 'node:assert/strict';
 import { it } from 'node:test';
 import type { ChildReportPage } from '@varin/protocol';

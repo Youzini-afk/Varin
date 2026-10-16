@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { spawn } from "node:child_process";
-import { rmSync, mkdirSync, existsSync } from "node:fs";
+import { mkdtempSync, rmSync, mkdirSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { describe, expect, it, afterEach } from "vitest";
@@ -12,7 +12,7 @@ import { createRelationCollector, identifierAt } from "./relations.js";
 import { openWorkspaceKnowledge, type KnowledgeStore } from "./store.js";
 
 // Scratch stores live in the OS temp dir; see store.test.ts.
-const TEST_DIR = join(tmpdir(), "varin-test-relations");
+const TEST_DIR = mkdtempSync(join(tmpdir(), "varin-test-relations-"));
 let storeCounter = 0;
 let store: KnowledgeStore | null = null;
 

@@ -1,3 +1,4 @@
+import { guardProviderReply } from './provider-response.test-helper.js';
 import express from 'express';
 import { createServer, type Server } from 'node:http';
 import { once } from 'node:events';
@@ -8,11 +9,16 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, expect, it } from 'vitest';
-import { createThreadsHttpAPI, configureRuntimeUrlResolver, setRuntimeExtraHeaders } from '@varin/application-client';
+import { createThreadsHttpAPI, configureRuntimeUrlResolver, readThreadMedia, setRuntimeExtraHeaders, type ThreadsAPI, type ThreadIdentity } from '@varin/application-client';
+import type { StoredMedia } from '@varin/protocol';
 import { createKernelClient } from './kernel-client.js';
 import { AgentRuntimeClient } from './agent-runtime-client.js';
 import { ExistingHostCredentialOwner } from './credential-owner.js';
+import { modelCredentialBindingIdentity } from './model-binding-lifetime.js';
 import { ThreadAdapter } from './thread-adapter.js';
+import { ThreadCollaboration } from './thread-collaboration.js';
+import { KernelStorageAdapter } from './storage-adapter.js';
+import { createDocumentAuthority } from '../documents/authority.js';
 import { registerThreadRoutes } from './thread-routes.js';
 import { registerCommonRequestMiddleware } from '../platform/core-routes.js';
 
@@ -29,7 +35,7 @@ async function listen(server: Server) {
   cleanups.push(async () => { server.closeAllConnections(); await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve())); });
   return `http://127.0.0.1:${address.port}`;
 }
-async function fixture(hold = false, acceptsImages?: boolean, existingRoot?: string) {
+async function fixture(hold = false, acceptsImages?: boolean, existingRoot?: string, withContinuations = false) {
   await fs.access(kernelPath);
   const root = existingRoot ?? await fs.mkdtemp(path.join(os.tmpdir(), 'varin-http-review-'));
   const kernel = createKernelClient({ hostId: 'http-review', storageRoot: root, buildVersion, kernelPath, allowCargoDevRunner: false });
@@ -39,19 +45,20 @@ async function fixture(hold = false, acceptsImages?: boolean, existingRoot?: str
   const provider = createServer((request, response) => {
     const chunks: Buffer[] = [];
     request.on('data', (bytes: Buffer) => chunks.push(bytes));
-    request.on('end', () => {
+    request.on('end', guardProviderReply(response, () => {
       requests.push({ body: JSON.parse(Buffer.concat(chunks).toString()) as Record<string, unknown>, ...(request.headers.authorization ? { authorization: request.headers.authorization } : {}) });
       response.writeHead(200, { 'content-type': 'text/event-stream' });
       if (hold && requests.length === 1) response.write(': waiting for legitimate cancellation\n\n');
       else response.end(`data: ${JSON.stringify({ type: 'response.completed', response: { output: [{ id: `http-answer-${requests.length}`, type: 'message', content: [{ type: 'output_text', text: 'actual HTTP answer' }] }] } })}\n\n`);
-    });
+    }));
   });
   const endpoint = `${await listen(provider)}/responses`;
+  const configuration = { providerFamily: 'openai-responses', model: 'fixture-model', endpoint, credentialEnvironment: null, allowAnonymous: false, configurationGeneration: 1, maxOutputTokens: 64, ...(acceptsImages === undefined ? {} : { acceptsImages }) };
   const owner = new ExistingHostCredentialOwner({ providerId: 'fixture-provider', providerFamily: 'openai-responses', endpoint,
+    bindingIdentity: modelCredentialBindingIdentity(configuration),
     currentScope: async () => ({ reference: 'fixture-reference', authority: 'fixture-existing-owner', account: 'fixture-local-handle', generation: 1 }),
     runtime: { getAuth: async () => ({ auth: { apiKey: secret } }) },
   });
-  const configuration = { providerFamily: 'openai-responses', model: 'fixture-model', endpoint, credentialEnvironment: null, allowAnonymous: false, configurationGeneration: 1, maxOutputTokens: 64, ...(acceptsImages === undefined ? {} : { acceptsImages }) };
   const launchErrors: unknown[] = [];
   const adapter = new ThreadAdapter(new AgentRuntimeClient(kernel), {
     resolveModel: async selection => {
@@ -60,6 +67,24 @@ async function fixture(hold = false, acceptsImages?: boolean, existingRoot?: str
     },
     rebindModel: async () => owner,
   }, async () => { throw new Error('this fixture has no admitted source'); }, (_runId, error) => { launchErrors.push(error); });
+  let stopContinuations: (() => Promise<void>) | undefined;
+  if (withContinuations) {
+    // next_run is released by committed ingress events. Install the production
+    // continuation owner; a one-off continueLaunch at enqueue cannot replace it.
+    const noSource = async () => { throw new Error('This HTTP fixture has no admitted file source or child'); };
+    const documents = createDocumentAuthority({ hostId: 'http-review', dataDir: path.join(root, 'documents') });
+    const storage = new KernelStorageAdapter({ client: kernel, hostId: 'http-review', storageRoot: root, resolveWorkspaceRoot: noSource });
+    const collaboration = new ThreadCollaboration({ kernel, storageAdapter: storage, runtime: adapter.runtime,
+      resolveLiveSource: noSource, sourceCaptureOwners: { documents, inspectInventory: noSource }, prepareContext: Object.assign(noSource, { main: noSource }),
+      continueRun: (runId, signal) => adapter.continueLaunch(runId, { signal }), recoverLaunches: signal => adapter.recover(signal),
+      onError: (_operation, error) => { launchErrors.push(error); } });
+    let stopped = false;
+    stopContinuations = async () => {
+      if (stopped) return;
+      stopped = true; collaboration.stop(); await storage.dispose(); await documents.dispose();
+    };
+    cleanups.push(stopContinuations);
+  }
   const app = express();
   registerCommonRequestMiddleware(app, { express });
   registerThreadRoutes(app, adapter, (request, response, next) => {
@@ -69,7 +94,7 @@ async function fixture(hold = false, acceptsImages?: boolean, existingRoot?: str
   const hostUrl = await listen(createServer(app));
   configureRuntimeUrlResolver({ apiBaseUrl: hostUrl, realtimeBaseUrl: hostUrl });
   setRuntimeExtraHeaders({ 'x-fixture-auth': 'fixture-client' });
-  return { api: createThreadsHttpAPI(), runtime: adapter.runtime, hostUrl, secret, requests, launchErrors, root, closeKernel: () => kernel.close() };
+  return { api: createThreadsHttpAPI(), runtime: adapter.runtime, hostUrl, secret, requests, launchErrors, root, closeKernel: async () => { await stopContinuations?.(); await kernel.close(); } };
 }
 
 it('public threads HTTP client reaches the kernel, enforces selected thread identity, and streams no credential material', async () => {
@@ -100,16 +125,17 @@ it('public threads HTTP client reaches the kernel, enforces selected thread iden
 }, 30_000);
 
 it('public threads HTTP input editing/cancellation and Run cancellation affect the real durable execution', async () => {
-  const f = await fixture(true);
+  const f = await fixture(true, undefined, undefined, true);
   const identity = await f.api.create('http-cancel-thread');
   const receipt = await f.api.submit({ ...identity, key: 'http-held-input', expectedHead: null, text: 'hold while I decide', model: { providerId: 'fixture-provider', modelId: 'fixture-model' } });
   await expect.poll(() => f.requests.length).toBe(1);
   const queued = await f.api.enqueue({ ...identity, key: 'http-queued-input', mode: 'boundary', text: 'queued user correction', images: [imageFixture] });
   const edited = await f.api.editInput(queued.input_id, 1, 'revised user correction');
   expect(edited.revision).toBe(2);
-  expect(JSON.stringify(edited.content)).toContain(imageFixture.data);
+  expect(await readImage(f.api, identity, { kind: 'input', inputId: queued.input_id, expectedRevision: edited.revision }, edited.content)).toEqual(Buffer.from(imageFixture.data, 'base64'));
   expect((await f.api.cancelInput(queued.input_id, edited.revision)).state).toBe('cancelled');
   const next = await f.api.enqueue({ ...identity, key: 'http-next-input', mode: 'next_run', text: 'continue after stopping the current Run' });
+  expect(f.launchErrors).toEqual([]);
   await f.api.cancelRun(receipt.run_id);
   await expect.poll(async () => (await f.api.run(receipt.run_id)).state, { timeout: 10_000 }).toBe('cancelled');
   await expect.poll(async () => (await f.api.run(next.run_id)).state, { timeout: 10_000 }).toBe('completed');
@@ -131,10 +157,14 @@ it('production HTTP image-only input reaches provider image content and survives
   const imageUrl = `data:${imageFixture.mimeType};base64,${imageFixture.data}`;
   expect(JSON.stringify(f.requests[0]?.body.input)).toContain('input_image');
   expect(JSON.stringify(f.requests[0]?.body.input)).toContain(imageUrl);
-  expect(JSON.stringify((await f.api.snapshot(identity)).history)).toContain(imageUrl);
+  const item = (await f.api.snapshot(identity)).history.find(item => item.source === 'user')!;
+  expect(inlineImages(item.content)).toEqual([]);
+  expect(await readImage(f.api, identity, { kind: 'history', itemId: item.id }, item.content)).toEqual(Buffer.from(imageFixture.data, 'base64'));
   await f.closeKernel();
   const reopened = await fixture(false, true, f.root);
-  expect(JSON.stringify((await reopened.api.snapshot(identity)).history)).toContain(imageUrl);
+  const restored = (await reopened.api.snapshot(identity)).history.find(entry => entry.id === item.id)!;
+  expect(restored.content).toEqual(item.content);
+  expect(await readImage(reopened.api, identity, { kind: 'history', itemId: restored.id }, restored.content)).toEqual(Buffer.from(imageFixture.data, 'base64'));
   expect(reopened.requests).toHaveLength(0);
 }, 30_000);
 
@@ -146,30 +176,41 @@ it('production HTTP rejects image input for a text-only model before durable adm
   expect(f.requests).toHaveLength(0);
 }, 30_000);
 
-it('an image exceeding the existing kernel frame limit leaves unrelated execution alive and is not admitted', async () => {
+it('an image larger than one control frame streams through ContentStore without restarting unrelated execution', async () => {
   const f = await fixture(true, true);
   const active = await f.api.create('http-large-image-active');
   const activeRun = await f.api.submit({ ...active, key: 'active-before-large-image', expectedHead: null, text: 'keep running', model: { providerId: 'fixture-provider', modelId: 'fixture-model' } });
   await expect.poll(() => f.requests.length).toBe(1);
   const before = await f.runtime.status();
   const target = await f.api.create('http-large-image-target');
-  const image = { mimeType: 'image/png', data: 'A'.repeat(17 * 1024 * 1024) };
-  await expect(f.api.submit({ ...target, key: 'too-large-image', expectedHead: null, text: '', images: [image], model: { providerId: 'fixture-provider', modelId: 'fixture-model' } })).rejects.toMatchObject({ code: 'kernel-frame-too-large' });
+  const image = largePngFixture(13 * 1024 * 1024);
+  expect(Buffer.byteLength(image.data)).toBeGreaterThan(16 * 1024 * 1024);
+  const receipt = await f.api.submit({ ...target, key: 'streamed-large-image', expectedHead: null, text: '', images: [image], model: { providerId: 'fixture-provider', modelId: 'fixture-model' } });
+  await expect.poll(async () => (await f.api.run(receipt.run_id)).state, { timeout: 15_000 }).toBe('completed');
+  const item = (await f.api.snapshot(target)).history.find(item => item.source === 'user')!;
+  expect(digest(await readImage(f.api, target, { kind: 'history', itemId: item.id }, item.content))).toBe(digest(Buffer.from(image.data, 'base64')));
+  expect(inlineImages(f.requests[1]!.body.input).map(digest)).toEqual([digest(`data:${image.mimeType};base64,${image.data}`)]);
   expect((await f.runtime.status()).epoch).toBe(before.epoch);
   expect((await f.api.run(activeRun.run_id)).state).toBe('generating');
-  expect((await f.api.snapshot(target)).history).toEqual([]);
-  expect(f.requests).toHaveLength(1);
+  expect(f.requests).toHaveLength(2);
   await f.api.cancelRun(activeRun.run_id);
 }, 30_000);
 
 
-function largePngFixture() {
+function largePngFixture(payloadBytes = 4 * 1024 * 1024) {
   const image = Buffer.from(imageFixture.data, 'base64');
-  const payload = Buffer.concat([Buffer.from('fixture\0'), Buffer.alloc(4 * 1024 * 1024, 'p')]);
+  const payload = Buffer.concat([Buffer.from('fixture\0'), Buffer.alloc(payloadBytes, 'p')]);
   const type = Buffer.from('tEXt');
   const length = Buffer.alloc(4); length.writeUInt32BE(payload.length);
   const checksum = Buffer.alloc(4); checksum.writeUInt32BE(crc32(Buffer.concat([type, payload])));
   return { mimeType: 'image/png', data: Buffer.concat([image.subarray(0, -12), length, type, payload, checksum, image.subarray(-12)]).toString('base64') };
+}
+async function readImage(api: ThreadsAPI, identity: ThreadIdentity,
+  holder: Parameters<ThreadsAPI['mediaRead']>[0]['holder'], content: unknown) {
+  const attachments = (content as { attachments: StoredMedia[] }).attachments;
+  expect(attachments).toHaveLength(1);
+  expect(attachments[0]!.media_type).toBe('image/png');
+  return Buffer.from(await readThreadMedia(api, { ...identity, holder, partIndex: 0 }, attachments[0]!));
 }
 function inlineImages(value: unknown): string[] {
   if (typeof value === 'string') return value.startsWith('data:image/') ? [value] : [];
@@ -177,9 +218,9 @@ function inlineImages(value: unknown): string[] {
   if (value && typeof value === 'object') return Object.values(value).flatMap(inlineImages);
   return [];
 }
-const digest = (value: string) => createHash('sha256').update(value).digest('hex');
+const digest = (value: string | Uint8Array) => createHash('sha256').update(value).digest('hex');
 
-it('public history hydrates accumulated images larger than one kernel frame without losing bytes or the kernel epoch', async () => {
+it('public history keeps compact original media holders while provider history exceeds one control frame', async () => {
   const f = await fixture(false, true);
   const identity = await f.api.create('http-large-history');
   const before = await f.runtime.status();
@@ -193,9 +234,13 @@ it('public history hydrates accumulated images larger than one kernel frame with
     snapshot = await f.api.snapshot(identity);
     head = snapshot.thread.branches.find(branch => branch.branch_id === identity.branchId)!.head;
   }
-  expect(Buffer.byteLength(JSON.stringify(snapshot!.history))).toBeGreaterThan(16 * 1024 * 1024);
+  expect(Buffer.byteLength(JSON.stringify(f.requests.at(-1)!.body.input))).toBeGreaterThan(16 * 1024 * 1024);
+  expect(Buffer.byteLength(JSON.stringify(snapshot!.history))).toBeLessThan(Buffer.byteLength(image.data));
+  expect(inlineImages(snapshot!.history)).toEqual([]);
   const expected = digest(`data:${image.mimeType};base64,${image.data}`);
-  expect(inlineImages(snapshot!.history).map(digest)).toEqual([expected, expected, expected]);
+  for (const item of snapshot!.history.filter(item => item.source === 'user')) {
+    expect(digest(await readImage(f.api, identity, { kind: 'history', itemId: item.id }, item.content))).toBe(digest(Buffer.from(image.data, 'base64')));
+  }
   expect(snapshot!.history.filter(item => item.source === 'user').map(item => (item.content as { text: string }).text)).toEqual(captions);
   expect(inlineImages(f.requests.at(-1)!.body.input).map(digest)).toEqual([expected, expected, expected]);
   expect((await f.runtime.status()).epoch).toBe(before.epoch);
@@ -224,12 +269,14 @@ it('load-earlier HTTP history keeps its pinned head while newer conversation tur
   expect(new Set(combined.map(item => item.id)).size).toBe(24);
   expect(combined.at(-1)!.id).toBe(pinned.historyPage.head);
   expect(JSON.stringify(combined)).not.toContain('new turn after history was pinned');
-  expect(inlineImages(earlier.items)).toContain(`data:${imageFixture.mimeType};base64,${imageFixture.data}`);
+  const first = earlier.items.find(item => item.source === 'user')!;
+  expect(await readImage(f.api, identity, { kind: 'history', itemId: first.id }, first.content)).toEqual(Buffer.from(imageFixture.data, 'base64'));
   const live = await f.api.snapshot(identity);
   expect(live.historyPage.head).not.toBe(pinned.historyPage.head);
   // A valid record can still be an invalid cursor for this immutable view.
   await expect(f.api.historyPage(identity, { headId: pinned.historyPage.head!, beforeId: live.historyPage.head! })).rejects.toMatchObject({ status: 409, code: 'thread-conflict' });
   const unrelated = await f.api.create('http-unrelated-history');
+  await expect(readImage(f.api, unrelated, { kind: 'history', itemId: first.id }, first.content)).rejects.toThrow();
   await expect(f.api.historyPage(unrelated, { headId: pinned.historyPage.head!, beforeId: pinned.historyPage.previous! })).rejects.toMatchObject({ status: 409, code: 'thread-conflict' });
   await expect(f.api.historyPage({ ...identity, branchId: unrelated.branchId }, { headId: pinned.historyPage.head!, beforeId: pinned.historyPage.previous! })).rejects.toMatchObject({ status: 400 });
 }, 45_000);

@@ -1,3 +1,4 @@
+import { guardProviderReply } from './provider-response.test-helper.js';
 import { createEgressRuntime } from '../harness/egress.js';
 import { createRetrievalSourceOwner } from './retrieval-source.js';
 import { createServer, type ServerResponse } from 'node:http';
@@ -39,11 +40,11 @@ async function fixture(hooks: { concurrency?: number; conversation?: (body: Reco
   const server = createServer((request, response) => {
     if (request.url !== '/v1/embeddings' || request.method !== 'POST') { response.writeHead(404).end(); return; }
     if (!request.headers.authorization?.startsWith('Bearer fake-')) { response.writeHead(401).end(); return; }
-    const chunks: Buffer[] = []; request.on('data', chunk => chunks.push(Buffer.from(chunk))); request.on('end', () => {
+    const chunks: Buffer[] = []; request.on('data', chunk => chunks.push(Buffer.from(chunk))); request.on('end', guardProviderReply(response, () => {
     const wire = JSON.parse(Buffer.concat(chunks).toString()) as Wire; wires.push(wire);
     if (hooks.embedding?.(wire, response)) return;
     respondEmbedding(wire, response);
-  }); });
+  })); });
   server.listen(0, '127.0.0.1'); await once(server, 'listening'); const address = server.address(); if (!address || typeof address === 'string') throw new Error('loopback unavailable');
   cleanups.push(async () => { server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve())); });
   const endpoint = `http://127.0.0.1:${address.port}/v1`;

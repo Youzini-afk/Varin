@@ -1,3 +1,4 @@
+import { guardProviderReply } from './provider-response.test-helper.js';
 import { resourceScopeFixture } from './resource-scope.test-helper.js';
 import { spawn, type ChildProcess } from 'node:child_process';
 import fs from 'node:fs/promises';
@@ -47,14 +48,14 @@ it.each([1, 3])('real FileSearch uses configured %i-worker budget and scoped adm
   let turns = 0;
   const server = createServer((request, response) => {
     const chunks: Buffer[] = [];
-    request.on('data', (chunk: Buffer) => chunks.push(chunk)); request.on('end', () => {
+    request.on('data', (chunk: Buffer) => chunks.push(chunk)); request.on('end', guardProviderReply(response, () => {
       requestBodies.push(JSON.parse(Buffer.concat(chunks).toString()) as Record<string, unknown>);
       const output = ++turns === 1
         ? [{ id: 'search-item', type: 'function_call', call_id: 'search-call', name: 'file_search', arguments: JSON.stringify({ query: 'needle', fixedStrings: true }) }]
         : [{ id: 'answer', type: 'message', content: [{ type: 'output_text', text: 'done' }] }];
       response.writeHead(200, { 'content-type': 'text/event-stream' });
       response.end(`data: ${JSON.stringify({ type: 'response.completed', response: { output } })}\n\n`);
-    });
+    }));
   });
   server.listen(0, '127.0.0.1'); await once(server, 'listening');
   cleanup.push(async () => { server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve())); });

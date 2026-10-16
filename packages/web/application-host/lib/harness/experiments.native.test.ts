@@ -881,17 +881,22 @@ describe("experiment service on the real kernel", () => {
       ...node("setInterval(()=>{},1000)"),
       machineId: "stop-race-machine",
     });
-    await entered;
+    // Acceptance errors must fail here, rather than strand the spawn barrier and
+    // appear later as an unhandled rejection plus a full test timeout.
+    await Promise.race([entered, submitting.then(() => entered)]);
     const stopping = experiments.stopForThreads(f.caller.workspaceId, [f.caller.owner.threadId!]);
-    await assert.rejects(
+    try {
+      await assert.rejects(
       experiments.submit(f.caller, {
         requestId: "must-not-pass-stop-gate",
         ...node("process.exit(0)"),
         machineId: "stop-race-machine",
       }),
       /thread .* stopping/i,
-    );
-    finishSpawn();
+      );
+    } finally {
+      finishSpawn();
+    }
     const submitted = await submitting;
     await stopping;
     const detail = await experiments.get(f.caller, submitted.attempt.attemptId);

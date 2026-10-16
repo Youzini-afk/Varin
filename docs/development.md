@@ -49,13 +49,24 @@ bun run dev
 | Rust 编译检查 / release binary | `bun run kernel:check` / `bun run kernel:build` |
 | Rust workspace 测试 | `bun run test:rust` |
 | 已核验 release kernel 的 Host 验收 | `bun run test:kernel` |
-| Host 生产边界及 cloud layout helper | `bun run test:cloud` |
+| 工具、发布与平台配置行为 | `bun run test:tooling` |
+| 仅 Host 生产边界及 cloud layout helper | `bun run test:cloud` |
 | 文档链接 / public route 与工程文档 | `bun run docs:check` / `bun run docs:validate` |
 | 文档检查器本身 | `bun run test:docs` |
 
 定向例子：在 `packages/web` 或 `packages/ui` 中运行 `bun run test 路径`；Rust 使用
 `cargo test --manifest-path kernel/Cargo.toml -p varin-kernel --lib FILTER --locked`。
 新环境资源不足时可加 `-j1`，不能把编译被终止记成测试通过。
+Node 测试包可用 `node --import tsx --test packages/<包>/test/<文件>.test.ts` 定向运行。
+原生 Host 定向验证用 `bun run test:kernel -- --vitest-file=application-host/lib/<文件>.native.test.ts`，
+不会额外重跑 Node transport 全套。仅需要纯查询、排序或 mock owner 的验证应留在 portable suite；
+需要真实 IPC、文件存储、进程树的验证才进入 native 入口。
+
+`test:tooling` 是 CI 中轻量工具测试的统一入口；`test:cloud` 是其子集，无需顺序重复运行。
+Linux driver 的私有 D-Bus 协议测试使用
+`dbus-run-session -- env VARIN_TEST_PRIVATE_BUS=1 /usr/bin/python3 -m unittest discover -s packages/computer-driver/linux -p 'test_*.py'`，
+需要系统 `python3-gi` 与 `dbus`，不连接真实桌面或请求屏幕授权。
+Windows 的无桌面 input targeting 回归由 `packages/computer-driver/windows/test-targeting.ps1` 执行。
 
 ## 输出和 native 边界
 

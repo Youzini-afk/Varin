@@ -60,28 +60,11 @@ describe('PWA manifest route', () => {
     await handler({ query: {} }, res);
 
     expect(listRecentThreads).toHaveBeenCalledOnce();
-    expect(JSON.parse(res.body).shortcuts).toEqual([
-      {
-        name: 'Appearance Settings',
-        short_name: 'Settings',
-        description: 'Open appearance settings',
-        url: '/?settings=appearance',
-        icons: [{ src: '/pwa-192.png', sizes: '192x192', type: 'image/png' }],
-      },
-      {
-        name: 'Latest task',
-        short_name: 'Latest task',
-        description: 'Open recent conversation',
-        url: '/?thread=thread%3Anew&branch=thread%3Anew%3Amain',
-        icons: [{ src: '/pwa-192.png', sizes: '192x192', type: 'image/png' }],
-      },
-      {
-        name: 'Older task',
-        short_name: 'Older task',
-        description: 'Open recent conversation',
-        url: '/?thread=thread%3Aold&branch=thread%3Aold%3Amain',
-        icons: [{ src: '/pwa-192.png', sizes: '192x192', type: 'image/png' }],
-      },
+    const shortcuts = JSON.parse(res.body).shortcuts as Array<{ name: string; url: string }>;
+    expect(shortcuts.map(({ name, url }) => ({ name, url }))).toEqual([
+      { name: 'Appearance Settings', url: '/?settings=appearance' },
+      { name: 'Latest task', url: '/?thread=thread%3Anew&branch=thread%3Anew%3Amain' },
+      { name: 'Older task', url: '/?thread=thread%3Aold&branch=thread%3Aold%3Amain' },
     ]);
   });
 });

@@ -1,3 +1,4 @@
+import "./network-fixture.js";
 import assert from 'node:assert/strict';
 import { it } from 'node:test';
 import type { ComputerAutomationProjection } from '@varin/protocol';
@@ -39,7 +40,7 @@ it('decides the original request revision from idle root work through the real c
   const child = { ...identity, threadId: 'child' };
   const request = { id: 'request-1', revision: 4, desktopId: 'desktop', access: 'control' as const,
     actor: { execution: { work: child, runId: 'child-run' }, rootWork: identity, rootExecution: null,
-      registry: null, roleAccess: { kind: 'tool-invocation' as const }, label: 'Child' },
+      label: 'Child' },
     reason: 'Review the requested window', createdAt: 'now', status: 'granting' as const };
   const state = { ...projection.state, requests: [request] };
   const command = { requestId: request.id, expectedRevision: 3, decision: 'grant' as const, key: 'original-decision' };
@@ -59,6 +60,10 @@ it('decides the original request revision from idle root work through the real c
     response = { state: { ...state, requests: [{ ...request, revision: 5, status: 'unavailable', assignmentId: 'original-assignment', detail: 'Original owner is offline' }] } };
     assert.deepEqual(await api.decide(identity, command), response);
     assert.deepEqual(calls[1]!.body, calls[0]!.body);
+    for (const retired of [{ registry: null }, { roleAccess: { kind: 'tool-invocation' } }]) {
+      response = { state: { ...state, requests: [{ ...request, actor: { ...request.actor, ...retired } }] } };
+      await assert.rejects(api.decide(identity, command), /computer_actor_identity_invalid/);
+    }
     response = { state: { ...state, requests: [{ ...request, revision: undefined }] } };
     await assert.rejects(api.decide(identity, command), /computer_request_invalid/);
     response = { code: 'computer-execution-stale' }; status = 409;

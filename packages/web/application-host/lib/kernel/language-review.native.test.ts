@@ -1,3 +1,4 @@
+import { guardProviderReply } from './provider-response.test-helper.js';
 import { responsesMetadataText } from './responses-wire.test-helper.js';
 import { createServer, type ServerResponse } from 'node:http';
 import { createHash } from 'node:crypto';
@@ -29,7 +30,7 @@ function output(body: Record<string, unknown>): Record<string, unknown> | undefi
   const item = (body.input as Array<Record<string, unknown>>).findLast(item => item.type === 'function_call_output');
   return item ? JSON.parse(responsesMetadataText(item.output)) as Record<string, unknown> : undefined;
 }
-async function fixture(reply: (body: Record<string, unknown>, response: ServerResponse) => void) {
+async function fixture(reply: (body: Record<string, unknown>, response: ServerResponse) => void | Promise<void>) {
   if (!kernelPath) throw new Error('Independent language acceptance requires explicit VARIN_TEST_KERNEL_PATH');
   await fs.access(kernelPath);
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'varin-language-review-'));
@@ -42,7 +43,7 @@ async function fixture(reply: (body: Record<string, unknown>, response: ServerRe
   const server = createServer((request, response) => {
     const chunks: Buffer[] = [];
     request.on('data', bytes => chunks.push(Buffer.from(bytes)));
-    request.on('end', () => { const body = JSON.parse(Buffer.concat(chunks).toString()) as Record<string, unknown>; requests.push(body); reply(body, response); });
+    request.on('end', guardProviderReply(response, () => { const body = JSON.parse(Buffer.concat(chunks).toString()) as Record<string, unknown>; requests.push(body); return reply(body, response); }));
   });
   server.listen(0, '127.0.0.1'); await once(server, 'listening');
   const address = server.address(); if (!address || typeof address === 'string') throw new Error('loopback fixture address missing');
@@ -110,11 +111,13 @@ it('revalidates every returned resource under the Run grant and records each tar
   await expect.poll(async () => (await f.runtime.run(run.receipt.run_id)).state).toBe('completed');
   expect(queries).toBe(1);
   const result = output(f.requests[1]!)!;
-  expect(result).toMatchObject({ outcome: 'succeeded', content: { status: 'partial', omissions: { outOfScope: 4, stale: 2, unavailable: 2 } } });
+  expect(result).toMatchObject({ outcome: 'succeeded', content: { status: 'partial', omissions: { outOfScope: 4, stale: 1, unavailable: 2 } } });
   const content = result.content as { items: Array<Record<string, unknown>> };
-  expect(content.items).toHaveLength(2);
+  expect(content.items).toHaveLength(3);
   expect(content.items[0]).toMatchObject({ observedRevision: revision(sourceText), rangeRevision: revision(sourceText) });
   expect(content.items[1]).toMatchObject({ observedRevision: revision(targetText), rangeRevision: null });
+  // Output columns beyond EOL clamp to that target line; reversed ranges remain stale.
+  expect(content.items[2]).toMatchObject({ range: range(0, 0, 20), observedRevision: revision(targetText), rangeRevision: null });
   expect(revision(targetText)).not.toBe(revision(sourceText));
   expect(JSON.stringify(result)).not.toContain('PRIVATE_UNAUTHORIZED_MARKER');
   expect(JSON.stringify(result)).not.toContain('OUTSIDE_SYMLINK_MARKER');
@@ -128,11 +131,11 @@ it('revalidates every returned resource under the Run grant and records each tar
   expect(restored.content).toMatchObject({ content: { kind: 'tool_result', result: { completion: { content: { data: result.content, parts: [] } } } } });
 }, 20_000);
 
-it('denies the queried input before dispatching to the Host language owner', async () => {
+it.each(['allowed/source.ts', 'private.ts'])('denies narrow project authority before dispatching %s to the Host language owner', async inputPath => {
   let calls = 0, queries = 0;
-  const f = await fixture((_body, response) => { if (++calls === 1) call(response, 'language_definition', { path: 'private.ts', line: 0, character: 0 }, calls); else answer(response); });
+  const f = await fixture((_body, response) => { if (++calls === 1) call(response, 'language_definition', { path: inputPath, line: 0, character: 0 }, calls); else answer(response); });
   await fs.mkdir(path.join(f.workspace, 'allowed'));
-  await fs.writeFile(path.join(f.workspace, 'private.ts'), 'const privateValue = 1;');
+  await fs.writeFile(path.join(f.workspace, inputPath), 'const value = 1;');
   f.kernel.setLanguageOwner(async () => { queries++; return { status: 'ready', items: [], omissions: omissions() }; });
   const run = await f.admit('denied-input', ['language_definition'], ['allowed']); await run.start();
   await expect.poll(async () => (await f.runtime.run(run.receipt.run_id)).state).toBe('completed');
@@ -216,7 +219,7 @@ it('revoking the Run grant during a language wait prevents the answer from becom
   release();
   await expect.poll(async () => (await f.runtime.run(run.receipt.run_id)).state).toBe('completed');
   const result = output(f.requests[1]!)!;
-  expect(result).toMatchObject({ outcome: 'failed' });
+  expect(result).toMatchObject({ outcome: 'cancelled', effect: 'none', content: { status: 'cancelled' } });
   expect(JSON.stringify(result)).not.toContain('observedRevision');
 }, 20_000);
 
@@ -244,8 +247,11 @@ it.each(['utf8-bom', 'utf16le', 'utf16be', 'crlf'] as const)('checks raw %s byte
     expect(JSON.stringify(output(f.requests[1]!))).not.toContain('observedRevision');
   } else {
     expect(output(f.requests[1]!)).toMatchObject({ outcome: 'succeeded', content: {
-      status: 'partial', omissions: { stale: 1 },
-      items: [{ range: range(0, 15, 17), observedRevision: revision(bytes), rangeRevision: revision(bytes) }],
+      status: 'ready', omissions: { stale: 0 },
+      items: [
+        { range: range(0, 15, 17), observedRevision: revision(bytes), rangeRevision: revision(bytes) },
+        { range: range(0, 0, 19), observedRevision: revision(bytes), rangeRevision: revision(bytes) },
+      ],
     } });
   }
 }, 20_000);
@@ -275,10 +281,10 @@ it('unversioned diagnostic observations stay pending while all locations still u
   f.kernel.setLanguageOwner(async query => ({ status: 'pending', diagnosticVerification: 'unversioned',
     source: boundSource(query, revision(text)), omissions: omissions(), items: [
       { ...location('allowed/source.ts'), message: 'Observed unversioned type error' },
-      { ...location('private.ts'), message: 'PRIVATE_OBSERVATION_MUST_NOT_ESCAPE' },
+      { ...location('private.ts'), resource: { workspaceId: 'another-workspace', resourceId: 'private.ts' }, message: 'PRIVATE_OBSERVATION_MUST_NOT_ESCAPE' },
       { ...location('allowed/source.ts', range(99, 0, 5)), message: 'INVALID_RANGE_MUST_NOT_ESCAPE' },
     ] }));
-  const run = await f.admit('unversioned-observation', ['language_diagnostics'], ['allowed']); await run.start();
+  const run = await f.admit('unversioned-observation', ['language_diagnostics']); await run.start();
   await expect.poll(async () => (await f.runtime.run(run.receipt.run_id)).state).toBe('completed');
   const result = output(f.requests[1]!)!;
   expect(result).toMatchObject({ content: { status: 'pending', diagnosticVerification: 'unversioned',

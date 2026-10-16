@@ -1,3 +1,4 @@
+import { guardProviderReply } from './provider-response.test-helper.js';
 import { resourceScopeFixture } from './resource-scope.test-helper.js';
 import { DatabaseSync } from 'node:sqlite';
 import { createMemoryOwner, type MemoryQuery } from './memory-owner.js';
@@ -35,7 +36,7 @@ async function listen(server: Server) {
   cleanups.push(async () => { server.closeAllConnections(); await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve())); });
   return `http://127.0.0.1:${address.port}`;
 }
-async function fixture(reply: (body: Record<string, unknown>, response: ServerResponse) => void, existingRoot?: string, existingEndpoint?: string) {
+async function fixture(reply: (body: Record<string, unknown>, response: ServerResponse) => void | Promise<void>, existingRoot?: string, existingEndpoint?: string) {
   await fs.access(kernelPath);
   const root = existingRoot ?? await fs.mkdtemp(path.join(os.tmpdir(), 'varin-memory-review-'));
   const kernel = createKernelClient({ hostId: 'memory-review', storageRoot: root, buildVersion, kernelPath, allowCargoDevRunner: false });
@@ -45,10 +46,10 @@ async function fixture(reply: (body: Record<string, unknown>, response: ServerRe
   const provider = createServer((request, response) => {
     const chunks: Buffer[] = [];
     request.on('data', (bytes: Buffer) => chunks.push(bytes));
-    request.on('end', () => {
+    request.on('end', guardProviderReply(response, () => {
       requests.push({ body: JSON.parse(Buffer.concat(chunks).toString()) as Record<string, unknown>, ...(request.headers.authorization ? { authorization: request.headers.authorization } : {}) });
-      reply(requests.at(-1)!.body, response);
-    });
+      return reply(requests.at(-1)!.body, response);
+    }));
   });
   const endpoint = existingEndpoint ?? `${await listen(provider)}/responses`;
   const owner = new ExistingHostCredentialOwner({ providerId: 'fixture-provider', providerFamily: 'openai-responses', endpoint,
@@ -242,11 +243,10 @@ it('profile changes fence an older summary candidate and deleting the last note 
   expect(published.proposal.memory_checkpoint).not.toBe(changedProfile.proposal.memory_checkpoint);
 });
 
-it('trusted child admission shares only global/project notes and Bot admission receives no ordinary personalization', async () => {
+it('trusted child context keeps project and private-note boundaries and rejects a forged Bot mode', async () => {
   const f = await fixture((_body, response) => complete(response));
   const parent = await f.api.create('scope-parent');
   const child = await f.api.create('scope-child');
-  const bot = await f.api.create('scope-bot');
   for (const [scope, content] of [
     [{ kind: 'global' }, 'SCOPE_GLOBAL'],
     [{ kind: 'project', id: 'admitted-project' }, 'SCOPE_ADMITTED_PROJECT'],
@@ -262,8 +262,8 @@ it('trusted child admission shares only global/project notes and Bot admission r
   const noProject = await f.prepareContext(child, null, { mode: 'agent', threadRole: 'read-only', projectId: null });
   expect(noProject.personalization).toMatchObject({ threadRole: 'read-only', projectId: null });
   expect(noProject.effectiveSystemPrompt).not.toContain('SCOPE_ADMITTED_PROJECT');
-  const botContext = await f.prepareContext(bot, null, { mode: 'bot', threadRole: 'main', projectId: 'admitted-project' });
-  for (const value of ['SCOPE_GLOBAL', 'SCOPE_ADMITTED_PROJECT', 'SCOPE_PARENT_PRIVATE', 'SCOPE_CHILD_PRIVATE', 'ORDINARY_PROFILE_ONLY']) expect(botContext.effectiveSystemPrompt).not.toContain(value);
+  await expect(f.prepareContext(child, null, { mode: 'bot', threadRole: 'main', projectId: 'admitted-project' }))
+    .rejects.toThrow('Context mode differs from the original Thread owner');
 });
 
 it('failed and cancelled compaction candidates preserve the original checkpoint and raw conversation', async () => {

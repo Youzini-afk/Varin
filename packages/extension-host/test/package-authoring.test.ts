@@ -10,6 +10,7 @@ import {
 } from '@varin/extension-contract';
 import { ApplicationExtensionRuntime } from '../src/application-runtime.js';
 import { ExtensionArtifactStore } from '../src/artifact-store.js';
+import { ExtensionUpdateReadinessError } from '../src/broker-supervisor.js';
 
 const deferred = () => { let resolve!: () => void; const promise = new Promise<void>(done => { resolve = done; }); return { promise, resolve }; };
 const source = (suffix = 'a'): VarinExtensionSourceViewProvenance => ({ resourceOwner: { kind: 'local' }, workspaceId: 'workspace', executionWorkspaceId: 'workspace',
@@ -239,7 +240,10 @@ test('a required Surface update commits application intent, recovers the selecte
     let current = await f.runtime.catalog.snapshot();
     assert.equal(current.extensions[0]!.integrity, installed.artifactIntegrity);
     assert.equal(current.extensions[0]!.actual.find(value => value.realmKind === 'host')?.status, 'active');
-    assert.ok(current.extensions[0]!.actual.some(value => value.diagnostics.some(diagnostic => diagnostic.code === 'required_surface_readiness')));
+    assert.equal(current.extensions[0]!.candidate!.applyRequested, true);
+    await assert.rejects(f.runtime.selectCandidate({ extensionId: installed.extensionId,
+      candidateIntegrity: staged.artifactIntegrity, expectedRevision: current.revision }),
+      (error: unknown) => error instanceof ExtensionUpdateReadinessError && error.code === 'required_surface_readiness');
     await f.restart(); current = await f.runtime.catalog.snapshot();
     assert.equal(current.extensions[0]!.integrity, installed.artifactIntegrity, 'restart does not bypass the required update group');
     assert.deepEqual(f.runtime.supervisor.activeExtensions(), [installed.extensionId]);

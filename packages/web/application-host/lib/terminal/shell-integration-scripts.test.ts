@@ -61,7 +61,7 @@ describe("shell integration launch", () => {
     const previousZdotdir = process.env.ZDOTDIR;
     try {
       for (const file of [".zshenv", ".zprofile", ".zshrc", ".zlogin"]) {
-        writeFileSync(join(userDir, file), `print -r -- '${file}:$ZDOTDIR' >> ${shellQuote(observed)}\n`);
+        writeFileSync(join(userDir, file), `print -r -- "${file}:$ZDOTDIR" >> ${shellQuote(observed)}\n`);
       }
       process.env.ZDOTDIR = userDir;
       const launch = shellIntegrationLaunch(candidate, ["-l"], true, "term-zsh:raw-zdotdir");

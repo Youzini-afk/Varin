@@ -5,138 +5,14 @@ import type {
 } from '@varin/extension-contract';
 import {
   VARIN_WORKBENCH_REPLACEMENT_TARGETS,
-  VARIN_WORKBENCH_SHELL_DATA_CONTRACT,
-  VARIN_WORKBENCH_SLOTS,
 } from '@varin/extension-contract';
 import type { SurfaceContribution } from '@varin/extension-surface';
 import { projectWorkbenchSeams } from './workbench-seams';
+import { VARIN_BUILTIN_AGENT_WORKSPACE_EXTENSION, VARIN_BUILTIN_IDE_WORKBENCH_EXTENSION } from '@varin/extension-builtins';
+import { builtinWorkbenchEntry } from './builtin-workbench.test-support';
 
-const agentEntry = (enabled = true): VarinExtensionCatalogEntry => ({
-  manifest: {
-    schemaVersion: 1,
-    id: 'varin.builtin.agent-workspace',
-    version: '1.0.0',
-    engines: { varin: '*' },
-    contributions: [{
-      contractVersion: 1,
-      data: {
-        contract: VARIN_WORKBENCH_SHELL_DATA_CONTRACT,
-        seams: {
-          web: {
-            replacementTargets: [
-              VARIN_WORKBENCH_REPLACEMENT_TARGETS.sessionNavigator,
-              VARIN_WORKBENCH_REPLACEMENT_TARGETS.chatTimeline,
-              VARIN_WORKBENCH_REPLACEMENT_TARGETS.chatComposer,
-              VARIN_WORKBENCH_REPLACEMENT_TARGETS.agents,
-              VARIN_WORKBENCH_REPLACEMENT_TARGETS.mcp,
-              VARIN_WORKBENCH_REPLACEMENT_TARGETS.workspaceExplorer,
-              VARIN_WORKBENCH_REPLACEMENT_TARGETS.settings,
-            ],
-            slots: [],
-          },
-          desktop: {
-            replacementTargets: [
-              VARIN_WORKBENCH_REPLACEMENT_TARGETS.sessionNavigator,
-              VARIN_WORKBENCH_REPLACEMENT_TARGETS.chatTimeline,
-              VARIN_WORKBENCH_REPLACEMENT_TARGETS.chatComposer,
-              VARIN_WORKBENCH_REPLACEMENT_TARGETS.agents,
-              VARIN_WORKBENCH_REPLACEMENT_TARGETS.mcp,
-              VARIN_WORKBENCH_REPLACEMENT_TARGETS.workspaceExplorer,
-              VARIN_WORKBENCH_REPLACEMENT_TARGETS.settings,
-            ],
-            slots: [],
-          },
-          mobile: {
-            replacementTargets: [
-              VARIN_WORKBENCH_REPLACEMENT_TARGETS.sessionNavigator,
-              VARIN_WORKBENCH_REPLACEMENT_TARGETS.chatTimeline,
-              VARIN_WORKBENCH_REPLACEMENT_TARGETS.chatComposer,
-              VARIN_WORKBENCH_REPLACEMENT_TARGETS.agents,
-              VARIN_WORKBENCH_REPLACEMENT_TARGETS.mcp,
-              VARIN_WORKBENCH_REPLACEMENT_TARGETS.settings,
-            ],
-            slots: [],
-          },
-        },
-      },
-      id: 'varin.builtin.agent-workspace.shell',
-      kind: 'shell',
-      replacement: { target: VARIN_WORKBENCH_REPLACEMENT_TARGETS.shell },
-      supports: ['web', 'desktop', 'mobile'],
-    }],
-  },
-  source: { display: 'Agent', kind: 'builtin' },
-  desired: { enabled, revision: 1, updatedAt: '2026-08-20T00:00:00.000Z' },
-  actual: [],
-  capabilityGrants: [],
-  installedAt: '2026-08-20T00:00:00.000Z',
-  updatedAt: '2026-08-20T00:00:00.000Z',
-  resolvedVersion: '1.0.0',
-  selectedVersion: '1.0.0',
-});
-
-const ideEntry = (enabled = true): VarinExtensionCatalogEntry => ({
-  manifest: {
-    schemaVersion: 1,
-    id: 'varin.builtin.ide-workbench',
-    version: '1.0.0',
-    engines: { varin: '*' },
-    contributions: [{
-      contractVersion: 1,
-      data: {
-        contract: VARIN_WORKBENCH_SHELL_DATA_CONTRACT,
-        seams: {
-          web: {
-            replacementTargets: [
-              VARIN_WORKBENCH_REPLACEMENT_TARGETS.sessionNavigator,
-              VARIN_WORKBENCH_REPLACEMENT_TARGETS.chatTimeline,
-              VARIN_WORKBENCH_REPLACEMENT_TARGETS.chatComposer,
-              VARIN_WORKBENCH_REPLACEMENT_TARGETS.agents,
-              VARIN_WORKBENCH_REPLACEMENT_TARGETS.mcp,
-              VARIN_WORKBENCH_REPLACEMENT_TARGETS.settings,
-              VARIN_WORKBENCH_REPLACEMENT_TARGETS.activity,
-              VARIN_WORKBENCH_REPLACEMENT_TARGETS.primarySidebar,
-              VARIN_WORKBENCH_REPLACEMENT_TARGETS.editor,
-              VARIN_WORKBENCH_REPLACEMENT_TARGETS.secondarySidebar,
-              VARIN_WORKBENCH_REPLACEMENT_TARGETS.panel,
-              VARIN_WORKBENCH_REPLACEMENT_TARGETS.status,
-            ],
-            slots: Object.values(VARIN_WORKBENCH_SLOTS),
-          },
-          desktop: {
-            replacementTargets: [
-              VARIN_WORKBENCH_REPLACEMENT_TARGETS.sessionNavigator,
-              VARIN_WORKBENCH_REPLACEMENT_TARGETS.chatTimeline,
-              VARIN_WORKBENCH_REPLACEMENT_TARGETS.chatComposer,
-              VARIN_WORKBENCH_REPLACEMENT_TARGETS.agents,
-              VARIN_WORKBENCH_REPLACEMENT_TARGETS.mcp,
-              VARIN_WORKBENCH_REPLACEMENT_TARGETS.settings,
-              VARIN_WORKBENCH_REPLACEMENT_TARGETS.activity,
-              VARIN_WORKBENCH_REPLACEMENT_TARGETS.primarySidebar,
-              VARIN_WORKBENCH_REPLACEMENT_TARGETS.editor,
-              VARIN_WORKBENCH_REPLACEMENT_TARGETS.secondarySidebar,
-              VARIN_WORKBENCH_REPLACEMENT_TARGETS.panel,
-              VARIN_WORKBENCH_REPLACEMENT_TARGETS.status,
-            ],
-            slots: Object.values(VARIN_WORKBENCH_SLOTS),
-          },
-        },
-      },
-      id: 'varin.builtin.ide-workbench.shell',
-      kind: 'shell',
-      replacement: { target: VARIN_WORKBENCH_REPLACEMENT_TARGETS.shell },
-      supports: ['web', 'desktop'],
-    }],
-  },
-  source: { display: 'IDE', kind: 'builtin' },
-  desired: { enabled, revision: 1, updatedAt: '2026-08-20T00:00:00.000Z' },
-  actual: [],
-  capabilityGrants: [],
-  installedAt: '2026-08-20T00:00:00.000Z',
-  updatedAt: '2026-08-20T00:00:00.000Z',
-  resolvedVersion: '1.0.0',
-  selectedVersion: '1.0.0',
-});
+const agentEntry = () => builtinWorkbenchEntry(VARIN_BUILTIN_AGENT_WORKSPACE_EXTENSION);
+const ideEntry = () => builtinWorkbenchEntry(VARIN_BUILTIN_IDE_WORKBENCH_EXTENSION);
 
 const layout = (selections: Record<string, string>): VarinWorkbenchResolvedLayout => ({
   profileId: 'default',

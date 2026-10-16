@@ -8,7 +8,7 @@ const base = {
   text: '',
 };
 
-describe('Pi editor inline contexts', () => {
+describe('native editor inline contexts', () => {
   test('serializes an active editor selection with its relative path and lines', () => {
     expect(appendInlineComments('Review this', [{
       ...base,
@@ -23,7 +23,7 @@ describe('Pi editor inline contexts', () => {
     );
   });
 
-  test('serializes an active editor file as readable Pi path context', () => {
+  test('serializes an active editor file as readable path context', () => {
     expect(appendInlineComments('', [{
       ...base,
       code: 'D:/work/src/example.ts',

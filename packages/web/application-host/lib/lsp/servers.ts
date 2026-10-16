@@ -12,9 +12,6 @@ const worker = (name: string) => {
 };
 
 const fixtureServer = worker('fixture-server');
-const typescriptServer = worker('typescript-server');
 
 export const VARIN_LSP_FIXTURE_SERVER_PATH = fixtureServer.path;
 export const VARIN_LSP_FIXTURE_SERVER_ARGS = fixtureServer.args;
-export const VARIN_LSP_TYPESCRIPT_SERVER_PATH = typescriptServer.path;
-export const VARIN_LSP_TYPESCRIPT_SERVER_ARGS = typescriptServer.args;

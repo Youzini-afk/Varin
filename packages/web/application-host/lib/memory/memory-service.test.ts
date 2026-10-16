@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { rmSync, mkdirSync, existsSync } from "node:fs";
+import { mkdtempSync, rmSync, mkdirSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { openKnowledgeStoreEngine } from "../knowledge/store-engine.js";
@@ -7,7 +7,7 @@ import type { KnowledgeScope, KnowledgeStore } from "../knowledge/store-contract
 import { createMemoryService, type MemoryOwner } from "./memory-service.js";
 
 // Scratch stores live in the OS temp dir; see harness/recall-tool.test.ts.
-const TEST_DIR = join(tmpdir(), "varin-test-memory-service");
+const TEST_DIR = mkdtempSync(join(tmpdir(), "varin-test-memory-service-"));
 
 const cleanup = () => {
   if (existsSync(TEST_DIR)) rmSync(TEST_DIR, { recursive: true, force: true });

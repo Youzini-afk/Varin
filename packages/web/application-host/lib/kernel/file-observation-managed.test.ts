@@ -1,5 +1,7 @@
 import assert from 'node:assert/strict';
-import test from 'node:test';
+import { afterEach, test, vi } from 'vitest';
+
+afterEach(() => vi.useRealTimers());
 import { FileObservationService } from './file-observation-service.js';
 import type { AgentRuntimeClient } from './agent-runtime-client.js';
 import type { DocumentsFileObservationOwner } from './file-observation-owner.js';
@@ -56,28 +58,28 @@ function fixture(initial = [binding()]) {
     failLists(count: number) { listFailures = count; }, onRead(callback: typeof read) { read = callback; }, onRelease(callback: typeof release) { release = callback; } };
 }
 
-test('managed polling keeps original keys, pauses without losing cursor, resumes immediately, and recovers on ready', async context => {
-  context.mock.timers.enable({ apis: ['setTimeout'] }); const original = binding(); const f = fixture([original]);
+test('managed polling keeps original keys, pauses without losing cursor, resumes immediately, and recovers on ready', async () => {
+  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] }); const original = binding(); const f = fixture([original]);
   try {
     await f.service.recover(); await turn(); assert.equal(f.reads.length, 1); assert.equal(f.reads[0]?.input.reopen, false);
-    context.mock.timers.tick(999); await turn(); assert.equal(f.reads.length, 1);
-    context.mock.timers.tick(1); await turn(); assert.equal(f.reads.length, 2);
+    vi.advanceTimersByTime(999); await turn(); assert.equal(f.reads.length, 1);
+    vi.advanceTimersByTime(1); await turn(); assert.equal(f.reads.length, 2);
     assert.deepEqual(f.reads.map(({ input }) => input), [1, 2].map(observationRevision => ({ followupId: original.followupId,
       generation: original.generation, sourceIndex: 0, receiptId: original.receiptId, observationRevision, reopen: false })));
     const cursor = structuredClone(original.position); original.action = 'paused'; original.definitionRevision++; f.emit(); await turn();
-    f.service.changed(original.receiptId); context.mock.timers.tick(5_000); await turn();
+    f.service.changed(original.receiptId); vi.advanceTimersByTime(5_000); await turn();
     assert.equal(f.reads.length, 2); assert.deepEqual(original.position, cursor); assert.equal(f.releases.length, 0);
     original.action = 'observe'; original.definitionRevision++; f.emit(); await turn();
     assert.equal(f.reads.length, 3); assert.equal(f.reads[2]?.input.observationRevision, 3);
-    f.exit(); context.mock.timers.tick(5_000); await turn(); assert.equal(f.reads.length, 3);
+    f.exit(); vi.advanceTimersByTime(5_000); await turn(); assert.equal(f.reads.length, 3);
     f.ready(); await turn(); assert.equal(f.reads.length, 4); assert.equal(f.reads[3]?.input.observationRevision, 4);
     assert.equal(f.reads.every(({ input }) => input.reopen === false), true); assert.deepEqual(f.errors, []);
   } finally { await f.service.stop(); }
-  context.mock.timers.tick(5_000); await turn(); assert.equal(f.reads.length, 4); assert.equal(f.stopped, true);
+  vi.advanceTimersByTime(5_000); await turn(); assert.equal(f.reads.length, 4); assert.equal(f.stopped, true);
 });
 
-test('an unreachable observation never blocks other cancellation; lost and negative release replies retry the same receipt', async context => {
-  context.mock.timers.enable({ apis: ['setTimeout'] });
+test('an unreachable observation never blocks other cancellation; lost and negative release replies retry the same receipt', async () => {
+  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
   const unavailable = binding('unavailable'); const other = binding('other'); other.action = 'release'; const f = fixture([unavailable, other]);
   f.onRead(async (_input, signal) => new Promise<FollowupFileObserveResult>((_resolve, reject) => {
     signal.addEventListener('abort', () => reject(new DOMException('cancelled', 'AbortError')), { once: true });
@@ -85,7 +87,7 @@ test('an unreachable observation never blocks other cancellation; lost and negat
   try {
     await f.service.recover(); await turn();
     assert.equal(f.reads.length, 1); assert.equal(f.releases.length, 1); assert.equal(f.bindings.has(other.receiptId), false);
-    context.mock.timers.tick(5_000); await turn(); assert.equal(f.reads.length, 1);
+    vi.advanceTimersByTime(5_000); await turn(); assert.equal(f.reads.length, 1);
     unavailable.action = 'release'; unavailable.definitionRevision++; let attempts = 0;
     f.onRelease(async input => {
       assert.equal(input.receiptId, unavailable.receiptId); attempts++;
@@ -95,9 +97,9 @@ test('an unreachable observation never blocks other cancellation; lost and negat
     });
     f.emit(); await turn(); assert.equal(f.reads[0]?.signal.aborted, true); assert.equal(attempts, 1);
     assert.equal(f.bindings.has(unavailable.receiptId), true);
-    context.mock.timers.tick(1_000); await turn(); assert.equal(attempts, 2); assert.equal(f.bindings.has(unavailable.receiptId), true);
-    context.mock.timers.tick(1_000); await turn(); assert.equal(attempts, 3); assert.equal(f.bindings.has(unavailable.receiptId), false);
-    context.mock.timers.tick(5_000); await turn(); assert.equal(attempts, 3);
+    vi.advanceTimersByTime(1_000); await turn(); assert.equal(attempts, 2); assert.equal(f.bindings.has(unavailable.receiptId), true);
+    vi.advanceTimersByTime(1_000); await turn(); assert.equal(attempts, 3); assert.equal(f.bindings.has(unavailable.receiptId), false);
+    vi.advanceTimersByTime(5_000); await turn(); assert.equal(attempts, 3);
     const attemptsForReceipt = f.releases.filter(({ input }) => input.receiptId === unavailable.receiptId);
     assert.equal(attemptsForReceipt.length, 3);
     assert.deepEqual(attemptsForReceipt.map(({ input }) => input), Array(3).fill(attemptsForReceipt[0]!.input));
@@ -105,24 +107,24 @@ test('an unreachable observation never blocks other cancellation; lost and negat
   } finally { await f.service.stop(); }
 });
 
-test('read and Catalog transport failures keep a recoverable wake, and disappearance cancels the old poll', async context => {
-  context.mock.timers.enable({ apis: ['setTimeout'] }); const f = fixture(); let attempts = 0;
+test('read and Catalog transport failures keep a recoverable wake, and disappearance cancels the old poll', async () => {
+  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] }); const f = fixture(); let attempts = 0;
   f.onRead(async () => {
     attempts++; if (attempts === 1) throw new Error('B temporarily disconnected');
     return { accepted: true, followup: { revision: 4 } as Followup };
   });
   try {
     await f.service.recover(); await turn(); assert.equal(attempts, 1);
-    f.failLists(1); context.mock.timers.tick(1_000); await turn(); assert.equal(attempts, 1);
-    context.mock.timers.tick(1_000); await turn(); assert.equal(attempts, 2);
+    f.failLists(1); vi.advanceTimersByTime(1_000); await turn(); assert.equal(attempts, 1);
+    vi.advanceTimersByTime(1_000); await turn(); assert.equal(attempts, 2);
     assert.deepEqual(f.reads[0]?.input, f.reads[1]?.input); assert.equal(f.errors.length, 2);
     f.bindings.clear(); f.emit(); await turn(); const listings = f.listings;
-    context.mock.timers.tick(5_000); await turn(); assert.equal(attempts, 2); assert.equal(f.listings, listings);
+    vi.advanceTimersByTime(5_000); await turn(); assert.equal(attempts, 2); assert.equal(f.listings, listings);
   } finally { await f.service.stop(); }
 });
 
-test('pause, superseding generation and epoch exit abort old flights while preserving the original cursor', async context => {
-  context.mock.timers.enable({ apis: ['setTimeout'] }); const original = binding(); const f = fixture([original]);
+test('pause, superseding generation and epoch exit abort old flights while preserving the original cursor', async () => {
+  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] }); const original = binding(); const f = fixture([original]);
   f.onRead(async (_input, signal) => new Promise<FollowupFileObserveResult>((_resolve, reject) => {
     signal.addEventListener('abort', () => reject(new DOMException('cancelled', 'AbortError')), { once: true });
   }));
@@ -130,24 +132,24 @@ test('pause, superseding generation and epoch exit abort old flights while prese
     await f.service.recover(); await turn(); const position = structuredClone(original.position);
     original.action = 'paused'; original.definitionRevision++; f.emit(); await turn();
     assert.equal(f.reads[0]?.signal.aborted, true); assert.deepEqual(original.position, position);
-    context.mock.timers.tick(5_000); await turn(); assert.equal(f.reads.length, 1);
+    vi.advanceTimersByTime(5_000); await turn(); assert.equal(f.reads.length, 1);
     original.action = 'observe'; original.definitionRevision++; f.emit(); await turn(); assert.equal(f.reads.length, 2);
     original.generation++; original.definitionRevision++; f.emit(); await turn();
     assert.equal(f.reads[1]?.signal.aborted, true); assert.equal(f.reads.length, 3); assert.equal(f.reads[2]?.input.generation, original.generation);
     f.exit(); await turn(); assert.equal(f.reads[2]?.signal.aborted, true);
-    context.mock.timers.tick(5_000); await turn(); assert.equal(f.reads.length, 3);
+    vi.advanceTimersByTime(5_000); await turn(); assert.equal(f.reads.length, 3);
     f.ready(); await turn(); assert.equal(f.reads.length, 4);
     assert.deepEqual(original.position, position); assert.equal(f.releases.length, 0); assert.deepEqual(f.errors, []);
   } finally { await f.service.stop(); }
 });
 
-test('a stable fixed source stops polling, while original diagnostics and failed releases still recover', async context => {
-  context.mock.timers.enable({ apis: ['setTimeout'] });
+test('a stable fixed source stops polling, while original diagnostics and failed releases still recover', async () => {
+  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
   const original = binding(); original.target!.immutable = true; original.target!.source.mode = 'fixed_branch';
   original.watchId = null; original.position = null; const f = fixture([original]);
   try {
     await f.service.recover(); await turn(); assert.equal(f.reads.length, 1);
-    const listings = f.listings; context.mock.timers.tick(5_000); await turn();
+    const listings = f.listings; vi.advanceTimersByTime(5_000); await turn();
     assert.equal(f.reads.length, 1); assert.equal(f.listings, listings);
     original.failureCode = 'source_unavailable'; original.definitionRevision++;
     let unavailable = true;
@@ -157,21 +159,21 @@ test('a stable fixed source stops polling, while original diagnostics and failed
       return { accepted: true, followup: { revision: original.definitionRevision } as Followup };
     });
     f.emit(); await turn(); assert.equal(f.reads.length, 2);
-    unavailable = false; context.mock.timers.tick(1_000); await turn(); assert.equal(f.reads.length, 3);
-    context.mock.timers.tick(5_000); await turn(); assert.equal(f.reads.length, 3);
+    unavailable = false; vi.advanceTimersByTime(1_000); await turn(); assert.equal(f.reads.length, 3);
+    vi.advanceTimersByTime(5_000); await turn(); assert.equal(f.reads.length, 3);
     f.onRead(async () => { throw new Error('fixed source transport unavailable'); });
     f.service.changed(original.receiptId); await turn(); assert.equal(f.reads.length, 4);
     f.onRead(async () => ({ accepted: true, followup: { revision: original.definitionRevision } as Followup }));
-    context.mock.timers.tick(1_000); await turn(); assert.equal(f.reads.length, 5);
-    context.mock.timers.tick(5_000); await turn(); assert.equal(f.reads.length, 5);
+    vi.advanceTimersByTime(1_000); await turn(); assert.equal(f.reads.length, 5);
+    vi.advanceTimersByTime(5_000); await turn(); assert.equal(f.reads.length, 5);
     original.action = 'release'; original.definitionRevision++; let releases = 0;
     f.onRelease(async () => {
       if (++releases === 1) return { released: false };
       f.bindings.delete(original.receiptId); return { released: true };
     });
     f.emit(); await turn(); assert.equal(releases, 1);
-    context.mock.timers.tick(1_000); await turn(); assert.equal(releases, 2);
-    context.mock.timers.tick(5_000); await turn(); assert.equal(releases, 2);
+    vi.advanceTimersByTime(1_000); await turn(); assert.equal(releases, 2);
+    vi.advanceTimersByTime(5_000); await turn(); assert.equal(releases, 2);
     assert.equal(f.errors.length, 1); assert.match(String(f.errors[0]), /fixed source transport unavailable/);
   } finally { await f.service.stop(); }
 });

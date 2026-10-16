@@ -1,3 +1,4 @@
+import { guardProviderReply } from './provider-response.test-helper.js';
 import { responsesMetadataText } from './responses-wire.test-helper.js';
 import fs from 'node:fs/promises';
 import path from 'node:path';
@@ -104,7 +105,7 @@ it('executes all three live tools end to end through the bundled TypeScript serv
       const provider = createServer((request, response) => {
         const bytes: Buffer[] = [];
         request.on('data', chunk => bytes.push(Buffer.from(chunk)));
-        request.on('end', () => {
+        request.on('end', guardProviderReply(response, () => {
           const body = JSON.parse(Buffer.concat(bytes).toString()) as Record<string, unknown>;
           requests.push(body);
           const previous = (body.input as Array<Record<string, unknown>>).findLast(item => item.type === 'function_call_output');
@@ -115,7 +116,7 @@ it('executes all three live tools end to end through the bundled TypeScript serv
             : [{ id: 'answer', type: 'message', content: [{ type: 'output_text', text: 'Real TypeScript checks complete' }] }];
           response.writeHead(200, { 'content-type': 'text/event-stream' });
           response.end(`data: ${JSON.stringify({ type: 'response.completed', response: { output } })}\n\n`);
-        });
+        }));
       });
       provider.listen(0, '127.0.0.1');
       await once(provider, 'listening');

@@ -145,8 +145,8 @@ bun run --cwd packages/script-runtime type-check
 bun run --cwd packages/script-runtime lint
 ```
 
-`test` builds this package before the real Node stdio subprocess suite.
-`test:dist` consumes existing compiled output and does not build it. The package
+`test` runs evaluator and framing tests directly from source.
+`test:dist` exercises the real Node stdio subprocess against existing compiled output; it does not build it. The package
 build references the already-generated protocol declarations, so build
 `@varin/protocol` first when those declarations are absent or changed.
 

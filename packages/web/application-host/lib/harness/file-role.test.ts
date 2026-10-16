@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest";
 import { classifyFileRole, classifyFileRoleDecision, fileRoleFit } from "./file-role.js";
-import { classifyFileRole as exploreClassifyFileRole } from "./explore-query.js";
 
 describe("shared file role", () => {
   it("uses filename patterns for source, test, docs, and lock", () => {
@@ -8,7 +7,7 @@ describe("shared file role", () => {
       role: "source",
       ground: "filename-pattern",
     });
-    expect(classifyFileRoleDecision("packages/pi-host/test/harness/session-e2e.test.ts")).toEqual({
+    expect(classifyFileRoleDecision("packages/web/application-host/lib/harness/explore.test.ts")).toEqual({
       role: "test",
       ground: "filename-pattern",
     });
@@ -36,6 +35,7 @@ describe("shared file role", () => {
       ground: "project-declaration",
     });
     expect(classifyFileRole("package.json")).toBe("other");
+    expect(classifyFileRole("LICENSE")).toBe("lock");
   });
 
   it("keeps lockfiles on the lock filename pattern even when they look like manifests", () => {
@@ -52,8 +52,10 @@ describe("shared file role", () => {
     });
   });
 
-  it("is the same function explore already uses", () => {
-    expect(exploreClassifyFileRole).toBe(classifyFileRole);
+  it("matches file roles to implementation, design and dependency questions", () => {
     expect(fileRoleFit("source", "implementation", false)).toBeGreaterThan(fileRoleFit("docs", "implementation", false));
+    expect(fileRoleFit("lock", "implementation", false)).toBeLessThan(0);
+    expect(fileRoleFit("docs", "design", null)).toBeGreaterThan(fileRoleFit("source", "design", null));
+    expect(fileRoleFit("lock", "dependency", null)).toBeGreaterThan(fileRoleFit("source", "dependency", null));
   });
 });

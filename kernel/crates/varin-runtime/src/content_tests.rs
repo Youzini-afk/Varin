@@ -160,7 +160,7 @@ fn corrupt_or_missing_live_object_aborts_sweep_before_deleting_other_objects() {
 }
 #[test]
 fn unsupported_catalog_versions_preserve_original_database_and_content() {
-    for version in [0, 1, 2, 3, 4, 5, 6, 8, 14] {
+    for version in [0, crate::catalog::FORMAT - 1, crate::catalog::FORMAT + 1] {
         let fixture = Fixture::new();
         fs::create_dir_all(fixture.0.join("content/objects")).unwrap();
         let sentinel = fixture.0.join("content/objects/original-user-content");

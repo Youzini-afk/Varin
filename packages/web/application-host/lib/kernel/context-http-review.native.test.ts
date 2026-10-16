@@ -1,3 +1,4 @@
+import { guardProviderReply } from './provider-response.test-helper.js';
 import express from 'express';
 import { createServer, type Server } from 'node:http';
 import { once } from 'node:events';
@@ -37,11 +38,11 @@ async function fixture(existingRoot?: string, existingEndpoint?: string) {
   const provider = createServer((request, response) => {
     const chunks: Buffer[] = [];
     request.on('data', (bytes: Buffer) => chunks.push(bytes));
-    request.on('end', () => {
+    request.on('end', guardProviderReply(response, () => {
       requests.push({ body: JSON.parse(Buffer.concat(chunks).toString()) as Record<string, unknown>, ...(request.headers.authorization ? { authorization: request.headers.authorization } : {}) });
       response.writeHead(200, { 'content-type': 'text/event-stream' });
       response.end(`data: ${JSON.stringify({ type: 'response.completed', response: { output: [{ id: `http-answer-${requests.length}`, type: 'message', content: [{ type: 'output_text', text: JSON.stringify(requests.at(-1)!.body).includes('Produce a faithful continuation summary') ? 'SUMMARY: fixed original goal.' : 'Original full answer.' }] }] } })}\n\n`);
-    });
+    }));
   });
   const endpoint = existingEndpoint ?? `${await listen(provider)}/responses`;
   const owner = new ExistingHostCredentialOwner({ providerId: 'fixture-provider', providerFamily: 'openai-responses', endpoint,

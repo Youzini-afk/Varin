@@ -1,4 +1,6 @@
 import React, { act } from 'react';
+import { I18nProvider } from '@/lib/i18n';
+import { dict } from '@/lib/i18n/messages/en';
 import { createRoot, type Root } from 'react-dom/client';
 import { parseHTML } from 'linkedom';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
@@ -30,6 +32,7 @@ function fixture() {
 }
 function deferred<T>() { let resolve!: (value: T) => void; const promise = new Promise<T>(done => { resolve = done; }); return { promise, resolve }; }
 let root: Root; let container: HTMLDivElement;
+const renderContent = (children: React.ReactNode) => root.render(<I18nProvider>{children}</I18nProvider>);
 beforeEach(() => {
   endpoint.generation = 1;
   const { document, window } = parseHTML('<!doctype html><html><body></body></html>');
@@ -37,53 +40,55 @@ beforeEach(() => {
   container = document.createElement('div'); document.body.append(container); root = createRoot(container);
 });
 afterEach(() => { act(() => root.unmount()); container.remove(); vi.unstubAllGlobals(); });
-const render = async (f: ReturnType<typeof fixture>, selected = identity, eventCursor = 1) => { await act(async () => root.render(<ThreadMessages api={f.api} family={f.family} identity={selected} eventCursor={eventCursor} cancelObservation={f.cancelObservation} />)); };
+const render = async (f: ReturnType<typeof fixture>, selected = identity, eventCursor = 1) => { await act(async () => renderContent(<ThreadMessages api={f.api} family={f.family} identity={selected} eventCursor={eventCursor} cancelObservation={f.cancelObservation} />)); };
 const button = (label: string) => [...container.querySelectorAll<HTMLButtonElement>('button')].find(value => value.textContent === label)!;
 const click = async (label: string) => { await act(async () => button(label).click()); };
-const enter = async (value: string) => { await act(async () => { const input = container.querySelector<HTMLTextAreaElement>('[aria-label="Task message text"]')!; input.value = value; input.dispatchEvent(new window.Event('input', { bubbles: true })); }); };
-const target = async () => { await act(async () => { const input = container.querySelector<HTMLSelectElement>('[aria-label="Message recipient"]')!; Object.defineProperty(input, 'value', { configurable: true, writable: true, value: JSON.stringify(['thread:peer', 'branch:peer']) }); input.dispatchEvent(new window.Event('change', { bubbles: true })); }); };
+const enter = async (value: string) => { await act(async () => { const input = container.querySelector<HTMLTextAreaElement>(`[aria-label="${dict['chat.messages.text']}"]`)!; input.value = value; input.dispatchEvent(new window.Event('input', { bubbles: true })); }); };
+const target = async () => { await act(async () => { const input = container.querySelector<HTMLSelectElement>(`[aria-label="${dict['chat.messages.recipient']}"]`)!; Object.defineProperty(input, 'value', { configurable: true, writable: true, value: JSON.stringify(['thread:peer', 'branch:peer']) }); input.dispatchEvent(new window.Event('change', { bubbles: true })); }); };
 
 it('reads accepted information on demand and replies with the original received ID as the user, without guessing a branch', async () => {
   const f = fixture(); await render(f); expect(f.api.list).not.toHaveBeenCalled();
-  await click('Open task messages'); expect(container.textContent).toContain('Accepted · awaiting a normal boundary');
-  expect(f.api.get).not.toHaveBeenCalled(); await click('Read message message:original');
+  await click(dict['chat.children.messages']); expect(container.textContent).toContain(dict['chat.messages.accepted']);
+  expect(f.api.get).not.toHaveBeenCalled(); await click(dict['chat.messages.read']);
   expect(container.textContent).toContain('Original message body');
-  await click('Reply to message:original'); await enter('Thanks, original reply'); await click('Send notification');
+  expect(f.api.get).toHaveBeenCalledExactlyOnceWith(identity, 'message:original', expect.any(AbortSignal));
+  await click(dict['chat.messages.reply']); await enter('Thanks, original reply'); await click(dict['chat.messages.send']);
   expect(f.api.send.mock.calls[0]![0]).toEqual(identity);
   expect(f.api.send.mock.calls[0]![1]).toEqual({ key: expect.any(String), kind: 'inform', text: 'Thanks, original reply', replyTo: 'message:original' });
-  expect(container.textContent).toContain('Accepted message message:sent');
-  expect(container.textContent).toContain('does not confirm that work started');
+  expect(container.textContent).toContain(dict['chat.messages.accepted']);
+  expect(container.textContent).not.toContain(dict['chat.messages.started']);
+  expect(container.textContent).not.toContain(dict['chat.messages.delivered']);
   expect(f.api.list.mock.calls.at(-1)![1]).toMatchObject({ direction: 'outgoing' });
 });
 
 it.each(['inform', 'request'] as const)('retries uncertain %s with exactly the same kind, body, peer and key, including across collapse', async kind => {
   const f = fixture(); f.api.send.mockRejectedValueOnce(new ThreadRequestError(400, 'kernel-response-discarded'));
-  await render(f); await click('Open task messages'); await target();
-  await act(async () => { const input = container.querySelector<HTMLSelectElement>('[aria-label="Message purpose"]')!; Object.defineProperty(input, 'value', { configurable: true, writable: true, value: kind }); input.dispatchEvent(new window.Event('change', { bubbles: true })); });
-  await enter('路径 C:\\work\\原文'); await click(kind === 'request' ? 'Send request' : 'Send notification');
-  expect(container.textContent).toContain('Could not confirm acceptance');
-  expect(container.querySelector<HTMLTextAreaElement>('[aria-label="Task message text"]')!.disabled).toBe(true);
+  await render(f); await click(dict['chat.children.messages']); await target();
+  await act(async () => { const input = container.querySelector<HTMLSelectElement>(`[aria-label="${dict['chat.messages.purpose']}"]`)!; Object.defineProperty(input, 'value', { configurable: true, writable: true, value: kind }); input.dispatchEvent(new window.Event('change', { bubbles: true })); });
+  await enter('路径 C:\\work\\原文'); await click(kind === 'request' ? dict['chat.messages.sendRequest'] : dict['chat.messages.send']);
+  expect(container.textContent).toContain(dict['chat.messages.unconfirmed']);
+  expect(container.querySelector<HTMLTextAreaElement>(`[aria-label="${dict['chat.messages.text']}"]`)!.disabled).toBe(true);
   const original = f.api.send.mock.calls[0]![1];
-  expect(container.querySelector<HTMLSelectElement>('[aria-label="Message purpose"]')!.disabled).toBe(true);
-  await click('Hide task messages'); await click('Open task messages'); await click(kind === 'request' ? 'Retry same request' : 'Retry same notification');
+  expect(container.querySelector<HTMLSelectElement>(`[aria-label="${dict['chat.messages.purpose']}"]`)!.disabled).toBe(true);
+  await click(dict['chat.children.messages']); await click(dict['chat.children.messages']); await click(dict['chat.messages.retry']);
   expect(f.api.send.mock.calls[1]![1]).toEqual(original);
   expect(original).toMatchObject({ kind, targetThreadId: 'thread:peer', targetBranchId: 'branch:peer', text: '路径 C:\\work\\原文' });
-  expect(container.textContent).toContain('Accepted message message:sent');
+  expect(container.textContent).toContain(dict['chat.messages.accepted']);
 });
 
 it('refreshes real delivery metadata and drops old message bodies on close, identity and Host changes', async () => {
   const f = fixture(); const delayed = deferred<MessageView>(); f.api.get.mockReturnValueOnce(delayed.promise);
-  await render(f); await click('Open task messages'); await click('Read message message:original');
-  const signal = f.api.get.mock.calls[0]![2]!; await click('Hide task messages'); expect(signal.aborted).toBe(true);
+  await render(f); await click(dict['chat.children.messages']); await click(dict['chat.messages.read']);
+  const signal = f.api.get.mock.calls[0]![2]!; await click(dict['chat.children.messages']); expect(signal.aborted).toBe(true);
   await act(async () => delayed.resolve({ ...summary, text: 'stale private body' }));
   expect(container.textContent).not.toContain('stale private body');
   f.api.list.mockResolvedValue({ messages: [{ ...summary, state: 'delivered', deliveredRunId: 'actual-receiver-run', deliveredCursor: 24 }], nextCursor: null });
-  await click('Open task messages'); await render(f, identity, 24);
-  expect(container.textContent).toContain('Delivered to history in actual-receiver-run');
+  await click(dict['chat.children.messages']); await render(f, identity, 24);
+  expect(container.textContent).toContain(dict['chat.messages.delivered']);
   await act(async () => { endpoint.generation++; for (const listener of endpoint.listeners) listener(); });
   expect(container.querySelector('[aria-label="Original task message"]')).toBeNull();
-  await click('Open task messages'); await render(f, { ...identity, branchId: 'other-branch' });
-  expect(container.textContent).not.toContain('actual-receiver-run'); expect(f.api.send).not.toHaveBeenCalled();
+  await click(dict['chat.children.messages']); await render(f, { ...identity, branchId: 'other-branch' });
+  expect(container.textContent).not.toContain(dict['chat.messages.delivered']); expect(f.api.send).not.toHaveBeenCalled();
 });
 
 it('shows request admission separately from delivery and retains failed or cancelled original messages without resending them', async () => {
@@ -91,22 +96,22 @@ it('shows request admission separately from delivery and retains failed or cance
   const request: MessageSummary = { ...summary, kind: 'request', activation: { state: 'pending', executionId: 'execution:new', holdReason: 'source_unsettled' } };
   f.api.list.mockResolvedValue({ messages: [request], nextCursor: null });
   f.api.get.mockResolvedValue({ ...request, text: 'Original request remains readable' });
-  await render(f); await click('Open task messages');
-  expect(container.textContent).toContain('Accepted · awaiting history delivery');
-  expect(container.textContent).toContain('awaiting the original source result and writer stop');
+  await render(f); await click(dict['chat.children.messages']);
+  expect(container.textContent).toContain(dict['chat.messages.accepted']);
+  expect(container.textContent).toContain(dict['chat.messages.source']);
   f.api.list.mockResolvedValue({ messages: [{ ...request, activation: { state: 'bound', runId: 'actual-request-run', executionId: 'execution:new', holdReason: 'manual_pause' } }], nextCursor: null });
   await render(f, identity, 2);
-  expect(container.textContent).toContain('Request bound to actual-request-run');
-  expect(container.textContent).toContain('manually paused');
-  expect(container.textContent).not.toContain('Delivered to history');
+  expect(container.textContent).toContain(dict['chat.messages.started']);
+  expect(container.textContent).toContain(dict['chat.messages.paused']);
+  expect(container.textContent).not.toContain(dict['chat.messages.delivered']);
   f.api.list.mockResolvedValue({ messages: [{ ...request, state: 'cancelled', activation: { state: 'cancelled', runId: 'actual-request-run', executionId: 'execution:new' } }], nextCursor: null });
   await render(f, identity, 3);
-  expect(container.textContent).toContain('Delivery cancelled · original message retained');
-  await click('Read message message:original'); expect(container.textContent).toContain('Original request remains readable');
+  expect(container.textContent).toContain(dict['chat.messages.cancelled']);
+  await click(dict['chat.messages.read']); expect(container.textContent).toContain('Original request remains readable');
   f.api.list.mockResolvedValue({ messages: [{ ...request, activation: { state: 'failed', executionId: 'execution:new', code: 'source_unavailable' } }], nextCursor: null });
   await render(f, identity, 4);
-  expect(container.textContent).toContain('Request activation failed: source_unavailable');
-  expect(container.textContent).toContain('Accepted · not delivered');
+  expect(container.textContent).toContain(`${dict['chat.messages.failed']}: source_unavailable`);
+  expect(container.textContent).toContain(dict['chat.messages.accepted']);
   expect(f.api.send).not.toHaveBeenCalled();
 });
 
@@ -125,26 +130,24 @@ it('projects original reply observations, ends only the selected Operation and k
   const received: MessageSummary = { ...summary, replyWait: { ...waiting.replyWait!, waitId: 'reply-wait:original-send', operationId: 'original-send', runId: 'run:peer' } };
   let sent = [waiting, expired, replied];
   f.api.list.mockImplementation(async (_scope, request) => ({ messages: request.direction === 'incoming' ? [received] : sent, nextCursor: null }));
-  await render(f); await click('Open task messages');
-  expect(container.textContent).toContain('Waiting for a linked reply · no deadline');
-  expect(button('End reply observation')).toBeUndefined(); // A received view never controls its peer.
-  await click('Sent messages');
-  expect(container.textContent).toContain('Reply wait deadline elapsed');
-  expect(container.textContent).toContain('observation result not delivered');
-  expect(container.textContent).toContain('Linked reply received: message:answer');
-  expect(container.textContent).toContain('observation result delivered');
-  await click('End reply observation');
+  await render(f); await click(dict['chat.children.messages']);
+  expect(container.textContent).toContain(dict['chat.messages.waiting']);
+  expect(button(dict['chat.messages.stopWait'])).toBeUndefined(); // A received view never controls its peer.
+  await click(dict['chat.messages.outgoing']);
+  expect(container.textContent).toContain(dict['chat.messages.expired']);
+  expect(container.textContent).toContain(dict['chat.messages.replied']);
+  await click(dict['chat.messages.stopWait']);
   expect(f.cancelObservation).toHaveBeenCalledExactlyOnceWith('own-send');
-  expect(container.textContent).toContain('Waiting for a linked reply'); // No optimistic terminal state.
+  expect(container.textContent).toContain(dict['chat.messages.waiting']); // No optimistic terminal state.
   sent = [{ ...waiting, replyWait: { ...waiting.replyWait!, state: 'cancelled', delivered: true } }, expired, replied];
   await render(f, identity, 2);
-  expect(container.textContent).toContain('sent message was not withdrawn');
-  expect(button('End reply observation')).toBeUndefined();
+  expect(container.textContent).toContain(dict['chat.messages.stoppedWait']);
+  expect(button(dict['chat.messages.stopWait'])).toBeUndefined();
   const late: MessageSummary = { ...summary, messageId: 'message:late', replyTo: expired.messageId };
   f.api.list.mockResolvedValue({ messages: [late], nextCursor: null });
   f.api.get.mockResolvedValue({ ...late, text: 'Actual late reply, still linked to the original message' });
-  await click('Received messages'); await click('Read message message:late');
-  expect(container.textContent).toContain('reply to message:expired');
+  await click(dict['chat.messages.incoming']); await click(dict['chat.messages.read']);
+  expect(f.api.get).toHaveBeenLastCalledWith(identity, 'message:late', expect.any(AbortSignal));
   expect(container.textContent).toContain('Actual late reply');
   expect(f.api.send).not.toHaveBeenCalled();
 });

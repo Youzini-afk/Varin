@@ -5,7 +5,6 @@ import { SurfaceExtensionRuntime } from "@varin/extension-surface";
 import {
   createVarinEditorMonacoClient,
   defineEditorMount,
-  defineSurfaceMount,
   resolveHostExtensionModule,
   resolveIsolatedExtensionModule,
   resolveSurfaceExtensionModule,
@@ -174,43 +173,6 @@ test("module resolvers preserve extension-object method ownership", async () => 
     },
   } as never);
   await surface.activate({} as never);
-});
-
-test("defineSurfaceMount exposes the framework-neutral DOM lifecycle contract", async () => {
-  const controller = new AbortController();
-  const container = { textContent: "" } as HTMLElement;
-  let disposed = 0;
-  const implementation = defineSurfaceMount<{ label: string }>(async (element, context) => {
-    assert.equal(context.contributionId, "dev.example.mount.panel");
-    assert.equal(context.owner.extensionId, "dev.example.mount");
-    assert.equal(context.signal, controller.signal);
-    element.textContent = context.props.label;
-    return () => {
-      disposed += 1;
-      element.textContent = "";
-    };
-  });
-
-  const cleanup = await implementation.mount(container, {
-    contributionId: "dev.example.mount.panel",
-    owner: {
-      desiredRevision: 1,
-      entrypointId: "main",
-      extensionId: "dev.example.mount",
-      extensionVersion: "1.0.0",
-      generation: 1,
-      hostId: "72694a4f-093a-4f79-8763-3ca9f06b7078",
-      realmId: "mount-test",
-    },
-    props: { label: "framework neutral" },
-    reportError: (error) => { throw error; },
-    signal: controller.signal,
-  });
-  assert.equal(container.textContent, "framework neutral");
-  assert.equal(typeof cleanup, "function");
-  if (typeof cleanup === "function") await cleanup();
-  assert.equal(disposed, 1);
-  assert.equal(container.textContent, "");
 });
 
 test("workspace.documents capability helper forwards resource-scoped calls", async () => {

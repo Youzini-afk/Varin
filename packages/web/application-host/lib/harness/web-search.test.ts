@@ -88,7 +88,7 @@ describe("configured web search providers", () => {
     await expect(searx.search("q", { recency: "week" })).rejects.toThrow("exact week");
   });
 
-  it("parses public settings and resolves only the named Pi auth entry", () => {
+  it("parses public settings and resolves only the named credential entry", () => {
     expect(parseSearchProviderSettings({ provider: "brave", credentialRef: "brave-search", unknown: true })).toEqual({
       provider: "brave",
       credentialRef: "brave-search",

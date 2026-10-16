@@ -1,3 +1,4 @@
+import { guardProviderReply } from './provider-response.test-helper.js';
 import { responsesMetadataText } from './responses-wire.test-helper.js';
 import { resourceScopeFixture } from './resource-scope.test-helper.js';
 import { createMemoryOwner, type MemoryQuery } from './memory-owner.js';
@@ -99,7 +100,7 @@ function assertPairing(body: Record<string, unknown>) {
 
 /** Real Host routing, Rust kernel, Documents/WorkingState and personalization. Only the paid
  * provider is replaced with loopback protocol fixtures. The caller controls precise barriers. */
-async function fixture(reply: (request: RecordedRequest, index: number) => void, providerFamily: 'openai-responses' | 'anthropic-messages' = 'openai-responses') {
+async function fixture(reply: (request: RecordedRequest, index: number) => void | Promise<void>, providerFamily: 'openai-responses' | 'anthropic-messages' = 'openai-responses') {
   if (!kernelPath) throw new Error('Review requires an explicit frozen VARIN_TEST_KERNEL_PATH');
   await fs.access(kernelPath);
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'varin-child-review-'));
@@ -113,10 +114,10 @@ async function fixture(reply: (request: RecordedRequest, index: number) => void,
   const provider = await listen(createServer((request, response) => {
     const chunks: Buffer[] = [];
     request.on('data', (chunk: Buffer) => chunks.push(chunk));
-    request.on('end', () => {
+    request.on('end', guardProviderReply(response, () => {
       const value = { body: JSON.parse(Buffer.concat(chunks).toString()) as Record<string, unknown>, response };
-      requests.push(value); reply(value, requests.length);
-    });
+      requests.push(value); return reply(value, requests.length);
+    }));
   }));
   cleanup.push(provider.close);
   const endpoint = `${provider.url}/${providerFamily === 'anthropic-messages' ? 'messages' : 'responses'}`;

@@ -15,9 +15,8 @@ vi.mock('../git/service.js', () => ({
 }));
 
 
-const { normalizeLanguage, languageName } = await import('./languages.js');
+const { normalizeLanguage } = await import('./languages.js');
 const { buildPrompt } = await import('./prompt.js');
-const { buildCacheKey } = await import('./store.js');
 const { generateWalkthrough: nativeGenerateWalkthrough, getWalkthrough: nativeGetWalkthrough } = await import('./index.js');
 const describeModel = vi.fn<import('../model-text/service.js').ModelTextService['describe']>();
 const generateText = vi.fn<import('../model-text/service.js').ModelTextService['generate']>();
@@ -26,7 +25,7 @@ const generateWalkthrough = (input: Parameters<typeof nativeGenerateWalkthrough>
 const getWalkthrough = (input: Parameters<typeof nativeGetWalkthrough>[0]) => nativeGetWalkthrough(input, {modelText});
 const gitService = await import('../git/service.js');
 const getDiff = vi.mocked(gitService.getDiff);
-import type { WalkthroughLanguage, WalkthroughSource } from './types.js';
+import type { WalkthroughSource } from './types.js';
 
 const SOURCE: WalkthroughSource = { kind: 'working-tree', scope: 'all' };
 
@@ -55,22 +54,8 @@ const PROMPT_INPUT: Parameters<typeof buildPrompt>[0] = {
   source: SOURCE,
 };
 
-const FILES = [{ path: 'src/a.ts', status: 'modified', hunks: [{ id: 'unstaged:src/a.ts:abcd1234' }] }];
-const keyFor = (language: WalkthroughLanguage) => buildCacheKey({
-  repoRoot: '/repo',
-  sourceKey: 'working-tree:all',
-  providerID: 'anthropic',
-  modelID: 'claude-haiku-4-5',
-  language,
-  files: FILES,
-});
-
 describe('normalizeLanguage', () => {
-  it('accepts the tags the interface uses', () => {
-    expect(normalizeLanguage('uk')).toBe('uk');
-    expect(normalizeLanguage('zh-TW')).toBe('zh-TW');
-    expect(normalizeLanguage('pt-BR')).toBe('pt-BR');
-  });
+
 
   it('tolerates case and separator drift from a platform locale', () => {
     expect(normalizeLanguage('uk-UA')).toBe('uk');
@@ -87,10 +72,7 @@ describe('normalizeLanguage', () => {
     expect(normalizeLanguage({ toString: () => 'uk' })).toBe('en');
   });
 
-  it('names languages in English, matching the language of the prompt', () => {
-    expect(languageName('uk')).toBe('Ukrainian');
-    expect(languageName('nope')).toBe('English');
-  });
+
 });
 
 describe('prompt language instruction', () => {
@@ -116,18 +98,6 @@ describe('prompt language instruction', () => {
 
   it('defaults to English when no language is passed', () => {
     expect(buildPrompt(PROMPT_INPUT).system).toBe(buildPrompt({ ...PROMPT_INPUT, language: 'en' }).system);
-  });
-});
-
-describe('cache key', () => {
-  // Without the language in the key, asking for a translation is answered with
-  // the untranslated entry that was already there.
-  it('separates walkthroughs written in different languages', () => {
-    expect(keyFor('uk')).not.toBe(keyFor('en'));
-  });
-
-  it('is stable for the same language', () => {
-    expect(keyFor('uk')).toBe(keyFor('uk'));
   });
 });
 

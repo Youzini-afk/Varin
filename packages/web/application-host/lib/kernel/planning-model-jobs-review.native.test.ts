@@ -1,3 +1,4 @@
+import { guardProviderReply } from './provider-response.test-helper.js';
 import { resourceScopeFixture } from './resource-scope.test-helper.js';
 import { DatabaseSync } from 'node:sqlite';
 import { createAgentPersonalization } from '../memory/agent-personalization.js';
@@ -21,7 +22,6 @@ import { createPolicyModelPreparer } from './policy-models.js';
 import { createThreadSourcePreparer } from './thread-sources.js';
 import { createDocumentAuthority } from '../documents/authority.js';
 import { KernelStorageAdapter, createKernelWorkspaceWorkingStateAccess } from './storage-adapter.js';
-import { CredentialBridge, type PrivateCredentialResponse } from './credential-bridge.js';
 import { ExistingHostCredentialOwner, type CredentialScope } from './credential-owner.js';
 import { AgentRuntimeClient } from './agent-runtime-client.js';
 import { ThreadAdapter, type ThreadModelAuthority } from './thread-adapter.js';
@@ -51,7 +51,7 @@ async function listen(server: Server) {
   return `http://127.0.0.1:${address.port}`;
 }
 type Request = { body: Record<string, unknown>; authorization?: string };
-type Reply = (request: Request, response: ServerResponse) => void;
+type Reply = (request: Request, response: ServerResponse) => void | Promise<void>;
 function complete(response: ServerResponse, text: string, extra: Record<string, unknown> = {}) {
   response.writeHead(200, { 'content-type': 'text/event-stream' });
   response.end(`data: ${JSON.stringify({ type: 'response.completed', response: {
@@ -64,11 +64,11 @@ async function provider(reply: Reply) {
   const server = createServer((request, response) => {
     const chunks: Buffer[] = [];
     request.on('data', (chunk: Buffer) => chunks.push(chunk));
-    request.on('end', () => {
+    request.on('end', guardProviderReply(response, () => {
       const captured = { body: JSON.parse(Buffer.concat(chunks).toString()) as Record<string, unknown>,
         ...(request.headers.authorization ? { authorization: request.headers.authorization } : {}) };
-      requests.push(captured); reply(captured, response);
-    });
+      requests.push(captured); return reply(captured, response);
+    }));
   });
   const endpoint = await listen(server);
   return { endpoint, requests, disconnect: () => server.closeAllConnections() };
@@ -563,34 +563,6 @@ it('preserves a planning configuration identity when equivalent owner metadata k
   const input = { threadId: 'semantic-key-order', generation: 0, requestedModelRoles: ['agentPlanning'] as const };
   const [first] = await prepare(input); reordered = true;
   await expect(prepare({ ...input, savedCapabilities: [first!.capability] })).resolves.toEqual([expect.objectContaining({ capability: first!.capability })]);
-});
-
-it('requires the exact auxiliary binding ID and scope in the Host credential bridge', async () => {
-  const responses: PrivateCredentialResponse[] = [];
-  let mainReads = 0; let planningReads = 0;
-  const scope = { reference: 'ref', authority: 'owner', account: 'account', generation: 1 };
-  const owner = (secret: string, read: () => void) => new ExistingHostCredentialOwner({ providerId: 'fixture', providerFamily: 'openai-responses',
-    endpoint: 'http://127.0.0.1:1/responses', currentScope: async () => scope,
-    runtime: { getAuth: async () => { read(); return { auth: { apiKey: secret } }; } } });
-  const bridge = new CredentialBridge(() => 'epoch', async response => { responses.push(response); }, () => { throw new Error('Unexpected transport failure'); });
-  cleanups.push(async () => bridge.close());
-  await bridge.register('run', owner('fake-main', () => { mainReads++; }));
-  await bridge.register('run', owner('fake-planner', () => { planningReads++; }), undefined, 'planning-binding');
-  for (const [id, bindingId, requestScope] of [
-    ['forged', 'forged-binding', scope], ['wrong-account', 'planning-binding', { ...scope, account: 'other' }],
-    ['correct', 'planning-binding', scope],
-  ] as const) bridge.consume({ v: 1, kind: 'credential-request', id, kernelEpoch: 'epoch', runId: 'run', bindingId, scope: requestScope });
-  await expect.poll(() => responses.length).toBe(3);
-  expect(responses.find(response => response.id === 'forged')!.ok).toBe(false);
-  expect(responses.find(response => response.id === 'wrong-account')!.ok).toBe(false);
-  expect(responses.find(response => response.id === 'correct')!.result!.headers).toContainEqual({ name: 'authorization', value: 'Bearer fake-planner' });
-  expect(mainReads).toBe(0); expect(planningReads).toBe(1);
-  bridge.unregister('run', 'planning-binding');
-  bridge.consume({ v: 1, kind: 'credential-request', id: 'after-release', kernelEpoch: 'epoch', runId: 'run', bindingId: 'planning-binding', scope });
-  bridge.consume({ v: 1, kind: 'credential-request', id: 'main-still-valid', kernelEpoch: 'epoch', runId: 'run', scope });
-  await expect.poll(() => responses.length).toBe(5);
-  expect(responses.find(response => response.id === 'after-release')!.ok).toBe(false);
-  expect(responses.find(response => response.id === 'main-still-valid')!.result!.headers).toContainEqual({ name: 'authorization', value: 'Bearer fake-main' });
 });
 
 // These cases use real broker preparation. Wait on durable Run notifications instead of

@@ -1,7 +1,6 @@
 import { describe, expect, test } from 'vitest';
 
 import {
-    buildHighlightParts,
     isFenceClose,
     matchFenceOpen,
     mentionRangesToHighlightRanges,
@@ -10,12 +9,7 @@ import {
     type HighlightRange,
 } from '../composerHighlight';
 
-/**
- * Characterization tests: they record what the composer highlighter does TODAY,
- * before the CodeMirror migration replaces the textarea + mirror overlay. The
- * token grammar must survive that move unchanged, so these assert token spans
- * and styles rather than rendered classes.
- */
+// The shared grammar and range resolver feed the live CodeMirror composer.
 
 /** Compact view of a range: the exact substring it covers, plus its style. */
 const spans = (text: string, ranges: HighlightRange[]) =>
@@ -334,80 +328,25 @@ describe('resolveHighlightSegments', () => {
         expect(segments[0].end).toBe(6);
     });
 
-    test('segments agree with the parts the overlay renders', () => {
-        const text = 'a `b` c';
-        const ranges = tokenizeMarkdown(text);
-        const segments = resolveHighlightSegments(text, ranges);
-        const parts = buildHighlightParts(text, ranges);
-        expect(parts!.map((part) => part.text))
-            .toEqual(segments.map((segment) => text.slice(segment.start, segment.end)));
-        expect(parts!.map((part) => part.className))
-            .toEqual(segments.map((segment) => segment.className));
-    });
-});
-
-describe('buildHighlightParts', () => {
-    test('returns null when there is nothing to highlight', () => {
-        expect(buildHighlightParts('', [])).toBeNull();
-        expect(buildHighlightParts('plain text', [])).toBeNull();
-    });
-
-    test('covers the full text and preserves it exactly', () => {
-        const text = '# Title\nplain `code` tail';
-        const parts = buildHighlightParts(text, tokenizeMarkdown(text));
-        expect(parts).not.toBeNull();
-        expect(parts!.map((part) => part.text).join('')).toBe(text);
-    });
-
-    test('adjacent parts sharing a class are coalesced', () => {
-        const parts = buildHighlightParts('abcdef', [
-            { start: 0, end: 3, style: 'code' },
-            { start: 3, end: 6, style: 'code' },
-        ]);
-        expect(parts).toHaveLength(1);
-        expect(parts![0].text).toBe('abcdef');
-    });
-
-    test('keeps delimiters and mention text intact when ranges overlap', () => {
+    test('preserves delimiters and reference spans when ranges overlap', () => {
         const text = '`@a/b.ts`';
-        const parts = buildHighlightParts(text, [
+        const segments = resolveHighlightSegments(text, [
             { start: 0, end: text.length, style: 'code' },
             { start: 1, end: text.length - 1, style: 'mentionFile' },
         ]);
-        expect(parts!.map((part) => part.text)).toEqual(['`', '@a/b.ts', '`']);
+        expect(segments.map(segment => text.slice(segment.start, segment.end))).toEqual(['`', '@a/b.ts', '`']);
     });
 
-    test('equal priority resolves to the earliest range in input order', () => {
-        const parts = buildHighlightParts('abcd', [
-            { start: 0, end: 4, style: 'mentionFile' },
-            { start: 0, end: 4, style: 'mentionAgent' },
-        ]);
-        expect(parts).toHaveLength(1);
-        expect(parts![0].className).toBe(
-            buildHighlightParts('abcd', [{ start: 0, end: 4, style: 'mentionFile' }])![0].className,
-        );
+    test('resolves tied ranges in input order and honors explicit priority', () => {
+        const first: HighlightRange = { start: 0, end: 4, style: 'code', className: 'first' };
+        const second: HighlightRange = { ...first, className: 'second' };
+        expect(resolveHighlightSegments('abcd', [first, second])).toEqual([{ start: 0, end: 4, className: 'first' }]);
+        expect(resolveHighlightSegments('abcd', [first, { ...second, priority: 999 }])).toEqual([{ start: 0, end: 4, className: 'second' }]);
     });
 
-    test('an explicit priority overrides the style table', () => {
-        const parts = buildHighlightParts('abcd', [
-            { start: 0, end: 4, style: 'mentionFile' },
-            { start: 0, end: 4, style: 'marker', priority: 999 },
-        ]);
-        expect(parts![0].className).toBe(
-            buildHighlightParts('abcd', [{ start: 0, end: 4, style: 'marker' }])![0].className,
-        );
-    });
-
-    test('an explicit className overrides the style class', () => {
-        const parts = buildHighlightParts('abcd', [
-            { start: 0, end: 4, style: 'code', className: 'custom-class' },
-        ]);
-        expect(parts).toEqual([{ text: 'abcd', className: 'custom-class' }]);
-    });
-
-    test('zero-width ranges are ignored', () => {
-        const parts = buildHighlightParts('abcd', [{ start: 2, end: 2, style: 'code' }]);
-        expect(parts).toHaveLength(1);
-        expect(parts![0].text).toBe('abcd');
+    test('ignores zero-width ranges without dropping input text', () => {
+        const text = 'abcd';
+        const segments = resolveHighlightSegments(text, [{ start: 2, end: 2, style: 'code' }]);
+        expect(segments.map(segment => text.slice(segment.start, segment.end))).toEqual([text]);
     });
 });

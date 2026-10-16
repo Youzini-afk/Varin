@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import test from 'node:test';
+import { test } from 'vitest';
 import { AgentRuntimeClient } from './agent-runtime-client.js';
 import { registerThreadFollowup } from './thread-followups.js';
 import { registerUserFollowup } from './followup-source.js';

@@ -1488,7 +1488,7 @@ describe("computer service (EE open + file write)", () => {
     status, headers: { "Content-Type": "application/json", "X-Varin-Computer-Host": "remote-h" },
   });
 
-  it("remote open forwards the target verbatim and reports unknown on transport loss", async () => {
+  it("remote open forwards the target verbatim to its owning Host", async () => {
     const seen: Record<string, unknown> = {};
     const service = createComputerService({
       client: fakeKernel().client as never, hostId: "h", platform: "windows", dataDir: newDataDir(),

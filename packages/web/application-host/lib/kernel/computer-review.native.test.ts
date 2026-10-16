@@ -1,3 +1,4 @@
+import { guardProviderReply } from './provider-response.test-helper.js';
 /** Full public/IPC acceptance fixture. Controlled driver and loopback provider only;
  * never operates the user's desktop or calls a paid model. */
 import express from 'express';
@@ -99,7 +100,7 @@ it('source-less public Native work executes the shipped Computer tool, drains ex
   const provider = createServer((request, outgoing) => {
     const chunks: Buffer[] = [];
     request.on('data', (chunk: Buffer) => chunks.push(chunk));
-    request.on('end', () => {
+    request.on('end', guardProviderReply(outgoing, () => {
       requests.push(JSON.parse(Buffer.concat(chunks).toString()) as Record<string, unknown>);
       if (naturalPhase) {
         if (++naturalSteps === 1) respond(outgoing, 'computer_control', {});
@@ -110,7 +111,7 @@ it('source-less public Native work executes the shipped Computer tool, drains ex
       else if (requests.length === 2) respond(outgoing, 'computer_act', { action: { kind: 'key', app: 'fixture-editor', key: 'enter' } });
       else if (requests.length === 3) finalResponse = outgoing;
       else respond(outgoing);
-    });
+    }));
   });
   const endpoint = `${await listen(provider)}/responses`;
   const credentialOwner = new ExistingHostCredentialOwner({ providerId: 'computer-fixture', providerFamily: 'openai-responses', endpoint,

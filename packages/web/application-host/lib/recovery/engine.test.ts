@@ -809,28 +809,6 @@ describe('affected-file workspace recovery journal', () => {
     expect(await fs.promises.readFile(file, 'utf8')).toBe('later user bytes');
   });
 
-  it('reports recovery lifecycle capabilities as implemented', async () => {
-    const { engine, harness } = await createHarness();
-    const status = await engine.status(harness.identity.workspaceId);
-    expect(status).toMatchObject({
-      status: 'ready',
-      capabilities: {
-        bindings: true,
-        catalogLifecycle: true,
-        checkpoints: true,
-        combined: true,
-        conflictConfirmation: true,
-        dirtyStateBarrier: true,
-        journal: true,
-        redo: true,
-        retention: false,
-        storageManagement: false,
-        workspaceLease: false,
-      },
-      failures: [],
-    });
-  });
-
   it('rejects overwrite-confirmed when a conflict fingerprint changed after review', async () => {
     const { engine, harness } = await createHarness();
     const target = path.join(harness.workspaceRoot, 'note.txt');

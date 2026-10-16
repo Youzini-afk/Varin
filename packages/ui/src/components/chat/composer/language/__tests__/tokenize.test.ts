@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'vitest';
 
-import { buildHighlightParts } from '../../../composerHighlight';
+import { resolveHighlightSegments } from '../../../composerHighlight';
 import {
     tokenizeComposer,
     tokenizeMentions,
@@ -46,7 +46,7 @@ describe('tokenizeComposer — reference constructs', () => {
         expect(styled('run /nosuchthing now')).toEqual([]);
     });
 
-    test('a Pi skill invocation is styled as one complete slash token', () => {
+    test('a registered skill invocation is styled as one complete slash token', () => {
         expect(styled(
             'use /skill:workspace-check now',
             context({ knownSlashNames: new Set(['skill:workspace-check']) }),
@@ -145,19 +145,18 @@ describe('tokenizeComposer — ranges are usable', () => {
         }
     });
 
-    test('the ranges reconstruct the text exactly through buildHighlightParts', () => {
+    test('the ranges reconstruct the text exactly through resolveHighlightSegments', () => {
         const text = 'ping @build about /review\n> quoted `code`';
-        const parts = buildHighlightParts(text, tokenizeComposer(text, context()));
-        expect(parts).not.toBeNull();
-        expect(parts!.map((part) => part.text).join('')).toBe(text);
+        const parts = resolveHighlightSegments(text, tokenizeComposer(text, context()));
+        expect(parts.map(part => text.slice(part.start, part.end)).join('')).toBe(text);
     });
 
     test('a mention inside inline code keeps the mention style', () => {
         // Mentions outrank code in the priority table, so a referenced path
         // stays recognizable even when the user wrapped it in backticks.
         const text = '`@src/app.ts`';
-        const parts = buildHighlightParts(text, tokenizeComposer(text, context()));
-        expect(parts!.map((part) => part.text)).toEqual(['`', '@src/app.ts', '`']);
+        const parts = resolveHighlightSegments(text, tokenizeComposer(text, context()));
+        expect(parts.map(part => text.slice(part.start, part.end))).toEqual(['`', '@src/app.ts', '`']);
     });
 });
 

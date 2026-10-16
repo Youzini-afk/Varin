@@ -360,5 +360,6 @@ test("dependency realms are explicit, nonempty and unique", () => {
 });
 
 test("rejects retired runtime package integration manifests", () => {
-  assert.throws(() => parseVarinExtensionManifest({ ...manifest(), integrates: { piPackages: ["legacy-package"] } }), /integrates is unsupported/);
+  assert.throws(() => parseVarinExtensionManifest({ ...manifest(), integrates: { piPackages: ["legacy-package"] } }), error => error instanceof VarinExtensionContractError
+    && error.issues.some(issue => issue.startsWith("integrates is unsupported")));
 });

@@ -1,3 +1,4 @@
+import "./network-fixture.js";
 import assert from 'node:assert/strict';
 import { it } from 'node:test';
 import { installRuntimeFetchBridge, runtimeFetch } from '../src/transport/runtime-fetch.js';

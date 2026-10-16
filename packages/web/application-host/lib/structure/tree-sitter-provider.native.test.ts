@@ -1,16 +1,12 @@
-import { mkdtempSync } from "node:fs";
+import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { languageIdForPath } from "@varin/protocol";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, onTestFinished } from "vitest";
 import { isJsonStructureContainerKind, isStructureContainerKind } from "./kinds.js";
 import {
   CATALOG_SCAN_LANGUAGES,
-  capabilitiesFromSpec,
-  tagsDefinitionKind,
-  treeSitterLanguageSpec,
-  treeSitterTagsSpec,
 } from "./languages.js";
 import { createTreeSitterStructureProvider } from "./native-provider.test-helper.js";
 import { NO_STRUCTURE_CAPABILITIES } from "./types.js";
@@ -30,67 +26,6 @@ const request = (text: string, path = "sample.ts") => ({
 const parsingProvider = () => createTreeSitterStructureProvider({ parseBudgetMs: 30_000 });
 
 describe("tree-sitter language specs", () => {
-  it("derives all four capabilities for typescript and tsx", () => {
-    const expected = { outline: true, classifyHits: true, literalCalls: true, imports: true };
-    expect(capabilitiesFromSpec(treeSitterLanguageSpec("typescript"))).toEqual(expected);
-    expect(capabilitiesFromSpec(treeSitterLanguageSpec("typescriptreact"))).toEqual(expected);
-    expect(createTreeSitterStructureProvider().capabilities("typescript")).toEqual(expected);
-    expect(createTreeSitterStructureProvider().capabilities("typescriptreact")).toEqual(expected);
-  });
-
-  it("derives JS capabilities including imports and JSON without imports", () => {
-    expect(capabilitiesFromSpec(treeSitterLanguageSpec("javascript"))).toEqual({
-      outline: true,
-      classifyHits: true,
-      literalCalls: true,
-      imports: true,
-    });
-    expect(capabilitiesFromSpec(treeSitterLanguageSpec("javascriptreact"))).toEqual({
-      outline: true,
-      classifyHits: true,
-      literalCalls: true,
-      imports: true,
-    });
-    expect(capabilitiesFromSpec(treeSitterLanguageSpec("json"))).toEqual({
-      outline: true,
-      classifyHits: true,
-      literalCalls: false,
-      imports: false,
-    });
-    expect(createTreeSitterStructureProvider().capabilities("json")).toEqual({
-      outline: true,
-      classifyHits: true,
-      literalCalls: false,
-      imports: false,
-    });
-    expect(capabilitiesFromSpec(undefined)).toEqual(NO_STRUCTURE_CAPABILITIES);
-    expect(createTreeSitterStructureProvider().capabilities("swift")).toEqual(NO_STRUCTURE_CAPABILITIES);
-    expect(createTreeSitterStructureProvider().capabilities(null)).toEqual(NO_STRUCTURE_CAPABILITIES);
-  });
-
-  it("derives outline and classifyHits from a spec, and optional queries from presence", () => {
-    const outlineOnly = capabilitiesFromSpec(treeSitterTagsSpec("x.wasm", "(program) @definition.module"));
-    expect(outlineOnly).toEqual({
-      outline: true,
-      classifyHits: true,
-      literalCalls: false,
-      imports: false,
-    });
-    expect(capabilitiesFromSpec(treeSitterTagsSpec("x.wasm", ""))).toEqual(NO_STRUCTURE_CAPABILITIES);
-  });
-
-  it("maps upstream tags captures onto slice kinds and leaves the rest as catalog names", () => {
-    expect(tagsDefinitionKind("definition.function")).toBe("function");
-    expect(tagsDefinitionKind("definition.trait")).toBe("interface");
-    expect(tagsDefinitionKind("definition.namespace")).toBe("module");
-    expect(isStructureContainerKind(tagsDefinitionKind("definition.class")!)).toBe(true);
-    // A constant is a name inside a container, so it never becomes a unit.
-    expect(isStructureContainerKind(tagsDefinitionKind("definition.constant")!)).toBe(false);
-    expect(tagsDefinitionKind("definition.something-new")).toBe("unknown");
-    expect(tagsDefinitionKind("reference.call")).toBeNull();
-    expect(tagsDefinitionKind("name")).toBeNull();
-  });
-
   /**
    * The bundled JavaScript grammar stands in for a downloaded one: what is
    * under test is the tags adapter, and this is the same capture shape every
@@ -368,6 +303,7 @@ describe("createTreeSitterStructureProvider", () => {
 
   it("reports unavailable when the runtime wasm cannot be read", async () => {
     const empty = mkdtempSync(join(tmpdir(), "varin-structure-runtime-"));
+    onTestFinished(() => rmSync(empty, { recursive: true, force: true }));
     const provider = createTreeSitterStructureProvider({
       runtimeFromUrl: pathToFileURL(join(empty, "missing.js")).href,
     });
