@@ -1,20 +1,21 @@
 import { getRuntimeEndpointGeneration, type ThreadModel } from '@varin/application-client';
-import { useThreadStore, threadIdentityKey } from '@/stores/useThreadStore';
+import { useThreadStore, selectedComposerKey } from '@/stores/useThreadStore';
 import { useThreadDraftStore } from '@/stores/useThreadDraftStore';
 import { getRegisteredRuntimeAPIs } from '@/lib/runtime-api/registry';
 import { useUIStore } from '@/stores/useUIStore';
 
 export async function cycleThreadModel(direction?: -1 | 1): Promise<void> {
-  const { selectedIdentity: identity, hostKey } = useThreadStore.getState();
+  const identity = useThreadStore.getState().selectedIdentity;
+  const draftKey = selectedComposerKey(useThreadStore.getState());
   const api = getRegisteredRuntimeAPIs()?.threads;
-  if (!identity || !api) return;
+  if (!draftKey || !api) return;
   const host = getRuntimeEndpointGeneration();
-  const [snapshot, models] = await Promise.all([api.snapshot(identity), api.listModels()]);
-  if (host !== getRuntimeEndpointGeneration() || useThreadStore.getState().selectedIdentity !== identity) return;
-  const draftKey = threadIdentityKey(hostKey, identity);
+  const [snapshot, models] = await Promise.all([identity ? api.snapshot(identity) : null, api.listModels()]);
+  if (host !== getRuntimeEndpointGeneration() || selectedComposerKey(useThreadStore.getState()) !== draftKey) return;
   const draft = useThreadDraftStore.getState().drafts[draftKey];
-  const run = snapshot.activeRun;
-  const config = (snapshot.modelSelection.desired?.configuration ?? run?.configuration) as { providerId?: string; model?: string; thinkingLevel?: ThreadModel['thinkingLevel']; catalogModelId?: string } | undefined;
+  if (draft?.firstSend) return;
+  const run = snapshot?.activeRun;
+  const config = (snapshot?.modelSelection.desired?.configuration ?? run?.configuration) as { providerId?: string; model?: string; thinkingLevel?: ThreadModel['thinkingLevel']; catalogModelId?: string } | undefined;
   const current = run && config?.providerId && config.model ? { providerId: config.providerId, modelId: config.catalogModelId ?? config.model, thinkingLevel: config.thinkingLevel } : draft?.model;
   let model: ThreadModel | undefined;
   if (direction) {
@@ -30,7 +31,7 @@ export async function cycleThreadModel(direction?: -1 | 1): Promise<void> {
     if (!levels.length) return;
     model = { ...current, thinkingLevel: levels[(levels.indexOf(current.thinkingLevel ?? 'off') + 1) % levels.length] };
   }
-  if (run) await api.selectModel({ ...identity, runId: run.id, key: crypto.randomUUID(), model });
+  if (run && identity) await api.selectModel({ ...identity, runId: run.id, key: crypto.randomUUID(), model });
   else useThreadDraftStore.getState().patch(draftKey, { model });
 }
 export async function cancelSelectedThreadRun(): Promise<void> {

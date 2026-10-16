@@ -41,7 +41,7 @@ import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
 import { EditorView } from '@codemirror/view';
 import { copyTextToClipboard } from '@/lib/clipboard';
 import { parseProjectPlanMarkdown } from '@/lib/project-config';
-import { startThreadFromNavigation } from '@/lib/agent-runtime/threadNavigation';
+import { createThreadForSubmission } from '@/lib/agent-runtime/threadNavigation';
 import { createWorktreeThread } from '@/lib/agent-runtime/worktreeThread';
 import { TodoSendDialog, type TodoSendExecution } from '@/components/session/TodoSendDialog';
 import { Icon } from "@/components/icon/Icon";
@@ -535,9 +535,9 @@ export const PlanView: React.FC<PlanViewProps> = ({ targetPath = null }) => {
             projectsState.setActiveProjectIdOnly(currentProjectRef.id);
           }
           const created = await createWorktreeThread();
-          identity = created.identity; directory = created.path;
+          identity = await useThreadStore.getState().materializeDraft(created.draftKey); directory = created.path;
         } else {
-          identity = await startThreadFromNavigation({
+          identity = await createThreadForSubmission({
             directory: currentProjectRef.path,
           });
         }

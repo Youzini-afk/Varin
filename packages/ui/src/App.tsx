@@ -445,7 +445,7 @@ function App({ apis }: AppProps) {
     return () => window.removeEventListener('varin:open-thread', handler as EventListener);
   }, [embeddedSessionChat]);
 
-  // Native tray/menu requests create a real Thread; workspace selection remains explicit.
+  // Tray/menu requests open a local draft; its first send creates the Thread.
   React.useEffect(() => {
     if (embeddedSessionChat || typeof window === 'undefined') return;
 

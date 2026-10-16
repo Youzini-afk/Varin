@@ -29,7 +29,7 @@ import {
 import { cn } from '@/lib/utils';
 import { useFeatureFlagsStore } from '@/stores/useFeatureFlagsStore';
 import { useGitStatus } from '@/stores/useGitStore';
-import { useThreadStore, threadIdentityKey } from '@/stores/useThreadStore';
+import { useThreadStore, selectedComposerKey } from '@/stores/useThreadStore';
 import { contextPanelGitDirectoryScopeKey, useContextPanelGitDirectoryStore } from '@/stores/useContextPanelGitDirectoryStore';
 import { normalizeContextPanelDirectoryKey, useUIStore } from '@/stores/useUIStore';
 
@@ -129,7 +129,7 @@ export const ContextPanelRail: React.FC = () => {
   const setContextRailOrder = useUIStore((state) => state.setContextRailOrder);
   const openContextSurface = useUIStore((state) => state.openContextSurface);
   const planModeEnabled = useFeatureFlagsStore((state) => state.planModeEnabled);
-  const sessionId = useThreadStore(state => state.selectedIdentity ? threadIdentityKey(state.hostKey, state.selectedIdentity) : null);
+  const sessionId = useThreadStore(state => selectedComposerKey(state));
   const gitScopeKey = contextPanelGitDirectoryScopeKey(sessionId, effectiveDirectory);
   const selectedGitDirectory = useContextPanelGitDirectoryStore((state) => gitScopeKey ? state.directories[gitScopeKey] : undefined);
 

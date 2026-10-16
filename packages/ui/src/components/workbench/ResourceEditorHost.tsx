@@ -55,7 +55,7 @@ import { useDeviceInfo } from '@/lib/device';
 import { threadHostKey as getRuntimeKey } from '@/stores/useThreadStore';
 import { createEditorDocumentController } from '@/lib/extensions/editor-document-controller';
 import { WorkbenchPdfReader } from './WorkbenchPdfReader';
-import { useThreadStore, threadIdentityKey } from '@/stores/useThreadStore';
+import { useThreadStore, selectedComposerKey } from '@/stores/useThreadStore';
 import { appendThreadDraftText } from '@/lib/agent-runtime/threadNavigation';
 import { BrowserResourceView } from './BrowserResourceView';
 import { attachEditorContext } from '@/lib/agent-editor/attach';
@@ -109,7 +109,7 @@ export const ResourceEditorHost: React.FC<ResourceEditorHostProps> = ({
   const { files, runtime } = useRuntimeAPIs();
   const { isMobile } = useDeviceInfo();
   const currentIdentity = useThreadStore(state => state.selectedIdentity);
-  const currentSessionId = useThreadStore(state => state.selectedIdentity ? threadIdentityKey(state.hostKey, state.selectedIdentity) : null);
+  const currentSessionId = useThreadStore(state => selectedComposerKey(state));
   const path = workspacePathFromResourceId(workspaceRoot, tab.resourceId);
   const displayPath = tab.providerId === BUILTIN_EDITOR_PROVIDER_IDS.browser ? tab.viewState.browserUrl ?? t('contextPanel.mode.browser') : tab.resourceId;
   const identity = React.useMemo<DocumentIdentity>(
@@ -432,7 +432,7 @@ export const ResourceEditorHost: React.FC<ResourceEditorHostProps> = ({
       className="workbench-icon-button flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-interactive-hover hover:text-foreground disabled:opacity-40"
       onClick={() => {
         if (!currentSessionId) return;
-        if (activeProviderId === BUILTIN_EDITOR_PROVIDER_IDS.browser) currentIdentity && appendThreadDraftText(currentIdentity, tab.viewState.browserUrl ?? '');
+        if (activeProviderId === BUILTIN_EDITOR_PROVIDER_IDS.browser) appendThreadDraftText(currentSessionId, tab.viewState.browserUrl ?? '');
         else {
           const result = attachEditorContext({ threadKey: currentSessionId, workspaceId, resourceId: tab.resourceId, kind: 'editor' });
           if ('status' in result) { toast.error(t(result.status === 'missing-document' ? 'workbench.attachment.missing-document' : 'workbench.attachment.wrong-runtime')); return; }

@@ -35,12 +35,12 @@ import {
 import { requestFileAccess } from '@/lib/desktop';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { useUIStore } from '@/stores/useUIStore';
-import { useThreadStore } from '@/stores/useThreadStore';
+import { useThreadStore, selectedComposerKey } from '@/stores/useThreadStore';
 import type { ThreadIdentity } from '@varin/application-client';
 import { submitThreadPrompt } from '@/lib/agent-runtime/submitThreadPrompt';
 import { appendThreadDraftText } from '@/lib/agent-runtime/threadNavigation';
 import { useProjectsStore } from '@/stores/useProjectsStore';
-import { startThreadFromNavigation } from '@/lib/agent-runtime/threadNavigation';
+import { createThreadForSubmission } from '@/lib/agent-runtime/threadNavigation';
 import { createWorktreeThread } from '@/lib/agent-runtime/worktreeThread';
 import { cn } from '@/lib/utils';
 import { actionInstruction } from '@/lib/actionInstructions';
@@ -188,7 +188,7 @@ export const ProjectNotesTodoPanel: React.FC<ProjectNotesTodoPanelProps> = ({
   const todoPanelStartYRef = React.useRef(0);
   const todoPanelStartHeightRef = React.useRef(todoPanelHeight);
 
-  const currentIdentity = useThreadStore(state => state.selectedIdentity);
+  const currentComposer = useThreadStore(selectedComposerKey);
   const currentDirectory = useDirectoryStore((state) => state.currentDirectory);
   const openContextPanelTab = useUIStore((state) => state.openContextPanelTab);
   const setActiveMainTab = useUIStore((state) => state.setActiveMainTab);
@@ -488,17 +488,17 @@ export const ProjectNotesTodoPanel: React.FC<ProjectNotesTodoPanelProps> = ({
 
   const handleSendToCurrentSession = React.useCallback(
     (todoText: string) => {
-      if (!currentIdentity) {
+      if (!currentComposer) {
         toast.error(t('rightSidebar.contextNotesTodo.toast.noActiveSession'));
         return;
       }
       routeToChat();
       const fenced = `\`\`\`md\n${todoText}\n\`\`\``;
-      appendThreadDraftText(currentIdentity, fenced);
+      appendThreadDraftText(currentComposer, fenced);
       toast.success(t('rightSidebar.contextNotesTodo.toast.sentToCurrentSession'));
       onActionComplete?.();
     },
-    [currentIdentity, onActionComplete, routeToChat, t]
+    [currentComposer, onActionComplete, routeToChat, t]
   );
 
   const handleSendToNewWorktreeSession = React.useCallback(
@@ -547,9 +547,9 @@ export const ProjectNotesTodoPanel: React.FC<ProjectNotesTodoPanelProps> = ({
             projectsState.setActiveProjectIdOnly(projectRef.id);
           }
           const created = await createWorktreeThread();
-          identity = created.identity; directory = created.path;
+          identity = await useThreadStore.getState().materializeDraft(created.draftKey); directory = created.path;
         } else {
-          identity = await startThreadFromNavigation({
+          identity = await createThreadForSubmission({
             directory: projectRef.path,
           });
         }

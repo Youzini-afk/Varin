@@ -18,7 +18,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { usePreferencesStore } from '@/stores/usePreferencesStore';
-import { useThreadStore, threadIdentityKey } from '@/stores/useThreadStore';
+import { useThreadStore, selectedComposerKey } from '@/stores/useThreadStore';
 import { useThreadDraftStore } from '@/stores/useThreadDraftStore';
 import { runtimeFetch } from '@varin/application-client';
 
@@ -137,9 +137,8 @@ export function useServerTTS(options: UseServerTTSOptions = {}): UseServerTTSRet
   const audioSourceRef = useRef<AudioBufferSourceNode | null>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
 
-  const thread = useThreadStore(state => state.selectedIdentity);
-  const host = useThreadStore(state => state.hostKey);
-  const currentModel = useThreadDraftStore(state => thread ? state.drafts[threadIdentityKey(host, thread)]?.model : undefined);
+  const composerKey = useThreadStore(selectedComposerKey);
+  const currentModel = useThreadDraftStore(state => composerKey ? state.drafts[composerKey]?.model : undefined);
   const openaiApiKey = usePreferencesStore((state) => state.openaiApiKey);
   const openaiCompatibleUrl = usePreferencesStore((state) => state.openaiCompatibleUrl);
   const openaiCompatibleApiKey = usePreferencesStore((state) => state.openaiCompatibleApiKey);

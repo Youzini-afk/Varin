@@ -1,7 +1,7 @@
 import React from 'react';
 
 import { EMPTY_TERMINAL_BUFFER, useTerminalStore } from '@/stores/useTerminalStore';
-import { useThreadStore } from '@/stores/useThreadStore';
+import { useThreadStore, selectedComposerKey } from '@/stores/useThreadStore';
 import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
 import { appendThreadDraftText, startThreadFromNavigation } from '@/lib/agent-runtime/threadNavigation';
 import { getRuntimeEndpointGeneration, type TerminalStreamEvent } from '@varin/application-client';
@@ -724,7 +724,7 @@ export const TerminalView: React.FC<TerminalViewProps> = ({ visible, directoryOv
         const selection = terminalControllerRef.current?.getSelection();
         if (!selection || !activeTab || !effectiveDirectory) return;
         try {
-            const identity = useThreadStore.getState().selectedIdentity ?? await startThreadFromNavigation({ directory: effectiveDirectory });
+            const identity = selectedComposerKey(useThreadStore.getState()) ?? await startThreadFromNavigation({ directory: effectiveDirectory });
             appendThreadDraftText(identity, `Terminal ${activeTab.label}, lines ${selection.startLine}-${selection.endLine}:\n\n\`\`\`text\n${selection.text}\n\`\`\``);
 
         } catch (error) {

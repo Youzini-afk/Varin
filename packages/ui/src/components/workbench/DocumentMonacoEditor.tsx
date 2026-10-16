@@ -20,7 +20,7 @@ import {
 } from '@/stores/useEditorContextStore';
 import { useUIStore } from '@/stores/useUIStore';
 import { threadHostKey as getRuntimeKey } from '@/stores/useThreadStore';
-import { useThreadStore, threadIdentityKey } from '@/stores/useThreadStore';
+import { useThreadStore, selectedComposerKey } from '@/stores/useThreadStore';
 import {
   EMPTY_INLINE_COMMENT_DRAFTS,
   getInlineCommentDraftKey,
@@ -81,7 +81,7 @@ export const DocumentMonacoEditor: React.FC<DocumentMonacoEditorProps> = ({
   const fileEditorSettings = useUIStore((state) => state.fileEditorSettings);
   const fileEditorKeymap = useUIStore((state) => state.fileEditorKeymap);
   const updateFileEditorSettings = useUIStore((state) => state.updateFileEditorSettings);
-  const sessionId = useThreadStore(state => state.selectedIdentity ? threadIdentityKey(state.hostKey, state.selectedIdentity) : null);
+  const sessionId = useThreadStore(state => selectedComposerKey(state));
   const sessionDirectory = useEffectiveDirectory();
   const inlineDraftKey = sessionId && sessionDirectory
     ? getInlineCommentDraftKey(getRuntimeKey(), sessionDirectory, sessionId)

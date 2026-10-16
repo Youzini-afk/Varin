@@ -2,7 +2,7 @@ import { create } from 'zustand';
 import type { EditorContextAttachment } from '@/lib/agent-editor/types';
 import type { InlineCommentDraft } from './useInlineCommentDraftStore';
 import type { ImageAttachment } from '@varin/protocol';
-import type { ThreadModel, ThreadPreparedSource, ThreadsAPI } from '@varin/application-client';
+import type { ThreadIdentity, ThreadModel, ThreadPrepareSource, ThreadPreparedSource, ThreadsAPI } from '@varin/application-client';
 import { useMessageQueueStore } from './messageQueueStore';
 
 export type ThreadPendingInput = {
@@ -25,6 +25,30 @@ export interface ThreadMaterialAttachment {
   filename: string;
   sourceHash?: string;
 }
+export interface DraftPdfAttachment { id: string; filename: string; data: string }
+export interface DraftSourceSelection {
+  path: string;
+  resourceOwner: ThreadPrepareSource['resourceOwner'];
+  mode: ThreadPrepareSource['mode'];
+  contentMode: ThreadPrepareSource['content']['mode'];
+  captureScopes: string[];
+}
+export interface ThreadFirstSend {
+  key: string;
+  text: string;
+  editorText: string;
+  images: ImageAttachment[];
+  pdfs: DraftPdfAttachment[];
+  model: ThreadModel;
+  workspacePath?: string;
+  sourceSelection?: DraftSourceSelection;
+  editorContext: readonly EditorContextAttachment[];
+  inlineContext: ReadonlyArray<{ key: string; drafts: readonly InlineCommentDraft[] }>;
+  goalObjective?: string;
+  goalBudget?: number;
+  status: 'sending' | 'failed';
+  error?: string;
+}
 export interface ThreadDraft {
   text: string;
   images: ImageAttachment[];
@@ -35,6 +59,11 @@ export interface ThreadDraft {
   workspacePath?: string;
   goalArmed?: boolean;
   pendingInput?: ThreadPendingInput;
+  identity?: ThreadIdentity;
+  pdfs?: DraftPdfAttachment[];
+  firstSend?: ThreadFirstSend;
+  sendError?: string;
+  sourceSelection?: DraftSourceSelection;
 }
 export const EMPTY_THREAD_DRAFT: ThreadDraft = Object.freeze({ text: '', images: [], materials: [], inputMode: 'boundary', preparedSource: null });
 /** Composer state only; accepted execution and history remain with the native Catalog. Never persisted. */

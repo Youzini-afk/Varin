@@ -73,6 +73,11 @@ projects navigation and summary clocks; `ThreadProjection` observes the selected
 streams are transient and sequence-scoped. A lost connection rebuilds from durable history rather than
 inventing completion or automatically resending input. Drafts retain exact uncertain command intent.
 
+Opening a new conversation creates only a local composer. Its first explicit send creates the Thread,
+prepares the selected source and uploads staged PDFs. The composer keeps its key across that transition,
+so editor attachments and message handoff stay attached. Creation and uncertain submission retries reuse
+their original keys. Source Host discovery is available before creation and grants no file access.
+
 `ThreadConversation` projects native Agent facts through `ThreadsAPI`. Its child, family, follow-up,
 plan, Goal, permission, question and recovery components keep their original owner and revision.
 Showing a resource or history view does not launch work. A follow-up registration observes its original

@@ -7,13 +7,14 @@ import { ChatTreeDialog } from '../conversation/ChatTreeDialog';
 import { ConversationSurface } from '../conversation/ConversationSurface';
 import { ConversationTimeline } from '../conversation/ConversationTimeline';
 import { deliverThreadInput } from '@/lib/agent-runtime/threadInputDelivery';
+import { sendThreadDraft } from '@/lib/agent-runtime/sendThreadDraft';
 import { AutoReviewBanner } from '@/components/chat/AutoReviewBanner';
 import { EditorContextAttachmentChips } from '@/components/workbench/EditorContextAttachmentChips';
 import { acknowledgeEditorContextAttachments, getEditorContextAttachmentsRevision, listEditorContextAttachments, subscribeEditorContextAttachments } from '@/lib/agent-editor/attachments';
 import { projectEditorContextAttachments } from '@/lib/agent-editor/projection';
 import { useInlineCommentDraftStore } from '@/stores/useInlineCommentDraftStore';
 import { appendInlineComments } from '@/lib/messages/inlineComments';
-import { useThreadStore, threadHostKey, threadIdentityKey } from '@/stores/useThreadStore';
+import { useThreadStore, threadHostKey, threadComposerKey } from '@/stores/useThreadStore';
 import { useThreadDraftStore, EMPTY_THREAD_DRAFT, type ThreadPendingInput, type ThreadMaterialAttachment } from '@/stores/useThreadDraftStore';
 import { ThreadMaterials } from './ThreadMaterials';
 import { ThreadMaterialAttachments } from './ThreadMaterialAttachments';
@@ -187,17 +188,17 @@ const resourceErrorMessages = new Map([
   ['resource-cancelled', 'Skill or resource preparation was cancelled. Try again when ready.'],
 ]);
 
-export function ThreadConversation({ api, identity, onBranchCreated, initialWorkspacePath, preferredModel, onWorkChanged, readOnly = false }: { onWorkChanged?: () => void; preferredModel?: ThreadModel | null; readOnly?: boolean; api: ThreadsAPI; identity: ThreadIdentity; onBranchCreated?: (identity: ThreadIdentity) => void; initialWorkspacePath?: string }) {
+export function ThreadConversation({ api, identity, onBranchCreated, initialWorkspacePath, preferredModel, onWorkChanged, readOnly = false, messageHandoff }: { messageHandoff?: MessageHandoff; onWorkChanged?: () => void; preferredModel?: ThreadModel | null; readOnly?: boolean; api: ThreadsAPI; identity: ThreadIdentity; onBranchCreated?: (identity: ThreadIdentity) => void; initialWorkspacePath?: string }) {
   const { t } = useI18n();
   const host = React.useSyncExternalStore(subscribeRuntimeEndpointChanged, getRuntimeEndpointGeneration, getRuntimeEndpointGeneration);
-  const draftKey = threadIdentityKey(threadHostKey(), identity);
+  const draftKey = threadComposerKey(threadHostKey(), identity);
   const viewScope = React.useMemo(() => ({ api, host, draftKey, readOnly }), [api, host, draftKey, readOnly]);
   const currentViewScope = React.useRef(viewScope);
   currentViewScope.current = viewScope;
-  const [handoff] = React.useState(() => new MessageHandoff());
+  const [handoff] = React.useState(() => messageHandoff ?? new MessageHandoff());
   const reducedMotion = usePrefersReducedMotion();
   React.useLayoutEffect(() => { handoff.select(String(host), draftKey, !readOnly, reducedMotion); }, [handoff, host, draftKey, readOnly, reducedMotion]);
-  React.useLayoutEffect(() => () => handoff.dispose(), [handoff]);
+  React.useLayoutEffect(() => () => { if (!messageHandoff) handoff.dispose(); }, [handoff, messageHandoff]);
   const draft = useThreadDraftStore(state => state.drafts[draftKey] ?? EMPTY_THREAD_DRAFT);
   const setText = React.useCallback((value: React.SetStateAction<string>) => useThreadDraftStore.getState().patch(draftKey, current => ({ text: typeof value === 'function' ? value(current.text) : value })), [draftKey]);
   const setImages = React.useCallback((value: React.SetStateAction<ImageAttachment[]>) => useThreadDraftStore.getState().patch(draftKey, current => ({ images: typeof value === 'function' ? value(current.images) : value })), [draftKey]);
@@ -355,7 +356,7 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
     const action = {}; pendingAction.current = action;
     const generation = identityGeneration.current;
     const current = () => generation === identityGeneration.current && host === getRuntimeEndpointGeneration() && pendingAction.current === action;
-    setPending(true); setError(undefined);
+    setPending(true); setError(undefined); useThreadDraftStore.getState().patch(draftKey, { sendError: undefined });
     try { await work(); if (current()) await projection.current?.refresh(); }
     catch (value) {
       if (!current()) return;
@@ -382,7 +383,7 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
   const addFiles = async (files: File[]) => {
     // DOM events can arrive twice before React publishes the disabled state. An uncertain
     // input keeps its exact retained snapshots, so selecting again cannot retransmit them.
-    if (!files.length || readOnly || fileRead.current || pendingAction.current || pendingInput.current) return;
+    if (!files.length || readOnly || fileRead.current || pendingAction.current || pendingInput.current || useThreadDraftStore.getState().drafts[draftKey]?.firstSend) return;
     const generation = fileReadGeneration.current;
     const controller = new AbortController(); fileRead.current = controller;
     const current = () => !controller.signal.aborted && generation === fileReadGeneration.current
@@ -430,7 +431,7 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
     if (editor.editorImages !== undefined) setImages(editor.editorImages);
     await projection.current?.refresh();
   } });
-  const pending = actionPending || recovery.blocked;
+  const pending = actionPending || recovery.blocked || draft.firstSend?.status === 'sending';
   const loadEarlier = async () => {
     if (!snapshot) return;
     const current = historyView ?? { ...snapshot.historyPage, items: snapshot.history };
@@ -534,7 +535,7 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
       </WorkOverviewSection>
       <WorkOverviewSection title={t('harness.overview.sources')} icon="folder" open={choices.sources ?? false} onOpenChange={open => disclosure(overviewKey, 'sources', open)}>
     {!readOnly && !delegated && <ThreadSourcePicker key={identity.branchId} api={api} identity={identity} initialPath={draft.workspacePath ?? initialWorkspacePath}
-      onUseChatOnly={() => { useThreadDraftStore.getState().patch(draftKey, { workspacePath: undefined, preparedSource: null }); }}
+      onUseChatOnly={() => { useThreadDraftStore.getState().patch(draftKey, { workspacePath: undefined, preparedSource: null, sourceSelection: undefined }); }}
       active={active || pending} launch={snapshot?.launch ?? null} prepared={preparedSource} onPrepared={setPreparedSource} onPreparingChange={setPreparingSource} />}
     {!readOnly && snapshot?.context.checkpoint && <ThreadResources checkpoint={snapshot.context.checkpoint} pending={pending}
       onAddSkill={addSkill}
@@ -626,6 +627,19 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
       }} onCancel={input => act(() => api.cancelInput(input.id, input.revision), true)} />}</div>
     <form className="space-y-2" onSubmit={event => {
       event.preventDefault();
+      if (draft.firstSend || draft.identity && !run && (draft.sourceSelection || draft.pdfs?.length)) {
+        if (pending || !draft.firstSend && sendDisabled) return;
+        const settings = useUIStore.getState();
+        const request = draft.firstSend ?? { key: crypto.randomUUID(), status: 'sending' as const, editorText: text, text: projectedText,
+          images, pdfs: draft.pdfs ?? [], model: { providerId, modelId, thinkingLevel }, workspacePath: draft.workspacePath,
+          sourceSelection: draft.sourceSelection, editorContext, inlineContext,
+          ...(draft.goalArmed && text.trim() ? { goalObjective: text.trim(), ...(settings.sessionGoalDefaultBudgetEnabled ? { goalBudget: settings.sessionGoalDefaultBudget } : {}) } : {}) };
+        handoff.submit(request.key, draftKey, handoff.captureDraft());
+        void sendThreadDraft(api, draftKey, request).then(inputId => {
+          if (inputId && host === getRuntimeEndpointGeneration()) handoff.accepted(request.key, inputId);
+        }, () => { handoff.cancelSubmission(request.key); });
+        return;
+      }
       if (sendDisabled || fileRead.current) return;
       const generation = identityGeneration.current;
       const sourceRect = handoff.captureDraft();
@@ -689,6 +703,8 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
       {snapshot?.launch?.preparation_failure && <p role="alert" className="text-sm text-destructive">{t('chat.run.preparationFailed', { reason: threadSourceFailureMessage(snapshot.launch.preparation_failure) ?? snapshot.launch.preparation_failure })}</p>}
       {draft.pendingInput?.status === 'unknown' && <p role="status" className="text-sm text-muted-foreground">{draft.pendingInput.kind === 'submit' && draft.pendingInput.acceptedRunId ? t('chat.send.goalPending') : t('chat.send.unconfirmed')}</p>}
       {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
+      {draft.firstSend?.error && <p role="alert" className="text-sm text-destructive">{draft.firstSend.error}</p>}
+      {draft.sendError && <p role="alert" className="text-sm text-destructive">{draft.sendError}</p>}
       {modelError && <p role="alert" className="text-sm text-destructive">{modelError}</p>}
       {snapshot?.modelSelection.desired?.status === 'failed' && <p role="alert" className="text-sm text-destructive">{t('chat.model.preparationFailed', { reason: snapshot.modelSelection.desired.failure ?? '' })}</p>}
       {snapshot?.modelSelection.desired && snapshot.modelSelection.desired.id !== snapshot.modelSelection.active?.id && snapshot.modelSelection.desired.status !== 'failed' && <p role="status" className="text-sm text-muted-foreground">{t('chat.model.nextRequest')}</p>}
@@ -704,8 +720,8 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
         onCompact={branch?.head && !active && providerId && modelId ? () => { showOverview('memory'); void compactThrough(branch.head!); } : undefined}
         editorRef={messageInput} value={text} onChange={setText} models={models}
         providerId={providerId} modelId={modelId} thinkingLevel={thinkingLevel} onModelChange={selectModel}
-        modelDisabled={pending || (delegated && !active)} attachmentDisabled={pending || Boolean(draft.pendingInput) || readingFiles}
-        imageDisabled={acceptsImages === false} sendDisabled={sendDisabled} pending={pending} active={active} retrying={Boolean(draft.pendingInput)}
+        modelDisabled={pending || Boolean(draft.firstSend) || (delegated && !active)} attachmentDisabled={pending || Boolean(draft.firstSend || draft.pendingInput) || readingFiles}
+        imageDisabled={acceptsImages === false} sendDisabled={draft.firstSend ? pending : sendDisabled} pending={pending} active={active} retrying={Boolean(draft.firstSend || draft.pendingInput)}
         delivery={inputMode} onDeliveryChange={setInputMode} allowNextRun={!delegated}
         onFiles={files => void addFiles(files)} onAttachImages={() => fileInput.current?.click()} onAttachPdfs={() => pdfInput.current?.click()}
         goalArmed={draft.goalArmed} onGoal={() => {
@@ -728,8 +744,9 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
       </div>}
       <ImageAttachmentStrip images={images} removeLabel={t('chat.fileAttachment.actions.removeImage')}
         onRemove={index => setImages(current => current.filter((_, candidate) => candidate !== index))} />
-      <ThreadMaterialAttachments materials={materials} locked={pending || Boolean(draft.pendingInput)}
+      <ThreadMaterialAttachments materials={materials} locked={pending || Boolean(draft.firstSend || draft.pendingInput)}
         onRemove={snapshotId => { if (!pendingAction.current && !pendingInput.current) setMaterials(current => current.filter(material => material.snapshotId !== snapshotId)); }} />
+      {draft.pdfs?.map(pdf => <span key={pdf.id} className="inline-flex rounded border px-2 py-1 text-sm">{pdf.filename}</span>)}
       {readingFiles && <p role="status">{t('chat.fileAttachment.uploading')}</p>}
         </div>
       </ThreadComposer>

@@ -7,7 +7,7 @@ import { BUILTIN_EDITOR_PROVIDER_IDS, type EditorTab } from '@/lib/workbench/edi
 import { appendThreadDraftText } from '@/lib/agent-runtime/threadNavigation';
 import { buildPdfMaterialCitationMarkdown } from '@/lib/materials/pdfMaterialCitation';
 import { useThreadDraftStore } from '@/stores/useThreadDraftStore';
-import { threadIdentityKey, useThreadStore } from '@/stores/useThreadStore';
+import { threadComposerKey, useThreadStore } from '@/stores/useThreadStore';
 
 /** The original source Run admits local PDF access; navigation paths confer no authority. */
 export function WorkbenchPdfReader({ workspaceId, identity, tab, path, onOpenOriginal }: {
@@ -49,7 +49,7 @@ export function WorkbenchPdfReader({ workspaceId, identity, tab, path, onOpenOri
       },
       addRegion(region) {
         if (!isCurrent()) throw new Error('Application Host changed');
-        const key = threadIdentityKey(host, identity);
+        const key = threadComposerKey(host, identity);
         useThreadDraftStore.getState().patch(key, draft => ({ images: [...draft.images, region.image] }));
         appendThreadDraftText(identity, buildPdfMaterialCitationMarkdown(region.title, region));
       },

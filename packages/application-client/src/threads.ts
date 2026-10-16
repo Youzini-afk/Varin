@@ -59,7 +59,8 @@ export interface ThreadResolvedSource {
   path: string;
 }
 export interface ThreadSourcesAPI {
-  list(identity: ThreadIdentity, signal?: AbortSignal): Promise<ThreadSourceTargets>;
+  /** A draft may discover configured Hosts before a Thread exists; discovery grants no source access. */
+  list(identity: ThreadIdentity | null, signal?: AbortSignal): Promise<ThreadSourceTargets>;
   resolve(identity: ThreadIdentity, request: { resourceOwner: SourceResourceOwner; path: string }, signal?: AbortSignal): Promise<ThreadResolvedSource>;
 }
 export interface ThreadPreparedSource {

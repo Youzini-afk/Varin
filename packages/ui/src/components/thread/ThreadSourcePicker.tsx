@@ -7,6 +7,7 @@ import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { getDocumentRegistry } from '@/lib/documents/session';
 import type { DocumentRegistry } from '@/lib/documents/registry';
+import type { DraftSourceSelection } from '@/stores/useThreadDraftStore';
 
 // A retry keeps the original snapshot and request identity, even if editors keep changing.
 // The registry remains the only mutable text owner; this holds only its opaque snapshot lease.
@@ -31,9 +32,11 @@ function releaseRequest(request: SourceRequest): Promise<void> {
   return request.releasing;
 }
 
-export function ThreadSourcePicker({ api, identity, initialPath, active, launch, prepared, onPrepared, onPreparingChange, onUseChatOnly }: {
+export function ThreadSourcePicker({ api, identity, initialPath, active, launch, prepared, onPrepared, onPreparingChange, onUseChatOnly, draftSelection, onDraftSelection }: {
   api: Pick<ThreadsAPI, 'prepareSource' | 'sources'>;
-  identity: ThreadIdentity;
+  identity: ThreadIdentity | null;
+  draftSelection?: DraftSourceSelection;
+  onDraftSelection?(value: DraftSourceSelection): void;
   initialPath?: string;
   active: boolean;
   launch: ThreadSnapshot['launch'];
@@ -44,12 +47,12 @@ export function ThreadSourcePicker({ api, identity, initialPath, active, launch,
 }) {
   const host = React.useSyncExternalStore(subscribeRuntimeEndpointChanged, getRuntimeEndpointGeneration, getRuntimeEndpointGeneration);
   const [targets, setTargets] = React.useState<ThreadSourceTargets>({ targets: [], unavailable: [] });
-  const [resourceOwner, setResourceOwner] = React.useState<SourceResourceOwner>({ kind: 'local' });
+  const [resourceOwner, setResourceOwner] = React.useState<SourceResourceOwner>(draftSelection?.resourceOwner ?? { kind: 'local' });
   const [directoryError, setDirectoryError] = React.useState<string>();
-  const [path, setPath] = React.useState(initialPath ?? '');
-  const [mode, setMode] = React.useState<'fixed_branch' | 'materialized' | 'live_root'>('fixed_branch');
-  const [contentMode, setContentMode] = React.useState<'saved-files' | 'surface-drafts'>('saved-files');
-  const [scopes, setScopes] = React.useState('');
+  const [path, setPath] = React.useState(draftSelection?.path ?? initialPath ?? '');
+  const [mode, setMode] = React.useState<'fixed_branch' | 'materialized' | 'live_root'>(draftSelection?.mode ?? (identity ? 'fixed_branch' : 'live_root'));
+  const [contentMode, setContentMode] = React.useState<'saved-files' | 'surface-drafts'>(draftSelection?.contentMode ?? 'saved-files');
+  const [scopes, setScopes] = React.useState(draftSelection?.captureScopes.join('\n') ?? '');
   const [preparing, setPreparing] = React.useState(false);
   const [error, setError] = React.useState<string>();
   const generation = React.useRef(0);
@@ -63,18 +66,22 @@ export function ThreadSourcePicker({ api, identity, initialPath, active, launch,
     return previous ? releaseRequest(previous) : Promise.resolve();
   }, []);
   React.useEffect(() => {
-    setPreparing(false); setError(undefined); setPath(callbacks.current.initialPath ?? '');
+    setPreparing(false); setError(undefined); if (identity) setPath(callbacks.current.initialPath ?? '');
     callbacks.current.onPreparingChange(false);
     return () => { void retire().catch(() => { /* The original Host may already be disconnected. */ }); };
-  }, [api, host, identity.threadId, identity.branchId, retire]);
+  }, [api, host, identity, retire]);
   React.useEffect(() => {
     const controller = new AbortController();
-    setTargets({ targets: [], unavailable: [] }); setDirectoryError(undefined); setResourceOwner({ kind: 'local' });
-    void api.sources.list({ runtime: 'agent', threadId: identity.threadId, branchId: identity.branchId }, controller.signal).then(value => {
+    setTargets({ targets: [], unavailable: [] }); setDirectoryError(undefined); if (identity) setResourceOwner({ kind: 'local' });
+    void api.sources.list(identity, controller.signal).then(value => {
       if (!controller.signal.aborted) setTargets(value);
     }, error => { if (!controller.signal.aborted) setDirectoryError(error instanceof Error ? error.message : 'Source Hosts could not be loaded'); });
     return () => controller.abort();
-  }, [api, host, identity.threadId, identity.branchId]);
+  }, [api, host, identity]);
+  React.useEffect(() => {
+    if (!identity) onDraftSelection?.({ path, resourceOwner, mode, contentMode,
+      captureScopes: mode === 'live_root' ? [] : scopes.split(/\r?\n/).map(value => value.trim()).filter(Boolean) });
+  }, [identity, path, resourceOwner, mode, contentMode, scopes, onDraftSelection]);
   React.useEffect(() => registerRuntimeEndpointSwitchBlocker(async () => {
     // Release on the original Host before the endpoint changes, including a late capture reply.
     const releasing = retire();
@@ -90,7 +97,7 @@ export function ThreadSourcePicker({ api, identity, initialPath, active, launch,
     });
   };
   const prepare = async () => {
-    if (active || request.current?.controller) return;
+    if (!identity || active || request.current?.controller) return;
     const current = generation.current;
     const pending: SourceRequest = request.current ?? {
       key: crypto.randomUUID(), consumer: { kind: 'thread', threadId: identity.threadId, branchId: identity.branchId },
@@ -193,8 +200,8 @@ export function ThreadSourcePicker({ api, identity, initialPath, active, launch,
       </>}
       {mode === 'materialized' && <p>File edits start in a separate working copy. Commands can have external effects; this is not a security sandbox. Changes are not copied back automatically.</p>}
       {active && <p>Workspace selection applies to a new run. Wait for the current run to finish before preparing another source.</p>}
-      <Button type="button" variant="outline" size="sm" disabled={active || preparing || !path.trim() || !targets.targets.some(target => targetKey(target.resourceOwner) === targetKey(resourceOwner))} onClick={() => void prepare()}>{preparing ? 'Preparing workspace' : 'Prepare workspace'}</Button>
-      {!source && onUseChatOnly && <Button type="button" variant="ghost" size="sm" disabled={active || preparing} onClick={() => { invalidate(); onUseChatOnly(); }}>Chat only</Button>}
+      {identity && <Button type="button" variant="outline" size="sm" disabled={active || preparing || !path.trim() || !targets.targets.some(target => targetKey(target.resourceOwner) === targetKey(resourceOwner))} onClick={() => void prepare()}>{preparing ? 'Preparing workspace' : 'Prepare workspace'}</Button>}
+      {!source && onUseChatOnly && <Button type="button" variant="ghost" size="sm" disabled={active || preparing} onClick={() => { invalidate(); setPath(''); onUseChatOnly(); }}>Chat only</Button>}
       {request.current && <Button type="button" variant="ghost" size="sm" onClick={invalidate}>{preparing ? 'Cancel preparation' : 'Discard captured request'}</Button>}
       {error && contentMode === 'surface-drafts' && <Button type="button" variant="ghost" size="sm" disabled={active || preparing} onClick={() => { invalidate(); void prepare(); }}>Capture drafts again</Button>}
       {prepared && <div aria-label="Prepared workspace">

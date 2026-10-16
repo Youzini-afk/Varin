@@ -7,7 +7,7 @@
 
 import { useCallback, useState } from 'react';
 import { usePreferencesStore } from '@/stores/usePreferencesStore';
-import { useThreadStore, threadIdentityKey } from '@/stores/useThreadStore';
+import { useThreadStore, selectedComposerKey } from '@/stores/useThreadStore';
 import { useThreadDraftStore } from '@/stores/useThreadDraftStore';
 import { useServerTTS } from './useServerTTS';
 import { useSayTTS } from './useSayTTS';
@@ -59,9 +59,8 @@ export function useMessageTTS(): UseMessageTTSReturn {
     const openaiCompatibleTtsModel = usePreferencesStore((state) => state.openaiCompatibleTtsModel);
     const showMessageTTSButtons = usePreferencesStore((state) => state.showMessageTTSButtons);
     const ttsInputMode = usePreferencesStore((state) => state.ttsInputMode);
-    const thread = useThreadStore(state => state.selectedIdentity);
-    const host = useThreadStore(state => state.hostKey);
-    const currentModel = useThreadDraftStore(state => thread ? state.drafts[threadIdentityKey(host, thread)]?.model : undefined);
+    const composerKey = useThreadStore(selectedComposerKey);
+    const currentModel = useThreadDraftStore(state => composerKey ? state.drafts[composerKey]?.model : undefined);
 
     const isServerProvider = voiceProvider === 'openai' || voiceProvider === 'openai-compatible';
     const shouldCheckOpenAIAvailability = showMessageTTSButtons && isServerProvider;

@@ -21,7 +21,7 @@ import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
 import { cn } from '@/lib/utils';
 import { useI18n } from '@/lib/i18n';
 import { useUIStore, type ContextPanelMode, type PendingDiffScope } from '@/stores/useUIStore';
-import { useThreadStore, threadIdentityKey } from '@/stores/useThreadStore';
+import { useThreadStore, threadComposerKey } from '@/stores/useThreadStore';
 import type { ThreadIdentity, ThreadSummary } from '@varin/application-client';
 import { addThreadDraftImage } from '@/lib/agent-runtime/draftAttachments';
 import { appendThreadDraftText } from '@/lib/agent-runtime/threadNavigation';
@@ -1222,7 +1222,7 @@ export const ContextPanel: React.FC = () => {
   const currentSessionId = useThreadStore(state => state.selectedIdentity);
   const gitSessionDirectory = effectiveDirectory || null;
   const gitDirectoryScopeKey = React.useMemo(() => {
-    return contextPanelGitDirectoryScopeKey(currentSessionId ? threadIdentityKey(useThreadStore.getState().hostKey, currentSessionId) : null, gitSessionDirectory);
+    return contextPanelGitDirectoryScopeKey(currentSessionId ? threadComposerKey(useThreadStore.getState().hostKey, currentSessionId) : null, gitSessionDirectory);
   }, [currentSessionId, gitSessionDirectory]);
   const selectedGitDirectory = useContextPanelGitDirectoryStore((state) => (
     gitDirectoryScopeKey ? state.directories[gitDirectoryScopeKey] ?? null : null

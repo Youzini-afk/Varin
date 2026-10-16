@@ -1,5 +1,6 @@
 import type { ThreadSummary } from '@varin/protocol';
 import { create } from 'zustand';
+import { useThreadDraftStore } from './useThreadDraftStore';
 import {
   getRuntimeApiBaseUrl, getRuntimeKey,
   subscribeRuntimeEndpointWillChange, subscribeRuntimeEndpointChanged,
@@ -9,21 +10,26 @@ import {
 /** Endpoint and user-selected Host identity are both needed: labels may be reused. */
 export const threadHostKey = (): string => JSON.stringify([getRuntimeApiBaseUrl(), getRuntimeKey()]);
 export const threadIdentityKey = (host: string, identity: ThreadIdentity): string => JSON.stringify([host, identity.threadId, identity.branchId]);
+const composerKeys = new Map<string, string>();
+/** A local composer keeps its attachment and animation identity when its first send creates a Thread. */
+export const threadComposerKey = (host: string, identity: ThreadIdentity): string => composerKeys.get(threadIdentityKey(host, identity)) ?? threadIdentityKey(host, identity);
+export const selectedComposerKey = (state: Pick<ThreadNavigationState, 'hostKey' | 'selectedIdentity' | 'selectedDraftKey'>): string | null =>
+  state.selectedIdentity ? threadComposerKey(state.hostKey, state.selectedIdentity) : state.selectedDraftKey;
 
 type ThreadMetadata = Pick<ThreadSummary, 'title' | 'pinned' | 'archived'>;
 interface ThreadNavigationState {
   hostKey: string;
   selectedIdentity: ThreadIdentity | null;
+  selectedDraftKey: string | null;
   threads: ThreadSummary[];
   catalogLoaded: boolean;
   catalogLoading: boolean;
   catalogError: string | null;
-  creating: boolean;
-  creationError: string | null;
   loadCatalog(): Promise<void>;
   resolveThread(target: { threadId: string; branchId?: string }): Promise<{ identity: ThreadIdentity; botId: string | null }>;
   selectThread(identity: { threadId: string; branchId?: string }): Promise<ThreadIdentity>;
-  createThread(options?: { workspacePath?: string }): Promise<ThreadIdentity>;
+  openDraft(options?: { workspacePath?: string }): string;
+  materializeDraft(draftKey: string): Promise<ThreadIdentity>;
   updateThread(threadId: string, patch: Partial<ThreadMetadata>): Promise<void>;
   deleteThread(threadId: string): Promise<void>;
   markRead(threadId: string, throughCursor: number): Promise<void>;
@@ -36,10 +42,10 @@ let navigation = 0;
 const deleted = new Set<string>();
 let catalogPending: Promise<void> | undefined;
 let catalogAgain = false;
-let createPending: Promise<ThreadIdentity> | undefined;
 const selections = new Map<string, ThreadIdentity>();
+const draftSelections = new Map<string, string>();
+const materializations = new Map<string, Promise<ThreadIdentity>>();
 const selectedBranches = new Map<string, string>();
-const creationKeys = new Map<string, string>();
 const mutationKeys = new Map<string, string>();
 const requireAPI = () => { if (!boundAPI) throw new Error('Thread catalog is unavailable'); return boundAPI; };
 const errorMessage = (error: unknown) => error instanceof Error ? error.message : String(error);
@@ -67,8 +73,8 @@ function mergeSummary(previous: ThreadSummary | undefined, incoming: ThreadSumma
 }
 
 export const useThreadStore = create<ThreadNavigationState>((set, get) => ({
-  hostKey: threadHostKey(), selectedIdentity: null, threads: [], catalogLoaded: false,
-  catalogLoading: false, catalogError: null, creating: false, creationError: null,
+  hostKey: threadHostKey(), selectedIdentity: null, selectedDraftKey: null, threads: [], catalogLoaded: false,
+  catalogLoading: false, catalogError: null,
   async loadCatalog() {
     if (catalogPending) { catalogAgain = true; return catalogPending; }
     const api = requireAPI(); const owner = binding; const request = ++catalogRequest;
@@ -111,31 +117,46 @@ export const useThreadStore = create<ThreadNavigationState>((set, get) => ({
     // Catalog identity is authoritative; snapshot execution remains owned by ThreadProjection.
     const branchId = identity.branchId;
     selectedBranches.set(JSON.stringify([get().hostKey, target.threadId]), branchId);
-    selections.set(get().hostKey, identity); set({ selectedIdentity: identity });
+    selections.set(get().hostKey, identity); draftSelections.delete(get().hostKey); set({ selectedIdentity: identity, selectedDraftKey: null });
     return identity;
   },
-  async createThread(options) {
-    if (createPending) return createPending;
-    const api = requireAPI(); const owner = binding; const host = get().hostKey; const next = ++navigation;
-    const key = creationKeys.get(host) ?? crypto.randomUUID(); creationKeys.set(host, key);
-    set({ creating: true, creationError: null });
+  openDraft(options) {
+    const host = get().hostKey;
+    navigation += 1;
+    const key = JSON.stringify([host, 'draft', crypto.randomUUID()]);
+    useThreadDraftStore.getState().patch(key, { workspacePath: options?.workspacePath });
+    selections.delete(host); draftSelections.set(host, key);
+    set({ selectedIdentity: null, selectedDraftKey: key });
+    return key;
+  },
+  async materializeDraft(draftKey) {
+    const api = requireAPI(); const owner = binding; const host = get().hostKey;
+    const draft = useThreadDraftStore.getState().drafts[draftKey];
+    if (!draft || JSON.parse(draftKey)[0] !== host) throw new Error('Conversation draft is unavailable on this Host');
+    if (draft.identity) {
+      if (get().selectedDraftKey === draftKey) {
+        selections.set(host, draft.identity); draftSelections.delete(host);
+        set({ selectedIdentity: draft.identity, selectedDraftKey: null });
+      }
+      return draft.identity;
+    }
+    const running = materializations.get(draftKey);
+    if (running) return running;
     const pending = (async () => {
-      try {
-        const identity = await api.create(key);
-        if (owner !== binding) throw new Error('Application Host changed during conversation creation');
-        creationKeys.delete(host);
-        if (options?.workspacePath) {
-          const { useThreadDraftStore } = await import('./useThreadDraftStore');
-          useThreadDraftStore.getState().patch(threadIdentityKey(host, identity), { workspacePath: options.workspacePath });
-        }
-        await get().loadCatalog().catch(() => {});
-        if (owner !== binding) return identity;
-        if (next === navigation) { selections.set(host, identity); set({ selectedIdentity: identity }); }
-        return identity;
-      } catch (error) { if (owner === binding) set({ creationError: errorMessage(error) }); throw error; }
-      finally { if (owner === binding) { createPending = undefined; set({ creating: false }); } }
+      // The local draft ID is also the stable creation key after a lost response.
+      const identity = await api.create(draftKey);
+      composerKeys.set(threadIdentityKey(host, identity), draftKey);
+      useThreadDraftStore.getState().patch(draftKey, { identity });
+      if (owner !== binding) throw new Error('Application Host changed during conversation creation');
+      await get().loadCatalog().catch(() => {});
+      if (owner === binding && get().selectedDraftKey === draftKey) {
+        selections.set(host, identity); draftSelections.delete(host);
+        set({ selectedIdentity: identity, selectedDraftKey: null });
+      }
+      return identity;
     })();
-    createPending = pending; return pending;
+    materializations.set(draftKey, pending);
+    try { return await pending; } finally { if (materializations.get(draftKey) === pending) materializations.delete(draftKey); }
   },
   async updateThread(threadId, patch) {
     const api = requireAPI(); const owner = binding;
@@ -175,11 +196,11 @@ export function bindThreadStore(api: ThreadsAPI): () => void {
   let abort = new AbortController();
   let retry: ReturnType<typeof setTimeout> | undefined;
   const reset = () => {
-    deleted.clear(); binding += 1; navigation += 1; catalogRequest += 1; catalogPending = undefined; catalogAgain = false; createPending = undefined;
+    deleted.clear(); binding += 1; navigation += 1; catalogRequest += 1; catalogPending = undefined; catalogAgain = false;
     abort.abort(); if (retry) clearTimeout(retry); abort = new AbortController();
     boundAPI = api;
     const hostKey = threadHostKey();
-    useThreadStore.setState({ hostKey, selectedIdentity: null, threads: [], catalogLoaded: false, catalogLoading: false, catalogError: null, creating: false, creationError: null });
+    useThreadStore.setState({ hostKey, selectedIdentity: null, selectedDraftKey: draftSelections.get(hostKey) ?? null, threads: [], catalogLoaded: false, catalogLoading: false, catalogError: null });
   };
   const start = () => {
     reset(); const owner = binding; let cursor = 0; let dirty = false; let refreshing = false;
@@ -194,7 +215,7 @@ export function bindThreadStore(api: ThreadsAPI): () => void {
         await refresh();
         if (stopped || owner !== binding) return;
         const restored = selections.get(threadHostKey());
-        if (!useThreadStore.getState().selectedIdentity && restored) await useThreadStore.getState().selectThread(restored).catch(() => {});
+        if (!useThreadStore.getState().selectedIdentity && !useThreadStore.getState().selectedDraftKey && restored) await useThreadStore.getState().selectThread(restored).catch(() => {});
         await api.observe(cursor, event => {
           if ('cursor' in event && !('stream' in event) && event.cursor > cursor && owner === binding) {
             cursor = event.cursor; void refresh().catch(() => {});
@@ -208,5 +229,5 @@ export function bindThreadStore(api: ThreadsAPI): () => void {
   const willChange = subscribeRuntimeEndpointWillChange(reset);
   const changed = subscribeRuntimeEndpointChanged(start);
   start();
-  return () => { stopped = true; willChange(); changed(); abort.abort(); if (retry) clearTimeout(retry); binding += 1; boundAPI = undefined; catalogPending = undefined; catalogAgain = false; createPending = undefined; };
+  return () => { stopped = true; willChange(); changed(); abort.abort(); if (retry) clearTimeout(retry); binding += 1; boundAPI = undefined; catalogPending = undefined; catalogAgain = false; };
 }

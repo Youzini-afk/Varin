@@ -1,4 +1,4 @@
-import { getRuntimeEndpointGeneration, type ThreadIdentity } from '@varin/application-client';
+import { getRuntimeEndpointGeneration } from '@varin/application-client';
 import type { ProjectEntry } from '@varin/application-client';
 import { generateBranchName } from '@/lib/git/branchNameGenerator';
 import {
@@ -18,12 +18,12 @@ import { startThreadFromNavigation } from './threadNavigation';
 export interface WorktreeThreadResult {
   branch: string;
   path: string;
-  identity: ThreadIdentity;
+  draftKey: string;
 }
 
 export interface WorktreeThreadRuntime {
   checkIsGitRepository(directory: string): Promise<boolean>;
-  createThread(target: { directory: string; projectId: string }): Promise<ThreadIdentity>;
+  openDraft(target: { directory: string; projectId: string }): Promise<string>;
   createWorktree(project: VarinProjectRef, preferredName: string): Promise<WorktreeMetadata>;
   generateBranchName(): string;
   getActiveProject(): ProjectEntry | null;
@@ -33,7 +33,7 @@ export interface WorktreeThreadRuntime {
 
 const defaultRuntime: WorktreeThreadRuntime = {
   checkIsGitRepository: checkVarinGitRepository,
-  createThread: (target) => startThreadFromNavigation({ directory: target.directory }),
+  openDraft: (target) => startThreadFromNavigation({ directory: target.directory }),
   createWorktree: async (project, preferredName) => {
     const host = getRuntimeEndpointGeneration();
     const setupCommands = await getWorktreeSetupCommands(project);
@@ -72,11 +72,10 @@ export const createWorktreeThreadWithRuntime = async (
   if (waitForBootstrap) await runtime.waitForBootstrap(worktree.path);
   assertHost();
   try {
-    const identity = await runtime.createThread({ directory: worktree.path, projectId: project.id });
-    return { branch: worktree.branch || preferredName, path: worktree.path, identity };
+    const draftKey = await runtime.openDraft({ directory: worktree.path, projectId: project.id });
+    return { branch: worktree.branch || preferredName, path: worktree.path, draftKey };
   } catch (error) {
-    // Creation may have committed despite a lost reply. Keep the actual workspace and
-    // let the user retry the original Thread creation; never delete its source blindly.
+    // The worktree exists independently of its local conversation draft.
     throw new Error(`Could not open a conversation. Worktree retained at ${worktree.path}: ${errorMessage(error)}`, { cause: error });
   }
 };

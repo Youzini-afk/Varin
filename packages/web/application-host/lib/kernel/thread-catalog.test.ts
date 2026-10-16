@@ -40,10 +40,23 @@ function fixture() {
     return Response.json(output ?? {}, { status });
   };
   vi.stubGlobal('fetch', (url: string, init: RequestInit) => request(new URL(url, 'http://fixture.invalid').pathname, JSON.parse(String(init.body))));
-  return { api: createThreadsHttpAPI(), requests, request };
+  return { api: createThreadsHttpAPI(), requests, request, adapter };
 }
 afterEach(() => vi.unstubAllGlobals());
 const target = { runtime: 'agent' as const, threadId: 'original-thread' };
+
+it('lets an authenticated draft discover source Hosts without creating or granting a Thread', async () => {
+  const f = fixture();
+  const result = { targets: [{ resourceOwner: { kind: 'local' as const }, label: 'This Host', capabilities: [] }], unavailable: [] };
+  const list = vi.fn(async () => result); const resolve = vi.fn();
+  f.adapter.bindSourceDirectory({ list, resolve });
+  await expect(f.api.sources.list(null)).resolves.toEqual(result);
+  expect(list).toHaveBeenCalledOnce(); expect(resolve).not.toHaveBeenCalled(); expect(f.requests).not.toHaveBeenCalled();
+  expect((await f.request('/api/threads/source/list', {}, false)).status).toBe(401);
+  expect((await f.request('/api/threads/source/list', { runtime: 'agent' })).status).toBe(400);
+  expect((await f.request('/api/threads/source/resolve', { resourceOwner: { kind: 'local' }, path: '/repo' })).status).toBe(400);
+  expect(resolve).not.toHaveBeenCalled(); expect(list).toHaveBeenCalledOnce();
+});
 
 it('uses the native product query and forwards original metadata/read command identities unchanged', async () => {
   const f = fixture();

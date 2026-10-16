@@ -10,7 +10,7 @@ import {
 } from '@/components/ui/dialog';
 import { useI18n } from '@/lib/i18n';
 import { useModelCatalogStore } from '@/stores/useModelCatalogStore';
-import { useThreadStore, threadIdentityKey } from '@/stores/useThreadStore';
+import { useThreadStore, selectedComposerKey } from '@/stores/useThreadStore';
 import { useThreadDraftStore } from '@/stores/useThreadDraftStore';
 
 type TodoSendTarget = 'session' | 'worktree';
@@ -57,9 +57,8 @@ export function TodoSendDialog({
   target,
 }: TodoSendDialogProps) {
   const { t } = useI18n();
-  const identity = useThreadStore(state => state.selectedIdentity);
-  const host = useThreadStore(state => state.hostKey);
-  const currentModel = useThreadDraftStore(state => identity ? state.drafts[threadIdentityKey(host, identity)]?.model : undefined);
+  const composerKey = useThreadStore(selectedComposerKey);
+  const currentModel = useThreadDraftStore(state => composerKey ? state.drafts[composerKey]?.model : undefined);
   const providers = useModelCatalogStore(state => state.channels);
   const loading = useModelCatalogStore(state => state.loading);
   const error = useModelCatalogStore(state => state.error);

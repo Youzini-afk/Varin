@@ -15,7 +15,7 @@ import { registerWorkbenchCommand } from '@/lib/workbench/editors/commands';
 import { activeEditorTab } from '@/lib/workbench/editors/groups';
 import { peekEditorWorkbench, subscribeEditorWorkbench } from '@/lib/workbench/editors/session';
 import { textEditorSummaryFromViewState } from '@/lib/workbench/editors/view-state-core';
-import { useThreadStore, threadIdentityKey } from '@/stores/useThreadStore';
+import { useThreadStore, selectedComposerKey } from '@/stores/useThreadStore';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { revealResourceInEditor } from '@/lib/agent-editor/navigation';
 import { languageIdFromResourceId } from '@/lib/language-services/language-id';
@@ -35,7 +35,7 @@ export const RunDebugCoordinator: React.FC = () => {
   const apis = useRuntimeAPIs();
   const workspaceId = useWorkbenchWorkspaceId();
   const directory = useDirectoryStore((state) => state.currentDirectory);
-  const sessionId = useThreadStore(state => state.selectedIdentity ? threadIdentityKey(state.hostKey, state.selectedIdentity) : null);
+  const sessionId = useThreadStore(state => selectedComposerKey(state));
   const workbench = React.useSyncExternalStore(
     subscribeEditorWorkbench,
     () => (workspaceId ? peekEditorWorkbench(workspaceId) : undefined),

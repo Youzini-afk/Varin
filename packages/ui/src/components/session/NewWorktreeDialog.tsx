@@ -817,9 +817,11 @@ export function NewWorktreeDialog({
             ? `#${linkedPrState.number} ${linkedPrState.title}`.trim()
             : t('session.newWorktree.newSessionTitle');
 
-        createdThread = await startThreadFromNavigation({ directory: metadata.path });
-        await useThreadStore.getState().updateThread(createdThread.threadId, { title: sessionTitle });
-        onWorktreeCreated?.(metadata.path, { thread: createdThread });
+        const draftKey = await startThreadFromNavigation({ directory: metadata.path });
+        if (linkedIssue || linkedPrState) {
+          createdThread = await useThreadStore.getState().materializeDraft(draftKey);
+          await useThreadStore.getState().updateThread(createdThread.threadId, { title: sessionTitle });
+        }
         onOpenChange(false);
         setIsCreating(false);
       } else {
@@ -846,6 +848,7 @@ export function NewWorktreeDialog({
       });
 
       if (createdThread) {
+        onWorktreeCreated?.(metadata.path, { thread: createdThread });
         void sendLinkedContextMessage({
           identity: createdThread,
           directory: metadata.path,

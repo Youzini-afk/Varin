@@ -1,6 +1,6 @@
 import React from 'react';
 import { usePreferencesStore } from '@/stores/usePreferencesStore';
-import { useThreadStore, threadIdentityKey } from '@/stores/useThreadStore';
+import { useThreadStore, selectedComposerKey } from '@/stores/useThreadStore';
 import { useFireworksCelebration } from '@/contexts/FireworksContext';
 import type { GitIdentityProfile, CommitFileEntry, GitStatus } from '@varin/application-client';
 import { useGitIdentitiesStore } from '@/stores/useGitIdentitiesStore';
@@ -224,7 +224,7 @@ export const GitView: React.FC<GitViewProps> = ({
   const currentDirectory = directoryOverride ?? effectiveDirectory;
   const [worktreeBootstrapStatus, setWorktreeBootstrapStatus] = React.useState<'pending' | 'ready' | 'failed' | null>(null);
   const [isWaitingForGitRefreshAfterBootstrap, setIsWaitingForGitRefreshAfterBootstrap] = React.useState(false);
-  const currentSessionId = useThreadStore(state => state.selectedIdentity ? threadIdentityKey(state.hostKey, state.selectedIdentity) : null);
+  const currentSessionId = useThreadStore(state => selectedComposerKey(state));
 
   const { profiles, globalIdentity, defaultGitIdentityId, loadProfiles, loadGlobalIdentity, loadDefaultGitIdentityId } =
     useGitIdentitiesStore(useShallow((s) => ({

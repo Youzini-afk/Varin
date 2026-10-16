@@ -83,8 +83,8 @@ export class ThreadAdapter {
     await this.requireIdentity(identity, signal);
     return this.runtime.threadUsage(identity.threadId, identity.branchId, signal);
   }
-  async listSourceTargets(identity: ThreadIdentity, signal?: AbortSignal) {
-    await this.requireIdentity(identity);
+  async listSourceTargets(identity: ThreadIdentity | null, signal?: AbortSignal) {
+    if (identity) await this.requireIdentity(identity, signal);
     if (!this.sourceDirectory) throw new Error('Source directory is unavailable');
     return this.sourceDirectory.list(signal);
   }

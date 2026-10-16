@@ -1,6 +1,6 @@
 import { createModelConnectionsHttpAPI, getRuntimeEndpointGeneration, type ThreadIdentity, type ThreadModel, type ThreadSubmit } from '@varin/application-client';
 import { getRegisteredRuntimeAPIs } from '@/lib/runtime-api/registry';
-import { threadIdentityKey, useThreadStore } from '@/stores/useThreadStore';
+import { threadComposerKey, useThreadStore } from '@/stores/useThreadStore';
 import { deliverThreadInput } from './threadInputDelivery';
 import { useThreadDraftStore } from '@/stores/useThreadDraftStore';
 
@@ -9,9 +9,10 @@ export async function submitThreadPrompt(identity: ThreadIdentity, text: string,
   const api = getRegisteredRuntimeAPIs()?.threads;
   if (!api) throw new Error('Thread execution is unavailable');
   const owner = getRuntimeEndpointGeneration();
-  const key = threadIdentityKey(useThreadStore.getState().hostKey, identity);
+  const key = threadComposerKey(useThreadStore.getState().hostKey, identity);
   const draft = useThreadDraftStore.getState();
   const previous = draft.drafts[key];
+  if (previous?.firstSend) throw new Error('Resolve the first message before sending another request');
   let selectedModel = model ?? previous?.model;
   if (!selectedModel) {
     const settings = await createModelConnectionsHttpAPI(owner).readSettings(directory);

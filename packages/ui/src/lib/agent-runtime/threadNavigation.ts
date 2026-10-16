@@ -1,5 +1,5 @@
 import { getRuntimeEndpointGeneration, type ThreadIdentity } from '@varin/application-client';
-import { useThreadStore, threadIdentityKey } from '@/stores/useThreadStore';
+import { useThreadStore, threadComposerKey } from '@/stores/useThreadStore';
 import { useThreadDraftStore } from '@/stores/useThreadDraftStore';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { useUIStore } from '@/stores/useUIStore';
@@ -39,17 +39,21 @@ export async function openThreadFromNavigation(target: { threadId: string; branc
   useUIStore.getState().closeMainSurfaces();
   return identity;
 }
-export async function startThreadFromNavigation(target: { directory?: string | null } = {}): Promise<ThreadIdentity> {
+export async function startThreadFromNavigation(target: { directory?: string | null } = {}): Promise<string> {
   const host = getRuntimeEndpointGeneration(); const request = ++navigation;
   const current = () => { if (host !== getRuntimeEndpointGeneration() || request !== navigation) throw new Error('Conversation navigation was superseded'); };
   await selectConversationShell(false, current);
   current();
-  const identity = await useThreadStore.getState().createThread({ workspacePath: target.directory ?? useDirectoryStore.getState().currentDirectory });
-  if (host !== getRuntimeEndpointGeneration() || request !== navigation) throw new Error('Application Host changed during conversation creation');
+  const draftKey = useThreadStore.getState().openDraft({ workspacePath: target.directory ?? useDirectoryStore.getState().currentDirectory });
   if (target.directory) useDirectoryStore.getState().setDirectory(target.directory);
   useUIStore.getState().setActiveMainTab('chat');
   useUIStore.getState().closeMainSurfaces();
-  return identity;
+  return draftKey;
+}
+/** Explicit submitters need a real Thread before admitting work. Navigation alone opens a draft. */
+export async function createThreadForSubmission(target: { directory?: string | null } = {}): Promise<ThreadIdentity> {
+  const draftKey = await startThreadFromNavigation(target);
+  return useThreadStore.getState().materializeDraft(draftKey);
 }
 export async function switchRelativeThread(offset: number): Promise<void> {
   const { threads, selectedIdentity } = useThreadStore.getState();
@@ -60,7 +64,7 @@ export async function switchRelativeThread(offset: number): Promise<void> {
   const target = visible[((index + Math.trunc(offset)) % visible.length + visible.length) % visible.length];
   await openThreadFromNavigation({ threadId: target.thread_id });
 }
-export function appendThreadDraftText(identity: ThreadIdentity, text: string): void {
-  const key = threadIdentityKey(useThreadStore.getState().hostKey, identity);
+export function appendThreadDraftText(identity: ThreadIdentity | string, text: string): void {
+  const key = typeof identity === 'string' ? identity : threadComposerKey(useThreadStore.getState().hostKey, identity);
   useThreadDraftStore.getState().patch(key, draft => ({ text: [draft.text.trimEnd(), text].filter(Boolean).join('\n\n') }));
 }

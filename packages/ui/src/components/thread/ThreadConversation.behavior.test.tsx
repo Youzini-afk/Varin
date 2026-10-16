@@ -14,7 +14,7 @@ import type { ChildTask, DelegatedExecution, StoredMedia, McpInteractionView, Fe
 import { ThreadConversation } from './ThreadConversation';
 import { dict as zhCN } from '@/lib/i18n/messages/zh-CN';
 import { useThreadDraftStore } from '@/stores/useThreadDraftStore';
-import { bindThreadStore, threadHostKey, threadIdentityKey, useThreadStore } from '@/stores/useThreadStore';
+import { bindThreadStore, threadHostKey, threadComposerKey, useThreadStore } from '@/stores/useThreadStore';
 import { ChatView } from '@/components/views/ChatView';
 import { AgentWorkspaceShell } from '@/workbenches/agent/AgentWorkspaceShell';
 import { useUIStore } from '@/stores/useUIStore';
@@ -211,7 +211,7 @@ it('waits for the original snapshot before choosing submit or enqueue for a rest
   const f = fixture(true);
   let finish!: (snapshot: ThreadSnapshot) => void;
   f.api.snapshot = vi.fn().mockImplementationOnce(() => new Promise(resolve => { finish = resolve; })).mockImplementation(async () => structuredClone(f.view));
-  const key = threadIdentityKey(threadHostKey(), identity);
+  const key = threadComposerKey(threadHostKey(), identity);
   useThreadDraftStore.getState().patch(key, { text: 'Restored draft', inputMode: 'boundary', model: { providerId: 'fixture-provider', modelId: 'fixture-model' } });
   await act(async () => root.render(<ThreadConversation api={f.api} identity={identity} />));
   expect(button('Send').disabled).toBe(true);
@@ -226,7 +226,7 @@ it('waits for the original snapshot before choosing submit or enqueue for a rest
 
 it('sends a new conversation from its captured project workspace, independent of later navigation', async () => {
   const f = fixture();
-  const key = threadIdentityKey(threadHostKey(), identity);
+  const key = threadComposerKey(threadHostKey(), identity);
   useThreadDraftStore.getState().patch(key, { workspacePath: '/chosen-project', text: 'Read the project', model: { providerId: 'fixture-provider', modelId: 'fixture-model' } });
   const prepared = { path: '/chosen-project', source: { resourceOwner: { kind: 'local' as const }, workspaceId: 'chosen', executionWorkspaceId: 'chosen', mode: 'live_root' as const,
     liveRoot: { hostId: 'host-a', canonicalRoot: '/chosen-project', rootId: 'root-a' }, tools: ['file_read' as const] } };
@@ -242,7 +242,7 @@ it('sends a new conversation from its captured project workspace, independent of
 
 it('an explicitly armed goal retains its accepted Run and budget when Goal registration needs retry', async () => {
   const f = fixture();
-  const key = threadIdentityKey(threadHostKey(), identity);
+  const key = threadComposerKey(threadHostKey(), identity);
   useUIStore.setState({ sessionGoalDefaultBudgetEnabled: true, sessionGoalDefaultBudget: 200_000 });
   useThreadDraftStore.getState().patch(key, { text: 'Complete the project', goalArmed: true, model: { providerId: 'fixture-provider', modelId: 'fixture-model' } });
   f.api.goals.start = vi.fn().mockRejectedValueOnce(new Error('Goal receipt disconnected')).mockResolvedValue({});
@@ -529,14 +529,28 @@ it.each(['any', 'all'] as const)('registers %s conditions as one retained intent
 });
 
 
-it('ordinary Agent workspace creates a native Thread directly and opens its canonical branch', async () => {
+it('opens a local draft and creates its canonical Thread only when the first message is sent', async () => {
   const f = fixture(); const create = vi.fn(f.api.create); f.api.create = create; runtimeState.api = f.api;
+  vi.mocked(f.api.materials.upload).mockResolvedValue(uploadedPdf());
+  f.api.prepareSource = vi.fn().mockResolvedValue({ path: '/chosen-project', source: { resourceOwner: { kind: 'local' }, workspaceId: 'chosen', executionWorkspaceId: 'chosen', mode: 'live_root',
+    liveRoot: { hostId: 'host-a', canonicalRoot: '/chosen-project', rootId: 'root-a' }, tools: ['file_read'] } });
   let unbind: (() => void) | undefined;
   try {
     await act(async () => { unbind = bindThreadStore(f.api); });
-    useThreadStore.setState({ selectedIdentity: null });
+    useThreadStore.setState({ selectedIdentity: null, selectedDraftKey: null });
     await act(async () => { root.render(<AgentWorkspaceShell />); });
+    expect(create).not.toHaveBeenCalled();
+    expect(useThreadStore.getState().selectedIdentity).toBeNull();
+    expect(container.querySelector('[aria-label="Conversation draft"]')).not.toBeNull();
+    await edit('[aria-label="Registered model"]', JSON.stringify(['fixture-provider', 'fixture-model']), 'change');
+    await edit('[aria-label="Message thread"]', 'Explain the attached document');
+    await choosePdfs(pdfFile());
+    expect(create).not.toHaveBeenCalled();
+    expect(f.api.materials.upload).not.toHaveBeenCalled();
+    await submitForm(composerForm());
     expect(create).toHaveBeenCalledOnce();
+    expect(f.api.materials.upload).toHaveBeenCalledOnce();
+    expect(f.submit).toHaveBeenCalledWith(expect.objectContaining({ ...identity, text: 'Explain the attached document', materials: [{ snapshotId: 'retained-original' }] }));
     expect(useThreadStore.getState().selectedIdentity).toEqual(identity);
     expect(container.querySelector('[aria-label="Thread conversation"]')).not.toBeNull();
     expect(container.querySelector('[aria-label="Conversation runtime"]')).toBeNull();
@@ -545,7 +559,7 @@ it('ordinary Agent workspace creates a native Thread directly and opens its cano
 
 it('freezes editor and inline context on an unknown send and acknowledges only captured revisions', async () => {
   const f = fixture(); f.submit.mockRejectedValueOnce(new Error('lost receipt'));
-  const host = threadHostKey(); const threadKey = threadIdentityKey(host, identity);
+  const host = threadHostKey(); const threadKey = threadComposerKey(host, identity);
   const attachment: EditorContextAttachment = { id: 'editor-1', runtimeKey: host, threadKey, workspaceId: 'workspace-a', resourceId: 'file-a',
     label: 'code.ts', documentInstanceId: 'document-a', documentRevision: 'disk-1', localEditRevision: 1,
     source: 'unsaved-buffer', kind: 'selection', text: 'original editor context', range: { startLine: 1, startColumn: 1, endLine: 1, endColumn: 5 } };
@@ -579,7 +593,7 @@ it.each(['thread', 'branch', 'host'] as const)('a late accepted receipt clears o
   await edit('[aria-label="Message thread"]', 'accepted original');
   await choosePdfs(pdfFile());
   await submitForm(container.querySelector('form')!);
-  const originalKey = threadIdentityKey(threadHostKey(), identity);
+  const originalKey = threadComposerKey(threadHostKey(), identity);
   const fork = changed === 'thread' ? { ...identity, threadId: 'thread:late' } : changed === 'branch' ? { ...identity, branchId: 'branch:late' } : identity;
   if (changed === 'host') await act(async () => { endpoint.generation++; endpoint.hostKey = 'host-b'; endpoint.listeners.forEach(listener => listener()); });
   await act(async () => { root.render(<ThreadConversation api={f.api} identity={fork} />); });
@@ -590,7 +604,7 @@ it.each(['thread', 'branch', 'host'] as const)('a late accepted receipt clears o
   expect(useThreadDraftStore.getState().drafts[originalKey].text).toBe('');
   expect(useThreadDraftStore.getState().drafts[originalKey].materials).toEqual([]);
   expect(useThreadDraftStore.getState().drafts[originalKey].pendingInput).toBeUndefined();
-  expect(useThreadDraftStore.getState().drafts[threadIdentityKey(threadHostKey(), fork)].materials.map(item => item.snapshotId)).toEqual(['new-pdf']);
+  expect(useThreadDraftStore.getState().drafts[threadComposerKey(threadHostKey(), fork)].materials.map(item => item.snapshotId)).toEqual(['new-pdf']);
 });
 
 it('retains original text, image bytes and request identity across branch navigation after a lost receipt', async () => {
@@ -609,7 +623,7 @@ it('retains original text, image bytes and request identity across branch naviga
   await submitForm(container.querySelector('form')!);
   expect(f.submit.mock.calls[1][0]).toEqual(original);
   expect(container.querySelector<HTMLTextAreaElement>('[aria-label="Message thread"]')!.value).toBe('newer editor text');
-  expect(useThreadDraftStore.getState().drafts[threadIdentityKey(threadHostKey(), fork)].text).toBe('other draft');
+  expect(useThreadDraftStore.getState().drafts[threadComposerKey(threadHostKey(), fork)].text).toBe('other draft');
 });
 
 it('shared file picker previews image-only input, retains bytes/key on failure, and supports removing a selected image', async () => {
@@ -761,9 +775,9 @@ it.each(['thread', 'branch', 'host', 'unmount'] as const)('discards a late PDF u
   await act(async () => retain(uploadedPdf('late-snapshot')));
   const chips = container.querySelector('[aria-label="chat.fileAttachment.pdfAttachments"]')!;
   expect(chips.textContent).toContain('new.pdf'); expect(chips.textContent).not.toContain('old.pdf');
-  expect(useThreadDraftStore.getState().drafts[threadIdentityKey(threadHostKey(), next)].materials.map(item => item.snapshotId)).toEqual(['new-snapshot']);
-  if (threadIdentityKey(originalHost, identity) !== threadIdentityKey(threadHostKey(), next)) {
-    expect(useThreadDraftStore.getState().drafts[threadIdentityKey(originalHost, identity)]?.materials ?? []).toEqual([]);
+  expect(useThreadDraftStore.getState().drafts[threadComposerKey(threadHostKey(), next)].materials.map(item => item.snapshotId)).toEqual(['new-snapshot']);
+  if (threadComposerKey(originalHost, identity) !== threadComposerKey(threadHostKey(), next)) {
+    expect(useThreadDraftStore.getState().drafts[threadComposerKey(originalHost, identity)]?.materials ?? []).toEqual([]);
   }
   expect(upload).toHaveBeenCalledTimes(2); expect(f.submit).not.toHaveBeenCalled();
 });
@@ -3232,7 +3246,7 @@ it.each([[413, 'http-body-too-large'], [400, 'model-images-unsupported']] as con
   const f = fixture();
   f.api.listModels = async () => [{ providerId: 'fixture-provider', modelId: 'fixture-model' }, { providerId: 'fixture-provider', modelId: 'replacement' }];
   f.submit.mockRejectedValueOnce(new ThreadRequestError(status, code, 'not_started'));
-  const key = threadIdentityKey(threadHostKey(), identity);
+  const key = threadComposerKey(threadHostKey(), identity);
   useThreadDraftStore.getState().patch(key, { text: 'Original', images: [{ mimeType: 'image/png', data: imageData }], model: { providerId: 'fixture-provider', modelId: 'fixture-model' } });
   await act(async () => root.render(<ThreadConversation api={f.api} identity={identity} />));
   await submitForm(container.querySelector('form')!);

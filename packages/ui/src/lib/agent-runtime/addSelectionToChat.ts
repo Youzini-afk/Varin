@@ -7,7 +7,7 @@ import {
 } from '@/components/chat/message/selectionMarkdown';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { appendThreadDraftText, startThreadFromNavigation } from './threadNavigation';
-import { useThreadStore } from '@/stores/useThreadStore';
+import { useThreadStore, selectedComposerKey } from '@/stores/useThreadStore';
 import { getRuntimeEndpointGeneration } from '@varin/application-client';
 import { useUIStore } from '@/stores/useUIStore';
 
@@ -63,9 +63,9 @@ export const captureSelectionMarkdown = async (): Promise<string | null> => {
 
 export const addSelectionToChat = async (): Promise<boolean> => {
   const host = getRuntimeEndpointGeneration();
-  const selected = useThreadStore.getState().selectedIdentity;
+  const selected = selectedComposerKey(useThreadStore.getState());
   const markdown = await captureSelectionMarkdown();
-  if (host !== getRuntimeEndpointGeneration() || selected !== useThreadStore.getState().selectedIdentity) return false;
+  if (host !== getRuntimeEndpointGeneration() || selected !== selectedComposerKey(useThreadStore.getState())) return false;
   const directory = useDirectoryStore.getState().currentDirectory;
   const ui = useUIStore.getState();
   ui.setActiveMainTab('chat'); ui.setSessionSwitcherOpen(false);

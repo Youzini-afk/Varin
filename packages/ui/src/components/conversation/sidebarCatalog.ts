@@ -1,6 +1,6 @@
 import React from 'react';
 import type { ThreadBranch } from '@varin/protocol';
-import { useThreadStore, threadIdentityKey } from '@/stores/useThreadStore';
+import { useThreadStore, threadComposerKey } from '@/stores/useThreadStore';
 import { useThreadDraftStore } from '@/stores/useThreadDraftStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 
@@ -33,7 +33,7 @@ export function useSidebarCatalog() {
     const summaries: SidebarConversation[] = threads.filter(thread => !thread.bot_id && thread.deleted_at_ms === null).map(thread => {
       const branch = thread.branches.find(branch => branch.branch_id === thread.main_branch_id);
       const projectIds = thread.observer_project_ids.filter((id): id is string => id !== null);
-      const draft = drafts[threadIdentityKey(host, { runtime: 'agent', threadId: thread.thread_id, branchId: thread.main_branch_id })];
+      const draft = drafts[threadComposerKey(host, { runtime: 'agent', threadId: thread.thread_id, branchId: thread.main_branch_id })];
       const busy = thread.branches.some(branch => branch.active_run_id !== null);
       if (thread.unread && !busy) attentionBySession[thread.thread_id] = { kind: branch?.latest_run?.state === 'failed' ? 'error' : 'complete', updatedAt: thread.updated_at_ms };
       return { id: thread.thread_id, name: thread.title, firstMessage: thread.title,

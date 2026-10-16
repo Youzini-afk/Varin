@@ -7,7 +7,7 @@ import {
   type InlineCommentDraft,
   type InlineCommentSource,
 } from '@/stores/useInlineCommentDraftStore';
-import { useThreadStore, threadIdentityKey } from '@/stores/useThreadStore';
+import { useThreadStore, threadComposerKey } from '@/stores/useThreadStore';
 import { useI18n } from '@/lib/i18n';
 import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
 import { threadHostKey as getRuntimeKey } from '@/stores/useThreadStore';
@@ -58,7 +58,7 @@ export function useInlineCommentController<TRange extends LineRangeBase>(
   const { t } = useI18n();
   const { source, fileLabel, language, getCodeForRange, toStoreRange, fromDraftRange } = options;
 
-  const currentSessionId = useThreadStore(state => state.selectedIdentity ? threadIdentityKey(state.hostKey, state.selectedIdentity) : null);
+  const currentSessionId = useThreadStore(state => state.selectedIdentity ? threadComposerKey(state.hostKey, state.selectedIdentity) : null);
   const effectiveDirectory = useEffectiveDirectory();
 
   const addDraft = useInlineCommentDraftStore((state) => state.addDraft);

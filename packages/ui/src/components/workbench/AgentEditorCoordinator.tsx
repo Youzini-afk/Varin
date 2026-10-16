@@ -20,7 +20,7 @@ import {
   activateEditorContextOwner,
   useEditorContextStore,
 } from '@/stores/useEditorContextStore';
-import { useThreadStore, threadIdentityKey } from '@/stores/useThreadStore';
+import { useThreadStore, selectedComposerKey } from '@/stores/useThreadStore';
 import { openThreadFromNavigation } from '@/lib/agent-runtime/threadNavigation';
 import { useSelectedThreadSnapshot } from '@/hooks/useSelectedThreadSnapshot';
 import { threadHostKey as getRuntimeKey } from '@/stores/useThreadStore';
@@ -39,7 +39,7 @@ export const AgentEditorCoordinator: React.FC = () => {
   const { t } = useI18n();
   const workspaceId = useWorkbenchWorkspaceId();
   const directory = useDirectoryStore((state) => state.currentDirectory);
-  const sessionId = useThreadStore(state => state.selectedIdentity ? threadIdentityKey(state.hostKey, state.selectedIdentity) : null);
+  const sessionId = useThreadStore(state => selectedComposerKey(state));
   const runtimeKey = getRuntimeKey();
   const { snapshot } = useSelectedThreadSnapshot();
   const toolExecutions = snapshot?.operations;

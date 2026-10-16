@@ -5,7 +5,7 @@ import { ChatTimeline } from './ChatTimeline';
 import { ConversationContext } from './ConversationContext';
 import { HistoryPresentation, assistant } from './historyPresentation';
 import { useTimelineViewStore } from './timelineViewStore';
-import { threadHostKey, threadIdentityKey } from '@/stores/useThreadStore';
+import { threadHostKey, threadComposerKey } from '@/stores/useThreadStore';
 import { ThreadContent } from '../thread/ThreadContent';
 import { ThreadSkillMaterials } from '../thread/ThreadSkillMaterials';
 import { ReviewTransferActions } from '../thread/ReviewTransferActions';
@@ -23,7 +23,7 @@ export function ConversationTimeline({ api, identity, snapshot, history, progres
   header?: React.ReactNode; footer?: React.ReactNode;
 }) {
   const { t } = useI18n();
-  const key = threadIdentityKey(threadHostKey(), identity);
+  const key = threadComposerKey(threadHostKey(), identity);
   const projector = React.useMemo(() => new HistoryPresentation(key), [key]);
   const view = React.useMemo(() => projector.project(history, snapshot), [history, snapshot, projector]);
   const head = history.at(-1)?.id ?? null;

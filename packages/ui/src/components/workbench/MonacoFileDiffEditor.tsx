@@ -32,7 +32,7 @@ import { useUIStore } from '@/stores/useUIStore';
 import { threadHostKey as getRuntimeKey } from '@/stores/useThreadStore';
 import { cn } from '@/lib/utils';
 import { createRunDebugEditorAdapter } from '@/lib/monaco/run-debug-editor-adapter';
-import { useThreadStore, threadIdentityKey } from '@/stores/useThreadStore';
+import { useThreadStore, selectedComposerKey } from '@/stores/useThreadStore';
 import { attachEditorContext } from '@/lib/agent-editor/attach';
 import { resourceIdFromWorkspacePath } from '@/lib/documents/path';
 import { registerMonacoExtensionView } from '@/lib/monaco/extension-service';
@@ -79,7 +79,7 @@ export const MonacoFileDiffEditor: React.FC<MonacoFileDiffEditorProps> = ({
   const editorFontSize = useUIStore((state) => state.editorFontSize);
   const fileEditorSettings = useUIStore((state) => state.fileEditorSettings);
   const updateFileEditorSettings = useUIStore((state) => state.updateFileEditorSettings);
-  const sessionId = useThreadStore(state => state.selectedIdentity ? threadIdentityKey(state.hostKey, state.selectedIdentity) : null);
+  const sessionId = useThreadStore(state => selectedComposerKey(state));
   const sessionDirectory = useEffectiveDirectory();
   const profileId = useWorkbenchProfileId();
   const hostRef = React.useRef<HTMLDivElement | null>(null);

@@ -8,8 +8,9 @@ vi.mock('@varin/application-client', async original => ({ ...await original<type
   subscribeRuntimeEndpointWillChange: (listener: () => void) => { endpoint.before.add(listener); return () => endpoint.before.delete(listener); },
   subscribeRuntimeEndpointChanged: (listener: () => void) => { endpoint.after.add(listener); return () => endpoint.after.delete(listener); },
 }));
-import { bindThreadStore, threadHostKey, threadIdentityKey, useThreadStore } from './useThreadStore';
+import { bindThreadStore, threadHostKey, threadIdentityKey, threadComposerKey, useThreadStore } from './useThreadStore';
 import { EMPTY_THREAD_DRAFT, useThreadDraftStore } from './useThreadDraftStore';
+import { sendThreadDraft } from '@/lib/agent-runtime/sendThreadDraft';
 const identity: ThreadIdentity = { runtime: 'agent', threadId: 'thread-a', branchId: 'main-a' };
 const summary = (patch: Partial<ThreadSummary> = {}): ThreadSummary => ({
   thread_id: identity.threadId, main_branch_id: identity.branchId, title: 'A', revision: 1, created_at_ms: 1, updated_at_ms: 1,
@@ -57,18 +58,18 @@ it('fences old Host reads even when Host labels and thread IDs collide', async (
   expect(useThreadStore.getState().hostKey).toBe(threadHostKey());
   expect(useThreadStore.getState().threads[0].title).toBe('B');
 });
-it('retries a lost create response with the same key and does not select a late result over user navigation', async () => {
+it('does not select a late first-send creation over a newer local draft', async () => {
   const f = apiFixture(); cleanup = bindThreadStore(f.api); await settle();
-  vi.mocked(f.api.create).mockRejectedValueOnce(new Error('lost response'));
-  await expect(useThreadStore.getState().createThread()).rejects.toThrow('lost response');
-  const first = vi.mocked(f.api.create).mock.calls[0][0];
-  await useThreadStore.getState().createThread();
-  expect(vi.mocked(f.api.create).mock.calls[1][0]).toBe(first);
+  const first = useThreadStore.getState().openDraft();
   const pending = deferred<ThreadIdentity>(); vi.mocked(f.api.create).mockImplementationOnce(() => pending.promise);
-  const creating = useThreadStore.getState().createThread();
-  await useThreadStore.getState().selectThread(identity);
-  pending.resolve({ runtime: 'agent', threadId: 'new-thread', branchId: 'new-branch' }); await creating;
-  expect(useThreadStore.getState().selectedIdentity).toEqual(identity);
+  const creating = useThreadStore.getState().materializeDraft(first);
+  const next = useThreadStore.getState().openDraft();
+  const created = { runtime: 'agent' as const, threadId: 'new-thread', branchId: 'new-branch' };
+  pending.resolve(created); await creating;
+  expect(useThreadStore.getState().selectedIdentity).toBeNull();
+  expect(useThreadStore.getState().selectedDraftKey).toBe(next);
+  expect(useThreadDraftStore.getState().drafts[first].identity).toEqual(created);
+  expect(f.api.create).toHaveBeenCalledTimes(1);
 });
 it('retains text, images, source and unconfirmed request per real Host and branch without projecting execution', () => {
   const a = threadIdentityKey(threadHostKey(), identity);
@@ -98,4 +99,40 @@ it('remembers an explicitly selected real branch when navigating away and back',
   useThreadStore.setState({ selectedIdentity: null });
   await useThreadStore.getState().selectThread({ threadId: identity.threadId });
   expect(useThreadStore.getState().selectedIdentity?.branchId).toBe('fork-a');
+});
+it('keeps new conversations local, then retains their composer through creation and a lost response', async () => {
+  const f = apiFixture(); cleanup = bindThreadStore(f.api); await settle();
+  const key = useThreadStore.getState().openDraft({ workspacePath: '/repo' });
+  useThreadDraftStore.getState().patch(key, { text: 'Explain this project', model: { providerId: 'account', modelId: 'model' } });
+  expect(f.api.create).not.toHaveBeenCalled();
+  expect(useThreadStore.getState().selectedIdentity).toBeNull();
+  expect(useThreadStore.getState().threads).toHaveLength(1);
+  vi.mocked(f.api.create).mockRejectedValueOnce(new Error('lost response'));
+  await expect(useThreadStore.getState().materializeDraft(key)).rejects.toThrow('lost response');
+  await useThreadStore.getState().materializeDraft(key);
+  expect(vi.mocked(f.api.create).mock.calls.map(call => call[0])).toEqual([key, key]);
+  expect(threadComposerKey(threadHostKey(), identity)).toBe(key);
+  expect(useThreadDraftStore.getState().drafts[key]).toMatchObject({ text: 'Explain this project', workspacePath: '/repo', identity });
+  expect(useThreadStore.getState().selectedIdentity).toEqual(identity);
+});
+it('sends a first input only once, preserves later typing, and retries unknown admission in the same Thread', async () => {
+  const f = apiFixture(); cleanup = bindThreadStore(f.api); await settle();
+  const key = useThreadStore.getState().openDraft();
+  useThreadDraftStore.getState().patch(key, { text: 'Original question' });
+  const submit = vi.fn().mockRejectedValueOnce(new Error('response lost'));
+  f.api.submit = submit;
+  const request = { key: 'first-message', text: 'Original question', editorText: 'Original question', images: [], pdfs: [],
+    model: { providerId: 'account', modelId: 'model' }, editorContext: [], inlineContext: [], status: 'sending' as const };
+  await expect(sendThreadDraft(f.api, key, request)).rejects.toThrow('response lost');
+  expect(useThreadDraftStore.getState().drafts[key].pendingInput?.status).toBe('unknown');
+  useThreadDraftStore.getState().patch(key, { text: 'Follow-up being typed' });
+  const accepted = deferred<{ run_id: string; input_id: string }>(); submit.mockImplementationOnce(() => accepted.promise);
+  const retry = sendThreadDraft(f.api, key, useThreadDraftStore.getState().drafts[key].firstSend!);
+  const duplicate = sendThreadDraft(f.api, key, request);
+  expect(duplicate).toBe(retry);
+  accepted.resolve({ run_id: 'run', input_id: 'input' }); await retry;
+  expect(f.api.create).toHaveBeenCalledTimes(1);
+  expect(submit.mock.calls.map(call => call[0])).toEqual([expect.objectContaining({ ...identity, key: 'first-message', text: 'Original question' }),
+    expect.objectContaining({ ...identity, key: 'first-message', text: 'Original question' })]);
+  expect(useThreadDraftStore.getState().drafts[key]).toMatchObject({ text: 'Follow-up being typed', firstSend: undefined, pendingInput: undefined });
 });
