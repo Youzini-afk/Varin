@@ -163,6 +163,7 @@ function ModelConnectionsEditor({ host }: { host: number }) {
             onAuthorizationReply={value => api.replyAuthorization(authorization!.id, value)} onAuthorizationCancel={async () => { await api.cancelAuthorization(authorization!.id); if (alive.current) { activeAuthorization.current = undefined; setAuthorization(null); } }} />
           <div hidden={tab !== 'connection'} id="model-channel-connection" role="tabpanel" aria-labelledby="model-tab-connection">
             <ModelSelection models={draft.models} type={type} candidates={candidates} busy={busy} onChange={models => edit({ models })} onConfigure={id => { setOpenedModels(previous => new Set(previous).add(id)); setSelectedModelId(id); }}
+              validity={(id, field, valid) => validity(`${id}:${field}`, valid)}
               onDiscover={() => run(async () => { const result = await api.discoverDraft({ channel: draft, ...(secret ? { secret } : {}) }); if (alive.current) setCandidates(result.models); })} />
           </div>
           <div hidden={tab !== 'advanced'} id="model-channel-advanced" role="tabpanel" aria-labelledby="model-tab-advanced" className="mt-6 border-t border-border/60 pt-5"><Button variant="ghost" className="text-destructive" disabled={busy} onClick={() => {

@@ -38,6 +38,10 @@ beforeEach(() => {
   const { document, window } = parseHTML('<!doctype html><html><body></body></html>');
   window.confirm = vi.fn(() => true);
   vi.stubGlobal('document', document); vi.stubGlobal('window', window); vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
+  vi.stubGlobal('HTMLElement', window.HTMLElement); vi.stubGlobal('Element', window.Element); vi.stubGlobal('Node', window.Node);
+  vi.stubGlobal('getComputedStyle', () => ({ animationName: 'none', transitionProperty: 'none', getPropertyValue: () => '' }));
+  vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => setTimeout(() => callback(0), 0));
+  vi.stubGlobal('cancelAnimationFrame', clearTimeout);
   container = document.createElement('div'); document.body.append(container); root = createRoot(container);
   snapshot = { revision: 'original', channels: [{ id: 'channel', name: 'Connection', enabled: true, type: 'local', baseUrl: 'http://localhost/v1', authentication: { kind: 'none' }, parameters: {}, models: [],
     connection: { headers: { 'X-Request-Source': 'original' }, paths: { embedding: '/vectors' }, proxy: { mode: 'proxy', url: 'http://localhost:8080' } } }],
@@ -226,7 +230,6 @@ test('model capabilities save declared effort choices, image input and capacitie
   snapshot.channels[0]!.models = [{ id: 'model', name: 'Model', operations: ['chat'], enabled: true }];
   await open(); await click('Model');
   await click('settings.models.reasoning');
-  await select('switch', 'levels');
   expect(button('settings.models.save').disabled).toBe(true);
   await click('settings.agents.thinking.low'); await click('settings.agents.thinking.high');
   await click('settings.models.imageInput'); await edit('settings.models.context', '128000'); await edit('settings.models.output', '8192');
