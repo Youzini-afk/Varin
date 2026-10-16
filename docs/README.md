@@ -17,6 +17,10 @@ package.json 为准；文档解释职责、机制、约束和不显然的取舍�
 | 仍需真实环境证据的运行时场景 | [运行时验收](runtime-acceptance.md) |
 | 部署、恢复、扩展开发和依赖维护 | [操作指南](ops/README.md) |
 
+## 进行中的设计
+
+- [聊天交互内容与精确引用](design/chat-interactive-content.md)：已讨论的目标方案，待实现；包含流式作品、分次写入、修订、画面读取和引用点。
+
 ## 源码旁的说明
 
 源码旁的 README / DOCUMENTATION 保留模块特有的不变量和实际入口：
