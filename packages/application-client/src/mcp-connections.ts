@@ -6,7 +6,15 @@ export interface McpConfigurationSource { path: string; scope: 'global' | 'proje
 export interface McpConfigurationServer {
   name: string; source: string; override?: string; enabled: boolean; exposure: string;
   status: string; cachedToolCount: number; connectedToolCount: number; error?: string;
+  /** This view owns a holder; releasing it may leave other consumers connected. */
+  holdsConnection: boolean;
+  /** The configured action is available; this does not guarantee network connectivity. */
+  canConnect: boolean;
+  /** An eligible OAuth action, not proof that the server supports OAuth. */
   canSignIn: boolean;
+  signInRequired: boolean;
+  /** The original MCP credential store contains a grant that can be removed. */
+  canSignOut: boolean;
 }
 export interface McpConfigurationSnapshot { view: string; sources: McpConfigurationSource[]; servers: McpConfigurationServer[]; issues: string[] }
 export interface McpConfigurationDocument { path: string; content: string; revision: string; exists: boolean }

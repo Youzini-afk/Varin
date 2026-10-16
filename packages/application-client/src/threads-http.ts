@@ -150,8 +150,9 @@ export function createThreadsHttpAPI(): ThreadsAPI {
       signal.addEventListener('abort', abort, { once: true });
       if (signal.aborted) abort();
       const remove = subscribeRuntimeEndpointWillChange(abort);
+      let response: Response | undefined;
       try {
-        const response = await runtimeFetch('/api/threads/observe', { query: { cursor }, signal: controller.signal,
+        response = await runtimeFetch('/api/threads/observe', { query: { cursor }, signal: controller.signal,
           headers: { Accept: 'text/event-stream' } });
         if (!response.ok || !response.body) throw new Error('Thread event stream unavailable');
         const reader = response.body.getReader();
@@ -169,8 +170,14 @@ export function createThreadsHttpAPI(): ThreadsAPI {
               if (data) listener(JSON.parse(data));
             }
           }
-        } finally { await reader.cancel(); reader.releaseLock(); }
-      } finally { remove(); signal.removeEventListener('abort', abort); }
+        } finally { await reader.cancel().catch(() => {}); reader.releaseLock(); }
+      } finally {
+        controller.abort();
+        remove(); signal.removeEventListener('abort', abort);
+        // Rejected responses have no reader. Release their original channel too;
+        // flow-controlled observation bodies are not drained in the background.
+        await response?.body?.cancel().catch(() => {});
+      }
     },
   };
 }

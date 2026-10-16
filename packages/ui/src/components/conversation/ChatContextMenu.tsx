@@ -115,7 +115,7 @@ export const ChatContextMenu: React.FC<Pick<ChatTimelineProps,
     const source = [...sources].find(([sourceElement]) => sourceElement.contains(element))?.[1];
     const code = element.closest('[data-component="markdown-code"],pre')?.querySelector<HTMLElement>('code');
     if (code) return { kind: 'code', text: getMarkdownCodeText(code), sourceEntryId: source?.entryId, runtimeKey };
-    const entryId = element.closest<HTMLElement>('[data-conversation-entry-id]')?.dataset.chatEntryId;
+    const entryId = element.closest<HTMLElement>('[data-conversation-entry-id]')?.dataset.conversationEntryId;
     const entry = props.entries.find((row): row is ChatSessionMessageEntry => row.id === entryId && row.type === 'message');
     if (entry?.message.role === 'user') return { kind: 'user', text: chatContentText(entry.message.content), entry, sourceEntryId: entry.id, runtimeKey };
     const pendingUser = element.closest('[data-conversation-user-message]');

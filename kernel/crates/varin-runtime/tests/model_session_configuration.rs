@@ -194,3 +194,29 @@ fn adapter_options_reject_wrong_family_and_frozen_input_replacement() {
     let payload = start.provider.serialize(&view, None).unwrap().to_value();
     assert_eq!(payload["temperature"], 0.3); assert_eq!(payload["top_p"],0.8); assert_eq!(payload["model"],"local-test");
 }
+
+#[test]
+fn chat_sampling_rejects_multiple_choices_before_dispatch() {
+    use serde_json::json;
+    let mut config = configuration();
+    config.provider_family = "openai-completions".into();
+    for count in [json!(2), json!(0), json!(-1), json!("2"), json!(true)] {
+        config.model_options = Some(json!({"samplingParams":{"n":count}}));
+        assert!(matches!(model_session::bind(config.clone()), Err(error) if error.code == "sampling_parameters"), "invalid choice count {count} was accepted");
+    }
+    // Null uses the API's default single choice. Neither it nor explicit zero-valued
+    // sampling controls should be lost while enforcing the adapter's actual contract.
+    for count in [json!(1), json!(null)] {
+        config.model_options = Some(json!({"temperature":0,"samplingParams":{"n":count,"top_p":0}}));
+        let start = model_session::bind(config.clone()).unwrap();
+        let view = RequestView {
+            request_id: "request".into(), run_id: "run".into(),
+            origin: varin_runtime::execution::RequestOrigin::Conversation { compaction: None, step: 1, history_range: start.binding.history_range.clone() },
+            binding: start.binding, history: vec![],
+        };
+        let payload = start.provider.serialize(&view, None).unwrap().to_value();
+        assert_eq!(payload["n"], count);
+        assert_eq!(payload["temperature"], 0.0);
+        assert_eq!(payload["top_p"], 0);
+    }
+}

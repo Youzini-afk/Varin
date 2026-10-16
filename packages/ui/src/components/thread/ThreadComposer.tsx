@@ -189,6 +189,8 @@ export function ThreadComposer({ editorRef, value, onChange, models, providerId,
   }, [onChange]);
 
   const handleEditorKeyDown = (event: KeyboardEvent): boolean => {
+    // IME confirmation belongs to the editor, including while suggestions are open.
+    if (isIMECompositionEvent(event)) return false;
     if (autocomplete?.kind === 'command'
       && event.key === 'Enter'
       && !event.shiftKey
@@ -476,7 +478,7 @@ export function ThreadComposer({ editorRef, value, onChange, models, providerId,
                     )}
                     aria-label={loading ? t('common.loading') : composerActions.primary === 'stop'
                       ? t('chat.chatInput.actions.stopGeneratingAria')
-                      : t('chat.chatInput.actions.sendMessageAria')}
+                      : t(retrying ? 'chat.messages.retry' : 'chat.chatInput.actions.sendMessageAria')}
                     aria-busy={loading || (composerActions.primary === 'stop' ? aborting : undefined)}
                     data-conversation-composer-primary-action={composerActions.primary}
                   >
@@ -497,7 +499,7 @@ export function ThreadComposer({ editorRef, value, onChange, models, providerId,
                 <TooltipContent side="top">
                   {loading ? t('common.loading') : composerActions.primary === 'stop'
                     ? t('chat.chatInput.actions.stopGeneratingAria')
-                    : t('chat.chatInput.actions.sendMessageAria')}
+                    : t(retrying ? 'chat.messages.retry' : 'chat.chatInput.actions.sendMessageAria')}
                 </TooltipContent>
               </Tooltip>
             </div>

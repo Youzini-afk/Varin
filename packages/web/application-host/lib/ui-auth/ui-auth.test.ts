@@ -325,6 +325,19 @@ describe('ui auth client credential seam', () => {
     };
     expect(await auth.ensureSessionToken(dictationWsReq, null)).toBe('client:device-1');
 
+    expect(await auth.resolveWebSocketAuthContext({
+      method: 'GET', url: `/api/varin/observations/ws?varin_url_token=${encodeURIComponent(urlToken)}`,
+      headers: { upgrade: 'websocket' },
+    })).not.toBeNull();
+    for (const [path, headers] of [
+      ['/api/varin/observations/ws', {}],
+      ['/api/varin/observations/ws/extra', { upgrade: 'websocket' }],
+    ] as const) {
+      expect(await auth.resolveWebSocketAuthContext({
+        method: 'GET', url: `${path}?varin_url_token=${encodeURIComponent(urlToken)}`, headers,
+      })).toBeNull();
+    }
+
     const piRuntimeWsReq = {
       method: 'GET',
       path: '/api/varin/runtime/ws',

@@ -1117,7 +1117,7 @@ export const Header: React.FC<HeaderProps> = ({
                     <McpDropdownContent active={isMobileServicesOpen && mobileServicesTab === 'mcp'} />
                   )}
 
-                  {mobileServicesTab === 'usage' && <ThreadTokenUsage />}
+                  {mobileServicesTab === 'usage' && <ThreadTokenUsage active={isMobileServicesOpen} />}
                 </div>
               </DropdownMenuContent>
             </DropdownMenu>

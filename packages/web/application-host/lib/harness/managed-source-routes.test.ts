@@ -11,7 +11,7 @@ const request = { coordinatorHostId, authorityId: 'authority', resourceEpoch: 't
 const receipt: ManagedSourceReceipt = { operationId: request.operationId, resourceEpoch: request.resourceEpoch,
   executionOwner: { kind: 'external', identity: 'source', epoch: 'target-epoch' }, accepted: true, executorStopped: false, result: null };
 
-function fixture(capabilities = ['filesystem:read']) {
+function fixture(capabilities = ['filesystem:read'], mount = '') {
   const sources = {
     capabilities: vi.fn(async () => ({ tools: [], grantCapabilities: [], clientCapabilities: ['filesystem:read'], unavailable: [] })),
     resolve: vi.fn(async () => ({ workspaceId: 'target-workspace', canonicalRoot: '/target/project', hostId: 'target' })),
@@ -30,7 +30,9 @@ function fixture(capabilities = ['filesystem:read']) {
   registerManagedRemoteRoutes(router as unknown as Express, { service,
     resolveAuthContext: async request => request.headers.authorization === 'Bearer trusted'
       ? { type: 'client', clientId: 'verified-principal', client: { id: 'verified-principal', capabilities } } : null });
-  const transport = routerTransport(router);
+  const mountedRouter = Router();
+  mountedRouter.use(mount || '/', router);
+  const transport = routerTransport(mountedRouter);
   const urls: string[] = [];
   const fetch = vi.fn(async (target: string | URL | Request, init: RequestInit = {}) => {
     urls.push(String(target));
@@ -38,18 +40,39 @@ function fixture(capabilities = ['filesystem:read']) {
   });
   let settings = { desktopHosts: [
     { id: 'preferred', label: 'Other route to same Host', apiUrl: 'https://other.invalid', clientToken: 'trusted' },
-    { id: 'original', label: 'Original source', apiUrl: 'https://original.invalid', clientToken: 'trusted' },
+    { id: 'original', label: 'Original source', apiUrl: `https://original.invalid${mount}`, clientToken: 'trusted' },
   ] };
   const owner: ManagedHostSourceOwner = { kind: 'managed_host', hostId: 'target', connectionId: 'original',
-    endpointIdentity: managedEndpointIdentity({ apiUrl: 'https://original.invalid' }) };
+    endpointIdentity: managedEndpointIdentity({ apiUrl: `https://original.invalid${mount}` }) };
   const registry = createManagedRemoteTargetRegistry({ coordinatorHostId, kernel: {} as never, resources: {} as never,
     readSettings: async () => settings, fetch: fetch as typeof globalThis.fetch });
-  return { sources, transport, urls, fetch, registry, owner, changeEndpoint() {
-    settings = { desktopHosts: settings.desktopHosts.map(entry => entry.id === 'original' ? { ...entry, apiUrl: 'https://replacement.invalid' } : entry) };
+  return { sources, transport, urls, fetch, registry, owner, changeEndpoint(apiUrl = 'https://replacement.invalid') {
+    settings = { desktopHosts: settings.desktopHosts.map(entry => entry.id === 'original' ? { ...entry, apiUrl } : entry) };
   } };
 }
 
 describe('managed Source authenticated transport without listeners', () => {
+  it('keeps the configured mount in Source identity, authenticated discovery and original-owner calls', async () => {
+    const f = fixture(['filesystem:read'], '/team/original');
+    const discovered = await f.registry.sourceTargets();
+    expect(discovered.targets).toEqual([expect.objectContaining({ resourceOwner: f.owner })]);
+    const client = await f.registry.source(f.owner);
+    expect(await client.resolve({ coordinatorHostId, path: '/target/project' })).toMatchObject({ workspaceId: 'target-workspace' });
+    expect(f.urls.filter(url => url.startsWith('https://original.invalid')))
+      .toEqual(expect.arrayContaining([
+        'https://original.invalid/team/original/api/harness/managed-execution/v1/identity',
+        'https://original.invalid/team/original/api/harness/managed-execution/v1/sources/resolve',
+      ]));
+    expect(f.urls.filter(url => url.startsWith('https://original.invalid'))
+      .every(url => url.startsWith('https://original.invalid/team/original/'))).toBe(true);
+    f.changeEndpoint('https://original.invalid/team/replacement');
+    await client.observe(request);
+    const requestsBeforeReacquire = f.urls.length;
+    await expect(f.registry.source(f.owner)).rejects.toThrow('original managed source connection');
+    expect(f.urls).toHaveLength(requestsBeforeReacquire);
+    expect(f.fetch.mock.calls.every(([, init]) => init?.redirect === 'error')).toBe(true);
+  });
+
   it('admits read-only discovery and Source reads with the verified principal while preserving the shell gate', async () => {
     const f = fixture();
     const listed = await f.registry.sourceTargets();

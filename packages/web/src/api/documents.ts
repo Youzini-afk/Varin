@@ -154,20 +154,28 @@ const readSseEvents = async (
 ): Promise<void> => {
   const reader = response.body?.getReader();
   if (!reader) throw new DocumentsError('Document watch stream is unavailable', { reason: 'failed' });
-  const decoder = new TextDecoder();
-  let buffer = '';
-  while (!signal.aborted) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    buffer += decoder.decode(value, { stream: true });
-    const chunks = buffer.split('\n\n');
-    buffer = chunks.pop() ?? '';
-    for (const chunk of chunks) {
-      const line = chunk.split('\n').find((entry) => entry.startsWith('data: '));
-      if (!line) continue;
-      const event = parseDocumentWatchEvent(JSON.parse(line.slice(6)));
-      listener(event);
+  const abortReader = () => { void reader.cancel(signal.reason).catch(() => undefined); };
+  signal.addEventListener('abort', abortReader, { once: true });
+  try {
+    const decoder = new TextDecoder();
+    let buffer = '';
+    while (!signal.aborted) {
+      const { done, value } = await reader.read();
+      if (done || signal.aborted) break;
+      buffer += decoder.decode(value, { stream: true });
+      const chunks = buffer.split('\n\n');
+      buffer = chunks.pop() ?? '';
+      for (const chunk of chunks) {
+        const line = chunk.split('\n').find((entry) => entry.startsWith('data: '));
+        if (!line) continue;
+        const event = parseDocumentWatchEvent(JSON.parse(line.slice(6)));
+        listener(event);
+      }
     }
+  } finally {
+    signal.removeEventListener('abort', abortReader);
+    await reader.cancel().catch(() => undefined);
+    reader.releaseLock();
   }
 };
 
@@ -225,23 +233,27 @@ export const createWebDocumentsAPI = (): DocumentsAPI => ({
             },
             signal: controller.signal,
           });
-          assertGeneration(generation);
-          if (!response.ok) {
-            throw new DocumentsError('Document watch failed', {
-              reason: 'failed',
-              status: response.status,
-            });
+          try {
+            assertGeneration(generation);
+            if (!response.ok) {
+              throw new DocumentsError('Document watch failed', {
+                reason: 'failed',
+                status: response.status,
+              });
+            }
+            if (reconnecting) {
+              tracker.transportReset('reconnected');
+              reconnecting = false;
+            }
+            reconnectDelayMs = 250;
+            await readSseEvents(response, (event) => {
+              if (event.kind === 'dirty-state-barrier' || event.kind === 'surface-operation') listener(event);
+              else tracker.accept(event);
+            }, controller.signal);
+            if (!controller.signal.aborted) throw new DocumentsError('Document watch ended', { reason: 'failed' });
+          } finally {
+            await response.body?.cancel().catch(() => undefined);
           }
-          if (reconnecting) {
-            tracker.transportReset('reconnected');
-            reconnecting = false;
-          }
-          reconnectDelayMs = 250;
-          await readSseEvents(response, (event) => {
-            if (event.kind === 'dirty-state-barrier' || event.kind === 'surface-operation') listener(event);
-            else tracker.accept(event);
-          }, controller.signal);
-          if (!controller.signal.aborted) throw new DocumentsError('Document watch ended', { reason: 'failed' });
         } catch (error) {
           if (controller.signal.aborted) break;
           if (getRuntimeEndpointGeneration() !== generation) {

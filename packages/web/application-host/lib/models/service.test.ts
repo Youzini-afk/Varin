@@ -153,3 +153,46 @@ test('OAuth refresh belongs to the account, survives a cancelled waiter and cann
   await expect(refresh).rejects.toMatchObject({ code: 'credential-scope-changed' });
   expect((await credentials.resolve(source, 'channel')).auth.apiKey).toBe('replacement');
 });
+
+
+test.each([
+  { type: 'gemini', parameter: 'pageToken', page: (ids: string[], next?: string) => ({ models: ids.map(id => ({ name: `models/${id}`, displayName: id })), ...(next ? { nextPageToken: next } : {}) }) },
+  { type: 'anthropic', parameter: 'after_id', page: (ids: string[], next?: string) => ({ data: ids.map(id => ({ id })), has_more: !!next, last_id: next ?? null }) },
+])('$type discovery follows opaque cursors at the original endpoint and never writes candidates', async ({ type, parameter, page }) => {
+  const { models } = await fixture();
+  const configured = { ...channel(), type };
+  const saved = await models.save(configured, (await models.read()).revision);
+  const requests: URL[] = [];
+  const fetchImpl: typeof fetch = async input => {
+    const url = new URL(String(input)); requests.push(url);
+    return Response.json(requests.length === 1 ? page(['first'], 'cursor /?&=#') : page(['first', 'second']));
+  };
+  expect(await models.discover(configured.id, fetchImpl)).toEqual({ models: [{ id: 'first', name: 'first' }, { id: 'second', name: 'second' }] });
+  expect(requests).toHaveLength(2);
+  expect(requests[1]!.origin).toBe(requests[0]!.origin); expect(requests[1]!.pathname).toBe('/v1/models');
+  expect(requests[1]!.searchParams.get(parameter)).toBe('cursor /?&=#');
+  expect(await models.read()).toEqual(saved);
+});
+
+test('discovery rejects repeated cursors and later-page failures without returning a partial success', async () => {
+  const { models } = await fixture();
+  const configured = { ...channel(), type: 'gemini' };
+  const saved = await models.save(configured, (await models.read()).revision);
+  let calls = 0;
+  await expect(models.discover(configured.id, async () => { calls++; return Response.json({ models: [{ name: 'models/first' }], nextPageToken: 'repeat' }); }))
+    .rejects.toMatchObject({ code: 'model-discovery-pagination-invalid' });
+  expect(calls).toBe(2);
+  calls = 0;
+  await expect(models.discover(configured.id, async () => ++calls === 1 ? Response.json({ models: [], nextPageToken: 'second' }) : new Response(null, { status: 503 })))
+    .rejects.toMatchObject({ code: 'model-discovery-failed' });
+  expect(calls).toBe(2); expect(await models.read()).toEqual(saved);
+});
+
+test('cancelling discovery between pages prevents the next request', async () => {
+  const { models } = await fixture();
+  const configured = { ...channel(), type: 'gemini' };
+  await models.save(configured, (await models.read()).revision);
+  const controller = new AbortController(); let calls = 0;
+  await expect(models.discover(configured.id, async () => { calls++; controller.abort(); return Response.json({ models: [], nextPageToken: 'second' }); }, controller.signal)).rejects.toThrow();
+  expect(calls).toBe(1);
+});

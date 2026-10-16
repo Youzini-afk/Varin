@@ -32,6 +32,11 @@ never splices one source's command or URL with another source's credentials. `mc
 enablement/exposure overrides separately. Project configuration cannot select a user model account.
 
 Settings show actual source and state, save the selected original file and check its revision.
+The structured editor creates complete HTTP or stdio definitions; independent inherited overrides belong
+in `mcpPolicies` through the raw configuration editor. Closing a settings view releases only its own
+connection holders and sign-in flows. A connected server can belong to other consumers; settings first
+acquires its own holder before offering view-local disconnect. Reconnect uses the current definition
+without retargeting other consumers' retained leases. Failed or cancelled initial preparation releases the undisclosed view.
 Malformed sources keep their last valid snapshot and report an error; invalid individual entries
 do not disable independent valid servers. Actual source removal and explicit disablement have their
 own withdrawal semantics. Reads never clear or rewrite a bad file. The common project-trust reader
@@ -98,10 +103,22 @@ describe tools; they cannot grant permission or prove that an effect is harmless
 ## Authentication, disconnect and recovery
 
 `mcp-auth.json` stores MCP OAuth separately from model accounts using the shared atomic file store.
-The generic OAuth flow retains issuer/resource, scopes and client identity. Normal token refresh and
+Settings distinguishes an observed authentication challenge from an optional OAuth discovery attempt.
+Sign-out is offered only for tokens present in the original store, including expired grants; discovery
+metadata alone is not a signed-in account. A bad credential record reports a per-server error.
+If reloading the credential file fails, its last valid snapshot remains available for recovery but
+cannot authorize a new dispatch until the original store is readable again. Failure is not sign-out.
+The generic OAuth flow retains issuer/resource, scopes and client identity, including the SDK's issuer
+stamp on an unchanged explicitly configured client ID/secret. Normal token refresh and
 scope reordering preserve account continuity; an actual scope/account change invalidates the binding.
-Cancelling a sign-in wait closes its temporary callback listener. Model-account references resolve
+Cancelling or receiving a state-bound authorization denial closes the temporary callback listener;
+remote error descriptions are not displayed. Model-account references resolve
 through the native [model service](../models/DOCUMENTATION.md), never the old Pi account directory.
+
+OAuth discovery, sign-in and refresh use the connection's frozen service headers only on the
+configured MCP origin. The SDK's own request headers take precedence. Requests carrying those
+service headers reject redirects, including same-origin redirects; separate discovered issuers do
+not inherit them. All requests still pass through the existing Host egress owner.
 
 HTTP 404 with an existing session invalidates that session, including POST and SSE/listen GET paths.
 The original request is sent once. The client preserves the negotiated metadata needed to describe

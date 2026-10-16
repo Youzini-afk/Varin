@@ -11,7 +11,7 @@ Workbench Profile 选择 Agent、IDE、Research 或 Bot 外壳，不改变执行
 
 ```text
 Web / Electron / mobile renderer
-  application-client RuntimeAPIs + authenticated HTTP / SSE
+  application-client RuntimeAPIs + authenticated HTTP / multiplexed observations
     Application Host (packages/web/application-host)
       admission, model accounts, resources, MCP, Documents, research, ComputerService
       Varin extension Host and brokered extension children
@@ -55,7 +55,11 @@ Host 校验真实 Thread/branch 和输入，准备模型、凭据、Source、策
 Run/request 的配置与正文，执行引擎记录原始模型和工具工作。设置变化不会重写已受理请求、队列输入或原回执。
 
 UI 通过 `ThreadsAPI` 读快照与历史，`/api/threads/observe` 传输持久事件和临时进度。断线后按 durable cursor 追平；
-视图关闭、Host 切换或 SSE 中断不代表执行取消。终端与语音的 WebSocket 仍有独立职责，旧运行时 socket 不再受理。
+视图关闭、Host 切换或观察流中断不代表执行取消。浏览器直连将固定白名单内的长观察请求复用到同 Host 的
+`/api/varin/observations/ws`，避免 HTTP/1 同源连接被 SSE 与长轮询占满；已有 relay 仍使用原复用通道。
+此适配器只转交原路由的响应与取消，保留身份、Origin、游标、revision 和租约，不受理任意 HTTP 请求或自动重放写入。
+逐通道 pull 控制响应背压；连接断开关闭各原观察者，恢复由各业务消费者按原语义负责。
+终端与语音的 WebSocket 仍有独立职责，旧运行时 socket 不再受理。
 
 PDF 上传由 ThreadMaterials 校验实际 Thread/branch，通过原 documentReader 与 MaterialStore 保存原始字节。
 输入只携带已核验的固定 snapshot 来源，`document_read` 再按原作用域读取。浏览器不创建另一套文档存储或解析权威。

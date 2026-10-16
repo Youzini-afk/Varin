@@ -6,7 +6,7 @@ import { StdioTransport, StreamableHttpTransport, McpSessionExpiredError, type M
 import { mcpEnvironmentBindings, mcpEnvironmentCurrent, type McpServerEntry } from './configuration.js';
 import { randomUUID } from 'node:crypto';
 import { resolve } from 'node:path';
-import { McpOAuthCredentialStore, mcpAuthProvider, type McpOAuthSettings } from './auth.js';
+import { McpOAuthCredentialStore, mcpAuthProvider, mcpOAuthFetch, type McpOAuthSettings } from './auth.js';
 export { signInMcpServer, type McpSignInPrompt } from './auth.js';
 export type McpTransportFactory = (entry: McpServerEntry, cwd: string, authProvider: AuthProvider | undefined) => McpTransport;
 const environments = new WeakMap<McpServerEntry, Readonly<Record<string, string | undefined>>>();
@@ -17,6 +17,16 @@ export const mcpOAuthUrl = (entry: McpServerEntry): string | undefined => {
   const config = entry.config;
   return 'url' in config && !config.auth && !Object.keys(config.headers ?? {}).some(name => name.toLowerCase() === 'authorization') ? config.url : undefined;
 };
+function authenticationFailure(error: unknown): { wwwAuthenticate?: unknown } | undefined {
+  // SDK version negotiation wraps transport failures in Error.cause.
+  const seen = new Set<object>();
+  while (error && typeof error === 'object' && !seen.has(error)) {
+    seen.add(error);
+    if ('status' in error && (error.status === 401 || error.status === 403)) return 'wwwAuthenticate' in error ? { wwwAuthenticate: error.wwwAuthenticate } : {};
+    error = 'cause' in error ? error.cause : undefined;
+  }
+  return undefined;
+}
 export function createDefaultTransport(entry: McpServerEntry, cwd: string, authProvider?: AuthProvider, fetchImpl?: typeof fetch): McpTransport {
   const config = entry.config;
   const resolveEnvironment = (value: string) => resolveValue(value, environments.get(entry) ?? process.env);
@@ -73,6 +83,12 @@ export class McpServerConnection {
     if (settings.clientSecret !== undefined) settings.clientSecret = resolveValue(settings.clientSecret, this.environmentBindings);
     return settings;
   }
+  oauthFetch(): typeof globalThis.fetch {
+    const config = this.entry.config;
+    if (!('url' in config)) throw new Error('MCP OAuth requires an HTTP server');
+    const headers = Object.fromEntries(Object.entries(config.headers ?? {}).map(([key, value]) => [key, resolveValue(value, this.environmentBindings)]));
+    return mcpOAuthFetch(config.url, headers, this.options.fetch);
+  }
   async getClient(): Promise<McpClient> {
     this.#shutdown.signal.throwIfAborted();
     if (this.#client?.connectionState === 'connected') return this.#client;
@@ -89,7 +105,7 @@ export class McpServerConnection {
       const config = this.entry.config;
       const provider = 'url' in config ? config.auth?.provider : undefined;
       const authorization: AuthProvider | undefined = provider ? { token: () => this.options.providerToken?.(provider) ?? Promise.resolve(undefined) }
-        : this.oauthUrl ? mcpAuthProvider(this.name, this.oauthUrl, this.options.credentials, this.oauthSettings(), this.options.fetch) : undefined;
+        : this.oauthUrl ? mcpAuthProvider(this.name, this.oauthUrl, this.options.credentials, this.oauthSettings(), this.oauthFetch()) : undefined;
       const transport = this.options.createTransport(this.entry, this.options.cwd, authorization);
       const opened = new McpClient({ name: 'Varin', version: '1', ...(this.options.clientCapabilities ? { capabilities: this.options.clientCapabilities } : {}) });
       client = opened;
@@ -126,9 +142,10 @@ export class McpServerConnection {
     } catch (error) {
       await client?.close();
       if (this.#client === client) this.#client = undefined;
-      this.state = this.#shutdown.signal.aborted ? 'closed' : error && typeof error === 'object' && 'status' in error && (error.status === 401 || error.status === 403) ? 'needs-auth' : 'failed';
+      const authentication = authenticationFailure(error);
+      this.state = this.#shutdown.signal.aborted ? 'closed' : authentication ? 'needs-auth' : 'failed';
       this.error = this.state === 'needs-auth' ? 'MCP sign-in required' : 'MCP connection unavailable';
-      this.challenge = error && typeof error === 'object' && 'wwwAuthenticate' in error ? error.wwwAuthenticate : undefined;
+      this.challenge = authentication?.wwwAuthenticate;
       this.options.onChange?.(this); throw error;
     }
   }
@@ -182,9 +199,9 @@ export class McpServerConnection {
     }).catch(error => {
       if (this.#client === client) {
         this.directoriesReady.delete(kind);
-        const needsAuth = !!error && typeof error === 'object' && 'status' in error && (error.status === 401 || error.status === 403);
-        this.directoryStates[kind] = needsAuth ? 'needs-auth' : 'failed';
-        if (needsAuth && 'wwwAuthenticate' in error) this.challenge = error.wwwAuthenticate;
+        const authentication = authenticationFailure(error);
+        this.directoryStates[kind] = authentication ? 'needs-auth' : 'failed';
+        if (authentication) this.challenge = authentication.wwwAuthenticate;
         this.options.onChange?.(this);
       }
       throw error;

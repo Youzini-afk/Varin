@@ -223,6 +223,8 @@ export interface ThreadSnapshot {
   eventCursor: number;
   thread: ThreadSummary;
   activeRun: Run | null;
+  /** Original Catalog terminal failure for the displayed Run; never inferred from missing output. */
+  runFailure?: import('@varin/protocol').RunFailure | null;
   history: ThreadHistoryItem[];
   historyPage: Pick<ThreadHistoryPage, 'head' | 'previous'>;
   inputs: QueuedInput[];

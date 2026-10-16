@@ -24,3 +24,23 @@ test('edits a selected JSONC field without mutating unrelated configuration', ()
   expect(edited).toContain('// source comment');
   expect(parseMcpConfigObject(edited)).toEqual({mcpServers:{docs:{command:'node',args:['server.js']}},autoEnableCodemode:false});
 });
+
+test.each(['http', 'stdio'] as const)('selects %s for a newly added empty server without pruning the selected definition', transport => {
+  const source = '{\n// keep source comment\n"mcpServers":{"controlled-qa":{}}}';
+  const edited = switchMcpServerTransport(source, 'controlled-qa', transport);
+  expect(edited).toContain('// keep source comment');
+  expect(parseMcpConfigObject(edited)).toEqual({ mcpServers: { 'controlled-qa': {
+    type: transport, [transport === 'http' ? 'url' : 'command']: '',
+  } } });
+  expect(mcpServerTransport(parseMcpConfigObject(edited), 'controlled-qa')).toBe(transport);
+});
+
+test('switches a minimal transport definition in both directions without deleting its JSONC object', () => {
+  const source = '{\n// preserve unrelated source note\n"mcpServers":{"docs":{"url":"https://example.test/mcp"}},"autoEnableCodemode":false}';
+  const stdio = switchMcpServerTransport(source, 'docs', 'stdio');
+  const http = switchMcpServerTransport(stdio, 'docs', 'http');
+  expect(parseMcpConfigObject(stdio)).toEqual({ mcpServers: { docs: { type: 'stdio', command: '' } }, autoEnableCodemode: false });
+  expect(parseMcpConfigObject(http)).toEqual({ mcpServers: { docs: { type: 'http', url: '' } }, autoEnableCodemode: false });
+  expect(stdio).toContain('// preserve unrelated source note');
+  expect(http).toContain('// preserve unrelated source note');
+});

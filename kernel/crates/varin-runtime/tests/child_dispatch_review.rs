@@ -1727,6 +1727,127 @@ fn independent_child_report_body_failure_keeps_healthy_report_and_receipt_admiss
 }
 
 #[test]
+fn child_report_keeps_its_terminal_history_when_navigation_precedes_delivery() {
+    use varin_runtime::catalog::navigation::NavigationCommand;
+    for (state, has_output, outcome) in [
+        (RunState::Completed, true, Outcome::Succeeded),
+        (RunState::Completed, false, Outcome::Failed),
+        (RunState::Failed, true, Outcome::Failed),
+        (RunState::Cancelled, true, Outcome::Cancelled),
+    ] {
+        for timing in ["before_navigation", "after_navigation", "after_reopen"] {
+            let mut f = Fixture::new();
+            let child = f.accept();
+            f.settle_exchange();
+            let (source, proposal, basis) = child_context(&child);
+            let child =
+                f.db.prepare_child(&child.execution_id, source, proposal, basis)
+                    .unwrap();
+            let receipt = child.receipt.as_ref().unwrap();
+            let epoch = f.db.epoch();
+            f.db.commit_execution(
+                &receipt.run_id,
+                epoch,
+                &ExecutionRecord::StateChanged {
+                    state: RunState::Runnable,
+                    waiting_on: None,
+                },
+            )
+            .unwrap();
+            let item = has_output.then(|| {
+                f.db.append_history(
+                    &receipt.run_id,
+                    epoch,
+                    Some(&receipt.input_id),
+                    HistorySource::Assistant,
+                    serde_json::to_value(
+                        ConversationItem::<varin_runtime::output::ResolvedMedia> {
+                            id: "original-child-report".into(),
+                            resource_activation: None,
+                            provenance: Provenance::Assistant,
+                            content: Content::Text {
+                                text: "Original child result before navigation".into(),
+                            },
+                            opaque: None,
+                        },
+                    )
+                    .unwrap(),
+                    None,
+                )
+                .unwrap()
+            });
+            let terminal_head = item
+                .as_ref()
+                .map(|item| item.id.clone())
+                .unwrap_or_else(|| receipt.input_id.clone());
+            let navigation_head = has_output.then(|| receipt.input_id.clone());
+            f.db.commit_execution(
+                &receipt.run_id,
+                epoch,
+                &ExecutionRecord::StateChanged {
+                    state,
+                    waiting_on: None,
+                },
+            )
+            .unwrap();
+            let prepared = (timing == "before_navigation").then(|| {
+                f.db.capture_child_reports()
+                    .unwrap()
+                    .load()
+                    .unwrap()
+                    .remove(0)
+            });
+            let navigation =
+                f.db.prepare_navigation(NavigationCommand {
+                    key: "rewind-before-report".into(),
+                    thread_id: child.child_thread_id.clone(),
+                    branch_id: child.child_branch_id.clone(),
+                    expected_head_id: Some(terminal_head.clone()),
+                    target_head_id: navigation_head.clone(),
+                    undo_of: None,
+                })
+                .unwrap()
+                .load()
+                .unwrap();
+            f.db.commit_navigation(navigation).unwrap();
+            if timing == "after_reopen" {
+                let root = f.root.clone();
+                drop(f.db);
+                f.db = Catalog::open(&root).unwrap();
+            }
+            if let Some(prepared) = prepared {
+                f.db.admit_child_report(prepared).unwrap();
+            }
+            f.db.reconcile_child_reports().unwrap();
+            let execution = f.db.delegated_execution(&child.execution_id).unwrap();
+            let report = execution.report.as_ref().unwrap();
+            assert_eq!(report.outcome, outcome, "{timing} {state:?}");
+            assert_eq!(
+                report.history_ids,
+                item.into_iter().map(|item| item.id).collect::<Vec<_>>(),
+                "{timing} {state:?}"
+            );
+            assert_eq!(
+                execution.terminal_head,
+                Some(terminal_head),
+                "{timing} {state:?}"
+            );
+            assert_eq!(f.db.head(&child.child_branch_id).unwrap(), navigation_head);
+            f.db.reconcile_child_reports().unwrap();
+            assert_eq!(
+                f.db.delegated_execution(&child.execution_id)
+                    .unwrap()
+                    .report,
+                execution.report
+            );
+            let root = f.root.clone();
+            drop(f);
+            std::fs::remove_dir_all(root).unwrap();
+        }
+    }
+}
+
+#[test]
 fn missing_file_handoff_and_pending_file_preparation_cannot_become_absent() {
     let mut f = Fixture::new();
     let selected =

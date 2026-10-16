@@ -42,6 +42,65 @@ test('disabling the logical catalog model withdraws later authorization even whe
   await expect(selected.credentialOwner.resolve(scope)).rejects.toMatchObject({ code: 'credential-resolution-failed' });
 });
 
+test.each([
+  ['gemini', 'gemini-3-flash-preview', 'high', { includeThoughts: true, thinkingLevel: 'HIGH' }],
+  ['vertex', 'publishers/google/models/gemini-2.5-pro', 'high', { includeThoughts: true, thinkingBudget: 32768 }],
+  ['gemini', 'gemini-2.5-flash-lite', 'minimal', { includeThoughts: true, thinkingBudget: 512 }],
+] as const)('Google thinking uses the selected upstream model behind a local %s alias (%s)', async (type, requestModelId, thinkingLevel, thinkingConfig) => {
+  const { models, channel, authority } = await fixture();
+  const aliased: ModelChannel = { ...channel, type, baseUrl: type === 'gemini' ? 'https://generativelanguage.googleapis.com/v1beta' : 'https://aiplatform.googleapis.com/v1',
+    parameters: {}, models: [{ ...channel.models[0]!, requestModelId, reasoning: true, maxOutputTokens: 65536 }] };
+  await models.save(aliased, (await models.read()).revision);
+  const selection = { providerId: aliased.id, modelId: 'logical-model', thinkingLevel };
+  const selected = await authority.resolveModel(selection);
+  try {
+    expect(selected.configuration).toMatchObject({ model: requestModelId, catalogModelId: 'logical-model', modelOptions: { protocol: { thinkingConfig } } });
+    expect((await authority.describeModel(selection)).modelOptions).toEqual(selected.configuration.modelOptions);
+  } finally { selected.credentialOwner.release(); }
+});
+
+test('Bedrock thinking recognizes the upstream Claude model behind a local alias', async () => {
+  vi.stubEnv('AWS_ACCESS_KEY_ID', 'fixture-access'); vi.stubEnv('AWS_SECRET_ACCESS_KEY', 'fixture-secret'); vi.stubEnv('AWS_PROFILE', '');
+  const { models, channel, authority } = await fixture();
+  const requestModelId = 'us.anthropic.claude-sonnet-4-6';
+  const aliased: ModelChannel = { ...channel, type: 'bedrock', baseUrl: 'https://bedrock-runtime.us-east-1.amazonaws.com',
+    authentication: { kind: 'aws-chain' }, parameters: {}, models: [{ ...channel.models[0]!, requestModelId, reasoning: true, maxOutputTokens: 65536 }] };
+  await models.save(aliased, (await models.read()).revision);
+  const selected = await authority.resolveModel({ providerId: aliased.id, modelId: 'logical-model', thinkingLevel: 'high' });
+  try {
+    expect(selected.configuration.model).toBe(requestModelId);
+    expect(selected.configuration.modelOptions).toEqual({ protocol: { additionalModelRequestFields: {
+      thinking: { type: 'adaptive', display: 'summarized' }, output_config: { effort: 'high' },
+    } } });
+  } finally { selected.credentialOwner.release(); }
+});
+
+test.each([
+  ['anthropic.claude-3-7-sonnet-20250219-v1:0', 'Claude Opus 4.6', 'enabled'],
+  ['arn:aws:bedrock:us-east-1::foundation-model/anthropic.claude-3-7-sonnet-20250219-v1:0', 'Claude Opus 4.6', 'enabled'],
+  ['arn:aws:bedrock:us-east-1:123456789012:inference-profile/us.anthropic.claude-3-7-sonnet-20250219-v1:0', 'Claude Opus 4.6', 'enabled'],
+  ['amazon.nova-pro-v1:0', 'Claude Opus 4.6', null],
+  ['us.amazon.nova-pro-v1:0', 'Claude Sonnet 3.7', null],
+  ['arn:aws:bedrock:us-east-1:123456789012:application-inference-profile/abcdef123456', 'Claude Opus 4.6', 'adaptive'],
+] as const)('Bedrock upstream identity wins over display-name hints (%s)', async (requestModelId, name, thinkingType) => {
+  vi.stubEnv('AWS_ACCESS_KEY_ID', 'fixture-access'); vi.stubEnv('AWS_SECRET_ACCESS_KEY', 'fixture-secret'); vi.stubEnv('AWS_PROFILE', '');
+  const { models, channel, authority } = await fixture();
+  const bedrock: ModelChannel = { ...channel, type: 'bedrock', baseUrl: 'https://bedrock-runtime.us-east-1.amazonaws.com',
+    authentication: { kind: 'aws-chain' }, parameters: {}, models: [{ ...channel.models[0]!, requestModelId, name, reasoning: true, maxOutputTokens: 65536 }] };
+  await models.save(bedrock, (await models.read()).revision);
+  const selection = { providerId: bedrock.id, modelId: 'logical-model', thinkingLevel: 'high' as const };
+  if (thinkingType === null) {
+    await expect(authority.resolveModel(selection)).rejects.toMatchObject({ code: 'model-thinking-protocol-unavailable' });
+    return;
+  }
+  const selected = await authority.resolveModel(selection);
+  try {
+    expect(selected.configuration.modelOptions).toMatchObject({ protocol: { additionalModelRequestFields: {
+      thinking: thinkingType === 'enabled' ? { type: 'enabled', budget_tokens: 16384 } : { type: 'adaptive' },
+    } } });
+  } finally { selected.credentialOwner.release(); }
+});
+
 test('MCP bearer projection uses the same OAuth identity and refuses unsupported authorization schemes', async () => {
   const { models, channel } = await fixture();
   const reference = await models.credentials.linkOAuth({ kind: 'oauth', provider: 'openrouter', accessToken: 'oauth-token' });

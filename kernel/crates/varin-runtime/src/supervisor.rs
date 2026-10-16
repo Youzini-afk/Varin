@@ -56,6 +56,9 @@ struct Worker {
     cancel: CancellationToken,
     join: Option<JoinHandle<()>>,
     pending: Option<PendingLaunch>,
+    // Cancellation-only workers publish this after all body/owner work. Their completion wake
+    // may then join the final bookkeeping even before JoinHandle::is_finished becomes visible.
+    cancellation_done: Option<Arc<AtomicBool>>,
 }
 struct OperationWorker {
     run_id: String,
@@ -84,6 +87,7 @@ pub struct RunSupervisor {
     operation_workers: Mutex<HashMap<String, OperationWorker>>,
     quiescence: Mutex<HashMap<String, Arc<RunDrain>>>,
     failures: Arc<Mutex<HashMap<String, ExecutionError>>>,
+    cancellation_failures: Arc<Mutex<HashMap<String, crate::catalog::recovery::PreparationIdentity>>>,
     wake: Arc<Mutex<Option<mpsc::Sender<()>>>>,
 }
 impl RunSupervisor {
@@ -95,6 +99,7 @@ impl RunSupervisor {
             operation_workers: Mutex::new(HashMap::new()),
             quiescence: Mutex::new(HashMap::new()),
             failures: Arc::new(Mutex::new(HashMap::new())),
+            cancellation_failures: Arc::new(Mutex::new(HashMap::new())),
             wake: Arc::new(Mutex::new(None)),
         }
     }
@@ -161,6 +166,7 @@ impl RunSupervisor {
                     cancel: cancel.clone(),
                     join: None,
                     pending: None,
+                    cancellation_done: None,
                 },
             );
         }
@@ -585,7 +591,7 @@ impl RunSupervisor {
                 }
             }
         }
-        Ok(())
+        self.reconcile_cancelled_executions()
     }
     pub fn interrupt_generation(&self, run_id: &str) -> bool {
         self.workers
@@ -717,13 +723,126 @@ impl RunSupervisor {
         progress
     }
     pub fn reconcile_message_requests(&self) -> Result<()> {
+        let cancellation = self.reconcile_cancelled_executions();
         let observations = self.reconcile_observations();
         // Legal request activation is a separate ingress owner. Its original guards decide
         // eligibility; a failed, unrelated observation cannot suppress this event-driven pass.
         let activation = crate::catalog::activation::reconcile(&self.catalog).map_err(error);
         observations?;
         activation?;
+        cancellation?;
         Ok(())
+    }
+
+    /// A committed cancellation may outlive its original worker. Restore only original
+    /// receipt/history pairing on the existing event-driven continuation pass, without launch.
+    pub fn reconcile_cancelled_executions(&self) -> Result<()> {
+        self.reap()?;
+        let runs = self.catalog.lock().map_err(error)?
+            .cancelled_recovery_runs().map_err(error)?;
+        let mut failure = None;
+        for run in runs {
+            if let Err(error) = self.start_cancelled_recovery(&run) {
+                failure.get_or_insert(error);
+            }
+        }
+        failure.map_or(Ok(()), Err)
+    }
+
+    fn start_cancelled_recovery(&self, run_id: &str) -> Result<()> {
+        let cancel = CancellationToken::default();
+        cancel.cancel();
+        let done = Arc::new(AtomicBool::new(false));
+        {
+            let quiescence = self.quiescence.lock().map_err(error)?;
+            if quiescence.get(run_id).is_some_and(|drain| drain.active.load(Ordering::Acquire)) {
+                return Ok(());
+            }
+            let mut workers = self.workers.lock().map_err(error)?;
+            if self.stopping.load(Ordering::Acquire) || workers.contains_key(run_id) {
+                return Ok(());
+            }
+            workers.insert(run_id.into(), Worker {
+                parent_run_id: None, cancel: cancel.clone(), join: None, pending: None,
+                cancellation_done: Some(done.clone()),
+            });
+        }
+        let preparation = (|| {
+            let mut owner = self.catalog.lock().map_err(error)?;
+            let failed = self.cancellation_failures.lock().map_err(error)?.get(run_id).cloned();
+            if failed.as_ref().is_some_and(|boundary| owner.preparation_is_current(boundary).unwrap_or(false)) {
+                return Ok(None);
+            }
+            owner.capture_cancelled_recovery(run_id).map_err(error)
+        })();
+        let preparation = match preparation {
+            Ok(Some(preparation)) => preparation,
+            result => {
+                self.remove_reservation(run_id, &cancel)?;
+                return result.map(|_| ());
+            }
+        };
+        let catalog = self.catalog.clone();
+        let failures = self.failures.clone();
+        let cancellation_failures = self.cancellation_failures.clone();
+        let wake = self.wake.clone();
+        let identity = run_id.to_owned();
+        let mut workers = self.workers.lock().map_err(error)?;
+        let Some(worker) = workers.get_mut(run_id)
+            .filter(|worker| same_reservation(&worker.cancel, &cancel)) else { return Ok(()) };
+        let join = thread::Builder::new().name(format!("cancel-recovery-{run_id}"))
+            .spawn(move || {
+                let mut last_boundary = preparation.identity().clone();
+                let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| -> Result<()> {
+                    let mut preparation = preparation;
+                    loop {
+                        let boundary = preparation.identity().clone();
+                        last_boundary = boundary.clone();
+                        // Original immutable bodies and serialization remain outside Catalog.
+                        let loaded = preparation.load();
+                        let mut owner = catalog.lock().map_err(error)?;
+                        if owner.run(&identity).map_err(error)?.state.terminal() { return Ok(()); }
+                        match loaded {
+                            Ok(prepared) => {
+                                if owner.publish_cancelled_recovery(prepared).map_err(error)? {
+                                    return Ok(());
+                                }
+                            }
+                            Err(failure) => {
+                                if owner.preparation_is_current(&boundary).map_err(error)? {
+                                    return Err(error(failure));
+                                }
+                            }
+                        }
+                        let Some(next) = owner.capture_cancelled_recovery(&identity).map_err(error)? else {
+                            return Ok(());
+                        };
+                        preparation = next;
+                    }
+                })).unwrap_or_else(|_| Err(ExecutionError::new(
+                    "cancel_recovery_panicked", "Cancelled exchange recovery stopped before publication",
+                )));
+                if let Ok(mut blocked) = cancellation_failures.lock() {
+                    if result.is_err() { blocked.insert(identity.clone(), last_boundary); }
+                    else { blocked.remove(&identity); }
+                }
+                // An observed failure must already be reapable: a user's explicit retry can
+                // then clear that boundary even if this thread has not returned yet.
+                done.store(true, Ordering::Release);
+                if let Ok(mut failures) = failures.lock() {
+                    if let Err(failure) = result { failures.insert(identity.clone(), failure); }
+                    else { failures.remove(&identity); }
+                }
+                // Wake after publishing the completion fence. A receipt arriving while this
+                // worker unwinds cannot be lost; unchanged failed boundaries do not self-retry.
+                if let Ok(wake) = wake.lock() {
+                    if let Some(sender) = wake.as_ref() { let _ = sender.send(()); }
+                }
+            }).map_err(error);
+        match join {
+            Ok(join) => { worker.join = Some(join); Ok(()) }
+            Err(failure) => { workers.remove(run_id); Err(failure) }
+        }
     }
     pub fn resume_policy_pause(
         &self,
@@ -985,6 +1104,7 @@ impl RunSupervisor {
     }
     pub fn cancel(&self, run_id: &str) -> Result<Run> {
         self.cancel_control(run_id);
+        self.reap()?;
         let (no_execution, launch) = {
             let mut workers = self.workers.lock().map_err(error)?;
             let no_execution = workers
@@ -996,6 +1116,7 @@ impl RunSupervisor {
                     cancel: CancellationToken::default(),
                     join: None,
                     pending: None,
+                    cancellation_done: None,
                 });
                 worker.cancel.cancel();
                 worker.pending.take()
@@ -1043,6 +1164,10 @@ impl RunSupervisor {
                 let _ = sender.send(());
             }
         };
+        if no_execution && result.as_ref().is_ok_and(|run| !run.state.terminal()) {
+            self.cancellation_failures.lock().map_err(error)?.remove(run_id);
+            self.start_cancelled_recovery(run_id)?;
+        }
         result
     }
     pub fn execution_failure(&self, run_id: &str) -> Result<Option<ExecutionError>> {
@@ -1150,7 +1275,8 @@ impl RunSupervisor {
             let mut workers = self.workers.lock().map_err(error)?;
             let ids: Vec<_> = workers
                 .iter()
-                .filter(|(_, worker)| worker.join.as_ref().is_some_and(JoinHandle::is_finished))
+                .filter(|(_, worker)| worker.join.as_ref().is_some_and(JoinHandle::is_finished)
+                    || worker.cancellation_done.as_ref().is_some_and(|done| done.load(Ordering::Acquire)))
                 .map(|(id, _)| id.clone())
                 .collect();
             ids.into_iter()

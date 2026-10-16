@@ -40,21 +40,29 @@ const readSseEvents = async <T>(
 ): Promise<void> => {
   const reader = response.body?.getReader();
   if (!reader) throw new RunServicesError('Run event stream is unavailable', { reason: 'failed' });
-  const decoder = new TextDecoder();
-  let buffer = '';
-  while (!signal.aborted) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    buffer += decoder.decode(value, { stream: true });
-    const chunks = buffer.split('\n\n');
-    buffer = chunks.pop() ?? '';
-    for (const chunk of chunks) {
-      const line = chunk.split('\n').find((entry) => entry.startsWith('data: '));
-      if (!line) continue;
-      const event = JSON.parse(line.slice(6)) as T;
-      if (event && typeof event === 'object' && 'content' in event) continue;
-      listener(event);
+  const abortReader = () => { void reader.cancel(signal.reason).catch(() => undefined); };
+  signal.addEventListener('abort', abortReader, { once: true });
+  try {
+    const decoder = new TextDecoder();
+    let buffer = '';
+    while (!signal.aborted) {
+      const { done, value } = await reader.read();
+      if (done || signal.aborted) break;
+      buffer += decoder.decode(value, { stream: true });
+      const chunks = buffer.split('\n\n');
+      buffer = chunks.pop() ?? '';
+      for (const chunk of chunks) {
+        const line = chunk.split('\n').find((entry) => entry.startsWith('data: '));
+        if (!line) continue;
+        const event = JSON.parse(line.slice(6)) as T;
+        if (event && typeof event === 'object' && 'content' in event) continue;
+        listener(event);
+      }
     }
+  } finally {
+    signal.removeEventListener('abort', abortReader);
+    await reader.cancel().catch(() => undefined);
+    reader.releaseLock();
   }
 };
 
@@ -79,17 +87,22 @@ export const subscribeRunSse = <T>(
         query: { workspaceId },
         signal: controller.signal,
       });
-      assertRunGeneration(generation);
-      if (!response.ok) {
-        throw new RunServicesError('Run event stream failed', {
-          reason: 'failed',
-          status: response.status,
-        });
+      try {
+        assertRunGeneration(generation);
+        if (!response.ok) {
+          throw new RunServicesError('Run event stream failed', {
+            reason: 'failed',
+            status: response.status,
+          });
+        }
+        await readSseEvents(response, listener, controller.signal);
+      } finally {
+        await response.body?.cancel().catch(() => undefined);
       }
-      await readSseEvents(response, listener, controller.signal);
     } catch {
       if (controller.signal.aborted) return;
     } finally {
+      controller.abort();
       unsubscribe();
     }
   })();

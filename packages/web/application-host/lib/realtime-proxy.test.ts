@@ -121,6 +121,51 @@ describe('realtime proxy URL builders', () => {
 });
 
 describe('realtime proxy', () => {
+  it('forwards mounted SSE only within the configured Host path', async () => {
+    const upstream = await startSseUpstream({ path: '/base/api/varin/events' });
+    const { origin, runtime } = await startProxyServer({ apiBaseUrl: `${upstream.origin}/base` });
+    try {
+      const response = await fetch(buildRealtimeProxySseUrl(origin, `${upstream.origin}/base/api/varin/events`));
+      expect(response.status).toBe(200);
+      expect(await response.text()).toContain('data: first');
+      for (const path of ['/api/varin/events', '/other/api/varin/events', '/base-other/api/varin/events']) {
+        const rejected = await fetch(buildRealtimeProxySseUrl(origin, `${upstream.origin}${path}`));
+        expect(rejected.status).toBe(404);
+      }
+      expect(upstream.requests).toHaveLength(1);
+      expect(firstRequest(upstream.requests).headers['x-proxy-auth']).toBe('secret');
+    } finally { runtime.stop(); }
+  });
+
+  it('rejects same-origin root SSE before forwarding mounted credentials', async () => {
+    const upstream = await startSseUpstream();
+    const { origin, runtime } = await startProxyServer({ apiBaseUrl: `${upstream.origin}/base` });
+    try {
+      const response = await fetch(buildRealtimeProxySseUrl(origin, `${upstream.origin}/api/varin/events`));
+      expect(response.status).toBe(404);
+      expect(upstream.requests).toHaveLength(0);
+    } finally { runtime.stop(); }
+  });
+
+  it('does not follow a redirect carrying configured SSE credentials outside the selected route', async () => {
+    const paths: string[] = [];
+    const server = http.createServer((req, res) => {
+      paths.push(req.url || '');
+      if (req.url === '/api/varin/events') {
+        res.writeHead(307, { Location: '/another-service' }).end();
+      } else {
+        res.writeHead(200, { 'Content-Type': 'text/event-stream' }).end('data: unintended receiver\n\n');
+      }
+    });
+    const upstreamOrigin = await listen(server);
+    const { origin, runtime } = await startProxyServer({ apiBaseUrl: upstreamOrigin });
+    try {
+      const response = await fetch(buildRealtimeProxySseUrl(origin, `${upstreamOrigin}/api/varin/events`));
+      expect(response.status).toBe(502);
+      expect(paths).toEqual(['/api/varin/events']);
+    } finally { runtime.stop(); }
+  });
+
   it('streams SSE chunks and forwards safe SSE headers with configured runtime headers', async () => {
     const upstream = await startSseUpstream();
     const { origin, runtime } = await startProxyServer({ apiBaseUrl: upstream.origin });
@@ -251,7 +296,7 @@ describe('realtime proxy', () => {
     }
   });
 
-  it('proxies WebSocket upgrades using query params from the raw upgrade request URL', async () => {
+  it.each(['', '/base'])('proxies WebSocket upgrades using query params from the raw upgrade request URL at mount %s', async (mount) => {
     const upstreamRequest: { current: IncomingMessage | null } = { current: null };
     const upstreamServer = http.createServer();
     const upstreamWs = new WebSocketServer({ server: upstreamServer });
@@ -262,10 +307,10 @@ describe('realtime proxy', () => {
       });
     });
     const upstreamOrigin = await listen(upstreamServer);
-    const { origin, runtime } = await startProxyServer({ apiBaseUrl: upstreamOrigin });
+    const { origin, runtime } = await startProxyServer({ apiBaseUrl: `${upstreamOrigin}${mount}` });
 
     try {
-      const target = `${upstreamOrigin.replace(/^http:/, 'ws:')}/api/terminal/ws?lastEventId=evt-1`;
+      const target = `${upstreamOrigin.replace(/^http:/, 'ws:')}${mount}/api/terminal/ws?lastEventId=evt-1`;
       const client = new WebSocket(buildRealtimeProxyWsUrl(origin, target), {
         headers: { Origin: 'varin-ui://app' },
       });
@@ -280,7 +325,7 @@ describe('realtime proxy', () => {
       });
 
       expect(message).toBe('echo:ping');
-      expect(upstreamRequest.current?.url).toBe('/api/terminal/ws?lastEventId=evt-1');
+      expect(upstreamRequest.current?.url).toBe(`${mount}/api/terminal/ws?lastEventId=evt-1`);
       expect(upstreamRequest.current?.headers['x-proxy-auth']).toBe('secret');
       client.close();
       upstreamWs.close();
@@ -315,6 +360,68 @@ describe('realtime proxy', () => {
     } finally {
       runtime.stop();
       uiAuthController.dispose?.();
+    }
+  });
+
+  it.each(['', '/base'])('proxies only the exact observation endpoint at mount %s with the fixed remote Origin and configured credentials', async (mount) => {
+    const requests: IncomingMessage[] = [];
+    const upstreamServer = http.createServer();
+    const upstreamWs = new WebSocketServer({ server: upstreamServer });
+    upstreamWs.on('connection', (socket, request) => { requests.push(request); socket.send('ready'); });
+    const upstreamOrigin = await listen(upstreamServer);
+    const { origin, runtime } = await startProxyServer({ apiBaseUrl: `${upstreamOrigin}${mount}` });
+    const client = new WebSocket(buildRealtimeProxyWsUrl(origin, `${upstreamOrigin}${mount}/api/varin/observations/ws`.replace('http:', 'ws:')), {
+      headers: { Origin: 'varin-ui://app', Cookie: 'local-session=private' },
+    });
+    try {
+      await new Promise<void>((resolve, reject) => {
+        client.once('message', () => resolve()); client.once('error', reject);
+      });
+      expect(requests).toHaveLength(1);
+      expect(requests[0]?.headers.origin).toBe(upstreamOrigin);
+      expect(requests[0]?.url).toBe(`${mount}/api/varin/observations/ws`);
+      expect(requests[0]?.headers['x-proxy-auth']).toBe('secret');
+      expect(requests[0]?.headers.cookie).toBeUndefined();
+    } finally {
+      client.close(); runtime.stop(); upstreamWs.close();
+    }
+  });
+
+  it.each(['/api/varin/observations/ws', '/api/terminal/ws', '/api/dictation/ws'])('does not forward credentials outside the configured runtime mount: %s', async (path) => {
+    const upstream = await startSseUpstream();
+    const { origin, runtime } = await startProxyServer({ apiBaseUrl: `${upstream.origin}/base` });
+    const client = new WebSocket(buildRealtimeProxyWsUrl(origin, `${upstream.origin.replace('http:', 'ws:')}${path}`), {
+      headers: { Origin: 'varin-ui://app' },
+    });
+    client.on('error', () => {});
+    try {
+      expect(await new Promise<number | undefined>((resolve) => {
+        client.once('unexpected-response', (_request, response) => { response.resume(); resolve(response.statusCode); });
+      })).toBe(404);
+      expect(upstream.requests).toHaveLength(0);
+    } finally { client.terminate(); runtime.stop(); }
+  });
+
+  it.each([
+    { authToken: null, originAllowed: true, path: '/api/varin/observations/ws', status: 401 },
+    { authToken: 'ui-token', originAllowed: false, path: '/api/varin/observations/ws', status: 403 },
+    { authToken: 'ui-token', originAllowed: true, path: '/api/varin/observations/ws/extra', status: 404 },
+  ])('rejects an observation proxy without its exact target, original UI auth or Origin: $status', async (options) => {
+    const upstream = await startSseUpstream();
+    const { origin, runtime } = await startProxyServer({ apiBaseUrl: upstream.origin, ...options });
+    const client = new WebSocket(buildRealtimeProxyWsUrl(origin, `${upstream.origin.replace('http:', 'ws:')}${options.path}`), {
+      headers: { Origin: 'https://untrusted.example' },
+    });
+    client.on('error', () => {});
+    try {
+      const status = await new Promise<number | undefined>((resolve, reject) => {
+        client.once('unexpected-response', (_request, response) => { response.resume(); resolve(response.statusCode); });
+        client.once('open', () => reject(new Error('Unexpected accepted proxy')));
+      });
+      expect(status).toBe(options.status);
+      expect(upstream.requests).toHaveLength(0);
+    } finally {
+      client.terminate(); runtime.stop();
     }
   });
 });

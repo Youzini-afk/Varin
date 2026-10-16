@@ -56,6 +56,7 @@ import { ChatReceivedThreadMessage } from './ChatReceivedThreadMessage';
 import { ChatTurnUsageFooter } from './ChatTurnUsageFooter';
 import { ChatCollapsibleUserContent } from './ChatCollapsibleUserContent';
 import { ChatTurnChangedFiles } from './ChatTurnChangedFiles';
+import { ChatToolResultPreview } from './ChatToolResultPreview';
 import { assistantMessagesForTurn } from './usagePresentation';
 
 export interface ChatTimelineProps {
@@ -224,6 +225,7 @@ const ToolResultContent: React.FC<{
   return (
     <div className="space-y-2">
       <ChatUserContentView content={result.content} messageId={messageId} variant="tool" />
+      <ChatToolResultPreview result={result} />
       <EntryExtras itemId={result.historyId} />
       {result.usage && <ChatAssistantUsageFooter usage={result.usage} />}
       {calls ? <details className="typography-meta text-muted-foreground">
@@ -277,7 +279,7 @@ const ChatToolDisclosure: React.FC<{
 
 function toolStatus(result: ChatToolResultMessage | undefined, execution: ChatToolExecutionState | undefined): ChatToolExecutionState['status'] {
   if (result?.status === 'background') return execution && execution.status !== 'running' ? execution.status : 'background';
-  return result ? result.status ?? (result.isError ? 'error' : 'success') : execution?.status ?? 'running';
+  return result ? result.status ?? (result.isError ? 'error' : 'success') : execution?.status ?? 'unknown';
 }
 
 const ChatToolStatus: React.FC<{ status: ChatToolExecutionState['status'] }> = ({ status }) => {

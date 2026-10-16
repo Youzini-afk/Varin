@@ -4,7 +4,8 @@ import type { JsonValue } from '@varin/protocol';
 export interface ChannelType extends ChannelTypeInfo {
   adapter?: { id: string; version: string; endpointPath: string; bindingId: string; identity: string; capture(): Promise<() => void> };
   credentialHeader?: { name: string; prefix: string };
-  discoveryRequest?(channel: ModelChannel): { url: string; headers?: Record<string, string> };
+  discoveryRequest?(channel: ModelChannel, cursor?: string): { url: string; headers?: Record<string, string> };
+  discoveryCursor?(response: unknown): string | undefined;
   parseDiscovery?(response: unknown): Array<{ id: string; name: string }>;
 }
 const object = (value: unknown): value is Record<string, unknown> => !!value && typeof value === 'object' && !Array.isArray(value);
@@ -17,6 +18,11 @@ function list(response: unknown) {
 }
 const schema = (properties: Record<string, JsonValue> = {}): Record<string, JsonValue> => ({ type: 'object', properties, additionalProperties: false });
 const string = { type: 'string' };
+const modelListUrl = (channel: ModelChannel, parameter: string, cursor?: string) => {
+  const url = new URL(`${channel.baseUrl.replace(/\/+$/, '')}/models`);
+  if (cursor !== undefined) url.searchParams.set(parameter, cursor);
+  return url.href;
+};
 const direct = (id: string, name: string, protocol: string, defaultBaseUrl?: string): ChannelType => ({
   id, name, protocol, ...(defaultBaseUrl === undefined ? {} : { defaultBaseUrl }), authentication: ['credential', 'environment', 'none'], operations: ['chat'], discovery: true,
   parametersSchema: schema(), discoveryRequest: channel => ({ url: `${channel.baseUrl.replace(/\/+$/, '')}/models` }), parseDiscovery: list,
@@ -29,8 +35,19 @@ export const BUILTIN_CHANNEL_TYPES: readonly ChannelType[] = [
   { ...direct('openai-compatible', 'OpenAI compatible', 'openai-completions'), operations: ['chat', 'embedding', 'rerank', 'image-generation', 'image-editing'], parametersSchema: schema({ imageApi: { enum: ['openai-images', 'openrouter-images'] } }) },
   direct('deepseek', 'DeepSeek', 'openai-completions', 'https://api.deepseek.com/v1'),
   { ...direct('openrouter', 'OpenRouter', 'openai-completions', 'https://openrouter.ai/api/v1'), operations: ['chat', 'image-generation', 'image-editing'], parametersSchema: schema({ imageApi: { enum: ['openrouter-images'] } }), oauthProviders: [{ id: 'openrouter', name: 'OpenRouter' }] },
-  { ...direct('anthropic', 'Anthropic', 'anthropic-messages', 'https://api.anthropic.com/v1'), authentication: ['credential', 'environment', 'anthropic-federation', 'none'], oauthProviders: [{ id: 'anthropic', name: 'Claude Pro / Max' }], discoveryRequest: channel => ({ url: `${channel.baseUrl.replace(/\/+$/, '')}/models`, headers: { 'anthropic-version': '2023-06-01' } }) },
-  { ...direct('gemini', 'Google Gemini', 'google-generative-ai', 'https://generativelanguage.googleapis.com/v1beta'), parseDiscovery: response => {
+  { ...direct('anthropic', 'Anthropic', 'anthropic-messages', 'https://api.anthropic.com/v1'), authentication: ['credential', 'environment', 'anthropic-federation', 'none'], oauthProviders: [{ id: 'anthropic', name: 'Claude Pro / Max' }], discoveryRequest: (channel, cursor) => ({ url: modelListUrl(channel, 'after_id', cursor), headers: { 'anthropic-version': '2023-06-01' } }),
+    discoveryCursor: response => {
+      if (!object(response) || response.has_more !== undefined && typeof response.has_more !== 'boolean') throw new Error('Model discovery returned invalid pagination');
+      if (!response.has_more) return undefined;
+      if (typeof response.last_id !== 'string' || !response.last_id) throw new Error('Model discovery returned invalid pagination');
+      return response.last_id;
+    } },
+  { ...direct('gemini', 'Google Gemini', 'google-generative-ai', 'https://generativelanguage.googleapis.com/v1beta'),
+    discoveryRequest: (channel, cursor) => ({ url: modelListUrl(channel, 'pageToken', cursor) }),
+    discoveryCursor: response => {
+      if (!object(response) || response.nextPageToken != null && typeof response.nextPageToken !== 'string') throw new Error('Model discovery returned invalid pagination');
+      return typeof response.nextPageToken === 'string' && response.nextPageToken ? response.nextPageToken : undefined;
+    }, parseDiscovery: response => {
     if (!object(response) || !Array.isArray(response.models)) throw new Error('Model discovery returned an invalid list');
     return response.models.map(item => {
       if (!object(item) || typeof item.name !== 'string') throw new Error('Model discovery returned an invalid model');
@@ -71,5 +88,5 @@ export class ChannelTypes {
     };
   }
   get(id: string) { return this.#types.get(id); }
-  list(): ChannelTypeInfo[] { return [...this.#types.values()].map(({ discoveryRequest: _request, parseDiscovery: _parse, adapter: _adapter, credentialHeader: _credential, ...info }) => structuredClone(info)); }
+  list(): ChannelTypeInfo[] { return [...this.#types.values()].map(({ discoveryRequest: _request, discoveryCursor: _cursor, parseDiscovery: _parse, adapter: _adapter, credentialHeader: _credential, ...info }) => structuredClone(info)); }
 }

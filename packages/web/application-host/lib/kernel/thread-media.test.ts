@@ -29,6 +29,7 @@ function fixture() {
     if (method === 'runtime.child.inspect' || method === 'runtime.child.execution.inspect') return {
       operation_id: 'child:original', execution_id: params.executionId ?? 'child:original',
       parent_thread_id: foreignChild ? 'thread:foreign' : identity.threadId,
+      parent_branch_id: identity.branchId,
       child_thread_id: 'thread:child', child_branch_id: 'branch:child',
     };
     if (method === 'runtime.child.report.read' || method === 'runtime.child.execution.report.read') {

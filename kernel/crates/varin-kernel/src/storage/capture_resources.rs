@@ -407,7 +407,13 @@ fn read_entry(
     let resource = resolve()?;
     let metadata = match fs::symlink_metadata(&resource.absolute) {
         Ok(value) => Some(value),
-        Err(error) if error.kind() == io::ErrorKind::NotFound => None,
+        // Descendants of a non-directory are absent observations. This does not
+        // authorize replacing that ancestor; mutations retain their own CAS.
+        Err(error)
+            if matches!(error.kind(), io::ErrorKind::NotFound | io::ErrorKind::NotADirectory) =>
+        {
+            None
+        }
         Err(error) => return Err(error.into()),
     };
     let state = match metadata {

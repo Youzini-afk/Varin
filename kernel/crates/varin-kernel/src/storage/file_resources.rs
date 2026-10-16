@@ -1602,7 +1602,13 @@ pub(super) fn resolve_scoped_resource(
                     }
                     current = canonical;
                 }
-                Err(error) if error.kind() == io::ErrorKind::NotFound => {
+                // An existing file can block the remaining path just as an
+                // absent directory does. Preserve its canonical prefix and
+                // check the complete canonical scope below, without creating
+                // directories or granting authority to replace the ancestor.
+                Err(error)
+                    if matches!(error.kind(), io::ErrorKind::NotFound | io::ErrorKind::NotADirectory) =>
+                {
                     current = next;
                     for rest in &components[index + 1..] {
                         current.push(rest.as_os_str());
@@ -1808,3 +1814,7 @@ impl Storage {
         Ok(result)
     }
 }
+
+#[cfg(test)]
+#[path = "non_directory_ancestor_review.rs"]
+mod non_directory_ancestor_review;

@@ -24,17 +24,24 @@ export function createMcpSettings(options: {
   const snapshot = async (id: string): Promise<McpConfigurationSnapshot> => {
     const view = requireView(id);
     await options.authority.directory(view.spec, new AbortController().signal);
+    requireView(id);
     const loaded = config(view), readiness = await options.authority.inspect(view.spec);
+    requireView(id);
     return { view: id, issues: loaded.errors,
       sources: loaded.sources.map(path => ({ path, scope: path === loaded.projectConfig ? 'project' : 'global' })),
       servers: loaded.servers.map(entry => {
         const state = readiness.servers.find(server => server.name === entry.name)!;
         const retained = view.connections.get(entry.name);
-        const current = retained ? options.authority.snapshot(retained.scope, retained.handle) : undefined;
+        const current = retained && !state.credentialError ? options.authority.snapshot(retained.scope, retained.handle) : undefined;
+        const signInRequired = state.status === 'needs-auth' || Object.values(state.directories ?? {}).includes('needs-auth');
+        const oauthEligible = mcpOAuthUrl(entry) !== undefined;
         return { name: entry.name, source: entry.source, ...(entry.override ? { override: entry.override } : {}), enabled: entry.config.enabled !== false,
           exposure: entry.config.exposure ?? 'codemode', status: state.status, cachedToolCount: state.cachedToolCount, connectedToolCount: state.connectedToolCount,
-          canSignIn: mcpOAuthUrl(entry) !== undefined,
-          ...(current?.error ? { error: current.error } : Object.values(state.directories ?? {}).includes('needs-auth')
+          holdsConnection: retained !== undefined, signInRequired,
+          canConnect: entry.config.enabled !== false && !state.credentialError,
+          canSignIn: oauthEligible && state.hasStoredOAuthGrant !== undefined && (!state.hasStoredOAuthGrant || signInRequired),
+          canSignOut: oauthEligible && state.hasStoredOAuthGrant === true,
+          ...(state.credentialError ? { error: state.credentialError } : current?.error ? { error: current.error } : Object.values(state.directories ?? {}).includes('needs-auth')
             ? { error: `MCP sign-in required for: ${Object.entries(state.directories ?? {}).filter(([, status]) => status === 'needs-auth').map(([kind]) => kind).join(', ')}` } : Object.values(state.directories ?? {}).includes('failed')
             ? { error: `MCP directory unavailable: ${Object.entries(state.directories ?? {}).filter(([, status]) => status === 'failed').map(([kind]) => kind).join(', ')}` } : {}) };
       }) };
@@ -47,6 +54,7 @@ export function createMcpSettings(options: {
     const opened = await options.authority.open(view.spec), entry = opened.config.servers.find(server => server.name === name);
     view.scopes.add(opened.scope);
     try {
+      if (view.closed) throw new ModelConfigurationError('mcp-view-unavailable', 'MCP settings were closed');
       if (!entry) throw new ModelConfigurationError('mcp-server-unavailable', 'MCP server is no longer configured');
       const state = await options.authority.connect(opened.scope, entry);
       if (view.closed) throw new ModelConfigurationError('mcp-view-unavailable', 'MCP settings were closed');
@@ -68,7 +76,15 @@ export function createMcpSettings(options: {
       const id = randomUUID(), view: View = { cwd: input.cwd as string | undefined, spec, scopes: new Set(), connections: new Map(), flows: new AuthorizationFlows(options.changed), closed: false };
       views.set(id, view);
       void options.authority.subscribe(spec, options.changed).then(unwatch => { if (view.closed) unwatch(); else view.unwatch = unwatch; }, () => undefined);
-      return snapshot(id);
+      const aborted = () => close(id);
+      signal.addEventListener('abort', aborted, { once: true });
+      try {
+        signal.throwIfAborted();
+        const result = await snapshot(id);
+        signal.throwIfAborted();
+        return result;
+      } catch (error) { close(id); throw error; }
+      finally { signal.removeEventListener('abort', aborted); }
     },
     read: async input => { await options.authority.reload(requireView(input.view).spec); return snapshot(input.view as string); },
     close: input => { close(input.view as string); return {}; },
@@ -98,9 +114,10 @@ export function createMcpSettings(options: {
       switch (input.command) {
         case 'connect': await waitWithSignal(connect(view, input.name), signal); break;
         case 'reconnect': {
-          const state = retained ? options.authority.snapshot(retained.scope, retained.handle) : undefined;
-          if (!retained || state?.error?.includes('revoked')) await waitWithSignal(connect(view, input.name), signal);
-          else await waitWithSignal(options.authority.reconnect(retained.scope, retained.handle), signal);
+          // Settings acts on today's definition. Existing Runs retain their original immutable lease.
+          const wasConnected = retained && options.authority.snapshot(retained.scope, retained.handle).state === 'connected';
+          const current = await waitWithSignal(connect(view, input.name), signal);
+          if (wasConnected && current.handle === retained.handle) await waitWithSignal(options.authority.reconnect(current.scope, current.handle), signal);
           break;
         }
         case 'disconnect': if (retained) { view.connections.delete(input.name); view.scopes.delete(retained.scope); options.authority.closeScope(retained.scope); } break;
@@ -112,7 +129,7 @@ export function createMcpSettings(options: {
     'authorization/start': async (input, signal) => {
       const view = requireView(input.view);
       if (typeof input.name !== 'string') throw new ModelConfigurationError('invalid-params', 'Select an MCP server');
-      const retained = view.connections.get(input.name) ?? await waitWithSignal(connect(view, input.name), signal);
+      const retained = await waitWithSignal(connect(view, input.name), signal);
       return view.flows.start(prompt => options.authority.signIn(retained.scope, retained.handle, prompt));
     },
     'authorization/read': input => requireView(input.view).flows.read(input.id as string),

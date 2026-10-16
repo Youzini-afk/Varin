@@ -5,7 +5,12 @@ import { tmpdir } from 'node:os';
 import { McpOAuthCredentialStore, oauthProvider, signInMcpServer } from './auth.js';
 vi.mock('@modelcontextprotocol/client', async importOriginal => ({
   ...await importOriginal<typeof import('@modelcontextprotocol/client')>(),
-  auth: async (provider: { redirectToAuthorization(url: URL): void }) => { provider.redirectToAuthorization(new URL('https://fixture/authorize')); return 'REDIRECT'; },
+  auth: async (provider: { redirectUrl: string; state(): string; redirectToAuthorization(url: URL): void }, options: { authorizationCode?: string }) => {
+    if (options.authorizationCode) return 'AUTHORIZED';
+    const url = new URL('https://fixture/authorize');
+    url.searchParams.set('redirect_uri', provider.redirectUrl); url.searchParams.set('state', provider.state());
+    provider.redirectToAuthorization(url); return 'REDIRECT';
+  },
 }));
 const cleanup: Array<() => Promise<unknown>> = [];
 afterEach(async () => { for (const close of cleanup.splice(0).reverse()) await close(); });
@@ -37,4 +42,28 @@ test('cancelling a redirected sign-in closes its local callback even when the ma
   await redirected;
   const rejected = expect(work).rejects.toThrow();
   controller.abort(); await rejected;
+});
+
+test('a state-bound OAuth denial ends sign-in and closes its callback without exposing remote error text', async () => {
+  const controller = new AbortController();
+  let shown!: (url: URL) => void;
+  const redirected = new Promise<URL>(resolve => { shown = resolve; });
+  let state: import('./auth.js').McpOAuthState | undefined;
+  const work = signInMcpServer({ serverUrl: 'https://fixture/mcp', settings: {}, store: { load: () => state, save: async value => { state = value; } },
+    prompt: { signal: controller.signal, showAuthorizationUrl: shown, promptForRedirectUrl: () => new Promise(() => {}) } });
+  let settled: unknown;
+  const observed = work.then(() => { settled = 'success'; }, error => { settled = error; });
+  const authorization = await redirected;
+  const callback = new URL(authorization.searchParams.get('redirect_uri')!);
+  callback.searchParams.set('state', 'wrong-state'); callback.searchParams.set('error', 'access_denied');
+  try {
+    expect((await fetch(callback)).status).toBe(400); expect(settled).toBeUndefined();
+    callback.searchParams.set('state', authorization.searchParams.get('state')!);
+    callback.searchParams.set('error_description', 'synthetic-private-remote-text');
+    const reply = await fetch(callback); await reply.text();
+    await expect.poll(() => settled, { timeout: 300 }).toBeInstanceOf(Error);
+    await observed;
+    expect((settled as Error).message).toBe('MCP sign-in was not authorized');
+    await expect(fetch(callback)).rejects.toThrow();
+  } finally { controller.abort(); await observed; }
 });

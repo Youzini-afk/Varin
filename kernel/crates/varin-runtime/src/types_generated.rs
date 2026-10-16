@@ -258,6 +258,15 @@ pub enum McpResourceFactKind {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct RunFailure {
+    pub run_id: String,
+    pub cursor: u64,
+    pub code: String,
+    pub message: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ContentCollectionReport {
     pub status: ContentCollectionStatus,
     pub phase: ContentCollectionPhase,

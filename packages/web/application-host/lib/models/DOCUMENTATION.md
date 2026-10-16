@@ -63,6 +63,10 @@ A channel type declares its protocol, operation support, authentication options,
 display metadata and optional discovery/catalog candidates. A channel is one stable user-selected
 connection. Multiple channels may use the same type. Each channel model has a stable catalog ID;
 `requestModelId` supplies the actual model/deployment identifier. Display names are not routing keys.
+Protocol-specific thinking options follow that upstream identifier, so a local catalog alias does
+not change the selected model's wire dialect or token budget.
+Opaque Bedrock resource/profile IDs retain the configured model-name hint; a recognizable upstream
+model ID always takes precedence over that hint.
 
 UI and execution consume the same type definitions. `channel-types.ts` is the current built-in
 support list; a provider name does not imply every protocol option is supported. Unknown model
@@ -72,6 +76,10 @@ remain explicit: image input alone does not enable image generation, editing or 
 Discovery and extension catalog candidates are read-only material. Applying a selection requires a
 configuration write; an empty or failed discovery does not delete saved models or purpose bindings.
 Configured values, unavailable types, missing credentials and disabled models remain distinguishable.
+Gemini and Anthropic discovery follow their opaque page cursors on the captured connection; cancellation,
+invalid/repeated cursors and later-page failures never publish a partial list as complete. Settings show
+contributed catalog candidates even without network discovery, and require connection changes to be saved
+before querying that connection. Selecting a candidate preserves its declared model capabilities.
 
 Connection options are explicit and credential-free:
 
@@ -86,6 +94,9 @@ Connection options are explicit and credential-free:
 The same captured options reach chat, discovery and supported auxiliary consumers. Normal edits
 affect later preparation; they cannot retarget an accepted Run, queued input or active request.
 Explicit disable/removal or account withdrawal is checked separately and can reject further access.
+Settings HTTP failures retain Host egress classifications with fixed, non-secret messages; a network
+policy denial is not reported as malformed model configuration. Non-desktop Hosts retain private-address
+checks; local model access is supplied by the real Electron network integration, not a model-setting bypass.
 
 ## Authentication and retained bindings
 

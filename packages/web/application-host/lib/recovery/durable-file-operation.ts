@@ -327,8 +327,11 @@ const kernelComplete = async (
 };
 
 const kernelCompensateDisk = async (context: DurableFileOperationContext, operationId: string, data: PersistedIntegrationData): Promise<void> => {
-  for (const file of data.appliedPaths ?? []) {
-    if (data.targetKinds?.[file] !== "disk") continue;
+  const paths = (data.appliedPaths ?? []).filter(file => data.targetKinds?.[file] === "disk"
+    && data.targets?.[file]?.target && data.safety?.[file]);
+  // Undo follows the retained safety tree, not the forward apply order. Remove
+  // child entries before replacing their directory with its original file.
+  for (const { path: file } of orderForStates(paths.map(path => ({ path })), entry => data.safety[entry.path]!)) {
     const target = data.targets?.[file]?.target;
     const safety = data.safety?.[file];
     if (!target || !safety) continue;
@@ -758,8 +761,27 @@ export const markDurableExternalUndoDispatched = async (
     const supplied = [...new Set(paths)].sort();
     if (expected.length !== supplied.length || expected.some((file, index) => file !== supplied[index])) throw new Error(`Integration ${operationId} surface undo path set changed`);
     for (const file of supplied) await kernelTransition(context, operationId, file, "external-compensate-intent");
-    await kernelComplete(context, operationId, "undoing", data);
+    await kernelComplete(context, operationId, "undoing", { ...data, executorStopped: false });
     return;
+};
+
+/** Keep each original Surface ACK before another owner can fail or disappear. */
+export const recordDurableExternalUndoResults = async (
+  context: DurableFileOperationContext,
+  input: { operationId: string; restoredPaths: readonly string[]; executorStopped: boolean },
+): Promise<void> => {
+  const operation = await kernelOperation(context, input.operationId);
+  if (operation.state !== "undoing") throw new Error(`Integration ${input.operationId} is not undoing`);
+  const data = kernelOperationData(operation);
+  const restored = [...new Set(input.restoredPaths)];
+  if (restored.length !== input.restoredPaths.length || restored.some(file => data.targetKinds[file] !== "surface"
+    || !["external-compensate-intent", "external-safety-observed"].includes(String(kernelFile(operation, file).phase)))) {
+    throw new Error(`Integration ${input.operationId} Surface undo receipt does not match its dispatch`);
+  }
+  for (const file of restored) await kernelTransition(context, input.operationId, file, "external-safety-observed");
+  data.compensatedPaths = [...new Set([...data.compensatedPaths, ...restored])].sort();
+  data.executorStopped = input.executorStopped;
+  await kernelComplete(context, input.operationId, "undoing", data);
 };
 
 /**
@@ -787,6 +809,7 @@ export const markDurableIntegrationUndoing = async (
     }
     const nextData = {
       ...data,
+      executorStopped: false,
       ...(apply?.applyCanonicalRoot ? { applyCanonicalRoot: apply.applyCanonicalRoot } : {}),
       ...(apply?.applyExecutionWorkspaceId ? { applyExecutionWorkspaceId: apply.applyExecutionWorkspaceId } : {}),
     };
@@ -808,7 +831,7 @@ export const finalizeDurableIntegrationUndone = async (
       throw new Error(`Integration ${operationId} cannot finish undo from state ${state}`);
     }
     const paths = [...new Set([...(data.compensatedPaths ?? []), ...(compensatedPaths ?? data.appliedPaths ?? [])])].sort();
-    const completed = { ...data, compensatedPaths: paths, needsAttentionPaths: [] };
+    const completed = { ...data, compensatedPaths: paths, needsAttentionPaths: [], executorStopped: true };
     delete completed.failure;
     if (state !== "undone") await kernelComplete(context, operationId, "undone", completed);
     return {
@@ -946,9 +969,14 @@ export const undoDurableIntegrationOperation = async (
     const surfacePaths = Object.entries(data.targetKinds ?? {}).filter(([, kind]) => kind === "surface").map(([file]) => file).sort();
     const undone = [...new Set(input.surfaceUndonePaths)].sort();
     if (surfacePaths.length !== undone.length || surfacePaths.some((file, index) => file !== undone[index])) throw new Error(`Integration ${input.operationId} surface undo is incomplete`);
-    if (state !== "undoing") await kernelComplete(context, input.operationId, "undoing", data);
+    // Surface ACKs establish only those writers' stop. Persist new disk work as
+    // unconfirmed until all of its original conditional calls have returned.
+    data.executorStopped = false;
+    await kernelComplete(context, input.operationId, "undoing", data);
     for (const file of surfacePaths) await kernelTransition(context, input.operationId, file, "external-safety-observed");
+    data.compensatedPaths = [...new Set([...data.compensatedPaths, ...undone])].sort();
     await kernelCompensateDisk(context, input.operationId, data);
+    data.executorStopped = true;
     const terminal = data.needsAttentionPaths.length > 0 ? "needs-attention" : "undone";
     await kernelComplete(context, input.operationId, terminal, data, data.failure);
     return { operationId: input.operationId, status: terminal === "undone" ? "compensated" : "needs-attention", appliedPaths: [], conflictPaths: [...(data.conflictPaths ?? [])], compensatedPaths: [...(data.compensatedPaths ?? [])], needsAttentionPaths: [...(data.needsAttentionPaths ?? [])], diffStats: data.diffStats, text: terminal === "undone" ? "Integration was undone." : "Integration undo requires attention." };
