@@ -1,4 +1,5 @@
 import React from 'react';
+import { SettingsActionBar } from '../shared/SettingsActionBar';
 import { IndexDirectories } from './IndexDirectories';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -64,15 +65,17 @@ export function IndexSettings(props: Partial<HarnessSettingsPageProps>) {
     setDirty(true);
   };
   const save = async () => {
-    if (!draft || !status) return;
+    if (!draft || !status) return false;
     setBusy(true);
     setError(null);
     try {
       await saveSemanticIndexConfig(draft, status.revision);
       setDirty(false);
       await refresh();
+      return true;
     } catch (failure) {
       setError(failure instanceof Error ? failure.message : String(failure));
+      return false;
     } finally { setBusy(false); }
   };
   const chooseFolder = async (_target: 'storage') => {
@@ -161,7 +164,7 @@ export function IndexSettings(props: Partial<HarnessSettingsPageProps>) {
         <Input type="number" min={0} step={1} className="w-40" value={draft?.requestIntervalMs ?? 0}
           onChange={(event) => edit({ requestIntervalMs: Number(event.target.value) })} />
       </SettingsFieldRow>
-      <Button size="sm" disabled={!dirty || !validDraft || busy} onClick={() => { void save(); }}>{t('settings.page.harness.index.save')}</Button>
+<SettingsActionBar dirty={dirty} saving={busy} saveDisabled={!validDraft} onSave={save} onCancel={() => { if (status) setDraft(status.config); setDirty(false); setError(null); }} error={error} />
       {error ? <p role="alert" className="typography-meta text-destructive">{error}</p> : null}
     </SettingsSection>
     <LocalSemanticSettings state={localSemantic} />

@@ -208,9 +208,11 @@ pub(super) fn idempotent(
     if let Some(result) = storage.operation_existing(operation_id, kind, &params_hash)? {
         return Ok(result);
     }
+    let selected_gc = params_value.get("objectHashes").and_then(Value::as_array)
+        .map(|hashes| hashes.iter().filter_map(Value::as_str).map(String::from).collect::<BTreeSet<_>>());
     let prior_cleanup = if kind == "storage.gc" {
-        storage.sweep_orphan_objects()?;
-        Some(storage.drain_gc_files()?)
+        if selected_gc.is_none() { storage.sweep_orphan_objects()?; }
+        Some(storage.drain_selected_gc_files(selected_gc.as_ref())?)
     } else {
         None
     };
@@ -233,7 +235,7 @@ pub(super) fn idempotent(
         Ok(result) => {
             storage.conn.execute_batch("COMMIT")?;
             if kind == "storage.gc" {
-                let cleanup = storage.drain_gc_files()?;
+                let cleanup = storage.drain_selected_gc_files(selected_gc.as_ref())?;
                 let mut enriched = result.clone();
                 if let Some(object) = enriched.as_object_mut() {
                     let deleted = cleanup
@@ -254,7 +256,11 @@ pub(super) fn idempotent(
                             .and_then(|prior| prior.get("byteLengthReclaimed"))
                             .and_then(Value::as_u64)
                             .unwrap_or(0);
-                    let (_, failures) = storage.cleanup_status()?;
+                    let failures = if selected_gc.is_some() {
+                        cleanup.get("failures").and_then(Value::as_array).into_iter().flatten()
+                            .chain(prior_cleanup.as_ref().and_then(|prior| prior.get("failures")).and_then(Value::as_array).into_iter().flatten())
+                            .filter_map(Value::as_str).map(String::from).collect::<Vec<_>>()
+                    } else { storage.cleanup_status()?.1 };
                     object.insert("deletedBlobs".to_string(), json!(deleted));
                     object.insert("byteLengthReclaimed".to_string(), json!(reclaimed_bytes));
                     object.insert("cleanupFailures".to_string(), json!(failures));

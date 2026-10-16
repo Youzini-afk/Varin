@@ -35,3 +35,5 @@ export * from "./mcp-connections.js";
 export * from "./documents-workspace-edit.js";
 
 export * from './resource-management.js';
+
+export * from "./storage.js";

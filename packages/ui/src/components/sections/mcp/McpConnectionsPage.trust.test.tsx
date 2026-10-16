@@ -3,8 +3,8 @@ import { createRoot, type Root } from 'react-dom/client';
 import { parseHTML } from 'linkedom';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import type { McpConfigurationSnapshot, McpConfigurationServer } from '@varin/application-client';
-const fixture = vi.hoisted(() => ({ version: 0, trust: true, listeners: new Set<() => void>(), blockers: new Set<() => Promise<void>>(), api: { open: vi.fn(), close: vi.fn(), read: vi.fn(), readDocument: vi.fn(), saveDocument: vi.fn(), command: vi.fn(), signIn: vi.fn(), authorization: vi.fn() } }));
-vi.mock('@varin/application-client', () => ({ createMcpConnectionsHttpAPI: () => fixture.api, registerRuntimeEndpointSwitchBlocker: (listener: () => Promise<void>) => { fixture.blockers.add(listener); return () => fixture.blockers.delete(listener); }, getRuntimeEndpointGeneration: () => 1, subscribeRuntimeEndpointChanged: () => () => {} }));
+const fixture = vi.hoisted(() => ({ version: 0, host: 1, trust: true, multisource: false, hostListeners: new Set<() => void>(), listeners: new Set<() => void>(), blockers: new Set<() => Promise<void>>(), api: { open: vi.fn(), close: vi.fn(), read: vi.fn(), readDocument: vi.fn(), saveDocument: vi.fn(), command: vi.fn(), signIn: vi.fn(), authorization: vi.fn() } }));
+vi.mock('@varin/application-client', () => ({ createMcpConnectionsHttpAPI: () => fixture.api, registerRuntimeEndpointSwitchBlocker: (listener: () => Promise<void>) => { fixture.blockers.add(listener); return () => fixture.blockers.delete(listener); }, getRuntimeEndpointGeneration: () => fixture.host, subscribeRuntimeEndpointChanged: (listener: () => void) => { fixture.hostListeners.add(listener); return () => fixture.hostListeners.delete(listener); } }));
 vi.mock('@/lib/projectTrust', () => ({ getProjectTrustGeneration: () => fixture.version,
   subscribeProjectTrustChanges: (listener: () => void) => { fixture.listeners.add(listener); return () => fixture.listeners.delete(listener); } }));
 vi.mock('@/components/sections/shared/ProjectTrustSettings', () => ({ ProjectTrustSettings: () => <div>Trust controls</div> }));
@@ -17,13 +17,19 @@ vi.mock('../shared/SettingsSection', () => ({ SettingsSection: ({ children }: Re
 vi.mock('../shared/AuthorizationPanel', () => ({ AuthorizationPanel: () => null }));
 vi.mock('./McpStructuredConfigEditor', () => ({ McpStructuredConfigEditor: ({ content, disabled, onChange }: { content: string; disabled: boolean; onChange(value: string): void }) => <textarea aria-label="Configuration draft" data-content={content} value={content} readOnly={disabled} onInput={event => onChange(event.currentTarget.value)} /> }));
 vi.mock('@/components/ui/CodeMirrorEditor', () => ({ CodeMirrorEditor: () => null }));
-vi.mock('@/components/ui/select', () => ({ Select: ({ children }: React.PropsWithChildren) => <div>{children}</div>, SelectContent: ({ children }: React.PropsWithChildren) => <div>{children}</div>, SelectTrigger: ({ children }: React.PropsWithChildren) => <div>{children}</div>, SelectValue: () => null, SelectItem: ({ children }: React.PropsWithChildren) => <span>{children}</span> }));
+vi.mock('@/components/ui/select', () => {
+  const Selection = React.createContext((_value: string) => {});
+  return { Select: ({ children, onValueChange }: React.PropsWithChildren<{ onValueChange(value: string): void }>) => <Selection.Provider value={onValueChange}>{children}</Selection.Provider>, SelectContent: ({ children }: React.PropsWithChildren) => <div>{children}</div>, SelectTrigger: ({ children }: React.PropsWithChildren) => <div>{children}</div>, SelectValue: () => null,
+    SelectItem: ({ children, value }: React.PropsWithChildren<{ value: string }>) => { const select = React.useContext(Selection); return <button onClick={() => select(value)}>{children}</button>; } };
+});
 import { McpConnectionsPage } from './McpConnectionsPage';
+import { SettingsNavigationContext } from '../shared/settings-context';
+import { finishSettingsNavigation, stayInSettings } from '@/lib/settings/drafts';
 let root: Root, container: HTMLDivElement, viewNumber: number;
 let servers: McpConfigurationServer[];
-const snapshot = (view = `view:${viewNumber}`): McpConfigurationSnapshot => ({ view, sources: fixture.trust ? [{ path: '/project/.mcp.json', scope: 'project' }] : [{ path: '/user/mcp.json', scope: 'global' }], servers, issues: [] });
+const snapshot = (view = `view:${viewNumber}`): McpConfigurationSnapshot => ({ view, sources: fixture.trust ? [{ path: '/project/.mcp.json', scope: 'project' }, ...(fixture.multisource ? [{ path: '/user/mcp.json', scope: 'global' as const }] : [])] : [{ path: '/user/mcp.json', scope: 'global' }], servers, issues: [] });
 beforeEach(() => {
-  servers = []; fixture.trust = true; fixture.version += 1; viewNumber = 0; vi.clearAllMocks();
+  servers = []; fixture.trust = true; fixture.multisource = false; fixture.version += 1; fixture.host += 1; viewNumber = 0; vi.clearAllMocks();
   fixture.api.open.mockImplementation(async () => snapshot(`view:${++viewNumber}`)); fixture.api.close.mockResolvedValue(undefined);
   fixture.api.read.mockImplementation(async (view: string) => snapshot(view));
   fixture.api.readDocument.mockImplementation(async (_view: string, path: string) => ({ path, content: '{}', revision: 'original', exists: true }));
@@ -32,7 +38,7 @@ beforeEach(() => {
   vi.stubGlobal('window', window); vi.stubGlobal('document', document); vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
   container = document.createElement('div'); document.body.append(container); root = createRoot(container);
 });
-afterEach(() => { act(() => root.unmount()); container.remove(); vi.unstubAllGlobals(); });
+afterEach(() => { act(() => root.unmount()); stayInSettings(); container.remove(); vi.unstubAllGlobals(); });
 const editor = () => container.querySelector<HTMLTextAreaElement>('[aria-label="Configuration draft"]')!;
 const button = (text: string) => [...container.querySelectorAll<HTMLButtonElement>('button')].find(value => value.textContent === text)!;
 const changeTrust = (trusted: boolean) => act(async () => { fixture.trust = trusted; fixture.version += 1; for (const listener of fixture.listeners) listener(); });
@@ -44,10 +50,10 @@ it('retains an unsaved project draft read-only after revocation, then saves it o
   await changeTrust(false);
   expect(fixture.api.close).toHaveBeenCalledWith('view:1');
   expect(editor().value).toBe(draft); expect(editor().hasAttribute('readOnly')).toBe(true);
-  expect(button('settings.models.save').disabled).toBe(true); expect(fixture.api.readDocument).toHaveBeenCalledOnce();
+  expect(button('settings.common.actions.saveChanges').disabled).toBe(true); expect(fixture.api.readDocument).toHaveBeenCalledOnce();
   await changeTrust(true);
   expect(editor().value).toBe(draft); expect(editor().hasAttribute('readOnly')).toBe(false);
-  await act(async () => button('settings.models.save').click());
+  await act(async () => button('settings.common.actions.saveChanges').click());
   expect(fixture.api.saveDocument).toHaveBeenCalledWith('view:3', '/project/.mcp.json', draft, 'original', expect.any(AbortSignal));
 });
 
@@ -58,6 +64,34 @@ it('does not let a late read from the revoked view replace the new untrusted vie
   await act(async () => complete({ path: '/project/.mcp.json', content: '{"revoked":true}', revision: 'old', exists: true }));
   expect(editor().getAttribute('data-content')).toBe('{}'); expect(container.textContent).not.toContain('revoked');
   expect(fixture.api.saveDocument).not.toHaveBeenCalled();
+});
+
+it('loads the selected source after discarding a draft retained across a trust refresh', async () => {
+  fixture.multisource = true;
+  fixture.api.readDocument.mockImplementation(async (_view: string, path: string) => ({ path, content: JSON.stringify({ source: path }), revision: path, exists: true }));
+  await act(async () => root.render(<SettingsNavigationContext.Provider value><McpConnectionsPage /></SettingsNavigationContext.Provider>));
+  await act(async () => { editor().value = '{"unsaved":true}'; editor().dispatchEvent(new window.Event('input', { bubbles: true })); });
+  await changeTrust(false); await changeTrust(true);
+  await act(async () => button('/user/mcp.json').click());
+  expect(fixture.api.readDocument).toHaveBeenCalledTimes(1);
+  await act(async () => { expect(await finishSettingsNavigation(false)).toBe(true); });
+  expect(fixture.api.readDocument).toHaveBeenLastCalledWith('view:3', '/user/mcp.json', expect.any(AbortSignal));
+  expect(editor().getAttribute('data-content')).toBe('{"source":"/user/mcp.json"}');
+  await act(async () => { editor().value = '{"global":true}'; editor().dispatchEvent(new window.Event('input', { bubbles: true })); });
+  await act(async () => button('settings.common.actions.saveChanges').click());
+  expect(fixture.api.saveDocument).toHaveBeenLastCalledWith('view:3', '/user/mcp.json', '{"global":true}', '/user/mcp.json', expect.any(AbortSignal));
+});
+
+it('rejects a late old-Host document response and saves only the new Host document', async () => {
+  let complete!: (value: unknown) => void;
+  fixture.api.readDocument.mockImplementationOnce(() => new Promise(resolve => { complete = resolve; }));
+  await act(async () => root.render(<McpConnectionsPage />));
+  await act(async () => { fixture.host += 1; for (const listener of fixture.hostListeners) listener(); });
+  await act(async () => complete({ path: '/old-host/config.json', content: '{"oldHost":true}', revision: 'old', exists: true }));
+  expect(editor().getAttribute('data-content')).toBe('{}');
+  await act(async () => { editor().value = '{"newHost":true}'; editor().dispatchEvent(new window.Event('input', { bubbles: true })); });
+  await act(async () => button('settings.common.actions.saveChanges').click());
+  expect(fixture.api.saveDocument).toHaveBeenLastCalledWith('view:2', '/project/.mcp.json', '{"newHost":true}', 'original', expect.any(AbortSignal));
 });
 
 

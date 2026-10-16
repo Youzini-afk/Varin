@@ -63,6 +63,9 @@ export const KeyboardShortcutsSettings: React.FC = () => {
     return translated === key ? fallbackLabel : translated;
   }, [tUnsafe]);
 
+  const [search, setSearch] = React.useState('');
+  const visibleActions = actions.filter(action => `${actionLabel(action.id, action.label)} ${formatShortcutForDisplay(getEffectiveShortcutCombo(action.id, shortcutOverrides))}`.toLocaleLowerCase().includes(search.trim().toLocaleLowerCase()));
+
   const [capturingActionId, setCapturingActionId] = React.useState<string | null>(null);
   const [draftByAction, setDraftByAction] = React.useState<Record<string, ShortcutCombo>>({});
   const [errorText, setErrorText] = React.useState<string>('');
@@ -181,7 +184,7 @@ export const KeyboardShortcutsSettings: React.FC = () => {
           {pendingOverwrite && (
             <div className="rounded-lg border border-[var(--status-warning-border)] bg-[var(--status-warning-background)] p-3 flex flex-col @xl:flex-row @xl:items-center justify-between gap-3">
               <span className="typography-meta text-foreground">
-                {t('settings.varin.keyboardShortcuts.overwritePrompt')}
+                {t('settings.varin.keyboardShortcuts.overwritePrompt')}<span className="mt-1 block font-medium">{actionLabel(pendingOverwrite.conflictActionId, pendingOverwrite.conflictActionId)} · {formatShortcutForDisplay(pendingOverwrite.combo)}</span>
               </span>
               <div className="flex gap-2 shrink-0">
                 <Button type="button" size="xs" className="!font-normal" onClick={confirmOverwrite}>{t('settings.varin.keyboardShortcuts.actions.overwrite')}</Button>
@@ -202,8 +205,11 @@ export const KeyboardShortcutsSettings: React.FC = () => {
         </div>
       )}
 
+      <Input type="search" value={search} onChange={event => setSearch(event.target.value)}
+        placeholder={t('settings.shortcuts.search')} aria-label={t('settings.shortcuts.search')} className="mb-4 max-w-sm" />
+      {!visibleActions.length && <p className="py-6 typography-meta text-muted-foreground">{t('settings.shortcuts.noResults')}</p>}
       <div>
-        {actions.map((action, index) => {
+        {visibleActions.map((action, index) => {
           const effective = getEffectiveShortcutCombo(action.id, shortcutOverrides);
           const draft = draftByAction[action.id];
           const displayCombo = draft ?? effective;
@@ -213,10 +219,11 @@ export const KeyboardShortcutsSettings: React.FC = () => {
             <div key={action.id} className={cn("py-1.5", index > 0 && "border-t border-border/40")}>
               <SettingsFieldRow
                 label={actionLabel(action.id, action.label)}
-                alignEnd={false}
+                controlClassName="flex-wrap"
               >
                 <Input
                   readOnly
+                  aria-label={actionLabel(action.id, action.label)}
                   value={capturingActionId === action.id ? t('settings.varin.keyboardShortcuts.field.pressKeys') : formatShortcutForDisplay(displayCombo)}
                   onFocus={() => {
                     setCapturingActionId(action.id);

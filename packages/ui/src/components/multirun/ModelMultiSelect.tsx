@@ -3,7 +3,7 @@ import type { ThreadThinkingLevel } from '@varin/application-client';
 import { toModelPickerProvider } from '@/lib/modelPicker';
 import { dropdownTriggerVariants } from '@/components/ui/dropdown-trigger';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { ProviderLogo } from '@/components/ui/ProviderLogo';
+import { ModelLogo } from '@/components/ui/ModelLogo';
 import { Icon } from "@/components/icon/Icon";
 import { cn } from '@/lib/utils';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
@@ -39,12 +39,13 @@ const ModelChip: React.FC<{
   totalSameModel: number;
   onRemove: () => void;
 }> = ({ model, instanceIndex, totalSameModel, onRemove }) => {
+  const configured = useModelCatalogStore(state => state.channels.find(channel => channel.id === model.providerID)?.models.find(entry => entry.id === model.modelID));
   const displayName = model.displayName || `${model.providerID}/${model.modelID}`;
   const label = totalSameModel > 1 ? `${displayName} (${instanceIndex})` : displayName;
 
   return (
     <div className={cn('flex items-center gap-1.5 px-2 rounded-md bg-interactive-selection/20 border border-border/30', CHIP_HEIGHT_CLASS)}>
-      <ProviderLogo providerId={model.providerID} className="h-3.5 w-3.5" />
+      <ModelLogo modelId={model.modelID} requestModelId={configured?.requestModelId} displayName={configured?.name ?? model.displayName} />
       <span className="typography-meta font-medium truncate max-w-[140px]">
         {label}
       </span>

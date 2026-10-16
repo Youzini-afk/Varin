@@ -8,6 +8,7 @@ import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { useI18n } from '@/lib/i18n';
 import { listBotMemory, readBotMemorySource, updateBotMemory } from '@/lib/bots';
+import { SettingsFooterContext, SettingsNavigationContext } from '@/components/sections/shared/settings-context';
 import { BotSettings } from './BotSettings';
 
 export function BotDetailsDialog({ bot, onClose }: {
@@ -15,14 +16,25 @@ export function BotDetailsDialog({ bot, onClose }: {
   onClose(): void;
 }) {
   const { t } = useI18n();
-  return <Dialog open={bot !== null} onOpenChange={(open) => { if (!open) onClose(); }}>
-    <DialogContent className="max-h-[85vh] max-w-2xl overflow-y-auto">
+  const [footer, setFooter] = React.useState<HTMLDivElement | null>(null);
+  const profileDraft = React.useRef({ dirty: false, saving: false });
+  const handleDraftStateChange = React.useCallback((state: { dirty: boolean; saving: boolean }) => { profileDraft.current = state; }, []);
+  React.useEffect(() => { profileDraft.current = { dirty: false, saving: false }; }, [bot?.id, bot?.tab]);
+  const close = () => {
+    if (bot?.tab === 'profile' && (profileDraft.current.saving || (profileDraft.current.dirty && !window.confirm(t('settings.bots.discardConfirm'))))) return;
+    onClose();
+  };
+  return <Dialog open={bot !== null} onOpenChange={(open) => { if (!open) close(); }}>
+    <DialogContent className="flex max-h-[85vh] max-w-2xl flex-col overflow-hidden">
       <DialogHeader>
         <DialogTitle>{bot?.name} · {t(bot?.tab === 'memory' ? 'settings.bots.memory' : 'settings.bots.section.profile')}</DialogTitle>
         <DialogDescription>{t(bot?.tab === 'memory' ? 'settings.bots.memory.description' : 'settings.bots.instructions.description')}</DialogDescription>
       </DialogHeader>
-      {bot ? bot.tab === 'profile' ? <BotSettings key={bot.id} initialBotId={bot.id} onDeleted={onClose} />
+      <div className="min-h-0 overflow-y-auto"><SettingsNavigationContext.Provider value={false}><SettingsFooterContext.Provider value={footer}>
+      {bot ? bot.tab === 'profile' ? <BotSettings key={bot.id} initialBotId={bot.id} onDeleted={onClose} onDraftStateChange={handleDraftStateChange} />
         : <BotMemoryPanel key={bot.id} botId={bot.id} /> : null}
+      </SettingsFooterContext.Provider></SettingsNavigationContext.Provider></div>
+      <div ref={setFooter} className="shrink-0" />
     </DialogContent>
   </Dialog>;
 }

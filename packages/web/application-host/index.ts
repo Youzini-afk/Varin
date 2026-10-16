@@ -1,3 +1,6 @@
+import { createStorageService } from './lib/storage/service.js';
+import { registerStorageRoutes } from './lib/storage/routes.js';
+import { readHostConnections } from './lib/connections/hosts.js';
 import { createResourceManagement } from './lib/agent-resources/management.js';
 import { registerResourceManagementRoutes } from './lib/agent-resources/management-routes.js';
 import { createModelTextService } from './lib/model-text/service.js';
@@ -2555,6 +2558,21 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     directories: indexDirectories,
     ...(uiAuthController ? { requireAuth: uiAuthController.requireAuth } : {}),
   });
+  registerStorageRoutes(app, createStorageService({
+    hostId, name: os.hostname(), dataDirectory: VARIN_DATA_DIR,
+    speechModelsDirectory: path.join(VARIN_USER_CONFIG_ROOT, 'speech-models'),
+    workspaces: () => documentsAuthority.listWorkspaceRegistrations(),
+    indexes: semanticIndexManagement, kernel: kernelClient,
+    devices: async () => {
+      const statuses = await connections.statusesWithDefaults();
+      return readHostConnections(connections.settingsStore).hosts.map(host => {
+        const status = statuses.find(item => item.id === host.id);
+        return { id: `connection:${host.id}`, name: host.label || host.id, current: false,
+          state: status && status.phase !== 'ready' ? 'offline' as const : 'unsupported' as const,
+          ...(status?.detail ? { detail: status.detail } : {}) };
+      });
+    },
+  }), uiAuthController.requireAuth);
   knowledgeVectors = createKnowledgeVectorRuntime({
     dataDir: VARIN_DATA_DIR,
     hostId,

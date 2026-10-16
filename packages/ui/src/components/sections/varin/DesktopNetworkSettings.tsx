@@ -1,6 +1,7 @@
 import * as React from 'react';
 
 import { Button } from '@/components/ui/button';
+import { SettingsActionBar } from '@/components/sections/shared/SettingsActionBar';
 import { Icon } from '@/components/icon/Icon';
 import { Input } from '@/components/ui/input';
 import {
@@ -26,7 +27,7 @@ import {
   SETTINGS_ICON_BUTTON_CLASS,
 } from '@/components/sections/shared/SettingsSection';
 
-export const DesktopNetworkSettings: React.FC = () => {
+export const DesktopNetworkSettings: React.FC<{ section?: 'general' | 'access' | 'all' }> = ({ section = 'all' }) => {
   const { t } = useI18n();
   const isLocalDesktop = isDesktopShell() && isDesktopLocalOriginActive();
   const isMacDesktop = isLocalDesktop
@@ -196,9 +197,8 @@ export const DesktopNetworkSettings: React.FC = () => {
     };
   }, [draftValue, isLocalDesktop]);
 
-  const isDirty = draftValue !== savedValue
-    || draftPassword !== savedPassword
-    || draftMacMenuBarEnabled !== savedMacMenuBarEnabled;
+  const isDirty = (section !== 'general' && (draftValue !== savedValue || draftPassword !== savedPassword))
+    || (section !== 'access' && draftMacMenuBarEnabled !== savedMacMenuBarEnabled);
   const currentPort = React.useMemo(() => {
     if (typeof window === 'undefined') {
       return null;
@@ -217,7 +217,7 @@ export const DesktopNetworkSettings: React.FC = () => {
   const lanUrl = draftValue && lanAccessActive && lanAddress && currentPort ? `http://${lanAddress}:${currentPort}` : null;
   const lanRequiresPassword = draftValue && !draftPassword.trim();
   const lanBlockedByMissingPassword = savedValue && !lanAccessActive && lanAccessBlockedReason === 'missing-password';
-  const saveDisabled = isLoading || isSaving || !isDirty || lanRequiresPassword;
+  const saveDisabled = isLoading || isSaving || !isDirty || (section !== 'general' && lanRequiresPassword);
 
   const handlePasswordChange = React.useCallback((value: string) => {
     setDraftPassword(value);
@@ -302,9 +302,7 @@ export const DesktopNetworkSettings: React.FC = () => {
   }, [isSavingKeepAwake, keepAwakeEnabled, keepAwakeSupported, t]);
 
   const handleSaveAndRestart = React.useCallback(async () => {
-    if (!isDirty) {
-      return;
-    }
+    if (!isDirty) return true;
 
     setIsSaving(true);
     setError(null);
@@ -317,9 +315,8 @@ export const DesktopNetworkSettings: React.FC = () => {
           Accept: 'application/json',
         },
         body: JSON.stringify({
-          desktopLanAccessEnabled: draftValue,
-          desktopUiPassword: draftPassword,
-          desktopMacMenuBarEnabled: draftMacMenuBarEnabled,
+          ...(section !== 'general' ? { desktopLanAccessEnabled: draftValue, desktopUiPassword: draftPassword } : {}),
+          ...(section !== 'access' ? { desktopMacMenuBarEnabled: draftMacMenuBarEnabled } : {}),
         }),
       });
 
@@ -335,11 +332,13 @@ export const DesktopNetworkSettings: React.FC = () => {
       if (!restarted) {
         throw new Error(t('settings.varin.desktopNetwork.error.savedRestartFailed'));
       }
+      return true;
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : t('settings.varin.desktopNetwork.error.saveFailed'));
       setIsSaving(false);
+      return false;
     }
-  }, [draftMacMenuBarEnabled, draftPassword, draftValue, isDirty, t]);
+  }, [draftMacMenuBarEnabled, draftPassword, draftValue, isDirty, section, t]);
 
   if (!isLocalDesktop) {
     return null;
@@ -348,7 +347,7 @@ export const DesktopNetworkSettings: React.FC = () => {
   return (
     <SettingsSection title={t('settings.varin.desktopNetwork.title')}>
       <div className="space-y-3">
-        {(launchAtLoginSupported || isMacDesktop || minimizeToTraySupported || keepAwakeSupported) ? (
+        {section !== 'access' && (launchAtLoginSupported || isMacDesktop || minimizeToTraySupported || keepAwakeSupported) ? (
           <div className={SETTINGS_OPTION_STACK_CLASS}>
             {launchAtLoginSupported ? (
               <SettingsCheckboxRow
@@ -409,6 +408,7 @@ export const DesktopNetworkSettings: React.FC = () => {
           </div>
         ) : null}
 
+        {section !== 'general' ? <>
         <SettingsStackedField
           settingsItem="sessions.desktop-ui-password"
           label={(
@@ -466,11 +466,12 @@ export const DesktopNetworkSettings: React.FC = () => {
           />
         </div>
 
+        </> : null}
         {error ? (
           <div className="typography-micro text-[var(--status-error)]">{error}</div>
         ) : null}
 
-        {lanUrl ? (
+        {section !== 'general' && lanUrl ? (
           <div className="typography-micro text-muted-foreground/80">
             {isDirty && !savedValue
               ? t('settings.varin.desktopNetwork.hint.openAfterRestart')
@@ -479,17 +480,12 @@ export const DesktopNetworkSettings: React.FC = () => {
           </div>
         ) : null}
 
-        <div className="flex justify-start py-1.5">
-          <Button
-            type="button"
-            size="xs"
-            onClick={handleSaveAndRestart}
-            disabled={saveDisabled}
-            className="shrink-0 !font-normal"
-          >
-            {isSaving ? t('settings.common.actions.saving') : t('settings.varin.desktopNetwork.actions.saveAndRestart')}
-          </Button>
-        </div>
+        {section !== 'general' || isMacDesktop ? <SettingsActionBar
+          dirty={isDirty} saving={isSaving} saveDisabled={saveDisabled}
+          onSave={handleSaveAndRestart} saveLabel={t('settings.varin.desktopNetwork.actions.saveAndRestart')}
+          onCancel={() => { setDraftValue(savedValue); setDraftPassword(savedPassword); setDraftMacMenuBarEnabled(savedMacMenuBarEnabled); setError(null); }}
+          error={error}
+        /> : null}
       </div>
     </SettingsSection>
   );

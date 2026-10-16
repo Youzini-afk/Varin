@@ -138,7 +138,7 @@ export const VARIN_BUNDLED_LANGUAGE_SERVER_PROVIDER_IDS = VARIN_BUNDLED_LANGUAGE
 );
 
 const pageContribution = (input: {
-  group: "pi" | "harness";
+  group: "pi" | "harness" | "projects" | "connections";
   icon: string;
   id: string;
   keywords: string[];
@@ -204,9 +204,9 @@ export const VARIN_BUILTIN_AGENTS_EXTENSION = definition({
     id: "varin.builtin.agents.page.agents",
     keywords: ["agent", "agents", "subagent", "subagents", "roles", "workflow"],
     kind: "split",
-    order: 2,
+    order: 1,
     slug: "agents",
-    title: "Agents",
+    title: "agents",
     titleKey: "settings.page.agents.title",
   })],
 });
@@ -221,7 +221,7 @@ export const VARIN_BUILTIN_HARNESS_EXTENSION = definition({
       id: "varin.builtin.harness.page.tools",
       keywords: ["harness", "agent", "tools", "shell", "bash", "output", "process"],
       kind: "single",
-      order: 1,
+      order: 5,
       slug: "harness-tools",
       title: "Tools & Execution",
       titleKey: "settings.page.harness.page.tools.title",
@@ -232,7 +232,7 @@ export const VARIN_BUILTIN_HARNESS_EXTENSION = definition({
       id: "varin.builtin.harness.page.permissions",
       keywords: ["harness", "permissions", "approval", "rules", "policy"],
       kind: "single",
-      order: 0,
+      order: 9,
       slug: "harness-permissions",
       title: "Permissions & Policy",
       titleKey: "settings.page.harness.page.permissions.title",
@@ -243,29 +243,29 @@ export const VARIN_BUILTIN_HARNESS_EXTENSION = definition({
       id: "varin.builtin.harness.page.context",
       keywords: ["harness", "context", "compaction", "preparation", "long session", "recovery", "next step"],
       kind: "single",
-      order: 4,
+      order: 10,
       slug: "harness-context",
       title: "Context Management",
       titleKey: "settings.page.harness.page.context.title",
     }),
     pageContribution({
-      group: "harness",
+      group: "projects",
       icon: "search-eye",
       id: "varin.builtin.harness.page.retrieval",
       keywords: ["harness", "retrieval", "embedding", "rerank", "code", "search"],
       kind: "single",
-      order: 7,
+      order: 4,
       slug: "harness-retrieval",
       title: "Code Retrieval",
       titleKey: "settings.page.harness.page.retrieval.title",
     }),
     pageContribution({
-      group: "harness",
+      group: "projects",
       icon: "database-2",
       id: "varin.builtin.harness.page.index",
       keywords: ["index", "embedding", "storage", "progress", "semantic"],
       kind: "single",
-      order: 8,
+      order: 5,
       slug: "harness-index",
       title: "Semantic File Index",
       titleKey: "settings.page.harness.page.index.title",
@@ -278,7 +278,7 @@ export const VARIN_BUILTIN_HARNESS_EXTENSION = definition({
       kind: "single",
       order: 6,
       slug: "harness-web",
-      title: "Web Access",
+      title: "Web search and documents",
       titleKey: "settings.page.harness.page.web.title",
     }),
     pageContribution({
@@ -287,7 +287,7 @@ export const VARIN_BUILTIN_HARNESS_EXTENSION = definition({
       id: "varin.builtin.harness.page.computers",
       keywords: ["computer", "desktop", "computer use", "gui", "automation", "screen"],
       kind: "single",
-      order: 10,
+      order: 8,
       slug: "harness-computers",
       title: "Computer Use",
       titleKey: "settings.page.harness.page.computers.title",
@@ -298,9 +298,9 @@ export const VARIN_BUILTIN_HARNESS_EXTENSION = definition({
       id: "varin.builtin.harness.page.bots",
       keywords: ["bot", "bots", "assistant", "persona", "durable agent"],
       kind: "single",
-      order: 9,
+      order: 2,
       slug: "harness-bots",
-      title: "Bots",
+      title: "Varin bot",
       titleKey: "settings.page.harness.page.bots.title",
     }),
   ],

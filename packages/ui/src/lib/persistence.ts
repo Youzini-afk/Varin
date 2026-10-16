@@ -127,7 +127,7 @@ const dispatchSettingsSynced = (settings: DesktopSettings): void => {
   window.dispatchEvent(new CustomEvent<DesktopSettings>('varin:settings-synced', { detail: settings }));
 };
 
-type SettingsSaveState = 'idle' | 'saving' | 'error';
+type SettingsSaveState = 'idle' | 'saving' | 'saved' | 'error';
 
 let _settingsSaveState: SettingsSaveState = 'idle';
 let _settingsSaveStateResetTimer: ReturnType<typeof setTimeout> | null = null;
@@ -154,16 +154,18 @@ const dispatchSettingsSaveState = (state: 'saving' | 'saved' | 'error'): void =>
     _settingsSaveStateResetTimer = null;
   }
 
-  // Quiet indicator: success is the normal case and renders nothing ('saved' → idle);
-  // only in-flight saves and failures surface in the UI.
-  const nextState: SettingsSaveState = state === 'saved' ? 'idle' : state;
+  // Success is shown only after the owner acknowledges persistence.
+  const nextState: SettingsSaveState = state;
   if (nextState !== _settingsSaveState) {
     _settingsSaveState = nextState;
     _settingsSaveStateListeners.forEach((listener) => listener());
   }
 
-  if (nextState === 'error') {
-    _settingsSaveStateResetTimer = setTimeout(() => dispatchSettingsSaveState('saved'), 6000);
+  if (nextState === 'saved') {
+    _settingsSaveStateResetTimer = setTimeout(() => {
+      _settingsSaveState = 'idle';
+      _settingsSaveStateListeners.forEach(listener => listener());
+    }, 2500);
   }
 
   if (typeof window === 'undefined') {

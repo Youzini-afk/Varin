@@ -145,3 +145,24 @@ their explicit release; GC only schedules objects that are unreachable from ever
 operation and temporary owner. A missing or malformed node/object/catalog makes the operation fail rather than authorizing
 deletion. Metadata release and physical cleanup have separate outcomes; cleanup failure keeps a retryable
 request and does not report zero bytes as success (D-239/D-282).
+
+The Storage settings page also measures managed application directories and configured index stores through
+an authenticated, metadata-only Host inventory. It counts hard-linked files once, leaves shared or
+unattributable kernel objects in the shared bucket, and does not scan original project directories.
+Its sizes are logical file lengths, separate from filesystem volume capacity. Unreadable paths and
+unsupported remote storage channels stay explicit rather than becoming zero-byte measurements.
+
+Storage cleanup uses a short-lived Host preview identity, not a renderer path. The native preview
+uses the same complete reachability graph as GC; confirmation passes only the previewed object hashes
+and rechecks current roots and readers. It neither releases recovery history nor sweeps unrelated
+pending files. Inactive index cleanup uses the existing index-management owner, validates its current
+configuration revision and the previewed metadata fingerprint, and limits workspace requests to that
+workspace's cache subtree. Active caches, working copies and source projects are excluded. Completion
+receipts report actual file bytes removed and preserve failures; a lost response is not a zero-byte success.
+
+Previews expire after ten minutes only for first acceptance. Running effects remain attached to their
+original confirmation, and completed receipts replay for 24 hours after completion. Expired entries
+are pruned without re-executing an old confirmation. Preview identities are bound to the authenticated
+Host principal; directory-restricted clients cannot use Host-wide management, and read-only clients
+can inspect inventory but cannot confirm cleanup. A workspace link retains its original requested
+identity and reports a missing catalog registration instead of silently widening to the whole Host.

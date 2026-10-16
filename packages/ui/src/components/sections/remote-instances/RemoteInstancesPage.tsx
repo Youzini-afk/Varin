@@ -20,6 +20,9 @@ import {
 } from '@/components/ui/dialog';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { SettingsPageLayout } from '@/components/sections/shared/SettingsPageLayout';
+import { SettingsActionBar } from '@/components/sections/shared/SettingsActionBar';
+import { SettingsFooterContext } from '@/components/sections/shared/settings-context';
+import { requestSettingsNavigation } from '@/lib/settings/drafts';
 import {
   SettingsSection,
   SettingsGroupTitle,
@@ -379,17 +382,18 @@ const normalizeForSave = (instance: DesktopSshInstance): DesktopSshInstance => {
   };
 };
 
-export const RemoteInstancesPage: React.FC = () => {
+interface RemoteInstancesPageProps { view?: 'hosts' | 'access'; intro?: React.ReactNode }
+export const RemoteInstancesPage: React.FC<RemoteInstancesPageProps> = ({ view = 'hosts', intro }) => {
   const runtimeKey = React.useSyncExternalStore((notify) => subscribeRuntimeEndpointChanged(() => notify()), getRuntimeKey, getRuntimeKey);
-  return <RemoteInstancesContent key={runtimeKey} />;
+  return <RemoteInstancesContent key={`${runtimeKey}:${view}`} view={view} intro={intro} />;
 };
 
-const RemoteInstancesContent: React.FC = () => {
+const RemoteInstancesContent: React.FC<RemoteInstancesPageProps> = ({ view = 'hosts', intro }) => {
   const ownerKey = getRuntimeKey();
   const { t } = useI18n();
   const timeFormatPreference = useUIStore((state) => state.timeFormatPreference);
   const { clientAuth } = useRuntimeAPIs();
-  const showInstanceManagement = true;
+  const showInstanceManagement = view === 'hosts';
   const instances = useDesktopSshStore((state) => state.instances);
   const statusesById = useDesktopSshStore((state) => state.statusesById);
   const importCandidates = useDesktopSshStore((state) => state.importCandidates);
@@ -411,11 +415,13 @@ const RemoteInstancesContent: React.FC = () => {
   const setSelectedId = useUIStore((state) => state.setSettingsRemoteInstancesSelectedId);
 
   const selectedInstance = React.useMemo(() => {
-    if (!selectedId) return null;
+    if (!selectedId || view !== 'hosts') return null;
     return instances.find((instance) => instance.id === selectedId) || null;
-  }, [instances, selectedId]);
+  }, [instances, selectedId, view]);
 
   const [draft, setDraft] = React.useState<DesktopSshInstance | null>(null);
+  const [editorFooter, setEditorFooter] = React.useState<HTMLDivElement | null>(null);
+  const baseline = React.useRef<DesktopSshInstance | null>(null);
   const [logDialogOpen, setLogDialogOpen] = React.useState(false);
   const [logDialogLoading, setLogDialogLoading] = React.useState(false);
   const [logDialogError, setLogDialogError] = React.useState<string | null>(null);
@@ -472,9 +478,10 @@ const RemoteInstancesContent: React.FC = () => {
   const [sshNameDraft, setSshNameDraft] = React.useState('');
 
   React.useEffect(() => {
+    if (!showInstanceManagement) return;
     void load();
     void loadImports();
-  }, [load, loadImports]);
+  }, [load, loadImports, showInstanceManagement]);
 
   const loadDirectHosts = React.useCallback(async () => {
     setDirectLoading(true);
@@ -844,14 +851,14 @@ const RemoteInstancesContent: React.FC = () => {
   // Load on mount, then poll while the page is visible so a device that redeems
   // a pairing link shows up in the list without reopening settings.
   React.useEffect(() => {
-    if (!clientAuth) return;
+    if (!clientAuth || view !== 'access') return;
     void loadRemoteClients();
     const interval = window.setInterval(() => {
       if (typeof document !== 'undefined' && document.visibilityState !== 'visible') return;
       void loadRemoteClients({ silent: true });
     }, 5_000);
     return () => window.clearInterval(interval);
-  }, [clientAuth, loadRemoteClients]);
+  }, [clientAuth, loadRemoteClients, view]);
 
   // Available direct transports for the create dialog. The server is authoritative
   // for LAN reachability (derived from its bind, not the UI origin), so "Local
@@ -1004,7 +1011,16 @@ const RemoteInstancesContent: React.FC = () => {
   }, [clientAuth, loadRemoteClients]);
 
   React.useEffect(() => {
-    setDraft(selectedInstance);
+    // Reachability refreshes must not replace an editor draft. Adopt a new
+    // snapshot only when opening another resource, or when the editor is clean.
+    setDraft(current => {
+      const clean = JSON.stringify(current) === JSON.stringify(baseline.current);
+      if (current?.id !== selectedInstance?.id || clean) {
+        baseline.current = selectedInstance;
+        return selectedInstance;
+      }
+      return current;
+    });
   }, [selectedInstance]);
 
   React.useEffect(() => {
@@ -1074,7 +1090,7 @@ const RemoteInstancesContent: React.FC = () => {
 
   const hasChanges = React.useMemo(() => {
     if (!draft || !selectedInstance) return false;
-    return JSON.stringify(draft) !== JSON.stringify(selectedInstance);
+    return JSON.stringify(draft) !== JSON.stringify(baseline.current);
   }, [draft, selectedInstance]);
 
   const updateDraft = React.useCallback((updater: (current: DesktopSshInstance) => DesktopSshInstance) => {
@@ -1082,7 +1098,7 @@ const RemoteInstancesContent: React.FC = () => {
   }, []);
 
   const handleSave = React.useCallback(async () => {
-    if (!draft) return;
+    if (!draft) return false;
     const normalized = normalizeForSave(draft);
 
     if (!normalized.sshCommand.trim()) {
@@ -1125,11 +1141,15 @@ const RemoteInstancesContent: React.FC = () => {
 
     try {
       await upsertInstance(normalized);
+      baseline.current = normalized;
+      setDraft(current => current === draft ? normalized : current);
       toast.success(t('settings.remoteInstances.page.toast.instanceSaved'));
+      return true;
     } catch (error) {
       toast.error(t('settings.remoteInstances.page.toast.saveFailed'), {
         description: error instanceof Error ? error.message : String(error),
       });
+      return false;
     }
   }, [draft, t, upsertInstance]);
 
@@ -1400,8 +1420,9 @@ const RemoteInstancesContent: React.FC = () => {
 
   if (!draft) {
     return (
-      <SettingsPageLayout title={t('settings.page.remoteInstances.title')}>
-        {clientAuth ? (
+      <SettingsPageLayout title={t(view === 'access' ? 'settings.page.access.title' : 'settings.page.remoteInstances.title')}>
+        {intro}
+        {view === 'access' && clientAuth ? (
           <SettingsSection
             title={t('settings.remoteInstances.clientAuth.title')}
             info={t('settings.remoteInstances.clientAuth.description')}
@@ -1942,8 +1963,10 @@ const RemoteInstancesContent: React.FC = () => {
   const instanceTitle = draft.nickname?.trim() || draft.sshParsed?.destination || draft.id;
 
   return (
-    <Dialog open={Boolean(draft)} onOpenChange={(open) => { if (!open) setSelectedId(null); }}>
-      <DialogContent className="sm:max-w-4xl max-h-[90vh] overflow-auto">
+    <Dialog open={Boolean(draft)} onOpenChange={(open) => { if (!open) requestSettingsNavigation(() => setSelectedId(null)); }}>
+      <DialogContent className="flex sm:max-w-4xl max-h-[90vh] flex-col overflow-hidden">
+      <SettingsFooterContext.Provider value={editorFooter}>
+      <div className="min-h-0 flex-1 overflow-y-auto pr-1">
       <div className="mb-6 px-1">
         <h1 className={`${SETTINGS_PAGE_TITLE_CLASS} truncate`}>{instanceTitle}</h1>
         <div className="mt-1 flex flex-wrap items-center gap-2 typography-meta text-muted-foreground">
@@ -2635,11 +2658,9 @@ const RemoteInstancesContent: React.FC = () => {
           </Button>
       </SettingsSection>
 
-      <div className="mt-8 border-t border-[var(--interactive-border)] pt-3">
-        <div className="flex items-center gap-2">
-          <Button type="button" size="xs" className="!font-normal" onClick={() => void handleSave()} disabled={!hasChanges || isSaving}>
-            {t('settings.common.actions.saveChanges')}
-          </Button>
+      </div>
+      <SettingsActionBar dirty={hasChanges} saving={isSaving} onSave={handleSave}
+        onCancel={() => { baseline.current = selectedInstance; setDraft(selectedInstance); }} error={error}>
           {status?.localUrl ? (
             <>
               <Button
@@ -2672,9 +2693,9 @@ const RemoteInstancesContent: React.FC = () => {
               </Button>
             </>
           ) : null}
-          {error ? <div className="ml-auto typography-meta text-[var(--status-error)]">{error}</div> : null}
-        </div>
-      </div>
+      </SettingsActionBar>
+      </SettingsFooterContext.Provider>
+      <div ref={setEditorFooter} className="shrink-0" />
 
       <Dialog open={logDialogOpen} onOpenChange={setLogDialogOpen}>
         <DialogContent className="sm:max-w-2xl">

@@ -23,7 +23,7 @@ export function ThemePicker({ themes, selected, onChange, label }: {
     .sort((a, b) => a.name.localeCompare(b.name, locale)), [themes, t, locale]);
   const current = selected ? getThemePresentation(selected, t) : undefined;
   const descriptionId = React.useId();
-  return <div className="w-full max-w-80 space-y-2">
+  return <div className="w-full min-w-40 max-w-56">
     <Select value={selected?.metadata.id ?? ''} onValueChange={onChange}>
       <SelectTrigger size="settings" className="w-full" aria-label={label} aria-describedby={current?.description ? descriptionId : undefined}>
         <SelectValue placeholder={t('settings.varin.visual.field.selectThemePlaceholder')}>
@@ -42,6 +42,6 @@ export function ThemePicker({ themes, selected, onChange, label }: {
         </SelectItem>)}
       </SelectContent>
     </Select>
-    {current?.description ? <p id={descriptionId} className="typography-meta text-muted-foreground">{current.description}</p> : null}
+    {current?.description ? <p id={descriptionId} className="sr-only">{current.description}</p> : null}
   </div>;
 }

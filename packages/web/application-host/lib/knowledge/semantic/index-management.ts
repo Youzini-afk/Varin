@@ -1,9 +1,10 @@
 import { createHash, randomUUID } from "node:crypto";
-import { mkdir, readdir, readFile, realpath, rename, rm, stat, writeFile } from "node:fs/promises";
+import { lstat, mkdir, readdir, readFile, realpath, rename, rm, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import express, { type Express, type RequestHandler } from "express";
 import type { createWorkspaceSemanticRuntime } from "./workspace-runtime.js";
 import { semanticRootDir } from "./identity.js";
+import { measureDirectory, within } from "../../storage/measure.js";
 import type { LocalCpuMode } from './local-cpu-policy.js';
 import type { createIndexDirectoryManager, IndexDirectoryAction } from '../index-directories.js';
 
@@ -181,6 +182,36 @@ export function createSemanticIndexManagement(dataDir: string, hostId: string) {
     saveTail = run.then(() => undefined, () => undefined);
     return run;
   };
+  /** Settings storage preview resolves paths here from the retained-owner registry.
+   * Workspace cleanup cannot touch shared data or another workspace. */
+  const removeRetainedScope = (directory: string, expectedRevision: string, input: { workspaceId?: string; fingerprint: string }): Promise<{ bytesReclaimed: number; filesDeleted: number; revision: string }> => {
+    const run = saveTail.then(async () => {
+      const current = await read();
+      if (current.error || current.revision !== expectedRevision) throw new Error("Index settings changed; inspect cleanup candidates again");
+      if (!isManagedIndexDirectory(directory) || sameDirectory(directory, activeDirectory()) || !current.retainedDirectories.includes(directory)) throw new Error("Directory is not an inactive retained index cache");
+      if (input.workspaceId !== undefined && !/^[a-zA-Z0-9_-]+$/.test(input.workspaceId)) throw new Error("Invalid workspace identity");
+      const target = input.workspaceId ? path.join(directory, 'workspace', input.workspaceId) : directory;
+      const real = await realpath(directory);
+      const activeReal = await realpath(activeDirectory()).catch(error => { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null; throw error; });
+      if (activeReal && (within(real, activeReal) || within(activeReal, real))) throw new Error("An active index cannot be removed through an overlapping directory");
+      // Refuse root or scope aliases, including a symlink in any scope component.
+      for (const candidate of [directory, ...(input.workspaceId ? [path.join(directory, 'workspace'), target] : [])]) {
+        if ((await lstat(candidate)).isSymbolicLink()) throw new Error("Index cleanup cannot follow a symbolic link");
+      }
+      if (!within(real, await realpath(target))) throw new Error("Index cache escaped its managed directory");
+      const measured = await measureDirectory(target);
+      if (measured.issues.length || measured.fingerprint !== input.fingerprint) throw new Error("Index cache changed after preview; inspect cleanup candidates again");
+      await rm(target, { recursive: true, force: false });
+      if (input.workspaceId) return { bytesReclaimed: measured.bytes, filesDeleted: measured.files.length, revision: current.revision };
+      const text = `${JSON.stringify({ ...current.config, retainedDirectories: current.retainedDirectories.filter(candidate => candidate !== directory) }, null, 2)}\n`;
+      const temporary = `${filePath}.${randomUUID()}.tmp`;
+      try { await writeFile(temporary, text, { flag: 'wx' }); await rename(temporary, filePath); }
+      finally { await rm(temporary, { force: true }).catch(() => undefined); }
+      return { bytesReclaimed: measured.bytes, filesDeleted: measured.files.length, revision: revisionOf(text) };
+    });
+    saveTail = run.then(() => undefined, () => undefined);
+    return run;
+  };
   const activeDirectory = () => semanticRootDir(active.storageDirectory ?? dataDir, hostId);
   const configuredDirectory = (config: SemanticIndexConfiguration) => semanticRootDir(config.storageDirectory ?? dataDir, hostId);
   const withCacheMaintenance = <T>(work: () => Promise<T>): Promise<T> => {
@@ -188,7 +219,7 @@ export function createSemanticIndexManagement(dataDir: string, hostId: string) {
     saveTail = run.then(() => undefined, () => undefined);
     return run;
   };
-  return { read, load, save, removeRetained, withCacheMaintenance, activeDirectory, configuredDirectory, active: () => active, directoryBytes };
+  return { read, load, save, removeRetained, removeRetainedScope, withCacheMaintenance, activeDirectory, configuredDirectory, active: () => active, directoryBytes };
 }
 
 export function registerSemanticIndexRoutes(

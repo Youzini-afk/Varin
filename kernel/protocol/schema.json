@@ -2209,7 +2209,7 @@
       "storageRoot": {"type": "string"},
       "capabilities": {"type": "string[]"}
     }},
-    "KernelHealthParams": {"fields": {"deep": {"type": "boolean", "optional": true}}},
+    "KernelHealthParams": {"fields": {"deep": {"type": "boolean", "optional": true}, "gcPreview": {"type": "boolean", "optional": true}}},
     "KernelSourceHandoffClaimParams": {"fields":{"handoffOperationId":{"type":"string"},"grantId":{"type":"string"},"childThreadId":{"type":"string"},"childBranchId":{"type":"string"}}},
     "KernelGrantIssueParams": {"fields": {
       "grantId": {"type": "string"},
@@ -2443,7 +2443,7 @@
     "KernelRecoveryOperationReleaseParams": {"fields": {"transitionId": {"type": "string"}, "operationId": {"type": "string"}, "workspaceId": {"type": "string"}}},
     "KernelOperationGetParams": {"fields": {"operationId": {"type": "string"}}},
     "KernelOperationReleaseParams": {"fields": {"operationId": {"type": "string"}, "workspaceId": {"type": "string", "optional": true}}},
-    "KernelGcParams": {"fields": {"operationId": {"type": "string"}}},
+    "KernelGcParams": {"fields": {"operationId": {"type": "string"}, "objectHashes": {"type": "string[]", "optional": true}}},
     "KernelError": {
       "fields": {
         "code": {"type": "string"},
@@ -2541,8 +2541,11 @@
         "bytesBase64": {"type": "string"}
       }
     },
+    "KernelGcPreviewObject": {"fields": {"hash": {"type": "string"}, "byteLength": {"type": "number"}}},
+    "KernelGcPreview": {"fields": {"objects": {"type": "KernelGcPreviewObject[]"}, "retainedObjects": {"type": "number"}}},
     "KernelHealthResult": {
       "fields": {
+        "gcPreview": {"type": "KernelGcPreview", "optional": true},
         "integrity": {"type": "string"},
         "branches": {"type": "number"},
         "nodes": {"type": "number"},

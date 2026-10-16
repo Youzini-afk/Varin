@@ -4,6 +4,7 @@ import { Button } from '@/components/ui/button';
 import { useI18n } from '@/lib/i18n';
 import { useHarnessSettings } from './useHarnessSettings';
 import type { HarnessSettingsPageProps } from './harness-settings-state';
+import { ImageToolsSettings } from './ImageToolsSettings';
 import { ToolsSettings } from './ToolsSettings';
 import { PermissionsSettings } from './PermissionsSettings';
 import { ContextSettings } from './ContextSettings';
@@ -13,9 +14,9 @@ import { WebSettings } from './WebSettings';
 import { ComputerSettings } from '../computers/ComputerSettings';
 import { BotSettings } from '../bots/BotSettings';
 
-export type HarnessSettingsSection = 'tools' | 'permissions' | 'context' | 'retrieval' | 'index' | 'web' | 'computers' | 'bots';
+export type HarnessSettingsSection = 'images' | 'tools' | 'permissions' | 'context' | 'retrieval' | 'index' | 'web' | 'computers' | 'bots';
 const pages: Record<HarnessSettingsSection, React.ComponentType<HarnessSettingsPageProps>> = {
-  tools: ToolsSettings, permissions: PermissionsSettings,
+  images: ImageToolsSettings, tools: ToolsSettings, permissions: PermissionsSettings,
   context: ContextSettings, retrieval: RetrievalSettings, index: IndexSettings, web: WebSettings,
   // Self-fetching: the computer and bot catalogs come from the Host service,
   // not harness settings — extra props are ignored.
@@ -41,9 +42,10 @@ export function HarnessSettingsPage({ section }: { section: HarnessSettingsSecti
           ? <BotSettings />
           : harness ? <Page key={`${targetKey}:${section}`} harness={harness} update={update} /> : null}
   </>;
-  return <SettingsPageLayout title={t(`settings.page.harness.page.${section}.title`)}
-    description={t(`settings.page.harness.page.${section}.description`)} showSaveStatus={showSaveStatus}
+  return <SettingsPageLayout title={t(section === 'images' ? 'settings.page.images.title' : `settings.page.harness.page.${section}.title`)}
+    description={t(section === 'images' ? 'settings.harness.images.description' : `settings.page.harness.page.${section}.description`)} showSaveStatus={showSaveStatus}
     className="[&>section]:py-5 [&>section]:space-y-4">
+    {!selfFetching ? <p className="mb-5 typography-meta text-muted-foreground">{t('settings.scope.hostGlobalHint')}</p> : null}
     {content}
   </SettingsPageLayout>;
 }

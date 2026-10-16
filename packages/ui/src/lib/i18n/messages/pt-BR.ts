@@ -1,7 +1,8 @@
-import type { I18nKey } from './en';
+import { dict as enDict, type I18nKey } from './en';
 import { settingsDict } from './pt-BR.settings';
 
 export const dict: Record<I18nKey, string> = {
+  ...enDict,
   ...settingsDict,
   "chat.toolResult.fileContents": "Conteúdo do arquivo: {path}",
   "chat.toolResult.byteRange": "{bytes} de {total} bytes lidos · deslocamento {offset}",

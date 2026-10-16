@@ -1,4 +1,8 @@
 import { WorkspaceEditRecovery } from './WorkspaceEditRecovery';
+import { getRuntimeEndpointGeneration, subscribeRuntimeEndpointChanged } from '@varin/application-client';
+import { SettingsActionBar } from '@/components/sections/shared/SettingsActionBar';
+import { requestSettingsNavigation } from '@/lib/settings/drafts';
+import { openStorageSettings } from '../storage/storage-navigation';
 import React from 'react';
 import type {
   RecoveryStorageLocation,
@@ -110,7 +114,13 @@ const statusTone = (state: RecoveryStorageStatus['state']): string => {
 };
 
 export const RecoverySettings: React.FC = () => {
-  const { t } = useI18n();
+  const workspaceId = useWorkbenchWorkspaceId();
+  const host = React.useSyncExternalStore(subscribeRuntimeEndpointChanged, getRuntimeEndpointGeneration, getRuntimeEndpointGeneration);
+  return <RecoverySettingsContent key={JSON.stringify([host, workspaceId])} />;
+};
+
+const RecoverySettingsContent: React.FC = () => {
+  const { t, locale } = useI18n();
   const preference = useUIStore((state) => state.recoveryPreference);
   const setPreference = useUIStore((state) => state.setRecoveryPreference);
   const workspaceId = useWorkbenchWorkspaceId();
@@ -129,13 +139,27 @@ export const RecoverySettings: React.FC = () => {
   const [maintenanceBusy, setMaintenanceBusy] = React.useState<string | null>(null);
   const [maintenanceError, setMaintenanceError] = React.useState<string | null>(null);
   const [retention, setRetention] = React.useState<RetentionDraft>(() => retentionDraft());
+  const live = React.useRef(true);
+  const refreshSequence = React.useRef(0);
+  const values = React.useRef({ globalStorageMode, globalCustomRoot, storageMode, customRoot, retention, globalStatus, status });
+  values.current = { globalStorageMode, globalCustomRoot, storageMode, customRoot, retention, globalStatus, status };
+  React.useEffect(() => { live.current = true; return () => { live.current = false; refreshSequence.current += 1; }; }, []);
+  const goToStorage = () => openStorageSettings();
+
 
   const changePreference = React.useCallback((next: RecoveryPreference) => {
     setPreference(next);
     void updateDesktopSettings({ recoveryPreference: next });
   }, [setPreference]);
 
-  const refresh = React.useCallback(async () => {
+  const refresh = React.useCallback(async (adopt?: 'global' | 'workspace' | 'retention') => {
+    const sequence = ++refreshSequence.current;
+    const before = values.current;
+    const globalWasClean = !before.globalStatus || JSON.stringify(storageLocation(before.globalStorageMode, before.globalCustomRoot)) === JSON.stringify(before.globalStatus.location);
+    const workspaceWasClean = !before.status || (before.storageMode === 'inherit'
+      ? before.status.storage.locationSource === 'global'
+      : before.status.storage.locationSource === 'workspace' && JSON.stringify(storageLocation(before.storageMode, before.customRoot)) === JSON.stringify(before.status.storage.location));
+    const retentionWasClean = !before.status || JSON.stringify(before.retention) === JSON.stringify(retentionDraft(before.status.retention.policy));
     setLoading(true);
     setGlobalError(null);
     setMaintenanceError(null);
@@ -149,34 +173,36 @@ export const RecoverySettings: React.FC = () => {
           : Promise.resolve(null),
         api.listStorageWorkspaces().then(requireWorkspaceRecoveryResult),
       ]);
+      if (!live.current || sequence !== refreshSequence.current) return;
       if (globalResult.status === 'fulfilled') {
         const next = globalResult.value.storage;
         setGlobalStatus(next);
-        setGlobalStorageMode(next.location.mode);
-        setGlobalCustomRoot(next.location.mode === 'custom' ? next.location.customRoot : '');
+        if (adopt === 'global' || globalWasClean && before.globalStorageMode === values.current.globalStorageMode && before.globalCustomRoot === values.current.globalCustomRoot) {
+          setGlobalStorageMode(next.location.mode);
+          setGlobalCustomRoot(next.location.mode === 'custom' ? next.location.customRoot : '');
+        }
       } else {
-        setGlobalStatus(null);
         setGlobalError(globalResult.reason instanceof Error ? globalResult.reason.message : String(globalResult.reason));
       }
       if (workspaceResult.status === 'fulfilled') {
         const next = workspaceResult.value;
         setStatus(next);
         if (next) {
-          setRetention(retentionDraft(next.retention.policy));
+          if (adopt === 'retention' || retentionWasClean && before.retention === values.current.retention) setRetention(retentionDraft(next.retention.policy));
+          if (adopt === 'workspace' || workspaceWasClean && before.storageMode === values.current.storageMode && before.customRoot === values.current.customRoot) {
           setStorageMode(next.storage.locationSource === 'workspace' ? next.storage.location.mode : 'inherit');
           setCustomRoot(
             next.storage.locationSource === 'workspace' && next.storage.location.mode === 'custom'
               ? next.storage.location.customRoot
               : '',
           );
+          }
         } else {
           setRetention(retentionDraft());
           setStorageMode('inherit');
           setCustomRoot('');
         }
       } else {
-        setStatus(null);
-        setRetention(retentionDraft());
         setError(workspaceResult.reason instanceof Error ? workspaceResult.reason.message : String(workspaceResult.reason));
       }
       if (inventoryResult.status === 'fulfilled') {
@@ -188,12 +214,10 @@ export const RecoverySettings: React.FC = () => {
           : String(inventoryResult.reason));
       }
     } catch (cause) {
-      setGlobalStatus(null);
-      setStorageWorkspaces([]);
-      setStatus(null);
+      if (!live.current || sequence !== refreshSequence.current) return;
       setGlobalError(cause instanceof Error ? cause.message : String(cause));
     } finally {
-      setLoading(false);
+      if (live.current && sequence === refreshSequence.current) setLoading(false);
     }
   }, [workspaceId]);
 
@@ -202,7 +226,7 @@ export const RecoverySettings: React.FC = () => {
   }, [refresh]);
 
   const saveGlobalStorage = React.useCallback(async () => {
-    if (globalStorageMode === 'custom' && !globalCustomRoot.trim()) return;
+    if (globalStorageMode === 'custom' && !globalCustomRoot.trim()) return false;
     setBusy('global');
     try {
       requireWorkspaceRecoveryResult(
@@ -211,31 +235,37 @@ export const RecoverySettings: React.FC = () => {
         ),
       );
       toast.success(t('settings.varin.recovery.storage.globalSaved'));
-      await refresh();
+      await refresh('global');
+      return true;
     } catch (cause) {
       toast.error(cause instanceof Error ? cause.message : String(cause));
+      return false;
     } finally {
       setBusy(null);
     }
   }, [globalCustomRoot, globalStorageMode, refresh, t]);
 
   const moveStorage = React.useCallback(async () => {
-    if (!workspaceId || (storageMode === 'custom' && !customRoot.trim())) return;
+    if (!workspaceId || (storageMode === 'custom' && !customRoot.trim())) return false;
     setBusy('move');
     try {
       const api = getWorkspaceRecoveryAPI();
       if (storageMode === 'inherit') {
-        requireWorkspaceRecoveryResult(await api.clearStorageLocationOverride(workspaceId));
+        const result = requireWorkspaceRecoveryResult(await api.clearStorageLocationOverride(workspaceId));
+        if (result.operation.state !== 'complete') throw new Error(result.operation.failure?.message || t('settings.varin.recovery.storage.maintenanceFailed'));
       } else {
-        requireWorkspaceRecoveryResult(await api.setStorageLocation({
+        const result = requireWorkspaceRecoveryResult(await api.setStorageLocation({
           location: storageLocation(storageMode, customRoot),
           workspaceId,
         }));
+        if (result.operation.state !== 'complete') throw new Error(result.operation.failure?.message || t('settings.varin.recovery.storage.maintenanceFailed'));
       }
       toast.success(t('settings.varin.recovery.storage.moveComplete'));
-      await refresh();
+      await refresh('workspace');
+      return true;
     } catch (cause) {
       toast.error(cause instanceof Error ? cause.message : String(cause));
+      return false;
     } finally {
       setBusy(null);
     }
@@ -257,7 +287,7 @@ export const RecoverySettings: React.FC = () => {
   }, [customRoot, globalCustomRoot, t]);
 
   const maintainStorageWorkspaces = React.useCallback(async (
-    action: 'cleanup' | 'migrate',
+    action: 'migrate',
     targets: RecoveryStorageWorkspaceSummary[],
   ) => {
     if (targets.length === 0) return;
@@ -266,22 +296,9 @@ export const RecoverySettings: React.FC = () => {
     try {
       const api = getWorkspaceRecoveryAPI();
       const results = await Promise.allSettled(targets.map(async (workspace) => {
-        if (action === 'migrate') {
-          const moved = requireWorkspaceRecoveryResult(
-            await api.clearStorageLocationOverride(workspace.workspaceId),
-          );
-          if (moved.operation.state !== 'complete') {
-            throw new Error(moved.operation.failure?.message || t('settings.varin.recovery.storage.maintenanceFailed'));
-          }
-          return 0;
-        }
-        const cleaned = requireWorkspaceRecoveryResult(
-          await api.cleanupStorage({ workspaceId: workspace.workspaceId }),
-        );
-        if (cleaned.result.status !== 'complete') {
-          throw new Error(cleaned.result.failures[0]?.message || t('settings.varin.recovery.storage.maintenanceFailed'));
-        }
-        return cleaned.result.byteLengthReclaimed;
+        const moved = requireWorkspaceRecoveryResult(await api.clearStorageLocationOverride(workspace.workspaceId));
+        if (moved.operation.state !== 'complete') throw new Error(moved.operation.failure?.message || t('settings.varin.recovery.storage.maintenanceFailed'));
+        return 0;
       }));
       const failed = results.filter((result) => result.status === 'rejected');
       if (failed.length > 0) {
@@ -293,17 +310,7 @@ export const RecoverySettings: React.FC = () => {
         const detail = first instanceof Error ? first.message : first ? String(first) : '';
         throw new Error(detail ? `${summary}: ${detail}` : summary, { cause: first });
       }
-      const reclaimedBytes = results.reduce((total, result) => (
-        result.status === 'fulfilled' ? total + result.value : total
-      ), 0);
-      toast.success(t(
-        action === 'migrate'
-          ? 'settings.varin.recovery.storage.migrateComplete'
-          : reclaimedBytes === 0
-            ? 'settings.varin.recovery.storage.cleanupNothing'
-            : 'settings.varin.recovery.storage.cleanupAllComplete',
-        { bytes: formatWorkspaceArchiveBytes(reclaimedBytes), count: targets.length },
-      ));
+      toast.success(t('settings.varin.recovery.storage.migrateComplete', { count: targets.length }));
       await refresh();
     } catch (cause) {
       const message = cause instanceof Error ? cause.message : String(cause);
@@ -339,36 +346,13 @@ export const RecoverySettings: React.FC = () => {
     }
   }, [refresh, t]);
 
-  const cleanup = React.useCallback(async () => {
-    const cleanupWorkspaceId = workspaceId ?? storageWorkspaces.find((workspace) => workspace.storageAvailable && workspace.workspaceAvailable)?.workspaceId;
-    if (!cleanupWorkspaceId) return;
-    setBusy('cleanup');
-    try {
-      const result = requireWorkspaceRecoveryResult(
-        await getWorkspaceRecoveryAPI().cleanupStorage({ workspaceId: cleanupWorkspaceId }),
-      );
-      if (result.result.status !== 'complete') {
-        throw new Error(result.result.failures[0]?.message || t('settings.varin.recovery.storage.maintenanceFailed'));
-      }
-      toast.success(t(result.result.byteLengthReclaimed === 0
-        ? 'settings.varin.recovery.storage.cleanupNothing'
-        : 'settings.varin.recovery.storage.cleanupComplete', {
-        bytes: formatWorkspaceArchiveBytes(result.result.byteLengthReclaimed),
-      }));
-      await refresh();
-    } catch (cause) {
-      toast.error(cause instanceof Error ? cause.message : String(cause));
-    } finally {
-      setBusy(null);
-    }
-  }, [refresh, storageWorkspaces, t, workspaceId]);
-
   const deleteHistory = React.useCallback(async () => {
     if (!workspaceId || typeof window === 'undefined') return;
     if (!window.confirm(t('settings.varin.recovery.storage.deleteConfirm'))) return;
     setBusy('delete');
     try {
-      requireWorkspaceRecoveryResult(await getWorkspaceRecoveryAPI().deleteWorkspaceHistory(workspaceId));
+      const result = requireWorkspaceRecoveryResult(await getWorkspaceRecoveryAPI().deleteWorkspaceHistory(workspaceId));
+      if (result.result.status !== 'complete') throw new Error(result.result.failures[0]?.message || t('settings.varin.recovery.storage.maintenanceFailed'));
       toast.success(t('settings.varin.recovery.storage.deleteComplete'));
       await refresh();
     } catch (cause) {
@@ -379,7 +363,7 @@ export const RecoverySettings: React.FC = () => {
   }, [refresh, t, workspaceId]);
 
   const saveRetention = React.useCallback(async () => {
-    if (!workspaceId) return;
+    if (!workspaceId) return false;
     setBusy('retention');
     try {
       const invalidRetention = t('settings.varin.recovery.retention.invalid');
@@ -394,9 +378,11 @@ export const RecoverySettings: React.FC = () => {
         workspaceId,
       }));
       toast.success(t('settings.varin.recovery.retention.saved'));
-      await refresh();
+      await refresh('retention');
+      return true;
     } catch (cause) {
       toast.error(cause instanceof Error ? cause.message : String(cause));
+      return false;
     } finally {
       setBusy(null);
     }
@@ -471,7 +457,7 @@ export const RecoverySettings: React.FC = () => {
               {t('settings.varin.recovery.native.description')}
             </p>
           </div>
-          <Button type="button" variant="ghost" size="xs" onClick={() => void refresh()} disabled={loading}>
+          <Button type="button" variant="ghost" size="xs" onClick={() => requestSettingsNavigation(() => { void refresh(); })} disabled={loading}>
             <Icon name="refresh" className={cn('size-3.5', loading && 'animate-spin')} />
             {t('settings.varin.recovery.actions.refresh')}
           </Button>
@@ -515,17 +501,7 @@ export const RecoverySettings: React.FC = () => {
                 </Button>
               </div>
             ) : null}
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              disabled={!globalLocationChanged || busy !== null || (globalStorageMode === 'custom' && !globalCustomRoot.trim())}
-              onClick={() => void saveGlobalStorage()}
-            >
-              {busy === 'global'
-                ? t('settings.varin.recovery.storage.savingGlobal')
-                : t('settings.varin.recovery.storage.saveGlobal')}
-            </Button>
+
           </div>
         ) : null}
 
@@ -581,9 +557,9 @@ export const RecoverySettings: React.FC = () => {
                 variant="outline"
                 size="sm"
                 disabled={busy !== null || maintenanceBusy !== null || (sharedStorage ? !canCleanupShared : cleanableStorageWorkspaces.length === 0)}
-                onClick={() => void (sharedStorage ? cleanup() : maintainStorageWorkspaces('cleanup', cleanableStorageWorkspaces))}
+                onClick={goToStorage}
               >
-                {t(sharedStorage ? 'settings.varin.recovery.storage.cleanupShared' : 'settings.varin.recovery.storage.cleanupAll')}
+                {t('settings.page.storage.title')}
               </Button>
             </div>
           </div>
@@ -660,9 +636,9 @@ export const RecoverySettings: React.FC = () => {
                         disabled={maintenanceBusy !== null
                           || !workspace.storageAvailable
                           || (workspace.checkpointCount === 0 && (workspace.objectCount ?? 0) === 0)}
-                        onClick={() => void maintainStorageWorkspaces('cleanup', [workspace])}
+                        onClick={() => openStorageSettings(workspace.workspaceId)}
                       >
-                        {t('settings.varin.recovery.storage.cleanupOne')}
+                        {t('settings.page.storage.title')}
                       </Button>
                       <Button
                         type="button"
@@ -801,17 +777,6 @@ export const RecoverySettings: React.FC = () => {
             <div className="flex flex-wrap gap-2">
               <Button
                 type="button"
-                variant="outline"
-                size="sm"
-                disabled={!retentionChanged || busy !== null}
-                onClick={() => void saveRetention()}
-              >
-                {busy === 'retention'
-                  ? t('settings.varin.recovery.retention.saving')
-                  : t('settings.varin.recovery.retention.save')}
-              </Button>
-              <Button
-                type="button"
                 variant="ghost"
                 size="sm"
                 disabled={busy !== null}
@@ -871,19 +836,8 @@ export const RecoverySettings: React.FC = () => {
               </div>
             ) : null}
             <div className="flex flex-wrap gap-2">
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                disabled={!locationChanged || busy !== null || (storageMode === 'custom' && !customRoot.trim())}
-                onClick={() => void moveStorage()}
-              >
-                {busy === 'move'
-                  ? t('settings.varin.recovery.storage.moving')
-                  : t('settings.varin.recovery.storage.move')}
-              </Button>
-              <Button type="button" variant="outline" size="sm" disabled={busy !== null} onClick={() => void cleanup()}>
-                {t('settings.varin.recovery.storage.cleanup')}
+              <Button type="button" variant="outline" size="sm" disabled={busy !== null} onClick={() => openStorageSettings(workspaceId ?? undefined)}>
+                {t('settings.page.storage.title')}
               </Button>
               <Button
                 type="button"
@@ -906,6 +860,20 @@ export const RecoverySettings: React.FC = () => {
         ) : null}
       </div>
       </SettingsSection>
+      <div className="flex flex-wrap items-center justify-between gap-3 py-4 typography-meta text-muted-foreground">
+        <p>{locale?.startsWith('zh') ? '按设备与工作区查看真实占用，检查清理候选。' : 'Inspect measured storage and cleanup candidates by Host and workspace.'}</p>
+        <Button size="sm" variant="outline" onClick={goToStorage}>
+          {locale?.startsWith('zh') ? '打开存储' : 'Open storage'}
+        </Button>
+      </div>
+      {globalLocationChanged || busy === 'global' ? <SettingsActionBar dirty={globalLocationChanged} saving={busy !== null || maintenanceBusy !== null} onSave={saveGlobalStorage}
+        saveDisabled={loading || globalStorageMode === 'custom' && !globalCustomRoot.trim()} saveLabel={t('settings.varin.recovery.storage.saveGlobal')}
+        onCancel={() => { if (globalStatus) { setGlobalStorageMode(globalStatus.location.mode); setGlobalCustomRoot(globalStatus.location.mode === 'custom' ? globalStatus.location.customRoot : ''); } }} /> : null}
+      {retentionChanged || busy === 'retention' ? <SettingsActionBar dirty={retentionChanged} saving={busy !== null || maintenanceBusy !== null} onSave={saveRetention}
+        saveDisabled={loading} saveLabel={t('settings.varin.recovery.retention.save')} onCancel={() => setRetention(retentionDraft(status?.retention.policy))} /> : null}
+      {locationChanged || busy === 'move' ? <SettingsActionBar dirty={locationChanged} saving={busy !== null || maintenanceBusy !== null} onSave={moveStorage}
+        saveDisabled={loading || storageMode === 'custom' && !customRoot.trim()} saveLabel={t('settings.varin.recovery.storage.move')}
+        onCancel={() => { if (status) { setStorageMode(status.storage.locationSource === 'workspace' ? status.storage.location.mode : 'inherit'); setCustomRoot(status.storage.locationSource === 'workspace' && status.storage.location.mode === 'custom' ? status.storage.location.customRoot : ''); } }} /> : null}
       <DirectoryExplorerDialog
         open={pickerTarget !== null}
         onOpenChange={(open) => { if (!open) setPickerTarget(null); }}

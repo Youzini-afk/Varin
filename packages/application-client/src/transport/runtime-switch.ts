@@ -35,7 +35,7 @@ const RUNTIME_ENDPOINT_WILL_CHANGE_EVENT = 'varin:runtime-endpoint-will-change';
 let activeApiBaseUrl = '';
 let activeRuntimeKey = '';
 let runtimeEndpointGeneration = 1;
-const runtimeEndpointSwitchBlockers = new Set<RuntimeEndpointSwitchBlocker>();
+const runtimeEndpointSwitchBlockers = new Map<RuntimeEndpointSwitchBlocker, 'guard' | 'cleanup'>();
 let safeSwitchQueue: Promise<void> = Promise.resolve();
 
 const setWindowRuntimeValue = <K extends '__VARIN_API_BASE_URL__' | '__VARIN_CLIENT_TOKEN__' | '__VARIN_RUNTIME_HEADERS__'>(
@@ -191,8 +191,9 @@ export const switchRuntimeEndpoint = (options: RuntimeEndpointSwitchOptions): vo
 
 export const registerRuntimeEndpointSwitchBlocker = (
   blocker: RuntimeEndpointSwitchBlocker,
+  options: { phase?: 'guard' | 'cleanup' } = {},
 ): (() => void) => {
-  runtimeEndpointSwitchBlockers.add(blocker);
+  runtimeEndpointSwitchBlockers.set(blocker, options.phase ?? 'cleanup');
   return () => runtimeEndpointSwitchBlockers.delete(blocker);
 };
 
@@ -213,7 +214,15 @@ export const switchRuntimeEndpointSafely = (
       runtimeKey: requested.runtimeKey?.trim() || normalizeRuntimeUrlKey(apiBaseUrl),
       previousRuntimeKey: getRuntimeKey(),
     };
-    await Promise.all([...runtimeEndpointSwitchBlockers].map((blocker) => blocker(detail)));
+    // A cancelled confirmation must leave the original views and their write
+    // capabilities usable. Run guards before taking the cleanup snapshot, since
+    // saving a draft may mount or release page-owned resources while we wait.
+    for (const [blocker, phase] of runtimeEndpointSwitchBlockers) {
+      if (phase === 'guard') await blocker(detail);
+    }
+    await Promise.all([...runtimeEndpointSwitchBlockers]
+      .filter(([, phase]) => phase === 'cleanup')
+      .map(([blocker]) => blocker(detail)));
     await lifecycle?.beforeCommit?.();
     switchRuntimeEndpoint(requested);
   };

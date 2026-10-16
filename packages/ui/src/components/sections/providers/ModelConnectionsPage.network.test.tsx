@@ -17,9 +17,10 @@ vi.mock('@/lib/varinEvents', () => ({ subscribeVarinEvents: () => () => {} }));
 vi.mock('../shared/SettingsPageLayout', () => ({ SettingsPageLayout: ({ children }: React.PropsWithChildren) => <div>{children}</div> }));
 vi.mock('../shared/SettingsSection', () => ({ SettingsSection: ({ children }: React.PropsWithChildren) => <section>{children}</section>, SettingsFieldRow: ({ label, children }: React.PropsWithChildren<{ label: string }>) => <label>{label}{children}</label>, SettingsStackedField: ({ label, children }: React.PropsWithChildren<{ label: string }>) => <label>{label}{children}</label> }));
 vi.mock('../shared/AuthorizationPanel', () => ({ AuthorizationPanel: () => null }));
-vi.mock('@/components/ui/button', () => ({ Button: ({ children, disabled, onClick }: React.ComponentProps<'button'>) => <button disabled={disabled} onClick={onClick}>{children}</button> }));
+vi.mock('@/components/ui/button', () => ({ Button: ({ children, disabled, onClick, ...props }: React.ComponentProps<'button'>) => <button {...props} disabled={disabled} onClick={onClick}>{children}</button> }));
 vi.mock('@/components/ui/input', () => ({ Input: ({ onChange, ...props }: React.ComponentProps<'input'>) => <input {...props} onInput={onChange as React.FormEventHandler<HTMLInputElement>} /> }));
 vi.mock('@/components/ui/textarea', () => ({ Textarea: ({ onChange, ...props }: React.ComponentProps<'textarea'>) => <textarea {...props} data-rendered-value={String(props.value ?? "")} onInput={onChange as React.FormEventHandler<HTMLTextAreaElement>} /> }));
+vi.mock('@/components/ui/switch', () => ({ Switch: ({ checked, disabled, onCheckedChange, ...props }: { checked: boolean; disabled?: boolean; onCheckedChange(value: boolean): void }) => <button {...props} role="switch" aria-checked={checked} disabled={disabled} onClick={() => onCheckedChange(!checked)} /> }));
 vi.mock('@/components/ui/checkbox', () => ({ Checkbox: () => <span /> }));
 vi.mock('@/components/ui/select', () => ({
   Select: ({ value, disabled, onValueChange, children }: React.PropsWithChildren<{ value: string; disabled?: boolean; onValueChange(value: string): void }>) => <select data-value={value} disabled={disabled} onChange={event => onValueChange(event.target.value)}>{children}</select>,
@@ -33,6 +34,7 @@ beforeEach(() => {
   fixtures.generation = 1; fixtures.listeners.clear(); fixtures.blockers.clear(); vi.resetAllMocks();
   fixtures.api.cancelAuthorization.mockResolvedValue(undefined); fixtures.api.storeCredential.mockResolvedValue({ reference: 'stored' }); fixtures.api.discover.mockResolvedValue({ models: [{ id: 'discovered', name: 'Discovered', operations: ['embedding'] }] });
   const { document, window } = parseHTML('<!doctype html><html><body></body></html>');
+  window.confirm = vi.fn(() => true);
   vi.stubGlobal('document', document); vi.stubGlobal('window', window); vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
   container = document.createElement('div'); document.body.append(container); root = createRoot(container);
   snapshot = { revision: 'original', channels: [{ id: 'channel', name: 'Connection', enabled: true, type: 'local', baseUrl: 'http://localhost/v1', authentication: { kind: 'none' }, parameters: {}, models: [],
@@ -42,7 +44,7 @@ beforeEach(() => {
   fixtures.api.save.mockImplementation(async (channel: ModelChannel) => { snapshot = { ...snapshot, revision: 'next', channels: [structuredClone(channel)] }; return snapshot; });
 });
 afterEach(() => { act(() => root.unmount()); container.remove(); vi.unstubAllGlobals(); });
-const button = (text: string) => [...container.querySelectorAll('button')].find(button => button.textContent === text)!;
+const button = (text: string) => [...container.querySelectorAll('button')].find(button => (button.textContent === text || button.getAttribute('aria-label') === text))!;
 const click = async (text: string) => { await act(async () => button(text).click()); };
 const edit = async (label: string, value: string) => {
   const element = container.querySelector(`[aria-label="${label}"]`) as HTMLInputElement;
@@ -76,7 +78,7 @@ test('invalid headers cannot save, closing discards edits, and a Host change cle
   await click('settings.models.close');
   expect(container.querySelector(`[aria-label="${embeddingLabel}"]`)).toBeNull();
   await click('Connection');
-  expect(button('settings.models.save').disabled).toBe(false);
+  expect(button('settings.models.save').disabled).toBe(true);
   expect(container.querySelector('[aria-label="settings.models.headers"]')?.getAttribute('data-rendered-value')).toContain('original');
   await edit(embeddingLabel, '/discarded');
   await act(async () => { fixtures.generation += 1; fixtures.listeners.forEach(listener => listener()); });
@@ -150,12 +152,12 @@ test('contributed catalog candidates are available without discovery and retain 
 test('a late save failure from the previous Host cannot poison the new editor', async () => {
   let reject!: (reason: Error) => void;
   fixtures.api.save.mockImplementationOnce(() => new Promise((_resolve, fail) => { reject = fail; }));
-  await open(); await click('settings.models.save');
+  await open(); await edit(embeddingLabel, '/pending'); await click('settings.models.save');
   await act(async () => { fixtures.generation += 1; fixtures.listeners.forEach(listener => listener()); });
   await click('Connection');
   await act(async () => reject(new Error('old-host-error')));
   expect(container.textContent).not.toContain('old-host-error');
-  expect(button('settings.models.save').disabled).toBe(false);
+  expect(button('settings.models.save').disabled).toBe(true);
 });
 
 test('Host switching waits for an in-flight sign-in handle and cancels it on the original owner', async () => {
@@ -193,4 +195,35 @@ test('changing the discovery connection retires its old candidates even after th
   await click('settings.models.save');
   expect(button('Discovered +')).toBeUndefined();
   expect(fixtures.api.discover).toHaveBeenCalledOnce();
+});
+
+
+test('service tab changes retain draft edits; a failed save stays dirty and Cancel restores persisted configuration', async () => {
+  await open();
+  await edit('settings.models.endpoint', 'http://localhost/unsaved');
+  await click('settings.models.advanced');
+  await edit(embeddingLabel, '/unsaved-path');
+  await click('settings.models.connection');
+  expect((container.querySelector('[aria-label="settings.models.endpoint"]') as HTMLInputElement).value).toBe('http://localhost/unsaved');
+  fixtures.api.save.mockRejectedValueOnce(new Error('Revision conflict'));
+  await click('settings.models.save');
+  expect(container.textContent).toContain('Revision conflict');
+  expect(button('settings.models.save').disabled).toBe(false);
+  await click('settings.common.actions.cancel');
+  expect((container.querySelector('[aria-label="settings.models.endpoint"]') as HTMLInputElement).value).toBe('http://localhost/v1');
+  expect((container.querySelector(`[aria-label="${embeddingLabel}"]`) as HTMLInputElement).value).toBe('/vectors');
+  expect(button('settings.models.save').disabled).toBe(true);
+  expect(fixtures.api.discover).not.toHaveBeenCalled();
+});
+
+test('switching services asks before abandoning an invalid JSON draft', async () => {
+  snapshot.channels.push({ ...structuredClone(snapshot.channels[0]!), id: 'second', name: 'Second connection' });
+  await open(); await edit('settings.models.headers', '{invalid');
+  vi.mocked(window.confirm).mockReturnValueOnce(false);
+  await click('Second connection');
+  expect(container.querySelector('[aria-current="page"]')?.getAttribute('aria-label')).toBe('Connection');
+  expect(button('settings.models.save').disabled).toBe(true);
+  await click('Second connection');
+  expect(container.querySelector('[aria-current="page"]')?.getAttribute('aria-label')).toBe('Second connection');
+  expect(fixtures.api.save).not.toHaveBeenCalled();
 });

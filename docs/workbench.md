@@ -211,6 +211,25 @@ Owner/channel 缺失、平台不支持、只读和真实可执行动作分别表
 Agent profile 用 `AgentProfilesAPI` 管理模型、指令和工具选择。Editor 保留 Host 和打开时 revision，
 刷新不抹掉未保存草稿。省略 tools、显式空集合和 reset 含义不同；已受理 Run 保留冻结配置。
 
+设置按使用偏好、Agent、开发与项目、连接与扩展组织。目录中的 UI 路由只定位唯一管理页面，
+不能改变字段 owner。对话默认保留全局/受信任项目继承；Harness 页面编辑当前 Host 的全局配置，
+项目已有覆盖仍生效。模型服务管理连接与模型启用，各功能只选择已有模型；模型品牌与接入服务品牌分开。
+技能保留目录/正文编辑，命令目录来自有效技能，并不提供另一套命令编辑 authority。
+
+草稿保存单元使用固定操作栏。切页、关闭、项目切换和 Host 切换先处理草稿；失败保存不能放行。
+Host 切换先串行完成 guard 阶段，再运行旧 owner teardown，避免用户仍在确认时关闭原 MCP view。
+即时设置的成功反馈只在实际 owner 确认后出现。聊天外观预览复用正式时间线、Markdown、工具和 diff
+渲染组件，在只读预览上下文中禁用真实文件/终端动作与扩展渲染器。
+
+工作连接页是现有客户端连接、Thread source、Host 资源和具体 desktop 的组合视图，不保存第二套连接
+profile。切换 Agent 只切换当前可见 Catalog；已受理 Run 的 source、execution 与 CU 选择不迁移。
+远程资源仍要求 Agent Host 可达的 HTTP(S)/SSH 转发地址，客户端 relay 登录不自动提供资源路由。
+
+存储页由 Application Host 统计实际数据根、共享恢复对象和缓存，并明确磁盘总量、Varin 占用与未知状态。
+共享对象不按引用次数累加；不能可靠分摊的工作区容量不伪造为零。清理先生成绑定认证主体与作用域的
+短期候选预览，再由原生 storage owner 重核对象引用及占用。客户端仅提交候选 ID，不提交删除路径。
+恢复记录删除/迁移仍由原恢复 owner 管理；空间清理统一进入存储预览。
+
 ## 能力降级与验证边界
 
 Web/Electron 共享桌面文件能力；hosted/Capacitor mobile 使用兼容 contribution 与移动编辑器，官方 IDE

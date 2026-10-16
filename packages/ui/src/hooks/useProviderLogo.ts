@@ -18,6 +18,10 @@ const PRELOADED_LOGO_SRCS = new Set<string>();
 
 const LOGO_ALIAS = new Map<string, string>([
     ['codex', 'openai'],
+    ['openai-codex', 'openai'],
+    ['openai-compatible', 'openai'],
+    ['azure', 'openai'],
+    ['vertex', 'google'],
     ['chatgpt', 'openai'],
     ['claude', 'anthropic'],
     ['gemini', 'google'],
@@ -45,7 +49,7 @@ const buildLogoCandidates = (providerId: string | null | undefined) => {
 
     const compact = normalized.replace(/[^a-z0-9_\-./:]/g, '');
     const primary = compact.split(/[/:]/)[0] || compact;
-    const candidates = [LOGO_ALIAS.get(compact), LOGO_ALIAS.get(primary), compact, primary]
+    const candidates = [compact, LOGO_ALIAS.get(compact), primary, LOGO_ALIAS.get(primary)]
         .filter((value): value is string => Boolean(value && value.length > 0));
 
     return [...new Set(candidates)];

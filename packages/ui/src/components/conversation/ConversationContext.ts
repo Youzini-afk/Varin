@@ -14,7 +14,13 @@ export interface ConversationPresentation {
   memory?: ThreadMemoryAPI;
   renderExtras?(itemId: string): React.ReactNode;
 }
+/** Presentation-only examples never activate extension renderers or file links. */
+export const ConversationPreviewContext = React.createContext(false);
 export const ConversationContext = React.createContext<ConversationPresentation | null>(null);
+/** Read-only renderers can be mounted in settings without an execution owner. */
+export function useOptionalConversationPresentation() {
+  return React.useContext(ConversationContext);
+}
 export function useConversationPresentation() {
   const value = React.useContext(ConversationContext);
   if (!value) throw new Error('Conversation presentation is not mounted');

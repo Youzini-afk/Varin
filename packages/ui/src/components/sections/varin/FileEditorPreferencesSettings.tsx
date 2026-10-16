@@ -13,8 +13,7 @@ import {
   SettingsCheckboxRow,
   SettingsControlGroup,
   SettingsSection,
-  SettingsStackedField,
-  SettingsTwoColumn,
+  SettingsFieldRow,
   SETTINGS_CONTROL_CLUSTER_CLASS,
   SETTINGS_NUMBER_STEPPER_ROW_CLASS,
   SETTINGS_SELECT_SIZE,
@@ -57,8 +56,8 @@ export const FileEditorPreferencesSettings: React.FC = () => {
       )}
       contentClassName="space-y-6"
     >
-      <SettingsTwoColumn>
-        <SettingsStackedField label={t('settings.varin.editor.field.wordWrap')}>
+      <div className="divide-y divide-border/50">
+        <SettingsFieldRow label={t('settings.varin.editor.field.wordWrap')}>
           <Select value={settings.wordWrap} onValueChange={(value) => update({ wordWrap: value as FileEditorProfileToggle })}>
             <SelectTrigger className={SETTINGS_SELECT_TRIGGER_CLASS} size={SETTINGS_SELECT_SIZE}>
               <SelectValue />
@@ -67,9 +66,9 @@ export const FileEditorPreferencesSettings: React.FC = () => {
               {PROFILE_TOGGLE_VALUES.map((value) => <SelectItem key={value} value={value}>{profileToggleLabel(value)}</SelectItem>)}
             </SelectContent>
           </Select>
-        </SettingsStackedField>
+        </SettingsFieldRow>
 
-        <SettingsStackedField label={t('settings.varin.editor.field.minimap')}>
+        <SettingsFieldRow label={t('settings.varin.editor.field.minimap')}>
           <Select value={settings.minimap} onValueChange={(value) => update({ minimap: value as FileEditorProfileToggle })}>
             <SelectTrigger className={SETTINGS_SELECT_TRIGGER_CLASS} size={SETTINGS_SELECT_SIZE}>
               <SelectValue />
@@ -78,9 +77,9 @@ export const FileEditorPreferencesSettings: React.FC = () => {
               {PROFILE_TOGGLE_VALUES.map((value) => <SelectItem key={value} value={value}>{profileToggleLabel(value)}</SelectItem>)}
             </SelectContent>
           </Select>
-        </SettingsStackedField>
+        </SettingsFieldRow>
 
-        <SettingsStackedField label={t('settings.varin.editor.field.stickyScroll')}>
+        <SettingsFieldRow label={t('settings.varin.editor.field.stickyScroll')}>
           <Select value={settings.stickyScroll} onValueChange={(value) => update({ stickyScroll: value as FileEditorProfileToggle })}>
             <SelectTrigger className={SETTINGS_SELECT_TRIGGER_CLASS} size={SETTINGS_SELECT_SIZE}>
               <SelectValue />
@@ -89,9 +88,9 @@ export const FileEditorPreferencesSettings: React.FC = () => {
               {PROFILE_TOGGLE_VALUES.map((value) => <SelectItem key={value} value={value}>{profileToggleLabel(value)}</SelectItem>)}
             </SelectContent>
           </Select>
-        </SettingsStackedField>
+        </SettingsFieldRow>
 
-        <SettingsStackedField label={t('settings.varin.editor.field.lineNumbers')}>
+        <SettingsFieldRow label={t('settings.varin.editor.field.lineNumbers')}>
           <Select value={settings.lineNumbers} onValueChange={(value) => update({ lineNumbers: value as FileEditorLineNumbers })}>
             <SelectTrigger className={SETTINGS_SELECT_TRIGGER_CLASS} size={SETTINGS_SELECT_SIZE}>
               <SelectValue />
@@ -103,9 +102,9 @@ export const FileEditorPreferencesSettings: React.FC = () => {
               <SelectItem value="relative">{t('settings.varin.editor.option.relative')}</SelectItem>
             </SelectContent>
           </Select>
-        </SettingsStackedField>
+        </SettingsFieldRow>
 
-        <SettingsStackedField label={t('settings.varin.editor.field.whitespace')}>
+        <SettingsFieldRow label={t('settings.varin.editor.field.whitespace')}>
           <Select value={settings.renderWhitespace} onValueChange={(value) => update({ renderWhitespace: value as FileEditorWhitespace })}>
             <SelectTrigger className={SETTINGS_SELECT_TRIGGER_CLASS} size={SETTINGS_SELECT_SIZE}>
               <SelectValue />
@@ -116,9 +115,9 @@ export const FileEditorPreferencesSettings: React.FC = () => {
               ))}
             </SelectContent>
           </Select>
-        </SettingsStackedField>
+        </SettingsFieldRow>
 
-        <SettingsStackedField label={t('settings.varin.editor.field.accessibility')}>
+        <SettingsFieldRow label={t('settings.varin.editor.field.accessibility')}>
           <Select value={settings.accessibilitySupport} onValueChange={(value) => update({ accessibilitySupport: value as FileEditorAccessibilitySupport })}>
             <SelectTrigger className={SETTINGS_SELECT_TRIGGER_CLASS} size={SETTINGS_SELECT_SIZE}>
               <SelectValue />
@@ -129,13 +128,13 @@ export const FileEditorPreferencesSettings: React.FC = () => {
               <SelectItem value="off">{t('settings.varin.editor.option.off')}</SelectItem>
             </SelectContent>
           </Select>
-        </SettingsStackedField>
+        </SettingsFieldRow>
 
-      </SettingsTwoColumn>
+      </div>
 
-      <SettingsTwoColumn>
+      <div className="divide-y divide-border/50">
         <SettingsControlGroup title={t('settings.varin.editor.group.indentation')} contentClassName="space-y-3">
-          <SettingsStackedField
+          <SettingsFieldRow
             label={t('settings.varin.editor.field.tabSize')}
             description={t('settings.varin.editor.field.tabSize.description')}
             controlClassName={SETTINGS_CONTROL_CLUSTER_CLASS}
@@ -148,7 +147,7 @@ export const FileEditorPreferencesSettings: React.FC = () => {
                 step={1}
               />
             </div>
-          </SettingsStackedField>
+          </SettingsFieldRow>
           <SettingsCheckboxRow
             checked={settings.detectIndentation}
             onChange={(detectIndentation) => update({ detectIndentation })}
@@ -201,7 +200,7 @@ export const FileEditorPreferencesSettings: React.FC = () => {
             ariaLabel={t('settings.varin.editor.field.formatOnSave')}
           />
         </SettingsControlGroup>
-      </SettingsTwoColumn>
+      </div>
     </SettingsSection>
   );
 };

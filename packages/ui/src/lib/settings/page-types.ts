@@ -4,7 +4,7 @@ import type { I18nKey } from '@/lib/i18n/store';
 
 export type SettingsPageSlug = string;
 
-export type SettingsPageGroup = 'general' | 'projects' | 'harness';
+export type SettingsPageGroup = 'general' | 'projects' | 'harness' | 'connections';
 
 export interface SettingsRuntimeContext {
   isWeb: boolean;

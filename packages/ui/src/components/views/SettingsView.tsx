@@ -1,4 +1,8 @@
 import React from 'react';
+import { getRuntimeEndpointGeneration, subscribeRuntimeEndpointChanged } from '@varin/application-client';
+import { SettingsNavigationContext } from '@/components/sections/shared/settings-context';
+import { requestSettingsNavigation } from '@/lib/settings/drafts';
+import { SettingsDraftDialog } from '@/components/sections/shared/SettingsDraftDialog';
 import { cn, getModifierLabel } from '@/lib/utils';
 import { useUIStore } from '@/stores/useUIStore';
 import { Tooltip, TooltipTrigger } from '@/components/ui/tooltip';
@@ -23,8 +27,8 @@ import { useSettingsPageRegistrations } from '@/lib/settings/surface-registry';
 import { buildSettingsSearchResults, type SettingsSearchResult } from '@/lib/settings/search';
 import { SettingsSearchTargetContext } from '@/lib/settings/search-target';
 // UI Kit: fixed settings navigation width
-const SETTINGS_NAV_WIDTH = 256;
-const SETTINGS_SPLIT_SIDEBAR_WIDTH = 280;
+const SETTINGS_NAV_WIDTH = 220;
+const SETTINGS_SPLIT_SIDEBAR_WIDTH = 236;
 
 type MobileStage = 'nav' | 'page-sidebar' | 'page-content';
 
@@ -39,7 +43,7 @@ interface SettingsViewProps {
   initialMobileStage?: MobileStage;
 }
 
-const NAV_GROUP_ORDER = ['general', 'projects', 'harness'] as const;
+const NAV_GROUP_ORDER = ['general', 'harness', 'projects', 'connections'] as const;
 
 
 function buildRuntimeContext(
@@ -60,6 +64,7 @@ function isPageAvailable(page: SettingsPageMeta, ctx: SettingsRuntimeContext): b
 
 export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile, isWindowed, visiblePageSlugs, initialMobileStage = 'nav' }) => {
   const { t } = useI18n();
+  const runtimeEpoch = React.useSyncExternalStore(subscribeRuntimeEndpointChanged, getRuntimeEndpointGeneration, getRuntimeEndpointGeneration);
   const deviceInfo = useDeviceInfo();
   const isMobile = forceMobile ?? deviceInfo.isMobile;
   const mcpInstalled = true;
@@ -93,8 +98,9 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
     return isDesktopShell();
   }, []);
   const isDesktopLocalOrigin = React.useMemo(() => {
+    void runtimeEpoch;
     return isDesktopShell() && isDesktopLocalOriginActive();
-  }, []);
+  }, [runtimeEpoch]);
   const isMac = React.useMemo(() => {
     return isDesktopShell() && typeof window !== 'undefined'
       && (window as unknown as { __VARIN_PLATFORM__?: string }).__VARIN_PLATFORM__ === 'darwin';
@@ -119,21 +125,21 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
       .filter((page) => page.slug !== 'home')
       .filter((page) => !allowedPages || allowedPages.has(page.slug))
       .filter((page) => isPageAvailable(page, runtimeCtx))
+      .sort((a, b) => a.order - b.order)
   }, [runtimeCtx, settingsPageRegistrations, visiblePageSlugs]);
 
-  const openPage = React.useCallback((slug: SettingsPageSlug) => {
+  const commitPageNavigation = React.useCallback((slug: SettingsPageSlug) => {
     setSettingsPage(slug);
     autoNavSlugRef.current = slug;
-    if (!isMobile) {
-      return;
+    if (isMobile) {
+      const def = getSettingsPageMeta(slug);
+      setMobileStage(!def || def.slug === 'home' ? 'nav' : def.kind === 'split' ? 'page-sidebar' : 'page-content');
     }
-    const def = getSettingsPageMeta(slug);
-    if (!def || def.slug === 'home') {
-      setMobileStage('nav');
-      return;
-    }
-    setMobileStage(def.kind === 'split' ? 'page-sidebar' : 'page-content');
   }, [isMobile, setSettingsPage]);
+
+  const openPage = React.useCallback((slug: SettingsPageSlug) => {
+    if (slug !== settingsSlug) requestSettingsNavigation(() => commitPageNavigation(slug));
+  }, [commitPageNavigation, settingsSlug]);
 
   const activePageMeta = React.useMemo(() => {
     return settingsPageRegistrations.find((registration) => registration.meta.slug === settingsSlug)?.meta ?? null;
@@ -197,13 +203,16 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
   }, [activeSearchResultIndex, settingsSearchResults.length]);
 
   const openSearchResult = React.useCallback((result: SettingsSearchResult) => {
-    const targetId = prepareSettingsSearchTarget(result);
-    setPendingSearchItemId(result.focusTargetId === null ? null : targetId);
-    openPage(result.page);
-    if (isMobile) {
-      setMobileStage('page-content');
-    }
-  }, [isMobile, openPage, prepareSettingsSearchTarget]);
+    const commit = () => {
+      setPendingSearchItemId(result.focusTargetId === null ? null : prepareSettingsSearchTarget(result));
+      commitPageNavigation(result.page);
+      if (isMobile) setMobileStage('page-content');
+    };
+    // Search highlighting and mobile stage change belong to the navigation
+    // commit, so keeping a draft leaves both the page and search context intact.
+    if (result.page === settingsSlug) commit();
+    else requestSettingsNavigation(commit);
+  }, [commitPageNavigation, isMobile, prepareSettingsSearchTarget, settingsSlug]);
 
   const handleSettingsSearchKeyDown = React.useCallback((event: React.KeyboardEvent<HTMLInputElement>) => {
     if (!settingsSearchQuery.trim()) {
@@ -350,7 +359,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
   }, []);
 
   const handleBack = React.useCallback(() => {
-    setMobileStage('nav');
+    requestSettingsNavigation(() => setMobileStage('nav'));
   }, []);
 
   const handleOpenPageSidebar = React.useCallback(() => {
@@ -363,7 +372,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
 
     return (
       <div className="flex h-full flex-col overflow-hidden">
-        <div className="px-4 pt-3">
+        <div className="px-3 pt-5">
           <div className="flex h-10 items-center gap-1.5 rounded-md border border-border bg-background/70 px-2 text-muted-foreground focus-within:ring-2 focus-within:ring-primary/40 sm:h-8">
             <Icon name="search" className="h-4 w-4 shrink-0" />
             <input
@@ -389,7 +398,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
 
         {/* Scrollable nav items */}
         <div className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden">
-          <div className="flex flex-col gap-0.5 px-4 pt-4 pb-2">
+          <div className="flex flex-col gap-0.5 px-3 pt-4 pb-3">
             {hasSearchQuery ? (
               settingsSearchResults.length > 0 ? (() => {
                 let resultIndex = 0;
@@ -475,9 +484,9 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
                             onClick={() => openPage(page.slug)}
                             aria-current={selected ? 'page' : undefined}
                             className={cn(
-                              'flex h-11 w-full items-center gap-2.5 rounded-md px-3 overflow-hidden sm:h-8 sm:gap-2 sm:px-2',
+                              'flex h-11 w-full items-center gap-2.5 rounded-lg px-3 overflow-hidden sm:h-9 sm:gap-2.5 sm:px-2.5',
                               selected
-                                ? 'bg-interactive-selection text-foreground'
+                                ? 'bg-background text-foreground shadow-xs'
                                 : 'text-foreground hover:bg-interactive-hover'
                             )}
                           >
@@ -514,7 +523,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
                   className={cn(
                     'flex h-11 w-full items-center gap-2.5 overflow-hidden rounded-md px-3 sm:h-8 sm:gap-2 sm:px-2',
                     settingsSlug === aboutPage.slug
-                      ? 'bg-interactive-selection text-foreground'
+                      ? 'bg-background text-foreground shadow-xs'
                       : 'text-foreground hover:bg-interactive-hover',
                   )}
                 >
@@ -600,7 +609,9 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
   };
 
   return (
+    <SettingsNavigationContext.Provider value={true}>
     <div ref={containerRef} data-settings-view="true" className={cn('relative flex h-full min-h-0 flex-col overflow-hidden bg-background')}>
+      <SettingsDraftDialog />
       {isMobile ? (
         <div
           className={cn(
@@ -612,7 +623,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
           {(showBackButton || onClose) ? (
             <button
               type="button"
-              onClick={showBackButton ? handleBack : onClose}
+              onClick={showBackButton ? handleBack : () => onClose && requestSettingsNavigation(onClose)}
               aria-label={mobileBackButtonLabel}
               className="inline-flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-lg p-2 text-muted-foreground hover:text-foreground hover:bg-interactive-hover/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
             >
@@ -640,7 +651,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
           {onClose && (
             <button
               type="button"
-              onClick={onClose}
+              onClick={() => onClose && requestSettingsNavigation(onClose)}
               aria-label={t('settings.view.actions.closeSettings')}
               title={t('settings.view.actions.closeSettingsWithShortcut', { shortcut: shortcutKey })}
               className="inline-flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-lg p-2 text-muted-foreground hover:text-foreground hover:bg-interactive-hover/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
@@ -668,7 +679,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
         <div className={cn('absolute right-0.5 z-50', isWindowed ? 'top-0.5' : 'top-1')}>
           <button
             type="button"
-            onClick={onClose}
+            onClick={() => onClose && requestSettingsNavigation(onClose)}
             aria-label={t('settings.view.actions.closeSettings')}
             title={t('settings.view.actions.closeSettingsWithShortcut', { shortcut: shortcutKey })}
             className="inline-flex h-7 w-7 items-center justify-center rounded-md p-0.5 text-muted-foreground hover:text-foreground hover:bg-interactive-hover/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
@@ -708,5 +719,6 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
         )}
       </div>
     </div>
+    </SettingsNavigationContext.Provider>
   );
 };

@@ -7,7 +7,7 @@ save feedback so individual pages do not need a second page system.
 ## Layout and hierarchy
 
 `SettingsPageLayout` owns scrolling, page width/padding, the container-query scope, the page header,
-and optional save status. Settings content responds to the pane through `@xl` / `@3xl` container
+a non-scrolling action-bar dock, and optional save status. Settings content responds to the pane through `@xl` / `@3xl` container
 queries; viewport breakpoints describe outer application chrome, not the width of a nested Settings
 pane.
 
@@ -31,10 +31,16 @@ required syntax, dynamic state, and active wizard instructions—remains visible
 
 ## Persistence feedback
 
-`SettingsPageLayout showSaveStatus` observes the shared persistence state. Fast successful writes stay
-quiet, slower writes show the delayed saving indicator, and failures remain visible. Settings saved
+`SettingsPageLayout showSaveStatus` observes the shared persistence state. Successful owner acknowledgments
+briefly show Saved, slower writes show the delayed saving indicator, and failures remain visible. Settings saved
 through the shared persistence path get this behavior automatically; a page-specific authority reports
 its state through `@/lib/persistence` rather than inventing a second success/error badge system.
+
+Drafted units use `SettingsActionBar` for fixed save/cancel controls and real dirty/saving/error state.
+Inside `SettingsNavigationContext`, they register with the shared navigation guard; outside Settings,
+the containing dialog must own its own close decision. `SettingsFooterContext` keeps dialog actions in
+the dialog instead of accidentally portalling behind it. Page/project/search/close transitions commit
+only after the draft decision. Runtime endpoint guards complete before teardown closes old views.
 
 ## Search projection
 

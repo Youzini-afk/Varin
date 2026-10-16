@@ -1,4 +1,6 @@
 import React from 'react';
+import { SettingsActionBar } from '../shared/SettingsActionBar';
+import { requestSettingsNavigation } from '@/lib/settings/drafts';
 import { agentScopeKey, type AgentMemoryNote, type AgentMemoryScope } from '@varin/protocol';
 import { SettingsPageLayout } from '@/components/sections/shared/SettingsPageLayout';
 import { Button } from '@/components/ui/button';
@@ -46,8 +48,7 @@ export function AgentMemoryPage({ initialScope, scopes, embedded = false }: {
       <Button variant="ghost" size="sm" onClick={() => void settings.load()}>{t('assistant.reload')}</Button></div> : null}
     <div className="grid gap-6 md:grid-cols-[170px_minmax(0,1fr)]">
       {picker(scope, next => {
-        if (draft && !window.confirm(t('assistant.discard'))) return;
-        setDraft(null); setScope(next);
+        requestSettingsNavigation(() => { setDraft(null); setScope(next); });
       })}
       <div className="min-w-0 space-y-3">
         <div className="flex items-center gap-2">
@@ -63,8 +64,7 @@ export function AgentMemoryPage({ initialScope, scopes, embedded = false }: {
           <details><summary className="cursor-pointer typography-meta text-muted-foreground">{t('assistant.move')}</summary>
             <div className="mt-2 max-w-64">{picker(draft.scope, next => setDraft({ ...draft, scope: next }))}</div>
           </details>
-          <div className="flex justify-end gap-2"><Button variant="ghost" disabled={settings.busy} onClick={() => setDraft(null)}>{t('assistant.cancel')}</Button>
-            <Button disabled={settings.busy || !draft.content.trim()} onClick={() => void save()}>{t('assistant.save')}</Button></div>
+          <SettingsActionBar saveLabel={t('assistant.save')} dirty={true} saving={settings.busy} saveDisabled={!draft.content.trim()} onSave={save} onCancel={() => setDraft(null)} error={settings.error} />
         </div> : null}
         {!settings.catalog && !settings.error ? <p role="status">{t('common.loading')}</p> : null}
         {settings.catalog && !items.length && !draft ? <p className="py-10 text-center text-muted-foreground typography-meta">{t('assistant.memory.empty')}</p> : null}
