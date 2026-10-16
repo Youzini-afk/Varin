@@ -91,6 +91,8 @@ Managed 多 Host 恢复由对话 Host 先持久化 metadata-only coordinator 和
 
 Integration 共用条件文件/对象机制。Agent 触发的整合将效果接到原 parent turn，普通对话撤销无需第二账本。
 混合 Surface/disk 修改若无法证明已分发效果，则保留耐久 needs-attention；网络失败不能变成安全空结果。
+Undo 在保留执行意图前检查原 Surface owner、回执和新鲜 dirty-state；准入失败仍可用原操作重试。
+多 Surface 的原 undo 回执逐组保存，后续 owner 丢失回复不抹掉已确认补偿，也不借用 apply 的停止证据。
 
 内置 provider 将 Recovery 与 WorkingState 同置于 Host kernel 数据根，目前不提供可迁移存储和 retention/delete-history 控件。
 Host catalog/WAL 是共享大小，不能反复当作每工作区可释放历史。GC 核对全部引用 owner，并如实报告物理删除失败。

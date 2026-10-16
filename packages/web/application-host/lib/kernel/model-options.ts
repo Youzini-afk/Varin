@@ -17,6 +17,8 @@ export function modelOptions(model: SelectedModel, requested: ThreadThinkingLeve
   const level = requested ?? available[0];
   if (!level || !available.includes(level)) return failed('model-thinking-level-unavailable');
   const effort = level === 'off' ? null : model.thinkingLevelMap?.[level] ?? level;
+  // Catalog IDs are user-owned aliases; protocol behavior follows the frozen upstream model.
+  const requestModelId = (model.requestModelId ?? model.modelId).toLowerCase();
   const protocol: Record<string, unknown> = {};
   const parameters: Record<string, unknown> = {};
   let reasoningEffort = effort;
@@ -42,8 +44,8 @@ export function modelOptions(model: SelectedModel, requested: ThreadThinkingLeve
     }
     case 'google-generative-ai': case 'google-vertex': {
       if (!model.reasoning) break;
-      const usesLevel = /gemini-3(?:\.\d+)?-(?:pro|flash)|gemma-?4/.test(model.modelId.toLowerCase())
-        || ['gemini-flash-latest', 'gemini-flash-lite-latest'].includes(model.modelId.toLowerCase());
+      const usesLevel = /gemini-3(?:\.\d+)?-(?:pro|flash)|gemma-?4/.test(requestModelId)
+        || ['gemini-flash-latest', 'gemini-flash-lite-latest'].includes(requestModelId.split('/').at(-1)!);
       if (level === 'off') protocol.thinkingConfig = { thinkingBudget: 0 };
       else if (usesLevel) {
         const mapped = String(effort).toUpperCase();
@@ -51,19 +53,25 @@ export function modelOptions(model: SelectedModel, requested: ThreadThinkingLeve
         protocol.thinkingConfig = { includeThoughts: true, thinkingLevel: mapped };
       } else {
         const mapped = String(effort).toLowerCase();
-        const googleBudgets: Record<string, number> = { minimal: model.modelId.includes('flash-lite') ? 512 : 128,
-          low: 2048, medium: 8192, high: model.modelId.includes('2.5-pro') ? 32768 : 24576 };
+        const googleBudgets: Record<string, number> = { minimal: requestModelId.includes('flash-lite') ? 512 : 128,
+          low: 2048, medium: 8192, high: requestModelId.includes('2.5-pro') ? 32768 : 24576 };
         if (!(mapped in googleBudgets)) return failed('model-thinking-mapping-invalid');
-        protocol.thinkingConfig = { includeThoughts: true, thinkingBudget: model.modelId.includes('2.5-') ? googleBudgets[mapped] : -1 };
+        protocol.thinkingConfig = { includeThoughts: true, thinkingBudget: requestModelId.includes('2.5-') ? googleBudgets[mapped] : -1 };
       }
       break;
     }
     case 'bedrock-converse-stream': {
       if (level === 'off') break;
       // Bedrock supports model-specific fields; Claude's contract is distinct from other models.
-      const candidates = [model.modelId, model.name].map(value => value.toLowerCase().replace(/[\s_.:]+/g, '-'));
-      if (!candidates.some(value => value.includes('claude'))) return failed('model-thinking-protocol-unavailable');
-      const adaptive = candidates.some(value => ['opus-4-6', 'opus-4-7', 'opus-4-8', 'opus-5', 'sonnet-4-6', 'sonnet-5', 'fable-5'].some(name => value.includes(name)));
+      const resource = /^arn:[^:]+:bedrock:[^:]*:[^:]*:(.+)$/.exec(requestModelId)?.[1];
+      const namedModel = resource === undefined ? requestModelId
+        : /^(?:foundation-model|inference-profile)\/([^/]+)$/.exec(resource)?.[1];
+      // Opaque resource/profile IDs need the configured name hint. A recognizable model
+      // ID is authoritative, including non-Claude IDs; display edits cannot change its dialect.
+      const candidate = (namedModel && (namedModel.includes('.') || /^claude[-_.]/.test(namedModel)) ? namedModel : model.name)
+        .toLowerCase().replace(/[\s_.:]+/g, '-');
+      if (!candidate.includes('claude')) return failed('model-thinking-protocol-unavailable');
+      const adaptive = ['opus-4-6', 'opus-4-7', 'opus-4-8', 'opus-5', 'sonnet-4-6', 'sonnet-5', 'fable-5'].some(name => candidate.includes(name));
       protocol.additionalModelRequestFields = adaptive ? { thinking: { type: 'adaptive', display: 'summarized' },
         output_config: { effort: model.thinkingLevelMap?.[level] ?? (level === 'minimal' ? 'low' : level) } }
         : { thinking: { type: 'enabled', budget_tokens: answerBudget(), display: 'summarized' }, anthropic_beta: ['interleaved-thinking-2025-05-14'] };

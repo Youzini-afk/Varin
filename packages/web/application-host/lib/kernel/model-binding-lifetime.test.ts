@@ -36,31 +36,32 @@ it('live binding identity distinguishes adapter instances with the same durable 
   expect(modelCredentialBindingIdentity({ ...first })).toBe(modelCredentialBindingIdentity(first));
 });
 
-it('child metadata releases both normalized model and inherited-generation captures', async () => {
-  const normalized = captured(), inherited = captured();
+it('child metadata validates the inherited generation in its normalized capture and releases it', async () => {
+  const normalized = captured();
+  const resolveModel = vi.fn(async () => normalized.model), rebindModel = vi.fn();
   const prepare = createChildProfilePreparer({ settings: async () => ({ harness: { agents: { precise: agent } } }), capabilities: async () => [],
-    models: { resolveModel: async () => normalized.model, rebindModel: async () => inherited.owner } });
+    models: { resolveModel, rebindModel } });
   const result = await prepare({ parent });
   expect(result.presets.find(value => value.id === 'custom:precise')).toMatchObject({ model: { configuration }, inherit_base: parent, unavailable: null });
+  expect(resolveModel).toHaveBeenCalledWith({ ...selection, temperature: 0 }, { configuration, credentialScope: scope });
+  expect(rebindModel).not.toHaveBeenCalled();
   expect(normalized.released).toHaveBeenCalledOnce();
-  expect(inherited.released).toHaveBeenCalledOnce();
 });
 
-it.each(['resolve', 'rebind'] as const)('cancelled child %s releases its late capture without waiting for it', async phase => {
-  const normalized = captured(), inherited = captured();
+it.each(['resolve', 'scope'] as const)('cancelled child %s releases its late capture without waiting for it', async phase => {
   const late = deferred<void>(), controller = new AbortController();
+  const currentScope = vi.fn(async () => { if (phase === 'scope') await late.promise; return scope; });
+  const normalized = captured(currentScope);
   const models: ThreadModelAuthority = { resolveModel: vi.fn(async () => { if (phase === 'resolve') await late.promise; return normalized.model; }),
-    rebindModel: vi.fn(async () => { if (phase === 'rebind') await late.promise; return inherited.owner; }) };
+    rebindModel: vi.fn() };
   const prepare = createChildProfilePreparer({ settings: async () => ({ harness: { agents: { precise: agent } } }), capabilities: async () => [], models });
   const pending = prepare({ parent }, controller.signal);
   const rejected = expect(pending).rejects.toMatchObject({ name: 'AbortError' });
-  await vi.waitFor(() => expect(phase === 'resolve' ? models.resolveModel : models.rebindModel).toHaveBeenCalledOnce());
+  await vi.waitFor(() => expect(phase === 'resolve' ? models.resolveModel : currentScope).toHaveBeenCalledOnce());
   controller.abort(); await rejected;
-  expect(phase === 'resolve' ? normalized.released : inherited.released).not.toHaveBeenCalled();
+  expect(normalized.released).not.toHaveBeenCalled();
   late.resolve();
   await vi.waitFor(() => expect(normalized.released).toHaveBeenCalledOnce());
-  if (phase === 'rebind') await vi.waitFor(() => expect(inherited.released).toHaveBeenCalledOnce());
-  else inherited.owner.release();
 });
 
 it('policy model preparation releases failures and cancelled late captures, but transfers successful captures', async () => {

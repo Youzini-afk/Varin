@@ -6,6 +6,36 @@ use super::*;
 use crate::execution::*;
 use std::sync::{Arc, Mutex};
 
+/// Executor/provider callbacks may include credentials or source text. Only structural
+/// causes with owner-defined wording may enter the public terminal failure fact.
+fn safe_run_failure(failure: &ExecutionError) -> ExecutionError {
+    let (code, message) = match failure.code.as_str() {
+        "context_candidate_capacity" => ("context_candidate_capacity", "The context summary and retained history do not fit the selected model's context budget. The original history remains unchanged."),
+        "context_capacity" => ("context_capacity", "The context budget could not be prepared for the next model request."),
+        "context_background_disabled" => ("context_background_disabled", "The selected context strategy requested background preparation while it is disabled."),
+        "context_compaction_failed" => ("context_compaction_failed", "Context compaction could not publish a continuation. The original history remains unchanged."),
+        "context_policy_unavailable" => ("context_policy_unavailable", "The selected context strategy is unavailable."),
+        "context_preparation_failed" => ("context_preparation_failed", "Context preparation failed before a new model request was admitted."),
+        _ => ("execution_failed", "Run execution failed."),
+    };
+    ExecutionError::new(code, message)
+}
+
+impl Catalog {
+    /// Read the original indexed event; no second failure ledger or history scan.
+    pub fn run_failure(&self, run_id: &str) -> Result<Option<RunFailure>> {
+        if self.run(run_id)?.state != RunState::Failed { return Ok(None); }
+        let failure: Option<(u64, String)> = self.db.query_row(
+            "SELECT cursor,data FROM events WHERE subject=?1 AND kind IN ('run.failed','context.preparation_failed') ORDER BY cursor DESC LIMIT 1",
+            [run_id], |row| Ok((read_number(row, 0)?, row.get(1)?)),
+        ).optional()?;
+        failure.map(|(cursor, data)| {
+            let failure = safe_run_failure(&serde_json::from_str::<ExecutionError>(&data)?);
+            Ok(RunFailure { run_id: run_id.into(), cursor, code: failure.code, message: failure.message })
+        }).transpose()
+    }
+}
+
 impl Persistence for Mutex<Catalog> {
     fn stop_reason(&self, run: &str, epoch: u64) -> std::result::Result<super::bot::RunStopReason, ExecutionError> {
         self.lock().map_err(catalog_lock_error)?.run_stop_reason(run, epoch).map_err(policy_error)
@@ -793,12 +823,12 @@ fn operation_id(request: &str, call: &str) -> String {
     format!("{request}:tool:{call}")
 }
 
-struct ExecutionBodyPreparation {
+pub(super) struct ExecutionBodyPreparation {
     content: crate::content::ContentStore,
     publication: crate::content::ContentPublication,
     frozen_request: Option<Value>,
 }
-struct PreparedExecutionBodies {
+pub(super) struct PreparedExecutionBodies {
     _publication: crate::content::ContentPublication,
     request: Option<Value>,
     tools_ref: Option<Value>,
@@ -817,7 +847,7 @@ struct PreparedExecutionBodies {
     results: std::collections::HashMap<String, OperationResultMetadata>,
 }
 impl ExecutionBodyPreparation {
-    fn write(self, record: &ExecutionRecord) -> Result<PreparedExecutionBodies> {
+    pub(super) fn write(self, record: &ExecutionRecord) -> Result<PreparedExecutionBodies> {
         let request = match record {
             ExecutionRecord::RequestPrepared { snapshot } => {
                 if snapshot.view.binding.resource_activations
@@ -1046,7 +1076,7 @@ impl Catalog {
         let prepared = self.prepare_execution_bodies(record)?.write(record)?;
         self.commit_prepared_execution(run_id, epoch, record, prepared)
     }
-    fn prepare_execution_bodies(
+    pub(super) fn prepare_execution_bodies(
         &self,
         record: &ExecutionRecord,
     ) -> Result<ExecutionBodyPreparation> {
@@ -1063,7 +1093,7 @@ impl Catalog {
             frozen_request,
         })
     }
-    fn commit_prepared_execution(
+    pub(super) fn commit_prepared_execution(
         &mut self,
         run_id: &str,
         epoch: u64,
@@ -1188,10 +1218,11 @@ impl Catalog {
         }
         match record {
             ExecutionRecord::StateChanged { .. }
-            | ExecutionRecord::ContextPreparationFailed { .. } => {
+            | ExecutionRecord::ContextPreparationFailed { .. }
+            | ExecutionRecord::ExecutionFailed { .. } => {
                 let (state, waiting_on) = match record {
                     ExecutionRecord::StateChanged { state, waiting_on } => (state, waiting_on),
-                    ExecutionRecord::ContextPreparationFailed { .. } => (&RunState::Failed, &None),
+                    ExecutionRecord::ContextPreparationFailed { .. } | ExecutionRecord::ExecutionFailed { .. } => (&RunState::Failed, &None),
                     _ => unreachable!(),
                 };
                 if *state != run.state && !run.state.permits(*state) {
@@ -1964,6 +1995,7 @@ impl Catalog {
             super::policy_checkpoint::consume(&tx, run_id)?;
         }
         if let ExecutionRecord::ContextPreparationFailed { failure } = record {
+            let failure = safe_run_failure(failure);
             event(
                 &tx,
                 run_id,
@@ -1971,6 +2003,10 @@ impl Catalog {
                 "context.preparation_failed",
                 json!({"code": failure.code, "message": failure.message}),
             )?;
+        }
+        if let ExecutionRecord::ExecutionFailed { failure } = record {
+            let failure = safe_run_failure(failure);
+            event(&tx, run_id, run.revision, "run.failed", json!({"code": failure.code, "message": failure.message}))?;
         }
         event(
             &tx,
@@ -1980,6 +2016,7 @@ impl Catalog {
             json!({"kind":match record {
                 ExecutionRecord::StateChanged { .. } => "state_changed",
                 ExecutionRecord::ContextPreparationFailed { .. } => "context_preparation_failed",
+                ExecutionRecord::ExecutionFailed { .. } => "execution_failed",
                 ExecutionRecord::RequestPrepared { .. } => "request_prepared",
                 ExecutionRecord::RequestNotDispatched { .. } => "request_not_dispatched",
                 ExecutionRecord::ModelDispatched { .. } => "model_dispatched",
@@ -1994,7 +2031,7 @@ impl Catalog {
         )?;
         if matches!(
             record,
-            ExecutionRecord::StateChanged { .. } | ExecutionRecord::ContextPreparationFailed { .. }
+            ExecutionRecord::StateChanged { .. } | ExecutionRecord::ContextPreparationFailed { .. } | ExecutionRecord::ExecutionFailed { .. }
         ) {
             if run.state.terminal() {
                 goals::settle_run(&tx, &run)?;

@@ -140,7 +140,7 @@ export function fileChangePhase(
   }
   if (details?.status === 'applied') return 'applied';
   if (details?.applied === false) return 'failed';
-  if (details?.applied === true || result || execution?.status === 'success') return 'applied';
+  if (details?.applied === true) return 'applied';
   if (execution?.status === 'running') return 'applying';
   return generating ? 'generating' : 'preview';
 }

@@ -999,7 +999,11 @@ impl Catalog {
         self.release_delegated_resources(execution_id)?;
         self.execution_task(execution_id)
     }
-    pub(super) fn publish_child_report(&mut self, mut child: ChildTask) -> Result<ChildTask> {
+    pub(super) fn publish_child_report(
+        &mut self,
+        mut child: ChildTask,
+        terminal_head: Option<String>,
+    ) -> Result<ChildTask> {
         let tx = self.db.transaction()?;
         let old: ChildTask = delegated::execution_task(&tx, &child.execution_id)?;
         if old.report.is_some() {
@@ -1008,12 +1012,8 @@ impl Catalog {
         child.revision = old.revision + 1;
         delegated::write_child_task(&tx, &child)?;
         let mut execution = delegated::execution(&tx, &child.execution_id)?;
-        if let Some(receipt) = &execution.receipt {
-            execution.terminal_head = tx.query_row(
-                "SELECT head FROM branches WHERE id=?1",
-                [&receipt.branch_id],
-                |row| row.get(0),
-            )?;
+        if execution.receipt.is_some() {
+            execution.terminal_head = terminal_head;
             delegated::write_execution(&tx, &execution)?;
         }
         event(

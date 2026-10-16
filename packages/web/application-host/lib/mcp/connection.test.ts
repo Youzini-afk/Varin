@@ -9,7 +9,7 @@ const cleanup: Array<() => Promise<unknown>> = [];
 afterEach(async () => { for (const close of cleanup.splice(0).reverse()) await close(); });
 const deferred = <T>() => { let resolve!: (value: T) => void; const promise = new Promise<T>(done => { resolve = done; }); return { promise, resolve }; };
 type Rpc = { id?: string | number; method: string; params?: Record<string, unknown> };
-async function fixture(handle: (request: Rpc, signal: AbortSignal, headers: Headers) => unknown | Promise<unknown>, headers: Record<string, string> = { authorization: 'fixture' }) {
+async function fixture(handle: (request: Rpc, signal: AbortSignal, headers: Headers) => unknown | Promise<unknown>, headers: Record<string, string> = { authorization: 'fixture' }, handshake?: (request: Rpc) => Response | undefined) {
   const directory = await mkdtemp(join(tmpdir(), 'varin-mcp-connection-'));
   cleanup.push(() => rm(directory, { recursive: true, force: true }));
   let notifications!: ReadableStreamDefaultController<Uint8Array>;
@@ -17,6 +17,7 @@ async function fixture(handle: (request: Rpc, signal: AbortSignal, headers: Head
     if (init?.method === 'GET') return new Response(new ReadableStream({ start(controller) { notifications = controller; } }), { headers: { 'content-type': 'text/event-stream' } });
     const request = JSON.parse(String(init?.body)) as Rpc;
     const reply = (result: unknown) => Response.json({ jsonrpc: '2.0', id: request.id, result });
+    const override = handshake?.(request); if (override) return override;
     if (request.method === 'server/discover') return Response.json({ jsonrpc: '2.0', id: request.id, error: { code: -32601, message: 'Unsupported' } }, { status: 404 });
     if (request.method === 'initialize') return reply({ protocolVersion: '2025-11-25', capabilities: { tools: {}, resources: {}, prompts: {} }, serverInfo: { name: 'fixture', version: '1' } });
     if (request.id === undefined) return new Response(null, { status: 202 });
@@ -104,4 +105,15 @@ test('a directory authorization failure is distinct from a failed connection or 
   expect(connection.state).toBe('connected');
   expect(connection.directoryStates.resources).toBe('ready');
   expect(connection.challenge).toBe('Bearer scope="tools"');
+});
+
+
+test.each([401, 403, 503])('preserves HTTP %s classification through SDK negotiation errors', async status => {
+  const challenge = 'Bearer resource_metadata="https://fixture/metadata"';
+  const { connection } = await fixture(request => empty(request.method), undefined, request => request.method === 'server/discover'
+    ? new Response(null, { status, headers: { 'www-authenticate': challenge } }) : undefined);
+  await expect(connection.getClient()).rejects.toThrow();
+  expect(connection.state).toBe(status === 503 ? 'failed' : 'needs-auth');
+  expect(connection.challenge).toBe(status === 503 ? undefined : challenge);
+  expect(connection.error).toBe(status === 503 ? 'MCP connection unavailable' : 'MCP sign-in required');
 });

@@ -14,7 +14,9 @@ function requestId(item: HistoryItem): string | undefined {
 const callKey = (runId: string | null, request: string, id: string) => JSON.stringify([runId, request, id]);
 export function assistant(id: string, content: ChatAssistantMessage['content'], configuration: unknown, pending = false): ChatAssistantMessage {
   const model = object(configuration);
-  return { id, role: 'assistant', api: '', model: String(model.model ?? ''), provider: String(model.providerId ?? ''),
+  // providerId is a channel identity, not a display name. Like durable request
+  // history, live text shows its accepted request model rather than today's catalog.
+  return { id, role: 'assistant', api: '', model: String(model.model ?? ''), provider: '',
     content, timestamp: 0, stopReason: pending ? 'pending' : 'stop' };
 }
 

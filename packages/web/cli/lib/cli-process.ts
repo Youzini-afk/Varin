@@ -2,6 +2,7 @@ import fs from 'fs';
 import path from 'path';
 import { spawnSync } from 'child_process';
 import { getRunDir } from './cli-paths.js';
+import { EXIT_CODE, TunnelCliError } from './cli-errors.js';
 import { errorMessage, recordOf, type CliNotice, type CliOptions } from './cli-types.js';
 
 export interface StoredInstanceOptions {
@@ -16,6 +17,13 @@ export interface StoredInstanceOptions {
 
 export type VarinProcessState = 'dead' | 'matched' | 'mismatched' | 'unknown';
 type NoticeHandler = (notice: CliNotice) => void;
+
+function assertNodeServerRuntime(): void {
+  // Script workers inherit the Host executable and require Node's REPL.
+  if (process.versions.bun) {
+    throw new TunnelCliError('Starting Varin requires Node.js. Run this command with node instead of bun.', EXIT_CODE.USAGE_ERROR);
+  }
+}
 
 async function getPidFilePath(port: number): Promise<string> {
   return path.join(getRunDir(), `varin-${port}.pid`);
@@ -327,6 +335,7 @@ async function stopInstanceProcess(pid: unknown, options: ProcessStopOptions = {
 
 
 export {
+  assertNodeServerRuntime,
   getPidFilePath,
   getInstanceFilePath,
   readPidFile,

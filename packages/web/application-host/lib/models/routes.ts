@@ -1,7 +1,23 @@
 import type { Express, RequestHandler } from 'express';
 import type { ModelsService } from './service.js';
 import { object, ModelConfigurationError } from './configuration.js';
-import type { EgressFetch } from '../harness/egress.js';
+import { EgressError, type EgressErrorKind, type EgressFetch } from '../harness/egress.js';
+
+// Keep the owner classification, but never project raw dependency messages or causes.
+const networkMessages: Record<EgressErrorKind, string> = {
+  dns: 'Model endpoint DNS lookup failed.',
+  'scheme-denied': 'The Application Host only allows HTTP(S) model endpoints.',
+  'private-network': 'This Application Host blocks model connections to local or private network addresses.',
+  'special-purpose': 'This Application Host blocks model connections to special-purpose network addresses.',
+  'proxy-unavailable': 'The Application Host could not connect to its configured proxy.',
+  'proxy-auth': 'The Application Host proxy authentication failed.',
+  'proxy-config-invalid': 'The Application Host proxy configuration is invalid.',
+  tls: 'The model connection failed during TLS setup.',
+  connect: 'The Application Host could not connect to the model endpoint.',
+  timeout: 'The model connection timed out.',
+  cancelled: 'The model request was cancelled.',
+  unknown: 'The model network request failed.',
+};
 
 export function registerModelRoutes(app: Express, models: ModelsService, requireAuth: RequestHandler, fetchImpl: EgressFetch) {
   const actions = {
@@ -35,7 +51,10 @@ export function registerModelRoutes(app: Express, models: ModelsService, require
       response.json(await action(input, controller.signal));
     } catch (error) {
       if (error instanceof ModelConfigurationError) response.status(error.status).json({ code: error.code, message: error.message });
-      else response.status(503).json({ code: 'model-settings-unavailable', message: 'Model configuration is unavailable. Check the selected configuration file.' });
+      else if (error instanceof EgressError) {
+        const blocked = ['scheme-denied', 'private-network', 'special-purpose'].includes(error.kind);
+        response.status(blocked ? 403 : 503).json({ code: `model-egress-${error.kind}`, message: networkMessages[error.kind] });
+      } else response.status(503).json({ code: 'model-settings-unavailable', message: 'The model settings request could not be completed.' });
     } finally { response.removeListener('close', close); }
   });
 }

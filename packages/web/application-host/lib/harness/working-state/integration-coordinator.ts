@@ -27,6 +27,7 @@ import {
   inspectDurableIntegrationOperation,
   projectIntegrationOperation,
   markDurableExternalUndoDispatched,
+  recordDurableExternalUndoResults,
   markDurableIntegrationNeedsAttention,
   markDurableIntegrationUndoing,
   markDurableExternalDispatched,
@@ -1218,6 +1219,41 @@ export class IntegrationCoordinator {
         this.previewByThread.delete(this.previewKey(input.workspaceId, input.threadId));
         return { ...finalized, status: finalized.status as IntegrationApplyResult["status"] };
       }
+      const surfacePaths = Object.entries(operation.targetKinds)
+        .filter(([, kind]) => kind === "surface")
+        .map(([file]) => file)
+        .sort();
+      const groupedSurfaces = new Map<string, { binding: DurableExternalBinding; paths: string[] }>();
+      // Admission failures have no effects. Check the original Surface owner and
+      // its receipt before reserving undo, so a wrong view or unavailable channel
+      // cannot strand an otherwise complete operation in the undoing phase.
+      if (surfacePaths.length > 0) {
+        if (!this.requestSurfaceOperation) throw new Error("Document surface operation channel is unavailable");
+        for (const file of surfacePaths) {
+          const binding = operation.externalBindings[file];
+          if (!binding || binding.afterLocalEditRevision === undefined || !binding.afterHash) {
+            throw new Error(`Integration surface receipt is unavailable: ${file}`);
+          }
+          if (input.sourceOwner && (binding.ownerId !== input.sourceOwner.ownerId
+            || binding.ownerGeneration !== input.sourceOwner.generation)) {
+            throw new Error(`Integration was applied by another document surface: ${file}`);
+          }
+          const key = `${binding.ownerId}\0${binding.ownerGeneration}\0${binding.ownerRegistrationId}`;
+          const group = groupedSurfaces.get(key) ?? { binding, paths: [] };
+          group.paths.push(file);
+          groupedSurfaces.set(key, group);
+        }
+      }
+      const documentWorkspaceId = surfacePaths.length > 0
+        ? operation.applyExecutionWorkspaceId ?? await this.documentWorkspace(input)
+        : input.workspaceId;
+      const barrier = surfacePaths.length > 0 && this.beginDirtyStateBarrier
+        ? await this.beginDirtyStateBarrier(documentWorkspaceId, surfacePaths)
+        : null;
+      // Surface edits are fenced while the barrier is held. After its fresh
+      // publication, the original owner/instance/revision/hash checks provide CAS.
+      await barrier?.release();
+      input.signal?.throwIfAborted();
       const reserveUndo = () => this.withWorkingStore(input.workspaceId, "integration-undo-reserve", async (_store, reservationContext) => {
         const current = await inspectDurableIntegrationOperation(reservationContext, input.operationId);
         if (current.state !== "complete" && current.state !== "conflict") {
@@ -1434,42 +1470,15 @@ export class IntegrationCoordinator {
           };
         }
       }
-      const surfacePaths = Object.entries(operation.targetKinds)
-        .filter(([, kind]) => kind === "surface")
-        .map(([file]) => file)
-        .sort();
-      const documentWorkspaceId = operation.applyExecutionWorkspaceId ?? await this.documentWorkspace(input);
-      const barrier = surfacePaths.length > 0 && this.beginDirtyStateBarrier
-        ? await this.beginDirtyStateBarrier(documentWorkspaceId, surfacePaths)
-        : null;
-      // The barrier forces every connected owner to publish a fresh revision.
-      // Release it before asking the registry to undo: registry edits are
-      // deliberately fenced while a recovery barrier is held. The subsequent
-      // owner/registration/instance/revision/hash checks provide the CAS.
-      await barrier?.release();
       const undonePaths: string[] = [];
         if (surfacePaths.length > 0) {
-          if (!this.requestSurfaceOperation) throw new Error("Document surface operation channel is unavailable");
-          const grouped = new Map<string, { binding: DurableExternalBinding; paths: string[] }>();
-          for (const file of surfacePaths) {
-            const binding = operation.externalBindings[file];
-            if (!binding || binding.afterLocalEditRevision === undefined || !binding.afterHash) {
-              throw new Error(`Integration surface receipt is unavailable: ${file}`);
-            }
-            if (input.sourceOwner && (binding.ownerId !== input.sourceOwner.ownerId
-              || binding.ownerGeneration !== input.sourceOwner.generation)) {
-              throw new Error(`Integration was applied by another document surface: ${file}`);
-            }
-            const key = `${binding.ownerId}\0${binding.ownerGeneration}\0${binding.ownerRegistrationId}`;
-            const group = grouped.get(key) ?? { binding, paths: [] };
-            group.paths.push(file);
-            grouped.set(key, group);
-          }
           await markDurableExternalUndoDispatched(context, input.operationId, surfacePaths);
           const failed: string[] = [];
-          for (const group of grouped.values()) {
+          const stoppedSurfacePaths = new Set<string>();
+          for (const group of groupedSurfaces.values()) {
+            const restoredPaths: string[] = [];
             try {
-              const results = await this.requestSurfaceOperation({
+              const request: DocumentSurfaceOperationRequest = {
                 action: "undo",
                 generation: group.binding.ownerGeneration,
                 operationId: input.operationId,
@@ -1491,18 +1500,23 @@ export class IntegrationCoordinator {
                   };
                 }),
                 workspaceId: documentWorkspaceId,
-              }, input.signal ? { signal: input.signal } : {});
+              };
+              const results = await this.requestSurfaceOperation!(request, input.signal ? { signal: input.signal } : {});
+              const acknowledged = completeSurfaceAcknowledgement(request, results);
+              if (acknowledged) for (const file of group.paths) stoppedSurfacePaths.add(file);
               const byPath = new Map(results.map((result) => [result.resource.resourceId, result]));
               for (const file of group.paths) {
                 const result = byPath.get(file);
                 const binding = operation.externalBindings[file]!;
-                if (result?.status === "undone" && result.documentInstanceId === binding.documentInstanceId
-                  && result.afterHash === binding.beforeHash) undonePaths.push(file);
+                if (acknowledged && result?.status === "undone" && result.documentInstanceId === binding.documentInstanceId
+                  && result.afterHash === binding.beforeHash) { undonePaths.push(file); restoredPaths.push(file); }
                 else failed.push(file);
               }
             } catch {
               failed.push(...group.paths);
             }
+            await recordDurableExternalUndoResults(context, { operationId: input.operationId, restoredPaths,
+              executorStopped: surfacePaths.every(file => stoppedSurfacePaths.has(file)) });
           }
           if (failed.length > 0) {
             const attention = await markDurableIntegrationNeedsAttention(

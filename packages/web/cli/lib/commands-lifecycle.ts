@@ -5,6 +5,7 @@ import {
   discoverUnconfirmedRegistryInstanceOnPort,
 } from './cli-lifecycle.js';
 import {
+  assertNodeServerRuntime,
   readInstanceOptions,
   removePidFile,
   removeInstanceFile,
@@ -342,6 +343,7 @@ async function restartCommand(
       const instanceHost = storedOptions.host || instance.host || options.host;
       const launchMode = instance.launchMode || 'daemon';
       const isForeground = launchMode === 'foreground';
+      if (!isForeground) assertNodeServerRuntime();
 
       const restartPort = options.explicitPort && typeof portOf(options) === 'number' ? portOf(options) : instance.port;
 

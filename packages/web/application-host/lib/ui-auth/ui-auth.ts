@@ -396,6 +396,7 @@ const isUrlAuthReadableHttpPath = (pathname: string): boolean => {
 
 const isUrlAuthWebSocketPath = (pathname: string): boolean => {
   return pathname === '/api/varin/realtime-proxy/ws'
+    || pathname === '/api/varin/observations/ws'
     || pathname === '/api/terminal/ws'
     || pathname === '/api/dictation/ws'
     || pathname.startsWith('/api/preview/proxy/');

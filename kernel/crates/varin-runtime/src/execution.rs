@@ -839,7 +839,7 @@ pub enum ToolCompletion<M = ResolvedMedia> {
     },
 }
 impl ToolCompletion {
-    fn cancelled() -> Self {
+    pub(crate) fn cancelled() -> Self {
         Self::Result {
             outcome: Outcome::Cancelled,
             effect: Effect::None,
@@ -1206,6 +1206,10 @@ pub enum ExecutionRecord {
         waiting_on: Option<String>,
     },
     ContextPreparationFailed {
+        failure: ExecutionError,
+    },
+    /// The same transaction owns both the terminal state and its safe failure fact.
+    ExecutionFailed {
         failure: ExecutionError,
     },
     RequestPrepared {
@@ -1948,7 +1952,12 @@ impl<
         macro_rules! finish {
             ($label:lifetime,$next:expr,$waiting:expr,$failure:expr $(,$rollback:expr)?)=>{{
                 let next:RunState=$next;let waiting_on:Option<String>=$waiting;let failure:Option<ExecutionError>=$failure;
-                match self.commit(&input,ExecutionRecord::StateChanged{state:next,waiting_on:waiting_on.clone()}) {
+                let record = if next == RunState::Failed {
+                    ExecutionRecord::ExecutionFailed { failure: failure.clone().unwrap_or_else(|| ExecutionError::new("execution_failed", "Run execution failed")) }
+                } else {
+                    ExecutionRecord::StateChanged { state: next, waiting_on: waiting_on.clone() }
+                };
+                match self.commit(&input,record) {
                     Err(error) if error.code=="input_pending"=>{ $(policy_state=$rollback;)? continue $label },
                     Err(error)=>return Err(error),
                     Ok(())=>return Ok(ExecutionReport{state:next,history,policy_state,model_steps:steps,waiting_on,failure}),
@@ -2532,6 +2541,15 @@ impl<
                             None => self.provider.serialize_cancellable(&view, Some(&mut request_compile_reuse), &model_cancel),
                         }) {
                             Ok(serialized) => serialized,
+                            Err(_) if model_cancel.is_cancelled() => {
+                                // A brokered encoder can return its cancellation only after
+                                // draining. No request was prepared, so restore this candidate
+                                // and let the original interrupt/Cancel/Bot Sleep boundary decide.
+                                steps -= 1;
+                                policy_state = previous_policy_state;
+                                interrupted_generation = !cancel.is_cancelled();
+                                continue 'agent;
+                            }
                             Err(error) => finish!('agent, RunState::Failed, None, Some(error)),
                         };
                     let preview = |context: ContextProjection| {
@@ -2571,9 +2589,10 @@ impl<
                             finish!('agent,RunState::Waiting,Some(wait_id),None);
                         }
                         Err(error) => {
-                            if cancel.is_cancelled() {
+                            if model_cancel.is_cancelled() {
                                 steps -= 1;
                                 policy_state = previous_policy_state;
+                                interrupted_generation = !cancel.is_cancelled();
                                 continue 'agent;
                             }
                             finish!('agent, RunState::Failed, None, Some(error));

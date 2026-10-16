@@ -1434,7 +1434,7 @@ export interface ThreadSummary {
   observer_project_ids: Array<string | null>;
 }
 
-export type AgentRuntimeStreamEvent = {v: 46; kind: 'runtime-event'; kernelEpoch: string} & ({stream: 'durable'; cursor: number} | {stream: 'progress'; runId: string; streamId: string; sequence: number; event: unknown});
+export type AgentRuntimeStreamEvent = {v: 47; kind: 'runtime-event'; kernelEpoch: string} & ({stream: 'durable'; cursor: number} | {stream: 'progress'; runId: string; streamId: string; sequence: number; event: unknown});
 
 export type SourceMode = 'fixed_branch' | 'materialized' | 'live_root';
 
@@ -2368,6 +2368,13 @@ export interface InputSubmitReceipt {
   run_id: string;
   input_id: string;
   cursor: number;
+}
+
+export interface RunFailure {
+  runId: string;
+  cursor: number;
+  code: string;
+  message: string;
 }
 
 export interface Run {

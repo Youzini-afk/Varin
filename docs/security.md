@@ -16,6 +16,10 @@ bearer/pairing token、Authorization header、任意环境值或文件正文。�
 另一个 Host 上同名路径不是授权。固定来源仍须当前 registration/trust 和原 Storage grant。
 撤权阻止新访问，不改写历史或虚构已受理效果回滚。
 
+配置在同一 origin 下的不同挂载前缀是不同 Host endpoint。Managed Source 身份、探测与原 owner 请求保留该前缀；
+桌面 realtime proxy 只给该前缀内的明确路由附加配置凭据，不跟随重定向。切换 Host 时，尚在准备认证的浏览器请求
+必须在派发前失败，不能把旧请求正文或凭据送到新 Host。
+
 ## Renderer 与桌面
 
 Electron 启用 context isolation，关闭 Node integration。Preload 方法显式且校验输入，没有通用 IPC 到 main 的逃逸入口。

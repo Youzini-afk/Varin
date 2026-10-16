@@ -8,12 +8,7 @@ let bindGate: Promise<void> | null = null;
 let runtimeListener: (() => void) | null = null;
 
 vi.doMock('@varin/application-client', () => ({
-  getRuntimeUrlResolver: () => ({
-    sse: (path: string, query?: Record<string, string>) => {
-      const suffix = query ? `?${new URLSearchParams(query).toString()}` : '';
-      return `http://runtime.test${path}${suffix}`;
-    },
-  }),
+  RuntimeEventSource: MockEventSource,
   subscribeRuntimeEndpointChanged: (listener: () => void) => {
     runtimeListener = listener;
     return () => { runtimeListener = null; };
@@ -53,7 +48,9 @@ class MockEventSource {
   onmessage: ((event: { data: string }) => void) | null = null;
   onerror: (() => void) | null = null;
 
-  constructor(public readonly url: string) {
+  readonly url: string;
+  constructor(path: string, options?: { query?: Record<string, string> }) {
+    this.url = `http://runtime.test${path}${options?.query ? `?${new URLSearchParams(options.query)}` : ''}`;
     MockEventSource.instances.push(this);
   }
 

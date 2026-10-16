@@ -1,6 +1,7 @@
 import { expect, it } from 'vitest';
 import { createManagedMcpTasks } from './managed-mcp-tasks.js';
-import type { SourceMcpHolder, SourceMcpHolderBinding, SourceMcpCreationOutcome } from '../kernel/protocol.generated.js';
+import type { SourceMcpHolder, SourceMcpHolderBinding, SourceMcpCreationOutcome, SourceMcpHolderParams, SourceMcpCreationReceiptParams } from '../kernel/protocol.generated.js';
+import type { McpTaskLease } from '../mcp/authority.js';
 import type { ManagedMcpTaskAction } from './managed-mcp-contract.js';
 const binding: SourceMcpHolderBinding = { operationId: 'a-operation', executionOwner: { kind: 'external', identity: 'b', epoch: 'b-kernel' }, purpose: 'task',
   endpoint: { server: 'peer', resourceKey: 'original-daemon', configurationVersion: 'definition', credentialVersion: 'credential' } };
@@ -12,7 +13,7 @@ function fixture() {
   let outcome: SourceMcpCreationOutcome | null = null;
   const controls: string[] = [];
   let run = async () => response, get = async (_signal: AbortSignal) => response;
-  const kernel = { async sourceRequest(method: string, params: any) {
+  const kernel = { async sourceRequest(method: string, params: SourceMcpHolderParams | SourceMcpCreationReceiptParams) {
     expect(params.principalId).toBe(scope.principal.principalId); expect(params.authorityId).toBe(scope.authorityId);
     if (holder && JSON.stringify(holder.binding) !== JSON.stringify(params.binding)) throw new Error('binding changed');
     if (method === 'source.mcp.holder') {
@@ -40,7 +41,7 @@ function fixture() {
     if (sealed) throw new Error('view sealed');
     return { beforeDispatch: async () => { if (sealed) throw new Error('view sealed'); }, lease: {
       async taskOwner() { acquisitions++; return { endpoint: binding.endpoint,
-        async start(_name: string, _args: unknown, options: any) { await options.beforeDispatch(); expect(options.interaction).toBeUndefined(); dispatches++; return run(); },
+        async start(_name: string, _args: unknown, options: Parameters<McpTaskLease['start']>[2]) { await options.beforeDispatch?.(); expect(options.interaction).toEqual({ operationId: binding.operationId, executionOwner: binding.executionOwner }); dispatches++; return run(); },
         async get(_id: string, signal: AbortSignal) { controls.push('get'); return get(signal); }, async result() { controls.push('result'); return { content: [] }; },
         async cancel() { controls.push('cancel'); return { ...response, task: { ...response.task, status: 'cancelled' } }; },
         release() { releases++; }, onChange() { return () => {}; } }; },
@@ -120,7 +121,7 @@ it('inspection follows the original still-running creation after its first reque
   const waiting = new Promise<void>(resolve => { accepted = resolve; });
   f.run(async () => { await waiting; return response; });
   const first = f.tasks.start(scope, start, new AbortController().signal);
-  while (!f.counts().dispatches) await Promise.resolve();
+  await expect.poll(() => f.counts().dispatches).toBe(1);
   let observed = false;
   const original = f.tasks.inspect(scope, binding, true).then(value => { observed = true; return value; });
   await Promise.resolve(); await Promise.resolve(); expect(observed).toBe(false);
@@ -136,10 +137,10 @@ it('holder release fences new controls and waits for actual original callbacks e
   const signal = new AbortController().signal;
   await f.tasks.start(scope, start, signal);
   const reading = f.tasks.control(scope, { kind: 'task_get', binding, taskId: response.task.taskId }, signal);
-  while (!f.controls.length) await Promise.resolve();
+  await expect.poll(() => f.controls.length).toBe(1);
   let drained = false;
   const releasing = f.tasks.release(scope, binding).then(value => { drained = true; return value; });
-  while (!controlSignal.aborted) await Promise.resolve();
+  await expect.poll(() => controlSignal.aborted).toBe(true);
   expect(drained).toBe(false); expect(f.counts().releases).toBe(0);
   await expect(f.tasks.control(scope, { kind: 'task_get', binding, taskId: response.task.taskId }, signal)).rejects.toThrow('original_transport_unavailable');
   finish(); await reading;

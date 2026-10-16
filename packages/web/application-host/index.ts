@@ -267,6 +267,7 @@ import { createRemoteClientAuthRuntime } from './lib/client-auth/remote-clients.
 import { createClientPairingRuntime } from './lib/client-auth/pairing.js';
 import { createPreviewProxyRuntime } from './lib/preview/proxy-runtime.js';
 import { attachRealtimeProxy } from './lib/realtime-proxy.js';
+import { attachObservations } from './lib/observations.js';
 import { createRelayService } from './lib/relay/service.js';
 import { createRelayHostLock } from './lib/relay/host-lock.js';
 
@@ -900,6 +901,12 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     getDesktopRuntimeConfig,
     getUiAuthController: () => uiAuthController,
     isRequestOriginAllowed,
+  });
+  const observations = attachObservations({
+    server,
+    authenticate: async (request) => Boolean(await uiAuthController?.resolveWebSocketAuthContext(request)),
+    isRequestOriginAllowed,
+    rejectWebSocketUpgrade,
   });
   if (!extensionRuntime) {
     extensionRuntime = await ApplicationExtensionRuntime.create({
@@ -2862,6 +2869,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     }),
     isReady: () => kernelClient.isReady,
     stop: async (shutdownOptions: { exitProcess?: boolean | undefined } = {}) => {
+      observations.stop();
       // Stop timer/watcher producers before their runtime and storage
       // dependencies begin shutting down.
       unsubscribeProjectTrust();

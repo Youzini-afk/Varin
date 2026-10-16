@@ -191,6 +191,17 @@ describe('surface Integration vertical path', () => {
       expect(await fs.promises.readFile(path.join(workspace, 'disk.txt'), 'utf8')).toBe('disk child\n');
       expect([...merged.appliedPaths].sort()).toEqual(['disk.txt', 'draft.txt']);
 
+      const originalJournal = await native.recovery.getOperation(identity.workspaceId, merged.operationId);
+      await expect(coordinator.undoIntegration({
+        workspaceId: identity.workspaceId,
+        threadId: 'thread-surface-vertical',
+        operationId: merged.operationId,
+        sourceOwner: { ownerId: 'another-editor', generation: 1 },
+      })).rejects.toThrow('another document surface');
+      expect(await native.recovery.getOperation(identity.workspaceId, merged.operationId)).toEqual(originalJournal);
+      expect(registry.get(resource)?.buffer).toBe('saved\n');
+      expect(await fs.promises.readFile(path.join(workspace, 'disk.txt'), 'utf8')).toBe('disk child\n');
+
       const undone = await coordinator.undoIntegration({
         workspaceId: identity.workspaceId,
         threadId: 'thread-surface-vertical',
@@ -201,9 +212,80 @@ describe('surface Integration vertical path', () => {
       expect(registry.get(resource)).toMatchObject({ buffer: 'draft\n', dirty: true });
       expect(await fs.promises.readFile(path.join(workspace, 'draft.txt'), 'utf8')).toBe('saved\n');
       expect(await fs.promises.readFile(path.join(workspace, 'disk.txt'), 'utf8')).toBe('disk base\n');
+      const undoneJournal = await native.recovery.getOperation(identity.workspaceId, merged.operationId);
+      expect(undoneJournal?.result).toMatchObject({ compensatedPaths: expect.arrayContaining(['disk.txt', 'draft.txt']),
+        effect: 'confirmed', executorStopped: true });
     } finally {
       await registry.flushRecoveryJournals();
       await registry.dispose();
+      await authority.dispose();
+      await native.dispose();
+    }
+  });
+
+  it('retains a confirmed Surface undo when a second real Registry reply is lost', async () => {
+    const root = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'varin-surface-undo-receipts-'));
+    roots.push(root);
+    const workspace = path.join(root, 'workspace');
+    const dataDir = path.join(root, 'data');
+    await fs.promises.mkdir(workspace);
+    for (const file of ['a.txt', 'b.txt']) await fs.promises.writeFile(path.join(workspace, file), 'saved\n');
+    const authority = createDocumentAuthority({ hostId: 'surface-undo-receipts', dataDir,
+      isAllowedRoot: async () => true, isTrusted: async () => true });
+    const identity = await authority.resolveWorkspace({ path: workspace });
+    const native = await createAuthorityTestRuntime({ documents: authority, hostId: 'surface-undo-receipts', dataDir });
+    const registries = ['a', 'b'].map(name => new DocumentRegistry({ documents: documentsClient(authority),
+      getGeneration: () => 1, recoverySessionId: `surface-undo-${name}`, journalDebounceMs: 0 }));
+    try {
+      for (const [index, file] of ['a.txt', 'b.txt'].entries()) {
+        const resource = { workspaceId: identity.workspaceId, resourceId: file };
+        await registries[index]!.open(resource);
+        registries[index]!.applyTransaction(resource, 'draft\n', { origin: 'editor' });
+      }
+      await expect.poll(async () => (await authority.inspectDirtyBuffers(identity.workspaceId))
+        .flatMap(publication => publication.resources).length).toBe(2);
+      const result = await native.workingStates.withBranchStore(identity.workspaceId, 'surface-undo-result', async store => {
+        const base = await store.captureDirectory(workspace);
+        const draft = await store.putObject(Buffer.from('draft\n'));
+        const child = await store.putObject(Buffer.from('child\n'));
+        const state = (hash: string, byteLength: number) => ({ kind: 'regular-file' as const, objectHash: hash, byteLength, mode: 0o644 });
+        for (const file of ['a.txt', 'b.txt']) base[file] = state(draft.hash, draft.byteLength);
+        await store.createBranch(identity.workspaceId, 'surface-undo-child', base, 'base', ['a.txt', 'b.txt']);
+        await store.commitVirtualWrites('surface-undo-child', 0, Object.fromEntries(['a.txt', 'b.txt']
+          .map(file => [file, state(child.hash, child.byteLength)])));
+        return store.publishHeadResult('surface-undo-child');
+      });
+      const coordinator = new IntegrationCoordinator({ workingStates: native.workingStates,
+        inspectDirtyBuffers: authority.inspectDirtyBuffers,
+        beginDirtyStateBarrier: (workspaceId, paths) => authority.beginDirtyStateBarrier(workspaceId, paths),
+        requestSurfaceOperation: async (request, options) => {
+          const response = await authority.requestSurfaceOperation(request, options);
+          if (request.action === 'undo' && request.targets.some(target => target.resource.resourceId === 'b.txt')) {
+            throw new Error('Controlled loss after the original Registry performed undo');
+          }
+          return response;
+        },
+      });
+      const merged = await coordinator.mergeResult({ workspaceId: identity.workspaceId, threadId: 'surface-undo-thread',
+        branchId: 'surface-undo-child', resultRevision: result.resultRevision });
+      expect(merged.status).toBe('applied');
+      for (const [index, file] of ['a.txt', 'b.txt'].entries()) {
+        expect(registries[index]!.get({ workspaceId: identity.workspaceId, resourceId: file })?.buffer).toBe('child\n');
+      }
+      const undone = await coordinator.undoIntegration({ workspaceId: identity.workspaceId, threadId: 'surface-undo-thread',
+        operationId: merged.operationId });
+      expect(undone.status).toBe('needs-attention');
+      const journal = await native.recovery.getOperation(identity.workspaceId, merged.operationId);
+      expect(journal?.result).toMatchObject({ compensatedPaths: ['a.txt'], needsAttentionPaths: ['b.txt'], executorStopped: false });
+      const files = journal?.files as Array<{ path: string; phase: string }>;
+      expect(files.find(file => file.path === 'a.txt')?.phase).toBe('external-safety-observed');
+      expect(files.find(file => file.path === 'b.txt')?.phase).toBe('needs-attention');
+      for (const [index, file] of ['a.txt', 'b.txt'].entries()) {
+        expect(registries[index]!.get({ workspaceId: identity.workspaceId, resourceId: file })?.buffer).toBe('draft\n');
+        expect(await fs.promises.readFile(path.join(workspace, file), 'utf8')).toBe('saved\n');
+      }
+    } finally {
+      for (const registry of registries) { await registry.flushRecoveryJournals(); await registry.dispose(); }
       await authority.dispose();
       await native.dispose();
     }

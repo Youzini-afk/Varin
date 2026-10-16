@@ -44,9 +44,9 @@ it('rejects late response bodies after cancellation or Host switching', async ()
   try {
     const api = createAgentProfilesHttpAPI();
     const controller = new AbortController();
-    const aborted = api.read({ runtime: 'pi' }, controller.signal);
+    const aborted = api.read({ runtime: 'agent' }, controller.signal);
     await new Promise(resolve => setImmediate(resolve));
-    controller.abort(); release({ runtime: 'pi' });
+    controller.abort(); release({ runtime: 'agent' });
     await assert.rejects(aborted, { name: 'AbortError' });
     const stale = api.read({ runtime: 'agent' });
     await new Promise(resolve => setImmediate(resolve));

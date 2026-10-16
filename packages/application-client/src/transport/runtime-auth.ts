@@ -1,4 +1,5 @@
 import { getActiveRelayTunnel } from './relay-provider.js';
+import { fetchWithoutRuntimeRouting } from './runtime-fetch.js';
 
 type RuntimeAuthCredential =
   | { type: 'bearer'; token: string }
@@ -299,7 +300,7 @@ const mintLocalRuntimeUrlAuthToken = (localOrigin: string): Promise<string> => {
   }
   const generation = localRuntimeUrlAuthGeneration;
   const refreshPromise = withMintDeadline(async (signal) => {
-    const response = await fetch(buildAuthUrl(origin, '/auth/url-token'), {
+    const response = await fetchWithoutRuntimeRouting(buildAuthUrl(origin, '/auth/url-token'), {
       method: 'POST',
       credentials: 'include',
       signal,

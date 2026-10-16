@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
+import { DatabaseSync } from "node:sqlite";
 import { createIsolatedTerminalSessionApi } from "../terminal/isolated-session-api.test-helper.js";
 import { spawn as nodeSpawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { TransportFixture } from "./tests/transport-fixture.js";
@@ -677,11 +678,22 @@ vitestIt.skipIf(!available || process.platform !== "linux")("a complete retained
   const processId = "complete-log-unknown-writer";
   const initial = await f.client.processSpawn(f.spawn(processId, "process.stdin.once('data',()=>{process.stdout.write('complete-log');process.stdin.destroy()});process.stdin.resume()"));
   assert.equal(initial.writerActive, true);
+  const databasePath = path.join(f.storageRoot, "catalog.sqlite");
+  const before = new DatabaseSync(databasePath, { readOnly: true });
+  let originalStatus: string;
+  try {
+    const row = before.prepare("SELECT status_json FROM process_records WHERE process_id=?").get(processId);
+    assert.ok(row);
+    assert.equal(typeof row.status_json, "string");
+    originalStatus = row.status_json as string;
+    assert.equal(JSON.parse(originalStatus).writerActive, true);
+  } finally { before.close(); }
   await f.client.processWrite({ workspaceId: "ws", processId, operationId: `input:${processId}`, bytesBase64: Buffer.from("go").toString("base64") });
   const files = outputFiles(f, processId);
   const deadline = Date.now() + 15_000;
-  // Inspect durable evidence directly, leaving the Storage process snapshot
-  // unrefreshed. This is an abrupt restart with separately missing exit proof.
+  // The stop notification can persist Storage's snapshot without processInspect.
+  // Save the real pre-exit row above, then restore that exact crash boundary only
+  // after the kernel is dead. The completed log alone must never release it.
   while (!(await fs.stat(files.marker).then(() => true, () => false)) || !(await fs.stat(files.receipt).then(() => true, () => false))) {
     if (Date.now() > deadline) throw new Error("Durable output and tree receipt did not arrive");
     await pause();
@@ -691,6 +703,10 @@ vitestIt.skipIf(!available || process.platform !== "linux")("a complete retained
   f.kernelChild.kill("SIGKILL");
   await exited;
   try {
+    const interrupted = new DatabaseSync(databasePath);
+    try {
+      assert.equal(interrupted.prepare("UPDATE process_records SET status_json=? WHERE process_id=?").run(originalStatus, processId).changes, 1);
+    } finally { interrupted.close(); }
     await fs.rm(files.receipt);
     const reopened = await reopenProcessFixture(f);
     const read = await reopened.client.processRead({ workspaceId: "ws", processId, cursor: 0 });
@@ -702,6 +718,29 @@ vitestIt.skipIf(!available || process.platform !== "linux")("a complete retained
     await assert.rejects(reopened.client.processRelease({ workspaceId: "ws", processId }), /unconfirmed|in use/);
     const registered = await reopened.client.fileRootRegister({ workspaceId: "ws", executionWorkspaceId: "ws", canonicalRoot: f.workspace });
     await assert.rejects(reopened.client.fileRemove({ workspaceId: "ws", rootId: String(registered.rootId), operationId: "unknown-log-reclaim", path: "child", recursive: true, force: true }), /writer|exit/);
+    await reopened.host.close();
+  } finally { await fs.writeFile(files.receipt, receipt); }
+}, 30_000);
+
+it("saved tree-exit evidence survives a missing guardian receipt file after restart", async () => {
+  const f = await fixture();
+  const processId = "saved-tree-exit";
+  await f.client.processSpawn(f.spawn(processId, "process.stdout.write('stopped');process.exitCode=7"));
+  const original = await drain(f.client, processId);
+  assert.equal(original.process.writerActive, false);
+  assert.equal(original.process.exitCode, 7);
+  await f.host.close();
+  const files = outputFiles(f, processId);
+  const receipt = await fs.readFile(files.receipt);
+  try {
+    await fs.rm(files.receipt);
+    const reopened = await reopenProcessFixture(f);
+    const read = await reopened.client.processRead({ workspaceId: "ws", processId, cursor: 0 });
+    assert.equal(read.process.writerActive, false);
+    assert.equal(read.process.status, "exited");
+    assert.equal(read.process.exitCode, 7);
+    assert.equal(read.outputComplete, true);
+    await reopened.client.processRelease({ workspaceId: "ws", processId });
     await reopened.host.close();
   } finally { await fs.writeFile(files.receipt, receipt); }
 }, 30_000);

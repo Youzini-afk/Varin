@@ -104,6 +104,8 @@ Responses preserves original output items for same-connection continuation. Chat
 assistant wire message while retaining semantic calls for cross-family replay, avoiding duplicate calls.
 `legacy_max_tokens`, stream usage and reasoning choices are explicit configuration, and unsupported
 vendor deltas fail rather than disappearing.
+Chat sampling options cannot expand the adapter's single-choice contract: a non-default `n` is
+rejected during binding, before credentials or a potentially billable request are dispatched.
 
 Azure requires the complete endpoint, deployment and API version selected by the Host. It validates
 or appends the API-version query and uses deployment as the request model. Resource defaults and

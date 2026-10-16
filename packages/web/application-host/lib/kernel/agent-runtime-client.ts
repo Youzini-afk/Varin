@@ -1867,6 +1867,9 @@ export class AgentRuntimeClient {
     }
     return run;
   }
+  runFailure(runId: string, signal?: AbortSignal): Promise<import('./protocol.generated.js').RunFailure | null> {
+    return this.kernel.agentRuntimeRequest('runtime.run.failure', { runId }, signal);
+  }
   resumeRun(
     runId: string,
     waitId: string,

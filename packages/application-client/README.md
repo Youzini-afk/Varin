@@ -243,6 +243,15 @@ downloads, assets and WebSockets use the runtime URL/auth resolver and their tra
 build a browser URL and pass it back into `runtimeFetch`, or place long-lived bearer credentials in a
 URL. Browser URL admission remains a narrow authenticated Host contract.
 
+Direct-browser long observations use `transport/observation-transport.ts` to multiplex the fixed
+`observation-protocol.ts` route allowlist over `/api/varin/observations/ws`. This keeps HTTP/1
+connections available across views and tabs; relay requests retain their existing transport.
+Each channel still receives the original HTTP status, headers and body, with pull-based backpressure.
+Cancellation closes only that original observation; a socket failure fails all unfinished channels
+without replaying them. Existing consumers own cursor/revision recovery and resource-lease lifetime.
+The Host validates the WebSocket identity and Origin, then reuses each original route's authorization.
+Local extension observations retain their local Host when the selected runtime is remote.
+
 React features consume RuntimeAPIs through the provider hooks. Framework-neutral consumers use the
 registered accessor only when a hook cannot own the lifecycle. Switching the current Host replaces
 endpoint/auth ownership and resets or rebinds existing consumers. Async work retains its original Host

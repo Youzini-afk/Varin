@@ -1,7 +1,7 @@
 import React from 'react';
 import { getRegisteredRuntimeAPIs } from '@/lib/runtime-api/registry';
 import { isDesktopShell, isWebRuntime } from '@/lib/desktop';
-import { getRuntimeUrlResolver } from '@varin/application-client';
+import { RuntimeEventSource, subscribeRuntimeEndpointChanged } from '@varin/application-client';
 import { useUIStore } from '@/stores/useUIStore';
 import type { NotificationPayload } from '@varin/application-client';
 
@@ -30,12 +30,12 @@ export const useWebNotificationStream = (options?: { enabled?: boolean }) => {
   const enabled = options?.enabled ?? true;
 
   React.useEffect(() => {
-    if (!enabled || isDesktopShell() || !isWebRuntime() || typeof window === 'undefined' || typeof EventSource === 'undefined') {
+    if (!enabled || isDesktopShell() || !isWebRuntime() || typeof window === 'undefined') {
       return;
     }
 
-    const source = new EventSource(getRuntimeUrlResolver().sse(NOTIFICATION_STREAM_PATH));
-    source.onmessage = (event) => {
+    let source: RuntimeEventSource;
+    const onmessage = (event: MessageEvent<string>) => {
       let data: unknown;
       try {
         data = JSON.parse(event.data) as unknown;
@@ -54,7 +54,15 @@ export const useWebNotificationStream = (options?: { enabled?: boolean }) => {
       void apis?.notifications?.notifyAgentCompletion(payload);
     };
 
+    const connect = () => {
+      source?.close();
+      source = new RuntimeEventSource(NOTIFICATION_STREAM_PATH);
+      source.onmessage = onmessage;
+    };
+    connect();
+    const unsubscribe = subscribeRuntimeEndpointChanged(connect);
     return () => {
+      unsubscribe();
       source.close();
     };
   }, [enabled]);

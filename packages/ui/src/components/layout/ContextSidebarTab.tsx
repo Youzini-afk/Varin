@@ -10,9 +10,9 @@ import { ThreadTokenUsage } from '@/components/thread/ThreadTokenUsage';
 import { MarkdownRenderer } from '@/components/chat/MarkdownRenderer';
 
 /** Inspect native history and context facts without projecting another runtime's counters. */
-export const ContextPanelContent: React.FC = () => {
+export const ContextPanelContent: React.FC<{ active?: boolean }> = ({ active = true }) => {
   const { t } = useI18n();
-  const { identity, snapshot, error } = useSelectedThreadSnapshot();
+  const { identity, snapshot, error } = useSelectedThreadSnapshot(active);
   const api = useRuntimeAPIs().threads;
   const [copied, setCopied] = React.useState<string>();
   if (!identity) return <div className="flex h-full items-center justify-center p-6 text-center typography-ui-label text-muted-foreground">{t('contextSidebar.empty.openSession')}</div>;
@@ -23,7 +23,7 @@ export const ContextPanelContent: React.FC = () => {
     {error && <p role="alert" className="typography-meta text-destructive">{error}</p>}
     <header><h2 className="truncate typography-ui-header font-semibold text-foreground">{snapshot.thread.title || t('contextSidebar.session.untitled')}</h2>
       <div className="mt-1 typography-micro text-muted-foreground">{model?.providerId} {model?.model && ` / ${model.model}`}</div></header>
-    <div className="rounded-lg bg-[var(--surface-elevated)]/70"><ThreadTokenUsage /></div>
+    <div className="rounded-lg bg-[var(--surface-elevated)]/70"><ThreadTokenUsage active={active} /></div>
     {checkpoint && <details className="rounded-lg border border-border/60 px-4 py-3 typography-meta">
       <summary className="cursor-pointer text-muted-foreground">{t('contextSidebar.section.context')}</summary>
       {checkpoint.proposal.summary && <div className="mt-3"><MarkdownRenderer content={checkpoint.proposal.summary} messageId={checkpoint.id} /></div>}

@@ -61,4 +61,50 @@ describe('createWebLanguageServicesAPI', () => {
       },
     });
   });
+
+  it('releases an unread rejected language observation instead of retaining its channel', async () => {
+    const cancel = vi.fn();
+    runtimeFetchMock.mockResolvedValueOnce(new Response(new ReadableStream<Uint8Array>({ cancel }), { status: 401 }));
+    const { createWebLanguageServicesAPI } = await import('./language');
+    const listener = vi.fn();
+    const subscription = createWebLanguageServicesAPI().subscribe('workspace', listener);
+    await new Promise(resolve => setImmediate(resolve));
+    expect(cancel).toHaveBeenCalledTimes(1);
+    expect(runtimeFetchMock.mock.calls[0]![1].signal.aborted).toBe(true);
+    expect(listener).not.toHaveBeenCalled();
+    subscription.close();
+    expect(cancel).toHaveBeenCalledTimes(1);
+  });
+
+  it('releases a language reader when event decoding fails', async () => {
+    const cancel = vi.fn();
+    const body = new ReadableStream<Uint8Array>({
+      start: controller => controller.enqueue(new TextEncoder().encode('data: not-json\n\n')),
+      cancel,
+    });
+    runtimeFetchMock.mockResolvedValueOnce(new Response(body));
+    const { createWebLanguageServicesAPI } = await import('./language');
+    const listener = vi.fn();
+    const subscription = createWebLanguageServicesAPI().subscribe('workspace', listener);
+    await new Promise(resolve => setImmediate(resolve));
+    expect(cancel).toHaveBeenCalledTimes(1);
+    expect(body.locked).toBe(false);
+    expect(runtimeFetchMock.mock.calls[0]![1].signal.aborted).toBe(true);
+    expect(listener).not.toHaveBeenCalled();
+    subscription.close();
+  });
+
+  it('cancels a late language response after its original subscription was closed', async () => {
+    let finish!: (response: Response) => void;
+    runtimeFetchMock.mockReturnValueOnce(new Promise<Response>(resolve => { finish = resolve; }));
+    const { createWebLanguageServicesAPI } = await import('./language');
+    const listener = vi.fn();
+    const subscription = createWebLanguageServicesAPI().subscribe('workspace', listener);
+    subscription.close();
+    const cancel = vi.fn();
+    finish(new Response(new ReadableStream<Uint8Array>({ cancel })));
+    await new Promise(resolve => setImmediate(resolve));
+    expect(cancel).toHaveBeenCalledTimes(1);
+    expect(listener).not.toHaveBeenCalled();
+  });
 });

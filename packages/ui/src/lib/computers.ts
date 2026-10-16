@@ -1,4 +1,4 @@
-import { ThreadRequestError, getRuntimeEndpointGeneration, getRuntimeUrlResolver, runtimeFetch } from '@varin/application-client';
+import { ThreadRequestError, getRuntimeEndpointGeneration, RuntimeEventSource, runtimeFetch } from '@varin/application-client';
 import { sha256 } from '@noble/hashes/sha2.js';
 import type {
   ComputerControlState,
@@ -104,15 +104,15 @@ export type DesktopStreamEvent =
   | { type: 'error'; error: string };
 
 /**
- * Subscribe to a desktop's frame stream. The returned EventSource only feeds
+ * Subscribe to a desktop's frame stream. The returned event subscription only feeds
  * this view — closing it unsubscribes the viewer without touching the task
  * or the desktop itself.
  */
-export const subscribeDesktopStream = (desktopId: string, viewerId: string, frames = true): EventSource => (
-  new EventSource(getRuntimeUrlResolver().sse(
+export const subscribeDesktopStream = (desktopId: string, viewerId: string, frames = true): RuntimeEventSource => (
+  new RuntimeEventSource(
     `/api/computers/desktops/${encodeURIComponent(desktopId)}/stream`,
-    { viewer: viewerId, ...(frames ? {} : { frames: '0' }) },
-  ))
+    { query: { viewer: viewerId, ...(frames ? {} : { frames: '0' }) } },
+  )
 );
 
 export const prepareComputerDesktop = async (input: import('@varin/protocol').ComputerDesktopPrepareParams): Promise<ComputerDesktop> => (

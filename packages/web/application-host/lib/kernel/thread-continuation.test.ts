@@ -468,6 +468,10 @@ it('subtree cancellation carries the original parent scope and never loads child
   expect(await f.adapter.cancelOperation('dispatch-operation')).toBe(status);
   expect(runtime.cancelTree).toHaveBeenLastCalledWith({ kind: 'child', operation_id: 'dispatch-operation' });
   expect(runtime.child).not.toHaveBeenCalled(); expect(runtime.operation).not.toHaveBeenCalled();
+  const accepted = runtime.cancelTree.mock.calls.length;
+  f.run.branch_id = 'branch:other';
+  await expect(f.adapter.cancelChild(identity, 'dispatch-operation')).rejects.toThrow('another Thread branch');
+  expect(runtime.cancelTree.mock.calls).toHaveLength(accepted);
 });
 
 it('an unrelated observation error remains visible without blocking original saved-launch discovery or event replay', async () => {

@@ -14,7 +14,7 @@ function tokenLabel(value: UsageTokenCount): string {
   return `${BigInt(value.known).toLocaleString()}${value.missing ? ' + ?' : ''}`;
 }
 /** Visible-demand projection of the original Catalog receipt metadata. */
-export function ThreadTokenUsage() {
+export function ThreadTokenUsage({ active = true }: { active?: boolean }) {
   const { t } = useI18n();
   const api = useRuntimeAPIs().threads;
   const identity = useThreadStore(state => state.selectedIdentity);
@@ -23,7 +23,7 @@ export function ThreadTokenUsage() {
   const [refresh, setRefresh] = React.useState(0);
   const [view, setView] = React.useState<{ owner: string; data?: ThreadUsage; error?: string }>({ owner: '' });
   React.useEffect(() => {
-    if (!identity || !api) { setView({ owner }); return; }
+    if (!active || !identity || !api) { setView({ owner }); return; }
     let alive = true; let dirty = false; let loading: Promise<void> | undefined;
     const controller = new AbortController();
     const current = () => alive && generation === getRuntimeEndpointGeneration();
@@ -51,7 +51,7 @@ export function ThreadTokenUsage() {
       if (current()) fail(new Error('Usage updates disconnected. Refresh to reconnect.'));
     })().catch(fail);
     return () => { alive = false; controller.abort(); };
-  }, [api, owner, generation, identity, refresh]);
+  }, [active, api, owner, generation, identity, refresh]);
   const shown = view.owner === owner ? view : undefined;
   return <section className="space-y-3 px-4 py-3" aria-label="Branch token usage">
     <div className="flex items-center justify-between gap-2"><h3 className="font-semibold">{t('chat.usage.title')}</h3>
