@@ -1,3 +1,4 @@
+import { guardProviderReply } from './provider-response.test-helper.js';
 import { AgentSettingsService } from '../models/settings.js';
 import { createServer, type ServerResponse } from 'node:http';
 import { once } from 'node:events';
@@ -46,11 +47,11 @@ it.each([
   const server=createServer((request,response)=>{
     const chunks:Buffer[]=[];
     request.on('data',(bytes:Buffer)=>chunks.push(bytes));
-    request.on('end',()=>{
+    request.on('end',guardProviderReply(response, ()=>{
       const body=JSON.parse(Buffer.concat(chunks).toString()) as Record<string,unknown>;
       if(JSON.stringify(body.input).includes('Produce a faithful continuation summary')) {summaries.push(response);summaryBodies.push(body);}
       else {main.push({body,response});if(main.length===1) answer(response,'ACK: old source read');}
-    });
+    }));
   });
   server.listen(0,'127.0.0.1');await once(server,'listening');
   const address=server.address();if(!address || typeof address==='string') throw new Error('fixture listener missing');

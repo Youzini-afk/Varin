@@ -1,3 +1,4 @@
+import { guardProviderReply } from './provider-response.test-helper.js';
 import express from 'express';
 import { createServer, type Server, type IncomingHttpHeaders } from 'node:http';
 import { once } from 'node:events';
@@ -29,7 +30,7 @@ it.each([false,true])('Anthropic subscription=%s dispatch preserves its bearer, 
  const root=await fs.mkdtemp(path.join(os.tmpdir(),'varin-wif-review-'));cleanups.push(()=>fs.rm(root,{recursive:true,force:true}));
  const assertion=[Buffer.from('{"alg":"RS256"}').toString('base64url'),Buffer.from(JSON.stringify({iss:'https://fixture.example.test',sub:'fixture-workload',aud:'fixture-api',exp:2000000000})).toString('base64url'),'fake-signature'].join('.');
  const token=subscription?'sk-ant-oat-fake-subscription-token':'fake-anthropic-federated-access-token';const captured:Array<{path:string;headers:IncomingHttpHeaders;body:Record<string,unknown>}>=[];
- const base=await listen(createServer((request,response)=>{const chunks:Buffer[]=[];request.on('data',chunk=>chunks.push(chunk));request.on('end',()=>{
+ const base=await listen(createServer((request,response)=>{const chunks:Buffer[]=[];request.on('data',chunk=>chunks.push(chunk));request.on('end',guardProviderReply(response, ()=>{
   captured.push({path:request.url!,headers:request.headers,body:JSON.parse(Buffer.concat(chunks).toString()) as Record<string,unknown>});
   if(request.url==='/v1/oauth/token'){response.writeHead(200,{'content-type':'application/json'}).end(JSON.stringify({access_token:token,token_type:'Bearer',expires_in:3600}));return;}
   response.writeHead(200,{'content-type':'text/event-stream'});const events=[
@@ -38,7 +39,7 @@ it.each([false,true])('Anthropic subscription=%s dispatch preserves its bearer, 
    {type:'content_block_delta',index:0,delta:{type:'text_delta',text:'Actual federated answer.'}},
    {type:'content_block_stop',index:0},{type:'message_delta',delta:{stop_reason:'end_turn'},usage:{output_tokens:6}},{type:'message_stop'},
   ];response.end(events.map(event=>`event: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`).join(''));
- });}));
+ }));}));
  const file=path.join(root,'assertion.jwt');await fs.writeFile(file,assertion);
  const agentDir=path.join(root,'models');const authority=new ModelsService(agentDir,{projectTrusted:()=>false});
  const reference='anthropic-account';

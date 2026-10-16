@@ -43,6 +43,23 @@ fn record_input(id: &str) -> Value {
 #[test]
 fn native_grants_store_null_and_historical_null_grants_reissue_without_migration() {
     let (mut storage, root) = fixture();
+    let format = |storage: &Storage| {
+        (
+            storage
+                .conn
+                .pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))
+                .unwrap(),
+            storage
+                .conn
+                .query_row(
+                    "SELECT value FROM metadata WHERE key='format_version'",
+                    [],
+                    |row| row.get::<_, String>(0),
+                )
+                .unwrap(),
+        )
+    };
+    let original_format = format(&storage);
     let value: Value = serde_json::from_str(&grant_json(&storage)).unwrap();
     for key in [
         "authority_instance_id",
@@ -76,22 +93,9 @@ fn native_grants_store_null_and_historical_null_grants_reissue_without_migration
     assert_eq!(second["kernel_epoch"], "next-epoch");
     assert_eq!(second["session_id"], Value::Null);
     assert_eq!(
-        storage
-            .conn
-            .query_row("PRAGMA user_version", [], |row| row.get::<_, i64>(0))
-            .unwrap(),
-        16
-    );
-    assert_eq!(
-        storage
-            .conn
-            .query_row(
-                "SELECT value FROM metadata WHERE key='format_version'",
-                [],
-                |row| row.get::<_, String>(0)
-            )
-            .unwrap(),
-        "22"
+        format(&storage),
+        original_format,
+        "grant reissue must not migrate either store format"
     );
     drop(storage);
     fs::remove_dir_all(root).unwrap();

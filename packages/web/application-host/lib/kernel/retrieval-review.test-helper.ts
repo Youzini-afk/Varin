@@ -1,3 +1,4 @@
+import { guardProviderReply } from './provider-response.test-helper.js';
 import { responsesMetadataText } from './responses-wire.test-helper.js';
 import express from 'express';
 import { createServer, type Server, type ServerResponse } from 'node:http';
@@ -35,7 +36,7 @@ export const deferred = <T = void>() => {
 };
 
 /** Real Documents, Rust kernel/compute and public HTTP route; only the model is scripted loopback. */
-export async function retrievalFixture(reply: (body: Record<string, unknown>, response: ServerResponse) => void) {
+export async function retrievalFixture(reply: (body: Record<string, unknown>, response: ServerResponse) => void | Promise<void>) {
   if (!process.env.VARIN_TEST_KERNEL_PATH) throw new Error('Independent retrieval acceptance requires explicit frozen VARIN_TEST_KERNEL_PATH');
   const cleanups: Array<() => void | Promise<void>> = [];
   const cleanup = async () => {
@@ -71,7 +72,7 @@ export async function retrievalFixture(reply: (body: Record<string, unknown>, re
     const endpoint = `${await listen(createServer((request, response) => {
       const chunks: Buffer[] = [];
       request.on('data', chunk => chunks.push(Buffer.from(chunk)));
-      request.on('end', () => { const body = JSON.parse(Buffer.concat(chunks).toString()) as Record<string, unknown>; requests.push(body); reply(body, response); });
+      request.on('end', guardProviderReply(response, () => { const body = JSON.parse(Buffer.concat(chunks).toString()) as Record<string, unknown>; requests.push(body); return reply(body, response); }));
     }))}/responses`;
     const configuration = { providerFamily: 'openai-responses', model: 'retrieval-loopback', endpoint, credentialEnvironment: null, allowAnonymous: true, configurationGeneration: 1, maxOutputTokens: 64 };
     const credentialOwner = new ExistingHostCredentialOwner({ providerId: 'fixture', providerFamily: 'openai-responses', endpoint, allowAnonymous: true,

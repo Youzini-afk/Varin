@@ -1,7 +1,6 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { describe, it, expect } from "vitest";
-import { createKernelProcessService } from "./process-service.js";
 import { createDocumentAuthorityHarness } from "../documents/contract-fixtures.js";
 import { createNativeProcessTestHarness, hasNativeProcessKernel } from "../process/native-process.test-helper.js";
 import { createLanguageSupervisor } from "../lsp/supervisor.js";

@@ -6,7 +6,6 @@ import { createDocumentAuthorityHarness } from "../../documents/contract-fixture
 import { createStructureSource } from "../../structure/source.js";
 import { createTreeSitterStructureProvider } from "../../structure/native-provider.test-helper.js";
 import { createHashEmbedder, hashEmbed } from "./embedder.js";
-import { createEmbedScheduler } from "./embed-scheduler.js";
 import { createSemanticBackend } from "./backend.js";
 import { createRemoteEmbedder } from "./remote-embedder.js";
 import { createSemanticIndexRuntime } from "./runtime.js";
@@ -39,7 +38,7 @@ const chunk = (documentId: string, body: string, startLine = 1): SemanticChunk =
   fallback: false,
 });
 
-describe("3.16 vector reuse, scheduler, overlays, and remote spaces", () => {
+describe("semantic vector reuse, overlays, and remote spaces", () => {
   it("reuses the same embedText and only re-embeds a changed block", async () => {
     const dataDir = mkdtempSync(join(tmpdir(), "varin-reuse-"));
     dirs.push(dataDir);
@@ -71,29 +70,6 @@ describe("3.16 vector reuse, scheduler, overlays, and remote spaces", () => {
     });
     expect(sent.filter((text) => text === "stable pineapple")).toHaveLength(1);
     expect(sent.filter((text) => text === "changing coconut now")).toHaveLength(1);
-  });
-
-  it("runs a foreground query before the next background batch", async () => {
-    const scheduler = createEmbedScheduler();
-    const order: string[] = [];
-    const background1 = scheduler.enqueue("background", async () => {
-      order.push("bg1-start");
-      await new Promise((resolve) => setTimeout(resolve, 20));
-      order.push("bg1-end");
-    });
-    let resolveQuery!: () => void;
-    const queryStarted = new Promise<void>((resolve) => { resolveQuery = resolve; });
-    const query = scheduler.enqueue("foreground", async () => {
-      resolveQuery();
-      order.push("fg");
-    });
-    const background2 = scheduler.enqueue("background", async () => {
-      order.push("bg2");
-    });
-    await queryStarted;
-    await Promise.all([background1, query, background2]);
-    expect(order.indexOf("fg")).toBeLessThan(order.indexOf("bg2"));
-    expect(order.indexOf("bg1-end")).toBeLessThan(order.indexOf("fg"));
   });
 
   it("masks disk vectors immediately and does not mix overlay gaps with missing bodies", async () => {

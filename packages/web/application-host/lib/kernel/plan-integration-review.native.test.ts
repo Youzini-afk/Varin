@@ -1,3 +1,4 @@
+import { guardProviderReply } from './provider-response.test-helper.js';
 import { responsesMetadataText } from './responses-wire.test-helper.js';
 import { resourceScopeFixture } from './resource-scope.test-helper.js';
 import express from 'express';
@@ -237,10 +238,10 @@ async function toolFixture(reply: (body: Record<string, unknown>, turn: number) 
   const server = createServer((req, res) => {
     const chunks: Buffer[] = [];
     req.on('data', (chunk: Buffer) => chunks.push(chunk));
-    req.on('end', () => {
+    req.on('end', guardProviderReply(res, () => {
       const body = JSON.parse(Buffer.concat(chunks).toString()) as Record<string, unknown>; requests.push(body);
       modelReply(res, reply(body, requests.length));
-    });
+    }));
   });
   server.listen(0, '127.0.0.1'); await once(server, 'listening');
   cleanups.push(async () => { server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve())); });

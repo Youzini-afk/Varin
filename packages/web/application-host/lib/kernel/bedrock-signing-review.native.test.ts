@@ -1,3 +1,4 @@
+import { guardProviderReply } from './provider-response.test-helper.js';
 import express from 'express';
 import { createServer, type Server, type IncomingHttpHeaders } from 'node:http';
 import { once } from 'node:events';
@@ -77,10 +78,10 @@ it.each(['ASCII request with plain text', 'Unicode 原文 café 🧪 with "quote
  let redirected=0;
  const redirect=await listen(createServer((_request,response)=>{redirected++;response.writeHead(200).end();}));
  const captured: Array<{body:string;headers:IncomingHttpHeaders;method:string;url:string}>=[];
- const endpoint=await listen(createServer((request,response)=>{const chunks:Buffer[]=[];request.on('data',chunk=>chunks.push(chunk));request.on('end',()=>{
+ const endpoint=await listen(createServer((request,response)=>{const chunks:Buffer[]=[];request.on('data',chunk=>chunks.push(chunk));request.on('end',guardProviderReply(response, ()=>{
   captured.push({body:Buffer.concat(chunks).toString('utf8'),headers:request.headers,method:request.method!,url:request.url!});
   response.writeHead(307,{location:`${redirect}/capture`}).end();
- });}));
+ }));}));
  const agentDir=path.join(root,'agent');await fs.mkdir(agentDir);
  const authority=await fixtureModels(agentDir, root, endpoint);
  const models=createModelAuthority(authority);

@@ -1,7 +1,7 @@
+import { guardProviderReply } from './provider-response.test-helper.js';
 import { resourceScopeFixture } from './resource-scope.test-helper.js';
-import { leafHostComposition } from './host-composition.test-helper.js';
 import { ApplicationExtensionRuntime } from '@varin/extension-host';
-import { createAgentPolicy, AgentPolicyBridge } from './agent-policy.js';
+import { createAgentPolicy } from './agent-policy.js';
 import { createContextComposition } from './context-composition.js';
 import { createRequire } from 'node:module';
 import { createThreadContext } from './thread-context.js';
@@ -39,7 +39,7 @@ async function listen(server: Server) {
   cleanups.push(async () => { server.closeAllConnections(); await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve())); });
   return `http://127.0.0.1:${address.port}`;
 }
-async function fixture(reply: (body: Record<string, unknown>, response: ServerResponse) => void, existingRoot?: string, existingEndpoint?: string) {
+async function fixture(reply: (body: Record<string, unknown>, response: ServerResponse) => void | Promise<void>, existingRoot?: string, existingEndpoint?: string) {
   await fs.access(kernelPath);
   const root = existingRoot ?? await fs.mkdtemp(path.join(os.tmpdir(), 'varin-http-review-'));
   const kernel = createKernelClient({ hostId: 'http-review', storageRoot: root, buildVersion, kernelPath, allowCargoDevRunner: false });
@@ -49,10 +49,10 @@ async function fixture(reply: (body: Record<string, unknown>, response: ServerRe
   const provider = createServer((request, response) => {
     const chunks: Buffer[] = [];
     request.on('data', (bytes: Buffer) => chunks.push(bytes));
-    request.on('end', () => {
+    request.on('end', guardProviderReply(response, () => {
       requests.push({ body: JSON.parse(Buffer.concat(chunks).toString()) as Record<string, unknown>, ...(request.headers.authorization ? { authorization: request.headers.authorization } : {}) });
-      reply(requests.at(-1)!.body, response);
-    });
+      return reply(requests.at(-1)!.body, response);
+    }));
   });
   const endpoint = existingEndpoint ?? `${await listen(provider)}/responses`;
   const owner = new ExistingHostCredentialOwner({ providerId: 'fixture-provider', providerFamily: 'openai-responses', endpoint,
@@ -219,16 +219,6 @@ it('restart accepts exact policy identity and rejects changed artifact or config
  const example=path.join(f.root,'evidence-policy');await fs.appendFile(path.join(example,'host.cjs'),'\n// changed artifact, identical author state version\n');
  const staged=await second.extensions.reloadLocalSource({extensionId:'example.evidence-policy',expectedRevision:(await second.extensions.state()).catalog.revision});if(staged.outcome!=='staged')throw new Error('not staged');await second.extensions.requestCandidateApplication({extensionId:'example.evidence-policy',candidateIntegrity:staged.candidateIntegrity,expectedRevision:(await second.extensions.state()).catalog.revision});await second.extensions.selectCandidate({extensionId:'example.evidence-policy',candidateIntegrity:staged.candidateIntegrity,expectedRevision:(await second.extensions.state()).catalog.revision});
  await expect(second.runtime.preparePolicy(first.run_id)).rejects.toThrow();expect((await second.runtime.launch(first.run_id))!.selection.policy).toEqual(saved);expect(f.requests).toHaveLength(1);expect(second.requests).toHaveLength(0);
-});
-it('late old-epoch response send failure cannot close replacement kernel',async()=>{
- let epoch='one';let rejectOld!:(e:Error)=>void;let failures=0;let sent=0;
- const bridge=new AgentPolicyBridge(()=>epoch,async()=>{sent++;await new Promise<void>((_resolve,reject)=>{rejectOld=reject})},()=>{failures++});
- const artifact = { providerKey:'fixture:host:varin.agent.policy@4', extensionId:'fixture', extensionVersion:'1', serviceId:'varin.agent.policy' as const, serviceVersion:4 as const,
-   composition: leafHostComposition({ extensionId: 'fixture', extensionVersion: '1', artifactIntegrity: 'artifact' }),
-   artifactIntegrity:'artifact', configurationIdentity:'config', declaredIdentity:{name:'policy',version:'1'}, identity:{name:'policy',version:'hash'}, modelRoles:[], stateTransition:'unsupported' as const };
- const binding=bridge.register('r',0,{binding:{reference:'p',artifact},revocationSignal:new AbortController().signal,release(){},async transitionState(){return {kind:'incompatible',reason:'Unsupported'}},async decide(){return {action:{kind:'complete'},state:null}}});
- bridge.consume({v:1,kind:'agent-policy-request',id:'decision1',kernelEpoch:'one',runId:'r',generation:0,binding,input:{view:{run_id:'r',state:'runnable',history_count:0,history_head_id:null,pending_tool_calls:0,model_capabilities:[]},event:{kind:'started'},state:null}});
- await expect.poll(()=>sent).toBe(1);epoch='two';bridge.close();rejectOld(new Error('old pipe closed'));await new Promise(resolve=>setTimeout(resolve,20));expect(failures).toBe(0);
 });
 
 

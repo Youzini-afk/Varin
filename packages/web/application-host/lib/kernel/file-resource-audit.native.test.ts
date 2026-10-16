@@ -7,7 +7,6 @@ import { fileURLToPath } from "node:url";
 import { afterEach, it as vitestIt } from "vitest";
 import { createDocumentAuthorityHarness } from "../documents/contract-fixtures.js";
 import { KernelRecoveryContentStore, KernelRecoveryStore } from "./kernel-recovery-store.js";
-import { createDocumentAuthority } from "../documents/authority.js";
 import { KernelFileResourceBackend } from "./file-resource-backend.js";
 import { createKernelClient, type KernelClient } from "./kernel-client.js";
 import { createKernelWorkspaceWorkingStateAccess, KernelStorageAdapter } from "./storage-adapter.js";
