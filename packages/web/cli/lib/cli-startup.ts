@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url';
 import { DEFAULT_PORT } from './cli-args.js';
 import { EXIT_CODE, TunnelCliError } from './cli-errors.js';
 import { getDataDir } from './cli-paths.js';
+import { assertNodeServerRuntime } from './cli-process.js';
 import { hasUiPasswordConfigured } from './cli-network.js';
 import type { CliOptions } from './cli-types.js';
 
@@ -312,6 +313,7 @@ function getStartupStatus(): StartupStatus {
 }
 
 function enableStartupService(options: CliOptions = {}): StartupStatus {
+  assertNodeServerRuntime();
   const paths = getStartupServicePaths();
   if (!paths.servicePath) {
     throw new TunnelCliError(`Startup integration is not supported on ${paths.platform}.`, EXIT_CODE.USAGE_ERROR);

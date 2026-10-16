@@ -1,6 +1,7 @@
 import { requestServerShutdown } from './cli-http.js';
 import { discoverRunningInstances } from './cli-lifecycle.js';
 import {
+  assertNodeServerRuntime,
   readInstanceOptions,
   removePidFile,
   stopInstanceProcess,
@@ -95,6 +96,7 @@ function createUpdateCommand<Manager>({ importFromFilePath, packageManagerPath, 
     updateSpin?.message(`Updating to ${updateInfo.version || 'latest'}...`);
 
     if (runningInstances.length > 0) {
+      assertNodeServerRuntime();
       updateSpin?.message(`Stopping ${runningInstances.length} running instance(s)...`);
       for (const instance of runningInstances) {
         try {

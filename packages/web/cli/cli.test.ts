@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
@@ -9,12 +9,14 @@ import { pathToFileURL } from 'url';
 
 import { isModuleCliExecution, normalizeCliEntryPath } from './cli-entry.js';
 import { requestJson } from './lib/cli-http.js';
-import { requestThreadApi } from './lib/cli-runtime.js';
 import { inspectTunnelAttachability } from './lib/cli-lifecycle.js';
 import { formatGoal } from './lib/commands-schedule.js';
 import { formatModelsOutput } from './lib/commands-models.js';
 import { formatProjectLine } from './lib/commands-projects.js';
 import { resolveTargetPort } from './lib/cli-api-target.js';
+import { createServeCommand } from './lib/commands-serve.js';
+import { createUpdateCommand } from './lib/commands-update.js';
+import { terminateProcessTree } from './lib/cli-process.js';
 import type { FetchLike, FetchResponseLike } from './lib/cli-http.js';
 import type { CliOptions } from './lib/cli-types.js';
 import {
@@ -30,6 +32,7 @@ import {
   getPidFilePath,
   isVarinCmdline,
   isVarinProcessRunning,
+  main,
   parseArgs,
   resolveServeHost,
   resolveServeUiPassword,
@@ -220,6 +223,126 @@ const requestBodyText = (options?: RequestInit): string => (
 const requestHeader = (options: RequestInit | undefined, name: string): string | null => (
   new Headers(options?.headers).get(name)
 );
+
+describe('cli server runtime', () => {
+  async function withBunRuntime(fn: () => Promise<unknown>): Promise<void> {
+    const bunDescriptor = Object.getOwnPropertyDescriptor(process.versions, 'bun');
+    try {
+      Object.defineProperty(process.versions, 'bun', { value: '1.3.14', configurable: true });
+      await fn();
+    } finally {
+      if (bunDescriptor) Object.defineProperty(process.versions, 'bun', bunDescriptor);
+      else Reflect.deleteProperty(process.versions, 'bun');
+    }
+  }
+
+  it.each([
+    ['serve'],
+    ['serve', '--foreground'],
+    ['startup', 'enable'],
+  ])('rejects an explicit Bun invocation before running %j', async (...args) => {
+    const argv = process.argv;
+    try {
+      process.argv = [process.execPath, 'varin', ...args];
+      await withBunRuntime(async () => expect(main()).rejects.toMatchObject({
+        message: 'Starting Varin requires Node.js. Run this command with node instead of bun.',
+        exitCode: 2,
+      }));
+    } finally {
+      process.argv = argv;
+    }
+  });
+
+  it.each(['--help', '--version'])('keeps %s available under Bun', async (arg) => {
+    const argv = process.argv;
+    const output = vi.spyOn(console, 'log').mockImplementation(() => {});
+    try {
+      process.argv = [process.execPath, 'varin', arg];
+      await withBunRuntime(main);
+      expect(output).toHaveBeenCalled();
+    } finally {
+      output.mockRestore();
+      process.argv = argv;
+    }
+  });
+
+  it('allows status under Bun but rejects a daemon restart before stopping the live server', async () => {
+    await withTempVarinDataDir(async () => {
+      const server = await startMockVarinServer();
+      let stopped = false;
+      try {
+        await withBunRuntime(async () => {
+          const options = { explicitPort: true, port: server.port, host: '127.0.0.1', json: true };
+          const output = await captureStdout(() => commands.status(options));
+          expect(JSON.parse(output).state).toBe('running');
+          await expect(commands.restart.call({ stop: async () => { stopped = true; },
+            serve: async () => server.port }, options)).rejects.toMatchObject({ exitCode: 2 });
+        });
+        expect(stopped).toBe(false);
+        expect(server.shutdownRequested).toBe(false);
+      } finally {
+        await server.close();
+      }
+    });
+  });
+
+  it('rejects an update that would restart a daemon before shutdown or installation', async () => {
+    await withTempVarinDataDir(async () => {
+      const child = spawnVarinLikeIdleProcess();
+      if (child.pid === undefined) throw new Error('Fixture process did not start');
+      const server = await startMockVarinServer({ pid: child.pid });
+      let installed = false;
+      const update = createUpdateCommand({ packageManagerPath: 'fixture', serveCommand: async () => server.port,
+        importFromFilePath: async () => ({ checkForUpdates: async () => ({ available: true, version: 'next' }),
+          getCurrentVersion: () => 'current', detectPackageManager: () => 'fixture',
+          executeUpdate: () => { installed = true; return { success: false, exitCode: 1 }; } }) });
+      try {
+        fs.writeFileSync(await getPidFilePath(server.port), String(child.pid));
+        fs.writeFileSync(await getInstanceFilePath(server.port), JSON.stringify({ port: server.port, host: '127.0.0.1', launchMode: 'daemon' }));
+        await withBunRuntime(async () => expect(update({ json: true })).rejects.toMatchObject({ exitCode: 2 }));
+        expect(installed).toBe(false);
+        expect(server.shutdownRequested).toBe(false);
+      } finally {
+        await terminateProcessTree(child.pid);
+        await server.close();
+      }
+    });
+  });
+
+  it('starts the daemon with the current Node executable and keeps paths with spaces intact', async () => {
+    await withTempVarinDataDir(async (directory) => {
+      const serverPath = path.join(directory, 'server with spaces.mjs');
+      fs.writeFileSync(serverPath, `
+        import { start } from 'node:repl';
+        import { createServer } from 'node:http';
+        const server = createServer((_request, response) => {
+          response.setHeader('content-type', 'application/json');
+          response.end(JSON.stringify({ executable: process.execPath, node: process.versions.node,
+            bun: Boolean(process.versions.bun), repl: typeof start }));
+        });
+        server.listen(0, '127.0.0.1', () => process.send({ type: 'varin:ready', port: server.address().port }));
+        process.on('SIGTERM', () => server.close());
+      `);
+      const serve = createServeCommand({ serverPath,
+        setForegroundServerActive() {}, setForegroundShutdown() {} });
+      let pid: number | undefined;
+      try {
+        const port = await serve({ port: 0, host: '127.0.0.1', quiet: true,
+          suppressQuietOutput: true, suppressUiPasswordWarning: true });
+        if (typeof port !== 'number') throw new Error('Daemon did not return its ready port');
+        pid = Number(fs.readFileSync(await getPidFilePath(port), 'utf8'));
+        const response = await fetch(`http://127.0.0.1:${port}`);
+        expect(await response.json()).toEqual({ executable: process.execPath,
+          node: process.versions.node, bun: false, repl: 'function' });
+        expect(JSON.parse(fs.readFileSync(await getInstanceFilePath(port), 'utf8'))).toMatchObject({
+          port, host: '127.0.0.1', launchMode: 'daemon',
+        });
+      } finally {
+        if (pid !== undefined) await terminateProcessTree(pid);
+      }
+    });
+  });
+});
 
 describe('cli args', () => {
 

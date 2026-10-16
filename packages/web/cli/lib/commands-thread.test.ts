@@ -34,8 +34,8 @@ describe('native CLI requests', () => {
     await threadCommand({ ...options, key: 'same', prompt: 'hello', model: 'provider/model', wait: true }, 'create');
     await threadCommand({ ...options, key: 'same', prompt: 'hello', model: 'provider/model' }, 'create');
     const submits = calls.filter(call => call.path.endsWith('/submit'));
-    expect(submits).toHaveLength(2); expect(submits[0].body).toEqual(submits[1].body);
-    expect(submits[0].body).toMatchObject({ ...identity, key: 'same:input', expectedHead: null, text: 'hello', model: { providerId: 'provider', modelId: 'model' } });
+    expect(submits).toHaveLength(2); expect(submits[0]!.body).toEqual(submits[1]!.body);
+    expect(submits[0]!.body).toMatchObject({ ...identity, key: 'same:input', expectedHead: null, text: 'hello', model: { providerId: 'provider', modelId: 'model' } });
     expect(calls.filter(call => call.path.endsWith('/run')).every(call => call.body.runId === receipt.run_id)).toBe(true);
     expect(output).toContain('run:original'); expect(calls.some(call => call.path.includes('/varin/runtime'))).toBe(false);
   });
@@ -66,8 +66,8 @@ describe('native CLI requests', () => {
     await threadCommand(retry, 'fork');
     expect(calls.filter(call => call.path.endsWith('/fork')).map(call => call.body.headId)).toEqual(['history:cut', 'history:cut']);
     const submits = calls.filter(call => call.path.endsWith('/submit'));
-    expect(submits[0].body.expectedHead).toBe('history:cut');
-    expect(submits[0].body).toEqual(submits[1].body);
+    expect(submits[0]!.body.expectedHead).toBe('history:cut');
+    expect(submits[0]!.body).toEqual(submits[1]!.body);
   });
 
   test('schedule creation emits the native calendar target and execution contract', async () => {

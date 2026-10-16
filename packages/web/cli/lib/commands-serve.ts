@@ -9,7 +9,7 @@ import { isPortAvailable, resolveAvailablePort } from './cli-ports.js';
 import { ensureLogsDir, getLogFilePath } from './cli-paths.js';
 import { rotateLogFile } from './cli-log-files.js';
 import { discoverVarinInstanceOnPort, isDesktopRuntimeForPort } from './cli-lifecycle.js';
-import { getPidFilePath, getInstanceFilePath, writePidFile, writeInstanceOptions, removePidFile, removeInstanceFile, isProcessRunning, terminateProcessTree } from './cli-process.js';
+import { assertNodeServerRuntime, getPidFilePath, getInstanceFilePath, writePidFile, writeInstanceOptions, removePidFile, removeInstanceFile, isProcessRunning, terminateProcessTree } from './cli-process.js';
 import { isNetworkExposedBindHost } from '#application-host/lib/security/bind-host.js';
 import {
   intro as clackIntro,
@@ -33,18 +33,15 @@ const DAEMON_READY_TIMEOUT_MS = 30000;
 
 function createServeCommand({
   serverPath,
-  bunBin,
-  getPreferredServerRuntime,
   setForegroundServerActive,
   setForegroundShutdown,
 }: {
-  bunBin: string;
-  getPreferredServerRuntime(): 'bun' | 'node';
   serverPath: string;
   setForegroundServerActive(value: boolean): void;
   setForegroundShutdown(handler: ForegroundShutdown | null): void;
 }): ServeCommand {
 async function serveCommand(options: CliOptions): Promise<number | void> {
+    assertNodeServerRuntime();
     const showOutput = shouldRenderHumanOutput(options);
     const jsonMessages: CliNotice[] = [];
     const emitNotice = (notice: CliNotice): void => {
@@ -112,9 +109,6 @@ async function serveCommand(options: CliOptions): Promise<number | void> {
         throw new Error(`Port ${targetPort} is already in use by another process.`);
       }
     }
-
-    const preferredRuntime = getPreferredServerRuntime();
-    const runtimeBin = preferredRuntime === 'bun' ? bunBin : process.execPath;
 
     ensureLogsDir();
     const initialLogPort = targetPort === 0 ? 'auto' : String(targetPort);
@@ -294,7 +288,9 @@ async function serveCommand(options: CliOptions): Promise<number | void> {
 
     const serveSpin = showOutput ? createSpinner(options) : null;
 
-    const child = spawn(runtimeBin, serverArgs, {
+    // Keep the Node runtime used by the CLI, foreground mode, and startup services.
+    // A Bun installation is a package manager, not a compatible Host/REPL runtime.
+    const child = spawn(process.execPath, serverArgs, {
       detached: true,
       windowsHide: true,
       stdio: ['ignore', logFd, logFd, 'ipc'],
