@@ -403,3 +403,5 @@ export const listenDesktopSshStatus = async (
     await unlisten();
   };
 };
+
+export const parseDesktopSshStatus = parseStatus;

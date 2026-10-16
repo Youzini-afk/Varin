@@ -4,7 +4,9 @@ import { getRuntimeEndpointGeneration } from './transport/runtime-switch.js';
 export type StorageCategoryId = 'recovery' | 'copies' | 'conversations' | 'indexes' | 'models' | 'other';
 export type StorageScope = { kind: 'all' } | { kind: 'shared' } | { kind: 'workspace'; workspaceId: string };
 export type StorageAvailability = 'ready' | 'offline' | 'restricted' | 'unsupported' | 'unavailable';
-export interface StorageDevice { id: string; name: string; current: boolean; state: StorageAvailability; detail?: string }
+/** A selected configured connection, bound to its observed Host and mount identity. */
+export interface StorageTarget { id: string; hostId: string; endpointIdentity: string }
+export interface StorageDevice { id: string; name: string; current: boolean; state: StorageAvailability; detail?: string; target?: StorageTarget }
 export interface StorageCategory { id: StorageCategoryId; bytes: number; }
 export interface StorageWorkspace { id: string; name: string; path: string; bytes: number; }
 export interface StorageInventory {
@@ -68,8 +70,8 @@ export function createStorageHttpAPI(generation = getRuntimeEndpointGeneration()
     return value as T;
   };
   return {
-    inventory: (scope: StorageScope, signal?: AbortSignal) => request<StorageInventory>('inventory', { scope }, signal),
-    preview: (scope: StorageScope, signal?: AbortSignal) => request<StorageCleanupPreview>('preview', { scope }, signal),
+    inventory: (scope: StorageScope, signal?: AbortSignal, target?: StorageTarget) => request<StorageInventory>('inventory', { scope, ...(target ? { target } : {}) }, signal),
+    preview: (scope: StorageScope, signal?: AbortSignal, target?: StorageTarget) => request<StorageCleanupPreview>('preview', { scope, ...(target ? { target } : {}) }, signal),
     cleanup: (previewId: string, candidateIds: string[]) => request<StorageCleanupReceipt>('cleanup', { previewId, candidateIds }),
   };
 }

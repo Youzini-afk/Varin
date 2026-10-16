@@ -199,5 +199,5 @@ export function createStorageService(options: Options) {
     })();
     try { return await stored.running; } finally { delete stored.running; }
   };
-  return { inventory, preview, cleanup };
+  return { device, devices: async () => [device, ...await options.devices()], inventory, preview, cleanup };
 }

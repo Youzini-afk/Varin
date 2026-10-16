@@ -194,6 +194,20 @@ export type DesktopKeepAwakeStatus = {
   active: boolean;
 };
 
+export type DesktopLocalHostMode = {
+  /** Saved preference for this desktop, independent of the selected Agent. */
+  enabled: boolean;
+  /** Next-launch policy after environment and recovery-shell constraints. */
+  effectiveEnabled: boolean;
+  environmentDisabled: boolean;
+  environmentRemoteTarget: boolean;
+  canDisable: boolean;
+  runtime: 'embedded' | 'external' | 'stopped';
+  requiresRestart: boolean;
+};
+
+export type DesktopLocalHostModeInput = { enabled: boolean; selectLocalOnRestart?: boolean };
+
 export type DesktopVibrancyResult = {
   enabled: boolean;
   requiresRestart: boolean;
@@ -390,6 +404,9 @@ export interface VarinDesktopCommandMap {
   desktop_get_lan_address: { args: void; result: string | null };
   desktop_set_vibrancy: { args: { enabled: boolean }; result: DesktopVibrancyResult };
   desktop_clear_cache: { args: void; result: null };
+  desktop_get_local_host_mode: { args: void; result: DesktopLocalHostMode };
+  desktop_set_local_host_mode: { args: DesktopLocalHostModeInput; result: DesktopLocalHostMode };
+  desktop_restart_without_update: { args: void; result: null };
   desktop_restart: { args: void; result: null };
 
   // --- capture/file/shell ---
@@ -530,6 +547,9 @@ export const VARIN_DESKTOP_COMMAND_CATALOG = {
   desktop_get_lan_address: true,
   desktop_set_vibrancy: true,
   desktop_clear_cache: true,
+  desktop_get_local_host_mode: true,
+  desktop_set_local_host_mode: true,
+  desktop_restart_without_update: true,
   desktop_restart: true,
   desktop_browser_capture_page: true,
   desktop_capture_page_rect: true,

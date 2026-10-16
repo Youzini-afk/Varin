@@ -17,6 +17,7 @@ export type DesktopConnectionRecoveryProps = {
   hostUrl?: string;
   onRetry?: () => void;
   onUseLocal?: () => void;
+  footer?: React.ReactNode;
   onUseRemote?: () => void;
   isRetrying?: boolean;
 };
@@ -37,6 +38,7 @@ export function DesktopConnectionRecovery({
   hostUrl,
   onRetry,
   onUseLocal,
+  footer,
   onUseRemote,
   isRetrying = false,
 }: DesktopConnectionRecoveryProps) {
@@ -132,6 +134,7 @@ export function DesktopConnectionRecovery({
             )}
           </div>
         </div>
+        {footer}
       </div>
     </div>
   );

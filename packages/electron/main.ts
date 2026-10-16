@@ -53,6 +53,7 @@ import { createTray, createTrayController, type TrayAction } from './tray.js';
 import { NotificationListener } from './notification-listener.js';
 import { routeThreadWindow, runtimeTargetKey, threadMiniChatUrl, threadWindowKey as buildThreadWindowKey } from './thread-window-target.js';
 import { resolveStartupUrlProbePlan, shouldIgnoreLoopbackConnectionLimit } from './startup-url-selection.js';
+import { readLocalHostMode, writeLocalHostMode, restartDesktopNormally, type LocalHostModeContext } from './local-host-mode.js';
 import { sanitizeRuntimeRequestHeaders } from './runtime-request-headers.js';
 import { assertUpdaterCapability } from './updater-capability.js';
 import { checkForDesktopUpdate, type DesktopPendingUpdate } from './updater-check.js';
@@ -1455,10 +1456,17 @@ const inheritUserShellEnv = () => {
   }
 };
 
-const shouldSkipLocalServer = () => {
+let startedLocalHostEnabled: boolean | null = null;
+const localHostModeContext = (): LocalHostModeContext => {
   inheritUserShellEnv();
-  return process.env.VARIN_SKIP_LOCAL_SERVER === '1';
+  return {
+    environment: process.env,
+    recoveryUiAvailable: shouldUsePackagedUi() && fs.existsSync(path.join(resolveWebDistDir(), 'index.html')),
+    startedEnabled: startedLocalHostEnabled,
+    runtime: state.serverHandle ? 'embedded' : state.sidecarUrl ? 'external' : 'stopped',
+  };
 };
+const shouldSkipLocalServer = () => !readLocalHostMode(settingsStore, localHostModeContext()).effectiveEnabled;
 
 const spawnLocalServer = async () => {
   const serverStartedAt = performance.now();
@@ -2981,6 +2989,7 @@ const resolveInitialUrl = async () => {
   const hmrUiUrl = `http://127.0.0.1:${hmrUiPort}`;
   const usePackagedUi = shouldUsePackagedUi();
   const skipLocalServer = shouldSkipLocalServer();
+  startedLocalHostEnabled = !skipLocalServer;
   const startupProbePlan = resolveStartupUrlProbePlan({
     development: isDev,
     packagedUi: usePackagedUi,
@@ -4471,6 +4480,23 @@ const handleInvoke = async (
       } finally {
         setTaskbarProgress(-1);
       }
+
+    case 'desktop_get_local_host_mode': {
+      return readLocalHostMode(settingsStore, localHostModeContext());
+    }
+    case 'desktop_set_local_host_mode': {
+      return writeLocalHostMode(settingsStore, {
+        enabled: args.enabled as boolean,
+        ...(args.selectLocalOnRestart === undefined ? {} : { selectLocalOnRestart: args.selectLocalOnRestart as boolean }),
+      }, localHostModeContext());
+    }
+    case 'desktop_restart_without_update': {
+      setImmediate(() => {
+        void restartDesktopNormally({ prepare: prepareForQuit, relaunch: () => app.relaunch(), exit: () => app.exit(0) })
+          .catch(error => log.error('[electron] ordinary restart failed', error));
+      });
+      return null;
+    }
 
     case 'desktop_restart': {
       const applyUpdate = Boolean(state.pendingUpdate?.downloaded && app.isPackaged);

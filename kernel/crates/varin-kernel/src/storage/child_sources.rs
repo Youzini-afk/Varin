@@ -462,7 +462,7 @@ mod tests {
             json!({"operationId":"create","builderId":"create"}),
         )
         .unwrap();
-        let source:varin_runtime::catalog::launches::SourceSelection=serde_json::from_value(json!({"mode":"materialized","workspace_id":"workspace","execution_workspace_id":"workspace","branch_id":"branch","revision":0,"live_root":null,"environment_run_id":"environment-run"})).unwrap();
+        let source:varin_runtime::catalog::launches::SourceSelection=serde_json::from_value(json!({"resource_owner":{"kind":"local"},"mode":"materialized","workspace_id":"workspace","execution_workspace_id":"workspace","branch_id":"branch","revision":0,"live_root":null,"environment_run_id":"environment-run"})).unwrap();
         let key = hex::encode(Sha256::digest(
             serde_json::to_vec(&json!(["workspace", "environment-run"])).unwrap(),
         ));

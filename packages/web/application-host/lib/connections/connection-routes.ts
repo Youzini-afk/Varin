@@ -1,11 +1,16 @@
 import type { Express, RequestHandler } from 'express';
+import { hasHostConnectionAccess, type ConnectionAccess } from './access.js';
 import { HostSshManager } from './ssh-manager.js';
 import { readHostConnections, writeHostConnections } from './hosts.js';
 
 export function registerConnectionRoutes(app: Express, ssh: HostSshManager, requireAuth: RequestHandler): void {
-  const route = (method: 'get' | 'post' | 'put' | 'delete', path: string, handle: (request: import('express').Request) => unknown | Promise<unknown>) => {
+  const route = (method: 'get' | 'post' | 'put' | 'delete', path: string, handle: (request: import('express').Request) => unknown | Promise<unknown>, access: ConnectionAccess = 'configuration') => {
     app[method](`/api/connections${path}`, requireAuth, async (request, response) => {
       response.setHeader('Cache-Control', 'no-store');
+      if (!hasHostConnectionAccess(request.varinAuth, access)) {
+        response.status(403).json({ code: 'connection-permission-denied', error: 'Host-wide connection management permission is required' });
+        return;
+      }
       try { response.json(await handle(request) ?? { ok: true }); }
       catch (error) { response.status(400).json({ error: error instanceof Error ? error.message : 'Connection operation failed' }); }
     });
@@ -13,11 +18,11 @@ export function registerConnectionRoutes(app: Express, ssh: HostSshManager, requ
   route('get', '/hosts', () => readHostConnections(ssh.settingsStore));
   route('put', '/hosts', (request) => writeHostConnections(ssh.settingsStore, request.body));
   route('get', '/ssh', () => ssh.readInstances());
-  route('put', '/ssh', (request) => ssh.setInstances(request.body));
+  route('put', '/ssh', (request) => ssh.setInstances(request.body), 'execution');
   route('get', '/ssh/import', () => ssh.importHosts());
   route('get', '/ssh/status', (request) => ssh.statusesWithDefaults(typeof request.query.id === 'string' ? request.query.id : undefined));
-  route('post', '/ssh/:id/connect', (request) => ssh.connect(request.params.id));
-  route('post', '/ssh/:id/disconnect', (request) => ssh.disconnect(request.params.id));
+  route('post', '/ssh/:id/connect', (request) => ssh.connect(request.params.id), 'execution');
+  route('post', '/ssh/:id/disconnect', (request) => ssh.disconnect(request.params.id), 'execution');
   route('get', '/ssh/:id/logs', (request) => ssh.logsForInstance(String(request.params.id), request.query.limit ? Number(request.query.limit) : undefined));
   route('delete', '/ssh/:id/logs', (request) => ssh.clearLogsForInstance(String(request.params.id)));
   route('post', '/hosts/probe', async (request) => {

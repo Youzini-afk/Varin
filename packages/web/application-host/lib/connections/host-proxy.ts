@@ -3,6 +3,7 @@ import type { IncomingMessage, Server, ServerResponse } from 'node:http';
 import type { Duplex } from 'node:stream';
 import { createProxyMiddleware, fixRequestBody } from 'http-proxy-middleware';
 import type { HostSshManager } from './ssh-manager.js';
+import { hasHostConnectionAccess } from './access.js';
 import { readHostConnections } from './hosts.js';
 
 /** Browser/mobile connections use this Host's authenticated HTTP/WS tunnel.
@@ -12,7 +13,7 @@ export function attachConnectionProxy(options: {
   server: Server;
   settings: HostSshManager['settingsStore'];
   requireAuth: RequestHandler;
-  authenticateUpgrade(request: IncomingMessage): Promise<boolean>;
+  authenticateUpgrade(request: IncomingMessage): Promise<unknown>;
   originAllowed(request: IncomingMessage): boolean | Promise<boolean>;
 }) {
   const targets = new WeakMap<IncomingMessage, { target: string; path: string; headers: Record<string, string> }>();
@@ -53,6 +54,10 @@ export function attachConnectionProxy(options: {
     },
   });
   options.app.use('/api/connections/hosts/:id/proxy', options.requireAuth, (request, response, next) => {
+    if (!hasHostConnectionAccess(request.varinAuth, 'proxy')) {
+      response.status(403).json({ code: 'connection-permission-denied', error: 'Host-wide full control is required to use a saved peer credential' });
+      return;
+    }
     // URL tokens authorize the gateway, so mint them at its existing auth owner.
     if (request.path === '/auth/url-token') {
       request.url = '/auth/url-token';
@@ -70,8 +75,15 @@ export function attachConnectionProxy(options: {
     if (!match) return;
     rememberSocket(socket);
     void (async () => {
-      if (!await options.authenticateUpgrade(request) || !await options.originAllowed(request)) {
+      // The auth owner validates the original inner WS route against its URL-token
+      // allowlist. Keep the real request/path intact for proxy routing and audit.
+      const authRequest = Object.assign(Object.create(request) as IncomingMessage, { url: match[2], originalUrl: match[2] });
+      const context = await options.authenticateUpgrade(authRequest);
+      if (!context || !await options.originAllowed(request)) {
         socket.end('HTTP/1.1 401 Unauthorized\r\nConnection: close\r\n\r\n'); return;
+      }
+      if (!hasHostConnectionAccess(context, 'proxy')) {
+        socket.end('HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n'); return;
       }
       resolve(request, decodeURIComponent(match[1]!), match[2]!);
       await proxy.upgrade(request, socket as import('node:net').Socket, head);

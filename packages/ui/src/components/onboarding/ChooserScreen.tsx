@@ -4,6 +4,7 @@ import { cn } from '@/lib/utils';
 import { desktopHostsGet, desktopHostsSet } from '@/lib/desktopHosts';
 import { useI18n } from '@/lib/i18n';
 import { LocalRuntimeCard } from './LocalRuntimeCard';
+import { LocalHostRecovery } from '@/components/sections/connections/DesktopLocalHostSettings';
 import { RemoteConnectionForm } from './RemoteConnectionForm';
 
 interface ChooserScreenProps {
@@ -104,6 +105,7 @@ export function ChooserScreen({ onRuntimeAvailable, localAvailable = true }: Cho
           </div>
         ) : null}
 
+        {isDesktopApp && !localAvailable ? <LocalHostRecovery /> : null}
         {showLocal ? <LocalRuntimeCard onContinue={useLocalRuntime} /> : null}
       </div>
     </div>

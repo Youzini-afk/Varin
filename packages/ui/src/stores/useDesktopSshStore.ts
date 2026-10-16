@@ -13,6 +13,7 @@ import {
   type DesktopSshImportCandidate,
   type DesktopSshInstance,
   type DesktopSshInstanceStatus,
+  type DesktopSshInstancesConfig,
 } from '@/lib/desktopSsh';
 
 type DesktopSshState = {
@@ -42,189 +43,209 @@ type DesktopSshState = {
 const byUpdatedAt = (a: DesktopSshInstanceStatus, b: DesktopSshInstanceStatus) => {
   return b.updatedAtMs - a.updatedAtMs;
 };
-let ownerGeneration = 0;
-let stopStatusListener: (() => Promise<void>) | undefined;
+export interface SshConnectionsTransport {
+  get: () => Promise<DesktopSshInstancesConfig>;
+  set: (config: DesktopSshInstancesConfig) => Promise<void>;
+  imports: () => Promise<DesktopSshImportCandidate[]>;
+  status: () => Promise<DesktopSshInstanceStatus[]>;
+  connect: (id: string) => Promise<void>;
+  disconnect: (id: string) => Promise<void>;
+  listen: (listener: (status: DesktopSshInstanceStatus) => void) => Promise<() => Promise<void>>;
+}
+const desktopTransport: SshConnectionsTransport = {
+  get: desktopSshInstancesGet, set: desktopSshInstancesSet, imports: desktopSshImportHosts,
+  status: desktopSshStatus, connect: desktopSshConnect, disconnect: desktopSshDisconnect, listen: listenDesktopSshStatus,
+};
+/** An owner-scoped projection. Releasing a view stops observation, never its SSH process. */
+export function createSshConnectionsStore(transport: SshConnectionsTransport = desktopTransport) {
+  let ownerGeneration = 0;
+  let stopStatusListener: (() => Promise<void>) | undefined;
+  const store = create<DesktopSshState>((set, get) => ({
+    instances: [],
+    statusesById: {},
+    importCandidates: [],
+    isLoading: false,
+    isSaving: false,
+    isImportsLoading: false,
+    initialized: false,
+    listenerReady: false,
+    error: null,
 
-export const useDesktopSshStore = create<DesktopSshState>((set, get) => ({
-  instances: [],
-  statusesById: {},
-  importCandidates: [],
-  isLoading: false,
-  isSaving: false,
-  isImportsLoading: false,
-  initialized: false,
-  listenerReady: false,
-  error: null,
+    load: async () => {
+      if (get().isLoading) return;
+      const generation = ownerGeneration;
+      set({ isLoading: true, error: null });
+      try {
+        const [config, statuses] = await Promise.all([transport.get(), transport.status()]);
+        if (generation !== ownerGeneration) return;
+        const statusMap: Record<string, DesktopSshInstanceStatus> = {};
+        for (const status of statuses.sort(byUpdatedAt)) {
+          statusMap[status.id] = status;
+        }
 
-  load: async () => {
-    if (get().isLoading) return;
-    const generation = ownerGeneration;
-    set({ isLoading: true, error: null });
-    try {
-      const [config, statuses] = await Promise.all([desktopSshInstancesGet(), desktopSshStatus()]);
-      if (generation !== ownerGeneration) return;
-      const statusMap: Record<string, DesktopSshInstanceStatus> = {};
-      for (const status of statuses.sort(byUpdatedAt)) {
-        statusMap[status.id] = status;
-      }
+        if (!get().listenerReady) {
+          const stop = await transport.listen((status) => {
+            if (generation !== ownerGeneration) return;
+            set((state) => ({
+              statusesById: {
+                ...state.statusesById,
+                [status.id]: status,
+              },
+            }));
+          });
+          if (generation !== ownerGeneration) { await stop(); return; }
+          stopStatusListener = stop;
+        }
 
-      if (!get().listenerReady) {
-        const stop = await listenDesktopSshStatus((status) => {
-          if (generation !== ownerGeneration) return;
-          set((state) => ({
-            statusesById: {
-              ...state.statusesById,
-              [status.id]: status,
-            },
-          }));
+        set({
+          instances: config.instances,
+          statusesById: statusMap,
+          isLoading: false,
+          initialized: true,
+          listenerReady: true,
         });
-        if (generation !== ownerGeneration) { await stop(); return; }
-        stopStatusListener = stop;
+      } catch (error) {
+        if (generation !== ownerGeneration) return;
+        set({
+          isLoading: false,
+          error: error instanceof Error ? error.message : String(error),
+        });
       }
+    },
 
-      set({
-        instances: config.instances,
-        statusesById: statusMap,
-        isLoading: false,
-        initialized: true,
-        listenerReady: true,
-      });
-    } catch (error) {
-      if (generation !== ownerGeneration) return;
-      set({
-        isLoading: false,
-        error: error instanceof Error ? error.message : String(error),
-      });
-    }
-  },
-
-  loadImports: async () => {
-    if (get().isImportsLoading) return;
-    const generation = ownerGeneration;
-    set({ isImportsLoading: true, error: null });
-    try {
-      const importCandidates = await desktopSshImportHosts();
-      if (generation !== ownerGeneration) return;
-      set({ importCandidates, isImportsLoading: false });
-    } catch (error) {
-      if (generation !== ownerGeneration) return;
-      set({
-        isImportsLoading: false,
-        error: error instanceof Error ? error.message : String(error),
-      });
-    }
-  },
-
-  refreshStatuses: async () => {
-    const generation = ownerGeneration;
-    try {
-      const statuses = await desktopSshStatus();
-      if (generation !== ownerGeneration) return;
-      const statusMap: Record<string, DesktopSshInstanceStatus> = {};
-      for (const status of statuses.sort(byUpdatedAt)) {
-        statusMap[status.id] = status;
+    loadImports: async () => {
+      if (get().isImportsLoading) return;
+      const generation = ownerGeneration;
+      set({ isImportsLoading: true, error: null });
+      try {
+        const importCandidates = await transport.imports();
+        if (generation !== ownerGeneration) return;
+        set({ importCandidates, isImportsLoading: false });
+      } catch (error) {
+        if (generation !== ownerGeneration) return;
+        set({
+          isImportsLoading: false,
+          error: error instanceof Error ? error.message : String(error),
+        });
       }
-      set({ statusesById: statusMap });
-    } catch (error) {
-      if (generation !== ownerGeneration) return;
-      set({ error: error instanceof Error ? error.message : String(error) });
-    }
-  },
+    },
 
-  setInstances: async (instances) => {
-    const generation = ownerGeneration;
-    set({ isSaving: true, error: null });
-    try {
-      await desktopSshInstancesSet({ instances });
+    refreshStatuses: async () => {
+      const generation = ownerGeneration;
+      try {
+        const statuses = await transport.status();
+        if (generation !== ownerGeneration) return;
+        const statusMap: Record<string, DesktopSshInstanceStatus> = {};
+        for (const status of statuses.sort(byUpdatedAt)) {
+          statusMap[status.id] = status;
+        }
+        set({ statusesById: statusMap });
+      } catch (error) {
+        if (generation !== ownerGeneration) return;
+        set({ error: error instanceof Error ? error.message : String(error) });
+      }
+    },
+
+    setInstances: async (instances) => {
+      const generation = ownerGeneration;
+      set({ isSaving: true, error: null });
+      try {
+        await transport.set({ instances });
+        if (generation !== ownerGeneration) return;
+        set({ instances, isSaving: false });
+        await get().refreshStatuses();
+      } catch (error) {
+        if (generation !== ownerGeneration) throw error;
+        set({
+          isSaving: false,
+          error: error instanceof Error ? error.message : String(error),
+        });
+        throw error;
+      }
+    },
+
+    upsertInstance: async (instance) => {
+      const current = get().instances;
+      const next = current.some((item) => item.id === instance.id)
+        ? current.map((item) => (item.id === instance.id ? instance : item))
+        : [instance, ...current];
+      await get().setInstances(next);
+    },
+
+    createFromCommand: async (id, sshCommand, nickname) => {
+      const instance = createDesktopSshInstance(id, sshCommand);
+      if (nickname && nickname.trim()) {
+        instance.nickname = nickname.trim();
+      }
+      await get().upsertInstance(instance);
+    },
+
+    removeInstance: async (id) => {
+      const generation = ownerGeneration;
+      await transport.disconnect(id).catch(() => undefined);
       if (generation !== ownerGeneration) return;
-      set({ instances, isSaving: false });
-      await get().refreshStatuses();
-    } catch (error) {
-      if (generation !== ownerGeneration) throw error;
-      set({
-        isSaving: false,
-        error: error instanceof Error ? error.message : String(error),
+      const next = get().instances.filter((item) => item.id !== id);
+      await get().setInstances(next);
+      if (generation !== ownerGeneration) return;
+      set((state) => {
+        const statusesById = { ...state.statusesById };
+        delete statusesById[id];
+        return { statusesById };
       });
-      throw error;
-    }
-  },
+    },
 
-  upsertInstance: async (instance) => {
-    const current = get().instances;
-    const next = current.some((item) => item.id === instance.id)
-      ? current.map((item) => (item.id === instance.id ? instance : item))
-      : [instance, ...current];
-    await get().setInstances(next);
-  },
+    connect: async (id) => {
+      const generation = ownerGeneration;
+      set({ error: null });
+      try {
+        await transport.connect(id);
+        if (generation !== ownerGeneration) return;
+        await get().refreshStatuses();
+      } catch (error) {
+        if (generation !== ownerGeneration) throw error;
+        set({ error: error instanceof Error ? error.message : String(error) });
+        throw error;
+      }
+    },
 
-  createFromCommand: async (id, sshCommand, nickname) => {
-    const instance = createDesktopSshInstance(id, sshCommand);
-    if (nickname && nickname.trim()) {
-      instance.nickname = nickname.trim();
-    }
-    await get().upsertInstance(instance);
-  },
+    disconnect: async (id) => {
+      const generation = ownerGeneration;
+      set({ error: null });
+      try {
+        await transport.disconnect(id);
+        if (generation !== ownerGeneration) return;
+        await get().refreshStatuses();
+      } catch (error) {
+        if (generation !== ownerGeneration) throw error;
+        set({ error: error instanceof Error ? error.message : String(error) });
+        throw error;
+      }
+    },
 
-  removeInstance: async (id) => {
-    const generation = ownerGeneration;
-    await desktopSshDisconnect(id).catch(() => undefined);
-    if (generation !== ownerGeneration) return;
-    const next = get().instances.filter((item) => item.id !== id);
-    await get().setInstances(next);
-    if (generation !== ownerGeneration) return;
-    set((state) => {
-      const statusesById = { ...state.statusesById };
-      delete statusesById[id];
-      return { statusesById };
-    });
-  },
+    retry: async (id) => {
+      await get().connect(id);
+    },
 
-  connect: async (id) => {
-    const generation = ownerGeneration;
-    set({ error: null });
-    try {
-      await desktopSshConnect(id);
-      if (generation !== ownerGeneration) return;
-      await get().refreshStatuses();
-    } catch (error) {
-      if (generation !== ownerGeneration) throw error;
-      set({ error: error instanceof Error ? error.message : String(error) });
-      throw error;
-    }
-  },
+    getStatus: (id) => {
+      return get().statusesById[id] || null;
+    },
 
-  disconnect: async (id) => {
-    const generation = ownerGeneration;
-    set({ error: null });
-    try {
-      await desktopSshDisconnect(id);
-      if (generation !== ownerGeneration) return;
-      await get().refreshStatuses();
-    } catch (error) {
-      if (generation !== ownerGeneration) throw error;
-      set({ error: error instanceof Error ? error.message : String(error) });
-      throw error;
-    }
-  },
+    clearError: () => set({ error: null }),
+  }));
 
-  retry: async (id) => {
-    await get().connect(id);
-  },
-
-  getStatus: (id) => {
-    return get().statusesById[id] || null;
-  },
-
-  clearError: () => set({ error: null }),
-}));
-
+  const release = () => {
+    ownerGeneration += 1;
+    void stopStatusListener?.();
+    stopStatusListener = undefined;
+    store.setState({ instances: [], statusesById: {}, importCandidates: [], initialized: false,
+      listenerReady: false, isLoading: false, isImportsLoading: false, isSaving: false, error: null });
+  };
+  return Object.assign(store, { release });
+}
+export const useDesktopSshStore = createSshConnectionsStore();
 subscribeRuntimeEndpointChanged(() => {
   if (hasDesktopInvoke()) return;
-  ownerGeneration += 1;
-  void stopStatusListener?.();
-  stopStatusListener = undefined;
-  useDesktopSshStore.setState({ instances: [], statusesById: {}, importCandidates: [], initialized: false,
-    listenerReady: false, isLoading: false, isImportsLoading: false, isSaving: false, error: null });
+  useDesktopSshStore.release();
   void useDesktopSshStore.getState().load();
   void useDesktopSshStore.getState().loadImports();
 });

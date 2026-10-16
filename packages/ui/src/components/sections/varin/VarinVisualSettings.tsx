@@ -26,7 +26,8 @@ import {
 } from '@/lib/desktop';
 import { useDeviceInfo } from '@/lib/device';
 import { usePwaDetection } from '@/hooks/usePwaDetection';
-import { updateDesktopSettings } from '@/lib/persistence';
+import { reportSettingsSaveState, updateDesktopSettings } from '@/lib/persistence';
+import { readStoredLocale } from '@/lib/i18n/runtime';
 import { CODE_FONT_OPTIONS, DEFAULT_MONO_FONT, DEFAULT_UI_FONT, UI_FONT_OPTIONS, type MonoFontOption, type UiFontOption } from '@/lib/fontOptions';
 import { useI18n, type Locale } from '@/lib/i18n';
 import { normalizeMobileKeyboardMode, supportsMobileKeyboardResizeContent, type MobileKeyboardMode } from '@/lib/mobileKeyboardMode';
@@ -669,7 +670,7 @@ export const VarinVisualSettings: React.FC<VarinVisualSettingsProps> = ({ visibl
                                         info={t('settings.appearance.language.description')}
                                         settingsItem="appearance.language"
                                     >
-                                        <Select value={locale} onValueChange={(value) => setLocale(value as Locale)}>
+                                        <Select value={locale} onValueChange={(value) => { setLocale(value as Locale); reportSettingsSaveState(readStoredLocale() === value ? 'saved' : 'error'); }}>
                                             <SelectTrigger aria-label={t('settings.appearance.language.select')} size={SETTINGS_SELECT_SIZE} className={SETTINGS_SELECT_TRIGGER_CLASS}>
                                                 <SelectValue>{label(locale)}</SelectValue>
                                             </SelectTrigger>

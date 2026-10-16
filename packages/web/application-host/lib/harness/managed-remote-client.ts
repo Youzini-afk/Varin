@@ -1,5 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 import { threadSourceFailureMessage } from '@varin/application-client';
+import type { StorageCleanupPreview, StorageCleanupReceipt, StorageDevice, StorageInventory, StorageScope } from '@varin/application-client';
 import { SourceAdmissionError } from '../kernel/source-admission-error.js';
 import type { KernelClient } from "../kernel/kernel-client.js";
 import type { KernelRecordResult, SourceFailureCode } from "../kernel/protocol.generated.js";
@@ -77,6 +78,12 @@ export interface ManagedTarget {
   identity: ManagedRemoteIdentity;
 }
 
+export interface ManagedStorageActions {
+  inventory: { input: { scope: StorageScope }; result: StorageInventory };
+  preview: { input: { scope: StorageScope }; result: StorageCleanupPreview };
+  cleanup: { input: { previewId: string; candidateIds: string[] }; result: StorageCleanupReceipt };
+}
+
 type SourceClientMethod<Method> = Method extends (principal: infer _Principal, ...args: infer Args) => infer Result
   ? (...args: Args) => Result : never;
 /** An authenticated connection to one frozen Host. No credential is included in source metadata. */
@@ -102,8 +109,8 @@ export interface ManagedRemoteTargetRegistryOptions {
   onError?: (error: Error) => void;
 }
 
-class ManagedResponseError extends Error {
-  constructor(message: string, readonly code: unknown) { super(message); }
+export class ManagedResponseError extends Error {
+  constructor(message: string, readonly code: unknown, readonly status?: number) { super(message); }
 }
 
 class ManagedTargetClient {
@@ -139,7 +146,7 @@ class ManagedTargetClient {
       const responseBody = await response.json().catch(() => null) as { error?: unknown; code?: unknown } | null;
       const message = responseBody && typeof responseBody === "object" && "error" in responseBody && typeof responseBody.error === "string"
         ? responseBody.error : `Managed target request failed (${response.status})`;
-      throw new ManagedResponseError(message, responseBody && typeof responseBody === 'object' && 'code' in responseBody ? responseBody.code : undefined);
+      throw new ManagedResponseError(message, responseBody && typeof responseBody === 'object' && 'code' in responseBody ? responseBody.code : undefined, response.status);
     }
     return response;
   }
@@ -212,7 +219,7 @@ export function createManagedRemoteTargetRegistry(options: ManagedRemoteTargetRe
     });
     const identity = await response.json().catch(() => null) as ManagedRemoteIdentity | { error?: string } | null;
     if (!response.ok || !identity || !("hostId" in identity) || typeof identity.hostId !== "string") {
-      throw new Error(identity && "error" in identity && typeof identity.error === "string" ? identity.error : `Target probe failed (${response.status})`);
+      throw new ManagedResponseError(identity && "error" in identity && typeof identity.error === "string" ? identity.error : `Target probe failed (${response.status})`, 'target-probe-failed', response.ok ? 502 : response.status);
     }
     if (identity.protocolVersion !== MANAGED_REMOTE_PROTOCOL_VERSION) throw new Error(`Unsupported managed target protocol ${String(identity.protocolVersion)}`);
     if (response.headers.get("x-varin-managed-host") !== identity.hostId) throw new Error("Managed target identity receipt is inconsistent");
@@ -363,6 +370,32 @@ export function createManagedRemoteTargetRegistry(options: ManagedRemoteTargetRe
       result.status === 'fulfilled' && result.value.machineId === targetId);
     if (!selected) throw new Error('The configured service target is unavailable');
     return selected.value;
+  };
+
+  /** Independent resource inspection: never registers an Experiment or changes
+   * the Agent Catalog. Credentials and endpoint resolution stay with this owner. */
+  const storageTargets = async (signal?: AbortSignal): Promise<StorageDevice[]> => {
+    const connections = configuredHosts(await options.readSettings());
+    return Promise.all(connections.map(async connection => {
+      try {
+        const target = await probe(connection, signal);
+        return { id: `connection:${connection.id}`, name: connection.label, current: false,
+          state: target.identity.capabilities.includes('storage') ? 'ready' as const : 'unsupported' as const,
+          target: { id: `connection:${connection.id}`, hostId: target.hostId, endpointIdentity: managedEndpointIdentity(connection) } };
+      } catch (error) {
+        signal?.throwIfAborted();
+        const unsupported = (error instanceof ManagedResponseError && [404, 501].includes(error.status ?? 0))
+          || (error instanceof Error && error.message.startsWith('Unsupported managed target protocol'));
+        return { id: `connection:${connection.id}`, name: connection.label, current: false,
+          state: error instanceof ManagedResponseError && [401, 403].includes(error.status ?? 0) ? 'restricted' as const : unsupported ? 'unsupported' as const : 'offline' as const };
+      }
+    }));
+  };
+  const storage = async <Action extends keyof ManagedStorageActions>(owner: ManagedHostSourceOwner, action: Action, input: ManagedStorageActions[Action]['input'], signal?: AbortSignal): Promise<ManagedStorageActions[Action]['result']> => {
+    const target = await forwardTarget(owner, signal);
+    if (!target.identity.capabilities.includes('storage')) throw new ManagedResponseError('This Host does not provide storage management', 'storage-unsupported', 501);
+    const client = new ManagedTargetClient(target, fetchImpl);
+    return client.json<ManagedStorageActions[Action]['result']>(`/storage/${action}`, input, 'POST', action === 'cleanup' ? undefined : signal);
   };
 
   const sourceTarget = async (owner: ManagedHostSourceOwner, signal?: AbortSignal): Promise<ManagedTarget> => {
@@ -793,7 +826,7 @@ export function createManagedRemoteTargetRegistry(options: ManagedRemoteTargetRe
     };
   };
 
-  return { refresh, resolveBackend, externalAuthority, targetFor, sourceTargets, sourceTarget, forwardTarget, selectForwardTarget, source, shellExec, shellRead, shellWrite, shellKill, setScopeSleeping, releaseScope, ownersForMachine };
+  return { refresh, resolveBackend, externalAuthority, targetFor, sourceTargets, sourceTarget, forwardTarget, selectForwardTarget, storageTargets, storage, source, shellExec, shellRead, shellWrite, shellKill, setScopeSleeping, releaseScope, ownersForMachine };
 }
 
 export type ManagedRemoteTargetRegistry = ReturnType<typeof createManagedRemoteTargetRegistry>;

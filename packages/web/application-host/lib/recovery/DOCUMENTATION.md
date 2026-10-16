@@ -166,3 +166,18 @@ are pruned without re-executing an old confirmation. Preview identities are boun
 Host principal; directory-restricted clients cannot use Host-wide management, and read-only clients
 can inspect inventory but cannot confirm cleanup. A workspace link retains its original requested
 identity and reports a missing catalog registration instead of silently widening to the whole Host.
+
+Storage's device selector is a resource target, independent of the Agent's Runtime endpoint or Catalog.
+The current Host resolves only its configured managed HTTP connections using the existing connection
+owner, credentials, endpoint identity and actual target Host handshake. A target advertising `storage`
+serves the same local inventory/preview/cleanup owner through a local-only managed route; it cannot
+forward another nested target. Relay-only connections and older targets without that capability remain
+explicitly unsupported, while failed connections and denied access retain their own states.
+
+A forwarded preview is bound to the current authenticated principal, original connection, endpoint,
+target Host, scope and target preview identity. Both Hosts check capabilities and directory restrictions.
+Confirmation rechecks the original target and never substitutes another connection or Host. If the
+response is lost, the same target preview is replayed; it does not create a fresh cleanup. Receipts and
+forwarding associations are retained in the owning Host process for the replay window, not promised
+across a Host restart. A lost association reports unconfirmed completion and requires a fresh inventory;
+the Rust operation receipt and its original effect remain owned by the target storage authority.

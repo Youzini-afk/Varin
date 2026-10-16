@@ -7,10 +7,11 @@ import { Icon } from '@/components/icon/Icon';
 import { getDefaultTheme } from '@/lib/theme/themes';
 
 function ThemeMiniature({ theme }: { theme: Theme }) {
-  return <svg viewBox="0 0 120 64" aria-hidden="true" className="h-full w-full" style={{ background: theme.colors.surface.background }}>
-    <rect x="8" y="8" width="24" height="48" rx="2" fill={theme.colors.sidebar?.background ?? theme.colors.surface.muted} />
-    {[16, 27, 38].map((y, index) => <rect key={y} x="44" y={y} width={index === 2 ? 39 : 54} height="5" rx="1.5" fill={theme.colors.surface.foreground} opacity={0.28 - index * 0.04} />)}
-  </svg>;
+  // Ordinary surfaces avoid the global WebKit icon rule that clears SVG fills in buttons.
+  return <span aria-hidden="true" className="relative block h-full w-full" style={{ background: theme.colors.surface.background }}>
+    <span className="absolute rounded-sm" style={{ left: '6.67%', top: '12.5%', width: '20%', height: '75%', background: theme.colors.sidebar?.background ?? theme.colors.surface.muted }} />
+    {[25, 42.19, 59.38].map((top, index) => <span key={top} className="absolute rounded-sm" style={{ left: '36.67%', top: `${top}%`, width: index === 2 ? '32.5%' : '45%', height: '7.81%', background: theme.colors.surface.foreground, opacity: 0.28 - index * 0.04 }} />)}
+  </span>;
 }
 
 /** The previews read the same theme objects that generate the workbench CSS. */

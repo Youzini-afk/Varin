@@ -303,6 +303,30 @@ Production dependencies required by Node workers remain unpacked for filesystem 
 Chromium locale files are limited to Varin's supported interface languages. Keep the shipped LICENSE,
 THIRD_PARTY_NOTICES and kernel notices with the distribution.
 
+## Local Host startup mode
+
+Settings → Work connections → Connect to an Agent controls whether this desktop
+starts an embedded Host. The preference is `desktopLocalHostEnabled` in the
+existing native `settings.json`; it does not follow the selected remote Agent.
+Saving changes the next launch only. The UI distinguishes the saved preference,
+effective next-launch policy, current embedded/external/stopped runtime, and a
+pending restart. Its explicit restart drains the existing native lifecycle and
+never applies a downloaded update.
+
+Frontend-only mode stops providing embedded local execution and built-in SSH
+forwarding. Remote Agents remain independent, but local work is not migrated or
+guaranteed to continue through a restart. The bundled chooser/recovery UI can
+atomically re-enable local startup and select the local Host without deleting
+saved remote connections. `VARIN_SKIP_LOCAL_SERVER=1` still takes precedence;
+`VARIN_SERVER_URL` also prevents recovery from silently changing an explicit
+startup target.
+
+The GUI permits disabling local startup only when the active build has bundled
+recovery assets. HMR or server-rendered development keeps its local Host enabled,
+including when a saved preference came from a bundled build. The explicit
+environment-variable mode remains available for developers who manage their own
+HMR/recovery environment.
+
 ## Common env vars
 
 | Variable | Use |
