@@ -102,20 +102,21 @@ pub(crate) fn builtin_schema() -> crate::run_tools::BuiltinSchema {
     crate::run_tools::BuiltinSchema::child(schema(), None, &[Worker, Retrieval])
 }
 pub(crate) fn schema() -> ToolSchema {
-    ToolSchema { requirements: None, name:"resource_read".into(),version:"2".into(),
-        description:"Read a selected skill, a file within its bundle, or the instructions applying to a target in the admitted source. Pass a retained explicit skill input's activationId and matching resourceId to select its original version. Without activationId, read from this invocation's current frozen catalog. Returned text retains its original source and scope.".into(),
+    ToolSchema { requirements: None, name:"resource_read".into(),version:"3".into(),
+        description:"Read a skill, its bundle file, admitted instructions, or interactive content (kind ui). UI views: summary, source (file and optional line range), state, screen, structure. ui: selects source; ui-view: observes that connected client; ui-snapshot: and ui-selection: retain a fixed observation. UI offset/limit are UTF-8 bytes; use returned next for a fixed continuation. Skill activationId selects its retained original version; otherwise use the invocation's frozen catalog.".into(),
         output_schema:None,metadata:None,
         schema:json!({"type":"object","oneOf":[
             {"type":"object","properties":{"kind":{"const":"skill"},"resourceId":{"type":"string","minLength":1},"activationId":{"type":"string","minLength":1,"description":"Use the activationId from a retained explicit skill input to read that original resource version."}},"required":["kind","resourceId"],"additionalProperties":false},
             {"type":"object","properties":{"kind":{"const":"skill-resource"},"resourceId":{"type":"string","minLength":1},"activationId":{"type":"string","minLength":1,"description":"Use the activationId from a retained explicit skill input to read that original resource version."},"relativePath":{"type":"string"}},"required":["kind","resourceId","relativePath"],"additionalProperties":false},
-            {"type":"object","properties":{"kind":{"const":"instruction-scope"},"targetPath":{"type":"string"},"targetType":{"type":"string","enum":["file","directory"]}},"required":["kind","targetPath"],"additionalProperties":false}
+            {"type":"object","properties":{"kind":{"const":"instruction-scope"},"targetPath":{"type":"string"},"targetType":{"type":"string","enum":["file","directory"]}},"required":["kind","targetPath"],"additionalProperties":false},
+            {"type":"object","properties":{"kind":{"const":"ui"},"ref":{"type":"string","minLength":1},"view":{"enum":["summary","source","state","screen","structure"]},"file":{"type":"string"},"startLine":{"type":"integer","minimum":1},"endLine":{"type":"integer","minimum":1},"offset":{"type":"integer","minimum":0},"limit":{"type":"integer","minimum":1}},"required":["kind","ref"],"additionalProperties":false}
         ]}),
     }
 }
 fn contract() -> ToolContract {
     ToolContract {
         name: "resource_read".into(),
-        schema_version: "2".into(),
+        schema_version: "3".into(),
         read_only: true,
         completion: CompletionKind::Result,
         lifetime: Lifetime::Run,
@@ -127,7 +128,7 @@ fn request(
     context: &FrozenToolContext,
 ) -> Result<ResourceRequest, ExecutionError> {
     if call.name != "resource_read"
-        || call.schema_version != "2"
+        || call.schema_version != "3"
         || !context.tools.contains(&schema())
     {
         return Err(failed("resource schema is not bound"));
@@ -325,9 +326,9 @@ impl PreparedToolCall for ResourceCall {
         contract: &ToolContract,
         cancel: &CancellationToken,
     ) -> ToolExecutionReceipt {
-        let result = (|| -> Result<Value, ExecutionError> {
+        let result = (|| -> Result<_, ExecutionError> {
             self.authorize(context, contract, cancel)?;
-            let result = self.owner.bridge.query(
+            let mut result = self.owner.bridge.query(
                 json!({"runId":context.run_id,"origin":context.origin,"callId":self.call_id,
                 "resourceCheckpointId":checkpoint(&self.request, &self.frozen)?,"request":self.request}),
                 cancel,
@@ -349,19 +350,24 @@ impl PreparedToolCall for ResourceCall {
             ) {
                 return Err(failed("resource owner returned an invalid status"));
             }
-            Ok(result)
+            let parts: Vec<varin_runtime::output::OutputPart<varin_runtime::output::IncomingMedia>> = result.as_object_mut()
+                .and_then(|object| object.remove("outputParts"))
+                .map(serde_json::from_value).transpose().map_err(failed)?.unwrap_or_default();
+            varin_runtime::output::OutputBody { data: result, parts }.map_media(|media| media.admit(
+                varin_runtime::output::OutputSource::Tool { context: context.clone() }
+            )).map_err(failed)
         })();
         let completion = match result {
             Ok(content) => ToolCompletion::Result {
-                outcome: if content["status"] == "ready" {
+                outcome: if content.data["status"] == "ready" {
                     Outcome::Succeeded
-                } else if content["status"] == "cancelled" {
+                } else if content.data["status"] == "cancelled" {
                     Outcome::Cancelled
                 } else {
                     Outcome::Failed
                 },
                 effect: Effect::None,
-                content: content.into(),
+                content,
             },
             Err(error) => ToolCompletion::Result {
                 outcome: if cancel.is_cancelled() || error.code == "resource_cancelled" {

@@ -6,6 +6,8 @@ Document Registry / DocumentsAPI.
 
 - `attachments.ts` — Host+Thread/branch scoped attachment list; acknowledge captured revisions after a receipt
 - `projection.ts` — saved vs unsaved prompt text; unsaved snapshots are not claimed as disk
+- `ContentReference` attachments — fixed chat, image, PDF and UI selections; numbered draft chips,
+  capability-aware image projection, and original-batch acknowledgement after input acceptance
 - `hints.ts` — tool path hints only; file watch events remain authoritative
 - `patch.ts` / `document-write.ts` — hunk apply/revert with expected revision; dirty buffers never overwritten
 - `merge.ts` — three-way ancestor/ours/theirs regions

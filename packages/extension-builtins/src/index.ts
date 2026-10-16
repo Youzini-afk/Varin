@@ -9,6 +9,8 @@ export { EXTENSION_PACKAGE_TOOL_DECLARATION, RUNTIME_CONTRACT_TOOL_DECLARATIONS,
 import { RESEARCH_DECISION_CAPABILITY, RESEARCH_DECISION_TOOL_DECLARATIONS, VARIN_BUILTIN_RESEARCH_DECISION_EXTENSION_ID } from './research-decision-tools.js';
 export { RESEARCH_DECISION_CAPABILITY, RESEARCH_DECISION_TOOL_DECLARATIONS, VARIN_BUILTIN_RESEARCH_DECISION_EXTENSION_ID } from './research-decision-tools.js';
 import { RESEARCH_DISCOVERY_CAPABILITY, RESEARCH_DISCOVERY_TOOL_DECLARATIONS, VARIN_BUILTIN_RESEARCH_DISCOVERY_EXTENSION_ID } from './research-discovery-tools.js';
+import { INTERACTIVE_UI_CAPABILITY, INTERACTIVE_UI_TOOL_DECLARATIONS, VARIN_BUILTIN_INTERACTIVE_UI_EXTENSION_ID } from './interactive-ui-tools.js';
+export * from './interactive-ui-tools.js';
 export { RESEARCH_DISCOVERY_CAPABILITY, RESEARCH_DISCOVERY_TOOL_DECLARATIONS, VARIN_BUILTIN_RESEARCH_DISCOVERY_EXTENSION_ID } from './research-discovery-tools.js';
 import { WEB_CAPABILITY, WEB_TOOL_DECLARATIONS, VARIN_BUILTIN_WEB_EXTENSION_ID } from './web-tools.js';
 export { WEB_CAPABILITY, WEB_TOOL_DECLARATIONS, VARIN_BUILTIN_WEB_EXTENSION_ID } from './web-tools.js';
@@ -565,6 +567,13 @@ export const VARIN_BUILTIN_RESEARCH_DISCOVERY_EXTENSION: VarinBuiltinExtensionDe
     capabilities: { host: [RESEARCH_DISCOVERY_CAPABILITY] }, provides: { services: [...RESEARCH_DISCOVERY_TOOL_DECLARATIONS] } },
 };
 
+export const VARIN_BUILTIN_INTERACTIVE_UI_EXTENSION: VarinBuiltinExtensionDefinition = {
+  enabledByDefault: true,
+  manifest: { id: VARIN_BUILTIN_INTERACTIVE_UI_EXTENSION_ID, displayName: 'Interactive content', version: '1.0.0', schemaVersion: 1, engines: { varin: '*' },
+    entrypoints: { host: { activation: ['service-request'], file: 'host.cjs', mode: 'brokered' } },
+    capabilities: { host: [INTERACTIVE_UI_CAPABILITY] }, provides: { services: [...INTERACTIVE_UI_TOOL_DECLARATIONS] } },
+};
+
 export const VARIN_BUILTIN_WEB_EXTENSION: VarinBuiltinExtensionDefinition = {
   enabledByDefault: true,
   manifest: { id: VARIN_BUILTIN_WEB_EXTENSION_ID, displayName: 'Web and materials', version: '1.0.0', schemaVersion: 1, engines: { varin: '*' },
@@ -654,6 +663,7 @@ export const VARIN_BUILTIN_EXTENSION_DEFINITIONS: readonly VarinBuiltinExtension
   VARIN_BUILTIN_RESEARCH_DISCOVERY_EXTENSION,
   VARIN_BUILTIN_RESEARCH_DECISION_EXTENSION,
   VARIN_BUILTIN_IMAGES_EXTENSION,
+  VARIN_BUILTIN_INTERACTIVE_UI_EXTENSION,
   VARIN_BUILTIN_SCRIPT_EXTENSION,
   VARIN_BUILTIN_RUNTIME_CONTRACTS_EXTENSION,
   VARIN_BUILTIN_RETRIEVAL_STRUCTURED_EXTENSION,

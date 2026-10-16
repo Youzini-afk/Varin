@@ -16,6 +16,7 @@ export type ObservationServerMessage =
 
 const GET_PATHS = new Set([
   '/api/threads/observe',
+  '/api/interactive-ui/view/observe',
   '/api/varin/events',
   '/api/notifications/stream',
   '/api/documents/watch',

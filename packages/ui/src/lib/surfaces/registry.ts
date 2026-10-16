@@ -16,6 +16,7 @@ export type ContextSurfaceId =
   | 'recovery'
   | 'browser'
   | 'preview'
+  | 'ui'
   | 'computer'
   | 'chat';
 
@@ -44,6 +45,7 @@ export type ContextSurfaceDescriptor = {
 };
 
 export const CONTEXT_SURFACES: readonly ContextSurfaceDescriptor[] = [
+  { id: 'ui', mode: 'ui', icon: 'window', labelKey: 'ui.content.title', descriptionKey: 'ui.content.title', availability: 'has-content', defaultWidthFraction: 0.55 },
   {
     id: 'threads',
     mode: 'threads',

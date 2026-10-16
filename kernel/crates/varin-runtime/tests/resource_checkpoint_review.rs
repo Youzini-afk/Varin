@@ -29,7 +29,7 @@ fn schema() -> ToolSchema {
     ToolSchema {
         requirements: None,
         name: "resource_read".into(),
-        version: "2".into(),
+        version: "3".into(),
         description: "Read selected resource".into(),
         schema: json!({"type":"object"}),
         output_schema: None,
@@ -205,7 +205,7 @@ fn model_call(db: &mut Catalog, receipt: &Receipt, checkpoint: &str) -> ToolOrig
                     call: ToolCall {
                         call_id: "read-skill".into(),
                         name: "resource_read".into(),
-                        schema_version: "2".into(),
+                        schema_version: "3".into(),
                         arguments: json!({"kind":"skill","resourceId":"skill"}),
                     },
                 },
@@ -304,7 +304,7 @@ fn policy_graph_freezes_original_resource_checkpoint_without_model_step() {
                 call: ToolCall {
                     call_id: "read-node".into(),
                     name: "resource_read".into(),
-                    schema_version: "2".into(),
+                    schema_version: "3".into(),
                     arguments: json!({"kind":"skill","resourceId":"skill"}),
                 },
             },
@@ -660,7 +660,7 @@ fn resource_refresh_can_remove_project_trust_without_changing_scope() {
 }
 
 #[test]
-fn compaction_copies_original_resource_bytes_even_before_previous_summary_boundary() {
+fn compaction_retains_resources_at_the_summary_boundary_and_rejects_earlier_cuts() {
     let f = Fixture::new();
     let mut db = f.open();
     db.create_thread("thread", "main").unwrap();
@@ -692,9 +692,21 @@ fn compaction_copies_original_resource_bytes_even_before_previous_summary_bounda
         instruction_sources: original.proposal.instruction_sources.clone(),
         memory_checkpoint: original.proposal.memory_checkpoint.clone(),
     };
+    // The existing summary includes the second input. An earlier cut cannot use it
+    // as source without including information beyond that cut.
+    assert!(matches!(
+        db.create_context_job(request.clone(), launch(None), json!({})),
+        Err(varin_runtime::RuntimeError::Conflict(_))
+    ));
     let job = db
-        .create_context_job(request, launch(None), json!({}))
+        .create_context_job(varin_runtime::context_job::ContextJobRequest {
+            key: "current-boundary-compaction".into(), through_id: second.input_id, ..request
+        }, launch(None), json!({}))
         .unwrap();
+    let execution = db.capture_context_job(&job.receipt.run_id).unwrap().load_execution().unwrap();
+    let compaction = Some(varin_runtime::context_job::ContextCompactionStep {
+        plan_hash: job.compaction.plan_hash.clone(), node_id: execution.plan.nodes()[0].id.clone(),
+    });
     let mut binding = binding(&job.receipt.branch_id, Some(job.receipt.input_id.clone()));
     binding.tools.clear();
     binding.tool_schema_generation = 0;
@@ -703,7 +715,7 @@ fn compaction_copies_original_resource_bytes_even_before_previous_summary_bounda
             request_id: "summary-step".into(),
             run_id: job.receipt.run_id.clone(),
             origin: RequestOrigin::Conversation {
-                compaction: None, step: 1,
+                compaction, step: 1,
                 history_range: binding.history_range.clone(),
             },
             binding,
@@ -877,7 +889,7 @@ impl ModelProvider for ResourceModel {
                 call: ToolCall {
                     call_id: "original-skill".into(),
                     name: "resource_read".into(),
-                    schema_version: "2".into(),
+                    schema_version: "3".into(),
                     arguments: json!({"kind":"skill-resource","resourceId":"skill","activationId":snapshot.view.binding.resource_activations[0].activation_id,"relativePath":"support.txt"}),
                 },
             }
@@ -924,7 +936,7 @@ impl ToolExecutor for ResourceFixtureTools {
         self.frozen.lock().unwrap().push(context.clone());
         Ok(ToolContract {
             name: "resource_read".into(),
-            schema_version: "2".into(),
+            schema_version: "3".into(),
             read_only: true,
             completion: CompletionKind::Result,
             lifetime: varin_runtime::Lifetime::Run,
@@ -1130,7 +1142,7 @@ fn explicit_skill_survives_refresh_compaction_fork_reopen_and_real_request_tool_
                 call: ToolCall {
                     call_id: "inherited-skill".into(),
                     name: "resource_read".into(),
-                    schema_version: "2".into(),
+                    schema_version: "3".into(),
                     arguments: json!({"kind":"skill-resource","resourceId":"skill","relativePath":"support.txt","activationId":activation.activation_id}),
                 },
             },
@@ -1564,7 +1576,7 @@ fn cold_calendar_skill_keeps_real_environment_proof_through_compaction_gc_and_re
                 call: ToolCall {
                     call_id: "calendar-resource".into(),
                     name: "resource_read".into(),
-                    schema_version: "2".into(),
+                    schema_version: "3".into(),
                     arguments: json!({"kind":"skill-resource","resourceId":"skill","relativePath":"support.txt","activationId":activation.activation_id}),
                 },
             },

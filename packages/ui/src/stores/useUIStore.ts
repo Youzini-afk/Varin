@@ -22,7 +22,7 @@ import {
 
 export type MainTab = 'chat' | 'plan' | 'git' | 'diff' | 'terminal' | 'files' | 'context' | 'diagram';
 export type PendingDiffScope = 'working' | 'staged';
-export type ContextPanelMode = 'threads' | 'diff' | 'walkthrough' | 'file' | 'context' | 'recovery' | 'plan' | 'chat' | 'preview' | 'browser' | 'git' | 'pr' | 'notes' | 'terminal' | 'computer';
+export type ContextPanelMode = 'threads' | 'diff' | 'walkthrough' | 'file' | 'context' | 'recovery' | 'plan' | 'chat' | 'preview' | 'browser' | 'git' | 'pr' | 'notes' | 'terminal' | 'computer' | 'ui';
 export type MermaidRenderingMode = 'svg' | 'ascii';
 export type UserMessageRenderingMode = 'markdown' | 'plain';
 export type ChatRenderMode = 'sorted' | 'live';
@@ -40,6 +40,7 @@ function normalizeFileEditorKeymap(value: unknown): FileEditorKeymap {
 
 type ContextPanelTab = {
   thread?: ThreadIdentity;
+  contentRef?: string;
   id: string;
   editorViewId?: string;
   mode: ContextPanelMode;
@@ -56,6 +57,7 @@ type ContextPanelTab = {
 
 type ContextPanelTabDescriptor = {
   thread?: ThreadIdentity;
+  contentRef?: string;
   mode: ContextPanelMode;
   editorViewId?: string;
   targetPath?: string | null;
@@ -223,6 +225,7 @@ const createContextPanelTab = (descriptor: ContextPanelTabDescriptor): ContextPa
     id: buildContextPanelTabID(descriptor.mode, dedupeKey),
     mode: descriptor.mode,
     ...(descriptor.thread ? { thread: descriptor.thread } : {}),
+    ...(descriptor.contentRef ? { contentRef: descriptor.contentRef } : {}),
     ...(descriptor.editorViewId ? { editorViewId: descriptor.editorViewId } : {}),
     targetPath: normalizedTargetPath,
     targetDirectory: normalizeDirectoryPath(descriptor.targetDirectory?.trim() ?? '') || null,
@@ -268,6 +271,7 @@ const sanitizeContextPanelTabs = (tabs: unknown): ContextPanelTab[] => {
     const candidate = entry as {
       mode?: unknown;
       thread?: ThreadIdentity;
+      contentRef?: unknown;
       editorViewId?: unknown;
       targetPath?: unknown;
       targetDirectory?: unknown;
@@ -280,11 +284,11 @@ const sanitizeContextPanelTabs = (tabs: unknown): ContextPanelTab[] => {
       touchedAt?: unknown;
     };
 
-    if (candidate.mode !== 'threads' && candidate.mode !== 'diff' && candidate.mode !== 'walkthrough' && candidate.mode !== 'file' && candidate.mode !== 'context' && candidate.mode !== 'recovery' && candidate.mode !== 'plan' && candidate.mode !== 'chat' && candidate.mode !== 'preview' && candidate.mode !== 'browser' && candidate.mode !== 'git' && candidate.mode !== 'pr' && candidate.mode !== 'notes' && candidate.mode !== 'terminal' && candidate.mode !== 'computer') {
+    if (candidate.mode !== 'threads' && candidate.mode !== 'diff' && candidate.mode !== 'walkthrough' && candidate.mode !== 'file' && candidate.mode !== 'context' && candidate.mode !== 'recovery' && candidate.mode !== 'plan' && candidate.mode !== 'chat' && candidate.mode !== 'preview' && candidate.mode !== 'browser' && candidate.mode !== 'git' && candidate.mode !== 'pr' && candidate.mode !== 'notes' && candidate.mode !== 'terminal' && candidate.mode !== 'computer' && candidate.mode !== 'ui') {
       continue;
     }
 
-    if (candidate.mode === 'chat' && (!candidate.thread || candidate.thread.runtime !== 'agent' || !candidate.thread.threadId || !candidate.thread.branchId)) continue;
+    if ((candidate.mode === 'chat' || candidate.mode === 'ui') && (!candidate.thread || candidate.thread.runtime !== 'agent' || !candidate.thread.threadId || !candidate.thread.branchId)) continue;
     const targetPath = normalizeContextTargetPath(typeof candidate.targetPath === 'string' ? candidate.targetPath : null);
     const dedupeKey = normalizeContextPanelTabDedupeKey(
       candidate.mode,
@@ -301,6 +305,7 @@ const sanitizeContextPanelTabs = (tabs: unknown): ContextPanelTab[] => {
       id,
       mode: candidate.mode,
       ...(candidate.thread ? { thread: candidate.thread } : {}),
+      ...(typeof candidate.contentRef === 'string' && candidate.contentRef ? { contentRef: candidate.contentRef } : {}),
       ...(typeof candidate.editorViewId === 'string' && candidate.editorViewId ? { editorViewId: candidate.editorViewId } : {}),
       targetPath,
       dedupeKey,

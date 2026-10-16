@@ -323,6 +323,7 @@ impl StreamState {
                     if !self.tool_ids.insert(id.clone()) {
                         return Err(invalid());
                     }
+                    emit_event(emit, ProviderEvent::ToolCallStarted { call_id: id.clone(), name: name.clone(), request_id: view.request_id.clone() })?;
                     self.blocks.insert(
                         index,
                         Block::Tool {

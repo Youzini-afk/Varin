@@ -1,7 +1,7 @@
 import type { ThreadIdentity } from '@varin/application-client';
 import type { DocumentIdentity } from '@/lib/documents/types';
 
-export type EditorContextAttachmentKind = 'editor' | 'selection' | 'diagnostic' | 'diff' | 'test-failure' | 'stack';
+export type EditorContextAttachmentKind = 'editor' | 'selection' | 'diagnostic' | 'diff' | 'test-failure' | 'stack' | 'reference';
 export type EditorContextAttachmentSource = 'saved' | 'unsaved-buffer';
 
 export type EditorContextRange = {
@@ -12,6 +12,8 @@ export type EditorContextRange = {
 };
 
 export type EditorContextAttachment = {
+  reference?: import('@varin/application-client').ContentReference;
+  ordinal?: number;
   id: string;
   runtimeKey: string;
   threadKey: string;

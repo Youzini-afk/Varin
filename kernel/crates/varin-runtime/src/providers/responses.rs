@@ -305,6 +305,9 @@ impl StreamState {
             "response.output_item.added" => {
                 let item = &event["item"];
                 if item["type"] == "function_call" {
+                    emit_event(emit, ProviderEvent::ToolCallStarted {
+                        call_id: required(item, "call_id")?.into(), name: required(item, "name")?.into(), request_id: view.request_id.clone(),
+                    })?;
                     self.calls.insert(
                         required(item, "id")?.into(),
                         required(item, "call_id")?.into(),

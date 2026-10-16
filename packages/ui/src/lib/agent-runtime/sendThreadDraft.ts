@@ -84,7 +84,7 @@ export function sendThreadDraft(api: ThreadsAPI, draftKey: string, request: Thre
       const original = read().pendingInput!;
       assertHost();
       const acceptedInputId = await deliverThreadInput(api, original, pendingInput => patch({ pendingInput }));
-      acknowledgeEditorContextAttachments(original.editorContext ?? []);
+      acknowledgeEditorContextAttachments(original.editorContext ?? [], draftKey);
       for (const bucket of original.inlineContext ?? []) useInlineCommentDraftStore.getState().acknowledgeDrafts(bucket.key, bucket.drafts);
       patch(current => ({ firstSend: undefined, pendingInput: undefined, preparedSource: null,
         ...(original.goalObjective ? { goalArmed: false } : {}),

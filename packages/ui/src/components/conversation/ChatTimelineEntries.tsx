@@ -1,6 +1,7 @@
 import { ChatAssistantUsageFooter } from './ChatAssistantUsageFooter';
 import { getRuntimeEndpointGeneration } from '@varin/application-client';
 import React from 'react';
+import { InteractiveUiCard } from '@/components/interactive-ui/InteractiveUiCard';
 import type { JsonValue } from '@varin/protocol';
 import type { ChatAssistantMessage, ChatSessionEntry, ChatSessionMessageEntry, ChatThinkingContent, ChatToolCall, ChatToolResultMessage, ChatUserContent, ChatUserMessage } from './types';
 import { Icon } from '@/components/icon/Icon';
@@ -314,6 +315,13 @@ const ChatToolCard: React.FC<{
   const fileChanges = React.useMemo(() => extensionRendered === undefined ? projectFileChanges(call, generating) : [], [call, generating, extensionRendered]);
   const nested = Object.values(executionById ?? {}).filter(child => child.parentToolCallId === call.id);
   if (extensionRendered !== undefined) return <>{extensionRendered}</>;
+  if (call.name === 'render_ui') {
+    const projected = conversation?.uiCards?.[call.id];
+    if (projected?.compact) return <details className="my-1 text-xs text-muted-foreground"><summary className="cursor-pointer">{t('ui.content.title')} · {t(projected.result?.isError ? 'ui.content.unsaved' : projected.result ? 'ui.content.updated' : 'ui.content.making')}</summary><RawJsonDetails value={projected.result?.details ?? call.arguments} /></details>;
+    return <InteractiveUiCard call={projected?.call ?? call} ownerCallId={call.id} cwd={cwd}
+      generating={projected?.call.rawArguments !== undefined && !projected.call.interrupted || generating}
+      execution={projected ? conversation?.toolExecutions[projected.call.id] : execution} result={projected ? projected.result : result} />;
+  }
   const mutationPhase = isFileChangeTool(call.name) ? fileChangePhase(execution, result, generating) : undefined;
   const status = mutationPhase === 'failed' || mutationPhase === 'partial' ? 'error' : toolStatus(result, execution);
   const transientOutput = execution?.result ?? execution?.partialResult;

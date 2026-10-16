@@ -541,7 +541,7 @@ export function createThreadResourceScope(owners: ThreadResourceScopeOwners): Th
     const snapshot = options.snapshot!;
     const signal = options.signal;
     const request = options.request;
-    const selected = request && request.kind !== 'instruction-scope' ? snapshot.skills.find(skill => skill.id === request.resourceId) : undefined;
+    const selected = request && request.kind !== 'instruction-scope' && request.kind !== 'ui' ? snapshot.skills.find(skill => skill.id === request.resourceId) : undefined;
     const authorize = async () => {
       signal?.throwIfAborted();
       if (source && source.mode !== 'live_root') {
@@ -557,6 +557,7 @@ export function createThreadResourceScope(owners: ThreadResourceScopeOwners): Th
     const requestPaths = (): string[] => {
       const request = options.request;
       if (!request) return [];
+      if (request.kind === 'ui') return [];
       if (request.kind === 'instruction-scope') {
         const target = normalize(request.targetPath);
         const directory = request.targetType === 'directory' ? target : normalize(path.posix.dirname(target));

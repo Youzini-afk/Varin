@@ -73,6 +73,10 @@ Desktop artifact downloads use `@noble/hashes` 2.4.0 to verify SHA-256
 before saving. Its MIT license is distributed at
 `packages/web/public/licenses/noble-hashes-LICENSE.txt`.
 
+Interactive content module imports use `es-module-lexer` 2.3.2, Copyright
+(C) 2018-2022 Guy Bedford, under the MIT License. Its license is distributed at
+`packages/web/public/licenses/es-module-lexer-LICENSE.txt`.
+
 ## TypeScript language service
 
 Varin's first-party TypeScript/JavaScript language extension distributes

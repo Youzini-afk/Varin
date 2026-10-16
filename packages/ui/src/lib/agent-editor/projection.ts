@@ -11,7 +11,15 @@ const languageFence = (languageId: string | undefined, content: string): string 
   return `${fence}${language}\n${content}\n${fence}`;
 };
 
-const formatOne = (attachment: EditorContextAttachment): string => {
+const formatOne = (attachment: EditorContextAttachment, includeImages?: boolean): string => {
+  if (attachment.reference) {
+    const selection = attachment.reference;
+    return [`Reference point ${attachment.ordinal}: ${selection.title}`, `- Reference: ${selection.ref}`,
+      `- Source: ${JSON.stringify(selection.source)}`,
+      selection.text ? languageFence('', selection.text) : '',
+      selection.image && includeImages === false ? 'Image not supplied to the current model; the source reference and selected text remain available.' : '',
+    ].filter(Boolean).join('\n');
+  }
   const pathLine = `- Resource: ${attachment.resourceId}`;
   const revisionLine = `- Disk revision: ${attachment.documentRevision ?? 'none'}`;
   const localLine = `- Editor revision: ${attachment.localEditRevision}`;
@@ -76,8 +84,9 @@ const formatOne = (attachment: EditorContextAttachment): string => {
 export const projectEditorContextAttachments = (
   text: string,
   items: readonly EditorContextAttachment[],
+  options?: { includeImages: boolean },
 ): string => {
   if (items.length === 0) return text;
-  const projected = items.map(formatOne).join('\n\n');
+  const projected = items.map(item => formatOne(item, options?.includeImages)).join('\n\n');
   return text.trim() ? `${text}\n\n${projected}` : projected;
 };

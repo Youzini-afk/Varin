@@ -38,9 +38,18 @@ export function createMediaResourceStore(storage: WorkspaceWorkingStateRootAcces
         if (!hash || payload.resourceId !== resourceId || !payload.mimeType.startsWith('image/')) throw new Error('Image resource metadata is invalid');
         // A fresh storage context has no in-memory upload owner. The retained record
         // is the original proof of access, including after Host restart.
-        const bytes = context.client
-          ? Buffer.from((await context.client.getBlob(hash, { recordId: record.recordId, slot: 'body' })).bytesBase64, 'base64')
-          : await store.getObject(hash);
+        let bytes: Buffer | Uint8Array | null | undefined;
+        if (context.client) {
+          const chunks: Buffer[] = []; let offset = 0;
+          for (;;) {
+            const slice = await context.client.getBlob(hash, { recordId: record.recordId, slot: 'body' }, { offset });
+            chunks.push(Buffer.from(slice.bytesBase64, 'base64'));
+            if (slice.eof) break;
+            if (slice.nextOffset <= offset) throw new Error('Media reader did not advance');
+            offset = slice.nextOffset;
+          }
+          bytes = Buffer.concat(chunks);
+        } else bytes = await store.getObject(hash);
         if (!bytes || bytes.byteLength !== payload.byteLength) throw new Error('Image resource bytes are unavailable');
         return { bytes, mimeType: payload.mimeType };
       });

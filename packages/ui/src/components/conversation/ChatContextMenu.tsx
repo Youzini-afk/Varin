@@ -15,6 +15,9 @@ import { resolveChatTimelineItem, type ChatTimelineProjection } from './chatTime
 import type { ChatTimelineProps } from './ChatTimelineEntries';
 import { assistantMessagesForTurn } from './usagePresentation';
 import { chatContentText } from './extensionPresentation';
+import { addContentReference } from '@/lib/agent-editor/attachments';
+import { ReferenceNavigationContext } from './ReferenceNavigation';
+import { fileToImageAttachment } from '@/components/chat/composer/imageAttachments';
 
 const SOURCE_LINK = '#varin-chat-source:';
 export const CHAT_QUOTE_EVENT = 'varin:chat-quote';
@@ -62,6 +65,12 @@ export const ChatContextMenu: React.FC<Pick<ChatTimelineProps,
 > & { projection: ChatTimelineProjection; children: React.ReactNode; onRevealEntry(entryId: string): void | Promise<void> }> = (props) => {
   const { t } = useI18n();
   const presentation = useConversationPresentation();
+  const navigation = React.useContext(ReferenceNavigationContext);
+  React.useEffect(() => {
+    if (!navigation) return;
+    navigation.revealEntry = props.onRevealEntry;
+    return () => { if (navigation.revealEntry === props.onRevealEntry) delete navigation.revealEntry; };
+  }, [navigation, props.onRevealEntry]);
   const root = React.useRef<HTMLDivElement>(null);
   const [sources] = React.useState(() => new Map<HTMLElement, ChatSourceData>());
   const [open, setOpen] = React.useState(false);
@@ -107,7 +116,8 @@ export const ChatContextMenu: React.FC<Pick<ChatTimelineProps,
       }
     }
     const image = element.closest<HTMLImageElement>('img');
-    if (image) return { kind: 'image', text: '', href: image.currentSrc || image.src, element: image.closest('a') ?? image, runtimeKey };
+    if (image) return { kind: 'image', text: '', href: image.currentSrc || image.src, element: image.closest('a') ?? image,
+      sourceEntryId: image.closest<HTMLElement>('[data-conversation-entry-id]')?.dataset.conversationEntryId, runtimeKey };
     const file = element.closest<HTMLElement>('[data-varin-file-link="true"]');
     if (file) return { kind: 'file', text: file.getAttribute('data-varin-file-path') || file.textContent || '', element: file, runtimeKey };
     const link = element.closest<HTMLAnchorElement>('a[href]');
@@ -153,10 +163,10 @@ export const ChatContextMenu: React.FC<Pick<ChatTimelineProps,
     if (!result.ok) throw new Error(result.error);
   };
   const quote = (value: MenuTarget) => {
-    const sourceLink = value.sourceEntryId
-      ? `[${t('chat.context.source')}](${SOURCE_LINK}${encodeURIComponent(props.sessionId)}:${encodeURIComponent(value.sourceEntryId)})\n\n`
-      : '';
-    presentation.quote(sourceLink + value.text.split('\n').map(line => `> ${line}`).join('\n') + '\n\n');
+    const sourceLink = value.sourceEntryId ? `${SOURCE_LINK}${encodeURIComponent(props.sessionId)}:${encodeURIComponent(value.sourceEntryId)}` : '';
+    addContentReference(presentation.identity, { ref: `chat-selection:${crypto.randomUUID()}`,
+      title: t('chat.context.source'), text: value.text,
+      source: { kind: 'chat', thread: presentation.identity, itemId: value.sourceEntryId, passages: value.passages ?? [], href: sourceLink } });
   };
   const openTarget = (value: MenuTarget) => {
     if (value.kind === 'image' && value.href) setImagePreview(value.href);
@@ -164,7 +174,7 @@ export const ChatContextMenu: React.FC<Pick<ChatTimelineProps,
     else if (value.href && /^(https?:|data:image\/|blob:)/u.test(value.href)) window.open(value.href, '_blank', 'noopener,noreferrer');
     else throw new Error(t('chat.context.sourceUnavailable'));
   };
-  const imageAction = async (value: MenuTarget, action: 'copy' | 'save') => {
+  const imageAction = async (value: MenuTarget, action: 'copy' | 'save' | 'quote') => {
     const response = await fetch(value.href!);
     if (!response.ok) throw new Error(t('chat.context.failed'));
     const blob = await response.blob();
@@ -179,7 +189,12 @@ export const ChatContextMenu: React.FC<Pick<ChatTimelineProps,
       canvas.width = bitmap.width; canvas.height = bitmap.height;
       canvas.getContext('2d')!.drawImage(bitmap, 0, 0); bitmap.close();
       const png = await new Promise<Blob>((resolve, reject) => canvas.toBlob((value) => value ? resolve(value) : reject(new Error(t('chat.context.failed'))), 'image/png'));
-      await navigator.clipboard.write([new ClipboardItem({ 'image/png': png })]);
+      if (action === 'quote') {
+        const image = await fileToImageAttachment(new File([png], 'reference.png', { type: 'image/png' }));
+        if (value.runtimeKey !== getRuntimeKey()) return;
+        addContentReference(presentation.identity, { ref: `chat-image:${crypto.randomUUID()}`, title: t('chat.context.openImage'), image,
+          source: { kind: 'chat', thread: presentation.identity, itemId: value.sourceEntryId, passages: [] } });
+      } else await navigator.clipboard.write([new ClipboardItem({ 'image/png': png })]);
     }
   };
   return <ChatActionsContext.Provider value={context}>
@@ -205,6 +220,7 @@ export const ChatContextMenu: React.FC<Pick<ChatTimelineProps,
       </ContextMenuTrigger>
       <ContextMenuContent className="min-w-48">
         {target?.kind === 'image' ? <>
+          <ContextMenuItem onClick={() => perform(value => imageAction(value, 'quote'))}>{t('chat.context.quote')}</ContextMenuItem>
           <ContextMenuItem onClick={() => perform(openTarget)}>{t('chat.context.openImage')}</ContextMenuItem>
           <ContextMenuItem onClick={() => perform((value) => imageAction(value, 'copy'))}>{t('chat.context.copyImage')}</ContextMenuItem>
           <ContextMenuItem onClick={() => perform((value) => imageAction(value, 'save'))}>{t('chat.context.saveImage')}</ContextMenuItem>

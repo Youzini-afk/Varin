@@ -32,6 +32,9 @@ export interface ChatThinkingContent {
 }
 
 export interface ChatToolCall {
+  rawArguments?: string;
+  sequence?: number;
+  interrupted?: boolean;
   arguments: JsonValue;
   id: string;
   name: string;

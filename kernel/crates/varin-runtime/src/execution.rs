@@ -578,6 +578,7 @@ pub(crate) fn model_history_item(request_id: &str, item: &ProviderItem) -> Conve
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum ProviderEvent {
+    ToolCallStarted { call_id: String, name: String, request_id: String },
     TextDelta { item_id: String, text: String },
     ToolArgumentsDelta { call_id: String, delta: String },
     ItemCompleted { item: ProviderItem },
@@ -2909,7 +2910,7 @@ impl<
                 match &event {
                     ProviderEvent::ItemCompleted { item } => items.push(item.clone()),
                     ProviderEvent::Usage { receipt } => usage = receipt.clone(),
-                    ProviderEvent::TextDelta { .. } | ProviderEvent::ToolArgumentsDelta { .. } => {
+                    ProviderEvent::TextDelta { .. } | ProviderEvent::ToolArgumentsDelta { .. } | ProviderEvent::ToolCallStarted { .. } => {
                         deltas.push(event.clone())
                     }
                 }

@@ -11,15 +11,12 @@ package.json 为准；文档解释职责、机制、约束和不显然的取舍�
 | 文件来源、WorkingState、进程、跨 Host 和恢复 | [资源](resources.md) |
 | 上下文、检索、材料、知识和记忆 | [检索与上下文](retrieval.md) |
 | 外壳、Profile、Documents 和编辑器 | [工作台](workbench.md) |
+| 聊天 HTML、流式作品、画面读取与引用 | [交互内容](interactive-content.md) |
 | Varin 扩展和原生运行时能力组合 | [扩展](extensions.md) |
 | 信任、权限和特权边界 | [安全](security.md) |
 | 开发命令与验证选择 | [开发](development.md)、[性能](performance.md) |
 | 仍需真实环境证据的运行时场景 | [运行时验收](runtime-acceptance.md) |
 | 部署、恢复、扩展开发和依赖维护 | [操作指南](ops/README.md) |
-
-## 进行中的设计
-
-- [聊天交互内容与精确引用](design/chat-interactive-content.md)：已讨论的目标方案，待实现；包含流式作品、分次写入、修订、画面读取和引用点。
 
 ## 源码旁的说明
 

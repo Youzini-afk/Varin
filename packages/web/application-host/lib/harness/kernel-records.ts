@@ -40,7 +40,7 @@ type KernelBlobClient = {
     hash: string,
     source: { recordId: string; slot: string },
     options?: { offset?: number; length?: number; signal?: AbortSignal },
-  ): Promise<{ byteLength: number; bytesBase64: string }>;
+  ): Promise<{ byteLength: number; bytesBase64: string; nextOffset: number; eof: boolean }>;
 };
 
 type ContextLike = {

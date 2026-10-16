@@ -103,7 +103,7 @@ export function initializeLocale(): void {
   void useI18nStore.getState().setLocale(detectInitialLocale());
 }
 
-export function formatMessage(dictionary: I18nDictionary, key: I18nKey, params?: I18nParams): string {
+export function formatMessage(dictionary: Partial<I18nDictionary>, key: I18nKey, params?: I18nParams): string {
   const template = dictionary[key] ?? enDict[key] ?? key;
   if (!params) {
     return template;

@@ -345,6 +345,11 @@ impl StreamState {
                 }
                 let value = event["content_block"].clone();
                 required(&value, "type")?;
+                if value["type"] == "tool_use" {
+                    emit_event(emit, ProviderEvent::ToolCallStarted {
+                        call_id: required(&value, "id")?.into(), name: registered_tool_name(required(&value, "name")?, view, self.oauth).into(), request_id: view.request_id.clone(),
+                    })?;
+                }
                 self.blocks.insert(
                     index,
                     Block {

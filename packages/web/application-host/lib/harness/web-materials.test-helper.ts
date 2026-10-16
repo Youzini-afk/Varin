@@ -50,7 +50,8 @@ export const createMaterialStoreFixture = (options: {
       const record = records.get(source.recordId), bytes = objects.get(hash);
       if (!bytes || !record?.references.some(ref => ref.slot === source.slot && ref.objectHash === hash)) throw new Error("Fixture blob proof is unavailable");
       const offset = range?.offset ?? 0;
-      return { byteLength: bytes.byteLength, bytesBase64: bytes.subarray(offset, offset + (range?.length ?? bytes.byteLength)).toString("base64") };
+      const nextOffset = Math.min(bytes.byteLength, offset + (range?.length ?? bytes.byteLength));
+      return { byteLength: bytes.byteLength, bytesBase64: bytes.subarray(offset, nextOffset).toString("base64"), nextOffset, eof: nextOffset === bytes.byteLength };
     },
   } : undefined;
   const context = {

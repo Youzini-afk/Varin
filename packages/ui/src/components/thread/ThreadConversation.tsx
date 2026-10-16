@@ -7,11 +7,12 @@ import { usePrefersReducedMotion } from '@/hooks/usePrefersReducedMotion';
 import { ChatTreeDialog } from '../conversation/ChatTreeDialog';
 import { ConversationSurface } from '../conversation/ConversationSurface';
 import { ConversationTimeline } from '../conversation/ConversationTimeline';
+import { ReferenceNavigationContext, type ReferenceNavigation } from '../conversation/ReferenceNavigation';
 import { deliverThreadInput } from '@/lib/agent-runtime/threadInputDelivery';
 import { sendThreadDraft } from '@/lib/agent-runtime/sendThreadDraft';
 import { AutoReviewBanner } from '@/components/chat/AutoReviewBanner';
 import { EditorContextAttachmentChips } from '@/components/workbench/EditorContextAttachmentChips';
-import { acknowledgeEditorContextAttachments, getEditorContextAttachmentsRevision, listEditorContextAttachments, subscribeEditorContextAttachments } from '@/lib/agent-editor/attachments';
+import { addContentReference, acknowledgeEditorContextAttachments, getEditorContextAttachmentsRevision, listEditorContextAttachments, subscribeEditorContextAttachments } from '@/lib/agent-editor/attachments';
 import { projectEditorContextAttachments } from '@/lib/agent-editor/projection';
 import { useInlineCommentDraftStore } from '@/stores/useInlineCommentDraftStore';
 import { appendInlineComments } from '@/lib/messages/inlineComments';
@@ -19,7 +20,6 @@ import { useThreadStore, threadHostKey, threadComposerKey } from '@/stores/useTh
 import { useThreadDraftStore, EMPTY_THREAD_DRAFT, type ThreadPendingInput, type ThreadMaterialAttachment } from '@/stores/useThreadDraftStore';
 import { ThreadMaterials } from './ThreadMaterials';
 import { ThreadMaterialAttachments } from './ThreadMaterialAttachments';
-import { buildPdfMaterialCitationMarkdown } from '@/lib/materials/pdfMaterialCitation';
 import { ComputerAutomationSection } from '@/components/thread/ComputerAutomationSection';
 import { useComputerAutomation } from '@/stores/useComputerAutomation';
 import { ThreadExecutions } from './ThreadExecutions';
@@ -194,6 +194,7 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
   const host = React.useSyncExternalStore(subscribeRuntimeEndpointChanged, getRuntimeEndpointGeneration, getRuntimeEndpointGeneration);
   const draftKey = threadComposerKey(threadHostKey(), identity);
   const viewScope = React.useMemo(() => ({ api, host, draftKey, readOnly }), [api, host, draftKey, readOnly]);
+  const referenceNavigation = React.useMemo<ReferenceNavigation>(() => ({ identity: { runtime: identity.runtime, threadId: identity.threadId, branchId: identity.branchId } }), [identity.runtime, identity.threadId, identity.branchId, host]);
   const currentViewScope = React.useRef(viewScope);
   currentViewScope.current = viewScope;
   const [handoff] = React.useState(() => messageHandoff ?? new MessageHandoff());
@@ -215,7 +216,6 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
     return captured.length ? [{ key, drafts: captured }] : [];
   }), [inlineBuckets, draftKey]);
   const inlineDrafts = inlineContext.flatMap(bucket => bucket.drafts);
-  const projectedText = projectEditorContextAttachments(appendInlineComments(text, inlineDrafts), editorContext);
   const providerId = draft.model?.providerId ?? '';
   const modelId = draft.model?.modelId ?? '';
   const thinkingLevel = draft.model?.thinkingLevel ?? 'off';
@@ -242,6 +242,7 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
   const forkKeys = React.useRef(new Map<string, string>());
   const compactionKeys = React.useRef(new Map<string, string>());
   const [progress, setProgress] = React.useState('');
+  const [streamingTools, setStreamingTools] = React.useState<import('@/lib/agent-runtime/thread-projection').StreamingToolCall[]>([]);
   const messageInput = React.useRef<ComposerEditorHandle | null>(null);
   const appliedModelPreference = React.useRef<string | undefined>(undefined);
   const [models, setModels] = React.useState<ThreadModelInfo[]>([]);
@@ -277,7 +278,7 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
     pendingAction.current = null; setPending(false); setError(undefined);
     setSnapshot(undefined); setProgress(''); setHistoryOpen(false); setContextRunId(undefined); setReadingFiles(false); fileReadGeneration.current += 1;
     fileRead.current?.abort(); fileRead.current = null;
-    const view = new ThreadProjection(api, identity, value => { snapshotHost.current = host; handoff.observe(value); setSnapshot(value); }, value => setError(value instanceof Error ? value.message : 'Thread unavailable'), setProgress);
+    const view = new ThreadProjection(api, identity, value => { snapshotHost.current = host; handoff.observe(value); setSnapshot(value); }, value => setError(value instanceof Error ? value.message : 'Thread unavailable'), setProgress, setStreamingTools);
     projection.current = view; view.start();
     return () => { identityGeneration.current += 1; historyGeneration.current += 1; fileReadGeneration.current += 1; fileRead.current?.abort(); fileRead.current = null; view.close(); };
   }, [api, identity, host, handoff]);
@@ -321,6 +322,9 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
   const policyIncompatible = policyUpdate?.status === 'failed' && policyUpdate.failure === 'policy_state_incompatible';
   const acceptsImages = active || delegated ? (run?.configuration as { acceptsImages?: boolean } | undefined)?.acceptsImages
     : models.find(model => model.providerId === providerId && model.modelId === modelId)?.acceptsImages;
+  const projectedText = projectEditorContextAttachments(appendInlineComments(text, inlineDrafts), editorContext, { includeImages: acceptsImages === true });
+  const requestImages = React.useMemo(() => [...images, ...(acceptsImages === true ? editorContext.flatMap(item => item.reference?.image
+    ? [{ mimeType: item.reference.image.mimeType, data: item.reference.image.data }] : []) : [])], [images, acceptsImages, editorContext]);
   React.useEffect(() => {
     if (active || delegated || draft.firstSend) return;
     const levels = models.find(model => model.providerId === providerId && model.modelId === modelId)?.thinkingLevels;
@@ -474,7 +478,7 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
   const visibleHistory = historyView?.items ?? snapshot?.history ?? [];
   const previousHistory = historyView ? historyView.previous : snapshot?.historyPage.previous;
   const memorySelection = getRegisteredRuntimeAPIs()?.bots?.selection;
-  const submissionFingerprint = () => JSON.stringify([identity.threadId, identity.branchId, projectedText, images, materials, providerId, modelId, thinkingLevel, inputMode, preparedSource?.source]);
+  const submissionFingerprint = () => JSON.stringify([identity.threadId, identity.branchId, projectedText, requestImages, materials, providerId, modelId, thinkingLevel, inputMode, preparedSource?.source]);
   const sourceCannotBeApplied = active && Boolean(preparedSource) && !pendingInput.current;
   const sendDisabled = pending || (!draft.pendingInput && (!snapshot || preparingDelegation || preparingSource || sourceCannotBeApplied || readingFiles
     || (images.length > 0 && acceptsImages === false)
@@ -577,12 +581,12 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
       </WorkOverviewSection>
     </div>
   </WorkOverviewControl>;
-  return <ThreadMaterials api={api.materials} identity={identity} onAddRegion={readOnly || acceptsImages === false ? undefined : region => {
+  return <ThreadMaterials api={api.materials} identity={identity} onAddRegion={readOnly ? undefined : region => {
     if (pendingAction.current) throw new Error('Wait for the current message before adding a PDF selection.');
-    setText(current => [current.trimEnd(), buildPdfMaterialCitationMarkdown(region.title, region)].filter(Boolean).join('\n\n'));
-    setImages(current => [...current, region.image]);
+    addContentReference(identity, { ref: `document-selection:${crypto.randomUUID()}`, title: region.title, image: region.image,
+      source: { kind: 'document', snapshotId: region.snapshotId, sourceHash: region.sourceHash, page: region.page, region: region.region } });
     messageInput.current?.focus();
-  }}><section ref={handoff.setRoot} className="regular-chat-view relative flex h-full min-h-0 flex-col [container-type:inline-size]" aria-label="Thread conversation" data-thread-conversation="true">
+  }}><ReferenceNavigationContext.Provider value={referenceNavigation}><section ref={handoff.setRoot} className="regular-chat-view relative flex h-full min-h-0 flex-col [container-type:inline-size]" aria-label="Thread conversation" data-thread-conversation="true">
     {overview}
     {!historyView && run?.state === 'failed' && <div role="alert" aria-label="Run failed" className="mx-auto w-full max-w-3xl px-4 py-2 text-sm text-destructive">
       <p>{t('harness.threads.state.failed')}</p>
@@ -597,7 +601,7 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
     <div className={cn('relative flex min-h-0 flex-1', empty && 'hidden')}>
     <ConversationSurface owner={String(host)} identity={draftKey} ready={Boolean(snapshot)} loadingLabel={t('common.loading')}>
     <ConversationTimeline api={api} identity={identity} snapshot={snapshot} history={visibleHistory}
-      progress={historyView ? '' : progress} cwd={emptyWorkspacePath ?? ''} working={!historyView && active && !launch?.preparation_failure && !pause} readOnly={readOnly}
+      progress={historyView ? '' : progress} streamingTools={historyView ? [] : streamingTools} cwd={emptyWorkspacePath ?? ''} working={!historyView && active && !launch?.preparation_failure && !pause} readOnly={readOnly}
       memory={snapshot?.thread.bot_id ? memorySelection : undefined}
       onQuote={quote => { if (!readOnly && currentViewScope.current === viewScope) { setText(current => [current.trimEnd(), quote].filter(Boolean).join('\n\n')); messageInput.current?.focus(); } }}
       onFork={!readOnly && !pending && onBranchCreated ? id => void forkFrom(id) : undefined}
@@ -637,7 +641,7 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
         if (pending || !draft.firstSend && sendDisabled) return;
         const settings = useUIStore.getState();
         const request = draft.firstSend ?? { key: crypto.randomUUID(), status: 'sending' as const, editorText: text, text: projectedText,
-          images, pdfs: draft.pdfs ?? [], model: { providerId, modelId, thinkingLevel }, workspacePath: draft.workspacePath,
+          images: requestImages, pdfs: draft.pdfs ?? [], model: { providerId, modelId, thinkingLevel }, workspacePath: draft.workspacePath,
           sourceSelection: draft.sourceSelection, editorContext, inlineContext,
           ...(draft.goalArmed && text.trim() ? { goalObjective: text.trim(), ...(settings.sessionGoalDefaultBudgetEnabled ? { goalBudget: settings.sessionGoalDefaultBudget } : {}) } : {}) };
         handoff.submit(request.key, draftKey, handoff.captureDraft());
@@ -665,9 +669,9 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
           }
           const key = crypto.randomUUID();
           const attachments = materials.length ? { materials: materials.map(({ snapshotId }) => ({ snapshotId })) } : {};
-          const submit = { ...identity, key, text: projectedText, images, ...attachments, expectedHead: branch?.head ?? null, model: { providerId, modelId, thinkingLevel }, ...(sourceForInput ? { source: sourceForInput.source } : {}) };
-          const queued = { ...identity, key, text: projectedText, images, ...attachments, mode: inputMode };
-          const continuation = { ...identity, key, text: projectedText, images, ...attachments, previousRunId: run?.id ?? '', expectedHead: branch?.head ?? null };
+          const submit = { ...identity, key, text: projectedText, images: requestImages, ...attachments, expectedHead: branch?.head ?? null, model: { providerId, modelId, thinkingLevel }, ...(sourceForInput ? { source: sourceForInput.source } : {}) };
+          const queued = { ...identity, key, text: projectedText, images: requestImages, ...attachments, mode: inputMode };
+          const continuation = { ...identity, key, text: projectedText, images: requestImages, ...attachments, previousRunId: run?.id ?? '', expectedHead: branch?.head ?? null };
           if (!active && delegated && (!api.collaboration || !run)) throw new Error('Child continuation is unavailable');
           const goalSettings = useUIStore.getState();
           const goal = draft.goalArmed && !active && !delegated && text.trim() ? { goalObjective: text.trim(),
@@ -679,7 +683,7 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
         const acceptedInputId = await deliverThreadInput(api, original, next => {
           useThreadDraftStore.getState().patch(draftKey, current => current.pendingInput?.input.key === original.input.key ? { pendingInput: next } : {});
         });
-        acknowledgeEditorContextAttachments(original.editorContext ?? []);
+        acknowledgeEditorContextAttachments(original.editorContext ?? [], draftKey);
         for (const bucket of original.inlineContext ?? []) useInlineCommentDraftStore.getState().acknowledgeDrafts(bucket.key, bucket.drafts);
         // A real receipt clears only the original captured editor bytes, even if its view unmounted.
         useThreadDraftStore.getState().patch(draftKey, current => current.pendingInput?.input.key === original.input.key ? {
@@ -772,5 +776,5 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
       }} /></div>}
     </div>}
     {empty && <div className="min-h-6 flex-1" />}
-  </section></ThreadMaterials>;
+  </section></ReferenceNavigationContext.Provider></ThreadMaterials>;
 }

@@ -2,7 +2,8 @@
 
 Varin 的工作台是在共享状态之上的可替换界面。本文说明更换 Shell、编辑器或交互设计时仍须保留的职责边界。
 具体类型、行为和失败结果以当前代码及定向测试为准；局部实现入口见 [UI 模块导航](../packages/ui/DOCUMENTATION.md)。
-进程关系见[架构](architecture.md)，文件与执行资源见[资源](resources.md)，扩展生命周期见[扩展](extensions.md)。
+进程关系见[架构](architecture.md)，文件与执行资源见[资源](resources.md)，扩展生命周期见[扩展](extensions.md)，
+聊天内的 HTML 作品、画面读取和引用见[交互内容](interactive-content.md)。
 
 ## 职责划分
 

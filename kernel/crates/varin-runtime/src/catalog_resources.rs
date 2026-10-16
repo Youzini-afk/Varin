@@ -131,6 +131,23 @@ pub struct ContextResources {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "kind", deny_unknown_fields)]
 pub enum ResourceRequest {
+    #[serde(rename = "ui")]
+    Ui {
+        #[serde(rename = "ref")]
+        reference: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        view: Option<UiReadView>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        file: Option<String>,
+        #[serde(rename = "startLine", skip_serializing_if = "Option::is_none")]
+        start_line: Option<u64>,
+        #[serde(rename = "endLine", skip_serializing_if = "Option::is_none")]
+        end_line: Option<u64>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        offset: Option<u64>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        limit: Option<u64>,
+    },
     #[serde(rename = "skill")]
     Skill {
         #[serde(rename = "activationId", skip_serializing_if = "Option::is_none")]
@@ -155,6 +172,9 @@ pub enum ResourceRequest {
         target_type: Option<ResourceTargetType>,
     },
 }
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "lowercase")]
+pub enum UiReadView { Summary, Source, State, Screen, Structure }
 impl ResourceRequest {
     pub fn activation_id(&self) -> Option<&str> {
         match self {
@@ -546,7 +566,7 @@ impl ResourceSnapshotRead {
         let checkpoint_id = self.checkpoint.id.clone();
         let invocation = self.invocation.load()?;
         if invocation.call.name != "resource_read"
-            || invocation.call.schema_version != "2"
+            || invocation.call.schema_version != "3"
             || !invocation.tools.iter().any(|schema| {
                 schema.name == invocation.call.name
                     && schema.version == invocation.call.schema_version

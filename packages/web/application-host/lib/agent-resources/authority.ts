@@ -62,7 +62,7 @@ export interface AgentResourceBinding {
   /** Temporary current-authorized handles for exact saved views. They are not persisted in the snapshot. */
   readers: readonly ResourceReader[];
 }
-export type AgentResourceRequest = ResourceRequest;
+export type AgentResourceRequest = Exclude<ResourceRequest, { kind: 'ui' }>;
 export type AgentResourceRead = ResourceResult<
   | { kind: 'skill' | 'skill-resource'; descriptor: SkillDescriptor; file: CapturedResource }
   | { kind: 'instruction-scope'; directory: string; instructions: (InstructionEntry & { content: string })[] }

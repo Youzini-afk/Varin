@@ -471,6 +471,8 @@ impl StreamState {
                                     "Google function identity is empty or duplicated",
                                 ));
                             }
+                            emit_event(emit, ProviderEvent::ToolCallStarted { call_id: call_id.clone(), name: name.into(), request_id: view.request_id.clone() })?;
+                            emit_event(emit, ProviderEvent::ToolArgumentsDelta { call_id: call_id.clone(), delta: arguments.to_string() })?;
                             Content::ToolCall {
                                 call: ToolCall {
                                     call_id,

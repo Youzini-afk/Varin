@@ -2,7 +2,10 @@ import React from 'react';
 import type { ThreadIdentity, ThreadSnapshot, ThreadsAPI, ThreadMemoryAPI } from '@varin/application-client';
 import type { ThreadHistoryItem as HistoryItem } from '@varin/application-client';
 import { ChatTimeline } from './ChatTimeline';
-import { ConversationContext } from './ConversationContext';
+import { ConversationContext, type UiCardProjection } from './ConversationContext';
+import type { ChatToolCall } from './types';
+import { getUiSession } from '@/lib/interactive-ui/sessions';
+import { projectUiWork } from '@/lib/interactive-ui/work-projection';
 import { HistoryPresentation, assistant } from './historyPresentation';
 import { useTimelineViewStore } from './timelineViewStore';
 import { threadHostKey, threadComposerKey } from '@/stores/useThreadStore';
@@ -15,10 +18,12 @@ import { getRuntimeEndpointGeneration } from '@varin/application-client';
 import { revealResourceInEditor } from '@/lib/agent-editor/navigation';
 import { useI18n } from '@/lib/i18n';
 import { toast } from '@/components/ui';
+import type { StreamingToolCall } from '@/lib/agent-runtime/thread-projection';
 
-export function ConversationTimeline({ api, identity, snapshot, history, progress, cwd, working, readOnly, onQuote, onFork, onRecover, memory, header, footer }: {
+export function ConversationTimeline({ api, identity, snapshot, history, progress, streamingTools = [], cwd, working, readOnly, onQuote, onFork, onRecover, memory, header, footer }: {
   api: ThreadsAPI; identity: ThreadIdentity; snapshot?: ThreadSnapshot; history: readonly HistoryItem[];
   progress: string; cwd: string; working: boolean; readOnly?: boolean; onQuote(text: string): void;
+  streamingTools?: StreamingToolCall[];
   onFork?(id: string): void; onRecover?(id: string): void; memory?: ThreadMemoryAPI;
   header?: React.ReactNode; footer?: React.ReactNode;
 }) {
@@ -27,8 +32,57 @@ export function ConversationTimeline({ api, identity, snapshot, history, progres
   const projector = React.useMemo(() => new HistoryPresentation(key), [key]);
   const view = React.useMemo(() => projector.project(history, snapshot), [history, snapshot, projector]);
   const head = history.at(-1)?.id ?? null;
-  const liveAssistant = React.useMemo(() => progress ? assistant(`progress:${snapshot?.activeRun?.id ?? key}`, [{ type: 'text', text: progress }], snapshot?.modelSelection.active?.configuration ?? snapshot?.activeRun?.configuration, working) : undefined,
-    [progress, working, snapshot?.modelSelection.active?.configuration, snapshot?.activeRun?.configuration, snapshot?.activeRun?.id, key]);
+  const sourceEntry = React.useCallback((callId: string) => view.entries.find(entry => entry.type === 'message' && entry.message.role === 'assistant'
+    && entry.message.content.some(part => part.type === 'toolCall' && part.id === callId))?.id, [view.entries]);
+  const uiCards = React.useMemo(() => {
+    const cards: Record<string, UiCardProjection> = {}, calls = new Map<string, ChatToolCall>();
+    const firstByWork = new Map<string, string>();
+    const admit = (call: ChatToolCall, work: string, result?: UiCardProjection['result']) => {
+      const first = firstByWork.get(work) ?? call.id; firstByWork.set(work, first);
+      cards[first] = { call, result, compact: false };
+      if (first !== call.id) cards[call.id] = { call, result, compact: true };
+    };
+    for (const entry of view.entries) {
+      if (entry.type !== 'message') continue;
+      if (entry.message.role === 'user') firstByWork.clear();
+      if (entry.message.role === 'assistant') for (const part of entry.message.content) if (part.type === 'toolCall' && part.name === 'render_ui') {
+        calls.set(part.id, part);
+        cards[part.id] ??= { call: part, compact: false };
+        const args = part.arguments as { ref?: string } | null;
+        if (args?.ref && firstByWork.has(args.ref.split('@')[0]!)) admit(part, args.ref.split('@')[0]!);
+      }
+      if (entry.message.role === 'toolResult') {
+        const output = entry.message.details as { kind?: string; workRef?: string } | undefined;
+        const call = calls.get(entry.message.toolCallId);
+        if (call) {
+          const original = call.arguments as { ref?: string } | null;
+          const work = output?.kind === 'ui' ? output.workRef : original?.ref?.split('@')[0];
+          if (work) admit(call, work, entry.message); else cards[call.id] = { call, result: entry.message, compact: false };
+        }
+      }
+    }
+    for (const call of streamingTools) if (call.name === 'render_ui') {
+      const projected: ChatToolCall = { type: 'toolCall', id: call.id, name: call.name, arguments: {}, rawArguments: call.rawArguments, sequence: call.sequence, interrupted: call.interrupted };
+      if (call.reference && firstByWork.has(call.reference.split('@')[0]!)) admit(projected, call.reference.split('@')[0]!);
+      else cards[call.id] = { call: projected, compact: false };
+    }
+    return cards;
+  }, [view.entries, streamingTools]);
+  React.useLayoutEffect(() => {
+    for (const [ownerCallId, projected] of Object.entries(uiCards)) {
+      if (projected.compact) continue;
+      const session = getUiSession(`${key}:${ownerCallId}`);
+      if (!session || session.placement !== 'panel') continue;
+      const execution = view.toolExecutions[projected.call.id];
+      projectUiWork(session, projected.call, projected.result?.details ?? execution?.result,
+        projected.call.rawArguments !== undefined && !projected.call.interrupted || execution?.status === 'running', projected.result?.isError ?? execution?.status === 'error');
+    }
+  }, [uiCards, key, view.toolExecutions]);
+  const liveAssistant = React.useMemo(() => progress || streamingTools.length ? assistant(`progress:${snapshot?.activeRun?.id ?? key}`, [
+    ...(progress ? [{ type: 'text' as const, text: progress }] : []),
+    ...streamingTools.filter(call => call.name === 'render_ui').map(call => ({ type: 'toolCall' as const, id: call.id, name: call.name, arguments: {}, rawArguments: call.rawArguments, sequence: call.sequence, interrupted: call.interrupted })),
+  ], snapshot?.modelSelection.active?.configuration ?? snapshot?.activeRun?.configuration, working) : undefined,
+    [progress, streamingTools, working, snapshot?.modelSelection.active?.configuration, snapshot?.activeRun?.configuration, snapshot?.activeRun?.id, key]);
   const entering = React.useRef<string | undefined>(undefined);
   React.useLayoutEffect(() => {
     if (!snapshot || entering.current === key) return;
@@ -71,8 +125,8 @@ export function ConversationTimeline({ api, identity, snapshot, history, progres
     } catch (error) { if (alive.current && host === getRuntimeEndpointGeneration() && !(error instanceof DOMException && error.name === 'AbortError'))
       toast.error(error instanceof Error ? error.message : String(error)); }
   }, [fileTarget, identity]);
-  const context = React.useMemo(() => ({ api, identity, head, quote: onQuote, openFile, fileTarget, memory, toolExecutions: view.toolExecutions, renderExtras }),
-    [api, identity, head, onQuote, openFile, fileTarget, memory, view.toolExecutions, renderExtras]);
+  const context = React.useMemo(() => ({ api, identity, head, quote: onQuote, openFile, fileTarget, memory, toolExecutions: view.toolExecutions, uiCards, sourceEntry, renderExtras }),
+    [api, identity, head, onQuote, openFile, fileTarget, memory, view.toolExecutions, uiCards, sourceEntry, renderExtras]);
   return <ConversationContext.Provider value={context}><ChatTimeline key={key} sessionId={key} cwd={cwd}
     entries={view.entries} toolExecutions={view.toolExecutions} liveAssistant={liveAssistant} leafId={head}
     assistantWaiting={working ? {} : undefined} onFork={onFork ? entry => onFork(entry.id) : undefined}

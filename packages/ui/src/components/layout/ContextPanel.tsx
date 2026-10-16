@@ -1,4 +1,5 @@
 import React from 'react';
+import { InteractiveUiPanel } from '@/components/interactive-ui/InteractiveUiCard';
 import { ContextBrowserView } from '@/components/workbench/ContextBrowserView';
 import { BrowserMaterialAction } from '@/components/workbench/MaterialViewActions';
 import { getPreviewProxyOrigin, postPreviewBridgeMessage, stripPreviewTokenFromUrl, type PreviewConsoleEvent, type PreviewConsoleFilter, type PreviewBridgeMessage, type PreviewProxyState } from '@/lib/preview/browser-view';
@@ -146,6 +147,7 @@ const getModeLabel = (
   if (mode === 'walkthrough') return t('contextPanel.mode.walkthrough');
   if (mode === 'plan') return t('contextPanel.mode.plan');
   if (mode === 'preview') return t('contextPanel.mode.preview');
+  if (mode === 'ui') return t('ui.content.title');
   if (mode === 'browser') return t('contextPanel.mode.browser');
   if (mode === 'git') return t('layout.rightSidebar.git');
   if (mode === 'pr') return t('contextPanel.mode.pr');
@@ -1643,7 +1645,7 @@ export const ContextPanel: React.FC = () => {
   // The rail switches between surfaces (modes); the in-panel strip only lists
   // instances of the active multi-instance surface (open files, split chats,
   // preview targets).
-  const isMultiInstanceMode = activeTab?.mode === 'file' || activeTab?.mode === 'chat' || activeTab?.mode === 'preview';
+  const isMultiInstanceMode = activeTab?.mode === 'file' || activeTab?.mode === 'chat' || activeTab?.mode === 'preview' || activeTab?.mode === 'ui';
   const activeModeTabs = React.useMemo(
     () => (activeTab ? tabs.filter((tab) => tab.mode === activeTab.mode) : []),
     [activeTab, tabs],
@@ -1666,6 +1668,8 @@ export const ContextPanel: React.FC = () => {
         ? <ContextPanelContent active={isOpen} />
         : activeTab?.mode === 'threads'
             ? <ThreadFamilyPanel />
+        : activeTab?.mode === 'ui' && activeTab.targetPath
+            ? <InteractiveUiPanel sessionKey={activeTab.targetPath} identity={activeTab.thread} contentRef={activeTab.contentRef} directory={directoryKey} onReturn={() => closeContextPanelTab(directoryKey, activeTab.id)} />
         : activeTab?.mode === 'recovery'
             ? <WorkspaceRecoveryPanel />
         : activeTab?.mode === 'git'

@@ -1,9 +1,20 @@
 import { threadHostKey as getRuntimeKey } from '@/stores/useThreadStore';
 import type { EditorContextAttachment } from './types';
+import type { ThreadIdentity, ContentReference } from '@varin/application-client';
+import { threadComposerKey } from '@/stores/useThreadStore';
+import { formatMessage, useI18nStore } from '@/lib/i18n';
 
 const listeners = new Set<() => void>();
 let attachments: EditorContextAttachment[] = [];
 let revision = 0;
+const ordinals = new Map<string, number>();
+export function addContentReference(identity: ThreadIdentity, reference: ContentReference) {
+  const runtimeKey = getRuntimeKey(), threadKey = threadComposerKey(runtimeKey, identity);
+  const ordinal = (ordinals.get(threadKey) ?? 0) + 1; ordinals.set(threadKey, ordinal);
+  return addEditorContextAttachment({ id: crypto.randomUUID(), runtimeKey, threadKey, workspaceId: '', resourceId: reference.ref,
+    label: formatMessage(useI18nStore.getState().dictionary, 'ui.content.reference', { number: ordinal }), documentInstanceId: null, documentRevision: null, localEditRevision: 0,
+    source: 'saved', kind: 'reference', reference, ordinal, ...(reference.text === undefined ? {} : { text: reference.text }) });
+}
 
 const emit = (): void => {
   revision += 1;
@@ -35,6 +46,7 @@ export const addEditorContextAttachment = (
   attachment: EditorContextAttachment,
 ): EditorContextAttachment | { status: 'wrong-runtime' } => {
   if (attachment.runtimeKey !== getRuntimeKey()) return { status: 'wrong-runtime' };
+  if (attachment.ordinal) ordinals.set(attachment.threadKey, Math.max(ordinals.get(attachment.threadKey) ?? 0, attachment.ordinal));
   const logicalIndex = attachments.findIndex((item) => (
     item.runtimeKey === attachment.runtimeKey
     && item.threadKey === attachment.threadKey
@@ -96,19 +108,24 @@ export const restoreEditorContextAttachments = (items: readonly EditorContextAtt
   if (restored.length === 0) return;
   const seen = new Set(attachments.map((item) => item.id));
   attachments = [...attachments, ...restored.filter((item) => !seen.has(item.id))];
+  for (const item of restored) if (item.ordinal) ordinals.set(item.threadKey, Math.max(ordinals.get(item.threadKey) ?? 0, item.ordinal));
   emit();
 };
 
 export const resetEditorContextAttachments = (): void => {
+  ordinals.clear();
   if (attachments.length === 0) return;
   attachments = [];
   emit();
 };
 
 /** A receipt acknowledges only captured revisions; later edits remain attached. */
-export const acknowledgeEditorContextAttachments = (captured: readonly EditorContextAttachment[]): void => {
+export const acknowledgeEditorContextAttachments = (captured: readonly EditorContextAttachment[], draftKey?: string): void => {
   const received = new Set(captured);
   const remaining = attachments.filter(item => !received.has(item));
+  const keys = new Set(captured.filter(item => item.reference).map(item => item.threadKey));
+  if (draftKey) keys.add(draftKey);
+  for (const key of keys) if (!remaining.some(next => next.threadKey === key && next.reference)) ordinals.delete(key);
   if (remaining.length === attachments.length) return;
   attachments = remaining; emit();
 };

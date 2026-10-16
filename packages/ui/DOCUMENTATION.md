@@ -28,6 +28,7 @@ Use these for architecture, then the local owner below for implementation change
 | Settings primitives and save feedback | [Settings components](src/components/sections/shared/DOCUMENTATION.md) |
 | Conversation controls | `src/components/thread`, `src/lib/agent-runtime`, and `ThreadsAPI` |
 | Conversation presentation | `src/components/conversation`: virtual timeline, message/tool cards, selection menus, sidebar and transitions |
+| Interactive content | `src/lib/interactive-ui`, `src/components/interactive-ui`; [contract and lifecycle](../../docs/interactive-content.md) |
 | Theme and shared chrome | `src/lib/theme`, `src/styles`, and `src/components/ui` |
 | Icons | [Sprite-backed Icon contract](src/components/icon/README.md) |
 

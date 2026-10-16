@@ -1,12 +1,16 @@
 import React from 'react';
 import type { ThreadIdentity, ThreadsAPI, ThreadMemoryAPI, ThreadFileTarget } from '@varin/application-client';
 import type { ChatToolExecutionState } from './types';
+import type { ChatToolCall, ChatToolResultMessage } from './types';
+export interface UiCardProjection { call: ChatToolCall; result?: ChatToolResultMessage; compact: boolean }
 
 export interface ConversationPresentation {
   api: ThreadsAPI;
   identity: ThreadIdentity;
   head: string | null;
   toolExecutions: Record<string, ChatToolExecutionState>;
+  uiCards?: Record<string, UiCardProjection>;
+  sourceEntry?(callId: string): string | undefined;
   outputDurationsMs?: Record<string, number>;
   quote(text: string): void;
   openFile(callId: string, path: string, line?: number): Promise<void>;

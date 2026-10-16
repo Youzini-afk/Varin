@@ -736,6 +736,11 @@ impl StreamState {
                                 }
                             }
                             let arguments = value["function"].get("arguments");
+                            if let Some(id) = &call.id {
+                                if !call.name.is_empty() {
+                                    emit_event(emit, ProviderEvent::ToolCallStarted { call_id: id.clone(), name: call.name.clone(), request_id: view.request_id.clone() })?;
+                                }
+                            }
                             let object_arguments = if self.mistral {
                                 arguments.filter(|v| v.is_object()).map(Value::to_string)
                             } else {

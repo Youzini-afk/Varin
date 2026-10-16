@@ -73,6 +73,9 @@ import { createThreadContext } from './lib/kernel/thread-context.js';
 import { createThreadResourceScope } from './lib/kernel/thread-resource-scope.js';
 import { createThreadSkillInputPreparer } from './lib/kernel/thread-skill-input.js';
 import { createResourceOwner } from './lib/kernel/resource-owner.js';
+import { createInteractiveUiRuntime } from './lib/interactive-ui/runtime.js';
+import { registerInteractiveUiRoutes } from './lib/interactive-ui/routes.js';
+import { INTERACTIVE_UI_CAPABILITY } from '@varin/extension-builtins';
 import { readAgentResourceConfiguration } from './lib/agent-resources/packages.js';
 import { ProjectTrustService, registerProjectTrustRoutes } from './lib/models/project-trust.js';
 import { createMcpSourceProcessAdmission } from './lib/kernel/mcp-process-admission.js';
@@ -1929,7 +1932,9 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
         return projects.find(project => projectContainsPath(project, root))?.id;
       },
     });
-  kernelClient.setResourceOwner(createResourceOwner({ runtime: agentRuntime, resources: threadResources }));
+  const interactiveUi = createInteractiveUiRuntime({ kernel: kernelClient, runtime: agentRuntime, media: mediaResources });
+  registerInteractiveUiRoutes(app, interactiveUi, uiAuthController.requireAuth);
+  kernelClient.setResourceOwner(createResourceOwner({ runtime: agentRuntime, resources: threadResources, ui: interactiveUi }));
   kernelClient.setPlanOwner(createPlanOwner(getUserKnowledgeStore, agentRuntime));
   kernelClient.setMemoryOwner(createMemoryOwner({ personalization: agentPersonalization, prepareContext: threadContext,
     bot: createBotMemoryOwner({ runtime: agentRuntime, history: botHistory, memory: memoryService, prepareContext: threadContext,
@@ -2641,6 +2646,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   const unregisterResearchDecisionCapability = extensionRuntime.capabilities.register(RESEARCH_DECISION_CAPABILITY, researchDecisionOwner.current.capability);
   const unregisterImagesCapability = extensionRuntime.capabilities.register(IMAGES_CAPABILITY, imageRuntimeOwner.current.capability);
   const unregisterResearchDiscoveryCapability = extensionRuntime.capabilities.register(RESEARCH_DISCOVERY_CAPABILITY, researchDiscoveryOwner.current.capability);
+  const unregisterInteractiveUiCapability = extensionRuntime.capabilities.register(INTERACTIVE_UI_CAPABILITY, interactiveUi.capability);
   const unregisterWebCapability = extensionRuntime.capabilities.register(WEB_CAPABILITY, webRuntimeOwner.current.capability);
   const unregisterExtensionPackageCapability = extensionRuntime.capabilities.register(
     VARIN_EXTENSION_PACKAGES_CAPABILITY, createExtensionPackageOwner({ extensions: extensionRuntime, kernel: kernelClient,
@@ -2937,6 +2943,8 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       unregisterResearchDecisionCapability();
       unregisterImagesCapability();
       unregisterResearchDiscoveryCapability();
+      unregisterInteractiveUiCapability();
+      interactiveUi.close();
       unregisterChildIntegrationCapability();
       unregisterScheduleCapability();
       unregisterDocumentsCapability();

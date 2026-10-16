@@ -248,7 +248,7 @@ fn resource_builtin_uses_frozen_checkpoint_and_current_cancellation_without_oper
         let call = ToolCall {
             call_id: "read".into(),
             name: "resource_read".into(),
-            schema_version: "2".into(),
+            schema_version: "3".into(),
             arguments,
         };
         let range = HistoryRange {
