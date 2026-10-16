@@ -1,6 +1,8 @@
 import { join } from 'node:path';
-import type { ModelChannel, ModelConnectionOptions, ChannelModel, ModelConnectionsSnapshot, ModelOperation, ConnectionAuthentication } from '@varin/application-client';
-import { imageModelInfo, imageToolContract, type ImageModelInfo, type ImageToolPurpose } from '@varin/protocol';
+import { randomUUID } from 'node:crypto';
+import type { ModelChannel, ModelConnectionDraft, ModelConnectionOptions, ChannelModel, ModelConnectionsSnapshot, ModelOperation, ConnectionAuthentication } from '@varin/application-client';
+import { imageModelInfo, imageToolContract, THINKING_LEVELS, type ImageModelInfo, type ImageToolPurpose } from '@varin/protocol';
+import { isModelThinkingConfiguration } from '@varin/protocol';
 import { embeddingRequestUrl } from '@varin/protocol/node/embeddings';
 import { ChannelTypes, type ChannelType } from './channel-types.js';
 import { ConfigurationFile, ModelConfigurationError, object, revisionOf } from './configuration.js';
@@ -125,8 +127,9 @@ export class ModelsService {
         || model.input !== undefined && (!Array.isArray(model.input) || model.input.some(item => item !== 'text' && item !== 'image'))
         || model.reasoning !== undefined && typeof model.reasoning !== 'boolean'
         || model.thinkingLevelMap !== undefined && (!object(model.thinkingLevelMap) || Object.entries(model.thinkingLevelMap).some(([level, value]) =>
-          !['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'].includes(level) || value !== null && typeof value !== 'string'))
+          !(THINKING_LEVELS as readonly string[]).includes(level) || value !== null && (typeof value !== 'string' || !value.trim())))
         || model.parameters !== undefined && !object(model.parameters) || model.compat !== undefined && !object(model.compat)) return fail('channel-model-invalid', 'Model fields or operations are invalid');
+      if (model.thinking !== undefined && !isModelThinkingConfiguration(model.thinking)) return fail('model-thinking-invalid', 'Choose valid thinking controls and supported levels');
       if (model.image !== undefined) {
         if (!object(model.image) || Object.keys(model.image).some(key => key !== 'mask' && key !== 'parameters')
           || model.image.mask !== undefined && typeof model.image.mask !== 'boolean'
@@ -295,6 +298,7 @@ export class ModelsService {
       ...(channel.connection === undefined ? {} : { connection: structuredClone(channel.connection) }),
       ...(model.contextWindow === undefined ? {} : { contextWindow: model.contextWindow }), input: model.input ?? ['text'],
       ...(model.reasoning === undefined ? {} : { reasoning: model.reasoning }),
+      ...(model.thinking === undefined ? {} : { thinking: structuredClone(model.thinking) }),
       ...(model.thinkingLevelMap === undefined ? {} : { thinkingLevelMap: model.thinkingLevelMap }),
       ...(model.parameters === undefined ? {} : { samplingParams: model.parameters }),
       ...(model.compat === undefined ? {} : { compat: model.compat }), allowAnonymous: channel.authentication.kind === 'none' };
@@ -341,6 +345,47 @@ export class ModelsService {
     } };
   }
   async selectedModel(providerId: string, modelId: string) { const channel = await this.#channel(providerId); return this.#selected(channel, this.#model(channel, modelId, 'chat')); }
+  /** Settings work uses a frozen draft and the same credential owners, without publishing a channel. */
+  async #captureDraft(input: ModelConnectionDraft) {
+    const channel = structuredClone(input.channel);
+    if (input.secret !== undefined && (!nonempty(input.secret) || channel.authentication.kind !== 'credential')) return fail('credential-invalid', 'Enter an API key for API key authentication');
+    if (input.secret) channel.authentication = { kind: 'credential', reference: `draft:${randomUUID()}` };
+    this.validate(channel);
+    const type = this.types.get(channel.type)!;
+    const scope: CredentialScope = input.secret ? { reference: channel.id, authority: this.credentials.authorityId, account: `draft:${randomUUID()}`, generation: 0 } : await this.#scope(channel);
+    const captured = !input.secret && ['credential', 'environment', 'none'].includes(channel.authentication.kind)
+      ? await this.credentials.captureResolver(channel.authentication, channel.id) : undefined;
+    let releaseAdapter: (() => void) | undefined;
+    try { releaseAdapter = await type.adapter?.capture(); } catch (error) { captured?.release(); throw error; }
+    let released = false;
+    const currentScope = async () => {
+      if (released) return fail('credential-binding-released', 'The draft connection has been released');
+      if (!input.secret && !sameScope(scope, await this.#scope(channel))) return fail('credential-scope-changed', 'The selected account changed');
+      return scope;
+    };
+    const getAuth = async (_provider: string, _model?: string, dispatch?: CredentialDispatch): Promise<ResolvedCredential> => {
+      await currentScope();
+      const result = input.secret ? this.#credentialHeaders(type, { auth: { apiKey: input.secret }, source: 'draft' })
+        : captured ? this.#credentialHeaders(type, await captured.resolve(undefined, dispatch)) : await this.#auth(channel, dispatch);
+      await currentScope();
+      return result;
+    };
+    const authority: ModelExecutionAuthority = {
+      getAuth, currentScope, currentProviderAccount: async () => input.secret || channel.authentication.kind !== 'credential' ? undefined : this.credentials.providerAccount(channel.authentication.reference),
+      routingEnvironment: async () => this.#routingEnvironment(channel),
+      anthropicAuthentication: async () => (await getAuth(channel.id)).source === 'oauth' ? 'oauth' : 'api-key',
+      vertexAuthentication: async () => channel.authentication.kind === 'google-adc' ? 'adc' : 'api-key',
+    };
+    return { channel, type, authority, getAuth, currentScope, release: () => { if (released) return; released = true; captured?.release(); releaseAdapter?.(); } };
+  }
+  async captureDraftModel(input: ModelConnectionDraft, modelId: string) {
+    const captured = await this.#captureDraft(input);
+    try {
+      const model = captured.channel.models.find(model => model.id === modelId && model.operations.includes('chat'));
+      if (!model) return fail('model-operation-unavailable', 'Choose a conversation model to test');
+      return { model: this.#selected(captured.channel, model), authority: captured.authority, release: captured.release };
+    } catch (error) { captured.release(); throw error; }
+  }
   readGlobalInferenceSettings() { return this.settings.read().then(snapshot => snapshot.document); }
   async listImageModels() {
     return (await this.read()).channels.filter(channel => channel.enabled).flatMap(channel => channel.models.filter(model => model.enabled && (model.operations.includes('image-generation') || model.operations.includes('image-editing'))).map(model => this.#imageInfo(channel, model)));
@@ -416,11 +461,21 @@ export class ModelsService {
     signal?.throwIfAborted();
     const channel = await this.#channel(id);
     const type = this.types.get(channel.type)!;
+    return this.#discover(channel, type, () => this.#auth(channel), () => this.currentScope(id), fetchImpl, signal);
+  }
+  async discoverDraft(input: ModelConnectionDraft, fetchImpl: EgressFetch, signal?: AbortSignal) {
+    signal?.throwIfAborted();
+    const captured = await this.#captureDraft(input);
+    try { return await this.#discover(captured.channel, captured.type, () => captured.getAuth(captured.channel.id),
+      captured.currentScope, fetchImpl, signal); }
+    finally { captured.release(); }
+  }
+  async #discover(channel: ModelChannel, type: ChannelType, getAuth: () => Promise<ResolvedCredential>, currentScope: () => Promise<CredentialScope>, fetchImpl: EgressFetch, signal?: AbortSignal) {
     if (!type.discovery || !type.discoveryRequest || !type.parseDiscovery) {
       if (type.catalog) return { models: structuredClone(type.catalog) };
       return fail('model-discovery-unavailable', 'Add models manually for this channel type');
     }
-    const expected = await this.#scope(channel);
+    const expected = await currentScope();
     const models = new Map<string, { id: string; name: string }>();
     const cursors = new Set<string>();
     let cursor: string | undefined;
@@ -428,8 +483,8 @@ export class ModelsService {
       signal?.throwIfAborted();
       const request = type.discoveryRequest(channel, cursor);
       endpoint(request.url);
-      const auth = await this.#auth(channel);
-      if (!sameScope(expected, await this.currentScope(id))) return fail('credential-scope-changed', 'The account changed during model discovery');
+      const auth = await getAuth();
+      if (!sameScope(expected, await currentScope())) return fail('credential-scope-changed', 'The account changed during model discovery');
       signal?.throwIfAborted();
       const headers = new Headers(request.headers);
       for (const [key, value] of Object.entries(channel.connection?.headers ?? {})) headers.set(key, value);
@@ -440,7 +495,7 @@ export class ModelsService {
       const page: unknown = await response.json();
       signal?.throwIfAborted();
       for (const model of type.parseDiscovery(page)) if (!models.has(model.id)) models.set(model.id, model);
-      if (!sameScope(expected, await this.currentScope(id))) return fail('credential-scope-changed', 'The account changed during model discovery');
+      if (!sameScope(expected, await currentScope())) return fail('credential-scope-changed', 'The account changed during model discovery');
       cursor = type.discoveryCursor?.(page);
       if (cursor !== undefined) {
         if (cursors.has(cursor)) return fail('model-discovery-pagination-invalid', 'Model discovery repeated a page cursor');

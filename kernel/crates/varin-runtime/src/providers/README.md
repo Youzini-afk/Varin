@@ -53,7 +53,11 @@ credentials. Same-family/version originals are replayed only under the same none
 connection identity and applicable model constraints. Cross-family projection drops provider-only
 items but rebuilds portable text and complete client-tool exchanges. Signatures, citations and
 encrypted reasoning are never flattened into invented ordinary text. Attachments must already be
-materialized; unsupported media/protocol combinations fail explicitly.
+materialized; unsupported media/protocol combinations fail explicitly. For a model explicitly configured
+as text-only, `input_projection.rs` replaces historical and tool-result images with a short text marker
+in the outgoing view. Original history and stored media remain intact. Changed items discard their opaque
+wire representation and retain tool receipt/pairing data. Their derived Arc identities are reused by the
+original request compile holder. New user image attachments are checked separately at Host admission.
 
 Responses, Azure and Codex reuse independent item fragments and tool schemas from the original Run
 worker's latest-only holder. Codex also reuses the joined instructions fragment only for its exact

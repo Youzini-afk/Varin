@@ -63,6 +63,18 @@ function fixture() {
 const until = async (condition:()=>boolean) => { for(let i=0;i<100&&!condition();i++) await new Promise(resolve=>setTimeout(resolve,1)); expect(condition()).toBe(true); };
 
 describe('native standalone text owner',()=>{
+  it('an unsaved model test uses the supplied captured binding and the ordinary inference receipt', async () => {
+    const f = fixture();
+    const binding = await f.resolveModel({ providerId: 'draft', modelId: 'draft-model' });
+    f.resolveModel.mockClear();
+    const resolve = vi.fn(async () => binding as unknown as Awaited<ReturnType<Parameters<typeof createModelTextService>[0]['models']['resolveModel']>>);
+    const running = f.service.generate({ ...f.input, purpose: 'text', model: { providerId: 'draft', modelId: 'draft-model' } }, { identity: 'nonsecret-draft', resolve });
+    await until(() => f.trace.includes('generated'));
+    expect(f.resolveModel).not.toHaveBeenCalled(); expect(resolve).toHaveBeenCalledOnce();
+    expect(f.records.get('model-text:original')?.generation.configuration.model).toBe('draft-model');
+    f.settle(); expect(await running).toMatchObject({ modelId: 'draft-model', requestId: 'model-text:original' });
+    expect(f.kernel.unregisterCredentialOwner).toHaveBeenCalledOnce(); await f.service.close();
+  });
   it('selects only explicit native settings and never invents a provider fallback',async()=>{
     const f=fixture();f.setSettings({utilityModel:{providerId:'utility',modelId:'chosen'},walkthroughModel:{providerId:'review',modelId:'whole-diff'},defaultProvider:'default',defaultModel:'main'});
     expect(await f.service.describe()).toMatchObject({providerID:'utility',modelID:'chosen',source:'utility'});

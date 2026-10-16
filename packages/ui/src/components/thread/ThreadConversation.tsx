@@ -1,3 +1,4 @@
+import { THINKING_LEVELS } from '@varin/protocol';
 import { ContextHistoryDialog } from '../conversation/ContextHistoryDialog';
 import { ActiveEditorSuggestion } from '../conversation/ActiveEditorSuggestion';
 import { MessageHandoff } from '../conversation/messageHandoff';
@@ -321,6 +322,11 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
   const acceptsImages = active || delegated ? (run?.configuration as { acceptsImages?: boolean } | undefined)?.acceptsImages
     : models.find(model => model.providerId === providerId && model.modelId === modelId)?.acceptsImages;
   React.useEffect(() => {
+    if (active || delegated || draft.firstSend) return;
+    const levels = models.find(model => model.providerId === providerId && model.modelId === modelId)?.thinkingLevels;
+    if (levels?.length && !levels.includes(thinkingLevel)) setThinkingLevel(levels[0]!);
+  }, [active, delegated, draft.firstSend, models, providerId, modelId, thinkingLevel, setThinkingLevel]);
+  React.useEffect(() => {
     const config = (snapshot?.modelSelection.desired?.configuration ?? run?.configuration) as { providerId?: string; model?: string; thinkingLevel?: ThreadThinkingLevel; catalogModelId?: string } | undefined;
     if (config?.providerId && config.model && (active || !providerId && preferredModel === undefined)) { setProviderId(config.providerId); setModelId(config.catalogModelId ?? config.model); setThinkingLevel(config.thinkingLevel ?? 'off'); }
   }, [run?.configuration, snapshot?.modelSelection.desired, active, providerId, preferredModel, setProviderId, setModelId, setThinkingLevel]);
@@ -346,7 +352,7 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
         if (current.model?.providerId || current.model?.modelId || current.workspacePath !== draft.workspacePath) return {};
         const thinking = effective.defaultThinkingLevel;
         return { model: { providerId: effective.defaultProvider as string, modelId: effective.defaultModel as string,
-          ...(typeof thinking === 'string' && ['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'].includes(thinking) ? { thinkingLevel: thinking as ThreadThinkingLevel } : {}) } };
+          ...(typeof thinking === 'string' && (THINKING_LEVELS as readonly string[]).includes(thinking) ? { thinkingLevel: thinking as ThreadThinkingLevel } : {}) } };
       });
     }).catch(failure => { if (!controller.signal.aborted && host === getRuntimeEndpointGeneration()) setError(failure instanceof Error ? failure.message : String(failure)); });
     return () => controller.abort();

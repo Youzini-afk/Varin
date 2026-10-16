@@ -51,7 +51,8 @@ impl ModelProvider for PiMessagesProvider {
         mut reuse: Option<&mut RequestCompileReuse>,
     ) -> Result<RequestBody, ExecutionError> {
         validate_view(view, FAMILY)?;
-        validate_images(view, &self.connection)?;
+        let input = model_input(view, &self.connection, reuse.as_deref_mut());
+        let view = input.as_ref();
         let mut groups: Vec<groups::HistoryGroup<'_>> = Vec::new();
         let mut calls = BTreeMap::new();
         let mut result_calls = BTreeMap::new();

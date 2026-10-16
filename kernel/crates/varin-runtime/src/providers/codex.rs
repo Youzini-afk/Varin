@@ -64,6 +64,8 @@ impl ModelProvider for CodexProvider {
         mut reuse: Option<&mut RequestCompileReuse>,
     ) -> Result<RequestBody, ExecutionError> {
         validate_view(view, FAMILY)?;
+        let input = model_input(view, &self.inner.connection, reuse.as_deref_mut());
+        let view = input.as_ref();
         let mut instructions = Vec::new();
         let mut sources = Vec::new();
         for item in &view.history {

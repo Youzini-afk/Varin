@@ -1,5 +1,5 @@
 /** Public model configuration. Credentials are references, never resolved secrets. */
-import type { JsonValue } from '@varin/protocol';
+import type { JsonValue, ThinkingLevel } from '@varin/protocol';
 import { runtimeFetch } from './transport/runtime-fetch.js';
 import { getRuntimeEndpointGeneration } from './transport/runtime-switch.js';
 import type { AuthorizationState } from './mcp-connections.js';
@@ -19,6 +19,8 @@ export type ConnectionAuthentication =
   | { kind: 'google-adc'; file?: string }
   | { kind: 'aws-chain'; profile?: string }
   | { kind: 'anthropic-federation'; identityTokenFile: string; organizationId: string; federationRuleId: string; serviceAccountId?: string; workspaceId?: string };
+import type { ModelThinkingConfiguration } from '@varin/protocol';
+export type { ModelThinkingEffort, ModelThinkingConfiguration } from '@varin/protocol';
 export interface ChannelModel {
   id: string;
   requestModelId?: string;
@@ -29,7 +31,8 @@ export interface ChannelModel {
   contextWindow?: number;
   maxOutputTokens?: number;
   reasoning?: boolean;
-  thinkingLevelMap?: Partial<Record<'off' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max', string | null>>;
+  thinking?: ModelThinkingConfiguration;
+  thinkingLevelMap?: Partial<Record<ThinkingLevel, string | null>>;
   parameters?: Record<string, JsonValue>;
   compat?: Record<string, JsonValue>;
   image?: { mask?: boolean; parameters?: Record<string, JsonValue> };
@@ -60,6 +63,10 @@ export interface ChannelTypeInfo {
 }
 export interface ModelConnectionsSnapshot { revision: string; channels: ModelChannel[]; types: ChannelTypeInfo[]; issues?: { channelId?: string; code: string; message: string }[] }
 export interface DiscoveredModel { id: string; name: string; operations?: ModelOperation[] }
+/** A transient connection draft. The supplied key is never written by discovery or testing. */
+export interface ModelConnectionDraft { channel: ModelChannel; secret?: string }
+export interface ModelConnectionTest extends ModelConnectionDraft { key: string; modelId: string; thinkingLevel?: ThinkingLevel }
+export interface ModelConnectionTestResult { requestId: string; modelId: string; elapsedMs: number; text: string }
 export interface AgentSettingsSnapshot {
   global: Record<string, JsonValue>; globalRevision: string;
   project: Record<string, JsonValue>; projectRevision: string; projectTrusted: boolean;
@@ -88,6 +95,8 @@ export function createModelConnectionsHttpAPI(generation = getRuntimeEndpointGen
     save: (channel: ModelChannel, expectedRevision: string, signal?: AbortSignal) => post<ModelConnectionsSnapshot>('save', { channel, expectedRevision }, signal),
     remove: (id: string, expectedRevision: string, signal?: AbortSignal) => post<ModelConnectionsSnapshot>('remove', { id, expectedRevision }, signal),
     discover: (id: string, signal?: AbortSignal) => post<{ models: DiscoveredModel[] }>('discover', { id }, signal),
+    discoverDraft: (draft: ModelConnectionDraft, signal?: AbortSignal) => post<{ models: DiscoveredModel[] }>('discover-draft', draft, signal),
+    test: (input: ModelConnectionTest, signal?: AbortSignal) => post<ModelConnectionTestResult>('test', input, signal),
     storeCredential: (secret: string, reference?: string, signal?: AbortSignal) => post<{ reference: string }>('credentials/store', { secret, reference }, signal),
     removeCredential: (reference: string, signal?: AbortSignal) => post<void>('credentials/remove', { reference }, signal),
     signIn: (provider: string, reference: string, signal?: AbortSignal) => post<AuthorizationState>('authorization/start', { provider, reference }, signal),

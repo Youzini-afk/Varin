@@ -1,3 +1,4 @@
+import { THINKING_LEVELS } from '@varin/protocol';
 import { parseThreadMaterials } from './thread-material-input.js';
 import { normalizeThreadSourcePreparation, parseSourceResourceOwner } from './thread-sources.js';
 import { threadSourceFailureMessage } from '@varin/application-client';
@@ -62,7 +63,7 @@ const modelSelection = (value: unknown): ThreadModel => {
   const model = object(value);
   if (Object.keys(model).some(key => !['providerId', 'modelId', 'thinkingLevel', 'temperature'].includes(key))) throw new Error('Unsupported model selection field');
   if (model.temperature !== undefined && (typeof model.temperature !== 'number' || !Number.isFinite(model.temperature) || model.temperature < 0)) throw new Error('Invalid temperature');
-  if (model.thinkingLevel !== undefined && (typeof model.thinkingLevel !== 'string' || !['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'].includes(model.thinkingLevel))) throw new Error('Invalid thinking level');
+  if (model.thinkingLevel !== undefined && (typeof model.thinkingLevel !== 'string' || !(THINKING_LEVELS as readonly string[]).includes(model.thinkingLevel))) throw new Error('Invalid thinking level');
   return { providerId: text(model.providerId), modelId: text(model.modelId),
     ...(model.thinkingLevel === undefined ? {} : { thinkingLevel: model.thinkingLevel as ThreadThinkingLevel }),
     ...(model.temperature === undefined ? {} : { temperature: model.temperature as number }) };

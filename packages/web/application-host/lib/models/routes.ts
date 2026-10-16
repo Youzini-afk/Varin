@@ -2,6 +2,7 @@ import type { Express, RequestHandler } from 'express';
 import type { ModelsService } from './service.js';
 import { object, ModelConfigurationError } from './configuration.js';
 import { EgressError, type EgressErrorKind, type EgressFetch } from '../harness/egress.js';
+import type { ModelConnectionDraft } from '@varin/application-client';
 
 // Keep the owner classification, but never project raw dependency messages or causes.
 const networkMessages: Record<EgressErrorKind, string> = {
@@ -25,6 +26,7 @@ export function registerModelRoutes(app: Express, models: ModelsService, require
     save: (input: Record<string, unknown>) => models.save(input.channel as Parameters<ModelsService['save']>[0], input.expectedRevision as string),
     remove: (input: Record<string, unknown>) => models.remove(input.id as string, input.expectedRevision as string),
     discover: (input: Record<string, unknown>, signal: AbortSignal) => models.discover(input.id as string, fetchImpl, signal),
+    'discover-draft': (input: Record<string, unknown>, signal: AbortSignal) => models.discoverDraft(input as unknown as ModelConnectionDraft, fetchImpl, signal),
     'credentials/store': async (input: Record<string, unknown>) => ({ reference: await models.storeCredential(input.secret as string, input.reference as string | undefined) }),
     'credentials/remove': async (input: Record<string, unknown>) => { await models.removeCredential(input.reference as string); return {}; },
     'authorization/start': (input: Record<string, unknown>) => models.signIn(input.provider as string, input.reference as string),
@@ -41,6 +43,7 @@ export function registerModelRoutes(app: Express, models: ModelsService, require
     try {
       const input: unknown = request.body;
       if (!object(input) || input.cwd !== undefined && typeof input.cwd !== 'string'
+        || name === 'discover-draft' && (!object(input.channel) || input.secret !== undefined && typeof input.secret !== 'string')
         || ['save', 'remove'].includes(name) && typeof input.expectedRevision !== 'string'
         || ['remove', 'discover'].includes(name) && typeof input.id !== 'string'
         || name === 'credentials/store' && (typeof input.secret !== 'string' || input.reference !== undefined && typeof input.reference !== 'string')

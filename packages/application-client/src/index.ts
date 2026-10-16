@@ -39,3 +39,4 @@ export * from './resource-management.js';
 export * from "./storage.js";
 
 export * from "./host-connections.js";
+export * from './model-capabilities.js';

@@ -9,6 +9,7 @@ it('model selection preserves capacity, thinking mapping and sampling through cr
   let topP = 0.8;
   const model = () => ({ providerId: 'fixture-provider', modelId: 'deepseek-fixture', name: 'Fixture',
     api: 'openai-completions', baseUrl: 'https://model.example.test/v1', maxTokens: 32768, contextWindow: 131072, reasoning: true,
+    thinking: { mode: 'levels' as const, levels: ['minimal', 'low', 'medium', 'high'] as ('minimal' | 'low' | 'medium' | 'high')[], allowOff: true },
     thinkingLevelMap: { xhigh: null }, samplingParams: { top_p: topP }, samplingParamsByThinkingLevel: { high: { temperature: 0.5 } },
     compat: { thinkingFormat: 'deepseek', supportsReasoningEffort: true } });
   const authority = createModelAuthority({ selectedModel: async () => model(), listModels: async () => [model()],

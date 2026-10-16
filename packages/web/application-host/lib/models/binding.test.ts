@@ -49,7 +49,7 @@ test.each([
 ] as const)('Google thinking uses the selected upstream model behind a local %s alias (%s)', async (type, requestModelId, thinkingLevel, thinkingConfig) => {
   const { models, channel, authority } = await fixture();
   const aliased: ModelChannel = { ...channel, type, baseUrl: type === 'gemini' ? 'https://generativelanguage.googleapis.com/v1beta' : 'https://aiplatform.googleapis.com/v1',
-    parameters: {}, models: [{ ...channel.models[0]!, requestModelId, reasoning: true, maxOutputTokens: 65536 }] };
+    parameters: {}, models: [{ ...channel.models[0]!, requestModelId, reasoning: true, thinking: { mode: 'levels', levels: [thinkingLevel], allowOff: true }, maxOutputTokens: 65536 }] };
   await models.save(aliased, (await models.read()).revision);
   const selection = { providerId: aliased.id, modelId: 'logical-model', thinkingLevel };
   const selected = await authority.resolveModel(selection);
@@ -64,7 +64,7 @@ test('Bedrock thinking recognizes the upstream Claude model behind a local alias
   const { models, channel, authority } = await fixture();
   const requestModelId = 'us.anthropic.claude-sonnet-4-6';
   const aliased: ModelChannel = { ...channel, type: 'bedrock', baseUrl: 'https://bedrock-runtime.us-east-1.amazonaws.com',
-    authentication: { kind: 'aws-chain' }, parameters: {}, models: [{ ...channel.models[0]!, requestModelId, reasoning: true, maxOutputTokens: 65536 }] };
+    authentication: { kind: 'aws-chain' }, parameters: {}, models: [{ ...channel.models[0]!, requestModelId, reasoning: true, thinking: { mode: 'levels', levels: ['high'], allowOff: true }, maxOutputTokens: 65536 }] };
   await models.save(aliased, (await models.read()).revision);
   const selected = await authority.resolveModel({ providerId: aliased.id, modelId: 'logical-model', thinkingLevel: 'high' });
   try {
@@ -86,7 +86,7 @@ test.each([
   vi.stubEnv('AWS_ACCESS_KEY_ID', 'fixture-access'); vi.stubEnv('AWS_SECRET_ACCESS_KEY', 'fixture-secret'); vi.stubEnv('AWS_PROFILE', '');
   const { models, channel, authority } = await fixture();
   const bedrock: ModelChannel = { ...channel, type: 'bedrock', baseUrl: 'https://bedrock-runtime.us-east-1.amazonaws.com',
-    authentication: { kind: 'aws-chain' }, parameters: {}, models: [{ ...channel.models[0]!, requestModelId, name, reasoning: true, maxOutputTokens: 65536 }] };
+    authentication: { kind: 'aws-chain' }, parameters: {}, models: [{ ...channel.models[0]!, requestModelId, name, reasoning: true, thinking: { mode: 'levels', levels: ['high'], allowOff: true }, maxOutputTokens: 65536 }] };
   await models.save(bedrock, (await models.read()).revision);
   const selection = { providerId: bedrock.id, modelId: 'logical-model', thinkingLevel: 'high' as const };
   if (thinkingType === null) {

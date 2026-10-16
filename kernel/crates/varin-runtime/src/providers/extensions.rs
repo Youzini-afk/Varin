@@ -221,11 +221,12 @@ impl ModelProvider for BrokeredModelProvider {
     fn serialize_cancellable(
         &self,
         view: &RequestView,
-        _reuse: Option<&mut RequestCompileReuse>,
+        reuse: Option<&mut RequestCompileReuse>,
         cancel: &CancellationToken,
     ) -> Result<RequestBody, ExecutionError> {
         validate_view(view, &self.metadata.protocol_family)?;
-        validate_images(view, &self.connection)?;
+        let input = model_input(view, &self.connection, reuse);
+        let view = input.as_ref();
         let mut projected = view.clone();
         projected.history = project_history(
             &view.history,

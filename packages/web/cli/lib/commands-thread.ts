@@ -1,3 +1,4 @@
+import { THINKING_LEVELS } from '@varin/protocol';
 import path from 'node:path';
 import type { ThreadIdentity, ThreadSnapshot, ThreadModel, ThreadPreparedSource, ThreadResolvedSource } from '@varin/application-client';
 import type { HistoryItem, InputSubmitReceipt, Run, ThreadSummary } from '@varin/protocol';
@@ -16,7 +17,7 @@ export const parseThreadModel = (options: CliOptions): ThreadModel => {
   const value = required(options.model, '--model'); const slash = value.indexOf('/');
   if (slash < 1 || slash === value.length - 1) throw new TunnelCliError('--model must use provider/model.', EXIT_CODE.USAGE_ERROR);
   const thinking = options.thinking;
-  if (thinking && !['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'].includes(thinking)) throw new TunnelCliError('Invalid --thinking level.', EXIT_CODE.USAGE_ERROR);
+  if (thinking && !(THINKING_LEVELS as readonly string[]).includes(thinking)) throw new TunnelCliError('Invalid --thinking level.', EXIT_CODE.USAGE_ERROR);
   return { providerId: value.slice(0, slash), modelId: value.slice(slash + 1), ...(thinking ? { thinkingLevel: thinking as NonNullable<ThreadModel['thinkingLevel']> } : {}) };
 };
 const identityFromOptions = (options: CliOptions): ThreadIdentity => ({ runtime: 'agent', threadId: required(options.thread, '--thread'), branchId: required(options.branch, '--branch') });

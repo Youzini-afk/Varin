@@ -429,7 +429,7 @@ pub struct RequestSnapshot<M = ResolvedMedia, S = RequestBody> {
 }
 
 /// Semantic history is portable; opaque continuation items are confined to their protocol family.
-/// Multimodal input must be handled or rejected by the adapter's `serialize`, never dropped here.
+/// Adapters apply the model's input capability before serializing this derived history.
 #[derive(Clone, Copy)]
 pub(crate) struct ProjectedHistoryItem<'a> {
     pub item: &'a Arc<ConversationItem>,
@@ -645,6 +645,7 @@ pub trait ModelProvider: Send + Sync {
 /// selected serializer (including its lease validation) on every request. No authorization is cached.
 pub struct RequestCompileReuse {
     identity: Option<RequestCompileIdentity>,
+    pub(crate) text_input: crate::providers::input_projection::TextInputProjection,
     pub(crate) responses:
         BTreeMap<usize, (Arc<ConversationItem>, Arc<crate::request_body::FrozenJson>)>,
     pub(crate) responses_tools: Option<Vec<Arc<crate::request_body::FrozenJson>>>,
@@ -664,6 +665,7 @@ impl RequestCompileReuse {
     pub(crate) fn new() -> Self {
         Self {
             identity: None,
+            text_input: Default::default(),
             responses: BTreeMap::new(),
             responses_tools: None,
             codex_instructions: None,
@@ -697,6 +699,7 @@ impl RequestCompileReuse {
                 && a.resource_checkpoint_id == b.resource_checkpoint_id
         });
         if !hit {
+            self.text_input = Default::default();
             self.responses.clear();
             self.responses_tools = None;
             self.codex_instructions = None;

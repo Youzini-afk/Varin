@@ -24,6 +24,50 @@ async function fixture() {
 const channel = (id = 'local-one'): ModelChannel => ({ id, name: id, type: 'local', enabled: true, baseUrl: 'http://localhost:1234/v1',
   authentication: { kind: 'none' }, parameters: {}, models: [{ id: 'chat', name: 'Chat', enabled: true, operations: ['chat'], maxOutputTokens: 4096, contextWindow: 32768 }] });
 
+test('draft discovery and inference binding use the entered key without publishing settings or credentials', async () => {
+  const { directory, models } = await fixture();
+  const draft = { ...channel(), type: 'openai-compatible', authentication: { kind: 'credential' as const, reference: '' },
+    connection: { headers: { 'x-project': 'draft' }, proxy: { mode: 'direct' as const } } };
+  const before = await models.read();
+  const discovered = await models.discoverDraft({ channel: draft, secret: 'fixture-draft-key' }, async (url, init) => {
+    expect(String(url)).toBe('http://localhost:1234/v1/models');
+    expect(new Headers(init?.headers).get('authorization')).toBe('Bearer fixture-draft-key');
+    expect(new Headers(init?.headers).get('x-project')).toBe('draft');
+    return new Response(JSON.stringify({ data: [{ id: 'another-model' }] }));
+  });
+  expect(discovered.models).toEqual([{ id: 'another-model', name: 'another-model' }]);
+  const captured = await models.captureDraftModel({ channel: draft, secret: 'fixture-draft-key' }, 'chat');
+  draft.baseUrl = 'http://localhost:9999/v1';
+  const resolved = await createModelAuthority(models).resolveCaptured(captured, { providerId: draft.id, modelId: 'chat' });
+  try {
+    expect(resolved.configuration.endpoint).toBe('http://localhost:1234/v1/chat/completions');
+    expect((await resolved.credentialOwner.resolve(await resolved.credentialOwner.scope())).headers.authorization).toBe('Bearer fixture-draft-key');
+  } finally { resolved.credentialOwner.release(); }
+  expect(await models.read()).toEqual(before);
+  expect(await readdir(directory)).toEqual([]);
+});
+
+test('model thinking controls produce only configured choices and freeze the requested budget', async () => {
+  const { models } = await fixture();
+  const selected = channel(); selected.type = 'gemini'; selected.baseUrl = 'https://generativelanguage.googleapis.com/v1beta';
+  selected.models[0] = { ...selected.models[0]!, reasoning: true, thinking: { mode: 'levels', levels: ['low', 'high'], allowOff: false } };
+  await models.save(selected, (await models.read()).revision);
+  const authority = createModelAuthority(models);
+  expect((await authority.listModels())[0]?.thinkingLevels).toEqual(['low', 'high']);
+  await expect(authority.resolveModel({ providerId: selected.id, modelId: 'chat', thinkingLevel: 'medium' })).rejects.toMatchObject({ code: 'model-thinking-level-unavailable' });
+  selected.models[0]!.thinking = { mode: 'budget', tokens: 1536, allowOff: true };
+  await models.save(selected, (await models.read()).revision);
+  const bound = await authority.resolveModel({ providerId: selected.id, modelId: 'chat', thinkingLevel: 'budget' });
+  try { expect(bound.configuration.modelOptions).toMatchObject({ protocol: { thinkingConfig: { includeThoughts: true, thinkingBudget: 1536 } } }); }
+  finally { bound.credentialOwner.release(); }
+  selected.models[0]!.thinking = { mode: 'switch' };
+  await models.save(selected, (await models.read()).revision);
+  expect((await authority.listModels())[0]?.thinkingLevels).toEqual(['off', 'on']);
+  selected.models[0]!.thinking = { mode: 'fixed' };
+  await models.save(selected, (await models.read()).revision);
+  expect((await authority.listModels())[0]?.thinkingLevels).toEqual(['on']);
+});
+
 test('settings HTTP clients edit model channels and MCP sources through the production JSON boundary without a Pi worker', async () => {
   const { directory, models } = await fixture();
   const authority = new McpAuthority();

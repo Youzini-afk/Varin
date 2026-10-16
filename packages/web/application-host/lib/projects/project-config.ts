@@ -1,3 +1,4 @@
+import { THINKING_LEVELS as thinkingLevels } from '@varin/protocol';
 import crypto from 'node:crypto';
 import { DateTime, IANAZone } from 'luxon';
 import { CronExpressionParser } from 'cron-parser';
@@ -5,7 +6,7 @@ import type fsPromisesModule from 'node:fs/promises';
 import type pathModule from 'node:path';
 
 const PROJECT_CONFIG_VERSION = 1;
-const THINKING_LEVELS = new Set(['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max']);
+const THINKING_LEVELS = new Set<string>(thinkingLevels);
 
 import type { ScheduledTask, ScheduledTaskExecution, ScheduledTaskSchedule, ScheduledTaskState } from '@varin/application-client';
 import type { CalendarSource, CalendarTarget, SourceResourceOwner } from '@varin/protocol';

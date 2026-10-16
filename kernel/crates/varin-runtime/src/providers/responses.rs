@@ -98,7 +98,6 @@ impl ResponsesProvider {
     ) -> Result<RequestBody, ExecutionError> {
         // Validation and the owning wrapper's lease check run even for a fully reusable prefix.
         validate_view(view, self.family)?;
-        validate_images(view, &self.connection)?;
         let previous = reuse
             .as_mut()
             .map(|reuse| std::mem::take(&mut reuse.responses))
@@ -156,8 +155,10 @@ impl ModelProvider for ResponsesProvider {
     fn serialize(
         &self,
         view: &RequestView,
-        reuse: Option<&mut RequestCompileReuse>,
+        mut reuse: Option<&mut RequestCompileReuse>,
     ) -> Result<RequestBody, ExecutionError> {
+        let input = model_input(view, &self.connection, reuse.as_deref_mut());
+        let view = input.as_ref();
         self.serialize_history(
             view,
             project_history(

@@ -1,5 +1,7 @@
 import React from 'react';
-import { THINKING_LEVELS, type ThinkingLevel } from '@varin/protocol';
+import { type ThinkingLevel } from '@varin/protocol';
+import { modelThinkingLevels } from '@varin/application-client';
+import { useModelCatalogStore } from '@/stores/useModelCatalogStore';
 import type { AgentProfileSaveRequest, AgentProfilesSnapshot, AgentProfileView } from '@varin/application-client';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
@@ -80,6 +82,10 @@ export function AgentProfileEditor({ profile, snapshot, host, cwd, onSave, onCan
   const notBuiltin = snapshot.capabilities === null ? [] : draft.tools.split(/[\n,]/u).map(value => value.trim()).filter(Boolean)
     .filter(name => !snapshot.capabilities!.some(capability => capability.name === name));
   const emptyModelLabel = t(profile?.effective.modelSource === 'unconfigured' ? 'settings.harness.models.noModel' : 'settings.varin.agents.detail.inherited');
+  const channels = useModelCatalogStore(state => state.channels);
+  const selection = draft.providerId && draft.modelId ? draft : profile?.effective.model;
+  const selectedModel = channels.find(channel => channel.id === selection?.providerId)?.models.find(model => model.id === selection?.modelId);
+  const thinkingLevels = selectedModel ? modelThinkingLevels(selectedModel) : [];
   return <form onSubmit={event => { void save(event); }} data-agent-editor="profile" data-runtime={snapshot.runtime}>
     <SettingsSection settingsItem="agents.catalog" contentClassName="space-y-5" info={t('settings.agents.applies')}>
       <p className="typography-meta text-muted-foreground">{t('settings.agents.sharedFields')}</p>
@@ -90,7 +96,7 @@ export function AgentProfileEditor({ profile, snapshot, host, cwd, onSave, onCan
     </SettingsSection>
     <SettingsSection title={t('settings.agents.page.section.modelParameters')} contentClassName="space-y-5">
       <SettingsStackedField label={t('settings.varin.agents.detail.model')}>
-        <ModelSelector cwd={cwd} providerId={draft.providerId} modelId={draft.modelId} allowNone disabled={busy} placeholder={emptyModelLabel} defaultSelectionLabel={emptyModelLabel} className="w-full max-w-none" onChange={(providerId, modelId) => update({ providerId, modelId })} />
+        <ModelSelector cwd={cwd} providerId={draft.providerId} modelId={draft.modelId} allowNone disabled={busy} placeholder={emptyModelLabel} defaultSelectionLabel={emptyModelLabel} className="w-full max-w-none" onChange={(providerId, modelId) => update({ providerId, modelId, thinkingLevel: 'inherit' })} />
       </SettingsStackedField>
       <SettingsTwoColumn>
         <SettingsStackedField label={t('settings.agents.page.field.temperature')} info={t('settings.agents.page.field.temperatureTooltip')}>
@@ -99,7 +105,7 @@ export function AgentProfileEditor({ profile, snapshot, host, cwd, onSave, onCan
         <SettingsStackedField label={t('settings.varin.agents.detail.thinking')}><Select value={draft.thinkingLevel} disabled={busy} onValueChange={thinkingLevel => update({ thinkingLevel: thinkingLevel as ThinkingLevel | 'inherit' })}>
           <SelectTrigger className="w-full"><SelectValue>{draft.thinkingLevel === 'inherit' ? t('chat.modelControls.default') : t(`settings.agents.thinking.${draft.thinkingLevel}`)}</SelectValue></SelectTrigger><SelectContent>
             <SelectItem value="inherit">{t('chat.modelControls.default')}</SelectItem>
-            {THINKING_LEVELS.map(level => <SelectItem key={level} value={level}>{t(`settings.agents.thinking.${level}`)}</SelectItem>)}
+            {thinkingLevels.map(level => <SelectItem key={level} value={level}>{t(`settings.agents.thinking.${level}`)}</SelectItem>)}
           </SelectContent></Select></SettingsStackedField>
       </SettingsTwoColumn>
     </SettingsSection>

@@ -1,3 +1,4 @@
+import { THINKING_LEVELS } from '@varin/protocol';
 import { TunnelCliError, EXIT_CODE } from './cli-errors.js';
 import path from 'node:path';
 import { resolveTargetPort } from './cli-api-target.js';
@@ -39,7 +40,7 @@ const parseModel = (value: unknown): { modelId: string; providerId: string } => 
 const parseThinkingLevel = (value: unknown): string | null => {
   const level = asNonEmptyString(value);
   if (!level) return null;
-  if (!['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'].includes(level)) {
+  if (!(THINKING_LEVELS as readonly string[]).includes(level)) {
     throw new TunnelCliError('--thinking must be one of: off, minimal, low, medium, high, xhigh, max.', EXIT_CODE.USAGE_ERROR);
   }
   return level;

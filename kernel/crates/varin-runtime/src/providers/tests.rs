@@ -1162,7 +1162,7 @@ fn codex_never_infers_account_identity_or_calls_http_without_it() {
 }
 
 #[test]
-fn explicit_model_image_capability_rejects_attachment_before_request_serialization() {
+fn text_only_model_projects_historical_images_without_mutating_history() {
     let mut connection = connection(vec![], 1);
     connection.accepts_images = Some(false);
     let provider = responses::ResponsesProvider::new(connection);
@@ -1187,10 +1187,11 @@ fn explicit_model_image_capability_rejects_attachment_before_request_serializati
         },
         opaque: None,
     }.into());
-    assert_eq!(
-        provider.serialize(&request, None).unwrap_err().code,
-        "unsupported_model_image"
-    );
+    let original = request.clone();
+    let encoded = provider.serialize(&request, None).unwrap().to_value().to_string();
+    assert!(encoded.contains("Image omitted"));
+    assert!(!encoded.contains("ZmFrZQ=="));
+    assert_eq!(request, original);
     Arc::make_mut(&mut request.history[0]).content = Content::Text {
         text: "ordinary text".into(),
     };
@@ -1708,14 +1709,19 @@ fn typed_parallel_tool_output_reaches_each_actual_provider_without_pair_or_json_
                 "{family}: {mime}"
             );
         }
-        assert_eq!(
-            media_provider(family, false)
-                .serialize(&paired_media_view(family, "image/png"), None)
-                .unwrap_err()
-                .code,
-            "unsupported_model_image",
-            "{family}"
-        );
+        let request = paired_media_view(family, "image/png");
+        let original = request.clone();
+        let text_provider = media_provider(family, false);
+        let mut reuse = RequestCompileReuse::new();
+        reuse.prepare(&request, 1, None, 1, None);
+        let first = text_provider.serialize(&request, Some(&mut reuse)).unwrap();
+        let warm = text_provider.serialize(&request, Some(&mut reuse)).unwrap();
+        let encoded = first.to_value().to_string();
+        assert!(!encoded.contains(MEDIA_PNG), "{family}");
+        assert!(encoded.contains("Image omitted") && encoded.contains("before image") && encoded.contains("after image"), "{family}");
+        assert!(encoded.contains("ordinary-json-remains-data"), "{family}");
+        assert_eq!(first.wire_bytes(), warm.wire_bytes(), "{family}");
+        assert_eq!(request, original, "{family}: durable history is unchanged");
     }
 }
 

@@ -78,8 +78,22 @@ configuration write; an empty or failed discovery does not delete saved models o
 Configured values, unavailable types, missing credentials and disabled models remain distinguishable.
 Gemini and Anthropic discovery follow their opaque page cursors on the captured connection; cancellation,
 invalid/repeated cursors and later-page failures never publish a partial list as complete. Settings show
-contributed catalog candidates even without network discovery, and require connection changes to be saved
-before querying that connection. Selecting a candidate preserves its declared model capabilities.
+contributed catalog candidates even without network discovery. `discover-draft` captures the displayed
+connection and optional entered key without writing either to storage. Selecting one or many candidates
+changes the editor draft and preserves declared capabilities; Save publishes that selection.
+
+Models declare image input, context capacity, output capacity and reasoning separately. `thinking`
+describes effort levels (including whether Off is allowed), an on/off switch, always-on reasoning, or
+a token budget. `thinkingLevelMap` maps public choices to provider values when their names differ.
+UI previews, chat controls and execution use the same declared choices. A reasoning flag alone does
+not claim support for all effort levels or for disabling reasoning. Providers retain their own wire
+formats and output-budget constraints; this metadata does not add unsupported server capabilities.
+
+The model editor's explicit Test action uses `/api/models/test` and the existing standalone
+`ModelTextService`/Catalog inference owner. It captures the unsaved connection, selected model and
+thinking choice, sends one short request, and retains the ordinary usage receipt. It does not create
+a conversation, publish a temporary channel, store an entered key, or automatically repeat a request.
+Leaving the test signals cancellation; the inference owner retains credentials until actual drain.
 
 Connection options are explicit and credential-free:
 

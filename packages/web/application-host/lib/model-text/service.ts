@@ -19,6 +19,11 @@ export interface ModelTextInput {
   signal?: AbortSignal | undefined;
 }
 export interface ModelTextResult { requestId: string; text: string; providerId: string; modelId: string }
+/** Trusted callers can supply a captured draft through the same inference owner. */
+export interface PreparedTextModel {
+  identity: string;
+  resolve(): ReturnType<ReturnType<typeof createModelAuthority>['resolveModel']>;
+}
 export interface ModelTextDescription {
   providerID: string; modelID: string; source: 'request' | 'walkthrough' | 'utility' | 'default';
   inputCharBudget: number; contextTokens: number; contextKnown: boolean;
@@ -140,7 +145,7 @@ export function createModelTextService(options: {
       await wait(observed);
     }
   }
-  async function execute(input: ModelTextInput, fingerprint: string, signal: AbortSignal): Promise<ModelTextResult> {
+  async function execute(input: ModelTextInput, fingerprint: string, signal: AbortSignal, prepared?: PreparedTextModel): Promise<ModelTextResult> {
     const requestId = `model-text:${input.key}`;
     const original = await status(requestId, true);
     if (original) {
@@ -152,7 +157,7 @@ export function createModelTextService(options: {
     if (closed) return fail('model-text-closed', 'Text generation is shutting down.', 503);
     signal.throwIfAborted();
     const chosen = await selection(input.model, input.purpose);
-    const model = await options.models.resolveModel(chosen);
+    const model = await (prepared ? prepared.resolve() : options.models.resolveModel(chosen));
     let registered = false;
     let admitted = false;
     let safelyReleased = false;
@@ -238,13 +243,13 @@ export function createModelTextService(options: {
       catch { return { ...metadata, outputStatus: 'unavailable' as const }; }
     },
     async cancel(requestId: string) { return projection(await cancel(requestId)); },
-    generate(input: ModelTextInput): Promise<ModelTextResult> {
+    generate(input: ModelTextInput, prepared?: PreparedTextModel): Promise<ModelTextResult> {
       if (!input || typeof input.key !== 'string' || !input.key.trim() || !['git-commit', 'review', 'walkthrough', 'text'].includes(input.purpose)
         || typeof input.prompt !== 'string' || !input.prompt.trim() || (input.system !== undefined && typeof input.system !== 'string')
         || (input.retryOf !== undefined && (typeof input.retryOf !== 'string' || !input.retryOf.startsWith('model-text:')))
         || (input.maxOutputTokens !== undefined && (!Number.isSafeInteger(input.maxOutputTokens) || input.maxOutputTokens <= 0))) return Promise.reject(Object.assign(new Error('A request key, purpose and prompt are required.'), { statusCode: 400, code: 'model-text-input-invalid' }));
       const fingerprint = createHash('sha256').update(JSON.stringify({ purpose: input.purpose, prompt: input.prompt, system: input.system ?? null,
-        model: input.model ? parseModelTextSelection(input.model) : null, maxOutputTokens: input.maxOutputTokens ?? null, responseSchema: input.responseSchema ?? null, schemaProvided: input.responseSchema !== undefined, retryOf: input.retryOf ?? null })).digest('hex');
+        model: input.model ? parseModelTextSelection(input.model) : null, ...(prepared ? { preparedIdentity: prepared.identity } : {}), maxOutputTokens: input.maxOutputTokens ?? null, responseSchema: input.responseSchema ?? null, schemaProvided: input.responseSchema !== undefined, retryOf: input.retryOf ?? null })).digest('hex');
       const existing = pending.get(input.key);
       if (existing) {
         if (existing.fingerprint !== fingerprint) return Promise.reject(Object.assign(new Error('This request key already belongs to different input.'), { statusCode: 409, code: 'model-text-key-conflict' }));
@@ -252,7 +257,7 @@ export function createModelTextService(options: {
       }
       const controller = new AbortController();
       const signal = input.signal ? AbortSignal.any([input.signal, controller.signal]) : controller.signal;
-      const promise = execute(input, fingerprint, signal).finally(() => { pending.delete(input.key); });
+      const promise = execute(input, fingerprint, signal, prepared).finally(() => { pending.delete(input.key); });
       pending.set(input.key, { fingerprint, controller, promise });
       return promise;
     },

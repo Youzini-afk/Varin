@@ -1,3 +1,4 @@
+import { THINKING_LEVELS } from '@varin/protocol';
 import { create } from 'zustand';
 import { getRuntimeEndpointGeneration, ThreadRequestError, type ThreadIdentity, type ThreadPreparedSource, type ThreadPrepareSource, type ThreadSubmit, type ThreadsAPI, type ThreadUpdate } from '@varin/application-client';
 import type { ImageAttachment, InputSubmitReceipt } from '@varin/protocol';
@@ -166,7 +167,7 @@ function createBatch(params: CreateMultiRunParams): Batch {
     const runGroup = params.groups.length > 1 ? `g${groupIndex + 1}` : undefined;
     const index = group.models.filter(value => value.providerID === model.providerID && value.modelID === model.modelID).length > 1
       ? group.models.slice(0, modelIndex + 1).filter(value => value.providerID === model.providerID && value.modelID === model.modelID).length : undefined;
-    if (model.variant !== undefined && !['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'].includes(model.variant)) throw new Error('Unsupported thinking level.');
+    if (model.variant !== undefined && !(THINKING_LEVELS as readonly string[]).includes(model.variant)) throw new Error('Unsupported thinking level.');
     return { id: crypto.randomUUID(), model: { ...model }, prompt: [group.prompt, attachments.instructions].filter(Boolean).join('\n\n'),
       title: getMultiRunSessionTitle({ groupSlug, runGroup, providerID: model.providerID, modelID: model.modelID, index }),
       preferredName: [runGroup, generateWorktreeNameSeed(groupSlug, toModelSlug(model.providerID, model.modelID)), index].filter(value => value !== undefined).join('/'),

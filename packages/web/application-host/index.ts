@@ -27,6 +27,7 @@ import { createResearchDiscoveryRuntime, RESEARCH_DISCOVERY_CAPABILITY } from '.
 import { ModelsExtensionOwner } from './lib/models/extensions.js';
 import { ModelsService } from './lib/models/service.js';
 import { registerModelRoutes } from './lib/models/routes.js';
+import { registerModelTestRoute } from './lib/models/test-route.js';
 import { createWebRuntime, WEB_CAPABILITY } from './lib/kernel/web-runtime.js';
 import { createMaterialReceiptReconciler } from './lib/kernel/material-receipts.js';
 import { createDocumentSources } from './lib/kernel/document-sources.js';
@@ -1858,6 +1859,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   const modelText = createModelTextService({ kernel: kernelClient, runtime: agentRuntime, models: modelAuthority,
     readSettings: async () => (await modelsService.settings.read()).document,
   });
+  registerModelTestRoute(app, modelsService, modelAuthority, modelText, uiAuthController.requireAuth);
   const threadNotifications = createThreadNotificationRuntime({
     runtime: agentRuntime,
     onError: () => console.error('[Notifications] Native activity projection is unavailable'),

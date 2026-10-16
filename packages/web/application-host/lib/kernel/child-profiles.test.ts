@@ -8,6 +8,7 @@ async function fixture() {
   const scope = { reference: 'profile-test', authority: 'fixture', account: 'opaque-test-account', generation: 3 };
   const descriptor = () => ({ providerId: 'provider', modelId: 'model', name: 'Fixture', api: 'openai-completions',
     baseUrl: 'https://model.invalid/v1', maxTokens: 32768, reasoning: true,
+    thinking: { mode: 'levels' as const, levels: ['low', 'high'] as ('low' | 'high')[], allowOff: true },
     samplingParams: { top_p: defaults }, samplingParamsByThinkingLevel: { high: { temperature: 0.5 } } });
   const models = createModelAuthority({ selectedModel: async () => descriptor(), listModels: async () => [descriptor()],
     currentScope: async () => scope, currentProviderAccount: async () => undefined, routingEnvironment: async () => ({}),

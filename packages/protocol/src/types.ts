@@ -4,6 +4,8 @@ export type JsonValue = JsonPrimitive | JsonValue[] | { [key: string]: JsonValue
 
 export const THINKING_LEVELS = [
   "off",
+  "on",
+  "budget",
   "minimal",
   "low",
   "medium",
@@ -13,6 +15,24 @@ export const THINKING_LEVELS = [
 ] as const;
 
 export type ThinkingLevel = (typeof THINKING_LEVELS)[number];
+
+export const MODEL_THINKING_EFFORTS = ['minimal', 'low', 'medium', 'high', 'xhigh', 'max'] as const;
+export type ModelThinkingEffort = (typeof MODEL_THINKING_EFFORTS)[number];
+export type ModelThinkingConfiguration =
+  | { mode: 'levels'; levels: ModelThinkingEffort[]; allowOff: boolean }
+  | { mode: 'switch' }
+  | { mode: 'fixed' }
+  | { mode: 'budget'; tokens: number; allowOff: boolean };
+export function isModelThinkingConfiguration(value: unknown): value is ModelThinkingConfiguration {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const control = value as Record<string, unknown>;
+  if (control.mode === 'switch' || control.mode === 'fixed') return true;
+  if (typeof control.allowOff !== 'boolean') return false;
+  if (control.mode === 'budget') return Number.isSafeInteger(control.tokens) && Number(control.tokens) > 0;
+  return control.mode === 'levels' && Array.isArray(control.levels) && control.levels.length > 0
+    && new Set(control.levels).size === control.levels.length
+    && control.levels.every(level => (MODEL_THINKING_EFFORTS as readonly unknown[]).includes(level));
+}
 
 /**
  * Immutable source selected for one user input. Surface contexts contain only

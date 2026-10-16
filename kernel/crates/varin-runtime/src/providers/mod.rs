@@ -12,6 +12,7 @@ pub mod connection_options;
 pub mod google;
 pub mod extensions;
 pub(crate) mod groups;
+pub(crate) mod input_projection;
 pub mod host_auth;
 pub mod mistral;
 pub mod pi_messages;
@@ -22,6 +23,7 @@ mod sse;
 mod tests;
 
 use crate::execution::*;
+use input_projection::model_input;
 use serde_json::Value;
 use std::borrow::Cow;
 use std::sync::{Arc, OnceLock};
@@ -568,25 +570,6 @@ impl CredentialResolver for EnvironmentCredentialResolver {
 
 /// Header types for private credential bridges; values remain dispatch-only.
 pub use reqwest::header as header_types;
-
-pub(super) fn validate_images(
-    view: &RequestView,
-    connection: &Connection,
-) -> Result<(), ExecutionError> {
-    if connection.accepts_images == Some(false)
-        && view
-            .history
-            .iter()
-            .flat_map(|item| item.content.media())
-            .any(|media| media.media_type.starts_with("image/"))
-    {
-        return Err(ExecutionError::new(
-            "unsupported_model_image",
-            "the frozen model catalog does not accept images",
-        ));
-    }
-    Ok(())
-}
 
 /// Provider text contains the complete execution receipt/data, never encoded image bytes.
 struct CompletionData<'a>(&'a ToolCompletion);

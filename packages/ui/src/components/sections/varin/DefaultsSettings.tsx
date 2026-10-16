@@ -2,7 +2,8 @@ import React from 'react';
 import { toast } from '@/components/ui';
 import { ProjectTrustSettings } from '@/components/sections/shared/ProjectTrustSettings';
 import { getProjectTrustGeneration, subscribeProjectTrustChanges } from '@/lib/projectTrust';
-import { createModelConnectionsHttpAPI, getRuntimeEndpointGeneration, subscribeRuntimeEndpointChanged, type AgentSettingsSnapshot } from '@varin/application-client';
+import { createModelConnectionsHttpAPI, getRuntimeEndpointGeneration, subscribeRuntimeEndpointChanged, modelThinkingLevels, type AgentSettingsSnapshot } from '@varin/application-client';
+import { useModelCatalogStore } from '@/stores/useModelCatalogStore';
 import type { JsonValue } from '@varin/protocol';
 import { ModelSelector } from '@/components/sections/agents/ModelSelector';
 import { SettingsSection, SettingsFieldRow, SettingsCheckboxRow } from '@/components/sections/shared/SettingsSection';
@@ -34,6 +35,10 @@ export const DefaultsSettings: React.FC = () => {
   }, [api, cwd]);
   React.useEffect(() => { setSnapshot(undefined); setScope('global'); setSaving(false); void reload(); return () => { sequence.current += 1; }; }, [reload, trustVersion]);
   const settings = snapshot?.[scope] ?? {};
+  const channels = useModelCatalogStore(state => state.channels);
+  const effective = { ...snapshot?.global, ...settings };
+  const selectedModel = channels.find(channel => channel.id === effective.defaultProvider)?.models.find(model => model.id === effective.defaultModel);
+  const thinkingLevels = selectedModel ? modelThinkingLevels(selectedModel) : [];
   const save = async (set: Record<string, JsonValue>, remove: string[] = []) => {
     if (!snapshot || saving || currentScope.current !== scopeKey || host !== getRuntimeEndpointGeneration()
       || trustVersion !== getProjectTrustGeneration() || scope === 'project' && !snapshot.projectTrusted) return;
@@ -62,10 +67,10 @@ export const DefaultsSettings: React.FC = () => {
       displayModelId={scope === 'project' ? string(snapshot?.global.defaultModel) : undefined}
       placeholder={scope === 'project' ? t('settings.bots.model.inherit') : undefined}
       defaultSelectionLabel={scope === 'project' ? t('settings.bots.model.inherit') : undefined}
-      onChange={(providerId, modelId) => save(providerId && modelId ? { defaultProvider: providerId, defaultModel: modelId } : {}, providerId && modelId ? [] : ['defaultProvider', 'defaultModel'])} /></SettingsFieldRow>
+      onChange={(providerId, modelId) => save(providerId && modelId ? { defaultProvider: providerId, defaultModel: modelId } : {}, providerId && modelId ? ['defaultThinkingLevel'] : ['defaultProvider', 'defaultModel', 'defaultThinkingLevel'])} /></SettingsFieldRow>
     <SettingsFieldRow label={t('settings.varin.agents.detail.thinking')}><Select value={string(settings.defaultThinkingLevel) || 'inherit'} disabled={!snapshot || saving} onValueChange={value => void save(value !== 'inherit' ? { defaultThinkingLevel: value } : {}, value !== 'inherit' ? [] : ['defaultThinkingLevel'])}>
       <SelectTrigger className="w-48"><SelectValue /></SelectTrigger><SelectContent>
-        <SelectItem value="inherit">{t('chat.modelControls.default')}</SelectItem>{(['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'] as const).map(level => <SelectItem key={level} value={level}>{t(`settings.agents.thinking.${level}`)}</SelectItem>)}
+        <SelectItem value="inherit">{t('chat.modelControls.default')}</SelectItem>{thinkingLevels.map(level => <SelectItem key={level} value={level}>{t(`settings.agents.thinking.${level}`)}</SelectItem>)}
       </SelectContent>
     </Select></SettingsFieldRow>
     {scope === 'global' && (['utilityModel', 'walkthroughModel'] as const).map(key => <SettingsFieldRow key={key} label={t(`thread.settings.${key}`)}>

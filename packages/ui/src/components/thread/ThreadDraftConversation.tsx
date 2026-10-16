@@ -59,7 +59,10 @@ export function ThreadDraftConversation({ api, draftKey, handoff }: { api: Threa
     });
     return () => { active = false; unsubscribe(); };
   }, [api, t]);
-  const model = draft.model;
+  const availableThinking = models.find(item => item.providerId === draft.model?.providerId && item.modelId === draft.model?.modelId)?.thinkingLevels;
+  const model = draft.model && availableThinking?.length ? { ...draft.model,
+    thinkingLevel: draft.model.thinkingLevel && availableThinking.includes(draft.model.thinkingLevel) ? draft.model.thinkingLevel : availableThinking[0],
+  } : draft.model;
   React.useEffect(() => {
     if (model?.providerId || model?.modelId) return;
     const controller = new AbortController();

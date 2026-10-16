@@ -90,6 +90,7 @@ export function ThreadComposer({ editorRef, value, onChange, models, providerId,
         </DropdownMenuTrigger><DropdownMenuContent side="top" align="end">
           {selected!.thinkingLevels!.map(level => <DropdownMenuItem key={level} onSelect={() => onModelChange(providerId, modelId, level)}>{t(`settings.agents.thinking.${level}`)}{level === thinkingLevel && <Icon name="check" className="ml-auto size-3.5" />}</DropdownMenuItem>)}
         </DropdownMenuContent></DropdownMenu>}
+        {selected?.thinkingLevels?.length === 1 && thinkingLevel !== 'off' ? <span className="flex items-center gap-1.5 px-2 typography-meta text-muted-foreground"><Icon name="brain" className="size-3.5" />{t(`settings.agents.thinking.${thinkingLevel}`)}</span> : null}
         <ModelSelector providerId={providerId} modelId={modelId} variant="composer" disabled={modelDisabled} allowNone={false}
           open={modelPickerOpen} onOpenChange={setModelPickerOpen}
           placeholder={t('chat.modelControls.selectModel')} dropdownPortalToBody

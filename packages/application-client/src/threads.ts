@@ -16,7 +16,7 @@ import type { VarinExtensionServiceProvision } from '@varin/extension-contract';
 
 /** Explicit authority selection. A thread never opens a Pi session. */
 export interface ThreadIdentity { runtime: 'agent'; threadId: string; branchId: string }
-export type ThreadThinkingLevel = 'off' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max';
+export type ThreadThinkingLevel = import('@varin/protocol').ThinkingLevel;
 export interface ThreadModel { providerId: string; modelId: string; thinkingLevel?: ThreadThinkingLevel; temperature?: number }
 export interface ThreadModelInfo extends ThreadModel { name?: string; acceptsImages?: boolean; contextWindowTokens?: number; thinkingLevels?: ThreadThinkingLevel[] }
 /** A public model selection resolves only through the Host's existing model/credential authority. */

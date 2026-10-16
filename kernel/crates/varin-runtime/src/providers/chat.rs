@@ -157,7 +157,8 @@ impl ChatProvider {
         mut reuse: Option<&mut RequestCompileReuse>,
     ) -> Result<RequestBody, ExecutionError> {
         validate_view(view, self.family)?;
-        validate_images(view, &self.connection)?;
+        let input = model_input(view, &self.connection, reuse.as_deref_mut());
+        let view = input.as_ref();
         let mut groups: Vec<ChatGroup<'_>> = Vec::new();
         let mut replayed = BTreeSet::new();
         let mut pending_media = Vec::new();

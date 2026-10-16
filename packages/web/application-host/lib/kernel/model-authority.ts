@@ -4,11 +4,12 @@ import { createHash } from 'node:crypto';
 import { ExistingHostCredentialOwner, type ExistingModelAuthRuntime, type CredentialScope, type CredentialDispatch } from './credential-owner.js';
 import type { ModelSessionConfiguration } from './protocol.generated.js';
 import { appendModelPath } from '../models/connection.js';
-import type { ModelConnectionOptions, ThreadModel, ThreadModelInfo, ThreadThinkingLevel } from '@varin/application-client';
+import type { ModelConnectionOptions, ModelThinkingConfiguration, ThreadModel, ThreadModelInfo, ThreadThinkingLevel } from '@varin/application-client';
 import { modelOptions, thinkingLevels } from './model-options.js';
 export interface SelectedModel {
   providerId: string; modelId: string; name: string; api: string; baseUrl: string; maxTokens: number;
   input?: readonly string[]; contextWindow?: number; reasoning?: boolean;
+  thinking?: ModelThinkingConfiguration;
   thinkingLevelMap?: Partial<Record<ThreadThinkingLevel, string | null>>;
   samplingParams?: Record<string, unknown>;
   samplingParamsByThinkingLevel?: Partial<Record<ThreadThinkingLevel, Record<string, unknown>>>;
@@ -167,6 +168,14 @@ export function createModelAuthority(authority: ModelAuthority) {
       currentProviderAccount: () => source.currentProviderAccount(providerId), ...(release ? { release } : {}) });
   }
   return {
+    async resolveCaptured(captured: { model: SelectedModel; authority: ModelExecutionAuthority; release(): void }, selection: ThreadModel) {
+      try {
+        const configuration = await configurationFor(captured.model, selection.thinkingLevel, selection.temperature, captured.authority);
+        const credentialOwner = ownerFor(configuration, captured.authority, captured.release);
+        await credentialOwner.scope();
+        return { configuration, credentialOwner, acceptsImages: configuration.acceptsImages ?? false };
+      } catch (error) { captured.release(); throw error; }
+    },
     async listModels(): Promise<ThreadModelInfo[]> {
       return (await authority.listModels()).filter(model => families.has(model.api) || Boolean(model.adapterId && model.adapterVersion && model.endpointPath))
         .map(model => ({ providerId: model.providerId, modelId: model.modelId, name: model.name, acceptsImages: model.input?.includes('image') ?? false,

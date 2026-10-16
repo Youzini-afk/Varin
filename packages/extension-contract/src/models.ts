@@ -9,9 +9,16 @@ export const VARIN_MODELS_VERSION = 1 as const;
 /** Reviewed permission to receive this provider's OAuth tokens and perform its account flow. */
 export const VARIN_MODEL_AUTHENTICATION_CAPABILITY = 'varin.models.authentication';
 export type VarinModelOperation = 'chat' | 'embedding' | 'rerank' | 'decision' | 'image-generation' | 'image-editing';
+export type VarinModelThinkingLevel = 'off' | 'on' | 'budget' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max';
+export type VarinModelThinkingConfiguration =
+  | { mode: 'levels'; levels: Exclude<VarinModelThinkingLevel, 'off' | 'on' | 'budget'>[]; allowOff: boolean }
+  | { mode: 'switch' | 'fixed' }
+  | { mode: 'budget'; tokens: number; allowOff: boolean };
 export interface VarinModelCatalogEntry {
   id: string; requestModelId?: string; name: string; enabled: boolean; operations: VarinModelOperation[];
   input?: ('text' | 'image')[]; contextWindow?: number; maxOutputTokens?: number; reasoning?: boolean;
+  thinking?: VarinModelThinkingConfiguration;
+  thinkingLevelMap?: Partial<Record<VarinModelThinkingLevel, string | null>>;
   parameters?: Record<string, JsonValue>; compat?: Record<string, JsonValue>;
 }
 export interface VarinModelAdapterDescription {
@@ -58,6 +65,11 @@ const record = (v: unknown): v is Record<string, unknown> => v !== null && typeo
 const text = (v: unknown): v is string => typeof v === 'string' && v.trim().length > 0;
 const allowed = (v: Record<string, unknown>, keys: string[]) => Object.keys(v).every(key => keys.includes(key));
 const positive = (v: unknown) => Number.isSafeInteger(v) && Number(v) > 0;
+const thinkingLevels = ['off', 'on', 'budget', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'];
+const thinkingConfiguration = (v: unknown): boolean => record(v) && (v.mode === 'switch' || v.mode === 'fixed'
+  || typeof v.allowOff === 'boolean' && (v.mode === 'budget' && positive(v.tokens)
+    || v.mode === 'levels' && Array.isArray(v.levels) && v.levels.length > 0 && new Set(v.levels).size === v.levels.length
+      && v.levels.every(level => thinkingLevels.slice(3).includes(level))));
 const list = (v: unknown, values: string[]): v is string[] => Array.isArray(v) && v.length > 0 && v.every(x => typeof x === 'string' && values.includes(x)) && new Set(v).size === v.length;
 function assert(condition: unknown, message: string): asserts condition { if (!condition) throw new Error(message); }
 export function validModelEndpointPath(value: unknown): value is string {
@@ -110,13 +122,15 @@ export function parseVarinModelsDescription(value: unknown): VarinModelsDescript
     if (channel.catalog !== undefined) {
       assert(Array.isArray(channel.catalog), 'Invalid channel model catalog'); unique(channel.catalog);
       for (const model of channel.catalog) {
-        assert(record(model) && allowed(model, ['id', 'requestModelId', 'name', 'enabled', 'operations', 'input', 'contextWindow', 'maxOutputTokens', 'reasoning', 'parameters', 'compat'])
+        assert(record(model) && allowed(model, ['id', 'requestModelId', 'name', 'enabled', 'operations', 'input', 'contextWindow', 'maxOutputTokens', 'reasoning', 'thinking', 'thinkingLevelMap', 'parameters', 'compat'])
           && text(model.name) && typeof model.enabled === 'boolean' && list(model.operations, operations)
           && model.operations.every(operation => (channel.operations as string[]).includes(operation))
           && (model.requestModelId === undefined || text(model.requestModelId))
           && (model.input === undefined || list(model.input, ['text', 'image']))
           && (model.contextWindow === undefined || positive(model.contextWindow)) && (model.maxOutputTokens === undefined || positive(model.maxOutputTokens))
           && (model.reasoning === undefined || typeof model.reasoning === 'boolean')
+          && (model.thinking === undefined || thinkingConfiguration(model.thinking))
+          && (model.thinkingLevelMap === undefined || record(model.thinkingLevelMap) && Object.entries(model.thinkingLevelMap).every(([key, value]) => thinkingLevels.includes(key) && (value === null || text(value))))
           && (model.parameters === undefined || record(model.parameters)) && (model.compat === undefined || record(model.compat)), 'Invalid channel model metadata');
       }
     }
