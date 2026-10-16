@@ -60,6 +60,7 @@ COPY packages/extension-sdk/package.json ./packages/extension-sdk/package.json
 COPY packages/extension-surface/package.json ./packages/extension-surface/package.json
 COPY packages/mobile/package.json ./packages/mobile/package.json
 COPY packages/protocol/package.json ./packages/protocol/package.json
+COPY packages/script-runtime/package.json ./packages/script-runtime/package.json
 COPY packages/settings-store/package.json ./packages/settings-store/package.json
 COPY packages/ui/package.json ./packages/ui/package.json
 COPY packages/web/package.json ./packages/web/package.json
