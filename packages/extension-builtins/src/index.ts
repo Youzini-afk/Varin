@@ -17,7 +17,6 @@ export { SCRIPT_CAPABILITY, SCRIPT_TOOL_DECLARATIONS, VARIN_BUILTIN_SCRIPT_EXTEN
 import { COMPUTER_CAPABILITY, COMPUTER_TOOL_DECLARATIONS, VARIN_BUILTIN_COMPUTER_EXTENSION_ID } from './computer-tools.js';
 export { COMPUTER_CAPABILITY, COMPUTER_TOOL_DECLARATIONS, VARIN_BUILTIN_COMPUTER_EXTENSION_ID } from './computer-tools.js';
 import type {
-  JsonObject,
   VarinApplicationSurface,
   VarinExtensionManifest,
   VarinExtensionStaticContribution,

@@ -27,6 +27,7 @@ it('executes resource connections, probes and SSH on the selected Agent Host', a
     await api.ssh.connect('resource/ssh');
     await api.ssh.logs('resource/ssh');
     assert.deepEqual(calls.map(call => call.url), ['https://agent-host.example/api/connections/hosts/probe', 'https://agent-host.example/api/connections/ssh/resource%2Fssh/connect', 'https://agent-host.example/api/connections/ssh/resource%2Fssh/logs?limit=600']);
+    assert.ok(calls[0]);
     assert.deepEqual(calls[0].body, { url: 'http://127.0.0.1:3000' });
     switchRuntimeEndpoint({ apiBaseUrl: 'https://agent-host.example', runtimeKey: 'agent', clientToken: 'new-fixture-principal' });
     await assert.rejects(api.hosts.set({ hosts: [], defaultHostId: null }), /Connection owner changed/);

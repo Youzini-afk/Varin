@@ -23,8 +23,8 @@
     "build:raw": "tsc -p tsconfig.build.json",
     "lint": "eslint \"./src/**/*.ts\" --config ../../eslint.config.js",
     "test": "tsx --test \"test/**/*.test.ts\"",
-    "typecheck": "tsc --noEmit -p tsconfig.json",
-    "type-check": "tsc --noEmit -p tsconfig.json"
+    "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.tests.json",
+    "type-check": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.tests.json"
   },
   "dependencies": {
     "@varin/extension-builtins": "workspace:*",

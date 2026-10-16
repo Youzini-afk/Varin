@@ -2,7 +2,10 @@ import type { DesktopLocalHostMode, DesktopLocalHostModeInput } from '@varin/app
 import type { SettingsFileStore } from '@varin/settings-store';
 
 export interface LocalHostModeContext {
-  environment: Pick<NodeJS.ProcessEnv, 'VARIN_SKIP_LOCAL_SERVER' | 'VARIN_SERVER_URL'>;
+  environment: {
+    VARIN_SKIP_LOCAL_SERVER?: string | undefined;
+    VARIN_SERVER_URL?: string | undefined;
+  };
   recoveryUiAvailable: boolean;
   startedEnabled: boolean | null;
   runtime: DesktopLocalHostMode['runtime'];
