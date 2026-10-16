@@ -73,6 +73,14 @@ support list; a provider name does not imply every protocol option is supported.
 names can be explicitly configured under a compatible type. Operations and image capabilities
 remain explicit: image input alone does not enable image generation, editing or masks.
 
+`catalog.ts` supplies a curated offline selection with capacities, image input and explicit thinking
+controls. New connections copy the type's starter models and parameters into their draft; existing
+connections remain user-owned. Live discovery enriches known presets with supplied directory facts,
+without replacing missing fields or overwriting saved models. OpenRouter and Copilot discovery retain
+capabilities; Gemini retains token limits. A preset is not evidence that an account has access to a model.
+Mixed-API channels declare their supported `protocols`; a model's `protocol` chooses its wire adapter.
+The model editor exposes that choice in advanced settings.
+
 Discovery and extension catalog candidates are read-only material. Applying a selection requires a
 configuration write; an empty or failed discovery does not delete saved models or purpose bindings.
 Configured values, unavailable types, missing credentials and disabled models remain distinguishable.
@@ -119,6 +127,13 @@ or explicit anonymous access. Cloud libraries are direct dependencies: Google's 
 refresh and the AWS/Smithy owners resolve chains and sign native requests. No library is loaded
 through Pi's dependency tree. OAuth authorization uses the existing Host interaction owner with a
 local callback or manual callback response; an unrelated channel does not wait for that interaction.
+
+Kimi Code, GitHub Copilot, xAI and Meta use device codes displayed by the same authorization panel.
+The Host polls at the issuer's interval, observes code expiry and cancels when the user closes sign-in.
+Copilot exchanges the GitHub token for an inference token; Meta exchanges its identity token for an
+API key. Their renewal uses the same credential store and account-generation checks as browser OAuth.
+Copilot's account endpoint is resolved during request preparation and frozen into that request;
+refresh cannot retarget it. Copilot OAuth does not enable Claude's subscription-specific body format.
 
 Anthropic workload identity is an explicit `anthropic-federation` authentication source: an absolute
 Host identity-token file, organization ID and federation rule ID, with optional service-account and

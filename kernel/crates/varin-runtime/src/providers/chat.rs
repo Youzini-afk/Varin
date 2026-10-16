@@ -11,6 +11,7 @@ pub struct ChatProvider {
     pub legacy_max_tokens: bool,
     pub include_stream_usage: bool,
     pub reasoning_effort: Option<String>,
+    pub requires_reasoning_content: bool,
 }
 impl ChatProvider {
     pub fn new(connection: Connection) -> Self {
@@ -22,6 +23,7 @@ impl ChatProvider {
             legacy_max_tokens: false,
             include_stream_usage: true,
             reasoning_effort: None,
+            requires_reasoning_content: false,
         }
     }
     pub(super) fn mistral(connection: Connection) -> Self {
@@ -267,6 +269,11 @@ impl ChatProvider {
             messages.push(
                 compiler.group_context(group.kind, context, &group.items, || {
                     let mut message = chat_message(&group.items, group.kind == "tool_media")?;
+                    if self.requires_reasoning_content && message["role"] == "assistant"
+                        && message.get("reasoning_content").is_none()
+                    {
+                        message["reasoning_content"] = Value::String(String::new());
+                    }
                     if let Some(mapped) = mapped {
                         mapped.apply(&mut message);
                     }

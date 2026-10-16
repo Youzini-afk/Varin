@@ -308,6 +308,8 @@ pub struct Connection {
     pub max_event_bytes: usize,
     /// Frozen catalog capability. None is reserved for explicit low-level/bootstrap callers.
     pub accepts_images: Option<bool>,
+    /// Copilot's per-request headers follow the actual input, across all three wire APIs.
+    pub copilot: bool,
 }
 impl Connection {
     pub fn new(
@@ -321,6 +323,7 @@ impl Connection {
             transport,
             max_event_bytes: 16 * 1024 * 1024,
             accepts_images: None,
+            copilot: false,
         }
     }
     pub(super) fn run(
@@ -370,6 +373,22 @@ impl Connection {
                 reqwest::header::HeaderValue::from_str(value)
                     .map_err(|_| failure("invalid_header", "invalid protocol header"))?,
             );
+        }
+        if self.copilot {
+            let agent = request.view.history.last().is_some_and(|item| {
+                item.provenance.is_assistant() || matches!(item.content, Content::ToolResult { .. })
+            });
+            headers.insert("x-initiator", if agent { "agent" } else { "user" }.parse().unwrap());
+            headers.insert("openai-intent", "conversation-edits".parse().unwrap());
+            let has_images = self.accepts_images != Some(false) && request.view.history.iter().any(|item| {
+                match &item.content {
+                    Content::Media { .. } => true,
+                    Content::Output { output } => output.parts.iter().any(|part| matches!(part, crate::output::OutputPart::Media { .. })),
+                    Content::ToolResult { result } => completion_output(&result.completion).is_some_and(|output| output.parts.iter().any(|part| matches!(part, crate::output::OutputPart::Media { .. }))),
+                    _ => false,
+                }
+            });
+            if has_images { headers.insert("copilot-vision-request", "true".parse().unwrap()); }
         }
         let mut decoder = sse::Decoder::new(self.max_event_bytes);
         let stream = if allow_eof {

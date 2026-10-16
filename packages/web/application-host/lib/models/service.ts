@@ -1,10 +1,11 @@
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
-import type { ModelChannel, ModelConnectionDraft, ModelConnectionOptions, ChannelModel, ModelConnectionsSnapshot, ModelOperation, ConnectionAuthentication } from '@varin/application-client';
+import type { ModelChannel, ModelConnectionDraft, ModelConnectionOptions, ChannelModel, DiscoveredModel, ModelConnectionsSnapshot, ModelOperation, ConnectionAuthentication } from '@varin/application-client';
 import { imageModelInfo, imageToolContract, THINKING_LEVELS, type ImageModelInfo, type ImageToolPurpose } from '@varin/protocol';
 import { isModelThinkingConfiguration } from '@varin/protocol';
 import { embeddingRequestUrl } from '@varin/protocol/node/embeddings';
 import { ChannelTypes, type ChannelType } from './channel-types.js';
+import { enrichModel } from './discovery.js';
 import { ConfigurationFile, ModelConfigurationError, object, revisionOf } from './configuration.js';
 import { CredentialService, fileSecretStore, type ResolvedCredential } from './credentials.js';
 import { AgentSettingsService } from './settings.js';
@@ -122,6 +123,7 @@ export class ModelsService {
       if (!object(model) || !nonempty(model.id) || !nonempty(model.name) || typeof model.enabled !== 'boolean'
         || !Array.isArray(model.operations) || model.operations.length === 0 || model.operations.some(op => !type.operations.includes(op))
         || model.requestModelId !== undefined && !nonempty(model.requestModelId)
+        || model.protocol !== undefined && !(type.protocols ?? [type.protocol]).includes(model.protocol as string)
         || model.contextWindow !== undefined && !positive(model.contextWindow)
         || model.maxOutputTokens !== undefined && !positive(model.maxOutputTokens)
         || model.input !== undefined && (!Array.isArray(model.input) || model.input.some(item => item !== 'text' && item !== 'image'))
@@ -244,7 +246,7 @@ export class ModelsService {
     return this.credentials.scope(auth, channel.id);
   }
   #credentialHeaders(type: ChannelType, resolved: ResolvedCredential): ResolvedCredential {
-    if (!type.adapter) return resolved;
+    if (!type.adapter && !type.credentialHeader) return resolved;
     if (resolved.auth.apiKey) {
       if (!type.credentialHeader) return fail('model-credential-header-missing', 'This protocol requires an explicit credential header');
       return { auth: { headers: { ...resolved.auth.headers, [type.credentialHeader.name]: `${type.credentialHeader.prefix}${resolved.auth.apiKey}` } }, source: 'configured headers' };
@@ -280,7 +282,7 @@ export class ModelsService {
     if (!bearer) return fail('mcp-authentication-unsupported', 'The selected account does not provide bearer authentication');
     return bearer[1];
   }
-  async anthropicAuthentication(providerId: string): Promise<'oauth' | 'api-key'> { return (await this.getAuth(providerId)).source === 'oauth' ? 'oauth' : 'api-key'; }
+  async anthropicAuthentication(providerId: string): Promise<'oauth' | 'api-key'> { return (await this.getAuth(providerId)).anthropicOauth ? 'oauth' : 'api-key'; }
   async vertexAuthentication(providerId: string): Promise<'api-key' | 'adc'> { return (await this.#channel(providerId)).authentication.kind === 'google-adc' ? 'adc' : 'api-key'; }
   async routingEnvironment(providerId: string): Promise<Record<string, string>> { return this.#routingEnvironment(await this.#channel(providerId)); }
   #routingEnvironment(channel: ModelChannel): Record<string, string> {
@@ -294,14 +296,14 @@ export class ModelsService {
     const adapter = this.types.get(channel.type)!.adapter;
     return { providerId: channel.id, modelId: model.id, requestModelId: model.requestModelId ?? model.id, name: model.name,
       ...(adapter ? { adapterId: adapter.id, adapterVersion: adapter.version, adapterIdentity: adapter.identity, adapterBindingId: adapter.bindingId, endpointPath: adapter.endpointPath } : {}),
-      api: this.types.get(channel.type)!.protocol, baseUrl: channel.baseUrl, maxTokens: model.maxOutputTokens ?? 0,
+      api: model.protocol ?? this.types.get(channel.type)!.protocol, baseUrl: channel.baseUrl, maxTokens: model.maxOutputTokens ?? 0,
       ...(channel.connection === undefined ? {} : { connection: structuredClone(channel.connection) }),
       ...(model.contextWindow === undefined ? {} : { contextWindow: model.contextWindow }), input: model.input ?? ['text'],
       ...(model.reasoning === undefined ? {} : { reasoning: model.reasoning }),
       ...(model.thinking === undefined ? {} : { thinking: structuredClone(model.thinking) }),
       ...(model.thinkingLevelMap === undefined ? {} : { thinkingLevelMap: model.thinkingLevelMap }),
       ...(model.parameters === undefined ? {} : { samplingParams: model.parameters }),
-      ...(model.compat === undefined ? {} : { compat: model.compat }), allowAnonymous: channel.authentication.kind === 'none' };
+      ...(model.compat === undefined && channel.type !== 'github-copilot' ? {} : { compat: { ...model.compat, ...(channel.type === 'github-copilot' ? { copilot: true } : {}) } }), allowAnonymous: channel.authentication.kind === 'none' };
   }
   async listModels(): Promise<SelectedModel[]> {
     return (await this.read()).channels.filter(channel => channel.enabled)
@@ -340,7 +342,7 @@ export class ModelsService {
         return channel.authentication.kind === 'credential' ? this.credentials.providerAccount(channel.authentication.reference) : undefined;
       },
       routingEnvironment: async () => this.#routingEnvironment(channel),
-      anthropicAuthentication: async () => (await getAuth(providerId)).source === 'oauth' ? 'oauth' : 'api-key',
+      anthropicAuthentication: async () => (await getAuth(providerId)).anthropicOauth ? 'oauth' : 'api-key',
       vertexAuthentication: async () => channel.authentication.kind === 'google-adc' ? 'adc' : 'api-key',
     } };
   }
@@ -373,7 +375,7 @@ export class ModelsService {
     const authority: ModelExecutionAuthority = {
       getAuth, currentScope, currentProviderAccount: async () => input.secret || channel.authentication.kind !== 'credential' ? undefined : this.credentials.providerAccount(channel.authentication.reference),
       routingEnvironment: async () => this.#routingEnvironment(channel),
-      anthropicAuthentication: async () => (await getAuth(channel.id)).source === 'oauth' ? 'oauth' : 'api-key',
+      anthropicAuthentication: async () => (await getAuth(channel.id)).anthropicOauth ? 'oauth' : 'api-key',
       vertexAuthentication: async () => channel.authentication.kind === 'google-adc' ? 'adc' : 'api-key',
     };
     return { channel, type, authority, getAuth, currentScope, release: () => { if (released) return; released = true; captured?.release(); releaseAdapter?.(); } };
@@ -476,14 +478,14 @@ export class ModelsService {
       return fail('model-discovery-unavailable', 'Add models manually for this channel type');
     }
     const expected = await currentScope();
-    const models = new Map<string, { id: string; name: string }>();
+    const models = new Map<string, DiscoveredModel>();
     const cursors = new Set<string>();
     let cursor: string | undefined;
     do {
       signal?.throwIfAborted();
-      const request = type.discoveryRequest(channel, cursor);
-      endpoint(request.url);
       const auth = await getAuth();
+      const request = type.discoveryRequest(auth.auth.baseUrl ? { ...channel, baseUrl: auth.auth.baseUrl } : channel, cursor);
+      endpoint(request.url);
       if (!sameScope(expected, await currentScope())) return fail('credential-scope-changed', 'The account changed during model discovery');
       signal?.throwIfAborted();
       const headers = new Headers(request.headers);
@@ -494,7 +496,7 @@ export class ModelsService {
       if (!response.ok) return fail('model-discovery-failed', `Model discovery failed (${response.status})`);
       const page: unknown = await response.json();
       signal?.throwIfAborted();
-      for (const model of type.parseDiscovery(page)) if (!models.has(model.id)) models.set(model.id, model);
+      for (const model of type.parseDiscovery(page)) if (!models.has(model.id)) models.set(model.id, enrichModel(type.catalog?.find(preset => preset.id === model.id), model));
       if (!sameScope(expected, await currentScope())) return fail('credential-scope-changed', 'The account changed during model discovery');
       cursor = type.discoveryCursor?.(page);
       if (cursor !== undefined) {

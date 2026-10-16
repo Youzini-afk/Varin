@@ -25,6 +25,26 @@ async function fixture() {
 const channel = (id = 'local-one'): ModelChannel => ({ id, name: id, type: 'local', enabled: true, baseUrl: 'http://localhost:1234/v1',
   authentication: { kind: 'none' }, parameters: {}, models: [{ id: 'chat', name: 'Chat', enabled: true, operations: ['chat'], maxOutputTokens: 4096, contextWindow: 32768 }] });
 
+test('Copilot presets retain their wire APIs and bind discovery and inference to the signed-in account endpoint', async () => {
+  const { models } = await fixture();
+  const type = models.types.get('github-copilot')!;
+  const reference = await models.credentials.linkOAuth({ kind: 'oauth', provider: 'github-copilot', accessToken: 'proxy-ep=proxy.business.githubcopilot.com;token=fixture' });
+  const selected: ModelChannel = { ...channel('copilot'), type: type.id, baseUrl: type.defaultBaseUrl!, authentication: { kind: 'credential', reference }, models: structuredClone(type.catalog!) };
+  const discovered = await models.discoverDraft({ channel: selected }, async (url, init) => {
+    expect(String(url)).toBe('https://api.business.githubcopilot.com/models');
+    expect(new Headers(init?.headers).get('authorization')).toContain('Bearer proxy-ep=');
+    return Response.json({ data: [{ id: 'claude-sonnet-5.5', capabilities: { supports: { vision: true }, limits: { max_context_window_tokens: 200000 } } }] });
+  });
+  expect(discovered.models[0]).toMatchObject({ protocol: 'anthropic-messages', contextWindow: 200000, input: ['text', 'image'], reasoning: true, thinking: { mode: 'levels' } });
+  const captured = await models.captureDraftModel({ channel: selected }, 'claude-sonnet-5.5');
+  const resolved = await createModelAuthority(models).resolveCaptured(captured, { providerId: selected.id, modelId: 'claude-sonnet-5.5', thinkingLevel: 'medium' });
+  try {
+    expect(resolved.configuration).toMatchObject({ providerFamily: 'anthropic-messages', endpoint: 'https://api.business.githubcopilot.com/v1/messages', anthropicOauth: false,
+      modelOptions: { copilot: true, protocol: { outputConfig: { effort: 'medium' } } } });
+    expect((await resolved.credentialOwner.resolve(await resolved.credentialOwner.scope())).headers.authorization).toContain('Bearer proxy-ep=');
+  } finally { resolved.credentialOwner.release(); }
+});
+
 test('draft discovery and inference binding use the entered key without publishing settings or credentials', async () => {
   const { directory, models } = await fixture();
   const draft = { ...channel(), type: 'openai-compatible', authentication: { kind: 'credential' as const, reference: '' },
@@ -212,7 +232,8 @@ test.each([
     const url = new URL(String(input)); requests.push(url);
     return Response.json(requests.length === 1 ? page(['first'], 'cursor /?&=#') : page(['first', 'second']));
   };
-  expect(await models.discover(configured.id, fetchImpl)).toEqual({ models: [{ id: 'first', name: 'first' }, { id: 'second', name: 'second' }] });
+  const result = await models.discover(configured.id, fetchImpl);
+  expect(result.models.map(({ id, name }) => ({ id, name }))).toEqual([{ id: 'first', name: 'first' }, { id: 'second', name: 'second' }]);
   expect(requests).toHaveLength(2);
   expect(requests[1]!.origin).toBe(requests[0]!.origin); expect(requests[1]!.pathname).toBe('/v1/models');
   expect(requests[1]!.searchParams.get(parameter)).toBe('cursor /?&=#');

@@ -649,6 +649,36 @@ fn chat_truncated_after_finish_does_not_emit_complete_items_and_multiple_choices
     ));
     assert!(generate(&p, chat::FAMILY).0.is_err());
 }
+
+#[test]
+fn copilot_headers_and_chat_reasoning_follow_the_actual_request() {
+    struct Inspect;
+    impl HttpTransport for Inspect {
+        fn stream(&self, request: HttpRequest<'_>, _: &CancellationToken,
+            _: &mut dyn FnMut(&[u8]) -> Result<bool, ModelFailure>) -> Result<(), ModelFailure> {
+            let agent = request.body.get("messages").unwrap().as_array().unwrap().len() > 1;
+            assert_eq!(request.headers["x-initiator"], if agent { "agent" } else { "user" });
+            assert_eq!(request.headers.contains_key("copilot-vision-request"), agent);
+            Ok(())
+        }
+    }
+    let mut connection = Connection::new("https://fixture.invalid", Arc::new(Credentials(AtomicUsize::new(0))), Arc::new(Inspect));
+    connection.copilot = true;
+    connection.accepts_images = Some(true);
+    let mut provider = chat::ChatProvider::new(connection.clone());
+    provider.requires_reasoning_content = true;
+    let mut initial = view(chat::FAMILY);
+    initial.history.push(ConversationItem { resource_activation: None, id: "question".into(), provenance: Provenance::UserInstruction { input_id: "question".into() }, content: Content::Text { text: "hello".into() }, opaque: None }.into());
+    let mut followup = paired_media_view(chat::FAMILY, "image/png");
+    followup.history.pop(); // The shared media fixture appends a new user turn; exercise the tool continuation here.
+    for view in [initial, followup] {
+        let serialized = provider.serialize(&view, None).unwrap();
+        for message in serialized.get("messages").unwrap().as_array().unwrap() {
+            if message["role"] == "assistant" { assert_eq!(message["reasoning_content"], ""); }
+        }
+        connection.run_events(&RequestSnapshot { view, serialized }, &CancellationToken::default(), &[], &mut |_| Ok(false)).unwrap();
+    }
+}
 #[test]
 fn azure_keeps_query_deployment_header_and_distinct_opaque_family() {
     struct AzureCredential;

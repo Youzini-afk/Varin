@@ -23,6 +23,8 @@ import type { ModelThinkingConfiguration } from '@varin/protocol';
 export type { ModelThinkingEffort, ModelThinkingConfiguration } from '@varin/protocol';
 export interface ChannelModel {
   id: string;
+  /** Wire protocol for providers serving more than one API. */
+  protocol?: string;
   requestModelId?: string;
   name: string;
   enabled: boolean;
@@ -52,7 +54,11 @@ export interface ChannelTypeInfo {
   id: string;
   name: string;
   protocol: string;
+  protocols?: string[];
   defaultBaseUrl?: string;
+  defaultModelIds?: string[];
+  defaultParameters?: Record<string, JsonValue>;
+  defaultEnvironmentVariable?: string;
   authentication: ConnectionAuthentication['kind'][];
   operations: ModelOperation[];
   discovery: boolean;
@@ -62,7 +68,7 @@ export interface ChannelTypeInfo {
   catalog?: ChannelModel[];
 }
 export interface ModelConnectionsSnapshot { revision: string; channels: ModelChannel[]; types: ChannelTypeInfo[]; issues?: { channelId?: string; code: string; message: string }[] }
-export interface DiscoveredModel { id: string; name: string; operations?: ModelOperation[] }
+export type DiscoveredModel = Pick<ChannelModel, 'id' | 'name'> & Partial<Omit<ChannelModel, 'id' | 'name' | 'enabled'>>;
 /** A transient connection draft. The supplied key is never written by discovery or testing. */
 export interface ModelConnectionDraft { channel: ModelChannel; secret?: string }
 export interface ModelConnectionTest extends ModelConnectionDraft { key: string; modelId: string; thinkingLevel?: ThinkingLevel }

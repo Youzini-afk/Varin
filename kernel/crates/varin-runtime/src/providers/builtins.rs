@@ -56,6 +56,8 @@ pub fn adapters() -> Vec<Arc<dyn ModelAdapter>> {
 #[derive(Default, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct Options {
+    #[serde(default)]
+    copilot: bool,
     temperature: Option<f64>,
     stop_sequences: Option<Vec<String>>,
     sampling_params: Option<BTreeMap<String, Value>>,
@@ -67,6 +69,12 @@ struct Options {
 struct ResponseOptions {
     text_verbosity: Option<String>,
     service_tier: Option<String>,
+}
+#[derive(Default, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct ChatOptions {
+    #[serde(default)]
+    requires_reasoning_content: bool,
 }
 #[derive(Default, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -114,9 +122,10 @@ fn object(value: &Option<Value>) -> Result<(), ExecutionError> {
 }
 fn bind(
     c: &ModelSessionConfiguration,
-    connection: Connection,
+    mut connection: Connection,
 ) -> Result<Arc<dyn ModelProvider>, ExecutionError> {
     let options: Options = decode(c.model_options.clone().unwrap_or_else(empty_object))?;
+    connection.copilot = options.copilot;
     if options.temperature.is_some_and(|v| !v.is_finite()) {
         return Err(ExecutionError::new(
             "model_temperature",
@@ -192,8 +201,9 @@ fn bind(
             }
         }
         chat::FAMILY => {
-            let _: Empty = decode(options.protocol)?;
+            let o: ChatOptions = decode(options.protocol)?;
             let mut p = chat::ChatProvider::new(connection);
+            p.requires_reasoning_content = o.requires_reasoning_content;
             p.max_output_tokens = c.max_output_tokens;
             p.legacy_max_tokens = c.legacy_max_tokens.unwrap_or(false);
             p.include_stream_usage = c.include_stream_usage.unwrap_or(true);

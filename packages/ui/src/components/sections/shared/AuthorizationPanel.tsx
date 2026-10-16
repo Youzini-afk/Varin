@@ -23,9 +23,12 @@ export function AuthorizationPanel({ state, onReply, onCancel }: {
     {state.message ? <p>{state.message}</p> : null}
     {state.status === 'pending' ? <>
       {state.authorizationUrl ? <a className="text-primary underline" href={state.authorizationUrl} target="_blank" rel="noreferrer">{t('settings.authorization.open')}</a> : null}
+      {state.deviceCode ? <div className="space-y-2"><p className="text-muted-foreground">{t('settings.authorization.deviceCode')}</p><code className="block select-all rounded-md bg-muted px-4 py-3 text-lg tracking-widest">{state.deviceCode}</code></div> : null}
       <div className="flex gap-2">
+        {!state.deviceCode ? <>
         <Input aria-label={t('settings.authorization.callback')} placeholder={t('settings.authorization.callback')} value={redirect} disabled={busy} onChange={event => setRedirect(event.target.value)} />
         <Button variant="outline" disabled={busy || !redirect.trim()} onClick={() => { void run(() => onReply(redirect)); }}>{t('settings.authorization.submit')}</Button>
+        </> : null}
         <Button variant="ghost" disabled={busy} onClick={() => { void run(onCancel); }}>{t('settings.models.close')}</Button>
       </div>
     </> : null}

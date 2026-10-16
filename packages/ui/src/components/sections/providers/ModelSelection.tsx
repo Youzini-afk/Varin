@@ -23,7 +23,7 @@ export function ModelSelection({ models, type, candidates, busy, onChange, onCon
   const [manual, setManual] = React.useState('');
   const [picking, setPicking] = React.useState(false);
   const [picked, setPicked] = React.useState<Set<string>>(() => new Set());
-  const available = [...type.catalog ?? [], ...candidates.filter(candidate => !type.catalog?.some(model => model.id === candidate.id))]
+  const available = [...candidates, ...(type.catalog ?? []).filter(model => !candidates.some(candidate => candidate.id === model.id))]
     .filter(candidate => !models.some(model => model.id === candidate.id));
   const matches = (model: { id: string; name: string }) => `${model.id} ${model.name}`.toLowerCase().includes(query.toLowerCase());
   const filtered = available.filter(matches);
@@ -34,10 +34,11 @@ export function ModelSelection({ models, type, candidates, busy, onChange, onCon
     for (const entry of entries) {
       const id = entry.id.trim(); if (!id || seen.has(id)) continue; seen.add(id);
       const catalog = type.catalog?.find(model => model.id === id);
-      const operations = entry.operations?.filter(operation => type.operations.includes(operation));
-      added.push(catalog ? { ...structuredClone(catalog), enabled: true } : { id, name: entry.name || id, enabled: true,
+      const operations = (entry.operations ?? catalog?.operations)?.filter(operation => type.operations.includes(operation));
+      const compat = { ...(type.id === 'deepseek' ? { thinkingFormat: 'deepseek' } : type.id === 'openrouter' ? { thinkingFormat: 'openrouter' } : {}), ...catalog?.compat, ...entry.compat };
+      added.push({ ...structuredClone(catalog), ...structuredClone(entry), id, name: entry.name && entry.name !== id ? entry.name : catalog?.name || entry.name || id, enabled: true,
         operations: operations?.length ? operations : type.operations.includes('chat') ? ['chat'] : [type.operations[0]!],
-        ...(type.id === 'deepseek' ? { compat: { thinkingFormat: 'deepseek' } } : type.id === 'openrouter' ? { compat: { thinkingFormat: 'openrouter' } } : {}),
+        ...(Object.keys(compat).length ? { compat } : {}),
       });
     }
     onChange([...models, ...added]); setPicked(new Set()); setManual('');

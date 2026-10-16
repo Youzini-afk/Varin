@@ -16,12 +16,14 @@ export interface SecretStore {
   read(reference: string): Promise<string | null>;
   modify(reference: string, change: (current: string | null) => string | null): Promise<void>;
 }
-export interface ResolvedCredential { auth: { apiKey?: string; headers?: Record<string, string | null>; baseUrl?: string }; source?: string }
+export interface ResolvedCredential { auth: { apiKey?: string; headers?: Record<string, string | null>; baseUrl?: string }; source?: string; anthropicOauth?: boolean }
 export interface OAuthProvider {
   /** Retain the exact reviewed implementation for a captured execution. */
   capture?(): { provider: OAuthProvider; release(): void };
   refresh(value: Extract<AccountCredential['value'], { kind: 'oauth' }>): Promise<Extract<AccountCredential['value'], { kind: 'oauth' }>>;
   headers(value: Extract<AccountCredential['value'], { kind: 'oauth' }>): Record<string, string>;
+  baseUrl?(value: Extract<AccountCredential['value'], { kind: 'oauth' }>): string;
+  anthropicOauth?: boolean;
 }
 
 /** Local credentials use the shared file transaction owner for locking and atomic replacement. */
@@ -182,6 +184,6 @@ export class CredentialService {
     const fresh = await waitWithSignal(this.#fresh(source.reference, record, provider), signal);
     if (fresh.value.kind === 'api-key') return { auth: { apiKey: fresh.value.key }, source: 'credential file' };
     if (!provider) return invalid('oauth-provider-unavailable', 'The selected authentication provider is unavailable');
-    return { auth: { headers: provider.headers(fresh.value) }, source: 'oauth' };
+    return { auth: { headers: provider.headers(fresh.value), ...(provider.baseUrl ? { baseUrl: provider.baseUrl(fresh.value) } : {}) }, source: 'oauth', anthropicOauth: provider.anthropicOauth ?? false };
   }
 }

@@ -119,7 +119,7 @@ function ModelConnectionsEditor({ host }: { host: number }) {
     const kind = selected.authentication[0]!;
     choose({ id: crypto.randomUUID(), name: selected.name, type: id, enabled: true, baseUrl: selected.defaultBaseUrl ?? '',
       authentication: kind === 'credential' ? { kind, reference: '' } : kind === 'environment' ? { kind, variable: '' } : { kind } as ConnectionAuthentication,
-      parameters: {}, models: [] });
+      parameters: structuredClone(selected.defaultParameters ?? {}), models: structuredClone((selected.catalog ?? []).filter(model => selected.defaultModelIds?.includes(model.id))) });
   };
   const back = () => selectedModelId ? setSelectedModelId(null) : draft ? requestSettingsNavigation(closeEditor) : setAdding(false);
   const selectedModel = draft?.models.find(model => model.id === selectedModelId);
@@ -135,7 +135,7 @@ function ModelConnectionsEditor({ host }: { host: number }) {
         <Input aria-label={t('settings.models.filterProviders')} placeholder={t('settings.models.filterProviders')} value={providerQuery} onChange={event => setProviderQuery(event.target.value)} className="mb-6 max-w-sm" />
         <div className="grid gap-3 @xl:grid-cols-2 @4xl:grid-cols-3">
           {snapshot.types.filter(type => `${type.name} ${type.id}`.toLowerCase().includes(providerQuery.toLowerCase())).map(type => <button key={type.id} type="button" onClick={() => addChannel(type.id)} className="group flex items-center gap-4 rounded-xl border border-border/60 p-5 text-left transition-colors hover:border-border hover:bg-interactive-hover">
-            <ProviderLogo providerId={type.id} className="size-7 shrink-0" /><span className="min-w-0 flex-1"><span className="block typography-ui-label">{type.name}</span><span className="mt-1 block truncate typography-micro text-muted-foreground">{type.defaultBaseUrl ? new URL(type.defaultBaseUrl).hostname : t('settings.models.customEndpoint')}</span></span><Icon name="arrow-right-s" className="size-4 text-muted-foreground" />
+            <ProviderLogo providerId={type.id} className="size-7 shrink-0" /><span className="min-w-0 flex-1"><span className="block typography-ui-label">{type.name}</span><span className="mt-1 block truncate typography-micro text-muted-foreground">{type.defaultBaseUrl ? new URL(type.defaultBaseUrl).hostname : t('settings.models.customEndpoint')}</span>{type.oauthProviders?.length ? <span className="mt-2 inline-block rounded bg-muted px-1.5 py-0.5 typography-micro text-muted-foreground">{t('settings.models.accountSignIn')}</span> : null}</span><Icon name="arrow-right-s" className="size-4 text-muted-foreground" />
           </button>)}
         </div>
       </> : null}

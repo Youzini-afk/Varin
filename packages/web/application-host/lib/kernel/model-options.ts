@@ -36,9 +36,11 @@ export function modelOptions(model: SelectedModel, requested: ThreadThinkingLeve
       break;
     }
     case 'anthropic-messages': {
-      if (model.compat?.supportsMidConvoEffort === true) {
-        protocol.thinking = { type: 'adaptive', display: 'summarized', block_binding: { prefix_mismatch_behavior: 'drop_block' } };
-        protocol.outputConfig = { effort: 'high' };
+      if (model.compat?.thinkingFormat === 'implicit') { reasoningEffort = null; break; }
+      if (level === 'budget' && (model.compat?.forceAdaptiveThinking === true || model.compat?.supportsMidConvoEffort === true)) return failed('model-thinking-budget-unavailable');
+      if (model.reasoning && model.compat?.supportsMidConvoEffort === true) {
+        protocol.thinking = level === 'off' ? { type: 'disabled' } : { type: 'adaptive', display: 'summarized', block_binding: { prefix_mismatch_behavior: 'drop_block' } };
+        if (level !== 'off' && effort) protocol.outputConfig = { effort };
       } else if (model.reasoning) {
         protocol.thinking = level === 'off' ? { type: 'disabled' }
           : model.compat?.forceAdaptiveThinking === true && level !== 'budget' ? { type: 'adaptive', display: 'summarized' }
@@ -51,7 +53,7 @@ export function modelOptions(model: SelectedModel, requested: ThreadThinkingLeve
     }
     case 'google-generative-ai': case 'google-vertex': {
       if (!model.reasoning) break;
-      const usesLevel = /gemini-3(?:\.\d+)?-(?:pro|flash)|gemma-?4/.test(requestModelId)
+      const usesLevel = model.compat?.thinkingFormat === 'google-level' || /gemini-[34](?:\.\d+)?-(?:pro|flash|argon)|gemma-?4/.test(requestModelId)
         || ['gemini-flash-latest', 'gemini-flash-lite-latest'].includes(requestModelId.split('/').at(-1)!);
       if (level === 'off') protocol.thinkingConfig = { thinkingBudget: 0 };
       else if (level === 'on') protocol.thinkingConfig = { includeThoughts: true };
@@ -80,13 +82,14 @@ export function modelOptions(model: SelectedModel, requested: ThreadThinkingLeve
       const candidate = (namedModel && (namedModel.includes('.') || /^claude[-_.]/.test(namedModel)) ? namedModel : model.name)
         .toLowerCase().replace(/[\s_.:]+/g, '-');
       if (!candidate.includes('claude')) return failed('model-thinking-protocol-unavailable');
-      const adaptive = ['opus-4-6', 'opus-4-7', 'opus-4-8', 'opus-5', 'sonnet-4-6', 'sonnet-5', 'fable-5'].some(name => candidate.includes(name));
+      const adaptive = ['opus-4-6', 'opus-4-7', 'opus-4-8', 'opus-5', 'sonnet-4-6', 'sonnet-5', 'haiku-5', 'fable-5'].some(name => candidate.includes(name));
       protocol.additionalModelRequestFields = adaptive && level !== 'budget' ? { thinking: { type: 'adaptive', display: 'summarized' },
         ...(effort ? { output_config: { effort: level === 'minimal' ? 'low' : effort } } : {}) }
         : { thinking: { type: 'enabled', budget_tokens: answerBudget(), display: 'summarized' }, anthropic_beta: ['interleaved-thinking-2025-05-14'] };
       break;
     }
     case 'openai-completions': {
+      if (model.compat?.requiresReasoningContentOnAssistantMessages === true) protocol.requiresReasoningContent = true;
       if (model.reasoning) {
         switch (model.compat?.thinkingFormat) {
           case 'qwen': parameters.enable_thinking = level !== 'off'; break;
@@ -116,5 +119,5 @@ export function modelOptions(model: SelectedModel, requested: ThreadThinkingLeve
   // Explicit profile/user selection wins over catalog defaults, including zero.
   if (temperature !== undefined) delete samplingParams.temperature;
   return { thinkingLevel: level, reasoningEffort,
-    modelOptions: { ...(temperature === undefined ? {} : { temperature }), ...(Object.keys(samplingParams).length ? { samplingParams } : {}), ...(Object.keys(protocol).length ? { protocol } : {}) } };
+    modelOptions: { ...(model.compat?.copilot === true ? { copilot: true } : {}), ...(temperature === undefined ? {} : { temperature }), ...(Object.keys(samplingParams).length ? { samplingParams } : {}), ...(Object.keys(protocol).length ? { protocol } : {}) } };
 }

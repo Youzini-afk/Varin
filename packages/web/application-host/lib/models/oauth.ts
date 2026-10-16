@@ -5,6 +5,7 @@ import type { OAuthProvider, AccountCredential } from './credentials.js';
 import type { AuthorizationPrompt } from '../authorization-flows.js';
 import { waitWithSignal } from '../cancellation.js';
 import { ModelConfigurationError, object } from './configuration.js';
+import { deviceOAuthProviders } from './oauth-device.js';
 
 type Token = Extract<AccountCredential['value'], { kind: 'oauth' }>;
 export interface ModelOAuthProvider extends OAuthProvider {
@@ -81,6 +82,7 @@ async function browserLogin(flow: BrowserFlow, prompt: AuthorizationPrompt): Pro
 export function modelOAuthProviders(fetchImpl: typeof fetch): ModelOAuthProvider[] {
   const codexClient = 'app_EMoamEEZ73f0CkXaXp7hrann', anthropicClient = '9d1c250a-e61b-44d9-88ed-5944d1962f5e';
   return [
+    ...deviceOAuthProviders(fetchImpl),
     {
       id: 'openai-codex', name: 'ChatGPT / Codex',
       login: prompt => browserLogin({ id: 'openai-codex', authorize: 'https://auth.openai.com/oauth/authorize', callback: 'http://localhost:1455/auth/callback', clientId: codexClient,
@@ -91,7 +93,7 @@ export function modelOAuthProviders(fetchImpl: typeof fetch): ModelOAuthProvider
       headers: value => ({ authorization: `Bearer ${value.accessToken}`, 'chatgpt-account-id': value.accountId! }),
     },
     {
-      id: 'anthropic', name: 'Claude Pro / Max',
+      id: 'anthropic', name: 'Claude Pro / Max', anthropicOauth: true,
       login: prompt => browserLogin({ id: 'anthropic', authorize: 'https://claude.ai/oauth/authorize', callback: 'http://localhost:53692/callback', clientId: anthropicClient,
         scope: 'org:create_api_key user:profile user:inference user:sessions:claude_code user:mcp_servers user:file_upload',
         exchange: async (code, verifier, state, redirect, signal) => token('anthropic', await post(fetchImpl, 'https://platform.claude.com/v1/oauth/token', { grant_type: 'authorization_code', client_id: anthropicClient, code, state, code_verifier: verifier, redirect_uri: redirect }, true, signal)),

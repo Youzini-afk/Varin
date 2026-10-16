@@ -126,14 +126,15 @@ test('changing authentication discards an entered key instead of overriding the 
 });
 
 test('new services select a provider before editing connection details', async () => {
-  snapshot.types.push({ ...snapshot.types[0]!, id: 'replacement', name: 'Replacement', defaultBaseUrl: 'https://example.test/v1' });
+  const preset = { id: 'ready', name: 'Ready model', enabled: true, operations: ['chat' as const], input: ['text' as const, 'image' as const], contextWindow: 128000, maxOutputTokens: 8192, reasoning: true, thinking: { mode: 'levels' as const, levels: ['low' as const, 'high' as const], allowOff: true } };
+  snapshot.types.push({ ...snapshot.types[0]!, id: 'replacement', name: 'Replacement', defaultBaseUrl: 'https://example.test/v1', catalog: [preset], defaultModelIds: ['ready'] });
   await act(async () => root.render(<ModelConnectionsPage />));
   await click('settings.models.addChannel');
   const provider = [...container.querySelectorAll('button')].find(item => item.textContent?.includes('Replacement'))!;
   await act(async () => provider.click());
   expect((container.querySelector('[aria-label="settings.models.endpoint"]') as HTMLInputElement).value).toBe('https://example.test/v1');
   await click('settings.models.save');
-  expect(fixtures.api.save.mock.calls[0]?.[0]).toMatchObject({ type: 'replacement', name: 'Replacement', authentication: { kind: 'none' } });
+  expect(fixtures.api.save.mock.calls[0]?.[0]).toMatchObject({ type: 'replacement', name: 'Replacement', authentication: { kind: 'none' }, models: [preset] });
 });
 
 test('discovery uses unsaved connection and key; model selection only changes the draft', async () => {

@@ -4,6 +4,7 @@ import type { AuthorizationState } from '@varin/application-client';
 export interface AuthorizationPrompt {
   signal: AbortSignal;
   showAuthorizationUrl(url: URL): void;
+  showDeviceCode?(url: URL, code: string): void;
   promptForRedirectUrl(signal: AbortSignal): Promise<string | undefined>;
 }
 interface Flow { state: AuthorizationState; controller: AbortController; reply?: (value: string | undefined) => void }
@@ -15,6 +16,7 @@ export class AuthorizationFlows {
     this.#flows.set(id, flow);
     const prompt: AuthorizationPrompt = { signal: flow.controller.signal,
       showAuthorizationUrl: url => { if (!flow.controller.signal.aborted) { flow.state.authorizationUrl = url.href; this.changed(); } },
+      showDeviceCode: (url, code) => { if (!flow.controller.signal.aborted) { flow.state.authorizationUrl = url.href; flow.state.deviceCode = code; this.changed(); } },
       promptForRedirectUrl: signal => new Promise(resolve => {
         const combined = AbortSignal.any([signal, flow.controller.signal]);
         const finish = (value: string | undefined) => { combined.removeEventListener('abort', abort); delete flow.reply; resolve(value); };

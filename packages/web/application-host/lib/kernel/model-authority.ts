@@ -54,6 +54,10 @@ function sameScope(left: CredentialScope, right: CredentialScope): boolean {
 export function createModelAuthority(authority: ModelAuthority) {
   async function configurationFor(model: SelectedModel, thinkingLevel?: ThreadThinkingLevel, temperature?: number, source: ModelExecutionAuthority = authority): Promise<ModelSessionConfiguration> {
     if (!families.has(model.api) && !(model.adapterId && model.adapterVersion && model.endpointPath)) return failed('model-protocol-unavailable');
+    if (model.compat?.copilot === true) {
+      const resolved = await source.getAuth(model.providerId, model.modelId);
+      if (resolved?.auth.baseUrl) model = { ...model, baseUrl: resolved.auth.baseUrl };
+    }
     const env = await source.routingEnvironment(model.providerId);
     const requestModelId = model.requestModelId ?? model.modelId;
     const anthropicOauth = model.api === 'anthropic-messages' && await source.anthropicAuthentication?.(model.providerId, model.modelId) === 'oauth';

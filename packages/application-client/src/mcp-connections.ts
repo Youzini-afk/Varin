@@ -1,7 +1,7 @@
 /** Application Host MCP configuration and sign-in, independent of conversation runtimes. */
 import { runtimeFetch } from './transport/runtime-fetch.js';
 import { getRuntimeEndpointGeneration } from './transport/runtime-switch.js';
-export interface AuthorizationState { id: string; status: 'pending' | 'completed' | 'cancelled' | 'failed'; authorizationUrl?: string; message?: string }
+export interface AuthorizationState { id: string; status: 'pending' | 'completed' | 'cancelled' | 'failed'; authorizationUrl?: string; deviceCode?: string; message?: string }
 export interface McpConfigurationSource { path: string; scope: 'global' | 'project' }
 export interface McpConfigurationServer {
   name: string; source: string; override?: string; enabled: boolean; exposure: string;
