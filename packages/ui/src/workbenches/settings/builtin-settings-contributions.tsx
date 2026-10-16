@@ -1,6 +1,6 @@
 import { WorkConnectionsPage } from '@/components/sections/connections/WorkConnectionsPage';
 import { AccessSettingsPage, HistorySettingsPage, NetworkSettingsPage } from '@/components/sections/connections/SettingsUtilityPages';
-import { StorageSettings } from '@/components/sections/storage/StorageSettings';
+import { StorageSettingsPage } from '@/components/sections/storage/StorageSettingsPage';
 import { HarnessSettingsPage } from '@/components/sections/harness/HarnessSettingsPage';
 import type { SurfaceActivationContext } from '@varin/extension-surface';
 import { AgentMemoryPage } from '@/components/sections/assistant/AgentMemoryPage';
@@ -38,7 +38,7 @@ const implementationFor = (spec: BuiltinSettingsPageSpec): SettingsPageImplement
   } else {
     switch (spec.renderer) {
       case 'history': implementation = { renderContent: () => <HistorySettingsPage /> }; break;
-      case 'storage': implementation = { renderContent: () => <StorageSettings /> }; break;
+      case 'storage': implementation = { renderContent: () => <StorageSettingsPage /> }; break;
       case 'work-connections': implementation = { renderContent: () => <WorkConnectionsPage /> }; break;
       case 'network': implementation = { renderContent: () => <NetworkSettingsPage /> }; break;
       case 'access': implementation = { renderContent: () => <AccessSettingsPage /> }; break;

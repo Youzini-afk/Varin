@@ -37,6 +37,7 @@ const fixture = async (requireClientAuth = true) => {
   const auth = createUiAuth({ requireClientAuth, clientAuthController: {
     authenticateBearerToken: async token => { const client = clients.get(token); return client ? { ok: true, clientId: client.id, client } : null; },
   } });
+  cleanup.push(auth.dispose);
   const app = express(); app.use(express.json());
   const resolve: RequestHandler = async (request, response, next) => {
     const context = await auth.resolveAuthContext(request, response);
@@ -58,7 +59,7 @@ const fixture = async (requireClientAuth = true) => {
     const response = await request('/auth/url-token', token, 'POST'); expect(response.status).toBe(200);
     return (await response.json() as { token: string }).token;
   };
-  return { app, url, request, mint, ssh, clients, spawn };
+  return { app, url, request, mint, ssh, clients, spawn, auth };
 };
 const wsDenied = (url: string) => new Promise<number>((resolve, reject) => {
   const socket = new WebSocket(url); cleanup.push(() => socket.terminate());
@@ -90,7 +91,7 @@ test('actual Host management routes reject read-only, missing-capability and dir
   expect((await f.request('/api/connections/ssh/peer/connect', 'configuration', 'POST')).status).toBe(403);
   for (const token of ['full', 'admin', 'configuration']) {
     const response = await f.request('/api/connections/hosts', token);
-    expect(response.status).toBe(200); expect((await response.json()).hosts[0].clientToken).toBe('fixture-peer-secret');
+    expect(response.status).toBe(200); expect(await response.json()).toMatchObject({ hosts: [{ clientToken: 'fixture-peer-secret' }] });
   }
   expect((await f.request('/api/connections/hosts', 'full', 'PUT', { hosts: [], defaultHostId: null })).status).toBe(200);
   expect(f.ssh.settingsStore.readSync().desktopHosts).toEqual([]);
@@ -142,4 +143,6 @@ test('local UI-session grants preserve trusted session authority without treatin
   const socket = new WebSocket(`${f.url.replace('http:', 'ws:')}/api/connections/hosts/peer/proxy/api/terminal/ws?varin_url_token=${grant}`);
   cleanup.push(() => socket.terminate()); await once(socket, 'open'); socket.send('hello');
   const [data] = await once(socket, 'message'); expect(String(data)).toBe('session accepted');
+  f.auth.dispose();
+  expect(await wsDenied(`${f.url.replace('http:', 'ws:')}/api/connections/hosts/peer/proxy/api/terminal/ws?varin_url_token=${grant}`)).toBe(401);
 });

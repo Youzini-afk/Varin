@@ -60,6 +60,13 @@ const desktopTransport: SshConnectionsTransport = {
 export function createSshConnectionsStore(transport: SshConnectionsTransport = desktopTransport) {
   let ownerGeneration = 0;
   let stopStatusListener: (() => Promise<void>) | undefined;
+  const assertCollectionWritable = (): void => {
+    const state = store.getState();
+    if (!state.initialized || state.isLoading) {
+      throw new Error('Load this Host’s SSH connections successfully before changing them.');
+    }
+    if (state.isSaving) throw new Error('An SSH connection change is already being saved.');
+  };
   const store = create<DesktopSshState>((set, get) => ({
     instances: [],
     statusesById: {},
@@ -72,9 +79,9 @@ export function createSshConnectionsStore(transport: SshConnectionsTransport = d
     error: null,
 
     load: async () => {
-      if (get().isLoading) return;
+      if (get().isLoading || get().isSaving) return;
       const generation = ownerGeneration;
-      set({ isLoading: true, error: null });
+      set({ isLoading: true, initialized: false, error: null });
       try {
         const [config, statuses] = await Promise.all([transport.get(), transport.status()]);
         if (generation !== ownerGeneration) return;
@@ -147,6 +154,7 @@ export function createSshConnectionsStore(transport: SshConnectionsTransport = d
     },
 
     setInstances: async (instances) => {
+      assertCollectionWritable();
       const generation = ownerGeneration;
       set({ isSaving: true, error: null });
       try {
@@ -165,6 +173,7 @@ export function createSshConnectionsStore(transport: SshConnectionsTransport = d
     },
 
     upsertInstance: async (instance) => {
+      assertCollectionWritable();
       const current = get().instances;
       const next = current.some((item) => item.id === instance.id)
         ? current.map((item) => (item.id === instance.id ? instance : item))
@@ -181,6 +190,9 @@ export function createSshConnectionsStore(transport: SshConnectionsTransport = d
     },
 
     removeInstance: async (id) => {
+      // A missing baseline must never disconnect a running connection or
+      // replace the owner's collection with the initial empty projection.
+      assertCollectionWritable();
       const generation = ownerGeneration;
       await transport.disconnect(id).catch(() => undefined);
       if (generation !== ownerGeneration) return;

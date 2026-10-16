@@ -506,13 +506,21 @@ export const createUiAuth = ({
   requireClientAuth = false,
 }: UiAuthOptions = {}) => {
   const normalizedPassword = normalizePassword(password);
-  const urlAuthTokens = new Map<string, { expiresAt: number; sessionToken: string; bearerToken?: string }>();
+  const urlAuthTokens = new Map<string, { expiresAt: number; sessionToken: string; bearerToken?: string; expiryTimer: ReturnType<typeof setTimeout> }>();
+  const removeUrlAuthToken = (token: string): void => {
+    const entry = urlAuthTokens.get(token);
+    if (entry) clearTimeout(entry.expiryTimer);
+    urlAuthTokens.delete(token);
+  };
+  const clearUrlAuthTokens = (): void => {
+    for (const token of urlAuthTokens.keys()) removeUrlAuthToken(token);
+  };
 
   const sweepUrlAuthTokens = (): void => {
     const now = Date.now();
     for (const [token, entry] of urlAuthTokens.entries()) {
       if (!entry || entry.expiresAt <= now) {
-        urlAuthTokens.delete(token);
+        removeUrlAuthToken(token);
       }
     }
   };
@@ -521,7 +529,9 @@ export const createUiAuth = ({
     sweepUrlAuthTokens();
     const token = `${URL_AUTH_TOKEN_PREFIX}${crypto.randomBytes(24).toString('base64url')}`;
     const expiresAt = Date.now() + URL_AUTH_TOKEN_TTL_MS;
-    urlAuthTokens.set(token, { sessionToken, expiresAt, ...(bearerToken ? { bearerToken } : {}) });
+    const expiryTimer = setTimeout(() => removeUrlAuthToken(token), URL_AUTH_TOKEN_TTL_MS);
+    expiryTimer.unref?.();
+    urlAuthTokens.set(token, { sessionToken, expiresAt, expiryTimer, ...(bearerToken ? { bearerToken } : {}) });
     return { token, expiresAt };
   };
 
@@ -531,7 +541,7 @@ export const createUiAuth = ({
     if (!token || !token.startsWith(URL_AUTH_TOKEN_PREFIX)) return null;
     const entry = urlAuthTokens.get(token);
     if (!entry || entry.expiresAt <= Date.now()) {
-      urlAuthTokens.delete(token);
+      removeUrlAuthToken(token);
       return null;
     }
     if (entry.bearerToken) {
@@ -741,7 +751,7 @@ export const createUiAuth = ({
         if (!res) return null;
         return ensureSessionToken(req, res);
       },
-      dispose: () => undefined,
+      dispose: clearUrlAuthTokens,
     };
   }
 
@@ -767,7 +777,7 @@ export const createUiAuth = ({
   const rotateJwtSecret = (): void => {
     const nextSecret = crypto.randomBytes(32).toString('hex');
     jwtSecret = persistJwtSecret(nextSecret);
-    urlAuthTokens.clear();
+    clearUrlAuthTokens();
     rebuildPasskeyController();
   };
 
@@ -1099,6 +1109,7 @@ export const createUiAuth = ({
   };
 
   const dispose = (): void => {
+    clearUrlAuthTokens();
     loginRateLimiter.clear();
     stopRateLimitCleanup();
     passkeyController.dispose();

@@ -106,7 +106,7 @@ it('refuses endpoint or Host identity substitution, arbitrary URLs, and recursiv
 });
 it('preserves remote read-only and directory restrictions and exposes observed offline or unsupported targets', async () => {
   const f = await fixture(); f.setReadOnly();
-  const response = await f.post('inventory', { scope: bScope, target: f.target }); expect(response.status).toBe(200); expect((await response.json()).canCleanup).toBe(false);
+  const response = await f.post('inventory', { scope: bScope, target: f.target }); expect(response.status).toBe(200); expect(await response.json()).toMatchObject({ canCleanup: false });
   expect((await f.post('cleanup', confirmation(await previewFor(f)))).status).toBe(403);
   f.restrict(); expect((await f.post('inventory', { scope: bScope, target: f.target })).status).toBe(403);
   f.unsupported(); expect((await f.registry.storageTargets())[0]?.state).toBe('unsupported'); f.deny(); expect((await f.registry.storageTargets())[0]?.state).toBe('restricted'); f.offline(); expect((await f.registry.storageTargets())[0]?.state).toBe('offline');
@@ -120,7 +120,7 @@ it('does not turn an HTTP-successful malformed identity into a successful invent
 it('does not elevate a read-only caller through the coordinator trusted remote credential', async () => {
   const f = await fixture();
   const response = await f.post('inventory', { scope: bScope, target: f.target }, 'readonly-a');
-  expect(response.status).toBe(200); expect((await response.json()).canCleanup).toBe(false);
+  expect(response.status).toBe(200); expect(await response.json()).toMatchObject({ canCleanup: false });
   const preview = await (await f.post('preview', { scope: bScope, target: f.target }, 'readonly-a')).json() as StorageCleanupPreview;
   expect((await f.post('cleanup', confirmation(preview), 'readonly-a')).status).toBe(403);
   expect(f.remoteCalls.filter(item => item.url.endsWith('/storage/cleanup'))).toHaveLength(0);

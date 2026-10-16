@@ -13,13 +13,19 @@ export async function measureDirectory(root: string, signal?: AbortSignal): Prom
     signal?.throwIfAborted();
     const filename = pending.pop()!;
     try {
-      const entry = await lstat(filename);
+      // Preserve full filesystem identities (notably 64-bit Windows inode IDs)
+      // and nanosecond change times instead of rounding them through JS numbers.
+      const entry = await lstat(filename, { bigint: true });
       if (entry.isSymbolicLink()) { issues.push(`Symbolic link was not followed: ${filename}`); continue; }
       const relative = path.relative(root, filename);
-      identities.push(`${relative}\0${entry.dev}:${entry.ino}\0${entry.size}\0${entry.mtimeMs}\0${entry.ctimeMs}`);
+      identities.push(`${relative}\0${entry.dev}:${entry.ino}\0${entry.size}\0${entry.mtimeNs}\0${entry.ctimeNs}`);
       if (entry.isDirectory()) {
         for (const name of (await readdir(filename)).sort().reverse()) pending.push(path.join(filename, name));
-      } else if (entry.isFile()) files.push({ path: filename, bytes: entry.size, identity: entry.ino ? `${entry.dev}:${entry.ino}` : filename });
+      } else if (entry.isFile()) {
+        const bytes = Number(entry.size);
+        if (!Number.isSafeInteger(bytes)) issues.push(`File length exceeds the measurable integer range: ${filename}`);
+        else files.push({ path: filename, bytes, identity: entry.ino ? `${entry.dev}:${entry.ino}` : filename });
+      }
       else issues.push(`Unsupported filesystem entry: ${filename}`);
     } catch (error) {
       const code = (error as NodeJS.ErrnoException).code;

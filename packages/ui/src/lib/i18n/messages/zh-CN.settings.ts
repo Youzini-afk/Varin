@@ -2844,4 +2844,9 @@ export const settingsDict = {
   "settings.connections.resourceManageDescription": "这些连接归当前 Agent Host 管理。SSH、本地地址和连接检测都在该 Host 上执行。保存不会切换当前会话，也不会迁移已受理的 Run。",
   "settings.connections.resourceLocal": "Agent Host 上的本地地址",
   "settings.connections.relayResourceUnsupported": "仅中继连接暂不能作为资源 Host",
+  "settings.connections.resourceCredentialsNote": "凭据保存在当前 Agent Host，由该 Host 用于连接这项资源。",
+  "settings.connections.resourceForwardListener": "此转发在当前 Agent Host 上监听的地址和端口。",
+  "settings.connections.resourceForwardTarget": "当前 Agent Host 上接收远端监听转发流量的地址和端口。",
+  "settings.connections.resourceReverseForward": "在资源机器上打开端口，将流量转回当前 Agent Host。",
+  "settings.connections.readBeforeWrite": "请先成功读取该 Host 已保存的连接，再进行修改。",
 } as const;

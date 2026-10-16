@@ -33,7 +33,7 @@ interface SettingsPageLayoutProps {
 
 /**
  * Standard layout wrapper for settings page content.
- * UI Kit: max-width 840px, padding 32px vertical / 48px horizontal.
+ * Shared responsive content width, scrolling and fixed save-unit footer.
  */
 export const SettingsPageLayout: React.FC<SettingsPageLayoutProps> = ({
   children,

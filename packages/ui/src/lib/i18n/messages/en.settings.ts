@@ -2843,4 +2843,9 @@ export const settingsDict = {
   "settings.connections.resourceManageDescription": "These connections belong to the current Agent Host. SSH, localhost addresses and connection checks run there. Saving does not change the current conversation or move accepted Runs.",
   "settings.connections.resourceLocal": "Local address on the Agent Host",
   "settings.connections.relayResourceUnsupported": "Relay-only resource connection unavailable",
+  "settings.connections.resourceCredentialsNote": "Credentials are saved on the current Agent Host and used by that Host to connect to this resource.",
+  "settings.connections.resourceForwardListener": "Local host and port where this forward listens on the current Agent Host.",
+  "settings.connections.resourceForwardTarget": "Host and port on the current Agent Host that receive traffic from the remote listener.",
+  "settings.connections.resourceReverseForward": "Open a port on the resource machine that connects back to the current Agent Host.",
+  "settings.connections.readBeforeWrite": "Read this Host’s saved connections successfully before making changes.",
 } as const;
