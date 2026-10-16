@@ -1367,6 +1367,16 @@ pub(crate) fn spawn(
                             .collect::<Vec<_>>();
                             return Ok(json!(tools));
                         }
+                        if method == "runtime.tools.catalog" {
+                            let _: crate::protocol_generated::KernelEmptyParams =
+                                serde_json::from_value(params)?;
+                            return Ok(serde_json::to_value(crate::run_tools::builtin_schemas(
+                                &crate::tools::ToolKind::all().collect(),
+                                true,
+                                true,
+                                false,
+                            ))?);
+                        }
                         if method == "runtime.child.capabilities" {
                             if !params.as_object().is_some_and(|value| value.is_empty()) {
                                 return Err(KernelError::Protocol(

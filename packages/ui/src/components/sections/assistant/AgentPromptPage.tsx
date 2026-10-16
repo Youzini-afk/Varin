@@ -3,7 +3,7 @@ import React from 'react';
 import { SettingsActionBar } from '../shared/SettingsActionBar';
 import { requestSettingsNavigation } from '@/lib/settings/drafts';
 import { agentScopeKey, personalizeAgentSystemPrompt, renderAgentSystemPrompt, splitAgentSystemPrompt,
-  type AgentMemoryScope, type AgentMemoryNote, type AgentSystemPromptSnapshot, type AgentSystemPromptPreview } from '@varin/protocol';
+  type AgentMemoryScope, type AgentMemoryNote, type AgentSystemPromptSnapshot, type AgentSystemPromptPreview, type AgentToolPrompt } from '@varin/protocol';
 import { runtimeFetch, getRuntimeEndpointGeneration } from '@varin/application-client';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import { SettingsPageLayout } from '@/components/sections/shared/SettingsPageLayout';
@@ -35,6 +35,10 @@ export function AgentPromptPage() {
   const revision = React.useRef(0);
   const editOriginal = React.useRef<Record<string, string>>({});
   const [saved, setSaved] = React.useState(false);
+  const [previewPart, setPreviewPart] = React.useState<'system' | 'tools'>('system');
+  const [toolCatalog, setToolCatalog] = React.useState<{ owner: string; tools: AgentToolPrompt[] } | null>(null);
+  const [toolsLoading, setToolsLoading] = React.useState(false);
+  const [toolsError, setToolsError] = React.useState<string | null>(null);
   const { threads: runtime } = useRuntimeAPIs();
   const selected = useThreadStore(state => state.selectedIdentity);
   const summaries = useThreadStore(state => state.threads);
@@ -45,14 +49,32 @@ export function AgentPromptPage() {
   const targetKey = JSON.stringify([settings.runtime, agentScopeKey(scope), branchId]);
   const view = loaded?.owner === targetKey ? loaded.view : null;
   const snapshot = view?.checkpoint;
+  const tools = threadId ? view?.tools : toolCatalog?.owner === targetKey ? toolCatalog.tools : undefined;
+  const toolPreview = React.useMemo(() => tools?.map(tool =>
+    `${tool.name}\n\n${tool.description}\n\n${JSON.stringify(tool.schema, null, 2)}`).join('\n\n────────────────────────\n\n') ?? '', [tools]);
   const projectId = scope.kind === 'project' ? scope.id : view?.projectId;
   const request = React.useRef(0);
   const owner = React.useRef(targetKey);
   React.useLayoutEffect(() => {
     owner.current = targetKey;
     setLoaded(null); setDirty(false); setDraft(''); setSaved(false); setError(null);
+    setToolCatalog(null); setToolsLoading(false); setToolsError(null);
   }, [targetKey]);
   const projectTarget = scope.kind === 'project' ? scope.id : undefined;
+  React.useEffect(() => {
+    if (!view || scope.kind === 'thread' || previewPart !== 'tools') return;
+    const controller = new AbortController();
+    setToolsLoading(true); setToolsError(null);
+    const query = projectTarget ? `?projectId=${encodeURIComponent(projectTarget)}` : '';
+    void runtimeFetch(`/api/agent-personalization/tools${query}`, { signal: controller.signal, cache: 'no-store' }).then(async response => {
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error || response.statusText);
+      if (!controller.signal.aborted && owner.current === targetKey && settings.runtime === getRuntimeEndpointGeneration()) setToolCatalog({ owner: targetKey, tools: result });
+    }).catch(failure => {
+      if (!controller.signal.aborted && owner.current === targetKey) setToolsError(failure instanceof Error ? failure.message : String(failure));
+    }).finally(() => { if (!controller.signal.aborted && owner.current === targetKey) setToolsLoading(false); });
+    return () => controller.abort();
+  }, [scope.kind, previewPart, projectTarget, targetKey, settings.runtime, view]);
   const reload = React.useCallback(async (signal?: AbortSignal): Promise<PromptView | null> => {
     if (!threadId) {
       if (scope.kind === 'thread') return null;
@@ -69,7 +91,8 @@ export function AgentPromptPage() {
     if (!checkpoint || !basis) return null;
     if (basis.threadId !== threadId || basis.mode !== 'agent') throw new Error('This Thread does not own ordinary assistant instructions');
     const original = Object.fromEntries(basis.originalSections.map(section => [section.name, section.content]));
-    return { original, ...(basis.projectId ? { projectId: basis.projectId } : {}), checkpoint: { threadId, mode: 'agent', original, sections: splitAgentSystemPrompt(checkpoint.proposal.effective_system_prompt),
+    return { original, tools: view.launch?.selection.tools.map(({ name, description, schema }) => ({ name, description, schema })) ?? [],
+      ...(basis.projectId ? { projectId: basis.projectId } : {}), checkpoint: { threadId, mode: 'agent', original, sections: splitAgentSystemPrompt(checkpoint.proposal.effective_system_prompt),
       content: checkpoint.proposal.effective_system_prompt,
       personalization: { mode: 'agent', revision: basis.revision, threadId, threadRole: basis.threadRole as 'main' | 'worker' | 'read-only',
         ...(basis.projectId ? { projectId: basis.projectId } : {}), profiles: [], memories: basis.memorySnapshot.memories as AgentMemoryNote[] },
@@ -163,8 +186,12 @@ export function AgentPromptPage() {
         <section className="space-y-2 border-t pt-4"><div className="flex items-center justify-between gap-2">
           <h3 className="typography-ui-label">{t('assistant.prompt.effective')}</h3>
           <Button variant="ghost" size="sm" disabled={loading} onClick={() => void refresh()}>{t('assistant.reload')}</Button>
-        </div><p className="typography-micro text-muted-foreground">{t(scope.kind === 'thread' ? 'assistant.prompt.sources' : 'assistant.prompt.currentSources')}</p>
-          <pre className="max-h-[32rem] overflow-auto whitespace-pre-wrap break-words rounded-md border bg-muted/20 p-3 text-xs leading-6">{preview}</pre>
+        </div><p className="typography-micro text-muted-foreground">{t(previewPart === 'tools' ? scope.kind === 'thread' ? 'assistant.prompt.toolSources' : 'assistant.prompt.toolCatalogSources' : scope.kind === 'thread' ? 'assistant.prompt.sources' : 'assistant.prompt.currentSources')}</p>
+          <div className="flex gap-1">
+            <Button variant="ghost" size="sm" aria-pressed={previewPart === 'system'} className={previewPart === 'system' ? 'bg-muted' : ''} onClick={() => setPreviewPart('system')}>{t('assistant.prompt.systemText')}</Button>
+            <Button variant="ghost" size="sm" aria-pressed={previewPart === 'tools'} className={previewPart === 'tools' ? 'bg-muted' : ''} onClick={() => setPreviewPart('tools')}>{t('assistant.prompt.tools')}{tools ? ` · ${tools.length}` : ''}</Button>
+          </div>
+          {previewPart === 'tools' && toolsError && !threadId ? <p role="alert" className="typography-meta text-destructive">{toolsError}</p> : <pre className="max-h-[32rem] overflow-auto whitespace-pre-wrap break-words rounded-md border bg-muted/20 p-3 text-xs leading-6">{previewPart === 'system' ? preview : toolsLoading && !threadId ? t('common.loading') : toolPreview || t('assistant.prompt.noTools')}</pre>}
         </section>
         {snapshot?.lastRequest ? <details className="border-t pt-3"><summary className="cursor-pointer typography-meta">{t('assistant.prompt.lastRequest')} · {new Date(snapshot.lastRequest.timestamp).toLocaleTimeString()}</summary>
           <pre className="mt-2 max-h-96 overflow-auto whitespace-pre-wrap break-words text-xs leading-6">{snapshot.lastRequest.content}</pre>

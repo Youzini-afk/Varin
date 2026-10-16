@@ -36,15 +36,23 @@ export interface AgentMemoryChange {
   id: number;
   note: AgentMemoryNote | null;
 }
+/** Model-visible tool instructions; runtime metadata is not part of the prompt preview. */
+export interface AgentToolPrompt {
+  name: string;
+  description: string;
+  schema: unknown;
+}
 /** Current settings resources, independent of any execution checkpoint. */
 export interface AgentSystemPromptPreview {
   original: Record<string, string>;
   projectId?: string;
+  /** Tool definitions are a separate request field, never editable system sections. */
+  tools?: AgentToolPrompt[];
 }
 export interface AgentSystemPromptSnapshot {
   threadId: string;
   mode: "agent" | "bot";
-  /** Native current prompt, including tools, files and extensions. */
+  /** Current textual system sections, including files and extension instructions. */
   original: Record<string, string>;
   sections: Record<string, string>;
   content: string;

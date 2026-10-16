@@ -15,6 +15,14 @@ Native explicit `/skill` input activation uses this same owner. Resources share 
 `AgentSettingsService` transaction and `ProjectTrustService` admission. This module never executes
 package code, installs packages, invokes a model, or writes settings. Old Pi assets are not read or imported.
 
+The settings prompt preview reads current resource sections independently of tool metadata. Its tool
+tab loads the Rust built-in declarations, selected extension declarations and existing MCP directory
+through `memory/prompt-tool-catalog.ts`; opening it does not prepare tool executors or connect servers.
+This is a settings catalog, not a claim that every listed tool will be selected in a Run. Conversation
+scope uses that branch's saved launch selection, including its exact MCP and extension schemas.
+Tool descriptions and input schemas stay separate from editable system text and are never saved as
+personalization overrides.
+
 ## Two operations
 
 - `prepare(admittedScope, signal)` returns `ResourceResult<{ snapshot: PreparedAgentResources }>`. The

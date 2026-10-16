@@ -1159,6 +1159,9 @@ export class AgentRuntimeClient {
   sourceTools(mode: import('./protocol.generated.js').SourceMode, signal?: AbortSignal): Promise<string[]> {
     return this.kernel.agentRuntimeRequest('runtime.source.tools', { mode }, signal);
   }
+  toolCatalog(signal?: AbortSignal): Promise<import('./protocol.generated.js').LaunchTool[]> {
+    return this.kernel.agentRuntimeRequest('runtime.tools.catalog', {}, signal);
+  }
   childCapabilities(signal?: AbortSignal): Promise<ChildCapabilityDescriptor[]> {
     return this.kernel.agentRuntimeRequest('runtime.child.capabilities', {}, signal);
   }

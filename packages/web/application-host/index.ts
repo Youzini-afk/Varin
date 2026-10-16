@@ -180,6 +180,7 @@ import { createMemoryOrganizer } from './lib/memory/memory-organizer.js';
 
 import { createAgentPersonalization } from './lib/memory/agent-personalization.js';
 import { registerAgentPersonalizationRoutes } from './lib/memory/agent-personalization-routes.js';
+import { createPromptToolCatalog } from './lib/memory/prompt-tool-catalog.js';
 
 import { createBotService } from './lib/bots/bot-service.js';
 import { createBotLifecycleRuntime } from './lib/bots/bot-lifecycle-runtime.js';
@@ -1585,6 +1586,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   registerProjectTrustRoutes(app, projectTrust, uiAuthController.requireAuth);
   const modelsService = new ModelsService(VARIN_DATA_DIR, { projectTrusted: cwd => projectTrust.trusted(cwd), fetch: egressRuntime.fetch as typeof globalThis.fetch });
   const resourceManagement = createResourceManagement({ dataDirectory: VARIN_DATA_DIR, documents: documentsAuthority, settings: modelsService.settings,
+    promptTools: (context, signal) => promptToolCatalog(context, signal),
     resolveProjectRoot: async projectId => {
       const projects = sanitizeProjects((await readSettingsFromDisk()).projects) ?? [];
       const project = projects.find(entry => entry.id === projectId);
@@ -1658,15 +1660,16 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     credentialScope: async (_scope, provider) => modelsService.currentScope(provider),
   });
   let mcpSettingsRevision = 0;
+  const resolveMcpSettingsScope = async (cwd: string | undefined, signal: AbortSignal): Promise<import('./lib/mcp/authority.js').McpAuthorityScope> => {
+    const workspace = cwd ? await documentsAuthority.resolveWorkspace({ path: cwd }) : undefined;
+    signal.throwIfAborted();
+    const root = workspace ? (await documentsAuthority.admitWorkspaceRegistration(workspace.workspaceId, signal)).canonicalPath : agentMcpDir;
+    return { resourceOwner: { kind: 'local' }, agentDir: agentMcpDir, configCwd: root, executionCwd: root,
+      environmentId: workspace ? `${hostId}:${workspace.workspaceId}` : `${hostId}:global`,
+      executionScope: workspace ? 'workspace' : 'global', projectTrusted: !!workspace && await projectTrust.trusted(root), sessionId: 'mcp-settings' };
+  };
   const mcpSettings = createMcpSettings({ authority: mcpAuthority,
-    resolveScope: async (cwd, signal) => {
-      const workspace = cwd ? await documentsAuthority.resolveWorkspace({ path: cwd }) : undefined;
-      signal.throwIfAborted();
-      const root = workspace ? (await documentsAuthority.admitWorkspaceRegistration(workspace.workspaceId, signal)).canonicalPath : agentMcpDir;
-      return { resourceOwner: { kind: 'local' }, agentDir: agentMcpDir, configCwd: root, executionCwd: root,
-        environmentId: workspace ? `${hostId}:${workspace.workspaceId}` : `${hostId}:global`,
-        executionScope: workspace ? 'workspace' : 'global', projectTrusted: !!workspace && await projectTrust.trusted(root), sessionId: 'mcp-settings' };
-    },
+    resolveScope: resolveMcpSettingsScope,
     changed: () => {
       const revision = String(++mcpSettingsRevision);
       for (const client of uiVarinEventClients) {
@@ -2176,7 +2179,8 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     ...(uiAuthController ? { requireAuth: uiAuthController.requireAuth } : {}),
     ...(uiAuthController?.resolveAuthContext ? { resolveAuthContext: uiAuthController.resolveAuthContext } : {}),
   });
-  registerAgentPersonalizationRoutes(app, agentPersonalization, uiAuthController?.requireAuth ?? ((_req, _res, next) => next()), resourceManagement.prompt);
+  const promptToolCatalog = createPromptToolCatalog({ runtime: agentRuntime, extensions: extensionRuntime, mcp: mcpAuthority, mcpScope: resolveMcpSettingsScope });
+  registerAgentPersonalizationRoutes(app, agentPersonalization, uiAuthController?.requireAuth ?? ((_req, _res, next) => next()), resourceManagement.prompt, resourceManagement.toolCatalog);
   registerThreadMemoryRoutes(app, createThreadMemory({ history: botHistory, memory: memoryService,
     narrate: (scopeId, system, prompt, signal, selection) => memoryOrganizer.extractSelection(scopeId, system, prompt, signal, selection) }),
     uiAuthController?.requireAuth ?? ((_request, _response, next) => next()));

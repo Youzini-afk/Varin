@@ -15,7 +15,7 @@ import { parseSkill } from './formats.js';
 import { readAgentResourceConfiguration, resourceDirectory } from './packages.js';
 import { contentVersion, createAdmittedDirectoryReader } from './source-reader.js';
 import { agentSystemSections } from './render.js';
-import type { AgentSystemPromptPreview } from '@varin/protocol';
+import type { AgentSystemPromptPreview, AgentToolPrompt } from '@varin/protocol';
 
 export class ResourceManagementFailure extends Error {
   constructor(readonly status: number, readonly code: string, message: string) { super(message); }
@@ -36,6 +36,7 @@ export interface ResourceManagementDependencies {
   /** Resolve only a saved Host project identity. Do not accept a path as a project ID. */
   resolveProjectRoot(projectId: string): string | null | Promise<string | null>;
   userAgentsDirectory?: string;
+  promptTools?(context: { projectId?: string; projectRoot?: string }, signal?: AbortSignal): Promise<AgentToolPrompt[]>;
 }
 
 /** Authenticated editor owner. Discovery is shared with native Runs, but this current view never
@@ -227,6 +228,14 @@ export function createResourceManagement(deps: ResourceManagementDependencies) {
         if (result.status !== 'ready') throw new ResourceManagementFailure(result.status === 'invalid' ? 422 : result.status === 'denied' ? 403 : 503, `resource-${result.status}`, result.reason);
         return { original: agentSystemSections(result.resources, 'main'), ...(target.projectId ? { projectId: target.projectId } : {}) };
       }, signal);
+    },
+    async toolCatalog(target: ResourceManagementTarget, signal?: AbortSignal): Promise<AgentToolPrompt[]> {
+      signal?.throwIfAborted();
+      const context = await targetScope(target);
+      if (!deps.promptTools) throw new ResourceManagementFailure(503, 'tool-catalog-unavailable', 'Tool catalog is unavailable');
+      const tools = await deps.promptTools({ ...(target.projectId ? { projectId: target.projectId } : {}), ...(context.projectRoot ? { projectRoot: context.projectRoot } : {}) }, signal);
+      context.assertTrust(); signal?.throwIfAborted();
+      return tools;
     },
     list: async (target: ResourceManagementTarget, signal?: AbortSignal) => (await catalog(target, signal)).snapshot,
     read: async (target: ResourceManagementTarget, id: string, signal?: AbortSignal) => readSelection(await selected(target, id, signal), signal),

@@ -51,6 +51,7 @@ pub(crate) const KERNEL_CONTROL_METHODS: &[&str] = &[
     "runtime.child.cancel",
     "runtime.child.capabilities",
     "runtime.source.tools",
+    "runtime.tools.catalog",
     "runtime.tree.cancel",
     "runtime.goal.control",
     "runtime.followup.control",
@@ -138,6 +139,7 @@ pub(crate) const KERNEL_CONTROL_RESPONSE_METHODS: &[&str] = &[
     "runtime.child.cancel",
     "runtime.child.capabilities",
     "runtime.source.tools",
+    "runtime.tools.catalog",
     "runtime.tree.cancel",
     "runtime.goal.control",
     "runtime.followup.control",
@@ -4585,6 +4587,9 @@ pub(crate) fn validate_generated_method_params(method: &str, params: &Value) -> 
             .map(|_| ())
             .map_err(|error| error.to_string()),
         "runtime.source.tools" => serde_json::from_value::<SourceToolsParams>(params.clone())
+            .map(|_| ())
+            .map_err(|error| error.to_string()),
+        "runtime.tools.catalog" => serde_json::from_value::<KernelEmptyParams>(params.clone())
             .map(|_| ())
             .map_err(|error| error.to_string()),
         "runtime.child.release" => serde_json::from_value::<ChildExecutionParams>(params.clone())
