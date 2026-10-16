@@ -125,3 +125,11 @@ it('keeps unsupported or malformed data inspectable without guessing a file or m
   expect(await render({ content: [{ type: 'text', text: 'obsolete envelope' }] })).toBeNull();
   expect(container.textContent).toContain('obsolete envelope');
 });
+
+it('renders nested tool data as inspectable JSON rather than React children', async () => {
+  const data = { todos: [{ content: { TODO: 'Review the diff' }, status: { unexpected: true } }], values: [null, 0, false] };
+  expect(await render(data, 'succeeded', 'custom_todos')).toBeNull();
+  const tool = container.querySelector('[data-conversation-tool-disclosure]')!;
+  const details = [...tool.querySelectorAll('details')].find(node => node.querySelector('summary')?.textContent === 'details');
+  expect(details?.querySelector('pre')?.textContent).toBe(JSON.stringify(data, null, 2));
+});

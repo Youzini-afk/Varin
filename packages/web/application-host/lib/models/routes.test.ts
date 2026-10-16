@@ -14,7 +14,7 @@ afterEach(async () => { for (const close of cleanup.splice(0).reverse()) await c
 async function fixture(fetchImpl: EgressFetch) {
   const directory = await mkdtemp(join(tmpdir(), 'varin-model-route-'));
   cleanup.push(() => rm(directory, { recursive: true, force: true }));
-  const models = new ModelsService(directory, { projectTrusted: () => false });
+  const models = new ModelsService(directory, { projectTrusted: () => false, fetch: async () => { throw new Error("Unexpected model fixture network request"); } });
   const channel: ModelChannel = { id: 'local', name: 'Local', type: 'openai', enabled: true,
     baseUrl: 'http://127.0.0.1:8088/v1', authentication: { kind: 'none' }, parameters: {}, models: [] };
   const saved = await models.save(channel, (await models.read()).revision);

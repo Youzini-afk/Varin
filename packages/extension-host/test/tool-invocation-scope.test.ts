@@ -3,7 +3,7 @@ import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { setImmediate } from 'node:timers/promises';
+import { setImmediate, setTimeout as delay } from 'node:timers/promises';
 import test from 'node:test';
 import { build } from 'esbuild';
 import type { JsonValue, VarinExtensionServiceProvision } from '@varin/extension-contract';
@@ -171,22 +171,32 @@ test('a frozen installed tool makes its first call on v1 after v2 publishes and 
     });
     const selecting = h.runtime.selectCandidate({ extensionId: id, candidateIntegrity: candidate.integrity, expectedRevision: requested.revision });
     await published.promise; unsubscribe();
+    await selecting;
+    const next = await h.runtime.prepareService({ serviceId: `${id}.query`, version: 1, method: 'execute', args: [] });
+    original.release();
     assert.equal(old.revocationSignal.aborted, false);
     const v1 = await old.invoke('execute', [null], undefined, scope('first-v1')) as { version: string };
     assert.equal(v1.version, '1.0.0');
     assert.equal(h.runtime.supervisor.getActiveArtifactIdentity(originalOwner), undefined);
     assert.equal(h.runtime.supervisor.getRetainedArtifactIdentity(originalOwner), originalArtifact);
-    const child = h.runtime.services.bindPinned(`${id}.query`, 1, original.providerId).pin();
+    const childBinding = h.runtime.services.bindPinned(`${id}.query`, 1, original.providerId);
+    const child = childBinding.pin();
+    childBinding.release();
     old.release();
     assert.equal((await child.invoke('execute', [null], undefined, scope('child-v1')) as { version: string }).version, '1.0.0');
-    child.release(); await selecting;
+    child.release();
+    // Publication is not a physical-stop receipt. Wait for this original owner's disposer.
+    const retirementDeadline = Date.now() + 5_000;
+    while (h.runtime.supervisor.getRetainedArtifactIdentity(originalOwner) !== undefined && Date.now() < retirementDeadline) {
+      await delay(10);
+    }
     assert.equal(h.runtime.supervisor.getRetainedArtifactIdentity(originalOwner), undefined);
-    const next = await h.runtime.prepareService({ serviceId: `${id}.query`, version: 1, method: 'execute', args: [] });
     assert.equal((await next.invoke('execute', [null]) as { version: string }).version, '2.0.0');
     for (const [version, failure] of [['3.0.0', 'mismatch'], ['4.0.0', 'omit']] as const) {
       const bad = await h.runtime.installOrStage({ source: await h.source(id, version, failure), expectedRevision: (await h.runtime.catalog.snapshot()).revision });
       const broken = bad.extensions.find(entry => entry.manifest.id === id)!.candidate!;
-      await assert.rejects(h.runtime.prepareCandidate(id, broken.integrity), /declaration differs from manifest|did not register declared tool/);
+      await assert.rejects(h.runtime.prepareCandidate(id, broken.integrity), failure === 'mismatch'
+        ? /declaration differs from manifest/ : /did not register declared service contract/);
       assert.equal((await next.invoke('execute', [null]) as { version: string }).version, '2.0.0');
     }
     const pin = next.pin();

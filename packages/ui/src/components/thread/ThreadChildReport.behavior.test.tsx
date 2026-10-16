@@ -1,4 +1,6 @@
 import React, { act } from 'react';
+import { I18nProvider } from '@/lib/i18n';
+import { dict } from '@/lib/i18n/messages/en';
 import { createRoot, type Root } from 'react-dom/client';
 import { parseHTML } from 'linkedom';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
@@ -29,6 +31,7 @@ function fixture() {
   return { readReport, readExecutionReport, mediaRead, api: { collaboration: { readReport, readExecutionReport }, mediaRead } as unknown as ThreadsAPI };
 }
 let root: Root; let container: HTMLDivElement;
+const renderContent = (children: React.ReactNode) => root.render(<I18nProvider>{children}</I18nProvider>);
 beforeEach(() => {
   endpoint.generation = 1;
   const { document, window } = parseHTML('<!doctype html><html><body></body></html>');
@@ -38,23 +41,23 @@ beforeEach(() => {
 });
 afterEach(() => { act(() => root.unmount()); container.remove(); vi.unstubAllGlobals(); vi.restoreAllMocks(); });
 const click = async (text: string) => { await act(async () => [...container.querySelectorAll('button')].find(value => value.textContent === text)!.click()); };
-const render = async (api: ThreadsAPI, selected = identity, executionId?: string) => { await act(async () => root.render(<ThreadChildReport api={api} identity={selected} operationId="dispatch" executionId={executionId} itemId="report-original" />)); };
+const render = async (api: ThreadsAPI, selected = identity, executionId?: string) => { await act(async () => renderContent(<ThreadChildReport api={api} identity={selected} operationId="dispatch" executionId={executionId} itemId="report-original" />)); };
 
 it.each([undefined, 'execution-original'])('assembles the complete original UTF-8 output report before rendering, using execution %s', async executionId => {
   const f = fixture(); let finish!: (page: ChildReportPage) => void;
   const reader = executionId ? f.readExecutionReport : f.readReport;
   reader.mockResolvedValueOnce(first).mockImplementationOnce(() => new Promise(resolve => { finish = resolve; }));
-  await render(f.api, identity, executionId); await click(executionId ? 'Read execution report' : 'Read report');
+  await render(f.api, identity, executionId); await click(dict['chat.children.report']);
   expect(container.querySelector('[aria-label="Typed output"]')).toBeNull();
   expect(container.textContent).not.toContain('原始报告 before');
-  expect(container.textContent).toContain(`${first.next_offset} of ${first.total_bytes} bytes`);
+  expect(container.querySelector('[role="status"]')?.textContent).toContain(`${Math.round(first.next_offset! / first.total_bytes * 100)}%`);
   expect(reader.mock.calls[1]![3]).toBe(first.next_offset);
   await act(async () => finish(last));
   const content = container.querySelector('[aria-label="Typed output"]')!;
   expect([...content.children].map(value => value.tagName)).toEqual(['P', 'FIGURE', 'P', 'DETAILS']);
   expect(content.textContent).toContain('原始报告 before'); expect(content.textContent).toContain('after image');
   expect(content.textContent).toContain('opaque-lookalike'); expect(container.querySelectorAll('figure')).toHaveLength(1);
-  expect(f.mediaRead).not.toHaveBeenCalled(); await click('View image');
+  expect(f.mediaRead).not.toHaveBeenCalled(); await click(dict['chat.media.view']);
   expect(f.mediaRead).toHaveBeenCalledExactlyOnceWith({ ...identity, holder: { kind: 'child_report', operationId: 'dispatch', executionId: 'execution-original', itemId: 'report-original' }, partIndex: 1, chunkIndex: 0, expectedContentRef: 'sha256-child-image' }, expect.any(AbortSignal));
   expect(container.querySelector('img')?.getAttribute('src')).toBe('blob:child-report');
 });
@@ -64,17 +67,17 @@ it('keeps ordinary text report paging and never infers typed media from its JSON
   const split = Math.floor(text.length / 2);
   f.readReport.mockResolvedValueOnce({ ...first, format: 'text', text: text.slice(0, split), next_offset: split, total_bytes: text.length })
     .mockResolvedValueOnce({ ...first, format: 'text', text: text.slice(split), offset: split, next_offset: null, total_bytes: text.length });
-  await render(f.api); await click('Read report'); expect(f.readReport).toHaveBeenCalledTimes(1);
+  await render(f.api); await click(dict['chat.children.report']); expect(f.readReport).toHaveBeenCalledTimes(1);
   expect(container.textContent).toContain(text.slice(0, split)); expect(container.querySelector('figure')).toBeNull();
-  await click('Read next page'); expect(f.readReport.mock.calls[1]![3]).toBe(split);
+  await click(dict['chat.children.readMore']); expect(f.readReport.mock.calls[1]![3]).toBe(split);
   expect(container.textContent).toContain(text.slice(split)); expect(f.mediaRead).not.toHaveBeenCalled();
 });
 
 it.each(['cancel', 'thread', 'host'] as const)('discards an unfinished original report on %s without publishing partial output', async change => {
   const f = fixture(); let finish!: (page: ChildReportPage) => void;
   f.readReport.mockResolvedValueOnce(first).mockImplementationOnce(() => new Promise(resolve => { finish = resolve; }));
-  await render(f.api); await click('Read report'); const signal = f.readReport.mock.calls[1]![5]!;
-  if (change === 'cancel') await click('Cancel report read');
+  await render(f.api); await click(dict['chat.children.report']); const signal = f.readReport.mock.calls[1]![5]!;
+  if (change === 'cancel') await click(dict['chat.plan.cancel']);
   else if (change === 'thread') await render(f.api, { ...identity, threadId: 'next-parent' });
   else await act(async () => { endpoint.generation += 1; endpoint.listeners.forEach(listener => listener()); });
   expect(signal.aborted).toBe(true); await act(async () => finish(last));
@@ -86,19 +89,19 @@ it.each([
   { total_bytes: last.total_bytes + 1 }, { offset: last.offset + 1 }, { format: 'text' as const }, { next_offset: last.offset },
 ])('rejects a changed report page rather than mixing it into the original output: %s', async changed => {
   const f = fixture(); f.readReport.mockResolvedValueOnce(first).mockResolvedValueOnce({ ...last, ...changed });
-  await render(f.api); await click('Read report');
+  await render(f.api); await click(dict['chat.children.report']);
   expect(container.querySelector('[role="alert"]')).not.toBeNull(); expect(container.querySelector('[aria-label="Typed output"]')).toBeNull();
-  expect(f.mediaRead).not.toHaveBeenCalled(); await click('Retry report read');
+  expect(f.mediaRead).not.toHaveBeenCalled(); await click(dict['chat.timeline.retry']);
   expect(f.readReport.mock.calls[2]![3]).toBe(0); expect(container.textContent).toContain('after image');
 });
 
 it('reports malformed complete output without exposing raw partial JSON and keeps retries on the original report', async () => {
   const f = fixture(); const invalid = '{"data":"private raw fragment';
   f.readReport.mockResolvedValueOnce({ ...first, text: invalid, total_bytes: new TextEncoder().encode(invalid).length, next_offset: null });
-  await render(f.api); await click('Read report');
+  await render(f.api); await click(dict['chat.children.report']);
   expect(container.textContent).toContain('incomplete or invalid');
   expect(container.textContent).not.toContain('private raw fragment');
   expect(container.querySelector('[aria-label="Typed output"]')).toBeNull();
-  await click('Retry report read'); expect(container.textContent).toContain('after image');
+  await click(dict['chat.timeline.retry']); expect(container.textContent).toContain('after image');
   expect(f.readReport.mock.calls.every(call => call[1] === 'dispatch' && call[2] === 'report-original')).toBe(true);
 });

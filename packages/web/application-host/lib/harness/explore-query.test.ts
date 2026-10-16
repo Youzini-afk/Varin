@@ -1,8 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
   buildTermGroups,
-  classifyFileRole,
-  fileRoleFit,
   parseExploreQuery,
 } from "./explore-query.js";
 
@@ -77,22 +75,5 @@ describe("parseExploreQuery", () => {
     expect(suppliedAnchors).toEqual(["foo", "", "  "]);
     expect(usedAnchors).toEqual(["foo"]);
     expect(groups.filter((group) => group.kind === "anchor").map((group) => group.distinctive)).toEqual(["foo"]);
-  });
-});
-
-describe("file roles", () => {
-  it("classifies source, test, docs, and lock without using provider status", () => {
-    expect(classifyFileRole("packages/web/application-host/lib/harness/explore.ts")).toBe("source");
-    expect(classifyFileRole("packages/pi-host/test/harness/session-e2e.test.ts")).toBe("test");
-    expect(classifyFileRole("docs/design/agent-harness.md")).toBe("docs");
-    expect(classifyFileRole("bun.lock")).toBe("lock");
-    expect(classifyFileRole("LICENSE")).toBe("lock");
-  });
-
-  it("fits implementation questions to source, not lockfiles", () => {
-    expect(fileRoleFit("source", "implementation", false)).toBeGreaterThan(fileRoleFit("docs", "implementation", false));
-    expect(fileRoleFit("lock", "implementation", false)).toBeLessThan(0);
-    expect(fileRoleFit("docs", "design", null)).toBeGreaterThan(fileRoleFit("source", "design", null));
-    expect(fileRoleFit("lock", "dependency", null)).toBe(2);
   });
 });

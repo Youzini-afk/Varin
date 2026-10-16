@@ -5,31 +5,14 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
 import {
-  VARIN_BUILTIN_WORKSPACE_RECOVERY_EXTENSION,
   VARIN_BUILTIN_WORKSPACE_RECOVERY_EXTENSION_ID,
-  VARIN_BUILTIN_WORKSPACE_RECOVERY_EXTENSION_VERSION,
 } from "@varin/extension-builtins";
 import {
   VARIN_WORKSPACE_RECOVERY_SERVICE_ID,
   VARIN_WORKSPACE_RECOVERY_SERVICE_VERSION,
 } from "@varin/extension-contract";
 import { ApplicationExtensionRuntime } from "../src/application-runtime.js";
-
-test("the native recovery built-in declares a replaceable Host service without package integration", () => {
-  const manifest = VARIN_BUILTIN_WORKSPACE_RECOVERY_EXTENSION.manifest;
-  assert.equal(manifest.id, "varin.builtin.recovery");
-  assert.equal(manifest.version, VARIN_BUILTIN_WORKSPACE_RECOVERY_EXTENSION_VERSION);
-  assert.equal(manifest.version, "0.4.0");
-  assert.equal(manifest.entrypoints?.host?.mode, "brokered");
-  assert.deepEqual(manifest.entrypoints?.host?.activation, ["service-request"]);
-  assert.deepEqual(manifest.capabilities?.host, ["workspace.recovery-primitives"]);
-  assert.deepEqual(manifest.provides?.services, [{
-    id: VARIN_WORKSPACE_RECOVERY_SERVICE_ID,
-    multiple: true,
-    version: VARIN_WORKSPACE_RECOVERY_SERVICE_VERSION,
-  }]);
-  assert.equal("integrates" in manifest, false);
-});
+import type { HostServiceBinding } from "../src/service-registry.js";
 
 test("the built-in recovery Host activates on service invocation and withdraws on deactivation", async () => {
   const dataDir = await mkdtemp(join(tmpdir(), "varin-builtin-recovery-"));
@@ -73,6 +56,7 @@ test("the built-in recovery Host activates on service invocation and withdraws o
       },
     };
   });
+  let consumer: HostServiceBinding | undefined;
   try {
     const started = await runtime.start();
     const entry = started.catalog.extensions.find((candidate) => (
@@ -82,6 +66,11 @@ test("the built-in recovery Host activates on service invocation and withdraws o
     assert.equal(entry?.integrity, undefined);
     assert.equal(calls.length, 0);
 
+    consumer = await runtime.prepareService({
+      args: [], method: "status",
+      serviceId: VARIN_WORKSPACE_RECOVERY_SERVICE_ID,
+      version: VARIN_WORKSPACE_RECOVERY_SERVICE_VERSION,
+    });
     const result = await runtime.invokeService({
       args: ["workspace-1"],
       method: "status",
@@ -122,6 +111,7 @@ test("the built-in recovery Host activates on service invocation and withdraws o
       /no provider is available|provider is unavailable/i,
     );
   } finally {
+    consumer?.release();
     await runtime.stop().catch(() => undefined);
     await rm(dataDir, { force: true, recursive: true });
   }

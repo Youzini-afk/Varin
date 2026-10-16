@@ -15,7 +15,7 @@ const createRuntime = (overrides = {}) => createNotificationEmitterRuntime({
 });
 
 describe('notification emitter runtime', () => {
-  it('broadcasts Pi events to every active notification SSE response', () => {
+  it('broadcasts UI events to every active notification SSE response', () => {
     const first = { write: vi.fn() };
     const second = { write: vi.fn() };
     const writeSseEvent = vi.fn((response, payload) => response.write(payload));

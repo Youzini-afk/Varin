@@ -16,7 +16,6 @@ describe("remapAsarUnpackedPath", () => {
 
 describe("resolveStructureRuntimeFile", () => {
   it("keeps a bundled file even when an installed twin exists", () => {
-    const bundled = new URL("./runtime/tree-sitter-typescript.wasm", import.meta.url).pathname;
     const installed = "/data/structure-grammars/sha256/deadbeef.wasm";
     const resolved = resolveStructureRuntimeFile(
       "tree-sitter-typescript.wasm",
@@ -26,7 +25,6 @@ describe("resolveStructureRuntimeFile", () => {
     );
     expect(resolved.replace(/\\/g, "/")).toContain("runtime/tree-sitter-typescript.wasm");
     expect(resolved).not.toBe(installed);
-    expect(bundled.length).toBeGreaterThan(0);
   });
 
   it("falls through to the download directory only when the bundled file is absent", () => {

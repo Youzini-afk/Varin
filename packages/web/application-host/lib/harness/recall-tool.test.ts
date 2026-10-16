@@ -1,12 +1,12 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { rmSync, mkdirSync, existsSync } from "node:fs";
+import { mkdtempSync, rmSync, mkdirSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { openWorkspaceKnowledge, type KnowledgeStore } from "../knowledge/store.js";
 import { executeRecall, openUserKnowledgeStore } from "./recall-tool.js";
 
 // Keep scratch stores separate from the source tree.
-const TEST_DIR = join(tmpdir(), "varin-test-recall");
+const TEST_DIR = mkdtempSync(join(tmpdir(), "varin-test-recall-"));
 function cleanup() {
   if (existsSync(TEST_DIR)) rmSync(TEST_DIR, { recursive: true, force: true });
 }

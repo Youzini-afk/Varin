@@ -14,14 +14,17 @@ describe('composer themes', () => {
         })).not.toThrow();
     });
 
-    // Retain the known WebKit input-lag regression until a real iOS check
-    // can verify it. A visible native caret must be scoped to range selection.
+    // This is the object installed by EditorView.theme, not a source-text scan.
+    // Keep the WebKit input-lag guard: typing must not expose a native caret.
+    // This checks the rule's scope, not WebKit rendering or input latency.
     test('native caret rules apply only while a range is selected', () => {
         const caretRules = Object.entries(NATIVE_SELECTION_THEME_SPEC)
             .filter(([, rule]) => 'caretColor' in rule);
         expect(caretRules.length).toBeGreaterThan(0);
-        for (const [selector] of caretRules) {
-            expect(selector).toContain('.oc-native-range');
+        for (const [selectors] of caretRules) {
+            for (const selector of selectors.split(',')) {
+                expect(selector).toContain('.oc-native-range');
+            }
         }
     });
 });

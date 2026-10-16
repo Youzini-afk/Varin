@@ -7,13 +7,13 @@ import {
   defaultVarinWorkbenchProfileDocument,
   VARIN_BUILTIN_AGENT_WORKSPACE_EXTENSION_ID,
   VARIN_BUILTIN_AGENT_WORKSPACE_SHELL_CONTRIBUTION_ID,
-  VARIN_BUILTIN_IDE_WORKBENCH_EXTENSION_ID,
   VARIN_BUILTIN_IDE_WORKBENCH_SHELL_CONTRIBUTION_ID,
   VARIN_WORKBENCH_IDE_PROFILE_ID,
-  VARIN_WORKBENCH_SHELL_DATA_CONTRACT,
 } from '@varin/extension-contract';
 import type { SurfaceRegistrySnapshot } from '@varin/extension-surface';
 import { resolveWorkbenchShellView } from './workbench-shell-view';
+import { VARIN_BUILTIN_AGENT_WORKSPACE_EXTENSION, VARIN_BUILTIN_IDE_WORKBENCH_EXTENSION } from '@varin/extension-builtins';
+import { builtinWorkbenchEntry } from './builtin-workbench.test-support';
 
 const hostId = '2d7b1dc1-7ccd-4be7-9fd1-23f31dc8cf1a';
 
@@ -40,6 +40,7 @@ const surfaceSnapshot = (failed = false): SurfaceRegistrySnapshot => ({
 });
 
 const agentEntry = (enabled: boolean, failed = false): VarinExtensionCatalogEntry => ({
+  ...builtinWorkbenchEntry(VARIN_BUILTIN_AGENT_WORKSPACE_EXTENSION, enabled),
   actual: failed
     ? [{
       desiredRevision: 1,
@@ -53,34 +54,6 @@ const agentEntry = (enabled: boolean, failed = false): VarinExtensionCatalogEntr
       updatedAt: '2026-08-20T00:00:00.000Z',
     }]
     : [],
-  capabilityGrants: [],
-  desired: { enabled, revision: 1, updatedAt: '2026-08-20T00:00:00.000Z' },
-  installedAt: '2026-08-20T00:00:00.000Z',
-  manifest: {
-    contributions: [{
-      contractVersion: 1,
-      data: {
-        contract: VARIN_WORKBENCH_SHELL_DATA_CONTRACT,
-        seams: {
-          web: { replacementTargets: [], slots: [] },
-          desktop: { replacementTargets: [], slots: [] },
-          mobile: { replacementTargets: [], slots: [] },
-        },
-      },
-      id: VARIN_BUILTIN_AGENT_WORKSPACE_SHELL_CONTRIBUTION_ID,
-      kind: 'shell',
-      replacement: { target: 'workbench.shell' },
-      supports: ['web', 'desktop', 'mobile'],
-    }],
-    engines: { varin: '*' },
-    id: VARIN_BUILTIN_AGENT_WORKSPACE_EXTENSION_ID,
-    schemaVersion: 1,
-    version: '1.0.0',
-  },
-  resolvedVersion: '1.0.0',
-  selectedVersion: '1.0.0',
-  source: { display: 'Agent Workspace', kind: 'builtin' },
-  updatedAt: '2026-08-20T00:00:00.000Z',
 });
 
 const hostSnapshot = (
@@ -158,28 +131,7 @@ test('a failed Surface in another window does not put this window in Recovery', 
 });
 
 test('the IDE profile is ready on web and recovers on mobile where it has no shell', () => {
-  const ideEntry: VarinExtensionCatalogEntry = {
-    ...agentEntry(true),
-    manifest: {
-      ...agentEntry(true).manifest,
-      id: VARIN_BUILTIN_IDE_WORKBENCH_EXTENSION_ID,
-      contributions: [{
-        contractVersion: 1,
-        data: {
-          contract: VARIN_WORKBENCH_SHELL_DATA_CONTRACT,
-          seams: {
-            web: { replacementTargets: [], slots: [] },
-            desktop: { replacementTargets: [], slots: [] },
-          },
-        },
-        id: VARIN_BUILTIN_IDE_WORKBENCH_SHELL_CONTRIBUTION_ID,
-        kind: 'shell',
-        replacement: { target: 'workbench.shell' },
-        supports: ['web', 'desktop'],
-      }],
-    },
-    source: { display: 'IDE Workbench', kind: 'builtin' },
-  };
+  const ideEntry = builtinWorkbenchEntry(VARIN_BUILTIN_IDE_WORKBENCH_EXTENSION);
   const snapshot = hostSnapshot(ideEntry);
   snapshot.workbench.document = {
     ...snapshot.workbench.document,

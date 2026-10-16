@@ -10,7 +10,7 @@ const roots: string[] = [];
 afterEach(async () => { vi.unstubAllEnvs(); await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true }))); });
 async function fixture() {
   const root = await mkdtemp(join(tmpdir(), 'varin-model-binding-')); roots.push(root);
-  const models = new ModelsService(root, { projectTrusted: () => false });
+  const models = new ModelsService(root, { projectTrusted: () => false, fetch: async () => { throw new Error("Unexpected model fixture network request"); } });
   const reference = await models.storeCredential('test-key');
   const channel: ModelChannel = { id: 'azure', type: 'azure', name: 'Azure', enabled: true, baseUrl: 'https://first.openai.azure.com',
     authentication: { kind: 'credential', reference }, parameters: { deployment: 'first-deployment', apiVersion: '2026-01-01' },

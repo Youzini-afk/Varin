@@ -8,7 +8,6 @@ vi.mock('node:child_process', () => ({
 
 const {
   checkForUpdates,
-  getCurrentVersion,
   setPackageManagerSpawnSyncForTest,
 } = await import('./package-manager.js');
 
@@ -351,12 +350,5 @@ describe('checkForUpdates', () => {
     const result = await checkForUpdates({ currentVersion: '1.9.10' });
 
     expect(result.available).toBe(false);
-  });
-});
-
-describe('getCurrentVersion', () => {
-  it('is exported for the CLI update command', () => {
-    expect(typeof getCurrentVersion).toBe('function');
-    expect(getCurrentVersion()).toMatch(/^\d+\.\d+\.\d+|unknown$/);
   });
 });

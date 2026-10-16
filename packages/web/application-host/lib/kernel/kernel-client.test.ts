@@ -1346,7 +1346,7 @@ test("typed recovery create fault injection rolls back operation intent and perm
   assert.equal(result.operationId, "typed-recovery-fault-operation");
 });
 
-test("R2 kernel file authority gates paths and applies conditional filesystem state", { timeout: 30_000 }, async (t) => {
+test("kernel file authority gates paths and applies conditional filesystem state", { timeout: 30_000 }, async (t) => {
   if (!(await fs.stat(kernelPath).then(() => true).catch(() => false))) {
     t.skip("release kernel has not been built in this checkout");
     return;
@@ -1465,7 +1465,7 @@ test("R2 kernel file authority gates paths and applies conditional filesystem st
   );
 });
 
-test("R2 file apply reconciles a committed disk side effect after kernel restart", { timeout: 30_000 }, async (t) => {
+test("file apply reconciles a committed disk side effect after kernel restart", { timeout: 30_000 }, async (t) => {
   if (!(await fs.stat(kernelPath).then(() => true).catch(() => false))) {
     t.skip("release kernel has not been built in this checkout");
     return;
@@ -1548,7 +1548,7 @@ test("R2 file apply reconciles a committed disk side effect after kernel restart
   assert.equal(retried.reconciled, true);
 });
 
-test("R3 kernel scans a fixed workspace view and materializes an immutable root without Host body copies", { timeout: 30_000 }, async (t) => {
+test("kernel scans a fixed workspace view and materializes an immutable root without Host body copies", { timeout: 30_000 }, async (t) => {
   if (!(await fs.stat(kernelPath).then(() => true).catch(() => false))) {
     t.skip("release kernel has not been built in this checkout");
     return;
@@ -1694,7 +1694,7 @@ test("R3 kernel scans a fixed workspace view and materializes an immutable root 
   assert.equal(await fs.readFile(path.join(target, "plain.txt"), "utf8"), "fixed plain\n");
 });
 
-test("R3 materialization reconciles a crash after live backup before staging promotion", { timeout: 30_000 }, async (t) => {
+test("materialization reconciles a crash after live backup before staging promotion", { timeout: 30_000 }, async (t) => {
   if (!(await fs.stat(kernelPath).then(() => true).catch(() => false))) {
     t.skip("release kernel has not been built in this checkout");
     return;

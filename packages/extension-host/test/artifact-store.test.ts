@@ -511,7 +511,17 @@ test("external sources cannot replace a distribution-owned built-in record", asy
   assert.equal(after.extensions.find((entry) => entry.manifest.id === builtinId)?.source.kind, "builtin");
 });
 
-test("materializes npm and Git sources through argument-safe source resolvers", async () => {
+test("materializes npm and Git sources through argument-safe source resolvers", async (t) => {
+  const previousCache = process.env.npm_config_cache;
+  const previousOffline = process.env.npm_config_offline;
+  t.after(() => {
+    if (previousCache === undefined) delete process.env.npm_config_cache;
+    else process.env.npm_config_cache = previousCache;
+    if (previousOffline === undefined) delete process.env.npm_config_offline;
+    else process.env.npm_config_offline = previousOffline;
+  });
+  process.env.npm_config_cache = await temporaryDirectory("varin-npm-cache-");
+  process.env.npm_config_offline = "true";
   const npmSource = await temporaryDirectory("varin-npm-source-");
   await writeExtension(npmSource, "dev.example.npm", "1.0.0");
   const npmData = await temporaryDirectory("varin-npm-data-");

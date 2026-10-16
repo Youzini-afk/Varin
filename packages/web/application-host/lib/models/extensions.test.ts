@@ -20,9 +20,10 @@ const description = (): VarinModelsDescription => ({
 });
 const channel = (authentication: ModelChannel['authentication'] = { kind: 'none' }): ModelChannel => ({ id: 'connection', name: 'Connection', type: 'fixture.channel', enabled: true,
   baseUrl: 'https://fixture.invalid/base', authentication, parameters: {}, models: [{ id: 'chat', name: 'Saved', enabled: true, operations: ['chat'], maxOutputTokens: 512 }] });
-async function fixture(fetchImpl: typeof fetch = globalThis.fetch) {
+const unexpectedFetch: typeof fetch = async () => { throw new Error('Unexpected model fixture network request'); };
+async function fixture(fetchImpl: typeof fetch = unexpectedFetch) {
   const directory = await mkdtemp(join(tmpdir(), 'varin-model-contributions-'));
-  const models = new ModelsService(directory, { projectTrusted: () => false });
+  const models = new ModelsService(directory, { projectTrusted: () => false, fetch: unexpectedFetch });
   const services = new HostServiceRegistry('model-fixture-host'), capabilities = new HostCapabilityRegistry();
   let generation = 0, composition: VarinHostServiceComposition, current: HostServiceOwnerIdentity;
   let grants: VarinExtensionCapabilityGrant[] = [];
@@ -76,9 +77,9 @@ test('SDK contributions reach product catalog and fixed service pins; same-versi
   expect([...f.retained.values()]).toEqual([first.bindingId]);
   expect(original.model).toMatchObject({ adapterId: 'fixture.codec', adapterVersion: '1', adapterIdentity: first.identity, adapterBindingId: first.bindingId, endpointPath: '/stream' });
   expect(saved.types.find(type => type.id === 'fixture.channel')!.catalog![0]!.id).toBe('catalogue');
-  expect((await f.models.discover('connection', globalThis.fetch)).models[0]!.id).toBe('catalogue');
+  expect((await f.models.discover('connection', unexpectedFetch)).models[0]!.id).toBe('catalogue');
   const before = await readFile(join(f.directory, 'models.json'), 'utf8');
-  await f.models.read(); await f.models.discover('connection', globalThis.fetch);
+  await f.models.read(); await f.models.discover('connection', unexpectedFetch);
   expect(await readFile(join(f.directory, 'models.json'), 'utf8')).toBe(before);
   const replacement = await f.install(codec(2)); await f.owner.refresh();
   const second = f.publications[1]!.adapters[0]!; expect(second.bindingId).not.toBe(first.bindingId); expect(second.identity).not.toBe(first.identity);

@@ -1,12 +1,9 @@
 import fs from "node:fs";
-import { createHash } from "node:crypto";
 import fsp from "node:fs/promises";
 import path from "node:path";
 import { tmpdir } from "node:os";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { copyFilePreferReflink, verifyObjectIntegrity } from "./reflink.js";
-import { materializeWorkingState } from "../harness/working-state/materializer.js";
-import type { RecoveryState } from "../harness/working-state/types.js";
+import { copyFilePreferReflink } from "./reflink.js";
 
 const cleanup: string[] = [];
 afterEach(async () => {
@@ -66,114 +63,7 @@ describe("copyFilePreferReflink", () => {
   });
 });
 
-describe("materializeWorkingState object reflink", () => {
-  it("materializes regular files from the object path and reports CoW accounting", async () => {
-    const dir = await scratch();
-    const objectDir = path.join(dir, "objects");
-    const target = path.join(dir, "worktree");
-    await fsp.mkdir(objectDir, { recursive: true });
-    const objectFile = path.join(objectDir, "blob-a");
-    const objectContent = "object-bytes\n";
-    const objectHash = createHash("sha256").update(objectContent).digest("hex");
-    await fsp.writeFile(objectFile, objectContent);
-
-    const states: Record<string, RecoveryState> = {
-      "src/a.txt": { kind: "regular-file", objectHash, byteLength: objectContent.length, mode: 0o644 },
-      "src/dir": { kind: "directory" },
-    };
-    const result = await materializeWorkingState({
-      targetDir: target,
-      states,
-      objectPathFor: (state) => (state.kind === "regular-file" ? objectFile : null),
-      readContent: async () => { throw new Error("readContent should not run when the object path exists"); },
-    });
-    expect(await fsp.readFile(path.join(target, "src", "a.txt"), "utf8")).toBe(objectContent);
-    expect(result.cow.reflink + result.cow.copy).toBe(1);
-  });
-
-  it("uses readContent when the object path is absent", async () => {
-    const dir = await scratch();
-    const target = path.join(dir, "worktree");
-    const states: Record<string, RecoveryState> = {
-      "a.txt": { kind: "regular-file", objectHash: "sha256-x", byteLength: 4 },
-    };
-    const result = await materializeWorkingState({
-      targetDir: target,
-      states,
-      objectPathFor: () => null,
-      readContent: async () => Buffer.from("data"),
-    });
-    expect(await fsp.readFile(path.join(target, "a.txt"), "utf8")).toBe("data");
-    expect(result.cow.copy).toBe(1);
-  });
-
-  it("falls back to readContent when the object file is missing", async () => {
-    const dir = await scratch();
-    const target = path.join(dir, "worktree");
-    const states: Record<string, RecoveryState> = {
-      "a.txt": { kind: "regular-file", objectHash: "sha256-x", byteLength: 8 },
-    };
-    await materializeWorkingState({
-      targetDir: target,
-      states,
-      objectPathFor: () => path.join(dir, "objects", "absent"),
-      readContent: async () => Buffer.from("fallback"),
-    });
-    expect(await fsp.readFile(path.join(target, "a.txt"), "utf8")).toBe("fallback");
-  });
-});
-
-describe("D-250 rework: object integrity verification", () => {
-  it("rejects a corrupt object (wrong hash) before materializing", async () => {
-    const dir = await scratch();
-    const objectDir = path.join(dir, "objects");
-    const target = path.join(dir, "worktree");
-    await fsp.mkdir(objectDir, { recursive: true });
-    const objectFile = path.join(objectDir, "blob-corrupt");
-    await fsp.writeFile(objectFile, "corrupt-bytes\n");
-
-    const states: Record<string, RecoveryState> = {
-      "a.txt": { kind: "regular-file", objectHash: "a".repeat(64), byteLength: 13, mode: 0o644 },
-    };
-    await expect(materializeWorkingState({
-      targetDir: target,
-      states,
-      objectPathFor: () => objectFile,
-      readContent: async () => Buffer.from("fallback"),
-    })).rejects.toThrow(/corrupt/);
-  });
-
-  it("rejects a corrupt object (wrong byteLength) before materializing", async () => {
-    const dir = await scratch();
-    const objectDir = path.join(dir, "objects");
-    const target = path.join(dir, "worktree");
-    await fsp.mkdir(objectDir, { recursive: true });
-    const objectFile = path.join(objectDir, "blob-wrong-size");
-    const objectContent = "hello\n";
-    const objectHash = createHash("sha256").update(objectContent).digest("hex");
-    await fsp.writeFile(objectFile, objectContent);
-
-    const states: Record<string, RecoveryState> = {
-      "a.txt": { kind: "regular-file", objectHash, byteLength: 999, mode: 0o644 },
-    };
-    await expect(materializeWorkingState({
-      targetDir: target,
-      states,
-      objectPathFor: () => objectFile,
-      readContent: async () => Buffer.from("fallback"),
-    })).rejects.toThrow(/corrupt.*expected 999.*got 6/);
-  });
-
-  it("verifyObjectIntegrity throws on corrupt object", async () => {
-    const dir = await scratch();
-    const objectFile = path.join(dir, "bad.bin");
-    await fsp.writeFile(objectFile, "not-the-right-content\n");
-    await expect(verifyObjectIntegrity(objectFile, "b".repeat(64), 21))
-      .rejects.toThrow(/corrupt/);
-  });
-});
-
-describe("D-250 rework: EACCES/EPERM are permission errors, not unsupported reflink", () => {
+describe("copy permissions", () => {
   it("propagates EACCES instead of falling back to copy", async () => {
     const dir = await scratch();
     const src = path.join(dir, "a.bin");

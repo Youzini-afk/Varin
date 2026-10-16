@@ -1,10 +1,20 @@
-import { mkdtempSync } from "node:fs";
+import { rmSync, mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import { createGrammarInstaller } from "./grammar-installer.js";
 import { parseGrammarPackManifest } from "./grammar-manifest.js";
 import { createGrammarStore, grammarIntegrityOf } from "./grammar-store.js";
+
+const roots: string[] = [];
+afterEach(() => {
+  for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
+});
+const temporaryDirectory = () => {
+  const root = mkdtempSync(join(tmpdir(), "varin-grammar-test-"));
+  roots.push(root);
+  return root;
+};
 
 const wasm = new Uint8Array([0, 1, 2, 3, 4, 5]);
 const integrity = grammarIntegrityOf(wasm);
@@ -34,7 +44,7 @@ const manifest = parseGrammarPackManifest({
   skipped: {},
 });
 
-const storeOf = () => createGrammarStore(mkdtempSync(join(tmpdir(), "varin-grammar-install-")));
+const storeOf = () => createGrammarStore(temporaryDirectory());
 
 const files = (entries: Record<string, Uint8Array>) => async (
   _tarball: Uint8Array,

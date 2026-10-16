@@ -1,3 +1,4 @@
+import { mkdtempSync } from "node:fs";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { existsSync, mkdirSync, rmSync } from "node:fs";
 import { randomUUID } from "node:crypto";
@@ -9,7 +10,7 @@ import { createDocumentAuthorityHarness } from "../documents/contract-fixtures.j
 import type { DocumentMutationObservation } from "../documents/authority.js";
 import { createProjectIndexScope } from './index-scope.js';
 
-const TEST_DIR = join(tmpdir(), "varin-symbol-runtime");
+const TEST_DIR = mkdtempSync(join(tmpdir(), "varin-symbol-runtime-"));
 
 describe("symbol graph runtime", () => {
   it('coalesces watch bursts and relation refreshes, and removes ignored paths without reading their bodies', async () => {

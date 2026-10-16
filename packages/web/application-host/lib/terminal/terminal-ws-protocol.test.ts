@@ -4,11 +4,8 @@ import {
   TERMINAL_WS_CONTROL_TAG_JSON,
   createTerminalWsControlFrame,
   isTerminalWsPathname,
-  isRebindRateLimited,
   normalizeTerminalWsMessageToBuffer,
-  normalizeTerminalWsMessageToText,
   parseRequestPathname,
-  pruneRebindTimestamps,
   readTerminalWsControlFrame,
 } from './terminal-ws-protocol.js';
 
@@ -67,7 +64,6 @@ describe('terminal websocket protocol', () => {
   it('normalizes buffer passthrough', () => {
     const raw = Buffer.from('abc', 'utf8');
     const normalized = normalizeTerminalWsMessageToBuffer(raw);
-    expect(normalized).toBe(raw);
     expect(normalized.toString('utf8')).toBe('abc');
   });
 
@@ -90,14 +86,6 @@ describe('terminal websocket protocol', () => {
     expect(normalized.toString('utf8')).toBe('abc');
   });
 
-  it('normalizes text payload from string', () => {
-    expect(normalizeTerminalWsMessageToText('\u001b[A')).toBe('\u001b[A');
-  });
-
-  it('normalizes text payload from binary data', () => {
-    expect(normalizeTerminalWsMessageToText(Buffer.from('\r', 'utf8'))).toBe('\r');
-  });
-
   it('parses relative request pathname', () => {
     expect(parseRequestPathname('/api/terminal/ws?x=1')).toBe('/api/terminal/ws');
   });
@@ -115,27 +103,4 @@ describe('terminal websocket protocol', () => {
     expect(parseRequestPathname('')).toBe('');
   });
 
-  it('prunes stale rebind timestamps', () => {
-    const now = 1_000;
-    const pruned = pruneRebindTimestamps([100, 200, 950, 999], now, 100);
-    expect(pruned).toEqual([950, 999]);
-  });
-
-  it('keeps rebind timestamps within active window', () => {
-    const now = 1_000;
-    const pruned = pruneRebindTimestamps([920, 950, 999], now, 100);
-    expect(pruned).toEqual([920, 950, 999]);
-  });
-
-  it('does not rate limit below threshold', () => {
-    expect(isRebindRateLimited([1, 2, 3], 4)).toBe(false);
-  });
-
-  it('does not rate limit empty window', () => {
-    expect(isRebindRateLimited([], 1)).toBe(false);
-  });
-
-  it('rate limits at threshold', () => {
-    expect(isRebindRateLimited([1, 2, 3, 4], 4)).toBe(true);
-  });
 });

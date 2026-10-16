@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { rmSync, mkdirSync, existsSync } from "node:fs";
+import { mkdtempSync, rmSync, mkdirSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { createRequire } from "node:module";
@@ -10,7 +10,7 @@ const require = createRequire(import.meta.url);
 const { TriviumDB } = require("triviumdb") as typeof import("triviumdb");
 
 // Scratch stores live in the OS temp dir; see harness/recall-tool.test.ts.
-const TEST_DIR = join(tmpdir(), "varin-test-tdb");
+const TEST_DIR = mkdtempSync(join(tmpdir(), "varin-test-tdb-"));
 
 function cleanup() {
   if (existsSync(TEST_DIR)) rmSync(TEST_DIR, { recursive: true, force: true });

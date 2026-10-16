@@ -15,23 +15,24 @@ import { registerModelRoutes } from './routes.js';
 import { McpAuthority } from '../mcp/authority.js';
 import { createMcpSettings } from '../mcp/settings.js';
 
+const unexpectedFetch: typeof fetch = async () => { throw new Error('Unexpected model fixture network request'); };
 const fixtures: string[] = [];
 afterEach(async () => { for (const directory of fixtures.splice(0)) await rm(directory, { recursive: true, force: true }); });
 async function fixture() {
   const directory = await mkdtemp(join(tmpdir(), 'varin-model-services-')); fixtures.push(directory);
-  return { directory, models: new ModelsService(directory, { projectTrusted: () => false }) };
+  return { directory, models: new ModelsService(directory, { projectTrusted: () => false, fetch: unexpectedFetch }) };
 }
 const channel = (id = 'local-one'): ModelChannel => ({ id, name: id, type: 'local', enabled: true, baseUrl: 'http://localhost:1234/v1',
   authentication: { kind: 'none' }, parameters: {}, models: [{ id: 'chat', name: 'Chat', enabled: true, operations: ['chat'], maxOutputTokens: 4096, contextWindow: 32768 }] });
 
 test('settings HTTP clients edit model channels and MCP sources through the production JSON boundary without a Pi worker', async () => {
   const { directory, models } = await fixture();
-  const authority = new McpAuthority();
+  const authority = new McpAuthority({ fetch: unexpectedFetch });
   const mcp = createMcpSettings({ authority, changed() {}, resolveScope: async () => ({ resourceOwner: { kind: 'local' }, agentDir: directory,
     configCwd: directory, executionCwd: directory, environmentId: 'fixture', executionScope: 'global', projectTrusted: false, sessionId: 'settings' }) });
   const app = express(); registerCommonRequestMiddleware(app, { express });
   const auth: express.RequestHandler = (_request, _response, next) => next();
-  registerModelRoutes(app, models, auth, globalThis.fetch); mcp.register(app, auth);
+  registerModelRoutes(app, models, auth, unexpectedFetch); mcp.register(app, auth);
   const server = createServer(app); server.listen(0, '127.0.0.1'); await once(server, 'listening');
   const previous = getRuntimeUrlResolver();
   const address = server.address() as { port: number };

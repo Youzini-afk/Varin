@@ -1,5 +1,4 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { getRuntimeEndpointGeneration } from '@varin/application-client';
 
 const { runtimeFetchMock } = vi.hoisted(() => ({ runtimeFetchMock: vi.fn() }));
 
@@ -22,8 +21,10 @@ describe('createWebLanguageSupportAPI', () => {
     const { createWebLanguageSupportAPI } = await import('./language-support');
     const status = await createWebLanguageSupportAPI().getStatus({ workspaceId: 'ws-1' });
     expect(status.workspaceId).toBe('ws-1');
-    const [path] = runtimeFetchMock.mock.calls[0] as [string];
-    expect(path).toBe('/api/language-support/status');
-    expect(getRuntimeEndpointGeneration()).toEqual(expect.any(Number));
+    expect(runtimeFetchMock).toHaveBeenCalledExactlyOnceWith('/api/language-support/status', {
+      method: 'POST',
+      headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
+      body: JSON.stringify({ workspaceId: 'ws-1' }),
+    });
   });
 });

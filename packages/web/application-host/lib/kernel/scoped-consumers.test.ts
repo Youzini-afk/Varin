@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import test from 'node:test';
+import { test } from 'vitest';
 import {
   HostServiceRegistry, type ApplicationExtensionRuntime, type HostServiceBinding, type HostServiceHandler,
   type HostServiceOwnerIdentity, type HostServicePreparationOptions,

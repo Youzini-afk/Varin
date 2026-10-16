@@ -12,7 +12,7 @@ Rust kernel. Renderers never spawn language servers.
 - `jsonrpc.ts`: Content-Length framed JSON-RPC client/server
 - `routes.ts`: authenticated `/api/language/*` routes and SSE events, pinned to the `surface` view
 - `capability.ts`: `workspace.language` Host capability
-- `fixture-server.ts` / `typescript-server.ts`: test servers, not production providers
+- `fixture-server.ts`: controlled test server, not a production provider
 - `managed-servers.ts`: on-demand native Go (`gopls`), Rust (`rust-analyzer`), C/C++ (`clangd`), and independent Markdown (`marksman`) preparation
 - the distribution TypeScript/JavaScript provider and the Python/HTML/CSS/JSON/YAML/Bash providers are
   brokered Varin extensions in `@varin/extension-builtins`. Their self-contained program assets are

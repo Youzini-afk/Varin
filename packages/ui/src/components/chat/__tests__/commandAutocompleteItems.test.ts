@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'vitest';
 import { commandMatchesSearch } from '../commandAutocompleteItems';
 
-describe('Pi command autocomplete search', () => {
+describe('command autocomplete search', () => {
   test('matches command names and descriptions', () => {
     const command = {
       description: 'Review the active workspace',
@@ -12,7 +12,7 @@ describe('Pi command autocomplete search', () => {
     expect(commandMatchesSearch(command, 'deploy')).toBe(false);
   });
 
-  test('matches aliases supplied by Pi command metadata', () => {
+  test('matches aliases supplied by command metadata', () => {
     expect(commandMatchesSearch({
       name: 'checkpoint',
       searchAliases: ['snapshot', 'recovery point'],

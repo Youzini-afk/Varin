@@ -6,7 +6,6 @@ import type {
   VarinDocumentReadResult,
   VarinResourceReference,
 } from '@varin/application-client';
-import { createProjectIdFromPath } from '@/lib/projectId';
 import {
   createVarinProjectConfigStore,
   VarinProjectConfigError,
@@ -23,7 +22,7 @@ const HOME = '/home/user';
 const REPO = '/repo';
 const HOME_WORKSPACE = '11111111-1111-4111-8111-111111111111';
 const REPO_WORKSPACE = '22222222-2222-4222-8222-222222222222';
-const project: VarinProjectRef = { id: createProjectIdFromPath(REPO), path: REPO };
+const project: VarinProjectRef = { id: 'project-config-fixture', path: REPO };
 
 const createRuntime = () => {
   const files = new Map<string, StoredFile>();

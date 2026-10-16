@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'vitest';
 
-import { repositoryPathForGitDiff } from '@/lib/monaco/git-diff-resource';
+import { repositoryPathForGitDiff } from './git-diff-resource';
 
 describe('Git Monaco diff workspace identity', () => {
   test('keeps a nested repository file inside the outer workspace identity', () => {

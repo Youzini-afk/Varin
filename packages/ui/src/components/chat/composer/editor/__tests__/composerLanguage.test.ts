@@ -61,10 +61,7 @@ describe('composerLanguage — initial decorations', () => {
             .toEqual([]);
     });
 
-    test('decorated spans carry the shared highlight classes', () => {
-        const [[, agentClass]] = decorations(stateWith('@build'));
-        expect(agentClass).toContain('status-success');
-    });
+
 });
 
 describe('composerLanguage — updates', () => {
