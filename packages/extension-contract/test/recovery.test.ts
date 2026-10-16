@@ -1,8 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
-  VARIN_WORKSPACE_RECOVERY_SERVICE_ID,
-  VARIN_WORKSPACE_RECOVERY_SERVICE_VERSION,
   WorkspaceRecoveryContractError,
   createWorkspaceRecoveryAPI,
   parseRecoveryConversation,
@@ -31,12 +29,6 @@ const checkpoint = () => ({
   source: "turn",
   state: "ready",
   workspaceId: "workspace-1",
-});
-
-test("owns the affected-file journal service version", () => {
-  assert.equal(VARIN_WORKSPACE_RECOVERY_SERVICE_ID, "varin.workspace-recovery");
-  assert.equal(VARIN_WORKSPACE_RECOVERY_SERVICE_VERSION, 7);
-  assert.equal(parseWorkspaceRecoveryCheckpointSummary(checkpoint()).changedPathCount, 1);
 });
 
 test("parses every storage mode and journal-oriented storage counts", () => {

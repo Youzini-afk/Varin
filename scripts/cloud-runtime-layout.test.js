@@ -1,7 +1,8 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { afterEach, describe, expect, it } from 'vitest';
+import assert from 'node:assert/strict';
+import { afterEach, describe, it } from 'node:test';
 import {
   CLOUD_RUNTIME_PACKAGE_DIRS,
   CLOUD_RUNTIME_SCHEMA_VERSION,
@@ -104,11 +105,8 @@ describe('Varin cloud runtime layout', () => {
     for (const directory of CLOUD_RUNTIME_PACKAGE_DIRS) {
       const manifest = readJson(path.join(repoRoot, 'packages', directory, 'package.json'));
       const lockEntry = lockWorkspaces[`packages/${directory}`] ?? {};
-      expect(
-        lockEntry.dependencies ?? {},
-        `cloud lock is stale for packages/${directory}; regenerate with \`node scripts/build-cloud-runtime.mjs --update-lock\``,
-      ).toEqual(manifest.dependencies ?? {});
-      expect(lockEntry.version).toBe(manifest.version);
+      assert.deepEqual(lockEntry.dependencies ?? {}, manifest.dependencies ?? {}, `cloud lock is stale for packages/${directory}; regenerate with \`node scripts/build-cloud-runtime.mjs --update-lock\``);
+      assert.equal(lockEntry.version, manifest.version);
     }
   });
 
@@ -116,13 +114,13 @@ describe('Varin cloud runtime layout', () => {
     const fixture = createFixture();
     const serverDir = path.join(fixture, 'packages', 'web', 'server');
     const manifest = readJson(path.join(fixture, 'packages', 'web', 'package.json'));
-    expect(findUndeclaredWorkspaceImports(serverDir, manifest)).toEqual([]);
+    assert.deepEqual(findUndeclaredWorkspaceImports(serverDir, manifest), []);
 
     fs.writeFileSync(
       path.join(serverDir, 'missing.js'),
       "import '@varin/missing-runtime';\n",
     );
-    expect(findUndeclaredWorkspaceImports(serverDir, manifest)).toEqual([
+    assert.deepEqual(findUndeclaredWorkspaceImports(serverDir, manifest), [
       'missing.js -> @varin/missing-runtime',
     ]);
   });
@@ -136,13 +134,13 @@ describe('Varin cloud runtime layout', () => {
       "import { Runtime } from '@varin/application-client/runtime';",
       "export { contract } from '@varin/extension-contract/nested/contract';",
     ].join('\n'));
-    expect(findUndeclaredWorkspaceImports(serverDir, manifest)).toEqual([]);
+    assert.deepEqual(findUndeclaredWorkspaceImports(serverDir, manifest), []);
 
     fs.appendFileSync(path.join(serverDir, 'subpaths.js'), [
       "\nimport '@varin/application-client-extra/runtime';",
       "import { missing } from '@varin/missing-runtime/nested/entry';",
     ].join('\n'));
-    expect(findUndeclaredWorkspaceImports(serverDir, manifest)).toEqual([
+    assert.deepEqual(findUndeclaredWorkspaceImports(serverDir, manifest), [
       'subpaths.js -> @varin/application-client-extra/runtime',
       'subpaths.js -> @varin/missing-runtime/nested/entry',
     ]);
@@ -157,7 +155,7 @@ describe('Varin cloud runtime layout', () => {
       const manifest = readJson(path.join(repoRoot, 'packages', directory, 'package.json'));
       for (const dependencyName of Object.keys(manifest.dependencies || {})) {
         if (dependencyName.startsWith('@varin/')) {
-          expect(packageNames.has(dependencyName), `${manifest.name} -> ${dependencyName}`).toBe(true);
+          assert.equal(packageNames.has(dependencyName), true, `${manifest.name} -> ${dependencyName}`);
         }
       }
     }
@@ -165,9 +163,7 @@ describe('Varin cloud runtime layout', () => {
 
   it('accepts the canonical application-host runtime tree', () => {
     const fixture = createFixture();
-    expect(verifyCloudRuntimeLayout(fixture)).toMatchObject({
-      schemaVersion: CLOUD_RUNTIME_SCHEMA_VERSION,
-    });
+    assert.equal(verifyCloudRuntimeLayout(fixture).schemaVersion, CLOUD_RUNTIME_SCHEMA_VERSION);
   });
 
   it('requires the runtime security patch referenced by the deployable manifest', () => {
@@ -176,10 +172,10 @@ describe('Varin cloud runtime layout', () => {
     const manifest = readJson(manifestPath);
     manifest.patchedDependencies = { 'braces@3.0.3': 'bun-patches/braces@3.0.3.patch' };
     writeJson(manifestPath, manifest);
-    expect(() => verifyCloudRuntimeLayout(fixture)).toThrow('Cloud runtime patch is missing');
+    assert.throws(() => verifyCloudRuntimeLayout(fixture), new RegExp("Cloud runtime patch is missing"));
     fs.mkdirSync(path.join(fixture, 'bun-patches'));
     fs.copyFileSync(path.join(repoRoot, 'bun-patches/braces@3.0.3.patch'), path.join(fixture, 'bun-patches/braces@3.0.3.patch'));
-    expect(() => verifyCloudRuntimeLayout(fixture)).not.toThrow();
+    assert.doesNotThrow(() => verifyCloudRuntimeLayout(fixture));
   });
 
   it('rejects workspace dependencies that are not shipped in the runtime', () => {
@@ -189,40 +185,30 @@ describe('Varin cloud runtime layout', () => {
     webManifest.dependencies['@varin/missing-runtime'] = 'workspace:*';
     writeJson(webManifestPath, webManifest);
 
-    expect(() => verifyCloudRuntimeLayout(fixture)).toThrow(
-      'depends on missing workspace @varin/missing-runtime',
-    );
+    assert.throws(() => verifyCloudRuntimeLayout(fixture), new RegExp("depends on missing workspace @varin/missing-runtime"));
   });
 
   it('requires compiled package outputs and a production lockfile', () => {
     const fixture = createFixture();
     fs.rmSync(path.join(fixture, 'packages', 'extension-host', 'dist'), { recursive: true, force: true });
-    expect(() => verifyCloudRuntimeLayout(fixture)).toThrow(
-      'Missing runtime package entry: packages/extension-host/dist',
-    );
+    assert.throws(() => verifyCloudRuntimeLayout(fixture), new RegExp("Missing runtime package entry: packages/extension-host/dist"));
 
     const secondFixture = createFixture();
     fs.rmSync(path.join(secondFixture, 'bun.lock'));
-    expect(() => verifyCloudRuntimeLayout(secondFixture)).toThrow(
-      'Cloud runtime bun.lock is missing',
-    );
+    assert.throws(() => verifyCloudRuntimeLayout(secondFixture), new RegExp("Cloud runtime bun\\.lock is missing"));
   });
 
   it('requires the AGPL metadata and legal notices in deployable artifacts', () => {
     const missingLicense = createFixture();
     fs.rmSync(path.join(missingLicense, 'LICENSE'));
-    expect(() => verifyCloudRuntimeLayout(missingLicense)).toThrow(
-      'Cloud runtime legal file is missing: LICENSE',
-    );
+    assert.throws(() => verifyCloudRuntimeLayout(missingLicense), new RegExp("Cloud runtime legal file is missing: LICENSE"));
 
     const wrongSpdx = createFixture();
     const manifestPath = path.join(wrongSpdx, 'package.json');
     const manifest = readJson(manifestPath);
     manifest.license = 'MIT';
     writeJson(manifestPath, manifest);
-    expect(() => verifyCloudRuntimeLayout(wrongSpdx)).toThrow(
-      'Unexpected cloud runtime license: MIT',
-    );
+    assert.throws(() => verifyCloudRuntimeLayout(wrongSpdx), new RegExp("Unexpected cloud runtime license: MIT"));
   });
 
   it('rejects retired update services and commands from the staged production artifact', () => {
@@ -230,11 +216,7 @@ describe('Varin cloud runtime layout', () => {
     const serverEntry = path.join(fixture, 'packages', 'web', 'server', 'package-manager.js');
     fs.writeFileSync(serverEntry, "export const updateUrl = 'https://api.openchamber.dev/v1/update/check';\n");
 
-    expect(() => verifyCloudRuntimeIdentity(fixture)).toThrow(
-      'Cloud runtime contains retired update identity',
-    );
-    expect(() => verifyCloudRuntimeLayout(fixture)).toThrow(
-      'Cloud runtime contains retired update identity',
-    );
+    assert.throws(() => verifyCloudRuntimeIdentity(fixture), new RegExp("Cloud runtime contains retired update identity"));
+    assert.throws(() => verifyCloudRuntimeLayout(fixture), new RegExp("Cloud runtime contains retired update identity"));
   });
 });

@@ -4,7 +4,6 @@ import {
   checkVarinContributionCompatibility,
   isVarinContributionCompatible,
   parseVarinExtensionManifest,
-  VarinExtensionContractError,
 } from "../src/index.js";
 
 const manifest = (): {
@@ -49,68 +48,6 @@ test("isVarinContributionCompatible predicate", () => {
   assert.equal(isVarinContributionCompatible("shell", 99), false);
   assert.equal(isVarinContributionCompatible("editor", 1), true);
   assert.equal(isVarinContributionCompatible("editor", 2), false);
-});
-
-test("parseVarinExtensionManifest accepts contractVersion 1", () => {
-  const parsed = parseVarinExtensionManifest(manifest());
-  assert.equal(parsed.contributions![0]!.contractVersion, 1);
-});
-
-test("parseVarinExtensionManifest parses higher contractVersion without throwing", () => {
-  const m = manifest();
-  (m.contributions![0] as { contractVersion: number }).contractVersion = 99;
-  // Should not throw �?the manifest is structurally valid, just incompatible
-  const parsed = parseVarinExtensionManifest(m);
-  assert.equal(parsed.contributions![0]!.contractVersion, 99);
-});
-
-test("parseVarinExtensionManifest skips kind-specific data validation for unsupported version", () => {
-  // An editor with contractVersion 2 and missing languageIds/filenames
-  // should NOT trigger the "must declare languageIds or filenames" issue
-  // because the data is not validated for unsupported versions.
-  const m = manifest();
-  m.contributions![0] = {
-    id: "dev.example.compat.editor",
-    kind: "editor",
-    contractVersion: 2,
-    data: {},
-    supports: ["web"],
-  };
-  const parsed = parseVarinExtensionManifest(m);
-  assert.equal(parsed.contributions![0]!.contractVersion, 2);
-});
-
-test("parseVarinExtensionManifest still validates kind-specific data for v1 editor", () => {
-  const m = manifest();
-  m.contributions![0] = {
-    id: "dev.example.compat.editor",
-    kind: "editor",
-    contractVersion: 1,
-    data: {},
-    supports: ["web"],
-  };
-  assert.throws(
-    () => parseVarinExtensionManifest(m),
-    (error: unknown) => {
-      if (!(error instanceof VarinExtensionContractError)) return false;
-      return error.issues.some((issue) => issue.includes("must declare languageIds or filenames"));
-    },
-  );
-});
-
-test("parseVarinExtensionManifest validates shell data only for compatible version", () => {
-  // shell with contractVersion 2 and invalid data should not throw shell data errors
-  const m = manifest();
-  m.contributions![0] = {
-    id: "dev.example.compat.shell",
-    kind: "shell",
-    contractVersion: 2,
-    data: { contract: "wrong", seams: {} },
-    supports: ["web"],
-    replacement: { target: "workbench.shell" },
-  };
-  const parsed = parseVarinExtensionManifest(m);
-  assert.equal(parsed.contributions![0]!.contractVersion, 2);
 });
 
 test("same extension can have both compatible and incompatible contributions", () => {

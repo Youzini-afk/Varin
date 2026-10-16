@@ -1,3 +1,4 @@
+import "./network-fixture.js";
 import assert from 'node:assert/strict';
 import { afterEach, beforeEach, it } from 'node:test';
 import { isAllowedObservationRequest, type ObservationClientMessage, type ObservationServerMessage } from '../src/transport/observation-protocol.js';

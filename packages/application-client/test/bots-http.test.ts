@@ -1,3 +1,4 @@
+import "./network-fixture.js";
 import assert from 'node:assert/strict';
 import { it } from 'node:test';
 import { BotRequestError, createBotsHttpAPI } from '../src/bots-http.js';

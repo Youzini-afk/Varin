@@ -1,5 +1,5 @@
 """Protocol tests on a private D-Bus, not a desktop/portal acceptance test.
-Run: dbus-run-session -- /usr/bin/python3 -m unittest discover -s packages/computer-driver/linux -p test_portal_transport.py
+Run: dbus-run-session -- env VARIN_TEST_PRIVATE_BUS=1 /usr/bin/python3 -m unittest discover -s packages/computer-driver/linux -p test_portal_transport.py
 """
 import os
 import socket
@@ -9,6 +9,8 @@ try:
     from portal_backend import PortalBackend, BUS, PATH, REMOTE, SCREEN, SESSION, REQUEST, Gio, GLib
     from portal_session import SessionError
 except ImportError:
+    if os.environ.get("VARIN_TEST_PRIVATE_BUS"):
+        raise  # An explicitly requested transport run must not pass by skipping it.
     PortalBackend = None
 
 XML = '''<node>

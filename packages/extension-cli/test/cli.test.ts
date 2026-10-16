@@ -1,54 +1,66 @@
 import { spawn } from "node:child_process";
-import { mkdtemp, readdir, readFile, writeFile } from "node:fs/promises";
+import { mkdtemp, readdir, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { test } from "node:test";
+import { join, resolve } from "node:path";
+import { after, test } from "node:test";
 import assert from "node:assert/strict";
-import { parseVarinExtensionManifest, type VarinExtensionStaticContribution } from "@varin/extension-contract";
 import { initProject } from "../src/init.js";
 import { buildProject } from "../src/build.js";
 import { checkProject } from "../src/project.js";
-import { runShellCompositionSmoke, testProject } from "../src/test-command.js";
+import { testProject } from "../src/test-command.js";
 import { runCli } from "../src/cli.js";
-import { defineShellMount, defineSurfaceExtension } from "@varin/extension-sdk";
+import { INIT_TEMPLATES } from "../src/templates.js";
 
-const temporaryDirectory = async (): Promise<string> => mkdtemp(join(tmpdir(), "varin-extension-cli-test-"));
+const temporaryDirectories: string[] = [];
+const temporaryDirectory = async (): Promise<string> => {
+  const directory = await mkdtemp(join(tmpdir(), "varin-extension-cli-test-"));
+  temporaryDirectories.push(directory);
+  return directory;
+};
+after(async () => {
+  await Promise.all(temporaryDirectories.map(directory => rm(directory, { recursive: true, force: true })));
+});
 
 const exchangeProtocolFrame = async (script: string, message: unknown): Promise<Record<string, unknown>> => {
   const child = spawn(process.execPath, [script], { stdio: ["pipe", "pipe", "pipe"] });
+  const exited = new Promise<void>(resolve => { child.once("exit", () => resolve()); child.once("error", () => resolve()); });
   const payload = Buffer.from(JSON.stringify(message), "utf8");
-  const response = await new Promise<Record<string, unknown>>((resolve, reject) => {
-    let settled = false;
-    let buffer = Buffer.alloc(0);
-    const finish = (callback: () => void) => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timer);
-      callback();
-      child.kill();
-    };
-    const timer = setTimeout(() => finish(() => reject(new Error(`Protocol fixture did not respond: ${script}`))), 5_000);
-    child.once("error", (error) => finish(() => reject(error)));
-    child.once("exit", (code) => {
-      if (!settled) finish(() => reject(new Error(`Protocol fixture exited before responding (${code ?? "unknown"}): ${script}`)));
+  try {
+    return await new Promise<Record<string, unknown>>((resolve, reject) => {
+      let settled = false;
+      let buffer = Buffer.alloc(0);
+      const finish = (callback: () => void) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        callback();
+        child.kill();
+      };
+      const timer = setTimeout(() => finish(() => reject(new Error(`Protocol fixture did not respond: ${script}`))), 5_000);
+      child.once("error", (error) => finish(() => reject(error)));
+      child.once("exit", (code) => {
+        if (!settled) finish(() => reject(new Error(`Protocol fixture exited before responding (${code ?? "unknown"}): ${script}`)));
+      });
+      child.stdout.on("data", (chunk) => {
+        buffer = Buffer.concat([buffer, chunk]);
+        const headerEnd = buffer.indexOf("\r\n\r\n");
+        if (headerEnd < 0) return;
+        const match = /Content-Length:\s*(\d+)/i.exec(buffer.subarray(0, headerEnd).toString("utf8"));
+        if (!match) return;
+        const length = Number(match[1]);
+        const start = headerEnd + 4;
+        if (buffer.length < start + length) return;
+        finish(() => resolve(JSON.parse(buffer.subarray(start, start + length).toString("utf8")) as Record<string, unknown>));
+      });
+      child.stdin.write(Buffer.concat([
+        Buffer.from(`Content-Length: ${payload.length}\r\n\r\n`, "utf8"),
+        payload,
+      ]));
     });
-    child.stdout.on("data", (chunk) => {
-      buffer = Buffer.concat([buffer, chunk]);
-      const headerEnd = buffer.indexOf("\r\n\r\n");
-      if (headerEnd < 0) return;
-      const match = /Content-Length:\s*(\d+)/i.exec(buffer.subarray(0, headerEnd).toString("utf8"));
-      if (!match) return;
-      const length = Number(match[1]);
-      const start = headerEnd + 4;
-      if (buffer.length < start + length) return;
-      finish(() => resolve(JSON.parse(buffer.subarray(start, start + length).toString("utf8")) as Record<string, unknown>));
-    });
-    child.stdin.write(Buffer.concat([
-      Buffer.from(`Content-Length: ${payload.length}\r\n\r\n`, "utf8"),
-      payload,
-    ]));
-  });
-  return response;
+  } finally {
+    child.kill();
+    await exited;
+  }
 };
 
 test("init writes a standalone managed Surface template and refuses overwrite", async () => {
@@ -63,159 +75,42 @@ test("init writes a standalone managed Surface template and refuses overwrite", 
   );
 });
 
-test("init templates cover shell, editor, view, language, debug, and test workbench seams", async () => {
+test("every generated template builds and passes its published author lifecycle", async (t) => {
   const root = await temporaryDirectory();
-  const shell = await initProject({
-    directory: join(root, "shell"),
-    id: "dev.example.shell",
-    name: "Vanilla Shell",
-    template: "shell",
-  });
-  assert.equal(shell.template, "shell");
-  const surface = await readFile(join(shell.directory, "src/surface.ts"), "utf8");
-  assert.match(surface, /defineShellMount/);
-  assert.match(surface, /VARIN_WORKBENCH_REPLACEMENT_TARGETS/);
-  assert.match(surface, /mount\.workbench\.mountReplacement/);
-  assert.match(surface, /mount\.workbench\.mountSlot/);
-  assert.doesNotMatch(surface, /@varin\/ui|@\/components/);
-  const shellManifest = JSON.parse(await readFile(join(shell.directory, "varin.extension.json"), "utf8"));
-  assert.doesNotThrow(() => parseVarinExtensionManifest(shellManifest));
-  assert.equal(shellManifest.contributions?.[0]?.kind, "shell");
-
-  const editor = await initProject({
-    directory: join(root, "editor"),
-    id: "dev.example.editor",
-    name: "Custom Editor",
-    template: "editor",
-  });
-  const editorSource = await readFile(join(editor.directory, "src/surface.ts"), "utf8");
-  assert.match(editorSource, /mount\.props\.document\.applyEdits/);
-  assert.match(editorSource, /case "invalid-range"/);
-  assert.match(editorSource, /case "overlapping-ranges"/);
-  assert.match(editorSource, /case "unsupported"/);
-  assert.match(editorSource, /case "stale"/);
-  assert.doesNotMatch(editorSource, /replaceContent/);
-  assert.match(editorSource, /mount\.props\.document\.save/);
-  assert.match(editorSource, /languageIds:\s*\["markdown"\]/);
-  assert.doesNotMatch(editorSource, /workbench\.editor\.actions|@varin\/ui/);
-  await initProject({
-    directory: join(root, "view"),
-    id: "dev.example.view",
-    name: "Sidebar View",
-    template: "view",
-  });
-  const language = await initProject({
-    directory: join(root, "language"),
-    id: "dev.example.language",
-    name: "Markdown Language",
-    template: "language",
-  });
-  const host = await readFile(join(language.directory, "src/host.ts"), "utf8");
-  assert.match(host, /defineLanguageProvider/);
-  assert.match(host, /context\.assets\.path\("runtime\/language-server\.mjs"\)/);
-  const languageRuntime = join(language.directory, "runtime/language-server.mjs");
-  await readFile(languageRuntime, "utf8");
-  const languageInitialize = await exchangeProtocolFrame(languageRuntime, {
-    jsonrpc: "2.0",
-    id: 1,
-    method: "initialize",
-    params: {},
-  });
-  assert.equal(languageInitialize.jsonrpc, "2.0");
-  assert.equal(languageInitialize.id, 1);
-  const languagePackage = JSON.parse(await readFile(join(language.directory, "package.json"), "utf8")) as { files?: string[] };
-  assert.ok(languagePackage.files?.includes("runtime"));
-  const checked = await checkProject(language.directory);
-  assert.deepEqual(checked.missingFiles, ["dist/host.cjs"]);
-
-  const debug = await initProject({
-    directory: join(root, "debug"),
-    id: "dev.example.debug",
-    name: "Node Debug",
-    template: "debug",
-  });
-  const debugHost = await readFile(join(debug.directory, "src/host.ts"), "utf8");
-  assert.match(debugHost, /defineDebugAdapter/);
-  assert.match(debugHost, /context\.assets\.path\("runtime\/debug-adapter\.mjs"\)/);
-  const debugRuntime = join(debug.directory, "runtime/debug-adapter.mjs");
-  await readFile(debugRuntime, "utf8");
-  const debugInitialize = await exchangeProtocolFrame(debugRuntime, {
-    seq: 1,
-    type: "request",
-    command: "initialize",
-    arguments: { clientID: "test" },
-  });
-  assert.equal(debugInitialize.type, "response");
-  assert.equal(debugInitialize.request_seq, 1);
-  assert.equal(debugInitialize.success, true);
-  const debugManifest = await readFile(join(debug.directory, "varin.extension.json"), "utf8");
-  assert.match(debugManifest, /workspace\.debug/);
-
-  const tests = await initProject({
-    directory: join(root, "test"),
-    id: "dev.example.test",
-    name: "Node Tests",
-    template: "test",
-  });
-  const testHost = await readFile(join(tests.directory, "src/host.ts"), "utf8");
-  assert.match(testHost, /defineTestProvider/);
-  assert.match(testHost, /kind:\s*"node-test"/);
-  assert.doesNotMatch(testHost, /test-adapter\.mjs/);
-  const testManifest = await readFile(join(tests.directory, "varin.extension.json"), "utf8");
-  assert.match(testManifest, /workspace\.test/);
+  // Resolve the already-installed author SDK just as an installed generated project would.
+  await symlink(resolve(import.meta.dirname, "../node_modules"), join(root, "node_modules"), "junction");
+  for (const template of INIT_TEMPLATES) {
+    await t.test(template, async () => {
+      const project = await initProject({
+        directory: join(root, template), id: `dev.example.${template}`, name: `Example ${template}`, template,
+      });
+      const result = await testProject(project.directory);
+      assert.equal(result.host, ["language", "debug", "test"].includes(template) ? "passed" : "skipped");
+      assert.equal(result.surfaces.length, ["surface", "shell", "editor", "view"].includes(template) ? 1 : 0,
+        "Surface templates must actually execute their generated entrypoint");
+      assert.ok(result.surfaces.every(surface => surface.result === "passed"));
+      assert.deepEqual((await checkProject(project.directory)).missingFiles, []);
+      if (template === "language" || template === "debug") {
+        const language = template === "language";
+        const runtime = `runtime/${language ? "language-server" : "debug-adapter"}.mjs`;
+        const metadata = JSON.parse(await readFile(join(project.directory, "package.json"), "utf8"));
+        assert.ok(metadata.files.includes("runtime"), "published template must include its executable adapter");
+        const response = await exchangeProtocolFrame(join(project.directory, runtime), language
+          ? { jsonrpc: "2.0", id: 1, method: "initialize", params: {} }
+          : { seq: 1, type: "request", command: "initialize", arguments: { clientID: "test" } });
+        if (language) {
+          assert.equal(response.jsonrpc, "2.0");
+          assert.equal(response.id, 1);
+          assert.ok(response.result);
+        } else {
+          assert.equal(response.type, "response");
+          assert.equal(response.request_seq, 1);
+          assert.equal(response.success, true);
+        }
+      }
+    });
+  }
 });
-
-test("shell composition smoke invokes replacement, slot, and disposer behavior", async () => {
-  const descriptor: VarinExtensionStaticContribution = {
-    contractVersion: 1,
-    data: {
-      contract: "varin-workbench-shell/v1",
-      seams: { web: { replacementTargets: ["workbench.editor"], slots: ["workbench.primary-sidebar.views"] } },
-    },
-    entrypoint: "dev.example.shell-smoke.surface",
-    id: "dev.example.shell-smoke.shell",
-    kind: "shell",
-    replacement: { target: "workbench.shell" },
-    supports: ["web"],
-  };
-  const manifest = parseVarinExtensionManifest({
-    schemaVersion: 1,
-    id: "dev.example.shell-smoke",
-    version: "1.0.0",
-    engines: { varin: "*" },
-    entrypoints: {
-      surfaces: [{
-        file: "dist/surface.cjs",
-        id: "dev.example.shell-smoke.surface",
-        mode: "managed",
-        supports: ["web"],
-      }],
-    },
-    contributions: [descriptor],
-  });
-  const { entrypoint: descriptorEntrypoint, ...dynamicDescriptor } = descriptor;
-  void descriptorEntrypoint;
-  await runShellCompositionSmoke(manifest, {
-    default: defineSurfaceExtension((context) => {
-      context.contribute(dynamicDescriptor, defineShellMount(async (container, mount) => {
-        const replacement = await mount.workbench.mountReplacement({
-          container,
-          target: "workbench.editor",
-        });
-        const slot = await mount.workbench.mountSlot({
-          container,
-          slot: "workbench.primary-sidebar.views",
-        });
-        return async () => {
-          await slot.dispose();
-          await replacement.dispose();
-          container.replaceChildren();
-        };
-      }));
-    }),
-  });
-});
-
 
 test("check reports a valid contract and missing published output", async () => {
   const root = await temporaryDirectory();
@@ -346,7 +241,7 @@ test("CLI output modes preserve validation and emit script-safe results", async 
 });
 
 test("check reports incompatible contributions for unknown contract version", async () => {
-  const root = await mkdtemp(join(tmpdir(), "varin-cli-incompat-"));
+  const root = await temporaryDirectory();
   await writeFile(join(root, "package.json"), JSON.stringify({
     name: "dev.example.incompat",
     version: "1.0.0",
@@ -385,7 +280,7 @@ test("check reports incompatible contributions for unknown contract version", as
 });
 
 test("check reports when validation errors for shell and transition-scene", async () => {
-  const root = await mkdtemp(join(tmpdir(), "varin-cli-when-"));
+  const root = await temporaryDirectory();
   await writeFile(join(root, "package.json"), JSON.stringify({
     name: "dev.example.when",
     version: "1.0.0",

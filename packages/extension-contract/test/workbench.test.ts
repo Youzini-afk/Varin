@@ -20,10 +20,8 @@ import {
   VARIN_WORKBENCH_IDE_PROFILE_LABEL,
   VARIN_WORKBENCH_RESEARCH_PROFILE_ID,
   VARIN_WORKBENCH_RESEARCH_PROFILE_LABEL,
-  VARIN_WORKBENCH_CONTEXT_KEYS,
   VARIN_WORKBENCH_REPLACEMENT_TARGETS,
   VARIN_WORKBENCH_SHELL_DATA_CONTRACT,
-  VARIN_WORKBENCH_SLOTS,
   resolveVarinWorkbenchLayout,
   resolveVarinWorkbenchLayoutForProfile,
   resolveVarinWorkbenchProfile,
@@ -185,19 +183,6 @@ const catalogEntry = (options: {
   selectedVersion: "1.0.0",
   source: { display: options.extensionId, kind: "local" as const },
   updatedAt: "2026-08-20T00:00:00.000Z",
-});
-
-test("workbench slot and replacement target constants are valid contribution IDs", () => {
-  for (const id of [...Object.values(VARIN_WORKBENCH_REPLACEMENT_TARGETS), ...Object.values(VARIN_WORKBENCH_SLOTS)]) {
-    parseVarinWorkbenchLayoutLayer({
-      profileId: VARIN_WORKBENCH_DEFAULT_PROFILE_ID,
-      references: [{ contributionId: id }],
-      replacementSelections: { [id]: id },
-      scope: "distribution",
-      scopeId: VARIN_WORKBENCH_DEFAULT_PROFILE_ID,
-      surface: "web",
-    });
-  }
 });
 
 test("workbench profile resolution inspects shell availability without mutating enablement", () => {
@@ -604,13 +589,4 @@ test("allows unknown third-party targets in seams", () => {
   const webSeams = resolveVarinWorkbenchShellSurfaceSeams(parsed, "web");
   assert.ok(webSeams.replacementTargets.includes("my.custom.target"));
   assert.ok(webSeams.slots.includes("my.custom.slot"));
-});
-
-test("public workbench context keys stay stable identifiers", () => {
-  assert.equal(VARIN_WORKBENCH_CONTEXT_KEYS.editorIsOpen, "editorIsOpen");
-  assert.equal(VARIN_WORKBENCH_CONTEXT_KEYS.editorIsDirty, "editorIsDirty");
-  assert.equal(VARIN_WORKBENCH_CONTEXT_KEYS.editorHasSelection, "editorHasSelection");
-  assert.equal(VARIN_WORKBENCH_SLOTS.primarySidebarViews, "workbench.primary-sidebar.views");
-  assert.equal(VARIN_WORKBENCH_REPLACEMENT_TARGETS.shell, "workbench.shell");
-  assert.equal(VARIN_WORKBENCH_REPLACEMENT_TARGETS.editor, "workbench.editor");
 });

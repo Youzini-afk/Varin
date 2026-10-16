@@ -1,6 +1,7 @@
 import importlib.util
 import io
 import json
+import os
 from pathlib import Path
 from types import SimpleNamespace
 import unittest
@@ -57,11 +58,15 @@ class AppBridges(unittest.TestCase):
             perform_operation=perform, CancelledError=InterruptedError)
         spec = importlib.util.spec_from_file_location("driver_for_gesture", Path(__file__).with_name("driver-host.py"))
         module = importlib.util.module_from_spec(spec)
-        inputs = [{"tool": "inject_input"}, {"tool": "browser", "op": "tabs"},
-                  {"tool": "office", "op": "act", "act": {"kind": "read"}}]
-        with patch.dict("sys.modules", {"runtime": runtime}), patch("sys.stdin", io.StringIO("\n".join(json.dumps(op) for op in inputs))), patch("sys.stdout", io.StringIO()):
+        inputs = [{"id": "gesture", "tool": "inject_input"}, {"id": "browser-read", "tool": "browser", "op": "tabs"},
+                  {"id": "office-read", "tool": "office", "op": "act", "act": {"kind": "read"}}]
+        output = io.StringIO()
+        with patch.dict("sys.modules", {"runtime": runtime}), patch.dict(os.environ, {"XDG_SESSION_TYPE": "x11", "WAYLAND_DISPLAY": ""}), patch("sys.stdin", io.StringIO("\n".join(json.dumps(op) for op in inputs))), patch("sys.stdout", output):
             spec.loader.exec_module(module)
             module.main()
+        replies = [json.loads(line) for line in output.getvalue().splitlines()]
+        self.assertEqual([(reply["id"], reply["ok"]) for reply in replies],
+                         [("gesture", True), ("browser-read", True), ("office-read", False)])
         self.assertEqual(observed, [True, True])
         self.assertFalse(held[0])  # EOF owns cleanup.
 

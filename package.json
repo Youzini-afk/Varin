@@ -55,7 +55,7 @@
     "test:rust": "cd kernel && cargo test --workspace --locked",
     "test:kernel": "node scripts/test-kernel-authority.mjs",
     "kernel:protocol": "node scripts/generate-kernel-protocol.mjs",
-    "test:cloud": "node --test scripts/host-production-boundary.test.mjs && bunx vitest run scripts/cloud-runtime-layout.test.js",
+    "test:cloud": "node --test scripts/host-production-boundary.test.mjs scripts/cloud-runtime-layout.test.js",
     "dev:web": "bun run --cwd packages/web build:watch",
     "dev:web:server": "bun run --cwd packages/web dev:server:watch",
     "dev:web:full": "node ./scripts/dev-web-full.mjs",
@@ -110,7 +110,8 @@
     "release:npm:publish": "node scripts/npm-public-release.mjs publish",
     "test:packages": "bun run --sequential --no-exit-on-error --filter '@varin/*' test",
     "test:packages:dist": "bun run --sequential --no-exit-on-error --filter '@varin/*' test:dist",
-    "check:packages": "bun run type-check && bun run test:packages"
+    "check:packages": "bun run type-check && bun run test:packages",
+    "test:tooling": "node --test scripts/host-production-boundary.test.mjs scripts/cloud-runtime-layout.test.js scripts/dependabot-report.test.mjs scripts/harness-replay.test.mjs scripts/npm-public-release.test.mjs packages/computer-driver/macos/test_build_helper.mjs packages/mobile/scripts/native-identity.test.mjs"
   },
   "overrides": {
     "@humanfs/node": "0.16.8",
