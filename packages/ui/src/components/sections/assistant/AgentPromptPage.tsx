@@ -1,5 +1,7 @@
 import { useThreadStore } from '@/stores/useThreadStore';
 import React from 'react';
+import { SettingsActionBar } from '../shared/SettingsActionBar';
+import { requestSettingsNavigation } from '@/lib/settings/drafts';
 import { agentScopeKey, personalizeAgentSystemPrompt, renderAgentSystemPrompt, splitAgentSystemPrompt,
   type AgentMemoryScope, type AgentMemoryNote, type AgentSystemPromptSnapshot } from '@varin/protocol';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
@@ -94,8 +96,7 @@ export function AgentPromptPage() {
   return <SettingsPageLayout title={t('assistant.prompt.title')} description={t('assistant.prompt.description')} showSaveStatus={false}>
     <div className="grid gap-6 md:grid-cols-[170px_minmax(0,1fr)]">
       <AgentScopePicker scope={scope} disabled={settings.busy} onChange={next => {
-        if (dirty && !window.confirm(t('assistant.discard'))) return;
-        setDirty(false); setSaved(false); setScope(next);
+        requestSettingsNavigation(() => { setDirty(false); setSaved(false); setScope(next); });
       }} />
       <div className="min-w-0 space-y-4">
         {error || settings.error ? <div role="alert" className="text-destructive typography-meta">{error || settings.error}</div> : null}
@@ -105,8 +106,7 @@ export function AgentPromptPage() {
           className="min-h-80 resize-y font-mono text-sm leading-6" />
         <div className="flex flex-wrap items-center justify-between gap-2">
           <span role="status" className="typography-meta text-muted-foreground">{dirty ? t('assistant.unsaved') : saved ? t('assistant.saved') : t('assistant.prompt.nextRequest')}</span>
-          <div className="flex gap-2"><Button variant="ghost" disabled={!profile || settings.busy} onClick={() => void save(true)}>{t('assistant.prompt.reset')}</Button>
-            <Button disabled={!dirty || settings.busy || scope.kind === 'thread' && !snapshot} onClick={() => void save()}>{t('assistant.save')}</Button></div>
+          <Button variant="ghost" disabled={!profile || settings.busy} onClick={() => void save(true)}>{t('assistant.prompt.reset')}</Button>
         </div>
         <div className="grid gap-3 border-t pt-4 sm:grid-cols-3">{(['density', 'style', 'autonomy'] as const).map(key => <label key={key} className="space-y-1.5 typography-meta">
           <span>{t(`assistant.preset.${key}`)}</span>
@@ -132,5 +132,6 @@ export function AgentPromptPage() {
         </details> : null}
       </div>
     </div>
+    <SettingsActionBar saveLabel={t('assistant.save')} dirty={dirty} saving={settings.busy} saveDisabled={scope.kind === 'thread' && !snapshot} onSave={() => save()} onCancel={() => { setDraft(stored); setDirty(false); setError(null); }} error={error || settings.error} />
   </SettingsPageLayout>;
 }

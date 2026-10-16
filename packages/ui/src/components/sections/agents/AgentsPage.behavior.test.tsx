@@ -12,10 +12,11 @@ import { I18nProvider } from '@/lib/i18n';
 import { AgentsPage } from './AgentsPage';
 import { AgentsSidebar } from './AgentsSidebar';
 import { beginAgentProfilesHost, selectAgentProfile, selectAgentProfilesRuntime } from './agent-profiles-store';
+import { useModelCatalogStore } from '@/stores/useModelCatalogStore';
 import { agentProfileDrafts } from './agent-profile-draft';
 
 const fixture = vi.hoisted(() => ({ api: {} as { agentProfiles: AgentProfilesAPI; threads: { listModels: ReturnType<typeof vi.fn> } },
-  piCatalog: vi.fn(), piModel: vi.fn(), host: '', writes: [] as AgentProfileSaveRequest[] }));
+  modelReads: vi.fn(), piCatalog: vi.fn(), piModel: vi.fn(), host: '', writes: [] as AgentProfileSaveRequest[] }));
 vi.mock('@/hooks/useRuntimeAPIs', () => ({ useRuntimeAPIs: () => fixture.api }));
 vi.mock('@/stores/useDirectoryStore', () => ({ useDirectoryStore: (select: (state: { currentDirectory: string }) => unknown) => select({ currentDirectory: '/workspace' }) }));
 vi.mock('@/stores/useProjectsStore', () => ({ useProjectsStore: (select: (state: object) => unknown) => select({ projects: [], activeProjectId: null }) }));
@@ -49,13 +50,17 @@ beforeEach(async () => {
       { name: 'file_write', version: '1', source_requirement: 'physical', default_presets: ['worker'] },
     ],
   });
-  fixture.writes = []; fixture.piCatalog.mockClear(); fixture.piModel.mockClear(); hold = undefined;
+  fixture.writes = []; fixture.modelReads.mockClear(); useModelCatalogStore.setState({ channels: [], loaded: false, loading: false, error: null }); fixture.piCatalog.mockClear(); fixture.piModel.mockClear(); hold = undefined;
   const { window, document } = parseHTML('<html><body></body></html>');
   Object.defineProperty(window, 'location', { value: { origin: 'http://ui.test', href: 'http://ui.test/' }, configurable: true });
   vi.stubGlobal('window', window); vi.stubGlobal('document', document); vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
   vi.stubGlobal('HTMLElement', window.HTMLElement); vi.stubGlobal('Element', window.Element); vi.stubGlobal('Node', window.Node);
   vi.stubGlobal('Event', window.Event); vi.stubGlobal('CustomEvent', window.CustomEvent);
   globalThis.fetch = async (input, init) => {
+    if (String(input).endsWith('/api/models/read')) {
+      fixture.modelReads();
+      return Response.json({ revision: 'models', types: [], channels: [{ id: 'local', name: 'Local', type: 'openai-compatible', enabled: true, baseUrl: 'http://localhost/v1', authentication: { kind: 'none' }, parameters: {}, models: [{ id: 'fixture', name: 'Local fixture', enabled: true, operations: ['chat'] }] }] });
+    }
     const action = String(input).split('/').at(-1) as 'read' | 'save' | 'remove';
     const body = JSON.parse(String(init?.body));
     if (action === 'save') fixture.writes.push(body);
@@ -99,7 +104,7 @@ test('renders actual Host worker/retrieval defaults and native model catalog fro
   expect(container.querySelector('[data-agent-id="varin:builtin:retrievalAgent"]')).not.toBeNull();
   expect(container.querySelector<HTMLTextAreaElement>('[aria-label="Tools (comma or newline separated)"]')?.value).toBe('file_read, file_write');
   expect(container.querySelector('[data-tools-source="default"]')).not.toBeNull();
-  expect(fixture.api.threads.listModels).toHaveBeenCalled();
+  expect(fixture.modelReads).toHaveBeenCalled();
   await click(container.querySelector('[data-agent-id="varin:builtin:retrievalAgent"] button')!);
   expect(container.querySelector<HTMLTextAreaElement>('[aria-label="Tools (comma or newline separated)"]')?.value).toBe('file_read');
 
@@ -145,7 +150,7 @@ test('keeps draft revisions across refresh; conflicts do not silently retry or o
   expect(fixture.writes).toHaveLength(1); expect(fixture.writes[0]!.expectedRevision).toBe(before.revision);
   expect(container.textContent).toContain('Agent settings changed. Reload them before saving.');
   expect((await persisted()).harness.agents.legacy.enabled).toBe(true);
-  await click(button('Discard draft'));
+  await click(button('Cancel'));
   expect(container.querySelector('[role="switch"]')?.getAttribute('aria-checked')).toBe('true');
   expect(container.querySelector<HTMLInputElement>('[aria-label="Responsibility"]')?.value).toBe('External change');
 });

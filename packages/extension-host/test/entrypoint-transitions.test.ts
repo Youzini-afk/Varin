@@ -75,7 +75,8 @@ test('removing Host stops new calls while an accepted provider pin remains valid
     try {
       await owner.runtime.selectCandidate(await owner.stage(false));
       const entry = (await owner.runtime.catalog.snapshot()).extensions.find(entry => entry.manifest.id === extensionId);
-      assert.equal(entry?.manifest.entrypoints.host, undefined);
+      assert.ok(entry);
+      assert.equal(entry.manifest.entrypoints?.host, undefined);
       assert.equal(await pin.invoke('read', []), 'original handler');
       await assert.rejects(owner.runtime.invokeService({
         serviceId: service.id, version: 1, providerId: lease.providerId, method: 'read', args: [],

@@ -1,5 +1,6 @@
 import React from 'react';
 import type { HarnessModelRole } from '@varin/protocol';
+import { ModelLogo } from '@/components/ui/ModelLogo';
 import { ModelSelector } from '@/components/sections/agents/ModelSelector';
 import { Switch } from '@/components/ui/switch';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
@@ -13,6 +14,7 @@ export function HarnessModelField({ harness, update, slot, enableControl = true 
   const cwd = useDirectoryStore((state) => state.currentDirectory);
   const selected = harness.models[slot];
   const catalog = useConfigurationModels();
+  const selectedModel = catalog.modelsFor(selected?.providerId ?? '', 'chat').find(model => model.id === selected?.modelId);
   const inherited = slot === 'worker';
   const label = t(slot === 'explore' ? 'settings.page.harness.codeRetrieval.mode.llm' : `settings.harness.role.${slot}`);
   const emptyLabel = t(inherited ? 'settings.page.harness.models.mainModel' : 'settings.harness.models.noModel');
@@ -27,8 +29,8 @@ export function HarnessModelField({ harness, update, slot, enableControl = true 
       {catalog.runtime === 'agent' ? <Select value={selected?.modelId ? JSON.stringify([selected.providerId, selected.modelId]) : '__none'} onValueChange={key => {
         const [providerId, modelId] = key === '__none' ? [] : JSON.parse(key) as string[];
         update({ models: { [slot]: { providerId, modelId } } });
-      }}><SelectTrigger size="settings" className="w-full" aria-label={label}><SelectValue>{selected?.modelId ? `${selected.providerId}/${selected.modelId}` : emptyLabel}</SelectValue></SelectTrigger><SelectContent>
-        <SelectItem value="__none">{emptyLabel}</SelectItem>{catalog.providers.flatMap(provider => catalog.modelsFor(provider.id, 'chat').map(model => <SelectItem key={JSON.stringify([provider.id, model.id])} value={JSON.stringify([provider.id, model.id])}>{model.name ?? model.id} · {provider.name}</SelectItem>))}
+      }}><SelectTrigger size="settings" className="w-full" aria-label={label}><SelectValue>{selected?.modelId ? <span className="flex min-w-0 items-center gap-2"><ModelLogo modelId={selected.modelId} requestModelId={selectedModel?.requestModelId} displayName={selectedModel?.name} /><span className="truncate">{selectedModel?.name || selected.modelId}</span></span> : emptyLabel}</SelectValue></SelectTrigger><SelectContent>
+        <SelectItem value="__none">{emptyLabel}</SelectItem>{catalog.providers.flatMap(provider => catalog.modelsFor(provider.id, 'chat').map(model => <SelectItem key={JSON.stringify([provider.id, model.id])} value={JSON.stringify([provider.id, model.id])}><span className="flex min-w-0 items-center gap-2"><ModelLogo modelId={model.id} requestModelId={model.requestModelId} displayName={model.name} /><span className="truncate">{model.name ?? model.id} · {provider.name}</span></span></SelectItem>))}
       </SelectContent></Select> : <ModelSelector cwd={cwd} providerId={selected?.providerId ?? ''} modelId={selected?.modelId ?? ''}
         className="w-full max-w-none" allowNone placeholder={emptyLabel} defaultSelectionLabel={emptyLabel}
         onChange={(providerId, modelId) => update({ models: { [slot]: { providerId: providerId || undefined, modelId: modelId || undefined } } })} />}

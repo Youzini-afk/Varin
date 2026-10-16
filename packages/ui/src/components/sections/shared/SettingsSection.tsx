@@ -1,6 +1,6 @@
 import React from 'react';
 import { Button } from '@/components/ui/button';
-import { Checkbox } from '@/components/ui/checkbox';
+import { Switch } from '@/components/ui/switch';
 import { Radio } from '@/components/ui/radio';
 import { dropdownTriggerVariants } from '@/components/ui/dropdown-trigger';
 import { cn } from '@/lib/utils';
@@ -52,7 +52,7 @@ export const SETTINGS_OPTION_STACK_CLASS = 'space-y-1.5';
  */
 /** L1 — page / detail-pane title (larger, quieter than section titles). */
 export const SETTINGS_PAGE_TITLE_CLASS =
-  'typography-settings-page-title text-muted-foreground';
+  'typography-settings-page-title font-semibold tracking-tight text-foreground';
 /** L2 — section title inside a settings page. */
 export const SETTINGS_SECTION_TITLE_CLASS =
   'typography-settings-section-title text-foreground';
@@ -120,7 +120,7 @@ export const SettingsSection: React.FC<SettingsSectionProps> = ({
       data-settings-item={settingsItem}
       className={cn(
         'space-y-5',
-        divider ? 'border-t border-border/60 py-8' : 'pb-8',
+        divider ? 'border-t border-border/60 py-6' : 'pb-6',
         className,
       )}
     >
@@ -305,7 +305,7 @@ export const SettingsFieldRow: React.FC<SettingsFieldRowProps> = ({
     <div
       data-settings-item={settingsItem}
       className={cn(
-        'flex flex-col gap-2 py-0.5 @xl:flex-row @xl:items-center @xl:gap-8',
+        'flex flex-col gap-3 py-3 @xl:flex-row @xl:items-center @xl:justify-between @xl:gap-8',
         className,
       )}
     >
@@ -380,49 +380,19 @@ export const SettingsCheckboxRow: React.FC<SettingsCheckboxRowProps> = ({
   labelAccessory,
   info,
 }) => {
-  const toggle = () => {
-    if (!disabled) onChange(!checked);
-  };
-
-  const hasDescription = description != null;
-
+  const labelId = React.useId();
+  const descriptionId = React.useId();
   return (
-    <div
-      data-settings-item={settingsItem}
-      className={cn(
-        'group flex cursor-pointer gap-2 py-0.5',
-        hasDescription ? 'items-start' : 'items-center',
-        disabled && 'cursor-not-allowed opacity-60',
-        className,
-      )}
-      role="button"
-      tabIndex={disabled ? -1 : 0}
-      aria-pressed={checked}
-      aria-disabled={disabled || undefined}
-      onClick={toggle}
-      onKeyDown={(event) => {
-        if (event.key === ' ' || event.key === 'Enter') {
-          event.preventDefault();
-          toggle();
-        }
-      }}
-    >
-      <Checkbox
-        checked={checked}
-        onChange={onChange}
-        disabled={disabled}
-        ariaLabel={ariaLabel}
-      />
-      <div className="flex min-w-0 flex-col">
+    <div data-settings-item={settingsItem} className={cn('flex items-center justify-between gap-6 py-3', disabled && 'opacity-60', className)}>
+      <div className="min-w-0 flex-1">
         <div className="flex min-w-0 items-center gap-1.5">
-          <span className={SETTINGS_FIELD_LABEL_CLASS}>{label}</span>
+          <label id={labelId} className={cn(SETTINGS_FIELD_LABEL_CLASS, 'cursor-pointer')} onClick={() => { if (!disabled) onChange(!checked); }}>{label}</label>
           {labelAccessory}
           {info != null ? <SettingsInfoHint>{info}</SettingsInfoHint> : null}
         </div>
-        {hasDescription ? (
-          <span className={SETTINGS_HELPER_CLASS}>{description}</span>
-        ) : null}
+        {description != null ? <p id={descriptionId} className={cn(SETTINGS_HELPER_CLASS, 'mt-1')}>{description}</p> : null}
       </div>
+      <Switch checked={checked} onCheckedChange={onChange} disabled={disabled} aria-label={ariaLabel} aria-labelledby={ariaLabel ? undefined : labelId} aria-describedby={description != null ? descriptionId : undefined} />
     </div>
   );
 };

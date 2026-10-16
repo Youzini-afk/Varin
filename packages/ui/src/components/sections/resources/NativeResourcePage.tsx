@@ -2,8 +2,10 @@ import React from 'react';
 import { markdown } from '@codemirror/lang-markdown';
 import type { NativeResourceKind, NativeResourceScope } from '@varin/application-client';
 import { Icon } from '@/components/icon/Icon';
+import { SettingsActionBar } from '@/components/sections/shared/SettingsActionBar';
 import { SettingsPageLayout } from '@/components/sections/shared/SettingsPageLayout';
 import { SettingsSection } from '@/components/sections/shared/SettingsSection';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { CodeMirrorEditor } from '@/components/ui/CodeMirrorEditor';
 import { Input } from '@/components/ui/input';
@@ -77,6 +79,7 @@ export const NativeResourcePage: React.FC<NativeResourcePageProps> = ({ kind }) 
   const save = React.useCallback(async () => {
     const success = await saveResource(kind, resourceTarget, targetKey);
     if (success) toast.success(t('settings.varin.resources.toast.saved'));
+    return success;
   }, [kind, resourceTarget, saveResource, t, targetKey]);
 
   React.useEffect(() => {
@@ -155,17 +158,11 @@ export const NativeResourcePage: React.FC<NativeResourcePageProps> = ({ kind }) 
       showSaveStatus={false}
       headerEnd={(
         <div className="flex items-center gap-2">
-          <Button type="button" variant="ghost" size="xs" disabled={pane.mutating} onClick={() => void reload()}>
+          <Button type="button" variant="ghost" size="xs" disabled={pane.mutating} onClick={() => void reload()} aria-label={t('settings.varin.recovery.actions.refresh')}>
             <Icon name="refresh" className={cn('size-3.5', pane.loadingDocument && 'animate-spin')} />
           </Button>
-          <Button
-            type="button"
-            size="sm"
-            disabled={!descriptor.writable || !dirty || pane.mutating}
-            onClick={() => void save()}
-          >
-            {pane.mutating ? t('settings.common.actions.saving') : t('settings.common.actions.saveChanges')}
-          </Button>
+          <Button type="button" variant="outline" size="sm" disabled={pane.mutating} onClick={() => setCopying(current => !current)}>{t('settings.varin.resources.actions.copy')}</Button>
+          {descriptor.writable ? <Button type="button" variant="ghost" size="sm" disabled={pane.mutating} onClick={() => void remove()} aria-label={t('settings.varin.resources.actions.delete')}><Icon name="delete-bin" className="size-4" /></Button> : null}
         </div>
       )}
     >
@@ -188,16 +185,8 @@ export const NativeResourcePage: React.FC<NativeResourcePageProps> = ({ kind }) 
                 : t('settings.varin.resources.status.readOnly')}
             </span>
             <span className="rounded-full bg-muted px-2 py-0.5 typography-micro text-muted-foreground">
-              {descriptor.sourceInfo.scope}
+              {t(descriptor.sourceInfo.scope === 'project' ? 'settings.common.scope.project' : 'settings.varin.resources.scope.user')}
             </span>
-          </div>
-
-          <div className="rounded-lg bg-[var(--surface-elevated)] px-3 py-2">
-            <p className="break-all font-mono typography-micro text-muted-foreground">{descriptor.filePath}</p>
-            <p className="mt-1 typography-micro text-muted-foreground">
-              {descriptor.sourceInfo.origin} · {descriptor.sourceInfo.source}
-              {descriptor.disableModelInvocation ? ` · ${t('settings.varin.skills.modelInvocationDisabled')}` : ''}
-            </p>
           </div>
 
           {!descriptor.writable ? (
@@ -207,6 +196,7 @@ export const NativeResourcePage: React.FC<NativeResourcePageProps> = ({ kind }) 
             </div>
           ) : null}
 
+          <div className="flex items-center justify-between typography-micro text-muted-foreground"><span className="rounded bg-muted px-1.5 py-0.5 font-mono">SKILL.md</span>{descriptor.writable ? <span>⌘S / Ctrl S</span> : null}</div>
           <div className="h-[34rem] min-h-80 overflow-hidden rounded-lg border border-border/60 bg-background">
             <CodeMirrorEditor
               value={pane.draft}
@@ -218,6 +208,15 @@ export const NativeResourcePage: React.FC<NativeResourcePageProps> = ({ kind }) 
             />
           </div>
 
+          <details className="border-t border-border/60 pt-3"><summary className="cursor-pointer typography-meta text-muted-foreground">{t('settings.varin.resources.sourceDetails')}</summary>
+          <div className="rounded-lg bg-[var(--surface-elevated)] px-3 py-2">
+            <p className="break-all font-mono typography-micro text-muted-foreground">{descriptor.filePath}</p>
+            <p className="mt-1 typography-micro text-muted-foreground">
+              {descriptor.sourceInfo.origin} · {descriptor.sourceInfo.source}
+              {descriptor.disableModelInvocation ? ` · ${t('settings.varin.skills.modelInvocationDisabled')}` : ''}
+            </p>
+          </div>
+          </details>
           {diagnostics.length > 0 ? (
             <div className="space-y-2">
               {diagnostics.map((diagnostic, index) => (
@@ -244,35 +243,23 @@ export const NativeResourcePage: React.FC<NativeResourcePageProps> = ({ kind }) 
         </div>
       </SettingsSection>
 
-      <SettingsSection
-        title={t('settings.varin.resources.actions.title')}
-        description={t('settings.varin.skills.actions.description')}
-      >
-        <div className="space-y-3">
-          <div className="flex flex-wrap items-center gap-2">
-            <Button type="button" variant="outline" size="sm" disabled={pane.mutating} onClick={() => setCopying((current) => !current)}>
-              {t('settings.varin.resources.actions.copy')}
-            </Button>
-            {descriptor.writable ? (
-              <Button type="button" variant="ghost" size="sm" disabled={pane.mutating} onClick={() => void remove()} className="text-[var(--status-error)]">
-                {t('settings.varin.resources.actions.delete')}
-              </Button>
-            ) : null}
-          </div>
-
-          {copying ? (
+      <Dialog open={copying} onOpenChange={open => { if (!pane.mutating) setCopying(open); }}>
+        <DialogContent>
+          <DialogHeader><DialogTitle>{t('settings.varin.resources.actions.copy')}</DialogTitle><DialogDescription>{t('settings.varin.skills.actions.description')}</DialogDescription></DialogHeader>
             <form
-              className="grid grid-cols-1 gap-2 rounded-lg border border-border/60 bg-[var(--surface-elevated)] p-3 @xl:grid-cols-[minmax(0,1fr)_10rem_auto]"
+              className="space-y-3"
               onSubmit={(event) => {
                 event.preventDefault();
                 void copy();
               }}
             >
               <Input
+                aria-label={t('settings.agents.name')}
                 value={copyName}
                 onChange={(event) => setCopyName(event.target.value)}
                 aria-invalid={Boolean(copyName && copyNameError)}
               />
+              {copyName && copyNameError ? <p role="alert" className="typography-meta text-destructive">{t(`settings.varin.resources.nameError.${copyNameError}`)}</p> : null}
               <Select value={copyScope} onValueChange={setCopyScope}>
                 <SelectTrigger size="settings"><SelectValue /></SelectTrigger>
                 <SelectContent>
@@ -282,13 +269,14 @@ export const NativeResourcePage: React.FC<NativeResourcePageProps> = ({ kind }) 
                   </SelectItem>
                 </SelectContent>
               </Select>
+              <div className="flex justify-end gap-2"><Button type="button" variant="ghost" size="sm" disabled={pane.mutating} onClick={() => setCopying(false)}>{t('settings.common.actions.cancel')}</Button>
               <Button type="submit" size="sm" disabled={Boolean(copyNameError) || projectBlocked || pane.mutating}>
                 {t('settings.varin.resources.actions.copy')}
-              </Button>
+              </Button></div>
             </form>
-          ) : null}
-        </div>
-      </SettingsSection>
+        </DialogContent>
+      </Dialog>
+      {descriptor.writable ? <SettingsActionBar dirty={dirty} saving={pane.mutating} onSave={save} onCancel={() => resetDraft(kind)} saveLabel={t('settings.common.actions.saveChanges')} error={pane.error} /> : null}
     </SettingsPageLayout>
   );
 };

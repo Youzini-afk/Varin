@@ -65,3 +65,12 @@ test('preload bootstrap discloses runtime credentials only to a trusted local re
   assert.equal(local.homeDirectory, 'C:\\Users\\Example');
   assert.equal(local.relayHostId, 'relay-host');
 });
+
+test('frontend-only recovery keeps native startup and restart privileged to the bundled shell', () => {
+  const withoutLocalHost = { uiProtocol: 'varin-ui', localOrigins: [] };
+  assert.equal(isTrustedLocalRendererUrl('varin-ui://app/index.html', withoutLocalHost), true);
+  assert.equal(isTrustedLocalRendererUrl('https://remote.example.test/app', withoutLocalHost), false);
+  assert.equal(REMOTE_SAFE_DESKTOP_COMMANDS.has('desktop_get_local_host_mode'), false);
+  assert.equal(REMOTE_SAFE_DESKTOP_COMMANDS.has('desktop_set_local_host_mode'), false);
+  assert.equal(REMOTE_SAFE_DESKTOP_COMMANDS.has('desktop_restart_without_update'), false);
+});

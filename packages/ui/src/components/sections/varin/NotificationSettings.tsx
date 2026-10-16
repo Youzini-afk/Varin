@@ -9,9 +9,7 @@ import { getClientPlatform } from '@/lib/platform';
 import { useI18n } from '@/lib/i18n';
 import {
   SettingsSection,
-  SettingsTwoColumn,
   SettingsCheckboxRow,
-  SettingsGroupTitle,
   SETTINGS_OPTION_STACK_CLASS,
 } from '@/components/sections/shared/SettingsSection';
 
@@ -564,16 +562,17 @@ export const NotificationSettings: React.FC = () => {
                 </>
               )}
             >
-              <SettingsTwoColumn className="gap-2 md:grid-cols-2 md:gap-3 lg:gap-3">
+              <div className="divide-y divide-border/50">
                 {(['completion', 'subtask', 'error', 'question'] as const).map((event: NotificationTemplateEvent) => (
-                  <section key={event} className="p-2">
-                    <SettingsGroupTitle className="capitalize">
+                  <details key={event} className="group/template py-3">
+                    <summary className="flex cursor-pointer list-none items-center justify-between gap-3 typography-ui-label [&::-webkit-details-marker]:hidden">
                       {t(TEMPLATE_EVENT_LABEL_KEYS[event])}
-                    </SettingsGroupTitle>
-                    <div className="mt-1.5 space-y-2">
+                    <span className="text-muted-foreground">+</span></summary>
+                    <div className="mt-4 space-y-3 pl-1">
                       <div>
-                        <label className="typography-micro text-muted-foreground block mb-1">{t('settings.notifications.page.template.field.title')}</label>
+                        <label htmlFor={`notification-template-${event}-title`} className="typography-meta text-muted-foreground block mb-1">{t('settings.notifications.page.template.field.title')}</label>
                         <Input
+                          id={`notification-template-${event}-title`}
                           value={notificationTemplates[event].title}
                           onChange={(e) => updateTemplate(event, 'title', e.target.value)}
                           className="h-7"
@@ -581,8 +580,9 @@ export const NotificationSettings: React.FC = () => {
                         />
                       </div>
                       <div>
-                        <label className="typography-micro text-muted-foreground block mb-1">{t('settings.notifications.page.template.field.message')}</label>
+                        <label htmlFor={`notification-template-${event}-message`} className="typography-meta text-muted-foreground block mb-1">{t('settings.notifications.page.template.field.message')}</label>
                         <Input
+                          id={`notification-template-${event}-message`}
                           value={notificationTemplates[event].message}
                           onChange={(e) => updateTemplate(event, 'message', e.target.value)}
                           className="h-7"
@@ -590,9 +590,9 @@ export const NotificationSettings: React.FC = () => {
                         />
                       </div>
                     </div>
-                  </section>
+                  </details>
                 ))}
-              </SettingsTwoColumn>
+              </div>
             </SettingsSection>
             )}
 

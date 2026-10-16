@@ -8,11 +8,10 @@ import { useDeviceInfo } from '@/lib/device';
 import { updateDesktopSettings } from '@/lib/persistence';
 import { setDirectoryShowHidden, useDirectoryShowHidden } from '@/lib/directoryShowHidden';
 import { Switch } from '@/components/ui/switch';
-import { Icon } from '@/components/icon/Icon';
-import { cn } from '@/lib/utils';
 import { SettingsSection, SettingsFieldRow, SettingsChipGroup } from '../shared/SettingsSection';
 import { SettingsInfoHint } from '../shared/SettingsInfoHint';
 import { ChatWidthSettings } from './ChatWidthSettings';
+import { ChatSettingsPreview, type ChatPreviewScene } from './ChatSettingsPreview';
 
 const Toggle: React.FC<{
   label: string; checked: boolean; onChange: (value: boolean) => void; item?: string; info?: string;
@@ -28,6 +27,7 @@ const Toggle: React.FC<{
 export const ChatSettings: React.FC = () => {
   const { t } = useI18n();
   const { isMobile } = useDeviceInfo();
+  const [previewScene, setPreviewScene] = React.useState<ChatPreviewScene>('conversation');
   const state = useUIStore(useShallow(s => ({
     chatRenderMode: s.chatRenderMode, activityRenderMode: s.activityRenderMode,
     userMessageRenderingMode: s.userMessageRenderingMode, collapsibleUserMessages: s.collapsibleUserMessages,
@@ -55,7 +55,16 @@ export const ChatSettings: React.FC = () => {
     void updateDesktopSettings({ [key]: value });
   };
 
-  return <div>
+  const showRelatedPreview = (event: React.SyntheticEvent<HTMLDivElement>) => {
+    const target = event.target;
+    if (!(target instanceof Element)) return;
+    if (target.closest('[data-settings-item="chat.changed-files"]')) { setPreviewScene('conversation'); return; }
+    const section = target.closest('[data-preview-scene]')?.getAttribute('data-preview-scene');
+    if (section === 'conversation' || section === 'files' || section === 'input') setPreviewScene(section);
+  };
+  return <div className="settings-chat-layout">
+    <div className="settings-chat-controls" onFocusCapture={showRelatedPreview} onPointerDownCapture={showRelatedPreview}>
+    <div data-preview-scene="conversation">
     <SettingsSection divider={false} title={t('settings.chat.reading')} settingsItem="chat.message-appearance" contentClassName="space-y-4">
       <ChatWidthSettings />
       <SettingsFieldRow label={t('settings.chat.userFormat')}>
@@ -74,19 +83,12 @@ export const ChatSettings: React.FC = () => {
     </SettingsSection>
 
     <SettingsSection title={t('settings.chat.execution')} settingsItem="chat.activity-display" contentClassName="space-y-5">
-      <div data-settings-item="chat.render-mode" role="group" aria-label={t('settings.chat.replyLayout')}
-        className="grid grid-cols-1 gap-3 @xl:grid-cols-2">
-        {(['live', 'sorted'] as const).map(mode => <button key={mode} type="button"
-          aria-pressed={state.chatRenderMode === mode} onClick={() => save('chatRenderMode', mode, actions.setChatRenderMode)}
-          className={cn('rounded-lg border p-4 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
-            state.chatRenderMode === mode ? 'border-primary/65 bg-interactive-selection' : 'border-border/60 hover:bg-interactive-hover')}>
-          <span className="flex items-center gap-2 typography-ui-label font-medium"><Icon name={mode === 'live' ? 'list-check-2' : 'stack'} className="size-4" />
-            {t(mode === 'live' ? 'settings.chat.live' : 'settings.chat.sorted')}
-            {state.chatRenderMode === mode ? <Icon name="check" className="ml-auto size-4" /> : null}
-          </span>
-          <span className="mt-2 block typography-meta text-muted-foreground">{t(mode === 'live' ? 'settings.chat.liveHint' : 'settings.chat.sortedHint')}</span>
-        </button>)}
-      </div>
+      <SettingsFieldRow label={t('settings.chat.replyLayout')} settingsItem="chat.render-mode"
+        info={t(state.chatRenderMode === 'live' ? 'settings.chat.liveHint' : 'settings.chat.sortedHint')}>
+        <SettingsChipGroup aria-label={t('settings.chat.replyLayout')} value={state.chatRenderMode}
+          onChange={mode => save('chatRenderMode', mode, actions.setChatRenderMode)}
+          options={[{ value: 'live', label: t('settings.chat.live') }, { value: 'sorted', label: t('settings.chat.sorted') }]} />
+      </SettingsFieldRow>
       {state.chatRenderMode === 'sorted' ? <SettingsFieldRow label={t('settings.chat.activity')}>
         <SettingsChipGroup aria-label={t('settings.chat.activity')} value={state.activityRenderMode}
           onChange={v => save('activityRenderMode', v, actions.setActivityRenderMode)}
@@ -98,7 +100,7 @@ export const ChatSettings: React.FC = () => {
         {state.showReasoningTraces ? <div className="pl-5"><Toggle label={t('settings.chat.collapseThinking')} checked={state.collapsibleThinkingBlocks}
           onChange={actions.setCollapsibleThinkingBlocks} /></div> : null}
       </div>
-      <div data-settings-item="chat.expanded-tools" className="rounded-lg bg-muted/20 px-4 py-1">
+      <div data-settings-item="chat.expanded-tools" className="divide-y divide-border/40">
         <Toggle label={t('settings.chat.expandCommands')} checked={state.showExpandedBashTools}
           onChange={v => save('showExpandedBashTools', v, actions.setShowExpandedBashTools)} />
         <Toggle label={t('settings.chat.expandEdits')} checked={state.showExpandedEditTools}
@@ -106,13 +108,14 @@ export const ChatSettings: React.FC = () => {
       </div>
     </SettingsSection>
 
+    </div>
+    <div data-preview-scene="input">
     <SettingsSection title={t('settings.chat.input')} settingsItem="chat.composer" contentClassName="space-y-4">
-      <div data-settings-item="chat.follow-up-behavior" className="space-y-3">
-        <div className="typography-ui-label">{t('settings.chat.busySend')}</div>
+      <SettingsFieldRow settingsItem="chat.follow-up-behavior" label={t('settings.chat.busySend')}
+        info={t(followUpBehavior === 'queue' ? 'settings.chat.queueHint' : 'settings.chat.steerHint')}>
         <SettingsChipGroup aria-label={t('settings.chat.busySend')} value={followUpBehavior} onChange={setFollowUpBehavior}
           options={[{ value: 'queue', label: t('settings.varin.visual.option.followUpBehavior.queue.label') }, { value: 'steer', label: t('settings.varin.visual.option.followUpBehavior.steer.label') }]} />
-        <p className="typography-meta text-muted-foreground">{t(followUpBehavior === 'queue' ? 'settings.chat.queueHint' : 'settings.chat.steerHint')}</p>
-      </div>
+      </SettingsFieldRow>
       <div className="divide-y divide-border/40">
         <Toggle label={t('settings.chat.keepDraft')} item="chat.persist-drafts" checked={state.persistChatDraft}
           onChange={actions.setPersistChatDraft} />
@@ -123,6 +126,8 @@ export const ChatSettings: React.FC = () => {
       </div>
     </SettingsSection>
 
+    </div>
+    <div data-preview-scene="files">
     <SettingsSection title={t('settings.chat.files')} settingsItem="chat.tools-and-files" contentClassName="space-y-4">
       <SettingsFieldRow label={t('settings.chat.diff')} settingsItem="editor.diff-layout">
         <SettingsChipGroup aria-label={t('settings.chat.diff')} value={state.diffLayoutPreference} onChange={actions.setDiffLayoutPreference}
@@ -143,5 +148,8 @@ export const ChatSettings: React.FC = () => {
         <Toggle label={t('settings.varin.visual.field.showDotfiles')} item="chat.dotfiles" checked={directoryShowHidden} onChange={setDirectoryShowHidden} />
       </div>
     </SettingsSection>
+    </div>
+    </div>
+    <ChatSettingsPreview scene={previewScene} onSceneChange={setPreviewScene} />
   </div>;
 };

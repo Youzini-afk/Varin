@@ -6,6 +6,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Button } from '@/components/ui/button';
 import { Switch } from '@/components/ui/switch';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { SettingsActionBar } from '@/components/sections/shared/SettingsActionBar';
 import { SettingsSection, SettingsStackedField, SettingsTwoColumn } from '@/components/sections/shared/SettingsSection';
 import { useI18n } from '@/lib/i18n';
 import { reportSettingsSaveState } from '@/lib/persistence';
@@ -58,21 +59,22 @@ export function AgentProfileEditor({ profile, snapshot, host, cwd, onSave, onCan
     setDraft(makeDraft()); setRevision(snapshot.revision); setValidationError(null);
   };
   const resetTools = () => update({ tools: profile?.defaults?.tools.join(', ') ?? '', toolsChange: 'reset' });
-  const save = async (event: React.FormEvent) => {
-    event.preventDefault();
-    if (busy) return;
+  const save = async (event?: React.FormEvent) => {
+    event?.preventDefault();
+    if (busy) return false;
     const temperature = draft.temperature.trim() ? Number(draft.temperature) : undefined;
     if (temperature !== undefined && (!Number.isFinite(temperature) || temperature < 0)) {
-      setValidationError(t('settings.agents.page.field.temperatureTooltip')); return;
+      setValidationError(t('settings.agents.page.field.temperatureTooltip')); return false;
     }
     reportSettingsSaveState('saving');
     const saved = await onSave(agentProfileSaveRequest(snapshot.runtime, revision, draft, profile, agentProfileDefaultLabels(profile, t)));
     if (!alive.current) {
       if (saved) agentProfileDrafts.delete(draftKey);
-      return;
+      return saved;
     }
     reportSettingsSaveState(saved ? 'saved' : 'error');
     if (saved) { latest.current.dirty = false; agentProfileDrafts.delete(draftKey); setDirty(false); }
+    return saved;
   };
   const source = draft.toolsChange === 'explicit' ? 'explicit' : draft.toolsChange === 'reset' ? (builtin ? 'default' : 'unconfigured') : profile?.tools.source ?? 'explicit';
   const notBuiltin = snapshot.capabilities === null ? [] : draft.tools.split(/[\n,]/u).map(value => value.trim()).filter(Boolean)
@@ -120,11 +122,8 @@ export function AgentProfileEditor({ profile, snapshot, host, cwd, onSave, onCan
     </SettingsSection>
     {validationError && <p role="alert" className="mb-4 typography-meta text-destructive">{validationError}</p>}
     {dirty && revision !== snapshot.revision && <p role="status" className="mb-3 typography-meta text-[var(--status-warning)]">{t('settings.agents.changedElsewhere')}</p>}
-    <div className="flex flex-wrap justify-end gap-2 border-t border-border/60 pt-4">
-      {dirty && <Button type="button" variant="ghost" disabled={busy} onClick={discard}>{t('settings.agents.discardChanges')}</Button>}
+    <SettingsActionBar dirty={dirty || !profile} saving={busy} onSave={() => save()} onCancel={() => { discard(); onCancel?.(); }} saveDisabled={!draft.name.trim()} saveLabel={t('settings.common.actions.saveChanges')} error={validationError}>
       {builtin && profile.defaults && <Button type="button" variant="ghost" disabled={busy} onClick={() => update({ ...profile.defaults!, ...agentProfileDefaultLabels(profile, t), tools: profile.defaults!.tools.join(', '), toolsChange: 'reset', temperature: '', thinkingLevel: 'inherit' })}>{t('settings.common.actions.reset')}</Button>}
-      {onCancel && <Button type="button" variant="outline" disabled={busy} onClick={() => { discard(); onCancel(); }}>{t('settings.common.actions.cancel')}</Button>}
-      <Button type="submit" disabled={busy || !draft.name.trim() || (Boolean(profile) && !dirty)}>{t('settings.common.actions.saveChanges')}</Button>
-    </div>
+    </SettingsActionBar>
   </form>;
 }

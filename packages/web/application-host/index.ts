@@ -1,3 +1,7 @@
+import { createStorageService } from './lib/storage/service.js';
+import { registerStorageRoutes } from './lib/storage/routes.js';
+import { createStorageCoordinator } from './lib/storage/coordinator.js';
+import { readHostConnections } from './lib/connections/hosts.js';
 import { createResourceManagement } from './lib/agent-resources/management.js';
 import { registerResourceManagementRoutes } from './lib/agent-resources/management-routes.js';
 import { createModelTextService } from './lib/model-text/service.js';
@@ -1125,6 +1129,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   });
   const managedRemoteExecution = createManagedRemoteExecutionService({
     client: kernelClient,
+    storageAvailable: true,
     hostId: extensionRuntime.services.hostId,
     resources: resourceService,
     onError: (error) => console.error("[VarinManagedRemote]", error.message),
@@ -2159,7 +2164,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   const connectionProxy = attachConnectionProxy({
     app, server, settings: connections.settingsStore,
     requireAuth: uiAuthController?.requireAuth ?? ((_request, _response, next) => next()),
-    authenticateUpgrade: async (request) => Boolean(await uiAuthController?.ensureSessionToken(request, { setHeader: () => undefined })),
+    authenticateUpgrade: (request) => uiAuthController?.resolveAuthContext(request, null, { allowClientAuth: true, allowUrlToken: true }) ?? Promise.resolve(null),
     originAllowed: isRequestOriginAllowed,
   });
   void connections.restore().catch((error) => console.error('[HostConnections]', errorMessage(error)));
@@ -2555,6 +2560,22 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     directories: indexDirectories,
     ...(uiAuthController ? { requireAuth: uiAuthController.requireAuth } : {}),
   });
+  const storageService = createStorageService({
+    hostId, name: os.hostname(), dataDirectory: VARIN_DATA_DIR,
+    speechModelsDirectory: path.join(VARIN_USER_CONFIG_ROOT, 'speech-models'),
+    workspaces: () => documentsAuthority.listWorkspaceRegistrations(),
+    indexes: semanticIndexManagement, kernel: kernelClient,
+    devices: async () => {
+      const statuses = await connections.statusesWithDefaults();
+      return readHostConnections(connections.settingsStore).hosts.map(host => {
+        const status = statuses.find(item => item.id === host.id);
+        return { id: `connection:${host.id}`, name: host.label || host.id, current: false,
+          state: status && status.phase !== 'ready' ? 'offline' as const : 'unsupported' as const,
+          ...(status?.detail ? { detail: status.detail } : {}) };
+      });
+    },
+  });
+  registerStorageRoutes(app, storageService, uiAuthController.requireAuth, createStorageCoordinator(storageService, managedRemoteTargets));
   knowledgeVectors = createKnowledgeVectorRuntime({
     dataDir: VARIN_DATA_DIR,
     hostId,

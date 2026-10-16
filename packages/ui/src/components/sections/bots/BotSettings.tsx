@@ -1,5 +1,7 @@
 import React from 'react';
 import { getRuntimeEndpointGeneration, subscribeRuntimeEndpointChanged } from '@varin/application-client';
+import { SettingsActionBar } from '@/components/sections/shared/SettingsActionBar';
+import { Icon } from '@/components/icon/Icon';
 import { BotMemoryPreferences } from './BotMemoryPreferences';
 import { SettingsSection, SettingsFieldRow } from '@/components/sections/shared/SettingsSection';
 import { Button } from '@/components/ui/button';
@@ -24,15 +26,16 @@ import { subscribeVarinEvents } from '@/lib/varinEvents';
 const BotDetailsDialog = React.lazy(() => import('./BotDetailsDialog').then((module) => ({ default: module.BotDetailsDialog })));
 
 /**
- * Bots settings (BC0): the durable Bot catalog — identity, persona
- * instructions, preferred model, and the real work items in the Bot's owner
- * scope. Profiles are Host records; edits apply to the live entry worker.
+ * Host-owned Bot profiles, independent model preferences, memory and native work.
+ * Profile drafts are retained across unrelated model/activity refreshes.
  */
-export function BotSettings(props: { initialBotId?: string; onDeleted?(): void } = {}) {
+type BotSettingsProps = { initialBotId?: string; onDeleted?(): void; onDraftStateChange?(state: { dirty: boolean; saving: boolean }): void };
+
+export function BotSettings(props: BotSettingsProps = {}) {
   const host = React.useSyncExternalStore(subscribeRuntimeEndpointChanged, getRuntimeEndpointGeneration, getRuntimeEndpointGeneration);
   return <BotSettingsForHost key={host} {...props} />;
 }
-function BotSettingsForHost({ initialBotId, onDeleted }: { initialBotId?: string; onDeleted?(): void }) {
+function BotSettingsForHost({ initialBotId, onDeleted, onDraftStateChange }: BotSettingsProps) {
   const { t } = useI18n();
   const host = React.useSyncExternalStore(subscribeRuntimeEndpointChanged, getRuntimeEndpointGeneration, getRuntimeEndpointGeneration);
   const [bots, setBots] = React.useState<BotSummary[] | null>(null);
@@ -43,6 +46,8 @@ function BotSettingsForHost({ initialBotId, onDeleted }: { initialBotId?: string
   const [busy, setBusy] = React.useState<string | null>(null);
   const [name, setName] = React.useState('');
   const [instructions, setInstructions] = React.useState('');
+  const [profileBaseline, setProfileBaseline] = React.useState<{ id: string; name: string; instructions: string } | null>(null);
+  const [showDirectory, setShowDirectory] = React.useState(!initialBotId);
   const [createDialogOpen, setCreateDialogOpen] = React.useState(false);
   const [createName, setCreateName] = React.useState('');
   const [renaming, setRenaming] = React.useState<BotSummary | null>(null);
@@ -52,8 +57,12 @@ function BotSettingsForHost({ initialBotId, onDeleted }: { initialBotId?: string
 
   const selected = bots?.find((bot) => bot.id === selectedId) ?? null;
   const workBotId = selected?.id;
+  const dirty = Boolean(profileBaseline && (name !== profileBaseline.name || instructions !== profileBaseline.instructions));
+  React.useEffect(() => { onDraftStateChange?.({ dirty, saving: busy !== null }); }, [dirty, busy, onDraftStateChange]);
+  const discardProfile = () => { setError(null); if (selected) { setName(selected.name); setInstructions(selected.instructions ?? ''); setProfileBaseline({ id: selected.id, name: selected.name, instructions: selected.instructions ?? '' }); } };
+  const confirmDiscard = () => !dirty || window.confirm(t('settings.bots.discardConfirm'));
+  const chooseBot = (id: string) => { if (id !== selectedId && !confirmDiscard()) return; setSelectedId(id); setShowDirectory(false); };
   const locked = Boolean(selected?.archived || selected?.deletion || busy);
-  const transitioning = selected?.activity?.state === 'sleeping' || selected?.activity?.state === 'waking';
 
   const refresh = React.useCallback(async () => {
     const version = ++loading.current.version;
@@ -80,9 +89,11 @@ function BotSettingsForHost({ initialBotId, onDeleted }: { initialBotId?: string
   }), [refresh]);
 
   React.useEffect(() => {
+    if (selected?.id === profileBaseline?.id && dirty) return;
     setName(selected?.name ?? '');
     setInstructions(selected?.instructions ?? '');
-  }, [selected?.id, selected?.name, selected?.instructions]);
+    setProfileBaseline(selected ? { id: selected.id, name: selected.name, instructions: selected.instructions ?? '' } : null);
+  }, [selected, dirty, profileBaseline?.id]);
 
   React.useEffect(() => {
     if (!workBotId) { setWork(null); return; }
@@ -104,20 +115,24 @@ function BotSettingsForHost({ initialBotId, onDeleted }: { initialBotId?: string
     try {
       await task();
       setError(null);
+      return true;
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause));
+      return false;
     } finally {
       setBusy(null);
     }
   };
 
   const save = () => {
-    if (!selected) return;
-    void run('save', async () => {
-      await updateBot(selected.id, {
+    if (!selected || !name.trim()) return Promise.resolve(false);
+    return run('save', async () => {
+      const saved = await updateBot(selected.id, {
         ...(name.trim() && name.trim() !== selected.name ? { name } : {}),
         instructions: instructions.trim() ? instructions : null,
       });
+      setName(saved.name); setInstructions(saved.instructions ?? '');
+      setProfileBaseline({ id: saved.id, name: saved.name, instructions: saved.instructions ?? '' });
       await refresh();
     });
   };
@@ -129,7 +144,7 @@ function BotSettingsForHost({ initialBotId, onDeleted }: { initialBotId?: string
     void run('create', async () => {
       const created = renaming ? await updateBot(renaming.id, { name: trimmed }) : await createBot({ name: trimmed });
       await refresh();
-      if (!renaming) setSelectedId(created.id);
+      if (!renaming) { setSelectedId(created.id); setShowDirectory(false); }
       setCreateDialogOpen(false);
       setRenaming(null);
     });
@@ -142,15 +157,20 @@ function BotSettingsForHost({ initialBotId, onDeleted }: { initialBotId?: string
         model: providerId && modelId ? { providerId, modelId } : null,
       });
       await refresh();
-    });
+    }).then(saved => { if (!saved) throw new Error('Model selection failed'); });
   };
 
-  const workStateLabel = (item: BotWorkItem): string => item.activeRun?.state ?? 'Ready';
+  const botStatusLabel = (bot: BotSummary) => t(bot.deletion ? bot.deletion.error ? 'settings.bots.deleteFailed' : 'settings.bots.deleting'
+    : bot.archived ? 'settings.bots.archived' : bot.activity?.state === 'sleeping' ? 'settings.bots.sleeping'
+      : bot.activity?.state === 'waking' ? 'settings.bots.waking' : bot.activity?.state === 'sleep-failed' ? 'settings.bots.sleepFailed'
+        : bot.activity?.state === 'wake-failed' ? 'settings.bots.wakeFailed' : bot.activity?.state === 'asleep' ? 'settings.bots.asleep' : 'settings.bots.ready');
+  const workStateLabel = (item: BotWorkItem): string => item.activeRun?.state ?? t('settings.bots.ready');
 
   const action = (bot: BotSummary, action: BotMenuAction) => {
+    if (bot.id === selectedId && dirty && ['rename', 'archive', 'delete'].includes(action)) { if (!confirmDiscard()) return; discardProfile(); }
     if (action === 'rename') { setError(null); setRenaming(bot); setCreateName(bot.name); setCreateDialogOpen(true); return; }
     if (action === 'delete') { setDeleting(bot); return; }
-    if (action === 'profile') { setSelectedId(bot.id); return; }
+    if (action === 'profile') { chooseBot(bot.id); return; }
     if (action === 'memory') { setMemoryBot(bot); return; }
     void run(action, async () => {
       if (action === 'pin') await updateBot(bot.id, { pinned: !bot.pinnedAt });
@@ -166,69 +186,62 @@ function BotSettingsForHost({ initialBotId, onDeleted }: { initialBotId?: string
       <Button variant="outline" size="sm" className="mt-2" onClick={() => { void refresh(); }}>{t('settings.harness.retry')}</Button>
     </div> : null}
     {!bots && !error ? <p role="status" className="typography-meta text-muted-foreground">{t('common.loading')}</p> : null}
-    {bots ? <>
-      {!initialBotId ? <SettingsSection title={t('settings.bots.section.list')} contentClassName="space-y-3">
+    {bots ? <div className={cn("overflow-hidden rounded-xl border border-border/70 bg-background", !initialBotId && "@3xl:grid @3xl:grid-cols-[220px_minmax(0,1fr)]")}>
+      {!initialBotId ? <aside className={cn("border-border/60 bg-muted/25 p-3 @3xl:block @3xl:border-r", !showDirectory && "hidden")}> <SettingsSection title={t('settings.bots.section.list')} contentClassName="space-y-3" divider={false}>
         {bots.length === 0 ? <p className="typography-meta text-muted-foreground">{t('settings.bots.empty')}</p> : null}
         <ul className="space-y-1">
           {bots.map((bot) => <li key={bot.id}>
             <BotMenu bot={bot} disabled={busy !== null} onAction={(value) => action(bot, value)}>
-              <button type="button" onClick={() => setSelectedId(bot.id)}
+              <button type="button" onClick={() => chooseBot(bot.id)}
                 aria-current={bot.id === selectedId ? 'page' : undefined}
-                className={cn('flex min-w-0 flex-1 items-center gap-2 rounded-md px-2 py-1.5 text-left typography-ui-label transition-colors',
-                  bot.id === selectedId ? 'bg-accent text-foreground' : 'text-muted-foreground hover:bg-accent/50 hover:text-foreground')}>
-                <span className="min-w-0 flex-1 truncate">{bot.name}</span>
-                {bot.deletion || bot.archived ? <span className="typography-meta text-muted-foreground">{t(bot.deletion ? bot.deletion.error ? 'settings.bots.deleteFailed' : 'settings.bots.deleting' : 'settings.bots.archived')}</span> : null}
+                className={cn('flex min-w-0 flex-1 items-center gap-2 rounded-lg px-3 py-3 text-left typography-ui-label transition-colors',
+                  bot.id === selectedId ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:bg-accent/50 hover:text-foreground')}>
+                <span className="min-w-0 flex-1"><span className="block truncate">{bot.name}</span><span className="mt-1 block typography-micro font-normal text-muted-foreground">{botStatusLabel(bot)}</span></span>
               </button>
             </BotMenu>
           </li>)}
         </ul>
         <div>
           <Button variant="outline" size="sm" disabled={busy !== null} onClick={() => {
+            if (!confirmDiscard()) return;
+            discardProfile();
             setCreateName('');
             setError(null);
             setRenaming(null);
             setCreateDialogOpen(true);
           }}>{busy === 'create' ? t('settings.bots.creating') : t('settings.bots.create')}</Button>
         </div>
-      </SettingsSection> : null}
-
+      </SettingsSection></aside> : null}
+      <div className={cn('min-w-0 px-4 py-5 @xl:px-6', !initialBotId && showDirectory && 'hidden @3xl:block')}>
+      {selected ? <>
+        {!initialBotId ? <Button variant="ghost" size="sm" className="mb-3 @3xl:hidden" onClick={() => setShowDirectory(true)}><Icon name="arrow-left-s" className="size-4" />{t('settings.bots.backToList')}</Button> : null}
+        <BotMenu bot={selected} disabled={busy !== null} onAction={value => action(selected, value)}><div className="min-w-0 flex-1 pb-4"><h2 className="truncate text-xl font-semibold">{selected.name}</h2><p className="mt-1 typography-micro text-muted-foreground">{t('settings.bots.section.profile')}{selected.archived ? ` · ${t('settings.bots.archived')}` : ''}</p></div></BotMenu>
+        <div className="mb-6 flex flex-wrap gap-2"><Button size="sm" disabled={locked} onClick={() => { if (confirmDiscard()) void run('entry', async () => { await openBotEntryFor(selected.id); }); }}><Icon name="chat-1" className="size-4" />{t('settings.bots.openEntry')}</Button>
+          <Button variant="outline" size="sm" disabled={busy !== null} onClick={() => setMemoryBot(selected)}>{t('settings.bots.viewMemory')}</Button></div>
+      </> : null}
+      <div className="@container">
       {selected ? <SettingsSection title={t('settings.bots.section.profile')} contentClassName="space-y-5">
         {selected.deletion || !selected.archived ? <BotActivityBanner bot={selected} busy={busy !== null} onAction={(value) => action(selected, value)} /> : null}
         <SettingsFieldRow label={t('settings.bots.name.label')}>
-          <Input value={name} disabled={locked} onChange={(event) => setName(event.target.value)} />
+          <Input aria-label={t('settings.bots.name.label')} value={name} disabled={locked} onChange={(event) => setName(event.target.value)} />
         </SettingsFieldRow>
         <SettingsFieldRow label={t('settings.bots.instructions.label')} description={t('settings.bots.instructions.description')}>
-          <Textarea value={instructions} disabled={locked} rows={5}
+          <Textarea aria-label={t('settings.bots.instructions.label')} value={instructions} disabled={locked} rows={5}
             placeholder={t('settings.bots.instructions.placeholder')}
             onChange={(event) => setInstructions(event.target.value)} />
         </SettingsFieldRow>
-        <SettingsFieldRow label={t('settings.bots.model.label')} description={t('settings.bots.model.description')}>
+        <SettingsFieldRow label={t('settings.bots.model.label')} description={<>{t('settings.bots.model.description')} {t('settings.bots.modelSavedSeparately')}</>}>
           <BotModelSelector model={selected.model} disabled={locked} onChange={selectModel} />
         </SettingsFieldRow>
-        <div className="flex flex-wrap gap-2">
-          <Button size="sm" disabled={locked
-            || (name.trim() === selected.name && instructions.trim() === (selected.instructions ?? ''))}
-            onClick={save}>{busy === 'save' ? t('settings.bots.saving') : t('settings.bots.save')}</Button>
-          <Button variant="outline" size="sm" disabled={locked} onClick={() => {
-            void run('entry', async () => { await openBotEntryFor(selected.id); });
-          }}>{t('settings.bots.openEntry')}</Button>
-          {!selected.archived ? <Button variant="outline" size="sm" disabled={locked || transitioning} onClick={() => {
-            void run('archive', async () => { await archiveBot(selected.id); await refresh(); });
-          }}>{busy === 'archive' ? t('settings.bots.archiving') : t('settings.bots.archive')}</Button> : null}
-          {selected.archived ? <Button variant="outline" size="sm" disabled={busy !== null || Boolean(selected.deletion)} onClick={() => {
-            void run('restore', async () => { await changeBotState(selected.id, 'restore'); await refresh(); });
-          }}>{t('settings.bots.restore')}</Button> : null}
-          <Button variant="destructive" size="sm" disabled={busy !== null || transitioning || Boolean(selected.deletion)} onClick={() => setDeleting(selected)}>{t('settings.bots.delete')}</Button>
-        </div>
-      </SettingsSection> : null}
 
-      {selected ? <SettingsSection title={t('settings.bots.section.work')} contentClassName="space-y-2">
+      </SettingsSection> : null}
+      {selected ? <SettingsSection title={t('settings.bots.section.work')} contentClassName="space-y-2" description={work ? t('settings.bots.work.summary', { count: work.length }) : undefined}>
         {work === null ? <p role="status" className="typography-meta text-muted-foreground">{t('common.loading')}</p> : null}
         {work !== null && work.length === 0
           ? <p className="typography-meta text-muted-foreground">{t('settings.bots.work.empty')}</p> : null}
         <ul className="space-y-1">
           {(work ?? []).map((item) => <li key={botWorkId(item)}
-            className="flex items-center gap-3 rounded-md border border-border/60 px-3 py-2">
+            className="flex flex-wrap items-center gap-3 rounded-md border border-border/60 px-3 py-2">
             <div className="min-w-0 flex-1">
               <p className="typography-ui-label truncate text-foreground">{botWorkTitle(item)}</p>
               <p className="typography-meta text-muted-foreground">{workStateLabel(item)}</p>
@@ -246,7 +259,10 @@ function BotSettingsForHost({ initialBotId, onDeleted }: { initialBotId?: string
           </li>)}
         </ul>
       </SettingsSection> : null}
-    </> : null}
+      </div>
+      {selected && !selected.archived && !selected.deletion ? <SettingsActionBar dirty={dirty} saving={busy !== null} onSave={save} onCancel={discardProfile} saveDisabled={!name.trim()} saveLabel={t('settings.bots.save')} error={error} /> : null}
+      </div>
+    </div> : null}
     {viewingDesktop ? <ComputerDesktopView desktop={viewingDesktop} open onOpenChange={(open) => { if (!open) setViewingDesktop(null); }} /> : null}
     <BotNameDialog
       open={createDialogOpen}

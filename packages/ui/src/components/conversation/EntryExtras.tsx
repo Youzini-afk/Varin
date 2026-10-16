@@ -1,5 +1,5 @@
-import { useConversationPresentation } from './ConversationContext';
+import { useOptionalConversationPresentation } from './ConversationContext';
 export function EntryExtras({ itemId }: { itemId?: string }) {
-  const context = useConversationPresentation();
-  return itemId ? context.renderExtras?.(itemId) : null;
+  const context = useOptionalConversationPresentation();
+  return itemId ? context?.renderExtras?.(itemId) : null;
 }

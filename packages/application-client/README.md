@@ -326,6 +326,14 @@ navigation project and revision-checked commands. The Host resolves project trus
 renderer paths do not grant access. Editing these defaults does not replace resources already frozen
 into a Run checkpoint.
 
+## Host-owned connections
+
+`createHostConnectionsHttpAPI` uses the selected Agent Host's authenticated HTTP transport, even
+inside Electron. It never falls back to desktop IPC: saved resource addresses, SSH processes,
+localhost probes and logs belong to that Host. The client captures endpoint generation before
+request dispatch and rejects late responses after authentication or Host replacement. The UI's
+separate owner-scoped SSH projection can stop observation without disconnecting its processes.
+
 ## Typed output media
 
 `ThreadsAPI.mediaRead` reads one byte chunk through its original history item, queued-input revision,

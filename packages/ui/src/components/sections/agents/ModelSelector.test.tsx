@@ -149,3 +149,18 @@ describe('model catalog activation', () => {
     expect(document.body.textContent).not.toContain('20万');
   });
 });
+
+
+it('uses each model family in a compatible service, including request-ID aliases and unknown models', async () => {
+  const snapshot = catalog(32768);
+  snapshot.channels[0]!.models = [
+    { id: 'model', name: 'Writing model', requestModelId: 'anthropic/claude-sonnet-4-5', enabled: true, operations: ['chat'] },
+    { id: 'deepseek-v3.2', name: 'DeepSeek V3.2', enabled: true, operations: ['chat'] },
+    { id: 'qwen3-32b', name: 'Qwen 3', enabled: true, operations: ['chat'] },
+    { id: 'team-custom', name: 'Team custom', enabled: true, operations: ['chat'] },
+  ];
+  runtime.read.mockResolvedValue(snapshot);
+  const document = await mountPicker();
+  const brands = [...document.querySelectorAll('[data-model-brand]')].map(element => element.getAttribute('data-model-brand'));
+  expect(brands).toEqual(['anthropic', 'anthropic', 'deepseek', 'qwen', 'unknown']);
+});

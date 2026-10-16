@@ -1,6 +1,8 @@
 import React from 'react';
 import { BusyDots } from '@/components/chat/message/parts/BusyDots';
 import { useI18n } from '@/lib/i18n';
+import { ModelLogo } from '@/components/ui/ModelLogo';
+import { useModelCatalogStore } from '@/stores/useModelCatalogStore';
 import { VarinLogo } from '@/components/ui/VarinLogo';
 import type { ChatAssistantWaitingPresentation } from './chatAssistantWaiting';
 import type { ChatTimelineTurn } from './chatTimelineProjection';
@@ -15,6 +17,9 @@ export const ChatTurnAssistantChrome: React.FC<{
   ));
   if (turn.liveAssistant) assistants.push(turn.liveAssistant);
   const last = assistants.at(-1);
+  const modelId = last?.model ?? waiting?.model?.id;
+  const providerId = last?.provider ?? waiting?.model?.provider;
+  const configured = useModelCatalogStore(state => state.channels.find(channel => channel.id === providerId)?.models.find(model => model.id === modelId));
   if (!last && !waiting) return null;
   const working = waiting !== undefined || turn.liveAssistant?.stopReason === 'pending';
 
@@ -32,7 +37,7 @@ export const ChatTurnAssistantChrome: React.FC<{
     >
       <VarinLogo width={14} height={14} className="shrink-0" isAnimated={working} decorative />
       <span className="font-medium text-foreground/85">Varin</span>
-      {modelLabel ? <span className="truncate">{modelLabel}</span> : null}
+      {modelLabel ? <span className="flex min-w-0 items-center gap-1.5" title={modelLabel}><ModelLogo requestModelId={last?.responseModel || configured?.requestModelId} modelId={modelId} displayName={configured?.name} /><span className="truncate">{configured?.name || last?.responseModel || modelId}</span></span> : null}
       {working ? (
         <span className="min-w-0 truncate text-muted-foreground/80">
           · {t('chat.assistant.working')}<BusyDots />

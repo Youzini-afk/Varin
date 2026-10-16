@@ -94,7 +94,7 @@ export const NativeResourceSidebar: React.FC<NativeResourceSidebarProps> = ({ ki
   }, [createResource, kind, name, nameError, onItemSelect, pane.mutating, projectBlocked, resourceTarget, scope, t, targetKey]);
 
   return (
-    <div className="flex h-full flex-col bg-background">
+    <div className="flex h-full flex-col bg-muted/25">
       <div className="space-y-3 border-b px-3 pb-3 pt-4">
         <div className="flex items-center justify-between gap-2">
           <h2 className={SETTINGS_PANEL_TITLE_CLASS}>
@@ -206,14 +206,11 @@ export const NativeResourceSidebar: React.FC<NativeResourceSidebarProps> = ({ ki
                 onItemSelect?.();
               }}
               className={cn(
-                'flex w-full items-start gap-2 rounded-md px-2 py-2 text-left transition-colors',
-                selected ? 'bg-interactive-selection' : 'hover:bg-interactive-hover',
+                'flex w-full items-start gap-3 rounded-lg border px-3 py-3 text-left transition-colors',
+                selected ? 'border-border/60 bg-background shadow-sm' : 'border-transparent hover:bg-interactive-hover',
               )}
             >
-              <span className={cn(
-                'mt-1.5 size-1.5 shrink-0 rounded-full',
-                resource.active ? 'bg-[var(--status-success)]' : 'bg-muted-foreground/40',
-              )} />
+<span className="flex size-8 shrink-0 items-center justify-center rounded-lg border border-border/60 bg-background"><Icon name="file-text" className="size-4 text-muted-foreground" /></span>
               <span className="min-w-0 flex-1">
                 <span className="flex items-center gap-1.5">
                   <span className="min-w-0 flex-1 truncate typography-ui-label text-foreground">
@@ -226,7 +223,7 @@ export const NativeResourceSidebar: React.FC<NativeResourceSidebarProps> = ({ ki
                   ) : null}
                 </span>
                 <span className="mt-0.5 block truncate typography-micro text-muted-foreground">
-                  {resource.sourceInfo.scope} · {resource.sourceInfo.source}
+                  {t(resource.sourceInfo.scope === 'project' ? 'settings.common.scope.project' : 'settings.varin.resources.scope.user')} · {resource.sourceInfo.source}
                 </span>
               </span>
             </button>

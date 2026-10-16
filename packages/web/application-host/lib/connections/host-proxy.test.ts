@@ -44,8 +44,8 @@ describe('Host connection gateway', () => {
     const server = createServer(app);
     const gatewayUrl = await listen(server);
     const gateway = attachConnectionProxy({ app, server, settings,
-      requireAuth: (request, response, next) => request.headers.authorization === 'Bearer local-token' ? next() : void response.sendStatus(401),
-      authenticateUpgrade: async (request) => new URL(request.url!, gatewayUrl).searchParams.get('varin_url_token') === 'local-url-token',
+      requireAuth: (request, response, next) => { if (request.headers.authorization !== 'Bearer local-token') { response.sendStatus(401); return; } request.varinAuth = { type: 'session', token: 'fixture-session' }; next(); },
+      authenticateUpgrade: async (request) => new URL(request.url!, gatewayUrl).searchParams.get('varin_url_token') === 'local-url-token' ? { type: 'session', token: 'fixture-session' } : null,
       originAllowed: () => true,
     });
     cleanup.push(gateway.stop);

@@ -2,7 +2,6 @@ import React from 'react';
 import { runtimeFetch } from '@varin/application-client';
 
 import { useThemeSystem } from '@/contexts/useThemeSystem';
-import type { ThemeMode } from '@/types/theme';
 import { useUIStore } from '@/stores/useUIStore';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
@@ -27,21 +26,17 @@ import {
 } from '@/lib/desktop';
 import { useDeviceInfo } from '@/lib/device';
 import { usePwaDetection } from '@/hooks/usePwaDetection';
-import { updateDesktopSettings } from '@/lib/persistence';
+import { reportSettingsSaveState, updateDesktopSettings } from '@/lib/persistence';
+import { readStoredLocale } from '@/lib/i18n/runtime';
 import { CODE_FONT_OPTIONS, DEFAULT_MONO_FONT, DEFAULT_UI_FONT, UI_FONT_OPTIONS, type MonoFontOption, type UiFontOption } from '@/lib/fontOptions';
 import { useI18n, type Locale } from '@/lib/i18n';
 import { normalizeMobileKeyboardMode, supportsMobileKeyboardResizeContent, type MobileKeyboardMode } from '@/lib/mobileKeyboardMode';
 import { getStoredMobileLayoutPreference, setStoredMobileLayoutPreference, type MobileLayoutPreference } from '@/lib/mobileLayoutPreference';
 import {
     SettingsSection,
-    SettingsTwoColumn,
-    SettingsControlGroup,
-    SettingsStackedField,
     SettingsFieldRow,
     SettingsInset,
     SettingsCheckboxRow,
-    SettingsRadioGroup,
-    SettingsRadioOption,
     SettingsChipGroup,
     SETTINGS_SELECT_TRIGGER_CLASS,
     SETTINGS_SELECT_SIZE,
@@ -61,30 +56,13 @@ import { subscribeRuntimeEndpointChanged } from '@varin/application-client';
 import { Icon } from '@/components/icon/Icon';
 import { FileEditorPreferencesSettings } from './FileEditorPreferencesSettings';
 import { ThemePicker } from './ThemePicker';
+import { AppearanceThemePreview } from './AppearanceThemePreview';
 
 interface Option<T extends string> {
     id: T;
     labelKey: string;
     descriptionKey?: string;
 }
-
-const THEME_MODE_OPTIONS: Array<{ value: ThemeMode; labelKey: string; descriptionKey: string }> = [
-    {
-        value: 'system',
-        labelKey: 'settings.varin.visual.option.themeMode.system',
-        descriptionKey: 'settings.varin.visual.option.themeMode.system.description',
-    },
-    {
-        value: 'light',
-        labelKey: 'settings.varin.visual.option.themeMode.light',
-        descriptionKey: 'settings.varin.visual.option.themeMode.light.description',
-    },
-    {
-        value: 'dark',
-        labelKey: 'settings.varin.visual.option.themeMode.dark',
-        descriptionKey: 'settings.varin.visual.option.themeMode.dark.description',
-    },
-];
 
 const DEFAULT_PWA_INSTALL_NAME = 'Varin - Agent Workspace';
 const PWA_ORIENTATION_OPTIONS: Option<'system' | 'portrait' | 'landscape'>[] = [
@@ -175,6 +153,7 @@ const WEEK_START_OPTIONS: Option<'auto' | 'monday' | 'sunday'>[] = [
 
 type VisibleSetting =
     | 'theme'
+    | 'locale'
     | 'windowControlsPosition'
     | 'pwaInstallName'
     | 'pwaOrientation'
@@ -182,6 +161,7 @@ type VisibleSetting =
     | 'timeFormat'
     | 'weekStart'
     | 'fontSize'
+    | 'codeFont'
     | 'terminalFontSize'
     | 'terminalShell'
     | 'terminalLoginShell'
@@ -250,8 +230,6 @@ export const VarinVisualSettings: React.FC<VarinVisualSettingsProps> = ({ visibl
     const weekStartPreference = useUIStore(state => state.weekStartPreference);
     const setWeekStartPreference = useUIStore(state => state.setWeekStartPreference);
     const {
-        themeMode,
-        setThemeMode,
         availableThemes,
         customThemesLoading,
         reloadCustomThemes,
@@ -347,10 +325,10 @@ export const VarinVisualSettings: React.FC<VarinVisualSettingsProps> = ({ visibl
 
     const hasThemeSettings = shouldShow('theme');
     const showWindowControlsPositionSetting = shouldShow('windowControlsPosition') && showWindowControlsPosition;
-    const hasLocalizationSettings = shouldShow('theme') || shouldShow('timeFormat') || shouldShow('weekStart');
+    const hasLocalizationSettings = shouldShow('locale') || shouldShow('timeFormat') || shouldShow('weekStart');
     const showMobileLayoutSetting = isMobile && isWebRuntime() && !isDesktopShell();
-    const hasAppearanceSettings = shouldShow('theme') || showWindowControlsPositionSetting || showMobileLayoutSetting || shouldShow('pwaInstallName') || shouldShow('pwaOrientation') || shouldShow('timeFormat') || shouldShow('weekStart');
-    const hasLayoutSettings = shouldShow('fontSize') || shouldShow('terminalFontSize') || shouldShow('editorFontSize') || shouldShow('spacing') || (shouldShow('inputBarOffset') && isMobile);
+    const hasAppearanceSettings = shouldShow('theme') || shouldShow('locale') || showWindowControlsPositionSetting || showMobileLayoutSetting || shouldShow('pwaInstallName') || shouldShow('pwaOrientation') || shouldShow('timeFormat') || shouldShow('weekStart');
+    const hasLayoutSettings = shouldShow('codeFont') || shouldShow('fontSize') || shouldShow('terminalFontSize') || shouldShow('editorFontSize') || shouldShow('spacing') || (shouldShow('inputBarOffset') && isMobile);
     const hasNavigationSettings = (shouldShow('terminalQuickKeys') && !isMobile) || shouldShow('terminalShell') || shouldShow('terminalLoginShell') || shouldShow('fileEditorKeymap') || shouldShow('autoSaveEnabled') || shouldShow('expandedEditorToolbar');
     const showPwaInstallNameSetting = shouldShow('pwaInstallName') && isWebRuntime() && browserTab && !isDesktopShell();
     const showPwaOrientationSetting = shouldShow('pwaOrientation') && isWebRuntime() && !isDesktopShell();
@@ -529,24 +507,14 @@ export const VarinVisualSettings: React.FC<VarinVisualSettingsProps> = ({ visibl
                 {hasAppearanceSettings && (
                     <div className="space-y-0">
                         {hasThemeSettings && (
+                            <>
+                            <AppearanceThemePreview lightTheme={selectedLightTheme} darkTheme={selectedDarkTheme} />
                             <SettingsSection title={t('settings.varin.visual.section.colorModeAndTheme')} divider={false}>
-                                <SettingsTwoColumn>
+                                <div className="divide-y divide-border/50">
                                     <div className={SETTINGS_FIELDS_STACK_CLASS}>
-                                        <SettingsRadioGroup aria-label={t('settings.varin.visual.section.colorMode')}>
-                                            {THEME_MODE_OPTIONS.map((option) => (
-                                                <SettingsRadioOption
-                                                    key={option.value}
-                                                    selected={themeMode === option.value}
-                                                    onSelect={() => setThemeMode(option.value)}
-                                                    label={tUnsafe(option.labelKey)}
-                                                    ariaLabel={tUnsafe(option.labelKey)}
-                                                />
-                                            ))}
-                                        </SettingsRadioGroup>
-
                                         {showMobileLayoutSetting && (
                                             <SettingsInset>
-                                                <SettingsStackedField label={t('settings.varin.visual.section.mobileLayout')}>
+                                                <SettingsFieldRow label={t('settings.varin.visual.section.mobileLayout')}>
                                                     <SettingsChipGroup
                                                         value={mobileLayoutPreference}
                                                         options={MOBILE_LAYOUT_OPTIONS.map((option) => ({
@@ -556,28 +524,28 @@ export const VarinVisualSettings: React.FC<VarinVisualSettingsProps> = ({ visibl
                                                         onChange={handleMobileLayoutPreferenceChange}
                                                         aria-label={t('settings.varin.visual.section.mobileLayout')}
                                                     />
-                                                </SettingsStackedField>
+                                                </SettingsFieldRow>
                                             </SettingsInset>
                                         )}
                                     </div>
 
                                     <div className={SETTINGS_FIELDS_STACK_CLASS}>
-                                        <SettingsStackedField
+                                        <SettingsFieldRow
                                             label={t('settings.varin.visual.field.lightTheme')}
                                             settingsItem="appearance.light-theme"
                                         >
                                             <ThemePicker themes={lightThemes} selected={selectedLightTheme}
                                                 onChange={setLightThemePreference}
                                                 label={t('settings.varin.visual.field.selectLightThemeAria')} />
-                                        </SettingsStackedField>
-                                        <SettingsStackedField
+                                        </SettingsFieldRow>
+                                        <SettingsFieldRow
                                             label={t('settings.varin.visual.field.darkTheme')}
                                             settingsItem="appearance.dark-theme"
                                         >
                                             <ThemePicker themes={darkThemes} selected={selectedDarkTheme}
                                                 onChange={setDarkThemePreference}
                                                 label={t('settings.varin.visual.field.selectDarkThemeAria')} />
-                                        </SettingsStackedField>
+                                        </SettingsFieldRow>
 
                                         <div className="flex items-center gap-2 pt-1">
                                             <button
@@ -607,7 +575,7 @@ export const VarinVisualSettings: React.FC<VarinVisualSettingsProps> = ({ visibl
                                             </SettingsInfoHint>
                                         </div>
                                     </div>
-                                </SettingsTwoColumn>
+                                </div>
 
                                 {macVibrancySupported && (
                                     <SettingsInset settingsItem="appearance.window-transparency" className="flex flex-col gap-1.5">
@@ -652,6 +620,7 @@ export const VarinVisualSettings: React.FC<VarinVisualSettingsProps> = ({ visibl
                                     </SettingsInset>
                                 )}
                             </SettingsSection>
+                            </>
                         )}
 
                         {showWindowControlsPositionSetting && (
@@ -660,8 +629,8 @@ export const VarinVisualSettings: React.FC<VarinVisualSettingsProps> = ({ visibl
                                 info={t('settings.varin.desktopNetwork.field.windowControlsPositionDescription')}
                                 divider={hasThemeSettings}
                             >
-                                <SettingsTwoColumn>
-                                    <SettingsStackedField
+                                <div className="divide-y divide-border/50">
+                                    <SettingsFieldRow
                                         label={t('settings.varin.desktopNetwork.field.windowControlsPosition')}
                                         settingsItem="sessions.desktop-window-controls-position"
                                     >
@@ -674,8 +643,8 @@ export const VarinVisualSettings: React.FC<VarinVisualSettingsProps> = ({ visibl
                                             onChange={handleWindowControlsPositionChange}
                                             aria-label={t('settings.varin.desktopNetwork.field.windowControlsPositionAria')}
                                         />
-                                    </SettingsStackedField>
-                                    <SettingsStackedField
+                                    </SettingsFieldRow>
+                                    <SettingsFieldRow
                                         label={t('settings.varin.desktopNetwork.field.windowControlsStyle')}
                                         settingsItem="sessions.desktop-window-controls-style"
                                     >
@@ -688,20 +657,20 @@ export const VarinVisualSettings: React.FC<VarinVisualSettingsProps> = ({ visibl
                                             onChange={handleWindowControlsStyleChange}
                                             aria-label={t('settings.varin.desktopNetwork.field.windowControlsStyleAria')}
                                         />
-                                    </SettingsStackedField>
-                                </SettingsTwoColumn>
+                                    </SettingsFieldRow>
+                                </div>
                             </SettingsSection>
                         )}
 
                         {hasLocalizationSettings && (
                             <SettingsSection title={t('settings.varin.visual.section.localization')}>
-                                <SettingsTwoColumn>
-                                    <SettingsStackedField
+                                <div className="divide-y divide-border/50">
+                                    <SettingsFieldRow
                                         label={t('settings.appearance.language.label')}
                                         info={t('settings.appearance.language.description')}
                                         settingsItem="appearance.language"
                                     >
-                                        <Select value={locale} onValueChange={(value) => setLocale(value as Locale)}>
+                                        <Select value={locale} onValueChange={(value) => { setLocale(value as Locale); reportSettingsSaveState(readStoredLocale() === value ? 'saved' : 'error'); }}>
                                             <SelectTrigger aria-label={t('settings.appearance.language.select')} size={SETTINGS_SELECT_SIZE} className={SETTINGS_SELECT_TRIGGER_CLASS}>
                                                 <SelectValue>{label(locale)}</SelectValue>
                                             </SelectTrigger>
@@ -713,12 +682,12 @@ export const VarinVisualSettings: React.FC<VarinVisualSettingsProps> = ({ visibl
                                                 ))}
                                             </SelectContent>
                                         </Select>
-                                    </SettingsStackedField>
+                                    </SettingsFieldRow>
 
                                     {(shouldShow('timeFormat') || shouldShow('weekStart')) && (
                                         <div className={SETTINGS_FIELDS_STACK_CLASS}>
                                             {shouldShow('timeFormat') && (
-                                                <SettingsStackedField
+                                                <SettingsFieldRow
                                                     label={t('settings.varin.visual.field.timeFormat')}
                                                     settingsItem="appearance.time-format"
                                                 >
@@ -732,11 +701,11 @@ export const VarinVisualSettings: React.FC<VarinVisualSettingsProps> = ({ visibl
                                                             ))}
                                                         </SelectContent>
                                                     </Select>
-                                                </SettingsStackedField>
+                                                </SettingsFieldRow>
                                             )}
 
                                             {shouldShow('weekStart') && (
-                                                <SettingsStackedField
+                                                <SettingsFieldRow
                                                     label={t('settings.varin.visual.field.weekStartsOn')}
                                                     settingsItem="appearance.week-start"
                                                 >
@@ -750,11 +719,11 @@ export const VarinVisualSettings: React.FC<VarinVisualSettingsProps> = ({ visibl
                                                             ))}
                                                         </SelectContent>
                                                     </Select>
-                                                </SettingsStackedField>
+                                                </SettingsFieldRow>
                                             )}
                                         </div>
                                     )}
-                                </SettingsTwoColumn>
+                                </div>
                             </SettingsSection>
                         )}
 
@@ -902,10 +871,10 @@ export const VarinVisualSettings: React.FC<VarinVisualSettingsProps> = ({ visibl
                 {/* --- Density & type --- */}
                 {hasLayoutSettings && (
                     <SettingsSection title={t('settings.varin.visual.section.densityAndType')} contentClassName={SETTINGS_FIELDS_STACK_CLASS}>
-                        {(shouldShow('fontSize') && !isMobile) || shouldShow('terminalFontSize') ? (
-                            <SettingsTwoColumn>
+                        {(shouldShow('fontSize') && !isMobile) || shouldShow('codeFont') ? (
+                            <div className="divide-y divide-border/50">
                                 {shouldShow('fontSize') && !isMobile && (
-                                    <SettingsStackedField
+                                    <SettingsFieldRow
                                         label={t('settings.varin.visual.field.interfaceFont')}
                                         settingsItem="appearance.interface-font-size"
                                         controlClassName="w-full"
@@ -933,11 +902,12 @@ export const VarinVisualSettings: React.FC<VarinVisualSettingsProps> = ({ visibl
                                         >
                                             <Icon name="restart" className="h-3.5 w-3.5" />
                                         </Button>
-                                    </SettingsStackedField>
+                                    </SettingsFieldRow>
                                 )}
-                                {shouldShow('terminalFontSize') && (
-                                    <SettingsStackedField
+                                {shouldShow('codeFont') && (
+                                    <SettingsFieldRow
                                         label={t('settings.varin.visual.field.codeFont')}
+                                        settingsItem="editor.code-font"
                                         controlClassName="w-full"
                                     >
                                         <Select value={monoFont} onValueChange={(value) => setMonoFont(value as MonoFontOption)}>
@@ -963,15 +933,15 @@ export const VarinVisualSettings: React.FC<VarinVisualSettingsProps> = ({ visibl
                                         >
                                             <Icon name="restart" className="h-3.5 w-3.5" />
                                         </Button>
-                                    </SettingsStackedField>
+                                    </SettingsFieldRow>
                                 )}
-                            </SettingsTwoColumn>
+                            </div>
                         ) : null}
 
                         {(shouldShow('fontSize') && !isMobile) || shouldShow('terminalFontSize') || shouldShow('editorFontSize') ? (
-                            <SettingsTwoColumn>
+                            <div className="divide-y divide-border/50">
                                 {shouldShow('fontSize') && !isMobile && (
-                                    <SettingsStackedField
+                                    <SettingsFieldRow
                                         label={t('settings.varin.visual.field.interfaceFontSize')}
                                         controlClassName="w-full"
                                     >
@@ -997,10 +967,10 @@ export const VarinVisualSettings: React.FC<VarinVisualSettingsProps> = ({ visibl
                                                 <Icon name="restart" className="h-3.5 w-3.5" />
                                             </Button>
                                         </div>
-                                    </SettingsStackedField>
+                                    </SettingsFieldRow>
                                 )}
                                 {shouldShow('terminalFontSize') && (
-                                    <SettingsStackedField
+                                    <SettingsFieldRow
                                         label={t('settings.varin.visual.field.terminalFontSize')}
                                         settingsItem="appearance.terminal-font-size"
                                         controlClassName="w-full"
@@ -1026,10 +996,10 @@ export const VarinVisualSettings: React.FC<VarinVisualSettingsProps> = ({ visibl
                                                 <Icon name="restart" className="h-3.5 w-3.5" />
                                             </Button>
                                         </div>
-                                    </SettingsStackedField>
+                                    </SettingsFieldRow>
                                 )}
                                 {shouldShow('editorFontSize') && (
-                                    <SettingsStackedField
+                                    <SettingsFieldRow
                                         label={t('settings.varin.visual.field.editorFontSize')}
                                         settingsItem="appearance.editor-font-size"
                                         controlClassName="w-full"
@@ -1055,15 +1025,15 @@ export const VarinVisualSettings: React.FC<VarinVisualSettingsProps> = ({ visibl
                                                 <Icon name="restart" className="h-3.5 w-3.5" />
                                             </Button>
                                         </div>
-                                    </SettingsStackedField>
+                                    </SettingsFieldRow>
                                 )}
-                            </SettingsTwoColumn>
+                            </div>
                         ) : null}
 
                         {shouldShow('spacing') || (shouldShow('inputBarOffset') && isMobile) ? (
-                            <SettingsTwoColumn>
+                            <div className="divide-y divide-border/50">
                                 {shouldShow('spacing') && (
-                                    <SettingsStackedField
+                                    <SettingsFieldRow
                                         label={t('settings.varin.visual.field.spacingDensity')}
                                         settingsItem="appearance.spacing-density"
                                         controlClassName="w-full"
@@ -1089,10 +1059,10 @@ export const VarinVisualSettings: React.FC<VarinVisualSettingsProps> = ({ visibl
                                                 <Icon name="restart" className="h-3.5 w-3.5" />
                                             </Button>
                                         </div>
-                                    </SettingsStackedField>
+                                    </SettingsFieldRow>
                                 )}
                                 {shouldShow('inputBarOffset') && isMobile && (
-                                    <SettingsStackedField
+                                    <SettingsFieldRow
                                         label={t('settings.varin.visual.field.inputBarOffset')}
                                         info={t('settings.varin.visual.field.inputBarOffsetTooltip')}
                                         settingsItem="appearance.input-bar-offset"
@@ -1119,9 +1089,9 @@ export const VarinVisualSettings: React.FC<VarinVisualSettingsProps> = ({ visibl
                                                 <Icon name="restart" className="h-3.5 w-3.5" />
                                             </Button>
                                         </div>
-                                    </SettingsStackedField>
+                                    </SettingsFieldRow>
                                 )}
-                            </SettingsTwoColumn>
+                            </div>
                         ) : null}
                     </SettingsSection>
                 )}
@@ -1130,24 +1100,14 @@ export const VarinVisualSettings: React.FC<VarinVisualSettingsProps> = ({ visibl
 
                 {/* --- Navigation --- */}
                 {hasNavigationSettings && (
-                    <SettingsSection title={t('settings.varin.visual.section.navigation')} contentClassName="space-y-4">
+                    <SettingsSection title={t(shouldShow('terminalShell') ? 'settings.page.terminal.title' : 'settings.page.editor.title')} contentClassName="space-y-4">
                         {shouldShow('fileEditorKeymap') && (
-                            <SettingsControlGroup
-                                title={t('settings.varin.visual.field.fileEditorKeymap')}
-                                settingsItem="appearance.file-editor-keymap"
-                            >
-                                <SettingsRadioGroup aria-label={t('settings.varin.visual.field.fileEditorKeymap')}>
-                                    {(['default', 'vim'] as const).map((keymap) => (
-                                        <SettingsRadioOption
-                                            key={keymap}
-                                            selected={fileEditorKeymap === keymap}
-                                            onSelect={() => setFileEditorKeymap(keymap)}
-                                            label={t(`settings.varin.visual.option.fileEditorKeymap.${keymap}`)}
-                                            ariaLabel={t(`settings.varin.visual.option.fileEditorKeymap.${keymap}`)}
-                                        />
-                                    ))}
-                                </SettingsRadioGroup>
-                            </SettingsControlGroup>
+                            <SettingsFieldRow label={t('settings.varin.visual.field.fileEditorKeymap')} settingsItem="appearance.file-editor-keymap">
+                                <Select value={fileEditorKeymap} onValueChange={(value: 'default' | 'vim') => setFileEditorKeymap(value)}>
+                                    <SelectTrigger size={SETTINGS_SELECT_SIZE} className={SETTINGS_SELECT_TRIGGER_CLASS} aria-label={t('settings.varin.visual.field.fileEditorKeymap')}><SelectValue /></SelectTrigger>
+                                    <SelectContent>{(['default', 'vim'] as const).map(keymap => <SelectItem key={keymap} value={keymap}>{t(`settings.varin.visual.option.fileEditorKeymap.${keymap}`)}</SelectItem>)}</SelectContent>
+                                </Select>
+                            </SettingsFieldRow>
                         )}
                         <div className={SETTINGS_OPTION_STACK_CLASS}>
                             {shouldShow('autoSaveEnabled') && (
@@ -1180,7 +1140,7 @@ export const VarinVisualSettings: React.FC<VarinVisualSettingsProps> = ({ visibl
                                 />
                             )}
                             {showTerminalShellSetting && (
-                                <SettingsStackedField
+                                <SettingsFieldRow
                                     label={t('settings.varin.visual.field.terminalShell')}
                                     info={t('settings.varin.visual.field.terminalShellHint')}
                                     settingsItem="appearance.terminal-shell"
@@ -1197,7 +1157,7 @@ export const VarinVisualSettings: React.FC<VarinVisualSettingsProps> = ({ visibl
                                             ))}
                                         </SelectContent>
                                     </Select>
-                                </SettingsStackedField>
+                                </SettingsFieldRow>
                             )}
                             {showTerminalShellSetting && terminalShellSupportsLogin && (
                                 <SettingsCheckboxRow

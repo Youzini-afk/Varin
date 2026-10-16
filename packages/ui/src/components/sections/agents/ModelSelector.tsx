@@ -6,7 +6,7 @@ import {
     DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { MobileOverlayPanel } from '@/components/ui/MobileOverlayPanel';
-import { ProviderLogo } from '@/components/ui/ProviderLogo';
+import { ModelLogo } from '@/components/ui/ModelLogo';
 import { Icon } from '@/components/icon/Icon';
 import { useModelLists } from '@/hooks/useModelLists';
 import { useDeviceInfo } from '@/lib/device';
@@ -186,6 +186,8 @@ export const ModelSelector: React.FC<ModelSelectorProps> = ({
     );
     const effectiveProviderId = displayProviderId ?? providerId;
     const effectiveModelId = displayModelId ?? modelId;
+    const effectiveModel = providers.find(entry => entry.id === effectiveProviderId)?.models?.find(entry => entry.id === effectiveModelId);
+    const modelLogo = <ModelLogo modelId={effectiveModelId} requestModelId={typeof effectiveModel?.requestModelId === 'string' ? effectiveModel.requestModelId : undefined} displayName={effectiveModel?.name} />;
     // Show the model's display name (as in the picker list), not the raw provider/model id.
     const triggerLabel = React.useMemo(() => {
         if (!effectiveProviderId || !effectiveModelId) {
@@ -250,9 +252,7 @@ export const ModelSelector: React.FC<ModelSelectorProps> = ({
                     )}
                 >
                     <div className="flex min-w-0 items-center gap-2">
-                        {!isReady ? catalogStatus : effectiveProviderId ? (
-                            <ProviderLogo providerId={effectiveProviderId} className="h-3.5 w-3.5 flex-shrink-0" />
-                        ) : (
+                        {!isReady ? catalogStatus : effectiveProviderId ? modelLogo : (
                             <Icon name="pencil-ai" className="h-3 w-3 text-muted-foreground" />
                         )}
                         {isReady ? <span className="typography-meta font-medium text-foreground truncate">{triggerLabel}</span> : null}
@@ -286,7 +286,7 @@ export const ModelSelector: React.FC<ModelSelectorProps> = ({
                 )}>
                     {!isReady ? catalogStatus : (
                         <>
-                            {effectiveProviderId ? <ProviderLogo providerId={effectiveProviderId} className="h-3.5 w-3.5 flex-shrink-0" /> : <Icon name="pencil-ai" className="h-3.5 w-3.5 flex-shrink-0 text-muted-foreground" />}
+                            {effectiveProviderId ? modelLogo : <Icon name="pencil-ai" className="h-3.5 w-3.5 flex-shrink-0 text-muted-foreground" />}
                             <span className="typography-ui-label min-w-0 flex-1 truncate text-left font-normal text-foreground">{triggerLabel}</span>
                         </>
                     )}

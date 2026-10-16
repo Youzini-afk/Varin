@@ -1135,9 +1135,16 @@ export class KernelClient {
     return this.requestRaw<T, M>(method, params, { signal, allowBootstrap: true, ...options });
   }
 
-  async health(options: { deep?: boolean; signal?: AbortSignal | undefined } = {}): Promise<KernelHealthResult> {
+  async health(options: { deep?: boolean; gcPreview?: boolean; signal?: AbortSignal | undefined } = {}): Promise<KernelHealthResult> {
     if (!this.handshakeResult) await this.start();
-    return this.requestRaw<KernelHealthResult>("storage.health", options.deep === undefined ? {} : { deep: options.deep }, { signal: options.signal });
+    return this.requestRaw<KernelHealthResult>("storage.health", { ...(options.deep === undefined ? {} : { deep: options.deep }), ...(options.gcPreview ? { gcPreview: true } : {}) }, { signal: options.signal });
+  }
+
+  /** Host settings only: collect exactly the previewed objects, rechecking all live references. */
+  async collectStorageObjects(operationId: string, objectHashes: string[]): Promise<Record<string, unknown>> {
+    if (!this.handshakeResult) await this.start();
+    if (!this.managementGrant) throw new Error("Storage management is unavailable");
+    return this.requestRaw<Record<string, unknown>>("storage.gc", { operationId, objectHashes }, { grant: this.managementGrant });
   }
 
   async snapshot(workspaceId: string, grant: KernelGrantHandle, signal?: AbortSignal): Promise<Record<string, unknown>> {

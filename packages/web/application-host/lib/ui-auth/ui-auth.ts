@@ -48,6 +48,8 @@ interface UiAuthResponse extends UiAuthHeaderResponse {
 }
 
 interface ClientAuthResult {
+  /** A short-lived token derived from an authenticated UI session. */
+  session?: boolean;
   client?: VarinAuthenticatedClient;
   clientId?: string;
   id?: string;
@@ -404,7 +406,11 @@ const isUrlAuthWebSocketPath = (pathname: string): boolean => {
 
 const canUseUrlAuthTokenForRequest = (req: UiAuthRequest): boolean => {
   const method = typeof req?.method === 'string' ? req.method.toUpperCase() : 'GET';
-  const pathname = getRequestPathname(req);
+  const outerPath = getRequestPathname(req);
+  // A saved-connection gateway keeps its mount in browser URLs. Authorize only
+  // the same enumerated inner read/realtime routes; the gateway separately
+  // requires full Host-wide delegation before substituting a peer credential.
+  const pathname = outerPath.replace(/^\/api\/connections\/hosts\/[^/]+\/proxy(?=\/)/u, '');
   if (isWebSocketUpgrade(req)) {
     return isUrlAuthWebSocketPath(pathname);
   }
@@ -500,35 +506,53 @@ export const createUiAuth = ({
   requireClientAuth = false,
 }: UiAuthOptions = {}) => {
   const normalizedPassword = normalizePassword(password);
-  const urlAuthTokens = new Map<string, { expiresAt: number; sessionToken: string }>();
+  const urlAuthTokens = new Map<string, { expiresAt: number; sessionToken: string; bearerToken?: string; expiryTimer: ReturnType<typeof setTimeout> }>();
+  const removeUrlAuthToken = (token: string): void => {
+    const entry = urlAuthTokens.get(token);
+    if (entry) clearTimeout(entry.expiryTimer);
+    urlAuthTokens.delete(token);
+  };
+  const clearUrlAuthTokens = (): void => {
+    for (const token of urlAuthTokens.keys()) removeUrlAuthToken(token);
+  };
 
   const sweepUrlAuthTokens = (): void => {
     const now = Date.now();
     for (const [token, entry] of urlAuthTokens.entries()) {
       if (!entry || entry.expiresAt <= now) {
-        urlAuthTokens.delete(token);
+        removeUrlAuthToken(token);
       }
     }
   };
 
-  const issueUrlAuthTokenForSession = (sessionToken: string) => {
+  const issueUrlAuthTokenForSession = (sessionToken: string, bearerToken?: string) => {
     sweepUrlAuthTokens();
     const token = `${URL_AUTH_TOKEN_PREFIX}${crypto.randomBytes(24).toString('base64url')}`;
     const expiresAt = Date.now() + URL_AUTH_TOKEN_TTL_MS;
-    urlAuthTokens.set(token, { sessionToken, expiresAt });
+    const expiryTimer = setTimeout(() => removeUrlAuthToken(token), URL_AUTH_TOKEN_TTL_MS);
+    expiryTimer.unref?.();
+    urlAuthTokens.set(token, { sessionToken, expiresAt, expiryTimer, ...(bearerToken ? { bearerToken } : {}) });
     return { token, expiresAt };
   };
 
-  const authenticateUrlAuthToken = (req: UiAuthRequest): ClientAuthResult | null => {
+  const authenticateUrlAuthToken = async (req: UiAuthRequest): Promise<ClientAuthResult | null> => {
     if (!canUseUrlAuthTokenForRequest(req)) return null;
     const token = getUrlAuthTokenFromRequest(req);
     if (!token || !token.startsWith(URL_AUTH_TOKEN_PREFIX)) return null;
     const entry = urlAuthTokens.get(token);
     if (!entry || entry.expiresAt <= Date.now()) {
-      urlAuthTokens.delete(token);
+      removeUrlAuthToken(token);
       return null;
     }
-    return { ok: true, sessionToken: entry.sessionToken || 'url:authenticated' };
+    if (entry.bearerToken) {
+      // A URL grant cannot outlive revocation or acquire broader capabilities
+      // than its original client. The bearer stays only in this short-lived map.
+      try {
+        const result = await clientAuthController?.authenticateBearerToken?.(entry.bearerToken, req);
+        return result?.ok ? result : null;
+      } catch { return null; }
+    }
+    return { ok: true, session: true, sessionToken: entry.sessionToken };
   };
 
   const authenticateClientRequest = async (
@@ -536,7 +560,7 @@ export const createUiAuth = ({
     { allowUrlToken = true }: { allowUrlToken?: boolean } = {},
   ): Promise<ClientAuthResult | null> => {
     if (allowUrlToken) {
-      const urlAuth = authenticateUrlAuthToken(req);
+      const urlAuth = await authenticateUrlAuthToken(req);
       if (urlAuth) return urlAuth;
     }
     const token = getBearerTokenFromRequest(req);
@@ -566,7 +590,9 @@ export const createUiAuth = ({
     return raw.startsWith('client:') ? raw.slice('client:'.length) : raw;
   };
 
-  const clientAuthContext = (clientAuth: ClientAuthResult) => ({
+  const clientAuthContext = (clientAuth: ClientAuthResult) => clientAuth.session === true
+    ? { type: 'session', token: clientAuth.sessionToken }
+    : ({
     type: 'client',
     token: clientSessionToken(clientAuth),
     clientId: clientAuthClientId(clientAuth),
@@ -586,7 +612,11 @@ export const createUiAuth = ({
       res.setHeader('Set-Cookie', header);
     };
 
-    const ensureSessionToken = async (req: UiAuthRequest, res: UiAuthHeaderResponse): Promise<string> => {
+    const ensureSessionToken = async (req: UiAuthRequest, res: UiAuthHeaderResponse): Promise<string | null> => {
+      if (requireClientAuth) {
+        const clientAuth = await authenticateClientRequest(req);
+        return clientAuth ? clientSessionToken(clientAuth) : null;
+      }
       const cookies = parseCookies(req.headers.cookie);
       if (cookies[cookieName]) {
         return cookies[cookieName];
@@ -626,7 +656,7 @@ export const createUiAuth = ({
       { allowClientAuth = true, allowUrlToken = true }: { allowClientAuth?: boolean; allowUrlToken?: boolean } = {},
     ) => {
       const cookies = parseCookies(req.headers.cookie);
-      if (cookies[cookieName]) {
+      if (!requireClientAuth && cookies[cookieName]) {
         return { type: 'session', token: cookies[cookieName] };
       }
       if (allowClientAuth) {
@@ -676,13 +706,14 @@ export const createUiAuth = ({
         const clientAuth = await authenticateClientRequest(req, { allowUrlToken: false });
         if (clientAuth) {
           res.setHeader('Cache-Control', 'no-store');
-          return res.json(issueUrlAuthTokenForSession(clientSessionToken(clientAuth)));
+          return res.json(issueUrlAuthTokenForSession(clientSessionToken(clientAuth), getBearerTokenFromRequest(req) || undefined));
         }
         if (requireClientAuth) {
           return res.status(401).json({ error: 'Client authentication required', locked: true, clientAuthRequired: true });
         }
         const sessionToken = await ensureSessionToken(req, res);
         res.setHeader('Cache-Control', 'no-store');
+        if (!sessionToken) return res.status(401).json({ error: 'Authentication required' });
         return res.json(issueUrlAuthTokenForSession(sessionToken));
       },
       handlePasskeyStatus: (_req: UiAuthRequest, res: UiAuthResponse) => {
@@ -720,7 +751,7 @@ export const createUiAuth = ({
         if (!res) return null;
         return ensureSessionToken(req, res);
       },
-      dispose: () => undefined,
+      dispose: clearUrlAuthTokens,
     };
   }
 
@@ -746,7 +777,7 @@ export const createUiAuth = ({
   const rotateJwtSecret = (): void => {
     const nextSecret = crypto.randomBytes(32).toString('hex');
     jwtSecret = persistJwtSecret(nextSecret);
-    urlAuthTokens.clear();
+    clearUrlAuthTokens();
     rebuildPasskeyController();
   };
 
@@ -915,8 +946,11 @@ export const createUiAuth = ({
       clearSessionCookie(req, res);
       return respondUnauthorized(req, res);
     }
+    // Preserve whether the grant came from a UI session or a bearer client.
+    const cookieToken = getTokenFromRequest(req);
+    const bearerToken = await isSessionValid(cookieToken) ? undefined : getBearerTokenFromRequest(req) || undefined;
     res.setHeader('Cache-Control', 'no-store');
-    return res.json(issueUrlAuthTokenForSession(sessionToken));
+    return res.json(issueUrlAuthTokenForSession(sessionToken, bearerToken));
   };
 
   const handleSessionCreate = async (req: UiAuthRequest, res: UiAuthResponse): Promise<void> => {
@@ -1075,6 +1109,7 @@ export const createUiAuth = ({
   };
 
   const dispose = (): void => {
+    clearUrlAuthTokens();
     loginRateLimiter.clear();
     stopRateLimitCleanup();
     passkeyController.dispose();

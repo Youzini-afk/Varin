@@ -4,6 +4,7 @@ import { parseHTML } from 'linkedom';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import type { BotSummary } from '@/lib/bots';
 import { BotSettings } from './BotSettings';
+import { BotDetailsDialog } from './BotDetailsDialog';
 
 const api = vi.hoisted(() => ({ list: vi.fn(), work: vi.fn(), update: vi.fn(), remove: vi.fn(), archive: vi.fn(), change: vi.fn() }));
 vi.mock('@/lib/bots', async original => ({ ...await original<typeof import('@/lib/bots')>(), listBots: api.list, listBotWork: api.work, updateBot: api.update,
@@ -11,12 +12,14 @@ vi.mock('@/lib/bots', async original => ({ ...await original<typeof import('@/li
 vi.mock('@/lib/i18n', () => ({ useI18n: () => ({ t: (key: string) => key }) }));
 vi.mock('@/lib/varinEvents', () => ({ subscribeVarinEvents: () => () => {} }));
 vi.mock('@/components/icon/Icon', () => ({ Icon: () => null }));
-vi.mock('./BotModelSelector', () => ({ BotModelSelector: () => null }));
+vi.mock('./BotModelSelector', () => ({ BotModelSelector: ({ onChange }: { onChange(provider: string, model: string): Promise<void> }) => <button onClick={() => { void onChange('gateway', 'claude'); }}>choose-model</button> }));
+vi.mock('@/components/ui/input', () => ({ Input: ({ onChange, ...props }: React.InputHTMLAttributes<HTMLInputElement>) => <input {...props} onInput={onChange as React.FormEventHandler<HTMLInputElement>} /> }));
+vi.mock('@/components/ui/textarea', () => ({ Textarea: ({ onChange, ...props }: React.TextareaHTMLAttributes<HTMLTextAreaElement>) => <textarea {...props} onInput={onChange as React.FormEventHandler<HTMLTextAreaElement>} /> }));
 vi.mock('@/components/sections/computers/ComputerDesktopView', () => ({ ComputerDesktopView: () => null }));
 vi.mock('@/lib/computers', () => ({ downloadComputerArtifact: vi.fn() }));
 vi.mock('@/components/ui/dialog', () => {
   const Section = ({ children }: { children?: React.ReactNode }) => <div>{children}</div>;
-  return { Dialog: ({ open, children }: { open: boolean; children: React.ReactNode }) => open ? <section role="dialog">{children}</section> : null,
+  return { Dialog: ({ open, children, onOpenChange }: { open: boolean; children: React.ReactNode; onOpenChange?(open: boolean): void }) => open ? <section role="dialog">{children}<button onClick={() => onOpenChange?.(false)}>close-dialog</button></section> : null,
     DialogContent: Section, DialogHeader: Section, DialogFooter: Section, DialogTitle: Section, DialogDescription: Section };
 });
 vi.mock('./BotMenu', () => ({ BotMenu: ({ bot, onAction, children }: { bot: BotSummary; onAction(action: string): void; children: React.ReactNode }) => <div>{children}
@@ -32,6 +35,7 @@ let container: HTMLDivElement;
 let root: Root;
 beforeEach(() => {
   const { window, document } = parseHTML('<!doctype html><html><body></body></html>');
+  window.confirm = vi.fn(() => true);
   vi.stubGlobal('window', window); vi.stubGlobal('document', document); vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
   vi.stubGlobal('Event', window.Event); vi.stubGlobal('CustomEvent', window.CustomEvent);
   container = document.createElement('div'); document.body.append(container); root = createRoot(container);
@@ -52,7 +56,7 @@ it('connects list rename/archive/restore to the right Bot without changing the s
   await render(); await click('rename-b'); await click('set-name');
   await act(async () => { container.querySelector('form')!.dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true })); });
   expect(api.update).toHaveBeenCalledWith('b', { name: 'New name' });
-  expect(container.querySelector('[aria-current=page]')?.textContent).toBe('a');
+  expect(container.querySelector('[aria-current=page]')?.textContent).toContain('a');
   await click('archive-a'); expect(api.archive).toHaveBeenCalledWith('a');
   await click('restore-b'); expect(api.change).toHaveBeenCalledWith('b', 'restore');
 });
@@ -80,4 +84,50 @@ it('shows pending cleanup and exposes retry when an archived Bot deletion fails'
   await click('settings.bots.deleteRetry');
   expect(api.change).toHaveBeenCalledWith('b', 'retry');
   expect(container.querySelector('[role=status]')?.textContent).toContain('settings.bots.deleting');
+});
+
+
+it('preserves unsaved profile text when saving an independent preferred model', async () => {
+  let current = bot('a');
+  api.list.mockImplementation(async () => [current]);
+  api.update.mockImplementation(async (_id, patch) => { current = { ...current, ...patch }; return current; });
+  await render();
+  const name = container.querySelector<HTMLInputElement>('[aria-label="settings.bots.name.label"]')!;
+  const instructions = container.querySelector<HTMLTextAreaElement>('[aria-label="settings.bots.instructions.label"]')!;
+  await act(async () => { name.value = 'Unsaved name'; name.dispatchEvent(new Event('input', { bubbles: true })); instructions.value = 'Unsaved instructions'; instructions.dispatchEvent(new Event('input', { bubbles: true })); });
+  await click('choose-model');
+  expect(api.update).toHaveBeenCalledWith('a', { model: { providerId: 'gateway', modelId: 'claude' } });
+  expect(name.value).toBe('Unsaved name');
+  expect(instructions.value).toBe('Unsaved instructions');
+  await click('settings.bots.save');
+  expect(api.update).toHaveBeenLastCalledWith('a', { name: 'Unsaved name', instructions: 'Unsaved instructions' });
+  expect(container.querySelector('[data-settings-action-bar] [role=status]')?.textContent).toBe('settings.common.status.saved');
+});
+
+it('keeps a failed profile save editable and cancels back to the saved profile', async () => {
+  await render();
+  const name = container.querySelector<HTMLInputElement>('[aria-label="settings.bots.name.label"]')!;
+  await act(async () => { name.value = 'Draft'; name.dispatchEvent(new Event('input', { bubbles: true })); });
+  api.update.mockRejectedValueOnce(new Error('Save unavailable'));
+  await click('settings.bots.save');
+  expect(name.value).toBe('Draft');
+  expect(container.textContent).toContain('Save unavailable');
+  await click('settings.common.actions.cancel');
+  expect(name.value).toBe('a');
+  expect(api.update).toHaveBeenCalledOnce();
+});
+
+it('guards unsaved standalone Bot profile dialog dismissal without a settings navigation host', async () => {
+  const onClose = vi.fn();
+  await act(async () => { root.render(<BotDetailsDialog bot={{ id: 'a', name: 'a', tab: 'profile' }} onClose={onClose} />); });
+  const name = container.querySelector<HTMLInputElement>('[aria-label="settings.bots.name.label"]')!;
+  await act(async () => { name.value = 'Unsaved dialog name'; name.dispatchEvent(new Event('input', { bubbles: true })); });
+  vi.mocked(window.confirm).mockReturnValueOnce(false);
+  await click('close-dialog');
+  expect(onClose).not.toHaveBeenCalled();
+  expect(name.value).toBe('Unsaved dialog name');
+  expect(window.confirm).toHaveBeenCalledWith('settings.bots.discardConfirm');
+  vi.mocked(window.confirm).mockReturnValueOnce(true);
+  await click('close-dialog');
+  expect(onClose).toHaveBeenCalledOnce();
 });

@@ -1,4 +1,5 @@
 import React from 'react';
+import { toast } from '@/components/ui';
 import { ProjectTrustSettings } from '@/components/sections/shared/ProjectTrustSettings';
 import { getProjectTrustGeneration, subscribeProjectTrustChanges } from '@/lib/projectTrust';
 import { createModelConnectionsHttpAPI, getRuntimeEndpointGeneration, subscribeRuntimeEndpointChanged, type AgentSettingsSnapshot } from '@varin/application-client';
@@ -39,15 +40,17 @@ export const DefaultsSettings: React.FC = () => {
     const owner = host; const saveScope = scopeKey; setSaving(true); setError(undefined);
     try {
       const next = await api.updateSettings({ cwd, scope, set, remove, expectedRevision: scope === 'global' ? snapshot.globalRevision : snapshot.projectRevision });
-      if (owner === getRuntimeEndpointGeneration() && saveScope === currentScope.current) setSnapshot(next);
+      if (owner === getRuntimeEndpointGeneration() && saveScope === currentScope.current) { setSnapshot(next); toast.success(t('settings.defaults.saved')); }
     } catch (failure) { if (owner === getRuntimeEndpointGeneration() && saveScope === currentScope.current) setError(failure instanceof Error ? failure.message : String(failure)); }
     finally { if (owner === getRuntimeEndpointGeneration() && saveScope === currentScope.current) setSaving(false); }
   };
   const string = (value: JsonValue | undefined) => typeof value === 'string' ? value : '';
   const model = (value: JsonValue | undefined) => value && typeof value === 'object' && !Array.isArray(value)
     ? { providerId: string(value.providerId), modelId: string(value.modelId) } : { providerId: '', modelId: '' };
-  return <SettingsSection title={t('settings.varin.defaults.title')} divider={false}>
+  return <>
+  <SettingsSection title={t('settings.varin.defaults.title')} divider={false} contentClassName="divide-y divide-border/50">
     <ProjectTrustSettings />
+    {!snapshot && !error && <p role="status" className="py-3 typography-meta text-muted-foreground">{t('settings.defaults.loading')}</p>}
     {error && <p role="alert" className="text-destructive text-sm">{error} <Button variant="ghost" onClick={() => void reload()}>{t('assistant.reload')}</Button></p>}
     <SettingsFieldRow label={t('assistant.scope')}><Select value={scope} disabled={saving} onValueChange={value => setScope(value as 'global' | 'project')}>
       <SelectTrigger className="w-48"><SelectValue /></SelectTrigger><SelectContent>
@@ -55,6 +58,10 @@ export const DefaultsSettings: React.FC = () => {
       </SelectContent>
     </Select></SettingsFieldRow>
     <SettingsFieldRow label={t('settings.varin.agents.detail.model')}><ModelSelector providerId={string(settings.defaultProvider)} modelId={string(settings.defaultModel)} disabled={!snapshot || saving}
+      displayProviderId={scope === 'project' ? string(snapshot?.global.defaultProvider) : undefined}
+      displayModelId={scope === 'project' ? string(snapshot?.global.defaultModel) : undefined}
+      placeholder={scope === 'project' ? t('settings.bots.model.inherit') : undefined}
+      defaultSelectionLabel={scope === 'project' ? t('settings.bots.model.inherit') : undefined}
       onChange={(providerId, modelId) => save(providerId && modelId ? { defaultProvider: providerId, defaultModel: modelId } : {}, providerId && modelId ? [] : ['defaultProvider', 'defaultModel'])} /></SettingsFieldRow>
     <SettingsFieldRow label={t('settings.varin.agents.detail.thinking')}><Select value={string(settings.defaultThinkingLevel) || 'inherit'} disabled={!snapshot || saving} onValueChange={value => void save(value !== 'inherit' ? { defaultThinkingLevel: value } : {}, value !== 'inherit' ? [] : ['defaultThinkingLevel'])}>
       <SelectTrigger className="w-48"><SelectValue /></SelectTrigger><SelectContent>
@@ -65,6 +72,9 @@ export const DefaultsSettings: React.FC = () => {
       <ModelSelector {...model(settings[key])} disabled={!snapshot || saving} placeholder={t('settings.bots.model.inherit')}
         onChange={(providerId, modelId) => save(providerId && modelId ? { [key]: { providerId, modelId } } : {}, providerId && modelId ? [] : [key])} />
     </SettingsFieldRow>)}
+    {scope === 'project' && <p className="py-3 typography-meta text-muted-foreground">{t('settings.defaults.projectInheritance')}</p>}
+  </SettingsSection>
+  <SettingsSection title={t('settings.defaults.clientPreferences')}>
     <SettingsCheckboxRow checked={showDeletionDialog} onChange={setShowDeletionDialog} label={t('thread.settings.confirmDelete')} />
-  </SettingsSection>;
+  </SettingsSection></>;
 };

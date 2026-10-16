@@ -1,5 +1,6 @@
 import React from 'react';
-import { getRuntimeApiBaseUrl, getRuntimeKey, runtimeFetch } from '@varin/application-client';
+import { SettingsActionBar } from '../shared/SettingsActionBar';
+import { getRuntimeApiBaseUrl, getRuntimeEndpointGeneration, subscribeRuntimeEndpointChanged, runtimeFetch } from '@varin/application-client';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -10,8 +11,25 @@ type NetworkSetting = { mode: 'auto' | 'direct' | 'proxy'; proxyUrl: string; noP
 const DEFAULT: NetworkSetting = { mode: 'auto', proxyUrl: '', noProxy: '' };
 
 export function OutboundNetworkSettings() {
+  const generation = React.useSyncExternalStore(subscribeRuntimeEndpointChanged, getRuntimeEndpointGeneration, getRuntimeEndpointGeneration);
+  return <OutboundNetworkContent key={generation} generation={generation} />;
+}
+function OutboundNetworkContent({ generation }: { generation: number }) {
   const { t } = useI18n();
-  const runtimeKey = getRuntimeKey();
+  const live = React.useRef(true);
+  const writing = React.useRef(false);
+  const testing = React.useRef(false);
+  React.useEffect(() => { live.current = true; return () => { live.current = false; }; }, []);
+  const isCurrent = React.useCallback(() => live.current && generation === getRuntimeEndpointGeneration(), [generation]);
+  // Every follow-up is fenced before sending, including the credential write
+  // after a settings save. A late old-Host response cannot redirect that secret.
+  const request = React.useCallback(async <T,>(url: string, init?: RequestInit): Promise<{ response: Response; value: T }> => {
+    if (!isCurrent()) throw new Error('Application Host changed. Reload settings.');
+    const response = await runtimeFetch(url, init);
+    const value = await response.json() as T;
+    if (!isCurrent()) throw new Error('Application Host changed. Reload settings.');
+    return { response, value };
+  }, [isCurrent]);
   const [saved, setSaved] = React.useState<NetworkSetting>(DEFAULT);
   const [draft, setDraft] = React.useState<NetworkSetting>(DEFAULT);
   const [username, setUsername] = React.useState('');
@@ -29,14 +47,12 @@ export function OutboundNetworkSettings() {
   })();
 
   const readHostState = React.useCallback(async () => {
-    const response = await runtimeFetch('/api/config/settings', { cache: 'no-store' });
+    const { response, value: document } = await request<{ outboundNetwork?: Partial<NetworkSetting> }>('/api/config/settings', { cache: 'no-store' });
     if (!response.ok) throw new Error(t('settings.page.harness.network.loadFailed'));
-    const document = await response.json() as { outboundNetwork?: Partial<NetworkSetting> };
-    const credentialResponse = await runtimeFetch('/api/harness/egress/credentials', { cache: 'no-store' });
+    const { response: credentialResponse, value: credential } = await request<{ configured?: boolean }>('/api/harness/egress/credentials', { cache: 'no-store' });
     if (!credentialResponse.ok) throw new Error(t('settings.page.harness.network.loadFailed'));
-    const credential = await credentialResponse.json() as { configured?: boolean };
     return { setting: { ...DEFAULT, ...document.outboundNetwork }, configured: credential.configured === true };
-  }, [t]);
+  }, [t, request]);
 
   React.useEffect(() => {
     let active = true;
@@ -51,11 +67,12 @@ export function OutboundNetworkSettings() {
     }).catch((cause) => { if (active) setError(cause instanceof Error ? cause.message : String(cause)); })
       .finally(() => { if (active) setLoading(false); });
     return () => { active = false; };
-  }, [runtimeKey, readHostState]);
+  }, [readHostState]);
 
   const dirty = JSON.stringify(saved) !== JSON.stringify(draft) || Boolean(username || password);
   const save = async () => {
-    if (saving || getRuntimeKey() !== runtimeKey) return;
+    if (writing.current || loading || !isCurrent()) return false;
+    writing.current = true;
     setSaving(true);
     setError(null);
     setResult(null);
@@ -68,37 +85,38 @@ export function OutboundNetworkSettings() {
         }
       }
       const changes: Record<string, unknown> = { outboundNetwork: { ...draft, proxyUrl: url } };
-      const response = await runtimeFetch('/api/config/settings', {
+      const { response, value } = await request<{ outboundNetwork?: NetworkSetting }>('/api/config/settings', {
         method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(changes),
       });
       if (!response.ok) throw new Error(t('settings.page.harness.network.saveFailed'));
-      const value = await response.json() as { outboundNetwork?: NetworkSetting };
       const persisted = value.outboundNetwork ?? { ...draft, proxyUrl: url };
       setSaved(persisted);
       setDraft(persisted);
-      const statusResponse = await runtimeFetch('/api/harness/egress/credentials', { cache: 'no-store' });
+      const { response: statusResponse, value: status } = await request<{ configured?: boolean }>('/api/harness/egress/credentials', { cache: 'no-store' });
       if (statusResponse.ok) {
-        const status = await statusResponse.json() as { configured?: boolean };
         setHasAuth(status.configured === true);
       }
       if (username || password) {
-        const credentialResponse = await runtimeFetch('/api/harness/egress/credentials', {
+        const { response: credentialResponse } = await request('/api/harness/egress/credentials', {
           method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ username, password, credentialRef: persisted.credentialRef }),
         });
         if (!credentialResponse.ok) throw new Error(t('settings.page.harness.network.saveFailed'));
         setHasAuth(true);
       }
       setUsername(''); setPassword('');
+      return true;
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : t('settings.page.harness.network.saveFailed'));
-    } finally { setSaving(false); }
+      if (isCurrent()) setError(cause instanceof Error ? cause.message : t('settings.page.harness.network.saveFailed'));
+      return false;
+    } finally { writing.current = false; if (isCurrent()) setSaving(false); }
   };
 
   const clearAuth = async () => {
-    if (saving || getRuntimeKey() !== runtimeKey) return;
+    if (writing.current || loading || dirty || !isCurrent()) return;
+    writing.current = true;
     setSaving(true); setError(null);
     try {
-      const response = await runtimeFetch('/api/harness/egress/credentials', {
+      const { response } = await request('/api/harness/egress/credentials', {
         method: 'DELETE', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ credentialRef: saved.credentialRef }),
       });
@@ -111,24 +129,24 @@ export function OutboundNetworkSettings() {
       }
       if (!response.ok) throw new Error(t('settings.page.harness.network.saveFailed'));
       setHasAuth(false); setUsername(''); setPassword(''); setResult(null);
-    } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); }
-    finally { setSaving(false); }
+    } catch (cause) { if (isCurrent()) setError(cause instanceof Error ? cause.message : String(cause)); }
+    finally { writing.current = false; if (isCurrent()) setSaving(false); }
   };
 
   const verify = async () => {
-    if (dirty || verifying || getRuntimeKey() !== runtimeKey) return;
+    if (dirty || writing.current || testing.current || !isCurrent()) return;
+    testing.current = true;
     setVerifying(true); setResult(null); setError(null);
     try {
-      const response = await runtimeFetch('/api/harness/egress/verify', {
+      const { response, value } = await request<{ ok?: boolean; status?: number; errorClass?: string; error?: string; policy?: { mode: string; source: string; proxyOrigin?: string } }>('/api/harness/egress/verify', {
         method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url: testUrl }),
       });
-      const value = await response.json() as { ok?: boolean; status?: number; errorClass?: string; error?: string; policy?: { mode: string; source: string; proxyOrigin?: string } };
       if (!response.ok) throw new Error(value.error ?? t('settings.page.harness.network.verifyFailed'));
       setResult(value.ok
         ? `${t('settings.page.harness.network.verifyOk')} HTTP ${value.status} · ${value.policy?.mode ?? '?'} · ${value.policy?.proxyOrigin ?? value.policy?.source ?? '?'}`
         : `${t('settings.page.harness.network.verifyFailed')} ${value.errorClass ?? 'http'}${value.status ? ` ${value.status}` : ''}: ${value.error ?? ''}`);
-    } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); }
-    finally { setVerifying(false); }
+    } catch (cause) { if (isCurrent()) setError(cause instanceof Error ? cause.message : String(cause)); }
+    finally { testing.current = false; if (isCurrent()) setVerifying(false); }
   };
 
   return <SettingsSection title={t('settings.page.harness.network.title')} description={`${t('settings.page.harness.network.host')} ${host}`} contentClassName="space-y-5">
@@ -156,9 +174,9 @@ export function OutboundNetworkSettings() {
       <SettingsFieldRow label={t('settings.page.harness.network.password')} controlClassName="@xl:flex-1 @xl:max-w-80">
         <Input type="password" value={password} autoComplete="new-password" onChange={(event) => setPassword(event.target.value)} disabled={loading || saving} />
       </SettingsFieldRow>
-      {hasAuth ? <Button size="sm" variant="ghost" disabled={loading || saving} onClick={() => void clearAuth()}>{t('settings.page.harness.network.clearAuth')}</Button> : null}
+      {hasAuth ? <Button size="sm" variant="ghost" disabled={loading || saving || dirty} onClick={() => void clearAuth()}>{t('settings.page.harness.network.clearAuth')}</Button> : null}
     </> : null}
-    <Button size="sm" disabled={loading || saving || !dirty} onClick={() => void save()}>{saving ? t('settings.common.actions.saving') : t('settings.page.harness.network.save')}</Button>
+    <SettingsActionBar dirty={dirty} saving={saving} saveDisabled={loading} onSave={save} onCancel={() => { setDraft(saved); setUsername(''); setPassword(''); setError(null); setResult(null); }} error={error} />
     <SettingsFieldRow label={t('settings.page.harness.network.testUrl')} controlClassName="@xl:flex-1 @xl:max-w-80">
       <Input value={testUrl} onChange={(event) => setTestUrl(event.target.value)} disabled={loading || verifying} />
     </SettingsFieldRow>

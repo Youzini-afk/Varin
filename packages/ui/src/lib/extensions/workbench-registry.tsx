@@ -640,11 +640,12 @@ export interface WorkbenchMatchRendererRegistration<TInput> {
 export const useWorkbenchMatchRenderers = <TInput,>(
   kind: 'message-renderer' | 'tool-renderer' | 'session-decoration',
   slot: string,
+  enabled = true,
 ): WorkbenchMatchRendererRegistration<TInput>[] => {
   const snapshot = useSurfaceRegistrySnapshot();
   const contributions = React.useMemo(() => snapshot.visibleContributions.filter((contribution) => (
-    contribution.descriptor.kind === kind && contribution.descriptor.placement?.slot === slot
-  )), [kind, slot, snapshot]);
+    enabled && contribution.descriptor.kind === kind && contribution.descriptor.placement?.slot === slot
+  )), [enabled, kind, slot, snapshot]);
   useVisibleContributionActivation(contributions);
   return React.useMemo(() => contributions.flatMap((contribution) => {
     const implementation = contribution.implementation as Partial<WorkbenchMatchRenderer<TInput>>;

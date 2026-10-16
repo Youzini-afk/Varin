@@ -17,6 +17,7 @@ export type DesktopConnectionRecoveryProps = {
   hostUrl?: string;
   onRetry?: () => void;
   onUseLocal?: () => void;
+  footer?: React.ReactNode;
   onUseRemote?: () => void;
   isRetrying?: boolean;
 };
@@ -37,6 +38,7 @@ export function DesktopConnectionRecovery({
   hostUrl,
   onRetry,
   onUseLocal,
+  footer,
   onUseRemote,
   isRetrying = false,
 }: DesktopConnectionRecoveryProps) {
@@ -57,8 +59,8 @@ export function DesktopConnectionRecovery({
   }, [config.descriptionParams, t, variant]);
 
   return (
-    <div className="flex flex-col items-center justify-center h-full p-8">
-      <div className="w-full max-w-md space-y-6">
+    <div className="flex h-full min-h-0 flex-col items-center overflow-y-auto p-8">
+      <div className="my-auto w-full max-w-md shrink-0 space-y-6">
         {/* Icon and title */}
         <div className="flex flex-col items-center space-y-3 text-center">
           <div
@@ -132,6 +134,7 @@ export function DesktopConnectionRecovery({
             )}
           </div>
         </div>
+        {footer}
       </div>
     </div>
   );

@@ -1,6 +1,7 @@
 import React from 'react';
 import { isDesktopShell, restartDesktopApp } from '@/lib/desktop';
 import { DesktopConnectionRecovery, type RecoveryVariant } from './DesktopConnectionRecovery';
+import { LocalHostRecovery } from '@/components/sections/connections/DesktopLocalHostSettings';
 import { RemoteConnectionForm } from './RemoteConnectionForm';
 import { resolveRecoveryNextStep } from './desktopRecoveryRouting';
 import { desktopHostsGet, desktopHostsSet } from '@/lib/desktopHosts';
@@ -100,20 +101,22 @@ export function RecoveryScreen({
     onEnterLocalSetup?.();
   }, [onEnterLocalSetup, persistFirstChoice]);
 
+  const localRecovery = !localAvailable && isDesktopShell() ? <LocalHostRecovery /> : null;
+
   // Recovery mode — show recovery component first; only switch to remote form on explicit user action
   if (showRemoteForm) {
     // For remote-wrong-service, do NOT auto-populate the known bad URL
     const prefillUrl = variant === 'remote-wrong-service' ? '' : (hostUrl || '');
     const prefillLabel = variant === 'remote-wrong-service' ? '' : (hostLabel || '');
     return (
-      <RemoteConnectionForm
+      <div className="space-y-4"><RemoteConnectionForm
         onBack={onCloseRemoteForm || (() => onChooseRemote?.())}
         initialUrl={prefillUrl}
         initialLabel={prefillLabel}
         isRecoveryMode={true}
         showInstancePicker={!localAvailable}
         onSwitchToLocal={localAvailable ? () => void handleRemoteFormUseLocal() : undefined}
-      />
+      />{localRecovery}</div>
     );
   }
 
@@ -126,6 +129,7 @@ export function RecoveryScreen({
       onUseLocal={localAvailable ? handleRecoveryUseLocal : undefined}
       onUseRemote={handleRecoveryUseRemote}
       isRetrying={isRetrying}
+      footer={localRecovery}
     />
   );
 }

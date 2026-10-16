@@ -1,5 +1,5 @@
 import React from 'react';
-import { useConversationPresentation } from './ConversationContext';
+import { useOptionalConversationPresentation } from './ConversationContext';
 import type { ChatAssistantMessage, ChatToolResultMessage } from './types';
 import { useUIStore } from '@/stores/useUIStore';
 import type { ChatToolExecutionState } from './types';
@@ -11,7 +11,7 @@ export const ChatTurnChangedFiles: React.FC<{
   messages: ChatAssistantMessage[]; results: ReadonlyMap<string, ChatToolResultMessage>;
   executions: Record<string, ChatToolExecutionState>; cwd: string; sessionId: string;
 }> = ({ messages, results, executions }) => {
-  const { openFile } = useConversationPresentation();
+  const conversation = useOptionalConversationPresentation();
   const enabled = useUIStore(state => state.showTurnChangedFiles);
   const { t } = useI18n();
   const files = React.useMemo(() => {
@@ -33,10 +33,10 @@ export const ChatTurnChangedFiles: React.FC<{
       <span className="tabular-nums">{files.length}</span><Icon name="arrow-right-s" className="ml-auto size-3.5 group-open/files:rotate-90" />
     </summary>
     <div className="mt-2 flex flex-col items-start gap-1">
-      {files.map(file => <button key={file.path} type="button" disabled={file.deleted}
+      {files.map(file => <button key={file.path} type="button" disabled={file.deleted || !conversation}
         className="max-w-full truncate rounded px-1 py-1 text-left enabled:hover:bg-interactive-hover disabled:opacity-60"
         title={file.path} data-varin-file-path={file.path} onClick={() => {
-          void openFile(file.callId, file.path);
+          void conversation?.openFile(file.callId, file.path);
         }}>{file.path}</button>)}
     </div>
   </details>;

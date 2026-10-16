@@ -11,6 +11,7 @@ import { Button } from '@/components/ui/button';
 import { VarinLogo } from '@/components/ui/VarinLogo';
 import { ChatView } from '@/components/views/ChatView';
 import { SettingsView } from '@/components/views/SettingsView';
+import { requestSettingsNavigation } from '@/lib/settings/drafts';
 import { TerminalView } from '@/components/views/TerminalView';
 import { ErrorBoundary } from '@/components/ui/ErrorBoundary';
 import { MobileOverlayPanel } from '@/components/ui/MobileOverlayPanel';
@@ -83,30 +84,12 @@ import { useEdgeSwipeSessionSwitch } from './useEdgeSwipeSessionSwitch';
 import { useNativePushRegistration } from './useNativePushRegistration';
 
 const MOBILE_SETTINGS_PAGES = [
-  'general',
-  'appearance',
-  'chat',
-  'notifications',
-  'sessions',
-  'git',
-  'mcp',
-  'plugins',
-  'plugin-settings',
-  'harness-tools',
-  'harness-permissions',
-  'harness-context',
-  'harness-retrieval',
-  'harness-index',
-  'harness-web',
-  'extensions',
-  'model-connections',
-  'mcp-connections',
-  'agents',
-  'commands',
-  'skills',
-  'usage',
-  'voice',
-  'about',
+  'general', 'appearance', 'chat', 'sessions', 'notifications', 'voice', 'storage', 'history',
+  'model-connections', 'agents', 'harness-bots', 'agent-prompt', 'agent-memory',
+  'harness-tools', 'harness-web', 'images', 'harness-computers', 'harness-permissions', 'harness-context',
+  'projects', 'editor', 'terminal', 'git', 'harness-retrieval', 'harness-index', 'language-support',
+  'work-connections', 'remote-instances', 'network', 'access', 'tunnel', 'mcp-connections',
+  'skills', 'commands', 'extensions', 'about',
 ] as const;
 
 type MobileAppProps = {
@@ -650,11 +633,6 @@ const useNativeAndroidBackButton = (onBack: () => boolean): void => {
 const normalizePath = (value?: string | null): string =>
   (value || '').replace(/\\/g, '/').replace(/\/+$/g, '');
 
-const formatTokens = (value: number): string => {
-  if (value >= 1_000_000) return `${(value / 1_000_000).toFixed(1)}M`;
-  if (value >= 1_000) return `${(value / 1_000).toFixed(1)}K`;
-  return String(value);
-};
 
 const mobileInputKeyboardProps = {
   autoComplete: 'off',
@@ -2421,7 +2399,7 @@ const MobileShell: React.FC<{ onActiveConnectionDeleted: () => void }> = ({ onAc
         {settingsOpen ? (
           <MobileSurfaceShell
             open
-            onClose={() => setSettingsOpen(false)}
+            onClose={() => requestSettingsNavigation(() => setSettingsOpen(false))}
             ariaLabel={t('mobile.menu.settings')}
             headerless
             variant={surfaceVariant}

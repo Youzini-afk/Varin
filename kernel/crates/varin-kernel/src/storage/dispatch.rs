@@ -64,7 +64,13 @@ impl Storage {
             method if method.starts_with("process.") => {
                 storage.dispatch_process(method, authorized_params, authorized_grant)
             }
-            "storage.health" => storage.health(authorized_params),
+            "storage.health" => {
+                let mut health = storage.health(authorized_params)?;
+                if authorized_params.get("gcPreview").and_then(Value::as_bool) == Some(true) {
+                    health["gcPreview"] = storage.gc_preview()?;
+                }
+                Ok(health)
+            },
             "storage.snapshot" => storage.snapshot(authorized_params),
             "storage.putBlob.begin" => {
                 storage.begin_blob_stream(authorized_params, grant_id.unwrap_or(""))
@@ -235,7 +241,17 @@ impl Storage {
                 storage.branch_delete(authorized_params)
             }),
             "pin.read" => storage.pin_read(authorized_params, grant_id.unwrap_or("")),
-            "storage.gc" => idempotent(storage, method, authorized_params, |storage| storage.gc()),
+            "storage.gc" => {
+                let selected = authorized_params.get("objectHashes").map(|value| {
+                    value.as_array().ok_or_else(|| KernelError::Protocol("objectHashes must be an array".into()))?
+                        .iter().map(|hash| {
+                            let hash = hash.as_str().ok_or_else(|| KernelError::Protocol("object hash must be a string".into()))?;
+                            object_path(&storage.root, hash)?;
+                            Ok(hash.to_string())
+                        }).collect::<Result<BTreeSet<_>, KernelError>>()
+                }).transpose()?;
+                idempotent(storage, method, authorized_params, |storage| storage.gc_selected(selected.as_ref()))
+            },
             "recovery.operation.conflicts" => {
                 storage.recovery_operation_conflicts(authorized_params, authorized_grant)
             }

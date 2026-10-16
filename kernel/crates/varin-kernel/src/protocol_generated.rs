@@ -1531,6 +1531,7 @@ pub(crate) struct KernelHandshakeParams {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct KernelHealthParams {
     pub(crate) deep: Option<bool>,
+    pub(crate) gc_preview: Option<bool>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -2352,6 +2353,7 @@ pub(crate) struct KernelOperationReleaseParams {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct KernelGcParams {
     pub(crate) operation_id: String,
+    pub(crate) object_hashes: Option<Vec<String>>,
 }
 
 #[derive(Clone, Debug, Deserialize)]

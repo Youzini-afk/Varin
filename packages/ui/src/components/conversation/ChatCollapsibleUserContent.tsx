@@ -29,7 +29,11 @@ export const ChatCollapsibleUserContent: React.FC<{ children: React.ReactNode }>
   }, [children, enabled]);
   return <>
     <div id={id} onFocusCapture={() => setExpanded(true)} className="overflow-hidden"
-      style={enabled && !expanded ? { maxHeight: previewHeight === undefined ? '2lh' : `${previewHeight}px` } : undefined}>
+      style={enabled && !expanded ? {
+        maxHeight: previewHeight === undefined ? '2lh' : `${previewHeight}px`,
+        // Rich blocks have paragraph spacing; make a clipped boundary visibly fade.
+        ...(long ? { maskImage: 'linear-gradient(to bottom, black calc(100% - 1lh), transparent)' } : {}),
+      } : undefined}>
       <div ref={content}>{children}</div>
     </div>
     {enabled && long ? <button type="button" className="mt-2 rounded typography-meta text-muted-foreground hover:text-foreground"

@@ -2254,11 +2254,11 @@ test("scoped leases freeze original calls, preserve ready owners on failed scope
     const value = hostState(current, 1, providers);
     value.routing.document = { ...value.routing.document, revision: 9, rules: providers.map((provider, index) => ({
       serviceId: provider.descriptor.id, version: 1, providerKeys: [provider.providerKey], allowFallback: false,
-      scope: { sessionId: index === 0 ? "thread-p" : "thread-q" },
+      scope: { threadId: index === 0 ? "thread-p" : "thread-q" },
     })) };
     return value;
   };
-  let sessionId = "thread-p";
+  let threadId = "thread-p";
   let rejectQ = false;
   const leases: Array<{ request: Parameters<SurfaceExtensionHost["watchServiceLease"]>[0]; signal: AbortSignal;
     emit: Parameters<SurfaceExtensionHost["watchServiceLease"]>[1] }> = [];
@@ -2277,12 +2277,12 @@ test("scoped leases freeze original calls, preserve ready owners on failed scope
     watchServiceLease: async function(request, emit, signal) {
       assert.ok(signal);
       leases.push({ request, signal, emit });
-      if (request.routing.sessionId === "thread-q" && rejectQ) { emit({ kind: "error", message: "Q provider preparation failed" }); return; }
+      if (request.routing.threadId === "thread-q" && rejectQ) { emit({ kind: "error", message: "Q provider preparation failed" }); return; }
       await holdServiceLease.call(this, request, emit, signal);
     },
     invokeService: async (request, signal) => {
       assert.ok(signal); signal.throwIfAborted(); calls.push(request); callSignals.push(signal);
-      if (holdRead && request.routing?.sessionId === "thread-p") await callGate;
+      if (holdRead && request.routing?.threadId === "thread-p") await callGate;
       signal.throwIfAborted();
       return request.providerId!;
     },
@@ -2295,7 +2295,7 @@ test("scoped leases freeze original calls, preserve ready owners on failed scope
     waitForHostState: async () => { throw new Error("Explicit reconciliation only"); },
   };
   const loader = new SurfaceExtensionLoader({ surface: "web", surfaceRuntime: runtime, host, realmId,
-    accessContext: () => ({ access: "remote", projectTrusted: false, routing: { sessionId } }),
+    accessContext: () => ({ access: "remote", projectTrusted: false, routing: { threadId } }),
     externalServiceFactories: [{ descriptor: { id: "varin.editor.monaco", version: 1 }, providerId: "monaco-local",
       providerKey: "varin.builtin.text:surface:varin.editor.monaco@1", create: owner => {
         factories.push(owner.generation);
@@ -2316,13 +2316,13 @@ test("scoped leases freeze original calls, preserve ready owners on failed scope
   assert.equal(await first.read(), providers[0]!.providerId);
   assert.equal(leases[0]!.request.services.length, 1);
   assert.equal(leases[0]!.request.expectedRoutingRevision, 9);
-  assert.equal(calls[0]!.routing?.sessionId, "thread-p");
+  assert.equal(calls[0]!.routing?.threadId, "thread-p");
   assert.equal(calls[0]!.lease?.owner.generation, leases[0]!.request.owner.generation);
-  sessionId = "thread-q"; rejectQ = true;
+  threadId = "thread-q"; rejectQ = true;
   await loader.reconcile();
   assert.equal(runtime.getSnapshot().visibleContributions[0]!.implementation, first);
   assert.equal(await first.read(), providers[0]!.providerId);
-  assert.equal(calls[1]!.routing?.sessionId, "thread-p");
+  assert.equal(calls[1]!.routing?.threadId, "thread-p");
   assert.equal(factories.length, initialFactories.length);
   assert.deepEqual(disposed, []);
   holdRead = true;
@@ -2338,7 +2338,7 @@ test("scoped leases freeze original calls, preserve ready owners on failed scope
   assert.throws(() => first.read(), /inactive/);
   const second = runtime.getSnapshot().visibleContributions[0]!.implementation as { read(): Promise<string> };
   assert.equal(await second.read(), providers[1]!.providerId);
-  assert.equal(calls.at(-1)!.routing?.sessionId, "thread-q");
+  assert.equal(calls.at(-1)!.routing?.threadId, "thread-q");
   const withdrawn = new Promise<void>(resolve => {
     const unsubscribe = runtime.subscribe(() => {
       if (!runtime.getSnapshot().visibleContributions.length) { unsubscribe(); resolve(); }
@@ -2360,7 +2360,7 @@ test("a pending local dependency change never publishes after a newer routing ch
   const route = (name: string) => {
     state.revision += 1;
     state.routing.document.revision += 1;
-    state.routing.document.rules = [{ serviceId: "review.local", version: 1, scope: { sessionId: "same-thread" },
+    state.routing.document.rules = [{ serviceId: "review.local", version: 1, scope: { threadId: "same-thread" },
       allowFallback: false, providerKeys: [`review.${name}:surface:review.local@1`] }];
   };
   let entered!: () => void, release!: () => void;
@@ -2385,7 +2385,7 @@ test("a pending local dependency change never publishes after a newer routing ch
     watchServiceLease: holdServiceLease,
   };
   const loader = new SurfaceExtensionLoader({ host, surface: "web", surfaceRuntime: runtime,
-    accessContext: () => ({ access: "local", projectTrusted: true, routing: { sessionId: "same-thread" } }),
+    accessContext: () => ({ access: "local", projectTrusted: true, routing: { threadId: "same-thread" } }),
     externalServiceFactories: ["b", "c"].map(name => ({ descriptor: { id: "review.local", version: 1, multiple: true },
       providerId: `local-${name}`, providerKey: `review.${name}:surface:review.local@1`, create: () => ({
         descriptor: { id: "review.local", version: 1, multiple: true }, providerId: `local-${name}`, implementation: { read: () => name },
@@ -2414,16 +2414,17 @@ test("a pending local dependency change never publishes after a newer routing ch
   } finally { release?.(); await loader.stop(); }
 });
 
-test("product Surface scope preserves the service configuration namespace and resolves the actual user-selected Workbench profile", () => {
+test("product Surface scope preserves distinct configuration and document namespaces and resolves the user-selected Workbench profile", () => {
   const state = hostState(snapshot(1, catalogEntry("1.0.0", integrityFor("profile-scope"))));
   state.workbench.document.profiles.push({ id: "research", label: "Research" });
   state.workbench.document.profileSelections.users.default = "research";
   const scope = surfaceServiceRoutingContext({ configurationDirectory: "/projects/research", documentWorkspaceId: "documents-workspace-id",
-    runtimeId: "runtime-p", sessionId: "thread-p", snapshot: state, surface: "web" });
-  assert.equal(scope.workspaceId, "/projects/research");
+    runtimeId: "runtime-p", threadId: "thread-p", snapshot: state, surface: "web" });
+  assert.equal(scope.configurationDirectory, "/projects/research");
+  assert.equal(scope.workspaceId, "documents-workspace-id");
   assert.equal(scope.profileId, "research");
   assert.equal(scope.userId, "default");
-  assert.equal(scope.sessionId, "thread-p");
+  assert.equal(scope.threadId, "thread-p");
   assert.equal(scope.runtimeId, "runtime-p");
   assert.equal(scope.projectId, undefined);
 });

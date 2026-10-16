@@ -12,7 +12,14 @@ iframes, downloads, SSE, and WebSocket upgrades cannot attach the normal `Author
 `ui-auth.ts` can mint short-lived `varin_url_token` credentials scoped to explicit readable or
 realtime paths. Callers obtain them through the shared runtime auth/URL helpers; long-lived client
 bearer tokens are never placed in URLs. Unknown paths and legacy token query parameters are rejected
-rather than becoming a compatibility write path.
+rather than becoming a compatibility write path. Session-derived grants retain session
+authority. Client-derived grants revalidate the original bearer on each use,
+including current capabilities, directory limits, and revocation; the bearer
+remains only in the short-lived in-memory grant and is never returned in a URL.
+A saved-connection proxy prefix does not expand the inner read/realtime path
+allowlist, and the proxy additionally requires Host-wide full-control authority.
+When client authentication is required without a UI password, arbitrary session
+cookies are not trusted and missing credentials cannot mint a session.
 
 WebSocket URL-token paths are enumerated by `isUrlAuthWebSocketPath`. Relay reachability has its own
 independent allowlist in `packages/web/application-host/lib/relay/tunnel-host.ts`; adding a realtime endpoint

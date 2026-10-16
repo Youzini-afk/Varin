@@ -264,9 +264,9 @@ describe('updateDesktopSettings', () => {
 
     try {
       const persisted = await updateDesktopSettings({ useSystemTheme: false, themeVariant: 'light' });
-      // Success is silent: the shared state machine maps 'saved' back to 'idle'.
+      // Success feedback follows the acknowledged write.
       expect(persisted).toBe(true);
-      expect(states).toEqual(['saving', 'idle']);
+      expect(states).toEqual(['saving', 'saved']);
     } finally {
       unsubscribe();
     }

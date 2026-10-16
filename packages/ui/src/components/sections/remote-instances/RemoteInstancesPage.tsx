@@ -20,6 +20,9 @@ import {
 } from '@/components/ui/dialog';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { SettingsPageLayout } from '@/components/sections/shared/SettingsPageLayout';
+import { SettingsActionBar } from '@/components/sections/shared/SettingsActionBar';
+import { SettingsFooterContext } from '@/components/sections/shared/settings-context';
+import { requestSettingsNavigation } from '@/lib/settings/drafts';
 import {
   SettingsSection,
   SettingsGroupTitle,
@@ -28,7 +31,7 @@ import {
   SETTINGS_SELECT_SIZE,
 } from '@/components/sections/shared/SettingsSection';
 import { SettingsInfoHint } from '@/components/sections/shared/SettingsInfoHint';
-import { useDesktopSshStore } from '@/stores/useDesktopSshStore';
+import { createSshConnectionsStore, useDesktopSshStore } from '@/stores/useDesktopSshStore';
 import { useUIStore } from '@/stores/useUIStore';
 import { toast } from '@/components/ui';
 import { Checkbox } from '@/components/ui/checkbox';
@@ -66,8 +69,10 @@ import {
 } from '@/lib/desktopHosts';
 import { createRelayTunnelClient } from '@/lib/relay/tunnel-client';
 import { getDesktopLanAddress, isDesktopLocalOriginActive, isDesktopShell } from '@/lib/desktop';
-import { runtimeFetch } from '@varin/application-client';
-import { getRuntimeApiBaseUrl, getRuntimeBearerTokenSync, getRuntimeExtraHeadersSync, getRuntimeKey, subscribeRuntimeEndpointChanged, switchRuntimeEndpointSafely } from '@varin/application-client';
+import { createHostConnectionsHttpAPI, getRuntimeEndpointGeneration, runtimeFetch, type DesktopHostsConfig } from '@varin/application-client';
+import { subscribeVarinEvents } from '@/lib/varinEvents';
+import { parseDesktopSshStatus } from '@/lib/desktopSsh';
+import { getRuntimeApiBaseUrl, getRuntimeBearerTokenSync, getRuntimeExtraHeadersSync, subscribeRuntimeEndpointChanged, switchRuntimeEndpointSafely } from '@varin/application-client';
 
 const randomPort = (): number => {
   return Math.floor(20000 + Math.random() * 30000);
@@ -354,6 +359,11 @@ const normalizeForSave = (instance: DesktopSshInstance): DesktopSshInstance => {
   return {
     ...instance,
     sshCommand: trimmedCommand,
+    auth: {
+      ...instance.auth,
+      ...(instance.auth.sshPassword ? { sshPassword: { ...instance.auth.sshPassword } } : {}),
+      ...(instance.auth.varinPassword ? { varinPassword: { ...instance.auth.varinPassword } } : {}),
+    },
     ...(nickname ? { nickname } : { nickname: undefined }),
     connectionTimeoutSec: Math.max(5, Math.min(240, Math.round(instance.connectionTimeoutSec || 60))),
     localForward: {
@@ -379,43 +389,65 @@ const normalizeForSave = (instance: DesktopSshInstance): DesktopSshInstance => {
   };
 };
 
-export const RemoteInstancesPage: React.FC = () => {
-  const runtimeKey = React.useSyncExternalStore((notify) => subscribeRuntimeEndpointChanged(() => notify()), getRuntimeKey, getRuntimeKey);
-  return <RemoteInstancesContent key={runtimeKey} />;
+interface RemoteInstancesPageProps { view?: 'hosts' | 'access' | 'resources'; intro?: React.ReactNode }
+export const RemoteInstancesPage: React.FC<RemoteInstancesPageProps> = ({ view = 'hosts', intro }) => {
+  const generation = React.useSyncExternalStore(subscribeRuntimeEndpointChanged, getRuntimeEndpointGeneration, getRuntimeEndpointGeneration);
+  return <RemoteInstancesContent key={`${generation}:${view}`} view={view} intro={intro} />;
 };
 
-const RemoteInstancesContent: React.FC = () => {
-  const ownerKey = getRuntimeKey();
+const RemoteInstancesContent: React.FC<RemoteInstancesPageProps> = ({ view = 'hosts', intro }) => {
+  const ownerGeneration = getRuntimeEndpointGeneration();
+  const resources = view === 'resources';
+  const resourceAPI = React.useMemo(() => createHostConnectionsHttpAPI(ownerGeneration), [ownerGeneration]);
+  const useConnectionsStore = React.useMemo(() => resources ? createSshConnectionsStore({ ...resourceAPI.ssh,
+    listen: async (listener) => {
+      resourceAPI.assertOwner();
+      const unsubscribe = subscribeVarinEvents(event => {
+        if (event.type !== 'ssh-instance-status') return;
+        try { resourceAPI.assertOwner(); } catch { return; }
+        const status = parseDesktopSshStatus(event.status);
+        if (status) listener(status);
+      });
+      return async () => unsubscribe();
+    },
+  }) : useDesktopSshStore, [resources, resourceAPI]);
+  React.useEffect(() => () => { if (resources) useConnectionsStore.release(); }, [resources, useConnectionsStore]);
   const { t } = useI18n();
   const timeFormatPreference = useUIStore((state) => state.timeFormatPreference);
   const { clientAuth } = useRuntimeAPIs();
-  const showInstanceManagement = true;
-  const instances = useDesktopSshStore((state) => state.instances);
-  const statusesById = useDesktopSshStore((state) => state.statusesById);
-  const importCandidates = useDesktopSshStore((state) => state.importCandidates);
-  const isLoading = useDesktopSshStore((state) => state.isLoading);
-  const isImportsLoading = useDesktopSshStore((state) => state.isImportsLoading);
-  const isSaving = useDesktopSshStore((state) => state.isSaving);
-  const error = useDesktopSshStore((state) => state.error);
-  const load = useDesktopSshStore((state) => state.load);
-  const loadImports = useDesktopSshStore((state) => state.loadImports);
-  const refreshStatuses = useDesktopSshStore((state) => state.refreshStatuses);
-  const upsertInstance = useDesktopSshStore((state) => state.upsertInstance);
-  const createFromCommand = useDesktopSshStore((state) => state.createFromCommand);
-  const removeInstance = useDesktopSshStore((state) => state.removeInstance);
-  const connect = useDesktopSshStore((state) => state.connect);
-  const disconnect = useDesktopSshStore((state) => state.disconnect);
-  const retry = useDesktopSshStore((state) => state.retry);
+  const showInstanceManagement = view !== 'access';
+  const instances = useConnectionsStore((state) => state.instances);
+  const statusesById = useConnectionsStore((state) => state.statusesById);
+  const importCandidates = useConnectionsStore((state) => state.importCandidates);
+  const isLoading = useConnectionsStore((state) => state.isLoading);
+  const initialized = useConnectionsStore((state) => state.initialized);
+  const isImportsLoading = useConnectionsStore((state) => state.isImportsLoading);
+  const isSaving = useConnectionsStore((state) => state.isSaving);
+  const error = useConnectionsStore((state) => state.error);
+  const load = useConnectionsStore((state) => state.load);
+  const loadImports = useConnectionsStore((state) => state.loadImports);
+  const refreshStatuses = useConnectionsStore((state) => state.refreshStatuses);
+  const upsertInstance = useConnectionsStore((state) => state.upsertInstance);
+  const createFromCommand = useConnectionsStore((state) => state.createFromCommand);
+  const removeInstance = useConnectionsStore((state) => state.removeInstance);
+  const connect = useConnectionsStore((state) => state.connect);
+  const disconnect = useConnectionsStore((state) => state.disconnect);
+  const retry = useConnectionsStore((state) => state.retry);
 
-  const selectedId = useUIStore((state) => state.settingsRemoteInstancesSelectedId);
-  const setSelectedId = useUIStore((state) => state.setSettingsRemoteInstancesSelectedId);
+  const clientSelectedId = useUIStore((state) => state.settingsRemoteInstancesSelectedId);
+  const setClientSelectedId = useUIStore((state) => state.setSettingsRemoteInstancesSelectedId);
+  const [resourceSelectedId, setResourceSelectedId] = React.useState<string | null>(null);
+  const selectedId = resources ? resourceSelectedId : clientSelectedId;
+  const setSelectedId = resources ? setResourceSelectedId : setClientSelectedId;
 
   const selectedInstance = React.useMemo(() => {
-    if (!selectedId) return null;
+    if (!selectedId || view === 'access') return null;
     return instances.find((instance) => instance.id === selectedId) || null;
-  }, [instances, selectedId]);
+  }, [instances, selectedId, view]);
 
   const [draft, setDraft] = React.useState<DesktopSshInstance | null>(null);
+  const [editorFooter, setEditorFooter] = React.useState<HTMLDivElement | null>(null);
+  const baseline = React.useRef<DesktopSshInstance | null>(null);
   const [logDialogOpen, setLogDialogOpen] = React.useState(false);
   const [logDialogLoading, setLogDialogLoading] = React.useState(false);
   const [logDialogError, setLogDialogError] = React.useState<string | null>(null);
@@ -427,13 +459,16 @@ const RemoteInstancesContent: React.FC = () => {
   const [isPrimaryActionPending, setIsPrimaryActionPending] = React.useState(false);
   const [isRetryPending, setIsRetryPending] = React.useState(false);
   const [clockMs, setClockMs] = React.useState(() => Date.now());
+  const directConfig = React.useRef<DesktopHostsConfig | null>(null);
   const [directHosts, setDirectHosts] = React.useState<DesktopHost[]>([]);
   // Live reachability per saved host (undefined = probe in flight), mirroring
   // the host switcher's status line so this list is not just dead text.
   const [directHostStatus, setDirectHostStatus] = React.useState<Record<string, HostProbeResult>>({});
   const [directDefaultHostId, setDirectDefaultHostId] = React.useState<string | null>('local');
-  const [directLoading, setDirectLoading] = React.useState(false);
+  const [directLoading, setDirectLoading] = React.useState(true);
   const [directSaving, setDirectSaving] = React.useState(false);
+  const directWriting = React.useRef(false);
+  const [directImporting, setDirectImporting] = React.useState(false);
   const [directLabel, setDirectLabel] = React.useState('');
   const [directUrl, setDirectUrl] = React.useState('');
   const [directToken, setDirectToken] = React.useState('');
@@ -472,15 +507,17 @@ const RemoteInstancesContent: React.FC = () => {
   const [sshNameDraft, setSshNameDraft] = React.useState('');
 
   React.useEffect(() => {
+    if (!showInstanceManagement) return;
     void load();
     void loadImports();
-  }, [load, loadImports]);
+  }, [load, loadImports, showInstanceManagement]);
 
   const loadDirectHosts = React.useCallback(async () => {
     setDirectLoading(true);
     setDirectError(null);
     try {
-      const config = await desktopHostsGet();
+      const config = await (resources ? resourceAPI.hosts.get() : desktopHostsGet());
+      directConfig.current = config;
       setDirectHosts(config.hosts || []);
       setDirectDefaultHostId(config.defaultHostId || 'local');
     } catch (err) {
@@ -488,32 +525,40 @@ const RemoteInstancesContent: React.FC = () => {
     } finally {
       setDirectLoading(false);
     }
-  }, []);
+  }, [resources, resourceAPI]);
 
   React.useEffect(() => {
+    if (!showInstanceManagement) return;
     void loadDirectHosts();
-  }, [loadDirectHosts]);
+  }, [loadDirectHosts, showInstanceManagement]);
 
   const persistDirectHosts = React.useCallback(async (hosts: DesktopHost[], defaultHostId: string | null = directDefaultHostId) => {
-    if (!isDesktopShell() && ownerKey !== getRuntimeKey()) throw new Error('Connection owner changed');
+    if ((resources || !isDesktopShell()) && ownerGeneration !== getRuntimeEndpointGeneration()) return false;
+    if (!directConfig.current || directLoading) { setDirectError(t('settings.connections.readBeforeWrite')); return false; }
+    if (directWriting.current) return false;
+    directWriting.current = true;
     setDirectSaving(true);
     setDirectError(null);
     try {
-      await desktopHostsSet({ hosts, defaultHostId, initialHostChoiceCompleted: true });
+      const config = { hosts, defaultHostId, initialHostChoiceCompleted: resources ? directConfig.current?.initialHostChoiceCompleted : true };
+      await (resources ? resourceAPI.hosts.set(config) : desktopHostsSet(config));
       setDirectHosts(hosts);
       setDirectDefaultHostId(defaultHostId);
+      return true;
     } catch (err) {
       setDirectError(err instanceof Error ? err.message : String(err));
+      return false;
     } finally {
+      directWriting.current = false;
       setDirectSaving(false);
     }
-  }, [directDefaultHostId, ownerKey]);
+  }, [directDefaultHostId, directLoading, ownerGeneration, resources, resourceAPI, t]);
 
   const handleAddDirectHost = React.useCallback(async () => {
     const resolved = resolveDesktopHostUrl(directUrl);
-    if (!resolved) {
+    if (!resolved || (resources && resolved.redeemUrl)) {
       setDirectError(t('desktopHostSwitcher.error.invalidUrl'));
-      return;
+      return false;
     }
     const url = resolved.persistedUrl;
     const id = typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
@@ -527,22 +572,24 @@ const RemoteInstancesContent: React.FC = () => {
       ...(directToken.trim() ? { clientToken: directToken.trim() } : {}),
       ...(buildRequestHeaders(directHeaders) ? { requestHeaders: buildRequestHeaders(directHeaders) } : {}),
     };
-    await persistDirectHosts([host, ...directHosts], directDefaultHostId);
+    if (!await persistDirectHosts([host, ...directHosts], directDefaultHostId)) return false;
     setDirectLabel('');
     setDirectUrl('');
     setDirectToken('');
     setDirectHeaders([]);
     setDirectAddDialogOpen(false);
-    if (resolved.redeemUrl) {
-      navigateToUrl(resolved.redeemUrl);
-    }
-  }, [directDefaultHostId, directHeaders, directHosts, directLabel, directToken, directUrl, persistDirectHosts, t]);
+    if (!resources && resolved.redeemUrl) navigateToUrl(resolved.redeemUrl);
+    return true;
+  }, [resources, directDefaultHostId, directHeaders, directHosts, directLabel, directToken, directUrl, persistDirectHosts, t]);
 
   const importDirectConnectLink = React.useCallback(async () => {
+    if (resources || directImporting || !directConfig.current || directLoading) return false;
+    setDirectImporting(true);
+    try {
     const payload = parsePairingConnectionPayload(directConnectLink);
     if (!payload) {
       setDirectError(t('settings.remoteInstances.direct.error.invalidConnectLink'));
-      return;
+      return false;
     }
     // The redeem body is identical across every transport (the desktop is the
     // same device however it reaches the server). The install-id dedupe key
@@ -627,7 +674,7 @@ const RemoteInstancesContent: React.FC = () => {
 
     if (!redeemed) {
       setDirectError(t('desktopHostSwitcher.error.invalidUrl'));
-      return;
+      return false;
     }
 
     const makeId = (): string => (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
@@ -656,7 +703,7 @@ const RemoteInstancesContent: React.FC = () => {
     const url = directUrl || (relay ? relayHostDisplayUrl(relay.serverId) : null);
     if (!url) {
       setDirectError(t('desktopHostSwitcher.error.invalidUrl'));
-      return;
+      return false;
     }
     const transportFields = {
       url,
@@ -673,20 +720,25 @@ const RemoteInstancesContent: React.FC = () => {
       const nextHosts = directHosts.map((host) => host.id === existing.id
         ? { ...host, label: payload.label || host.label, ...transportFields }
         : host);
-      await persistDirectHosts(nextHosts, directDefaultHostId);
+      if (!await persistDirectHosts(nextHosts, directDefaultHostId)) return false;
     } else {
       // payload.label is normally the issuing server's hostname.
-      await persistDirectHosts([{ id: makeId(), label: payload.label || redactSensitiveUrl(url), ...transportFields }, ...directHosts], directDefaultHostId);
+      if (!await persistDirectHosts([{ id: makeId(), label: payload.label || redactSensitiveUrl(url), ...transportFields }, ...directHosts], directDefaultHostId)) return false;
     }
     setDirectConnectLink('');
     setDirectError(null);
     setDirectImportDialogOpen(false);
-  }, [directConnectLink, directDefaultHostId, directHosts, persistDirectHosts, t]);
+    return true;
+    } catch (error) {
+      setDirectError(error instanceof Error ? error.message : String(error));
+      return false;
+    } finally { setDirectImporting(false); }
+  }, [resources, directImporting, directLoading, directConnectLink, directDefaultHostId, directHosts, persistDirectHosts, t]);
 
   const handleRemoveDirectHost = React.useCallback(async (id: string) => {
     const nextHosts = directHosts.filter((host) => host.id !== id);
     const nextDefault = directDefaultHostId === id ? 'local' : directDefaultHostId;
-    await persistDirectHosts(nextHosts, nextDefault);
+    if (!await persistDirectHosts(nextHosts, nextDefault)) return;
     if (directEditingId === id) {
       setDirectEditingId(null);
     }
@@ -704,9 +756,9 @@ const RemoteInstancesContent: React.FC = () => {
   const saveDirectHostEdit = React.useCallback(async () => {
     if (!directEditingId) return;
     const resolved = resolveDesktopHostUrl(directEditUrl);
-    if (!resolved) {
+    if (!resolved || (resources && resolved.redeemUrl)) {
       setDirectError(t('desktopHostSwitcher.error.invalidUrl'));
-      return;
+      return false;
     }
     const url = resolved.persistedUrl;
     const nextHosts = directHosts.map((host) => host.id === directEditingId
@@ -719,18 +771,17 @@ const RemoteInstancesContent: React.FC = () => {
         requestHeaders: buildRequestHeaders(directEditHeaders),
       }
       : host);
-    await persistDirectHosts(nextHosts, directDefaultHostId);
+    if (!await persistDirectHosts(nextHosts, directDefaultHostId)) return false;
     setDirectEditingId(null);
-    if (resolved.redeemUrl) {
-      navigateToUrl(resolved.redeemUrl);
-    }
-  }, [directDefaultHostId, directEditHeaders, directEditLabel, directEditToken, directEditUrl, directEditingId, directHosts, persistDirectHosts, t]);
+    if (!resources && resolved.redeemUrl) navigateToUrl(resolved.redeemUrl);
+    return true;
+  }, [resources, directDefaultHostId, directEditHeaders, directEditLabel, directEditToken, directEditUrl, directEditingId, directHosts, persistDirectHosts, t]);
 
   const createSshInstanceFromDialog = React.useCallback(async () => {
     const command = sshCommandDraft.trim();
     if (!command) {
       toast.error(t('settings.remoteInstances.page.toast.sshCommandRequired'));
-      return;
+      return false;
     }
     const id = `ssh-${Date.now()}-${Math.random().toString(16).slice(2)}`;
     try {
@@ -740,10 +791,12 @@ const RemoteInstancesContent: React.FC = () => {
       setSshCommandDraft('ssh user@example.com');
       setSshNameDraft('');
       toast.success(t('settings.remoteInstances.page.toast.instanceCreated'));
+      return true;
     } catch (error) {
       toast.error(t('settings.remoteInstances.sidebar.toast.createFailed'), {
         description: error instanceof Error ? error.message : String(error),
       });
+      return false;
     }
   }, [createFromCommand, setSelectedId, sshCommandDraft, sshNameDraft, t]);
 
@@ -758,6 +811,11 @@ const RemoteInstancesContent: React.FC = () => {
     if (!showInstanceManagement || directHosts.length === 0) return;
     let cancelled = false;
     void Promise.all(directHosts.map(async (host) => {
+      if (resources) {
+        const result = host.relay && !host.apiUrl ? { status: 'unreachable' as const, latencyMs: 0 }
+          : await resourceAPI.hosts.probe(host).catch((): HostProbeResult => ({ status: 'unreachable', latencyMs: 0 }));
+        return [host.id, result] as const;
+      }
       const relayProbe = () => probeRelayDesktopHost(host.relay!, { clientToken: host.clientToken || null, requestHeaders: host.requestHeaders || null }).catch((): HostProbeResult => ({ status: 'unreachable', latencyMs: 0 }));
       // Relay-only host: tunnel probe. Multi-transport host: direct first,
       // relay as the away-from-home fallback.
@@ -782,7 +840,7 @@ const RemoteInstancesContent: React.FC = () => {
     return () => {
       cancelled = true;
     };
-  }, [directHosts, showInstanceManagement]);
+  }, [directHosts, showInstanceManagement, resources, resourceAPI]);
 
   const loadRemoteClients = React.useCallback(async (options?: { silent?: boolean }) => {
     if (!clientAuth) return;
@@ -844,14 +902,14 @@ const RemoteInstancesContent: React.FC = () => {
   // Load on mount, then poll while the page is visible so a device that redeems
   // a pairing link shows up in the list without reopening settings.
   React.useEffect(() => {
-    if (!clientAuth) return;
+    if (!clientAuth || view !== 'access') return;
     void loadRemoteClients();
     const interval = window.setInterval(() => {
       if (typeof document !== 'undefined' && document.visibilityState !== 'visible') return;
       void loadRemoteClients({ silent: true });
     }, 5_000);
     return () => window.clearInterval(interval);
-  }, [clientAuth, loadRemoteClients]);
+  }, [clientAuth, loadRemoteClients, view]);
 
   // Available direct transports for the create dialog. The server is authoritative
   // for LAN reachability (derived from its bind, not the UI origin), so "Local
@@ -1004,7 +1062,16 @@ const RemoteInstancesContent: React.FC = () => {
   }, [clientAuth, loadRemoteClients]);
 
   React.useEffect(() => {
-    setDraft(selectedInstance);
+    // Reachability refreshes must not replace an editor draft. Adopt a new
+    // snapshot only when opening another resource, or when the editor is clean.
+    setDraft(current => {
+      const clean = JSON.stringify(current) === JSON.stringify(baseline.current);
+      if (current?.id !== selectedInstance?.id || clean) {
+        baseline.current = selectedInstance;
+        return selectedInstance;
+      }
+      return current;
+    });
   }, [selectedInstance]);
 
   React.useEffect(() => {
@@ -1074,7 +1141,7 @@ const RemoteInstancesContent: React.FC = () => {
 
   const hasChanges = React.useMemo(() => {
     if (!draft || !selectedInstance) return false;
-    return JSON.stringify(draft) !== JSON.stringify(selectedInstance);
+    return JSON.stringify(draft) !== JSON.stringify(baseline.current);
   }, [draft, selectedInstance]);
 
   const updateDraft = React.useCallback((updater: (current: DesktopSshInstance) => DesktopSshInstance) => {
@@ -1082,7 +1149,7 @@ const RemoteInstancesContent: React.FC = () => {
   }, []);
 
   const handleSave = React.useCallback(async () => {
-    if (!draft) return;
+    if (!draft) return false;
     const normalized = normalizeForSave(draft);
 
     if (!normalized.sshCommand.trim()) {
@@ -1125,11 +1192,15 @@ const RemoteInstancesContent: React.FC = () => {
 
     try {
       await upsertInstance(normalized);
+      baseline.current = normalized;
+      setDraft(current => current === draft ? normalized : current);
       toast.success(t('settings.remoteInstances.page.toast.instanceSaved'));
+      return true;
     } catch (error) {
       toast.error(t('settings.remoteInstances.page.toast.saveFailed'), {
         description: error instanceof Error ? error.message : String(error),
       });
+      return false;
     }
   }, [draft, t, upsertInstance]);
 
@@ -1172,14 +1243,15 @@ const RemoteInstancesContent: React.FC = () => {
   );
 
   const handlePatternCreate = React.useCallback(async () => {
+    if (patternCreating) return false;
     const host = patternHost;
     const destination = patternDestination.trim();
     if (!host) {
-      return;
+      return false;
     }
     if (!destination) {
       toast.error(t('settings.remoteInstances.page.toast.destinationRequired'));
-      return;
+      return false;
     }
 
     setPatternCreating(true);
@@ -1189,10 +1261,11 @@ const RemoteInstancesContent: React.FC = () => {
         setPatternHost(null);
         setPatternDestination('');
       }
+      return created;
     } finally {
       setPatternCreating(false);
     }
-  }, [createImportedInstance, patternDestination, patternHost, t]);
+  }, [createImportedInstance, patternCreating, patternDestination, patternHost, t]);
 
   const connectWithPortRecovery = React.useCallback(async () => {
     if (!selectedInstance) return;
@@ -1224,9 +1297,9 @@ const RemoteInstancesContent: React.FC = () => {
   }, [connect, selectedInstance, t, upsertInstance]);
 
   const readLogsForInstance = React.useCallback(async (id: string) => {
-    const lines = await desktopSshLogs(id, 600);
+    const lines = await (resources ? resourceAPI.ssh.logs(id) : desktopSshLogs(id, 600));
     return lines.map((line) => formatLogLine(line));
-  }, []);
+  }, [resources, resourceAPI]);
 
   const handleOpenLogs = React.useCallback(async () => {
     if (!draft) return;
@@ -1298,7 +1371,7 @@ const RemoteInstancesContent: React.FC = () => {
       return;
     }
     try {
-      await desktopSshLogsClear(draft.id);
+      await (resources ? resourceAPI.ssh.clearLogs(draft.id) : desktopSshLogsClear(draft.id));
       setLogDialogLines([]);
       toast.success(t('settings.remoteInstances.page.toast.logsCleared'));
     } catch (error) {
@@ -1306,9 +1379,10 @@ const RemoteInstancesContent: React.FC = () => {
         description: error instanceof Error ? error.message : String(error),
       });
     }
-  }, [draft, t]);
+  }, [draft, t, resources, resourceAPI]);
 
   const handleOpenCurrentInstance = React.useCallback(async () => {
+    if (resources) return;
     if (!isDesktopShell() && draft) {
       const gateway = (getRuntimeApiBaseUrl() || window.location.origin).replace(/\/$/u, '');
       await switchRuntimeEndpointSafely({ apiBaseUrl: `${gateway}/api/connections/hosts/${encodeURIComponent(draft.id)}/proxy`,
@@ -1328,7 +1402,7 @@ const RemoteInstancesContent: React.FC = () => {
     }
 
     navigateToUrl(target);
-  }, [draft, setSelectedId, status?.localUrl, t]);
+  }, [resources, draft, setSelectedId, status?.localUrl, t]);
 
   const handlePrimaryConnectionAction = React.useCallback(() => {
     if (!draft) {
@@ -1398,10 +1472,20 @@ const RemoteInstancesContent: React.FC = () => {
       ? t('settings.remoteInstances.page.actions.cancel')
       : t('settings.remoteInstances.sidebar.actions.connect');
 
+  const cancelDirectAdd = () => { setDirectAddDialogOpen(false); setDirectLabel(''); setDirectUrl(''); setDirectToken(''); setDirectHeaders([]); setDirectError(null); };
+  const cancelDirectEdit = () => { setDirectEditingId(null); setDirectError(null); };
+  const cancelDirectImport = () => { setDirectImportDialogOpen(false); setDirectConnectLink(''); setDirectError(null); };
+  const cancelSshAdd = () => { setSshAddDialogOpen(false); setSshNameDraft(''); setSshCommandDraft('ssh user@example.com'); };
+  const editOriginal = directHosts.find(host => host.id === directEditingId);
+  const directEditDirty = Boolean(editOriginal && (directEditLabel !== editOriginal.label || directEditUrl !== (editOriginal.apiUrl || editOriginal.url)
+    || directEditToken !== (editOriginal.clientToken || '') || JSON.stringify(buildRequestHeaders(directEditHeaders)) !== JSON.stringify(editOriginal.requestHeaders)));
+
   if (!draft) {
     return (
-      <SettingsPageLayout title={t('settings.page.remoteInstances.title')}>
-        {clientAuth ? (
+      <SettingsPageLayout title={t(resources ? 'settings.connections.resourceManage' : view === 'access' ? 'settings.page.access.title' : 'settings.page.remoteInstances.title')}>
+        {resources ? <p className="mb-5 typography-meta text-muted-foreground">{t('settings.connections.resourceManageDescription')}<span className="mt-1 block break-all font-mono">{redactSensitiveUrl(getRuntimeApiBaseUrl() || window.location.origin)}</span></p> : null}
+        {intro}
+        {view === 'access' && clientAuth ? (
           <SettingsSection
             title={t('settings.remoteInstances.clientAuth.title')}
             info={t('settings.remoteInstances.clientAuth.description')}
@@ -1516,10 +1600,10 @@ const RemoteInstancesContent: React.FC = () => {
                the manual fallback. The token-storage note lives in the add
                dialog next to the token field it describes. */
             <div className="flex shrink-0 items-center gap-2">
-              <Button type="button" size="xs" className="!font-normal" onClick={() => setDirectImportDialogOpen(true)} disabled={directSaving}>
+              {!resources ? <Button type="button" size="xs" className="!font-normal" onClick={() => setDirectImportDialogOpen(true)} disabled={directSaving || directLoading || !directConfig.current}>
                 {t('settings.remoteInstances.direct.import.action')}
-              </Button>
-              <Button type="button" variant="outline" size="xs" className="!font-normal" onClick={() => setDirectAddDialogOpen(true)} disabled={directSaving}>
+              </Button> : null}
+              <Button type="button" variant="outline" size="xs" className="!font-normal" onClick={() => setDirectAddDialogOpen(true)} disabled={directSaving || directLoading || !directConfig.current}>
                 <Icon name="add" className="h-3.5 w-3.5" />
                 {t('settings.remoteInstances.direct.actions.add')}
               </Button>
@@ -1529,7 +1613,7 @@ const RemoteInstancesContent: React.FC = () => {
             <div className="space-y-2.5">
               {directLoading ? (
                 <p className="typography-meta text-muted-foreground">{t('settings.remoteInstances.direct.state.loading')}</p>
-              ) : directHosts.length === 0 ? (
+              ) : !directConfig.current ? null : directHosts.length === 0 ? (
                 <p className="typography-meta text-muted-foreground">{t('settings.remoteInstances.direct.state.empty')}</p>
               ) : directHosts.map((host) => {
                 const probe = directHostStatus[host.id];
@@ -1557,9 +1641,9 @@ const RemoteInstancesContent: React.FC = () => {
                             !probe ? 'bg-muted-foreground/30 animate-pulse' : isOnline ? 'bg-[var(--status-success)]' : 'bg-[var(--status-error)]',
                           )} />
                           <p className="typography-ui-label text-foreground truncate">{redactSensitiveUrl(host.label)}</p>
-                          {directDefaultHostId === host.id ? <span className="typography-micro text-muted-foreground shrink-0">{t('desktopHostSwitcher.header.default')}</span> : null}
+                          {!resources && directDefaultHostId === host.id ? <span className="typography-micro text-muted-foreground shrink-0">{t('desktopHostSwitcher.header.default')}</span> : null}
                           <span className={cn('typography-micro shrink-0', isOnline ? 'text-[var(--status-success)]' : 'text-muted-foreground')}>
-                            {t(statusKey)}
+                            {resources && host.relay && !host.apiUrl ? t('settings.connections.relayResourceUnsupported') : t(statusKey)}
                             {isOnline && typeof probe?.latencyMs === 'number'
                               ? t('desktopHostSwitcher.status.ping', { ms: Math.max(0, Math.round(probe.latencyMs)) })
                               : ''}
@@ -1570,9 +1654,9 @@ const RemoteInstancesContent: React.FC = () => {
                         </p>
                       </div>
                       <div className="flex shrink-0 items-center gap-1">
-                        <Button type="button" variant="ghost" size="xs" className="!font-normal" onClick={() => void setDefaultDirectHost(host.id)} disabled={directSaving || directDefaultHostId === host.id} aria-label={t('desktopHostSwitcher.actions.setAsDefaultAria')}>
+                        {!resources ? <Button type="button" variant="ghost" size="xs" className="!font-normal" onClick={() => void setDefaultDirectHost(host.id)} disabled={directSaving || directDefaultHostId === host.id} aria-label={t('desktopHostSwitcher.actions.setAsDefaultAria')}>
                           {directDefaultHostId === host.id ? <Icon name="star-fill" className="h-3.5 w-3.5" /> : <Icon name="star" className="h-3.5 w-3.5" />}
-                        </Button>
+                        </Button> : null}
                         {/* The edit form is URL/token-centric; relay-ONLY hosts have
                             nothing it can edit and are re-imported via a fresh pairing
                             link instead. Multi-transport hosts keep their relay leg
@@ -1594,10 +1678,10 @@ const RemoteInstancesContent: React.FC = () => {
               })}
             </div>
 
-            {directError ? <p className="typography-meta text-[var(--status-error)]">{directError}</p> : null}
+            {directError ? <div role="alert" className="space-y-2 typography-meta text-[var(--status-error)]"><p>{directError}</p>{!directConfig.current ? <Button variant="outline" size="sm" disabled={directLoading} onClick={() => void loadDirectHosts()}>{t('settings.common.actions.refresh')}</Button> : null}</div> : null}
         </SettingsSection> : null}
 
-        {showInstanceManagement ? <Dialog open={directAddDialogOpen} onOpenChange={setDirectAddDialogOpen}>
+        {showInstanceManagement ? <Dialog open={directAddDialogOpen} onOpenChange={(open) => { if (open) setDirectAddDialogOpen(true); else if (!directSaving) requestSettingsNavigation(cancelDirectAdd); }}>
           <DialogContent className="sm:max-w-lg">
             <DialogHeader>
               <DialogTitle>{t('settings.remoteInstances.direct.actions.add')}</DialogTitle>
@@ -1608,7 +1692,7 @@ const RemoteInstancesContent: React.FC = () => {
               <Input className="h-8" value={directUrl} onChange={(event) => setDirectUrl(event.target.value)} placeholder={t('settings.remoteInstances.direct.field.urlPlaceholder')} disabled={directSaving} autoFocus />
               <div className="space-y-1">
                 <Input className="h-8" value={directToken} onChange={(event) => setDirectToken(event.target.value)} placeholder={t('settings.remoteInstances.direct.field.tokenPlaceholder')} type="password" disabled={directSaving} />
-                <p className="px-1 typography-micro text-muted-foreground">{t('settings.remoteInstances.direct.note')}</p>
+                <p className="px-1 typography-micro text-muted-foreground">{t(resources ? 'settings.connections.resourceCredentialsNote' : 'settings.remoteInstances.direct.note')}</p>
               </div>
               <div className="space-y-2">
                 <div className="flex items-center gap-1.5">
@@ -1629,15 +1713,12 @@ const RemoteInstancesContent: React.FC = () => {
                   {t('settings.remoteInstances.direct.headers.actions.add')}
                 </Button>
               </div>
-              <div className="flex justify-end gap-2">
-                <Button type="button" variant="outline" size="xs" className="!font-normal" onClick={() => setDirectAddDialogOpen(false)} disabled={directSaving}>{t('settings.common.actions.cancel')}</Button>
-                <Button type="submit" size="xs" className="!font-normal" disabled={directSaving || !directUrl.trim()}>{t('settings.remoteInstances.direct.actions.add')}</Button>
-              </div>
+              <SettingsFooterContext.Provider value={null}><SettingsActionBar dirty={directAddDialogOpen} saving={directSaving} onSave={handleAddDirectHost} onCancel={cancelDirectAdd} saveDisabled={!directUrl.trim()} saveLabel={t('settings.remoteInstances.direct.actions.add')} error={directError} /></SettingsFooterContext.Provider>
             </form>
           </DialogContent>
         </Dialog> : null}
 
-        {showInstanceManagement ? <Dialog open={Boolean(directEditingId)} onOpenChange={(open) => { if (!open) setDirectEditingId(null); }}>
+        {showInstanceManagement ? <Dialog open={Boolean(directEditingId)} onOpenChange={(open) => { if (!open && !directSaving) requestSettingsNavigation(cancelDirectEdit); }}>
           <DialogContent className="sm:max-w-lg">
             <DialogHeader>
               <DialogTitle>{t('desktopHostSwitcher.actions.edit')}</DialogTitle>
@@ -1647,6 +1728,7 @@ const RemoteInstancesContent: React.FC = () => {
               <Input className="h-8" value={directEditLabel} onChange={(event) => setDirectEditLabel(event.target.value)} placeholder={t('settings.remoteInstances.direct.field.labelPlaceholder')} disabled={directSaving} />
               <Input className="h-8" value={directEditUrl} onChange={(event) => setDirectEditUrl(event.target.value)} placeholder={t('settings.remoteInstances.direct.field.urlPlaceholder')} disabled={directSaving} autoFocus />
               <Input className="h-8" value={directEditToken} onChange={(event) => setDirectEditToken(event.target.value)} placeholder={t('settings.remoteInstances.direct.field.tokenPlaceholder')} type="password" disabled={directSaving} />
+              {resources ? <p className="px-1 typography-micro text-muted-foreground">{t('settings.connections.resourceCredentialsNote')}</p> : null}
               <div className="space-y-2">
                 <div className="flex items-center gap-1.5">
                   <SettingsGroupTitle>{t('settings.remoteInstances.direct.headers.title')}</SettingsGroupTitle>
@@ -1666,15 +1748,12 @@ const RemoteInstancesContent: React.FC = () => {
                   {t('settings.remoteInstances.direct.headers.actions.add')}
                 </Button>
               </div>
-              <div className="flex justify-end gap-2">
-                <Button type="button" variant="outline" size="xs" className="!font-normal" onClick={() => setDirectEditingId(null)} disabled={directSaving}>{t('settings.common.actions.cancel')}</Button>
-                <Button type="submit" size="xs" className="!font-normal" disabled={directSaving}>{t('settings.common.actions.saveChanges')}</Button>
-              </div>
+              <SettingsFooterContext.Provider value={null}><SettingsActionBar dirty={directEditDirty} saving={directSaving} onSave={saveDirectHostEdit} onCancel={cancelDirectEdit} saveDisabled={!directEditUrl.trim()} error={directError} /></SettingsFooterContext.Provider>
             </form>
           </DialogContent>
         </Dialog> : null}
 
-        {showInstanceManagement ? <Dialog open={directImportDialogOpen} onOpenChange={setDirectImportDialogOpen}>
+        {showInstanceManagement && !resources ? <Dialog open={directImportDialogOpen} onOpenChange={(open) => { if (open) setDirectImportDialogOpen(true); else if (!directSaving && !directImporting) requestSettingsNavigation(cancelDirectImport); }}>
           <DialogContent className="sm:max-w-lg">
             <DialogHeader>
               <DialogTitle>{t('settings.remoteInstances.direct.import.action')}</DialogTitle>
@@ -1682,10 +1761,7 @@ const RemoteInstancesContent: React.FC = () => {
             </DialogHeader>
             <form className="space-y-3" onSubmit={(event) => { event.preventDefault(); void importDirectConnectLink(); }}>
               <Input className="h-8" value={directConnectLink} onChange={(event) => setDirectConnectLink(event.target.value)} placeholder={t('settings.remoteInstances.direct.import.placeholder')} disabled={directSaving} autoFocus />
-              <div className="flex justify-end gap-2">
-                <Button type="button" variant="outline" size="xs" className="!font-normal" onClick={() => setDirectImportDialogOpen(false)} disabled={directSaving}>{t('settings.common.actions.cancel')}</Button>
-                <Button type="submit" size="xs" className="!font-normal" disabled={directSaving || !directConnectLink.trim()}>{t('settings.remoteInstances.direct.import.action')}</Button>
-              </div>
+              <SettingsFooterContext.Provider value={null}><SettingsActionBar dirty={directImportDialogOpen} saving={directSaving || directImporting} onSave={importDirectConnectLink} onCancel={cancelDirectImport} saveDisabled={!directConnectLink.trim()} saveLabel={t('settings.remoteInstances.direct.import.action')} error={directError} /></SettingsFooterContext.Provider>
             </form>
           </DialogContent>
         </Dialog> : null}
@@ -1788,16 +1864,17 @@ const RemoteInstancesContent: React.FC = () => {
           title={t('settings.remoteInstances.sidebar.title')}
           description={t('settings.remoteInstances.sidebar.total', { count: instances.length })}
           headerAction={(
-            <Button type="button" size="xs" className="!font-normal" onClick={() => setSshAddDialogOpen(true)}>
+            <Button type="button" size="xs" className="!font-normal" onClick={() => setSshAddDialogOpen(true)} disabled={!initialized || isLoading || isSaving}>
               <Icon name="add" className="h-3.5 w-3.5" />
               {t('settings.remoteInstances.sidebar.actions.addSshInstance')}
             </Button>
           )}
           contentClassName="space-y-2.5"
         >
+            {error ? <div role="alert" className="space-y-2 typography-meta text-destructive"><p>{error}</p>{!initialized ? <Button variant="outline" size="sm" disabled={isLoading} onClick={() => void load()}>{t('settings.common.actions.refresh')}</Button> : null}</div> : null}
             {isLoading ? (
               <p className="typography-meta text-muted-foreground">{t('settings.remoteInstances.page.import.loading')}</p>
-            ) : instances.length === 0 ? (
+            ) : !initialized ? null : instances.length === 0 ? (
               <p className="typography-meta text-muted-foreground">{t('settings.remoteInstances.page.import.noneFound')}</p>
             ) : instances.map((instance) => {
               const instanceStatus = statusesById[instance.id];
@@ -1845,7 +1922,7 @@ const RemoteInstancesContent: React.FC = () => {
             })}
         </SettingsSection> : null}
 
-        {showInstanceManagement ? <Dialog open={sshAddDialogOpen} onOpenChange={setSshAddDialogOpen}>
+        {showInstanceManagement ? <Dialog open={sshAddDialogOpen} onOpenChange={(open) => { if (open) setSshAddDialogOpen(true); else if (!isSaving) requestSettingsNavigation(cancelSshAdd); }}>
           <DialogContent className="sm:max-w-lg">
             <DialogHeader>
               <DialogTitle>{t('settings.remoteInstances.sidebar.actions.addSshInstance')}</DialogTitle>
@@ -1854,10 +1931,7 @@ const RemoteInstancesContent: React.FC = () => {
             <form className="space-y-3" onSubmit={(event) => { event.preventDefault(); void createSshInstanceFromDialog(); }}>
               <Input className="h-8" value={sshNameDraft} onChange={(event) => setSshNameDraft(event.target.value)} placeholder={t('settings.remoteInstances.page.field.nicknamePlaceholder')} disabled={isSaving} />
               <Input className="h-8" value={sshCommandDraft} onChange={(event) => setSshCommandDraft(event.target.value)} placeholder={t('settings.remoteInstances.page.field.sshCommandPlaceholder')} disabled={isSaving} autoFocus />
-              <div className="flex justify-end gap-2">
-                <Button type="button" variant="outline" size="xs" className="!font-normal" onClick={() => setSshAddDialogOpen(false)} disabled={isSaving}>{t('settings.common.actions.cancel')}</Button>
-                <Button type="submit" size="xs" className="!font-normal" disabled={isSaving || !sshCommandDraft.trim()}>{t('settings.common.actions.create')}</Button>
-              </div>
+              <SettingsFooterContext.Provider value={null}><SettingsActionBar dirty={sshAddDialogOpen} saving={isSaving} onSave={createSshInstanceFromDialog} onCancel={cancelSshAdd} saveDisabled={!sshCommandDraft.trim()} saveLabel={t('settings.common.actions.create')} error={error} /></SettingsFooterContext.Provider>
             </form>
           </DialogContent>
         </Dialog> : null}
@@ -1885,6 +1959,7 @@ const RemoteInstancesContent: React.FC = () => {
                     variant="outline"
                     size="xs"
                     className="!font-normal"
+                    disabled={!initialized || isLoading || isSaving}
                     onClick={() => void handleImportCandidate(candidate.host, candidate.pattern)}
                   >
                     {t('settings.common.actions.import')}
@@ -1898,9 +1973,7 @@ const RemoteInstancesContent: React.FC = () => {
         <Dialog
           open={Boolean(patternHost)}
           onOpenChange={(open) => {
-            if (!open) {
-              closePatternDialog();
-            }
+            if (!open && !patternCreating) requestSettingsNavigation(closePatternDialog);
           }}
         >
           <DialogContent className="sm:max-w-md">
@@ -1914,23 +1987,17 @@ const RemoteInstancesContent: React.FC = () => {
               className="space-y-3"
               onSubmit={(event) => {
                 event.preventDefault();
-                handlePatternCreate();
+                void handlePatternCreate();
               }}
             >
               <Input
                 value={patternDestination}
+                disabled={patternCreating}
                 onChange={(event) => setPatternDestination(event.target.value)}
                 placeholder={t('settings.remoteInstances.page.patternDialog.destinationPlaceholder')}
                 autoFocus
               />
-              <div className="flex items-center justify-end gap-2">
-                <Button type="button" variant="outline" size="xs" className="!font-normal" onClick={closePatternDialog} disabled={patternCreating}>
-                  {t('settings.common.actions.cancel')}
-                </Button>
-                <Button type="submit" size="xs" className="!font-normal" disabled={patternCreating}>
-                  {t('settings.remoteInstances.page.actions.create')}
-                </Button>
-              </div>
+              <SettingsFooterContext.Provider value={null}><SettingsActionBar dirty={Boolean(patternHost)} saving={patternCreating} onSave={handlePatternCreate} onCancel={closePatternDialog} saveDisabled={!patternDestination.trim() || !initialized || isLoading} saveLabel={t('settings.remoteInstances.page.actions.create')} error={error} /></SettingsFooterContext.Provider>
             </form>
           </DialogContent>
         </Dialog>
@@ -1942,8 +2009,10 @@ const RemoteInstancesContent: React.FC = () => {
   const instanceTitle = draft.nickname?.trim() || draft.sshParsed?.destination || draft.id;
 
   return (
-    <Dialog open={Boolean(draft)} onOpenChange={(open) => { if (!open) setSelectedId(null); }}>
-      <DialogContent className="sm:max-w-4xl max-h-[90vh] overflow-auto">
+    <Dialog open={Boolean(draft)} onOpenChange={(open) => { if (!open) requestSettingsNavigation(() => setSelectedId(null)); }}>
+      <DialogContent className="flex sm:max-w-4xl max-h-[90vh] flex-col overflow-hidden">
+      <SettingsFooterContext.Provider value={editorFooter}>
+      <div className="min-h-0 flex-1 overflow-y-auto pr-1">
       <div className="mb-6 px-1">
         <h1 className={`${SETTINGS_PAGE_TITLE_CLASS} truncate`}>{instanceTitle}</h1>
         <div className="mt-1 flex flex-wrap items-center gap-2 typography-meta text-muted-foreground">
@@ -2021,7 +2090,7 @@ const RemoteInstancesContent: React.FC = () => {
           </div>
           {status?.localUrl ? (
             <div className="flex flex-wrap items-center gap-2 typography-meta text-muted-foreground">
-              <span>{t('settings.remoteInstances.page.status.currentLocalUrl')}</span>
+              <span>{t(resources ? 'settings.connections.resourceLocal' : 'settings.remoteInstances.page.status.currentLocalUrl')}</span>
               <span className="font-mono text-foreground/90">{status.localUrl}</span>
             </div>
           ) : null}
@@ -2382,8 +2451,8 @@ const RemoteInstancesContent: React.FC = () => {
 
             const localLabel = forward.type === 'remote' ? 'Local target' : 'Local listen';
             const localHint = forward.type === 'remote'
-              ? 'Local host and port on your machine that receives traffic from remote -R listener.'
-              : 'Local host and port where this forward listens on your machine.';
+              ? (resources ? t('settings.connections.resourceForwardTarget') : 'Local host and port on your machine that receives traffic from remote -R listener.')
+              : (resources ? t('settings.connections.resourceForwardListener') : 'Local host and port where this forward listens on your machine.');
             const remoteLabel = forward.type === 'remote' ? 'Remote listen' : 'Remote target';
             const remoteHint = forward.type === 'remote'
               ? 'Remote host and port where SSH creates the -R listener.'
@@ -2392,7 +2461,7 @@ const RemoteInstancesContent: React.FC = () => {
             const localEndpoint = formatEndpoint(forward.localHost || 'localhost', forward.localPort);
             const remoteEndpoint = formatEndpoint(forward.remoteHost || 'localhost', forward.remotePort);
             const canOpenLocalEndpoint =
-              forward.type === 'local' && typeof forward.localPort === 'number' && forward.localPort > 0;
+              !resources && forward.type === 'local' && typeof forward.localPort === 'number' && forward.localPort > 0;
             const localEndpointUrl = canOpenLocalEndpoint
               ? `http://${toBrowserHost(forward.localHost)}:${forward.localPort}`
               : '';
@@ -2448,7 +2517,7 @@ const RemoteInstancesContent: React.FC = () => {
                           hint={(
                             <div className="space-y-1">
                               <p>{t('settings.remoteInstances.page.field.forwardTypeHint')}</p>
-                              <p>{t(forwardTypeDescriptionKey(forward.type))}</p>
+                              <p>{t(resources && forward.type === 'remote' ? 'settings.connections.resourceReverseForward' : forwardTypeDescriptionKey(forward.type))}</p>
                             </div>
                           )}
                         />
@@ -2635,11 +2704,9 @@ const RemoteInstancesContent: React.FC = () => {
           </Button>
       </SettingsSection>
 
-      <div className="mt-8 border-t border-[var(--interactive-border)] pt-3">
-        <div className="flex items-center gap-2">
-          <Button type="button" size="xs" className="!font-normal" onClick={() => void handleSave()} disabled={!hasChanges || isSaving}>
-            {t('settings.common.actions.saveChanges')}
-          </Button>
+      </div>
+      <SettingsActionBar dirty={hasChanges} saving={isSaving} onSave={handleSave}
+        onCancel={() => { baseline.current = selectedInstance; setDraft(selectedInstance); }} error={error}>
           {status?.localUrl ? (
             <>
               <Button
@@ -2658,7 +2725,7 @@ const RemoteInstancesContent: React.FC = () => {
                 <Icon name="file-copy" className="h-3.5 w-3.5" />
                 {t('settings.remoteInstances.page.actions.copyLocalUrl')}
               </Button>
-              <Button
+              {!resources ? <Button
                 type="button"
                 variant="outline"
                 size="xs"
@@ -2669,12 +2736,12 @@ const RemoteInstancesContent: React.FC = () => {
               >
                 <Icon name="external-link" className="h-3.5 w-3.5" />
                 {t('settings.remoteInstances.page.actions.open')}
-              </Button>
+              </Button> : null}
             </>
           ) : null}
-          {error ? <div className="ml-auto typography-meta text-[var(--status-error)]">{error}</div> : null}
-        </div>
-      </div>
+      </SettingsActionBar>
+      </SettingsFooterContext.Provider>
+      <div ref={setEditorFooter} className="shrink-0" />
 
       <Dialog open={logDialogOpen} onOpenChange={setLogDialogOpen}>
         <DialogContent className="sm:max-w-2xl">

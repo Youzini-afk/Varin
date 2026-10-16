@@ -1,4 +1,5 @@
 import React from 'react';
+import { SettingsFooterContext } from './settings-context';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 import { Icon } from '@/components/icon/Icon';
 import { useI18n } from '@/lib/i18n';
@@ -32,7 +33,7 @@ interface SettingsPageLayoutProps {
 
 /**
  * Standard layout wrapper for settings page content.
- * UI Kit: max-width 840px, padding 32px vertical / 48px horizontal.
+ * Shared responsive content width, scrolling and fixed save-unit footer.
  */
 export const SettingsPageLayout: React.FC<SettingsPageLayoutProps> = ({
   children,
@@ -45,21 +46,25 @@ export const SettingsPageLayout: React.FC<SettingsPageLayoutProps> = ({
   headerEnd,
   showSaveStatus = false,
 }) => {
+  const [footerTarget, setFooterTarget] = React.useState<HTMLDivElement | null>(null);
   const hasHeader = title != null || description != null || headerEnd != null || showSaveStatus;
   const isPlainTitle = typeof title === 'string' || typeof title === 'number';
   const hasTitleChrome = titleLeading != null || titleAccessory != null;
 
   return (
+    <SettingsFooterContext.Provider value={footerTarget}>
+    <div className={cn('flex h-full min-h-0 flex-col', outerClassName)}>
     <ScrollableOverlay
-      outerClassName={cn('h-full', outerClassName)}
+      outerClassName="flex-1 min-h-0"
       className="w-full @container"
     >
       <div
         className={cn(
-          'mx-auto max-w-[840px] space-y-0 px-6 py-6 @3xl:px-12 @3xl:py-8',
+          'mx-auto w-full max-w-[1040px] space-y-0 px-5 py-6 @3xl:px-10 @3xl:py-8',
           // The first visible section never needs the top divider, no matter
           // which platform-conditional sections above it rendered null.
           '[&>section:first-of-type]:border-t-0 [&>section:first-of-type]:pt-0',
+          className?.includes('settings-chat-page') && 'max-w-[1320px]',
           className
         )}
       >
@@ -98,6 +103,9 @@ export const SettingsPageLayout: React.FC<SettingsPageLayoutProps> = ({
         {children}
       </div>
     </ScrollableOverlay>
+    <div ref={setFooterTarget} className="shrink-0 empty:hidden" />
+    </div>
+    </SettingsFooterContext.Provider>
   );
 };
 
@@ -134,6 +142,8 @@ const SettingsSaveStatus: React.FC = () => {
       </div>
     );
   }
+
+  if (status === 'saved') return <div aria-live="polite" className="flex shrink-0 items-center gap-1.5 typography-meta text-muted-foreground"><Icon name="check" className="size-3.5" /><span>{t('settings.common.status.saved')}</span></div>;
 
   if (status !== 'saving' || !showSaving) {
     return null;

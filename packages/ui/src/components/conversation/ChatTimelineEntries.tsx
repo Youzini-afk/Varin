@@ -10,7 +10,7 @@ import { renderTerminalOutput } from '@/components/chat/message/parts/toolOutput
 import { getApplyPatchFileEntries } from '@/components/chat/message/parts/toolDiffUtils';
 import { getToolSummary, groupToolCalls } from '@/components/chat/message/parts/toolSummary';
 import { attachProcessTerminal } from '@/lib/attachProcessTerminal';
-import { useConversationPresentation } from './ConversationContext';
+import { ConversationPreviewContext, useOptionalConversationPresentation } from './ConversationContext';
 import { EntryExtras } from './EntryExtras';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import {
@@ -121,6 +121,7 @@ const ChatUserContentView: React.FC<{
   variant?: 'assistant' | 'tool';
   plain?: boolean;
 }> = ({ content, messageId, variant = 'assistant', plain = false }) => {
+  const preview = React.useContext(ConversationPreviewContext);
   const parts: ChatUserContent[] = typeof content === 'string'
     ? [{ text: content, type: 'text' }]
     : content;
@@ -134,7 +135,7 @@ const ChatUserContentView: React.FC<{
               content={part.text}
               messageId={`${messageId}:text:${index}`}
               variant={variant}
-              enableFileReferences
+              enableFileReferences={!preview}
             />}
           </ChatTextSource>
         ) : (
@@ -300,15 +301,16 @@ const ChatToolCard: React.FC<{
   const { t } = useI18n();
   const expandCommands = useUIStore(state => state.showExpandedBashTools);
   const expandEdits = useUIStore(state => state.showExpandedEditTools);
+  const preview = React.useContext(ConversationPreviewContext);
   const toolRenderers = useWorkbenchMatchRenderers<{
     call: ChatToolCall;
     cwd: string;
     execution?: ChatToolExecutionState;
     result?: ChatToolResultMessage;
-  }>('tool-renderer', 'chat.timeline.tools');
+  }>('tool-renderer', 'chat.timeline.tools', !preview);
   const sessionId = React.useContext(TimelineSessionContext);
-  const conversation = useConversationPresentation();
-  const extensionRendered = renderFirstWorkbenchMatch(toolRenderers, { call, cwd, execution, result });
+  const conversation = useOptionalConversationPresentation();
+  const extensionRendered = preview ? undefined : renderFirstWorkbenchMatch(toolRenderers, { call, cwd, execution, result });
   const fileChanges = React.useMemo(() => extensionRendered === undefined ? projectFileChanges(call, generating) : [], [call, generating, extensionRendered]);
   const nested = Object.values(executionById ?? {}).filter(child => child.parentToolCallId === call.id);
   if (extensionRendered !== undefined) return <>{extensionRendered}</>;
@@ -327,7 +329,7 @@ const ChatToolCard: React.FC<{
     arguments: call.arguments,
     details,
   }).text;
-  const harnessShellId = call.name === 'process_spawn' && conversation.api.processes && execution
+  const harnessShellId = call.name === 'process_spawn' && conversation?.api.processes && execution
     && typeof call.arguments === 'object' && call.arguments && !Array.isArray(call.arguments) && call.arguments.mode === 'pty' ? call.id : null;
   const command = typeof call.arguments === 'object' && call.arguments && !Array.isArray(call.arguments)
     ? String((call.arguments as Record<string, unknown>).command ?? '')
@@ -344,7 +346,7 @@ const ChatToolCard: React.FC<{
     {fileChanges.map((file, index) => <ChatFileChangePreview key={`${index}:${file.path}`} file={file}
       previewId={`${call.id}:${index}:${file.path}`}
       phase={fileChangePhase(execution, result, generating, file.path)}
-      onOpen={file.operation === 'delete' ? undefined : () => void conversation.openFile(call.id, file.path)} />)}
+      onOpen={file.operation === 'delete' || !conversation ? undefined : () => void conversation.openFile(call.id, file.path)} />)}
     <ChatToolDisclosure
       disclosureId={`tool:${call.id}`}
       initiallyExpanded={(call.name === 'process_spawn' && expandCommands) || (isFileChangeTool(call.name) && expandEdits)}
@@ -364,7 +366,7 @@ const ChatToolCard: React.FC<{
           )}
         />
         <span className="min-w-0 flex-1 truncate" title={`${call.name}: ${compactSummary || call.name}`}>{fileChanges.length ? t('chat.fileChange.details') : compactSummary || call.name}</span>
-        {harnessShellId ? (
+        {harnessShellId && conversation ? (
           <button
             type="button"
             className="shrink-0 rounded px-1.5 typography-micro text-foreground hover:bg-interactive-hover"
@@ -416,8 +418,8 @@ const ChatToolCard: React.FC<{
                 <button
                   key={file.filePath}
                   type="button"
-                  disabled={file.deleted}
-                  onClick={() => void conversation.openFile(call.id, file.filePath)}
+                  disabled={file.deleted || !conversation}
+                  onClick={() => void conversation?.openFile(call.id, file.filePath)}
                   className="inline-flex min-w-0 items-center gap-1 rounded-md border border-border/60 px-2 py-1 typography-micro text-muted-foreground hover:bg-interactive-hover hover:text-foreground disabled:cursor-default disabled:opacity-50"
                 >
                   <Icon name="file-code" className="size-3.5 shrink-0" />
@@ -426,7 +428,7 @@ const ChatToolCard: React.FC<{
               ))}
             </div>
             {applyPatchFiles.map((file) => (
-              file.patch ? (
+              file.patch && conversation ? (
                 <PatchHunkReview
                   key={`review:${file.filePath}`}
                   resolveTarget={() => conversation.fileTarget(call.id, file.filePath)}
@@ -595,6 +597,7 @@ const AssistantMessage: React.FC<{
   resultByCallId: ReadonlyMap<string, ChatToolResultMessage>;
   streaming?: boolean;
 }> = ({ cwd, entryId, executionById, hiddenThinkingLabel, message, resultByCallId, streaming = false }) => {
+  const preview = React.useContext(ConversationPreviewContext);
   const rendered: React.ReactNode[] = [];
   for (let index = 0; index < message.content.length;) {
     const content = message.content[index]!;
@@ -619,7 +622,7 @@ const AssistantMessage: React.FC<{
               content={content.text}
               messageId={`${entryId}:text:${index}`}
               isStreaming={streaming}
-              enableFileReferences
+              enableFileReferences={!preview}
             />
           </ChatTextSource>,
         );
@@ -654,6 +657,7 @@ const ChatSortedActivityGroup: React.FC<{
 }> = ({ cwd, executionById, hiddenThinkingLabel, projection, resultByCallId }) => {
   const { t } = useI18n();
   const activityRenderMode = useUIStore((state) => state.activityRenderMode);
+  const preview = React.useContext(ConversationPreviewContext);
   const showThinking = useUIStore(state => state.showReasoningTraces);
   const activity = projection.activity.filter(item => showThinking || item.kind !== 'thinking');
   const [expanded, setExpanded] = React.useState(activityRenderMode === 'summary');
@@ -743,7 +747,7 @@ const ChatSortedActivityGroup: React.FC<{
                         messageId={item.id}
                         isStreaming={item.streaming}
                         variant="assistant"
-                        enableFileReferences
+                        enableFileReferences={!preview}
                       />
                     </ChatTextSource>
                   </div>
@@ -916,11 +920,12 @@ export const ChatTimelineEntryList: React.FC<Omit<
 }) => {
   const { t } = useI18n();
   const chatRenderMode = useUIStore((state) => state.chatRenderMode);
+  const preview = React.useContext(ConversationPreviewContext);
   const messageRenderers = useWorkbenchMatchRenderers<{
     cwd: string;
     entry: ChatSessionEntry;
     sessionId: string;
-  }>('message-renderer', 'chat.timeline.entries');
+  }>('message-renderer', 'chat.timeline.entries', !preview);
   const previousProjection = React.useRef<ReturnType<typeof projectChatTimeline> | undefined>(undefined);
   const projection = React.useMemo(
     () => projectChatTimeline(entries, liveAssistant, undefined, previousProjection.current),
@@ -930,12 +935,13 @@ export const ChatTimelineEntryList: React.FC<Omit<
   const resultByCallId = projectedResultByCallId ?? projection.resultByCallId;
   const extensionEntries = React.useMemo(() => {
     const renderedById = new Map<string, React.ReactNode>();
+    if (preview) return renderedById;
     for (const entry of projection.visibleEntries) {
       const rendered = renderFirstWorkbenchMatch(messageRenderers, { cwd, entry, sessionId });
       if (rendered !== undefined) renderedById.set(entry.id, rendered);
     }
     return renderedById;
-  }, [cwd, messageRenderers, projection.visibleEntries, sessionId]);
+  }, [cwd, messageRenderers, preview, projection.visibleEntries, sessionId]);
   const builtInEntries = React.useMemo(
     () => projection.visibleEntries.filter((entry) => !extensionEntries.has(entry.id)),
     [extensionEntries, projection.visibleEntries],

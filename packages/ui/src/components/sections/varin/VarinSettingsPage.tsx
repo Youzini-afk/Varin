@@ -18,6 +18,7 @@ import { isDesktopLocalOriginActive, isDesktopShell, isWebRuntime } from '@/lib/
 import { isCapacitorApp } from '@/lib/platform';
 import { useI18n } from '@/lib/i18n';
 import { subscribeRuntimeEndpointChanged } from '@varin/application-client';
+import { SettingsPageLink } from '@/components/sections/shared/SettingsPageLink';
 import { RecoverySettings } from './RecoverySettings';
 import type { VarinSettingsSection } from './types';
 
@@ -51,7 +52,7 @@ export const VarinSettingsPage: React.FC<VarinSettingsPageProps> = ({ section })
                 <VarinVisualSettings />
                 <ChatSettings />
                 <DefaultsSettings />
-                {showDesktopNetworkSettings && <DesktopNetworkSettings />}
+                {showDesktopNetworkSettings && <DesktopNetworkSettings section="general" />}
                 <SessionRetentionSettings />
                 <RecoverySettings />
                 {isWebRuntime() && !isDesktopShell() && !isCapacitorApp() && <PasskeySettings />}
@@ -69,6 +70,10 @@ export const VarinSettingsPage: React.FC<VarinSettingsPageProps> = ({ section })
                 return <VisualSectionContent />;
             case 'chat':
                 return <ChatSectionContent />;
+            case 'editor':
+                return <EditorSectionContent />;
+            case 'terminal':
+                return <TerminalSectionContent />;
             case 'sessions':
                 return <SessionsSectionContent />;
             case 'shortcuts':
@@ -94,6 +99,8 @@ export const VarinSettingsPage: React.FC<VarinSettingsPageProps> = ({ section })
         general: t('settings.page.general.title'),
         visual: t('settings.page.appearance.title'),
         chat: t('settings.page.chat.title'),
+        editor: t('settings.page.editor.title'),
+        terminal: t('settings.page.terminal.title'),
         sessions: t('settings.page.sessions.title'),
         shortcuts: t('settings.page.shortcuts.title'),
         git: t('settings.page.git.title'),
@@ -108,6 +115,8 @@ export const VarinSettingsPage: React.FC<VarinSettingsPageProps> = ({ section })
         general: t('settings.page.general.description'),
         visual: t('settings.page.appearance.description'),
         chat: t('settings.page.chat.description'),
+        editor: t('settings.page.editor.description'),
+        terminal: t('settings.page.terminal.description'),
         sessions: t('settings.page.sessions.description'),
         shortcuts: t('settings.page.shortcuts.description'),
         git: undefined,
@@ -123,7 +132,7 @@ export const VarinSettingsPage: React.FC<VarinSettingsPageProps> = ({ section })
             title={pageTitle}
             description={pageDescription}
             showSaveStatus
-            className="varin-settings-page-body"
+            className={section === 'chat' ? 'varin-settings-page-body settings-chat-page' : 'varin-settings-page-body'}
         >
             {renderSectionContent()}
         </SettingsPageLayout>
@@ -134,28 +143,18 @@ const ShortcutsSectionContent: React.FC = () => {
     return <KeyboardShortcutsSettings />;
 };
 
-// General section: app-level settings — startup/tray/network, access password,
-// passkeys, and editor behavior.
+// General owns startup and language/region. Security and editor preferences have dedicated pages.
 const GeneralSectionContent: React.FC = () => {
+    const { t } = useI18n();
     const runtimeEndpointEpoch = useRuntimeEndpointEpoch();
     void runtimeEndpointEpoch;
     const showDesktopNetworkSettings = isDesktopShell() && isDesktopLocalOriginActive();
-    // Passkeys only work against the browser's WebAuthn UI on the web surface —
-    // Desktop and Capacitor shells never show the browser login screen.
-    const showPasskeySettings = isWebRuntime() && !isDesktopShell() && !isCapacitorApp();
     return (
         <>
-            {showDesktopNetworkSettings && <DesktopNetworkSettings />}
-            {showPasskeySettings && <PasskeySettings />}
-            <VarinVisualSettings visibleSettings={[
-                'fileEditorKeymap',
-                'fileEditorPreferences',
-                'autoSaveEnabled',
-                'expandedEditorToolbar',
-                'terminalQuickKeys',
-                'terminalShell',
-                'terminalLoginShell',
-            ]} />
+            {showDesktopNetworkSettings && <DesktopNetworkSettings section="general" />}
+            <SettingsPageLink page="access">{t('settings.page.access.title')}</SettingsPageLink>
+            <VarinVisualSettings visibleSettings={['locale', 'timeFormat', 'weekStart', 'pwaInstallName', 'pwaOrientation', 'mobileKeyboardMode']} />
+
         </>
     );
 };
@@ -165,14 +164,7 @@ const VisualSectionContent: React.FC = () => {
     return <VarinVisualSettings visibleSettings={[
         'theme',
         'windowControlsPosition',
-        'pwaInstallName',
-        'pwaOrientation',
-        'mobileKeyboardMode',
-        'timeFormat',
-        'weekStart',
         'fontSize',
-        'terminalFontSize',
-        'editorFontSize',
         'spacing',
         'inputBarOffset',
     ]} />;
@@ -180,13 +172,24 @@ const VisualSectionContent: React.FC = () => {
 
 const ChatSectionContent: React.FC = () => <ChatSettings />;
 
-// Sessions section: Default model & agent, Session retention
+const EditorSectionContent: React.FC = () => <VarinVisualSettings visibleSettings={[
+    'codeFont', 'editorFontSize', 'fileEditorKeymap', 'fileEditorPreferences',
+    'autoSaveEnabled', 'expandedEditorToolbar',
+]} />;
+
+const TerminalSectionContent: React.FC = () => {
+    const { t } = useI18n();
+    return <>
+        <SettingsPageLink page="editor" description={t('settings.page.editor.title')}>{t('settings.varin.visual.field.codeFont')}</SettingsPageLink>
+        <VarinVisualSettings visibleSettings={['terminalFontSize', 'terminalQuickKeys', 'terminalShell', 'terminalLoginShell']} />
+    </>;
+};
+
+// Defaults retain their Host/project owner; client deletion confirmation is separate.
 const SessionsSectionContent: React.FC = () => {
     return (
         <>
             <DefaultsSettings />
-            <SessionRetentionSettings />
-            <RecoverySettings />
         </>
     );
 };

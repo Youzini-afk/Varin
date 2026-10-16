@@ -105,3 +105,14 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
+
+## Model brand icons
+
+The bundled `deepseek.svg` in `packages/ui/src/assets/provider-logos` comes from
+[models.dev](https://github.com/anomalyco/models.dev/blob/dev/logos/deepseek.svg),
+Copyright (c) 2025 models.dev, under the MIT License. The bundled `claude.svg` and
+`qwen.svg` come from [LobeHub icons](https://github.com/lobehub/lobe-icons),
+Copyright (c) 2023 LobeHub, under the MIT License. The unchanged license texts are
+distributed at `packages/web/public/licenses/models-dev-LICENSE.txt` and
+`packages/web/public/licenses/lobe-icons-LICENSE.txt`. Brand marks identify model
+families and do not imply endorsement. Model-family matching is original Varin code.

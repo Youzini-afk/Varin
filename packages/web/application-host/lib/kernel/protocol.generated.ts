@@ -3599,6 +3599,7 @@ export interface KernelHandshakeParams {
 
 export interface KernelHealthParams {
   deep?: boolean;
+  gcPreview?: boolean;
 }
 
 export interface KernelSourceHandoffClaimParams {
@@ -4437,6 +4438,7 @@ export interface KernelOperationReleaseParams {
 
 export interface KernelGcParams {
   operationId: string;
+  objectHashes?: string[];
 }
 
 export interface KernelError {
@@ -4553,7 +4555,18 @@ export interface KernelObjectSlice extends KernelBlobResult {
   bytesBase64: string;
 }
 
+export interface KernelGcPreviewObject {
+  hash: string;
+  byteLength: number;
+}
+
+export interface KernelGcPreview {
+  objects: KernelGcPreviewObject[];
+  retainedObjects: number;
+}
+
 export interface KernelHealthResult {
+  gcPreview?: KernelGcPreview;
   integrity: string;
   branches: number;
   nodes: number;

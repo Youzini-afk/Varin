@@ -1,4 +1,5 @@
 import React from 'react';
+import { requestSettingsNavigation } from '@/lib/settings/drafts';
 import { Dialog } from '@base-ui/react/dialog';
 import { cn } from '@/lib/utils';
 import { useI18n } from '@/lib/i18n';
@@ -32,7 +33,8 @@ export const SettingsWindow: React.FC<SettingsWindowProps> = ({ open, onOpenChan
       open={open}
       onOpenChange={(next) => {
         if (!next && hasOpenFloatingMenu()) return;
-        onOpenChange(next);
+        if (next) onOpenChange(true);
+        else requestSettingsNavigation(() => onOpenChange(false));
       }}
     >
       <Dialog.Portal>
@@ -48,7 +50,7 @@ export const SettingsWindow: React.FC<SettingsWindowProps> = ({ open, onOpenChan
             aria-describedby={descriptionId}
             className={cn(
               'relative pointer-events-auto',
-              'w-[90vw] max-w-[1200px] h-[85vh] max-h-[900px]',
+              'w-[94vw] max-w-[1440px] h-[90vh] max-h-[1000px]',
               'rounded-xl border shadow-none overflow-hidden origin-center',
               'bg-background',
               'transition-all duration-150 ease-out',

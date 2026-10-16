@@ -3,6 +3,10 @@ use super::*;
 
 impl Storage {
     pub(super) fn drain_gc_files(&mut self) -> Result<Value, KernelError> {
+        self.drain_selected_gc_files(None)
+    }
+
+    pub(super) fn drain_selected_gc_files(&mut self, selected: Option<&BTreeSet<String>>) -> Result<Value, KernelError> {
         let rows: Vec<(String, String)> = self
             .conn
             .prepare("SELECT hash, path FROM pending_gc_files WHERE state IN ('pending', 'failed') ORDER BY queued_at")?
@@ -12,6 +16,7 @@ impl Storage {
         let mut reclaimed_bytes = 0_u64;
         let mut failures = Vec::new();
         for (hash, raw_path) in rows {
+            if selected.is_some_and(|hashes| !hashes.contains(&hash)) { continue; }
             if self.blob_read_roots.contains(&hash) {
                 continue;
             }
@@ -183,7 +188,7 @@ impl Storage {
         Ok((pending, failures))
     }
 
-    pub(super) fn gc(&mut self) -> Result<Value, KernelError> {
+    fn gc_reachable(&mut self) -> Result<(BTreeSet<String>, BTreeSet<String>), KernelError> {
         let mut roots = BTreeSet::new();
         for row in self
             .conn
@@ -275,13 +280,46 @@ impl Storage {
         {
             blobs.insert(row?);
         }
+        Ok((nodes, blobs))
+    }
+
+    /// Read-only preview uses the exact same reachability rules as collection.
+    /// It does not sweep or release any history, materialization or operation.
+    pub(super) fn gc_preview(&mut self) -> Result<Value, KernelError> {
+        let (_, retained) = self.gc_reachable()?;
+        let hashes: BTreeSet<String> = self.conn
+            .prepare("SELECT hash FROM blobs UNION SELECT hash FROM pending_gc_files")?
+            .query_map([], |row| row.get::<_, String>(0))?
+            .collect::<Result<_, _>>()?;
+        let mut objects = Vec::new();
+        for hash in hashes {
+            self.check_cancelled()?;
+            if retained.contains(&hash) { continue; }
+            let file = object_path(&self.root, &hash)?;
+            let metadata = match fs::symlink_metadata(&file) {
+                Ok(value) => value,
+                Err(error) if error.kind() == io::ErrorKind::NotFound => continue,
+                Err(error) => return Err(error.into()),
+            };
+            if !metadata.file_type().is_file() { continue; }
+            objects.push(json!({"hash": hash, "byteLength": metadata.len()}));
+        }
+        Ok(json!({"objects": objects, "retainedObjects": retained.len()}))
+    }
+
+    pub(super) fn gc(&mut self) -> Result<Value, KernelError> {
+        self.gc_selected(None)
+    }
+
+    pub(super) fn gc_selected(&mut self, selected: Option<&BTreeSet<String>>) -> Result<Value, KernelError> {
+        let (nodes, blobs) = self.gc_reachable()?;
         let stale_root_blobs: Vec<(String, String)> = self
             .conn
             .prepare("SELECT root_hash, blob_hash FROM root_blobs")?
             .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?
             .collect::<Result<_, _>>()?;
         for (root_hash, blob_hash) in stale_root_blobs {
-            if !nodes.contains(&root_hash) {
+            if selected.is_none() && !nodes.contains(&root_hash) {
                 self.conn.execute(
                     "DELETE FROM root_blobs WHERE root_hash = ?1 AND blob_hash = ?2",
                     params![root_hash, blob_hash],
@@ -294,7 +332,7 @@ impl Storage {
             .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?
             .collect::<Result<_, _>>()?;
         for (root_hash, parent_root) in stale_parents {
-            if !nodes.contains(&root_hash) || !nodes.contains(&parent_root) {
+            if selected.is_none() && (!nodes.contains(&root_hash) || !nodes.contains(&parent_root)) {
                 self.conn.execute(
                     "DELETE FROM root_parents WHERE root_hash = ?1 AND parent_root = ?2",
                     params![root_hash, parent_root],
@@ -312,7 +350,7 @@ impl Storage {
         let mut deleted_nodes = 0;
         for hash in all_nodes {
             self.check_cancelled()?;
-            if !nodes.contains(&hash) {
+            if selected.is_none() && !nodes.contains(&hash) {
                 self.conn
                     .execute("DELETE FROM trie_nodes WHERE hash = ?1", params![hash])?;
                 deleted_nodes += 1;
@@ -326,7 +364,7 @@ impl Storage {
         let mut deleted_blobs = 0;
         for hash in all_blobs {
             self.check_cancelled()?;
-            if !blobs.contains(&hash) {
+            if !blobs.contains(&hash) && selected.is_none_or(|hashes| hashes.contains(&hash)) {
                 let path = object_path(&self.root, &hash)?;
                 self.conn.execute(
                     "INSERT OR IGNORE INTO pending_gc_files(hash, path, state, queued_at) VALUES (?1, ?2, 'pending', ?3)",
@@ -378,5 +416,88 @@ impl Storage {
             }
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod storage_settings_tests {
+    use super::*;
+
+    fn fixture() -> (Storage, Grant, PathBuf) {
+        let root = std::env::temp_dir().join(format!("varin-storage-settings-{}", Uuid::new_v4()));
+        let mut storage = Storage::open(&root, "host").unwrap();
+        storage.issue_grant(&json!({"grantId":"settings-test","hostGeneration":"generation","owningWorkspace":"workspace","executionWorkspace":"workspace",
+            "capabilities":["storage.read","storage.write","storage.gc"],"pathScopes":[""]}), "host", "generation", root.to_str().unwrap(), "epoch").unwrap();
+        let grant = storage.load_grant("settings-test").unwrap();
+        (storage, grant, root)
+    }
+    fn invoke(storage: &mut Storage, grant: &Grant, method: &str, value: Value) -> Value {
+        let (grant, params) = storage.authorize(Some(&grant.grant_id), &grant.kernel_epoch, "host", "generation", method, &value).unwrap();
+        storage.dispatch(method, &params, Some(&grant.grant_id), &grant).unwrap()
+    }
+    fn put(storage: &mut Storage, grant: &Grant, id: &str, bytes: &[u8]) -> Value {
+        invoke(storage, grant, "storage.putBlob.begin", json!({"operationId":id,"streamId":id,"workspaceId":"workspace","byteLength":bytes.len()}));
+        invoke(storage, grant, "storage.putBlob.chunk", json!({"streamId":id,"sequence":0,"bytesBase64":BASE64.encode(bytes)}));
+        invoke(storage, grant, "storage.putBlob.finish", json!({"operationId":id,"streamId":id,"workspaceId":"workspace"}))
+    }
+    fn release(storage: &mut Storage, grant: &Grant, blob: &Value) {
+        invoke(storage, grant, "storage.blob.release", json!({"ownerId":blob["ownerId"],"workspaceId":"workspace"}));
+    }
+    fn close(storage: Storage, root: PathBuf) { drop(storage); fs::remove_dir_all(root).unwrap(); }
+
+    #[test]
+    fn preview_is_read_only_and_uses_the_same_recovery_and_temporary_roots() {
+        let (mut storage, grant, root) = fixture();
+        let temporary = put(&mut storage, &grant, "temporary", b"temporary reader");
+        let recovery = put(&mut storage, &grant, "recovery", b"undo safety");
+        release(&mut storage, &grant, &recovery);
+        storage.conn.execute("INSERT INTO recovery_refs(workspace_id,owner_kind,owner_id,slot,object_hash) VALUES('workspace','operation','undo','safety',?1)", [recovery["hash"].as_str().unwrap()]).unwrap();
+        let abandoned = put(&mut storage, &grant, "abandoned", b"discard me");
+        release(&mut storage, &grant, &abandoned);
+        let preview = invoke(&mut storage, &grant, "storage.health", json!({"gcPreview":true}));
+        assert_eq!(preview["gcPreview"]["objects"], json!([{"hash":abandoned["hash"],"byteLength":10}]));
+        for blob in [&temporary, &recovery, &abandoned] { assert!(object_path(&root, blob["hash"].as_str().unwrap()).unwrap().exists()); }
+        assert_eq!(storage.conn.query_row("SELECT COUNT(*) FROM blobs", [], |row| row.get::<_, i64>(0)).unwrap(), 3);
+        close(storage, root);
+    }
+
+    #[test]
+    fn confirmation_only_collects_selected_hashes_and_rechecks_new_references() {
+        let (mut storage, grant, root) = fixture();
+        let selected = put(&mut storage, &grant, "selected", b"selected body");
+        let newly_referenced = put(&mut storage, &grant, "rereferenced", b"protect again");
+        release(&mut storage, &grant, &selected); release(&mut storage, &grant, &newly_referenced);
+        let preview = storage.gc_preview().unwrap();
+        assert_eq!(preview["objects"].as_array().unwrap().len(), 2);
+        storage.record_object_owner("new-reader", newly_referenced["hash"].as_str().unwrap(), Some("workspace"), None, &grant.grant_id).unwrap();
+        let later = put(&mut storage, &grant, "later", b"not in preview"); release(&mut storage, &grant, &later);
+        let params = json!({"operationId":"confirmed-preview","objectHashes":[selected["hash"],newly_referenced["hash"]]});
+        let receipt = invoke(&mut storage, &grant, "storage.gc", params.clone());
+        assert_eq!(receipt["byteLengthReclaimed"], 13);
+        assert_eq!(receipt["deletedBlobs"], 1);
+        assert_eq!(receipt["cleanupFailures"], json!([]));
+        assert!(!object_path(&root, selected["hash"].as_str().unwrap()).unwrap().exists());
+        assert!(object_path(&root, newly_referenced["hash"].as_str().unwrap()).unwrap().exists());
+        assert!(object_path(&root, later["hash"].as_str().unwrap()).unwrap().exists());
+        assert_eq!(invoke(&mut storage, &grant, "storage.gc", params), receipt);
+        assert_eq!(storage.health(&json!({"deep":true})).unwrap()["integrity"], "ok");
+        close(storage, root);
+    }
+
+    #[test]
+    fn scoped_cleanup_does_not_drain_unselected_pending_files_or_report_their_failures() {
+        let (mut storage, grant, root) = fixture();
+        let selected = put(&mut storage, &grant, "selected", b"selected"); release(&mut storage, &grant, &selected);
+        let pending = put(&mut storage, &grant, "pending", b"pending"); release(&mut storage, &grant, &pending);
+        storage.conn.execute("DELETE FROM blobs WHERE hash=?1", [pending["hash"].as_str().unwrap()]).unwrap();
+        storage.conn.execute("INSERT INTO pending_gc_files(hash,path,state,last_error,queued_at) VALUES(?1,'untrusted-path','failed','older failure',1)", [pending["hash"].as_str().unwrap()]).unwrap();
+        let receipt = invoke(&mut storage, &grant, "storage.gc", json!({"operationId":"only-selected","objectHashes":[selected["hash"]]}));
+        assert_eq!(receipt["byteLengthReclaimed"], 8);
+        assert_eq!(receipt["cleanupFailures"], json!([]));
+        assert!(object_path(&root, pending["hash"].as_str().unwrap()).unwrap().exists());
+        let failure = invoke(&mut storage, &grant, "storage.gc", json!({"operationId":"pending-failure","objectHashes":[pending["hash"]]}));
+        assert_eq!(failure["byteLengthReclaimed"], 0);
+        assert!(!failure["cleanupFailures"].as_array().unwrap().is_empty());
+        close(storage, root);
     }
 }

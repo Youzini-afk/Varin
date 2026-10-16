@@ -10,6 +10,8 @@ import { RiArrowDownSLine, RiFolderLine } from '@remixicon/react';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { cn } from '@/lib/utils';
 import { useI18n } from '@/lib/i18n';
+import { requestSettingsNavigation } from '@/lib/settings/drafts';
+import { SettingsNavigationContext } from './settings-context';
 
 const formatProjectLabel = (label: string): string => {
   return label.replace(/[-_]/g, ' ').replace(/\b\w/g, (char) => char.toUpperCase());
@@ -20,6 +22,7 @@ export const SettingsProjectSelector: React.FC<{ className?: string }> = ({ clas
   const projects = useProjectsStore((state) => state.projects);
   const activeProjectId = useProjectsStore((state) => state.activeProjectId);
   const setActiveProject = useProjectsStore((state) => state.setActiveProject);
+  const guardNavigation = React.useContext(SettingsNavigationContext);
 
   const sortedProjects = React.useMemo(() => {
     return [...projects].sort((a, b) => (a.label || a.path).localeCompare(b.label || b.path));
@@ -65,8 +68,10 @@ export const SettingsProjectSelector: React.FC<{ className?: string }> = ({ clas
           <DropdownMenuRadioGroup
             value={activeProject?.id ?? ''}
             onValueChange={(value) => {
-              if (!value) return;
-              void setActiveProject(value);
+              if (!value || value === activeProject?.id) return;
+              const select = () => { void setActiveProject(value); };
+              if (guardNavigation) requestSettingsNavigation(select);
+              else select();
             }}
           >
             {sortedProjects.map((project) => {

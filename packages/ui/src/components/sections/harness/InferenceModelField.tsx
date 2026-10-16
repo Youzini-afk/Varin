@@ -1,11 +1,12 @@
 import React from 'react';
+import { ModelLogo } from '@/components/ui/ModelLogo';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useI18n } from '@/lib/i18n';
 import { AutoSaveInput } from './AutoSaveInput';
 
 /** Declared inference models are suggestions. An undiscovered model can still be entered explicitly. */
 export function InferenceModelField({ models, value, onCommit, label, placeholder }: {
-  models: readonly { id: string; name?: string }[];
+  models: readonly { id: string; name?: string; requestModelId?: string }[];
   value: string;
   onCommit: (id: string) => void;
   label: string;
@@ -27,10 +28,10 @@ export function InferenceModelField({ models, value, onCommit, label, placeholde
       }
     }}>
       <SelectTrigger size="settings" className="w-full" aria-label={label}>
-        <SelectValue>{manual || !selected ? t('settings.harness.models.manualModel') : selected.name || selected.id}</SelectValue>
+        <SelectValue>{manual || !selected ? t('settings.harness.models.manualModel') : <span className="flex min-w-0 items-center gap-2"><ModelLogo modelId={selected.id} requestModelId={selected.requestModelId} displayName={selected.name} /><span className="truncate">{selected.name || selected.id}</span></span>}</SelectValue>
       </SelectTrigger>
       <SelectContent>
-        {models.map(model => <SelectItem key={model.id} value={`model:${model.id}`}>{model.name || model.id}</SelectItem>)}
+        {models.map(model => <SelectItem key={model.id} value={`model:${model.id}`}><span className="flex min-w-0 items-center gap-2"><ModelLogo modelId={model.id} requestModelId={model.requestModelId} displayName={model.name} /><span className="truncate">{model.name || model.id}</span></span></SelectItem>)}
         <SelectItem value="__manual">{t('settings.harness.models.manualModel')}</SelectItem>
       </SelectContent>
     </Select>}

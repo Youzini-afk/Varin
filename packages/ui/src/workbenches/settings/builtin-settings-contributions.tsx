@@ -1,3 +1,7 @@
+import { WorkConnectionsPage } from '@/components/sections/connections/WorkConnectionsPage';
+import { AccessSettingsPage, HistorySettingsPage, NetworkSettingsPage } from '@/components/sections/connections/SettingsUtilityPages';
+import { StorageSettingsPage } from '@/components/sections/storage/StorageSettingsPage';
+import { HarnessSettingsPage } from '@/components/sections/harness/HarnessSettingsPage';
 import type { SurfaceActivationContext } from '@varin/extension-surface';
 import { AgentMemoryPage } from '@/components/sections/assistant/AgentMemoryPage';
 import { AgentPromptPage } from '@/components/sections/assistant/AgentPromptPage';
@@ -33,6 +37,12 @@ const implementationFor = (spec: BuiltinSettingsPageSpec): SettingsPageImplement
     implementation = varinPage(spec.renderer.slice('varin:'.length) as VarinSettingsSection);
   } else {
     switch (spec.renderer) {
+      case 'history': implementation = { renderContent: () => <HistorySettingsPage /> }; break;
+      case 'storage': implementation = { renderContent: () => <StorageSettingsPage /> }; break;
+      case 'work-connections': implementation = { renderContent: () => <WorkConnectionsPage /> }; break;
+      case 'network': implementation = { renderContent: () => <NetworkSettingsPage /> }; break;
+      case 'access': implementation = { renderContent: () => <AccessSettingsPage /> }; break;
+      case 'images': implementation = { renderContent: () => <HarnessSettingsPage section="images" /> }; break;
       case 'agent-memory': implementation = { renderContent: () => <AgentMemoryPage /> }; break;
       case 'agent-prompt': implementation = { renderContent: () => <AgentPromptPage /> }; break;
       case 'empty': implementation = { renderContent: () => null }; break;
