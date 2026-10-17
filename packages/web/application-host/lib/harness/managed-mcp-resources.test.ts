@@ -1,6 +1,6 @@
 import { expect, it } from 'vitest';
-import type { McpAuthorityService, McpResourceChange, McpResourceRelease } from '../mcp/authority.js';
-import type { McpResourceBinding, SourceMcpCreationOutcome, SourceMcpHolder } from '../kernel/protocol.generated.js';
+import type { McpAuthorityLease, McpAuthorityService, McpResourceChange, McpResourceRelease } from '../mcp/authority.js';
+import type { McpResourceBinding, SourceMcpCreationOutcome, SourceMcpHolder, SourceMcpCreationReceiptParams, SourceMcpHolderParams } from '../kernel/protocol.generated.js';
 import { createManagedMcpResources } from './managed-mcp-resources.js';
 import type { ManagedMcpResourceAction } from './managed-mcp-contract.js';
 
@@ -29,7 +29,7 @@ function fixture() {
   let run = async () => acknowledgement;
   let detach = async (): Promise<McpResourceRelease> => ({ status: 'acknowledged', acknowledgement: { _meta: { unsubscribed: true } } });
   const calls: Array<{ method: string; action: string }> = [];
-  const kernel = { async sourceRequest(method: string, params: any) {
+  const kernel = { async sourceRequest(method: string, params: SourceMcpCreationReceiptParams | SourceMcpHolderParams) {
     calls.push({ method, action: params.action });
     expect(params.principalId).toBe(scope.principal.principalId);
     expect(params.authorityId).toBe(scope.authorityId);
@@ -42,6 +42,7 @@ function fixture() {
       return { holder: structuredClone(holder), authority: { phase: holder.released ? 'draining' : 'retaining' }, grantState };
     }
     expect(method).toBe('source.mcp.creation_receipt');
+    if (!('requestHash' in params)) throw new Error('Missing creation receipt request hash');
     if (holder?.creationReceipt && params.requestHash !== holder.creationReceipt.requestHash) throw new Error('request changed');
     if (params.action === 'begin' && !holder?.creationReceipt) {
       if (holder?.released) throw new Error('holder released');
@@ -63,9 +64,9 @@ function fixture() {
     views++; active.throwIfAborted(); if (sealed) throw new Error('view sealed');
     return { beforeDispatch: async () => { active.throwIfAborted(); if (sealed) throw new Error('view sealed'); }, lease: {
       resourceEndpoint: () => binding.endpoint,
-      async observeResource(originalService: McpAuthorityService, uri: string, options: any) {
+      async observeResource(originalService: McpAuthorityService, uri: string, options: Parameters<McpAuthorityLease['observeResource']>[2]) {
         expect(originalService).toEqual(service); expect(uri).toBe(binding.uri); expect(options.interaction).toEqual({ operationId: binding.operationId, executionOwner: binding.executionOwner });
-        await options.beforeDispatch(); creationSignal = options.signal; change = options.onChange; subscriptions++;
+        await options.beforeDispatch?.(); creationSignal = options.signal; change = options.onChange; subscriptions++;
         const ack = await run();
         return { endpoint: binding.endpoint, listenerId: 'original-listener', acknowledgement: ack,
           detach(options?: unknown) { cleanupOrigins.push(options); detaches++; return detach(); } };

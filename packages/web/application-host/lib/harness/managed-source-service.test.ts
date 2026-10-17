@@ -5,7 +5,7 @@ import type { SourceAuthorityOpenParams, SourceAuthorityBindParams, SourceAuthor
 import { createManagedSourceService } from './managed-source-service.js';
 import { ManagedSourceDrainedError } from './managed-source-drain.js';
 import { createSourceQueryService } from '../kernel/source-query-service.js';
-import type { ManagedSourceBindRequest, ManagedSourcePrincipal, ManagedSourceServiceHandler, ManagedSourceLocalScope, ManagedSourceCleanupScope } from './managed-remote-types.js';
+import type { ManagedSourceBindRequest, ManagedSourcePrincipal, ManagedSourceServiceHandler, ManagedSourceCleanupScope } from './managed-remote-types.js';
 
 const principal: ManagedSourcePrincipal = { principalId: 'verified', capabilities: ['filesystem:read'] };
 const source: ThreadSource = { resourceOwner: { kind: 'managed_host', hostId: 'target', connectionId: 'connection', endpointIdentity: 'endpoint' },

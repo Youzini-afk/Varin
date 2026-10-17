@@ -3,7 +3,7 @@ import { isDeepStrictEqual } from 'node:util';
 import { composeMcpAuthorityLeases, type McpAuthority, type McpAuthorityOwnedLease, type McpAuthorityScope,
   type McpCompositionSnapshot, type McpDefinitionLease } from '../mcp/authority.js';
 import type { KernelClient } from '../kernel/kernel-client.js';
-import type { McpBinding, McpChildDerivationReceipt, McpProvenance, SourceAuthorityAddress,
+import type { McpChildDerivationReceipt, McpProvenance, SourceAuthorityAddress,
   SourceMcpDerivationOutcome, SourceMcpDerivationResult } from '../kernel/protocol.generated.js';
 import type { ManagedSourceCleanupScope, ManagedSourceLocalScope } from './managed-remote-types.js';
 import type { ManagedMcpDerivationAction } from './managed-mcp-contract.js';

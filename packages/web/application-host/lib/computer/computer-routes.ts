@@ -1,7 +1,7 @@
 import type { Express, Request, RequestHandler, Response } from "express";
 import { HarnessServiceError } from "../harness/service-error.js";
 import { ComputerBeforeDispatchError, ComputerEffectError, type ComputerService } from "./computer-service.js";
-import { computerWorkKey, parseComputerActor, type ComputerAccess } from '@varin/protocol';
+import { parseComputerActor, type ComputerAccess } from '@varin/protocol';
 import { ComputerError } from './computer-error.js';
 
 /**
