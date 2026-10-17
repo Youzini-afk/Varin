@@ -136,6 +136,13 @@ describe('document authority contract', () => {
     });
     const stillMissing = requireStatus(await harness.authority.read(harness.resource('also-missing.txt')), 'missing');
     expect(stillMissing.status).toBe('missing');
+    await fs.promises.writeFile(path.join(harness.workspaceRoot, 'readable.txt'), 'available');
+    const snapshots = await harness.authority.readSnapshots(['also-missing.txt', 'denied.txt', 'readable.txt'].map(name => harness.resource(name)));
+    expect(snapshots).toMatchObject([
+      { status: 'fulfilled', value: { status: 'missing' } },
+      { status: 'rejected' },
+      { status: 'fulfilled', value: { status: 'ready', content: 'available' } },
+    ]);
   });
 
   it('creates when expected revision is missing and conflicts when the file exists', async () => {

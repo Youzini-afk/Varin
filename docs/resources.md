@@ -46,6 +46,10 @@ Git 是 inventory、filter、换行、mode 和 linked-worktree 元数据的语�
 Host Documents 负责根准入、文档修订和 Surface 协调。Rust Storage 负责规范化 exact/subtree 租约及物理捕获、apply、rename、remove。
 别名、symlink、平台大小写参与同一资源身份；嵌套调用仍由 Rust 判断租约覆盖，TS 路径字符串相等不够。
 
+会话准备通过 Documents 批量读取已知的指令与配置候选，共用一次覆盖这些 exact 路径的租约。
+读取结果与缺失事实只在本次准备内复用；候选文件各自保留错误，外部别名继续由原资源 owner 准入。
+目录身份与信任查询走 `getWorkspace`，需要编辑状态的界面才使用 `inspectWorkspace`。
+
 租约约束已准入的冲突工作，不隔离任意第三方进程，也不把 live root 变成 OS 原子快照。文件效果在真正执行时复核身份和
 expected state。read/read 可重叠，不冲突的工作可绕过等待项；等待者不提前持有部分资源。
 

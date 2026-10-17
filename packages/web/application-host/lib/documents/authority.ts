@@ -552,8 +552,8 @@ export const createDocumentAuthority = (options: DocumentAuthorityOptions) => {
     });
   };
 
-  const resolveResourcePath = async (resource: DocumentResource, allowMissing = false): Promise<ResolveResourceResult> => {
-    const workspace = await loadWorkspace(resource.workspaceId);
+  const resolveResourcePath = async (resource: DocumentResource, allowMissing = false, admittedWorkspace?: Promise<LoadedWorkspace>): Promise<ResolveResourceResult> => {
+    const workspace = await (admittedWorkspace ?? loadWorkspace(resource.workspaceId));
     try {
       if (workspace.kind === 'file') {
         if (normalizeWorkspaceRelativePath(resource.resourceId) !== '') {
@@ -659,7 +659,12 @@ export const createDocumentAuthority = (options: DocumentAuthorityOptions) => {
   ): Promise<Result> => {
     options.signal?.throwIfAborted();
     options.reportPhase?.('document:resolve');
-    const resolved = await waitWithSignal(Promise.all(requests.map(({ resource }) => resolveResourcePath(resource, true))), options.signal);
+    const workspaces = new Map<string, Promise<LoadedWorkspace>>();
+    const resolved = await waitWithSignal(Promise.all(requests.map(({ resource }) => {
+      let workspace = workspaces.get(resource.workspaceId);
+      if (!workspace) { workspace = loadWorkspace(resource.workspaceId); workspaces.set(resource.workspaceId, workspace); }
+      return resolveResourcePath(resource, true, workspace);
+    })), options.signal);
     const canonicalPaths = await waitWithSignal(Promise.all(resolved.map((entry) => canonicalizePathIdentity(
       entry.resolved.absolutePath,
       { allowMissing: true, fsPromises, pathModule },
@@ -1002,6 +1007,14 @@ export const createDocumentAuthority = (options: DocumentAuthorityOptions) => {
     options.reportPhase?.('document:read');
     return snapshotFile(resource, target!.resolved.absolutePath, options.signal);
   }, options);
+
+  /** Capture related files under one exact-resource lease. An unreadable candidate
+   * stays a per-file result so callers can retain their normal selection precedence. */
+  const readSnapshots = (resources: readonly DocumentResource[], options: { signal?: AbortSignal } = {}): Promise<PromiseSettledResult<SnapshotResult>[]> => {
+    if (!resources.length) return Promise.resolve([]);
+    return withResolvedResourceOperation(resources.map(resource => ({ resource, scope: 'exact' })),
+      resolved => Promise.allSettled(resources.map((resource, index) => snapshotFile(resource, resolved[index]!.resolved.absolutePath, options.signal))), options);
+  };
 
   const write = (request: WriteRequest): Promise<DocumentWriteResult> => withResolvedResourceOperation([
     { resource: request.resource, scope: 'subtree' },
@@ -2371,6 +2384,7 @@ export const createDocumentAuthority = (options: DocumentAuthorityOptions) => {
     runResourceOperation,
     read,
     readSnapshot,
+    readSnapshots,
     prepareWorkspaceEdit: workspaceEdits.prepare,
     discardWorkspaceEdit: async (request: { workspaceId: string; operationId: string }) => workspaceEdits.discard(request),
     applyWorkspaceEdit: workspaceEdits.apply,

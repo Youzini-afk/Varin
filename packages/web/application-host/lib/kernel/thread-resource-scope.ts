@@ -64,7 +64,7 @@ export interface ThreadResourceScopeOwners {
   };
   dataDirectory: string;
   homeDir?: string;
-  documents: Pick<DocumentAuthority, 'inspectWorkspace' | 'readSnapshot' | 'admitWorkspaceRegistration'>;
+  documents: Pick<DocumentAuthority, 'inspectWorkspace' | 'readSnapshot' | 'admitWorkspaceRegistration'> & Partial<Pick<DocumentAuthority, 'readSnapshots'>>;
   workingStates: WorkspaceWorkingStateRootAccess;
   validateLiveSource: LiveSourceResolver;
   projectTrusted(root: string): boolean | Promise<boolean>;
@@ -328,7 +328,7 @@ export function createThreadResourceScope(owners: ThreadResourceScopeOwners): Th
     }
   };
 
-  const prepareSourceCapture: ThreadResourceScope['prepareSourceCapture'] = async input => {
+  const prepareSourceCapture = async (input: Parameters<ThreadResourceScope['prepareSourceCapture']>[0], documents: Pick<DocumentAuthority, 'readSnapshot'> = owners.documents): Promise<SourceResourceCapturePlan> => {
     const { store, directory: root, workspaceId, signal } = input;
     const trusted = await owners.projectTrusted(root);
     const captures = new Map<string, ReturnType<typeof recordReader>>();
@@ -375,7 +375,7 @@ export function createThreadResourceScope(owners: ThreadResourceScopeOwners): Th
       return { ...admitted, path: normalize(path.posix.join(admitted.directory, relative.slice(alias.length).replace(/^\//, ''))) };
     };
     const base = createDocumentResourceReader({ domainId: projectId, viewId: sourceView, workspaceId: input.captureWorkspaceId,
-      documents: owners.documents, list: (relative, signal) => listSourceDirectory(store, root, { domainId: projectId, viewId: sourceView }, relative, signal) });
+      documents, list: (relative, signal) => listSourceDirectory(store, root, { domainId: projectId, viewId: sourceView }, relative, signal) });
     const draftFiles = new Map((input.editorDrafts ?? []).map(draft => [normalize(draft.path), Buffer.from(draft.content)]));
     const draftChildren = (relative: string): ResourceDirectoryEntry[] => {
       const prefix = relative ? `${relative}/` : '';
@@ -638,14 +638,36 @@ export function createThreadResourceScope(owners: ThreadResourceScopeOwners): Th
         const id = `workspace:${source.workspaceId}`;
         const previous = options.snapshot?.readers.find(reader => reader.domainId === id);
         const viewId = previous?.viewId ?? `live-resource:${source.liveRoot.rootId}:${randomUUID()}`;
-        const reader = createDocumentResourceReader({ domainId: id, viewId, workspaceId: source.workspaceId, documents: owners.documents,
+        let documents: Pick<DocumentAuthority, 'readSnapshot'> = owners.documents;
+        if (owners.documents.readSnapshots && !options.snapshot) {
+          // These same candidates are used by source capture and context assembly.
+          // Keep their bytes only for this preparation, including exact absence.
+          const candidates = [...CONTEXT_FILE_NAMES, ...(scope.projectTrusted ? [
+            '.varin/settings.json', '.varin/resources/SYSTEM.md', '.varin/resources/APPEND_SYSTEM.md', '.varin/resources/skills', '.agents/skills',
+          ] : [])];
+          const local = (await Promise.all(candidates.map(async resourceId => {
+            try { return isPathWithinRoot(await canonicalizePathIdentity(path.join(root, resourceId), { allowMissing: true }), root) ? resourceId : null; }
+            // Alias/error handling remains with the original resource reader if selected.
+            catch { return null; }
+          }))).filter((value): value is string => value !== null);
+          const results = await owners.documents.readSnapshots(local.map(resourceId => ({ workspaceId: source.workspaceId, resourceId })), signal ? { signal } : {});
+          const captured = new Map(local.map((relative, index) => [relative, results[index]!]));
+          documents = { readSnapshot: async (resource, readOptions) => {
+            readOptions?.signal?.throwIfAborted();
+            const result = resource.workspaceId === source.workspaceId ? captured.get(resource.resourceId) : undefined;
+            if (!result) return owners.documents.readSnapshot(resource, readOptions);
+            if (result.status === 'rejected') throw result.reason;
+            return result.value;
+          } };
+        }
+        const reader = createDocumentResourceReader({ domainId: id, viewId, workspaceId: source.workspaceId, documents,
           list: (relative, signal) => listSourceDirectory(store, root, { domainId: id, viewId }, relative, signal) });
         scope.sourceIdentity = `workspace:${source.workspaceId}:live:${source.liveRoot.rootId}`;
         scope.project = { reader, cwd: '', skillAncestorBoundary: '', displayRoot: root };
         if (!options.snapshot) {
           // Capturing this candidate's external dependencies does not mutate the live source or a prior snapshot.
           const captured = await prepareSourceCapture({ store, directory: root, workspaceId: source.workspaceId, captureWorkspaceId: source.workspaceId,
-            branchId: identity.branchId, ...(signal ? { signal } : {}) });
+            branchId: identity.branchId, ...(signal ? { signal } : {}) }, documents);
           scope.project.reader = withSourceLinks(reader, captured.resources);
           applyCapture(scope, scope.project.reader, captured.resources);
         }

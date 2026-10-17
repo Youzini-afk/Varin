@@ -8,7 +8,7 @@ export interface LiveSourceSelection {
 }
 export type LiveSourceResolver = (source: LiveSourceSelection, signal?: AbortSignal) => Promise<void>;
 interface Owners {
-  documents: { inspectWorkspace(workspaceId: string, options?: { signal?: AbortSignal }): Promise<{ root: string; hostId: string }> };
+  documents: { getWorkspace(workspaceId: string, signal?: AbortSignal): Promise<{ root: string; hostId: string }> };
   kernel: KernelClient;
 }
 
@@ -16,10 +16,9 @@ interface Owners {
 export function createLiveSourceOwner({ documents, kernel }: Owners) {
   const validate: LiveSourceResolver = async (source, signal) => {
     signal?.throwIfAborted();
-    const [workspace, execution] = await Promise.all([
-      documents.inspectWorkspace(source.workspaceId, signal ? { signal } : {}),
-      documents.inspectWorkspace(source.executionWorkspaceId, signal ? { signal } : {}),
-    ]);
+    const original = documents.getWorkspace(source.workspaceId, signal);
+    const [workspace, execution] = await Promise.all([original, source.executionWorkspaceId === source.workspaceId
+      ? original : documents.getWorkspace(source.executionWorkspaceId, signal)]);
     const handshake = kernel.handshake ?? await kernel.start();
     if (source.liveRoot.hostId !== handshake.hostId || workspace.hostId !== source.liveRoot.hostId
       || execution.hostId !== source.liveRoot.hostId
@@ -31,7 +30,7 @@ export function createLiveSourceOwner({ documents, kernel }: Owners) {
     signal?.throwIfAborted();
   };
   const prepare = async (workspaceId: string, executionWorkspaceId: string, threadId: string, signal?: AbortSignal): Promise<LiveRoot> => {
-    const workspace = await documents.inspectWorkspace(workspaceId, signal ? { signal } : {});
+    const workspace = await documents.getWorkspace(workspaceId, signal);
     const source = { workspaceId, executionWorkspaceId,
       liveRoot: { hostId: workspace.hostId, canonicalRoot: workspace.root, rootId: '' } };
     await validate(source, signal);
@@ -46,9 +45,11 @@ export function createLiveSourceOwner({ documents, kernel }: Owners) {
     } finally { await kernel.revokeGrant(grant.grantId); }
   };
   const admit = async (source: LiveSourceSelection, threadId: string, signal?: AbortSignal): Promise<void> => {
-    await validate(source, signal);
     const actual = await prepare(source.workspaceId, source.executionWorkspaceId, threadId, signal);
-    if (actual.rootId !== source.liveRoot.rootId) throw new Error('Live root registration does not match the selected source');
+    if (actual.rootId !== source.liveRoot.rootId || actual.hostId !== source.liveRoot.hostId
+      || normalizePathIdentity(actual.canonicalRoot) !== normalizePathIdentity(source.liveRoot.canonicalRoot)) {
+      throw new Error('Live root registration does not match the selected source');
+    }
   };
   return { prepare, validate, admit };
 }

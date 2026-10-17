@@ -945,7 +945,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     resolveWorkspaceRoot: async (workspaceId) => isBotScopeId(workspaceId) ? scopeDirectory(workspaceId)
       : (await documentsAuthority.admitWorkspaceRegistration(workspaceId)).canonicalPath,
   });
-  const resolveKernelExecutionRoot = async (canonicalRoot: string, _owningWorkspaceId: string) => { const resolved = await documentsAuthority.resolveWorkspace({ path: canonicalRoot }); const inspected = await documentsAuthority.inspectWorkspace(resolved.workspaceId); return { workspaceId: resolved.workspaceId, canonicalRoot: inspected.root }; };
+  const resolveKernelExecutionRoot = async (canonicalRoot: string, _owningWorkspaceId: string) => { const resolved = await documentsAuthority.resolveWorkspace({ path: canonicalRoot }); const workspace = await documentsAuthority.getWorkspace(resolved.workspaceId); return { workspaceId: resolved.workspaceId, canonicalRoot: workspace.root }; };
   kernelStorageAdapter.bindFileRootResolver(resolveKernelExecutionRoot);
   const kernelFileResources = new KernelFileResourceBackend(kernelStorageAdapter, {
     resolveExecutionRoot: resolveKernelExecutionRoot,
