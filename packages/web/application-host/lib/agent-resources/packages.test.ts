@@ -1,5 +1,5 @@
 import { afterEach, expect, it } from 'vitest';
-import { mkdtemp, mkdir, readFile, readdir, rm, symlink, writeFile } from 'node:fs/promises';
+import { mkdtemp, mkdir, readFile, readdir, realpath, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { AgentSettingsService } from '../models/settings.js';
@@ -9,7 +9,7 @@ import { readAgentResourceConfiguration } from './packages.js';
 const roots: string[] = [];
 afterEach(async () => { for (const root of roots.splice(0)) await rm(root, { recursive: true, force: true }); });
 it('native package admission reads only selected settings, resolves explicit installed assets and never installs', async () => {
-  const data = await mkdtemp(join(tmpdir(), 'varin-native-packages-')); roots.push(data);
+  const data = await realpath(await mkdtemp(join(tmpdir(), 'varin-native-packages-'))); roots.push(data);
   const project = join(data, 'project');
   await mkdir(join(data, 'resources', 'local'), { recursive: true });
   await mkdir(join(data, 'resources', 'downloaded')); await symlink('local', join(data, 'resources', 'alias'), 'dir');
