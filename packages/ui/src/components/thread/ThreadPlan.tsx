@@ -8,19 +8,19 @@ import { MarkdownRenderer } from '@/components/chat/MarkdownRenderer';
 import { summarizePlan } from '@/lib/planSummary';
 import { subscribeVarinEvents } from '@/lib/varinEvents';
 
-type Props = { api: ThreadPlanAPI; identity: ThreadIdentity; contextRevision?: number };
+type Props = { api: ThreadPlanAPI; identity: ThreadIdentity; contextRevision?: number; onContentChange?(present: boolean): void };
 type ReadFailure = 'failed' | 'not-ready' | 'unsupported';
 const scopeFailure = (error: unknown): Exclude<ReadFailure, 'failed'> | null => error instanceof ThreadRequestError
   ? error.code === 'plan-not-ready' ? 'not-ready' : error.code === 'plan-unsupported' ? 'unsupported' : null
   : null;
 
 /** A draft belongs to one branch on one Host. Switching either discards it. */
-export function ThreadPlan({ api, identity, contextRevision }: Props) {
+export function ThreadPlan({ api, identity, contextRevision, onContentChange }: Props) {
   const host = React.useSyncExternalStore(subscribeRuntimeEndpointChanged, getRuntimeEndpointGeneration, getRuntimeEndpointGeneration);
-  return <PlanCard key={JSON.stringify([host, identity.threadId, identity.branchId])} api={api} identity={identity} contextRevision={contextRevision} host={host} />;
+  return <PlanCard key={JSON.stringify([host, identity.threadId, identity.branchId])} api={api} identity={identity} contextRevision={contextRevision} host={host} onContentChange={onContentChange} />;
 }
 
-function PlanCard({ api, identity, contextRevision, host }: Props & { host: number }) {
+function PlanCard({ api, identity, contextRevision, host, onContentChange }: Props & { host: number }) {
   const { t } = useI18n();
   const [state, setState] = React.useState<ThreadPlanState>();
   const [loading, setLoading] = React.useState(true);
@@ -31,6 +31,8 @@ function PlanCard({ api, identity, contextRevision, host }: Props & { host: numb
   const [draft, setDraft] = React.useState('');
   const [basis, setBasis] = React.useState<ThreadPlanState>();
   const [saving, setSaving] = React.useState(false);
+  const hasContent = Boolean(state?.plan?.content.trim() || editing || saveError || readError === 'failed');
+  React.useEffect(() => { onContentChange?.(hasContent); }, [hasContent, onContentChange]);
   const lifecycle = React.useRef(0);
   const reads = React.useRef(0);
   const request = React.useRef<Parameters<ThreadPlanAPI['update']>[0] | null>(null);

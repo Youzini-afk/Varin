@@ -39,7 +39,7 @@ export function BotDetailsDialog({ bot, onClose }: {
   </Dialog>;
 }
 
-export function BotMemoryPanel({ botId }: { botId: string }) {
+export function BotMemoryPanel({ botId, onContentChange }: { botId: string; onContentChange?(present: boolean): void }) {
   const { t } = useI18n();
   const host = React.useSyncExternalStore(subscribeRuntimeEndpointChanged, getRuntimeEndpointGeneration, getRuntimeEndpointGeneration);
   const [items, setItems] = React.useState<BotMemoryItem[] | null>(null);
@@ -48,6 +48,8 @@ export function BotMemoryPanel({ botId }: { botId: string }) {
   const [editing, setEditing] = React.useState<BotMemoryItem | null>(null);
   const [draft, setDraft] = React.useState('');
   const [busy, setBusy] = React.useState(false);
+  const hasContent = Boolean(items?.length || error || editing);
+  React.useEffect(() => { onContentChange?.(hasContent); }, [hasContent, onContentChange]);
   const [sources, setSources] = React.useState<Record<number, MemorySourceExcerpt[]>>({});
   const [revision, refresh] = React.useReducer((value: number) => value + 1, 0);
   const alive = React.useRef(true);

@@ -10,10 +10,11 @@ import { useI18n } from '@/lib/i18n';
 import { AgentScopePicker } from './AgentScopePicker';
 import { useAgentSettings } from './agentSettings';
 
-export function AgentMemoryPage({ initialScope, scopes, embedded = false }: {
+export function AgentMemoryPage({ initialScope, scopes, embedded = false, onContentChange }: {
   initialScope?: AgentMemoryScope;
   scopes?: Array<{ scope: AgentMemoryScope; label: string }>;
   embedded?: boolean;
+  onContentChange?(present: boolean): void;
 } = {}) {
   const { t } = useI18n();
   const settings = useAgentSettings();
@@ -28,6 +29,9 @@ export function AgentMemoryPage({ initialScope, scopes, embedded = false }: {
   }, [settings.runtime, initialKind, initialId]);
   const items = settings.catalog?.memories.filter(note => agentScopeKey(note.scope) === agentScopeKey(scope)
     && note.content.toLowerCase().includes(query.toLowerCase())) ?? [];
+  const hasContent = Boolean(draft || settings.error || settings.catalog?.memories.some(note =>
+    !scopes || scopes.some(option => agentScopeKey(option.scope) === agentScopeKey(note.scope))));
+  React.useEffect(() => { onContentChange?.(hasContent); }, [hasContent, onContentChange]);
   const save = async () => {
     if (!draft || !settings.catalog) return;
     if (await settings.update('memory', draft)) setDraft(null);
@@ -46,7 +50,7 @@ export function AgentMemoryPage({ initialScope, scopes, embedded = false }: {
   const content = <>
     {settings.error ? <div role="alert" className="mb-4 text-destructive">{settings.error}
       <Button variant="ghost" size="sm" onClick={() => void settings.load()}>{t('assistant.reload')}</Button></div> : null}
-    <div className="grid gap-6 md:grid-cols-[170px_minmax(0,1fr)]">
+    <div className={embedded ? 'grid gap-3' : 'grid gap-6 md:grid-cols-[170px_minmax(0,1fr)]'}>
       {picker(scope, next => {
         requestSettingsNavigation(() => { setDraft(null); setScope(next); });
       })}

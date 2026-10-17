@@ -29,10 +29,10 @@ function OverviewSurface({ compact, label, children }: {
     exit={{ opacity: 0, y: -4, scale: 0.99 }}
     transition={{ duration: reduced ? 0 : 0.18, ease: [0.22, 1, 0.36, 1] }}
     style={{ transformOrigin: 'top right' }}
-    className={cn('pointer-events-auto mt-3 flex flex-col overflow-hidden rounded-xl border border-border/70 shadow-lg',
+    className={cn('pointer-events-auto flex min-h-0 flex-col overflow-hidden rounded-xl border border-border/70',
       compact ? 'workbench-overview-peek max-h-[min(55dvh,24rem)]'
-        : 'workbench-overview-full max-h-[min(72dvh,46rem)] bg-background/96 backdrop-blur-xl')}
-    {...(compact ? { 'data-harness-overview-peek': true } : { 'data-harness-overview-floating': true })}>
+        : 'workbench-overview-full max-h-full bg-background')}
+    {...(compact ? { 'data-harness-overview-peek': true } : { 'data-harness-overview-panel': true })}>
     {children}
   </motion.section>;
 }
@@ -58,13 +58,14 @@ export function WorkOverviewControl({ open, compactOpen, attention, onOpenChange
     if (section) onSelect(section); else onOpenChange(true);
     fullTrigger.current?.focus();
   };
-  return <div className="pointer-events-none absolute right-3 top-2 z-40 flex flex-col items-end"
+  return <aside className="workbench-overview-control pointer-events-none relative flex h-full min-h-0 shrink-0 flex-col items-end"
+    data-view={compactOpen ? 'compact' : open ? 'full' : 'closed'}
     onKeyDown={event => {
       if (compactOpen && event.key === 'Escape') {
         event.preventDefault(); event.stopPropagation(); closeCompact();
       }
     }}>
-    <div className="workbench-overview-launcher pointer-events-auto relative" data-peek-open={compactOpen}
+    <div className="workbench-overview-launcher pointer-events-auto absolute right-3 top-2 z-40" data-peek-open={compactOpen}
       data-harness-overview-controls="true">
       <Tooltip>
         <TooltipTrigger asChild>
@@ -117,8 +118,8 @@ export function WorkOverviewControl({ open, compactOpen, attention, onOpenChange
         </div>
       </OverviewSurface> : null}
     </AnimatePresence>
-    <div hidden={!open || compactOpen}>
+    <div hidden={!open || compactOpen} className={cn('min-h-0 w-full flex-1 flex-col px-3 pb-3 pt-14', open && !compactOpen ? 'flex' : 'hidden')}>
       <OverviewSurface compact={false} label={t('harness.overview.title')}>{children}</OverviewSurface>
     </div>
-  </div>;
+  </aside>;
 }

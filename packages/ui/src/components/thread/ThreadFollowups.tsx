@@ -328,9 +328,10 @@ function FollowupOccurrences({ api, family, mediaRead, identity, item }: { api: 
 }
 
 /** Original definitions and delivery facts; no client timer or execution queue. */
-export function ThreadFollowups({ api, family, mediaRead, research, identity, run, operations, followups, pending, act, cancelObservation, createOpen, onCreateOpenChange }: {
+export function ThreadFollowups({ api, family, mediaRead, research, identity, run, operations, followups, pending, act, cancelObservation, createOpen, onCreateOpenChange, onContentChange }: {
   api: ThreadFollowupsAPI; family?: ThreadFamilyAPI; mediaRead: ThreadsAPI['mediaRead']; research?: ThreadResearchAPI; identity: ThreadIdentity; run?: Run; operations: Operation[]; followups: Followup[];
   createOpen?: boolean; onCreateOpenChange?(open: boolean): void;
+  onContentChange?(present: boolean): void;
   pending: boolean; act(work: () => Promise<unknown>): Promise<void>; cancelObservation(operationId: string): Promise<void>;
 }) {
   const [editing, setEditing] = React.useState(false);
@@ -391,6 +392,8 @@ export function ThreadFollowups({ api, family, mediaRead, research, identity, ru
   React.useEffect(() => { live.current = true; return () => { live.current = false; }; }, []);
   const current = () => live.current && host.current === getRuntimeEndpointGeneration();
   const independent = followups.filter(item => item.actor.kind !== 'goal');
+  const hasContent = Boolean(independent.length || registrations.length || registrationError || editing);
+  React.useEffect(() => { onContentChange?.(hasContent); }, [hasContent, onContentChange]);
   const pastCount = independent.filter(isPastFollowup).length;
   const processes = operations.filter(operation => operation.executor === 'process_spawn' && operation.execution_owner?.kind === 'kernel'
     && ['thread', 'environment'].includes(operation.lifetime) && operation.call_completion?.kind === 'job_accepted');

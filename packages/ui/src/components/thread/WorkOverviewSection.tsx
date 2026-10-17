@@ -10,11 +10,13 @@ export const WorkOverviewSection: React.FC<{
   open: boolean;
   onOpenChange: (open: boolean) => void;
   attention?: boolean;
+  visible?: boolean;
   children: React.ReactNode;
-}> = ({ title, icon, status, open, onOpenChange, attention = false, children }) => {
+}> = ({ title, icon, status, open, onOpenChange, attention = false, visible = true, children }) => {
   return (
     <details
-      className="workbench-disclosure group border-b border-border/45 last:border-b-0"
+      hidden={!visible}
+      className={cn('workbench-disclosure group border-b border-border/45 last:border-b-0', !visible && 'hidden')}
       open={open}
       onToggle={(event) => {
         if (event.target === event.currentTarget && event.currentTarget.open !== open) {

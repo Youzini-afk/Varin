@@ -5,13 +5,15 @@ import { useI18n } from '@/lib/i18n';
 import { ResearchFactsView } from '@/workbenches/research/ResearchFactsPanel';
 
 /** Source choices are Catalog projections. A later Run changing source never hides the older choice. */
-export function ThreadResearch({ api, materials, identity, sourceRunId }: {
-  api: ThreadResearchAPI; materials: ThreadMaterialsAPI; identity: ThreadIdentity; sourceRunId?: string;
+export function ThreadResearch({ api, materials, identity, sourceRunId, onContentChange }: {
+  api: ThreadResearchAPI; materials: ThreadMaterialsAPI; identity: ThreadIdentity; sourceRunId?: string; onContentChange?(present: boolean): void;
 }) {
   const { t } = useI18n();
   const [scopes, setScopes] = React.useState<ThreadResearchScope[]>([]);
   const [selectedRunId, setSelectedRunId] = React.useState<string>();
   const [error, setError] = React.useState<string>();
+  const hasContent = scopes.length > 0 || Boolean(error);
+  React.useEffect(() => { onContentChange?.(hasContent); }, [hasContent, onContentChange]);
   const generation = React.useRef(0);
   const scopeOwner = React.useRef<{ api: ThreadResearchAPI; threadId: string; branchId: string } | undefined>(undefined);
   React.useEffect(() => {

@@ -56,7 +56,7 @@ import { ThreadComposer } from './ThreadComposer';
 import { DraftPresetChips } from '@/components/chat/DraftPresetChips';
 import { useUIStore } from '@/stores/useUIStore';
 import type { ComposerEditorHandle } from '@/components/chat/composer/editor/ComposerEditor';
-import { WorkOverviewControl, type OverviewPeekRow } from './WorkOverviewControl';
+import { WorkOverviewControl, type OverviewPeekRow, type OverviewPeekSection } from './WorkOverviewControl';
 import { WorkOverviewSection } from './WorkOverviewSection';
 import { EMPTY_WORK_OVERVIEW_CHOICES, useWorkOverviewStore } from '@/stores/useWorkOverviewStore';
 import { VarinLogo } from '@/components/ui/VarinLogo';
@@ -489,26 +489,61 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
   const overviewKey = draftKey;
   const choices = useWorkOverviewStore(state => state.bySession[overviewKey] ?? EMPTY_WORK_OVERVIEW_CHOICES);
   const disclosure = useWorkOverviewStore(state => state.setDisclosure);
-  const showOverview = (section: Parameters<typeof disclosure>[1]) => { disclosure(overviewKey, 'overview', true); disclosure(overviewKey, section, true); };
+  const contentOwner = `${host}:${draftKey}`;
+  const [overviewContent, setOverviewContent] = React.useState<{ owner: string; plan?: boolean; followups?: boolean; research?: boolean; memory?: boolean }>({ owner: '' });
+  const [focusedOverview, setFocusedOverview] = React.useState<{ owner: string; section: OverviewPeekSection }>();
+  const reportOverviewContent = React.useMemo(() => {
+    const report = (key: 'plan' | 'followups' | 'research' | 'memory') => (present: boolean) => setOverviewContent(previous => {
+      const current = previous.owner === contentOwner ? previous : { owner: contentOwner };
+      return current[key] === present ? current : { ...current, [key]: present };
+    });
+    return { plan: report('plan'), followups: report('followups'), research: report('research'), memory: report('memory') };
+  }, [contentOwner]);
+  const content = overviewContent.owner === contentOwner ? overviewContent : undefined;
+  const focused = focusedOverview?.owner === contentOwner ? focusedOverview.section : undefined;
+  const showOverview = (section: OverviewPeekSection) => {
+    setFocusedOverview({ owner: contentOwner, section });
+    disclosure(overviewKey, 'overview', true); disclosure(overviewKey, section, true);
+  };
+  const checkpoint = snapshot?.context.checkpoint;
+  const resources = checkpoint?.resources?.snapshot;
+  const visibleOperations = snapshot?.operations.filter(operation => operation.id !== pause?.action_id) ?? [];
+  const hasRecovery = Boolean(recovery.notice || recovery.error || recovery.unavailable || recovery.combinedUnavailable
+    || recovery.operation || recovery.canRetry || recovery.canUndo || recovery.savedOperations.length);
+  const hasSummaries = Boolean(checkpoint?.proposal.summary.trim() || snapshot?.context.jobs.length);
+  const sections = {
+    plan: Boolean(snapshot?.goals.length || content?.plan),
+    threads: Boolean(snapshot?.children?.length || snapshot?.childExecutions?.length || snapshot?.delegatedExecutions?.length || snapshot?.thread.parent_thread_id),
+    outputs: Boolean(visibleOperations.length || snapshot?.followups.some(item => item.actor.kind !== 'goal') || content?.followups || hasRecovery),
+    sources: Boolean(preparedSource || draft.workspacePath || launch?.selection.source || content?.research || resources?.system
+      || resources?.appendSystem || resources?.instructions.length || resources?.instructionScopes.some(scope => scope.instructions.length)
+      || resources?.skills.length || resources?.diagnostics.length),
+    memory: Boolean(content?.memory || checkpoint?.personalization?.memorySnapshot.memories.length || hasSummaries),
+    computer: hasComputer,
+  };
   const overviewRows: OverviewPeekRow[] = [];
-  if (snapshot?.goals.length) overviewRows.push({ id: 'goals', section: 'plan', icon: 'target', label: t('chat.draftPresets.craftGoal.label'), value: snapshot.goals.length });
-  if (snapshot?.children?.length) overviewRows.push({ id: 'children', section: 'threads', icon: 'git-branch', label: t('harness.overview.threads'), value: snapshot.children!.length });
-  if (snapshot?.operations.some(operation => operation.phase !== 'terminal')) overviewRows.push({ id: 'operations', section: 'outputs', icon: 'loader-4', label: t('harness.overview.outputs'), value: snapshot.operations.filter(operation => operation.phase !== 'terminal').length });
-  if (hasComputer) overviewRows.push({ id: 'computer', section: 'computer', icon: 'computer', label: t('computer.automation.title') });
+  if (sections.plan) overviewRows.push({ id: 'plan', section: 'plan', icon: 'task', label: t('harness.overview.plan') });
+  if (sections.threads) overviewRows.push({ id: 'children', section: 'threads', icon: 'git-branch', label: t('harness.overview.threads'), value: snapshot?.children?.length || undefined });
+  if (sections.outputs) overviewRows.push({ id: 'operations', section: 'outputs', icon: 'list-check-2', label: t('harness.overview.outputs'), value: visibleOperations.length || undefined });
+  if (sections.sources) overviewRows.push({ id: 'sources', section: 'sources', icon: 'folder', label: t('harness.overview.sources') });
+  if (sections.memory) overviewRows.push({ id: 'memory', section: 'memory', icon: 'book-open', label: t('harness.overview.memory') });
+  if (sections.computer) overviewRows.push({ id: 'computer', section: 'computer', icon: 'computer', label: t('computer.automation.title') });
   const empty = Boolean(snapshot && !visibleHistory.length && !progress.length && !active && !firstMessage.message && !pending && !draft.pendingInput);
   const emptyWorkspacePath = preparedSource?.path ?? draft.workspacePath ?? launch?.selection.source?.live_root?.canonicalRoot;
 
   const overview = <WorkOverviewControl open={choices.overview ?? false} compactOpen={choices.compact ?? false}
     attention={Boolean(run?.waiting_on || recovery.unavailable || error)} rows={overviewRows}
-    onOpenChange={open => disclosure(overviewKey, 'overview', open)} onCompactChange={open => disclosure(overviewKey, 'compact', open)}
+    onOpenChange={open => { setFocusedOverview(undefined); disclosure(overviewKey, 'overview', open); }}
+    onCompactChange={open => { setFocusedOverview(undefined); disclosure(overviewKey, 'compact', open); }}
     onSelect={section => showOverview(section)}>
     <div className="border-b border-border/50 px-4 py-3 typography-ui-label font-medium">{t('harness.overview.title')}</div>
     <div className="thread-work-overview min-h-0 overflow-y-auto">
-      <WorkOverviewSection title={t('harness.overview.plan')} icon="task" open={choices.plan ?? false} onOpenChange={open => disclosure(overviewKey, 'plan', open)}>
+      {!overviewRows.length && !focused && <p className="px-3 py-4 typography-meta text-muted-foreground">{t('harness.overview.empty')}</p>}
+      <WorkOverviewSection visible={sections.plan || focused === 'plan'} title={t('harness.overview.plan')} icon="task" open={choices.plan ?? false} onOpenChange={open => disclosure(overviewKey, 'plan', open)}>
       {!readOnly && snapshot && <ThreadGoal api={api.goals} identity={identity} goals={snapshot.goals} sourceRunId={run?.id} refresh={async () => { await projection.current?.refresh(); }} />}
-      {!readOnly && api.plan && <ThreadPlan api={api.plan} identity={identity} contextRevision={snapshot?.context.checkpoint?.revision} />}
+      {!readOnly && api.plan && <ThreadPlan api={api.plan} identity={identity} contextRevision={snapshot?.context.checkpoint?.revision} onContentChange={reportOverviewContent.plan} />}
       </WorkOverviewSection>
-      <WorkOverviewSection title={t('harness.overview.threads')} icon="git-branch" open={choices.threads ?? false} onOpenChange={open => disclosure(overviewKey, 'threads', open)}>
+      <WorkOverviewSection visible={sections.threads || focused === 'threads'} title={t('harness.overview.threads')} icon="git-branch" open={choices.threads ?? false} onOpenChange={open => disclosure(overviewKey, 'threads', open)}>
       {snapshot && <ChildTasks api={api} identity={identity} children={snapshot.children ?? []}
         executions={snapshot.childExecutions ?? []} activity={snapshot.childActivity} pending={pending}
         cancel={!readOnly && api.collaboration ? operationId => act(() => api.collaboration!.cancelChild(identity, operationId)) : undefined} />}
@@ -519,8 +554,8 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
       {!readOnly && api.messages && <ThreadMessages api={api.messages} family={api.family} identity={identity} eventCursor={snapshot?.eventCursor} cancelObservation={pending ? undefined : operationId => act(() => api.cancelOperation(operationId), true)} />}
     {delegated && <div className="mx-auto w-full max-w-3xl px-4"><ThreadExecutions key={`${host}:${identity.threadId}:${identity.branchId}`} api={api} identity={identity} executions={snapshot?.delegatedExecutions ?? []} /></div>}
       </WorkOverviewSection>
-      <WorkOverviewSection title={t('harness.overview.outputs')} icon="list-check-2" open={choices.outputs ?? false} onOpenChange={open => disclosure(overviewKey, 'outputs', open)}>
-      {snapshot?.operations.filter(operation => operation.id !== pause?.action_id).map(operation => <div key={operation.id} className="mx-auto max-w-3xl rounded border p-2 text-sm">
+      <WorkOverviewSection visible={sections.outputs || focused === 'outputs'} title={t('harness.overview.outputs')} icon="list-check-2" open={choices.outputs ?? false} onOpenChange={open => disclosure(overviewKey, 'outputs', open)}>
+      {visibleOperations.map(operation => <div key={operation.id} className="mx-auto max-w-3xl rounded border p-2 text-sm">
         <div>Background operation · {operation.phase} · {operation.outcome ?? 'In progress'} · effect: {operation.effect}</div>
         <InferenceStatus operation={operation} />
         <McpTaskStatus operation={operation} />
@@ -542,21 +577,21 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
       </div>)}
       {!readOnly && snapshot && <ThreadFollowups key={`${host}:${identity.threadId}:${identity.branchId}`} api={api.followups} family={api.family} mediaRead={api.mediaRead} research={api.research} identity={identity}
         run={run ?? undefined} operations={snapshot.operations} followups={snapshot.followups} pending={pending} act={act}
-        cancelObservation={operationId => act(() => api.cancelOperation(operationId))} />}
+        cancelObservation={operationId => act(() => api.cancelOperation(operationId))} onContentChange={reportOverviewContent.followups} />}
     {!readOnly && <ThreadRecovery recovery={recovery} disabled={active || actionPending} />}
       </WorkOverviewSection>
-      <WorkOverviewSection title={t('harness.overview.sources')} icon="folder" open={choices.sources ?? false} onOpenChange={open => disclosure(overviewKey, 'sources', open)}>
+      <WorkOverviewSection visible={sections.sources || focused === 'sources'} title={t('harness.overview.sources')} icon="folder" open={choices.sources ?? false} onOpenChange={open => disclosure(overviewKey, 'sources', open)}>
     {!readOnly && !delegated && <ThreadSourcePicker key={identity.branchId} api={api} identity={identity} initialPath={draft.workspacePath ?? initialWorkspacePath}
       onUseChatOnly={() => { useThreadDraftStore.getState().patch(draftKey, { workspacePath: undefined, preparedSource: null, sourceSelection: undefined }); }}
       active={active || pending} launch={snapshot?.launch ?? null} prepared={preparedSource} onPrepared={setPreparedSource} onPreparingChange={setPreparingSource} />}
     {!readOnly && snapshot?.context.checkpoint && <ThreadResources checkpoint={snapshot.context.checkpoint} pending={pending}
       onAddSkill={addSkill}
       onRefresh={() => void act(() => api.resources.refresh({ ...identity, expectedRevision: snapshot.context.checkpoint!.revision }))} />}
-      {!readOnly && api.research && <ThreadResearch key={`research:${host}:${identity.threadId}:${identity.branchId}`} api={api.research} materials={api.materials} identity={identity} sourceRunId={run?.id} />}
+      {!readOnly && api.research && <ThreadResearch key={`research:${host}:${identity.threadId}:${identity.branchId}`} api={api.research} materials={api.materials} identity={identity} sourceRunId={run?.id} onContentChange={reportOverviewContent.research} />}
       </WorkOverviewSection>
-      <WorkOverviewSection title={t('harness.overview.memory')} icon="book-open" open={choices.memory ?? false} onOpenChange={open => disclosure(overviewKey, 'memory', open)}>
-    {snapshot && <ThreadMemory key={identity.threadId} identity={identity} botId={snapshot.thread.bot_id} basis={snapshot.context.checkpoint?.personalization} />}
-    {snapshot && <details className="mx-auto max-h-64 w-full max-w-3xl shrink-0 overflow-y-auto px-4 text-xs text-muted-foreground">
+      <WorkOverviewSection visible={sections.memory || focused === 'memory'} title={t('harness.overview.memory')} icon="book-open" open={choices.memory ?? false} onOpenChange={open => disclosure(overviewKey, 'memory', open)}>
+    {snapshot && <ThreadMemory key={identity.threadId} identity={identity} botId={snapshot.thread.bot_id} basis={snapshot.context.checkpoint?.personalization} onContentChange={reportOverviewContent.memory} />}
+    {snapshot && hasSummaries && <details className="mx-auto max-h-64 w-full max-w-3xl shrink-0 overflow-y-auto px-4 text-xs text-muted-foreground">
       <summary className="cursor-pointer">Context summaries · checkpoint {snapshot.context.checkpoint?.revision ?? 0} · {snapshot.context.jobs.length} jobs</summary>
       {snapshot.context.checkpoint?.proposal.through_id && <div className="my-2" aria-label="Active context summary">
         <MarkdownRenderer messageId={snapshot.context.checkpoint.id} content={snapshot.context.checkpoint.proposal.summary} />
@@ -575,7 +610,7 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
       })}
     </details>}
       </WorkOverviewSection>
-      <WorkOverviewSection title={t('computer.automation.title')} icon="computer" open={choices.computer ?? false} onOpenChange={open => disclosure(overviewKey, 'computer', open)}>
+      <WorkOverviewSection visible={sections.computer} title={t('computer.automation.title')} icon="computer" open={choices.computer ?? false} onOpenChange={open => disclosure(overviewKey, 'computer', open)}>
     {!readOnly && hasComputer && <section className="mx-auto w-full max-w-3xl px-4" aria-label={t('computer.automation.title')}>
       <h3 className="typography-meta">{t('computer.automation.title')}</h3>
       <ComputerAutomationSection view={computer} directory={initialWorkspacePath ?? ''} />
@@ -588,8 +623,9 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
     addContentReference(identity, { ref: `document-selection:${crypto.randomUUID()}`, title: region.title, image: region.image,
       source: { kind: 'document', snapshotId: region.snapshotId, sourceHash: region.sourceHash, page: region.page, region: region.region } });
     messageInput.current?.focus();
-  }}><ReferenceNavigationContext.Provider value={referenceNavigation}><section ref={handoff.setRoot} className="regular-chat-view relative flex h-full min-h-0 flex-col [container-type:inline-size]" aria-label="Thread conversation" data-thread-conversation="true">
-    {overview}
+  }}><ReferenceNavigationContext.Provider value={referenceNavigation}><section ref={handoff.setRoot} className="regular-chat-view relative flex h-full min-h-0 min-w-0 [container-type:inline-size]" aria-label="Thread conversation" data-thread-conversation="true">
+    <div className="thread-conversation-layout relative flex min-h-0 min-w-0 flex-1">
+    <div className="flex min-h-0 min-w-0 flex-1 flex-col">
     {!historyView && run?.state === 'failed' && <div role="alert" aria-label="Run failed" className="mx-auto w-full max-w-3xl px-4 py-2 text-sm text-destructive">
       <p>{t('harness.threads.state.failed')}</p>
       {runFailure && <p>{runFailureKey ? t(runFailureKey) : runFailure.message}</p>}
@@ -779,5 +815,8 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
       }} /></div>}
     </div>}
     {empty && <div className="min-h-6 flex-1" />}
+    </div>
+    {overview}
+    </div>
   </section></ReferenceNavigationContext.Provider></ThreadMaterials>;
 }

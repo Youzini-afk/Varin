@@ -6,7 +6,7 @@
   --wb-state-duration: 170ms;
   --wb-travel-duration: 520ms;
   --wb-overview-compact-width: 12rem;
-  --wb-overview-full-width: 20rem;
+  --wb-overview-full-width: 17rem;
 }
 
 .conversation-message-handoff {
@@ -250,12 +250,22 @@
 .workbench-overview-peek-trigger:hover,
 .workbench-overview-peek-trigger:focus-visible { color: var(--foreground); }
 .workbench-overview-peek-trigger:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
+.workbench-overview-control { width: 0; transition: width var(--wb-panel-duration) var(--wb-ease); }
+.workbench-overview-control[data-view="compact"] { width: calc(var(--wb-overview-compact-width) + 1.5rem); }
+.workbench-overview-control[data-view="full"] { width: calc(var(--wb-overview-full-width) + 1.5rem); }
 .workbench-overview-peek {
-  width: min(var(--wb-overview-compact-width), calc(100cqi - 1.5rem));
+  width: calc(100% - 1.5rem);
+  margin: 3.5rem .75rem .75rem;
   background: var(--surface-elevated);
 }
-.workbench-overview-full { width: min(var(--wb-overview-full-width), calc(100cqi - 1.5rem)); }
+.workbench-overview-full { width: 100%; }
 .workbench-overview-peek-progress > span { transition: width var(--wb-state-duration) ease; }
+@container (max-width: 600px) {
+  .thread-conversation-layout { flex-direction: column-reverse; }
+  .workbench-overview-control { height: 0; }
+  .workbench-overview-control[data-view="compact"],
+  .workbench-overview-control[data-view="full"] { width: 100%; height: auto; max-height: 45%; }
+}
 
 @keyframes wb-action-arrive {
   from { opacity: 0; transform: translateY(3px) scale(.65); }
@@ -274,7 +284,6 @@
   .conversation-composer-attachment { animation: none; }
 }
 
-.conversation-chat-layout { transition: padding-right var(--wb-panel-duration) var(--wb-ease); }
 .conversation-layout { display: grid; grid-template-rows: minmax(0, 1fr) auto auto; }
 .conversation-content { grid-row: 1; overflow: hidden; }
 .conversation-scene { display: flex; flex-direction: column; height: 100%; min-height: 0; }
@@ -285,10 +294,6 @@
   position: absolute; top: 12px; left: 50%; z-index: 1; transform: translateX(-50%);
   max-width: calc(100% - 32px); padding: 5px 10px; border-radius: 8px;
   background: var(--background); pointer-events: none;
-}
-.conversation-chat-layout[data-overview-view="compact"] { padding-right: calc(var(--wb-overview-compact-width) + 1rem); }
-@container (min-width: 900px) {
-  .conversation-chat-layout[data-overview-view="full"] { padding-right: calc(var(--wb-overview-full-width) + 1rem); }
 }
 @media (min-width: 768px) {
   [data-workbench-chrome="agent"] .conversation-layout[data-centered] {
