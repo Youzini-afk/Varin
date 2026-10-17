@@ -23,6 +23,7 @@ import type { ThreadMaterialAuthority, WebMaterialStore } from '../harness/web-m
 import { createWebSearchService, parseSearchProviderSettings, resolveConfiguredSearchProvider } from '../harness/web-search.js';
 import type { AgentRuntimeClient } from './agent-runtime-client.js';
 import type { ExtensionToolConfiguration, ExtensionToolRun } from './extension-tool-owner.js';
+import { extendToolConfiguration } from './extension-tool-owner.js';
 import { createMaterialToolOwner } from './material-tool-owner.js';
 import { threadMaterialScope } from './material-storage.js';
 import type { ExtensionToolBinding, LaunchSource, OutputBody, IncomingMedia, OutputPart } from './protocol.generated.js';
@@ -283,13 +284,18 @@ export function createWebRuntime(options: WebRuntimeOptions) {
     const captured = required.length ? null : await options.settings(run.source).then(capture).then(
       value => ({ value }), error => ({ error }),
     );
-    return (descriptor, original) => {
+    return extendToolConfiguration(previous, (descriptor, original) => {
       if (!WEB_TOOL_DECLARATIONS.some(value => value.id === descriptor.id && value.version === descriptor.version)) return previous?.(descriptor, original) ?? original ?? null;
       if (original !== undefined) { configuration(original); return original; }
       if (!captured) throw new Error('The original Web configuration was not retained');
       if ('error' in captured) throw captured.error;
       return JSON.stringify(captured.value);
-    };
+    }, descriptor => {
+      if (!WEB_TOOL_DECLARATIONS.some(value => value.id === descriptor.id && value.version === descriptor.version)) return undefined;
+      if (!captured || 'error' in captured) return undefined;
+      if (captured.value.disabledTools.includes(descriptor.tool!.name)) return false;
+      return descriptor.tool!.name !== 'websearch' || (!captured.value.web.searchError && Boolean(captured.value.web.settings?.search));
+    });
   };
   const snapshotCapability = createMaterialToolOwner(options.materials, async (invocation, signal) => (await invocationScope(invocation, signal)).authority);
   const decisionMaterials = async (invocation: ToolInvocationAuthority, signal: AbortSignal) => {

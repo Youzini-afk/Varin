@@ -20,7 +20,7 @@ import {
   type PermissionPolicy,
 } from '@varin/protocol';
 import { compileToolJsonSchema } from '../models/schema.js';
-import type { ThreadToolPreparation } from '@varin/application-client';
+import type { ThreadToolPreparation, AgentSettingsSnapshot } from '@varin/application-client';
 import type { KernelClient } from './kernel-client.js';
 import type {
   ExecutorOwner,
@@ -91,6 +91,24 @@ export interface ExtensionToolConfiguration {
   retain?(descriptor: VarinExtensionServiceProvision, identity: string | null): () => void;
   retainPreparation?(): () => void;
   release?(): void;
+}
+/** Preserve the other owners' availability and lease hooks when composing configuration. */
+export function extendToolConfiguration(
+  previous: ExtensionToolConfiguration | undefined,
+  resolve: ExtensionToolConfiguration,
+  available?: (descriptor: VarinExtensionServiceProvision) => boolean | undefined,
+): ExtensionToolConfiguration {
+  return Object.assign(resolve, previous, {
+    enabled: (descriptor: VarinExtensionServiceProvision) => available?.(descriptor) ?? previous?.enabled?.(descriptor) ?? true,
+  });
+}
+/** One explicit tool toggle applies to every extension, in addition to owner readiness. */
+export function configuredToolAvailability(snapshot: AgentSettingsSnapshot, previous: ExtensionToolConfiguration): ExtensionToolConfiguration {
+  const global = object(snapshot.global.harness) ? snapshot.global.harness : {};
+  const project = snapshot.projectTrusted && object(snapshot.project.harness) ? snapshot.project.harness : {};
+  const tools = { ...(object(global.tools) ? global.tools : {}), ...(object(project.tools) ? project.tools : {}) };
+  return extendToolConfiguration(previous, (descriptor, original) => previous(descriptor, original),
+    descriptor => descriptor.tool && tools[descriptor.tool.name] === false ? false : undefined);
 }
 class ExtensionToolConfigurationError extends Error {
   constructor(serviceId: string, cause: unknown) {

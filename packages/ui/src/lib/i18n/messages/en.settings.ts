@@ -721,6 +721,7 @@ export const settingsDict = {
   'settings.varin.mcp.native.exposure.codemode': "Codemode scripts (default)",
   'settings.varin.mcp.native.exposure.deferred': "Load on tool search",
   'settings.varin.mcp.native.exposure.direct': "Declare to model",
+  'settings.varin.mcp.native.exposure.catalog': "Individual capability catalog entries",
   'settings.varin.mcp.native.exposure.hidden': "Hidden",
   'settings.varin.mcp.native.seconds': "seconds",
   'settings.varin.mcp.native.description': "Server description",

@@ -179,6 +179,7 @@ pub(crate) fn builtin_definitions(
     );
     tools = crate::questions::builtin_schemas(tools);
     tools.extend(crate::collaboration::builtin_schemas());
+    tools.extend(crate::capability_tools::definitions());
     tools.extend(crate::family_tools::builtin_schemas());
     tools.extend([
         crate::message_tools::builtin_schema(),
@@ -516,8 +517,11 @@ impl ToolExecutor for ScopedTools {
             .active
             .as_ref()
             .ok_or_else(|| failed("tool scope is not prepared"))?;
+        let has_goal = self.owner.catalog.lock().map_err(failed)?.goal_binding(run).map_err(failed)?.is_some();
         let schemas = active.directory.schemas().iter()
-            .filter(|schema| self.allowed_tools.as_ref().is_none_or(|names| names.contains(&schema.name)))
+            .filter(|schema| schema.name != "goal_report" || has_goal)
+            .filter(|schema| varin_runtime::tool_disclosure::is_gateway(schema)
+                || self.allowed_tools.as_ref().is_none_or(|names| names.contains(&schema.name)))
             .cloned().collect::<Vec<_>>();
         let executor = active
             .directory

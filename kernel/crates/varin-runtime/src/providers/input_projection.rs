@@ -43,6 +43,14 @@ fn text_content(content: &Content) -> Content {
 /// Shared by built-in and contributed adapters. Unchanged items keep their Arc identity;
 /// changed items are reused within the original compile cache without copying image bytes.
 pub(super) fn model_input<'a>(view: &'a RequestView, connection: &Connection, reuse: Option<&mut RequestCompileReuse>) -> Cow<'a, RequestView> {
+    let mut projected = text_input(view, connection, reuse);
+    if let Some(tools) = crate::tool_disclosure::model_tools(&view.binding.tools) {
+        projected.to_mut().binding.tools = tools;
+    }
+    projected
+}
+
+fn text_input<'a>(view: &'a RequestView, connection: &Connection, reuse: Option<&mut RequestCompileReuse>) -> Cow<'a, RequestView> {
     if connection.accepts_images != Some(false) { return Cow::Borrowed(view); }
     let mut cache = reuse.map(|reuse| &mut reuse.text_input);
     let mut previous = cache.as_mut().map(|cache| std::mem::take(&mut cache.items)).unwrap_or_default();

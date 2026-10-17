@@ -2,6 +2,14 @@ import { describe, it, expect } from 'vitest';
 import { getToolSummary, groupToolCalls, type ToolGroupEntry } from './toolSummary.js';
 
 describe('getToolSummary', () => {
+  it('shows the disclosed target and keeps effectful calls out of read groups', () => {
+    expect(getToolSummary({ toolName: 'tool_describe', arguments: { namespace: 'browser' } }))
+      .toEqual({ text: 'browser', readOnly: true });
+    expect(getToolSummary({ toolName: 'tool_invoke', arguments: { reference: { name: 'file_edit', version: '1' }, arguments: { path: 'src/app.ts' } } }))
+      .toEqual({ text: 'file_edit · src/app.ts', readOnly: false });
+    expect(getToolSummary({ toolName: 'tool_invoke', arguments: { reference: { name: 'tool_invoke' } } }))
+      .toEqual({ text: 'tool_invoke', readOnly: false });
+  });
   it('grep: pattern + path + hit count', () => {
     const result = getToolSummary({
       toolName: 'grep',

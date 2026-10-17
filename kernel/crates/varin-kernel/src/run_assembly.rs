@@ -374,6 +374,7 @@ impl RunAssembly {
         }
         if !is_context_job {
             declarations.push(crate::questions::declaration(runtime.catalog()));
+            declarations.extend(crate::capability_tools::declarations(runtime.catalog()));
             declarations.extend(crate::family_tools::declarations(runtime.catalog()));
             declarations.push(crate::message_tools::declaration(runtime.catalog()));
             declarations.push(crate::followup_tools::declaration(

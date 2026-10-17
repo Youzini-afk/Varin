@@ -51,6 +51,8 @@ it('freezes only its original setting and restores it without rereading changed 
   const original = first(declaration);
   const denied = make(async () => snapshot({}, true));
   const prepareDenied = await denied.prepareConfiguration(run, []);
+  expect(first.enabled!(declaration)).toBe(true);
+  expect(prepareDenied.enabled!(declaration)).toBe(false);
   expect((await invoke(denied, { action: 'search', query: 'query' }, prepareDenied(declaration))).receipt)
     .toMatchObject({ executor_stopped: true, completion: { outcome: 'failed', effect: 'none', content: { data: { code: 'forbidden' } } } });
   expect(fetch).not.toHaveBeenCalled();

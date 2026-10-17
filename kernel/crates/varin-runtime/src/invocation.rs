@@ -266,7 +266,7 @@ impl<P: Persistence + ?Sized + 'static> InvocationRunner<P> {
             ));
         }
         reservation.resolve(&contract.resources)?;
-        let durable = !contract.read_only
+        let durable = bound.requires_operation() || !contract.read_only
             || contract.completion == CompletionKind::Job
             || !matches!(bound.executor_owner(), ExecutorOwner::Kernel);
         let tool = AdmittedTool {

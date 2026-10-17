@@ -27,6 +27,18 @@ const work = (threadId = 'root'): ComputerWorkRef => ({ runtime: 'agent', thread
 const owner = { extensionId: 'varin.builtin.computer', extensionVersion: '1.0.0', entrypointId: 'host', instanceKey: 'computer-runtime-fixture', generation: 1 };
 const response = (extra: Partial<DriverResponse> = {}): DriverResponse => ({ id: 'controlled', ok: true, ...extra });
 const deferred = <T>() => { let resolve!: (value: T) => void, reject!: (reason: Error) => void; const promise = new Promise<T>((a, b) => { resolve = a; reject = b; }); return { promise, resolve, reject }; };
+test('Computer settings hide declarations during preparation without acquiring a desktop', async () => {
+  const opened = await fixture();
+  try {
+    const run = { runId: 'root-run', threadId: 'root', source: null };
+    const available = await opened.computer.prepareConfiguration(run, []);
+    assert(COMPUTER_TOOL_DECLARATIONS.every(tool => available.enabled!(tool)));
+    opened.disable();
+    const disabled = await opened.computer.prepareConfiguration(run, []);
+    assert(COMPUTER_TOOL_DECLARATIONS.every(tool => !disabled.enabled!(tool)));
+    assert.equal(opened.calls.length, 0);
+  } finally { await opened.cleanup(); }
+});
 async function fixture(records = new Map<string, KernelRecordResult>(), remote: Partial<Pick<ComputerServiceOptions, 'hostId' | 'remoteHosts' | 'fetch' | 'platform' | 'vmExec' | 'resolveWork'>> = {}) {
   const dataDir = await mkdtemp(join(tmpdir(), 'varin-computer-domain-'));
   let enabled = true, releases = 0, failClear = false, blockInput = false, idle = false, deliveries = 0, terminal = false, releaseSucceeds = true, failList = false;

@@ -1,5 +1,9 @@
 use super::*;
 use varin_runtime::execution::*;
+fn with_disclosure(mut tools: Vec<ToolSchema>) -> Vec<ToolSchema> {
+    tools.extend(varin_runtime::tool_disclosure::schemas());
+    tools
+}
 #[path = "../../varin-runtime/tests/fixtures/child_dispatch.rs"]
 mod fixture;
 
@@ -254,7 +258,12 @@ fn shipped_defaults_resolve_actual_declarations_with_their_required_sources() {
             .unwrap()
             .clone()
     };
-    let f = fixture::Fixture::new_with_schemas(0, get("file_read"), get("dispatch"));
+    let f = fixture::Fixture::new_parent_custom(0, get("file_read"), get("dispatch"), false, false, false, |_, launch| {
+        // Shipped presets must compare against the owning wait declaration, not the
+        // generic fixture's intentionally minimal placeholder schema.
+        launch.tools.retain(|tool| tool.name != "wait_child");
+        launch.tools.push(get("wait_child"));
+    });
     let mut selected =
         f.db.capture_child_dispatch_invocation(&f.context)
             .unwrap()
@@ -305,10 +314,10 @@ fn shipped_defaults_resolve_actual_declarations_with_their_required_sources() {
         // An explicit source capability selection stays exact when a preset evolves.
         input.tools = Some(vec!["file_read".into()]);
         let (_, explicit) = crate::collaboration::resolve_selection(&selected, &input).unwrap();
-        assert_eq!(explicit, vec![get("file_read")]);
+        assert_eq!(explicit, with_disclosure(vec![get("file_read")]));
         input.tools = Some(vec!["code_retrieval".into()]);
         let (_, explicit) = crate::collaboration::resolve_selection(&selected, &input).unwrap();
-        assert_eq!(explicit, vec![get("code_retrieval")]);
+        assert_eq!(explicit, with_disclosure(vec![get("code_retrieval")]));
         input.tools = None;
         assert!(resolved.source_delegation().configured_preset);
         if member == ChildPresetDefault::Worker {
@@ -339,7 +348,7 @@ fn shipped_defaults_resolve_actual_declarations_with_their_required_sources() {
 }
 
 #[test]
-fn absent_source_defaults_derive_from_frozen_declarations_but_explicit_tools_remain_exact() {
+fn absent_source_defaults_derive_from_frozen_declarations_but_explicit_domain_tools_remain_exact() {
     use varin_runtime::catalog::dispatch::{
         ChildModelSource, ChildPreset, ChildPresetDefault, ChildPresetToolsSource, ChildWorkMode,
     };
@@ -361,6 +370,8 @@ fn absent_source_defaults_derive_from_frozen_declarations_but_explicit_tools_rem
         |input, launch| {
             input.tools = Some(vec!["helper".into()]);
             launch.source = None;
+            launch.tools.retain(|tool| tool.name != "wait_child");
+            launch.tools.push(get("wait_child"));
         },
     );
     let mut selected =
@@ -446,7 +457,7 @@ fn absent_source_defaults_derive_from_frozen_declarations_but_explicit_tools_rem
     input.tools = Some(vec!["helper".into()]);
     input.work_mode = Some(ChildWorkMode::ReadOnly);
     let (_, tools) = crate::collaboration::resolve_selection(&selected, &input).unwrap();
-    assert_eq!(tools, vec![selected.extension_bindings[0].tool.clone()]);
+    assert_eq!(tools, with_disclosure(vec![selected.extension_bindings[0].tool.clone()]));
     let root = f.root.clone();
     drop(selected);
     drop(f);

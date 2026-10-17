@@ -26,6 +26,10 @@ it('freezes Web configuration failures at its own declarations and preserves the
   expect(broken(COMPUTER_TOOL_DECLARATIONS[0])).toBe('other-owner');
   expect(() => broken(WEB_TOOL_DECLARATIONS[1])).toThrow(failure);
   expect(broken(WEB_TOOL_DECLARATIONS[1], original)).toBe(original);
+  expect(accepted.enabled!(WEB_TOOL_DECLARATIONS[0])).toBe(false); // No search provider configured.
+  expect(accepted.enabled!(WEB_TOOL_DECLARATIONS[1])).toBe(true); // Page/material reads remain usable.
+  const disabled = await make(async () => ({ ...snapshot, global: { harness: { tools: { webfetch: false } } } })).prepareConfiguration(run, []);
+  expect(disabled.enabled!(WEB_TOOL_DECLARATIONS[1])).toBe(false);
 });
 
 it('keeps an unconfirmed Storage mutation unknown and unstopped rather than converting a rejected Host promise to no effect', async () => {

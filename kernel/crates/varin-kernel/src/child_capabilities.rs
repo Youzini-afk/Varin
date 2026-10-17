@@ -178,7 +178,8 @@ impl varin_runtime::execution::ContextPreparation for BindingPreparation {
                 error(e.to_string())
             })?
         };
-        if binding.tools.iter().any(|tool| tool.name == "dispatch") {
+        if binding.tools.iter().any(|tool| tool.name == "dispatch")
+            && !varin_runtime::tool_disclosure::enabled(&binding.tools) {
             let text = if let Some(reference) = binding
                 .child_dispatch
                 .as_ref()
@@ -240,7 +241,7 @@ impl varin_runtime::execution::ContextPreparation for BindingPreparation {
     }
 }
 
-fn discovery(
+pub(crate) fn discovery(
     selected: &varin_runtime::catalog::dispatch::ChildDispatchSelection,
 ) -> serde_json::Value {
     use serde_json::json;

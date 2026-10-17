@@ -470,6 +470,15 @@ impl ChildDispatchSelection {
             }
             tools = selected.clone();
         }
+        // Discovery/call are the native interface to this exact subset, not additional
+        // target authority. Explicit profiles retain the interface even when listing only
+        // their domain capabilities. Older retained catalogs do not acquire new declarations.
+        for gateway in crate::tool_disclosure::schemas() {
+            if self.catalog.native_capabilities.iter().any(|entry| entry.name == gateway.name && entry.version == gateway.version)
+                && !tools.contains(&gateway.name) {
+                tools.push(gateway.name);
+            }
+        }
         let mode = if input.preset.is_none() && input.work_mode.is_none() {
             if tools.iter().any(|name| self.physical_tool(name)) {
                 ChildWorkMode::IsolatedWrite

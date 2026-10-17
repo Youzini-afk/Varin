@@ -692,7 +692,15 @@ impl RequestCompileReuse {
         adapter: usize,
         selected: Option<Arc<dyn ModelProvider>>,
     ) {
-        let b = &view.binding;
+        let mut projected_binding;
+        let b = if let Some(tools) = crate::tool_disclosure::model_tools(&view.binding.tools) {
+            projected_binding = view.binding.clone();
+            projected_binding.tools = tools;
+            // This is only the encoder reuse key. The original request and executable
+            // pins retain their real generation and complete authorized directory.
+            projected_binding.tool_schema_generation = 0;
+            &projected_binding
+        } else { &view.binding };
         let hit = self.identity.as_ref().is_some_and(|old| {
             let a = &old.binding;
             old.run == view.run_id
@@ -969,6 +977,9 @@ pub use policy_model::*;
 /// A selected invocation. External arguments are decoded when this handle is created, and the
 /// same implementation and typed input are retained through preparation, admission and dispatch.
 pub trait PreparedToolCall: Send {
+    /// A read-only coordinator needs a durable parent identity for nested Operations.
+    /// This retains ancestry without inventing an external effect for the coordinator.
+    fn requires_operation(&self) -> bool { false }
     /// Called only after the original durable caller receipt was committed. Delivery
     /// cleanup must not change that receipt or make the caller await a remote owner.
     fn receipt_persisted(&self, _context: &ToolExecutionContext) {}
@@ -3212,7 +3223,7 @@ impl<
                         };
                         // Each side effect owns its durable intent; pure results retain the
                         // cheaper in-memory path and enter history when provider pairing closes.
-                        if !tool.contract.read_only
+                        if bound.requires_operation() || !tool.contract.read_only
                             || tool.contract.completion == CompletionKind::Job
                         {
                             self.commit(
@@ -3242,7 +3253,7 @@ impl<
                                 snapshot.view.request_id, call.call_id
                             ),
                         };
-                        let durable = !tool.contract.read_only
+                        let durable = bound.requires_operation() || !tool.contract.read_only
                             || tool.contract.completion == CompletionKind::Job;
                         let completion = self.execute_one(
                             input,
@@ -3371,6 +3382,8 @@ pub(crate) fn validate_model_items(
     items: &[ProviderItem],
     snapshot: &RequestSnapshot,
 ) -> Result<Vec<ToolCall>, ExecutionError> {
+    let projected = crate::tool_disclosure::model_tools(&snapshot.view.binding.tools);
+    let model_tools = projected.as_ref().unwrap_or(&snapshot.view.binding.tools);
     // Provider IDs must be unique within this response, not across independent requests.
     let mut item_ids = BTreeSet::new();
     let mut call_ids = BTreeSet::new();
@@ -3400,10 +3413,7 @@ pub(crate) fn validate_model_items(
                         "tool call identity is empty or duplicated",
                     ));
                 }
-                if !snapshot
-                    .view
-                    .binding
-                    .tools
+                if !model_tools
                     .iter()
                     .any(|schema| schema.name == call.name && schema.version == call.schema_version)
                 {

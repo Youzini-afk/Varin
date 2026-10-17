@@ -245,6 +245,7 @@ fn selected(
     }))
 }
 impl PreparedToolCall for SelectedCall {
+    fn requires_operation(&self) -> bool { self.invocation.requires_operation() }
     fn receipt_persisted(&self, context: &ToolExecutionContext) {
         self.invocation.receipt_persisted(context);
     }

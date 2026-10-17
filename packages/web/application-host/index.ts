@@ -95,7 +95,7 @@ import { createMcpTaskRecovery } from './lib/kernel/mcp-task-recovery.js';
 import { createMcpLease } from './lib/kernel/mcp-owner.js';
 import { createChildMcpPreparer } from './lib/kernel/mcp-child-preparation.js';
 import { createManagedChildMcpPreparer } from './lib/kernel/managed-child-mcp-preparation.js';
-import { createExtensionTools } from './lib/kernel/extension-tool-owner.js';
+import { createExtensionTools, configuredToolAvailability } from './lib/kernel/extension-tool-owner.js';
 import { MATERIAL_SNAPSHOT_CAPABILITY } from './lib/kernel/material-tool-owner.js';
 import { createIntegrationToolOwner, createIntegrationTargetOpener, createIntegrationReceiptReconciler, CHILD_INTEGRATION_CAPABILITY } from './lib/kernel/integration-tool-owner.js';
 
@@ -1816,9 +1816,15 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     if (!researchDiscoveryOwner.current) throw new Error('Scholarly search tool preparation is unavailable');
     if (!researchDecisionOwner.current) throw new Error('Research decision tool preparation is unavailable');
     if (!imageRuntimeOwner.current) throw new Error('Image tool preparation is unavailable');
-    return imageRuntimeOwner.current.prepareConfiguration(run, required, await researchDecisionOwner.current.prepareConfiguration(run, required, await researchDiscoveryOwner.current.prepareConfiguration(run, required,
+    const configuration = await imageRuntimeOwner.current.prepareConfiguration(run, required, await researchDecisionOwner.current.prepareConfiguration(run, required, await researchDiscoveryOwner.current.prepareConfiguration(run, required,
       await webRuntimeOwner.current.prepareConfiguration(run, required,
         await scriptRuntimeOwner.current.prepareConfiguration(await computerRuntimeOwner.current.prepareConfiguration(run, required), run.source)))));
+    if (required.length) return configuration;
+    try {
+      const root = run.source?.resource_owner.kind === 'local'
+        ? (await documentsAuthority.admitWorkspaceRegistration(run.source.workspace_id)).canonicalPath : undefined;
+      return configuredToolAvailability(await modelsService.settings.snapshot(root), configuration);
+    } catch (error) { configuration.release?.(); throw error; }
   },currentPolicy:async runId=>{
     const launch=await kernelClient.agentRuntimeRequest<import('./lib/kernel/protocol.generated.js').LaunchIntent|null,'runtime.launch.inspect'>('runtime.launch.inspect',{runId});
     const workspace=launch?.selection.source?.resource_owner.kind === 'local'?await documentsAuthority.admitWorkspaceRegistration(launch.selection.source.workspace_id):undefined;

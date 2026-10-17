@@ -55,6 +55,14 @@ export function getToolSummary(input: ToolSummaryInput): ToolSummary {
   const readOnly = READ_ONLY_TOOLS.has(name);
 
   switch (name) {
+    case "tool_describe":
+      return { text: asString(args?.name) ?? asString(args?.namespace) ?? "Capabilities", readOnly: true };
+    case "tool_invoke": {
+      const target = asString(asRecord(args?.reference)?.name);
+      if (!target || target === name) return { text: name, readOnly: false };
+      const summary = getToolSummary({ toolName: target, arguments: args?.arguments, details: details?.result });
+      return { text: summary.text === target || !summary.text ? target : `${target} · ${summary.text}`, readOnly: summary.readOnly };
+    }
     case "file_read": {
       const path = asString(args?.path) ?? "";
       return { text: path, readOnly };

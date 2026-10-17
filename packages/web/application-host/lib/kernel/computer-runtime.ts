@@ -17,6 +17,7 @@ import type { AgentRuntimeClient } from './agent-runtime-client.js';
 import { KernelClientError, type KernelClient } from './kernel-client.js';
 import type { ComputerScope, Effect, Run, ComputerRequestRecord, ComputerRequestView, ComputerEventReceipt, ComputerDecisionActor, KernelMethod, KernelMethodParams, Operation } from './protocol.generated.js';
 import type { ExtensionToolOwnerOptions } from './extension-tool-owner.js';
+import { extendToolConfiguration } from './extension-tool-owner.js';
 import { requireToolInvocation, runToolDomainCall, noteInvocationComputerUse, assertNoScriptComputerStopCycle } from './tool-invocation.js';
 import type { ToolExecutionReceipt } from './tool-bridge.js';
 
@@ -70,17 +71,18 @@ export function createComputerRuntime({ kernel, runtime, computers, enabled }: {
       actor: value.canExecute && execution ? { execution, rootWork, rootExecution,
         label: value.threadId === value.rootThreadId ? 'Main agent' : 'Worker' } : null };
   };
-  const prepareConfiguration: NonNullable<ExtensionToolOwnerOptions['prepareConfiguration']> = async (_run, required) => {
+  const prepareConfiguration: NonNullable<ExtensionToolOwnerOptions['prepareConfiguration']> = async (run, required) => {
     // Required bindings are the original immutable configuration, even after settings change.
     const capturedDefault = required.length ? { value: null } : await computers.defaultDesktop().then(
       value => ({ value }), error => ({ error }),
     );
-    return (descriptor, original) => {
+    const available = required.length > 0 || await enabled(run.runId);
+    return extendToolConfiguration(undefined, (descriptor, original) => {
       if (!COMPUTER_TOOL_DECLARATIONS.some(entry => entry.id === descriptor.id && entry.version === descriptor.version)) return original ?? null;
       if (original !== undefined) { configuration(original); return original; }
       if ('error' in capturedDefault) throw capturedDefault.error;
       return JSON.stringify({ version: 1, defaultDesktopId: capturedDefault.value });
-    };
+    }, descriptor => COMPUTER_TOOL_DECLARATIONS.some(entry => entry.id === descriptor.id && entry.version === descriptor.version) ? available : undefined);
   };
   const hostEpoch = computers.controlOwnerEpoch;
   const decisions = new Map<string, Promise<ComputerRequestRecord>>();

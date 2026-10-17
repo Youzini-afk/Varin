@@ -2,6 +2,14 @@
 
 This package contains the browser-safe manifests for Varin's built-in extensions and the immutable Node runtimes used by brokered Host extensions.
 
+These declarations form the executable capability directory. Ordinary Agent requests expose a
+stable native interface: `tool_describe` reads available namespaces or exact tool documentation,
+and `tool_invoke` calls the returned version reference through the original nested invocation
+lifecycle. Detailed schemas are tool-result data, not additional model functions. Explicit tool
+toggles compose with each owner's configuration readiness before a declaration is published.
+`runtime_contract` covers service/UI contracts and package source; callable-tool documentation
+belongs to `tool_describe`.
+
 `varin.builtin.web` distributes ordinary `websearch`, `webfetch`, `document_read` and `materials` tools. The single
 `WEB_TOOL_DECLARATIONS` feeds the manifest, tool schema and Host decoder; the immutable Host artifact
 uses the existing `web.materials` capability. Search, egress, fixed snapshots and PDF parsing retain

@@ -871,12 +871,15 @@ credential for each run, and npm attaches provenance automatically.
 
 ## Runtime contract discovery
 
-The ordinary `runtime_contract` tool provides two explicitly different views:
+Callable-tool documentation uses native `tool_describe`: `{}` lists available namespaces,
+`{ "namespace": "development" }` reads a capability group, and `{ "name": "runtime_contract" }`
+reads one exact tool. Results include parameters and a version reference for
+`tool_invoke({ reference, arguments })`. Documentation is appended as tool-result data; the
+provider's function list stays fixed. Unavailable tools are absent, and discovery grants no
+execution permission. SDK callers can still use their original `call.tools.list/describe/invoke`.
 
-- `{ "action": "list", "kind": "tool" }` and
-  `{ "action": "describe", "kind": "tool", "name": "runtime_contract" }` inspect the invoking
-  Run's accepted tools through the same SDK `call.tools.list/describe` owner. Results identify
-  `accepted_run`, Run ID and generation. A missing tool returns null and is not enabled by discovery.
+The ordinary `runtime_contract` tool provides the current service/UI contract and immutable-source views:
+
 - `{ "action": "list", "kind": "service" }` lists current declarations and original preparation
   facts. `{ "action": "describe", "kind": "service", "serviceId": "varin.context.fragments",
   "version": 1, "member": { "kind": "method", "name": "describe" } }` requests one method.
@@ -900,4 +903,4 @@ provision. Method entries carry `inputSchema`, `outputSchema`, optional descript
 relative and do not expose Host installation paths. Import that same descriptor at activation.
 Ordinary tool execute metadata derives from the existing tool declaration. The context-fragments
 provider is a complete built-in method example; owners without such declarations report
-`undeclared`. Discovery does not synthesize missing method contracts or full Application API reflection. No catalog is injected into every prompt or tool result.
+`undeclared`. Discovery does not synthesize missing method contracts or full Application API reflection. Complete service and tool catalogs are returned only on explicit inspection.

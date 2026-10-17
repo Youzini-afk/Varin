@@ -395,13 +395,13 @@ export function createScriptRuntime(options: {
       const captured = await (source?.resource_owner.kind === 'managed_host'
         ? runtime.managedSource(source.resource_owner).then(client => client.scriptBinding({ coordinatorHostId: runtime.coordinatorHostId, source }))
         : resolveScriptNodeBinding()).then(value => ({ value }), error => ({ error }));
-      return (descriptor, original) => {
+      return Object.assign((descriptor: Parameters<typeof fallback>[0], original?: string | null) => {
         if (!SCRIPT_TOOL_DECLARATIONS.some(entry => entry.id === descriptor.id && entry.version === descriptor.version)) return fallback(descriptor, original);
         if ('error' in captured) throw captured.error;
         const node = captured.value;
         if (original !== undefined && original !== node.configuration_identity) throw new Error('Original script Node binding is unavailable');
         return node.configuration_identity;
-      };
+      }, fallback);
     },
     async drainRuns(runIds: ReadonlySet<string>) {
       const pending = await rpc<Operation[], 'runtime.managed_process.pending'>('runtime.managed_process.pending', {});

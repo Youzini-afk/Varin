@@ -1631,6 +1631,54 @@ fn tool_parameter_schemas_reach_every_protocol_as_objects_without_changing_the_o
     }
 }
 
+#[test]
+fn disclosure_keeps_every_protocol_tool_prefix_stable_when_hidden_capabilities_change() {
+    for family in MEDIA_FAMILIES {
+        let provider = media_provider(family, true);
+        let mut request = view(family);
+        let mut hidden = request.binding.tools.remove(0);
+        hidden.name = "computer_browser".into();
+        request.binding.tools = crate::tool_disclosure::schemas();
+        request.binding.tools.push(hidden.clone());
+        let original = request.binding.tools.clone();
+        let mut reuse = RequestCompileReuse::new();
+        reuse.prepare(&request, 1, None, 1, None);
+        let first = provider.serialize(&request, Some(&mut reuse)).unwrap().to_value();
+        assert_eq!(request.binding.tools, original, "{family}: execution directory is unchanged");
+        // A large or even provider-incompatible deferred schema is documentation, never a
+        // function parameter declaration. Its original execution schema stays untouched.
+        hidden.schema = json!({"type":"array","pattern":"(?=provider-unsupported)"});
+        hidden.description = "Changed backend documentation".into();
+        request.binding.tools.pop();
+        request.binding.tools.push(hidden);
+        request.binding.tool_schema_generation += 1;
+        reuse.prepare(&request, 1, None, 1, None);
+        assert_eq!(first, provider.serialize(&request, Some(&mut reuse)).unwrap().to_value(), "{family}: hidden updates do not rewrite the prefix");
+        request.binding.tools.pop();
+        reuse.prepare(&request, 1, None, 1, None);
+        assert_eq!(first, provider.serialize(&request, Some(&mut reuse)).unwrap().to_value(), "{family}: unavailable capabilities do not rewrite the prefix");
+        assert_eq!(original.len(), 3);
+        let encoded = first.to_string();
+        assert!(!encoded.contains("computer_browser"), "{family}: deferred function was serialized");
+        assert!(encoded.contains(crate::tool_disclosure::DESCRIBE));
+        assert!(encoded.contains(crate::tool_disclosure::INVOKE));
+        let tools_field = |wire: &Value| match family {
+            bedrock::FAMILY => wire["toolConfig"]["tools"].clone(),
+            pi_messages::FAMILY => wire["context"]["messages"][0]["toolsAdded"].clone(),
+            _ => wire["tools"].clone(),
+        };
+        request.history.push(ConversationItem { resource_activation: None, id: "describe-call".into(), provenance: Provenance::Assistant,
+            content: Content::ToolCall { call: ToolCall { call_id:"describe".into(),name:crate::tool_disclosure::DESCRIBE.into(),schema_version:"1".into(),arguments:json!({"namespace":"browser"}) } },opaque:None }.into());
+        request.history.push(ConversationItem { resource_activation: None, id: "describe-result".into(), provenance: Provenance::ToolData {call_id:"describe".into()},
+            content: Content::ToolResult { result: ToolResult {request_id:request.request_id.clone(),call_id:"describe".into(),completion:ToolCompletion::Result {
+                outcome:crate::Outcome::Succeeded,effect:crate::Effect::None,content:json!({"namespace":"browser","status":"unavailable"}).into(),
+            }}},opaque:None }.into());
+        reuse.prepare(&request, 1, None, 1, None);
+        let appended = provider.serialize(&request, Some(&mut reuse)).unwrap().to_value();
+        assert_eq!(tools_field(&first), tools_field(&appended), "{family}: documentation is appended as history, never promoted into tools");
+    }
+}
+
 fn paired_media_view(family: &str, mime: &str) -> RequestView {
     let mut request = view(family);
     for call_id in ["first", "second"] {

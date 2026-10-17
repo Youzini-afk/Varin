@@ -11,6 +11,7 @@ import { HarnessServiceError } from '../harness/service-error.js';
 import type { SemanticInference } from '../knowledge/semantic/runtime-inference.js';
 import type { DecisionInferenceLease } from '../knowledge/semantic/decision-inference.js';
 import type { ExtensionToolConfiguration, ExtensionToolRun } from './extension-tool-owner.js';
+import { extendToolConfiguration } from './extension-tool-owner.js';
 import type { ExtensionToolBinding, LaunchSource } from './protocol.generated.js';
 import { runToolDomainCall } from './tool-invocation.js';
 import type { createWebRuntime } from './web-runtime.js';
@@ -73,13 +74,22 @@ export function createResearchDecisionRuntime(options: {
   };
   const prepareConfiguration = async (run: ExtensionToolRun, required: readonly ExtensionToolBinding[], previous?: ExtensionToolConfiguration): Promise<ExtensionToolConfiguration> => {
     const captured = required.length ? null : await options.settings(run.source).then(enabled).then(value => ({ value }), error => ({ error }));
-    return (descriptor, original) => {
+    // Capture checks model/configuration availability without making an inference request.
+    let available: boolean | undefined;
+    if (captured && 'value' in captured) {
+      available = false;
+      if (captured.value) for (const purpose of ['web', 'scholarly'] as const) {
+        const result = await options.inference.captureDecision(purpose).catch(() => ({ status: 'unavailable' as const }));
+        if (result.status === 'ready') { available = true; result.lease.release(); }
+      }
+    }
+    return extendToolConfiguration(previous, (descriptor, original) => {
       if (descriptor.id !== declaration.id || descriptor.version !== declaration.version) return previous?.(descriptor, original) ?? original ?? null;
       if (original !== undefined) { restored(original); return original; }
       if (!captured) throw new Error('Original research decision configuration was not retained');
       if ('error' in captured) throw captured.error;
       return JSON.stringify(captured.value);
-    };
+    }, descriptor => descriptor.id === declaration.id && descriptor.version === declaration.version ? available : undefined);
   };
   return { capability, prepareConfiguration };
 }

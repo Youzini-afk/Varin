@@ -557,7 +557,7 @@ impl<
                                             completion
                                         }
                                         Ok(contract) => {
-                                            let replayable = contract.read_only
+                                            let replayable = !bound.requires_operation() && contract.read_only
                                                 && contract.completion == CompletionKind::Result
                                                 && contract
                                                     .resources

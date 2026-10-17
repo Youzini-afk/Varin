@@ -198,7 +198,7 @@ const SourceToolExposureField: React.FC<SourceFieldProps> = (props) => {
     const [pattern, setPattern] = React.useState('');
     const entries = asJsonObject(readJsonPath(props.document, props.path));
     const options = ['codemode', 'deferred', 'direct', 'hidden'].map(value => ({
-        value, label: t(`settings.varin.mcp.native.exposure.${value}` as never),
+        value, label: t(`settings.varin.mcp.native.exposure.${value === 'direct' ? 'catalog' : value}` as never),
     }));
     const add = () => {
         const name = pattern.trim();
@@ -376,7 +376,7 @@ export const McpStructuredConfigEditor: React.FC<McpStructuredConfigEditorProps>
             {<div className="space-y-4 border-t border-border/60 pt-4">
               <SourceOptionalBooleanField {...sourceFields} path={[...serverPath, 'enabled']} label={text('settings.varin.mcp.native.enabled')}/>
               <SourceOptionalSelectField {...sourceFields} path={[...serverPath, 'exposure']} label={text('settings.varin.mcp.native.exposure')} options={['codemode', 'deferred', 'direct', 'hidden'].map(value => ({ value,
-                        label: text(`settings.varin.mcp.native.exposure.${value}`) }))}/>
+                        label: text(`settings.varin.mcp.native.exposure.${value === 'direct' ? 'catalog' : value}`) }))}/>
               <SourceToolExposureField {...sourceFields} path={[...serverPath, 'toolExposure']} label={text('settings.varin.mcp.native.toolExposure')}/>
               {transport !== 'unconfigured' ? <><SourceOptionalNumberField {...sourceFields} path={[...serverPath, 'timeout']} label={text('settings.varin.mcp.structured.server.requestTimeout')} min={0} unit={text('settings.varin.mcp.native.seconds')}/>
               <SourceStringField {...sourceFields} path={[...serverPath, 'description']} label={text('settings.varin.mcp.native.description')}/></> : null}

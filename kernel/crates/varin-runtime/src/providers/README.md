@@ -83,6 +83,12 @@ fragments plus a complete wire buffer still cost memory; vector scans, final ass
 encoding/hashing and media work remain. This is local reuse, not remote incremental transmission.
 
 Tool parameter projection is shared by the built-in protocols in [tool_schema.rs](tool_schema.rs).
+The common input projection first selects the fixed model interface when native disclosure
+gateways are present. Deferred schemas stay in the original request binding for execution and
+enter conversation history only as `tool_describe` results. Built-in and brokered adapters see
+the same projection. Hidden catalog changes do not change the provider tools or encoder reuse
+key; the original generation and endpoint pins remain authoritative. Auxiliary jobs without the
+gateways retain their explicitly selected tool interface.
 Object unions and local references receive an explicit object root; constants become typed singleton
 enums. Alternatives, definitions, required fields and ordinary example/default data stay intact.
 The original declaration and its version remain the execution validator's authority. Explicit nonobject

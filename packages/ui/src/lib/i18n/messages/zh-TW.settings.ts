@@ -534,6 +534,7 @@ export const settingsDict = {
   'settings.varin.mcp.native.exposure.codemode': "Codemode 指令碼呼叫（預設）",
   'settings.varin.mcp.native.exposure.deferred': "工具搜尋時載入",
   'settings.varin.mcp.native.exposure.direct': "直接向模型宣告",
+  'settings.varin.mcp.native.exposure.catalog': "加入獨立能力目錄",
   'settings.varin.mcp.native.exposure.hidden': "隱藏",
   'settings.varin.mcp.native.seconds': "秒",
   'settings.varin.mcp.native.description': "服務描述",

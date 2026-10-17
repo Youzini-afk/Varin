@@ -723,6 +723,7 @@ export const settingsDict = {
   'settings.varin.mcp.native.exposure.codemode': "Codemode 脚本调用（默认）",
   'settings.varin.mcp.native.exposure.deferred': "工具搜索时加载",
   'settings.varin.mcp.native.exposure.direct': "直接向模型声明",
+  'settings.varin.mcp.native.exposure.catalog': "加入独立能力目录",
   'settings.varin.mcp.native.exposure.hidden': "隐藏",
   'settings.varin.mcp.native.seconds': "秒",
   'settings.varin.mcp.native.description': "服务描述",

@@ -8,6 +8,7 @@ import type { ScholarlySearchParams } from '@varin/protocol';
 import type { ScholarlySearchService } from '../harness/research-search.js';
 import { HarnessServiceError } from '../harness/service-error.js';
 import type { ExtensionToolConfiguration, ExtensionToolRun } from './extension-tool-owner.js';
+import { extendToolConfiguration } from './extension-tool-owner.js';
 import type { ExtensionToolBinding, LaunchSource } from './protocol.generated.js';
 import { runToolDomainCall } from './tool-invocation.js';
 
@@ -63,13 +64,14 @@ export function createResearchDiscoveryRuntime(options: ResearchDiscoveryRuntime
     const captured = required.length ? null : await options.settings(run.source).then(capture).then(
       value => ({ value }), error => ({ error }),
     );
-    return (descriptor, original) => {
+    return extendToolConfiguration(previous, (descriptor, original) => {
       if (!RESEARCH_DISCOVERY_TOOL_DECLARATIONS.some(value => value.id === descriptor.id && value.version === descriptor.version)) return previous?.(descriptor, original) ?? original ?? null;
       if (original !== undefined) { configuration(original); return original; }
       if (!captured) throw new Error('The original scholarly search configuration was not retained');
       if ('error' in captured) throw captured.error;
       return JSON.stringify(captured.value);
-    };
+    }, descriptor => RESEARCH_DISCOVERY_TOOL_DECLARATIONS.some(value => value.id === descriptor.id && value.version === descriptor.version)
+      && captured && 'value' in captured ? captured.value.enabled : undefined);
   };
   return { capability, prepareConfiguration };
 }
