@@ -3,7 +3,7 @@
  * only retain its native handle. Never hardlink files that the writer can edit. */
 import { copyFileSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { randomUUID } from "node:crypto";
-import { join } from "node:path";
+import { join, toNamespacedPath } from "node:path";
 import type { TriviumDB } from "triviumdb";
 import type { SemanticCheckpoint, SemanticPublishedReader, SemanticPublishedReaderStats } from "./store-contract.js";
 
@@ -22,7 +22,8 @@ export function createSemanticPublishedReaders(options: {
   onCleanupError(error: unknown): void;
 }) {
   const epoch = randomUUID();
-  const directory = join(options.directory, epoch);
+  // Node's Windows mkdtemp needs the extended path form once publication paths exceed MAX_PATH.
+  const directory = toNamespacedPath(join(options.directory, epoch));
   const backings = new Set<Backing>();
   const readers = new Map<string, Publication>();
   let latest: Publication | null = null;
