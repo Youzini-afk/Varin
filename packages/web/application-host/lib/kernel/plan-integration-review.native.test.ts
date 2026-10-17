@@ -433,11 +433,21 @@ it('Catalog rejects a forged source inherited reference before creating the bran
   expect((await f.runtime.thread(source.threadId)).branches.some(branch => branch.branch_id === targetBranchId)).toBe(false);
 });
 
+// The real durable history setup needs a larger budget on hosted Windows disks.
 it('bounded Catalog membership pages the head search and authenticates cursors across identity changes and reopen', async () => {
   const f = await fixture(); const identity = await f.create('paged-membership');
   const fixedHead = await f.append(identity, 'membership-head');
   const seed = (await f.write(identity, 'membership-plan', fixedHead, null, 'old-head plan').expect(200)).body as PlanMutationResult;
-  for (let index = 0; index < 256; index++) await f.append(identity, `membership-tail-${index}`);
+  // Keep the real 256-entry page boundary, but reuse each committed input head
+  // instead of issuing two additional plan-view reads for every fixture entry.
+  let tailHead = fixedHead;
+  for (let index = 0; index < 256; index++) {
+    const key = `membership-tail-${index}`;
+    const receipt = await f.runtime.submit({ key, threadId: identity.threadId, branchId: identity.branchId,
+      expectedHead: tailHead, input: { text: key }, configuration: {} });
+    await f.runtime.cancelRun(receipt.run_id);
+    tailHead = receipt.input_id;
+  }
   const input = { branchId: identity.branchId, headId: fixedHead, candidateHeadId: null };
   const first = await f.kernel.agentRuntimeRequest('runtime.plan.contains', input) as { status: string; cursor?: string };
   expect(first.status).toBe('pending'); expect(first.cursor).toBeTruthy();
@@ -469,7 +479,7 @@ it('bounded Catalog membership pages the head search and authenticates cursors a
   await expect(reopened.kernel.agentRuntimeRequest('runtime.plan.contains', continued)).rejects.toThrow();
   expect(await reopened.kernel.agentRuntimeRequest('runtime.plan.contains', { branchId: identity.branchId, headId: null, candidateHeadId: null }))
     .toEqual({ status: 'ready', visible: true });
-}, 45_000);
+}, 90_000);
 
 it('a real todo CAS conflict settles with its structured no-effect receipt and preserves the user revision', async () => {
   const f = await toolFixture((_body, turn) => turn === 1
