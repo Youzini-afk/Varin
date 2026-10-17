@@ -228,9 +228,12 @@ it('cached query vectors do not bypass source authorization after a symlink esca
 
 it('unchanged chunk bytes do not substitute for a changed whole-file Documents revision', async () => {
   let held: { wire: Wire; response: ServerResponse } | undefined;
-  const f = await fixture({ embedding: (wire, response) => { if (wire.input.includes(question)) { held = { wire, response }; return true; } return false; } });
+  // Establish this source before starting the index/watch owner. Late events
+  // from replacing the fixture's files must not invalidate the initial query.
+  const f = await fixture({ cold: true, embedding: (wire, response) => { if (wire.input.includes(question)) { held = { wire, response }; return true; } return false; } });
   await fs.unlink(path.join(f.documents.workspaceRoot, 'alpha.ts')); await fs.unlink(path.join(f.documents.workspaceRoot, 'beta.ts'));
   await f.write('mixed.ts', `${alpha}\n${beta}`); await f.scan();
+  expect(f.workspace.indexStatuses()[0]?.status.publishedDocuments).toBe(1);
   const run = await f.run('semantic-file-revision'); await expect.poll(() => Boolean(held), { timeout: 15_000 }).toBe(true);
   await f.write('mixed.ts', `${alpha}\n${beta.replace('BETA_SEMANTIC_EVIDENCE', 'CHANGED_OTHER_UNIT')}`);
   respondEmbedding(held!.wire, held!.response); const history = JSON.stringify(await f.completed(run));
