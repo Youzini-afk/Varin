@@ -150,6 +150,48 @@ fn request_commit_validates_the_exact_available_cut_of_the_frozen_launch() {
     db.lock().unwrap().commit_execution(&original.run_id, original.owner_generation,
         &ExecutionRecord::RequestPrepared { snapshot: snapshot.into() }).unwrap();
 }
+#[test]
+fn policy_graph_validates_the_exact_available_cut_of_the_frozen_launch() {
+    use crate::catalog::launches::{AgentSelection, LaunchSelection};
+    let fixture = Fixture::new();
+    let db = fixture.catalog();
+    let mut original = input(&db);
+    let mut hidden = original.binding.tools[0].clone();
+    hidden.name = "hidden".into();
+    original.binding.tools.push(hidden.clone());
+    original.binding.tools.extend(crate::tool_disclosure::schemas());
+    let identity = PolicyIdentity { name: "test".into(), version: "1".into() };
+    let mut selection = LaunchSelection::from_binding(&original.binding, identity.clone(), None);
+    selection.agent = Some(AgentSelection { profile_id: None, name: None, work_focus: "code".into(), tools: Some(vec!["read".into()]) });
+    let mut catalog = db.lock().unwrap();
+    catalog.bind_launch(&original.run_id, selection).unwrap();
+    let boundary = catalog.policy_boundary(&original.run_id, original.owner_generation).unwrap();
+    let action_id = format!("{}:policy:{}", original.run_id, boundary.id);
+    let tools = crate::tool_disclosure::request_tools(&original.binding.tools, false, Some(&["read".into()]));
+    for tamper in 0..4 {
+        let mut selected = tools.clone();
+        match tamper {
+            0 => selected.push(hidden.clone()),
+            1 => selected[0].schema = json!({"type":"string"}),
+            2 => { selected.pop(); },
+            _ => {},
+        }
+        let intent = PolicyGraphIntent::PolicyToolGraphV1 {
+            action_id: action_id.clone(), boundary: boundary.clone(), identity: identity.clone(), state: Value::Null,
+            nodes: vec![PolicyAdmittedNode {
+                node: PolicyToolNode { id: "read-node".into(), depends_on: vec![], call: ToolCall {
+                    call_id: "read-node".into(), name: "read".into(), schema_version: "1".into(), arguments: json!({}) } },
+                context: FrozenToolContext {
+                    run_id: original.run_id.clone(), origin: ToolOrigin::PolicyAction { action_id: action_id.clone(), node_id: "read-node".into() },
+                    tools: Arc::new(selected), tool_schema_generation: original.binding.tool_schema_generation,
+                    child_dispatch: None, resource_activations: vec![], resource_checkpoint_id: boundary.resource_checkpoint_id.clone(), source: boundary.source.clone(),
+                },
+            }],
+        };
+        let result = catalog.admit_policy_graph(&original.run_id, original.owner_generation, &intent);
+        if tamper < 3 { assert!(result.is_err()); } else { result.unwrap(); }
+    }
+}
 impl ToolExecutor for Tools {
     fn plan(
         &self,
