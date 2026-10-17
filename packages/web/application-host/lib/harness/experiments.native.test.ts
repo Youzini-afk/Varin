@@ -46,7 +46,7 @@ afterEach(async () => {
 });
 
 async function fixture() {
-  const root = await fs.mkdtemp(path.join(os.tmpdir(), "varin-experiment-"));
+  const root = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), "varin-experiment-")));
   roots.push(root);
   const workspace = path.join(root, "workspace");
   await fs.mkdir(workspace, { recursive: true });

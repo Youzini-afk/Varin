@@ -31,7 +31,7 @@ afterEach(async () => {
 });
 
 async function fixture() {
-  const root = await fs.mkdtemp(path.join(os.tmpdir(), "varin-experiment-workspace-"));
+  const root = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), "varin-experiment-workspace-")));
   roots.push(root);
   const source = path.join(root, "source");
   const storageRoot = path.join(root, "storage");
