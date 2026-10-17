@@ -19,7 +19,7 @@ const occurrence: CalendarOccurrence = { id: 'occurrence:original', definition_i
   observed_at_ms: 10, thread_id: 'thread:original', branch_id: 'branch:original', input_id: null, run_id: null, execution_id: null, goal_id: null, state: 'preparing', hold_reason: null, failure_code: null };
 
 it('the asset service preserves native acceptance keys and separates Catalog facts from external assets', async () => {
-  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'varin-calendar-assets-'));
+  const root = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'varin-calendar-assets-')));
   const config = createProjectConfigRuntime({ fsPromises: fs, path, projectsDirPath: path.join(root, 'config'), createTaskID: () => 'task' });
   let project: CalendarProject = { project_id: 'project', revision: 0, definitions: [] };
   const client = {

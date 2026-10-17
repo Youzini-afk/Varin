@@ -14,7 +14,7 @@ const roots: string[] = [];
 afterEach(async () => { for (const root of roots.splice(0)) await fs.rm(root, { recursive: true, force: true }); });
 
 const fixture = async () => {
-  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'varin-scoped-recovery-'));
+  const root = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'varin-scoped-recovery-')));
   roots.push(root);
   const state = { kind: 'missing' };
   const client = {

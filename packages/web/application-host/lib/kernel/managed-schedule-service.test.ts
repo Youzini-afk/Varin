@@ -27,7 +27,7 @@ const task = { name: 'B calendar', runtime: 'agent', enabled: false, execution: 
   target: { kind: 'new_work', source: { kind: 'project' }, model: { providerId: 'fixture', modelId: 'model', temperature: 0 }, sourceMode: 'fixed_branch', goal: null } };
 
 async function fixture() {
-  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'varin-managed-schedule-'));
+  const root = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'varin-managed-schedule-')));
   const targetRoot = path.join(root, 'B', 'same-project'), coordinatorRoot = path.join(root, 'A', 'same-project');
   await fs.mkdir(targetRoot, { recursive: true }); await fs.mkdir(coordinatorRoot, { recursive: true });
   const config = createProjectConfigRuntime({ fsPromises: fs, path, projectsDirPath: path.join(root, 'B', 'config') });
