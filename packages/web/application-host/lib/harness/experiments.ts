@@ -483,14 +483,11 @@ export function createExperimentService(deps: ExperimentServiceDeps) {
     }
   };
 
-  // Experiment execution is a Host-managed authority (like the process-host
-  // service): one service grant per (owning, execution) workspace pair so a
-  // detached reconciler can still inspect, stop and collect the jobs it
-  // launched. Records live in the owning workspace so facts are shared across
-  // roots; the process root and cwd resolve against the actor's execution
-  // workspace, whose scope the router already admitted for params.cwd.
+  // Recovery retains the attempt's original native owner. A workspace-only
+  // maintenance grant cannot adopt a process started by an Agent Run.
   const contextAt = (caller: ExperimentCaller, canonicalRoot: string): Promise<ExperimentContext> => {
-    const key = `${caller.workspaceId}\0${caller.executionWorkspaceId}\0${canonicalRoot}`;
+    const owner = requireResearchOwner(caller);
+    const key = `${caller.workspaceId}\0${caller.executionWorkspaceId}\0${owner.threadId}\0${owner.runId}\0${owner.operationId}\0${canonicalRoot}`;
     const existing = contexts.get(key);
     if (existing) return existing;
     const creating = (async (): Promise<ExperimentContext> => {
@@ -498,6 +495,9 @@ export function createExperimentService(deps: ExperimentServiceDeps) {
         grantId: `experiment:${randomUUID()}`,
         owningWorkspace: caller.workspaceId,
         executionWorkspace: caller.executionWorkspaceId,
+        threadId: owner.threadId,
+        runId: owner.runId,
+        operationId: owner.operationId,
         capabilities: SERVICE_CAPABILITIES,
         pathScopes: [""],
       });
@@ -2209,11 +2209,13 @@ export function createExperimentService(deps: ExperimentServiceDeps) {
 
       const jobRecord = await ctx.scoped.getRecord(workspaceId, recordIdFor.job(jobIdFor(attempt.attemptId))).catch(() => null);
       if (jobRecord?.state === "released") { await retireAttemptAuthority(recordCaller(workspaceId,fresh)); return; }
-      const resolved = preResolved ?? await resolveBackend(ctx, caller, attempt.machineId ?? LOCAL_MACHINE_ID).catch(() => null);
+      const machineId = attempt.machineId ?? LOCAL_MACHINE_ID;
+      const backendContext = machineId === LOCAL_MACHINE_ID ? await contextForAttempt(caller, fresh) : ctx;
+      const resolved = preResolved ?? await resolveBackend(backendContext, caller, machineId).catch(() => null);
       if (!resolved) return;
       const executionRootId = str(payload.executionRootId);
       const executionCanonicalRoot = str(payload.executionCanonicalRoot);
-      const executionResolved = executionRootId && executionCanonicalRoot
+      const executionResolved = machineId !== LOCAL_MACHINE_ID && executionRootId && executionCanonicalRoot
         ? {
             backend: resolved.backend,
             site: { ...resolved.site, rootId: executionRootId, canonicalRoot: executionCanonicalRoot },

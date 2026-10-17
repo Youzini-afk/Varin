@@ -3,10 +3,11 @@ import assert from "node:assert/strict";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { randomUUID } from 'node:crypto';
 import { fileURLToPath } from "node:url";
-import { afterEach, describe, it as vitestIt } from "vitest";
+import { afterEach, describe, it as vitestIt, vi } from "vitest";
 import { createKernelClient, KernelClientError, type KernelClient } from "../kernel/kernel-client.js";
-import { createExperimentService, type ExperimentCaller } from "./experiments.js";
+import { createExperimentService as createExperimentOwner, type ExperimentCaller } from "./experiments.js";
 import type { ExperimentAttemptState } from "@varin/protocol";
 import type { ExperimentBackend } from "./experiment-backend.js";
 import { createResourceService } from "./resources.js";
@@ -25,6 +26,17 @@ const it = vitestIt.skipIf(!available);
 const clients: KernelClient[] = [];
 const roots: string[] = [];
 const pause = (ms = 25) => new Promise<void>((resolve) => setTimeout(resolve, ms));
+
+// Each public submission represents a distinct admitted invocation. Family reads
+// share the caller scope; one finished attempt must not retire a later call's grants.
+function createExperimentService(...args: Parameters<typeof createExperimentOwner>): ReturnType<typeof createExperimentOwner> {
+  const service = createExperimentOwner(...args);
+  return { ...service, submit: (caller, params, signal) => service.submit({ ...caller,
+    owner: { ...caller.owner, operationId: `fixture-submit:${randomUUID()}` } }, params, signal) };
+}
+const eventually = <T>(read: () => Promise<T>, check: (value: T) => void): Promise<T> => vi.waitFor(async () => {
+  const value = await read(); check(value); return value;
+}, { timeout: 15_000 });
 
 afterEach(async () => {
   await Promise.all(clients.splice(0).map((client) => client.close()));
@@ -183,15 +195,16 @@ describe("experiment service on the real kernel", () => {
     assert.match(submitted.attempt.attemptId, /^attempt-[a-f0-9]{40}$/);
 
     // A retry with the same requestId returns the recorded attempt — no second job.
-    const retry = await f.experiments.submit(f.caller, { requestId: "req-complete-1", ...spec, outputPaths: ["result.txt"] });
+    const retry = await f.experiments.submit(f.caller, { requestId: "req-complete-1", title: "quick check", ...spec, outputPaths: ["result.txt"] });
     assert.equal(retry.attempt.attemptId, submitted.attempt.attemptId);
 
     const waited = await f.experiments.wait(f.caller, submitted.attempt.attemptId, 30_000);
     assert.equal(waited.timedOut, false);
     assert.equal(waited.attempt.state, "completed");
     assert.equal(waited.attempt.exitCode, 0);
-    const detail = await f.experiments.get(f.caller, submitted.attempt.attemptId);
-    assert.equal(waited.attempt.collection, "done", JSON.stringify({ artifacts: detail.artifacts, errors: f.errors.map(String) }));
+    const detail = await eventually(() => f.experiments.get(f.caller, submitted.attempt.attemptId), value => {
+      assert.equal(value.attempt.collection, 'done'); assert.equal(value.job?.state, 'released');
+    });
     assert.equal(detail.job?.backend, "local");
     assert.ok(detail.job?.backendJobId);
     assert.equal(detail.job?.state, "released");
@@ -665,10 +678,12 @@ describe("experiment service on the real kernel", () => {
     });
     const waited = await experiments.wait(f.caller, submitted.attempt.attemptId, 15_000);
     assert.equal(waited.attempt.state, "completed");
-    assert.equal(waited.attempt.collection, "failed");
+    await eventually(() => experiments.get(f.caller, submitted.attempt.attemptId), value => {
+      assert.equal(value.attempt.collection, "failed");
+    });
     assert.equal(releases, 0);
     const durableLog = await experiments.logs(f.caller, { attemptId: submitted.attempt.attemptId });
-    assert.equal(durableLog.origin, "live");
+    assert.equal(durableLog.origin, "artifact");
     assert.equal(durableLog.text, output.toString());
 
     fileAvailable = true;
@@ -684,7 +699,7 @@ describe("experiment service on the real kernel", () => {
     assert.equal(persistedLog.text, output.toString());
   });
 
-  it("retries a failed terminal commitment release after the backend job is already released", async () => {
+  it("retries a failed terminal commitment release before collecting and releasing the stopped backend job", async () => {
     const f = await fixture();
     let releaseUnavailable = true;
     let markReleaseFailure!: () => void;
@@ -714,17 +729,19 @@ describe("experiment service on the real kernel", () => {
       resources: { cpuCores: 1 },
     });
     const waited = await experiments.wait(f.caller, submitted.attempt.attemptId, 15_000);
-    assert.equal(waited.attempt.state, "completed");
+    assert.equal(waited.attempt.state, "completed", JSON.stringify({ waited, errors: f.errors.map(String) }));
     await releaseFailed;
     const pending = await experiments.get(f.caller, submitted.attempt.attemptId);
-    assert.equal(pending.job?.state, "released");
+    assert.equal(pending.job?.state, "exited");
     assert.equal(
       (await f.resources.list(f.caller.workspaceId)).machines.find((machine) => machine.machineId === "local")?.commitments.length,
       1,
     );
 
     releaseUnavailable = false;
-    const reconciled = await experiments.get(f.caller, submitted.attempt.attemptId);
+    const reconciled = await eventually(() => experiments.get(f.caller, submitted.attempt.attemptId), value => {
+      assert.equal(value.job?.state, 'released');
+    });
     const releaseDeadline = Date.now() + 15_000;
     while ((await f.resources.list(f.caller.workspaceId)).machines.find((machine) => machine.machineId === "local")?.commitments.length && Date.now() < releaseDeadline) await pause();
     assert.equal(reconciled.job?.state, "released");
