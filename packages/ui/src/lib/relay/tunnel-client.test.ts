@@ -546,12 +546,17 @@ describe('createRelayTunnelClient', () => {
       socket.onopen = () => resolve();
     });
 
+    let echoes = 0;
+    socket.onmessage = event => { if (event.data === 'echo:keepbusy') echoes++; };
     // Keep traffic flowing faster than the ping interval for a few intervals.
     for (let i = 0; i < 20; i++) {
       now += 10;
       socket.send('keepbusy');
       await wait(10);
     }
+    // Finish the actual encrypted traffic before declaring the clock idle;
+    // a late echo would otherwise refresh lastActivityAt at the idle instant.
+    await vi.waitFor(() => expect(echoes).toBe(20));
     expect(pings.length).toBe(0);
 
     // Now go idle: a ping must appear once we exceed the interval.
