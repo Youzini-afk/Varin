@@ -76,8 +76,11 @@ it('public User continuation preserves exact predecessor and input without selec
   await expect(api.continueChild({ ...input, branchId: fork.branchId })).rejects.toMatchObject({ status: 400 });
   expect(await api.readExecutionReport(identity, accepted.execution_id, 'new-report', 0)).toMatchObject({ execution_id: accepted.execution_id, text: 'new' });
   const parentFork: ThreadIdentity = { runtime: 'agent', threadId: 'thread:parent', branchId: 'parent-fork' };
-  expect(await api.executions(parentFork, 'original-dispatch')).toEqual([accepted]);
-  expect(await api.readExecutionReport(parentFork, accepted.execution_id, 'new-report')).toMatchObject({ execution_id: accepted.execution_id, text: 'new' });
+  await expect(api.executions(parentFork, 'original-dispatch')).rejects.toMatchObject({ status: 400 });
+  await expect(api.readExecutionReport(parentFork, accepted.execution_id, 'new-report')).rejects.toMatchObject({ status: 400 });
+  const parent = { ...parentFork, branchId: 'branch:parent' };
+  expect(await api.executions(parent, 'original-dispatch')).toEqual([accepted]);
+  expect(await api.readExecutionReport(parent, accepted.execution_id, 'new-report')).toMatchObject({ execution_id: accepted.execution_id, text: 'new' });
   for (const extra of [{ childOperationId: 'another' }, { configuration: {} }, { source: {} }, { actor: 'agent' }]) {
     expect((await request('/api/threads/child/continue', { ...input, ...extra })).status).toBe(400);
   }
@@ -135,7 +138,7 @@ it.each(['user_continuation', 'message_request', 'followup', 'calendar'] as cons
   const runtime = {
     onEvent: (listener: typeof emit) => { emit = listener; return () => {}; }, onExit: () => () => {}, onReady: () => () => {}, reconcileObservations: async () => [],
     children: async () => [], childExecutions: async () => [structuredClone(child)], unacceptedChildDependencies: async () => [], status: async () => ({ eventCursor: 7 }), events: async () => [],
-    context: vi.fn(async () => checkpoint), childExecution: async () => structuredClone(child),
+    context: vi.fn(async () => checkpoint), childExecution: async () => structuredClone(child), launch: async () => null,
     readyChildSource: vi.fn(async (input: Parameters<AgentRuntimeClient['readyChildSource']>[0]) => {
       child.source = { kind: 'ready', handoff: null, pin: input.pin, selection: { mode: input.source.mode, resource_owner: input.source.resourceOwner, workspace_id: input.source.workspaceId,
         execution_workspace_id: input.source.executionWorkspaceId, branch_id: input.source.branchId, revision: input.source.revision, live_root: null }, provenance: input.provenance };
@@ -194,7 +197,7 @@ it.each(['user_continuation', 'message_request', 'followup', 'calendar'] as cons
     expect(prepareContext.forSource).toHaveBeenCalledWith(checkpoint, expect.objectContaining({ branchId: 'child-source:execution:new', revision: 0 }), expect.any(AbortSignal));
     expect(continueRun).toHaveBeenCalledWith('new-run', expect.any(AbortSignal));
     expect(kernel.claimChildSource).not.toHaveBeenCalled(); expect(kernel.releaseChildToolHandoff).not.toHaveBeenCalled();
-    await vi.waitFor(() => expect(runtime.releaseMcpResourceSource).toHaveBeenCalledWith('new-run'));
+    expect(runtime.releaseMcpResourceSource).not.toHaveBeenCalled();
     expect(runtime.releaseChildResources).not.toHaveBeenCalled();
     expect(scoped.unpinBranch).toHaveBeenCalledOnce();
     expect(scoped.unpinBranch).toHaveBeenCalledWith({ operationId: 'branch-query-unpin:old-result:predecessor-query-pin',
@@ -228,7 +231,7 @@ it.each(['dispatch', 'user_continuation', 'message_request', 'followup', 'calend
   const runtime = {
     onEvent: () => () => {}, onExit: () => () => {}, onReady: () => () => {}, reconcileObservations: async () => [],
     children: async () => [], childExecutions: async () => [structuredClone(child)], unacceptedChildDependencies: async () => [],
-    status: async () => ({ eventCursor: 1 }), events: async () => [], context: async () => checkpoint,
+    status: async () => ({ eventCursor: 1 }), events: async () => [], context: async () => checkpoint, launch: async () => null,
     thread: async () => ({ bot_id: null }),
     childExecution: async () => structuredClone(child), readyChildSource: vi.fn(),
     prepareChild: vi.fn(async (_input: Parameters<AgentRuntimeClient['prepareChild']>[0]) => {
@@ -246,7 +249,8 @@ it.each(['dispatch', 'user_continuation', 'message_request', 'followup', 'calend
     continueRun, recoverLaunches: async () => {}, onError: (_id, error) => errors.push(error) });
   try {
     await collaboration.recover();
-    await vi.waitFor(() => expect(runtime.releaseChildResources).toHaveBeenCalledOnce());
+    await vi.waitFor(() => expect(continueRun).toHaveBeenCalledOnce());
+    expect(runtime.releaseChildResources).not.toHaveBeenCalled();
     expect(continueRun).toHaveBeenCalledWith('source-free-run', expect.any(AbortSignal));
     expect(runtime.prepareChild).toHaveBeenCalledWith(expect.objectContaining({ source: null,
       expectedContextCheckpoint: kind === 'dispatch' ? null : checkpoint.id }), expect.any(AbortSignal));
@@ -302,7 +306,8 @@ it('Bot Sleep joins its original child owner, while Delete retries original reso
   const runtime = {
     onEvent: () => () => {}, onExit: () => () => {}, onReady: () => () => {}, reconcileObservations: async () => [],
     children: async () => [], childExecutions: async () => [structuredClone(child), other], unacceptedChildDependencies: async () => [],
-    status: async () => ({ eventCursor: 1 }), events: async () => [], childExecution: async () => structuredClone(child),
+    status: async () => ({ eventCursor: 1 }), events: async () => [], childExecution: async () => structuredClone(child), launch: async () => null,
+    releaseMcpResourceSource: vi.fn(async () => {}),
     releaseChildResources: vi.fn(async () => {
       if (releasingFails) throw new Error('Original child release is not confirmed');
       child.resources_released = true; return structuredClone(child);

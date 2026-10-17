@@ -263,7 +263,13 @@ it('normal source retirement uses the original grants while failed preparation s
   let stopped!: () => void;
   const drain = new Promise<void>(resolve => { stopped = resolve; });
   const releaseLanguageSource = vi.fn(async (_runId: string) => drain);
-  const runtime = new AgentRuntimeClient({ subscribeExit() {}, onToolReleased() {}, releaseLanguageSource, retireRunGrants, revokeGrant } as unknown as KernelClient);
+  const kernel = { subscribeExit() {}, onToolReleased() {}, releaseLanguageSource, retireRunGrants, revokeGrant,
+    agentRuntimeRequest: async (method: string, params: { runId: string }) => {
+      if (method === 'runtime.run.inspect') return { id: params.runId, thread_id: 'original-thread' };
+      if (method === 'runtime.launch.inspect') return null;
+      throw new Error(`Unexpected request: ${method}`);
+    } } as unknown as KernelClient;
+  const runtime = new AgentRuntimeClient(kernel);
   runtime.retainSourceGrant('old-child-run', 'original-creating-grant');
   runtime.retainSourceGrant('old-child-run', 'rebound-child-grant');
   runtime.retainSourceGrant('failed-preparation', 'unaccepted-grant');
@@ -273,7 +279,7 @@ it('normal source retirement uses the original grants while failed preparation s
   stopped(); await retiring;
   await runtime.retireSourceGrants('old-child-run');
   expect(retireRunGrants.mock.calls.map(args => args[0])).toEqual(['old-child-run', 'old-child-run']);
-  const restarted = new AgentRuntimeClient({ subscribeExit() {}, onToolReleased() {}, releaseLanguageSource, retireRunGrants, revokeGrant } as unknown as KernelClient);
+  const restarted = new AgentRuntimeClient(kernel);
   await restarted.retireSourceGrants('previous-host-child-run');
   expect(retireRunGrants).toHaveBeenLastCalledWith('previous-host-child-run');
   expect(releaseLanguageSource.mock.calls.map(args => args[0])).toEqual(['old-child-run', 'old-child-run', 'previous-host-child-run']);
