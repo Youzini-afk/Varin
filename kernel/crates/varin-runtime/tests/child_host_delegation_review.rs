@@ -6,6 +6,8 @@ mod content_collection;
 mod fixture;
 #[path = "fixtures/input_admission.rs"]
 mod input_admission;
+#[path = "fixtures/service_composition.rs"]
+mod service_composition;
 use fixture::Fixture;
 use input_admission::InputAdmission;
 use serde_json::json;
@@ -421,6 +423,7 @@ fn original_host_refs_survive_new_composition_collection_and_reopen_without_free
         .unwrap();
     let mut extension = launch.extension_bindings[0].clone();
     extension.artifact_integrity = "replacement-artifact".into();
+    extension.composition = service_composition::graph(&extension.extension_id, &extension.extension_version, &extension.artifact_integrity);
     extension.declaration_hash = "replacement-declaration".into();
     extension.tool.version = extension.declaration_hash.clone();
     extension.tool.description = "Replacement declaration".into();
