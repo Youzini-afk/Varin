@@ -100,7 +100,7 @@
     opacity var(--wb-state-duration) ease, transform 170ms var(--wb-ease-settle);
 }
 .workbench-icon-button:active:not(:disabled),
-.workbench-titlebar button:active:not(:disabled),
+.workbench-titlebar button:not([data-window-control]):active:not(:disabled),
 .ide-activity button:active:not(:disabled),
 .workbench-resource-rail button:active:not(:disabled) { transform: scale(.93); }
 .workbench-resource-rail button[aria-pressed="true"],
@@ -313,7 +313,7 @@
 .ide-sidebar-resizer:hover { background: var(--interactive-border-hover); }
 
 .agent-conversation-canvas { container: agent-canvas / inline-size; }
-[data-workbench-chrome="agent"] > header { min-height: 44px; padding-right: 6px; border-bottom-color: transparent; }
+[data-workbench-chrome="agent"] > header { min-height: 44px; border-bottom-color: transparent; }
 @media (min-width: 768px) {
   [data-workbench-chrome="agent"] .oc-draft-starters {
     display: grid;

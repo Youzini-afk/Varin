@@ -704,7 +704,8 @@ export const IdeWorkbenchShell: React.FC<Record<string, unknown>> = () => {
         />
 
         <header
-          className="workbench-titlebar app-region-drag flex h-11 shrink-0 items-center gap-2 px-2"
+          className={cn('workbench-titlebar app-region-drag flex h-11 shrink-0 items-center gap-2 pl-2',
+            usesFramelessChrome && windowControlsSide === 'right' ? 'pr-0' : 'pr-2')}
           onMouseDown={(event) => {
             const target = event.target as HTMLElement;
             if (event.button !== 0) return;
@@ -754,7 +755,7 @@ export const IdeWorkbenchShell: React.FC<Record<string, unknown>> = () => {
               )}
             />
           ) : <div className="min-w-0 truncate typography-ui-label text-foreground">{workspaceLabel}</div>}
-          <div className="ml-auto flex shrink-0 app-region-no-drag items-center gap-1">
+          <div className="ml-auto flex shrink-0 self-stretch app-region-no-drag items-center gap-1">
 
             <OpenInAppButton directory={directory ?? ''} />
             <WorkbenchServices />

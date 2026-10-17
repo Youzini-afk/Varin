@@ -573,11 +573,11 @@ export const Header: React.FC<HeaderProps> = ({
     return {
       // Left inset is handled by the no-drag spacer (see renderDesktop); only
       // the right inset / titlebar height are owned by the window-controls overlay.
-      paddingRight: 'calc(0.75rem + var(--oc-wco-right-inset, 0px))',
-      minHeight: 'max(2.5rem, var(--oc-wco-titlebar-height, 0px))',
-      height: 'max(2.5rem, var(--oc-wco-titlebar-height, 0px))',
+      paddingRight: usesFramelessChrome && windowControlsSide === 'right' ? 0 : 'calc(0.75rem + var(--oc-wco-right-inset, 0px))',
+      minHeight: 'max(2.75rem, var(--oc-wco-titlebar-height, 0px))',
+      height: 'max(2.75rem, var(--oc-wco-titlebar-height, 0px))',
     };
-  }, [isDesktopApp, usesFramelessChrome]);
+  }, [isDesktopApp, usesFramelessChrome, windowControlsSide]);
 
   const updateHeaderHeight = React.useCallback(() => {
     if (typeof document === 'undefined') {
@@ -787,7 +787,7 @@ export const Header: React.FC<HeaderProps> = ({
       aria-label={t('header.navigation.mainAria')}
     >
       <TitlebarLeftControls />
-      <div className="flex min-w-0 flex-1 items-center">
+      <div className="flex min-w-0 flex-1 self-stretch items-center">
         {activeSurfaceHeader ? (
           <div className="mr-3 flex min-w-0 flex-col items-start px-1 py-0.5 -my-0.5 text-left">
             <span className="truncate typography-ui-label text-[14px] font-normal leading-tight text-foreground max-w-full">
@@ -917,7 +917,7 @@ export const Header: React.FC<HeaderProps> = ({
 
         <div className="flex-1" />
 
-        <div className="flex shrink-0 items-center gap-1">
+        <div className="flex shrink-0 self-stretch items-center gap-1">
           {activeMainTab === 'chat' && contextUsage && contextUsage.totalTokens > 0 && <ContextUsageDisplay
             {...contextUsage}
             size="compact" hideIcon showPercentIcon

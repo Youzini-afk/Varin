@@ -143,7 +143,7 @@ export const WindowsWindowControls = React.memo(function WindowsWindowControls({
       <div
         className={cn(
           'app-region-no-drag group/wctl flex h-8 shrink-0 items-center',
-          isLeft ? 'mr-1' : 'ml-1 -mr-3',
+          isLeft ? 'mr-1' : 'ml-1',
         )}
         aria-label={t('header.windowControls.groupAria')}
       >
@@ -158,15 +158,15 @@ export const WindowsWindowControls = React.memo(function WindowsWindowControls({
   // icon cluster (app menu / sidebar / project actions) and avoids negative
   // margins so TitlebarLeftControls publishes an accurate reserved width —
   // otherwise the project-actions chevron overlaps the session title. Right
-  // side keeps an h-10 Windows-style hit target and cancels Header's
-  // pr-3 edge padding so the close hit area reaches the window boundary.
+  // side stretches through the titlebar. Its parent owns the edge spacing so
+  // the close hit area reaches the window boundary in both Agent and IDE.
   const buttonClassName = cn(
     'app-region-no-drag inline-flex items-center justify-center text-muted-foreground transition-colors hover:bg-interactive-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary',
-    isLeft ? 'h-8 w-8 rounded-md' : 'h-10 w-10',
+    isLeft ? 'h-8 w-8 rounded-md' : 'w-10 self-stretch',
   );
   const containerClassName = isLeft
     ? 'app-region-no-drag mr-1 flex h-8 shrink-0 items-center'
-    : 'app-region-no-drag ml-1 -mr-3 flex h-10 shrink-0 items-center';
+    : 'app-region-no-drag ml-1 flex shrink-0 self-stretch items-stretch';
 
   const renderControl = (action: DesktopWindowControlAction) => {
     if (action === 'minimize') {
