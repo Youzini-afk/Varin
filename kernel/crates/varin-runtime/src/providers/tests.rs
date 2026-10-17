@@ -370,6 +370,21 @@ fn http_status_preserves_retry_and_request_id_without_echoing_body() {
     assert!(!error.message.contains("secret prompt"));
 }
 #[test]
+fn http_schema_failure_retains_diagnostic_without_credentials_or_other_response_fields() {
+    let body = json!({"error":{"message":"Invalid schema for function 'follow_up': type must be object. Bearer fixture-secret", "code":"invalid_request_error"}, "request":"private prompt"}).to_string();
+    let response = format!("HTTP/1.1 400 Bad Request\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len());
+    let (endpoint, server) = loopback_response(response.into_bytes());
+    let mut headers = reqwest::header::HeaderMap::new();
+    headers.insert(reqwest::header::AUTHORIZATION, "Bearer fixture-secret".parse().unwrap());
+    let error = ReqwestTransport::new(|| reqwest::Client::builder().no_proxy()).stream(
+        HttpRequest { endpoint: &endpoint, headers, body: &json!({}).into() },
+        &CancellationToken::default(), &mut |_| Ok(false),
+    ).unwrap_err();
+    server.join().unwrap();
+    assert_eq!(error.code, "http_400");
+    assert_eq!(error.message, "HTTP 400: Invalid schema for function 'follow_up': type must be object. [redacted]");
+}
+#[test]
 fn http_cancellation_interrupts_stalled_headers_and_body() {
     use std::io::{Read, Write};
     for send_headers in [false, true] {

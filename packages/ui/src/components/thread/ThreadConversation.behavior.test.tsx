@@ -531,7 +531,10 @@ it.each(['any', 'all'] as const)('registers %s conditions as one retained intent
 
 it('opens a local draft and creates its canonical Thread only when the first message is sent', async () => {
   const f = fixture(); const create = vi.fn(f.api.create); f.api.create = create; runtimeState.api = f.api;
-  vi.mocked(f.api.materials.upload).mockResolvedValue(uploadedPdf());
+  let upload!: (value: Awaited<ReturnType<ThreadsAPI['materials']['upload']>>) => void;
+  vi.mocked(f.api.materials.upload).mockImplementation(() => new Promise(resolve => { upload = resolve; }));
+  let accept!: (value: Awaited<ReturnType<ThreadsAPI['submit']>>) => void;
+  f.submit.mockImplementation(() => new Promise(resolve => { accept = resolve; }));
   f.api.prepareSource = vi.fn().mockResolvedValue({ path: '/chosen-project', source: { resourceOwner: { kind: 'local' }, workspaceId: 'chosen', executionWorkspaceId: 'chosen', mode: 'live_root',
     liveRoot: { hostId: 'host-a', canonicalRoot: '/chosen-project', rootId: 'root-a' }, tools: ['file_read'] } });
   let unbind: (() => void) | undefined;
@@ -550,7 +553,20 @@ it('opens a local draft and creates its canonical Thread only when the first mes
     await submitForm(composerForm());
     expect(create).toHaveBeenCalledOnce();
     expect(f.api.materials.upload).toHaveBeenCalledOnce();
+    expect(container.querySelector('h1')).toBeNull();
+    expect(container.querySelector('[data-conversation-user-message]')?.textContent).toContain('Explain the attached document');
+    expect(container.querySelector('[data-conversation-submission-status]')?.getAttribute('data-conversation-submission-status')).toBe('preparing');
+    await act(async () => { upload(uploadedPdf()); });
     expect(f.submit).toHaveBeenCalledWith(expect.objectContaining({ ...identity, text: 'Explain the attached document', materials: [{ snapshotId: 'retained-original' }] }));
+    expect(container.querySelector('[data-conversation-submission-status]')?.getAttribute('data-conversation-submission-status')).toBe('dispatching');
+    await act(async () => { accept({ thread_id: identity.threadId, branch_id: identity.branchId, run_id: 'ui-run', input_id: 'sent', cursor: 1 }); });
+    expect(container.querySelector('h1')).toBeNull();
+    expect(container.querySelector('[data-conversation-submission-status]')?.getAttribute('data-conversation-submission-status')).toBe('accepted');
+    f.view.history = [{ id: 'sent', thread_id: identity.threadId, run_id: 'ui-run', parent: null, source: 'user', provider: null, content: { text: 'Explain the attached document' } }];
+    f.view.historyPage.head = 'sent'; f.view.thread.branches[0]!.head = 'sent';
+    await act(async () => { f.emit({ cursor: 1, subject: 'ui-run', revision: 1, kind: 'run.accepted', data: {} }); });
+    expect(container.querySelectorAll('[data-conversation-user-message]')).toHaveLength(1);
+    expect(container.querySelector('[data-conversation-submission-status]')).toBeNull();
     expect(useThreadStore.getState().selectedIdentity).toEqual(identity);
     expect(container.querySelector('[aria-label="Thread conversation"]')).not.toBeNull();
     expect(container.querySelector('[aria-label="Conversation runtime"]')).toBeNull();

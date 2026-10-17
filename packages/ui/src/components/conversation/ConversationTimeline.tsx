@@ -3,7 +3,7 @@ import type { ThreadIdentity, ThreadSnapshot, ThreadsAPI, ThreadMemoryAPI } from
 import type { ThreadHistoryItem as HistoryItem } from '@varin/application-client';
 import { ChatTimeline } from './ChatTimeline';
 import { ConversationContext, type UiCardProjection } from './ConversationContext';
-import type { ChatToolCall } from './types';
+import type { ChatToolCall, ChatUserMessage, ChatSessionSubmissionStatus } from './types';
 import { getUiSession } from '@/lib/interactive-ui/sessions';
 import { projectUiWork } from '@/lib/interactive-ui/work-projection';
 import { HistoryPresentation, assistant } from './historyPresentation';
@@ -20,10 +20,11 @@ import { useI18n } from '@/lib/i18n';
 import { toast } from '@/components/ui';
 import type { StreamingToolCall } from '@/lib/agent-runtime/thread-projection';
 
-export function ConversationTimeline({ api, identity, snapshot, history, progress, streamingTools = [], cwd, working, readOnly, onQuote, onFork, onRecover, memory, header, footer }: {
+export function ConversationTimeline({ api, identity, snapshot, history, progress, streamingTools = [], cwd, working, readOnly, onQuote, onFork, onRecover, memory, header, footer, liveUser, liveUserStatus }: {
   api: ThreadsAPI; identity: ThreadIdentity; snapshot?: ThreadSnapshot; history: readonly HistoryItem[];
   progress: string; cwd: string; working: boolean; readOnly?: boolean; onQuote(text: string): void;
   streamingTools?: StreamingToolCall[];
+  liveUser?: ChatUserMessage; liveUserStatus?: ChatSessionSubmissionStatus;
   onFork?(id: string): void; onRecover?(id: string): void; memory?: ThreadMemoryAPI;
   header?: React.ReactNode; footer?: React.ReactNode;
 }) {
@@ -128,7 +129,7 @@ export function ConversationTimeline({ api, identity, snapshot, history, progres
   const context = React.useMemo(() => ({ api, identity, head, quote: onQuote, openFile, fileTarget, memory, toolExecutions: view.toolExecutions, uiCards, sourceEntry, renderExtras }),
     [api, identity, head, onQuote, openFile, fileTarget, memory, view.toolExecutions, uiCards, sourceEntry, renderExtras]);
   return <ConversationContext.Provider value={context}><ChatTimeline key={key} sessionId={key} cwd={cwd}
-    entries={view.entries} toolExecutions={view.toolExecutions} liveAssistant={liveAssistant} leafId={head}
+    entries={view.entries} toolExecutions={view.toolExecutions} liveAssistant={liveAssistant} liveUser={liveUser} liveUserStatus={liveUserStatus} leafId={head}
     assistantWaiting={working ? {} : undefined} onFork={onFork ? entry => onFork(entry.id) : undefined}
     onRecover={onRecover ? entry => onRecover(entry.id) : undefined} header={header} footer={footer} />
   </ConversationContext.Provider>;

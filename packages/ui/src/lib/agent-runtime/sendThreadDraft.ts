@@ -87,6 +87,7 @@ export function sendThreadDraft(api: ThreadsAPI, draftKey: string, request: Thre
       acknowledgeEditorContextAttachments(original.editorContext ?? [], draftKey);
       for (const bucket of original.inlineContext ?? []) useInlineCommentDraftStore.getState().acknowledgeDrafts(bucket.key, bucket.drafts);
       patch(current => ({ firstSend: undefined, pendingInput: undefined, preparedSource: null,
+        firstMessageReceipt: acceptedInputId ? { key: request.key, text: original.input.text, images: request.images, inputId: acceptedInputId } : undefined,
         ...(original.goalObjective ? { goalArmed: false } : {}),
         text: current.text === original.editorText ? '' : current.text,
         images: current.images.filter(image => !request.images.includes(image)),

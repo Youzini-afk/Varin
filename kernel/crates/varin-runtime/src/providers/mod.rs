@@ -243,6 +243,14 @@ impl ReqwestTransport {
             .as_ref()
             .map_err(Clone::clone)?;
         let body = request.body.wire_bytes();
+        // Error messages are useful diagnostics, but credential header values must not
+        // enter saved failures even if an upstream endpoint echoes them back.
+        let credentials: Vec<String> = request.headers.iter()
+            .filter(|(name, _)| matches!(name.as_str(), "authorization" | "proxy-authorization")
+                || name.as_str().ends_with("key") || name.as_str().ends_with("token"))
+            .filter_map(|(_, value)| value.to_str().ok())
+            .flat_map(|value| [Some(value), value.strip_prefix("Bearer ").or_else(|| value.strip_prefix("Basic "))])
+            .flatten().filter(|value| !value.is_empty()).map(str::to_owned).collect();
         let mut headers = request.headers;
         headers.insert(
             reqwest::header::ACCEPT,
@@ -264,12 +272,24 @@ impl ReqwestTransport {
             let request_id = response.headers().get("x-request-id").or_else(|| response.headers().get("request-id")).or_else(|| response.headers().get("x-amzn-requestid"))
                 .and_then(|v| v.to_str().ok()).map(str::to_owned);
             if !response.status().is_success() {
-                // Never persist arbitrary error bodies: providers can echo prompt/credentials in them.
-                return Err(ModelFailure { code: format!("http_{}", response.status().as_u16()),
-                    message: "model endpoint rejected the request".into(),
-                    retry_after_ms: response.headers().get("retry-after-ms").and_then(|v| v.to_str().ok()).and_then(|v| v.parse().ok())
-                        .or_else(|| response.headers().get("retry-after").and_then(|v| v.to_str().ok()).and_then(|v| v.parse::<u64>().ok()).and_then(|s| s.checked_mul(1000))),
-                    provider_request_id: request_id });
+                let status = response.status().as_u16();
+                let retry_after_ms = response.headers().get("retry-after-ms").and_then(|v| v.to_str().ok()).and_then(|v| v.parse().ok())
+                    .or_else(|| response.headers().get("retry-after").and_then(|v| v.to_str().ok()).and_then(|v| v.parse::<u64>().ok()).and_then(|s| s.checked_mul(1000)));
+                let body = tokio::select! {
+                    biased;
+                    _ = cancel.cancelled() => None,
+                    body = response.json::<Value>() => body.ok(),
+                };
+                // Keep the provider's diagnostic field, never the full response (HTML,
+                // request echoes, stack traces, etc.). Renderers display it as error text.
+                let detail = body.as_ref().and_then(|body| body.pointer("/error/message").or_else(|| body.get("message")))
+                    .and_then(Value::as_str).filter(|message| !message.trim().is_empty());
+                let mut message = match detail {
+                    Some(detail) => format!("HTTP {status}: {detail}"),
+                    None => format!("Model endpoint rejected the request (HTTP {status})."),
+                };
+                for credential in credentials { message = message.replace(&credential, "[redacted]"); }
+                return Err(ModelFailure { code: format!("http_{status}"), message, retry_after_ms, provider_request_id: request_id });
             }
             if !response.headers().get("content-type").and_then(|v|v.to_str().ok())
                 .is_some_and(|v| v.split(';').next().is_some_and(|t|t.trim().eq_ignore_ascii_case(content_type))) {

@@ -10,6 +10,7 @@ import { ConversationTimeline } from '../conversation/ConversationTimeline';
 import { ReferenceNavigationContext, type ReferenceNavigation } from '../conversation/ReferenceNavigation';
 import { deliverThreadInput } from '@/lib/agent-runtime/threadInputDelivery';
 import { sendThreadDraft } from '@/lib/agent-runtime/sendThreadDraft';
+import { useFirstMessagePreview } from './useFirstMessagePreview';
 import { AutoReviewBanner } from '@/components/chat/AutoReviewBanner';
 import { EditorContextAttachmentChips } from '@/components/workbench/EditorContextAttachmentChips';
 import { addContentReference, acknowledgeEditorContextAttachments, getEditorContextAttachmentsRevision, listEditorContextAttachments, subscribeEditorContextAttachments } from '@/lib/agent-editor/attachments';
@@ -476,6 +477,7 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
     });
   };
   const visibleHistory = historyView?.items ?? snapshot?.history ?? [];
+  const firstMessage = useFirstMessagePreview(draftKey, Boolean(snapshot?.historyPage.head), handoff);
   const previousHistory = historyView ? historyView.previous : snapshot?.historyPage.previous;
   const memorySelection = getRegisteredRuntimeAPIs()?.bots?.selection;
   const submissionFingerprint = () => JSON.stringify([identity.threadId, identity.branchId, projectedText, requestImages, materials, providerId, modelId, thinkingLevel, inputMode, preparedSource?.source]);
@@ -493,7 +495,7 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
   if (snapshot?.children?.length) overviewRows.push({ id: 'children', section: 'threads', icon: 'git-branch', label: t('harness.overview.threads'), value: snapshot.children!.length });
   if (snapshot?.operations.some(operation => operation.phase !== 'terminal')) overviewRows.push({ id: 'operations', section: 'outputs', icon: 'loader-4', label: t('harness.overview.outputs'), value: snapshot.operations.filter(operation => operation.phase !== 'terminal').length });
   if (hasComputer) overviewRows.push({ id: 'computer', section: 'computer', icon: 'computer', label: t('computer.automation.title') });
-  const empty = Boolean(snapshot && !visibleHistory.length && !progress && !active);
+  const empty = Boolean(snapshot && !visibleHistory.length && !progress && !active && !firstMessage.message && !pending && !draft.pendingInput);
   const emptyWorkspacePath = preparedSource?.path ?? draft.workspacePath ?? launch?.selection.source?.live_root?.canonicalRoot;
 
   const overview = <WorkOverviewControl open={choices.overview ?? false} compactOpen={choices.compact ?? false}
@@ -599,8 +601,9 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
     {!readOnly && snapshot && <ThreadQuestions key={draftKey} operations={snapshot.operations} enabled={operation => !pending && run?.state === 'waiting' && run.waiting_on === operation.waiting_on}
       onCancel={operation => act(() => api.cancelOperation(operation.id))} onAnswer={(operation, answer) => act(() => api.answerQuestion({ ...identity, operationId: operation.id, answer }))} />}
     <div className={cn('relative flex min-h-0 flex-1', empty && 'hidden')}>
-    <ConversationSurface owner={String(host)} identity={draftKey} ready={Boolean(snapshot)} loadingLabel={t('common.loading')}>
+    <ConversationSurface owner={String(host)} identity={draftKey} ready={Boolean(snapshot || firstMessage.message)} loadingLabel={t('common.loading')}>
     <ConversationTimeline api={api} identity={identity} snapshot={snapshot} history={visibleHistory}
+      liveUser={historyView ? undefined : firstMessage.message} liveUserStatus={firstMessage.status}
       progress={historyView ? '' : progress} streamingTools={historyView ? [] : streamingTools} cwd={emptyWorkspacePath ?? ''} working={!historyView && active && !launch?.preparation_failure && !pause} readOnly={readOnly}
       memory={snapshot?.thread.bot_id ? memorySelection : undefined}
       onQuote={quote => { if (!readOnly && currentViewScope.current === viewScope) { setText(current => [current.trimEnd(), quote].filter(Boolean).join('\n\n')); messageInput.current?.focus(); } }}

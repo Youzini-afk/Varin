@@ -61,6 +61,12 @@ export class MessageHandoff {
 
   cancelSubmission(id: string): void { this.finish(`submit:${id}`); }
 
+  preview(id: string, timestamp: number): void {
+    const transfer = this.transfers.get(`submit:${id}`);
+    if (transfer && !transfer.turnId) transfer.turnId = `turn:live-user:${timestamp}`;
+    this.watch();
+  }
+
   accepted(id: string, inputId: string): void {
     const transfer = this.transfers.get(`submit:${id}`);
     if (transfer) transfer.turnId = `turn:${inputId}`;

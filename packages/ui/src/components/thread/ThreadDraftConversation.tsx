@@ -1,6 +1,8 @@
 import React from 'react';
 import { createModelConnectionsHttpAPI, getRuntimeEndpointGeneration, type ThreadModelInfo, type ThreadsAPI, type ThreadThinkingLevel } from '@varin/application-client';
 import { ThreadComposer } from './ThreadComposer';
+import { ChatTurnUserMessage } from '../conversation/ChatTimelineEntries';
+import { useFirstMessagePreview } from './useFirstMessagePreview';
 import { ThreadSourcePicker } from './ThreadSourcePicker';
 import { WorkOverviewControl } from './WorkOverviewControl';
 import { DraftPresetChips } from '@/components/chat/DraftPresetChips';
@@ -89,6 +91,7 @@ export function ThreadDraftConversation({ api, draftKey, handoff }: { api: Threa
   const sending = draft.firstSend?.status === 'sending';
   const locked = Boolean(draft.firstSend);
   const sourcePath = draft.sourceSelection?.path ?? draft.workspacePath;
+  const firstMessage = useFirstMessagePreview(draftKey, false, handoff);
   const addFiles = async (files: File[]) => {
     if (!files.length || reading.current || useThreadDraftStore.getState().drafts[draftKey]?.firstSend) return;
     const current = () => mounted.current && generation === getRuntimeEndpointGeneration();
@@ -118,12 +121,14 @@ export function ThreadDraftConversation({ api, draftKey, handoff }: { api: Threa
         onDraftSelection={sourceChanged} active={locked} launch={null} prepared={null} onPrepared={ignorePrepared} onPreparingChange={ignorePrepared}
         onUseChatOnly={() => patch({ workspacePath: undefined })} />}
     </WorkOverviewControl>
-    <div className="min-h-6 flex-1" />
+    {firstMessage.message ? <div className="min-h-0 flex-1 overflow-y-auto py-4"><div className="chat-input-column" data-turn-id={`turn:live-user:${firstMessage.message.timestamp}`}>
+      <ChatTurnUserMessage cwd={sourcePath ?? ''} message={firstMessage.message} status={firstMessage.status} />
+    </div></div> : <div className="min-h-6 flex-1" />}
     <div className="shrink-0 space-y-5 pb-4">
-      <div className="chat-input-column flex flex-col items-center gap-5 pb-1 text-center">
+      {!firstMessage.message && <div className="chat-input-column flex flex-col items-center gap-5 pb-1 text-center">
         <VarinLogo width={24} height={24} decorative className="text-muted-foreground" />
         <h1 className="text-2xl font-medium tracking-tight text-foreground md:text-3xl">{sourcePath ? t('chat.emptyState.draftTitleWithProject', { project: formatDirectoryName(sourcePath) }) : t('chat.emptyState.draftTitle')}</h1>
-      </div>
+      </div>}
       <form className="space-y-2" onSubmit={event => {
         event.preventDefault(); if (sendDisabled || reading.current) return;
         const settings = useUIStore.getState();
@@ -142,7 +147,7 @@ export function ThreadDraftConversation({ api, draftKey, handoff }: { api: Threa
         <input ref={fileInput} type="file" accept="image/*" multiple hidden aria-label="Choose image attachments" onChange={event => { const files = [...(event.target.files ?? [])]; event.target.value = ''; void addFiles(files); }} />
         <input ref={pdfInput} type="file" accept="application/pdf,.pdf" multiple hidden aria-label={t('chat.fileAttachment.actions.choosePdfs')} onChange={event => { const files = [...(event.target.files ?? [])]; event.target.value = ''; void addFiles(files); }} />
         {draft.goalArmed && <p className="chat-input-column typography-meta text-primary">{t('thread.composer.goalArmed')}</p>}
-        <ThreadComposer editorRef={editor} value={draft.text} onChange={text => patch({ text })} identityKey={draftKey} placement="center"
+        <ThreadComposer editorRef={editor} value={draft.text} onChange={text => patch({ text })} identityKey={draftKey} placement={firstMessage.message ? 'bottom' : 'center'}
           models={models} providerId={model?.providerId ?? ''} modelId={model?.modelId ?? ''} thinkingLevel={model?.thinkingLevel ?? 'off'}
           onModelChange={(providerId, modelId, thinkingLevel) => patch({ model: { providerId, modelId, thinkingLevel } })}
           modelDisabled={locked} attachmentDisabled={locked || readingFiles} imageDisabled={acceptsImages === false}
@@ -165,13 +170,13 @@ export function ThreadDraftConversation({ api, draftKey, handoff }: { api: Threa
           </div>
         </ThreadComposer>
       </form>
-      <div className="conversation-starters"><DraftPresetChips cwd={sourcePath} className="oc-draft-starters" onSubmit={starter => {
+      {!firstMessage.message && <div className="conversation-starters"><DraftPresetChips cwd={sourcePath} className="oc-draft-starters" onSubmit={starter => {
         if (starter.ref.type === 'command' && starter.ref.name === 'craft-goal') patch({ goalArmed: true });
         else if (starter.ref.type === 'command' && starter.ref.name === 'schedule-task') useUIStore.getState().setScheduledTasksDialogOpen(true);
         else patch(current => ({ text: [current.text.trimEnd(), starter.submitText].filter(Boolean).join('\n\n') }));
         editor.current?.focus();
-      }} /></div>
+      }} /></div>}
     </div>
-    <div className="min-h-6 flex-1" />
+    {!firstMessage.message && <div className="min-h-6 flex-1" />}
   </section>;
 }

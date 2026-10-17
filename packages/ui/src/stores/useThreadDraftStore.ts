@@ -62,6 +62,8 @@ export interface ThreadDraft {
   identity?: ThreadIdentity;
   pdfs?: DraftPdfAttachment[];
   firstSend?: ThreadFirstSend;
+  /** Paint the accepted first input until its native history snapshot arrives. */
+  firstMessageReceipt?: Pick<ThreadFirstSend, 'key' | 'text' | 'images'> & { inputId: string };
   sendError?: string;
   sourceSelection?: DraftSourceSelection;
 }

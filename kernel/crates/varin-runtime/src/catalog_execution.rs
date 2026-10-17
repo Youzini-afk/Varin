@@ -6,9 +6,12 @@ use super::*;
 use crate::execution::*;
 use std::sync::{Arc, Mutex};
 
-/// Executor/provider callbacks may include credentials or source text. Only structural
-/// causes with owner-defined wording may enter the public terminal failure fact.
+/// HTTP diagnostics are prepared by the model transport, including credential redaction.
+/// Other executor failures use owner-defined wording instead of arbitrary callback text.
 fn safe_run_failure(failure: &ExecutionError) -> ExecutionError {
+    if failure.code.strip_prefix("http_").and_then(|status| status.parse::<u16>().ok()).is_some_and(|status| (400..=599).contains(&status)) {
+        return ExecutionError::new(&failure.code, &failure.message);
+    }
     let (code, message) = match failure.code.as_str() {
         "context_candidate_capacity" => ("context_candidate_capacity", "The context summary and retained history do not fit the selected model's context budget. The original history remains unchanged."),
         "context_capacity" => ("context_capacity", "The context budget could not be prepared for the next model request."),
@@ -16,6 +19,9 @@ fn safe_run_failure(failure: &ExecutionError) -> ExecutionError {
         "context_compaction_failed" => ("context_compaction_failed", "Context compaction could not publish a continuation. The original history remains unchanged."),
         "context_policy_unavailable" => ("context_policy_unavailable", "The selected context strategy is unavailable."),
         "context_preparation_failed" => ("context_preparation_failed", "Context preparation failed before a new model request was admitted."),
+        "transport_error" => ("transport_error", "Could not connect to the model service. Check the connection and proxy settings."),
+        "stream_interrupted" => ("stream_interrupted", "The model connection ended before the response completed."),
+        "credential_missing" | "unknown_credential_ref" => ("credential_missing", "The selected model credential is unavailable. Configure its API key or sign in again."),
         _ => ("execution_failed", "Run execution failed."),
     };
     ExecutionError::new(code, message)

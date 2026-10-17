@@ -53,11 +53,11 @@ pub(crate) fn schema() -> ToolSchema {
     ToolSchema {
         requirements: None,
         name: followups::TOOL.into(),
-        version: "8".into(),
+        version: "9".into(),
         description: "Schedule an instruction to continue this conversation when a condition is met. Registration returns immediately; idle conversations start a new run. Current pauses, unanswered questions and goal limits remain in effect. jobs lists accepted task-family jobs; list shows registrations; get reads an instruction; occurrences pages delivery history; occurrence reads one occurrence's evidence. control pauses, resumes or cancels a registration using its current revision. Pause holds observation and pending delivery; cancel removes future and undelivered work while preserving existing results and observed jobs.".into(),
         output_schema: None,
         metadata: None,
-        schema: json!({"oneOf":[
+        schema: json!({"type":"object","oneOf":[
             {"type":"object","properties":{
                 "action":{"const":"register"},"trigger":trigger,
                 "repeat":{"enum":["once","each"],"description":"Defaults to once. Each repeats on known machine metric crossings, original log matches, observed file changes, artifact revisions or collection results. Any requires at least one repeatable condition; all requires every condition to repeat and pairs their oldest unconsumed facts. Retained log bytes are replayable; unobserved file changes or machine crossings are not reconstructed."},
