@@ -6,6 +6,8 @@ import type {
   FastDecisionAnswer,
   FastDecisionQuestion,
 } from "@varin/protocol";
+import type { ModelDecisionPaths } from '@varin/application-client';
+import { appendModelPath } from './connection.js';
 
 /** Criteria key used when the caller asks for an explicit "no suitable option". */
 const NONE_OPTION = "__none__";
@@ -15,6 +17,7 @@ export interface ClassifierRequest {
   apiKey?: string;
   headers?: Record<string, string>;
   endpoint?: string;
+  paths?: ModelDecisionPaths;
   model: string;
   nativeModel?: ClassifierModel<ClassifierApi>;
   classify?: ClassifierFunction;
@@ -22,7 +25,7 @@ export interface ClassifierRequest {
   state: unknown;
   questions: readonly FastDecisionQuestion[];
   signal?: AbortSignal;
-  fetchImpl?: typeof fetch;
+  fetchImpl?: ClassifierFetch;
 }
 
 export interface ClassifierResponse {
@@ -52,23 +55,25 @@ export interface ClassifierRequestRoute {
   requestUrl: string;
   requestKind: "preparation" | "model_compute";
 }
+export type ClassifierFetch = (input: Parameters<typeof fetch>[0], init?: RequestInit, route?: ClassifierRequestRoute) => Promise<Response>;
 
 export const isSupportedClassifierApi = (api: string): boolean =>
   api === "typesafe-system-one" || api === "cloudflare-workers-ai-system-one" || api === "llama-cpp-classify";
 
 /** The selected protocol owns its actual routes; credentials and transports consume this plan. */
-export function classifierRequestRoutes(api: string, baseUrl: string, endpoint?: string): readonly ClassifierRequestRoute[] {
+export function classifierRequestRoutes(api: string, baseUrl: string, endpoint?: string, paths?: ModelDecisionPaths): readonly ClassifierRequestRoute[] {
   if (api === "llama-cpp-classify") {
-    if (endpoint !== undefined) throw new ClassifierRequestError("llama.cpp classification uses tokenize, apply-template and completion endpoints; configure its server base URL instead of a single endpoint override");
+    if (endpoint !== undefined || paths?.classify !== undefined) throw new ClassifierRequestError("llama.cpp classification uses tokenize, apply-template and completion endpoints; configure their individual paths instead of a single endpoint override");
     const root = llamaServerRoot(baseUrl);
     return [
-      { requestUrl: new URL(`${root}/tokenize`).toString(), requestKind: "preparation" },
-      { requestUrl: new URL(`${root}/apply-template`).toString(), requestKind: "preparation" },
-      { requestUrl: new URL(`${root}/completion`).toString(), requestKind: "model_compute" },
+      { requestUrl: paths?.tokenize === undefined ? new URL(`${root}/tokenize`).toString() : appendModelPath(root, paths.tokenize), requestKind: "preparation" },
+      { requestUrl: paths?.applyTemplate === undefined ? new URL(`${root}/apply-template`).toString() : appendModelPath(root, paths.applyTemplate), requestKind: "preparation" },
+      { requestUrl: paths?.completion === undefined ? new URL(`${root}/completion`).toString() : appendModelPath(root, paths.completion), requestKind: "model_compute" },
     ];
   }
   if (api !== "typesafe-system-one" && api !== "cloudflare-workers-ai-system-one") throw new ClassifierRequestError("Unsupported classifier API");
-  return [{ requestUrl: new URL(`${baseUrl.replace(/\/+$/u, "")}${endpoint ?? (api === "typesafe-system-one" ? "/systemone" : "/run")}`).toString(), requestKind: "model_compute" }];
+  const path = endpoint ?? paths?.classify;
+  return [{ requestUrl: path === undefined ? new URL(`${baseUrl.replace(/\/+$/u, "")}${api === "typesafe-system-one" ? "/systemone" : "/run"}`).toString() : appendModelPath(baseUrl, path), requestKind: "model_compute" }];
 }
 
 const isRecord = (value: unknown): value is Record<string, unknown> => (
@@ -308,10 +313,11 @@ export async function requestClassifier(request: ClassifierRequest): Promise<Cla
   };
   const supported = isSupportedClassifierApi(nativeModel.api);
   if (!supported && !request.classify) throw new ClassifierRequestError("Unsupported classifier API without its registered implementation");
-  const routes = supported ? classifierRequestRoutes(nativeModel.api, request.baseUrl, request.endpoint) : undefined;
+  const defaultRoutes = supported ? classifierRequestRoutes(nativeModel.api, request.baseUrl) : undefined;
+  const routes = supported ? classifierRequestRoutes(nativeModel.api, request.baseUrl, request.endpoint, request.paths) : undefined;
   let captured: Record<string, unknown> | undefined;
   const computeUsage: ClassifierResponse["usage"][] = [];
-  const fetchImpl = request.fetchImpl ?? fetch;
+  const fetchImpl: ClassifierFetch = request.fetchImpl ?? fetch;
   const transport = new AbortController();
   const signal = request.signal ? AbortSignal.any([request.signal, transport.signal]) : transport.signal;
   const pending = new Set<Promise<Response>>();
@@ -329,11 +335,12 @@ export async function requestClassifier(request: ClassifierRequest): Promise<Cla
           signal.throwIfAborted();
           // A role override changes only this frozen request's destination. Payload,
           // authentication, cancellation and retry behavior stay with the native API.
-          const destination = request.endpoint ? `${request.baseUrl.replace(/\/+$/u, "")}${request.endpoint}` : url;
-          const route = routes?.find(value => value.requestUrl === new URL(String(destination)).toString());
-          if (routes && !route) throw new ClassifierRequestError("Classifier request left its selected protocol routes");
+          const index = defaultRoutes?.findIndex(value => value.requestUrl === new URL(String(url)).toString()) ?? -1;
+          if (defaultRoutes && index < 0) throw new ClassifierRequestError("Classifier request left its selected protocol routes");
+          const route = routes?.[index];
+          const destination = route?.requestUrl ?? (request.endpoint ? `${request.baseUrl.replace(/\/+$/u, "")}${request.endpoint}` : url);
           let response: Response;
-          try { response = await fetchImpl(destination, { ...init, signal: init?.signal ? AbortSignal.any([signal, init.signal]) : signal }); }
+          try { response = await fetchImpl(destination, { ...init, signal: init?.signal ? AbortSignal.any([signal, init.signal]) : signal }, route); }
           catch (error) { if (!route || route.requestKind === "model_compute") computeUsage.push(undefined); throw error; }
           let usage: ClassifierResponse["usage"];
           try {

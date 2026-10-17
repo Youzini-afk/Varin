@@ -31,6 +31,7 @@ export interface SemanticProviderBinding {
   getAuth(): ReturnType<ExistingModelAuthRuntime['getAuth']>;
   allowAnonymous?: boolean;
   requestModelId?: string;
+  contextWindow?: number;
   release?(): void;
   headers?: Record<string, string>;
   egressOverride?: EgressOverride;
@@ -165,7 +166,7 @@ export function createSemanticInference(
       const provider = capturedProvider = await authority.resolveEmbeddingBinding(settings.providerId, settings.modelId);
       if (JSON.stringify(settingsFrom(await readGlobalSettings())) !== JSON.stringify(settings) || capturedRevocation !== revocationGeneration) return fail('unavailable', 'embedding-selection-changed');
       const binding: HarnessResolvedEmbeddingBinding = Object.freeze({ ...settings,
-        maxTokens: settings.maxTokens ?? REMOTE_EMBEDDING_DEFAULT_MAX_TOKENS, configurationId: provider.configurationId });
+        maxTokens: settings.maxTokens ?? provider.contextWindow ?? REMOTE_EMBEDDING_DEFAULT_MAX_TOKENS, configurationId: provider.configurationId });
       const identity: SemanticInferenceIdentity = Object.freeze({ providerId: binding.providerId,
         modelId: binding.modelId, protocol: binding.protocol, configurationId: binding.configurationId,
         endpoint: provider.requestUrl, credentialScope: Object.freeze({ ...provider.credentialScope }) });

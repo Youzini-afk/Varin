@@ -62,6 +62,10 @@ const select = async (current: string, next: string) => {
   await act(async () => { Object.defineProperty(element, 'value', { configurable: true, value: next }); element.dispatchEvent(new window.Event('change', { bubbles: true })); });
 };
 const open = async () => { await act(async () => root.render(<ModelConnectionsPage />)); await click('Connection'); };
+const configureOpenedModel = async () => {
+  const configure = [...container.querySelectorAll('button')].find(button => button.textContent === 'settings.models.advanced' && button.getAttribute('role') !== 'tab' && !button.closest('[hidden]'))!;
+  await act(async () => configure.click());
+};
 const embeddingLabel = 'settings.models.path: settings.models.operation.embedding';
 
 test('network controls load saved values, save typed changes, and clear options back to Host defaults', async () => {
@@ -226,6 +230,117 @@ test('service tab changes retain draft edits; a failed save stays dirty and Canc
   expect((container.querySelector(`[aria-label="${embeddingLabel}"]`) as HTMLInputElement).value).toBe('/vectors');
   expect(button('settings.models.save').disabled).toBe(true);
   expect(fixtures.api.discoverDraft).not.toHaveBeenCalled();
+});
+
+test.each([undefined, 'cloudflare-workers-ai-system-one'])('decision API belongs to the decision model, inheriting %s without rewriting its service or sibling', async inherited => {
+  snapshot.types[0]!.operations.push('decision');
+  snapshot.types[0]!.parametersSchema = { properties: { decisionApi: { enum: ['typesafe-system-one', 'cloudflare-workers-ai-system-one'] } } };
+  snapshot.types[0]!.defaultParameters = { decisionApi: 'typesafe-system-one' };
+  const parameters: ModelChannel['parameters'] = inherited ? { decisionApi: inherited } : {};
+  snapshot.channels[0]!.parameters = parameters;
+  snapshot.channels[0]!.connection!.paths!.decision = '/service-decision';
+  const other: ModelChannel['models'][number] = { id: 'other', name: 'Other', enabled: true, operations: ['decision'] };
+  snapshot.channels[0]!.models = [{ id: 'jev-latest', name: 'Jev', enabled: true, operations: ['chat'], catalog: { overrides: [] } }, other];
+  await open();
+  expect(container.querySelector('option[value="typesafe-system-one"]')).toBeNull();
+  await click('Jev');
+  await configureOpenedModel();
+  expect(container.querySelector('option[value="typesafe-system-one"]')).toBeNull();
+  await click('settings.models.operation.decision');
+  await click('settings.models.operation.chat');
+  const originalApi = inherited ?? 'typesafe-system-one';
+  const api = inherited ? 'typesafe-system-one' : 'cloudflare-workers-ai-system-one';
+  const decisionPath = () => (container.querySelector('[aria-label="settings.models.decisionPath"]') as HTMLInputElement).value;
+  expect(container.querySelector(`select[data-value="${originalApi}"]`)).not.toBeNull();
+  expect(decisionPath()).toBe('/service-decision');
+  await select(originalApi, api);
+  expect(decisionPath()).toBe(inherited ? '/systemone' : '/run');
+  await edit('settings.models.decisionPath', '/custom/decide');
+  await click('settings.models.save');
+  expect(fixtures.api.save.mock.calls[0]?.[0]).toMatchObject({ parameters,
+    connection: { paths: { decision: '/service-decision' } },
+    models: [{ id: 'jev-latest', operations: ['decision'], decision: { api, paths: { classify: '/custom/decide' } }, catalog: { overrides: ['operations', 'decision'] } }, other] });
+  expect(decisionPath()).toBe('/custom/decide');
+  await click('settings.models.operation.chat'); await click('settings.models.operation.decision');
+  await click('settings.models.save');
+  expect(fixtures.api.save.mock.calls[1]?.[0].models[0]).toMatchObject({ operations: ['chat'] });
+  expect(fixtures.api.save.mock.calls[1]?.[0].models[0].decision).toBeUndefined();
+});
+
+test.each(['embedding', 'rerank', 'decision'] as const)('%s context capacity can be edited in the model row and detail page', async operation => {
+  snapshot.types[0]!.operations = ['chat', operation];
+  snapshot.channels[0]!.models = [{ id: 'model', name: 'Model', operations: [operation], enabled: true }];
+  await open(); await click('Model');
+  expect(container.querySelector('[aria-label="settings.models.reasoning"]')).toBeNull();
+  await edit('settings.models.context', '32768');
+  await click('settings.models.save');
+  expect(fixtures.api.save.mock.calls[0]?.[0].models[0]).toMatchObject({ operations: [operation], contextWindow: 32768 });
+  await configureOpenedModel();
+  const context = [...container.querySelectorAll<HTMLInputElement>('[aria-label="settings.models.context"]')].find(input => !input.closest('[hidden]'))!;
+  expect(context.value).toBe('32768');
+  await act(async () => { context.value = '65536'; context.dispatchEvent(new window.Event('input', { bubbles: true })); });
+  await click('settings.models.save');
+  expect(fixtures.api.save.mock.calls[1]?.[0].models[0]).toMatchObject({ operations: [operation], contextWindow: 65536 });
+});
+
+test('image presets fill editable generation and editing paths while preserving the service and sibling', async () => {
+  snapshot.types[0]!.operations = ['chat', 'image-generation', 'image-editing'];
+  snapshot.types[0]!.parametersSchema = { properties: { imageApi: { enum: ['openai-images', 'openrouter-images'] } } };
+  snapshot.channels[0]!.parameters = { imageApi: 'openai-images' };
+  snapshot.channels[0]!.connection!.paths!['image-generation'] = '/service-generate';
+  snapshot.channels[0]!.connection!.paths!['image-editing'] = '/service-edit';
+  const other: ModelChannel['models'][number] = { id: 'other', name: 'Other', enabled: true, operations: ['image-generation'] };
+  snapshot.channels[0]!.models = [{ id: 'image', name: 'Image', enabled: true, operations: ['image-generation', 'image-editing'], image: { mask: false } }, other];
+  await open();
+  expect(container.querySelector('[aria-label="settings.models.parameter.imageApi"]')).toBeNull();
+  await click('Image'); await configureOpenedModel();
+  expect(container.querySelector('select[data-value="openai-images"]')).not.toBeNull();
+  const path = (name: string) => (container.querySelector(`[aria-label="settings.models.${name}Path"]`) as HTMLInputElement).value;
+  expect(path('imageGeneration')).toBe('/service-generate');
+  expect(path('imageEditing')).toBe('/service-edit');
+  await select('openai-images', 'openrouter-images');
+  expect(path('imageGeneration')).toBe('/chat/completions');
+  expect(path('imageEditing')).toBe('/chat/completions');
+  await edit('settings.models.imageGenerationPath', '/custom/generate');
+  await edit('settings.models.imageEditingPath', '/custom/edit');
+  await click('settings.models.save');
+  expect(fixtures.api.save.mock.calls[0]?.[0]).toMatchObject({ parameters: { imageApi: 'openai-images' },
+    connection: { paths: { 'image-generation': '/service-generate', 'image-editing': '/service-edit' } },
+    models: [{ id: 'image', image: { api: 'openrouter-images', mask: false, paths: { generation: '/custom/generate', editing: '/custom/edit' } } }, other] });
+  await select('openrouter-images', 'openai-images');
+  expect(path('imageGeneration')).toBe('/images/generations');
+  expect(path('imageEditing')).toBe('/images/edits');
+  await edit('settings.models.imageGenerationPath', '');
+  const field = container.querySelector('[aria-label="settings.models.imageGenerationPath"]')!;
+  await act(async () => { field.dispatchEvent(new window.Event('focusout', { bubbles: true })); });
+  expect(path('imageGeneration')).toBe('/service-generate');
+  await click('settings.models.save');
+  expect(fixtures.api.save.mock.calls[1]?.[0].models[0].image.paths).toEqual({ editing: '/images/edits' });
+  await click('settings.models.operation.chat');
+  await click('settings.models.operation.image-generation'); await click('settings.models.operation.image-editing');
+  await click('settings.models.save');
+  expect(fixtures.api.save.mock.calls[2]?.[0].models[0]).toMatchObject({ operations: ['chat'] });
+  expect(fixtures.api.save.mock.calls[2]?.[0].models[0].image).toBeUndefined();
+});
+
+test('llama.cpp exposes three editable request paths and switching presets fills the new protocol path', async () => {
+  snapshot.types[0]!.operations.push('decision');
+  snapshot.types[0]!.defaultParameters = { decisionApi: 'typesafe-system-one' };
+  snapshot.channels[0]!.models = [{ id: 'model', name: 'Model', enabled: true, operations: ['decision'] }];
+  await open(); await click('Model'); await configureOpenedModel();
+  await select('typesafe-system-one', 'llama-cpp-classify');
+  for (const [key, path] of [['tokenize', '/tokenize'], ['applyTemplate', '/apply-template'], ['completion', '/completion']]) {
+    expect((container.querySelector(`[aria-label="settings.models.${key}Path"]`) as HTMLInputElement).value).toBe(path);
+    await edit(`settings.models.${key}Path`, `/custom${path}`);
+  }
+  await click('settings.models.save');
+  expect(fixtures.api.save.mock.calls[0]?.[0].models[0].decision).toEqual({ api: 'llama-cpp-classify',
+    paths: { tokenize: '/custom/tokenize', applyTemplate: '/custom/apply-template', completion: '/custom/completion' } });
+  await select('llama-cpp-classify', 'typesafe-system-one');
+  expect(container.querySelector('[aria-label="settings.models.tokenizePath"]')).toBeNull();
+  expect((container.querySelector('[aria-label="settings.models.decisionPath"]') as HTMLInputElement).value).toBe('/systemone');
+  await click('settings.models.save');
+  expect(fixtures.api.save.mock.calls[1]?.[0].models[0].decision).toEqual({ api: 'typesafe-system-one', paths: { classify: '/systemone' } });
 });
 
 test('model capabilities save declared effort choices, image input and capacities', async () => {

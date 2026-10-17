@@ -19,13 +19,16 @@ interface Props {
 export function ModelCommonSettings({ model, disabled, onChange, validity }: Props) {
   const { t } = useI18n();
   const id = React.useId();
+  const chat = model.operations.includes('chat');
   const thinking = modelThinkingConfiguration(model);
   const update = (patch: Partial<ChannelModel>) => onChange({ ...model, ...patch });
-  const invalidThinking = model.reasoning && thinking.mode === 'levels' && !thinking.levels.length;
-  const invalidCapacity = [model.contextWindow, model.maxOutputTokens].some(value => value !== undefined && (!Number.isSafeInteger(value) || value <= 0));
+  const capacityFields: ('contextWindow' | 'maxOutputTokens')[] = chat ? ['contextWindow', 'maxOutputTokens'] : ['contextWindow'];
+  const invalidThinking = chat && model.reasoning && thinking.mode === 'levels' && !thinking.levels.length;
+  const invalidCapacity = capacityFields.some(field => model[field] !== undefined && (!Number.isSafeInteger(model[field]) || model[field]! <= 0));
   React.useEffect(() => { validity('thinking', !invalidThinking); validity('capacity', !invalidCapacity); }, [invalidThinking, invalidCapacity, validity]);
 
   return <div className="space-y-5 @container">
+    {chat ? <>
     <div className="grid gap-4 @lg:grid-cols-2">
       <div className="flex items-center justify-between gap-4"><label htmlFor={`${id}-image`} className="typography-meta">{t('settings.models.imageInput')}</label><Switch id={`${id}-image`} aria-label={t('settings.models.imageInput')} checked={model.input?.includes('image') ?? false} disabled={disabled} onCheckedChange={enabled => update({ input: enabled ? ['text', 'image'] : ['text'] })} /></div>
       <div className="flex items-center justify-between gap-4"><label htmlFor={`${id}-reasoning`} className="typography-meta">{t('settings.models.reasoning')}</label><Switch id={`${id}-reasoning`} aria-label={t('settings.models.reasoning')} checked={model.reasoning === true} disabled={disabled} onCheckedChange={enabled => update({ reasoning: enabled,
@@ -46,7 +49,8 @@ export function ModelCommonSettings({ model, disabled, onChange, validity }: Pro
         </div></div>
       </CollapsibleContent>
     </Collapsible>
-    <div className="grid gap-4 @lg:grid-cols-2">{(['contextWindow', 'maxOutputTokens'] as const).map(field => <div key={field} className="space-y-2"><label htmlFor={`${id}-${field}`} className="block typography-meta text-muted-foreground">{t(field === 'contextWindow' ? 'settings.models.context' : 'settings.models.output')}</label><Input id={`${id}-${field}`} type="number" aria-label={t(field === 'contextWindow' ? 'settings.models.context' : 'settings.models.output')} placeholder={t('settings.models.unspecified')} value={model[field] ?? ''} disabled={disabled} onChange={event => update({ [field]: event.target.value ? Number(event.target.value) : undefined })} /></div>)}</div>
+    </> : null}
+    <div className="grid gap-4 @lg:grid-cols-2">{capacityFields.map(field => <div key={field} className="space-y-2"><label htmlFor={`${id}-${field}`} className="block typography-meta text-muted-foreground">{t(field === 'contextWindow' ? 'settings.models.context' : 'settings.models.output')}</label><Input id={`${id}-${field}`} type="number" aria-label={t(field === 'contextWindow' ? 'settings.models.context' : 'settings.models.output')} placeholder={t('settings.models.unspecified')} value={model[field] ?? ''} disabled={disabled} onChange={event => update({ [field]: event.target.value ? Number(event.target.value) : undefined })} /></div>)}</div>
     {invalidCapacity ? <p role="alert" className="typography-micro text-destructive">{t('settings.models.invalidCapacity')}</p> : null}
   </div>;
 }

@@ -81,10 +81,10 @@ export function ModelSelection({ models, type, candidates, busy, onChange, onFol
               <span>{t(model.catalog ? 'settings.models.directoryFollowing' : 'settings.models.directoryManual')}{model.catalog?.overrides.length ? ` · ${t('settings.models.directoryOverrides')} ${model.catalog.overrides.length}` : ''}</span>
               {!model.catalog || model.catalog.overrides.length ? <Button variant="ghost" size="sm" disabled={busy} onClick={() => onFollow?.(model.id)}><Icon name="refresh" className="size-3.5" />{t('settings.models.followDirectory')}</Button> : null}
               {model.catalog?.overrides.map(field => <button key={field} type="button" disabled={busy} className="rounded border border-border/50 px-2 py-1 hover:text-foreground" onClick={() => onFollow?.(model.id, field)} title={t('settings.models.followDirectory')}>
-                {t(`settings.models.${({ contextWindow: 'context', maxOutputTokens: 'output', input: 'imageInput', thinking: 'thinkingMode', operations: 'capabilities' } as Record<string, string>)[field] ?? field}` as I18nKey)} ↺
+                {t(`settings.models.${({ contextWindow: 'context', maxOutputTokens: 'output', input: 'imageInput', thinking: 'thinkingMode', operations: 'capabilities', decision: 'parameter.decisionApi' } as Record<string, string>)[field] ?? field}` as I18nKey)} ↺
               </button>)}
             </div> : null}
-            {model.operations.includes('chat') ? <ModelCommonSettings model={model} disabled={busy} onChange={next => onChange(models.map(value => value.id === model.id ? next : value))} validity={(field, valid) => validity(model.id, field, valid)} /> : null}
+            <ModelCommonSettings model={model} disabled={busy} onChange={next => onChange(models.map(value => value.id === model.id ? next : value))} validity={(field, valid) => validity(model.id, field, valid)} />
             <div className="flex justify-end"><Button variant="ghost" size="sm" disabled={busy} onClick={() => onConfigure(model.id)}>{t('settings.models.advanced')}<Icon name="arrow-right-s" className="size-4" /></Button></div>
           </div>
         </CollapsibleContent>

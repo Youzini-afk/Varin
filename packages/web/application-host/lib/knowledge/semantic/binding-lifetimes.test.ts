@@ -17,6 +17,21 @@ function provider() {
     currentScope: async () => scope, assertAvailable: async () => {}, getAuth: vi.fn(async () => ({ auth: { apiKey: 'fixture-only' } })) } satisfies InferenceProviderBinding;
 }
 const forbidden = async () => { throw new Error('No model requests are allowed in capture tests'); };
+it('embedding uses the selected model context capacity unless an explicit input budget overrides it', async () => {
+  let budget: { maxTokens?: number } = {};
+  const owner = createSemanticInference({
+    readGlobalInferenceSettings: async () => ({ harness: { embedding: { ...model, protocol: 'openai-compatible', ...budget } } }),
+    resolveEmbeddingBinding: async () => ({ ...provider(), contextWindow: 32768 }),
+  });
+  const original = await owner.capture();
+  try {
+    expect(original.binding.maxTokens).toBe(32768);
+    budget = { maxTokens: 2048 };
+    const next = await owner.capture();
+    try { expect(next.binding.maxTokens).toBe(2048); } finally { next.release(); }
+    expect(original.binding.maxTokens).toBe(32768);
+  } finally { original.release(); await owner.close(); }
+});
 const requestOptions: InferenceRequestsOptions = { kernel: { agentRuntimeRequest: forbidden },
   runtime: { onEvent: () => () => {}, onReady: () => () => {}, onExit: () => () => {} }, egress: { prepare: forbidden } };
 const requestOwner = { run: forbidden } as unknown as InferenceRequests;

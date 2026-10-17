@@ -1,6 +1,6 @@
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
-import type { ModelChannel, ModelConnectionDraft, ModelConnectionOptions, ChannelModel, DiscoveredModel, ModelConnectionsSnapshot, ModelOperation, ConnectionAuthentication } from '@varin/application-client';
+import type { ModelChannel, ModelConnectionDraft, ModelConnectionOptions, ModelDecisionPaths, ChannelModel, DiscoveredModel, ModelConnectionsSnapshot, ModelOperation, ConnectionAuthentication } from '@varin/application-client';
 import { imageModelInfo, imageToolContract, THINKING_LEVELS, type ImageModelInfo, type ImageToolPurpose } from '@varin/protocol';
 import { isModelThinkingConfiguration } from '@varin/protocol';
 import { embeddingRequestUrl } from '@varin/protocol/node/embeddings';
@@ -16,6 +16,8 @@ import { AwsCredentialOwner } from './aws-auth.js';
 import { GoogleCredentialOwner } from './google-auth.js';
 import { AnthropicCredentialOwner, validateAnthropicFederation } from './anthropic-auth.js';
 import { rerankRequestUrl } from './rerank.js';
+import { classifierRequestRoutes, isSupportedClassifierApi } from './classifier.js';
+import { llamaServerRoot } from './classifier-protocol.js';
 import { modelOAuthProviders, type ModelOAuthProvider } from './oauth.js';
 import { AuthorizationFlows } from '../authorization-flows.js';
 import { ConfigWatchManager } from '../configuration-watch.js';
@@ -30,6 +32,8 @@ export interface InferenceProviderBinding {
   routes: readonly { requestUrl: string; requestKind: 'model_compute' | 'preparation' }[];
   imageModel?: ImageModelInfo;
   requestModelId?: string;
+  contextWindow?: number;
+  decisionPaths?: ModelDecisionPaths;
   connection?: ModelConnectionOptions;
   headers?: Record<string, string>;
   egressOverride?: EgressOverride;
@@ -45,6 +49,18 @@ const fail = (code: string, message: string): never => { throw new ModelConfigur
 const positive = (value: unknown) => typeof value === 'number' && Number.isSafeInteger(value) && value > 0;
 const nonempty = (value: unknown): value is string => typeof value === 'string' && value.trim().length > 0;
 const sameScope = (a: CredentialScope, b: CredentialScope) => a.authority === b.authority && a.reference === b.reference && a.account === b.account && a.generation === b.generation;
+const decisionProtocol = (modelApi: unknown, parameters: Record<string, unknown>, type: ChannelType) => {
+  const api = modelApi ?? parameters.decisionApi ?? type.defaultParameters?.decisionApi;
+  return typeof api === 'string' ? api : type.protocol;
+};
+function validateModelPaths(paths: unknown, baseUrl: string, keys: readonly string[]): asserts paths is Record<string, string> | undefined {
+  if (paths === undefined) return;
+  if (!object(paths) || Object.keys(paths).some(key => !keys.includes(key))) return fail('model-connection-invalid', 'Model paths must describe supported request routes');
+  for (const path of Object.values(paths)) {
+    if (typeof path !== 'string') return fail('model-connection-invalid', 'Model paths must be strings');
+    appendModelPath(baseUrl, path);
+  }
+}
 function endpoint(value: string) {
   let url: URL;
   try { url = new URL(value); } catch { return fail('model-endpoint-invalid', 'Enter a complete model endpoint'); }
@@ -112,7 +128,6 @@ export class ModelsService {
     if (!type) return fail('channel-type-unavailable', `Channel type is unavailable: ${value.type}`);
     validateModelConnection(value.connection, type.operations, type.credentialHeader?.name);
     for (const path of Object.values(value.connection?.paths ?? {})) appendModelPath(value.baseUrl, path);
-    if (type.protocol === 'llama-cpp-classify' && value.connection?.paths?.decision !== undefined) return fail('model-connection-invalid', 'llama.cpp classification requires its tokenize, apply-template and completion routes; configure the server base URL instead');
     const auth = value.authentication;
     if (!type.authentication.includes(auth.kind as ConnectionAuthentication['kind'])
       || auth.kind === 'credential' && !nonempty(auth.reference)
@@ -139,11 +154,22 @@ export class ModelsService {
         || model.parameters !== undefined && !object(model.parameters) || model.compat !== undefined && !object(model.compat)) return fail('channel-model-invalid', 'Model fields or operations are invalid');
       if (model.catalog !== undefined && !validCatalogOverrides(model.catalog)) return fail('channel-model-invalid', 'Model directory overrides are invalid');
       if (model.thinking !== undefined && !isModelThinkingConfiguration(model.thinking)) return fail('model-thinking-invalid', 'Choose valid thinking controls and supported levels');
+      if (model.decision !== undefined && (!object(model.decision) || Object.keys(model.decision).some(key => key !== 'api' && key !== 'paths')
+        || model.decision.api !== undefined && (typeof model.decision.api !== 'string' || !isSupportedClassifierApi(model.decision.api))
+        || !model.operations.includes('decision'))) return fail('decision-capabilities-invalid', 'Decision capabilities must describe a decision model with a supported classifier API');
+      if (model.operations.includes('decision')) {
+        const llama = decisionProtocol(model.decision?.api, value.parameters, type) === 'llama-cpp-classify';
+        const paths = model.decision?.paths;
+        validateModelPaths(paths, llama ? llamaServerRoot(value.baseUrl) : value.baseUrl, ['classify', 'tokenize', 'applyTemplate', 'completion']);
+        if (llama && (paths?.classify ?? value.connection?.paths?.decision) !== undefined) return fail('model-connection-invalid', 'llama.cpp classification requires its tokenize, apply-template and completion routes; configure their individual model paths instead');
+      }
       if (model.image !== undefined) {
-        if (!object(model.image) || Object.keys(model.image).some(key => key !== 'mask' && key !== 'parameters')
+        if (!object(model.image) || Object.keys(model.image).some(key => key !== 'api' && key !== 'paths' && key !== 'mask' && key !== 'parameters')
+          || model.image.api !== undefined && model.image.api !== 'openai-images' && model.image.api !== 'openrouter-images'
           || model.image.mask !== undefined && typeof model.image.mask !== 'boolean'
           || model.image.parameters !== undefined && !object(model.image.parameters)
           || !model.operations.some(operation => operation === 'image-generation' || operation === 'image-editing')) return fail('image-capabilities-invalid', 'Image capabilities must describe an image model');
+        validateModelPaths(model.image.paths, value.baseUrl, ['generation', 'editing']);
         const info = this.#imageInfo(value as unknown as ModelChannel, model as unknown as ChannelModel);
         try { compileToolJsonSchema(imageToolContract(info.supportsEditing ? 'editing' : 'generation', info).inputSchema); }
         catch { return fail('image-capabilities-invalid', 'Image parameter constraints are invalid'); }
@@ -465,7 +491,7 @@ export class ModelsService {
     return (await this.read()).channels.filter(channel => channel.enabled).flatMap(channel => channel.models.filter(model => model.enabled && (model.operations.includes('image-generation') || model.operations.includes('image-editing'))).map(model => this.#imageInfo(channel, model)));
   }
   #imageInfo(channel: ModelChannel, model: ChannelModel): ImageModelInfo {
-    const api = typeof channel.parameters.imageApi === 'string' ? channel.parameters.imageApi : channel.type === 'openrouter' ? 'openrouter-images' : 'openai-images';
+    const api = model.image?.api ?? (typeof channel.parameters.imageApi === 'string' ? channel.parameters.imageApi : channel.type === 'openrouter' ? 'openrouter-images' : 'openai-images');
     const info = imageModelInfo({ provider: channel.id, id: model.id, name: model.name, api, input: model.operations.includes('image-editing') ? ['text', 'image'] : ['text'] });
     if (!info) return fail('image-api-unavailable', 'The selected image protocol is unavailable');
     const parameters = model.image?.parameters === undefined ? [] : Object.keys(model.image.parameters);
@@ -483,15 +509,20 @@ export class ModelsService {
     const model = this.#model(channel, modelId, operation);
     const type = this.types.get(channel.type)!;
     const image = operation === 'image-generation' || operation === 'image-editing';
-    const api = image ? this.#imageInfo(channel, model).api : type.protocol;
+    const api = image ? this.#imageInfo(channel, model).api : operation === 'decision' ? decisionProtocol(model.decision?.api, channel.parameters, type) : type.protocol;
     const baseUrl = channel.baseUrl;
-    const configuredPath = override ?? channel.connection?.paths?.[operation];
-    const routes = configuredPath !== undefined ? [{ requestUrl: appendModelPath(baseUrl, configuredPath), requestKind: 'model_compute' as const }]
+    const modelPath = operation === 'decision' ? model.decision?.paths?.classify
+      : image ? model.image?.paths?.[operation === 'image-editing' ? 'editing' : 'generation'] : undefined;
+    const configuredPath = override ?? modelPath ?? channel.connection?.paths?.[operation];
+    if (operation === 'decision') {
+      if (!isSupportedClassifierApi(api)) return fail('decision-api-unavailable', 'The selected classifier API is unavailable');
+      if (configuredPath !== undefined) appendModelPath(baseUrl, configuredPath);
+    }
+    const routes = operation === 'decision' ? classifierRequestRoutes(api, baseUrl, configuredPath, model.decision?.paths)
+      : configuredPath !== undefined ? [{ requestUrl: appendModelPath(baseUrl, configuredPath), requestKind: 'model_compute' as const }]
       : image ? (api === 'openrouter-images' ? ['chat/completions'] : [operation === 'image-editing' ? 'images/edits' : 'images/generations']).map(path => ({ requestUrl: `${baseUrl.replace(/\/+$/, '')}/${path}`, requestKind: 'model_compute' as const }))
       : operation === 'embedding' ? [{ requestUrl: embeddingRequestUrl(baseUrl), requestKind: 'model_compute' as const }]
-        : operation === 'rerank' ? [{ requestUrl: rerankRequestUrl(baseUrl, override), requestKind: 'model_compute' as const }]
-          : api === 'llama-cpp-classify' ? ['tokenize', 'apply-template', 'completion'].map(path => ({ requestUrl: `${baseUrl.replace(/\/v1\/?$/, '').replace(/\/+$/, '')}/${path}`, requestKind: path === 'completion' ? 'model_compute' as const : 'preparation' as const }))
-            : [{ requestUrl: `${baseUrl.replace(/\/+$/, '')}${override ?? (api === 'typesafe-system-one' ? '/systemone' : '/run')}`, requestKind: 'model_compute' as const }];
+        : [{ requestUrl: rerankRequestUrl(baseUrl, override), requestKind: 'model_compute' as const }];
     routes.forEach(route => endpoint(route.requestUrl));
     const credentialScope = await this.#scope(channel);
     const assertAvailable = async () => {
@@ -520,9 +551,11 @@ export class ModelsService {
     };
     const { name: _channelName, models: _models, enabled: _channelEnabled, ...connection } = channel;
     const { name: _modelName, enabled: _modelEnabled, ...selection } = model;
-    const configurationId = revisionOf({ channel: connection, model: selection, routes });
+    const configurationId = revisionOf({ channel: connection, model: selection, routes, ...(operation === 'decision' ? { api } : {}) });
     const egressOverride = modelEgressOverride(channel.connection);
     return { providerId, modelId, requestModelId: model.requestModelId ?? model.id, baseUrl, api, routes, requestUrl: routes[0]!.requestUrl, ...(configuredPath === undefined ? {} : { endpoint: configuredPath }), configurationId,
+      ...(model.contextWindow === undefined ? {} : { contextWindow: model.contextWindow }),
+      ...(operation === 'decision' && model.decision?.paths ? { decisionPaths: structuredClone(model.decision.paths) } : {}),
       ...(channel.connection === undefined ? {} : { connection: structuredClone(channel.connection) }),
       ...(channel.connection?.headers === undefined ? {} : { headers: structuredClone(channel.connection.headers) }),
       ...(egressOverride === undefined ? {} : { egressOverride }),

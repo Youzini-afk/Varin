@@ -1,11 +1,12 @@
 import React from 'react';
-import { modelThinkingConfiguration, modelThinkingLevels, type ChannelModel, type ChannelTypeInfo, type ModelConnectionTestResult, type ModelThinkingConfiguration, type ThreadThinkingLevel } from '@varin/application-client';
+import { modelThinkingConfiguration, modelThinkingLevels, type ChannelModel, type ChannelTypeInfo, type ModelConnectionOptions, type ModelConnectionTestResult, type ModelThinkingConfiguration, type ThreadThinkingLevel } from '@varin/application-client';
 import type { JsonValue } from '@varin/protocol';
 import { SettingsSection, SettingsStackedField, SettingsFieldRow } from '../shared/SettingsSection';
 import { JsonObjectField } from '../shared/JsonObjectField';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { ModelCommonSettings } from './ModelCommonSettings';
+import { ModelApiSettings } from './ModelApiSettings';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Icon } from '@/components/icon/Icon';
@@ -14,12 +15,15 @@ import { useI18n } from '@/lib/i18n';
 
 interface Props {
   model: ChannelModel; type: ChannelTypeInfo; busy: boolean; selected: boolean;
+  inheritedImageApi?: string;
+  inheritedDecisionApi?: string;
+  inheritedPaths?: ModelConnectionOptions['paths'];
   onChange(model: ChannelModel): void;
   onRemove(): void;
   validity(field: string, valid: boolean): void;
   onTest(level: ThreadThinkingLevel, signal: AbortSignal): Promise<ModelConnectionTestResult>;
 }
-export function ModelConfiguration({ model, type, busy, selected, onChange, onRemove, validity, onTest }: Props) {
+export function ModelConfiguration({ model, type, busy, selected, inheritedImageApi, inheritedDecisionApi, inheritedPaths, onChange, onRemove, validity, onTest }: Props) {
   const { t } = useI18n();
   const [testing, setTesting] = React.useState(false);
   const [result, setResult] = React.useState<ModelConnectionTestResult | null>(null);
@@ -41,10 +45,15 @@ export function ModelConfiguration({ model, type, busy, selected, onChange, onRe
   const modes: ModelThinkingConfiguration['mode'][] = ['levels', 'switch', 'fixed', ...(budgetSupported ? ['budget' as const] : [])];
   const needsBudgetField = model.reasoning && thinking.mode === 'budget' && protocol === 'openai-completions' && model.compat?.thinkingFormat !== 'openrouter';
   const update = (patch: Partial<ChannelModel>) => { setResult(null); setFailure(null); onChange({ ...model, ...patch }); };
+  const changeOperation = (operation: ChannelModel['operations'][number], checked: boolean) => {
+    const operations = checked ? [...model.operations, operation] : model.operations.filter(value => value !== operation);
+    update({ operations, ...(!operations.includes('decision') ? { decision: undefined } : {}),
+      ...(!operations.some(value => value === 'image-generation' || value === 'image-editing') ? { image: undefined } : {}) });
+  };
   const changeMode = (mode: ModelThinkingConfiguration['mode']) => update({ thinking: mode === 'levels' ? { mode, levels: [], allowOff: true } : mode === 'budget' ? { mode, tokens: 8192, allowOff: true } : { mode } });
-  const invalidThinking = model.reasoning && thinking.mode === 'levels' && !thinking.levels.length;
+  const invalidThinking = chat && model.reasoning && thinking.mode === 'levels' && !thinking.levels.length;
   const invalidCapacity = [model.contextWindow, model.maxOutputTokens].some(value => value !== undefined && (!Number.isSafeInteger(value) || value <= 0));
-  const invalidBudget = model.reasoning && thinking.mode === 'budget' && (!Number.isSafeInteger(thinking.tokens) || thinking.tokens <= 0 || needsBudgetField && typeof model.compat?.thinkingTokenBudgetField !== 'string');
+  const invalidBudget = chat && model.reasoning && thinking.mode === 'budget' && (!Number.isSafeInteger(thinking.tokens) || thinking.tokens <= 0 || needsBudgetField && typeof model.compat?.thinkingTokenBudgetField !== 'string');
   React.useEffect(() => { validity('budget', !invalidBudget); }, [invalidBudget, validity]);
   const test = async () => {
     const abort = new AbortController(); controller.current = abort;
@@ -58,11 +67,12 @@ export function ModelConfiguration({ model, type, busy, selected, onChange, onRe
       <SettingsSection title={t('settings.models.basic')} divider={false}>
         <SettingsFieldRow label={t('settings.models.name')} controlClassName="@xl:flex-1"><Input aria-label={t('settings.models.name')} value={model.name} disabled={disabled} onChange={event => update({ name: event.target.value })} /></SettingsFieldRow>
         <SettingsFieldRow label={t('settings.models.requestModelId')} controlClassName="@xl:flex-1"><Input aria-label={t('settings.models.requestModelId')} placeholder={model.id} value={model.requestModelId ?? ''} disabled={disabled} onChange={event => update({ requestModelId: event.target.value || undefined })} /></SettingsFieldRow>
-        {type.operations.length > 1 ? <div className="flex flex-wrap gap-x-5 gap-y-3">{type.operations.map(operation => <label key={operation} className="flex items-center gap-2 typography-meta"><Checkbox checked={model.operations.includes(operation)} disabled={disabled} onChange={checked => update({ operations: checked ? [...model.operations, operation] : model.operations.filter(value => value !== operation) })} />{t(`settings.models.operation.${operation}`)}</label>)}</div> : null}
+        {type.operations.length > 1 ? <div className="flex flex-wrap gap-x-5 gap-y-3">{type.operations.map(operation => <label key={operation} className="flex items-center gap-2 typography-meta"><Checkbox ariaLabel={t(`settings.models.operation.${operation}`)} checked={model.operations.includes(operation)} disabled={disabled} onChange={checked => changeOperation(operation, checked)} />{t(`settings.models.operation.${operation}`)}</label>)}</div> : null}
       </SettingsSection>
-      {chat ? <SettingsSection title={t('settings.models.capabilities')}>
+      <SettingsSection title={t('settings.models.capabilities')}>
         <ModelCommonSettings model={model} disabled={disabled} onChange={next => { setResult(null); setFailure(null); onChange(next); }} validity={validity} />
-      </SettingsSection> : null}
+      </SettingsSection>
+      <ModelApiSettings model={model} type={type} disabled={disabled} inheritedImageApi={inheritedImageApi} inheritedDecisionApi={inheritedDecisionApi} inheritedPaths={inheritedPaths} onChange={update} />
       <SettingsSection title={t('settings.models.advanced')}>
         {chat && (type.protocols?.length ?? 0) > 1 ? <SettingsFieldRow label={t('settings.models.protocol')}><Select value={protocol} disabled={disabled} onValueChange={value => update({ protocol: value })}><SelectTrigger size="settings" aria-label={t('settings.models.protocol')}><SelectValue /></SelectTrigger><SelectContent>{type.protocols!.map(value => <SelectItem key={value} value={value}>{value}</SelectItem>)}</SelectContent></Select></SettingsFieldRow> : null}
         {chat && model.reasoning ? <div className="space-y-3">

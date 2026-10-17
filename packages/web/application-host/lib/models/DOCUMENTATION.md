@@ -72,6 +72,31 @@ not change the selected model's wire dialect or token budget.
 Opaque Bedrock resource/profile IDs retain the configured model-name hint; a recognizable upstream
 model ID always takes precedence over that hint.
 
+OpenAI-compatible and local services can host decision models alongside chat, embedding and rerank
+models. Mark the classifier model with the `decision` operation and select its `decision.api`
+(System One, Cloudflare System One or llama.cpp). An unset value inherits the channel's
+`parameters.decisionApi`, then the installed type default (`typesafe-system-one` for compatible/local
+services). Each decision model can select its own protocol without changing sibling models or the
+channel default. Decision requests use that classifier protocol and its routes; conversation requests
+retain their chat protocol. `decision.paths.classify` overrides the channel's decision path. llama.cpp
+instead uses `decision.paths.tokenize`, `applyTemplate` and `completion`, relative to the server root
+with a trailing `/v1` removed. It retains separate preparation/compute routes and does not accept a
+single decision-path override. An explicit purpose endpoint remains the highest-priority override.
+
+Image protocol selection belongs to each model's `image.api`. An unset value inherits the channel's
+`parameters.imageApi`, then its installed OpenAI Images/OpenRouter default. Model edits preserve other
+image capabilities and do not rewrite sibling models or the channel default. Prepared image bindings
+retain their original protocol and route. `image.paths.generation` and `image.paths.editing` override
+the respective channel paths. Image and single-call decision paths append to the configured service
+base URL's existing path; they keep the same origin and reject traversal, query strings and fragments.
+The model editor always shows editable paths. Choosing a protocol preset fills its standard paths;
+clearing a path restores its inherited/default value. Request formats stay with the selected protocol.
+
+All model editors expose `contextWindow`, including embedding, rerank and decision models. Auxiliary
+bindings capture the configured capacity with their model identity. Remote embedding uses an explicit
+`harness.embedding.maxTokens` input budget first, then the model context capacity, then the existing
+unspecified-capacity default. Changing capacity affects newly prepared bindings and vector spaces.
+
 UI and execution consume the same type definitions. `channel-types.ts` is the current built-in
 support list; a provider name does not imply every protocol option is supported. Unknown model
 names can be explicitly configured under a compatible type. Operations and image capabilities

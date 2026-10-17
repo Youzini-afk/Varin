@@ -10,6 +10,32 @@ const completion = (input: number, labels = ['0', '1']) => Response.json({ token
   completion_probabilities: [{ top_logprobs: labels.map(label => ({ id: label.codePointAt(0), logprob: label === '0' ? 0 : -1e30 })) }] });
 function deferred() { let resolve!: () => void; const promise = new Promise<void>(done => { resolve = done; }); return { promise, resolve }; }
 
+it.each([false, true])('uses custom llama.cpp paths with shared endpoint=%s while retaining payloads and compute usage', async shared => {
+  const seen = new Set<string>();
+  const kinds = new Set<string>();
+  const result = await requestClassifier({ ...request, paths: { tokenize: shared ? '/custom/run' : '/custom/tokens', applyTemplate: shared ? '/custom/run' : '/custom/template', completion: '/custom/run' },
+    fetchImpl: async (url, init, route) => {
+      const destination = String(url); seen.add(destination);
+      const body = bodyOf(init);
+      expect(body.model).toBe(model.id);
+      expect(route?.requestUrl).toBe(destination);
+      kinds.add(route!.requestKind);
+      if (route?.requestKind === 'preparation') {
+        if (typeof body.content === 'string') {
+          expect(destination).toBe(`https://llama.invalid/router/custom/${shared ? 'run' : 'tokens'}`);
+          return tokenize(body);
+        }
+        expect(destination).toBe(`https://llama.invalid/router/custom/${shared ? 'run' : 'template'}`);
+        return Response.json({ prompt: body.messages[1]!.content });
+      }
+      expect(destination).toBe('https://llama.invalid/router/custom/run');
+      return completion(13);
+    } });
+  expect(seen.size).toBe(shared ? 1 : 3);
+  expect(kinds).toEqual(new Set(['preparation', 'model_compute']));
+  expect(result).toMatchObject({ answers: [{ id: 'one', score: 0 }], missing: [], usage: { inputTokens: 13, outputTokens: 1 } });
+});
+
 it('keeps each 503 retry and deeper probability readout in original transport usage', async () => {
   const depths: number[] = [];
   const result = await requestClassifier({ ...request, fetchImpl: async (url, init) => {

@@ -212,7 +212,9 @@ function ModelConnectionsEditor({ host }: { host: number }) {
           }}>{t('settings.models.removeService')}</Button></div>
         </div>
         {draft.models.filter(model => openedModels.has(model.id)).map(model => <div key={model.id} hidden={selectedModelId !== model.id}>
-          <ModelConfiguration model={model} type={type} busy={busy} selected={selectedModelId === model.id} validity={(field, valid) => validity(`${model.id}:${field}`, valid)}
+          <ModelConfiguration model={model} type={type} busy={busy} selected={selectedModelId === model.id} inheritedImageApi={typeof draft.parameters.imageApi === 'string' ? draft.parameters.imageApi : undefined} validity={(field, valid) => validity(`${model.id}:${field}`, valid)}
+            inheritedDecisionApi={typeof draft.parameters.decisionApi === 'string' ? draft.parameters.decisionApi : undefined}
+            inheritedPaths={draft.connection?.paths}
             onChange={next => editModels(draft.models.map(value => value.id === model.id ? next : value))}
             onRemove={() => { edit({ models: draft.models.filter(value => value.id !== model.id) }); setSelectedModelId(null); setInvalidFields(previous => new Set([...previous].filter(key => !key.startsWith(`${model.id}:`)))); }}
             onTest={(thinkingLevel, signal) => api.test({ key: crypto.randomUUID(), channel: draft, ...(secret ? { secret } : {}), modelId: model.id, thinkingLevel }, signal)} />

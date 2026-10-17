@@ -24,7 +24,7 @@ interface Props {
 }
 export function ConnectionSettings({ draft, type, busy, advanced, secret, authorization, edit, editConnection, validity, setSecret, cancelAuthorization, onSignIn, onSignOut, onAuthorizationReply, onAuthorizationCancel }: Props) {
   const { t } = useI18n();
-  const labels: Record<string, string> = { deployment: t('settings.models.parameter.deployment'), apiVersion: t('settings.models.parameter.apiVersion'), project: t('settings.models.parameter.project'), location: t('settings.models.parameter.location'), region: t('settings.models.parameter.region'), imageApi: t('settings.models.parameter.imageApi') };
+  const labels: Record<string, string> = { deployment: t('settings.models.parameter.deployment'), apiVersion: t('settings.models.parameter.apiVersion'), project: t('settings.models.parameter.project'), location: t('settings.models.parameter.location'), region: t('settings.models.parameter.region') };
   return <>
     <div hidden={advanced}>
       <SettingsSection title={t('settings.models.connection')} divider={false}>
@@ -54,8 +54,8 @@ export function ConnectionSettings({ draft, type, busy, advanced, secret, author
                 }} /></SettingsFieldRow>;
             })}
           </> : null}
-          {Object.entries((type.parametersSchema.properties ?? {}) as Record<string, Record<string, JsonValue>>).map(([key, schema]) => <SettingsFieldRow controlClassName="w-full @xl:flex-1 @xl:max-w-xl" key={key} label={labels[key] ?? key}>
-            {Array.isArray(schema.enum) ? <Select value={String(draft.parameters[key] ?? '__unset')} disabled={busy} onValueChange={value => { const parameters = { ...draft.parameters }; if (value === '__unset') delete parameters[key]; else parameters[key] = value; edit({ parameters }); }}><SelectTrigger size="settings" aria-label={labels[key] ?? key}><SelectValue /></SelectTrigger><SelectContent><SelectItem value="__unset">{t('settings.models.default')}</SelectItem>{schema.enum.map(value => <SelectItem key={String(value)} value={String(value)}>{String(value)}</SelectItem>)}</SelectContent></Select>
+          {Object.entries((type.parametersSchema.properties ?? {}) as Record<string, Record<string, JsonValue>>).filter(([key]) => key !== 'imageApi' && key !== 'decisionApi').map(([key, schema]) => <SettingsFieldRow controlClassName="w-full @xl:flex-1 @xl:max-w-xl" key={key} label={labels[key] ?? key}>
+            {Array.isArray(schema.enum) ? <Select value={String(draft.parameters[key] ?? type.defaultParameters?.[key] ?? '__unset')} disabled={busy} onValueChange={value => { const parameters = { ...draft.parameters }; if (value === '__unset') delete parameters[key]; else parameters[key] = value; edit({ parameters }); }}><SelectTrigger size="settings" aria-label={labels[key] ?? key}><SelectValue /></SelectTrigger><SelectContent><SelectItem value="__unset">{t('settings.models.default')}</SelectItem>{schema.enum.map(value => <SelectItem key={String(value)} value={String(value)}>{String(value)}</SelectItem>)}</SelectContent></Select>
               : <Input value={String(draft.parameters[key] ?? '')} disabled={busy} aria-label={labels[key] ?? key} onChange={event => { const parameters = { ...draft.parameters }; if (event.target.value) parameters[key] = event.target.value; else delete parameters[key]; edit({ parameters }); }} />}
           </SettingsFieldRow>)}
       </SettingsSection>

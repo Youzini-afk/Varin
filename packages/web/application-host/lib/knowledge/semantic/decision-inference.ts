@@ -4,7 +4,7 @@ import { isDeepStrictEqual } from 'node:util';
 import { parseHarnessFastDecisionSettings, resolveFastDecisionPurpose,
   type HarnessFastDecisionPurpose, type HarnessFastDecisionPurposeStatus, type HarnessFastDecisionResult,
   type HarnessFastDecisionParams, type HarnessResolvedFastDecisionBinding } from '@varin/protocol';
-import { requestClassifier, classifierWireUsage, classifierRawUsage, classifierWireResponseValid, ClassifierResponseError } from '../../models/classifier.js';
+import { requestClassifier, classifierWireUsage, classifierRawUsage, classifierWireResponseValid, ClassifierResponseError, type ClassifierFetch } from '../../models/classifier.js';
 import type { InferenceProviderBinding as HostInferenceProviderBinding } from '../../models/service.js';
 import type { InferenceCall, InferenceInvocationAuthority, InferenceRequests, InferenceRequestsOptions } from './inference-requests.js';
 import { ResearchDecisionFailure } from '../../harness/research-decide.js';
@@ -110,9 +110,9 @@ export function createDecisionInference(authority: DecisionInferenceAuthority, s
               for (const [name, value] of Object.entries(auth?.auth.headers ?? {})) if (value !== null) headers.set(name, value);
               await assertAvailable(combined);
               const connection = await options.egress.prepare(provider.requestUrl, provider.egressOverride);
-              const fetchImpl: typeof fetch = async (url, init) => {
+              const fetchImpl: ClassifierFetch = async (url, init, selectedRoute) => {
                 const destination = new URL(String(url)).toString();
-                const route = provider.routes.find(value => value.requestUrl === destination);
+                const route = provider.routes.find(value => value.requestUrl === destination && (!selectedRoute || value.requestKind === selectedRoute.requestKind));
                 if (!route || init?.method !== 'POST' || typeof init.body !== 'string') throw new Error('decision-request-binding-changed');
                 const selectedBinding: InferenceBinding = { purpose, providerId: binding.providerId, modelId: binding.modelId,
                   requestKind: route.requestKind, configurationId: binding.configurationId,
@@ -127,8 +127,9 @@ export function createDecisionInference(authority: DecisionInferenceAuthority, s
                   } });
               };
               const result = await requestClassifier({ baseUrl: provider.baseUrl, ...(provider.endpoint ? { endpoint: provider.endpoint } : {}),
+                ...(provider.decisionPaths ? { paths: provider.decisionPaths } : {}),
                 nativeModel: { ...({ type: 'classifier' as const, api: provider.api as 'typesafe-system-one' | 'cloudflare-workers-ai-system-one' | 'llama-cpp-classify',
-                  provider: binding.providerId, id: provider.requestModelId ?? binding.modelId, name: binding.modelId, input: ['text'] as const, contextWindow: 0,
+                  provider: binding.providerId, id: provider.requestModelId ?? binding.modelId, name: binding.modelId, input: ['text'] as const, contextWindow: provider.contextWindow ?? 0,
                   cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 } }), baseUrl: provider.baseUrl,
                   api: provider.api as 'typesafe-system-one' | 'cloudflare-workers-ai-system-one' | 'llama-cpp-classify' },
                 ...(auth?.auth.apiKey === undefined ? {} : { apiKey: auth.auth.apiKey }),

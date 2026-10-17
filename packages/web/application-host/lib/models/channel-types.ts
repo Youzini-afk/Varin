@@ -20,6 +20,7 @@ export interface ChannelType extends ChannelTypeInfo {
 const object = (value: unknown): value is Record<string, unknown> => !!value && typeof value === 'object' && !Array.isArray(value);
 const schema = (properties: Record<string, JsonValue> = {}): Record<string, JsonValue> => ({ type: 'object', properties, additionalProperties: false });
 const string = { type: 'string' };
+const decisionApi = { enum: ['typesafe-system-one', 'cloudflare-workers-ai-system-one', 'llama-cpp-classify'] };
 const modelListUrl = (channel: ModelChannel, parameter: string, cursor?: string) => {
   const url = new URL(`${channel.baseUrl.replace(/\/+$/, '')}/models`);
   if (cursor !== undefined) url.searchParams.set(parameter, cursor);
@@ -34,7 +35,8 @@ const channelTypes: ChannelType[] = [
   { ...direct('openai', 'OpenAI', 'openai-responses', 'https://api.openai.com/v1'), operations: ['chat', 'embedding', 'image-generation', 'image-editing'] },
   { ...direct('openai-codex', 'ChatGPT / Codex', 'openai-codex-responses', 'https://chatgpt.com/backend-api'), authentication: ['credential'], discovery: false,
     oauthProviders: [{ id: 'openai-codex', name: 'ChatGPT / Codex' }] },
-  { ...direct('openai-compatible', 'OpenAI compatible', 'openai-completions'), operations: ['chat', 'embedding', 'rerank', 'image-generation', 'image-editing'], parametersSchema: schema({ imageApi: { enum: ['openai-images', 'openrouter-images'] } }) },
+  { ...direct('openai-compatible', 'OpenAI compatible', 'openai-completions'), operations: ['chat', 'embedding', 'rerank', 'decision', 'image-generation', 'image-editing'],
+    parametersSchema: schema({ imageApi: { enum: ['openai-images', 'openrouter-images'] }, decisionApi }), defaultParameters: { decisionApi: 'typesafe-system-one' } },
   direct('deepseek', 'DeepSeek', 'openai-completions', 'https://api.deepseek.com/v1'),
   ...(['opencode', 'opencode-go'] as const).map(id => ({
     ...direct(id, id === 'opencode' ? 'OpenCode Zen' : 'OpenCode Go', 'openai-completions', `https://opencode.ai/inference${id === 'opencode-go' ? '/go' : ''}`),
@@ -93,7 +95,8 @@ const channelTypes: ChannelType[] = [
   direct('ant-ling', 'Ling / Ring', 'openai-completions', 'https://api.ant-ling.com/v1'),
   direct('xiaomi', '小米 MiMo', 'openai-completions', 'https://api.xiaomimimo.com/v1'),
   { ...direct('vercel-ai-gateway', 'Vercel AI Gateway', 'anthropic-messages', 'https://ai-gateway.vercel.sh/v1'), credentialHeader: { name: 'authorization', prefix: 'Bearer ' } },
-  { ...direct('local', 'Local service', 'openai-completions', 'http://localhost:8080/v1'), operations: ['chat', 'embedding', 'rerank'], authentication: ['none', 'credential', 'environment'] },
+  { ...direct('local', 'Local service', 'openai-completions', 'http://localhost:8080/v1'), operations: ['chat', 'embedding', 'rerank', 'decision'], authentication: ['none', 'credential', 'environment'],
+    parametersSchema: schema({ decisionApi }), defaultParameters: { decisionApi: 'typesafe-system-one' } },
   { ...direct('rerank', 'Rerank API', 'http-rerank'), operations: ['rerank'], discovery: false },
   ...([['typesafe-system-one', 'Typesafe System One'], ['cloudflare-workers-ai-system-one', 'Cloudflare Workers AI · Classifier'], ['llama-cpp-classify', 'llama.cpp · Classifier']] as const).map(([id, name]) => ({
     ...direct(id, name, id), operations: ['decision' as const], discovery: false,

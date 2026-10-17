@@ -6,6 +6,8 @@ import type { ModelChannel, ModelConnectionOptions } from '@varin/application-cl
 import { appendModelPath, modelEgressOverride, validateModelConnection } from './connection.js';
 import { ModelsService } from './service.js';
 import { createModelAuthority } from '../kernel/model-authority.js';
+import { requestClassifier } from './classifier.js';
+import type { ClassifierApi } from './classifier-protocol.js';
 import type { EgressFetch } from '../harness/egress.js';
 
 const roots: string[] = [];
@@ -100,8 +102,10 @@ test('discovery passes channel routing to Host egress and merges non-sensitive h
     expect(headers.get('x-request-source')).toBe('settings');
     return Response.json({ data: [{ id: 'candidate' }] });
   };
-  expect(await models.discover(channel.id, fetchImpl)).toEqual({ models: [{ id: 'candidate', name: 'candidate' }] });
-  expect(await models.read()).toEqual(before);
+  expect(await models.discover(channel.id, fetchImpl)).toEqual({ models: [{ id: 'candidate', name: 'candidate', catalog: { source: 'service', overrides: [] } }] });
+  const after = await models.read();
+  expect(after.channels).toEqual(before.channels);
+  expect(after.revision).toBe(before.revision);
 });
 
 test('invalid persisted network options preserve the original file and the previous accepted binding', async () => {
@@ -117,13 +121,125 @@ test('invalid persisted network options preserve the original file and the previ
   } finally { binding.release?.(); }
 });
 
-test('multi-route llama.cpp classification cannot misrepresent a single overridden endpoint', async () => {
+test('image model protocols override the inherited service default independently and retain their accepted route', async () => {
+  const { models, channel } = await fixture({ paths: { 'image-generation': '/service-generate', 'image-editing': '/service-edit' } });
+  const mixed: ModelChannel = { ...channel, parameters: { imageApi: 'openai-images' }, models: [
+    { id: 'router', name: 'Router image', enabled: true, operations: ['image-generation', 'image-editing'], image: { api: 'openrouter-images', paths: { generation: '/custom/generate', editing: '/custom/edit' } } },
+    { id: 'images', name: 'OpenAI image', enabled: true, operations: ['image-generation'] },
+  ] };
+  await models.save(mixed, (await models.read()).revision);
+  const router = await models.resolveImageBinding(channel.id, 'router', 'generation');
+  const editing = await models.resolveImageBinding(channel.id, 'router', 'editing');
+  const images = await models.resolveImageBinding(channel.id, 'images', 'generation');
+  try {
+    expect(router.api).toBe('openrouter-images');
+    expect(router.requestUrl).toBe(`${channel.baseUrl}/custom/generate`);
+    expect(editing.requestUrl).toBe(`${channel.baseUrl}/custom/edit`);
+    expect(images.api).toBe('openai-images');
+    expect(images.requestUrl).toBe(`${channel.baseUrl}/service-generate`);
+    expect((await models.listImageModels()).map(model => model.api)).toEqual(['openrouter-images', 'openai-images']);
+    await models.save({ ...mixed, models: [{ ...mixed.models[0]!, image: { api: 'openai-images' } }, mixed.models[1]!] }, (await models.read()).revision);
+    expect(router.api).toBe('openrouter-images');
+    expect(router.requestUrl).toBe(`${channel.baseUrl}/custom/generate`);
+    expect(() => models.validate({ ...mixed, models: [{ ...mixed.models[0]!, image: { api: 'unknown' } }] })).toThrow('Image capabilities');
+  } finally { router.release?.(); editing.release?.(); images.release?.(); }
+});
+
+test.each(['embedding', 'rerank', 'decision'] as const)('%s context capacity is saved and frozen in its original binding', async operation => {
   const { models, channel } = await fixture();
-  const classifier = { ...channel, type: 'llama-cpp-classify', models: [{ id: 'model', name: 'Model', enabled: true, operations: ['decision' as const] }] };
+  const configured: ModelChannel = { ...channel, models: [{ id: 'model', name: 'Model', enabled: true, operations: [operation], contextWindow: 32768 }] };
+  await models.save(configured, (await models.read()).revision);
+  const resolve = () => operation === 'embedding' ? models.resolveEmbeddingBinding(channel.id, 'model')
+    : operation === 'rerank' ? models.resolveRerankBinding(channel.id, 'model') : models.resolveDecisionBinding(channel.id, 'model');
+  const binding = await resolve();
+  try {
+    expect(binding.contextWindow).toBe(32768);
+    expect((await models.read()).channels[0]?.models[0]?.contextWindow).toBe(32768);
+    await models.save({ ...configured, models: [{ ...configured.models[0]!, contextWindow: 65536 }] }, (await models.read()).revision);
+    const next = await resolve();
+    try { expect(next.contextWindow).toBe(65536); expect(next.configurationId).not.toBe(binding.configurationId); }
+    finally { next.release?.(); }
+    expect(binding.contextWindow).toBe(32768);
+  } finally { binding.release?.(); }
+});
+
+test.each(['openai-compatible', 'local'])('%s services route each decision model through its selected protocol alongside chat models', async type => {
+  const { models, channel } = await fixture();
+  const mixed: ModelChannel = { ...channel, type, parameters: { decisionApi: 'cloudflare-workers-ai-system-one' }, models: [{ ...channel.models[0]!, operations: ['chat'] },
+    { id: 'decision', requestModelId: 'jev-latest', name: 'Decision', enabled: true, operations: ['decision'], decision: { api: 'typesafe-system-one', paths: { classify: '/custom/systemone' } } },
+    { id: 'inherited', name: 'Inherited', enabled: true, operations: ['decision'] }] };
+  await models.save(mixed, (await models.read()).revision);
+  const binding = await models.resolveDecisionBinding(channel.id, 'decision');
+  const inherited = await models.resolveDecisionBinding(channel.id, 'inherited');
+  const chat = await createModelAuthority(models).resolveModel({ providerId: channel.id, modelId: 'model' });
+  try {
+    expect(binding.api).toBe('typesafe-system-one');
+    expect(binding.requestUrl).toBe(`${channel.baseUrl}/custom/systemone`);
+    expect(inherited.api).toBe('cloudflare-workers-ai-system-one');
+    expect(inherited.requestUrl).toBe(`${channel.baseUrl}/run`);
+    expect(chat.configuration.endpoint).toBe(`${channel.baseUrl}/chat/completions`);
+    await models.save({ ...mixed, models: mixed.models.map(model => model.id === 'decision' ? { ...model, decision: { api: 'cloudflare-workers-ai-system-one' } } : model) }, (await models.read()).revision);
+    const replacement = await models.resolveDecisionBinding(channel.id, 'decision');
+    try {
+      expect(replacement.api).toBe('cloudflare-workers-ai-system-one');
+      expect(replacement.requestUrl).toBe(`${channel.baseUrl}/run`);
+      expect(replacement.configurationId).not.toBe(binding.configurationId);
+    } finally { replacement.release?.(); }
+    expect(binding.api).toBe('typesafe-system-one');
+    expect(binding.requestUrl).toBe(`${channel.baseUrl}/custom/systemone`);
+    const result = await requestClassifier({ baseUrl: binding.baseUrl, model: binding.requestModelId!, ...(binding.decisionPaths ? { paths: binding.decisionPaths } : {}),
+      nativeModel: { api: binding.api as ClassifierApi, id: binding.requestModelId!, baseUrl: binding.baseUrl },
+      state: { goal: 'Find relevant evidence' },
+      questions: [{ id: 'relevant', kind: 'score', instructions: 'Evaluate relevance', levels: ['irrelevant', 'relevant'] }],
+      fetchImpl: async (url, init) => {
+        expect(String(url)).toBe(binding.requestUrl);
+        expect(JSON.parse(String(init?.body))).toMatchObject({ model: 'jev-latest', questions: { relevant: { type: 'score' } } });
+        return Response.json({ answers: { relevant: { type: 'score', score: 1 } } });
+      } });
+    expect(result).toMatchObject({ answers: [{ id: 'relevant', kind: 'score', score: 1 }], missing: [] });
+  } finally { binding.release?.(); inherited.release?.(); chat.credentialOwner.release(); }
+});
+
+test.each(['llama-cpp-classify', 'openai-compatible'])('%s cannot misrepresent multi-route llama.cpp classification as a single endpoint', async type => {
+  const { models, channel } = await fixture();
+  const classifier: ModelChannel = { ...channel, type,
+    models: [{ id: 'model', name: 'Model', enabled: true, operations: ['decision'], decision: {
+      ...(type === 'openai-compatible' ? { api: 'llama-cpp-classify' as const } : {}),
+      paths: { tokenize: '/custom/tokenize', applyTemplate: '/custom/template', completion: '/custom/complete' } } }] };
   await expect(models.save({ ...classifier, connection: { paths: { decision: '/run' } } }, (await models.read()).revision)).rejects.toMatchObject({ code: 'model-connection-invalid' });
   await models.save({ ...classifier, connection: { proxy: { mode: 'direct' } } }, (await models.read()).revision);
   const binding = await models.resolveDecisionBinding(channel.id, 'model');
-  try { expect(binding.routes).toHaveLength(3); expect(binding.egressOverride).toEqual({ mode: 'direct' }); } finally { binding.release?.(); }
+  try {
+    expect(binding.routes.map(route => route.requestUrl)).toEqual(['https://models.example/gateway/custom/tokenize', 'https://models.example/gateway/custom/template', 'https://models.example/gateway/custom/complete']);
+    expect(binding.egressOverride).toEqual({ mode: 'direct' });
+  } finally { binding.release?.(); }
+  await expect(models.resolveDecisionBinding(channel.id, 'model', '/run')).rejects.toThrow('single endpoint override');
+});
+
+test.each(['image', 'decision'] as const)('%s model paths validate before saving and preserve saved models on malformed edits', async kind => {
+  const { models, channel } = await fixture();
+  const baseModel = { id: 'custom', name: 'Custom', enabled: true, operations: [kind === 'image' ? 'image-generation' as const : 'decision' as const] };
+  for (const path of ['https://other.example/run', '/../run', '/%2e%2e/run', '/run?key=value', '', 1]) {
+    const configuration = kind === 'image' ? { image: { paths: { generation: path } } } : { decision: { paths: { classify: path } } };
+    await expect(models.save({ ...channel, models: [{ ...baseModel, ...configuration }] } as ModelChannel, (await models.read()).revision)).rejects.toMatchObject({ code: 'model-connection-invalid' });
+  }
+  expect((await models.read()).channels[0]?.models).toEqual(channel.models);
+});
+
+test('a System One model can override an inherited llama.cpp default and invalid model classifier settings are rejected', async () => {
+  const { models, channel } = await fixture();
+  const model: ModelChannel['models'][number] = { id: 'model', name: 'Model', enabled: true, operations: ['decision'], decision: { api: 'typesafe-system-one' } };
+  const configured: ModelChannel = { ...channel, parameters: { decisionApi: 'llama-cpp-classify' }, connection: { paths: { decision: '/custom-systemone' } }, models: [model] };
+  await models.save(configured, (await models.read()).revision);
+  const binding = await models.resolveDecisionBinding(channel.id, 'model');
+  try {
+    expect(binding.api).toBe('typesafe-system-one');
+    expect(binding.requestUrl).toBe(`${channel.baseUrl}/custom-systemone`);
+    for (const decision of [{ api: 'unknown' }, { api: 1 }, { api: null }, { endpoint: '/custom' }, []]) {
+      expect(() => models.validate({ ...configured, models: [{ ...model, decision }] })).toThrow('Decision capabilities');
+    }
+    expect(() => models.validate({ ...configured, models: [{ ...model, operations: ['chat'] }] })).toThrow('Decision capabilities');
+  } finally { binding.release?.(); }
 });
 
 
