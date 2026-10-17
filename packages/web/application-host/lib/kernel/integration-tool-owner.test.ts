@@ -78,10 +78,11 @@ async function openHarness(options: { callback?: 'mask' | 'early' | 'tamper'; re
       state: 'executing', revision: 1, epoch: 1, configuration: {}, cancel_requested: false, waiting_on: null };
     // These narrow records intentionally implement only the management/runtime fields the owner reads.
     const launch = { run_id: run.id, selection: { source: sourceBinding } } as LaunchIntent;
+    const childSource = { ...sourceBinding, environment_run_id: null, branch_id: 'child-source', revision: 7 };
     const child = { child_operation_id: input.childOperationId, execution_id: input.executionId, parent_run_id: 'original-dispatch-run',
       parent_thread_id: run.thread_id, parent_branch_id: run.branch_id, child_thread_id: 'child-thread',
-      source: { kind: 'ready', handoff: null, pin: null,
-        selection: { ...sourceBinding, environment_run_id: null, branch_id: 'child-source', revision: 7 },
+      source: { kind: 'ready', handoff: null, pin: { pin_id: 'original-child-source', root: 'fixed-result-root', source: childSource },
+        selection: childSource,
         provenance: { consistency: 'fixed-root', root: 'fixed-result-root' } },
       code_result: { kind: 'published', effect: 'confirmed', result: { publication_id: input.publicationId,
         workspace_id: 'workspace', branch_id: 'child-source', result_revision: 7, root: 'fixed-result-root',

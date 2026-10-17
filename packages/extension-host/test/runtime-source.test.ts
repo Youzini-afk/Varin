@@ -171,7 +171,7 @@ test('a long verified source read yields control and cancellation closes its act
   try {
     fs.createReadStream = ((...args: Parameters<typeof fs.createReadStream>) => {
       const stream = original(...args);
-      if (String(args[0]).endsWith('/package/large')) {
+      if (String(args[0]).replaceAll('\\', '/').endsWith('/package/large')) {
         observed = true;
         streamClosed = new Promise(resolve => stream.once('close', () => { closed = true; resolve(); }));
         stream.once('data', () => {

@@ -397,7 +397,8 @@ it('and UI mutations use one exact revision CAS and scope moves retain old-scope
 function toolCall(response: ServerResponse, callId: string, args: Record<string, unknown>) {
   response.writeHead(200, { 'content-type': 'text/event-stream' });
   response.end(`data: ${JSON.stringify({ type: 'response.completed', response: { output: [
-    { id: `item-${callId}`, type: 'function_call', call_id: callId, name: 'memory', arguments: JSON.stringify(args) },
+    { id: `item-${callId}`, type: 'function_call', call_id: callId, name: 'tool_invoke',
+      arguments: JSON.stringify({ reference: { name: 'memory', version: '1' }, arguments: args }) },
   ] } })}\n\n`);
 }
 it('actual model tools share UI notes, keep reads cheap, enforce revision CAS and deliver each committed mutation once', async () => {
@@ -419,7 +420,12 @@ it('actual model tools share UI notes, keep reads cheap, enforce revision CAS an
   expect(catalog.revision).toBe(2); expect(catalog.memories).toEqual([]);
   const history = (await f.api.snapshot(identity)).history;
   type ToolResult = { call_id: string; completion: { kind: string; outcome?: string; effect?: string; content?: Record<string, unknown> } };
-  const results = history.filter(item => item.source === 'tool').map(item => (item.content as { content: { result: ToolResult } }).content.result);
+  const results = history.filter(item => item.source === 'tool').map(item => {
+    const result = (item.content as { content: { result: ToolResult } }).content.result;
+    const output = result.completion.content as { data: { reference: { name: string }; completion: ToolResult['completion']; result: unknown }; parts: unknown[] };
+    expect(output.data.reference.name).toBe('memory');
+    return { ...result, completion: { ...output.data.completion, content: { data: output.data.result, parts: output.parts } } };
+  });
   expect(results.map(result => result.call_id)).toEqual(['memory-read-empty', 'memory-save', 'memory-read-saved', 'memory-stale-write', 'memory-delete']);
   expect(results[0]!.completion).toMatchObject({ kind: 'result', outcome: 'succeeded', effect: 'none', content: { data: { revision: 0, notes: [] }, parts: [] } });
   expect(results[1]!.completion).toMatchObject({ kind: 'result', outcome: 'succeeded', effect: 'confirmed', content: { data: {
@@ -438,9 +444,9 @@ it('actual model tools share UI notes, keep reads cheap, enforce revision CAS an
   expect(toolQueries.every(query => query.scope.threadId === identity.threadId && query.runId === run.run_id)).toBe(true);
   const origin = toolQueries.find(query => query.arguments!.action === 'save')!.origin!;
   expect(await f.personalization.mutationReceipt(origin)).toMatchObject({ revision: 1 });
-  const events = await f.runtime.events(0, 512);
-  expect(events.filter(event => event.subject === run.run_id && event.kind === 'execution.committed'
-    && (event.data as { kind?: string }).kind === 'tool_dispatched')).toHaveLength(3);
+  const mutations = toolQueries.filter(query => query.arguments!.action !== 'read');
+  const operations = await Promise.all(mutations.map(query => f.runtime.operation(query.origin!.slice(`run:${run.run_id}:`.length))));
+  expect(operations.map(operation => operation.effect)).toEqual(['confirmed', 'none', 'confirmed']);
   await turn(f, identity, 'after-tool-delivery');
   expect((await f.api.snapshot(identity)).history.filter(item => item.source === 'environment' && JSON.stringify(item).includes('REAL_NATIVE_MEMORY'))).toEqual([]);
 });

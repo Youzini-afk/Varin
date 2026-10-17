@@ -63,6 +63,9 @@ it('client submits, inspects, cancels, replays events and preserves receipt on r
   expect(events.some(event => event.kind === 'run.accepted' && event.subject === receipt.run_id)).toBe(true);
   expect(events.every((event, index) => index === 0 || event.cursor > events[index - 1]!.cursor)).toBe(true);
   expect(await f.runtimeClient.events(events.at(-1)!.cursor, 100)).toEqual([]);
+  // Cancellation acknowledges intent before the executor and its content readers drain.
+  await expect.poll(async () => (await f.runtimeClient.run(receipt.run_id)).state).toBe('cancelled');
+  await expect.poll(async () => (await f.runtimeClient.collectContent()).status).toBe('completed');
   const collection = await f.runtimeClient.collectContent();
   expect(collection.status).toBe('completed');
   expect(collection.removedObjects).toBeGreaterThanOrEqual(0);
@@ -107,7 +110,7 @@ it('client uses unique IDs and independent credits while ordinary responses are 
   expect(new Set(runtimeRequests.map(value => value.id)).size).toBe(runtimeRequests.length);
   expect(runtimeRequests.every(value => value.epoch === f.host.kernelEpoch && value.grantId === undefined)).toBe(true);
   f.release();
-  expect((await Promise.all(ordinary)).every(value => value.integrity === 'ok')).toBe(true);
+  expect(await Promise.all(ordinary)).toEqual(Array.from({ length: KERNEL_REQUEST_WINDOW }, () => expect.objectContaining({ integrity: 'not_checked', deep: false })));
 }, 30_000);
 
 it('abort retains wire credit until receipt and cancels queued admission without dispatch', async () => {
@@ -669,7 +672,7 @@ it('queued source launch survives kernel loss and rebinds fresh authority to the
     expect(restarted.kernelEpoch).not.toBe(oldEpoch);
     expect(launch?.requires_rebind).toBe(true);
     expect((await runtimeClient.pendingLaunches()).some(item => item.run_id === next.run_id)).toBe(true);
-    await expect(runtimeClient.startFromSource({ ...selection, revision: revision + 1 })).rejects.toThrow(/source selection/i);
+    await expect(runtimeClient.startFromSource({ ...selection, revision: revision + 1 })).rejects.toThrow(/source.*admitted identity/i);
     await runtimeClient.rebindLaunch(next.run_id);
     await runtimeClient.cancelRun(predecessor.run_id);
     await expect.poll(async () => (await runtimeClient.run(next.run_id)).state, { timeout: 10_000 }).toBe('completed');
