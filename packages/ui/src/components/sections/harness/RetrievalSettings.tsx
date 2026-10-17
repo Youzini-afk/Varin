@@ -127,7 +127,7 @@ export function InferenceSettings({ harness, update, kind, localSemanticStatus }
           const next = { ...current.current, providerId, modelId: '' };
           current.current = next; setFields(next);
         }}>
-          <SelectTrigger size="settings" className="w-64" aria-label={t(`settings.page.harness.${kind}.provider`)}><SelectValue>{fields.providerId || t('settings.page.harness.models.notConfigured')}</SelectValue></SelectTrigger>
+          <SelectTrigger size="settings" className="w-64" aria-label={t(`settings.page.harness.${kind}.provider`)}><SelectValue /></SelectTrigger>
           <SelectContent><SelectItem value="__none" disabled>{t('settings.page.harness.models.notConfigured')}</SelectItem>{providers.filter(provider => modelsFor(provider.id, kind).length).map((provider) => <SelectItem key={provider.id} value={provider.id}>{provider.name || provider.id}</SelectItem>)}</SelectContent>
         </Select>
       </SettingsFieldRow>
@@ -200,7 +200,7 @@ function FastDecisionSettings({ harness, update }: HarnessSettingsPageProps) {
           const next = { ...current.current, providerId, modelId: '' };
           current.current = next; setFields(next);
         }}>
-          <SelectTrigger size="settings" className="w-64" aria-label={t('settings.page.harness.fastDecision.provider')}><SelectValue>{fields.providerId || t('settings.page.harness.models.notConfigured')}</SelectValue></SelectTrigger>
+          <SelectTrigger size="settings" className="w-64" aria-label={t('settings.page.harness.fastDecision.provider')}><SelectValue /></SelectTrigger>
           <SelectContent><SelectItem value="__none" disabled>{t('settings.page.harness.models.notConfigured')}</SelectItem>{providers.filter(provider => modelsFor(provider.id, 'decision').length).map((provider) => <SelectItem key={provider.id} value={provider.id}>{provider.name || provider.id}</SelectItem>)}</SelectContent>
         </Select>
       </SettingsFieldRow>

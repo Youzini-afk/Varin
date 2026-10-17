@@ -11,6 +11,7 @@ const modelKey = (model: { providerId: string; modelId: string }) => JSON.string
 export function ImageToolsSettings({ harness, update }: HarnessSettingsPageProps) {
   const { t } = useI18n();
   const catalog = useConfigurationModels();
+  const providerName = (id: string) => catalog.providers.find(provider => provider.id === id)?.name || id;
   const [models, setModels] = React.useState<ImageModelInfo[] | null>(null);
   const [error, setError] = React.useState<string | null>(null);
   React.useEffect(() => {
@@ -40,8 +41,8 @@ export function ImageToolsSettings({ harness, update }: HarnessSettingsPageProps
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="__none__">{t('settings.harness.images.none')}</SelectItem>
-              {selected && !current ? <SelectItem value={modelKey(selected)} disabled>{selected.providerId}/{selected.modelId}</SelectItem> : null}
-              {available.map(model => <SelectItem key={modelKey(model)} value={modelKey(model)}><span className="flex min-w-0 items-center gap-2"><ModelLogo modelId={model.modelId} requestModelId={configured(model.providerId, model.modelId)?.requestModelId} displayName={model.name} /><span className="truncate">{model.name} · {model.providerId}</span></span></SelectItem>)}
+              {selected && !current ? <SelectItem value={modelKey(selected)} disabled>{providerName(selected.providerId)}/{selected.modelId}</SelectItem> : null}
+              {available.map(model => <SelectItem key={modelKey(model)} value={modelKey(model)}><span className="flex min-w-0 items-center gap-2"><ModelLogo modelId={model.modelId} requestModelId={configured(model.providerId, model.modelId)?.requestModelId} displayName={model.name} /><span className="truncate">{model.name} · {providerName(model.providerId)}</span></span></SelectItem>)}
             </SelectContent>
           </Select>
           {selected && models && !current ? <p className="typography-meta text-destructive">{t('settings.harness.images.modelUnavailable')}</p> : null}
