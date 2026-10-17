@@ -43,13 +43,16 @@ it('releases the offscreen context observation and reconstructs it only when vis
   expect(api.observe).toHaveBeenCalledTimes(2); expect(container.textContent).toBe('Reopened context');
 });
 
-it('does not publish or subscribe from a snapshot that finishes after its view became hidden', async () => {
+it('aborts the live observation and ignores a snapshot that finishes after its view became hidden', async () => {
   let finish!: (value: ThreadSnapshot) => void;
   api.snapshot.mockReturnValueOnce(new Promise<ThreadSnapshot>(resolve => { finish = resolve; }));
   await act(async () => root.render(<ContextView active />));
+  expect(api.observe).toHaveBeenCalledTimes(1);
+  const signal = api.observe.mock.calls[0]![2].signal as AbortSignal;
   await act(async () => root.render(<ContextView active={false} />));
   await act(async () => finish(snapshot('Hidden stale result')));
-  expect(api.observe).not.toHaveBeenCalled(); expect(container.textContent).toBe('');
+  expect(signal.aborted).toBe(true);
+  expect(api.observe).toHaveBeenCalledTimes(1); expect(container.textContent).toBe('');
   await act(async () => root.render(<ContextView active />));
-  expect(api.observe).toHaveBeenCalledTimes(1); expect(container.textContent).toBe('Current context');
+  expect(api.observe).toHaveBeenCalledTimes(2); expect(container.textContent).toBe('Current context');
 });

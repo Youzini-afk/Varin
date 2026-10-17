@@ -5,7 +5,7 @@ import path from 'node:path';
 import { afterEach, it } from 'vitest';
 import { KernelClient, KernelClientError, type KernelGrantHandle } from './kernel-client.js';
 import { KernelRequestWindow } from './request-window.js';
-import { KERNEL_REQUEST_WINDOW } from './protocol.generated.js';
+import { KERNEL_PROTOCOL_VERSION, KERNEL_REQUEST_WINDOW } from './protocol.generated.js';
 import { KernelFileResourceBackend } from './file-resource-backend.js';
 import type { KernelFileAuthorityContext, KernelStorageAdapter } from './storage-adapter.js';
 import type { RecoveryIdentity } from '../recovery/journal-files.js';
@@ -34,15 +34,15 @@ async function fixture() {
   const cancellations: Array<{ id: string; discard: boolean }> = [];
   let captureEntered!: (frame: Frame) => void;
   const entered = new Promise<Frame>(resolve => { captureEntered = resolve; });
-  const reply = (frame: Frame, result: unknown) => owner.consumeFrame({ v: 1, kind: 'response', id: frame.id, ok: true, result });
-  const fail = (frame: Frame, code: string) => owner.consumeFrame({ v: 1, kind: 'response', id: frame.id, ok: false, error: { code, message: code } });
+  const reply = (frame: Frame, result: unknown) => owner.consumeFrame({ v: KERNEL_PROTOCOL_VERSION, kind: 'response', id: frame.id, ok: true, result });
+  const fail = (frame: Frame, code: string) => owner.consumeFrame({ v: KERNEL_PROTOCOL_VERSION, kind: 'response', id: frame.id, ok: false, error: { code, message: code } });
   owner.transport = {
     async send(frame, lane) {
       frames.push({ frame, lane });
       if (frame.kind === 'cancel') return;
       switch (frame.method) {
         case 'file.capture': captureEntered(frame); break;
-        case 'file.lease.acquire': reply(frame, { status: 'acquired' }); break;
+        case 'file.lease.wait': reply(frame, { status: 'acquired' }); break;
         case 'file.lease.check': reply(frame, { checked: true }); break;
         case 'file.lease.release': reply(frame, { released: true }); break;
         case 'process.release': reply(frame, { released: true }); break;
@@ -74,7 +74,7 @@ it('captureDetailed keeps its original gate lease and signal until the actual ca
     () => f.backend.captureDetailed(f.identity, 'output', { store: false }, 'original-capture'), { signal: controller.signal })
     .catch(error => { settled = true; return error; });
   const capture = await f.entered;
-  const acquire = f.frames.find(value => value.frame.method === 'file.lease.acquire')!.frame;
+  const acquire = f.frames.find(value => value.frame.method === 'file.lease.wait')!.frame;
   assert.equal(capture.grantId, 'original-grant');
   assert.equal(capture.params!.leaseId, acquire.params!.leaseId);
   assert.equal(capture.params!.rootId, 'original-root');
@@ -165,7 +165,7 @@ it.each(['outer', 'inner'] as const)('nested capture uses the same physical leas
   const capture = await f.entered;
   (source === 'outer' ? outer : inner).abort(); await tick();
   assert.deepEqual(f.cancellations, [{ id: capture.id, discard: false }]);
-  assert.equal(f.frames.filter(value => value.frame.method === 'file.lease.acquire').length, 1);
+  assert.equal(f.frames.filter(value => value.frame.method === 'file.lease.wait').length, 1);
   assert.equal(f.frames.filter(value => value.frame.method === 'file.lease.check').length, 1);
   assert.equal(f.frames.some(value => value.frame.method === 'file.lease.release'), false);
   f.fail(capture, 'cancelled');

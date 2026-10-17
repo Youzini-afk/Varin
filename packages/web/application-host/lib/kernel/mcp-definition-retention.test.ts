@@ -1,4 +1,5 @@
 import { beforeEach, expect, it, vi } from 'vitest';
+import { resolve } from 'node:path';
 
 const ports = vi.hoisted(() => {
   const deferred = () => {
@@ -63,7 +64,10 @@ vi.mock('../mcp/auth.js', async importOriginal => {
     tokens() { return undefined; } async remove() { if ('credential' in ports) ports.credential = undefined; return true; }
   } };
 });
-vi.mock('../mcp/connection.js', () => ({ McpServerConnection: ports.Connection, createDefaultTransport: () => {} }));
+vi.mock('../mcp/connection.js', async importOriginal => ({
+  ...await importOriginal<typeof import('../mcp/connection.js')>(),
+  McpServerConnection: ports.Connection, createDefaultTransport: () => {},
+}));
 vi.mock('../mcp/directory.js', () => ({ McpDirectory: class { async get() {} async update() {} async close() {} } }));
 vi.mock('../configuration-watch.js', () => ({ ConfigWatchManager: class {
   async watch() { return { watchId: 'test-watch' }; } unwatch() {} close() {}
@@ -103,7 +107,7 @@ it('retains deferred exact definitions past parent release and replacement, deri
   const childA = await authority.acquire(scope('child-a'), { servers: ['test'], deriveFrom: token });
   const childB = await authority.acquire(scope('child-b'), { servers: ['test'], deriveFrom: token });
   expect(ports.instances.map(instance => instance.options.entry.config.command)).toEqual(['original', 'original']);
-  expect(ports.instances.map(instance => instance.options.cwd)).toEqual([scope('child-a').executionCwd, scope('child-b').executionCwd]);
+  expect(ports.instances.map(instance => instance.options.cwd)).toEqual([resolve(scope('child-a').executionCwd!), resolve(scope('child-b').executionCwd!)]);
   expect(Object.keys(childA.binding.provenance.servers)).toEqual(['test']);
   const a = childA.binding.provenance.servers.test!, b = childB.binding.provenance.servers.test!;
   expect(a.owner.source_authority).toEqual(scope('child-a').sourceAuthority);

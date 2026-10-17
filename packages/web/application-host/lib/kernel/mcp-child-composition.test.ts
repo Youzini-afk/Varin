@@ -7,6 +7,10 @@ const sdk = vi.hoisted(() => {
   const calls: Array<{ server: string; cwd: string }> = [];
   class Connection {
     state = 'connecting';
+    readonly directoriesReady = new Set(['tools']);
+    readonly directoryStates = { tools: 'ready', resources: 'unprepared', resourceTemplates: 'unprepared', prompts: 'unprepared' };
+    readonly environmentCurrent = true;
+    prompts = [];
     tools = [{ name: 'read', inputSchema: { type: 'object' } }];
     resources = []; resourceTemplates = []; timeoutMs = 1000;
     constructor(readonly options: { entry: Entry; cwd: string }) {}
@@ -25,6 +29,7 @@ const sdk = vi.hoisted(() => {
       },
     };
     async getClient() { this.state = 'connected'; return this.client; }
+    getToolsClient() { return this.getClient(); }
     async requestOnce<T>(run: (value: typeof this.client) => Promise<T>) { return run(await this.getClient()); }
     async close() { this.state = 'closed'; }
   }
@@ -40,7 +45,10 @@ vi.mock('../mcp/configuration.js', async importOriginal => ({
   },
   validateMcpServerConfig: (_name: string, config: unknown) => config,
 }));
-vi.mock('../mcp/connection.js', () => ({ McpServerConnection: sdk.Connection }));
+vi.mock('../mcp/connection.js', async importOriginal => ({
+  ...await importOriginal<typeof import('../mcp/connection.js')>(),
+  McpServerConnection: sdk.Connection,
+}));
 vi.mock('../configuration-watch.js', () => ({ ConfigWatchManager: class {
   async watch() { return { watchId: 'test-watch' }; } unwatch() {} close() {}
 } }));

@@ -221,7 +221,7 @@ it('ThreadAdapter submits an explicit source with real forSource preparation and
   const changed = submitted.initialContext!;
   expect(submitted.expectedContextCheckpoint).toBe(saved.id);
   expect(submitted.launch).toMatchObject({ inheritSource: false, source: { workspaceId: 'new-workspace', branchId: 'new-source', revision: 2 }, childDispatch: frozenProfiles });
-  expect(childProfiles).toHaveBeenCalledExactlyOnceWith({ modelOwner: expect.objectContaining({ retain: expect.any(Function) }), parent: { configuration: submitted.configuration, credential_scope: submitted.launch!.credentialScope } });
+  expect(childProfiles).toHaveBeenCalledExactlyOnceWith({ modelOwner: expect.objectContaining({ retain: expect.any(Function) }), parent: { configuration: submitted.configuration, credential_scope: submitted.launch!.credentialScope }, projectId: 'admitted-project' });
 
   expect(changed.resources?.source).toMatchObject({ workspace_id: 'new-workspace', branch_id: 'new-source', revision: 2 });
   expect(changed.resources?.snapshot.scope).toMatchObject({ mode: 'agent', threadRole: 'worker', projectId: 'admitted-project' });
@@ -267,7 +267,7 @@ it('ThreadAdapter reuses an accepted input receipt after settings break, and onl
     launch: expect.objectContaining({ inheritSource: false, source: expect.objectContaining({ branchId: source.branchId }) }) }));
 
   fAdapter.runtime.inputReceipt.mockReset().mockResolvedValue(null);
-  await expect(fAdapter.adapter.submit({ ...input, key: 'unaccepted-key' })).rejects.toMatchObject({ failure: { status: 'invalid', path: 'agent-settings.json' } });
+  await expect(fAdapter.adapter.submit({ ...input, key: 'unaccepted-key' })).rejects.toMatchObject({ code: 'resource-invalid', reason: { failure: { status: 'invalid', path: 'agent-settings.json' } } });
   expect(fAdapter.runtime.inputReceipt).toHaveBeenCalledTimes(2);
   expect(fAdapter.runtime.submit).toHaveBeenCalledOnce();
   expect(fAdapter.active()).toEqual(saved);

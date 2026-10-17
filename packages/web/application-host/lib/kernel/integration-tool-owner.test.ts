@@ -80,6 +80,9 @@ async function openHarness(options: { callback?: 'mask' | 'early' | 'tamper'; re
     const launch = { run_id: run.id, selection: { source: sourceBinding } } as LaunchIntent;
     const child = { child_operation_id: input.childOperationId, execution_id: input.executionId, parent_run_id: 'original-dispatch-run',
       parent_thread_id: run.thread_id, parent_branch_id: run.branch_id, child_thread_id: 'child-thread',
+      source: { kind: 'ready', handoff: null, pin: null,
+        selection: { ...sourceBinding, environment_run_id: null, branch_id: 'child-source', revision: 7 },
+        provenance: { consistency: 'fixed-root', root: 'fixed-result-root' } },
       code_result: { kind: 'published', effect: 'confirmed', result: { publication_id: input.publicationId,
         workspace_id: 'workspace', branch_id: 'child-source', result_revision: 7, root: 'fixed-result-root',
         base_root: 'fixed-base-root', record_id: 'original-result-record' } } } as DelegatedExecution;
@@ -177,7 +180,7 @@ it('the installed example integrates a fixed publication from a later Run of the
       const receipt = await h.execute(input, policy);
       const admitted = h.mergeResult.mock.lastCall![0];
       expect(receipt).toEqual({ completion: { kind: 'result', outcome: 'succeeded', effect: 'confirmed',
-        content: domainReceipt(admitted.operationId!) }, executor_stopped: true });
+        content: { data: domainReceipt(admitted.operationId!), parts: [] } }, executor_stopped: true });
       expect(admitted).toMatchObject({
         workspaceId: 'workspace', threadId: 'child-thread', branchId: 'child-source', resultRevision: 7,
         parentAuthority: { kind: 'directory', directory: '/fixture/parent-source', workspaceId: 'documents-workspace' },
@@ -200,7 +203,7 @@ it('the installed example integrates a fixed publication from a later Run of the
     h.mergeResult.mockClear();
     h.openTarget.mockClear();
     for (const args of [{ ...input, childOperationId: 'unrelated-child' }, { ...input, publicationId: 'newer-publication' }]) {
-      expect(await h.execute(args)).toMatchObject({ completion: { outcome: 'failed', effect: 'none', content: { status: 'rejected' } }, executor_stopped: true });
+      expect(await h.execute(args)).toMatchObject({ completion: { outcome: 'failed', effect: 'none', content: { data: { status: 'rejected' } } }, executor_stopped: true });
     }
     h.child.parent_branch_id = 'different-parent-branch';
     expect(await h.execute()).toMatchObject({ completion: { outcome: 'failed', effect: 'none' } });
@@ -230,7 +233,7 @@ it('a successful ordinary callback cannot replace partial, unknown or still-runn
       const receipt = await h.execute();
       expect(h.callbackReplies.at(-1)).toEqual(forged);
       expect(receipt).toEqual({ completion: { kind: 'result', outcome: facts.effect === 'unknown' ? 'indeterminate' : 'failed',
-        effect: facts.effect, content: domainReceipt(h.mergeResult.mock.lastCall![0].operationId!, facts) }, executor_stopped: facts.executorStopped });
+        effect: facts.effect, content: { data: domainReceipt(h.mergeResult.mock.lastCall![0].operationId!, facts), parts: [] } }, executor_stopped: facts.executorStopped });
     }
     h.mergeResult.mockRejectedValueOnce(new Error('Response lost after journal commit'));
     h.inspectIntegration.mockImplementationOnce(async request => domainReceipt(request.operationId!, { status: 'conflict', effect: 'partial' }));
@@ -243,7 +246,7 @@ it('a successful ordinary callback cannot replace partial, unknown or still-runn
     });
     h.inspectIntegration.mockRejectedValueOnce(new Error('Original journal channel is still unavailable'));
     expect(await h.execute()).toMatchObject({ completion: { outcome: 'indeterminate', effect: 'unknown',
-      content: { error: 'Terminal commit acknowledgment lost' } }, executor_stopped: true });
+      content: { data: { error: 'Terminal commit acknowledgment lost' } } }, executor_stopped: true });
     expect(h.callbackReplies.at(-1)).toEqual(forged);
   } finally { await h.close(); }
 }, 20_000);
@@ -318,7 +321,7 @@ it('the installed broker cannot release a Host effect when its extension returns
     const original = domainReceipt(`integration:${call.operationId}`, { status: 'conflict', effect: 'partial' });
     finish.resolve(original);
     await expect.poll(() => frames.find(frame => frame.kind === 'host-tool-receipt')).toMatchObject({ call,
-      receipt: { executor_stopped: true, completion: { outcome: 'failed', effect: 'partial', content: original } } });
+      receipt: { executor_stopped: true, completion: { outcome: 'failed', effect: 'partial', content: { data: original, parts: [] } } } });
     await expect.poll(() => release.mock.calls.length).toBe(1);
     expect(h.targetRelease).toHaveBeenCalledTimes(1);
     expect(h.mergeResult).toHaveBeenCalledTimes(1);

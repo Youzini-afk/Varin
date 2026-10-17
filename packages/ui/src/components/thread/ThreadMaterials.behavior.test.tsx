@@ -24,6 +24,19 @@ vi.mock('@varin/application-client', async (importOriginal) => {
   };
 });
 vi.mock('@/components/icon/Icon', () => ({ Icon: () => null }));
+// Exercise the conversation draft through its composer port; browser editor/layout
+// behavior has separate renderer tests.
+vi.mock('./ThreadComposer', () => ({ ThreadComposer: (props: React.ComponentProps<typeof import('./ThreadComposer').ThreadComposer>) => <div>
+  {props.children}
+  <select aria-label="Registered model" value={JSON.stringify([props.providerId, props.modelId])} onChange={event => {
+    const [provider, model] = JSON.parse(event.currentTarget.value); props.onModelChange(provider, model, props.thinkingLevel);
+  }}>
+    {props.models.map(model => <option key={`${model.providerId}:${model.modelId}`} value={JSON.stringify([model.providerId, model.modelId])}>{model.name}</option>)}
+  </select>
+  <textarea aria-label="Message thread" ref={props.editorRef as React.Ref<HTMLTextAreaElement>} value={props.value} onInput={event => props.onChange(event.currentTarget.value)} />
+  <button type="submit" disabled={props.sendDisabled}>Send</button>
+</div> }));
+vi.mock('@/components/chat/DraftPresetChips', () => ({ DraftPresetChips: () => null }));
 vi.mock('@/components/ui/button', () => ({
   Button: ({ variant: _variant, size: _size, ...props }: React.ButtonHTMLAttributes<HTMLButtonElement> & { variant?: string; size?: string }) => <button {...props} />,
 }));
@@ -33,15 +46,18 @@ vi.mock('@/components/ui/textarea', () => ({
 vi.mock('@/components/ui/dialog', () => ({
   Dialog: ({ open, children, onOpenChange }: { open: boolean; children: React.ReactNode; onOpenChange?: (value: boolean) => void }) => open ? <div role="dialog"><button onClick={() => onOpenChange?.(false)}>Close material</button>{children}</div> : null,
   DialogContent: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
+  DialogTrigger: ({ children }: { children: React.ReactNode }) => <>{children}</>,
   DialogHeader: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
   DialogTitle: ({ children }: { children: React.ReactNode }) => <h2>{children}</h2>,
   DialogDescription: ({ children }: { children: React.ReactNode }) => <p>{children}</p>,
 }));
 vi.mock('@/components/chat/MarkdownRenderer', () => ({ MarkdownRenderer: ({ content }: { content: string }) => <p>{content}</p>, SimpleMarkdownRenderer: ({ content }: { content: string }) => <div data-testid="pdf-text">{content}</div> }));
-vi.mock('@/lib/i18n', () => ({ useI18n: () => ({ t: mocks.translate }) }));
+vi.mock('@/lib/i18n', async original => ({ ...await original<typeof import('@/lib/i18n')>(), useI18n: () => ({ t: mocks.translate }) }));
 vi.mock('@/lib/varinEvents', () => ({ subscribeVarinEvents: () => () => {} }));
 
 import { useThreadDraftStore } from '@/stores/useThreadDraftStore';
+import { listEditorContextAttachments, resetEditorContextAttachments } from '@/lib/agent-editor/attachments';
+import { threadComposerKey, threadHostKey } from '@/stores/useThreadStore';
 import { threadSummary } from '@/test/threadFixtures';
 import { ThreadMaterials } from './ThreadMaterials';
 import { ThreadRequestError } from '@varin/application-client';
@@ -101,6 +117,7 @@ let objectUrlMock: ReturnType<typeof vi.fn>;
 
 beforeEach(() => {
   const dom = parseHTML('<!doctype html><html><body></body></html>');
+  Object.defineProperty(dom.window, 'location', { value: new URL('http://ui.test/'), configurable: true });
   vi.stubGlobal('window', dom.window);
   vi.stubGlobal('document', dom.document);
   vi.stubGlobal('HTMLElement', dom.HTMLElement);
@@ -109,11 +126,15 @@ beforeEach(() => {
   vi.stubGlobal('CustomEvent', dom.CustomEvent);
   vi.stubGlobal('Node', dom.Node);
   vi.stubGlobal('Event', dom.Event);
+  vi.stubGlobal('CSS', { escape: (value: string) => value });
+  vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => setTimeout(() => callback(performance.now()), 0));
+  vi.stubGlobal('cancelAnimationFrame', clearTimeout);
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
   container = document.createElement('div');
   document.body.appendChild(container);
   root = createRoot(container);
   useThreadDraftStore.setState({ drafts: {} });
+  resetEditorContextAttachments();
   mocks.runtimeKey = 'runtime-a'; mocks.generation = 1;
   mocks.runtimeFetch.mockReset();
   mocks.addRegion.mockReset().mockReturnValue('added');
@@ -403,20 +424,24 @@ it('adds a real Research ArtifactRow region and citation to its enclosing Thread
   const f = artifactConversationFixture(); await f.open();
   await editComposer('Keep my question'); await selectPdfRegion(); await click('harness.pdf.askAboutSelection');
   const text = container.querySelector<HTMLTextAreaElement>('[aria-label="Message thread"]')!.value;
-  expect(text).toContain('Keep my question'); expect(text).toContain('Original experiment.pdf');
-  expect(text).toContain('snapshot-artifact'); expect(text).toContain('hash-a');
+  expect(text).toBe('Keep my question');
+  const references = listEditorContextAttachments(threadHostKey(), threadComposerKey(threadHostKey(), identity));
+  expect(references).toHaveLength(1);
+  expect(references[0]?.reference).toMatchObject({ title: 'Original experiment.pdf',
+    image: { data: 'AQID', mimeType: 'image/png' }, source: { kind: 'document', snapshotId: 'snapshot-artifact', sourceHash: 'hash-a', page: 1 } });
   expect(f.materials.read.mock.calls.at(-1)?.[1]).toMatchObject({ snapshotId: 'snapshot-artifact', view: 'page-image',
     page: 1, region: { x: 0.1, y: 0.2, width: 0.3, height: 0.1 } });
   expect(container.querySelector('[role="dialog"]')).toBeNull();
-  expect(container.querySelector('img')?.getAttribute('src')).toBe('data:image/png;base64,AQID');
   const model = container.querySelector<HTMLSelectElement>('[aria-label="Registered model"]')!;
   await act(async () => {
     Object.defineProperty(model, 'value', { value: JSON.stringify(['fixture-provider', 'fixture-model']), configurable: true });
     model.dispatchEvent(new Event('change', { bubbles: true })); await settle();
   });
   await act(async () => { container.querySelector('form')!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })); await settle(); });
-  expect(f.submit).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ ...identity, text,
+  expect(f.submit).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ ...identity, text: expect.stringContaining(text),
     images: [{ data: 'AQID', mimeType: 'image/png' }] }));
+  expect(f.submit.mock.calls[0]![0].text).toContain('snapshot-artifact');
+  expect(f.submit.mock.calls[0]![0].text).toContain('hash-a');
   expect(mocks.addRegion).not.toHaveBeenCalled(); expect(mocks.runtimeFetch).not.toHaveBeenCalled();
 });
 

@@ -1,5 +1,7 @@
 import type { ThreadSource } from '@varin/application-client';
 import { createHash } from 'node:crypto';
+import { pathToFileURL } from 'node:url';
+import { resolve } from 'node:path';
 import { expect, it, vi } from 'vitest';
 import { AgentRuntimeClient } from './agent-runtime-client.js';
 import { KernelClient, KernelClientError } from './kernel-client.js';
@@ -76,7 +78,7 @@ it('captures the accepted live source without another file tool and preserves th
     const f = fixture(mode);
     const read = await f.documents.tool(f.authority).readPath!('paper.pdf');
     expect(read.source).toEqual(f.bytes);
-    expect(read.sourceUrl).toBe(mode === 'live_root' ? 'file:///fixture/source/paper.pdf'
+    expect(read.sourceUrl).toBe(mode === 'live_root' ? pathToFileURL(resolve('/fixture/source/paper.pdf')).href
       : 'varin-source:///workspaces/workspace/branches/fixed/revisions/7/paper.pdf');
     const get = f.frames.find(value => value.frame.method === 'storage.getBlob')!.frame;
     expect(get.params).toMatchObject(mode === 'live_root' ? { ownerId: 'capture-owner' } : { branchId: 'fixed', revision: 7, path: 'paper.pdf' });

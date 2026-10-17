@@ -46,7 +46,7 @@ describe('document routes', () => {
           generation: 1,
           ownerId: 'web-surface',
           resources: [{ baseRevision: null, content: 'unsaved hello', localEditRevision: 1, resource: harness.resource('note.txt') }],
-          sessionId: 'session-1',
+          consumer: { kind: 'thread', threadId: 'thread-1', branchId: 'branch-1' },
           workspaceId: harness.identity.workspaceId,
         })
         .expect(200);
@@ -54,7 +54,7 @@ describe('document routes', () => {
       expect(JSON.stringify(captured.body)).not.toContain('unsaved hello');
       await request(app)
         .post('/api/documents/agent-input/release')
-        .send({ context: captured.body, sessionId: 'session-1' })
+        .send({ context: captured.body, consumer: { kind: 'thread', threadId: 'thread-1', branchId: 'branch-1' } })
         .expect(200, { released: true });
       await request(app)
         .post('/api/documents/dirty/clear')
@@ -81,7 +81,7 @@ describe('document routes', () => {
         .query({ workspaceId: 'ffffffff-ffff-4fff-8fff-ffffffffffff' })
         .expect(404);
       expect(response.headers['content-type']).toMatch(/application\/json/);
-      expect(response.body.reason).toBe('failed');
+      expect(response.body.reason).toBe('workspace-unregistered');
     } finally {
       await harness.cleanup();
     }

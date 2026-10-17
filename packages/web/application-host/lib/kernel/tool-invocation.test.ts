@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { test } from 'node:test';
+import { test } from 'vitest';
 import type { HostCapabilityCallContext } from '@varin/extension-host';
 import { withToolInvocation, runToolDomainCall, requireToolInvocation, type ToolInvocationAuthority } from './tool-invocation.js';
 import type { ToolExecutionReceipt } from './tool-bridge.js';

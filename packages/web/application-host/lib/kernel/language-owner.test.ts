@@ -168,11 +168,12 @@ describe('live language owner', () => {
 
   it('rejects an input revision that changed while its server request was pending', async () => {
     const f = await fixture();
-    f.peer.heldMethods.add('textDocument/definition');
+    const entered = deferred<void>(), answer = deferred<unknown>();
+    f.peer.handlers.set('textDocument/definition', async () => { entered.resolve(); return answer.promise; });
     const pending = f.invoke();
-    await vi.waitFor(() => expect(f.peer.requests('textDocument/definition')).toHaveLength(1));
+    await entered.promise;
     await fs.writeFile(path.join(f.documents.workspaceRoot, 'main.ts'), 'const changed = 2;\n');
-    f.peer.reply(f.peer.requests('textDocument/definition')[0]!, [{ uri: f.uri('main.ts'), range: testRange(0, 6, 11) }]);
+    answer.resolve([{ uri: f.uri('main.ts'), range: testRange(0, 6, 11) }]);
     const result = await pending;
     expect(result.status).toBe('stale');
     expect(result.items).toEqual([]);
@@ -208,11 +209,12 @@ describe('live language owner', () => {
 
   it('cancels a stalled feature request, ignores its late response, and retains the shared server', async () => {
     const f = await fixture();
-    f.peer.heldMethods.add('textDocument/definition');
+    const entered = deferred<void>(), answer = deferred<unknown>();
+    f.peer.handlers.set('textDocument/definition', async () => { entered.resolve(); return answer.promise; });
     const cancelled = new AbortController();
     const pending = f.invoke({}, cancelled.signal);
     const rejected = expect(pending).rejects.toMatchObject({ name: 'AbortError' });
-    await vi.waitFor(() => expect(f.peer.requests('textDocument/definition')).toHaveLength(1));
+    await entered.promise;
     const first = f.peer.requests('textDocument/definition')[0]!;
     expect(await f.invoke({ method: 'references', runId: 'run-b' })).toMatchObject({ status: 'ready', items: [] });
     cancelled.abort();
@@ -220,8 +222,8 @@ describe('live language owner', () => {
     expect(f.peer.notifications('$/cancelRequest')).toEqual([
       expect.objectContaining({ params: { id: first.id } }),
     ]);
-    f.peer.reply(first, [{ uri: f.uri('main.ts'), range: testRange(0, 6, 11) }]);
-    f.peer.heldMethods.delete('textDocument/definition');
+    answer.resolve([{ uri: f.uri('main.ts'), range: testRange(0, 6, 11) }]);
+    f.peer.handlers.delete('textDocument/definition');
     expect(await f.invoke()).toMatchObject({ status: 'ready', items: [], omissions: zeroOmissions });
     expect(f.spawn).toHaveBeenCalledTimes(1);
     expect(f.supervisor.inspectViews()).toEqual(expect.arrayContaining([expect.objectContaining({ view: expect.stringMatching(/^agent:source:/), status: 'ready' })]));
@@ -601,7 +603,7 @@ describe('source-bound language navigation', () => {
       expect(frame.params).toEqual({ query: 'value' });
       return [{ name: 'value', kind: 13, location: { uri: f.uri('main.ts'), range } },
         { name: 'needle', kind: 13, location: { uri: f.uri('..inside.ts'), range } },
-        { name: 'private', kind: 13, location: { uri: 'file:///not-this-source/secret.ts', range } },
+        { name: 'private', kind: 13, location: { uri: f.uri('../not-this-source/secret.ts'), range } },
         { name: 'missing', kind: 13, range }];
     });
     expect(await f.invoke({ method: 'workspace_symbols', query: 'value' })).toMatchObject({
@@ -620,17 +622,17 @@ describe('source-bound language navigation', () => {
     const raw = (name: string) => ({ name, kind: 12, uri: f.uri(name === 'cross' ? 'other.ts' : 'main.ts'), range,
       selectionRange: range, data: { privateProviderItem: name, nested: ['opaque'] } });
     f.peer.handlers.set('textDocument/prepareCallHierarchy', () => [raw('value'), raw('cross')]);
-    const gate = deferred<void>(); let started = 0;
+    const gate = deferred<void>(), started = [deferred<void>(), deferred<void>()]; let calls = 0;
     f.peer.handlers.set('callHierarchy/outgoingCalls', async frame => {
       const item = frame.params?.item as ReturnType<typeof raw>;
       expect(item).toEqual(raw(item.name));
-      if (++started <= 2) await gate.promise;
+      if (calls < started.length) { started[calls++]!.resolve(); await gate.promise; }
       return [{ to: raw('target'), fromRanges: [range] }];
     });
     const first = f.invoke({ method: 'call_hierarchy', direction: 'outgoing' });
-    await vi.waitFor(() => expect(started).toBe(1));
+    await started[0]!.promise;
     const second = f.invoke({ method: 'call_hierarchy', direction: 'outgoing', runId: 'run-b', grantId: 'grant-b' });
-    await vi.waitFor(() => expect(started).toBe(2));
+    await started[1]!.promise;
     gate.resolve();
     for (const result of await Promise.all([first, second])) {
       expect(result).toMatchObject({ status: 'ready', items: [
