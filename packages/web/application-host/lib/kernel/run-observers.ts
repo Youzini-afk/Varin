@@ -232,7 +232,13 @@ export class RunObservers {
     { expectedRoutingRevision: selection.routing.revision, signal });
     let adopted = false;
     try {
-      if (this.selection !== selection || signal.aborted) return;
+      // Cold activation publishes provider status while this preparation is in flight.
+      // That notification alone does not invalidate the unchanged catalog/routing admission.
+      const currentSelection = this.selection;
+      if (!currentSelection || signal.aborted
+        || currentSelection.catalog.revision !== selection.catalog.revision
+        || currentSelection.routing.revision !== selection.routing.revision
+        || this.selectedProviderKey(currentSelection, routing) !== providerKey) return;
       if (binding.providerKey !== providerKey) throw new Error('Activity observer selection changed during preparation');
       binding.assertAvailable();
       const current = this.subscriptions.get(key);

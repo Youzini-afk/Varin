@@ -113,7 +113,7 @@ function settingsFrom(document: unknown): HarnessEmbeddingSettings {
   return settings;
 }
 const invalidSettings = (error: unknown): boolean => error instanceof HarnessInferenceSettingsValidationError
-  || error instanceof SyntaxError || record(error) && error.code === 'invalid_settings';
+  || error instanceof SyntaxError || record(error) && ['invalid_settings', 'embedding-settings-invalid'].includes(String(error.code));
 function safeFailure(error: unknown): SemanticInferenceError {
   if (error instanceof SemanticInferenceError) return error;
   if (invalidSettings(error)) return new SemanticInferenceError('invalid', 'embedding-settings-invalid');
@@ -146,7 +146,9 @@ export function createSemanticInference(
   let disabled = false;
   let revocationGeneration = 0;
   const readGlobalSettings = async () => {
-    const settings = await settingsOwner.readGlobalSettings();
+    let settings: unknown;
+    try { settings = await settingsOwner.readGlobalSettings(); }
+    catch (error) { throw safeFailure(error); }
     const nextDisabled = record(settings) && record(settings.harness) && record(settings.harness.embedding)
       && settings.harness.embedding.enabled === false;
     if (nextDisabled && !disabled) revocationGeneration++;

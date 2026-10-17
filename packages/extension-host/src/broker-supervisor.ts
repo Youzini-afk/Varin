@@ -28,6 +28,7 @@ import {
   canonicalServiceComposition,
 } from "@varin/extension-contract";
 import { ApplicationExtensionCatalog } from "./application-catalog.js";
+import { ExtensionCatalogStaleStateError } from "./errors.js";
 import type { HostCapabilityRegistry } from "./capability-registry.js";
 import { ExtensionPackageManager } from "./package-manager.js";
 import { NativeHostTransport } from "./native-host-transport.js";
@@ -1653,7 +1654,14 @@ export class BrokeredHostSupervisor {
   }
 
   async #reportActual(extensionId: string, state: VarinExtensionActualState): Promise<void> {
-    await this.#catalog.reportActualState(extensionId, state);
+    try {
+      await this.#catalog.reportActualState(extensionId, state);
+    } catch (error) {
+      // A newer desired revision or generation can publish while a retiring worker
+      // finishes. Its obsolete diagnostic must not fail the completed teardown.
+      if (error instanceof ExtensionCatalogStaleStateError) return;
+      throw error;
+    }
     this.#onStateChange();
   }
 }

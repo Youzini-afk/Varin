@@ -95,6 +95,9 @@ export const createScheduledTasksRuntime = ({ projectConfigRuntime, listProjects
         wanted.add(pathDirname(agentsDirectory));
       }
     }
+    // Directory discovery can finish after stop closed the current watchers.
+    // Do not recreate a watcher from that obsolete in-flight refresh.
+    if (!started) return;
     for (const [directory, watcher] of loopWatchers) {
       if (!wanted.has(directory)) {
         watcher.close();
