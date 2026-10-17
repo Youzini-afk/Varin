@@ -1,5 +1,5 @@
 import type { AgentSettingsSnapshot } from '@varin/application-client';
-import { mergeHarnessSettings, type HarnessSettings, type HarnessSettingsInput, type JsonValue } from '@varin/protocol';
+import { DEFAULT_COMPACTION_RESERVE_RATIO, mergeHarnessSettings, type HarnessSettings, type HarnessSettingsInput, type JsonValue } from '@varin/protocol';
 
 /** Objects merge, arrays replace, undefined removes a setting (restores inheritance). */
 export type HarnessSettingsPatch = { [key: string]: unknown };
@@ -25,10 +25,11 @@ export function patchHarnessSettings(base: unknown, patch: HarnessSettingsPatch)
 
 interface Transport {
   read: () => Promise<AgentSettingsSnapshot>;
-  write: (harness: JsonValue, revision: string) => Promise<AgentSettingsSnapshot>;
+  write: (settings: Record<string, JsonValue>, revision: string) => Promise<AgentSettingsSnapshot>;
 }
 export interface HarnessSettingsState {
   harness: HarnessSettings | null;
+  reserveRatio: number;
   status: 'loading' | 'idle' | 'saving' | 'saved' | 'error';
   error: string | null;
 }
@@ -40,7 +41,7 @@ export class HarnessSettingsController {
   private active: Promise<void> | null = null;
   private refreshRequested = false;
   private listeners = new Set<() => void>();
-  private state: HarnessSettingsState = { harness: null, status: 'loading', error: null };
+  private state: HarnessSettingsState = { harness: null, reserveRatio: DEFAULT_COMPACTION_RESERVE_RATIO, status: 'loading', error: null };
 
   constructor(private readonly transport: Transport) {}
   getSnapshot = (): HarnessSettingsState => this.state;
@@ -50,24 +51,33 @@ export class HarnessSettingsController {
   };
 
   private project(status: HarnessSettingsState['status'], error: string | null = null) {
-    const raw = this.pending.reduce(patchHarnessSettings, object(this.confirmed?.global?.harness));
+    const raw = this.pending.reduce(patchHarnessSettings, object(this.confirmed?.global));
     let harness: HarnessSettings | null = null;
     try {
-      if (this.confirmed) harness = mergeHarnessSettings(raw as HarnessSettingsInput, {});
+      if (this.confirmed) harness = mergeHarnessSettings(object(raw.harness) as HarnessSettingsInput, {});
     } catch (failure) {
       status = 'error';
       error = failure instanceof Error ? failure.message : String(failure);
     }
-    this.state = { harness, status, error };
+    const reserveRatio = object(raw.compaction).reserveRatio as number | undefined;
+    this.state = { harness, reserveRatio: reserveRatio ?? DEFAULT_COMPACTION_RESERVE_RATIO, status, error };
     this.listeners.forEach((listener) => listener());
   }
 
   update = (patch: HarnessSettingsPatch): void => {
+    this.enqueue({ harness: patch });
+  };
+
+  updateReserveRatio = (reserveRatio: number): void => {
+    this.enqueue({ compaction: { reserveRatio } });
+  };
+
+  private enqueue(patch: HarnessSettingsPatch): void {
     this.pending.push(patch);
     // Keep failures visible until retry; new input stays in the optimistic view.
     this.project(this.state.error ? 'error' : 'saving', this.state.error);
     if (!this.state.error) void this.drain();
-  };
+  }
 
   retry = (): Promise<void> => {
     if (this.active) return this.active;
@@ -93,9 +103,11 @@ export class HarnessSettingsController {
             const batch = this.pending.slice();
             const revision = this.confirmed!.globalRevision;
             if (!revision) throw new Error('Settings revision is unavailable');
-            const next = batch.reduce(patchHarnessSettings, object(this.confirmed!.global?.harness));
+            const next = batch.reduce(patchHarnessSettings, object(this.confirmed!.global));
+            const keys = new Set(batch.flatMap(patch => Object.keys(patch)));
+            const changed = Object.fromEntries([...keys].map(key => [key, next[key]])) as Record<string, JsonValue>;
             this.project('saving');
-            this.confirmed = await this.transport.write(next as JsonValue, revision);
+            this.confirmed = await this.transport.write(changed, revision);
             this.pending.splice(0, batch.length);
           }
         } while (this.refreshRequested);

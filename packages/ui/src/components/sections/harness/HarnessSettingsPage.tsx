@@ -15,17 +15,17 @@ import { ComputerSettings } from '../computers/ComputerSettings';
 import { BotSettings } from '../bots/BotSettings';
 
 export type HarnessSettingsSection = 'images' | 'tools' | 'permissions' | 'context' | 'retrieval' | 'index' | 'web' | 'computers' | 'bots';
-const pages: Record<HarnessSettingsSection, React.ComponentType<HarnessSettingsPageProps>> = {
+const pages: Record<Exclude<HarnessSettingsSection, 'context'>, React.ComponentType<HarnessSettingsPageProps>> = {
   images: ImageToolsSettings, tools: ToolsSettings, permissions: PermissionsSettings,
-  context: ContextSettings, retrieval: RetrievalSettings, index: IndexSettings, web: WebSettings,
+  retrieval: RetrievalSettings, index: IndexSettings, web: WebSettings,
   // Self-fetching: the computer and bot catalogs come from the Host service,
   // not harness settings — extra props are ignored.
   computers: ComputerSettings, bots: () => <BotSettings /> };
 
 export function HarnessSettingsPage({ section }: { section: HarnessSettingsSection }) {
   const { t } = useI18n();
-  const { harness, status, error, update, retry, targetKey } = useHarnessSettings();
-  const Page = pages[section];
+  const { harness, reserveRatio, status, error, update, updateReserveRatio, retry, targetKey } = useHarnessSettings();
+  const Page = section === 'context' ? null : pages[section];
   const selfFetching = section === 'computers' || section === 'bots';
   const showSaveStatus = section !== 'index' && !selfFetching;
   const content = <>
@@ -40,7 +40,9 @@ export function HarnessSettingsPage({ section }: { section: HarnessSettingsSecti
         ? <ComputerSettings />
         : section === 'bots'
           ? <BotSettings />
-          : harness ? <Page key={`${targetKey}:${section}`} harness={harness} update={update} /> : null}
+          : section === 'context' && harness
+            ? <ContextSettings key={`${targetKey}:${section}`} harness={harness} update={update} reserveRatio={reserveRatio} onReserveRatioChange={updateReserveRatio} />
+            : harness && Page ? <Page key={`${targetKey}:${section}`} harness={harness} update={update} /> : null}
   </>;
   return <SettingsPageLayout title={t(section === 'images' ? 'settings.page.images.title' : `settings.page.harness.page.${section}.title`)}
     description={t(section === 'images' ? 'settings.harness.images.description' : `settings.page.harness.page.${section}.description`)} showSaveStatus={showSaveStatus}

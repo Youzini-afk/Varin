@@ -1944,9 +1944,9 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     const source=launch?.selection.source;
     const root=source?.resource_owner.kind === 'local' ? (await documentsAuthority.admitWorkspaceRegistration(source.workspace_id)).canonicalPath : undefined;
     const admitted=await agentRuntime.contextScope(run.id,signal);
-    const model=run.configuration as {providerId?:string;model:string};
+    const model=run.configuration as {providerId?:string;model:string;contextWindowTokens?:number};
     const policy=await readContextPolicy({settings:await modelsService.settings.snapshot(root),...(root?{projectRoot:root}:{}),
-      ...(model.providerId?{providerId:model.providerId}:{}),modelId:model.model});
+      ...(model.providerId?{providerId:model.providerId}:{}),modelId:model.model,contextWindowTokens:model.contextWindowTokens ?? null});
     return {policy,scope:{threadId:run.thread_id,...(admitted?.projectId?{projectId:admitted.projectId}:{}),...(root?{workspaceId:root}:{})}};
   },(runId,signal)=>threads.continueLaunch(runId,{signal}),createContextBudget(extensionRuntime));
   contextService.bindCompaction(contextCompaction);

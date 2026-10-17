@@ -125,7 +125,7 @@ async function initialize(frame: Record<string, unknown>) {
   kernel.setContextOwner(new ContextService(runtime, prepareContext, async (run, launch, signal) => {
     const selected = launch?.selection.source;
     const registration = selected ? await documents.admitWorkspaceRegistration(selected.workspace_id) : undefined;
-    const policy=await readContextPolicy({ settings: await new AgentSettingsService(agentDir, () => trusted).snapshot(registration?.canonicalPath), ...(registration ? { projectRoot: registration.canonicalPath } : {}), modelId: model.modelId, providerId: model.providerId });
+    const policy=await readContextPolicy({ settings: await new AgentSettingsService(agentDir, () => trusted).snapshot(registration?.canonicalPath), ...(registration ? { projectRoot: registration.canonicalPath } : {}), modelId: model.modelId, providerId: model.providerId, contextWindowTokens:(run.configuration as {contextWindowTokens?:number}).contextWindowTokens ?? null });
     const admitted=await runtime.contextScope(run.id,signal);
     return {policy,scope:{threadId:run.thread_id,...(admitted?.projectId?{projectId:admitted.projectId}:{}),
       ...(registration?{workspaceId:registration.canonicalPath}:{})}};

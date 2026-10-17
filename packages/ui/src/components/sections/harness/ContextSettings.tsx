@@ -5,9 +5,15 @@ import type { HarnessSettingsPageProps } from './harness-settings-state';
 import { AutoSaveInput } from './AutoSaveInput';
 import { HarnessModelField } from './HarnessModelField';
 
-export function ContextSettings({ harness, update }: HarnessSettingsPageProps) {
+export function ContextSettings({ harness, update, reserveRatio, onReserveRatioChange }: HarnessSettingsPageProps & {
+  reserveRatio: number;
+  onReserveRatioChange(ratio: number): void;
+}) {
   const { t } = useI18n();
   const recovery = harness.context.compactionRecovery;
+  const validPercent = (value: string): string | null => value.trim() !== '' && Number.isFinite(Number(value)) && Number(value) >= 0 && Number(value) < 100
+    ? null : t('settings.page.harness.context.reserveRatio.invalid');
+  const percent = Number((reserveRatio * 100).toFixed(6));
   const validSeconds = (value: string): string | null => {
     const millis = Math.round(Number(value) * 1000);
     return Number.isSafeInteger(millis) && millis > 0 && millis <= 2_147_483_647
@@ -21,6 +27,14 @@ export function ContextSettings({ harness, update }: HarnessSettingsPageProps) {
       <HarnessModelField harness={harness} update={update} slot="agentPlanning" />
     </SettingsSection>
     <SettingsSection settingsItem="harness.context">
+      <SettingsFieldRow label={t('settings.page.harness.context.reserveRatio')}
+        description={t('settings.page.harness.context.reserveRatio.description', { threshold: Number((100 - percent).toFixed(6)) })}>
+        <AutoSaveInput className="w-28" type="number" min={0} max={100} step="any"
+          aria-label={t('settings.page.harness.context.reserveRatio')}
+          value={String(percent)} validate={validPercent}
+          onCommit={value => onReserveRatioChange(Number(value) / 100)} />
+        <span className="typography-meta text-muted-foreground">%</span>
+      </SettingsFieldRow>
       <SettingsCheckboxRow checked={harness.context.backgroundPreparation}
         onChange={(backgroundPreparation) => update({ context: { backgroundPreparation } })}
         ariaLabel={t('settings.page.harness.context.backgroundPreparation')}

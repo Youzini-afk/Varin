@@ -34,8 +34,9 @@ function request(method: string, params: unknown, options: { grant?: { grantId: 
   return result;
 }
 async function settings(reserveTokens: number) {
+  const { contextWindowTokens } = configuration as { contextWindowTokens: number };
   await writeFile(join(root, 'agent/agent-settings.json'), JSON.stringify({ compaction: {
-    enabled: true, reserveTokens, keepRecentTokens: 32,
+    enabled: true, reserveRatio: reserveTokens / contextWindowTokens, keepRecentTokens: 32,
   }, harness: { context: { backgroundPreparation: false, preparationWaterline: 0.5 } } }));
 }
 async function initialize(frame: Record<string, unknown>) {
@@ -67,9 +68,9 @@ async function initialize(frame: Record<string, unknown>) {
       return value;
     } };
   service = new ContextService(runtime, context, async (run) => {
-    const model = run.configuration as { model: string; providerId?: string };
+    const model = run.configuration as { model: string; providerId?: string; contextWindowTokens?: number };
     const policy = await readContextPolicy({ settings: await new AgentSettingsService(join(root, 'agent'), () => false).snapshot(), modelId: model.model,
-      ...(model.providerId ? { providerId: model.providerId } : {}) });
+      ...(model.providerId ? { providerId: model.providerId } : {}), contextWindowTokens: model.contextWindowTokens ?? null });
     const scope = await runtime.contextScope(run.id);
     return { policy, scope: { threadId: run.thread_id, ...(scope?.projectId ? { projectId: scope.projectId } : {}) } };
   }, async (id, signal) => { await runtime.startRun(id, signal); }, budget);

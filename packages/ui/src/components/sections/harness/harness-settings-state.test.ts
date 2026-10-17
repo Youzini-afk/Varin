@@ -6,6 +6,7 @@ import { HarnessSettingsController } from './harness-settings-state';
 const snapshot = (harness: JsonValue, revision: string): AgentSettingsSnapshot => ({
   global: { harness }, globalRevision: revision, project: {}, projectRevision: 'project', projectTrusted: false,
 });
+const writtenSnapshot = (global: Record<string, JsonValue>, revision: string): AgentSettingsSnapshot => ({ ...snapshot({}, revision), global });
 const deferred = <T,>() => { let resolve!: (value: T) => void; let reject!: (reason: Error) => void;
   const promise = new Promise<T>((yes, no) => { resolve = yes; reject = no; }); return { promise, resolve, reject }; };
 
@@ -17,7 +18,7 @@ describe('Harness automatic saving', () => {
     const write = vi.fn();
     const controller = new HarnessSettingsController({ read, write });
     await expect(controller.load()).resolves.toBeUndefined();
-    expect(controller.getSnapshot()).toEqual({
+    expect(controller.getSnapshot()).toMatchObject({
       harness: null, status: 'error', error: 'Invalid model role: unknownRole',
     });
     await controller.retry();
@@ -38,10 +39,10 @@ describe('Harness automatic saving', () => {
     controller.update({ output: { visibleBytes: 64000 } });
     expect(write).toHaveBeenCalledTimes(1);
     expect(controller.getSnapshot().harness!.tools).toEqual({ bash: false, grep: false });
-    first.resolve(snapshot(write.mock.calls[0]![0], 'b'));
+    first.resolve(writtenSnapshot(write.mock.calls[0]![0], 'b'));
     await vi.waitFor(() => expect(write).toHaveBeenCalledTimes(2));
-    expect(write.mock.calls[1]).toEqual([{ tools: { grep: false, bash: false }, future: { keep: true }, output: { visibleBytes: 64000 } }, 'b']);
-    second.resolve(snapshot(write.mock.calls[1]![0], 'c'));
+    expect(write.mock.calls[1]).toEqual([{ harness: { tools: { grep: false, bash: false }, future: { keep: true }, output: { visibleBytes: 64000 } } }, 'b']);
+    second.resolve(writtenSnapshot(write.mock.calls[1]![0], 'c'));
     await controller.load();
     expect(controller.getSnapshot().status).toBe('saved');
   });
@@ -50,7 +51,7 @@ describe('Harness automatic saving', () => {
     const read = vi.fn().mockResolvedValueOnce(snapshot({ tools: { grep: true } }, 'a'))
       .mockResolvedValueOnce(snapshot({ tools: { grep: true }, context: { backgroundPreparation: false } }, 'outside'));
     const write = vi.fn().mockRejectedValueOnce(new Error('revision conflict'))
-      .mockImplementationOnce(async (harness: JsonValue) => snapshot(harness, 'new'));
+      .mockImplementationOnce(async (settings: Record<string, JsonValue>) => writtenSnapshot(settings, 'new'));
     const controller = new HarnessSettingsController({ read, write });
     await controller.load();
     controller.update({ tools: { bash: false } });
@@ -59,12 +60,12 @@ describe('Harness automatic saving', () => {
     controller.update({ tools: { grep: false } });
     expect(write).toHaveBeenCalledTimes(1);
     await controller.retry();
-    expect(write.mock.calls[1]).toEqual([{ tools: { grep: false, bash: false }, context: { backgroundPreparation: false } }, 'outside']);
+    expect(write.mock.calls[1]).toEqual([{ harness: { tools: { grep: false, bash: false }, context: { backgroundPreparation: false } } }, 'outside']);
     expect(controller.getSnapshot().error).toBeNull();
   });
 
   it('removes only the chosen override and preserves empty domain restrictions and explicit false', async () => {
-    const write = vi.fn(async (harness: JsonValue) => snapshot(harness, 'b'));
+    const write = vi.fn(async (settings: Record<string, JsonValue>) => writtenSnapshot(settings, 'b'));
     const controller = new HarnessSettingsController({ read: async () => snapshot({
       models: { worker: { providerId: 'one', modelId: 'model' }, explore: { providerId: 'two', modelId: 'other' } },
       web: { domains: { block: ['blocked.test'] } }, nextStep: { enabled: true },
@@ -72,11 +73,11 @@ describe('Harness automatic saving', () => {
     await controller.load();
     controller.update({ models: { worker: undefined }, web: { domains: { allow: [] } }, nextStep: { enabled: false } });
     await controller.load();
-    expect(write.mock.calls[0]![0]).toEqual({ models: { explore: { providerId: 'two', modelId: 'other' } }, web: { domains: { block: ['blocked.test'], allow: [] } }, nextStep: { enabled: false } });
+    expect(write.mock.calls[0]![0]).toEqual({ harness: { models: { explore: { providerId: 'two', modelId: 'other' } }, web: { domains: { block: ['blocked.test'], allow: [] } }, nextStep: { enabled: false } } });
   });
 
   it('restores a document parser default by removing only that user override', async () => {
-    const write = vi.fn(async (harness: JsonValue) => snapshot(harness, 'b'));
+    const write = vi.fn(async (settings: Record<string, JsonValue>) => writtenSnapshot(settings, 'b'));
     const controller = new HarnessSettingsController({
       read: async () => snapshot({ documentReading: {
         doclingCommand: 'custom-docling', tesseractCommand: 'custom-tesseract', ocrLanguage: 'fra',
@@ -86,15 +87,33 @@ describe('Harness automatic saving', () => {
     await controller.load();
     controller.update({ documentReading: { doclingCommand: undefined } });
     await controller.load();
-    expect(write.mock.calls[0]![0]).toEqual({ documentReading: {
+    expect(write.mock.calls[0]![0]).toEqual({ harness: { documentReading: {
       tesseractCommand: 'custom-tesseract', ocrLanguage: 'fra',
-    } });
+    } } });
     expect(controller.getSnapshot().harness?.documentReading).toEqual({
       doclingCommand: 'docling', tesseractCommand: 'custom-tesseract', ocrLanguage: 'fra',
     });
   });
 
-  it('refreshes an externally changed Pi settings snapshot while preserving local state', async () => {
+  it('saves the reserve ratio alongside harness edits while preserving other compaction settings', async () => {
+    const initial = writtenSnapshot({ harness: { shell: 'auto' }, defaultModel: 'selected',
+      compaction: { keepRecentTokens: 1000, modelOverrides: { 'p/m': { reserveRatio: 0.15 } } } }, 'a');
+    const first = deferred<AgentSettingsSnapshot>();
+    const write = vi.fn().mockImplementationOnce(() => first.promise)
+      .mockImplementationOnce(async (settings: Record<string, JsonValue>) => writtenSnapshot({ ...initial.global, ...settings }, 'c'));
+    const controller = new HarnessSettingsController({ read: async () => initial, write });
+    await controller.load();
+    expect(controller.getSnapshot().reserveRatio).toBe(0.1);
+    controller.update({ context: { backgroundPreparation: false } });
+    controller.updateReserveRatio(0.2);
+    expect(controller.getSnapshot().reserveRatio).toBe(0.2);
+    first.resolve(writtenSnapshot({ ...initial.global, ...write.mock.calls[0]![0] }, 'b'));
+    await controller.load();
+    expect(write.mock.calls[1]).toEqual([{ compaction: { reserveRatio: 0.2, keepRecentTokens: 1000, modelOverrides: { 'p/m': { reserveRatio: 0.15 } } } }, 'b']);
+    expect(controller.getSnapshot().status).toBe('saved');
+  });
+
+  it('refreshes an externally changed settings snapshot while preserving local state', async () => {
     const read = vi.fn()
       .mockResolvedValueOnce(snapshot({ shell: 'auto' }, 'a'))
       .mockResolvedValueOnce(snapshot({ shell: 'wsl' }, 'b'));

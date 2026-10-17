@@ -18,7 +18,7 @@ export function useHarnessSettings(runtime: 'agent' = 'agent') {
     const models = createModelConnectionsHttpAPI();
     const controller = new HarnessSettingsController({
       read: async () => models.readSettings(cwd),
-      write: async (harness, expectedRevision) => models.updateSettings({ cwd, scope: 'global', expectedRevision, set: { harness }, remove: [] }),
+      write: async (settings, expectedRevision) => models.updateSettings({ cwd, scope: 'global', expectedRevision, set: settings, remove: [] }),
     });
     const next = { controller, users: 0 };
     controllers.set(targetKey, next);
@@ -52,5 +52,5 @@ export function useHarnessSettings(runtime: 'agent' = 'agent') {
       reportSettingsSaveState(state.status);
     }
   }, [state.status]);
-  return { ...state, update: controller.update, retry: controller.retry, targetKey };
+  return { ...state, update: controller.update, updateReserveRatio: controller.updateReserveRatio, retry: controller.retry, targetKey };
 }

@@ -53,8 +53,11 @@ invalidates cached trust instead of claiming the write was rolled back.
 
 `agent-settings.json` and trusted `.varin/settings.json` also own the typed `compaction` and `resources`
 fields. Context policy is derived from a settings snapshot with its revisions and trusted project
-selection. Token counts require non-negative safe integers, including every model override; explicit
-zero remains distinct from the default. Resource file roots are `VARIN_DATA_DIR/resources` and
+selection. `compaction.reserveRatio` defaults to 0.1 and applies to the selected model's context window;
+global, trusted project and per-model ratios use the same precedence. Ratios are finite numbers from
+0 to less than 1; the former `reserveTokens` setting is rejected rather than silently ignored.
+Token counts require non-negative safe integers, including every model override; explicit zero remains
+distinct from the default. Resource file roots are `VARIN_DATA_DIR/resources` and
 `.varin/resources`; see [resource admission](../agent-resources/DOCUMENTATION.md).
 
 ## Channels and model selection

@@ -10,23 +10,24 @@ it('native settings preserve explicit zero, trusted overrides and immutable poli
   const projectRoot = path.join(root, 'project');
   let trusted = false;
   const settings = new AgentSettingsService(root, () => trusted);
-  const read = async () => readContextPolicy({ settings: await settings.snapshot(projectRoot), projectRoot, providerId: 'p', modelId: 'm' });
+  const read = async () => readContextPolicy({ settings: await settings.snapshot(projectRoot), projectRoot, providerId: 'p', modelId: 'm', contextWindowTokens: 128000 });
   try {
     await writeFile(path.join(root, 'settings.json'), '{legacy broken');
     await mkdir(path.join(projectRoot, '.pi'), { recursive: true });
     await writeFile(path.join(projectRoot, '.pi', 'settings.json'), '{legacy broken');
-    expect(await read()).toMatchObject({ keepRecentTokens: 20000, explicitKeepRecentTokens: null });
+    expect(await read()).toMatchObject({ reserveTokens: 12800, keepRecentTokens: 20000, explicitKeepRecentTokens: null });
     let snapshot = await settings.snapshot();
     snapshot = await settings.update({ scope: 'global', expectedRevision: snapshot.globalRevision,
-      set: { compaction: { keepRecentTokens: 123, modelOverrides: { 'p/m': { keepRecentTokens: 0 } } } }, remove: [] });
-    const frozen = readContextPolicy({ settings: snapshot, providerId: 'p', modelId: 'm' });
-    expect(frozen).toMatchObject({ keepRecentTokens: 0, explicitKeepRecentTokens: 0 });
+      set: { compaction: { reserveRatio: 0.15, keepRecentTokens: 123, modelOverrides: { 'p/m': { reserveRatio: 0, keepRecentTokens: 0 } } } }, remove: [] });
+    const frozen = readContextPolicy({ settings: snapshot, providerId: 'p', modelId: 'm', contextWindowTokens: 128000 });
+    expect(frozen).toMatchObject({ reserveTokens: 0, keepRecentTokens: 0, explicitKeepRecentTokens: 0 });
+    expect(readContextPolicy({ settings: snapshot, providerId: 'p', modelId: 'other', contextWindowTokens: 1000000 }).reserveTokens).toBe(150000);
     await mkdir(path.join(projectRoot, '.varin'), { recursive: true });
-    await writeFile(path.join(projectRoot, '.varin/settings.json'), JSON.stringify({ compaction: { modelOverrides: { 'p/m': { keepRecentTokens: 456 } } } }));
+    await writeFile(path.join(projectRoot, '.varin/settings.json'), JSON.stringify({ compaction: { modelOverrides: { 'p/m': { reserveRatio: 0.2, keepRecentTokens: 456 } } } }));
     expect((await read()).explicitKeepRecentTokens).toBe(0);
     trusted = true;
-    expect((await read()).explicitKeepRecentTokens).toBe(456);
-    expect(readContextPolicy({ settings: snapshot, providerId: 'p', modelId: 'm' })).toEqual(frozen);
+    expect(await read()).toMatchObject({ reserveTokens: 25600, explicitKeepRecentTokens: 456 });
+    expect(readContextPolicy({ settings: snapshot, providerId: 'p', modelId: 'm', contextWindowTokens: 128000 })).toEqual(frozen);
     expect(await readFile(path.join(projectRoot, '.pi', 'settings.json'), 'utf8')).toBe('{legacy broken');
   } finally { await rm(root, { recursive: true, force: true }); }
 });
@@ -36,7 +37,7 @@ it('rejects invalid native compaction writes atomically, including unselected mo
   const settings = new AgentSettingsService(root, () => false);
   try {
     const before = await settings.snapshot();
-    for (const compaction of [{ keepRecentTokens: -1 }, { enabled: 'yes' }, { modelOverrides: { unused: { reserveTokens: 1.5 } } }, { reserveTokens: null }]) {
+    for (const compaction of [{ keepRecentTokens: -1 }, { enabled: 'yes' }, { modelOverrides: { unused: { reserveRatio: 1.5 } } }, { reserveRatio: null }, { reserveRatio: -0.1 }, { reserveRatio: 1 }, { reserveTokens: 16384 }]) {
       await expect(settings.update({ scope: 'global', expectedRevision: before.globalRevision, set: { compaction }, remove: [] })).rejects.toMatchObject({ code: 'invalid_settings' });
       expect(await settings.snapshot()).toEqual(before);
     }

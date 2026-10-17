@@ -1,5 +1,6 @@
 export * from './harness-images.js';
 export * from "./agent-personalization.js";
+export * from "./compaction-settings.js";
 export * from "./harness.js";
 export * from "./harness-mcp.js";
 export * from "./explore-model.js";
