@@ -11,6 +11,11 @@ import {
 
 const manifest = (service: unknown) => ({ schemaVersion: 1, id: 'example.contract', version: '1.0.0', engines: { varin: '*' },
   entrypoints: { host: { mode: 'brokered', file: 'host.cjs', activation: ['service-request'] } }, provides: { services: [service] } });
+const invalidSourcePaths = ['/host/private.ts', '../escape', 'file:///secret', 'C:\\secret', 'C:/secret',
+  './relative', 'source//file', ' ', 'src/\n/../secret', 'src/\u0000file', 'src/', 'src/./a', 'foo\\bar',
+  '.', '..', 'a+b.c-d:source'];
+const validSourcePaths = ['src/entry.ts', 'src/中文 file.ts', 'src/.hidden', 'src/.../file',
+  'src/name:part.ts', '123:local', '_local:source', 'src/\nfile.ts'];
 
 test('existing context method contract survives manifest parsing without loading the implementation', () => {
   const parsed = parseVarinExtensionManifest(manifest(VARIN_CONTEXT_FRAGMENTS_SERVICE));
@@ -32,9 +37,7 @@ test('published manifest schema and runtime reject unsafe source locators and ma
   const validate = new Constructor({ strict: false, formats: { 'semver-range': () => true } }).compile(schema);
   const tool = { name: 'source', description: 'Locate its implementation', inputSchema: true, outputSchema: true,
     operation: 'read', completion: 'result' };
-  for (const source of [{ path: '/host/private.ts' }, { path: '../escape' }, { path: 'file:///secret' },
-    { path: 'C:\\secret' }, { path: './relative' }, { path: 'source//file' }, { path: 'source/file', line: 0 },
-    { path: ' ' }, { path: 'src/\n/../secret' }, { path: 'src/\u0000file' }, { path: 'src/' },
+  for (const source of [...invalidSourcePaths.map(path => ({ path })), { path: 'source/file', line: 0 },
     { path: 'src/file', line: Number.MAX_SAFE_INTEGER + 1 }, { path: 'src/file', host: '/private' }]) {
     for (const declaration of [
       { contract: { methods: { read: { inputSchema: true, outputSchema: true, source } } } },
@@ -46,7 +49,7 @@ test('published manifest schema and runtime reject unsafe source locators and ma
       assert.throws(() => parseVarinExtensionManifest(value));
     }
   }
-  for (const source of [undefined, { path: 'src/entry.ts', line: Number.MAX_SAFE_INTEGER }, { path: 'src/中文 file.ts' }]) {
+  for (const source of [undefined, { path: 'src/entry.ts', line: Number.MAX_SAFE_INTEGER }, ...validSourcePaths.map(path => ({ path }))]) {
     const value = manifest({ id: 'example.tool', version: 1, tool: { ...tool, ...(source ? { source } : {}) } });
     assert.equal(validate(value), true);
     assert.deepEqual(parseVarinExtensionManifest(value).provides!.services![0]!.tool!.source, source);
@@ -82,16 +85,33 @@ test('tool execution schemas cannot acquire a second method declaration and quer
 });
 
 test('source query schema and decoder share exact identity, path and byte-page admission', async () => {
-  const { VARIN_RUNTIME_CONTRACT_REQUEST_SCHEMA, parseVarinRuntimeContractResult } = await import('../src/index.js');
+  const { VARIN_RUNTIME_CONTRACT_REQUEST_SCHEMA, VARIN_RUNTIME_SOURCE_REQUEST_SCHEMA,
+    VARIN_RUNTIME_INSPECTION_REQUEST_SCHEMA, parseVarinRuntimeContractResult } = await import('../src/index.js');
+  const manifestSchema = JSON.parse(await readFile(new URL('../schema/varin.extension.schema.json', import.meta.url), 'utf8'));
+  const sourceProperties = VARIN_RUNTIME_SOURCE_REQUEST_SCHEMA.properties as Record<string, unknown>;
+  assert.deepEqual(sourceProperties.path, manifestSchema.$defs.contractSource.properties.path);
+  // JSON Schema patterns are consumed by more than the Host's default JavaScript regex mode.
+  function checkPatterns(value: unknown): void {
+    if (!value || typeof value !== 'object') return;
+    if ('pattern' in value && typeof value.pattern === 'string') {
+      const pattern = value.pattern;
+      for (const flags of ['', 'u', 'v']) assert.doesNotThrow(() => new RegExp(pattern, flags));
+    }
+    for (const child of Object.values(value)) checkPatterns(child);
+  }
+  checkPatterns(VARIN_RUNTIME_INSPECTION_REQUEST_SCHEMA);
   const Constructor = Ajv2020 as unknown as new (options: object) => { compile(schema: unknown): (input: unknown) => boolean };
   const validate = new Constructor({ strict: false }).compile(VARIN_RUNTIME_CONTRACT_REQUEST_SCHEMA);
   const request = { action: 'read', kind: 'source', extensionId: 'example.source', slot: 'selected',
     artifactIntegrity: 'sha256-' + 'a'.repeat(64), path: 'src/中文.no-extension', offset: 0, maxBytes: 1 };
   assert.equal(validate(request), true);
   assert.deepEqual(parseVarinRuntimeContractRequest(request), request);
+  for (const path of validSourcePaths) {
+    assert.equal(validate({ ...request, path }), true, path);
+    assert.deepEqual(parseVarinRuntimeContractRequest({ ...request, path }), { ...request, path });
+  }
   for (const change of [{ runId: 'forged' }, { artifactIntegrity: '1.0.0' }, { slot: 'retained' }, { maxBytes: 0 },
-    { offset: 0.5 }, { offset: Number.MAX_SAFE_INTEGER + 1 }, { path: '../secret' }, { path: '/secret' },
-    { path: 'file:///secret' }, { path: 'foo\\bar' }, { path: 'src/./a' }, { path: 'src//a' }, { path: 'src/' }]) {
+    { offset: 0.5 }, { offset: Number.MAX_SAFE_INTEGER + 1 }, ...invalidSourcePaths.map(path => ({ path }))]) {
     assert.equal(validate({ ...request, ...change }), false, JSON.stringify(change));
     assert.throws(() => parseVarinRuntimeContractRequest({ ...request, ...change }), JSON.stringify(change));
   }

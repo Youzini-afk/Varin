@@ -41,11 +41,17 @@ const nonempty = (value: unknown): string => {
   if (typeof value !== 'string' || !value.trim()) throw new Error('Source identifier must be nonempty');
   return value;
 };
-const PACKAGE_SOURCE_PATH = /^(?!\s*$)(?!\/)(?![a-zA-Z][a-zA-Z0-9+.-]*:)(?![\s\S]*[\\\0])(?![\s\S]*(?:^|\/)\.{1,2}(?:\/|$))(?![\s\S]*\/\/)(?![\s\S]*\/$)[\s\S]+$/;
+// Provider schema validators may use RE2 rather than JavaScript. Express exclusion with
+// JSON Schema `not`, keeping its pattern free of lookarounds and JavaScript-only escapes.
+const INVALID_PACKAGE_SOURCE_PATH_PATTERN = String.raw`^/|^[a-zA-Z][a-zA-Z0-9+.\-]*:|[\\\x00]|(^|/)\.{1,2}(/|$)|//|/$`;
+const INVALID_PACKAGE_SOURCE_PATH = new RegExp(INVALID_PACKAGE_SOURCE_PATH_PATTERN);
+const PACKAGE_SOURCE_PATH_SCHEMA = {
+  type: 'string', minLength: 1, pattern: '\\S', not: { pattern: INVALID_PACKAGE_SOURCE_PATH_PATTERN },
+};
 const ARTIFACT_INTEGRITY = /^sha256-[a-f0-9]{64}$/;
 export function parseVarinPackageSourcePath(value: unknown): string {
   const path = nonempty(value);
-  if (!PACKAGE_SOURCE_PATH.test(path)) throw new Error('Contract source must be a package-relative path');
+  if (INVALID_PACKAGE_SOURCE_PATH.test(path)) throw new Error('Contract source must be a package-relative path');
   return path;
 }
 /** Source metadata is a logical package location, never a Host path or source read permission. */
@@ -80,7 +86,7 @@ const sourceFields = {
     return value;
   } },
   artifactIntegrity: { schema: { type: 'string', pattern: ARTIFACT_INTEGRITY.source }, parse: integrity },
-  path: { schema: { type: 'string', minLength: 1, pattern: PACKAGE_SOURCE_PATH.source }, parse: parseVarinPackageSourcePath },
+  path: { schema: PACKAGE_SOURCE_PATH_SCHEMA, parse: parseVarinPackageSourcePath },
   offset: { schema: { type: 'integer', minimum: 0, maximum: Number.MAX_SAFE_INTEGER }, parse: (value: unknown) => integer(value, 0), optional: true },
   maxBytes: { schema: { type: 'integer', minimum: 1, maximum: Number.MAX_SAFE_INTEGER }, parse: (value: unknown) => integer(value, 1), optional: true },
 } satisfies Record<keyof VarinRuntimeSourceRequest, Field>;
