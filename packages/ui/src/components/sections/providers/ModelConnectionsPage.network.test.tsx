@@ -5,7 +5,7 @@ import { afterEach, beforeEach, expect, test, vi } from 'vitest';
 import type { ModelChannel, ModelConnectionsSnapshot } from '@varin/application-client';
 import { ModelConnectionsPage } from './ModelConnectionsPage';
 
-const fixtures = vi.hoisted(() => ({ generation: 1, listeners: new Set<() => void>(), blockers: new Set<() => Promise<void>>(), api: { read: vi.fn(), save: vi.fn(), cancelAuthorization: vi.fn(), storeCredential: vi.fn(), discoverDraft: vi.fn(), test: vi.fn(), signIn: vi.fn(), authorization: vi.fn() } }));
+const fixtures = vi.hoisted(() => ({ generation: 1, listeners: new Set<() => void>(), blockers: new Set<() => Promise<void>>(), api: { read: vi.fn(), directory: vi.fn(), save: vi.fn(), cancelAuthorization: vi.fn(), storeCredential: vi.fn(), discoverDraft: vi.fn(), test: vi.fn(), signIn: vi.fn(), authorization: vi.fn() } }));
 vi.mock('@varin/application-client', async importOriginal => ({
   ...await importOriginal<typeof import('@varin/application-client')>(),
   registerRuntimeEndpointSwitchBlocker: (listener: () => Promise<void>) => { fixtures.blockers.add(listener); return () => fixtures.blockers.delete(listener); },
@@ -46,7 +46,8 @@ beforeEach(() => {
   snapshot = { revision: 'original', channels: [{ id: 'channel', name: 'Connection', enabled: true, type: 'local', baseUrl: 'http://localhost/v1', authentication: { kind: 'none' }, parameters: {}, models: [],
     connection: { headers: { 'X-Request-Source': 'original' }, paths: { embedding: '/vectors' }, proxy: { mode: 'proxy', url: 'http://localhost:8080' } } }],
     types: [{ id: 'local', name: 'Local', protocol: 'openai-completions', authentication: ['none'], operations: ['chat', 'embedding'], discovery: false, parametersSchema: {} }] };
-  fixtures.api.read.mockImplementation(async () => structuredClone(snapshot));
+  fixtures.api.read.mockImplementation(async () => ({ ...structuredClone(snapshot), types: snapshot.types.map(({ catalog: _catalog, ...type }) => structuredClone(type)) }));
+  fixtures.api.directory.mockImplementation(async (type: string) => ({ models: structuredClone(snapshot.types.find(value => value.id === type)?.catalog ?? []), status: { revision: 'directory', refreshing: false } }));
   fixtures.api.save.mockImplementation(async (channel: ModelChannel) => { snapshot = { ...snapshot, revision: 'next', channels: [structuredClone(channel)] }; return snapshot; });
 });
 afterEach(() => { act(() => root.unmount()); container.remove(); vi.unstubAllGlobals(); });
@@ -157,7 +158,7 @@ test('contributed catalog candidates are available without discovery and retain 
   snapshot.types[0]!.catalog = [{ ...candidate, operations: [...candidate.operations], input: [...candidate.input] }];
   await open(); await click('settings.models.addModel'); await click('Catalog'); await click('settings.models.addSelected · 1');
   expect(fixtures.api.save).not.toHaveBeenCalled(); expect(fixtures.api.discoverDraft).not.toHaveBeenCalled();
-  await click('settings.models.save'); expect(fixtures.api.save.mock.calls[0]?.[0].models).toEqual([candidate]);
+  await click('settings.models.save'); expect(fixtures.api.save.mock.calls[0]?.[0].models).toEqual([{ ...candidate, catalog: { overrides: [] } }]);
 });
 
 test('a late save failure from the previous Host cannot poison the new editor', async () => {

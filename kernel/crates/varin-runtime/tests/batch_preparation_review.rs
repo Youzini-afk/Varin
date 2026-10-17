@@ -286,6 +286,7 @@ fn input(run: &str) -> ExecutionInput {
         run_id: run.into(),
         owner_generation: 1,
         binding: RequestBinding {
+            request_context: None,
             child_dispatch: None,
             goal: None,
             resource_activations: Vec::new(),

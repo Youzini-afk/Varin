@@ -38,7 +38,13 @@ export interface ChannelModel {
   parameters?: Record<string, JsonValue>;
   compat?: Record<string, JsonValue>;
   image?: { mask?: boolean; parameters?: Record<string, JsonValue> };
+  /** Directory defaults follow updates; listed fields remain explicit user choices. */
+  catalog?: { source?: 'service'; overrides: ModelCatalogField[] };
 }
+export type ModelCatalogField = Exclude<keyof ChannelModel, 'id' | 'enabled' | 'catalog'>;
+export const MODEL_CATALOG_FIELDS: readonly ModelCatalogField[] = ['name', 'protocol', 'requestModelId', 'operations', 'input', 'contextWindow', 'maxOutputTokens', 'reasoning', 'thinking', 'thinkingLevelMap', 'parameters', 'compat', 'image'];
+export interface ModelDirectoryStatus { revision: string; updatedAt?: number; refreshing: boolean; issue?: 'cache-unavailable' | 'refresh-failed' | 'partial-refresh' | 'cache-write-failed' }
+export interface ModelDirectorySnapshot { models: ChannelModel[]; status: ModelDirectoryStatus }
 export interface ModelChannel {
   id: string;
   name: string;
@@ -67,7 +73,7 @@ export interface ChannelTypeInfo {
   /** Read-only contributed candidates; saved channel models remain user-owned. */
   catalog?: ChannelModel[];
 }
-export interface ModelConnectionsSnapshot { revision: string; channels: ModelChannel[]; types: ChannelTypeInfo[]; issues?: { channelId?: string; code: string; message: string }[] }
+export interface ModelConnectionsSnapshot { revision: string; channels: ModelChannel[]; types: ChannelTypeInfo[]; directory?: ModelDirectoryStatus; issues?: { channelId?: string; code: string; message: string }[] }
 export type DiscoveredModel = Pick<ChannelModel, 'id' | 'name'> & Partial<Omit<ChannelModel, 'id' | 'name' | 'enabled'>>;
 /** A transient connection draft. The supplied key is never written by discovery or testing. */
 export interface ModelConnectionDraft { channel: ModelChannel; secret?: string }
@@ -98,6 +104,8 @@ export function createModelConnectionsHttpAPI(generation = getRuntimeEndpointGen
   };
   return {
     read: (signal?: AbortSignal) => post<ModelConnectionsSnapshot>('read', {}, signal),
+    directory: (type: string, signal?: AbortSignal, channelId?: string) => post<ModelDirectorySnapshot>('directory', { type, channelId }, signal),
+    refreshDirectory: (signal?: AbortSignal) => post<ModelDirectoryStatus>('directory/refresh', {}, signal),
     save: (channel: ModelChannel, expectedRevision: string, signal?: AbortSignal) => post<ModelConnectionsSnapshot>('save', { channel, expectedRevision }, signal),
     remove: (id: string, expectedRevision: string, signal?: AbortSignal) => post<ModelConnectionsSnapshot>('remove', { id, expectedRevision }, signal),
     discover: (id: string, signal?: AbortSignal) => post<{ models: DiscoveredModel[] }>('discover', { id }, signal),

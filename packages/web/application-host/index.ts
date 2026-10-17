@@ -312,8 +312,6 @@ const __dirname = path.dirname(__filename);
 const DEFAULT_PORT = 3000;
 const SHUTDOWN_TIMEOUT_MS = 10_000;
 const CLIENT_RELOAD_DELAY_MS = 800;
-const MODELS_DEV_API_URL = 'https://models.dev/api.json';
-const MODELS_METADATA_CACHE_TTL_MS = 5 * 60 * 1000;
 const TERMINAL_INPUT_WS_HEARTBEAT_INTERVAL_MS = 15 * 1000;
 const TUNNEL_BOOTSTRAP_TTL_DEFAULT_MS = 30 * 60 * 1000;
 const TUNNEL_BOOTSTRAP_TTL_MIN_MS = 60 * 1000;
@@ -897,8 +895,6 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     server,
     __dirname,
     varinDataDir: VARIN_DATA_DIR,
-    modelsDevApiUrl: MODELS_DEV_API_URL,
-    modelsMetadataCacheTtl: MODELS_METADATA_CACHE_TTL_MS,
     mobileDeviceStore,
     mobilePairingRuntime,
     mobilePushRuntime,
@@ -1588,6 +1584,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   const projectTrust = new ProjectTrustService(VARIN_DATA_DIR, (id, signal) => documentsAuthority.admitWorkspaceRegistration(id, signal));
   registerProjectTrustRoutes(app, projectTrust, uiAuthController.requireAuth);
   const modelsService = new ModelsService(VARIN_DATA_DIR, { projectTrusted: cwd => projectTrust.trusted(cwd), fetch: egressRuntime.fetch as typeof globalThis.fetch });
+  const stopModelDirectory = modelsService.startDirectory(egressRuntime.fetch as typeof globalThis.fetch);
   const resourceManagement = createResourceManagement({ dataDirectory: VARIN_DATA_DIR, documents: documentsAuthority, settings: modelsService.settings,
     promptTools: (context, signal) => promptToolCatalog(context, signal),
     resolveProjectRoot: async projectId => {
@@ -2995,6 +2992,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       for (const error of processShutdownErrors) console.error('[VarinKernel] Native process shutdown incomplete:', errorMessage(error));
       unsubscribeModelSettings();
       unsubscribeModels();
+      stopModelDirectory();
       modelsService.authorizations.close();
       unsubscribeModelKernel();
       await modelExtensions.close();

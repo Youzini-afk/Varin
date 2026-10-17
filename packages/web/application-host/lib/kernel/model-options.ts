@@ -90,6 +90,7 @@ export function modelOptions(model: SelectedModel, requested: ThreadThinkingLeve
     }
     case 'openai-completions': {
       if (model.compat?.requiresReasoningContentOnAssistantMessages === true) protocol.requiresReasoningContent = true;
+      if (model.compat?.reasoningDetails === true) protocol.reasoningDetails = true;
       if (model.reasoning) {
         switch (model.compat?.thinkingFormat) {
           case 'qwen': parameters.enable_thinking = level !== 'off'; break;
@@ -119,5 +120,5 @@ export function modelOptions(model: SelectedModel, requested: ThreadThinkingLeve
   // Explicit profile/user selection wins over catalog defaults, including zero.
   if (temperature !== undefined) delete samplingParams.temperature;
   return { thinkingLevel: level, reasoningEffort,
-    modelOptions: { ...(model.compat?.copilot === true ? { copilot: true } : {}), ...(temperature === undefined ? {} : { temperature }), ...(Object.keys(samplingParams).length ? { samplingParams } : {}), ...(Object.keys(protocol).length ? { protocol } : {}) } };
+    modelOptions: { ...(model.requestProfile ? { requestProfile: model.requestProfile } : {}), ...(model.compat?.copilot === true ? { copilot: true } : {}), ...(temperature === undefined ? {} : { temperature }), ...(Object.keys(samplingParams).length ? { samplingParams } : {}), ...(Object.keys(protocol).length ? { protocol } : {}) } };
 }

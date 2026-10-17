@@ -76,7 +76,8 @@ test('SDK contributions reach product catalog and fixed service pins; same-versi
   const original = await f.models.captureModel('connection', 'chat');
   expect([...f.retained.values()]).toEqual([first.bindingId]);
   expect(original.model).toMatchObject({ adapterId: 'fixture.codec', adapterVersion: '1', adapterIdentity: first.identity, adapterBindingId: first.bindingId, endpointPath: '/stream' });
-  expect(saved.types.find(type => type.id === 'fixture.channel')!.catalog![0]!.id).toBe('catalogue');
+  expect(saved.types.find(type => type.id === 'fixture.channel')!.catalog).toBeUndefined();
+  expect((await f.models.directorySnapshot('fixture.channel')).models[0]!.id).toBe('catalogue');
   expect((await f.models.discover('connection', unexpectedFetch)).models[0]!.id).toBe('catalogue');
   const before = await readFile(join(f.directory, 'models.json'), 'utf8');
   await f.models.read(); await f.models.discover('connection', unexpectedFetch);

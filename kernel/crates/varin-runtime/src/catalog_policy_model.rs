@@ -99,6 +99,7 @@ impl PolicyModelAdmissionReferences {
             .clone()
             .ok_or_else(|| RuntimeError::Invalid("planning binding missing".into()))?;
         expected.history_range = snapshot.view.binding.history_range.clone();
+        expected.request_context = snapshot.view.binding.request_context.clone();
         expected.instruction_sources = instructions.clone();
         expected.memory_checkpoint = snapshot.view.binding.memory_checkpoint.clone();
         expected.goal = snapshot.view.binding.goal.clone();

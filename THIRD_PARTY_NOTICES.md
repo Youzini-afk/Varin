@@ -110,7 +110,7 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
-## Model brand icons
+## models.dev metadata and model brand icons
 
 The bundled `deepseek.svg` in `packages/ui/src/assets/provider-logos` comes from
 [models.dev](https://github.com/anomalyco/models.dev/blob/dev/logos/deepseek.svg),
@@ -120,6 +120,11 @@ Copyright (c) 2023 LobeHub, under the MIT License. The unchanged license texts a
 distributed at `packages/web/public/licenses/models-dev-LICENSE.txt` and
 `packages/web/public/licenses/lobe-icons-LICENSE.txt`. Brand marks identify model
 families and do not imply endorsement. Model-family matching is original Varin code.
+
+`packages/web/application-host/lib/models/directory-snapshot.ts` also bundles model metadata from
+[models.dev](https://github.com/anomalyco/models.dev), under the same MIT License. Its public model
+list snapshots come from the documented OpenCode, Command Code and Cline model-directory APIs.
+The runtime normalizes this data with Varin's own installed protocol and channel implementations.
 
 ## Pi model metadata and account protocols
 

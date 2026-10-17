@@ -1,12 +1,18 @@
-import type { ChannelTypeInfo, DiscoveredModel, ModelChannel } from '@varin/application-client';
+import type { ChannelTypeInfo, ChannelModel, DiscoveredModel, ModelChannel } from '@varin/application-client';
 import type { JsonValue } from '@varin/protocol';
 import { MODEL_PRESETS } from './catalog.js';
-import { modelList, openRouterModels, geminiModels, copilotModels } from './discovery.js';
+import { modelList, openRouterModels, geminiModels, copilotModels, commandCodeModels, clineModels } from './discovery.js';
 import { COPILOT_HEADERS } from './oauth-device.js';
+import { BUNDLED_CHANNEL_DIRECTORY, parseChannelDirectory, directoryChannel, type ChannelDirectoryEntry } from './channel-directory.js';
 
 export interface ChannelType extends ChannelTypeInfo {
   adapter?: { id: string; version: string; endpointPath: string; bindingId: string; identity: string; capture(): Promise<() => void> };
   credentialHeader?: { name: string; prefix: string };
+  /** Installed behavior, confined to this channel; never inferred from an endpoint hostname. */
+  requestProfile?: 'opencode';
+  modelBasePaths?: Record<string, string>;
+  publicDirectory?: string;
+  metadataId?: string;
   discoveryRequest?(channel: ModelChannel, cursor?: string): { url: string; headers?: Record<string, string> };
   discoveryCursor?(response: unknown): string | undefined;
   parseDiscovery?(response: unknown): DiscoveredModel[];
@@ -30,6 +36,20 @@ const channelTypes: ChannelType[] = [
     oauthProviders: [{ id: 'openai-codex', name: 'ChatGPT / Codex' }] },
   { ...direct('openai-compatible', 'OpenAI compatible', 'openai-completions'), operations: ['chat', 'embedding', 'rerank', 'image-generation', 'image-editing'], parametersSchema: schema({ imageApi: { enum: ['openai-images', 'openrouter-images'] } }) },
   direct('deepseek', 'DeepSeek', 'openai-completions', 'https://api.deepseek.com/v1'),
+  ...(['opencode', 'opencode-go'] as const).map(id => ({
+    ...direct(id, id === 'opencode' ? 'OpenCode Zen' : 'OpenCode Go', 'openai-completions', `https://opencode.ai/inference${id === 'opencode-go' ? '/go' : ''}`),
+    protocols: ['openai-completions', 'openai-responses', 'anthropic-messages', 'google-generative-ai'],
+    credentialHeader: { name: 'authorization', prefix: 'Bearer ' }, requestProfile: 'opencode' as const,
+    modelBasePaths: { 'openai-completions': '/openai/v1', 'openai-responses': '/openai/v1', 'anthropic-messages': '/anthropic/v1', 'google-generative-ai': '/google/v1beta' },
+    publicDirectory: `https://opencode.ai/inference${id === 'opencode-go' ? '/go' : ''}/v1/models`,
+    discoveryRequest: (channel: ModelChannel) => ({ url: `${channel.baseUrl.replace(/\/+$/, '')}/v1/models` }),
+    oauthProviders: [{ id: 'opencode', name: 'OpenCode' }],
+  })),
+  { ...direct('commandcode', 'Command Code', 'openai-completions', 'https://api.commandcode.ai/provider/v1'),
+    protocols: ['openai-completions', 'openai-responses', 'anthropic-messages'], credentialHeader: { name: 'authorization', prefix: 'Bearer ' },
+    publicDirectory: 'https://api.commandcode.ai/provider/v1/models', parseDiscovery: commandCodeModels },
+  ...(['cline', 'cline-pass'] as const).map(id => ({ ...direct(id, id === 'cline' ? 'Cline' : 'ClinePass', 'openai-completions', 'https://api.cline.bot/api/v1'),
+    publicDirectory: 'https://api.cline.bot/api/v1/models', parseDiscovery: (response: unknown) => clineModels(response).filter(model => model.id.startsWith('cline-pass/') === (id === 'cline-pass')) })),
   { ...direct('openrouter', 'OpenRouter', 'openai-completions', 'https://openrouter.ai/api/v1'), operations: ['chat', 'image-generation', 'image-editing'], parametersSchema: schema({ imageApi: { enum: ['openrouter-images'] } }), oauthProviders: [{ id: 'openrouter', name: 'OpenRouter' }], parseDiscovery: openRouterModels, credentialHeader: { name: 'authorization', prefix: 'Bearer ' } },
   { ...direct('anthropic', 'Anthropic', 'anthropic-messages', 'https://api.anthropic.com/v1'), authentication: ['credential', 'environment', 'anthropic-federation', 'none'], oauthProviders: [{ id: 'anthropic', name: 'Claude Pro / Max' }], discoveryRequest: (channel, cursor) => ({ url: modelListUrl(channel, 'after_id', cursor), headers: { 'anthropic-version': '2023-06-01' } }),
     discoveryCursor: response => {
@@ -86,10 +106,11 @@ const environmentVariables: Record<string, string> = {
   moonshotai: 'MOONSHOT_API_KEY', 'moonshotai-cn': 'MOONSHOT_API_KEY', zai: 'ZAI_API_KEY', 'zai-coding-cn': 'ZAI_API_KEY',
   'qwen-token-plan': 'QWEN_TOKEN_PLAN_API_KEY', 'qwen-token-plan-cn': 'QWEN_TOKEN_PLAN_API_KEY', fireworks: 'FIREWORKS_API_KEY', together: 'TOGETHER_API_KEY',
   nvidia: 'NVIDIA_API_KEY', 'kimi-coding': 'KIMI_API_KEY', 'vercel-ai-gateway': 'AI_GATEWAY_API_KEY',
+  opencode: 'OPENCODE_API_KEY', 'opencode-go': 'OPENCODE_API_KEY', commandcode: 'CMD_API_KEY', cline: 'CLINE_API_KEY', 'cline-pass': 'CLINE_API_KEY',
 };
 export const BUILTIN_CHANNEL_TYPES: readonly ChannelType[] = channelTypes.map(type => {
   const catalog = MODEL_PRESETS[type.id];
-  return { ...type, ...(catalog ? { catalog, protocols: [...new Set([type.protocol, ...catalog.flatMap(model => model.protocol ? [model.protocol] : [])])],
+  return { ...type, ...(catalog ? { catalog, protocols: [...new Set([...(type.protocols ?? [type.protocol]), ...catalog.flatMap(model => model.protocol ? [model.protocol] : [])])],
     defaultModelIds: catalog.filter(model => model.enabled).slice(0, 3).map(model => model.id) } : {}),
     ...(environmentVariables[type.id] ? { defaultEnvironmentVariable: environmentVariables[type.id] } : {}) };
 });
@@ -97,7 +118,16 @@ export const BUILTIN_CHANNEL_TYPES: readonly ChannelType[] = channelTypes.map(ty
 export class ChannelTypes {
   readonly #types = new Map<string, ChannelType>();
   readonly #owners = new Map<string, string>();
-  constructor() { for (const type of BUILTIN_CHANNEL_TYPES) this.register(type); }
+  constructor() { for (const type of BUILTIN_CHANNEL_TYPES) this.register(type); this.prepareDirectory(parseChannelDirectory(BUNDLED_CHANNEL_DIRECTORY))(); }
+  prepareDirectory(entries: ChannelDirectoryEntry[]) {
+    const templates: Record<string, string> = { 'openai-completions': 'openai-compatible', 'openai-responses': 'openai', 'anthropic-messages': 'anthropic', 'google-generative-ai': 'gemini', 'mistral-conversations': 'mistral' };
+    const types = entries.map(entry => {
+      const previous = this.get(entry.id);
+      if (previous && previous.protocol !== entry.protocol) throw new Error('A channel directory update cannot replace an installed protocol');
+      return { ...directoryChannel(entry, this.get(templates[entry.protocol]!)), ...(previous?.catalog ? { catalog: previous.catalog } : {}) };
+    });
+    return this.prepareReplacement('directory', types);
+  }
   register(type: ChannelType) {
     if (this.#types.has(type.id)) throw new Error(`Channel type already registered: ${type.id}`);
     this.#types.set(type.id, type);
@@ -115,5 +145,12 @@ export class ChannelTypes {
     };
   }
   get(id: string) { return this.#types.get(id); }
-  list(): ChannelTypeInfo[] { return [...this.#types.values()].map(({ discoveryRequest: _request, discoveryCursor: _cursor, parseDiscovery: _parse, adapter: _adapter, credentialHeader: _credential, ...info }) => structuredClone(info)); }
+  entries() { return [...this.#types.values()]; }
+  followsDirectory(id: string) { const owner = this.#owners.get(id); return owner === undefined || owner === 'directory'; }
+  setCatalog(id: string, catalog: ChannelModel[]) {
+    const type = this.#types.get(id);
+    if (type) this.#types.set(id, { ...type, catalog });
+  }
+  list(): ChannelTypeInfo[] { return this.entries().map(({ discoveryRequest: _request, discoveryCursor: _cursor, parseDiscovery: _parse, adapter: _adapter, credentialHeader: _credential,
+    requestProfile: _profile, modelBasePaths: _paths, publicDirectory: _public, metadataId: _metadata, catalog: _catalog, ...info }) => structuredClone(info)); }
 }

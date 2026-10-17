@@ -440,6 +440,7 @@ fn request_snapshot(receipt: &Receipt) -> crate::execution::RequestSnapshot {
                 },
             },
             binding: RequestBinding {
+                request_context: None,
                 child_dispatch: None,
                 goal: None,
                 resource_activations: Vec::new(),

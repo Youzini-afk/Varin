@@ -20,6 +20,7 @@ pub mod registry;
 pub mod responses;
 mod sse;
 mod tool_schema;
+pub mod request_profile;
 #[cfg(test)]
 mod tests;
 
@@ -346,6 +347,7 @@ pub struct Connection {
     pub accepts_images: Option<bool>,
     /// Copilot's per-request headers follow the actual input, across all three wire APIs.
     pub copilot: bool,
+    pub request_profile: Option<request_profile::RequestProfile>,
 }
 impl Connection {
     pub fn new(
@@ -360,6 +362,7 @@ impl Connection {
             max_event_bytes: 16 * 1024 * 1024,
             accepts_images: None,
             copilot: false,
+            request_profile: None,
         }
     }
     pub(super) fn run(
@@ -425,6 +428,9 @@ impl Connection {
                 }
             });
             if has_images { headers.insert("copilot-vision-request", "true".parse().unwrap()); }
+        }
+        if let Some(profile) = self.request_profile {
+            request_profile::apply(profile, &request.view, &mut headers);
         }
         let mut decoder = sse::Decoder::new(self.max_event_bytes);
         let stream = if allow_eof {

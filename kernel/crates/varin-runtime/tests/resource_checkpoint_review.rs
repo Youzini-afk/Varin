@@ -75,6 +75,7 @@ fn proposal(text: &str) -> ContextProposal {
 }
 fn binding(branch: &str, head: Option<String>) -> RequestBinding {
     RequestBinding {
+        request_context: None,
         child_dispatch: None,
         goal: None,
         resource_activations: Vec::new(),

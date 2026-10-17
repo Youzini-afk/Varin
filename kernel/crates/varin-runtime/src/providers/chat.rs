@@ -12,6 +12,7 @@ pub struct ChatProvider {
     pub include_stream_usage: bool,
     pub reasoning_effort: Option<String>,
     pub requires_reasoning_content: bool,
+    pub reasoning_details: bool,
 }
 impl ChatProvider {
     pub fn new(connection: Connection) -> Self {
@@ -24,6 +25,7 @@ impl ChatProvider {
             include_stream_usage: true,
             reasoning_effort: None,
             requires_reasoning_content: false,
+            reasoning_details: false,
         }
     }
     pub(super) fn mistral(connection: Connection) -> Self {
@@ -336,6 +338,7 @@ impl ModelProvider for ChatProvider {
         }
         let mut state = StreamState {
             mistral: self.mistral,
+            reasoning_details: self.reasoning_details,
             ..StreamState::default()
         };
         let affinity = request.serialized.get("prompt_cache_key");
@@ -379,6 +382,7 @@ struct Call {
 #[derive(Default)]
 struct StreamState {
     mistral: bool,
+    reasoning_details: bool,
     id: Option<String>,
     message: serde_json::Map<String, Value>,
     calls: BTreeMap<u64, Call>,
@@ -704,6 +708,89 @@ impl StreamState {
                             emit_event(emit, ProviderEvent::ReasoningDelta {
                                 item_id: format!("{id}:{key}"), text: text.into(),
                             })?;
+                        }
+                    }
+                    "reasoning_details" if self.reasoning_details => {
+                        if value.is_null() {
+                            continue;
+                        }
+                        let details = value.as_array().ok_or_else(|| {
+                            failure(
+                                "invalid_reasoning_details",
+                                "reasoning details must be an array",
+                            )
+                        })?;
+                        let saved = self
+                            .message
+                            .entry(key.clone())
+                            .or_insert_with(|| json!([]))
+                            .as_array_mut()
+                            .unwrap();
+                        for detail in details {
+                            let fields = detail.as_object().ok_or_else(|| {
+                                failure(
+                                    "invalid_reasoning_details",
+                                    "reasoning detail must be an object",
+                                )
+                            })?;
+                            let index = fields.get("index").and_then(Value::as_u64);
+                            let detail_id = fields.get("id").and_then(Value::as_str);
+                            let existing = saved.iter_mut().find(|entry| {
+                                index.is_some_and(|index| {
+                                    entry.get("index").and_then(Value::as_u64) == Some(index)
+                                }) || index.is_none()
+                                    && detail_id.is_some_and(|id| {
+                                        entry.get("id").and_then(Value::as_str) == Some(id)
+                                    })
+                            });
+                            if let Some(existing) = existing {
+                                for (name, fragment) in fields {
+                                    if fragment.is_null()
+                                        && existing.get(name).is_some_and(|value| !value.is_null())
+                                    {
+                                        continue;
+                                    }
+                                    if matches!(
+                                        name.as_str(),
+                                        "text" | "summary" | "data" | "signature"
+                                    ) {
+                                        if let (Some(previous), Some(next)) = (
+                                            existing.get(name).and_then(Value::as_str),
+                                            fragment.as_str(),
+                                        ) {
+                                            existing[name] = json!(format!("{previous}{next}"));
+                                            continue;
+                                        }
+                                    }
+                                    existing[name] = fragment.clone();
+                                }
+                            } else {
+                                saved.push(detail.clone());
+                            }
+                            if !delta.get("reasoning").is_some_and(|value| !value.is_null())
+                                && !delta
+                                    .get("reasoning_content")
+                                    .is_some_and(|value| !value.is_null())
+                            {
+                                let text = match fields.get("type").and_then(Value::as_str) {
+                                    Some("reasoning.text") => {
+                                        fields.get("text").and_then(Value::as_str)
+                                    }
+                                    Some("reasoning.summary") => {
+                                        fields.get("summary").and_then(Value::as_str)
+                                    }
+                                    _ => None,
+                                };
+                                if let Some(text) = text {
+                                    emit_event(
+                                        emit,
+                                        ProviderEvent::ReasoningDelta {
+                                            item_id: format!("{id}:reasoning-details"),
+                                            text: text.into(),
+                                        },
+                                    )?;
+                                }
+                            }
                         }
                     }
                     "tool_calls" => {

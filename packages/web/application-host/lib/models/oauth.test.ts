@@ -34,12 +34,13 @@ test('browser account protocols exchange PKCE callbacks and preserve their actua
 test('device accounts exchange identity tokens, renew inference credentials and stop polling on cancellation', async () => {
   vi.useFakeTimers();
   try {
-    for (const id of ['kimi-coding', 'xai', 'github-copilot', 'meta']) {
+    for (const id of ['kimi-coding', 'xai', 'github-copilot', 'meta', 'opencode']) {
       let polls = 0;
       const provider = modelOAuthProviders(async (url, init) => {
         const endpoint = String(url), form = Object.fromEntries(new URLSearchParams(String(init?.body)));
         if (endpoint.endsWith('/device_authorization') || endpoint.endsWith('/device/code') || endpoint.endsWith('/device/authorization/')) {
-          return Response.json({ device_code: 'private-device', user_code: 'ABCD-1234', verification_uri: 'https://example.test/activate', interval: 1, expires_in: 600 });
+          if (id === 'opencode') { expect(form.client_id).toBe('varin'); expect(form.supports_org_scope).toBe('true'); }
+          return Response.json({ device_code: 'private-device', user_code: 'ABCD-1234', verification_uri: id === 'opencode' ? '/console/device?user_code=ABCD-1234' : 'https://example.test/activate', interval: 1, expires_in: 600 });
         }
         if (endpoint.includes('copilot_internal')) {
           expect(new Headers(init?.headers).get('authorization')).toBe('Bearer access');

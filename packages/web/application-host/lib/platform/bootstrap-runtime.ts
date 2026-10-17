@@ -104,8 +104,6 @@ export const createServerBootstrapRuntime = (dependencies: ServerBootstrapDepend
       server,
       __dirname,
       varinDataDir,
-      modelsDevApiUrl,
-      modelsMetadataCacheTtl,
       mobileDeviceStore,
       mobilePairingRuntime,
       mobilePushRuntime,
@@ -193,8 +191,6 @@ export const createServerBootstrapRuntime = (dependencies: ServerBootstrapDepend
       server,
       __dirname,
       varinDataDir,
-      modelsDevApiUrl,
-      modelsMetadataCacheTtl,
     });
 
     return {

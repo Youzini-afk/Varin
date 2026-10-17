@@ -56,7 +56,7 @@ test('draft discovery and inference binding use the entered key without publishi
     expect(new Headers(init?.headers).get('x-project')).toBe('draft');
     return new Response(JSON.stringify({ data: [{ id: 'another-model' }] }));
   });
-  expect(discovered.models).toEqual([{ id: 'another-model', name: 'another-model' }]);
+  expect(discovered.models).toEqual([{ id: 'another-model', name: 'another-model', catalog: { source: 'service', overrides: [] } }]);
   const captured = await models.captureDraftModel({ channel: draft, secret: 'fixture-draft-key' }, 'chat');
   draft.baseUrl = 'http://localhost:9999/v1';
   const resolved = await createModelAuthority(models).resolveCaptured(captured, { providerId: draft.id, modelId: 'chat' });
@@ -177,8 +177,10 @@ test('discovery returns candidates without changing configured models or their r
     expect(new Headers(init?.headers).get('authorization')).toBe('Bearer test-key');
     return Response.json({ data: [{ id: 'candidate' }] });
   };
-  expect(await models.discover(configured.id, fetchImpl)).toEqual({ models: [{ id: 'candidate', name: 'candidate' }] });
-  expect(await models.read()).toEqual(saved);
+  expect(await models.discover(configured.id, fetchImpl)).toEqual({ models: [{ id: 'candidate', name: 'candidate', catalog: { source: 'service', overrides: [] } }] });
+  const after = await models.read();
+  expect(after.revision).toBe(saved.revision);
+  expect(after.channels).toEqual(saved.channels);
 });
 
 test('settings CAS keeps concurrent edits and validates before writing without a Pi worker', async () => {
@@ -237,7 +239,9 @@ test.each([
   expect(requests).toHaveLength(2);
   expect(requests[1]!.origin).toBe(requests[0]!.origin); expect(requests[1]!.pathname).toBe('/v1/models');
   expect(requests[1]!.searchParams.get(parameter)).toBe('cursor /?&=#');
-  expect(await models.read()).toEqual(saved);
+  const after = await models.read();
+  expect(after.revision).toBe(saved.revision);
+  expect(after.channels).toEqual(saved.channels);
 });
 
 test('discovery rejects repeated cursors and later-page failures without returning a partial success', async () => {

@@ -37,7 +37,7 @@ export function openRouterModels(response: unknown): DiscoveredModel[] {
       ...(supportsReasoning === undefined ? {} : { reasoning: supportsReasoning }),
       ...(supportsReasoning ? { thinking: levels.length ? { mode: 'levels' as const, levels, allowOff: reasoning.mandatory !== true }
         : reasoning.mandatory === true ? { mode: 'fixed' as const } : { mode: 'switch' as const } } : {}),
-      compat: { thinkingFormat: 'openrouter', maxTokensField: 'max_tokens' },
+      compat: { thinkingFormat: 'openrouter', maxTokensField: 'max_tokens', reasoningDetails: true },
     }];
   });
 }
@@ -69,9 +69,26 @@ export function copilotModels(response: unknown): DiscoveredModel[] {
   });
 }
 
+export function commandCodeModels(response: unknown): DiscoveredModel[] {
+  const basic = modelList(response), data = (response as { data: Record<string, unknown>[] }).data;
+  return basic.flatMap((model, index) => {
+    const item = data[index]!, endpoints = Array.isArray(item.supported_endpoints) ? item.supported_endpoints : [];
+    const has = (path: string) => endpoints.includes(path) || endpoints.includes(`/v1${path}`);
+    const protocol = has('/messages') ? 'anthropic-messages' : has('/responses') ? 'openai-responses' : has('/chat/completions') ? 'openai-completions' : undefined;
+    if (!protocol) return [];
+    return [{ ...model, protocol, operations: ['chat'] as ModelOperation[], ...capacity(item.context_length, item.max_output_tokens) }];
+  });
+}
+
+export function clineModels(response: unknown): DiscoveredModel[] {
+  return modelList(response).map(model => ({ ...model, protocol: 'openai-completions', operations: ['chat'], compat: { thinkingFormat: 'openrouter', reasoningDetails: true } }));
+}
+
 /** Only supplied directory facts replace presets; missing fields remain unknown. */
 export function enrichModel(preset: DiscoveredModel | undefined, model: DiscoveredModel): DiscoveredModel {
   const fields = Object.fromEntries(Object.entries(model).filter(([, value]) => value !== undefined));
-  return { ...preset, ...fields, id: model.id, name: model.name === model.id ? preset?.name ?? model.name : model.name,
+  const merged = { ...preset, ...fields, id: model.id, name: model.name === model.id ? preset?.name ?? model.name : model.name,
     ...(preset?.compat || model.compat ? { compat: { ...preset?.compat, ...model.compat } } : {}) };
+  if (model.reasoning === false) { delete merged.thinking; delete merged.thinkingLevelMap; }
+  return merged;
 }

@@ -47,6 +47,7 @@ fn anthropic() -> anthropic::AnthropicProvider {
     anthropic::AnthropicProvider::new(connection(), 100)
 }
 fn binding(branch: &str, family: &str) -> RequestBinding {
+    request_context: None,
     serde_json::from_value(json!({"goal":null,"resource_activations":[],"resource_checkpoint_id":null,
         "connection_identity":"fixture","provider_family":family,"model":"fixture","credential_ref":null,
         "configuration_generation":1,"tool_schema_generation":0,"tools":[],"instruction_sources":[],"memory_checkpoint":null,

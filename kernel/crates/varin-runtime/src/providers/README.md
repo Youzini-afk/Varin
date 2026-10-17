@@ -11,6 +11,13 @@ options. Reviewed Host model contributions register [brokered codecs](extensions
 prepares the selected implementation and endpoint.
 The renderer chooses registered model IDs, not arbitrary endpoints or auth headers.
 
+Channel-specific request behavior is selected explicitly in frozen model options. The OpenCode
+profile in [request_profile.rs](request_profile.rs) derives its headers at dispatch from the original
+request and its Catalog-owned branch/workspace context. Sessions survive subsequent Runs; auxiliary
+purposes have separate stable scopes. Ordinary connections do not acquire vendor headers, and
+metadata is not inserted into prompts or tool declarations. A projectless request omits the project
+header. Host directory refreshes cannot retarget an accepted connection.
+
 ## Current protocol families
 
 | Family | Adapter and important protocol boundary |
@@ -115,6 +122,8 @@ Responses preserves original output items for same-connection continuation. Chat
 assistant wire message while retaining semantic calls for cross-family replay, avoiding duplicate calls.
 `legacy_max_tokens`, stream usage and reasoning choices are explicit configuration, and unsupported
 vendor deltas fail rather than disappearing.
+The `reasoningDetails` Chat option accepts structured reasoning deltas for Cline-compatible services;
+encrypted fragments remain opaque and replay under the original connection identity.
 Responses, Azure and Codex explicitly send `strict:false` for ordinary function tools. Tool declarations
 can have optional fields and full JSON Schema alternatives; server normalization must not turn omitted
 fields into required nullable values. Invocation validation remains with the original tool owner. See

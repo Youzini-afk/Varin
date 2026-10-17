@@ -1,5 +1,5 @@
 import React from 'react';
-import { createModelConnectionsHttpAPI, getRuntimeEndpointGeneration, subscribeRuntimeEndpointChanged, registerRuntimeEndpointSwitchBlocker, type ModelChannel, type ModelConnectionOptions, type ModelConnectionsSnapshot, type DiscoveredModel, type ConnectionAuthentication, type AuthorizationState } from '@varin/application-client';
+import { createModelConnectionsHttpAPI, getRuntimeEndpointGeneration, subscribeRuntimeEndpointChanged, registerRuntimeEndpointSwitchBlocker, MODEL_CATALOG_FIELDS, type ChannelModel, type ModelChannel, type ModelConnectionOptions, type ModelConnectionsSnapshot, type DiscoveredModel, type ConnectionAuthentication, type AuthorizationState } from '@varin/application-client';
 import { SettingsPageLayout } from '../shared/SettingsPageLayout';
 import { ConnectionSettings } from './ConnectionSettings';
 import { ModelConfiguration } from './ModelConfiguration';
@@ -14,6 +14,8 @@ import { Icon } from '@/components/icon/Icon';
 import { cn } from '@/lib/utils';
 import { useI18n } from '@/lib/i18n';
 import { subscribeVarinEvents } from '@/lib/varinEvents';
+
+const discoveryConfiguration = (channel: ModelChannel) => JSON.stringify([channel.type, channel.baseUrl, channel.connection, channel.authentication, channel.parameters]);
 
 export function ModelConnectionsPage() {
   const host = React.useSyncExternalStore(subscribeRuntimeEndpointChanged, getRuntimeEndpointGeneration, getRuntimeEndpointGeneration);
@@ -36,6 +38,8 @@ function ModelConnectionsEditor({ host }: { host: number }) {
   const [adding, setAdding] = React.useState(false);
   const [providerQuery, setProviderQuery] = React.useState('');
   const [baseRevision, setBaseRevision] = React.useState('');
+  const [baseDraft, setBaseDraft] = React.useState('');
+  const [catalogs, setCatalogs] = React.useState<Record<string, ChannelModel[]>>({});
   const [authorization, setAuthorization] = React.useState<AuthorizationState | null>(null);
   const [invalidFields, setInvalidFields] = React.useState<Set<string>>(() => new Set());
   const [editorGeneration, setEditorGeneration] = React.useState(0);
@@ -67,15 +71,33 @@ function ModelConnectionsEditor({ host }: { host: number }) {
   }, [api]);
   const cancelAuthorization = () => { const id = activeAuthorization.current; activeAuthorization.current = undefined; if (id) void api.cancelAuthorization(id).catch(() => {}); setAuthorization(null); };
   const closeEditor = () => { cancelAuthorization(); setDraft(null); setSecret(''); setError(null); };
-  const choose = (channel: ModelChannel) => { cancelAuthorization(); setSelectedModelId(null); setOpenedModels(new Set()); setInvalidFields(new Set()); setEditorGeneration(value => value + 1); setDraft(structuredClone(channel)); setBaseRevision(snapshot!.revision); setCandidates([]); setSecret(''); setTab('connection'); setAdding(false); setError(null); };
-  const type = snapshot?.types.find(type => type.id === draft?.type);
+  const choose = (channel: ModelChannel) => { cancelAuthorization(); setSelectedModelId(null); setOpenedModels(new Set()); setInvalidFields(new Set()); setEditorGeneration(value => value + 1); setDraft(structuredClone(channel)); setBaseDraft(JSON.stringify(channel)); setBaseRevision(snapshot!.revision); setCandidates([]); setSecret(''); setTab('connection'); setAdding(false); setError(null); };
+  const typeInfo = snapshot?.types.find(type => type.id === draft?.type);
   const savedChannel = snapshot?.channels.find(channel => channel.id === draft?.id);
-  const dirty = Boolean(draft && (!savedChannel || secret || invalidFields.size || JSON.stringify(draft) !== JSON.stringify(savedChannel)));
-  const discoveryConfiguration = (channel: ModelChannel) => JSON.stringify([channel.type, channel.baseUrl, channel.connection, channel.authentication, channel.parameters]);
+  const accountDirectory = Boolean(draft && savedChannel && !secret && discoveryConfiguration(draft) === discoveryConfiguration(savedChannel));
+  const catalogKey = draft ? `${draft.id}:${accountDirectory ? 'account' : 'public'}` : '';
+  const type = typeInfo ? { ...typeInfo, catalog: catalogs[catalogKey] ?? [] } : undefined;
+  const selectedType = draft?.type;
+  React.useEffect(() => {
+    if (!selectedType) return;
+    const controller = new AbortController();
+    void api.directory(selectedType, controller.signal, accountDirectory ? draft?.id : undefined).then(value => { if (!controller.signal.aborted) setCatalogs(previous => ({ ...previous, [catalogKey]: value.models })); }, error => { if (!controller.signal.aborted) setError(String(error)); });
+    return () => controller.abort();
+  }, [api, selectedType, draft?.id, accountDirectory, catalogKey, snapshot?.directory?.revision]);
+  const dirty = Boolean(draft && (!savedChannel || secret || invalidFields.size || JSON.stringify(draft) !== baseDraft));
+  React.useEffect(() => {
+    if (!dirty && savedChannel) { setDraft(structuredClone(savedChannel)); setBaseDraft(JSON.stringify(savedChannel)); setBaseRevision(snapshot!.revision); }
+  }, [dirty, savedChannel, snapshot]);
   const edit = (patch: Partial<ModelChannel>) => {
     if (draft && discoveryConfiguration({ ...draft, ...patch }) !== discoveryConfiguration(draft)) setCandidates([]);
     setDraft(value => value ? { ...value, ...patch } : value);
   };
+  const editModels = (models: ChannelModel[]) => edit({ models: models.map(model => {
+    const previous = draft?.models.find(value => value.id === model.id);
+    if (!previous?.catalog || !model.catalog) return model;
+    const changed = MODEL_CATALOG_FIELDS.filter(field => JSON.stringify(previous[field]) !== JSON.stringify(model[field]));
+    return { ...model, catalog: { ...model.catalog, overrides: [...new Set([...model.catalog.overrides, ...changed])] } };
+  }) });
   const editConnection = (patch: Partial<ModelConnectionOptions>) => {
     if (!draft) return;
     const connection = { ...draft.connection, ...patch };
@@ -101,7 +123,7 @@ function ModelConnectionsEditor({ host }: { host: number }) {
       if (alive.current) { setDraft(channel); setSecret(''); }
     }
     const next = await api.save(channel, baseRevision);
-    if (alive.current) { setSnapshot(next); setDraft(structuredClone(channel)); setBaseRevision(next.revision); }
+    if (alive.current) { const saved = next.channels.find(value => value.id === channel.id)!; setSnapshot(next); setDraft(structuredClone(saved)); setBaseDraft(JSON.stringify(saved)); setBaseRevision(next.revision); }
   });
   const signIn = (provider: string) => { if (draft) void run(async () => {
     const reference = draft.authentication.kind === 'credential' && draft.authentication.reference || `model:${draft.id}`;
@@ -114,27 +136,33 @@ function ModelConnectionsEditor({ host }: { host: number }) {
     const next = await api.authorization(state.id);
     if (alive.current && activeAuthorization.current === state.id) setAuthorization(next);
   }); };
-  const addChannel = (id: string) => {
+  const addChannel = (id: string) => { void run(async () => {
     const selected = snapshot!.types.find(type => type.id === id)!;
+    const { models } = await api.directory(id);
+    if (!alive.current) return;
+    const channelId = crypto.randomUUID();
+    setCatalogs(previous => ({ ...previous, [`${channelId}:public`]: models }));
     const kind = selected.authentication[0]!;
-    choose({ id: crypto.randomUUID(), name: selected.name, type: id, enabled: true, baseUrl: selected.defaultBaseUrl ?? '',
+    const starters = models.filter(model => selected.defaultModelIds?.includes(model.id) || model.enabled).slice(0, 3);
+    choose({ id: channelId, name: selected.name, type: id, enabled: true, baseUrl: selected.defaultBaseUrl ?? '',
       authentication: kind === 'credential' ? { kind, reference: '' } : kind === 'environment' ? { kind, variable: '' } : { kind } as ConnectionAuthentication,
-      parameters: structuredClone(selected.defaultParameters ?? {}), models: structuredClone((selected.catalog ?? []).filter(model => selected.defaultModelIds?.includes(model.id))) });
-  };
+      parameters: structuredClone(selected.defaultParameters ?? {}), models: structuredClone((starters.length ? starters : models.slice(0, 3)).map(model => ({ ...model, enabled: true, catalog: { overrides: [] } }))) });
+  }); };
   const back = () => selectedModelId ? setSelectedModelId(null) : draft ? requestSettingsNavigation(closeEditor) : setAdding(false);
   const selectedModel = draft?.models.find(model => model.id === selectedModelId);
   const title = selectedModel ? selectedModel.name || selectedModel.id : draft ? draft.name || type?.name : adding ? t('settings.models.addChannel') : t('settings.models.title');
   return <SettingsPageLayout title={title} className="max-w-[1120px]"
     titleLeading={draft || adding ? <Button variant="ghost" size="icon" aria-label={t('settings.models.back')} disabled={busy} onClick={back}><Icon name="arrow-left-s" className="size-5" /></Button> : undefined}
     description={selectedModel ? `${draft!.name} / ${selectedModel.id}` : draft ? (type?.name !== draft.name ? type?.name : undefined) : adding ? t('settings.models.chooseProvider') : t('settings.models.description')}
-    headerEnd={!draft && !adding ? <Button disabled={busy || !snapshot?.types.length} onClick={() => { setAdding(true); setProviderQuery(''); }}><Icon name="add" className="size-4" />{t('settings.models.addChannel')}</Button> : draft && !selectedModel ? <Switch aria-label={t('settings.models.enabled')} checked={draft.enabled} disabled={busy} onCheckedChange={enabled => edit({ enabled })} /> : undefined}>
+    headerEnd={!draft ? <div className="flex gap-2"><Button variant="ghost" disabled={busy || snapshot?.directory?.refreshing} onClick={() => { void run(async () => { await api.refreshDirectory(); if (alive.current) setSnapshot(await api.read()); }); }}><Icon name="refresh" className={snapshot?.directory?.refreshing ? 'size-4 animate-spin' : 'size-4'} />{t('settings.models.refreshDirectory')}</Button>{!adding ? <Button disabled={busy || !snapshot?.types.length} onClick={() => { setAdding(true); setProviderQuery(''); }}><Icon name="add" className="size-4" />{t('settings.models.addChannel')}</Button> : null}</div> : !selectedModel ? <Switch aria-label={t('settings.models.enabled')} checked={draft.enabled} disabled={busy} onCheckedChange={enabled => edit({ enabled })} /> : undefined}>
+    {snapshot?.directory ? <p role="status" className="mb-4 typography-micro text-muted-foreground">{snapshot.directory.issue ? t(`settings.models.directoryIssue.${snapshot.directory.issue}`) : t(snapshot.directory.refreshing ? 'settings.models.directoryRefreshing' : 'settings.models.directoryAutomatic')}{snapshot.directory.updatedAt ? ` · ${new Date(snapshot.directory.updatedAt).toLocaleString()}` : ''}</p> : null}
     {error && !draft ? <p role="alert" className="mb-4 typography-meta text-destructive">{error}</p> : null}
     {snapshot?.issues?.map((issue, index) => <p key={index} role="alert" className="mb-3 typography-meta text-destructive">{issue.channelId ? `${issue.channelId}: ` : ''}{issue.message}</p>)}
     {!snapshot ? error ? <Button variant="outline" disabled={busy} onClick={() => { void run(async () => setSnapshot(await api.read())); }}>{t('settings.harness.retry')}</Button> : <p role="status" className="typography-meta text-muted-foreground">{t('common.loading')}</p> : <>
       {!draft && adding ? <>
         <Input aria-label={t('settings.models.filterProviders')} placeholder={t('settings.models.filterProviders')} value={providerQuery} onChange={event => setProviderQuery(event.target.value)} className="mb-6 max-w-sm" />
         <div className="grid gap-3 @xl:grid-cols-2 @4xl:grid-cols-3">
-          {snapshot.types.filter(type => `${type.name} ${type.id}`.toLowerCase().includes(providerQuery.toLowerCase())).map(type => <button key={type.id} type="button" onClick={() => addChannel(type.id)} className="group flex items-center gap-4 rounded-xl border border-border/60 p-5 text-left transition-colors hover:border-border hover:bg-interactive-hover">
+          {snapshot.types.filter(type => `${type.name} ${type.id}`.toLowerCase().includes(providerQuery.toLowerCase())).map(type => <button key={type.id} type="button" disabled={busy} onClick={() => addChannel(type.id)} className="group flex items-center gap-4 rounded-xl border border-border/60 p-5 text-left transition-colors hover:border-border hover:bg-interactive-hover">
             <ProviderLogo providerId={type.id} className="size-7 shrink-0" /><span className="min-w-0 flex-1"><span className="block typography-ui-label">{type.name}</span><span className="mt-1 block truncate typography-micro text-muted-foreground">{type.defaultBaseUrl ? new URL(type.defaultBaseUrl).hostname : t('settings.models.customEndpoint')}</span>{type.oauthProviders?.length ? <span className="mt-2 inline-block rounded bg-muted px-1.5 py-0.5 typography-micro text-muted-foreground">{t('settings.models.accountSignIn')}</span> : null}</span><Icon name="arrow-right-s" className="size-4 text-muted-foreground" />
           </button>)}
         </div>
@@ -162,7 +190,15 @@ function ModelConnectionsEditor({ host }: { host: number }) {
             onSignOut={() => { void run(async () => { if (draft.authentication.kind === 'credential') await api.removeCredential(draft.authentication.reference); if (alive.current) edit({ authentication: { kind: 'credential', reference: '' } }); }); }}
             onAuthorizationReply={value => api.replyAuthorization(authorization!.id, value)} onAuthorizationCancel={async () => { await api.cancelAuthorization(authorization!.id); if (alive.current) { activeAuthorization.current = undefined; setAuthorization(null); } }} />
           <div hidden={tab !== 'connection'} id="model-channel-connection" role="tabpanel" aria-labelledby="model-tab-connection">
-            <ModelSelection models={draft.models} type={type} candidates={candidates} busy={busy} onChange={models => edit({ models })} onConfigure={id => { setOpenedModels(previous => new Set(previous).add(id)); setSelectedModelId(id); }}
+            <ModelSelection models={draft.models} type={type} candidates={candidates} busy={busy} onChange={editModels}
+              onFollow={(id, field) => edit({ models: draft.models.map(model => {
+                if (model.id !== id) return model;
+                const defaults = type.catalog?.find(value => value.id === id);
+                if (!defaults) return model;
+                if (field) { const next = { ...model, catalog: { ...defaults.catalog, overrides: model.catalog?.overrides.filter(value => value !== field) ?? MODEL_CATALOG_FIELDS.filter(value => value !== field) } }; if (defaults[field] === undefined) delete next[field]; else Object.assign(next, { [field]: structuredClone(defaults[field]) }); return next; }
+                return { ...structuredClone(defaults), enabled: model.enabled, catalog: { ...defaults.catalog, overrides: [] } };
+              }) })}
+              onConfigure={id => { setOpenedModels(previous => new Set(previous).add(id)); setSelectedModelId(id); }}
               validity={(id, field, valid) => validity(`${id}:${field}`, valid)}
               onDiscover={() => run(async () => { const result = await api.discoverDraft({ channel: draft, ...(secret ? { secret } : {}) }); if (alive.current) setCandidates(result.models); })} />
           </div>
@@ -173,7 +209,7 @@ function ModelConnectionsEditor({ host }: { host: number }) {
         </div>
         {draft.models.filter(model => openedModels.has(model.id)).map(model => <div key={model.id} hidden={selectedModelId !== model.id}>
           <ModelConfiguration model={model} type={type} busy={busy} selected={selectedModelId === model.id} validity={(field, valid) => validity(`${model.id}:${field}`, valid)}
-            onChange={next => edit({ models: draft.models.map(value => value.id === model.id ? next : value) })}
+            onChange={next => editModels(draft.models.map(value => value.id === model.id ? next : value))}
             onRemove={() => { edit({ models: draft.models.filter(value => value.id !== model.id) }); setSelectedModelId(null); setInvalidFields(previous => new Set([...previous].filter(key => !key.startsWith(`${model.id}:`)))); }}
             onTest={(thinkingLevel, signal) => api.test({ key: crypto.randomUUID(), channel: draft, ...(secret ? { secret } : {}), modelId: model.id, thinkingLevel }, signal)} />
         </div>)}

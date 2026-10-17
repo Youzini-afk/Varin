@@ -301,6 +301,7 @@ fn prepare(
         leaf_id: None,
     };
     bound.binding.goal = read.goal;
+    bound.binding.request_context = Some(owner.lock().map_err(failure)?.model_request_context(&read.operation.run_id).map_err(failure)?);
     let view = RequestView {
         request_id: id.into(),
         run_id: read.operation.run_id,

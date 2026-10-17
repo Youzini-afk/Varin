@@ -186,6 +186,7 @@ fn replay_scenario(tail_phase: Option<&str>) {
         leaf_id: Some(run.input_id.clone()),
     };
     let binding = RequestBinding {
+        request_context: None,
         child_dispatch: None,
         goal: None,
         resource_activations: Vec::new(),

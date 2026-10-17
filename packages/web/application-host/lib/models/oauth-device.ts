@@ -23,7 +23,7 @@ async function login(fetchImpl: typeof fetch, flow: DeviceFlow, prompt: Authoriz
   const start = await form(fetchImpl, flow.authorize, { client_id: flow.clientId, ...flow.parameters }, prompt.signal);
   if (!start.response.ok) return fail('oauth-request-failed', `Account authorization failed (${start.response.status})`);
   const device = required(start.body, 'device_code'), code = required(start.body, 'user_code');
-  const url = new URL(typeof start.body.verification_uri_complete === 'string' ? start.body.verification_uri_complete : required(start.body, 'verification_uri'));
+  const url = new URL(typeof start.body.verification_uri_complete === 'string' ? start.body.verification_uri_complete : required(start.body, 'verification_uri'), flow.authorize);
   if (!['https:', 'http:'].includes(url.protocol)) return fail('oauth-response-invalid', 'Invalid account authorization URL');
   if (!prompt.showDeviceCode) return fail('oauth-device-interaction-unavailable', 'This client cannot display device authorization');
   prompt.showDeviceCode(url, code);
@@ -50,6 +50,7 @@ function token(flow: DeviceFlow, value: Record<string, unknown>, previous?: Toke
   const refreshToken = typeof value.refresh_token === 'string' ? value.refresh_token : previous?.refreshToken;
   return { kind: 'oauth', provider: flow.id, accessToken: required(value, 'access_token'),
     ...(refreshToken ? { refreshToken } : {}),
+    ...(flow.id === 'opencode' && typeof value.org_id === 'string' ? { accountId: value.org_id } : previous?.accountId ? { accountId: previous.accountId } : {}),
     expiresAt: Date.now() + expiresIn * 1000 };
 }
 export const COPILOT_HEADERS = {
@@ -86,6 +87,7 @@ export function deviceOAuthProviders(fetchImpl: typeof fetch): ModelOAuthProvide
     return { kind: 'oauth', provider: meta.id, accessToken: required(await json(response), 'api_key'), refreshToken: identity, expiresAt: Date.now() + 24 * 60 * 60 * 1000 };
   };
   return [
+    standard({ id: 'opencode', clientId: 'varin', authorize: 'https://opencode.ai/console/auth/device/code', token: 'https://opencode.ai/console/auth/device/token', parameters: { supports_org_scope: 'true' } }, 'OpenCode'),
     standard({ id: 'kimi-coding', clientId: '17e5f671-d194-4dfb-9706-5516cb48c098', authorize: 'https://auth.kimi.com/api/oauth/device_authorization', token: 'https://auth.kimi.com/api/oauth/token' }, 'Kimi Code'),
     standard({ id: 'xai', clientId: 'b1a00492-073a-47ea-816f-4c329264a828', authorize: 'https://auth.x.ai/oauth2/device/code', token: 'https://auth.x.ai/oauth2/token', parameters: { scope: 'openid profile email offline_access grok-cli:access api:access', referrer: 'varin' } }, 'Grok'),
     { id: copilot.id, name: 'GitHub Copilot', login: async prompt => exchangeCopilot(required(await login(fetchImpl, copilot, prompt), 'access_token'), prompt.signal),

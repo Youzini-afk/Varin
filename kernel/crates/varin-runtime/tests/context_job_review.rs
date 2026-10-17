@@ -133,6 +133,7 @@ impl ModelProvider for Provider {
 }
 fn binding() -> RequestBinding {
     RequestBinding {
+        request_context: None,
         child_dispatch: None,
         goal: None,
         resource_activations: Vec::new(),

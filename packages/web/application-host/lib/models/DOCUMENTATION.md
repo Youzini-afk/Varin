@@ -16,6 +16,7 @@ See [runtime ownership](../../../../../docs/runtime.md) and the
 | Responsibility | Entry |
 | --- | --- |
 | Channel types, validation, discovery and captured selections | `channel-types.ts`, `service.ts` |
+| Background directory refresh, service templates, derived cache and metadata normalization | `directory.ts`, `channel-directory.json`, `channel-directory.ts`, `directory-models.ts`, `directory-snapshot.ts` |
 | Credential-free HTTP headers, operation paths and proxy validation | `connection.ts` |
 | Revisioned settings and file observation | `configuration.ts`, `settings.ts` |
 | Model account storage, OAuth and cloud credential sources | `credentials.ts`, `oauth.ts`, `google-auth.ts`, `aws-auth.ts`, `anthropic-auth.ts` |
@@ -76,16 +77,49 @@ support list; a provider name does not imply every protocol option is supported.
 names can be explicitly configured under a compatible type. Operations and image capabilities
 remain explicit: image input alone does not enable image generation, editing or masks.
 
-`catalog.ts` supplies a curated offline selection with capacities, image input and explicit thinking
-controls. New connections copy the type's starter models and parameters into their draft; existing
-connections remain user-owned. Live discovery enriches known presets with supplied directory facts,
-without replacing missing fields or overwriting saved models. OpenRouter and Copilot discovery retain
-capabilities; Gemini retains token limits. A preset is not evidence that an account has access to a model.
-Mixed-API channels declare their supported `protocols`; a model's `protocol` chooses its wire adapter.
-The model editor exposes that choice in advanced settings.
+`catalog.ts` supplies reviewed protocol hints; `directory-snapshot.ts` supplies offline models.dev
+metadata and public service lists. `ModelDirectory` loads `model-directory.json`, then refreshes in
+the background using conditional HTTP requests. The normal freshness interval is six hours; settings
+also offer an explicit refresh. Initial settings contain only service descriptions; the selected
+service's model catalog is fetched separately. Conversation creation, model capture and dispatch never
+wait for directory network requests. A failed refresh retains the prior source. This cache is derived
+data and can be replaced; user configuration and credentials retain their separate owners.
+
+`channel-directory.json` is the bundled standard-service directory and is also fetched from Varin's
+main branch. Reviewed vendor, agent-service and local entries select existing protocol implementations;
+ordinary new service templates can therefore arrive without a client release. Specialized channels
+such as OpenCode, Command Code and Cline remain installed behavior. Remote directory data cannot
+replace an installed channel's protocol, introduce OAuth implementations or execute SDK packages.
+Missing later entries retain their known descriptors so saved connections remain usable. Generic
+aggregator/reseller expansion is deferred. The channel directory, models.dev and activated public
+service lists refresh independently, with per-source in-flight reuse and atomic cache replacement.
+
+An installed channel definition owns protocols, authentication and special behavior. Directory SDK
+labels map to installed codecs, without loading packages or executable remote configuration. Public
+lists determine advertised models; connected account discovery is cached separately under the exact
+connection fingerprint and credential scope. User overrides win over service facts, which win over
+models.dev provider metadata and explicitly identified canonical-model metadata. Display-name guessing
+is not used. Directory membership does not establish account entitlement.
+
+New starter/candidate models follow directory defaults through `model.catalog`. Its `overrides` list
+marks explicit field choices, including clearing a field. The settings editor can restore each field
+or the whole model to the current defaults. Service-discovered models retain their service snapshot
+until a matching account directory is available. Older manually configured models stay manual until
+the user chooses to follow the directory. Refreshing never rewrites `models.json`, enables newly
+discovered models, removes configured references or changes purpose selections. Captured execution
+bindings retain their original configuration. A model missing from a later directory keeps its saved
+metadata. Model catalogs and user configuration have independent revisions.
+
+Mixed-API channels declare supported `protocols` and optional relative `modelBasePaths`; a model's
+protocol chooses both the installed codec and the corresponding path beneath the saved service root.
+This allows one OpenCode connection and credential to serve Responses, Chat, Messages and Google
+models. Command Code uses its advertised `supported_endpoints`. Saved service origins are not changed
+by a directory refresh. The advanced model editor exposes protocol selection.
 
 Discovery and extension catalog candidates are read-only material. Applying a selection requires a
 configuration write; an empty or failed discovery does not delete saved models or purpose bindings.
+Completed saved-connection discovery can update the derived account cache without changing the user
+configuration revision. Draft discovery does not write either the connection or the entered key.
 Configured values, unavailable types, missing credentials and disabled models remain distinguishable.
 Gemini and Anthropic discovery follow their opaque page cursors on the captured connection; cancellation,
 invalid/repeated cursors and later-page failures never publish a partial list as complete. Settings show
@@ -137,6 +171,18 @@ Copilot exchanges the GitHub token for an inference token; Meta exchanges its id
 API key. Their renewal uses the same credential store and account-generation checks as browser OAuth.
 Copilot's account endpoint is resolved during request preparation and frozen into that request;
 refresh cannot retarget it. Copilot OAuth does not enable Claude's subscription-specific body format.
+
+OpenCode Zen and Go additionally support OpenCode's documented workspace-scoped device flow with
+client ID `varin`. Relative verification URLs resolve against the issuer. Rotating refresh tokens use
+the existing account refresh single-flight and generation checks. The OpenCode request profile is
+selected only by those channel types. Rust derives its session, request and optional project headers
+from the original execution branch/workspace, including auxiliary work; other channels do not receive
+them. Auxiliary purposes have separate stable affinity scopes. No project path or header placeholder
+is sent, and the profile does not change the system prompt or tool list.
+
+Cline and ClinePass retain separate model lists on the same API. Their explicit Chat compatibility
+option retains streamed `reasoning_details`, assembles fragments and replays encrypted blocks only
+under the original connection identity. It does not project encrypted data into visible reasoning.
 
 Anthropic workload identity is an explicit `anthropic-federation` authentication source: an absolute
 Host identity-token file, organization ID and federation rule ID, with optional service-account and

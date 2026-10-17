@@ -957,6 +957,7 @@ fn begin_package_call(db: &mut Catalog, params: Value) -> Result<Value, KernelEr
         metadata: None,
     };
     let binding = RequestBinding {
+        request_context: None,
         child_dispatch: None,
         goal: None,
         resource_activations: vec![],
@@ -1118,6 +1119,7 @@ fn coordinator_read(
         let schemas = crate::tools::KernelToolExecutor::selected_schemas(&binding.enabled_tools);
         let read_schema = schemas[0].clone();
         let mut request = RequestBinding {
+            request_context: None,
             child_dispatch: None,
             goal: None,
             resource_activations: vec![],
@@ -2012,6 +2014,7 @@ fn environment_forward_canonical_acceptance_survives_unknown_and_terminal_host_r
     let run = submitted.run_id;
     let schema:ToolSchema=serde_json::from_value(json!({"name":"environment_forward","version":"1","description":"Forward a selected service","schema":{"type":"object"},"metadata":{"service_id":"environment.forward","service_version":1,"completion":"job","operation":"effect","lifetime":"thread"}})).unwrap();
     let binding = RequestBinding {
+        request_context: None,
         child_dispatch: None,
         goal: None,
         resource_activations: vec![],
@@ -2256,6 +2259,7 @@ fn native_file_followup(
     )?;
     let schema = crate::followup_tools::schema();
     let request = RequestBinding {
+        request_context: None,
         child_dispatch: None,
         goal: None,
         resource_activations: vec![],

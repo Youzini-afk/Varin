@@ -210,6 +210,7 @@ pub(super) fn binding(runtime: &Arc<RunSupervisor>, run: &str) -> RequestBinding
     let launch = db.launch_intent(run).unwrap().unwrap().selection;
     let record = db.run(run).unwrap();
     RequestBinding {
+        request_context: None,
         child_dispatch: db
             .launch_metadata(run)
             .unwrap()

@@ -138,6 +138,7 @@ fn view(family: &str) -> RequestView {
             },
         },
         binding: RequestBinding {
+            request_context: None,
             child_dispatch: None,
             goal: None,
             resource_activations: Vec::new(),
@@ -2551,4 +2552,111 @@ fn frozen_bedrock_body_is_identical_for_durable_recovery_signing_and_real_http()
         "signing hashes precisely those HTTP bytes"
     );
     std::fs::remove_dir_all(directory).unwrap();
+}
+
+#[test]
+fn channel_identity_headers_follow_the_frozen_owner_and_stay_out_of_ordinary_requests() {
+    struct Capture(std::sync::Mutex<Vec<reqwest::header::HeaderMap>>);
+    impl HttpTransport for Capture {
+        fn stream(
+            &self,
+            request: HttpRequest<'_>,
+            _: &CancellationToken,
+            receive: &mut dyn FnMut(&[u8]) -> Result<bool, ModelFailure>,
+        ) -> Result<(), ModelFailure> {
+            self.0.lock().unwrap().push(request.headers);
+            receive(b"data: {}\n\n")?;
+            Ok(())
+        }
+    }
+    let transport = Arc::new(Capture(std::sync::Mutex::new(Vec::new())));
+    let mut connection = Connection::new(
+        "https://fixture.invalid",
+        Arc::new(Credentials(AtomicUsize::new(0))),
+        transport.clone(),
+    );
+    let mut owner = view(chat::FAMILY);
+    owner.binding.request_context = Some(ModelRequestContext {
+        session_id: "actual-owner".into(),
+        workspace_id: Some("workspace-1".into()),
+    });
+    let send = |connection: &Connection, view: RequestView| {
+        connection
+            .run(
+                &RequestSnapshot {
+                    view,
+                    serialized: json!({}).into(),
+                },
+                &CancellationToken::default(),
+                &[],
+                &mut |_| Ok(true),
+            )
+            .unwrap()
+    };
+    send(&connection, owner.clone());
+    connection.request_profile = Some(request_profile::RequestProfile::Opencode);
+    send(&connection, owner.clone());
+    owner.run_id = "next-run".into();
+    owner.request_id = "next-request".into();
+    send(&connection, owner.clone());
+    owner.binding.request_context.as_mut().unwrap().session_id = "other-conversation".into();
+    owner.binding.request_context.as_mut().unwrap().workspace_id = None;
+    send(&connection, owner);
+    let requests = transport.0.lock().unwrap();
+    assert!(!requests[0].contains_key("x-opencode-session"));
+    assert_eq!(requests[1]["x-opencode-client"], "varin");
+    assert_eq!(
+        requests[1]["x-opencode-session"],
+        requests[2]["x-opencode-session"]
+    );
+    assert_eq!(
+        requests[1]["x-opencode-project"],
+        requests[2]["x-opencode-project"]
+    );
+    assert_ne!(
+        requests[1]["x-opencode-request"],
+        requests[2]["x-opencode-request"]
+    );
+    assert_ne!(
+        requests[2]["x-opencode-session"],
+        requests[3]["x-opencode-session"]
+    );
+    assert!(!requests[3].contains_key("x-opencode-project"));
+}
+
+#[test]
+fn chat_reasoning_details_survive_fragmented_stream_and_original_connection_replay() {
+    let mut provider = chat::ChatProvider::new(chat_connection(
+        vec![
+            json!({"id":"c","choices":[{"index":0,"delta":{"reasoning_details":[{"index":0,"id":"r","type":"reasoning.encrypted","data":"part-"}]},"finish_reason":null}]}),
+            json!({"id":"c","choices":[{"index":0,"delta":{"reasoning_details":[{"index":0,"id":"r","type":"reasoning.encrypted","data":"two"}]},"finish_reason":null}]}),
+            json!({"id":"c","choices":[{"index":0,"delta":{"content":"answer"},"finish_reason":"stop"}]}),
+        ],
+        true,
+    ));
+    provider.reasoning_details = true;
+    let (result, events) = generate(&provider, chat::FAMILY);
+    assert_eq!(result.unwrap(), FinishReason::Stop);
+    let mut replay = view(chat::FAMILY);
+    replay.history = events
+        .into_iter()
+        .filter_map(|event| match event {
+            ProviderEvent::ItemCompleted { item } => Some(Arc::new(ConversationItem {
+                resource_activation: None,
+                id: item.id,
+                provenance: Provenance::Assistant,
+                content: item.content,
+                opaque: item.opaque,
+            })),
+            _ => None,
+        })
+        .collect();
+    let body = provider.serialize(&replay, None).unwrap().to_value();
+    assert_eq!(
+        body["messages"][0]["reasoning_details"],
+        json!([{ "index":0,"id":"r","type":"reasoning.encrypted","data":"part-two" }])
+    );
+    replay.binding.connection_identity = "another-account".into();
+    let body = provider.serialize(&replay, None).unwrap().to_value();
+    assert!(body["messages"][0].get("reasoning_details").is_none());
 }

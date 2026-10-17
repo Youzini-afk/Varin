@@ -357,9 +357,19 @@ pub struct HistoryRange {
     pub leaf_id: Option<String>,
 }
 
+/// Execution identity used by channel-specific request metadata.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct ModelRequestContext {
+    /// Stable conversation scope, independent of model requests and Runs.
+    pub session_id: String,
+    pub workspace_id: Option<String>,
+}
+
 /// No keys, tokens, or authorization headers belong in a request snapshot.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct RequestBinding {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub request_context: Option<ModelRequestContext>,
     #[serde(default)]
     pub child_dispatch: Option<Value>,
     #[serde(default)]

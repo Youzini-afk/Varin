@@ -120,6 +120,7 @@ fn combined(ending: Ending) {
             run_id: receipt.run_id,
             owner_generation: db.epoch(),
             binding: RequestBinding {
+                request_context: None,
                 child_dispatch: None,
                 goal: None, resource_activations: Vec::new(),
                 resource_checkpoint_id: None,

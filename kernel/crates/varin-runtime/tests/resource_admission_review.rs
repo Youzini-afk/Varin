@@ -28,6 +28,7 @@ fn request_snapshot(receipt: &Receipt) -> varin_runtime::execution::RequestSnaps
                 },
             },
             binding: RequestBinding {
+                request_context: None,
                 child_dispatch: None,
                 goal: None,
                 resource_activations: Vec::new(),
@@ -273,6 +274,7 @@ mod actual_engines {
             run_id: receipt.run_id,
             owner_generation: db.epoch(),
             binding: RequestBinding {
+                request_context: None,
                 child_dispatch: None,
                 goal: None,
                 resource_activations: Vec::new(),

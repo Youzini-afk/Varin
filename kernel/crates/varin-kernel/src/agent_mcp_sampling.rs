@@ -250,6 +250,7 @@ fn prepare_and_generate(
     // Execution attribution is frozen from the original tool. It contributes no Goal text,
     // main history or tool authority to this isolated provider request.
     view.binding.goal = work.intent.goal.clone();
+    view.binding.request_context = Some(runtime.catalog().lock().map_err(runtime_error)?.model_request_context(&work.operation.run_id).map_err(runtime_error)?);
     let serialized = bound.provider.serialize_cancellable(&view, None, cancel)?;
     let snapshot = RequestSnapshot { view, serialized };
     let model = SamplingModel {

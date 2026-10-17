@@ -223,6 +223,7 @@ impl<
             .map(|c| c.history.as_slice())
             .unwrap_or(history);
         binding.history_range = input.binding.history_range.clone();
+        binding.request_context = input.binding.request_context.clone();
         binding.history_range.leaf_id = head.map(str::to_string);
         binding.instruction_sources = instructions.clone();
         binding.memory_checkpoint = context

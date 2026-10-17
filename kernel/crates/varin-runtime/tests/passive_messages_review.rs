@@ -480,6 +480,7 @@ fn binding(f: &Fixture) -> RequestBinding {
             .unwrap()
             .selection;
     RequestBinding {
+        request_context: None,
         child_dispatch: f
             .db
             .launch_metadata(&f.context.run_id)

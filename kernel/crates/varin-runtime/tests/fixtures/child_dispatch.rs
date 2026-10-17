@@ -467,6 +467,7 @@ impl Fixture {
                     history_range: range.clone(),
                 },
                 binding: RequestBinding {
+                    request_context: None,
                     child_dispatch: dispatch_context.clone(),
                     goal: None,
                     resource_activations: Vec::new(),
@@ -657,6 +658,7 @@ impl Fixture {
                     history_range: range.clone(),
                 },
                 binding: RequestBinding {
+                    request_context: None,
                     child_dispatch: self
                         .db
                         .launch_metadata(&self.context.run_id)

@@ -706,6 +706,18 @@ fn committed_model_history_head(
 }
 
 impl Catalog {
+    /// Actual execution placement, independent of the client's current navigation selection.
+    pub fn model_request_context(&self, run_id: &str) -> Result<ModelRequestContext> {
+        let run = self.run(run_id)?;
+        let workspace_id = self
+            .launch_metadata(run_id)?
+            .and_then(|launch| launch.selection.source)
+            .map(|source| source.workspace_id);
+        Ok(ModelRequestContext {
+            session_id: run.branch_id,
+            workspace_id,
+        })
+    }
     pub(crate) fn cancelled_recovery_runs(&self) -> Result<Vec<String>> {
         let mut statement = self.db.prepare(
             "SELECT id FROM runs WHERE json_extract(body,'$.cancel_requested')=1
@@ -876,6 +888,7 @@ impl Catalog {
         )?;
         binding.history_range.branch_id = run.branch_id.clone();
         binding.history_range.leaf_id = self.head(&run.branch_id)?;
+        binding.request_context = Some(self.model_request_context(run_id)?);
         let database = self
             .db
             .path()

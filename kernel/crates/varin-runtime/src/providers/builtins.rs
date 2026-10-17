@@ -56,6 +56,7 @@ pub fn adapters() -> Vec<Arc<dyn ModelAdapter>> {
 #[derive(Default, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct Options {
+    request_profile: Option<super::request_profile::RequestProfile>,
     #[serde(default)]
     copilot: bool,
     temperature: Option<f64>,
@@ -75,6 +76,8 @@ struct ResponseOptions {
 struct ChatOptions {
     #[serde(default)]
     requires_reasoning_content: bool,
+    #[serde(default)]
+    reasoning_details: bool,
 }
 #[derive(Default, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -126,6 +129,7 @@ fn bind(
 ) -> Result<Arc<dyn ModelProvider>, ExecutionError> {
     let options: Options = decode(c.model_options.clone().unwrap_or_else(empty_object))?;
     connection.copilot = options.copilot;
+    connection.request_profile = options.request_profile;
     if options.temperature.is_some_and(|v| !v.is_finite()) {
         return Err(ExecutionError::new(
             "model_temperature",
@@ -204,6 +208,7 @@ fn bind(
             let o: ChatOptions = decode(options.protocol)?;
             let mut p = chat::ChatProvider::new(connection);
             p.requires_reasoning_content = o.requires_reasoning_content;
+            p.reasoning_details = o.reasoning_details;
             p.max_output_tokens = c.max_output_tokens;
             p.legacy_max_tokens = c.legacy_max_tokens.unwrap_or(false);
             p.include_stream_usage = c.include_stream_usage.unwrap_or(true);

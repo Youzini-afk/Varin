@@ -17,6 +17,7 @@ export interface SelectedModel {
   requestModelId?: string;
   allowAnonymous?: boolean;
   connection?: ModelConnectionOptions;
+  requestProfile?: 'opencode';
   adapterId?: string; adapterVersion?: string; adapterIdentity?: string; adapterBindingId?: string; endpointPath?: string;
 }
 export interface ModelExecutionAuthority extends ExistingModelAuthRuntime {

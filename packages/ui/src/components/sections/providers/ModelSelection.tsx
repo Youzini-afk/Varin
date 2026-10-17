@@ -1,23 +1,24 @@
 import React from 'react';
-import type { ChannelModel, ChannelTypeInfo, DiscoveredModel } from '@varin/application-client';
+import type { ChannelModel, ChannelTypeInfo, DiscoveredModel, ModelCatalogField } from '@varin/application-client';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Switch } from '@/components/ui/switch';
 import { ModelLogo } from '@/components/ui/ModelLogo';
 import { Icon } from '@/components/icon/Icon';
-import { useI18n } from '@/lib/i18n';
+import { useI18n, type I18nKey } from '@/lib/i18n';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { ModelCommonSettings } from './ModelCommonSettings';
 
 interface Props {
   models: ChannelModel[]; type: ChannelTypeInfo; candidates: DiscoveredModel[]; busy: boolean;
   onChange(models: ChannelModel[]): void;
+  onFollow?(id: string, field?: ModelCatalogField): void;
   onConfigure(id: string): void;
   onDiscover(): Promise<boolean>;
   validity(modelId: string, field: string, valid: boolean): void;
 }
-export function ModelSelection({ models, type, candidates, busy, onChange, onConfigure, onDiscover, validity }: Props) {
+export function ModelSelection({ models, type, candidates, busy, onChange, onFollow, onConfigure, onDiscover, validity }: Props) {
   const { t } = useI18n();
   const [query, setQuery] = React.useState('');
   const [manual, setManual] = React.useState('');
@@ -39,6 +40,7 @@ export function ModelSelection({ models, type, candidates, busy, onChange, onCon
       added.push({ ...structuredClone(catalog), ...structuredClone(entry), id, name: entry.name && entry.name !== id ? entry.name : catalog?.name || entry.name || id, enabled: true,
         operations: operations?.length ? operations : type.operations.includes('chat') ? ['chat'] : [type.operations[0]!],
         ...(Object.keys(compat).length ? { compat } : {}),
+        ...(entry.catalog || catalog ? { catalog: { ...catalog?.catalog, ...entry.catalog, overrides: [] } } : {}),
       });
     }
     onChange([...models, ...added]); setPicked(new Set()); setManual('');
@@ -75,6 +77,13 @@ export function ModelSelection({ models, type, candidates, busy, onChange, onCon
         </div>
         <CollapsibleContent className="h-[var(--collapsible-panel-height)] transition-[height,opacity] duration-200 ease-out data-[starting-style]:h-0 data-[starting-style]:opacity-0 data-[ending-style]:h-0 data-[ending-style]:opacity-0 motion-reduce:transition-none">
           <div className="mb-4 space-y-4 rounded-xl border border-border/50 bg-muted/15 p-4 @xl:ml-8 @xl:p-5">
+            {type.catalog?.some(value => value.id === model.id) ? <div className="flex flex-wrap items-center justify-between gap-2 typography-micro text-muted-foreground">
+              <span>{t(model.catalog ? 'settings.models.directoryFollowing' : 'settings.models.directoryManual')}{model.catalog?.overrides.length ? ` · ${t('settings.models.directoryOverrides')} ${model.catalog.overrides.length}` : ''}</span>
+              {!model.catalog || model.catalog.overrides.length ? <Button variant="ghost" size="sm" disabled={busy} onClick={() => onFollow?.(model.id)}><Icon name="refresh" className="size-3.5" />{t('settings.models.followDirectory')}</Button> : null}
+              {model.catalog?.overrides.map(field => <button key={field} type="button" disabled={busy} className="rounded border border-border/50 px-2 py-1 hover:text-foreground" onClick={() => onFollow?.(model.id, field)} title={t('settings.models.followDirectory')}>
+                {t(`settings.models.${({ contextWindow: 'context', maxOutputTokens: 'output', input: 'imageInput', thinking: 'thinkingMode', operations: 'capabilities' } as Record<string, string>)[field] ?? field}` as I18nKey)} ↺
+              </button>)}
+            </div> : null}
             {model.operations.includes('chat') ? <ModelCommonSettings model={model} disabled={busy} onChange={next => onChange(models.map(value => value.id === model.id ? next : value))} validity={(field, valid) => validity(model.id, field, valid)} /> : null}
             <div className="flex justify-end"><Button variant="ghost" size="sm" disabled={busy} onClick={() => onConfigure(model.id)}>{t('settings.models.advanced')}<Icon name="arrow-right-s" className="size-4" /></Button></div>
           </div>

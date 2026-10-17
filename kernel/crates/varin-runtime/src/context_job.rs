@@ -553,6 +553,7 @@ pub fn text_compaction_start(selection: &crate::catalog::launches::LaunchSelecti
     RunStart {
         context_preparation: Arc::new(NoopContextPreparation),
         binding: RequestBinding {
+            request_context: None,
             child_dispatch: None,
             goal: None,
             resource_activations: Vec::new(),

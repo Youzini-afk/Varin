@@ -23,6 +23,8 @@ const networkMessages: Record<EgressErrorKind, string> = {
 export function registerModelRoutes(app: Express, models: ModelsService, requireAuth: RequestHandler, fetchImpl: EgressFetch) {
   const actions = {
     read: () => models.read(),
+    directory: (input: Record<string, unknown>) => models.directorySnapshot(input.type as string, input.channelId as string | undefined),
+    'directory/refresh': () => { void models.modelDirectory.refresh(true); return models.modelDirectory.status(); },
     save: (input: Record<string, unknown>) => models.save(input.channel as Parameters<ModelsService['save']>[0], input.expectedRevision as string),
     remove: (input: Record<string, unknown>) => models.remove(input.id as string, input.expectedRevision as string),
     discover: (input: Record<string, unknown>, signal: AbortSignal) => models.discover(input.id as string, fetchImpl, signal),
@@ -43,6 +45,7 @@ export function registerModelRoutes(app: Express, models: ModelsService, require
     try {
       const input: unknown = request.body;
       if (!object(input) || input.cwd !== undefined && typeof input.cwd !== 'string'
+        || name === 'directory' && (typeof input.type !== 'string' || input.channelId !== undefined && typeof input.channelId !== 'string')
         || name === 'discover-draft' && (!object(input.channel) || input.secret !== undefined && typeof input.secret !== 'string')
         || ['save', 'remove'].includes(name) && typeof input.expectedRevision !== 'string'
         || ['remove', 'discover'].includes(name) && typeof input.id !== 'string'
