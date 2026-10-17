@@ -113,6 +113,43 @@ fn input_with_frozen_context(
 struct Tools {
     calls: AtomicUsize,
 }
+
+#[test]
+fn request_commit_validates_the_exact_available_cut_of_the_frozen_launch() {
+    use crate::catalog::launches::{AgentSelection, LaunchSelection};
+    let fixture = Fixture::new();
+    let db = fixture.catalog();
+    let mut original = input(&db);
+    let mut hidden = original.binding.tools[0].clone();
+    hidden.name = "hidden".into();
+    let mut goal = hidden.clone();
+    goal.name = "goal_report".into();
+    original.binding.tools.extend([hidden.clone(), goal]);
+    original.binding.tools.extend(crate::tool_disclosure::schemas());
+    let mut selection = LaunchSelection::from_binding(&original.binding,
+        PolicyIdentity { name: "test".into(), version: "1".into() }, None);
+    selection.agent = Some(AgentSelection { profile_id: None, name: None, work_focus: "code".into(), tools: Some(vec!["read".into()]) });
+    db.lock().unwrap().bind_launch(&original.run_id, selection).unwrap();
+    let mut binding = original.binding.clone();
+    binding.tools = crate::tool_disclosure::request_tools(&binding.tools, false, Some(&["read".into()]));
+    let snapshot = RequestSnapshot { view: RequestView {
+        request_id: "available-cut".into(), run_id: original.run_id.clone(),
+        origin: RequestOrigin::Conversation { compaction: None, step: 1, history_range: binding.history_range.clone() },
+        binding, history: original.history,
+    }, serialized: json!({"input": "fixture"}).into() };
+    for tamper in 0..3 {
+        let mut changed = snapshot.clone();
+        match tamper {
+            0 => changed.view.binding.tools.push(hidden.clone()),
+            1 => changed.view.binding.tools[0].schema = json!({"type":"string"}),
+            _ => { changed.view.binding.tools.pop(); },
+        }
+        assert!(db.lock().unwrap().commit_execution(&original.run_id, original.owner_generation,
+            &ExecutionRecord::RequestPrepared { snapshot: changed.into() }).is_err());
+    }
+    db.lock().unwrap().commit_execution(&original.run_id, original.owner_generation,
+        &ExecutionRecord::RequestPrepared { snapshot: snapshot.into() }).unwrap();
+}
 impl ToolExecutor for Tools {
     fn plan(
         &self,
