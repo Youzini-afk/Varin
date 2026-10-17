@@ -17,6 +17,7 @@ interface FixtureParams extends Record<string, unknown> {
 }
 
 const files = new Map<string, { text: string; version: number }>();
+const watchedBatches: unknown[] = [];
 
 const positionToOffset = (text: string, position?: Position): number => {
   const targetLine = Math.max(0, position?.line ?? 0);
@@ -143,7 +144,7 @@ const server = createJsonRpcServer({
           workspaceSymbolProvider: true,
           renameProvider: true,
           codeActionProvider: { resolveProvider: true },
-          executeCommandProvider: { commands: ['fixture.finish'] },
+          executeCommandProvider: { commands: ['fixture.finish', 'fixture.watchedFiles'] },
           documentFormattingProvider: true,
           documentRangeFormattingProvider: true,
           documentOnTypeFormattingProvider: { firstTriggerCharacter: '}', moreTriggerCharacter: [';'] },
@@ -327,6 +328,7 @@ const server = createJsonRpcServer({
       return { ...params, command: { title: 'Finish fixture action', command: 'fixture.finish', arguments: ['done'] } };
     }
     if (method === 'workspace/executeCommand') {
+      if (params?.command === 'fixture.watchedFiles') return watchedBatches;
       if (params?.command !== 'fixture.finish') throw new Error('unsupported fixture command');
       return { finished: params?.arguments?.[0] ?? null };
     }
@@ -385,6 +387,7 @@ const server = createJsonRpcServer({
   onNotification(method, rawParams) {
     const params = (rawParams && typeof rawParams === 'object' && !Array.isArray(rawParams)
       ? rawParams : {}) as FixtureParams;
+    if (method === 'workspace/didChangeWatchedFiles') watchedBatches.push(params.changes);
     if (method === 'initialized' && process.env.VARIN_LSP_FIXTURE_CRASH === '1') {
       process.exit(17);
       return;

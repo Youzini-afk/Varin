@@ -212,7 +212,7 @@ fn file_inventory_traversals_leave_storage_and_cancellation_available_until_work
         hold.entered();
         assert_eq!(
             f.short("storage.health", json!({"deep":false}), Some("writer"))["integrity"],
-            "ok"
+            "not_checked"
         );
         // Another original metadata call is independently runnable while the first is held.
         let independent = f
@@ -262,7 +262,7 @@ fn file_inventory_revocation_and_retirement_reject_late_results() {
         assert!(token.load(Ordering::Acquire));
         assert_eq!(
             f.short("storage.health", json!({}), Some("writer"))["integrity"],
-            "ok"
+            "not_checked"
         );
         hold.release();
         assert!(matches!(f.finish(), Err(KernelError::Authorization(_))));

@@ -163,7 +163,7 @@ fn single_capture_real_body_retains_original_or_implicit_exclusion_while_control
             hold.entered();
             assert_eq!(
                 f.short("storage.health", json!({}), Some("writer"))["integrity"],
-                "ok"
+                "not_checked"
             );
             assert_eq!(
                 f.inventory("file.measure", f.params("body"), "reader")
@@ -496,7 +496,7 @@ fn existing_object_verification_is_off_actor_and_gc_cannot_delete_later_publicat
         assert!(object_path(&f, b"object verification body").exists());
         assert_eq!(
             f.short("storage.health", json!({}), Some("writer"))["integrity"],
-            "ok"
+            "not_checked"
         );
         if cancel {
             token.store(true, Ordering::Release);

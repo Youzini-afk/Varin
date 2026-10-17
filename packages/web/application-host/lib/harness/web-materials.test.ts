@@ -153,7 +153,9 @@ describe("web material snapshots", () => {
     const body = Buffer.from("a large fixed body");
     const opened = openStore({ client: { getBlob: async (hash, source, options) => {
       calls.push({ hash, source, options });
-      return { byteLength: body.length, bytesBase64: body.subarray(options!.offset!, options!.offset! + options!.length!).toString("base64") };
+      const chunk = body.subarray(options!.offset!, options!.offset! + options!.length!);
+      const nextOffset = options!.offset! + chunk.length;
+      return { byteLength: body.length, bytesBase64: chunk.toString("base64"), nextOffset, eof: nextOffset === body.length };
     } } });
     const ref = await opened.materials.put("ws", draft("https://example.com/range"), body, authority("thread"));
     const found = await opened.materials.read("ws", ref.snapshotId, {
@@ -174,7 +176,9 @@ describe("web material snapshots", () => {
       const offset = range!.offset!, length = range!.length!;
       expect(length).toBeLessThanOrEqual(256 * 1024);
       reads.push({ ...proof, offset, length });
-      return { byteLength: bytes.length, bytesBase64: bytes.subarray(offset, offset + length - (truncate ? 1 : 0)).toString("base64") };
+      const chunk = bytes.subarray(offset, offset + length - (truncate ? 1 : 0));
+      const nextOffset = offset + chunk.length;
+      return { byteLength: bytes.length, bytesBase64: chunk.toString("base64"), nextOffset, eof: nextOffset === bytes.length };
     } } });
     const ref = await opened.materials.put("ws", { ...draft("file:///paper.pdf"), document: { kind: "pdf", parser: "source" } }, body,
       authority("thread"), { source: { bytes: source, contentType: "application/pdf" } });
@@ -204,7 +208,9 @@ describe("web material snapshots", () => {
         expect(range!.signal).toBe(controller.signal);
         if (range!.offset === 256 * 1024) { enter(); await held; }
       }
-      return { byteLength: bytes.length, bytesBase64: bytes.subarray(range!.offset!, range!.offset! + range!.length!).toString("base64") };
+      const chunk = bytes.subarray(range!.offset!, range!.offset! + range!.length!);
+      const nextOffset = range!.offset! + chunk.length;
+      return { byteLength: bytes.length, bytesBase64: chunk.toString("base64"), nextOffset, eof: nextOffset === bytes.length };
     } } });
     const ref = await opened.materials.put("ws", { ...draft("file:///paper.pdf"), document: { kind: "pdf", parser: "source" } }, Buffer.alloc(0),
       authority("thread"), { source: { bytes: source, contentType: "application/pdf" } });

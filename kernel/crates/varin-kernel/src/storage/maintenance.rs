@@ -269,9 +269,6 @@ impl Storage {
     }
 
     pub(super) fn health(&self, params: &Value) -> Result<Value, KernelError> {
-        let integrity: String = self
-            .conn
-            .query_row("PRAGMA integrity_check", [], |row| row.get(0))?;
         let branches: i64 = self
             .conn
             .query_row("SELECT COUNT(*) FROM branches", [], |row| row.get(0))?;
@@ -298,9 +295,12 @@ impl Storage {
             .unwrap_or(0);
         if !params.get("deep").and_then(Value::as_bool).unwrap_or(false) {
             return Ok(
-                json!({"integrity": integrity, "branches": branches, "nodes": nodes, "nodeJsonBytes": node_json_bytes, "catalogBytes": catalog_bytes, "walBytes": wal_bytes, "operations": operations, "temporaryObjectOwners": temporary_object_owners, "blobs": blobs, "storageRoot": self.root, "pendingCleanup": pending_cleanup, "cleanupFailures": cleanup_failures, "deep": false}),
+                json!({"integrity": "not_checked", "branches": branches, "nodes": nodes, "nodeJsonBytes": node_json_bytes, "catalogBytes": catalog_bytes, "walBytes": wal_bytes, "operations": operations, "temporaryObjectOwners": temporary_object_owners, "blobs": blobs, "storageRoot": self.root, "pendingCleanup": pending_cleanup, "cleanupFailures": cleanup_failures, "deep": false}),
             );
         }
+        let integrity: String = self
+            .conn
+            .query_row("PRAGMA integrity_check", [], |row| row.get(0))?;
         let mut roots = BTreeSet::new();
         for row in self
             .conn

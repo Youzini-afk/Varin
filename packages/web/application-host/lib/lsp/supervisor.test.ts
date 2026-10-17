@@ -50,6 +50,26 @@ const fixtureProvider = (overrides: {
 });
 
 describe('language supervisor', () => {
+  it('batches filesystem invalidations and delivers them before the next language query', async () => {
+    const harness = await createDocumentAuthorityHarness();
+    const language = createLanguageSupervisor({ documents: harness.authority, spawn, pathModule: path, isTrusted: async () => true });
+    try {
+      language.registerProvider(fixtureProvider());
+      const resource = harness.resource('note.ts');
+      await language.syncDocument({ resource, languageId: 'typescript', documentVersion: 1, reason: 'open', content: 'const value = 1;\n' });
+      for (let repeat = 0; repeat < 4; repeat++) for (let index = 0; index < 32; index++) {
+        language.observeDocumentMutation({ workspaceId: resource.workspaceId, resourceId: `generated/${index}.ts`, kind: 'modified' });
+      }
+      language.observeDocumentMutation({ workspaceId: resource.workspaceId, resourceId: 'generated/0.ts', kind: 'deleted' });
+      const result = await language.executeCommand({ resource, languageId: 'typescript', documentVersion: 1,
+        providerId: 'fixture', generation: 1, command: 'fixture.watchedFiles' });
+      const batches = featureValue<Array<Array<{ uri: string; type: number }>>>(result);
+      expect(batches).toHaveLength(1);
+      expect(batches[0]).toHaveLength(32);
+      expect(batches[0]?.find(change => change.uri.endsWith('/generated/0.ts'))?.type).toBe(3);
+    } finally { await language.dispose(); await harness.cleanup(); }
+  });
+
   it('initializes a fixture server and serves completion, hover, and code actions', async () => {
     const harness = await createDocumentAuthorityHarness();
     let spawnedEnvironment: NodeJS.ProcessEnv | undefined;

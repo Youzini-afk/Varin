@@ -69,6 +69,8 @@ Provider language families share a process (for example TS/TSX/JS). Document ver
 after shared startup finishes, in the synchronous notification step. A view revision detects changes to
 other synchronized files while a query is answering. Filesystem/Document mutation events invalidate
 diagnostics and return changed disk buffers to server filesystem ownership; fixed-source documents remain fixed.
+Filesystem invalidations are coalesced by URI into notifications on the existing 20 ms watch cadence.
+A feature query flushes pending notifications first, so batching does not query a server before its invalidations.
 
 ## Preparation and prewarming
 

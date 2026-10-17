@@ -736,7 +736,7 @@ impl Storage {
     ) -> Result<(usize, usize), KernelError> {
         let pending = {
             let mut statement = self.conn.prepare(
-                "SELECT o.operation_id, o.kind, o.result_json FROM operations o JOIN operation_owners w ON w.operation_id = o.operation_id WHERE o.state = 'started' AND w.workspace_id = ?1 AND o.kind LIKE 'file.%' ORDER BY o.created_at, o.operation_id",
+                "SELECT o.operation_id, o.kind, o.result_json FROM operations o INDEXED BY operations_pending_files JOIN operation_owners w ON w.operation_id = o.operation_id WHERE o.state = 'started' AND w.workspace_id = ?1 AND o.kind GLOB 'file.*' ORDER BY o.created_at, o.operation_id",
             )?;
             let rows = statement.query_map(params![workspace_id], |row| {
                 Ok((
@@ -1004,7 +1004,7 @@ impl Storage {
     ) -> Result<Vec<Value>, KernelError> {
         let rows = {
             let mut statement = self.conn.prepare(
-                "SELECT o.operation_id, o.kind, o.result_json, o.created_at, o.updated_at FROM operations o JOIN operation_owners w ON w.operation_id = o.operation_id WHERE o.state = 'started' AND w.workspace_id = ?1 AND o.kind LIKE 'file.%' ORDER BY o.created_at, o.operation_id",
+                "SELECT o.operation_id, o.kind, o.result_json, o.created_at, o.updated_at FROM operations o INDEXED BY operations_pending_files JOIN operation_owners w ON w.operation_id = o.operation_id WHERE o.state = 'started' AND w.workspace_id = ?1 AND o.kind GLOB 'file.*' ORDER BY o.created_at, o.operation_id",
             )?;
             let rows = statement.query_map(params![workspace_id], |row| {
                 Ok((

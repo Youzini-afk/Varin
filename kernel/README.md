@@ -66,6 +66,10 @@ Recovery/Integration phases and idempotent original-operation receipts. Bytes ar
 references publish. Logical release and physical cleanup have distinct results; failed deletion remains
 retryable and cannot be reported as successful zero-byte cleanup.
 
+Root admission queries an index of pending file operations; protocol traffic is not scanned as
+file recovery work. Query indexes are rebuildable and leave the record format unchanged. Ordinary
+`storage.health` returns statistics with `integrity: not_checked`; only `deep: true` runs integrity checks.
+
 Host Documents admits a canonical root; scoped Rust file resources own exact/subtree leases, capture,
 conditional apply, mkdir/remove/rename, scan/measure/materialize and restart reconciliation. Waiting
 plans acquire their whole resource set, not partial leases. Read/read overlaps and disjoint work can

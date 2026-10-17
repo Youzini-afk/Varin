@@ -58,7 +58,7 @@ fn lease_wait_remains_queued_until_a_cancelled_capture_worker_has_really_drained
         assert!(matches!(f.rx.try_recv(), Err(mpsc::TryRecvError::Empty)));
         assert_eq!(
             f.short("storage.health", json!({}), Some("writer"))["integrity"],
-            "ok"
+            "not_checked"
         );
         assert_eq!(
             f.short(

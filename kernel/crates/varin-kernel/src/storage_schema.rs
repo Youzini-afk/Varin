@@ -46,6 +46,14 @@ pub(crate) const CATALOG_SCHEMA: &str = "CREATE TABLE IF NOT EXISTS metadata (ke
 
 pub(crate) const CATALOG_USER_VERSION: i64 = 16;
 
+// Rebuildable query accelerators do not change stored records or their format.
+// Root admission must visit pending file work, not every historical pipe write.
+pub(crate) const CATALOG_QUERY_INDEXES: &str = "
+    CREATE INDEX IF NOT EXISTS operations_kind_state ON operations(kind, state);
+    CREATE INDEX IF NOT EXISTS operations_pending_files
+    ON operations(created_at, operation_id)
+    WHERE state = 'started' AND kind GLOB 'file.*';";
+
 pub(crate) const REQUIRED_TABLES: &[&str] = &[
     "blobs",
     "branches",

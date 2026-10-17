@@ -335,7 +335,7 @@ it('and Storage negotiated windows remain independent during real concurrent upl
   expect(first?.byteLength).toBe(body.length);
   expect(second?.byteLength).toBe(body.length);
   expect(statuses).toHaveLength(100);
-  expect((await f.host.health()).integrity).toBe('ok');
+  expect((await f.host.health()).integrity).toBe('not_checked');
 }, 30_000);
 
 function completeLocalResponse(response: ServerResponse, id: string, text: string) {

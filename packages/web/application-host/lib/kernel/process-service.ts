@@ -19,7 +19,13 @@ interface Options {
 }
 export interface ProcessAddress { workspaceId: string; processId: string; rootId?: string }
 type Address = ProcessAddress;
-interface ProjectionOptions { retainOutput?: boolean; stdinIgnored?: boolean; terminate?: (force: boolean) => Promise<void> }
+interface ProjectionOptions {
+  retainOutput?: boolean;
+  stdinIgnored?: boolean;
+  terminate?: (force: boolean) => Promise<void>;
+  /** Private Host protocols release an input after its final acknowledgement. */
+  releaseInputReceipt?: (operationId: string) => Promise<unknown>;
+}
 export type ProcessProjectionClient = Pick<KernelScopedClient, 'processSubscribe' | 'processWrite' | 'processResize' | 'processKill' | 'processRelease'>;
 const asError = (value: unknown): Error => value instanceof Error ? value : new Error(String(value));
 const nativeSignal = (value: string | null): NodeJS.Signals | null => {
@@ -211,6 +217,13 @@ export class KernelManagedProcess extends EventEmitter implements ManagedPipedPr
       bytesBase64: bytes.toString("base64"), ...(eof ? { eof: true } : {}) });
     requireAppliedProcessInteraction(receipt, { ...this.address, operationId, kernelEpoch: this.epoch,
       kind: 'write', requestedBytes: bytes.length, eofRequested: eof });
+    // Private pipe frames have no later receipt reader after this acknowledgement.
+    // Caller-supplied operation IDs keep their durable replay contract.
+    if (!identity) await this.releaseAcknowledgedInput(operationId);
+  }
+  private async releaseAcknowledgedInput(operationId: string): Promise<void> {
+    try { await this.options.releaseInputReceipt?.(operationId); }
+    catch (error) { this.reportError(asError(error)); }
   }
   kill(signal?: NodeJS.Signals | number): boolean {
     if (this.lost) { this.emit("error", this.lost); return false; }
@@ -230,6 +243,7 @@ export class KernelManagedProcess extends EventEmitter implements ManagedPipedPr
     const operationId = `process-resize:${randomUUID()}`;
     const receipt = await this.scoped.processResize({ ...this.address, operationId, cols, rows });
     requireAppliedProcessInteraction(receipt, { ...this.address, operationId, kernelEpoch: this.epoch, kind: 'resize', cols, rows });
+    await this.releaseAcknowledgedInput(operationId);
   }
   async release(): Promise<void> {
     if (this.options.retainOutput) throw new Error("Retained Agent process output belongs to its original operation");
@@ -390,7 +404,9 @@ export function createKernelProcessService(options: Options) {
     const epoch = options.client.kernelEpoch;
     if (!epoch) throw new Error("Native process epoch was lost during startup");
     validateSnapshot(initial, params, epoch);
-    const handle = new KernelManagedProcess(resolved.client, { workspaceId: params.workspaceId, processId: params.processId }, initial, report, () => { handles.delete(handle); }, { stdinIgnored });
+    const handle = new KernelManagedProcess(resolved.client, { workspaceId: params.workspaceId, processId: params.processId }, initial, report, () => { handles.delete(handle); }, {
+      stdinIgnored, releaseInputReceipt: operationId => resolved.client.releaseOperation(operationId),
+    });
     handles.add(handle);
     try {
       await handle.start();

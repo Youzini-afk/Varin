@@ -201,7 +201,7 @@ it("raw output above the native buffer bound reaches real exit before any reader
   await f.client.processSpawn(f.spawn("large", "process.stdout.write(Buffer.alloc(16*1024*1024,173));process.stderr.write('done');process.exitCode=7"));
   await waitFor(f.client, "large", (s) => s.pid !== null);
   await pause(200);
-  assert.equal((await f.client.health()).integrity, "ok");
+  assert.equal((await f.client.health()).integrity, "not_checked");
   const terminal = await waitFor(f.client, "large", (s) => !s.writerActive);
   assert.equal(terminal.status, "exited");
   assert.equal(terminal.exitCode, 7);
@@ -222,15 +222,22 @@ it("the Host stream adapter uses native push delivery and closes after complete 
     child.stderr.resume();
     let closed = false;
     child.once("close", () => { closed = true; });
+    await child.writeInput('retained:', 'caller-owned-input');
     const bytes = Buffer.alloc(256*1024, 201);
-    child.stdin.end(bytes);
+    await new Promise<void>((resolve, reject) => child.stdin.end(bytes, (error?: Error | null) => error ? reject(error) : resolve()));
     await child.completion;
     assert.equal(closed, true);
-    assert.deepEqual(Buffer.concat(chunks), bytes);
+    assert.deepEqual(Buffer.concat(chunks), Buffer.concat([Buffer.from('retained:'), bytes]));
     assert.equal(child.exitCode, 0);
     assert.ok(methods.includes("process.subscribe"));
     assert.equal(methods.includes("process.read"), false, "Host output delivery must not poll process.read");
     assert.equal((await service.list(f.workspace))[0]?.writerActive, false);
+    const database = new DatabaseSync(path.join(f.storageRoot, 'catalog.sqlite'), { readOnly: true });
+    try {
+      assert.deepEqual(database.prepare("SELECT operation_id FROM operations WHERE kind='process.write'").all().map(row => row.operation_id), ['caller-owned-input']);
+    } finally { database.close(); }
+    const retained = (await fs.readdir(path.join(f.storageRoot, 'process-receipts'))).filter(name => name.endsWith('.interaction'));
+    assert.equal(retained.length, 1, 'private protocol receipts are released; caller-owned input remains replayable');
   } finally { await service.dispose(); }
 }, 30_000);
 
@@ -783,7 +790,7 @@ it("a held subscription data credit cannot block stdin acknowledgements or nativ
       await pause();
     }
     assert.equal(dataEvents, 1);
-    assert.equal((await f.client.health()).integrity, "ok");
+    assert.equal((await f.client.health()).integrity, "not_checked");
     await f.client.processKill({ workspaceId: "ws", processId, force: true });
     while (!terminal) {
       if (observerFailure) throw observerFailure;

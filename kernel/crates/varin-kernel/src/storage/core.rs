@@ -56,7 +56,9 @@ impl Storage {
             .iter()
             .map(|value| value.to_string())
             .collect::<Vec<_>>();
-        if indexes != expected_indexes {
+        // Extra derived indexes are query plans, not another catalog format.
+        // Required indexes still have to exist before opening stored assets.
+        if expected_indexes.iter().any(|index| !indexes.contains(index)) {
             return Err(KernelError::Storage(format!(
                 "catalog index set is corrupt: expected {:?}, found {:?}",
                 expected_indexes, indexes
@@ -172,6 +174,7 @@ impl Storage {
         } else {
             Self::validate_catalog_schema(&conn)?;
         }
+        conn.execute_batch(CATALOG_QUERY_INDEXES)?;
         for directory in ["objects", "staging"] {
             fs::create_dir_all(root.join(directory))?;
         }

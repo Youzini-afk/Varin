@@ -70,7 +70,7 @@ export async function smokeKernelRelease({ webRoot, kernelDirectory = path.join(
       assert.equal(child.exitCode, 7);
       assert.match(output, /native-release-shell/);
       assert.ok((await processes.list(workspace)).every(process => !process.writerActive));
-      const health = await client.health();
+      const health = await client.health({ deep: true });
       assert.equal(health.integrity, 'ok');
       observation = { kernelEpoch: handshake.kernelEpoch, fixedRoot, structureRevision: units.revision, shellExitCode: child.exitCode, integrity: health.integrity };
     } finally {

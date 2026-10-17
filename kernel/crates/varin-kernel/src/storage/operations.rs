@@ -163,6 +163,23 @@ impl Storage {
             if owned.is_none() {
                 return Ok(false);
             }
+            // Acknowledged private pipe frames release their guardian receipt with
+            // the journal row. Keep it on failed/uncertain interactions so recovery
+            // can still inspect the original effect.
+            let process_id: Option<String> = self.conn.query_row(
+                "SELECT json_extract(result_json, '$.intent.address.processId') FROM operations WHERE operation_id=?1 AND kind IN ('process.write','process.resize') AND state='committed' AND json_extract(result_json, '$.receipt.state') IN ('applied','not_applied','partial')",
+                [operation_id], |row| row.get(0),
+            ).optional()?;
+            if let Some(process_id) = process_id {
+                let receipt = crate::process::interaction::path(
+                    &crate::process::receipt_path(&self.root, &process_id), operation_id,
+                );
+                match fs::remove_file(receipt) {
+                    Ok(()) => {},
+                    Err(error) if error.kind() == io::ErrorKind::NotFound => {},
+                    Err(error) => return Err(error.into()),
+                }
+            }
             self.conn.execute(
                 "DELETE FROM operation_owners WHERE operation_id = ?1 AND workspace_id = ?2",
                 params![operation_id, workspace_id],

@@ -75,7 +75,7 @@ it("R0/R6 saturation retains a bounded native window through parallel uploads, c
   expect(f.maximum()).toBe(KERNEL_REQUEST_WINDOW);
   expect(f.outstanding.size).toBe(0);
   await expect(f.actor.readBranch({ branchId: "cancel-large" })).rejects.toThrow(/branch not found/i);
-  expect((await f.actor.health()).integrity).toBe("ok");
+  expect((await f.actor.health()).integrity).toBe("not_checked");
 }, 30_000);
 
 it("R0/R6 truncated input drains the old epoch, rejects pending work and permits a clean restart", async () => {
@@ -92,7 +92,7 @@ it("R0/R6 truncated input drains the old epoch, rejects pending work and permits
     await restarted.start();
     const actor = restarted.scoped(await restarted.issueGrant({ grantId: "after-disconnect", owningWorkspace: "ws", executionWorkspace: "ws", pathScopes: [""], capabilities: ["storage.read", "storage.write"] }));
     assert.equal((await actor.readBranch({ branchId: "base", includeEntries: false })).root, before.root);
-    assert.equal((await actor.health()).integrity, "ok");
+    assert.equal((await actor.health()).integrity, "not_checked");
   } finally { await restarted.close(); }
 }, 30_000);
 
@@ -145,7 +145,7 @@ it("content beyond one frame round-trips while stalled data leaves control and c
     expect((await f.host.agentRuntimeRequest<{epoch: number}, 'runtime.status'>('runtime.status', {})).epoch).toBeGreaterThan(0);
   } finally { data.uncork(); }
   expect(await f.actor.getRecord('ws', 'cancel-body')).toBeNull();
-  expect((await f.actor.health()).integrity).toBe('ok');
+  expect((await f.actor.health()).integrity).toBe('not_checked');
 }, 30_000);
 
 it('Run inspection streams large configuration while cancellation returns a control receipt', async () => {

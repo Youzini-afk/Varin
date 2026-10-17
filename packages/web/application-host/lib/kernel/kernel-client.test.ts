@@ -118,7 +118,7 @@ test("real Rust kernel persists roots, CAS revisions, pins, and objects", { time
   assert.equal(reopenedCreate.root, created.root);
   const normalized = await client.readBranch({ branchId: "branch-test", paths: ["src\\file.txt"] });
   assert.equal(normalized.entries[0]?.path, "src/file.txt");
-  assert.equal((await client.health({ deep: false })).integrity, "ok");
+  assert.equal((await client.health({ deep: false })).integrity, "not_checked");
   await assert.rejects(
     client.createBranch({ operationId: "op-create", branchId: "operation-reuse", workspaceId: "workspace-test", draftBasePaths: [], captureScopes: [], entries: [] }),
     /operationId.*reused|different parameters/i,
@@ -264,7 +264,7 @@ test("real Rust kernel persists roots, CAS revisions, pins, and objects", { time
   assert.equal((await client.health({ deep: true })).integrity, "ok");
   const diff = await client.diffRoots({ leftRoot: String(created.root), rightRoot: changed.root });
   assert.deepEqual(diff.changed, ["src/file.txt"]);
-  assert.equal((await client.health()).integrity, "ok");
+  assert.equal((await client.health()).integrity, "not_checked");
   await client.close();
   const reopenedHost = createKernelClient({ hostId: "kernel-test-host", storageRoot: root, buildVersion, kernelPath, allowCargoDevRunner: false });
   clients.push(reopenedHost);
@@ -561,7 +561,7 @@ test("queued long branch build observes cancellation and leaves the kernel usabl
   );
   setTimeout(() => controller.abort(), 0);
   await pending;
-  assert.equal((await client.health()).integrity, "ok");
+  assert.equal((await client.health()).integrity, "not_checked");
   assert.equal((await client.releaseBlob(blob.ownerId)).released, true);
 });
 

@@ -56,7 +56,7 @@ it('waits in overlap order, lets unrelated resources pass, and leaves control an
 
   expect(await f.owner.fileLeaseWait(f.params('unrelated-c', ['c']))).toMatchObject({ status: 'acquired' });
   expect(await f.owner.fileLeaseAcquire(f.params('cannot-jump-b', ['b']))).toMatchObject({ status: 'busy' });
-  expect((await f.owner.health()).integrity).toBe('ok');
+  expect((await f.owner.health()).integrity).toBe('not_checked');
   expect((await f.host.agentRuntimeRequest<{ epoch: number }, 'runtime.status'>('runtime.status', {})).epoch).toBeGreaterThan(0);
   expect(first.settled()).toBe(false);
   expect(second.settled()).toBe(false);
@@ -83,7 +83,7 @@ it('cancels only the original waiter and never treats a late abort as release of
   controller.abort();
   await rejected;
   expect(survivor.settled()).toBe(false);
-  expect((await f.owner.health()).integrity).toBe('ok');
+  expect((await f.owner.health()).integrity).toBe('not_checked');
   await f.release(f.owner, 'holder');
   expect(await survivor.result).toMatchObject({ leaseId: 'surviving-waiter', status: 'acquired' });
   expect(await f.release(f.owner, 'cancelled-waiter')).toMatchObject({ released: false });
@@ -120,7 +120,7 @@ it('withdraws a revoked grant waiter without poisoning another grant or leaving 
   expect(survivor.settled()).toBe(false);
   await f.release(f.owner, 'holder');
   expect(await survivor.result).toMatchObject({ status: 'acquired', leaseId: 'live-waiter' });
-  expect((await live.health()).integrity).toBe('ok');
+  expect((await live.health()).integrity).toBe('not_checked');
 
   const replacement = outcome(f.owner.fileLeaseWait(f.params('after-owner-revocation', ['shared'])));
   await f.accepted('after-owner-revocation');

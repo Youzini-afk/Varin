@@ -69,7 +69,7 @@ fn cold_blob_hash_is_off_actor_and_cancel_waits_for_actual_reader() {
     hold.entered();
     assert_eq!(
         f.short("storage.health", json!({}), Some("writer"))["integrity"],
-        "ok"
+        "not_checked"
     );
     assert_eq!(
         f.short(
@@ -300,7 +300,7 @@ fn fixed_resource_read_uses_real_blob_worker_and_original_reply() {
     hold.entered();
     assert_eq!(
         f.short("storage.health", json!({}), Some("writer"))["integrity"],
-        "ok"
+        "not_checked"
     );
     assert!(matches!(reply.try_recv(), Err(mpsc::TryRecvError::Empty)));
     hold.release();

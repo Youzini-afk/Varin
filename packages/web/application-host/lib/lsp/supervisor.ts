@@ -127,6 +127,8 @@ interface LanguageSessionRecord extends ManagedProcessOwner<ManagedPipedProcessH
   resolveCounter: number;
   root: string;
   rpc: JsonRpcClient | null;
+  watchedFiles: Map<string, number>;
+  watchedFilesTimer: ReturnType<typeof setTimeout> | null;
   serverCapabilities: ServerCapabilities;
   status: 'degraded' | 'failed' | 'ready' | 'starting';
   usedAt: number;
@@ -509,6 +511,9 @@ export const createLanguageSupervisor = ({
   const disposeRecord = (record: LanguageSessionRecord | null | undefined, reason = 'Language server stopped'): Promise<void> => {
     if (!record) return Promise.resolve();
     if (record.pendingTermination) return record.pendingTermination;
+    if (record.watchedFilesTimer) clearTimeout(record.watchedFilesTimer);
+    record.watchedFilesTimer = null;
+    record.watchedFiles.clear();
     clearRecordDiagnostics(record);
     record.status = 'degraded'; record.message = reason + '; waiting for process exit';
     emit(record.workspaceId, { kind: 'status', snapshot: snapshotFor(record) });
@@ -584,6 +589,8 @@ export const createLanguageSupervisor = ({
     nextDocumentVersion: 0,
     child: null,
     rpc: null,
+    watchedFiles: new Map(),
+    watchedFilesTimer: null,
     root: input.root,
     serverCapabilities: {},
     callHierarchyItems: new Map<string, unknown>(),
@@ -1385,6 +1392,7 @@ export const createLanguageSupervisor = ({
       }
       try {
         const queryDeadline = AbortSignal.timeout(requestTimeoutMs);
+        flushWatchedFiles(record);
         const raw = await record.rpc.request(method, params, options.signal ? AbortSignal.any([options.signal, queryDeadline]) : queryDeadline);
         if (sessions.get(sessionKey(workspaceId, languageId, view)) !== record) {
           return staleResult('generation');
@@ -1475,6 +1483,15 @@ export const createLanguageSupervisor = ({
     },
   });
 
+  const flushWatchedFiles = (record: LanguageSessionRecord): void => {
+    if (record.watchedFilesTimer) clearTimeout(record.watchedFilesTimer);
+    record.watchedFilesTimer = null;
+    const changes = [...record.watchedFiles].map(([uri, type]) => ({ uri, type }));
+    record.watchedFiles.clear();
+    if (!changes.length || !record.rpc || !['ready', 'degraded'].includes(record.status)) return;
+    record.rpc.notify('workspace/didChangeWatchedFiles', { changes });
+  };
+
   const observeDocumentMutation = (event: Pick<DocumentMutationObservation, 'workspaceId' | 'resourceId' | 'kind'>, targetView?: LanguageViewId): void => {
     for (const [key, record] of sessions) {
       if (record.workspaceId !== event.workspaceId || (targetView ? record.view !== targetView : Boolean(sourceView(record.workspaceId, record.view))) || !record.rpc || (record.status !== 'ready' && record.status !== 'degraded')) continue;
@@ -1513,7 +1530,14 @@ export const createLanguageSupervisor = ({
             record.diagnosticSnapshots.delete(resourceId);
             desiredDocuments.get(key)?.delete(resourceId);
           }
-          record.rpc.notify('workspace/didChangeWatchedFiles', { changes: [{ uri: toFileUri(absolute), type: event.kind === 'created' ? 1 : event.kind === 'deleted' ? 3 : 2 }] });
+          // Filesystem batches are invalidations, not one durable pipe operation
+          // per changed path and per server. Retain the latest fact for each URI;
+          // feature requests flush this batch before querying the same server.
+          record.watchedFiles.set(toFileUri(absolute), event.kind === 'created' ? 1 : event.kind === 'deleted' ? 3 : 2);
+          record.watchedFilesTimer ??= setTimeout(() => {
+            try { flushWatchedFiles(record); }
+            catch (error) { setFailed(record, error instanceof Error ? error.message : 'Language connection failed'); }
+          }, 20);
         } catch (error) { setFailed(record, error instanceof Error ? error.message : 'Language connection failed'); }
       };
       if (open?.fixed) continue;
