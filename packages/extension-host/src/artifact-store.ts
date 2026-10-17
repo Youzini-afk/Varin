@@ -534,7 +534,8 @@ export class ExtensionArtifactStore {
     // Stage beside the destination so publishing remains one atomic rename,
     // including when the application's data directory is on another volume.
     await mkdir(this.directory, { recursive: true });
-    const temporaryRoot = await mkdtemp(join(this.directory, ".prepare-"));
+    // Containment checks compare real paths, including Windows short temp names.
+    const temporaryRoot = await realpath(await mkdtemp(join(this.directory, ".prepare-")));
     const materializedSourceRoot = join(temporaryRoot, "source");
     const artifactRoot = join(temporaryRoot, "artifact");
     try {
