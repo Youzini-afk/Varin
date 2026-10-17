@@ -2,8 +2,8 @@ import {
   LEFT_FACE_CELL_OPACITIES,
   LOGO_MARK_SCALE,
   RIGHT_FACE_CELL_OPACITIES,
-} from './varin-logo-geometry';
-import { VARIN_MARK_PATHS, VARIN_MARK_SECONDARY_OPACITY, VARIN_MARK_VIEWBOX } from './varin-mark';
+} from './varin-logo-geometry.js';
+import { VARIN_MARK_PATHS, VARIN_MARK_SECONDARY_OPACITY, VARIN_MARK_VIEWBOX } from './varin-mark.js';
 
 /**
  * Markup for the one real 3D object in the splash scene.

@@ -4,8 +4,8 @@ import {
   floorInscribedRadius,
   floorReach,
   HORIZON_RISE_PX,
-} from './varin-splash-camera';
-import { WORKBENCH_TRANSITION_HANDOFF_ATTRIBUTE } from '../../lib/workbench/transition-paint-handoff';
+} from './varin-splash-camera.js';
+import { WORKBENCH_TRANSITION_HANDOFF_ATTRIBUTE } from '../../lib/workbench/transition-paint-handoff.js';
 
 /**
  * The splash floor: a grid put into the camera's floor plane, with the cube standing on one of its cells.

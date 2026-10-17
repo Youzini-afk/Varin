@@ -29,6 +29,10 @@ Same-origin embedded Thread iframes complete an authenticated parent-frame hands
 
 The `preload.ts` bridge exposes desktop-only APIs to the web UI through `window.__VARIN_DESKTOP__`. Privileged commands are checked in `main.ts`, not only in the UI.
 
+The early startup document uses the shared loading scene's geometry, cube markup and Canvas renderer.
+It holds the first frame without a playback loop, using the resolved desktop theme and saved splash
+palette, so the application loading animation starts from the same composition.
+
 ## Main files
 
 | File | Purpose |

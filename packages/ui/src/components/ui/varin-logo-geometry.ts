@@ -1,5 +1,5 @@
-import { projectPoint } from './varin-splash-camera';
-import { VARIN_MARK_PATHS, VARIN_MARK_POLYGONS, VARIN_MARK_VIEWBOX_SIZE } from './varin-mark';
+import { projectPoint } from './varin-splash-camera.js';
+import { VARIN_MARK_PATHS, VARIN_MARK_POLYGONS, VARIN_MARK_VIEWBOX_SIZE } from './varin-mark.js';
 
 /**
  * The startup cube projected through its shared camera, including the approved flat mark.

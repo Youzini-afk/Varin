@@ -5,7 +5,7 @@ import {
   SPLASH_CAMERA_SPIN_DEG,
   SPLASH_CAMERA_TILT_CSS_PROPERTY,
   SPLASH_CAMERA_TILT_DEG,
-} from './varin-splash-camera';
+} from './varin-splash-camera.js';
 import {
   CUBE_EDGE_PX,
   VARIN_SPLASH_COLORS,
@@ -17,7 +17,7 @@ import {
   type VarinSplashPhase,
   type VarinSplashTempo,
   type SplashPlaneColors,
-} from './varin-splash-lattice';
+} from './varin-splash-lattice.js';
 
 export type SplashCanvasPlaybackKind = 'covered' | 'covering' | 'idle' | 'revealing';
 
@@ -377,7 +377,7 @@ export function mountSplashTileCanvas(
     colorContext.fillStyle = resolved;
     colorContext.fillRect(0, 0, 1, 1);
     const value = colorContext.getImageData(0, 0, 1, 1).data;
-    return [value[0] / 255, value[1] / 255, value[2] / 255, value[3] / 255];
+    return [value[0]! / 255, value[1]! / 255, value[2]! / 255, value[3]! / 255];
   };
   const background = rgba(options.colors.background);
   const line = rgba(options.colors.line);
@@ -677,7 +677,8 @@ void main() {
             project(value.x - half, value.y + half, viewport, tiltDeg),
           ];
           if (corners.some((corner) => corner === null)) continue;
-          const [topLeft, topRight, bottomRight, bottomLeft] = corners as Array<{ x: number; y: number }>;
+          type Point = { x: number; y: number };
+          const [topLeft, topRight, bottomRight, bottomLeft] = corners as [Point, Point, Point, Point];
           const fill = background.map((channel, index) => mix(channel, pulse[index] ?? channel, value.fillMix));
           context.globalAlpha = value.opacity;
           context.fillStyle = cssColor(fill);
@@ -922,6 +923,7 @@ void main() {
 export const splashGroundScript = (
   elementId: string,
   colors: Pick<SplashPlaneColors, 'background' | 'cell' | 'line'> = VARIN_SPLASH_COLORS,
+  animation: { breathe?: boolean } = {},
 ): string => {
   const playback = resolveSplashCanvasPlayback({
     leaving: false,
@@ -930,7 +932,7 @@ export const splashGroundScript = (
     tempo: 'standard',
   });
   const options = createSplashCanvasMountOptions({
-    breathe: true,
+    breathe: animation.breathe ?? true,
     colors,
     direction: 'forward',
     mode: 'boot',
