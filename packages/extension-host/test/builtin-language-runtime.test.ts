@@ -12,6 +12,24 @@ import {
   resolveVarinBuiltinPackageRoot,
 } from "@varin/extension-builtins/host";
 import { ApplicationExtensionRuntime } from "../src/application-runtime.js";
+import { HostCapabilityRegistry } from '../src/capability-registry.js';
+
+test('teardown admits only Host-declared cleanup methods of the original granted capability', async () => {
+  const registry = new HostCapabilityRegistry();
+  const owner = { extensionId: 'example.language', extensionVersion: '1.0.0', entrypointId: 'host', instanceKey: 'original', generation: 1 };
+  const grants = [{ capability: 'workspace.language', realm: 'host' as const, manifestVersion: '1.0.0', granted: false, updatedAt: new Date().toISOString() }];
+  const signal = new AbortController().signal;
+  const calls: string[] = [];
+  registry.register('workspace.language', (method, _params, context) => {
+    assert.equal(context.owner, owner); calls.push(method); return null;
+  }, { cleanupMethods: ['unregisterProvider'] });
+  const invoke = (method: string, disposing: boolean, original = grants) => registry.invoke(owner, original, 'workspace.language', method, {}, signal, undefined, disposing);
+  assert.throws(() => invoke('registerProvider', true), /not granted/);
+  assert.throws(() => invoke('unregisterProvider', false), /not granted/);
+  assert.throws(() => invoke('unregisterProvider', true, []), /not granted/);
+  await invoke('unregisterProvider', true);
+  assert.deepEqual(calls, ['unregisterProvider']);
+});
 
 test("built-in package roots use Electron's physical ASAR-unpacked directory on every desktop path style", () => {
   const windowsVirtual = "D:\\Varin\\resources\\app.asar\\node_modules\\@varin\\extension-builtins\\dist\\builtin-packages\\typescript-language";
@@ -38,7 +56,7 @@ test("the built-in TypeScript language extension materializes lazily and unregis
   runtime.capabilities.register("workspace.language", async (method, params) => {
     calls.push({ method, params });
     return { status: method === "registerProvider" ? "registered" : "unregistered" };
-  });
+  }, { cleanupMethods: ['unregisterProvider'] });
   try {
     const started = await runtime.start();
     const entry = started.catalog.extensions.find((candidate) => (

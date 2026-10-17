@@ -2707,6 +2707,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   const unregisterLanguageCapability = extensionRuntime.capabilities.register(
     'workspace.language',
     createLanguageCapabilityHandler(languageSupervisor),
+    { cleanupMethods: ['unregisterProvider'] },
   );
   const runRuntime = createRunRuntime({
     documents: documentsAuthority,
@@ -2722,10 +2723,12 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   const unregisterDebugCapability = extensionRuntime.capabilities.register(
     'workspace.debug',
     createWorkspaceDebugCapabilityHandler(runRuntime.debug),
+    { cleanupMethods: ['unregisterAdapter'] },
   );
   const unregisterTestCapability = extensionRuntime.capabilities.register(
     'workspace.test',
     createWorkspaceTestCapabilityHandler(runRuntime.tests),
+    { cleanupMethods: ['unregisterProvider'] },
   );
   await extensionRuntime.start().catch((error) => {
     console.warn('[Varin Extensions] Host reconciliation failed:', error?.message || error);

@@ -19,12 +19,14 @@ export type HostCapabilityHandler = (
 
 export class HostCapabilityRegistry {
   readonly #handlers = new Map<string, HostCapabilityHandler>();
+  readonly #cleanupMethods = new Map<string, ReadonlySet<string>>();
 
-  register(capability: string, handler: HostCapabilityHandler): () => void {
+  register(capability: string, handler: HostCapabilityHandler, options?: { cleanupMethods?: readonly string[] }): () => void {
     if (!isVarinExtensionId(capability)) throw new Error(`Invalid Host capability ID: ${capability}`);
     if (this.#handlers.has(capability)) throw new Error(`Host capability is already registered: ${capability}`);
     this.#handlers.set(capability, handler);
-    return () => { if (this.#handlers.get(capability) === handler) this.#handlers.delete(capability); };
+    this.#cleanupMethods.set(capability, new Set(options?.cleanupMethods));
+    return () => { if (this.#handlers.get(capability) === handler) { this.#handlers.delete(capability); this.#cleanupMethods.delete(capability); } };
   }
 
   invoke(
@@ -35,11 +37,14 @@ export class HostCapabilityRegistry {
     params: JsonValue,
     signal: AbortSignal,
     invocation?: HostInvocationScope,
+    disposing = false,
   ): Promise<JsonValue> {
     signal.throwIfAborted();
     const granted = grants.some((grant) => (
       grant.realm === "host"
-      && grant.granted
+      // Only trusted Host registrations can admit owner-scoped release methods
+      // during teardown. Revocation still denies every ordinary capability call.
+      && (grant.granted || disposing && this.#cleanupMethods.get(capability)?.has(method))
       && grant.capability === capability
       && grant.manifestVersion === owner.extensionVersion
     ));
