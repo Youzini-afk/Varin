@@ -2148,6 +2148,8 @@ export const dict: Record<I18nKey, string> = {
   'filesView.diagram.closeDiagramView': '다이어그램 보기 닫기',
   'filesView.diagram.saveDiagram': '다이어그램 저장',
   'contextUsage.aria.label': '컨텍스트 사용량',
+  'contextUsage.tooltip.lastRequest': "최근 모델 요청의 출력을 포함한 사용량입니다.",
+  'contextUsage.tooltip.unavailable': "컨텍스트 사용량이 아직 없습니다.",
   'contextUsage.mobile.title': '컨텍스트 사용량',
   'contextUsage.mobile.usedTokens': '사용한 토큰',
   'contextUsage.mobile.contextLimit': '컨텍스트 한도',

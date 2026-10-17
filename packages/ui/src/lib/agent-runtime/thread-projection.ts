@@ -2,6 +2,7 @@ import { subscribeRuntimeEndpointWillChange } from '@varin/application-client';
 import type { ThreadIdentity, ThreadSnapshot, ThreadsAPI } from '@varin/application-client';
 import type { AgentResourceReference } from '@varin/protocol';
 import { PartialJson } from '@/lib/interactive-ui/partial-json';
+import { useThreadContextUsageStore } from '@/stores/useThreadContextUsageStore';
 
 interface ProgressView {
   stream: string;
@@ -74,6 +75,7 @@ export class ThreadProjection {
             }
           }
           this.publishCurrentProgress();
+          useThreadContextUsageStore.getState().observe(snapshot);
           this.publish(snapshot);
         }
       }

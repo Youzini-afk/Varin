@@ -1994,6 +1994,8 @@ export const dict = {
   'filesView.document.outsideWorkspace': 'Ce chemin est en dehors de l\'espace de travail et ne peut pas être modifié ici.',
   'filesView.editor.htmlPreviewTitle': 'Aperçu HTML',
   'contextUsage.aria.label': 'Utilisation du contexte',
+  'contextUsage.tooltip.lastRequest': "Selon la dernière requête au modèle, sortie comprise.",
+  'contextUsage.tooltip.unavailable': "Utilisation du contexte pas encore disponible.",
   'contextUsage.mobile.title': 'Utilisation du contexte',
   'contextUsage.mobile.usedTokens': 'Jetons utilisés',
   'contextUsage.mobile.contextLimit': 'Limite de contexte',

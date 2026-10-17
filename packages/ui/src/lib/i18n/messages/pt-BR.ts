@@ -2223,6 +2223,8 @@ export const dict: Record<I18nKey, string> = {
   "filesView.diagram.closeDiagramView": "Fechar visualização de diagrama",
   "filesView.diagram.saveDiagram": "Salvar diagrama",
   "contextUsage.aria.label": "Uso do contexto",
+  'contextUsage.tooltip.lastRequest': "Com base na última solicitação ao modelo, incluindo a resposta.",
+  'contextUsage.tooltip.unavailable': "O uso do contexto ainda não está disponível.",
   "contextUsage.mobile.title": "Uso do contexto",
   "contextUsage.mobile.usedTokens": "Tokens usados",
   "contextUsage.mobile.contextLimit": "Limite de contexto",

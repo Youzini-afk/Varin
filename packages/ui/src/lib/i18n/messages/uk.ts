@@ -2201,6 +2201,8 @@ export const dict: Record<I18nKey, string> = {
   "filesView.diagram.closeDiagramView": "Закрити перегляд діаграми",
   "filesView.diagram.saveDiagram": "Зберегти діаграму",
   "contextUsage.aria.label": "Використання контексту",
+  'contextUsage.tooltip.lastRequest': "За останнім запитом до моделі, включно з відповіддю.",
+  'contextUsage.tooltip.unavailable': "Використання контексту ще недоступне.",
   "contextUsage.mobile.title": "Використання контексту",
   "contextUsage.mobile.usedTokens": "Використані токени",
   "contextUsage.mobile.contextLimit": "Обмеження контексту",

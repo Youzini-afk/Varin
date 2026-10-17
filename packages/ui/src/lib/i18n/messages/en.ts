@@ -2189,6 +2189,8 @@ export const dict = {
   'filesView.diagram.closeDiagramView': 'Close diagram view',
   'filesView.diagram.saveDiagram': 'Save diagram',
   'contextUsage.aria.label': 'Context usage',
+  'contextUsage.tooltip.lastRequest': "Based on the last model request, including its output.",
+  'contextUsage.tooltip.unavailable': "Context usage is not available yet.",
   'contextUsage.mobile.title': 'Context Usage',
   'contextUsage.mobile.usedTokens': 'Used tokens',
   'contextUsage.mobile.contextLimit': 'Context limit',

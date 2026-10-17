@@ -68,6 +68,21 @@ fn pi_input_tokens(usage: &UsageReceipt) -> Option<u64> {
     separate_cache_input_tokens(usage)
 }
 
+/// Last request's observed context footprint for presentation. Keep protocol-specific cache
+/// accounting here alongside budget calibration, rather than teaching renderers those rules.
+pub(crate) fn reported_context_tokens(family: &str, usage: &UsageReceipt) -> Option<u64> {
+    if usage.measurement == UsageMeasurement::Missing { return None; }
+    let input = match family {
+        anthropic::FAMILY => separate_cache_input_tokens(usage),
+        bedrock::FAMILY => bedrock_input_tokens(usage),
+        pi_messages::FAMILY => pi_input_tokens(usage),
+        chat::FAMILY | responses::FAMILY | codex::FAMILY | azure::FAMILY
+        | google::FAMILY | google::VERTEX_FAMILY | mistral::FAMILY => inclusive_input_tokens(usage),
+        _ => None,
+    }?;
+    input.checked_add(usage.output_tokens?)
+}
+
 #[derive(Clone, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
 pub struct CredentialDispatch {

@@ -2227,6 +2227,8 @@ export const dict: Record<I18nKey, string> = {
   'contextSidebar.tokens.output': 'Wyjście',
   'contextSidebar.tokens.reasoning': 'Rozumowanie',
   'contextUsage.aria.label': 'Użycie kontekstu',
+  'contextUsage.tooltip.lastRequest': "Na podstawie ostatniego żądania do modelu, wraz z odpowiedzią.",
+  'contextUsage.tooltip.unavailable': "Użycie kontekstu nie jest jeszcze dostępne.",
   'contextUsage.mobile.contextLimit': 'Limit kontekstu',
   'contextUsage.mobile.outputLimit': 'Limit wyjścia',
   'contextUsage.mobile.title': 'Użycie kontekstu',

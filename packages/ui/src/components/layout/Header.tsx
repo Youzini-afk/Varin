@@ -19,6 +19,8 @@ import { useUIStore, type ContextPanelMode, type MainTab } from '@/stores/useUIS
 import { ContextPanelControls } from './ContextPanelControls';
 import { useThreadStore } from '@/stores/useThreadStore';
 import { ThreadTokenUsage } from '@/components/thread/ThreadTokenUsage';
+import { ContextUsageDisplay } from '@/components/ui/ContextUsageDisplay';
+import { contextUsageKey, useThreadContextUsageStore } from '@/stores/useThreadContextUsageStore';
 import { threadSubtreeIds } from '@/lib/agent-runtime/thread-tree';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
@@ -113,6 +115,7 @@ export const Header: React.FC<HeaderProps> = ({
 
   const { threads: threadAPI } = useRuntimeAPIs();
   const identity = useThreadStore(state => state.selectedIdentity);
+  const contextUsage = useThreadContextUsageStore(state => identity ? state.views[contextUsageKey(identity)]?.usage : null);
   const currentSessionId = identity?.threadId ?? null;
   const currentSessionSummary = useThreadStore(state => state.threads.find(thread => thread.thread_id === state.selectedIdentity?.threadId));
   const threadCatalog = useThreadStore(state => state.threads);
@@ -917,10 +920,15 @@ export const Header: React.FC<HeaderProps> = ({
         <div className="flex shrink-0 items-center gap-1">
           <OpenInAppButton directory={actionDirectory} className="mr-1" />
           <WorkbenchServices />
-          {openDirectory && <Tooltip><TooltipTrigger asChild><button type="button" className={DESKTOP_HEADER_ICON_BUTTON_CLASS}
-            aria-label={t('contextSidebar.section.context')} aria-pressed={activeContextMode === 'context'}
-            onClick={() => activeContextMode === 'context' ? closeContextPanel(openDirectory) : openContextOverview(openDirectory)}><Icon name="pie-chart" className="size-4" /></button></TooltipTrigger>
-            <TooltipContent>{t('contextSidebar.section.context')}</TooltipContent></Tooltip>}
+          {openDirectory && <ContextUsageDisplay
+            {...contextUsage}
+            size="compact" hideIcon showPercentIcon
+            pressed={activeContextMode === 'context'}
+            onClick={() => activeContextMode === 'context' ? closeContextPanel(openDirectory) : openContextOverview(openDirectory)}
+            className="h-8"
+            valueClassName="typography-ui-label font-medium leading-none text-foreground"
+            percentIconClassName="h-4.5 w-4.5"
+          />}
           <ContextPanelControls />
           <WindowsWindowControls visible={usesFramelessChrome && windowControlsSide === 'right'} position="right" />
         </div>

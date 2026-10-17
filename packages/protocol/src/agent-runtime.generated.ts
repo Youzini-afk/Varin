@@ -55,7 +55,7 @@ export interface ModelPresentationParams {
   requestIds: string[];
 }
 
-export interface ModelPresentation { requestId: string; providerFamily: string; modelId: string; usage: InferenceUsage; }
+export interface ModelPresentation { requestId: string; providerFamily: string; modelId: string; contextTokens?: number | null; usage: InferenceUsage; }
 
 export interface ThreadUsageParams {
   threadId: string;

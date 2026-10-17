@@ -1,4 +1,18 @@
 use super::*;
+
+#[test]
+fn context_display_uses_protocol_cache_accounting() {
+    let mut usage = UsageReceipt { measurement: UsageMeasurement::Actual, input_tokens: Some(100),
+        output_tokens: Some(20), cached_input_tokens: Some(40), cache_write_tokens: Some(10),
+        raw: Some(json!({"totalTokens":170})), ..Default::default() };
+    assert_eq!(reported_context_tokens(chat::FAMILY, &usage), Some(120));
+    assert_eq!(reported_context_tokens(anthropic::FAMILY, &usage), Some(170));
+    assert_eq!(reported_context_tokens(bedrock::FAMILY, &usage), Some(170));
+    usage.cached_input_tokens = None;
+    assert_eq!(reported_context_tokens(anthropic::FAMILY, &usage), None);
+    usage.measurement = UsageMeasurement::Missing;
+    assert_eq!(reported_context_tokens(chat::FAMILY, &usage), None);
+}
 use serde_json::json;
 use std::sync::atomic::{AtomicUsize, Ordering};
 struct Credentials(AtomicUsize);

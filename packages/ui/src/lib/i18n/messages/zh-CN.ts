@@ -2249,6 +2249,8 @@ export const dict: Record<I18nKey, string> = {
   'filesView.diagram.closeDiagramView': '关闭图表视图',
   'filesView.diagram.saveDiagram': '保存图表',
   'contextUsage.aria.label': '上下文用量',
+  'contextUsage.tooltip.lastRequest': "按最近一次模型请求统计，包含该次输出。",
+  'contextUsage.tooltip.unavailable': "暂未取得上下文用量。",
   'contextUsage.mobile.title': '上下文用量',
   'contextUsage.mobile.usedTokens': '已用 token',
   'contextUsage.mobile.contextLimit': '上下文上限',
