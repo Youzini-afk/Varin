@@ -1588,6 +1588,48 @@ fn media_provider(family: &str, accepts: bool) -> Box<dyn ModelProvider> {
         _ => unreachable!(),
     }
 }
+#[test]
+fn tool_parameter_schemas_reach_every_protocol_as_objects_without_changing_the_original() {
+    let schema = json!({"oneOf":[
+        {"type":"object","additionalProperties":false,"properties":{
+            "op":{"const":"launch"},"binary":{"type":"string"}},"required":["op"]},
+        {"type":"object","additionalProperties":false,"properties":{
+            "op":{"const":"act"},"act":{"type":"object","properties":{
+                "kind":{"enum":["click","type"]},"text":{"type":"string"}}}},"required":["op","act"]}
+    ],"$defs":{"selection":{"enum":["auto",null]}},
+        "examples":[{"const":"ordinary user data","type":"ordinary user data"}]});
+    for family in MEDIA_FAMILIES {
+        let provider = media_provider(family, true);
+        let mut request = view(family);
+        request.binding.tools[0].name = "computer_browser".into();
+        request.binding.tools[0].schema = schema.clone();
+        let wire = provider.serialize(&request, None).unwrap().to_value();
+        let parameters = match family {
+            responses::FAMILY | azure::FAMILY | codex::FAMILY => {
+                assert_eq!(wire["tools"][0]["strict"], false, "{family}: optional parameters keep their meaning");
+                &wire["tools"][0]["parameters"]
+            }
+            chat::FAMILY | mistral::FAMILY => &wire["tools"][0]["function"]["parameters"],
+            anthropic::FAMILY => &wire["tools"][0]["input_schema"],
+            bedrock::FAMILY => &wire["toolConfig"]["tools"][0]["toolSpec"]["inputSchema"]["json"],
+            google::FAMILY | google::VERTEX_FAMILY => &wire["tools"][0]["functionDeclarations"][0]["parametersJsonSchema"],
+            pi_messages::FAMILY => &wire["context"]["messages"][0]["toolsAdded"][0]["parameters"],
+            _ => unreachable!(),
+        };
+        assert_eq!(parameters["type"], "object", "{family}");
+        assert!(parameters["properties"].is_object(), "{family}");
+        assert_eq!(parameters["oneOf"][0]["properties"]["op"], json!({"type":"string","enum":["launch"]}), "{family}");
+        assert_eq!(parameters["oneOf"][1]["required"], json!(["op","act"]), "{family}");
+        assert_eq!(parameters["$defs"]["selection"]["type"], json!(["string","null"]), "{family}");
+        assert_eq!(parameters["examples"], schema["examples"], "{family}: examples are not schema nodes");
+        assert_eq!(request.binding.tools[0].schema, schema, "{family}: original remains authoritative");
+        request.binding.tools[0].schema = json!({"type":"array","items":{"type":"string"}});
+        let error = provider.serialize(&request, None).err().expect("nonobject parameters cannot be sent");
+        assert_eq!(error.code, "invalid_tool_schema", "{family}");
+        assert!(error.message.contains("computer_browser"), "{family}: identify the invalid declaration");
+    }
+}
+
 fn paired_media_view(family: &str, mime: &str) -> RequestView {
     let mut request = view(family);
     for call_id in ["first", "second"] {
@@ -1997,9 +2039,11 @@ fn accepted_job_and_not_dispatched_receipts_keep_their_data_and_media_in_each_pr
                         .flat_map(|item| item["content"].as_array().unwrap())
                     {
                         if family == anthropic::FAMILY && part["type"] == "tool_result" {
+                            assert_eq!(part["is_error"], !receipts.is_empty());
                             receipts.push(text(&part["content"][0]["text"]));
                         }
                         if family == bedrock::FAMILY && part.get("toolResult").is_some() {
+                            assert_eq!(part["toolResult"]["status"], if receipts.is_empty() { "success" } else { "error" });
                             receipts.push(text(&part["toolResult"]["content"][0]["text"]));
                         }
                     }
@@ -2011,6 +2055,7 @@ fn accepted_job_and_not_dispatched_receipts_keep_their_data_and_media_in_each_pr
                         .iter()
                         .filter(|item| item["role"] == "toolResult")
                     {
+                        assert_eq!(item["isError"], !receipts.is_empty());
                         receipts.push(text(&item["content"][0]["text"]));
                     }
                 }

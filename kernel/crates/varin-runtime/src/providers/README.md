@@ -75,6 +75,13 @@ including valid noncanonical JSON. No transport may reserialize the body after s
 fragments plus a complete wire buffer still cost memory; vector scans, final assembly, durable
 encoding/hashing and media work remain. This is local reuse, not remote incremental transmission.
 
+Tool parameter projection is shared by the built-in protocols in [tool_schema.rs](tool_schema.rs).
+Object unions and local references receive an explicit object root; constants become typed singleton
+enums. Alternatives, definitions, required fields and ordinary example/default data stay intact.
+The original declaration and its version remain the execution validator's authority. Explicit nonobject
+parameter schemas fail locally with the tool name before HTTP dispatch. Projection uses the existing
+configuration-fragment holder, so unchanged tools are not recompiled for every model step.
+
 ## Dispatch and stream semantics
 
 [Connection and transport](mod.rs) resolve the credential reference immediately before dispatch via
@@ -108,6 +115,10 @@ Responses preserves original output items for same-connection continuation. Chat
 assistant wire message while retaining semantic calls for cross-family replay, avoiding duplicate calls.
 `legacy_max_tokens`, stream usage and reasoning choices are explicit configuration, and unsupported
 vendor deltas fail rather than disappearing.
+Responses, Azure and Codex explicitly send `strict:false` for ordinary function tools. Tool declarations
+can have optional fields and full JSON Schema alternatives; server normalization must not turn omitted
+fields into required nullable values. Invocation validation remains with the original tool owner. See
+the [function-calling contract](https://developers.openai.com/api/docs/guides/function-calling#strict-mode).
 Chat sampling options cannot expand the adapter's single-choice contract: a non-default `n` is
 rejected during binding, before credentials or a potentially billable request are dispatched.
 

@@ -284,7 +284,10 @@ impl ChatProvider {
         let mut body = RequestBody::from(json!({"model":view.binding.model,"stream":true,"n":1}));
         body.insert_fragments("messages", messages);
         if !view.binding.tools.is_empty() {
-            body.insert_frozen("tools", compiler.field("tools", || Value::Array(view.binding.tools.iter().map(|tool|json!({"type":"function","function":{"name":tool.name,"description":tool.description,"parameters":tool.schema}})).collect())));
+            body.insert_frozen("tools", compiler.field("tools", || {
+                view.binding.tools.iter().map(|tool| Ok(json!({"type":"function","function":{"name":tool.name,"description":tool.description,"parameters":tool_schema::parameters(tool)?}})))
+                    .collect::<Result<Vec<_>, ExecutionError>>().map(Value::Array)
+            })?);
         }
         if self.include_stream_usage {
             body.insert("stream_options", json!({"include_usage":true}));

@@ -138,7 +138,8 @@ fn anthropic_blocks(
             Content::Text { text } | Content::ReasoningSummary { text } => blocks.push(json!({"type":"text","text":text})),
             Content::ToolCall { call } => blocks.push(json!({"type":"tool_use","id":call.call_id,"name":if oauth { oauth_tool_name(&call.name) } else { &call.name },"input":call.arguments})),
             Content::ToolResult { result } => {
-                let mut block = json!({"type":"tool_result","tool_use_id":result.call_id,"is_error":matches!(result.completion,ToolCompletion::Result{outcome:crate::types::Outcome::Failed|crate::types::Outcome::Cancelled|crate::types::Outcome::Indeterminate,..})});
+                let error = !matches!(&result.completion, ToolCompletion::Result { outcome: crate::types::Outcome::Succeeded, .. } | ToolCompletion::JobAccepted { .. });
+                let mut block = json!({"type":"tool_result","tool_use_id":result.call_id,"is_error":error});
                 block["content"] = Value::Array(anthropic_parts(completion_parts(&result.completion))?);
                 blocks.push(block);
             }
@@ -219,9 +220,9 @@ impl ModelProvider for AnthropicProvider {
             blocks.extend(anthropic_blocks(&system, self.oauth)?);
             Ok(Value::Array(blocks))
         })?;
-        let tools = compiler.field("tools", || Value::Array(view.binding.tools.iter().map(|t| {
-            json!({"name":if self.oauth { oauth_tool_name(&t.name) } else { &t.name },"description":t.description,"input_schema":t.schema})
-        }).collect()));
+        let tools = compiler.field("tools", || view.binding.tools.iter().map(|t| {
+            Ok(json!({"name":if self.oauth { oauth_tool_name(&t.name) } else { &t.name },"description":t.description,"input_schema":tool_schema::parameters(t)?}))
+        }).collect::<Result<Vec<_>, ExecutionError>>().map(Value::Array))?;
         let mut result = RequestBody::from(
             json!({"model":view.binding.model,"max_tokens":self.max_tokens,"stream":true}),
         );

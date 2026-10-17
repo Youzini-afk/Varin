@@ -181,8 +181,10 @@ impl ModelProvider for BedrockProvider {
         }
         if !view.binding.tools.is_empty() {
             body.insert_frozen("toolConfig", compiler.field("toolConfig", || {
-                json!({"tools":view.binding.tools.iter().map(|t|json!({"toolSpec":{"name":t.name,"description":t.description,"inputSchema":{"json":t.schema}}})).collect::<Vec<_>>()})
-            }));
+                let tools = view.binding.tools.iter().map(|t| Ok(json!({"toolSpec":{"name":t.name,"description":t.description,"inputSchema":{"json":tool_schema::parameters(t)?}}})))
+                    .collect::<Result<Vec<_>, ExecutionError>>()?;
+                Ok(json!({"tools":tools}))
+            })?);
         }
         compiler.finish(reuse);
         Ok(body)

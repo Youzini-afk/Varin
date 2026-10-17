@@ -70,18 +70,17 @@ impl GroupCompiler {
     pub(super) fn field(
         &mut self,
         key: &'static str,
-        compile: impl FnOnce() -> Value,
-    ) -> Arc<FrozenJson> {
+        compile: impl FnOnce() -> Result<Value, ExecutionError>,
+    ) -> Result<Arc<FrozenJson>, ExecutionError> {
         if !self.retain {
-            return FrozenJson::new(compile());
+            return Ok(FrozenJson::new(compile()?));
         }
-        let value = self
-            .previous
-            .fields
-            .remove(key)
-            .unwrap_or_else(|| FrozenJson::new(compile()));
+        let value = match self.previous.fields.remove(key) {
+            Some(value) => value,
+            None => FrozenJson::new(compile()?),
+        };
         self.current.fields.insert(key, value.clone());
-        value
+        Ok(value)
     }
     pub(super) fn finish(self, reuse: Option<&mut RequestCompileReuse>) {
         if let Some(reuse) = reuse {

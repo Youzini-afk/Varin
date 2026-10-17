@@ -123,7 +123,9 @@ impl ResponsesProvider {
         {
             tools.clone()
         } else {
-            let tools: Vec<_>=view.binding.tools.iter().map(|t|crate::request_body::FrozenJson::new(json!({"type":"function","name":t.name,"description":t.description,"parameters":t.schema}))).collect();
+            let tools = view.binding.tools.iter().map(|t| {
+                Ok(crate::request_body::FrozenJson::new(json!({"type":"function","name":t.name,"description":t.description,"parameters":tool_schema::parameters(t)?,"strict":false})))
+            }).collect::<Result<Vec<_>, ExecutionError>>()?;
             if let Some(reuse) = reuse.as_mut() {
                 reuse.responses_tools = Some(tools.clone());
             }

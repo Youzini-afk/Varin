@@ -294,7 +294,11 @@ impl ModelProvider for GoogleProvider {
             })?);
         }
         if !view.binding.tools.is_empty() {
-            body.insert_frozen("tools", compiler.field("tools", || json!([{"functionDeclarations":view.binding.tools.iter().map(|t|json!({"name":t.name,"description":t.description,"parametersJsonSchema":t.schema})).collect::<Vec<_>>()}])));
+            body.insert_frozen("tools", compiler.field("tools", || {
+                let declarations = view.binding.tools.iter().map(|t| Ok(json!({"name":t.name,"description":t.description,"parametersJsonSchema":tool_schema::parameters(t)?})))
+                    .collect::<Result<Vec<_>, ExecutionError>>()?;
+                Ok(json!([{"functionDeclarations":declarations}]))
+            })?);
         }
         compiler.finish(reuse);
         Ok(body)

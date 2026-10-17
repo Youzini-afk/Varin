@@ -134,9 +134,11 @@ impl ModelProvider for PiMessagesProvider {
         let mut compiler = groups::GroupCompiler::new(reuse.as_deref_mut());
         let mut messages = Vec::new();
         if !view.binding.tools.is_empty() {
-            messages.push(compiler.field("tools-message", || json!({"role":"system","content":"","timestamp":0,
-                "toolsAdded":view.binding.tools.iter().map(|t|json!({"name":t.name,"description":t.description,"parameters":t.schema})).collect::<Vec<_>>()
-            })));
+            messages.push(compiler.field("tools-message", || {
+                let tools = view.binding.tools.iter().map(|t| Ok(json!({"name":t.name,"description":t.description,"parameters":tool_schema::parameters(t)?})))
+                    .collect::<Result<Vec<_>, ExecutionError>>()?;
+                Ok(json!({"role":"system","content":"","timestamp":0,"toolsAdded":tools}))
+            })?);
         }
         for (role, items) in groups {
             let mut sources = items.clone();

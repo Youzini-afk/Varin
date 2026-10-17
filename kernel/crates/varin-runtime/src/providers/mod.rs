@@ -19,6 +19,7 @@ pub mod pi_messages;
 pub mod registry;
 pub mod responses;
 mod sse;
+mod tool_schema;
 #[cfg(test)]
 mod tests;
 
