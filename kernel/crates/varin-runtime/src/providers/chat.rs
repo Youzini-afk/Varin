@@ -689,7 +689,7 @@ impl StreamState {
                         let mut combined = field.as_str().unwrap_or("").to_owned();
                         combined.push_str(text);
                         *field = json!(combined);
-                        if key == "content" {
+                        if key == "content" || key == "refusal" {
                             emit_event(
                                 emit,
                                 ProviderEvent::TextDelta {
@@ -697,6 +697,10 @@ impl StreamState {
                                     text: text.into(),
                                 },
                             )?;
+                        } else {
+                            emit_event(emit, ProviderEvent::ReasoningDelta {
+                                item_id: format!("{id}:{key}"), text: text.into(),
+                            })?;
                         }
                     }
                     "tool_calls" => {

@@ -324,6 +324,10 @@ impl StreamState {
                         .into(),
                 },
             )?,
+            "response.reasoning_summary_text.delta" => emit_event(emit, ProviderEvent::ReasoningDelta {
+                item_id: format!("{}:summary:{}", required(&event, "item_id")?, event["summary_index"].as_u64().unwrap_or(0)),
+                text: event["delta"].as_str().ok_or_else(|| failure("invalid_provider_event", "reasoning delta is missing"))?.into(),
+            })?,
             "response.function_call_arguments.delta" => {
                 let item_id = required(&event, "item_id")?;
                 let call_id = self.calls.get(item_id).ok_or_else(|| {

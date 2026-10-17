@@ -55,6 +55,9 @@ Host 校验真实 Thread/branch 和输入，准备模型、凭据、Source、策
 Run/request 的配置与正文，执行引擎记录原始模型和工具工作。设置变化不会重写已受理请求、队列输入或原回执。
 
 UI 通过 `ThreadsAPI` 读快照与历史，`/api/threads/observe` 传输持久事件和临时进度。断线后按 durable cursor 追平；
+首次订阅与快照读取并行，进度携带 Thread、branch、Run 和 request 身份。文字、公开思考和工具参数增量在
+独立传输消费者中按序发送，消费较慢时合并相邻增量；传输等待不阻塞模型执行，也不丢弃组成正文的片段。
+持久历史只替换对应 request 的临时内容，避免前一次请求的提交清空下一次请求的流式输出。
 视图关闭、Host 切换或观察流中断不代表执行取消。浏览器直连将固定白名单内的长观察请求复用到同 Host 的
 `/api/varin/observations/ws`，避免 HTTP/1 同源连接被 SSE 与长轮询占满；已有 relay 仍使用原复用通道。
 此适配器只转交原路由的响应与取消，保留身份、Origin、游标、revision 和租约，不受理任意 HTTP 请求或自动重放写入。

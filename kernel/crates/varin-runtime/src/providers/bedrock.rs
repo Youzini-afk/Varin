@@ -407,6 +407,7 @@ impl StreamState {
                             return Err(invalid());
                         }
                         text.push_str(part);
+                        emit_event(emit, ProviderEvent::ReasoningDelta { item_id: format!("bedrock-{index}"), text: part.into() })?;
                     } else if let Some(part) = reasoning.get("signature").and_then(Value::as_str) {
                         if !redacted.is_empty() {
                             return Err(invalid());

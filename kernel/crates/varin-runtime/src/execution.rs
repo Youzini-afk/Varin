@@ -580,6 +580,7 @@ pub(crate) fn model_history_item(request_id: &str, item: &ProviderItem) -> Conve
 pub enum ProviderEvent {
     ToolCallStarted { call_id: String, name: String, request_id: String },
     TextDelta { item_id: String, text: String },
+    ReasoningDelta { item_id: String, text: String },
     ToolArgumentsDelta { call_id: String, delta: String },
     ItemCompleted { item: ProviderItem },
     Usage { receipt: UsageReceipt },
@@ -1550,40 +1551,54 @@ pub enum ExecutionEvent {
     ToolCompleted(ToolResult),
 }
 
-/// A lossy bounded presentation stream. Its consumer runs independently from the engine.
-/// Durable completion facts are always available from Persistence, even if progress is dropped.
+/// Presentation batches. A slow consumer coalesces adjacent deltas instead of losing text;
+/// the model worker never waits for transport I/O. History remains the durable authority.
 #[derive(Debug, Clone)]
 pub struct ProgressUpdate {
-    pub sequence: u64,
     pub run_id: String,
-    pub event: ExecutionEvent,
+    pub request_id: String,
+    pub events: Vec<ExecutionEvent>,
 }
 
 #[derive(Debug, Clone, Default)]
 pub struct ProgressSink {
-    sequence: Arc<AtomicU64>,
-    sender: Option<mpsc::SyncSender<ProgressUpdate>>,
+    pending: Arc<std::sync::Mutex<Vec<ProgressUpdate>>>,
+    sender: Option<mpsc::SyncSender<()>>,
+}
+pub struct ProgressReceiver {
+    pending: Arc<std::sync::Mutex<Vec<ProgressUpdate>>>,
+    wakes: mpsc::Receiver<()>,
+}
+impl Iterator for ProgressReceiver {
+    type Item = Vec<ProgressUpdate>;
+    fn next(&mut self) -> Option<Self::Item> {
+        self.wakes.recv().ok()?;
+        Some(std::mem::take(&mut *self.pending.lock().unwrap()))
+    }
 }
 impl ProgressSink {
-    pub fn channel(capacity: usize) -> (Self, mpsc::Receiver<ProgressUpdate>) {
-        let (sender, receiver) = mpsc::sync_channel(capacity);
-        (
-            Self {
-                sequence: Arc::new(AtomicU64::new(0)),
-                sender: Some(sender),
-            },
-            receiver,
-        )
+    pub fn channel() -> (Self, ProgressReceiver) {
+        // The single slot is a wake, not a payload budget. All pending content is retained.
+        let (sender, wakes) = mpsc::sync_channel(1);
+        let pending = Arc::new(std::sync::Mutex::new(Vec::new()));
+        (Self { pending: pending.clone(), sender: Some(sender) }, ProgressReceiver { pending, wakes })
     }
 
-    fn emit(&self, run_id: &str, event: ExecutionEvent) {
+    fn emit(&self, run_id: &str, request_id: &str, event: ExecutionEvent) {
         if let Some(sender) = &self.sender {
-            // Full and disconnected observers both lose transient updates, never block execution.
-            let _ = sender.try_send(ProgressUpdate {
-                sequence: self.sequence.fetch_add(1, Ordering::Relaxed) + 1,
-                run_id: run_id.into(),
-                event,
-            });
+            let mut pending = self.pending.lock().unwrap();
+            if pending.last().is_none_or(|batch| batch.run_id != run_id || batch.request_id != request_id) {
+                pending.push(ProgressUpdate { run_id: run_id.into(), request_id: request_id.into(), events: Vec::new() });
+            }
+            let events = &mut pending.last_mut().unwrap().events;
+            let merged = match (events.last_mut(), &event) {
+                (Some(ExecutionEvent::Provider(ProviderEvent::TextDelta { item_id: a, text })), ExecutionEvent::Provider(ProviderEvent::TextDelta { item_id: b, text: delta }))
+                | (Some(ExecutionEvent::Provider(ProviderEvent::ReasoningDelta { item_id: a, text })), ExecutionEvent::Provider(ProviderEvent::ReasoningDelta { item_id: b, text: delta })) if a == b => { text.push_str(delta); true },
+                (Some(ExecutionEvent::Provider(ProviderEvent::ToolArgumentsDelta { call_id: a, delta: text })), ExecutionEvent::Provider(ProviderEvent::ToolArgumentsDelta { call_id: b, delta })) if a == b => { text.push_str(delta); true },
+                _ => false,
+            };
+            if !merged { events.push(event); }
+            if matches!(sender.try_send(()), Err(mpsc::TrySendError::Disconnected(()))) { pending.clear(); }
         }
     }
 }
@@ -2910,11 +2925,11 @@ impl<
                 match &event {
                     ProviderEvent::ItemCompleted { item } => items.push(item.clone()),
                     ProviderEvent::Usage { receipt } => usage = receipt.clone(),
-                    ProviderEvent::TextDelta { .. } | ProviderEvent::ToolArgumentsDelta { .. } | ProviderEvent::ToolCallStarted { .. } => {
+                    ProviderEvent::TextDelta { .. } | ProviderEvent::ReasoningDelta { .. } | ProviderEvent::ToolArgumentsDelta { .. } | ProviderEvent::ToolCallStarted { .. } => {
                         deltas.push(event.clone())
                     }
                 }
-                self.progress.emit(run_id, ExecutionEvent::Provider(event));
+                self.progress.emit(run_id, &snapshot.view.request_id, ExecutionEvent::Provider(event));
                 Ok(())
             };
             match selected {
@@ -3287,7 +3302,7 @@ impl<
             completion,
         };
         self.progress
-            .emit(&input.run_id, ExecutionEvent::ToolCompleted(result.clone()));
+            .emit(&input.run_id, &snapshot.view.request_id, ExecutionEvent::ToolCompleted(result.clone()));
         result
     }
 

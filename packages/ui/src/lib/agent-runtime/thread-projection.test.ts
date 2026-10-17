@@ -1,7 +1,9 @@
 import { afterEach, expect, it, vi } from 'vitest';
 import type { ThreadIdentity, ThreadSnapshot, ThreadsAPI } from '@varin/application-client';
 import { KERNEL_PROTOCOL_VERSION } from '../../../../web/application-host/lib/kernel/protocol.generated.js';
-import { ThreadProjection } from './thread-projection';
+import { ThreadProjection, type StreamingTextPart } from './thread-projection';
+
+const textOf = (parts: StreamingTextPart[]) => parts.map(part => part.type === 'text' ? part.text : part.thinking).join('\n');
 
 const identity: ThreadIdentity = { runtime: 'agent', threadId: 'thread:projection', branchId: 'branch:projection' };
 const deferred = () => { let resolve!: () => void; const promise = new Promise<void>(yes => { resolve = yes; }); return { promise, resolve }; };
@@ -20,14 +22,14 @@ it('reconnects from the last durable cursor and replaces lossy progress with aut
   });
   const snapshot = vi.fn(async () => structuredClone(view));
   const publish = vi.fn(); const progress = vi.fn(); const report = vi.fn();
-  const projection = new ThreadProjection({ observe, snapshot } as unknown as ThreadsAPI, identity, publish, report, progress);
+  const projection = new ThreadProjection({ observe, snapshot } as unknown as ThreadsAPI, identity, publish, report, parts => progress(textOf(parts)));
   try {
     projection.start();
     await vi.advanceTimersByTimeAsync(0);
-    expect(observe.mock.calls[0]![0]).toBe(6);
+    expect(observe.mock.calls[0]![0]).toBeNull();
     connections[0]!.listener({ cursor: 7, subject: run.id, revision: 1, kind: 'run.changed', data: {} });
     await vi.advanceTimersByTimeAsync(0);
-    connections[0]!.listener({ v: KERNEL_PROTOCOL_VERSION, kind: 'runtime-event', kernelEpoch: 'epoch', stream: 'progress', runId: run.id, streamId: 'first-stream', sequence: 1, event: { kind: 'provider', data: { kind: 'text_delta', item_id: 'assistant', text: 'unfinished display text' } } });
+    connections[0]!.listener(delta(1, 'unfinished display text'));
     expect(progress).toHaveBeenLastCalledWith('unfinished display text');
     connections[0]!.close();
     await vi.advanceTimersByTimeAsync(0);
@@ -47,8 +49,10 @@ function snapshotView(active = true): ThreadSnapshot {
   const run = { id: 'run', thread_id: identity.threadId, branch_id: identity.branchId, state: 'generating' as const, revision: 1, epoch: 1, configuration: {}, cancel_requested: false, waiting_on: null };
   return { identity, eventCursor: 6, thread: { thread_id: identity.threadId, main_branch_id: identity.branchId, title: '', revision: 1, created_at_ms: 0, updated_at_ms: 0, pinned: false, archived: false, deleted_at_ms: null, activity_cursor: 0, read_cursor: 0, unread: false, bot_id: null, parent_thread_id: null, observer_project_ids: [null], branches: [{ branch_id: identity.branchId, head: null, active_run_id: active ? run.id : null, latest_run: active ? run : null }] }, activeRun: active ? run : null, history: [], historyPage: { head: null, previous: null }, inputs: [], operations: [], followups: [], goals: [], launch: null, modelSelection: { desired: null, active: null }, policySelection: null, context: { checkpoint: null, jobs: [] } };
 }
-function delta(sequence: number, text: string, runId = 'run') {
-  return { v: KERNEL_PROTOCOL_VERSION, kind: 'runtime-event' as const, kernelEpoch: 'epoch', stream: 'progress' as const, runId, streamId: `stream:${runId}`, sequence, event: { kind: 'provider', data: { kind: 'text_delta', item_id: 'assistant', text } } };
+function delta(sequence: number, text: string, runId = 'run', requestId = 'request') {
+  return { v: KERNEL_PROTOCOL_VERSION, kind: 'runtime-event' as const, kernelEpoch: 'epoch', stream: 'progress' as const, runId,
+    threadId: runId === 'run' ? identity.threadId : 'other-thread', branchId: identity.branchId, requestId,
+    streamId: `stream:${runId}`, sequence, event: { kind: 'batch', events: [{ kind: 'provider', data: { kind: 'text_delta', item_id: 'assistant', text } }] } };
 }
 async function startProjection(snapshot: ThreadsAPI['snapshot']) {
   vi.useFakeTimers();
@@ -57,12 +61,34 @@ async function startProjection(snapshot: ThreadsAPI['snapshot']) {
     listener = next;
     await new Promise<void>(resolve => signal.addEventListener('abort', () => resolve(), { once: true }));
   };
-  const progress = vi.fn(); const report = vi.fn(); const publish = vi.fn();
-  const projection = new ThreadProjection({ snapshot, observe } as ThreadsAPI, identity, publish, report, progress);
+  const progress = vi.fn(); const parts = vi.fn(); const report = vi.fn(); const publish = vi.fn();
+  const projection = new ThreadProjection({ snapshot, observe } as ThreadsAPI, identity, publish, report, value => { parts(value); progress(textOf(value)); });
   projection.start();
   await vi.advanceTimersByTimeAsync(0);
-  return { projection, listener, progress, report, publish };
+  return { projection, listener, progress, parts, report, publish };
 }
+
+it('streams thinking and text during the initial snapshot and keeps the next request when old history commits', async () => {
+  const pending = deferred();
+  const view = snapshotView();
+  const snapshot = vi.fn<ThreadsAPI['snapshot']>().mockImplementationOnce(async () => { await pending.promise; return snapshotView(false); })
+    .mockImplementation(async () => structuredClone(view));
+  const h = await startProjection(snapshot);
+  try {
+    const event = delta(1, 'First answer');
+    event.event.events.unshift({ kind: 'provider', data: { kind: 'reasoning_delta', item_id: 'reasoning', text: 'Visible thinking' } });
+    h.listener(event);
+    expect(h.publish).not.toHaveBeenCalled();
+    expect(h.parts).toHaveBeenLastCalledWith([{ type: 'thinking', thinking: 'Visible thinking' }, { type: 'text', text: 'First answer' }]);
+    pending.resolve(); await vi.advanceTimersByTimeAsync(0);
+    h.listener(delta(2, 'Next answer', 'run', 'next-request'));
+    view.history.push({ id: 'old-answer', thread_id: identity.threadId, run_id: 'run', parent: null, source: 'assistant',
+      content: { id: 'model-item:7:requestanswer', content: { kind: 'text', text: 'First answer' } }, provider: null });
+    h.listener({ cursor: 8, subject: 'run', revision: 2, kind: 'history.appended', data: {} });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(h.parts).toHaveBeenLastCalledWith([{ type: 'text', text: 'Next answer' }]);
+  } finally { pending.resolve(); h.projection.close(); }
+});
 
 it('retains the first chunks while the accepted Run snapshot is in flight', async () => {
   const pending = deferred();
@@ -73,7 +99,7 @@ it('retains the first chunks while the accepted Run snapshot is in flight', asyn
   try {
     h.listener({ cursor: 7, subject: 'run', revision: 1, kind: 'run.accepted', data: {} });
     h.listener(delta(1, 'Controlled Q'));
-    expect(h.progress).not.toHaveBeenCalledWith('Controlled Q');
+    expect(h.progress).toHaveBeenLastCalledWith('Controlled Q');
     pending.resolve();
     await vi.advanceTimersByTimeAsync(0);
     expect(h.progress).toHaveBeenLastCalledWith('Controlled Q');
@@ -110,7 +136,7 @@ it('preserves live text when user history arrives and replaces it when assistant
     expect(h.progress).toHaveBeenLastCalledWith('Controlled Q');
     h.listener(delta(2, 'A response.'));
     expect(h.progress).toHaveBeenLastCalledWith('Controlled QA response.');
-    view.history.push({ id: 'answer', thread_id: identity.threadId, run_id: 'run', parent: 'user', source: 'assistant', content: { text: 'Controlled QA response.' }, provider: null });
+    view.history.push({ id: 'answer', thread_id: identity.threadId, run_id: 'run', parent: 'user', source: 'assistant', content: { id: 'model-item:7:requestanswer', text: 'Controlled QA response.' }, provider: null });
     h.listener({ cursor: 8, subject: 'run', revision: 2, kind: 'execution.committed', data: { kind: 'model_finished' } });
     await vi.advanceTimersByTimeAsync(0);
     expect(h.progress).toHaveBeenLastCalledWith('');
@@ -118,7 +144,7 @@ it('preserves live text when user history arrives and replaces it when assistant
   } finally { h.projection.close(); }
 });
 
-it('never publishes another Run\'s unconfirmed progress or progress after closing', async () => {
+it('publishes scoped progress while a snapshot is pending and ignores other threads and closed views', async () => {
   const pending = deferred();
   const snapshot = vi.fn<ThreadsAPI['snapshot']>().mockResolvedValueOnce(snapshotView(false))
     .mockImplementationOnce(async () => { await pending.promise; return snapshotView(); });
@@ -128,7 +154,8 @@ it('never publishes another Run\'s unconfirmed progress or progress after closin
   h.projection.close();
   pending.resolve();
   await vi.advanceTimersByTimeAsync(0);
-  expect(h.progress.mock.calls.every(([text]) => text === '')).toBe(true);
+  expect(h.progress).toHaveBeenLastCalledWith('Unconfirmed current text');
+  expect(h.progress).not.toHaveBeenCalledWith('Other thread text');
   expect(h.publish).toHaveBeenCalledTimes(1);
 });
 

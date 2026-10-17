@@ -1,4 +1,5 @@
 import React from 'react';
+import { usePacedText } from './usePacedText';
 import { usePdfMaterialLinkInteractions } from '@/components/materials/usePdfMaterialLinkInteractions';
 import morphdom from 'morphdom';
 import { renderMermaidASCII, renderMermaidSVG } from 'beautiful-mermaid';
@@ -691,62 +692,6 @@ const useMermaidInlineInteractions = ({
 // ---------------------------------------------------------------------------
 // Rendering core: marked -> math -> shiki -> sanitize -> decorate -> morphdom
 // ---------------------------------------------------------------------------
-
-const TEXT_PACE_MS = 64;
-const PACE_BASELINE_MS = 24;
-const PACE_RATIO = TEXT_PACE_MS / PACE_BASELINE_MS;
-const TEXT_SNAP = /[\s.,!?;:)\]]/;
-
-const paceStep = (remaining: number): number => {
-  const base = remaining <= 12 ? 2 : remaining <= 48 ? 4 : remaining <= 96 ? 8 : Math.min(24, Math.ceil(remaining / 8));
-  return Math.max(1, Math.round(base * PACE_RATIO));
-};
-
-const nextRevealIndex = (text: string, start: number): number => {
-  const end = Math.min(text.length, start + paceStep(text.length - start));
-  for (let i = end; i < Math.min(text.length, end + 8); i += 1) {
-    if (TEXT_SNAP.test(text[i] ?? '')) return i + 1;
-  }
-  return end;
-};
-
-const usePacedText = (content: string, streaming: boolean): string => {
-  const [shown, setShown] = React.useState<number>(() => (streaming ? 0 : content.length));
-  const shownRef = React.useRef(shown);
-  shownRef.current = shown;
-
-  React.useEffect(() => {
-    if (!streaming || typeof window === 'undefined') {
-      setShown(content.length);
-      return;
-    }
-    if (shownRef.current > content.length) {
-      setShown(content.length);
-    }
-
-    let timer: number | null = null;
-    const tick = () => {
-      const current = Math.min(shownRef.current, content.length);
-      if (current >= content.length) {
-        timer = null;
-        return;
-      }
-      setShown(nextRevealIndex(content, current));
-      timer = window.setTimeout(tick, TEXT_PACE_MS);
-    };
-
-    if (shownRef.current < content.length) {
-      timer = window.setTimeout(tick, TEXT_PACE_MS);
-    }
-
-    return () => {
-      if (timer !== null) window.clearTimeout(timer);
-    };
-  }, [content, streaming]);
-
-  if (!streaming) return content;
-  return content.slice(0, Math.min(shown, content.length));
-};
 
 // Mermaid layout is expensive; `decorate` would otherwise re-render every
 // diagram on every paced-stream step (~40/sec). Memoize by theme+mode+source

@@ -396,7 +396,8 @@ export interface ThreadsAPI {
   retryPreparation(runId: string): Promise<void>;
   events(cursor: number): Promise<RuntimeEvent[]>;
   /** Reconnect from the last durable cursor; progress is presentation-only. */
-  observe(cursor: number, listener: (event: RuntimeEvent | AgentRuntimeStreamEvent) => void, options: { signal: AbortSignal }): Promise<void>;
+  /** null subscribes from now; used alongside an initial snapshot to capture live deltas during its reads. */
+  observe(cursor: number | null, listener: (event: RuntimeEvent | AgentRuntimeStreamEvent) => void, options: { signal: AbortSignal }): Promise<void>;
 }
 
 /** Safe projection of source-owned failures; arbitrary upstream messages are never displayed. */

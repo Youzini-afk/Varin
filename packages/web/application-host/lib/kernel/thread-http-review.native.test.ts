@@ -1,6 +1,6 @@
 import { guardProviderReply } from './provider-response.test-helper.js';
 import express from 'express';
-import { createServer, type Server } from 'node:http';
+import { createServer, type Server, type ServerResponse } from 'node:http';
 import { once } from 'node:events';
 import { createHash } from 'node:crypto';
 import { crc32 } from 'node:zlib';
@@ -35,7 +35,8 @@ async function listen(server: Server) {
   cleanups.push(async () => { server.closeAllConnections(); await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve())); });
   return `http://127.0.0.1:${address.port}`;
 }
-async function fixture(hold = false, acceptsImages?: boolean, existingRoot?: string, withContinuations = false) {
+async function fixture(hold = false, acceptsImages?: boolean, existingRoot?: string, withContinuations = false,
+  streamReply?: (response: ServerResponse) => void) {
   await fs.access(kernelPath);
   const root = existingRoot ?? await fs.mkdtemp(path.join(os.tmpdir(), 'varin-http-review-'));
   const kernel = createKernelClient({ hostId: 'http-review', storageRoot: root, buildVersion, kernelPath, allowCargoDevRunner: false });
@@ -48,6 +49,7 @@ async function fixture(hold = false, acceptsImages?: boolean, existingRoot?: str
     request.on('end', guardProviderReply(response, () => {
       requests.push({ body: JSON.parse(Buffer.concat(chunks).toString()) as Record<string, unknown>, ...(request.headers.authorization ? { authorization: request.headers.authorization } : {}) });
       response.writeHead(200, { 'content-type': 'text/event-stream' });
+      if (streamReply) { streamReply(response); return; }
       if (hold && requests.length === 1) response.write(': waiting for legitimate cancellation\n\n');
       else response.end(`data: ${JSON.stringify({ type: 'response.completed', response: { output: [{ id: `http-answer-${requests.length}`, type: 'message', content: [{ type: 'output_text', text: 'actual HTTP answer' }] }] } })}\n\n`);
     }));
@@ -122,6 +124,44 @@ it('public threads HTTP client reaches the kernel, enforces selected thread iden
     expect(f.launchErrors).toEqual([]);
     expect(await f.api.create('http-owned-thread')).toEqual(identity);
   } finally { controller.abort(); await observation; }
+}, 30_000);
+
+it('streams every text and reasoning fragment through real IPC before the provider finishes', async () => {
+  let finish!: () => void;
+  const expected = 'streaming '.repeat(64);
+  const f = await fixture(false, undefined, undefined, false, response => {
+    const write = (event: unknown) => response.write(`data: ${JSON.stringify(event)}\n\n`);
+    write({ type: 'response.reasoning_summary_text.delta', item_id: 'reasoning', summary_index: 0, delta: 'visible thinking' });
+    for (const text of expected) write({ type: 'response.output_text.delta', item_id: 'message', delta: text });
+    finish = () => response.end(`data: ${JSON.stringify({ type: 'response.completed', response: { output: [
+      { id: 'reasoning', type: 'reasoning', summary: [{ type: 'summary_text', text: 'visible thinking' }] },
+      { id: 'message', type: 'message', content: [{ type: 'output_text', text: expected }] },
+    ] } })}\n\n`);
+  });
+  const identity = await f.api.create('streamed-reply');
+  const controller = new AbortController();
+  let text = '', thinking = ''; const sequences: number[] = [];
+  const observation = f.api.observe(null, event => {
+    if (!('stream' in event) || event.stream !== 'progress' || event.threadId !== identity.threadId) return;
+    expect(event.branchId).toBe(identity.branchId);
+    sequences.push(event.sequence);
+    const batch = event.event as { kind: string; events: Array<{ kind: string; data: { kind: string; text?: string } }> };
+    expect(batch.kind).toBe('batch');
+    for (const part of batch.events) {
+      if (part.data.kind === 'text_delta') text += part.data.text;
+      if (part.data.kind === 'reasoning_delta') thinking += part.data.text;
+    }
+  }, { signal: controller.signal }).catch(error => { if (!controller.signal.aborted) throw error; });
+  try {
+    const receipt = await f.api.submit({ ...identity, key: 'streaming', expectedHead: null, text: 'Stream this answer',
+      model: { providerId: 'fixture-provider', modelId: 'fixture-model' } });
+    await expect.poll(() => text).toBe(expected);
+    expect(thinking).toBe('visible thinking');
+    expect(sequences).toEqual(sequences.map((_, index) => index + 1));
+    expect((await f.runtime.run(receipt.run_id)).state).toBe('generating');
+    finish();
+    await expect.poll(async () => (await f.runtime.run(receipt.run_id)).state).toBe('completed');
+  } finally { finish?.(); controller.abort(); await observation; }
 }, 30_000);
 
 it('public threads HTTP input editing/cancellation and Run cancellation affect the real durable execution', async () => {

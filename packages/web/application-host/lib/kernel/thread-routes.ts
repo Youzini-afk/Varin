@@ -488,10 +488,16 @@ export function registerThreadRoutes(app: Express, adapter: ThreadAdapter, requi
   post('operation', body => adapter.requireOperation(text(body.operationId)));
   post('operation/cancel', body => adapter.cancelOperation(text(body.operationId)));
   post('events', body => adapter.runtime.events(revision(body.cursor), 256));
-  app.get('/api/threads/observe', requireAuth, (request, response) => {
+  app.get('/api/threads/observe', requireAuth, async (request, response) => {
     let cursor: number;
-    try { cursor = revision(Number(request.query.cursor ?? 0)); }
-    catch { response.status(400).json({ error: 'Invalid event cursor' }); return; }
+    if (request.query.cursor === undefined) {
+      try { cursor = (await adapter.runtime.status()).eventCursor; }
+      catch { response.status(503).json({ error: 'Thread observation is unavailable' }); return; }
+    } else {
+      try { cursor = revision(Number(request.query.cursor)); }
+      catch { response.status(400).json({ error: 'Invalid event cursor' }); return; }
+    }
+    if (response.destroyed) return;
     response.status(200).set({ 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', Connection: 'keep-alive' });
     response.flushHeaders();
     const close = adapter.observe(cursor, event => {

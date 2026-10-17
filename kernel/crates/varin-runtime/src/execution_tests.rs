@@ -12,6 +12,22 @@ use std::sync::{
 struct Fixture {
     path: std::path::PathBuf,
 }
+
+#[test]
+fn progress_coalesces_bursts_without_blocking_or_losing_content() {
+    let (sink, mut receiver) = ProgressSink::channel();
+    for _ in 0..4096 {
+        sink.emit("run", "request", ExecutionEvent::Provider(ProviderEvent::TextDelta { item_id: "message".into(), text: "字".into() }));
+    }
+    sink.emit("run", "next", ExecutionEvent::Provider(ProviderEvent::ReasoningDelta { item_id: "thinking".into(), text: "next reasoning".into() }));
+    let batches = receiver.next().unwrap();
+    assert_eq!(batches.len(), 2);
+    assert_eq!(batches[0].events.len(), 1);
+    assert!(matches!(&batches[0].events[0], ExecutionEvent::Provider(ProviderEvent::TextDelta { text, .. }) if text == &"字".repeat(4096)));
+    assert_eq!(batches[1].request_id, "next");
+    drop(sink);
+    assert!(receiver.next().is_none());
+}
 impl Fixture {
     fn new() -> Self {
         Self {
@@ -280,7 +296,7 @@ fn actual_catalog_two_model_tool_exchange_survives_reopen_with_opaque_original()
     let input = input(&db);
     let run_id = input.run_id.clone();
     let cancel = CancellationToken::default();
-    let (progress, _never_consumed) = ProgressSink::channel(1);
+    let (progress, _never_consumed) = ProgressSink::channel();
     let engine = engine(db.clone(), Mode::ToolThenAnswer, cancel.clone(), progress);
     let report = engine.run(input, cancel).unwrap();
     assert_eq!(report.state, RunState::Completed);
@@ -1531,7 +1547,7 @@ fn recovered_completed_output_never_resends_model_or_reexecutes_cached_receipts(
         let (input, recovery) = prepared.unwrap();
         assert!(recovery.is_some());
         let cancel = CancellationToken::default();
-        let (progress, _receiver) = ProgressSink::channel(1);
+        let (progress, _receiver) = ProgressSink::channel();
         let engine = engine(db.clone(), Mode::ToolThenAnswer, cancel.clone(), progress);
         engine.provider.calls.store(1, Ordering::SeqCst);
         let report = engine.run_recovered(input, cancel, recovery).unwrap();
@@ -1644,7 +1660,7 @@ fn active_context_compiles_summary_and_tail_without_destroying_original_history(
     let collection = catalog.prepare_content_collection(Default::default());
     drop(catalog);
     content_collection::collect(|| collection).unwrap();
-    let (progress, _receiver) = ProgressSink::channel(1);
+    let (progress, _receiver) = ProgressSink::channel();
     let engine = ExecutionEngine {
         context_preparation: Arc::new(NoopContextPreparation),
         persistence: db.clone(),
@@ -1963,7 +1979,7 @@ fn context_prefix_reuse_rehydrates_only_new_history_across_real_model_steps() {
             })));
         let transport = Arc::new(Transport::default());
         let credentials = Arc::new(Credentials(AtomicUsize::new(0)));
-        let (progress, _receiver) = ProgressSink::channel(1);
+        let (progress, _receiver) = ProgressSink::channel();
         let views = Arc::new(Mutex::new(Vec::new()));
         let config: crate::ModelSessionConfiguration = serde_json::from_value(json!({
             "providerFamily":responses::FAMILY,"model":input.binding.model,"endpoint":"https://fixture.invalid",

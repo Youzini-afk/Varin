@@ -573,17 +573,23 @@ impl RunAssembly {
                 self.context.clone(),
             ));
         }
-        let (progress, updates) = varin_runtime::execution::ProgressSink::channel(64);
+        let (progress, updates) = varin_runtime::execution::ProgressSink::channel();
         start.progress = progress;
         let responses = self.responses.clone();
         let epoch = self.epoch.clone();
         let stream_id = uuid::Uuid::new_v4().to_string();
+        let thread_id = run.thread_id.clone();
+        let branch_id = run.branch_id.clone();
         thread::spawn(move || {
-            for update in updates {
+            let mut sequence = 0u64;
+            for batch in updates { for update in batch {
+                sequence += 1;
                 let event = json!({"v":PROTOCOL_VERSION,"kind":"runtime-event","kernelEpoch":epoch,
-                    "stream":"progress","runId":update.run_id,"streamId":stream_id,"sequence":update.sequence,"event":update.event});
-                let _ = responses.try_send(event);
-            }
+                    "stream":"progress","runId":update.run_id,"threadId":thread_id,"branchId":branch_id,
+                    "requestId":update.request_id,"streamId":stream_id,"sequence":sequence,
+                    "event":{"kind":"batch","events":update.events}});
+                if responses.send_progress(event).is_err() { return; }
+            } }
         });
         Ok(PreparedLaunch::Start(start))
     }

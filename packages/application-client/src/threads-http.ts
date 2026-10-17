@@ -152,7 +152,7 @@ export function createThreadsHttpAPI(): ThreadsAPI {
       const remove = subscribeRuntimeEndpointWillChange(abort);
       let response: Response | undefined;
       try {
-        response = await runtimeFetch('/api/threads/observe', { query: { cursor }, signal: controller.signal,
+        response = await runtimeFetch('/api/threads/observe', { query: cursor === null ? {} : { cursor }, signal: controller.signal,
           headers: { Accept: 'text/event-stream' } });
         if (!response.ok || !response.body) throw new Error('Thread event stream unavailable');
         const reader = response.body.getReader();

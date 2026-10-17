@@ -5,6 +5,24 @@ import type { ChatAssistantMessage, ChatSessionEntry, ChatToolExecutionState, Ch
 const object = (value: unknown): Record<string, unknown> => value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {};
 const json = (value: unknown): JsonValue => value as JsonValue;
 
+/** Display only the public thinking text stored in the original provider item. Opaque
+ * signatures/encrypted payloads stay untouched; this does not change model replay content. */
+function thinkingText(envelope: Record<string, unknown>): string {
+  const opaque = object(envelope.opaque), value = object(opaque.value);
+  let text: unknown;
+  switch (opaque.family) {
+    case 'openai-completions': case 'mistral-conversations': text = value.reasoning_content ?? value.reasoning; break;
+    case 'anthropic-messages': if (value.type === 'thinking') text = value.thinking; break;
+    case 'openai-responses': case 'openai-codex-responses': case 'azure-openai-responses':
+      if (value.type === 'reasoning' && Array.isArray(value.summary)) text = value.summary.map(part => object(part).text).filter(part => typeof part === 'string').join('\n');
+      break;
+    case 'google-generative-ai': case 'google-vertex': { const part = object(value.part); if (part.thought === true) text = part.text; break; }
+    case 'bedrock-converse-stream': text = object(object(object(value.block).reasoningContent).reasoningText).text; break;
+    case 'pi-messages': { const block = object(value.block); if (block.type === 'thinking' && block.redacted !== true) text = block.thinking; break; }
+  }
+  return typeof text === 'string' ? text : '';
+}
+
 function requestId(item: HistoryItem): string | undefined {
   const id = object(item.content).id;
   if (typeof id !== 'string') return undefined;
@@ -37,6 +55,7 @@ export class HistoryPresentation {
       const configuration = metadata ? { model: metadata.modelId } : undefined;
       const envelope = object(item.content);
       const content = object(envelope.content);
+      const thinking = thinkingText(envelope);
       const request = metadata?.requestId ?? requestId(item);
       const call = object(content.call);
       if (content.kind === 'tool_call' && typeof call.call_id === 'string') {
@@ -73,6 +92,8 @@ export class HistoryPresentation {
         } else if (content.kind === 'output') {
           entry = { ...base, type: 'message', message: { role: 'custom', customType: item.source, display: true, timestamp: 0,
             content: outputParts(content.output as OutputBody) } };
+        } else if (content.kind === 'provider_only' && thinking) {
+          entry = { ...base, type: 'message', message: assistant(item.id, [{ type: 'thinking', thinking }], configuration) };
         } else if (content.kind === 'provider_only') continue;
         else if (content.kind === 'media') {
           entry = { ...base, type: 'message', message: { role: 'custom', customType: 'media', content: '', display: true, timestamp: 0 } };
@@ -80,6 +101,9 @@ export class HistoryPresentation {
           entry = { ...base, type: 'custom_message', customType: item.source, display: true,
             content: typeof item.content === 'string' ? item.content : typeof envelope.text === 'string' ? envelope.text : '',
             ...(typeof item.content === 'string' || typeof envelope.text === 'string' ? {} : { details: json(item.content) }) };
+        }
+        if (entry.type === 'message' && entry.message.role === 'assistant' && thinking && content.kind !== 'provider_only' && content.kind !== 'reasoning_summary') {
+          entry.message.content.unshift({ type: 'thinking', thinking });
         }
         if (entry.type === 'message' && entry.message.role === 'assistant' && metadata) {
           const usage = metadata.usage;

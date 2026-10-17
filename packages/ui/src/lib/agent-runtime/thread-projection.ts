@@ -6,13 +6,16 @@ import { useThreadContextUsageStore } from '@/stores/useThreadContextUsageStore'
 
 interface ProgressView {
   stream: string;
+  requestId: string;
   sequence: number;
   firstObserved: number;
-  items: Map<string, string>;
+  items: Map<string, StreamingTextPart>;
   calls: Map<string, StreamingToolCall>;
   readers: Map<string, PartialJson>;
 }
 export interface StreamingToolCall { id: string; name: string; rawArguments: string; sequence: number; reference?: string; interrupted?: boolean }
+export type StreamingTextPart = { type: 'text'; text: string } | { type: 'thinking'; thinking: string };
+interface ProviderProgress { kind?: string; data?: { kind?: string; item_id?: string; text?: string; call_id?: string; name?: string; request_id?: string; delta?: string } }
 
 /** Rebuildable view only. No model history or running state is written by the UI. */
 export class ThreadProjection {
@@ -25,12 +28,12 @@ export class ThreadProjection {
   private readonly progress = new Map<string, ProgressView>();
   private progressObservation = 0;
   private interruptedTools: StreamingToolCall[] = [];
-  private assistantHead: string | undefined;
+  private readonly committedRequests = new Set<string>();
   private removeEndpoint: (() => void) | undefined;
   constructor(private readonly api: ThreadsAPI, private readonly identity: ThreadIdentity,
     private readonly publish: (snapshot: ThreadSnapshot) => void,
     private readonly report: (error: unknown) => void,
-    private readonly publishProgress: (text: string) => void = () => {},
+    private readonly publishProgress: (parts: StreamingTextPart[]) => void = () => {},
     private readonly publishTools: (calls: StreamingToolCall[]) => void = () => {}) {}
 
   async refresh(): Promise<void> {
@@ -43,29 +46,24 @@ export class ThreadProjection {
         const observedBeforeSnapshot = this.progressObservation;
         const snapshot = await this.api.snapshot(this.identity);
         if (!this.abort.signal.aborted) {
-          if (!this.initialized) { this.cursor = snapshot.eventCursor; this.initialized = true; }
-          const activeRunId = snapshot.thread.branches.find(branch => branch.branch_id === this.identity.branchId)?.active_run_id ?? null;
-          let assistantHead: string | undefined;
-          for (let index = snapshot.history.length - 1; index >= 0; index -= 1) {
-            if (snapshot.history[index]!.source === 'assistant') { assistantHead = snapshot.history[index]!.id; break; }
-          }
-          // A delayed user/tool history read does not supersede provider text. Only an
-          // assistant commit replaces it; Run ownership is always confirmed by Catalog.
-          if (activeRunId === this.activeRunId && assistantHead !== this.assistantHead && activeRunId) {
-            this.progress.get(activeRunId)?.items.clear();
-          }
+          if (!this.initialized) { this.cursor = Math.max(this.cursor, snapshot.eventCursor); this.initialized = true; }
+          let activeRunId = snapshot.thread.branches.find(branch => branch.branch_id === this.identity.branchId)?.active_run_id ?? null;
+          // Scoped progress can arrive while an older snapshot is still being read.
+          const incoming = this.activeRunId ? this.progress.get(this.activeRunId) : undefined;
+          if (!activeRunId && incoming && incoming.firstObserved > observedBeforeSnapshot) activeRunId = this.activeRunId;
           if (activeRunId && activeRunId !== this.activeRunId) this.interruptedTools = [];
           this.activeRunId = activeRunId;
-          this.assistantHead = assistantHead;
           const knownCalls = new Set(snapshot.history.flatMap(item => {
             const envelope = item.content as { id?: string; content?: { call?: { call_id?: string } } };
             const call = envelope?.content?.call;
             const prefix = /^model-item:(\d+):/.exec(envelope?.id ?? '');
             const requestId = item.modelRequest?.requestId ?? (prefix ? envelope.id!.slice(prefix[0].length, prefix[0].length + Number(prefix[1])) : undefined);
+            if (item.source === 'assistant' && requestId) this.committedRequests.add(requestId);
             return call?.call_id && requestId ? [JSON.stringify([item.run_id, requestId, call.call_id])] : [];
           }));
           this.interruptedTools = this.interruptedTools.filter(call => !knownCalls.has(call.id));
           for (const [runId, progress] of this.progress) {
+            if (this.committedRequests.has(progress.requestId)) progress.items.clear();
             for (const [id, call] of progress.calls) if (knownCalls.has(call.id)) { progress.calls.delete(id); progress.readers.delete(id); }
             // Progress can beat both durable replay and this snapshot's reads. A snapshot
             // started before the first delta cannot rule out its newly accepted Run.
@@ -93,27 +91,30 @@ export class ThreadProjection {
 
   private publishCurrentProgress(): void {
     const current = this.activeRunId ? this.progress.get(this.activeRunId) : undefined;
-    this.publishProgress(current ? [...current.items.values()].join('\n') : '');
+    this.publishProgress(current ? [...current.items.values()] : []);
     this.publishTools(current ? [...current.calls.values()] : this.interruptedTools);
   }
 
   private async observe(): Promise<void> {
     while (!this.abort.signal.aborted) {
       try {
-        if (!this.initialized) await this.refresh();
+        if (!this.initialized) void this.refresh();
         if (this.abort.signal.aborted) return;
-        if (this.initialized) await this.api.observe(this.cursor, event => {
+        await this.api.observe(this.initialized ? this.cursor : null, event => {
           if (this.abort.signal.aborted) return;
           if ('cursor' in event && typeof event.cursor === 'number' && !('stream' in event)) {
             if (event.cursor <= this.cursor) return;
             this.cursor = event.cursor;
             void this.refresh();
           } else if ('stream' in event && event.stream === 'progress') {
+            if (event.threadId !== this.identity.threadId || event.branchId !== this.identity.branchId
+              || this.committedRequests.has(event.requestId)) return;
             const observed = ++this.progressObservation;
             const stream = `${event.kernelEpoch}:${event.streamId}`;
             let progress = this.progress.get(event.runId);
-            if (!progress || progress.stream !== stream) {
-              progress = { stream, sequence: 0, firstObserved: observed, items: new Map(), calls: new Map(), readers: new Map() };
+            if (!progress || progress.stream !== stream || progress.requestId !== event.requestId) {
+              progress = { stream, requestId: event.requestId, sequence: progress?.stream === stream ? progress.sequence : 0,
+                firstObserved: observed, items: new Map(), calls: new Map(), readers: new Map() };
               this.progress.set(event.runId, progress);
             }
             if (event.sequence !== progress.sequence + 1) {
@@ -124,34 +125,41 @@ export class ThreadProjection {
               void this.refresh();
             }
             progress.sequence = event.sequence;
-            const payload = event.event as { kind?: string; data?: { kind?: string; item_id?: string; text?: string; call_id?: string; name?: string; request_id?: string; delta?: string } };
-            const data = payload?.data;
-            if (payload?.kind === 'provider' && typeof data?.call_id === 'string') {
-              const old = progress.calls.get(data.call_id);
-              if (data.kind === 'tool_call_started' || data.kind === 'tool_arguments_delta') progress.calls.set(data.call_id, {
-                id: data.request_id ? JSON.stringify([event.runId, data.request_id, data.call_id]) : old?.id ?? data.call_id,
-                name: data.name ?? old?.name ?? '', rawArguments: (old?.rawArguments ?? '') + (data.delta ?? ''), sequence: event.sequence,
-              });
-              const call = progress.calls.get(data.call_id);
-              if (call?.name === 'render_ui') {
-                let reader = progress.readers.get(data.call_id);
-                const fresh = !reader;
-                if (!reader) { reader = new PartialJson(); progress.readers.set(data.call_id, reader); }
-                const args = reader.feed(fresh ? call.rawArguments : data.delta ?? '') as { ref?: string } | undefined;
-                if (reader.completeFields.has('ref') && typeof args?.ref === 'string') call.reference = args.ref;
+            const batch = event.event as { kind: 'batch'; events: ProviderProgress[] };
+            if (batch.kind !== 'batch' || !Array.isArray(batch.events)) return;
+            for (const payload of batch.events) {
+              const data = payload?.data;
+              if (payload?.kind === 'provider' && typeof data?.call_id === 'string') {
+                const old = progress.calls.get(data.call_id);
+                if (data.kind === 'tool_call_started' || data.kind === 'tool_arguments_delta') progress.calls.set(data.call_id, {
+                  id: data.request_id ? JSON.stringify([event.runId, data.request_id, data.call_id]) : old?.id ?? data.call_id,
+                  name: data.name ?? old?.name ?? '', rawArguments: (old?.rawArguments ?? '') + (data.delta ?? ''), sequence: event.sequence,
+                });
+                const call = progress.calls.get(data.call_id);
+                if (call?.name === 'render_ui') {
+                  let reader = progress.readers.get(data.call_id);
+                  const fresh = !reader;
+                  if (!reader) { reader = new PartialJson(); progress.readers.set(data.call_id, reader); }
+                  const args = reader.feed(fresh ? call.rawArguments : data.delta ?? '') as { ref?: string } | undefined;
+                  if (reader.completeFields.has('ref') && typeof args?.ref === 'string') call.reference = args.ref;
+                }
+              }
+              if (payload.kind === 'provider' && (data?.kind === 'text_delta' || data?.kind === 'reasoning_delta')
+                && typeof data.item_id === 'string' && typeof data.text === 'string') {
+                const old = progress.items.get(data.item_id);
+                progress.items.set(data.item_id, data.kind === 'reasoning_delta'
+                  ? { type: 'thinking', thinking: (old?.type === 'thinking' ? old.thinking : '') + data.text }
+                  : { type: 'text', text: (old?.type === 'text' ? old.text : '') + data.text });
               }
             }
-            if (payload && payload.kind === 'provider' && payload.data?.kind === 'text_delta' && typeof payload.data.item_id === 'string' && typeof payload.data.text === 'string') {
-              progress.items.set(payload.data.item_id, (progress.items.get(payload.data.item_id) ?? '') + payload.data.text);
-            }
-            if (event.runId === this.activeRunId) this.publishCurrentProgress();
-            else void this.refresh();
+            if (event.runId !== this.activeRunId) { this.activeRunId = event.runId; void this.refresh(); }
+            this.publishCurrentProgress();
           }
         }, { signal: this.abort.signal });
       } catch (error) { if (!this.abort.signal.aborted) this.report(error); }
       if (this.abort.signal.aborted) return;
       // A closed transport has no reliable presentation deltas; reconstruct from history.
-      this.progress.clear(); this.publishProgress(''); this.publishTools([]);
+      this.progress.clear(); this.publishProgress([]); this.publishTools([]);
       void this.refresh();
       await new Promise<void>(resolve => {
         const finish = () => { clearTimeout(timer); this.abort.signal.removeEventListener('abort', finish); resolve(); };

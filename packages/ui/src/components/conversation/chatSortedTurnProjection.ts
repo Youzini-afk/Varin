@@ -52,10 +52,6 @@ const assistantSources = (
   return sources;
 };
 
-const isTerminalAnswer = (message: ChatAssistantMessage): boolean => (
-  message.stopReason !== 'pending' && message.stopReason !== 'toolUse'
-);
-
 export const projectChatSortedTurn = (
   entries: readonly ChatTimelineEntry[],
   liveAssistant?: ChatAssistantMessage,
@@ -105,12 +101,12 @@ export const projectChatSortedTurn = (
           sourceId: source.id,
           streaming,
         });
-      } else if (isTerminalAnswer(message)) {
+      } else {
         answerContent.push(content);
       }
     }
 
-    if (isTerminalAnswer(message) && (answerContent.length > 0 || message.errorMessage)) {
+    if (answerContent.length > 0 || message.errorMessage) {
       answersBySourceId.set(source.id, { ...message, content: answerContent });
     }
   }

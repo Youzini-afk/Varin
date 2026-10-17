@@ -18,11 +18,11 @@ import { getRuntimeEndpointGeneration } from '@varin/application-client';
 import { revealResourceInEditor } from '@/lib/agent-editor/navigation';
 import { useI18n } from '@/lib/i18n';
 import { toast } from '@/components/ui';
-import type { StreamingToolCall } from '@/lib/agent-runtime/thread-projection';
+import type { StreamingToolCall, StreamingTextPart } from '@/lib/agent-runtime/thread-projection';
 
 export function ConversationTimeline({ api, identity, snapshot, history, progress, streamingTools = [], cwd, working, readOnly, onQuote, onFork, onRecover, memory, header, footer, liveUser, liveUserStatus }: {
   api: ThreadsAPI; identity: ThreadIdentity; snapshot?: ThreadSnapshot; history: readonly HistoryItem[];
-  progress: string; cwd: string; working: boolean; readOnly?: boolean; onQuote(text: string): void;
+  progress: StreamingTextPart[]; cwd: string; working: boolean; readOnly?: boolean; onQuote(text: string): void;
   streamingTools?: StreamingToolCall[];
   liveUser?: ChatUserMessage; liveUserStatus?: ChatSessionSubmissionStatus;
   onFork?(id: string): void; onRecover?(id: string): void; memory?: ThreadMemoryAPI;
@@ -79,10 +79,10 @@ export function ConversationTimeline({ api, identity, snapshot, history, progres
         projected.call.rawArguments !== undefined && !projected.call.interrupted || execution?.status === 'running', projected.result?.isError ?? execution?.status === 'error');
     }
   }, [uiCards, key, view.toolExecutions]);
-  const liveAssistant = React.useMemo(() => progress || streamingTools.length ? assistant(`progress:${snapshot?.activeRun?.id ?? key}`, [
-    ...(progress ? [{ type: 'text' as const, text: progress }] : []),
+  const liveAssistant = React.useMemo(() => progress.length || streamingTools.length ? assistant(`progress:${snapshot?.activeRun?.id ?? key}`, [
+    ...progress,
     ...streamingTools.filter(call => call.name === 'render_ui').map(call => ({ type: 'toolCall' as const, id: call.id, name: call.name, arguments: {}, rawArguments: call.rawArguments, sequence: call.sequence, interrupted: call.interrupted })),
-  ], snapshot?.modelSelection.active?.configuration ?? snapshot?.activeRun?.configuration, working) : undefined,
+  ], snapshot?.modelSelection.active?.configuration ?? snapshot?.activeRun?.configuration, working || progress.length > 0) : undefined,
     [progress, streamingTools, working, snapshot?.modelSelection.active?.configuration, snapshot?.activeRun?.configuration, snapshot?.activeRun?.id, key]);
   const entering = React.useRef<string | undefined>(undefined);
   React.useLayoutEffect(() => {

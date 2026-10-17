@@ -1179,7 +1179,7 @@ export const ChatTimelineEntryList: React.FC<Omit<
                   hiddenThinkingLabel={resolvedThinkingLabel}
                   message={displayedMessage}
                   resultByCallId={resultByCallId}
-                  streaming={chatRenderMode === 'live'}
+                  streaming={displayedMessage.stopReason === 'pending'}
                 />
               ) : null}
             </article>

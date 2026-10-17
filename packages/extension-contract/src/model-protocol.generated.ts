@@ -21,7 +21,7 @@ export interface RequestView { request_id:string; run_id:string; origin:RequestO
 
 export interface ModelUsageReceipt { measurement:'missing'|'estimated'|'actual'; input_tokens:number|null; output_tokens:number|null; cached_input_tokens:number|null; cache_write_tokens:number|null; reasoning_tokens:number|null; raw:unknown|null; pricing_version:string|null }
 
-export type ProviderEvent = {kind:'text_delta';item_id:string;text:string} | {kind:'tool_arguments_delta';call_id:string;delta:string} | {kind:'item_completed';item:{id:string;content:ModelContent;opaque:ModelOpaqueItem|null}} | {kind:'usage';receipt:ModelUsageReceipt};
+export type ProviderEvent = {kind:'text_delta'|'reasoning_delta';item_id:string;text:string} | {kind:'tool_call_started';call_id:string;name:string;request_id:string} | {kind:'tool_arguments_delta';call_id:string;delta:string} | {kind:'item_completed';item:{id:string;content:ModelContent;opaque:ModelOpaqueItem|null}} | {kind:'usage';receipt:ModelUsageReceipt};
 
 export type FinishReason = 'stop'|'tool_calls'|'length'|'content_filter';
 

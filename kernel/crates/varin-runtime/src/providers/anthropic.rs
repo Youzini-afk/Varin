@@ -406,6 +406,10 @@ impl StreamState {
                                 failure("invalid_provider_event", "thinking delta missing")
                             })?,
                         )?;
+                        emit_event(emit, ProviderEvent::ReasoningDelta {
+                            item_id: format!("{}:{index}", self.id.as_ref().unwrap()),
+                            text: delta["thinking"].as_str().unwrap().into(),
+                        })?;
                     }
                     "signature_delta" => {
                         ensure_block(&block.value, &["thinking"])?;

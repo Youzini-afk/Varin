@@ -483,6 +483,7 @@ impl StreamState {
                             }
                         } else if let Some(text) = part["text"].as_str() {
                             if part["thought"] == true {
+                                emit_event(emit, ProviderEvent::ReasoningDelta { item_id: id.clone(), text: text.into() })?;
                                 Content::ProviderOnly
                             } else {
                                 emit_event(

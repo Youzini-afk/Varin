@@ -228,7 +228,7 @@ impl ModelProvider for PiMessagesProvider {
                 "text_delta"|"thinking_delta"|"toolcall_delta"=>{
                     let block=blocks.get_mut(&index).ok_or_else(invalid)?;let delta=required(&event,"delta")?;
                     if kind=="toolcall_delta" {if block["type"]!="toolCall"{return Err(invalid());}emit_event(emit,ProviderEvent::ToolArgumentsDelta{call_id:required(block,"id")?.into(),delta:delta.into()})?;}
-                    else {let field=if kind=="text_delta"{"text"}else{"thinking"};if block["type"]!=field{return Err(invalid());}let text=block[field].as_str().ok_or_else(invalid)?.to_owned()+delta;block[field]=json!(text);if field=="text"{emit_event(emit,ProviderEvent::TextDelta{item_id:format!("pi-{index}"),text:delta.into()})?;}}
+                    else {let field=if kind=="text_delta"{"text"}else{"thinking"};if block["type"]!=field{return Err(invalid());}let text=block[field].as_str().ok_or_else(invalid)?.to_owned()+delta;block[field]=json!(text);emit_event(emit,if field=="text"{ProviderEvent::TextDelta{item_id:format!("pi-{index}"),text:delta.into()}}else{ProviderEvent::ReasoningDelta{item_id:format!("pi-{index}"),text:delta.into()}})?;}
                 },
                 "text_end"|"thinking_end"|"toolcall_end"=>{
                     let mut block=blocks.remove(&index).ok_or_else(invalid)?;

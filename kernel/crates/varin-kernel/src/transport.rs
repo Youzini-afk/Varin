@@ -7,7 +7,7 @@ use std::{
     collections::{HashMap, VecDeque},
     io,
     sync::{
-        atomic::{AtomicBool, AtomicUsize, Ordering},
+        atomic::{AtomicBool, Ordering},
         mpsc, Arc, Condvar, Mutex,
     },
     thread,
@@ -258,12 +258,12 @@ struct Shared {
     changed: Condvar,
     received: Mutex<HashMap<Uuid, Arc<Mutex<Received>>>>,
     response_lanes: Mutex<HashMap<String, Lane>>,
-    queued: AtomicUsize,
     epoch: String,
     chunk_bytes: usize,
 }
 impl Shared {
     fn fail(&self) {
+        let _scheduler = self.scheduled.lock().unwrap();
         if !self.stopped.swap(true, Ordering::AcqRel) {
             self.changed.notify_all();
             let _ = self.incoming.send(Incoming::Disconnected);
@@ -362,14 +362,11 @@ impl Sender {
         if self.lane(&value) == Lane::Control {
             return shared.enqueue_control(value);
         }
-        self.send_body(value, false)
+        self.send_body(value).map(|_| ())
     }
-    fn send_body(&self, value: Value, reserved: bool) -> Result<(), mpsc::SendError<Value>> {
+    fn send_body(&self, value: Value) -> Result<Uuid, mpsc::SendError<Value>> {
         let shared = self.shared.as_ref().unwrap();
         if shared.stopped.load(Ordering::Acquire) {
-            if reserved {
-                shared.queued.fetch_sub(1, Ordering::AcqRel);
-            }
             return Err(mpsc::SendError(value));
         }
         let id = Uuid::new_v4();
@@ -387,9 +384,6 @@ impl Sender {
                 ending: false,
             },
         );
-        if !reserved {
-            shared.queued.fetch_add(1, Ordering::AcqRel);
-        }
         if shared
             .command(
                 "transport-stream-open",
@@ -404,7 +398,21 @@ impl Sender {
             .as_ref()
             .unwrap()
             .send((id, value))
+            .map(|_| id)
             .map_err(|error| mpsc::SendError(error.0 .1))
+    }
+    /// Only the dedicated progress consumer waits here. The model worker coalesces pending
+    /// content independently. One outstanding batch per stream also preserves delivery order.
+    pub(crate) fn send_progress(&self, value: Value) -> Result<(), mpsc::SendError<Value>> {
+        #[cfg(test)]
+        if let Some(fixture) = &self.fixture { return fixture.send(value); }
+        let shared = self.shared.as_ref().unwrap();
+        let id = self.send_body(value)?;
+        let mut scheduler = shared.scheduled.lock().unwrap();
+        while !shared.stopped.load(Ordering::Acquire) && scheduler.streams.contains_key(&id) {
+            scheduler = shared.changed.wait(scheduler).unwrap();
+        }
+        Ok(())
     }
     pub(crate) fn send_control(&self, value: Value) -> Result<(), mpsc::SendError<Value>> {
         #[cfg(test)]
@@ -418,28 +426,6 @@ impl Sender {
             }
         }
         shared.enqueue_control(value)
-    }
-    pub(crate) fn try_send(&self, value: Value) -> Result<(), mpsc::TrySendError<Value>> {
-        #[cfg(test)]
-        if let Some(fixture) = &self.fixture {
-            return fixture.try_send(value);
-        }
-        // Replaceable progress has no independent application ACK. Keep only the transport
-        // window's number of such bodies outstanding; durable facts use send and owner credits.
-        if self
-            .shared
-            .as_ref()
-            .unwrap()
-            .queued
-            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |count| {
-                (count < crate::protocol_generated::KERNEL_REQUEST_WINDOW).then_some(count + 1)
-            })
-            .is_err()
-        {
-            return Err(mpsc::TrySendError::Full(value));
-        }
-        self.send_body(value, true)
-            .map_err(|error| mpsc::TrySendError::Disconnected(error.0))
     }
 }
 
@@ -497,7 +483,6 @@ impl Transport {
             changed: Condvar::new(),
             received: Mutex::new(HashMap::new()),
             response_lanes: Mutex::new(HashMap::new()),
-            queued: AtomicUsize::new(0),
             epoch: epoch.clone(),
             chunk_bytes: bootstrap.chunk_bytes,
         });
@@ -549,6 +534,7 @@ impl Transport {
                     .command("transport-stream-begin", id, json!({"byteLength":length}))
                     .is_err()
                 {
+                    drop(scheduler);
                     encoder.fail();
                     break;
                 }
@@ -802,7 +788,7 @@ fn read_control(mut input: Connection, shared: &Arc<Shared>) -> io::Result<()> {
                 }
                 scheduler.streams.remove(&id);
                 scheduler.order.retain(|queued| *queued != id);
-                shared.queued.fetch_sub(1, Ordering::AcqRel);
+                shared.changed.notify_all();
             }
             _ => return Err(protocol_error("unknown transport command")),
         }

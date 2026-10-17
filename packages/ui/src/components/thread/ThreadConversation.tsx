@@ -62,7 +62,7 @@ import { EMPTY_WORK_OVERVIEW_CHOICES, useWorkOverviewStore } from '@/stores/useW
 import { VarinLogo } from '@/components/ui/VarinLogo';
 import { cn, formatDirectoryName } from '@/lib/utils';
 import { MarkdownRenderer } from '@/components/chat/MarkdownRenderer';
-import { ThreadProjection } from '@/lib/agent-runtime/thread-projection';
+import { ThreadProjection, type StreamingTextPart } from '@/lib/agent-runtime/thread-projection';
 import { ThreadOutput } from './ThreadMedia';
 import { ThreadInputQueue } from './ThreadQueuedInput';
 import { ChildTasks } from '../conversation/ChildTasks';
@@ -242,7 +242,7 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
   const identityGeneration = React.useRef(0);
   const forkKeys = React.useRef(new Map<string, string>());
   const compactionKeys = React.useRef(new Map<string, string>());
-  const [progress, setProgress] = React.useState('');
+  const [progress, setProgress] = React.useState<StreamingTextPart[]>([]);
   const [streamingTools, setStreamingTools] = React.useState<import('@/lib/agent-runtime/thread-projection').StreamingToolCall[]>([]);
   const messageInput = React.useRef<ComposerEditorHandle | null>(null);
   const appliedModelPreference = React.useRef<string | undefined>(undefined);
@@ -277,7 +277,7 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
     historyGeneration.current += 1; setHistoryView(null); setHistoryLoading(false);
     setPreparingSource(false);
     pendingAction.current = null; setPending(false); setError(undefined);
-    setSnapshot(undefined); setProgress(''); setHistoryOpen(false); setContextRunId(undefined); setReadingFiles(false); fileReadGeneration.current += 1;
+    setSnapshot(undefined); setProgress([]); setHistoryOpen(false); setContextRunId(undefined); setReadingFiles(false); fileReadGeneration.current += 1;
     fileRead.current?.abort(); fileRead.current = null;
     const view = new ThreadProjection(api, identity, value => { snapshotHost.current = host; handoff.observe(value); setSnapshot(value); }, value => setError(value instanceof Error ? value.message : 'Thread unavailable'), setProgress, setStreamingTools);
     projection.current = view; view.start();
@@ -495,7 +495,7 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
   if (snapshot?.children?.length) overviewRows.push({ id: 'children', section: 'threads', icon: 'git-branch', label: t('harness.overview.threads'), value: snapshot.children!.length });
   if (snapshot?.operations.some(operation => operation.phase !== 'terminal')) overviewRows.push({ id: 'operations', section: 'outputs', icon: 'loader-4', label: t('harness.overview.outputs'), value: snapshot.operations.filter(operation => operation.phase !== 'terminal').length });
   if (hasComputer) overviewRows.push({ id: 'computer', section: 'computer', icon: 'computer', label: t('computer.automation.title') });
-  const empty = Boolean(snapshot && !visibleHistory.length && !progress && !active && !firstMessage.message && !pending && !draft.pendingInput);
+  const empty = Boolean(snapshot && !visibleHistory.length && !progress.length && !active && !firstMessage.message && !pending && !draft.pendingInput);
   const emptyWorkspacePath = preparedSource?.path ?? draft.workspacePath ?? launch?.selection.source?.live_root?.canonicalRoot;
 
   const overview = <WorkOverviewControl open={choices.overview ?? false} compactOpen={choices.compact ?? false}
@@ -604,7 +604,7 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
     <ConversationSurface owner={String(host)} identity={draftKey} ready={Boolean(snapshot || firstMessage.message)} loadingLabel={t('common.loading')}>
     <ConversationTimeline api={api} identity={identity} snapshot={snapshot} history={visibleHistory}
       liveUser={historyView ? undefined : firstMessage.message} liveUserStatus={firstMessage.status}
-      progress={historyView ? '' : progress} streamingTools={historyView ? [] : streamingTools} cwd={emptyWorkspacePath ?? ''} working={!historyView && active && !launch?.preparation_failure && !pause} readOnly={readOnly}
+      progress={historyView ? [] : progress} streamingTools={historyView ? [] : streamingTools} cwd={emptyWorkspacePath ?? ''} working={!historyView && active && !launch?.preparation_failure && !pause} readOnly={readOnly}
       memory={snapshot?.thread.bot_id ? memorySelection : undefined}
       onQuote={quote => { if (!readOnly && currentViewScope.current === viewScope) { setText(current => [current.trimEnd(), quote].filter(Boolean).join('\n\n')); messageInput.current?.focus(); } }}
       onFork={!readOnly && !pending && onBranchCreated ? id => void forkFrom(id) : undefined}
