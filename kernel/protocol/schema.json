@@ -635,6 +635,7 @@
   "RunReconcileParams",
   "RunReconcileResult",
   "SubmitLaunch",
+  "AgentSelection",
   "LaunchFailedParams",
   "SourceFailureCode",
   "ThreadParams",
@@ -838,7 +839,7 @@
   "MediaReadChunk",
   "ChildSourceAuthority"
 ],
-  "protocolVersion": 48,
+  "protocolVersion": 49,
   "runtimeStructs": {
     "RunFailure": {"fields": {"runId": {"type": "string"}, "cursor": {"type": "number"}, "code": {"type": "string"}, "message": {"type": "string"}}},"ContentCollectionReport":{"fields":{"status":{"type":"ContentCollectionStatus"},"phase":{"type":"ContentCollectionPhase"},"removedObjects":{"type":"number"},"removedBytes":{"type":"number"},"removedStagingFiles":{"type":"number"},"reason":{"type":"string | null"}}},"ModelSessionConfiguration":{"fields":{"catalogModelId":{"type":"string","optional":true},"providerId":{"type":"string","optional":true},"providerFamily":{"type":"string"},"model":{"type":"string"},"endpoint":{"type":"string"},"credentialEnvironment":{"type":"string | null"},"allowAnonymous":{"type":"boolean"},"acceptsImages":{"type":"boolean","optional":true},"configurationGeneration":{"type":"number"},"maxOutputTokens":{"type":"number | null"},"azureDeployment":{"type":"string | null","optional":true},"azureApiVersion":{"type":"string | null","optional":true},"legacyMaxTokens":{"type":"boolean","optional":true},"includeStreamUsage":{"type":"boolean","optional":true},"reasoningEffort":{"type":"string | null","optional":true},"anthropicOauth":{"type":"boolean","optional":true},"adapterId":{"type":"string","optional":true},"adapterVersion":{"type":"string","optional":true},"awsRegion":{"type":"string","optional":true},"adapterIdentity":{"type":"string","optional":true},"adapterBindingId":{"type":"string","optional":true},"connection":{"type":"ModelHttpConfiguration","optional":true},"contextWindowTokens":{"type":"number","optional":true},"thinkingLevel":{"type":"string","optional":true},"modelOptions":{"type":"unknown","optional":true}}},"KernelWorkingResultCandidate":{"fields":{"publicationId":{"type":"string"},"candidateOperationId":{"type":"string"},"workspaceId":{"type":"string"},"branchId":{"type":"string"},"root":{"type":"string"},"baseRoot":{"type":"string"},"writeRevision":{"type":"number"},"pinId":{"type":"string"},"basePinId":{"type":"string"}}}},
   "runtimeEnums": {
@@ -1988,7 +1989,8 @@
     "HostToolReconcileParams": {"fields":{"operationId":{"type":"string"},"executionOwner":{"type":"ExecutorOwner"}}},
     "RunReconcileParams": {"fields":{"runId":{"type":"string"},"toolBinding":{"type":"unknown"}}},
     "RunReconcileResult": {"fields":{"reconciled":{"type":"string[]"},"unresolved":{"type":"string[]"}}},
-    "SubmitLaunch": {"fields":{"inheritSource":{"type":"boolean","optional":true},"source":{"type":"LaunchSourceParams | null"},"enabledTools":{"type":"string[]"},"credentialScope":{"type":"CredentialScope","optional":true},"childDispatch":{"type":"ChildDispatchCatalog","optional":true}}},
+    "AgentSelection": {"rustType":"varin_runtime::catalog::launches::AgentSelection","fields":{"profileId":{"type":"string | null"},"name":{"type":"string | null"},"workFocus":{"type":"\"code\" | \"research\""},"tools":{"type":"string[] | null"}}},
+    "SubmitLaunch": {"fields":{"agent":{"type":"AgentSelection","optional":true},"inheritSource":{"type":"boolean","optional":true},"source":{"type":"LaunchSourceParams | null"},"enabledTools":{"type":"string[]"},"credentialScope":{"type":"CredentialScope","optional":true},"childDispatch":{"type":"ChildDispatchCatalog","optional":true}}},
     "SourceFailureCode": {"raw":"export type SourceFailureCode = 'source_unavailable' | 'source_registration_missing' | 'source_authority_denied' | 'source_environment_unavailable' | 'source_changed';","rustType":"varin_runtime::catalog::launches::SourceFailureCode"},
     "LaunchFailedParams": {"fields":{"runId":{"type":"string"},"code":{"type":"string"}}},
     "ThreadParams": {"fields":{"threadId":{"type":"string"}}},
@@ -2074,7 +2076,7 @@
     "McpPrepareParams": {"fields":{"runId":{"type":"string"},"binding":{"type":"McpBinding"},"derivations":{"type":"McpChildDerivationReceipt[]","optional":true}}},
     "ToolSelectParams": {"fields":{"runId":{"type":"string"},"selectionId":{"type":"string"}}},
     "ToolReadyParams": {"fields":{"extensionBindings":{"type":"LiveExtensionToolBinding[]","optional":true},"runId":{"type":"string"},"selectionId":{"type":"string"},"binding":{"type":"LiveMcpBinding","optional":true}}},
-    "LaunchSelection": {"fields":{"extension_bindings":{"type":"ExtensionToolBinding[]"},"policy_models":{"type":"PolicyModelCapability[]"},"mcp_binding":{"type":"McpBinding | null"},"credential_scope":{"type":"CredentialScope | null"},"connection_identity":{"type":"string"},"provider_family":{"type":"string"},"model":{"type":"string"},"configuration_generation":{"type":"number"},"tool_schema_generation":{"type":"number"},"tools":{"type":"LaunchTool[]"},"policy":{"type":"LaunchPolicy"},"source":{"type":"LaunchSource | null"},"child_dispatch":{"type":"ChildDispatchCatalog | null"}}},
+    "LaunchSelection": {"fields":{"agent":{"type":"AgentSelection","optional":true},"extension_bindings":{"type":"ExtensionToolBinding[]"},"policy_models":{"type":"PolicyModelCapability[]"},"mcp_binding":{"type":"McpBinding | null"},"credential_scope":{"type":"CredentialScope | null"},"connection_identity":{"type":"string"},"provider_family":{"type":"string"},"model":{"type":"string"},"configuration_generation":{"type":"number"},"tool_schema_generation":{"type":"number"},"tools":{"type":"LaunchTool[]"},"policy":{"type":"LaunchPolicy"},"source":{"type":"LaunchSource | null"},"child_dispatch":{"type":"ChildDispatchCatalog | null"}}},
     "LaunchIntent": {"fields":{"policy_preparable":{"type":"boolean"},"policy_generation":{"type":"number"},"policy_target":{"type":"PolicyTarget"},"preparation_failure":{"type":"string | null"},"run_id":{"type":"string"},"revision":{"type":"number"},"selection":{"type":"LaunchSelection"},"bound_epoch":{"type":"number | null"},"requires_rebind":{"type":"boolean"},"startable":{"type":"boolean"},"pause":{"type":"PolicyPauseInfo | null"}}},
     "KernelProcessSubscribeParams": {"fields":{"workspaceId":{"type":"string"},"processId":{"type":"string"},"rootId":{"type":"string","optional":true},"subscriptionId":{"type":"string"},"cursor":{"type":"number"}}},
     "KernelProcessSubscriptionParams": {"fields":{"subscriptionId":{"type":"string"}}},

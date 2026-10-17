@@ -143,6 +143,39 @@ fn finish(db: &mut Catalog, receipt: &Receipt) {
     db.transition_run(&run.id, run.epoch, run.revision, RunState::Completed)
         .unwrap();
 }
+
+#[test]
+fn agent_selection_updates_context_with_the_original_source_and_keeps_its_retry_receipt() {
+    let f = Fixture::new();
+    let mut db = f.open();
+    db.create_thread("thread", "main").unwrap();
+    let first = admit(&mut db, "first", "general", Some(source("materialized", "files")));
+    finish(&mut db, &first);
+    let old = db.active_context("main").unwrap().unwrap();
+    let input = command(&db, "choose-agent", "main");
+    let mut selected = launch(None);
+    selected.agent = Some(varin_runtime::catalog::launches::AgentSelection {
+        profile_id: Some("varin:custom:researcher".into()), name: Some("Researcher".into()),
+        work_focus: "research".into(), tools: Some(vec!["resource_read".into()]),
+    });
+    let prepared = db.prepare_submission(input.clone(), Some(proposal("research instructions")), Some(basis("research instructions"))).unwrap()
+        .with_resources(old.resources.clone()).with_expected_context_checkpoint(Some(old.id.clone()))
+        .load(Some(selected.clone()), true).unwrap();
+    let receipt = db.admit_submission(prepared).unwrap();
+    let current = db.active_context("main").unwrap().unwrap();
+    assert_eq!(current.proposal.effective_system_prompt, "research instructions");
+    assert_eq!(current.resources, old.resources);
+    assert_eq!(current.proposal.memory_checkpoint, old.proposal.memory_checkpoint);
+    let admitted = db.capture_launch(&receipt.run_id).unwrap().unwrap().load().unwrap();
+    assert_eq!(admitted.selection.agent, selected.agent);
+    assert_eq!(admitted.selection.source, old.resources.unwrap().source);
+    // Profile settings may change after acceptance; retry still returns the first execution.
+    selected.agent.as_mut().unwrap().name = Some("Renamed".into());
+    selected.agent.as_mut().unwrap().tools = Some(vec![]);
+    let replay = db.prepare_submission(input, None, None).unwrap().load(Some(selected), true).unwrap();
+    assert_eq!(db.admit_submission(replay).unwrap().run_id, receipt.run_id);
+    assert_eq!(db.active_context("main").unwrap().unwrap().id, current.id);
+}
 fn refresh(db: &mut Catalog, text: &str) -> ContextCheckpoint {
     let old = db.active_context("main").unwrap().unwrap();
     let source = old.resources.as_ref().unwrap().source.clone();

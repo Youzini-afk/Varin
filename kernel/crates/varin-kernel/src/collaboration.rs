@@ -350,6 +350,7 @@ impl ToolExecutor for CollaborationTools {
                         cancel,
                     )?;
                     let launch = varin_runtime::catalog::launches::LaunchSelection {
+                        agent: None,
                         child_dispatch: Some(selected.catalog.clone()),
                         extension_bindings: resolved.extension_bindings.clone(),
                         policy_models: Vec::new(),

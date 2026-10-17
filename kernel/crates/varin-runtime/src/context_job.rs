@@ -533,6 +533,7 @@ pub fn text_compaction_launch(
             )
         })?;
     Ok(crate::catalog::launches::LaunchSelection {
+        agent: None,
         child_dispatch: None,
         policy_models: Vec::new(),
         extension_bindings: Vec::new(),

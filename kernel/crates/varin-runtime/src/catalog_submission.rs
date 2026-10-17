@@ -86,6 +86,10 @@ fn submission_intent(
     let mut selected = serde_json::to_value(launch).expect("typed launch selection");
     if let Some(object) = selected.as_object_mut() {
         object.remove("child_dispatch");
+        if let Some(agent) = object.get_mut("agent").and_then(Value::as_object_mut) {
+            agent.remove("name");
+            agent.remove("tools");
+        }
     }
     let input = crate::content::ContentStore::normalized_user_input(&command.key, &command.input)?;
     let dependencies = crate::output::incoming_input_dependencies(&input)?;
@@ -352,8 +356,11 @@ impl PreparedSubmission {
         };
         let active = current.map(context::CheckpointRead::load).transpose()?;
         let selected_source = launch.as_ref().and_then(|launch| launch.source.clone());
+        let context_source = if inherit_source {
+            active.as_ref().and_then(|checkpoint| checkpoint.resources.as_ref()).and_then(|resources| resources.source.clone())
+        } else { selected_source.clone() };
         let normalized_source =
-            super::followups::normalized_source(selected_source.clone(), &run_id);
+            super::followups::normalized_source(context_source.clone(), &run_id);
         if resources.is_none() && !inherit_source && selected_source.is_some() {
             if let Some(previous) = active
                 .as_ref()
@@ -387,7 +394,7 @@ impl PreparedSubmission {
                     })?;
                     resources.validate(basis)?;
                     if resources.snapshot.scope.branch_id != command.branch_id
-                        || resources.source != selected_source
+                        || resources.source != context_source
                     {
                         return Err(RuntimeError::Conflict(
                             "resource snapshot differs from the admitted branch/source".into(),

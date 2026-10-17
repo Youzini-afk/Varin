@@ -471,6 +471,9 @@ impl Catalog {
             ).optional()?;
             if let (Some(selection), Some((previous_run, body))) = (launch.as_mut(), previous) {
                 let previous: launch_content::LaunchMetadata = serde_json::from_str(&body)?;
+                if selection.agent.is_none() {
+                    selection.agent = previous.selection.agent;
+                }
                 if selection.child_dispatch_ref.is_none() {
                     selection.child_dispatch_ref = previous.selection.child_dispatch_ref;
                 }

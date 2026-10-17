@@ -2,7 +2,7 @@ import { create } from 'zustand';
 import type { EditorContextAttachment } from '@/lib/agent-editor/types';
 import type { InlineCommentDraft } from './useInlineCommentDraftStore';
 import type { ImageAttachment } from '@varin/protocol';
-import type { ThreadIdentity, ThreadModel, ThreadPrepareSource, ThreadPreparedSource, ThreadsAPI } from '@varin/application-client';
+import type { ThreadAgentChoice, ThreadIdentity, ThreadModel, ThreadPrepareSource, ThreadPreparedSource, ThreadsAPI } from '@varin/application-client';
 import { useMessageQueueStore } from './messageQueueStore';
 
 export type ThreadPendingInput = {
@@ -40,6 +40,7 @@ export interface ThreadFirstSend {
   images: ImageAttachment[];
   pdfs: DraftPdfAttachment[];
   model: ThreadModel;
+  agent?: ThreadAgentChoice;
   workspacePath?: string;
   sourceSelection?: DraftSourceSelection;
   editorContext: readonly EditorContextAttachment[];
@@ -54,6 +55,8 @@ export interface ThreadDraft {
   images: ImageAttachment[];
   materials: ThreadMaterialAttachment[];
   model?: ThreadModel;
+  agent?: ThreadAgentChoice;
+  nextAgentModel?: ThreadModel;
   inputMode: 'boundary' | 'interrupt' | 'next_run';
   preparedSource: ThreadPreparedSource | null;
   workspacePath?: string;

@@ -78,7 +78,7 @@ export function sendThreadDraft(api: ThreadsAPI, draftKey: string, request: Thre
           editorText: request.editorText, editorContext: request.editorContext, inlineContext: request.inlineContext,
           preparedSource, goalObjective: request.goalObjective, goalBudget: request.goalBudget,
           input: { ...identity, key: request.key, expectedHead: null, text: request.text, images: request.images, materials,
-            model: request.model, ...(preparedSource ? { source: preparedSource.source } : {}) } };
+            model: request.model, ...(request.agent ? { agent: request.agent } : {}), ...(preparedSource ? { source: preparedSource.source } : {}) } };
         patch({ pendingInput: input });
       }
       const original = read().pendingInput!;

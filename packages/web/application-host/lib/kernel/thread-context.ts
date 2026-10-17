@@ -7,7 +7,7 @@ import type { AgentPersonalization } from '../memory/agent-personalization.js';
 import { type PreparedAgentResources } from '../agent-resources/authority.js';
 import { agentSystemSections } from '../agent-resources/render.js';
 import type { ThreadResourceScope, ThreadResourceScopeOptions } from './thread-resource-scope.js';
-import type { InitialContext, ContextPersonalization, ContextResources, LaunchSource, ChildSelectedProfile } from './protocol.generated.js';
+import type { InitialContext, ContextPersonalization, ContextResources, LaunchSource, ChildSelectedProfile, AgentSelection } from './protocol.generated.js';
 
 interface ContextOwners {
   composition?: ContextCompositionPreparer;
@@ -26,6 +26,7 @@ export interface AdmittedContextScope {
 export interface ContextPreparer {
   (identity: ThreadIdentity, source: ThreadSource | null, admitted: AdmittedContextScope, signal?: AbortSignal): Promise<InitialContext>;
   main(identity: ThreadIdentity, source: ThreadSource | null, signal?: AbortSignal): Promise<InitialContext>;
+  withAgent?(context: InitialContext, agent: AgentSelection, instructions: string): Promise<InitialContext>;
   refresh?(checkpoint: ContextCheckpoint, signal?: AbortSignal): Promise<InitialContext>;
   compact?(checkpoint: ContextCheckpoint, signal?: AbortSignal): Promise<InitialContext>;
   forSource?(checkpoint: ContextCheckpoint, source: ThreadSource | null, signal?: AbortSignal): Promise<InitialContext>;
@@ -73,7 +74,8 @@ export function createThreadContext(owners: ContextOwners): ContextPreparer {
       const profile = catalog.prompts[agentScopeKey(scope)];
       return profile ? [{ scope, profile }] : [];
     });
-    const configurationDigest = digest({ scopes, profiles, bot, mode: basis.mode, threadRole: basis.threadRole });
+    const configurationDigest = digest({ scopes, profiles, bot, mode: basis.mode, threadRole: basis.threadRole,
+      agent: basis.originalSections.filter(section => section.name === 'agent_profile' || section.name === 'work_focus') });
     const memorySnapshot = updateMemory && !bot ? { revision: catalog.revision,
       memories: basis.mode === 'bot' ? [] : catalog.memories.filter(note => keys.has(agentScopeKey(note.scope))) } : basis.memorySnapshot;
     const context: AgentPersonalizationContext = {
@@ -129,13 +131,24 @@ export function createThreadContext(owners: ContextOwners): ContextPreparer {
     }
     const candidate = await render({ ...basis,
       originalSections: [...Object.entries(sections(snapshot)).map(([name, content]) => ({ name, content })),
-        ...basis.originalSections.filter(section => section.name === 'child_profile')],
+        ...basis.originalSections.filter(section => ['child_profile', 'agent_profile', 'work_focus'].includes(section.name))],
       instructionSources: [...sources(snapshot), ...basis.instructionSources.filter(source => source.startsWith('agent.child-profile:'))] }, { source: retainSource ? previous.source : resourceSource(source), snapshot }, false, options?.signal);
     options?.signal?.throwIfAborted();
     // Resource publication does not acknowledge a newer memory note snapshot.
     return { ...candidate, memoryCheckpoint: checkpoint.proposal.memory_checkpoint };
   };
   return Object.assign(initial, {
+    async withAgent(context: InitialContext, agent: AgentSelection, instructions: string): Promise<InitialContext> {
+      const basis = context.personalization;
+      if (!basis || basis.mode !== 'agent' || basis.threadRole !== 'main') throw new Error('Agent selection requires an ordinary main conversation');
+      const originalSections = basis.originalSections.filter(section => !['agent_profile', 'work_focus'].includes(section.name));
+      if (instructions.trim()) originalSections.push({ name: 'agent_profile', content: instructions });
+      originalSections.push({ name: 'work_focus', content: agent.workFocus === 'research'
+        ? 'Work focus: research. Investigate questions, compare explanations, and design and carry out experiments as appropriate to the task. Ground claims in evidence and distinguish findings from hypotheses.'
+        : 'Work focus: general. Help with coding and everyday tasks, choosing the tools and level of investigation appropriate to the user’s request.' });
+      if (JSON.stringify(originalSections) === JSON.stringify(basis.originalSections)) return context;
+      return render({ ...basis, originalSections }, context.resources);
+    },
     async forSource(checkpoint: ContextCheckpoint, source: ThreadSource | null, signal?: AbortSignal): Promise<InitialContext> {
       return replaceResources(checkpoint, source, signal ? { signal } : undefined, false);
     },

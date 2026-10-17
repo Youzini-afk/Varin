@@ -537,6 +537,7 @@ impl RunAssembly {
             selection.child_dispatch = saved_launch
                 .as_ref()
                 .and_then(|launch| launch.selection.child_dispatch.clone());
+            selection.agent = saved_launch.as_ref().and_then(|launch| launch.selection.agent.clone());
             check_cancelled()?;
             let preparation = runtime
                 .catalog()

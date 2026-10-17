@@ -19,6 +19,7 @@ export interface ThreadIdentity { runtime: 'agent'; threadId: string; branchId: 
 export type ThreadThinkingLevel = import('@varin/protocol').ThinkingLevel;
 export interface ThreadModel { providerId: string; modelId: string; thinkingLevel?: ThreadThinkingLevel; temperature?: number }
 export interface ThreadModelInfo extends ThreadModel { name?: string; acceptsImages?: boolean; contextWindowTokens?: number; thinkingLevels?: ThreadThinkingLevel[] }
+export interface ThreadAgentChoice { profileId: string | null; workFocus: import('@varin/protocol').WorkFocusId }
 /** A public model selection resolves only through the Host's existing model/credential authority. */
 export type ThreadMcpSamplingRequestReview = ThreadIdentity & Omit<McpSamplingRequestReviewParams, 'action' | 'editedRequest'> & (
   | { action: 'generate'; model: ThreadModel; editedRequest: Record<string, unknown> }
@@ -75,6 +76,7 @@ export interface ThreadSubmit extends ThreadIdentity {
   images?: ImageAttachment[];
   materials?: ThreadMaterialAttachment[];
   model: ThreadModel;
+  agent?: ThreadAgentChoice;
   source?: ThreadSource;
 }
 export interface ThreadHistoryPage {

@@ -23,7 +23,7 @@ import { WorkbenchContributionSlot } from '@/lib/extensions/workbench-registry';
 
 export function ThreadComposer({ editorRef, value, onChange, models, providerId, modelId, thinkingLevel, onModelChange,
   modelDisabled, attachmentDisabled, imageDisabled, sendDisabled, pending, active, retrying, delivery, onDeliveryChange,
-  allowNextRun, onFiles, onAttachImages, onAttachPdfs, onStop, onGoal, goalArmed, children, attachmentNames, skills, hasInput, onWorkspace, workspaceLabel, workspacePath, identityKey, messageHistory: sentMessageHistory = [], placement = 'bottom', queue, onCompact, onOpenHistory }: {
+  allowNextRun, onFiles, onAttachImages, onAttachPdfs, onStop, onGoal, goalArmed, children, attachmentNames, skills, hasInput, onWorkspace, workspaceLabel, workspacePath, identityKey, messageHistory: sentMessageHistory = [], placement = 'bottom', queue, onCompact, onOpenHistory, agentControls }: {
   editorRef: React.Ref<ComposerEditorHandle>; value: string; onChange(value: string): void;
   identityKey?: string; messageHistory?: readonly string[]; placement?: 'center' | 'bottom'; queue?: React.ReactNode; onCompact?(): void; onOpenHistory?(): void;
   models: ThreadModelInfo[]; providerId: string; modelId: string; thinkingLevel: ThreadThinkingLevel;
@@ -36,6 +36,7 @@ export function ThreadComposer({ editorRef, value, onChange, models, providerId,
   goalArmed?: boolean;
   workspacePath?: string;
   children?: React.ReactNode; attachmentNames: string[]; skills: string[];
+  agentControls?: React.ReactNode;
 }) {
   const { t } = useI18n();
   const reducedMotion = usePrefersReducedMotion();
@@ -98,6 +99,7 @@ export function ThreadComposer({ editorRef, value, onChange, models, providerId,
             const levels = models.find(item => item.providerId === provider && item.modelId === model)?.thinkingLevels ?? ['off'];
             onModelChange(provider, model, levels.includes(thinkingLevel) ? thinkingLevel : levels[0] ?? 'off');
           }} />
+        {agentControls}
   </div>;
   const updateAutocomplete = React.useCallback((
     value: string,

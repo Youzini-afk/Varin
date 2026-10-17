@@ -1376,7 +1376,15 @@ export interface RunReconcileResult {
   unresolved: string[];
 }
 
+export interface AgentSelection {
+  profileId: string | null;
+  name: string | null;
+  workFocus: "code" | "research";
+  tools: string[] | null;
+}
+
 export interface SubmitLaunch {
+  agent?: AgentSelection;
   inheritSource?: boolean;
   source: LaunchSourceParams | null;
   enabledTools: string[];
@@ -1434,7 +1442,7 @@ export interface ThreadSummary {
   observer_project_ids: Array<string | null>;
 }
 
-export type AgentRuntimeStreamEvent = {v: 48; kind: 'runtime-event'; kernelEpoch: string} & ({stream: 'durable'; cursor: number} | {stream: 'progress'; runId: string; threadId: string; branchId: string; requestId: string; streamId: string; sequence: number; event: unknown});
+export type AgentRuntimeStreamEvent = {v: 49; kind: 'runtime-event'; kernelEpoch: string} & ({stream: 'durable'; cursor: number} | {stream: 'progress'; runId: string; threadId: string; branchId: string; requestId: string; streamId: string; sequence: number; event: unknown});
 
 export type SourceMode = 'fixed_branch' | 'materialized' | 'live_root';
 
@@ -1750,6 +1758,7 @@ export interface ToolReadyParams {
 }
 
 export interface LaunchSelection {
+  agent?: AgentSelection;
   extension_bindings: ExtensionToolBinding[];
   policy_models: PolicyModelCapability[];
   mcp_binding: McpBinding | null;

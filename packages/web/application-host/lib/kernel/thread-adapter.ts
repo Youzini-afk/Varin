@@ -8,6 +8,7 @@ import type { MessageSendParams, MessageListParams } from '@varin/protocol';
 import type { FamilyRunsParams, FamilyReadParams, FamilyItemParams } from '@varin/protocol';
 import type { ChildProfilePreparer } from './child-profiles.js';
 import type { ThreadToolInspection, ThreadMcpSamplingRequestReview } from '@varin/application-client';
+import type { AgentProfilesAPI, ThreadAgentChoice } from '@varin/application-client';
 import type { PlanService } from './plan-service.js';
 import type { ImageAttachment } from '@varin/protocol';
 import { threadInput } from './thread-images.js';
@@ -57,6 +58,17 @@ export class ThreadAdapter {
     private readonly prepareChildProfiles?: ChildProfilePreparer) {}
 
   private inputMaterials?: ThreadInputMaterials;
+  private agentProfiles?: AgentProfilesAPI;
+  bindAgentProfiles(owner: AgentProfilesAPI): void { this.agentProfiles = owner; }
+  private async prepareAgent(choice: ThreadAgentChoice) {
+    if (!choice.profileId) return { selection: { ...choice, name: null, tools: null }, instructions: '' };
+    const profile = (await this.agentProfiles?.read({ runtime: 'agent' }))?.profiles.find(profile => profile.id === choice.profileId);
+    if (!profile || !profile.effective.enabled || profile.tools.source === 'unconfigured'
+      || profile.effective.workFocus.length && !profile.effective.workFocus.includes(choice.workFocus)) {
+      throw Object.assign(new Error('The selected Agent is unavailable. Choose an enabled Agent for this work focus.'), { code: 'agent-profile-unavailable' });
+    }
+    return { selection: { ...choice, name: profile.effective.name, tools: profile.tools.names }, instructions: profile.effective.instructions };
+  }
   bindMaterials(owner: ThreadInputMaterials): void { this.inputMaterials = owner; }
   private async prepareInput(input: ThreadIdentity & { text: string; images?: ImageAttachment[]; materials?: ThreadMaterialAttachment[] }, signal?: AbortSignal) {
     const selected = parseThreadMaterials(input.materials);
@@ -637,7 +649,7 @@ export class ThreadAdapter {
         this.assertImagesSupported(input.images, model.configuration);
         const command: InputSubmitParams = { key: input.key, threadId: input.threadId, branchId: input.branchId,
           expectedHead: input.expectedHead, input: await this.prepareInput(input), configuration: model.configuration,
-          launch: { inheritSource: input.source === undefined, source: input.source ? {
+          launch: { ...(input.agent ? { agent: { ...input.agent, name: null, tools: null } } : {}), inheritSource: input.source === undefined, source: input.source ? {
             resourceOwner: input.source.resourceOwner, workspaceId: input.source.workspaceId, executionWorkspaceId: input.source.executionWorkspaceId,
             branchId: input.source.branchId ?? null, revision: input.source.revision ?? null, mode: input.source.mode, liveRoot: input.source.liveRoot ?? null, ...(input.source.environmentRunId ? { environmentRunId: input.source.environmentRunId } : {}),
           } : null, enabledTools: input.source?.tools ?? [], credentialScope: await model.credentialOwner.scope() },
@@ -647,7 +659,7 @@ export class ThreadAdapter {
         const checkpoint = this.prepareContext || explicitSkill ? await this.runtime.context(input.branchId) : null;
         const preparesResources = this.prepareContext && (input.source !== undefined || !checkpoint);
         let inputPreparation: InputResourcePreparation | undefined;
-        if (preparesResources || explicitSkill || this.prepareChildProfiles) {
+        if (preparesResources || explicitSkill || this.prepareChildProfiles || input.agent) {
           // An accepted command owns its original receipt. A later malformed settings file must not
           // make an uncertain reply depend on re-preparing a replacement resource generation.
           const existing = await this.runtime.inputReceipt(command);
@@ -657,6 +669,8 @@ export class ThreadAdapter {
             return existing;
           }
           try {
+            const agent = input.agent ? await this.prepareAgent(input.agent) : undefined;
+            if (agent) command.launch!.agent = agent.selection;
             if (this.prepareContext && checkpoint && input.source) {
               if (!this.prepareContext!.forSource) throw new Error('Resource source preparation is unavailable');
               initialContext = await this.prepareContext!.forSource(checkpoint, input.source);
@@ -677,8 +691,20 @@ export class ThreadAdapter {
               }
               initialContext = await this.prepareContext.main(input, source);
             }
+            if (agent) {
+              if (!this.prepareContext?.withAgent) throw new Error('Agent context preparation is unavailable');
+              const base = initialContext ?? (checkpoint ? { ...(checkpoint.resources ? { resources: checkpoint.resources } : {}), ...(checkpoint.personalization ? { personalization: checkpoint.personalization } : {}),
+                effectiveSystemPrompt: checkpoint.proposal.effective_system_prompt, instructionSources: checkpoint.proposal.instruction_sources,
+                memoryCheckpoint: checkpoint.proposal.memory_checkpoint } : undefined);
+              if (!base) throw new Error('Agent context is unavailable');
+              const selected = await this.prepareContext.withAgent(base, agent.selection, agent.instructions);
+              if (selected !== base) {
+                initialContext = selected;
+                if (checkpoint) command.expectedContextCheckpoint = checkpoint.id;
+              }
+            }
             if (this.prepareChildProfiles) {
-              command.launch!.childDispatch = await this.prepareChildProfiles({ projectId: (initialContext?.personalization ?? checkpoint?.personalization)?.projectId ?? null, modelOwner: model.credentialOwner, parent: {
+              command.launch!.childDispatch = await this.prepareChildProfiles({ ...(input.agent ? { workFocus: input.agent.workFocus } : {}), projectId: (initialContext?.personalization ?? checkpoint?.personalization)?.projectId ?? null, modelOwner: model.credentialOwner, parent: {
                 configuration: model.configuration, credential_scope: command.launch!.credentialScope ?? null,
               } });
             }

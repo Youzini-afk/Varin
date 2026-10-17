@@ -53,6 +53,8 @@ import { createModelConnectionsHttpAPI, threadSourceFailureMessage, ThreadReques
 import type { ThreadIdentity, ThreadModel, ThreadModelInfo, ThreadThinkingLevel, ThreadSnapshot, ThreadsAPI, ThreadHistoryPage, ThreadPreparedSource } from '@varin/application-client';
 import { Button } from '@/components/ui/button';
 import { ThreadComposer } from './ThreadComposer';
+import { ThreadAgentControls } from './ThreadAgentControls';
+import { useThreadAgentChoice } from './useThreadAgentChoice';
 import { DraftPresetChips } from '@/components/chat/DraftPresetChips';
 import { useUIStore } from '@/stores/useUIStore';
 import type { ComposerEditorHandle } from '@/components/chat/composer/editor/ComposerEditor';
@@ -220,6 +222,7 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
   const providerId = draft.model?.providerId ?? '';
   const modelId = draft.model?.modelId ?? '';
   const thinkingLevel = draft.model?.thinkingLevel ?? 'off';
+  const temperature = draft.model?.temperature;
   const patchModel = React.useCallback((patch: Partial<ThreadModel>) => useThreadDraftStore.getState().patch(draftKey, current => ({ model: { providerId: '', modelId: '', ...current.model, ...patch } })), [draftKey]);
   const setProviderId = React.useCallback((providerId: string) => patchModel({ providerId }), [patchModel]);
   const setModelId = React.useCallback((modelId: string) => patchModel({ modelId }), [patchModel]);
@@ -316,6 +319,10 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
   const preparingDelegation = snapshot?.delegatedExecutions?.some(execution => !execution.receipt && !execution.report && !execution.cancel_requested) ?? false;
   React.useEffect(() => { if (delegated && inputMode === 'next_run') setInputMode('boundary'); }, [delegated, inputMode, setInputMode]);
   const launch = snapshot?.launch?.run_id === run?.id ? snapshot?.launch : null;
+  const agent = useThreadAgentChoice(draftKey, draft.workspacePath ?? launch?.selection.source?.live_root?.canonicalRoot ?? initialWorkspacePath, launch?.selection.agent, Boolean(snapshot));
+  React.useEffect(() => {
+    if (!active && draft.nextAgentModel) useThreadDraftStore.getState().patch(draftKey, { model: draft.nextAgentModel, nextAgentModel: undefined });
+  }, [active, draft.nextAgentModel, draftKey]);
   const pause = run?.state === 'waiting' && launch?.pause?.wait_id === run.waiting_on ? launch.pause : null;
   const policy = snapshot?.policySelection;
   const policyUpdate = policy?.desired && policy.desired.run_id === run?.id ? policy.desired : null;
@@ -480,7 +487,7 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
   const firstMessage = useFirstMessagePreview(draftKey, Boolean(snapshot?.historyPage.head), handoff);
   const previousHistory = historyView ? historyView.previous : snapshot?.historyPage.previous;
   const memorySelection = getRegisteredRuntimeAPIs()?.bots?.selection;
-  const submissionFingerprint = () => JSON.stringify([identity.threadId, identity.branchId, projectedText, requestImages, materials, providerId, modelId, thinkingLevel, inputMode, preparedSource?.source]);
+  const submissionFingerprint = () => JSON.stringify([identity.threadId, identity.branchId, projectedText, requestImages, materials, providerId, modelId, thinkingLevel, inputMode, preparedSource?.source, agent]);
   const sourceCannotBeApplied = active && Boolean(preparedSource) && !pendingInput.current;
   const sendDisabled = pending || (!draft.pendingInput && (!snapshot || preparingDelegation || preparingSource || sourceCannotBeApplied || readingFiles
     || (images.length > 0 && acceptsImages === false)
@@ -680,7 +687,7 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
         if (pending || !draft.firstSend && sendDisabled) return;
         const settings = useUIStore.getState();
         const request = draft.firstSend ?? { key: crypto.randomUUID(), status: 'sending' as const, editorText: text, text: projectedText,
-          images: requestImages, pdfs: draft.pdfs ?? [], model: { providerId, modelId, thinkingLevel }, workspacePath: draft.workspacePath,
+          images: requestImages, pdfs: draft.pdfs ?? [], model: { providerId, modelId, thinkingLevel, ...(temperature === undefined ? {} : { temperature }) }, ...(!snapshot?.thread.bot_id && !delegated ? { agent } : {}), workspacePath: draft.workspacePath,
           sourceSelection: draft.sourceSelection, editorContext, inlineContext,
           ...(draft.goalArmed && text.trim() ? { goalObjective: text.trim(), ...(settings.sessionGoalDefaultBudgetEnabled ? { goalBudget: settings.sessionGoalDefaultBudget } : {}) } : {}) };
         handoff.submit(request.key, draftKey, handoff.captureDraft());
@@ -708,7 +715,7 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
           }
           const key = crypto.randomUUID();
           const attachments = materials.length ? { materials: materials.map(({ snapshotId }) => ({ snapshotId })) } : {};
-          const submit = { ...identity, key, text: projectedText, images: requestImages, ...attachments, expectedHead: branch?.head ?? null, model: { providerId, modelId, thinkingLevel }, ...(sourceForInput ? { source: sourceForInput.source } : {}) };
+          const submit = { ...identity, key, text: projectedText, images: requestImages, ...attachments, expectedHead: branch?.head ?? null, model: { providerId, modelId, thinkingLevel, ...(temperature === undefined ? {} : { temperature }) }, ...(!snapshot?.thread.bot_id && !delegated ? { agent } : {}), ...(sourceForInput ? { source: sourceForInput.source } : {}) };
           const queued = { ...identity, key, text: projectedText, images: requestImages, ...attachments, mode: inputMode };
           const continuation = { ...identity, key, text: projectedText, images: requestImages, ...attachments, previousRunId: run?.id ?? '', expectedHead: branch?.head ?? null };
           if (!active && delegated && (!api.collaboration || !run)) throw new Error('Child continuation is unavailable');
@@ -765,6 +772,10 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
       <AutoReviewBanner identity={identity} />
       {draft.goalArmed && <p className="px-2 typography-meta text-primary">{t('thread.composer.goalArmed')}</p>}
       <ThreadComposer onOpenHistory={() => setHistoryOpen(true)} identityKey={draftKey} placement={empty ? 'center' : 'bottom'}
+        agentControls={!snapshot?.thread.bot_id && !delegated ? <ThreadAgentControls value={agent} model={draft.model} pending={active} disabled={pending || Boolean(draft.firstSend || draft.pendingInput)}
+          onChange={(agent, model) => { useThreadDraftStore.getState().patch(draftKey, current => ({ agent,
+            nextAgentModel: active ? model ?? (agent.profileId === current.agent?.profileId ? current.nextAgentModel : undefined) : undefined,
+            ...(!active && model ? { model } : {}) })); }} /> : undefined}
         messageHistory={visibleHistory.filter(item => item.source === 'user').slice().reverse().map(item => typeof item.content === 'string' ? item.content : typeof (item.content as { text?: unknown })?.text === 'string' ? (item.content as { text: string }).text : '')}
         onCompact={branch?.head && !active && providerId && modelId ? () => { showOverview('memory'); void compactThrough(branch.head!); } : undefined}
         editorRef={messageInput} value={text} onChange={setText} models={models}

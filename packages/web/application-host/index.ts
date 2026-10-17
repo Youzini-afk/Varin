@@ -2145,6 +2145,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     },
   });
   registerAgentProfileRoutes(app, agentProfiles, uiAuthController.requireAuth);
+  threads.bindAgentProfiles(agentProfiles);
   isNativeThreadLive = async identity => {
     const thread = await agentRuntime.thread(identity.threadId);
     return thread.deleted_at_ms === null && thread.branches.some(branch => branch.branch_id === identity.branchId);

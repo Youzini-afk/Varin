@@ -648,6 +648,7 @@ grant_id: "parent".into(),
         enabled_tools: BTreeSet::from([ToolKind::FileRead]),
     };
     let launch = LaunchSelection {
+        agent: None,
         child_dispatch: Some(catalog),
         connection_identity: model.connection_identity().unwrap(),
         provider_family: model.configuration.provider_family.clone(),

@@ -3043,6 +3043,7 @@ fn prepare_context_job_mode(
         }
         .map_err(|error| KernelError::Protocol(error.to_string()))?;
         varin_runtime::catalog::launches::LaunchSelection {
+            agent: None,
             child_dispatch: None,
             policy_models: Vec::new(),
             extension_bindings: Vec::new(),

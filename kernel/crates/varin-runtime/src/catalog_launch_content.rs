@@ -16,6 +16,8 @@ pub struct PolicyModelReference {
 #[derive(Debug, Clone, Serialize, serde::Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct LaunchSelectionMetadata {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent: Option<launches::AgentSelection>,
     pub child_dispatch_ref: Option<Value>,
     pub credential_scope: Option<crate::providers::auth::CredentialScope>,
     pub connection_identity: String,
@@ -115,6 +117,7 @@ impl LaunchSelectionMetadata {
             .transpose()?;
         let policy_models = stage_policy_models(content, &selection.policy_models)?;
         Ok(Self {
+            agent: selection.agent,
             child_dispatch_ref: selection
                 .child_dispatch
                 .as_ref()
@@ -150,6 +153,7 @@ impl LaunchSelectionMetadata {
     }
     fn load_selection(self, content: &crate::content::ContentStore) -> Result<LaunchSelection> {
         let selection = LaunchSelection {
+            agent: self.agent.clone(),
             child_dispatch: self
                 .child_dispatch_ref
                 .as_ref()

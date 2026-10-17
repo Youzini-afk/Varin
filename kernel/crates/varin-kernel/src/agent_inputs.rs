@@ -197,6 +197,7 @@ pub(super) fn selected_launch(
         ));
     }
     Ok::<_, KernelError>(varin_runtime::catalog::launches::LaunchSelection {
+        agent: selected.agent,
         child_dispatch: selected.child_dispatch,
         extension_bindings: Vec::new(),
         policy_models: Vec::new(),

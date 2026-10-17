@@ -625,6 +625,7 @@ fn exercise_child(
         .unwrap();
     let resolved = selected.resolve(&parent.input).unwrap();
     let child_launch = LaunchSelection {
+        agent: None,
         child_dispatch: Some(selected.catalog.clone()),
         extension_bindings: resolved.extension_bindings.clone(),
         policy_models: vec![],

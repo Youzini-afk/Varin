@@ -289,6 +289,10 @@ impl RunTools {
         generation: u64,
         prepared: PreparedRunTools,
     ) -> Result<Arc<dyn ToolExecutor>, ExecutionError> {
+        let allowed_tools = self.catalog.lock().map_err(failed)?
+            .launch_metadata(run).map_err(failed)?
+            .and_then(|launch| launch.selection.agent.and_then(|agent| agent.tools))
+            .map(|names| names.into_iter().collect());
         let slot = self.slot(run)?;
         for extension in &prepared.extensions {
             extension.generation.activate()?;
@@ -325,6 +329,7 @@ impl RunTools {
             owner: self.clone(),
             slot,
             run_id: run.into(),
+            allowed_tools,
         }))
     }
     pub fn desire(&self, run: &str, id: &str) -> Result<(), ExecutionError> {
@@ -428,6 +433,7 @@ struct ScopedTools {
     owner: Arc<RunTools>,
     slot: Arc<Slot>,
     run_id: String,
+    allowed_tools: Option<std::collections::BTreeSet<String>>,
 }
 impl ScopedTools {
     fn directory(&self) -> Result<Arc<ToolDirectory>, ExecutionError> {
@@ -510,7 +516,9 @@ impl ToolExecutor for ScopedTools {
             .active
             .as_ref()
             .ok_or_else(|| failed("tool scope is not prepared"))?;
-        let schemas = active.directory.schemas().to_vec();
+        let schemas = active.directory.schemas().iter()
+            .filter(|schema| self.allowed_tools.as_ref().is_none_or(|names| names.contains(&schema.name)))
+            .cloned().collect::<Vec<_>>();
         let executor = active
             .directory
             .freeze(&schemas)?

@@ -153,7 +153,7 @@ export function registerThreadRoutes(app: Express, adapter: ThreadAdapter, requi
     update: ['runtime', 'threadId', 'key', 'expectedRevision', 'title', 'pinned', 'archived'],
     delete: ['runtime', 'threadId', 'key', 'expectedRevision'],
     read: ['runtime', 'threadId', 'key', 'throughCursor'],
-    create: ['key'], list: ['query', 'archived'], models: [], submit: ['runtime', 'threadId', 'branchId', 'key', 'text', 'images', 'materials', 'expectedHead', 'model', 'source'],
+    create: ['key'], list: ['query', 'archived'], models: [], submit: ['runtime', 'threadId', 'branchId', 'key', 'text', 'images', 'materials', 'expectedHead', 'model', 'source', 'agent'],
     usage: ['runtime', 'threadId', 'branchId'],
     snapshot: ['runtime', 'threadId', 'branchId'], 'history/page': ['runtime', 'threadId', 'branchId', 'headId', 'beforeId'], enqueue: ['runtime', 'threadId', 'branchId', 'key', 'text', 'images', 'materials', 'mode'],
     'input/edit': ['inputId', 'expectedRevision', 'text', 'images'], 'input/cancel': ['inputId', 'expectedRevision'],
@@ -197,7 +197,7 @@ export function registerThreadRoutes(app: Express, adapter: ThreadAdapter, requi
         const code = threadSourceFailureMessage(suppliedCode) ? 'thread-request-failed' : suppliedCode;
         const status = code.includes('conflict') ? 409 : code === 'denied' || code === 'forbidden' ? 403
           : code === 'not-found' ? 404 : code === 'unavailable' || code === 'timeout' ? 503 : 400;
-        response.status(status).json({ code, error: 'Thread request could not be completed',
+        response.status(status).json({ code, error: code === 'agent-profile-unavailable' ? 'The selected Agent is unavailable. Choose an enabled Agent for this work focus.' : 'Thread request could not be completed',
           ...admission });
       } finally { response.removeListener('close', closed); }
     });
@@ -434,6 +434,11 @@ export function registerThreadRoutes(app: Express, adapter: ThreadAdapter, requi
       const input: ThreadSubmit = { ...identity(body), key: text(body.key), text: body.text, ...(images === undefined ? {} : { images }), ...(materials === undefined ? {} : { materials }),
         expectedHead: body.expectedHead === null ? null : text(body.expectedHead),
         model: modelSelection(body.model) };
+      if (body.agent !== undefined) {
+        const agent = object(body.agent);
+        if (Object.keys(agent).some(key => !['profileId', 'workFocus'].includes(key)) || agent.workFocus !== 'code' && agent.workFocus !== 'research') throw new Error('Invalid Agent selection');
+        input.agent = { profileId: agent.profileId === null ? null : text(agent.profileId), workFocus: agent.workFocus };
+      }
       if (body.source !== undefined) {
         const source = object(body.source);
         if (Object.keys(source).some(key => !['resourceOwner', 'workspaceId', 'executionWorkspaceId', 'branchId', 'revision', 'mode', 'tools', 'liveRoot', 'environmentRunId'].includes(key))) throw new Error('Unsupported source selection field');

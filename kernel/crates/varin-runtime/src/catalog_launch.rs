@@ -469,9 +469,21 @@ impl ExtensionToolBinding {
         Ok(())
     }
 }
+/// The user's Agent configuration for this Run. Tools select from the admitted directory;
+/// they never grant capabilities absent from that directory.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct AgentSelection {
+    pub profile_id: Option<String>,
+    pub name: Option<String>,
+    pub work_focus: String,
+    pub tools: Option<Vec<String>>,
+}
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct LaunchSelection {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent: Option<AgentSelection>,
     pub child_dispatch: Option<super::dispatch::ChildDispatchCatalog>,
     pub extension_bindings: Vec<ExtensionToolBinding>,
     #[serde(default)]
@@ -496,6 +508,7 @@ impl LaunchSelection {
         source: Option<SourceSelection>,
     ) -> Self {
         Self {
+            agent: None,
             child_dispatch: None,
             extension_bindings: Vec::new(),
             policy_models: Vec::new(),
@@ -528,6 +541,9 @@ impl LaunchSelection {
     /// A delegated child intent retains the parent's handoff while its own source is
     /// Pending. Its actual Run must still pass `validate` after the source becomes Ready.
     pub(super) fn validate_structure(&self) -> Result<()> {
+        if self.agent.as_ref().is_some_and(|agent| !matches!(agent.work_focus.as_str(), "code" | "research")) {
+            return Err(RuntimeError::Invalid("unknown Agent work focus".into()));
+        }
         if let Some(catalog) = &self.child_dispatch {
             catalog.validate()?;
         }

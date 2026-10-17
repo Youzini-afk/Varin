@@ -5,7 +5,7 @@ use crate::model::PathState;
 use serde::Deserialize;
 use serde_json::Value;
 
-pub(crate) const KERNEL_PROTOCOL_VERSION: u64 = 48;
+pub(crate) const KERNEL_PROTOCOL_VERSION: u64 = 49;
 pub(crate) const KERNEL_MAX_FRAME_BYTES: usize = 16777216;
 pub(crate) const KERNEL_REQUEST_WINDOW: usize = 2;
 pub(crate) const KERNEL_CONTROL_METHODS: &[&str] = &[
@@ -2857,6 +2857,7 @@ pub(crate) struct McpInteractionErrorItem {
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct SubmitLaunch {
+    pub(crate) agent: Option<varin_runtime::catalog::launches::AgentSelection>,
     pub(crate) inherit_source: Option<bool>,
     pub(crate) source: RequiredNullable<LaunchSourceParams>,
     pub(crate) enabled_tools: Vec<String>,
