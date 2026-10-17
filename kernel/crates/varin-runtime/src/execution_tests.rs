@@ -1475,7 +1475,12 @@ fn recovered_completed_output_never_resends_model_or_reexecutes_cached_receipts(
     for cut in 0..3 {
         let fixture = Fixture::new();
         let db = fixture.catalog();
-        let original_input = input(&db);
+        let mut original_input = input(&db);
+        let mut goal_tool = original_input.binding.tools[0].clone();
+        goal_tool.name = "goal_report".into();
+        original_input.binding.tools.push(goal_tool);
+        let mut request_binding = original_input.binding.clone();
+        request_binding.tools = crate::tool_disclosure::request_tools(&request_binding.tools, false, None);
         let run_id = original_input.run_id.clone();
         let epoch = original_input.owner_generation;
         let snapshot = RequestSnapshot {
@@ -1486,7 +1491,7 @@ fn recovered_completed_output_never_resends_model_or_reexecutes_cached_receipts(
                     compaction: None, step: 1,
                     history_range: original_input.binding.history_range.clone(),
                 },
-                binding: original_input.binding.clone(),
+                binding: request_binding,
                 history: original_input.history.clone(),
             },
             serialized: json!({"request":"must never send again"}).into(),

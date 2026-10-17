@@ -148,7 +148,7 @@ it("content beyond one frame round-trips while stalled data leaves control and c
   expect((await f.actor.health()).integrity).toBe('not_checked');
 }, 30_000);
 
-it('Run inspection streams large configuration while cancellation returns a control receipt', async () => {
+it('Run inspection streams large configuration while data-bodied inference admission and cancellation retain independent control credit', async () => {
   const f = await fixture();
   const runtime = new AgentRuntimeClient(f.host);
   await runtime.createThread('large-config', 'large-config-branch');
@@ -161,6 +161,11 @@ it('Run inspection streams large configuration while cancellation returns a cont
   const cancel = runtime.cancelRun(receipt.run_id); void cancel.catch(() => undefined);
   try {
     await expect.poll(() => f.probe.incomingStreams()).toBe(KERNEL_REQUEST_WINDOW);
+    // This malformed body must receive its original bounded rejection even while
+    // ordinary response streams occupy every data credit. The request itself streams.
+    await expect(f.host.agentRuntimeRequest('runtime.inference.admit', {} as never)).rejects.toMatchObject({
+      method: 'runtime.inference.admit', settlement: 'response',
+    });
     const cancelled = await cancel;
     expect(cancelled).toMatchObject({id:receipt.run_id, cancel_requested:true});
     expect(cancelled).not.toHaveProperty('configuration');
