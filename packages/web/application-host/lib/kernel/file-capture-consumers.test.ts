@@ -17,7 +17,7 @@ const tick = () => new Promise<void>(resolve => setImmediate(resolve));
 interface Frame { kind: string; id: string; method?: string; grantId?: string; params?: Record<string, unknown> }
 /** Real client, scoped grant, file gate and Experiment backend. Only the wire peer is a fixture. */
 async function fixture() {
-  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'varin-single-capture-'));
+  const root = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'varin-single-capture-')));
   roots.push(root);
   const client = new KernelClient({ hostId: 'capture-consumer', storageRoot: root, buildVersion: 'fixture' });
   const owner = client as unknown as {
