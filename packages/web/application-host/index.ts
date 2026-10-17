@@ -2925,7 +2925,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       runObservers.stop();
       collaboration.stop();
       await fileObservations.stop();
-      scheduledTasksRuntime.stop();
+      await scheduledTasksRuntime.stop();
       await botService.dispose();
       unregisterRuntimeContractCapability();
       unregisterExtensionPackageCapability();

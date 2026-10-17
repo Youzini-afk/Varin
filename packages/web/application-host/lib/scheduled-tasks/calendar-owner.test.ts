@@ -63,7 +63,7 @@ it('the asset service preserves native acceptance keys and separates Catalog fac
     await fs.writeFile(config.resolveProjectConfigPath('project'), JSON.stringify({ scheduledTasks: [{ broken: true }] }));
     await expect(service.list('project')).rejects.toThrow();
     expect(client.syncCalendar).toHaveBeenCalledTimes(before);
-  } finally { runtime.stop(); await fs.rm(root, { recursive: true, force: true }); }
+  } finally { await runtime.stop(); await fs.rm(root, { recursive: true, force: true }); }
 });
 
 it('calculation proceeds beside a held cold preparation, and a resume while its first attempt drains is not lost', async () => {

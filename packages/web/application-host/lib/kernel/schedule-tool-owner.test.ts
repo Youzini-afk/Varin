@@ -93,5 +93,5 @@ it('the ordinary scheduled task example edits its admitted project and returns n
     sourceBinding.resource_owner = { kind: 'managed_host', hostId: 'other-host', connectionId: 'original-connection', endpointIdentity: 'original-endpoint' };
     expect(await execute({ action: 'list' })).toMatchObject({ completion: { outcome: 'failed', effect: 'none', content: { data: { status: 'rejected', error: expect.stringContaining('managed project schedule owner is unavailable') } } }, executor_stopped: true });
     expect(workspaceRoot).toHaveBeenCalledTimes(localReads);
-  } finally { retained?.lease.release(); await extensions?.stop(); scheduler.stop(); await fs.rm(root, { recursive: true, force: true }); }
+  } finally { retained?.lease.release(); await extensions?.stop(); await scheduler.stop(); await fs.rm(root, { recursive: true, force: true }); }
 }, 30_000);

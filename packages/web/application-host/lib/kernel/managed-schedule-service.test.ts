@@ -37,7 +37,7 @@ async function fixture() {
   scheduler.setCalendarOwner({ sync: async (_id: string, tasks: unknown) => tasks, run, control, stop() {} } as unknown as CalendarOwner);
   const service = createScheduledTaskService({ projectConfigRuntime: config, scheduledTasksRuntime: scheduler,
     readSettingsFromDisk: async () => ({ projects: [{ id: 'same-project', path: targetRoot }] }), sanitizeProjects: value => value as Array<{ id: string; path: string }> });
-  cleanups.push(async () => { scheduler.stop(); await fs.rm(root, { recursive: true, force: true }); });
+  cleanups.push(async () => { await scheduler.stop(); await fs.rm(root, { recursive: true, force: true }); });
   const scope: ManagedSourceLocalScope = { principal: { principalId: 'paired-A', capabilities }, coordinatorHostId: 'A', authorityId: 'original-source', resourceEpoch: 'B-epoch',
     scope: { kind: 'run', runId: 'run-A', threadId: 'thread-A', epoch: 1 },
     source: { resource_owner: { kind: 'managed_host', hostId: 'B', connectionId: 'connection-B', endpointIdentity: 'endpoint-B' },
