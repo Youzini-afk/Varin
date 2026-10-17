@@ -39,6 +39,7 @@ export class TransportFixture {
     delete this.hold;
     for (const value of this.held.splice(0)) this.deliver(value);
   }
+  injectIncoming(value: Envelope): void { this.deliver(value); }
   send(value: Envelope): Promise<void> {
     return this.transport.send(value, value.kind === 'cancel' || CONTROL_METHODS.has(String(value.method)) ? 'control' : 'data');
   }

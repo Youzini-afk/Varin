@@ -9,7 +9,7 @@ import { afterEach, expect, it } from "vitest";
 import { TransportFixture } from "./tests/transport-fixture.js";
 import { createKernelClient } from "./kernel-client.js";
 import { AgentRuntimeClient } from './agent-runtime-client.js';
-import { KERNEL_REQUEST_WINDOW } from "./protocol.generated.js";
+import { KERNEL_PROTOCOL_VERSION, KERNEL_REQUEST_WINDOW, type AgentRuntimeStreamEvent } from "./protocol.generated.js";
 
 const repository = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../../..");
 const kernelPath = process.env.VARIN_TEST_KERNEL_PATH ?? path.join(repository, "kernel/target/release", process.platform === "win32" ? "varin-kernel.exe" : "varin-kernel");
@@ -17,7 +17,7 @@ const buildVersion = (JSON.parse(await fs.readFile(path.join(repository, "packag
 const cleanups: Array<() => Promise<void>> = [];
 afterEach(async () => { for (const cleanup of cleanups.splice(0).reverse()) await cleanup(); });
 
-async function fixture() {
+async function fixture(recoveryWakeBeforeHandshake = false) {
   await fs.access(kernelPath); // Release acceptance must never silently skip.
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "varin-r6-transport-"));
   let child!: ChildProcessWithoutNullStreams;
@@ -31,18 +31,39 @@ async function fixture() {
     if (envelope.kind === 'request') outstanding.add(envelope.id);
     maximum = Math.max(maximum, outstanding.size);
   };
-  probe.onReceive = value => { if (typeof value.id === 'string') outstanding.delete(value.id); };
+  let injected = false;
+  probe.onReceive = value => {
+    if (typeof value.id === 'string') outstanding.delete(value.id);
+    const result = value.result as Record<string, unknown> | undefined;
+    if (recoveryWakeBeforeHandshake && !injected && value.ok === true && typeof result?.kernelEpoch === 'string') {
+      injected = true;
+      probe.injectIncoming({ v: KERNEL_PROTOCOL_VERSION, kind: 'runtime-event', stream: 'durable',
+        kernelEpoch: result.kernelEpoch, cursor: 0 });
+    }
+  };
   const options = { hostId: "r6-transport", storageRoot: root, kernelPath, buildVersion, allowCargoDevRunner: false };
   const host = createKernelClient({ ...options, transportFactory: probe.create, spawnProcess: ((command, args, input) => {
     child = spawn(command, args ?? [], input ?? {}) as ChildProcessWithoutNullStreams;
     return child;
   }) as typeof spawn });
   cleanups.push(async () => { await host.close(); await fs.rm(root, { recursive: true, force: true }); });
+  const runtimeEvents: AgentRuntimeStreamEvent[] = [];
+  const readyOrder: string[] = [];
+  host.subscribeReady(() => { readyOrder.push('ready'); });
+  host.onAgentRuntimeEvent(event => { runtimeEvents.push(event); readyOrder.push('event'); });
   await host.start();
   const grant = await host.issueGrant({ grantId: "actor", owningWorkspace: "ws", executionWorkspace: "ws", capabilities: ["storage.read", "storage.write", "storage.gc"], pathScopes: [""] });
   const actor = host.scoped(grant);
-  return { host, actor, child, root, options, probe, requests, outstanding, maximum: () => maximum };
+  return { host, actor, child, root, options, probe, requests, outstanding, runtimeEvents, readyOrder, maximum: () => maximum };
 }
+
+it('a durable recovery wake preceding the handshake response is delivered only after verified startup', async () => {
+  const f = await fixture(true);
+  expect(f.host.isReady).toBe(true);
+  expect(f.runtimeEvents.filter(event => event.stream === 'durable' && event.cursor === 0)).toHaveLength(1);
+  expect(f.readyOrder[0]).toBe('ready');
+  expect((await f.actor.health()).integrity).toBe('not_checked');
+});
 
 it("R0/R6 saturation retains a bounded native window through parallel uploads, cancellation and reuse", async () => {
   const f = await fixture();

@@ -582,6 +582,8 @@ export class KernelClient {
   private managementGrant: InternalGrantHandle | null = null;
   private handshakeResult: KernelHandshakeResult | null = null;
   private startPromise: Promise<KernelHandshakeResult> | null = null;
+  private starting = false;
+  private startupRuntimeCursor: number | null = null;
 
   constructor(options: KernelClientOptions) {
     this.managedSourceBridge = new ManagedSourceBridge(() => this.epoch, frame => this.write(frame), () => this.failAll(new KernelClientError({ code: 'source-channel-failed', message: 'Managed source channel failed', retryable: false }), true));
@@ -836,11 +838,17 @@ export class KernelClient {
     if (this.handshakeResult) return this.handshakeResult;
     if (this.startPromise) return this.startPromise;
     this.startPromise = this.startInternal();
-    try { return await this.startPromise; } finally { this.startPromise = null; }
+    try { return await this.startPromise; } finally {
+      this.startPromise = null;
+      this.starting = false;
+      this.startupRuntimeCursor = null;
+    }
   }
 
   private async startInternal(): Promise<KernelHandshakeResult> {
     if (this.closed) throw new KernelClientError({ code: "kernel-client-closed", message: "Kernel client is closed" });
+    this.starting = true;
+    this.startupRuntimeCursor = null;
     const command = await prepareKernelCommand(this.options);
     const { manifest } = command;
     this.window = new KernelRequestWindow(KERNEL_REQUEST_WINDOW);
@@ -941,9 +949,14 @@ export class KernelClient {
     }, { allowBootstrap: true });
     this.managementGrant = this.grantFromResponse(managementGrant);
     this.toolBridge.reconnect();
+    this.starting = false;
     for (const listener of this.readyListeners) {
       try { listener(); } catch { this.readyListeners.delete(listener); }
     }
+    const cursor = this.startupRuntimeCursor;
+    this.startupRuntimeCursor = null;
+    if (cursor !== null) this.consumeFrame({ v: KERNEL_PROTOCOL_VERSION, kind: 'runtime-event',
+      kernelEpoch: this.epoch, stream: 'durable', cursor });
     return result;
   }
 
@@ -968,12 +981,20 @@ export class KernelClient {
       }
       if (this.modelProtocolBridge.consume(response) || this.managedSourceBridge.consume(response) || this.credentialBridge.consume(response) || this.fileObservationBridge.consume(response) || this.resourceBridge.consume(response) || this.contextBridge.consume(response) || this.memoryBridge.consume(response) || this.planBridge.consume(response) || this.languageBridge.consume(response) || this.retrievalBridge.consume(response) || this.toolBridge.consume(response) || this.policyBridge.consume(response)) return;
       if (response.kind === "runtime-event") {
-        if (response.v !== KERNEL_PROTOCOL_VERSION || response.kernelEpoch !== this.epoch
+        const eventEpoch = this.epoch ?? (this.starting && response.stream === 'durable' ? this.transport?.kernelEpoch : null);
+        if (response.v !== KERNEL_PROTOCOL_VERSION || response.kernelEpoch !== eventEpoch
           || !["durable", "progress"].includes(response.stream)
           || (response.stream === "durable" && (!Number.isSafeInteger(response.cursor) || response.cursor < 0))
           || (response.stream === "progress" && (typeof response.runId !== "string" || typeof response.streamId !== "string"
             || !Number.isSafeInteger(response.sequence) || response.sequence < 0))) {
           this.failAll(new KernelClientError({ code: "kernel-protocol-error", message: "Malformed native runtime event", retryable: false }), true);
+          return;
+        }
+        // Recovery can publish a durable wake before the handshake response is
+        // delivered. Coalesce its cursor until the authenticated epoch's build,
+        // storage identity and management grant have all passed startup.
+        if (this.starting && response.stream === 'durable') {
+          this.startupRuntimeCursor = Math.max(this.startupRuntimeCursor ?? 0, response.cursor);
           return;
         }
         for (const listener of this.agentRuntimeListeners) {
@@ -1058,6 +1079,8 @@ export class KernelClient {
       try { listener(error); } catch { /* A projection cannot prevent other handle invalidations. */ }
     }
     this.started = false;
+    this.starting = false;
+    this.startupRuntimeCursor = null;
     this.epoch = null;
     this.managementGrant = null;
     this.handshakeResult = null;
