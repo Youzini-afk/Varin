@@ -918,17 +918,21 @@ export const Header: React.FC<HeaderProps> = ({
         <div className="flex-1" />
 
         <div className="flex shrink-0 items-center gap-1">
-          <OpenInAppButton directory={actionDirectory} className="mr-1" />
-          <WorkbenchServices />
-          {openDirectory && <ContextUsageDisplay
+          {activeMainTab === 'chat' && contextUsage && contextUsage.totalTokens > 0 && <ContextUsageDisplay
             {...contextUsage}
             size="compact" hideIcon showPercentIcon
             pressed={activeContextMode === 'context'}
-            onClick={() => activeContextMode === 'context' ? closeContextPanel(openDirectory) : openContextOverview(openDirectory)}
-            className="h-8"
+            onClick={() => {
+              if (!openDirectory) return;
+              if (activeContextMode === 'context') closeContextPanel(openDirectory);
+              else openContextOverview(openDirectory);
+            }}
+            className="mr-1.5"
             valueClassName="typography-ui-label font-medium leading-none text-foreground"
             percentIconClassName="h-4.5 w-4.5"
           />}
+          <OpenInAppButton directory={actionDirectory} className="mr-1" />
+          <WorkbenchServices />
           <ContextPanelControls />
           <WindowsWindowControls visible={usesFramelessChrome && windowControlsSide === 'right'} position="right" />
         </div>
