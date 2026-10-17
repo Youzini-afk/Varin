@@ -131,6 +131,7 @@ impl Fixture {
                 controls.execute(method, params, &AtomicBool::new(false))
             }
             "runtime.bot.gate.publish"
+            | "runtime.bot.thread.create"
             | "runtime.thread.list"
             | "runtime.thread.inspect"
             | "runtime.run.inspect"

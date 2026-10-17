@@ -20,8 +20,8 @@ fn selected_family_tools_execute_from_real_model_and_policy_origins() {
             owner.queries.is_empty(),
             "conversation reads need no source/memory/plan service access"
         );
-        let db = f.catalog();
-        let db = db.lock().unwrap();
+        let catalog = f.catalog();
+        let db = catalog.lock().unwrap();
         let history = db.history(&f.run.branch_id).unwrap();
         if model {
             let results = history
@@ -90,6 +90,7 @@ fn selected_family_tools_execute_from_real_model_and_policy_origins() {
             );
         }
         drop(db);
+        drop(catalog);
         f.finish();
     }
 }

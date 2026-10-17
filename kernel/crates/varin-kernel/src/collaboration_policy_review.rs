@@ -278,7 +278,7 @@ impl PreparedToolCall for HookCall {
             assert!(matches!(
                 completion.completion,
                 ToolCompletion::JobAccepted { .. }
-            ));
+            ), "{completion:?}");
             self.accepted.send(x.operation_id.clone()).unwrap();
             self.release.lock().unwrap().recv().unwrap();
         }
@@ -442,12 +442,13 @@ grant_id: "parent".into(),
         environment_run_id: None,
         enabled_tools: kinds,
     };
+    let retained = crate::host_tool_review::ChildRetentionOwner::new(EPOCH);
     let directory = Arc::new(
         varin_runtime::composition::tools::ToolDirectory::assemble(declarations(
             db.clone(),
             Some(binding.clone()),
             resources.clone(),
-            crate::host_tools::ToolBridge::new(std::sync::mpsc::sync_channel(1).0.into()),
+            retained.bridge.clone(),
         ))
         .unwrap(),
     );
@@ -652,6 +653,7 @@ grant_id: "parent".into(),
         varin_runtime::catalog::child_delivery::deliver_waits(&db).unwrap();
     } else {
         drop(child_engine);
+        drop(resources);
     }
     let input = execution_input(&db, &run, identity);
     assert_eq!(
@@ -714,6 +716,7 @@ grant_id: "parent".into(),
     drop(requests);
     drop(owner);
     drop(engine);
+    drop(retained);
     drop(policy);
     drop(db);
     drop(storage);

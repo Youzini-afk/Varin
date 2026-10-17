@@ -92,7 +92,7 @@ fn bot_service_publishes_original_lifecycle_and_refreshes_same_instance_grant_af
     assert_eq!(restored["bot"]["id"], bot);
     assert_eq!(
         restored["bot"]["entry"],
-        json!({"runtime":"pi","sessionId":null})
+        first["bot"]["entry"]
     );
     f.runtime
         .catalog()
@@ -397,7 +397,9 @@ impl ModelProvider for ProductMemoryModel {
                         if result.call_id == format!("memory-{index}") =>
                     {
                         match &result.completion {
-                            ToolCompletion::Result { content, .. } => Some(content.data.clone()),
+                            ToolCompletion::Result { content, .. } => Some(if content.data.get("reference").is_some() {
+                                content.data["result"].clone()
+                            } else { content.data.clone() }),
                             _ => None,
                         }
                     }
@@ -430,9 +432,9 @@ impl ModelProvider for ProductMemoryModel {
             .map(|arguments| Content::ToolCall {
                 call: ToolCall {
                     call_id: format!("memory-{step}"),
-                    name: "memory".into(),
-                    schema_version: "bot-1".into(),
-                    arguments,
+                    name: "tool_invoke".into(),
+                    schema_version: "1".into(),
+                    arguments: json!({"reference":{"name":"memory","version":"bot-1"},"arguments":arguments}),
                 },
             })
             .unwrap_or(Content::Text {
@@ -593,6 +595,7 @@ fn product_bot_entry_admission_original_history_knowledge_tools_and_actual_model
     f.host.send(json!({"kind":"fixture-close"}));
     receive(&mut f, EPOCH, "fixture-closed");
     runtime.shutdown().unwrap();
+    drop(assembly);
     drop(f);
     drop(runtime);
     std::fs::remove_dir_all(root).unwrap();

@@ -498,6 +498,7 @@ fn explicit_followup_uses_both_real_origins_and_separates_registration_from_wait
                 view.load().unwrap().instruction.as_deref(),
                 Some("Check this delegated task once at the requested time")
             );
+            drop(owner);
             f.finish();
         }
     }

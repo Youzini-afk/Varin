@@ -466,7 +466,7 @@ mod tests {
         let key = hex::encode(Sha256::digest(
             serde_json::to_vec(&json!(["workspace", "environment-run"])).unwrap(),
         ));
-        let managed = root.join("managed/runs");
+        let managed = root.join("managed").join("runs");
         fs::create_dir_all(&managed).unwrap();
         let registered=invoke(&mut storage,"actor","file.root.register",json!({"workspaceId":"workspace","executionWorkspaceId":"workspace","canonicalRoot":managed})).unwrap();
         let branch = storage.branch("branch").unwrap();

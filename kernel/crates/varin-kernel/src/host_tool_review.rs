@@ -6,6 +6,40 @@ use std::time::Duration;
 use varin_runtime::execution::*;
 use varin_runtime::{Catalog, Effect, ExecutorOwner, Outcome, RunState, SubmitInput};
 
+/// Controlled acknowledgement of the original private credential/source retention.
+/// Business execution and source/grant decisions remain with the real owners.
+pub(crate) struct ChildRetentionOwner {
+    pub bridge: ToolBridge,
+    worker: Option<std::thread::JoinHandle<()>>,
+}
+impl ChildRetentionOwner {
+    pub fn new(epoch: &'static str) -> Self {
+        let (send, frames) = mpsc::sync_channel::<Value>(16);
+        let bridge = ToolBridge::new(send.into());
+        bridge.initialize(epoch);
+        let receiver = bridge.clone();
+        let worker = std::thread::spawn(move || for frame in frames {
+            match frame["kind"].as_str().unwrap() {
+                "host-tool-child-retain" => {
+                    assert_eq!(frame["kernelEpoch"], epoch);
+                    assert!(frame["parentRunId"].as_str().is_some_and(|id| !id.is_empty()));
+                    assert!(frame["childOperationId"].as_str().is_some_and(|id| !id.is_empty()));
+                    receiver.receive(json!({"v":1,"kind":"host-tool-response","id":frame["id"],"kernelEpoch":epoch,"ok":true}));
+                }
+                "host-tool-child-release" => {}
+                _ => panic!("Unexpected child retention frame: {frame}"),
+            }
+        });
+        Self { bridge, worker: Some(worker) }
+    }
+}
+impl Drop for ChildRetentionOwner {
+    fn drop(&mut self) {
+        self.bridge.close();
+        self.worker.take().unwrap().join().unwrap();
+    }
+}
+
 fn recv(frames: &mpsc::Receiver<Value>, kind: &str) -> Value {
     loop {
         let frame = frames.recv_timeout(Duration::from_secs(5)).unwrap();

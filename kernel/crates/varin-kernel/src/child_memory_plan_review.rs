@@ -97,7 +97,14 @@ impl ModelProvider for ModelCalls {
                     Content::Text {
                         text: "Child finished".into(),
                     },
-                    |call| Content::ToolCall { call: call.clone() },
+                    |call| {
+                        let call = if varin_runtime::tool_disclosure::enabled(&request.view.binding.tools)
+                            && !varin_runtime::tool_disclosure::is_direct(&call.name) {
+                            ToolCall { call_id: call.call_id.clone(), name: "tool_invoke".into(), schema_version: "1".into(),
+                                arguments: json!({"reference":{"name":call.name,"version":call.schema_version},"arguments":call.arguments}) }
+                        } else { call.clone() };
+                        Content::ToolCall { call }
+                    },
                 ),
             },
         })
@@ -180,7 +187,7 @@ impl OwnerReplies {
             if q["arguments"]["action"] == "save" {
                 assert_eq!(q["arguments"]["revision"], self.revision);
                 self.revision += 1;
-                let scope = json!({"kind":"session","id":f.run.thread_id});
+                let scope = json!({"kind":"thread","id":f.run.thread_id});
                 self.note = Some(
                     json!({"id":1,"scope":scope,"content":q["arguments"]["content"],"updatedAt":"2026-10-10T00:00:00Z"}),
                 );
@@ -396,7 +403,7 @@ fn selected_child_memory_and_plan_execute_through_both_origins_and_keep_report_s
             if model { "model_step" } else { "policy_action" }
         );
         for foreign in ["thread:parent", "thread:sibling"] {
-            let receipt = json!({"revision":2,"changes":[{"id":2,"scope":{"kind":"session","id":foreign},"note":null}]});
+            let receipt = json!({"revision":2,"changes":[{"id":2,"scope":{"kind":"thread","id":foreign},"note":null}]});
             assert!(db
                 .prepare_memory_receipt(&f.run.id, receipt)
                 .unwrap()
@@ -409,7 +416,8 @@ fn selected_child_memory_and_plan_execute_through_both_origins_and_keep_report_s
                 .unwrap();
             assert_eq!(
                 op.intent["origin"]["kind"],
-                if model { "model_step" } else { "policy_action" }
+                if model && varin_runtime::tool_disclosure::enabled(&f.original.tools) { "nested_call" }
+                else if model { "model_step" } else { "policy_action" }
             );
             assert_eq!(op.intent["origin"], query["origin"]["toolOrigin"]);
             let applied = query["arguments"]["items"].as_array().unwrap().len() == 1;
@@ -659,15 +667,15 @@ fn cancelled_child_reopen_reconciles_original_note_and_plan_receipts_without_rep
             assert_eq!(recovered["view"], first["view"]);
         }
         assert_eq!(owner.plan_ref.as_deref(), Some("later-ui-plan"));
-        let db = f.catalog();
-        let db = db.lock().unwrap();
+        let catalog = f.catalog();
+        let db = catalog.lock().unwrap();
         assert_eq!(db.run(&f.run.id).unwrap().state, RunState::Cancelled);
         assert_eq!(
             db.memory_state(&f.run.branch_id).unwrap().unwrap().memories[0]["content"],
             "Later UI note"
         );
         drop(db);
-
+        drop(catalog);
         f.finish();
     }
 }

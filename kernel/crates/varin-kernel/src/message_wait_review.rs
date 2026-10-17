@@ -279,12 +279,13 @@ fn absolute_deadlines_keep_early_reply_and_reject_late_reply_even_before_timer_r
             early_reply.map(|r| r.identity.message_id)
         );
         assert!(wait.delivered);
-        let db = f.catalog();
-        let db = db.lock().unwrap();
+        let catalog = f.catalog();
+        let db = catalog.lock().unwrap();
         let op = db.operation(&view.operation_id).unwrap();
         assert_eq!(op.effect, Effect::Confirmed);
         assert_eq!(op.outcome, Some(Outcome::Succeeded));
         drop(db);
+        drop(catalog);
         f.finish();
     }
     let f = fixture();

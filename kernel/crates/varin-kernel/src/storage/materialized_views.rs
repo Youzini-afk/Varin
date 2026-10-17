@@ -625,6 +625,9 @@ mod tests {
         drop(storage);
         fs::remove_dir_all(root).unwrap();
     }
+    // On Unix a missing exit receipt keeps the prior tree unknown. On Windows,
+    // absence of the original native Job already supplies actual stop evidence.
+    #[cfg(unix)]
     #[test]
     fn reopening_retains_old_unknown_writer_and_reclaims_only_after_original_stop_evidence() {
         let (mut storage, grant, root, params, hash) = fixture();
