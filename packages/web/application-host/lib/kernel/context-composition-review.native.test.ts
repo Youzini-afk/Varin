@@ -119,6 +119,7 @@ async function installExample(f: Awaited<ReturnType<typeof fixture>>) {
   for (const file of ['package.json', 'varin.extension.json']) await fs.copyFile(path.join(repository, 'examples/extensions/project-context', file), path.join(example, file));
   await build({ entryPoints: [path.join(repository, 'examples/extensions/project-context/host.ts')], bundle: true, platform: 'node', format: 'cjs', outfile: path.join(example, 'host.cjs'), alias: { '@varin/extension-sdk': path.join(repository, 'packages/extension-sdk/dist/index.js') } });
   await f.extensions.installOrStage({ expectedRevision: (await f.extensions.state()).catalog.revision, source: { kind: 'local', display: 'Real example', specifier: example } });
+  await f.extensions.setEnabled('example.project-context', true, (await f.extensions.state()).catalog.revision);
 }
 async function route(f: Awaited<ReturnType<typeof fixture>>, providerKey: string, scope: {projectId?: string; threadId?: string}) {
   return f.extensions.upsertServiceRoutingRule({ expectedRevision: (await f.extensions.routing.read()).document.revision,
@@ -161,7 +162,7 @@ it('packaged default and installable scoped example reach captured model request
   await f.adapter.refreshPersonalization();
   const prior = (await f.api.snapshot(identity)).context.checkpoint!;
   expect(prior.personalization!.revision).toBe(beforeRestart.personalization!.revision);
-  expect(prior.personalization!.contextComposition!.transforms[0]!.providerId).not.toBe(beforeRestart.personalization!.contextComposition!.transforms[0]!.providerId);
+  expect(prior.personalization!.contextComposition!.transforms).toEqual(beforeRestart.personalization!.contextComposition!.transforms);
   const { contextComposition, ...basis } = prior.personalization!;
   await expect(f.runtime.refreshContext({ branchId: identity.branchId, expectedRevision: prior.revision, context: {
     ...(prior.resources ? { resources: prior.resources } : {}),
@@ -202,12 +203,13 @@ it('optional unavailable default is empty, but explicit missing and failing prov
   await fs.writeFile(path.join(bad, 'varin.extension.json'), JSON.stringify({ schemaVersion: 1, id: 'review.bad-context', version: '1.0.0', engines: { varin: '*' }, entrypoints: { host: { file: 'host.cjs', mode: 'brokered', activation: ['service-request'] } }, provides: { services: [VARIN_CONTEXT_FRAGMENTS_SERVICE] } }));
   await fs.writeFile(path.join(bad, 'host.cjs'), `module.exports={activate(context){context.services.provide(${JSON.stringify(VARIN_CONTEXT_FRAGMENTS_SERVICE)},{describe(){throw new Error('deliberate describe failure')}})}}`);
   await f.extensions.installOrStage({ expectedRevision: (await f.extensions.state()).catalog.revision, source: { kind: 'local', display: 'Bad context', specifier: bad } });
+  await f.extensions.setEnabled('review.bad-context', true, (await f.extensions.state()).catalog.revision);
   await f.composition(scope);
   expect((await f.extensions.state()).services.providers.some(provider => provider.extensionId === 'review.bad-context')).toBe(false);
   await route(f, 'review.bad-context:host:varin.context.fragments@1', scope);
   await expect(f.composition(scope)).rejects.toThrow(/deliberate describe failure/);
 });
-it('unchanged context preparation invokes describe once and reuses the real worker generation', async () => {
+it('unchanged context preparation invokes describe once and retains the declaration without retaining a worker', async () => {
   const f = await fixture((_body, response) => complete(response, 'unused', 'unused'));
   let describes = 0;
   const originalPrepare = f.extensions.prepareServiceCollection.bind(f.extensions);
@@ -235,7 +237,7 @@ it('unchanged context preparation invokes describe once and reuses the real work
   expect(afterRouting).toEqual(beforeRouting);
   expect(describes).toBe(1);
   expect(generations.size).toBe(1);
-  expect((await f.extensions.state()).services.providers.filter(provider => provider.extensionId === 'varin.builtin.context-fragments')).toHaveLength(1);
+  expect((await f.extensions.state()).services.providers.filter(provider => provider.extensionId === 'varin.builtin.context-fragments')).toHaveLength(0);
 });
 it('selected describe failure preserves the checkpoint and data fragments stay outside model system instructions', async () => {
   const f = await fixture((_body, response) => complete(response, `data-${Date.now()}`, 'done'));
@@ -252,6 +254,7 @@ it('selected describe failure preserves the checkpoint and data fragments stay o
     await fs.writeFile(path.join(folder, 'varin.extension.json'), JSON.stringify({ schemaVersion: 1, id, version: '1.0.0', engines: { varin: '*' }, entrypoints: { host: { file: 'host.cjs', mode: 'brokered', activation: ['service-request'] } }, provides: { services: [VARIN_CONTEXT_FRAGMENTS_SERVICE] } }));
     await fs.writeFile(path.join(folder, 'host.cjs'), `module.exports={activate(context){context.services.provide(${JSON.stringify(VARIN_CONTEXT_FRAGMENTS_SERVICE)},{describe(){${implementation}}})}}`);
     await f.extensions.installOrStage({ expectedRevision: (await f.extensions.state()).catalog.revision, source: { kind: 'local', display: id!, specifier: folder } });
+    await f.extensions.setEnabled(id!, true, (await f.extensions.state()).catalog.revision);
   }
   await route(f, 'review.fail-fragments:host:varin.context.fragments@1', { threadId: identity.threadId });
   await expect(f.adapter.refreshPersonalization()).rejects.toThrow();
@@ -302,7 +305,7 @@ it('calendar GUI assets reach original source/model/context owners, consume a ge
   expect(JSON.stringify(await f.runtime.history(occurrence.branch_id))).toContain('Original calendar Environment input');
   expect(f.requests).toHaveLength(1); expect(JSON.stringify(f.requests[0]!.body)).toContain(instruction.replaceAll('\n', '\\n'));
   expect(host.errors).toEqual([]); expect(f.launchErrors).toEqual([]);
-  host.scheduler.stop(); await f.close();
+  await host.scheduler.stop(); await f.close();
   const reopened = await fixture(reply, f.root, f.endpoint), resumed = await install(reopened);
   const same = await resumed.api.run('selected-project', 'calendar-task', 'original-manual-key');
   if (same.runtime !== 'agent') throw new Error('Native calendar returned a Pi receipt');

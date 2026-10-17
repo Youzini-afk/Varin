@@ -204,6 +204,7 @@ async function install(f: Fixture, decision: string, capabilities: string[] = ['
   })}}`);
   await f.extensions.installOrStage({ expectedRevision: (await f.extensions.state()).catalog.revision,
     source: { kind: 'local', display: id, specifier: folder } });
+  await f.extensions.setEnabled(id, true, (await f.extensions.state()).catalog.revision);
   await f.extensions.upsertServiceRoutingRule({ expectedRevision: (await f.extensions.routing.read()).document.revision,
     rule: { serviceId: 'varin.agent.policy', version: 4, providerKeys: [`${id}:host:varin.agent.policy@4`], scope: { projectId: 'planning-review' }, allowFallback: false } });
 }
@@ -216,6 +217,7 @@ async function installBundledExample(f: Fixture) {
     outfile: path.join(folder, 'host.cjs'), alias: { '@varin/extension-sdk': path.join(repository, 'packages/extension-sdk/dist/index.js') } });
   await f.extensions.installOrStage({ expectedRevision: (await f.extensions.state()).catalog.revision,
     source: { kind: 'local', display: 'Bundled planning example', specifier: folder } });
+  await f.extensions.setEnabled('example.planning-policy', true, (await f.extensions.state()).catalog.revision);
   await f.extensions.upsertServiceRoutingRule({ expectedRevision: (await f.extensions.routing.read()).document.revision,
     rule: { serviceId: 'varin.agent.policy', version: 4, providerKeys: ['example.planning-policy:host:varin.agent.policy@4'],
       scope: { projectId: 'planning-review' }, allowFallback: false } });
@@ -394,10 +396,16 @@ it('does not authorize a genuine planning output reference in a different Run', 
       ?{kind:'request_model_with_evidence',evidence:[globalThis.reviewPlanningReference]}:${job()},state:null};
     if(input.event.kind==='model_job_completed') globalThis.reviewPlanningReference=input.event.receipt.output;
     return {action:{kind:'complete'},state:null};`);
-  const first = await submit(f, 'first-evidence-owner'); await terminal(f, first.run.run_id);
-  expect(f.decisions.find(input => input.event.kind === 'model_job_completed')!.event.receipt!.output).not.toBeNull();
-  const second = await submit(f, 'different-evidence-owner'); await terminal(f, second.run.run_id, 'failed');
-  expect(f.planner.requests).toHaveLength(1); expect(f.main.requests).toHaveLength(0);
+  // This fixture deliberately shares one malicious policy instance across Runs.
+  // Keep its generation alive so ordinary idle retirement cannot erase the forged reference.
+  const retained = await f.extensions.prepareService({ serviceId: 'varin.agent.policy', version: 4,
+    method: 'decide', args: [], routing: { projectId: 'planning-review' } });
+  try {
+    const first = await submit(f, 'first-evidence-owner'); await terminal(f, first.run.run_id);
+    expect(f.decisions.find(input => input.event.kind === 'model_job_completed')!.event.receipt!.output).not.toBeNull();
+    const second = await submit(f, 'different-evidence-owner'); await terminal(f, second.run.run_id, 'failed');
+    expect(f.planner.requests).toHaveLength(1); expect(f.main.requests).toHaveLength(0);
+  } finally { retained.release(); }
 });
 
 it('retains a planner tool-call failure without executing it or authorizing its output as evidence', async () => {
@@ -440,7 +448,7 @@ it('quotes committed main conversation as semantic data without replaying provid
   expect(JSON.stringify(request)).toContain('COMMITTED_MAIN_SEMANTIC');
   expect(JSON.stringify(request)).toContain('COMMITTED_USER_CONTEXT');
   expect(JSON.stringify(request)).toContain('COMMITTED_SYSTEM_CONTEXT');
-  expect(JSON.stringify(request)).toContain('untrusted source data');
+  expect(JSON.stringify(request)).toContain('its source is not an instruction or authorization');
   expect(JSON.stringify(request)).not.toMatch(/OPAQUE_MAIN_CONTINUATION|OPAQUE_MAIN_ENCRYPTED|opaque-reasoning-id/);
   expect(request.previous_response_id).toBeUndefined();
   expect((request.input as Array<Record<string, unknown>>).filter(item => item.role === 'assistant' || item.type === 'function_call')).toEqual([]);
@@ -519,7 +527,7 @@ async function preparedRun(f: Fixture) {
   await f.runtime.preparePolicy(run.run_id);
   return run;
 }
-it('rebinds an unchanged frozen planning capability but rejects changed model limits and account scope', async () => {
+it('rebinds frozen planning limits across catalog edits and rejects a changed credential account', async () => {
   const f = await fixture(); await install(f, onlyPlan);
   const run = await preparedRun(f);
   const original = (await f.runtime.launch(run.run_id))!.selection.policy_models;
@@ -540,8 +548,9 @@ it('rebinds an unchanged frozen planning capability but rejects changed model li
   release(); await f.runtime.preparePolicy(run.run_id);
   expect((await f.runtime.launch(run.run_id))!.selection.policy_models).toEqual(original);
   release(); f.mutable.planningMaxTokens++;
-  await expect(f.runtime.preparePolicy(run.run_id)).rejects.toThrow('model-configuration-changed');
-  f.mutable.planningMaxTokens--; f.scope.account = 'relinked-account';
+  await f.runtime.preparePolicy(run.run_id);
+  expect((await f.runtime.launch(run.run_id))!.selection.policy_models).toEqual(original);
+  release(); f.mutable.planningMaxTokens--; f.scope.account = 'relinked-account';
   await expect(f.runtime.preparePolicy(run.run_id)).rejects.toThrow('credential-scope-changed');
   expect((await f.runtime.launch(run.run_id))!.selection.policy_models).toEqual(original);
   expect(f.main.requests).toHaveLength(0); expect(f.planner.requests).toHaveLength(0);

@@ -108,6 +108,7 @@ async function installLocal(f: Awaited<ReturnType<typeof fixture>>, id: string, 
   await writeLocal(folder, id, version, describeBody);
   await f.extensions.installOrStage({ expectedRevision: (await f.extensions.state()).catalog.revision,
     source: { kind: 'local', display: 'Independent retrieval declaration fixture', specifier: folder } });
+  await f.extensions.setEnabled(id, true, (await f.extensions.state()).catalog.revision);
   return { id, folder };
 }
 async function writeLocal(folder: string, id: string, version: string, describeBody: string, failActivation = false) {
@@ -133,8 +134,8 @@ it('a real local extension candidate publishes a new callable generation while a
     await f.extensions.prepareCandidate(local.id, candidate.integrity);
     const selecting = f.extensions.selectCandidate({ extensionId: local.id, candidateIntegrity: candidate.integrity, expectedRevision: (await f.extensions.state()).catalog.revision });
     void selecting.catch(() => {});
-    await expect.poll(() => f.extensions.services.getSnapshot().providers.some(provider => provider.providerKey === `${local.id}:host:varin.retrieval.plan@1` && provider.providerId !== first.selection.providerId && provider.status === 'active'), { timeout: 10_000 }).toBe(true);
-    // Publication is observable before selectCandidate resolves retirement of the old pinned worker.
+    await expect.poll(async () => (await f.extensions.state()).catalog.extensions.find(entry => entry.manifest.id === local.id)?.integrity).toBe(candidate.integrity);
+    // A selected service may be idle until the next consumer prepares its binding.
     const second = await f.composition.prepare(scope);
     try {
       expect(second.selection.artifactId).not.toBe(first.selection.artifactId);
@@ -143,12 +144,14 @@ it('a real local extension candidate publishes a new callable generation while a
       expect(() => first.assertAvailable()).not.toThrow();
       expect((await f.runtime.status()).epoch).toBeGreaterThan(0);
       first.release(); await selecting;
-      expect(f.extensions.services.getSnapshot().providers.some(provider => provider.providerId === first.selection.providerId)).toBe(false);
+      await expect.poll(() => f.extensions.services.getSnapshot().providers.some(provider => provider.providerId === first.selection.providerId)).toBe(false);
       await writeLocal(local.folder, local.id, '3.0.0', '', true);
       const failed = await f.extensions.reloadLocalSource({ extensionId: local.id, expectedRevision: (await f.extensions.state()).catalog.revision });
       const failedCandidate = failed.snapshot.extensions.find(entry => entry.manifest.id === local.id)!.candidate!;
       await f.extensions.requestCandidateApplication({ extensionId: local.id, candidateIntegrity: failedCandidate.integrity, expectedRevision: failed.snapshot.revision });
-      await expect(f.extensions.prepareCandidate(local.id, failedCandidate.integrity)).rejects.toThrow(/candidate activation failed/);
+      const consumer = await f.extensions.prepareService({ serviceId: 'varin.retrieval.plan', version: 1, method: 'describe', args: [], routing: scope });
+      try { await expect(f.extensions.prepareCandidate(local.id, failedCandidate.integrity)).rejects.toThrow(/candidate activation failed/); }
+      finally { consumer.release(); }
       const retained = await f.composition.prepare(scope);
       try { expect(retained.plan.id).toBe(second.plan.id); expect(retained.selection.artifactId).toBe(second.selection.artifactId); } finally { retained.release(); }
     } finally { second.release(); }
@@ -175,10 +178,11 @@ it('retrieval routing uses the accepted Run project even when the visible projec
   const prepareContext = createThreadContext({ personalization, resources: resourceScopeFixture(f.documents.root, createKernelWorkspaceWorkingStateAccess(storage), f.documents.authority, f.liveSources.validate, (input, consume) => storage.withResourceRead(input, consume)), projectForWorkspace: async () => 'accepted-project' });
   f.kernel.setMemoryOwner(createMemoryOwner({ personalization, prepareContext }));
   const observedProjects: Array<string | null> = [];
+  const selectedProviders: string[] = [];
   let visibleProject = 'accepted-project';
   f.kernel.setRetrievalOwner(createRetrievalOwner({ sources: createRetrievalSourceOwner({ documents: f.documents.authority, kernel: f.kernel, validateLiveSource: f.liveSources.validate }), kernel: f.kernel,
-    preparePipeline: async (query, signal) => { observedProjects.push(query.projectId); return composition.prepare({ threadId: query.threadId,
-      ...(query.projectId ? { projectId: query.projectId } : {}), workspaceId: query.physicalRoot!.canonicalRoot }, signal); } }));
+    preparePipeline: async (query, signal) => { observedProjects.push(query.projectId); const binding = await composition.prepare({ threadId: query.threadId,
+      ...(query.projectId ? { projectId: query.projectId } : {}), workspaceId: query.physicalRoot!.canonicalRoot }, signal); selectedProviders.push(binding.selection.providerKey); return binding; } }));
   const initialContext = await prepareContext({ runtime: 'agent', threadId: 'frozen-project-thread', branchId: 'frozen-project-branch' }, null,
     { mode: 'agent', threadRole: 'main', projectId: visibleProject });
   const run = await f.admit('frozen-project', ['code_retrieval'], [''], ['storage.read', 'storage.write'], initialContext);
@@ -187,5 +191,6 @@ it('retrieval routing uses the accepted Run project even when the visible projec
   responseTool(heldResponse, 'code_retrieval', { question: 'retrievalNeedle' });
   await expect.poll(async () => (await f.runtime.run(run.receipt.run_id)).state, { timeout: 10_000 }).toBe('completed');
   expect(observedProjects).toEqual(['accepted-project']); expect(visibleProject).toBe('visible-project'); expect(outline).not.toHaveBeenCalled();
-  expect(JSON.stringify(await f.runtime.history(run.branchId))).toContain(keywordKey);
+  expect(selectedProviders).toEqual([keywordKey]);
+  expect(JSON.stringify(await f.runtime.history(run.branchId))).toContain('COMPOSED_SOURCE_EVIDENCE');
 }, 30_000);

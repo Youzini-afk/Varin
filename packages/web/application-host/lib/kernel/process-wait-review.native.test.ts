@@ -287,7 +287,9 @@ it('original research log bytes and drained stderr jointly resume one new Run an
   });
   try {
     await expect.poll(async () => (await f.api.research!.logs(selection, { attemptId: accepted.attempt.attemptId })).text,
-      { timeout: 15_000 }).toBe('λab');
+      { timeout: 15_000 }).toBe('λab').catch(async error => {
+        throw new Error(`${String(error)}; ${JSON.stringify({ attempt: await f.api.research!.get(selection, accepted.attempt.attemptId), errors: [...new Set(f.launchErrors.map(String))] })}`);
+      });
     const jobs = await f.api.followups.jobSources(identity, original.run_id);
     const job = jobs.find(item => item.binding.subject.kind === 'workspace' && item.binding.subject.subjectId === accepted.attempt.attemptId)!;
     expect(job).toBeDefined();

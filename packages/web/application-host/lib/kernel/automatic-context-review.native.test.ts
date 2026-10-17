@@ -20,9 +20,9 @@ const kernelPath=process.env.VARIN_TEST_KERNEL_PATH ?? path.join(repository,'ker
 const buildVersion=(JSON.parse(await fs.readFile(path.join(repository,'package.json'),'utf8')) as {version:string}).version;
 const cleanups:Array<()=>Promise<void>>=[];
 afterEach(async()=>{for(const cleanup of cleanups.splice(0).reverse()) await cleanup();});
-function answer(response:ServerResponse,text:string):void {
+function answer(response:ServerResponse,text:string,inputTokens=12):void {
   response.writeHead(200,{'content-type':'text/event-stream'});
-  response.end(`data: ${JSON.stringify({type:'response.completed',response:{output:[{id:crypto.randomUUID(),type:'message',content:[{type:'output_text',text}]}],usage:{input_tokens:12,output_tokens:8}}})}\n\n`);
+  response.end(`data: ${JSON.stringify({type:'response.completed',response:{output:[{id:crypto.randomUUID(),type:'message',content:[{type:'output_text',text}]}],usage:{input_tokens:inputTokens,output_tokens:8}}})}\n\n`);
 }
 it.each([
   {cancel:false,block:false,fail:false},
@@ -50,7 +50,7 @@ it.each([
     request.on('end',guardProviderReply(response, ()=>{
       const body=JSON.parse(Buffer.concat(chunks).toString()) as Record<string,unknown>;
       if(JSON.stringify(body.input).includes('Produce a faithful continuation summary')) {summaries.push(response);summaryBodies.push(body);}
-      else {main.push({body,response});if(main.length===1) answer(response,'ACK: old source read');}
+      else {main.push({body,response});if(main.length===1) answer(response,'ACK: old source read',14_000);}
     }));
   });
   server.listen(0,'127.0.0.1');await once(server,'listening');

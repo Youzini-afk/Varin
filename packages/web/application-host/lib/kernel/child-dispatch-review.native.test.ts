@@ -77,6 +77,8 @@ function complete(response: ServerResponse, output: unknown[]) {
   response.end(`data: ${JSON.stringify({ type: 'response.completed', response: { output } })}\n\n`);
 }
 function tool(name: string, args: unknown, id: string) {
+  const versions: Record<string, string> = { dispatch: '2', wait_child: '1', child_status: '2', child_report: '3', threads: '1', read_thread: '2', send: '3', memory: '1' };
+  if (versions[name]) { args = { reference: { name, version: versions[name] }, arguments: args }; name = 'tool_invoke'; }
   return { id: `item-${id}`, type: 'function_call', call_id: id, name, arguments: JSON.stringify(args) };
 }
 function answer(text: string, id: string) {
@@ -84,9 +86,12 @@ function answer(text: string, id: string) {
 }
 function result(body: Record<string, unknown>, name?: string) {
   const items = body.input as Array<Record<string, unknown>>;
-  const call = name ? items.findLast(item => item.type === 'function_call' && item.name === name) : undefined;
+  const call = name ? items.findLast(item => item.type === 'function_call' && (item.name === name
+    || item.name === 'tool_invoke' && JSON.parse(String(item.arguments)).reference?.name === name)) : undefined;
   const output = items.findLast(item => item.type === 'function_call_output' && (!call || item.call_id === call.call_id));
-  return output ? JSON.parse(responsesMetadataText(output.output)) as Record<string, unknown> : undefined;
+  const value = output ? JSON.parse(responsesMetadataText(output.output)) as Record<string, unknown> : undefined;
+  const content = value?.content as { reference?: unknown; completion: Record<string, unknown>; result: unknown } | undefined;
+  return content?.reference ? { ...content.completion, operation_id: content.completion.operationId, content: content.result } : value;
 }
 function assertPairing(body: Record<string, unknown>) {
   const pending = new Set<string>();
@@ -159,10 +164,14 @@ async function fixture(reply: (request: RecordedRequest, index: number) => void 
       }
       return result;
     });
+    const credentials = { available: true };
     const credentialOwner = new ExistingHostCredentialOwner({ providerId: model.providerId,
       providerFamily: configuration.providerFamily, endpoint, bindingIdentity: modelCredentialBindingIdentity(configuration),
-      currentScope: async () => ({ reference: 'child-review-reference', authority: 'child-review-authority',
-        account: 'child-review-account', generation: 1 }),
+      currentScope: async () => {
+        if (!credentials.available) throw new Error('fixture credential owner was explicitly disabled');
+        return { reference: 'child-review-reference', authority: 'child-review-authority',
+          account: 'child-review-account', generation: 1 };
+      },
       runtime: { getAuth: async () => ({ auth: { apiKey: 'fake-child-review-key-not-a-real-secret' } }) } });
     const extensions = options.policyExample ? await ApplicationExtensionRuntime.create({ dataDir: path.join(root, 'extensions'), varinVersion: buildVersion,
       brokerScript: path.join(repository, 'packages/extension-host/broker/broker-child.mjs') }) : undefined;
@@ -177,6 +186,7 @@ async function fixture(reply: (request: RecordedRequest, index: number) => void 
         await extensions.installOrStage({ expectedRevision: (await extensions.state()).catalog.revision,
           source: { kind: 'local', display: 'Collaboration policy example', specifier: folder } });
       }
+      await extensions.setEnabled('example.collaboration-policy', true, (await extensions.state()).catalog.revision);
     }
     const selectParentPolicy = async (threadId: string) => {
       if (!extensions) throw new Error('Policy example is not installed');
@@ -234,7 +244,7 @@ async function fixture(reply: (request: RecordedRequest, index: number) => void 
       if (!kernelProcess.kill('SIGKILL')) throw new Error('Could not kill this fixture kernel');
       await exited; await kernel.close();
     };
-    return { kernel, grants, crash, runtime, adapter, collaboration, models, prepareContext, workingStates, personalization, documents, memoryQueries, memoryControl, policyDecisions,
+    return { kernel, grants, crash, runtime, adapter, collaboration, models, credentials, prepareContext, workingStates, personalization, documents, memoryQueries, memoryControl, policyDecisions,
       errors, close, selectParentPolicy, api: createThreadsHttpAPI(), profiles: createAgentProfilesHttpAPI(), hostUrl: host.url };
   }
   return { root, workspace, requests, openHost, setProject(value: string) { projectId = value; }, setTrusted(value: boolean) { trusted = value; } };
@@ -286,7 +296,7 @@ it('family tools and public views read original and fork-inherited conversations
   const receipt = await h.api.submit({ ...identity, key: 'family-input', expectedHead: null, text: 'FAMILY_PARENT_SEMANTIC: discover and read this original task', model, source: prepared.source });
   await expect.poll(async () => (await h.runtime.run(receipt.run_id)).state, { timeout: 10_000 }).toBe('completed');
   const child = await h.runtime.child(operationId);
-  expect(child.report?.outcome).toBe('succeeded'); expect(child.launch.tools.map(item => item.name)).toEqual(['read_thread', 'threads']);
+  expect(child.report?.outcome).toBe('succeeded'); expect(child.launch.tools.map(item => item.name)).toEqual(['read_thread', 'threads', 'tool_describe', 'tool_invoke']);
   const directory = await h.api.family!.list(identity);
   expect(directory.members.map(member => member.threadId)).toEqual([child.child_thread_id]);
   const target = { threadId: child.child_thread_id, branchId: child.child_branch_id };
@@ -338,7 +348,9 @@ it('two real send observations retain their original requests across Host restar
       expect(childSteps).toBe(3);
       const outputs = (body.input as Array<Record<string, unknown>>).filter(item => item.type === 'function_call_output' && ['reply-send-one', 'reply-send-two'].includes(String(item.call_id)));
       expect(outputs).toHaveLength(2);
-      for (const output of outputs) expect(JSON.parse(responsesMetadataText(output.output))).toMatchObject({ kind: 'job_accepted', effect: 'confirmed' });
+      for (const output of outputs) expect(JSON.parse(responsesMetadataText(output.output))).toMatchObject({
+        content: { reference: { name: 'send', version: '3' }, completion: { kind: 'job_accepted', effect: 'confirmed' } },
+      });
       expect(JSON.stringify(body.input)).toContain('FIRST_LINKED_REPLY_BODY');
       expect(JSON.stringify(body.input)).toContain('SECOND_LINKED_REPLY_BODY');
       complete(response, [answer('Both original reply observations completed once', 'reply-child-done')]);
@@ -478,7 +490,7 @@ it('selected read-only child owns its ordinary notes and plan through real Host 
     release.release();
     await expect.poll(async () => (await h.runtime.run(run.run_id)).state, { timeout: 10_000 }).toBe('completed');
     const child = await h.runtime.child(operationId);
-    expect(child.launch.tools.map(item => item.name).sort()).toEqual(['memory', 'todo']);
+    expect(child.launch.tools.map(item => item.name).sort()).toEqual(['memory', 'todo', 'tool_describe', 'tool_invoke']);
     expect(child.report?.outcome).toBe('succeeded'); expect(child.code_result).toEqual({ kind: 'no_changes' });
     const childIdentity = { runtime: 'agent' as const, threadId: child.child_thread_id, branchId: child.child_branch_id };
     const ownPlan = await h.api.plan!.read(childIdentity);
@@ -713,7 +725,7 @@ it('a saved runtime-specific preset stays frozen across a later edit and Host/ke
   expect(finished.child_thread_id).toBe(child.child_thread_id);
   expect(finished.selected_profile).toEqual(child.selected_profile);
   expect(finished.configuration).toEqual(child.configuration);
-  expect(finished.launch.tools.map(tool => tool.name)).toEqual(['file_read']);
+  expect(finished.launch.tools.map(tool => tool.name)).toEqual(['file_read', 'tool_describe', 'tool_invoke']);
   expect((await reopened.profiles.read({ runtime: 'agent' })).profiles.find(profile => profile.id === saved.profileId)?.tools)
     .toEqual({ source: 'explicit', names: [] });
   expect((await reopened.runtime.readChildReport(operationId, finished.report!.history_ids.at(-1)!)).text).toBe('REOPENED_CHILD_REPORT');
@@ -1014,12 +1026,12 @@ it('credential-owner failure holds the admitted child for explicit retry without
   const receipt = await h.api.submit({ ...identity, key: 'parent-input', expectedHead: null, text: 'dispatch then finish', model, source: prepared.source });
   await entered.promise;
   await expect.poll(async () => (await h.runtime.run(receipt.run_id)).state).toBe('completed');
-  h.models.rebindModel = async () => { throw new Error('fixture credential owner was explicitly disabled'); };
+  h.credentials.available = false;
   release.release();
   await expect.poll(async () => (await h.runtime.child(operationId)).receipt).not.toBeNull();
   const child = await h.runtime.child(operationId);
   expect(child.receipt).not.toBeNull();
-  await expect.poll(async () => (await h.runtime.launch(child.receipt!.run_id))?.preparation_failure).toBe('preparation_failed');
+  await expect.poll(async () => (await h.runtime.launch(child.receipt!.run_id))?.preparation_failure).toBe('credentials_unavailable');
   expect((await h.runtime.run(child.receipt!.run_id)).state).toBe('waiting');
   expect((await h.runtime.child(operationId)).report).toBeNull();
   expect(childSteps).toBe(0); expect(parentSteps).toBe(2);
@@ -1164,12 +1176,15 @@ function combinedPairing(body: Record<string, unknown>, family: CombinedFamily) 
 function combinedResult(body: Record<string, unknown>, family: CombinedFamily, name: string) {
   if (family === 'openai-responses') return result(body, name);
   const items = combinedItems(body, family);
-  const call = items.findLast(item => item.type === 'tool_use' && item.name === name);
+  const call = items.findLast(item => item.type === 'tool_use' && (item.name === name
+    || item.name === 'tool_invoke' && (item.input as { reference?: { name: string } })?.reference?.name === name));
   const output = items.findLast(item => item.type === 'tool_result' && item.tool_use_id === call?.id);
   if (!output) return undefined;
   const blocks = output.content as Array<{ type: string; text?: string }>;
   expect(blocks[0]?.type).toBe('text');
-  return JSON.parse(blocks[0]!.text!) as Record<string, unknown>;
+  const value = JSON.parse(blocks[0]!.text!) as Record<string, unknown>;
+  const content = value.content as { reference?: unknown; completion: Record<string, unknown>; result: unknown } | undefined;
+  return content?.reference ? { ...content.completion, operation_id: content.completion.operationId, content: content.result } : value;
 }
 async function durableRequests(root: string, runId: string) {
   const database = new DatabaseSync(path.join(root, 'agent-runtime', 'conversation.sqlite'), { readOnly: true });
@@ -1202,7 +1217,7 @@ for (const family of ['openai-responses', 'anthropic-messages'] as const) {
       combinedPairing(body, family);
       if (!isParent(body)) {
         childSteps++;
-        expect((body.tools as Array<{ name: string }>).map(value => value.name)).toEqual(['file_read']);
+        expect((body.tools as Array<{ name: string }>).map(value => value.name)).toEqual(['file_read', 'tool_describe', 'tool_invoke']);
         combinedReply(family, response, [answer(spoof, 'combined-child-report')]);
       } else if (++parentSteps === 1) combinedReply(family, response, [tool('dispatch', dispatch, 'combined-dispatch')]);
       else if (parentSteps === 2) {
@@ -1500,7 +1515,7 @@ it('installed collaboration policy accepts a child and reads before any parent M
     release.release();
     await expect.poll(async () => (await h.runtime.run(receipt.run_id)).state, { timeout: 10_000 }).toBe('completed');
     const finished = await h.runtime.child(child.operation_id);
-    expect(finished.launch.tools.map(item => item.name)).toEqual(['file_read']);
+    expect(finished.launch.tools.map(item => item.name)).toEqual(['file_read', 'tool_describe', 'tool_invoke']);
     expect(finished.report).toMatchObject({ outcome: 'succeeded', sender_thread_id: child.child_thread_id });
     expect((await h.runtime.operation(child.operation_id)).call_completion).toEqual(acceptedCall);
     expect(policyReceipts(h).filter(item => item.node_id === 'wait-child')).toHaveLength(1);

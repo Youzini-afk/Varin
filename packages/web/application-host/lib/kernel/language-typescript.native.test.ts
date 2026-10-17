@@ -109,10 +109,13 @@ it('executes all three live tools end to end through the bundled TypeScript serv
           const body = JSON.parse(Buffer.concat(bytes).toString()) as Record<string, unknown>;
           requests.push(body);
           const previous = (body.input as Array<Record<string, unknown>>).findLast(item => item.type === 'function_call_output');
-          if (previous) outputs.push(JSON.parse(responsesMetadataText(previous.output)) as Record<string, unknown>);
+          if (previous) {
+            const output = JSON.parse(responsesMetadataText(previous.output)) as { content: { completion: Record<string, unknown>; result: unknown } };
+            outputs.push({ ...output.content.completion, content: output.content.result });
+          }
           const next = calls[requests.length - 1];
           const output = next ? [{ id: `item-${requests.length}`, type: 'function_call', call_id: `call-${requests.length}`,
-            name: next.name, arguments: JSON.stringify(next.arguments) }]
+            name: 'tool_invoke', arguments: JSON.stringify({ reference: { name: next.name, version: '1' }, arguments: next.arguments }) }]
             : [{ id: 'answer', type: 'message', content: [{ type: 'output_text', text: 'Real TypeScript checks complete' }] }];
           response.writeHead(200, { 'content-type': 'text/event-stream' });
           response.end(`data: ${JSON.stringify({ type: 'response.completed', response: { output } })}\n\n`);

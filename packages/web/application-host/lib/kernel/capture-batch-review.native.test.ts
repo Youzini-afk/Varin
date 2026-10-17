@@ -73,7 +73,7 @@ it('captureDirectory copy/hash work allows the Storage health request to finish 
   const capture = f.store.captureDirectory(f.workspace, ['large.bin'], { store: false });
   const request = await f.captureRequest;
   const health = f.host.health();
-  expect((await health).integrity).toBe('ok');
+  expect(await health).toMatchObject({ integrity: 'not_checked', deep: false });
   const healthRequest = f.requests.findLast(value => value.method === 'storage.health')!;
   const states = await capture;
   expect(states['large.bin']).toMatchObject({ kind: 'regular-file', byteLength: 256 * 1024 * 1024 });

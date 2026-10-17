@@ -156,6 +156,7 @@ async function installExample(f: Awaited<ReturnType<typeof fixture>>) {
   for (const file of ['package.json', 'varin.extension.json']) await fs.copyFile(path.join(repository, 'examples/extensions/evidence-policy', file), path.join(example, file));
   await build({ entryPoints: [path.join(repository, 'examples/extensions/evidence-policy/host.ts')], bundle: true, platform: 'node', format: 'cjs', outfile: path.join(example, 'host.cjs'), alias: { '@varin/extension-sdk': path.join(repository, 'packages/extension-sdk/dist/index.js') } });
   await f.extensions.installOrStage({ expectedRevision: (await f.extensions.state()).catalog.revision, source: { kind: 'local', display: 'Real example', specifier: example } });
+  await f.extensions.setEnabled('example.evidence-policy', true, (await f.extensions.state()).catalog.revision);
 }
 async function route(f: Awaited<ReturnType<typeof fixture>>, providerKey: string, scope: {projectId?: string; threadId?: string}) {
   return f.extensions.upsertServiceRoutingRule({ expectedRevision: (await f.extensions.routing.read()).document.revision,
@@ -167,6 +168,7 @@ async function installCustom(f: Awaited<ReturnType<typeof fixture>>, id: string,
   await fs.writeFile(path.join(folder,'varin.extension.json'),JSON.stringify({schemaVersion:1,id,version:'1.0.0',engines:{varin:'*'},entrypoints:{host:{file:'host.cjs',mode:'brokered',activation:['service-request']}},provides:{services:[{id:'varin.agent.policy',version:4,multiple:true}]}}));
   await fs.writeFile(path.join(folder,'host.cjs'),`module.exports={activate(context){context.services.provide({id:'varin.agent.policy',version:4,multiple:true},{${handlers}})}}`);
   await f.extensions.installOrStage({expectedRevision:(await f.extensions.state()).catalog.revision,source:{kind:'local',display:id,specifier:folder}});
+  await f.extensions.setEnabled(id, true, (await f.extensions.state()).catalog.revision);
   await route(f,`${id}:host:varin.agent.policy@4`,{projectId:'selected-project'});
 }
 
@@ -375,6 +377,7 @@ async function installMemoryPolicy(f: Awaited<ReturnType<typeof fixture>>, id: s
     } });` }, bundle: true, platform: 'node', format: 'cjs', outfile: path.join(folder, 'host.cjs'),
     alias: { '@varin/extension-sdk': path.join(repository, 'packages/extension-sdk/dist/index.js') } });
   await f.extensions.installOrStage({ expectedRevision: (await f.extensions.state()).catalog.revision, source: { kind: 'local', display: id, specifier: folder } });
+  await f.extensions.setEnabled(id, true, (await f.extensions.state()).catalog.revision);
   await route(f, `${id}:host:varin.agent.policy@4`, { projectId: 'selected-project' });
 }
 function holdMutation(f: Awaited<ReturnType<typeof fixture>>) {

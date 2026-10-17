@@ -219,9 +219,20 @@ async function toolFixture(reply: (body: Record<string, unknown>, turn: number) 
   const storage = new KernelStorageAdapter({ client: f.kernel, hostId: 'plan-integration', storageRoot: f.root, resolveWorkspaceRoot: async () => f.root });
   cleanups.push(() => storage.dispose());
   const personalization = createAgentPersonalization({ client: f.kernel, context: async () => ({ bot: false }) });
-  const prepareContext = createThreadContext({ personalization, resources: resourceScopeFixture(f.root, createKernelWorkspaceWorkingStateAccess(storage)), projectForWorkspace: async () => undefined });
+  const prepareContext = createThreadContext({ personalization, resources: resourceScopeFixture(f.root, createKernelWorkspaceWorkingStateAccess(storage)), projectForWorkspace: async () => undefined,
+    botForThread: async threadId => {
+      const id = (await f.runtime.thread(threadId)).bot_id;
+      return id ? { id, name: 'Plan fixture Bot', instructions: null, revision: 1 } : null;
+    } });
   f.scopeContext.prepare = identity => prepareContext.main(identity, null);
-  f.kernel.setMemoryOwner(createMemoryOwner({ personalization, prepareContext }));
+  f.kernel.setMemoryOwner(createMemoryOwner({ personalization, prepareContext, bot: async (query, signal) => {
+    expect(query.action).toBe('synchronize');
+    expect(query.scope.botId).toBe((await f.runtime.thread(query.scope.threadId)).bot_id);
+    expect(query.checkpoint).toBeDefined();
+    const context = await prepareContext.refresh!(query.checkpoint!, signal);
+    return { status: 'ready', context, state: { revision: 0, memories: [], noteRevisions: {},
+      botKnowledge: { botId: query.scope.botId, threadId: query.scope.threadId, items: [], invalidations: [], corrections: [] } } };
+  } }));
   const queries: PlanQuery[] = [];
   const control = { loseReply: false };
   const owner = createPlanOwner(async () => f.store, f.runtime);
@@ -316,14 +327,29 @@ it('a forged model ownership field is rejected before the private plan owner can
   expect((await f.read(identity).expect(200)).body.plan).toBeNull();
 });
 
+it('an admitted Bot owns its plan through both the model tool and user routes', async () => {
+  const f = await toolFixture((_body, turn) => turn === 1
+    ? [call('todo', 'bot-plan', { action: 'update', expectedRef: null, items: [{ text: 'Bot plan', status: 'pending' }] })] : done);
+  await f.kernel.agentRuntimeRequest('runtime.bot.gate.publish', {
+    botId: 'plan-fixture-bot', profileRevision: 1, activityOperationId: null, permitted: true,
+  });
+  const identity: ThreadIdentity = { runtime: 'agent', ...await f.runtime.createBotThread('plan-fixture-bot', 'thread:bot-plan', 'branch:bot-plan') };
+  await f.submit(identity, 'bot');
+  const saved = (await f.read(identity).expect(200)).body;
+  expect(saved.plan.content).toBe('- [ ] Bot plan');
+  expect(f.queries.some(query => query.action === 'mutate')).toBe(true);
+  await f.write(identity, 'bot-user-edit', saved.headId, saved.plan.ref, 'Updated Bot plan').expect(200);
+  expect((await f.read(identity).expect(200)).body.plan.content).toBe('Updated Bot plan');
+});
+
 it.each([
-  { mode: 'bot' as const, role: 'main' as const },
   { mode: 'agent' as const, role: 'worker' as const },
   { mode: 'agent' as const, role: 'read-only' as const },
 ])('todo cannot mutate from admitted $mode/$role scope', async ({ mode, role }) => {
   const f = await toolFixture((_body, turn) => turn === 1
     ? [call('todo', 'forbidden-scope', { action: 'update', expectedRef: null, items: [{ text: 'forbidden', status: 'pending' }] })] : done);
-  const identity = await f.create(`forbidden-${mode}-${role}`, false); await f.submit(identity, mode, role);
+  const identity = await f.create(`forbidden-${mode}-${role}`, false);
+  await f.submit(identity, mode, role);
   await f.read(identity).expect(400);
   await f.write(identity, 'forbidden-user-route', (await f.runtime.planView(identity.branchId)).headId, null, 'forbidden').expect(400);
   expect(f.queries.filter(query => query.action === 'mutate')).toEqual([]);

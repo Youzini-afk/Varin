@@ -143,8 +143,12 @@ it('a query retains model A and old published reader while model B and a replace
   const f = await fixture({ embedding: (wire, response) => { if (wire.model === 'model-a' && wire.input.includes(question)) { held = { wire, response }; return true; } return false; } });
   const old = await f.run('semantic-old'); await expect.poll(() => Boolean(held), { timeout: 15_000 }).toBe(true);
   const oldMeta = f.selections[0]!.plan.semantic!;
-  await f.write('alpha.ts', alpha.replace('ALPHA_SEMANTIC_EVIDENCE', 'ALPHA_NEW_BYTES')); await f.writeSettings('model-b');
+  await f.write('alpha.ts', alpha.replace('ALPHA_SEMANTIC_EVIDENCE', 'ALPHA_NEW_BYTES'));
+  f.workspace.observeDocumentMutation({ workspaceId: f.workspaceId, resourceId: 'alpha.ts', kind: 'modified' });
+  await f.workspace.drain();
+  await f.writeSettings('model-b');
   await f.scan();
+  await expect.poll(() => f.workspace.indexStatuses()[0]?.status.publishedDocuments).toBe(2);
   const current = await f.run('semantic-new'); const newHistory = JSON.stringify(await f.completed(current));
   expect(f.selections[1]!.plan.semantic!.modelId).toBe('model-b'); expect(f.selections[1]!.plan.semantic!.publishedRevision).not.toBe(oldMeta.publishedRevision);
   expect(newHistory).toContain('ALPHA_NEW_BYTES');
@@ -206,7 +210,8 @@ it('Run grant revocation during inference drops source and never starts a fallba
 }, 45_000);
 
 it('cached query vectors do not bypass source authorization after a symlink escape and out-of-scope paths are never read', async () => {
-  const f = await fixture();
+  const f = await fixture({ conversation: (body, response) => latestOutput(body) ? responseDone(response)
+    : responseTool(response, 'code_retrieval', { question, paths: ['allowed'] }) });
   await f.write('allowed/entry.ts', 'export const conceptual = "ALLOWED_SEMANTIC_MARKER";\n');
   await f.write('private/secret.ts', 'export const hidden = "PRIVATE_SEMANTIC_SECRET";\n'); await f.scan();
   const first = await f.run('semantic-cache-first', ['allowed']); const firstHistory = JSON.stringify(await f.completed(first));
