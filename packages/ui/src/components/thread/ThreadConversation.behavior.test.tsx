@@ -1411,11 +1411,16 @@ it('shows the core Pause reason and exact resume control while input remains que
   expect(button('Resume run').disabled).toBe(true);
   await act(async () => {
     f.view.activeRun!.state = 'runnable'; f.view.activeRun!.waiting_on = null;
-    f.view.launch!.pause = null; f.view.launch!.startable = true; f.view.launch!.preparation_failure = 'preparation_failed';
+    f.view.launch!.pause = null; f.view.launch!.startable = true;
     f.view.operations = [];
     resolve({ run_id: 'ui-run', action_id: 'action:wait:policy-one', wait_id: 'wait:policy-one', cursor: 2 });
   });
   expect(button('Resume run')).toBeUndefined();
+  expect(button('Retry preparation')).toBeUndefined();
+  await act(async () => {
+    f.view.launch!.preparation_failure = 'preparation_failed';
+    f.emit({ cursor: 3, subject: 'ui-run', revision: 3, kind: 'run.preparation_failed', data: { code: 'preparation_failed' } });
+  });
   expect(button('Retry preparation')).toBeDefined();
   await act(async () => { button('Retry preparation').click(); });
   expect(f.api.retryPreparation).toHaveBeenCalledExactlyOnceWith('ui-run');
