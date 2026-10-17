@@ -16,6 +16,10 @@ import { useI18n } from '@/lib/i18n';
 import { subscribeVarinEvents } from '@/lib/varinEvents';
 
 const discoveryConfiguration = (channel: ModelChannel) => JSON.stringify([channel.type, channel.baseUrl, channel.connection, channel.authentication, channel.parameters]);
+const providerEndpoint = (baseUrl: string) => {
+  const url = new URL(baseUrl);
+  return `${url.host}${url.pathname.replace(/\/$/, '')}`;
+};
 
 export function ModelConnectionsPage() {
   const host = React.useSyncExternalStore(subscribeRuntimeEndpointChanged, getRuntimeEndpointGeneration, getRuntimeEndpointGeneration);
@@ -163,7 +167,7 @@ function ModelConnectionsEditor({ host }: { host: number }) {
         <Input aria-label={t('settings.models.filterProviders')} placeholder={t('settings.models.filterProviders')} value={providerQuery} onChange={event => setProviderQuery(event.target.value)} className="mb-6 max-w-sm" />
         <div className="grid gap-3 @xl:grid-cols-2 @4xl:grid-cols-3">
           {snapshot.types.filter(type => `${type.name} ${type.id}`.toLowerCase().includes(providerQuery.toLowerCase())).map(type => <button key={type.id} type="button" disabled={busy} onClick={() => addChannel(type.id)} className="group flex items-center gap-4 rounded-xl border border-border/60 p-5 text-left transition-colors hover:border-border hover:bg-interactive-hover">
-            <ProviderLogo providerId={type.id} className="size-7 shrink-0" /><span className="min-w-0 flex-1"><span className="block typography-ui-label">{type.name}</span><span className="mt-1 block truncate typography-micro text-muted-foreground">{type.defaultBaseUrl ? new URL(type.defaultBaseUrl).hostname : t('settings.models.customEndpoint')}</span>{type.oauthProviders?.length ? <span className="mt-2 inline-block rounded bg-muted px-1.5 py-0.5 typography-micro text-muted-foreground">{t('settings.models.accountSignIn')}</span> : null}</span><Icon name="arrow-right-s" className="size-4 text-muted-foreground" />
+            <ProviderLogo providerId={type.id} className="size-7 shrink-0" /><span className="min-w-0 flex-1"><span className="block typography-ui-label">{type.name}</span><span title={type.defaultBaseUrl} className="mt-1 block truncate typography-micro text-muted-foreground">{type.defaultBaseUrl ? providerEndpoint(type.defaultBaseUrl) : t('settings.models.customEndpoint')}</span>{type.oauthProviders?.length ? <span className="mt-2 inline-block rounded bg-muted px-1.5 py-0.5 typography-micro text-muted-foreground">{t('settings.models.accountSignIn')}</span> : null}</span><Icon name="arrow-right-s" className="size-4 text-muted-foreground" />
           </button>)}
         </div>
       </> : null}

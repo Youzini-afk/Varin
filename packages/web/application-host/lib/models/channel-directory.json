@@ -7,10 +7,10 @@
     { "id": "alibaba-coding-plan-cn", "name": "阿里云百炼 Coding Plan", "kind": "model-vendor", "protocol": "openai-completions", "baseUrl": "https://coding.dashscope.aliyuncs.com/v1", "environmentVariable": "DASHSCOPE_API_KEY" },
     { "id": "zhipuai", "name": "智谱开放平台", "kind": "model-vendor", "protocol": "openai-completions", "baseUrl": "https://open.bigmodel.cn/api/paas/v4", "environmentVariable": "ZHIPU_API_KEY" },
     { "id": "zai-api", "name": "Z.AI", "kind": "model-vendor", "protocol": "openai-completions", "baseUrl": "https://api.z.ai/api/paas/v4", "environmentVariable": "ZAI_API_KEY", "metadataId": "zai" },
-    { "id": "stepfun", "name": "阶跃星辰", "kind": "model-vendor", "protocol": "openai-completions", "baseUrl": "https://api.stepfun.com/v1", "environmentVariable": "STEPFUN_API_KEY" },
-    { "id": "stepfun-ai", "name": "StepFun", "kind": "model-vendor", "protocol": "openai-completions", "baseUrl": "https://api.stepfun.ai/v1", "environmentVariable": "STEPFUN_API_KEY" },
-    { "id": "stepfun-step-plan", "name": "阶跃星辰 Step Plan", "kind": "model-vendor", "protocol": "openai-completions", "baseUrl": "https://api.stepfun.com/step_plan/v1", "environmentVariable": "STEPFUN_API_KEY" },
-    { "id": "stepfun-ai-step-plan", "name": "StepFun Step Plan", "kind": "model-vendor", "protocol": "openai-completions", "baseUrl": "https://api.stepfun.ai/step_plan/v1", "environmentVariable": "STEPFUN_API_KEY" },
+    { "id": "stepfun", "name": "阶跃星辰 API（中国大陆）", "kind": "model-vendor", "protocol": "openai-completions", "baseUrl": "https://api.stepfun.com/v1", "environmentVariable": "STEPFUN_API_KEY" },
+    { "id": "stepfun-ai", "name": "StepFun API（国际）", "kind": "model-vendor", "protocol": "openai-completions", "baseUrl": "https://api.stepfun.ai/v1", "environmentVariable": "STEPFUN_API_KEY" },
+    { "id": "stepfun-step-plan", "name": "阶跃星辰 Step Plan（中国大陆）", "kind": "model-vendor", "protocol": "openai-completions", "baseUrl": "https://api.stepfun.com/step_plan/v1", "environmentVariable": "STEPFUN_API_KEY" },
+    { "id": "stepfun-ai-step-plan", "name": "StepFun Step Plan（国际）", "kind": "model-vendor", "protocol": "openai-completions", "baseUrl": "https://api.stepfun.ai/step_plan/v1", "environmentVariable": "STEPFUN_API_KEY" },
     { "id": "ollama", "name": "Ollama", "kind": "local", "protocol": "openai-completions", "baseUrl": "http://localhost:11434/v1" },
     { "id": "lmstudio", "name": "LM Studio", "kind": "local", "protocol": "openai-completions", "baseUrl": "http://localhost:1234/v1" }
   ]
