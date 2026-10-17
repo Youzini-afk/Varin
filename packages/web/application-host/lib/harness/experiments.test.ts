@@ -24,7 +24,7 @@ afterEach(async () => { for (const fn of cleanup.splice(0).reverse()) await fn()
 
 /** An explicit in-memory Storage/backend fixture. The production ExperimentService remains the owner under test. */
 async function fixture() {
-  const root = await fs.mkdtemp(path.join(os.tmpdir(), "varin-admission-"));
+  const root = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), "varin-admission-")));
   cleanup.push(() => fs.rm(root, { recursive: true, force: true }));
   await fs.writeFile(path.join(root, "input.txt"), "immutable input");
   const records = new Map<string, KernelRecordResult>();
