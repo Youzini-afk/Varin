@@ -2,7 +2,7 @@ import React from 'react';
 import { createModelConnectionsHttpAPI, getRuntimeEndpointGeneration, type ThreadModelInfo, type ThreadsAPI, type ThreadThinkingLevel } from '@varin/application-client';
 import { ThreadComposer } from './ThreadComposer';
 import { ThreadAgentControls } from './ThreadAgentControls';
-import { useThreadAgentChoice } from './useThreadAgentChoice';
+import { useThreadWorkFocus } from './useThreadWorkFocus';
 import { ChatTurnUserMessage } from '../conversation/ChatTimelineEntries';
 import { useFirstMessagePreview } from './useFirstMessagePreview';
 import { ThreadSourcePicker } from './ThreadSourcePicker';
@@ -34,7 +34,7 @@ import { usePrefersReducedMotion } from '@/hooks/usePrefersReducedMotion';
 export function ThreadDraftConversation({ api, draftKey, handoff }: { api: ThreadsAPI; draftKey: string; handoff: MessageHandoff }) {
   const { t } = useI18n();
   const draft = useThreadDraftStore(state => state.drafts[draftKey] ?? EMPTY_THREAD_DRAFT);
-  const agent = useThreadAgentChoice(draftKey, draft.workspacePath);
+  const workFocus = useThreadWorkFocus(draftKey, draft.workspacePath);
   const patch = React.useCallback((value: Parameters<ReturnType<typeof useThreadDraftStore.getState>['patch']>[1]) => useThreadDraftStore.getState().patch(draftKey, value), [draftKey]);
   const [models, setModels] = React.useState<ThreadModelInfo[]>([]);
   const [error, setError] = React.useState<string>();
@@ -133,7 +133,7 @@ export function ThreadDraftConversation({ api, draftKey, handoff }: { api: Threa
         const settings = useUIStore.getState();
         const request: ThreadFirstSend = draft.firstSend ?? { key: crypto.randomUUID(), status: 'sending',
           editorText: draft.text, text: projectEditorContextAttachments(appendInlineComments(draft.text, inlineDrafts), editorContext),
-          images: draft.images, pdfs: draft.pdfs ?? [], model: model!, agent, workspacePath: draft.workspacePath, sourceSelection: draft.sourceSelection,
+          images: draft.images, pdfs: draft.pdfs ?? [], model: model!, agent: { profileId: null, workFocus }, workspacePath: draft.workspacePath, sourceSelection: draft.sourceSelection,
           editorContext, inlineContext,
           ...(draft.goalArmed && draft.text.trim() ? { goalObjective: draft.text.trim(), ...(settings.sessionGoalDefaultBudgetEnabled ? { goalBudget: settings.sessionGoalDefaultBudget } : {}) } : {}),
         };
@@ -147,7 +147,7 @@ export function ThreadDraftConversation({ api, draftKey, handoff }: { api: Threa
         <input ref={pdfInput} type="file" accept="application/pdf,.pdf" multiple hidden aria-label={t('chat.fileAttachment.actions.choosePdfs')} onChange={event => { const files = [...(event.target.files ?? [])]; event.target.value = ''; void addFiles(files); }} />
         {draft.goalArmed && <p className="chat-input-column typography-meta text-primary">{t('thread.composer.goalArmed')}</p>}
         <ThreadComposer editorRef={editor} value={draft.text} onChange={text => patch({ text })} identityKey={draftKey} placement={firstMessage.message ? 'bottom' : 'center'}
-          agentControls={<ThreadAgentControls value={agent} model={model} disabled={locked} onChange={(agent, model) => patch({ agent, ...(model ? { model } : {}) })} />}
+          agentControls={<ThreadAgentControls workFocus={workFocus} disabled={locked} onWorkFocusChange={workFocus => patch({ workFocus })} />}
           models={models} providerId={model?.providerId ?? ''} modelId={model?.modelId ?? ''} thinkingLevel={model?.thinkingLevel ?? 'off'}
           onModelChange={(providerId, modelId, thinkingLevel) => patch({ model: { providerId, modelId, thinkingLevel } })}
           modelDisabled={locked} attachmentDisabled={locked || readingFiles} imageDisabled={acceptsImages === false}

@@ -54,7 +54,7 @@ import type { ThreadIdentity, ThreadModel, ThreadModelInfo, ThreadThinkingLevel,
 import { Button } from '@/components/ui/button';
 import { ThreadComposer } from './ThreadComposer';
 import { ThreadAgentControls } from './ThreadAgentControls';
-import { useThreadAgentChoice } from './useThreadAgentChoice';
+import { useThreadWorkFocus } from './useThreadWorkFocus';
 import { DraftPresetChips } from '@/components/chat/DraftPresetChips';
 import { useUIStore } from '@/stores/useUIStore';
 import type { ComposerEditorHandle } from '@/components/chat/composer/editor/ComposerEditor';
@@ -319,10 +319,8 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
   const preparingDelegation = snapshot?.delegatedExecutions?.some(execution => !execution.receipt && !execution.report && !execution.cancel_requested) ?? false;
   React.useEffect(() => { if (delegated && inputMode === 'next_run') setInputMode('boundary'); }, [delegated, inputMode, setInputMode]);
   const launch = snapshot?.launch?.run_id === run?.id ? snapshot?.launch : null;
-  const agent = useThreadAgentChoice(draftKey, draft.workspacePath ?? launch?.selection.source?.live_root?.canonicalRoot ?? initialWorkspacePath, launch?.selection.agent, Boolean(snapshot));
-  React.useEffect(() => {
-    if (!active && draft.nextAgentModel) useThreadDraftStore.getState().patch(draftKey, { model: draft.nextAgentModel, nextAgentModel: undefined });
-  }, [active, draft.nextAgentModel, draftKey]);
+  const workFocus = useThreadWorkFocus(draftKey, draft.workspacePath ?? launch?.selection.source?.live_root?.canonicalRoot ?? initialWorkspacePath, launch?.selection.agent?.workFocus, Boolean(snapshot));
+  const agent = { profileId: null, workFocus };
   const pause = run?.state === 'waiting' && launch?.pause?.wait_id === run.waiting_on ? launch.pause : null;
   const policy = snapshot?.policySelection;
   const policyUpdate = policy?.desired && policy.desired.run_id === run?.id ? policy.desired : null;
@@ -772,10 +770,8 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
       <AutoReviewBanner identity={identity} />
       {draft.goalArmed && <p className="px-2 typography-meta text-primary">{t('thread.composer.goalArmed')}</p>}
       <ThreadComposer onOpenHistory={() => setHistoryOpen(true)} identityKey={draftKey} placement={empty ? 'center' : 'bottom'}
-        agentControls={!snapshot?.thread.bot_id && !delegated ? <ThreadAgentControls value={agent} model={draft.model} pending={active} disabled={pending || Boolean(draft.firstSend || draft.pendingInput)}
-          onChange={(agent, model) => { useThreadDraftStore.getState().patch(draftKey, current => ({ agent,
-            nextAgentModel: active ? model ?? (agent.profileId === current.agent?.profileId ? current.nextAgentModel : undefined) : undefined,
-            ...(!active && model ? { model } : {}) })); }} /> : undefined}
+        agentControls={!snapshot?.thread.bot_id && !delegated ? <ThreadAgentControls workFocus={workFocus} pending={active} disabled={pending || Boolean(draft.firstSend || draft.pendingInput)}
+          onWorkFocusChange={workFocus => useThreadDraftStore.getState().patch(draftKey, { workFocus })} /> : undefined}
         messageHistory={visibleHistory.filter(item => item.source === 'user').slice().reverse().map(item => typeof item.content === 'string' ? item.content : typeof (item.content as { text?: unknown })?.text === 'string' ? (item.content as { text: string }).text : '')}
         onCompact={branch?.head && !active && providerId && modelId ? () => { showOverview('memory'); void compactThrough(branch.head!); } : undefined}
         editorRef={messageInput} value={text} onChange={setText} models={models}

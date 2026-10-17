@@ -55,8 +55,7 @@ export interface ThreadDraft {
   images: ImageAttachment[];
   materials: ThreadMaterialAttachment[];
   model?: ThreadModel;
-  agent?: ThreadAgentChoice;
-  nextAgentModel?: ThreadModel;
+  workFocus?: import('@varin/protocol').WorkFocusId;
   inputMode: 'boundary' | 'interrupt' | 'next_run';
   preparedSource: ThreadPreparedSource | null;
   workspacePath?: string;
