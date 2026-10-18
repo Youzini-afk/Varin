@@ -342,17 +342,21 @@ export function createKernelProcessService(options: Options) {
   const launches = new Set<Promise<KernelManagedProcess>>();
   const grants = new Map<string, Promise<{ grant: KernelGrantHandle; client: KernelScopedClient; rootId: string; identity: NativeProcessIdentity; launches: Set<symbol>; retiring: boolean }>>();
   let stopping = false;
+  let generation = 0;
   const report = (error: Error): void => { try { options.onError?.(error); } catch { /* diagnostics are not process facts */ } };
   const unsubscribe = options.client.subscribeExit((error) => {
-    stopping = true;
+    generation += 1;
+    grants.clear();
     for (const handle of handles) handle.invalidate(error);
   });
   const context = async (cwd: string, admission?: ManagedProcessAdmission, signal = new AbortController().signal) => {
+    const originalGeneration = generation;
     const resolvedIdentity = admission ? await admission(signal) : await options.resolveIdentity(cwd);
     const identity = {
       ...resolvedIdentity,
       canonicalRoot: await canonicalizePathIdentity(resolvedIdentity.canonicalRoot),
     };
+    if (generation !== originalGeneration) throw new Error("Native process authority changed during preparation");
     const key = JSON.stringify(identity);
     let existing = grants.get(key);
     if (!existing) {
@@ -362,24 +366,28 @@ export function createKernelProcessService(options: Options) {
           owningWorkspace: identity.workspaceId, executionWorkspace: identity.executionWorkspaceId,
           capabilities: ["storage.read", "storage.write", "process", "process.maintenance"], pathScopes: [""],
         });
+        if (generation !== originalGeneration) throw new Error("Native process authority changed during preparation");
         const client = options.client.scoped(grant);
         const root = await client.fileRootRegister({ workspaceId: identity.workspaceId, executionWorkspaceId: identity.executionWorkspaceId, canonicalRoot: identity.canonicalRoot });
+        if (generation !== originalGeneration) throw new Error("Native process authority changed during preparation");
         if (typeof root.rootId !== "string") throw new Error("Native process root registration returned no identity");
         return { grant, client, rootId: root.rootId, identity, launches: new Set<symbol>(), retiring: false };
       })();
       grants.set(key, existing);
-      void existing.catch(() => { grants.delete(key); });
+      const pending = existing;
+      void pending.catch(() => { if (grants.get(key) === pending) grants.delete(key); });
     }
     return existing;
   };
   const launch = async (command: string, args: readonly string[], input: SpawnOptions, mode: "pipe" | "pty", cols = 80, rows = 24, admission?: ManagedProcessAdmission): Promise<KernelManagedProcess> => {
+    const originalGeneration = generation;
     input.signal?.throwIfAborted();
     if (stopping || !options.client.isReady) throw new Error("Native process authority is unavailable or stopping");
     if (typeof input.cwd !== "string" || !path.isAbsolute(input.cwd)) throw new Error("Native process launch requires an admitted absolute cwd");
     if (input.shell || input.detached || input.uid !== undefined || input.gid !== undefined) throw new Error("Native process launch does not accept an alternate shell, detached identity, uid or gid");
     const canonicalCwd = await canonicalizePathIdentity(input.cwd);
     const resolved = await context(input.cwd, admission, input.signal);
-    if (stopping || resolved.retiring) throw new Error("Native process authority is stopping");
+    if (stopping || resolved.retiring || generation !== originalGeneration) throw new Error("Native process authority changed or is stopping");
     const token = Symbol('process launch');
     resolved.launches.add(token);
     try {
@@ -400,6 +408,7 @@ export function createKernelProcessService(options: Options) {
         || await canonicalizePathIdentity(current.canonicalRoot) !== resolved.identity.canonicalRoot) throw new Error('Process source changed before launch');
     }
     input.signal?.throwIfAborted();
+    if (generation !== originalGeneration) throw new Error("Native process authority changed before launch");
     const initial = await resolved.client.processSpawn(params);
     const epoch = options.client.kernelEpoch;
     if (!epoch) throw new Error("Native process epoch was lost during startup");

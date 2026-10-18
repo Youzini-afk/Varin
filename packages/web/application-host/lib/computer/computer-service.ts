@@ -697,6 +697,7 @@ export function createComputerService(options: ComputerServiceOptions): Computer
   });
   const platform = options.platform ?? localPlatform();
   let scopedClient: Promise<KernelScopedClient> | null = null;
+  let catalogEpoch = options.client.kernelEpoch;
   const lanes = new Map<string, DesktopLane>();
   const controlEpoch = randomUUID();
   let disposed = false;
@@ -713,6 +714,10 @@ export function createComputerService(options: ComputerServiceOptions): Computer
     ...(options.vmExec ? { exec: options.vmExec } : {}) });
 
   const scoped = (): Promise<KernelScopedClient> => {
+    if (catalogEpoch !== options.client.kernelEpoch) {
+      catalogEpoch = options.client.kernelEpoch;
+      scopedClient = null;
+    }
     if (scopedClient) return scopedClient;
     const creating = (async () => {
       const grant = await options.client.issueGrant({

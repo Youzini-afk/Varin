@@ -21,7 +21,7 @@ async function fixture() {
       paths: ['allowed/file'], disposition: 'reconcile', reason: 'interrupted', createdAt: 1, updatedAt: 2 }], nextCursor: null })),
     fileOperationReconcile: vi.fn(async () => ({ state: 'completed' })),
     getRecord: vi.fn(async () => null) };
-  const host = { scoped: vi.fn((_grant: KernelGrantHandle) => client), issueGrant: vi.fn(async () => { throw new Error('Grant broadening is forbidden in this path'); }) };
+  const host = { subscribeExit: () => () => {}, scoped: vi.fn((_grant: KernelGrantHandle) => client), issueGrant: vi.fn(async () => { throw new Error('Grant broadening is forbidden in this path'); }) };
   const fileStore = { captureState: vi.fn(), applyState: vi.fn(), hashFile: vi.fn(), relativePathFor: vi.fn(), verifyObject: vi.fn() } satisfies RecoveryFileStore;
   const resourceOperationGate = { run: async <T>(_resources: readonly unknown[], action: () => Promise<T>) => action() };
   const input: KernelAdmittedStorageContextInput = { grant, owningWorkspaceId: 'owner', executionWorkspaceId: 'execution',

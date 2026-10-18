@@ -175,6 +175,18 @@ const makeService = (driver?: FakeDriver, extra: Partial<ComputerServiceOptions>
 };
 
 describe("computer service (BC4)", () => {
+  it('renews the Computer catalog client after the kernel epoch changes', async () => {
+    const kernel = fakeKernel();
+    const client = { ...kernel.client, kernelEpoch: 'first', scoped: vi.fn(kernel.client.scoped) };
+    const { service } = makeService(undefined, { client: client as never });
+    await service.listArtifacts('scope');
+    await service.listArtifacts('scope');
+    expect(client.scoped).toHaveBeenCalledTimes(1);
+    client.kernelEpoch = 'second';
+    await service.listArtifacts('scope');
+    expect(client.scoped).toHaveBeenCalledTimes(2);
+    await service.dispose();
+  });
   it('pages a fixed tree without rescanning, keeps indexes addressable, and omits screenshots by default', async () => {
     const snapshot = { ...appSnapshot(), treeLines: Array.from({ length: 205 }, (_, index) => `${index} Button Item ${index}`),
       elements: Array.from({ length: 205 }, (_, index) => ({ index, name: `Item ${index}`, runtimeId: [index] })) };

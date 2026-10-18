@@ -295,7 +295,7 @@ impl KernelToolExecutor {
     ) -> ToolCompletion {
         let result = self.language_query(context, args, cancel);
         match result {
-            Ok(content) => ToolCompletion::Result { outcome: Outcome::Succeeded, effect: Effect::None, content: content.into() },
+            Ok(content) => language_completion(content),
             Err(error) => ToolCompletion::Result { outcome: if cancel.is_cancelled() { Outcome::Cancelled } else { Outcome::Failed }, effect: Effect::None,
                 content: json!({"status":if cancel.is_cancelled() {"cancelled"} else {"unavailable"},"error":error.code,"message":error.message}).into() },
         }
@@ -761,9 +761,29 @@ impl LanguageProjection<'_> {
     }
 }
 
+fn language_completion(content: Value) -> ToolCompletion {
+    let outcome = match content["status"].as_str() {
+        Some("unavailable" | "unsupported" | "stale") => Outcome::Failed,
+        Some("cancelled") => Outcome::Cancelled,
+        _ => Outcome::Succeeded,
+    };
+    ToolCompletion::Result { outcome, effect: Effect::None, content: content.into() }
+}
+
 #[cfg(test)]
 mod output_range_tests {
     use super::*;
+
+    #[test]
+    fn language_failure_preserves_the_query_diagnostic() {
+        let content=json!({"status":"unavailable","message":"Language request timed out","items":[]});
+        let ToolCompletion::Result {outcome,effect,content:output}=language_completion(content.clone()) else {panic!("query result")};
+        assert_eq!(outcome,Outcome::Failed);
+        assert_eq!(effect,Effect::None);
+        assert_eq!(output.data,content);
+        let ToolCompletion::Result {outcome,..}=language_completion(json!({"status":"pending","diagnosticVerification":"unversioned","items":[]})) else {panic!("query result")};
+        assert_eq!(outcome,Outcome::Succeeded);
+    }
 
     #[test]
     fn normalizes_lsp_output_columns_on_their_own_utf16_lines_without_accepting_invalid_ranges() {

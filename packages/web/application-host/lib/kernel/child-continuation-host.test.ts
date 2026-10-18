@@ -153,7 +153,7 @@ it.each(['user_continuation', 'message_request', 'followup', 'calendar'] as cons
     releaseMcpResourceSource: vi.fn(async () => {}),
     failChild: vi.fn(async () => structuredClone(child)),
   };
-  const kernel = { reconcileChildToolHandoffs() {}, claimChildSource: vi.fn(), releaseChildToolHandoff: vi.fn(),
+  const kernel = { subscribeExit: () => () => {}, reconcileChildToolHandoffs() {}, claimChildSource: vi.fn(), releaseChildToolHandoff: vi.fn(),
     issueGrant: vi.fn(async (input: KernelGrantIssueInput) => ({ ...input, storageIdentity: 'storage' })),
     revokeGrant: vi.fn(async () => {}), scoped: vi.fn(() => scoped) };
   const resolveWorkspaceRoot = vi.fn(async () => { throw new Error('Fixed continuation must not reopen the former live directory'); });

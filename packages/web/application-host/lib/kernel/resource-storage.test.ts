@@ -17,6 +17,7 @@ function fixture() {
     getBlob: vi.fn(async () => ({ bytesBase64: Buffer.from('BODY').toString('base64'), nextOffset: 4, eof: true })),
   };
   const client = {
+    subscribeExit: () => () => {},
     issueGrant: vi.fn(async (input: KernelGrantIssueInput) => ({ ...input, storageIdentity: 'storage' })),
     revokeGrant: vi.fn(async () => undefined), scoped: vi.fn(() => scoped),
   };
@@ -96,6 +97,7 @@ describe('frozen resource Storage admission', () => {
       writeRevision: 8, headRevision: 7, captureScopes: [], draftBasePaths: [], createdAt: 1, updatedAt: 2, nextCursor: null };
     const denied = () => { throw Object.assign(new Error('outside readonly scope'), { code: 'unauthorized' }); };
     const client = {
+      subscribeExit: () => () => {},
       issueGrant: vi.fn(async (input: KernelGrantIssueInput) => { grants.push(input); return input; }),
       revokeGrant: vi.fn(async (id: string) => { released.push(id); }),
       scoped: (grant: KernelGrantIssueInput) => {

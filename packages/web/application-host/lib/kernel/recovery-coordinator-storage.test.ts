@@ -8,7 +8,7 @@ it('keeps remote-only recovery metadata on the existing Host store without admit
   const issueGrant = vi.fn(async (input: unknown) => ({ ...input as object, hostId: 'coordinator-host', kernelEpoch: 'epoch' } as unknown as KernelGrantHandle));
   const resolveWorkspaceRoot = vi.fn(async () => { throw new Error('No local workspace is registered'); });
   const resolveActor = vi.fn(async () => { throw new Error('No session actor exists'); });
-  const adapter = new KernelStorageAdapter({ client: { issueGrant, scoped: () => scoped } as unknown as KernelClient,
+  const adapter = new KernelStorageAdapter({ client: { issueGrant, scoped: () => scoped, subscribeExit: () => () => {} } as unknown as KernelClient,
     hostId: 'coordinator-host', storageRoot: '/host-owned-store', recoveryCoordinatorWorkspace: workspaceId,
     resolveWorkspaceRoot, resolveActor });
   const context = await adapter.context(workspaceId, 'recovery-maintenance');

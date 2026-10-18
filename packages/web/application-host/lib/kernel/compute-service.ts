@@ -24,9 +24,16 @@ const relative = (value: string): string => {
 export function createKernelComputeService(options: KernelComputeServiceOptions) {
   const contexts = new Map<string, Promise<Context>>();
   const operations = new Set<Promise<unknown>>();
-  const lifecycle = new AbortController();
+  let lifecycle = new AbortController();
   let disposed = false;
-  const unregister = options.client.subscribeExit((error) => lifecycle.abort(error));
+  let grammarGrant: Promise<KernelGrantHandle> | undefined;
+  const grammarRecipes = new Map<string, Promise<string>>();
+  const unregister = options.client.subscribeExit((error) => {
+    const previous = lifecycle;
+    lifecycle = new AbortController();
+    contexts.clear(); grammarGrant = undefined; grammarRecipes.clear();
+    previous.abort(error);
+  });
   const track = <T>(work: Promise<T>): Promise<T> => {
     operations.add(work);
     void work.then(() => operations.delete(work), () => operations.delete(work));
@@ -39,20 +46,23 @@ export function createKernelComputeService(options: KernelComputeServiceOptions)
     const key = JSON.stringify([identity, scopes]);
     const existing = contexts.get(key);
     if (existing) return existing;
+    const signal = lifecycle.signal;
     const creating = (async (): Promise<Context> => {
       const grant = await options.client.issueGrant({
         grantId: "compute-host:" + randomUUID(), owningWorkspace: identity.workspaceId,
         executionWorkspace: "executionWorkspaceId" in identity ? identity.executionWorkspaceId : identity.workspaceId,
         capabilities: ["storage.read", "storage.write"], pathScopes: scopes.map(relative),
       });
+      signal.throwIfAborted();
       const client = options.client.scoped(grant);
       if (!("canonicalRoot" in identity)) return { client, grant, workspaceId: identity.workspaceId };
       try {
         const registered = await client.fileRootRegister({ workspaceId: identity.workspaceId, executionWorkspaceId: identity.executionWorkspaceId, canonicalRoot: identity.canonicalRoot });
+        signal.throwIfAborted();
         if (typeof registered.rootId !== "string") throw new Error("Native computation root registration returned no identity");
         return { client, grant, workspaceId: identity.workspaceId, rootId: registered.rootId, canonicalRoot: identity.canonicalRoot };
       } catch (error) {
-        await options.client.revokeGrant(grant.grantId);
+        if (!signal.aborted) await options.client.revokeGrant(grant.grantId);
         throw error;
       }
     })();
@@ -83,19 +93,26 @@ export function createKernelComputeService(options: KernelComputeServiceOptions)
       }
     }
   };
-  let grammarGrant: Promise<KernelGrantHandle> | undefined;
-  const grammarRecipes = new Map<string, Promise<string>>();
   return {
     async registerGrammar(recipe: KernelComputeGrammarParams): Promise<string> {
-      lifecycle.signal.throwIfAborted();
+      if (disposed) throw new Error("Native computation service is disposed");
+      const signal = lifecycle.signal;
+      signal.throwIfAborted();
       // The digest and queries identify an immutable recipe for this kernel
       // lifetime. A repository scan must not reread the same wasm per file.
       const key = JSON.stringify(recipe);
       const existing = grammarRecipes.get(key);
       if (existing) return existing;
       const registering = track((async () => {
-        grammarGrant ??= options.client.issueGrant({ grantId: "compute-grammar:" + randomUUID(), capabilities: ["compute.grammar"], pathScopes: [] });
-        const registered = await options.client.scoped(await grammarGrant).computeGrammarRegister(recipe);
+        if (!grammarGrant) {
+          const pending = options.client.issueGrant({ grantId: "compute-grammar:" + randomUUID(), capabilities: ["compute.grammar"], pathScopes: [] });
+          grammarGrant = pending;
+          void pending.catch(() => { if (grammarGrant === pending) grammarGrant = undefined; });
+        }
+        const grant = await grammarGrant;
+        signal.throwIfAborted();
+        const registered = await options.client.scoped(grant).computeGrammarRegister(recipe);
+        signal.throwIfAborted();
         if (typeof registered.recipeId !== "string") throw new Error("Native grammar registration returned no recipe identity");
         return registered.recipeId;
       })());

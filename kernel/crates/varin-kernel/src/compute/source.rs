@@ -30,7 +30,13 @@ fn revision_from_object_hash(hash:&str)->Result<String>{
 fn read_capture(mut file:File,expected:Option<&str>,shared:&Shared)->Result<CapturedFile>{
     let before=file.metadata().map_err(|e|e.to_string())?;
     let mut result=Vec::new();let mut buffer=[0u8;65536];let mut digest=Sha256::new();
-    loop {shared.check()?;let n=file.read(&mut buffer).map_err(|e|e.to_string())?;if n==0{break;}digest.update(&buffer[..n]);result.extend_from_slice(&buffer[..n]);}
+    shared.check()?;
+    // Capture needs the exact bytes, but allocation failure must fail this read,
+    // not abort the process that also owns conversations and tool execution.
+    let length=usize::try_from(before.len()).map_err(|_|"File length exceeds addressable memory")?;
+    reserve_capture(&mut result,length)?;
+    loop {shared.check()?;let n=file.read(&mut buffer).map_err(|e|e.to_string())?;if n==0{break;}
+        reserve_capture(&mut result,n)?;digest.update(&buffer[..n]);result.extend_from_slice(&buffer[..n]);}
     let after=file.metadata().map_err(|e|e.to_string())?;
     if before.len()!=after.len()||before.modified().ok()!=after.modified().ok()||after.len()!=result.len() as u64{return Err("File changed during native capture; retry the source".into());}
     // One digest of the bytes actually captured supplies both identities. Live
@@ -42,6 +48,9 @@ fn read_capture(mut file:File,expected:Option<&str>,shared:&Shared)->Result<Capt
     let metadata=SourceMetadata{byte_length:after.len(),modified_time_ns:after.modified().ok()
         .and_then(|time|time.duration_since(std::time::UNIX_EPOCH).ok()).map(|time|time.as_nanos().to_string())};
     Ok(CapturedFile{bytes:result,metadata,object_hash,revision})
+}
+fn reserve_capture(bytes:&mut Vec<u8>,additional:usize)->Result<()> {
+    bytes.try_reserve_exact(additional).map_err(|_|"Insufficient memory to capture the file; retry when memory is available".to_string())
 }
 struct TreeReader {conn:Connection}
 impl TreeReader {
@@ -319,6 +328,13 @@ mod tests {
     struct TestFile(PathBuf);
     impl Drop for TestFile {
         fn drop(&mut self) { let _ = fs::remove_file(&self.0); }
+    }
+
+    #[test]
+    fn capture_allocation_failure_preserves_existing_bytes() {
+        let mut bytes=vec![1,2,3];
+        assert!(reserve_capture(&mut bytes,usize::MAX).unwrap_err().contains("Insufficient memory"));
+        assert_eq!(bytes,[1,2,3]);
     }
 
     #[test]

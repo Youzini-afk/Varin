@@ -1707,6 +1707,7 @@ export class KernelStorageAdapter {
   readonly client: KernelClient;
   private readonly options: KernelStorageAdapterOptions;
   private readonly grants = new Map<string, Promise<KernelGrantHandle>>();
+  private readonly unregisterExit: () => void;
   private boundFileStore: RecoveryFileStore | undefined;
   private boundFileResources: HostFileResourceBackend | undefined;
   private fileRootResolver: KernelFileRootResolver | undefined;
@@ -1715,6 +1716,7 @@ export class KernelStorageAdapter {
   constructor(options: KernelStorageAdapterOptions) {
     this.options = options;
     this.client = options.client;
+    this.unregisterExit = this.client.subscribeExit(() => this.grants.clear());
     this.boundFileStore = options.fileStore;
     this.fileStoreProxy = {
       applyState: (...args) => this.boundFileStore?.applyState(...args) ?? Promise.reject(new Error("Kernel recovery file store is not bound")),
@@ -1827,22 +1829,23 @@ export class KernelStorageAdapter {
     const actorJson = JSON.stringify(Object.fromEntries(Object.entries(actor)
       .filter(([field, value]) => field !== "capabilities" && value !== undefined).sort(([left], [right]) => left.localeCompare(right))));
     const key = JSON.stringify({ workspaceId, actorJson, capabilities });
-    const existing = this.grants.get(key); if (existing) return existing;
-    const grant = (async () => {
+    return this.cachedGrant(key, async () => {
       // The cache reuses a live grant. A later adapter lifetime needs a new
       // identity: the previous grant may have been explicitly revoked on disposal.
       return this.client.issueGrant({ grantId: `product:${this.options.hostId}:${randomUUID()}`, ...actor, capabilities, pathScopes: actor.pathScopes ?? [""] });
-    })();
-    this.grants.set(key, grant); return grant;
+    });
+  }
+  private cachedGrant(key: string, create: () => Promise<KernelGrantHandle>): Promise<KernelGrantHandle> {
+    const existing = this.grants.get(key); if (existing) return existing;
+    const pending = create();
+    this.grants.set(key, pending);
+    void pending.catch(() => { if (this.grants.get(key) === pending) this.grants.delete(key); });
+    return pending;
   }
   /** Original journal metadata survives a missing physical Source. No physical write capability. */
   async recoveryMetadataClient(workspaceId: string): Promise<Pick<KernelScopedClient, "recoveryOperationGet" | "recoveryOperationList">> {
     const key = JSON.stringify({workspaceId,purpose:"recovery-metadata"});
-    let grant = this.grants.get(key);
-    if (!grant) {
-      grant = this.client.issueGrant({grantId:`product:${this.options.hostId}:${randomUUID()}`,owningWorkspace:workspaceId,executionWorkspace:workspaceId,pathScopes:[],capabilities:["storage.read","recovery","recovery.maintenance"]});
-      this.grants.set(key,grant);
-    }
+    const grant = this.cachedGrant(key, () => this.client.issueGrant({grantId:`product:${this.options.hostId}:${randomUUID()}`,owningWorkspace:workspaceId,executionWorkspace:workspaceId,pathScopes:[],capabilities:["storage.read","recovery","recovery.maintenance"]}));
     return this.client.scoped(await grant);
   }
 
@@ -1852,13 +1855,9 @@ export class KernelStorageAdapter {
         throw new Error('Recovery coordination storage does not admit a file/session actor');
       }
       const key = JSON.stringify({ workspaceId, purpose: 'recovery-coordinator' });
-      let grant = this.grants.get(key);
-      if (!grant) {
-        grant = this.client.issueGrant({ grantId: `product:${this.options.hostId}:${randomUUID()}`,
+      const grant = this.cachedGrant(key, () => this.client.issueGrant({ grantId: `product:${this.options.hostId}:${randomUUID()}`,
           owningWorkspace: workspaceId, executionWorkspace: workspaceId, pathScopes: [],
-          capabilities: ['storage.read', 'storage.write', 'recovery', 'recovery.maintenance'] });
-        this.grants.set(key, grant);
-      }
+          capabilities: ['storage.read', 'storage.write', 'recovery', 'recovery.maintenance'] }));
       return this.contextUsingGrant(await grant, { authorityId: this.options.hostId, workspaceId,
         canonicalRoot: '', filesystemProfile: 'metadata' }, undefined, true);
     }
@@ -2101,6 +2100,7 @@ export class KernelStorageAdapter {
     };
   }
   async dispose(): Promise<void> {
+    this.unregisterExit();
     const grants = await Promise.allSettled([...this.grants.values()].map(async (grant) => this.client.revokeGrant((await grant).grantId)));
     this.grants.clear();
     const failures = grants.filter((result): result is PromiseRejectedResult => result.status === "rejected");
