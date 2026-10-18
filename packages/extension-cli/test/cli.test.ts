@@ -1,8 +1,9 @@
 import { spawn } from "node:child_process";
-import { mkdtemp, readdir, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readdir, readFile, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { dirname, join } from "node:path";
 import { after, test } from "node:test";
+import { fileURLToPath } from "node:url";
 import assert from "node:assert/strict";
 import { initProject } from "../src/init.js";
 import { buildProject } from "../src/build.js";
@@ -77,8 +78,14 @@ test("init writes a standalone managed Surface template and refuses overwrite", 
 
 test("every generated template builds and passes its published author lifecycle", async (t) => {
   const root = await temporaryDirectory();
-  // Resolve the already-installed author SDK just as an installed generated project would.
-  await symlink(resolve(import.meta.dirname, "../node_modules"), join(root, "node_modules"), "junction");
+  // Install the declared author dependencies from their actual public entries;
+  // their placement in the workspace node_modules is an installer detail.
+  const authorDependencies = join(root, "node_modules", "@varin");
+  await mkdir(authorDependencies, { recursive: true });
+  for (const name of ["extension-contract", "extension-sdk"]) {
+    const entry = await realpath(fileURLToPath(import.meta.resolve(`@varin/${name}`)));
+    await symlink(dirname(dirname(entry)), join(authorDependencies, name), "junction");
+  }
   for (const template of INIT_TEMPLATES) {
     await t.test(template, async () => {
       const project = await initProject({
@@ -330,7 +337,6 @@ test("check reports when validation errors for shell and transition-scene", asyn
 });
 
 const mkdirSource = async (root: string): Promise<void> => {
-  const { mkdir } = await import("node:fs/promises");
   await mkdir(join(root, "src"), { recursive: true });
   await writeFile(join(root, "src", "host.js"), `export default { activate(context) { context.effect(() => undefined); } };\n`);
   await writeFile(join(root, "src", "main.js"), `export default { activate(context) { context.onDispose(() => undefined); } };\n`);
