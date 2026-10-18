@@ -17,6 +17,28 @@ use std::{
 use varin_runtime::execution::*;
 use varin_runtime::{Catalog, RunState, SubmitInput};
 
+struct ResourceActor {
+    requests: Option<mpsc::Sender<crate::tools::ResourceCall>>,
+    worker: Option<std::thread::JoinHandle<()>>,
+}
+impl ResourceActor {
+    fn send(&self, request: crate::tools::ResourceCall) -> Result<(), KernelError> {
+        self.requests
+            .as_ref()
+            .unwrap()
+            .send(request)
+            .map_err(|_| KernelError::Storage("fixture resource owner stopped".into()))
+    }
+}
+impl Drop for ResourceActor {
+    fn drop(&mut self) {
+        self.requests.take();
+        if let Some(worker) = self.worker.take() {
+            worker.join().unwrap();
+        }
+    }
+}
+
 #[derive(Clone)]
 struct Owner {
     storage: Arc<Mutex<Storage>>,
@@ -49,19 +71,29 @@ impl Owner {
                 .serve_interaction(command, epoch, host, generation);
             Ok(())
         });
-        let actor = storage.clone();
-        let resources = KernelResourceClient::new(
-            move |request| {
+        let actor_storage = storage.clone();
+        let (requests, queued) = mpsc::channel::<crate::tools::ResourceCall>();
+        // Match the production Storage actor's lifetime. On Linux the guardian's
+        // parent-death signal follows its creating thread, not the whole process;
+        // a per-RPC thread would stop the process as soon as spawn returned.
+        let worker = std::thread::spawn(move || {
+            while let Ok(request) = queued.recv() {
                 let result = crate::tools::serve_resource(
-                    &mut actor.lock().unwrap(),
+                    &mut actor_storage.lock().unwrap(),
                     epoch,
                     host,
                     generation,
                     &request,
                 );
                 let _ = request.reply.send(result);
-                Ok(())
-            },
+            }
+        });
+        let actor = ResourceActor {
+            requests: Some(requests),
+            worker: Some(worker),
+        };
+        let resources = KernelResourceClient::new(
+            move |request| actor.send(request),
             |_| Ok(()),
             controls,
         )
