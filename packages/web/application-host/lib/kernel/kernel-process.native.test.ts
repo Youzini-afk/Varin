@@ -254,17 +254,24 @@ it("a failed native spawn rejects the Host launch without leaving a live writer"
 it("kernel death invalidates the Host handle without manufacturing an exit event", async () => {
   const f = await fixture();
   const service = createKernelProcessService({ client: f.host, resolveIdentity: async () => ({ workspaceId: "ws", executionWorkspaceId: "ws", canonicalRoot: f.workspace }) });
+  let kernelFailure: Error | undefined;
+  const unsubscribe = f.host.subscribeExit(error => { kernelFailure = error; });
   try {
     const child = await service.spawn(process.execPath, ["-e", "setInterval(()=>{},1000)"], { cwd: path.join(f.workspace, "child") });
     child.stdout.resume(); child.stderr.resume();
     let exited = false;
     child.once("exit", () => { exited = true; });
-    f.kernelChild.kill("SIGKILL");
-    await assert.rejects(child.completion, /kernel|epoch|Rust|pipe/i);
+    assert.equal(f.kernelChild.kill("SIGKILL"), true);
+    await assert.rejects(child.completion, (error: unknown) => {
+      assert.ok(kernelFailure instanceof Error, "the kernel client must report the disconnection");
+      assert.equal(error, kernelFailure, "the handle must reject with the actual kernel failure");
+      return true;
+    });
+    assert.equal(f.host.isReady, false);
     assert.equal(exited, false);
     assert.equal(child.snapshot.status, "unknown");
     assert.equal(child.snapshot.writerActive, true);
-  } finally { await service.dispose(); }
+  } finally { unsubscribe(); await service.dispose(); }
 }, 30_000);
 
 
