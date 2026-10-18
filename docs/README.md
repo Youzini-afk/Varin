@@ -19,6 +19,10 @@
 | 仍需真实环境证据的运行时场景 | [运行时验收](runtime-acceptance.md) |
 | 部署、恢复、扩展开发和依赖维护 | [操作指南](ops/README.md) |
 
+## 待实施设计
+
+- [Agent 工作侧重与编程协作](design/agent-modes-and-collaboration.md)：三条工作线的方向、实现与验证解耦、文件交换恢复、角色开关及提示词。
+
 ## 源码旁的说明
 
 源码旁的 README / DOCUMENTATION 保留模块特有的不变量和实际入口：
