@@ -64,10 +64,10 @@ struct Call {
     request: Request,
 }
 fn parse(call: &ToolCall, frozen: &FrozenToolContext) -> Result<Request, ExecutionError> {
-    if !disclosure::schemas().iter().any(|schema| {
+    if !frozen.tools.iter().any(|schema| {
         schema.name == call.name
             && schema.version == call.schema_version
-            && frozen.tools.contains(schema)
+            && disclosure::is_gateway(schema)
     }) {
         return Err(error("disclosure interface is not bound"));
     }
@@ -179,7 +179,7 @@ impl Call {
         if let Some(name) = &args.name {
             return Ok(match tools.iter().find(|tool| &tool.name == name) {
                 Some(tool) => {
-                    let mut value = json!({"status":"available","reference":{"name":tool.name,"version":tool.version},
+                    let mut value = json!({"status":"available","name":tool.name,"reference":{"name":tool.name,"version":tool.version},
                         "namespace":disclosure::namespace(&tool.name),"description":tool.description,"parameters":tool.schema,
                         "outputSchema":tool.output_schema,"metadata":tool.metadata});
                     if name == "dispatch" {
@@ -193,7 +193,7 @@ impl Call {
         if let Some(group) = &args.namespace {
             let selected = tools
                 .iter()
-                .filter(|tool| disclosure::namespace(&tool.name) == group)
+                .filter(|tool| disclosure::namespace(&tool.name) == Some(group.as_str()))
                 .map(|tool| {
                     self.describe(&Describe {
                         namespace: None,
@@ -208,7 +208,7 @@ impl Call {
         }
         Ok(
             json!({"groups":disclosure::GROUPS.iter().filter_map(|(id, description)| {
-            let count = tools.iter().filter(|tool| disclosure::namespace(&tool.name) == *id).count();
+            let count = tools.iter().filter(|tool| disclosure::namespace(&tool.name) == Some(*id)).count();
             (count > 0).then(|| json!({"namespace":id,"description":description,"tools":count}))
         }).collect::<Vec<_>>()}),
         )
@@ -229,15 +229,11 @@ impl Call {
     }
     fn run(&self, context: &ToolExecutionContext) -> Result<ToolCompletion, ExecutionError> {
         match &self.request {
-            Request::Describe(args) => {
-                let mut description = self.describe(args)?;
-                description["invocation"] = json!("Call tools directly by reference.name with the listed parameters, or use tool_invoke with reference and arguments. Both use the original validation and permissions.");
-                Ok(ToolCompletion::Result {
-                    outcome: Outcome::Succeeded,
-                    effect: Effect::None,
-                    content: description.into(),
-                })
-            }
+            Request::Describe(args) => Ok(ToolCompletion::Result {
+                outcome: Outcome::Succeeded,
+                effect: Effect::None,
+                content: self.describe(args)?.into(),
+            }),
             Request::Invoke(args) => {
                 let nested = self.owner.catalog.lock().map_err(error)?.nested_tools();
                 let receipt = nested.invoke(

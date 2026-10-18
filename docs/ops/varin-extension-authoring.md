@@ -871,7 +871,8 @@ credential for each run, and npm attaches provenance automatically.
 
 ## Runtime contract discovery
 
-Callable-tool documentation uses native `tool_describe`: `{}` lists available namespaces,
+Common tools are declared directly, including common capabilities implemented by extensions.
+Additional tool documentation uses native `tool_describe`: `{}` lists available deferred namespaces,
 `{ "namespace": "development" }` reads a capability group, and `{ "name": "runtime_contract" }`
 reads one exact tool. Results include parameters and a version reference. The model may call the
 tool directly by name with those parameters, or use `tool_invoke({ reference, arguments })`.

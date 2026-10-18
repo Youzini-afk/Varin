@@ -226,7 +226,7 @@ export function createResourceManagement(deps: ResourceManagementDependencies) {
       return withCurrentScope(target, async scope => {
         const result = await authority.preview(scope, signal);
         if (result.status !== 'ready') throw new ResourceManagementFailure(result.status === 'invalid' ? 422 : result.status === 'denied' ? 403 : 503, `resource-${result.status}`, result.reason);
-        return { original: agentSystemSections(result.resources, 'main'), ...(target.projectId ? { projectId: target.projectId } : {}) };
+        return { original: agentSystemSections(result.resources), ...(target.projectId ? { projectId: target.projectId } : {}) };
       }, signal);
     },
     async toolCatalog(target: ResourceManagementTarget, signal?: AbortSignal): Promise<AgentToolPrompt[]> {

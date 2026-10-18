@@ -84,12 +84,20 @@ encoding/hashing and media work remain. This is local reuse, not remote incremen
 
 Tool parameter projection is shared by the built-in protocols in [tool_schema.rs](tool_schema.rs).
 The common input projection first selects the fixed model interface when native disclosure
-gateways are present. Deferred schemas stay in the original request binding for execution and
+gateways are present. Common file, code, execution, collaboration, conversation, web and image
+tools are declared directly, including tools implemented by extensions. The disclosure index
+contains only deferred categories; exact-name documentation reads can also describe a common tool.
+MCP keeps its owner's exposure selection: admitted MCP entrypoints and direct tool declarations
+remain visible. Deferred server tools are discovered through `mcp_discover` and called through
+`mcp_call`, without a second discovery layer or adding declarations after discovery.
+Deferred schemas stay in the original request binding for execution and
 enter conversation history only as `tool_describe` results. A model may call a deferred tool
 directly by name or use `tool_invoke`; both resolve against the complete frozen request directory
 and retain the target's original validation and authorization. Built-in and brokered adapters see
 the same projection. Hidden catalog changes do not change the provider tools or encoder reuse
-key; the original generation and endpoint pins remain authoritative. Auxiliary jobs without the
+key; the original generation and endpoint pins remain authoritative. Gateway recognition uses
+its callable contract, so a retained description from before a wording change keeps the projection
+active and preserves its original text. Auxiliary jobs without the
 gateways retain their explicitly selected tool interface.
 Object unions and local references receive an explicit object root; constants become typed singleton
 enums. Alternatives, definitions, required fields and ordinary example/default data stay intact.

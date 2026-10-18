@@ -619,22 +619,22 @@ fn disclosure_accepts_mixed_direct_chat_calls_without_declaring_deferred_tools()
     let provider = chat::ChatProvider::new(chat_connection(vec![json!({
         "id":"mixed", "choices":[{"index":0,"finish_reason":"tool_calls","delta":{"role":"assistant","tool_calls":[
             {"index":0,"id":"read","type":"function","function":{"name":"process_read","arguments":"{\"processId\":\"original\"}"}},
-            {"index":1,"id":"resize","type":"function","function":{"name":"process_resize","arguments":"{\"processId\":\"original\",\"cols\":100,\"rows\":30}"}}
+            {"index":1,"id":"settings","type":"function","function":{"name":"settings_search","arguments":"{\"query\":\"theme\"}"}}
         ]}}]
     })], true));
     let mut request = view(chat::FAMILY);
     let mut read = request.binding.tools.remove(0);
     read.name = "process_read".into();
-    let mut resize = read.clone();
-    resize.name = "process_resize".into();
-    resize.version = "resize-v2".into();
+    let mut deferred = read.clone();
+    deferred.name = "settings_search".into();
+    deferred.version = "settings-v2".into();
     request.binding.tools = crate::tool_disclosure::schemas();
-    request.binding.tools.extend([read, resize]);
+    request.binding.tools.extend([read, deferred]);
     let snapshot = RequestSnapshot { serialized: provider.serialize(&request, None).unwrap(), view: request };
     let declarations = snapshot.serialized.to_value()["tools"].clone();
     let names = declarations.as_array().unwrap().iter().map(|tool| tool["function"]["name"].as_str().unwrap()).collect::<Vec<_>>();
     assert!(names.contains(&"process_read"));
-    assert!(!names.contains(&"process_resize"));
+    assert!(!names.contains(&"settings_search"));
     let mut items = Vec::new();
     assert_eq!(provider.generate(&snapshot, &CancellationToken::default(), &mut |event| {
         if let ProviderEvent::ItemCompleted { item } = event { items.push(item); }
@@ -642,11 +642,11 @@ fn disclosure_accepts_mixed_direct_chat_calls_without_declaring_deferred_tools()
     }).unwrap(), FinishReason::ToolCalls);
     let calls = crate::execution::validate_model_items(&items, &snapshot).unwrap();
     assert_eq!(calls.len(), 2);
-    assert_eq!(calls[1].name, "process_resize");
-    assert_eq!(calls[1].schema_version, "resize-v2");
-    assert_eq!(calls[1].arguments, json!({"processId":"original","cols":100,"rows":30}));
+    assert_eq!(calls[1].name, "settings_search");
+    assert_eq!(calls[1].schema_version, "settings-v2");
+    assert_eq!(calls[1].arguments, json!({"query":"theme"}));
     let mut unavailable = snapshot.clone();
-    unavailable.view.binding.tools.retain(|tool| tool.name != "process_resize");
+    unavailable.view.binding.tools.retain(|tool| tool.name != "settings_search");
     assert_eq!(crate::execution::validate_model_items(&items, &unavailable).unwrap_err().code, "unknown_tool_schema");
     unavailable.view.binding.tools.push(ToolSchema { version: "different".into(), ..snapshot.view.binding.tools.last().unwrap().clone() });
     assert_eq!(crate::execution::validate_model_items(&items, &unavailable).unwrap_err().code, "unknown_tool_schema");
@@ -1677,6 +1677,22 @@ fn disclosure_keeps_every_protocol_tool_prefix_stable_when_hidden_capabilities_c
         let mut hidden = request.binding.tools.remove(0);
         hidden.name = "computer_browser".into();
         request.binding.tools = crate::tool_disclosure::schemas();
+        // A retained description keeps its original bytes across a prompt wording update.
+        request.binding.tools[0].description = "Previously saved discovery instructions".into();
+        let common_names = ["file_read", "code_retrieval", "process_resize", "dispatch", "memory", "websearch", "image_generate", "image_edit",
+            "mcp_discover", "mcp_call", "mcp_read_resource", "mcp_task_get", "mcp__fixture__query"];
+        for name in common_names {
+            let mut common = hidden.clone();
+            common.name = name.into();
+            if matches!(name, "code_retrieval" | "websearch" | "image_generate" | "image_edit") {
+                common.metadata = Some(ToolMetadata {
+                    service_id: format!("fixture.{name}"), service_version: 1,
+                    completion: RegisteredToolCompletion::Result, lifetime: None,
+                    operation: ToolOperation::Read, examples: None, source: None,
+                });
+            }
+            request.binding.tools.push(common);
+        }
         request.binding.tools.push(hidden.clone());
         let original = request.binding.tools.clone();
         let mut reuse = RequestCompileReuse::new();
@@ -1695,8 +1711,11 @@ fn disclosure_keeps_every_protocol_tool_prefix_stable_when_hidden_capabilities_c
         request.binding.tools.pop();
         reuse.prepare(&request, 1, None, 1, None);
         assert_eq!(first, provider.serialize(&request, Some(&mut reuse)).unwrap().to_value(), "{family}: unavailable capabilities do not rewrite the prefix");
-        assert_eq!(original.len(), 3);
         let encoded = first.to_string();
+        for name in common_names {
+            assert!(encoded.contains(name), "{family}: common tool {name} must be declared");
+            assert_eq!(crate::tool_disclosure::namespace(name), None, "{name}: directly declared tools stay out of the deferred index");
+        }
         assert!(!encoded.contains("computer_browser"), "{family}: deferred function was serialized");
         assert!(encoded.contains(crate::tool_disclosure::DESCRIBE));
         assert!(encoded.contains(crate::tool_disclosure::INVOKE));

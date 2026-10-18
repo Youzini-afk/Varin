@@ -73,11 +73,10 @@ function adapterFixture(saved: ContextCheckpoint, prepare: ContextPreparer, chil
   return { adapter, runtime, admit, errors, active: () => structuredClone(active) };
 }
 
-it('renders selected resources once, keeps runtime safety outside SYSTEM, and exposes metadata without skill bodies', async () => {
+it('renders selected resources once and exposes skill metadata while retaining role in context', async () => {
   const f = await fixture();
   expect(f.context.effectiveSystemPrompt).toContain('SELECTED USER SYSTEM');
-  expect(f.context.effectiveSystemPrompt).toContain('Use only the tools actually provided');
-  expect(f.context.effectiveSystemPrompt).toContain('Your admitted role is main');
+  expect(f.context.personalization?.threadRole).toBe('main');
   expect(f.context.effectiveSystemPrompt).toContain('SELECTED APPEND');
   expect(f.context.effectiveSystemPrompt).toContain('USER CONTEXT');
   expect(f.context.effectiveSystemPrompt).toContain('resource_read');
@@ -100,7 +99,7 @@ it('refresh and compaction preserve frozen child instructions and resources whil
   const refreshed = await f.prepare.refresh!(saved);
   expect(refreshed.resources).toBe(saved.resources);
   expect(refreshed.personalization?.originalSections).toEqual(saved.personalization?.originalSections);
-  expect(refreshed.effectiveSystemPrompt).toContain('Use only the tools actually provided');
+  expect(refreshed.personalization?.threadRole).toBe('worker');
   expect(refreshed.effectiveSystemPrompt).toContain('PROFILE OVERRIDE');
   expect(refreshed.effectiveSystemPrompt).toContain('FROZEN NOTE');
   expect(refreshed.effectiveSystemPrompt).not.toContain('LATER LIVE SYSTEM');

@@ -18,6 +18,7 @@ impl ModelProvider for Provider {
     ) -> Result<RequestBody, ExecutionError> {
         let tools = disclosure::model_tools(&view.binding.tools).unwrap();
         assert!(!tools.iter().any(|tool| tool.name == "fixture_effect"));
+        assert!(tools.iter().any(|tool| tool.name == "ask_user"));
         Ok(json!({"tools":tools}).into())
     }
     fn generate(
@@ -27,16 +28,33 @@ impl ModelProvider for Provider {
         emit: &mut dyn FnMut(ProviderEvent) -> Result<(), ExecutionError>,
     ) -> Result<FinishReason, ModelFailure> {
         let step = self.step.fetch_add(1, Ordering::SeqCst);
+        if step == 0 {
+            emit(ProviderEvent::ItemCompleted { item: ProviderItem {
+                id: "group-index".into(), opaque: None,
+                content: Content::ToolCall { call: ToolCall {
+                    call_id: "index".into(), name: disclosure::DESCRIBE.into(),
+                    schema_version: "1".into(), arguments: json!({}),
+                } },
+            } }).unwrap();
+        }
         let content = match step {
             0 => Content::ToolCall {
                 call: ToolCall {
                     call_id: "describe".into(),
                     name: disclosure::DESCRIBE.into(),
                     schema_version: "1".into(),
-                    arguments: json!({"namespace":if self.mode == "question" {"conversation"} else {"extensions"}}),
+                    arguments: if self.mode == "question" { json!({"name":"ask_user"}) } else { json!({"namespace":"extensions"}) },
                 },
             },
             1 => {
+                let index = request.view.history.iter().find_map(|item| match &item.content {
+                    Content::ToolResult { result } if result.call_id == "index" => match &result.completion {
+                        ToolCompletion::Result { content, .. } => Some(&content.data), _ => None,
+                    }, _ => None,
+                }).unwrap();
+                assert_eq!(index["groups"].as_array().unwrap().len(), 1);
+                assert_eq!(index["groups"][0]["namespace"], "extensions");
+                assert_eq!(index["groups"][0]["tools"], 1, "common tools stay out of the deferred index");
                 let result = request
                     .view
                     .history
@@ -53,7 +71,7 @@ impl ModelProvider for Provider {
                         _ => None,
                     })
                     .expect("description is a real tool result");
-                let result = &result["tools"][0];
+                let result = if self.mode == "question" { &result } else { &result["tools"][0] };
                 assert_eq!(
                     result["parameters"]["required"],
                     json!([if self.mode == "question" {
@@ -62,6 +80,7 @@ impl ModelProvider for Provider {
                         "mode"
                     }])
                 );
+                assert_eq!(result["name"], if self.mode == "question" { "ask_user" } else { "fixture_effect" });
                 let mut reference = result["reference"].clone();
                 if self.mode == "stale" {
                     reference["version"] = json!("obsolete");

@@ -416,8 +416,7 @@ fn selected_child_memory_and_plan_execute_through_both_origins_and_keep_report_s
                 .unwrap();
             assert_eq!(
                 op.intent["origin"]["kind"],
-                if model && varin_runtime::tool_disclosure::enabled(&f.original.tools) { "nested_call" }
-                else if model { "model_step" } else { "policy_action" }
+                if model { "model_step" } else { "policy_action" }
             );
             assert_eq!(op.intent["origin"], query["origin"]["toolOrigin"]);
             let applied = query["arguments"]["items"].as_array().unwrap().len() == 1;

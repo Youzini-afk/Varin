@@ -100,7 +100,7 @@ export function createThreadContext(owners: ContextOwners): ContextPreparer {
         revision: configurationDigest === basis.configurationDigest ? basis.revision : catalog.revision, ...(composition ? { contextComposition: composition } : {}) },
     };
   };
-  const sections = (snapshot: PreparedAgentResources) => agentSystemSections(snapshot, snapshot.scope.threadRole);
+  const sections = (snapshot: PreparedAgentResources) => agentSystemSections(snapshot);
   const sources = (snapshot: PreparedAgentResources): string[] => [
     `varin:${snapshot.scope.mode}-${snapshot.scope.threadRole}:v1`, snapshot.id,
     ...[snapshot.system, snapshot.appendSystem, ...snapshot.instructions].filter(entry => entry !== null)

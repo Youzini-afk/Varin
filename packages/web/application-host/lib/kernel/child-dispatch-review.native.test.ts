@@ -149,8 +149,8 @@ async function fixture(reply: (request: RecordedRequest, index: number) => void 
     const personalization = createAgentPersonalization({ client: kernel,
       context: async () => ({ bot: false, projectId }) });
     const resources = resourceScopeFixture(root, workingStates, documents, undefined, (input, consume) => storage.withResourceRead(input, consume));
-    const originalContext = createThreadContext({ personalization, resources,
-      projectForWorkspace: async () => projectId });
+    const originalContext = identifyFixtureContext(createThreadContext({ personalization, resources,
+      projectForWorkspace: async () => projectId }));
     const prepareContext = options.context?.(originalContext) ?? originalContext;
     const memoryQueries: MemoryQuery[] = [];
     const memoryOwner = createMemoryOwner({ personalization, prepareContext });
@@ -252,8 +252,25 @@ async function fixture(reply: (request: RecordedRequest, index: number) => void 
 
 
 const dispatch = { task: 'CHILD_TASK: inspect source.txt and send a report', workMode: 'read_only', tools: ['file_read'] };
-// Normal children may themselves delegate; identify the admitted role from the actual context.
-const isParent = (body: Record<string, unknown>) => !JSON.stringify(body.input ?? body.system).includes('Your admitted role is worker');
+// The fake provider distinguishes actors using fixture metadata, independently of product prose.
+const isParent = (body: Record<string, unknown>) => !JSON.stringify(body.input ?? body.system).includes('<fixture_role>worker</fixture_role>');
+function identifyFixtureContext(original: ContextPreparer): ContextPreparer {
+  type Context = Awaited<ReturnType<ContextPreparer>>;
+  const identify = (context: Context): Context => {
+    if (!context.personalization) throw new Error('Fixture context is missing its admitted role');
+    return { ...context, effectiveSystemPrompt: `${context.effectiveSystemPrompt}\n<fixture_role>${context.personalization.threadRole}</fixture_role>` };
+  };
+  const wrap = <Args extends unknown[]>(prepare: (...args: Args) => Promise<Context>) =>
+    (...args: Args) => prepare(...args).then(identify);
+  return Object.assign(wrap(original), {
+    main: wrap(original.main),
+    ...(original.withAgent ? { withAgent: wrap(original.withAgent) } : {}),
+    ...(original.refresh ? { refresh: wrap(original.refresh) } : {}),
+    ...(original.compact ? { compact: wrap(original.compact) } : {}),
+    ...(original.forSource ? { forSource: wrap(original.forSource) } : {}),
+    ...(original.refreshResources ? { refreshResources: wrap(original.refreshResources) } : {}),
+  });
+}
 const job = (body: Record<string, unknown>) => {
   const receipt = result(body, 'dispatch');
   expect(receipt?.kind, JSON.stringify(receipt)).toBe('job_accepted');
