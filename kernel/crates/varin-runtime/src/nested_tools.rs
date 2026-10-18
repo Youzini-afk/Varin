@@ -129,6 +129,16 @@ fn error(message: &str) -> ExecutionError {
     ExecutionError::new("nested_tool", message)
 }
 impl NestedTools {
+    /// Stop subordinate work while the outer invocation retains its own final receipt.
+    pub fn cancel(&self, parent_operation_id: &str, owner: &ExecutorOwner) -> Result<(), ExecutionError> {
+        let scope = self.scopes.lock().map_err(|_| error("invocation scopes unavailable"))?
+            .get(parent_operation_id).cloned();
+        let Some(scope) = scope else { return Ok(()); };
+        if &scope.owner != owner { return Err(error("invocation owner changed")); }
+        scope.state.lock().map_err(|_| error("invocation scope unavailable"))?.accepting = false;
+        scope.cancel.cancel();
+        Ok(())
+    }
     /// Observe only this live invocation's original frozen directory. Inspection cannot
     /// register work, select a provider, or change the executing Run's capabilities.
     pub fn inspect(
@@ -646,7 +656,7 @@ mod tests {
         );
         let next = registry.delegate_inference(&context).unwrap();
         assert_ne!(next.owner(), &owner);
-        parent.scope.cancel.cancel();
+        registry.cancel(&context.operation_id, &ExecutorOwner::Kernel).unwrap();
         assert!(registry.inspect(&context.operation_id, &ExecutorOwner::Kernel, None).is_err());
         assert!(
             registry

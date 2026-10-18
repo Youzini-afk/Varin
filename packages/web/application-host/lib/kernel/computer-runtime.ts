@@ -270,7 +270,19 @@ export function createComputerRuntime({ kernel, runtime, computers, enabled }: {
           const signal = AbortSignal.any([context.signal, dispatch.signal]);
           const releaseScriptDispatch = noteInvocationComputerUse(context, desktopId, reason => dispatch.abort(reason));
           try { switch (method) {
-            case 'apps': return result({ apps: await computers.listApps(desktopId) });
+            case 'apps': {
+              const query = typeof params.query === 'string' ? params.query.trim().toLocaleLowerCase() : '';
+              const apps = (await computers.listApps(desktopId)).flatMap(app => {
+                const windows = app.windows?.filter(window => params.includeHidden === true || window.visible !== false || window.minimized === true);
+                if (app.windows?.length && !windows?.length) return [];
+                const { windowTitle, ...identity } = app;
+                const title = windows ? windows.find(window => window.main)?.title ?? windows[0]?.title : windowTitle;
+                const selected = { ...identity, ...(windows ? { windows } : {}), ...(title === undefined ? {} : { windowTitle: title }) };
+                return !query || [app.name, String(app.pid), selected.windowTitle, ...(windows?.map(window => window.title) ?? [])]
+                  .some(value => value?.toLocaleLowerCase().includes(query)) ? [selected] : [];
+              });
+              return result({ apps });
+            }
             case 'prepare': {
               const changed = await computers.prepareDesktop(params as ComputerDesktopPrepareParams, { automated: true, desktopId, signal });
               return applicationResult(changed, changed, changed.desktop.status === 'available', changed.cancelled);

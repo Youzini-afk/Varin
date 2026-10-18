@@ -110,12 +110,12 @@ impl<P: Persistence + ?Sized + 'static> InvocationRunner<P> {
                         {
                             let runner = self.clone();
                             let child_scope = scope.clone();
-                            let parent_cancel = cancel.clone();
+                            let parent_cancel = cancel.child("nested-calls");
                             Some(registry.register(
                                 context.clone(),
                                 bound.executor_owner(),
                                 scope.frozen.clone(),
-                                cancel.clone(),
+                                parent_cancel.clone(),
                                 Arc::new(move |context, call| {
                                     runner.execute_nested(
                                         context,

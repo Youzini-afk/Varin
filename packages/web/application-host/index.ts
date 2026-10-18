@@ -1689,7 +1689,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   kernelClient.onToolReleased(releaseAgentMcpScope);
   kernelClient.subscribeExit(() => { for (const runId of agentMcpScopes.keys()) releaseAgentMcpScope(runId); });
   const prepareAgentPolicy = createAgentPolicy(extensionRuntime);
-  const modelAuthority = createModelAuthority(modelsService);
+  const modelAuthority = createModelAuthority(modelsService, { outputVisibleBytes: async () => (await modelsService.settings.harness()).output.visibleBytes });
   const botAgentModel = async (bot: import('@varin/application-client').BotSummary) => {
     const global = (await modelsService.settings.snapshot()).global;
     const selection = bot.model ?? (typeof global.defaultProvider === 'string' && typeof global.defaultModel === 'string'

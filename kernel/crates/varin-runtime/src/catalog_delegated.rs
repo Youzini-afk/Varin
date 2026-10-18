@@ -481,6 +481,9 @@ impl ChildContinuationPreparation {
                     }
                     return Ok(None);
                 }
+                if matches!(source, ChildSource::Shared { .. }) {
+                    return Ok(None);
+                }
                 let ChildSource::Ready {
                     pin,
                     provenance_ref,
@@ -581,7 +584,7 @@ impl Catalog {
             let launch = self
                 .launch_metadata(&run.id)?
                 .ok_or_else(|| RuntimeError::NotFound("previous Run launch".into()))?;
-            let writers = if matches!(previous.source, Some(ChildSource::Absent)) {
+            let writers = if matches!(previous.source, Some(ChildSource::Absent | ChildSource::Shared { .. })) {
                 None
             } else {
                 Some(self.capture_child_writer_bindings(&previous.execution_id)?)
@@ -697,6 +700,13 @@ impl Catalog {
                 ));
             }
             None
+        } else if let ChildSource::Shared { selection, .. } = source {
+            if previous.code_result != ChildCodeResult::NoChanges
+                || launch.selection.source.as_ref() != Some(selection)
+            {
+                return Err(RuntimeError::Conflict("shared child workspace changed".into()));
+            }
+            None
         } else {
             let ChildSource::Ready { pin, selection, .. } = source else {
                 return Err(RuntimeError::Conflict(
@@ -746,6 +756,13 @@ impl Catalog {
                 }
             };
             Some(basis)
+        };
+        let continued_source = match source {
+            ChildSource::Absent => Some(ChildSource::Absent),
+            ChildSource::Shared { selection, .. } => Some(ChildSource::Shared {
+                handoff: None, selection: selection.clone(),
+            }),
+            _ => None,
         };
         let tx = self.db.transaction()?;
         if prepared.ingress.is_none() {
@@ -859,7 +876,7 @@ impl Catalog {
             launch: selected,
             policy_target: launch.policy_target,
             source_basis: basis,
-            source: absent.then_some(ChildSource::Absent),
+            source: continued_source,
             code_result: if absent {
                 ChildCodeResult::NotApplicable
             } else if matches!(previous.code_result, ChildCodeResult::NoChanges) {

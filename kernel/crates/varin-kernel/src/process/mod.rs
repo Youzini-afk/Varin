@@ -838,7 +838,8 @@ impl ProcessManager {
         Ok(Some(
             json!({"status":status, "pid":buffer.pid, "exitCode":exit_code, "signal":signal,
             "stopApplied":buffer.receipt.as_ref().and_then(|receipt|receipt.get("stopApplied")).and_then(Value::as_bool),
-            "reason":reason, "writerActive":!matches!(status,"exited"|"failed"), "outputAvailable":true,
+            "reason":reason, "writerActive":!matches!(status,"exited"|"failed"),
+            "treeConfirmed":matches!(status,"exited"|"failed"), "outputAvailable":true,
             "outputComplete":buffer.output_closed && buffer.output_error.is_none(),"outputError":buffer.output_error}),
         ))
     }

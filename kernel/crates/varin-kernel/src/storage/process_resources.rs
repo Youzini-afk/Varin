@@ -159,7 +159,7 @@ impl Storage {
         id: &str,
         record: &mut Value,
     ) -> Result<(), KernelError> {
-        if record["writerActive"] == false {
+        if record["writerActive"] == false && record["treeConfirmed"] == true {
             return Ok(());
         }
         let epoch = string(&record, "kernelEpoch")?;
@@ -188,8 +188,10 @@ impl Storage {
                 );
             }
             record["writerActive"] = json!(false);
+            record["treeConfirmed"] = json!(true);
         } else {
             record["status"] = json!("unknown");
+            record["treeConfirmed"] = json!(false);
             record["reason"] = json!(
                 "prior process tree has no confirmed exit receipt; execution directory is retained"
             );

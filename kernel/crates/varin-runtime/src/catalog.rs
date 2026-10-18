@@ -537,22 +537,7 @@ impl Catalog {
         )?;
         if let Some(selection) = launch {
             if let Some(source) = selection.source.as_ref() {
-                if let Some(origin_id) = source.environment_run_id.as_ref() {
-                    let origin_run: Run = record(&tx, "runs", origin_id)?;
-                    let origin: launch_content::LaunchMetadata =
-                        record(&tx, "run_launches", origin_id)?;
-                    let mut same_source = source.clone();
-                    same_source.environment_run_id = None;
-                    if origin_run.thread_id != run.thread_id
-                        || source.mode != crate::SourceMode::Materialized
-                        || origin.selection.source.as_ref() != Some(&same_source)
-                    {
-                        return Err(RuntimeError::Conflict(
-                            "environment continuation must preserve the original thread source"
-                                .into(),
-                        ));
-                    }
-                }
+                launches::validate_environment_source(&tx, &run.thread_id, source)?;
             }
             let intent = launch_content::LaunchMetadata {
                 dispatch_context_ref: None,

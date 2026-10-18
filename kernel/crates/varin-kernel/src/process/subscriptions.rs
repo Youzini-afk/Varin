@@ -249,13 +249,14 @@ fn projection(subscription: &Subscription, buffer: &super::Buffer, cursor: u64) 
     let mut snapshot = subscription.snapshot.clone();
     if subscription.live {
         if let Some(receipt) = &buffer.receipt {
-            for key in ["status", "pid", "exitCode", "signal", "reason"] {
+            for key in ["status", "pid", "exitCode", "signal", "reason", "treeConfirmed", "stopApplied"] {
                 snapshot[key] = receipt[key].clone();
             }
             snapshot["writerActive"] = json!(false);
         } else if buffer.closed {
             snapshot["status"] = json!("unknown");
             snapshot["writerActive"] = json!(true);
+            snapshot["treeConfirmed"] = json!(false);
             snapshot["reason"] = json!("guardian control closed without a confirmed tree receipt");
         } else if let Some(pid) = buffer.pid {
             snapshot["pid"] = json!(pid);

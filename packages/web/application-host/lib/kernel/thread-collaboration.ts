@@ -274,16 +274,20 @@ export class ThreadCollaboration {
   }
   private childSource(child: DelegatedExecution): ThreadSource | null {
     if (child.source?.kind === 'absent') return null;
-    if (child.source?.kind !== 'ready') throw new Error('Child source is not ready');
+    if (child.source?.kind !== 'ready' && child.source?.kind !== 'shared') throw new Error('Child source is not ready');
     const fixed = child.source.selection;
-    if ((fixed.mode !== 'fixed_branch' && fixed.mode !== 'materialized') || !fixed.branch_id || fixed.revision === null) throw new Error('Child source is not fixed');
     const tools = sourceToolSchemas(child.launch).map(tool => tool.name as ThreadSource['tools'][number]);
+    if (fixed.mode === 'live_root' && fixed.live_root) return {
+      resourceOwner: fixed.resource_owner, mode: fixed.mode, liveRoot: fixed.live_root,
+      workspaceId: fixed.workspace_id, executionWorkspaceId: fixed.execution_workspace_id, tools,
+    };
+    if ((fixed.mode !== 'fixed_branch' && fixed.mode !== 'materialized') || !fixed.branch_id || fixed.revision === null) throw new Error('Child source is not fixed');
     return { resourceOwner: fixed.resource_owner, mode: fixed.mode, workspaceId: fixed.workspace_id, executionWorkspaceId: fixed.execution_workspace_id,
       branchId: fixed.branch_id, revision: fixed.revision, tools,
       ...(fixed.environment_run_id ? { environmentRunId: fixed.environment_run_id } : {}) };
   }
   private async prepareSource(child: DelegatedExecution, signal: AbortSignal): Promise<DelegatedExecution> {
-    if (child.source?.kind === 'ready' || child.source?.kind === 'absent') return child;
+    if (child.source?.kind === 'ready' || child.source?.kind === 'shared' || child.source?.kind === 'absent') return child;
     const original = child.trigger.kind === 'dispatch' ? child.source?.handoff?.source : child.source_basis?.source;
     if (original?.resource_owner.kind === 'managed_host') {
       return withManagedChildSource(this.owners.runtime, child, signal, async (service, address) => {
@@ -407,7 +411,7 @@ export class ThreadCollaboration {
     return child;
   }
   private async releaseHandoff(child: DelegatedExecution, signal: AbortSignal): Promise<void> {
-    if (child.resources_released || (!child.receipt && !child.report) || (child.source?.kind !== 'ready' && child.source?.kind !== 'absent' && !child.report)) return;
+    if (child.resources_released || (!child.receipt && !child.report) || (child.source?.kind !== 'ready' && child.source?.kind !== 'shared' && child.source?.kind !== 'absent' && !child.report)) return;
     const { kernel, runtime } = this.owners;
     // Completed children must detach their original observers before releasing
     // the source handoff. A failed fence retains that same source for retry.
@@ -433,8 +437,9 @@ export class ThreadCollaboration {
       // Successful startRun owns the fast path; terminal discovery owns its retry.
       if (child.report) await kernel.releaseChildToolHandoff(child.parent_run_id, child.child_operation_id);
     }
-    if (child.source?.kind === 'absent') {
+    if (child.source?.kind === 'absent' || child.source?.kind === 'shared') {
       if (!child.report) return;
+      if (child.receipt) await runtime.retireSourceGrants(child.receipt.run_id);
       signal.throwIfAborted();
       await runtime.releaseChildResources(child.execution_id, signal);
       return;
@@ -511,9 +516,9 @@ export class ThreadCollaboration {
           }
         }
         signal.throwIfAborted();
-        if (source?.mode === 'live_root') throw new Error('Child source is not isolated');
-        child = await runtime.prepareChild({ executionId: child.execution_id, source: source ? { resourceOwner: source.resourceOwner, mode: source.mode, liveRoot: null,
-          workspaceId: source.workspaceId, executionWorkspaceId: source.executionWorkspaceId, branchId: source.branchId, revision: source.revision } : null,
+        child = await runtime.prepareChild({ executionId: child.execution_id, source: source ? { resourceOwner: source.resourceOwner, mode: source.mode, liveRoot: source.liveRoot ?? null,
+          workspaceId: source.workspaceId, executionWorkspaceId: source.executionWorkspaceId, branchId: source.branchId ?? null, revision: source.revision ?? null,
+          ...(source.environmentRunId ? { environmentRunId: source.environmentRunId } : {}) } : null,
           context, expectedContextCheckpoint: checkpoint?.id ?? null, ...(inputPreparation ? { inputPreparation } : {}) }, signal);
       }
       if (child.receipt && child.state === 'ready') {

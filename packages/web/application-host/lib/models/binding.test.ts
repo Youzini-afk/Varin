@@ -42,6 +42,22 @@ test('disabling the logical catalog model withdraws later authorization even whe
   await expect(selected.credentialOwner.resolve(scope)).rejects.toMatchObject({ code: 'credential-resolution-failed' });
 });
 
+test('tool output settings follow new bindings while delegated model overrides keep the parent budget', async () => {
+  const { models, channel } = await fixture();
+  let budget = 32768;
+  const authority = createModelAuthority(models, { outputVisibleBytes: async () => budget });
+  const selection = { providerId: channel.id, modelId: 'logical-model' };
+  const parent = await authority.resolveModel(selection);
+  budget = 65536;
+  const child = await authority.resolveModel(selection, { configuration: parent.configuration, credentialScope: await parent.credentialOwner.scope() });
+  const next = await authority.resolveModel(selection);
+  try {
+    expect(child.configuration.toolOutputVisibleBytes).toBe(32768);
+    expect(next.configuration.toolOutputVisibleBytes).toBe(65536);
+    expect(next.configuration.configurationGeneration).not.toBe(parent.configuration.configurationGeneration);
+  } finally { parent.credentialOwner.release(); child.credentialOwner.release(); next.credentialOwner.release(); }
+});
+
 test.each([
   ['gemini', 'gemini-3-flash-preview', 'high', { includeThoughts: true, thinkingLevel: 'HIGH' }],
   ['vertex', 'publishers/google/models/gemini-2.5-pro', 'high', { includeThoughts: true, thinkingBudget: 32768 }],

@@ -58,6 +58,7 @@ type WorkspaceState = {
   refreshTail: Promise<void>;
   documentWatch: { ready: Promise<boolean>; close(): void } | null;
   documentWatchReady: boolean;
+  documentWatchPreparation?: Promise<boolean>;
   queryInference?: QueryInferenceSelection;
   retrievalBindingState?: SemanticInferenceDescription['status'];
 };
@@ -251,7 +252,7 @@ return;
     state.refreshTail = task.then(() => undefined, () => undefined);
     return task;
   };
-  const ensureDocumentWatch = async (state: WorkspaceState, reconcileOnRecovery: boolean): Promise<boolean> => {
+  const prepareDocumentWatch = async (state: WorkspaceState, reconcileOnRecovery: boolean): Promise<boolean> => {
     const selected = await selectedRoots(state.root);
     // A resource root can be a drive or home directory. Do not recursively
     // watch that ancestor merely because a selected project lives below it.
@@ -283,13 +284,12 @@ return;
         });
       });
       state.documentWatch = documentWatch;
-      state.documentWatchReady = await documentWatch.ready;
-      if (disposed) {
+      const ready = await documentWatch.ready;
+      if (disposed || state.documentWatch !== documentWatch) {
         documentWatch.close();
-        state.documentWatch = null;
-        state.documentWatchReady = false;
         return false;
       }
+      state.documentWatchReady = ready;
       if (!state.documentWatchReady) {
         documentWatch.close();
         state.documentWatch = null;
@@ -306,6 +306,14 @@ return;
       return false;
     }
   };
+  const ensureDocumentWatch = (state: WorkspaceState, reconcileOnRecovery: boolean): Promise<boolean> => {
+    if (state.documentWatchPreparation) return state.documentWatchPreparation;
+    const task = prepareDocumentWatch(state, reconcileOnRecovery).finally(() => {
+      if (state.documentWatchPreparation === task) delete state.documentWatchPreparation;
+    });
+    state.documentWatchPreparation = task;
+    return task;
+  };
   const getWorkspace = async (workspaceId: string, autoScan = true, queryOnly = false, configurationRoot?: string): Promise<WorkspaceState> => {
     await maintenance.get(workspaceId);
     assertActive();
@@ -315,7 +323,7 @@ return;
     if (existing) {
       if (configurationRoot === undefined) existing.indexingEnabled = workspaceId !== GLOBAL_INFERENCE_SCOPE
         && (await selectedRoots(existing.root)).length > 0;
-      if (existing.indexingEnabled && !queryOnly) await ensureDocumentWatch(existing, true);
+      if (existing.indexingEnabled && !queryOnly) track(ensureDocumentWatch(existing, true));
       // Also wait for a refresh already queued by config.changed.
       await refresh(existing, autoScan);
       assertActive();
@@ -352,11 +360,9 @@ return;
       markUnavailable(state);
       states.set(workspaceId, state);
       if (!queryOnly) scheduleReconcile();
-      // Subscribe before the first scan so writes during enumeration are either
-      // observed incrementally or cause the scope to be reconciled.
-      if (indexingEnabled && !queryOnly) await ensureDocumentWatch(state, false);
-      // Register observation before reading settings, so changes made while a
-      // watch is being created are included in the first binding snapshot.
+      // Watch startup can enumerate a large tree. Keep it off foreground query
+      // admission; hits remain partial until it is ready, then reconcile once.
+      if (indexingEnabled && !queryOnly) track(ensureDocumentWatch(state, true));
       await refresh(state);
       if (autoScan && indexingEnabled && !disposed) track(runtime.scanWorkspace(workspaceId));
       await state.refreshTail;

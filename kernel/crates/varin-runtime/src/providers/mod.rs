@@ -345,6 +345,8 @@ pub struct Connection {
     pub max_event_bytes: usize,
     /// Frozen catalog capability. None is reserved for explicit low-level/bootstrap callers.
     pub accepts_images: Option<bool>,
+    /// Model-visible tool text budget; original receipts stay in the conversation store.
+    pub tool_output_visible_bytes: Option<usize>,
     /// Copilot's per-request headers follow the actual input, across all three wire APIs.
     pub copilot: bool,
     pub request_profile: Option<request_profile::RequestProfile>,
@@ -361,6 +363,7 @@ impl Connection {
             transport,
             max_event_bytes: 16 * 1024 * 1024,
             accepts_images: None,
+            tool_output_visible_bytes: None,
             copilot: false,
             request_profile: None,
         }

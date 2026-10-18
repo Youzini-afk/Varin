@@ -287,6 +287,7 @@ pub struct ModelSessionConfiguration {
     pub credential_environment: Option<String>,
     pub allow_anonymous: bool,
     pub accepts_images: Option<bool>,
+    pub tool_output_visible_bytes: Option<u64>,
     pub configuration_generation: u64,
     pub max_output_tokens: Option<u64>,
     pub azure_deployment: Option<String>,

@@ -2012,6 +2012,7 @@ export interface ModelSessionConfiguration {
   credentialEnvironment: string | null;
   allowAnonymous: boolean;
   acceptsImages?: boolean;
+  toolOutputVisibleBytes?: number;
   configurationGeneration: number;
   maxOutputTokens: number | null;
   azureDeployment?: string | null;
@@ -2493,7 +2494,7 @@ export interface SourceDraftProvenance { threadId: string; branchId: string; sna
 
 export type ChildSourceProvenance = { consistency: 'fixed-root'; root: string; resources?: SourceResourceCapture } | { consistency: 'stable-capture' | 'git-base-with-overlay'; contentMode: 'saved-files' | 'fixed-draft-baseline'; captureScopes: string[]; omittedDraftPaths: string[]; captureIdentity?: string; drafts?: SourceDraftProvenance; resources?: SourceResourceCapture };
 
-export type ChildSource = { kind: 'absent' } | { kind: 'pending'; handoff: ChildSourceHandoff } | { kind: 'ready'; handoff: ChildSourceHandoff | null; pin: ChildSourcePin; selection: LaunchSource; provenance: ChildSourceProvenance };
+export type ChildSource = { kind: 'absent' } | { kind: 'pending'; handoff: ChildSourceHandoff } | { kind: 'shared'; handoff: ChildSourceHandoff | null; selection: LaunchSource } | { kind: 'ready'; handoff: ChildSourceHandoff | null; pin: ChildSourcePin; selection: LaunchSource; provenance: ChildSourceProvenance };
 
 export interface ChildWorkingResultRef {
   publication_id: string;

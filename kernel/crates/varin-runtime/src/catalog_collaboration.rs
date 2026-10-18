@@ -133,6 +133,12 @@ pub enum ChildSource {
     Pending {
         handoff: ChildSourceHandoff,
     },
+    /// Read-only access to the dispatching Run's actual local execution workspace.
+    /// Materialized sources retain the original environment Run instead of copying it.
+    Shared {
+        handoff: Option<ChildSourceHandoff>,
+        selection: launches::SourceSelection,
+    },
     Ready {
         handoff: Option<ChildSourceHandoff>,
         pin: ChildSourcePin,
@@ -145,12 +151,12 @@ impl ChildSource {
         match self {
             Self::Absent => None,
             Self::Pending { handoff } => Some(handoff),
-            Self::Ready { handoff, .. } => handoff.as_ref(),
+            Self::Ready { handoff, .. } | Self::Shared { handoff, .. } => handoff.as_ref(),
         }
     }
     pub fn pin(&self) -> Option<&ChildSourcePin> {
         match self {
-            Self::Absent => None,
+            Self::Absent | Self::Shared { .. } => None,
             Self::Ready { pin, .. } => Some(pin),
             Self::Pending { handoff } => match &handoff.root {
                 ChildSourceRoot::Fixed { pin } => Some(pin),
@@ -160,7 +166,7 @@ impl ChildSource {
     }
     pub fn selection(&self) -> Option<&launches::SourceSelection> {
         match self {
-            Self::Ready { selection, .. } => Some(selection),
+            Self::Ready { selection, .. } | Self::Shared { selection, .. } => Some(selection),
             _ => None,
         }
     }
@@ -463,7 +469,18 @@ impl Catalog {
                 dispatch_context_ref: prepared.frozen_reference,
                 launch: prepared.launch,
                 source: prepared.handoff.map_or(ChildSource::Absent, |handoff| {
-                    ChildSource::Pending { handoff }
+                    if prepared.work_mode == super::dispatch::ChildWorkMode::ReadOnly
+                        && handoff.source.resource_owner.is_local()
+                        && matches!(handoff.root, ChildSourceRoot::Physical { .. })
+                    {
+                        let mut selection = handoff.source.clone();
+                        if selection.mode == crate::SourceMode::Materialized {
+                            selection.environment_run_id.get_or_insert_with(|| run.id.clone());
+                        }
+                        ChildSource::Shared { handoff: Some(handoff), selection }
+                    } else {
+                        ChildSource::Pending { handoff }
+                    }
                 }),
                 code_result: if parent.selection.source.is_none() {
                     ChildCodeResult::NotApplicable
@@ -869,7 +886,7 @@ impl ChildPreparation {
         }
         let expected = match &child.source {
             ChildSource::Absent => None,
-            ChildSource::Ready { selection, .. } => Some(selection),
+            ChildSource::Ready { selection, .. } | ChildSource::Shared { selection, .. } => Some(selection),
             ChildSource::Pending { .. } => {
                 return Err(RuntimeError::Conflict("child source is not ready".into()));
             }
@@ -1537,7 +1554,7 @@ impl Catalog {
             || execution.receipt.is_some()
             || execution.report.is_some()
             || execution.cancel_requested
-            || matches!(execution.source, Some(ChildSource::Ready { .. }))
+            || matches!(execution.source, Some(ChildSource::Ready { .. } | ChildSource::Shared { .. }))
             || (matches!(execution.trigger, delegated::DelegatedTrigger::Dispatch)
                 && self
                     .operation(&execution.child_operation_id)?

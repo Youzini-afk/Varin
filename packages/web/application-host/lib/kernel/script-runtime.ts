@@ -36,7 +36,7 @@ function deferred<T>() {
 }
 type CellResult = Extract<ScriptWorkerFrame, { type: 'completed' }>;
 interface Cell {
-  id: string; context: HostCapabilityCallContext; accepting: boolean; sent: boolean;
+  id: string; owner: ToolInvocationAuthority['executorOwner']; context: HostCapabilityCallContext; accepting: boolean; sent: boolean;
   callbacks: Set<Promise<unknown>>; computerCancellations: Set<(reason: unknown) => void>; desktops: Set<string>; output: OutputPart<IncomingMedia>[];
   completed: ReturnType<typeof deferred<CellResult>>;
 }
@@ -86,7 +86,12 @@ export function createScriptRuntime(options: {
         threadId: environment.threadId, source: managedSource }))
       : environment.process.requestTermination(true);
     const cell = environment.cell;
-    const cancellations = [runtime.cancelOperation(environment.id), ...(cell ? [runtime.cancelOperation(cell.id)] : [])];
+    // The cell owns its final receipt, including output printed before a timeout or
+    // process exit. Cancelling that invocation here races its receipt with the
+    // bridge's cancellation reply and hides the output behind an unknown result.
+    const cancellations = [runtime.cancelOperation(environment.id), ...(cell ? [rpc('runtime.managed_process.cell', {
+      operationId: cell.id, executionOwner: cell.owner, environmentId: environment.id, closing: true,
+    })] : [])];
     environment.closing = (async () => {
       await Promise.allSettled([physical, ...cancellations, ...(environment.source.kind === 'local' ? [environment.process.completion] : []), ...(cell ? [...cell.callbacks] : [])]);
       await environment.opening.promise;
@@ -103,7 +108,7 @@ export function createScriptRuntime(options: {
         // The terminal may precede original Job acceptance. Preserve it on the same
         // Operation now; the caller's later handoff applies that already retained fact.
         const body = original.external_receipt ? original.external_receipt.result.data : original.result?.kind === 'output' ? original.result.output.data : undefined;
-        const stopped = record(body) && record(body.process) && body.process.writerActive === false && body.callbacksStopped === true;
+        const stopped = original.external_receipt?.executor_stopped === true;
         receipt = result(body, stopped ? 'confirmed' : 'unknown', stopped,
           stopped ? environment.accepted ? 'succeeded' : original.external_receipt?.outcome ?? 'cancelled' : 'indeterminate');
       } catch (error) { receipt = result({ environmentId: environment.id, error: errorText(error), process: environment.process.snapshot }, 'unknown', false, 'indeterminate'); }
@@ -155,7 +160,7 @@ export function createScriptRuntime(options: {
           && kernel.toolCallbackEnded(operation.run_id, operation.execution_owner, operation.id) === true,
       });
       const body = original.external_receipt ? original.external_receipt.result.data : original.result?.kind === 'output' ? original.result.output.data : undefined;
-      const stopped = record(body) && record(body.process) && body.process.writerActive === false && body.callbacksStopped === true;
+      const stopped = original.external_receipt?.executor_stopped === true;
       return result(body, stopped ? 'confirmed' : 'unknown', stopped, stopped ? 'succeeded' : 'indeterminate');
     } catch (error) { return result({ environmentId: operation.id, error: errorText(error) }, 'unknown', false, 'indeterminate'); }
     finally { await source?.release().catch(options.onError); }
@@ -285,7 +290,7 @@ export function createScriptRuntime(options: {
       if (!environment.accepting || environment.node.configuration_identity !== authority.configurationIdentity) throw new Error('script_environment_unavailable_or_binding_changed');
       await rpc('runtime.managed_process.cell', { operationId: authority.operationId, executionOwner: authority.executorOwner, environmentId: environment.id, closing: false }, context.signal);
       requireToolInvocation(context);
-      const cell: Cell = { id: authority.operationId, context, accepting: true, sent: false, callbacks: new Set(), computerCancellations: new Set(), desktops: new Set(), output: [], completed: deferred<CellResult>() };
+      const cell: Cell = { id: authority.operationId, owner: authority.executorOwner, context, accepting: true, sent: false, callbacks: new Set(), computerCancellations: new Set(), desktops: new Set(), output: [], completed: deferred<CellResult>() };
       environment.cell = cell;
       const abort = () => { void close(environment, context.signal.reason).catch(options.onError); };
       context.signal.addEventListener('abort', abort, { once: true });
@@ -300,7 +305,7 @@ export function createScriptRuntime(options: {
           return result({ environmentId: environment.id, cellId: cell.id, ...(evaluated.valueText === undefined ? {} : { valueText: evaluated.valueText }), ...(evaluated.error ? { error: evaluated.error } : {}) }, evaluated.error ? 'partial' : 'confirmed', true, evaluated.error ? 'failed' : 'succeeded', cell.output);
         } catch (error) {
           const stopped = await close(environment, error);
-          return result({ environmentId: environment.id, cellId: cell.id, error: errorText(error) }, stopped.executor_stopped ? cell.sent ? 'partial' : 'none' : 'unknown', stopped.executor_stopped, stopped.executor_stopped ? context.signal.aborted ? 'cancelled' : 'failed' : 'indeterminate', cell.output);
+          return result({ environmentId: environment.id, cellId: cell.id, environmentState: stopped.executor_stopped ? 'closed' : 'closing', error: errorText(error) }, stopped.executor_stopped ? cell.sent ? 'partial' : 'none' : 'unknown', stopped.executor_stopped, stopped.executor_stopped ? context.signal.aborted ? 'cancelled' : 'failed' : 'indeterminate', cell.output);
         } finally {
           cell.accepting = false; cancelTimer?.();
           context.signal.removeEventListener('abort', abort);
@@ -322,7 +327,10 @@ export function createScriptRuntime(options: {
         assertNoScriptCellCycle(context, id);
         const environment = environments.get(id);
         if (method === 'run') {
-          if (!environment || environment.runId !== authority.runId || environment.threadId !== authority.threadId) throw new Error('Script heap is unavailable; open a fresh environment');
+          if (!environment || environment.runId !== authority.runId || environment.threadId !== authority.threadId) {
+            return result({ environmentId: id, environmentState: 'closed', error: 'script_environment_closed',
+              message: 'This script environment has ended. Open a new environment to run scripts.' }, 'none', true, 'failed');
+          }
           return await evaluate(environment, authority, params, context);
         }
         const original = await rpc<Operation, 'runtime.managed_process.cell'>('runtime.managed_process.cell', { operationId: authority.operationId, executionOwner: authority.executorOwner, environmentId: id, closing: true }, context.signal);

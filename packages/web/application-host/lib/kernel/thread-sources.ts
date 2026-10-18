@@ -212,7 +212,7 @@ export function createThreadSourceAdmission({ documents, withSourceRead, liveSou
     const relation = source.mode === 'live_root' ? null : await runtime.childForThread(identity.threadId, signal);
     const child = relation && runId ? await runtime.childExecutionForRun(runId, signal) : null;
     if (relation && (!runId || !child || child.child_thread_id !== identity.threadId || child.child_branch_id !== identity.branchId
-      || child.source?.kind !== 'ready' || !isDeepStrictEqual(child.source.selection.resource_owner, resourceOwner)
+      || (child.source?.kind !== 'ready' && child.source?.kind !== 'shared') || !isDeepStrictEqual(child.source.selection.resource_owner, resourceOwner)
       || (child.source.selection.environment_run_id ?? undefined) !== source.environmentRunId || child.source.selection.workspace_id !== source.workspaceId
       || child.source.selection.execution_workspace_id !== source.executionWorkspaceId
       || child.source.selection.branch_id !== source.branchId || child.source.selection.revision !== source.revision

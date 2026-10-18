@@ -38,6 +38,7 @@ export interface ModelSessionConfiguration {
   credentialEnvironment: string | null;
   allowAnonymous: boolean;
   acceptsImages?: boolean;
+  toolOutputVisibleBytes?: number;
   configurationGeneration: number;
   maxOutputTokens: number | null;
   azureDeployment?: string | null;

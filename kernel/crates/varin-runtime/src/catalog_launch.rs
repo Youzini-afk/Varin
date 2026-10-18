@@ -153,6 +153,35 @@ impl SourceSelection {
         Ok(())
     }
 }
+/// A continuation reuses its original environment. A read-only delegated child may
+/// reuse that same directory through its recorded dispatch source, including worktrees.
+pub(super) fn validate_environment_source(db: &Connection, thread_id: &str, source: &SourceSelection) -> Result<()> {
+    let Some(origin_id) = source.environment_run_id.as_ref() else { return Ok(()); };
+    let origin_run: Run = record(db, "runs", origin_id)?;
+    let origin: LaunchMetadata = record(db, "run_launches", origin_id)?;
+    let mut original_source = source.clone();
+    original_source.environment_run_id = None;
+    let mut shared = false;
+    if origin_run.thread_id != thread_id {
+        let mut statement = db.prepare("SELECT e.body FROM delegated_executions e JOIN child_tasks c ON c.id=e.child_operation_id WHERE c.child_thread_id=?1 AND json_extract(e.body,'$.source.kind')='shared'")?;
+        for raw in statement.query_map([thread_id], |row| row.get::<_, String>(0))? {
+            let child: delegated::DelegatedExecution = serde_json::from_str(&raw?)?;
+            if matches!(child.source, Some(collaboration::ChildSource::Shared { selection, .. }) if selection == *source)
+                && child.code_result == collaboration::ChildCodeResult::NoChanges
+            {
+                shared = true;
+                break;
+            }
+        }
+    }
+    if (origin_run.thread_id != thread_id && !shared)
+        || source.mode != crate::SourceMode::Materialized
+        || origin.selection.source.as_ref() != Some(&original_source)
+    {
+        return Err(RuntimeError::Conflict("environment source differs from its original workspace".into()));
+    }
+    Ok(())
+}
 /// Credential-free retained Host MCP generation, frozen before any model request.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
@@ -891,20 +920,7 @@ impl Catalog {
             ));
         }
         if let Some(source) = selection.source.as_ref() {
-            if let Some(origin_id) = source.environment_run_id.as_ref() {
-                let origin_run: Run = record(&tx, "runs", origin_id)?;
-                let origin: LaunchMetadata = record(&tx, "run_launches", origin_id)?;
-                let mut same_source = source.clone();
-                same_source.environment_run_id = None;
-                if origin_run.thread_id != run.thread_id
-                    || source.mode != crate::SourceMode::Materialized
-                    || origin.selection.source.as_ref() != Some(&same_source)
-                {
-                    return Err(RuntimeError::Conflict(
-                        "environment continuation must preserve the original thread source".into(),
-                    ));
-                }
-            }
+            validate_environment_source(&tx, &run.thread_id, source)?;
         }
         let previous: Option<LaunchMetadata> = optional_record(&tx, "run_launches", run_id)?;
         let intent = match previous {

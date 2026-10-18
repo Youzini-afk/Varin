@@ -69,6 +69,8 @@ Catalog 事务保存短元数据和不可变内容引用。历史正文、请求
 历史原文、模型输入和 UI 投影用途不同。Provider 原始续接项单独保留签名、加密推理等内容，
 不压平为虚构的普通文本。上下文设置、记忆和服务选择后来变化，也不改已受理请求的字节。
 普通输出明确分为 JSON data 和有序 text/media parts；不能根据 JSON 键名猜测控制命令或媒体。
+模型输入按 `harness.output.visibleBytes` 投影长工具输出：保留首尾、原始字节数和历史条目引用，
+完整回执继续存储，图片保留原媒体类型。同一条输出的投影在后续请求中复用，避免重复处理正文。
 
 上下文 checkpoint 保存已发布摘要、指令、记忆/资源及来源边界。新记忆可作为后续请求的投影，
 不改写原历史。Knowledge/Memory 仍是笔记写入者；Catalog 只记录观察和请求投递证据。
@@ -134,6 +136,10 @@ tool/result 对。持久脚本、PTY、研究 Job 和 MCP Task 各有实际寿�
 - `fixed_branch` 绑定不可变分支/revision，可供文件、检索和派生语言视图读取；当前不提供
   可写物理 cwd，也不提供需要该 cwd 的 workspace MCP、shell 或 PTY 执行视图。
 - `materialized` 绑定固定来源及原 execution copy/Run；副本缺失时明确失败，不能以同一身份换建副本。
+
+本地物理 Source 派发只读子 agent 时，直接共享父 Run 的实际执行目录。各 worktree 保留各自的目录身份；
+materialized 来源保留原 environment Run，续跑沿用同一个目录，并能读取期间发生的文件变化。
+这条路径省去整目录捕获和复制。写代码子 agent 继续准备隔离副本；fixed branch 和 managed Host 保留现有来源交接。
 
 固定捕获的 saved-files/surface-drafts、Git 语义、来源闭包和文件一致性由
 [资源合同](resources.md)解释。Linux 的连续目录观察只允许复用名称清单，仍读取并哈希全部

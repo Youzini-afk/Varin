@@ -52,8 +52,8 @@ function append(url: URL, suffix: string): string {
 function sameScope(left: CredentialScope, right: CredentialScope): boolean {
   return left.reference === right.reference && left.authority === right.authority && left.account === right.account && left.generation === right.generation;
 }
-export function createModelAuthority(authority: ModelAuthority) {
-  async function configurationFor(model: SelectedModel, thinkingLevel?: ThreadThinkingLevel, temperature?: number, source: ModelExecutionAuthority = authority): Promise<ModelSessionConfiguration> {
+export function createModelAuthority(authority: ModelAuthority, options: { outputVisibleBytes?: () => Promise<number> } = {}) {
+  async function configurationFor(model: SelectedModel, thinkingLevel?: ThreadThinkingLevel, temperature?: number, source: ModelExecutionAuthority = authority, inheritedOutputBytes?: number): Promise<ModelSessionConfiguration> {
     if (!families.has(model.api) && !(model.adapterId && model.adapterVersion && model.endpointPath)) return failed('model-protocol-unavailable');
     if (model.compat?.copilot === true) {
       const resolved = await source.getAuth(model.providerId, model.modelId);
@@ -133,6 +133,7 @@ export function createModelAuthority(authority: ModelAuthority) {
       : Number.isSafeInteger(model.maxTokens) && model.maxTokens > 0 ? model.maxTokens : null;
     if (model.api === 'anthropic-messages' && max === null) return failed('anthropic-output-capacity-required');
     const acceptsImages = model.input?.includes('image') ?? false;
+    const toolOutputVisibleBytes = inheritedOutputBytes ?? await options.outputVisibleBytes?.() ?? 32768;
     const legacy = model.compat?.maxTokensField === 'max_tokens';
     const streamUsage = model.compat?.supportsUsageInStreaming !== false;
     if (model.contextWindow !== undefined && (!Number.isSafeInteger(model.contextWindow) || model.contextWindow <= 0)) return failed('model-context-capacity-invalid');
@@ -140,11 +141,11 @@ export function createModelAuthority(authority: ModelAuthority) {
     const awsRegion = model.api === 'bedrock-converse-stream' ? env.AWS_REGION || env.AWS_DEFAULT_REGION : undefined;
     const generation = Number.parseInt(createHash('sha256').update(JSON.stringify({ providerId: model.providerId, requestModelId: model.requestModelId, allowAnonymous: model.allowAnonymous, awsRegion,
       adapterId: model.adapterId, adapterVersion: model.adapterVersion, adapterIdentity: model.adapterIdentity, connection: model.connection, family: model.api, model: model.modelId, endpoint, max, deployment, apiVersion, legacy, streamUsage, acceptsImages,
-      contextWindow: model.contextWindow, ...resolved, ...(model.api === 'anthropic-messages' ? { anthropicOauth } : {}) })).digest('hex').slice(0, 12), 16);
+      contextWindow: model.contextWindow, toolOutputVisibleBytes, ...resolved, ...(model.api === 'anthropic-messages' ? { anthropicOauth } : {}) })).digest('hex').slice(0, 12), 16);
     return { providerId: model.providerId, providerFamily: model.api, model: model.requestModelId ?? model.modelId, endpoint,
       ...(awsRegion ? { awsRegion } : {}),
       ...(model.connection ? { connection: { ...(model.connection.headers ? { headers: model.connection.headers } : {}), ...(model.connection.proxy ? { proxy: model.connection.proxy } : {}) } } : {}),
-      credentialEnvironment: null, allowAnonymous: model.allowAnonymous ?? false, acceptsImages, configurationGeneration: generation, maxOutputTokens: max,
+      credentialEnvironment: null, allowAnonymous: model.allowAnonymous ?? false, acceptsImages, toolOutputVisibleBytes, configurationGeneration: generation, maxOutputTokens: max,
       adapterId: model.adapterId ?? model.api, adapterVersion: model.adapterVersion ?? '1', ...(model.adapterIdentity ? { adapterIdentity: model.adapterIdentity, adapterBindingId: model.adapterBindingId } : {}), ...resolved,
       catalogModelId: model.modelId,
       ...(model.contextWindow === undefined ? {} : { contextWindowTokens: model.contextWindow }),
@@ -204,12 +205,12 @@ export function createModelAuthority(authority: ModelAuthority) {
         if (inherited) {
           const original = inherited.configuration;
           const base = await configurationFor(captured.model, original.thinkingLevel as ThreadThinkingLevel | undefined,
-            (original.modelOptions as { temperature?: number } | undefined)?.temperature, captured.authority);
+            (original.modelOptions as { temperature?: number } | undefined)?.temperature, captured.authority, original.toolOutputVisibleBytes);
           // Deriving new overrides needs the original normalization metadata, unlike
           // simply rebinding an already-normalized request. Never mix today's defaults.
           if (base.configurationGeneration !== original.configurationGeneration) return failed('model-configuration-changed');
         }
-        const configuration = await configurationFor(captured.model, selection.thinkingLevel, selection.temperature, captured.authority);
+        const configuration = await configurationFor(captured.model, selection.thinkingLevel, selection.temperature, captured.authority, inherited?.configuration.toolOutputVisibleBytes);
         const credentialOwner = ownerFor(configuration, captured.authority, captured.release);
         const scope = await credentialOwner.scope();
         if (inherited && !sameScope(scope, inherited.credentialScope)) return failed('credential-scope-changed');

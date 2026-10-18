@@ -2818,6 +2818,7 @@ pub(crate) struct ModelSessionConfiguration {
     pub(crate) credential_environment: RequiredNullable<String>,
     pub(crate) allow_anonymous: bool,
     pub(crate) accepts_images: Option<bool>,
+    pub(crate) tool_output_visible_bytes: Option<i64>,
     pub(crate) configuration_generation: i64,
     pub(crate) max_output_tokens: RequiredNullable<i64>,
     pub(crate) azure_deployment: Option<RequiredNullable<String>>,

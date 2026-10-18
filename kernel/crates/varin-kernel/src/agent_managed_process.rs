@@ -133,6 +133,12 @@ pub(super) fn execute(
                 db.require_script_environment(&context, &p.environment_id, !p.closing)
                     .map_err(domain)?
             };
+            if p.closing {
+                // The cell still delivers its output/error. Only its subordinate
+                // calls stop; cancelling the cell itself would race that receipt.
+                lock()?.nested_tools().cancel(&op.id, &p.execution_owner)
+                    .map_err(|error| KernelError::Operation(error.to_string()))?;
+            }
             read_operation(env)
         }
         "runtime.managed_process.accept" => {

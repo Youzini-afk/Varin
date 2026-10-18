@@ -5,7 +5,7 @@ import { createMemoryOwner, type MemoryQuery } from './memory-owner.js';
 import { DatabaseSync } from 'node:sqlite';
 import { createHash } from 'node:crypto';
 import express from 'express';
-import { spawn, type ChildProcess } from 'node:child_process';
+import { spawn, execFileSync, type ChildProcess } from 'node:child_process';
 import { once } from 'node:events';
 import fs from 'node:fs/promises';
 import { createServer, type Server, type ServerResponse } from 'node:http';
@@ -38,6 +38,8 @@ import { createThreadContext, type ContextPreparer } from './thread-context.js';
 import { registerThreadRoutes } from './thread-routes.js';
 import { createThreadSourcePreparer, createThreadSourceAdmission } from './thread-sources.js';
 import { KernelStorageAdapter, createKernelWorkspaceWorkingStateAccess } from './storage-adapter.js';
+import { createLiveSourceOwner } from './live-source.js';
+import { originalMaterializationLocation } from './source-launch.js';
 
 const repository = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../../../..');
 const { build } = createRequire(path.join(repository, 'packages/extension-builtins/package.json'))('esbuild');
@@ -146,9 +148,10 @@ async function fixture(reply: (request: RecordedRequest, index: number) => void 
     const storage = new KernelStorageAdapter({ client: kernel, hostId: 'child-review-host', storageRoot: root,
       resolveWorkspaceRoot: async id => (await documents.inspectWorkspace(id)).root });
     const workingStates = createKernelWorkspaceWorkingStateAccess(storage);
+    const liveSources = createLiveSourceOwner({ documents, kernel });
     const personalization = createAgentPersonalization({ client: kernel,
       context: async () => ({ bot: false, projectId }) });
-    const resources = resourceScopeFixture(root, workingStates, documents, undefined, (input, consume) => storage.withResourceRead(input, consume));
+    const resources = resourceScopeFixture(root, workingStates, documents, liveSources.validate, (input, consume) => storage.withResourceRead(input, consume));
     const originalContext = identifyFixtureContext(createThreadContext({ personalization, resources,
       projectForWorkspace: async () => projectId }));
     const prepareContext = options.context?.(originalContext) ?? originalContext;
@@ -201,7 +204,7 @@ async function fixture(reply: (request: RecordedRequest, index: number) => void 
         policyDecisions.push(structuredClone(input));
         return lease.decide(input, signal);
       } };
-    }, observe: ({threadId}, changed, signal) => createAgentPolicy(extensions).observe({threadId,projectId}, changed, signal) } : undefined, undefined, undefined, undefined, (id, signal) => documents.admitWorkspaceRegistration(id, signal));
+    }, observe: ({threadId}, changed, signal) => createAgentPolicy(extensions).observe({threadId,projectId}, changed, signal) } : undefined, undefined, liveSources.validate, undefined, (id, signal) => documents.admitWorkspaceRegistration(id, signal));
     const knowledge = options.plans ? await openUserKnowledgeStore({ dataDir: root, hostId: 'child-review-host', embedding: null }) : undefined;
     const plans = knowledge ? new PlanService(runtime, async () => knowledge) : undefined;
     if (knowledge) kernel.setPlanOwner(createPlanOwner(async () => knowledge, runtime));
@@ -212,9 +215,9 @@ async function fixture(reply: (request: RecordedRequest, index: number) => void 
     }, rebindModel: async () => credentialOwner };
     const settings = new AgentSettingsService(agentDir, () => false);
     const profiles = createAgentProfilesAPI({ settings, capabilities: signal => runtime.childCapabilities(signal) });
-    const adapter = new ThreadAdapter(runtime, models, createThreadSourceAdmission({ documents, withSourceRead: (input, consume) => storage.withResourceRead(input, consume), runtime }), (_runId, error) => { errors.push(error); }, createThreadSourcePreparer({ inspectInventory: async () => ({ kind: 'directory' }), sourceTools: mode => kernel.agentRuntimeRequest('runtime.source.tools', { mode }),  documents, workingStates, prepareResources: resources.prepareSourceCapture }), prepareContext, plans, undefined, undefined,
+    const adapter = new ThreadAdapter(runtime, models, createThreadSourceAdmission({ documents, liveSources, withSourceRead: (input, consume) => storage.withResourceRead(input, consume), runtime }), (_runId, error) => { errors.push(error); }, createThreadSourcePreparer({ inspectInventory: async () => ({ kind: 'directory' }), sourceTools: mode => kernel.agentRuntimeRequest('runtime.source.tools', { mode }),  documents, workingStates, liveSources, prepareResources: resources.prepareSourceCapture }), prepareContext, plans, undefined, undefined,
       createChildProfilePreparer({ settings: async () => (await settings.read()).document, capabilities: signal => runtime.childCapabilities(signal), models }));
-    const collaboration = options.collaboration === false ? undefined : new ThreadCollaboration({ kernel, storageAdapter: storage, resolveLiveSource: async () => { throw new Error("Fixed source fixture"); }, sourceCaptureOwners: { documents, prepareResources: resources.prepareSourceCapture, inspectInventory: async () => { throw new Error("Fixed source fixture"); } }, runtime,  prepareContext, continueRun: (runId, signal) => adapter.continueLaunch(runId, { signal }), recoverLaunches: signal => adapter.recover(signal), onError: (_operation, error) => { errors.push(error); } });
+    const collaboration = options.collaboration === false ? undefined : new ThreadCollaboration({ kernel, storageAdapter: storage, resolveLiveSource: liveSources.validate, sourceCaptureOwners: { documents, prepareResources: resources.prepareSourceCapture, inspectInventory: async () => { throw new Error("Read-only dispatch must not capture the directory"); } }, runtime,  prepareContext, continueRun: (runId, signal) => adapter.continueLaunch(runId, { signal }), recoverLaunches: signal => adapter.recover(signal), onError: (_operation, error) => { errors.push(error); } });
     const app = express();
     registerCommonRequestMiddleware(app, { express });
     registerThreadRoutes(app, adapter, (request, response, next) => {
@@ -1637,6 +1640,73 @@ it('cancelling a policy child observation resumes from the real cancellation fac
     expect(parentSteps).toBe(1); expect(childSteps).toBe(1); expect(h.errors.map(String)).toEqual([]);
   } finally { release.release(); }
 }, 30_000);
+
+it.each(['live_root', 'materialized'] as const)('read-only dispatch shares its own %s worktree and keeps that directory on continuation', async mode => {
+  const parentSteps = new Map<string, number>(), childSteps = new Map<string, number>(), operations = new Map<string, string>();
+  const f = await fixture(({ body, response }) => {
+    const label = JSON.stringify(body).includes('WORKTREE_B') ? 'B' : 'A';
+    if (isParent(body)) {
+      const step = (parentSteps.get(label) ?? 0) + 1; parentSteps.set(label, step);
+      if (step === 1) complete(response, [tool('dispatch', { ...dispatch, task: `WORKTREE_${label}: read source.txt` }, `dispatch-${label}`)]);
+      else if (step === 2) { operations.set(label, job(body)); complete(response, [tool('wait_child', { operationId: job(body) }, `wait-${label}`)]); }
+      else complete(response, [answer(`Parent ${label} complete`, `parent-${label}`)]);
+      return;
+    }
+    const step = (childSteps.get(label) ?? 0) + 1; childSteps.set(label, step);
+    if (step % 2 === 1) complete(response, [tool('file_read', { path: 'source.txt' }, `read-${label}-${step}`)]);
+    else {
+      const receipt = result(body) as { content?: { content?: { text?: string } } };
+      expect(receipt.content?.content?.text).toBe(step === 2 ? `${label}_UNCOMMITTED` : `${label}_UPDATED`);
+      complete(response, [answer(`WORKTREE_${label} read complete`, `child-${label}-${step}`)]);
+    }
+  });
+  const other = path.join(f.root, 'worktree-b');
+  const git = (...args: string[]) => execFileSync('git', ['-C', f.workspace, ...args], { stdio: 'pipe', windowsHide: true });
+  git('init'); git('add', 'source.txt');
+  git('-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid', 'commit', '-m', 'fixture');
+  git('worktree', 'add', '-b', 'fixture-b', other);
+  const h = await f.openHost();
+  let first: Awaited<ReturnType<typeof h.runtime.child>> | undefined;
+  let firstRoot = '';
+  const submit = h.adapter.submit.bind(h.adapter);
+  h.adapter.submit = async input => { try { return await submit(input); } catch (error) { h.errors.push((error as { reason?: unknown }).reason ?? error); throw error; } };
+  for (const [label, directory] of [['A', f.workspace], ['B', other]] as const) {
+    await fs.writeFile(path.join(directory, 'source.txt'), `${label}_UNCOMMITTED`);
+    const identity = await h.api.create(`WORKTREE_${label}`);
+    const workspaceId = (await h.documents.resolveWorkspace({ path: directory })).workspaceId;
+    const prepared = await h.api.prepareSource({ ...identity, key: 'source', resourceOwner: { kind: 'local' }, workspaceId,
+      content: { mode: 'saved-files' }, captureScopes: [], mode });
+    prepared.source.tools = ['file_read'];
+    const parent = await h.api.submit({ ...identity, key: `parent-${label}`, expectedHead: null, text: `WORKTREE_${label}: delegate reading`, model, source: prepared.source })
+      .catch(error => { throw new Error(h.errors.map(String).join('\n'), { cause: error }); });
+    await expect.poll(async () => {
+      if (h.errors.length) throw new Error(h.errors.map(String).join('\n'));
+      return (await h.runtime.run(parent.run_id)).state;
+    }, { timeout: 15_000 }).toBe('completed');
+    const child = await h.runtime.child(operations.get(label)!);
+    expect(child.source.kind).toBe('shared');
+    expect(child.code_result.kind).toBe('no_changes');
+    const launch = await h.runtime.launch(child.receipt!.run_id);
+    const parentLaunch = await h.runtime.launch(parent.run_id);
+    if (mode === 'live_root') expect(launch!.selection.source).toEqual(parentLaunch!.selection.source);
+    else expect(launch!.selection.source).toEqual({ ...parentLaunch!.selection.source, environment_run_id: parent.run_id });
+    if (label === 'A') {
+      first = child;
+      firstRoot = mode === 'live_root' ? directory : (await originalMaterializationLocation(f.root, workspaceId, parent.run_id)).targetPath;
+    }
+  }
+  await fs.writeFile(path.join(firstRoot, 'source.txt'), 'A_UPDATED');
+  const childIdentity: ThreadIdentity = { runtime: 'agent', threadId: first!.child_thread_id, branchId: first!.child_branch_id };
+  const before = await h.api.snapshot(childIdentity);
+  const next = await h.api.collaboration!.continueChild({ ...childIdentity, key: 'again', previousRunId: first!.receipt!.run_id,
+    expectedHead: before.thread.branches.find(branch => branch.branch_id === childIdentity.branchId)!.head, text: 'WORKTREE_A: read again' });
+  await expect.poll(async () => (await h.runtime.childExecution(next.execution_id)).state, { timeout: 15_000 }).toBe('completed');
+  const finished = await h.runtime.childExecution(next.execution_id);
+  expect(finished.source).toMatchObject({ kind: 'shared', handoff: null });
+  expect((await h.runtime.launch(finished.receipt!.run_id))!.selection.source).toEqual((await h.runtime.launch(first!.receipt!.run_id))!.selection.source);
+  expect(childSteps.get('A')).toBe(4); expect(childSteps.get('B')).toBe(2);
+  expect(h.errors.map(String)).toEqual([]);
+}, 45_000);
 
 it.each(['user_continuation', 'message_request'] as const)('%s continues a completed writable child after Host restart from its exact fixed files with independent reports/results', async continuationKind => {
   let parentSteps = 0; let childSteps = 0; let operationId = '';

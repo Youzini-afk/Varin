@@ -462,6 +462,7 @@ enum Scenario {
     TypedMedia,
     Persistence,
     CancelDrain,
+    TimeoutOutput,
     LostClose,
     KillFailure,
     RunEndJob,
@@ -493,7 +494,7 @@ impl AgentPolicy for Cells {
         if stage > 0
             && stage
                 <= match self.scenario {
-                    Scenario::CancelDrain | Scenario::RunEndJob => 2,
+                    Scenario::CancelDrain | Scenario::RunEndJob | Scenario::TimeoutOutput => 2,
                     Scenario::LostClose | Scenario::KillFailure => 6,
                     _ => 5,
                 }
@@ -509,6 +510,8 @@ impl AgentPolicy for Cells {
                     panic!("original environment admission failed: {receipts:?}")
                 };
                 next["environment"] = json!(operation_id);
+            } else if self.scenario == Scenario::TimeoutOutput && stage == 2 {
+                assert_eq!(receipts[0].outcome(), Outcome::Failed);
             } else if self.scenario == Scenario::CancelDrain && stage == 2 {
                 assert_eq!(
                     receipts[0].outcome(),
@@ -544,7 +547,7 @@ impl AgentPolicy for Cells {
                 state: next,
             });
         }
-        if self.scenario == Scenario::CancelDrain && stage >= 2 {
+        if matches!(self.scenario, Scenario::CancelDrain | Scenario::TimeoutOutput) && stage >= 2 {
             return Ok(PolicyDecision {
                 action: if stage == 2 {
                     PolicyAction::RequestModel
@@ -567,6 +570,10 @@ impl AgentPolicy for Cells {
             });
         }
         let (name, args) = match stage {
+            1 if self.scenario == Scenario::TimeoutOutput => (
+                "script_run",
+                json!({"environmentId":env,"script":"print('printed-before-timeout'); for (;;) {}", "timeoutMs":1000}),
+            ),
             1 if self.scenario == Scenario::RunEndJob => (
                 "script_run",
                 json!({"environmentId": env, "script": format!(
@@ -698,6 +705,11 @@ fn actual_managed_node_retries_lost_close_receipt_without_replaying_cells() {
 #[ignore = "requires fresh kernel guardian, workspace Node/tsx and script-runtime build; no product socket or paid provider"]
 fn actual_run_end_stops_idle_script_environment_but_preserves_nested_thread_job() {
     run_case(Scenario::RunEndJob);
+}
+#[test]
+#[ignore = "requires fresh guardian/Node/script-runtime; no product socket or paid provider"]
+fn actual_script_timeout_preserves_printed_output_in_the_original_receipt() {
+    run_case(Scenario::TimeoutOutput);
 }
 #[test]
 #[ignore = "requires fresh guardian/Node; run alone or --test-threads=1 for the existing process kill fault injection"]
@@ -1077,10 +1089,19 @@ fn run_case(scenario: Scenario) {
                 wires.lock().unwrap().last().unwrap(),
             );
         }
+        if scenario == Scenario::TimeoutOutput {
+            let read = runtime.catalog().lock().unwrap()
+                .capture_call_completion(cell_id.as_deref().expect("original script cell"))
+                .unwrap();
+            let output = serde_json::to_string(&read.load().unwrap()).unwrap();
+            assert!(output.contains("printed-before-timeout"), "{output}");
+            assert!(output.contains("Explicit script timeout elapsed"), "{output}");
+            assert!(!output.contains("host_tool_effect_unknown"), "{output}");
+        }
         let facts:Vec<_>=snapshots.last().unwrap().history.iter().filter(|item|matches!(&item.provenance,Provenance::EnvironmentFact{event_id} if event_id.starts_with("memory:"))).collect();
         assert_eq!(
             facts.len(),
-            1,
+            if scenario == Scenario::TimeoutOutput { 0 } else { 1 },
             "one independent note reaches the next actual request"
         );
         assert!(snapshots.last().unwrap().history.iter().all(|item|!matches!(&item.content,Content::ToolResult{result} if result.call_id=="save-note")),"nested call cannot manufacture provider pairing");
@@ -1099,7 +1120,7 @@ fn run_case(scenario: Scenario) {
             std::fs::read_to_string(work.join("job-result")).unwrap(),
             "survived"
         );
-    } else if scenario != Scenario::TypedMedia {
+    } else if !matches!(scenario, Scenario::TypedMedia | Scenario::TimeoutOutput) {
         assert_eq!(
             std::fs::read_to_string(work.join("actual-node.txt")).unwrap(),
             "created by original Node"
@@ -1116,7 +1137,7 @@ fn run_case(scenario: Scenario) {
         db.capture_operation_read(db.operation(environment).unwrap())
     };
     let environment = read.load().unwrap();
-    assert_eq!(environment.effect, Effect::Confirmed);
+    assert_eq!(environment.effect, Effect::Confirmed, "{environment:?}");
     let terminal = serde_json::to_value(environment.result.as_ref().unwrap()).unwrap();
     assert_eq!(terminal["kind"], "output");
     assert_eq!(terminal["output"]["data"]["process"]["writerActive"], false);
@@ -1150,7 +1171,7 @@ fn run_case(scenario: Scenario) {
                 }
                 assert_eq!(
                     frame["memoryWrites"],
-                    if scenario == Scenario::RunEndJob {
+                    if matches!(scenario, Scenario::RunEndJob | Scenario::TimeoutOutput) {
                         0
                     } else {
                         1

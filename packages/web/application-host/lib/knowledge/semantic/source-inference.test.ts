@@ -13,7 +13,7 @@ import type { SemanticSourceView } from './query-view.js';
 import type { StructureSource } from '../../structure/types.js';
 import type { DocumentAuthority } from '../../documents/authority.js';
 
-async function fixture(failSource: boolean, local = false, managed = false) {
+async function fixture(failSource: boolean, local = false, managed = false, live = false) {
   const directory = mkdtempSync(join(tmpdir(), 'varin-source-inference-'));
   const credentials = { reference: 'fixture', authority: 'fixture-owner', account: 'fixture-account', generation: 1 };
   const embedding = { providerId: 'embedding', modelId: 'fixture', protocol: 'openai-compatible', dimensions: 2, maxTokens: 4096, enabled: true };
@@ -62,29 +62,49 @@ async function fixture(failSource: boolean, local = false, managed = false) {
     source.structure = structure;
   }
   const unavailable = () => { throw new Error('A source query must not inspect or watch the old live directory'); };
-  const documents = { inspectWorkspace: unavailable, read: unavailable, watch: unavailable } as unknown as DocumentAuthority;
+  let releaseWatch!: () => void;
+  const watchReady = new Promise<boolean>(resolve => { releaseWatch = () => resolve(true); });
+  const watch = vi.fn(() => ({ ready: watchReady, close() {}, position: null, settle: async () => {} }));
+  const documents = { inspectWorkspace: live ? async () => ({ root: directory }) : unavailable, read: unavailable,
+    watch: live ? watch : unavailable } as unknown as DocumentAuthority;
   const component = local ? await localComponentFixture(join(directory, 'component')) : undefined;
   const encoder = component ? createLocalSemanticEmbedder({ dataDir: '', pack: component.pack }) : createHashEmbedder();
   const runtime = createWorkspaceSemanticRuntime({ dataDir: directory, hostId: 'source-inference',
     documents, structureSource: managed ? new Proxy({} as StructureSource, { get: () => { throw new Error('Managed source cannot use coordinator grammars'); } }) : structure,
-    ...(managed ? { getIndexScope: () => { throw new Error('Managed source cannot use coordinator index selection'); } } : {}), scheduler: createEmbedScheduler(), embedder: encoder, runtimeInference: inference });
+    ...(managed ? { getIndexScope: () => { throw new Error('Managed source cannot use coordinator index selection'); } } : {}),
+    ...(live ? { searchFilesystemFiles: async () => [] } : {}), scheduler: createEmbedScheduler(), embedder: encoder, runtimeInference: inference });
   let invocation = 0;
   const run = (beforeSearch?: () => void) => inference.requests!.run({ operationId: `original-query-${++invocation}`,
     executorOwner: { kind: 'external', identity: 'source-test', epoch: 'original-epoch' } }, new AbortController().signal, async call => {
     await call.assertFresh();
     const lease = await runtime.acquireQuery({ workspaceId: 'original-workspace', inference: call, roots: [''], signal: call.signal,
-      sourceView: source, assertAuthorized() {}, authorize: async () => {} });
+      ...(live ? {} : { sourceView: source }), assertAuthorized() {}, authorize: async () => {} });
     try {
       expect(versionCheck).not.toHaveBeenCalled(); beforeSearch?.();
       if (lease.stage.status !== 'ready' || !lease.stage.implementation) throw new Error('Embedding binding unavailable');
       return await lease.stage.implementation.search('source meaning', 5, call.signal);
     } finally { lease.release(); }
   });
-  return { source, frames, fetch, versionCheck, embedding, run, runtime, inference, component, directory, encoder,
+  return { source, frames, fetch, versionCheck, embedding, run, runtime, inference, component, directory, encoder, watch, releaseWatch,
     select: (value: unknown) => { selection = value; }, setReadGate: (gate?: () => Promise<void>) => { readGate = gate; }, close: async () => {
     await runtime.dispose(); await inference.close(); rmSync(directory, { recursive: true, force: true });
   } };
 }
+
+it('serves a configured foreground query while the background document watcher is still starting', async () => {
+  const f = await fixture(false, false, false, true);
+  const scan = f.runtime.scanWorkspace('original-workspace');
+  try {
+    await vi.waitFor(() => expect(f.watch).toHaveBeenCalledOnce());
+    let result: Awaited<ReturnType<typeof f.run>> | undefined;
+    const query = f.run().then(value => { result = value; });
+    await vi.waitFor(() => expect(result).toBeDefined());
+    await query;
+    expect(result?.hits).toEqual([]);
+    expect(f.fetch).not.toHaveBeenCalled();
+    expect(f.watch).toHaveBeenCalledOnce();
+  } finally { f.releaseWatch(); await scan; await f.close(); }
+});
 
 it('checks complete document versions once at real egress and once before source publication', async () => {
   const f = await fixture(false);

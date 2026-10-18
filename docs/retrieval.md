@@ -46,6 +46,9 @@ Structure 使用 native tree-sitter grammar/recipe 与适用 LSP fallback。小�
 代码 semantic 和 knowledge-vector 是目的不同的派生库。身份包括实际 content/revision、model/vector space 和 recipe。
 新 generation 发布不会改写已有 reader 的 pin；相同路径或 provider 展示名不足以复用。
 
+文件观察器启动和后台索引独立于前台查询准入。观察器尚未就绪时，查询使用当前可用索引和检索路径，
+标明覆盖未完成；观察器就绪后统一补齐扫描。多个查询复用同一次观察器准备。
+
 Native 前台 query/document embedding、rerank、decision、generation 使用原 query session 和递增 ordinal。
 Catalog 管受理、dispatch、usage、receipt 与恢复；Host 配置、凭据、egress、protocol adapter 保持原归属。辅助推理直接使用原生 inference 路径。后台文档索引继续使用现有 index owner。
 

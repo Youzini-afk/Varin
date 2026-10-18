@@ -171,6 +171,39 @@ fn view(family: &str) -> RequestView {
         history: vec![],
     }
 }
+
+#[test]
+fn tool_output_budget_preserves_receipts_utf8_and_reuses_the_projection() {
+    let mut conn = connection(vec![], 1);
+    conn.accepts_images = Some(true);
+    conn.tool_output_visible_bytes = Some(32768);
+    let mut request = view(responses::FAMILY);
+    let text = format!("START\n{}\nLAST_ERROR", "中文🧭".repeat(7000));
+    let original = ConversationItem {
+        resource_activation: None, id: "large-receipt".into(),
+        provenance: Provenance::ToolData { call_id: "call-1".into() },
+        content: Content::ToolResult { result: ToolResult {
+            request_id: "request".into(), call_id: "call-1".into(),
+            completion: ToolCompletion::Result { outcome: crate::Outcome::Failed, effect: crate::Effect::Partial,
+                content: OutputBody { data: json!({"error":"timeout"}), parts: vec![OutputPart::Text { text: text.clone() }] } },
+        } }, opaque: None,
+    };
+    request.history.push(original.clone().into());
+    let mut reuse = RequestCompileReuse::new();
+    let projected = input_projection::model_input(&request, &conn, Some(&mut reuse)).history[0].clone();
+    let Content::ToolResult { result } = &projected.content else { panic!("tool receipt"); };
+    let ToolCompletion::Result { outcome, effect, content } = &result.completion else { panic!("completion"); };
+    assert_eq!((*outcome, *effect), (crate::Outcome::Failed, crate::Effect::Partial));
+    assert_eq!(content.data["historyItemId"], "large-receipt");
+    let OutputPart::Text { text: shown } = &content.parts[0] else { panic!("preview"); };
+    assert!(shown.contains("START") && shown.ends_with("LAST_ERROR"));
+    assert!(shown.len() + content.data.to_string().len() <= 32768);
+    assert_eq!(request.history[0].content, original.content);
+    let again = input_projection::model_input(&request, &conn, Some(&mut reuse)).history[0].clone();
+    assert!(Arc::ptr_eq(&projected, &again));
+    let wire = responses::ResponsesProvider::new(conn).serialize(&request, None).unwrap().to_value().to_string();
+    assert!(wire.len() < text.len() && wire.contains("LAST_ERROR") && wire.contains("truncated"));
+}
 fn generate(
     provider: &impl ModelProvider,
     family: &str,

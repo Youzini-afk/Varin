@@ -147,6 +147,7 @@ pub fn build_provider(
         crate::providers::connection_options::transport(configuration.connection.as_ref())?,
     );
     connection.accepts_images = configuration.accepts_images;
+    connection.tool_output_visible_bytes = configuration.tool_output_visible_bytes.map(|bytes| bytes as usize);
     let provider = selected.bind(&configuration, connection)?;
     let binding = RequestBinding {
         request_context: None,

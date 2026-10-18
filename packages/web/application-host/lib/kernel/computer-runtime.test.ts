@@ -196,6 +196,26 @@ test('both original tool origins dispatch through Computer owner without a file 
   }
 });
 
+test('apps shows foreground windows by default and can explicitly search hidden windows', async () => {
+  const f = await fixture();
+  try {
+    f.computers.listApps = async () => [
+      { name: 'Editor', pid: 1, windows: [{ handle: 1, title: 'Document', visible: true }, { handle: 2, title: 'Helper', visible: false }] },
+      { name: 'Minimized', pid: 2, windows: [{ handle: 3, visible: false, minimized: true }] },
+      { name: 'Background', pid: 3, windows: [{ handle: 4, title: 'Service', visible: false }] },
+    ];
+    const list = async (args: Record<string, unknown>) => {
+      const { receipt } = await f.invoke('apps', args);
+      assert.equal(receipt.completion.kind, 'result');
+      return receipt.completion.kind === 'result' ? receipt.completion.content.data as { apps: Array<{ name: string; windows: unknown[] }> } : { apps: [] };
+    };
+    const visible = await list({});
+    assert.deepEqual(visible.apps.map(app => app.name), ['Editor', 'Minimized']);
+    assert.equal(visible.apps[0]!.windows.length, 1);
+    assert.deepEqual((await list({ query: 'service', includeHidden: true })).apps.map(app => app.name), ['Background']);
+  } finally { await f.cleanup(); }
+});
+
 test('child assignment, missing desktop and disabled settings reject before input with none/stopped receipts', async () => {
   const f = await fixture();
   try {
