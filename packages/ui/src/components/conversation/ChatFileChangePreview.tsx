@@ -9,13 +9,14 @@ import { useOptionalThemeSystem } from '@/contexts/useThemeSystem';
 import { getMarkdownSyntaxVars } from '@/components/chat/markdown/markdownSyntaxVars';
 import { highlightLinesInWorker } from '@/components/chat/markdown/markdown-worker';
 import type { FileChangeLine, FileChangePhase, FileChangePreview } from './fileChangePreview';
+import { timelinePresentationCache } from './timelinePresentationCache';
 
 type PreviewView = { expanded: boolean; following: boolean; scrollTop: number };
 const PreviewViews = React.createContext<Map<string, PreviewView> | undefined>(undefined);
 
 /** The mounted turn keeps user navigation across live-to-persisted remounts. */
-export const ChatFileChangePreviewScope: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [views] = React.useState(() => new Map<string, PreviewView>());
+export const ChatFileChangePreviewScope: React.FC<{ children: React.ReactNode; sessionId?: string }> = ({ children, sessionId }) => {
+  const [views] = React.useState(() => sessionId ? timelinePresentationCache(sessionId, 'files', () => new Map<string, PreviewView>()) : new Map<string, PreviewView>());
   return <PreviewViews.Provider value={views}>{children}</PreviewViews.Provider>;
 };
 

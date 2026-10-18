@@ -61,6 +61,7 @@ export interface ChatSystemMessage {
 }
 
 export interface ChatAssistantMessage {
+  runId?: string;
   id: string;
   api: string;
   content: ChatAssistantContent[];
@@ -148,6 +149,7 @@ export type ChatMessage =
   | ChatUnknownMessage;
 
 export interface ChatSessionEntryBase {
+  runId?: string;
   id: string;
   parentId: string | null;
   timestamp: string;
@@ -171,6 +173,12 @@ export interface ChatUsageEntry extends ChatSessionEntryBase {
   model: string;
   usage: ChatUsage;
   note?: string;
+}
+
+export interface ChatRunUsageEntry extends ChatSessionEntryBase {
+  type: 'run_usage';
+  runId: string;
+  usages: ChatUsage[];
 }
 
 export interface ChatThinkingLevelChangeEntry extends ChatSessionEntryBase {
@@ -237,6 +245,7 @@ export interface ChatUnknownSessionEntry extends ChatSessionEntryBase {
 export type ChatSessionEntry =
   | ChatContextEditEntry
   | ChatUsageEntry
+  | ChatRunUsageEntry
   | ChatSessionMessageEntry
   | ChatThinkingLevelChangeEntry
   | ChatModelChangeEntry

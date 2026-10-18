@@ -12,6 +12,7 @@ import { ThreadRequestError } from '@varin/application-client';
 import type { ContextCheckpoint, ThreadIdentity, ThreadSnapshot, ThreadSubmit, ThreadsAPI } from '@varin/application-client';
 import type { ChildTask, DelegatedExecution, StoredMedia, McpInteractionView, FetchResult } from '@varin/protocol';
 import { ThreadConversation } from './ThreadConversation';
+import { useTimelineViewStore } from '../conversation/timelineViewStore';
 import { dict as zhCN } from '@/lib/i18n/messages/zh-CN';
 import { useThreadDraftStore } from '@/stores/useThreadDraftStore';
 import { bindThreadStore, threadHostKey, threadComposerKey, useThreadStore } from '@/stores/useThreadStore';
@@ -24,6 +25,7 @@ const translations = vi.hoisted(() => ({ dictionary: {} as Record<string, string
 const runtimeState = vi.hoisted(() => ({ api: undefined as ThreadsAPI | undefined }));
 const endpoint = vi.hoisted(() => ({ generation: 1, hostKey: 'host-a', listeners: new Set<() => void>() }));
 const recoveryService = vi.hoisted(() => ({ api: undefined as WorkspaceRecoveryAPI | undefined }));
+const timelineList = vi.hoisted(() => ({ scrollToIndex: vi.fn(async () => {}) }));
 vi.mock('@/lib/recovery/workspaceRecovery', async original => ({
   ...await original<typeof import('@/lib/recovery/workspaceRecovery')>(),
   getWorkspaceRecoveryAPI: () => { if (!recoveryService.api) throw new Error('Recovery unavailable'); return recoveryService.api; },
@@ -95,12 +97,14 @@ vi.mock('@/components/ui/textarea', () => ({ Textarea: ({ onChange, ...props }: 
 // virtual viewport's geometry and scrolling require a browser, so render its rows here.
 vi.mock('@legendapp/list/react', () => ({ LegendList: React.forwardRef((props: {
   data: Array<{ id: string }>; renderItem(input: { item: { id: string }; index: number }): React.ReactNode;
-  ListHeaderComponent?: React.ReactNode; ListFooterComponent?: React.ReactNode;
+  ListHeaderComponent?: React.ReactNode; ListFooterComponent?: React.ReactNode; onLoad?(): void;
 }, ref) => {
   const node = React.useRef<HTMLDivElement>(null);
+  const onLoad = React.useRef(props.onLoad);
+  React.useEffect(() => { onLoad.current?.(); }, []);
   React.useImperativeHandle(ref, () => ({ getScrollableNode: () => node.current,
     getState: () => ({ data: props.data, scroll: 0, scrollLength: 600, contentLength: 600, positionAtIndex: () => 0 }),
-    scrollToIndex: async () => {}, scrollToOffset: async () => {}, scrollToEnd: async () => {},
+    scrollToIndex: timelineList.scrollToIndex, scrollToOffset: async () => {}, scrollToEnd: async () => {},
   }), [props.data]);
   return <div ref={node}>{props.ListHeaderComponent}{props.data.map((item, index) => <React.Fragment key={item.id}>{props.renderItem({ item, index })}</React.Fragment>)}{props.ListFooterComponent}</div>;
 }) }));
@@ -129,7 +133,7 @@ function fixture(active = false) {
   });
   let listener: Parameters<ThreadsAPI['observe']>[1] | undefined;
   const unused = async (): Promise<never> => { throw new Error('unused fixture API'); };
-  const api: ThreadsAPI = { contextHistory: unused, fileTarget: unused, usage: unused, update: unused, delete: unused, markRead: unused, materials: { upload: vi.fn(unused), readSource: vi.fn(unused), read: vi.fn(unused), readArtifact: vi.fn(unused) }, computer: { state: vi.fn<ThreadsAPI['computer']['state']>(async target => ({ state: { work: target, rootWork: target, currentExecution: null, currentRootExecution: null, active: false, status: 'enabled', leases: [], requests: [], cleanups: [] }, activities: [] })), stop: vi.fn(unused), decide: vi.fn(unused) }, goals: { start: vi.fn(unused), update: unused, control: unused, list: async () => view.goals }, resources: { refresh: unused }, followups: { jobSources: async () => [], register: unused, list: unused, get: unused, occurrence: unused, occurrences: unused, control: unused, pendingRegistrations: async () => [], cancelRegistration: unused }, listModels: async () => [{ providerId: 'fixture-provider', modelId: 'fixture-model' }], list: async () => [view.thread], create: async () => identity,
+  const api: ThreadsAPI = { historyRuns: async (_identity, { headId }) => ({ head: headId, runs: [] }), historyRunPreview: async () => '', historyUsage: async () => [], contextHistory: unused, fileTarget: unused, usage: unused, update: unused, delete: unused, markRead: unused, materials: { upload: vi.fn(unused), readSource: vi.fn(unused), read: vi.fn(unused), readArtifact: vi.fn(unused) }, computer: { state: vi.fn<ThreadsAPI['computer']['state']>(async target => ({ state: { work: target, rootWork: target, currentExecution: null, currentRootExecution: null, active: false, status: 'enabled', leases: [], requests: [], cleanups: [] }, activities: [] })), stop: vi.fn(unused), decide: vi.fn(unused) }, goals: { start: vi.fn(unused), update: unused, control: unused, list: async () => view.goals }, resources: { refresh: unused }, followups: { jobSources: async () => [], register: unused, list: unused, get: unused, occurrence: unused, occurrences: unused, control: unused, pendingRegistrations: async () => [], cancelRegistration: unused }, listModels: async () => [{ providerId: 'fixture-provider', modelId: 'fixture-model' }], list: async () => [view.thread], create: async () => identity,
     mediaRead: vi.fn(async input => ({ media: storedImage, partIndex: input.partIndex, chunkIndex: 0, chunkCount: 1, totalBytes: Buffer.from(imageData, 'base64').length, bytesBase64: imageData })),
     listMcpInteractions: vi.fn(async () => ({ items: [], nextCursor: null })), readMcpInteraction: unused, respondMcpInteraction: unused,
     reviewMcpSamplingRequest: unused, reviewMcpSamplingOutput: unused,
@@ -149,6 +153,8 @@ beforeEach(() => {
   vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:test-image');
   vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => {});
   useThreadDraftStore.setState({ drafts: {} });
+  useTimelineViewStore.setState({ views: {} });
+  timelineList.scrollToIndex.mockClear();
   useInlineCommentDraftStore.setState({ drafts: {}, touchedAt: {} });
   resetEditorContextAttachments();
   endpoint.generation = 1; endpoint.hostKey = 'host-a';
@@ -823,40 +829,65 @@ it('keeps earlier retained PDFs when a later file fails and never claims success
 });
 
 
-it('loads earlier images under a pinned head while live controls continue, then returns to latest messages', async () => {
+const historyFrames = () => {
+  const frames: FrameRequestCallback[] = [];
+  vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => { frames.push(callback); return frames.length; });
+  return async () => { while (frames.length) await act(async () => { for (const callback of frames.splice(0)) callback(performance.now()); }); };
+};
+
+it('prefetches earlier images without a load button and retains them while live messages and controls continue', async () => {
+  const flushFrames = historyFrames();
   const f = fixture(true);
-  const item = (id: string, text: string) => ({ id, thread_id: identity.threadId, run_id: 'ui-run', parent: null, source: 'assistant' as const, content: { id, provenance: { kind: 'assistant' }, content: { kind: 'text', text }, opaque: null }, provider: null });
-  f.view.history = [item('message-2', 'middle message'), item('message-3', 'pinned newest message')];
+  const item = (id: string, text: string) => ({ id, thread_id: identity.threadId, run_id: 'ui-run', parent: Number(id.split('-')[1]) > 1 ? `message-${Number(id.split('-')[1]) - 1}` : null, source: 'assistant' as const, content: { id, provenance: { kind: 'assistant' }, content: { kind: 'text', text }, opaque: null }, provider: null });
+  f.view.history = [item('message-2', 'middle message'), item('message-3', 'newest message')];
   f.view.historyPage = { head: 'message-3', previous: 'message-2' };
   f.view.thread.branches[0]!.head = 'message-3';
   const earlier = { ...item('message-1', 'oldest image message'), source: 'user' as const, content: { text: 'oldest image message', attachments: [storedImage] } };
   const historyPage = vi.fn(async () => ({ head: 'message-3', previous: null, items: [earlier] }));
   f.api.historyPage = historyPage;
   await act(async () => { root.render(<ThreadConversation api={f.api} identity={identity} />); });
-  await act(async () => { button('Load earlier history').click(); });
-  expect(historyPage).toHaveBeenCalledWith(identity, { headId: 'message-3', beforeId: 'message-2' });
+  await flushFrames();
+  expect(historyPage).toHaveBeenCalledWith(identity, { headId: 'message-3', beforeId: 'message-2' }, expect.any(AbortSignal));
+  expect(container.textContent).not.toContain('Load earlier history');
   expect(container.textContent).toContain('oldest image message');
   await act(async () => button('View image').click());
   expect(container.querySelector('article img')?.getAttribute('src')).toBe('blob:test-image');
-  f.view.history = [item('message-3', 'pinned newest message'), item('message-4', 'new live arrival')];
+  f.view.history = [item('message-3', 'newest message'), item('message-4', 'new live arrival')];
   f.view.historyPage = { head: 'message-4', previous: 'message-3' };
   f.view.thread.branches[0]!.head = 'message-4';
   await act(async () => { f.emit({ cursor: 20, subject: 'ui-run', revision: 2, kind: 'history.appended', data: {} }); });
-  expect(container.textContent).not.toContain('new live arrival');
-  expect(button('Show latest messages')).toBeDefined();
+  expect(container.textContent).toContain('new live arrival');
+  expect(container.textContent).toContain('oldest image message');
   await act(async () => { button('Stop run').click(); });
   expect(f.cancelRun).toHaveBeenCalledWith('ui-run');
-  expect(container.textContent).toContain('oldest image message');
-  await act(async () => { button('Show latest messages').click(); });
-  expect(container.textContent).toContain('new live arrival');
-  expect(container.textContent).not.toContain('oldest image message');
 });
 
-it('acknowledges only visible live history and waits to mark newer activity until returning from an earlier page', async () => {
+it('navigates to a complete Run whose body is not loaded without changing the rail when history arrives', async () => {
+  const flushFrames = historyFrames();
+  const f = fixture(true);
+  useUIStore.setState({ promptNavigatorEnabled: true });
+  const history = Array.from({ length: 5 }, (_, i) => ({ id: `nav:${i}`, parent: i ? `nav:${i - 1}` : null, thread_id: identity.threadId,
+    run_id: i < 2 ? 'old-run' : 'ui-run', source: i === 0 || i === 2 ? 'user' as const : 'assistant' as const, provider: null,
+    content: i === 0 || i === 2 ? { text: `Question ${i}` } : { content: { kind: 'text', text: i === 1 ? 'Earlier complete answer' : `Current step ${i}` } } }));
+  f.view.history = history.slice(3); f.view.historyPage = { head: 'nav:4', previous: 'nav:3' };
+  f.api.historyRuns = async () => ({ head: 'nav:4', runs: [{ runId: 'old-run', firstItemId: 'nav:0', lastItemId: 'nav:1' }, { runId: 'ui-run', firstItemId: 'nav:2', lastItemId: 'nav:4' }] });
+  const historyPage = vi.fn(async () => ({ head: 'nav:4', previous: null, items: history.slice(0, 3) })); f.api.historyPage = historyPage;
+  await act(async () => root.render(<ThreadConversation api={f.api} identity={identity} />));
+  expect(container.querySelectorAll('[data-run-id]')).toHaveLength(2);
+  expect(container.textContent).not.toContain('Earlier complete answer');
+  const original = container.querySelector<HTMLButtonElement>('[data-run-id="old-run"]')!;
+  await act(async () => original.click()); await flushFrames();
+  expect(historyPage).toHaveBeenCalledWith(identity, { headId: 'nav:4', beforeId: 'nav:3', limit: 256 }, expect.any(AbortSignal));
+  expect(container.textContent).toContain('Earlier complete answer');
+  expect(container.querySelectorAll('[data-run-id]')).toHaveLength(2);
+  expect(container.querySelector('[data-run-id="old-run"]')).toBe(original);
+  expect(original.getAttribute('aria-current')).toBe('location');
+  expect(timelineList.scrollToIndex).toHaveBeenCalled();
+});
+
+it('acknowledges visible history only while following the latest messages', async () => {
   const f = fixture(true);
   f.view.thread.activity_cursor = 1;
-  f.view.historyPage = { head: 'head', previous: 'previous' };
-  f.api.historyPage = async () => ({ head: 'head', previous: null, items: [] });
   const markRead = vi.spyOn(useThreadStore.getState(), 'markRead').mockResolvedValue(undefined);
   Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'hidden' });
   await act(async () => root.render(<ThreadConversation api={f.api} identity={identity} />));
@@ -864,33 +895,38 @@ it('acknowledges only visible live history and waits to mark newer activity unti
   Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'visible' });
   await act(async () => document.dispatchEvent(new window.Event('visibilitychange')));
   expect(markRead).toHaveBeenLastCalledWith(identity.threadId, 1);
-  await act(async () => button('Load earlier history').click());
+  const key = threadComposerKey(threadHostKey(), identity);
+  await act(async () => useTimelineViewStore.getState().cancelTimelineAutomation(key));
   markRead.mockClear();
   f.view.thread.activity_cursor = 2;
   await act(async () => f.emit({ cursor: 2, subject: 'ui-run', revision: 2, kind: 'history.appended', data: {} }));
   await act(async () => document.dispatchEvent(new window.Event('visibilitychange')));
   expect(markRead).not.toHaveBeenCalled();
-  await act(async () => button('Return to latest view').click());
+  await act(async () => {
+    const store = useTimelineViewStore.getState();
+    store.completeTimelineReturn(key, store.requestTimelineReturn(key));
+  });
   expect(markRead).toHaveBeenLastCalledWith(identity.threadId, 2);
 });
 
 it('discards an earlier-page response after the selected branch changes', async () => {
+  const flushFrames = historyFrames();
   const f = fixture();
-  f.view.historyPage = { head: 'old-head', previous: 'old-cursor' };
+  f.view.history = [{ id: 'old-head', parent: 'old-message', thread_id: identity.threadId, run_id: 'ui-run', source: 'assistant', provider: null, content: {} }];
+  f.view.historyPage = { head: 'old-head', previous: 'old-head' };
   let resolvePage!: (page: Awaited<ReturnType<ThreadsAPI['historyPage']>>) => void;
   f.api.historyPage = () => new Promise(resolve => { resolvePage = resolve; });
   await act(async () => { root.render(<ThreadConversation api={f.api} identity={identity} />); });
-  await act(async () => { button('Load earlier history').click(); });
-  expect(button('Loading earlier history').disabled).toBe(true);
+  await flushFrames();
+  expect(resolvePage).toBeDefined();
   const next = { ...identity, branchId: 'another-branch' };
   f.view.identity = next;
   f.view.thread.branches = [{ branch_id: next.branchId, head: null, active_run_id: null, latest_run: null }];
-  f.view.historyPage = { head: null, previous: null };
+  f.view.history = []; f.view.historyPage = { head: null, previous: null };
   await act(async () => { root.render(<ThreadConversation api={f.api} identity={next} />); });
   await act(async () => { resolvePage({ head: 'old-head', previous: null, items: [{ id: 'old-message', thread_id: identity.threadId, run_id: 'ui-run', parent: null, source: 'user', content: { text: 'history from the previous branch' }, provider: null }] }); });
   expect(container.textContent).not.toContain('history from the previous branch');
   expect(container.textContent).not.toContain('Viewing saved history');
-  expect([...container.querySelectorAll('button')].filter(value => !value.closest('[inert]')).map(value => value.textContent)).not.toContain('Loading earlier history');
 });
 
 it('retries a conversation fork with the same request key and opens only the accepted branch', async () => {

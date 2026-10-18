@@ -28,6 +28,8 @@ import type { ThreadSkillInputPreparer } from './thread-skill-input.js';
 import { parseExplicitSkillCommand } from '../agent-resources/activation.js';
 import { KernelRequestError } from './kernel-error.js';
 import { ResourceScopeError } from './thread-resource-scope.js';
+import { HistoryRunUsageReader, historyModelRequestId } from './history-run-usage.js';
+import { HistoryRunNavigationReader } from './history-run-navigation.js';
 
 export interface ThreadModelAuthority {
   listModels?(): Promise<ThreadModelInfo[]>;
@@ -898,30 +900,43 @@ export class ThreadAdapter {
     return operation;
   }
 
-  async historyPage(identity: ThreadIdentity, cursor: { headId: string; beforeId: string }): Promise<ThreadHistoryPage> {
+  async historyPage(identity: ThreadIdentity, cursor: { headId: string; beforeId: string; limit?: number }, signal?: AbortSignal): Promise<ThreadHistoryPage> {
     await this.requireIdentity(identity);
-    return this.readHistoryPage(identity.branchId, cursor);
+    return this.readHistoryPage(identity.branchId, cursor, signal);
   }
 
-  private readonly historyModelPresentations = new Map<string, import('@varin/protocol').ModelPresentation>();
+  private historyNavigationReader?: HistoryRunNavigationReader;
+  async historyRuns(identity: ThreadIdentity, cursor: { headId: string | null }, signal?: AbortSignal) {
+    await this.requireIdentity(identity);
+    return (this.historyNavigationReader ??= new HistoryRunNavigationReader(this.runtime)).read(identity.branchId, cursor.headId, signal);
+  }
+  async historyRunPreview(identity: ThreadIdentity, cursor: { headId: string; runId: string }, signal?: AbortSignal) {
+    await this.requireIdentity(identity);
+    return (this.historyNavigationReader ??= new HistoryRunNavigationReader(this.runtime)).preview(identity.branchId, cursor.headId, cursor.runId, signal);
+  }
 
-  private async readHistoryPage(branchId: string, cursor?: { headId: string; beforeId?: string }): Promise<ThreadHistoryPage> {
-    const page = await this.runtime.historyPage({ branchId, ...cursor, limit: 20 });
-    const items = await Promise.all(page.items.map(item => this.runtime.historyItem(item)));
+  async historyUsage(identity: ThreadIdentity, cursor: { headId: string; beforeId?: string; limit?: number }, signal?: AbortSignal) {
+    await this.requireIdentity(identity);
+    const page = await this.readHistoryPage(identity.branchId, cursor, signal);
+    return (this.historyUsageReader ??= new HistoryRunUsageReader(this.runtime)).read(identity.branchId, page,
+      page.items.flatMap(item => item.modelRequest ? [item.modelRequest] : []), signal);
+  }
+
+  private historyUsageReader?: HistoryRunUsageReader;
+
+  private async readHistoryPage(branchId: string, cursor?: { headId: string; beforeId?: string; limit?: number }, signal?: AbortSignal): Promise<ThreadHistoryPage> {
+    const page = await this.runtime.historyPage({ branchId, limit: 20, ...cursor }, signal);
+    const items = await Promise.all(page.items.map(item => this.runtime.historyItem(item, signal)));
     const requests = new Map<string, string>();
     for (const item of items) {
-      if (item.source !== 'assistant') continue;
-      const id = (item.content as { id?: unknown } | null)?.id;
-      if (typeof id !== 'string') continue;
-      // Runtime model_history_id encodes the request's byte length before the provider item ID.
-      const prefix = /^model-item:(\d+):/.exec(id);
-      if (prefix) requests.set(item.id, Buffer.from(id.slice(prefix[0].length)).subarray(0, Number(prefix[1])).toString('utf8'));
+      const id = historyModelRequestId(item);
+      if (id) requests.set(item.id, id);
     }
-    const missing = [...new Set(requests.values())].filter(id => !this.historyModelPresentations.has(id));
-    if (missing.length) for (const view of await this.runtime.modelPresentations(missing)) this.historyModelPresentations.set(view.requestId, view);
+    const presentations = requests.size ? await this.runtime.modelPresentations([...new Set(requests.values())], signal) : [];
+    const metadata = new Map(presentations.map(view => [view.requestId, view]));
     return { head: page.head, previous: page.previous, items: items.map(item => {
       const requestId = requests.get(item.id);
-      const modelRequest = requestId && this.historyModelPresentations.get(requestId);
+      const modelRequest = requestId && metadata.get(requestId);
       return modelRequest ? { ...item, modelRequest } : item;
     }) };
   }

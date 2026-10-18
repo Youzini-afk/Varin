@@ -155,7 +155,9 @@ export function registerThreadRoutes(app: Express, adapter: ThreadAdapter, requi
     read: ['runtime', 'threadId', 'key', 'throughCursor'],
     create: ['key'], list: ['query', 'archived'], models: [], submit: ['runtime', 'threadId', 'branchId', 'key', 'text', 'images', 'materials', 'expectedHead', 'model', 'source', 'agent'],
     usage: ['runtime', 'threadId', 'branchId'],
-    snapshot: ['runtime', 'threadId', 'branchId'], 'history/page': ['runtime', 'threadId', 'branchId', 'headId', 'beforeId'], enqueue: ['runtime', 'threadId', 'branchId', 'key', 'text', 'images', 'materials', 'mode'],
+    snapshot: ['runtime', 'threadId', 'branchId'], 'history/page': ['runtime', 'threadId', 'branchId', 'headId', 'beforeId', 'limit'],
+    'history/runs': ['runtime', 'threadId', 'branchId', 'headId'], 'history/run-preview': ['runtime', 'threadId', 'branchId', 'headId', 'runId'],
+    'history/usage': ['runtime', 'threadId', 'branchId', 'headId', 'beforeId', 'limit'], enqueue: ['runtime', 'threadId', 'branchId', 'key', 'text', 'images', 'materials', 'mode'],
     'input/edit': ['inputId', 'expectedRevision', 'text', 'images'], 'input/cancel': ['inputId', 'expectedRevision'],
     run: ['runId'], 'run/cancel': ['runId'], 'run/resume': ['runId', 'waitId'], 'run/retry-preparation': ['runId'], operation: ['operationId'], 'operation/cancel': ['operationId'], events: ['cursor'],
   };
@@ -462,7 +464,10 @@ export function registerThreadRoutes(app: Express, adapter: ThreadAdapter, requi
     });
     return adapter.submit(input);
   });
-  post('history/page', body => adapter.historyPage(identity(body), { headId: text(body.headId), beforeId: text(body.beforeId) }));
+  post('history/page', (body, signal) => adapter.historyPage(identity(body), { headId: text(body.headId), beforeId: text(body.beforeId), ...(body.limit === undefined ? {} : { limit: Number(body.limit) }) }, signal));
+  post('history/runs', (body, signal) => adapter.historyRuns(identity(body), { headId: body.headId === null ? null : text(body.headId) }, signal));
+  post('history/run-preview', (body, signal) => adapter.historyRunPreview(identity(body), { headId: text(body.headId), runId: text(body.runId) }, signal));
+  post('history/usage', (body, signal) => adapter.historyUsage(identity(body), { headId: text(body.headId), ...(body.beforeId === undefined ? {} : { beforeId: text(body.beforeId) }), ...(body.limit === undefined ? {} : { limit: Number(body.limit) }) }, signal));
   post('history/file', (body, signal) => adapter.fileTarget({ ...identity(body), itemId: text(body.itemId), path: text(body.path) }, signal));
   post('snapshot', body => adapter.snapshot(identity(body)));
   post('usage', (body, signal) => adapter.usage(identity(body), signal));

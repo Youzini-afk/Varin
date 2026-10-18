@@ -1,5 +1,5 @@
 import React from 'react';
-import type { ChatAssistantMessage, ChatSessionEntry } from './types';
+import type { ChatAssistantMessage, ChatSessionEntry, ChatUsage } from './types';
 import {
   aggregateChatUsage,
   assistantMessagesForTurn,
@@ -9,11 +9,12 @@ import { ChatAssistantUsageFooter } from './ChatAssistantUsageFooter';
 
 export const ChatTurnUsageFooter: React.FC<{
   actions?: React.ReactNode;
-  entries: readonly ChatSessionEntry[];
+  entries?: readonly ChatSessionEntry[];
+  usages?: readonly ChatUsage[];
   liveAssistant?: ChatAssistantMessage;
   outputDurationsMs?: Readonly<Record<string, number>>;
-}> = ({ actions, entries, liveAssistant, outputDurationsMs }) => {
-  const usages = assistantMessagesForTurn(entries, liveAssistant).flatMap(message => message.usage ? [message.usage] : []);
+}> = ({ actions, entries = [], usages: providedUsages, liveAssistant, outputDurationsMs }) => {
+  const usages = providedUsages ?? assistantMessagesForTurn(entries, liveAssistant).flatMap(message => message.usage ? [message.usage] : []);
   const groups = ['actual', 'estimated', 'missing'].flatMap(measurement => {
     const usage = aggregateChatUsage(usages.filter(usage => usage.measurement === measurement));
     return usage ? [usage] : [];

@@ -84,6 +84,23 @@ export interface ThreadHistoryPage {
   previous: string | null;
   items: ThreadHistoryItem[];
 }
+/** One real Run on the selected branch's visible ancestry, independent of loaded bodies. */
+export interface ThreadHistoryRun {
+  runId: string;
+  firstItemId: string | null;
+  lastItemId: string | null;
+}
+export interface ThreadHistoryRuns {
+  head: string | null;
+  runs: ThreadHistoryRun[];
+}
+/** Original model receipts through the displayed history cut, once per ended Run. */
+export interface ThreadRunUsage {
+  runId: string;
+  /** Last original item included in this Run's summary. */
+  throughId: string;
+  requests: Array<Pick<import('@varin/protocol').ModelPresentation, 'requestId' | 'usage'>>;
+}
 /** Current file in the historical operation's original source, never the navigation project. */
 export type ThreadFileTarget = { kind: 'document'; workspaceId: string; root: string; resourceId: string }
   | { kind: 'unavailable'; reason: 'no_source' | 'fixed_source' | 'managed_source' };
@@ -369,7 +386,11 @@ export interface ThreadsAPI {
   cancelInput(inputId: string, expectedRevision: number): Promise<QueuedInput>;
   /** Read one original-holder media chunk; the expected reference is identity, never authority. */
   mediaRead(input: ThreadIdentity & Omit<MediaReadParams, 'threadId' | 'branchId'>, signal?: AbortSignal): Promise<MediaReadChunk>;
-  historyPage(identity: ThreadIdentity, cursor: { headId: string; beforeId: string }): Promise<ThreadHistoryPage>;
+  historyPage(identity: ThreadIdentity, cursor: { headId: string; beforeId: string; limit?: number }, signal?: AbortSignal): Promise<ThreadHistoryPage>;
+  historyRuns(identity: ThreadIdentity, cursor: { headId: string | null }, signal?: AbortSignal): Promise<ThreadHistoryRuns>;
+  historyRunPreview(identity: ThreadIdentity, cursor: { headId: string; runId: string }, signal?: AbortSignal): Promise<string>;
+  /** Secondary read; history bodies never wait for a whole Run's usage scan. */
+  historyUsage(identity: ThreadIdentity, cursor: { headId: string; beforeId?: string; limit?: number }, signal?: AbortSignal): Promise<ThreadRunUsage[]>;
   fileTarget(input: ThreadIdentity & { itemId: string; path: string }, signal?: AbortSignal): Promise<ThreadFileTarget>;
   snapshot(identity: ThreadIdentity): Promise<ThreadSnapshot>;
   /** Original execution usage on this branch, excluding child Threads and standalone utility work. */

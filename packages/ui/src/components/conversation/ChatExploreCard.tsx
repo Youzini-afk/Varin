@@ -10,11 +10,12 @@ import { usePrefersReducedMotion } from '@/hooks/usePrefersReducedMotion';
 import { useI18n } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
 import { explorePresentation, exploreRecord } from './explorePresentation';
+import { timelinePresentationCache } from './timelinePresentationCache';
 
 type ExploreView = { expanded: boolean; sequence: number };
 const ExploreViews = React.createContext<Map<string, ExploreView> | undefined>(undefined);
-export const ChatExploreScope: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [views] = React.useState(() => new Map<string, ExploreView>());
+export const ChatExploreScope: React.FC<{ children: React.ReactNode; sessionId?: string }> = ({ children, sessionId }) => {
+  const [views] = React.useState(() => sessionId ? timelinePresentationCache(sessionId, 'explore', () => new Map<string, ExploreView>()) : new Map<string, ExploreView>());
   return <ExploreViews.Provider value={views}>{children}</ExploreViews.Provider>;
 };
 

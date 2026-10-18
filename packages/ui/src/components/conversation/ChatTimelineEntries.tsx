@@ -59,8 +59,23 @@ import { ChatCollapsibleUserContent } from './ChatCollapsibleUserContent';
 import { ChatTurnChangedFiles } from './ChatTurnChangedFiles';
 import { ChatToolResultPreview } from './ChatToolResultPreview';
 import { assistantMessagesForTurn } from './usagePresentation';
+import { timelinePresentationCache } from './timelinePresentationCache';
 
 export interface ChatTimelineProps {
+  navigation?: {
+    runs: readonly import('@varin/application-client').ThreadHistoryRun[];
+    readPreview(runId: string, signal: AbortSignal): Promise<string>;
+    ensureItem(entryId: string, signal: AbortSignal): Promise<void>;
+    error?: string;
+    retry(): Promise<void>;
+  };
+  earlierHistory?: {
+    available: boolean;
+    loading: boolean;
+    error?: string;
+    latencyMs: number;
+    load(retry?: boolean): Promise<void>;
+  };
   header?: React.ReactNode;
   footer?: React.ReactNode;
   compactionStatus?: 'requested' | 'running' | 'retrying' | 'ready' | 'applying' | 'failed';
@@ -249,10 +264,12 @@ const ToolResultContent: React.FC<{
 const ToolDisclosureContext = React.createContext<Map<string, boolean> | null>(null);
 const TimelineSessionContext = React.createContext<string | undefined>(undefined);
 
-const ChatToolDisclosureScope: React.FC<{ children: React.ReactNode; sessionId: string }> = ({ children, sessionId }) => {
-  const [choices] = React.useState(() => new Map<string, boolean>());
+export const ChatToolDisclosureScope: React.FC<{ children: React.ReactNode; sessionId: string }> = ({ children, sessionId }) => {
+  const parent = React.useContext(ToolDisclosureContext);
+  const [choices] = React.useState(() => timelinePresentationCache(sessionId, 'tools', () => new Map<string, boolean>()));
+  if (parent) return <>{children}</>;
   return <TimelineSessionContext.Provider value={sessionId}><ToolDisclosureContext.Provider value={choices}>
-    <ChatExploreScope><ChatFileChangePreviewScope>{children}</ChatFileChangePreviewScope></ChatExploreScope>
+    <ChatExploreScope sessionId={sessionId}><ChatFileChangePreviewScope sessionId={sessionId}>{children}</ChatFileChangePreviewScope></ChatExploreScope>
   </ToolDisclosureContext.Provider></TimelineSessionContext.Provider>;
 };
 
@@ -656,19 +673,23 @@ const AssistantMessage: React.FC<{
   </div>;
 };
 
-const ChatSortedActivityGroup: React.FC<{
+export const ChatSortedActivityGroup: React.FC<{
   cwd: string;
   executionById: Record<string, ChatToolExecutionState>;
   hiddenThinkingLabel: string;
   projection: ChatSortedTurnProjection;
   resultByCallId: ReadonlyMap<string, ChatToolResultMessage>;
-}> = ({ cwd, executionById, hiddenThinkingLabel, projection, resultByCallId }) => {
+  part?: 'header' | 'body';
+  expanded?: boolean;
+  onExpandedChange?(expanded: boolean): void;
+}> = ({ cwd, executionById, hiddenThinkingLabel, projection, resultByCallId, part, expanded: controlledExpanded, onExpandedChange }) => {
   const { t } = useI18n();
   const activityRenderMode = useUIStore((state) => state.activityRenderMode);
   const preview = React.useContext(ConversationPreviewContext);
   const showThinking = useUIStore(state => state.showReasoningTraces);
   const activity = projection.activity.filter(item => showThinking || item.kind !== 'thinking');
-  const [expanded, setExpanded] = React.useState(activityRenderMode === 'summary');
+  const [localExpanded, setExpanded] = React.useState(activityRenderMode === 'summary');
+  const expanded = controlledExpanded ?? localExpanded;
   React.useEffect(() => {
     setExpanded(activityRenderMode === 'summary');
   }, [activityRenderMode]);
@@ -700,9 +721,9 @@ const ChatSortedActivityGroup: React.FC<{
       className="min-w-0"
       data-conversation-sorted-activity="true"
     >
-      <button
+      {part !== 'body' && <button
         type="button"
-        onClick={() => setExpanded((value) => !value)}
+        onClick={() => onExpandedChange ? onExpandedChange(!expanded) : setExpanded(value => !value)}
         className="flex w-full items-center gap-2 rounded-md px-1 py-1.5 text-left typography-meta text-muted-foreground hover:bg-interactive-hover"
         aria-expanded={expanded}
       >
@@ -719,8 +740,8 @@ const ChatSortedActivityGroup: React.FC<{
         {failed ? <ChatToolStatus status="error" /> : null}
         <span className="typography-micro">{activity.length}</span>
         <Icon name="arrow-down-s" className={cn('size-3.5 shrink-0 transition-transform', expanded && 'rotate-180')} />
-      </button>
-      {expanded ? (
+      </button>}
+      {part !== 'header' && expanded ? (
         <div className="ml-2 space-y-2 border-l border-border py-2 pl-3">
           {activity.map((item, index) => {
             if (item.kind === 'tool') {
@@ -910,6 +931,11 @@ export const ChatTimelineEntryList: React.FC<Omit<
 > & {
   outputDurationsMs?: Readonly<Record<string, number>>;
   projectedResultByCallId?: ReadonlyMap<string, ChatToolResultMessage>;
+  part?: 'body' | 'footer';
+  /** A physical body row uses its logical Run's sorted projection. Activity
+   * has its own virtual rows; it must not be mounted again inside the body. */
+  sortedPresentation?: ChatSortedTurnProjection;
+  extensionPresentation?: ReadonlyMap<string, () => React.ReactNode>;
 }> = ({
   cwd,
   entries,
@@ -925,6 +951,9 @@ export const ChatTimelineEntryList: React.FC<Omit<
   sessionId,
   threadBusyEntryId,
   toolExecutions,
+  part,
+  sortedPresentation,
+  extensionPresentation,
 }) => {
   const { t } = useI18n();
   const chatRenderMode = useUIStore((state) => state.chatRenderMode);
@@ -933,7 +962,7 @@ export const ChatTimelineEntryList: React.FC<Omit<
     cwd: string;
     entry: ChatSessionEntry;
     sessionId: string;
-  }>('message-renderer', 'chat.timeline.entries', !preview);
+  }>('message-renderer', 'chat.timeline.entries', !preview && !extensionPresentation);
   const previousProjection = React.useRef<ReturnType<typeof projectChatTimeline> | undefined>(undefined);
   const projection = React.useMemo(
     () => projectChatTimeline(entries, liveAssistant, undefined, previousProjection.current),
@@ -943,22 +972,29 @@ export const ChatTimelineEntryList: React.FC<Omit<
   const resultByCallId = projectedResultByCallId ?? projection.resultByCallId;
   const extensionEntries = React.useMemo(() => {
     const renderedById = new Map<string, React.ReactNode>();
+    if (extensionPresentation) {
+      for (const entry of projection.visibleEntries) {
+        const render = extensionPresentation.get(entry.id);
+        if (render) renderedById.set(entry.id, part === 'footer' ? null : render());
+      }
+      return renderedById;
+    }
     if (preview) return renderedById;
     for (const entry of projection.visibleEntries) {
       const rendered = renderFirstWorkbenchMatch(messageRenderers, { cwd, entry, sessionId });
       if (rendered !== undefined) renderedById.set(entry.id, rendered);
     }
     return renderedById;
-  }, [cwd, messageRenderers, preview, projection.visibleEntries, sessionId]);
+  }, [cwd, messageRenderers, preview, projection.visibleEntries, sessionId, extensionPresentation, part]);
   const builtInEntries = React.useMemo(
     () => projection.visibleEntries.filter((entry) => !extensionEntries.has(entry.id)),
     [extensionEntries, projection.visibleEntries],
   );
   const sortedProjection = React.useMemo(
-    () => chatRenderMode === 'sorted'
+    () => sortedPresentation ?? (chatRenderMode === 'sorted'
       ? projectChatSortedTurn(builtInEntries, projection.liveAssistant)
-      : undefined,
-    [builtInEntries, chatRenderMode, projection.liveAssistant],
+      : undefined),
+    [builtInEntries, chatRenderMode, projection.liveAssistant, sortedPresentation],
   );
   const resolvedThinkingLabel = hiddenThinkingLabel || t('chat.reasoningTrace.thinking');
   // The row owns the whole turn, independent of live/sorted presentation.
@@ -972,11 +1008,13 @@ export const ChatTimelineEntryList: React.FC<Omit<
     entry.type === 'message' && entry.message.role === 'assistant'
       && entry.message.content.some((content) => content.type === 'text' && content.text.trim())
   )).at(-1);
+  const lastEntry = projection.visibleEntries.at(-1);
+  const footerUsage = lastEntry?.type === 'run_usage' ? lastEntry : undefined;
 
   return (
     <ChatToolDisclosureScope key={sessionId} sessionId={sessionId}>
     <div className="flex flex-col gap-3">
-        {projection.visibleEntries.map((entry) => {
+        {part !== 'footer' && projection.visibleEntries.map((entry) => {
           if (extensionEntries.has(entry.id)) {
             return <React.Fragment key={entry.id}>{extensionEntries.get(entry.id)}</React.Fragment>;
           }
@@ -1002,7 +1040,7 @@ export const ChatTimelineEntryList: React.FC<Omit<
               const displayedMessage = chatRenderMode === 'sorted'
                 ? sortedProjection?.answersBySourceId.get(entry.id)
                 : message;
-              const showsActivity = sortedProjection?.activityAnchorId === entry.id
+              const showsActivity = !sortedPresentation && sortedProjection?.activityAnchorId === entry.id
                 && sortedProjection.activity.length > 0;
               if (!displayedMessage && !showsActivity) return null;
               return (
@@ -1135,6 +1173,9 @@ export const ChatTimelineEntryList: React.FC<Omit<
           if (entry.type === 'usage') {
             return <MetaEntry key={entry.id} icon="pie-chart">{entry.kind} · {entry.provider}/{entry.model} · <ChatAssistantUsageFooter usage={entry.usage} /></MetaEntry>;
           }
+          if (entry.type === 'run_usage') {
+            return entry === footerUsage ? null : <ChatTurnUsageFooter key={entry.id} usages={entry.usages} />;
+          }
           if (entry.type === 'custom') {
             return (
               <details key={entry.id} className="mx-auto max-w-full rounded-md bg-muted/30 px-3 py-1.5 typography-meta text-muted-foreground">
@@ -1153,11 +1194,11 @@ export const ChatTimelineEntryList: React.FC<Omit<
           );
         })}
 
-        {projection.liveAssistant && (() => {
+        {part !== 'footer' && projection.liveAssistant && (() => {
           const displayedMessage = chatRenderMode === 'sorted'
             ? sortedProjection?.answersBySourceId.get(CHAT_SORTED_LIVE_ASSISTANT_ID)
             : projection.liveAssistant;
-          const showsActivity = sortedProjection?.activityAnchorId === CHAT_SORTED_LIVE_ASSISTANT_ID
+          const showsActivity = !sortedPresentation && sortedProjection?.activityAnchorId === CHAT_SORTED_LIVE_ASSISTANT_ID
             && sortedProjection.activity.length > 0;
           if (!displayedMessage && !showsActivity) return null;
           return (
@@ -1185,10 +1226,11 @@ export const ChatTimelineEntryList: React.FC<Omit<
             </article>
           );
         })()}
-        <ChatTurnChangedFiles messages={assistantMessagesForTurn(builtInEntries, projection.liveAssistant)}
+        {part !== 'body' && <><ChatTurnChangedFiles messages={assistantMessagesForTurn(builtInEntries, projection.liveAssistant)}
           results={resultByCallId} executions={toolExecutions} cwd={cwd} sessionId={sessionId} />
         <ChatTurnUsageFooter
           entries={entries}
+          usages={footerUsage?.usages}
           liveAssistant={projection.liveAssistant}
           outputDurationsMs={outputDurationsMs}
           actions={turnText ? (
@@ -1241,7 +1283,7 @@ export const ChatTimelineEntryList: React.FC<Omit<
               <ChatMoreButton />
             </div>
           ) : undefined}
-        />
+        /></>}
     </div>
     </ChatToolDisclosureScope>
   );

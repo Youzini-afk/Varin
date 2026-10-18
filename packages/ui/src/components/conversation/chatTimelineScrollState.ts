@@ -55,14 +55,15 @@ export const prepareChatTimelineEntry = (
     hasLiveOverlay: boolean;
     leafId: string | null;
     working: boolean;
+    preserveReading?: boolean;
   },
 ): ChatTimelineViewState => {
   const view = current ?? DEFAULT_CHAT_TIMELINE_VIEW;
-  const restore = !options.working
+  const restore = (options.preserveReading || !options.working
     && !options.hasAttention
     && !options.hasLiveOverlay
     && view.observedLeafId !== undefined
-    && view.observedLeafId === options.leafId
+    && view.observedLeafId === options.leafId)
     && view.viewport?.mode === 'free-scrolling';
   const generation = view.generation + 1;
   const next: ChatTimelineViewState = {

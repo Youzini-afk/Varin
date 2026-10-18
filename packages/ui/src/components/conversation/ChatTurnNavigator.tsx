@@ -2,47 +2,55 @@ import React from 'react';
 import { AnimatePresence, motion } from 'motion/react';
 import { usePrefersReducedMotion } from '@/hooks/usePrefersReducedMotion';
 import { useI18n } from '@/lib/i18n';
-import type { ChatTimelineItem, ChatTimelineRow } from './chatTimelineProjection';
-import { projectChatMessageNavigation, readChatMessageNavigationText, type ChatMessageMarker, type ChatMessageNavigationTarget, type ChatLiveNavigationState } from './chatMessageNavigation';
+import type { ThreadHistoryRun } from '@varin/application-client';
 
-type TurnMarker = ChatMessageMarker;
-export type ChatTurnNavigatorHandle = { setVisibleIndex(index: number, role?: ChatMessageMarker['role']): void };
+type TurnMarker = ThreadHistoryRun & { id: string; round: number };
+export type ChatTurnNavigatorHandle = { setVisibleRun(runId: string): void };
 type PreviewHandle = { show(marker: TurnMarker, anchor: HTMLElement): void; hide(): void; reconcile(markers: readonly TurnMarker[]): void };
-type TurnPreview = { id: string; round: number; text: string; role: ChatMessageMarker['role']; anchor: HTMLElement };
+type TurnPreview = { id: string; round: number; text: string; anchor: HTMLElement };
 const excerpt = (text: string): string => {
   const compact = text.trim().replace(/\s+/g, ' ');
   return compact.length > 240 ? `${compact.slice(0, 240)}…` : compact;
 };
 
-/** Only a hovered/focused pointer reads message text; pointer motion does not rerender the rail. */
+/** Hover reads this Run's preview independently of mounted message elements. */
 const TurnPreview = React.forwardRef<PreviewHandle, {
   root: React.RefObject<HTMLElement | null>;
-  readItem(index: number): ChatTimelineItem | undefined;
-}>(({ root, readItem }, ref) => {
+  readPreview(runId: string, signal: AbortSignal): Promise<string>;
+}>(({ root, readPreview }, ref) => {
   const { t } = useI18n();
   const reducedMotion = usePrefersReducedMotion();
   const [preview, setPreview] = React.useState<TurnPreview>();
+  const current = React.useRef<TurnPreview | undefined>(undefined);
   const popup = React.useRef<HTMLDivElement>(null);
+  const pending = React.useRef<AbortController | undefined>(undefined);
+  const cache = React.useRef(new Map<string, { throughId: string | null; text: string }>());
+  const show = React.useCallback((marker: TurnMarker, anchor: HTMLElement) => {
+    pending.current?.abort();
+    const controller = new AbortController(); pending.current = controller;
+    const cached = cache.current.get(marker.id);
+    const next = { id: marker.id, round: marker.round, anchor, text: cached?.text ?? '' };
+    current.current = next; setPreview(next);
+    if (cached?.throughId === marker.lastItemId) return;
+    void readPreview(marker.runId, controller.signal).then(value => {
+      if (controller.signal.aborted || current.current?.id !== marker.id) return;
+      const text = excerpt(value);
+      cache.current.set(marker.id, { throughId: marker.lastItemId, text });
+      current.current = { ...current.current, text }; setPreview(current.current);
+    }).catch(() => { /* An unavailable preview leaves the Run pointer usable. */ });
+  }, [readPreview]);
+  React.useEffect(() => () => pending.current?.abort(), []);
   React.useImperativeHandle(ref, () => ({
-    show(marker, anchor) {
-      setPreview(current => {
-        if (current?.id === marker.id && current.anchor === anchor) return current;
-        const item = readItem(marker.index);
-        if (!item || item.id !== marker.rowId) return undefined;
-        return { id: marker.id, round: marker.round, anchor, role: marker.role, text: excerpt(readChatMessageNavigationText(item, marker)) };
-      });
-    },
-    hide() { setPreview(undefined); },
+    show,
+    hide() { pending.current?.abort(); current.current = undefined; setPreview(undefined); },
     reconcile(markers) {
-      setPreview(current => {
-        if (!current) return current;
-        const ordinal = markers.findIndex(marker => marker.id === current.id);
-        const marker = markers[ordinal], item = marker && readItem(marker.index);
-        if (!marker || !item || item.id !== marker.rowId) return undefined;
-        return { ...current, round: marker.round, role: marker.role, text: excerpt(readChatMessageNavigationText(item, marker)) };
-      });
+      const value = current.current;
+      if (!value) return;
+      const marker = markers.find(marker => marker.id === value.id);
+      if (!marker) { pending.current?.abort(); current.current = undefined; setPreview(undefined); }
+      else show(marker, value.anchor);
     },
-  }), [readItem]);
+  }), [show]);
   React.useLayoutEffect(() => {
     if (!preview || !popup.current || !root.current) return;
     const bounds = root.current.getBoundingClientRect();
@@ -57,40 +65,23 @@ const TurnPreview = React.forwardRef<PreviewHandle, {
       initial={{ opacity: 0, x: -4 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -2 }}
       transition={{ duration: reducedMotion ? 0 : .15, ease: [.22, 1, .36, 1] }}>
       <div className="mb-1.5 typography-micro tabular-nums text-muted-foreground">
-        {preview.role === 'user' ? t('harness.messages.you') : 'Varin'} · {t('chat.promptNavigator.turn', { number: preview.round })}
+        Varin · {t('chat.promptNavigator.turn', { number: preview.round })}
       </div>
-      <p className="line-clamp-3 break-words typography-meta text-foreground">{preview.text || '…'}</p>
+      <p className="line-clamp-3 break-words typography-meta text-foreground">{preview.text || t('chat.promptNavigator.noPreview')}</p>
     </motion.div> : null}
   </AnimatePresence>;
 });
 
-const markerAtIndex = (markers: readonly TurnMarker[], index: number, role?: ChatMessageMarker['role']): TurnMarker | undefined => {
-  let low = 0, high = markers.length;
-  while (low < high) {
-    const middle = (low + high) >>> 1;
-    if (markers[middle]!.index <= index) low = middle + 1; else high = middle;
-  }
-  const fallback = markers[Math.max(0, low - 1)];
-  if (role && fallback?.index === index) {
-    for (let ordinal = low - 1; ordinal >= 0 && markers[ordinal]!.index === index; ordinal -= 1) {
-      if (markers[ordinal]!.role === role) return markers[ordinal];
-    }
-  }
-  return fallback;
-};
-
-/** Separate pointers for the user's prompt and the Agent's complete response round. */
+/** One pointer per native Run. The rail never consumes virtual rows or their indices. */
 export const ChatTurnNavigator = React.memo(React.forwardRef<ChatTurnNavigatorHandle, {
-  items: readonly ChatTimelineRow[];
-  sorted: boolean;
-  liveSources?: ChatLiveNavigationState;
-  initialIndex: number;
-  readItem(index: number): ChatTimelineItem | undefined;
-  onSelect(target: ChatMessageNavigationTarget): void;
-}>(({ items, sorted, liveSources, initialIndex, readItem, onSelect }, ref) => {
+  runs: readonly ThreadHistoryRun[];
+  initialRunId?: string;
+  readPreview(runId: string, signal: AbortSignal): Promise<string>;
+  onSelect(target: ThreadHistoryRun): void;
+}>(({ runs, initialRunId, readPreview, onSelect }, ref) => {
   const { t } = useI18n();
-  const markers = React.useMemo(() => projectChatMessageNavigation(items, sorted, liveSources), [items, sorted, liveSources]);
-  const [activeId, setActiveId] = React.useState(() => markerAtIndex(markers, initialIndex)?.id);
+  const markers = React.useMemo(() => runs.map((run, index) => ({ ...run, id: run.runId, round: index + 1 })), [runs]);
+  const [activeId, setActiveId] = React.useState(initialRunId);
   const root = React.useRef<HTMLElement>(null);
   const scroll = React.useRef<HTMLDivElement>(null);
   const list = React.useRef<HTMLDivElement>(null);
@@ -100,9 +91,9 @@ export const ChatTurnNavigator = React.memo(React.forwardRef<ChatTurnNavigatorHa
   const pointerY = React.useRef<number | undefined>(undefined);
   const waveFrame = React.useRef<number | null>(null);
   const waved = React.useRef(new Set<HTMLButtonElement>());
-  const displayedId = markers.some(marker => marker.id === activeId) ? activeId : markerAtIndex(markers, initialIndex)?.id;
+  const displayedId = markers.some(marker => marker.id === activeId) ? activeId : initialRunId;
   const activeOrdinal = markers.findIndex(marker => marker.id === displayedId);
-  React.useImperativeHandle(ref, () => ({ setVisibleIndex(index, role) { setActiveId(markerAtIndex(markers, index, role)?.id); } }), [markers]);
+  React.useImperativeHandle(ref, () => ({ setVisibleRun(runId) { setActiveId(runId); } }), []);
 
   const revealActive = React.useCallback(() => {
     const viewport = scroll.current;
@@ -168,8 +159,8 @@ export const ChatTurnNavigator = React.memo(React.forwardRef<ChatTurnNavigatorHa
       <div ref={list} className="conversation-turn-navigation-list">
         {markers.map((marker, ordinal) => <button key={marker.id} type="button" data-conversation-turn-marker={ordinal}
           ref={button => { if (button) buttons.current.set(ordinal, button); else buttons.current.delete(ordinal); }}
-          className="conversation-turn-marker" data-message-role={marker.role}
-          aria-label={`${marker.role === 'user' ? t('harness.messages.you') : 'Varin'} · ${t('chat.promptNavigator.turn', { number: marker.round })}`}
+          className="conversation-turn-marker" data-message-role="assistant" data-run-id={marker.runId}
+          aria-label={`Varin · ${t('chat.promptNavigator.turn', { number: marker.round })}`}
           aria-current={marker.id === displayedId ? 'location' : undefined}
           tabIndex={ordinal === (activeOrdinal >= 0 ? activeOrdinal : 0) ? 0 : -1}
           onPointerEnter={event => { if (event.pointerType !== 'touch') showPreview(ordinal); }}
@@ -179,11 +170,6 @@ export const ChatTurnNavigator = React.memo(React.forwardRef<ChatTurnNavigatorHa
         </button>)}
       </div>
     </div>
-    <TurnPreview ref={preview} root={root} readItem={readItem} />
+    <TurnPreview ref={preview} root={root} readPreview={readPreview} />
   </nav>;
-}), (previous, next) => {
-  if (previous.items !== next.items || previous.sorted !== next.sorted || previous.initialIndex !== next.initialIndex
-    || previous.readItem !== next.readItem || previous.onSelect !== next.onSelect) return false;
-  const left = previous.liveSources, right = next.liveSources;
-  return left === right || Boolean(left && right && left.rowId === right.rowId && left.hasAssistant === right.hasAssistant);
-});
+}));

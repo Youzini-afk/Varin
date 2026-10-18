@@ -1,6 +1,5 @@
 import React from 'react';
 import { AnimatePresence, motion, useIsPresent } from 'motion/react';
-import { Icon } from '@/components/icon/Icon';
 import { usePrefersReducedMotion } from '@/hooks/usePrefersReducedMotion';
 
 type PaintedScene = { owner: string; identity: string; content: React.ReactNode };
@@ -32,8 +31,8 @@ export const ConversationSurface = React.forwardRef<HTMLDivElement, {
         {scene.content}
       </ConversationScene> : null}
     </AnimatePresence>
-    {!ready ? <div role="status" className="conversation-loading flex items-center gap-2 typography-meta text-muted-foreground">
-      <Icon name="loader-4" className="size-3.5 shrink-0 animate-spin" /><span className="truncate">{loadingLabel}</span>
+    {!ready ? <div role="status" className="conversation-loading typography-meta text-muted-foreground">
+      <span className="truncate">{loadingLabel}</span>
     </div> : null}
   </div>;
 });

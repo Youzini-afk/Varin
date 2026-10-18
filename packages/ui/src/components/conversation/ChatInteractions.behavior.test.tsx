@@ -5,7 +5,7 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { ChatContextMenu, ChatTextSource } from './ChatContextMenu';
 import { ChatTurnNavigator } from './ChatTurnNavigator';
 import { ConversationContext, type ConversationPresentation } from './ConversationContext';
-import { projectChatTimeline, resolveChatTimelineItem } from './chatTimelineProjection';
+import { projectChatTimeline } from './chatTimelineProjection';
 import type { ChatSessionMessageEntry } from './types';
 import { listEditorContextAttachments, resetEditorContextAttachments } from '@/lib/agent-editor/attachments';
 import { threadComposerKey, threadHostKey } from '@/stores/useThreadStore';
@@ -30,9 +30,9 @@ vi.mock('@/components/ui/context-menu', () => ({
   ContextMenuSeparator: () => <hr />,
 }));
 
-const user: ChatSessionMessageEntry = { id: 'user:original', parentId: null, timestamp: '', type: 'message', message: { role: 'user', content: 'Original request', timestamp: 0 } };
-const answer: ChatSessionMessageEntry = { id: 'answer:original', parentId: user.id, timestamp: '', type: 'message', message: { id: 'answer:original', role: 'assistant', content: [{ type: 'text', text: 'Original answer' }], timestamp: 0, model: 'original-model', provider: '', api: '', stopReason: 'stop' } };
-const nextUser: ChatSessionMessageEntry = { ...user, id: 'user:next', parentId: answer.id, message: { role: 'user', content: 'Next request', timestamp: 1 } };
+const user: ChatSessionMessageEntry = { id: 'user:original', runId: 'run:1', parentId: null, timestamp: '', type: 'message', message: { role: 'user', content: 'Original request', timestamp: 0 } };
+const answer: ChatSessionMessageEntry = { id: 'answer:original', runId: 'run:1', parentId: user.id, timestamp: '', type: 'message', message: { id: 'answer:original', role: 'assistant', content: [{ type: 'text', text: 'Original answer' }], timestamp: 0, model: 'original-model', provider: '', api: '', stopReason: 'stop' } };
+const nextUser: ChatSessionMessageEntry = { ...user, id: 'user:next', runId: 'run:2', parentId: answer.id, message: { role: 'user', content: 'Next request', timestamp: 1 } };
 const entries = [user, answer, nextUser];
 const projection = projectChatTimeline(entries);
 let root: Root;
@@ -74,12 +74,13 @@ it('keeps the original history identity for right-click quote, fork and recovery
   expect(fork).toHaveBeenCalledWith(user); expect(recover).toHaveBeenCalledWith(user);
 });
 
-it('moves between prompt and response markers with Arrow keys, Home and End', async () => {
+it('keeps one marker per Run and supports keyboard navigation and a preview without mounted messages', async () => {
   const select = vi.fn();
-  await act(async () => root.render(<ChatTurnNavigator items={projection.items} sorted={false} initialIndex={0}
-    readItem={index => resolveChatTimelineItem(projection.items[index]!, projection.liveItem)} onSelect={select} />));
+  const runs = [{ runId: 'run:1', firstItemId: user.id, lastItemId: answer.id }, { runId: 'run:2', firstItemId: nextUser.id, lastItemId: nextUser.id }];
+  const readPreview = vi.fn(async () => 'The complete Agent round');
+  await act(async () => root.render(<ChatTurnNavigator runs={runs} initialRunId="run:1" readPreview={readPreview} onSelect={select} />));
   const buttons = [...container.querySelectorAll<HTMLButtonElement>('nav button')];
-  expect(buttons).toHaveLength(3);
+  expect(buttons).toHaveLength(2);
   const focus = buttons.map(button => vi.spyOn(button, 'focus'));
   const key = async (index: number, value: string) => {
     const event = new window.Event('keydown', { bubbles: true, cancelable: true });
@@ -88,9 +89,12 @@ it('moves between prompt and response markers with Arrow keys, Home and End', as
     expect(event.defaultPrevented).toBe(true);
   };
   await key(0, 'ArrowDown'); expect(focus[1]).toHaveBeenCalledOnce();
-  await key(1, 'End'); expect(focus[2]).toHaveBeenCalledOnce();
-  await key(2, 'Home'); expect(focus[0]).toHaveBeenCalledOnce();
+  await key(0, 'End'); expect(focus[1]).toHaveBeenCalledTimes(2);
+  await key(1, 'Home'); expect(focus[0]).toHaveBeenCalledOnce();
   await key(1, 'ArrowUp'); expect(focus[0]).toHaveBeenCalledTimes(2);
   await act(async () => buttons[1]!.click());
-  expect(select).toHaveBeenCalledWith(expect.objectContaining({ rowId: projection.items[0]!.id, role: 'assistant' }));
+  expect(select).toHaveBeenCalledWith(expect.objectContaining({ runId: 'run:2' }));
+  await act(async () => buttons[0]!.dispatchEvent(new window.Event('focusin', { bubbles: true })));
+  expect(container.querySelector('[role="tooltip"]')?.textContent).toContain('The complete Agent round');
+  expect(readPreview).toHaveBeenCalledWith('run:1', expect.any(AbortSignal));
 });

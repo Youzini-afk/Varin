@@ -59,6 +59,10 @@ A read selecting old activation still checks its original ancestry and current t
 
 ## Native Thread admission and product views
 
+`history-run-navigation.ts` builds the chat rail's metadata-only Run index from native history references,
+validating the selected branch/cut even when its immutable prefix is cached. It excludes rewound history;
+body pagination and virtual rows never supply Run ordinals. Preview bodies are read only on demand.
+
 `agent-runtime-client.ts` is the typed Catalog client. `thread-adapter.ts`, `thread-routes.ts` and related
 Thread adapters validate authenticated product requests, prepare actual owners and project results. Rust
 owns admission and original command receipts, not an in-memory Host request queue.

@@ -3,6 +3,10 @@ import { settingsDict } from './zh-TW.settings';
 
 export const dict: Record<I18nKey, string> = {
   ...enDict,
+  'chat.history.unavailable': '較早的訊息暫時讀取失敗',
+  'chat.history.retry': '重試',
+  'chat.promptNavigator.noPreview': '本輪 Agent 暫無文字內容',
+  'chat.promptNavigator.unavailable': '輪次索引暫時無法使用，點擊重試',
   ...settingsDict,
   "chat.toolResult.fileContents": "檔案內容：{path}",
   "chat.toolResult.byteRange": "已讀取 {bytes} / {total} 位元組 · 偏移 {offset}",

@@ -88,6 +88,20 @@ Job/source and cursor; it never stops the observed Job or uses a renderer timer 
 labels and token receipts come from the original frozen request, not today's selected model; usage is
 counted once per request even when it produced several visible items. Tool-call identity includes its
 Run and request. Cancelled, indeterminate, accepted background work and success have distinct states.
+`thread-history` caches read-only bodies by Host epoch, Thread and branch, merging live tails and
+prefetched pages through native parent IDs. It retains reading history on return, bridges unseen
+appends, drops a rewound future, and aborts reads on view-owner departure. Whole-Run usage is a
+separate cancellable Host read; bodies and progress never await that scan. Summaries carry their
+original cut and appear once after the ended Run, with unknown receipts kept distinct from zero.
+`chatTimelineBlocks` separates logical turns (quotes and copy) from measured user,
+message, activity and footer rows. Stable native row IDs let the virtual list compensate prepends
+and height changes; sticky user prompts use the list's own sticky-header support. Upward prefetch
+starts a viewport ahead and extends by observed speed and read latency. Ordinary history scrolling
+does not enter a frozen view or require a loading button; only read failures expose retry.
+The navigation rail reads a separate complete native Run index, with one pointer per Run and
+ordinals from the selected branch's ancestry. Loaded body pages, virtual rows and activity folding
+do not define its count or order. Hover previews read the Run's prompt/response; selecting an
+unloaded Run first loads its original history anchor, then maps it to a measured row.
 `timelineViewStore` owns scroll positions only. Message handoff animation targets the history ID from
 the accepted input receipt. A retained outgoing scene is inert during conversation switching.
 

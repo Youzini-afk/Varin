@@ -5,13 +5,11 @@ import {
   type NativeScrollEvent,
   type NativeSyntheticEvent,
 } from '@legendapp/list/react';
-import type { ChatAssistantMessage } from './types';
 import { useShallow } from 'zustand/react/shallow';
 import { Icon } from '@/components/icon/Icon';
 import { useI18n } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
 import { useTimelineViewStore } from './timelineViewStore';
-import { useConversationPresentation } from './ConversationContext';
 import { useUIStore } from '@/stores/useUIStore';
 import {
   DEFAULT_CHAT_TIMELINE_VIEW,
@@ -28,172 +26,27 @@ import {
 } from './chatTimelineScrollState';
 import {
   projectChatTimeline,
-  resolveChatTimelineItem,
-  type ChatTimelineItem,
-  type ChatTimelineRow,
   type ChatTimelineProjection,
 } from './chatTimelineProjection';
 import {
-  ChatTimelineEntryList,
-  ChatTurnUserMessage,
+  ChatToolDisclosureScope,
   type ChatTimelineProps,
 } from './ChatTimelineEntries';
 import {
   findChatAssistantWaitingTurnId,
-  type ChatAssistantWaitingPresentation,
 } from './chatAssistantWaiting';
-import { ChatTurnAssistantChrome } from './ChatTurnAssistantChrome';
+import { ChatTimelineBlockView } from './ChatTimelineBlockView';
+import { projectChatTimelineBlocks, type ChatTimelineBlock, type ChatTimelineBlocks, type ChatTimelineBlockAliases } from './chatTimelineBlocks';
+import { timelinePresentationCache } from './timelinePresentationCache';
 import { ChatContextMenu } from './ChatContextMenu';
 import { ChatTurnNavigator, type ChatTurnNavigatorHandle } from './ChatTurnNavigator';
-import { chatNavigationHasAssistant, chatNavigationMessageElement, chatNavigationRowElement, type ChatMessageNavigationTarget } from './chatMessageNavigation';
+import { readChatRunNavigationText } from './chatMessageNavigation';
+import type { ThreadHistoryRun } from '@varin/application-client';
+import { toast } from '@/components/ui';
 import { prefersReducedMotion } from '@/hooks/usePrefersReducedMotion';
-
-interface ChatTimelineItemViewProps extends Omit<
-  ChatTimelineProps,
-  'assistantWaiting' | 'entries' | 'liveAssistant' | 'liveUser' | 'toolExecutions'
-> {
-  assistantWaiting?: ChatAssistantWaitingPresentation;
-  isMobile: boolean;
-  item: ChatTimelineItem;
-}
-
-const toolCallIdsByItem = new WeakMap<ChatTimelineItem, readonly string[]>();
-
-const toolCallIdsForItem = (item: ChatTimelineItem): readonly string[] => {
-  const cached = toolCallIdsByItem.get(item);
-  if (cached) return cached;
-  const ids = new Set<string>();
-  const collect = (message: ChatAssistantMessage): void => {
-    for (const content of message.content) {
-      if (content.type === 'toolCall') ids.add(content.id);
-    }
-  };
-  if (item.kind === 'live-assistant') collect(item.message);
-  else if (item.kind === 'entry') {
-    if (item.entry.type === 'message' && item.entry.message.role === 'assistant') {
-      collect(item.entry.message);
-    }
-  } else {
-    for (const entry of item.turn.entries) {
-      if (entry.type === 'message' && entry.message.role === 'assistant') collect(entry.message);
-    }
-    if (item.turn.liveAssistant) collect(item.turn.liveAssistant);
-  }
-  const result = [...ids];
-  toolCallIdsByItem.set(item, result);
-  return result;
-};
-
-const ChatTimelineItemView = React.memo(({
-  assistantWaiting,
-  cwd,
-  forkBusyEntryId,
-  hiddenThinkingLabel,
-  isMobile,
-  item,
-  liveUserStatus,
-  onFork,
-  onOpenThread,
-  onRecover,
-  recoveryBusyEntryId,
-  sessionId,
-  threadBusyEntryId,
-}: ChatTimelineItemViewProps) => {
-  const stickyUserHeader = useUIStore(state => state.stickyUserHeader);
-  const toolCallIds = React.useMemo(() => toolCallIdsForItem(item), [item]);
-  const presentation = useConversationPresentation();
-  const outputDurationsMs = presentation.outputDurationsMs;
-  const toolExecutions = React.useMemo(() => Object.fromEntries(toolCallIds.flatMap(id => {
-    const execution = presentation.toolExecutions[id]; return execution ? [[id, execution]] : [];
-  })), [presentation.toolExecutions, toolCallIds]);
-  if (item.kind === 'live-assistant') {
-    return (
-      <div className="chat-message-column py-1.5" data-turn-entry={item.id}>
-        <ChatTimelineEntryList
-          cwd={cwd}
-          entries={[]}
-          forkBusyEntryId={forkBusyEntryId}
-          hiddenThinkingLabel={hiddenThinkingLabel}
-          liveAssistant={item.message}
-          onFork={onFork}
-          onOpenThread={onOpenThread}
-          onRecover={onRecover}
-          outputDurationsMs={outputDurationsMs}
-          projectedResultByCallId={item.resultByCallId}
-          recoveryBusyEntryId={recoveryBusyEntryId}
-          sessionId={sessionId}
-          threadBusyEntryId={threadBusyEntryId}
-          toolExecutions={toolExecutions}
-        />
-      </div>
-    );
-  }
-
-  if (item.kind === 'entry') {
-    return (
-      <div className="chat-message-column py-1.5" data-turn-entry={item.id}>
-        <ChatTimelineEntryList
-          cwd={cwd}
-          entries={[item.entry]}
-          forkBusyEntryId={forkBusyEntryId}
-          hiddenThinkingLabel={hiddenThinkingLabel}
-          onFork={onFork}
-          onOpenThread={onOpenThread}
-          onRecover={onRecover}
-          outputDurationsMs={outputDurationsMs}
-          projectedResultByCallId={item.resultByCallId}
-          recoveryBusyEntryId={recoveryBusyEntryId}
-          sessionId={sessionId}
-          threadBusyEntryId={threadBusyEntryId}
-          toolExecutions={toolExecutions}
-        />
-      </div>
-    );
-  }
-
-  const { turn } = item;
-  return (
-    <div
-      className="chat-message-column flex flex-col gap-3 py-1.5"
-      data-turn-id={turn.id}
-      data-turn-entry={turn.id}
-    >
-      <div className={cn(
-        !isMobile && stickyUserHeader && 'conversation-user-message-sticky sticky top-0 z-10 -mx-1 bg-background/95 px-1 py-1 backdrop-blur-sm',
-      )}>
-        <ChatTurnUserMessage
-          cwd={cwd}
-          entry={turn.userEntry}
-          forkBusyEntryId={forkBusyEntryId}
-          message={turn.user}
-          onFork={onFork}
-          onOpenThread={onOpenThread}
-          onRecover={onRecover}
-          recoveryBusyEntryId={recoveryBusyEntryId}
-          status={turn.liveUser ? liveUserStatus : undefined}
-          threadBusyEntryId={threadBusyEntryId}
-        />
-      </div>
-      <ChatTurnAssistantChrome turn={turn} waiting={assistantWaiting} />
-      <ChatTimelineEntryList
-        cwd={cwd}
-        entries={turn.entries}
-        forkBusyEntryId={forkBusyEntryId}
-        hiddenThinkingLabel={hiddenThinkingLabel}
-        liveAssistant={turn.liveAssistant}
-        onFork={onFork}
-        onOpenThread={onOpenThread}
-        onRecover={onRecover}
-        outputDurationsMs={outputDurationsMs}
-        projectedResultByCallId={item.turn.resultByCallId}
-        recoveryBusyEntryId={recoveryBusyEntryId}
-        sessionId={sessionId}
-        threadBusyEntryId={threadBusyEntryId}
-        toolExecutions={toolExecutions}
-      />
-    </div>
-  );
-});
+import { useWorkbenchMatchRenderers } from '@/lib/extensions/workbench-registry';
+import type { ChatSessionEntry } from './types';
+import { ConversationPreviewContext } from './ConversationContext';
 
 const isInteractiveKeyTarget = (target: EventTarget | null): boolean => (
   target instanceof HTMLElement
@@ -228,6 +81,9 @@ export const ChatTimeline: React.FC<ChatTimelineProps> = (props) => {
   const { t } = useI18n();
   const promptNavigatorEnabled = useUIStore(state => state.promptNavigatorEnabled);
   const sortedMessages = useUIStore(state => state.chatRenderMode === 'sorted');
+  const stickyUserHeader = useUIStore(state => state.stickyUserHeader);
+  const activityRenderMode = useUIStore(state => state.activityRenderMode);
+  const showThinking = useUIStore(state => state.showReasoningTraces);
   const isMobile = useUIStore((state) => state.isMobile);
   const onScrollContainerChange = props.onScrollContainerChange;
   const listRef = React.useRef<LegendListRef>(null);
@@ -246,21 +102,42 @@ export const ChatTimeline: React.FC<ChatTimelineProps> = (props) => {
     projectionRef.current,
   ), [props.entries, props.liveAssistant, props.liveUser]);
   projectionRef.current = projection;
-  const liveNavigationItem = projection.liveItem?.item;
-  const liveNavigationSources = promptNavigatorEnabled && liveNavigationItem && liveNavigationItem.kind !== 'entry' ? {
-    rowId: liveNavigationItem.id,
-    hasAssistant: chatNavigationHasAssistant([], liveNavigationItem.kind === 'turn' ? liveNavigationItem.turn.liveAssistant : liveNavigationItem.message, sortedMessages),
-  } : undefined;
-  const readNavigatorItem = React.useCallback((index: number) => {
+  const navigationRef = React.useRef(props.navigation);
+  navigationRef.current = props.navigation;
+  const readRunPreview = React.useCallback((runId: string, signal: AbortSignal) => {
     const current = projectionRef.current;
-    const row = current?.items[index];
-    return current && row ? resolveChatTimelineItem(row, current.liveItem) : undefined;
+    const text = current ? readChatRunNavigationText(current.visibleEntries, runId, current.liveAssistant) : '';
+    return text ? Promise.resolve(text) : navigationRef.current?.readPreview(runId, signal) ?? Promise.resolve('');
   }, []);
   const assistantWaitingTurnId = React.useMemo(() => findChatAssistantWaitingTurnId(
     projection.items,
     props.assistantWaiting !== undefined,
     projection.liveItem,
   ), [projection.items, projection.liveItem, props.assistantWaiting]);
+
+  const [, updateActivity] = React.useReducer(value => value + 1, 0);
+  const preview = React.useContext(ConversationPreviewContext);
+  const messageRenderers = useWorkbenchMatchRenderers<{ cwd: string; entry: ChatSessionEntry; sessionId: string }>('message-renderer', 'chat.timeline.entries', !preview);
+  const extensionPresentation = React.useMemo(() => {
+    const rendered = new Map<string, () => React.ReactNode>();
+    if (!preview && messageRenderers.length) for (const entry of projection.visibleEntries) {
+      const input = { cwd: props.cwd, entry, sessionId: props.sessionId };
+      const renderer = messageRenderers.find(renderer => renderer.implementation.matches(input));
+      if (renderer) rendered.set(entry.id, () => renderer.implementation.render(input));
+    }
+    return rendered;
+  }, [preview, messageRenderers, projection.visibleEntries, props.cwd, props.sessionId]);
+  const customIds = React.useMemo(() => new Set(extensionPresentation.keys()), [extensionPresentation]);
+  const activityState = React.useMemo(() => timelinePresentationCache(props.sessionId, 'activity', () => ({ mode: activityRenderMode, choices: new Map<string, boolean>() })), [props.sessionId, activityRenderMode]);
+  if (activityState.mode !== activityRenderMode) { activityState.mode = activityRenderMode; activityState.choices.clear(); }
+  const isActivityExpanded = React.useCallback((id: string) => activityState.choices.get(id) ?? activityRenderMode === 'summary', [activityState, activityRenderMode]);
+  const setActivityExpanded = React.useCallback((id: string, expanded: boolean) => { activityState.choices.set(id, expanded); updateActivity(); }, [activityState]);
+  const blocksRef = React.useRef<ChatTimelineBlocks | undefined>(undefined);
+  const blockAliases = React.useMemo(() => timelinePresentationCache(props.sessionId, 'block-identities', () => new Map() as ChatTimelineBlockAliases), [props.sessionId]);
+  const blocks = projectChatTimelineBlocks(projection, { sorted: sortedMessages, expanded: isActivityExpanded, previous: blocksRef.current, customIds, showThinking, aliases: blockAliases });
+  blocksRef.current = blocks;
+  const stickyHeaders = React.useMemo(() => !isMobile && stickyUserHeader ? blocks.items.flatMap((block, index) => block.kind === 'user' ? [index] : []) : [], [blocks.items, isMobile, stickyUserHeader]);
+  const waitingGroupId = [...blocks.groups.values()].reverse().find(group => group.ownerId === assistantWaitingTurnId)?.id;
 
   const timelineView = useTimelineViewStore(useShallow((state) => (
     state.views[props.sessionId] ?? DEFAULT_CHAT_TIMELINE_VIEW
@@ -280,8 +157,8 @@ export const ChatTimeline: React.FC<ChatTimelineProps> = (props) => {
 
   const entryTarget = timelineView.entry.target;
   const entryTargetIndex = React.useMemo(() => entryTarget.kind === 'turn'
-    ? projection.items.findIndex((item) => item.id === entryTarget.itemId)
-    : -1, [entryTarget, projection.items]);
+    ? blocks.items.findIndex((item) => item.id === entryTarget.itemId)
+    : -1, [entryTarget, blocks.items]);
   const initialScrollAtEnd = entryTarget.kind === 'end' || entryTargetIndex < 0;
   const firstVisibleIndexRef = React.useRef(-1);
   const viewportRef = React.useRef<ChatTimelineViewportAnchor | undefined>(timelineView.viewport);
@@ -293,10 +170,13 @@ export const ChatTimeline: React.FC<ChatTimelineProps> = (props) => {
   const anchorCorrectionFrameRef = React.useRef<number | null>(null);
   const followEndFrameRef = React.useRef<number | null>(null);
   const positionedAnchorRef = React.useRef<string | null>(null);
+  const scrollSample = React.useRef({ top: 0, time: 0, upward: 0 });
+  const prefetchFrame = React.useRef<number | null>(null);
+  const [viewportHeight, setViewportHeight] = React.useState(0);
   const touchYRef = React.useRef<number | null>(null);
   const manualOwnershipClaimedRef = React.useRef(false);
   const navigationRequestRef = React.useRef<symbol | null>(null);
-  const navigationFrameRef = React.useRef<number | null>(null);
+  const navigationAbort = React.useRef<AbortController | undefined>(undefined);
   if (timelineView.scrollMode !== 'free-scrolling') {
     manualOwnershipClaimedRef.current = false;
   }
@@ -306,7 +186,7 @@ export const ChatTimeline: React.FC<ChatTimelineProps> = (props) => {
     const index = firstVisibleIndexRef.current;
     if (!list || index < 0) return;
     const state = list.getState();
-    const item = state.data[index] as ChatTimelineRow | undefined;
+    const item = state.data[index] as ChatTimelineBlock | undefined;
     if (!item) return;
     const position = state.positionAtIndex(index);
     if (!Number.isFinite(position) || !Number.isFinite(state.scroll)) return;
@@ -318,24 +198,11 @@ export const ChatTimeline: React.FC<ChatTimelineProps> = (props) => {
   }, []);
 
   const updateNavigationPosition = React.useCallback(() => {
-    if (!turnNavigatorRef.current) return;
-    const index = firstVisibleIndexRef.current;
-    const row = projectionRef.current?.items[index];
-    if (!row) return;
-    let role: ChatMessageNavigationTarget['role'] | undefined = row.kind === 'turn' ? 'user'
-      : row.kind === 'live-assistant' ? 'assistant'
-        : row.entry.type === 'message' && (row.entry.message.role === 'user' || row.entry.message.role === 'assistant') ? row.entry.message.role : undefined;
-    const viewport = listRef.current?.getScrollableNode();
-    const element = viewport && chatNavigationRowElement(viewport, row.id);
-    if (element && viewport) {
-      const readingLine = viewport.getBoundingClientRect().top + CHAT_TIMELINE_ANCHOR_OFFSET_PX;
-      for (const message of element.querySelectorAll<HTMLElement>('[data-conversation-message-role]')) {
-        if (message.getBoundingClientRect().top > readingLine) break;
-        if (message.dataset.conversationMessageRole === 'user' || message.dataset.conversationMessageRole === 'assistant') role = message.dataset.conversationMessageRole;
-      }
-    }
-    turnNavigatorRef.current?.setVisibleIndex(index, role);
+    const block = blocksRef.current?.items[firstVisibleIndexRef.current];
+    const runId = block?.kind === 'user' ? block.turn.userEntry?.runId : block?.group.runId;
+    if (runId) turnNavigatorRef.current?.setVisibleRun(runId);
   }, []);
+  React.useEffect(updateNavigationPosition, [props.navigation?.runs, updateNavigationPosition]);
   const scheduleViewportCapture = React.useCallback(() => {
     if (viewportFrameRef.current !== null) return;
     viewportFrameRef.current = requestAnimationFrame(() => {
@@ -356,8 +223,8 @@ export const ChatTimeline: React.FC<ChatTimelineProps> = (props) => {
     if (viewportFrameRef.current !== null) cancelAnimationFrame(viewportFrameRef.current);
     if (anchorCorrectionFrameRef.current !== null) cancelAnimationFrame(anchorCorrectionFrameRef.current);
     if (followEndFrameRef.current !== null) cancelAnimationFrame(followEndFrameRef.current);
-    if (navigationFrameRef.current !== null) cancelAnimationFrame(navigationFrameRef.current);
-    navigationRequestRef.current = null;
+    if (prefetchFrame.current !== null) cancelAnimationFrame(prefetchFrame.current);
+    navigationRequestRef.current = null; navigationAbort.current?.abort();
     captureViewport();
     if (observedLeafIdRef.current !== undefined) {
       saveTimelineCheckpoint(
@@ -430,7 +297,7 @@ export const ChatTimeline: React.FC<ChatTimelineProps> = (props) => {
       followContentEnd();
       return;
     }
-    const index = projection.items.findIndex((item) => item.id === target.itemId);
+    const index = blocks.items.findIndex((item) => item.id === target.itemId);
     if (index < 0) {
       atEndRef.current = true;
       observedLeafIdRef.current = props.leafId;
@@ -449,7 +316,7 @@ export const ChatTimeline: React.FC<ChatTimelineProps> = (props) => {
   }, [
     completeTimelineReturn,
     followContentEnd,
-    projection.items,
+    blocks.items,
     props.leafId,
     props.sessionId,
     requestTimelineReturn,
@@ -462,6 +329,7 @@ export const ChatTimeline: React.FC<ChatTimelineProps> = (props) => {
   }, [applyEntryIntent, timelineView.entry.epoch]);
 
   const takeManualOwnership = React.useCallback(() => {
+    navigationAbort.current?.abort(); navigationRequestRef.current = null;
     const current = useTimelineViewStore.getState().views[props.sessionId];
     if (
       manualOwnershipClaimedRef.current
@@ -477,8 +345,8 @@ export const ChatTimeline: React.FC<ChatTimelineProps> = (props) => {
 
   const anchoredTurnId = timelineView.newTurn?.turnId;
   const anchorIndex = React.useMemo(() => anchoredTurnId
-    ? projection.items.findIndex((item) => item.id === anchoredTurnId)
-    : -1, [anchoredTurnId, projection.items]);
+    ? blocks.items.findIndex((item) => item.id === anchoredTurnId)
+    : -1, [anchoredTurnId, blocks.items]);
 
   const correctAnchoredTurn = React.useCallback(() => {
     if (anchorCorrectionFrameRef.current !== null) return;
@@ -541,8 +409,27 @@ export const ChatTimeline: React.FC<ChatTimelineProps> = (props) => {
     timelineView.scrollMode,
   ]);
 
+  const scheduleHistoryPrefetch = React.useCallback(() => {
+    if (prefetchFrame.current !== null) return;
+    prefetchFrame.current = requestAnimationFrame(() => {
+      prefetchFrame.current = null;
+      if (!listLoadedRef.current) return;
+      const state = listRef.current?.getState();
+      const history = props.earlierHistory;
+      if (!state || !history?.available || history.loading || history.error) return;
+      // One viewport of breathing room, extended by the actual upward speed
+      // and observed transport time. The cursor owner coalesces concurrent reads.
+      const lead = state.scrollLength + scrollSample.current.upward * history.latencyMs;
+      if (state.scroll <= lead) void history.load();
+    });
+  }, [props.earlierHistory]);
+  React.useEffect(() => { scheduleHistoryPrefetch(); }, [blocks.items, props.earlierHistory, scheduleHistoryPrefetch]);
+
   const handleScroll = React.useCallback((event: NativeSyntheticEvent<NativeScrollEvent>) => {
     const { contentOffset, contentSize, layoutMeasurement } = event.nativeEvent;
+    const now = performance.now();
+    const sample = scrollSample.current;
+    scrollSample.current = { top: contentOffset.y, time: now, upward: sample.time && now > sample.time ? Math.max(0, (sample.top - contentOffset.y) / (now - sample.time)) : 0 };
     atEndRef.current = isChatTimelineAtEnd(
       contentSize.height,
       contentOffset.y,
@@ -552,7 +439,7 @@ export const ChatTimeline: React.FC<ChatTimelineProps> = (props) => {
     if (atEndRef.current && props.leafId !== undefined) {
       observedLeafIdRef.current = props.leafId;
     }
-    if (atEndRef.current) {
+    if (atEndRef.current && !navigationRequestRef.current) {
       const current = useTimelineViewStore.getState().views[props.sessionId];
       if (current?.scrollMode === 'free-scrolling' && current.pendingReturnToken === undefined) {
         const token = requestTimelineReturn(props.sessionId);
@@ -560,9 +447,11 @@ export const ChatTimeline: React.FC<ChatTimelineProps> = (props) => {
       }
     }
     scheduleViewportCapture();
-  }, [completeTimelineReturn, props.leafId, props.sessionId, requestTimelineReturn, scheduleViewportCapture]);
+    scheduleHistoryPrefetch();
+  }, [completeTimelineReturn, props.leafId, props.sessionId, requestTimelineReturn, scheduleViewportCapture, scheduleHistoryPrefetch]);
 
   const handleReturnToLatest = React.useCallback(() => {
+    navigationAbort.current?.abort(); navigationRequestRef.current = null;
     const token = requestTimelineReturn(props.sessionId);
     if (token <= 0) return;
     void Promise.resolve(scrollToContentEnd(true))
@@ -570,7 +459,7 @@ export const ChatTimeline: React.FC<ChatTimelineProps> = (props) => {
   }, [completeTimelineReturn, props.sessionId, requestTimelineReturn, scrollToContentEnd]);
 
   const extraData = React.useMemo(() => ({
-    liveItem: projection.liveItem,
+    projection,
     assistantWaiting: props.assistantWaiting,
     assistantWaitingTurnId,
     forkBusyEntryId: props.forkBusyEntryId,
@@ -583,7 +472,7 @@ export const ChatTimeline: React.FC<ChatTimelineProps> = (props) => {
     recoveryBusyEntryId: props.recoveryBusyEntryId,
     threadBusyEntryId: props.threadBusyEntryId,
   }), [
-    projection.liveItem,
+    projection,
     props.assistantWaiting,
     assistantWaitingTurnId,
     props.forkBusyEntryId,
@@ -596,19 +485,18 @@ export const ChatTimeline: React.FC<ChatTimelineProps> = (props) => {
     props.recoveryBusyEntryId,
     props.threadBusyEntryId,
   ]);
-  const renderItem = React.useCallback(({ item: row }: { item: ChatTimelineRow }) => {
-    const item = resolveChatTimelineItem(row, projection.liveItem);
-    if (!item) return null;
+  const renderItem = React.useCallback(({ item: block }: { item: ChatTimelineBlock }) => {
     return (
-    <ChatTimelineItemView
-      {...(item.id === assistantWaitingTurnId && props.assistantWaiting
+    <ChatTimelineBlockView
+      {...('group' in block && block.group.id === waitingGroupId && props.assistantWaiting
         ? { assistantWaiting: props.assistantWaiting }
         : {})}
       cwd={props.cwd}
       forkBusyEntryId={props.forkBusyEntryId}
       hiddenThinkingLabel={props.hiddenThinkingLabel}
-      isMobile={isMobile}
-      item={item}
+      block={block} projection={projection} sorted={sortedMessages}
+      extensionPresentation={extensionPresentation}
+      expanded={'group' in block && isActivityExpanded(block.group.id)} onExpandedChange={setActivityExpanded}
       liveUserStatus={props.liveUserStatus}
       onFork={props.onFork}
       onOpenThread={props.onOpenThread}
@@ -619,13 +507,16 @@ export const ChatTimeline: React.FC<ChatTimelineProps> = (props) => {
     />
     );
   }, [
-    projection.liveItem,
+    projection,
     props.assistantWaiting,
-    assistantWaitingTurnId,
+    waitingGroupId,
     props.cwd,
     props.forkBusyEntryId,
     props.hiddenThinkingLabel,
-    isMobile,
+    sortedMessages,
+    isActivityExpanded,
+    setActivityExpanded,
+    extensionPresentation,
     props.liveUserStatus,
     props.onFork,
     props.onOpenThread,
@@ -668,47 +559,56 @@ export const ChatTimeline: React.FC<ChatTimelineProps> = (props) => {
   ), [isMobile, props.compactionStatus, props.onApplyCompaction, props.onOpenCompaction, props.footer, t]);
 
   const releaseAutomationForIntent = React.useCallback((intent: ChatTimelineScrollIntent) => {
+    navigationAbort.current?.abort(); navigationRequestRef.current = null;
     if (!shouldReleaseChatTimelineFollow(modeRef.current, atEndRef.current, intent)) return;
     takeManualOwnership();
   }, [takeManualOwnership]);
 
-  const selectMessage = React.useCallback(async (target: ChatMessageNavigationTarget) => {
+  const selectRun = React.useCallback(async (target: ThreadHistoryRun) => {
     takeManualOwnership();
-    const request = Symbol();
-    navigationRequestRef.current = request;
-    if (navigationFrameRef.current !== null) cancelAnimationFrame(navigationFrameRef.current);
-    navigationFrameRef.current = null;
-    const list = listRef.current;
-    if (!list) return;
-    const revealMessage = (): boolean => {
-      if (navigationRequestRef.current !== request || list !== listRef.current
-        || projectionSessionRef.current !== props.sessionId) return true;
-      const viewport = list.getScrollableNode();
-      const message = viewport && chatNavigationMessageElement(viewport, target);
-      if (!viewport || !message) return false;
-      const offset = list.getState().scroll + message.getBoundingClientRect().top - viewport.getBoundingClientRect().top - CHAT_TIMELINE_ANCHOR_OFFSET_PX;
-      void list.scrollToOffset({ offset, animated: !prefersReducedMotion() });
-      return true;
-    };
-    if (target.role === 'assistant' && revealMessage()) return;
-    await list.scrollToIndex({ index: target.index, viewPosition: 0, animated: target.role === 'user' && !prefersReducedMotion() });
-    if (target.role === 'assistant' && navigationRequestRef.current === request && list === listRef.current) {
-      navigationFrameRef.current = requestAnimationFrame(() => { navigationFrameRef.current = null; revealMessage(); });
+    const request = Symbol(); navigationRequestRef.current = request;
+    const controller = new AbortController(); navigationAbort.current = controller;
+    if (!listRef.current) return;
+    const current = () => !controller.signal.aborted && navigationRequestRef.current === request
+      && listRef.current !== null && projectionSessionRef.current === props.sessionId;
+    try {
+      if (target.firstItemId) await navigationRef.current?.ensureItem(target.firstItemId, controller.signal);
+      if (!current()) return;
+      // A newly fetched body must commit before mapping the Run's anchor to a
+      // physical row. This mapping never determines the rail's count or order.
+      await new Promise<void>(resolve => requestAnimationFrame(() => resolve()));
+      if (!current()) return;
+      const list = listRef.current;
+      if (!list) return;
+      const index = blocksRef.current?.items.findIndex(block => block.kind === 'user'
+        ? block.turn.userEntry?.runId === target.runId : block.group.runId === target.runId) ?? -1;
+      if (index < 0) { if (!target.firstItemId) handleReturnToLatest(); return; }
+      await list.scrollToIndex({ index, viewPosition: 0, viewOffset: CHAT_TIMELINE_ANCHOR_OFFSET_PX, animated: !prefersReducedMotion() });
+      if (current()) turnNavigatorRef.current?.setVisibleRun(target.runId);
+    } catch (error) {
+      if (current()) toast.error(error instanceof Error ? error.message : t('chat.history.unavailable'));
+    } finally {
+      if (navigationRequestRef.current === request) navigationRequestRef.current = null;
+      if (navigationAbort.current === controller) navigationAbort.current = undefined;
     }
-  }, [props.sessionId, takeManualOwnership]);
+  }, [props.sessionId, takeManualOwnership, handleReturnToLatest, t]);
 
   return (
-    <ChatContextMenu key={props.sessionId} {...props} projection={projection}
+    <ChatToolDisclosureScope key={props.sessionId} sessionId={props.sessionId}><ChatContextMenu {...props} projection={projection}
       onRevealEntry={async (entryId) => {
         const source = props.entries.find((entry) => entry.id === entryId);
         const toolCallId = source?.type === 'message' && source.message.role === 'toolResult' ? source.message.toolCallId : undefined;
-        const index = projection.items.findIndex((row) => {
-          const item = resolveChatTimelineItem(row, projection.liveItem);
-          if (!item) return false;
-          return item.kind === 'entry' ? item.entry.id === entryId
-            : item.kind === 'turn' && (item.turn.userEntry?.id === entryId || item.turn.entries.some((entry) => entry.id === entryId)
-              || (toolCallId !== undefined && item.turn.resultByCallId.has(toolCallId)));
-        });
+        const activityGroup = sortedMessages ? [...blocks.groups.values()].find(group => !group.sorted.answersBySourceId.has(entryId) && group.sorted.activity.some(activity => activity.sourceId === entryId || activity.kind === 'tool' && activity.call.id === toolCallId)) : undefined;
+        if (activityGroup && !isActivityExpanded(activityGroup.id)) {
+          setActivityExpanded(activityGroup.id, true);
+          await new Promise<void>(resolve => requestAnimationFrame(() => resolve()));
+        }
+        const currentBlocks = blocksRef.current?.items ?? [];
+        const activityIndex = activityGroup ? currentBlocks.findIndex(block => block.kind === 'activity' && block.group.id === activityGroup.id
+          && activityGroup.sorted.activity.some(activity => activity.id === block.activityId && (activity.sourceId === entryId || activity.kind === 'tool' && activity.call.id === toolCallId))) : -1;
+        const index = activityIndex >= 0 ? activityIndex : currentBlocks.findIndex(block => block.kind === 'user' ? block.turn.userEntry?.id === entryId
+          : block.kind === 'entry' && (block.entry.id === entryId || toolCallId !== undefined && block.entry.type === 'message' && block.entry.message.role === 'assistant'
+            && block.entry.message.content.some(part => part.type === 'toolCall' && part.id === toolCallId)));
         if (index < 0) throw new Error(t('chat.context.sourceUnavailable'));
         takeManualOwnership();
         const list = listRef.current;
@@ -733,21 +633,23 @@ export const ChatTimeline: React.FC<ChatTimelineProps> = (props) => {
           list.getState().scroll + element.getBoundingClientRect().top - container.getBoundingClientRect().top - inset - CHAT_TIMELINE_ANCHOR_OFFSET_PX) });
       }}>
     <div className="conversation-timeline-surface relative flex min-h-0 flex-1">
-      {promptNavigatorEnabled ? <ChatTurnNavigator ref={turnNavigatorRef} items={projection.items}
-        sorted={sortedMessages} liveSources={liveNavigationSources}
-        initialIndex={initialScrollAtEnd ? projection.items.length - 1 : entryTargetIndex}
-        readItem={readNavigatorItem} onSelect={selectMessage} /> : null}
+      {promptNavigatorEnabled && props.navigation ? <ChatTurnNavigator ref={turnNavigatorRef} runs={props.navigation.runs}
+        initialRunId={props.navigation.runs.at(-1)?.runId} readPreview={readRunPreview} onSelect={selectRun} /> : null}
+      {promptNavigatorEnabled && props.navigation?.error && <button type="button" className="absolute left-2 top-2 z-20 text-muted-foreground"
+        aria-label={t('chat.promptNavigator.unavailable')} title={t('chat.promptNavigator.unavailable')} onClick={() => void props.navigation?.retry()}>
+        <Icon name="error-warning" className="size-3.5" />
+      </button>}
       <LegendList
         ref={listRef}
         anchoredEndSpace={anchoredEndSpace}
         className="overlay-scrollbar-target overlay-scrollbar-container min-h-0 min-w-0 flex-1 overscroll-contain"
         contentContainerClassName="py-5"
-        data={projection.items}
+        data={blocks.items}
         dataKey={props.sessionId}
         extraData={extraData}
         getItemType={(item) => item.kind}
-        initialScrollIndex={initialScrollAtEnd ? (projection.items.length ? {
-          index: projection.items.length - 1,
+        initialScrollIndex={initialScrollAtEnd ? (blocks.items.length ? {
+          index: blocks.items.length - 1,
           viewPosition: 1,
         } : undefined) : {
           index: entryTargetIndex,
@@ -758,9 +660,13 @@ export const ChatTimeline: React.FC<ChatTimelineProps> = (props) => {
         }}
         itemsAreEqual={(previous, item) => previous === item}
         keyExtractor={(item) => item.id}
-        ListHeaderComponent={<>{props.header}</>}
+        ListHeaderComponent={<>{props.header}{props.earlierHistory?.error && <div role="status" className="chat-message-column flex items-center gap-2 py-1 typography-meta text-muted-foreground">
+          <span>{t('chat.history.unavailable')}</span><button className="text-primary hover:underline" onClick={() => void props.earlierHistory?.load(true)}>{t('chat.history.retry')}</button>
+        </div>}</>}
         ListFooterComponent={endBreathingSpace}
         maintainScrollAtEnd={false}
+        drawDistance={viewportHeight || undefined}
+        stickyHeaderIndices={stickyHeaders}
         maintainVisibleContentPosition={timelineView.scrollMode === 'following-end'
           ? false
           : { data: true, size: true }}
@@ -773,8 +679,12 @@ export const ChatTimeline: React.FC<ChatTimelineProps> = (props) => {
           if (itemKey === timelineView.newTurn?.turnId) correctAnchoredTurn();
           if (modeRef.current === 'following-end') scheduleFollowEnd();
         }}
-        onLayout={scheduleFollowEnd}
-        onMetricsChange={scheduleFollowEnd}
+        onLayout={() => { scheduleFollowEnd(); scheduleHistoryPrefetch(); }}
+        onMetricsChange={() => {
+          const height = listRef.current?.getState().scrollLength;
+          if (height) setViewportHeight(previous => previous === height ? previous : height);
+          scheduleFollowEnd(); scheduleHistoryPrefetch();
+        }}
         onKeyDownCapture={(event) => {
           if (isToolPreviewScrollTarget(event.target)) return;
           if (CHAT_TIMELINE_SCROLL_KEYS.has(event.key) && !isInteractiveKeyTarget(event.target)) {
@@ -786,6 +696,7 @@ export const ChatTimeline: React.FC<ChatTimelineProps> = (props) => {
           onScrollContainerChange?.(listRef.current?.getScrollableNode() ?? null);
           applyEntryIntent();
           updateNavigationPosition();
+          scheduleHistoryPrefetch();
         }}
         onScroll={handleScroll}
         onTouchMoveCapture={(event) => {
@@ -824,6 +735,6 @@ export const ChatTimeline: React.FC<ChatTimelineProps> = (props) => {
         </button>
       ) : null}
     </div>
-    </ChatContextMenu>
+    </ChatContextMenu></ChatToolDisclosureScope>
   );
 };

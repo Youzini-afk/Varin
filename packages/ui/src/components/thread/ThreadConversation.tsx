@@ -50,7 +50,7 @@ import { useI18n, type I18nKey } from '@/lib/i18n';
 import { subscribeVarinEvents } from '@/lib/varinEvents';
 import React from 'react';
 import { createModelConnectionsHttpAPI, threadSourceFailureMessage, ThreadRequestError, getRuntimeEndpointGeneration, subscribeRuntimeEndpointChanged } from '@varin/application-client';
-import type { ThreadIdentity, ThreadModel, ThreadModelInfo, ThreadThinkingLevel, ThreadSnapshot, ThreadsAPI, ThreadHistoryPage, ThreadPreparedSource } from '@varin/application-client';
+import type { ThreadIdentity, ThreadModel, ThreadModelInfo, ThreadThinkingLevel, ThreadSnapshot, ThreadsAPI, ThreadPreparedSource } from '@varin/application-client';
 import { Button } from '@/components/ui/button';
 import { ThreadComposer } from './ThreadComposer';
 import { ThreadAgentControls } from './ThreadAgentControls';
@@ -65,6 +65,7 @@ import { VarinLogo } from '@/components/ui/VarinLogo';
 import { cn, formatDirectoryName } from '@/lib/utils';
 import { MarkdownRenderer } from '@/components/chat/MarkdownRenderer';
 import { ThreadProjection, type StreamingTextPart } from '@/lib/agent-runtime/thread-projection';
+import { threadHistoryWindow } from '@/lib/agent-runtime/thread-history';
 import { ThreadOutput } from './ThreadMedia';
 import { ThreadInputQueue } from './ThreadQueuedInput';
 import { ChildTasks } from '../conversation/ChildTasks';
@@ -239,9 +240,11 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
   const [preparingSource, setPreparingSource] = React.useState(false);
   const [snapshotState, setSnapshot] = React.useState<ThreadSnapshot>();
   const snapshotHost = React.useRef<number | undefined>(undefined);
-  const [historyView, setHistoryView] = React.useState<ThreadHistoryPage | null>(null);
-  const [historyLoading, setHistoryLoading] = React.useState(false);
-  const historyGeneration = React.useRef(0);
+  const historyWindow = React.useMemo(() => threadHistoryWindow(api, String(host), { runtime: identity.runtime, threadId: identity.threadId, branchId: identity.branchId }), [api, host, identity.runtime, identity.threadId, identity.branchId]);
+  const history = React.useSyncExternalStore(historyWindow.subscribe, historyWindow.getSnapshot, historyWindow.getSnapshot);
+  const navigationEnabled = useUIStore(state => state.promptNavigatorEnabled);
+  React.useEffect(() => { historyWindow.enableNavigation(navigationEnabled); }, [historyWindow, navigationEnabled]);
+  const scrollMode = useTimelineViewStore(state => state.views[draftKey]?.scrollMode ?? 'following-end');
   const identityGeneration = React.useRef(0);
   const forkKeys = React.useRef(new Map<string, string>());
   const compactionKeys = React.useRef(new Map<string, string>());
@@ -277,18 +280,17 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
   const projection = React.useRef<ThreadProjection | undefined>(undefined);
   React.useEffect(() => {
     identityGeneration.current += 1; forkKeys.current.clear(); compactionKeys.current.clear();
-    historyGeneration.current += 1; setHistoryView(null); setHistoryLoading(false);
     setPreparingSource(false);
     pendingAction.current = null; setPending(false); setError(undefined);
     setSnapshot(undefined); setProgress([]); setHistoryOpen(false); setContextRunId(undefined); setReadingFiles(false); fileReadGeneration.current += 1;
     fileRead.current?.abort(); fileRead.current = null;
-    const view = new ThreadProjection(api, identity, value => { snapshotHost.current = host; handoff.observe(value); setSnapshot(value); }, value => setError(value instanceof Error ? value.message : 'Thread unavailable'), setProgress, setStreamingTools);
+    const view = new ThreadProjection(api, identity, value => { snapshotHost.current = host; historyWindow.accept(value); handoff.observe(value); setSnapshot(value); }, value => setError(value instanceof Error ? value.message : 'Thread unavailable'), setProgress, setStreamingTools);
     projection.current = view; view.start();
-    return () => { identityGeneration.current += 1; historyGeneration.current += 1; fileReadGeneration.current += 1; fileRead.current?.abort(); fileRead.current = null; view.close(); };
-  }, [api, identity, host, handoff]);
+    return () => { identityGeneration.current += 1; fileReadGeneration.current += 1; fileRead.current?.abort(); fileRead.current = null; view.close(); };
+  }, [api, identity, host, handoff, historyWindow]);
   const snapshot = snapshotHost.current === host && snapshotState?.identity.threadId === identity.threadId && snapshotState?.identity.branchId === identity.branchId ? snapshotState : undefined;
   React.useEffect(() => {
-    if (!snapshot || historyView || typeof document === 'undefined') return;
+    if (!snapshot || scrollMode !== 'following-end' || history.connecting || typeof document === 'undefined') return;
     const acknowledge = () => {
       if (document.visibilityState !== 'hidden' && host === getRuntimeEndpointGeneration()) {
         void useThreadStore.getState().markRead(identity.threadId, snapshot.thread.activity_cursor).catch(() => {});
@@ -297,7 +299,7 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
     acknowledge();
     document.addEventListener('visibilitychange', acknowledge);
     return () => document.removeEventListener('visibilitychange', acknowledge);
-  }, [snapshot, historyView, host, identity.threadId]);
+  }, [snapshot, scrollMode, history.connecting, host, identity.threadId]);
   const workRevision = snapshot ? JSON.stringify([snapshot.activeRun?.id, snapshot.activeRun?.state,
     snapshot.children?.map(child => [child.child_thread_id, child.state])]) : null;
   React.useEffect(() => { if (workRevision) onWorkChanged?.(); }, [workRevision, onWorkChanged]);
@@ -440,7 +442,10 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
     setText(current => current === command || current.startsWith(`${command} `) ? current : `${command} ${current}`);
     messageInput.current?.focus();
   };
-  const returnToLatest = () => { historyGeneration.current += 1; setHistoryView(null); setHistoryLoading(false); };
+  const returnToLatest = () => {
+    const store = useTimelineViewStore.getState();
+    store.completeTimelineReturn(draftKey, store.requestTimelineReturn(draftKey));
+  };
   const recovery = useThreadRecovery({ api, identity, host, snapshot, disabled: readOnly || active || actionPending || Boolean(draft.pendingInput), onRecovered: async editor => {
     returnToLatest(); pendingInput.current = undefined; setPreparedSource(null);
     if (editor.editorText !== undefined) setText(editor.editorText);
@@ -448,18 +453,6 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
     await projection.current?.refresh();
   } });
   const pending = actionPending || recovery.blocked || draft.firstSend?.status === 'sending';
-  const loadEarlier = async () => {
-    if (!snapshot) return;
-    const current = historyView ?? { ...snapshot.historyPage, items: snapshot.history };
-    if (!current.head || !current.previous) return;
-    const generation = ++historyGeneration.current;
-    setHistoryLoading(true); setError(undefined);
-    try {
-      const page = await api.historyPage(identity, { headId: current.head, beforeId: current.previous });
-      if (generation === historyGeneration.current) setHistoryView({ head: current.head, previous: page.previous, items: [...page.items, ...current.items] });
-    } catch (value) { if (generation === historyGeneration.current) setError(value instanceof Error ? value.message : 'Earlier history is unavailable'); }
-    finally { if (generation === historyGeneration.current) setHistoryLoading(false); }
-  };
   const forkFrom = async (headId: string) => {
     const generation = identityGeneration.current;
     let key = forkKeys.current.get(headId);
@@ -481,9 +474,8 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
       if (generation === identityGeneration.current) compactionKeys.current.delete(fingerprint);
     });
   };
-  const visibleHistory = historyView?.items ?? snapshot?.history ?? [];
+  const visibleHistory = history.items;
   const firstMessage = useFirstMessagePreview(draftKey, Boolean(snapshot?.historyPage.head), handoff);
-  const previousHistory = historyView ? historyView.previous : snapshot?.historyPage.previous;
   const memorySelection = getRegisteredRuntimeAPIs()?.bots?.selection;
   const submissionFingerprint = () => JSON.stringify([identity.threadId, identity.branchId, projectedText, requestImages, materials, providerId, modelId, thinkingLevel, inputMode, preparedSource?.source, agent]);
   const sourceCannotBeApplied = active && Boolean(preparedSource) && !pendingInput.current;
@@ -631,31 +623,28 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
   }}><ReferenceNavigationContext.Provider value={referenceNavigation}><section ref={handoff.setRoot} className="regular-chat-view relative flex h-full min-h-0 min-w-0 [container-type:inline-size]" aria-label="Thread conversation" data-thread-conversation="true">
     <div className="thread-conversation-layout relative flex min-h-0 min-w-0 flex-1">
     <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-    {!historyView && run?.state === 'failed' && <div role="alert" aria-label="Run failed" className="mx-auto w-full max-w-3xl px-4 py-2 text-sm text-destructive">
+    {run?.state === 'failed' && <div role="alert" aria-label="Run failed" className="mx-auto w-full max-w-3xl px-4 py-2 text-sm text-destructive">
       <p>{t('harness.threads.state.failed')}</p>
       {runFailure && <p>{runFailureKey ? t(runFailureKey) : runFailure.message}</p>}
     </div>}
-    {!historyView && run?.state === 'cancelled' && <p role="status" aria-label="Run cancelled" className="mx-auto w-full max-w-3xl px-4 py-2 text-sm text-muted-foreground">{t('harness.threads.state.cancelled')}</p>}
+    {run?.state === 'cancelled' && <p role="status" aria-label="Run cancelled" className="mx-auto w-full max-w-3xl px-4 py-2 text-sm text-muted-foreground">{t('harness.threads.state.cancelled')}</p>}
     {contextRunId && <ContextHistoryDialog key={`${draftKey}:${contextRunId}`} api={api} identity={identity} runId={contextRunId} onClose={() => setContextRunId(undefined)} />}
     {historyOpen && <ChatTreeDialog api={api} identity={identity} open onOpenChange={setHistoryOpen} busy={pending} recoverDisabled={active}
       onFork={entry => { void forkFrom(entry.id); }} onRecover={entry => { showOverview('outputs'); void recovery.recover(entry.id); }} />}
     {!readOnly && snapshot && <ThreadQuestions key={draftKey} operations={snapshot.operations} enabled={operation => !pending && run?.state === 'waiting' && run.waiting_on === operation.waiting_on}
       onCancel={operation => act(() => api.cancelOperation(operation.id))} onAnswer={(operation, answer) => act(() => api.answerQuestion({ ...identity, operationId: operation.id, answer }))} />}
     <div className={cn('relative flex min-h-0 flex-1', empty && 'hidden')}>
-    <ConversationSurface owner={String(host)} identity={draftKey} ready={Boolean(snapshot || firstMessage.message)} loadingLabel={t('common.loading')}>
-    <ConversationTimeline api={api} identity={identity} snapshot={snapshot} history={visibleHistory}
-      liveUser={historyView ? undefined : firstMessage.message} liveUserStatus={firstMessage.status}
-      progress={historyView ? [] : progress} streamingTools={historyView ? [] : streamingTools} cwd={emptyWorkspacePath ?? ''} working={!historyView && active && !launch?.preparation_failure && !pause} readOnly={readOnly}
+    <ConversationSurface owner={String(host)} identity={draftKey} ready={Boolean(history.ready || snapshot || firstMessage.message)} loadingLabel={t('common.loading')}>
+    <ConversationTimeline api={api} identity={identity} snapshot={history.connecting ? undefined : snapshot} history={visibleHistory}
+      runUsage={history.usage} historyReset={history.reset} historyReady={history.ready}
+      navigation={{ runs: history.runs, readPreview: historyWindow.readRunPreview, ensureItem: historyWindow.ensureItem, error: history.navigationError, retry: historyWindow.retryNavigation }}
+      earlierHistory={{ available: Boolean(history.previous), loading: history.loading, error: history.error, latencyMs: history.latencyMs, load: historyWindow.loadEarlier }}
+      liveUser={firstMessage.message} liveUserStatus={firstMessage.status}
+      progress={snapshot && !history.connecting ? progress : []} streamingTools={snapshot && !history.connecting ? streamingTools : []} cwd={emptyWorkspacePath ?? ''} working={active && !history.connecting && !launch?.preparation_failure && !pause} readOnly={readOnly || !snapshot || history.connecting}
       memory={snapshot?.thread.bot_id ? memorySelection : undefined}
       onQuote={quote => { if (!readOnly && currentViewScope.current === viewScope) { setText(current => [current.trimEnd(), quote].filter(Boolean).join('\n\n')); messageInput.current?.focus(); } }}
-      onFork={!readOnly && !pending && onBranchCreated ? id => void forkFrom(id) : undefined}
-      onRecover={!readOnly && !pending && !active && snapshot ? id => { showOverview('outputs'); void recovery.recover(id); } : undefined}
-      header={<>      <div className="mx-auto flex max-w-3xl items-center gap-2">
-        {previousHistory && <Button variant="ghost" size="sm" disabled={historyLoading} onClick={() => void loadEarlier()}>{historyLoading ? 'Loading earlier history' : 'Load earlier history'}</Button>}
-        {historyView && <Button variant="outline" size="sm" onClick={returnToLatest}>{historyView.head !== snapshot?.historyPage.head ? 'Show latest messages' : 'Return to latest view'}</Button>}
-        {historyView && <span className="text-xs text-muted-foreground">Viewing saved history</span>}
-      </div>
-</>}
+      onFork={!readOnly && snapshot && !history.connecting && !pending && onBranchCreated ? id => void forkFrom(id) : undefined}
+      onRecover={!readOnly && !history.connecting && !pending && !active && snapshot ? id => { showOverview('outputs'); void recovery.recover(id); } : undefined}
       footer={<>      {snapshot?.operations.filter(operation => operation.id !== pause?.action_id).map(operation => <div key={operation.id} className="mx-auto max-w-3xl">
         <ThreadPermission operation={operation} enabled={!readOnly && !pending && operation.run_id === run?.id && !run?.cancel_requested} onDecide={(permissionId, decision) => act(() => api.decidePermission({ ...identity, operationId: operation.id, permissionId, decision }))} />
       </div>)}

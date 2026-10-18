@@ -7,7 +7,7 @@ import {
 
 interface TimelineViewStore {
   views: Record<string, ChatTimelineViewState>;
-  enter(key: string, head: string | null, working: boolean): void;
+  enter(key: string, head: string | null, working: boolean, preserveReading?: boolean): void;
   anchor(key: string, entryId: string): void;
   cancelTimelineAutomation(key: string): void;
   completeTimelineReturn(key: string, token: number): void;
@@ -23,7 +23,7 @@ export const useTimelineViewStore = create<TimelineViewStore>((set, get) => {
   });
   return {
     views: {},
-    enter: (key, leafId, working) => update(key, view => prepareChatTimelineEntry(view, { leafId, working, hasAttention: false, hasLiveOverlay: false })),
+    enter: (key, leafId, working, preserveReading) => update(key, view => prepareChatTimelineEntry(view, { leafId, working, preserveReading, hasAttention: false, hasLiveOverlay: false })),
     anchor: (key, id) => update(key, view => armChatTimelineTurn(view, id, `turn:${id}`)),
     cancelTimelineAutomation: key => update(key, cancelChatTimelineAutomation),
     completeTimelineReturn: (key, token) => update(key, view => completeChatTimelineReturn(view, token)),

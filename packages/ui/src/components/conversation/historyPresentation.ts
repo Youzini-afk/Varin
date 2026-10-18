@@ -1,5 +1,5 @@
 import type { JsonValue, Operation, OutputBody } from '@varin/protocol';
-import type { ThreadSnapshot, ThreadHistoryItem as HistoryItem } from '@varin/application-client';
+import type { ThreadSnapshot, ThreadHistoryItem as HistoryItem, ThreadRunUsage } from '@varin/application-client';
 import type { ChatAssistantMessage, ChatSessionEntry, ChatToolExecutionState, ChatUserContent } from './types';
 
 const object = (value: unknown): Record<string, unknown> => value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {};
@@ -46,7 +46,7 @@ function outputParts(output: OutputBody | undefined): ChatUserContent[] {
 export class HistoryPresentation {
   constructor(readonly identity: string) {}
   private entries = new Map<string, ChatSessionEntry>();
-  project(history: readonly HistoryItem[], snapshot: ThreadSnapshot | undefined) {
+  project(history: readonly HistoryItem[], snapshot: ThreadSnapshot | undefined, runUsage: readonly ThreadRunUsage[] = []) {
     const result: ChatSessionEntry[] = [];
     const toolExecutions: Record<string, ChatToolExecutionState> = {};
     const calls = new Map<string, { id: string; name: string }>();
@@ -67,7 +67,7 @@ export class HistoryPresentation {
       }
       let entry = this.entries.get(item.id);
       if (!entry) {
-        const base = { id: item.id, parentId: item.parent, timestamp: '' };
+        const base = { id: item.id, parentId: item.parent, timestamp: '', runId: item.run_id };
         if (item.source === 'user') {
           const text = typeof item.content === 'string' ? item.content : typeof envelope.text === 'string' ? envelope.text : '';
           entry = { ...base, type: 'message', message: { role: 'user', content: text, timestamp: 0 } };
@@ -105,22 +105,29 @@ export class HistoryPresentation {
         if (entry.type === 'message' && entry.message.role === 'assistant' && thinking && content.kind !== 'provider_only' && content.kind !== 'reasoning_summary') {
           entry.message.content.unshift({ type: 'thinking', thinking });
         }
-        if (entry.type === 'message' && entry.message.role === 'assistant' && metadata) {
-          const usage = metadata.usage;
-          entry.message.usage = { requestId: metadata.requestId, measurement: usage.measurement,
-            unknownReceipts: usage.measurement === 'missing' || usage.inputTokens === null || usage.outputTokens === null ? 1 : 0,
-            ...(usage.inputTokens === null ? {} : { input: usage.inputTokens }),
-            ...(usage.outputTokens === null ? {} : { output: usage.outputTokens }),
-            ...(usage.cachedInputTokens == null ? {} : { cacheRead: usage.cachedInputTokens }),
-            ...(usage.cacheWriteTokens == null ? {} : { cacheWrite: usage.cacheWriteTokens }),
-            ...(usage.reasoningTokens == null ? {} : { reasoning: usage.reasoningTokens }),
-          };
-        }
         this.entries.set(item.id, entry);
       }
       result.push(entry);
     }
-    return { entries: result, toolExecutions };
+    const visible = new Set(result.map(entry => entry.id));
+    const lastByRun = new Map<string, string>();
+    const cutByRun = new Map(history.map(item => [item.run_id, item.id]));
+    for (const item of history) if (visible.has(item.id)) lastByRun.set(item.run_id, item.id);
+    const footers = new Map(runUsage.flatMap(run => {
+      const after = lastByRun.get(run.runId);
+      if (!after || cutByRun.get(run.runId) !== run.throughId || !run.requests.length) return [];
+      const footer: ChatSessionEntry = { id: `run-usage:${run.runId}`, parentId: after, timestamp: '', type: 'run_usage', runId: run.runId,
+        usages: run.requests.map(({ requestId, usage }) => ({ requestId, measurement: usage.measurement,
+          unknownReceipts: usage.measurement === 'missing' || usage.inputTokens === null || usage.outputTokens === null ? 1 : 0,
+          ...(usage.inputTokens === null ? {} : { input: usage.inputTokens }),
+          ...(usage.outputTokens === null ? {} : { output: usage.outputTokens }),
+          ...(usage.cachedInputTokens === null ? {} : { cacheRead: usage.cachedInputTokens }),
+          ...(usage.cacheWriteTokens === null ? {} : { cacheWrite: usage.cacheWriteTokens }),
+          ...(usage.reasoningTokens === null ? {} : { reasoning: usage.reasoningTokens }),
+        })) };
+      return [[after, footer] as const];
+    }));
+    return { entries: result.flatMap(entry => footers.has(entry.id) ? [entry, footers.get(entry.id)!] : [entry]), toolExecutions };
   }
 }
 

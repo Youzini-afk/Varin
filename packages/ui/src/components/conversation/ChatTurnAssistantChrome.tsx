@@ -6,22 +6,25 @@ import { useModelCatalogStore } from '@/stores/useModelCatalogStore';
 import { VarinLogo } from '@/components/ui/VarinLogo';
 import type { ChatAssistantWaitingPresentation } from './chatAssistantWaiting';
 import type { ChatTimelineTurn } from './chatTimelineProjection';
+import type { ChatAssistantMessage, ChatSessionEntry } from './types';
 
 export const ChatTurnAssistantChrome: React.FC<{
   waiting?: ChatAssistantWaitingPresentation;
-  turn: ChatTimelineTurn;
-}> = ({ turn, waiting }) => {
+  turn?: ChatTimelineTurn;
+  entries?: readonly ChatSessionEntry[];
+  liveAssistant?: ChatAssistantMessage;
+}> = ({ turn, entries = turn?.entries ?? [], liveAssistant = turn?.liveAssistant, waiting }) => {
   const { t } = useI18n();
-  const assistants = turn.entries.flatMap((entry) => (
+  const assistants = entries.flatMap((entry) => (
     entry.type === 'message' && entry.message.role === 'assistant' ? [entry.message] : []
   ));
-  if (turn.liveAssistant) assistants.push(turn.liveAssistant);
+  if (liveAssistant) assistants.push(liveAssistant);
   const last = assistants.at(-1);
   const modelId = last?.model ?? waiting?.model?.id;
   const providerId = last?.provider ?? waiting?.model?.provider;
   const configured = useModelCatalogStore(state => state.channels.find(channel => channel.id === providerId)?.models.find(model => model.id === modelId));
   if (!last && !waiting) return null;
-  const working = waiting !== undefined || turn.liveAssistant?.stopReason === 'pending';
+  const working = waiting !== undefined || liveAssistant?.stopReason === 'pending';
 
   const modelLabel = last?.model
     ? [last.provider, last.responseModel || last.model].filter(Boolean).join('/')
