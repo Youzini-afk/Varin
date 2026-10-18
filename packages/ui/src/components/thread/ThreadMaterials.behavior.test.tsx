@@ -372,6 +372,7 @@ function artifactConversationFixture() {
     run_id: 'run:submitted', input_id: 'input:submitted', cursor: 1 }));
   const api: ThreadsAPI = { historyRuns: async (_identity, { headId }) => ({ head: headId, runs: [] }), historyRunPreview: async () => '', historyUsage: async () => [], contextHistory: unused, fileTarget: unused, usage: unused,
     materials: f.materials, research: f.api,
+    contextInspection: async (_identity, { headId }) => ({ head: headId, counts: { total: 0, user: 0, assistant: 0, tool: 0 }, latestRequest: null, contextRequest: null }),
     computer: { state: async work => ({ state: { work, rootWork: work, currentExecution: null, currentRootExecution: null,
       active: false, status: 'enabled', leases: [], requests: [], cleanups: [] }, activities: [] }), stop: unused, decide: unused },
     goals: { start: unused, update: unused, control: unused, list: async () => [] }, resources: { refresh: unused },

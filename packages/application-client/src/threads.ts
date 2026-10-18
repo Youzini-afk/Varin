@@ -108,6 +108,14 @@ export type ThreadFileTarget = { kind: 'document'; workspaceId: string; root: st
 export interface ThreadHistoryItem extends HistoryItem {
   modelRequest?: import('@varin/protocol').ModelPresentation;
 }
+/** Context facts at an immutable history cut, independent of loaded message pages. */
+export interface ThreadContextInspection {
+  head: string | null;
+  counts: { total: number; user: number; assistant: number; tool: number };
+  latestRequest: import('@varin/protocol').ModelPresentation | null;
+  /** Cleared by a compaction until the next model request reports its footprint. */
+  contextRequest: import('@varin/protocol').ModelPresentation | null;
+}
 /** Durable context records projected by the Host; original conversation history stays intact. */
 export interface ContextJob {
   compaction: { producer: ContextCompactionProducer; kind: 'text' | 'model_plan'; sourceCutHash: string; planHash: string };
@@ -393,6 +401,7 @@ export interface ThreadsAPI {
   historyUsage(identity: ThreadIdentity, cursor: { headId: string; beforeId?: string; limit?: number }, signal?: AbortSignal): Promise<ThreadRunUsage[]>;
   fileTarget(input: ThreadIdentity & { itemId: string; path: string }, signal?: AbortSignal): Promise<ThreadFileTarget>;
   snapshot(identity: ThreadIdentity): Promise<ThreadSnapshot>;
+  contextInspection(identity: ThreadIdentity, cursor: { headId: string | null }, signal?: AbortSignal): Promise<ThreadContextInspection>;
   /** Original execution usage on this branch, excluding child Threads and standalone utility work. */
   usage(identity: ThreadIdentity, signal?: AbortSignal): Promise<import('@varin/protocol').ThreadUsage>;
   inspectTools(identity: ThreadIdentity, runId: string): Promise<ThreadToolInspection>;

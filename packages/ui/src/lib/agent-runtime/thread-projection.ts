@@ -30,6 +30,8 @@ export class ThreadProjection {
   private interruptedTools: StreamingToolCall[] = [];
   private readonly committedRequests = new Set<string>();
   private removeEndpoint: (() => void) | undefined;
+  private contextSnapshot?: ThreadSnapshot;
+  private contextRefreshing = false;
   constructor(private readonly api: ThreadsAPI, private readonly identity: ThreadIdentity,
     private readonly publish: (snapshot: ThreadSnapshot) => void,
     private readonly report: (error: unknown) => void,
@@ -73,12 +75,33 @@ export class ThreadProjection {
             }
           }
           this.publishCurrentProgress();
-          useThreadContextUsageStore.getState().observe(snapshot);
           this.publish(snapshot);
+          this.contextSnapshot = snapshot;
+          void this.refreshContext();
         }
       }
     } catch (error) { if (!this.abort.signal.aborted) this.report(error); }
     finally { this.refreshing = false; }
+  }
+
+  /** Context inspection can scan metadata beyond the visible page; streaming never awaits it. */
+  private async refreshContext(): Promise<void> {
+    if (this.contextRefreshing) return;
+    this.contextRefreshing = true;
+    try {
+      while (this.contextSnapshot && !this.abort.signal.aborted) {
+        const snapshot = this.contextSnapshot;
+        this.contextSnapshot = undefined;
+        try {
+          const inspection = await this.api.contextInspection(this.identity, { headId: snapshot.historyPage.head }, this.abort.signal);
+          if (inspection.head !== snapshot.historyPage.head) throw new Error('Context inspection did not match the selected history');
+          if (!this.abort.signal.aborted) useThreadContextUsageStore.getState().observe(snapshot, inspection);
+        } catch (error) {
+          if (!this.abort.signal.aborted && !this.contextSnapshot) useThreadContextUsageStore.getState().observe(snapshot, undefined,
+            error instanceof Error ? error.message : String(error));
+        }
+      }
+    } finally { this.contextRefreshing = false; }
   }
 
   start(): void {

@@ -30,6 +30,7 @@ import { KernelRequestError } from './kernel-error.js';
 import { ResourceScopeError } from './thread-resource-scope.js';
 import { HistoryRunUsageReader, historyModelRequestId } from './history-run-usage.js';
 import { HistoryRunNavigationReader } from './history-run-navigation.js';
+import { ThreadContextReader } from './thread-context-inspection.js';
 
 export interface ThreadModelAuthority {
   listModels?(): Promise<ThreadModelInfo[]>;
@@ -923,6 +924,11 @@ export class ThreadAdapter {
   }
 
   private historyUsageReader?: HistoryRunUsageReader;
+  private contextReader?: ThreadContextReader;
+  async contextInspection(identity: ThreadIdentity, cursor: { headId: string | null }, signal?: AbortSignal) {
+    await this.requireIdentity(identity);
+    return (this.contextReader ??= new ThreadContextReader(this.runtime)).read(identity.branchId, cursor.headId, signal);
+  }
 
   private async readHistoryPage(branchId: string, cursor?: { headId: string; beforeId?: string; limit?: number }, signal?: AbortSignal): Promise<ThreadHistoryPage> {
     const page = await this.runtime.historyPage({ branchId, limit: 20, ...cursor }, signal);

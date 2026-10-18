@@ -155,6 +155,7 @@ export function registerThreadRoutes(app: Express, adapter: ThreadAdapter, requi
     read: ['runtime', 'threadId', 'key', 'throughCursor'],
     create: ['key'], list: ['query', 'archived'], models: [], submit: ['runtime', 'threadId', 'branchId', 'key', 'text', 'images', 'materials', 'expectedHead', 'model', 'source', 'agent'],
     usage: ['runtime', 'threadId', 'branchId'],
+    'context/inspect': ['runtime', 'threadId', 'branchId', 'headId'],
     snapshot: ['runtime', 'threadId', 'branchId'], 'history/page': ['runtime', 'threadId', 'branchId', 'headId', 'beforeId', 'limit'],
     'history/runs': ['runtime', 'threadId', 'branchId', 'headId'], 'history/run-preview': ['runtime', 'threadId', 'branchId', 'headId', 'runId'],
     'history/usage': ['runtime', 'threadId', 'branchId', 'headId', 'beforeId', 'limit'], enqueue: ['runtime', 'threadId', 'branchId', 'key', 'text', 'images', 'materials', 'mode'],
@@ -470,6 +471,7 @@ export function registerThreadRoutes(app: Express, adapter: ThreadAdapter, requi
   post('history/usage', (body, signal) => adapter.historyUsage(identity(body), { headId: text(body.headId), ...(body.beforeId === undefined ? {} : { beforeId: text(body.beforeId) }), ...(body.limit === undefined ? {} : { limit: Number(body.limit) }) }, signal));
   post('history/file', (body, signal) => adapter.fileTarget({ ...identity(body), itemId: text(body.itemId), path: text(body.path) }, signal));
   post('snapshot', body => adapter.snapshot(identity(body)));
+  post('context/inspect', (body, signal) => adapter.contextInspection(identity(body), { headId: body.headId === null ? null : text(body.headId) }, signal));
   post('usage', (body, signal) => adapter.usage(identity(body), signal));
   post('enqueue', async body => {
     const input = inputBeforeAdmission(() => {

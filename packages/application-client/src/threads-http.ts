@@ -132,6 +132,7 @@ export function createThreadsHttpAPI(): ThreadsAPI {
     fileTarget: (input, signal) => post('history/file', input, signal),
     usage: (selected, signal) => post('usage', selected, signal),
     snapshot: selected => post('snapshot', selected), run: runId => post('run', { runId }),
+    contextInspection: (identity, cursor, signal) => post('context/inspect', { ...identity, ...cursor }, signal),
     inspectTools: (identity, runId) => post('tools/inspect', { ...identity, runId }),
     inspectPolicy: (identity, runId) => post('policy/inspect', { ...identity, runId }),
     restartPolicy: (identity, runId, selectionId) => post('policy/restart', { ...identity, runId, selectionId }),

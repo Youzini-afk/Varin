@@ -31,7 +31,8 @@ export class ThreadHistoryWindow {
   private navigationStale = true;
   private navigationRuns: ThreadHistoryRun[] = [];
   private activeRunId?: string;
-  constructor(private api: Pick<ThreadsAPI, 'historyPage' | 'historyUsage' | 'historyRuns' | 'historyRunPreview'>, private identity: ThreadIdentity) {}
+  constructor(private api: Pick<ThreadsAPI, 'historyPage' | 'historyUsage' | 'historyRuns' | 'historyRunPreview'>, private identity: ThreadIdentity,
+    private options: { usage?: boolean } = {}) {}
 
   getSnapshot = (): ThreadHistoryWindowView => this.view;
   subscribe = (listener: () => void): (() => void) => {
@@ -154,6 +155,7 @@ export class ThreadHistoryWindow {
     }
   };
   private readUsage(cursor: { headId: string; beforeId?: string; limit?: number }) {
+    if (this.options.usage === false) return;
     const signal = this.controller?.signal;
     if (!signal || signal.aborted) return;
     const key = JSON.stringify(cursor);

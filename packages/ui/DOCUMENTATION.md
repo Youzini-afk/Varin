@@ -102,6 +102,11 @@ The navigation rail reads a separate complete native Run index, with one pointer
 ordinals from the selected branch's ancestry. Loaded body pages, virtual rows and activity folding
 do not define its count or order. Hover previews read the Run's prompt/response; selecting an
 unloaded Run first loads its original history anchor, then maps it to a measured row.
+The header context ring and context sidebar share a separate anchored context inspection. The Host
+counts immutable ancestry metadata and reads the latest original model receipt beyond visible pages;
+tool-result bursts cannot erase usage just by pushing that request out of the loaded tail. Inspection
+runs alongside snapshot/progress rendering. Compaction clears the old footprint until a new request
+reports usage. Sidebar message bodies remain paginated, and unavailable billing stays unknown.
 `timelineViewStore` owns scroll positions only. Message handoff animation targets the history ID from
 the accepted input receipt. A retained outgoing scene is inert during conversation switching.
 

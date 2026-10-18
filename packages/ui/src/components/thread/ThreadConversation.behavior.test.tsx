@@ -140,6 +140,7 @@ function fixture(active = false) {
     listMcpInteractions: vi.fn(async () => ({ items: [], nextCursor: null })), readMcpInteraction: unused, respondMcpInteraction: unused,
     reviewMcpSamplingRequest: unused, reviewMcpSamplingOutput: unused,
     snapshot: async () => structuredClone(view), submit, enqueue, editInput, cancelInput, cancelRun,
+    contextInspection: async (_identity, { headId }) => ({ head: headId, counts: { total: 0, user: 0, assistant: 0, tool: 0 }, latestRequest: null, contextRequest: null }),
     sources: { list: async () => ({ targets: [{ resourceOwner: { kind: 'local' }, label: 'This Host', capabilities: [] }], unavailable: [] }),
       resolve: async (_identity, request) => ({ resourceOwner: request.resourceOwner, path: request.path, workspaceId: (await getRegisteredRuntimeAPIs()!.documents.resolveWorkspace({ path: request.path })).workspaceId }) },
     recoverySource: unused, prepareNavigation: unused, navigate: unused, navigationReceipt: unused,
