@@ -757,6 +757,9 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
       <AutoReviewBanner identity={identity} />
       {draft.goalArmed && <p className="px-2 typography-meta text-primary">{t('thread.composer.goalArmed')}</p>}
       <ThreadComposer onOpenHistory={() => setHistoryOpen(true)} identityKey={draftKey} placement={empty ? 'center' : 'bottom'}
+        permissionWorkspacePath={active || !preparedSource ? (launch?.selection.source
+          ? launch.selection.source.resource_owner.kind === 'local' ? launch.selection.source.live_root?.canonicalRoot : undefined
+          : draft.workspacePath) : preparedSource.source.resourceOwner.kind === 'local' ? preparedSource.path : undefined}
         agentControls={!snapshot?.thread.bot_id && !delegated ? <ThreadAgentControls workFocus={workFocus} pending={active} disabled={pending || Boolean(draft.firstSend || draft.pendingInput)}
           onWorkFocusChange={workFocus => useThreadDraftStore.getState().patch(draftKey, { workFocus })} /> : undefined}
         messageHistory={visibleHistory.filter(item => item.source === 'user').slice().reverse().map(item => typeof item.content === 'string' ? item.content : typeof (item.content as { text?: unknown })?.text === 'string' ? (item.content as { text: string }).text : '')}

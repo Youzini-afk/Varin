@@ -1,5 +1,5 @@
 import type { AgentSettingsSnapshot } from '@varin/application-client';
-import { DEFAULT_COMPACTION_RESERVE_RATIO, mergeHarnessSettings, type HarnessSettings, type HarnessSettingsInput, type JsonValue } from '@varin/protocol';
+import { DEFAULT_COMPACTION_RESERVE_RATIO, mergeHarnessSettings, mergePolicies, type HarnessSettings, type HarnessSettingsInput, type JsonValue, type PermissionMode } from '@varin/protocol';
 
 /** Objects merge, arrays replace, undefined removes a setting (restores inheritance). */
 export type HarnessSettingsPatch = { [key: string]: unknown };
@@ -29,6 +29,7 @@ interface Transport {
 }
 export interface HarnessSettingsState {
   harness: HarnessSettings | null;
+  effectivePermissionMode: PermissionMode | null;
   reserveRatio: number;
   status: 'loading' | 'idle' | 'saving' | 'saved' | 'error';
   error: string | null;
@@ -41,7 +42,7 @@ export class HarnessSettingsController {
   private active: Promise<void> | null = null;
   private refreshRequested = false;
   private listeners = new Set<() => void>();
-  private state: HarnessSettingsState = { harness: null, reserveRatio: DEFAULT_COMPACTION_RESERVE_RATIO, status: 'loading', error: null };
+  private state: HarnessSettingsState = { harness: null, effectivePermissionMode: null, reserveRatio: DEFAULT_COMPACTION_RESERVE_RATIO, status: 'loading', error: null };
 
   constructor(private readonly transport: Transport) {}
   getSnapshot = (): HarnessSettingsState => this.state;
@@ -53,14 +54,20 @@ export class HarnessSettingsController {
   private project(status: HarnessSettingsState['status'], error: string | null = null) {
     const raw = this.pending.reduce(patchHarnessSettings, object(this.confirmed?.global));
     let harness: HarnessSettings | null = null;
+    let effectivePermissionMode: PermissionMode | null = null;
     try {
-      if (this.confirmed) harness = mergeHarnessSettings(object(raw.harness) as HarnessSettingsInput, {});
+      if (this.confirmed) {
+        harness = mergeHarnessSettings(object(raw.harness) as HarnessSettingsInput, {});
+        const project = this.confirmed.projectTrusted ? object(this.confirmed.project.harness) as HarnessSettingsInput : {};
+        effectivePermissionMode = mergePolicies({ mode: harness.permissions?.mode ?? 'normal', rules: [] },
+          { mode: project.permissions?.mode }).mode;
+      }
     } catch (failure) {
       status = 'error';
       error = failure instanceof Error ? failure.message : String(failure);
     }
     const reserveRatio = object(raw.compaction).reserveRatio as number | undefined;
-    this.state = { harness, reserveRatio: reserveRatio ?? DEFAULT_COMPACTION_RESERVE_RATIO, status, error };
+    this.state = { harness, effectivePermissionMode, reserveRatio: reserveRatio ?? DEFAULT_COMPACTION_RESERVE_RATIO, status, error };
     this.listeners.forEach((listener) => listener());
   }
 

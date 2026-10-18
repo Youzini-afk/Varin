@@ -5,6 +5,11 @@ through the shared CodeMirror editor, model/thinking controls, dictation, image/
 editor context. This directory holds reusable attachment, text, language and editor helpers; the
 editor does not own Thread submission. Work controls live in the conversation's work overview.
 
+The footer's permission shield edits the Host's global `harness.permissions.mode` through the shared
+settings controller. It remains available during execution and preserves existing rules. Its displayed
+mode includes trusted project constraints for the execution workspace; a pending source change does
+not replace the running workspace. Settings events refresh the control across views and reconnects.
+
 ## Ownership
 
 | Area | Owner |

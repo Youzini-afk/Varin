@@ -1,5 +1,5 @@
 import React from 'react';
-import { createModelConnectionsHttpAPI, getRuntimeKey } from '@varin/application-client';
+import { createModelConnectionsHttpAPI, getRuntimeEndpointGeneration, getRuntimeKey, subscribeRuntimeEndpointChanged } from '@varin/application-client';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { reportSettingsSaveState } from '@/lib/persistence';
 import { subscribeVarinEvents } from '@/lib/varinEvents';
@@ -10,12 +10,18 @@ const controllers = new Map<string, { controller: HarnessSettingsController; use
 
 export function useHarnessSettings(runtime: 'agent' = 'agent') {
   const cwd = useDirectoryStore((state) => state.currentDirectory);
-  const targetKey = JSON.stringify([getRuntimeKey(), cwd, runtime]);
+  return useWorkspaceHarnessSettings(cwd, runtime);
+}
+
+/** The composer supplies its execution workspace rather than the navigation directory. */
+export function useWorkspaceHarnessSettings(cwd?: string, runtime: 'agent' = 'agent') {
+  const host = React.useSyncExternalStore(subscribeRuntimeEndpointChanged, getRuntimeEndpointGeneration, getRuntimeEndpointGeneration);
+  const targetKey = JSON.stringify([getRuntimeKey(), host, cwd, runtime]);
   const entry = React.useMemo(() => {
     const existing = controllers.get(targetKey);
     if (existing) return existing;
     // Capture this runtime connection; a delayed save cannot follow a host switch.
-    const models = createModelConnectionsHttpAPI();
+    const models = createModelConnectionsHttpAPI(host);
     const controller = new HarnessSettingsController({
       read: async () => models.readSettings(cwd),
       write: async (settings, expectedRevision) => models.updateSettings({ cwd, scope: 'global', expectedRevision, set: settings, remove: [] }),
@@ -23,7 +29,7 @@ export function useHarnessSettings(runtime: 'agent' = 'agent') {
     const next = { controller, users: 0 };
     controllers.set(targetKey, next);
     return next;
-  }, [cwd, targetKey, runtime]);
+  }, [cwd, targetKey, runtime, host]);
   const { controller } = entry;
   const state = React.useSyncExternalStore(controller.subscribe, controller.getSnapshot, controller.getSnapshot);
   React.useEffect(() => {
@@ -43,7 +49,7 @@ export function useHarnessSettings(runtime: 'agent' = 'agent') {
     };
   }, [controller, entry, targetKey]);
   React.useEffect(() => subscribeVarinEvents((event) => {
-    if (event.type === 'settings-changed' && event.owner === 'agent-settings') {
+    if (event.type === 'stream-ready' || event.type === 'settings-changed' && event.owner === 'agent-settings') {
       void controller.refresh();
     }
   }), [controller, runtime]);

@@ -20,10 +20,11 @@ import { useMessageHistory } from '@/components/chat/composer/state/useMessageHi
 import { eventMatchesShortcut, getEffectiveShortcutCombo } from '@/lib/shortcuts';
 import { isIMECompositionEvent } from '@/lib/ime';
 import { WorkbenchContributionSlot } from '@/lib/extensions/workbench-registry';
+import { ThreadPermissionControl } from './ThreadPermissionControl';
 
 export function ThreadComposer({ editorRef, value, onChange, models, providerId, modelId, thinkingLevel, onModelChange,
   modelDisabled, attachmentDisabled, imageDisabled, sendDisabled, pending, active, retrying, delivery, onDeliveryChange,
-  allowNextRun, onFiles, onAttachImages, onAttachPdfs, onStop, onGoal, goalArmed, children, attachmentNames, skills, hasInput, onWorkspace, workspaceLabel, workspacePath, identityKey, messageHistory: sentMessageHistory = [], placement = 'bottom', queue, onCompact, onOpenHistory, agentControls }: {
+  allowNextRun, onFiles, onAttachImages, onAttachPdfs, onStop, onGoal, goalArmed, children, attachmentNames, skills, hasInput, onWorkspace, workspaceLabel, workspacePath, permissionWorkspacePath, identityKey, messageHistory: sentMessageHistory = [], placement = 'bottom', queue, onCompact, onOpenHistory, agentControls }: {
   editorRef: React.Ref<ComposerEditorHandle>; value: string; onChange(value: string): void;
   identityKey?: string; messageHistory?: readonly string[]; placement?: 'center' | 'bottom'; queue?: React.ReactNode; onCompact?(): void; onOpenHistory?(): void;
   models: ThreadModelInfo[]; providerId: string; modelId: string; thinkingLevel: ThreadThinkingLevel;
@@ -35,6 +36,7 @@ export function ThreadComposer({ editorRef, value, onChange, models, providerId,
   hasInput: boolean; onWorkspace(): void; workspaceLabel: string;
   goalArmed?: boolean;
   workspacePath?: string;
+  permissionWorkspacePath?: string;
   children?: React.ReactNode; attachmentNames: string[]; skills: string[];
   agentControls?: React.ReactNode;
 }) {
@@ -396,6 +398,7 @@ export function ThreadComposer({ editorRef, value, onChange, models, providerId,
                   </DropdownMenuItem>
                 </DropdownMenuContent>
               </DropdownMenu>
+              <ThreadPermissionControl workspacePath={permissionWorkspacePath} className={footerIconButtonClass} />
               {goalEnabled && <button type="button" className={cn(footerIconButtonClass, goalArmed && 'text-primary bg-primary/10')} onClick={onGoal} aria-pressed={Boolean(goalArmed)} aria-label={t('chat.draftPresets.craftGoal.label')}><Icon name="target" className="size-4" /></button>}
               <button type="button" onClick={onWorkspace} className="flex min-w-0 items-center gap-1 rounded-md px-1 py-1 typography-micro text-muted-foreground hover:bg-interactive-hover" title={workspaceLabel}><Icon name="folder" className="size-3.5" /><span className="max-w-28 truncate">{workspaceLabel}</span></button>
               <WorkbenchContributionSlot kind="composer-action" slot="chat.composer.actions.leading" props={{ identityKey, workspacePath, text: value, onChange, onSend: submit }} />
