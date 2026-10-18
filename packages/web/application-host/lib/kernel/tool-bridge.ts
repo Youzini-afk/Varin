@@ -171,6 +171,10 @@ export const unknownToolReceipt = (): ToolExecutionReceipt => ({
   },
   executor_stopped: false,
 });
+export const failedReadToolReceipt = (code: string): ToolExecutionReceipt => ({
+  completion: { kind: 'result', outcome: 'failed', effect: 'none', content: { data: { error: code }, parts: [] } },
+  executor_stopped: true,
+});
 export const undispatchedToolReceipt = (
   reason: string,
 ): ToolExecutionReceipt => ({
@@ -997,7 +1001,8 @@ export class ToolBridge {
                 epoch: request.binding.ownerId,
               }),
         )
-        .catch(unknownToolReceipt)
+        .catch(() => owner.binding.tools.some(tool => tool.name === call.name && tool.metadata?.operation === 'read')
+          ? failedReadToolReceipt('host_tool_read_failed') : unknownToolReceipt())
         .then((receipt) => {
           entry.actualPending = false;
           entry.receipt = receipt;

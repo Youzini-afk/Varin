@@ -91,6 +91,9 @@ specific retrieval and memory inference share actual Catalog admission/receipts.
 
 `tool-invocation.ts`, `tool-bridge.ts`, `extension-tool-owner.ts`, `nested-tool-owner.ts` and the domain
 owners validate the original Run, ToolOrigin, operation/call, schema, binding and execution owner.
+Extension input schemas are checked once at authorization; execution reuses the parsed input after checking
+the original call identity, current permission and binding availability. Read-only callback/schema failures
+settle as failed reads. Domain mutation receipts retain their actual effect and executor-stop evidence.
 The model's tool name or claimed source is not authority. Nested scripts invoke the same ordinary tools
 through retained parent permission; they cannot upgrade read-only or borrowed authority by changing labels.
 
@@ -119,6 +122,15 @@ HTTP cannot prove remote execution stopped.
 | Calendar | `../scheduled-tasks/calendar-owner.ts` | Runtime Calendar occurrences and original launch/observation |
 | Project schedules | `schedule-tool-owner.ts`, `managed-schedule-service.ts` | Source Host scheduler and Source Storage mutation receipt |
 | Recovery/Integration | `managed-recovery-service.ts`, integration owners | Existing Recovery/Integration journals and conditional file authority |
+
+Agent `todo` updates accept a complete item list without a preliminary read. The plan owner selects the
+current visible version within the original branch; optional `expectedRef` preserves explicit version
+comparisons. Original mutation receipts deduplicate retries. User editor saves retain their displayed version.
+
+Settings tools obtain execution stages from the existing writer calls. Validation failures and rejected CAS
+writes have no effect; applied fields and unresolved dispatched writes retain their respective outcomes.
+Updates without an explicit revision rebase their requested fields after a confirmed CAS rejection, preserving
+concurrent changes to other fields. This uses the existing read/merge/write path rather than model round trips.
 
 Filename entries are navigation, not a complete API catalog. Consult the actual module and nearest
 focused tests before modifying an owner; generated schemas define the concrete method shapes.

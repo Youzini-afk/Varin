@@ -9,6 +9,7 @@ use serde::{Deserialize, Serialize};
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct FileWriteArgs {
     pub path: String,
+    #[serde(default)]
     pub read_version: String,
     pub content: String,
 }
@@ -156,7 +157,7 @@ impl Storage {
             None,
         )?;
         self.check_cancelled()?;
-        if mutation.read_version().is_empty() {
+        if mutation.read_version().is_empty() && matches!(mutation, TextMutation::Edit(_)) {
             return Err(KernelError::Operation("readVersion is required".into()));
         }
         if !execute {
@@ -211,9 +212,29 @@ impl Storage {
             return Err(KernelError::Operation("file resource is busy".into()));
         }
         let result = (|| {
-            let expected = self.capture_file_state(&resource)?;
+            if mutation.read_version().is_empty() {
+                match fs::symlink_metadata(&resource.absolute) {
+                    Ok(_) => return Ok(json!({"path":resource.path,"status":"conflict"})),
+                    Err(error) if error.kind() == io::ErrorKind::NotFound => {},
+                    Err(error) => return Err(error.into()),
+                }
+            }
+            let params = json!({"rootId":root_id,"path":resource.path,"offset":0,"leaseId":lease_id});
+            let (expected, observed) = match self.prepare_file_mutation_read(&params, grant)? {
+                Some(task) => {
+                    let prepared = task.run()?;
+                    let state = prepared.state.clone();
+                    (state, Some(self.finish_file_read(&task, Ok(prepared), grant)?))
+                },
+                None => (self.capture_file_state(&resource)?, None),
+            };
             let current_version = read_version(root_id, &resource.path, &expected)?;
-            if current_version != mutation.read_version() {
+            let version_matches = if mutation.read_version().is_empty() {
+                matches!(expected, FileState::Missing)
+            } else {
+                current_version == mutation.read_version()
+            };
+            if !version_matches {
                 return Ok(
                     json!({"path":resource.path,"status":"conflict","readVersion":current_version}),
                 );
@@ -228,14 +249,8 @@ impl Storage {
                 }
             };
             let previous_text = if matches!(expected, FileState::RegularFile { .. }) {
-                let observed = self.file_read(
-                    &json!({"rootId":root_id,"path":resource.path,"offset":0,"leaseId":lease_id}),
-                    grant,
-                    true,
-                )?;
-                if observed["readVersion"].as_str() != Some(current_version.as_str()) {
-                    return Ok(json!({"path":resource.path,"status":"conflict"}));
-                }
+                let observed = observed.as_ref().ok_or_else(||
+                    KernelError::Operation("file changed before mutation".into()))?;
                 let text = observed["content"]["text"].as_str().ok_or_else(|| {
                     KernelError::Operation("text mutation requires UTF-8 content".into())
                 })?;

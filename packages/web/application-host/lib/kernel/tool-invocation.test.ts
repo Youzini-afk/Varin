@@ -69,6 +69,17 @@ test('lost domain transport remains unknown and occupied after the broker callba
   assert.deepEqual(observed?.completion, { kind: 'result', outcome: 'indeterminate', effect: 'unknown', content: { data: { error: 'host_tool_effect_unknown' }, parts: [] } });
 });
 
+test('a failed read domain settles without claiming an unknown write', async () => {
+  const signal=new AbortController().signal;
+  let observed:ToolExecutionReceipt|undefined;
+  await withToolInvocation({authority:{...authority,operation:'read'},owner,signal,onEffectReceipt:value=>{observed=value;}},async invocation=>{
+    await assert.rejects(runToolDomainCall({owner,signal,invocation},{...input,operation:'read'},async()=>{throw new Error('reader failed');}),/reader failed/);
+  });
+  assert.equal(observed?.executor_stopped,true);
+  assert.equal(observed?.completion.kind,'result');
+  assert.deepEqual(observed?.completion,{kind:'result',outcome:'failed',effect:'none',content:{data:{error:'host_tool_read_failed'},parts:[]}});
+});
+
 test('domain result and accepted job preserve JSON null; only a bodyless job projects its handle', async () => {
   for (const completion of [
     { kind:'result' as const,outcome:'succeeded' as const,effect:'confirmed' as const,content:{data:null,parts:[]} },

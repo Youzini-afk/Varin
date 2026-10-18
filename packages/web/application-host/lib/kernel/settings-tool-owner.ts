@@ -6,7 +6,6 @@ import type { SettingsSearchParams, SettingsReadParams, SettingsUpdateParams, Se
 import type { SettingsService, SettingsServiceCaller } from '../harness/settings-service.js';
 import type { AgentRuntimeClient } from './agent-runtime-client.js';
 import { runToolDomainCall, type ToolInvocationAuthority } from './tool-invocation.js';
-import { HarnessServiceError } from '../harness/service-error.js';
 
 export { SETTINGS_CAPABILITY };
 export function createSettingsToolOwner(options: {
@@ -26,28 +25,31 @@ export function createSettingsToolOwner(options: {
     const readOnly = method === 'search' || method === 'read';
     return runToolDomainCall(context, { operation: readOnly ? 'read' : 'effect', domain: SETTINGS_CAPABILITY,
       toolName: `settings_${method}`, arguments: params }, async authority => {
-      let entered = false;
+      let pendingWrites = 0;
+      let changed = false;
       try {
         context.signal.throwIfAborted();
         const run = await options.runtime.run(authority.runId, context.signal);
         if (run.thread_id !== authority.threadId) throw new Error('Settings invocation Thread changed');
         const caller: SettingsServiceCaller = { threadId: run.thread_id, branchId: run.branch_id,
           runId: authority.runId, operationId: authority.operationId, invocation: authority,
-          workspaceId: options.localWorkspace?.(authority) ?? null, signal: context.signal };
-        entered = true;
+          workspaceId: options.localWorkspace?.(authority) ?? null, signal: context.signal,
+          onMutationState(state) {
+            if (state === 'started') pendingWrites++;
+            else { pendingWrites--; if (state === 'applied') changed = true; }
+          } };
         const result = method === 'search' ? await options.service.search(caller, params as unknown as SettingsSearchParams)
           : method === 'read' ? await options.service.read(caller, params as unknown as SettingsReadParams)
           : method === 'update' ? await options.service.update(caller, params as unknown as SettingsUpdateParams)
           : await options.service.action(caller, params as unknown as SettingsActionParams);
         const status = 'status' in result ? result.status : 'state' in result ? result.state : 'ok';
-        const failed = ['failed', 'unavailable', 'denied', 'malformed'].includes(status);
-        const effect = readOnly ? 'none' : ['applied', 'partial', 'pending'].includes(status) ? 'confirmed' : 'unknown';
-        return { executor_stopped: true, completion: { kind: 'result', outcome: failed ? 'failed' : 'succeeded', effect,
+        const failed = ['failed', 'partial', 'unavailable', 'denied', 'malformed'].includes(status);
+        const effect = pendingWrites > 0 ? 'unknown' : changed ? failed ? 'partial' : 'confirmed' : 'none';
+        return { executor_stopped: true, completion: { kind: 'result', outcome: pendingWrites > 0 ? 'indeterminate' : failed ? 'failed' : 'succeeded', effect,
           content: { data: parseVarinToolJson(JSON.parse(JSON.stringify(result)) as JsonValue), parts: [] } } };
       } catch (error) {
-        const knownNoEffect = error instanceof HarnessServiceError && ['invalid-params', 'denied', 'not-found'].includes(error.harnessCode);
-        const uncertain = entered && !readOnly && !knownNoEffect;
-        return { executor_stopped: true, completion: { kind: 'result', outcome: uncertain ? 'indeterminate' : 'failed', effect: uncertain ? 'unknown' : 'none',
+        const uncertain = pendingWrites > 0;
+        return { executor_stopped: true, completion: { kind: 'result', outcome: uncertain ? 'indeterminate' : 'failed', effect: uncertain ? 'unknown' : changed ? 'partial' : 'none',
           content: { data: { error: error instanceof Error ? error.message : 'Settings owner failed' }, parts: [] } } };
       }
     });

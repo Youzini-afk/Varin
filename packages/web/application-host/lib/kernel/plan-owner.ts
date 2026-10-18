@@ -7,7 +7,7 @@ export interface PlanQuery {
   action: 'read' | 'mutate' | 'receipt';
   view: PlanView;
   origin: Extract<PlanOrigin, {kind:'tool'}>;
-  arguments: { action:'read' } | { action:'update'; expectedRef:string|null; items:TodoItem[] };
+  arguments: { action:'read' } | { action:'update'; expectedRef?:string|null; items:TodoItem[] };
 }
 /** Same-epoch original executor facts, never a substitute for a durable mutation receipt. */
 export interface PlanExecutionReceipt {
@@ -34,12 +34,12 @@ export function createPlanOwner(getStore:()=>Promise<KnowledgeStore>, runtime: A
         return {status:'ready',plan:await withPlanSelection(store,runtime,query.view,selection=>store.readPlan(query.view,selection),signal)};
       }
       if (args.action !== 'update' || Object.keys(args).some(key=>!['action','expectedRef','items'].includes(key))
-        || !(args.expectedRef === null || typeof args.expectedRef === 'string' && args.expectedRef.length > 0)
+        || !(args.expectedRef === undefined || args.expectedRef === null || typeof args.expectedRef === 'string' && args.expectedRef.length > 0)
         || !Array.isArray(args.items) || args.items.some(item=>!item || typeof item.text !== 'string'
           || !isTodoItemStatus(item.status) || Object.keys(item).some(key=>!['text','status'].includes(key)))) {
         throw new KnowledgeMutationError('invalid','Invalid plan update');
       }
-      const input = {view:query.view,origin:query.origin,expectedRef:args.expectedRef,content:renderTodoPlan(args.items)};
+      const input = {view:query.view,origin:query.origin,...(args.expectedRef === undefined ? {} : {expectedRef:args.expectedRef}),content:renderTodoPlan(args.items)};
       const store=await getStore();
       if (query.action !== 'receipt') signal.throwIfAborted();
       const prior = await store.readPlanMutation(input);

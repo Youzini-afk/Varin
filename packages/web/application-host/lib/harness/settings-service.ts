@@ -57,6 +57,8 @@ export interface SettingsServiceCaller {
   operationId?: string;
   signal?: AbortSignal;
   invocation?: import('../kernel/tool-invocation.js').ToolInvocationAuthority;
+  /** Facts from the existing writer call, without a separate verification read. */
+  onMutationState?(state: 'started' | 'unchanged' | 'applied'): void;
 }
 
 export interface SettingsActionOperationStore {
@@ -890,11 +892,13 @@ export function createSettingsService(deps: SettingsServiceDeps): SettingsServic
           operation: makeOperation(stored.id, stored.state, stored.detail, stored.cancelVerb),
         };
       }
+      caller.onMutationState?.('started');
       const cancelled = await adapter.cancelOperation(actionContext, entry, stored.id, args).catch((error: unknown): ActionInvocation => ({
         status: 'unavailable',
         detail: error instanceof Error ? error.message : String(error),
         operation: { id: stored.id, state: 'unavailable' },
       }));
+      if (cancelled.status === 'applied' || cancelled.status === 'pending') caller.onMutationState?.('applied');
       const cancellation = cancelled.operation && cancelled.operation.id === stored.id
         ? cancelled.operation
         : makeOperation(stored.id, cancelled.status === 'applied' ? 'cancelled' : cancelled.status === 'unavailable' ? 'unavailable' : 'running', cancelled.detail, stored.cancelVerb);
@@ -972,6 +976,7 @@ export function createSettingsService(deps: SettingsServiceDeps): SettingsServic
         };
       }
     }
+    caller.onMutationState?.('started');
     const outcome: ActionInvocation = await adapter.invoke(
       actionContext,
       entry,
@@ -981,6 +986,7 @@ export function createSettingsService(deps: SettingsServiceDeps): SettingsServic
       status: 'failed' as const,
       detail: error instanceof Error ? error.message : String(error),
     }));
+    if (outcome.status === 'applied' || outcome.status === 'pending') caller.onMutationState?.('applied');
     if (outcome.status === 'pending' && !outcome.operation) {
       return {
         status: 'unavailable',
@@ -1057,6 +1063,7 @@ export function createSettingsService(deps: SettingsServiceDeps): SettingsServic
     effective?: Record<string, unknown>;
     document?: VarinSettingsDocument;
   }> => {
+    const originalWrites = writes;
     const duplicateCheck = rejectConflictingDuplicatePaths(writes);
     writes = duplicateCheck.accepted;
     const itemResults: SettingsItemResult[] = [...duplicateCheck.rejected];
@@ -1172,12 +1179,18 @@ export function createSettingsService(deps: SettingsServiceDeps): SettingsServic
     // Always CAS on the document we just merged against: without an explicit
     // expectedRevision a concurrent UI write between read and transact would
     // otherwise be silently clobbered.
+    caller.onMutationState?.('started');
     const outcome = await deps.persistAppSettings(
       changes,
       removals,
       currentRevision,
     );
+    caller.onMutationState?.(outcome.conflict ? 'unchanged' : 'applied');
     if (outcome.conflict) {
+      if (expectedRevision === undefined && writes.every(write => write.expectedRevision === undefined)) {
+        caller.signal?.throwIfAborted();
+        return updateAppBatch(caller, originalWrites);
+      }
       for (const item of itemResults) {
         if (item.status !== 'applied' && item.status !== 'partial') continue;
         item.status = 'failed';
@@ -1260,6 +1273,7 @@ export function createSettingsService(deps: SettingsServiceDeps): SettingsServic
     writes: AgentWrite[],
     expectedRevision?: string,
   ): Promise<{ items: SettingsItemResult[]; revision?: string; effective?: Record<string, unknown> }> => {
+    const originalWrites = writes;
     const root = caller.workspaceId ? await deps.resolveWorkspaceRoot(caller.workspaceId) : null;
     if (scope === 'project' && !root) throw new HarnessServiceError('unavailable', 'project settings require an admitted workspace');
     const duplicateCheck = rejectConflictingDuplicatePaths(writes);
@@ -1385,15 +1399,27 @@ export function createSettingsService(deps: SettingsServiceDeps): SettingsServic
       }
       topLevelSet[rootKey] = rootObject;
     }
-    const updated = await deps.agentSettings().update({
-      ...(scope === 'project' && root ? { cwd: root } : {}),
-      scope,
-      expectedRevision: currentRevision,
-      set: topLevelSet as Record<string, import('@varin/protocol').JsonValue>,
-      remove: topLevelRemove,
-    }).catch((error: unknown) => {
+    caller.onMutationState?.('started');
+    let updated;
+    try {
+      updated = await deps.agentSettings().update({
+        ...(scope === 'project' && root ? { cwd: root } : {}),
+        scope,
+        expectedRevision: currentRevision,
+        set: topLevelSet as Record<string, import('@varin/protocol').JsonValue>,
+        remove: topLevelRemove,
+      });
+    } catch (error) {
+      if (error instanceof ModelConfigurationError && error.code === 'config_conflict') {
+        caller.onMutationState?.('unchanged');
+        if (expectedRevision === undefined && writes.every(write => write.expectedRevision === undefined)) {
+          caller.signal?.throwIfAborted();
+          return updateAgentBatch(caller, scope, originalWrites);
+        }
+      }
       throw new HarnessServiceError('failed', error instanceof Error ? error.message : String(error));
-    });
+    }
+    caller.onMutationState?.('applied');
     snapshot = updated;
     const revision = scope === 'project' ? snapshot.projectRevision : snapshot.globalRevision;
     const effective: Record<string, unknown> = {};
@@ -1480,6 +1506,7 @@ export function createSettingsService(deps: SettingsServiceDeps): SettingsServic
     }
     let response;
     try {
+      caller.onMutationState?.('started');
       response = await bridge.request({
         type: 'apply',
         entries: [{
@@ -1497,6 +1524,7 @@ export function createSettingsService(deps: SettingsServiceDeps): SettingsServic
     }
     const result = response.results.find((item) => item.id === entry.id);
     const status = result?.status ?? 'unavailable';
+    if (status === 'applied') caller.onMutationState?.('applied');
     if (status === 'applied') {
       deps.onChanged?.({
         owner: 'client',

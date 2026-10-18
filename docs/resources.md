@@ -67,6 +67,8 @@ Windows 和不支持的根保留 unknown coverage，完整复核目录 inventory
 Agent 的物理文件读取在后台流式哈希，只保留所请求的片段；完整读取和部分读取都返回原文件的 `readVersion`。
 该版本由根、路径与内容状态决定，同一文件跨 Run 保持稳定；读写权限由原 grant 独立校验。UTF-8 文本的片段边界会扩展到完整字符，
 翻页使用返回的 `nextOffset`；二进制片段保留精确字节和明确的 base64 编码。
+`file_write` 创建新文件时可省略 `readVersion`；替换已有文件与文本编辑使用读取所得版本。文本修改准备在一次读取中
+取得正文和版本状态，提交时沿原 `file.apply` 校验当前文件；响应帧大小只约束发往调用方的正文。
 `file_list` 默认列当前目录，`recursive` 展开后代，`nextCursor` 配合相同过滤条件继续读取。物理目录页按路径顺序读取
 当前状态；`includeRevisions` 显式请求正文版本，普通目录列表省略未计算的哈希。
 普通目录列表显示包括依赖、Git、worktree 和被忽略文件在内的入口。递归发现默认略过 `.git`、`node_modules`、`.worktrees`

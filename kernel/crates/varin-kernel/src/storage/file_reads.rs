@@ -18,6 +18,7 @@ pub(crate) struct FileReadTask {
 }
 pub(crate) struct PreparedFileRead {
     pub value: Value,
+    pub state: FileState,
     after: fs::Metadata,
 }
 
@@ -95,14 +96,15 @@ impl FileReadTask {
                 "file changed while being read".into(),
             ));
         }
+        let state = FileState::RegularFile {
+            object_hash: format!("sha256-{}", hex::encode(hash.finalize())),
+            byte_length: position,
+            mode: Some(file_mode(&after)),
+        };
         let version = super::file_mutations::read_version(
             self.params["rootId"].as_str().expect("admitted root"),
             &self.resource_path,
-            &FileState::RegularFile {
-                object_hash: format!("sha256-{}", hex::encode(hash.finalize())),
-                byte_length: position,
-                mode: Some(file_mode(&after)),
-            },
+            &state,
         )?;
         let left = (self.start - from) as usize;
         let right = (self.end - from) as usize;
@@ -135,6 +137,7 @@ impl FileReadTask {
         Ok(PreparedFileRead {
             value: json!({"path":self.params["path"],"source":{"rootId":self.params["rootId"]},
             "missing":false,"readVersion":version,"content":content}),
+            state,
             after,
         })
     }
@@ -147,14 +150,24 @@ impl Storage {
         grant: &Grant,
         cancellation: Arc<AtomicBool>,
     ) -> Result<Option<FileReadTask>, KernelError> {
-        self.file_read(params, grant, false)?;
-        let root_id = params["rootId"].as_str().expect("admitted root");
-        let resource = self.resolve_file_resource(
-            root_id,
-            params["path"].as_str().expect("admitted path"),
-            grant,
-            false,
-        )?;
+        self.prepare_file_read_inner(params, grant, cancellation, true)
+    }
+    pub(super) fn prepare_file_mutation_read(
+        &mut self,
+        params: &Value,
+        grant: &Grant,
+    ) -> Result<Option<FileReadTask>, KernelError> {
+        let cancellation = self.cancellation.clone().unwrap_or_else(|| Arc::new(AtomicBool::new(false)));
+        self.prepare_file_read_inner(params, grant, cancellation, false)
+    }
+    fn prepare_file_read_inner(
+        &mut self,
+        params: &Value,
+        grant: &Grant,
+        cancellation: Arc<AtomicBool>,
+        response: bool,
+    ) -> Result<Option<FileReadTask>, KernelError> {
+        let resource = self.resolve_file_read(params, grant)?;
         match fs::symlink_metadata(&resource.absolute) {
             Ok(meta) if !meta.is_file() || meta.file_type().is_symlink() => return Ok(None),
             Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
@@ -183,7 +196,7 @@ impl Storage {
             })
             .transpose()?
             .unwrap_or(before.len().saturating_sub(start));
-        if length > MAX_BLOB_RESPONSE_BYTES as u64 {
+        if response && length > MAX_BLOB_RESPONSE_BYTES as u64 {
             return Err(KernelError::Operation(
                 "file is larger than one response frame; request a byte range".into(),
             ));
@@ -211,13 +224,7 @@ impl Storage {
         grant: &Grant,
     ) -> Result<Value, KernelError> {
         task.check()?;
-        self.file_read(&task.params, grant, false)?;
-        let resource = self.resolve_file_resource(
-            task.params["rootId"].as_str().unwrap(),
-            &task.resource_path,
-            grant,
-            false,
-        )?;
+        let resource = self.resolve_file_read(&task.params, grant)?;
         let prepared = result?;
         if grant.grant_id != task.grant.grant_id
             || resource.absolute != task.absolute

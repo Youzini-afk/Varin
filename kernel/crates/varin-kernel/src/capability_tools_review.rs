@@ -366,9 +366,7 @@ fn disclosure_invocation_uses_original_permissions_versions_receipts_and_output(
         }
         assert_eq!(
             report.state,
-            if mode == "unknown" {
-                RunState::Failed
-            } else if mode == "question" {
+            if mode == "question" {
                 RunState::Waiting
             } else {
                 RunState::Completed

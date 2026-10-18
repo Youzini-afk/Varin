@@ -36,7 +36,8 @@ export interface PlanCandidate {
 export interface PlanMutationInput {
   view: PlanView;
   origin: PlanOrigin;
-  expectedRef: PlanRef | null;
+  /** Omit for an Agent update against the current visible plan; null requires no existing plan. */
+  expectedRef?: PlanRef | null;
   content: string;
   /** Temporary visibility evidence; excluded from semantic mutation intent. */
   selection?: PlanSelection;

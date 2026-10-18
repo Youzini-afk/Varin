@@ -47,7 +47,7 @@ impl Fixture {
         let binding:ToolBinding=serde_json::from_value(json!({"resourceOwner":{"kind":"local"},"grantId":"actor","runId":"run","threadId":"thread",
             "workspaceId":"workspace","executionWorkspaceId":"workspace","rootId":registered["rootId"],"sourceMode":"live_root",
             "liveRoot":{"hostId":HOST,"rootId":registered["rootId"],"canonicalRoot":registered["canonicalRoot"]},
-            "enabledTools":["file_read","file_edit","file_list","file_search","process_spawn"]})).unwrap();
+            "enabledTools":["file_read","file_write","file_edit","file_list","file_search","process_spawn"]})).unwrap();
         let storage = Arc::new(Mutex::new(storage));
         let owner = storage.clone();
         let resources = KernelResourceClient::new(
@@ -114,6 +114,29 @@ impl Fixture {
             other => panic!("{other:?}"),
         }
     }
+}
+
+#[test]
+fn file_write_creates_without_a_read_and_keeps_existing_content_on_an_unversioned_retry() {
+    let mut f=Fixture::new();
+    assert!(matches!(f.call("file_write",json!({"path":"new.txt","content":"中文🙂"})),
+        ToolCompletion::Result { outcome:Outcome::Succeeded,.. }));
+    assert!(matches!(f.call("file_write",json!({"path":"new.txt","content":"overwritten"})),ToolCompletion::NotDispatched {..}));
+    assert_eq!(fs::read_to_string(f.root.join("work/new.txt")).unwrap(),"中文🙂");
+}
+
+#[test]
+fn text_edits_can_read_existing_content_larger_than_a_response_frame_internally() {
+    let mut f=Fixture::new();
+    let mut body="x".repeat(crate::protocol::MAX_BLOB_RESPONSE_BYTES+1);
+    body.push_str("END");
+    fs::write(f.root.join("work/large.txt"),&body).unwrap();
+    let version=f.read(json!({"path":"large.txt","length":1}))["readVersion"].clone();
+    assert!(matches!(f.call("file_edit",json!({"path":"large.txt","readVersion":version,"edits":[{"oldText":"END","newText":"DONE"}]})),
+        ToolCompletion::Result { outcome:Outcome::Succeeded,.. }));
+    let content=fs::read_to_string(f.root.join("work/large.txt")).unwrap();
+    assert_eq!(content.len(),body.len()+1);
+    assert!(content.ends_with("DONE"));
 }
 
 #[test]

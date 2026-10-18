@@ -4,7 +4,7 @@
 import { randomUUID } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
 import { parseVarinToolJson, parseIncomingOutputPart, type JsonValue, type OutputPart, type IncomingMedia } from '@varin/extension-contract';
-import { unknownToolReceipt, type ToolExecutionReceipt } from './tool-bridge.js';
+import { failedReadToolReceipt, unknownToolReceipt, type ToolExecutionReceipt } from './tool-bridge.js';
 import type { HostCapabilityCallContext, HostInvocationScope, HostServiceOwnerIdentity } from '@varin/extension-host';
 import { toolOperationId, validToolOrigin, type ExecutorOwner, type LaunchSource, type ToolOrigin } from './protocol.generated.js';
 
@@ -104,7 +104,8 @@ export async function withToolInvocation<T>(options: {
       await Promise.allSettled(registration.nested);
       if (registration.effect) {
         // An unclassified domain error is not evidence that its physical writer stopped.
-        const receipt = await registration.effect.work.catch(unknownToolReceipt);
+        const receipt = await registration.effect.work.catch(() => authority.operation === 'read'
+          ? failedReadToolReceipt('host_tool_read_failed') : unknownToolReceipt());
         options.onEffectReceipt?.(receipt);
       }
     } finally { options.onOutput?.(registration.parts); registrations.delete(scope); liveOperations.delete(authority.operationId); }

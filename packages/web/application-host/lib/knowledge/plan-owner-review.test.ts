@@ -77,6 +77,24 @@ const tool = (kind: 'model_step' | 'policy_action' = 'model_step'): Extract<Plan
 const write = (s: KnowledgeStore, v: PlanView, key: string, expectedRef: string | null, content = key) => mutatePlan(s, input(v, key, expectedRef, content));
 
 describe('plan independent owner review, real TriviumDB', () => {
+  it('updates an Agent plan without a preliminary read and replays the original mutation', async () => {
+    const {store}=await fixture();
+    const v=view();
+    const runtime={planContains:async()=>({status:'ready',visible:true})} as unknown as AgentRuntimeClient;
+    const owner=createPlanOwner(async()=>store,runtime);
+    const query=(callId:string,text:string,guard?:{expectedRef:string|null}):PlanQuery=>({
+      action:'mutate',view:v,origin:{...tool(),callId,operationId:`req:tool:${callId}`},
+      arguments:{action:'update',items:[{text,status:'pending'}],...guard},
+    });
+    const first=query('first','First plan');
+    const saved=await owner(first,new AbortController().signal);
+    expect(saved).toMatchObject({status:'ready',mutation:{receipt:{status:'applied'}}});
+    const updated=await owner(query('next','Updated plan'),new AbortController().signal);
+    expect(updated).toMatchObject({status:'ready',plan:{content:'- [ ] Updated plan'},mutation:{receipt:{status:'applied'}}});
+    expect(await owner({...first,action:'receipt'},new AbortController().signal)).toEqual(saved);
+    expect(await owner(query('guarded','Stale plan',{expectedRef:null}),new AbortController().signal))
+      .toMatchObject({status:'ready',plan:{content:'- [ ] Updated plan'},mutation:{receipt:{status:'conflict'}}});
+  });
   it('isolates same-head siblings and fixes a fork against later same-head source edits', async () => {
     const { store } = await fixture();
     const a = view(); const p1 = await write(store, a, 'p1', null);

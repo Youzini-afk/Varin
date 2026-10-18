@@ -62,7 +62,9 @@ function selectionOf(value: PlanSelection | undefined): PlanSelection {
 
 function inputOf(value: PlanMutationInput): PlanMutationInput {
   if (!value || typeof value !== 'object' || typeof value.content !== 'string') fail('Plan content is required');
-  return { view: viewOf(value.view), origin: originOf(value.origin), expectedRef: nullable(value.expectedRef, 'expected reference'), content: value.content, ...(value.selection ? { selection: selectionOf(value.selection) } : {}) };
+  const origin=originOf(value.origin);
+  if (value.expectedRef === undefined && origin.kind !== 'tool') fail('User plan updates require the displayed reference');
+  return { view: viewOf(value.view), origin, ...(value.expectedRef === undefined ? {} : {expectedRef:nullable(value.expectedRef, 'expected reference')}), content: value.content, ...(value.selection ? { selection: selectionOf(value.selection) } : {}) };
 }
 
 export function createPlanStore(owner: Owner): Methods {
@@ -158,11 +160,12 @@ export function createPlanStore(owner: Owner): Methods {
         if (replay) return replay;
         const { view, origin } = input, ids = identities(input), currentOwner = branch(view);
         const selection = selectionOf(input.selection);
+        const expectedRef = input.expectedRef === undefined ? selection.selectedRef : input.expectedRef;
         // CAS is against the actual latest owner, never merely a historical visible version.
-        if (currentOwner.latestRef === input.expectedRef && selection.latestRef !== currentOwner.latestRef) {
+        if ((input.expectedRef === undefined || currentOwner.latestRef === expectedRef) && selection.latestRef !== currentOwner.latestRef) {
           throw new KnowledgeMutationError('conflict', 'Plan selection is stale');
         }
-        const conflict = currentOwner.latestRef !== input.expectedRef || selection.selectedRef !== currentOwner.latestRef;
+        const conflict = currentOwner.latestRef !== expectedRef || selection.selectedRef !== currentOwner.latestRef;
         const current = conflict ? null : selected(view, currentOwner.latestRef, selection);
         const receipt: PlanMutationReceipt = { threadId: view.threadId, branchId: view.branchId,
           origin, intentHash: ids.intentHash, status: conflict ? 'conflict' : 'applied', ref: conflict ? currentOwner.latestRef : ids.ref };

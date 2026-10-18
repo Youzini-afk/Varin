@@ -1674,12 +1674,11 @@ impl Storage {
     /// the bound Run supplies the root, and the existing grant/root/lease owner
     /// still admits every read. The caller adds its selected source mode; this owner
     /// only establishes the actual physical root and observed file revision.
-    pub(crate) fn file_read(
+    pub(super) fn resolve_file_read(
         &mut self,
         params: &Value,
         grant: &Grant,
-        read_body: bool,
-    ) -> Result<Value, KernelError> {
+    ) -> Result<ResolvedFileResource, KernelError> {
         let root_id = params["rootId"]
             .as_str()
             .ok_or_else(|| KernelError::Authorization("physical source root is missing".into()))?;
@@ -1697,6 +1696,17 @@ impl Storage {
             params.get("leaseId").and_then(Value::as_str),
         )?;
         self.check_cancelled()?;
+        Ok(resource)
+    }
+    pub(crate) fn file_read(
+        &mut self,
+        params: &Value,
+        grant: &Grant,
+        read_body: bool,
+    ) -> Result<Value, KernelError> {
+        let resource = self.resolve_file_read(params, grant)?;
+        let root_id = params["rootId"].as_str().expect("admitted root");
+        let path = params["path"].as_str().expect("admitted path");
         if !read_body {
             return Ok(Value::Null);
         }

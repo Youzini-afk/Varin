@@ -10,7 +10,7 @@ fn calls() -> Vec<ToolCall> {
         ("memory", json!({"action":"read","scope":"currentThread"})),
         ("memory", json!({"action":"save","scope":"currentThread","revision":0,"content":"Child private note"})),
         ("todo", json!({"action":"read"})),
-        ("todo", json!({"action":"update","expectedRef":null,"items":[{"text":"Child step","status":"in_progress"}]})),
+        ("todo", json!({"action":"update","items":[{"text":"Child step","status":"in_progress"}]})),
         ("todo", json!({"action":"update","expectedRef":null,"items":[]})),
         ("todo", json!({"action":"read"})),
         ("todo", json!({"action":"update","expectedRef":"child-plan-1","items":[{"text":"Child step","status":"completed"}]})),

@@ -25,8 +25,8 @@ struct Item {
 enum Arguments {
     Read,
     Update {
-        #[serde(rename = "expectedRef")]
-        expected_ref: crate::protocol_generated::RequiredNullable<String>,
+        #[serde(rename = "expectedRef", default)]
+        expected_ref: Option<String>,
         #[serde(rename = "items")]
         _items: Vec<Item>,
     },
@@ -43,14 +43,12 @@ fn args(call: &ToolCall) -> Result<Arguments, ExecutionError> {
             return Err(error("read accepts only action"));
         }
         Arguments::Update { expected_ref, .. }
-            if call.arguments.get("expectedRef").is_none()
-                || expected_ref
-                    .0
+            if expected_ref
                     .as_ref()
                     .is_some_and(|value| value.is_empty()) =>
         {
             return Err(error(
-                "expectedRef must be an explicit nonempty reference or null",
+                "expectedRef must be a nonempty reference or null",
             ));
         }
         _ => {}
@@ -64,7 +62,7 @@ pub(crate) fn builtin_schema() -> crate::run_tools::BuiltinSchema {
     crate::run_tools::BuiltinSchema::child(schema(), None, &[Worker])
 }
 pub(crate) fn schema() -> ToolSchema {
-    ToolSchema { requirements: None, description: "Read or replace this conversation's plan. Read first, then update using the exact returned plan ref (null when absent). A conflicting update changes nothing; read again before revising. Owner identity is fixed by the runtime.".into(), output_schema: None, metadata: None,
+    ToolSchema { requirements: None, description: "Read or update this conversation's plan. Updates accept the complete item list; expectedRef optionally checks a previously read version.".into(), output_schema: None, metadata: None,
         name: TOOL.into(),
         version: "1".into(),
         schema: json!({"type":"object",

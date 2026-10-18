@@ -106,7 +106,7 @@ impl ToolKind {
             Self::FileList => "List paths in the admitted source with bounded pagination.",
             Self::FileSearch => "Search text in the admitted source and return bounded matches.",
             Self::FileWrite => {
-                "Write a file against its exact read version in the admitted writable workspace."
+                "Create a new file or replace an existing file using its read version."
             }
             Self::FileEdit => {
                 "Apply exact text edits against a file read version in the admitted writable workspace."
@@ -498,7 +498,7 @@ impl ResourceOperation {
             }
             Self::FileMutation(mutation) => {
                 normalized_path(mutation.path(), false)?;
-                if mutation.read_version().is_empty() {
+                if mutation.read_version().is_empty() && matches!(mutation, TextMutation::Edit(_)) {
                     return Err(ExecutionError::new(
                         "invalid_tool_arguments",
                         "readVersion is required",
@@ -2531,8 +2531,8 @@ fn tool_schema(kind: ToolKind) -> Value {
             return discovery::schema(kind == ToolKind::FileSearch);
         }
         ToolKind::FileWrite => (
-            json!({"path":{"type":"string"},"readVersion":{"type":"string","minLength":1},"content":{"type":"string"}}),
-            vec!["path", "readVersion", "content"],
+            json!({"path":{"type":"string"},"readVersion":{"type":"string","minLength":1,"description":"Version for replacing an existing file. Omit to create a new file."},"content":{"type":"string"}}),
+            vec!["path", "content"],
         ),
         ToolKind::FileEdit => (
             json!({"path":{"type":"string"},"readVersion":{"type":"string","minLength":1},"edits":{"type":"array","minItems":1,"items":{"type":"object","additionalProperties":false,"properties":{"oldText":{"type":"string","minLength":1},"newText":{"type":"string"}},"required":["oldText","newText"]}}}),

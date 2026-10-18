@@ -186,7 +186,7 @@ export async function retainExtensionTool(
       throw new Error('extension_tool_exact_binding_unavailable');
     const validateInput = compileToolJsonSchema(schema.schema),
       validateOutput = compileToolJsonSchema(schema.output_schema);
-    const approved = new Map<string, { identity: string; policy: string }>();
+    const approved = new Map<string, { identity: string; policy: string; arguments: ReturnType<typeof parseVarinToolJson> }>();
     let released = false;
     const policy = async (run: string) => {
       const current = await options.currentPolicy(run);
@@ -199,7 +199,7 @@ export async function retainExtensionTool(
         identity: createHash('sha256').update(canonical(value)).digest('hex'),
       };
     };
-    const validate = (call: HostToolCall) => {
+    const assertAvailable = (call: HostToolCall) => {
       if (
         released ||
         call.name !== schema.name ||
@@ -207,9 +207,13 @@ export async function retainExtensionTool(
       )
         throw new Error('extension_tool_binding_changed');
       pin.assertAvailable();
-      parseVarinToolJson(call.arguments);
-      if (!validateInput(call.arguments))
+    };
+    const validate = (call: HostToolCall) => {
+      assertAvailable(call);
+      const args = parseVarinToolJson(call.arguments);
+      if (!validateInput(args))
         throw new Error('extension_tool_input_schema_invalid');
+      return args;
     };
     const gate = (call: HostToolCall, current: PermissionPolicy) =>
       evaluateGate(
@@ -297,11 +301,10 @@ export async function retainExtensionTool(
       async authorize(call, signal) {
         const combined = AbortSignal.any([signal, pin.revocationSignal]);
         combined.throwIfAborted();
-        validate(call);
+        const args = validate(call), identity = canonical(call);
         const current = await policy(call.runId),
           decision = gate(call, current.value),
-          previous = approved.get(call.operationId),
-          identity = canonical(call);
+          previous = approved.get(call.operationId);
         if (
           decision.decision === 'deny' ||
           (previous &&
@@ -322,15 +325,16 @@ export async function retainExtensionTool(
             combined,
           );
         combined.throwIfAborted();
-        validate(call);
-        approved.set(call.operationId, { identity, policy: current.identity });
+        assertAvailable(call);
+        approved.set(call.operationId, { identity, policy: current.identity, arguments: args });
       },
       async execute(call, signal, owner): Promise<ToolExecutionReceipt> {
         const combined = AbortSignal.any([signal, pin.revocationSignal]);
         let context: ToolInvocationAuthority;
+        let args: ReturnType<typeof parseVarinToolJson>;
         try {
           combined.throwIfAborted();
-          validate(call);
+          assertAvailable(call);
           const previous = approved.get(call.operationId),
             current = await policy(call.runId);
           approved.delete(call.operationId);
@@ -341,9 +345,10 @@ export async function retainExtensionTool(
             gate(call, current.value).decision === 'deny'
           )
             throw new Error('authorization changed');
+          args = previous.arguments;
           context = await authority(call, combined, owner);
           combined.throwIfAborted();
-          validate(call);
+          assertAvailable(call);
         } catch {
           return undispatchedToolReceipt('extension_tool_dispatch_rejected');
         }
@@ -370,7 +375,7 @@ export async function retainExtensionTool(
             (scope) =>
               pin.invoke(
                 'execute',
-                [parseVarinToolJson(call.arguments)],
+                [args],
                 combined,
                 scope,
               ),
@@ -380,8 +385,8 @@ export async function retainExtensionTool(
             return {
               completion: {
                 kind: 'result',
-                outcome: 'indeterminate',
-                effect: 'unknown',
+                outcome: descriptor.tool!.operation === 'read' ? 'failed' : 'indeterminate',
+                effect: descriptor.tool!.operation === 'read' ? 'none' : 'unknown',
                 content: { data: { error: 'extension_tool_output_schema_invalid', output }, parts },
               },
               executor_stopped: true,
@@ -390,7 +395,7 @@ export async function retainExtensionTool(
             completion: {
               kind: 'result',
               outcome: 'succeeded',
-              effect: 'confirmed',
+              effect: descriptor.tool!.operation === 'read' ? 'none' : 'confirmed',
               content: { data: output, parts },
             },
             executor_stopped: true,
@@ -401,8 +406,8 @@ export async function retainExtensionTool(
           return {
             completion: {
               kind: 'result',
-              outcome: 'indeterminate',
-              effect: 'unknown',
+              outcome: descriptor.tool!.operation === 'read' ? 'failed' : 'indeterminate',
+              effect: descriptor.tool!.operation === 'read' ? 'none' : 'unknown',
               content: { data: { error: 'extension_tool_callback_failed' }, parts },
             },
             executor_stopped: true,

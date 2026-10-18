@@ -669,8 +669,8 @@ it('real A-to-B routing keeps A on rejected B publication, ignores disabled B, a
       executor_stopped: true,
       completion: {
         kind: 'result',
-        outcome: 'indeterminate',
-        effect: 'unknown',
+        outcome: 'failed',
+        effect: 'none',
         content: { data: {
           error: 'extension_tool_output_schema_invalid',
           output: { original: ['B', 42] },
