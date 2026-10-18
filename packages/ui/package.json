@@ -55,7 +55,7 @@
     "@varin/extension-sdk": "workspace:*",
     "@varin/extension-surface": "workspace:*",
     "@varin/protocol": "workspace:*",
-    "@zumer/snapdom": "^3.3.4",
+    "@zumer/snapdom": "^3.3.5",
     "beautiful-mermaid": "^1.1.3",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
