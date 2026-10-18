@@ -1009,6 +1009,8 @@ export const ChatTimelineEntryList: React.FC<Omit<
       && entry.message.content.some((content) => content.type === 'text' && content.text.trim())
   )).at(-1);
   const lastEntry = projection.visibleEntries.at(-1);
+  // Native run summaries arrive after the Run ends; persisted assistant messages
+  // and successful file edits can arrive between model steps while it is active.
   const footerUsage = lastEntry?.type === 'run_usage' ? lastEntry : undefined;
 
   return (
@@ -1226,8 +1228,8 @@ export const ChatTimelineEntryList: React.FC<Omit<
             </article>
           );
         })()}
-        {part !== 'body' && <><ChatTurnChangedFiles messages={assistantMessagesForTurn(builtInEntries, projection.liveAssistant)}
-          results={resultByCallId} executions={toolExecutions} cwd={cwd} sessionId={sessionId} />
+        {part !== 'body' && <>{footerUsage && <ChatTurnChangedFiles messages={assistantMessagesForTurn(builtInEntries)}
+          results={resultByCallId} executions={toolExecutions} cwd={cwd} sessionId={sessionId} />}
         <ChatTurnUsageFooter
           entries={entries}
           usages={footerUsage?.usages}
