@@ -22,6 +22,7 @@
 ## 待实施设计
 
 - [Agent 工作侧重与编程协作](design/agent-modes-and-collaboration.md)：三条工作线的方向、实现与验证解耦、文件交换恢复、角色开关及提示词。
+- [动态上下文投递与摘要能力恢复](design/context-delivery-and-compaction.md)：临时队友状态尾部、环境观察独立投递、摘要 S0/A/B 材料与只读查询；计划不做自动增量推送。
 
 ## 源码旁的说明
 
