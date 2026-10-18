@@ -112,6 +112,7 @@ fn input_with_frozen_context(
 #[derive(Default)]
 struct Tools {
     calls: AtomicUsize,
+    uncertain: bool,
 }
 
 #[test]
@@ -212,12 +213,12 @@ impl ToolExecutor for Tools {
         Ok(ToolContract {
             name: call.name.clone(),
             schema_version: call.schema_version.clone(),
-            read_only: true,
+            read_only: !(self.uncertain && call.call_id == "call-1"),
             completion: CompletionKind::Result,
             lifetime: Lifetime::Run,
             resources: vec![ResourceClaim {
-                key: "file".into(),
-                access: Access::Read,
+                key: if self.uncertain && call.call_id == "call-1" { "pending-write" } else { "file" }.into(),
+                access: if self.uncertain && call.call_id == "call-1" { Access::Write } else { Access::Read },
             }],
         })
     }
@@ -232,17 +233,26 @@ impl ToolExecutor for Tools {
     }
     fn execute(
         &self,
-        _: &ToolExecutionContext,
-        _: &ToolCall,
+        context: &ToolExecutionContext,
+        call: &ToolCall,
         _: &ToolContract,
         _: &CancellationToken,
     ) -> ToolCompletion {
         self.calls.fetch_add(1, Ordering::SeqCst);
+        if self.uncertain && call.call_id == "call-1" {
+            return ToolCompletion::Result { outcome: Outcome::Indeterminate, effect: Effect::Unknown,
+                content: json!({"error":"reply_lost","operationId":context.operation_id}).into() };
+        }
         ToolCompletion::Result {
             outcome: Outcome::Succeeded,
             effect: Effect::None,
             content: json!("actual bytes").into(),
         }
+    }
+    fn execute_receipt(&self, context: &ToolExecutionContext, call: &ToolCall, contract: &ToolContract, cancel: &CancellationToken) -> ToolExecutionReceipt {
+        let completion=self.execute(context,call,contract,cancel);
+        if self.uncertain && call.call_id == "call-1" { ToolExecutionReceipt { completion, executor_stopped:false } }
+        else { ToolExecutionReceipt::local(completion,contract) }
     }
 }
 struct Provider {
@@ -253,6 +263,7 @@ struct Provider {
 #[derive(Clone, Copy)]
 enum Mode {
     ToolThenAnswer,
+    RecoverToolThenAnswer,
     CancelPrepared,
     PartialFailure,
 }
@@ -293,7 +304,14 @@ impl ModelProvider for Provider {
                 provider_request_id: Some("remote-request".into()),
             });
         }
-        if call == 0 {
+        if call == 1 && matches!(self.mode,Mode::RecoverToolThenAnswer) {
+            assert!(request.view.history.iter().any(|item|matches!(&item.content,Content::ToolResult{result}
+                if matches!(&result.completion,ToolCompletion::Result{outcome:Outcome::Indeterminate,content,..} if content.data["error"]=="reply_lost"))));
+            send(emit,ProviderEvent::ItemCompleted { item: ProviderItem {
+                id:"other-read".into(), content:Content::ToolCall { call:ToolCall {
+                    call_id:"call-2".into(),name:"read".into(),schema_version:"1".into(),arguments:json!({}) } }, opaque:None } })?;
+            Ok(FinishReason::ToolCalls)
+        } else if call == 0 {
             send(
                 emit,
                 ProviderEvent::ItemCompleted {
@@ -396,6 +414,27 @@ fn actual_catalog_two_model_tool_exchange_survives_reopen_with_opaque_original()
             .as_ref()
             .is_some_and(|o| o.value == json!({"signature":[null,42,"unaltered"]}))
     }));
+    assert!(matches!(&history.last().unwrap().content,Content::Text{text} if text=="done"));
+}
+#[test]
+fn uncertain_tool_result_allows_another_tool_and_answer_while_retaining_original_operation() {
+    let f=Fixture::new();let db=f.catalog();let input=input(&db);let run=input.run_id.clone();
+    let cancel=CancellationToken::default();
+    let mut engine=engine(db.clone(),Mode::RecoverToolThenAnswer,cancel.clone(),ProgressSink::default());
+    engine.tools=Arc::new(Tools { uncertain:true,..Tools::default() });
+    assert_eq!(engine.run(input,cancel).unwrap().state,RunState::Completed);
+    assert_eq!(engine.provider.calls.load(Ordering::SeqCst),3);
+    assert_eq!(engine.tools.calls.load(Ordering::SeqCst),2);
+    let catalog=db.lock().unwrap();
+    let pending=catalog.pending_run_operations(&run).unwrap();
+    assert_eq!(pending.len(),1);
+    assert_eq!((pending[0].outcome,pending[0].effect),(Some(Outcome::Indeterminate),Effect::Unknown));
+    let inspection=rusqlite::Connection::open_with_flags(f.path.join("conversation.sqlite"),rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY).unwrap();
+    let occupied:bool=inspection.query_row("SELECT EXISTS(SELECT 1 FROM resource_occupancy WHERE operation_id=?1)", [&pending[0].id], |r|r.get(0)).unwrap();
+    assert!(occupied);
+    let history=catalog.execution_history("main").unwrap();
+    assert!(history.iter().any(|item|matches!(&item.content,Content::ToolResult{result} if result.call_id=="call-2"
+        && matches!(result.completion,ToolCompletion::Result{outcome:Outcome::Succeeded,..}))));
     assert!(matches!(&history.last().unwrap().content,Content::Text{text} if text=="done"));
 }
 #[test]

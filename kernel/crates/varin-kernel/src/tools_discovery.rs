@@ -44,14 +44,15 @@ impl FileQueryArgs {
         Ok(())
     }
     pub fn params(&self, binding: &ToolBinding, context: &ToolExecutionContext) -> Value {
+        let recursive = self.recursive.unwrap_or(self.search);
         let mut params = json!({"workspaceId":binding.workspace_id,"jobId":context.operation_id,
             "lane":"foreground","operation":if self.search {"search"} else {"list"},
             "paths":self.paths.clone().unwrap_or_else(|| vec![String::new()]),
             "maxResults":self.max_results.unwrap_or(100).saturating_add(if self.search {0} else {1}).min(9_007_199_254_740_991),"includeHidden":self.include_hidden.unwrap_or(true),
-            "excludeDirectories":self.exclude_directories.clone().unwrap_or_else(|| vec![".git".into(),"node_modules".into(),".worktrees".into()]),
-            "respectGitignore":self.respect_gitignore.unwrap_or(true),
+            "excludeDirectories":self.exclude_directories.clone().unwrap_or_else(|| if recursive {vec![".git".into(),"node_modules".into(),".worktrees".into()]} else {vec![]}),
+            "respectGitignore":self.respect_gitignore.unwrap_or(recursive),
             "includeRevisions":self.include_revisions.unwrap_or(false),
-            "immediate":!self.recursive.unwrap_or(self.search)});
+            "immediate":!recursive});
         if let Some(cursor) = &self.cursor { params["startAfterPath"] = json!(cursor); }
         if binding.source_mode != SourceMode::FixedBranch {
             params["rootId"] = json!(binding.root_id);
@@ -227,15 +228,15 @@ pub(super) fn schema(search: bool) -> Value {
     let mut schema = json!({"type":"object","additionalProperties":false,
         "description":if search {"Search text in the selected source. Returns file paths, source revisions, line/column and matching text. Narrow paths or globs when results are partial."} else {"List a directory in the selected source. Omit paths for the root. Pass nextCursor as cursor with the same filters to continue; recursive includes descendants. Revisions are captured only when includeRevisions is true."},
         "properties":{
-            "paths":{"type":"array","items":{"type":"string"}},
+            "paths":{"type":"array","items":{"type":"string"},"description":"Explicit files or directories, including ignored paths."},
             "globs":{"type":"array","items":{"type":"string"}},
             "query":{"type":"string","description":if search {"Nonempty literal text, or regex when fixedStrings is false"} else {"Optional case-insensitive path substring"}},
             "fixedStrings":{"type":"boolean","default":true},
             "ignoreCase":{"type":"boolean","default":false},
             "recursive":{"type":"boolean","default":search},
             "includeHidden":{"type":"boolean","default":true},
-            "excludeDirectories":{"type":"array","items":{"type":"string"},"default":[".git","node_modules",".worktrees"],"description":"Directory names to skip; an empty array includes them."},
-            "respectGitignore":{"type":"boolean","default":true},
+            "excludeDirectories":{"type":"array","items":{"type":"string"},"description":"Directory names to skip within selected paths. Recursive queries default to .git, node_modules and .worktrees; non-recursive queries default to none."},
+            "respectGitignore":{"type":"boolean","description":"Apply ignore rules within selected paths; defaults to recursive."},
             "includeRevisions":{"type":"boolean","default":false},
             "cursor":{"type":"string","description":"file_list continuation from nextCursor; keep the original paths and filters."},
             "maxResults":{"type":"integer","minimum":1,"maximum":9_007_199_254_740_991i64,"default":100},

@@ -328,6 +328,20 @@ impl Drop for Fixture {
 
 #[test]
 fn unknown_effect_with_original_stop_receipt_closes_exchange_after_restart() {
+    struct ContinueAfterReceipt(AtomicUsize);
+    impl ModelProvider for ContinueAfterReceipt {
+        fn serialize(&self,view:&RequestView,_:Option<&mut RequestCompileReuse>)->Result<RequestBody,ExecutionError>{
+            assert!(view.history.iter().any(|item|matches!(&item.content,Content::ToolResult{result}
+                if matches!(result.completion,ToolCompletion::Result{outcome:Outcome::Indeterminate,..}))));
+            Ok(serde_json::to_value(view).unwrap().into())
+        }
+        fn generate(&self,_:&RequestSnapshot,_:&CancellationToken,emit:&mut dyn FnMut(ProviderEvent)->Result<(),ExecutionError>)->Result<FinishReason,ModelFailure>{
+            self.0.fetch_add(1,Ordering::SeqCst);
+            emit(ProviderEvent::ItemCompleted { item:ProviderItem { id:"answer".into(),
+                content:Content::Text { text:"continued with original receipt".into() },opaque:None } }).unwrap();
+            Ok(FinishReason::Stop)
+        }
+    }
     for cancel_during_recovery in [false, true] {
         let f = Fixture::dispatched(false);
         let mut catalog = Catalog::open(&f.root).unwrap();
@@ -344,7 +358,9 @@ fn unknown_effect_with_original_stop_receipt_closes_exchange_after_restart() {
             .unwrap();
         assert_eq!(f.occupancy(), 0);
         let supervisor = RunSupervisor::new(catalog);
-        let start = f.start();
+        let mut start = f.start();
+        let provider=Arc::new(ContinueAfterReceipt(AtomicUsize::new(0)));
+        start.provider=provider.clone();
         let (entered, entering) = std::sync::mpsc::channel();
         let (release, released) = std::sync::mpsc::channel();
         let handle = supervisor
@@ -365,9 +381,10 @@ fn unknown_effect_with_original_stop_receipt_closes_exchange_after_restart() {
         let expected = if cancel_during_recovery {
             RunState::Cancelled
         } else {
-            RunState::Failed
+            RunState::Completed
         };
         assert_eq!(report.state, expected);
+        assert_eq!(provider.0.load(Ordering::SeqCst),usize::from(!cancel_during_recovery));
         let owner = supervisor.catalog();
         let catalog = owner.lock().unwrap();
         let history = catalog.execution_history("branch").unwrap();

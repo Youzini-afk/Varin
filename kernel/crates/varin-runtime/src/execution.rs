@@ -1789,9 +1789,6 @@ impl AgentPolicy for DefaultAgentPolicy {
             PolicyEvent::ModelCompleted { tool_calls, .. } if *tool_calls > 0 => PolicyAction::ExecuteTools,
             PolicyEvent::ModelCompleted { reason: FinishReason::Stop, .. } => PolicyAction::Complete,
             PolicyEvent::ModelCompleted { .. } => PolicyAction::Fail { reason: "model ended without a complete answer".into() },
-            PolicyEvent::ToolsCompleted { results } if results.iter().any(|result|
-                matches!(result.completion, ToolCompletion::Result { outcome: Outcome::Indeterminate, .. })) =>
-                PolicyAction::Fail { reason: "tool effect is indeterminate; reconcile the original operation before continuing".into() },
             PolicyEvent::Delivered { .. } | PolicyEvent::Resumed { .. } | PolicyEvent::ToolsCompleted { .. } | PolicyEvent::ModelJobCompleted { .. } | PolicyEvent::ToolGraphCompleted { .. } | PolicyEvent::ResultChunk { .. } => PolicyAction::RequestModel,
         };
         Ok(PolicyDecision {

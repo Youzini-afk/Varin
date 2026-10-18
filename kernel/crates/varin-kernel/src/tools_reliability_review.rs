@@ -226,3 +226,28 @@ fn directory_pages_cover_the_remaining_paths_without_entering_excluded_copies() 
     }
     assert_eq!(seen, ["", "a", "a/sub", "a/sub/file", "a.txt", "b", "z"]);
 }
+
+#[test]
+fn explicit_paths_reach_dependencies_worktrees_and_ignored_files_without_filter_flags() {
+    let mut f = Fixture::new();
+    for dir in [".git", "node_modules/pkg/node_modules/nested", ".worktrees/copy", "build"] {
+        fs::create_dir_all(f.root.join("work").join(dir)).unwrap();
+    }
+    fs::write(f.root.join("work/.gitignore"), "node_modules/\n.worktrees/\nbuild/\n*.log\n").unwrap();
+    fs::write(f.root.join("work/build/.gitignore"), "skip.txt\n").unwrap();
+    for path in ["source.txt", ".git/config", "node_modules/pkg/index.js", "node_modules/pkg/node_modules/nested/index.js",
+        ".worktrees/copy/source.txt", "build/output.txt", "build/skip.txt", "debug.log"] {
+        fs::write(f.root.join("work").join(path), "needle").unwrap();
+    }
+    let mut query = |name: &str, args: Value| {
+        let ToolCompletion::Result { outcome: Outcome::Succeeded, content, .. } = f.call(name,args) else {panic!("query failed")};
+        let mut paths=content.data["records"].as_array().unwrap().iter().map(|r|r["path"].as_str().unwrap().to_string()).collect::<Vec<_>>();
+        paths.sort();paths
+    };
+    assert_eq!(query("file_list",json!({})), ["", ".git", ".gitignore", ".worktrees", "build", "debug.log", "node_modules", "source.txt"]);
+    assert_eq!(query("file_search",json!({"query":"needle"})), ["source.txt"]);
+    assert_eq!(query("file_search",json!({"query":"needle","paths":["node_modules/pkg",".worktrees/copy",".git/config","build","debug.log"]})),
+        [".git/config", ".worktrees/copy/source.txt", "build/output.txt", "debug.log", "node_modules/pkg/index.js"]);
+    assert_eq!(query("file_search",json!({"query":"needle","paths":["","node_modules/pkg"]})), ["node_modules/pkg/index.js", "source.txt"]);
+    assert_eq!(query("file_list",json!({"paths":["node_modules/pkg"]})), ["node_modules/pkg", "node_modules/pkg/index.js", "node_modules/pkg/node_modules"]);
+}

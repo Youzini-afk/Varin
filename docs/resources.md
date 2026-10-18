@@ -69,7 +69,9 @@ Agent 的物理文件读取在后台流式哈希，只保留所请求的片段�
 翻页使用返回的 `nextOffset`；二进制片段保留精确字节和明确的 base64 编码。
 `file_list` 默认列当前目录，`recursive` 展开后代，`nextCursor` 配合相同过滤条件继续读取。物理目录页按路径顺序读取
 当前状态；`includeRevisions` 显式请求正文版本，普通目录列表省略未计算的哈希。
-列表与搜索默认跳过 `.git`、`node_modules`、`.worktrees`，可通过 `excludeDirectories` 覆盖，并保留 ignore 规则开关。
+普通目录列表显示包括依赖、Git、worktree 和被忽略文件在内的入口。递归发现默认略过 `.git`、`node_modules`、`.worktrees`
+及 ignore 规则排除的内容；明确指定的路径作为搜索起点，直接进入该范围，内部的嵌套目录继续应用过滤。
+Harness 在同一次遍历中处理路径与过滤，调用方仍可通过 `excludeDirectories`、`respectGitignore` 调整范围。
 文本搜索在分配整文件缓冲之前检查二进制前缀。
 
 ## 进程与 Operation 寿命
@@ -78,6 +80,8 @@ Rust ProcessManager/guardian 拥有 pipe/PTY、stdin 序列回执、原始输出
 guardian 是同一发行 executable 的另一模式，不另开数据库 writer。Host Terminal、shell、task、test、LSP、DAP 适配原 handle。
 
 输出观察、业务结果和 executor stop 是不同维度。业务副作用可未知而进程已确认停止；响应丢失也不能证明进程停止。
+工具结果未确认时，默认策略将原结果交回模型，允许继续调用工具与回答。原 owner 通过已有回执通道更新原操作，
+维护仍在执行的资源；对话的推进与原操作的完成分别处理。
 关闭终端视图不杀 Job，取消 Wait 不杀被观察进程。stdin 与 resize 分别有序，使阻塞输入不拖住窗口调整。
 
 Windows 使用 named Jobs；Linux 使用 managed session 加 subreaper。旧 epoch 无法证明的退出保留 unknown，继续保护目录。

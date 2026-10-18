@@ -9,7 +9,14 @@ use std::{collections::{HashMap,HashSet}, fs::{self,File}, io::{Read,Seek,SeekFr
 
 pub(crate) struct SourceMetadata {pub byte_length:u64,pub modified_time_ns:Option<String>}
 pub(crate) struct Document {pub path:String,pub revision:String,pub state:PathState,pub bytes:Option<Vec<u8>>,pub metadata:Option<SourceMetadata>}
-pub(crate) fn within(path:&str,root:&str)->bool {root.is_empty()||path==root||path.starts_with(&(root.to_string()+"/"))}
+pub(crate) fn within(path:&str,root:&str)->bool {root.is_empty()||path.strip_prefix(root).is_some_and(|tail|tail.is_empty()||tail.starts_with('/'))}
+fn relative_to<'a>(path:&'a str,root:&str)->&'a str {
+    if root.is_empty(){path}else{path.strip_prefix(root).unwrap_or(path).trim_start_matches('/')}
+}
+fn selection_relative<'a>(path:&'a str,selections:&[String])->&'a str {
+    let selected=selections.iter().filter(|root|within(path,root)).max_by_key(|root|root.len());
+    selected.map_or(path,|root|relative_to(path,root))
+}
 pub(crate) fn normalize(value:&str)->Result<String>{
     let value=value.replace('\\',"/");
     if value.contains('\0')||value.starts_with('/')||value.contains(':')||value.split('/').any(|s|s==".."){return Err("Computation path is outside its admitted view".into());}
@@ -160,10 +167,13 @@ pub(crate) fn inventory(task: &Task, shared: &Shared) -> Result<bool> {
 /// callback=false is an explicit caller result budget, not a failed enumeration.
 pub(crate) fn visit(task:&mut Task,shared:&Shared,mut callback:impl FnMut(Document)->Result<bool>)->Result<bool>{
     let content=task.params.operation!="list"||task.params.include_revisions.unwrap_or(false);
+    let immediate=task.params.immediate.unwrap_or(false);
     let roots=task.params.paths.clone().unwrap_or_else(||vec![String::new()]);
     let explicit=task.params.files.as_deref().unwrap_or_default().iter().map(|f|f.path.clone()).collect::<HashSet<_>>();
     let mut roots=roots.iter().map(|p|normalize(p)).collect::<Result<Vec<_>>>()?;
     roots.sort_by(|a,b|a.split('/').cmp(b.split('/')));
+    roots.dedup();
+    let selections=roots.clone();
     let mut minimal_roots=Vec::<String>::new();
     for path in roots { if !minimal_roots.iter().any(|parent|within(&path,parent)){minimal_roots.push(path);} }
     let roots=minimal_roots.into_iter().rev().collect::<Vec<_>>();
@@ -177,12 +187,13 @@ pub(crate) fn visit(task:&mut Task,shared:&Shared,mut callback:impl FnMut(Docume
     let eligible=|path:&str,directory:bool|->bool{
         if task.params.start_after_path.as_deref().is_some_and(|after|path.split('/').cmp(after.split('/'))!=std::cmp::Ordering::Greater){return false;}
         if excluded.iter().any(|p|within(path,p))||(!explicit.is_empty()&&!explicit.contains(path))||!scopes.iter().any(|scope|within(path,scope))||!roots.iter().any(|root|within(path,root)){return false;}
-        if path.split('/').any(|s|dirs.contains(s)||(!include_hidden&&s.starts_with('.'))){return false;}
+        if immediate&&!selections.iter().any(|root|path==root||path.rsplit_once('/').map(|(parent,_)|parent==root).unwrap_or(root.is_empty())){return false;}
+        if selection_relative(path,&selections).split('/').any(|s|dirs.contains(s)||(!include_hidden&&s.starts_with('.'))){return false;}
         !glob.matched(path,directory).is_ignore()
     };
     let descend=|path:&str|->bool{
         (explicit.is_empty()||explicit.iter().any(|f|within(f,path)||f==path))&&scopes.iter().any(|s|within(path,s)||within(s,path))&&roots.iter().any(|s|within(path,s)||within(s,path))
-            &&!path.split('/').any(|s|dirs.contains(s)||(!include_hidden&&s.starts_with('.')))
+            &&(selections.iter().any(|root|within(root,path))||!selection_relative(path,&selections).split('/').any(|s|dirs.contains(s)||(!include_hidden&&s.starts_with('.'))))
     };
     let mut overlays=std::mem::take(&mut task.overlays).into_iter().map(|o|(o.path.clone(),o)).collect::<HashMap<_,_>>();
     let shadowed=overlays.keys().cloned().collect::<HashSet<_>>();
@@ -225,7 +236,7 @@ pub(crate) fn visit(task:&mut Task,shared:&Shared,mut callback:impl FnMut(Docume
                     if matches!(state,PathState::Missing){continue;}
                     let directory=state.is_directory();
                     if directory&&descend(&path){if let Some(children)=children{
-                        let depth_allowed=!task.params.immediate.unwrap_or(false)||roots.iter().any(|r|path==*r||within(r,&path));
+                        let depth_allowed=!immediate||selections.iter().any(|r|path==*r||within(r,&path));
                         if depth_allowed{stack.push(Visit::Index(children,path.clone()));}
                     }}
                     if shadowed.iter().any(|p|within(&path,p))||!eligible(&path,directory){continue;}
@@ -249,13 +260,16 @@ pub(crate) fn visit(task:&mut Task,shared:&Shared,mut callback:impl FnMut(Docume
             let mut walk_starts = Vec::new();
             for prefix in &roots {
                 let target = root.join(prefix);
-                let directory_prefix = if fs::symlink_metadata(&target).is_ok_and(|m|m.is_dir()) {
+                let directory_prefix = if fs::symlink_metadata(&target).is_ok_and(|m|
+                    m.is_dir()||(!task.params.include_tracked.unwrap_or(false)&&!m.file_type().is_symlink())) {
                     prefix.clone()
                 } else { prefix.rsplit_once('/').map(|(parent,_)|parent.to_string()).unwrap_or_default() };
                 if selected.insert(directory_prefix.clone()) { walk_starts.push(directory_prefix); }
             }
             let initial = selected.clone();
             let mut visited = HashSet::new();
+            let mut ignore_matchers=None;
+            let ignore_errors=std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
             while let Some(prefix) = walk_starts.pop() {
                 if !visited.insert(prefix.clone()) { continue; }
                 shared.check()?;
@@ -280,16 +294,52 @@ pub(crate) fn visit(task:&mut Task,shared:&Shared,mut callback:impl FnMut(Docume
                 let nested = std::sync::Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
                 let queued = nested.clone();
                 let walk_scopes=scopes.clone();let walk_roots=roots.clone();let walk_dirs=dirs.clone();let walk_root=root.clone();
+                let walk_selections=selections.clone();
                 let walk_prefix=prefix.clone();
+                let walk_ignore_errors=ignore_errors.clone();
+                // Explicit paths are search roots, including ignored directories. Compile
+                // ignore rules once per selected root; the traversal reuses these matchers.
+                if respect&&ignore_matchers.is_none() {
+                    let mut probe=ignore::WalkBuilder::new(&root).hidden(false).build_matchers().remove(0);
+                    let mut matchers=Vec::new();
+                    for selected in &selections {
+                        let target=root.join(selected);
+                        let ignored=if selected.is_empty(){false}else{
+                            let (matched,error)=probe.matched_with_errors(selected,true);
+                            partial|=error.is_some();matched.is_ignore()
+                        };
+                        if !ignored {continue;}
+                        let mut rules=ignore::WalkBuilder::new(&target);
+                        rules.hidden(false).parents(false).git_global(false).git_exclude(false).require_git(false);
+                        matchers.push((selected.clone(),rules.build_matchers().remove(0)));
+                    }
+                    matchers.push((String::new(),probe));
+                    matchers.sort_by_key(|(selected,_)|std::cmp::Reverse(selected.len()));
+                    ignore_matchers=Some(std::sync::Arc::new(std::sync::Mutex::new(matchers)));
+                }
+                let matchers=if respect{ignore_matchers.clone()}else{None};
                 let mut builder=ignore::WalkBuilder::new(&directory);
-                if task.params.immediate.unwrap_or(false) { builder.max_depth(Some(1)); }
-                builder.sort_by_file_name(|a,b|a.cmp(b)).hidden(!include_hidden).follow_links(false).git_ignore(respect).git_global(respect).git_exclude(respect).ignore(respect)
+                if immediate&&selections.len()==roots.len() { builder.max_depth(Some(1)); }
+                builder.sort_by_file_name(|a,b|a.cmp(b)).standard_filters(false).follow_links(false)
                     .filter_entry(move|entry|{
                         let Ok(path)=entry.path().strip_prefix(&walk_root)else{return false;};let path=path.to_string_lossy().replace('\\',"/");
                         let is_directory=entry.file_type().is_some_and(|t|t.is_dir());
                         if !walk_scopes.iter().any(|s|within(&path,s)||within(s,&path))
-                            || !walk_roots.iter().any(|s|within(&path,s)||within(s,&path))
-                            || path.split('/').any(|s|walk_dirs.contains(s)) { return false; }
+                            || !walk_roots.iter().any(|s|within(&path,s)||within(s,&path)) { return false; }
+                        let leads_to_selection=walk_selections.iter().any(|selected|within(selected,&path));
+                        let selected_relative=selection_relative(&path,&walk_selections);
+                        if !leads_to_selection {
+                            if selected_relative.split('/').any(|s|walk_dirs.contains(s)||(!include_hidden&&s.starts_with('.')))
+                                || (immediate&&selected_relative.contains('/')) {return false;}
+                            if let Some(matchers)=&matchers {
+                                let mut matchers=matchers.lock().unwrap();
+                                if let Some((selected,matcher))=matchers.iter_mut().find(|(selected,_)|within(&path,selected)) {
+                                    let (matched,error)=matcher.matched_with_errors(relative_to(&path,selected),is_directory);
+                                    if error.is_some(){walk_ignore_errors.store(true,std::sync::atomic::Ordering::Relaxed);}
+                                    if matched.is_ignore(){return false;}
+                                }
+                            }
+                        }
                         let relative = if walk_prefix.is_empty() { path.as_str() } else { path.strip_prefix(&walk_prefix).unwrap_or("").trim_start_matches('/') };
                         if inventory.as_ref().is_some_and(|inventory|!inventory.allows(relative,is_directory)) { return false; }
                         if discover_repositories && is_directory && path != walk_prefix && entry.path().join(".git").exists() {
@@ -304,7 +354,6 @@ pub(crate) fn visit(task:&mut Task,shared:&Shared,mut callback:impl FnMut(Docume
                 let path=entry.path().strip_prefix(&root).map_err(|e|e.to_string())?.to_string_lossy().replace('\\',"/");
                 let Some(kind)=entry.file_type()else{partial=true;continue;};
                 if shadowed.iter().any(|p|within(&path,p))||!eligible(&path,kind.is_dir()){continue;}
-                if task.params.immediate.unwrap_or(false)&&!roots.iter().any(|r|path==*r||path.rsplit_once('/').map(|(p,_)|p==r).unwrap_or(r.is_empty())){continue;}
                 let mut bytes=None;let mut object_hash=String::new();let mut revision=String::new();
                 let mut metadata=if task.params.operation=="list"&&kind.is_file(){
                     match fs::symlink_metadata(entry.path()){
@@ -328,8 +377,9 @@ pub(crate) fn visit(task:&mut Task,shared:&Shared,mut callback:impl FnMut(Docume
                     }
                     PathState::RegularFile{object_hash,byte_length:bytes.as_ref().map(|b|b.len() as u64).or_else(||metadata.as_ref().map(|value|value.byte_length)).unwrap_or(0),mode:0o644}
                 }else{PathState::Unsupported};
-                if !callback(Document{path,revision,state,bytes,metadata})?{return Ok(partial);}
+                if !callback(Document{path,revision,state,bytes,metadata})?{return Ok(partial||ignore_errors.load(std::sync::atomic::Ordering::Relaxed));}
             }
+                partial|=ignore_errors.load(std::sync::atomic::Ordering::Relaxed);
                 walk_starts.extend(std::mem::take(&mut *nested.lock().unwrap()));
             }
         }
