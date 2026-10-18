@@ -27,7 +27,7 @@ grep-regex = "0.1.14"
 grep-matcher = "0.1.8"
 ignore = "0.4.25"
 globset = "0.4.16"
-tree-sitter = { version = "=0.27.0", features = ["wasm"] }
+tree-sitter = { version = "=0.27.1", features = ["wasm"] }
 streaming-iterator = "0.1.9"
 
 wasmparser = "0.259.0"
