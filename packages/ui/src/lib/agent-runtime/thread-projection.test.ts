@@ -61,12 +61,26 @@ async function startProjection(snapshot: ThreadsAPI['snapshot']) {
     listener = next;
     await new Promise<void>(resolve => signal.addEventListener('abort', () => resolve(), { once: true }));
   };
-  const progress = vi.fn(); const parts = vi.fn(); const report = vi.fn(); const publish = vi.fn();
-  const projection = new ThreadProjection({ snapshot, observe } as ThreadsAPI, identity, publish, report, value => { parts(value); progress(textOf(value)); });
+  const progress = vi.fn(); const parts = vi.fn(); const report = vi.fn(); const publish = vi.fn(); const tools = vi.fn();
+  const projection = new ThreadProjection({ snapshot, observe } as ThreadsAPI, identity, publish, report, value => { parts(value); progress(textOf(value)); }, tools);
   projection.start();
   await vi.advanceTimersByTimeAsync(0);
-  return { projection, listener, progress, parts, report, publish };
+  return { projection, listener, progress, parts, report, publish, tools };
 }
+
+it('exposes a gateway render_ui call while its HTML is still streaming and retains the original call identity', async () => {
+  const h = await startProjection(async () => snapshotView());
+  const send = (sequence: number, data: object) => h.listener({ ...delta(sequence, ''),
+    event: { kind: 'batch', events: [{ kind: 'provider', data }] } });
+  try {
+    send(1, { kind: 'tool_call_started', request_id: 'request', call_id: 'call', name: 'tool_invoke' });
+    const first = '{"reference":{"name":"render_ui","version":"1"},"arguments":{"ref":"ui:work@1","changes":[{"file":"index.html","op":"write","text":"<h1>生成中';
+    send(2, { kind: 'tool_arguments_delta', call_id: 'call', delta: first });
+    expect(h.tools).toHaveBeenLastCalledWith([{ id: JSON.stringify(['run', 'request', 'call']), name: 'render_ui', rawArguments: first, sequence: 2, reference: 'ui:work@1' }]);
+    send(3, { kind: 'tool_arguments_delta', call_id: 'call', delta: '</h1>"}]}}' });
+    expect(h.tools.mock.lastCall?.[0][0]).toMatchObject({ name: 'render_ui', reference: 'ui:work@1', rawArguments: first + '</h1>"}]}}' });
+  } finally { h.projection.close(); }
+});
 
 it('streams thinking and text during the initial snapshot and keeps the next request when old history commits', async () => {
   const pending = deferred();

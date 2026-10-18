@@ -65,7 +65,7 @@ export function UiWorkView({ session, source, files, assets = {}, entry, title, 
   const origin = React.useRef<{ x: number; y: number } | undefined>(undefined);
   const actual = React.useRef({ source, files, entry, committed }); actual.current = { source, files, entry, committed };
   const state = React.useRef<UiViewState | undefined>(session.state);
-  const lastExecution = React.useRef<{ ref?: string; committed: boolean }>({ committed: false });
+  const lastExecution = React.useRef<{ channel?: string; ref?: string; committed: boolean }>({ committed: false });
   const registration = React.useRef<{ viewRef: string; token: string } | undefined>(undefined);
   const captures = React.useRef(new Map<string, { resolve(value: UiObservation): void; reject(reason: unknown): void }>());
   const saveTimer = React.useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
@@ -131,19 +131,25 @@ export function UiWorkView({ session, source, files, assets = {}, entry, title, 
       for (const pending of pendingCaptures.values()) pending.reject(new Error('页面已关闭')); pendingCaptures.clear(); };
   }, [channel, api, session, t]);
   React.useEffect(() => {
-    if (!ready || committed && !viewInitialized || !visible) return;
-    if (lastExecution.current.committed && (!committed || lastExecution.current.ref !== source.ref)) {
+    if (!ready || !visible) return;
+    // Show HTML immediately while restoring view state. A failed observation connection
+    // must not prevent already-loaded content from running with the locally retained state.
+    const execute = committed && (viewInitialized || Boolean(connectionError));
+    if (lastExecution.current.channel === channel && lastExecution.current.committed && execute && lastExecution.current.ref === source.ref) return;
+    if (lastExecution.current.channel === channel && lastExecution.current.committed && (!execute || lastExecution.current.ref !== source.ref)) {
       lastExecution.current = { committed: false }; setReady(false); setViewInitialized(false); setChannel(crypto.randomUUID()); return;
     }
-    lastExecution.current = { ref: source.ref, committed };
     let active = true;
     const frame = requestAnimationFrame(() => {
-      void (committed ? prepareUiFiles(files, entry) : Promise.resolve(files)).then(prepared => {
-        if (active) send({ type: 'update', files: prepared, assets, entry, committed, source, ...(state.current ? { state: state.current } : {}) });
+      void (execute ? prepareUiFiles(files, entry) : Promise.resolve(files)).then(prepared => {
+        if (active) {
+          lastExecution.current = { channel, ref: source.ref, committed: execute };
+          send({ type: 'update', files: prepared, assets, entry, committed: execute, source, ...(state.current ? { state: state.current } : {}) });
+        }
       }).catch(failure => { if (active) setError(t('ui.content.parseFailed', { reason: failure.message })); });
     });
     return () => { active = false; cancelAnimationFrame(frame); };
-  }, [source, files, assets, entry, committed, ready, viewInitialized, send, visible, t]);
+  }, [source, files, assets, entry, committed, ready, viewInitialized, connectionError, channel, send, visible, t]);
   React.useEffect(() => {
     if (!ready || !visible || code) return;
     const theme = () => {

@@ -159,12 +159,16 @@ export class ThreadProjection {
                   name: data.name ?? old?.name ?? '', rawArguments: (old?.rawArguments ?? '') + (data.delta ?? ''), sequence: event.sequence,
                 });
                 const call = progress.calls.get(data.call_id);
-                if (call?.name === 'render_ui') {
+                if (call?.name === 'render_ui' || call?.name === 'tool_invoke') {
                   let reader = progress.readers.get(data.call_id);
                   const fresh = !reader;
                   if (!reader) { reader = new PartialJson(); progress.readers.set(data.call_id, reader); }
-                  const args = reader.feed(fresh ? call.rawArguments : data.delta ?? '') as { ref?: string } | undefined;
-                  if (reader.completeFields.has('ref') && typeof args?.ref === 'string') call.reference = args.ref;
+                  const input = reader.feed(fresh ? call.rawArguments : data.delta ?? '') as
+                    { ref?: string; reference?: { name?: string }; arguments?: { ref?: string } } | undefined;
+                  const wrapped = input?.reference?.name === 'render_ui' && reader.fieldComplete(input.reference, 'name');
+                  if (wrapped) call.name = 'render_ui';
+                  const args = wrapped ? input.arguments : input;
+                  if (args && reader.fieldComplete(args, 'ref') && typeof args.ref === 'string') call.reference = args.ref;
                 }
               }
               if (payload.kind === 'provider' && (data?.kind === 'text_delta' || data?.kind === 'reasoning_delta')

@@ -31,10 +31,15 @@ class WorkProjection {
     if (same && this.output === output && this.running === running && this.failed === failed) return;
     if (this.call?.id !== call.id || call.rawArguments !== undefined && call.rawArguments.length < this.raw.length) { this.reader = new PartialJson(); this.raw = ''; }
     this.call = call; this.output = output; this.running = running; this.failed = failed;
-    if (call.rawArguments !== undefined) { this.input = this.reader.feed(call.rawArguments.slice(this.raw.length)) as Partial<RenderUiInput> ?? {}; this.raw = call.rawArguments; }
+    if (call.rawArguments !== undefined) {
+      const input = this.reader.feed(call.rawArguments.slice(this.raw.length)) as
+        (Partial<RenderUiInput> & { reference?: { name?: string }; arguments?: Partial<RenderUiInput> }) | undefined;
+      this.input = (input?.reference?.name === 'render_ui' ? input.arguments : input) ?? {};
+      this.raw = call.rawArguments;
+    }
     else this.input = call.arguments as Partial<RenderUiInput> ?? {};
     const saved = this.receipt();
-    const target = saved?.ref ?? (call.rawArguments === undefined || this.reader.completeFields.has('ref') ? this.input.ref : undefined);
+    const target = saved?.ref ?? (call.rawArguments === undefined || this.reader.fieldComplete(this.input, 'ref') ? this.input.ref : undefined);
     if (target !== this.target) {
       this.target = target; this.request?.abort(); this.error = '';
       if (target) {
@@ -80,7 +85,9 @@ class WorkProjection {
       updateUiSession(this.session, { ...this.session.display, status: this.error || message('ui.content.making') }); return;
     }
     let files: Record<string, string> = Object.assign(Object.create(null), base?.contents ?? {});
-    if (!saved) for (const change of Array.isArray(this.input.changes) ? this.input.changes : []) {
+    // Keep complete writes visible while the saved revision is being fetched, including
+    // a card remounted by the virtual list between the streaming and durable messages.
+    if (!saved || !base) for (const change of Array.isArray(this.input.changes) ? this.input.changes : []) {
       if (!change || typeof change.file !== 'string') continue;
       if (this.call.rawArguments !== undefined && (!this.reader.fieldComplete(change, 'file') || !this.reader.fieldComplete(change, 'op'))) continue;
       const file = relativeFile(change.file);
@@ -89,9 +96,10 @@ class WorkProjection {
       else if (change.op === 'edit' && Array.isArray(change.edits) && files[file] !== undefined) files[file] = editPreview(files[file]!, change.edits.filter(edit => edit && (this.call!.rawArguments === undefined || this.reader.fieldComplete(edit, 'oldText'))));
       else if (change.op === 'delete') delete files[file];
     }
-    if (saved && base?.ref !== saved.ref) files = this.session.display?.files ?? files;
+    const previousFiles = this.session.display?.files;
+    if (saved && base?.ref !== saved.ref && previousFiles && Object.keys(previousFiles).length) files = previousFiles;
     const title = saved?.title ?? this.input.title ?? base?.title ?? message('ui.content.title');
-    const entry = relativeFile(saved?.entry ?? (this.call.rawArguments === undefined || this.reader.completeFields.has('entry') ? this.input.entry : undefined) ?? base?.entry ?? 'index.html');
+    const entry = relativeFile(saved?.entry ?? (this.call.rawArguments === undefined || this.reader.fieldComplete(this.input, 'entry') ? this.input.entry : undefined) ?? base?.entry ?? 'index.html');
     const committed = Boolean(saved && base?.ref === saved.ref);
     const source = committed ? { ref: saved!.ref } : { preview: { callId: this.call.id, sequence: this.call.sequence ?? 0, contents: files, entry, title, ...(base ? { baseRef: base.ref } : {}) } };
     updateUiSession(this.session, { source, files, assets: base?.assets ?? this.session.display?.assets ?? {}, title, entry, committed,

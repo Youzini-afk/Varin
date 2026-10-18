@@ -1290,6 +1290,7 @@ export const registerCommonRequestMiddleware = (
       req.path.startsWith('/api/language-support') ||
       req.path.startsWith('/api/tasks') ||
       req.path.startsWith('/api/threads') ||
+      req.path.startsWith('/api/interactive-ui') ||
       req.path.startsWith('/api/runtime') ||
       req.path.startsWith('/api/debug') ||
       req.path.startsWith('/api/tests') ||
