@@ -12,9 +12,12 @@ import type { ChatToolCall, ChatToolExecutionState, ChatToolResultMessage } from
 import { projectUiWork, releaseUiWork, restoreUiWork } from '@/lib/interactive-ui/work-projection';
 import { uiFrameDocument, uiThemeCss } from '@/lib/interactive-ui/frame';
 import { prepareUiFiles, createUiExport } from '@/lib/interactive-ui/modules';
-import { getUiSession, moveUiSession, uiSession, subscribeUiSessions, uiSessionsRevision, type UiSession } from '@/lib/interactive-ui/sessions';
+import { getUiSession, moveUiSession, openUiSessionPanel, uiSession, subscribeUiSessions, uiSessionsRevision, type UiSession } from '@/lib/interactive-ui/sessions';
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
+import { ContextMenu, ContextMenuTrigger, ContextMenuContent, ContextMenuItem, ContextMenuSeparator } from '@/components/ui/context-menu';
+import { copyTextToClipboard } from '@/lib/clipboard';
 import { useI18n } from '@/lib/i18n';
+import { CHAT_TIMELINE_SCROLL_INTENT_EVENT } from '@/components/conversation/chatTimelineScrollState';
 
 export function InteractiveUiCard({ call, ownerCallId, execution, result, cwd, generating }: { call: ChatToolCall; ownerCallId?: string; execution?: ChatToolExecutionState; result?: ChatToolResultMessage; cwd: string; generating: boolean }) {
   const conversation = useOptionalConversationPresentation();
@@ -47,15 +50,16 @@ export function UiWorkView({ session, source, files, assets = {}, entry, title, 
 }) {
   const { t } = useI18n();
   const api = React.useMemo(() => createInteractiveUiHttpAPI(session.host), [session.host]);
+  const surface = React.useRef<HTMLElement>(null);
   const iframe = React.useRef<HTMLIFrameElement>(null);
   const frameLoad = React.useRef({ channel: '', loaded: false });
   const [channel, setChannel] = React.useState(() => crypto.randomUUID());
-  const frameDoc = React.useMemo(() => uiFrameDocument(channel), [channel]);
-  const [ready, setReady] = React.useState(false), [code, setCode] = React.useState(false), [file, setFile] = React.useState(entry);
+  const frameDoc = React.useMemo(() => uiFrameDocument(channel, !panel), [channel, panel]);
+  const [ready, setReady] = React.useState(false);
   const [viewInitialized, setViewInitialized] = React.useState(false);
   const [fullView, setFullView] = React.useState(false);
   const mobile = useUIStore(value => value.isMobile);
-  const [height, setHeight] = React.useState(280), [error, setError] = React.useState('');
+  const [height, setHeight] = React.useState(session.inlineSize?.height ?? 0), [error, setError] = React.useState('');
   const [connectionError, setConnectionError] = React.useState('');
   const [selectedText, setSelectedText] = React.useState<string>();
   const textObservation = React.useRef<UiObservation | undefined>(undefined);
@@ -91,7 +95,8 @@ export function UiWorkView({ session, source, files, assets = {}, entry, title, 
       const image = await invokeDesktop('desktop_capture_page_rect', { x: left, y: top, width: right - left, height: bottom - top }).catch(() => null);
       if (!image) {
         const rasterId = crypto.randomUUID();
-        return new Promise<UiObservation>((resolve, reject) => { captures.current.set(rasterId, { resolve, reject }); send({ type: 'capture', id: rasterId, raster: true }); });
+        return new Promise<UiObservation>((resolve, reject) => { captures.current.set(rasterId, { resolve, reject }); send({ type: 'capture', id: rasterId, raster: true,
+          bounds: { x: left - rect.x, y: top - rect.y, width: right - left, height: bottom - top } }); });
       }
       observation.stateCapturedAt = observation.capturedAt;
       observation.image = { mimeType: 'image/png', data: image.base64, method: 'screen', capturedAt: new Date().toISOString(), bounds: { x: left - rect.x, y: top - rect.y, width: right - left, height: bottom - top } };
@@ -107,12 +112,26 @@ export function UiWorkView({ session, source, files, assets = {}, entry, title, 
       if (event.source !== iframe.current?.contentWindow || event.data?.channel !== channel) return;
       const message = event.data;
       if (message.type === 'ready') setReady(true);
-      if (message.type === 'resize' || message.type === 'updated') setHeight(Math.max(160, message.height + 32));
+      if (message.type === 'resize' && Number.isFinite(message.height) && message.height >= 0) {
+        const measured = Math.ceil(message.height);
+        if (!panel) session.inlineSize = { width: message.width, height: measured };
+        setHeight(measured);
+      }
       if (message.type === 'error') setError(t('ui.content.scriptFailed'));
+      if (!panel && message.type === 'scroll-intent' && (message.intent === 'away-from-end' || message.intent === 'toward-end')) {
+        surface.current?.dispatchEvent(new CustomEvent(CHAT_TIMELINE_SCROLL_INTENT_EVENT, { bubbles: true, detail: message.intent }));
+      }
       const observed = (): UiObservation => ({ ...message.source, viewRef: registration.current?.viewRef ?? session.viewRef ?? `ui-view:${crypto.randomUUID()}`,
         capturedAt: message.capturedAt, state: message.state, viewport: message.viewport, structure: message.structure, render: message.render,
         ...(message.context == null ? {} : { context: message.context }), ...(message.image ? { image: message.image } : {}), ...(message.textRange ? { textRange: message.textRange } : {}) });
-      if (message.type === 'selection') { setSelectedText(message.text); textObservation.current = observed(); }
+      if (message.type === 'selection' || message.type === 'context-menu') {
+        setSelectedText(message.text || undefined); textObservation.current = message.text ? observed() : undefined;
+        if (message.type === 'context-menu' && Number.isFinite(message.x) && Number.isFinite(message.y)) {
+          const bounds = iframe.current!.getBoundingClientRect();
+          surface.current?.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true,
+            clientX: bounds.left + message.x, clientY: bounds.top + message.y }));
+        }
+      }
       if (message.type === 'capture-error') { captures.current.get(message.id)?.reject(new Error(message.error)); captures.current.delete(message.id); }
       if (message.type === 'state') {
         state.current = message.state; session.state = message.state;
@@ -129,7 +148,7 @@ export function UiWorkView({ session, source, files, assets = {}, entry, title, 
     window.addEventListener('message', receive);
     return () => { isMounted.current = false; window.removeEventListener('message', receive); clearTimeout(saveTimer.current);
       for (const pending of pendingCaptures.values()) pending.reject(new Error('页面已关闭')); pendingCaptures.clear(); };
-  }, [channel, api, session, t]);
+  }, [channel, api, session, panel, t]);
   React.useEffect(() => {
     if (!ready || !visible) return;
     // Show HTML immediately while restoring view state. A failed observation connection
@@ -151,15 +170,15 @@ export function UiWorkView({ session, source, files, assets = {}, entry, title, 
     return () => { active = false; cancelAnimationFrame(frame); };
   }, [source, files, assets, entry, committed, ready, viewInitialized, connectionError, channel, send, visible, t]);
   React.useEffect(() => {
-    if (!ready || !visible || code) return;
+    if (!ready || !visible) return;
     const theme = () => {
-      send({ type: 'theme', css: uiThemeCss() });
+      send({ type: 'theme', css: uiThemeCss(surface.current ?? document.body) });
     };
     theme(); const observer = new MutationObserver(theme); observer.observe(document.documentElement, { attributes: true, attributeFilter: ['class', 'style', 'data-theme'] });
     return () => observer.disconnect();
-  }, [ready, send, visible, code]);
+  }, [ready, send, visible]);
   React.useEffect(() => {
-    if (!ready || !visible || code) return;
+    if (!ready || !visible) return;
     const abort = new AbortController(); let owner: { viewRef: string; token: string } | undefined;
     void (async () => {
       while (!abort.signal.aborted) try {
@@ -189,7 +208,7 @@ export function UiWorkView({ session, source, files, assets = {}, entry, title, 
       }
     })();
     return () => { abort.abort(); registration.current = undefined; if (owner) void api.detach(session.identity, owner.viewRef, owner.token, state.current).catch(() => {}); };
-  }, [ready, source.ref, source.preview?.callId, api, session, capture, visible, code]);
+  }, [ready, source.ref, source.preview?.callId, api, session, capture, visible]);
   const citeText = async () => {
     if (!selectedText) return;
     try { addReference(session, await api.select(session.identity, textObservation.current ?? await capture(), { text: selectedText })); setSelectedText(undefined); }
@@ -220,60 +239,97 @@ export function UiWorkView({ session, source, files, assets = {}, entry, title, 
       addReference(session, await api.select(session.identity, observation, { text: JSON.stringify(observation.context ?? observation.state.data ?? observation.state.controls) }));
     } catch (failure) { toast.error(String((failure as Error).message)); }
   };
-  const expand = () => {
+  const expand = (view: 'source' | 'preview' = 'preview') => {
     session.panelDirectory = cwd;
-    moveUiSession(session, 'panel');
+    openUiSessionPanel(session, view);
     if (!cwd || mobile) { setFullView(true); return; }
     useUIStore.getState().openContextPanelTab(cwd, { mode: 'ui', targetPath: session.key, thread: session.identity, contentRef: source.ref ?? source.preview?.baseRef, label: title, dedupeKey: session.key });
   };
   const returnInline = () => {
-    setFullView(false); moveUiSession(session, 'inline');
+    setFullView(false); session.panelView = undefined; moveUiSession(session, 'inline');
     if (session.panelDirectory) {
       const store = useUIStore.getState(), directory = normalizeContextPanelDirectoryKey(session.panelDirectory);
       for (const tab of store.contextPanelByDirectory[directory]?.tabs ?? []) if (tab.mode === 'ui' && tab.targetPath === session.key) store.closeContextPanelTab(directory, tab.id);
     }
     onReturn?.();
   };
+  const showMenu = (element: HTMLElement) => {
+    const bounds = element.getBoundingClientRect();
+    surface.current?.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: bounds.left, clientY: bounds.bottom }));
+  };
+  const reset = () => {
+    state.current = { data: null, controls: {}, scroll: { x: 0, y: 0 } }; session.state = state.current;
+    setError(''); setReady(false); setViewInitialized(false); setChannel(crypto.randomUUID());
+  };
   React.useEffect(() => { const escape = (event: KeyboardEvent) => { if (event.key === 'Escape') setRegionImage(undefined); }; window.addEventListener('keydown', escape); return () => window.removeEventListener('keydown', escape); }, []);
-  return <section className={`my-3 overflow-hidden rounded-xl border border-border bg-card ${panel ? 'flex h-full min-h-0 flex-col' : ''}`} aria-label={title}>
-    <header className="flex items-center gap-2 border-b border-border px-3 py-2 text-sm">
+  return <ContextMenu><ContextMenuTrigger asChild><section ref={surface} data-interactive-ui tabIndex={0}
+    className={`relative min-w-0 ${panel ? 'flex h-full min-h-0 flex-col bg-background' : 'my-3'}`} aria-label={title}
+    onContextMenu={event => event.stopPropagation()}
+    onKeyDown={event => {
+      if (event.target !== event.currentTarget || !(event.key === 'ContextMenu' || event.shiftKey && event.key === 'F10')) return;
+      event.preventDefault(); showMenu(event.currentTarget);
+    }}>
+    {panel && <header className="flex items-center gap-2 border-b border-border px-3 py-2 text-sm">
       <span className="min-w-0 flex-1 truncate font-medium">{title}</span>
       {status && <span className="text-xs text-muted-foreground">{status}</span>}
-      <Button size="sm" variant="ghost" onClick={() => setCode(!code)}>{t(code ? 'ui.content.preview' : 'ui.content.source')}</Button>
-      {!panel && <Button size="icon" variant="ghost" aria-label={t('ui.content.expand')} onClick={expand}><Icon name="fullscreen" className="size-4" /></Button>}
-      {panel && <Button size="sm" variant="ghost" onClick={returnInline}>{t('ui.content.return')}</Button>}
-      <details className="relative"><summary className="cursor-pointer list-none px-2" aria-label={t('ui.content.more')}>⋯</summary>
-        <div className="absolute right-0 z-20 flex w-36 flex-col rounded-lg border bg-popover p-1 shadow-lg">
-          <Button size="sm" variant="ghost" onClick={() => void navigator.clipboard.writeText(files[file] ?? files[entry] ?? '')}>{t('ui.content.copy')}</Button>
-          <Button size="sm" variant="ghost" onClick={() => void downloadUi(files, assets, entry, title, state.current).catch(failure => toast.error(failure.message))}>{t('ui.content.download')}</Button>
-          <Button size="sm" variant="ghost" onClick={() => { state.current = { data: null, controls: {}, scroll: { x: 0, y: 0 } }; session.state = state.current; setReady(false); setViewInitialized(false); setChannel(crypto.randomUUID()); }}>{t('ui.content.reset')}</Button>
-        </div>
-      </details>
-    </header>
+      <Button size="sm" variant="ghost" onClick={() => expand('source')}>{t('ui.content.source')}</Button>
+      <Button size="sm" variant="ghost" onClick={returnInline}>{t('ui.content.return')}</Button>
+      <Button size="icon" variant="ghost" aria-label={t('ui.content.more')} onClick={event => showMenu(event.currentTarget)}><Icon name="more" className="size-4" /></Button>
+    </header>}
+    {!panel && <button type="button" aria-label={t('ui.content.more')} onClick={event => showMenu(event.currentTarget)}
+      className={`absolute right-0 top-0 z-10 size-7 items-center justify-center rounded text-muted-foreground hover:bg-muted ${mobile ? 'flex' : 'hidden [@media(any-pointer:coarse)]:flex'}`}><Icon name="more" className="size-4" /></button>}
     {visible ? <>
-      {code && <div className="min-h-0 flex-1 overflow-auto"><select aria-label="源码文件" value={file in files ? file : entry} onChange={event => setFile(event.target.value)} className="m-2 rounded border bg-background px-2 py-1 text-sm">{Object.keys(files).map(path => <option key={path}>{path}</option>)}</select><pre className="max-h-[65vh] overflow-auto px-4 pb-4 text-xs"><code>{files[file] ?? files[entry] ?? ''}</code></pre></div>}
-      <div className={`relative min-h-0 ${panel ? 'flex-1' : ''} ${code ? 'hidden' : ''}`}>
+      <div className={`relative min-h-0 ${panel ? 'flex-1' : ''}`}>
         <iframe ref={iframe} title={title} sandbox="allow-scripts" referrerPolicy="no-referrer" srcDoc={frameDoc}
           onLoad={() => {
             if (frameLoad.current.channel !== channel) { frameLoad.current = { channel, loaded: true }; return; }
             setReady(false); setError(t('ui.content.navigated'));
             for (const pending of captures.current.values()) pending.reject(new Error(t('ui.content.navigated'))); captures.current.clear();
-          }} className="block w-full border-0" style={{ height: panel ? '100%' : Math.min(height, Math.max(280, window.innerHeight * 0.65)) }} />
+          }} className="block w-full border-0 bg-transparent" style={{ height: panel ? '100%' : height }} />
         {regionImage?.image && <div className="absolute inset-0 z-10 touch-none overflow-hidden bg-background" onPointerDown={event => { origin.current = regionPoint(event); setRectangle(undefined); event.currentTarget.setPointerCapture(event.pointerId); }}
           onPointerMove={event => { if (!origin.current) return; const { x, y } = regionPoint(event); setRectangle({ x: Math.min(origin.current.x, x), y: Math.min(origin.current.y, y), width: Math.abs(x - origin.current.x), height: Math.abs(y - origin.current.y) }); }} onPointerUp={() => { origin.current = undefined; }} onPointerCancel={() => { origin.current = undefined; }}>
           <img src={`data:${regionImage.image.mimeType};base64,${regionImage.image.data}`} alt="选择要引用的区域" className="absolute" style={regionImage.image.bounds ? { left: regionImage.image.bounds.x, top: regionImage.image.bounds.y, width: regionImage.image.bounds.width, height: regionImage.image.bounds.height } : { width: '100%', height: '100%' }} draggable={false} />
           {rectangle && <div className="pointer-events-none absolute border-2 border-primary bg-primary/10" style={{ left: rectangle.x, top: rectangle.y, width: rectangle.width, height: rectangle.height }} />}
+          <div className="absolute z-20 flex gap-1 rounded-lg border bg-popover p-1 shadow" onPointerDown={event => event.stopPropagation()}
+            style={{ left: (regionImage.image.bounds?.x ?? 0) + 8, top: (regionImage.image.bounds?.y ?? 0) + 8 }}>
+            <Button size="sm" variant="ghost" disabled={!rectangle?.width || !rectangle.height} onClick={() => void citeRegion()}>{t('ui.content.citeRegion')}</Button>
+            <Button size="sm" variant="ghost" onClick={() => setRegionImage(undefined)}>{t('ui.content.cancel')}</Button>
+          </div>
         </div>}
       </div>
       {(error || connectionError || committed && !Object.hasOwn(files, entry)) && <p role="status" className="px-3 py-1 text-xs text-muted-foreground">{error || connectionError || t('ui.content.missingEntry', { file: entry })}</p>}
-      <footer className="flex flex-wrap items-center gap-1 border-t px-2 py-1">
-        {regionImage ? <><Button size="sm" variant="ghost" disabled={!rectangle?.width || !rectangle.height} onClick={() => void citeRegion()}>{t('ui.content.citeRegion')}</Button><Button size="sm" variant="ghost" onClick={() => setRegionImage(undefined)}>{t('ui.content.cancel')}</Button></>
-          : <><Button size="sm" variant="ghost" onClick={() => void startRegion()}>{t('ui.content.region')}</Button>{selectedText && <Button size="sm" variant="ghost" onClick={() => void citeText()}>{t('ui.content.citeText')}</Button>}<Button size="sm" variant="ghost" onClick={() => void discuss()}>{t('ui.content.discuss')}</Button></>}
-      </footer>
+      {!panel && status && <p role="status" className="py-1 text-xs text-muted-foreground">{status}</p>}
     </> : <button className="w-full px-3 py-6 text-sm text-muted-foreground" onClick={returnInline}>{t('ui.content.expanded')}</button>}
     {fullView && <Dialog open onOpenChange={open => { if (!open) returnInline(); }}><DialogContent className="h-[94dvh] w-[96vw] max-w-none p-2">
-      <DialogTitle className="sr-only">{title}</DialogTitle><UiWorkView session={session} source={source} files={files} assets={assets} entry={entry} title={title} committed={committed} status={status} panel onReturn={() => setFullView(false)} />
+      <DialogTitle className="sr-only">{title}</DialogTitle>{session.panelView === 'source'
+        ? <UiSourceView session={session} files={files} entry={entry} title={title} onReturn={returnInline} />
+        : <UiWorkView session={session} source={source} files={files} assets={assets} entry={entry} title={title} cwd={cwd} committed={committed} status={status} panel onReturn={() => setFullView(false)} />}
     </DialogContent></Dialog>}
+  </section></ContextMenuTrigger><ContextMenuContent className="min-w-48">
+    {selectedText && <><ContextMenuItem onClick={() => void copyTextToClipboard(selectedText)}>{t('chat.context.copy')}</ContextMenuItem>
+      <ContextMenuItem onClick={() => void citeText()}>{t('ui.content.citeText')}</ContextMenuItem><ContextMenuSeparator /></>}
+    <ContextMenuItem onClick={() => expand('source')}>{t('ui.content.source')}</ContextMenuItem>
+    <ContextMenuItem onClick={() => expand()}>{t('ui.content.expand')}</ContextMenuItem>
+    <ContextMenuItem onClick={() => void startRegion()}>{t('ui.content.region')}</ContextMenuItem>
+    <ContextMenuItem onClick={() => void discuss()}>{t('ui.content.discuss')}</ContextMenuItem>
+    <ContextMenuSeparator />
+    <ContextMenuItem onClick={() => void copyTextToClipboard(files[entry] ?? '')}>{t('ui.content.copy')}</ContextMenuItem>
+    <ContextMenuItem onClick={() => void downloadUi(files, assets, entry, title, state.current).catch(failure => toast.error(failure.message))}>{t('ui.content.download')}</ContextMenuItem>
+    <ContextMenuItem onClick={reset}>{t('ui.content.reset')}</ContextMenuItem>
+  </ContextMenuContent></ContextMenu>;
+}
+
+function UiSourceView({ session, files, entry, title, onReturn }: { session: UiSession; files: Record<string, string>; entry: string; title: string; onReturn(): void }) {
+  const { t } = useI18n();
+  const [file, setFile] = React.useState(entry);
+  return <section data-interactive-ui className="flex h-full min-h-0 flex-col" aria-label={title} onContextMenu={event => event.stopPropagation()}>
+    <header className="flex items-center gap-2 border-b px-3 py-2 text-sm"><span className="min-w-0 flex-1 truncate">{title}</span>
+      <Button size="sm" variant="ghost" onClick={() => openUiSessionPanel(session, 'preview')}>{t('ui.content.preview')}</Button>
+      <Button size="sm" variant="ghost" onClick={onReturn}>{t('ui.content.return')}</Button></header>
+    <div className="flex items-center gap-2 p-2"><select aria-label={t('ui.content.source')} value={file in files ? file : entry} onChange={event => setFile(event.target.value)} className="min-w-0 flex-1 rounded border bg-background px-2 py-1 text-sm">
+      {Object.keys(files).map(path => <option key={path}>{path}</option>)}</select>
+      <Button size="sm" variant="ghost" onClick={() => void copyTextToClipboard(files[file] ?? files[entry] ?? '')}>{t('ui.content.copy')}</Button></div>
+    <pre className="min-h-0 flex-1 overflow-auto px-4 pb-4 text-xs"><code>{files[file] ?? files[entry] ?? ''}</code></pre>
   </section>;
 }
 async function downloadUi(files: Record<string, string>, assets: UiSource['assets'], entry: string, title: string, state?: UiViewState) {
@@ -289,11 +345,18 @@ export function InteractiveUiPanel({ sessionKey, identity, contentRef, directory
   const [error, setError] = React.useState('');
   React.useEffect(() => {
     if (!session) return;
-    moveUiSession(session, 'panel');
-    return () => { moveUiSession(session, 'inline'); releaseUiWork(session); };
+    session.panelMounted = true;
+    if (!session.panelView) openUiSessionPanel(session, 'preview');
+    return () => { session.panelMounted = false; session.panelView = undefined; moveUiSession(session, 'inline'); releaseUiWork(session); };
   }, [session]);
   React.useEffect(() => { if (session && !session.display && contentRef) void restoreUiWork(session, contentRef).catch(failure => setError(failure.message)); }, [session, contentRef]);
   if (error) return <div className="p-4 text-sm text-muted-foreground">{error}</div>;
-  if (!session?.display || session.placement !== 'panel') return <div className="p-4 text-sm text-muted-foreground">{t('ui.content.empty')}</div>;
-  return <UiWorkView session={session} {...session.display} panel onReturn={onReturn} />;
+  if (!session?.display) return <div className="p-4 text-sm text-muted-foreground">{t('ui.content.empty')}</div>;
+  if (session.panelView === 'source') return <UiSourceView session={session} {...session.display} onReturn={() => {
+    session.panelView = undefined; moveUiSession(session, 'inline');
+    const store = useUIStore.getState(), location = normalizeContextPanelDirectoryKey(directory ?? session.panelDirectory ?? '');
+    for (const tab of store.contextPanelByDirectory[location]?.tabs ?? []) if (tab.mode === 'ui' && tab.targetPath === session.key) store.closeContextPanelTab(location, tab.id);
+    onReturn?.();
+  }} />;
+  return <UiWorkView session={session} {...session.display} cwd={directory ?? session.panelDirectory} panel onReturn={onReturn} />;
 }

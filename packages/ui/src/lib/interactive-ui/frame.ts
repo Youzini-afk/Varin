@@ -12,6 +12,21 @@ function frameRuntime() {
   let resolveFile: (from: string, ref: string) => string = (_from, ref) => ref;
   window.fetch = (input, options) => originalFetch(typeof input === 'string' ? resolveFile(currentEntry, input) : input, options);
   const dom = () => document.getElementById('work')!;
+  let sizeFrame = 0, measuredHeight = -1, measuredWidth = -1;
+  const measure = () => {
+    if (sizeFrame) return;
+    sizeFrame = requestAnimationFrame(() => {
+      sizeFrame = 0;
+      const work = dom(), bounds = work.getBoundingClientRect();
+      const body = getComputedStyle(document.body);
+      const height = Math.ceil(Math.max(bounds.height, work.scrollHeight) + parseFloat(body.paddingTop) + parseFloat(body.paddingBottom));
+      const width = Math.round(bounds.width);
+      if (height !== measuredHeight || width !== measuredWidth) {
+        measuredHeight = height; measuredWidth = width;
+        send({ type: 'resize', height, width });
+      }
+    });
+  };
   const key = (node: Element) => node.id || node.getAttribute('data-key');
   const sync = (target: Element, incoming: Element) => {
     for (const attribute of [...target.attributes]) if (!incoming.hasAttribute(attribute.name)) target.removeAttribute(attribute.name);
@@ -50,7 +65,7 @@ function frameRuntime() {
       if (!text && value === undefined && !['CANVAS', 'IMG', 'BUTTON'].includes(element.tagName)) return [];
       return [{ tag: element.tagName.toLowerCase(), text, value, selector: selector(element), bounds: { x: bounds.x, y: bounds.y, width: bounds.width, height: bounds.height } }];
     }), viewport: { width: innerWidth, height: innerHeight }, ready });
-  const raster = async () => {
+  const raster = async (bounds = { x: 0, y: 0, width: innerWidth, height: innerHeight }) => {
     const clone = dom().cloneNode(true) as HTMLElement;
     const originals = [dom(), ...dom().querySelectorAll('*')], copies = [clone, ...clone.querySelectorAll('*')];
     originals.forEach((element, index) => {
@@ -63,11 +78,11 @@ function frameRuntime() {
     });
     clone.querySelectorAll('script,style,link').forEach(element => element.remove());
     const markup = new XMLSerializer().serializeToString(clone);
-    const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${innerWidth}" height="${innerHeight}"><foreignObject width="100%" height="100%"><div xmlns="http://www.w3.org/1999/xhtml" style="transform:translate(${-scrollX}px,${-scrollY}px)">${markup}</div></foreignObject></svg>`;
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${bounds.width}" height="${bounds.height}"><foreignObject width="${innerWidth}" height="${innerHeight}"><div xmlns="http://www.w3.org/1999/xhtml" style="transform:translate(${-scrollX - bounds.x}px,${-scrollY - bounds.y}px)">${markup}</div></foreignObject></svg>`;
     const image = new Image(); image.src = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`; await image.decode();
-    const canvas = document.createElement('canvas'); canvas.width = innerWidth * devicePixelRatio; canvas.height = innerHeight * devicePixelRatio;
+    const canvas = document.createElement('canvas'); canvas.width = bounds.width * devicePixelRatio; canvas.height = bounds.height * devicePixelRatio;
     canvas.getContext('2d')!.drawImage(image, 0, 0, canvas.width, canvas.height);
-    return { mimeType: 'image/png', data: canvas.toDataURL('image/png').split(',')[1], method: 'dom', capturedAt: new Date().toISOString() };
+    return { mimeType: 'image/png', data: canvas.toDataURL('image/png').split(',')[1], method: 'dom', bounds, capturedAt: new Date().toISOString() };
   };
   let saveFrame = 0;
   const save = () => { cancelAnimationFrame(saveFrame); saveFrame = requestAnimationFrame(() => send({ type: 'state', state: currentState() })); };
@@ -146,38 +161,76 @@ function frameRuntime() {
       ready = true;
       if (renderState !== 'error') renderState = 'ready';
     }
-    send({ type: 'updated', height: dom().scrollHeight });
+    measure();
   };
   let updates = Promise.resolve();
   addEventListener('message', event => {
     if (event.source !== parent || event.data?.channel !== channel) return;
     const message = event.data;
     if (message.type === 'update') updates = updates.then(() => update(message)).catch(error => { renderState = 'error'; send({ type: 'error', message: String(error) }); });
-    else if (message.type === 'theme') document.getElementById('theme')!.textContent = message.css;
+    else if (message.type === 'theme') { document.getElementById('theme')!.textContent = message.css; measure(); }
     else if (message.type === 'capture') {
       const value = observation();
-      if (message.raster) void raster().then(image => send({ type: 'capture', id: message.id, ...value, image }), error => send({ type: 'capture-error', id: message.id, error: String(error) }));
+      if (message.raster) void raster(message.bounds).then(image => send({ type: 'capture', id: message.id, ...value, image }), error => send({ type: 'capture-error', id: message.id, error: String(error) }));
       else send({ type: 'capture', id: message.id, ...value });
     } else if (message.type === 'reset') { state = null; savedControls = {}; savedScroll = { x: 0, y: 0 }; location.reload(); }
   });
   addEventListener('input', save); addEventListener('change', save); addEventListener('scroll', save, { passive: true });
-  addEventListener('mouseup', () => {
-    const selection = getSelection(); if (!selection || !selection.toString().trim()) return;
+  const selectionDetails = () => {
+    const selection = getSelection(); if (!selection || !selection.rangeCount || !selection.toString().trim()) return { text: '' };
     const range = selection.getRangeAt(0);
     const endpoint = (node: Node, offset: number) => ({ selector: selector(node instanceof Element ? node : node.parentElement!),
       ...(node instanceof Element ? {} : { childIndex: [...node.parentNode!.childNodes].indexOf(node as ChildNode) }), offset });
-    send({ type: 'selection', ...observation(), text: selection.toString(), textRange: { start: endpoint(range.startContainer, range.startOffset), end: endpoint(range.endContainer, range.endOffset) } });
+    return { ...observation(), text: selection.toString(), textRange: { start: endpoint(range.startContainer, range.startOffset), end: endpoint(range.endContainer, range.endOffset) } };
+  };
+  addEventListener('mouseup', () => send({ type: 'selection', ...selectionDetails() }));
+  // Controls keep their editing/application menus; ordinary content opens the message menu.
+  const ownsMenu = (target: EventTarget | null) => target instanceof Element && target.closest('input,textarea,select,button,a[href],[contenteditable]:not([contenteditable="false"]),canvas,svg,video,audio,[role="application"],[role="button"],[role="slider"],[role="textbox"]');
+  window.addEventListener('contextmenu', event => {
+    if (event.defaultPrevented || ownsMenu(event.target) || ('pointerType' in event && event.pointerType === 'touch')) return;
+    event.preventDefault();
+    send({ type: 'context-menu', x: event.clientX, y: event.clientY, ...selectionDetails() });
   });
+  window.addEventListener('keydown', event => {
+    if (event.defaultPrevented || ownsMenu(event.target) || !(event.key === 'ContextMenu' || event.shiftKey && event.key === 'F10')) return;
+    event.preventDefault();
+    const bounds = (document.activeElement ?? dom()).getBoundingClientRect();
+    send({ type: 'context-menu', x: Math.max(0, bounds.left), y: Math.max(0, bounds.top), ...selectionDetails() });
+  });
+  // Wheel/touch events do not cross iframe documents. Report reading intent while
+  // leaving native scrolling and local chart/list interactions with the browser.
+  const scrollIntent = (target: EventTarget | null, delta: number) => {
+    for (let node = target instanceof Element ? target : null; node && node !== document.body; node = node.parentElement) {
+      const style = getComputedStyle(node);
+      if (/(auto|scroll)/.test(style.overflowY) && node.scrollHeight > node.clientHeight) {
+        if (style.overscrollBehaviorY === 'contain' || style.overscrollBehaviorY === 'none'
+          || (delta < 0 ? node.scrollTop > 0 : node.scrollTop + node.clientHeight < node.scrollHeight - 1)) return;
+      }
+    }
+    send({ type: 'scroll-intent', intent: delta < 0 ? 'away-from-end' : 'toward-end' });
+  };
+  window.addEventListener('wheel', event => {
+    if (!event.defaultPrevented && !event.ctrlKey && event.deltaY) scrollIntent(event.target, event.deltaY);
+  }, { passive: true });
+  let touchY: number | undefined;
+  window.addEventListener('touchstart', event => { touchY = event.touches.length === 1 ? event.touches[0]!.clientY : undefined; }, { passive: true });
+  window.addEventListener('touchmove', event => {
+    const y = event.touches.length === 1 ? event.touches[0]!.clientY : undefined;
+    if (!event.defaultPrevented && touchY !== undefined && y !== undefined && y !== touchY) scrollIntent(event.target, touchY - y);
+    touchY = y;
+  }, { passive: true });
   addEventListener('error', () => { renderState = 'error'; send({ type: 'error', message: '页面运行出错，可查看源码继续修改' }); });
   addEventListener('unhandledrejection', () => { renderState = 'error'; send({ type: 'error', message: '页面运行出错，可查看源码继续修改' }); });
-  new ResizeObserver(() => send({ type: 'resize', height: dom().scrollHeight })).observe(dom());
+  new ResizeObserver(measure).observe(dom());
   send({ type: 'ready' });
 }
-export function uiFrameDocument(channel: string) {
-  return `<!doctype html><html data-channel="${channel}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><base href="https://varin.invalid/"><style id="theme"></style><style>html{color-scheme:light dark}body{margin:0;padding:16px;font:14px/1.55 system-ui}*{box-sizing:border-box}img,canvas,svg{max-width:100%}button,input,select,textarea{font:inherit}button{cursor:pointer}a{color:var(--primary)}:focus-visible{outline:2px solid var(--primary);outline-offset:2px}@media(prefers-reduced-motion:reduce){*,*::before,*::after{scroll-behavior:auto!important;animation:none!important;transition:none!important}}</style></head><body><div id="work"></div><script>(${frameRuntime.toString()})()</script></body></html>`;
+export function uiFrameDocument(channel: string, inline = false) {
+  const layout = inline ? 'html,body{height:auto!important;min-height:0!important;max-height:none!important;margin:0!important;padding:0!important;overflow:visible!important;background:transparent!important}body{display:block!important}#work{display:flow-root}' : '';
+  return `<!doctype html><html data-channel="${channel}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><base href="https://varin.invalid/"><style id="theme"></style><style>html{color-scheme:light dark}:where(body){margin:0;padding:16px;font:14px/1.55 system-ui}*{box-sizing:border-box}img,canvas,svg{max-width:100%}button,input,select,textarea{font:inherit}button{cursor:pointer}a{color:var(--primary)}:focus-visible{outline:2px solid var(--primary);outline-offset:2px}@media(prefers-reduced-motion:reduce){*,*::before,*::after{scroll-behavior:auto!important;animation:none!important;transition:none!important}}${layout}</style></head><body><div id="work"></div><script>(${frameRuntime.toString()})()</script></body></html>`;
 }
-export function uiThemeCss() {
+export function uiThemeCss(element: Element = document.body) {
   const computed = getComputedStyle(document.documentElement);
   const vars = ['background', 'foreground', 'muted', 'muted-foreground', 'primary', 'primary-foreground', 'border', 'card', 'card-foreground'].map(name => `--${name}:${computed.getPropertyValue(`--${name}`)};`).join('');
-  return `:root{${vars}color-scheme:${document.documentElement.classList.contains('dark') ? 'dark' : 'light'}}body{background:var(--background);color:var(--foreground);font-family:${getComputedStyle(document.body).fontFamily}}`;
+  const typography = getComputedStyle(element);
+  return `:root{${vars}color-scheme:${document.documentElement.classList.contains('dark') ? 'dark' : 'light'}}body{background:var(--background);color:var(--foreground);font-family:${typography.fontFamily};font-size:${typography.fontSize};line-height:${typography.lineHeight}}`;
 }

@@ -19,6 +19,7 @@ import {
   isChatTimelineEntryCurrent,
   CHAT_TIMELINE_ANCHOR_OFFSET_PX,
   CHAT_TIMELINE_EDGE_EPSILON_PX,
+  CHAT_TIMELINE_SCROLL_INTENT_EVENT,
   shouldReleaseChatTimelineFollow,
   type ChatTimelineScrollIntent,
   type ChatTimelineScrollMode,
@@ -87,6 +88,7 @@ export const ChatTimeline: React.FC<ChatTimelineProps> = (props) => {
   const isMobile = useUIStore((state) => state.isMobile);
   const onScrollContainerChange = props.onScrollContainerChange;
   const listRef = React.useRef<LegendListRef>(null);
+  const surfaceRef = React.useRef<HTMLDivElement>(null);
   const turnNavigatorRef = React.useRef<ChatTurnNavigatorHandle>(null);
   const endSpaceRef = React.useRef<HTMLDivElement>(null);
   const projectionRef = React.useRef<ChatTimelineProjection | undefined>(undefined);
@@ -563,6 +565,15 @@ export const ChatTimeline: React.FC<ChatTimelineProps> = (props) => {
     if (!shouldReleaseChatTimelineFollow(modeRef.current, atEndRef.current, intent)) return;
     takeManualOwnership();
   }, [takeManualOwnership]);
+  React.useEffect(() => {
+    const surface = surfaceRef.current;
+    const receive = (event: Event) => {
+      const intent = (event as CustomEvent).detail;
+      if (intent === 'away-from-end' || intent === 'toward-end') releaseAutomationForIntent(intent);
+    };
+    surface?.addEventListener(CHAT_TIMELINE_SCROLL_INTENT_EVENT, receive);
+    return () => surface?.removeEventListener(CHAT_TIMELINE_SCROLL_INTENT_EVENT, receive);
+  }, [releaseAutomationForIntent]);
 
   const selectRun = React.useCallback(async (target: ThreadHistoryRun) => {
     takeManualOwnership();
@@ -632,7 +643,7 @@ export const ChatTimeline: React.FC<ChatTimelineProps> = (props) => {
         await list.scrollToOffset({ animated: false, offset: Math.max(0,
           list.getState().scroll + element.getBoundingClientRect().top - container.getBoundingClientRect().top - inset - CHAT_TIMELINE_ANCHOR_OFFSET_PX) });
       }}>
-    <div className="conversation-timeline-surface relative flex min-h-0 flex-1">
+    <div ref={surfaceRef} className="conversation-timeline-surface relative flex min-h-0 flex-1">
       {promptNavigatorEnabled && props.navigation ? <ChatTurnNavigator ref={turnNavigatorRef} runs={props.navigation.runs}
         initialRunId={props.navigation.runs.at(-1)?.runId} readPreview={readRunPreview} onSelect={selectRun} /> : null}
       {promptNavigatorEnabled && props.navigation?.error && <button type="button" className="absolute left-2 top-2 z-20 text-muted-foreground"

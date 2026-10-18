@@ -3,10 +3,10 @@ import { createRoot } from 'react-dom/client';
 import { parseHTML } from 'linkedom';
 import { expect, it, vi } from 'vitest';
 import { InteractiveUiError } from '@varin/application-client';
-import { UiWorkView } from './InteractiveUiCard';
-import type { UiSession } from '@/lib/interactive-ui/sessions';
+import { UiWorkView, InteractiveUiPanel } from './InteractiveUiCard';
+import { uiSession } from '@/lib/interactive-ui/sessions';
 
-const api = vi.hoisted(() => ({ attach: vi.fn(), detach: vi.fn(async () => {}), t: (key: string) => key }));
+const api = vi.hoisted(() => ({ attach: vi.fn(), detach: vi.fn(async () => {}), openPanel: vi.fn(), t: (key: string) => key }));
 vi.mock('@varin/application-client', async original => ({ ...await original<typeof import('@varin/application-client')>(), createInteractiveUiHttpAPI: () => api }));
 vi.mock('@/lib/i18n', () => ({ useI18n: () => ({ t: api.t }) }));
 vi.mock('@/lib/desktop', () => ({ invokeDesktop: vi.fn() }));
@@ -14,16 +14,20 @@ vi.mock('@/components/icon/Icon', () => ({ Icon: () => null }));
 vi.mock('@/components/ui', () => ({ toast: { error: vi.fn() } }));
 vi.mock('@/components/ui/button', () => ({ Button: ({ size: _size, variant: _variant, ...props }: React.ButtonHTMLAttributes<HTMLButtonElement> & { size?: string; variant?: string }) => <button {...props} /> }));
 vi.mock('@/components/ui/dialog', () => ({ Dialog: () => null, DialogContent: () => null, DialogTitle: () => null }));
-vi.mock('@/stores/useUIStore', () => ({ useUIStore: () => false, normalizeContextPanelDirectoryKey: (value: string) => value }));
+vi.mock('@/stores/useUIStore', () => ({ useUIStore: Object.assign(() => false, { getState: () => ({ openContextPanelTab: api.openPanel }) }), normalizeContextPanelDirectoryKey: (value: string) => value }));
+vi.mock('@/components/ui/context-menu', () => ({ ContextMenu: ({ children }: React.PropsWithChildren) => children,
+  ContextMenuTrigger: ({ children }: React.PropsWithChildren) => children, ContextMenuContent: ({ children }: React.PropsWithChildren) => <div role="menu">{children}</div>,
+  ContextMenuItem: ({ children, ...props }: React.ButtonHTMLAttributes<HTMLButtonElement>) => <button {...props}>{children}</button>, ContextMenuSeparator: () => <hr /> }));
 vi.mock('@/stores/useThreadStore', () => ({ useThreadStore: {}, threadComposerKey: vi.fn(), threadHostKey: vi.fn() }));
 vi.mock('@/lib/agent-editor/attachments', () => ({ addContentReference: vi.fn() }));
 vi.mock('@/lib/interactive-ui/work-projection', () => ({ projectUiWork: vi.fn(), releaseUiWork: vi.fn(), restoreUiWork: vi.fn() }));
 vi.mock('@/lib/interactive-ui/modules', () => ({ prepareUiFiles: async (files: Record<string, string>) => files, createUiExport: vi.fn() }));
 
-it('shows loaded HTML and source while view registration is pending, and runs it once even if registration fails', async () => {
+it('keeps inline content mounted while inspecting source, restores measured height and runs loaded HTML despite registration failure', async () => {
   vi.useFakeTimers();
   const { document, window } = parseHTML('<html><body></body></html>');
   vi.stubGlobal('document', document); vi.stubGlobal('window', window); vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
+  vi.stubGlobal('CustomEvent', window.CustomEvent);
   vi.stubGlobal('innerHeight', 800);
   vi.stubGlobal('sessionStorage', { getItem: () => null, setItem: vi.fn() });
   vi.stubGlobal('getComputedStyle', () => ({ getPropertyValue: () => '', fontFamily: 'system-ui' }));
@@ -33,29 +37,45 @@ it('shows loaded HTML and source while view registration is pending, and runs it
   let reject!: (error: Error) => void;
   api.attach.mockImplementationOnce(() => new Promise((_resolve, no) => { reject = no; }));
   const container = document.createElement('div'); document.body.append(container); const root = createRoot(container);
-  const session: UiSession = { key: 'card', host: 0, identity: { runtime: 'agent', threadId: 'thread', branchId: 'branch' }, placement: 'inline' };
+  const scrollIntent = vi.fn(); container.addEventListener('varin:conversation-scroll-intent', scrollIntent);
+  const session = uiSession('card', { runtime: 'agent', threadId: 'thread', branchId: 'branch' }, 0);
+  session.cardMounted = true;
   const files = { 'index.html': '<h1>可见报告</h1><script>window.ready = true;</script>' };
-  const render = () => root.render(<UiWorkView session={session} source={{ ref: 'ui:work@1' }} files={files} entry="index.html" title="报告" committed />);
+  session.display = { source: { ref: 'ui:work@1' }, files, assets: {}, entry: 'index.html', title: '报告', committed: true, status: '' };
+  const render = (panel = false) => root.render(<><UiWorkView session={session} {...session.display!} cwd="/project" />
+    {panel && <InteractiveUiPanel sessionKey={session.key} />}</>);
   const click = async (key: string) => act(async () => [...container.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === key)!.click());
   const postMessage = vi.fn();
   try {
     await act(async () => render());
-    await click('ui.content.source'); expect(container.querySelector('pre code')?.textContent).toBe(files['index.html']);
-    await click('ui.content.preview');
     const frame = container.querySelector('iframe')!;
+    await click('ui.content.source');
+    expect(api.openPanel).toHaveBeenCalledWith('/project', expect.objectContaining({ mode: 'ui', targetPath: session.key }));
+    expect(session.placement).toBe('inline');
+    await act(async () => render(true));
+    expect(container.querySelector('pre code')?.textContent).toBe(files['index.html']);
+    expect(container.querySelector('iframe')).toBe(frame);
     const frameWindow = { postMessage }; Object.defineProperty(frame, 'contentWindow', { value: frameWindow });
     const channel = /data-channel="([^"]+)"/.exec(frame.getAttribute('srcDoc') ?? frame.getAttribute('srcdoc') ?? frame.srcdoc)![1];
     await act(async () => {
       const event = new window.Event('message'); Object.assign(event, { source: frameWindow, data: { channel, type: 'ready' } }); window.dispatchEvent(event);
+      const resize = new window.Event('message'); Object.assign(resize, { source: frameWindow, data: { channel, type: 'resize', height: 2400, width: 800 } }); window.dispatchEvent(resize);
+      const intent = new window.Event('message'); Object.assign(intent, { source: frameWindow, data: { channel, type: 'scroll-intent', intent: 'away-from-end' } }); window.dispatchEvent(intent);
     });
+    expect(frame.style.height).toBe('2400px');
+    expect(session.inlineSize).toEqual({ height: 2400, width: 800 });
+    expect(scrollIntent.mock.calls[0]?.[0].detail).toBe('away-from-end');
     await act(async () => { await vi.advanceTimersByTimeAsync(16); });
     const updates = () => postMessage.mock.calls.map(([message]) => message).filter(message => message.type === 'update');
     expect(updates()).toEqual([expect.objectContaining({ files, committed: false })]);
     await act(async () => reject(new InteractiveUiError(403, 'View unavailable')));
     await act(async () => { await vi.advanceTimersByTimeAsync(16); });
     expect(updates()).toEqual([expect.objectContaining({ committed: false }), expect.objectContaining({ files, committed: true })]);
-    await act(async () => render());
+    await act(async () => render(true));
     await act(async () => { await vi.advanceTimersByTimeAsync(16); });
     expect(updates()).toHaveLength(2);
+    await act(async () => root.render(null));
+    await act(async () => render());
+    expect(container.querySelector('iframe')?.style.height).toBe('2400px');
   } finally { act(() => root.unmount()); container.remove(); vi.unstubAllGlobals(); vi.useRealTimers(); }
 });

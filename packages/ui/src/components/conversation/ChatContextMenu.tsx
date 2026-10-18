@@ -204,7 +204,10 @@ export const ChatContextMenu: React.FC<Pick<ChatTimelineProps,
     }}>
       <ContextMenuTrigger asChild>
         <div ref={root} className="flex min-h-0 flex-1"
-          onContextMenuCapture={(event) => { if (!freeze(event.target)) event.stopPropagation(); }}
+          onContextMenuCapture={(event) => {
+            if (event.target instanceof Element && event.target.closest('[data-interactive-ui]')) return;
+            if (!freeze(event.target)) event.stopPropagation();
+          }}
           onClickCapture={(event) => {
             const href = (event.target as Element).closest('a')?.getAttribute('href');
             if (!href?.startsWith(SOURCE_LINK)) return;

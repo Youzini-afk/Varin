@@ -35,6 +35,8 @@ export interface ChatTimelineViewState {
   viewport?: ChatTimelineViewportAnchor;
 }
 
+export const CHAT_TIMELINE_SCROLL_INTENT_EVENT = 'varin:conversation-scroll-intent';
+
 export const DEFAULT_CHAT_TIMELINE_VIEW: Readonly<ChatTimelineViewState> = {
   entry: { epoch: 0, generation: 0, target: { kind: 'end' } },
   generation: 0,

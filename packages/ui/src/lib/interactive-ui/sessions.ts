@@ -7,6 +7,9 @@ export interface UiSession {
   display?: UiDisplay;
   cardMounted?: boolean;
   panelDirectory?: string;
+  panelView?: 'source' | 'preview';
+  panelMounted?: boolean;
+  inlineSize?: { width: number; height: number };
 }
 const sessions = new Map<string, UiSession>();
 const listeners = new Set<() => void>();
@@ -22,6 +25,10 @@ export function uiSession(key: string, identity: ThreadIdentity, host: number) {
 export const getUiSession = (key: string) => sessions.get(key);
 export function moveUiSession(session: UiSession, placement: UiSession['placement']) {
   session.placement = placement; revision++; for (const listener of listeners) listener();
+}
+export function openUiSessionPanel(session: UiSession, view: 'source' | 'preview') {
+  session.panelView = view;
+  moveUiSession(session, view === 'source' ? 'inline' : 'panel');
 }
 export function updateUiSession(session: UiSession, display: UiDisplay) {
   session.display = display; revision++; for (const listener of listeners) listener();

@@ -104,7 +104,7 @@ class WorkProjection {
     const source = committed ? { ref: saved!.ref } : { preview: { callId: this.call.id, sequence: this.call.sequence ?? 0, contents: files, entry, title, ...(base ? { baseRef: base.ref } : {}) } };
     updateUiSession(this.session, { source, files, assets: base?.assets ?? this.session.display?.assets ?? {}, title, entry, committed,
       status: this.error || (this.failed ? message('ui.content.unsaved') : this.running ? message('ui.content.making') : saved ? '' : message('ui.content.unsaved')) });
-    if (committed && this.session.placement === 'panel' && this.session.panelDirectory) useUIStore.getState().openContextPanelTab(this.session.panelDirectory,
+    if (committed && this.session.panelMounted && this.session.panelDirectory) useUIStore.getState().openContextPanelTab(this.session.panelDirectory,
       { mode: 'ui', targetPath: this.session.key, thread: this.session.identity, contentRef: saved!.ref, label: title, dedupeKey: this.session.key });
   }
 }
@@ -113,7 +113,7 @@ const owner = (session: UiSession) => { let projection = projections.get(session
 export const projectUiWork = (session: UiSession, call: ChatToolCall, output: unknown, running: boolean, failed: boolean) => owner(session).update(call, output, running, failed);
 export const restoreUiWork = (session: UiSession, ref: string) => owner(session).restore(ref);
 export function releaseUiWork(session: UiSession) {
-  if (session.cardMounted || session.placement === 'panel') return;
+  if (session.cardMounted || session.panelMounted || session.placement === 'panel') return;
   projections.get(session)?.close(); projections.delete(session); delete session.source; delete session.display;
 }
 function relativeFile(file: string) { return file.replaceAll('\\', '/').split('/').filter(part => part && part !== '.').join('/'); }
