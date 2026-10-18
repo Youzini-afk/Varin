@@ -11,7 +11,7 @@ const roots: string[] = [];
 afterEach(async () => { for (const root of roots.splice(0)) await fs.rm(root, { recursive: true, force: true }); });
 
 async function fixture() {
-  const root = await fs.mkdtemp(path.join(os.tmpdir(), "varin-preparation-proof-")); roots.push(root);
+  const root = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), "varin-preparation-proof-"))); roots.push(root);
   const caller: ExperimentWorkspaceCaller = { workspaceId: "ws", executionWorkspaceId: "exec",
     owner: { runtime: "agent", threadId: "preparation-thread", runId: "preparation-run", operationId: "preparation-operation" } };
   const input: ExperimentInputSnapshot = {
@@ -119,7 +119,10 @@ it.each([1, 2])('keeps the original source lease and drain fact through inventor
     const preparing = prepareExperimentInput(f.client, f.caller, f.input.sourceRoot!, {
       captureScopes: [], signal: controller.signal,
     }).catch(error => { settled = true; return error; });
-    await entered;
+    await Promise.race([entered, preparing.then(result => {
+      if (result instanceof Error) throw result;
+      throw new Error('Preparation completed before the controlled inventory scan');
+    })]);
     controller.abort();
     await new Promise(resolve => setImmediate(resolve));
     assert.equal(settled, false, 'an abort is not the inventory worker stop receipt');
