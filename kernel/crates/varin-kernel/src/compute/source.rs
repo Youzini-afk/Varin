@@ -189,7 +189,10 @@ pub(crate) fn visit(task:&mut Task,shared:&Shared,mut callback:impl FnMut(Docume
         if excluded.iter().any(|p|within(path,p))||(!explicit.is_empty()&&!explicit.contains(path))||!scopes.iter().any(|scope|within(path,scope))||!roots.iter().any(|root|within(path,root)){return false;}
         if immediate&&!selections.iter().any(|root|path==root||path.rsplit_once('/').map(|(parent,_)|parent==root).unwrap_or(root.is_empty())){return false;}
         if selection_relative(path,&selections).split('/').any(|s|dirs.contains(s)||(!include_hidden&&s.starts_with('.'))){return false;}
-        !glob.matched(path,directory).is_ignore()
+        let matched = glob.matched(path,directory);
+        // ignore's directory exemption keeps walkers descending. Traversal is
+        // already separate here; records must actually match a positive glob.
+        !matched.is_ignore() && (!directory || glob.num_whitelists() == 0 || matched.is_whitelist())
     };
     let descend=|path:&str|->bool{
         (explicit.is_empty()||explicit.iter().any(|f|within(f,path)||f==path))&&scopes.iter().any(|s|within(path,s)||within(s,path))&&roots.iter().any(|s|within(path,s)||within(s,path))

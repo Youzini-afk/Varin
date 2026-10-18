@@ -2634,7 +2634,7 @@
     "FamilyHistoryEntry": {"fields": {"id": {"type": "string"}, "parentId": {"type": "string | null"}, "sequence": {"type": "number"}, "runId": {"type": "string"}, "source": {"type": "string"}, "kind": {"type": "string"}, "body": {"type": "unknown | null"}, "preview": {"type": "string"}, "bodyBytes": {"type": "number"}, "bodyTruncated": {"type": "boolean"}, "tool": {"type": "FamilyToolAssociation | null"}}},
     "FamilyRead": {"fields": {"threadId": {"type": "string"}, "branchId": {"type": "string"}, "runId": {"type": "string | null"}, "headId": {"type": "string | null"}, "anchor": {"type": "string"}, "items": {"type": "FamilyHistoryEntry[]"}, "nextCursor": {"type": "string | null"}, "scanned": {"type": "number"}, "scanComplete": {"type": "boolean"}, "hasEarlier": {"type": "boolean"}, "hasLater": {"type": "boolean"}}},
     "FamilyItem": {
-      "raw": "export interface FamilyItem { threadId: string; branchId: string; runId: string | null; headId: string | null; itemId: string; format: 'conversation_json'; text: string; offset: number; nextOffset: number | null; totalBytes: number }"
+      "raw": "export interface FamilyItem { threadId: string; branchId: string; runId: string | null; headId: string | null; anchor: string; itemId: string; format: 'conversation_json'; text: string; offset: number; nextOffset: number | null; totalBytes: number }"
     },
     "HostJobSubject": {
       "raw": "export type HostJobSubject = {kind:'workspace';workspaceId:string;subjectId:string} | {kind:'mcp';endpoint:McpEndpoint;dispatchId:string} | {kind:'environment_forward';hostId:string;hostEpoch:string;target:SourceResourceOwner;serviceHost:string;servicePort:number};",

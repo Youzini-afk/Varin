@@ -487,7 +487,12 @@ impl ResourceOperation {
                         .collect::<Result<Vec<_>, ExecutionError>>()?;
                     arguments["env"] = json!(environment);
                 }
-                serde_json::from_value(arguments).map(Self::ProcessSpawn)
+                serde_json::from_value::<ProcessSpawnArgs>(arguments).map(|mut args| {
+                    args.cwd = std::path::Path::new(&args.cwd.replace('\\', "/"))
+                        .components().filter(|part| !matches!(part, std::path::Component::CurDir))
+                        .collect::<std::path::PathBuf>().to_string_lossy().replace('\\', "/");
+                    Self::ProcessSpawn(args)
+                })
             }
         }
         .map_err(|error| ExecutionError::new("invalid_tool_arguments", error.to_string()))?;
@@ -2560,7 +2565,7 @@ fn tool_schema(kind: ToolKind) -> Value {
             vec!["processId", "cols", "rows"],
         ),
         ToolKind::ProcessSpawn => (
-            json!({"cwd":{"type":"string","description":"Directory relative to the selected source root, using forward slashes. Use an empty string for the root."},"command":{"type":"string"},"args":{"type":"array","items":{"type":"string"}},
+            json!({"cwd":{"type":"string","description":"Directory relative to the selected source root. Empty string or . selects the root."},"command":{"type":"string"},"args":{"type":"array","items":{"type":"string"}},
             "env":{"type":"array","description":"Complete process environment. Omit to inherit this execution environment; an empty array starts with no environment variables.","items":{"type":"object","additionalProperties":false,"properties":{"name":{"type":"string"},"value":{"type":"string"}},"required":["name","value"]}},
             "mode":{"type":"string","enum":["pipe","pty"]},"cols":{"type":"integer","minimum":1,"maximum":65535},"rows":{"type":"integer","minimum":1,"maximum":65535},"windowsRawArguments":{"type":"string"}}),
             vec!["cwd", "command", "args", "mode"],

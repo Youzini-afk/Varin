@@ -71,6 +71,7 @@ Agent 的物理文件读取在后台流式哈希，只保留所请求的片段�
 取得正文和版本状态，提交时沿原 `file.apply` 校验当前文件；响应帧大小只约束发往调用方的正文。
 `file_list` 默认列当前目录，`recursive` 展开后代，`nextCursor` 配合相同过滤条件继续读取。物理目录页按路径顺序读取
 当前状态；`includeRevisions` 显式请求正文版本，普通目录列表省略未计算的哈希。
+正向 `globs` 同时筛选文件和目录结果；未匹配的目录仍可作为递归路径进入，以找到匹配的后代文件。
 普通目录列表显示包括依赖、Git、worktree 和被忽略文件在内的入口。递归发现默认略过 `.git`、`node_modules`、`.worktrees`
 及 ignore 规则排除的内容；明确指定的路径作为搜索起点，直接进入该范围，内部的嵌套目录继续应用过滤。
 Harness 在同一次遍历中处理路径与过滤，调用方仍可通过 `excludeDirectories`、`respectGitignore` 调整范围。
@@ -89,7 +90,7 @@ guardian 是同一发行 executable 的另一模式，不另开数据库 writer�
 Windows 使用 named Jobs；Linux 使用 managed session 加 subreaper。旧 epoch 无法证明的退出保留 unknown，继续保护目录。
 Host 对可能仍存在 executor 的启动/停止失败保留 owner，不用旧 PID、HTTP abort 或 Promise reject 虚构退出码。
 目录解析或进程受理失败时，Storage 用原进程意图记录确认是否尚未启动；确认未启动的失败返回 `not_dispatched`，
-供模型修正参数后继续。`cwd` 使用选中 Source 下的相对目录，空字符串表示根目录。
+供模型修正参数后继续。`cwd` 使用选中 Source 下的相对目录，空字符串和 `.` 表示根目录；入口统一处理 `./` 和路径分隔符。
 
 grant retirement 与 revocation 分开：前者在真实 drain 后关闭旧 caller，后者继续拒绝。Operation-owned grant 可以长于 Run，
 直到自己的 reader、process 和回执归档完成。原来源仅支持精确限定的 successor 读取，不继承全部旧控制权限。

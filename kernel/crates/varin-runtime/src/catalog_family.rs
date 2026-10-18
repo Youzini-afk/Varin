@@ -97,7 +97,7 @@ pub struct ReadRequest {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ItemRequest {
     pub run_id: Option<String>,
-    pub anchor: String,
+    pub anchor: Option<String>,
     pub item_id: String,
     pub offset: Option<usize>,
     pub max_bytes: Option<usize>,
@@ -190,6 +190,7 @@ pub struct ItemPage {
     pub branch_id: String,
     pub run_id: Option<String>,
     pub head_id: Option<String>,
+    pub anchor: String,
     pub item_id: String,
     pub format: String,
     pub text: String,
@@ -326,6 +327,9 @@ impl Catalog {
             ));
         }
         let frozen = self.capture_tool_invocation(&context, &call.call_id)?;
+        let (thread, branch) = if call.name == READ_TOOL && thread.is_none() && branch.is_none() {
+            (Some(run.thread_id.as_str()), Some(run.branch_id.as_str()))
+        } else { (thread, branch) };
         let mut read = self.capture_family_read(&run.thread_id, thread, branch)?;
         read.invocation = Some(Invocation {
             context,
@@ -1072,7 +1076,7 @@ impl FamilyRead {
     }
     pub fn item(self, request: ItemRequest, cancel: &dyn Fn() -> bool) -> Result<ItemPage> {
         let db = self.open(cancel)?;
-        let anchor = self.anchor(&db, request.run_id.as_deref(), Some(&request.anchor))?;
+        let anchor = self.anchor(&db, request.run_id.as_deref(), request.anchor.as_deref())?;
         let ancestry = self.ancestry(&db, &anchor, cancel)?;
         let (_, item) = ancestry
             .iter()
@@ -1088,6 +1092,7 @@ impl FamilyRead {
         let end = utf8_end(&text, offset, request.max_bytes.unwrap_or(65536))?;
         self.finish(cancel)?;
         Ok(ItemPage {
+            anchor: self.sign(&anchor)?,
             thread_id: anchor.thread,
             branch_id: anchor.branch,
             run_id: anchor.run,

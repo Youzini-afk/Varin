@@ -6,14 +6,17 @@ fn family_fixture(selected: Vec<String>) -> Fixture {
 fn family_calls() -> Vec<ToolCall> {
     [("threads",json!({})),
   ("read_thread",json!({"threadId":"thread:parent","branchId":"branch:parent","query":{"kind":"recent","limit":2}})),
-  ("read_thread",json!({"threadId":"thread:parent","branchId":"branch:parent","query":{"kind":"runs","limit":1}})),
+  ("read_thread",json!({"query":{"kind":"runs","limit":1}})),
  ].into_iter().enumerate().map(|(n,(name,arguments))|ToolCall{call_id:format!("family-{n}"),name:name.into(),schema_version:crate::family_tools::schemas().into_iter().find(|schema|schema.name==name).unwrap().version,arguments}).collect()
 }
 #[test]
 fn selected_family_tools_execute_from_real_model_and_policy_origins() {
     for model in [true, false] {
         let f = family_fixture(vec!["threads".into(), "read_thread".into()]);
-        let calls = family_calls();
+        let mut calls = family_calls();
+        let item_id = f.catalog().lock().unwrap().history("branch:parent").unwrap().last().unwrap().id.clone();
+        calls.push(ToolCall { call_id: "read-original-item".into(), name: "read_thread".into(), schema_version: "2".into(),
+            arguments: json!({"threadId":"thread:parent","branchId":"branch:parent","query":{"kind":"item","itemId":item_id,"maxBytes":512}}) });
         let mut owner = OwnerReplies::default();
         execute(&f, model, calls.clone(), &mut owner, false);
         assert!(
@@ -32,7 +35,7 @@ fn selected_family_tools_execute_from_real_model_and_policy_origins() {
                     _ => None,
                 })
                 .collect::<Vec<_>>();
-            assert_eq!(results.len(), 3);
+            assert_eq!(results.len(), 4);
             for result in &results {
                 let ToolCompletion::Result {
                     outcome,
@@ -55,6 +58,8 @@ fn selected_family_tools_execute_from_real_model_and_policy_origins() {
                 unreachable!()
             };
             assert_eq!(content.data["page"]["members"].as_array().unwrap().len(), 1);
+            assert_eq!(content.data["page"]["current"]["branchId"], f.run.branch_id);
+            assert_eq!(content.data["page"]["current"]["threadId"], f.run.thread_id);
             assert_eq!(
                 content.data["page"]["members"][0]["threadId"],
                 "thread:parent"
@@ -64,6 +69,11 @@ fn selected_family_tools_execute_from_real_model_and_policy_origins() {
             };
             assert!(content.data["page"]["items"].as_array().unwrap().len() > 0);
             assert_eq!(content.data["page"]["threadId"], "thread:parent");
+            let ToolCompletion::Result { content, .. } = &results[2].completion else { unreachable!() };
+            assert_eq!(content.data["page"]["branchId"], f.run.branch_id);
+            let ToolCompletion::Result { content, .. } = &results[3].completion else { unreachable!() };
+            assert_eq!(content.data["page"]["itemId"], item_id);
+            assert!(content.data["page"]["anchor"].as_str().is_some());
         } else {
             let raw = rusqlite::Connection::open_with_flags(
                 f.root.join("conversation.sqlite"),
@@ -78,7 +88,7 @@ fn selected_family_tools_execute_from_real_model_and_policy_origins() {
                 .unwrap()
                 .collect::<Result<Vec<_>, _>>()
                 .unwrap();
-            assert_eq!(receipts.len(), 3);
+            assert_eq!(receipts.len(), 4);
             for (_, outcome) in receipts {
                 assert_eq!(outcome, "\"succeeded\"");
             }

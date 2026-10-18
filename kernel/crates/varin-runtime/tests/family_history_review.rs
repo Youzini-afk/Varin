@@ -247,6 +247,7 @@ fn anchors_pagination_run_selection_search_and_semantic_item_expansion_are_fixed
     assert_eq!(second.items.last().unwrap().id, a.id);
     let mut accumulated = String::new();
     let mut offset = 0;
+    let mut item_anchor = None;
     loop {
         let item =
             f.db.capture_family_read(
@@ -258,7 +259,7 @@ fn anchors_pagination_run_selection_search_and_semantic_item_expansion_are_fixed
             .item(
                 ItemRequest {
                     run_id: None,
-                    anchor: first.anchor.clone(),
+                    anchor: item_anchor.clone(),
                     item_id: large.id.clone(),
                     offset: Some(offset),
                     max_bytes: Some(17),
@@ -267,6 +268,7 @@ fn anchors_pagination_run_selection_search_and_semantic_item_expansion_are_fixed
             )
             .unwrap();
         assert_eq!(item.format, "conversation_json");
+        item_anchor = Some(item.anchor.clone());
         accumulated.push_str(&item.text);
         if let Some(next) = item.next_offset {
             assert!(next > offset);
@@ -340,7 +342,7 @@ fn anchors_pagination_run_selection_search_and_semantic_item_expansion_are_fixed
         .item(
             ItemRequest {
                 run_id: None,
-                anchor: bad,
+                anchor: Some(bad),
                 item_id: b.id,
                 offset: None,
                 max_bytes: None
@@ -608,7 +610,7 @@ fn paused_read_worker_does_not_own_catalog_and_append_fork_cancel_preserve_its_v
             .item(
                 ItemRequest {
                     run_id: None,
-                    anchor: page.anchor,
+                    anchor: Some(page.anchor),
                     item_id: item.id,
                     offset: None,
                     max_bytes: None
@@ -681,7 +683,7 @@ fn empty_missing_foreign_corrupt_and_changed_cursor_queries_remain_distinct() {
         .item(
             ItemRequest {
                 run_id: None,
-                anchor: page.anchor,
+                anchor: Some(page.anchor),
                 item_id: "not-an-item".into(),
                 offset: None,
                 max_bytes: None
@@ -757,7 +759,7 @@ fn opaque_provider_continuations_are_retained_but_never_returned_or_searched() {
         .item(
             ItemRequest {
                 run_id: None,
-                anchor: page.anchor,
+                anchor: Some(page.anchor),
                 item_id: item.id.clone(),
                 offset: None,
                 max_bytes: None,
@@ -898,7 +900,7 @@ fn fork_lists_and_filters_visible_original_runs_without_reassigning_their_branch
         .item(
             ItemRequest {
                 run_id: Some(original),
-                anchor: selected.anchor,
+                anchor: Some(selected.anchor),
                 item_id: inherited.id,
                 offset: None,
                 max_bytes: None,

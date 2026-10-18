@@ -193,6 +193,29 @@ fn missing_process_cwd_is_not_dispatched_and_following_reads_work() {
 }
 
 #[test]
+fn process_dot_cwd_resolves_before_launch_and_globs_filter_records_without_pruning_traversal() {
+    let mut f = Fixture::new();
+    for cwd in [".", "./", ".\\"] {
+        let operation = ResourceOperation::parse(ToolKind::ProcessSpawn,
+            &json!({"command":"unused-command","args":[],"env":[],"mode":"pipe","cwd":cwd})).unwrap();
+        let ResourceOperation::ProcessSpawn(args) = operation else { unreachable!() };
+        assert_eq!(args.cwd, "");
+    }
+    let ToolCompletion::NotDispatched { reason } = f.call("process_spawn",
+        json!({"command":"unused-command","args":[],"env":[],"mode":"pipe","cwd":"./missing"})) else { panic!("missing directory was dispatched"); };
+    assert!(reason.contains("working directory") && !reason.contains("normalized"), "{reason}");
+    fs::create_dir_all(f.root.join("work/docs/sub")).unwrap();
+    for path in ["README.md", "docs/notes.md", "docs/sub/last.md", "docs/other.txt"] {
+        fs::write(f.root.join("work").join(path), "body").unwrap();
+    }
+    for (recursive, expected) in [(false, vec!["README.md"]), (true, vec!["README.md", "docs/notes.md", "docs/sub/last.md"])] {
+        let ToolCompletion::Result { outcome: Outcome::Succeeded, content, .. } = f.call("file_list", json!({"globs":["*.md"],"recursive":recursive})) else { panic!("listing failed"); };
+        let paths = content.data["records"].as_array().unwrap().iter().map(|r|r["path"].as_str().unwrap()).collect::<Vec<_>>();
+        assert_eq!(paths, expected);
+    }
+}
+
+#[test]
 fn partial_utf8_read_has_the_full_file_version_and_advances_on_character_boundaries() {
     let mut f = Fixture::new();
     fs::write(f.root.join("work/body"), "第一🙂行\nnext").unwrap();

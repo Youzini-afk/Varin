@@ -6,7 +6,7 @@ use std::collections::BTreeMap;
 #[derive(Default)]
 pub(crate) struct TextInputProjection {
     items: BTreeMap<usize, (Arc<ConversationItem>, Arc<ConversationItem>)>,
-    settings: Option<(Option<bool>, Option<usize>)>,
+    settings: Option<(Option<bool>, Option<usize>, bool)>,
 }
 const IMAGE_NOTICE: &str = "[Image omitted: the selected model accepts text input only.]";
 
@@ -71,7 +71,7 @@ fn preview(fragments: &[&str], budget: usize) -> String {
     result
 }
 
-fn bounded_output(output: &OutputBody, budget: usize, item_id: &str) -> Option<OutputBody> {
+fn bounded_output(output: &OutputBody, budget: usize, item_id: &str, can_read: bool) -> Option<OutputBody> {
     let data = if output.data.is_null() { String::new() } else { serde_json::to_string(&output.data).expect("output data") };
     let mut fragments = vec![data.as_str()];
     for part in &output.parts {
@@ -82,18 +82,23 @@ fn bounded_output(output: &OutputBody, budget: usize, item_id: &str) -> Option<O
     }
     let original_bytes: usize = fragments.iter().map(|text| text.len()).sum();
     if original_bytes <= budget { return None; }
-    let data = json!({"truncated":true,"originalBytes":original_bytes,"historyItemId":item_id});
+    // Item pages contain a JSON fragment inside a JSON response. Leave room for
+    // escaping and the paging envelope, using the caller's existing output budget.
+    let mut data = json!({"truncated":true,"originalBytes":original_bytes,"historyItemId":item_id});
+    if can_read {
+        data["read"] = json!({"tool":"read_thread","arguments":{"query":{"kind":"item","itemId":item_id,"offset":0,"maxBytes":(budget / 4).max(1)}}});
+    }
     let metadata_bytes = serde_json::to_string(&data).expect("output metadata").len();
     let mut parts = vec![OutputPart::Text { text: preview(&fragments, budget.saturating_sub(metadata_bytes)) }];
     parts.extend(output.parts.iter().filter(|part| matches!(part, OutputPart::Media { .. })).cloned());
     Some(OutputBody { data, parts })
 }
 
-fn bounded_content(content: &Content, budget: usize, item_id: &str) -> Option<Content> {
+fn bounded_content(content: &Content, budget: usize, item_id: &str, can_read: bool) -> Option<Content> {
     match content {
-        Content::Output { output } => bounded_output(output, budget, item_id).map(|output| Content::Output { output }),
+        Content::Output { output } => bounded_output(output, budget, item_id, can_read).map(|output| Content::Output { output }),
         Content::ToolResult { result } => {
-            let content = bounded_output(completion_output(&result.completion)?, budget, item_id)?;
+            let content = bounded_output(completion_output(&result.completion)?, budget, item_id, can_read)?;
             let mut result = result.clone();
             match &mut result.completion {
                 ToolCompletion::Result { content: output, .. } => *output = content,
@@ -119,7 +124,8 @@ pub(super) fn model_input<'a>(view: &'a RequestView, connection: &Connection, re
 fn text_input<'a>(view: &'a RequestView, connection: &Connection, reuse: Option<&mut RequestCompileReuse>) -> Cow<'a, RequestView> {
     if connection.accepts_images != Some(false) && connection.tool_output_visible_bytes.is_none() { return Cow::Borrowed(view); }
     let mut cache = reuse.map(|reuse| &mut reuse.text_input);
-    let settings = (connection.accepts_images, connection.tool_output_visible_bytes);
+    let can_read = view.binding.tools.iter().any(|tool| tool.name == crate::catalog::family::READ_TOOL);
+    let settings = (connection.accepts_images, connection.tool_output_visible_bytes, can_read);
     if let Some(cache) = cache.as_mut() {
         if cache.settings != Some(settings) { cache.items.clear(); cache.settings = Some(settings); }
     }
@@ -129,7 +135,7 @@ fn text_input<'a>(view: &'a RequestView, connection: &Connection, reuse: Option<
     let history = view.history.iter().map(|source| {
         let key = Arc::as_ptr(source) as usize;
         let item = previous.remove(&key).map(|(_, projected)| projected).unwrap_or_else(|| {
-            let mut content = connection.tool_output_visible_bytes.and_then(|budget| bounded_content(&source.content, budget, &source.id));
+            let mut content = connection.tool_output_visible_bytes.and_then(|budget| bounded_content(&source.content, budget, &source.id, can_read));
             if connection.accepts_images == Some(false) && source.content.media().iter().any(|media| media.media_type.starts_with("image/")) {
                 content = Some(text_content(content.as_ref().unwrap_or(&source.content)));
             }

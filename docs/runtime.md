@@ -71,6 +71,9 @@ Catalog 事务保存短元数据和不可变内容引用。历史正文、请求
 普通输出明确分为 JSON data 和有序 text/media parts；不能根据 JSON 键名猜测控制命令或媒体。
 模型输入按 `harness.output.visibleBytes` 投影长工具输出：保留首尾、原始字节数和历史条目引用，
 完整回执继续存储，图片保留原媒体类型。同一条输出的投影在后续请求中复用，避免重复处理正文。
+截断结果附带 `read_thread` 的读取参数，`item` 可直接使用条目 ID 读取当前会话的原文。
+首个读取返回固定锚点，后续沿该锚点和 `nextOffset` 续读；建议页大小从既有展示预算派生，为 JSON 转义及分页元数据留出空间。
+`threads` 的 `current` 字段直接给出调用方 Thread、branch 和 Run；完整自身条目仍由 `includeSelf` 控制。
 
 上下文 checkpoint 保存已发布摘要、指令、记忆/资源及来源边界。新记忆可作为后续请求的投影，
 不改写原历史。Knowledge/Memory 仍是笔记写入者；Catalog 只记录观察和请求投递证据。

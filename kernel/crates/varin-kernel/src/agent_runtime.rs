@@ -3280,7 +3280,7 @@ impl FamilyCommand {
                         .map_err(domain)?,
                     varin_runtime::catalog::family::ItemRequest {
                         run_id: p.run_id,
-                        anchor: p.anchor,
+                        anchor: Some(p.anchor),
                         item_id: p.item_id,
                         offset: size(p.offset)?,
                         max_bytes: size(p.max_bytes)?,

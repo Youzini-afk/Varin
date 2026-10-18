@@ -178,7 +178,8 @@ fn tool_output_budget_preserves_receipts_utf8_and_reuses_the_projection() {
     conn.accepts_images = Some(true);
     conn.tool_output_visible_bytes = Some(32768);
     let mut request = view(responses::FAMILY);
-    let text = format!("START\n{}\nLAST_ERROR", "中文🧭".repeat(7000));
+    request.binding.tools[0].name = "read_thread".into();
+    let text = format!("START\n{}\nOMITTED_MIDDLE\n{}\nLAST_ERROR", "中文🧭".repeat(3500), "中文🧭".repeat(3500));
     let original = ConversationItem {
         resource_activation: None, id: "large-receipt".into(),
         provenance: Provenance::ToolData { call_id: "call-1".into() },
@@ -195,14 +196,25 @@ fn tool_output_budget_preserves_receipts_utf8_and_reuses_the_projection() {
     let ToolCompletion::Result { outcome, effect, content } = &result.completion else { panic!("completion"); };
     assert_eq!((*outcome, *effect), (crate::Outcome::Failed, crate::Effect::Partial));
     assert_eq!(content.data["historyItemId"], "large-receipt");
+    assert_eq!(content.data["read"], json!({"tool":"read_thread","arguments":{"query":{"kind":"item","itemId":"large-receipt","offset":0,"maxBytes":8192}}}));
     let OutputPart::Text { text: shown } = &content.parts[0] else { panic!("preview"); };
     assert!(shown.contains("START") && shown.ends_with("LAST_ERROR"));
     assert!(shown.len() + content.data.to_string().len() <= 32768);
     assert_eq!(request.history[0].content, original.content);
     let again = input_projection::model_input(&request, &conn, Some(&mut reuse)).history[0].clone();
     assert!(Arc::ptr_eq(&projected, &again));
+    request.binding.tools.clear();
+    let unavailable = input_projection::model_input(&request, &conn, Some(&mut reuse));
+    let Content::ToolResult { result } = &unavailable.history[0].content else { panic!("tool receipt"); };
+    assert!(super::completion_output(&result.completion).unwrap().data.get("read").is_none());
     let wire = responses::ResponsesProvider::new(conn).serialize(&request, None).unwrap().to_value().to_string();
     assert!(wire.len() < text.len() && wire.contains("LAST_ERROR") && wire.contains("truncated"));
+    assert!(!wire.contains("OMITTED_MIDDLE"));
+    let mut conn = connection(vec![], 1);
+    conn.tool_output_visible_bytes = Some(32768);
+    request.binding.provider_family = chat::FAMILY.into();
+    let chat = chat::ChatProvider::new(conn).serialize(&request, None).unwrap().to_value().to_string();
+    assert!(!chat.contains("OMITTED_MIDDLE") && chat.contains("LAST_ERROR"));
 }
 fn generate(
     provider: &impl ModelProvider,
