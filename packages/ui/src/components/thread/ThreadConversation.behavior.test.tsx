@@ -19,13 +19,15 @@ import { bindThreadStore, threadHostKey, threadComposerKey, useThreadStore } fro
 import { ChatView } from '@/components/views/ChatView';
 import { AgentWorkspaceShell } from '@/workbenches/agent/AgentWorkspaceShell';
 import { useUIStore } from '@/stores/useUIStore';
+import { useWorkOverviewStore } from '@/stores/useWorkOverviewStore';
+import { KERNEL_PROTOCOL_VERSION } from '../../../../web/application-host/lib/kernel/protocol.generated.js';
 import type { WorkspaceCombinedRecoveryOperation, WorkspaceCombinedRecoveryPlan, WorkspaceRecoveryAPI } from '@varin/extension-contract';
 
 const translations = vi.hoisted(() => ({ dictionary: {} as Record<string, string> }));
 const runtimeState = vi.hoisted(() => ({ api: undefined as ThreadsAPI | undefined }));
 const endpoint = vi.hoisted(() => ({ generation: 1, hostKey: 'host-a', listeners: new Set<() => void>() }));
 const recoveryService = vi.hoisted(() => ({ api: undefined as WorkspaceRecoveryAPI | undefined }));
-const timelineList = vi.hoisted(() => ({ scrollToIndex: vi.fn(async () => {}) }));
+const timelineList = vi.hoisted(() => ({ scrollToIndex: vi.fn(async () => {}), render: vi.fn() }));
 vi.mock('@/lib/recovery/workspaceRecovery', async original => ({
   ...await original<typeof import('@/lib/recovery/workspaceRecovery')>(),
   getWorkspaceRecoveryAPI: () => { if (!recoveryService.api) throw new Error('Recovery unavailable'); return recoveryService.api; },
@@ -89,7 +91,6 @@ vi.mock('./ThreadComposer', () => ({ ThreadComposer: (props: React.ComponentProp
 </div> }));
 vi.mock('@/components/chat/DraftPresetChips', () => ({ DraftPresetChips: () => null }));
 vi.mock('@/components/ui/VarinLogo', () => ({ VarinLogo: () => null }));
-vi.mock('./WorkOverviewControl', () => ({ WorkOverviewControl: ({ children }: React.PropsWithChildren) => <div>{children}</div> }));
 vi.mock('@/components/ui/input', () => ({ Input: ({ onChange, ...props }: React.InputHTMLAttributes<HTMLInputElement>) => <input {...props} onInput={onChange as React.FormEventHandler<HTMLInputElement>} /> }));
 vi.mock('@/components/ui/textarea', () => ({ Textarea: ({ onChange, ...props }: React.TextareaHTMLAttributes<HTMLTextAreaElement>) => <textarea {...props} onInput={onChange as React.FormEventHandler<HTMLTextAreaElement>} /> }));
 
@@ -99,6 +100,7 @@ vi.mock('@legendapp/list/react', () => ({ LegendList: React.forwardRef((props: {
   data: Array<{ id: string }>; renderItem(input: { item: { id: string }; index: number }): React.ReactNode;
   ListHeaderComponent?: React.ReactNode; ListFooterComponent?: React.ReactNode; onLoad?(): void;
 }, ref) => {
+  timelineList.render();
   const node = React.useRef<HTMLDivElement>(null);
   const onLoad = React.useRef(props.onLoad);
   React.useEffect(() => { onLoad.current?.(); }, []);
@@ -154,7 +156,9 @@ beforeEach(() => {
   vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => {});
   useThreadDraftStore.setState({ drafts: {} });
   useTimelineViewStore.setState({ views: {} });
+  useWorkOverviewStore.setState({ bySession: {} });
   timelineList.scrollToIndex.mockClear();
+  timelineList.render.mockClear();
   useInlineCommentDraftStore.setState({ drafts: {}, touchedAt: {} });
   resetEditorContextAttachments();
   endpoint.generation = 1; endpoint.hostKey = 'host-a';
@@ -212,6 +216,43 @@ const choosePdfs = async (...files: File[]) => {
   });
 };
 const composerForm = () => container.querySelector<HTMLTextAreaElement>('[aria-label="Message thread"]')!.closest('form')!;
+
+it('opens and closes the work overview during streaming without redrawing the conversation for disclosure', async () => {
+  const f = fixture(true);
+  await act(async () => root.render(<ThreadConversation api={f.api} identity={identity} />));
+  const stream = async (sequence: number) => act(async () => {
+    f.emit({ v: KERNEL_PROTOCOL_VERSION, kind: 'runtime-event', kernelEpoch: 'epoch', stream: 'progress', streamId: 'stream',
+      threadId: identity.threadId, branchId: identity.branchId, runId: 'ui-run', requestId: 'streaming-request', sequence,
+      event: { kind: 'batch', events: [{ kind: 'provider', data: { kind: 'text_delta', item_id: 'answer', text: `chunk ${sequence} ` } }] } });
+  });
+  const launcher = () => container.querySelector<HTMLButtonElement>('[data-harness-overview-controls] button')!;
+  const view = () => launcher().closest('aside')!.getAttribute('data-view');
+  await stream(1);
+  const originalLauncher = launcher();
+  expect(view()).toBe('closed');
+  timelineList.render.mockClear();
+  await act(async () => originalLauncher.click());
+  expect(view()).toBe('full');
+  expect(launcher().getAttribute('aria-expanded')).toBe('true');
+  expect(timelineList.render).not.toHaveBeenCalled();
+  await stream(2);
+  expect(launcher()).toBe(originalLauncher);
+  expect(view()).toBe('full');
+  expect(container.textContent).toContain('chunk 2');
+  timelineList.render.mockClear();
+  await act(async () => launcher().click());
+  expect(view()).toBe('closed');
+  expect(timelineList.render).not.toHaveBeenCalled();
+  await stream(3);
+  await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="harness.overview.peek"]')!.click());
+  expect(view()).toBe('compact');
+  await stream(4);
+  expect(view()).toBe('compact');
+  await act(async () => [...container.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent?.includes('harness.overview.details'))!.click());
+  expect(view()).toBe('full');
+  expect(f.cancelRun).not.toHaveBeenCalled();
+  expect(f.enqueue).not.toHaveBeenCalled();
+});
 
 it('waits for the original snapshot before choosing submit or enqueue for a restored draft', async () => {
   const f = fixture(true);

@@ -24,7 +24,9 @@ export const ConversationSurface = React.forwardRef<HTMLDivElement, {
   if (painted.current?.owner !== owner) painted.current = undefined;
   if (ready) painted.current = { owner, identity, content: children };
   const scene = painted.current;
-  return <div ref={ref} className="conversation-content relative min-h-0 min-w-0 flex-1" aria-busy={!ready}
+  // Virtual sticky rows use their own high z-indices. Keep them below sibling
+  // conversation controls, including when an entrance animation drops its transform.
+  return <div ref={ref} className="conversation-content isolate relative min-h-0 min-w-0 flex-1" aria-busy={!ready}
     data-conversation-hydrating={!ready || undefined}>
     <AnimatePresence key={owner} initial={false}>
       {scene ? <ConversationScene key={scene.identity} inactive={!ready || scene.identity !== identity}>
