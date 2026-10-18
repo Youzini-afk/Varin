@@ -4,6 +4,8 @@ Ordinary Agent memory is explicit, lightweight text. `agent-personalization.ts` 
 record (`agent.personalization`) containing global, project and Thread notes and scoped system-prompt
 edits. Projects use the configured project ID; Thread notes use the native Thread ID. There is no
 implicit import of historical sessions or knowledge records and no background extraction for ordinary chats.
+New Agent notes append through the serialized mutation owner without a preliminary read. Updates and deletions
+require the observed revision; original operation receipts deduplicate retries for both paths.
 
 `kernel/memory-owner.ts` routes native memory tools through the admitted Run, operation and scopes.
 The tool cannot read another project's or Thread's notes. Selected-message saves preserve chosen text

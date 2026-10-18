@@ -10,6 +10,7 @@ import type { KernelClient } from './kernel-client.js';
 import type { ExtensionToolOwnerOptions } from './extension-tool-owner.js';
 import type { KernelMethod, KernelMethodParams, NodeBinding, Operation, OutputPart, IncomingMedia } from './protocol.generated.js';
 import type { ToolExecutionReceipt } from './tool-bridge.js';
+import { undispatchedToolReceipt } from './tool-bridge.js';
 import { scheduleAtDeadline } from '../deadline.js';
 import { resolveScriptNodeBinding, scriptNodeSpawnInput } from './script-node-binding.js';
 import { createManagedProcessClient } from './managed-process-client.js';
@@ -184,6 +185,11 @@ export function createScriptRuntime(options: {
     void work.finally(() => cell.callbacks.delete(work)).catch(options.onError);
   };
   const openEnvironment = async (authority: ToolInvocationAuthority, params: Record<string, JsonValue>, signal: AbortSignal): Promise<ToolExecutionReceipt> => {
+    const requestedCwd = typeof params.cwd === 'string' ? params.cwd : '';
+    if (requestedCwd.includes('\\') || requestedCwd.includes('\0') || requestedCwd.includes(':') || requestedCwd.startsWith('/')
+      || requestedCwd.split('/').some(part => part === '.' || part === '..')) {
+      return undispatchedToolReceipt('cwd must be relative to the selected source root, using forward slashes; use an empty string for the root');
+    }
     await recovering;
     signal.throwIfAborted();
     if (environments.has(authority.operationId)) throw new Error('script_environment_already_open');

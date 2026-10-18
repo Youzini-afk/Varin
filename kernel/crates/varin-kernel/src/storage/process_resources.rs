@@ -41,6 +41,14 @@ fn contains(parent: &Path, child: &Path) -> bool {
     }
 }
 impl Storage {
+    /// The durable intent precedes guardian dispatch. An absent intent or an
+    /// explicit failed admission proves that this command never started.
+    pub(crate) fn process_spawn_not_dispatched(&self, id: &str) -> Result<bool, KernelError> {
+        Ok(self.process_record(id)?.is_none_or(|record| {
+            record["spawned"] == false && record["writerActive"] == false
+                && record["treeConfirmed"] == true
+        }))
+    }
     #[cfg(test)]
     pub(crate) fn set_test_process_worker_executable(&mut self, executable: PathBuf) {
         self.processes.set_test_worker_executable(executable);
@@ -448,7 +456,11 @@ impl Storage {
             ));
         }
         let cwd = self.resolve_file_resource(root_id, string(params_value, "cwd")?, grant, true)?;
-        let cwd = fs::canonicalize(&cwd.absolute)?;
+        let cwd = fs::canonicalize(&cwd.absolute).map_err(|error| {
+            if error.kind() == io::ErrorKind::NotFound {
+                KernelError::NotFound(format!("process working directory {:?} under the selected source root", params_value["cwd"]))
+            } else { error.into() }
+        })?;
         if !contains(&root.canonical_root, &cwd) || !cwd.is_dir() {
             return Err(KernelError::Authorization(
                 "process cwd escaped the registered directory".into(),

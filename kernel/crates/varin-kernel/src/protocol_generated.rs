@@ -2393,6 +2393,7 @@ pub(crate) struct KernelComputeStartParams {
     pub(crate) include_text: Option<bool>,
     pub(crate) include_tracked: Option<bool>,
     pub(crate) include_revisions: Option<bool>,
+    pub(crate) start_after_path: Option<String>,
 }
 
 #[derive(Clone, Debug, Deserialize)]

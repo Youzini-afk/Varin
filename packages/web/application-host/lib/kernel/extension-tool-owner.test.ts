@@ -169,6 +169,7 @@ it('installed SDK declaration reaches shared bridge, compiled schemas, validated
     const options = {
       runtime,
       kernel,
+      configurationIdentity: Object.assign(() => null, { enabled: (value: { id: string }) => value.id === descriptor.id }),
       currentPolicy: async () => ({
         mode: 'normal' as const,
         rules: [{ tool: descriptor.tool!.name, decision: 'allow' as const }],
@@ -321,7 +322,8 @@ it('installed SDK declaration reaches shared bridge, compiled schemas, validated
       { runId: 'independent-custom-selection', threadId: 'thread', branchId: 'history-branch', source: null }, [], new AbortController().signal,
     );
     try {
-      expect(isolated.initial.map(value => value.binding.serviceId)).toEqual([descriptor.id]);
+      expect(isolated.initial.map(value => value.binding.serviceId)).toContain(descriptor.id);
+      expect(isolated.initial.some(value => COMPUTER_TOOL_DECLARATIONS.some(declaration => declaration.id === value.binding.serviceId))).toBe(false);
       for (const declaration of COMPUTER_TOOL_DECLARATIONS) expect(isolated.inspect()).toContainEqual(expect.objectContaining({
         serviceId: declaration.id, status: 'unavailable', error: `extension_tool_configuration_unavailable:${declaration.id}`,
       }));
@@ -360,7 +362,7 @@ it('real A-to-B routing keeps A on rejected B publication, ignores disabled B, a
       path.join(repository, 'packages/extension-builtins/package.json'),
     )('esbuild');
     const serviceId = 'example.routing.read';
-    const install = async (label: string) => {
+    const install = async (label: string, toolName = 'routing_read') => {
       const dir = path.join(root, label);
       await fs.mkdir(dir);
       const manifest = {
@@ -384,7 +386,7 @@ it('real A-to-B routing keeps A on rejected B publication, ignores disabled B, a
               version: 1,
               multiple: true,
               tool: {
-                name: 'routing_read',
+                name: toolName,
                 description: `Read ${label}`,
                 completion: 'result',
                 operation: 'read',
@@ -502,13 +504,9 @@ it('real A-to-B routing keeps A on rejected B publication, ignores disabled B, a
         rules: [{ tool: 'routing_read', decision: 'allow' as const }],
       }),
     };
-    await runtime.prepareService({
-      serviceId,
-      version: 1,
-      method: 'execute',
-      args: [],
-      routing: { threadId: 'thread' },
-    });
+    // The first model request must have its selected tool even while the
+    // service-request extension has not been activated by another caller.
+    expect((await runtime.state()).services.providers.some(provider => provider.extensionId === a && provider.status === 'active')).toBe(false);
    const scope = await createExtensionTools(options)(
       { runId: 'run', threadId: 'thread', branchId: 'history-branch', source: null },
       [],
@@ -715,6 +713,16 @@ it('real A-to-B routing keeps A on rejected B publication, ignores disabled B, a
     expect(
       scope.initial[0]!.lease.available(scope.initial[0]!.binding.tool),
     ).toBe(false);
+    scope.close(); closeScope = undefined;
+    const researchId = await install('Research', 'research_search');
+    await route(researchId);
+    for (const workFocus of ['code', 'research'] as const) {
+      const focused = await createExtensionTools(options)(
+        { runId: `focus-${workFocus}`, threadId: 'thread', branchId: 'history-branch', source: null, workFocus }, [], new AbortController().signal);
+      try {
+        expect(focused.initial.map(value => value.binding.tool.name)).toEqual(workFocus === 'research' ? ['research_search'] : []);
+      } finally { focused.close(); for (const retained of focused.initial) retained.lease.release(); }
+    }
   } finally {
     closeScope?.();
     for (const retained of leases) retained.lease.release();

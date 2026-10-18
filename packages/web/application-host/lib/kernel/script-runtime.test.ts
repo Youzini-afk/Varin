@@ -3,6 +3,26 @@ import { test } from 'vitest';
 import { SCRIPT_TOOL_DECLARATIONS } from '@varin/extension-builtins';
 import { createScriptRuntime } from './script-runtime.js';
 import { withToolInvocation } from './tool-invocation.js';
+import type { ToolExecutionReceipt } from './tool-bridge.js';
+
+test('an invalid script cwd reports no dispatch before opening an environment', async () => {
+  const owner = { extensionId: 'varin.builtin.scripts', extensionVersion: '1.0.0', entrypointId: 'host', instanceKey: 'script-test', generation: 1 };
+  const signal = new AbortController().signal;
+  const scripts = createScriptRuntime({ kernel: { agentRuntimeRequest() { throw new Error('Unexpected process admission'); } } as never,
+    runtime: { onEvent: () => () => {}, onReady: () => () => {} } as never,
+    resolveLiveSource: async () => {}, onError: error => { throw error; } });
+  const input = { cwd: 'D:\\project\\opencr' };
+  let receipt: ToolExecutionReceipt | undefined;
+  try {
+    await assert.rejects(withToolInvocation({ owner, signal, onEffectReceipt: value => { receipt = value; }, authority: {
+      invocationId: 'invalid', operationId: 'request:tool:invalid', callId: 'invalid', runId: 'run', threadId: 'thread',
+      executorOwner: { kind: 'kernel' }, origin: { kind: 'model_step', request_id: 'request' }, source: null,
+      toolName: 'script_open', operation: 'effect', completion: 'job', configurationIdentity: null, arguments: input,
+    } }, async invocation => scripts.capability('open', input, { owner, signal, invocation })), /tool_domain_result_unavailable/);
+    assert.equal(receipt?.completion.kind, 'not_dispatched');
+    assert.equal(receipt?.executor_stopped, true);
+  } finally { await scripts.dispose(); }
+});
 
 test('a new script reaches its own admission while an old environment is still draining', async () => {
   let release!: () => void;

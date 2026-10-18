@@ -1,4 +1,4 @@
-//! One immutable-object reader, with short Storage admission and completion.
+//! Object and physical-file readers, with short Storage admission and completion.
 //! Transient retention keeps bytes alive; it never grants access to those bytes.
 use super::*;
 
@@ -31,7 +31,7 @@ pub(crate) enum BlobReadPhase {
     Read,
     Encoded,
 }
-pub(crate) struct BlobReadTask {
+pub(crate) struct ImmutableReadTask {
     params: Value,
     hash: String,
     path: PathBuf,
@@ -45,27 +45,45 @@ pub(crate) struct BlobReadTask {
     #[cfg(test)]
     hold: std::sync::Mutex<Option<(BlobReadPhase, Box<dyn FnOnce() + Send>)>>,
 }
-pub(crate) struct PreparedBlobRead {
+pub(crate) struct PreparedImmutableRead {
     value: Value,
     verified: bool,
 }
+pub(crate) enum BlobReadTask {
+    Immutable(ImmutableReadTask),
+    File(super::file_reads::FileReadTask),
+}
+pub(crate) enum PreparedBlobRead {
+    Immutable(PreparedImmutableRead),
+    File(super::file_reads::PreparedFileRead),
+}
 impl BlobReadTask {
     pub(crate) fn params(&self) -> &Value {
-        &self.params
+        match self { Self::Immutable(task) => &task.params, Self::File(task) => &task.params }
+    }
+    pub(crate) fn method(&self) -> &'static str {
+        match self { Self::Immutable(_) => "storage.getBlob", Self::File(_) => "file.read" }
     }
     pub(crate) fn cancellation(&self) -> Arc<AtomicBool> {
-        self.cancellation.clone()
+        match self { Self::Immutable(task) => task.cancellation.clone(), Self::File(task) => task.cancellation.clone() }
     }
-    /// The worker tail retains a separate reference while its completion is queued.
-    pub(crate) fn retain_worker(&self) -> BlobReadRetention {
-        BlobReadRetention {
-            _lifetime: self.retention._lifetime.clone(),
-        }
+    pub(crate) fn retain_worker(&self) -> Option<BlobReadRetention> {
+        match self { Self::Immutable(task) => Some(task.retention.clone()), Self::File(_) => None }
     }
     pub(crate) fn with_file_output(mut self, path: String, source: Value) -> Self {
-        self.file_output = Some((path, source));
+        if let Self::Immutable(task) = &mut self { task.file_output = Some((path, source)); }
         self
     }
+    #[cfg(test)]
+    pub(crate) fn hold_at(&mut self, phase: BlobReadPhase, hold: Box<dyn FnOnce() + Send>) {
+        match self { Self::Immutable(task) => task.hold_at(phase, hold), Self::File(task) => task.hold_at(hold) }
+    }
+    pub(crate) fn run(&self) -> Result<PreparedBlobRead, KernelError> {
+        match self { Self::Immutable(task) => task.run().map(PreparedBlobRead::Immutable),
+            Self::File(task) => task.run().map(PreparedBlobRead::File) }
+    }
+}
+impl ImmutableReadTask {
     #[cfg(test)]
     pub(crate) fn hold_at(&mut self, phase: BlobReadPhase, hold: Box<dyn FnOnce() + Send>) {
         *self.hold.get_mut().unwrap() = Some((phase, hold));
@@ -94,7 +112,7 @@ impl BlobReadTask {
             Ok(())
         }
     }
-    pub(crate) fn run(&self) -> Result<PreparedBlobRead, KernelError> {
+    pub(crate) fn run(&self) -> Result<PreparedImmutableRead, KernelError> {
         self.check_cancelled()?;
         let mut file = File::open(&self.path)?;
         if file.metadata()?.len() != self.byte_length {
@@ -150,7 +168,7 @@ impl BlobReadTask {
             value["bytesBase64"] = Value::String(BASE64.encode(bytes));
         }
         self.checkpoint(BlobReadPhase::Encoded)?;
-        Ok(PreparedBlobRead {
+        Ok(PreparedImmutableRead {
             value,
             verified: self.verify,
         })
@@ -218,7 +236,7 @@ impl Storage {
         let end = start.saturating_add(length).min(byte_length);
         let length = usize::try_from(end - start)
             .map_err(|_| KernelError::Operation("requested object range is too large".into()))?;
-        Ok(BlobReadTask {
+        Ok(BlobReadTask::Immutable(ImmutableReadTask {
             params: params.clone(),
             hash: hash.into(),
             path,
@@ -231,7 +249,7 @@ impl Storage {
             file_output: None,
             #[cfg(test)]
             hold: Default::default(),
-        })
+        }))
     }
     pub(crate) fn finish_blob_read(
         &mut self,
@@ -239,6 +257,13 @@ impl Storage {
         result: Result<PreparedBlobRead, KernelError>,
         grant: &Grant,
     ) -> Result<Value, KernelError> {
+        let task = match task {
+            BlobReadTask::Immutable(task) => task,
+            BlobReadTask::File(task) => return self.finish_file_read(task, result.and_then(|value| match value {
+                PreparedBlobRead::File(value) => Ok(value),
+                _ => Err(KernelError::Storage("file reader result changed".into())),
+            }), grant),
+        };
         task.check_cancelled()?;
         self.validate_blob_read_source(
             &task.params,
@@ -259,7 +284,7 @@ impl Storage {
                 "content object metadata changed during read".into(),
             ));
         }
-        let prepared = result?;
+        let PreparedBlobRead::Immutable(prepared) = result? else { return Err(KernelError::Storage("blob reader result changed".into())); };
         if prepared.verified {
             self.verified_objects.insert(task.hash.clone());
         }

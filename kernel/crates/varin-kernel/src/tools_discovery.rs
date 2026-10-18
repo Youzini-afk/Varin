@@ -15,6 +15,10 @@ pub(super) struct FileQueryArgs {
     fixed_strings: Option<bool>,
     recursive: Option<bool>,
     include_hidden: Option<bool>,
+    exclude_directories: Option<Vec<String>>,
+    respect_gitignore: Option<bool>,
+    include_revisions: Option<bool>,
+    cursor: Option<String>,
     max_results: Option<i64>,
     max_bytes: Option<usize>,
 }
@@ -22,6 +26,10 @@ impl FileQueryArgs {
     pub fn validate(&self) -> Result<(), ExecutionError> {
         for path in self.paths.as_deref().unwrap_or_default() {
             normalized_path(path, true)?;
+        }
+        if let Some(cursor) = &self.cursor {
+            normalized_path(cursor, true)?;
+            if self.search { return Err(ExecutionError::new("invalid_tool_arguments", "cursor is available for file_list")); }
         }
         if (self.search && self.query.as_deref().is_none_or(str::is_empty))
             || self
@@ -39,8 +47,12 @@ impl FileQueryArgs {
         let mut params = json!({"workspaceId":binding.workspace_id,"jobId":context.operation_id,
             "lane":"foreground","operation":if self.search {"search"} else {"list"},
             "paths":self.paths.clone().unwrap_or_else(|| vec![String::new()]),
-            "maxResults":self.max_results.unwrap_or(100),"includeHidden":self.include_hidden.unwrap_or(true),
-            "immediate":!self.recursive.unwrap_or(true)});
+            "maxResults":self.max_results.unwrap_or(100).saturating_add(if self.search {0} else {1}).min(9_007_199_254_740_991),"includeHidden":self.include_hidden.unwrap_or(true),
+            "excludeDirectories":self.exclude_directories.clone().unwrap_or_else(|| vec![".git".into(),"node_modules".into(),".worktrees".into()]),
+            "respectGitignore":self.respect_gitignore.unwrap_or(true),
+            "includeRevisions":self.include_revisions.unwrap_or(false),
+            "immediate":!self.recursive.unwrap_or(self.search)});
+        if let Some(cursor) = &self.cursor { params["startAfterPath"] = json!(cursor); }
         if binding.source_mode != SourceMode::FixedBranch {
             params["rootId"] = json!(binding.root_id);
         } else {
@@ -155,12 +167,19 @@ impl KernelResourceClient {
                     })?
                     .len()
                     + 1;
-                if bytes.saturating_add(size) > budget {
+                if bytes.saturating_add(size) > budget || (!args.search && records.len() >= args.max_results.unwrap_or(100) as usize) {
                     truncated = true;
                     break;
                 }
                 bytes += size;
-                records.push(record.clone());
+                let mut record = record.clone();
+                if !args.search {
+                    if record["revision"] == "" { record.as_object_mut().unwrap().remove("revision"); }
+                    if record["data"]["state"]["objectHash"] == "" {
+                        record["data"]["state"].as_object_mut().unwrap().remove("objectHash");
+                    }
+                }
+                records.push(record);
             }
             let terminal = !matches!(page["status"].as_str(), Some("queued" | "running"));
             let cursor = page["nextCursor"].as_u64().expect("compute page cursor");
@@ -176,13 +195,16 @@ impl KernelResourceClient {
                         dispatched: true,
                     });
                 }
+                let next = (!args.search && truncated).then(|| records.last().and_then(|record|record["path"].as_str())).flatten();
                 let output = json!({"source":if binding.source_mode == SourceMode::FixedBranch {
                         json!(binding.file_source)
                     } else { binding.physical_source() },
                         "status":if truncated {"partial"} else {page["status"].as_str().unwrap_or("failed")},
                         "records":records,"scannedFiles":page["scannedFiles"],
                         "truncated":truncated || page["status"] == "partial",
-                        "message":if truncated {json!("Output byte budget reached; narrow paths/globs/query or increase maxBytes")} else {page["message"].clone()}});
+                        "nextCursor":next,
+                        "message":if next.is_some() {json!("More paths are available; pass nextCursor as cursor with the same filters")}
+                            else if truncated {json!("Output byte budget reached; narrow paths/globs/query or increase maxBytes")} else {page["message"].clone()}});
                 self.finish_query(binding, context, !terminal, &watch)?;
                 return Ok(output);
             }
@@ -202,17 +224,23 @@ impl KernelResourceClient {
 }
 
 pub(super) fn schema(search: bool) -> Value {
-    json!({"type":"object","additionalProperties":false,
-        "description":if search {"Search text in the selected source. Returns file paths, source revisions, line/column and matching text. Narrow paths or globs when results are partial."} else {"List paths in the selected source. Omit paths to select the granted root; query filters path names. Narrow paths/globs when results are partial."},
+    let mut schema = json!({"type":"object","additionalProperties":false,
+        "description":if search {"Search text in the selected source. Returns file paths, source revisions, line/column and matching text. Narrow paths or globs when results are partial."} else {"List a directory in the selected source. Omit paths for the root. Pass nextCursor as cursor with the same filters to continue; recursive includes descendants. Revisions are captured only when includeRevisions is true."},
         "properties":{
             "paths":{"type":"array","items":{"type":"string"}},
             "globs":{"type":"array","items":{"type":"string"}},
             "query":{"type":"string","description":if search {"Nonempty literal text, or regex when fixedStrings is false"} else {"Optional case-insensitive path substring"}},
             "fixedStrings":{"type":"boolean","default":true},
             "ignoreCase":{"type":"boolean","default":false},
-            "recursive":{"type":"boolean","default":true},
+            "recursive":{"type":"boolean","default":search},
             "includeHidden":{"type":"boolean","default":true},
+            "excludeDirectories":{"type":"array","items":{"type":"string"},"default":[".git","node_modules",".worktrees"],"description":"Directory names to skip; an empty array includes them."},
+            "respectGitignore":{"type":"boolean","default":true},
+            "includeRevisions":{"type":"boolean","default":false},
+            "cursor":{"type":"string","description":"file_list continuation from nextCursor; keep the original paths and filters."},
             "maxResults":{"type":"integer","minimum":1,"maximum":9_007_199_254_740_991i64,"default":100},
             "maxBytes":{"type":"integer","minimum":1,"maximum":crate::protocol::MAX_FRAME_BYTES / 2,"default":65536}},
-        "required":if search {vec!["query"]} else {vec![]}})
+        "required":if search {vec!["query"]} else {vec![]}});
+    if search { schema["properties"].as_object_mut().unwrap().remove("cursor"); }
+    schema
 }

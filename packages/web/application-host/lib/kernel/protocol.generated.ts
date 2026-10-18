@@ -4645,6 +4645,7 @@ export interface KernelComputeStartParams {
   includeText?: boolean;
   includeTracked?: boolean;
   includeRevisions?: boolean;
+  startAfterPath?: string;
 }
 
 export interface KernelComputeReadParams {

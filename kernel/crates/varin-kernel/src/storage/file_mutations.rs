@@ -46,14 +46,12 @@ impl TextMutation {
     }
 }
 pub(super) fn read_version(
-    grant: &Grant,
     root_id: &str,
     path: &str,
     state: &FileState,
 ) -> Result<String, KernelError> {
     hash_json(&json!([
-        "file-state-v1",
-        grant.grant_id,
+        "file-state-v2",
         root_id,
         path,
         state
@@ -189,7 +187,7 @@ impl Storage {
                 ));
             }
             if prior["state"] == "committed" {
-                return self.mutation_receipt(receipt.clone(), grant, root_id, &resource.path);
+                return self.mutation_receipt(receipt.clone(), root_id, &resource.path);
             }
             // Existing file.apply intents retain the exact expected/target states
             // and object owner. Reuse them, never calculate an edit a second time.
@@ -197,7 +195,7 @@ impl Storage {
                 let intent = receipt["intent"].clone();
                 *dispatched = true;
                 let result = self.file_apply(&intent, grant)?;
-                return self.mutation_receipt(result, grant, root_id, &resource.path);
+                return self.mutation_receipt(result, root_id, &resource.path);
             }
             return Err(KernelError::Operation(
                 "mutation journal state cannot be replayed".into(),
@@ -214,7 +212,7 @@ impl Storage {
         }
         let result = (|| {
             let expected = self.capture_file_state(&resource)?;
-            let current_version = read_version(grant, root_id, &resource.path, &expected)?;
+            let current_version = read_version(root_id, &resource.path, &expected)?;
             if current_version != mutation.read_version() {
                 return Ok(
                     json!({"path":resource.path,"status":"conflict","readVersion":current_version}),
@@ -409,7 +407,7 @@ impl Storage {
                     );
                 }
             }
-            self.mutation_receipt(applied?, grant, root_id, &resource.path)
+            self.mutation_receipt(applied?, root_id, &resource.path)
         })();
         let released = self.file_lease_release(
             &json!({"workspaceId":workspace_id,"rootId":root_id,"leaseId":lease_id}),
@@ -424,13 +422,12 @@ impl Storage {
     fn mutation_receipt(
         &self,
         mut receipt: Value,
-        grant: &Grant,
         root_id: &str,
         path: &str,
     ) -> Result<Value, KernelError> {
         if let Some(state) = receipt["stateJson"].as_str() {
             let state: FileState = serde_json::from_str(state)?;
-            receipt["readVersion"] = json!(read_version(grant, root_id, path, &state)?);
+            receipt["readVersion"] = json!(read_version(root_id, path, &state)?);
         }
         if let Some(object) = receipt.as_object_mut() {
             object.remove("__nativeRequestHash");

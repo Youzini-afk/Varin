@@ -58,6 +58,30 @@ impl Fixture {
 }
 
 #[test]
+fn physical_file_range_hashes_off_actor_and_honors_cancellation() {
+    let mut f = Fixture::new();
+    fs::write(f.work().join("body"), "第一🙂行").unwrap();
+    for cancel in [false, true] {
+        let params=json!({"workspaceId":"workspace","rootId":f.root_id,"path":"body","offset":1,"length":1});
+        let storage=f.kernel.storage.as_mut().unwrap();
+        let (grant,authorized)=storage.authorize(Some("writer"),EPOCH,HOST,GENERATION,"file.read",&params).unwrap();
+        let cancellation=Arc::new(AtomicBool::new(false));
+        let task=storage.prepare_file_read(&authorized,&grant,cancellation.clone()).unwrap().unwrap();
+        let mut hold=f.blob_hold(BlobReadPhase::Read);
+        let request=Fixture::request("file.read",params,Some("writer"));
+        f.kernel.spawn_blob_read(BlobReadTask::File(task),BlobReadReply::Wire(request),&f.tx).unwrap();
+        hold.entered();
+        assert_eq!(f.short("storage.health",json!({}),Some("writer"))["integrity"],"not_checked");
+        if cancel { cancellation.store(true,Ordering::Release); }
+        hold.release();
+        let (_,task,result)=f.receive_blob();
+        let result=f.kernel.storage.as_mut().unwrap().finish_blob_read(&task,result,&grant);
+        if cancel { assert!(matches!(result,Err(KernelError::Cancelled))); }
+        else { let value=result.unwrap(); assert_eq!(value["content"]["text"],"第"); assert!(value["readVersion"].is_string()); }
+    }
+}
+
+#[test]
 fn cold_blob_hash_is_off_actor_and_cancel_waits_for_actual_reader() {
     let mut f = Fixture::new();
     let body = vec![7; 512 * 1024];

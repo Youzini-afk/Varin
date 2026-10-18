@@ -5,6 +5,20 @@ import type { ChatAssistantMessage, ChatSessionEntry, ChatToolExecutionState, Ch
 const object = (value: unknown): Record<string, unknown> => value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {};
 const json = (value: unknown): JsonValue => value as JsonValue;
 
+// Keep the original call/history identity while presenting a UI created through
+// the generic tool gateway exactly like a directly called render_ui.
+function presentedCall(call: Record<string, unknown>): Record<string, unknown> {
+  const args = object(call.arguments);
+  return call.name === 'tool_invoke' && object(args.reference).name === 'render_ui'
+    ? { ...call, name: 'render_ui', arguments: args.arguments }
+    : call;
+}
+function presentedOutput(data: unknown): unknown {
+  const value = object(data);
+  return object(value.reference).name === 'render_ui' && object(value.result).kind === 'ui'
+    ? value.result : data;
+}
+
 /** Display only the public thinking text stored in the original provider item. Opaque
  * signatures/encrypted payloads stay untouched; this does not change model replay content. */
 function thinkingText(envelope: Record<string, unknown>): string {
@@ -57,7 +71,7 @@ export class HistoryPresentation {
       const content = object(envelope.content);
       const thinking = thinkingText(envelope);
       const request = metadata?.requestId ?? requestId(item);
-      const call = object(content.call);
+      const call = presentedCall(object(content.call));
       if (content.kind === 'tool_call' && typeof call.call_id === 'string') {
         const id = callKey(item.run_id, request ?? item.id, call.call_id);
         calls.set(id, { id: item.id, name: String(call.name) });
@@ -88,7 +102,7 @@ export class HistoryPresentation {
             isError: completion.kind === 'not_dispatched' || completion.outcome === 'failed',
             status: completion.kind === 'not_dispatched' ? 'error' : completion.kind === 'job_accepted' ? 'background' : outcomeStatus(completion.outcome),
             content: completion.kind === 'not_dispatched' ? [{ type: 'text', text: String(completion.reason ?? '') }] : outputParts(output),
-            ...(output?.data == null ? {} : { details: json(output.data) }) } };
+            ...(output?.data == null ? {} : { details: json(presentedOutput(output.data)) }) } };
         } else if (content.kind === 'output') {
           entry = { ...base, type: 'message', message: { role: 'custom', customType: item.source, display: true, timestamp: 0,
             content: outputParts(content.output as OutputBody) } };
@@ -136,7 +150,7 @@ function projectExecution(operation: Operation, id: string, call: Record<string,
   const output = completion && completion.kind !== 'not_dispatched' ? completion.content : undefined;
   return { toolCallId: id, name: String(call.name), args: json(call.arguments),
     status: operation.phase === 'terminal' ? outcomeStatus(operation.outcome) : operation.executor === 'ask_user' ? 'waiting' : 'running',
-    ...(output?.data == null ? {} : { result: json(output.data) }) };
+    ...(output?.data == null ? {} : { result: json(presentedOutput(output.data)) }) };
 }
 
 function outcomeStatus(outcome: unknown): ChatToolExecutionState['status'] {

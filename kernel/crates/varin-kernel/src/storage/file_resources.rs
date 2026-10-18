@@ -1705,7 +1705,7 @@ impl Storage {
             Ok(value) => value,
             Err(error) if error.kind() == io::ErrorKind::NotFound => {
                 return Ok(
-                    json!({"path":path,"source":source,"missing":true,"readVersion":super::file_mutations::read_version(grant,root_id,&resource.path,&FileState::Missing)?}),
+                    json!({"path":path,"source":source,"missing":true,"readVersion":super::file_mutations::read_version(root_id,&resource.path,&FileState::Missing)?}),
                 )
             }
             Err(error) => return Err(error.into()),
@@ -1730,88 +1730,11 @@ impl Storage {
         if let Some(state) = state {
             return Ok(json!({"path":path,"source":source,"state":state,"missing":false}));
         }
-        let mut options = OpenOptions::new();
-        options.read(true);
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::OpenOptionsExt;
-            options.custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK);
-        }
-        let mut file = options.open(&resource.absolute)?;
-        let before = file.metadata()?;
-        if !before.is_file() {
-            return Err(KernelError::Operation("file changed before read".into()));
-        }
-        let byte_length = before.len();
-        let offset = params["offset"].as_u64().unwrap_or(0);
-        let length = match params.get("length") {
-            Some(value) => value
-                .as_u64()
-                .ok_or_else(|| KernelError::Operation("invalid byte range".into()))?,
-            None => byte_length.saturating_sub(offset),
-        };
-        if (params.get("length").is_none() && byte_length > MAX_BLOB_RESPONSE_BYTES as u64)
-            || length > MAX_BLOB_RESPONSE_BYTES as u64
-        {
-            return Err(KernelError::Operation(
-                "file is larger than one response frame; request a byte range".into(),
-            ));
-        }
-        let start = offset.min(byte_length);
-        let end = start.saturating_add(length).min(byte_length);
-        file.seek(SeekFrom::Start(start))?;
-        let mut bytes = vec![0u8; (end - start) as usize];
-        for chunk in bytes.chunks_mut(128 * 1024) {
-            self.check_cancelled()?;
-            file.read_exact(chunk)?;
-        }
-        self.check_cancelled()?;
-        let after = file.metadata()?;
-        let resolved = self.resolve_file_resource(root_id, path, grant, false)?;
-        let current = fs::symlink_metadata(&resolved.absolute)?;
-        let mut changed = resolved.absolute != resource.absolute
-            || !current.is_file()
-            || current.file_type().is_symlink()
-            || before.len() != after.len()
-            || before.modified()? != after.modified()?
-            || file_mode(&before) != file_mode(&after)
-            || after.len() != current.len()
-            || after.modified()? != current.modified()?;
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::MetadataExt;
-            changed |= after.dev() != current.dev() || after.ino() != current.ino();
-        }
-        if changed {
-            return Err(KernelError::Operation(
-                "file changed while being read".into(),
-            ));
-        }
-        let version = if start == 0 && end == byte_length {
-            let state = FileState::RegularFile {
-                object_hash: format!("sha256-{}", hex::encode(Sha256::digest(&bytes))),
-                byte_length,
-                mode: Some(file_mode(&after)),
-            };
-            Some(super::file_mutations::read_version(
-                grant,
-                root_id,
-                &resource.path,
-                &state,
-            )?)
-        } else {
-            None
-        };
-        let mut content = json!({"byteLength":byte_length,"offset":start,"nextOffset":end,"eof":end>=byte_length});
-        match String::from_utf8(bytes) {
-            Ok(text) => content["text"] = Value::String(text),
-            Err(error) => content["bytesBase64"] = Value::String(BASE64.encode(error.as_bytes())),
-        }
-        let mut result = json!({"path":path,"source":source,"missing":false,"content":content});
-        if let Some(version) = version {
-            result["readVersion"] = json!(version);
-        }
-        Ok(result)
+        let task = self.prepare_file_read(params, grant, self.cancellation.clone()
+            .unwrap_or_else(|| Arc::new(AtomicBool::new(false))))?
+            .ok_or_else(|| KernelError::Operation("file changed before read".into()))?;
+        let result = task.run();
+        self.finish_file_read(&task, result, grant)
     }
 }
 

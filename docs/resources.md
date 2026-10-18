@@ -64,6 +64,14 @@ Windows 和不支持的根保留 unknown coverage，完整复核目录 inventory
 内核重启后，Host 更新文件、计算、进程与 Computer 的授权缓存；新请求绑定新 epoch，旧请求保留原失败与回执。
 跨越重启的进程准备会终止，后续显式启动请求重新受理。
 
+Agent 的物理文件读取在后台流式哈希，只保留所请求的片段；完整读取和部分读取都返回原文件的 `readVersion`。
+该版本由根、路径与内容状态决定，同一文件跨 Run 保持稳定；读写权限由原 grant 独立校验。UTF-8 文本的片段边界会扩展到完整字符，
+翻页使用返回的 `nextOffset`；二进制片段保留精确字节和明确的 base64 编码。
+`file_list` 默认列当前目录，`recursive` 展开后代，`nextCursor` 配合相同过滤条件继续读取。物理目录页按路径顺序读取
+当前状态；`includeRevisions` 显式请求正文版本，普通目录列表省略未计算的哈希。
+列表与搜索默认跳过 `.git`、`node_modules`、`.worktrees`，可通过 `excludeDirectories` 覆盖，并保留 ignore 规则开关。
+文本搜索在分配整文件缓冲之前检查二进制前缀。
+
 ## 进程与 Operation 寿命
 
 Rust ProcessManager/guardian 拥有 pipe/PTY、stdin 序列回执、原始输出、resize、终止和真实进程树退出回执。
@@ -74,6 +82,8 @@ guardian 是同一发行 executable 的另一模式，不另开数据库 writer�
 
 Windows 使用 named Jobs；Linux 使用 managed session 加 subreaper。旧 epoch 无法证明的退出保留 unknown，继续保护目录。
 Host 对可能仍存在 executor 的启动/停止失败保留 owner，不用旧 PID、HTTP abort 或 Promise reject 虚构退出码。
+目录解析或进程受理失败时，Storage 用原进程意图记录确认是否尚未启动；确认未启动的失败返回 `not_dispatched`，
+供模型修正参数后继续。`cwd` 使用选中 Source 下的相对目录，空字符串表示根目录。
 
 grant retirement 与 revocation 分开：前者在真实 drain 后关闭旧 caller，后者继续拒绝。Operation-owned grant 可以长于 Run，
 直到自己的 reader、process 和回执归档完成。原来源仅支持精确限定的 successor 读取，不继承全部旧控制权限。

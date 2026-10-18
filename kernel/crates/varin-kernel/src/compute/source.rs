@@ -5,7 +5,7 @@ use crate::{model::{PathState, TrieNode}, protocol::{node_hash, object_path}};
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
 use rusqlite::{Connection, OpenFlags};
 use sha2::{Digest,Sha256};
-use std::{collections::{HashMap,HashSet}, fs::{self,File}, io::Read, path::{Path,PathBuf}};
+use std::{collections::{HashMap,HashSet}, fs::{self,File}, io::{Read,Seek,SeekFrom}, path::{Path,PathBuf}};
 
 pub(crate) struct SourceMetadata {pub byte_length:u64,pub modified_time_ns:Option<String>}
 pub(crate) struct Document {pub path:String,pub revision:String,pub state:PathState,pub bytes:Option<Vec<u8>>,pub metadata:Option<SourceMetadata>}
@@ -51,6 +51,15 @@ fn read_capture(mut file:File,expected:Option<&str>,shared:&Shared)->Result<Capt
 }
 fn reserve_capture(bytes:&mut Vec<u8>,additional:usize)->Result<()> {
     bytes.try_reserve_exact(additional).map_err(|_|"Insufficient memory to capture the file; retry when memory is available".to_string())
+}
+fn search_capture(mut file:File,shared:&Shared)->Result<Option<CapturedFile>> {
+    shared.check()?;
+    let mut prefix=[0u8;8192];
+    let count=file.read(&mut prefix).map_err(|e|e.to_string())?;
+    let prefix=&prefix[..count];
+    if prefix.contains(&0) || std::str::from_utf8(prefix).is_err_and(|error|error.error_len().is_some()) {return Ok(None);}
+    file.seek(SeekFrom::Start(0)).map_err(|e|e.to_string())?;
+    read_capture(file,None,shared).map(Some)
 }
 struct TreeReader {conn:Connection}
 impl TreeReader {
@@ -153,7 +162,11 @@ pub(crate) fn visit(task:&mut Task,shared:&Shared,mut callback:impl FnMut(Docume
     let content=task.params.operation!="list"||task.params.include_revisions.unwrap_or(false);
     let roots=task.params.paths.clone().unwrap_or_else(||vec![String::new()]);
     let explicit=task.params.files.as_deref().unwrap_or_default().iter().map(|f|f.path.clone()).collect::<HashSet<_>>();
-    let roots=roots.iter().map(|p|normalize(p)).collect::<Result<Vec<_>>>()?;
+    let mut roots=roots.iter().map(|p|normalize(p)).collect::<Result<Vec<_>>>()?;
+    roots.sort_by(|a,b|a.split('/').cmp(b.split('/')));
+    let mut minimal_roots=Vec::<String>::new();
+    for path in roots { if !minimal_roots.iter().any(|parent|within(&path,parent)){minimal_roots.push(path);} }
+    let roots=minimal_roots.into_iter().rev().collect::<Vec<_>>();
     let excluded=task.params.exclude_paths.clone().unwrap_or_default().into_iter().map(|p|normalize(&p)).collect::<Result<HashSet<_>>>()?;
     let dirs:HashSet<String>=task.params.exclude_directories.clone().unwrap_or_default().into_iter().collect();
     let scopes=task.scopes.clone();
@@ -162,6 +175,7 @@ pub(crate) fn visit(task:&mut Task,shared:&Shared,mut callback:impl FnMut(Docume
     for glob in task.params.globs.as_deref().unwrap_or_default(){glob_builder.add(glob).map_err(|e|e.to_string())?;}
     let glob=glob_builder.build().map_err(|e|e.to_string())?;
     let eligible=|path:&str,directory:bool|->bool{
+        if task.params.start_after_path.as_deref().is_some_and(|after|path.split('/').cmp(after.split('/'))!=std::cmp::Ordering::Greater){return false;}
         if excluded.iter().any(|p|within(path,p))||(!explicit.is_empty()&&!explicit.contains(path))||!scopes.iter().any(|scope|within(path,scope))||!roots.iter().any(|root|within(path,root)){return false;}
         if path.split('/').any(|s|dirs.contains(s)||(!include_hidden&&s.starts_with('.'))){return false;}
         !glob.matched(path,directory).is_ignore()
@@ -268,7 +282,8 @@ pub(crate) fn visit(task:&mut Task,shared:&Shared,mut callback:impl FnMut(Docume
                 let walk_scopes=scopes.clone();let walk_roots=roots.clone();let walk_dirs=dirs.clone();let walk_root=root.clone();
                 let walk_prefix=prefix.clone();
                 let mut builder=ignore::WalkBuilder::new(&directory);
-                builder.hidden(!include_hidden).follow_links(false).git_ignore(respect).git_global(respect).git_exclude(respect).ignore(respect)
+                if task.params.immediate.unwrap_or(false) { builder.max_depth(Some(1)); }
+                builder.sort_by_file_name(|a,b|a.cmp(b)).hidden(!include_hidden).follow_links(false).git_ignore(respect).git_global(respect).git_exclude(respect).ignore(respect)
                     .filter_entry(move|entry|{
                         let Ok(path)=entry.path().strip_prefix(&walk_root)else{return false;};let path=path.to_string_lossy().replace('\\',"/");
                         let is_directory=entry.file_type().is_some_and(|t|t.is_dir());
@@ -306,9 +321,10 @@ pub(crate) fn visit(task:&mut Task,shared:&Shared,mut callback:impl FnMut(Docume
                 let state=if kind.is_dir(){PathState::Directory{mode:None}}else if kind.is_symlink(){PathState::Symlink{symlink_target:fs::read_link(entry.path()).map_err(|e|e.to_string())?.to_string_lossy().into(),mode:None}}
                 else if kind.is_file(){
                     if content {
-                        let result: Result<CapturedFile>=(||{let canonical=safe_disk_path(&root,entry.path(),&scopes)?;let b=read_capture(File::open(&canonical).map_err(|e|e.to_string())?,None,shared)?;
+                        let result: Result<Option<CapturedFile>>=(||{let canonical=safe_disk_path(&root,entry.path(),&scopes)?;let file=File::open(&canonical).map_err(|e|e.to_string())?;
+                            let b=if task.params.operation=="search"{search_capture(file,shared)?}else{Some(read_capture(file,None,shared)?)};
                             if fs::canonicalize(entry.path()).map_err(|e|e.to_string())?!=canonical{return Err("File identity changed during native capture".into());}Ok(b)})();
-                        match result{Ok(captured)=>{bytes=Some(captured.bytes);metadata=Some(captured.metadata);object_hash=captured.object_hash;revision=captured.revision;},Err(e)=>{shared.check()?;partial=true;shared.emit("error",&path,"",serde_json::json!({"message":e}))?;continue;}}
+                        match result{Ok(Some(captured))=>{bytes=Some(captured.bytes);metadata=Some(captured.metadata);object_hash=captured.object_hash;revision=captured.revision;},Ok(None)=>continue,Err(e)=>{shared.check()?;partial=true;shared.emit("error",&path,"",serde_json::json!({"message":e}))?;continue;}}
                     }
                     PathState::RegularFile{object_hash,byte_length:bytes.as_ref().map(|b|b.len() as u64).or_else(||metadata.as_ref().map(|value|value.byte_length)).unwrap_or(0),mode:0o644}
                 }else{PathState::Unsupported};
@@ -330,6 +346,14 @@ mod tests {
         fn drop(&mut self) { let _ = fs::remove_file(&self.0); }
     }
 
+    #[test]
+    fn search_skips_binary_before_allocating_the_file_length() {
+        let fixture=TestFile(std::env::temp_dir().join(format!("varin-search-binary-{}",uuid::Uuid::new_v4())));
+        let file=File::create(&fixture.0).unwrap(); file.set_len(32*1024*1024).unwrap(); drop(file);
+        assert!(search_capture(File::open(&fixture.0).unwrap(),&Shared::new()).unwrap().is_none());
+        fs::write(&fixture.0,"中文🙂 needle").unwrap();
+        assert_eq!(search_capture(File::open(&fixture.0).unwrap(),&Shared::new()).unwrap().unwrap().bytes,"中文🙂 needle".as_bytes());
+    }
     #[test]
     fn capture_allocation_failure_preserves_existing_bytes() {
         let mut bytes=vec![1,2,3];

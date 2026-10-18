@@ -121,6 +121,7 @@ export interface ExtensionToolRun {
   source: LaunchIntent['selection']['source'];
   projectId?: string;
   fixed?: boolean;
+  workFocus?: 'code' | 'research';
 }
 class ExtensionToolSourceError extends Error {
   constructor(serviceId: string, dependency: string) {
@@ -472,6 +473,9 @@ export function createExtensionTools(
         | undefined;
     const watches = new Map<string, () => void>();
     const delivered = new Map<string, ExtensionToolLease>();
+    const enabled = (descriptor: VarinExtensionServiceProvision) =>
+      preparedOptions.configurationIdentity?.enabled?.(descriptor) !== false
+      && (run.workFocus === 'research' || !['research_search', 'research_decide'].includes(descriptor.tool?.name ?? ''));
     const routingScope = {
       threadId: run.threadId, branchId: run.branchId, sourceRunId: run.runId,
       ...(run.projectId ? { projectId: run.projectId } : {}),
@@ -540,6 +544,7 @@ export function createExtensionTools(
       );
       try {
         signal.throwIfAborted(); requireToolSource(id, selected.descriptor.tool?.requirements, run.source);
+        if (!enabled(selected.descriptor)) throw new ExtensionToolConfigurationError(id, 'Tool is disabled for this work focus');
         return await retainExtensionTool(candidateOptions, selected);
       } catch (error) { selected.release(); throw error; }
       } finally { releasePreparation?.(); }
@@ -583,23 +588,19 @@ export function createExtensionTools(
         initial.push(retained);
         signal.throwIfAborted();
       }
-      if (!required.length && !run.fixed) for (const entry of services(snapshot).values()) {
+      if (!required.length && !run.fixed) await Promise.all([...services(snapshot).values()].map(async entry => {
         try {
-          if (entry.declarations.every(descriptor => preparedOptions.configurationIdentity?.enabled?.(descriptor) === false)) continue;
-          const resolved = await runtime.resolveServiceCompositions({ serviceId: entry.id, version: entry.version,
-            method: 'execute', args: [], routing: routingScope }, { signal, expectedRoutingRevision: snapshot.routing.document.revision });
-          const root = resolved.services[0];
-          if (resolved.services.length !== 1 || !root || !snapshot.services.providers.some(provider => provider.status === 'active'
-            && provider.providerKey === root.providerKey && runtime.supervisor.getRetainedComposition(provider)?.root === root.composition.root)) continue;
+          if (entry.declarations.every(descriptor => !enabled(descriptor))) return;
+          // Prepare the first complete directory before the first model request.
+          // Later changes still publish only at a closed request boundary.
           initial.push(await prepare(entry.id, entry.version, snapshot.routing.document.revision));
         } catch (error) {
-          if (error instanceof HostCompositionPreparationRequiredError) continue;
           states.set(`${entry.id}@${entry.version}`, { serviceId: entry.id, version: entry.version,
             declarations: entry.declarations, status: 'unavailable',
             error: error instanceof ExtensionToolConfigurationError || error instanceof ExtensionToolSourceError ? error.message : 'extension_tool_preparation_failed' });
         }
-        signal.throwIfAborted();
-      }
+      }));
+      signal.throwIfAborted();
     } catch (error) {
       for (const retained of initial) retained.lease.release();
       throw error;
@@ -657,7 +658,7 @@ export function createExtensionTools(
         return;
       seenRevision = current.revision;
       for (const [slot, entry] of services(current)) {
-        if (entry.declarations.every(descriptor => preparedOptions.configurationIdentity?.enabled?.(descriptor) === false)) {
+        if (entry.declarations.every(descriptor => !enabled(descriptor))) {
           tokens.delete(slot); states.delete(slot);
           const previous = delivered.get(slot);
           if (previous && publish) { await publish(slot, undefined, previous); delivered.delete(slot); watches.get(slot)?.(); watches.delete(slot); }

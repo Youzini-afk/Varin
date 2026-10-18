@@ -2341,9 +2341,7 @@ impl KernelToolExecutor {
             // is deliberately normalized to unknown by the runtime.
             Ok(result) if mutation && result["status"] == "conflict" => {
                 ToolCompletion::NotDispatched {
-                    reason: format!(
-                        "File version conflict; no file was changed. Read the current file before retrying. {result}"
-                    ),
+                    reason: "File version conflict; read the current file to obtain its readVersion before retrying.".into(),
                 }
             }
             Ok(result) if mutation => ToolCompletion::Result {
@@ -2370,6 +2368,8 @@ impl KernelToolExecutor {
             Err(failure) => ToolCompletion::Result {
                 outcome: if spawn || mutation {
                     Outcome::Indeterminate
+                } else if matches!(&failure.error, KernelError::Cancelled) {
+                    Outcome::Cancelled
                 } else {
                     Outcome::Failed
                 },
@@ -2556,7 +2556,7 @@ fn tool_schema(kind: ToolKind) -> Value {
             vec!["processId", "cols", "rows"],
         ),
         ToolKind::ProcessSpawn => (
-            json!({"cwd":{"type":"string"},"command":{"type":"string"},"args":{"type":"array","items":{"type":"string"}},
+            json!({"cwd":{"type":"string","description":"Directory relative to the selected source root, using forward slashes. Use an empty string for the root."},"command":{"type":"string"},"args":{"type":"array","items":{"type":"string"}},
             "env":{"type":"array","description":"Complete process environment. Omit to inherit this execution environment; an empty array starts with no environment variables.","items":{"type":"object","additionalProperties":false,"properties":{"name":{"type":"string"},"value":{"type":"string"}},"required":["name","value"]}},
             "mode":{"type":"string","enum":["pipe","pty"]},"cols":{"type":"integer","minimum":1,"maximum":65535},"rows":{"type":"integer","minimum":1,"maximum":65535},"windowsRawArguments":{"type":"string"}}),
             vec!["cwd", "command", "args", "mode"],
@@ -2627,7 +2627,7 @@ pub(crate) fn prepare_resource(
         return serve_resource_immediate(storage, epoch, host_id, host_generation, request)
             .map(ResourceWork::Ready);
     };
-    if request.authorize_only || request.binding.source_mode != SourceMode::FixedBranch {
+    if request.authorize_only {
         return serve_resource_immediate(storage, epoch, host_id, host_generation, request)
             .map(ResourceWork::Ready);
     }
@@ -2647,6 +2647,19 @@ pub(crate) fn prepare_resource(
         )?;
         validate_binding(&grant, &request.binding, &request.context)?;
         dispatched = true;
+        if request.binding.source_mode != SourceMode::FixedBranch {
+            if let Some(root) = &request.binding.live_root { storage.validate_live_root(root, &grant, host_id)?; }
+            let key = storage.file_resource_key(request.binding.root_id.as_deref().expect("physical root"), &args.path, &grant)?;
+            if request.expected_resource_key.as_deref() != Some(key.as_str()) {
+                return Err(KernelError::Authorization("canonical file resource changed after admission".into()));
+            }
+            return match storage.prepare_file_read(&authorized, &grant, request.cancellation.shared_flag())? {
+                Some(task) => Ok(ResourceWork::BlobRead(crate::storage::blob_reads::BlobReadTask::File(task))),
+                None => storage.file_read(&authorized, &grant, true).map(|mut value| {
+                    value["source"] = request.binding.physical_source(); ResourceWork::Ready(value)
+                }),
+            };
+        }
         let state =
             storage.dispatch(method, &authorized, Some(&request.binding.grant_id), &grant)?;
         let source = request
@@ -2709,11 +2722,23 @@ pub(crate) fn finish_resource_blob_read(
             epoch,
             host_id,
             host_generation,
-            "storage.getBlob",
+            task.method(),
             task.params(),
         )?;
         validate_binding(&grant, &request.binding, &request.context)?;
-        storage.finish_blob_read(task, result, &grant)
+        if task.method() == "file.read" {
+            if let Some(root) = &request.binding.live_root { storage.validate_live_root(root, &grant, host_id)?; }
+            if let ResourceOperation::FileRead(args) = &request.operation {
+                let key = storage.file_resource_key(request.binding.root_id.as_deref().expect("physical root"), &args.path, &grant)?;
+                if request.expected_resource_key.as_deref() != Some(key.as_str()) {
+                    return Err(KernelError::Authorization("canonical file resource changed during read".into()));
+                }
+            }
+        }
+        storage.finish_blob_read(task, result, &grant).map(|mut value| {
+            if task.method() == "file.read" { value["source"] = request.binding.physical_source(); }
+            value
+        })
     })()
     .map_err(|error| ResourceFailure {
         error,
@@ -3027,6 +3052,11 @@ fn serve_resource_immediate(
         dispatched = true;
         let result = storage.dispatch(method, &authorized, Some(&request.binding.grant_id), &grant);
         storage.clear_cancellation();
+        if result.is_err() && method == "process.spawn"
+            && storage.process_spawn_not_dispatched(&request.context.operation_id).unwrap_or(false)
+        {
+            dispatched = false;
+        }
         let result = result?;
         Ok(result)
     })();
@@ -3040,6 +3070,10 @@ mod collaboration_boundary_review;
 #[cfg(test)]
 #[path = "tools_retrieval_review.rs"]
 mod retrieval_source_adapter_review;
+
+#[cfg(test)]
+#[path = "tools_reliability_review.rs"]
+mod reliability_review;
 
 /// Runs only on the actual resource Host. The original coordinator owns Catalog intent;
 /// this adapter invokes the existing typed Storage/compute/process owners directly.

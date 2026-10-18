@@ -68,6 +68,22 @@ it('child ordinary memory resolves self, preserves shared scopes and reconciles 
   expect(storage.writes()).toBe(writes);
 });
 
+it('appends new notes without a preliminary read while preserving replay and update guards', async () => {
+  const storage = storageFixture();
+  const personalization = createAgentPersonalization({ client: storage.client, context: async () => ({ bot: false }) });
+  const owner = createMemoryOwner({ personalization, prepareContext: (async () => { throw new Error('No context refresh'); }) as unknown as ContextPreparer });
+  const scope = { mode: 'agent' as const, threadId: 'thread', projectId: null };
+  const queries: MemoryQuery[] = ['global', 'currentThread'].map((scopeName, index) => ({ action: 'tool', runId: 'run', scope,
+    origin: `run:run:new-note-${index}`, arguments: { action: 'save', scope: scopeName as 'global' | 'currentThread', content: `Note ${index}` } }));
+  const results = await Promise.all(queries.map(query => owner(query, new AbortController().signal)));
+  expect(results.every(result => result.status === 'ready')).toBe(true);
+  expect((await personalization.catalog()).memories.map(note => note.content)).toEqual(['Note 0', 'Note 1']);
+  expect(await owner(queries[0]!, new AbortController().signal)).toEqual(results[0]);
+  expect(storage.writes()).toBe(2);
+  expect(await owner({ ...queries[0]!, origin: 'run:run:update', arguments: { action: 'save', id: 1, scope: 'global', content: 'Overwrite' } }, new AbortController().signal)).toMatchObject({ status: 'rejected' });
+  expect(storage.writes()).toBe(2);
+});
+
 it.each([
   { memories: [{ id: 1, scope: { kind: 'session', id: 'old-session' }, content: 'OLD_NOTE', updatedAt: '' }], prompts: {}, nextId: 2 },
   { memories: [], prompts: { 'session:old-session': { sections: { preamble: 'OLD_PROMPT' } } }, nextId: 1 },

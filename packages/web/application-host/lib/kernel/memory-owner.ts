@@ -62,9 +62,11 @@ export function createMemoryOwner(options: { personalization: AgentPersonalizati
           && (!args.scope || agentScopeKey(note.scope) === agentScopeKey(scope))
           && (args.id === undefined || args.id === note.id) && (args.action !== 'search' || note.content.toLocaleLowerCase().includes(term))) };
       }
-      if (!query.origin || !Number.isSafeInteger(args.revision)) throw new AgentPersonalizationError('Memory mutation origin and current revision are required');
+      if (!query.origin || (args.revision !== undefined && !Number.isSafeInteger(args.revision))
+        || ((args.action === 'delete' || args.id !== undefined) && args.revision === undefined))
+        throw new AgentPersonalizationError('Updating or deleting a note requires its current revision');
       const input = { origin: query.origin, action: args.action, ...(args.id === undefined ? {} : { id: args.id }), scope,
-        ...(args.content === undefined ? {} : { content: args.content }), revision: args.revision! };
+        ...(args.content === undefined ? {} : { content: args.content }), ...(args.revision === undefined ? {} : { revision: args.revision }) };
       const memoryReceipt = query.action === 'receipt'
         ? await options.personalization.mutationReceipt(query.origin, { ...input, admitted })
         : await options.personalization.mutation(input, admitted);

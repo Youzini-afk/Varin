@@ -175,7 +175,7 @@ export function createAgentPersonalization(options: {
       return structuredClone({ catalog: { memories: document.memories, prompts: document.prompts, revision }, noteRevisions: document.noteRevisions ?? {} });
     },
     async mutationReceipt(origin: string, intent?: unknown) { return (await findMutation(origin, intent))?.receipt ?? null; },
-    async mutation(input: { origin: string; action: 'save' | 'delete'; id?: number; scope: AgentMemoryScope; content?: string; revision: number },
+    async mutation(input: { origin: string; action: 'save' | 'delete'; id?: number; scope: AgentMemoryScope; content?: string; revision?: number },
       admitted: { mode: 'agent' | 'bot'; threadId: string; projectId: string | null }) {
       if (admitted.mode !== 'agent') throw new AgentPersonalizationError('Bot memory has its own owner');
       const scope = parseAgentScope(input.scope);
@@ -183,16 +183,17 @@ export function createAgentPersonalization(options: {
         || (candidate.kind === 'project' && candidate.id === admitted.projectId)
         || (candidate.kind === 'thread' && candidate.id === admitted.threadId);
       if (!allowed(scope)) throw new AgentPersonalizationError('Memory scope is outside this conversation', 403);
-      if (!input.origin || !Number.isSafeInteger(input.revision) || input.revision < 0) throw new AgentPersonalizationError('Stable mutation origin and revision are required');
+      if (!input.origin || (input.revision !== undefined && (!Number.isSafeInteger(input.revision) || input.revision < 0))
+        || ((input.action === 'delete' || input.id !== undefined) && input.revision === undefined))
+        throw new AgentPersonalizationError('Stable mutation origin is required; updating or deleting also requires the current revision');
       const intent = { ...input, scope, admitted };
       const previous = await findMutation(input.origin, intent);
       if (previous) return previous.receipt;
-      const current = await read();
-      const note = input.id === undefined ? undefined : current.document.memories.find(item => item.id === input.id);
+      const note = input.id === undefined ? undefined : (await read()).document.memories.find(item => item.id === input.id);
       if (input.action === 'delete' && note && agentScopeKey(note.scope) !== agentScopeKey(scope)) throw new AgentPersonalizationError('Memory does not belong to the selected scope', 403);
       if (input.id !== undefined && (!note || !allowed(note.scope))) throw new AgentPersonalizationError('Memory is unavailable in this conversation', 404);
       const identity = { origin: input.origin, intent, native: true as const };
-      if (input.action === 'save') return (await saveNote({ ...(input.id === undefined ? {} : { id: input.id }), scope, content: input.content ?? '', revision: input.revision,
+      if (input.action === 'save') return (await saveNote({ ...(input.id === undefined ? {} : { id: input.id }), scope, content: input.content ?? '', ...(input.revision === undefined ? {} : { revision: input.revision }),
         source: { threadId: admitted.threadId, label: 'agent' } }, identity)).receipt;
       return (await mutate(input.revision, document => {
         if (input.id === undefined || !document.memories.some(item => item.id === input.id)) throw new AgentPersonalizationError('Memory no longer exists', 404);

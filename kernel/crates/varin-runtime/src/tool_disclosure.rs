@@ -12,10 +12,6 @@ pub const GROUPS: &[(&str, &str)] = &[
         "Scholarly search and configured candidate judgments",
     ),
     (
-        "interface",
-        "Interactive HTML in chat",
-    ),
-    (
         "desktop",
         "Desktop observation, input and control assignments",
     ),
@@ -49,7 +45,7 @@ fn build_schemas() -> Vec<ToolSchema> {
         .collect::<Vec<_>>()
         .join("; ");
     [
-        (DESCRIBE, format!("查询工具的用途、参数和版本。可按分组或工具名称查询；省略参数时列出可用分组。可用分组：{index}。"),
+        (DESCRIBE, format!("查询工具的用途、参数和版本。可按分组或工具名称查询；省略参数时列出可用分组。分组索引：{index}。"),
          json!({"type":"object","additionalProperties":false,"properties":{"namespace":{"type":"string","minLength":1},"name":{"type":"string","minLength":1}}})),
         (INVOKE, "通过已声明的入口调用工具，适用于目标工具未单独声明的情况。reference 填工具名称和版本，arguments 填目标工具的参数。".into(),
          json!({"type":"object","additionalProperties":false,"required":["reference","arguments"],"properties":{
@@ -121,6 +117,7 @@ pub fn is_always_declared(name: &str) -> bool {
             | "webfetch"
             | "image_generate"
             | "image_edit"
+            | "render_ui"
             | "resource_read"
     )
 }
@@ -155,7 +152,6 @@ pub fn namespace(name: &str) -> Option<&'static str> {
     Some(match name {
         "document_read" | "materials" => "documents",
         "research_search" | "research_decide" => "research",
-        "render_ui" => "interface",
         "computer_browser" | "computer_browser_read" => "browser",
         "computer_office" | "computer_office_read" => "office",
         "computer_prepare"

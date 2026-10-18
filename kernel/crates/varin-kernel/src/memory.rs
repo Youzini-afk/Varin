@@ -24,6 +24,14 @@ struct Arguments {
 }
 fn args(call: &ToolCall, mutations: bool) -> Result<Arguments, ExecutionError> {
     let args: Arguments = serde_json::from_value(call.arguments.clone()).map_err(error)?;
+    if matches!(args.action.as_str(), "save" | "delete") {
+        if !mutations {
+            return Err(error("Memory writes are unavailable in this execution"));
+        }
+        if args.revision.is_none() && (args.action == "delete" || args.id.is_some()) {
+            return Err(error("Updating or deleting a note requires the revision returned by memory read/search"));
+        }
+    }
     if !matches!(args.action.as_str(), "read" | "search" | "save" | "delete")
         || args
             .scope
@@ -32,10 +40,8 @@ fn args(call: &ToolCall, mutations: bool) -> Result<Arguments, ExecutionError> {
         || args.id == Some(0)
         || (args.action == "save" && args.content.as_deref().is_none_or(|s| s.trim().is_empty()))
         || (args.action == "delete" && args.id.is_none())
-        || (matches!(args.action.as_str(), "save" | "delete")
-            && (!mutations || args.revision.is_none()))
     {
-        return Err(error("invalid or ungranted memory action"));
+        return Err(error("Invalid memory arguments: save requires nonempty content; delete requires id; scope is global, project or currentThread"));
     }
     Ok(args)
 }
@@ -50,7 +56,7 @@ pub(crate) fn builtin_schema(bot: bool) -> crate::run_tools::BuiltinSchema {
     )
 }
 pub(crate) fn schema(mutations: bool) -> ToolSchema {
-    ToolSchema { requirements: None, description: "Read or explicitly maintain ordinary persistent notes. Reads return the current catalog revision; writes require that revision. Scopes are resolved from this conversation's admitted identity. Saved notes commit immediately; system memory snapshots change only at successful compaction.".into(), output_schema: None, metadata: None,
+    ToolSchema { requirements: None, description: "Read and maintain persistent notes. save with content creates a note; updating an existing id or deleting requires the revision returned by read/search. Scopes follow the conversation identity. Saved notes commit immediately; system memory snapshots update at successful compaction.".into(), output_schema: None, metadata: None,
         name: TOOL.into(),
         version: if mutations { "1" } else { "1-read" }.into(),
         schema: json!({"type":"object",
@@ -557,3 +563,21 @@ pub(crate) fn reconcile(
 #[cfg(test)]
 #[path = "memory_capacity_review.rs"]
 mod capacity_review;
+
+#[cfg(test)]
+mod mutation_arguments {
+    use super::*;
+    #[test]
+    fn new_notes_need_no_revision_but_existing_notes_and_read_only_runs_keep_their_guards() {
+        let mut call=ToolCall{call_id:"save".into(),name:TOOL.into(),schema_version:"1".into(),
+            arguments:json!({"action":"save","scope":"global","content":"New note"})};
+        assert!(args(&call,true).is_ok());
+        assert!(args(&call,false).is_err());
+        call.arguments["scope"]=json!("currentThread");
+        assert!(args(&call,true).is_ok());
+        call.arguments["id"]=json!(1);
+        assert!(args(&call,true).err().unwrap().message.contains("revision"));
+        call.arguments["revision"]=json!(0);
+        assert!(args(&call,true).is_ok());
+    }
+}
