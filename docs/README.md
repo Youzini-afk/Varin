@@ -1,11 +1,12 @@
 # Varin 文档
 
-从[架构](architecture.md)了解进程和状态归属，再沿问题进入下面的领域说明。具体 API、参数和命令以代码、schema、测试及
-package.json 为准；文档解释职责、机制、约束和不显然的取舍。旧设计、阶段计划和验收批次保留在 Git 历史，不作为第二套当前合同。
+第一次使用，从[项目介绍](../.github/readme/README.zh-CN.md)和[使用指南](../packages/docs/README.zh-CN.md)开始。
+准备参与开发，先看[贡献指南](../.github/translations/CONTRIBUTING.zh-CN.md)和[开发环境](development.md)。
+下面按问题整理实现说明，方便定位相关模块。
 
 | 要了解什么 | 入口 |
 | --- | --- |
-| 安装、启动和使用 | [项目 README](../README.md)、[用户文档](../packages/docs/README.md) |
+| 安装、启动和使用 | [项目 README](../.github/readme/README.zh-CN.md)、[用户文档](../packages/docs/README.zh-CN.md) |
 | 系统如何装配、谁拥有状态 | [架构](architecture.md) |
 | Agent loop、历史、请求、工具、恢复与续接 | [运行时](runtime.md) |
 | 文件来源、WorkingState、进程、跨 Host 和恢复 | [资源](resources.md) |
@@ -28,5 +29,4 @@ package.json 为准；文档解释职责、机制、约束和不显然的取舍�
 - [模型、账号与设置](../packages/web/application-host/lib/models/DOCUMENTATION.md)、[MCP 服务](../packages/web/application-host/lib/mcp/DOCUMENTATION.md)、[Computer Use](../packages/web/application-host/lib/computer/DOCUMENTATION.md)
 - [application-client](../packages/application-client/README.md)、[protocol](../packages/protocol/README.md)、[extension-host](../packages/extension-host/README.md)
 
-当前对话由原生 Agent runtime 执行。旧设计、过程记录和已移除运行时的指导留在 Git 历史；
-源码接线、定向测试、安装包与真实环境验收分别说明，不互相代替。
+具体 API、参数和命令以代码、schema 与 package scripts 为准。文档说明当前机制及取舍，历史设计保留在 Git 中。

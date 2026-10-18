@@ -2,84 +2,61 @@ English | [简体中文](https://github.com/Youzini-afk/Varin/blob/main/.github/
 
 # Contributing to Varin
 
-Contributions to the runtime, desktop and remote surfaces, extensions, documentation, accessibility
-and platform support are welcome. This guide covers the public contribution workflow.
-[AGENTS.md](../AGENTS.md) contains repository rules; the [development guide](../docs/development.md)
-covers setup, commands and verification, and [architecture](../docs/architecture.md) explains module ownership.
+You can contribute by fixing a bug, improving a workflow, building an extension, writing documentation, or sharing what happens on your platform.
 
-## Before you begin
+## Pick a starting point
 
-- Read the [Code of Conduct](CODE_OF_CONDUCT.md).
-- Search existing issues and pull requests before starting duplicate work. Use
-  [GitHub Issues](https://github.com/Youzini-afk/Varin/issues) for reproducible bugs, feature proposals
-  and focused technical discussions.
-- Report vulnerabilities privately through [Security](SECURITY.md). Keep exploit details out of
-  public issues, pull requests, logs and screenshots.
-- For substantial product or architecture changes, discuss the intended user outcome and affected
-  boundaries early. A prototype can help resolve a concrete design question.
+Search [issues](https://github.com/Youzini-afk/Varin/issues) and [pull requests](https://github.com/Youzini-afk/Varin/pulls) for related work. A small, reproducible problem is a useful first contribution. For a larger change, explain the workflow you want to improve and share a sketch or prototype early.
 
-## Working on a change
+Bug reports are useful on their own. Include the version, installation method, what happened, and steps or an example that reproduce it. Remove credentials and private content from logs and screenshots. Use the [security policy](SECURITY.md) for vulnerability reports.
 
-Read the owning implementation, its consumers and the nearest README or DOCUMENTATION before editing.
-Keep the change focused and preserve unrelated work. Follow existing code style and shared UI components.
+## Set up a checkout
 
-The native Rust Agent runtime is the product's conversation and execution owner. Thread/branch history,
-queues, Runs and Operations belong to its Catalog; trusted Application Host services supply models,
-credentials and domain capabilities. Follow those owners rather than copying state into another layer.
-Historical Pi assets are preserved without importing them or restoring a fallback runtime.
+Fork and clone the repository. Source development uses Node.js 24, Bun 1.3.14, Git, Rust, a C/C++ toolchain, and CMake. The [development guide](../docs/development.md) covers environment setup and commands.
 
-Use public extension interfaces and preserve plugin-owned configuration and data. Privileged operations
-belong in the trusted Host, never in a renderer. Check the applicable [security](../docs/security.md)
-and [extension](../docs/extensions.md) boundaries, and never log credentials or private user content.
+From the repository root:
 
-Obsolete internal formats do not require compatibility readers or automatic migration machinery.
-Unsupported stores must leave existing assets intact. Workspace files, Git history, native Pi data and
-external configuration remain user assets; current-format durability and recovery still apply.
+```sh
+bun install --frozen-lockfile
+git switch -c your-change
+bun run dev
+```
 
-## Documentation
+Open the UI URL printed in the terminal. For desktop development, use `bun run electron:dev`. Configure a model in Settings when your change needs a running agent.
 
-Code, types, schemas, tests and package scripts establish current behavior. Documentation explains
-responsibilities, mechanisms, constraints and useful design reasons; Git preserves history. Update the
-relevant current explanation when behavior changes. The [documentation index](../docs/README.md)
-locates the owning document; [AGENTS.md](../AGENTS.md) describes how to handle active designs and plans.
+Read [AGENTS.md](../AGENTS.md) and the README or DOCUMENTATION nearest the code you will change.
 
-Public user documentation, the root README, this guide and the security policy use English as their
-source language. Keep applicable existing translations synchronized when changing facts, commands,
-security guidance or links. Localized root documents retain their language navigation.
+## Find the right part of the repository
 
-Main engineering documents use Chinese. Source-adjacent and package documents keep their established
-language; they do not need parallel translations. The public documentation language convention does
-not change this engineering convention.
+| Area | Start here |
+| --- | --- |
+| Conversations, panels, editors, and shared UI | [packages/ui](../packages/ui/DOCUMENTATION.md) |
+| Model connections, application services, and remote access | [Application Host](../packages/web/README.md) |
+| Agent execution, history, files, and processes | [Rust kernel](../kernel/README.md) |
+| Extension contracts and authoring | [Extension guide](../docs/ops/varin-extension-authoring.md), [examples](../examples/extensions/README.md) |
+| User guides and translations | [Public docs](../packages/docs/CONTRIBUTING.md) |
+| How the pieces fit together | [Architecture](../docs/architecture.md), [documentation index](../docs/README.md) |
 
-## Verification
+Follow the existing owner of the behavior. The Rust runtime manages conversations and execution; the Application Host supplies trusted services; clients present them through shared APIs. Preserve user files and data, and use the established extension interfaces.
 
-Choose checks for the behavior and consumers affected by the change. Use the nearest `package.json`
-and the [development guide](../docs/development.md) to find the appropriate commands.
+## Make and check the change
 
-Reuse meaningful existing checks. Add a regression test when it protects important behavior or a
-reproduced failure; a new test is not required for every change. Remove obsolete or redundant checks.
-Shared contracts need evidence from their consumers, and packaging or platform claims need the relevant
-runtime. Type checking alone does not prove those behaviors.
+Keep one coherent problem in each pull request. Read the implementation and its callers, use the existing style and shared UI components, and update the documentation that describes the behavior.
 
-For UI changes, use screenshots or recordings when they help verify the result, covering the layouts,
-themes and states affected. Support performance claims with representative measurements. Report what
-ran and what remains unverified. Broaden verification when a new failure or unresolved risk warrants it.
+Choose checks that exercise the affected behavior. Reuse existing tests; add a focused regression test when it protects an important behavior or a reproduced bug. The [development guide](../docs/development.md#修改与验证) lists checks by change type. Documentation and link changes use `bun run docs:validate`.
 
-## Commits and pull requests
+For UI work, attach a screenshot or recording of the relevant state. For performance work, include a representative measurement. Record the commands you ran and their results, plus any relevant behavior you could not check in your environment.
 
-Use concise commit subjects describing the change. A pull request should explain the problem, resulting
-behavior, relevant checks and any material limitations. Include affected ownership or external contracts
-when they help the reviewer understand the change. Scale the detail to the work.
+Public guides and the repository's introductory documents use English as their source language. Keep the existing translations aligned when changing behavior, commands, or links. Main engineering docs use Chinese; package and source-adjacent docs keep their established language.
 
-Keep the branch current without rewriting other contributors' work. Resolve conflicts by checking the
-intended behavior and state owner, rather than mechanically choosing one side. Preserve unrelated user
-edits and avoid destructive Git cleanup.
+## Open a pull request
 
-Bug reports, documentation improvements, translation updates and platform observations are also useful
-contributions; include the environment and reproduction steps relevant to your report.
+Explain the problem and the resulting behavior, then give the relevant verification. Link related issues and include screenshots where useful. The [PR template](pull_request_template.md) keeps these details together.
 
-## License
+Use a concise commit subject that describes the change. Resolve conflicts with attention to the intended behavior, and preserve unrelated work.
 
-By submitting a contribution, you agree that it may be distributed under Varin's
-[GNU Affero General Public License v3.0](../LICENSE) (`AGPL-3.0-only`) and that imported third-party
-material retains the notices required by [Third-party notices](../THIRD_PARTY_NOTICES.md).
+## Community and license
+
+Please follow the [Code of Conduct](CODE_OF_CONDUCT.md).
+
+By submitting a contribution, you agree that it may be distributed under [AGPL-3.0-only](../LICENSE). Keep the copyright and license notices for imported third-party material; see [THIRD_PARTY_NOTICES](../THIRD_PARTY_NOTICES.md).

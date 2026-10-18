@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="240" viewBox="0 0 1200 240" role="img" aria-labelledby="title">
+  <title id="title">Varin</title>
+  <rect width="1200" height="240" rx="28" fill="#efefe8"/>
+  <g transform="translate(380 120) scale(1.28)">
+    <path d="M-35 -19 L-11 -43 L44 -43 L57 -30 L2 -30 L-21 -7 L-21 26 L-35 12 Z" fill="#20272a"/>
+    <path d="M35 19 L11 43 L-44 43 L-57 30 L-2 30 L21 7 L21 -26 L35 -12 Z" fill="#77837f"/>
+  </g>
+  <text x="495" y="154" fill="#20272a" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="102" font-weight="600" letter-spacing="-4">Varin</text>
+</svg>

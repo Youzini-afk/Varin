@@ -2,70 +2,61 @@
 
 # 为 Varin 贡献
 
-欢迎改进运行时、桌面与远程端、扩展、文档、无障碍和平台支持。本文介绍公开贡献流程。
-仓库规则见 [AGENTS.md](../../AGENTS.md)；环境、命令和验证方法见[开发指南](../../docs/development.md)；
-模块职责见[架构](../../docs/architecture.md)。
+修复问题、改进工作流程、开发扩展、编写文档，以及分享平台实测结果，都是参与 Varin 的方式。
 
-## 开始之前
+## 从哪里开始
 
-- 阅读[行为准则](CODE_OF_CONDUCT.zh-CN.md)。
-- 先搜索已有 Issue 和 Pull Request，避免重复工作。通过
-  [GitHub Issues](https://github.com/Youzini-afk/Varin/issues) 报告可复现的问题、提出功能建议和技术讨论。
-- 按[安全策略](SECURITY.zh-CN.md)私下报告漏洞，避免在公开 Issue、Pull Request、日志或截图中泄露利用细节。
-- 较大的产品或架构改动，应尽早讨论预期用户结果和影响范围。必要时用原型澄清具体设计问题。
+先在 [Issues](https://github.com/Youzini-afk/Varin/issues) 和 [Pull Requests](https://github.com/Youzini-afk/Varin/pulls) 中查找相关工作。第一次贡献可以从一个小而明确、能够复现的问题开始。较大的改动，适合尽早说明要改善的工作流程，并分享草图或原型。
 
-## 实现改动
+问题报告本身也很有帮助。请提供版本、安装方式、实际现象，以及复现步骤或示例。日志和截图中请移除密钥与私人内容。漏洞报告请走[安全策略](SECURITY.zh-CN.md)中的渠道。
 
-修改前阅读负责该行为的实现、实际调用方和最近的 README 或 DOCUMENTATION。保持改动聚焦，
-保留无关工作，沿用既有代码风格和共享 UI 组件。
+## 准备开发环境
 
-原生 Rust Agent runtime 是产品的会话与执行所有者。Thread/branch 历史、队列、Run 和 Operation
-由 Catalog 管理；可信 Application Host 提供模型、凭据和领域能力。按实际职责归属修改，避免把状态
-复制到另一层。保留历史 Pi 资产，不导入这些资产，也不恢复备用运行时。
+Fork 并克隆仓库。源码开发使用 Node.js 24、Bun 1.3.14、Git、Rust、C/C++ 工具链和 CMake。具体环境与命令见[开发指南](../../docs/development.md)。
 
-通过公开接口集成扩展，保留插件自己的配置和数据。特权操作由可信 Host 执行，不能放到渲染器中。
-按涉及的能力阅读[安全](../../docs/security.md)和[扩展](../../docs/extensions.md)说明，
-不要记录凭据或用户私密内容。
+在仓库根目录运行：
 
-过时的内部格式无需兼容读取器或自动迁移机制。不支持的存储必须保留已有资产。工作区文件、
-Git 历史、Pi 原生数据和外部配置仍属于用户资产；当前格式的持久性和恢复要求仍然适用。
+```sh
+bun install --frozen-lockfile
+git switch -c your-change
+bun run dev
+```
 
-## 文档
+打开终端打印的 UI 地址。开发桌面端使用 `bun run electron:dev`。改动需要实际运行 Agent 时，在设置中配置模型。
 
-代码、类型、schema、测试和包脚本确定当前行为；文档解释职责、机制、约束和有价值的设计理由；
-Git 保存历史。行为变化时更新对应的当前说明。[文档入口](../../docs/README.md)用于定位所属文档，
-进行中的设计和计划按 [AGENTS.md](../../AGENTS.md) 处理。
+修改前阅读 [AGENTS.md](../../AGENTS.md) 及代码附近的 README 或 DOCUMENTATION。
 
-面向用户的公开文档、仓库首页 README、贡献指南和安全策略以英文为源语言。修改事实、命令、
-安全建议或链接时，同步适用的已有译本；本地化根文档保留语言导航。
+## 找到对应模块
 
-主工程文档使用中文，源码旁和包内文档沿用既有语言，无需另建平行译本。
-公开文档的语言约定不改变工程文档的约定。
+| 修改内容 | 入口 |
+| --- | --- |
+| 对话、面板、编辑器和共享界面 | [packages/ui](../../packages/ui/DOCUMENTATION.md) |
+| 模型连接、应用服务与远程访问 | [Application Host](../../packages/web/README.md) |
+| Agent 执行、历史、文件和进程 | [Rust 内核](../../kernel/README.md) |
+| 扩展接口与开发 | [扩展作者指南](../../docs/ops/varin-extension-authoring.md)、[示例](../../examples/extensions/README.md) |
+| 使用指南与翻译 | [公开文档编写](../../packages/docs/CONTRIBUTING.zh-CN.md) |
+| 系统各部分如何配合 | [架构](../../docs/architecture.md)、[文档索引](../../docs/README.md) |
 
-## 验证
+沿现有职责修改：Rust 运行时管理会话与执行，Application Host 提供可信服务，客户端通过共享 API 呈现这些能力。保留用户文件与数据，扩展沿用既有公开接口。
 
-根据改动影响的行为和调用方选择检查。具体命令查最近的 `package.json` 和
-[开发指南](../../docs/development.md)。
+## 实现与验证
 
-优先复用有效的已有检查。保护重要行为或可复现故障时补回归测试，不要求每次改动都新增测试。
-删除过时或重复的检查。共享协议需要实际调用方的证据，打包与平台行为需要相应运行环境；
-仅通过类型检查不能证明这些行为。
+一个 Pull Request 聚焦一个完整的问题。阅读实现及其调用方，沿用已有代码风格与共享 UI 组件，并更新描述该行为的文档。
 
-UI 改动可用截图或录屏验证相关布局、主题和状态；性能结论应有代表性的测量。
-说明实际运行了什么、哪些仍未验证。出现新失败或尚未解决的风险时，再扩大验证范围。
+验证围绕实际改动选择。优先复用已有测试；重要行为或已复现的问题，适合补充小而明确的回归测试。[开发指南](../../docs/development.md#修改与验证)按改动类型列出了检查方式。文档和链接修改使用 `bun run docs:validate`。
 
-## 提交与 Pull Request
+界面改动附上对应状态的截图或录屏；性能改动提供有代表性的测量。记录实际执行的命令和结果，以及受环境影响尚未验证的相关行为。
 
-提交标题简洁说明改动。Pull Request 说明问题、改动后的行为、相关验证和重要限制；
-职责归属或外部协议的变化有助于理解时一并说明，详细程度与工作相称。
+公开使用指南和仓库介绍以英文为源语言。修改行为、命令或链接时，同步现有译本。主工程文档使用中文，包内和源码旁文档沿用已有语言。
 
-更新分支时不要重写其他贡献者的工作。解决冲突时核对预期行为和状态归属，避免机械选择某一侧。
-保留用户无关改动，不使用破坏性 Git 清理。
+## 提交 Pull Request
 
-问题报告、文档改进、翻译更新和平台实测也都是有价值的贡献，请附上相关环境与复现步骤。
+先说明问题和改动后的行为，再给出相关验证。关联已有 Issue，必要时附图。[PR 模板](../pull_request_template.md)提供了这些信息的填写位置。
 
-## 许可证
+提交标题简洁描述改动。解决冲突时核对预期行为，保留与本次修改无关的工作。
 
-提交贡献即表示你同意相关内容可按 Varin 的
-[GNU Affero General Public License v3.0](../../LICENSE)（`AGPL-3.0-only`）分发，
-导入的第三方内容仍保留[第三方声明](../../THIRD_PARTY_NOTICES.md)要求的声明。
+## 社区与许可证
+
+请遵守[行为准则](CODE_OF_CONDUCT.zh-CN.md)。
+
+提交贡献即表示你同意相关内容可按 [AGPL-3.0-only](../../LICENSE) 分发。引入第三方内容时保留其版权与许可声明，详见 [THIRD_PARTY_NOTICES](../../THIRD_PARTY_NOTICES.md)。

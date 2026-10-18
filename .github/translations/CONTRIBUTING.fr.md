@@ -2,91 +2,61 @@
 
 # Contribuer à Varin
 
-Les contributions au runtime, aux interfaces de bureau et distantes, aux extensions, à la documentation,
-à l'accessibilité et aux plateformes sont les bienvenues. Ce guide décrit le processus public de contribution.
-[AGENTS.md](../../AGENTS.md) contient les règles du dépôt ; le [guide de développement](../../docs/development.md)
-explique l'installation, les commandes et la validation ; l'[architecture](../../docs/architecture.md) décrit les responsabilités.
+Vous pouvez corriger un bug, améliorer un parcours, créer une extension, écrire de la documentation ou partager vos observations sur une plateforme.
 
-## Avant de commencer
+## Choisir un point de départ
 
-- Lisez le [Code de conduite](CODE_OF_CONDUCT.fr.md).
-- Recherchez les issues et pull requests existantes pour éviter les doublons. Utilisez les
-  [Issues GitHub](https://github.com/Youzini-afk/Varin/issues) pour les bugs reproductibles, les propositions
-  de fonctionnalités et les discussions techniques ciblées.
-- Signalez les vulnérabilités en privé selon la [politique de sécurité](../SECURITY.md). Ne publiez pas
-  de détails d'exploitation dans les issues, pull requests, journaux ou captures d'écran.
-- Pour une modification importante du produit ou de l'architecture, discutez tôt du résultat attendu
-  pour l'utilisateur et des frontières concernées. Un prototype peut clarifier une question de conception.
+Cherchez les travaux liés dans les [issues](https://github.com/Youzini-afk/Varin/issues) et les [pull requests](https://github.com/Youzini-afk/Varin/pulls). Un petit problème reproductible convient bien à une première contribution. Pour un changement plus large, expliquez tôt le parcours à améliorer et partagez un croquis ou un prototype.
 
-## Réaliser une modification
+Un rapport de bug est déjà utile. Indiquez la version, le mode d'installation, le comportement observé et les étapes ou un exemple pour le reproduire. Retirez les identifiants et les données privées des journaux et captures. Signalez les vulnérabilités selon la [politique de sécurité](../SECURITY.md).
 
-Lisez l'implémentation responsable, ses consommateurs et le README ou DOCUMENTATION le plus proche.
-Gardez la modification ciblée, préservez le travail sans rapport et suivez le style et les composants UI existants.
+## Préparer l'environnement
 
-Le runtime natif Rust Agent gère les conversations et l'exécution du produit. Son Catalog possède
-l'historique Thread/branche, les files, les Runs et les Operations ; l'Application Host de confiance
-fournit les modèles, les identifiants et les services métier. Respectez ces responsabilités sans
-copier l'état dans une autre couche. Les anciennes données Pi sont préservées sans importation ni
-rétablissement d'un runtime de secours.
+Créez un fork et clonez le dépôt. Le développement utilise Node.js 24, Bun 1.3.14, Git, Rust, une chaîne C/C++ et CMake. Le [guide de développement](../../docs/development.md) décrit l'environnement et les commandes.
 
-Intégrez les extensions par leurs interfaces publiques et préservez leurs configurations et données.
-Les opérations privilégiées appartiennent au Host de confiance, jamais au renderer. Consultez les règles
-de [sécurité](../../docs/security.md) et d'[extension](../../docs/extensions.md) applicables.
-Ne journalisez jamais les identifiants ni le contenu privé des utilisateurs.
+À la racine du dépôt :
 
-Les formats internes obsolètes ne nécessitent ni lecteurs de compatibilité ni migration automatique.
-Un stockage non pris en charge doit laisser les données existantes intactes. Les fichiers de travail,
-l'historique Git, les données natives Pi et les configurations externes restent des biens de l'utilisateur ;
-la durabilité et la récupération du format actuel restent nécessaires.
+```sh
+bun install --frozen-lockfile
+git switch -c your-change
+bun run dev
+```
 
-## Documentation
+Ouvrez l'URL de l'interface affichée dans le terminal. Pour le bureau, utilisez `bun run electron:dev`. Configurez un modèle dans les paramètres si votre modification nécessite un agent en cours d'exécution.
 
-Le code, les types, les schémas, les tests et les scripts des packages définissent le comportement actuel.
-La documentation explique les responsabilités, mécanismes, contraintes et raisons de conception utiles ;
-Git conserve l'historique. Mettez à jour l'explication concernée lorsque le comportement change.
-L'[index documentaire](../../docs/README.md) indique le document responsable ; [AGENTS.md](../../AGENTS.md)
-précise le traitement des conceptions et plans en cours.
+Lisez [AGENTS.md](../../AGENTS.md) et le README ou DOCUMENTATION le plus proche du code concerné.
 
-La documentation publique destinée aux utilisateurs, le README racine, ce guide et la politique de
-sécurité ont l'anglais comme langue source. Synchronisez les traductions existantes concernées lorsque
-les faits, commandes, consignes de sécurité ou liens changent. Conservez la navigation linguistique
-des documents racines localisés.
+## Trouver le bon module
 
-Les principaux documents d'ingénierie sont en chinois. Les documents proches du code ou propres aux
-packages gardent leur langue établie, sans nécessiter de traductions parallèles. La convention de langue
-de la documentation publique ne change pas celle de la documentation d'ingénierie.
+| Domaine | Point de départ |
+| --- | --- |
+| Conversations, panneaux, éditeurs et interface partagée | [packages/ui](../../packages/ui/DOCUMENTATION.md) |
+| Connexions aux modèles, services applicatifs et accès distant | [Application Host](../../packages/web/README.md) |
+| Exécution des agents, historique, fichiers et processus | [Noyau Rust](../../kernel/README.md) |
+| Contrats et création d'extensions | [Guide](../../docs/ops/varin-extension-authoring.md), [exemples](../../examples/extensions/README.md) |
+| Guides utilisateur et traductions | [Documentation publique](../../packages/docs/CONTRIBUTING.md) |
+| Assemblage du système | [Architecture](../../docs/architecture.md), [index](../../docs/README.md) |
 
-## Validation
+Suivez la responsabilité existante du comportement : le runtime Rust gère les conversations et l'exécution, l'Application Host fournit les services de confiance, et les clients les présentent via les API communes. Préservez les fichiers et données des utilisateurs, et utilisez les interfaces d'extension établies.
 
-Choisissez les vérifications selon le comportement modifié et ses consommateurs. Consultez le
-`package.json` le plus proche et le [guide de développement](../../docs/development.md) pour les commandes.
+## Modifier et vérifier
 
-Réutilisez les vérifications pertinentes. Ajoutez un test de régression pour protéger un comportement
-important ou un défaut reproduit ; chaque modification ne nécessite pas un nouveau test. Supprimez les
-vérifications obsolètes ou redondantes. Les contrats partagés demandent des preuves venant de leurs
-consommateurs ; l'empaquetage et les plateformes demandent l'environnement approprié.
-La vérification des types seule ne démontre pas ces comportements.
+Gardez un problème cohérent par pull request. Lisez l'implémentation et ses appelants, suivez le style existant, utilisez les composants UI partagés et actualisez la documentation du comportement.
 
-Pour l'UI, utilisez des captures ou enregistrements utiles à la vérification des dispositions, thèmes et
-états concernés. Appuyez les affirmations de performance sur des mesures représentatives. Indiquez ce
-qui a été exécuté et ce qui reste non vérifié. Élargissez la validation si un nouvel échec ou un risque
-non résolu le justifie.
+Choisissez les vérifications adaptées au changement. Réutilisez les tests existants ; ajoutez un test de régression ciblé pour un comportement important ou un bug reproduit. Le [guide de développement](../../docs/development.md#修改与验证) répertorie les vérifications par type de modification. Pour les documents et les liens, utilisez `bun run docs:validate`.
 
-## Commits et pull requests
+Pour l'interface, joignez une capture ou une vidéo de l'état concerné. Pour les performances, fournissez une mesure représentative. Indiquez les commandes exécutées, leurs résultats et les comportements pertinents que votre environnement n'a pas permis de vérifier.
 
-Utilisez des titres de commit concis décrivant la modification. Expliquez dans la pull request le
-problème, le comportement obtenu, les vérifications et les limites importantes. Décrivez les changements
-de responsabilité ou de contrat externe lorsqu'ils aident la revue. Adaptez le détail au travail.
+Les guides publics et les documents de présentation du dépôt ont l'anglais pour langue source. Alignez les traductions existantes lorsque le comportement, les commandes ou les liens changent. Les documents d'ingénierie principaux sont en chinois ; les documents de paquets et proches du code gardent leur langue établie.
 
-Gardez la branche à jour sans réécrire le travail d'autrui. Résolvez les conflits en vérifiant le
-comportement prévu et le responsable de l'état, sans choisir mécaniquement un côté. Préservez les
-modifications utilisateur sans rapport et évitez le nettoyage Git destructif.
+## Envoyer une pull request
 
-Les rapports de bugs, améliorations documentaires, traductions et observations sur les plateformes
-sont aussi utiles ; fournissez l'environnement et les étapes de reproduction pertinents.
+Expliquez le problème et le comportement obtenu, puis les vérifications effectuées. Liez les issues concernées et ajoutez des images utiles. Le [modèle de PR](../pull_request_template.md) rassemble ces éléments.
 
-## Licence
+Choisissez un titre de commit concis qui décrit la modification. Résolvez les conflits en tenant compte du comportement attendu et préservez les travaux sans rapport avec votre changement.
 
-En soumettant une contribution, vous acceptez sa distribution sous la
-[GNU Affero General Public License v3.0](../../LICENSE) de Varin (`AGPL-3.0-only`) et le maintien,
-pour le matériel tiers importé, des mentions requises par les [avis sur les composants tiers](../../THIRD_PARTY_NOTICES.md).
+## Communauté et licence
+
+Respectez le [Code de conduite](CODE_OF_CONDUCT.fr.md).
+
+En soumettant une contribution, vous acceptez qu'elle puisse être distribuée sous [AGPL-3.0-only](../../LICENSE). Conservez les mentions de droits d'auteur et de licence des éléments tiers importés ; consultez [THIRD_PARTY_NOTICES](../../THIRD_PARTY_NOTICES.md).

@@ -1,5 +1,5 @@
 name: 文档 / Documentation
-description: 文档页有误、缺失，或还在用旧品牌 · A page is wrong, missing, or still uses old branding
+description: 改进说明、示例、链接或翻译 · Improve instructions, examples, links, or translations
 title: "[Docs]: "
 labels: ["documentation"]
 body:
@@ -8,8 +8,8 @@ body:
     attributes:
       label: 页面 / Page
       description: >-
-        packages/docs/content/docs/ 下的路径，或侧边栏标题 ·
-        A path under packages/docs/content/docs/, or the sidebar title
+        README、指南、文档页的链接或路径，以及对应语言 ·
+        A README, guide, or docs URL/path and its language
     validations:
       required: true
   - type: textarea

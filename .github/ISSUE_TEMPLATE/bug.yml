@@ -6,10 +6,10 @@ body:
   - type: markdown
     attributes:
       value: |
-        感谢报告。请先搜索已有 Issue。不要包含密钥、提示词正文或私人文件内容。
+        请先搜索已有 Issue。复现示例、截图和日志都很有帮助，分享前请移除密钥与私人数据。
 
-        Thanks for reporting. Please search existing issues first. Do not include secrets, prompt
-        bodies, or private file contents.
+        Please search existing issues first. Examples, screenshots, and logs help us reproduce the
+        problem. Remove credentials and private data before sharing them.
   - type: textarea
     id: what-happened
     attributes:
@@ -40,9 +40,9 @@ body:
       options:
         - Web
         - 桌面端 / Desktop
-        - VS Code
         - 移动端 / Mobile
-        - CLI / Docker
+        - Docker / 远程 Host / Remote Host
+        - 扩展 / Extension
         - 不确定 / Not sure
     validations:
       required: true
@@ -50,9 +50,14 @@ body:
     id: version
     attributes:
       label: 版本或提交 / Version or commit
-      placeholder: 0.1.0 或 git SHA · 0.1.0 or a git SHA
+      placeholder: 例如 0.9.25 或 git SHA · e.g. 0.9.25 or a git SHA
   - type: textarea
     id: environment
     attributes:
       label: 环境 / Environment
-      placeholder: 操作系统、Node/Bun 版本、安装方式 · OS, Node/Bun version, how you installed
+      placeholder: 操作系统、安装方式；模型或远程连接相关问题请补充服务名称 · OS, installation method, and relevant model or remote service
+  - type: textarea
+    id: evidence
+    attributes:
+      label: 截图与日志（可选） / Screenshots and logs (optional)
+      description: 附上能说明问题的片段即可，请移除敏感信息 · Relevant excerpts are enough; remove sensitive information

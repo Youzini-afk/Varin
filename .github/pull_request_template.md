@@ -1,25 +1,16 @@
-## 摘要 / Summary
+## 改动 / Change
 
-<!-- 改了什么，为什么改。 -->
-<!-- What changed, and why. -->
+<!-- 说明要解决的问题与改动后的行为，关联相关 Issue。 -->
+<!-- Describe the problem and resulting behavior. Link related issues. -->
 
-## 校验 / Verification
+## 验证 / Verification
 
-请遵循[简体中文贡献指南](translations/CONTRIBUTING.zh-CN.md)。只勾选你实际跑过的项。
-Follow [CONTRIBUTING.md](CONTRIBUTING.md). Check only what you actually ran.
+<!-- 写明实际执行的命令、结果，以及受环境影响尚未验证的相关部分。根据改动选择检查。 -->
+<!-- List the checks you ran, their results, and relevant behavior left unverified. Choose checks for the change. -->
 
-- [ ] `bun run type-check`
-- [ ] `bun run lint`
-- [ ] `bun run check:pi` — Pi host / 协议 / broker / 运行时 · Pi host, protocol, broker, runtime
-- [ ] `bun run --cwd packages/web test` — Web 服务或传输 · Web service or transport
-- [ ] `bun run --cwd packages/ui test` — 共享 UI · shared UI
-- [ ] `bun run docs:validate` — 文档 · documentation
-- [ ] `bun run dead-code` — 新增、删除或重命名了导出 · added, removed, or renamed exports
+## 界面或示例 / Screenshots or examples
 
-没跑的检查请直接说明，不要留空当作跑过。
-If you skipped a check, say so rather than leaving it blank.
+<!-- 有助于说明效果时附上截图、录屏或使用示例；不适用可删除此节。 -->
+<!-- Add screenshots, a recording, or an example when useful. Remove this section if it does not apply. -->
 
-## 备注 / Notes
-
-<!-- 受影响的产品端（Web / 桌面 / 移动端）。残留风险。 -->
-<!-- Affected surfaces (web / desktop / mobile). Remaining risk. -->
+<!-- 贡献指南 / Contribution guide: https://github.com/Youzini-afk/Varin/blob/main/.github/CONTRIBUTING.md -->

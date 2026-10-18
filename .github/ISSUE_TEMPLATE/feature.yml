@@ -6,10 +6,10 @@ body:
   - type: markdown
     attributes:
       value: |
-        请写用户结果，不要写实现方案。较大的架构改动应先讨论边界（Pi host、渲染器、插件归属）。
+        介绍你想完成的工作，以及当前卡在哪里。欢迎附上使用示例、草图或实现想法。
 
-        Describe the user outcome rather than an implementation. Larger architectural changes should
-        start with the boundary they affect: the Pi host, the renderer, or plugin ownership.
+        Describe what you want to do and where the current workflow gets in the way.
+        Examples, sketches, and implementation ideas are welcome.
   - type: textarea
     id: problem
     attributes:

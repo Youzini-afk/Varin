@@ -1,174 +1,84 @@
 [English](../../README.md) | [简体中文](README.zh-CN.md) | [繁體中文](README.zh-TW.md) | Français | [日本語](README.ja.md)
 
-# Varin
-
 <p align="center">
-  <img src="../../packages/electron/resources/icons/app-icon.svg" alt="Varin" width="128" />
+  <img src="../../.github/readme/assets/wordmark.svg" alt="Varin" width="720" />
 </p>
 
-[![CI](https://github.com/Youzini-afk/Varin/actions/workflows/ci.yml/badge.svg)](https://github.com/Youzini-afk/Varin/actions/workflows/ci.yml)
-[![Docker Images](https://github.com/Youzini-afk/Varin/actions/workflows/docker.yml/badge.svg)](https://github.com/Youzini-afk/Varin/actions/workflows/docker.yml)
-[![License: AGPL v3](https://img.shields.io/badge/License-AGPL_v3-blue.svg)](../../LICENSE)
+<p align="center"><strong>Un espace de travail open source pour les agents IA.</strong></p>
 
-**Un espace de travail Agent indépendant et un cadre d’exécution pour le code, la recherche et les
-projets, sur ordinateur, sur le web et sur mobile.**
+<p align="center">
+  <a href="https://github.com/Youzini-afk/Varin/releases">Télécharger</a> ·
+  <a href="../../packages/docs/README.md">Guides</a> ·
+  <a href="../../docs/ops/varin-extension-authoring.md">Créer une extension</a> ·
+  <a href="../translations/CONTRIBUTING.fr.md">Contribuer</a>
+</p>
 
-Varin utilise son propre runtime Agent natif en Rust. Son Catalog possède les Threads, les branches,
-l’historique durable des conversations et l’exécution. L’Application Host partagé gère les connexions
-et comptes de modèles, les ressources de l’agent, la configuration MCP et les services de confiance
-de l’espace de travail. Les clients affichent et contrôlent ces services via les mêmes API applicatives.
-Voir l’[architecture](../../docs/architecture.md).
+<p align="center">
+  <a href="https://github.com/Youzini-afk/Varin/releases"><img src="https://img.shields.io/github/v/release/Youzini-afk/Varin" alt="Release" /></a>
+  <a href="https://github.com/Youzini-afk/Varin/actions/workflows/ci.yml"><img src="https://github.com/Youzini-afk/Varin/actions/workflows/ci.yml/badge.svg" alt="CI" /></a>
+  <a href="../../LICENSE"><img src="https://img.shields.io/badge/License-AGPL_v3-blue.svg" alt="License: AGPL v3" /></a>
+</p>
 
-> [!IMPORTANT]
-> Varin est en pré-1.0 et en développement actif. Les interfaces produit et le protocole privé du
-> runtime évoluent ensemble ; l’interopérabilité entre versions n’est pas garantie. Sauvegardez les
-> espaces de travail importants et fixez un digest d’image testé pour les déploiements persistants.
-> Les données existantes ne sont ni importées, ni migrées, ni réécrites automatiquement ; les formats
-> de stockage internes non pris en charge sont refusés.
+Réunissez vos modèles, outils, fichiers et projets dans un même espace. Travaillez avec un agent pour examiner un problème, écrire du code, lire des articles scientifiques ou créer une explication interactive. Suivez son travail et consultez les résultats dans la conversation.
 
-## Ce que fournit Varin
+Varin fonctionne sur ordinateur et dans le navigateur. Son client mobile se connecte à votre Host. Son propre runtime Rust gère l'exécution des agents et l'historique des conversations.
 
-- **Conversations natives :** historique des Threads et branches, streaming, file d’entrées, choix
-  du modèle et du niveau de raisonnement, sous-tâches, plans, permissions et restauration, avec le
-  Catalog natif comme autorité. [Runtime](../../docs/runtime.md)
-- **Un espace de développement :** fichiers, différences, Git, worktrees, terminaux, recherche,
-  serveurs de langage et débogage. Le bureau et le web partagent Monaco ; l’éditeur léger mobile
-  utilise la même autorité documentaire, avec une gestion explicite des modifications non enregistrées
-  et des conflits. [Workbench](../../docs/workbench.md)
-- **Exécution et restauration :** les sources admises distinguent fichiers courants, instantanés et
-  travail matérialisé. Rust possède le stockage et les ressources d’exécution ; permissions,
-  annulation et achèvement réel restent des faits distincts. [Ressources](../../docs/resources.md)
-- **Recherche et contexte :** recherche exacte et sémantique, navigation dans le code, notes à portée
-  définie, connaissances du Bot, découverte web et scientifique, et documents PDF conservant leurs
-  sources et images de pages. [Recherche et contexte](../../docs/retrieval.md)
-- **Configuration gérée par le Host :** canaux de modèles, comptes, points de terminaison, instructions
-  et compétences de l’agent, connexions MCP dans des réglages dédiés. Les identifiants et l’exécution
-  privilégiée restent sous la responsabilité des services de confiance.
-  [Modèles](../../packages/web/application-host/lib/models/DOCUMENTATION.md),
-  [ressources de l’agent](../../packages/web/application-host/lib/agent-resources/DOCUMENTATION.md),
-  [MCP](../../packages/web/application-host/lib/mcp/DOCUMENTATION.md)
-- **Utilisation locale et distante :** Electron intègre l’Application Host ; les clients web et
-  mobiles Capacitor s’y connectent. Hosts distants, appairage, tunnels et déploiements conteneur/SSH
-  conservent des limites explicites d’accès et de plateforme.
-  [Sécurité](../../docs/security.md) · [Exploitation](../../docs/ops/README.md)
+## Ce que vous pouvez faire
 
-Quatre Workbench Profiles intégrés proposent **Agent Workspace**, **IDE Workbench**, **Research
-Workbench** et **Varin Bot**. Agent, Research et Bot fonctionnent sur bureau, web et mobile ; IDE sur
-bureau et web. Ces profils sont des extensions Varin : vous pouvez remplacer toute l’interface ou
-certaines contributions, tandis que l’orientation du travail, les documents et l’identité du Thread
-restent indépendants de la présentation.
+| Votre travail | Dans Varin |
+| --- | --- |
+| Avancer sur une tâche | Conversations en streaming, messages en attente, plans, agents enfants et suivis planifiés. |
+| Développer un projet | Édition de fichiers, différences, Git et worktrees, terminaux, recherche de code et outils de langage. |
+| Lire et chercher | Recherche web et scientifique, lecture de PDF et conservation des sources auprès de la conversation. |
+| Créer du contenu visuel | Génération et édition d'images, graphiques HTML interactifs et petits outils dans les messages. |
+| Choisir vos outils | Modèles cloud ou locaux, permissions, instructions, skills et serveurs MCP. |
+| Changer de machine | Espace de travail local ou connexion à un Host distant depuis le bureau, le web ou le mobile. |
 
-La prise en charge des fournisseurs de modèles, de Computer/VM et des paquets dépend de l’environnement
-réel. Des tests ciblés ne constituent pas une validation complète de chaque plateforme ; voir les
-[critères de validation du runtime](../../docs/runtime-acceptance.md).
+Les espaces Agent, IDE, Research et Bot proposent des dispositions adaptées à ces usages. IDE est disponible sur ordinateur et sur le web ; les autres prennent aussi en charge le mobile. [Détails des espaces de travail](../../docs/workbench.md)
 
-## Créer des extensions Varin
+## Commencer
 
-Les extensions Varin ajoutent des interfaces de workbench et des capacités de confiance au Host via
-des contrats publics. Les outils sont `@varin/extension-contract`, `@varin/extension-sdk`, l’adaptateur
-React 19 facultatif `@varin/extension-react`, `@varin/extension-surface` et `@varin/extension-cli`.
+| Utilisation | Point de départ |
+| --- | --- |
+| Application Windows, macOS ou Linux | [Télécharger une version](https://github.com/Youzini-afk/Varin/releases). Choisissez le fichier adapté à votre système et à votre architecture CPU. |
+| Serveur ou ordinateur personnel, accessible dans le navigateur | [Hébergement avec Docker](../../docs/ops/cloud-deployment.md) : stockage persistant, mot de passe et accès distant. |
+| iOS ou Android | [Configuration mobile](../../packages/mobile/README.md). Le client se connecte à un Host existant. |
+| Depuis les sources | Suivez les étapes ci-dessous. |
 
-Lorsque des versions publiées sont disponibles dans votre registre :
+Dans les paramètres, connectez un fournisseur de modèles ou un service local. Sélectionnez un modèle, choisissez un dossier de projet si la tâche en a besoin, puis démarrez une conversation. La zone de saisie permet de choisir les permissions et le mode général ou recherche.
+
+Varin est en développement actif avant la version 1.0. Cette page décrit les sources actuelles ; les [notes de version](https://github.com/Youzini-afk/Varin/releases) décrivent les builds publiés. Sauvegardez les données importantes de l'application avant une mise à niveau.
+
+## Exécuter depuis les sources
+
+Utilisez **Node.js 24**, **Bun 1.3.14**, Git et la chaîne Rust indiquée dans [rust-toolchain.toml](../../kernel/rust-toolchain.toml). Les dépendances natives nécessitent aussi une chaîne C/C++ et CMake. Consultez le [guide de développement](../../docs/development.md).
 
 ```sh
-npx @varin/extension-cli init ./my-extension --id dev.example.my-extension --name "My Extension"
-cd my-extension
-npm install
-npx varin-extension build
-npx varin-extension test
-```
-
-Voir les [extensions](../../docs/extensions.md) et le [guide de création](../../docs/ops/varin-extension-authoring.md)
-pour le travail depuis les sources, les manifests, capacités, cycles de vie, publications et tests.
-
-## Télécharger l’application de bureau
-
-Consultez les [GitHub Releases](https://github.com/Youzini-afk/Varin/releases) pour les distributions
-disponibles et leurs plateformes et versions. Les procédures source et conteneur suivent.
-
-## Démarrer depuis les sources
-
-Prérequis : Node.js 22.19 ou plus récent (Node.js 24 est la base du développement source), Bun 1.3.14,
-Git et la chaîne Rust définie dans [kernel/rust-toolchain.toml](../../kernel/rust-toolchain.toml).
-Voir le [guide de développement](../../docs/development.md) pour la préparation et la vérification des plateformes.
-
-Le noyau Rust est obligatoire. En développement, Cargo peut le lancer en l’absence d’un binaire préparé ;
-`bun run kernel:build` produit l’exécutable release vérifié par manifest nécessaire aux distributions.
-La disponibilité est vérifiée auprès de l’Application Host réel et du catalogue natif de Threads.
-
-### Développement web
-
-```bash
 git clone https://github.com/Youzini-afk/Varin.git
 cd Varin
 bun install --frozen-lockfile
 bun run dev
 ```
 
-Ouvrez l’URL Vite affichée dans le terminal. Cette commande démarre l’UI et l’Application Host de
-confiance sur des ports disponibles. Configurez les connexions et comptes de modèles dans les réglages
-avant de commencer un travail utilisant un modèle.
+Ouvrez l'URL de l'interface affichée dans le terminal. Cette commande lance l'interface web et l'Application Host.
 
-### Développement bureau
+Pour l'application de bureau, exécutez `bun run electron:dev` dans le même dépôt. La commande prépare le noyau natif et lance Electron avec l'interface de développement. [Développement et packaging desktop](../../packages/electron/README.md#development)
 
-```bash
-bun run electron:dev
-```
+## Étendre votre espace de travail
 
-Pour tester les ressources UI intégrées :
+Le harness de Varin relie le modèle aux outils, au contexte, aux permissions, aux tâches en arrière-plan et aux agents enfants. Le runtime Rust conserve les conversations et les traces d'exécution ; l'Application Host partagé fournit les connexions aux modèles et les services de l'espace de travail.
 
-```bash
-bun run electron:dev:bundled
-```
+Les outils courants sont déclarés directement. Les autres capacités disponibles disposent d'un index et de descriptions à la demande, ce qui garde stable le préfixe des déclarations lors de leur découverte. Les outils de recherche sont disponibles à la demande en mode général et déclarés directement en mode recherche.
 
-### Programme d’installation Windows
+Les extensions peuvent ajouter des outils, des adaptateurs de modèles, des panneaux ou des dispositions complètes. Commencez par le [guide de création](../../docs/ops/varin-extension-authoring.md), le [SDK](../../packages/extension-sdk/README.md) ou les [exemples](../../examples/extensions/README.md).
 
-À exécuter sous Windows :
+Les détails d'implémentation sont dans l'[architecture](../../docs/architecture.md), le [runtime](../../docs/runtime.md) et l'[index de documentation](../../docs/README.md).
 
-```powershell
-bun run electron:build:win
-bun run electron:smoke:win
-```
+## Contribuer
 
-L’installeur NSIS, les métadonnées de mise à jour et la blockmap sont écrits dans `packages/electron/dist`.
-Sans identifiants de signature, le résultat n’est pas signé. Voir le [guide de packaging bureau](../../packages/electron/README.md#packaging).
+Les rapports de bugs, améliorations d'interface et d'outils, documents, traductions et retours sur les plateformes sont bienvenus. Le [guide de contribution](../translations/CONTRIBUTING.fr.md) explique la préparation, le choix d'une modification et l'envoi d'une pull request.
 
-## Exécuter l’image cloud
-
-Compose utilise `ghcr.io/youzini-afk/varin-slim:latest` par défaut. Sur un hôte Docker Linux :
-
-```bash
-mkdir -p data/varin data/ssh data/cloudflared workspaces
-sudo chown -R 1000:1000 data workspaces
-umask 077
-printf 'VARIN_UI_PASSWORD=%s\n' "$(openssl rand -base64 24)" > .env
-docker compose up -d
-curl --fail http://127.0.0.1:3000/health
-```
-
-Ouvrez `http://127.0.0.1:3000` avec le mot de passe généré. Une exposition à Internet nécessite un
-reverse proxy TLS ou un tunnel approuvé respectant les [règles de transfert](../../docs/ops/REVERSE_PROXY.md).
-En production, fixez `VARIN_IMAGE` à un digest immuable testé.
-
-Pour disposer d’outils de développement Python, Java, Go ou Rust dans le conteneur :
-
-```bash
-docker compose -f docker-compose.yml -f docker-compose.toolbelt.yml up -d
-```
-
-Voir le [déploiement cloud](../../docs/ops/cloud-deployment.md) pour les chemins persistants, variables
-d’environnement, variantes d’image, architectures prises en charge et déploiements SSH avec contrôle
-de santé et retour arrière.
-
-## Architecture et développement
-
-Commencez par l’[index documentaire](../../docs/README.md), l’[architecture](../../docs/architecture.md)
-et le [guide de développement](../../docs/development.md). L’Application Host intègre l’exécution du
-Catalog natif, le stockage et les ressources gérés par Rust, ainsi que les autorités distinctes de
-connaissances et d’extensions ; les renderers ne possèdent ni identifiants ni exécution durable.
-
-Lisez [CONTRIBUTING](../CONTRIBUTING.md) et [AGENTS](../../AGENTS.md) avant de contribuer. Les scripts
-des paquets définissent les commandes ; choisissez des vérifications adaptées au changement.
+[Signaler un bug](https://github.com/Youzini-afk/Varin/issues/new?template=bug.yml) · [Proposer une fonctionnalité](https://github.com/Youzini-afk/Varin/issues/new?template=feature.yml) · [Signaler une vulnérabilité en privé](../SECURITY.md)
 
 Merci à la communauté [LinuxDO](https://linux.do) pour son soutien.
 
@@ -176,7 +86,4 @@ Merci à la communauté [LinuxDO](https://linux.do) pour son soutien.
 
 Varin est un projet indépendant issu du fork OpenChamber de son mainteneur.
 
-L’œuvre combinée est distribuée sous la [GNU Affero General Public License v3.0](../../LICENSE)
-(`AGPL-3.0-only`). Les versions modifiées proposées sur un réseau doivent fournir leur code source
-correspondant conformément à la licence. Les mentions de copyright et obligations tierces conservées
-figurent dans [THIRD_PARTY_NOTICES](../../THIRD_PARTY_NOTICES.md).
+Le projet est distribué sous la [GNU Affero General Public License v3.0](../../LICENSE) (`AGPL-3.0-only`). Les versions modifiées accessibles par le réseau doivent fournir leur code source correspondant selon la licence. Les mentions de droits d'auteur et de tiers sont conservées dans [THIRD_PARTY_NOTICES](../../THIRD_PARTY_NOTICES.md).

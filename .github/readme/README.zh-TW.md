@@ -1,162 +1,89 @@
 [English](../../README.md) | [简体中文](README.zh-CN.md) | 繁體中文 | [Français](README.fr.md) | [日本語](README.ja.md)
 
-# Varin
-
 <p align="center">
-  <img src="../../packages/electron/resources/icons/app-icon.svg" alt="Varin" width="128" />
+  <img src="../../.github/readme/assets/wordmark.svg" alt="Varin" width="720" />
 </p>
 
-[![CI](https://github.com/Youzini-afk/Varin/actions/workflows/ci.yml/badge.svg)](https://github.com/Youzini-afk/Varin/actions/workflows/ci.yml)
-[![Docker Images](https://github.com/Youzini-afk/Varin/actions/workflows/docker.yml/badge.svg)](https://github.com/Youzini-afk/Varin/actions/workflows/docker.yml)
-[![License: AGPL v3](https://img.shields.io/badge/License-AGPL_v3-blue.svg)](../../LICENSE)
+<p align="center"><strong>開源的通用 Agent 工作台。</strong></p>
 
-**獨立的 Agent 工作空間與執行框架，用於程式開發、研究和專案工作，涵蓋桌面、Web 與行動端。**
+<p align="center">
+  <a href="https://github.com/Youzini-afk/Varin/releases">下載</a> ·
+  <a href="../../packages/docs/README.md">使用指南</a> ·
+  <a href="../../docs/ops/varin-extension-authoring.md">開發擴充功能</a> ·
+  <a href="../translations/CONTRIBUTING.zh-TW.md">參與貢獻</a>
+</p>
 
-Varin 使用自己的原生 Rust Agent runtime。Catalog 擁有 Thread、分支、持久對話歷史與執行狀態。
-共用 Application Host 負責模型連線與帳號、Agent 資源設定、MCP 設定和可信工作區服務。
-用戶端透過同一套應用 API 呈現並控制這些服務。詳見[架構](../../docs/architecture.md)。
+<p align="center">
+  <a href="https://github.com/Youzini-afk/Varin/releases"><img src="https://img.shields.io/github/v/release/Youzini-afk/Varin" alt="Release" /></a>
+  <a href="https://github.com/Youzini-afk/Varin/actions/workflows/ci.yml"><img src="https://github.com/Youzini-afk/Varin/actions/workflows/ci.yml/badge.svg" alt="CI" /></a>
+  <a href="../../LICENSE"><img src="https://img.shields.io/badge/License-AGPL_v3-blue.svg" alt="License: AGPL v3" /></a>
+</p>
 
-> [!IMPORTANT]
-> Varin 尚未達到 1.0，正在積極開發。產品介面與私有執行階段協定同步演進，新舊版本不保證互通。
-> 請備份重要工作區，並在持久部署中固定經過驗證的映像檔摘要。現有使用者資產不會被自動匯入、遷移或改寫；
-> 不支援的內部儲存格式會被拒絕開啟。
+把模型、工具、檔案和專案放在同一個工作空間裡。你可以和 Agent 一起排查問題、撰寫程式、閱讀論文，或製作互動式說明；執行過程和結果都保留在對話中，方便查看與繼續工作。
 
-## Varin 提供什麼
+Varin 提供桌面版和網頁版，也有連接 Host 的行動客戶端。它使用自己的 Rust 執行環境管理 Agent 執行和對話歷史。
 
-- **原生對話：** Thread 與分支歷史、串流回應、輸入佇列、模型與思考級別選擇、子任務、計畫、權限和復原，
-  均由原生 Catalog 支撐。[執行階段](../../docs/runtime.md)
-- **程式開發工作區：** 檔案、差異、Git、worktree、終端機、工作區搜尋、語言伺服器和偵錯。
-  桌面與 Web 共用 Monaco，行動端輕量編輯器使用同一個文件權威，並明確處理未儲存的緩衝區與衝突。
-  [工作台](../../docs/workbench.md)
-- **執行與復原：** 經准入的來源區分即時檔案、快照和實體化工作。Rust 擁有儲存與執行資源；
-  權限、取消意圖和實際完成是獨立事實。[資源與復原](../../docs/resources.md)
-- **研究與上下文：** 精確和語意檢索、語言導覽、作用域筆記、Bot 知識、Web 與學術探索，
-  以及保留來源和頁面影像的 PDF 材料。[檢索與上下文](../../docs/retrieval.md)
-- **Host 管理的設定：** 透過專用設定配置模型渠道、帳號、端點、Agent 指令與技能、MCP 連線。
-  憑證和特權執行由可信 owner 持有。[模型](../../packages/web/application-host/lib/models/DOCUMENTATION.md)、
-  [Agent 資源](../../packages/web/application-host/lib/agent-resources/DOCUMENTATION.md)、
-  [MCP](../../packages/web/application-host/lib/mcp/DOCUMENTATION.md)
-- **本地與遠端使用：** Electron 內嵌 Application Host，Web 和 Capacitor 行動用戶端連線至同一 Host。
-  遠端 Host、配對、通道及容器/SSH 部署保留明確的存取與平台邊界。
-  [安全](../../docs/security.md) · [維運](../../docs/ops/README.md)
+## 用 Varin 做什麼
 
-四個內建 Workbench Profile 分別選擇 **Agent Workspace**、**IDE Workbench**、**Research Workbench**
-或 **Varin Bot**。Agent、Research 和 Bot 支援桌面、Web 與行動端，IDE 支援桌面與 Web。
-這些 Profile 都是 Varin 擴充套件，可以替換整個外殼或個別貢獻；工作焦點、文件和 Thread 身分獨立於介面呈現。
+| 手頭的工作 | Varin 提供的能力 |
+| --- | --- |
+| 推進一項任務 | 串流對話、訊息佇列、計畫、子 Agent 和排程接續。 |
+| 開發專案 | 檔案編輯、差異檢視、Git 與 worktree、終端機，以及程式碼檢索和語言工具。 |
+| 閱讀與研究 | 網頁與學術檢索、PDF 閱讀，在對話旁保留原始資料。 |
+| 製作視覺化內容 | 生成和編輯圖像，在訊息中製作互動式 HTML 圖表和小工具。 |
+| 組織自己的工具 | 連接雲端或本機模型，設定權限，配置指令、skills 和 MCP 服務。 |
+| 跨裝置工作 | 使用本機工作區，或從桌面、瀏覽器和行動裝置連接遠端 Host。 |
 
-模型供應商、Computer/VM 和封裝支援取決於實際環境。針對性測試不等於完整的平台驗收；
-詳見[執行階段驗收](../../docs/runtime-acceptance.md)。
+內建的 Agent、IDE、Research 和 Bot 工作台為不同任務提供相應配置。IDE 支援桌面與網頁，其他工作台也支援行動裝置。[工作台說明](../../docs/workbench.md)
 
-## 開發 Varin 擴充套件
+## 開始使用
 
-Varin 擴充套件透過公開契約貢獻工作台介面和可信 Host 能力。開發工具套件包括 `@varin/extension-contract`、
-`@varin/extension-sdk`、選用的 React 19 介接器 `@varin/extension-react`、`@varin/extension-surface`
-和 `@varin/extension-cli`。
+| 使用方式 | 入口 |
+| --- | --- |
+| Windows、macOS 或 Linux 桌面版 | [下載發行版](https://github.com/Youzini-afk/Varin/releases)，選擇與系統和 CPU 架構對應的安裝檔。 |
+| 在自己的電腦或伺服器執行，透過瀏覽器存取 | [Docker 自行部署](../../docs/ops/cloud-deployment.md)，包含持久化目錄、密碼和遠端存取設定。 |
+| iOS 或 Android | [行動端設定](../../packages/mobile/README.md)。行動客戶端連接既有 Host。 |
+| 從原始碼執行 | 見下方開發步驟。 |
 
-當所用 registry 中有可用的發行版本時：
+開啟應用程式後，先在設定中連接模型提供者或本機服務。選擇模型，依任務需要選擇專案資料夾，即可開始對話。輸入框中可以選擇權限，並切換通用或科研工作模式。
+
+Varin 正處於 1.0 之前的活躍開發階段。本頁介紹目前原始碼，[發行說明](https://github.com/Youzini-afk/Varin/releases)記錄各發行版的內容。升級前請備份重要的應用程式資料。
+
+## 從原始碼執行
+
+使用 **Node.js 24**、**Bun 1.3.14**、Git，以及 [rust-toolchain.toml](../../kernel/rust-toolchain.toml) 指定的 Rust 工具鏈。原生相依套件還需要 C/C++ 工具鏈與 CMake。環境與指令說明見[開發指南](../../docs/development.md)。
 
 ```sh
-npx @varin/extension-cli init ./my-extension --id dev.example.my-extension --name "My Extension"
-cd my-extension
-npm install
-npx varin-extension build
-npx varin-extension test
-```
-
-原始碼工作流程、manifest、能力、生命週期、發布與測試契約見[擴充套件](../../docs/extensions.md)及
-[開發指南](../../docs/ops/varin-extension-authoring.md)。
-
-## 下載桌面版
-
-請在 [GitHub Releases](https://github.com/Youzini-afk/Varin/releases) 查看可用產物及平台、版本資訊。
-原始碼和容器使用方式如下。
-
-## 從原始碼開始
-
-前提：Node.js 22.19 或更新版本（原始碼開發基線為 Node.js 24）、Bun 1.3.14、Git，
-以及 [kernel/rust-toolchain.toml](../../kernel/rust-toolchain.toml) 指定的 Rust 工具鏈。
-平台設定與驗證見[開發指南](../../docs/development.md)。
-
-Rust kernel 是必要元件。沒有 staged binary 時，原始碼開發可以透過 Cargo 啟動它；
-`bun run kernel:build` 產生封裝布局所需、經 manifest 驗證的 release 執行檔。
-就緒檢查針對實際 Application Host 與原生 Thread catalog。
-
-### Web 開發
-
-```bash
 git clone https://github.com/Youzini-afk/Varin.git
 cd Varin
 bun install --frozen-lockfile
 bun run dev
 ```
 
-開啟終端機印出的 Vite URL。此命令在可用開發連接埠啟動 UI 與可信 Application Host。
-開始模型工作前，請在設定中配置模型連線與帳號。
+開啟終端機印出的 UI 網址。此指令會啟動網頁介面和 Application Host。
 
-### 桌面開發
+開發桌面版時，在同一份原始碼中執行 `bun run electron:dev`。它會準備原生核心，並啟動帶有開發介面的 Electron 應用程式。[桌面開發與打包](../../packages/electron/README.md#development)
 
-```bash
-bun run electron:dev
-```
+## 擴充你的工作台
 
-若要測試封裝的 UI 資源：
+Varin 的 Harness 負責連接模型、工具、上下文、權限、背景工作和子 Agent。原生 Rust 執行環境儲存對話與執行紀錄，共享的 Application Host 提供模型連線和工作區服務。
 
-```bash
-bun run electron:dev:bundled
-```
+常用工具直接宣告，其他可用能力透過索引和按需說明提供。讀取說明時保持工具宣告前綴穩定。研究工具在通用模式下按需揭露，在科研模式下直接常駐。
 
-### Windows 安裝程式
+擴充功能可以加入工具、模型轉接器、面板，乃至整套工作台配置。從[擴充功能作者指南](../../docs/ops/varin-extension-authoring.md)、[SDK](../../packages/extension-sdk/README.md)或[範例](../../examples/extensions/README.md)開始。
 
-在 Windows 上執行：
+實作細節見[架構](../../docs/architecture.md)、[執行環境](../../docs/runtime.md)和[文件索引](../../docs/README.md)。
 
-```powershell
-bun run electron:build:win
-bun run electron:smoke:win
-```
+## 參與貢獻
 
-NSIS 安裝程式、更新中繼資料和 blockmap 輸出至 `packages/electron/dist`。未設定簽署憑證的建置不帶簽章。
-詳見[桌面封裝](../../packages/electron/README.md#packaging)。
+歡迎提交問題報告、改進介面和工具、補充文件與翻譯，或分享平台實測結果。[貢獻指南](../translations/CONTRIBUTING.zh-TW.md)介紹開發準備、如何選擇改動和提交 Pull Request。
 
-## 執行雲端映像檔
-
-Compose 預設使用 `ghcr.io/youzini-afk/varin-slim:latest`。在 Linux Docker 主機上：
-
-```bash
-mkdir -p data/varin data/ssh data/cloudflared workspaces
-sudo chown -R 1000:1000 data workspaces
-umask 077
-printf 'VARIN_UI_PASSWORD=%s\n' "$(openssl rand -base64 24)" > .env
-docker compose up -d
-curl --fail http://127.0.0.1:3000/health
-```
-
-開啟 `http://127.0.0.1:3000`，使用產生的密碼。面向網際網路的部署需要 TLS 反向代理或經核准的通道，
-並遵守[轉送規則](../../docs/ops/REVERSE_PROXY.md)。正式部署請將 `VARIN_IMAGE` 固定為經過驗證的不可變摘要。
-
-如需容器內的 Python、Java、Go 或 Rust 開發工具：
-
-```bash
-docker compose -f docker-compose.yml -f docker-compose.toolbelt.yml up -d
-```
-
-持久化路徑、環境變數、映像檔變體、支援的架構，以及具健康檢查和回復機制的 SSH 部署，見
-[雲端部署](../../docs/ops/cloud-deployment.md)。
-
-## 架構與開發
-
-從[文件索引](../../docs/README.md)、[架構](../../docs/architecture.md)和[開發指南](../../docs/development.md)
-開始。Application Host 整合原生 Catalog 執行、Rust 擁有的儲存與資源，以及獨立的知識和擴充套件 owner；
-renderer 不擁有憑證或持久執行。
-
-貢獻前請閱讀 [CONTRIBUTING](../CONTRIBUTING.md) 和 [AGENTS](../../AGENTS.md)。命令以 package scripts
-為準，驗證應針對改動選擇。
+[回報問題](https://github.com/Youzini-afk/Varin/issues/new?template=bug.yml) · [提出建議](https://github.com/Youzini-afk/Varin/issues/new?template=feature.yml) · [私下回報安全漏洞](../SECURITY.md)
 
 感謝 [LinuxDO](https://linux.do) 社群的支持。
 
 ## 來源與授權
 
-Varin 是一個獨立專案，源自維護者的 OpenChamber 分支。
+Varin 是獨立專案，起源於維護者的 OpenChamber 分支。
 
-組合後的作品以 [GNU Affero General Public License v3.0](../../LICENSE)（`AGPL-3.0-only`）散布。
-透過網路向使用者提供修改版本時，必須按授權條款要求提供對應原始碼。保留的著作權與第三方義務見
-[THIRD_PARTY_NOTICES](../../THIRD_PARTY_NOTICES.md)。
+專案依 [GNU Affero General Public License v3.0](../../LICENSE)（`AGPL-3.0-only`）散布。透過網路提供修改版本時，應依授權條款提供對應原始碼。著作權與第三方聲明保留在 [THIRD_PARTY_NOTICES](../../THIRD_PARTY_NOTICES.md) 中。

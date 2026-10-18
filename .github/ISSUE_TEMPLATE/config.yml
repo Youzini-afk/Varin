@@ -4,5 +4,5 @@ contact_links:
     url: https://github.com/Youzini-afk/Varin/security/advisories/new
     about: 请私密报告漏洞，不要开公开 Issue。Report vulnerabilities privately, not as a public issue.
   - name: 文档 / Documentation
-    url: https://github.com/Youzini-afk/Varin/tree/main/packages/docs/content/docs
-    about: 安装与使用文档源码，含简体中文与 8 种其他语言。Documentation source, in Simplified Chinese plus eight other languages.
+    url: https://github.com/Youzini-afk/Varin/tree/main/packages/docs
+    about: 安装、使用与排查指南，含多语言入口。Installation, usage, and troubleshooting guides with language navigation.
