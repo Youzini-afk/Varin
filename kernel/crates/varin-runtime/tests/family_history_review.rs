@@ -197,6 +197,51 @@ fn real_main_sibling_nested_discovery_survives_terminal_and_never_grants_control
     std::fs::remove_dir_all(root).unwrap();
 }
 #[test]
+fn retained_output_pages_return_exact_text_and_complete_records() {
+    let mut f = Fixture::new();
+    let child = f.accept();
+    f.settle_exchange();
+    let run = f.context.run_id.clone();
+    let text = "第一行🙂\n\"quotes\" and \\slashes\n".repeat(40);
+    let records = vec![json!({"id":0,"body":"large record".repeat(60)}), json!({"id":1,"body":"last"})];
+    let source = json!({"id":"retained-output","provenance":{"kind":"assistant"},"opaque":null,
+        "content":{"kind":"output","output":{"data":{"records":records,"a/b~c":text},"parts":[{"kind":"text","text":text}]}}});
+    let head = f.db.head("branch:parent").unwrap();
+    let item = f.db.append_history(&run, f.db.epoch(), head.as_deref(), HistorySource::Assistant, source, None).unwrap();
+    for pointer in ["/parts/0/text", "/data/a~1b~0c"] {
+        let mut collected = String::new();
+        let mut anchor = None;
+        let mut offset = 0;
+        loop {
+            let page = f.db.capture_family_read(&child.child_thread_id, Some("thread:parent"), Some("branch:parent")).unwrap()
+                .output(OutputRequest { run_id:None, anchor:anchor.clone(), item_id:item.id.clone(), pointer:pointer.into(),
+                    offset:Some(offset), max_bytes:Some(73) }, &|| false).unwrap();
+            assert_eq!(page["format"], "text");
+            assert_eq!(page["totalBytes"], text.len());
+            collected.push_str(page["value"].as_str().unwrap());
+            anchor = Some(page["anchor"].as_str().unwrap().to_owned());
+            if let Some(next) = page["nextOffset"].as_u64() { assert!(next as usize > offset); offset = next as usize; }
+            else { break; }
+        }
+        assert_eq!(collected, text);
+    }
+    let first = f.db.capture_family_read(&child.child_thread_id, Some("thread:parent"), Some("branch:parent")).unwrap()
+        .output(OutputRequest { run_id:None, anchor:None, item_id:item.id.clone(), pointer:"/data/records".into(),
+            offset:None, max_bytes:Some(100) }, &|| false).unwrap();
+    assert_eq!(first["format"], "records");
+    assert_eq!(first["value"], json!([records[0]]));
+    assert_eq!(first["nextOffset"], 1);
+    let second = f.db.capture_family_read(&child.child_thread_id, Some("thread:parent"), Some("branch:parent")).unwrap()
+        .output(OutputRequest { run_id:None, anchor:Some(first["anchor"].as_str().unwrap().into()), item_id:item.id.clone(),
+            pointer:"/data/records".into(), offset:Some(1), max_bytes:Some(100) }, &|| false).unwrap();
+    assert_eq!(second["value"], json!([records[1]]));
+    assert!(second["nextOffset"].is_null());
+    let root = f.root.clone();
+    drop(f);
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
 fn anchors_pagination_run_selection_search_and_semantic_item_expansion_are_fixed() {
     let mut f = Fixture::new();
     let child = f.accept();

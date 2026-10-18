@@ -129,11 +129,20 @@ pub fn model_tools(tools: &[ToolSchema]) -> Option<Vec<ToolSchema>> {
     }
     let mut visible = tools
         .iter()
-        .filter(|tool| is_always_declared(&tool.name))
+        .filter(|tool| is_declared(tool))
         .cloned()
         .collect::<Vec<_>>();
     visible.sort_by(|a, b| a.name.cmp(&b.name));
     Some(visible)
+}
+
+pub fn is_declared(tool: &ToolSchema) -> bool {
+    is_always_declared(&tool.name)
+        || tool.metadata.as_ref().is_some_and(|metadata| metadata.always_declared)
+}
+
+pub fn deferred_namespace(tool: &ToolSchema) -> Option<&'static str> {
+    if is_declared(tool) { None } else { namespace(&tool.name) }
 }
 
 /// The executable request cut of a frozen launch. Keep this distinct from the

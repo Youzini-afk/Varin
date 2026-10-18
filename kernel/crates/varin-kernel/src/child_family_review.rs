@@ -17,6 +17,17 @@ fn selected_family_tools_execute_from_real_model_and_policy_origins() {
         let item_id = f.catalog().lock().unwrap().history("branch:parent").unwrap().last().unwrap().id.clone();
         calls.push(ToolCall { call_id: "read-original-item".into(), name: "read_thread".into(), schema_version: "2".into(),
             arguments: json!({"threadId":"thread:parent","branchId":"branch:parent","query":{"kind":"item","itemId":item_id,"maxBytes":512}}) });
+        let output_id = {
+            let catalog = f.catalog();
+            let mut db = catalog.lock().unwrap();
+            let parent = db.history("branch:parent").unwrap().last().unwrap().clone();
+            let output = json!({"id":"output-page","provenance":{"kind":"assistant"},"opaque":null,
+                "content":{"kind":"output","output":{"data":{"records":[{"body":"whole row"}]},"parts":[]}}});
+            let epoch = db.epoch();
+            db.append_history(&parent.run_id, epoch, Some(&parent.id), varin_runtime::HistorySource::Assistant, output, None).unwrap().id
+        };
+        calls.push(ToolCall { call_id:"read-output".into(), name:"read_thread".into(), schema_version:"2".into(),
+            arguments:json!({"threadId":"thread:parent","branchId":"branch:parent","query":{"kind":"output","itemId":output_id,"pointer":"/data/records","maxBytes":1}}) });
         let mut owner = OwnerReplies::default();
         execute(&f, model, calls.clone(), &mut owner, false);
         assert!(
@@ -35,7 +46,7 @@ fn selected_family_tools_execute_from_real_model_and_policy_origins() {
                     _ => None,
                 })
                 .collect::<Vec<_>>();
-            assert_eq!(results.len(), 4);
+            assert_eq!(results.len(), 5);
             for result in &results {
                 let ToolCompletion::Result {
                     outcome,
@@ -74,6 +85,9 @@ fn selected_family_tools_execute_from_real_model_and_policy_origins() {
             let ToolCompletion::Result { content, .. } = &results[3].completion else { unreachable!() };
             assert_eq!(content.data["page"]["itemId"], item_id);
             assert!(content.data["page"]["anchor"].as_str().is_some());
+            let ToolCompletion::Result { content, .. } = &results[4].completion else { unreachable!() };
+            assert_eq!(content.data["page"]["format"], "records");
+            assert_eq!(content.data["page"]["value"], json!([{"body":"whole row"}]));
         } else {
             let raw = rusqlite::Connection::open_with_flags(
                 f.root.join("conversation.sqlite"),
@@ -88,7 +102,7 @@ fn selected_family_tools_execute_from_real_model_and_policy_origins() {
                 .unwrap()
                 .collect::<Result<Vec<_>, _>>()
                 .unwrap();
-            assert_eq!(receipts.len(), 4);
+            assert_eq!(receipts.len(), 5);
             for (_, outcome) in receipts {
                 assert_eq!(outcome, "\"succeeded\"");
             }

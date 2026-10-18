@@ -102,6 +102,17 @@ pub struct ItemRequest {
     pub offset: Option<usize>,
     pub max_bytes: Option<usize>,
 }
+/// A range within the original tool output. Pointers address OutputBody, not provider JSON.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct OutputRequest {
+    pub run_id: Option<String>,
+    pub anchor: Option<String>,
+    pub item_id: String,
+    pub pointer: String,
+    pub offset: Option<usize>,
+    pub max_bytes: Option<usize>,
+}
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct FamilyRun {
@@ -1074,18 +1085,22 @@ impl FamilyRead {
             parts: vec![crate::output::OutputPart::Media { media: resolved }],
         })
     }
-    pub fn item(self, request: ItemRequest, cancel: &dyn Fn() -> bool) -> Result<ItemPage> {
+    fn original_item(&self, run: Option<&str>, signed_anchor: Option<&str>, item_id: &str, cancel: &dyn Fn() -> bool) -> Result<(Anchor, HistoryItem)> {
         let db = self.open(cancel)?;
-        let anchor = self.anchor(&db, request.run_id.as_deref(), request.anchor.as_deref())?;
+        let anchor = self.anchor(&db, run, signed_anchor)?;
         let ancestry = self.ancestry(&db, &anchor, cancel)?;
         let (_, item) = ancestry
             .iter()
-            .find(|(_, item)| item.id == request.item_id)
+            .find(|(_, item)| item.id == item_id)
             .ok_or_else(|| RuntimeError::Conflict("item is not on the anchored view".into()))?;
         if anchor.run.as_ref().is_some_and(|run| *run != item.run_id) {
             return Err(RuntimeError::Conflict("item belongs to another Run".into()));
         }
-        let (body, _) = self.semantic(item, cancel)?;
+        Ok((anchor, item.clone()))
+    }
+    pub fn item(self, request: ItemRequest, cancel: &dyn Fn() -> bool) -> Result<ItemPage> {
+        let (anchor, item) = self.original_item(request.run_id.as_deref(), request.anchor.as_deref(), &request.item_id, cancel)?;
+        let (body, _) = self.semantic(&item, cancel)?;
         check(cancel)?;
         let text = serde_json::to_string(&body)?;
         let offset = request.offset.unwrap_or(0);
@@ -1097,13 +1112,62 @@ impl FamilyRead {
             branch_id: anchor.branch,
             run_id: anchor.run,
             head_id: anchor.head,
-            item_id: item.id.clone(),
+            item_id: request.item_id,
             format: "conversation_json".into(),
             text: text[offset..end].into(),
             offset,
             next_offset: (end < text.len()).then_some(end),
             total_bytes: text.len(),
         })
+    }
+    pub fn output(self, request: OutputRequest, cancel: &dyn Fn() -> bool) -> Result<Value> {
+        let (anchor, item) = self.original_item(request.run_id.as_deref(), request.anchor.as_deref(), &request.item_id, cancel)?;
+        let (body, _) = self.content.load_stored_history_payload(&item.content, cancel)?;
+        // These paths belong to the runtime's history envelope. Borrow the original body;
+        // selecting one field must not deserialize and reserialize the entire output again.
+        let content = &body["content"];
+        let output = match content["kind"].as_str() {
+            Some("output") => content.get("output"),
+            Some("tool_result") => content.pointer("/result/completion/content"),
+            _ => None,
+        }.ok_or_else(|| RuntimeError::Invalid("item has no output body".into()))?;
+        let selected = output.pointer(&request.pointer)
+            .ok_or_else(|| RuntimeError::Invalid("output pointer does not exist".into()))?;
+        let offset = request.offset.unwrap_or(0);
+        let budget = request.max_bytes.unwrap_or(65536);
+        if budget == 0 { return Err(RuntimeError::Invalid("maxBytes must be positive".into())); }
+        let (format, value, end, total) = match selected {
+            Value::Array(records) => {
+                if offset > records.len() { return Err(RuntimeError::Invalid("output record offset exceeds length".into())); }
+                let mut bytes: usize = 2;
+                let mut end = offset;
+                for record in &records[offset..] {
+                    check(cancel)?;
+                    let next = serde_json::to_vec(record)?.len() + usize::from(end > offset);
+                    // Always return a complete first record, so a large record cannot stall pagination.
+                    if end > offset && bytes.saturating_add(next) > budget { break; }
+                    bytes = bytes.saturating_add(next);
+                    end += 1;
+                    if bytes >= budget { break; }
+                }
+                ("records", Value::Array(records[offset..end].to_vec()), end, records.len())
+            }
+            Value::String(text) => {
+                let end = utf8_end(text, offset, budget)?;
+                ("text", Value::String(text[offset..end].into()), end, text.len())
+            }
+            other => {
+                let text = serde_json::to_string(other)?;
+                let end = utf8_end(&text, offset, budget)?;
+                ("json", Value::String(text[offset..end].into()), end, text.len())
+            }
+        };
+        self.finish(cancel)?;
+        let mut page = json!({"threadId":anchor.thread,"branchId":anchor.branch,"runId":anchor.run,
+            "headId":anchor.head,"anchor":self.sign(&anchor)?,"itemId":request.item_id,"pointer":request.pointer,
+            "format":format,"value":value,"offset":offset,"nextOffset":(end < total).then_some(end)});
+        page[if format == "records" { "totalItems" } else { "totalBytes" }] = total.into();
+        Ok(page)
     }
 }
 fn utf8_end(text: &str, offset: usize, budget: usize) -> Result<usize> {

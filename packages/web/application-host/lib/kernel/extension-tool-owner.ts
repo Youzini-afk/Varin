@@ -149,6 +149,7 @@ export async function retainExtensionTool(
   options: ExtensionToolOwnerOptions,
   selected: HostServiceBinding,
   required?: ExtensionToolBinding,
+  workFocus?: ExtensionToolRun['workFocus'],
 ): Promise<ExtensionToolLease> {
   const { runtime, kernel } = options,
     pin = (() => { try { return selected.pin(); } catch (error) { selected.release(); throw error; } })();
@@ -168,6 +169,10 @@ export async function retainExtensionTool(
     } catch (error) { throw new ExtensionToolConfigurationError(originalDescriptor.id, error); }
     const descriptor = parseVarinExtensionServiceProvision(options.configurationIdentity?.declaration?.(originalDescriptor, configurationIdentity) ?? originalDescriptor);
     const schema = extensionToolSchema(descriptor);
+    const alwaysDeclared = required
+      ? required.tool.metadata?.always_declared === true
+      : workFocus === 'research' && ['research_search', 'research_decide'].includes(schema.name);
+    if (alwaysDeclared) schema.metadata!.always_declared = true;
     releaseConfiguration = options.configurationIdentity?.retain?.(descriptor, configurationIdentity);
     // Null states that this service has no separate configuration authority.
     const binding: ExtensionToolBinding = {
@@ -479,8 +484,7 @@ export function createExtensionTools(
     const watches = new Map<string, () => void>();
     const delivered = new Map<string, ExtensionToolLease>();
     const enabled = (descriptor: VarinExtensionServiceProvision) =>
-      preparedOptions.configurationIdentity?.enabled?.(descriptor) !== false
-      && (run.workFocus === 'research' || !['research_search', 'research_decide'].includes(descriptor.tool?.name ?? ''));
+      preparedOptions.configurationIdentity?.enabled?.(descriptor) !== false;
     const routingScope = {
       threadId: run.threadId, branchId: run.branchId, sourceRunId: run.runId,
       ...(run.projectId ? { projectId: run.projectId } : {}),
@@ -549,8 +553,8 @@ export function createExtensionTools(
       );
       try {
         signal.throwIfAborted(); requireToolSource(id, selected.descriptor.tool?.requirements, run.source);
-        if (!enabled(selected.descriptor)) throw new ExtensionToolConfigurationError(id, 'Tool is disabled for this work focus');
-        return await retainExtensionTool(candidateOptions, selected);
+        if (!enabled(selected.descriptor)) throw new ExtensionToolConfigurationError(id, 'Tool is disabled by its configuration');
+        return await retainExtensionTool(candidateOptions, selected, undefined, run.workFocus);
       } catch (error) { selected.release(); throw error; }
       } finally { releasePreparation?.(); }
     };

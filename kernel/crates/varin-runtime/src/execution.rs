@@ -319,6 +319,9 @@ impl ToolRequirements {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct ToolMetadata {
+    /// Host-selected presentation for the frozen work focus, independent of availability.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub always_declared: bool,
     pub service_id: String,
     pub service_version: u64,
     pub completion: RegisteredToolCompletion,

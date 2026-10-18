@@ -13,6 +13,7 @@ pub mod google;
 pub mod extensions;
 pub(crate) mod groups;
 pub(crate) mod input_projection;
+mod output_preview;
 pub mod host_auth;
 pub mod mistral;
 pub mod pi_messages;

@@ -195,8 +195,12 @@ fn tool_output_budget_preserves_receipts_utf8_and_reuses_the_projection() {
     let Content::ToolResult { result } = &projected.content else { panic!("tool receipt"); };
     let ToolCompletion::Result { outcome, effect, content } = &result.completion else { panic!("completion"); };
     assert_eq!((*outcome, *effect), (crate::Outcome::Failed, crate::Effect::Partial));
-    assert_eq!(content.data["historyItemId"], "large-receipt");
-    assert_eq!(content.data["read"], json!({"tool":"read_thread","arguments":{"query":{"kind":"item","itemId":"large-receipt","offset":0,"maxBytes":8192}}}));
+    assert_eq!(content.data, json!({"error":"timeout"}));
+    let OutputPart::Text { text: notice } = content.parts.last().unwrap() else { panic!("continuation"); };
+    let notice: Value = serde_json::from_str(notice).unwrap();
+    let omitted = &notice["outputPreview"]["omitted"][0];
+    assert_eq!(notice["outputPreview"]["historyItemId"], "large-receipt");
+    assert_eq!(omitted["read"], json!({"tool":"read_thread","arguments":{"query":{"kind":"output","itemId":"large-receipt","pointer":"/parts/0/text","offset":omitted["headBytes"],"maxBytes":32768}}}));
     let OutputPart::Text { text: shown } = &content.parts[0] else { panic!("preview"); };
     assert!(shown.contains("START") && shown.ends_with("LAST_ERROR"));
     assert!(shown.len() + content.data.to_string().len() <= 32768);
@@ -206,7 +210,8 @@ fn tool_output_budget_preserves_receipts_utf8_and_reuses_the_projection() {
     request.binding.tools.clear();
     let unavailable = input_projection::model_input(&request, &conn, Some(&mut reuse));
     let Content::ToolResult { result } = &unavailable.history[0].content else { panic!("tool receipt"); };
-    assert!(super::completion_output(&result.completion).unwrap().data.get("read").is_none());
+    let OutputPart::Text { text: notice } = super::completion_output(&result.completion).unwrap().parts.last().unwrap() else { panic!("continuation"); };
+    assert!(serde_json::from_str::<Value>(notice).unwrap()["outputPreview"]["omitted"][0].get("read").is_none());
     let wire = responses::ResponsesProvider::new(conn).serialize(&request, None).unwrap().to_value().to_string();
     assert!(wire.len() < text.len() && wire.contains("LAST_ERROR") && wire.contains("truncated"));
     assert!(!wire.contains("OMITTED_MIDDLE"));
@@ -215,6 +220,48 @@ fn tool_output_budget_preserves_receipts_utf8_and_reuses_the_projection() {
     request.binding.provider_family = chat::FAMILY.into();
     let chat = chat::ChatProvider::new(conn).serialize(&request, None).unwrap().to_value().to_string();
     assert!(!chat.contains("OMITTED_MIDDLE") && chat.contains("LAST_ERROR"));
+}
+
+#[test]
+fn tool_output_preview_keeps_records_and_cursors_and_explicit_pages_intact() {
+    let mut conn = connection(vec![], 1);
+    conn.tool_output_visible_bytes = Some(1024);
+    let mut request = view(responses::FAMILY);
+    request.binding.tools[0].name = "read_thread".into();
+    let records = (0..20).map(|n| json!({"path":format!("src/{n}.rs"),"content":"complete record\n".repeat(10)})).collect::<Vec<_>>();
+    let data = json!({"status":"partial","error":{"code":"index_incomplete","message":"Remaining indexing work"},
+        "records":records,"nextCursor":"original-page-end","total":100});
+    let make_result = |id: &str, data: Value| ConversationItem {
+        resource_activation: None, id: id.into(), provenance: Provenance::ToolData { call_id: id.into() },
+        content: Content::ToolResult { result: ToolResult { request_id: "request".into(), call_id: id.into(),
+            completion: ToolCompletion::Result { outcome: crate::Outcome::Succeeded, effect: crate::Effect::None, content: data.into() } } }, opaque: None,
+    };
+    request.history.push(make_result("list", data.clone()).into());
+    let projected = input_projection::model_input(&request, &conn, None);
+    let Content::ToolResult { result } = &projected.history[0].content else { panic!("result"); };
+    let output = super::completion_output(&result.completion).unwrap();
+    for key in ["status", "error", "nextCursor", "total"] { assert_eq!(output.data[key], data[key]); }
+    let shown = output.data["records"].as_array().unwrap();
+    assert!(!shown.is_empty() && shown.len() < records.len());
+    assert_eq!(shown, &records[..shown.len()]);
+    let OutputPart::Text { text } = output.parts.last().unwrap() else { panic!("continuation"); };
+    let notice: Value = serde_json::from_str(text).unwrap();
+    assert_eq!(notice["outputPreview"]["omitted"][0]["read"]["arguments"]["query"]["offset"], shown.len());
+    assert_eq!(notice["outputPreview"]["omitted"][0]["pointer"], "/data/records");
+
+    for (name, arguments) in [
+        ("file_read", json!({"path":"source.rs","length":9000})),
+        ("process_read", json!({"processId":"process"})),
+        ("read_thread", json!({"query":{"kind":"output","itemId":"list","pointer":"/data/records"}})),
+        ("tool_invoke", json!({"reference":{"name":"read_thread","version":"2"},"arguments":{"query":{"kind":"item","itemId":"list"}}})),
+    ] {
+        request.history.clear();
+        request.history.push(ConversationItem { resource_activation: None, id: "call".into(), provenance: Provenance::Assistant,
+            content: Content::ToolCall { call: ToolCall { call_id:"page".into(), name:name.into(), schema_version:"1".into(), arguments } }, opaque:None }.into());
+        request.history.push(make_result("page", data.clone()).into());
+        let projected = input_projection::model_input(&request, &conn, None);
+        assert!(Arc::ptr_eq(&projected.history[1], &request.history[1]), "{name}: explicit pages retain their full body and continuation");
+    }
 }
 fn generate(
     provider: &impl ModelProvider,
@@ -1731,6 +1778,7 @@ fn disclosure_keeps_every_protocol_tool_prefix_stable_when_hidden_capabilities_c
             common.name = name.into();
             if matches!(name, "code_retrieval" | "websearch" | "image_generate" | "image_edit") {
                 common.metadata = Some(ToolMetadata {
+                    always_declared: false,
                     service_id: format!("fixture.{name}"), service_version: 1,
                     completion: RegisteredToolCompletion::Result, lifetime: None,
                     operation: ToolOperation::Read, examples: None, source: None,
@@ -1778,6 +1826,19 @@ fn disclosure_keeps_every_protocol_tool_prefix_stable_when_hidden_capabilities_c
         reuse.prepare(&request, 1, None, 1, None);
         let appended = provider.serialize(&request, Some(&mut reuse)).unwrap().to_value();
         assert_eq!(tools_field(&first), tools_field(&appended), "{family}: documentation is appended as history, never promoted into tools");
+        let mut research = request.binding.tools.iter().find(|tool| tool.name == "websearch").unwrap().clone();
+        research.name = "research_search".into();
+        request.binding.tools.push(research.clone());
+        reuse.prepare(&request, 1, None, 1, None);
+        let general = provider.serialize(&request, Some(&mut reuse)).unwrap().to_value();
+        assert_eq!(tools_field(&first), tools_field(&general), "{family}: research remains deferred in general mode");
+        assert_eq!(crate::tool_disclosure::deferred_namespace(&research), Some("research"));
+        research.metadata.as_mut().unwrap().always_declared = true;
+        *request.binding.tools.last_mut().unwrap() = research.clone();
+        reuse.prepare(&request, 1, None, 1, None);
+        let focused = provider.serialize(&request, Some(&mut reuse)).unwrap().to_value();
+        assert!(tools_field(&focused).to_string().contains("research_search"), "{family}: research mode declares research directly");
+        assert_eq!(crate::tool_disclosure::deferred_namespace(&research), None);
     }
 }
 

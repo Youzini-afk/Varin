@@ -1115,6 +1115,7 @@ mod tests {
                 schema: json!({"type":"object"}),
                 output_schema: None,
                 metadata: Some(ToolMetadata {
+                    always_declared: false,
                     lifetime: None,
                     service_id: "helper.service".into(),
                     service_version: 1,

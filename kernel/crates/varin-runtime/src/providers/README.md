@@ -99,6 +99,16 @@ key; the original generation and endpoint pins remain authoritative. Gateway rec
 its callable contract, so a retained description from before a wording change keeps the projection
 active and preserves its original text. Auxiliary jobs without the
 gateways retain their explicitly selected tool interface.
+Research services remain deferred and executable in general work focus; Host-selected research
+focus marks their frozen metadata `always_declared`. Restoring a binding preserves that selection.
+The declaration projection and encoder reuse key apply the same selection.
+
+`output_preview.rs` budgets the body display while preserving JSON objects and complete array
+records. Long strings/logs receive UTF-8 head/tail previews with line boundaries where possible.
+Additional continuation text identifies each omitted OutputBody pointer and its retained
+`read_thread` output range. Original receipts/media remain in their owner. Explicit file ranges,
+process pages and retained-output pages bypass further previewing, including wrapped calls.
+Immutable projections are reused; no inference pass summarizes or rescans previous output.
 Object unions and local references receive an explicit object root; constants become typed singleton
 enums. Alternatives, definitions, required fields and ordinary example/default data stay intact.
 The original declaration and its version remain the execution validator's authority. Explicit nonobject

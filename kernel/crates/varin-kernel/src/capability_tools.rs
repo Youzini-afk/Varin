@@ -208,7 +208,7 @@ impl Call {
         }
         Ok(
             json!({"groups":disclosure::GROUPS.iter().filter_map(|(id, description)| {
-            let count = tools.iter().filter(|tool| disclosure::namespace(&tool.name) == Some(*id)).count();
+            let count = tools.iter().filter(|tool| disclosure::deferred_namespace(tool) == Some(*id)).count();
             (count > 0).then(|| json!({"namespace":id,"description":description,"tools":count}))
         }).collect::<Vec<_>>()}),
         )
