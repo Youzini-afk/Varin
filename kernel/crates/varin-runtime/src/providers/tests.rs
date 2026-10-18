@@ -615,6 +615,44 @@ fn chat_connection(events: Vec<Value>, done: bool) -> Connection {
     )
 }
 #[test]
+fn disclosure_accepts_mixed_direct_chat_calls_without_declaring_deferred_tools() {
+    let provider = chat::ChatProvider::new(chat_connection(vec![json!({
+        "id":"mixed", "choices":[{"index":0,"finish_reason":"tool_calls","delta":{"role":"assistant","tool_calls":[
+            {"index":0,"id":"read","type":"function","function":{"name":"process_read","arguments":"{\"processId\":\"original\"}"}},
+            {"index":1,"id":"resize","type":"function","function":{"name":"process_resize","arguments":"{\"processId\":\"original\",\"cols\":100,\"rows\":30}"}}
+        ]}}]
+    })], true));
+    let mut request = view(chat::FAMILY);
+    let mut read = request.binding.tools.remove(0);
+    read.name = "process_read".into();
+    let mut resize = read.clone();
+    resize.name = "process_resize".into();
+    resize.version = "resize-v2".into();
+    request.binding.tools = crate::tool_disclosure::schemas();
+    request.binding.tools.extend([read, resize]);
+    let snapshot = RequestSnapshot { serialized: provider.serialize(&request, None).unwrap(), view: request };
+    let declarations = snapshot.serialized.to_value()["tools"].clone();
+    let names = declarations.as_array().unwrap().iter().map(|tool| tool["function"]["name"].as_str().unwrap()).collect::<Vec<_>>();
+    assert!(names.contains(&"process_read"));
+    assert!(!names.contains(&"process_resize"));
+    let mut items = Vec::new();
+    assert_eq!(provider.generate(&snapshot, &CancellationToken::default(), &mut |event| {
+        if let ProviderEvent::ItemCompleted { item } = event { items.push(item); }
+        Ok(())
+    }).unwrap(), FinishReason::ToolCalls);
+    let calls = crate::execution::validate_model_items(&items, &snapshot).unwrap();
+    assert_eq!(calls.len(), 2);
+    assert_eq!(calls[1].name, "process_resize");
+    assert_eq!(calls[1].schema_version, "resize-v2");
+    assert_eq!(calls[1].arguments, json!({"processId":"original","cols":100,"rows":30}));
+    let mut unavailable = snapshot.clone();
+    unavailable.view.binding.tools.retain(|tool| tool.name != "process_resize");
+    assert_eq!(crate::execution::validate_model_items(&items, &unavailable).unwrap_err().code, "unknown_tool_schema");
+    unavailable.view.binding.tools.push(ToolSchema { version: "different".into(), ..snapshot.view.binding.tools.last().unwrap().clone() });
+    assert_eq!(crate::execution::validate_model_items(&items, &unavailable).unwrap_err().code, "unknown_tool_schema");
+}
+
+#[test]
 fn chat_complete_tool_fragments_replay_once_and_keep_usage_after_finish() {
     let p = chat::ChatProvider::new(chat_connection(
         vec![

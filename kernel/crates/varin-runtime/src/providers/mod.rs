@@ -493,7 +493,8 @@ pub(super) fn schema_version(view: &RequestView, name: &str) -> Result<String, M
     // Auxiliary outputs are evidence, never executable calls. Retain an offending call and
     // its provider original even though no schema was offered. The empty version explicitly
     // means unadmitted; the policy-model owner rejects every call before result publication.
-    // Ordinary conversation requests still require an exact offered schema below.
+    // Ordinary calls resolve the version from the complete frozen execution directory,
+    // including deferred tools omitted from the provider's declaration list.
     if matches!(view.origin, RequestOrigin::PolicyModelJob { .. } | RequestOrigin::McpSampling { .. } | RequestOrigin::AuxiliaryInference { .. }) {
         return Ok(String::new());
     }

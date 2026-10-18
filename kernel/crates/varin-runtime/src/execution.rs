@@ -3382,8 +3382,8 @@ pub(crate) fn validate_model_items(
     items: &[ProviderItem],
     snapshot: &RequestSnapshot,
 ) -> Result<Vec<ToolCall>, ExecutionError> {
-    let projected = crate::tool_disclosure::model_tools(&snapshot.view.binding.tools);
-    let model_tools = projected.as_ref().unwrap_or(&snapshot.view.binding.tools);
+    // Disclosure only reduces the provider's declarations. Direct calls still resolve
+    // against this request's complete frozen capability cut, never the live catalog.
     // Provider IDs must be unique within this response, not across independent requests.
     let mut item_ids = BTreeSet::new();
     let mut call_ids = BTreeSet::new();
@@ -3413,7 +3413,7 @@ pub(crate) fn validate_model_items(
                         "tool call identity is empty or duplicated",
                     ));
                 }
-                if !model_tools
+                if !snapshot.view.binding.tools
                     .iter()
                     .any(|schema| schema.name == call.name && schema.version == call.schema_version)
                 {

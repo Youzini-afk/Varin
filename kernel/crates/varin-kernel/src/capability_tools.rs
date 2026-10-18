@@ -229,11 +229,15 @@ impl Call {
     }
     fn run(&self, context: &ToolExecutionContext) -> Result<ToolCompletion, ExecutionError> {
         match &self.request {
-            Request::Describe(args) => Ok(ToolCompletion::Result {
-                outcome: Outcome::Succeeded,
-                effect: Effect::None,
-                content: self.describe(args)?.into(),
-            }),
+            Request::Describe(args) => {
+                let mut description = self.describe(args)?;
+                description["invocation"] = json!("Call tools directly by reference.name with the listed parameters, or use tool_invoke with reference and arguments. Both use the original validation and permissions.");
+                Ok(ToolCompletion::Result {
+                    outcome: Outcome::Succeeded,
+                    effect: Effect::None,
+                    content: description.into(),
+                })
+            }
             Request::Invoke(args) => {
                 let nested = self.owner.catalog.lock().map_err(error)?.nested_tools();
                 let receipt = nested.invoke(

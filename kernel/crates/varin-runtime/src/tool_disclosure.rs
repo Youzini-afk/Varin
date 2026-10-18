@@ -93,7 +93,8 @@ pub fn enabled(tools: &[ToolSchema]) -> bool {
     definitions().iter().all(|owned| tools.contains(owned))
 }
 
-pub fn is_direct(name: &str) -> bool {
+/// Included in every provider declaration list; deferred tools remain directly callable.
+pub fn is_always_declared(name: &str) -> bool {
     matches!(
         name,
         DESCRIBE
@@ -121,7 +122,7 @@ pub fn model_tools(tools: &[ToolSchema]) -> Option<Vec<ToolSchema>> {
     }
     let mut visible = tools
         .iter()
-        .filter(|tool| tool.metadata.is_none() && is_direct(&tool.name))
+        .filter(|tool| tool.metadata.is_none() && is_always_declared(&tool.name))
         .cloned()
         .collect::<Vec<_>>();
     visible.sort_by(|a, b| a.name.cmp(&b.name));

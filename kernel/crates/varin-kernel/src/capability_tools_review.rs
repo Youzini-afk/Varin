@@ -16,7 +16,9 @@ impl ModelProvider for Provider {
         view: &RequestView,
         _: Option<&mut RequestCompileReuse>,
     ) -> Result<RequestBody, ExecutionError> {
-        Ok(json!({"tools":disclosure::model_tools(&view.binding.tools)}).into())
+        let tools = disclosure::model_tools(&view.binding.tools).unwrap();
+        assert!(!tools.iter().any(|tool| tool.name == "fixture_effect"));
+        Ok(json!({"tools":tools}).into())
     }
     fn generate(
         &self,
@@ -67,19 +69,29 @@ impl ModelProvider for Provider {
                 if self.mode == "missing" {
                     reference["name"] = json!("not_selected");
                 }
-                let arguments = if self.mode == "question" {
+                let arguments = if self.mode == "direct_invalid" {
+                    json!({})
+                } else if self.mode == "question" {
                     json!({"question":"Choose a fixture option","options":["A","B"]})
                 } else {
-                    json!({"mode":self.mode})
+                    json!({"mode":self.mode.strip_prefix("direct_").unwrap_or(self.mode)})
                 };
-                Content::ToolCall {
-                    call: ToolCall {
+                let call = if self.mode.starts_with("direct_") {
+                    ToolCall {
+                        call_id: "invoke".into(),
+                        name: reference["name"].as_str().unwrap().into(),
+                        schema_version: reference["version"].as_str().unwrap().into(),
+                        arguments,
+                    }
+                } else {
+                    ToolCall {
                         call_id: "invoke".into(),
                         name: disclosure::INVOKE.into(),
                         schema_version: "1".into(),
                         arguments: json!({"reference":reference,"arguments":arguments}),
-                    },
-                }
+                    }
+                };
+                Content::ToolCall { call }
             }
             _ => Content::Text {
                 text: "done".into(),
@@ -144,7 +156,8 @@ impl ToolExecutor for Target {
         _: &ToolContract,
         _: &CancellationToken,
     ) -> Result<(), ExecutionError> {
-        assert!(matches!(context.origin, ToolOrigin::NestedCall { .. }));
+        assert!(matches!((&context.origin, call.call_id.as_str()),
+            (ToolOrigin::NestedCall { .. }, "target") | (ToolOrigin::ModelStep { .. }, "invoke")));
         let snapshot = self
             .catalog
             .lock()
@@ -193,6 +206,7 @@ impl ToolExecutor for Target {
 fn disclosure_invocation_uses_original_permissions_versions_receipts_and_output() {
     for mode in [
         "success", "denied", "stale", "missing", "unknown", "question",
+        "direct_success", "direct_denied", "direct_invalid",
     ] {
         let root = std::env::temp_dir().join(format!("varin-disclosure-{}", uuid::Uuid::new_v4()));
         let mut db = Catalog::open(&root).unwrap();
@@ -256,7 +270,7 @@ fn disclosure_invocation_uses_original_permissions_versions_receipts_and_output(
         let report = engine.run(input, CancellationToken::default()).unwrap();
         assert_eq!(
             target.calls.load(Ordering::SeqCst),
-            usize::from(matches!(mode, "success" | "unknown")),
+            usize::from(matches!(mode, "success" | "unknown" | "direct_success")),
             "{mode}: {:?}",
             report.history
         );
@@ -265,29 +279,38 @@ fn disclosure_invocation_uses_original_permissions_versions_receipts_and_output(
             .iter()
             .find_map(|item| match &item.content {
                 Content::ToolResult { result } if result.call_id == "invoke" => {
-                    Some(&result.completion)
+                    Some(result)
                 }
                 _ => None,
             })
             .unwrap();
-        if matches!(mode, "success" | "unknown") {
+        if matches!(mode, "success" | "unknown" | "direct_success") {
             let ToolCompletion::Result {
                 outcome, content, ..
-            } = result
+            } = &result.completion
             else {
                 panic!("target receipt missing")
             };
-            assert_eq!(content.data["result"]["actual"], "fixture_effect");
+            let direct = mode.starts_with("direct_");
+            assert_eq!(
+                if direct { &content.data["actual"] } else { &content.data["result"]["actual"] },
+                "fixture_effect"
+            );
             assert!(
                 matches!(&content.parts[0],varin_runtime::output::OutputPart::Text{text} if text=="target output")
             );
             assert!(
                 matches!(&content.parts[1], varin_runtime::output::OutputPart::Media { media } if media.media_type == "image/png")
             );
+            let operation_id = if direct {
+                format!("{}:tool:{}", result.request_id, result.call_id)
+            } else {
+                content.data["operationId"].as_str().unwrap().into()
+            };
             let operation = db
                 .lock()
                 .unwrap()
-                .operation(content.data["operationId"].as_str().unwrap())
+                .operation(&operation_id)
                 .unwrap();
             assert_eq!(
                 operation.effect,
@@ -306,8 +329,18 @@ fn disclosure_invocation_uses_original_permissions_versions_receipts_and_output(
                 }
             );
         }
+        if mode == "direct_denied" {
+            assert!(matches!(&result.completion, ToolCompletion::NotDispatched { reason }
+                if reason == "tool_disclosure: original target permission denied"));
+        }
+        if mode == "direct_invalid" {
+            let ToolCompletion::Result { outcome: Outcome::Failed, effect: Effect::None, content } = &result.completion else {
+                panic!("{mode}: rejected invocation must have no effect")
+            };
+            assert_eq!(content.data["message"], "mode required");
+        }
         if mode == "question" {
-            let ToolCompletion::Result { content, .. } = result else {
+            let ToolCompletion::Result { content, .. } = &result.completion else {
                 panic!("missing question receipt")
             };
             assert_eq!(content.data["completion"]["kind"], "job_accepted");

@@ -85,7 +85,9 @@ encoding/hashing and media work remain. This is local reuse, not remote incremen
 Tool parameter projection is shared by the built-in protocols in [tool_schema.rs](tool_schema.rs).
 The common input projection first selects the fixed model interface when native disclosure
 gateways are present. Deferred schemas stay in the original request binding for execution and
-enter conversation history only as `tool_describe` results. Built-in and brokered adapters see
+enter conversation history only as `tool_describe` results. A model may call a deferred tool
+directly by name or use `tool_invoke`; both resolve against the complete frozen request directory
+and retain the target's original validation and authorization. Built-in and brokered adapters see
 the same projection. Hidden catalog changes do not change the provider tools or encoder reuse
 key; the original generation and endpoint pins remain authoritative. Auxiliary jobs without the
 gateways retain their explicitly selected tool interface.

@@ -873,8 +873,10 @@ credential for each run, and npm attaches provenance automatically.
 
 Callable-tool documentation uses native `tool_describe`: `{}` lists available namespaces,
 `{ "namespace": "development" }` reads a capability group, and `{ "name": "runtime_contract" }`
-reads one exact tool. Results include parameters and a version reference for
-`tool_invoke({ reference, arguments })`. Documentation is appended as tool-result data; the
+reads one exact tool. Results include parameters and a version reference. The model may call the
+tool directly by name with those parameters, or use `tool_invoke({ reference, arguments })`.
+Both use the original frozen capability directory, validation and permissions.
+Documentation is appended as tool-result data; the
 provider's function list stays fixed. Unavailable tools are absent, and discovery grants no
 execution permission. SDK callers can still use their original `call.tools.list/describe/invoke`.
 

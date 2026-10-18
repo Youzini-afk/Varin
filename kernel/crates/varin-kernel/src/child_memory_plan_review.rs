@@ -99,7 +99,7 @@ impl ModelProvider for ModelCalls {
                     },
                     |call| {
                         let call = if varin_runtime::tool_disclosure::enabled(&request.view.binding.tools)
-                            && !varin_runtime::tool_disclosure::is_direct(&call.name) {
+                            && !varin_runtime::tool_disclosure::is_always_declared(&call.name) {
                             ToolCall { call_id: call.call_id.clone(), name: "tool_invoke".into(), schema_version: "1".into(),
                                 arguments: json!({"reference":{"name":call.name,"version":call.schema_version},"arguments":call.arguments}) }
                         } else { call.clone() };
