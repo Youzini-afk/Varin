@@ -49,6 +49,10 @@ const createMockRequest = () => {
       listeners.set(event, handler);
       return this;
     },
+    once(event: string, handler: () => void) {
+      listeners.set(event, () => { listeners.delete(event); handler(); });
+      return this;
+    },
     emit(event: string) {
       const handler = listeners.get(event);
       if (typeof handler === 'function') {
@@ -169,7 +173,7 @@ describe('local SSE routes', () => {
     }
   });
 
-  it('serves Varin SSE with nginx-safe headers', () => {
+  it('serves Varin SSE with nginx-safe headers', async () => {
     const { app, getRoute } = createRouteRegistry();
     const clients = new Set<Response>();
 
@@ -187,7 +191,7 @@ describe('local SSE routes', () => {
     const expressRequest = req as unknown as Request;
     const expressResponse = res as unknown as Response;
 
-    handler(expressRequest, expressResponse, () => {});
+    await handler(expressRequest, expressResponse, () => {});
 
     expect(res.statusCode).toBe(200);
     expect(res.getHeader('content-type')).toContain('text/event-stream');

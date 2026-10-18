@@ -2659,7 +2659,7 @@ export function createComputerService(options: ComputerServiceOptions): Computer
         lane.interrupted = work;
         lane.control = { owner: 'human', since: control.since, reachable: control.reachable, ...(control.holderId ? { holderId: control.holderId } : {}) };
         automation.setHumanControl(id, true);
-        const interrupted = await automation.interruptDesktop(id);
+        await automation.interruptDesktop(id);
         await persistControl(id, false, false);
         void deliverControlEvents(id).catch(() => undefined);
       } else if (control.owner === 'agent' && lane.interrupted && !lane.interrupted.returned) {
@@ -2753,7 +2753,6 @@ export function createComputerService(options: ComputerServiceOptions): Computer
       if (physical.status === 'rejected') throw physical.reason;
       if (revoked.status === 'rejected') throw new HarnessServiceError('unavailable', 'Input was released, but the previous computer script could not be revoked');
       if (persisted.status === 'rejected') throw new HarnessServiceError('unavailable', 'Input was released, but human control could not be saved; keep this Host open and retry takeover');
-      const interrupted = revoked.value;
       lane.control.reachable = params.holderId === options.localControlHolder || (viewers.get(id)?.viewers.has(params.holderId) ?? false);
       if (operator) void deliverControlEvents(id).catch(() => undefined);
       return { control: { ...controlState(id), transitioning: false }, cancelled: dropped.filter((entry) => entry.kind === "action").length, released: true };

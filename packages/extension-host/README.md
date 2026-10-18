@@ -54,6 +54,9 @@ Capability decisions are part of activation identity. A changed selected grant a
 revision; candidate grant reviews are checked independently before publication. Revocations update
 the Host-owned grant arrays used by live and draining transport callbacks before replacement awaits,
 so retaining an old implementation after a failed update cannot retain revoked privileges.
+Trusted Host capability registrations may declare `cleanupMethods` for owner-scoped releases,
+such as unregistering that exact extension's language provider. Only transport disposal admits
+these methods after revocation; ordinary calls and previously ungranted capabilities remain denied.
 
 `ApplicationExtensionRuntime.prepareService` resolves the existing scoped routing configuration once
 and returns an exact-generation strong service lease. Every consumer releases it; an independent

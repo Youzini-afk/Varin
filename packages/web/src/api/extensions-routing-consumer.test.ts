@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtemp, readdir, readFile, rm } from 'node:fs/promises';
+import { mkdtemp, mkdir, readdir, readFile, writeFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createRequire } from 'node:module';
@@ -22,6 +22,7 @@ import { serviceRoutingOptions, serviceRoutingComposition } from '@/lib/extensio
 
 // React is a UI-owned runtime dependency. Resolve the same instance as the real settings controls.
 const requireUI = createRequire(new URL('../../../ui/package.json', import.meta.url));
+const { build } = createRequire(new URL('../../../extension-host/package.json', import.meta.url))('esbuild');
 const React: typeof import('react') = requireUI('react');
 const { createRoot }: typeof import('react-dom/client') = requireUI('react-dom/client');
 
@@ -250,10 +251,18 @@ test('real settings controls persist ordered choices through the original client
 
     // A real installed Decision package uses the same public Settings/client/Router path.
     // Merely displaying and selecting its metadata must not activate its broker.
+    const example = join(directory, 'context-budget');
+    await mkdir(example);
+    await writeFile(join(example, 'varin.extension.json'), await readFile(new URL('../../../../examples/extensions/context-budget/varin.extension.json', import.meta.url)));
+    await build({ entryPoints: [fileURLToPath(new URL('../../../../examples/extensions/context-budget/host.ts', import.meta.url))],
+      outfile: join(example, 'host.cjs'), bundle: true, platform: 'node', format: 'cjs', target: 'node22', alias: {
+        '@varin/extension-sdk': fileURLToPath(new URL('../../../extension-sdk/dist/index.js', import.meta.url)),
+        '@varin/extension-contract': fileURLToPath(new URL('../../../extension-contract/dist/index.js', import.meta.url)),
+      } });
     const installed = await readWhileWatching(() => runtime.installOrStage({
       expectedRevision: store.getVarinExtensionCatalogState().snapshot!.catalog.revision,
       source: { kind: 'local', display: 'Actual context budget example',
-        specifier: fileURLToPath(new URL('../../../../examples/extensions/context-budget', import.meta.url)) },
+        specifier: example },
     }));
     await readWhileWatching(() => runtime.setEnabled('example.context-budget', true, installed.revision));
     serviceId = VARIN_CONTEXT_BUDGET_SERVICE.id;

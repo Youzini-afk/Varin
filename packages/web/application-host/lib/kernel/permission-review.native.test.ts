@@ -129,7 +129,7 @@ async function fixture(reply: (body: Record<string, unknown>, response: ServerRe
 const model = { providerId: 'fixture-provider', modelId: 'fixture-model' };
 function tool(response: ServerResponse) {
   response.writeHead(200, { 'content-type': 'text/event-stream' });
-  response.end(`data: ${JSON.stringify({ type: 'response.completed', response: { output: [{ id: `send-${crypto.randomUUID()}`, type: 'function_call', call_id: `call-${crypto.randomUUID()}`, name: 'fixture_send', arguments: JSON.stringify({ text: 'only this approved text' }) }] } })}\n\n`);
+  response.end(`data: ${JSON.stringify({ type: 'response.completed', response: { output: [{ id: `send-${crypto.randomUUID()}`, type: 'function_call', call_id: `call-${crypto.randomUUID()}`, name: 'tool_invoke', arguments: JSON.stringify({ reference: { name: 'fixture_send', version: 'schema-1' }, arguments: { text: 'only this approved text' } }) }] } })}\n\n`);
 }
 function done(response: ServerResponse) {
   response.writeHead(200, { 'content-type': 'text/event-stream' });

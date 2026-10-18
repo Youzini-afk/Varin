@@ -320,9 +320,10 @@ fn file_inventory_shutdown_retains_storage_until_real_worker_stops() {
 fn file_inventory_pages_preserve_path_fingerprint_and_changed_membership() {
     let mut f = Fixture::new();
     fs::create_dir_all(f.work().join("nested")).unwrap();
+    let quoted = if cfg!(windows) { "nested/quote'.txt" } else { "nested/quote\".txt" };
     for (path, body) in [
         ("a.txt", "a"),
-        ("nested/quote\".txt", "quoted"),
+        (quoted, "quoted"),
         ("z.txt", "z"),
     ] {
         fs::write(f.work().join(path), body).unwrap();
@@ -337,7 +338,7 @@ fn file_inventory_pages_preserve_path_fingerprint_and_changed_membership() {
     // Fingerprints are path inventory, not content versions.
     fs::write(f.work().join("a.txt"), b"different contents").unwrap();
     let second = f.inventory("file.scan", params.clone(), "reader").unwrap();
-    assert_eq!(second["paths"], json!(["nested/quote\".txt", "z.txt"]));
+    assert_eq!(second["paths"], json!([quoted, "z.txt"]));
     assert!(second["nextCursor"].is_null());
     let mut all = first["paths"].as_array().unwrap().clone();
     all.extend(second["paths"].as_array().unwrap().iter().cloned());

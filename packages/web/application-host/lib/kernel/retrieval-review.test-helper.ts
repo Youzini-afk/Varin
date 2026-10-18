@@ -18,6 +18,10 @@ import { registerThreadRoutes } from './thread-routes.js';
 import { registerCommonRequestMiddleware } from '../platform/core-routes.js';
 
 export function responseTool(response: ServerResponse, name: string, args: Record<string, unknown>, serial = 1) {
+  if (name === 'code_retrieval') {
+    args = { reference: { name, version: '1' }, arguments: args };
+    name = 'tool_invoke';
+  }
   response.writeHead(200, { 'content-type': 'text/event-stream' });
   response.end(`data: ${JSON.stringify({ type: 'response.completed', response: { output: [{ id: `item-${serial}`, type: 'function_call', call_id: `call-${serial}`, name, arguments: JSON.stringify(args) }] } })}\n\n`);
 }
@@ -27,7 +31,9 @@ export function responseDone(response: ServerResponse) {
 }
 export function latestOutput(body: Record<string, unknown>): Record<string, unknown> | undefined {
   const item = (body.input as Array<Record<string, unknown>>).findLast(item => item.type === 'function_call_output');
-  return item ? JSON.parse(responsesMetadataText(item.output)) as Record<string, unknown> : undefined;
+  const value = item ? JSON.parse(responsesMetadataText(item.output)) as Record<string, unknown> : undefined;
+  const content = value?.content as { reference?: { name: string }; result?: unknown } | undefined;
+  return content?.reference ? { ...value, content: content.result } : value;
 }
 export const deferred = <T = void>() => {
   let resolve!: (value: T) => void;

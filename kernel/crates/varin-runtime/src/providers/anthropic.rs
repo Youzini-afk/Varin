@@ -251,7 +251,11 @@ impl ModelProvider for AnthropicProvider {
         self.connection.run(
             request,
             cancel,
-            &[("anthropic-version", "2023-06-01")],
+            if self.oauth {
+                &[("anthropic-version", "2023-06-01"), ("x-app", "cli")]
+            } else {
+                &[("anthropic-version", "2023-06-01")]
+            },
             &mut |event| state.event(event, &request.view, emit),
         )?;
         if !state.stopped {

@@ -211,7 +211,7 @@ export function createResearchSourceAuthority(options: {
         if (branch.root !== admitted.root)
           throw new Error('Fixed research revision changed');
         const candidate: Omit<ExperimentInputSnapshot, 'root'> = { schemaVersion: 2, branchId: capture.branchId, sourceRoot: null,
-          workspaceId: caller.workspaceId, executionWorkspaceId: caller.executionWorkspaceId, captureScopes: [...(caller.workspaceScope ?? [])],
+          workspaceId: caller.workspaceId, executionWorkspaceId: caller.executionWorkspaceId, captureScopes: (caller.workspaceScope ?? []).map(scope => scope || '.'),
           capturedPathCount: null, inventoryFingerprint: null, captureSemantics: null,
           source: { kind: 'fixed-branch', branchId: admitted.branchId, revision: admitted.revision, root: admitted.root },
           ...(admitted.cwd ? { cwd: admitted.cwd } : {}) };
@@ -224,7 +224,7 @@ export function createResearchSourceAuthority(options: {
         capture.signal?.throwIfAborted();
         dispatched = true;
         const created = await source.client.createBranch({ operationId: `experiment-input-branch:${capture.branchId}`, branchId: capture.branchId,
-          workspaceId: caller.workspaceId, baseRef: `pin:${admitted.pinId}`, entries: [], draftBasePaths: [], captureScopes: [...(caller.workspaceScope ?? [])] });
+          workspaceId: caller.workspaceId, baseRef: `pin:${admitted.pinId}`, entries: [], draftBasePaths: [], captureScopes: candidate.captureScopes });
         if (created.root !== admitted.root || created.branchId !== capture.branchId)
           throw new Error('Fixed experiment input creation changed its immutable root');
         return { ...candidate, root: admitted.root };

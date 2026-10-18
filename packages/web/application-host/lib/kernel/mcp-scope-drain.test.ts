@@ -1,4 +1,5 @@
 import { beforeEach, expect, it, vi } from 'vitest';
+import { resolve } from 'node:path';
 
 const ports = vi.hoisted(() => {
   const deferred = () => {
@@ -61,7 +62,10 @@ vi.mock('../mcp/auth.js', async importOriginal => {
     tokens() { return undefined; } async remove() { if ('credential' in ports) ports.credential = undefined; return true; }
   } };
 });
-vi.mock('../mcp/connection.js', () => ({ McpServerConnection: ports.Connection, createDefaultTransport: () => {} }));
+vi.mock('../mcp/connection.js', async importOriginal => ({
+  ...await importOriginal<typeof import('../mcp/connection.js')>(),
+  McpServerConnection: ports.Connection, createDefaultTransport: () => {},
+}));
 vi.mock('../mcp/directory.js', () => ({ McpDirectory: class { async get() {} async update() {} async close() {} } }));
 vi.mock('../configuration-watch.js', () => ({ ConfigWatchManager: class {
   async watch() { return { watchId: 'test-watch' }; } unwatch() {} close() {}
@@ -210,7 +214,7 @@ it('adapts the original not-yet-started transport only through the trusted scope
   const args = [{ name: 'test' }, '/cwd', undefined];
   expect(ports.instances[0]!.options.createTransport(...args)).toBe(adapted);
   expect(factory).toHaveBeenCalledWith(...args);
-  expect(adapter).toHaveBeenCalledWith(input, original);
+  expect(adapter).toHaveBeenCalledWith({ ...input, agentDir: resolve(input.agentDir), configCwd: resolve(input.configCwd), executionCwd: resolve(input.executionCwd!) }, original);
   expect(original.start).not.toHaveBeenCalled();expect(adapted.start).not.toHaveBeenCalled();
   await lease.releaseAndDrain();await authority.close();
 

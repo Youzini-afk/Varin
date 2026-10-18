@@ -213,7 +213,7 @@ function managedResource(accepted = false): McpResourcePending {
   };
 }
 function resourcePort(initial: McpResourcePending) {
-  let pending = structuredClone(initial);
+  const pending = structuredClone(initial);
   const request = vi.fn(async (method: string, params: unknown) => {
     switch (method) {
       case 'runtime.mcp.resource.pending': return pending.cancelRequested && pending.subscription.localReleased && pending.subscription.mcpHolderReleased ? [] : [structuredClone(pending)];

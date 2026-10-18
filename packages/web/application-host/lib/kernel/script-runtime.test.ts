@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { test } from 'node:test';
+import { test } from 'vitest';
 import { SCRIPT_TOOL_DECLARATIONS } from '@varin/extension-builtins';
 import { createScriptRuntime } from './script-runtime.js';
 import { withToolInvocation } from './tool-invocation.js';

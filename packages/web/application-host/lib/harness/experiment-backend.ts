@@ -213,7 +213,7 @@ export const createLocalExperimentBackend = (scoped: KernelScopedClient, release
       };
     },
     async inspect(site, backendJobId) {
-      const snapshot = await scoped.processInspect({ workspaceId: site.workspaceId, processId: backendJobId });
+      const snapshot = await scoped.processInspect({ workspaceId: site.workspaceId, rootId: site.rootId, processId: backendJobId });
       return {
         status: snapshot.status,
         writerActive: snapshot.writerActive,
@@ -223,7 +223,7 @@ export const createLocalExperimentBackend = (scoped: KernelScopedClient, release
       };
     },
     async read(site, backendJobId, cursor) {
-      const result = await scoped.processRead({ workspaceId: site.workspaceId, processId: backendJobId, cursor });
+      const result = await scoped.processRead({ workspaceId: site.workspaceId, rootId: site.rootId, processId: backendJobId, cursor });
       return {
         chunks: result.chunks.map((chunk) => ({
           channel: chunk.channel,
@@ -241,11 +241,11 @@ export const createLocalExperimentBackend = (scoped: KernelScopedClient, release
       };
     },
     async kill(site, backendJobId) {
-      await scoped.processKill({ workspaceId: site.workspaceId, processId: backendJobId, force: true });
+      await scoped.processKill({ workspaceId: site.workspaceId, rootId: site.rootId, processId: backendJobId, force: true });
     },
     async release(site, backendJobId) {
       if (!released) {
-        await scoped.processRelease({ workspaceId: site.workspaceId, processId: backendJobId });
+        await scoped.processRelease({ workspaceId: site.workspaceId, rootId: site.rootId, processId: backendJobId });
         released = true;
       }
       await releaseAuthority?.();

@@ -1343,7 +1343,8 @@ export const createWorkspaceRecoveryEngine = (options: CreateWorkspaceRecoveryEn
         record.state = "aborted";
         await persist(record);
       }
-    } catch (error) {
+    } catch (caughtError) {
+      let error = caughtError;
       if (error instanceof RecoveryCancellationRequested && record.state !== 'navigating-conversation' && barrier) {
         record = parseCombined(await getOperation(record.workspaceId, record.id));
         try { await compensate(record, identity, identity.canonicalRoot, barrier); return publicOperation(record); }

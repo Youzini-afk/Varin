@@ -417,13 +417,12 @@ fn model_and_policy_nested_calls_share_original_catalog_without_inner_model_pair
                 .inspect(&outer.operation_id)
                 .is_none()
         );
-        assert!(
-            db.lock()
-                .unwrap()
-                .operation(&calls[1].operation_id)
-                .is_err(),
-            "pure read stays lightweight"
-        );
+        let read = db.lock().unwrap().operation(&calls[1].operation_id).unwrap();
+        assert_eq!(read.effect, Effect::None);
+        assert_eq!(read.outcome, Some(Outcome::Succeeded));
+        assert!(db.lock().unwrap().external_delivery_persisted(&read.id).unwrap(),
+            "external reads retain their original stop receipt");
+        assert!(db.resource_admission().inspect(&read.id).is_none());
         let paired: Vec<_> = report
             .history
             .iter()

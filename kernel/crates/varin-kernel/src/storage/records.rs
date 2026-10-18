@@ -290,8 +290,13 @@ impl Storage {
             }
             "experiment.attempt" => {
                 derived("experiment.attempt")?;
-                required("specId")?;
                 required("backend")?;
+                // Submission precedes immutable input/spec preparation. Stopping
+                // or failing that accepted intent must remain durably representable.
+                let pending_spec = object.get("specId") == Some(&Value::Null)
+                    && object.get("backend").and_then(Value::as_str) == Some("unresolved")
+                    && matches!(state, "submitted" | "stopping" | "failed" | "cancelled" | "lost");
+                if !pending_spec { required("specId")?; }
                 state_in(&[
                     "submitted",
                     "queued",
@@ -2195,6 +2200,20 @@ impl Storage {
 #[cfg(test)]
 mod artifact_page_tests {
     use super::*;
+    #[test]
+    fn experiment_intent_can_settle_before_its_spec_is_prepared() {
+        let mut payload = json!({"id":"attempt","specId":null,"backend":"unresolved"});
+        let validate = |state: &str, payload: &Value| Storage::validate_domain_record_payload(
+            "experiment.attempt", "experiment.attempt:attempt", "workspace", state, None, payload);
+        for state in ["submitted", "stopping", "failed", "cancelled", "lost"] {
+            validate(state, &payload).unwrap();
+        }
+        for state in ["queued", "running", "completed"] { assert!(validate(state, &payload).is_err()); }
+        payload["backend"] = json!("local");
+        assert!(validate("submitted", &payload).is_err());
+        payload["specId"] = json!("immutable-spec");
+        validate("running", &payload).unwrap();
+    }
     #[test]
     fn native_settings_operations_preserve_thread_branch_and_original_record_actor() {
         let root = std::env::temp_dir().join(format!("settings-operation-{}", Uuid::new_v4()));

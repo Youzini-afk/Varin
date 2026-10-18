@@ -359,7 +359,10 @@ export async function prepareExperimentInput(
     const sourceRoot = await canonicalizePathIdentity(asNonEmptyString(canonicalRoot, "Experiment source root"));
     if (sourceRoot !== canonicalRoot) throw new Error("Experiment source root identity changed after admission");
     if (!options.captureScopes) throw new Error("Experiment capture scopes must be explicit caller-authorized paths");
-    const scopes = [...new Set(options.captureScopes.map((entry) => normalizeRelative(entry, "Experiment capture scope")))].sort();
+    const normalizedScopes = [...new Set(options.captureScopes.map((entry) => normalizeRelative(entry, "Experiment capture scope")))].sort();
+    // Native grants spell the whole source as ""; the inventory/branch APIs use
+    // an empty scope list for that same admitted full-root capture.
+    const scopes = normalizedScopes.includes("") ? [] : normalizedScopes;
     for (const scope of scopes) await validateScope(sourceRoot, scope);
     const cwd = options.cwd === undefined ? undefined : normalizeRelative(options.cwd, "Experiment cwd");
     if (!options.sourceAuthority) ownGrant = await issueExperimentGrant(client, caller, "prepare", options.signal);

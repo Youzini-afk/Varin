@@ -354,7 +354,12 @@ async function run(frame: Record<string, unknown>) {
     sourceTools: async mode => (await b.sourceRequest<ManagedSourceCapabilities>('source.capabilities', { mode, managed: false })).tools.map(tool => tool.name),
   });
   const packageQueries = frame.scenario === 'extension-package' ? createSourceQueryService({ kernel: b, documents: bDocuments,
-    validateLiveSource: bLive.validate, storage, resourceOwners: { agentDir: join(root, 'target-agent'), homeDir: root } as never }) : undefined;
+    validateLiveSource: bLive.validate, storage, resourceOwners: {
+      dataDirectory: join(root, 'target-agent'), homeDir: root, documents: bDocuments,
+      workingStates: createKernelWorkspaceWorkingStateAccess(storage), validateLiveSource: bLive.validate,
+      projectTrusted: path => path === bRoot, configuration: async () => ({ packages: [] }),
+      withSourceRead: async () => { throw new Error('Managed resources require their original target authority'); },
+    } }) : undefined;
   const childService = createManagedChildSourceService({ storage, capture });
   const sourceOwner = createManagedSourceService({ kernel: b, hostId: HOST_B, documents: bDocuments,
     validateLiveSource: bLive.validate, prepareSource: localPreparer,
@@ -595,5 +600,6 @@ createInterface({ input: process.stdin }).on('line', line => {
     return;
   }
   assert.equal(frame.kind, 'fixture-init');
-  void run(frame).catch(error => write({ kind: 'fixture-error', message: String(error), stack: error instanceof Error ? error.stack : undefined }));
+  void run(frame).catch(error => write({ kind: 'fixture-error', message: String(error), stack: error instanceof Error ? error.stack : undefined,
+    causes: error instanceof AggregateError ? error.errors.map(value => value instanceof Error ? value.stack : String(value)) : undefined }));
 });

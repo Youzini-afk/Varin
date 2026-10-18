@@ -28,6 +28,7 @@ import {
   canonicalServiceComposition,
 } from "@varin/extension-contract";
 import { ApplicationExtensionCatalog } from "./application-catalog.js";
+import { ExtensionCatalogStaleStateError } from "./errors.js";
 import type { HostCapabilityRegistry } from "./capability-registry.js";
 import { ExtensionPackageManager } from "./package-manager.js";
 import { NativeHostTransport } from "./native-host-transport.js";
@@ -424,6 +425,8 @@ export class BrokeredHostSupervisor {
   readonly #capabilities: HostCapabilityRegistry;
   readonly #catalog: ApplicationExtensionCatalog;
   readonly #generations = new Map<string, number>();
+  readonly #crashes = new Map<string, { generation: number; desiredRevision: number; error: Error }>();
+  readonly #disposing = new Set<string>();
   readonly #packages: ExtensionPackageManager;
   readonly #onStateChange: () => void;
   readonly #services: HostServiceRegistry;
@@ -953,6 +956,13 @@ export class BrokeredHostSupervisor {
     const snapshot = await this.#catalog.snapshot();
     const entry = snapshot.extensions.find(entry => entry.manifest.id === extensionId); if (!entry) return;
     const active = this.#latest(extensionId);
+    const crash = this.#crashes.get(extensionId);
+    if (crash && (crash.generation !== this.#generations.get(extensionId) || crash.desiredRevision !== entry.desired.revision)) {
+      this.#crashes.delete(extensionId);
+    } else if (crash && !active && entry.desired.enabled && !code) {
+      code = 'brokered_host_crashed';
+      error = crash.error;
+    }
     const status = this.#nativeRestartRequired.has(extensionId) ? 'restart-required' : active ? 'active' : code ? 'failed' : 'inactive';
     const state = diagnosticState(snapshot.hostId, entry.desired.revision, active?.owner.generation ?? this.#generations.get(extensionId) ?? 0,
       status, code, error instanceof Error ? error.message : error === undefined ? undefined : String(error));
@@ -1417,6 +1427,7 @@ export class BrokeredHostSupervisor {
     if (this.#preparations.get(preparationKey) === instance.preparation) this.#preparations.delete(preparationKey);
     this.#setStoragePhase(instance, "disposed");
     this.#storageSessions.delete(ownerStorageKey(instance.owner));
+    this.#disposing.add(ownerStorageKey(instance.owner));
     try {
       // Normal cleanup retains its reviewed capability view until it finishes. A forced process
       // exit is a separate fact from successful disposer completion.
@@ -1438,6 +1449,7 @@ export class BrokeredHostSupervisor {
       // Trusted-native callbacks may retain their context even after cleanup failed. Never
       // leave those captured grants usable after the owner is no longer tracked.
       for (const grant of instance.grants) grant.granted = false;
+      this.#disposing.delete(ownerStorageKey(instance.owner));
       this.#ownerGrants.delete(ownerStorageKey(instance.owner));
       this.#ownerDependencies.delete(ownerStorageKey(instance.owner));
       for (const pin of instance.dependencyPins.splice(0)) pin.release();
@@ -1447,10 +1459,14 @@ export class BrokeredHostSupervisor {
   #handleCrash(owner: HostServiceOwnerIdentity, error: Error): void {
     const instance = this.#instance(owner);
     if (!instance || instance.revoked) return;
+    // Retirement is asynchronous; its final inactive report must retain the crash
+    // for this generation, while a new desired revision or activation starts fresh.
+    const current = this.#generations.get(owner.extensionId) === owner.generation;
+    if (current) this.#crashes.set(owner.extensionId, { generation: owner.generation, desiredRevision: instance.desiredRevision, error });
     instance.revoked = true;
     instance.revocation.abort(error);
     this.#revokeOwners([owner]);
-    void this.#reportOwner(owner.extensionId, 'brokered_host_crashed', error).catch(() => undefined);
+    void this.#reportOwner(owner.extensionId, current ? 'brokered_host_crashed' : undefined, current ? error : undefined).catch(() => undefined);
   }
   async #handleChildRequest(
     owner: HostServiceOwnerIdentity,
@@ -1475,6 +1491,7 @@ export class BrokeredHostSupervisor {
         asJsonValue(params.params),
         callSignal,
         scoped?.scope,
+        this.#disposing.has(ownerStorageKey(owner)),
       );
     }
     if (method === "storage.open") {
@@ -1637,7 +1654,14 @@ export class BrokeredHostSupervisor {
   }
 
   async #reportActual(extensionId: string, state: VarinExtensionActualState): Promise<void> {
-    await this.#catalog.reportActualState(extensionId, state);
+    try {
+      await this.#catalog.reportActualState(extensionId, state);
+    } catch (error) {
+      // A newer desired revision or generation can publish while a retiring worker
+      // finishes. Its obsolete diagnostic must not fail the completed teardown.
+      if (error instanceof ExtensionCatalogStaleStateError) return;
+      throw error;
+    }
     this.#onStateChange();
   }
 }

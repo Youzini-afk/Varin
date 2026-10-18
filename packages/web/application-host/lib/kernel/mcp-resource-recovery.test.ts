@@ -7,7 +7,7 @@ function fixture() {
   const calls: string[] = [], policies: unknown[] = [];
   let live = true, controlsDrained = true, retire = false;
   const client = {
-    async service(input: any, signal?: AbortSignal) {
+    async service(input: { operation: { action: { kind: string; binding: unknown } } }, signal?: AbortSignal) {
       expect(input).toMatchObject({ authorityId: 'original-source', coordinatorHostId: 'a', resourceEpoch: 'original-b-epoch' });
       expect(input.operation.action.binding).toEqual(binding);
       const action = input.operation.action; calls.push(action.kind);
@@ -19,7 +19,7 @@ function fixture() {
       });
       throw new Error('No creation or replacement is allowed');
     },
-    async release(input: any) { calls.push('source-retire'); expect(input.authorityId).toBe('original-source'); return { phase: 'retired' }; },
+    async release(input: { authorityId: string }) { calls.push('source-retire'); expect(input.authorityId).toBe('original-source'); return { phase: 'retired' }; },
   };
   const recover = createMcpResourceRecovery({ kernel: { async agentRuntimeRequest(method: string) {
     expect(method).toBe('runtime.mcp.resource.context'); return { threadId: 'thread', source: null, binding: { provenance: { servers: { peer: {

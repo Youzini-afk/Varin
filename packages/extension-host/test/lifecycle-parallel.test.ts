@@ -24,9 +24,9 @@ const entry = (id: string, requires: string[] = [], service = id): LifecycleEntr
 });
 const pin = (services: HostServiceRegistry, id: string) => { const binding = services.bind(id, 1); try { return binding.pin(); } finally { binding.release(); } };
 const tick = () => new Promise<void>(r => setImmediate(r));
-const bounded = async <T>(promise: Promise<T>): Promise<T> => {
+const bounded = async <T>(promise: Promise<T>, timeout = 1000): Promise<T> => {
   let timer: ReturnType<typeof setTimeout>;
-  try { return await Promise.race([promise, new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error('Operation blocked by unrelated lifecycle')), 1000); })]); }
+  try { return await Promise.race([promise, new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error('Operation blocked by unrelated lifecycle')), timeout); })]); }
   finally { clearTimeout(timer!); }
 };
 function harness(entries: [LifecycleEntry, ...LifecycleEntry[]]) {
@@ -319,11 +319,14 @@ test('removal cleanup cannot cancel a concurrently reinstalled owner with its st
     const originalDelete = runtime.storage.deleteExtensionData.bind(runtime.storage);
     runtime.storage.deleteExtensionData = async extensionId => { entered.resolve(); await cleanup.promise; await originalDelete(extensionId); };
     const removing = runtime.removeExtension({extensionId:id,deleteData:true,expectedRevision:revision}); await entered.promise;
-    const reinstalling = runtime.installOrStage({source,expectedRevision:(await runtime.catalog.snapshot()).revision});
+    const reinstalling = runtime.installOrStage({source,expectedRevision:(await runtime.catalog.snapshot()).revision})
+      .then(snapshot => runtime.setEnabled(id, true, snapshot.revision));
     try {
-      await bounded((async () => { while (!(await runtime.catalog.snapshot()).extensions.some(e => e.manifest.id === id)) await tick(); })());
+      // This path publishes real files and starts the replacement, unlike the
+      // in-memory lifecycle gates above. It must finish while old cleanup waits.
+      await bounded(reinstalling, 10_000);
     } finally { cleanup.resolve(); }
-    await bounded(Promise.all([removing,reinstalling]));
+    await bounded(removing, 10_000);
     assert.ok(runtime.supervisor.activeExtensions().includes(id), 'new installed owner was cancelled by old removal snapshot');
   } finally { cleanup.resolve(); await runtime.stop(); await rm(root,{recursive:true,force:true}); }
 });

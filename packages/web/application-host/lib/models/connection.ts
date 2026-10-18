@@ -7,15 +7,18 @@ const invalid = (message: string): never => { throw new ModelConfigurationError(
 const operations: readonly ModelOperation[] = ['chat', 'embedding', 'rerank', 'decision', 'image-generation', 'image-editing'];
 const secretHeader = /(?:^|[-_])(?:authorization|authentication|auth|bearer|cookie|cookies|token|secret|password|credential|credentials|session|signature|(?:api|access|private|subscription|security)[-_]?key)(?:$|[-_])/i;
 const transportHeaders = new Set(['host', 'connection', 'content-length', 'transfer-encoding', 'proxy-connection', 'upgrade', 'trailer', 'te']);
+// Control bytes are deliberately excluded from both literal and decoded URL paths.
+// eslint-disable-next-line no-control-regex
+const controlCharacter = /[\u0000-\u001f\u007f]/u;
 
 export function validateModelPath(path: unknown): asserts path is string {
-  if (typeof path !== 'string' || !path.startsWith('/') || path.startsWith('//') || /[\\?#\s\u0000-\u001f\u007f]/u.test(path)) {
+  if (typeof path !== 'string' || !path.startsWith('/') || path.startsWith('//') || /[\\?#\s]/u.test(path) || controlCharacter.test(path)) {
     return invalid('Model paths must start with a single / and cannot contain an origin, query or fragment');
   }
   // Check escaped separators and dot segments too, before URL implementations normalize them.
   let decoded = path;
   for (;;) {
-    if (decoded.split('/').some(segment => segment === '.' || segment === '..') || /[\\?#\u0000-\u001f\u007f]/u.test(decoded)) {
+    if (decoded.split('/').some(segment => segment === '.' || segment === '..') || /[\\?#]/u.test(decoded) || controlCharacter.test(decoded)) {
       return invalid('Model paths cannot traverse directories or contain a query or fragment');
     }
     if (!decoded.includes('%')) break;

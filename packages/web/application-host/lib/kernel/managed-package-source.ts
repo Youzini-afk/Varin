@@ -49,10 +49,18 @@ export function createManagedPackageSource(kernel: KernelClient) {
       }
       const payload: CaptureOwner = { id: original.id, workspaceId: scope.source.workspace_id,
         identity, captureId, packagePath: parseVarinExtensionPackagePath(packagePath) };
-      await scoped.putRecord({ operationId: `extension-package-capture:${original.id}`, recordId: original.recordId,
-        workspaceId: scope.source.workspace_id, recordType, state: 'capturing',
-        threadId: identity.scope.threadId, runId: identity.scope.runId,
-        payloadJson: JSON.stringify(payload), ownerIds: [], references: [] });
+      // Fixed source grants stay read-only. Persisting this Host-owned cleanup
+      // address needs a separate record writer, with no source path authority.
+      const writer = await kernel.issueGrant({ grantId: `extension-package-record:${randomUUID()}`,
+        owningWorkspace: scope.source.workspace_id, executionWorkspace: scope.source.execution_workspace_id,
+        threadId: identity.scope.threadId, runId: identity.scope.runId, operationId: identity.operationId,
+        capabilities: ['storage.write'], pathScopes: [] });
+      try {
+        await kernel.scoped(writer).putRecord({ operationId: `extension-package-capture:${original.id}`, recordId: original.recordId,
+          workspaceId: scope.source.workspace_id, recordType, state: 'capturing',
+          threadId: identity.scope.threadId, runId: identity.scope.runId,
+          payloadJson: JSON.stringify(payload), ownerIds: [], references: [] });
+      } finally { await kernel.retireGrant(writer.grantId); }
       return { pinId: original.pinId };
     },
     async release(scope: ManagedSourceCleanupScope): Promise<void> {

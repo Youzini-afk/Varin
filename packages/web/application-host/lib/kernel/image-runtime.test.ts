@@ -1,11 +1,13 @@
 import { describe, expect, test } from 'vitest';
 import { IMAGE_TOOL_DECLARATIONS } from '@varin/extension-builtins';
-import type { ImageToolRequest } from '@varin/protocol';
+import type { ImageToolRequest, ImageToolResult } from '@varin/protocol';
+import type { AgentSettingsSnapshot } from '@varin/application-client';
 import { createImageRuntime } from './image-runtime.js';
-import { imageMimeType, resolveImageBytes } from './image-model.js';
+import { imageMimeType, resolveImageBytes, type ImageBytes } from './image-model.js';
 import { createInferenceRequests } from '../knowledge/semantic/inference-requests.js';
 import { withToolInvocation } from './tool-invocation.js';
 import { toolOperationId } from './protocol.generated.js';
+import type { InferenceAdmitParams, InferenceOwnerParams, InferenceSettleParams, InferenceSessionParams } from './protocol.generated.js';
 import type { ToolExecutionReceipt } from './tool-bridge.js';
 
 const png = Uint8Array.from([137, 80, 78, 71, 13, 10, 26, 10, 0]);
@@ -13,27 +15,30 @@ const owner = { extensionId: 'varin.builtin.images', entrypointId: 'host', exten
 const executorOwner = { kind: 'host' as const, host_id: 'host', instance_id: 'executor' };
 function fixture() {
   const controller = new AbortController();
-  const requests: any[] = [], stored: any[] = [], published: any[] = [], fetches: string[] = [];
-  const statuses = new Map<string, any>();
+  type Request = Partial<InferenceAdmitParams & InferenceOwnerParams & InferenceSettleParams & InferenceSessionParams>;
+  const requests: Array<{ method: string; value: Request }> = [], fetches: string[] = [];
+  const stored: Array<{ scope: unknown; bytes: ImageBytes; provenance: Record<string, unknown> }> = [];
+  const published: InferenceSettleParams[] = [];
+  const statuses = new Map<string, { operationId: string; live: boolean; dispatched: boolean; phase: string; receipt?: unknown }>();
   let owned = 0;
   let network: {path?:string;headers?:Record<string,string>;proxy?:unknown} = {};
-  const dispatched: any[] = [];
+  const dispatched: Array<{ destination: string; headers: Headers; override: unknown }> = [];
   let download: (url: string, init?: RequestInit) => Promise<Response> = async () => new Response(png, { headers: { 'content-type': 'image/png' } });
   let payload: unknown = { data: [{ b64_json: Buffer.from(png).toString('base64') }], usage: { input_tokens: 12, output_tokens: 8, images: 1, cost: 0.03 } };
   let afterReceipt: (() => void) | undefined;
   let retentionFailure = false;
   const listeners = new Set<() => void>();
   const lifecycle = { onEvent: (fn: () => void) => { listeners.add(fn); return () => listeners.delete(fn); }, onReady: () => () => {}, onExit: () => () => {} };
-  const kernel = { agentRuntimeRequest: async (method: string, value: any) => {
+  const kernel = { agentRuntimeRequest: async (method: string, value: Request) => {
     requests.push({ method, value });
     if (method === 'runtime.inference.admit') {
       const id = `inference:${value.parentOperationId}:${value.ordinal}`;
       if (!statuses.has(id)) statuses.set(id, { operationId: id, live: true, dispatched: false, phase: 'prepared' });
       return statuses.get(id);
     }
-    const state = statuses.get(value.operationId);
+    const state = statuses.get(value.operationId!)!;
     if (method === 'runtime.inference.dispatch') { state.dispatched = true; return state; }
-    if (method === 'runtime.inference.settle') { published.push(value); Object.assign(state, { phase: 'terminal', live: false, receipt: value.receipt }); afterReceipt?.(); return state; }
+    if (method === 'runtime.inference.settle') { published.push(value as InferenceSettleParams); Object.assign(state, { phase: 'terminal', live: false, receipt: value.receipt }); afterReceipt?.(); return state; }
     if (method === 'runtime.inference.status') return state;
     if (method === 'runtime.inference.session') return { hasRequests: [...statuses.keys()].some(id => id.startsWith(`inference:${value.parentOperationId}:`)) };
     throw new Error(`Unexpected request ${method}`);
@@ -43,8 +48,8 @@ function fixture() {
     if (new URL(url).hostname === 'image.example') return Response.json(payload);
     return download(destination, init);
   } }) };
-  const inference = createInferenceRequests({ kernel: kernel as any, runtime: lifecycle as any, egress: egress as any });
-  let selection: any = { generation: { providerId: 'images', modelId: 'model' } };
+  const inference = createInferenceRequests({ kernel: kernel as never, runtime: lifecycle as never, egress: egress as never });
+  let selection: unknown = { generation: { providerId: 'images', modelId: 'model' } };
   let endpoint = 'https://image.example/v1';
   const authority = { listImageModels: async () => [], resolveImageBinding: async (_provider: string, _model: string, purpose: string) => {
     const baseUrl = endpoint;
@@ -59,16 +64,16 @@ function fixture() {
       assertAvailable: async () => {}, getAuth: async () => ({ auth: { apiKey: 'key' } }),
     };
   } };
-  const images = createImageRuntime({ authority: authority as any, settings: async () => ({ global: { harness: { images: selection } }, project: {}, projectTrusted: false } as any),
-    requests: inference, egress: egress as any, media: { put: async (scope: any, bytes: any, provenance: any) => {
+  const images = createImageRuntime({ authority: authority as never, settings: async () => ({ global: { harness: { images: selection } }, project: {}, projectTrusted: false, globalRevision: 'g', projectRevision: 'p' } as AgentSettingsSnapshot),
+    requests: inference, egress: egress as never, media: { put: async (scope, bytes, provenance) => {
       if (retentionFailure) throw new Error('storage unavailable');
       stored.push({ scope, bytes, provenance }); return { resourceId: `resource-${stored.length}`, mimeType: bytes.mimeType, byteLength: bytes.bytes.length };
     }, read: async () => ({ bytes: png, mimeType: 'image/png' }) },
-    documents: { tool: () => ({ readPath: async () => ({ source: png }) }) } as any,
-    runtime: { familyList: async () => ({ rootThreadId: 'root' }) } as any });
+    documents: { tool: () => ({ readPath: async () => ({ source: png }) }) } as never,
+    runtime: { familyList: async () => ({ rootThreadId: 'root' }) } as never });
   async function invoke(input: ImageToolRequest = { prompt: 'A landscape' }, purpose = 'generation') {
     const declaration = IMAGE_TOOL_DECLARATIONS.find(item => item.id.endsWith(`.${purpose}`))!;
-    const configuration = await images.prepareConfiguration({ source: null } as any, []);
+    const configuration = await images.prepareConfiguration({ source: null, runId: 'run', threadId: 'thread' }, []);
     const identity = configuration(declaration);
     const release = configuration.retain!(declaration, identity);
     const origin = { kind: 'model_step' as const, request_id: 'exchange' };
@@ -76,11 +81,11 @@ function fixture() {
     let receipt: ToolExecutionReceipt | undefined;
     try {
       const data = await withToolInvocation({ owner, signal: controller.signal,
-        authority: { invocationId: 'invocation', runId: 'run', threadId: 'thread', operationId, callId: 'call', executorOwner: executorOwner as any,
+        authority: { invocationId: 'invocation', runId: 'run', threadId: 'thread', operationId, callId: 'call', executorOwner: executorOwner as never,
           origin, source: null, toolName: declaration.tool!.name, operation: 'effect', completion: 'result', configurationIdentity: identity, arguments: input },
         onEffectReceipt: value => { receipt = value; },
-      }, async invocation => images.capability(purpose, input as any, { owner, signal: controller.signal, invocation } as any));
-      return { data: data as any, receipt: receipt! };
+      }, async invocation => images.capability(purpose, input as never, { owner, signal: controller.signal, invocation } as never));
+      return { data: data as unknown as ImageToolResult, receipt: receipt! };
     } finally { release(); configuration.release?.(); }
   }
   return { images, invoke, controller, requests, stored, published, fetches, dispatched, inference, owned: () => owned, network: (value: typeof network) => { network = value; },
@@ -94,14 +99,15 @@ describe('image tools use their original execution and media ownership', () => {
     const f = fixture();
     const generation = IMAGE_TOOL_DECLARATIONS[0]!, editing = IMAGE_TOOL_DECLARATIONS[1]!;
     f.select({ generation: null });
-    const absent = await f.images.prepareConfiguration({ source: null } as any, []);
+    const run = { source: null, runId: 'run', threadId: 'thread' };
+    const absent = await f.images.prepareConfiguration(run, []);
     expect(absent.enabled!(generation)).toBe(false); expect(absent.enabled!(editing)).toBe(false);
     f.select({ editing: { providerId: 'images', modelId: 'model' } });
-    const selected = await f.images.prepareConfiguration({ source: null } as any, []);
+    const selected = await f.images.prepareConfiguration(run, []);
     expect(selected.enabled!(generation)).toBe(false); expect(selected.enabled!(editing)).toBe(true);
     const identity = selected(editing); const release = selected.retain!(editing, identity);
     f.endpoint('https://replacement.example/v1'); f.select({});
-    const original = await f.images.prepareConfiguration({ source: null } as any, [{ serviceId: editing.id, serviceVersion: editing.version, configurationIdentity: identity }] as any);
+    const original = await f.images.prepareConfiguration(run, [{ serviceId: editing.id, serviceVersion: editing.version, configurationIdentity: identity }] as never);
     expect(original(editing, identity)).toBe(identity); release(); absent.release?.(); selected.release?.(); original.release?.(); expect(f.owned()).toBe(0); await f.inference.close();
   });
   test('cancellation after the provider receipt retains downloaded images and actual non-token usage', async () => {
@@ -111,9 +117,9 @@ describe('image tools use their original execution and media ownership', () => {
     f.setDownload(async (_url, init) => { expect(init?.signal?.aborted).not.toBe(true); return new Response(png, { headers: { 'content-type': 'image/png' } }); });
     const result = await f.invoke();
     expect(result.data.status).toBe('ok'); expect(result.data.images).toHaveLength(1);
-    expect(f.stored[0].provenance.operationId).toBeTruthy();
-    expect(f.published[0].receipt.usage).toEqual({ measurement: 'actual', inputTokens: 12, outputTokens: 8 });
-    expect(f.published[0].response.rawUsage.cost).toBe(0.03);
+    expect(f.stored[0]!.provenance.operationId).toBeTruthy();
+    expect(f.published[0]!.receipt.usage).toEqual({ measurement: 'actual', inputTokens: 12, outputTokens: 8 });
+    expect(f.published[0]!.response).toMatchObject({ rawUsage: { cost: 0.03 } });
     expect(result.receipt.executor_stopped).toBe(true); expect(result.receipt.completion).toMatchObject({ effect: 'confirmed', content: { parts: [{ kind: 'media' }] } });
     expect(f.owned()).toBe(0); await f.inference.close();
   });
@@ -137,9 +143,9 @@ test('image inference consumes the frozen channel route, nonsecret headers and e
   f.network({ path: '/custom/render', headers: { 'x-project': 'original' }, proxy });
   const result = await f.invoke();
   expect(result.data.status).toBe('ok');
-  expect(f.dispatched[0].destination).toBe('https://image.example/v1/custom/render');
-  expect(f.dispatched[0].headers.get('x-project')).toBe('original');
-  expect(f.dispatched[0].headers.get('authorization')).toBe('Bearer key');
-  expect(f.dispatched[0].override).toEqual(proxy);
+  expect(f.dispatched[0]!.destination).toBe('https://image.example/v1/custom/render');
+  expect(f.dispatched[0]!.headers.get('x-project')).toBe('original');
+  expect(f.dispatched[0]!.headers.get('authorization')).toBe('Bearer key');
+  expect(f.dispatched[0]!.override).toEqual(proxy);
   expect(f.owned()).toBe(0); await f.inference.close();
 });

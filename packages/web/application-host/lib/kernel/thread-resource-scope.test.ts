@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { lstat, mkdir, mkdtemp, readFile, readdir, readlink, rm, symlink, writeFile } from 'node:fs/promises';
+import { lstat, mkdir, mkdtemp, readFile, readdir, readlink, realpath, rm, symlink, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import type { InstalledAgentResourcePackage } from '../agent-resources/packages.js';
@@ -22,7 +22,7 @@ afterEach(async () => { for (const root of roots.splice(0)) await rm(root, { rec
 
 /** Native inventory/capture is represented here by a small temporary-file fixture; no IPC claim. */
 async function fixture(files: Record<string, string>) {
-  const base = await mkdtemp(path.join(os.tmpdir(), 'varin-source-resources-')); roots.push(base);
+  const base = await realpath(await mkdtemp(path.join(os.tmpdir(), 'varin-source-resources-'))); roots.push(base);
   const root = path.join(base, 'workspace'); const agentDir = path.join(base, 'agent'); const home = path.join(base, 'home');
   await Promise.all([mkdir(root), mkdir(agentDir), mkdir(home)]);
   const write = async (file: string, body: string) => { await mkdir(path.dirname(path.join(base, file)), { recursive: true }); await writeFile(path.join(base, file), body); };

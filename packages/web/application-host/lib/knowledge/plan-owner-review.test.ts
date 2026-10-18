@@ -224,7 +224,7 @@ describe('plan independent owner review, real TriviumDB', () => {
     // Catalog admission/history are fixtures. Public service, private bridge, owner, worker pipe and DB are real.
     const runtime = {
       thread: async () => ({ bot_id: mode === 'bot' ? 'actual-bot' : null }),
-      context: async (branch: string) => ({ personalization: { mode, threadRole: branch === parent.branchId ? 'main' : 'worker', sessionId: views.get(branch)!.threadId } }),
+      context: async (branch: string) => ({ personalization: { mode, threadRole: branch === parent.branchId ? 'main' : 'worker', threadId: views.get(branch)!.threadId } }),
       childForThread: async (thread: string) => thread === v.threadId || thread === sibling.threadId ? { child_thread_id: thread } : null,
       planView: async (branch: string) => views.get(branch)!,
       planContains: async (branch: string, head: string | null, candidate: string | null) => ({
@@ -272,16 +272,16 @@ describe('plan independent owner review, real TriviumDB', () => {
   });
   it('requires an admitted ordinary scope rather than trusting a child-like role label', async () => {
     const identity = { runtime: 'agent' as const, threadId: 'claimed-child', branchId: 'branch' };
-    let basis: { mode: string; threadRole: string; sessionId: string } | undefined = { mode: 'agent', threadRole: 'worker', sessionId: identity.threadId };
+    let basis: { mode: string; threadRole: string; threadId: string } | undefined = { mode: 'agent', threadRole: 'worker', threadId: identity.threadId };
     let botId: string | null = null;
     const runtime = { thread: async () => ({ bot_id: botId }), context: async () => basis && ({ personalization: basis }), childForThread: async () => null } as unknown as AgentRuntimeClient;
     const service = new PlanService(runtime, async () => { throw new Error('An unsupported scope must not open the plan owner'); });
     await expect(service.read(identity)).rejects.toMatchObject({ code: 'plan-unsupported' });
-    basis = { mode: 'bot', threadRole: 'main', sessionId: identity.threadId };
+    basis = { mode: 'bot', threadRole: 'main', threadId: identity.threadId };
     await expect(service.read(identity)).rejects.toMatchObject({ code: 'plan-unsupported' });
-    botId = 'actual-bot'; basis = { mode: 'agent', threadRole: 'main', sessionId: identity.threadId };
+    botId = 'actual-bot'; basis = { mode: 'agent', threadRole: 'main', threadId: identity.threadId };
     await expect(service.read(identity)).rejects.toMatchObject({ code: 'plan-unsupported' });
-    basis = { mode: 'agent', threadRole: 'main', sessionId: 'foreign-thread' };
+    basis = { mode: 'agent', threadRole: 'main', threadId: 'foreign-thread' };
     await expect(service.read(identity)).rejects.toThrow('Context belongs to another Thread');
     basis = undefined;
     await expect(service.read(identity)).rejects.toMatchObject({ code: 'plan-not-ready' });

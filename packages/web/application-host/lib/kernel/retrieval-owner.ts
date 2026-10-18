@@ -35,7 +35,7 @@ const rank: Record<RetrievalStageStatus, number> = { disabled: 0, empty: 1, read
  * Search/read admission uses the original Run grant and source; Documents owns text decoding.
  * Providers only receive text after admission. Rust independently verifies all returned snippets.
  */
-export function createRetrievalOwner({ sources, kernel, pipelines, preparePipeline, inferenceRequests }: {
+export function createRetrievalOwner({ sources, pipelines, preparePipeline, inferenceRequests }: {
   sources: RetrievalSourceOwner;
   kernel: KernelClient;
   pipelines?: Pick<RetrievalPipelineOwner, 'capture'>;

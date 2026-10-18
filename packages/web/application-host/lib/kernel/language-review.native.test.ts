@@ -24,11 +24,17 @@ function complete(response: ServerResponse, output: unknown[]) {
 }
 function answer(response: ServerResponse) { complete(response, [{ id: 'answer', type: 'message', content: [{ type: 'output_text', text: 'complete' }] }]); }
 function call(response: ServerResponse, name: string, args: Record<string, unknown>, serial: number) {
-  complete(response, [{ id: `item-${serial}`, type: 'function_call', call_id: `call-${serial}`, name, arguments: JSON.stringify(args) }]);
+  complete(response, [{ id: `item-${serial}`, type: 'function_call', call_id: `call-${serial}`, name: 'tool_invoke',
+    arguments: JSON.stringify({ reference: { name, version: '1' }, arguments: args }) }]);
 }
-function output(body: Record<string, unknown>): Record<string, unknown> | undefined {
+function rawOutput(body: Record<string, unknown>): Record<string, unknown> | undefined {
   const item = (body.input as Array<Record<string, unknown>>).findLast(item => item.type === 'function_call_output');
   return item ? JSON.parse(responsesMetadataText(item.output)) as Record<string, unknown> : undefined;
+}
+function output(body: Record<string, unknown>): Record<string, unknown> | undefined {
+  const value = rawOutput(body);
+  const content = value?.content as { reference?: { name: string }; result?: unknown } | undefined;
+  return content?.reference ? { ...value, content: content.result } : value;
 }
 async function fixture(reply: (body: Record<string, unknown>, response: ServerResponse) => void | Promise<void>) {
   if (!kernelPath) throw new Error('Independent language acceptance requires explicit VARIN_TEST_KERNEL_PATH');
@@ -68,7 +74,8 @@ it('selected language capability with no Host owner reports unavailable, never a
   const run = await f.admit('unavailable-owner', ['language_definition']); await run.start();
   await expect.poll(async () => (await f.runtime.run(run.receipt.run_id)).state).toBe('completed');
   expect(f.requests).toHaveLength(2);
-  expect(JSON.stringify(f.requests[0]!.tools)).toContain('language_definition');
+  expect(JSON.stringify(f.requests[0]!.tools)).toContain('tool_invoke');
+  expect(JSON.stringify(f.requests[0]!.tools)).not.toContain('language_definition');
   expect(JSON.stringify(output(f.requests[1]!))).toMatch(/unavailable/);
   expect(output(f.requests[1]!)).not.toMatchObject({ content: { status: 'ready', locations: [] } });
   expect((await f.runtime.history(run.branchId)).some(item => item.source === 'tool')).toBe(true);
@@ -128,7 +135,7 @@ it('revalidates every returned resource under the Run grant and records each tar
   const durableTool = page.items.find(item => item.source === 'tool');
   expect(durableTool).toBeDefined();
   const restored = await f.runtime.historyItem(durableTool!);
-  expect(restored.content).toMatchObject({ content: { kind: 'tool_result', result: { completion: { content: { data: result.content, parts: [] } } } } });
+  expect(restored.content).toMatchObject({ content: { kind: 'tool_result', result: { completion: { content: { data: rawOutput(f.requests[1]!)!.content, parts: [] } } } } });
 }, 20_000);
 
 it.each(['allowed/source.ts', 'private.ts'])('denies narrow project authority before dispatching %s to the Host language owner', async inputPath => {

@@ -7,11 +7,11 @@ import { KERNEL_PROTOCOL_VERSION } from './protocol.generated.js';
 // The controlled transport supplies envelopes; it supplies no settlement classification.
 function fixture() {
   const client = new KernelClient({ hostId: 'request-settlement', storageRoot: '/unused', buildVersion: 'test' });
-  const port = client as unknown as { transport: { send(frame: Record<string, unknown>): Promise<void> };
+  const port = client as unknown as { transport: { send(frame: Record<string, unknown>): Promise<void>; close(): Promise<void> };
     consumeFrame(frame: unknown): void; requestRaw(method: string, params: object): Promise<unknown>;
     closed: boolean; failAll(error: Error, terminate?: boolean): void };
   const send = vi.fn(async (_frame: Record<string, unknown>) => {});
-  port.transport = { send };
+  port.transport = { send, close: async () => {} };
   return { port, send };
 }
 

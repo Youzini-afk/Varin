@@ -12,11 +12,15 @@ it('persists computer steps in the real kernel, pages every seq and survives reo
   const version = (JSON.parse(await readFile(join(repository, 'package.json'), 'utf8')) as { version: string }).version;
   const kernelPath = process.env.VARIN_TEST_KERNEL_PATH;
   if (!kernelPath) throw new Error('Run through scripts/test-kernel-authority.mjs');
+  const work = { runtime: 'agent' as const, threadId: 'evidence-thread', branchId: 'evidence-branch' };
+  const execution = { work, runId: 'evidence-run' };
   const start = async () => {
     const client = createKernelClient({ hostId: 'evidence-host', storageRoot: join(directory, 'kernel'), buildVersion: version,
       kernelPath, allowCargoDevRunner: false });
     await client.start();
     const service = createComputerService({ client, hostId: 'evidence-host', dataDir: directory, platform: 'windows',
+      resolveActor: async () => ({ execution, rootWork: work, rootExecution: execution, label: 'Evidence fixture' }),
+      resolveScope: async () => ({ work, rootWork: work, currentExecution: execution, currentRootExecution: execution }),
       createDriver: () => ({ request: async () => ({ id: 'driver', ok: true, pid: 123 }),
         alive: () => true, cancel: () => true, dispose: () => undefined, capabilities: null }) });
     await service.ensureLocal();
@@ -24,8 +28,9 @@ it('persists computer steps in the real kernel, pages every seq and survives reo
   };
   let current = await start();
   try {
-    await Promise.all(Array.from({ length: 8 }, (_, index) => current.service.open({ desktopId: 'local-console',
-      path: `private ${index}.txt` })));
+    const open = (path: string) => current.service.automation.authorize(work, 'control', 'local-console',
+      () => current.service.open({ desktopId: 'local-console', path }));
+    await Promise.all(Array.from({ length: 8 }, (_, index) => open(`private ${index}.txt`)));
     const first = await current.service.evidence({ desktopId: 'local-console', since: 0, limit: 3 });
     expect(first.entries.map((entry) => entry.seq)).toEqual([1, 2, 3]);
     expect(first.hasMore).toBe(true);
@@ -33,13 +38,15 @@ it('persists computer steps in the real kernel, pages every seq and survives reo
     expect(second.entries.map((entry) => entry.seq)).toEqual([4, 5, 6, 7, 8]);
     expect(second.hasMore).toBe(false);
     expect(JSON.stringify([...first.entries, ...second.entries])).not.toContain('private');
+    await current.service.finishExecution(execution);
     await current.service.dispose();
     await current.client.close();
     current = await start();
     expect((await current.service.evidence({ desktopId: 'local-console', since: 0, limit: 10 })).entries).toHaveLength(8);
-    await current.service.open({ desktopId: 'local-console', path: 'later.txt' });
+    await open('later.txt');
     expect((await current.service.evidence({ desktopId: 'local-console', since: 8 })).entries.map((entry) => entry.seq)).toEqual([9]);
-    await expect(current.service.act({ desktopId: 'local-console', action: { kind: 'secret-selector', app: 'private' } as never }))
+    await expect(current.service.automation.authorize(work, 'control', 'local-console',
+      () => current.service.act({ desktopId: 'local-console', action: { kind: 'secret-selector', app: 'private' } as never })))
       .rejects.toThrow();
     const rejected = (await current.service.evidence({ desktopId: 'local-console', since: 9 })).entries;
     expect(rejected).toMatchObject([{ seq: 10, op: 'invalid', outcome: 'rejected' }]);

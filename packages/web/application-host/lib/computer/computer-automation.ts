@@ -1,7 +1,7 @@
 import { ComputerError, ComputerReleaseUnconfirmed } from './computer-error.js';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { randomUUID } from 'node:crypto';
-import { computerWorkKey, computerExecutionKey, sameComputerWork, sameComputerExecution, type ComputerAccess, type ComputerAccessRequest, type ComputerActor, type ComputerAutomationState, type ComputerLease, type ComputerWorkRef, type ComputerExecutionRef, type ComputerWorkScope, type ComputerCleanup } from '@varin/protocol';
+import { computerExecutionKey, sameComputerWork, sameComputerExecution, type ComputerAccess, type ComputerAccessRequest, type ComputerActor, type ComputerAutomationState, type ComputerLease, type ComputerWorkRef, type ComputerExecutionRef, type ComputerWorkScope, type ComputerCleanup } from '@varin/protocol';
 import { HarnessServiceError } from '../harness/service-error.js';
 export interface ComputerAdmission {
     sequence: number;
@@ -126,7 +126,6 @@ export function createComputerAutomation(options: {
     };
     const stateFor = (actor: ComputerActor, scope = scopeFor(actor)): ComputerAutomationState => {
         const cleanups = cleanupsFor(scope);
-        const current = scope.currentRootExecution;
         const currentRound = (candidate: ComputerActor) => !originFor(candidate) && sameComputerWork(candidate.rootWork, scope.rootWork)
             && (!hasEnded(candidate) && (!sameComputerWork(candidate.execution.work, scope.work) || Boolean(scope.currentExecution && sameComputerExecution(candidate.execution, scope.currentExecution))));
         const currentLeases = [...leases.values()].filter(lease => currentRound(lease.actor));

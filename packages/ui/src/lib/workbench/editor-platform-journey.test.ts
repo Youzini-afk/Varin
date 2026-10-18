@@ -18,7 +18,7 @@ import { DocumentRegistry } from '@/lib/documents/registry';
 import { documentKey, type DocumentIdentity } from '@/lib/documents/types';
 import { FileEditorModelRegistry } from '@/lib/monaco/model-registry';
 import type { MonacoRuntime } from '@/lib/monaco/runtime';
-import { getRuntimeKey } from '@varin/application-client';
+import { threadHostKey as getRuntimeKey } from '@/stores/useThreadStore';
 import {
   armWorkbenchProfileTransitionPhase,
   beginWorkbenchProfileTransition,
@@ -320,9 +320,9 @@ describe('unified editor cross-surface journey', () => {
       kind: 'editor',
     });
     expect('status' in attached ? attached.status : attached.source).toBe('unsaved-buffer');
-    const consumed = consumeEditorContextAttachments(getRuntimeKey(), 'session-main', workspaceId);
+    const consumed = consumeEditorContextAttachments(getRuntimeKey(), 'thread-main', workspaceId);
     expect(consumed[0]?.text).toBe('const result = 2;\n');
-    expect(projectEditorContextAttachments('', consumed)).toContain('Pi file tools cannot see it on disk');
+    expect(projectEditorContextAttachments('', consumed)).toContain('File tools do not see this buffer on disk');
 
     const saved = await documents.save(identity);
     expect(saved.dirty).toBe(false);

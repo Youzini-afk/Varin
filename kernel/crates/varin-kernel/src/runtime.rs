@@ -2075,13 +2075,16 @@ pub(crate) fn run() -> Result<(), Box<dyn std::error::Error>> {
                 // Arrival belongs to the authenticated control offer, before JSON encoding,
                 // content upload or hydration can make a later small input overtake it.
                 let input_order = agent_control.reserve_input(&meta, epoch.as_deref(), &cancel)?;
+                let wire_lane = if meta["method"].as_str().is_some_and(|method| KERNEL_CONTROL_RESPONSE_METHODS.contains(&method)) {
+                    WireLane::Control
+                } else { WireLane::Data };
                 let mut active = cancellations
                     .lock()
                     .map_err(|_| "cancellation owner poisoned")?;
                 if active.contains_key(id)
                     || active
                         .values()
-                        .filter(|request| request.wire_lane == Some(WireLane::Data))
+                        .filter(|request| request.wire_lane == Some(wire_lane))
                         .count()
                         >= KERNEL_REQUEST_WINDOW
                 {
@@ -2096,7 +2099,7 @@ pub(crate) fn run() -> Result<(), Box<dyn std::error::Error>> {
                         grant_id,
                         runtime_cancel: Some(cancel),
                         input_order,
-                        wire_lane: Some(WireLane::Data),
+                        wire_lane: Some(wire_lane),
                         pending_body: true,
                         body_cancel_receipt: false,
                     },
@@ -2252,8 +2255,7 @@ pub(crate) fn run() -> Result<(), Box<dyn std::error::Error>> {
         }
         // Credits follow the response lane, as on the Host. A short control request
         // such as run.inspect can return a streamed body and owns ordinary credit.
-        let wire_lane = if lane == Lane::Control
-            && request["method"]
+        let wire_lane = if request["method"]
                 .as_str()
                 .is_some_and(|method| KERNEL_CONTROL_RESPONSE_METHODS.contains(&method))
         {

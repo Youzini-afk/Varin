@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { test } from 'node:test';
+import { test } from 'vitest';
 import type { HostCapabilityCallContext } from '@varin/extension-host';
 import { createNestedToolOwner } from './nested-tool-owner.js';
 import type { KernelClient } from './kernel-client.js';

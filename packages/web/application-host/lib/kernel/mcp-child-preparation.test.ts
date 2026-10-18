@@ -52,21 +52,17 @@ else {process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:request.id,error:{co
     rules: [{ tool: allowedTool, decision: 'allow' as const }, { tool: MCP_CAPABILITIES.find(value => value.operation === 'read_resource')!.name, decision: 'allow' as const }],
   });
   const signal = new AbortController().signal;
+  const parentScope = {
+    resourceOwner: { kind: 'local' as const }, agentDir: root, configCwd: root,
+    executionCwd: parentCwd, environmentId: 'host:parent', executionScope: 'workspace' as const,
+    projectTrusted: false, sessionId: 'parent',
+  };
   try {
     const parent = createMcpLease({
       kernel,
       currentPolicy: policy,
       lease: await authority.acquire(
-        {
-          resourceOwner: { kind: 'local' },
-          agentDir: root,
-          configCwd: root,
-          executionCwd: parentCwd,
-          environmentId: 'host:parent',
-          executionScope: 'workspace',
-          projectTrusted: false,
-          sessionId: 'parent',
-        },
+        parentScope,
         { servers: ['fixture'] },
       ),
     });
@@ -285,6 +281,9 @@ else {process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:request.id,error:{co
     }
     config.mcpServers.fixture.args = [script, 'new-configuration'];
     await fs.writeFile(path.join(root, 'mcp.json'), JSON.stringify(config));
+    // Observe the replacement through the real configuration owner before
+    // testing retained definitions; filesystem watch delivery is asynchronous.
+    await authority.reload(parentScope);
     const afterUpdate = await prepare(
       { ...input, delegatedBinding: selected },
       signal,

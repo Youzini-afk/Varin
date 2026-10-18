@@ -1,21 +1,25 @@
 import { afterEach, expect, it, vi } from 'vitest';
 import { createSemanticInference } from '../semantic/runtime-inference.js';
 import { createKnowledgeInference } from './inference.js';
-import type { KnowledgeInferenceView, Operation } from '../../kernel/protocol.generated.js';
+import type { KnowledgeInferenceView, Operation, KnowledgeInferenceAdmit, KnowledgeInferenceReadParams, KnowledgeInferenceFinish,
+  InferenceAdmitParams, InferenceSettleParams, InferenceSessionParams, InferenceReceipt } from '../../kernel/protocol.generated.js';
 const closes: Array<() => Promise<void>> = [];
 afterEach(async () => { for (const close of closes.splice(0).reverse()) await close(); });
 function fixture() {
   const roots = new Map<string, KnowledgeInferenceView>();
   const operations = new Map<string, Operation>();
-  const methods: Array<{ method: string; params: any }> = [];
+  type Request = KnowledgeInferenceAdmit & KnowledgeInferenceReadParams & KnowledgeInferenceFinish
+    & InferenceAdmitParams & InferenceSettleParams & InferenceSessionParams;
+  const methods: Array<{ method: string; params: Request }> = [];
   let revoked = false;
   let fetchResult: () => Promise<Response> = async () => new Response(JSON.stringify({ data: [{ index: 0, embedding: [0.6, 0.8] }], usage: { prompt_tokens: 3, total_tokens: 3 } }));
   const fetch = vi.fn(async () => fetchResult());
-  const status = (id: string) => { const operation = operations.get(id)!; const state = operation.result?.kind === 'control' ? operation.result.value as any : {}; return {
+  const status = (id: string) => { const operation = operations.get(id)!; const state = operation.result?.kind === 'control'
+    ? operation.result.value as { dispatched?: boolean; receipt?: InferenceReceipt } : {}; return {
     operationId: id, live: operation.phase !== 'terminal', phase: operation.phase, dispatched: state.dispatched ?? false, recovered: false,
     cancelRequested: false, receipt: state.receipt ?? null, outcome: operation.outcome,
   }; };
-  const kernel = { agentRuntimeRequest: async (method: string, params: any) => {
+  const kernel = { agentRuntimeRequest: async (method: string, params: Request) => {
     methods.push({ method, params });
     if (method === 'runtime.knowledge_inference.read') return roots.get(params.operationId) ?? null;
     if (method === 'runtime.knowledge_inference.admit') {
@@ -30,7 +34,7 @@ function fixture() {
         intent: params, execution_owner: params.executionOwner, result: { kind: 'control', value: { dispatched: false } } } as unknown as Operation;
       operations.set(operation.id, operation); roots.get(params.parentOperationId)!.inference.push(operation); return status(operation.id);
     }
-    if (method === 'runtime.inference.dispatch') { (operations.get(params.operationId)!.result as any).value.dispatched = true; return status(params.operationId); }
+    if (method === 'runtime.inference.dispatch') { operations.get(params.operationId)!.result = { kind: 'control', value: { dispatched: true } }; return status(params.operationId); }
     if (method === 'runtime.inference.settle') { const operation = operations.get(params.operationId)!; operation.phase = 'terminal'; operation.outcome = params.receipt.problem ? 'failed' : 'succeeded';
       operation.result = { kind: 'control', value: { dispatched: true, receipt: params.receipt, response: params.response } }; return status(params.operationId); }
     if (method === 'runtime.inference.status') return status(params.operationId);

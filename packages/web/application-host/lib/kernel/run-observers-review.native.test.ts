@@ -1,4 +1,6 @@
-import { execFileSync, spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
+import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
+import { DatabaseSync } from 'node:sqlite';
+import { createHash } from 'node:crypto';
 import { once } from 'node:events';
 import fs from 'node:fs/promises';
 import os from 'node:os';
@@ -42,6 +44,7 @@ async function fixture() {
     if (code) await fs.writeFile(path.join(dir, 'host.ts'), code);
     await build({ entryPoints: [code ? path.join(dir, 'host.ts') : path.join(repository, 'examples/extensions/run-activity/host.ts')], bundle: true, platform: 'node', format: 'cjs', outfile: path.join(dir, 'host.cjs'), alias: { '@varin/extension-sdk': path.join(repository, 'packages/extension-sdk/dist/index.js') } });
     await extensions.installOrStage({ expectedRevision: (await extensions.state()).catalog.revision, source: { kind: 'local', display: id, specifier: dir } });
+    await extensions.setEnabled(id, true, (await extensions.state()).catalog.revision);
   }
   async function route(thread = 'thread', id = 'example.run-activity') {
     await extensions.upsertServiceRoutingRule({ expectedRevision: (await extensions.routing.read()).document.revision, rule: { serviceId, version: 1, providerKeys: [key(id)], scope: { threadId: thread }, allowFallback: false } });
@@ -64,7 +67,8 @@ it('installed but unselected observer reads no runtime and starts no broker', as
 });
 it('actual example projects committed facts and exact acknowledgements survive kernel restart', async () => {
   const f = await fixture(); await f.install(); await f.install('example.unused', gated()); await f.route(); const receipt = await f.submit(); const observer = f.start();
-  await poll(() => f.invoke('getSnapshot', [subscription()])).toMatchObject({ projection: { [receipt.run_id]: { state: 'accepted' } } });
+  await poll(() => f.invoke('getSnapshot', [subscription()])).toMatchObject({ projection: { [receipt.run_id]: { state: 'accepted' } } })
+    .catch(error => { throw new Error(`${String(error)}; observer errors: ${f.errors.map(String).join('; ')}`); });
   await poll(() => f.runtime.observerEvents(subscription(), 'thread', 64)).toEqual([]);
   expect(f.extensions.supervisor.activeExtensions()).not.toContain('example.unused');
   await f.runtime.cancelRun(receipt.run_id);
@@ -314,12 +318,24 @@ it('opening a genuine old context schema fails clearly without deleting or rewri
   const f = await fixture(); await f.runtime.createThread('thread','thread-branch'); await submitScoped(f,'thread-branch','project-a','old-history');
   await f.crash();
   const database = path.join(f.root,'kernel','agent-runtime','conversation.sqlite');
-  const python = (script: string) => execFileSync('python3',['-c',script,database],{encoding:'utf8'});
-  python("import sqlite3,sys; c=sqlite3.connect(sys.argv[1]); c.execute('ALTER TABLE runs DROP COLUMN context_checkpoint_id'); c.execute('ALTER TABLE context_checkpoints DROP COLUMN project_id'); c.execute(\"UPDATE runtime_domains SET version=1 WHERE name='context_checkpoints'\"); c.commit()");
-  const snapshot = () => python("import sqlite3,sys,json,hashlib,pathlib; c=sqlite3.connect(sys.argv[1]); tables=[r[0] for r in c.execute(\"SELECT name FROM sqlite_master WHERE type='table' ORDER BY name\")]; print(json.dumps({t:c.execute('SELECT * FROM '+t).fetchall() for t in tables},sort_keys=True)); root=pathlib.Path(sys.argv[1]).parent/'content'; print(json.dumps({str(p.relative_to(root)):hashlib.sha256(p.read_bytes()).hexdigest() for p in sorted(root.rglob('*')) if p.is_file()},sort_keys=True))");
-  const before = snapshot(); expect(before).toContain('old-history');
+  const altered = new DatabaseSync(database);
+  try { altered.exec("ALTER TABLE runs DROP COLUMN context_checkpoint_id; ALTER TABLE context_checkpoints DROP COLUMN project_id; UPDATE runtime_domains SET version=1 WHERE name='context_checkpoints';"); }
+  finally { altered.close(); }
+  const snapshot = async () => {
+    const db = new DatabaseSync(database, { readOnly: true });
+    let tables;
+    try { tables = db.prepare("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name").all()
+      .map(row => [row.name, db.prepare(`SELECT * FROM "${String(row.name).replaceAll('"', '""')}"`).all()]); }
+    finally { db.close(); }
+    const content = path.join(path.dirname(database), 'content');
+    const files = (await fs.readdir(content, { recursive: true, withFileTypes: true })).filter(entry => entry.isFile())
+      .map(entry => path.join(entry.parentPath, entry.name)).sort();
+    const hashes = await Promise.all(files.map(async file => [path.relative(content, file), createHash('sha256').update(await fs.readFile(file)).digest('hex')]));
+    return JSON.stringify({ tables, hashes });
+  };
+  const before = await snapshot(); expect(before).toContain('old-history');
   await expect(f.runtime.status()).rejects.toThrow(/unsupported context checkpoint format|context checkpoint.*preserved/);
-  expect(snapshot()).toBe(before);
+  expect(await snapshot()).toBe(before);
 });
 
 it.each(['\uFEFFproject-a\uFEFF', '\u0085project-a\u0085'])('admission agrees with actual Host project canonicalization for %j', async project => {

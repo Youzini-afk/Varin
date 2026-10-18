@@ -52,7 +52,7 @@ beforeEach(async () => {
   });
   fixture.writes = []; fixture.modelReads.mockClear(); useModelCatalogStore.setState({ channels: [], loaded: false, loading: false, error: null }); fixture.piCatalog.mockClear(); fixture.piModel.mockClear(); hold = undefined;
   const { window, document } = parseHTML('<html><body></body></html>');
-  Object.defineProperty(window, 'location', { value: { origin: 'http://ui.test', href: 'http://ui.test/' }, configurable: true });
+  Object.defineProperty(window, 'location', { value: new URL('http://ui.test/'), configurable: true });
   vi.stubGlobal('window', window); vi.stubGlobal('document', document); vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
   vi.stubGlobal('HTMLElement', window.HTMLElement); vi.stubGlobal('Element', window.Element); vi.stubGlobal('Node', window.Node);
   vi.stubGlobal('Event', window.Event); vi.stubGlobal('CustomEvent', window.CustomEvent);
@@ -87,7 +87,10 @@ afterEach(async () => {
   globalThis.fetch = originalFetch; vi.unstubAllGlobals();
   await rm(directory, { recursive: true, force: true });
 });
-const settle = async () => act(async () => { await new Promise(resolve => setTimeout(resolve, 20)); });
+const settle = async () => vi.waitFor(async () => {
+  await act(async () => {});
+  expect(button('Refresh')?.disabled).toBe(false);
+});
 const render = async () => { await act(async () => root.render(<I18nProvider><AgentsSidebar /><AgentsPage /></I18nProvider>)); await settle(); };
 const button = (label: string) => [...container.querySelectorAll<HTMLButtonElement>('button')].find(value => value.textContent === label)!;
 const click = async (value: HTMLElement) => { await act(async () => value.click()); await settle(); };

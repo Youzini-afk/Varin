@@ -292,8 +292,7 @@ impl RunTools {
     ) -> Result<Arc<dyn ToolExecutor>, ExecutionError> {
         let allowed_tools = self.catalog.lock().map_err(failed)?
             .launch_metadata(run).map_err(failed)?
-            .and_then(|launch| launch.selection.agent.and_then(|agent| agent.tools))
-            .map(|names| names.into_iter().collect());
+            .and_then(|launch| launch.selection.agent.and_then(|agent| agent.tools));
         let slot = self.slot(run)?;
         for extension in &prepared.extensions {
             extension.generation.activate()?;
@@ -434,7 +433,7 @@ struct ScopedTools {
     owner: Arc<RunTools>,
     slot: Arc<Slot>,
     run_id: String,
-    allowed_tools: Option<std::collections::BTreeSet<String>>,
+    allowed_tools: Option<Vec<String>>,
 }
 impl ScopedTools {
     fn directory(&self) -> Result<Arc<ToolDirectory>, ExecutionError> {
@@ -518,11 +517,8 @@ impl ToolExecutor for ScopedTools {
             .as_ref()
             .ok_or_else(|| failed("tool scope is not prepared"))?;
         let has_goal = self.owner.catalog.lock().map_err(failed)?.goal_binding(run).map_err(failed)?.is_some();
-        let schemas = active.directory.schemas().iter()
-            .filter(|schema| schema.name != "goal_report" || has_goal)
-            .filter(|schema| varin_runtime::tool_disclosure::is_gateway(schema)
-                || self.allowed_tools.as_ref().is_none_or(|names| names.contains(&schema.name)))
-            .cloned().collect::<Vec<_>>();
+        let schemas = varin_runtime::tool_disclosure::request_tools(
+            active.directory.schemas(), has_goal, self.allowed_tools.as_deref());
         let executor = active
             .directory
             .freeze(&schemas)?

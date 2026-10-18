@@ -21,5 +21,8 @@ export default defineConfig({
     ...baseConfig.test,
     include: NATIVE_TEST_INCLUDE,
     exclude: COMMON_TEST_EXCLUDE,
+    // Real IPC and cold filesystem/provider requests can take several seconds.
+    // Keep polling inside the native tests' existing execution budgets.
+    expect: { poll: { timeout: 10_000 } },
   },
 });

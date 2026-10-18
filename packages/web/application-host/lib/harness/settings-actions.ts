@@ -170,18 +170,6 @@ const needString = (args: Record<string, unknown>, key: string): string => {
   return value;
 };
 
-const needWorkspace = async (
-  ctx: SettingsActionContext,
-  deps: SettingsActionDeps,
-): Promise<string> => {
-  if (!ctx.caller.workspaceId) {
-    throw new HarnessServiceError('unavailable', 'this action requires a admitted project source');
-  }
-  const root = ctx.workspaceRoot ?? await deps.resolveWorkspaceRoot(ctx.caller.workspaceId);
-  if (!root) throw new HarnessServiceError('unavailable', `cannot resolve workspace root for ${ctx.caller.workspaceId}`);
-  return root;
-};
-
 const unavailable = (detail: string): ActionInvocation => ({ status: 'unavailable', detail });
 
 const wrapError = (error: unknown): ActionInvocation => ({

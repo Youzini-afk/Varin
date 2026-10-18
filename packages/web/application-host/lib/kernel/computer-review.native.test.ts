@@ -18,7 +18,7 @@ import { registerCommonRequestMiddleware } from '../platform/core-routes.js';
 import { AgentRuntimeClient } from './agent-runtime-client.js';
 import { createComputerRuntime } from './computer-runtime.js';
 import { ExistingHostCredentialOwner } from './credential-owner.js';
-import { createExtensionTools } from './extension-tool-owner.js';
+import { createExtensionTools, extensionToolSchema } from './extension-tool-owner.js';
 import { createKernelClient } from './kernel-client.js';
 import { ThreadAdapter } from './thread-adapter.js';
 import { registerThreadRoutes } from './thread-routes.js';
@@ -41,9 +41,11 @@ async function listen(server: Server) {
   return `http://127.0.0.1:${address.port}`;
 }
 function respond(response: ServerResponse, name?: string, args: Record<string, unknown> = {}) {
+  const tool = name ? extensionToolSchema(COMPUTER_TOOL_DECLARATIONS.find(declaration => declaration.tool?.name === name)!) : undefined;
   response.writeHead(200, { 'content-type': 'text/event-stream' });
   response.end(`data: ${JSON.stringify({ type: 'response.completed', response: { output: name
-    ? [{ id: `item-${name}`, type: 'function_call', call_id: name, name, arguments: JSON.stringify(args) }]
+    ? [{ id: `item-${name}`, type: 'function_call', call_id: name, name: 'tool_invoke',
+      arguments: JSON.stringify({ reference: { name, version: tool!.version }, arguments: args }) }]
     : [{ id: 'answer', type: 'message', content: [{ type: 'output_text', text: 'Computer receipt consumed' }] }] } })}\n\n`);
 }
 

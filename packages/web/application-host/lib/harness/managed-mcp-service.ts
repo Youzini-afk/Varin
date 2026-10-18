@@ -479,13 +479,17 @@ export function createManagedMcpService(options: {
     return tasks.control(scope, action, signal);
   };
   const published = async <T>(scope: Address, work: () => Promise<T>): Promise<T> => {
-    try { return await work(); }
-    finally {
+    const confirmPublication = async () => {
       try { await interactions?.published(scope); }
       catch { throw Object.assign(new Error('mcp_interaction_publication_pending'), {
         code: 'mcp_interaction_publication_pending', dispatched: true, settlement: 'unknown',
       }); }
-    }
+    };
+    let result: T;
+    try { result = await work(); }
+    catch (error) { await confirmPublication(); throw error; }
+    await confirmPublication();
+    return result;
   };
   const reply = async (work: () => Promise<unknown>): Promise<ManagedMcpReply> => {
     try { return { ok: true, value: await work(), executorStopped: true }; }

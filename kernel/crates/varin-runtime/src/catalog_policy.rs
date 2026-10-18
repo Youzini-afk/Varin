@@ -74,6 +74,8 @@ impl PolicyNodeReceiptMetadata {
 
 pub struct PolicyGraphSchemaPreparation {
     context: Option<context::ContextRead>,
+    launch: Option<super::launch_content::LaunchMetadata>,
+    has_goal: bool,
     content: crate::content::ContentStore,
     publication: crate::content::ContentPublication,
 }
@@ -111,7 +113,18 @@ impl PolicyGraphSchemaPreparation {
                 "policy skill bindings differ from retained input material".into(),
             ));
         }
-        let tools_ref = self.content.save(&serde_json::to_value(&body.tools)?)?;
+        let tools_ref = if let Some(launch) = &self.launch {
+            let tools: Vec<ToolSchema> = serde_json::from_value(self.content.load(&launch.selection.tools_ref)?)?;
+            let allowed = launch.selection.agent.as_ref().and_then(|agent| agent.tools.as_deref());
+            if body.tools != crate::tool_disclosure::request_tools(&tools, self.has_goal, allowed) {
+                return Err(RuntimeError::Conflict("graph differs from the admitted capability selection".into()));
+            }
+            // Keep the complete launch reference as the commit fence while the graph
+            // retains only its exact executable capability selection.
+            launch.selection.tools_ref.clone()
+        } else {
+            self.content.save(&serde_json::to_value(&body.tools)?)?
+        };
         let metadata = PolicyActionMetadata::PolicyToolGraphV1 {
             action_id: body.action_id.clone(),
             boundary: body.boundary.clone(),
@@ -401,6 +414,8 @@ impl Catalog {
         let head = self.head(&run.branch_id)?;
         Ok(PolicyGraphSchemaPreparation {
             context: self.prepare_context_read(run_id, epoch, head.as_deref())?,
+            launch: self.launch_metadata(run_id)?,
+            has_goal: self.goal_binding(run_id)?.is_some(),
             content: self.content.clone(),
             publication: self.content.begin_publication(),
         })

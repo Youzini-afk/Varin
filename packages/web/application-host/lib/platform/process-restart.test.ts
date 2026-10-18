@@ -1,19 +1,20 @@
 import { expect, test } from 'vitest';
 import { EventEmitter } from 'node:events';
+import type { ChildProcess, spawn } from 'node:child_process';
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { createProcessRestart } from './process-restart.js';
 
 function controlled() {
-  const child = new EventEmitter() as any;
+  const child = new EventEmitter() as { -readonly [Key in keyof ChildProcess]: ChildProcess[Key] };
   child.connected = true;
-  const messages: any[] = [];
-  child.send = (value: any) => { messages.push(value); queueMicrotask(() => child.emit('message', { kind: 'launched' })); };
+  const messages: unknown[] = [];
+  child.send = (value: unknown) => { messages.push(value); queueMicrotask(() => child.emit('message', { kind: 'launched' })); return true; };
   child.disconnect = () => { child.connected = false; };
   child.unref = () => {};
   let spawns = 0;
-  return { child, messages, get spawns() { return spawns; }, spawn: (() => { spawns++; queueMicrotask(() => child.emit('message', { kind: 'ready' })); return child; }) as any };
+  return { child, messages, get spawns() { return spawns; }, spawn: (() => { spawns++; queueMicrotask(() => child.emit('message', { kind: 'ready' })); return child; }) as typeof spawn };
 }
 test('concurrent restart requests share one real drain and never launch before it completes', async () => {
   const f = controlled(); let release!: () => void, entered!: () => void, stopped = 0, exits = 0;

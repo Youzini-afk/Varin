@@ -143,8 +143,12 @@ it('a query retains model A and old published reader while model B and a replace
   const f = await fixture({ embedding: (wire, response) => { if (wire.model === 'model-a' && wire.input.includes(question)) { held = { wire, response }; return true; } return false; } });
   const old = await f.run('semantic-old'); await expect.poll(() => Boolean(held), { timeout: 15_000 }).toBe(true);
   const oldMeta = f.selections[0]!.plan.semantic!;
-  await f.write('alpha.ts', alpha.replace('ALPHA_SEMANTIC_EVIDENCE', 'ALPHA_NEW_BYTES')); await f.writeSettings('model-b');
+  await f.write('alpha.ts', alpha.replace('ALPHA_SEMANTIC_EVIDENCE', 'ALPHA_NEW_BYTES'));
+  f.workspace.observeDocumentMutation({ workspaceId: f.workspaceId, resourceId: 'alpha.ts', kind: 'modified' });
+  await f.workspace.drain();
+  await f.writeSettings('model-b');
   await f.scan();
+  await expect.poll(() => f.workspace.indexStatuses()[0]?.status.publishedDocuments).toBe(2);
   const current = await f.run('semantic-new'); const newHistory = JSON.stringify(await f.completed(current));
   expect(f.selections[1]!.plan.semantic!.modelId).toBe('model-b'); expect(f.selections[1]!.plan.semantic!.publishedRevision).not.toBe(oldMeta.publishedRevision);
   expect(newHistory).toContain('ALPHA_NEW_BYTES');
@@ -206,7 +210,8 @@ it('Run grant revocation during inference drops source and never starts a fallba
 }, 45_000);
 
 it('cached query vectors do not bypass source authorization after a symlink escape and out-of-scope paths are never read', async () => {
-  const f = await fixture();
+  const f = await fixture({ conversation: (body, response) => latestOutput(body) ? responseDone(response)
+    : responseTool(response, 'code_retrieval', { question, paths: ['allowed'] }) });
   await f.write('allowed/entry.ts', 'export const conceptual = "ALLOWED_SEMANTIC_MARKER";\n');
   await f.write('private/secret.ts', 'export const hidden = "PRIVATE_SEMANTIC_SECRET";\n'); await f.scan();
   const first = await f.run('semantic-cache-first', ['allowed']); const firstHistory = JSON.stringify(await f.completed(first));
@@ -223,9 +228,12 @@ it('cached query vectors do not bypass source authorization after a symlink esca
 
 it('unchanged chunk bytes do not substitute for a changed whole-file Documents revision', async () => {
   let held: { wire: Wire; response: ServerResponse } | undefined;
-  const f = await fixture({ embedding: (wire, response) => { if (wire.input.includes(question)) { held = { wire, response }; return true; } return false; } });
+  // Establish this source before starting the index/watch owner. Late events
+  // from replacing the fixture's files must not invalidate the initial query.
+  const f = await fixture({ cold: true, embedding: (wire, response) => { if (wire.input.includes(question)) { held = { wire, response }; return true; } return false; } });
   await fs.unlink(path.join(f.documents.workspaceRoot, 'alpha.ts')); await fs.unlink(path.join(f.documents.workspaceRoot, 'beta.ts'));
   await f.write('mixed.ts', `${alpha}\n${beta}`); await f.scan();
+  expect(f.workspace.indexStatuses()[0]?.status.publishedDocuments).toBe(1);
   const run = await f.run('semantic-file-revision'); await expect.poll(() => Boolean(held), { timeout: 15_000 }).toBe(true);
   await f.write('mixed.ts', `${alpha}\n${beta.replace('BETA_SEMANTIC_EVIDENCE', 'CHANGED_OTHER_UNIT')}`);
   respondEmbedding(held!.wire, held!.response); const history = JSON.stringify(await f.completed(run));

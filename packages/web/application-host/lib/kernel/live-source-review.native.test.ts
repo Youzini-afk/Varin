@@ -375,7 +375,7 @@ it('the kernel refuses process effects attached to a fixed branch even with a va
   await f.kernel.revokeGrant(grant.grantId);
 }, 30_000);
 
-it('source preparation selects language tools only for the explicitly prepared live workspace', async () => {
+it('source preparation selects language tools for every admitted source mode', async () => {
   const f = await fixture((_body, response) => done(response));
   await fs.writeFile(path.join(f.workspace, 'source.ts'), 'export const value = 1;\n');
   const identity = await f.api.create('language-source-selection');
@@ -386,7 +386,7 @@ it('source preparation selects language tools only for the explicitly prepared l
   for (const mode of ['fixed_branch', 'materialized'] as const) {
     const prepared = await f.api.prepareSource({ ...identity, key: `switch-${mode}`, resourceOwner: { kind: 'local' as const }, workspaceId: (await f.documents.resolveWorkspace({ path: f.workspace })).workspaceId, content: { mode: 'saved-files' }, captureScopes: [], mode });
     expect(prepared.source.mode).toBe(mode);
-    for (const tool of languageTools) expect(prepared.source.tools).not.toContain(tool);
+    expect(prepared.source.tools).toEqual(expect.arrayContaining(languageTools));
     expect(prepared.source.tools).toContain('file_read');
   }
   expect(f.requests).toHaveLength(0);

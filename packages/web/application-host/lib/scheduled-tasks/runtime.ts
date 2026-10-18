@@ -68,6 +68,7 @@ export const createScheduledTasksRuntime = ({ projectConfigRuntime, listProjects
   // loops directory (project ancestors + user scope) and resync debounced.
   const loopWatchers = new Map<string, ReturnType<typeof watch>>();
   let loopResyncTimer: ReturnType<typeof setTimeout> | undefined;
+  let stopping: Promise<void> | undefined;
 
   const onLoopDirectoryEvent = (): void => {
     if (!started) return;
@@ -95,6 +96,9 @@ export const createScheduledTasksRuntime = ({ projectConfigRuntime, listProjects
         wanted.add(pathDirname(agentsDirectory));
       }
     }
+    // Directory discovery can finish after stop closed the current watchers.
+    // Do not recreate a watcher from that obsolete in-flight refresh.
+    if (!started) return;
     for (const [directory, watcher] of loopWatchers) {
       if (!wanted.has(directory)) {
         watcher.close();
@@ -117,20 +121,28 @@ export const createScheduledTasksRuntime = ({ projectConfigRuntime, listProjects
   };
 
   const start = async (): Promise<void> => {
+    await stopping;
     if (started) return;
     const current = calendarOwner();
     started = true;
     try { await current.start(syncAllProjects); }
-    catch (error) { stop(); throw error; }
+    catch (error) { await stop(); throw error; }
   };
 
-  const stop = (): void => {
+  const stop = (): Promise<void> => {
+    if (stopping) return stopping;
     started = false;
     owner?.stop();
-    for (const watcher of loopWatchers.values()) watcher.close();
+    const closing = [...loopWatchers.values()].map(watcher => new Promise<void>(resolve => {
+      watcher.once('close', resolve); watcher.close();
+    }));
     loopWatchers.clear();
     if (loopResyncTimer) clearTimeout(loopResyncTimer);
     loopResyncTimer = undefined;
+    const task = Promise.all([...closing, Promise.allSettled([...projectSyncs.values()])]).then(() => undefined);
+    stopping = task;
+    void task.finally(() => { if (stopping === task) stopping = undefined; }).catch(() => undefined);
+    return task;
   };
 
   const status = async (projectID?: string) => {

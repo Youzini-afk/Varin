@@ -28,6 +28,13 @@ import { modelCredentialBindingIdentity } from './model-binding-lifetime.js';
 import { ThreadAdapter } from './thread-adapter.js';
 import { registerThreadRoutes } from './thread-routes.js';
 import { registerCommonRequestMiddleware } from '../platform/core-routes.js';
+import type { LaunchTool } from './protocol.generated.js';
+
+function invokeTool(tool: Pick<LaunchTool, 'name' | 'version'>, args: unknown, callId: string) {
+  return { id: `item-${callId}`, type: 'function_call', call_id: callId, name: 'tool_invoke',
+    arguments: JSON.stringify({ reference: { name: tool.name, version: tool.version }, arguments: args }) };
+}
+const discover = (id: string) => invokeTool({ name: 'mcp_discover', version: '1' }, { server: 'fixture' }, id);
 
 const repository = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../../../..');
 const kernelPath = process.env.VARIN_TEST_KERNEL_PATH ?? path.join(repository, 'kernel/target/release', process.platform === 'win32' ? 'varin-kernel.exe' : 'varin-kernel');
@@ -42,20 +49,23 @@ async function listen(server: Server) {
   cleanups.push(async () => { server.closeAllConnections(); await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve())); });
   return `http://127.0.0.1:${address.port}`;
 }
-async function fixture(reply: (body: Record<string, unknown>, response: ServerResponse) => void | Promise<void>, existingRoot?: string, existingEndpoint?: string, selectedServers: readonly string[] | 'composed' = ['fixture'], maxMessageBytes?: number) {
+async function fixture(reply: (body: Record<string, unknown>, response: ServerResponse, capabilities: LaunchTool[]) => void | Promise<void>, existingRoot?: string, existingEndpoint?: string, selectedServers: readonly string[] | 'composed' = ['fixture'], maxMessageBytes?: number) {
   await fs.access(kernelPath);
   const root = existingRoot ?? await fs.mkdtemp(path.join(os.tmpdir(), 'varin-http-review-'));
   const kernel = createKernelClient({ hostId: 'http-review', storageRoot: root, buildVersion, kernelPath, allowCargoDevRunner: false });
   cleanups.push(async () => { await kernel.close(); if (!existingRoot) await fs.rm(root, { recursive: true, force: true }); });
   await kernel.start();
   const secret = 'fake-http-provider-key-not-a-real-secret';
-  const requests: Array<{ body: Record<string, unknown>; authorization?: string }> = [];
+  // Scripted calls use the controlled MCP owner's real versioned declarations.
+  // Provider requests remain unchanged and expose only the stable gateway schemas.
+  let capabilities: LaunchTool[] = [];
+  const requests: Array<{ body: Record<string, unknown>; capabilities: LaunchTool[]; authorization?: string }> = [];
   const provider = createServer((request, response) => {
     const chunks: Buffer[] = [];
     request.on('data', (bytes: Buffer) => chunks.push(bytes));
     request.on('end', guardProviderReply(response, () => {
-      requests.push({ body: JSON.parse(Buffer.concat(chunks).toString()) as Record<string, unknown>, ...(request.headers.authorization ? { authorization: request.headers.authorization } : {}) });
-      return reply(requests.at(-1)!.body, response);
+      requests.push({ body: JSON.parse(Buffer.concat(chunks).toString()) as Record<string, unknown>, capabilities: structuredClone(capabilities), ...(request.headers.authorization ? { authorization: request.headers.authorization } : {}) });
+      return reply(requests.at(-1)!.body, response, requests.at(-1)!.capabilities);
     }));
   });
   const endpoint = existingEndpoint ?? `${await listen(provider)}/responses`;
@@ -118,7 +128,9 @@ process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:request.id,result})+'\\n')
       lease=input.requiredBinding?await composition.restore(input.requiredBinding,signal):composition.snapshot();
     } else lease=await mcp.acquire(scope(input.threadId), { servers: selectedServers==='composed'?[]:selectedServers, ...(signal ? { signal } : {}) });
     const tracked = { ...lease, callTool: async (...args: Parameters<typeof lease.callTool>) => { transportTrace.push({ stage: 'enter', run: input.runId }); try { const result = await lease.callTool(...args); transportTrace.push({ stage: 'returned', run: input.runId }); return result; } catch (error) { transportTrace.push({ stage: 'error', error: String(error), run: input.runId }); throw error; } } };
-    return createMcpLease({ lease: tracked, kernel, currentPolicy: async () => ({ mode: 'normal', rules: [] }) });
+    const prepared = createMcpLease({ lease: tracked, kernel, currentPolicy: async () => ({ mode: 'normal', rules: [] }) });
+    capabilities = prepared.binding.tools;
+    return prepared;
   }, undefined, undefined, undefined, undefined, (id, signal) => documents.admitWorkspaceRegistration(id, signal));
   const adapter = new ThreadAdapter(runtime, {
     resolveModel: async selection => {
@@ -158,10 +170,10 @@ async function addPreparingDependency(f: Awaited<ReturnType<typeof fixture>>) {
 
 it('the shared MCP authority invokes a real selected stdio server only after allow-once and never starts unrelated configuration', async () => {
   let turns = 0;
-  const f = await fixture((body, response) => {
-    const tool = (body.tools as Array<{ name: string }>).find(tool => tool.name.startsWith('mcp__fixture__'))!;
+  const f = await fixture((_body, response, capabilities) => {
+    const tool = capabilities.find(tool => tool.name.startsWith('mcp__fixture__'))!;
     response.writeHead(200, { 'content-type': 'text/event-stream' });
-    const output = ++turns === 1 ? { id: 'real-mcp-call', type: 'function_call', call_id: 'real-mcp-call-id', name: tool.name, arguments: JSON.stringify({ text: 'explicitly approved remote content' }) }
+    const output = ++turns === 1 ? invokeTool(tool, { text: 'explicitly approved remote content' }, 'real-mcp-call-id')
       : { id: 'real-mcp-answer', type: 'message', content: [{ type: 'output_text', text: 'actual MCP result received' }] };
     response.end(`data: ${JSON.stringify({ type: 'response.completed', response: { output: [output] } })}\n\n`);
   });
@@ -194,10 +206,10 @@ it('lazy discovery starts only its selected real server, then validates and gate
     let output: Record<string, unknown>;
     if (turns === 2) {
       const previous = (body.input as Array<Record<string, unknown>>).findLast(item => item.type === 'function_call_output')!;
-      const result = JSON.parse(responsesMetadataText(previous.output)) as { content: { tools: Array<{ server: string; tool: string; schemaVersion: string }> } };
-      const discovered = result.content.tools.find(tool => tool.server === 'fixture' && tool.tool === 'send')!;
+      const result = JSON.parse(responsesMetadataText(previous.output)) as { content: { result: { tools: Array<{ server: string; tool: string; schemaVersion: string }> } } };
+      const discovered = result.content.result.tools.find(tool => tool.server === 'fixture' && tool.tool === 'send')!;
       expect(discovered).toBeDefined();
-      output = { id: 'lazy-concrete-call', type: 'function_call', call_id: 'lazy-concrete-id', name: 'mcp_call', arguments: JSON.stringify({ server: discovered.server, tool: discovered.tool, schemaVersion: discovered.schemaVersion, arguments: { text: 'lazy approved content' } }) };
+      output = invokeTool({ name: 'mcp_call', version: '1' }, { server: discovered.server, tool: discovered.tool, schemaVersion: discovered.schemaVersion, arguments: { text: 'lazy approved content' } }, 'lazy-concrete-id');
     } else output = { id: 'lazy-answer', type: 'message', content: [{ type: 'output_text', text: 'lazy action finished' }] };
     response.end(`data: ${JSON.stringify({ type: 'response.completed', response: { output: [output] } })}\n\n`);
   }, undefined, undefined, []);
@@ -209,10 +221,11 @@ it('lazy discovery starts only its selected real server, then validates and gate
   expect(await fs.stat(f.startsPath).then(() => true, () => false)).toBe(false);
   expect(await fs.stat(f.unusedPath).then(() => true, () => false)).toBe(false);
   const toolNames = (f.requests[0]!.body.tools as Array<{ name: string }>).map(tool => tool.name);
-  expect(toolNames).toEqual(expect.arrayContaining(['mcp_call', 'mcp_discover', 'ask_user']));
+  expect(toolNames).toEqual(expect.arrayContaining(['tool_describe', 'tool_invoke', 'ask_user']));
+  expect(toolNames).not.toEqual(expect.arrayContaining(['mcp_call', 'mcp_discover']));
   expect(toolNames.some(name => name.startsWith('mcp__fixture__'))).toBe(false);
   held.writeHead(200, { 'content-type': 'text/event-stream' });
-  held.end(`data: ${JSON.stringify({ type: 'response.completed', response: { output: [{ id: 'lazy-discover-item', type: 'function_call', call_id: 'lazy-discover-id', name: 'mcp_discover', arguments: JSON.stringify({ server: 'fixture' }) }] } })}\n\n`);
+  held.end(`data: ${JSON.stringify({ type: 'response.completed', response: { output: [discover('lazy-discover-id')] } })}\n\n`);
   await expect.poll(async () => (await f.api.snapshot(identity)).operations.some(op => op.waiting_on?.startsWith('permission:')), { timeout: 15_000 }).toBe(true).catch(async error => { throw new Error(`${String(error)} ${JSON.stringify({ requests: f.requests.length, run: await f.runtime.run(receipt.run_id), events: (await f.runtime.events(0, 256)).slice(-8) })}`); });
   expect(await fs.readFile(f.effectsPath, 'utf8').catch(() => '')).toBe('');
   const op = (await f.api.snapshot(identity)).operations.find(op => op.waiting_on?.startsWith('permission:'))!;
@@ -229,11 +242,11 @@ it('lazy discovery starts only its selected real server, then validates and gate
 it('a real configuration watch prepares a new MCP directory while the frozen request completes against its original server', async () => {
   let held!: ServerResponse;
   let turns = 0;
-  const f = await fixture((body, response) => {
+  const f = await fixture((_body, response, capabilities) => {
     if (++turns === 1) { held = response; return; }
-    const tool = (body.tools as Array<{ name: string; parameters: Record<string, unknown> }>).find(tool => tool.name.startsWith('mcp__fixture__'))!;
+    const tool = capabilities.find(tool => tool.name.startsWith('mcp__fixture__'))!;
     response.writeHead(200, { 'content-type': 'text/event-stream' });
-    const output = turns === 2 ? { id: 'new-call', type: 'function_call', call_id: 'new-call-id', name: tool.name, arguments: JSON.stringify({ message: 'new schema call' }) }
+    const output = turns === 2 ? invokeTool(tool, { message: 'new schema call' }, 'new-call-id')
       : { id: 'done', type: 'message', content: [{ type: 'output_text', text: 'both retained generations completed' }] };
     response.end(`data: ${JSON.stringify({ type: 'response.completed', response: { output: [output] } })}\n\n`);
   });
@@ -271,20 +284,21 @@ it('a real configuration watch prepares a new MCP directory while the frozen req
   expect(f.kernel.mcpBinding(receipt.run_id)).toEqual(original);
   expect((await f.runtime.launch(receipt.run_id))!.selection.mcp_binding?.generation).toBe(original.generation);
   held.writeHead(200, { 'content-type': 'text/event-stream' });
-  held.end(`data: ${JSON.stringify({ type: 'response.completed', response: { output: [{ id: 'old-call', type: 'function_call', call_id: 'old-call-id', name: originalTool.name, arguments: JSON.stringify({ text: 'old schema call' }) }] } })}\n\n`);
-  for (const callId of ['old-call-id', 'new-call-id']) {
+  held.end(`data: ${JSON.stringify({ type: 'response.completed', response: { output: [invokeTool(originalTool, { text: 'old schema call' }, 'old-call-id')] } })}\n\n`);
+  for (const args of [{ text: 'old schema call' }, { message: 'new schema call' }]) {
     await expect.poll(async () => (await f.api.snapshot(identity)).operations.some(op => op.waiting_on?.startsWith('permission:')
-      && (controlResult(op.result) as { permission?: { call?: { callId?: string } } })?.permission?.call?.callId === callId), { timeout: 15_000 }).toBe(true);
+      && JSON.stringify((controlResult(op.result) as { permission?: { call?: { arguments?: unknown } } })?.permission?.call?.arguments) === JSON.stringify(args)), { timeout: 15_000 }).toBe(true);
     const operation = (await f.api.snapshot(identity)).operations.find(op => op.waiting_on?.startsWith('permission:')
-      && (controlResult(op.result) as { permission?: { call?: { callId?: string } } })?.permission?.call?.callId === callId)!;
+      && JSON.stringify((controlResult(op.result) as { permission?: { call?: { arguments?: unknown } } })?.permission?.call?.arguments) === JSON.stringify(args))!;
     await f.api.decidePermission({ ...identity, operationId: operation.id, permissionId: (controlResult(operation.result) as { permission: { id: string } }).permission.id, decision: 'allow_once' });
   }
   await expect.poll(async () => (await f.api.run(receipt.run_id)).state, { timeout: 15_000 }).toBe('completed');
   expect((await fs.readFile(f.effectsPath, 'utf8')).trim().split('\n').map(line => JSON.parse(line))).toEqual([{ name: 'send', arguments: { text: 'old schema call' } }]);
   expect((await fs.readFile(nextEffects, 'utf8')).trim().split('\n').map(line => JSON.parse(line))).toEqual([{ name: 'send', arguments: { message: 'new schema call' } }]);
-  const nextTool = (f.requests[1]!.body.tools as Array<{ name: string; parameters: { properties: Record<string, unknown> } }>).find(tool => tool.name === originalTool.name)!;
-  expect(nextTool.parameters.properties).toHaveProperty('message');
-  expect(nextTool.parameters.properties).not.toHaveProperty('text');
+  const nextTool = f.requests[1]!.capabilities.find(tool => tool.name === originalTool.name)!;
+  expect((nextTool.schema as { properties: unknown }).properties).toHaveProperty('message');
+  expect((nextTool.schema as { properties: unknown }).properties).not.toHaveProperty('text');
+  expect(f.requests[1]!.body.tools).toEqual(f.requests[0]!.body.tools);
   const selection = (await f.runtime.launch(receipt.run_id))!.selection;
   expect(selection.mcp_binding!.generation).not.toBe(original.generation);
   expect(selection.tool_schema_generation).toBeGreaterThan(0);
@@ -293,10 +307,10 @@ it('a real configuration watch prepares a new MCP directory while the frozen req
 }, 45_000);
 it('disabling a real selected MCP dependency ends its outstanding permission wait without an answer or remote dispatch', async () => {
   let turns=0;
-  const f=await fixture((body,response)=>{
+  const f=await fixture((_body,response,capabilities)=>{
     response.writeHead(200,{'content-type':'text/event-stream'});
-    const tool=(body.tools as Array<{name:string}>).find(tool=>tool.name.startsWith('mcp__fixture__'))!;
-    const output=++turns===1?{id:'blocked-call',type:'function_call',call_id:'blocked-call-id',name:tool.name,arguments:JSON.stringify({text:'must not send'})}
+    const tool=capabilities.find(tool=>tool.name.startsWith('mcp__fixture__'))!;
+    const output=++turns===1?invokeTool(tool,{text:'must not send'},'blocked-call-id')
       :{id:'finished',type:'message',content:[{type:'output_text',text:'disabled dependency was rejected'}]};
     response.end(`data: ${JSON.stringify({type:'response.completed',response:{output:[output]}})}\n\n`);
   });
@@ -309,16 +323,16 @@ it('disabling a real selected MCP dependency ends its outstanding permission wai
   expect(await fs.readFile(f.effectsPath,'utf8').catch(()=>'' )).toBe('');
   expect((await f.api.snapshot(identity)).operations.some(op=>op.waiting_on?.startsWith('permission:'))).toBe(false);
   const result=(f.requests[1]!.body.input as Array<{type:string;output?:unknown}>).find(item=>item.type==='function_call_output')!;
-  expect(JSON.parse(responsesMetadataText(result.output))).toMatchObject({kind:'not_dispatched',reason:expect.any(String)});
+  expect(JSON.parse(responsesMetadataText(result.output))).toMatchObject({content:{completion:{kind:'not_dispatched',reason:expect.any(String)}}});
 },30_000);
 it('cold MCP preparation starts the model and publishes a fast dependency while another real server is still preparing',async()=>{
   let held!:ServerResponse;let turns=0;
-  const f=await fixture((body,response)=>{
+  const f=await fixture((_body,response,capabilities)=>{
     if(++turns===1){held=response;return;}
     response.writeHead(200,{'content-type':'text/event-stream'});
-    const fast=(body.tools as Array<{name:string}>).find(tool=>tool.name.startsWith('mcp__fixture__'));
+    const fast=capabilities.find(tool=>tool.name.startsWith('mcp__fixture__'));
     if(turns===2)expect(fast).toBeDefined();
-    const output=turns===2?{id:'fast-call',type:'function_call',call_id:'fast-call-id',name:fast!.name,arguments:JSON.stringify({text:'fast dependency worked'})}
+    const output=turns===2?invokeTool(fast!,{text:'fast dependency worked'},'fast-call-id')
       :{id:'fast-finished',type:'message',content:[{type:'output_text',text:'independent preparation worked'}]};
     response.end(`data: ${JSON.stringify({type:'response.completed',response:{output:[output]}})}\n\n`);
   },undefined,undefined,'composed');
@@ -342,7 +356,7 @@ it('cold MCP preparation starts the model and publishes a fast dependency while 
   expect(gateRequests).toHaveLength(1);
   await f.runtime.refreshMcp(receipt.run_id);
   held.writeHead(200,{'content-type':'text/event-stream'});
-  held.end(`data: ${JSON.stringify({type:'response.completed',response:{output:[{id:'discover-fast',type:'function_call',call_id:'discover-fast-id',name:'mcp_discover',arguments:JSON.stringify({server:'fixture'})}]}})}\n\n`);
+  held.end(`data: ${JSON.stringify({type:'response.completed',response:{output:[discover('discover-fast-id')]}})}\n\n`);
   await expect.poll(async()=>(await f.api.snapshot(identity)).operations.some(op=>op.waiting_on?.startsWith('permission:')),{timeout:15_000}).toBe(true);
   expect(gateRequests[0]!.writableEnded).toBe(false);
   const operation=(await f.api.snapshot(identity)).operations.find(op=>op.waiting_on?.startsWith('permission:'))!;
@@ -354,15 +368,16 @@ it('cold MCP preparation starts the model and publishes a fast dependency while 
 },45_000);
 it('reopening a question restores only the selected MCP dependencies while an unselected server is still preparing', async () => {
   let held!: ServerResponse; let turns = 0;
-  const f = await fixture((body, response) => {
+  const f = await fixture((body, response, capabilities) => {
     if (++turns === 1) { held = response; return; }
     response.writeHead(200, { 'content-type': 'text/event-stream' });
     const output = turns === 2
       ? { id: 'restore-question', type: 'function_call', call_id: 'restore-question-id', name: 'ask_user', arguments: JSON.stringify({ question: 'Continue with the selected service?' }) }
       : { id: 'restored-answer', type: 'message', content: [{ type: 'output_text', text: 'continued without waiting for unrelated preparation' }] };
     if (turns === 3) {
-      expect((body.tools as Array<{name: string}>).some(tool => tool.name.startsWith('mcp__fixture__'))).toBe(true);
-      expect((body.tools as Array<{name: string}>).some(tool => tool.name.startsWith('mcp__slow__'))).toBe(false);
+      expect(capabilities.some(tool => tool.name.startsWith('mcp__fixture__'))).toBe(true);
+      expect(capabilities.some(tool => tool.name.startsWith('mcp__slow__'))).toBe(false);
+      expect((body.tools as Array<{name: string}>).some(tool => tool.name.startsWith('mcp__'))).toBe(false);
     }
     response.end(`data: ${JSON.stringify({ type: 'response.completed', response: { output: [output] } })}\n\n`);
   }, undefined, undefined, 'composed');
@@ -375,7 +390,7 @@ it('reopening a question restores only the selected MCP dependencies while an un
   await expect.poll(() => gates.length, { timeout: 15_000 }).toBe(1);
   await f.runtime.refreshMcp(receipt.run_id);
   held.writeHead(200, { 'content-type': 'text/event-stream' });
-  held.end(`data: ${JSON.stringify({ type: 'response.completed', response: { output: [{ id: 'restore-discover', type: 'function_call', call_id: 'restore-discover-id', name: 'mcp_discover', arguments: JSON.stringify({ server: 'fixture' }) }] } })}\n\n`);
+  held.end(`data: ${JSON.stringify({ type: 'response.completed', response: { output: [discover('restore-discover-id')] } })}\n\n`);
   await expect.poll(async () => (await f.api.run(receipt.run_id)).state, { timeout: 15_000 }).toBe('waiting');
   const operation = (await f.api.snapshot(identity)).operations.find(op => op.executor === 'ask_user')!;
   const selected = (await f.runtime.launch(receipt.run_id))!.selection.mcp_binding;
@@ -391,12 +406,12 @@ it('reopening a question restores only the selected MCP dependencies while an un
 }, 45_000);
 it('reenabling an identically described dependency gives new work a fresh owner while the old model exchange remains revoked',async()=>{
   const held:ServerResponse[]=[];let turns=0;
-  const f=await fixture((body,response)=>{
+  const f=await fixture((_body,response,capabilities)=>{
     const turn=++turns;
     if(turn<=2){held.push(response);return;}
     response.writeHead(200,{'content-type':'text/event-stream'});
-    const tool=(body.tools as Array<{name:string}>).find(tool=>tool.name.startsWith('mcp__fixture__'))!;
-    const output=turn===3?{id:'reenabled-call',type:'function_call',call_id:'reenabled-id',name:tool.name,arguments:JSON.stringify({text:'reenabled call'})}
+    const tool=capabilities.find(tool=>tool.name.startsWith('mcp__fixture__'))!;
+    const output=turn===3?invokeTool(tool,{text:'reenabled call'},'reenabled-id')
       :{id:'reenabled-finished',type:'message',content:[{type:'output_text',text:'fresh owner completed'}]};
     response.end(`data: ${JSON.stringify({type:'response.completed',response:{output:[output]}})}\n\n`);
   },undefined,undefined,'composed');
@@ -408,7 +423,7 @@ it('reenabling an identically described dependency gives new work a fresh owner 
   await expect.poll(ready,{timeout:15_000}).toBe(true);
   await f.runtime.refreshMcp(receipt.run_id);
   held[0]!.writeHead(200,{'content-type':'text/event-stream'});
-  held[0]!.end(`data: ${JSON.stringify({type:'response.completed',response:{output:[{id:'discover',type:'function_call',call_id:'discover-id',name:'mcp_discover',arguments:JSON.stringify({server:'fixture'})}]}})}\n\n`);
+  held[0]!.end(`data: ${JSON.stringify({type:'response.completed',response:{output:[discover('discover-id')]}})}\n\n`);
   await expect.poll(()=>held.length,{timeout:15_000}).toBe(2);
   const original=f.kernel.mcpBinding(receipt.run_id)!;
   const originalLive=f.kernel.mcpLiveBinding(receipt.run_id)!;
@@ -420,11 +435,12 @@ it('reenabling an identically described dependency gives new work a fresh owner 
   const next=owner.snapshot();expect(next.implementationIdentity).not.toBe(implementation);next.release();
   await f.runtime.refreshMcp(receipt.run_id);
   held[1]!.writeHead(200,{'content-type':'text/event-stream'});
-  held[1]!.end(`data: ${JSON.stringify({type:'response.completed',response:{output:[{id:'old-revoked-call',type:'function_call',call_id:'old-revoked-id',name:tool.name,arguments:JSON.stringify({text:'old revoked call'})}]}})}\n\n`);
+  held[1]!.end(`data: ${JSON.stringify({type:'response.completed',response:{output:[invokeTool(tool,{text:'old revoked call'},'old-revoked-id')]}})}\n\n`);
   await expect.poll(async()=>(await f.api.snapshot(identity)).operations.some(op=>op.waiting_on?.startsWith('permission:')),{timeout:15_000}).toBe(true);
   const operation=(await f.api.snapshot(identity)).operations.find(op=>op.waiting_on?.startsWith('permission:'))!;
   const permission=(controlResult(operation.result) as {permission:{id:string;call:{callId:string}}}).permission;
-  expect(permission.call.callId).toBe('reenabled-id');
+  expect(permission.call.callId).toBe('target');
+  expect(controlResult(operation.result)).toMatchObject({permission:{call:{arguments:{text:'reenabled call'}}}});
   expect(f.kernel.mcpBinding(receipt.run_id)).toEqual(original);
   expect(f.kernel.mcpLiveBinding(receipt.run_id)!.ownerId).not.toBe(originalLive.ownerId);
   await f.api.decidePermission({...identity,operationId:operation.id,permissionId:permission.id,decision:'allow_once'});
@@ -434,12 +450,12 @@ it('reenabling an identically described dependency gives new work a fresh owner 
   expect(f.compositionErrors).toEqual([]);expect(f.launchErrors).toEqual([]);
 },45_000);
 it('a real oversized UTF-8 MCP result keeps its remote-effect receipt, preserves other Runs and releases headless owners', async () => {
-  const f = await fixture((body, response) => {
+  const f = await fixture((body, response, capabilities) => {
     const independent = JSON.stringify(body.input).includes('independent small run');
     const result = (body.input as Array<Record<string, unknown>>).findLast(item => item.type === 'function_call_output');
-    const selected = (body.tools as Array<{ name: string }>).find(tool => tool.name.startsWith('mcp__fixture__'))!;
+    const selected = capabilities.find(tool => tool.name.startsWith('mcp__fixture__'))!;
     const output = !independent && !result
-      ? { id: 'large-mcp-item', type: 'function_call', call_id: 'large-mcp-call', name: selected.name, arguments: JSON.stringify({ text: 'large unicode response' }) }
+      ? invokeTool(selected, { text: 'large unicode response' }, 'large-mcp-call')
       : { id: `final-${crypto.randomUUID()}`, type: 'message', content: [{ type: 'output_text', text: independent ? 'independent run completed' : 'full large output received' }] };
     response.writeHead(200, { 'content-type': 'text/event-stream' });
     response.end(`data: ${JSON.stringify({ type: 'response.completed', response: { output: [output] } })}\n\n`);
@@ -475,10 +491,10 @@ it('a real oversized UTF-8 MCP result keeps its remote-effect receipt, preserves
 }, 45_000);
 it('the default MCP framing limit cannot invent a receipt or break the kernel when a remote result is oversized', async () => {
   let turn = 0;
-  const f = await fixture((body, response) => {
-    const name = (body.tools as Array<{ name: string }>).find(tool => tool.name.startsWith('mcp__fixture__'))!.name;
+  const f = await fixture((_body, response, capabilities) => {
+    const selected = capabilities.find(tool => tool.name.startsWith('mcp__fixture__'))!;
     response.writeHead(200, { 'content-type': 'text/event-stream' });
-    const output = ++turn === 1 ? { id: 'framing-call', type: 'function_call', call_id: 'framing-call-id', name, arguments: JSON.stringify({ text: 'large unicode response' }) }
+    const output = ++turn === 1 ? invokeTool(selected, { text: 'large unicode response' }, 'framing-call-id')
       : { id: 'framing-final', type: 'message', content: [{ type: 'output_text', text: 'remote receipt unavailable; do not replay' }] };
     response.end(`data: ${JSON.stringify({ type: 'response.completed', response: { output: [output] } })}\n\n`);
   });

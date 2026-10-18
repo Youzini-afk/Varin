@@ -248,11 +248,15 @@ describe('surface Integration vertical path', () => {
         const base = await store.captureDirectory(workspace);
         const draft = await store.putObject(Buffer.from('draft\n'));
         const child = await store.putObject(Buffer.from('child\n'));
-        const state = (hash: string, byteLength: number) => ({ kind: 'regular-file' as const, objectHash: hash, byteLength, mode: 0o644 });
-        for (const file of ['a.txt', 'b.txt']) base[file] = state(draft.hash, draft.byteLength);
+        const state = (file: string, hash: string, byteLength: number) => {
+          const original = base[file];
+          if (original?.kind !== 'regular-file') throw new Error('Expected a captured fixture file');
+          return { ...original, objectHash: hash, byteLength };
+        };
+        for (const file of ['a.txt', 'b.txt']) base[file] = state(file, draft.hash, draft.byteLength);
         await store.createBranch(identity.workspaceId, 'surface-undo-child', base, 'base', ['a.txt', 'b.txt']);
         await store.commitVirtualWrites('surface-undo-child', 0, Object.fromEntries(['a.txt', 'b.txt']
-          .map(file => [file, state(child.hash, child.byteLength)])));
+          .map(file => [file, state(file, child.hash, child.byteLength)])));
         return store.publishHeadResult('surface-undo-child');
       });
       const coordinator = new IntegrationCoordinator({ workingStates: native.workingStates,

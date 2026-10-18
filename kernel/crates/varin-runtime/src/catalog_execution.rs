@@ -833,6 +833,8 @@ pub(super) struct ExecutionBodyPreparation {
     content: crate::content::ContentStore,
     publication: crate::content::ContentPublication,
     frozen_request: Option<Value>,
+    launch: Option<super::launch_content::LaunchMetadata>,
+    has_goal: bool,
 }
 pub(super) struct PreparedExecutionBodies {
     _publication: crate::content::ContentPublication,
@@ -868,10 +870,21 @@ impl ExecutionBodyPreparation {
             _ => None,
         };
         let tools_ref = match record {
-            ExecutionRecord::RequestPrepared { snapshot } => Some(
-                self.content
-                    .save(&serde_json::to_value(&snapshot.view.binding.tools)?)?,
-            ),
+            ExecutionRecord::RequestPrepared { snapshot } => {
+                // Read immutable bodies outside the Catalog lock. The commit below
+                // still fences this exact launch reference and schema generation.
+                if let Some(launch) = &self.launch {
+                    let tools: Vec<crate::execution::ToolSchema> =
+                        serde_json::from_value(self.content.load(&launch.selection.tools_ref)?)?;
+                    let allowed = launch.selection.agent.as_ref().and_then(|agent| agent.tools.as_deref());
+                    if snapshot.view.binding.tools != crate::tool_disclosure::request_tools(&tools, self.has_goal, allowed) {
+                        return Err(RuntimeError::Conflict("request differs from the admitted capability selection".into()));
+                    }
+                    Some(launch.selection.tools_ref.clone())
+                } else {
+                    Some(self.content.save(&serde_json::to_value(&snapshot.view.binding.tools)?)?)
+                }
+            }
             _ => None,
         };
         let policy_checkpoint = match record {
@@ -1097,6 +1110,14 @@ impl Catalog {
             content: self.content.clone(),
             publication: self.content.begin_publication(),
             frozen_request,
+            launch: match record {
+                ExecutionRecord::RequestPrepared { snapshot } => self.launch_metadata(&snapshot.view.run_id)?,
+                _ => None,
+            },
+            has_goal: match record {
+                ExecutionRecord::RequestPrepared { snapshot } => self.goal_binding(&snapshot.view.run_id)?.is_some(),
+                _ => false,
+            },
         })
     }
     pub(super) fn commit_prepared_execution(

@@ -409,6 +409,9 @@ export class ThreadCollaboration {
   private async releaseHandoff(child: DelegatedExecution, signal: AbortSignal): Promise<void> {
     if (child.resources_released || (!child.receipt && !child.report) || (child.source?.kind !== 'ready' && child.source?.kind !== 'absent' && !child.report)) return;
     const { kernel, runtime } = this.owners;
+    // Completed children must detach their original observers before releasing
+    // the source handoff. A failed fence retains that same source for retry.
+    if (child.report && child.receipt) await runtime.releaseMcpResourceSource(child.receipt.run_id);
     const selection = child.launch.mcp_binding;
     const managed = selection && Object.values(selection.provenance.servers).some(server => server.owner.resource_owner.kind === 'managed_host');
     // A Run receipt precedes source/credential/MCP preparation. Keep the original

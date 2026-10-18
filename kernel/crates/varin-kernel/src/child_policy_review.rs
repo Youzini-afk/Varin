@@ -486,6 +486,7 @@ impl Fixture {
             assembly,
             frames,
         } = self;
+        assembly.runtime.shutdown().unwrap();
         assembly.policy.close();
         assembly.credentials.close();
         assembly.memory.close();
@@ -498,6 +499,7 @@ impl Fixture {
     }
     fn finish(self) {
         let root = self.root.clone();
+        self.assembly.runtime.shutdown().unwrap();
         self.assembly.policy.close();
         self.assembly.credentials.close();
         self.assembly.memory.close();

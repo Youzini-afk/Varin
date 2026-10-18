@@ -70,6 +70,7 @@ describe('Bot mode navigation', () => {
 
   beforeEach(() => {
     const { window, document } = parseHTML('<!doctype html><html><body></body></html>');
+    Object.defineProperty(window, 'location', { value: new URL('http://ui.test/'), configurable: true });
     vi.stubGlobal('window', window);
     vi.stubGlobal('document', document);
     vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);

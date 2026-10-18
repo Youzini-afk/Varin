@@ -40,6 +40,10 @@ export function createContextComposition(runtime: ApplicationExtensionRuntime): 
       try { resolved = await runtime.resolveServiceCompositions(request, { ...options, collection: true }); }
       catch (error) {
         signal?.throwIfAborted();
+        if (error instanceof HostServiceBindingError && error.code === 'missing') {
+          prepared.delete(scope.threadId);
+          return undefined;
+        }
         if (!(error instanceof HostCompositionPreparationRequiredError)) throw error;
       }
       if (resolved && resolved.services.length === cached.declarations.length

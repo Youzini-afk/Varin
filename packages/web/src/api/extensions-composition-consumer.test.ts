@@ -1,15 +1,18 @@
 import assert from 'node:assert/strict';
-import { EventEmitter } from 'node:events';
+import { once } from 'node:events';
+import { createServer } from 'node:http';
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import express, { type Express, type Request, type Response as ExpressResponse } from 'express';
+import express from 'express';
+import { WebSocket } from 'ws';
 import { test } from 'vitest';
 import { ApplicationExtensionRuntime } from '@varin/extension-host';
 import { clearRuntimeUrlAuthToken } from '@varin/application-client';
 import type { VarinSurfaceServiceLeaseEvent, VarinSurfaceServiceLeaseRequest } from '@varin/extension-contract';
 import { registerExtensionRoutes } from '#application-host/lib/extensions/routes.js';
+import { attachObservations } from '#application-host/lib/observations.js';
 import { createWebExtensionsAPI } from './extensions';
 
 const deferred = <T,>() => {
@@ -23,64 +26,17 @@ const until = async (ready: () => boolean, message: string) => {
   while (!ready()) { assert(Date.now() < end, message); await new Promise(resolve => setTimeout(resolve, 5)); }
 };
 
-/** Only delivery is adapted: actual Express auth/route handlers and ReadableStream frames,
- * no HTTP or Unix listener. A completed POST body is not a closed response stream. */
-function streamRouter(router: ReturnType<typeof express.Router>) {
-  return (target: URL, init: RequestInit): Promise<Response> => new Promise((resolve, reject) => {
-    const headers = new Headers();
-    let stream!: ReadableStreamDefaultController<Uint8Array>;
-    let replied = false;
-    let closed = false;
-    const incoming = Object.assign(new EventEmitter(), {
-      method: init.method ?? 'GET', url: target.pathname + target.search,
-      headers: Object.fromEntries(new Headers(init.headers)), body: init.body ? JSON.parse(String(init.body)) : undefined,
-      aborted: false,
-    });
-    const close = () => {
-      if (closed) return;
-      closed = true; response.destroyed = true;
-      init.signal?.removeEventListener('abort', abort);
-      response.emit('close');
-    };
-    const body = new ReadableStream<Uint8Array>({ start(controller) { stream = controller; }, cancel: close });
-    const response = Object.assign(new EventEmitter(), {
-      statusCode: 200, writableEnded: false, destroyed: false, headersSent: false,
-      setHeader(name: string, value: string) { headers.set(name, value); return this; },
-      status(code: number) { this.statusCode = code; return this; },
-      flushHeaders() {
-        if (this.headersSent) return;
-        this.headersSent = true;
-        if (!replied) { replied = true; resolve(new Response(body, { status: this.statusCode, headers })); }
-        incoming.emit('close'); // Node may finish reading a POST while its response remains open.
-      },
-      write(bytes: string) { this.flushHeaders(); stream.enqueue(new TextEncoder().encode(bytes)); return true; },
-      end() {
-        if (closed || this.writableEnded) return this;
-        this.flushHeaders(); this.writableEnded = true;
-        init.signal?.removeEventListener('abort', abort);
-        stream.close(); response.emit('finish'); return this;
-      },
-      json(payload: unknown) { this.setHeader('Content-Type', 'application/json'); this.write(JSON.stringify(payload)); return this.end(); },
-    });
-    const abort = () => {
-      if (closed) return;
-      incoming.aborted = true; incoming.emit('aborted');
-      if (!response.writableEnded) stream.error(init.signal?.reason ?? new Error('Reader disconnected'));
-      close(); reject(init.signal?.reason);
-    };
-    if (init.signal?.aborted) { abort(); return; }
-    init.signal?.addEventListener('abort', abort, { once: true });
-    router(incoming as Request, response as unknown as ExpressResponse, (error?: unknown) => {
-      close(); reject(error ?? new Error(`Unmatched direct route ${target.pathname}`));
-    });
-  });
-}
-
 test('public Surface lease client binds scoped broker graphs and owns only its real response lifetime', async () => {
   const directory = await mkdtemp(join(tmpdir(), 'varin-surface-composition-'));
   const runtime = await ApplicationExtensionRuntime.create({ dataDir: join(directory, 'data'), varinVersion: '1.2.3',
     brokerScript: fileURLToPath(new URL('../../../extension-host/broker/broker-child.mjs', import.meta.url)) });
   const entered = deferred<void>(), release = deferred<void>();
+  const closedGenerations = new Set<number>();
+  const watchServiceLease = runtime.watchServiceLease.bind(runtime);
+  runtime.watchServiceLease = async (request, ...args) => {
+    try { await watchServiceLease(request, ...args); }
+    finally { closedGenerations.add((request as VarinSurfaceServiceLeaseRequest).owner.generation); }
+  };
   runtime.capabilities.register('review.surface.gate', async () => { entered.resolve(); await release.promise; return null; });
   const dependency = 'review.surface.dependency', composed = 'review.surface.composed';
   const install = async (id: string, kind: 'dependency' | 'composed' | 'surface') => {
@@ -128,6 +84,14 @@ test('public Surface lease client binds scoped broker graphs and owns only its r
       ? { ok: true, clientId: token } : null,
   } });
   const controllers: AbortController[] = [], completions: Promise<void>[] = [];
+  const app = express(); app.use(express.json());
+  const server = createServer(app);
+  const observations = attachObservations({ server,
+    authenticate: async request => Boolean(await auth.resolveWebSocketAuthContext(request)),
+    isRequestOriginAllowed: () => true,
+    rejectWebSocketUpgrade: socket => socket.destroy(),
+  });
+  const originalFetch = globalThis.fetch;
   try {
     await runtime.start();
     await install('review.surface.b', 'dependency'); await install('review.surface.c', 'dependency');
@@ -135,14 +99,22 @@ test('public Surface lease client binds scoped broker graphs and owns only its r
     await route('p', 'review.surface.b'); await route('q', 'review.surface.c');
     const router = express.Router();
     router.post('/auth/url-token', auth.handleUrlAuthToken);
-    registerExtensionRoutes(router as unknown as Express, { extensionCatalog: runtime.catalog, extensionPackages: runtime.packages,
+    router.use('/api/varin/extensions', (_request, response, next) => {
+      if (!authorized) { response.status(401).json({ error: 'unauthorized' }); return; }
+      next();
+    });
+    app.use(router);
+    registerExtensionRoutes(app, { extensionCatalog: runtime.catalog, extensionPackages: runtime.packages,
       extensionRuntime: runtime, uiAuthController: auth });
-    const transport = streamRouter(router);
+    server.listen(0, '127.0.0.1'); await once(server, 'listening');
+    const address = server.address(); assert(address && typeof address !== 'string');
+    const origin = `http://127.0.0.1:${address.port}`;
+    setGlobal('WebSocket', WebSocket);
     setGlobal('window', { location: { origin: 'https://surface.invalid', href: 'https://surface.invalid/' },
-      __VARIN_LOCAL_ORIGIN__: 'https://application-host.invalid' });
+      __VARIN_LOCAL_ORIGIN__: origin });
     clearRuntimeUrlAuthToken();
     setGlobal('fetch', (input: URL | string, init: RequestInit = {}) => {
-      const target = new URL(String(input)); assert.equal(target.origin, 'https://application-host.invalid');
+      const target = new URL(String(input)); assert.equal(target.origin, origin);
       assert.equal(init.credentials, 'include');
       const headers = new Headers(init.headers);
       // Controlled browser authentication only at token mint. Actual service requests must use
@@ -153,7 +125,7 @@ test('public Surface lease client binds scoped broker graphs and owns only its r
         assert.equal(headers.has('authorization'), false);
         if (!authorized) headers.delete('x-varin-application-token');
       }
-      return transport(target, { ...init, headers });
+      return originalFetch(target, { ...init, headers });
     });
     const api = createWebExtensionsAPI();
     const request = async (projectId: string, generation: number): Promise<VarinSurfaceServiceLeaseRequest> => {
@@ -197,6 +169,7 @@ test('public Surface lease client binds scoped broker graphs and owns only its r
     assert.equal(await p.invoke('read'), 'review.surface.b', 'An open lease never reselects its dependency');
     p.controller.abort(new Error('Surface detached'));
     await completions[0];
+    await until(() => closedGenerations.has(1), 'The Host must observe the original lease response closing');
     await assert.rejects(p.invoke('read'), /authenticated composition owner/);
     assert(runtime.services.getSnapshot().providers.some(provider => provider.providerId === p.selected.providers[0]!.providerId),
       'The actual old callback still owns A/B after the Surface reader closes');
@@ -209,6 +182,8 @@ test('public Surface lease client binds scoped broker graphs and owns only its r
     await Promise.allSettled(completions);
     try { await runtime.stop(); }
     finally {
+      observations.stop(); server.closeAllConnections();
+      if (server.listening) await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve()));
       auth.dispose(); clearRuntimeUrlAuthToken();
       if (previousDataDir === undefined) delete process.env.VARIN_DATA_DIR; else process.env.VARIN_DATA_DIR = previousDataDir;
       for (const [name, descriptor] of saved) { if (descriptor) Object.defineProperty(globalThis, name, descriptor); else Reflect.deleteProperty(globalThis, name); }

@@ -384,6 +384,8 @@ fn activated_planning_generation_uses_its_exact_model_and_private_credential_own
     );
     bridge.close();
     credentials.close();
+    drop(bridge);
+    drop(credentials);
     drop(catalog);
     std::fs::remove_dir_all(root).unwrap();
 }

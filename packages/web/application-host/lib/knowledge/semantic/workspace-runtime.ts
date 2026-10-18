@@ -7,7 +7,6 @@ import { createRemoteEmbedder } from './remote-embedder.js';
 import { DEFAULT_SEMANTIC_RECALL } from '../../harness/explore.js';
 import { SemanticInferenceError, type createSemanticInference, type SemanticInferenceLease, type SemanticInferenceDescription } from './runtime-inference.js';
 import type { RetrievalSemanticLease } from '../../kernel/retrieval-composition.js';
-import { randomUUID } from 'node:crypto';
 import path from 'node:path';
 import { FAST_DECISION_PURPOSES } from '@varin/protocol';
 import type { HarnessInferenceBindingSnapshot } from '@varin/protocol';
@@ -18,7 +17,7 @@ import type { SemanticEmbedder } from './embedder.js';
 import { isAbortError, waitWithSignal } from '../../cancellation.js';
 import { workspaceScope, defaultRecipeIdentity, recipeIdOf, spaceIdOf } from './identity.js';
 import type { InferenceCall } from './inference-requests.js';
-import { pinSemanticQueryView, type SemanticDraftReadResult, type SemanticSourceView } from './query-view.js';
+import type { SemanticSourceView } from './query-view.js';
 import { createSemanticIndexRuntime, resolveSemanticScanRoots, type SemanticIndexRuntimeOptions, type SemanticScanOptions } from './runtime.js';
 import { isBotScopeId, isThreadScopeId } from '../../harness/owner-scope.js';
 

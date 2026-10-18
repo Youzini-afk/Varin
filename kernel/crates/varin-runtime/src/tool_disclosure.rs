@@ -128,6 +128,16 @@ pub fn model_tools(tools: &[ToolSchema]) -> Option<Vec<ToolSchema>> {
     Some(visible)
 }
 
+/// The executable request cut of a frozen launch. Keep this distinct from the
+/// smaller provider interface, and use the same cut when validating persistence.
+pub fn request_tools(tools: &[ToolSchema], has_goal: bool, allowed: Option<&[String]>) -> Vec<ToolSchema> {
+    if !enabled(tools) { return tools.to_vec(); }
+    tools.iter()
+        .filter(|tool| tool.name != "goal_report" || has_goal)
+        .filter(|tool| is_gateway(tool) || allowed.is_none_or(|names| names.contains(&tool.name)))
+        .cloned().collect()
+}
+
 /// This is an explicit API classification, not keyword matching of user requests.
 pub fn namespace(name: &str) -> &'static str {
     match name {

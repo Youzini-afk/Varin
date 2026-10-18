@@ -276,6 +276,7 @@ impl Fixture {
     fn finish(mut self) {
         self.bridge.close();
         self.host.take().unwrap().join().unwrap();
+        self.runtime.shutdown().unwrap();
         let root = self.root.clone();
         drop(self);
         std::fs::remove_dir_all(root).unwrap();
@@ -340,6 +341,7 @@ fn private_user_registers_under_writer_lease_then_release_hint_readies_same_orig
     )
     .unwrap();
     assert!(f.watch.lock().unwrap().open.is_empty());
+    drop(owner);
     f.finish();
 }
 #[test]
@@ -460,6 +462,7 @@ fn same_key_registration_handles_are_independent_and_revocation_precedes_host_be
     )
     .unwrap();
     assert!(f.watch.lock().unwrap().open.is_empty());
+    drop(owner);
     f.finish();
 }
 #[test]
@@ -509,6 +512,7 @@ fn unstable_registration_keeps_original_position_and_first_snapshot_does_not_inv
         .unwrap()
         .occurrence
         .is_some());
+    drop(owner);
     f.finish();
 }
 
@@ -674,6 +678,7 @@ fn pending_user_fixed_acceptance_is_visible_cancelled_and_pin_released_with_dura
             .dispatch("pin.read", &p, Some("reader"), &g)
             .is_err());
     }
+    drop(owner);
     f.finish();
 }
 #[test]
@@ -741,6 +746,7 @@ fn explicit_user_disposal_between_storage_acceptance_and_watch_stops_late_admiss
         .as_array()
         .unwrap()
         .is_empty());
+    drop(owner);
     f.finish();
 }
 
@@ -813,6 +819,7 @@ fn corrupt_pending_receipt_is_an_explicit_failure_and_not_an_empty_list() {
         "cancelled"
     );
     drop(connection);
+    drop(owner);
     f.finish();
 }
 #[test]
@@ -902,6 +909,7 @@ fn explicit_user_disposal_of_committed_definition_preserves_original_retries_and
         .unwrap()
         .user_followup_registration_cancelled("delivered", &f.run)
         .unwrap());
+    drop(catalog);
     f.finish();
 }
 

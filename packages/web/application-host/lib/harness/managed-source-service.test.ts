@@ -5,7 +5,7 @@ import type { SourceAuthorityOpenParams, SourceAuthorityBindParams, SourceAuthor
 import { createManagedSourceService } from './managed-source-service.js';
 import { ManagedSourceDrainedError } from './managed-source-drain.js';
 import { createSourceQueryService } from '../kernel/source-query-service.js';
-import type { ManagedSourceBindRequest, ManagedSourcePrincipal, ManagedSourceServiceHandler, ManagedSourceLocalScope, ManagedSourceCleanupScope } from './managed-remote-types.js';
+import type { ManagedSourceBindRequest, ManagedSourcePrincipal, ManagedSourceServiceHandler, ManagedSourceCleanupScope } from './managed-remote-types.js';
 
 const principal: ManagedSourcePrincipal = { principalId: 'verified', capabilities: ['filesystem:read'] };
 const source: ThreadSource = { resourceOwner: { kind: 'managed_host', hostId: 'target', connectionId: 'connection', endpointIdentity: 'endpoint' },
@@ -243,7 +243,7 @@ describe('managed Source target admission orchestration', () => {
     const f = fixture(); const binding = await f.service.bind(principal, request);
     const queries = createSourceQueryService({ kernel: f.kernel, documents: {} as never,
       validateLiveSource: async () => {}, storage: {} as never,
-      resourceOwners: { agentDir: '/unused-query-assets', homeDir: '/unused-query-home' } as never });
+      resourceOwners: { dataDirectory: '/unused-query-assets', homeDir: '/unused-query-home' } as never });
     f.serviceOperation.mockImplementation(queries);
     f.releaseSource.mockImplementation(async scope => { f.events.push('drain-views'); await queries.release(scope); });
     f.readBranch.mockRejectedValue(new Error('Original fixed path is unavailable'));
@@ -259,7 +259,7 @@ describe('managed Source target admission orchestration', () => {
     const f = fixture(); const binding = await f.service.bind(principal, request);
     const queries = createSourceQueryService({ kernel: f.kernel, documents: {} as never,
       validateLiveSource: async () => {}, storage: {} as never,
-      resourceOwners: { agentDir: '/unused-query-assets', homeDir: '/unused-query-home' } as never });
+      resourceOwners: { dataDirectory: '/unused-query-assets', homeDir: '/unused-query-home' } as never });
     f.serviceOperation.mockImplementation(queries);
     let entered!: () => void, finish!: () => void, nativeSignal!: AbortSignal;
     const active = new Promise<void>(resolve => { entered = resolve; });
@@ -295,7 +295,7 @@ describe('managed Source target admission orchestration', () => {
         return { workspaceId: 'workspace', canonicalPath: '/target/project', hostId: 'target' };
       },
     } as never, validateLiveSource: async () => {}, storage: {} as never, languageSupervisor: supervisor as never,
-    resourceOwners: { agentDir: '/unused-query-assets', homeDir: '/unused-query-home' } as never });
+    resourceOwners: { dataDirectory: '/unused-query-assets', homeDir: '/unused-query-home' } as never });
     f.serviceOperation.mockImplementation(queries);
     const address = { coordinatorHostId: 'coordinator', authorityId: binding.authorityId, resourceEpoch: binding.resourceEpoch };
     const language = f.service.service(principal, { ...address, requestId: 'language-preparing',
@@ -317,7 +317,7 @@ describe('managed Source target admission orchestration', () => {
     const f = fixture(); const binding = await f.service.bind(principal, request);
     const queries = createSourceQueryService({ kernel: f.kernel, documents: {} as never,
       validateLiveSource: async () => {}, storage: {} as never,
-      resourceOwners: { agentDir: '/unused-query-assets', homeDir: '/unused-query-home' } as never });
+      resourceOwners: { dataDirectory: '/unused-query-assets', homeDir: '/unused-query-home' } as never });
     f.serviceOperation.mockImplementation(queries);
     let started!: () => void, releasing!: () => void, finishRelease!: () => void, jobId = '', cancelled = false;
     const active = new Promise<void>(resolve => { started = resolve; });

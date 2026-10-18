@@ -122,13 +122,14 @@ grant_id: "parent".into(),
         environment_run_id: None,
         enabled_tools: kinds,
     };
+    let retained = crate::host_tool_review::ChildRetentionOwner::new(EPOCH);
     let directory = Arc::new(
         varin_runtime::composition::tools::ToolDirectory::assemble(
             crate::collaboration::declarations(
                 db.clone(),
                 Some(binding),
                 resources,
-                crate::host_tools::ToolBridge::new(std::sync::mpsc::sync_channel(1).0.into()),
+                retained.bridge.clone(),
             ),
         )
         .unwrap(),
@@ -169,7 +170,7 @@ grant_id: "parent".into(),
         assert!(matches!(
             completion.completion,
             ToolCompletion::JobAccepted { .. }
-        ));
+        ), "{completion:?}");
         let children = db.lock().unwrap().child_tasks().unwrap();
         assert_eq!(children.len(), 1);
         assert_eq!(children[0].parent_run_id, f.context.run_id);
@@ -178,6 +179,7 @@ grant_id: "parent".into(),
         assert_eq!(children[0].source.pin().unwrap().source.revision, Some(0));
     }
     drop(executor);
+    drop(retained);
     drop(db);
     drop(storage);
     std::fs::remove_dir_all(f.root).unwrap();

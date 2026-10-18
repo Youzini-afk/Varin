@@ -26,7 +26,7 @@ it('keeps identical worker trees stable across install paths, creation order and
   const files = [
     ['worker.js', 'import "./nested/evaluator.js";'],
     ['nested/evaluator.js', 'export const evaluate = () => 1;'],
-    ['A.js', 'export const upper = true;'],
+    ['Z.js', 'export const upper = true;'],
     ['a.js', 'export const lower = true;'],
   ] as const;
   for (const [name, contents] of files) await put(first, name, contents);

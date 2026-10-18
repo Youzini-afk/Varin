@@ -289,6 +289,11 @@ impl RecoveryPreparation {
         let Some(history) = self.execution.hydrate_history(cancellation)? else {
             return Ok(None);
         };
+        let allowed_tools = self.launch.as_ref()
+            .and_then(|launch| launch.selection.agent.as_ref())
+            .and_then(|agent| agent.tools.as_deref());
+        let request_tools = crate::tool_disclosure::request_tools(
+            &self.execution.binding.tools, self.goal.is_some(), allowed_tools);
         let recovery = match &self.kind {
             RecoveryKind::None | RecoveryKind::Policy => None,
             RecoveryKind::Undispatched { step, checkpoint } => {
@@ -350,7 +355,7 @@ impl RecoveryPreparation {
                         || frozen.credential_ref != binding.credential_ref
                         || frozen.configuration_generation != binding.configuration_generation
                         || frozen.tool_schema_generation != binding.tool_schema_generation
-                        || frozen.tools != binding.tools
+                        || frozen.tools != request_tools
                         || frozen.history_range.leaf_id != binding.history_range.leaf_id)
                 {
                     return Err(RuntimeError::Conflict(
@@ -514,7 +519,7 @@ impl RecoveryPreparation {
                     })
                     .transpose()?
                     .unwrap_or(false);
-                let tools_changed = snapshot.view.binding.tools != binding.tools
+                let tools_changed = snapshot.view.binding.tools != request_tools
                     || snapshot.view.binding.tool_schema_generation
                         != binding.tool_schema_generation;
                 let activated_tools = match &model.active_tool_composition {

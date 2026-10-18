@@ -6,6 +6,7 @@ import { createContextComposition } from './context-composition.js';
 import { createRequire } from 'node:module';
 import { createThreadContext } from './thread-context.js';
 import { createAgentPersonalization } from '../memory/agent-personalization.js';
+import { createMemoryOwner } from './memory-owner.js';
 import { createThreadSourcePreparer } from './thread-sources.js';
 import { createDocumentAuthority } from '../documents/authority.js';
 import { KernelStorageAdapter, createKernelWorkspaceWorkingStateAccess } from './storage-adapter.js';
@@ -75,6 +76,7 @@ async function fixture(reply: (body: Record<string, unknown>, response: ServerRe
   await extensions.start(); cleanups.push(() => extensions.stop());
   const composition = createContextComposition(extensions);
   const prepareContext = createThreadContext({ composition, personalization, resources, projectForWorkspace: async () => 'selected-project' });
+  kernel.setMemoryOwner(createMemoryOwner({ personalization, prepareContext }));
   const decisions: unknown[]=[]; let pins=0;
   const originalPrepare=extensions.prepareService.bind(extensions);
   extensions.prepareService=async(...args)=>{const binding=await originalPrepare(...args); if(args[0] && typeof args[0]==='object' && 'serviceId' in args[0] && args[0].serviceId==='varin.agent.policy') return {...binding,pin:()=>{const pin=binding.pin();pins++;let released=false;return {...pin,invoke:(method,args,signal)=>{if(method==='decide') decisions.push(structuredClone(args[0]));return pin.invoke(method,args,signal)},release:()=>{if(!released){released=true;pins--;}pin.release()}}}};return binding};
@@ -115,6 +117,7 @@ async function installExample(f: Awaited<ReturnType<typeof fixture>>) {
   for (const file of ['package.json', 'varin.extension.json']) await fs.copyFile(path.join(repository, 'examples/extensions/evidence-policy', file), path.join(example, file));
   await build({ entryPoints: [path.join(repository, 'examples/extensions/evidence-policy/host.ts')], bundle: true, platform: 'node', format: 'cjs', outfile: path.join(example, 'host.cjs'), alias: { '@varin/extension-sdk': path.join(repository, 'packages/extension-sdk/dist/index.js') } });
   await f.extensions.installOrStage({ expectedRevision: (await f.extensions.state()).catalog.revision, source: { kind: 'local', display: 'Real example', specifier: example } });
+  await f.extensions.setEnabled('example.evidence-policy', true, (await f.extensions.state()).catalog.revision);
 }
 async function route(f: Awaited<ReturnType<typeof fixture>>, providerKey: string, scope: {projectId?: string; threadId?: string}) {
   return f.extensions.upsertServiceRoutingRule({ expectedRevision: (await f.extensions.routing.read()).document.revision,
@@ -141,7 +144,7 @@ it('no selected policy uses default; explicit missing fails without inference', 
   const f=await fixture((_body,response)=>complete(response,'default','done'));
   const a=await f.api.create('default-review'); const first=await f.api.submit({...a,key:'default',expectedHead:null,text:'default',model});
   await expect.poll(async()=>(await f.api.run(first.run_id)).state).toBe('completed');
-  expect((await f.runtime.launch(first.run_id))!.selection.policy.name).toBe('default+questions');
+  expect((await f.runtime.launch(first.run_id))!.selection.policy.name).toBe('default+questions+observations');
   await route(f,'missing.policy:host:varin.agent.policy@4',{projectId:'selected-project'});
   const b=await f.api.create('missing-review'); await f.api.submit({...b,key:'missing',expectedHead:null,text:'missing',model});
   await expect.poll(()=>f.launchErrors.length).toBe(1); expect(f.requests).toHaveLength(1);
@@ -152,6 +155,7 @@ async function installCustom(f: Awaited<ReturnType<typeof fixture>>, id: string,
   await fs.writeFile(path.join(folder,'varin.extension.json'),JSON.stringify({schemaVersion:1,id,version:'1.0.0',engines:{varin:'*'},entrypoints:{host:{file:'host.cjs',mode:'brokered',activation:['service-request']}},provides:{services:[{id:'varin.agent.policy',version:4,multiple:true}]}}));
   await fs.writeFile(path.join(folder,'host.cjs'),`module.exports={activate(context){context.services.provide({id:'varin.agent.policy',version:4,multiple:true},{${handlers}})}}`);
   await f.extensions.installOrStage({expectedRevision:(await f.extensions.state()).catalog.revision,source:{kind:'local',display:id,specifier:folder}});
+  await f.extensions.setEnabled(id, true, (await f.extensions.state()).catalog.revision);
   await route(f,`${id}:host:varin.agent.policy@4`,{projectId:'selected-project'});
 }
 it('cancel during hung broker describe releases preparing pin', async()=>{
@@ -206,19 +210,21 @@ it('retry launch while model in flight cannot detach policy lease of active Run'
  expect(f.kernel.policyBinding(first.run_id, 0)).toBeDefined();complete(held,'retry-complete','done');
  await expect.poll(async()=>(await f.runtime.run(first.run_id)).state).toBe('completed');expect(f.requests).toHaveLength(1);
 });
-it('restart accepts exact policy identity and rejects changed artifact or config with unchanged author version before inference',async()=>{
+it('restart restores the exact policy identity and rejects forged bindings or unavailable original artifacts',async()=>{
  const f=await fixture((_body,response)=>{response.writeHead(200,{'content-type':'text/event-stream'});response.end(`data: ${JSON.stringify({type:'response.completed',response:{output:[{id:'ask',type:'function_call',call_id:'ask-call',name:'ask_user',arguments:JSON.stringify({question:'Choose',options:['A','B']})}]}})}\n\n`)});
  await installExample(f);await route(f,'example.evidence-policy:host:varin.agent.policy@4',{projectId:'selected-project'});
  const a=await f.api.create('restart');const source=await f.api.prepareSource({...a,key:'source',resourceOwner: { kind: 'local' as const }, workspaceId: (await f.documents.resolveWorkspace({ path: f.workspace })).workspaceId, content: { mode: 'saved-files' }, captureScopes: [],mode:'fixed_branch'});const first=await f.api.submit({...a,key:'restart',expectedHead:null,text:'ask',model,source:source.source});await expect.poll(async()=>(await f.runtime.run(first.run_id)).state).toBe('waiting');const saved=(await f.runtime.launch(first.run_id))!.selection.policy;
  await f.close();await f.extensions.stop();
  const second=await fixture((_body,response)=>complete(response,'unexpected','unexpected'),f.root,f.endpoint);
  const same=await second.runtime.preparePolicy(first.run_id);expect(same).toBeDefined();expect((await second.runtime.launch(first.run_id))!.selection.policy).toEqual(saved);second.kernel.releaseRunPolicyOwners(first.run_id);
- const actualBind=second.extensions.services.bind.bind(second.extensions.services);
- second.extensions.services.bind=(...args)=>{const binding=actualBind(...args);return {...binding,pin:()=>{const pin=binding.pin();return {...pin,invoke:async(method,args,signal)=>{const value=await pin.invoke(method,args,signal);return method==='describe'?{...(value as {identity:{name:string;version:string}}),configuration:{modelBudget:7}}:value}}}}};
- await expect(second.runtime.preparePolicy(first.run_id)).rejects.toThrow();second.extensions.services.bind=actualBind;
+ for (const changed of [{ configurationIdentity: 'changed-configuration' }, { artifactIntegrity: `sha256-${'0'.repeat(64)}` }]) {
+   await expect(createAgentPolicy(second.extensions)({ threadId: a.threadId, projectId: 'selected-project',
+     requiredBinding: { ...same!.artifact, ...changed } })).rejects.toThrow('policy_exact_binding_unavailable');
+ }
  const example=path.join(f.root,'evidence-policy');await fs.appendFile(path.join(example,'host.cjs'),'\n// changed artifact, identical author state version\n');
- const staged=await second.extensions.reloadLocalSource({extensionId:'example.evidence-policy',expectedRevision:(await second.extensions.state()).catalog.revision});if(staged.outcome!=='staged')throw new Error('not staged');await second.extensions.requestCandidateApplication({extensionId:'example.evidence-policy',candidateIntegrity:staged.candidateIntegrity,expectedRevision:(await second.extensions.state()).catalog.revision});await second.extensions.selectCandidate({extensionId:'example.evidence-policy',candidateIntegrity:staged.candidateIntegrity,expectedRevision:(await second.extensions.state()).catalog.revision});
- await expect(second.runtime.preparePolicy(first.run_id)).rejects.toThrow();expect((await second.runtime.launch(first.run_id))!.selection.policy).toEqual(saved);expect(f.requests).toHaveLength(1);expect(second.requests).toHaveLength(0);
+ const staged=await second.extensions.reloadLocalSource({extensionId:'example.evidence-policy',expectedRevision:(await second.extensions.state()).catalog.revision});if(staged.outcome!=='staged')throw new Error('not staged');await second.extensions.requestCandidateApplication({extensionId:'example.evidence-policy',candidateIntegrity:staged.candidateIntegrity,expectedRevision:(await second.extensions.state()).catalog.revision});await second.extensions.prepareCandidate('example.evidence-policy', staged.candidateIntegrity);await second.extensions.selectCandidate({extensionId:'example.evidence-policy',candidateIntegrity:staged.candidateIntegrity,expectedRevision:(await second.extensions.state()).catalog.revision});
+ await expect(second.runtime.preparePolicy(first.run_id)).rejects.toThrow();
+ expect((await second.runtime.launch(first.run_id))!.selection.policy).toEqual(saved);expect(f.requests).toHaveLength(1);expect(second.requests).toHaveLength(0);
 });
 
 
@@ -230,6 +236,7 @@ it('installed SDK policy delivers real assistant history, pauses through queued 
     outfile: path.join(example, 'host.cjs'), alias: { '@varin/extension-sdk': path.join(repository, 'packages/extension-sdk/dist/index.js') } });
   await f.extensions.installOrStage({ expectedRevision: (await f.extensions.state()).catalog.revision,
     source: { kind: 'local', display: 'Delivery pause SDK example', specifier: example } });
+  await f.extensions.setEnabled('example.delivery-pause-policy', true, (await f.extensions.state()).catalog.revision);
   await route(f, 'example.delivery-pause-policy:host:varin.agent.policy@4', { projectId: 'selected-project' });
   const identity = await f.api.create('delivery-pause-native');
   const admitted = await f.api.submit({ ...identity, key: 'delivery-pause', expectedHead: null, text: 'Show a result and wait for me', model });

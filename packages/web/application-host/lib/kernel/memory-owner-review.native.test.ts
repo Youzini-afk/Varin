@@ -28,7 +28,8 @@ async function fixture() {
 }
 async function admitScope(runtime: AgentRuntimeClient, name: string, mode: 'agent' | 'bot', role: 'main' | 'worker' | 'read-only', projectId: string | null) {
   const threadId = `thread:${name}`, branchId = `branch:${name}`;
-  await runtime.createThread(threadId, branchId);
+  if (mode === 'bot') await runtime.createBotThread(`bot:${name}`, threadId, branchId);
+  else await runtime.createThread(threadId, branchId);
   await runtime.submit({ key: `scope:${name}`, threadId, branchId, expectedHead: null, input: { text: 'admit the trusted fixture scope' }, configuration: {},
     initialContext: { effectiveSystemPrompt: 'FIXED_SCOPE_SYSTEM', instructionSources: ['scope-fixture'], memoryCheckpoint: 'scope-fixture:0',
       personalization: { mode, threadRole: role, threadId: threadId, projectId, revision: 0, configurationDigest: 'scope-fixture-profile',
@@ -41,6 +42,7 @@ it('production scope resolution and HTTP notes share persisted identity, exact C
   const main = await admitScope(runtime, 'scope-main', 'agent', 'main', 'project-a');
   const child = await admitScope(runtime, 'scope-child', 'agent', 'worker', 'project-a');
   const other = await admitScope(runtime, 'scope-other', 'agent', 'read-only', 'project-b');
+  await f.client.agentRuntimeRequest('runtime.bot.gate.publish', { botId: 'bot:scope-bot', profileRevision: 1, activityOperationId: null, permitted: true });
   const bot = await admitScope(runtime, 'scope-bot', 'bot', 'main', 'project-a');
   const resolve = createPersonalizationContextResolver({ runtime: () => runtime });
   const service = createAgentPersonalization({ client: f.client, context: resolve });

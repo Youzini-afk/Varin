@@ -27,7 +27,7 @@ afterEach(async () => {
 });
 
 async function fixture(env: Record<string, string> = {}) {
-  const root = await fs.mkdtemp(path.join(os.tmpdir(), "varin-authority-audit-"));
+  const root = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), "varin-authority-audit-")));
   roots.push(root);
   const workspace = path.join(root, "workspace");
   const storageRoot = path.join(root, "storage");

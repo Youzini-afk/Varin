@@ -14,8 +14,9 @@ const dirs: string[] = [];
 const stores: Array<{ close(): Promise<void> }> = [];
 afterEach(async () => { vi.useRealTimers(); for (const store of stores.splice(0)) await store.close(); for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true }); vi.restoreAllMocks(); });
 const chunk = (documentId: string, body: string): SemanticChunk => ({ documentId, blockId: blockIdentity(documentId, 1, 1), parentUnitId: documentId, parentName: 'f', parentKind: 'function', parentSignature: 'function f()', startLine: 1, endLine: 1, contentHash: contentHashOf(body), body, embedText: body, fallback: false });
-function fixture() {
-  const dataDir = mkdtempSync(join(tmpdir(), 'varin-published-review-')); dirs.push(dataDir);
+function fixture(nestedDirectory = '') {
+  const root = mkdtempSync(join(tmpdir(), 'varin-published-review-')); dirs.push(root);
+  const dataDir = join(root, nestedDirectory);
   const space = { ...createHashEmbedder().space, dim: 2 };
   const options = { dataDir, hostId: 'review', scope: workspaceScope('review'), space };
   const store = createSemanticStoreEngine(options); stores.push(store);
@@ -24,11 +25,27 @@ function fixture() {
 }
 function files(root: string): Record<string, string> {
   const result: Record<string, string> = {};
-  const visit = (dir: string) => { for (const name of readdirSync(dir)) { const file = join(dir, name); if (statSync(file).isDirectory()) visit(file); else result[file] = createHash('sha256').update(readFileSync(file)).digest('hex'); } };
+  const visit = (dir: string) => { for (const name of readdirSync(dir)) {
+    const file = join(dir, name), info = statSync(file);
+    if (info.isDirectory()) visit(file);
+    // The native writer holds its lock file exclusively on Windows. Track its existence and
+    // metadata while hashing every data artifact; acquiring a reader must change neither.
+    else result[file] = name.endsWith('.lock') ? `lock:${info.size}:${info.mtimeMs}` : createHash('sha256').update(readFileSync(file)).digest('hex');
+  } };
   visit(root); return result;
 }
 
 describe('independent immutable publication reader acceptance', () => {
+  it('publishes and releases native readers beneath deep data directories', async () => {
+    const f = fixture('nested-'.repeat(12));
+    await f.publish('DEEP_PUBLICATION', 1); f.store.markReady(true);
+    const reader = (await f.store.retainPublished())!;
+    expect((await f.store.searchPinned(reader.token, [1, 0], 1))[0]?.body).toBe('DEEP_PUBLICATION');
+    await f.store.releasePinned(reader.token);
+    await f.store.close();
+    expect(f.store.publishedReaderStats()).toEqual({ activeReaders: 0, retainedPublications: 0 });
+  });
+
   it('a cold reader acquire does not materialize or publish an empty database', async () => {
     const f = fixture(); const before = files(f.dataDir);
     expect(await f.store.retainPublished()).toBeNull();

@@ -639,7 +639,7 @@ fn read_control(mut input: Connection, shared: &Arc<Shared>) -> io::Result<()> {
                         .response_lanes
                         .lock()
                         .unwrap()
-                        .insert(request_id.into(), Lane::Data);
+                        .insert(request_id.into(), response_lane(meta["method"].as_str().unwrap_or_default()));
                     shared
                         .incoming
                         .send(Incoming::Open(meta))

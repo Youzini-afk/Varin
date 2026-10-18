@@ -1,4 +1,4 @@
-import { expect, it, vi } from 'vitest';
+import { expect, it } from 'vitest';
 import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { tmpdir } from 'node:os';
@@ -38,7 +38,7 @@ it('deletes Bot catalog and private resources through the release kernel without
     await writeFile(path.join(bot.homeDir, 'result.txt'), 'Bot output');
     await writeFile(path.join(other.homeDir, 'keep.txt'), 'Other Bot output');
     await service.remove(bot.id);
-    await vi.waitFor(async () => expect(await service.get(bot.id)).toBeNull());
+    await expect.poll(() => service.get(bot.id)).toBeNull();
     await expect(readdir(bot.homeDir)).rejects.toMatchObject({ code: 'ENOENT' });
     await expect(readdir(path.dirname(vectors))).rejects.toMatchObject({ code: 'ENOENT' });
     expect(await readdir(memory)).toEqual(['semantic', 'user.tdb']);

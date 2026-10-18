@@ -143,7 +143,6 @@ export const registerNotificationRoutes = (app: Express, dependencies: Notificat
     addOrUpdateApnsToken,
     removeApnsToken,
     updateUiVisibility,
-    clearPendingPushBadge,
     isUiVisible,
     getUiNotificationClients,
     writeSseEvent,

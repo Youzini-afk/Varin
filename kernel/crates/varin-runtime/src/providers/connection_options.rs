@@ -136,7 +136,11 @@ struct ChannelTransport {
 impl ChannelTransport {
     fn request<'a>(&self, mut request: HttpRequest<'a>) -> HttpRequest<'a> {
         for (name, value) in &self.headers {
-            if !request.headers.contains_key(name) {
+            if name == "anthropic-beta" {
+                // Beta features form a list: preserve both credential-required
+                // features and the channel's explicit additions.
+                request.headers.append(name, value.clone());
+            } else if !request.headers.contains_key(name) {
                 request.headers.insert(name, value.clone());
             }
         }

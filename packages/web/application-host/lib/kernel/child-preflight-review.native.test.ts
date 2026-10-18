@@ -1,4 +1,4 @@
-import { execFileSync } from 'node:child_process';
+import { DatabaseSync } from 'node:sqlite';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -28,8 +28,9 @@ for (const [defect, definition] of Object.entries(definitions)) {
     try {
       const initial = open(); await initial.runtime.status(); await initial.kernel.close();
       const catalog = path.join(root, 'agent-runtime', 'conversation.sqlite');
-      execFileSync('python3', ['-c', 'import sqlite3,sys; c=sqlite3.connect(sys.argv[1]); c.executescript(sys.argv[2]); c.commit(); c.execute("PRAGMA wal_checkpoint(TRUNCATE)"); c.close()', catalog,
-        `PRAGMA foreign_keys=OFF; DROP TABLE child_tasks; ${definition}`]);
+      const database = new DatabaseSync(catalog);
+      try { database.exec(`PRAGMA foreign_keys=OFF; DROP TABLE child_tasks; ${definition} PRAGMA wal_checkpoint(TRUNCATE);`); }
+      finally { database.close(); }
       const before = await fs.readFile(catalog);
       const reopened = open();
       await expect(reopened.runtime.status()).rejects.toThrow();

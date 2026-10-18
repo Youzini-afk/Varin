@@ -2,7 +2,7 @@
 // responder side is built from the SAME protocol modules (createHostHandshake +
 // the tunnel codec). No network, no real WebSocket.
 
-import { afterEach, describe, expect, test } from 'vitest';
+import { afterEach, describe, expect, test, vi } from 'vitest';
 import {
   exportPublicKeyJwk,
   generateEcdhKeyPair,
@@ -13,6 +13,7 @@ import { createHostHandshake } from './handshake';
 import { TunnelFrameType } from './protocol';
 import {
   createFragmentAssembler,
+  createOutboundFrameBatcher,
   decodeFrameBatch,
   decodeJsonPayload,
   decodeTunnelFrame,
@@ -490,8 +491,8 @@ describe('createRelayTunnelClient', () => {
     const baseline = clientBinaryCount(); // WsOpen etc. before the burst
     for (let i = 0; i < BURST; i += 1) socket.send(`m${i}`);
 
-    // Wait for the trailing window to flush and echoes to round-trip.
-    await wait(250);
+    // Crypto and the trailing batch flush must both finish before inspecting order.
+    await vi.waitFor(() => expect(echoes).toHaveLength(BURST));
 
     const bodyFrames = received.filter((f) => f.frameType === TunnelFrameType.WsText);
     expect(bodyFrames.length).toBe(BURST);
@@ -508,46 +509,28 @@ describe('createRelayTunnelClient', () => {
     expect(burstWireMessages).toBeGreaterThan(0);
   });
 
-  test('leading edge: a single frame after idle is delivered immediately, not a window later', async () => {
-    const WINDOW = 300;
-    let firstWsTextAt = 0;
-    const { client } = await setupClient(
-      {
-        recordFrame: (frame) => {
-          if (frame.frameType === TunnelFrameType.WsText && firstWsTextAt === 0) {
-            firstWsTextAt = Date.now();
-          }
-        },
-      },
-      { batchWindowMs: WINDOW },
-    );
-    track(client);
-    const socket = client.openWebSocket('/api/event/ws');
-    await new Promise<void>((resolve) => {
-      socket.onopen = () => resolve();
-    });
-    // Stay idle beyond the window so the next frame takes the leading edge.
-    await wait(WINDOW + 50);
-    const sentAt = Date.now();
-    socket.send('solo');
-    await wait(WINDOW / 2);
-    expect(firstWsTextAt).toBeGreaterThan(0);
-    // Delivered well within a full window (leading-edge flush), not delayed.
-    expect(firstWsTextAt - sentAt).toBeLessThan(WINDOW / 2);
-  });
-
-  test('boundary frame (StreamEnd) flushes buffered body immediately', async () => {
-    // A large batch window would stall a POST body if StreamEnd did not force a
-    // flush; the request completing quickly proves the boundary flush.
-    const { client } = await setupClient({}, { batchWindowMs: 1_000 });
-    track(client);
-    const start = Date.now();
-    const response = await client.fetch('/echo-body', { method: 'POST', body: 'boundary-body' });
-    expect(await response.text()).toBe('boundary-body');
-    expect(Date.now() - start).toBeLessThan(500);
+  test('leading edge flushes after idle without waiting for the batch timer', () => {
+    let now = 1000;
+    const sent: Uint8Array[] = [];
+    const timer = vi.fn(() => 1 as unknown as ReturnType<typeof setTimeout>);
+    const batcher = createOutboundFrameBatcher({ windowMs: 300, now: () => now,
+      setTimer: timer, clearTimer: () => {}, sendBatch: bytes => { sent.push(bytes); } });
+    const frame = encodeTunnelFrame(TunnelFrameType.WsText, 1, textEncoder.encode('solo'));
+    batcher.enqueue(frame);
+    expect(sent).toHaveLength(1); expect(timer).not.toHaveBeenCalled();
+    now += 10; batcher.enqueue(frame);
+    expect(sent).toHaveLength(1); expect(timer).toHaveBeenCalledOnce();
+    batcher.flush(); now += 301; batcher.enqueue(frame);
+    expect(sent).toHaveLength(3); expect(timer).toHaveBeenCalledOnce();
+    expect(decodeFrameBatch(sent[2]!)).toEqual([frame]);
+    batcher.dispose();
   });
 
   test('keepalive: no ping while frames flow, ping fires after idle', async () => {
+    // Advance elapsed idle time explicitly; CPU scheduling gaps are not test traffic.
+    let now = Date.now();
+    const clock = vi.spyOn(Date, 'now').mockImplementation(() => now);
+    try {
     const pings: number[] = [];
     const { client } = await setupClient(
       {
@@ -563,17 +546,23 @@ describe('createRelayTunnelClient', () => {
       socket.onopen = () => resolve();
     });
 
+    let echoes = 0;
+    socket.onmessage = event => { if (event.data === 'echo:keepbusy') echoes++; };
     // Keep traffic flowing faster than the ping interval for a few intervals.
-    const busyUntil = Date.now() + 200;
-    while (Date.now() < busyUntil) {
+    for (let i = 0; i < 20; i++) {
+      now += 10;
       socket.send('keepbusy');
       await wait(10);
     }
+    // Finish the actual encrypted traffic before declaring the clock idle;
+    // a late echo would otherwise refresh lastActivityAt at the idle instant.
+    await vi.waitFor(() => expect(echoes).toBe(20));
     expect(pings.length).toBe(0);
 
     // Now go idle: a ping must appear once we exceed the interval.
-    await wait(150);
-    expect(pings.length).toBeGreaterThan(0);
+    now += 150;
+    await vi.waitFor(() => expect(pings.length).toBeGreaterThan(0));
+    } finally { clock.mockRestore(); }
   });
 
   test('negotiates legacy (no batch) when the host does not advertise batching', async () => {

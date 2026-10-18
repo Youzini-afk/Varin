@@ -1,5 +1,5 @@
 import { afterEach, expect, it } from 'vitest';
-import { mkdtemp, mkdir, readFile, readdir, rm, symlink, writeFile } from 'node:fs/promises';
+import { mkdtemp, mkdir, readFile, readdir, realpath, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { once } from 'node:events';
@@ -11,7 +11,7 @@ import { AgentSettingsService } from './settings.js';
 const roots: string[] = [];
 afterEach(async () => { for (const root of roots.splice(0)) await rm(root, { recursive: true, force: true }); });
 async function fixture() {
-  const root = await mkdtemp(join(tmpdir(), 'varin-native-trust-')); roots.push(root);
+  const root = await realpath(await mkdtemp(join(tmpdir(), 'varin-native-trust-'))); roots.push(root);
   const data = join(root, 'data'), project = join(root, 'project');
   await mkdir(data); await mkdir(join(project, 'nested'), { recursive: true });
   await symlink(project, join(root, 'alias'), 'dir');

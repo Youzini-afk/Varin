@@ -1,4 +1,5 @@
 import { expect, it } from 'vitest';
+import { KERNEL_PROTOCOL_VERSION } from './protocol.generated.js';
 import { KernelClient, KernelClientError, type KernelGrantHandle } from './kernel-client.js';
 
 /** Real client admission/cancellation with only the transport replaced by an in-memory fixture. */
@@ -16,9 +17,9 @@ function fixture() {
   const sent: Array<{ frame: Record<string, unknown>; lane: string }> = [];
   owner.transport = { async send(frame, lane) { sent.push({ frame, lane }); }, cancelRequest() {}, async close() {} };
   const request = (method: string, signal?: AbortSignal) => owner.requestRaw(method, {}, { allowBootstrap: true, signal });
-  const release = (index: number) => owner.consumeFrame({ v: 1, kind: 'request-credit-released', id: sent[index]!.frame.id,
+  const release = (index: number) => owner.consumeFrame({ v: KERNEL_PROTOCOL_VERSION, kind: 'request-credit-released', id: sent[index]!.frame.id,
     kernelEpoch: 'epoch', method: sent[index]!.frame.method });
-  const finish = (index: number) => owner.consumeFrame({ v: 1, kind: 'response', id: sent[index]!.frame.id, ok: true, result: {} });
+  const finish = (index: number) => owner.consumeFrame({ v: KERNEL_PROTOCOL_VERSION, kind: 'response', id: sent[index]!.frame.id, ok: true, result: {} });
   return { client, owner, sent, request, release, finish };
 }
 const tick = () => new Promise<void>(resolve => setImmediate(resolve));

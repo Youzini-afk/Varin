@@ -1,10 +1,10 @@
 import assert from 'node:assert/strict';
-import { test } from 'node:test';
+import { test } from 'vitest';
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { EventEmitter } from 'node:events';
-import { resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { ApplicationExtensionRuntime } from '@varin/extension-host';
 import express, { type Express, type Request, type Response as ExpressResponse } from 'express';
 import { parseVarinToolJson } from '@varin/extension-contract';
@@ -792,7 +792,7 @@ test('shipped Computer broker binds lifecycle and application declarations, keep
     await f.computers.ensureLocal(); await f.computers.setDefaultDesktop('local-console');
     const captured = await f.computer.prepareConfiguration({ runId: 'root-run', threadId: 'root', source: null }, []);
     extensions = await ApplicationExtensionRuntime.create({ dataDir: join(f.dataDir, 'extensions'), varinVersion: '0.9.25',
-      brokerScript: resolve('packages/extension-host/broker/broker-child.mjs') });
+      brokerScript: fileURLToPath(new URL('../../../../extension-host/broker/broker-child.mjs', import.meta.url)) });
     extensions.capabilities.register(COMPUTER_CAPABILITY, f.computer.capability);
     await extensions.start();
     await extensions.activateExtension(VARIN_BUILTIN_COMPUTER_EXTENSION_ID);

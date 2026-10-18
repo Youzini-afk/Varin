@@ -949,6 +949,7 @@ mod tests {
             let base = std::env::temp_dir().join(format!("file-observer-{}", Uuid::new_v4()));
             let work = base.join("work");
             fs::create_dir_all(&work).unwrap();
+            let work = fs::canonicalize(work).unwrap();
             let storage = Storage::open(&base.join("store"), "host").unwrap();
             let mut f = Self {
                 base,
@@ -1221,7 +1222,7 @@ mod tests {
         let target = f.accept(&r);
         assert_eq!(
             Path::new(&target.physical_root.unwrap().canonical_root),
-            directory
+            fs::canonicalize(&directory).unwrap()
         );
         let original = f.read(&r, "epoch", "generation").unwrap().state;
         fs::write(f.work.join("result.txt"), b"another-workspace-version").unwrap();

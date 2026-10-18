@@ -120,7 +120,7 @@ async function openQuestion(f: Awaited<ReturnType<typeof fixture>>, key: string,
   const receipt = await f.api.submit({ ...identity, key: `${key}-input`, expectedHead: null, text: 'ask me before choosing a plan', model, ...(source ? { source } : {}) });
   await expect.poll(async () => (await f.api.run(receipt.run_id)).state, { timeout: 10_000 }).toBe('waiting');
   const view = await f.api.snapshot(identity);
-  const operation = view.operations.find(operation => operation.executor === 'ask_user')!;
+  const operation = view.operations.find(operation => operation.executor === 'ask_user' && operation.waiting_on === view.activeRun?.waiting_on)!;
   expect(operation, JSON.stringify({ run: view.activeRun, launchErrors: f.launchErrors.map(String), calls: f.requests.length, events: operation ? [] : (await f.runtime.events(0, 256)).slice(-8) })).toBeDefined();
   expect(view.activeRun?.waiting_on).toBe(operation.waiting_on);
   return { identity, receipt, operation };
@@ -151,7 +151,7 @@ it('ordinary user answers pause the real Run, append once, resume once and canno
   expect((await f.api.snapshot(identity)).modelSelection.active?.id).toBe(desired.id);
   assertResponsesPairing(f.requests[1]!.body);
   expect((await f.runtime.launch(receipt.run_id))?.selection).toEqual(selected?.selection);
-  expect(((f.requests[1]!.body.tools ?? []) as Array<{ name: string }>).map(tool => tool.name)).toEqual(selected!.selection.tools.map(tool=>tool.name));
+  expect(f.requests[1]!.body.tools).toEqual(f.requests[0]!.body.tools);
   const body = f.requests[1]!.body.input as Array<{ role?: string; content?: unknown }>;
   expect(JSON.stringify(body.filter(item => item.role === 'user'))).toContain(answer.answer);
   expect(JSON.stringify(body.filter(item => item.role === 'system'))).not.toContain(answer.answer);

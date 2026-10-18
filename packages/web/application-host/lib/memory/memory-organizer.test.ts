@@ -4,12 +4,11 @@ import { setImmediate } from "node:timers/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { openKnowledgeStoreEngine } from "../knowledge/store-engine.js";
-import type { KnowledgeScope, KnowledgeStore, OrganizerProgress } from "../knowledge/store-contract.js";
+import type { KnowledgeScope, KnowledgeStore } from "../knowledge/store-contract.js";
 import { createMemoryService, type MemoryOwner, type MemoryService } from "./memory-service.js";
 import { createMemoryOrganizer } from "./memory-organizer.js";
-import { memorySourceClaims, type MemoryInference, type MemoryInferenceBinding, type MemoryWork, type MemorySelectionRequest } from "./memory-inference.js";
+import { memorySourceClaims, type MemoryInference, type MemoryInferenceBinding, type MemoryWork } from "./memory-inference.js";
 import type { HistoryMemoryMaterial } from "./bot-history.js";
-import { estimateMemoryOrganizerInputTokens } from "@varin/protocol";
 import { sourceRevision } from "./memory-sources.js";
 
 let testDir: string;
@@ -185,11 +184,6 @@ describe("memory organizer (BC2)", () => {
     });
     organizers.add(instance);
     return instance;
-  };
-
-  const progressFor = async (scopeId: string, key: string): Promise<OrganizerProgress | null> => {
-    const store = stores.get(scopeId);
-    return store ? store.getOrganizerProgress(key) : null;
   };
 
   beforeEach(async () => {
