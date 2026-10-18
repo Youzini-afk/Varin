@@ -4,10 +4,11 @@ import { spawnSync } from 'node:child_process';
 
 const root = path.resolve(import.meta.dirname, '..');
 const args = process.argv.slice(2);
-if (args.some((arg) => arg !== '--build' && !arg.startsWith('--vitest-file='))) {
-  throw new Error('Usage: node scripts/test-kernel-authority.mjs [--build] [--vitest-file=<path>]');
+if (args.some((arg) => arg !== '--build' && arg !== '--build-only' && !arg.startsWith('--vitest-file='))) {
+  throw new Error('Usage: node scripts/test-kernel-authority.mjs [--build | --build-only] [--vitest-file=<path>]');
 }
 const vitestFiles = args.filter((arg) => arg.startsWith('--vitest-file=')).map((arg) => arg.slice('--vitest-file='.length));
+const buildOnly = args.includes('--build-only');
 const env = { ...process.env, VARIN_REQUIRE_RELEASE_KERNEL: '1' };
 
 function run(command, arguments_) {
@@ -20,7 +21,7 @@ function run(command, arguments_) {
   }
 }
 
-if (args.includes('--build')) {
+if (args.includes('--build') || buildOnly) {
   const toolchain = fs.readFileSync(path.join(root, 'kernel/rust-toolchain.toml'), 'utf8');
   const channel = /^channel\s*=\s*"([^"]+)"/m.exec(toolchain)?.[1];
   if (!channel) throw new Error('kernel/rust-toolchain.toml has no pinned channel');
@@ -28,6 +29,7 @@ if (args.includes('--build')) {
   run('rustup', ['toolchain', 'install', channel, '--profile', 'minimal', '--component', 'rustfmt']);
   run(process.execPath, ['scripts/build-kernel.mjs']);
 }
+if (buildOnly) process.exit(0);
 
 const defaultBinary = path.join(root, 'kernel/target/release', process.platform === 'win32' ? 'varin-kernel.exe' : 'varin-kernel');
 const binary = env.VARIN_TEST_KERNEL_PATH?.trim() || env.VARIN_KERNEL_PATH?.trim() || defaultBinary;

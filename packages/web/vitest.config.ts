@@ -9,8 +9,9 @@ const applicationHostSrc = fileURLToPath(new URL('./application-host', import.me
  * stores, OS process trees). They run exactly once, through
  * `scripts/test-kernel-authority.mjs` with `vitest.kernel.config.ts`, which
  * verifies a fresh manifest-matched binary before any of them execute. The
- * main suite must stay deterministic on a checkout with no Rust artifacts, so
- * these files are excluded here rather than skipped at runtime.
+ * main suite excludes these acceptance files rather than skipping at runtime.
+ * Some Documents fixtures use the kernel's native directory observer, so CI
+ * still builds the kernel before running the package suite.
  */
 export const COMMON_TEST_EXCLUDE = [
   '**/node_modules/**',
