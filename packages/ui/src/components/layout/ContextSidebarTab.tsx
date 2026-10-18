@@ -11,7 +11,7 @@ import { Icon } from '@/components/icon/Icon';
 import { WorkerHighlightedCode } from '@/components/code/WorkerHighlightedCode';
 import { ThreadTokenUsage } from '@/components/thread/ThreadTokenUsage';
 import { MarkdownRenderer } from '@/components/chat/MarkdownRenderer';
-import { contextUsageKey, useThreadContextUsageStore } from '@/stores/useThreadContextUsageStore';
+import { contextUsageKey, threadContextModel, useThreadContextUsageStore } from '@/stores/useThreadContextUsageStore';
 import { useThreadStore } from '@/stores/useThreadStore';
 import { useUIStore } from '@/stores/useUIStore';
 import { useModelCatalogStore } from '@/stores/useModelCatalogStore';
@@ -40,7 +40,7 @@ function ContextDetails({ api, identity, snapshot, active, error }: {
   const counts = inspection?.counts;
   const request = inspection?.latestRequest;
   const tokens = request?.usage;
-  const model = snapshot.modelSelection.active?.configuration;
+  const model = threadContextModel(snapshot);
   const channel = useModelCatalogStore(state => state.channels.find(channel => channel.id === model?.providerId));
   const modelName = channel?.models.find(candidate => candidate.id === (model?.catalogModelId ?? model?.model))?.name
     || model?.model || request?.modelId || '—';

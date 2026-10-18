@@ -3,7 +3,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { parseHTML } from 'linkedom';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import type { ThreadContextInspection, ThreadIdentity, ThreadSnapshot, ThreadsAPI } from '@varin/application-client';
-import type { ModelPresentation } from '@varin/protocol';
+import type { ModelPresentation, Run } from '@varin/protocol';
 const runtime = vi.hoisted(() => ({ api: undefined as ThreadsAPI | undefined }));
 const copy = vi.hoisted(() => vi.fn(async (_value: string) => ({ ok: true })));
 vi.mock('@/hooks/useRuntimeAPIs', () => ({ useRuntimeAPIs: () => ({ threads: runtime.api }) }));
@@ -38,12 +38,15 @@ function HeaderUsage() {
 it('restores context cards and raw JSON while header usage stays independent of the visible history page', async () => {
   const request: ModelPresentation = { requestId: 'request:older', providerFamily: 'openai-completions', modelId: 'fixture-model', contextTokens: 26000,
     usage: { measurement: 'actual', inputTokens: 25000, outputTokens: 1000, cachedInputTokens: 20000, reasoningTokens: 200 } };
+  const run: Run = { id: 'run', thread_id: identity.threadId, branch_id: identity.branchId, epoch: 1, revision: 1,
+    state: 'executing', waiting_on: null, cancel_requested: false,
+    configuration: { providerFamily: request.providerFamily, model: request.modelId, endpoint: 'http://fixture.test', credentialEnvironment: null,
+      allowAnonymous: true, configurationGeneration: 1, maxOutputTokens: 8000, contextWindowTokens: 100000 } };
   const view: ThreadSnapshot = { identity, eventCursor: 10,
-    thread: { thread_id: identity.threadId, main_branch_id: identity.branchId, title: 'Context inspection', revision: 1, created_at_ms: 1, updated_at_ms: 2, pinned: false, archived: false, deleted_at_ms: null, activity_cursor: 10, read_cursor: 0, unread: false, bot_id: null, parent_thread_id: null, observer_project_ids: [null], branches: [{ branch_id: identity.branchId, head: 'tool:39', active_run_id: null, latest_run: null }] },
-    activeRun: null, history: Array.from({ length: 20 }, (_, i) => ({ id: `tool:${i + 20}`, thread_id: identity.threadId, parent: `tool:${i + 19}`, source: 'tool', run_id: 'run', provider: null, content: { text: `result ${i + 20}` } })),
+    thread: { thread_id: identity.threadId, main_branch_id: identity.branchId, title: 'Context inspection', revision: 1, created_at_ms: 1, updated_at_ms: 2, pinned: false, archived: false, deleted_at_ms: null, activity_cursor: 10, read_cursor: 0, unread: false, bot_id: null, parent_thread_id: null, observer_project_ids: [null], branches: [{ branch_id: identity.branchId, head: 'tool:39', active_run_id: run.id, latest_run: run }] },
+    activeRun: run, history: Array.from({ length: 20 }, (_, i) => ({ id: `tool:${i + 20}`, thread_id: identity.threadId, parent: `tool:${i + 19}`, source: 'tool', run_id: 'run', provider: null, content: { text: `result ${i + 20}` } })),
     historyPage: { head: 'tool:39', previous: 'tool:20' }, inputs: [], operations: [], followups: [], goals: [], launch: null,
-    modelSelection: { desired: null, active: { id: 'model', run_id: 'run', revision: 1, binding_id: 'binding', credential_scope: null, status: 'active', failure: null,
-      configuration: { providerFamily: request.providerFamily, model: request.modelId, endpoint: 'http://fixture.test', credentialEnvironment: null, allowAnonymous: true, configurationGeneration: 1, maxOutputTokens: 8000, contextWindowTokens: 100000 } } },
+    modelSelection: { desired: null, active: null },
     policySelection: null, context: { checkpoint: null, jobs: [] } };
   const inspection: ThreadContextInspection = { head: 'tool:39', counts: { total: 40, user: 1, assistant: 1, tool: 38 }, latestRequest: request, contextRequest: request };
   let resolve!: (value: ThreadContextInspection) => void;
@@ -73,8 +76,15 @@ it('restores context cards and raw JSON while header usage stays independent of 
   await act(async () => listener({ cursor: 11, subject: 'run', revision: 2, kind: 'model.settled', data: {} }));
   expect(container.querySelector('svg[role=progressbar]')?.getAttribute('aria-valuenow')).toBe('31');
   expect(raw.getAttribute('aria-expanded')).toBe('true');
-  inspection.contextRequest = null; view.eventCursor = 12;
-  await act(async () => listener({ cursor: 12, subject: 'run', revision: 3, kind: 'context.committed', data: {} }));
+  view.activeRun = null;
+  view.thread.branches[0]!.active_run_id = null;
+  view.thread.branches[0]!.latest_run = { ...run, state: 'completed' };
+  view.eventCursor = 12;
+  await act(async () => listener({ cursor: 12, subject: 'run', revision: 3, kind: 'run.changed', data: {} }));
+  expect(container.querySelector('svg[role=progressbar]')?.getAttribute('aria-valuenow')).toBe('31');
+  expect(container.querySelector('section[aria-label="Context"]')?.textContent).toContain('31,000 / 100,000');
+  inspection.contextRequest = null; view.eventCursor = 13;
+  await act(async () => listener({ cursor: 13, subject: 'run', revision: 4, kind: 'context.committed', data: {} }));
   expect(container.querySelector('svg[role=progressbar]')).toBeNull();
   const signal = inspect.mock.calls.at(-1)![2]!;
   await act(async () => root.render(<I18nProvider><ContextPanelContent active={false} /></I18nProvider>));

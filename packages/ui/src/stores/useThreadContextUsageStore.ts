@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 import { subscribeRuntimeEndpointWillChange } from '@varin/application-client';
 import type { ThreadContextInspection, ThreadIdentity, ThreadSnapshot } from '@varin/application-client';
-import type { ModelPresentation } from '@varin/protocol';
+import type { ModelPresentation, ModelSessionConfiguration } from '@varin/protocol';
 
 export interface ThreadContextUsage {
   totalTokens: number;
@@ -12,9 +12,16 @@ export interface ThreadContextUsage {
 
 export const contextUsageKey = (identity: ThreadIdentity) => JSON.stringify([identity.threadId, identity.branchId]);
 
+/** Initial configuration lives on the Run; selections only record later model changes. */
+export function threadContextModel(snapshot: ThreadSnapshot): Partial<ModelSessionConfiguration> | undefined {
+  const run = snapshot.activeRun ?? snapshot.thread.branches.find(branch => branch.branch_id === snapshot.identity.branchId)?.latest_run;
+  const configuration = snapshot.modelSelection.active?.configuration ?? run?.configuration;
+  return configuration && typeof configuration === 'object' ? configuration as Partial<ModelSessionConfiguration> : undefined;
+}
+
 /** Last observed request, not cumulative billing or a tokenization of the next prompt. */
 export function threadContextUsage(snapshot: ThreadSnapshot, inspection?: ThreadContextInspection): ThreadContextUsage | null {
-  const model = snapshot.modelSelection.active?.configuration;
+  const model = threadContextModel(snapshot);
   const limit = model?.contextWindowTokens;
   if (!model || !limit || !Number.isFinite(limit) || limit <= 0) return null;
   const present = (request: ModelPresentation | null | undefined): ThreadContextUsage | null => {
