@@ -110,7 +110,7 @@ export function createRetrievalModelStage(options: {
         return {
           stage: { providerId: exploreSelection?.providerId ?? lease!.binding.providerId,
             configurationId: identity([mode, exploreSelection, llm?.configuration, scope, lease?.binding]), status: 'ready',
-            implementation: { kind: 'progressive', select: async ({ run, validateMaterials }, active) => {
+            implementation: { kind: 'progressive', select: async ({ run, validateMaterials, progress }, active) => {
               await validate(active);
               const execute = async () => {
                 const duties = resolveExploreDuties({ mode, llm: !!exploreSelection, fastDecision: !!lease, rerank: false });
@@ -124,6 +124,7 @@ export function createRetrievalModelStage(options: {
                   judgeMaterials: duties.selection === 'fast-decision', waitForLaterProgress: !!exploreSelection,
                   closing: { promise: settled, requested: () => closing },
                   call: async batch => {
+                    if (!exploreSelection) progress?.phase('selecting');
                     try {
                       return await session.decide({ purpose: 'explore', goal: batch.goal,
                         materials: batch.materials, questions: batch.questions,
@@ -133,7 +134,7 @@ export function createRetrievalModelStage(options: {
                     } catch (error) {
                       if (!(error instanceof ResearchDecisionFailure) || !error.result) throw error;
                       return { ...error.result, failure: { status: error.cancelled ? 'cancelled' : 'failed', note: error.message } };
-                    }
+                    } finally { if (!exploreSelection && !active.aborted) progress?.phase('collecting'); }
                   },
                 }));
                 void fd?.catch(() => {});
@@ -161,7 +162,7 @@ export function createRetrievalModelStage(options: {
                       vocab: run.vocab(), sources: run.sourceStates(), inputSource: query.source.mode === 'live_root' ? 'disk' : query.source.mode, decisionMode: mode, duties,
                       fastDecision: { status: decision.status } };
                     const guard = async () => { await validate(active); await validateMaterials([]); };
-                    model = await runExploreModelLoop({ started, ...(complete ? { complete } : {}), signal: active, ...(query.limit === undefined ? {} : { limit: query.limit }), port: {
+                    model = await runExploreModelLoop({ started, ...(complete ? { complete } : {}), ...(progress ? { progress } : {}), signal: active, ...(query.limit === undefined ? {} : { limit: query.limit }), port: {
                       plan: async plan => { await validateLLM(active); await guard(); return { queryId, ...await run.submitPlan(plan), sources: run.sourceStates() }; },
                       views: async input => {
                         await guard();

@@ -250,6 +250,7 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
   const compactionKeys = React.useRef(new Map<string, string>());
   const [progress, setProgress] = React.useState<StreamingTextPart[]>([]);
   const [streamingTools, setStreamingTools] = React.useState<import('@/lib/agent-runtime/thread-projection').StreamingToolCall[]>([]);
+  const [toolProgress, setToolProgress] = React.useState<import('@/lib/agent-runtime/thread-projection').ToolExecutionProgress[]>([]);
   const messageInput = React.useRef<ComposerEditorHandle | null>(null);
   const appliedModelPreference = React.useRef<string | undefined>(undefined);
   const [models, setModels] = React.useState<ThreadModelInfo[]>([]);
@@ -282,9 +283,9 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
     identityGeneration.current += 1; forkKeys.current.clear(); compactionKeys.current.clear();
     setPreparingSource(false);
     pendingAction.current = null; setPending(false); setError(undefined);
-    setSnapshot(undefined); setProgress([]); setHistoryOpen(false); setContextRunId(undefined); setReadingFiles(false); fileReadGeneration.current += 1;
+    setSnapshot(undefined); setProgress([]); setToolProgress([]); setHistoryOpen(false); setContextRunId(undefined); setReadingFiles(false); fileReadGeneration.current += 1;
     fileRead.current?.abort(); fileRead.current = null;
-    const view = new ThreadProjection(api, identity, value => { snapshotHost.current = host; historyWindow.accept(value); handoff.observe(value); setSnapshot(value); }, value => setError(value instanceof Error ? value.message : 'Thread unavailable'), setProgress, setStreamingTools);
+    const view = new ThreadProjection(api, identity, value => { snapshotHost.current = host; historyWindow.accept(value); handoff.observe(value); setSnapshot(value); }, value => setError(value instanceof Error ? value.message : 'Thread unavailable'), setProgress, setStreamingTools, setToolProgress);
     projection.current = view; view.start();
     return () => { identityGeneration.current += 1; fileReadGeneration.current += 1; fileRead.current?.abort(); fileRead.current = null; view.close(); };
   }, [api, identity, host, handoff, historyWindow]);
@@ -638,7 +639,7 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
       navigation={{ runs: history.runs, readPreview: historyWindow.readRunPreview, ensureItem: historyWindow.ensureItem, error: history.navigationError, retry: historyWindow.retryNavigation }}
       earlierHistory={{ available: Boolean(history.previous), loading: history.loading, error: history.error, latencyMs: history.latencyMs, load: historyWindow.loadEarlier }}
       liveUser={firstMessage.message} liveUserStatus={firstMessage.status}
-      progress={snapshot && !history.connecting ? progress : []} streamingTools={snapshot && !history.connecting ? streamingTools : []} cwd={emptyWorkspacePath ?? ''} working={active && !history.connecting && !launch?.preparation_failure && !pause} readOnly={readOnly || !snapshot || history.connecting}
+      progress={snapshot && !history.connecting ? progress : []} streamingTools={snapshot && !history.connecting ? streamingTools : []} toolProgress={toolProgress} cwd={emptyWorkspacePath ?? ''} working={active && !history.connecting && !launch?.preparation_failure && !pause} readOnly={readOnly || !snapshot || history.connecting}
       memory={snapshot?.thread.bot_id ? memorySelection : undefined}
       onQuote={quote => { if (!readOnly && currentViewScope.current === viewScope) { setText(current => [current.trimEnd(), quote].filter(Boolean).join('\n\n')); messageInput.current?.focus(); } }}
       onFork={!readOnly && snapshot && !history.connecting && !pending && onBranchCreated ? id => void forkFrom(id) : undefined}

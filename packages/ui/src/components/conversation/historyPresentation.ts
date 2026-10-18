@@ -5,17 +5,19 @@ import type { ChatAssistantMessage, ChatSessionEntry, ChatToolExecutionState, Ch
 const object = (value: unknown): Record<string, unknown> => value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {};
 const json = (value: unknown): JsonValue => value as JsonValue;
 
-// Keep the original call/history identity while presenting a UI created through
-// the generic tool gateway exactly like a directly called render_ui.
+// Dedicated cards keep their original call/history identity through the gateway.
 function presentedCall(call: Record<string, unknown>): Record<string, unknown> {
   const args = object(call.arguments);
-  return call.name === 'tool_invoke' && object(args.reference).name === 'render_ui'
-    ? { ...call, name: 'render_ui', arguments: args.arguments }
+  const name = object(args.reference).name;
+  return call.name === 'tool_invoke' && (name === 'render_ui' || name === 'code_retrieval')
+    ? { ...call, name, arguments: args.arguments }
     : call;
 }
 function presentedOutput(data: unknown): unknown {
   const value = object(data);
-  return object(value.reference).name === 'render_ui' && object(value.result).kind === 'ui'
+  const name = object(value.reference).name;
+  return (name === 'render_ui' && object(value.result).kind === 'ui')
+    || (name === 'code_retrieval' && typeof object(value.result).status === 'string')
     ? value.result : data;
 }
 
@@ -60,10 +62,18 @@ function outputParts(output: OutputBody | undefined): ChatUserContent[] {
 export class HistoryPresentation {
   constructor(readonly identity: string) {}
   private entries = new Map<string, ChatSessionEntry>();
-  project(history: readonly HistoryItem[], snapshot: ThreadSnapshot | undefined, runUsage: readonly ThreadRunUsage[] = []) {
+  project(history: readonly HistoryItem[], snapshot: ThreadSnapshot | undefined, runUsage: readonly ThreadRunUsage[] = [],
+    progress: readonly import('@/lib/agent-runtime/thread-projection').ToolExecutionProgress[] = []) {
     const result: ChatSessionEntry[] = [];
     const toolExecutions: Record<string, ChatToolExecutionState> = {};
     const calls = new Map<string, { id: string; name: string }>();
+    const live = new Map(progress.map(item => [item.operationId, item]));
+    const completed = new Map<string, Record<string, unknown>>(history.flatMap(item => {
+      const result = object(object(item.content).content).result;
+      const tool = object(result);
+      return typeof tool.request_id === 'string' && typeof tool.call_id === 'string'
+        ? [[`${tool.request_id}:tool:${tool.call_id}`, object(tool.completion)] as const] : [];
+    }));
     for (const item of history) {
       const metadata = item.modelRequest;
       const configuration = metadata ? { model: metadata.modelId } : undefined;
@@ -78,6 +88,16 @@ export class HistoryPresentation {
         const operation = snapshot?.operations.find(operation => operation.run_id === item.run_id
           && operation.id === `${request}:tool:${call.call_id}`);
         if (operation) toolExecutions[id] = projectExecution(operation, id, call);
+        const operationId = `${request}:tool:${call.call_id}`;
+        const receipt = completed.get(operationId);
+        const candidate = live.get(operationId);
+        const update = candidate?.toolName === call.name ? candidate : undefined;
+        if ((!operation && !receipt && snapshot?.activeRun?.id === item.run_id) || (update && update.runId === item.run_id)) {
+          const running = !receipt && snapshot?.activeRun?.id === item.run_id;
+          toolExecutions[id] ??= { toolCallId: id, name: String(call.name), args: json(call.arguments),
+            status: receipt ? outcomeStatus(receipt.outcome) : running ? 'running' : 'unknown' };
+          if (update?.runId === item.run_id) toolExecutions[id]!.partialResult = json({ details: update.details });
+        }
       }
       let entry = this.entries.get(item.id);
       if (!entry) {

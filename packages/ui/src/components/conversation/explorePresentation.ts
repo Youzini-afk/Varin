@@ -48,7 +48,8 @@ export function explorePresentation(execution?: ChatToolExecutionState, result?:
   });
   const snippets = validSnippets ? rawSnippets.map(value => {
     const row = value as Record<string, unknown>;
-    return { ...row, text: row.content, why: '' } as unknown as ExploreSearchSnippet;
+    return { ...row, text: row.content, why: typeof row.why === 'string' ? row.why : '',
+      source: row.source ?? (exploreRecord(details?.source)?.mode === 'fixed_branch' ? 'working-branch' : 'disk') } as unknown as ExploreSearchSnippet;
   }) : undefined;
   const invalid = (rawSnippets !== undefined && !validSnippets) || (details?.progress !== undefined && !ownProgress);
   let phase: ExploreDisplayPhase;
@@ -58,7 +59,7 @@ export function explorePresentation(execution?: ChatToolExecutionState, result?:
   else if (result?.status === 'unknown' || execution?.status === 'unknown') phase = 'unknown';
   else if (invalid) phase = 'invalid';
   else if (final) phase = details?.status === 'partial' ? 'partial' : snippets ? snippets.length ? 'complete' : 'empty' : 'unknown';
-  else if (execution?.status === 'running') phase = progress?.phase ?? 'starting';
+  else if (execution?.status === 'running') phase = progress && ['complete', 'partial', 'empty'].includes(progress.phase) ? 'finishing' : progress?.phase ?? 'starting';
   else phase = generating ? 'preparing' : 'unknown';
   const running = execution?.status === 'running' && !['complete', 'partial', 'empty', 'failed', 'unavailable', 'cancelled'].includes(phase);
   return { phase, running, final, details, progress, snippets,

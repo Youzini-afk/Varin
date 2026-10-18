@@ -1529,6 +1529,7 @@ pub(crate) struct KernelToolExecutor {
     language: Option<crate::language::LanguageBridge>,
     retrieval: Option<crate::retrieval::RetrievalBridge>,
     retrieval_project_id: Option<String>,
+    retrieval_branch_id: Option<String>,
     retrieval_invocations: Option<Arc<varin_runtime::nested_tools::NestedTools>>,
 }
 impl KernelToolExecutor {
@@ -1654,6 +1655,7 @@ impl KernelToolExecutor {
             language: None,
             retrieval: None,
             retrieval_project_id: None,
+            retrieval_branch_id: None,
             retrieval_invocations: None,
         })
     }
@@ -1662,10 +1664,12 @@ impl KernelToolExecutor {
         bridge: crate::retrieval::RetrievalBridge,
         project_id: Option<String>,
         invocations: Arc<varin_runtime::nested_tools::NestedTools>,
+        branch_id: Option<String>,
     ) -> Self {
         self.retrieval_invocations = Some(invocations);
         self.retrieval = Some(bridge);
         self.retrieval_project_id = project_id;
+        self.retrieval_branch_id = branch_id;
         self
     }
     pub(crate) fn with_language(mut self, bridge: crate::language::LanguageBridge) -> Self {

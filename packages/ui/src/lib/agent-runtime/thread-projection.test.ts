@@ -62,11 +62,35 @@ async function startProjection(snapshot: ThreadsAPI['snapshot']) {
     await new Promise<void>(resolve => signal.addEventListener('abort', () => resolve(), { once: true }));
   };
   const progress = vi.fn(); const parts = vi.fn(); const report = vi.fn(); const publish = vi.fn(); const tools = vi.fn();
-  const projection = new ThreadProjection({ snapshot, observe } as ThreadsAPI, identity, publish, report, value => { parts(value); progress(textOf(value)); }, tools);
+  const toolProgress = vi.fn();
+  const projection = new ThreadProjection({ snapshot, observe } as ThreadsAPI, identity, publish, report, value => { parts(value); progress(textOf(value)); }, tools, toolProgress);
   projection.start();
   await vi.advanceTimersByTimeAsync(0);
-  return { projection, listener, progress, parts, report, publish, tools };
+  return { projection, listener, progress, parts, report, publish, tools, toolProgress };
 }
+
+it('keeps retrieval progress after the model call commits and ends it at the tool receipt', async () => {
+  const view = snapshotView();
+  view.history.push({ id: 'call-history', thread_id: identity.threadId, run_id: 'run', parent: null, source: 'assistant',
+    content: { id: 'model-item:7:request:call', content: { kind: 'tool_call', call: { call_id: 'call', name: 'code_retrieval', arguments: {} } } }, provider: null });
+  const h = await startProjection(async () => structuredClone(view));
+  const update = (sequence: number) => ({ ...delta(sequence, ''), streamId: 'retrieval', event: {
+    kind: 'tool_progress', operationId: 'request:tool:call', toolName: 'code_retrieval', details: { progress: { phase: 'collecting', receivedFiles: sequence } },
+  } });
+  try {
+    h.listener(update(1)); h.listener(update(3)); h.listener(update(2));
+    expect(h.toolProgress).toHaveBeenCalledTimes(2);
+    expect(h.toolProgress.mock.lastCall?.[0]).toMatchObject([{ operationId: 'request:tool:call', details: { progress: { receivedFiles: 3 } } }]);
+    expect(h.progress).toHaveBeenLastCalledWith('');
+    view.history.push({ id: 'receipt', thread_id: identity.threadId, run_id: 'run', parent: 'call-history', source: 'tool', provider: null,
+      content: { content: { kind: 'tool_result', result: { request_id: 'request', call_id: 'call', completion: {} } } } });
+    h.listener({ cursor: 7, subject: 'run', revision: 2, kind: 'history.appended', data: {} });
+    await vi.advanceTimersByTimeAsync(0);
+    h.listener(update(4));
+    expect(h.toolProgress).toHaveBeenCalledTimes(2);
+    expect(view.operations).toEqual([]);
+  } finally { h.projection.close(); }
+});
 
 it('exposes a gateway render_ui call while its HTML is still streaming and retains the original call identity', async () => {
   const h = await startProjection(async () => snapshotView());

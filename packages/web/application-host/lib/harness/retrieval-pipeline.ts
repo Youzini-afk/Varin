@@ -45,7 +45,8 @@ export type RetrievalModel = {
   select(input: { question: string; snippets: readonly RetrievalSnippet[] }, signal: AbortSignal): Promise<{ indices: readonly number[]; status: 'ready' | 'partial' | 'empty' }>;
 } | {
   kind: 'progressive';
-  select(input: { run: ExploreQueryRun; validateMaterials(materials: readonly FastDecisionMaterial[]): Promise<void> }, signal: AbortSignal): Promise<{ fastDecision?: ExploreFastDecisionDetails; model?: ExploreModelParticipation }>;
+  select(input: { run: ExploreQueryRun; validateMaterials(materials: readonly FastDecisionMaterial[]): Promise<void>;
+    progress?: Pick<ReturnType<typeof import('./explore-progress.js').createExploreProgress>, 'phase' | 'observe'> }, signal: AbortSignal): Promise<{ fastDecision?: ExploreFastDecisionDetails; model?: ExploreModelParticipation }>;
 };
 export interface RetrievalPipelineConfiguration {
   configurationId: string;

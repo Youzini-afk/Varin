@@ -127,7 +127,7 @@ export const ChatExploreCard: React.FC<{
         <ol className="relative" aria-label={t('chat.explore.process')}>
           <AnimatePresence initial={false} mode="popLayout">{visibleActivities.map(item => activity(item, !expanded))}</AnimatePresence>
         </ol>
-      </div> : <p className="px-3 py-2 typography-meta text-muted-foreground">{t(`chat.explore.phase.${phase}`)}</p>}
+      </div> : null}
       {phase !== 'cancelled' && typeof details?.error === 'string' ? <p className={cn('break-words px-3 py-2 typography-meta text-[var(--status-error)]', !expanded && 'line-clamp-2')}>{details.error}</p> : null}
       {expanded && selected ? <div className="mx-3 my-2 overflow-hidden rounded-lg border border-border/50">
         <div className="break-all bg-muted/20 px-3 py-2 typography-micro text-muted-foreground">

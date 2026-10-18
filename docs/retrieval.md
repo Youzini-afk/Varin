@@ -29,6 +29,11 @@ Host 搜索将 inventory/content 计算交给 Rust compute，保留原来源及�
 共享 Explore planner 和 progressive selection 在 `packages/protocol`；Host 算法在 `harness/explore*.ts`。
 原生 adapter 保留原请求、回执、取消和交付寿命。
 
+快速检索卡片从原查询读取阶段、来源状态和已读取片段的位置，显示持续耗时与候选数量。Host 通过私有检索桥发送
+完整进度快照，Rust 使用原调用的 Thread/branch/Run/operation 身份转发临时观察事件；慢消费者合并待发快照，
+执行线程继续处理查询与取消。UI 在模型提交工具调用后继续接收该工具的进度，以工具结果结束运行态。
+直接调用和 `tool_invoke` 使用同一张卡片。进度只含展示元数据，最终工具回执与模型上下文保持原有内容。
+
 候选量/来源预算是覆盖事实，不是置信度。graph/index 缺口保持可见。Graph 给 path，真正文本须重读并重新定位 symbol/literal
 才输出位置；过期关系可以不带行号。可选 relation enrichment 不能让成功文本搜索失败，也不能挤掉 unread/partial 提示。
 

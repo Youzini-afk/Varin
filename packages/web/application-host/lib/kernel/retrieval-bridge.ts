@@ -2,8 +2,10 @@ import { sourceFailureCode } from './source-admission-error.js';
 import { waitWithSignal } from '../cancellation.js';
 import type { RetrievalQuery } from './protocol.generated.js';
 import type { RetrievalOwner, RetrievalResult } from './retrieval-owner.js';
+import type { ExploreToolProgress } from '@varin/protocol';
 
 export interface PrivateRetrievalResponse { v: 1; kind: 'retrieval-response'; id: string; kernelEpoch: string; result: RetrievalResult }
+export interface PrivateRetrievalProgress { v: 1; kind: 'retrieval-progress'; id: string; kernelEpoch: string; progress: ExploreToolProgress }
 const record = (value: unknown): value is Record<string, unknown> => value !== null && typeof value === 'object' && !Array.isArray(value);
 const text = (value: unknown): value is string => typeof value === 'string' && value.length > 0;
 export const unavailableRetrievalResult = (message: string): RetrievalResult => ({ status: 'unavailable', snippets: [], omissions: { outOfScope: 0, stale: 0, unavailable: 0 }, stages: [], message });
@@ -26,7 +28,7 @@ export class RetrievalBridge {
   private owner?: RetrievalOwner;
   private readonly active = new Map<string, { epoch: string; controller: AbortController }>();
   constructor(private readonly currentEpoch: () => string | null,
-    private readonly send: (response: PrivateRetrievalResponse) => Promise<void>, private readonly transportFailed: () => void) {}
+    private readonly send: (response: PrivateRetrievalResponse | PrivateRetrievalProgress) => Promise<void>, private readonly transportFailed: () => void) {}
   setOwner(owner: RetrievalOwner): void {
     if (this.owner && this.owner !== owner) throw new Error('Retrieval owner is already connected');
     this.owner = owner;
@@ -51,12 +53,25 @@ export class RetrievalBridge {
     const query = value.query;
     const owner = this.owner;
     void (async () => {
+      let latest: ExploreToolProgress | undefined;
+      let sending: Promise<void> | undefined;
+      const emit = (progress: ExploreToolProgress) => {
+        if (controller.signal.aborted || this.active.get(id) !== entry || epoch !== this.currentEpoch()) return;
+        latest = progress;
+        if (sending) return;
+        sending = (async () => {
+          while (latest && this.active.get(id) === entry && epoch === this.currentEpoch()) {
+            const progress = latest; latest = undefined;
+            await this.send({ v: 1, kind: 'retrieval-progress', id, kernelEpoch: epoch, progress });
+          }
+        })().catch(() => { this.transportFailed(); }).finally(() => { sending = undefined; if (latest) emit(latest); });
+      };
       let result: RetrievalResult;
       try {
         result = validQuery(query) && owner
           // Cancellation detaches even a non-cooperative owner. Its durable inference ledger
           // can still settle actual dispatch facts without reviving this result delivery.
-          ? await waitWithSignal(owner(query, controller.signal), controller.signal)
+          ? await waitWithSignal(owner(query, controller.signal, emit), controller.signal)
           : unavailableRetrievalResult(owner ? 'Invalid retrieval query' : 'Retrieval owner is unavailable');
       } catch (error) {
         const failure = sourceFailureCode(error);
@@ -64,6 +79,7 @@ export class RetrievalBridge {
           : { ...unavailableRetrievalResult('Retrieval query failed'), ...(failure ? { sourceFailure: failure } : {}) };
       }
       if (this.active.get(id) !== entry) return;
+      while (sending) await sending;
       this.active.delete(id);
       if (epoch !== this.currentEpoch()) return;
       await this.send({ v: 1, kind: 'retrieval-response', id, kernelEpoch: epoch, result });

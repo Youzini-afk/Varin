@@ -14,6 +14,7 @@ interface ProgressView {
   readers: Map<string, PartialJson>;
 }
 export interface StreamingToolCall { id: string; name: string; rawArguments: string; sequence: number; reference?: string; interrupted?: boolean }
+export interface ToolExecutionProgress { runId: string; operationId: string; toolName: string; details: unknown }
 export type StreamingTextPart = { type: 'text'; text: string } | { type: 'thinking'; thinking: string };
 interface ProviderProgress { kind?: string; data?: { kind?: string; item_id?: string; text?: string; call_id?: string; name?: string; request_id?: string; delta?: string } }
 
@@ -29,6 +30,8 @@ export class ThreadProjection {
   private progressObservation = 0;
   private interruptedTools: StreamingToolCall[] = [];
   private readonly committedRequests = new Set<string>();
+  private readonly completedTools = new Set<string>();
+  private readonly toolProgress = new Map<string, ToolExecutionProgress & { stream: string; sequence: number }>();
   private removeEndpoint: (() => void) | undefined;
   private contextSnapshot?: ThreadSnapshot;
   private contextRefreshing = false;
@@ -36,7 +39,8 @@ export class ThreadProjection {
     private readonly publish: (snapshot: ThreadSnapshot) => void,
     private readonly report: (error: unknown) => void,
     private readonly publishProgress: (parts: StreamingTextPart[]) => void = () => {},
-    private readonly publishTools: (calls: StreamingToolCall[]) => void = () => {}) {}
+    private readonly publishTools: (calls: StreamingToolCall[]) => void = () => {},
+    private readonly publishToolProgress: (progress: ToolExecutionProgress[]) => void = () => {}) {}
 
   async refresh(): Promise<void> {
     this.dirty = true;
@@ -56,7 +60,9 @@ export class ThreadProjection {
           if (activeRunId && activeRunId !== this.activeRunId) this.interruptedTools = [];
           this.activeRunId = activeRunId;
           const knownCalls = new Set(snapshot.history.flatMap(item => {
-            const envelope = item.content as { id?: string; content?: { call?: { call_id?: string } } };
+            const envelope = item.content as { id?: string; content?: { call?: { call_id?: string }; result?: { request_id?: string; call_id?: string } } };
+            const completed = envelope?.content?.result;
+            if (completed?.request_id && completed.call_id) this.completedTools.add(`${completed.request_id}:tool:${completed.call_id}`);
             const call = envelope?.content?.call;
             const prefix = /^model-item:(\d+):/.exec(envelope?.id ?? '');
             const requestId = item.modelRequest?.requestId ?? (prefix ? envelope.id!.slice(prefix[0].length, prefix[0].length + Number(prefix[1])) : undefined);
@@ -110,7 +116,7 @@ export class ThreadProjection {
     this.removeEndpoint = subscribeRuntimeEndpointWillChange(() => this.close());
     void this.observe();
   }
-  close(): void { this.removeEndpoint?.(); this.abort.abort(); this.progress.clear(); }
+  close(): void { this.removeEndpoint?.(); this.abort.abort(); this.progress.clear(); this.toolProgress.clear(); }
 
   private publishCurrentProgress(): void {
     const current = this.activeRunId ? this.progress.get(this.activeRunId) : undefined;
@@ -130,8 +136,22 @@ export class ThreadProjection {
             this.cursor = event.cursor;
             void this.refresh();
           } else if ('stream' in event && event.stream === 'progress') {
-            if (event.threadId !== this.identity.threadId || event.branchId !== this.identity.branchId
-              || this.committedRequests.has(event.requestId)) return;
+            if (event.threadId !== this.identity.threadId || event.branchId !== this.identity.branchId) return;
+            const tool = event.event as { kind?: string; operationId?: string; toolName?: string; details?: unknown } | null;
+            if (tool?.kind === 'tool_progress') {
+              if (typeof tool.operationId !== 'string' || typeof tool.toolName !== 'string' || !tool.details
+                || this.completedTools.has(tool.operationId)) return;
+              const stream = `${event.kernelEpoch}:${event.streamId}`;
+              const previous = this.toolProgress.get(tool.operationId);
+              if (previous?.stream === stream && event.sequence <= previous.sequence) return;
+              // Each tool frame is a complete presentation snapshot. It remains valid
+              // after the model's tool-call message commits, and across skipped frames.
+              this.toolProgress.set(tool.operationId, { runId: event.runId, operationId: tool.operationId,
+                toolName: tool.toolName, details: tool.details, stream, sequence: event.sequence });
+              this.publishToolProgress([...this.toolProgress.values()]);
+              return;
+            }
+            if (this.committedRequests.has(event.requestId)) return;
             const observed = ++this.progressObservation;
             const stream = `${event.kernelEpoch}:${event.streamId}`;
             let progress = this.progress.get(event.runId);

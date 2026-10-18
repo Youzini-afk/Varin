@@ -2120,7 +2120,7 @@ pub(crate) fn run() -> Result<(), Box<dyn std::error::Error>> {
             policy_bridge.receive(request);
             continue;
         }
-        if request.get("kind").and_then(Value::as_str) == Some("retrieval-response") {
+        if matches!(request.get("kind").and_then(Value::as_str), Some("retrieval-response" | "retrieval-progress")) {
             retrieval_bridge.receive(request);
             continue;
         }

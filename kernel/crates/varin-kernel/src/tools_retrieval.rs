@@ -401,7 +401,19 @@ impl KernelToolExecutor {
         if let Some(limit) = args.limit {
             query["limit"] = json!(limit);
         }
-        let raw = bridge.query(query, cancel);
+        let presentation = self.retrieval_branch_id.as_ref().map(|branch| {
+            let operation = match &context.origin {
+                ToolOrigin::NestedCall { parent_operation_id } => parent_operation_id,
+                _ => &context.operation_id,
+            };
+            let request = match &context.origin {
+                ToolOrigin::ModelStep { request_id } => request_id,
+                _ => operation,
+            };
+            json!({"runId":context.run_id,"threadId":self.binding.thread_id,"branchId":branch,"requestId":request,
+                "event":{"kind":"tool_progress","operationId":operation,"toolName":"code_retrieval"}})
+        });
+        let raw = bridge.query(query, cancel, presentation);
         // Close admission before returning a cancelled observer; child receipts remain independent.
         drop(inference);
         let raw = raw?;

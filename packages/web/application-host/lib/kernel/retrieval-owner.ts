@@ -1,6 +1,8 @@
 import { sourceFailureCode } from './source-admission-error.js';
 import type { SourceFailureCode } from './protocol.generated.js';
 import type { FastDecisionMaterial } from '@varin/protocol';
+import type { ExploreToolProgress } from '@varin/protocol';
+import { createExploreProgress } from '../harness/explore-progress.js';
 import { contentHashOf } from '../knowledge/semantic/identity.js';
 import { createExploreQueryRun, formatExploreOutput, requiredExploreComponents, DEFAULT_BYTE_BUDGET, DEFAULT_EXCERPT_LIMIT, type ExploreDeps } from '../harness/explore.js';
 import type { ExploreFileSnapshot } from '../harness/file-snapshot.js';
@@ -23,7 +25,7 @@ export interface RetrievalResult {
   message?: string;
   sourceFailure?: SourceFailureCode;
 }
-export type RetrievalOwner = (query: RetrievalQuery, signal: AbortSignal) => Promise<RetrievalResult>;
+export type RetrievalOwner = (query: RetrievalQuery, signal: AbortSignal, progress?: (value: ExploreToolProgress) => void) => Promise<RetrievalResult>;
 const relative = (path: string): string => {
   if (typeof path !== 'string' || path.includes('\\') || path.startsWith('/') || path.includes(':') || path.includes('\0') || path.split('/').includes('..')) throw new Error('Invalid retrieval resource path');
   return path.split('/').filter(part => part && part !== '.').join('/');
@@ -42,7 +44,7 @@ export function createRetrievalOwner({ sources, pipelines, preparePipeline, infe
   inferenceRequests?: Pick<InferenceRequests, 'run'>;
   preparePipeline?: (query: RetrievalQuery, signal: AbortSignal, inference?: InferenceCall) => Promise<BoundRetrievalPipeline>;
 }): RetrievalOwner {
-  const execute = async (query: RetrievalQuery, signal: AbortSignal, inference?: InferenceCall): Promise<RetrievalResult> => {
+  const execute = async (query: RetrievalQuery, signal: AbortSignal, progress: ReturnType<typeof createExploreProgress>, inference?: InferenceCall): Promise<RetrievalResult> => {
     // Bind before source I/O. A later settings publication cannot replace this query's selected stages.
     let binding: BoundRetrievalPipeline;
     try {
@@ -186,6 +188,17 @@ export function createRetrievalOwner({ sources, pipelines, preparePipeline, infe
       } };
       const run = createExploreQueryRun({ question: query.question, paths: roots.length === 1 && roots[0] === '' ? ['.'] : roots,
         ...(query.limit === undefined ? {} : { limit: query.limit }) }, deps, { signal });
+      const observing = new AbortController();
+      const observe = async () => {
+        try {
+          while (!observing.signal.aborted) {
+            const collected = run.collect();
+            progress.observe({ sources: run.sourceStates(), views: collected.views });
+            if (run.terminal() !== 'active') break;
+            await run.waitForProgress(collected.sequence, observing.signal);
+          }
+        } catch (error) { if (!observing.signal.aborted) throw error; }
+      };
       // Only this query owner can resolve the loop's material identities back to
       // admitted views. Re-read the same selected source at HTTP/delivery fences;
       // structure views retain their own legitimate omitted-range text.
@@ -221,12 +234,14 @@ export function createRetrievalOwner({ sources, pipelines, preparePipeline, infe
       };
       let modelParticipation: import('@varin/protocol').ExploreModelParticipation | undefined;
       try {
+        progress.phase('collecting');
         run.start();
+        void observe().catch(() => {});
         if (binding.model?.kind === 'progressive') {
           try {
             // The query observer may detach immediately on cancel. This real owner
             // awaits its session so HTTP bodies and receipts retain their lifetime.
-            const details = await binding.model.select({ run, validateMaterials }, signal);
+            const details = await binding.model.select({ run, validateMaterials, progress }, signal);
             modelParticipation = details.model;
             if (details.fastDecision) {
               const decision = details.fastDecision;
@@ -242,6 +257,7 @@ export function createRetrievalOwner({ sources, pipelines, preparePipeline, infe
           } catch { signal.throwIfAborted(); stage('model', 'failed'); }
         }
         await waitWithSignal(run.waitForViews(), signal);
+        progress.phase('finishing');
         const explored = run.finish(modelParticipation);
         const packed = modelParticipation?.select === 'used' ? formatExploreOutput(explored)
           : { snippets: explored.snippets, omitted: explored.omitted };
@@ -301,6 +317,7 @@ export function createRetrievalOwner({ sources, pipelines, preparePipeline, infe
         binding.assertAvailable?.();
         await sources.validate(query, signal);
         if (binding.model?.kind === 'snippets' && result.snippets.length) {
+          progress.phase('selecting');
           // Recheck the exact permit immediately before sending any source to a selected model.
           for (const path of new Set(result.snippets.map(item => item.path))) {
             await sources.checkPath(query, path, signal);
@@ -334,20 +351,27 @@ export function createRetrievalOwner({ sources, pipelines, preparePipeline, infe
         result.status = signal.aborted ? 'cancelled' : 'failed'; result.snippets = [];
         return result;
       } finally {
+        observing.abort();
         if (run.terminal() === 'active') run.cancel();
       }
     } finally { binding.release?.(); }
   };
-  return (query, signal) => {
-    if (!inferenceRequests) return execute(query, signal);
-    const invocation = query.invocation;
-    const origin = invocation.kind === 'model_step' ? { kind: 'model_step' as const, request_id: invocation.requestId }
-      : invocation.kind === 'policy_action' ? { kind: 'policy_action' as const, action_id: invocation.actionId, node_id: invocation.nodeId }
-        : { kind: 'nested_call' as const, parent_operation_id: invocation.parentOperationId };
-    return inferenceRequests.run({ operationId: toolOperationId(origin, invocation.toolCallId), executorOwner: query.inferenceOwner }, signal,
-      async call => {
-        await call.assertFresh();
-        return execute(query, call.signal, call);
-      });
+  return async (query, signal, emit) => {
+    const progress = createExploreProgress(emit);
+    progress.phase('starting');
+    const withInference = () => {
+      const invocation = query.invocation;
+      const origin = invocation.kind === 'model_step' ? { kind: 'model_step' as const, request_id: invocation.requestId }
+        : invocation.kind === 'policy_action' ? { kind: 'policy_action' as const, action_id: invocation.actionId, node_id: invocation.nodeId }
+          : { kind: 'nested_call' as const, parent_operation_id: invocation.parentOperationId };
+      return inferenceRequests!.run({ operationId: toolOperationId(origin, invocation.toolCallId), executorOwner: query.inferenceOwner }, signal,
+        async call => { await call.assertFresh(); return execute(query, call.signal, progress, call); });
+    };
+    try {
+      const result = inferenceRequests ? await withInference() : await execute(query, signal, progress);
+      progress.phase(result.status === 'ready' ? 'complete' : result.status === 'unsupported' ? 'unavailable'
+        : result.status === 'stale' ? 'partial' : result.status);
+      return result;
+    } catch (error) { progress.phase(signal.aborted ? 'cancelled' : 'failed'); throw error; }
   };
 }

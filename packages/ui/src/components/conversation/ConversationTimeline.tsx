@@ -19,15 +19,16 @@ import { getRuntimeEndpointGeneration } from '@varin/application-client';
 import { revealResourceInEditor } from '@/lib/agent-editor/navigation';
 import { useI18n } from '@/lib/i18n';
 import { toast } from '@/components/ui';
-import type { StreamingToolCall, StreamingTextPart } from '@/lib/agent-runtime/thread-projection';
+import type { StreamingToolCall, StreamingTextPart, ToolExecutionProgress } from '@/lib/agent-runtime/thread-projection';
 
-export function ConversationTimeline({ api, identity, snapshot, history, runUsage, historyReady, historyReset = 0, earlierHistory, navigation, progress, streamingTools = [], cwd, working, readOnly, onQuote, onFork, onRecover, memory, header, footer, liveUser, liveUserStatus }: {
+export function ConversationTimeline({ api, identity, snapshot, history, runUsage, historyReady, historyReset = 0, earlierHistory, navigation, progress, streamingTools = [], toolProgress = [], cwd, working, readOnly, onQuote, onFork, onRecover, memory, header, footer, liveUser, liveUserStatus }: {
   api: ThreadsAPI; identity: ThreadIdentity; snapshot?: ThreadSnapshot; history: readonly HistoryItem[];
   runUsage?: readonly import('@varin/application-client').ThreadRunUsage[];
   historyReady?: boolean; historyReset?: number; earlierHistory?: ChatTimelineProps['earlierHistory'];
   navigation?: ChatTimelineProps['navigation'];
   progress: StreamingTextPart[]; cwd: string; working: boolean; readOnly?: boolean; onQuote(text: string): void;
   streamingTools?: StreamingToolCall[];
+  toolProgress?: ToolExecutionProgress[];
   liveUser?: ChatUserMessage; liveUserStatus?: ChatSessionSubmissionStatus;
   onFork?(id: string): void; onRecover?(id: string): void; memory?: ThreadMemoryAPI;
   header?: React.ReactNode; footer?: React.ReactNode;
@@ -35,7 +36,7 @@ export function ConversationTimeline({ api, identity, snapshot, history, runUsag
   const { t } = useI18n();
   const key = threadComposerKey(threadHostKey(), identity);
   const projector = React.useMemo(() => new HistoryPresentation(key), [key]);
-  const view = React.useMemo(() => projector.project(history, snapshot, runUsage), [history, snapshot, runUsage, projector]);
+  const view = React.useMemo(() => projector.project(history, snapshot, runUsage, toolProgress), [history, snapshot, runUsage, toolProgress, projector]);
   const head = history.at(-1)?.id ?? null;
   const sourceEntry = React.useCallback((callId: string) => view.entries.find(entry => entry.type === 'message' && entry.message.role === 'assistant'
     && entry.message.content.some(part => part.type === 'toolCall' && part.id === callId))?.id, [view.entries]);

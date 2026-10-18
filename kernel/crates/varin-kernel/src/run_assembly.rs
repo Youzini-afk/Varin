@@ -360,6 +360,7 @@ impl RunAssembly {
                         .lock()
                         .map_err(|_| KernelError::Storage("catalog owner failed".into()))?
                         .nested_tools(),
+                    Some(run.branch_id.clone()),
                 );
             start.binding.tool_schema_generation =
                 saved_schema_generation.unwrap_or(start.binding.configuration_generation);

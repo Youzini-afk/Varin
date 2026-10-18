@@ -11,7 +11,7 @@ import type { MemoryToolOwner } from './memory-owner.js';
 import { ContextBridge, type ContextOwner, type PrivateContextResponse } from './context-bridge.js';
 import { ResourceBridge, type PrivateResourceResponse } from './resource-bridge.js';
 import type { ResourceOwner } from './resource-owner.js';
-import { RetrievalBridge, type PrivateRetrievalResponse } from './retrieval-bridge.js';
+import { RetrievalBridge, type PrivateRetrievalResponse, type PrivateRetrievalProgress } from './retrieval-bridge.js';
 import type { RetrievalOwner } from './retrieval-owner.js';
 import { LanguageBridge, type PrivateLanguageResponse } from './language-bridge.js';
 import type { LanguageToolOwner } from './language-owner.js';
@@ -1089,7 +1089,7 @@ export class KernelClient {
     if (terminate && this.child && !this.child.killed) this.child.kill();
   }
 
-  private async write(request: PrivateModelProtocolResponse | PrivateManagedSourceFrame | KernelRequest | PrivateCredentialResponse | PrivateToolFrame | PrivatePolicyResponse | PrivateMemoryResponse | PrivateContextResponse | PrivateResourceResponse | PrivateFileObservationResponse | PrivatePlanResponse | PrivateLanguageResponse | PrivateRetrievalResponse): Promise<void> {
+  private async write(request: PrivateModelProtocolResponse | PrivateManagedSourceFrame | KernelRequest | PrivateCredentialResponse | PrivateToolFrame | PrivatePolicyResponse | PrivateMemoryResponse | PrivateContextResponse | PrivateResourceResponse | PrivateFileObservationResponse | PrivatePlanResponse | PrivateLanguageResponse | PrivateRetrievalResponse | PrivateRetrievalProgress): Promise<void> {
     const transport = this.transport;
     if (!transport) throw new KernelClientError({ code: "kernel-disconnected", message: "Rust kernel transport is unavailable", retryable: true });
     const control = request.kind === "cancel" || request.kind === "credential-response" || request.kind === "host-tool-revoked" || request.kind === "file-observation-response"
