@@ -49,10 +49,7 @@ import {
     SETTINGS_OPTION_STACK_CLASS,
 } from '@/components/sections/shared/SettingsSection';
 import { SettingsInfoHint } from '@/components/sections/shared/SettingsInfoHint';
-import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
-import type { TerminalShellOption } from '@varin/application-client';
-import { isTerminalShell } from '@/lib/terminalShell';
-import { subscribeRuntimeEndpointChanged } from '@varin/application-client';
+import { TerminalShellSettings } from './TerminalShellSettings';
 import { Icon } from '@/components/icon/Icon';
 import { FileEditorPreferencesSettings } from './FileEditorPreferencesSettings';
 import { ThemePicker } from './ThemePicker';
@@ -194,7 +191,6 @@ export const VarinVisualSettings: React.FC<VarinVisualSettingsProps> = ({ visibl
     const { locale, locales, setLocale, label, t } = useI18n();
     const tUnsafe = React.useCallback((key: string) => t(key as Parameters<typeof t>[0]), [t]);
     const { isMobile } = useDeviceInfo();
-    const { terminal } = useRuntimeAPIs();
     const { browserTab } = usePwaDetection();
 
     const expandedEditorToolbar = useUIStore(state => state.expandedEditorToolbar);
@@ -205,10 +201,6 @@ export const VarinVisualSettings: React.FC<VarinVisualSettingsProps> = ({ visibl
     const setFontSize = useUIStore(state => state.setFontSize);
     const terminalFontSize = useUIStore(state => state.terminalFontSize);
     const setTerminalFontSize = useUIStore(state => state.setTerminalFontSize);
-    const terminalShell = useUIStore(state => state.terminalShell);
-    const setTerminalShell = useUIStore(state => state.setTerminalShell);
-    const terminalLoginShells = useUIStore(state => state.terminalLoginShells);
-    const setTerminalLoginShells = useUIStore(state => state.setTerminalLoginShells);
     const editorFontSize = useUIStore(state => state.editorFontSize);
     const setEditorFontSize = useUIStore(state => state.setEditorFontSize);
     const uiFont = useUIStore(state => state.uiFont);
@@ -334,40 +326,6 @@ export const VarinVisualSettings: React.FC<VarinVisualSettingsProps> = ({ visibl
     const showPwaOrientationSetting = shouldShow('pwaOrientation') && isWebRuntime() && !isDesktopShell();
     const showMobileKeyboardModeSetting = shouldShow('mobileKeyboardMode') && isWebRuntime() && !isDesktopShell() && supportsMobileKeyboardResizeContent();
     const showTerminalShellSetting = shouldShow('terminalShell') || shouldShow('terminalLoginShell');
-    const [availableTerminalShells, setAvailableTerminalShells] = React.useState<TerminalShellOption[]>([]);
-    const [terminalShellRuntimeEpoch, setTerminalShellRuntimeEpoch] = React.useState(0);
-    React.useEffect(() => subscribeRuntimeEndpointChanged(() => {
-        setAvailableTerminalShells([]);
-        setTerminalShellRuntimeEpoch((epoch) => epoch + 1);
-    }), []);
-    React.useEffect(() => {
-        let cancelled = false;
-        if (!showTerminalShellSetting || !terminal.listShells) return;
-        void terminal.listShells()
-            .then((shells) => {
-                if (!cancelled) setAvailableTerminalShells(shells);
-            })
-            .catch(() => {
-                if (!cancelled) setAvailableTerminalShells([]);
-            });
-        return () => {
-            cancelled = true;
-        };
-    }, [showTerminalShellSetting, terminal, terminalShellRuntimeEpoch]);
-    const terminalShellOptions = React.useMemo(() => {
-        const explicitShells = availableTerminalShells.filter((shell) => shell.id !== 'auto');
-        if (terminalShell === 'auto' || explicitShells.some((shell) => shell.id === terminalShell)) {
-            return explicitShells;
-        }
-        return [{ id: terminalShell, name: terminalShell, supportsLogin: false }, ...explicitShells];
-    }, [availableTerminalShells, terminalShell]);
-    const terminalShellSupportsLogin = availableTerminalShells.find((shell) => shell.id === terminalShell)?.supportsLogin === true;
-    const terminalLoginShellEnabled = terminalLoginShells.includes(terminalShell);
-    const setTerminalLoginShellEnabled = (enabled: boolean) => {
-        setTerminalLoginShells(enabled
-            ? [...terminalLoginShells.filter((shell) => shell !== terminalShell), terminalShell]
-            : terminalLoginShells.filter((shell) => shell !== terminalShell));
-    };
     const [mobileLayoutPreference, setMobileLayoutPreference] = React.useState<MobileLayoutPreference>(() => getStoredMobileLayoutPreference());
     const [pwaInstallName, setPwaInstallName] = React.useState('');
     const [pwaOrientation, setPwaOrientation] = React.useState<'system' | 'portrait' | 'landscape'>('system');
@@ -1139,35 +1097,7 @@ export const VarinVisualSettings: React.FC<VarinVisualSettingsProps> = ({ visibl
                                     info={t('settings.varin.visual.field.terminalQuickKeysTooltip')}
                                 />
                             )}
-                            {showTerminalShellSetting && (
-                                <SettingsFieldRow
-                                    label={t('settings.varin.visual.field.terminalShell')}
-                                    info={t('settings.varin.visual.field.terminalShellHint')}
-                                    settingsItem="appearance.terminal-shell"
-                                    className="pt-2"
-                                >
-                                    <Select value={terminalShell} onValueChange={(value) => { if (isTerminalShell(value)) setTerminalShell(value); }}>
-                                        <SelectTrigger aria-label={t('settings.varin.visual.field.terminalShellAria')} size={SETTINGS_SELECT_SIZE} className={SETTINGS_SELECT_TRIGGER_CLASS}>
-                                            <SelectValue />
-                                        </SelectTrigger>
-                                        <SelectContent>
-                                            <SelectItem value="auto">{t('settings.varin.visual.option.terminalShell.auto')}</SelectItem>
-                                            {terminalShellOptions.map((shell) => (
-                                                <SelectItem key={shell.id} value={shell.id}>{shell.name}</SelectItem>
-                                            ))}
-                                        </SelectContent>
-                                    </Select>
-                                </SettingsFieldRow>
-                            )}
-                            {showTerminalShellSetting && terminalShellSupportsLogin && (
-                                <SettingsCheckboxRow
-                                    checked={terminalLoginShellEnabled}
-                                    onChange={setTerminalLoginShellEnabled}
-                                    label={t('settings.varin.visual.field.terminalLoginShell')}
-                                    ariaLabel={t('settings.varin.visual.field.terminalLoginShell')}
-                                    settingsItem="appearance.terminal-login-shell"
-                                />
-                            )}
+                            {showTerminalShellSetting && <TerminalShellSettings />}
                         </div>
                     </SettingsSection>
                 )}

@@ -24,13 +24,21 @@ HTTP remains the authenticated command plane for create, resize, appearance upda
 - Concurrent creates for one ID are single-flight only when the complete creation identity matches: owner, HTTP/programmatic source, working directory, shell/spawn, login, writer registration, and retain behavior. An exited ID cannot be reused until it is explicitly closed.
 - Dimensions are bounded to 1-1000 columns and 1-500 rows; input is capped at 64 KiB.
 - PTY children explicitly clear `NODE_CHANNEL_FD`; daemon IPC descriptors are host-private and invalid after PTY descriptor cleanup.
-- `GET /api/terminal/shells` reports shell IDs available on the active server using the same augmented PATH provided to spawned PTYs, plus whether each executable has a supported login-mode argument. `auto` preserves environment/platform fallback order; an explicit unavailable shell fails creation instead of silently running a different shell. Login mode is opt-in and uses only built-in arguments for known shells. Preference changes affect new sessions and explicit restarts, not running PTYs.
+- `GET /api/terminal/shells` reports shell IDs and executable paths on the active Host, including Auto's resolved program and login-mode support. Settings show that result, its path, refresh and visible discovery errors. Discovery uses the PTY's augmented PATH. Windows also checks standard PowerShell installation directories and resolves App Execution Aliases to their installed executable without launching probes. Explicit `VARIN_TERMINAL_SHELL` / `SHELL` selections take precedence; Windows then prefers `pwsh`, Windows PowerShell and finally CMD. macOS/Linux retain the user's shell and platform fallback order. An explicit unavailable shell fails creation instead of silently running a different shell. Login mode is opt-in and uses only built-in arguments for known shells. Preference changes affect new sessions and explicit restarts, not running PTYs.
 - PTY data and exit callbacks enter one FIFO queue. Stale callbacks from replaced processes are ignored.
 - Scrollback is retained on the server and capped at 512 KiB with UTF-8-safe trimming. Device-status, device-attribute, cursor-position reply, color-query, and OSC 133/633 shell-integration exchanges are removed from replay history with incomplete control sequences carried across PTY chunks; live output remains byte-for-byte unchanged.
 - User sessions inject a Varin-owned OSC 633 script for bash, PowerShell, and zsh. Command text, cwd, and exit codes come only from those sequences. A finished sequence without command text is dropped; PTY process exit is never turned into a command. Harness `spawn` sessions are not injected and their output is not parsed. `inspectSession.integration` is `ready` after the first observed sequence, otherwise `not-observed`. `subscribeCommands` is the Host observation API. PowerShell compares `LASTEXITCODE` with the command-start value; an unchanged nonzero value cannot be attributed to the new command and falls back to exit 1. zsh sources user startup files with the original `ZDOTDIR` semantics, then restores the Varin injection directory; zsh is not claimed as live-tested here.
 - Exited sessions remain attachable until explicit close or idle cleanup.
 - Restarts are serialized per terminal. Each restart spawns and wires the replacement before terminating the old process, retaining the terminal ID.
 - Close uses SIGTERM with bounded SIGKILL escalation. Harness kill/close and explicit force-kill wait for a real PTY exit and process-writer release before evicting the session; failure leaves the same identity observable and retryable. Idle cleanup and shutdown request native tree termination; unconfirmed exits retain the same process/session and report failure. Attached terminals are not considered idle.
+
+## Encoding
+
+User shells and external programs retain their encoding settings. Terminal transport and Varin-owned
+protocols use UTF-8; this does not change file encodings, console code pages, PowerShell encoding
+preferences or Python encoding variables for general terminals. The private Windows environment
+probe explicitly encodes its own response as UTF-8, matching the Host decoder, independently of the
+shell/version used to run that probe.
 
 ## Security And Relay
 

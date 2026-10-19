@@ -1,3 +1,5 @@
+import nodePath from 'node:path';
+
 const TERMINAL_SHELL_IDS = ['bash', 'zsh', 'sh', 'fish', 'pwsh', 'powershell', 'cmd', 'dash', 'ksh', 'nu'] as const;
 export type TerminalShellId = typeof TERMINAL_SHELL_IDS[number];
 export type TerminalShellPreference = 'auto' | TerminalShellId;
@@ -17,7 +19,7 @@ const shellIdFromPath = (value: unknown): TerminalShellId | null => {
   return TERMINAL_SHELL_ID_SET.has(id) ? id as TerminalShellId : null;
 };
 
-const SHELL_LABELS: Partial<Record<TerminalShellId, string>> = { pwsh: 'PowerShell', powershell: 'Windows PowerShell', cmd: 'Command Prompt' };
+const SHELL_LABELS: Partial<Record<TerminalShellId, string>> = { pwsh: 'PowerShell (pwsh)', powershell: 'Windows PowerShell', cmd: 'Command Prompt' };
 const shellLabel = (id: TerminalShellId): string => SHELL_LABELS[id] ?? id;
 
 export const getTerminalShellLoginArgs = (executable: unknown, platform: NodeJS.Platform = process.platform): string[] | null => {
@@ -31,7 +33,11 @@ export const getTerminalShellLoginArgs = (executable: unknown, platform: NodeJS.
 export interface TerminalShellResolverDependencies {
   buildAugmentedPath?: (() => string) | undefined;
   env?: NodeJS.ProcessEnv | undefined;
-  fs: { promises: { readFile(path: string, encoding: 'utf8'): Promise<string> } };
+  fs: { promises: {
+    readFile(path: string, encoding: 'utf8'): Promise<string>;
+    readlink?(path: string): Promise<string>;
+    readdir?(path: string): Promise<string[]>;
+  } };
   isExecutable(path: string): boolean;
   path: { join(...parts: string[]): string };
   platform?: NodeJS.Platform | undefined;
@@ -46,38 +52,82 @@ export interface TerminalShellDescriptor {
 }
 
 export const createTerminalShellResolver = ({ fs, path, searchPathFor, isExecutable, buildAugmentedPath = () => env.PATH || '', platform = process.platform, env = process.env }: TerminalShellResolverDependencies) => {
-  const resolveExecutable = (candidate: unknown): string | null => {
-    if (!candidate) return null;
-    const value = String(candidate);
-    const found = value.includes('/') || value.includes('\\') ? value : searchPathFor(value, buildAugmentedPath());
-    if (found && isExecutable(found)) return found;
-    return isExecutable(value) ? value : null;
-  };
-
-  const defaultCandidates = (): Array<string | undefined> => platform === 'win32'
-    ? [
-        env.VARIN_TERMINAL_SHELL,
-        env.SHELL,
-        env.ComSpec,
-        path.join(env.SystemRoot || 'C:\\Windows', 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe'),
-        'pwsh.exe',
-        'powershell.exe',
-        'cmd.exe',
-      ]
-    : [env.VARIN_TERMINAL_SHELL, env.SHELL, '/bin/zsh', '/bin/bash', '/bin/sh', 'zsh', 'bash', 'sh'];
-
-  const resolveCandidates = (candidates: unknown[]): string[] => {
-    const seen = new Set<string>();
-    return candidates
-      .map(resolveExecutable)
-      .filter((candidate): candidate is string => {
-        if (!candidate || seen.has(candidate)) return false;
-        seen.add(candidate);
+  // One shallow inventory per request. No shell is started to discover installed programs.
+  const prepare = async () => {
+    const searchPath = buildAugmentedPath();
+    const reads = new Map<string, Promise<string | null>>();
+    const executableAt = (candidate: string): Promise<string | null> => {
+      const key = platform === 'win32' ? candidate.toLowerCase() : candidate;
+      let read = reads.get(key);
+      if (!read) {
+        read = (async () => {
+          if (isExecutable(candidate)) return candidate;
+          if (platform === 'win32' && fs.promises.readlink) {
+            try {
+              // App Execution Aliases can fail stat with EACCES while readlink exposes
+              // the installed executable. Pass that real path to the native PTY owner.
+              const target = nodePath.win32.resolve(nodePath.win32.dirname(candidate), await fs.promises.readlink(candidate));
+              if (isExecutable(target)) return target;
+            } catch { /* Absent or broken candidate. */ }
+          }
+          return null;
+        })();
+        reads.set(key, read);
+      }
+      return read;
+    };
+    const resolveExecutable = async (candidate: unknown): Promise<string | null> => {
+      if (!candidate) return null;
+      const value = String(candidate);
+      if (value.includes('/') || value.includes('\\')) return executableAt(value);
+      if (platform === 'win32' && shellIdFromPath(value)) {
+        const filename = value.toLowerCase().endsWith('.exe') ? value : `${value}.exe`;
+        for (const directory of searchPath.split(';').filter(Boolean)) {
+          const found = await executableAt(path.join(directory.replace(/^"(.*)"$/, '$1'), filename));
+          if (found) return found;
+        }
+      }
+      const found = searchPathFor(value, searchPath);
+      if (found) return executableAt(found);
+      return executableAt(value);
+    };
+    const resolveCandidates = async (candidates: unknown[]): Promise<string[]> => {
+      const resolved = await Promise.all(candidates.map(resolveExecutable));
+      const seen = new Set<string>();
+      return resolved.filter((candidate): candidate is string => {
+        if (!candidate) return false;
+        const key = platform === 'win32' ? candidate.toLowerCase() : candidate;
+        if (seen.has(key)) return false;
+        seen.add(key);
         return true;
       });
+    };
+    const installed: string[] = [];
+    if (platform === 'win32') {
+      const roots = [...new Set([
+        env.ProgramW6432, env.ProgramFiles || 'C:\\Program Files', env['ProgramFiles(x86)'],
+        ...(env.LOCALAPPDATA ? [path.join(env.LOCALAPPDATA, 'Programs')] : []),
+      ].filter((root): root is string => Boolean(root)))];
+      for (const root of roots) {
+        const directory = path.join(root, 'PowerShell');
+        installed.push(path.join(directory, 'pwsh.exe'));
+        try {
+          const versions = await fs.promises.readdir?.(directory) ?? [];
+          versions.sort((a, b) => Number(/preview/i.test(a)) - Number(/preview/i.test(b)) || b.localeCompare(a, 'en', { numeric: true }));
+          installed.push(...versions.map(version => path.join(directory, version, 'pwsh.exe')));
+        } catch { /* This installation location is absent or not readable. */ }
+      }
+      if (env.LOCALAPPDATA) installed.push(path.join(env.LOCALAPPDATA, 'Microsoft', 'WindowsApps', 'pwsh.exe'));
+    }
+    const defaults = platform === 'win32'
+      ? [env.VARIN_TERMINAL_SHELL, env.SHELL, 'pwsh.exe', ...installed, 'powershell.exe',
+        path.join(env.SystemRoot || 'C:\\Windows', 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe'), env.ComSpec, 'cmd.exe']
+      : [env.VARIN_TERMINAL_SHELL, env.SHELL, '/bin/zsh', '/bin/bash', '/bin/sh', 'zsh', 'bash', 'sh'];
+    return { defaults, resolveCandidates };
   };
 
   const list = async (): Promise<TerminalShellDescriptor[]> => {
+    const { defaults, resolveCandidates } = await prepare();
     let configuredShells: string[] = [];
     if (platform !== 'win32') {
       try {
@@ -92,9 +142,9 @@ export const createTerminalShellResolver = ({ fs, path, searchPathFor, isExecuta
     }
 
     const candidates = platform === 'win32'
-      ? [...defaultCandidates(), ...TERMINAL_SHELL_IDS]
+      ? [...defaults, ...TERMINAL_SHELL_IDS]
       : [env.VARIN_TERMINAL_SHELL, env.SHELL, ...configuredShells, ...TERMINAL_SHELL_IDS, '/bin/zsh', '/bin/bash', '/bin/sh'];
-    const autoExecutable = resolveCandidates(defaultCandidates())[0] ?? null;
+    const autoExecutable = (await resolveCandidates(defaults))[0] ?? null;
     const byId = new Map<TerminalShellPreference, TerminalShellDescriptor>([
       ['auto', {
         id: 'auto',
@@ -103,7 +153,7 @@ export const createTerminalShellResolver = ({ fs, path, searchPathFor, isExecuta
         supportsLogin: Boolean(autoExecutable && getTerminalShellLoginArgs(autoExecutable, platform)),
       }],
     ]);
-    for (const executable of resolveCandidates(candidates)) {
+    for (const executable of await resolveCandidates(candidates)) {
       const id = shellIdFromPath(executable);
       if (id && !byId.has(id)) {
         byId.set(id, { id, name: shellLabel(id), executable, supportsLogin: Boolean(getTerminalShellLoginArgs(executable, platform)) });
@@ -115,7 +165,10 @@ export const createTerminalShellResolver = ({ fs, path, searchPathFor, isExecuta
   const resolve = async (preference: unknown): Promise<{ id: TerminalShellPreference; executables: string[] }> => {
     const normalized = normalizeTerminalShell(preference ?? 'auto');
     if (!normalized) throw new Error('Invalid terminal shell');
-    if (normalized === 'auto') return { id: 'auto', executables: resolveCandidates(defaultCandidates()) };
+    if (normalized === 'auto') {
+      const { defaults, resolveCandidates } = await prepare();
+      return { id: 'auto', executables: await resolveCandidates(defaults) };
+    }
     const selected = (await list()).find((shell) => shell.id === normalized);
     if (!selected) throw new Error(`Terminal shell "${normalized}" is not available`);
     return { id: selected.id, executables: selected.executable ? [selected.executable] : [] };

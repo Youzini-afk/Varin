@@ -78,6 +78,8 @@ export const createPlatformEnvironmentRuntime = (options: {
 
   const getWindowsShellEnvironment = (): Environment | null => {
     const script = [
+      // This private probe returns a UTF-8 protocol. It does not configure user terminals.
+      '[Console]::OutputEncoding = New-Object System.Text.UTF8Encoding $false',
       '$entries = [ordered]@{}',
       'Get-ChildItem Env: | ForEach-Object { $entries[$_.Name] = $_.Value }',
       "$paths = @([Environment]::GetEnvironmentVariable('Path', 'Machine'), [Environment]::GetEnvironmentVariable('Path', 'User'), [Environment]::GetEnvironmentVariable('Path', 'Process')) | Where-Object { $_ }",

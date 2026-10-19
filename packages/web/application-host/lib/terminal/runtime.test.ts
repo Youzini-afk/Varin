@@ -348,10 +348,10 @@ describe('terminal runtime', () => {
       const listed = createResponse();
       await requiredRoute(harness.routes.get, '/api/terminal/shells')({}, listed);
       expect(listed.body).toEqual(expect.arrayContaining([
-        { id: 'auto', name: 'Auto', supportsLogin: process.platform !== 'win32' },
-        { id: 'zsh', name: 'zsh', supportsLogin: true },
-        { id: 'bash', name: 'bash', supportsLogin: true },
-        { id: 'sh', name: 'sh', supportsLogin: false },
+        { id: 'auto', name: 'Auto', executable: process.platform === 'win32' ? null : '/bin/zsh', supportsLogin: process.platform !== 'win32' },
+        { id: 'zsh', name: 'zsh', executable: '/bin/zsh', supportsLogin: true },
+        { id: 'bash', name: 'bash', executable: '/bin/bash', supportsLogin: true },
+        { id: 'sh', name: 'sh', executable: '/bin/sh', supportsLogin: false },
       ]));
 
       const created = createResponse();

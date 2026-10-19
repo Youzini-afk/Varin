@@ -992,7 +992,7 @@ export function createTerminalRuntime({
   app.get('/api/terminal/shells', async (_req: Request, res: Response) => {
     try {
       const shells = await shellResolver.list();
-      res.json(shells.map(({ id, name, supportsLogin }) => ({ id, name, supportsLogin })));
+      res.json(shells);
     } catch (error) {
       res.status(500).json({ error: errorMessage(error, 'Failed to list terminal shells') });
     }

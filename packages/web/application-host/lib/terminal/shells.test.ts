@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import pathModule from 'node:path';
 
 import { createTerminalShellResolver, getTerminalShellLoginArgs } from './shells.js';
 
@@ -7,11 +8,15 @@ const createResolver = ({
   env = {},
   augmentedPath = '/augmented/bin',
   executables = [],
+  links = {},
+  directories = {},
 }: {
   augmentedPath?: string | undefined;
   env?: NodeJS.ProcessEnv | undefined;
   executables?: string[] | undefined;
   platform?: NodeJS.Platform | undefined;
+  links?: Record<string, string>;
+  directories?: Record<string, string[]>;
 } = {}) => {
   const available = new Set<string>(executables);
   const path = {
@@ -21,7 +26,11 @@ const createResolver = ({
   return {
     searches,
     resolver: createTerminalShellResolver({
-      fs: { promises: { readFile: async () => '' } },
+      fs: { promises: {
+        readFile: async () => '',
+        readlink: async candidate => { if (links[candidate]) return links[candidate]; throw new Error('not a link'); },
+        readdir: async directory => directories[directory] ?? [],
+      } },
       path,
       platform,
       env,
@@ -35,7 +44,8 @@ const createResolver = ({
         }
         return null;
       },
-      isExecutable: (candidate) => available.has(candidate),
+      isExecutable: (candidate) => platform === 'win32'
+        ? [...available].some(value => value.toLowerCase() === candidate.toLowerCase()) : available.has(candidate),
     }),
   };
 };
@@ -68,6 +78,31 @@ describe('terminal shell resolver', () => {
     });
 
     await expect(resolver.resolve('auto')).resolves.toEqual({ id: 'auto', executables: ['/custom/zsh', '/bin/bash'] });
+  });
+
+  it('resolves a Store execution alias whose file check fails, preserving PATH priority and reporting its real program', async () => {
+    const alias = 'C:\\User\\WindowsApps\\pwsh.exe';
+    const target = 'C:\\Program Files\\WindowsApps\\Microsoft.PowerShell_7\\pwsh.exe';
+    const later = 'C:\\Tools\\pwsh.exe';
+    const { resolver } = createResolver({ platform: 'win32', augmentedPath: 'C:\\User\\WindowsApps;C:\\Tools',
+      env: { ComSpec: 'C:\\Windows\\System32\\cmd.exe' },
+      executables: [target, later, 'C:\\Windows\\System32\\cmd.exe'], links: { [alias]: target },
+    });
+    expect((await resolver.resolve('auto')).executables[0]).toBe(target);
+    expect(await resolver.list()).toContainEqual({ id: 'pwsh', name: 'PowerShell (pwsh)', executable: target, supportsLogin: false });
+    expect((await resolver.resolve('pwsh')).executables).toEqual([target]);
+  });
+
+  it('finds stable standard installs outside PATH before previews and CMD, while explicit environment selection wins', async () => {
+    const root = 'C:\\Program Files\\PowerShell';
+    const stable = pathModule.win32.join(root, '7', 'pwsh.exe');
+    const preview = pathModule.win32.join(root, '7-preview', 'pwsh.exe');
+    const cmd = 'C:\\Windows\\System32\\cmd.exe';
+    const options = { platform: 'win32' as const, env: { ProgramFiles: 'C:\\Program Files', ComSpec: cmd },
+      executables: [stable, preview, cmd], directories: { [root]: ['7-preview', '7'] },
+    };
+    expect((await createResolver(options).resolver.resolve('auto')).executables).toEqual([stable, preview, cmd]);
+    expect((await createResolver({ ...options, env: { ...options.env, VARIN_TERMINAL_SHELL: cmd } }).resolver.resolve('auto')).executables[0]).toBe(cmd);
   });
 
   it('uses only known platform-safe login arguments', () => {

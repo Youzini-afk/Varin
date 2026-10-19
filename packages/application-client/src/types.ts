@@ -66,6 +66,8 @@ export type TerminalShell = 'auto' | 'bash' | 'zsh' | 'sh' | 'fish' | 'pwsh' | '
 export interface TerminalShellOption {
   id: TerminalShell;
   name: string;
+  /** Program on the active Host, including Auto's currently resolved selection. */
+  executable: string | null;
   supportsLogin: boolean;
 }
 

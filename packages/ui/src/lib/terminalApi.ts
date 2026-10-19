@@ -363,12 +363,13 @@ export async function createTerminalSession(options: CreateTerminalOptions): Pro
   return response.json() as Promise<TerminalSession>;
 }
 export async function listTerminalShells(): Promise<TerminalShellOption[]> {
-  const response = await runtimeFetch('/api/terminal/shells');
+  const response = await runtimeFetch('/api/terminal/shells', { cache: 'no-store' });
   if (!response.ok) throw await responseError(response, 'Failed to list terminal shells');
   const payload = await response.json().catch(() => []);
   return Array.isArray(payload)
     ? payload.filter((entry): entry is TerminalShellOption => (
-        entry && typeof entry === 'object' && isTerminalShell(entry.id) && typeof entry.name === 'string' && typeof entry.supportsLogin === 'boolean'
+        entry && typeof entry === 'object' && isTerminalShell(entry.id) && typeof entry.name === 'string'
+        && (entry.executable === null || typeof entry.executable === 'string') && typeof entry.supportsLogin === 'boolean'
       ))
     : [];
 }

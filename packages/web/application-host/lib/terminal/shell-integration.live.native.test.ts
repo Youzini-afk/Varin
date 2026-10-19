@@ -1,8 +1,11 @@
-import { existsSync } from "node:fs";
+import { existsSync, readlinkSync } from "node:fs";
+import path from 'node:path';
 import { tmpdir } from "node:os";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { createIsolatedTerminalSessionApi } from "./isolated-session-api.test-helper.js";
 import type { TerminalCommandRecord } from "./session-api.js";
+import { createPlatformEnvironmentRuntime } from '../platform/environment-runtime.js';
+import { hasNativeProcessKernel } from '../process/native-process.test-helper.js';
 
 const gitBashCandidates = [
   process.env.VARIN_TERMINAL_SHELL,
@@ -27,8 +30,35 @@ const resolveLiveShell = (): { family: "bash" | "powershell"; path: string; shel
 };
 
 const liveShell = resolveLiveShell();
+const storeAlias = path.join(process.env.LOCALAPPDATA ?? '', 'Microsoft', 'WindowsApps', 'pwsh.exe');
+let storePowerShell: string | undefined;
+try { storePowerShell = process.platform === 'win32' ? readlinkSync(storeAlias) : undefined; } catch { /* Store PowerShell is optional. */ }
 
 describe("live shell integration", () => {
+  it.skipIf(!storePowerShell || !hasNativeProcessKernel)('discovers Store PowerShell and runs a Unicode command through the native user terminal', async () => {
+    const previous = process.env.VARIN_TERMINAL_SHELL;
+    process.env.VARIN_TERMINAL_SHELL = storeAlias;
+    const platform = createPlatformEnvironmentRuntime();
+    const runtime = createIsolatedTerminalSessionApi({ isExecutable: platform.isExecutable,
+      searchPathFor: platform.searchPathFor, buildAugmentedPath: () => path.dirname(storeAlias) });
+    const commands: TerminalCommandRecord[] = [];
+    const observation = runtime.subscribeCommands(command => commands.push(command));
+    try {
+      const handle = await runtime.createTerminalSession({ sessionId: 'store-pwsh', cwd: tmpdir(), owner: 'user', shell: 'pwsh' });
+      let output = '';
+      const data = handle.onData(text => { output += text; });
+      await vi.waitFor(() => expect(runtime.inspectSession(handle.id)?.integration).toBe('ready'), { timeout: 15_000 });
+      await handle.write("Write-Output '中文🙂'\r");
+      await vi.waitFor(() => expect(commands.some(command => command.command.includes('中文🙂') && command.exitCode === 0)).toBe(true), { timeout: 15_000 });
+      expect(output).toContain('中文🙂');
+      data.dispose();
+      await handle.destroy();
+    } finally {
+      observation.dispose();
+      try { await runtime.shutdown(); }
+      finally { if (previous === undefined) delete process.env.VARIN_TERMINAL_SHELL; else process.env.VARIN_TERMINAL_SHELL = previous; }
+    }
+  }, 35_000);
   it.skipIf(!liveShell)("observes a real user-terminal command on Windows Git Bash or PowerShell", async () => {
     const shell = liveShell!;
     const runtime = createIsolatedTerminalSessionApi({
