@@ -36,6 +36,8 @@ export type SemanticInferenceAdmissionResult =
 export type SemanticInferenceSettlement = {
   receipt: SemanticInferenceReceipt;
   result?: HarnessEmbedResult;
+  /** The local request has finished. Its provider usage may still be unknown. */
+  transportStopped?: true;
   /** The transport was never created, or its complete pre-dispatch chain has
    * settled with cancellation latched. No late dispatch remains possible. */
   noDispatchFinalized?: true;

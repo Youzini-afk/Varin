@@ -190,20 +190,21 @@ bytes remain at the source owner; model credentials, requests and usage remain w
   Index-build keys include workspace/recipe, input hashes and vector binding so a new model can build
   a distinct index. Native query requests use the original Catalog and never also write this ledger.
   Obsolete internal query records are rejected, not imported, silently erased or used as a fallback.
-  An indexed unresolved-state scan also fences overlapping index inputs under the same workspace,
-  recipe and vector binding, independent of batch grouping/order after restart. Settlement removes
-  terminal operations from that scan; no second claim authority or background cleanup is introduced.
+  Live admissions track overlapping inputs under the same workspace, recipe and vector binding,
+  independent of batch grouping/order. A locally active request keeps its admission until its transport
+  finishes; a cancelled waiter alone does not release it. This set is process-local and avoids scanning
+  historical receipts for every new batch.
   Transport batch IDs and credential epochs are excluded from deduplication. Completed-result reuse
   additionally requires the original credential-scope fingerprint and the inference caller's current
-  authorization; a different account cannot inherit that result. Recovered unresolved dispatches remain unknown and
-  are never automatically resent. Successful settled vectors can be reused after interruption before
-  publication. Known zero-attempt cache hits remain distinguishable from paid dispatches, and
-  unknown attempts remain explicitly unknown. Known settled failures/no-send outcomes are terminal,
-  not indeterminate. Only an index build with unchanged intent, zero known attempts and finalized
-  proof that its transport can never dispatch may be admitted again. That full-sync transaction
-  archives the old no-send fact as `semantic-inference-attempt` and creates a new admission number
-  and token under the same operation key. History lists both admissions. A pending pre-dispatch
-  chain remains unknown until finalized; any started/unknown request never acquires this retry path.
+  authorization; a different account cannot inherit that result. Successful settled vectors can be
+  reused after interruption before publication. Failed or interrupted index computations can start
+  a new recorded attempt on a later check once their local transport has stopped, including after
+  process recovery. The previous attempt is archived as `semantic-inference-attempt`; its usage and
+  uncertain provider outcome stay unchanged. Repeating derived-vector computation does not require
+  deleting the index or fabricating a successful previous response. A pending pre-dispatch chain
+  retains its live admission until it finishes, so cancellation cannot create concurrent duplicate work.
+  HTTP failures, invalid vector responses and classified network failures retain distinct diagnostic
+  codes and sanitized details instead of being replaced by a generic indeterminate-dispatch error.
   Facts are retained across restarts without automatic
   pruning; future deletion/retention must preserve unresolved-outcome fences. Read-only workspace-scope
   history projections omit vector payloads and dispatch tokens.

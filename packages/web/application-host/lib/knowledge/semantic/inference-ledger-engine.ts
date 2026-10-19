@@ -107,6 +107,9 @@ export function createSemanticInferenceLedgerEngine(options: SemanticInferenceLe
   let tail: Promise<unknown> = Promise.resolve();
   let closing: Promise<void> | null = null;
   let closed = false;
+  // Only requests owned by this live process can hold up another index pass.
+  // Recovered receipts retain their cost facts without blocking recomputation.
+  const active = new Map<string, Entry>();
   const enqueue = <T>(operation: () => T): Promise<T> => {
     if (closed || closing) return Promise.reject(new Error("Semantic inference ledger is closed"));
     const work = () => { persistence.recover(); return operation(); };
@@ -132,8 +135,7 @@ export function createSemanticInferenceLedgerEngine(options: SemanticInferenceLe
     const entry: Entry = { type: value.type, key: value.key, token: text(value.token), identity, receipt,
       state: value.state, hasResult: Boolean(value.result), admissionNumber: integer(value.admissionNumber, 1),
       noDispatchFinalized: value.noDispatchFinalized, createdAt: value.createdAt, updatedAt: value.updatedAt };
-    if ((entry.noDispatchFinalized && !retryableNoSend(entry))
-      || (entry.type === "semantic-inference-attempt" && (identity.operation.kind !== "index-build" || !retryableNoSend(entry)))) return invalid();
+    if (entry.noDispatchFinalized && !retryableNoSend(entry)) return invalid();
     if (value.result) {
       if (receipt.state !== "succeeded" || !receipt.attemptsKnown) return invalid();
       entry.result = resultOf(value.result, entry);
@@ -158,9 +160,8 @@ export function createSemanticInferenceLedgerEngine(options: SemanticInferenceLe
           || receipt.state !== "indeterminate" || receipt.attempts !== 0 || receipt.attemptsKnown) return invalid();
         const previous = lookup({ key });
         if (previous) {
-          // Intent is immutable under one originating invocation, including
-          // unknown outcomes. A changed credential scope alone is not a new
-          // semantic intent; the inference caller must reauthorize it.
+          // Completed vectors remain tied to their original credential scope.
+          // Failed or interrupted computations can start a new recorded attempt.
           if (intentKey(previous.entry.identity) !== intentKey(identity)
             || previous.entry.receipt.inputBytes !== receipt.inputBytes) {
             throw new Error("Semantic inference operation intent changed");
@@ -168,17 +169,14 @@ export function createSemanticInferenceLedgerEngine(options: SemanticInferenceLe
           if (previous.entry.result && previous.entry.identity.credentialScopeHash !== identity.credentialScopeHash) {
             throw new Error("Semantic inference completed credential scope changed");
           }
-          if (identity.operation.kind !== "index-build" || !retryableNoSend(previous.entry)) return outcome(previous.entry);
+          if (previous.entry.result || active.has(previous.entry.token)) return outcome(previous.entry);
         }
         if (identity.operation.kind === "index-build") {
           const hashes = new Set(identity.inputHashes);
           const binding = vectorBindingKey(identity);
-          // A restarted inventory can regroup model batches. Unresolved input
-          // work remains fenced independently of the batch shape/order, rather
-          // than allowing [A, B] to be replayed as [A] or [B, C]. Only unresolved
-          // rows are scanned; settlement maintains this property index.
-          for (const id of db.indexedLookup({ type: "semantic-inference", state: "unknown" }, Math.max(1, db.nodeCount()))) {
-            const prior = decode(db.getPayload(id));
+          // Concurrent scans may regroup the same inputs. Join the existing
+          // admission boundary while its request is still locally active.
+          for (const prior of active.values()) {
             const origin = prior.identity.operation;
             if (origin.kind !== "index-build" || origin.hostId !== identity.operation.hostId
               || origin.workspaceId !== identity.operation.workspaceId || origin.recipeId !== identity.operation.recipeId
@@ -199,6 +197,7 @@ export function createSemanticInferenceLedgerEngine(options: SemanticInferenceLe
           { type: "insert", vector: [0], payload: entry },
         ]);
         persistence.commit();
+        active.set(token, entry);
         return { status: "admitted", token };
       });
     },
@@ -212,6 +211,7 @@ export function createSemanticInferenceLedgerEngine(options: SemanticInferenceLe
           || (receipt.attemptsKnown && receipt.attempts === 0
             && (receipt.httpStatus !== undefined || receipt.usage.status !== "unknown"))
           || (settlement.noDispatchFinalized !== undefined && settlement.noDispatchFinalized !== true)
+          || (settlement.transportStopped !== undefined && settlement.transportStopped !== true)
           || (settlement.noDispatchFinalized && (receipt.state !== "not-started" || !receipt.attemptsKnown || receipt.attempts !== 0))
           || (settlement.result && receipt.state !== "succeeded")) return invalid();
         const result = settlement.result ? resultOf(settlement.result, current.entry) : undefined;
@@ -221,11 +221,14 @@ export function createSemanticInferenceLedgerEngine(options: SemanticInferenceLe
             || current.entry.noDispatchFinalized !== Boolean(settlement.noDispatchFinalized)) {
             throw new Error("Semantic inference settlement is already terminal");
           }
+          active.delete(token);
           return;
         }
         const entry: Entry = { ...current.entry, receipt, state: receipt.state === "indeterminate" ? "unknown" : "terminal", hasResult: Boolean(result),
           noDispatchFinalized: Boolean(settlement.noDispatchFinalized),
           updatedAt: new Date().toISOString(), ...(result ? { result } : {}) };
+        if (entry.state === "terminal" || settlement.transportStopped) active.delete(token);
+        else if (active.has(token)) active.set(token, entry);
         db.commitTransaction([{ type: "delete", id: current.id }, { type: "insert", vector: [0], payload: entry }]);
         persistence.commit();
       });

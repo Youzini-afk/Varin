@@ -54,4 +54,19 @@ describe('index progress presentation', () => {
     expect(document.body.textContent).toContain('50 indexed documents');
     expect(document.body.textContent).not.toContain('Checked 0/');
   });
+
+  it('clears the old failure from the current check and shows an actionable failure with details afterwards', () => {
+    const status = snapshot();
+    const entry = status.directories.entries[0]!;
+    entry.error = 'embedding-network-connect: connection failed (ECONNRESET)';
+    entry.checking = true;
+    const checking = render(status);
+    expect(checking.querySelector('[role="alert"]')).toBeNull();
+    entry.checking = false;
+    status.roots[0]!.progress = { phase: 'failed', processedFiles: 3, totalFiles: 100, error: entry.error };
+    const failed = render(status);
+    expect(failed.querySelector('[role="alert"]')?.textContent).toContain('index.directories.error.network');
+    expect(failed.querySelector('[role="alert"] details')?.textContent).toContain('ECONNRESET');
+    expect(failed.body.textContent).toContain('index.directories.retry');
+  });
 });

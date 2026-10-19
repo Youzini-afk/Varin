@@ -148,7 +148,10 @@ export async function requestOpenAICompatibleEmbeddings(
       response.status,
     );
   }
-  const payload = await response.json() as unknown;
+  const payload = await response.json().catch((error: unknown) => {
+    if (error instanceof SyntaxError) throw new EmbeddingResponseError('Embedding response is not valid JSON');
+    throw error;
+  }) as unknown;
   const usage = embeddingWireUsage(payload);
   if (usage) request.onUsage?.(usage);
   return parseOpenAICompatibleEmbeddings(payload, request);

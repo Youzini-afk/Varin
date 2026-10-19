@@ -80,43 +80,50 @@ it('completed index vectors survive restart without another HTTP, while changed 
   expect(f.requests()).toBe(1);
 }, 30_000);
 
-it('new explicit index input is a separate operation while an older unknown document attempt stays fenced across reopen', async () => {
+it('an interrupted index request can resume after reopen while retaining its original unknown usage', async () => {
   let firstRequest = true;
-  const f = await fixture((body, response) => { if (firstRequest) { firstRequest = false; response.destroy(); } else success(body, response); });
+  const f = await fixture((body, response) => { if (firstRequest) { firstRequest = false; response.destroy(Object.assign(new Error('fetch failed'), { cause: Object.assign(new Error('socket closed'), { code: 'ECONNRESET' }) })); } else success(body, response); });
   const operation: SemanticInferenceOperation = { kind: 'index-build', hostId: 'ledger-review', workspaceId: 'registered-workspace', recipeId: 'recipe-one', stage: 'document-embedding' };
   const first = await f.inference().capture(); const original = { ...input(first, operation), purpose: 'document' as const };
-  await expect(first.embed(original)).rejects.toThrow(); first.release(); await f.reopen(); const next = await f.inference().capture();
-  await expect(next.embed({ ...input(next, operation, 'new-batch'), purpose: 'document' })).rejects.toThrow(); expect(f.requests()).toBe(1);
+  await expect(first.embed(original)).rejects.toMatchObject({ code: 'embedding-network-connect', message: expect.stringContaining('ECONNRESET'),
+    receipt: { state: 'indeterminate', attempts: 1, usage: { status: 'unknown' } } });
+  first.release(); await f.reopen(); const next = await f.inference().capture();
+  expect((await next.embed({ ...input(next, operation, 'new-batch'), purpose: 'document' })).receipt.state).toBe('succeeded'); expect(f.requests()).toBe(2);
   const changed = await next.embed({ ...input(next, operation, 'different-source-version', 'NEW_DOCUMENT_VERSION'), purpose: 'document' });
-  expect(changed.receipt.purpose).toBe('index-document-embedding'); expect(f.requests()).toBe(2); next.release();
-  const facts = await f.ledger().list({ scopeId: 'registered-workspace' }); expect(facts).toHaveLength(2); expect(facts.filter(fact => fact.state === 'unknown')).toHaveLength(1); expect(facts.filter(fact => fact.hasResult)).toHaveLength(1);
+  expect(changed.receipt.purpose).toBe('index-document-embedding'); expect(f.requests()).toBe(3); next.release();
+  const facts = await f.ledger().list({ scopeId: 'registered-workspace' }); expect(facts).toHaveLength(3); expect(facts.filter(fact => fact.state === 'unknown')).toHaveLength(1); expect(facts.filter(fact => fact.hasResult)).toHaveLength(2);
 }, 30_000);
 
-it('an unresolved index batch fences regrouped overlapping inputs across restart instead of charging each partial batch again', async () => {
+it('overlapping batches share the active request boundary and can resume once the interrupted transport stops', async () => {
+  let interruptedResponse: ControlledResponse | undefined;
   let firstRequest = true;
-  const f = await fixture((body, response) => { if (firstRequest) { firstRequest = false; response.destroy(); } else success(body, response); });
+  const f = await fixture((body, response) => { if (firstRequest) { firstRequest = false; interruptedResponse = response; } else success(body, response); });
   const operation: SemanticInferenceOperation = { kind: 'index-build', hostId: 'ledger-review', workspaceId: 'registered-workspace', recipeId: 'recipe-one', stage: 'document-embedding' };
   const first = await f.inference().capture();
   const grouped = { ...input(first, operation, 'initial-group'), purpose: 'document' as const, items: [{ id: 'a', text: 'FIRST_PENDING_DOCUMENT' }, { id: 'b', text: 'SECOND_PENDING_DOCUMENT' }] };
-  await expect(first.embed(grouped)).rejects.toThrow(); first.release(); await f.reopen();
+  const pending = first.embed(grouped); const rejected = expect(pending).rejects.toThrow();
+  await expect.poll(f.requests).toBe(1);
   const next = await f.inference().capture();
   await expect(next.embed({ ...input(next, operation, 'regrouped-one'), purpose: 'document', items: [{ id: 'new-a', text: 'FIRST_PENDING_DOCUMENT' }] })).rejects.toThrow();
   await expect(next.embed({ ...input(next, operation, 'regrouped-two'), purpose: 'document', items: [{ id: 'new-b', text: 'SECOND_PENDING_DOCUMENT' }, { id: 'c', text: 'NEW_UNSENT_DOCUMENT' }] })).rejects.toThrow();
   expect(f.requests()).toBe(1);
-  const distinct = await next.embed({ ...input(next, operation, 'separate-version'), purpose: 'document', items: [{ id: 'd', text: 'INDEPENDENT_DOCUMENT_VERSION' }] });
-  expect(distinct.receipt.state).toBe('succeeded'); expect(f.requests()).toBe(2); next.release();
+  interruptedResponse!.destroy(); await rejected; first.release();
+  const resumed = await next.embed({ ...input(next, operation, 'resumed-one'), purpose: 'document', items: [{ id: 'a', text: 'FIRST_PENDING_DOCUMENT' }] });
+  expect(resumed.receipt.state).toBe('succeeded'); expect(f.requests()).toBe(2); next.release();
   expect((await f.ledger().list({ scopeId: 'registered-workspace', state: 'unknown' })).length).toBe(1);
 }, 30_000);
 
-it('a malformed provider vector response is a known failed attempt and never triggers a paid fallback or automatic replay', async () => {
-  const f = await fixture((_body, response) => response.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({ data: [{ index: 0, embedding: [1] }] })));
+it('a malformed vector response remains a failed attempt and a later index check can retry it', async () => {
+  let firstRequest = true;
+  const f = await fixture((body, response) => { if (firstRequest) { firstRequest = false; response.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({ data: [{ index: 0, embedding: [1] }] })); } else success(body, response); });
   const lease = await f.inference().capture();
   await expect(lease.embed(input(lease))).rejects.toMatchObject({ receipt: { state: 'failed', attempts: 1, attemptsKnown: true, usage: { status: 'unknown' } } });
-  await expect(lease.embed(input(lease, indexOperation(), 'retry-envelope'))).rejects.toThrow(); expect(f.requests()).toBe(1);
-  expect(await f.ledger().list()).toMatchObject([{ state: 'terminal', hasResult: false, receipt: { state: 'failed' } }]); lease.release();
+  expect(f.requests()).toBe(1);
+  expect((await lease.embed(input(lease, indexOperation(), 'retry-envelope'))).receipt.state).toBe('succeeded'); expect(f.requests()).toBe(2);
+  expect(await f.ledger().list()).toMatchObject([{ state: 'terminal', hasResult: false, receipt: { state: 'failed' } }, { state: 'terminal', hasResult: true, receipt: { state: 'succeeded' } }]); lease.release();
 }, 30_000);
 
-it('an isolated child exiting after durable admission without close leaves a recoverable unknown WAL fence', async () => {
+it('an isolated child exiting after admission preserves unknown receipts and allows a new index attempt', async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'varin-ledger-exit-review-')); cleanups.push(() => fs.rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }));
   const digest = (value: string) => createHash('sha256').update(value).digest('hex');
   const identity = { providerId: 'exit-provider', modelId: 'fixture', protocol: 'openai-compatible' as const,
@@ -140,8 +147,8 @@ it('an isolated child exiting after durable admission without close leaves a rec
   }
   const reopened = createSemanticInferenceLedger({ dataDir: root, hostId: 'ledger-review' }); cleanups.push(() => reopened.close());
   expect(await reopened.read(admission.key)).toMatchObject({ status: 'indeterminate', receipt: { attempts: 0, attemptsKnown: false, state: 'indeterminate' } });
-  expect(await reopened.admit({ ...admission, receipt: { ...receipt, batchId: 'different-bridge-envelope' } })).toMatchObject({ status: 'indeterminate' });
-  expect(await reopened.list({ scopeId: 'workspace-unclosed' })).toHaveLength(1);
+  expect(await reopened.admit({ ...admission, receipt: { ...receipt, batchId: 'different-bridge-envelope' } })).toMatchObject({ status: 'admitted' });
+  expect(await reopened.list({ scopeId: 'workspace-unclosed' })).toHaveLength(2);
 }, 25_000);
 
 it('empty provider usage stays unknown while an explicitly measured zero remains known', async () => {

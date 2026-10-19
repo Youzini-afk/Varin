@@ -8,6 +8,20 @@ import { SettingsSection } from '@/components/sections/shared/SettingsSection';
 import { useI18n } from '@/lib/i18n';
 import { manageIndexDirectory, type SemanticIndexConfig, type SemanticIndexStatus } from './semantic-index-api';
 
+function indexFailureMessage(failure: string, t: ReturnType<typeof useI18n>['t']): string {
+  const code = failure.split(':', 1)[0];
+  const httpStatus = /^embedding-http-(\d{3})$/.exec(code ?? '')?.[1];
+  if (httpStatus === '401' || httpStatus === '403') return t('index.directories.error.authentication');
+  if (httpStatus === '429') return t('index.directories.error.rateLimit');
+  if (httpStatus) return t('index.directories.error.http', { status: httpStatus });
+  if (code === 'embedding-network-timeout') return t('index.directories.error.timeout');
+  if (code === 'embedding-response-invalid') return t('index.directories.error.response');
+  if (code?.startsWith('embedding-network-')) return t('index.directories.error.network');
+  if (code === 'embedding-operation-unresolved') return t('index.directories.error.pending');
+  if (code === 'embedding-dispatch-indeterminate') return t('index.directories.error.interrupted');
+  return failure;
+}
+
 export function IndexDirectories({ status, draft, edit, refresh }: {
   status: SemanticIndexStatus | null;
   draft: SemanticIndexConfig | null;
@@ -45,7 +59,8 @@ export function IndexDirectories({ status, draft, edit, refresh }: {
         const deleting = entry.state === 'deleting';
         const semanticProcessing = (entry.state === 'active' || entry.checking) && ['enumerating', 'processing'].includes(root?.progress?.phase ?? '');
         const processing = entry.checking || semanticProcessing;
-        const failure = entry.error ?? root?.progress?.error;
+        const failure = processing ? undefined : entry.error ?? root?.progress?.error;
+        const failureMessage = failure ? indexFailureMessage(failure, t) : undefined;
         const indexedDocuments = root?.status.publishedDocuments ?? root?.progress?.publishedDocuments;
         const totalFiles = root?.progress?.totalFiles ?? 0;
         return <div key={entry.path} className="space-y-2 py-4">
@@ -83,7 +98,7 @@ export function IndexDirectories({ status, draft, edit, refresh }: {
                 {t(paused ? 'index.directories.resume' : 'index.directories.pause')}
               </Button>
               <Button size="xs" variant="ghost" disabled={pending.has(entry.path)} onClick={() => void act('check', entry.path)}>
-                <RiRefreshLine className={processing ? 'size-3.5 animate-spin' : 'size-3.5'} />{t('index.directories.check')}
+                <RiRefreshLine className={processing ? 'size-3.5 animate-spin' : 'size-3.5'} />{t(failure ? 'index.directories.retry' : 'index.directories.check')}
               </Button>
             </> : null}
             <Button size="xs" variant="ghost" disabled={pending.has(entry.path) || (deleting && entry.busy)} onClick={() => setRemoving(entry.path)}>
@@ -108,7 +123,13 @@ export function IndexDirectories({ status, draft, edit, refresh }: {
               {inventory.selectedRootIgnored ? <p className="text-[var(--status-warning)]">{t('settings.page.harness.index.progress.ignoredRoot', { directory: inventory.root })}</p> : null}
             </div>)}
           </details> : null}
-          {failure ? <p role="alert" className="break-words typography-meta text-destructive">{failure}</p> : null}
+          {failure ? <div role="alert" className="space-y-1 break-words typography-meta text-destructive">
+            <p>{failureMessage}</p>
+            {failureMessage !== failure ? <details className="text-muted-foreground">
+              <summary className="cursor-pointer">{t('index.directories.error.details')}</summary>
+              <p className="mt-1 font-mono">{failure}</p>
+            </details> : null}
+          </div> : null}
         </div>;
       })}
     </div>

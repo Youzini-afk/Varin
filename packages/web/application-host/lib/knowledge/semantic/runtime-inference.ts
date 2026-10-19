@@ -12,7 +12,7 @@ import {
   type HarnessEmbedParams, type HarnessEmbedResult,
 } from '@varin/protocol';
 import { EmbeddingResponseError, requestOpenAICompatibleEmbeddings, parseOpenAICompatibleEmbeddings, embeddingWireUsage, type EmbeddingUsage } from '@varin/protocol/node/embeddings';
-import type { EgressOverride } from '../../harness/egress.js';
+import { classifyEgressError, type EgressOverride } from '../../harness/egress.js';
 import { waitWithSignal } from '../../cancellation.js';
 import { semanticInferenceOperationKey, type SemanticInferenceLedger, type SemanticInferenceLedgerIdentity, type SemanticInferenceOperation, type SemanticInferenceFactFilter } from './inference-ledger-contract.js';
 import { ExistingHostCredentialOwner, type CredentialScope, type ExistingModelAuthRuntime } from '../../kernel/credential-owner.js';
@@ -97,8 +97,8 @@ export type SemanticInferenceDescription = { status: 'ready'; binding: HarnessRe
   | { status: SemanticInferenceStatus; reason: string };
 export class SemanticInferenceError extends Error {
   constructor(readonly status: SemanticInferenceStatus, readonly code: string,
-    readonly receipt?: SemanticInferenceReceipt) {
-    super(code);
+    readonly receipt?: SemanticInferenceReceipt, readonly detail?: string) {
+    super(detail ? `${code}: ${detail}` : code);
     this.name = 'SemanticInferenceError';
   }
 }
@@ -116,6 +116,10 @@ const invalidSettings = (error: unknown): boolean => error instanceof HarnessInf
   || error instanceof SyntaxError || record(error) && ['invalid_settings', 'embedding-settings-invalid'].includes(String(error.code));
 function safeFailure(error: unknown): SemanticInferenceError {
   if (error instanceof SemanticInferenceError) return error;
+  if (error instanceof EmbeddingResponseError) {
+    const code = error.status && error.status >= 400 ? `embedding-http-${error.status}` : 'embedding-response-invalid';
+    return new SemanticInferenceError('unavailable', code, undefined, error.message);
+  }
   if (invalidSettings(error)) return new SemanticInferenceError('invalid', 'embedding-settings-invalid');
   const code = record(error) && typeof error.code === 'string' ? error.code : '';
   if (code === 'model-channel-disabled' || code === 'model-disabled') return new SemanticInferenceError('disabled', code);
@@ -307,9 +311,9 @@ export function createSemanticInference(
             let transportCompleted = false;
             let transportSettlement: Promise<void> | undefined;
             let settlementTail: Promise<void> = Promise.resolve();
-            const settle = (value: SemanticInferenceReceipt, result?: HarnessEmbedResult, noDispatchFinalized?: true): Promise<void> => {
+            const settle = (value: SemanticInferenceReceipt, result?: HarnessEmbedResult, noDispatchFinalized?: true, transportStopped?: true): Promise<void> => {
               pendingSettlements++;
-              const task = settlementTail.then(() => ledger.settle(token!, { receipt: frozenReceipt(value), ...(result ? { result } : {}), ...(noDispatchFinalized ? { noDispatchFinalized } : {}) }));
+              const task = settlementTail.then(() => ledger.settle(token!, { receipt: frozenReceipt(value), ...(result ? { result } : {}), ...(noDispatchFinalized ? { noDispatchFinalized } : {}), ...(transportStopped ? { transportStopped } : {}) }));
               settlementTail = task.catch(() => undefined);
               void task.then(() => { pendingSettlements--; }, () => { pendingSettlements--; });
               return task;
@@ -396,7 +400,7 @@ export function createSemanticInference(
                   items: result.vectors.map((vector, index) => ({ id: params.items[index]!.id, index, vector })) };
                 const actualReceipt: SemanticInferenceReceipt = { ...receipt, attemptsKnown: true, state: 'succeeded' };
                 receipt = actualReceipt;
-                transportSettlement = settle(actualReceipt, response);
+                transportSettlement = settle(actualReceipt, response, undefined, true);
                 await transportSettlement;
                 terminalStored = true;
                 if (finished) { try { options.onReceipt?.(frozenReceipt(actualReceipt)); } catch { /* observation only */ } }
@@ -407,7 +411,7 @@ export function createSemanticInference(
                   : receivedResponse && error instanceof EmbeddingResponseError ? 'failed'
                   : signal.aborted || !receivedResponse ? 'indeterminate' : 'failed' };
                 receipt = actualReceipt;
-                transportSettlement = settle(actualReceipt, undefined, actualReceipt.state === 'not-started' && actualReceipt.attempts === 0 ? true : undefined);
+                transportSettlement = settle(actualReceipt, undefined, actualReceipt.state === 'not-started' && actualReceipt.attempts === 0 ? true : undefined, true);
                 await transportSettlement;
                 terminalStored = actualReceipt.state !== 'indeterminate';
                 if (finished) { try { options.onReceipt?.(frozenReceipt(actualReceipt)); } catch { /* observation only */ } }
@@ -444,9 +448,13 @@ export function createSemanticInference(
               if (settlementFailed) receipt = { ...receipt, state: 'indeterminate' };
               const snapshot = publish();
               if (signal.aborted) throw Object.assign(new Error('embedding-cancelled'), { name: 'AbortError', receipt: snapshot });
-              const failure = safeFailure(error);
+              let failure = safeFailure(error);
+              if (!(error instanceof SemanticInferenceError) && !(error instanceof EmbeddingResponseError) && receipt.attempts > 0) {
+                const network = classifyEgressError(error);
+                failure = new SemanticInferenceError('unavailable', `embedding-network-${network.kind}`, undefined, network.message);
+              }
               throw new SemanticInferenceError(failure.status, settlementFailed ? 'embedding-settlement-unavailable'
-                : receipt.state === 'indeterminate' ? 'embedding-dispatch-indeterminate' : failure.code, snapshot);
+                : failure.code, snapshot, settlementFailed ? undefined : failure.detail);
             } finally { finished = true; pending.delete(completion); finish(); }
           },
         };

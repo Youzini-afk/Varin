@@ -122,3 +122,21 @@ it.each(['query', 'index'] as const)('%s embeddings use the captured endpoint, h
   } finally { lease.release(); await owner.close(); }
   expect(captured.release).toHaveBeenCalledOnce();
 });
+
+it.each([
+  { name: 'authentication rejection', code: 'embedding-http-401', response: () => Response.json({ error: { message: 'private prompt and credential must stay private' } }, { status: 401 }) },
+  { name: 'invalid JSON', code: 'embedding-response-invalid', response: () => new Response('<html>private upstream content</html>') },
+])('index embeddings preserve $name without exposing upstream content', async ({ code, response }) => {
+  const captured = provider();
+  const ledger = { admit: async () => ({ status: 'admitted' as const, token: 'original' }), settle: async () => {},
+    close: async () => {}, read: async () => null, list: async () => [] };
+  const owner = createSemanticInference({ readGlobalInferenceSettings: async () => settings, resolveEmbeddingBinding: async () => captured }, undefined,
+    { ledger, fetchImpl: async () => response() });
+  const lease = await owner.capture();
+  try {
+    const failure = await lease.embed({ ...lease.binding, batchId: 'batch', purpose: 'document', items: [{ id: 'input', text: 'private source text' }],
+      operationIdentity: { kind: 'index-build', hostId: 'host', workspaceId: 'workspace', recipeId: 'recipe', stage: 'document-embedding' } }).catch((error: unknown) => error);
+    expect(failure).toMatchObject({ code, receipt: { state: 'failed', attempts: 1 } });
+    expect(String(failure)).not.toContain('private');
+  } finally { lease.release(); await owner.close(); }
+});
