@@ -246,6 +246,16 @@ pub fn budget_candidates(view: &RequestView) -> Vec<BudgetCandidate> {
             end_index: index + 1,
         });
     }
+    // The durable head can be an environment observation, or an item already represented by
+    // the current summary. It still defines the full capture when retained originals are
+    // reconsidered. Temporary request-only projections do not change this history identity.
+    if pending.is_empty() {
+        if let Some(head) = &view.binding.history_range.leaf_id {
+            candidates.retain(|candidate| &candidate.through_id != head);
+            candidates.push(BudgetCandidate { through_id: head.clone(), prefix_estimated_tokens: total,
+                retained_estimated_tokens: 0, end_index: view.history.len() });
+        }
+    }
     candidates
 }
 /// Recent same-configuration observations. Missing duration/rate stays missing, not zero.
@@ -270,7 +280,7 @@ impl PreparationTiming {
             return base;
         }
         // The known delta is already in the current estimate; it advances preparation only.
-        // Expected future growth is also reserved when planning the fixed retained tail.
+        // Expected future growth is also reserved in the combined continuation budget.
         (base - 2.0 * growth.saturating_add(self.pending_tokens) as f64 / input_budget as f64)
             .max(base / 2.0)
     }
@@ -294,15 +304,16 @@ pub fn native_mode(
             > input_budget as f64 * timing.waterline(policy.preparation_waterline, input_budget))
     .then_some(ContextCompactionMode::Background)
 }
-pub fn native_candidate<'a>(
+/// Space available to the model's combined summary and original selection. The existing
+/// adaptive growth reserve remains a budgeting hint, rather than choosing a history suffix.
+pub fn continuation_budget(
     view: &RequestView,
-    candidates: &'a [BudgetCandidate],
     policy: &ContextPolicy,
     capacity: u64,
     max_output_tokens: Option<u64>,
     estimate: &InputEstimate,
     timing: &PreparationTiming,
-) -> Option<&'a BudgetCandidate> {
+) -> u64 {
     let history_tokens = view
         .history
         .iter()
@@ -329,36 +340,22 @@ pub fn native_candidate<'a>(
         .saturating_add(prefix);
     let input_budget = capacity.saturating_sub(policy.reserve_tokens);
     let summary_output = max_output_tokens.unwrap_or(policy.reserve_tokens);
-    let available = input_budget
-        .saturating_sub(fixed)
-        .saturating_sub(summary_output);
-    let recent = policy
+    let available = input_budget.saturating_sub(fixed);
+    policy
         .explicit_keep_recent_tokens
+        .map(|tokens| tokens.saturating_add(summary_output))
         .unwrap_or_else(|| {
-            // P + planned S1 + B + future N, not B alone. Current known N is already in history.
             input_budget
                 .saturating_mul(3)
                 .saturating_div(5)
                 .saturating_sub(fixed)
-                .saturating_sub(summary_output)
                 .saturating_sub(timing.expected_growth().unwrap_or(0))
                 .max(1)
         })
-        .min(available);
-    let mut retained = 0u64;
-    let mut end = view.history.len();
-    while end > 0 && retained < recent {
-        let next = estimate_item(&view.history[end - 1]);
-        if retained > 0 && next > recent.saturating_sub(retained) {
-            break;
-        }
-        end -= 1;
-        retained = retained.saturating_add(next);
-    }
-    candidates
-        .iter()
-        .rev()
-        .find(|candidate| candidate.end_index <= end)
+        .min(available)
+}
+pub fn native_candidate(candidates: &[BudgetCandidate]) -> Option<&BudgetCandidate> {
+    candidates.last()
 }
 
 #[cfg(test)]
@@ -451,55 +448,50 @@ mod preparation_tests {
         }
         let candidates = budget_candidates(&view);
         let cold = PreparationTiming::default();
-        let candidate = native_candidate(
+        let budget = continuation_budget(
             &view,
-            &candidates,
             &policy,
             2000,
             Some(100),
             &estimate(1200),
             &cold,
-        )
-        .unwrap();
-        assert_eq!(candidate.retained_estimated_tokens, 700); // P=200, S1 reserve=100, B=700, total=1000 <= 1080.
+        );
+        assert_eq!(budget, 880); // Total continuation target: 1800 * 60% - 200 fixed.
+        assert_eq!(native_candidate(&candidates).unwrap().retained_estimated_tokens, 0);
         let warm = PreparationTiming {
             duration_ms: Some(200.0),
             tokens_per_ms: Some(1.0),
             pending_tokens: 0,
         };
         assert_eq!(
-            native_candidate(
+            continuation_budget(
                 &view,
-                &candidates,
                 &policy,
                 2000,
                 Some(100),
                 &estimate(1200),
                 &warm
-            )
-            .unwrap()
-            .retained_estimated_tokens,
-            500
+            ),
+            680
         );
         policy.explicit_keep_recent_tokens = Some(300);
         assert_eq!(
-            native_candidate(
+            continuation_budget(
                 &view,
-                &candidates,
                 &policy,
                 2000,
                 Some(100),
                 &estimate(1200),
                 &warm
-            )
-            .unwrap()
-            .retained_estimated_tokens,
-            300
+            ),
+            400
         );
         assert_eq!(
             view.history.len(),
             11,
             "Planning cannot truncate source or unsummarized tail"
         );
+        view.binding.history_range.leaf_id = Some("environment-head".into());
+        assert_eq!(native_candidate(&budget_candidates(&view)).unwrap().through_id, "environment-head");
     }
 }

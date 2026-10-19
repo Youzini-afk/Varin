@@ -125,6 +125,7 @@ export interface ContextJob {
   receipt: InputSubmitReceipt;
 }
 export interface ContextCheckpoint {
+  retained?: { items: { content_object: string }; estimated_tokens: number; budget_tokens: number | null };
   bot_memory_snapshot?: { botId: string; threadId: string; revision: number; state: { content_object: string } };
   resource_activations: ResourceActivation[];
   resources?: ContextResources;

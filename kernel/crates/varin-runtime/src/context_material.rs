@@ -174,9 +174,10 @@ pub(crate) fn source_item(
                 "summary source range is not a valid UTF-8 text range".into(),
             ));
         }
+        let retention = serde_json::from_str::<Value>(text).ok().and_then(|value| value.get("retention").cloned());
         item.content = Content::Text {
             text: serde_json::to_string(
-                &json!({"sourceId":source.source_id,"utf8Range":{"start":start,"end":end,"total":text.len()},"quotedSourceFragment":&text[start..end]}),
+                &json!({"sourceId":source.source_id,"retention":retention,"utf8Range":{"start":start,"end":end,"total":text.len()},"quotedSourceFragment":&text[start..end]}),
             )?,
         };
         item.id = format!("{}:{start}:{end}", item.id);

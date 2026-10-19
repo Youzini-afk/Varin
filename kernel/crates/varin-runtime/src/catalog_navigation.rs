@@ -417,6 +417,7 @@ impl NavigationPreparation {
                 {
                     value.proposal.through_id = None;
                     value.proposal.summary.clear();
+                    value.retained = None;
                     value.resource_activations.clear();
                     if let Some(snapshot) = value.bot_memory_snapshot.take() {
                         if value.proposal.memory_checkpoint.as_deref()

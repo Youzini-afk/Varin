@@ -17,6 +17,8 @@ pub struct ContextProposal {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct ContextCheckpoint {
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub retained: Option<crate::context_retention::RetainedContext>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub bot_memory_snapshot: Option<super::memory::BotMemorySnapshotRef>,
     pub resource_activations: Vec<super::resources::ResourceActivation>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -30,7 +32,11 @@ pub struct ContextCheckpoint {
 
 impl ContextCheckpoint {
     pub(crate) fn save(&self, content: &crate::content::ContentStore) -> Result<Value> {
-        let dependencies = self.bot_memory_snapshot.as_ref().map(|snapshot| snapshot.dependency()).transpose()?.into_iter().collect();
+        let mut dependencies: Vec<_> = self.bot_memory_snapshot.as_ref().map(|snapshot| snapshot.dependency()).transpose()?.into_iter().collect();
+        if let Some(retained) = &self.retained {
+            dependencies.push(retained.items["content_object"].as_str()
+                .ok_or_else(|| RuntimeError::Invalid("retained context reference is malformed".into()))?.into());
+        }
         content.save_with_dependencies(&serde_json::to_value(self)?, dependencies)
     }
 }
@@ -420,6 +426,7 @@ impl Catalog {
                 .and_then(|context| context.personalization),
         };
         let checkpoint = ContextCheckpoint {
+            retained: None,
             bot_memory_snapshot: self.active_context(&proposal.branch_id)?.and_then(|context| context.bot_memory_snapshot),
             resource_activations,
             id: proposal.key.clone(),
@@ -807,6 +814,9 @@ impl ContextRead {
                         .iter()
                         .map(|activation| activation.summary_reference().into()),
                 );
+                if let Some(retained) = &checkpoint.retained {
+                    history.extend(content.load_items(&retained.items, &|| false)?);
+                }
                 CompiledContextPrefix {
                     identity,
                     head: None,

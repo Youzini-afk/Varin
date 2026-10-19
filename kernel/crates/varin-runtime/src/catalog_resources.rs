@@ -449,6 +449,7 @@ impl ResourceRefresh {
             memory_checkpoint,
         };
         let checkpoint = context::ContextCheckpoint {
+            retained: current.retained,
             bot_memory_snapshot: current.bot_memory_snapshot,
             resource_activations: current.resource_activations,
             id: proposal.key.clone(),

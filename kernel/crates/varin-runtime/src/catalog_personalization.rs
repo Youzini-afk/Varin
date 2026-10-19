@@ -161,7 +161,7 @@ impl PersonalizationRefresh {
             expected_revision, summary: current.proposal.summary,
             effective_system_prompt, instruction_sources, memory_checkpoint,
         };
-        let checkpoint = context::ContextCheckpoint {bot_memory_snapshot:current.bot_memory_snapshot,resource_activations: current.resource_activations, id:proposal.key.clone(),revision:current.revision+1,proposal,personalization:Some(personalization),resources:current.resources};
+        let checkpoint = context::ContextCheckpoint {retained:current.retained,bot_memory_snapshot:current.bot_memory_snapshot,resource_activations: current.resource_activations, id:proposal.key.clone(),revision:current.revision+1,proposal,personalization:Some(personalization),resources:current.resources};
         let reference = checkpoint.save(&content)?;
         Ok(PreparedPersonalizationRefresh {previous_id:current.id,checkpoint,reference,unchanged:false,_publication})
     }

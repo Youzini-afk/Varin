@@ -92,7 +92,16 @@ node inputs follow only the frozen recipe. Pure text produces zero ModelSteps. C
 capacity is checked before dispatch; reopening consumes completed nodes and never replays an unknown
 dispatch. A failed node cancels and joins its remaining workers before the Run settles.
 
-Summary recipes freeze S0, replaced history A and retained recent background B. B stays in the main branch.
+Summary recipes freeze the previous summary and all original material in the selected history range,
+including originals retained by the preceding checkpoint. Native automatic compaction selects the latest
+complete exchange as its capture boundary. The model returns a summary and original-block references;
+it chooses retention throughout that material, rather than inheriting a predetermined recent suffix.
+Local text estimates accompany each retention group, and the continuation budget covers summary plus
+originals. User message parts and complete provider/tool exchanges share a group. Costs identify
+unmeasured media/provider content and are not provider billing measurements. The original history remains
+durable; checkpoint references keep selected items, including their media, alive through collection.
+Later input is appended after the frozen cut. Resource/personalization refresh preserves the selection;
+forking or navigation that discards the summary also discards its selection.
 Model nodes use [summary_tools.rs](src/summary_tools.rs) for read-only original history/output and related
 records; normal Tool invocations retain query audit and recovery. Text plans remain tool-free.
 

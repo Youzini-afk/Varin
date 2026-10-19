@@ -445,6 +445,7 @@ impl PreparedSubmission {
                         super::followups::normalized_source(resources.source.take(), &run_id);
                 }
                 let body = context::ContextCheckpoint {
+                    retained: active.as_ref().and_then(|active| active.retained.clone()),
                     bot_memory_snapshot: active.as_ref().and_then(|active| active.bot_memory_snapshot.clone()),
                     id: proposal.key.clone(),
                     revision,

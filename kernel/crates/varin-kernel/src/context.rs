@@ -283,20 +283,15 @@ impl ContextPreparation for CapacityPreparation {
                     mode == ContextCompactionMode::Blocking,
                 )
             } else {
-                let Some(candidate) = native_candidate(
-                    view,
-                    &legal,
-                    &settings,
-                    capacity,
-                    configuration.max_output_tokens,
-                    &estimate,
-                    &timing,
-                ) else {
+                let Some(candidate) = native_candidate(&legal) else {
                     return Ok(ContextRequestPreparation::Ready);
                 };
+                let mut recipe = ContextSummaryRecipe::automatic(settings.configuration_identity.clone(), mode);
+                recipe.continuation_budget_tokens = Some(varin_runtime::context_capacity::continuation_budget(
+                    view, &settings, capacity, configuration.max_output_tokens, &estimate, &timing));
                 (
                     candidate.through_id.clone(),
-                    ContextSummaryRecipe::automatic(settings.configuration_identity.clone(), mode),
+                    recipe,
                     mode == ContextCompactionMode::Blocking,
                 )
             }

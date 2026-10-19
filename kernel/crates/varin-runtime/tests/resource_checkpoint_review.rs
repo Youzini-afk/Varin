@@ -861,6 +861,7 @@ fn admit_explicit(db: &mut Catalog, key: &str, raw: &str, text: &str) -> Receipt
     let mut selected = resources(text, None);
     selected.snapshot.skills[0].disable_model_invocation = true;
     let candidate = ContextCheckpoint {
+        retained: None,
         bot_memory_snapshot: None,
         resource_activations: vec![],
         id: "candidate".into(),
@@ -1552,6 +1553,7 @@ fn cold_calendar_skill_keeps_real_environment_proof_through_compaction_gc_and_re
     let mut personalization = basis("calendar main");
     personalization.thread_id = occurrence.thread_id.clone();
     let candidate = ContextCheckpoint {
+        retained: None,
         bot_memory_snapshot: None,
         resource_activations: vec![],
         id: "candidate".into(),

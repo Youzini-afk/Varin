@@ -227,6 +227,7 @@ impl BranchForkPreparation {
                         memory_checkpoint: original.proposal.memory_checkpoint,
                     };
                     let body = context::ContextCheckpoint {
+                        retained: None,
                         bot_memory_snapshot: None,
                         resource_activations: Vec::new(),
                         id: proposal.key.clone(),

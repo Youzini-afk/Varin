@@ -3,6 +3,7 @@ export const DEFAULT_COMPACTION_RESERVE_RATIO = 0.1;
 
 export interface CompactionBudgetSettings {
   reserveRatio?: number;
+  /** Original-content allowance used with the summary reserve to derive the continuation target. */
   keepRecentTokens?: number;
 }
 

@@ -2910,6 +2910,7 @@ export interface ContextSummaryRecipe {
   mode: 'manual' | 'background' | 'blocking';
   configurationIdentity: string | null;
   additionalInstructions: string | null;
+  continuationBudgetTokens?: number;
 }
 
 export type ContextCompactionProducer = {kind:'builtin';name:'fold';version:'1'} | {kind:'extension';providerKey:string;providerId:string;extensionId:string;extensionVersion:string;serviceId:'varin.context.compaction';serviceVersion:1;artifactIntegrity:string;composition:HostServiceComposition;configurationIdentity:string;declaredIdentity:LaunchPolicy};

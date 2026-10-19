@@ -26,6 +26,7 @@ pub mod context_job;
 pub mod summary_tools;
 mod context_execution;
 mod context_material;
+pub mod context_retention;
 
 #[cfg(test)]
 extern crate self as varin_runtime;
