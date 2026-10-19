@@ -6,8 +6,9 @@ describe('native desktop workspace readiness', () => {
   });
   test('distinguishes pending boot from a failed catalog without an installer fallback', () => {
     expect(resolveDesktopWorkspaceView({ catalogError: null, catalogLoaded: false })).toBe('loading');
-    expect(resolveDesktopWorkspaceView({ catalogError: new Error('unavailable'), catalogLoaded: false, catalogLoading: true })).toBe('loading');
+    expect(resolveDesktopWorkspaceView({ catalogError: null, catalogLoaded: false, catalogLoading: true })).toBe('loading');
     expect(resolveDesktopWorkspaceView({ catalogError: new Error('unavailable'), catalogLoaded: false })).toBe('catalog-recovery');
+    expect(resolveDesktopWorkspaceView({ catalogError: new Error('unavailable'), catalogLoaded: false, catalogLoading: true })).toBe('catalog-recovery');
   });
   test('directory transitions cannot admit an unready workspace', () => {
     expect(desktopWorkspaceIsOperable('main', false)).toBe(true);

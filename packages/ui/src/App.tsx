@@ -664,7 +664,7 @@ function App({ apis }: AppProps) {
     return (
       <ErrorBoundary>
         <RuntimeInitializationRecovery
-          onRetry={() => { void useThreadStore.getState().loadCatalog(); }}
+          onRetry={() => { void useThreadStore.getState().loadCatalog().catch(() => {}); }}
           isRetrying={catalogLoading}
         />
       </ErrorBoundary>
