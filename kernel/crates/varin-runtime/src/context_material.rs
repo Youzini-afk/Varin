@@ -41,7 +41,7 @@ pub(crate) fn model_budget(
     let capacity: Capacity = serde_json::from_value(configuration.clone())?;
     // Every model node carries the read capability as well as these instructions.
     let counter = TokenCounter::for_configuration(configuration);
-    let fixed = counter.count(SUMMARIZER_SYSTEM)
+    let fixed = counter.count(&recipe.system_text())
         + counter.count(&recipe.request_text())
         + counter.json(&serde_json::to_value(crate::summary_tools::schema())?);
     let source_budget_tokens = match (capacity.context_window_tokens, capacity.max_output_tokens) {

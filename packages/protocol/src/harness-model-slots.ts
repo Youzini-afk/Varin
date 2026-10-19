@@ -12,6 +12,7 @@ export type HarnessModelSlots = Partial<Record<HarnessModelRole, HarnessModelBin
 
 export const HARNESS_MODEL_ROLES: readonly HarnessModelRole[] = [
   "agentPlanning",
+  "contextCompaction",
   "explore",
   "retrievalAgent",
   "worker",
@@ -26,7 +27,7 @@ export const HARNESS_MODEL_ROLES: readonly HarnessModelRole[] = [
   "memoryOrganizer",
 ];
 
-const DEFAULTING_TO_MAIN = new Set<HarnessModelRole>(["worker", "verifier"]);
+const DEFAULTING_TO_MAIN = new Set<HarnessModelRole>(["worker", "verifier", "contextCompaction"]);
 
 export const resolveHarnessModelSlot = (
   slot: HarnessModelRole,

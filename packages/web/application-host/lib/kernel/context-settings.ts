@@ -26,7 +26,7 @@ export function readContextPolicy(input: { settings: AgentSettingsSnapshot; proj
   const explicitKeep = override.keepRecentTokens ?? ordinary.keepRecentTokens;
   const reserveRatio = override.reserveRatio ?? ordinary.reserveRatio ?? DEFAULT_COMPACTION_RESERVE_RATIO;
   const policy = {
-    enabled: ordinary.enabled ?? true,
+    enabled: (ordinary.enabled ?? true) && harness.models.contextCompaction?.enabled !== false,
     reserveTokens: Math.ceil((input.contextWindowTokens ?? 0) * reserveRatio),
     keepRecentTokens: explicitKeep ?? 20000,
     explicitKeepRecentTokens: explicitKeep ?? null,

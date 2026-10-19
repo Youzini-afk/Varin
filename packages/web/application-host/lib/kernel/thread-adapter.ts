@@ -1,5 +1,7 @@
 import { admitContextJobCandidate, contextCompactionScope } from './context-job-preparation.js';
 import type { ContextCompactionOwner } from './context-compaction.js';
+import type { ContextAgentOwner } from './context-agent.js';
+import { isDeepStrictEqual } from 'node:util';
 import type { SourceDirectory } from './thread-sources.js';
 import { sourceFailureCode } from './source-admission-error.js';
 import type { McpInteractionListParams, McpInteractionReadParams, McpInteractionRespondParams, McpSamplingOutputReviewParams } from '@varin/protocol';
@@ -70,7 +72,7 @@ export class ThreadAdapter {
   private async prepareAgent(choice: ThreadAgentChoice) {
     if (!choice.profileId) return { selection: { ...choice, name: null, tools: null }, instructions: '' };
     const profile = (await this.agentProfiles?.read({ runtime: 'agent' }))?.profiles.find(profile => profile.id === choice.profileId);
-    if (!profile || !profile.effective.enabled || profile.tools.source === 'unconfigured'
+    if (!profile || profile.automation || !profile.effective.enabled || profile.tools.source === 'unconfigured'
       || profile.effective.workFocus.length && !profile.effective.workFocus.includes(choice.workFocus)) {
       throw Object.assign(new Error('The selected Agent is unavailable. Choose an enabled Agent for this work focus.'), { code: 'agent-profile-unavailable' });
     }
@@ -91,6 +93,8 @@ export class ThreadAdapter {
 
   private compaction?: ContextCompactionOwner;
   bindCompaction(owner: ContextCompactionOwner): void { this.compaction = owner; }
+  private contextAgent?: ContextAgentOwner;
+  bindContextAgent(owner: ContextAgentOwner): void { this.contextAgent = owner; }
   private sourceDirectory?: SourceDirectory;
   bindSourceDirectory(directory: SourceDirectory): void { this.sourceDirectory = directory; }
   private fileResolver?: import('./thread-file-target.js').ThreadFileTargetResolver;
@@ -533,9 +537,11 @@ export class ThreadAdapter {
       const configuration = run.configuration as ModelSessionConfiguration;
       if (previous.request.branch_id !== input.branchId || previous.request.through_id !== input.throughId
         || previous.request.expected_revision !== input.expectedRevision || previous.request.owner_run_id
-        || configuration.providerId !== input.model.providerId || (configuration.catalogModelId ?? configuration.model) !== input.model.modelId
-        || input.model.thinkingLevel !== undefined && configuration.thinkingLevel !== input.model.thinkingLevel
-        || input.model.temperature !== undefined && (configuration.modelOptions as { temperature?: number } | undefined)?.temperature !== input.model.temperature) {
+        || (previous.request.summary_recipe.requestedModel !== undefined
+          ? !isDeepStrictEqual(previous.request.summary_recipe.requestedModel, input.model)
+          : configuration.providerId !== input.model.providerId || (configuration.catalogModelId ?? configuration.model) !== input.model.modelId
+            || input.model.thinkingLevel !== undefined && configuration.thinkingLevel !== input.model.thinkingLevel
+            || input.model.temperature !== undefined && (configuration.modelOptions as { temperature?: number } | undefined)?.temperature !== input.model.temperature)) {
         throw new Error('Context job key already belongs to another selection');
       }
       void this.continueLaunch(previous.receipt.run_id).catch(() => undefined);
@@ -547,25 +553,30 @@ export class ThreadAdapter {
     const recipe = candidate ? { effective_system_prompt: candidate.effectiveSystemPrompt,
       instruction_sources: candidate.instructionSources, memory_checkpoint: candidate.memoryCheckpoint } : checkpoint?.proposal;
     const personalization = candidate?.personalization ?? checkpoint?.personalization;
+    const scope = contextCompactionScope(input.threadId, personalization, candidate?.resources ?? checkpoint?.resources);
+    const agent = await this.contextAgent?.prepare(scope, { model: input.model }, signal);
     if (!this.models.describeModel) throw new Error('Model capacity description is unavailable');
-    const description = await this.models.describeModel(input.model);
+    const description = agent?.configuration ?? await this.models.describeModel(input.model);
     let model: Awaited<ReturnType<ThreadModelAuthority['resolveModel']>> | undefined;
     try {
       const { job } = await admitContextJobCandidate(this.runtime, this.compaction,
-        contextCompactionScope(input.threadId, personalization, candidate?.resources ?? checkpoint?.resources),
-        { summaryRecipe: { strategy: { kind: 'builtin', name: 'manual', version: '1' }, mode: 'manual', configurationIdentity: null, additionalInstructions: null },
+        scope,
+        { summaryRecipe: { strategy: { kind: 'builtin', name: 'manual', version: '1' }, mode: 'manual', configurationIdentity: null, additionalInstructions: null,
+            requestedModel: input.model, ...(agent?.instructions !== undefined ? { agentInstructions: agent.instructions } : {}) },
           key, branchId: input.branchId, throughId: input.throughId, expectedRevision: input.expectedRevision,
           effectiveSystemPrompt: recipe?.effective_system_prompt ?? '', instructionSources: recipe?.instruction_sources ?? [],
           memoryCheckpoint: recipe?.memory_checkpoint ?? null, ...(personalization ? { personalization } : {}),
-          configuration: description }, signal, async () => {
+          configuration: description }, signal, agent?.bind ?? (async () => {
           model = await waitForModelBinding(this.models.resolveModel(input.model), model => model.credentialOwner.release(), signal);
-          if ((model.configuration.contextWindowTokens ?? null) !== description.contextWindowTokens
-            || (model.configuration.maxOutputTokens ?? null) !== description.maxOutputTokens) throw new Error('Model capacity changed during compaction preparation');
+          const capacity = description as { contextWindowTokens: number | null; maxOutputTokens: number | null };
+          if ((model.configuration.contextWindowTokens ?? null) !== capacity.contextWindowTokens
+            || (model.configuration.maxOutputTokens ?? null) !== capacity.maxOutputTokens) throw new Error('Model capacity changed during compaction preparation');
           return { configuration: model.configuration, credentialScope: await model.credentialOwner.scope() };
-        });
-      void this.continueLaunch(job.receipt.run_id, model ? { credentialOwner: model.credentialOwner } : {}).catch(() => undefined);
+        }));
+      const credentialOwner = agent?.credentialOwner ?? model?.credentialOwner;
+      await this.continueLaunch(job.receipt.run_id, credentialOwner ? { credentialOwner } : {}).catch(() => undefined);
       return job;
-    } finally { model?.credentialOwner.release(); }
+    } finally { model?.credentialOwner.release(); agent?.release(); }
   }
 
   async refreshResources(input: ThreadResourceRefresh, signal?: AbortSignal) {

@@ -1,3 +1,4 @@
+import { contextAgentDefinitionFixture } from './context-agent.test-helper.js';
 import { expect, it } from 'vitest';
 import { createChildProfilePreparer } from './child-profiles.js';
 import { createModelAuthority } from './model-authority.js';
@@ -100,7 +101,7 @@ it('prepares defaults and explicitly saved runtime profiles from the original se
     } } }));
     const f = await fixture();
     const settings = new AgentSettingsService(root, () => false);
-    const profiles = createAgentProfilesAPI({ settings, capabilities: async () => f.capabilities });
+    const profiles = createAgentProfilesAPI({ contextAgentDefinition: contextAgentDefinitionFixture, settings, capabilities: async () => f.capabilities });
     const prepare = createChildProfilePreparer({ settings: async () => (await settings.read()).document,
       models: f.models, capabilities: async () => f.capabilities });
     let view = await profiles.read({ runtime: 'agent' });
@@ -148,7 +149,7 @@ it('rejects unsupported settings without converting or rewriting the original as
   const root = await mkdtemp(join(tmpdir(), 'profile-invalid-'));
   const path = join(root, 'agent-settings.json');
   try {
-    const profiles = createAgentProfilesAPI({ settings: new AgentSettingsService(root, () => false), capabilities: async () => [] });
+    const profiles = createAgentProfilesAPI({ contextAgentDefinition: contextAgentDefinitionFixture, settings: new AgentSettingsService(root, () => false), capabilities: async () => [] });
     for (const harness of [
       { models: { review: { agent: { instructions: 'Original instructions' } } } },
       { memory: { mode: 'off' } },

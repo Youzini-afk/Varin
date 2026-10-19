@@ -2,6 +2,7 @@ import type {
   AgentRuntime,
   AgentToolsView,
   ChildCapabilityDescriptor,
+  ContextAgentDefinition,
   HarnessAgentModelSettings,
   HarnessAgentOverrides,
   HarnessCustomAgent,
@@ -45,6 +46,8 @@ export interface AgentProfileView {
   };
   tools: AgentToolsView;
   defaults: AgentProfileDefaults | null;
+  /** Automatic context work has its own prompt contract and runtime-owned tools. */
+  automation?: ContextAgentDefinition;
 }
 
 export interface AgentProfilesSnapshot {

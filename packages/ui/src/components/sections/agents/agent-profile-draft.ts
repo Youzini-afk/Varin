@@ -45,7 +45,7 @@ export function agentProfileSaveRequest(runtime: AgentRuntime, revision: string,
       ...(draft.name.trim() === defaults?.name ? {} : { name: draft.name.trim() }),
       ...(draft.description === defaults?.description ? {} : { description: draft.description }),
       ...(draft.instructions === defaults?.instructions ? {} : { instructions: draft.instructions }),
-      ...(draft.worktree === defaults?.worktree ? {} : { worktree: draft.worktree }),
+      ...(profile.automation || draft.worktree === defaults?.worktree ? {} : { worktree: draft.worktree }),
       ...(Object.keys(modelSettings).length ? { modelSettings } : {}),
     };
     config = { kind: 'builtin', slot: profile.config.slot, binding: {
@@ -59,7 +59,7 @@ export function agentProfileSaveRequest(runtime: AgentRuntime, revision: string,
     } };
   }
   return { runtime, expectedRevision: revision, ...(profile ? { id: profile.id } : {}), config,
-    ...(draft.toolsChange === 'unchanged' ? {} : { tools: draft.toolsChange === 'reset' ? null
+    ...(profile?.automation || draft.toolsChange === 'unchanged' ? {} : { tools: draft.toolsChange === 'reset' ? null
       : [...new Set(draft.tools.split(/[\n,]/u).map(tool => tool.trim()).filter(Boolean))] }),
   };
 }

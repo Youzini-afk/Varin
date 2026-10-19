@@ -15,6 +15,7 @@ import { reportSettingsSaveState } from '@/lib/persistence';
 import { ModelSelector } from './ModelSelector';
 import { agentProfileLabels, agentProfileDefaultLabels } from './agent-profile-presentation';
 import { agentProfileDrafts, agentProfileSaveRequest, makeAgentProfileDraft, type AgentProfileDraft } from './agent-profile-draft';
+import { ContextAgentDetails } from './ContextAgentDetails';
 
 interface Props {
   profile?: AgentProfileView;
@@ -88,8 +89,8 @@ export function AgentProfileEditor({ profile, snapshot, host, cwd, onSave, onCan
   const thinkingLevels = selectedModel ? modelThinkingLevels(selectedModel) : [];
   return <form onSubmit={event => { void save(event); }} data-agent-editor="profile" data-runtime={snapshot.runtime}>
     <SettingsSection settingsItem="agents.catalog" contentClassName="space-y-5" info={t('settings.agents.applies')}>
-      <p className="typography-meta text-muted-foreground">{t('settings.agents.sharedFields')}</p>
-      <div className="flex items-center justify-between gap-3"><label htmlFor="agent-enabled" className="typography-ui-label">{t('settings.agents.enabled')}</label>
+      <p className="typography-meta text-muted-foreground">{t(profile?.automation ? 'settings.agents.context.applies' : 'settings.agents.sharedFields')}</p>
+      <div className="flex items-center justify-between gap-3"><label htmlFor="agent-enabled" className="typography-ui-label">{t(profile?.automation ? 'settings.agents.context.enabled' : 'settings.agents.enabled')}</label>
         <Switch id="agent-enabled" checked={draft.enabled} disabled={busy} onCheckedChange={enabled => update({ enabled })} /></div>
       <SettingsStackedField label={t('settings.agents.name')}><Input aria-label={t('settings.agents.name')} required value={draft.name} disabled={busy} onChange={event => update({ name: event.target.value })} /></SettingsStackedField>
       <SettingsStackedField label={t('settings.agents.description')}><Input aria-label={t('settings.agents.description')} value={draft.description} disabled={busy} onChange={event => update({ description: event.target.value })} /></SettingsStackedField>
@@ -110,6 +111,7 @@ export function AgentProfileEditor({ profile, snapshot, host, cwd, onSave, onCan
       </SettingsTwoColumn>
     </SettingsSection>
     <SettingsSection title={t('settings.agents.instructions')}><Textarea aria-label={t('settings.agents.instructions')} rows={9} className="resize-y font-mono typography-meta" value={draft.instructions} disabled={busy} onChange={event => update({ instructions: event.target.value })} /></SettingsSection>
+    {profile?.automation ? <ContextAgentDetails definition={profile.automation} instructions={draft.instructions} /> : <>
     <SettingsSection title={t('settings.agents.tools')} info={t('settings.agents.runtimeTools')} contentClassName="space-y-3">
       <p className="typography-meta" data-tools-source={source}>{t(`settings.agents.toolsSource.${source}`)}</p>
       <Textarea aria-label={t('settings.agents.tools')} rows={3} className="font-mono typography-meta" value={draft.tools} disabled={busy} onChange={event => update({ tools: event.target.value, toolsChange: 'explicit' })} />
@@ -126,6 +128,7 @@ export function AgentProfileEditor({ profile, snapshot, host, cwd, onSave, onCan
           onChange={event => update({ workFocus: event.target.checked ? [...draft.workFocus, focus] : draft.workFocus.filter(value => value !== focus) })} />{t(`workFocus.${focus}`)}</label>)}
       </div></fieldset>
     </SettingsSection>
+    </>}
     {validationError && <p role="alert" className="mb-4 typography-meta text-destructive">{validationError}</p>}
     {dirty && revision !== snapshot.revision && <p role="status" className="mb-3 typography-meta text-[var(--status-warning)]">{t('settings.agents.changedElsewhere')}</p>}
     <SettingsActionBar dirty={dirty || !profile} saving={busy} onSave={() => save()} onCancel={() => { discard(); onCancel?.(); }} saveDisabled={!draft.name.trim()} saveLabel={t('settings.common.actions.saveChanges')} error={validationError}>

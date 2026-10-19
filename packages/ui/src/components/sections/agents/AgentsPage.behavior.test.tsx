@@ -1,3 +1,4 @@
+import { contextAgentDefinitionFixture } from '../../../../../web/application-host/lib/kernel/context-agent.test-helper';
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { parseHTML } from 'linkedom';
@@ -43,7 +44,7 @@ beforeEach(async () => {
     models: { retrievalAgent: { providerId: 'local', modelId: 'fixture' } },
     agents: { legacy: { ...custom, tools: ['read', 'external_tool'] }, split: { ...custom, name: 'Runtime helper', tools: [] } },
   } }));
-  owner = createAgentProfilesAPI({ settings: new AgentSettingsService(directory, () => true),
+  owner = createAgentProfilesAPI({ contextAgentDefinition: contextAgentDefinitionFixture, settings: new AgentSettingsService(directory, () => true),
     // Controlled registered-directory input; this test does not establish Rust IPC discovery.
     capabilities: async () => [
       { name: 'file_read', version: '1', source_requirement: 'source', default_presets: ['worker', 'retrieval'] },
@@ -156,4 +157,22 @@ test('keeps draft revisions across refresh; conflicts do not silently retry or o
   await click(button('Cancel'));
   expect(container.querySelector('[role="switch"]')?.getAttribute('aria-checked')).toBe('true');
   expect(container.querySelector<HTMLInputElement>('[aria-label="Responsibility"]')?.value).toBe('External change');
+});
+
+test('edits the automatic context Agent and previews the same runtime contract without dispatch controls', async () => {
+  await render();
+  await click(container.querySelector('[data-agent-id="varin:builtin:contextCompaction"] button')!);
+  expect(container.querySelector('[data-agent-id="varin:builtin:contextCompaction"]')!.textContent).toContain('Automatic');
+  expect(container.querySelector('[aria-label="Tools (comma or newline separated)"]')).toBeNull();
+  expect(container.querySelector('[data-context-system]')!.textContent).toBe('Organize the supplied conversation.\nReturn summary and retain as JSON.');
+  const textarea = container.querySelector<HTMLTextAreaElement>('textarea')!;
+  await edit(textarea.getAttribute('aria-label')!, 'Keep the active goal and useful original evidence.');
+  expect(container.querySelector('[data-context-system]')!.textContent).toContain('Keep the active goal');
+  await save();
+  const config = (await persisted()).harness.models.contextCompaction;
+  expect(config.agent.instructions).toBe('Keep the active goal and useful original evidence.');
+  expect(config.agent.tools).toBeUndefined(); expect(config.agent.worktree).toBeUndefined();
+  await click(button('Reset'));
+  await save();
+  expect((await persisted()).harness.models.contextCompaction.agent?.instructions).toBeUndefined();
 });

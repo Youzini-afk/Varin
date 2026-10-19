@@ -72,6 +72,8 @@ it('drops a late pure plan after caller cancellation without native admission', 
 it('recalls an accepted manual key and starts a frozen text job without current provider or model credentials', async () => {
   const f = fixture(); const identity = { runtime: 'agent' as const, threadId: 'thread:main', branchId: input.branchId };
   f.job.request.key = createHash('sha256').update(JSON.stringify([identity.threadId, identity.branchId, input.key])).digest('hex');
+  f.job.request.summary_recipe.requestedModel = { providerId: 'caller-provider', modelId: 'caller-model' };
+  f.job.request.summary_recipe.agentInstructions = 'Original profile instructions';
   const runtime = { ...f.runtime,
     thread: vi.fn(async () => ({ branches: [{ branch_id: identity.branchId }] })), contextJobs: vi.fn(async () => [f.job]),
     run: vi.fn(async () => ({ id: 'summary', thread_id: f.job.receipt.thread_id, branch_id: f.job.receipt.branch_id, configuration: input.configuration })),
@@ -83,7 +85,7 @@ it('recalls an accepted manual key and starts a frozen text job without current 
   const adapter = new ThreadAdapter(runtime as unknown as AgentRuntimeClient, models, vi.fn(), vi.fn());
   adapter.bindCompaction(f.owner);
   const result = await adapter.compact({ ...identity, key: input.key, throughId: input.throughId, expectedRevision: input.expectedRevision,
-    model: { providerId: 'original-provider', modelId: 'original-model' } });
+    model: { providerId: 'caller-provider', modelId: 'caller-model' } });
   expect(result).toBe(f.job);
   await vi.waitFor(() => expect(runtime.startRun).toHaveBeenCalledOnce());
   expect(f.owner.selected).not.toHaveBeenCalled(); expect(f.owner.prepare).not.toHaveBeenCalled();

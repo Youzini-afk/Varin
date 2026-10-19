@@ -6,6 +6,7 @@ import {
   resolveAgentTools, updateAgentToolSelection,
   type HarnessSettingsInput, type HarnessModelBinding,
   type HarnessCustomAgent, type JsonValue, type ChildCapabilityDescriptor,
+  type ContextAgentDefinition,
 } from '@varin/protocol';
 import type {
   AgentProfilesAPI, AgentProfilesSnapshot, AgentProfileView, AgentProfileConfig, AgentProfileSaveRequest,
@@ -42,16 +43,20 @@ function sharedAgent(agent: HarnessCustomAgent) {
   const { tools: _tools, ...shared } = agent;
   return shared;
 }
-function definitions(capabilities: ChildCapabilityDescriptor[]) {
+function definitions(capabilities: ChildCapabilityDescriptor[], context: ContextAgentDefinition) {
   const native = agentPresetTools(capabilities);
-  return Object.values(EXECUTION_PRESETS).map(definition => ({ slot: definition.slot, name: definition.id,
+  return [...Object.values(EXECUTION_PRESETS).map(definition => ({ slot: definition.slot, name: definition.id,
     description: definition.teamDescription, instructions: definition.systemPromptFragment,
     worktree: definition.worktree, workFocus: definition.workFocus ?? [],
-    tools: native[definition.id as 'worker' | 'retrieval'] }));
+    tools: native[definition.id], automation: undefined as ContextAgentDefinition | undefined })),
+    { slot: 'contextCompaction' as const, name: 'Context organization',
+      description: 'Update conversation summaries and retain original material for subsequent work.',
+      instructions: context.instructions, worktree: 'none' as const, workFocus: [],
+      tools: context.tools.map(tool => tool.name), automation: context }];
 }
-function project(snapshot: GlobalSettingsSnapshot, target: 'agent', capabilities: ChildCapabilityDescriptor[]): AgentProfilesSnapshot {
+function project(snapshot: GlobalSettingsSnapshot, target: 'agent', capabilities: ChildCapabilityDescriptor[], context: ContextAgentDefinition): AgentProfilesSnapshot {
   const selected = settings(snapshot);
-  const profiles: AgentProfileView[] = definitions(capabilities).map(definition => {
+  const profiles: AgentProfileView[] = definitions(capabilities, context).map(definition => {
     const binding = selected.models[definition.slot] ?? {};
     const overrides = binding.agent;
     const model = binding.providerId && binding.modelId ? { providerId: binding.providerId, modelId: binding.modelId } : null;
@@ -60,10 +65,11 @@ function project(snapshot: GlobalSettingsSnapshot, target: 'agent', capabilities
       config: { kind: 'builtin', slot: definition.slot, binding: sharedBinding(binding) },
       effective: { name: overrides?.name ?? definition.name, description: overrides?.description ?? definition.description,
         instructions: overrides?.instructions ?? definition.instructions, enabled: binding.enabled !== false,
-        model, modelSource: model ? 'selected' : ['worker', 'verifier'].includes(definition.slot) ? 'inherit' : 'unconfigured',
+        model, modelSource: model ? 'selected' : ['worker', 'verifier', 'contextCompaction'].includes(definition.slot) ? 'inherit' : 'unconfigured',
         ...(overrides?.modelSettings ? { modelSettings: overrides.modelSettings } : {}),
         worktree: overrides?.worktree ?? definition.worktree, workFocus: [...definition.workFocus] },
-      tools: resolveAgentTools(overrides?.tools, target, definition.tools),
+      tools: resolveAgentTools(definition.automation ? undefined : overrides?.tools, target, definition.tools),
+      ...(definition.automation ? { automation: definition.automation } : {}),
       defaults: { name: definition.name, description: definition.description, instructions: definition.instructions,
         tools: [...definition.tools], worktree: definition.worktree },
     };
@@ -95,10 +101,11 @@ function validateSave(input: AgentProfileSaveRequest): void {
 export function createAgentProfilesAPI(owners: {
   settings: AgentProfileSettingsOwner;
   capabilities(signal?: AbortSignal): Promise<ChildCapabilityDescriptor[]>;
+  contextAgentDefinition(signal?: AbortSignal): Promise<ContextAgentDefinition>;
   onChanged?(): void;
 }): AgentProfilesAPI {
   const capabilities = async (signal?: AbortSignal) => {
-    try { return await waitWithSignal(owners.capabilities(signal), signal); }
+    try { return await waitWithSignal(Promise.all([owners.capabilities(signal), owners.contextAgentDefinition(signal)]), signal); }
     catch {
       signal?.throwIfAborted();
       throw new ProfileRequestFailure('agent-capabilities-unavailable', 'Native tool capabilities are unavailable. Check the Agent runtime connection and reload.', 503);
@@ -107,20 +114,23 @@ export function createAgentProfilesAPI(owners: {
   return {
     async read(input, signal) {
       const target = runtime(input.runtime);
-      const [snapshot, tools] = await Promise.all([waitWithSignal(owners.settings.read(), signal), capabilities(signal)]);
-      return project(snapshot, target, tools);
+      const [snapshot, [tools, context]] = await Promise.all([waitWithSignal(owners.settings.read(), signal), capabilities(signal)]);
+      return project(snapshot, target, tools, context);
     },
     async save(input, signal) {
       validateSave(input);
       const target = runtime(input.runtime);
-      const tools = await capabilities(signal);
+      const [tools, context] = await capabilities(signal);
       const config: AgentProfileConfig = input.config;
       let profileId = input.id;
       if (!profileId && (config.kind !== 'custom' || config.key !== '' || !Array.isArray(input.tools))) {
         invalid('New agents require a custom profile and an explicit tool selection for this runtime.');
       }
-      const builtin = definitions(tools).find(definition => config.kind === 'builtin' && definition.slot === config.slot);
+      const builtin = definitions(tools, context).find(definition => config.kind === 'builtin' && definition.slot === config.slot);
       if (config.kind === 'builtin' && (!builtin || profileId !== `varin:builtin:${config.slot}`)) invalid('Select a built-in profile available in this runtime.');
+      if (builtin?.automation && (input.tools !== undefined || (config.kind === 'builtin' && config.binding.agent?.worktree !== undefined))) {
+        invalid('Context organization uses its runtime-owned read tools and conversation source.');
+      }
       if (config.kind === 'custom' && profileId !== undefined && profileId !== `varin:custom:${config.key}`) invalid('The selected agent identity changed. Reload agent settings.');
       signal?.throwIfAborted();
       // The callback sees the current document protected by the original revision CAS.
@@ -145,12 +155,12 @@ export function createAgentProfilesAPI(owners: {
           agents: { ...selected.agents, [key]: agent } as unknown as JsonValue };
       });
       owners.onChanged?.();
-      return { snapshot: project(snapshot, target, tools), profileId: profileId! };
+      return { snapshot: project(snapshot, target, tools, context), profileId: profileId! };
     },
     async remove(input, signal) {
       const target = runtime(input.runtime);
       if (typeof input.id !== 'string' || !input.id.startsWith('varin:custom:')) invalid('Only custom agent profiles can be deleted.');
-      const tools = await capabilities(signal);
+      const [tools, context] = await capabilities(signal);
       signal?.throwIfAborted();
       const snapshot = await owners.settings.updateHarness(input.expectedRevision, harness => {
         const key = input.id.slice('varin:custom:'.length);
@@ -161,7 +171,7 @@ export function createAgentProfilesAPI(owners: {
         return { ...harness, models: selected.models as unknown as JsonValue, agents: agents as unknown as JsonValue };
       });
       owners.onChanged?.();
-      return project(snapshot, target, tools);
+      return project(snapshot, target, tools, context);
     },
   };
 }

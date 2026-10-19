@@ -40,7 +40,7 @@ function ProfileSidebar({ state, snapshot, refresh, onItemSelect }: ReturnType<t
     {state.error && <p role="alert" className="px-1 py-2 typography-meta text-destructive">{state.error}</p>}
     {profiles.map(profile => <div key={profile.id} data-agent-id={profile.id}>
       <SettingsSidebarItem title={agentProfileLabels(profile, t).name} selected={state.view === 'profiles' && !state.creating && state.selectedId === profile.id}
-        metadata={<span>{t(profile.kind === 'builtin' ? 'settings.agents.builtin' : 'settings.agents.custom')} · {t(!profile.effective.enabled ? 'settings.agents.status.disabled' : profile.tools.source === 'unconfigured' || profile.effective.modelSource === 'unconfigured' ? 'settings.agents.status.unconfigured' : 'settings.agents.configured')}</span>}
+        metadata={<span>{t(profile.kind === 'builtin' ? 'settings.agents.builtin' : 'settings.agents.custom')} · {t(!profile.effective.enabled ? 'settings.agents.status.disabled' : profile.automation ? 'settings.agents.automatic' : profile.tools.source === 'unconfigured' || profile.effective.modelSource === 'unconfigured' ? 'settings.agents.status.unconfigured' : 'settings.agents.configured')}</span>}
         icon={<Icon name="robot-2" className="size-4 shrink-0 text-muted-foreground" />} onSelect={() => { selectAgentProfile(profile.id); onItemSelect?.(); }} />
     </div>)}
     {!profiles.length && <p role="status" className="px-1 py-4 typography-meta text-muted-foreground">{state.loading ? t('common.loading') : t('settings.varin.agents.catalog.noMatches')}</p>}

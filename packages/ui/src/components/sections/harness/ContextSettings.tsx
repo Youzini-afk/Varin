@@ -5,6 +5,9 @@ import type { HarnessSettingsPageProps } from './harness-settings-state';
 import { AutoSaveInput } from './AutoSaveInput';
 import { HarnessModelField } from './HarnessModelField';
 import { MessageTimeSettings } from './MessageTimeSettings';
+import { SettingsPageLink } from '@/components/sections/shared/SettingsPageLink';
+import { getRuntimeEndpointGeneration, getRuntimeKey } from '@varin/application-client';
+import { beginAgentProfilesHost, selectAgentProfile, setAgentProfilesQuery } from '../agents/agent-profiles-store';
 
 export function ContextSettings({ harness, update, reserveRatio, onReserveRatioChange }: HarnessSettingsPageProps & {
   reserveRatio: number;
@@ -25,6 +28,12 @@ export function ContextSettings({ harness, update, reserveRatio, onReserveRatioC
   const setRecovery = (patch: Partial<typeof recovery>) => update({ context: { compactionRecovery: patch } });
   return <>
     <MessageTimeSettings harness={harness} update={update} />
+    <SettingsSection settingsItem="harness.models.contextCompaction">
+      <SettingsPageLink page="agents" description={t('settings.agents.context.configureDescription')} onNavigate={() => {
+        beginAgentProfilesHost(JSON.stringify([getRuntimeKey(), getRuntimeEndpointGeneration()]));
+        setAgentProfilesQuery(''); selectAgentProfile('varin:builtin:contextCompaction');
+      }}>{t('settings.harness.role.contextCompaction')}</SettingsPageLink>
+    </SettingsSection>
     <SettingsSection settingsItem="harness.models.agentPlanning">
       <HarnessModelField harness={harness} update={update} slot="agentPlanning" />
     </SettingsSection>

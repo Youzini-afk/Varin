@@ -320,6 +320,13 @@ Creation requires a custom config with an empty key and explicit tools; the Host
 identity. Removing a custom profile removes its shared definition. The HTTP client preserves the
 Host's safe failure code/message and rejects late responses after Host changes or cancellation.
 
+The built-in `contextCompaction` profile includes an `automation` descriptor from the native runtime:
+default instructions, the output-format suffix, request/budget template and read-only tools. Its model
+defaults to the conversation model. The editor changes work instructions and model parameters; tools
+and workspace controls apply to delegated profiles. Role/mention consumers filter automatic profiles
+out of ordinary conversation selection. Timing and capacity remain in context settings. Manual and
+automatic ContextJobs consume the same profile and retain their admitted choices across recovery.
+
 Model/authentication and MCP connections have separate Host APIs in `model-connections.ts` and
 `mcp-connections.ts`. `resource-management.ts` manages current user/project skills using a saved
 navigation project and revision-checked commands. The Host resolves project trust and source paths;

@@ -1445,7 +1445,7 @@ export interface ThreadSummary {
   observer_project_ids: Array<string | null>;
 }
 
-export type AgentRuntimeStreamEvent = {v: 51; kind: 'runtime-event'; kernelEpoch: string} & ({stream: 'durable'; cursor: number} | {stream: 'progress'; runId: string; threadId: string; branchId: string; requestId: string; streamId: string; sequence: number; event: unknown});
+export type AgentRuntimeStreamEvent = {v: 52; kind: 'runtime-event'; kernelEpoch: string} & ({stream: 'durable'; cursor: number} | {stream: 'progress'; runId: string; threadId: string; branchId: string; requestId: string; streamId: string; sequence: number; event: unknown});
 
 export type SourceMode = 'fixed_branch' | 'materialized' | 'live_root';
 
@@ -1904,12 +1904,22 @@ export interface BranchForkResult {
 
 export type ContextBudgetStrategy = { kind: 'builtin'; name: string; version: string } | { kind: 'extension'; providerKey: string; extensionId: string; extensionVersion: string; artifactIntegrity: string; serviceVersion: number; configurationIdentity: string; name: string; version: string };
 
+export interface ContextAgentDefinition {
+  instructions: string;
+  systemSuffix: string;
+  request: string;
+  budgetTemplate: string;
+  tools: LaunchTool[];
+}
+
 export interface ContextSummaryRecipe {
   strategy: ContextBudgetStrategy;
   mode: 'manual' | 'background' | 'blocking';
   configurationIdentity: string | null;
   additionalInstructions: string | null;
   continuationBudgetTokens?: number;
+  agentInstructions?: string;
+  requestedModel?: unknown;
 }
 
 export type ContextCompactionProducer = {kind:'builtin';name:'fold';version:'1'} | {kind:'extension';providerKey:string;providerId:string;extensionId:string;extensionVersion:string;serviceId:'varin.context.compaction';serviceVersion:1;artifactIntegrity:string;composition:HostServiceComposition;configurationIdentity:string;declaredIdentity:LaunchPolicy};

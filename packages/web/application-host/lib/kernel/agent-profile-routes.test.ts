@@ -1,3 +1,4 @@
+import { contextAgentDefinitionFixture } from './context-agent.test-helper.js';
 import { EventEmitter } from 'node:events';
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -17,7 +18,7 @@ it('retains the actual owner failure through registered routes and the public HT
   const requireAuth: RequestHandler = (_request, _response, next) => next();
   let nativeUnavailable = false;
   let nativeRequests = 0;
-  const service = createAgentProfilesAPI({ settings: new AgentSettingsService(root, () => false), capabilities: async () => {
+  const service = createAgentProfilesAPI({ contextAgentDefinition: contextAgentDefinitionFixture, settings: new AgentSettingsService(root, () => false), capabilities: async () => {
     nativeRequests += 1;
     if (nativeUnavailable) throw new Error('private implementation detail must not cross HTTP');
     return [];

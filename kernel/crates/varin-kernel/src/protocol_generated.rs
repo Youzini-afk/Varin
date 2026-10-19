@@ -5,7 +5,7 @@ use crate::model::PathState;
 use serde::Deserialize;
 use serde_json::Value;
 
-pub(crate) const KERNEL_PROTOCOL_VERSION: u64 = 51;
+pub(crate) const KERNEL_PROTOCOL_VERSION: u64 = 52;
 pub(crate) const KERNEL_MAX_FRAME_BYTES: usize = 16777216;
 pub(crate) const KERNEL_REQUEST_WINDOW: usize = 2;
 pub(crate) const KERNEL_CONTROL_METHODS: &[&str] = &[
@@ -50,6 +50,7 @@ pub(crate) const KERNEL_CONTROL_METHODS: &[&str] = &[
     "runtime.operation.status",
     "runtime.child.cancel",
     "runtime.child.capabilities",
+    "runtime.context_job.definition",
     "runtime.source.tools",
     "runtime.tools.catalog",
     "runtime.tree.cancel",
@@ -138,6 +139,7 @@ pub(crate) const KERNEL_CONTROL_RESPONSE_METHODS: &[&str] = &[
     "runtime.operation.status",
     "runtime.child.cancel",
     "runtime.child.capabilities",
+    "runtime.context_job.definition",
     "runtime.source.tools",
     "runtime.tools.catalog",
     "runtime.tree.cancel",
@@ -4611,6 +4613,11 @@ pub(crate) fn validate_generated_method_params(method: &str, params: &Value) -> 
         "runtime.child.capabilities" => serde_json::from_value::<KernelEmptyParams>(params.clone())
             .map(|_| ())
             .map_err(|error| error.to_string()),
+        "runtime.context_job.definition" => {
+            serde_json::from_value::<KernelEmptyParams>(params.clone())
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        }
         "runtime.source.tools" => serde_json::from_value::<SourceToolsParams>(params.clone())
             .map(|_| ())
             .map_err(|error| error.to_string()),

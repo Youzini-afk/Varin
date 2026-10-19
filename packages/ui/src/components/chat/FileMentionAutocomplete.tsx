@@ -274,7 +274,7 @@ export const FileMentionAutocomplete = React.forwardRef<FileMentionHandle, FileM
       return;
     }
     const query = searchQuery.trim().toLowerCase();
-    setAgents((profiles?.profiles ?? []).filter(profile => profile.effective.enabled
+    setAgents((profiles?.profiles ?? []).filter(profile => !profile.automation && profile.effective.enabled
       && `${profile.effective.name} ${profile.effective.description}`.toLowerCase().includes(query))
       .map(profile => ({ name: profile.id, description: profile.effective.description, mode: profile.kind })));
   }, [profiles, onAgentSelect, searchQuery]);

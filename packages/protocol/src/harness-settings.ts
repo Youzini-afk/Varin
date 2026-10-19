@@ -313,6 +313,7 @@ export interface HarnessSettings {
 }
 
 export type HarnessModelRole =
+  | "contextCompaction"
   | "agentPlanning"
   | "explore"
   | "retrievalAgent"

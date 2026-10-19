@@ -47,6 +47,11 @@ pub struct ContextSummaryRecipe {
     pub additional_instructions: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub continuation_budget_tokens: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent_instructions: Option<String>,
+    /// Original manual caller selection, before applying the configured context Agent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub requested_model: Option<Value>,
 }
 fn required_text<'de, D: serde::Deserializer<'de>>(
     deserializer: D,
@@ -64,6 +69,8 @@ impl ContextSummaryRecipe {
             configuration_identity: None,
             additional_instructions: None,
             continuation_budget_tokens: None,
+            agent_instructions: None,
+            requested_model: None,
         }
     }
     pub fn automatic(configuration_identity: String, mode: ContextCompactionMode) -> Self {
@@ -76,6 +83,8 @@ impl ContextSummaryRecipe {
             configuration_identity: Some(configuration_identity),
             additional_instructions: None,
             continuation_budget_tokens: None,
+            agent_instructions: None,
+            requested_model: None,
         }
     }
     pub fn validate(&self, automatic: bool) -> Result<(), String> {
@@ -119,6 +128,9 @@ impl ContextSummaryRecipe {
             return Err("invalid frozen context summary recipe".into());
         }
         Ok(())
+    }
+    pub fn system_text(&self) -> String {
+        format!("{}\n{SUMMARY_FORMAT}", self.agent_instructions.as_deref().unwrap_or(SUMMARIZER_INSTRUCTIONS))
     }
     pub fn request_text(&self) -> String {
         match self
@@ -373,8 +385,33 @@ pub(crate) struct SummarySource {
 
 use std::sync::Arc;
 
-pub const SUMMARIZER_SYSTEM: &str = "Organize conversation context so subsequent work can continue. The input contains an existing summary, when present, and conversation material with estimated token costs. The continuation budget covers the new summary and retained original material together.\nUpdate the summary and choose original material to retain within that budget according to the needs of subsequent work. Prioritize originals closely related to the current work whose important details would be lost in a summary. Summarize other useful information. Preserve applicable goals, requirements, authorizations, decisions and evidence, results, and unfinished work. Apply later corrections, merge repetition, and remove obsolete information. Keep the resulting context concise and sufficient to continue. Distinguish user requests, reference material, plans, and actual results. Use read-only queries as needed to fill gaps.\nReturn JSON with summary (the updated summary text) and retain (an array of retainId values). Retention groups preserve related message parts and tool exchanges together; their cost is counted once. Earlier batch results are provisional: carry forward useful references and revise them as further material arrives. Text and media token estimates are identified separately in the supplied budget.";
+pub const SUMMARIZER_INSTRUCTIONS: &str = "Organize conversation context so subsequent work can continue. The input contains an existing summary, when present, and conversation material with estimated token costs. The continuation budget covers the new summary and retained original material together.\nUpdate the summary and choose original material to retain within that budget according to the needs of subsequent work. Prioritize originals closely related to the current work whose important details would be lost in a summary. Summarize other useful information. Preserve applicable goals, requirements, authorizations, decisions and evidence, results, and unfinished work. Apply later corrections, merge repetition, and remove obsolete information. Keep the resulting context concise and sufficient to continue. Distinguish user requests, reference material, plans, and actual results. Use read-only queries as needed to fill gaps.";
+
+pub const SUMMARY_FORMAT: &str = "Return JSON with summary (the updated summary text) and retain (an array of retainId values). Retention groups preserve related message parts and tool exchanges together; their cost is counted once. Earlier batch results are provisional: carry forward useful references and revise them as further material arrives. Text and media token estimates are identified separately in the supplied budget.";
 pub const SUMMARY_REQUEST: &str = "Organize this conversation context.";
+
+pub const SUMMARY_BUDGET_TEMPLATE: &str = "Continuation budget (new summary + retained originals): {budget}. Text costs use {tokenizer} for the conversation model; media and provider-only costs marked unmeasured are additional. References sharing a retainId are counted once.";
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ContextAgentDefinition {
+    pub instructions: String,
+    pub system_suffix: String,
+    pub request: String,
+    pub budget_template: String,
+    pub tools: Vec<ToolSchema>,
+}
+pub fn agent_definition() -> ContextAgentDefinition {
+    ContextAgentDefinition {
+        instructions: SUMMARIZER_INSTRUCTIONS.into(), system_suffix: SUMMARY_FORMAT.into(),
+        request: SUMMARY_REQUEST.into(), budget_template: SUMMARY_BUDGET_TEMPLATE.into(),
+        tools: vec![crate::summary_tools::schema()],
+    }
+}
+pub fn budget_text(budget: Option<u64>, tokenizer: &str) -> String {
+    SUMMARY_BUDGET_TEMPLATE.replace("{budget}", &budget.map(|tokens| format!("{tokens} tokens")).unwrap_or_else(|| "unspecified".into()))
+        .replace("{tokenizer}", tokenizer)
+}
 
 pub fn policy_identity() -> PolicyIdentity {
     PolicyIdentity {

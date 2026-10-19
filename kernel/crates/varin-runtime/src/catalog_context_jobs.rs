@@ -215,11 +215,12 @@ impl Catalog {
             Some(owner) => Some(self.run(owner)?),
             None => activation::latest_run(&self.db, &request.branch_id)?,
         };
-        let continuation_tokenizer = crate::token_count::TokenCounter::for_configuration(
-            conversation.as_ref().filter(|run| run.configuration["model"].is_string())
-                .map(|run| &run.configuration).unwrap_or(&configuration));
+        let continuation_configuration = conversation.as_ref().filter(|run| run.configuration["model"].is_string())
+            .map(|run| run.configuration.clone()).unwrap_or_else(|| configuration.clone());
+        let continuation_tokenizer = crate::token_count::TokenCounter::for_configuration(&continuation_configuration);
         Ok(ContextJobPreparation {
             continuation_tokenizer,
+            continuation_configuration,
             memory_reference,
             epoch: self.epoch,
             database: self
@@ -289,13 +290,11 @@ impl Catalog {
         if let Some(parent) = &request.owner_run_id {
             let parent = self.run(parent)?;
             fence(&parent, self.epoch)?;
-            let selected = self.launch_metadata(&parent.id)?.ok_or_else(|| {
+            self.launch_metadata(&parent.id)?.ok_or_else(|| {
                 RuntimeError::Invalid("automatic compaction needs the selected model owner".into())
             })?;
             if parent.cancel_requested
                 || parent.branch_id != request.branch_id
-                || parent.configuration != configuration
-                || selected.selection.credential_scope != launch.credential_scope
             {
                 return Err(RuntimeError::Conflict(
                     "automatic compaction owner changed".into(),
@@ -595,8 +594,7 @@ impl Catalog {
             })?
             .collect::<std::result::Result<Vec<_>, _>>()?;
         for (id, original_owner) in ids {
-            let job = self.run(&id)?;
-            let selected = self.launch_metadata(&id)?;
+            let original = self.run(&original_owner)?;
             let original_launch = self.launch_metadata(&original_owner)?;
             let same_policy = original_launch
                 .as_ref()
@@ -605,8 +603,8 @@ impl Catalog {
                     .as_ref()
                     .map(|value| (&value.policy_target, &value.selection.policy));
             if same_policy
-                && job.configuration == parent.configuration
-                && selected
+                && original.configuration == parent.configuration
+                && original_launch
                     .as_ref()
                     .and_then(|value| value.selection.credential_scope.as_ref())
                     == launch
@@ -922,7 +920,7 @@ impl ContextJobCompiler {
                 source: "context_compaction:v4".into(),
             },
             content: Content::Text {
-                text: SUMMARIZER_SYSTEM.into(),
+                text: recipe.request.summary_recipe.system_text(),
             },
             opaque: None,
         }];
@@ -960,8 +958,8 @@ impl ContextJobCompiler {
         history.extend(self.recent.iter().map(|item|std::sync::Arc::unwrap_or_clone(item.clone())));
         let mut instructions = recipe.request.summary_recipe.request_text();
         if self.originals.is_some() {
-            instructions.push_str(&format!("\n\nContinuation budget (new summary + retained originals): {}. Text costs use {} for the conversation model; media and provider-only costs marked unmeasured are additional. References sharing a retainId are counted once.",
-                recipe.continuation_budget_tokens.map(|tokens| format!("{tokens} tokens")).unwrap_or_else(|| "unspecified".into()), recipe.continuation_tokenizer.description()));
+            instructions.push_str("\n\n");
+            instructions.push_str(&budget_text(recipe.continuation_budget_tokens, &recipe.continuation_tokenizer.description()));
         }
         if let Some(guidance) = &node.instructions {
             instructions.push_str(
@@ -1008,6 +1006,7 @@ impl ContextExecutionRead {
 
 pub struct ContextJobPreparation {
     continuation_tokenizer: crate::token_count::TokenCounter,
+    continuation_configuration: Value,
     memory_reference: Option<Value>,
     epoch: u64,
     database: std::path::PathBuf,
@@ -1196,8 +1195,16 @@ impl ContextJobPreparation {
         let mut sources = crate::context_material::quote_sources(&self.request.key, history)?;
         crate::context_retention::Originals::new(originals.clone(), self.continuation_tokenizer.clone()).annotate(&mut sources);
         let model_budget=crate::context_material::model_budget(&self.configuration,&self.request.summary_recipe)?;
-        let continuation_budget_tokens = self.request.summary_recipe.continuation_budget_tokens
-            .or_else(|| model_budget.source_budget_tokens.map(|tokens| tokens.saturating_mul(3) / 5));
+        let continuation_budget_tokens = if let Some(tokens) = self.request.summary_recipe.continuation_budget_tokens {
+            Some(tokens)
+        } else {
+            let available = if self.continuation_configuration == self.configuration {
+                model_budget.source_budget_tokens
+            } else {
+                crate::context_material::model_budget(&self.continuation_configuration, &self.request.summary_recipe)?.source_budget_tokens
+            };
+            available.map(|tokens| tokens.saturating_mul(3) / 5)
+        };
         let recent = Vec::new();
         let source_cut_hash = crate::context_material::hash(&json!({
             "quoteFormat":crate::context_material::QUOTE_FORMAT,
@@ -1206,7 +1213,7 @@ impl ContextJobPreparation {
             "sources":sources,"memoryReference":self.memory_reference,"botMemory":bot_memory_snapshot,"resourceActivations":resource_activations,
             "personalization":self.request.personalization,"systemPrompt":self.request.effective_system_prompt,"instructionSources":self.request.instruction_sources,
             "memoryCheckpoint":self.request.memory_checkpoint,"summaryRecipe":self.request.summary_recipe,
-            "modelBudget":model_budget,"continuationTokenizer":self.continuation_tokenizer,
+            "modelBudget":model_budget,"continuationTokenizer":self.continuation_tokenizer,"continuationBudgetTokens":continuation_budget_tokens,
         }))?;
         Ok(FrozenSummarySource {
             originals,

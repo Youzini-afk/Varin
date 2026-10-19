@@ -12,6 +12,8 @@ import type { ContextPolicySnapshot } from './context-settings.js';
 import type { ContextOwner, ContextQuery, ContextResult } from './context-bridge.js';
 import { ContextPreparationTiming } from './context-timing.js';
 import type { AgentRuntimeClient } from './agent-runtime-client.js';
+import type { ContextAgentOwner } from './context-agent.js';
+import type { ExistingHostCredentialOwner } from './credential-owner.js';
 
 export interface ContextPolicyPreparation { policy:ContextPolicySnapshot; scope:ContextBudgetScope }
 interface Job {
@@ -30,6 +32,8 @@ export class ContextService implements ContextOwner {
   // close() ends the current kernel epoch, while the Host owner can be rebound.
   private lifetime=new AbortController();
   private compaction?:ContextCompactionOwner;
+  private contextAgent?:ContextAgentOwner;
+  bindContextAgent(owner:ContextAgentOwner):void {this.contextAgent=owner;}
   private publishObservations?: (run:Run,signal:AbortSignal)=>Promise<void>;
   bindObservations(publish:(run:Run,signal:AbortSignal)=>Promise<void>):void { this.publishObservations=publish; }
   bindCompaction(owner:ContextCompactionOwner):void {this.compaction=owner;}
@@ -37,7 +41,7 @@ export class ContextService implements ContextOwner {
   constructor(private readonly runtime:AgentRuntimeClient,
     private readonly prepareContext:ContextPreparer,
     private readonly readPolicy:(run:Run,launch:LaunchIntent|null,signal:AbortSignal)=>Promise<ContextPolicyPreparation>,
-    private readonly continueRun:(runId:string,signal?:AbortSignal)=>Promise<void>,
+    private readonly continueRun:(runId:string,signal?:AbortSignal,credentialOwner?:ExistingHostCredentialOwner)=>Promise<void>,
     private readonly budget:ContextBudgetOwner | null, now?:()=>number) { this.timing=new ContextPreparationTiming(now); }
   close():void {this.lifetime.abort();this.lifetime=new AbortController();for(const job of this.jobs.values()) job.controller.abort();this.jobs.clear();this.timing.clear();this.observations.clear();}
   async query(query:ContextQuery,signal:AbortSignal):Promise<ContextResult> {
@@ -133,49 +137,57 @@ export class ContextService implements ContextOwner {
     const configuration=run.configuration as ModelSessionConfiguration;
     const scope=launch?.selection.credential_scope;
     signal.throwIfAborted();
+    const agentScope=contextCompactionScope(run.thread_id,personalization,candidate?.resources ?? checkpoint?.resources);
+    const agent=await this.contextAgent?.prepare(agentScope,{configuration,...(scope?{credentialScope:scope}:{})},signal);
+    const credentialScope=agent ? agent.credentialScope : scope;
     let job:ContextJob;
+    let preparedOwner:ExistingHostCredentialOwner | undefined;
     try {
-      const admission=await admitContextJobCandidate(this.runtime,this.compaction,
-        contextCompactionScope(run.thread_id,personalization,candidate?.resources ?? checkpoint?.resources),
-        {summaryRecipe:query.summaryRecipe,key,ownerRunId:run.id,branchId:run.branch_id,throughId:query.throughId,expectedRevision:query.expectedRevision,
-        effectiveSystemPrompt:recipe?.effective_system_prompt ?? '',instructionSources:recipe?.instruction_sources ?? [],memoryCheckpoint:recipe?.memory_checkpoint ?? null,
-        ...(personalization?{personalization}:{}),configuration,...(scope?{credentialScope:scope}:{})},signal);
-      job=admission.job;
-      // Only a fully observed new admission can produce a duration. Recovered/accepted
-      // jobs retain their original receipts, but observation time is not preparation time.
-      const observed=this.observations.get(run.branch_id);
-      if (!admission.recovered && observed?.requestId===query.requestId && query.summaryRecipe.strategy.kind==='builtin'
-        && job.compaction.producer.kind==='builtin' && job.compaction.kind==='model_plan') {
-        const measure=this.timing.start(run.branch_id,observed.identity);
-        if(measure) work.measure=measure;
+      try {
+        const admission=await admitContextJobCandidate(this.runtime,this.compaction,
+          agentScope,
+          {summaryRecipe:{...query.summaryRecipe,...(agent?.instructions !== undefined?{agentInstructions:agent.instructions}:{})},key,ownerRunId:run.id,branchId:run.branch_id,throughId:query.throughId,expectedRevision:query.expectedRevision,
+          effectiveSystemPrompt:recipe?.effective_system_prompt ?? '',instructionSources:recipe?.instruction_sources ?? [],memoryCheckpoint:recipe?.memory_checkpoint ?? null,
+          ...(personalization?{personalization}:{}),configuration:agent?.configuration ?? configuration,
+          ...(credentialScope?{credentialScope}:{})},signal,agent?.bind);
+        job=admission.job;
+        preparedOwner=agent?.credentialOwner;
+        // Only a fully observed new admission can produce a duration. Recovered/accepted
+        // jobs retain their original receipts, but observation time is not preparation time.
+        const observed=this.observations.get(run.branch_id);
+        if (!admission.recovered && observed?.requestId===query.requestId && query.summaryRecipe.strategy.kind==='builtin'
+          && job.compaction.producer.kind==='builtin' && job.compaction.kind==='model_plan') {
+          const measure=this.timing.start(run.branch_id,observed.identity);
+          if(measure) work.measure=measure;
+        }
+      } catch (error) {
+        signal.throwIfAborted();
+        if (!(error instanceof KernelClientError) || error.code!=='context-job-already-admitted') throw error;
+        // Another detached preparation may have committed while our immutable source was loading.
+        // The original Catalog admission fence prevents a second paid job, even for another key.
+        const accepted=await this.accepted(await this.runtime.contextJobs(run.branch_id,signal),run,query.expectedRevision,launch,signal);
+        if (!accepted) throw error;
+        job=accepted;
       }
-    } catch (error) {
       signal.throwIfAborted();
-      if (!(error instanceof KernelClientError) || error.code!=='context-job-already-admitted') throw error;
-      // Another detached preparation may have committed while our immutable source was loading.
-      // The original Catalog admission fence prevents a second paid job, even for another key.
-      const accepted=await this.accepted(await this.runtime.contextJobs(run.branch_id,signal),run,query.expectedRevision,launch,signal);
-      if (!accepted) throw error;
-      job=accepted;
-    }
-    signal.throwIfAborted();
-    await this.start(job,signal);
-    return job;
+      await this.start(job,signal,preparedOwner);
+      return job;
+    } finally { agent?.release(); }
   }
   private async accepted(jobs:ContextJob[],owner:Run,revision:number,launch:LaunchIntent|null,signal:AbortSignal):Promise<ContextJob|undefined> {
     for (const job of jobs) {
       if (!job.request.owner_run_id || job.request.branch_id!==owner.branch_id || job.request.expected_revision!==revision) continue;
-      const [run,selected,original]=await Promise.all([this.runtime.run(job.receipt.run_id,signal),this.runtime.launch(job.receipt.run_id,signal),this.runtime.launch(job.request.owner_run_id,signal)]);
-      if (isDeepStrictEqual(run.configuration,owner.configuration)
-        && isDeepStrictEqual(selected?.selection.credential_scope ?? null,launch?.selection.credential_scope ?? null)
+      const [source,original]=await Promise.all([this.runtime.run(job.request.owner_run_id,signal),this.runtime.launch(job.request.owner_run_id,signal)]);
+      if (isDeepStrictEqual(source.configuration,owner.configuration)
+        && isDeepStrictEqual(original?.selection.credential_scope ?? null,launch?.selection.credential_scope ?? null)
         && isDeepStrictEqual(original?.policy_target ?? null,launch?.policy_target ?? null)
         && isDeepStrictEqual(original?.selection.policy ?? null,launch?.selection.policy ?? null)) return job;
     }
     return undefined;
   }
-  private async start(job:ContextJob,signal:AbortSignal):Promise<void> {
+  private async start(job:ContextJob,signal:AbortSignal,credentialOwner?:ExistingHostCredentialOwner):Promise<void> {
     const launch=await this.runtime.launch(job.receipt.run_id,signal);
-    if(launch?.startable && launch.requires_rebind) await this.continueRun(job.receipt.run_id,signal);
+    if(launch?.startable && launch.requires_rebind) await this.continueRun(job.receipt.run_id,signal,credentialOwner);
   }
   private async observe(job:ContextJob,parentId:string,work:Job):Promise<ContextResult> {
     const signal=work.controller.signal;

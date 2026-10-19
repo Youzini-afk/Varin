@@ -8,7 +8,7 @@ use std::sync::{Arc, Mutex, mpsc};
 use varin_runtime::catalog::goals::{GoalBoundary, GoalContext};
 use varin_runtime::catalog::launches::LaunchSelection;
 use varin_runtime::context_job::{
-    ContextJobRequest, SUMMARIZER_SYSTEM, SUMMARY_REQUEST, configure_compaction_start,
+    ContextJobRequest, SUMMARY_REQUEST, configure_compaction_start,
 };
 use varin_runtime::execution::*;
 use varin_runtime::supervisor::{RunStart, RunSupervisor};
@@ -226,7 +226,10 @@ fn exercise(mode: Mode) {
         compaction: None,
         summary_recipe: {
             let mut recipe = varin_runtime::context_job::ContextSummaryRecipe::manual();
-            if matches!(mode, Mode::Select) { recipe.continuation_budget_tokens = Some(2000); }
+            if matches!(mode, Mode::Select) {
+                recipe.continuation_budget_tokens = Some(2000);
+                recipe.agent_instructions = Some("Preserve exact names needed for the next edit.".into());
+            }
             recipe
         },
         owner_run_id: None,
@@ -316,7 +319,12 @@ fn exercise(mode: Mode) {
         assert!(!serde_json::to_string(&views[1]).unwrap().contains("RECENT B retained"));
         assert!(views[1].history.iter().any(|item|matches!(&item.content,Content::ToolResult{result} if matches!(&result.completion,ToolCompletion::Result{outcome:varin_runtime::Outcome::Succeeded,..}))));
     }
-    assert!(matches!(&view.history[0].content,Content::Text{text} if text == SUMMARIZER_SYSTEM));
+    assert!(matches!(&view.history[0].content,Content::Text{text} if text == &request.summary_recipe.system_text()));
+    if matches!(mode, Mode::Select) {
+        let definition = varin_runtime::context_job::agent_definition();
+        assert!(matches!(&view.history[0].content,Content::Text{text} if text.starts_with("Preserve exact names") && text.ends_with(&definition.system_suffix)));
+        assert_eq!(definition.tools, view.binding.tools);
+    }
     assert!(
         matches!(&view.history.last().unwrap().content,Content::Text{text} if text.starts_with(SUMMARY_REQUEST))
     );
@@ -663,7 +671,7 @@ fn simultaneous_budget_candidates_admit_one_original_recipe_and_reopen_without_a
                 branch_id: "main".into(),
                 expected_head: None,
                 input: json!("Original source"),
-                configuration: json!({}),
+                configuration: json!({"model":"conversation","contextWindowTokens":16000,"maxOutputTokens":1000}),
             },
             Some(launch.clone()),
         )
@@ -694,21 +702,24 @@ fn simultaneous_budget_candidates_admit_one_original_recipe_and_reopen_without_a
             configuration_identity: Some("settings".into()),
             additional_instructions: Some(format!("Preserve guidance from {version}")),
             continuation_budget_tokens: None,
+            agent_instructions: Some(format!("Keep the active goal from {version}")),
+            requested_model: None,
         },
     };
     // Both read workers finish before either short admission. Distinct keys must not create
     // duplicate generation when an observer detached during the first preparation.
     let first = db
-        .prepare_context_job(request("old"), launch.clone(), json!({}))
+        .prepare_context_job(request("old"), launch.clone(), json!({"model":"organizer","contextWindowTokens":32000,"maxOutputTokens":1000}))
         .unwrap()
         .load()
         .unwrap();
     let second = db
-        .prepare_context_job(request("new"), launch, json!({}))
+        .prepare_context_job(request("new"), launch, json!({"model":"another-organizer","contextWindowTokens":8000,"maxOutputTokens":1000}))
         .unwrap()
         .load()
         .unwrap();
     let original = db.admit_prepared_context_job(first).unwrap();
+    assert_eq!(db.run(&original.receipt.run_id).unwrap().configuration["model"], "organizer");
     assert!(matches!(
         db.admit_prepared_context_job(second),
         Err(varin_runtime::RuntimeError::ContextJobAlreadyAdmitted)

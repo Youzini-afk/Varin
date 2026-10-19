@@ -290,6 +290,13 @@ export const SETTINGS_CATALOG: readonly SettingsCatalogEntry[] = [
       keywords: ['planning', 'policy', 'agentPlanning', 'model', 'enable', 'disable'] },
   },
   {
+    id: 'harness.models.contextCompaction', category: 'agents', owner: 'agent-settings',
+    field: { path: 'harness.models.contextCompaction', kind: 'json', scope: 'user',
+      note: '{enabled?: boolean, providerId?: string, modelId?: string, agent?: {name?, description?, instructions?, modelSettings?: {temperature?, thinkingLevel?}}}. Automatic context organization; an omitted model inherits the conversation model. enabled controls automatic preparation; manual compaction uses the same configuration.' },
+    apply: 'next-run', ui: { page: 'agents', titleKey: 'settings.harness.role.contextCompaction',
+      keywords: ['context', 'compaction', 'summary', 'prompt', '上下文', '压缩', '摘要'] },
+  },
+  {
     id: 'harness.next-step', category: 'harness', owner: 'agent-settings',
     fields: [
       { path: 'harness.nextStep', kind: 'json', scope: 'user',

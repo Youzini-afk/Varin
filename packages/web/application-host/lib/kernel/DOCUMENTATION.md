@@ -87,6 +87,13 @@ operation owner records.
 pages the native current/history directory before hydrating selected reports; UI state does not retire tasks.
 `child-source-store.ts` captures the selected concrete worktree and carries a reused Agent's changes over
 that fixed stage. Managed preparation uses the same original target handoff and restricted preparation grant.
+
+`context-agent.ts` prepares the automatic context-organization profile from the existing trusted settings
+snapshot. Both manual and automatic ContextJob admission use it; an unset model retains the conversation
+binding, and parameter overrides use the existing model owner. Native `runtime.context_job.definition`
+supplies the editor's actual prompt parts and tools. ContextJob freezes the selected instructions and model;
+recovery reads the admitted job before consulting current profile settings. Agent profile management exposes
+this automatic role alongside delegated profiles, while dispatch retains its own preset directory.
 `code-exchange.ts` and `managed-code-exchange.ts` compose selected snapshots with the existing Integration,
 Documents and recovery owners. Native journal reconciliation publishes passive Agent notices under the original
 operation identity. See [collaboration](../../../../../docs/collaboration.md) for the product contract and prompts.

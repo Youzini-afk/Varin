@@ -48,6 +48,8 @@ it('keeps shared compaction preparation alive for a cancelled query but cancels 
 it.each(['main', 'child'])('stages a %s candidate, measures only new work, and reuses its original job across Runs', async role => {
   let now = 0;
   let summaryState = 'running';
+  let summaryConfiguration: unknown;
+  const release = vi.fn();
   const listeners = new Set<(event: { stream: string }) => void>();
   const parent = { id: 'parent', thread_id: `thread:${role}`, branch_id: `branch:${role}`, state: 'running', cancel_requested: false, configuration: { model: 'same-model' } };
   const successor = { ...parent, id: 'next' };
@@ -56,10 +58,11 @@ it.each(['main', 'child'])('stages a %s candidate, measures only new work, and r
   const jobs: import('@varin/application-client').ContextJob[] = [];
   const publishContextJob = vi.fn(async () => checkpoint);
   const runtime = {
-    run: async (id: string) => id === 'parent' ? parent : id === 'next' ? successor : { ...parent, id: 'summary', state: summaryState },
+    run: async (id: string) => id === 'parent' ? parent : id === 'next' ? successor : { ...parent, id: 'summary', state: summaryState, configuration: summaryConfiguration },
     launch: async () => null, context: async () => checkpoint, contextJobs: async () => jobs,
-    createContextJob: vi.fn(async (input: { key: string }) => {
-      const job = { compaction: { producer: { kind: 'builtin', name: 'fold', version: '1' }, kind: 'model_plan', sourceCutHash: 'cut', planHash: 'plan' }, request: { key: input.key, owner_run_id: 'parent', branch_id: parent.branch_id, through_id: 'prefix', expected_revision: 1, summary_recipe: recipe }, receipt: { run_id: 'summary' } };
+    createContextJob: vi.fn(async (input: import('./protocol.generated.js').ContextJobCreateParams) => {
+      summaryConfiguration = input.configuration;
+      const job = { compaction: { producer: { kind: 'builtin', name: 'fold', version: '1' }, kind: 'model_plan', sourceCutHash: 'cut', planHash: 'plan' }, request: { key: input.key, owner_run_id: 'parent', branch_id: parent.branch_id, through_id: 'prefix', expected_revision: 1, summary_recipe: input.summaryRecipe }, receipt: { run_id: 'summary' } };
       jobs.push(job as never); return job;
     }),
     publishContextJob,
@@ -71,6 +74,9 @@ it.each(['main', 'child'])('stages a %s candidate, measures only new work, and r
     async () => ({ policy: { configurationIdentity: 'settings', enabled: true, reserveTokens: 100, keepRecentTokens: 20000,
       explicitKeepRecentTokens: null, backgroundPreparation: true, preparationWaterline: 0.75 }, scope: { threadId: parent.thread_id } }),
     async () => { throw new Error('A sendable parent must not restart'); }, null, () => now);
+  if (role === 'child') service.bindContextAgent({ prepare: async () => ({
+    instructions: 'Keep actionable evidence.', configuration: { model: 'organizer' }, release,
+  }) });
   const signal = new AbortController().signal;
   const observe = (requestId: string, tokens: number, runId = 'parent') => service.query({ action: 'prepare', runId, requestId,
     expectedRevision: 1, observation: { identity: 'binding', estimatedTokens: tokens } }, signal);
@@ -80,6 +86,10 @@ it.each(['main', 'child'])('stages a %s candidate, measures only new work, and r
     expect(await observe('b', 600)).toMatchObject({ timing: { durationMs: null, tokensPerMs: 0.2, pendingTokens: 200 } });
     const query = { action: 'compact', requestId: 'b', runId: 'parent', throughId: 'prefix', expectedRevision: 1, block: false, summaryRecipe: recipe } as const;
     expect(await service.query(query, signal)).toMatchObject({ published: false, accepted: { block: false } });
+    if (role === 'child') {
+      expect(runtime.createContextJob.mock.calls[0]![0]).toMatchObject({ configuration: { model: 'organizer' }, summaryRecipe: { agentInstructions: 'Keep actionable evidence.' } });
+      expect(release).toHaveBeenCalledOnce();
+    }
     now = 3500; summaryState = 'completed';
     for (const notify of listeners) notify({ stream: 'durable' });
     await vi.waitFor(() => expect(listeners.size).toBe(0));

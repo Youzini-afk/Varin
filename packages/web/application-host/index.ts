@@ -110,6 +110,7 @@ import { registerThreadRoutes } from './lib/kernel/thread-routes.js';
 import { createSettingsToolOwner, SETTINGS_CAPABILITY } from './lib/kernel/settings-tool-owner.js';
 import { createEnvironmentForwardRuntime } from './lib/harness/environment-forwards.js';
 import { createAgentProfilesAPI } from './lib/kernel/agent-profiles.js';
+import { createContextAgent } from './lib/kernel/context-agent.js';
 import { registerAgentProfileRoutes } from './lib/kernel/agent-profile-routes.js';
 import { registerRuntimeMaintenanceRoutes } from './lib/kernel/runtime-maintenance-routes.js';
 import { createModelAuthority } from './lib/kernel/model-authority.js';
@@ -1966,6 +1967,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     bot: createBotMemoryOwner({ runtime: agentRuntime, history: botHistory, memory: memoryService, prepareContext: threadContext,
       knowledge: input => knowledgeContextRuntime.knowledgeForThread(input) }) }));
   const contextCompaction = createContextCompaction(extensionRuntime);
+  const contextAgent = createContextAgent({ settings: modelsService.settings, models: modelAuthority });
   const contextService=new ContextService(agentRuntime,threadContext,async(run,launch,signal)=>{
     const source=launch?.selection.source;
     const root=source?.resource_owner.kind === 'local' ? (await documentsAuthority.admitWorkspaceRegistration(source.workspace_id)).canonicalPath : undefined;
@@ -1974,8 +1976,9 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     const policy=await readContextPolicy({settings:await modelsService.settings.snapshot(root),...(root?{projectRoot:root}:{}),
       ...(model.providerId?{providerId:model.providerId}:{}),modelId:model.model,contextWindowTokens:model.contextWindowTokens ?? null});
     return {policy,scope:{threadId:run.thread_id,...(admitted?.projectId?{projectId:admitted.projectId}:{}),...(root?{workspaceId:root}:{})}};
-  },(runId,signal)=>threads.continueLaunch(runId,{signal}),createContextBudget(extensionRuntime));
+  },(runId,signal,credentialOwner)=>threads.continueLaunch(runId,{signal,...(credentialOwner?{credentialOwner}:{})}),createContextBudget(extensionRuntime));
   contextService.bindCompaction(contextCompaction);
+  contextService.bindContextAgent(contextAgent);
   kernelClient.setContextOwner(contextService);
   const prepareThreadSource = createThreadSourcePreparer({
     inspectInventory: (directory, signal) => inspectSourceInventory(directory, signal),
@@ -2009,6 +2012,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     return resolveMessageTimeSettings((settings.harness as { context?: { messageTime?: unknown } } | undefined)?.context?.messageTime);
   });
   threads.bindCompaction(contextCompaction);
+  threads.bindContextAgent(contextAgent);
   scheduledTaskService.bindSourceDirectory(sourceDirectory);
   const targetSourceQuery = createSourceQueryService({ kernel: kernelClient, documents: documentsAuthority,
     validateLiveSource: liveSources.validate, storage: kernelStorageAdapter,
@@ -2172,6 +2176,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   registerThreadRoutes(app, threads, uiAuthController?.requireAuth ?? ((_request, _response, next) => next()), researchRuntime.user, computerRuntimeOwner.current.user, webRuntimeOwner.current.user, userIntegrations);
   const agentProfiles = createAgentProfilesAPI({ settings: modelsService.settings,
     capabilities: signal => agentRuntime.childCapabilities(signal),
+    contextAgentDefinition: signal => agentRuntime.contextAgentDefinition(signal),
     onChanged: () => {
       for (const client of uiVarinEventClients) {
         try { writeSseEvent(client, { type: 'varin:settings-changed', properties: { owner: 'agent-settings' } }); }

@@ -1407,6 +1407,10 @@ pub(crate) fn spawn(
                                 crate::child_capabilities::descriptors(),
                             )?);
                         }
+                        if method == "runtime.context_job.definition" {
+                            let _: crate::protocol_generated::KernelEmptyParams = serde_json::from_value(params)?;
+                            return Ok(serde_json::to_value(varin_runtime::context_job::agent_definition())?);
+                        }
                         if method == "runtime.model.select" {
                             let runtime = runtime.clone();
                             let run_models = run_models

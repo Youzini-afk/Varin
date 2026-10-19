@@ -1030,6 +1030,9 @@ export class AgentRuntimeClient {
   previewContextJob(input: ContextJobPreviewParams, signal?: AbortSignal): Promise<ContextCompactionPreview> {
     return this.kernel.agentRuntimeRequest('runtime.context_job.preview', input, signal);
   }
+  contextAgentDefinition(signal?: AbortSignal): Promise<import('./protocol.generated.js').ContextAgentDefinition> {
+    return this.kernel.agentRuntimeRequest('runtime.context_job.definition', {}, signal);
+  }
   createContextJob(
     input: ContextJobCreateParams,
     signal?: AbortSignal,
