@@ -5,11 +5,12 @@ use serde_json::Value;
 use sha2::{Digest, Sha256};
 use std::{
     collections::BTreeMap,
-    sync::{Arc, Mutex, OnceLock},
+    io::Read,
+    sync::{Arc, Mutex, OnceLock, Weak},
 };
 use tiktoken_rs::tokenizer::Tokenizer as OpenAiTokenizer;
 
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Ord, PartialOrd, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Encoding {
     #[default]
@@ -31,15 +32,16 @@ impl Encoding {
             OpenAiTokenizer::R50kBase | OpenAiTokenizer::Gpt2 => Self::R50kBase,
         }
     }
-    fn openai(self) -> OpenAiTokenizer {
+    fn load(self) -> tiktoken_rs::CoreBPE {
         match self {
-            Self::O200kBase => OpenAiTokenizer::O200kBase,
-            Self::O200kHarmony => OpenAiTokenizer::O200kHarmony,
-            Self::Cl100kBase => OpenAiTokenizer::Cl100kBase,
-            Self::P50kBase => OpenAiTokenizer::P50kBase,
-            Self::P50kEdit => OpenAiTokenizer::P50kEdit,
-            Self::R50kBase => OpenAiTokenizer::R50kBase,
+            Self::O200kBase => tiktoken_rs::o200k_base(),
+            Self::O200kHarmony => tiktoken_rs::o200k_harmony(),
+            Self::Cl100kBase => tiktoken_rs::cl100k_base(),
+            Self::P50kBase => tiktoken_rs::p50k_base(),
+            Self::P50kEdit => tiktoken_rs::p50k_edit(),
+            Self::R50kBase => tiktoken_rs::r50k_base(),
         }
+        .expect("bundled tiktoken encoding")
     }
     fn label(self) -> &'static str {
         match self {
@@ -52,7 +54,7 @@ impl Encoding {
         }
     }
 }
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum TokenizerBinding {
     Encoding { name: Encoding },
@@ -65,25 +67,66 @@ impl Default for TokenizerBinding {
         }
     }
 }
-type Loaded = Arc<OnceLock<Result<tokenizers::Tokenizer, String>>>;
-#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+#[derive(Default)]
+struct Loaded {
+    file: OnceLock<Result<tokenizers::Tokenizer, String>>,
+    bpe: OnceLock<tiktoken_rs::CoreBPE>,
+    reference: OnceLock<Arc<Loaded>>,
+}
+impl std::fmt::Debug for Loaded {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Loaded").finish_non_exhaustive()
+    }
+}
+fn shared(binding: &TokenizerBinding) -> Arc<Loaded> {
+    static ENCODERS: OnceLock<Mutex<BTreeMap<TokenizerBinding, Weak<Loaded>>>> = OnceLock::new();
+    let mut encoders = ENCODERS.get_or_init(Default::default).lock().unwrap();
+    if let Some(loaded) = encoders.get(binding).and_then(Weak::upgrade) {
+        return loaded;
+    }
+    encoders.retain(|_, cell| cell.strong_count() > 0);
+    let loaded = Arc::new(Loaded::default());
+    encoders.insert(binding.clone(), Arc::downgrade(&loaded));
+    loaded
+}
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(from = "CounterDescriptor")]
 pub struct TokenCounter {
     pub name: TokenizerBinding,
     pub matched: bool,
     #[serde(skip)]
-    loaded: OnceLock<Loaded>,
+    loaded: Arc<Loaded>,
+}
+#[derive(Deserialize)]
+struct CounterDescriptor {
+    name: TokenizerBinding,
+    matched: bool,
+}
+impl From<CounterDescriptor> for TokenCounter {
+    fn from(value: CounterDescriptor) -> Self {
+        Self::new(value.name, value.matched)
+    }
+}
+impl Default for TokenCounter {
+    fn default() -> Self {
+        Self::new(TokenizerBinding::default(), false)
+    }
 }
 impl TokenCounter {
+    fn new(name: TokenizerBinding, matched: bool) -> Self {
+        let loaded = shared(&name);
+        Self {
+            name,
+            matched,
+            loaded,
+        }
+    }
     pub fn for_model(model: &str) -> Self {
         Self::for_binding(model, None)
     }
     pub fn for_binding(model: &str, binding: Option<&TokenizerBinding>) -> Self {
         if let Some(binding) = binding {
-            return Self {
-                name: binding.clone(),
-                matched: true,
-                loaded: OnceLock::new(),
-            };
+            return Self::new(binding.clone(), true);
         }
         let model = model
             .rsplit('/')
@@ -91,13 +134,12 @@ impl TokenCounter {
             .unwrap_or(model)
             .to_ascii_lowercase();
         let encoding = tiktoken_rs::tokenizer::get_tokenizer(&model).map(Encoding::from_openai);
-        Self {
-            name: TokenizerBinding::Encoding {
+        Self::new(
+            TokenizerBinding::Encoding {
                 name: encoding.unwrap_or_default(),
             },
-            matched: encoding.is_some(),
-            loaded: OnceLock::new(),
-        }
+            encoding.is_some(),
+        )
     }
     pub fn for_configuration(configuration: &Value) -> Self {
         let binding = configuration
@@ -112,33 +154,41 @@ impl TokenCounter {
         let TokenizerBinding::File { path, sha256 } = &self.name else {
             return None;
         };
-        // The Host gives identical content one immutable path. Load/hash/parse once, outside Catalog locks.
-        static FILES: OnceLock<Mutex<BTreeMap<(String, String), Loaded>>> = OnceLock::new();
-        let cell = self.loaded.get_or_init(|| {
-            FILES
-                .get_or_init(Default::default)
-                .lock()
-                .unwrap()
-                .entry((path.clone(), sha256.clone()))
-                .or_default()
-                .clone()
-        });
-        cell.get_or_init(|| {
-            let bytes =
-                std::fs::read(path).map_err(|_| "tokenizer file unavailable".to_string())?;
-            if hex::encode(Sha256::digest(&bytes)) != *sha256 {
-                return Err("tokenizer file content changed".into());
-            }
-            let mut tokenizer = tokenizers::Tokenizer::from_bytes(bytes)
-                .map_err(|_| "unsupported tokenizer file".to_string())?;
-            tokenizer
-                .with_truncation(None)
-                .map_err(|_| "tokenizer configuration invalid".to_string())?;
-            tokenizer.with_padding(None);
-            Ok(tokenizer)
-        })
-        .as_ref()
-        .ok()
+        // Shared by live counters; the last Run/compiler drops the parsed vocabulary.
+        // Loading stays lazy so metadata capture never performs file IO under Catalog.
+        self.loaded
+            .file
+            .get_or_init(|| {
+                let mut bytes = std::fs::read(path)
+                    .or_else(|error| {
+                        // Cache compression changes representation, not a captured binding's identity.
+                        if error.kind() == std::io::ErrorKind::NotFound && path.ends_with(".json") {
+                            std::fs::read(format!("{path}.gz"))
+                        } else {
+                            Err(error)
+                        }
+                    })
+                    .map_err(|_| "tokenizer file unavailable".to_string())?;
+                if bytes.starts_with(&[0x1f, 0x8b]) {
+                    let mut decoded = Vec::new();
+                    flate2::read::GzDecoder::new(bytes.as_slice())
+                        .read_to_end(&mut decoded)
+                        .map_err(|_| "tokenizer cache decompression failed".to_string())?;
+                    bytes = decoded;
+                }
+                if hex::encode(Sha256::digest(&bytes)) != *sha256 {
+                    return Err("tokenizer file content changed".into());
+                }
+                let mut tokenizer = tokenizers::Tokenizer::from_bytes(bytes)
+                    .map_err(|_| "unsupported tokenizer file".to_string())?;
+                tokenizer
+                    .with_truncation(None)
+                    .map_err(|_| "tokenizer configuration invalid".to_string())?;
+                tokenizer.with_padding(None);
+                Ok(tokenizer)
+            })
+            .as_ref()
+            .ok()
     }
     fn encoding(&self) -> Encoding {
         match &self.name {
@@ -171,8 +221,15 @@ impl TokenCounter {
             ),
         }
     }
-    fn openai(&self) -> &'static tiktoken_rs::CoreBPE {
-        tiktoken_rs::bpe_for_tokenizer(self.encoding().openai()).expect("bundled tiktoken encoding")
+    fn openai(&self) -> &tiktoken_rs::CoreBPE {
+        let loaded = if matches!(self.name, TokenizerBinding::File { .. }) {
+            self.loaded
+                .reference
+                .get_or_init(|| shared(&TokenizerBinding::default()))
+        } else {
+            &self.loaded
+        };
+        loaded.bpe.get_or_init(|| self.encoding().load())
     }
     pub fn count(&self, text: &str) -> u64 {
         match self
@@ -335,6 +392,21 @@ mod tests {
         let recovered: TokenCounter =
             serde_json::from_value(serde_json::to_value(&a).unwrap()).unwrap();
         assert_eq!(recovered.count("中文 🎉"), 1);
+        assert!(Arc::ptr_eq(&a.loaded, &recovered.loaded));
+        let weak = Arc::downgrade(&a.loaded);
+        drop(a);
+        drop(b);
+        drop(recovered);
+        assert!(weak.upgrade().is_none());
+        // Reopen a captured raw path after the Host has compressed its cache entry.
+        let mut gzip = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
+        std::io::Write::write_all(&mut gzip, &bytes).unwrap();
+        std::fs::write(format!("{}.gz", path.display()), gzip.finish().unwrap()).unwrap();
+        std::fs::remove_file(&path).unwrap();
+        assert_eq!(
+            TokenCounter::for_binding("custom", Some(&binding)).count("中文 🎉"),
+            1
+        );
         let bad = TokenCounter::for_binding(
             "unlisted",
             Some(&TokenizerBinding::File {
@@ -344,6 +416,10 @@ mod tests {
         );
         assert_eq!(bad.count("你好，世界！"), 4);
         assert!(bad.description().contains("reference tokenizer"));
+        assert!(std::ptr::eq(bad.openai(), modern.openai()));
+        let weak = Arc::downgrade(&bad.loaded);
+        drop(bad);
+        assert!(weak.upgrade().is_none());
         std::fs::remove_dir_all(root).unwrap();
     }
 }

@@ -662,6 +662,8 @@ pub trait ModelProvider: Send + Sync {
 /// selected serializer (including its lease validation) on every request. No authorization is cached.
 pub struct RequestCompileReuse {
     identity: Option<RequestCompileIdentity>,
+    // Keep the lazy encoder shared across tool steps; dropping the Run releases it.
+    tokenizer: Option<crate::token_count::TokenCounter>,
     pub(crate) text_input: crate::providers::input_projection::TextInputProjection,
     pub(crate) responses:
         BTreeMap<usize, (Arc<ConversationItem>, Arc<crate::request_body::FrozenJson>)>,
@@ -682,6 +684,7 @@ impl RequestCompileReuse {
     pub(crate) fn new() -> Self {
         Self {
             identity: None,
+            tokenizer: None,
             text_input: Default::default(),
             responses: BTreeMap::new(),
             responses_tools: None,
@@ -725,6 +728,7 @@ impl RequestCompileReuse {
                 && a.resource_checkpoint_id == b.resource_checkpoint_id
         });
         if !hit {
+            self.tokenizer = Some(crate::token_count::TokenCounter::for_binding(&b.model, b.tokenizer.as_ref()));
             self.text_input = Default::default();
             self.responses.clear();
             self.responses_tools = None;

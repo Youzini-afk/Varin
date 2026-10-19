@@ -860,6 +860,9 @@ export class AgentRuntimeClient {
   collectContent(signal?: AbortSignal): Promise<ContentCollectionReport> {
     return this.kernel.agentRuntimeRequest('runtime.content.collect', {}, signal);
   }
+  tokenizerReferences(): Promise<import('./protocol.generated.js').TokenizerBinding[]> {
+    return this.kernel.agentRuntimeRequest('runtime.tokenizers.references', {});
+  }
   /** Use the Run epoch and actual ModelStep/tool-call or policy-action/node identity. */
   admission(
     input: AdmissionInspectParams,

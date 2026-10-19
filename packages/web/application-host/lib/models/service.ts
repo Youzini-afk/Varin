@@ -415,6 +415,9 @@ export class ModelsService {
   }
   async prepareTokenizer(source: import('@varin/application-client').ModelTokenizer) { return this.tokenizers.resolve(source); }
   async cachedTokenizer(source: import('@varin/application-client').ModelTokenizer) { return this.tokenizers.cached(source); }
+  acquireTokenizer(source?: import('@varin/application-client').ModelTokenizer, inherited?: Pick<import('../kernel/protocol.generated.js').ModelSessionConfiguration, 'tokenizer'>) {
+    return this.tokenizers.acquire(source, inherited);
+  }
   async listModels(): Promise<SelectedModel[]> {
     return (await this.read()).channels.filter(channel => channel.enabled)
       .flatMap(channel => channel.models.filter(model => model.enabled && model.operations.includes('chat')).map(model => this.#selected(channel, model)));

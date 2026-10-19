@@ -8,6 +8,7 @@ import type { ModelSessionConfiguration } from './protocol.generated.js';
 import { appendModelPath } from '../models/connection.js';
 import type { ModelConnectionOptions, ModelThinkingConfiguration, ThreadModel, ThreadModelInfo, ThreadThinkingLevel } from '@varin/application-client';
 import { modelOptions, thinkingLevels } from './model-options.js';
+import type { TokenizerLease } from '../models/tokenizers.js';
 export interface SelectedModel {
   tokenizer?: ModelTokenizer;
   providerId: string; modelId: string; name: string; api: string; baseUrl: string; maxTokens: number;
@@ -24,6 +25,7 @@ export interface SelectedModel {
   adapterId?: string; adapterVersion?: string; adapterIdentity?: string; adapterBindingId?: string; endpointPath?: string;
 }
 export interface ModelExecutionAuthority extends ExistingModelAuthRuntime {
+  acquireTokenizer?(source?: ModelTokenizer, inherited?: Pick<ModelSessionConfiguration, 'tokenizer'>): Promise<TokenizerLease>;
   prepareTokenizer?(source: ModelTokenizer): Promise<TokenizerBinding | undefined>;
   cachedTokenizer?(source: ModelTokenizer): Promise<TokenizerBinding | undefined>;
   getAuth(providerId: string, modelId?: string, dispatch?: CredentialDispatch): ReturnType<ExistingModelAuthRuntime['getAuth']>;
@@ -181,12 +183,16 @@ export function createModelAuthority(authority: ModelAuthority, options: { outpu
   }
   return {
     async resolveCaptured(captured: { model: SelectedModel; authority: ModelExecutionAuthority; release(): void }, selection: ThreadModel) {
+      let tokenizer: TokenizerLease | undefined;
+      let credentialOwner: ExistingHostCredentialOwner | undefined;
+      const release = () => { tokenizer?.release(); captured.release(); };
       try {
-        const configuration = await configurationFor(captured.model, selection.thinkingLevel, selection.temperature, captured.authority);
-        const credentialOwner = ownerFor(configuration, captured.authority, captured.release);
+        tokenizer = await authority.acquireTokenizer?.(captured.model.tokenizer);
+        const configuration = await configurationFor(captured.model, selection.thinkingLevel, selection.temperature, captured.authority, undefined, tokenizer);
+        credentialOwner = ownerFor(configuration, captured.authority, release);
         await credentialOwner.scope();
         return { configuration, credentialOwner, acceptsImages: configuration.acceptsImages ?? false };
-      } catch (error) { captured.release(); throw error; }
+      } catch (error) { if (credentialOwner) credentialOwner.release(); else release(); throw error; }
     },
     async listModels(): Promise<ThreadModelInfo[]> {
       return (await authority.listModels()).filter(model => families.has(model.api) || Boolean(model.adapterId && model.adapterVersion && model.endpointPath))
@@ -208,7 +214,11 @@ export function createModelAuthority(authority: ModelAuthority, options: { outpu
     async resolveModel(selection: ThreadModel, inherited?: { configuration: ModelSessionConfiguration; credentialScope: CredentialScope }) {
       const captured = authority.captureModel ? await authority.captureModel(selection.providerId, selection.modelId, inherited?.configuration)
         : { model: await authority.selectedModel(selection.providerId, selection.modelId), authority };
+      let tokenizer: TokenizerLease | undefined;
+      let credentialOwner: ExistingHostCredentialOwner | undefined;
+      const release = () => { tokenizer?.release(); captured.release?.(); };
       try {
+        tokenizer = await authority.acquireTokenizer?.(captured.model.tokenizer, inherited?.configuration);
         if (inherited) {
           const original = inherited.configuration;
           const base = await configurationFor(captured.model, original.thinkingLevel as ThreadThinkingLevel | undefined,
@@ -217,12 +227,12 @@ export function createModelAuthority(authority: ModelAuthority, options: { outpu
           // simply rebinding an already-normalized request. Never mix today's defaults.
           if (base.configurationGeneration !== original.configurationGeneration) return failed('model-configuration-changed');
         }
-        const configuration = await configurationFor(captured.model, selection.thinkingLevel, selection.temperature, captured.authority, inherited?.configuration.toolOutputVisibleBytes, inherited?.configuration);
-        const credentialOwner = ownerFor(configuration, captured.authority, captured.release);
+        const configuration = await configurationFor(captured.model, selection.thinkingLevel, selection.temperature, captured.authority, inherited?.configuration.toolOutputVisibleBytes, tokenizer ?? inherited?.configuration);
+        credentialOwner = ownerFor(configuration, captured.authority, release);
         const scope = await credentialOwner.scope();
         if (inherited && !sameScope(scope, inherited.credentialScope)) return failed('credential-scope-changed');
         return { configuration, credentialOwner, acceptsImages: configuration.acceptsImages ?? false };
-      } catch (error) { captured.release?.(); throw error; }
+      } catch (error) { if (credentialOwner) credentialOwner.release(); else release(); throw error; }
     },
     async rebindModel(configuration: ModelSessionConfiguration, expectedScope: CredentialScope) {
       if (!expectedScope) return failed('credential-selection-missing');
@@ -230,15 +240,19 @@ export function createModelAuthority(authority: ModelAuthority, options: { outpu
       const catalogModelId = configuration.catalogModelId ?? configuration.model;
       const captured = authority.captureModel ? await authority.captureModel(providerId, catalogModelId, configuration)
         : { model: await authority.selectedModel(providerId, catalogModelId), authority };
+      let tokenizer: TokenizerLease | undefined;
+      let owner: ExistingHostCredentialOwner | undefined;
+      const release = () => { tokenizer?.release(); captured.release?.(); };
       try {
+      tokenizer = await authority.acquireTokenizer?.(undefined, configuration);
       if (captured.model.api !== configuration.providerFamily
         || (captured.model.adapterId ?? captured.model.api) !== configuration.adapterId
         || (captured.model.adapterVersion ?? '1') !== configuration.adapterVersion
         || (captured.model.adapterIdentity ?? null) !== (configuration.adapterIdentity ?? null)) return failed('model-configuration-changed');
-      const owner = ownerFor(configuration, captured.authority, captured.release);
+      owner = ownerFor(configuration, captured.authority, release);
       if (!sameScope(await owner.scope(), expectedScope)) return failed('credential-scope-changed');
       return owner;
-      } catch (error) { captured.release?.(); throw error; }
+      } catch (error) { if (owner) owner.release(); else release(); throw error; }
     },
   };
 }

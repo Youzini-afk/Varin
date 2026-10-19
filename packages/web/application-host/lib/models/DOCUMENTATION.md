@@ -71,7 +71,9 @@ selects local files. The advanced model editor exposes the same source choices.
 
 `ModelTokenizers` prepares resources under `VARIN_DATA_DIR/cache/tokenizers`. Downloads use the Host's
 egress policy without model credentials. Concurrent preparation for the same source shares one job;
-files are published atomically under their SHA-256, and source references persist across restarts.
+files are gzip-compressed and published atomically under the SHA-256 of their uncompressed bytes,
+and source references persist across restarts. Captured raw `.json` paths also resolve the compressed
+representation. Source files are left untouched.
 Floating repository references are pinned to the first cached content; select a new revision to update.
 Local file changes are detected from filesystem metadata and create a new immutable cache file.
 Conversation preparation uses available cache entries and starts missing downloads in the background.
@@ -83,6 +85,18 @@ keep their original reference. Rust loads tokenizer JSON data, disables padding/
 across models and caches fragment counts. It never executes repository code or downloads on the counting
 path. Unsupported or unavailable tokenizer files retain reference counting and identify it in estimate
 metadata. Existing provider-usage calibration remains separate from local text token counts.
+
+Parsed vocabularies (including tiktoken encodings) are shared by live counters. The Run compiler retains
+its lazy counter across tool steps; the last counter releases the vocabulary. The registry holds weak
+references, so idle model configurations do not keep parsed vocabularies resident.
+
+Cache collection runs after source/configuration changes and the release of an obsolete binding.
+It retains configured source heads, Host model-binding leases and native execution/continuation roots.
+The native reference read includes active/queued Runs, the latest ordinary branch Run, pending model
+selections, frozen child directories and unfinished compaction/delegation. Terminal internal jobs and
+superseded terminal Runs no longer pin versions. Metadata/content reads run off the Catalog lock;
+the Host serializes publication, binding acquisition and cache removal. Collection never walks user
+directories, expires by age/count, or changes durable conversation metadata.
 
 ## Channels and model selection
 

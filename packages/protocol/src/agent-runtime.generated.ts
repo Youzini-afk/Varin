@@ -1445,7 +1445,7 @@ export interface ThreadSummary {
   observer_project_ids: Array<string | null>;
 }
 
-export type AgentRuntimeStreamEvent = {v: 50; kind: 'runtime-event'; kernelEpoch: string} & ({stream: 'durable'; cursor: number} | {stream: 'progress'; runId: string; threadId: string; branchId: string; requestId: string; streamId: string; sequence: number; event: unknown});
+export type AgentRuntimeStreamEvent = {v: 51; kind: 'runtime-event'; kernelEpoch: string} & ({stream: 'durable'; cursor: number} | {stream: 'progress'; runId: string; threadId: string; branchId: string; requestId: string; streamId: string; sequence: number; event: unknown});
 
 export type SourceMode = 'fixed_branch' | 'materialized' | 'live_root';
 
@@ -1925,6 +1925,8 @@ export type ContextCompactionPlan = {kind:'text';sourceCutHash:string;text:strin
 export interface ContextCompactionCandidate {producer:ContextCompactionProducer;plan:ContextCompactionPlan}
 
 export interface ContextCompactionSource {sourceId:string;item:{id:string;provenance:{kind:'external_data';source:string};content:{kind:'text';text:string}|{kind:'media';media:ResolvedMedia};opaque:null}}
+
+export type TokenizerBinding = {kind: 'encoding'; name: string} | {kind: 'file'; path: string; sha256: string}
 
 export interface ContextCompactionModelBudget {contextWindowTokens:number|null;maxOutputTokens:number|null;sourceBudgetTokens:number|null}
 

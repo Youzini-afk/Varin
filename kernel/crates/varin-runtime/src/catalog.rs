@@ -1812,6 +1812,9 @@ pub mod plan;
 #[path = "catalog_models.rs"]
 pub mod models;
 
+#[path = "catalog_tokenizers.rs"]
+pub mod tokenizers;
+
 #[path = "catalog_result_content.rs"]
 pub mod result_content;
 

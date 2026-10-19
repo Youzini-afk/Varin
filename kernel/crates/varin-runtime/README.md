@@ -102,8 +102,10 @@ unmeasured media/provider content and are not provider billing measurements. The
 durable; checkpoint references keep selected items, including their media, alive through collection.
 `token_count` loads a generic tokenizer binding frozen in model configuration and request snapshots:
 an encoding name or a content-addressed Host-prepared `tokenizer.json` file. The Host owns discovery,
-public downloads and cache preparation; Rust hashes/parses the immutable file once and shares the
-loaded tokenizer. Missing/unusable files use a labeled reference encoding without stopping the Run.
+public downloads, gzip cache preparation and collection; Rust decompresses/hashes/parses each live
+file binding once. Live counters share both file tokenizers and owned tiktoken encodings through weak
+registry entries. A Run compiler retains its lazy counter across tool steps; the last counter releases
+the vocabulary. Missing/unusable files use a labeled reference encoding without stopping the Run.
 OpenAI mappings come from tiktoken; unmatched models use the o200k reference. No model-specific
 vocabularies or model-name branches are bundled. Immutable request fragments cache counts; changed
 tokenizer bindings invalidate calibration/reuse identities. Summary input uses its own model tokenizer;

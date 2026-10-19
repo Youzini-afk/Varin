@@ -59,6 +59,8 @@ export interface ModelSessionConfiguration {
   modelOptions?: unknown;
 }
 
+export type TokenizerBinding = {kind: 'encoding'; name: string} | {kind: 'file'; path: string; sha256: string}
+
 export interface ModelHttpConfiguration { headers?:Record<string,string>; proxy?:{mode:"direct"}|{mode:"proxy";url:string} }
 
 export interface ResourceActivation {

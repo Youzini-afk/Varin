@@ -1635,6 +1635,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   });
   let modelCatalogRevision = 0;
   const unsubscribeModels = modelsService.subscribe(kind => {
+    if (kind === 'channels') void modelsService.tokenizers.collect();
     for (const listener of extensionConfigurationListeners) listener();
     const revision = String(++modelCatalogRevision), ids = [kind === 'authorization' ? 'model-authorization' : kind === 'credentials' ? 'model-credentials' : 'model-channels'];
     for (const client of uiVarinEventClients) {
@@ -1835,6 +1836,19 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     return agentMcpPolicy(cwd,Boolean(workspace) && await projectTrust.trusted(cwd));
   }}), documentsAuthority.admitWorkspaceRegistration);
   agentRuntime.bindManagedSources(managedRemoteTargets);
+  let stopTokenizerCollection: (() => Promise<void>) | undefined;
+  const startTokenizerCollection = () => {
+    stopTokenizerCollection ??= modelsService.tokenizers.startCollection({
+      sources: async () => (await modelsService.read()).channels.flatMap(channel => channel.models.flatMap(model => model.tokenizer ? [model.tokenizer] : [])),
+      durable: () => {
+        if (!kernelClient.handshake) throw new Error('Runtime tokenizer references are unavailable');
+        return agentRuntime.tokenizerReferences();
+      },
+    });
+    void modelsService.tokenizers.collect();
+  };
+  const unsubscribeTokenizerKernel = kernelClient.subscribeReady(startTokenizerCollection);
+  if (kernelClient.handshake) startTokenizerCollection();
   managedRecoveryOwner.current = createManagedRecoveryCoordinator({ coordinatorHostId: agentRuntime.coordinatorHostId,
     registry: managedRemoteTargets });
   kernelClient.setManagedSourceOwner(owner => agentRuntime.managedSource(owner), () => agentRuntime.coordinatorHostId);
@@ -2934,6 +2948,8 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     isReady: () => kernelClient.isReady,
     stop: async (shutdownOptions: { exitProcess?: boolean | undefined } = {}) => {
       observations.stop();
+      unsubscribeTokenizerKernel();
+      await stopTokenizerCollection?.();
       // Stop timer/watcher producers before their runtime and storage
       // dependencies begin shutting down.
       unsubscribeProjectTrust();

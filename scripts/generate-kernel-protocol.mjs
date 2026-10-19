@@ -55,7 +55,7 @@ const extensionToolNames = ['Outcome', 'Effect', 'Lifetime', 'OperationCallCompl
 const extensionToolsGenerated = '// Generated from kernel/protocol/schema.json. Do not hand-edit.\n\n'
   + extensionToolNames.map(name => renderDto(name, schema.dto[name])).join('\n\n') + '\n';
 const extensionModelsGenerated = '// Generated from kernel/protocol/schema.json. Do not hand-edit.\nimport type { Outcome, Effect, Lifetime, OutputBody, ResolvedMedia, ContentProvenance, LaunchTool } from \'./nested-tools.generated.js\';\n\n'
-  + ["HistoryRange", "ModelOpaqueItem", "ModelToolCall", "ModelToolCompletion", "ModelContent", "ModelConversationItem", "RequestBinding", "RequestOrigin", "RequestView", "ModelUsageReceipt", "ProviderEvent", "FinishReason", "ModelProtocolCall", "ModelProtocolResult", "ModelSessionConfiguration", "ModelHttpConfiguration", "ResourceActivation", "AgentResourceReference"].map(name => renderDto(name, schema.dto[name])).join('\n\n') + '\n';
+  + ["HistoryRange", "ModelOpaqueItem", "ModelToolCall", "ModelToolCompletion", "ModelContent", "ModelConversationItem", "RequestBinding", "RequestOrigin", "RequestView", "ModelUsageReceipt", "ProviderEvent", "FinishReason", "ModelProtocolCall", "ModelProtocolResult", "ModelSessionConfiguration", "TokenizerBinding", "ModelHttpConfiguration", "ResourceActivation", "AgentResourceReference"].map(name => renderDto(name, schema.dto[name])).join('\n\n') + '\n';
 const protocolGenerated = '// Generated from kernel/protocol/schema.json. Do not hand-edit.\n\n' + dtoEntries.filter(([name]) => (schema.runtimeExports ?? []).includes(name)).map(([name, spec]) => renderDto(name, spec)).join('\n\n') + '\n';
 const generated = `/**
  * Generated from \`kernel/protocol/schema.json\`.

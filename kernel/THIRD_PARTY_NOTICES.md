@@ -5,6 +5,7 @@ used by the private executable are distributed under their upstream permissive l
 
 - `rusqlite` / `libsqlite3-sys` — MIT; SQLite itself is public domain.
 - `serde`, `serde_json`, `thiserror`, `uuid`, `sha2`, `hex`, and `base64` — MIT or Apache-2.0.
+- `flate2` and its Rust compression backend `miniz_oxide` — MIT or Apache-2.0.
 - `tree-sitter` — MIT.
 - `wasmtime`, its C API, and Cranelift — Apache-2.0 with LLVM exceptions.
 

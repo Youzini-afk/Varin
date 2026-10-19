@@ -704,6 +704,26 @@ pub(crate) fn spawn(
                             deferred = true;
                             return Ok(Value::Null);
                         }
+                        if method == "runtime.tokenizers.references" {
+                            let read = runtime.catalog().lock()
+                                .map_err(|_| KernelError::Storage("catalog owner failed".into()))?
+                                .capture_tokenizer_references();
+                            let response_id = id.clone();
+                            let response_sender = responses.clone();
+                            let done = finished.clone();
+                            thread::Builder::new().name("runtime-tokenizer-references".into()).spawn(move || {
+                                let result = read.load().map_err(|error| KernelError::Operation(error.to_string()))
+                                    .and_then(|bindings| serde_json::to_value(bindings).map_err(Into::into));
+                                let response = match result {
+                                    Ok(value) => response_ok(&response_id, value),
+                                    Err(error) => response_error(&response_id, &error),
+                                };
+                                done(&response_id);
+                                let _ = response_sender.send(response);
+                            })?;
+                            deferred = true;
+                            return Ok(Value::Null);
+                        }
                         if method == "runtime.content.collect" {
                             // This admission is metadata-only. Maintenance never enters Storage or
                             // the ordinary history/receipt content queue, and does not own a Run.
