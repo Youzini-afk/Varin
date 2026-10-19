@@ -57,7 +57,7 @@ async function fixture(reply: (body: Record<string, unknown>, response: ServerRe
   await kernel.start();
   const secret = 'fake-http-provider-key-not-a-real-secret';
   // Scripted calls use the controlled MCP owner's real versioned declarations.
-  // Provider requests remain unchanged and expose only the stable gateway schemas.
+  // Each model request declares that generation's direct tools and MCP entrypoints.
   let capabilities: LaunchTool[] = [];
   const requests: Array<{ body: Record<string, unknown>; capabilities: LaunchTool[]; authorization?: string }> = [];
   const provider = createServer((request, response) => {
@@ -221,8 +221,7 @@ it('lazy discovery starts only its selected real server, then validates and gate
   expect(await fs.stat(f.startsPath).then(() => true, () => false)).toBe(false);
   expect(await fs.stat(f.unusedPath).then(() => true, () => false)).toBe(false);
   const toolNames = (f.requests[0]!.body.tools as Array<{ name: string }>).map(tool => tool.name);
-  expect(toolNames).toEqual(expect.arrayContaining(['tool_describe', 'tool_invoke', 'ask_user']));
-  expect(toolNames).not.toEqual(expect.arrayContaining(['mcp_call', 'mcp_discover']));
+  expect(toolNames).toEqual(expect.arrayContaining(['tool_describe', 'tool_invoke', 'ask_user', 'mcp_call', 'mcp_discover']));
   expect(toolNames.some(name => name.startsWith('mcp__fixture__'))).toBe(false);
   held.writeHead(200, { 'content-type': 'text/event-stream' });
   held.end(`data: ${JSON.stringify({ type: 'response.completed', response: { output: [discover('lazy-discover-id')] } })}\n\n`);
@@ -298,7 +297,11 @@ it('a real configuration watch prepares a new MCP directory while the frozen req
   const nextTool = f.requests[1]!.capabilities.find(tool => tool.name === originalTool.name)!;
   expect((nextTool.schema as { properties: unknown }).properties).toHaveProperty('message');
   expect((nextTool.schema as { properties: unknown }).properties).not.toHaveProperty('text');
-  expect(f.requests[1]!.body.tools).toEqual(f.requests[0]!.body.tools);
+  const originalDeclarations = f.requests[0]!.body.tools as Array<{ name: string }>;
+  const nextDeclarations = f.requests[1]!.body.tools as Array<{ name: string }>;
+  expect(originalDeclarations.find(tool => tool.name === originalTool.name)).toMatchObject({ description: originalTool.description, parameters: originalTool.schema });
+  expect(nextDeclarations.find(tool => tool.name === nextTool.name)).toMatchObject({ description: nextTool.description, parameters: nextTool.schema });
+  expect(nextDeclarations.filter(tool => tool.name !== nextTool.name)).toEqual(originalDeclarations.filter(tool => tool.name !== originalTool.name));
   const selection = (await f.runtime.launch(receipt.run_id))!.selection;
   expect(selection.mcp_binding!.generation).not.toBe(original.generation);
   expect(selection.tool_schema_generation).toBeGreaterThan(0);
@@ -377,7 +380,9 @@ it('reopening a question restores only the selected MCP dependencies while an un
     if (turns === 3) {
       expect(capabilities.some(tool => tool.name.startsWith('mcp__fixture__'))).toBe(true);
       expect(capabilities.some(tool => tool.name.startsWith('mcp__slow__'))).toBe(false);
-      expect((body.tools as Array<{name: string}>).some(tool => tool.name.startsWith('mcp__'))).toBe(false);
+      const names = (body.tools as Array<{name: string}>).map(tool => tool.name);
+      expect(names.some(name => name.startsWith('mcp__fixture__'))).toBe(true);
+      expect(names.some(name => name.startsWith('mcp__slow__'))).toBe(false);
     }
     response.end(`data: ${JSON.stringify({ type: 'response.completed', response: { output: [output] } })}\n\n`);
   }, undefined, undefined, 'composed');

@@ -23,9 +23,8 @@ it('a retrieval tool with no Host owner reports unavailable and records a real t
   const run = await f.admit('missing-retrieval-owner', ['code_retrieval']); await run.start();
   await expect.poll(async () => (await f.runtime.run(run.receipt.run_id)).state, { timeout: 10_000 }).toBe('completed');
   expect(f.requests).toHaveLength(2);
-  expect(JSON.stringify(f.requests[0]!.tools)).toContain('tool_invoke');
-  expect(JSON.stringify(f.requests[0]!.tools)).not.toContain('code_retrieval');
-  expect(JSON.stringify(latestOutput(f.requests[1]!))).toMatch(/unavailable/);
+  expect((f.requests[0]!.tools as Array<{ name: string }>).map(tool => tool.name)).toEqual(expect.arrayContaining(['tool_invoke', 'code_retrieval']));
+  expect(latestOutput(f.requests[1]!)).toMatchObject({ outcome: 'failed', content: { status: 'unavailable' } });
   expect((await f.runtime.history(run.branchId)).some(item => item.source === 'tool')).toBe(true);
 }, 20_000);
 

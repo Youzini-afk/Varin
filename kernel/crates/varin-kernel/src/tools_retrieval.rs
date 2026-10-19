@@ -337,7 +337,7 @@ impl KernelToolExecutor {
             Ok(content) => ToolCompletion::Result {
                 outcome: match content["status"].as_str() {
                     Some("cancelled") => Outcome::Cancelled,
-                    Some("failed") => Outcome::Failed,
+                    Some("unavailable" | "unsupported" | "failed" | "stale") => Outcome::Failed,
                     _ => Outcome::Succeeded,
                 },
                 effect: Effect::None,

@@ -74,9 +74,8 @@ it('selected language capability with no Host owner reports unavailable, never a
   const run = await f.admit('unavailable-owner', ['language_definition']); await run.start();
   await expect.poll(async () => (await f.runtime.run(run.receipt.run_id)).state).toBe('completed');
   expect(f.requests).toHaveLength(2);
-  expect(JSON.stringify(f.requests[0]!.tools)).toContain('tool_invoke');
-  expect(JSON.stringify(f.requests[0]!.tools)).not.toContain('language_definition');
-  expect(JSON.stringify(output(f.requests[1]!))).toMatch(/unavailable/);
+  expect((f.requests[0]!.tools as Array<{ name: string }>).map(tool => tool.name)).toEqual(expect.arrayContaining(['tool_invoke', 'language_definition']));
+  expect(output(f.requests[1]!)).toMatchObject({ outcome: 'failed', content: { status: 'unavailable' } });
   expect(output(f.requests[1]!)).not.toMatchObject({ content: { status: 'ready', locations: [] } });
   expect((await f.runtime.history(run.branchId)).some(item => item.source === 'tool')).toBe(true);
 }, 20_000);
