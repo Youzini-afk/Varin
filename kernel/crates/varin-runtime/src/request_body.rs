@@ -1,6 +1,7 @@
 //! Provider JSON with immutable, already encoded fragments. Only the final wire buffer is
 //! contiguous: freezing copies fragment bytes, without reconstructing or escaping their payloads.
 use bytes::Bytes;
+use crate::token_count::{TokenCounter, TokenizerName};
 use serde::{ser::SerializeMap, Deserialize, Deserializer, Serialize, Serializer};
 use serde_json::{
     value::{to_raw_value, RawValue},
@@ -15,14 +16,19 @@ use std::{
 #[derive(Debug)]
 pub(crate) struct FrozenJson {
     raw: Box<RawValue>,
-    estimated_bytes: u64,
+    tokens: OnceLock<(TokenizerName, u64)>,
 }
 impl FrozenJson {
     pub(crate) fn new(value: Value) -> Arc<Self> {
         Arc::new(Self {
-            estimated_bytes: crate::context_capacity::size(&value),
+            tokens: OnceLock::new(),
             raw: to_raw_value(&value).expect("JSON value serializes"),
         })
+    }
+    fn tokens(&self, counter: TokenCounter) -> u64 {
+        let count = || counter.json(&serde_json::from_str(self.raw.get()).expect("validated JSON"));
+        let (name, tokens) = self.tokens.get_or_init(|| (counter.name, count()));
+        if *name == counter.name { *tokens } else { count() }
     }
 }
 impl Serialize for FrozenJson {
@@ -44,13 +50,13 @@ impl Field {
             value => Self::Json(FrozenJson::new(value)),
         }
     }
-    fn size(&self) -> u64 {
+    fn tokens(&self, counter: TokenCounter) -> u64 {
         match self {
-            Self::Json(value) => value.estimated_bytes,
-            Self::Array(items) => items.iter().fold(2u64, |size, value| {
-                size.saturating_add(value.estimated_bytes).saturating_add(1)
+            Self::Json(value) => value.tokens(counter),
+            Self::Array(items) => items.iter().fold(counter.count("[]"), |size, value| {
+                size.saturating_add(value.tokens(counter)).saturating_add(counter.count(","))
             }),
-            Self::Object(body) => body.estimated_bytes(),
+            Self::Object(body) => body.estimated_tokens(counter),
         }
     }
     fn value(&self) -> Value {
@@ -209,12 +215,12 @@ impl RequestBody {
         fields.insert(key.into(), Field::Object(Box::new(body)));
         self.encoded.take();
     }
-    pub(crate) fn estimated_bytes(&self) -> u64 {
+    pub(crate) fn estimated_tokens(&self, counter: TokenCounter) -> u64 {
         let Root::Object(fields) = &self.root else {
             let Root::Json(value) = &self.root else {
                 unreachable!()
             };
-            return value.estimated_bytes;
+            return value.tokens(counter);
         };
         let kind = self.get("type");
         let kind = kind.as_ref().and_then(Value::as_str);
@@ -234,9 +240,9 @@ impl RequestBody {
                     && matches!(key.as_str(), "encrypted_content" | "signature"))
                     && !(fields.contains_key("text") && key.as_str() == "thoughtSignature")
             })
-            .fold(2u64, |size, (key, value)| {
-                size.saturating_add(key.len() as u64 + 4)
-                    .saturating_add(value.size())
+            .fold(counter.count("{}"), |size, (key, value)| {
+                size.saturating_add(counter.field(key))
+                    .saturating_add(value.tokens(counter))
             })
     }
     pub(crate) fn transcript_prefix(
@@ -385,7 +391,7 @@ mod tests {
     use serde_json::json;
 
     #[test]
-    fn frozen_envelope_clones_keep_wire_identity_and_original_size_rules() {
+    fn frozen_envelope_clones_keep_wire_identity_and_cached_token_counts() {
         let value = json!({"input":[
             {"role":"user","content":"汉字 🧭\n\"\\"},
             {"type":"input_image","image_url":format!("data:image/png;base64,{}","a".repeat(8192))},
@@ -394,14 +400,15 @@ mod tests {
             {"text":"plain","thoughtSignature":"opaque".repeat(8192)}
         ],"model":"before"});
         let body = RequestBody::from(value.clone());
-        assert_eq!(
-            body.estimated_bytes(),
-            crate::context_capacity::size(&value)
-        );
+        let counter = TokenCounter::for_model("gpt-4o");
+        let tokens = body.estimated_tokens(counter);
         assert!(
-            body.estimated_bytes() < 512,
+            tokens < 128,
             "media and encrypted signatures are not text estimates"
         );
+        let Root::Object(fields) = &body.root else { unreachable!() };
+        let Field::Array(items) = &fields["input"] else { unreachable!() };
+        assert!(items.iter().all(|item| item.tokens.get().is_some()));
         let bytes = body.wire_bytes();
         let mut changed = body.clone();
         assert_eq!(bytes.as_ptr(), changed.wire_bytes().as_ptr());
@@ -417,6 +424,14 @@ mod tests {
         let recovered: RequestBody =
             serde_json::from_slice(&serde_json::to_vec(&body).unwrap()).unwrap();
         assert_eq!(recovered.wire_bytes(), bytes);
-        assert_eq!(recovered.estimated_bytes(), body.estimated_bytes());
+        assert_eq!(recovered.estimated_tokens(counter), tokens);
+        let mut nested = RequestBody::from(json!({}));
+        nested.insert_object("request", body.clone());
+        let recovered: RequestBody = serde_json::from_slice(&serde_json::to_vec(&nested).unwrap()).unwrap();
+        assert_eq!(recovered.estimated_tokens(counter), nested.estimated_tokens(counter));
+        let fragment = FrozenJson::new(json!("你好，世界！"));
+        assert_eq!(fragment.tokens(counter), 4);
+        assert_eq!(fragment.tokens(TokenCounter::for_model("gpt-4")), 7);
+        assert_eq!(fragment.tokens.get(), Some(&(counter.name, 4)));
     }
 }

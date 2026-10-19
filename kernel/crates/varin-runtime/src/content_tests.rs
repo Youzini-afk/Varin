@@ -381,7 +381,7 @@ fn typed_output_preserves_opaque_json_order_source_and_only_explicit_media_depen
         opaque: None,
     };
     assert!(
-        crate::context_capacity::estimate_item(&item) > 200_000,
+        crate::token_count::TokenCounter::default().item(&item) > 200_000,
         "opaque image-shaped JSON remains ordinary text material"
     );
 }

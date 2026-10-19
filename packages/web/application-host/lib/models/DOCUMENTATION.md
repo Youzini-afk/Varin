@@ -280,7 +280,10 @@ existing resource/file owners; see [runtime image tools](../../../../../docs/run
 Provider usage belongs to its original ModelStep or inference Operation. Repeated history, recovery
 or parent/child projections do not create another consumption record. Actual, estimated, missing
 and pending measurements stay distinct; cancellation is not zero usage. Context capacity uses full
-request estimates and eligible prior actual usage, retrieval uses tokenizer/chunk estimates, and
+request tokenizer counts and eligible prior actual usage. The native runtime selects the tokenizer
+from the upstream request model ID, labels unmatched models as reference-tokenizer estimates, and
+keeps conversation retention counts separate from the compaction model input. Retrieval uses
+tokenizer/chunk estimates, and
 Goal budgets retain their existing output-token scope. These are different consumers of evidence,
 not interchangeable counters. Raw non-token image usage is preserved without inventing token costs.
 

@@ -1,5 +1,5 @@
 //! Core-owned quotation, source identity and frozen summary-plan validation.
-use crate::{catalog::RuntimeError, context_capacity::estimate_item, context_job::*, execution::*};
+use crate::{catalog::RuntimeError, token_count::TokenCounter, context_job::*, execution::*};
 use serde::Deserialize;
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
@@ -40,10 +40,10 @@ pub(crate) fn model_budget(
 ) -> Result<ContextCompactionModelBudget> {
     let capacity: Capacity = serde_json::from_value(configuration.clone())?;
     // Every model node carries the read capability as well as these instructions.
-    let fixed = (SUMMARIZER_SYSTEM.len() as u64
-        + recipe.request_text().len() as u64
-        + serde_json::to_vec(&crate::summary_tools::schema())?.len() as u64)
-        .div_ceil(4);
+    let counter = TokenCounter::for_model(configuration["model"].as_str().unwrap_or_default());
+    let fixed = counter.count(SUMMARIZER_SYSTEM)
+        + counter.count(&recipe.request_text())
+        + counter.json(&serde_json::to_value(crate::summary_tools::schema())?);
     let source_budget_tokens = match (capacity.context_window_tokens, capacity.max_output_tokens) {
         (Some(window), Some(output)) => Some(
             window
@@ -260,7 +260,7 @@ pub(crate) fn validate_plan(
     }
     Ok(())
 }
-pub(crate) fn builtin_plan(preview: &ContextCompactionPreview) -> Result<ContextCompactionPlan> {
+pub(crate) fn builtin_plan(preview: &ContextCompactionPreview, counter: TokenCounter) -> Result<ContextCompactionPlan> {
     let budget = preview.model_budget.source_budget_tokens;
     if budget == Some(0) {
         return Err(RuntimeError::Invalid(
@@ -269,7 +269,8 @@ pub(crate) fn builtin_plan(preview: &ContextCompactionPreview) -> Result<Context
     }
     let mut inputs = Vec::new();
     for source in &preview.sources {
-        if budget.is_none_or(|budget| estimate_item(&source.item) <= budget)
+        let cost = counter.item(&source.item);
+        if budget.is_none_or(|budget| cost <= budget)
             || !matches!(source.item.content, Content::Text { .. })
         {
             inputs.push((
@@ -277,7 +278,7 @@ pub(crate) fn builtin_plan(preview: &ContextCompactionPreview) -> Result<Context
                     source_id: source.source_id.clone(),
                     range: None,
                 },
-                estimate_item(&source.item),
+                cost,
             ));
             continue;
         }
@@ -287,9 +288,7 @@ pub(crate) fn builtin_plan(preview: &ContextCompactionPreview) -> Result<Context
         let budget = budget.expect("oversized source has budget");
         let mut start = 0;
         while start < text.len() {
-            let mut end = start
-                .saturating_add(usize::try_from(budget.saturating_mul(4)).unwrap_or(usize::MAX))
-                .min(text.len());
+            let mut end = start + counter.prefix_bytes(&text[start..], budget);
             while !text.is_char_boundary(end) {
                 end -= 1;
             }
@@ -303,7 +302,7 @@ pub(crate) fn builtin_plan(preview: &ContextCompactionPreview) -> Result<Context
                     start: start as u64,
                     end: end as u64,
                 };
-                let cost = estimate_item(&source_item(source, Some(&range))?);
+                let cost = counter.item(&source_item(source, Some(&range))?);
                 if cost <= budget {
                     inputs.push((
                         ContextCompactionInput::Source {
@@ -454,7 +453,7 @@ mod tests {
             )
             .unwrap(),
         };
-        let plan = builtin_plan(&preview).unwrap();
+        let plan = builtin_plan(&preview, TokenCounter::default()).unwrap();
         assert!(plan.nodes().len() > 1);
         let body = serde_json::to_string(&source).unwrap();
         let mut reconstructed = String::new();
@@ -596,7 +595,7 @@ mod tests {
             sources: quote_sources("original-summary", originals).unwrap(),
             model_budget: model_budget(&json!({}), &ContextSummaryRecipe::manual()).unwrap(),
         };
-        let plan = builtin_plan(&preview).unwrap();
+        let plan = builtin_plan(&preview, TokenCounter::default()).unwrap();
         let items: Vec<_> = plan
             .nodes()
             .iter()

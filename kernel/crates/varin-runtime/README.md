@@ -96,10 +96,15 @@ Summary recipes freeze the previous summary and all original material in the sel
 including originals retained by the preceding checkpoint. Native automatic compaction selects the latest
 complete exchange as its capture boundary. The model returns a summary and original-block references;
 it chooses retention throughout that material, rather than inheriting a predetermined recent suffix.
-Local text estimates accompany each retention group, and the continuation budget covers summary plus
+Offline tokenizer counts accompany each retention group, and the continuation budget covers summary plus
 originals. User message parts and complete provider/tool exchanges share a group. Costs identify
 unmeasured media/provider content and are not provider billing measurements. The original history remains
 durable; checkpoint references keep selected items, including their media, alive through collection.
+`token_count` selects the encoding by request model ID: tiktoken mappings for OpenAI, bundled official
+DeepSeek V4/V4.1 Flash and Qwen3-8B vocabularies, and a labeled o200k reference for unmatched models.
+Immutable request fragments cache counts; whole-request estimates retain actual-usage calibration.
+Summary input uses its own model tokenizer; the retained material uses the frozen conversation tokenizer.
+Tokenizer assets, revisions and licenses are recorded in `assets/tokenizers/sources.json`.
 Later input is appended after the frozen cut. Resource/personalization refresh preserves the selection;
 forking or navigation that discards the summary also discards its selection.
 Model nodes use [summary_tools.rs](src/summary_tools.rs) for read-only original history/output and related

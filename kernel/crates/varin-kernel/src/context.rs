@@ -175,6 +175,10 @@ impl ContextPreparation for CapacityPreparation {
                     ContextBudgetStrategy::Extension { .. }
                 )
             });
+        let native = native_mode(&settings, capacity, &estimate, &timing);
+        if !external && native.is_none() {
+            return Ok(ContextRequestPreparation::Ready);
+        }
         let legal = budget_candidates(view);
         if legal.is_empty() {
             return Ok(ContextRequestPreparation::Ready);
@@ -273,7 +277,7 @@ impl ContextPreparation for CapacityPreparation {
                 }
             }
         } else {
-            let Some(mode) = native_mode(&settings, capacity, &estimate, &timing) else {
+            let Some(mode) = native else {
                 return Ok(ContextRequestPreparation::Ready);
             };
             if let Some(job) = &existing {

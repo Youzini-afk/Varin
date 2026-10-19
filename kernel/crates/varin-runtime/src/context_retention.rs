@@ -1,5 +1,5 @@
 //! Model-selected originals, with local text estimates and original message relationships.
-use crate::{RuntimeError, context_capacity::estimate_item, execution::*};
+use crate::{RuntimeError, token_count::TokenCounter, execution::*};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::collections::{BTreeMap, BTreeSet};
@@ -49,9 +49,10 @@ pub(crate) struct Originals {
     groups: Vec<Vec<usize>>,
     group_of: BTreeMap<String, usize>,
     costs: Vec<(u64, usize, usize)>,
+    counter: TokenCounter,
 }
 impl Originals {
-    pub(crate) fn new(history: ConversationHistory) -> Self {
+    pub(crate) fn new(history: ConversationHistory, counter: TokenCounter) -> Self {
         fn root(parents: &mut [usize], index: usize) -> usize {
             if parents[index] != index {
                 parents[index] = root(parents, parents[index]);
@@ -121,7 +122,7 @@ impl Originals {
                     .fold((0u64, 0, 0), |(tokens, media, provider), index| {
                         let item = &history[*index];
                         (
-                            tokens.saturating_add(estimate_item(item)),
+                            tokens.saturating_add(counter.item(item)),
                             media + item.content.media().len(),
                             provider + usize::from(matches!(item.content, Content::ProviderOnly)),
                         )
@@ -133,6 +134,7 @@ impl Originals {
             groups,
             group_of,
             costs,
+            counter,
         }
     }
     fn group(&self, id: &str) -> Option<usize> {
@@ -189,7 +191,7 @@ impl Originals {
             .collect();
         Ok(
             json!({"previousResult":selection,"retainedOriginals":retained,
-            "estimatedTokens":(selection.summary.len() as u64).div_ceil(4)
+            "estimatedTokens":self.counter.count(&selection.summary)
                 + tokens})
             .to_string(),
         )
@@ -219,7 +221,7 @@ impl Originals {
                 let cost = annotation.unwrap_or_else(|| {
                     json!({"retainId":null,
                     "estimatedTokens":material["content"]["text"].as_str()
-                        .map(|text| (text.len() as u64).div_ceil(4)),"kind":"existing_summary"})
+                        .map(|text| self.counter.count(text)),"kind":"existing_summary"})
                 });
                 *text = json!({"retention":cost,"material":material}).to_string();
             }
@@ -306,7 +308,7 @@ mod tests {
                 },
             },
         }));
-        let originals = Originals::new(history);
+        let originals = Originals::new(history, TokenCounter::default());
         let kept = originals.select(&["result-b".into(), "r1".into()]).unwrap();
         assert_eq!(kept, first_exchange);
         assert_eq!(originals.select(&["next-result".into()]).unwrap().len(), 2);

@@ -3,7 +3,7 @@ use crate::execution::{
     Content, RequestBody, RequestOrigin, RequestSnapshot, RequestView, UsageMeasurement, UsageReceipt,
 };
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
+use crate::token_count::TokenCounter;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -22,7 +22,7 @@ pub struct InputEstimate {
     pub estimated_tokens: u64,
     pub unmeasured_media: u64,
     pub unmeasured_provider_items: u64,
-    pub method: &'static str,
+    pub method: String,
 }
 
 /// The selected serializer declares its actual transcript layout and usage interpretation.
@@ -87,59 +87,14 @@ pub fn calibrated_estimate(
         estimate.estimated_tokens = (i128::from(input) + i128::from(estimate.estimated_tokens)
             - i128::from(old_estimate))
         .clamp(0, i128::from(u64::MAX)) as u64;
-        estimate.method = "actual-input-calibrated; utf8-bytes/4 delta; media unmeasured";
+        estimate.method = format!("actual-input-calibrated; {} delta; media unmeasured", TokenCounter::for_model(&view.binding.model).description());
     }
     estimate
 }
-fn media(object: &serde_json::Map<String, Value>) -> bool {
-    matches!(
-        object.get("type").and_then(Value::as_str),
-        Some("input_image" | "image_url" | "image" | "input_file")
-    ) || object.contains_key("inlineData")
-        || object.contains_key("inline_data")
-        || object.contains_key("image") && object.len() == 1
-}
-pub(crate) fn size(value: &Value) -> u64 {
-    match value {
-        Value::Null => 4,
-        Value::Bool(value) => {
-            if *value {
-                4
-            } else {
-                5
-            }
-        }
-        Value::Number(value) => value.to_string().len() as u64,
-        Value::String(value) => {
-            if value.starts_with("data:image/") {
-                0
-            } else {
-                value.len() as u64 + 2
-            }
-        }
-        Value::Array(values) => values.iter().fold(2u64, |bytes, value| {
-            bytes.saturating_add(size(value)).saturating_add(1)
-        }),
-        Value::Object(values) if media(values) => 0,
-        Value::Object(values) => values
-            .iter()
-            .filter(|(key, _)| {
-                !(matches!(
-                    values.get("type").and_then(Value::as_str),
-                    Some("reasoning" | "thinking")
-                ) && matches!(key.as_str(), "encrypted_content" | "signature"))
-                    && !(values.contains_key("text") && key.as_str() == "thoughtSignature")
-            })
-            .fold(2u64, |bytes, (key, value)| {
-                bytes
-                    .saturating_add(key.len() as u64 + 4)
-                    .saturating_add(size(value))
-            }),
-    }
-}
 pub fn estimate_request(view: &RequestView, serialized: &RequestBody) -> InputEstimate {
+    let counter = TokenCounter::for_model(&view.binding.model);
     InputEstimate {
-        estimated_tokens: serialized.estimated_bytes().div_ceil(4),
+        estimated_tokens: serialized.estimated_tokens(counter),
         unmeasured_media: view
             .history
             .iter()
@@ -150,35 +105,9 @@ pub fn estimate_request(view: &RequestView, serialized: &RequestBody) -> InputEs
             .iter()
             .filter(|item| matches!(item.content, Content::ProviderOnly))
             .count() as u64,
-        method: "utf8-bytes/4; media excluded",
+        method: format!("tokenizer {}; media excluded", counter.description()),
     }
 }
-pub fn estimate_item(item: &crate::execution::ConversationItem) -> u64 {
-    // Only complete semantic content participates. Opaque provider signatures and base64
-    // transport bytes are not ordinary text tokens and cannot be assigned an invented cost.
-    match &item.content {
-        Content::Text { text } | Content::ReasoningSummary { text } => {
-            (text.len() as u64).div_ceil(4)
-        }
-        Content::Media { .. } | Content::ProviderOnly => 0,
-        _ => {
-            let projected = item
-                .clone()
-                .map_media(|media| {
-                    Ok::<_, std::convert::Infallible>(crate::output::ResolvedMedia {
-                        data_base64: String::new(),
-                        ..media
-                    })
-                })
-                .unwrap();
-            (serde_json::to_vec(&projected.content)
-                .expect("semantic content serializes")
-                .len() as u64)
-                .div_ceil(4)
-        }
-    }
-}
-
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct BudgetCandidate {
@@ -207,16 +136,18 @@ pub enum BudgetDecision {
 /// Candidates derive only from this actual request. The original admission subsequently proves
 /// immutable ancestry and validates all source tool pairs again before freezing any excerpts.
 pub fn budget_candidates(view: &RequestView) -> Vec<BudgetCandidate> {
-    let total = view
+    let counter = TokenCounter::for_model(&view.binding.model);
+    let costs: Vec<_> = view
         .history
         .iter()
-        .map(|item| estimate_item(item))
-        .fold(0u64, u64::saturating_add);
+        .map(|item| counter.item(item))
+        .collect();
+    let total = costs.iter().copied().fold(0u64, u64::saturating_add);
     let mut prefix = 0u64;
     let mut pending = std::collections::BTreeSet::new();
     let mut candidates = Vec::new();
     for (index, item) in view.history.iter().enumerate() {
-        prefix = prefix.saturating_add(estimate_item(item));
+        prefix = prefix.saturating_add(costs[index]);
         match &item.content {
             crate::execution::Content::ToolCall { call } => {
                 pending.insert(call.call_id.clone());
@@ -314,11 +245,13 @@ pub fn continuation_budget(
     estimate: &InputEstimate,
     timing: &PreparationTiming,
 ) -> u64 {
-    let history_tokens = view
+    let counter = TokenCounter::for_model(&view.binding.model);
+    let costs: Vec<_> = view
         .history
         .iter()
-        .map(|item| estimate_item(item))
-        .fold(0u64, u64::saturating_add);
+        .map(|item| counter.item(item))
+        .collect();
+    let history_tokens = costs.iter().copied().fold(0u64, u64::saturating_add);
     let original_start = view
         .history
         .iter()
@@ -331,9 +264,9 @@ pub fn continuation_budget(
             )
         })
         .unwrap_or(view.history.len());
-    let prefix = view.history[..original_start].iter().filter(|item| !matches!(&item.provenance,
+    let prefix = view.history[..original_start].iter().zip(&costs).filter(|(item, _)| !matches!(&item.provenance,
         crate::execution::Provenance::ExternalData { source } if source.starts_with("conversation-summary:")))
-        .map(|item| estimate_item(item)).fold(0u64, u64::saturating_add);
+        .map(|(_, cost)| *cost).fold(0u64, u64::saturating_add);
     let fixed = estimate
         .estimated_tokens
         .saturating_sub(history_tokens)
@@ -379,7 +312,7 @@ mod preparation_tests {
             estimated_tokens: tokens,
             unmeasured_media: 0,
             unmeasured_provider_items: 0,
-            method: "fixture",
+            method: "fixture".into(),
         }
     }
     #[test]
@@ -447,16 +380,19 @@ mod preparation_tests {
             }.into());
         }
         let candidates = budget_candidates(&view);
+        let counter = TokenCounter::default();
+        let fixed = counter.item(&view.history[0]);
+        let request_tokens = view.history.iter().map(|item| counter.item(item)).sum();
         let cold = PreparationTiming::default();
         let budget = continuation_budget(
             &view,
             &policy,
             2000,
             Some(100),
-            &estimate(1200),
+            &estimate(request_tokens),
             &cold,
         );
-        assert_eq!(budget, 880); // Total continuation target: 1800 * 60% - 200 fixed.
+        assert_eq!(budget, 1080 - fixed); // Total continuation target: 1800 * 60% - fixed input.
         assert_eq!(native_candidate(&candidates).unwrap().retained_estimated_tokens, 0);
         let warm = PreparationTiming {
             duration_ms: Some(200.0),
@@ -469,10 +405,10 @@ mod preparation_tests {
                 &policy,
                 2000,
                 Some(100),
-                &estimate(1200),
+                &estimate(request_tokens),
                 &warm
             ),
-            680
+            budget - 200
         );
         policy.explicit_keep_recent_tokens = Some(300);
         assert_eq!(
@@ -481,7 +417,7 @@ mod preparation_tests {
                 &policy,
                 2000,
                 Some(100),
-                &estimate(1200),
+                &estimate(request_tokens),
                 &warm
             ),
             400

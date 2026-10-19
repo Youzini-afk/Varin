@@ -27,6 +27,7 @@ pub mod summary_tools;
 mod context_execution;
 mod context_material;
 pub mod context_retention;
+pub mod token_count;
 
 #[cfg(test)]
 extern crate self as varin_runtime;

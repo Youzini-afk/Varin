@@ -54,6 +54,8 @@ impl ContextJobAdmission {
 
 #[derive(Serialize, serde::Deserialize)]
 struct ContextJobRecipe {
+    #[serde(default)]
+    continuation_tokenizer: crate::token_count::TokenCounter,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     originals: Option<Value>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -209,7 +211,15 @@ impl Catalog {
         // conversation and participate in the next compaction.
         source.recent_head = Some(request.through_id.clone());
         let memory_reference = self.memory_state_identity(&request.branch_id)?;
+        let conversation = match &request.owner_run_id {
+            Some(owner) => Some(self.run(owner)?),
+            None => activation::latest_run(&self.db, &request.branch_id)?,
+        };
+        let continuation_tokenizer = crate::token_count::TokenCounter::for_model(
+            conversation.as_ref().and_then(|run| run.configuration["model"].as_str())
+                .or_else(|| configuration["model"].as_str()).unwrap_or_default());
         Ok(ContextJobPreparation {
+            continuation_tokenizer,
             memory_reference,
             epoch: self.epoch,
             database: self
@@ -832,7 +842,7 @@ impl ContextJobRead {
         };
         Ok(ContextJobCompiler {
             originals: recipe.originals.as_ref().map(|reference| self.content.load_items(reference, &|| false)
-                .map(crate::context_retention::Originals::new)).transpose()?,
+                .map(|items| crate::context_retention::Originals::new(items, recipe.continuation_tokenizer))).transpose()?,
             recent: self.content.load_items(&recipe.recent,&||false)?,
             recipe,
             sources,
@@ -950,8 +960,8 @@ impl ContextJobCompiler {
         history.extend(self.recent.iter().map(|item|std::sync::Arc::unwrap_or_clone(item.clone())));
         let mut instructions = recipe.request.summary_recipe.request_text();
         if self.originals.is_some() {
-            instructions.push_str(&format!("\n\nContinuation budget (new summary + retained originals): {}. Costs use local UTF-8 text estimates; media and provider-only costs marked unmeasured are additional. References sharing a retainId are counted once.",
-                recipe.continuation_budget_tokens.map(|tokens| format!("{tokens} estimated tokens")).unwrap_or_else(|| "unspecified".into())));
+            instructions.push_str(&format!("\n\nContinuation budget (new summary + retained originals): {}. Text costs use {} for the conversation model; media and provider-only costs marked unmeasured are additional. References sharing a retainId are counted once.",
+                recipe.continuation_budget_tokens.map(|tokens| format!("{tokens} tokens")).unwrap_or_else(|| "unspecified".into()), recipe.continuation_tokenizer.description()));
         }
         if let Some(guidance) = &node.instructions {
             instructions.push_str(
@@ -997,6 +1007,7 @@ impl ContextExecutionRead {
 }
 
 pub struct ContextJobPreparation {
+    continuation_tokenizer: crate::token_count::TokenCounter,
     memory_reference: Option<Value>,
     epoch: u64,
     database: std::path::PathBuf,
@@ -1183,7 +1194,7 @@ impl ContextJobPreparation {
             history.insert(0, prior.into());
         }
         let mut sources = crate::context_material::quote_sources(&self.request.key, history)?;
-        crate::context_retention::Originals::new(originals.clone()).annotate(&mut sources);
+        crate::context_retention::Originals::new(originals.clone(), self.continuation_tokenizer).annotate(&mut sources);
         let model_budget=crate::context_material::model_budget(&self.configuration,&self.request.summary_recipe)?;
         let continuation_budget_tokens = self.request.summary_recipe.continuation_budget_tokens
             .or_else(|| model_budget.source_budget_tokens.map(|tokens| tokens.saturating_mul(3) / 5));
@@ -1195,7 +1206,7 @@ impl ContextJobPreparation {
             "sources":sources,"memoryReference":self.memory_reference,"botMemory":bot_memory_snapshot,"resourceActivations":resource_activations,
             "personalization":self.request.personalization,"systemPrompt":self.request.effective_system_prompt,"instructionSources":self.request.instruction_sources,
             "memoryCheckpoint":self.request.memory_checkpoint,"summaryRecipe":self.request.summary_recipe,
-            "modelBudget":crate::context_material::model_budget(&self.configuration,&self.request.summary_recipe)?,
+            "modelBudget":model_budget,"continuationTokenizer":self.continuation_tokenizer,
         }))?;
         Ok(FrozenSummarySource {
             originals,
@@ -1235,19 +1246,20 @@ impl ContextJobPreparation {
             original
         } else {
             let frozen = self.frozen_source(&database)?;
+            let summary_tokenizer = crate::token_count::TokenCounter::for_model(self.configuration["model"].as_str().unwrap_or_default());
             let compaction = match &self.request.compaction {
                 Some(candidate) => candidate.clone(),
                 None => ContextCompactionCandidate {
                     producer: ContextCompactionProducer::builtin(),
-                    plan: crate::context_material::builtin_plan(&frozen.preview)?,
+                    plan: crate::context_material::builtin_plan(&frozen.preview, summary_tokenizer)?,
                 },
             };
             compaction.producer.validate()?;
             crate::context_material::validate_plan(&compaction.plan, &frozen.preview)?;
-            if matches!(
+            if self.request.compaction.is_some() && matches!(
                 compaction.producer,
                 ContextCompactionProducer::Builtin { .. }
-            ) && compaction.plan != crate::context_material::builtin_plan(&frozen.preview)?
+            ) && compaction.plan != crate::context_material::builtin_plan(&frozen.preview, summary_tokenizer)?
             {
                 return Err(RuntimeError::Invalid(
                     "builtin compaction producer must use the core fold plan".into(),
@@ -1263,6 +1275,7 @@ impl ContextJobPreparation {
                     .collect::<Vec<_>>(),
             )?;
             ContextJobRecipe {
+                continuation_tokenizer: self.continuation_tokenizer,
                 originals: Some(self.content.save_items(&frozen.originals)?),
                 continuation_budget_tokens: frozen.continuation_budget_tokens,
                 recent: self.content.save_items(&frozen.recent)?,
@@ -1433,12 +1446,13 @@ impl ContextJobPublication {
             crate::context_retention::Selection { summary, retain: Vec::new() }
         } else { crate::context_retention::Selection::parse(&summary)? };
         let retained = recipe.originals.as_ref().map(|reference| -> Result<_> {
-            let originals = crate::context_retention::Originals::new(self.content.load_items(reference, &|| false)?);
+            let counter = recipe.continuation_tokenizer;
+            let originals = crate::context_retention::Originals::new(self.content.load_items(reference, &|| false)?, counter);
             let items = originals.select(&selection.retain)?;
             crate::execution::validate_history_pairs(&items)
                 .map_err(|error| RuntimeError::Invalid(error.to_string()))?;
-            let estimated_tokens = (selection.summary.len() as u64).div_ceil(4)
-                + items.iter().map(|item| crate::context_capacity::estimate_item(item)).sum::<u64>();
+            let estimated_tokens = counter.count(&selection.summary)
+                + items.iter().map(|item| counter.item(item)).sum::<u64>();
             Ok(crate::context_retention::RetainedContext { items: self.content.save_items(&items)?,
                 estimated_tokens, budget_tokens: recipe.continuation_budget_tokens })
         }).transpose()?;
