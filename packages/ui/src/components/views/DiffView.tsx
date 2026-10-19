@@ -38,8 +38,6 @@ import { useI18n } from '@/lib/i18n';
 import type { I18nKey } from '@/lib/i18n/store';
 import { fileDiffFromPatch } from '@/lib/diff/patchFileDiff';
 import { startReviewFlow } from '@/lib/reviewFlow';
-import { WALKTHROUGH_ACTION_CLASS } from '@/components/views/walkthrough/walkthroughAction';
-import { useWalkthroughStore } from '@/stores/useWalkthroughStore';
 import { useThreadStore } from '@/stores/useThreadStore';
 import { getFirstChangedModifiedLineFromPatch } from './diffPatchUtils';
 import type { FileDiffMetadata } from '@pierre/diffs';
@@ -1001,8 +999,6 @@ export const DiffView: React.FC<DiffViewProps> = ({
     const { git, documents } = useRuntimeAPIs();
     const sessionDirectory = useEffectiveDirectory();
     const effectiveDirectory = directoryOverride ?? sessionDirectory;
-    const openContextPanelTab = useUIStore((state) => state.openContextPanelTab);
-    const requestWalkthroughSource = useWalkthroughStore((state) => state.requestSource);
     const { screenWidth, isMobile } = useDeviceInfo();
     const useMonacoFileDiff = !isMobile;
 
@@ -1045,7 +1041,6 @@ export const DiffView: React.FC<DiffViewProps> = ({
 
     const isMobileLayout = isMobile || screenWidth <= 768;
     const showReviewAction = Boolean(currentThread) && !isMobileLayout;
-    const showWalkthroughAction = !isMobileLayout;
     const showFileSidebar = !hideStackedFileSidebar && !isMobileLayout && screenWidth >= 1024;
     const diffScrollRef = React.useRef<HTMLElement | null>(null);
     const fileSectionRefs = React.useRef(new Map<string, HTMLDivElement | null>());
@@ -1719,29 +1714,6 @@ export const DiffView: React.FC<DiffViewProps> = ({
                         )}
                         <span className="diff-toolbar__review-label typography-ui-label">
                             {t('diffView.actions.review')}
-                        </span>
-                    </Button>
-                )}
-                {changedFiles.length > 0 && showWalkthroughAction && (
-                    <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => {
-                            const directory = effectiveDirectory ?? '';
-                            requestWalkthroughSource(directory, {
-                                kind: 'working-tree',
-                                scope: activeDiffScope === 'staged' || activeDiffScope === 'working'
-                                    ? activeDiffScope
-                                    : 'all',
-                            });
-                            openContextPanelTab(navigationDirectory ?? directory, { mode: 'walkthrough', targetDirectory: directory });
-                        }}
-                        className={cn('diff-toolbar__walkthrough-button h-7 flex-shrink-0 gap-1.5 px-2', WALKTHROUGH_ACTION_CLASS)}
-                        aria-label={t('walkthrough.action.open')}
-                    >
-                        <Icon name="compass-3" className="size-4" />
-                        <span className="diff-toolbar__walkthrough-label typography-ui-label">
-                            {t('walkthrough.action.open')}
                         </span>
                     </Button>
                 )}

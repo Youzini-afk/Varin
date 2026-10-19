@@ -223,7 +223,7 @@ impl Catalog {
             || g.ordinal != 1
             || !matches!(
                 g.purpose.as_str(),
-                "git-commit" | "review" | "walkthrough" | "text"
+                "git-commit" | "review" | "title" | "text"
             )
             || g.user.trim().is_empty()
             || g.system_prompt.trim().is_empty()
@@ -456,6 +456,20 @@ mod tests {
             db.admit_inference_generation(&duplicate.generation, body)
                 .is_err()
         );
+    }
+    #[test]
+    fn conversation_titles_use_the_original_standalone_generation_owner() {
+        let (_, mut db) = open();
+        let mut p = input("conversation-title");
+        p.generation.purpose = "title".into();
+        let id = admit(&mut db, &p);
+        let operation = generate(&mut db, &p);
+        db.dispatch_inference_generation(&operation).unwrap();
+        settle(&mut db, &operation, true);
+        let work = serde_json::to_value(db.capture_model_text(&id).unwrap().load().unwrap()).unwrap();
+        assert_eq!(work["generation"]["purpose"], "title");
+        assert_eq!(work["inference"]["outcome"], "succeeded");
+        assert!(db.list_threads().unwrap().is_empty());
     }
     #[test]
     fn original_usage_result_and_explicit_retry_wait_for_transport_drain() {

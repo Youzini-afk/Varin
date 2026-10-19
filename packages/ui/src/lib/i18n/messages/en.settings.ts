@@ -1,4 +1,5 @@
 export const settingsDict = {
+  'settings.varin.defaults.utilityModel.description': 'Generates conversation titles, Git commit messages and pull request descriptions. Uses the global default model when unset. Choose a faster or lower-cost model for these auxiliary tasks.',
   "settings.connections.localHost.title": "Local Agent startup",
   "settings.connections.localHost.description": "Saved on this desktop, independently of the Agent you are connected to. Changes apply on the next app launch.",
   "settings.connections.localHost.enabled": "Start a local Agent Host with Varin",

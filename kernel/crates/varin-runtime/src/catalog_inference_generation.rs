@@ -67,7 +67,7 @@ impl Catalog {
         p: &InferenceGenerateParams,
         body: InferenceBody,
     ) -> Result<InferenceStatus> {
-        if !matches!(p.purpose.as_str(), "explore" | "memory-organizer" | "git-commit" | "review" | "walkthrough" | "text") || p.system_prompt.trim().is_empty() || p.user.trim().is_empty() {
+        if !matches!(p.purpose.as_str(), "explore" | "memory-organizer" | "git-commit" | "review" | "title" | "text") || p.system_prompt.trim().is_empty() || p.user.trim().is_empty() {
             return Err(RuntimeError::Invalid(
                 "invalid tool-free inference request".into(),
             ));
@@ -94,7 +94,7 @@ impl Catalog {
             },
             request: Value::Null,
         };
-        if matches!(p.purpose.as_str(), "git-commit" | "review" | "walkthrough" | "text") {
+        if matches!(p.purpose.as_str(), "git-commit" | "review" | "title" | "text") {
             model_text::validate_generation(&self.db,p,&body.reference,self.epoch)?;
             return self.admit_inference_for(&params,body,InferenceCaller::ModelText,true);
         }

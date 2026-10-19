@@ -73,10 +73,10 @@ export const DefaultsSettings: React.FC = () => {
         <SelectItem value="inherit">{t('chat.modelControls.default')}</SelectItem>{thinkingLevels.map(level => <SelectItem key={level} value={level}>{t(`settings.agents.thinking.${level}`)}</SelectItem>)}
       </SelectContent>
     </Select></SettingsFieldRow>
-    {scope === 'global' && (['utilityModel', 'walkthroughModel'] as const).map(key => <SettingsFieldRow key={key} label={t(`thread.settings.${key}`)}>
-      <ModelSelector {...model(settings[key])} disabled={!snapshot || saving} placeholder={t('settings.bots.model.inherit')}
-        onChange={(providerId, modelId) => save(providerId && modelId ? { [key]: { providerId, modelId } } : {}, providerId && modelId ? [] : [key])} />
-    </SettingsFieldRow>)}
+    {scope === 'global' && <SettingsFieldRow label={t('thread.settings.utilityModel')} info={t('settings.varin.defaults.utilityModel.description')} settingsItem="sessions.small-model">
+      <ModelSelector {...model(settings.utilityModel)} disabled={!snapshot || saving} placeholder={t('settings.bots.model.inherit')}
+        onChange={(providerId, modelId) => save(providerId && modelId ? { utilityModel: { providerId, modelId } } : {}, providerId && modelId ? [] : ['utilityModel'])} />
+    </SettingsFieldRow>}
     {scope === 'project' && <p className="py-3 typography-meta text-muted-foreground">{t('settings.defaults.projectInheritance')}</p>}
   </SettingsSection>
   <SettingsSection title={t('settings.defaults.clientPreferences')}>

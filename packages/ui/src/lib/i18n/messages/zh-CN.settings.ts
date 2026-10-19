@@ -1,4 +1,5 @@
 export const settingsDict = {
+  'settings.varin.defaults.utilityModel.description': '用于生成会话标题、Git 提交信息和 PR 说明。未单独设置时使用全局默认模型，可选择速度更快、成本更低的模型处理这些辅助任务。',
   "settings.connections.localHost.title": "本地 Agent 启动",
   "settings.connections.localHost.description": "保存在此桌面客户端，与当前连接的 Agent 无关。更改在下次启动应用时生效。",
   "settings.connections.localHost.enabled": "随 Varin 启动本地 Agent Host",

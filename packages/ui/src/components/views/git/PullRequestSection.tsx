@@ -33,8 +33,6 @@ import { MobileOverlayPanel } from '@/components/ui/MobileOverlayPanel';
 import { SimpleMarkdownRenderer } from '@/components/chat/MarkdownRenderer';
 import { Icon } from '@/components/icon/Icon';
 import { useUIStore } from '@/stores/useUIStore';
-import { useWalkthroughStore } from '@/stores/useWalkthroughStore';
-import { WALKTHROUGH_ACTION_CLASS } from '@/components/views/walkthrough/walkthroughAction';
 import { formatDateTimeForPreference } from '@/lib/timeFormat';
 import { ensureThreadDraftTarget } from '@/lib/agent-runtime/threadDraftActions';
 import { useInlineCommentDraftStore, type InlineCommentDraftTarget } from '@/stores/useInlineCommentDraftStore';
@@ -332,7 +330,7 @@ export const PullRequestSection: React.FC<{
   remotes?: GitRemote[];
   remoteBranches?: string[];
   onGeneratedDescription?: () => void;
-}> = ({ isActive = true, directory, navigationDirectory, branch, baseBranch, trackingBranch, remotes = [], remoteBranches = [], onGeneratedDescription }) => {
+}> = ({ isActive = true, directory, branch, baseBranch, trackingBranch, remotes = [], remoteBranches = [], onGeneratedDescription }) => {
   const { t } = useI18n();
   const activeRef = React.useRef(isActive);
   activeRef.current = isActive;
@@ -343,10 +341,7 @@ export const PullRequestSection: React.FC<{
   const setSettingsDialogOpen = useUIStore((state) => state.setSettingsDialogOpen);
   const setSettingsPage = useUIStore((state) => state.setSettingsPage);
   const setActiveMainTab = useUIStore((state) => state.setActiveMainTab);
-  const { isMobile, hasTouchInput, screenWidth } = useDeviceInfo();
-  const openContextPanelTab = useUIStore((state) => state.openContextPanelTab);
-  const requestWalkthroughSource = useWalkthroughStore((state) => state.requestSource);
-  const showWalkthroughAction = !isMobile && screenWidth >= 768;
+  const { isMobile, hasTouchInput } = useDeviceInfo();
 
   const openGitHubSettings = React.useCallback(() => {
     setSettingsPage('github');
@@ -1526,23 +1521,6 @@ export const PullRequestSection: React.FC<{
               ) : null}
             </div>
             <div className="flex shrink-0 items-center gap-1.5">
-              {showWalkthroughAction ? (
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className={cn('pr-actions__walkthrough-button h-7 shrink-0 gap-1.5 px-2', WALKTHROUGH_ACTION_CLASS)}
-                  onClick={() => {
-                    requestWalkthroughSource(directory, { kind: 'pr', number: pr.number });
-                    openContextPanelTab(navigationDirectory ?? directory, { mode: 'walkthrough', targetDirectory: directory });
-                  }}
-                  aria-label={t('walkthrough.action.open')}
-                >
-                  <Icon name="compass-3" className="size-4" />
-                  <span className="pr-actions__walkthrough-label typography-ui-label">
-                    {t('walkthrough.action.open')}
-                  </span>
-                </Button>
-              ) : null}
               {canMerge && pr.draft && pr.state === 'open' ? (
                 <Tooltip>
                   <TooltipTrigger asChild>

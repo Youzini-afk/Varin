@@ -1,5 +1,5 @@
 import { runtimeFetch, getRuntimeEndpointGeneration } from '@varin/application-client';
-export interface ModelTextRequest { key: string; purpose: 'git-commit' | 'review' | 'walkthrough' | 'text'; prompt: string; system?: string; model?: { providerId: string; modelId: string }; maxOutputTokens?: number; responseSchema?: Record<string, unknown> }
+export interface ModelTextRequest { key: string; purpose: 'git-commit' | 'review' | 'title' | 'text'; prompt: string; system?: string; model?: { providerId: string; modelId: string }; maxOutputTokens?: number; responseSchema?: Record<string, unknown> }
 export class ModelTextError extends Error {
   constructor(message: string, readonly code: string, readonly requestId?: string) { super(message); this.name = 'ModelTextError'; }
 }

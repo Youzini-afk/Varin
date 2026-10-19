@@ -60,7 +60,6 @@ import {
 // The context panel itself is part of the desktop shell. Keep its optional
 // surfaces outside that eager graph; each remains mounted only while its tab
 // exists, preserving the existing state behavior.
-const WalkthroughView = lazyWithChunkRecovery(() => import('@/components/views/walkthrough/WalkthroughView').then((module) => ({ default: module.WalkthroughView })));
 const DiffView = lazyWithChunkRecovery(() => import('@/components/views/DiffView').then((module) => ({ default: module.DiffView })));
 const ContextResourceEditor = lazyWithChunkRecovery(() => import('@/components/workbench/ContextResourceEditor').then((module) => ({ default: module.ContextResourceEditor })));
 const GitView = lazyWithChunkRecovery(() => import('@/components/views/GitView').then((module) => ({ default: module.GitView })));
@@ -144,7 +143,6 @@ const getModeLabel = (
   if (mode === 'threads') return t('harness.overview.threads');
   if (mode === 'file') return t('contextPanel.mode.files');
   if (mode === 'diff') return t('contextPanel.mode.diff');
-  if (mode === 'walkthrough') return t('contextPanel.mode.walkthrough');
   if (mode === 'plan') return t('contextPanel.mode.plan');
   if (mode === 'preview') return t('contextPanel.mode.preview');
   if (mode === 'ui') return t('ui.content.title');
@@ -236,10 +234,6 @@ const getTabIcon = (tab: { thread?: ThreadIdentity; mode: ContextPanelMode; targ
 
   if (tab.mode === 'diff') {
     return <Icon name="arrow-left-right" className="h-3.5 w-3.5" />;
-  }
-
-  if (tab.mode === 'walkthrough') {
-    return <Icon name="compass-3" className="h-3.5 w-3.5" />;
   }
 
   if (tab.mode === 'git') {
@@ -1717,10 +1711,6 @@ export const ContextPanel: React.FC = () => {
     () => tabs.some((tab) => tab.mode === 'terminal'),
     [tabs],
   );
-  const hasWalkthroughTab = React.useMemo(
-    () => tabs.some((tab) => tab.mode === 'walkthrough'),
-    [tabs],
-  );
   const hasFileTabs = React.useMemo(
     () => tabs.some((tab) => tab.mode === 'file'),
     [tabs],
@@ -2013,14 +2003,7 @@ export const ContextPanel: React.FC = () => {
             <TerminalView visible={isOpen && activeTab?.mode === 'terminal'} />
           </div>
         ) : null}
-        {hasWalkthroughTab ? (
-          <div className={cn('absolute inset-0', activeTab?.mode === 'walkthrough' ? 'block' : 'hidden')}>
-            <React.Suspense fallback={null}>
-              <WalkthroughView directory={tabs.find((tab) => tab.mode === 'walkthrough')?.targetDirectory ?? effectiveDirectory} />
-            </React.Suspense>
-          </div>
-        ) : null}
-        {activeTab?.mode !== 'chat' && !isFileTabActive && activeTab?.mode !== 'browser' && activeTab?.mode !== 'diff' && activeTab?.mode !== 'terminal' && activeTab?.mode !== 'walkthrough' ? (
+        {activeTab?.mode !== 'chat' && !isFileTabActive && activeTab?.mode !== 'browser' && activeTab?.mode !== 'diff' && activeTab?.mode !== 'terminal' ? (
           <React.Suspense fallback={null}>{activeNonChatContent}</React.Suspense>
         ) : null}
       </div>

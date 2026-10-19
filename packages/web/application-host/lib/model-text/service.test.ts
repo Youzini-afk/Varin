@@ -76,12 +76,23 @@ describe('native standalone text owner',()=>{
     expect(f.kernel.unregisterCredentialOwner).toHaveBeenCalledOnce(); await f.service.close();
   });
   it('selects only explicit native settings and never invents a provider fallback',async()=>{
-    const f=fixture();f.setSettings({utilityModel:{providerId:'utility',modelId:'chosen'},walkthroughModel:{providerId:'review',modelId:'whole-diff'},defaultProvider:'default',defaultModel:'main'});
+    const f=fixture();f.setSettings({utilityModel:{providerId:'utility',modelId:'chosen'},defaultProvider:'default',defaultModel:'main'});
     expect(await f.service.describe()).toMatchObject({providerID:'utility',modelID:'chosen',source:'utility'});
-    expect(await f.service.describe({purpose:'walkthrough'})).toMatchObject({providerID:'review',modelID:'whole-diff',source:'walkthrough'});
+    expect(await f.service.describe({purpose:'title'})).toMatchObject({providerID:'utility',modelID:'chosen',source:'utility'});
     expect(await f.service.describe({model:{providerId:'explicit',modelId:'request'}})).toMatchObject({providerID:'explicit',modelID:'request',source:'request'});
     f.setSettings({});await expect(f.service.describe()).rejects.toMatchObject({code:'model-not-configured'});
     expect(f.resolveModel).not.toHaveBeenCalled();await f.service.close();
+  });
+  it('generates a title with the configured auxiliary model through native inference', async () => {
+    const f = fixture();
+    f.setSettings({ utilityModel: { providerId: 'utility', modelId: 'title-model' }, defaultProvider: 'default', defaultModel: 'main' });
+    const result = f.service.generate({ ...f.input, purpose: 'title' });
+    await until(() => f.trace.includes('generated'));
+    expect(f.resolveModel).toHaveBeenCalledWith(expect.objectContaining({ providerId: 'utility', modelId: 'title-model' }));
+    expect(f.records.get('model-text:original')?.generation.purpose).toBe('title');
+    f.settle();
+    expect(await result).toMatchObject({ providerId: 'utility', modelId: 'title-model' });
+    await f.service.close();
   });
   it('deduplicates an original key and releases credentials only after reading the durable result',async()=>{
     const f=fixture();const first=f.service.generate(f.input);const second=f.service.generate({...f.input});

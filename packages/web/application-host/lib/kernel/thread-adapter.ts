@@ -63,6 +63,8 @@ export class ThreadAdapter {
     private readonly prepareChildProfiles?: ChildProfilePreparer) {}
 
   private inputMaterials?: ThreadInputMaterials;
+  private titles?: import('../model-text/thread-titles.js').ThreadTitleService;
+  bindTitles(owner: import('../model-text/thread-titles.js').ThreadTitleService): void { this.titles = owner; }
   private agentProfiles?: AgentProfilesAPI;
   bindAgentProfiles(owner: AgentProfilesAPI): void { this.agentProfiles = owner; }
   private async prepareAgent(choice: ThreadAgentChoice) {
@@ -696,6 +698,7 @@ export class ThreadAdapter {
           const existing = await this.runtime.inputReceipt(command);
           if (existing) {
             admissionStarted = true;
+            this.titles?.schedule(thread, input.text);
             void this.continueLaunch(existing.run_id, { credentialOwner: model.credentialOwner }).catch(() => undefined);
             return existing;
           }
@@ -747,6 +750,7 @@ export class ThreadAdapter {
             const accepted = await this.runtime.inputReceipt(command);
             if (!accepted) throw error;
             admissionStarted = true;
+            this.titles?.schedule(thread, input.text);
             void this.continueLaunch(accepted.run_id, { credentialOwner: model.credentialOwner }).catch(() => undefined);
             return accepted;
           }
@@ -755,6 +759,7 @@ export class ThreadAdapter {
         // explicit source/credential/tool selection. A competing checkpoint leaves all of them unchanged.
         admissionStarted = true;
         const receipt = await this.runtime.submit({ ...command, ...(initialContext ? { initialContext } : {}), ...(inputPreparation ? { inputPreparation } : {}) });
+        this.titles?.schedule(thread, input.text);
         // The shared launch owner closes the initial context-refresh gap before preparation.
         void this.continueLaunch(receipt.run_id, { credentialOwner: model.credentialOwner }).catch(() => undefined);
         return receipt;

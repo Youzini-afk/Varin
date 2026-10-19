@@ -1299,7 +1299,6 @@ export const registerCommonRequestMiddleware = (
       req.path.startsWith('/api/mobile') ||
       req.path.startsWith('/api/notifications') ||
       req.path.startsWith('/api/model-text') ||
-      req.path.startsWith('/api/walkthrough') ||
       req.path.startsWith('/api/text') ||
       req.path.startsWith('/api/voice') ||
       req.path.startsWith('/api/tts') ||

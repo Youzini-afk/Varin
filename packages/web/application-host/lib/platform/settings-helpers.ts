@@ -476,10 +476,6 @@ export const createSettingsHelpers = (dependencies: SettingsHelpersDependencies)
       const trimmed = candidate.smallModelOverride.trim();
       result.smallModelOverride = trimmed.length > 0 ? trimmed : undefined;
     }
-    if (typeof candidate.walkthroughModelOverride === 'string') {
-      const trimmed = candidate.walkthroughModelOverride.trim();
-      result.walkthroughModelOverride = trimmed.length > 0 ? trimmed : undefined;
-    }
     if (typeof candidate.defaultGitIdentityId === 'string') {
       const trimmed = candidate.defaultGitIdentityId.trim();
       result.defaultGitIdentityId = trimmed.length > 0 ? trimmed : undefined;

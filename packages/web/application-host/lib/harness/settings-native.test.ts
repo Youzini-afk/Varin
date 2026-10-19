@@ -48,7 +48,7 @@ describe('native global/project settings ownership', () => {
     const f = await fixture();
     await expect(f.service.update(f.caller, { id: 'sessions.small-model', set: { utilityModel: { providerId: 'native' } } })).rejects.toThrow(/providerId and modelId/);
     f.trust();
-    const denied = await f.service.update({ ...f.caller, workspaceId: 'project' }, { id: 'sessions.walkthrough-model', scope: 'project', set: { walkthroughModel: { providerId: 'native', modelId: 'model' } } });
+    const denied = await f.service.update({ ...f.caller, workspaceId: 'project' }, { id: 'sessions.small-model', scope: 'project', set: { utilityModel: { providerId: 'native', modelId: 'model' } } });
     expect(denied.status).toBe('failed');
     expect((await f.owner.snapshot()).global).toEqual({});
   });

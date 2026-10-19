@@ -16,7 +16,6 @@ import { registerGitHubRoutes } from '../github/routes.js';
 import { registerVarinEventRoutes, registerScheduledTaskRoutes } from '../scheduled-tasks/routes.js';
 import { registerModelTextRoutes } from '../model-text/routes.js';
 import type { ModelTextService } from '../model-text/service.js';
-import { registerWalkthroughRoutes } from '../walkthrough/routes.js';
 import { registerSmartSearchRoutes } from '../smart-search/routes.js';
 import { registerWorkspaceRoutes } from '../workspace/workspace-routes.js';
 import { registerDocumentRoutes } from '../documents/routes.js';
@@ -102,22 +101,6 @@ export const createPlatformRoutesRuntime = ({
 }: {
   clientReloadDelayMs: number;
 }) => {
-  let walkthroughService: (
-    typeof import('../walkthrough/index.js')
-    & { getPullRequestDiff: typeof import('../walkthrough/pull-request.js').getPullRequestDiff }
-  ) | null = null;
-
-  const getWalkthroughService = async (modelText: ModelTextService): Promise<NonNullable<typeof walkthroughService> & { modelText: ModelTextService }> => {
-    if (!walkthroughService) {
-      const [service, pullRequest] = await Promise.all([
-        import('../walkthrough/index.js'),
-        import('../walkthrough/pull-request.js'),
-      ]);
-      walkthroughService = { ...service, getPullRequestDiff: pullRequest.getPullRequestDiff };
-    }
-    return { ...walkthroughService, modelText };
-  };
-
   const registerRoutes = async (
     app: Express,
     dependencies: PlatformRouteDependencies,
@@ -248,7 +231,6 @@ export const createPlatformRoutesRuntime = ({
       ...(resolveAuthContext ? { resolveAuthContext } : {}),
     });
     registerModelTextRoutes(app, { service: dependencies.modelText });
-    registerWalkthroughRoutes(app, { getWalkthroughService: () => getWalkthroughService(dependencies.modelText) });
     registerGitHubRoutes(app);
     registerGitRoutes(app, { ...(documents ? { documents } : {}), ...(onGitStatus ? { onStatus: onGitStatus } : {}) });
     registerWorkspaceRoutes(app, {

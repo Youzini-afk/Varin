@@ -5,6 +5,7 @@ import { readHostConnections } from './lib/connections/hosts.js';
 import { createResourceManagement } from './lib/agent-resources/management.js';
 import { registerResourceManagementRoutes } from './lib/agent-resources/management-routes.js';
 import { createModelTextService } from './lib/model-text/service.js';
+import { createThreadTitleService } from './lib/model-text/thread-titles.js';
 import { createSourceGitInventory } from './lib/kernel/source-git-inventory.js';
 import { createThreadNotificationRuntime } from './lib/notifications/thread-runtime.js';
 import { createContextCompaction } from './lib/kernel/context-compaction.js';
@@ -1870,6 +1871,12 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   const modelText = createModelTextService({ kernel: kernelClient, runtime: agentRuntime, models: modelAuthority,
     readSettings: async () => (await modelsService.settings.read()).document,
   });
+  const threadTitles = createThreadTitleService({ runtime: agentRuntime, modelText,
+    onError: error => {
+      const code = error && typeof error === 'object' && 'code' in error && typeof error.code === 'string' ? error.code : 'title-generation-failed';
+      console.error('[ThreadTitle] Auxiliary title generation failed; the input title is retained:', code);
+    },
+  });
   registerModelTestRoute(app, modelsService, modelAuthority, modelText, uiAuthController.requireAuth);
   const threadNotifications = createThreadNotificationRuntime({
     runtime: agentRuntime,
@@ -1978,6 +1985,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       capabilities: signal => agentRuntime.childCapabilities(signal),
     }));
   const sourceDirectory = createThreadSourceDirectory({ documents: documentsAuthority, remote: managedSourceConsumers.threads });
+  threads.bindTitles(threadTitles);
   threads.bindSourceDirectory(sourceDirectory);
   threads.bindFileResolver(createThreadFileTargetResolver({ storageRoot: kernelClient.handshake!.storageRoot,
     documents: documentsAuthority, validateLiveSource: liveSources.validate }));
@@ -2994,7 +3002,9 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       // The organizer is a semantic-inference consumer; fence it before closing that owner.
       const inferenceShutdownErrors: unknown[] = [];
       await memoryOrganizer.dispose().catch((error: unknown) => { inferenceShutdownErrors.push(error); });
-      await modelText.close().catch((error: unknown) => { inferenceShutdownErrors.push(error); });
+      for (const result of await Promise.allSettled([threadTitles.close(), modelText.close()])) {
+        if (result.status === 'rejected') inferenceShutdownErrors.push(result.reason);
+      }
       await semanticInference.close().catch((error: unknown) => { inferenceShutdownErrors.push(error); });
       await symbolGraphRuntime.dispose();
       // Stop producers and drain their receipts while process grants are valid.

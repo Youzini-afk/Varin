@@ -64,8 +64,8 @@
 ## Client ownership
 
 `packages/web/src/api/github.ts` is the typed HTTP adapter. The shared
-`useGitHubPrStatusStore.ts` cache is consumed by `GitView`, `PullRequestSection`, and
-`WalkthroughView`. It keys entries by runtime, directory, branch and requested remote, so one
+`useGitHubPrStatusStore.ts` cache is consumed by `GitView` and `PullRequestSection`.
+It keys entries by runtime, directory, branch and requested remote, so one
 server or fork cannot supply another target's PR state.
 
 Cache lifecycle, refresh ownership and selector rules are documented in

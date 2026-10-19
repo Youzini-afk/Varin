@@ -5,7 +5,7 @@ import type { KernelClient } from '../kernel/kernel-client.js';
 import type { createModelAuthority } from '../kernel/model-authority.js';
 import type { ExecutorOwner, ModelTextView, ModelTextStatus, Operation } from '../kernel/protocol.generated.js';
 
-export type ModelTextPurpose = 'git-commit' | 'review' | 'walkthrough' | 'text';
+export type ModelTextPurpose = 'git-commit' | 'review' | 'title' | 'text';
 export interface ModelTextSelection { providerId: string; modelId: string }
 export interface ModelTextInput {
   key: string;
@@ -25,7 +25,7 @@ export interface PreparedTextModel {
   resolve(): ReturnType<ReturnType<typeof createModelAuthority>['resolveModel']>;
 }
 export interface ModelTextDescription {
-  providerID: string; modelID: string; source: 'request' | 'walkthrough' | 'utility' | 'default';
+  providerID: string; modelID: string; source: 'request' | 'utility' | 'default';
   inputCharBudget: number; contextTokens: number; contextKnown: boolean;
   outputTokens: number | null; outputTokenLimit: number | null; structuredOutput: boolean | null; hasLogin?: boolean;
 }
@@ -40,11 +40,6 @@ export function parseModelTextSelection(value: unknown): ModelTextSelection {
     return fail('model-selection-invalid', 'Choose an explicit provider and model.', 400);
   }
   return { providerId: selection.providerId.trim(), modelId: selection.modelId.trim() };
-}
-export function parseModelTextReference(value?: string): ModelTextSelection | undefined {
-  if (!value) return undefined;
-  const slash = value.indexOf('/');
-  return parseModelTextSelection({ providerId: value.slice(0, slash), modelId: slash < 0 ? '' : value.slice(slash + 1) });
 }
 export function createModelTextService(options: {
   kernel: KernelClient;
@@ -71,10 +66,9 @@ export function createModelTextService(options: {
       if (observed !== revision) done();
     });
   };
-  async function selection(explicit?: ModelTextSelection, purpose?: ModelTextPurpose) {
+  async function selection(explicit?: ModelTextSelection) {
     if (explicit) return { ...parseModelTextSelection(explicit), source: 'request' as const };
     const settings = record(await options.readSettings());
-    if (purpose === 'walkthrough' && settings.walkthroughModel !== undefined && settings.walkthroughModel !== null) return { ...parseModelTextSelection(settings.walkthroughModel), source: 'walkthrough' as const };
     if (settings.utilityModel !== undefined && settings.utilityModel !== null) return { ...parseModelTextSelection(settings.utilityModel), source: 'utility' as const };
     if (typeof settings.defaultProvider !== 'string' || typeof settings.defaultModel !== 'string' || !settings.defaultProvider.trim() || !settings.defaultModel.trim()) {
       return fail('model-not-configured', 'Select a utility model or configure the default provider and model.', 409);
@@ -156,7 +150,7 @@ export function createModelTextService(options: {
     }
     if (closed) return fail('model-text-closed', 'Text generation is shutting down.', 503);
     signal.throwIfAborted();
-    const chosen = await selection(input.model, input.purpose);
+    const chosen = await selection(input.model);
     const model = await (prepared ? prepared.resolve() : options.models.resolveModel(chosen));
     let registered = false;
     let admitted = false;
@@ -224,7 +218,7 @@ export function createModelTextService(options: {
   }
   return {
     async describe(input: { model?: ModelTextSelection | undefined; purpose?: ModelTextPurpose; outputReserveTokens?: number | ((limits: { contextTokens: number; outputTokenLimit: number | null }) => number) } = {}): Promise<ModelTextDescription> {
-      const chosen = await selection(input.model, input.purpose);
+      const chosen = await selection(input.model);
       const model = await options.models.describeModel(chosen);
       const contextTokens = model.contextWindowTokens ?? 0;
       const outputTokenLimit = model.maxOutputTokens;
@@ -244,7 +238,7 @@ export function createModelTextService(options: {
     },
     async cancel(requestId: string) { return projection(await cancel(requestId)); },
     generate(input: ModelTextInput, prepared?: PreparedTextModel): Promise<ModelTextResult> {
-      if (!input || typeof input.key !== 'string' || !input.key.trim() || !['git-commit', 'review', 'walkthrough', 'text'].includes(input.purpose)
+      if (!input || typeof input.key !== 'string' || !input.key.trim() || !['git-commit', 'review', 'title', 'text'].includes(input.purpose)
         || typeof input.prompt !== 'string' || !input.prompt.trim() || (input.system !== undefined && typeof input.system !== 'string')
         || (input.retryOf !== undefined && (typeof input.retryOf !== 'string' || !input.retryOf.startsWith('model-text:')))
         || (input.maxOutputTokens !== undefined && (!Number.isSafeInteger(input.maxOutputTokens) || input.maxOutputTokens <= 0))) return Promise.reject(Object.assign(new Error('A request key, purpose and prompt are required.'), { statusCode: 400, code: 'model-text-input-invalid' }));
