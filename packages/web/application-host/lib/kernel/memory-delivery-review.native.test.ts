@@ -1,4 +1,5 @@
 import { guardProviderReply } from './provider-response.test-helper.js';
+import { isSummaryRequest as summaryRequest } from './summary-request.test-helper.js';
 import { resourceScopeFixture } from './resource-scope.test-helper.js';
 import { DatabaseSync } from 'node:sqlite';
 import { createMemoryOwner, type MemoryQuery } from './memory-owner.js';
@@ -117,7 +118,6 @@ function complete(response: ServerResponse, text = 'DONE') {
   response.writeHead(200, { 'content-type': 'text/event-stream' });
   response.end(`data: ${JSON.stringify({ type: 'response.completed', response: { output: [{ id: 'same-provider-id', type: 'message', content: [{ type: 'output_text', text }] }] } })}\n\n`);
 }
-const summaryRequest = (body: Record<string, unknown>) => JSON.stringify(body).includes('Produce a faithful continuation summary');
 const tail = (body: Record<string, unknown>) => JSON.stringify(messages(body).filter(item => item.role !== 'system'));
 async function turn(f: Awaited<ReturnType<typeof fixture>>, identity: Awaited<ReturnType<typeof f.api.create>>, key: string) {
   const before = await f.api.snapshot(identity);

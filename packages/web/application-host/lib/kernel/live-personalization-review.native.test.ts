@@ -1,4 +1,5 @@
 import { guardProviderReply } from './provider-response.test-helper.js';
+import { isSummaryRequest } from './summary-request.test-helper.js';
 import { resourceScopeFixture } from './resource-scope.test-helper.js';
 import { createMemoryOwner } from './memory-owner.js';
 import { createThreadContext } from './thread-context.js';
@@ -105,7 +106,7 @@ it('live profiles advance at the request boundary while note tails preserve the 
   const f = await fixture((body, response) => {
     count++;
     if (count === 1) { held = response; return; }
-    complete(response, `live-output-${count}`, JSON.stringify(body).includes('Produce a faithful continuation summary') ? 'LIVE CONTINUATION SUMMARY' : 'ordinary completed response');
+    complete(response, `live-output-${count}`, isSummaryRequest(body) ? 'LIVE CONTINUATION SUMMARY' : 'ordinary completed response');
   });
   const identity = await f.api.create('live-personalization');
   await f.personalization.savePrompt({ kind: 'global' }, { sections: { global_rule: 'PROFILE OLD' } }, (await f.personalization.catalog()).revision);

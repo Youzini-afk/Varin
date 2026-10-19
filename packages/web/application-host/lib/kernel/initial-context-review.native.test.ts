@@ -1,4 +1,5 @@
 import { guardProviderReply } from './provider-response.test-helper.js';
+import { isSummaryRequest } from './summary-request.test-helper.js';
 import { resourceScopeFixture } from './resource-scope.test-helper.js';
 import { createMemoryOwner } from './memory-owner.js';
 import { createThreadContext } from './thread-context.js';
@@ -99,7 +100,7 @@ const system = (body: Record<string, unknown>) => messages(body).filter(value =>
 it('initial context preserves pinned AGENTS and request roles while current personalization survives retry, restart, compaction and fork', async () => {
   let serial = 0;
   const reply = (body: Record<string, unknown>, response: ServerResponse) => {
-    const text = JSON.stringify(body).includes('Produce a faithful continuation summary') ? 'GENERATED CONTINUATION SUMMARY' : 'ordinary answer';
+    const text = isSummaryRequest(body) ? 'GENERATED CONTINUATION SUMMARY' : 'ordinary answer';
     response.writeHead(200, { 'content-type': 'text/event-stream' });
     response.end(`data: ${JSON.stringify({ type: 'response.completed', response: { output: [{ id: `answer-${++serial}`, type: 'message', content: [{ type: 'output_text', text }] }] } })}\n\n`);
   };

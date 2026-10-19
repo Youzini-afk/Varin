@@ -145,15 +145,15 @@ impl ContextPreparation for CapacityPreparation {
         let prepared = self.bridge.query(json!({"action":"prepare","runId":view.run_id,"requestId":view.request_id,
             "expectedRevision":revision,
             "observation":{"estimatedTokens":estimate_request(view, serialized).estimated_tokens,"identity":identity}}), cancel)?;
+        // Without a declared window this only publishes an observation; budget
+        // preparation is not a dependency of the model request.
+        let Some(capacity) = configuration.context_window_tokens else {
+            return Ok(ContextRequestPreparation::Ready);
+        };
         let mut settings = policy(&prepared)?;
         if !settings.enabled {
             return Ok(ContextRequestPreparation::Ready);
         }
-        // Observation publication belongs to every request boundary. Capacity settings
-        // only decide whether this request also needs budget preparation.
-        let Some(capacity) = configuration.context_window_tokens else {
-            return Ok(ContextRequestPreparation::Ready);
-        };
         let estimate = match budget {
             Some((read, protocol)) => read
                 .estimate(view, serialized, protocol, cancel)

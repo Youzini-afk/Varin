@@ -494,9 +494,9 @@ export function createKernelProcessService(options: Options) {
       }
     },
     async dispose(): Promise<void> {
-      if (stopping && !options.client.isReady) { unsubscribe(); return; }
       stopping = true;
       await Promise.allSettled([...launches]);
+      if (!options.client.isReady) { unsubscribe(); return; }
       const active = [...handles];
       for (const handle of active) handle.discardOutput();
       const requests = await Promise.allSettled(active.map((handle) => handle.requestTermination(true)));

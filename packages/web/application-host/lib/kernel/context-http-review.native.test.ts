@@ -1,4 +1,5 @@
 import { guardProviderReply } from './provider-response.test-helper.js';
+import { isSummaryRequest } from './summary-request.test-helper.js';
 import express from 'express';
 import { createServer, type Server } from 'node:http';
 import { once } from 'node:events';
@@ -41,7 +42,7 @@ async function fixture(existingRoot?: string, existingEndpoint?: string) {
     request.on('end', guardProviderReply(response, () => {
       requests.push({ body: JSON.parse(Buffer.concat(chunks).toString()) as Record<string, unknown>, ...(request.headers.authorization ? { authorization: request.headers.authorization } : {}) });
       response.writeHead(200, { 'content-type': 'text/event-stream' });
-      response.end(`data: ${JSON.stringify({ type: 'response.completed', response: { output: [{ id: `http-answer-${requests.length}`, type: 'message', content: [{ type: 'output_text', text: JSON.stringify(requests.at(-1)!.body).includes('Produce a faithful continuation summary') ? 'SUMMARY: fixed original goal.' : 'Original full answer.' }] }] } })}\n\n`);
+      response.end(`data: ${JSON.stringify({ type: 'response.completed', response: { output: [{ id: `http-answer-${requests.length}`, type: 'message', content: [{ type: 'output_text', text: isSummaryRequest(requests.at(-1)!.body) ? 'SUMMARY: fixed original goal.' : 'Original full answer.' }] }] } })}\n\n`);
     }));
   });
   const endpoint = existingEndpoint ?? `${await listen(provider)}/responses`;
@@ -84,10 +85,10 @@ it('HTTP compaction generates an authenticated fixed-range summary and the next 
   const job = await f.api.compact({ ...identity, key: 'compact', throughId, expectedRevision: 0, model });
   await expect.poll(async () => (await f.api.snapshot(identity)).context.jobs.find(value => value.job.receipt.run_id === job.receipt.run_id)?.run.state).toBe('completed');
   expect(f.requests).toHaveLength(2);
-  expect(JSON.stringify(f.requests[1]!.body)).toContain('Produce a faithful continuation summary');
+  expect(isSummaryRequest(f.requests[1]!.body)).toBe(true);
   expect(JSON.stringify(f.requests[1]!.body)).toContain('ORIGINAL USER GOAL');
   expect(f.requests[1]!.authorization).toBe(`Bearer ${f.secret}`);
-  expect(f.requests[1]!.body.tools ?? []).toEqual([]);
+  expect((f.requests[1]!.body.tools as Array<{ name: string }>).map(tool => tool.name)).toEqual(['summary_read']);
   expect((await f.api.snapshot(identity)).context.checkpoint).toBeNull();
   const tail = await f.api.submit({ ...identity, key: 'tail-before-publication', expectedHead: throughId, text: 'APPENDED TAIL: retain this verbatim.', model });
   await expect.poll(async () => (await f.api.run(tail.run_id)).state).toBe('completed');

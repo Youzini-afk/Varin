@@ -99,6 +99,7 @@ async function drain(client: KernelScopedClient, processId: string, start = 0) {
     if (!result.process.writerActive && result.outputComplete && cursor === result.endCursor) {
       return { stdout: Buffer.concat(stdout), stderr: Buffer.concat(stderr), process: result.process, cursor };
     }
+    if (cursor < result.endCursor) continue;
     if (Date.now() > deadline) throw new Error(`Process did not exit: ${JSON.stringify(result.process)}`);
     await pause();
   }

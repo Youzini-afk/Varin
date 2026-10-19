@@ -210,14 +210,12 @@ pub(crate) fn run(
         failure = None;
         (parked.state, parked.waiting_on)
     } else {
-        engine.persistence.commit(
-            id,
-            input.owner_generation,
-            &ExecutionRecord::StateChanged {
-                state,
-                waiting_on: waiting_on.clone(),
-            },
-        )?;
+        let record = if let Some(problem) = failure.as_ref().filter(|_| state == RunState::Failed) {
+            ExecutionRecord::ExecutionFailed { failure: problem.clone() }
+        } else {
+            ExecutionRecord::StateChanged { state, waiting_on: waiting_on.clone() }
+        };
+        engine.persistence.commit(id, input.owner_generation, &record)?;
         (state, waiting_on)
     };
     let (model_steps, history) = {

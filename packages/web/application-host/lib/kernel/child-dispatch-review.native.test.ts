@@ -79,7 +79,7 @@ function complete(response: ServerResponse, output: unknown[]) {
   response.end(`data: ${JSON.stringify({ type: 'response.completed', response: { output } })}\n\n`);
 }
 function tool(name: string, args: unknown, id: string) {
-  const versions: Record<string, string> = { dispatch: '2', wait_child: '1', child_status: '2', child_report: '3', threads: '1', read_thread: '2', send: '3', memory: '1' };
+  const versions: Record<string, string> = { dispatch: '2', wait_child: '1', child_status: '2', child_report: '3', threads: '1', read_thread: '2', send: '4', memory: '1' };
   if (versions[name]) { args = { reference: { name, version: versions[name] }, arguments: args }; name = 'tool_invoke'; }
   return { id: `item-${id}`, type: 'function_call', call_id: id, name, arguments: JSON.stringify(args) };
 }
@@ -317,7 +317,8 @@ it('family tools and public views read original and fork-inherited conversations
   await expect.poll(async () => (await h.runtime.run(receipt.run_id)).state, { timeout: 10_000 }).toBe('completed');
   const child = await h.runtime.child(operationId);
   expect(child.report?.outcome).toBe('succeeded'); expect(child.launch.tools.map(item => item.name)).toEqual(['read_thread', 'threads', 'tool_describe', 'tool_invoke']);
-  const directory = await h.api.family!.list(identity);
+  expect((await h.api.family!.list(identity)).members).toEqual([]);
+  const directory = await h.api.family!.list(identity, { scope: 'history' });
   expect(directory.members.map(member => member.threadId)).toEqual([child.child_thread_id]);
   const target = { threadId: child.child_thread_id, branchId: child.child_branch_id };
   const view = await h.api.family!.read(identity, { ...target, query: { kind: 'recent' } });
@@ -355,7 +356,7 @@ it('two real send observations retain their original requests across Host restar
     if (isParent(body)) {
       if (++parentSteps === 1) complete(response, [tool('dispatch', { ...dispatch, tools: ['threads', 'send'] }, 'reply-observer-child')]);
       else { operationId = job(body); complete(response, [answer('Parent finished; explicit replies remain available', 'reply-parent-done')]); }
-    } else if (++childSteps === 1) complete(response, [tool('threads', {}, 'reply-discovery')]);
+    } else if (++childSteps === 1) complete(response, [tool('threads', { scope: 'history' }, 'reply-discovery')]);
     else if (childSteps === 2) {
       const content = result(body, 'threads')?.content as { page: import('./protocol.generated.js').FamilyList };
       const parent = content.page.members.find(member => member.threadId === content.page.rootThreadId)!;
@@ -369,7 +370,7 @@ it('two real send observations retain their original requests across Host restar
       const outputs = (body.input as Array<Record<string, unknown>>).filter(item => item.type === 'function_call_output' && ['reply-send-one', 'reply-send-two'].includes(String(item.call_id)));
       expect(outputs).toHaveLength(2);
       for (const output of outputs) expect(JSON.parse(responsesMetadataText(output.output))).toMatchObject({
-        content: { reference: { name: 'send', version: '3' }, completion: { kind: 'job_accepted', effect: 'confirmed' } },
+        content: { reference: { name: 'send', version: '4' }, completion: { kind: 'job_accepted', effect: 'confirmed' } },
       });
       expect(JSON.stringify(body.input)).toContain('FIRST_LINKED_REPLY_BODY');
       expect(JSON.stringify(body.input)).toContain('SECOND_LINKED_REPLY_BODY');
@@ -423,7 +424,7 @@ it('passive family messages keep Agent and User identities, do not reopen finish
         expect(JSON.stringify(body.input)).toContain('USER_FROM_CHILD_ORIGINAL');
         complete(response, [answer('Natural new Run processed retained information', 'message-parent-next')]);
       }
-    } else if (++childSteps === 1) complete(response, [tool('threads', {}, 'message-discovery')]);
+    } else if (++childSteps === 1) complete(response, [tool('threads', { scope: 'history' }, 'message-discovery')]);
     else if (childSteps === 2) {
       const content = result(body, 'threads')?.content as { page: import('./protocol.generated.js').FamilyList };
       const parent = content.page.members.find(member => member.threadId === content.page.rootThreadId)!;
@@ -1525,7 +1526,8 @@ it('installed collaboration policy accepts a child and reads before any parent M
     expect(withoutUnset(child.configuration)).toEqual(withoutUnset((await h.runtime.run(receipt.run_id)).configuration));
     expect(child).toMatchObject({ parent_run_id: receipt.run_id, parent_thread_id: identity.threadId, parent_branch_id: identity.branchId, state: 'preparing', receipt: null });
     expect(policyReceipts(h)).toEqual([
-      { node_id: 'dispatch', completion: { kind: 'job_accepted', operation_id: child.operation_id, phase: 'preparing_child', effect: 'none', lifetime: 'thread' } },
+      { node_id: 'dispatch', completion: { kind: 'job_accepted', operation_id: child.operation_id, phase: 'preparing_child', effect: 'none', lifetime: 'thread',
+        output: { action_id: dispatchEvent.action_id, node_id: 'dispatch', content_ref: expect.stringMatching(/^sha256-[0-9a-f]{64}$/) } } },
       { node_id: 'parent-read', completion: { kind: 'result', outcome: 'succeeded', effect: 'none', output: expect.any(Object) } },
     ]);
     expect(childSourcePins(f.root)).toEqual([originalSourcePin(child).pin_id]);

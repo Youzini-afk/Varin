@@ -39,7 +39,11 @@ pub(crate) fn model_budget(
     recipe: &ContextSummaryRecipe,
 ) -> Result<ContextCompactionModelBudget> {
     let capacity: Capacity = serde_json::from_value(configuration.clone())?;
-    let fixed = (SUMMARIZER_SYSTEM.len() as u64 + recipe.request_text().len() as u64).div_ceil(4);
+    // Every model node carries the read capability as well as these instructions.
+    let fixed = (SUMMARIZER_SYSTEM.len() as u64
+        + recipe.request_text().len() as u64
+        + serde_json::to_vec(&crate::summary_tools::schema())?.len() as u64)
+        .div_ceil(4);
     let source_budget_tokens = match (capacity.context_window_tokens, capacity.max_output_tokens) {
         (Some(window), Some(output)) => Some(
             window
@@ -444,7 +448,7 @@ mod tests {
             source_cut_hash: "unicode-cut".into(),
             sources: quote_sources("job", vec![source.clone().into(), image.clone().into()]).unwrap(),
             model_budget: model_budget(
-                &json!({"contextWindowTokens":600,"maxOutputTokens":64}),
+                &json!({"contextWindowTokens":2000,"maxOutputTokens":64}),
                 &ContextSummaryRecipe::manual(),
             )
             .unwrap(),

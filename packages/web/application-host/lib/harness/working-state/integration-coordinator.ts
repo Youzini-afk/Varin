@@ -1723,7 +1723,7 @@ export class IntegrationCoordinator {
 
       const mergeBaseStates = { ...result.baseStates };
       const mergeChildStates = { ...result.pathStates };
-      const diskObjects=new Map(Object.values(diskParentStates).flatMap(state=>state.kind==='regular-file'?[[state.objectHash,state] as const]:[]));
+      const diskObjects=new Map((parentAuthority.kind === "branch" ? [] : Object.values(diskParentStates)).flatMap(state=>state.kind==='regular-file'?[[state.objectHash,state] as const]:[]));
       const mergeReader={getObject:async(hash:string)=>{
         const state=diskObjects.get(hash);
         return state&&context.fileStore.readContent?context.fileStore.readContent(parentIdentity,state):store.getObject(hash);

@@ -1,4 +1,5 @@
 import { guardProviderReply } from './provider-response.test-helper.js';
+import { isSummaryRequest } from './summary-request.test-helper.js';
 import { AgentSettingsService } from '../models/settings.js';
 import { createServer, type ServerResponse } from 'node:http';
 import { once } from 'node:events';
@@ -49,7 +50,7 @@ it.each([
     request.on('data',(bytes:Buffer)=>chunks.push(bytes));
     request.on('end',guardProviderReply(response, ()=>{
       const body=JSON.parse(Buffer.concat(chunks).toString()) as Record<string,unknown>;
-      if(JSON.stringify(body.input).includes('Produce a faithful continuation summary')) {summaries.push(response);summaryBodies.push(body);}
+      if(isSummaryRequest(body)) {summaries.push(response);summaryBodies.push(body);}
       else {main.push({body,response});if(main.length===1) answer(response,'ACK: old source read',14_000);}
     }));
   });
@@ -153,6 +154,7 @@ it.each([
       summaries[1]!.writeHead(500,{'content-type':'application/json'});
       summaries[1]!.end(JSON.stringify({error:{message:'summary fixture failed'}}));
       await expect.poll(async()=>(await runtime.run(second.run_id)).state).toBe('failed');
+      expect(await runtime.runFailure(jobs[0]!.receipt.run_id)).toMatchObject({code:'http_500'});
       expect(main).toHaveLength(1);
       expect(summaries).toHaveLength(2);
       expect(JSON.stringify(await runtime.history(jobs[0]!.receipt.branch_id))).toContain('PARTIAL_SUMMARY');
