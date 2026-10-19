@@ -1,5 +1,6 @@
 import { getRuntimeEndpointGeneration, ThreadRequestError, type ThreadsAPI } from '@varin/application-client';
 import type { ThreadPendingInput } from '@/stores/useThreadDraftStore';
+import { observeMessageTime } from '@varin/protocol';
 
 const deliveries = new Map<string, Promise<string | undefined>>();
 /** Reopening the view while a send is still in flight joins its original observation. */
@@ -7,6 +8,10 @@ export function deliverThreadInput(api: ThreadsAPI, original: ThreadPendingInput
   const key = JSON.stringify([getRuntimeEndpointGeneration(), original.input.threadId, original.input.branchId, original.input.key]);
   const existing = deliveries.get(key);
   if (existing) return existing;
+  if (!original.input.clientTime) {
+    original = { ...original, input: { ...original.input, clientTime: observeMessageTime() } } as ThreadPendingInput;
+    update(original);
+  }
   const delivery = deliver(api, original, update);
   deliveries.set(key, delivery);
   const settled = () => { if (deliveries.get(key) === delivery) deliveries.delete(key); };

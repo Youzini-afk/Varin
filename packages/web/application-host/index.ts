@@ -214,7 +214,7 @@ import { createMaterialCollections as createMaterialCollectionsService } from '.
 import { IntegrationCoordinator } from './lib/harness/working-state/integration-coordinator.js';
 import { createThreadFileTargetResolver } from './lib/kernel/thread-file-target.js';
 
-import { THINKING_LEVELS } from '@varin/protocol';
+import { THINKING_LEVELS, resolveMessageTimeSettings } from '@varin/protocol';
 import { createSettingsService, settingsDocumentRevision } from './lib/harness/settings-service.js';
 
 import { createClientSurfaceBridge } from './lib/harness/client-surfaces.js';
@@ -1982,6 +1982,10 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   threads.bindFileResolver(createThreadFileTargetResolver({ storageRoot: kernelClient.handshake!.storageRoot,
     documents: documentsAuthority, validateLiveSource: liveSources.validate }));
   threads.bindMaterials(webRuntimeOwner.current.inputMaterials);
+  threads.bindMessageTime(async () => {
+    const settings = await modelsService.readGlobalInferenceSettings();
+    return resolveMessageTimeSettings((settings.harness as { context?: { messageTime?: unknown } } | undefined)?.context?.messageTime);
+  });
   threads.bindCompaction(contextCompaction);
   scheduledTaskService.bindSourceDirectory(sourceDirectory);
   const targetSourceQuery = createSourceQueryService({ kernel: kernelClient, documents: documentsAuthority,

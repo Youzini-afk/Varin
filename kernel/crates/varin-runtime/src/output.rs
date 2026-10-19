@@ -513,6 +513,9 @@ impl crate::content::ContentStore {
         input: &Value,
     ) -> Result<Value, crate::catalog::RuntimeError> {
         let mut value = admit_user_input(input_id, input)?;
+        // The first admitted clock observation is retained with history. A retry's
+        // new observation or changed time-display preference is not a new user intent.
+        if let Some(object) = value.as_object_mut() { object.remove("sentTime"); }
         if let Some(attachments) = value.get_mut("attachments") {
             let media: Vec<ResolvedMedia> = serde_json::from_value(attachments.take())?;
             *attachments = serde_json::to_value(

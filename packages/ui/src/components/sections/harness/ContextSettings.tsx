@@ -4,6 +4,7 @@ import { useI18n } from '@/lib/i18n';
 import type { HarnessSettingsPageProps } from './harness-settings-state';
 import { AutoSaveInput } from './AutoSaveInput';
 import { HarnessModelField } from './HarnessModelField';
+import { MessageTimeSettings } from './MessageTimeSettings';
 
 export function ContextSettings({ harness, update, reserveRatio, onReserveRatioChange }: HarnessSettingsPageProps & {
   reserveRatio: number;
@@ -23,6 +24,7 @@ export function ContextSettings({ harness, update, reserveRatio, onReserveRatioC
     ? null : t('settings.page.harness.context.recovery.retries.invalid');
   const setRecovery = (patch: Partial<typeof recovery>) => update({ context: { compactionRecovery: patch } });
   return <>
+    <MessageTimeSettings harness={harness} update={update} />
     <SettingsSection settingsItem="harness.models.agentPlanning">
       <HarnessModelField harness={harness} update={update} slot="agentPlanning" />
     </SettingsSection>

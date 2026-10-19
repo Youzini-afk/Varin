@@ -348,6 +348,7 @@ it('renders the composer and retries an uncertain send with the same request ide
   await submitForm(container.querySelector('form')!);
   expect(f.submit).toHaveBeenCalledTimes(2);
   expect(f.submit.mock.calls[1]![0]).toEqual(f.submit.mock.calls[0]![0]);
+  expect(f.submit.mock.calls[0]![0]).toHaveProperty('clientTime.sentAt', expect.any(String));
   expect(f.submit.mock.calls[0]![0]).toMatchObject({ ...identity, text: 'keep this user message', model: { providerId: 'fixture-provider', modelId: 'fixture-model' } });
   expect(container.querySelector<HTMLTextAreaElement>('[aria-label="Message thread"]')?.value).toBe('');
   expect(f.enqueue).not.toHaveBeenCalled();

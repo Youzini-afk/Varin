@@ -1,4 +1,4 @@
-import { parseComputerAutomationProjection, parseComputerAutomationState } from '@varin/protocol';
+import { observeMessageTime, parseComputerAutomationProjection, parseComputerAutomationState } from '@varin/protocol';
 import { threadSourceFailureMessage, type ThreadsAPI } from './threads.js';
 import { runtimeFetch } from './transport/runtime-fetch.js';
 import { getRuntimeEndpointGeneration, subscribeRuntimeEndpointWillChange } from './transport/runtime-switch.js';
@@ -12,6 +12,9 @@ export class ThreadRequestError extends Error {
 
 /** Uses the same Application Host transport/auth selection as the other RuntimeAPIs. */
 export function createThreadsHttpAPI(): ThreadsAPI {
+  const withClientTime = <T extends { clientTime?: import('@varin/protocol').MessageTimeObservation }>(input: T) => ({
+    ...input, clientTime: input.clientTime ?? observeMessageTime(),
+  });
   const post = async <T>(method: string, body: unknown, signal?: AbortSignal): Promise<T> => {
     signal?.throwIfAborted();
     const generation = getRuntimeEndpointGeneration();
@@ -78,7 +81,7 @@ export function createThreadsHttpAPI(): ThreadsAPI {
     plan: { read: identity => post('plan/read', identity), update: input => post('plan/update', input) },
     collaboration: {
       integration: (input, signal) => post('child/integration', input, signal),
-      continueChild: (input, signal) => post('child/continue', input, signal),
+      continueChild: (input, signal) => post('child/continue', withClientTime(input), signal),
       executions: (identity, operationId, signal) => post('child/executions', { ...identity, ...(operationId ? { operationId } : {}) }, signal),
       readExecutionReport: (identity, executionId, itemId, offset, maxBytes, signal) => post('child/execution/report', { ...identity, executionId, itemId, offset, maxBytes }, signal),
       children: identity => post('child/list', identity),
@@ -110,7 +113,7 @@ export function createThreadsHttpAPI(): ThreadsAPI {
     update: input => post('update', input), delete: input => post('delete', input), markRead: input => post('read', input),
     listModels: () => post('models', {}),
     selectModel: input => post('model/select',input),
-    create: key => post('create', { key }), fork: input => post('fork', input), submit: input => post('submit', input), enqueue: input => post('enqueue', input),
+    create: key => post('create', { key }), fork: input => post('fork', input), submit: input => post('submit', withClientTime(input)), enqueue: input => post('enqueue', withClientTime(input)),
     prepareNavigation: input => post('navigation/prepare', input),
     recoverySource: input => post('recovery/source', input),
     navigate: input => post('navigate', input),

@@ -18,6 +18,7 @@ import { mergePolicies, type PermissionMode, type PermissionRule } from "./permi
 import { parseHarnessAgents, type HarnessCustomAgent } from "./harness-agents.js";
 import { parseHarnessModelSlots, type HarnessModelBinding } from "./harness-model-slots.js";
 import { parseHarnessImageSettings, type HarnessImageSettings } from './harness-images.js';
+import { isTimeZone, type MessageTimeSettings } from './message-time.js';
 
 /** A provider + model pair, as stored in a model slot. */
 export interface ModelSelection {
@@ -84,6 +85,7 @@ export interface HarnessContextSettings {
   /** Fraction of usable input where preparation starts (0-1, default 0.75). */
   preparationWaterline: number;
   compactionRecovery: CompactionRecoverySettings;
+  messageTime: MessageTimeSettings;
 }
 
 export interface CompactionRecoverySettings {
@@ -161,6 +163,7 @@ export interface HarnessContextSettingsInput {
   backgroundPreparation?: unknown;
   preparationWaterline?: unknown;
   compactionRecovery?: unknown;
+  messageTime?: unknown;
 }
 
 export class HarnessSettingsValidationError extends Error {
@@ -175,7 +178,24 @@ const DEFAULT_HARNESS_CONTEXT_SETTINGS: HarnessContextSettings = {
   backgroundPreparation: true,
   preparationWaterline: 0.75,
   compactionRecovery: { enabled: true, streamIdleMs: 120_000, responseWaitMs: 300_000, maxRetries: 1 },
+  messageTime: { enabled: false, timeZone: null },
 };
+
+export function resolveMessageTimeSettings(value: unknown): MessageTimeSettings {
+  if (value === undefined) return { ...DEFAULT_HARNESS_CONTEXT_SETTINGS.messageTime };
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    throw new HarnessSettingsValidationError('harness.context.messageTime must be an object');
+  }
+  const input = value as Record<string, unknown>;
+  if (input.enabled !== undefined && typeof input.enabled !== 'boolean') {
+    throw new HarnessSettingsValidationError('harness.context.messageTime.enabled must be a boolean');
+  }
+  const timeZone = input.timeZone ?? null;
+  if (timeZone !== null && (typeof timeZone !== 'string' || !isTimeZone(timeZone))) {
+    throw new HarnessSettingsValidationError('harness.context.messageTime.timeZone must be a valid time zone or null');
+  }
+  return { enabled: input.enabled ?? false, timeZone };
+}
 
 export function resolveCompactionRecoverySettings(value: unknown): CompactionRecoverySettings {
   if (value === undefined) return { ...DEFAULT_HARNESS_CONTEXT_SETTINGS.compactionRecovery };
@@ -209,7 +229,7 @@ export function resolveHarnessContextSettings(
     throw new HarnessSettingsValidationError("harness.context must be an object");
   }
   const input = (context ?? {}) as HarnessContextSettingsInput;
-  if (Object.keys(input).some(key => !["backgroundPreparation", "preparationWaterline", "compactionRecovery"].includes(key))) {
+  if (Object.keys(input).some(key => !["backgroundPreparation", "preparationWaterline", "compactionRecovery", "messageTime"].includes(key))) {
     throw new HarnessSettingsValidationError("Unsupported harness.context setting");
   }
   if (input.backgroundPreparation !== undefined && typeof input.backgroundPreparation !== "boolean") {
@@ -227,6 +247,7 @@ export function resolveHarnessContextSettings(
     backgroundPreparation: input.backgroundPreparation ?? DEFAULT_HARNESS_CONTEXT_SETTINGS.backgroundPreparation,
     preparationWaterline: input.preparationWaterline ?? DEFAULT_HARNESS_CONTEXT_SETTINGS.preparationWaterline,
     compactionRecovery: resolveCompactionRecoverySettings(input.compactionRecovery),
+    messageTime: resolveMessageTimeSettings(input.messageTime),
   };
 }
 
@@ -259,7 +280,7 @@ export interface HarnessSettings {
      */
     autoOrganize: { user: boolean; bot: boolean };
   };
-  /** Context-management settings (background compaction preparation). */
+  /** User-owned message context and background compaction preparation. */
   context: HarnessContextSettings;
   /** User-owned post-turn next-step suggestions; projects cannot enable it. */
   nextStep: HarnessNextStepSettings;
@@ -320,7 +341,8 @@ export const DEFAULT_HARNESS_SETTINGS: HarnessSettings = {
     autoOrganize: { user: true, bot: true },
   },
   context: { backgroundPreparation: true, preparationWaterline: 0.75,
-    compactionRecovery: { ...DEFAULT_HARNESS_CONTEXT_SETTINGS.compactionRecovery } },
+    compactionRecovery: { ...DEFAULT_HARNESS_CONTEXT_SETTINGS.compactionRecovery },
+    messageTime: { ...DEFAULT_HARNESS_CONTEXT_SETTINGS.messageTime } },
   nextStep: { enabled: false },
   documentReading: { ...DEFAULT_HARNESS_DOCUMENT_READING_SETTINGS },
   worktree: {
@@ -473,8 +495,7 @@ export function mergeHarnessSettings(
           ?? DEFAULT_HARNESS_SETTINGS.knowledge.autoOrganize.bot,
       },
     },
-    // Background preparation is user-owned. A repository cannot enable
-    // background model calls the user turned off.
+    // Message time and background preparation are user-owned.
     context: resolveHarnessContextSettings(user.context),
     // Local document parser executables are user-owned. Project settings can
     // never select a process for the Host to launch.

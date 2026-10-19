@@ -12,6 +12,8 @@ import type { AgentProfilesAPI, ThreadAgentChoice } from '@varin/application-cli
 import type { PlanService } from './plan-service.js';
 import type { ImageAttachment } from '@varin/protocol';
 import { threadInput } from './thread-images.js';
+import { messageSentTime } from './thread-message-time.js';
+import type { MessageTimeObservation, MessageTimeSettings } from '@varin/protocol';
 import { materialInputText, parseThreadMaterials, type ThreadInputMaterials } from './thread-material-input.js';
 import type { ThreadMaterialAttachment } from '@varin/application-client';
 import { listThreadFollowups } from './thread-followups.js';
@@ -73,13 +75,16 @@ export class ThreadAdapter {
     return { selection: { ...choice, name: profile.effective.name, tools: profile.tools.names }, instructions: profile.effective.instructions };
   }
   bindMaterials(owner: ThreadInputMaterials): void { this.inputMaterials = owner; }
-  private async prepareInput(input: ThreadIdentity & { text: string; images?: ImageAttachment[]; materials?: ThreadMaterialAttachment[] }, signal?: AbortSignal) {
+  private messageTime?: () => Promise<MessageTimeSettings>;
+  bindMessageTime(settings: () => Promise<MessageTimeSettings>): void { this.messageTime = settings; }
+  private async prepareInput(input: ThreadIdentity & { text: string; images?: ImageAttachment[]; materials?: ThreadMaterialAttachment[]; clientTime?: MessageTimeObservation }, signal?: AbortSignal) {
+    const sentTime = this.messageTime ? messageSentTime(await this.messageTime(), input.clientTime) : undefined;
     const selected = parseThreadMaterials(input.materials);
-    if (!selected?.length) return threadInput(input.text, input.images);
+    if (!selected?.length) return { ...threadInput(input.text, input.images), ...(sentTime ? { sentTime } : {}) };
     if (!this.inputMaterials) throw new Error('Thread material admission is unavailable');
     const materials = await this.inputMaterials(input, selected, signal);
     signal?.throwIfAborted();
-    return threadInput(materialInputText(input.text, materials), input.images);
+    return { ...threadInput(materialInputText(input.text, materials), input.images), ...(sentTime ? { sentTime } : {}) };
   }
 
   private compaction?: ContextCompactionOwner;
@@ -762,7 +767,7 @@ export class ThreadAdapter {
     }
   }
 
-  async enqueue(input: ThreadIdentity & { key: string; text: string; images?: ImageAttachment[]; materials?: ThreadMaterialAttachment[]; mode: InputMode }) {
+  async enqueue(input: ThreadIdentity & { key: string; text: string; images?: ImageAttachment[]; materials?: ThreadMaterialAttachment[]; mode: InputMode; clientTime?: MessageTimeObservation }) {
     let admissionStarted = false;
     try {
       const thread = await this.requireIdentity(input);

@@ -193,12 +193,15 @@ fn explicit_user_new_run_keeps_original_dispatch_and_never_borrows_its_report() 
         &f.db,
         &initial,
         "second",
-        json!({"text":"continue with this image","attachments":[{"media_type":"image/png","data_base64":"aW1hZ2U6Zml4ZWQ="}]}),
+        json!({"text":"continue with this image","sentTime":"2026-01-02T00:05:06+08:00 [Asia/Shanghai]","attachments":[{"media_type":"image/png","data_base64":"aW1hZ2U6Zml4ZWQ="}]}),
     );
     let next = accept(&mut f.db, command.clone());
     assert!(next.source.is_none());
     assert!(next.receipt.is_none());
     assert_eq!(accept(&mut f.db, command.clone()), next);
+    let mut timed_retry = command.clone();
+    timed_retry.input["sentTime"] = json!("2026-01-02T00:10:00+08:00 [Asia/Shanghai]");
+    assert_eq!(accept(&mut f.db, timed_retry), next);
     let source = ready_source(&mut f.db, &next);
     let child = prepare(&mut f.db, &next, source);
     let run = &child.receipt.as_ref().unwrap().run_id;
@@ -217,6 +220,7 @@ fn explicit_user_new_run_keeps_original_dispatch_and_never_borrows_its_report() 
     let history = f.db.history(&child.child_branch_id).unwrap();
     let input = history.iter().find(|item| item.run_id == *run).unwrap();
     assert_eq!(input.source, HistorySource::User);
+    assert_eq!(input.content["sentTime"], "2026-01-02T00:05:06+08:00 [Asia/Shanghai]");
     assert_eq!(
         input.content["attachments"][0]["data_base64"],
         "aW1hZ2U6Zml4ZWQ="

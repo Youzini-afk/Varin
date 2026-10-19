@@ -70,6 +70,7 @@ export interface ThreadPreparedSource {
   provenance?: ChildSourceProvenance;
 }
 export interface ThreadSubmit extends ThreadIdentity {
+  clientTime?: import('@varin/protocol').MessageTimeObservation;
   key: string;
   expectedHead: string | null;
   text: string;
@@ -158,6 +159,7 @@ export interface ThreadMessagesAPI {
   get(identity: ThreadIdentity, messageId: string, signal?: AbortSignal): Promise<MessageView>;
 }
 export interface ThreadChildContinuation extends ThreadIdentity {
+  clientTime?: import('@varin/protocol').MessageTimeObservation;
   sourceAgent?: string;
   name?: string;
   key: string;
@@ -398,7 +400,7 @@ export interface ThreadsAPI {
   cancelContext(identity: ThreadIdentity, runId: string): Promise<RunCancellationReceipt>;
   resumeContext(identity: ThreadIdentity, runId: string): Promise<void>;
   submit(input: ThreadSubmit): Promise<InputSubmitReceipt>;
-  enqueue(input: ThreadIdentity & { key: string; text: string; images?: ImageAttachment[]; materials?: ThreadMaterialAttachment[]; mode: InputMode }): Promise<InputReceipt>;
+  enqueue(input: ThreadIdentity & { key: string; text: string; images?: ImageAttachment[]; materials?: ThreadMaterialAttachment[]; mode: InputMode; clientTime?: import('@varin/protocol').MessageTimeObservation }): Promise<InputReceipt>;
   editInput(inputId: string, expectedRevision: number, text: string, images?: ImageAttachment[]): Promise<QueuedInput>;
   cancelInput(inputId: string, expectedRevision: number): Promise<QueuedInput>;
   /** Read one original-holder media chunk; the expected reference is identity, never authority. */

@@ -2934,4 +2934,13 @@ export const settingsDict = {
   "settings.models.invalidBudget": "Enter a valid budget and request field.",
   "settings.models.invalidCapacity": "Token capacities must be positive integers.",
   "settings.models.removeCredential": "Remove credential",
+  'settings.page.harness.context.messageTime.title': 'Time information',
+  'settings.page.harness.context.messageTime.enabled': 'Include time information',
+  'settings.page.harness.context.messageTime.description': 'Include the sending time and time zone with new messages. Tool calls in the same turn reuse this observation. Off by default.',
+  'settings.page.harness.context.messageTime.timeZone': 'Sending time zone',
+  'settings.page.harness.context.messageTime.device': 'Follow this device ({timeZone})',
+  'settings.page.harness.context.messageTime.custom': 'Choose a time zone',
+  'settings.page.harness.context.messageTime.search': 'Search or enter a time zone, e.g. Asia/Shanghai',
+  'settings.page.harness.context.messageTime.invalid': 'Enter a valid time zone, e.g. Asia/Shanghai.',
+  'settings.page.harness.context.messageTime.preview': 'Sending preview',
 } as const;

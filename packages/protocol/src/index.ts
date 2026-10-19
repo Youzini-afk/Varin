@@ -7,6 +7,7 @@ export * from "./explore-model.js";
 export * from "./explore-model-loop.js";
 export * from "./language-id.js";
 export * from "./harness-settings.js";
+export * from "./message-time.js";
 export * from "./harness-inference.js";
 export * from "./harness-fast-decision.js";
 export * from "./harness-computer.js";

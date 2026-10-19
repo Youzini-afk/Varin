@@ -4226,5 +4226,40 @@ fn native_inference_checkpoint_reopens_original_usage_and_opaque_without_replay(
 #[path = "catalog_bot_tests.rs"]
 mod bot_scope;
 
+#[test]
+fn message_sent_time_survives_retry_queue_edit_and_reopen_as_context_data() {
+    use crate::catalog::inputs::EnqueueInput;
+    use crate::execution::{Content, Provenance};
+    let f = Fixture::new();
+    let mut db = f.open();
+    db.create_thread("thread", "main").unwrap();
+    let time = "2026-01-02T00:05:06+08:00 [Asia/Shanghai]";
+    let mut command = command();
+    command.input["sentTime"] = json!(time);
+    let receipt = db.submit(&command).unwrap();
+    command.input["sentTime"] = json!("2026-01-02T00:10:00+08:00 [Asia/Shanghai]");
+    assert_eq!(db.submit(&command).unwrap(), receipt);
+    command.input["text"] = json!("different user input");
+    assert!(db.submit(&command).is_err());
+    let mut queued = EnqueueInput { key:"timed-queue".into(),thread_id:"thread".into(),branch_id:"main".into(),
+        mode:InputMode::Boundary,input:json!({"text":"queued", "sentTime":time}),configuration:None };
+    let pending = db.enqueue_input(&queued).unwrap();
+    queued.input.as_object_mut().unwrap().remove("sentTime");
+    assert_eq!(db.enqueue_input(&queued).unwrap(), pending);
+    let edited = db.edit_queued_input(&pending.input_id,1,json!({"text":"edited"})).unwrap();
+    assert_eq!(edited.content["sentTime"],time);
+    drop(db);
+    let mut db = f.open();
+    assert_eq!(db.history("main").unwrap()[0].content["sentTime"],time);
+    let epoch=db.epoch();
+    let delivered=db.consume_inputs(&receipt.run_id,epoch,Some(&receipt.input_id)).unwrap();
+    assert_eq!(delivered.len(),2);
+    assert!(matches!(&delivered[0].provenance,Provenance::EnvironmentFact{..}));
+    assert!(matches!(&delivered[0].content,Content::Text{text} if text==&format!("Message sent at: {time}")));
+    assert!(matches!(&delivered[1].provenance,Provenance::UserInstruction{..}));
+    assert_eq!(delivered[1].id,pending.input_id);
+    assert_eq!(db.consume_inputs(&receipt.run_id,epoch,Some(&pending.input_id)).unwrap().len(),0);
+}
+
 #[path = "catalog_cancel_recovery_tests.rs"]
 mod cancelled_recovery;

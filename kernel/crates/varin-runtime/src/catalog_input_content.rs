@@ -225,6 +225,11 @@ impl InputEditPreparation {
                 )
             };
         let mut stored = self.content.store_user_input(&self.id, &material)?;
+        // Editing a queued message preserves its original sending time.
+        if let Some(time) = previous.content.get("sentTime") {
+            if stored.is_string() { stored = json!({"text":stored}); }
+            stored["sentTime"] = time.clone();
+        }
         // Omission preserves the exact captured revision. Only the owner can reuse these refs.
         if self.value.get("attachments").is_none() {
             if let Some(attachments) = previous.content.get("attachments") {

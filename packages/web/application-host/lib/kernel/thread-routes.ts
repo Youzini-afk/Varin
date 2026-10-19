@@ -9,6 +9,7 @@ import { parseComputerWorkRef, parseComputerExecutionRef } from '@varin/protocol
 import type { FamilyListParams,FamilyRunsParams, FamilyReadParams, FamilyItemParams, FollowupRegistrationTrigger } from '@varin/protocol';
 import { PlanConflict } from './plan-service.js';
 import { parseThreadImages } from './thread-images.js';
+import { parseClientTime } from './thread-message-time.js';
 import type { Express, RequestHandler } from 'express';
 import type { ThreadIdentity, ThreadModel, ThreadSubmit, ThreadThinkingLevel, ThreadResearchAPI, ThreadResearchSelection, ThreadComputerAPI, ThreadMaterialsAPI, ThreadMaterialReadRequest, ThreadMaterialSourceReadRequest, ThreadMaterialArtifactReadRequest } from '@varin/application-client';
 import { ComputerError } from '../computer/computer-error.js';
@@ -119,7 +120,7 @@ export function registerThreadRoutes(app: Express, adapter: ThreadAdapter, requi
     'family/runs': ['runtime', 'threadId', 'branchId', 'request'],
     'family/read': ['runtime', 'threadId', 'branchId', 'request'],
     'family/item': ['runtime', 'threadId', 'branchId', 'request'],
-    'child/continue': ['runtime', 'threadId', 'branchId', 'key', 'name', 'sourceAgent', 'previousRunId', 'expectedHead', 'text', 'images', 'materials'],
+    'child/continue': ['runtime', 'threadId', 'branchId', 'key', 'name', 'sourceAgent', 'previousRunId', 'expectedHead', 'text', 'images', 'materials', 'clientTime'],
     'child/executions': ['runtime', 'threadId', 'branchId', 'operationId'],
     'child/execution/report': ['runtime', 'threadId', 'branchId', 'executionId', 'itemId', 'offset', 'maxBytes'],
     'child/report': ['runtime', 'threadId', 'branchId', 'operationId', 'itemId', 'offset', 'maxBytes'],
@@ -153,12 +154,12 @@ export function registerThreadRoutes(app: Express, adapter: ThreadAdapter, requi
     update: ['runtime', 'threadId', 'key', 'expectedRevision', 'title', 'pinned', 'archived'],
     delete: ['runtime', 'threadId', 'key', 'expectedRevision'],
     read: ['runtime', 'threadId', 'key', 'throughCursor'],
-    create: ['key'], list: ['query', 'archived'], models: [], submit: ['runtime', 'threadId', 'branchId', 'key', 'text', 'images', 'materials', 'expectedHead', 'model', 'source', 'agent'],
+    create: ['key'], list: ['query', 'archived'], models: [], submit: ['runtime', 'threadId', 'branchId', 'key', 'text', 'images', 'materials', 'expectedHead', 'model', 'source', 'agent', 'clientTime'],
     usage: ['runtime', 'threadId', 'branchId'],
     'context/inspect': ['runtime', 'threadId', 'branchId', 'headId'],
     snapshot: ['runtime', 'threadId', 'branchId'], 'history/page': ['runtime', 'threadId', 'branchId', 'headId', 'beforeId', 'limit'],
     'history/runs': ['runtime', 'threadId', 'branchId', 'headId'], 'history/run-preview': ['runtime', 'threadId', 'branchId', 'headId', 'runId'],
-    'history/usage': ['runtime', 'threadId', 'branchId', 'headId', 'beforeId', 'limit'], enqueue: ['runtime', 'threadId', 'branchId', 'key', 'text', 'images', 'materials', 'mode'],
+    'history/usage': ['runtime', 'threadId', 'branchId', 'headId', 'beforeId', 'limit'], enqueue: ['runtime', 'threadId', 'branchId', 'key', 'text', 'images', 'materials', 'mode', 'clientTime'],
     'input/edit': ['inputId', 'expectedRevision', 'text', 'images'], 'input/cancel': ['inputId', 'expectedRevision'],
     run: ['runId'], 'run/cancel': ['runId'], 'run/resume': ['runId', 'waitId'], 'run/retry-preparation': ['runId'], operation: ['operationId'], 'operation/cancel': ['operationId'], events: ['cursor'],
   };
@@ -332,6 +333,7 @@ export function registerThreadRoutes(app: Express, adapter: ThreadAdapter, requi
         ...(body.name===undefined?{}:{name:text(body.name)}),
         ...(body.sourceAgent===undefined?{}:{sourceAgent:text(body.sourceAgent)}),
         expectedHead: body.expectedHead === null ? null : text(body.expectedHead), text: body.text,
+        ...(body.clientTime === undefined ? {} : { clientTime: parseClientTime(body.clientTime)! }),
         ...(images === undefined ? {} : { images }), ...(materials === undefined ? {} : { materials }) };
     });
     return adapter.continueChild(input, signal);
@@ -446,6 +448,7 @@ export function registerThreadRoutes(app: Express, adapter: ThreadAdapter, requi
       const materials = parseThreadMaterials(body.materials);
       if (typeof body.text !== 'string' || (!body.text.length && !images?.length && !materials?.length)) throw new Error('Text, images or materials are required');
       const input: ThreadSubmit = { ...identity(body), key: text(body.key), text: body.text, ...(images === undefined ? {} : { images }), ...(materials === undefined ? {} : { materials }),
+        ...(body.clientTime === undefined ? {} : { clientTime: parseClientTime(body.clientTime)! }),
         expectedHead: body.expectedHead === null ? null : text(body.expectedHead),
         model: modelSelection(body.model) };
       if (body.agent !== undefined) {
@@ -491,7 +494,8 @@ export function registerThreadRoutes(app: Express, adapter: ThreadAdapter, requi
       const images = parseThreadImages(body.images);
       const materials = parseThreadMaterials(body.materials);
       if (typeof body.text !== 'string' || (!body.text.length && !images?.length && !materials?.length)) throw new Error('Text, images or materials are required');
-      return { ...selected, key: text(body.key), text: body.text, ...(images === undefined ? {} : { images }), ...(materials === undefined ? {} : { materials }), mode: body.mode as 'boundary' | 'interrupt' | 'next_run' };
+      return { ...selected, key: text(body.key), text: body.text, ...(images === undefined ? {} : { images }), ...(materials === undefined ? {} : { materials }),
+        ...(body.clientTime === undefined ? {} : { clientTime: parseClientTime(body.clientTime)! }), mode: body.mode as 'boundary' | 'interrupt' | 'next_run' };
     });
     return adapter.enqueue(input);
   });

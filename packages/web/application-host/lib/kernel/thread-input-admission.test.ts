@@ -33,9 +33,26 @@ function fixture() {
     const response = await request(app).post(new URL(url, 'http://fixture.invalid').pathname).send(JSON.parse(String(init.body)));
     return Response.json(response.body, { status: response.status });
   });
-  return { api: createThreadsHttpAPI(), runtime, queued, models, source, configuration };
+  return { api: createThreadsHttpAPI(), adapter, runtime, queued, models, source, configuration };
 }
 afterEach(() => vi.unstubAllGlobals());
+it('attaches sending-device or selected-zone time only when enabled, across submit, queue and continuation', async () => {
+  const f = fixture();
+  const settings = { enabled: false, timeZone: null as string | null };
+  f.adapter.bindMessageTime(async () => settings);
+  const timed = { ...input, clientTime: { sentAt: '2026-01-01T16:05:06Z', timeZone: 'Asia/Shanghai' } };
+  await f.api.submit(timed);
+  expect(f.runtime.submit).toHaveBeenLastCalledWith(expect.objectContaining({ input: expect.not.objectContaining({ sentTime: expect.anything() }) }));
+  settings.enabled = true;
+  await f.api.submit(timed);
+  expect(f.runtime.submit).toHaveBeenLastCalledWith(expect.objectContaining({ input: expect.objectContaining({ sentTime: '2026-01-02T00:05:06+08:00 [Asia/Shanghai]' }) }));
+  settings.timeZone = 'America/New_York';
+  const content = { ...identity, key: 'timed-send', text: timed.text, ...(timed.images ? { images: timed.images } : {}), clientTime: timed.clientTime };
+  await f.api.enqueue({ ...content, mode: 'boundary' });
+  expect(f.queued.enqueue).toHaveBeenLastCalledWith(expect.objectContaining({ input: expect.objectContaining({ sentTime: '2026-01-01T11:05:06-05:00 [America/New_York]' }) }));
+  await f.api.collaboration!.continueChild({ ...content, expectedHead: null, previousRunId: 'old-run' });
+  expect(f.queued.acceptChildContinuation).toHaveBeenLastCalledWith(expect.objectContaining({ input: expect.objectContaining({ sentTime: '2026-01-01T11:05:06-05:00 [America/New_York]' }) }), expect.any(AbortSignal));
+});
 it('reports model rejection before native acceptance, so the original draft can be corrected', async () => {
   const f = fixture(); f.configuration.acceptsImages = false;
   await expect(f.api.submit(input)).rejects.toMatchObject({ status: 400, code: 'model-images-unsupported', admission: 'not_started' });

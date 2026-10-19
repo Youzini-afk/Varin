@@ -3,6 +3,7 @@ import { describe, it } from "node:test";
 import {
   mergeHarnessSettings,
   resolveHarnessContextSettings,
+  formatMessageTime,
   resolveHarnessNextStepSettings,
   resolveHarnessDocumentReadingSettings,
   resolveHarnessCodeRetrievalSettings,
@@ -152,6 +153,7 @@ describe("harness settings", () => {
       backgroundPreparation: true,
       preparationWaterline: 0.75,
       compactionRecovery: { enabled: true, streamIdleMs: 120_000, responseWaitMs: 300_000, maxRetries: 1 },
+      messageTime: { enabled: false, timeZone: null },
     });
     assert.equal(
       mergeHarnessSettings({ context: { backgroundPreparation: false } }, {}).context.backgroundPreparation,
@@ -245,6 +247,16 @@ describe("harness settings", () => {
     assert.throws(() => resolveHarnessContextSettings({ compactionRecovery: { streamIdleMs: 0 } }), /streamIdleMs/);
     assert.throws(() => resolveHarnessContextSettings({ compactionRecovery: { responseWaitMs: -1 } }), /responseWaitMs/);
     assert.throws(() => resolveHarnessContextSettings({ compactionRecovery: { maxRetries: 1.5 } }), /maxRetries/);
+  });
+
+  it('keeps message time opt-in and user-owned, with a named zone independent of projects', () => {
+    assert.deepEqual(mergeHarnessSettings({}, { context: { messageTime: { enabled: true, timeZone: 'UTC' } } }).context.messageTime,
+      { enabled: false, timeZone: null });
+    assert.deepEqual(mergeHarnessSettings({ context: { messageTime: { enabled: true, timeZone: 'Asia/Shanghai' } } }, {}).context.messageTime,
+      { enabled: true, timeZone: 'Asia/Shanghai' });
+    assert.throws(() => resolveHarnessContextSettings({ messageTime: { timeZone: 'invalid/zone' } }), /timeZone/);
+    assert.equal(formatMessageTime('2026-01-01T16:05:06Z', 'Asia/Shanghai'), '2026-01-02T00:05:06+08:00 [Asia/Shanghai]');
+    assert.equal(formatMessageTime('2026-07-01T12:05:06Z', 'America/New_York'), '2026-07-01T08:05:06-04:00 [America/New_York]');
   });
 
   it("keeps compaction stall recovery user-owned and fills omitted settings", () => {

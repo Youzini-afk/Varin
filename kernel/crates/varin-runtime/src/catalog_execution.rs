@@ -2242,7 +2242,7 @@ pub(super) fn user_input_items(id: &str, input: &Value) -> Result<crate::executi
         })?;
         if object
             .keys()
-            .any(|key| key != "text" && key != "attachments" && key != "skillInvocations")
+            .any(|key| key != "text" && key != "attachments" && key != "skillInvocations" && key != "sentTime")
         {
             return Err(RuntimeError::Invalid(
                 "unsupported user input field; content was not accepted".into(),
@@ -2277,6 +2277,16 @@ pub(super) fn user_input_items(id: &str, input: &Value) -> Result<crate::executi
         .iter()
         .map(|entry| entry.project(id).into())
         .collect();
+    if let Some(time) = input.get("sentTime") {
+        let time = time.as_str().ok_or_else(|| RuntimeError::Invalid("message sentTime must be a string".into()))?;
+        items.push(ConversationItem {
+            id: format!("{id}:sent-time"),
+            resource_activation: None,
+            provenance: Provenance::EnvironmentFact { event_id: format!("{id}:sent-time") },
+            content: Content::Text { text: format!("Message sent at: {time}") },
+            opaque: None,
+        }.into());
+    }
     items.extend(
         parts
             .into_iter()

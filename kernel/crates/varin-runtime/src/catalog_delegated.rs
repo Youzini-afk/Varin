@@ -480,7 +480,7 @@ impl ChildContinuationPreparation {
         if self.command.key.trim().is_empty() {
             return Err(RuntimeError::Invalid("continuation key is required".into()));
         }
-        let input_ref = if let Some((_, history)) = &self.ingress {
+        let mut input_ref = if let Some((_, history)) = &self.ingress {
             self.content.load_history_payload(history)?;
             history.clone()
         } else {
@@ -488,6 +488,13 @@ impl ChildContinuationPreparation {
             self.content.save(&self.command.input)?
         };
         if let Some(existing) = &self.existing {
+            if self.ingress.is_none() && existing.input_ref != input_ref {
+                let original = self.content.load(&existing.input_ref)?;
+                if crate::content::ContentStore::normalized_user_input(&self.command.key, &original)?
+                    == crate::content::ContentStore::normalized_user_input(&self.command.key, &self.command.input)? {
+                    input_ref = existing.input_ref.clone();
+                }
+            }
             check_retry(existing, &self.command, &input_ref)?;
         }
         let provenance_ref = self

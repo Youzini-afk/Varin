@@ -302,6 +302,17 @@ export const SETTINGS_CATALOG: readonly SettingsCatalogEntry[] = [
       keywords: ['next step', 'suggestion', 'follow up', 'model'] },
   },
   {
+    id: 'harness.context.messageTime', category: 'harness', owner: 'agent-settings',
+    fields: [
+      { path: 'harness.context.messageTime.enabled', kind: 'boolean', scope: 'user', default: false },
+      { path: 'harness.context.messageTime.timeZone', kind: 'string', scope: 'user', nullable: true, default: null,
+        note: 'null follows the sending device; otherwise an IANA time zone, independent of execution Host. Applies to new messages; accepted message times are retained.' },
+    ],
+    apply: 'immediate',
+    ui: { page: 'harness-context', titleKey: 'settings.page.harness.context.messageTime.title',
+      keywords: ['time', 'date', 'timezone', 'message', '时间', '日期', '时区'] },
+  },
+  {
     id: 'harness.context', category: 'harness', owner: 'agent-settings',
     field: { path: 'harness.context', kind: 'json', scope: 'user',
       note: '{backgroundPreparation: boolean, preparationWaterline: 0<n<1} — user-owned background compaction prep',
