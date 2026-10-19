@@ -209,11 +209,12 @@ func keyCode(_ name: String) throws -> CGKeyCode {
     guard let bytes = CFDataGetBytePtr(data) else { throw DriverFailure(code: "unsupported", message: "The keyboard layout has no Unicode mapping") }
     let layout = UnsafeRawPointer(bytes).assumingMemoryBound(to: UCKeyboardLayout.self)
     for code in UInt16(0)..<UInt16(128) {
-        var dead: UInt32 = 0, length: UniCharCount = 0
+        var dead: UInt32 = 0
+        var length = 0
         var chars = [UniChar](repeating: 0, count: 8)
         let status = UCKeyTranslate(layout, code, UInt16(kUCKeyActionDisplay), 0, UInt32(LMGetKbdType()),
-            OptionBits(kUCKeyTranslateNoDeadKeysMask), &dead, UniCharCount(chars.count), &length, &chars)
-        if status == noErr && String(utf16CodeUnits: chars, count: Int(length)).lowercased() == name.lowercased() { return code }
+            OptionBits(kUCKeyTranslateNoDeadKeysMask), &dead, chars.count, &length, &chars)
+        if status == noErr && String(utf16CodeUnits: chars, count: length).lowercased() == name.lowercased() { return code }
     }
     throw DriverFailure(code: "unsupported", message: "This key is unavailable in the current keyboard layout")
 }
